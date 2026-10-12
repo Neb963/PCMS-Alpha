@@ -51,7 +51,21 @@ test('P51-04 F: no fake effect without marker; lost ack holds target and cannot 
   assert.equal(entity.activeOperationId,op.operationId);
   assert.equal(remoteLedger.length,1);
   assert.equal(apply({ type:'BEGIN_OBSERVATION',operationId:op.operationId,targetId:target.id,expectedRevision:5 }).ok,true);
-  assert.equal(apply({ type:'OBSERVED_EQUIVALENT',operationId:op.operationId,targetId:target.id,expectedRevision:6 }).operation.status,'CONFIRMED');
+  assert.equal(apply({type:'OBSERVED_EQUIVALENT',operationId:op.operationId,
+    targetId:target.id,expectedRevision:6}).code,'INDEPENDENT_PROOF_REQUIRED');
+  assert.equal(entity.activeOperationId,op.operationId);
+  assert.equal(apply({type:'OBSERVED_EQUIVALENT',operationId:op.operationId,
+    targetId:target.id,expectedRevision:6,
+    proof:{source:'INDEPENDENT_READBACK',disposition:'EQUIVALENT',
+      observationId:'observation_fixture_01',observedFingerprint:'b'.repeat(64)}
+  }).code,'INDEPENDENT_PROOF_REQUIRED');
+  const independentReadback=remoteLedger.find(item=>item.operationId===op.operationId);
+  assert.equal(independentReadback?.accepted,true,'fake remote ledger is independent of PCMS state');
+  assert.equal(apply({type:'OBSERVED_EQUIVALENT',operationId:op.operationId,
+    targetId:target.id,expectedRevision:6,
+    proof:{source:'INDEPENDENT_READBACK',disposition:'EQUIVALENT',
+      observationId:'observation_fixture_01',observedFingerprint:intent.fingerprint}
+  }).operation.status,'CONFIRMED');
   assert.equal(entity.activeOperationId,null);
   assert.equal(remoteLedger.length,1,'readback does not create a new effect');
 });

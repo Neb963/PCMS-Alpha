@@ -59,10 +59,18 @@ export function transition(entity, existing, action) {
         return fail('OBSERVATION_NOT_ADMISSIBLE');
       status = 'OBSERVING'; break;
     case 'OBSERVED_EQUIVALENT':
+      if (existing.status !== 'OBSERVING') return fail('OBSERVATION_NOT_ADMISSIBLE');
+      // A caller's success assertion is not remote evidence. The operation
+      // remains fenced until an independent readback is explicitly matched.
+      if (action.proof?.source !== 'INDEPENDENT_READBACK' ||
+          action.proof?.disposition !== 'EQUIVALENT' ||
+          !isSafeId(action.proof?.observationId) ||
+          action.proof?.observedFingerprint !== existing.fingerprint)
+        return fail('INDEPENDENT_PROOF_REQUIRED');
+      status = 'CONFIRMED'; break;
     case 'OBSERVED_CONFLICT':
       if (existing.status !== 'OBSERVING') return fail('OBSERVATION_NOT_ADMISSIBLE');
-      status = action.type === 'OBSERVED_EQUIVALENT' ? 'CONFIRMED' : 'HELD_UNCERTAIN';
-      break;
+      status = 'HELD_UNCERTAIN'; break;
     default: return fail('COMMAND_NOT_ALLOWED');
   }
   if (!active.has(existing.status)) return fail('OPERATION_FINAL');
