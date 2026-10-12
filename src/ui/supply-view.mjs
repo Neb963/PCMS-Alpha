@@ -23,7 +23,7 @@ function request(portName,type,params){
   });
 }
 const supply=(type,params)=>request('pcms-i06-supply',type,params);
-const parsed=()=>input.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+const parsed=()=>input.value.replace(/\r\n/g,'\n').split('\n').filter(x=>x.length>0);
 function setBusy(value){
   busy=value;preview.disabled=value;freeze.disabled=value||!latest||!latest.items.some(i=>i.state==='FROZEN');
   refresh.disabled=value;
