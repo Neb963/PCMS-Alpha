@@ -123,42 +123,44 @@ def observer_isolation_probe(session):
     thread.start()
     try:
         fixture_url='http://127.0.0.1:'+str(server.server_address[1])+'/fixture'
-        script='''const done=arguments[arguments.length-1];
-        (async()=>{
-          const {perchanceReadIsolated}=await import('./perchance-observer.mjs');
-          const tab=await browser.tabs.create({url:__FIXTURE_URL__,active:true});
-          try {
-            let target;
-            for(let k=0;k<60;k++){
-              target=await browser.tabs.get(tab.id);
-              if(target.url===__FIXTURE_URL__&&target.status==='complete')break;
-              await new Promise(r=>setTimeout(r,100));
-            }
-            if(target.url!==__FIXTURE_URL__||target.status!=='complete'){
-              done({error:'FIXTURE_NAVIGATION_UNCONFIRMED',
-                targetUrl:target.url,targetStatus:target.status});return;
-            }
-            const permissions=await browser.permissions.getAll();
-            let out;
-            try{
-              out=await browser.scripting.executeScript({
-                target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
-                func:perchanceReadIsolated,args:[{}]
-              });
-            }catch(e){
-              done({error:String(e).slice(0,180),targetUrl:target.url,
-                targetStatus:target.status,origins:permissions.origins,
-                hasExplicitOrigin:await browser.permissions.contains({
-                  origins:['http://127.0.0.1/*']})});
-              return;
-            }
-            done({count:out.length,frameId:out[0]?.frameId,
-              rejected:out[0]?.result,scriptError:Boolean(out[0]?.error)});
-          }finally{await browser.tabs.remove(tab.id);}
-        })().catch(e=>done({error:String(e).slice(0,180)}));'''
-        script=script.replace('__FIXTURE_URL__',json.dumps(fixture_url))
-        return call('POST',f'/session/{session}/execute/async',
-                    {'script':script,'args':[]},timeout=30)
+        original=call('GET',f'/session/{session}/window')
+        extra=call('POST',f'/session/{session}/window/new',{'type':'tab'})
+        try:
+            call('POST',f'/session/{session}/url',{'url':fixture_url},timeout=20)
+            observed_url=call('GET',f'/session/{session}/url')
+            if observed_url!=fixture_url:
+                raise AssertionError({'error':'FIXTURE_NAVIGATION_UNCONFIRMED',
+                                      'actual':observed_url})
+            call('POST',f'/session/{session}/window',{'handle':original})
+            script='''const done=arguments[arguments.length-1];
+            (async()=>{
+              const {perchanceReadIsolated}=await import('./perchance-observer.mjs');
+              const tabs=await browser.tabs.query({});
+              const target=tabs.find(t=>t.url===__FIXTURE_URL__);
+              if(!target){done({error:'FIXTURE_TAB_NOT_FOUND'});return;}
+              const permissions=await browser.permissions.getAll();
+              try {
+                const out=await browser.scripting.executeScript({
+                  target:{tabId:target.id,frameIds:[0]},world:'ISOLATED',
+                  func:perchanceReadIsolated,args:[{}]
+                });
+                done({count:out.length,frameId:out[0]?.frameId,
+                  rejected:out[0]?.result,scriptError:Boolean(out[0]?.error)});
+              }catch(e){
+                done({error:String(e).slice(0,180),targetUrl:target.url,
+                  origins:permissions.origins});
+              }
+            })().catch(e=>done({error:String(e).slice(0,180)}));'''
+            script=script.replace('__FIXTURE_URL__',json.dumps(fixture_url))
+            return call('POST',f'/session/{session}/execute/async',
+                        {'script':script,'args':[]},timeout=30)
+        finally:
+            try:
+                call('POST',f'/session/{session}/window',
+                     {'handle':extra['handle']})
+                call('DELETE',f'/session/{session}/window')
+            except Exception: pass
+            call('POST',f'/session/{session}/window',{'handle':original})
     finally:
         server.shutdown()
         server.server_close()
