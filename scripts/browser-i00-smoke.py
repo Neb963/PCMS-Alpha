@@ -350,7 +350,13 @@ def main():
                         "return {button:document.querySelector('#pcms-attention-list button')?.textContent||'',text:document.querySelector('#pcms-attention-list')?.textContent||''}")
                     if notice_ui.get('button'):break
                     time.sleep(.15)
-                assert notice_ui.get('button')=='Ignore notice',notice_ui
+                if notice_ui.get('button')!='Ignore notice':
+                    direct_notices=canonical_command(after,{'type':'GET_NOTICES'})
+                    direct_summary=canonical_command(after,{'type':'SUMMARY'})
+                    ui_state=execute(after,
+                        "return {journal:document.getElementById('pcms-journal-health')?.textContent,queue:document.getElementById('pcms-work-queue-summary')?.textContent,ready:document.readyState,overview:document.getElementById('view-overview')?.hidden}")
+                    raise AssertionError(('Attention UI did not show known fake notice',
+                                          notice_ui,ui_state,direct_summary,direct_notices))
                 assert 'SOURCE_HELD' in notice_ui.get('text',''),notice_ui
                 execute(after,"document.querySelector('#pcms-attention-list button').click();return true")
                 for _ in range(40):
