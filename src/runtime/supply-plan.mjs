@@ -22,7 +22,7 @@ export function slugIssue(slug) {
 }
 export function freezeSupply({batchId,accountId,personaUid,
   accountRevision,bindingVersion,slugs}) {
-  if(!isId(batchId)||!isId(accountId)||!isId(personaUid)||
+  if(!isId(batchId)||batchId.length>95||!isId(accountId)||!isId(personaUid)||
      !Number.isSafeInteger(accountRevision)||accountRevision<1||
      !Number.isSafeInteger(bindingVersion)||bindingVersion<1||
      !Array.isArray(slugs)||slugs.length<1||slugs.length>100)
