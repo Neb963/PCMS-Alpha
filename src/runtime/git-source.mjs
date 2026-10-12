@@ -26,6 +26,14 @@ async function digest(bytes) {
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))]
     .map(x=>x.toString(16).padStart(2,'0')).join('');
 }
+async function verifyGitBlob(bytes, expected) {
+  const head=new TextEncoder().encode('blob '+bytes.length+'\\0');
+  const combined=new Uint8Array(head.length+bytes.length);
+  combined.set(head);combined.set(bytes,head.length);
+  const actual=[...new Uint8Array(await crypto.subtle.digest('SHA-1',combined))]
+    .map(x=>x.toString(16).padStart(2,'0')).join('');
+  return actual===expected;
+}
 const UTF8 = new TextDecoder('utf-8',{fatal:true});
 function readiness(raw) {
   let text;
@@ -118,7 +126,7 @@ export async function inspectGitSource({token,folder}, transport=fetch) {
         blob.size!==e.size)return issue('SOURCE_UNVERIFIED');
       let raw;
       try{raw=bytesOfBase64(blob.content);}catch{return issue('SOURCE_MANIFEST_UNSUPPORTED');}
-      if(raw.length!==e.size)return issue('SOURCE_UNVERIFIED');
+      if(raw.length!==e.size || !(await verifyGitBlob(raw,e.sha)))return issue('SOURCE_UNVERIFIED');
       hashes.set(e.path,await digest(raw));
       if(e.path==='DEPLOYMENT.md')rawMarker.value=raw;
     }
