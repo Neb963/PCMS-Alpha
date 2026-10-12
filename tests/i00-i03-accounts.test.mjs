@@ -207,5 +207,5 @@ test('I03 F: packaged entry includes accounted new modules but donor remains imm
   assert.doesNotMatch(boundary,/sendNativeMessage|fetch\s*\(|XMLHttpRequest/);
   for(const id of ['pcms-enroll','pcms-accounts-list','pcms-create-persona'])
     assert.match(html,new RegExp('id="'+id+'"'));
-  assert.match(html,/Provider effects OFF/);
+  assert.match(html,/Provider writes HELD/);
 });

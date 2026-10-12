@@ -115,6 +115,85 @@ def source_command(session, command):
                 {'script':script.replace('COMMAND',json.dumps(command)),'args':[]},timeout=30)
 
 
+
+def supply_command(session, command):
+    # Real packaged supply port, no external provider credential or remote writes.
+    script = '''const done=arguments[arguments.length-1];
+    const port=browser.runtime.connect({name:'pcms-i06-supply'});
+    port.onMessage.addListener(value=>{try{port.disconnect()}catch(e){}done(value)});
+    port.onDisconnect.addListener(()=>done({error:'supply-disconnected'}));
+    port.postMessage(COMMAND);'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script.replace('COMMAND',json.dumps(command)),'args':[]},timeout=30)
+
+
+def supply_isolated_wrong_origin(session):
+    script = '''const done=arguments[arguments.length-1];
+    (async()=>{
+      const {perchanceSupplyIsolated}=await import('./perchance-supply.mjs');
+      const res=await perchanceSupplyIsolated({kind:'CREATE',slug:'browser-test-only',
+        principalFingerprint:'a'.repeat(64)});
+      done(res);
+    })().catch(e=>done({code:'PROBE_ERROR',detail:String(e).slice(0,100)}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=30)
+
+
+
+def supply_effect_idb_probe(session):
+    # Actual installed Firefox IndexedDB journal with strictly injected fake
+    # Perchance/owner/Git ledgers. No live account or external effect.
+    script = '''const done=arguments[arguments.length-1];
+    (async()=>{
+      const {createSupplyBoundary}=await import('./supply-boundary.mjs');
+      const api={runtime:browser.runtime,storage:browser.storage};
+      const sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')+'#generators'};
+      const effects=[];
+      const guard={
+        getSafeRouteReadiness:async()=>({ready:true,
+          personaUid:'persona-fixture-0001',cookieStoreId:'fixture-container',
+          routeId:'fixture-protected'}),
+        runSupplyStep:async (persona,req)=>{
+          if(persona!=='persona-fixture-0001')throw Error('Wrong fake persona');
+          effects.push(req.kind);
+          if(req.kind==='CREATE')
+            return {ok:true,ack:'CREATED',temporarySlug:'temp-fake-01'};
+          if(req.kind==='READ_CREATE')
+            return {ok:true,source:'INDEPENDENT_READBACK',privateEmpty:true,
+              ownerMatches:true,temporarySlug:'temp-fake-01',remoteId:'remote_fake_0001'};
+          if(req.kind==='RENAME')return {ok:true,ack:'RENAMED'};
+          if(req.kind==='READ_RENAME')
+            return {ok:true,source:'INDEPENDENT_READBACK',privateEmpty:true,
+              ownerMatches:true,slug:req.slug,previousSlug:req.temporarySlug,
+              remoteId:req.remoteId};
+          throw Error('Unknown fake effect kind');
+        }
+      };
+      const boundary=createSupplyBoundary(api,{guard:()=>guard,
+        effectGate:()=>true,gitGate:()=>true,
+        gitWrite:async ({folder,slug,token})=>{
+          if(token!=='offline-git-write-token')throw Error('Wrong fixture token');
+          effects.push('GIT_MARKER');
+          return {ok:true,source:'GIT_READBACK',ready:false,emptyFolder:true,folder};
+        }});
+      const itemId='batch_browser_0002_001',batchId='batch_browser_0002';
+      async function effect(revision){
+        return boundary.run({type:'EXECUTE_ITEM',params:{batchId,itemId,
+          expectedRevision:revision}},sender);
+      }
+      const created=await effect(1);
+      const renamed=await effect(created.revision);
+      const linked=await boundary.run({type:'FINISH_SOURCE_FOLDER',params:{
+        batchId,itemId,expectedRevision:renamed.revision,
+        token:'offline-git-write-token'}},sender);
+      const fromPort=await boundary.run({type:'GET_BATCH',params:{batchId}},sender);
+      done({created,renamed,linked,effects,
+        final:fromPort?.batch?.items?.find(x=>x.itemId===itemId)});
+    })().catch(e=>done({error:'I06_EFFECT_IDB_PROBE_FAILED',detail:String(e).slice(0,220)}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=60)
+
+
 def source_idb_probe(session):
     # A real packaged Firefox IDB transaction with an injected synthetic Git
     # snapshot. No live GitHub/per-gens request. F tests own Git byte semantics.
@@ -512,6 +591,71 @@ def main():
                     time.sleep(.15)
                 assert '51–100' in pagination,pagination
                 print('B I04_REAL_IDB_1250_FILTER_PAGINATION_OWNER_HOLD=PASS',flush=True)
+
+                # I06 actual installed Firefox IndexedDB and extension port
+                # retain frozen operator slugs and reject duplication. Effect
+                # activation is deliberately absent: NO provider request sent.
+                read_batches=supply_command(after,{'type':'LIST_BATCHES'})
+                assert read_batches.get('ok') is True,read_batches
+                assert read_batches.get('batches')==[],read_batches
+                frozen=supply_command(after,{'type':'FREEZE','params':{
+                    'batchId':'batch_browser_0001',
+                    'accountId':'fixture_inventory_01','expectedAccountRevision':2,
+                    'slugs':['supply-test-one','supply-test-two','supply-test-two','gen-0999']}})
+                assert frozen.get('ok') is True,frozen
+                assert [x['state'] for x in frozen['batch']['items']]==[
+                    'FROZEN','FROZEN','REJECTED','REJECTED'],frozen
+                same=supply_command(after,{'type':'FREEZE','params':{
+                    'batchId':'batch_browser_0002',
+                    'accountId':'fixture_inventory_01','expectedAccountRevision':2,
+                    'slugs':['supply-test-one','another-safe-name']}})
+                assert same.get('ok') is True,same
+                assert same['batch']['items'][0]['reason']=='ALREADY_OWNED',same
+                assert same['batch']['items'][1]['state']=='FROZEN',same
+                invalid=supply_command(after,{'type':'FREEZE','params':{
+                    'batchId':'batch_browser_0003',
+                    'accountId':'fixture_inventory_01','expectedAccountRevision':1,
+                    'slugs':['safe-name']}})
+                assert invalid.get('code')=='STALE_ACCOUNT_REVISION',invalid
+                held=supply_command(after,{'type':'EXECUTE_ITEM','params':{
+                    'batchId':'batch_browser_0001',
+                    'itemId':'batch_browser_0001_000','expectedRevision':1}})
+                assert held.get('code')=='PROVIDER_ACTIVATION_HELD',held
+                previous=supply_command(after,{'type':'GET_BATCH','params':{
+                    'batchId':'batch_browser_0001'}})
+                assert previous.get('batch',{}).get('items',[{}])[0].get('state')=='FROZEN',previous
+                unsafe=supply_command(after,{'type':'WRITE_PROVIDER','params':{}})
+                assert unsafe.get('code')=='CAPABILITY_OFF',unsafe
+                wrong_origin=supply_isolated_wrong_origin(after)
+                assert wrong_origin.get('code')=='WRONG_ORIGIN',wrong_origin
+                call('POST',f'/session/{after}/url',{'url':url+'#generators'})
+                visible=execute(after,"return {input:!!document.getElementById('pcms-supply-slugs'),"
+                    "queue:!!document.getElementById('pcms-supply-queue'),"
+                    "freeze:document.getElementById('pcms-supply-freeze')?.disabled,"
+                    "effects:document.getElementById('pcms-supply-feedback')?.textContent}")
+                assert visible.get('input') is True and visible.get('queue') is True,visible
+                assert visible.get('freeze') is True,visible
+                persisted=supply_command(after,{'type':'LIST_BATCHES'})
+                assert persisted.get('ok') is True and len(persisted['batches'])==2,persisted
+                print('B I06_REAL_IDB_FROZEN_BATCH_COLLISION_HOLDS_ZERO_PROVIDER_EFFECTS=PASS',flush=True)
+
+                # The same packaged XPI's real canonical store also exercises
+                # distinct fake CREATE, RENAME and GIT dispatch journals.
+                # Each fake returns an independent readback envelope.
+                effect_probe=supply_effect_idb_probe(after)
+                assert effect_probe.get('created',{}).get('state')=='CREATE_CONFIRMED',effect_probe
+                assert effect_probe.get('renamed',{}).get('state')=='SOURCE_PENDING',effect_probe
+                assert effect_probe.get('linked',{}).get('state')=='CONFIRMED',effect_probe
+                assert effect_probe.get('effects')==[
+                    'CREATE','READ_CREATE','RENAME','READ_RENAME','GIT_MARKER'],effect_probe
+                assert effect_probe.get('final',{}).get('state')=='CONFIRMED',effect_probe
+                same_again=supply_command(after,{'type':'EXECUTE_ITEM','params':{
+                    'batchId':'batch_browser_0002','itemId':'batch_browser_0002_001',
+                    'expectedRevision':effect_probe['linked']['revision']}})
+                assert same_again.get('code')=='NOT_ADMISSIBLE',same_again
+                print('B I06_REAL_IDB_FAKE_PROVIDER_AND_GIT_SEPARATE_MARKERS=PASS',flush=True)
+
+
 
                 # I05: real permanently installed XPI source port and canonical
                 # association; synthetic inspection only, zero private Git reads.

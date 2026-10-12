@@ -1,0 +1,47 @@
+{
+  "phaseId": "I06",
+  "planRevision": "S7-AUDITED-DESIGN-1",
+  "proposedDisposition": "SCOPED_F_B_IMPLEMENTATION_COMPLETE_IF_PROVEN_ON_PROTECTED_MAIN",
+  "claim": "Operator-frozen exact slug lists on verified account/Persona revisions; canonical per-item allocation/receipt and separate protected private-empty create, guarded rename and non-READY private Git marker effect journals, deterministic independent readback, protected retry fencing and scoped source/uncertainty holds. Live external mutation gates remain OFF.",
+  "requiredAssertions": [
+    "P52-02",
+    "P56-06",
+    "S6-I06-GIT-MARKER-SAFETY",
+    "S6-I06-ALLOCATION",
+    "UX-03",
+    "UX-04",
+    "REQ-G02",
+    "REQ-G03",
+    "REQ-G04",
+    "REQ-G08"
+  ],
+  "evidenceTierNotes": {
+    "F": "Independent fake Perchance create/rename ledgers, abort-before-marker/route-loss/Pause after prepare, lost acknowledgment and no replay, stale account/collision, 40 exact requests across two dedicated Personas including 10 successful, 10 conflict, 10 Git pending, 5 lost-create and 5 lost-rename; independent private-Git DAG with nonforced ref update, collision/drift, lost PATCH, exact non-READY readback. Exact current-candidate CI is authoritative.",
+    "B": "Disposable installed combined-XPI Firefox Developer Edition with real canonical IndexedDB freeze/unique collision, account revision, held production effect gate, wrong-origin isolated executor and independently injected fake Perchance/Git effect receipts exercising CREATE, RENAME, GIT separately against the packaged persistence and Work Queue interface. No live Perchance or private Git calls. Existing I00–I05 packaged/browser/donor regressions retained. Current-candidate and postmerge proof required.",
+    "X": "NOT_RUN as separate cross-system live adversarial acceptance; F contains deliberate negative/oracle fault injection, not X/live evidence.",
+    "H": "NOT_RUN. No separately authorized current live Perchance/Mullvad/private Git mutations, site compatibility test or human live activation evidence."
+  },
+  "capabilities": {
+    "localSupplyPreview": "ON_OPERATOR_ACTION",
+    "canonicalFreeze": "ON_WITH_VERIFIED_ACCOUNT_AND_FROZEN_REVISION",
+    "pendingBatchReceipts": "ON_LOCAL_CANONICAL_STORE",
+    "protectedProviderCreateRename": "IMPLEMENTED_AND_FAKE_EFFECT_VERIFIED; LIVE_ACTIVATION_OFF",
+    "gitNonReadyFolder": "IMPLEMENTED_AND_FAKE_REF_VERIFIED; LIVE_WRITE_ACTIVATION_OFF",
+    "readOnlyReconciliation": "ON_DEMAND_WHEN_GUARDED; UNKNOWN_TEMP_IDENTITY_HELD",
+    "providerWrites": "OFF",
+    "sourceGitWrites": "OFF",
+    "publishing": "OFF",
+    "refresherMutations": "OFF",
+    "donorRouteControl": "UNCHANGED",
+    "liveProviderAcceptance": "NOT_CLAIMED"
+  },
+  "holds": [
+    "A live provider reply is never substituted for independent protected owner, private-empty, same-principal and exact identity trajectory readback. Undocumented provider endpoints/localStorage may drift; protocol invalidity holds the exact item.",
+    "Create uncertainty without authenticated temporary identity remains HELD_UNCERTAIN and never triggers another create; rename uncertainty must independently inspect old and final names.",
+    "A pre-dispatch intent may be cancelled transactionally; DISPATCH_POSSIBLE, unknown effect or lost ACK never cancels or blindly retries.",
+    "Remote Perchance confirmation survives private Git unavailable/uninitialized/conflicted: SOURCE_PENDING. Git marker is Status: SOURCE_PENDING, never READY. Uncertain Git write attribution stays held.",
+    "Late human H/live operator Perchance and private per-gens compatibility tests are unperformed activation work, not implementation F/B PASS claims.",
+    "No private per-gens initialization, live Perchance/Cloudflare/Mullvad intervention, CI trust-root edits, donor code changes, external Git mutation or auto-publish occurred."
+  ],
+  "provenance": "In-PR completion proposal; intentionally excludes branch/head, future merge SHA, self-referential CI run, XPI hash or postmerge pass. Exact protected squash main and executed postmerge B/F corroboration required for acceptance."
+}
