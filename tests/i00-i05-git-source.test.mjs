@@ -43,7 +43,7 @@ function fixture(changes={}, flags={}) {
     assert.equal(options.credentials,'omit');assert.equal(options.headers.Authorization,'Bearer read-only-test-token');
     const u=new URL(url),route=u.pathname+u.search;
     assert.equal(u.origin,'https://api.github.com');
-    assert.ok(route.startsWith('/repos/Neb963/per-gens/'),route);
+    assert.ok(route==='/repos/Neb963/per-gens'||route.startsWith('/repos/Neb963/per-gens/'),route);
     let status=200,json;
     if(route.endsWith('/git/ref/heads/main')){
       if(flags.empty)status=409;
