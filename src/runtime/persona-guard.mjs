@@ -5,7 +5,8 @@ const HOLD = code => Object.freeze({ ready: false, code });
 const BAD_PROXY = new Set(['controlled_by_other_extensions', 'not_controllable']);
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
-  listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab }) {
+  listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
+  supplyIsolatedTab }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -148,8 +149,28 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     finally{await releaseConflictGuard(leased);}
   }
 
+  // Only the fixed same-XPI supply function is permitted. A donor lease
+  // encloses admission and page execution; the postcheck never transforms
+  // an unknown remote outcome into a safe retry.
+  async function runSupplyStep(personaUid,request) {
+    if(typeof supplyIsolatedTab!=='function')return {ok:false,code:'SUPPLY_EXECUTOR_UNAVAILABLE'};
+    const leased=await acquireConflictGuard(personaUid);
+    if(!leased?.ready||!leased.leaseId)
+      return {ok:false,code:leased?.code||'GUARD_UNAVAILABLE'};
+    try {
+      const before=await inspectOwnedAction(leased);
+      if(!before?.ready)return {ok:false,code:before?.code||'GUARD_CHANGED'};
+      const packet=await supplyIsolatedTab(leased,request);
+      const after=await inspectOwnedAction(leased);
+      if(!after?.ready)return {ok:false,code:'POST_EFFECT_GUARD_CHANGED'};
+      return packet&&typeof packet==='object'?packet:{ok:false,code:'SUPPLY_PACKET_UNVERIFIED'};
+    }catch{return {ok:false,code:'SUPPLY_EXECUTOR_UNAVAILABLE'};}
+    finally{await releaseConflictGuard(leased);}
+  }
+
   return Object.freeze({
     observeReadOnly,
+    runSupplyStep,
     listAvailablePersonas,
     listProtectedRoutes: availableRoutes,
     createProtectedPersona,
