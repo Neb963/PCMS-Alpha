@@ -76,7 +76,8 @@ export function moveSupply(item,event,proof={}) {
         return error('NOT_ADMISSIBLE');
       state='CREATE_OBSERVING';break;
     case 'CREATE_CONFIRMED':
-      if(state!=='CREATE_OBSERVING'||proof.source!=='INDEPENDENT_READBACK'||
+      if(state!=='CREATE_OBSERVING')return error('NOT_ADMISSIBLE');
+      if(proof.source!=='INDEPENDENT_READBACK'||
         proof.privateEmpty!==true||proof.ownerMatches!==true||
         !isId(proof.remoteId)||!SUPPLY_SLUG.test(proof.temporarySlug||'')||
         proof.temporarySlug===item.requestedSlug)
@@ -109,8 +110,9 @@ export function moveSupply(item,event,proof={}) {
         return error('NOT_ADMISSIBLE');
       state='SOURCE_PENDING';reason='GIT_UNAVAILABLE';break;
     case 'SOURCE_CONFIRMED':
-      if(!['PROVIDER_CONFIRMED','SOURCE_PENDING'].includes(state)||
-        proof.source!=='GIT_READBACK'||proof.ready!==false||
+      if(!['PROVIDER_CONFIRMED','SOURCE_PENDING'].includes(state))
+        return error('NOT_ADMISSIBLE');
+      if(proof.source!=='GIT_READBACK'||proof.ready!==false||
         proof.emptyFolder!==true||typeof proof.folder!=='string'||!proof.folder)
         return error('GIT_MARKER_PROOF_REQUIRED');
       state='CONFIRMED';folder=proof.folder;reason=null;break;
