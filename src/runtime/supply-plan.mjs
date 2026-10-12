@@ -100,7 +100,8 @@ export function moveSupply(item,event,proof={}) {
         return error('NOT_ADMISSIBLE');
       state='RENAME_OBSERVING';break;
     case 'PROVIDER_CONFIRMED':
-      if(state!=='RENAME_OBSERVING'||proof.source!=='INDEPENDENT_READBACK'||
+      if(state!=='RENAME_OBSERVING')return error('NOT_ADMISSIBLE');
+      if(proof.source!=='INDEPENDENT_READBACK'||
         proof.privateEmpty!==true||proof.ownerMatches!==true||
         proof.remoteId!==remoteId||proof.slug!==item.requestedSlug||
         proof.previousSlug!==temporarySlug)return error('INDEPENDENT_RENAME_PROOF_REQUIRED');
