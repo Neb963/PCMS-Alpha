@@ -72,7 +72,12 @@ test('I04 F: interpreter passes only de-identified observations, not session sec
   });
   const out=await adapter(context,account);
   assert.equal(validateInventoryObservation(account,out).ok,true);
-  assert.doesNotMatch(JSON.stringify(out),/never-return-this|user@example\.test/);
+  assert.doesNotMatch(JSON.stringify(out),/sessionToken|email|authorization/);
+  const leaking=createReadOnlyInterpreter({readProtectedPage:async()=>({
+    sessionReply,ownerReplies,sessionToken:'must-stay-in-page',email:'user@example.test'
+  })});
+  assert.equal(await leaking(context,account),null,
+    'credential-bearing page envelope must not be admitted');
   const blocked=createReadOnlyInterpreter({readProtectedPage:async()=>({
     sessionReply:{httpStatus:403,body:'challenge'},ownerReplies:new Map()
   })});
