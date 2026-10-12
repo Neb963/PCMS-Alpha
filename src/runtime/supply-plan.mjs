@@ -6,7 +6,8 @@ const SAFE_STATE=new Set(['REJECTED','FROZEN','CREATE_PREPARED',
   'CREATE_DISPATCH_POSSIBLE','CREATE_UNCERTAIN','CREATE_OBSERVING',
   'CREATE_CONFIRMED','RENAME_PREPARED','RENAME_DISPATCH_POSSIBLE',
   'RENAME_UNCERTAIN','RENAME_OBSERVING','PROVIDER_CONFIRMED',
-  'SOURCE_PENDING','CONFIRMED']);
+  'SOURCE_PENDING','GIT_PREPARED','GIT_DISPATCH_POSSIBLE',
+  'GIT_UNCERTAIN','GIT_OBSERVING','CONFIRMED']);
 const ERRORS=new Set(['INVALID_SLUG','SLUG_NOT_CANONICAL','DUPLICATE_SLUG',
   'ALREADY_OWNED','REMOTE_COLLISION','ACCOUNT_STALE','ROUTE_LOST',
   'GIT_UNAVAILABLE','SOURCE_COLLISION','RECONCILIATION_REQUIRED']);
@@ -36,7 +37,7 @@ export function freezeSupply({batchId,accountId,personaUid,
     return {itemId:batchId+'_'+String(index).padStart(3,'0'),
       index,requestedSlug:raw,accountId,personaUid,accountRevision,bindingVersion,
       state:issue?'REJECTED':'FROZEN',reason:issue,revision:1,
-      createOperationId:null,renameOperationId:null,
+      createOperationId:null,renameOperationId:null,gitOperationId:null,
       temporarySlug:null,remoteId:null,folder:null};
   });
   return {ok:true,batch:{batchId,accountId,personaUid,accountRevision,bindingVersion,
@@ -59,7 +60,8 @@ export function moveSupply(item,event,proof={}) {
     return error('INVALID_ITEM');
   let state=item.state,reason=item.reason,temporarySlug=item.temporarySlug,
     remoteId=item.remoteId,folder=item.folder,
-    createOperationId=item.createOperationId,renameOperationId=item.renameOperationId;
+    createOperationId=item.createOperationId,renameOperationId=item.renameOperationId,
+    gitOperationId=item.gitOperationId;
   switch(event) {
     case 'CREATE_PREPARED':
       if(state!=='FROZEN'||!isId(proof.operationId))return error('NOT_ADMISSIBLE');
@@ -110,8 +112,23 @@ export function moveSupply(item,event,proof={}) {
       if(!['PROVIDER_CONFIRMED','SOURCE_PENDING'].includes(state))
         return error('NOT_ADMISSIBLE');
       state='SOURCE_PENDING';reason='GIT_UNAVAILABLE';break;
+    case 'GIT_PREPARED':
+      if(!['PROVIDER_CONFIRMED','SOURCE_PENDING'].includes(state)||
+         !isId(proof.operationId))return error('NOT_ADMISSIBLE');
+      gitOperationId=proof.operationId;state='GIT_PREPARED';break;
+    case 'GIT_DISPATCH_POSSIBLE':
+      if(state!=='GIT_PREPARED')return error('NOT_ADMISSIBLE');
+      state='GIT_DISPATCH_POSSIBLE';break;
+    case 'GIT_UNCERTAIN':
+      if(!['GIT_DISPATCH_POSSIBLE','GIT_OBSERVING'].includes(state))
+        return error('NOT_ADMISSIBLE');
+      state='GIT_UNCERTAIN';reason='RECONCILIATION_REQUIRED';break;
+    case 'GIT_OBSERVING':
+      if(!['GIT_DISPATCH_POSSIBLE','GIT_UNCERTAIN'].includes(state))
+        return error('NOT_ADMISSIBLE');
+      state='GIT_OBSERVING';break;
     case 'SOURCE_CONFIRMED':
-      if(!['PROVIDER_CONFIRMED','SOURCE_PENDING'].includes(state))
+      if(state!=='GIT_OBSERVING')
         return error('NOT_ADMISSIBLE');
       if(proof.source!=='GIT_READBACK'||proof.ready!==false||
         proof.emptyFolder!==true||typeof proof.folder!=='string'||!proof.folder)
@@ -123,7 +140,7 @@ export function moveSupply(item,event,proof={}) {
     default:return error('INVALID_TRANSITION');
   }
   return {ok:true,item:{...item,state,reason,temporarySlug,remoteId,folder,
-    createOperationId,renameOperationId,revision:item.revision+1}};
+    createOperationId,renameOperationId,gitOperationId,revision:item.revision+1}};
 }
 export function publicSupply(batch) {
   return {batchId:batch.batchId,accountId:batch.accountId,revision:batch.revision,
