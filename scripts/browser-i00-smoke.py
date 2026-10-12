@@ -126,15 +126,15 @@ def observer_isolation_probe(session):
         script='''const done=arguments[arguments.length-1];
         (async()=>{
           const {perchanceReadIsolated}=await import('./perchance-observer.mjs');
-          const tab=await browser.tabs.create({url:FIXTURE,active:false});
+          const tab=await browser.tabs.create({url:__FIXTURE_URL__,active:false});
           try {
             let target;
             for(let k=0;k<60;k++){
               target=await browser.tabs.get(tab.id);
-              if(target.url===FIXTURE&&target.status==='complete')break;
+              if(target.url===__FIXTURE_URL__&&target.status==='complete')break;
               await new Promise(r=>setTimeout(r,100));
             }
-            if(target.url!==FIXTURE||target.status!=='complete'){
+            if(target.url!==__FIXTURE_URL__||target.status!=='complete'){
               done({error:'FIXTURE_NAVIGATION_UNCONFIRMED',
                 targetUrl:target.url,targetStatus:target.status});return;
             }
@@ -156,7 +156,7 @@ def observer_isolation_probe(session):
               rejected:out[0]?.result,scriptError:Boolean(out[0]?.error)});
           }finally{await browser.tabs.remove(tab.id);}
         })().catch(e=>done({error:String(e).slice(0,180)}));'''
-        script=script.replace('FIXTURE',json.dumps(fixture_url))
+        script=script.replace('__FIXTURE_URL__',json.dumps(fixture_url))
         return call('POST',f'/session/{session}/execute/async',
                     {'script':script,'args':[]},timeout=30)
     finally:
