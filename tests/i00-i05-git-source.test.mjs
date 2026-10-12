@@ -91,7 +91,7 @@ test('P53-03 READY requires exact marker and all nonempty deployable root blobs'
     {'gens/a/DEPLOYMENT.md':'Status: READY\nStatus: DISABLED\n'}
   ]) {
     const result=await read(fixture(changes));
-    if(changes['gens/a/DEPLOYMENT.md']==='Status: READY \\n')
+    if(changes['gens/a/DEPLOYMENT.md']==='Status: READY \n')
       assert.equal(result.code,'NOT_READY');
     else assert.equal(result.code,'SOURCE_MANIFEST_UNSUPPORTED');
   }
