@@ -59,11 +59,16 @@ export async function perchanceSupplyIsolated(request) {
     const read=async name=>{
       const owner=await call('checkGeneratorOwnership',{generatorName:name});
       const page=await call('getGeneratorPageData',{generatorName:name},{unauthenticated:true});
+      const manifest=page.generator?.srcManifest;
+      const manifestVerified=manifest!==null&&typeof manifest==='object'&&
+        (Array.isArray(manifest)?
+          manifest.length===0:
+          Object.getPrototypeOf(manifest)===Object.prototype&&
+          Object.keys(manifest).length===0);
       if(owner.status!=='is-owner'||page.status!=='success'||!page.generator||
          page.generator.name!==name||page.generator.isPrivate!==true||
          page.generator.modelText!==''||page.generator.outputTemplate!==''||
-         (Array.isArray(page.generator.srcManifest)?page.generator.srcManifest.length!==0:
-           Object.keys(page.generator.srcManifest||{}).length!==0))
+         !manifestVerified)
         return hold('PRIVATE_EMPTY_OWNER_UNVERIFIED');
       const publicId=page.generator.publicId;
       if(typeof publicId!=='string'||!safeId('public_'+publicId))
