@@ -102,7 +102,7 @@ def inventory_command(session, command):
 
 
 
-def observer_isolation_probe(session):
+def observer_isolation_probe(session,extension_url):
     # Actual installed XPI's Firefox scripting.executeScript in a local
     # controlled page. The fixed production reader must refuse wrong origin
     # before parsing attacker-controlled app state or issuing any requests.
@@ -122,9 +122,19 @@ def observer_isolation_probe(session):
                 raise AssertionError({'error':'FIXTURE_NAVIGATION_UNCONFIRMED',
                                       'actual':observed_url})
             call('POST',f'/session/{session}/window',{'handle':original})
+            # geckodriver sometimes carries the previous tab's content URL
+            # across a context switch. Assert and recover the extension URL
+            # before executing privileged extension-only browser APIs.
+            if call('GET',f'/session/{session}/url')!=extension_url:
+                call('POST',f'/session/{session}/url',
+                     {'url':extension_url},timeout=20)
             script='''const done=arguments[arguments.length-1];
             (async()=>{
-              const {perchanceReadIsolated}=await import('./perchance-observer.mjs');
+              if(location.protocol!=='moz-extension:'){
+                done({error:'NOT_EXTENSION_CONTEXT',url:location.href});return;
+              }
+              const {perchanceReadIsolated}=await import(
+                browser.runtime.getURL('pcms/perchance-observer.mjs'));
               const tabs=await browser.tabs.query({});
               const target=tabs.find(t=>t.url===__FIXTURE_URL__);
               if(!target){done({error:'FIXTURE_TAB_NOT_FOUND'});return;}
@@ -397,7 +407,7 @@ def main():
                 assert view['unsafe']==0,view
                 # The exact installed XPI must expose a read-only guarded
                 # background status; no valid status enables PCMS effects.
-                isolated=observer_isolation_probe(after)
+                isolated=observer_isolation_probe(after,url)
                 assert isolated.get('count')==1 and isolated.get('frameId')==0,isolated
                 assert isolated.get('scriptError') is False,isolated
                 assert isolated.get('rejected',{}).get('code')=='WRONG_ORIGIN',isolated
