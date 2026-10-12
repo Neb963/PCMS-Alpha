@@ -1,5 +1,6 @@
 // No import of PCMS controller, PersonaGuard, donor management, AI or backup.
 import { createSafeReport } from './safe-report.mjs';
+import { makeSafeArchive } from './diagnostic-archive.mjs';
 const output = document.getElementById('report');
 const state = document.getElementById('diagnostic-state');
 let report;
@@ -23,11 +24,11 @@ async function inspect() {
 }
 document.getElementById('export').addEventListener('click', () => {
   if (!report) return;
-  const file = new Blob([JSON.stringify(report,null,2)+'\n'], { type:'application/json' });
+  const file = new Blob([makeSafeArchive(report)], { type:'application/zip' });
   const url = URL.createObjectURL(file);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'pcms-redacted-diagnostics.json';
+  a.download = 'pcms-redacted-diagnostics.zip';
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
