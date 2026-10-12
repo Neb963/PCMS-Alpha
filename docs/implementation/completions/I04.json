@@ -1,0 +1,44 @@
+{
+  "phaseId": "I04",
+  "planRevision": "S7-AUDITED-DESIGN-1",
+  "proposedDisposition": "SCOPED_F_B_IMPLEMENTATION_COMPLETE_IF_PROVEN_ON_PROTECTED_MAIN",
+  "claim": "Owned read-only generator inventory through the combined XPI donor Persona/route/control-lease guard and fixed Firefox isolated-world Perchance page readback, current authenticated session and per-generator positive owner classification, durable non-destructive canonical reconciliation, 1,250-row paginated operator search, scoped recovery holds. No provider effect or source write.",
+  "requiredAssertions": [
+    "P52-01",
+    "S6-I04-INVENTORY-SEARCH",
+    "UX-01",
+    "UX-03",
+    "REQ-A07",
+    "REQ-G01",
+    "REQ-G12",
+    "REQ-U05"
+  ],
+  "evidenceTierNotes": {
+    "F": "Independent modeled Perchance GET generators / owner readback; explicit invalid token, wrong-origin, session drift, page route/lease revoked, duplicate generator, wrong account and collaborator/edit-key cases. Existing donor regressions and all previous fast tests. Must be verified on final candidate.",
+    "B": "Permanent combined XPI in disposable Firefox Dev Edition 154.0b10, full browser restart and route wake, real IndexedDB 1,250-record filter/pagination and stale-safe read-only guard, fixed isolated-world observer executed against controlled local wrong-origin fixture. Must be verified on final candidate.",
+    "X": "NOT_RUN_SEPARATELY; broader cross-system protected Persona and provider fault chains remain later integration.",
+    "H": "NOT_RUN; live Perchance current provider session/ownership schema compatibility remains operator deferred, no account/provider access authorized."
+  },
+  "capabilities": {
+    "guardedReadOnlyObserver": "IMPLEMENTED_SOURCE_AND_OFFLINE_FIXTURE_QUALIFIED; LIVE_COMPATIBILITY_UNVERIFIED",
+    "guardedIdentityReadback": "IMPLEMENTED_SOURCE_AND_OFFLINE_FIXTURE_QUALIFIED; LIVE_COMPATIBILITY_UNVERIFIED",
+    "canonicalInventory": "READ_ONLY",
+    "ownerState": "HISTORICAL_OBSERVATION_ONLY",
+    "providerWrites": "OFF",
+    "sourceGitWrites": "OFF",
+    "reservations": "OFF",
+    "refresherMutations": "OFF",
+    "publishing": "OFF",
+    "unverifiedOwner": "SCOPED_HOLD",
+    "liveProviderAcceptance": "NOT_CLAIMED",
+    "donorRouteControl": "UNCHANGED"
+  },
+  "holds": [
+    "The Perchance REST endpoints and browser localStorage shape are historically observed undocumented internals; live behavior may drift. Rejected sessions, no bound live tab, unsupported response shape or donor-guard failure must preserve existing inventory and report scoped hold.",
+    "No synthetic owner proof or session flag enables publishing, provider mutation, Git writeback, account-specific action or subsequent I05 provider effects. A locally observed owner state is historical read-only.",
+    "No provider/Cloudflare/Mullvad/private per-gens account mutation, access or operator live verification attempted.",
+    "No CI required check/protected policy/donor pinned source was changed.",
+    "Packaged Firefox B negative fixture does not establish current live Perchance ownership."
+  ],
+  "provenance": "This proposal intentionally contains no branch/head or future merged-main SHA, run ID, or XPI hash. GitHub exact-current-candidate CI, protected squash result and postmerge main F/B evidence are authoritative."
+}
