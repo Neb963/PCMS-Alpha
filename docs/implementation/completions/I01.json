@@ -1,0 +1,52 @@
+{
+  "phaseId": "I01",
+  "planRevision": "S7-AUDITED-DESIGN-1",
+  "proposedDisposition": "SCOPED_IMPLEMENTATION_COMPLETE_ONLY_IF_VERIFIED_ON_PROTECTED_MAIN",
+  "claim": "Synchronous same-XPI Firefox wake with donor-first route gate, shared donor Persona lease registry, bounded stable UID/current container checks and read-only Overview/Accounts runtime receipts; all PCMS external effects remain OFF",
+  "assertions": [
+    {
+      "id": "S6-I01-COLD-WAKE",
+      "evidence": "F synchronous entrypoint and negative-case wake tests; B real packaged Firefox idle suspension, message/port wake, scheduled alarm and persistent counter, full Firefox installed-XPI process restart",
+      "status": "EXECUTED_F_AND_B"
+    },
+    {
+      "id": "P51-01",
+      "evidence": "F synchronous alarm/message/onConnect/startup registration and storage-write failure; B installed-XPI real alarm, idle cold wake, full restart, donor unavailable safe hold",
+      "status": "PARTIAL_I01_SUBCASES_ONLY",
+      "remaining": "I02 canonical durable operation claim, duplicate due-command admission and crash/recovery cutpoint oracles"
+    },
+    {
+      "id": "P51-02",
+      "evidence": "F independent fake shared donor lease conflict, stable UID/container rotation, route drift, Direct rejection, revocation and healthy sibling isolation; pinned donor Integration API regressions; no provider dispatch",
+      "status": "PARTIAL_I01_SUBCASES_ONLY",
+      "remaining": "I02/I03 target-bound command and actual guarded browser effect boundaries, packaged synthetic route-loss/lease-revocation and editor safety where applicable"
+    },
+    {
+      "id": "REQ-A06",
+      "status": "SCOPED_GUARD_ONLY",
+      "remaining": "End-to-end account-scoped task holds require later canonical state and account enrollment"
+    }
+  ],
+  "capabilities": {
+    "providerWrites": "OFF",
+    "sourceGitWrites": "OFF",
+    "liveProviderAcceptance": "NOT_CLAIMED",
+    "donorRoutingProtection": "UNCHANGED",
+    "guardedAdmission": "READ_ONLY_AND_HELD_UNTIL_I02_JOURNAL",
+    "manualAccountEnrollment": "OFF"
+  },
+  "safetyHolds": [
+    "Never treat a P51 test as full PASS from phase-owned subcases",
+    "No synthetic test replaces a live protected Mullvad route proof",
+    "No automatic Direct fallback, browser/native bypass, private per-gens write, operator-owned tab mutation or provider effect",
+    "Wake health marker is best-effort diagnostics; not canonical business DB, not a dispatch authorization",
+    "Unproven donor recovery remains held; no PCMS action can run"
+  ],
+  "evidenceTierNotes": {
+    "F": "Node fast tests and full inherited donor regressions on matched PR CI merge candidate",
+    "B": "Persistently installed combined XPI, Firefox Developer Edition 154.0b10, same addon across process relaunch; actual idle suspension boot ID change and real alarm persisted",
+    "X": "NOT_RUN_FOR_I01; cross-system multi-account effects not enabled",
+    "H": "NOT_RUN; no live provider authority"
+  },
+  "provenance": "No head/merge SHA, future check ID or future run ID embedded. GitHub CI and observed main associate immutable revisions; postmerge proof must be checked separately."
+}
