@@ -122,5 +122,99 @@ export function createSupplyStore(db){
       };
     });
   }
-  return Object.freeze({freeze,get,advance,list});
+  // Atomic I06 journal + item transition. This store is the sole writer of
+  // provider dispatch receipts; the generic I02 operations summary sees them.
+  function stage({batchId,itemId,expectedRevision,event,operationId,
+    fingerprint,proof}) {
+    if(!isSafeId(batchId)||!isSafeId(itemId)||
+       !Number.isSafeInteger(expectedRevision)||expectedRevision<1)
+      return Promise.resolve(fail('INVALID_ITEM'));
+    const creating=event==='CREATE_PREPARED'||event==='RENAME_PREPARED';
+    if(creating&&(!isSafeId(operationId)||!(/^[a-f0-9]{64}$/.test(fingerprint||''))))
+      return Promise.resolve(fail('INVALID_FINGERPRINT'));
+    return new Promise((resolve,reject)=>{
+      let tx,out=fail('TRANSACTION_INCOMPLETE');
+      try{tx=db.transaction(['meta','events','operations','entities'],'readwrite');}
+      catch{return reject(Error('SUPPLY_DB_UNAVAILABLE'));}
+      tx.oncomplete=()=>resolve(out);tx.onabort=()=>reject(Error('SUPPLY_DB_ABORTED'));
+      tx.onerror=()=>{};
+      const m=tx.objectStore('meta'),ops=tx.objectStore('operations');
+      m.get(batchKey(batchId)).onsuccess=b=>{
+        const batch=b.target.result?.batch;
+        const index=batch?.items.findIndex(x=>x.itemId===itemId)??-1;
+        if(index<0){out=fail('ITEM_NOT_FOUND');return;}
+        const prior=batch.items[index];
+        if(prior.revision!==expectedRevision){out=fail('STALE_REVISION');return;}
+        m.get('account:'+batch.accountId).onsuccess=a=>{
+          const current=a.target.result?.account;
+          if(!validateOwnerContext(batch,current).ok &&
+             !['CREATE_UNCERTAIN','RENAME_UNCERTAIN','SOURCE_PENDING'].includes(event)){
+            out=fail('ACCOUNT_STALE');return;
+          }
+          const opId=creating?operationId:
+            event.startsWith('CREATE_')?prior.createOperationId:prior.renameOperationId;
+          if(!isSafeId(opId)&&!event.startsWith('SOURCE_')){
+            out=fail('OPERATION_MISSING');return;
+          }
+          const entities=tx.objectStore('entities');
+          entities.get(itemId).onsuccess=e=>{
+            const entity=e.target.result;
+            if(entity?.activeOperationId&&entity.activeOperationId!==opId){
+              out=fail('ITEM_OPERATION_BUSY');return;
+            }
+            if(!creating&&!event.startsWith('SOURCE_')&&!entity){
+              out=fail('OPERATION_MISSING');return;
+            }
+            if(event.startsWith('SOURCE_')){
+              const moved=moveSupply(prior,event,proof);
+              if(!moved.ok){out=moved;return;}
+              const items=batch.items.slice();items[index]=moved.item;
+              m.put({key:batchKey(batchId),batch:{...batch,items,revision:batch.revision+1}});
+              tx.objectStore('events').add({stage:'SUPPLY_'+event,batchId,itemId});
+              out={ok:true,item:moved.item};return;
+            }
+            ops.get(opId).onsuccess=o=>{
+              const operation=o.target.result;
+              if(creating&&operation){out=fail('OPERATION_ID_USED');return;}
+              if(!creating&&(!operation||operation.targetId!==itemId)){
+                out=fail('OPERATION_MISSING');return;
+              }
+              const expectedOpState={
+                CREATE_DISPATCH_POSSIBLE:'PREPARED',RENAME_DISPATCH_POSSIBLE:'PREPARED',
+                CREATE_OBSERVING:'DISPATCH_POSSIBLE',RENAME_OBSERVING:'DISPATCH_POSSIBLE',
+                CREATE_CONFIRMED:'OBSERVING',PROVIDER_CONFIRMED:'OBSERVING'
+              }[event];
+              if(expectedOpState&&operation.status!==expectedOpState&&
+                 !(event.endsWith('_OBSERVING')&&operation.status==='HELD_UNCERTAIN')){
+                out=fail('OPERATION_STATE_CHANGED');return;
+              }
+              const moved=moveSupply(prior,event,creating?{operationId}:proof);
+              if(!moved.ok){out=moved;return;}
+              let status;
+              if(creating)status='PREPARED';
+              else if(event.endsWith('_DISPATCH_POSSIBLE'))status='DISPATCH_POSSIBLE';
+              else if(event.endsWith('_OBSERVING'))status='OBSERVING';
+              else if(event.endsWith('_UNCERTAIN'))status='HELD_UNCERTAIN';
+              else status='CONFIRMED';
+              const nextOp=creating?{operationId:opId,targetId:itemId,
+                fingerprint,effectType:event==='CREATE_PREPARED'?
+                  'supply_create_v1':'supply_rename_v1',status,revision:1}:
+                {...operation,status,revision:operation.revision+1};
+              const items=batch.items.slice();items[index]=moved.item;
+              m.put({key:batchKey(batchId),batch:{...batch,items,revision:batch.revision+1}});
+              ops.put(nextOp);
+              const nextEntity=entity?{...entity,revision:entity.revision+1,
+                activeOperationId:status==='CONFIRMED'?null:opId}:
+                {id:itemId,revision:1,activeOperationId:opId};
+              entities.put(nextEntity);
+              tx.objectStore('events').add({stage:'SUPPLY_'+event,batchId,itemId,
+                operationId:opId,operationRevision:nextOp.revision});
+              out={ok:true,item:moved.item,operation:nextOp};
+            };
+          };
+        };
+      };
+    });
+  }
+  return Object.freeze({freeze,get,advance,stage,list});
 }
