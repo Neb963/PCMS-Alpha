@@ -7,7 +7,10 @@ const digest = v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
 const active = a => a && a.state !== 'ARCHIVED';
 const key = id => 'account:' + id;
 const reasons = new Set(['IDENTITY_UNOBSERVABLE','CHALLENGE','SESSION_UNAVAILABLE']);
-const allowed = new Set(['ENROLL','ACK_LOGIN','VERIFY','MANUAL_OVERRIDE','ARCHIVE','REBIND']);
+const allowed = new Set(['ENROLL','ACK_LOGIN','VERIFY','MANUAL_OVERRIDE','ARCHIVE','REACTIVATE','REBIND']);
+function withHistory(previous,entry) {
+  return [...(Array.isArray(previous.history)?previous.history:[]),entry].slice(-32);
+}
 
 export function transitionAccount(previous, action, all = []) {
   if (!action || !allowed.has(action.type) || !isSafeId(action.accountId))
@@ -18,7 +21,7 @@ export function transitionAccount(previous, action, all = []) {
     if (all.some(a => active(a) && a.personaUid.toLowerCase() === action.personaUid.toLowerCase()))
       return fail('PERSONA_ALREADY_BOUND');
     return {ok:true, account:{ accountId:action.accountId, personaUid:action.personaUid,
-      state:'WAITING_LOGIN', revision:1, bindingVersion:1, identity:null, override:null },
+      state:'WAITING_LOGIN', revision:1, bindingVersion:1, identity:null, override:null, history:[] },
       event:'ENROLLED'};
   }
   if (!previous) return fail('ACCOUNT_NOT_FOUND');
@@ -27,7 +30,22 @@ export function transitionAccount(previous, action, all = []) {
   if (action.type === 'ARCHIVE') {
     if (!active(previous)) return fail('ALREADY_ARCHIVED');
     return {ok:true,account:{...previous,state:'ARCHIVED',
-      identity:null, override:null, revision:previous.revision+1},event:'ARCHIVED'};
+      identity:null, override:null, revision:previous.revision+1,
+      history:withHistory(previous,{event:'ARCHIVED',revision:previous.revision+1,
+        priorPersonaUid:previous.personaUid,priorIdentity:previous.identity,
+        priorOverride:previous.override})},event:'ARCHIVED'};
+  }
+  if (action.type === 'REACTIVATE') {
+    if (previous.state!=='ARCHIVED'||action.explicitReactivation!==true)
+      return fail('REACTIVATION_NOT_AUTHORIZED');
+    if (all.some(a=>a && active(a) && a.accountId!==previous.accountId &&
+      a.personaUid.toLowerCase()===previous.personaUid.toLowerCase()))
+      return fail('PERSONA_ALREADY_BOUND');
+    return {ok:true,account:{...previous,state:'WAITING_LOGIN',
+      identity:null,override:null,revision:previous.revision+1,
+      bindingVersion:previous.bindingVersion+1,
+      history:withHistory(previous,{event:'REACTIVATE',revision:previous.revision+1})},
+      event:'REACTIVATE'};
   }
   if (!active(previous)) return fail('ACCOUNT_ARCHIVED');
   let state, identity=previous.identity, override=previous.override, personaUid=previous.personaUid;
@@ -41,7 +59,8 @@ export function transitionAccount(previous, action, all = []) {
           !reasons.has(action.reason) || action.acknowledgeLimitedAuthority !== true)
         return fail('OVERRIDE_NOT_AUTHORIZED');
       state='OVERRIDDEN'; identity=null;
-      override={source:'OPERATOR',reason:action.reason, consentRevision:previous.revision+1,
+      override={source:'OPERATOR',reason:action.reason,consentRevision:previous.revision+1,
+        reportedAt:action.reportedAt || null, routeAtReport:action.routeAtReport || null,
         grantsProviderMutation:false}; break;
     case 'VERIFY': {
       // This state transition is only invoked by a privileged readback adapter,
@@ -69,8 +88,15 @@ export function transitionAccount(previous, action, all = []) {
       state='REBIND_PENDING'; identity=null; override=null; break;
     default: return fail('INVALID_ACCOUNT_COMMAND');
   }
+  const history=['MANUAL_OVERRIDE','REBIND'].includes(action.type)
+    ? withHistory(previous,{
+      event:action.type,revision:previous.revision+1,priorPersonaUid:previous.personaUid,
+      priorIdentity:previous.identity,priorOverride:previous.override,
+      ...(action.type==='MANUAL_OVERRIDE'?{reportedReason:action.reason,
+        reportedAt:action.reportedAt || null,routeAtReport:action.routeAtReport || null}:{})
+    }) : previous.history;
   return {ok:true,account:{...previous,personaUid,bindingVersion,state,identity,override,
-    revision:previous.revision+1},event:action.type};
+    history,revision:previous.revision+1},event:action.type};
 }
 
 export function createAccountStore(db) {
