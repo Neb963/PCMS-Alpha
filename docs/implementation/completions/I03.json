@@ -1,0 +1,70 @@
+{
+  "phaseId": "I03",
+  "planRevision": "S7-AUDITED-DESIGN-1",
+  "proposedDisposition": "SCOPED_IMPLEMENTATION_COMPLETE_ONLY_IF_VERIFIED_ON_PROTECTED_MAIN",
+  "claim": "Same-XPI donor-guarded Persona selection/protected creation/human Perchance login entry; canonical revision-fenced exclusive PCMS account↔Persona binding, pending and manual limited exception, archive/reactivation/rebind audit, independent-identity proof interface, usable read-only Accounts/Overview status. Provider writes remain OFF and real Perchance identity verification unproven.",
+  "assertions": [
+    {
+      "id": "S6-I03-BINDING-EXCLUSIVITY",
+      "status": "SCOPED_F_AND_B",
+      "evidence": "F duplicate UID, duplicate remote principal fixture, replay/revision/owner conflict and donor route denial; B real packaged Firefox IndexedDB same-Persona collision and read-only binding projection.",
+      "remaining": "No real Perchance session/owner observation and no protected multi-Persona integration/live matrix."
+    },
+    {
+      "id": "S6-I03-OVERRIDE-PROVENANCE",
+      "status": "SCOPED_F_AND_B",
+      "evidence": "F explicit exception acknowledgement, reason allowlist, source/revision, denied UI proof; B real IndexedDB manual override remains UNVERIFIED, owner-dependent effects OFF.",
+      "remaining": "Cloudflare event/route/time evidence depends on supported guarded provider observation; all operator challenge reasons are reported, not live independently observed."
+    },
+    {
+      "id": "S6-I03-ARCHIVE-REPAIR",
+      "status": "SCOPED_F_WITH_B_STORE",
+      "evidence": "F exclusive rebind, stale revision, invalidated identity, bounded audit history, archived reactivation; B real canonical state for enrollment/override, packaged UI.",
+      "remaining": "Real donor Persona rotation/repair and follow-on approval invalidation integration require downstream owning phases and human acceptance."
+    },
+    {
+      "id": "REQ-A01/REQ-A02/REQ-A08",
+      "status": "SCOPED_LOCAL_IMPLEMENTED",
+      "remaining": "Protected Persona creation/human login require actual live route availability; no real provider claim or donor management operating acceptance."
+    },
+    {
+      "id": "REQ-A03/REQ-A04/REQ-A05",
+      "status": "SCOPED_HELD_SESSION_IDENTITY",
+      "remaining": "Guarded independent session identity reader has no verified provider backend. CHECK_IDENTITY explicitly rejects unobserved account; a manual override never authorizes remote mutations. Real challenge observations are not claimed."
+    },
+    {
+      "id": "UX-06",
+      "status": "SCOPED_ACCESSIBLE_ACCOUNT_PANEL",
+      "remaining": "Final operator H UX/a11y acceptance remains I17."
+    }
+  ],
+  "capabilities": {
+    "accountLocalBinding": "ENABLED_GUARDED",
+    "personaCreate": "DONOR_OWNED_PROTECTED_ROUTE_ONLY",
+    "humanLogin": "GUARDED_MANUAL_ONLY",
+    "providerSessionVerification": "HELD_UNOBSERVABLE",
+    "manualOverride": "LOCAL_ENROLLMENT_EXCEPTION_ONLY",
+    "providerWrites": "OFF",
+    "sourceGitWrites": "OFF",
+    "scheduler": "OFF",
+    "publishing": "OFF",
+    "guardedAction": "NO_OWNER_DEPENDENT_REMOTE_DISPATCH",
+    "liveProviderAcceptance": "NOT_CLAIMED",
+    "donorRoutingProtection": "UNCHANGED"
+  },
+  "safetyHolds": [
+    "No remote Perchance owner/session evidence is fabricated; current production CHECK_IDENTITY returns an explicit hold until a verified guarded adapter is implemented.",
+    "Neither locally bound account nor manual exception can authorize any Perchance, GitHub, native or route-changing provider effect.",
+    "No automatic Direct fallback, token export, HTTP request, challenge bypass or dirty-editor mutation.",
+    "No automation test interacted with live Perchance, Mullvad, Cloudflare, private per-gens or a real operator account.",
+    "Unverified effect and B/X/H subcases cannot be relabeled full Stage 5 P-test PASS.",
+    "No protected workflow/required-check/policy trust root changed."
+  ],
+  "evidenceTierNotes": {
+    "F": "Deterministic Node account state/route/sender/adverse tests plus pinned donor regressions and unchanged I00–I02 required suite, exact final candidate CI required.",
+    "B": "Same-run deterministic combined XPI permanently installed across a Firefox Developer Edition 154.0b10 full process relaunch; real IndexedDB account transaction/exclusivity/override/restore, no fake identity, no provider effect; final candidate CI required.",
+    "X": "NOT_RUN_SEPARATELY; later integrated owner/route/provider emulator negative cases held.",
+    "H": "NOT_RUN; no live session or protected route acceptance."
+  },
+  "provenance": "Proposal embeds no PR or head/merge SHA or future CI. Correlate actual final merge candidate checks, protected squash result and packaged postmerge-main smoke independently."
+}

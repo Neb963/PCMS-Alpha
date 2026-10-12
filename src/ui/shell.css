@@ -7,3 +7,12 @@ main{grid-column:2;grid-row:2;min-width:0;padding:22px 26px 36px;max-width:1400p
 @media(max-width:750px){.app{grid-template-columns:minmax(0,1fr);grid-template-rows:48px minmax(0,1fr) 44px}.menu{display:inline-block;background:var(--paper);border:1px solid var(--line);border-radius:4px;padding:4px 9px}.sidebar{display:none;position:absolute;z-index:4;left:0;right:0;top:48px;box-shadow:0 10px 16px #0002;padding:8px}.sidebar.open{display:flex}.sidebar-note{display:none}main{grid-column:1;padding:20px 14px 24px}.footer{font-size:11px}.phase{display:none}.advanced{font-size:11px;white-space:normal;text-align:right}.workspace-head{align-items:start;flex-wrap:wrap}.workspace-head h1{font-size:22px}.settings-list>div{display:block}.settings-list dd{margin-top:4px}}
 @media(prefers-color-scheme:dark){:root{--canvas:#12171c;--paper:#1a2026;--ink:#e8ecef;--muted:#acbac6;--line:#39434e;--accent:#9ac5ff;--focus:#bddfff;--quiet:#26313b}.sidebar nav a[aria-current=page]{background:#1d3858;color:#cce3ff}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+
+/* I03: compact inline account controls, not floating overlays. */
+.account-record{border-top:1px solid var(--line);padding:1rem 0}
+.account-record h3{margin:.15rem 0;font-size:1rem}
+.account-controls{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem;margin:.7rem 0}
+.account-controls input:not([type=checkbox]),.account-controls select{min-width:10rem;max-width:100%;padding:.42rem .5rem}
+.account-controls label{display:inline-flex;gap:.35rem;align-items:center}
+.account-controls button{max-width:100%}
+#pcms-accounts-feedback{min-height:1.5rem}

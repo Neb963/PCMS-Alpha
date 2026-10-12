@@ -13,7 +13,7 @@
     <header class="topbar">
       <button class="menu" type="button" id="menu" aria-expanded="false" aria-controls="navigation">Menu</button>
       <div class="identity"><strong>PCMS</strong><span>Alpha</span></div>
-      <span class="phase">I02 · Durable journal · Effects OFF</span>
+      <span class="phase">I03 · Guarded accounts · Provider effects OFF</span>
       <a class="advanced" href="../options/options.html" id="advanced">PersonaMonkey advanced controls <span aria-hidden="true">↗</span></a>
     </header>
     <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
@@ -28,11 +28,11 @@
       <p class="sidebar-note">Provider, Git source and scheduler effects remain disabled.</p>
     </aside>
     <main id="main" tabindex="-1" aria-label="Current PCMS workspace">
-      <div class="system-status" role="status" aria-live="polite" id="navigation-status">I02 · Local journal diagnostics · Provider effects OFF</div>
+      <div class="system-status" role="status" aria-live="polite" id="navigation-status">I03 · Local account binding · Provider effects OFF</div>
       <div id="unknown-route" class="notice" role="status" hidden>Unknown workspace. Showing Overview without changing any data.</div>
       <section class="workspace" id="view-overview" data-view="overview" aria-labelledby="heading-overview">
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 01</p><h1 id="heading-overview" tabindex="-1">Overview</h1><p>Operational evidence and actions will appear when their verified components exist.</p></div></header>
-        <div class="notice" role="status"><strong>Provider effects disabled</strong><p>Local operation journaling and a fail-closed command boundary are installed. Account identity, remote inventory and provider mutation are not active. Missing observations do not imply no incidents.</p></div>
+        <div class="notice" role="status"><strong>Provider effects disabled</strong><p>Local operation journaling and a fail-closed command boundary are installed. Account binding and manual login are enabled, but remote identity verification and provider mutation remain unavailable. Missing observations do not imply no incidents.</p></div>
         <section class="panel" aria-labelledby="runtime-health-title"><div class="panel-head"><h2 id="runtime-health-title">Background guard</h2><span class="unknown" id="pcms-guard-badge">Checking</span></div><p id="pcms-guard-health" role="status">Runtime evidence unavailable until checked. Provider actions remain off.</p></section>
         <section class="panel" aria-labelledby="journal-title"><div class="panel-head"><h2 id="journal-title">Canonical journal</h2><span class="unknown">Effects OFF</span></div><p id="pcms-journal-health" role="status">Checking isolated canonical storage.</p><a href="emergency.html">Open emergency diagnostics</a></section>
         <section class="panel" aria-labelledby="attention-title"><div class="panel-head"><h2 id="attention-title">Attention</h2><span class="unknown">Local receipts</span></div><div id="pcms-attention-list" role="status" tabindex="-1">Reading local notice receipts. Missing data is not healthy.</div></section>
@@ -46,8 +46,24 @@
         <section class="panel"><div class="panel-head"><h2>Operations</h2><span class="unknown">Read-only</span></div><p id="pcms-work-queue-summary" role="status">Loading canonical journal status. Unknown outcomes must be reconciled, not repeated.</p><p id="blocked-work-queue" class="reason">Disabled: effect dispatcher and queued provider operations are unavailable. This screen cannot approve or replay them.</p></section>
       </section>
       <section class="workspace" id="view-accounts" data-view="accounts" aria-labelledby="heading-accounts" hidden>
-        <header class="workspace-head"><div><p class="eyebrow">Workspace / 04</p><h1 id="heading-accounts" tabindex="-1">Accounts</h1><p>Dedicated Persona bindings and verified account identity.</p></div><button type="button" disabled aria-describedby="blocked-accounts">Enroll account</button></header>
-        <section class="panel"><div class="panel-head"><h2>Account inventory</h2><span class="unknown">Unknown</span></div><p class="empty">PCMS has not queried or verified any account or Persona binding. The PersonaMonkey donor continues to own its routing.</p><p id="blocked-accounts" class="reason">Disabled: enrollment, login handoff and rebind require I03. <span id="pcms-account-guard">Guard status pending.</span></p><a href="../options/options.html">Open existing PersonaMonkey controls</a></section>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 04</p><h1 id="heading-accounts" tabindex="-1">Accounts</h1><p>Dedicated Persona bindings, human login and provenance-aware verification.</p></div><button type="button" id="pcms-refresh-accounts">Refresh local state</button></header>
+        <div class="notice" role="status"><strong>Human login only — no provider writes</strong><p>PersonaMonkey owns routing, container identity, protected browser navigation and route selection. A local account binding or manual override is not proof of Perchance ownership.</p></div>
+        <section class="panel" aria-labelledby="accounts-enrollment-title"><div class="panel-head"><h2 id="accounts-enrollment-title">Enroll an account</h2><span class="unknown">Guarded local binding</span></div>
+          <p id="pcms-account-guard" class="reason">Checking donor guard status.</p>
+          <div class="account-controls"><label for="pcms-persona-picker">Unbound Persona</label><select id="pcms-persona-picker"><option value="">Loading Personas</option></select><button type="button" id="pcms-enroll" disabled>Bind account</button></div>
+          <details><summary>Create a protected Persona with PersonaMonkey</summary>
+            <div class="account-controls"><label for="pcms-new-persona-name">Persona name</label><input id="pcms-new-persona-name" maxlength="64" autocomplete="off" placeholder="New Persona">
+              <label for="pcms-protected-route">Protected route</label><select id="pcms-protected-route"><option value="">Loading routes</option></select>
+              <button type="button" id="pcms-create-persona" disabled>Create Persona</button>
+            </div><p class="reason">Direct and Block routes cannot be selected. If creation acknowledgement is uncertain, refresh Persona inventory before retrying.</p>
+          </details>
+          <p id="pcms-accounts-feedback" role="status" aria-live="polite">Account status not yet loaded.</p>
+        </section>
+        <section class="panel" aria-labelledby="accounts-inventory-title"><div class="panel-head"><h2 id="accounts-inventory-title">Account bindings</h2><span class="unknown">Source: local PCMS state</span></div>
+          <div id="pcms-accounts-list" role="region" aria-label="Account records">Loading records; absence is not a remote account census.</div>
+          <p class="reason">Verification checks must be based on independent, guarded session readback; unavailable verification keeps owner-dependent operations disabled. Archival preserves Persona and source history.</p>
+          <a href="../options/options.html">Open PersonaMonkey advanced controls</a>
+        </section>
       </section>
       <section class="workspace" id="view-refresher" data-view="refresher" aria-labelledby="heading-refresher" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 05</p><h1 id="heading-refresher" tabindex="-1">Refresher</h1><p>Operational capacity, scheduling and observed visibility.</p></div><button type="button" disabled aria-describedby="blocked-refresher">Start refresh</button></header>
@@ -58,10 +74,11 @@
         <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">All off</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Off — not implemented</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup, restore and AI tests</dt><dd>Off — not implemented</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No provider settings or operation commands can be changed here. PersonaMonkey retains advanced security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
       </section>
     </main>
-    <footer class="footer"><span>PCMS Alpha · Stage I02</span><span>UI navigation available · PCMS side effects disabled</span></footer>
+    <footer class="footer"><span>PCMS Alpha · Stage I03</span><span>UI navigation available · PCMS side effects disabled</span></footer>
   </div>
   <script type="module" src="shell.mjs"></script>
   <script type="module" src="health.mjs"></script>
   <script type="module" src="operations.mjs"></script>
+  <script type="module" src="accounts.mjs"></script>
 </body>
 </html>
