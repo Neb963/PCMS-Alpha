@@ -18,6 +18,15 @@ export function validateAccountMessage(api,sender,m) {
   if(m.params !== undefined && (!m.params||typeof m.params!=='object'||Array.isArray(m.params)||
       Object.keys(m.params).length>5))return fail('INVALID_PARAMS');
   const p=m.params||{};
+  const permitted={
+    LIST_ACCOUNTS:[],LIST_PERSONAS:[],LIST_ROUTES:[],
+    CREATE_PERSONA:['name','routeId'],ENROLL:['accountId','personaUid','expectedRevision'],
+    ACK_LOGIN:['accountId','expectedRevision'],OPEN_LOGIN:['accountId','expectedRevision'],
+    CHECK_IDENTITY:['accountId','expectedRevision'],ARCHIVE:['accountId','expectedRevision'],
+    MANUAL_OVERRIDE:['accountId','expectedRevision','reason','acknowledgeLimitedAuthority'],
+    REBIND:['accountId','expectedRevision','personaUid','explicitRepair']
+  };
+  if(Object.keys(p).some(k=>!permitted[m.type].includes(k)))return fail('INVALID_PARAMS');
   if(!['LIST_ACCOUNTS','LIST_PERSONAS','LIST_ROUTES'].includes(m.type)) {
     if(m.type==='CREATE_PERSONA') {
       if(typeof p.name!=='string'||p.name.length<1||p.name.length>64||
