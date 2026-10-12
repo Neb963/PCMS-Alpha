@@ -86,7 +86,7 @@ attachPcmsGuard({
     const tab=matching.find(item=>item.active)||matching[0];
     const current=await getState(),profile=current.profiles?.[cookieStoreId];
     if(!profile||profile.personaUid!==personaUid||profile.routeId!==routeId||
-       routeId==='direct'||routeId==='block'||current.routes?.[routeId]?.enabled!==true)
+       routeId==='direct'||routeId==='block'||!current.routes?.[routeId]||current.routes[routeId].enabled===false)
       return {ok:false,code:'PERSONA_ROUTE_CHANGED'};
     const results=await browser.scripting.executeScript({
       target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',

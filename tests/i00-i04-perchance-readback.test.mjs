@@ -67,7 +67,8 @@ test('I04 F: interpreter passes only de-identified observations, not session sec
   const adapter=createReadOnlyInterpreter({
     readProtectedPage:async ctx=>{
       assert.deepEqual(ctx,context);
-      return {sessionReply,ownerReplies};
+      return {ok:true,principalFingerprint:account.identity.principalFingerprint,
+        sessionReply,ownerReplies:[...ownerReplies]};
     },now:()=>1791841200000,newObservationId:()=>'observation_0001'
   });
   const out=await adapter(context,account);
@@ -79,7 +80,8 @@ test('I04 F: interpreter passes only de-identified observations, not session sec
   assert.equal(await leaking(context,account),null,
     'credential-bearing page envelope must not be admitted');
   const blocked=createReadOnlyInterpreter({readProtectedPage:async()=>({
-    sessionReply:{httpStatus:403,body:'challenge'},ownerReplies:new Map()
+    ok:false,principalFingerprint:account.identity.principalFingerprint,
+    sessionReply:{httpStatus:403,body:'challenge'},ownerReplies:[]
   })});
   assert.equal(await blocked(context,account),null);
 });
