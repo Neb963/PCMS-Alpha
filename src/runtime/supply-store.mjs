@@ -129,7 +129,7 @@ export function createSupplyStore(db){
     if(!isSafeId(batchId)||!isSafeId(itemId)||
        !Number.isSafeInteger(expectedRevision)||expectedRevision<1)
       return Promise.resolve(fail('INVALID_ITEM'));
-    const creating=event==='CREATE_PREPARED'||event==='RENAME_PREPARED';
+    const creating=['CREATE_PREPARED','RENAME_PREPARED','GIT_PREPARED'].includes(event);
     if(creating&&(!isSafeId(operationId)||!(/^[a-f0-9]{64}$/.test(fingerprint||''))))
       return Promise.resolve(fail('INVALID_FINGERPRINT'));
     return new Promise((resolve,reject)=>{
@@ -152,8 +152,9 @@ export function createSupplyStore(db){
             out=fail('ACCOUNT_STALE');return;
           }
           const opId=creating?operationId:
+            (event.startsWith('GIT_')||event==='SOURCE_CONFIRMED')?prior.gitOperationId:
             event.startsWith('CREATE_')?prior.createOperationId:prior.renameOperationId;
-          if(!isSafeId(opId)&&!event.startsWith('SOURCE_')){
+          if(!isSafeId(opId)&&event!=='SOURCE_PENDING'){ 
             out=fail('OPERATION_MISSING');return;
           }
           const entities=tx.objectStore('entities');
@@ -162,10 +163,10 @@ export function createSupplyStore(db){
             if(entity?.activeOperationId&&entity.activeOperationId!==opId){
               out=fail('ITEM_OPERATION_BUSY');return;
             }
-            if(!creating&&!event.startsWith('SOURCE_')&&!entity){
+            if(!creating&&event!=='SOURCE_PENDING'&&!entity){
               out=fail('OPERATION_MISSING');return;
             }
-            if(event.startsWith('SOURCE_')){
+            if(event==='SOURCE_PENDING'){ 
               const moved=moveSupply(prior,event,proof);
               if(!moved.ok){out=moved;return;}
               const items=batch.items.slice();items[index]=moved.item;
@@ -182,7 +183,9 @@ export function createSupplyStore(db){
               const expectedOpState={
                 CREATE_DISPATCH_POSSIBLE:'PREPARED',RENAME_DISPATCH_POSSIBLE:'PREPARED',
                 CREATE_OBSERVING:'DISPATCH_POSSIBLE',RENAME_OBSERVING:'DISPATCH_POSSIBLE',
-                CREATE_CONFIRMED:'OBSERVING',PROVIDER_CONFIRMED:'OBSERVING'
+                CREATE_CONFIRMED:'OBSERVING',PROVIDER_CONFIRMED:'OBSERVING',
+                GIT_DISPATCH_POSSIBLE:'PREPARED',GIT_OBSERVING:'DISPATCH_POSSIBLE',
+                SOURCE_CONFIRMED:'OBSERVING'
               }[event];
               if(expectedOpState&&operation.status!==expectedOpState&&
                  !(event.endsWith('_OBSERVING')&&operation.status==='HELD_UNCERTAIN')){
@@ -198,7 +201,8 @@ export function createSupplyStore(db){
               else status='CONFIRMED';
               const nextOp=creating?{operationId:opId,targetId:itemId,
                 fingerprint,effectType:event==='CREATE_PREPARED'?
-                  'supply_create_v1':'supply_rename_v1',status,revision:1}:
+                  'supply_create_v1':event==='RENAME_PREPARED'?
+                    'supply_rename_v1':'supply_git_marker_v1',status,revision:1}:
                 {...operation,status,revision:operation.revision+1};
               const items=batch.items.slice();items[index]=moved.item;
               m.put({key:batchKey(batchId),batch:{...batch,items,revision:batch.revision+1}});
