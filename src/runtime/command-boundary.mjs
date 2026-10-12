@@ -2,7 +2,7 @@
 import { createCanonicalStore, createRestoreSentinel, openCanonicalDatabase, fail } from './journal.mjs';
 
 export const COMMAND_PORT = 'pcms-i02-canonical-readonly';
-const SAFE_NAMES = new Set(['HEALTH','SUMMARY','GET_OPERATION','PREVIEW']);
+const SAFE_NAMES = new Set(['HEALTH','SUMMARY','GET_OPERATION','GET_NOTICES','IGNORE_NOTICE','PREVIEW']);
 export function trustedExtensionPage(api, sender) {
   if (sender?.id !== api.runtime.id || typeof sender.url !== 'string') return false;
   const base = api.runtime.getURL('pcms/');
@@ -18,6 +18,12 @@ export function validateCommand(api, sender, message) {
   if (!bytes || bytes.length > 2048 || Object.keys(message).length > 3)
     return fail('MESSAGE_TOO_LARGE');
   if (!SAFE_NAMES.has(message.type)) return fail('CAPABILITY_OFF');
+  if (message.type === 'IGNORE_NOTICE' &&
+    (typeof message.notice !== 'object' || !message.notice ||
+      !/^[a-zA-Z0-9_-]{8,100}$/.test(message.notice.scopeId || '') ||
+      typeof message.notice.code !== 'string' ||
+      !Number.isSafeInteger(message.notice.expectedRevision)))
+    return fail('INVALID_NOTICE');
   if (message.type === 'GET_OPERATION' &&
       (typeof message.operationId !== 'string' || !/^[a-zA-Z0-9_-]{8,100}$/.test(message.operationId)))
     return fail('INVALID_TARGET');
@@ -35,12 +41,14 @@ export function createCommandBoundary(api, { open = openCanonicalDatabase } = {}
     try {
       const store = await canonical();
       const states = await store.summary();
-      if (!states.ok) throw Error('missing state');
+      const notices = await store.noticeSummary();
+      if (!states.ok || !notices.ok) throw Error('missing state');
       return { ok: true, phase: 'I02', storage: 'READY', restore: restore.code,
-        held: restore.held, providerEffects: 'OFF', states: states.states };
+        held: restore.held, providerEffects: 'OFF', states: states.states,
+        attention: notices.counts };
     } catch {
       return { ok: true, phase: 'I02', storage: 'UNAVAILABLE', restore: restore.code,
-        held: true, providerEffects: 'OFF', states: null };
+        held: true, providerEffects: 'OFF', states: null, attention: null };
     }
   }
   async function dispatch(message, sender) {
@@ -49,6 +57,14 @@ export function createCommandBoundary(api, { open = openCanonicalDatabase } = {}
     const state = await status();
     if (message.type === 'HEALTH' || message.type === 'SUMMARY') return state;
     if (state.storage !== 'READY' || state.held) return fail('CANONICAL_HOLD');
+    if (message.type === 'IGNORE_NOTICE') {
+      try { return await (await canonical()).ignoreNotice(message.notice); }
+      catch { return fail('CANONICAL_HOLD'); }
+    }
+    if (message.type === 'GET_NOTICES') {
+      try { return await (await canonical()).listNotices(); }
+      catch { return fail('CANONICAL_HOLD'); }
+    }
     if (message.type === 'GET_OPERATION') {
       try {
         const op = await (await canonical()).getOperation(message.operationId);

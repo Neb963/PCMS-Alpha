@@ -248,8 +248,28 @@ export function createCanonicalStore(db) {
       };
     });
   }
+
+  function listNotices(limit=50) {
+    return transact(db,['meta'],'readonly',(tx,finish)=>{
+      const notices=[];
+      let truncated=false;
+      const cursor=tx.objectStore('meta').openCursor();
+      cursor.onsuccess = event => {
+        const row=event.target.result;
+        if (!row) {finish(ok({notices,truncated}));return;}
+        const n=row.value;
+        if (typeof n?.key==='string' && n.key.startsWith('attention:') &&
+            n.ignored!==true) {
+          if (notices.length>=limit) truncated=true;
+          else notices.push({scopeId:n.scopeId,code:n.code,
+            severity:n.severity,revision:n.revision});
+        }
+        row.continue();
+      };
+    });
+  }
   return Object.freeze({ provisionTarget, apply, getOperation, summary, recover,
-    recordNotice, ignoreNotice, noticeSummary, close: () => db.close() });
+    recordNotice, ignoreNotice, noticeSummary, listNotices, close: () => db.close() });
 }
 
 // Restore sentinel lives OUTSIDE replaceable IDB. It must not be cleared by
