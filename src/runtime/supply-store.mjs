@@ -92,7 +92,7 @@ export function createSupplyStore(db){
         m.get('account:'+batch.accountId).onsuccess=a=>{
           const account=a.target.result?.account;
           if(!validateOwnerContext(batch,account).ok &&
-             !['CREATE_UNCERTAIN','RENAME_UNCERTAIN','SOURCE_PENDING'].includes(event)){
+             !['CREATE_UNCERTAIN','RENAME_UNCERTAIN','SOURCE_PENDING','ABORT_PREPARED'].includes(event)){
             finish(fail('ACCOUNT_STALE'));return;
           }
           const moved=moveSupply(previous,event,proof);
@@ -152,6 +152,9 @@ export function createSupplyStore(db){
             out=fail('ACCOUNT_STALE');return;
           }
           const opId=creating?operationId:
+            event==='ABORT_PREPARED'?
+              (prior.state==='CREATE_PREPARED'?prior.createOperationId:
+               prior.state==='RENAME_PREPARED'?prior.renameOperationId:prior.gitOperationId):
             (event.startsWith('GIT_')||event==='SOURCE_CONFIRMED')?prior.gitOperationId:
             event.startsWith('CREATE_')?prior.createOperationId:prior.renameOperationId;
           if(!isSafeId(opId)&&event!=='SOURCE_PENDING'){ 
@@ -185,7 +188,7 @@ export function createSupplyStore(db){
                 CREATE_OBSERVING:'DISPATCH_POSSIBLE',RENAME_OBSERVING:'DISPATCH_POSSIBLE',
                 CREATE_CONFIRMED:'OBSERVING',PROVIDER_CONFIRMED:'OBSERVING',
                 GIT_DISPATCH_POSSIBLE:'PREPARED',GIT_OBSERVING:'DISPATCH_POSSIBLE',
-                SOURCE_CONFIRMED:'OBSERVING'
+                SOURCE_CONFIRMED:'OBSERVING',ABORT_PREPARED:'PREPARED'
               }[event];
               if(expectedOpState&&operation.status!==expectedOpState&&
                  !(event.endsWith('_OBSERVING')&&operation.status==='HELD_UNCERTAIN')){
@@ -198,6 +201,7 @@ export function createSupplyStore(db){
               else if(event.endsWith('_DISPATCH_POSSIBLE'))status='DISPATCH_POSSIBLE';
               else if(event.endsWith('_OBSERVING'))status='OBSERVING';
               else if(event.endsWith('_UNCERTAIN'))status='HELD_UNCERTAIN';
+              else if(event==='ABORT_PREPARED')status='ABORTED';
               else status='CONFIRMED';
               const nextOp=creating?{operationId:opId,targetId:itemId,
                 fingerprint,effectType:event==='CREATE_PREPARED'?
@@ -208,7 +212,7 @@ export function createSupplyStore(db){
               m.put({key:batchKey(batchId),batch:{...batch,items,revision:batch.revision+1}});
               ops.put(nextOp);
               const nextEntity=entity?{...entity,revision:entity.revision+1,
-                activeOperationId:status==='CONFIRMED'?null:opId}:
+                activeOperationId:['CONFIRMED','ABORTED'].includes(status)?null:opId}:
                 {id:itemId,revision:1,activeOperationId:opId};
               entities.put(nextEntity);
               tx.objectStore('events').add({stage:'SUPPLY_'+event,batchId,itemId,
