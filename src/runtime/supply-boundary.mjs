@@ -9,7 +9,7 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {writeNonReadyFolder,markerRequestAllowed} from './supply-git.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 export const SUPPLY_PORT='pcms-i06-supply';
-const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM','FINISH_SOURCE_FOLDER']);
+const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER']);
 const hex=/^[a-f0-9]{64}$/;
 export function validateSupplyMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
@@ -35,7 +35,7 @@ export function validateSupplyMessage(api,sender,message){
       return fail('INVALID_PARAMS');
   }else if(message.type==='GET_BATCH'&&!isSafeId(p.batchId))
     return fail('INVALID_PARAMS');
-  else if(['EXECUTE_ITEM','FINISH_SOURCE_FOLDER'].includes(message.type)&&
+  else if(['EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER'].includes(message.type)&&
     (!isSafeId(p.batchId)||!isSafeId(p.itemId)||
      !Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
     return fail('INVALID_PARAMS');
@@ -162,7 +162,8 @@ export function createSupplyBoundary(api,{
         evidence.remoteId===item.remoteId);
     if(!valid){
       await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
-        expectedRevision:observed.item.revision,event:kind+'_UNCERTAIN'});
+        expectedRevision:observed.item.revision,event:kind+'_UNCERTAIN',
+        proof:create?{temporarySlug:response.temporarySlug}:undefined});
       return fail('HELD_UNCERTAIN');
     }
     const confirmed=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
@@ -172,6 +173,67 @@ export function createSupplyBoundary(api,{
     if(!confirmed.ok)return fail('HELD_UNCERTAIN');
     // Git write/readback is separate conditional authority. Never promote
     // source READY or invent a folder if Git is not proven writable.
+    if(!create){
+      const pending=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
+        expectedRevision:confirmed.item.revision,event:'SOURCE_PENDING'});
+      return redacted(pending.ok?pending:confirmed);
+    }
+    return redacted(confirmed);
+  }
+  // Operator-triggered read-only reconciliation. A create with no returned
+  // temporary identity is held: a random owned empty generator is not proof.
+  async function reconcile(s,p){
+    const found=await s.supply.get(p.batchId);
+    if(!found.ok)return found;
+    const b=found.batch,item=b.items.find(x=>x.itemId===p.itemId);
+    if(!item)return fail('ITEM_NOT_FOUND');
+    if(item.revision!==p.expectedRevision)return fail('STALE_REVISION');
+    const create=item.state.startsWith('CREATE_');
+    const kind=create?'CREATE':'RENAME';
+    if(!['CREATE_UNCERTAIN','CREATE_DISPATCH_POSSIBLE','CREATE_OBSERVING',
+          'RENAME_UNCERTAIN','RENAME_DISPATCH_POSSIBLE','RENAME_OBSERVING'].includes(item.state))
+      return fail('NOT_ADMISSIBLE');
+    const temporarySlug=create?item.ackTemporarySlug:item.temporarySlug;
+    if(!temporarySlug)return fail('TEMP_IDENTITY_UNVERIFIED');
+    const account=await s.accounts.get(b.accountId);
+    if(!account.ok||!validateOwnerContext(b,account.account).ok)
+      return fail('ACCOUNT_STALE');
+    const g=guard();
+    if(!g?.runSupplyStep||!g.getSafeRouteReadiness)
+      return fail('DONOR_GUARD_UNAVAILABLE');
+    const readiness=await g.getSafeRouteReadiness(b.personaUid);
+    if(!readiness?.ready)return fail(readiness?.code||'PROTECTED_ROUTE_UNVERIFIED');
+    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+    let at={item};
+    if(item.state.endsWith('DISPATCH_POSSIBLE')||item.state.endsWith('OBSERVING')){
+      at=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
+        expectedRevision:item.revision,event:kind+'_UNCERTAIN'});
+      if(!at.ok)return at;
+    }
+    at=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
+      expectedRevision:at.item.revision,event:kind+'_OBSERVING'});
+    if(!at.ok)return at;
+    let evidence;
+    try{
+      evidence=await g.runSupplyStep(b.personaUid,{
+        kind:create?'READ_CREATE':'READ_RENAME',
+        slug:item.requestedSlug,temporarySlug,remoteId:item.remoteId,
+        principalFingerprint:account.account.identity.principalFingerprint});
+    }catch{evidence={ok:false};}
+    const valid=evidence?.ok===true&&evidence.source==='INDEPENDENT_READBACK'&&
+      evidence.ownerMatches===true&&evidence.privateEmpty===true&&
+      (create?evidence.temporarySlug===temporarySlug:
+        evidence.slug===item.requestedSlug&&evidence.previousSlug===temporarySlug&&
+        evidence.remoteId===item.remoteId);
+    if(!valid){
+      await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
+        expectedRevision:at.item.revision,event:kind+'_UNCERTAIN'});
+      return fail('RECONCILIATION_REQUIRED');
+    }
+    const confirmed=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
+      expectedRevision:at.item.revision,
+      event:create?'CREATE_CONFIRMED':'PROVIDER_CONFIRMED',proof:evidence});
+    if(!confirmed.ok)return fail('RECONCILIATION_REQUIRED');
     if(!create){
       const pending=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
         expectedRevision:confirmed.item.revision,event:'SOURCE_PENDING'});
@@ -244,6 +306,7 @@ export function createSupplyBoundary(api,{
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(message.type==='PREVIEW'||message.type==='FREEZE')
         return await frozenPlan(s,p,message.type==='PREVIEW');
+      if(message.type==='RECONCILE_ITEM')return await reconcile(s,p);
       if(message.type==='FINISH_SOURCE_FOLDER')return await finishSource(s,p);
       return await execute(s,p);
     }catch{return fail('SUPPLY_CANONICAL_UNAVAILABLE');}
