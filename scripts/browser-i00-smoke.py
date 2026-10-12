@@ -78,6 +78,43 @@ def canonical_command(session, command):
                 {'script':expression,'args':[]},timeout=30)
 
 
+
+def account_command(session, command):
+    # The real same-XPI account command endpoint; sender identity is supplied
+    # by Firefox, never by the test payload.
+    script = '''const done=arguments[arguments.length-1];
+    const port=browser.runtime.connect({name:'pcms-i03-accounts'});
+    port.onMessage.addListener(value=>{try{port.disconnect()}catch(e){}done(value)});
+    port.onDisconnect.addListener(()=>done({error:'accounts-disconnected'}));
+    port.postMessage(COMMAND);'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script.replace('COMMAND',json.dumps(command)),'args':[]},timeout=30)
+
+
+def account_idb_probe(session):
+    # Real IndexedDB transaction fence (not a Node-only state reducer).
+    script = '''const done=arguments[arguments.length-1];
+    (async()=>{
+      const {openCanonicalDatabase}=await import('./journal.mjs');
+      const {createAccountStore}=await import('./accounts.mjs');
+      const db=await openCanonicalDatabase(),store=createAccountStore(db);
+      const first=await store.apply({type:'ENROLL',accountId:'fixture_account_a01',
+        personaUid:'persona-aaaa-0001',expectedRevision:0});
+      const collision=await store.apply({type:'ENROLL',accountId:'fixture_account_b02',
+        personaUid:'persona-aaaa-0001',expectedRevision:0});
+      const stale=await store.apply({type:'ACK_LOGIN',accountId:'fixture_account_a01',
+        expectedRevision:0});
+      const override=await store.apply({type:'MANUAL_OVERRIDE',
+        accountId:'fixture_account_a01',expectedRevision:1,
+        reason:'IDENTITY_UNOBSERVABLE',acknowledgeLimitedAuthority:true});
+      const all=await store.list();
+      db.close();
+      done({first,collision,stale,override,all});
+    })().catch(()=>done({error:'ACCOUNT_IDB_PROBE_FAILED'}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=30)
+
+
 def canonical_probe(session):
     # In a disposable profile only: exercise REAL IndexedDB transactions from
     # the packaged add-on origin, not just a mocked callback.
@@ -250,12 +287,12 @@ def main():
                 url=f'moz-extension://{uuid}/pcms/index.html'
                 call('POST',f'/session/{after}/url',{'url':url},timeout=30)
                 for _ in range(40):
-                    view=execute(after,"return {title:document.title, selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view), links:[...document.querySelectorAll('[data-workspace]')].map(x=>x.getAttribute('href')), enabled:[...document.querySelectorAll('.workspace button')].filter(x=>!x.disabled).length}")
+                    view=execute(after,"return {title:document.title, selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view), links:[...document.querySelectorAll('[data-workspace]')].map(x=>x.getAttribute('href')), unsafe:[...document.querySelectorAll('#view-generators button,#view-work-queue button,#view-refresher button')].filter(x=>!x.disabled).length}")
                     if view.get('selected'): break
                     time.sleep(.15)
                 assert view['selected']==['overview'],view
                 assert view['links']==['#overview','#generators','#work-queue','#accounts','#refresher','#settings'],view
-                assert view['enabled']==0,view
+                assert view['unsafe']==0,view
                 # The exact installed XPI must expose a read-only guarded
                 # background status; no valid status enables PCMS effects.
                 guard=guard_status(after)
@@ -264,6 +301,27 @@ def main():
                 canonical=canonical_command(after,{'type':'SUMMARY'})
                 assert canonical.get('ok') is True and canonical.get('storage')=='READY',canonical
                 assert canonical.get('providerEffects')=='OFF',canonical
+                personas=account_command(after,{'type':'LIST_PERSONAS'})
+                assert personas.get('ok') is True and isinstance(personas.get('personas'),list),personas
+                records=account_command(after,{'type':'LIST_ACCOUNTS'})
+                assert records.get('ok') is True and records.get('accounts')==[],records
+                denied_enroll=account_command(after,{'type':'ENROLL','params':{
+                    'accountId':'fixture_forbidden_a01','personaUid':'persona-aaaa-0001','expectedRevision':0}})
+                assert denied_enroll.get('code')=='PERSONA_NOT_AVAILABLE',denied_enroll
+                tested=account_idb_probe(after)
+                assert tested.get('first',{}).get('ok') is True,tested
+                assert tested.get('collision',{}).get('code')=='PERSONA_ALREADY_BOUND',tested
+                assert tested.get('stale',{}).get('code')=='STALE_REVISION',tested
+                assert tested.get('override',{}).get('account',{}).get('state')=='OVERRIDDEN',tested
+                assert tested.get('override',{}).get('account',{}).get('identity') is None,tested
+                listed=account_command(after,{'type':'LIST_ACCOUNTS'})
+                assert listed.get('ok') is True and len(listed.get('accounts',[]))==1,listed
+                assert listed['accounts'][0]['identity']=='UNVERIFIED',listed
+                assert listed['accounts'][0]['providerWrites']=='OFF',listed
+                identity=account_command(after,{'type':'CHECK_IDENTITY','params':{
+                    'accountId':'fixture_account_a01','expectedRevision':2}})
+                assert identity.get('ok') is not True,identity
+                print('B I03_REAL_IDB_EXCLUSIVITY_REVISION_OVERRIDE_AND_NO_FAKE_IDENTITY=PASS',flush=True)
                 synthetic=canonical_probe(after)
                 assert synthetic.get('created',{}).get('ok') is True,synthetic
                 assert synthetic.get('prepared',{}).get('operation',{}).get('status')=='PREPARED',synthetic
@@ -287,6 +345,9 @@ def main():
                 assert restore_marker_probe(after) is True
                 held=canonical_command(after,{'type':'SUMMARY'})
                 assert held.get('held') is True and held.get('restore')=='RESTORE_IN_PROGRESS',held
+                account_hold=account_command(after,{'type':'ACK_LOGIN','params':{
+                    'accountId':'fixture_account_a01','expectedRevision':2}})
+                assert account_hold.get('code')=='RESTORE_HOLD',account_hold
                 denied=canonical_command(after,{'type':'GET_OPERATION','operationId':'fixture_operation_01'})
                 assert denied.get('code')=='CANONICAL_HOLD',denied
                 assert clear_restore_marker(after) is True
@@ -321,8 +382,10 @@ def main():
                 print('B I01_EVENT_PAGE_COLD_WAKE=PASS before=',boot_before,
                       'after=',guard_after['bootId'],flush=True)
                 call('POST',f'/session/{after}/url',{'url':url+'#accounts'})
-                view=execute(after,"return {selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view),active:document.querySelector('[aria-current=page]')?.dataset.workspace,blocked:document.querySelector('#view-accounts button')?.disabled}")
-                assert view=={'selected':['accounts'],'active':'accounts','blocked':True},view
+                view=execute(after,"return {selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view),active:document.querySelector('[aria-current=page]')?.dataset.workspace,blocked:document.querySelector('#pcms-enroll')?.disabled,refresh:document.querySelector('#pcms-refresh-accounts')?.disabled}")
+                assert view=={'selected':['accounts'],'active':'accounts','blocked':True,'refresh':False},view
+                account_ui=execute(after,"return {controls:!!document.getElementById('pcms-accounts-list'),description:document.getElementById('pcms-accounts-list')?.textContent||''}")
+                assert account_ui.get('controls'),account_ui
                 call('POST',f'/session/{after}/url',{'url':f'moz-extension://{uuid}/options/options.html'})
                 title=execute(after,'return document.title')
                 assert title, 'Original donor advanced option page not available'
