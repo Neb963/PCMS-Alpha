@@ -67,7 +67,7 @@ test('I04 F: interpreter passes only de-identified observations, not session sec
   const adapter=createReadOnlyInterpreter({
     readProtectedPage:async ctx=>{
       assert.deepEqual(ctx,context);
-      return {sessionReply,ownerReplies,sessionToken:'never-return-this',email:'user@example.test'};
+      return {sessionReply,ownerReplies};
     },now:()=>1791841200000,newObservationId:()=>'observation_0001'
   });
   const out=await adapter(context,account);

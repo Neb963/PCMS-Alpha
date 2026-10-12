@@ -94,7 +94,11 @@ export function createReadOnlyInterpreter({
   if(typeof readProtectedPage!=='function')throw TypeError('Qualified protected-page executor required');
   return async function inventoryReader(context,account) {
     const packet=await readProtectedPage(context);
-    if(!packet)return null;
+    // Refuse any credential-bearing or unexpected transport envelope.
+    // A qualified executor must discard secrets BEFORE crossing the page
+    // boundary; even a mistakenly returned token cannot become a PCMS fact.
+    if(!own(packet)||Object.keys(packet).some(key=>
+        key!=='sessionReply'&&key!=='ownerReplies'))return null;
     const value=normalizeReadOnlyInventory({
       sessionReply:packet.sessionReply,
       items:packet.sessionReply?.body?.generators,
