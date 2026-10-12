@@ -1,0 +1,867 @@
+{
+  "schemaVersion": 1,
+  "planRevision": "S7-AUDITED-DESIGN-1",
+  "status": "STAGE_7_AUDITED_DESIGN_PENDING_OPERATOR_SIGNOFF_NO_IMPLEMENTATION_AUTHORIZATION",
+  "sourceDocs": [
+    "docs/specs/PCMS-Alpha-Stage-1-Requirements-Audit.md",
+    "docs/specs/PCMS-Alpha-Stage-2-Behavior-and-Lifecycle-Specification.md",
+    "docs/specs/PCMS-Alpha-Stage-3-F1-F2-Decision-Amendment.md",
+    "docs/specs/PCMS-Alpha-Stage-3-Minimal-Architecture.md",
+    "docs/specs/PCMS-Alpha-Stage-4-UI-UX-Specification.md",
+    "docs/verification/PCMS-Alpha-Stage-5-Verification-Specification.md",
+    "docs/verification/PCMS-Alpha-Stage-5-Test-and-Failure-Matrix.md",
+    "docs/verification/PCMS-Alpha-Stage-5-Operator-Acceptance-Plan.md",
+    "docs/verification/PCMS-Alpha-Stage-5-Evidence-and-Unknowns-Register.md",
+    "docs/specs/PCMS-Alpha-Stage-3-Working-Decision-Register.md"
+  ],
+  "repo": "Neb963/PCMS-Alpha",
+  "donorCommit": "9995f6eadfa54be6cc0001f4e04f2a2d9b9401bf",
+  "donorGeckoId": "persona-route-manager@local",
+  "privateGeneratorRepository": "Neb963/per-gens",
+  "rules": {
+    "singleActiveAgent": true,
+    "onePhasePerInvocation": true,
+    "remoteGitHubCheckpointRequired": true,
+    "noLocalOnlyAcceptance": true,
+    "completion": "phase completion proposal in PR + independent checks on merged candidate + observed main merge; NO post-merge self-reference in marker",
+    "blocking": "park branch/draft PR, allow next independent phase only after safety/dependency check",
+    "testSemantics": "P-tests are design contracts until actually executed; H-series never public CI",
+    "operatorLiveTesting": "minimal, late and only when necessary; separately authorize exact live side effects",
+    "sourceMainProtected": true,
+    "S6DecisionsAcceptedThrough": "S6-Q25",
+    "checkpointNoSelfReferentialSHA": true,
+    "earlyGitWritesRequireJournalCASReadback": true,
+    "phaseAcceptanceNeverImpliesEffectActivation": true,
+    "primaryRequirementsMapped": 56,
+    "supplementaryChecksAreFutureObligationsNotExecuted": true
+  },
+  "phaseOrder": [
+    "I00",
+    "I01",
+    "I02",
+    "I03",
+    "I04",
+    "I05",
+    "I06",
+    "I07",
+    "I08",
+    "I09",
+    "I10",
+    "I11",
+    "I12",
+    "I13",
+    "I14",
+    "I15",
+    "I16",
+    "I17"
+  ],
+  "phases": [
+    {
+      "id": "I00",
+      "title": "Combined XPI and navigable shell",
+      "dependsOn": [],
+      "primaryTests": [],
+      "uxContracts": [
+        "UX-01",
+        "UX-02"
+      ],
+      "testTiers": [
+        "F",
+        "B"
+      ],
+      "uiDestinations": [
+        "Overview",
+        "Generators",
+        "Work Queue",
+        "Accounts",
+        "Refresher",
+        "Settings"
+      ],
+      "authorities": [
+        "PersonaMonkey",
+        "UI"
+      ],
+      "effectCapabilityPolicy": "OFF",
+      "scope": "Reproducible combined packaged XPI retaining Gecko ID/native-host compatibility, donor routing/permissions/regressions; six navigable destinations with genuinely disabled actions.",
+      "proof": "Donor regressions and packaged Firefox installation identity; no PCMS provider effects.",
+      "fallback": "If donor security or build differs, stop and do not enable PCMS.",
+      "forbiddenClaim": "Functional account/provider workflow.",
+      "primaryRequirements": [
+        "REQ-U02",
+        "REQ-X06",
+        "REQ-X08"
+      ],
+      "supplementaryAssertions": [
+        "S6-I00-PACKAGING",
+        "S6-I00-DONOR-SECURITY"
+      ]
+    },
+    {
+      "id": "I01",
+      "title": "Fail-closed background wake and PersonaGuard",
+      "dependsOn": [
+        "I00"
+      ],
+      "primaryTests": [
+        "P51-01",
+        "P51-02"
+      ],
+      "uxContracts": [
+        "UX-06"
+      ],
+      "testTiers": [
+        "F",
+        "B"
+      ],
+      "uiDestinations": [
+        "Overview",
+        "Accounts"
+      ],
+      "authorities": [
+        "PersonaMonkey",
+        "Firefox background"
+      ],
+      "effectCapabilityPolicy": "OFF",
+      "scope": "Top-level synchronous wake listener registrations; one guarded same-XPI authority path, stable UID/current-container, lease/route checks and runtime health receipts.",
+      "proof": "Persistent installed XPI cold wake, full restart, route loss, lease revocation and donor security isolation; independent zero-effect oracle.",
+      "fallback": "Retain protected fail-closed defaults and forbid all PCMS writes.",
+      "forbiddenClaim": "Live Perchance owner verification or enabled mutation.",
+      "primaryRequirements": [
+        "REQ-A06"
+      ],
+      "supplementaryAssertions": [
+        "S6-I01-COLD-WAKE"
+      ]
+    },
+    {
+      "id": "I02",
+      "title": "Journal, canonical commands and emergency diagnostics",
+      "dependsOn": [
+        "I01"
+      ],
+      "primaryTests": [
+        "P51-03",
+        "P51-04",
+        "P51-06",
+        "P55-11"
+      ],
+      "uxContracts": [
+        "UX-01",
+        "UX-03",
+        "UX-08"
+      ],
+      "testTiers": [
+        "F",
+        "B"
+      ],
+      "uiDestinations": [
+        "Overview",
+        "Work Queue",
+        "Settings"
+      ],
+      "authorities": [
+        "IndexedDB",
+        "PersonaMonkey",
+        "Firefox background"
+      ],
+      "effectCapabilityPolicy": "OFF",
+      "scope": "Revision-fenced command admission, PREPARED/DISPATCH_POSSIBLE before fake effects, independent restore hold outside replaceable DB, redacted Core-independent diagnostic entrypoint.",
+      "proof": "DB abort/crash between cutpoints, duplicate requests, untrusted senders, corrupt Core, leak-canary oracle; donor unaffected.",
+      "fallback": "Canonical DB unavailable => PCMS mutating hold, never donor fail-open.",
+      "forbiddenClaim": "Exactly-once external service semantics.",
+      "primaryRequirements": [
+        "REQ-U03",
+        "REQ-U04",
+        "REQ-X04",
+        "REQ-X05"
+      ],
+      "supplementaryAssertions": [
+        "S6-I02-NOTIFICATIONS",
+        "S6-I02-EMERGENCY-ENTRY"
+      ]
+    },
+    {
+      "id": "I03",
+      "title": "Persona-bound account enrollment",
+      "dependsOn": [
+        "I02"
+      ],
+      "primaryTests": [],
+      "uxContracts": [
+        "UX-06"
+      ],
+      "testTiers": [
+        "F",
+        "B"
+      ],
+      "uiDestinations": [
+        "Accounts",
+        "Overview"
+      ],
+      "authorities": [
+        "PersonaMonkey",
+        "IndexedDB",
+        "UI"
+      ],
+      "effectCapabilityPolicy": "HUMAN_LOGIN_ONLY",
+      "scope": "Select/create unbound Persona, human login handoff, verified session identity, one active account per Persona, repair/rebind and honest pending/unknown states.",
+      "proof": "Fake identity rotations, revoked leases, duplicate account/Persona bindings, UI target revision fencing; no direct native bypass.",
+      "fallback": "Identity unverified => no owner-dependent mutations.",
+      "forbiddenClaim": "Manual UID entry as normal UX or collaborator access as ownership.",
+      "primaryRequirements": [
+        "REQ-A01",
+        "REQ-A02",
+        "REQ-A03",
+        "REQ-A04",
+        "REQ-A05",
+        "REQ-A08"
+      ],
+      "supplementaryAssertions": [
+        "S6-I03-BINDING-EXCLUSIVITY",
+        "S6-I03-OVERRIDE-PROVENANCE",
+        "S6-I03-ARCHIVE-REPAIR"
+      ]
+    },
+    {
+      "id": "I04",
+      "title": "Owned generator read-only inventory",
+      "dependsOn": [
+        "I03"
+      ],
+      "primaryTests": [
+        "P52-01"
+      ],
+      "uxContracts": [
+        "UX-01",
+        "UX-03"
+      ],
+      "testTiers": [
+        "F",
+        "B"
+      ],
+      "uiDestinations": [
+        "Generators",
+        "Accounts",
+        "Overview"
+      ],
+      "authorities": [
+        "Perchance read-only",
+        "PersonaMonkey",
+        "IndexedDB",
+        "UI"
+      ],
+      "effectCapabilityPolicy": "READ_ONLY",
+      "scope": "Guarded read-only inventory sync, positive owner vs editKey separation, unknown/deleted ambiguity, responsive 1,000+ search/filter.",
+      "proof": "Owner mismatch, account session drift, missing list item, stale out-of-order UI refresh and bounded fleet fixture.",
+      "fallback": "Unknown owner => target hold; never delete on absence.",
+      "forbiddenClaim": "Live ownership proven merely by fixture.",
+      "primaryRequirements": [
+        "REQ-A07",
+        "REQ-G01",
+        "REQ-G12",
+        "REQ-U05"
+      ],
+      "supplementaryAssertions": [
+        "S6-I04-INVENTORY-SEARCH"
+      ]
+    },
+    {
+      "id": "I05",
+      "title": "GitHub READY inspection and source association",
+      "dependsOn": [
+        "I02",
+        "I04"
+      ],
+      "primaryTests": [
+        "P53-01",
+        "P53-02",
+        "P53-03"
+      ],
+      "uxContracts": [
+        "UX-04",
+        "UX-05"
+      ],
+      "testTiers": [
+        "F",
+        "B"
+      ],
+      "uiDestinations": [
+        "Generators",
+        "Settings"
+      ],
+      "authorities": [
+        "per-gens read-only",
+        "IndexedDB",
+        "UI"
+      ],
+      "effectCapabilityPolicy": "READ_ONLY",
+      "scope": "Explicit folder↔generator association, full tree/READY/test-input inspection, reject hostile paths and relevant HEAD drift; empty main yields GITHUB_UNINITIALIZED.",
+      "proof": "Fake Git DAG and path collisions/reincarnation, absent HEAD, READY revocation, irrelevant vs relevant drift.",
+      "fallback": "Absent Git main or ambiguous tree => SOURCE_PENDING, no writeback.",
+      "forbiddenClaim": "Private per-gens initialized or READY automatically granted.",
+      "primaryRequirements": [
+        "REQ-G06",
+        "REQ-G09",
+        "REQ-G10"
+      ],
+      "supplementaryAssertions": [
+        "S6-I05-EMPTY-GIT",
+        "S6-I05-ASSOCIATION"
+      ]
+    },
+    {
+      "id": "I06",
+      "title": "Private-first slug reservation and batch receipts",
+      "dependsOn": [
+        "I03",
+        "I04",
+        "I05"
+      ],
+      "primaryTests": [
+        "P52-02",
+        "P56-06"
+      ],
+      "uxContracts": [
+        "UX-03",
+        "UX-04"
+      ],
+      "testTiers": [
+        "F",
+        "B"
+      ],
+      "uiDestinations": [
+        "Generators",
+        "Work Queue"
+      ],
+      "authorities": [
+        "Perchance",
+        "PersonaMonkey",
+        "IndexedDB",
+        "per-gens conditional"
+      ],
+      "effectCapabilityPolicy": "PROVIDER_WRITE_GATED",
+      "scope": "Freeze operator slug list, target-specific two-stage private-empty create + guarded rename, bounded per-item receipts, non-READY Git folder only when authorized and possible.",
+      "proof": "Separate create/rename fake-effect ledgers, lost acknowledgment, collision, uncertain temporary ID, partial batch and Git outage.",
+      "fallback": "HELD_UNCERTAIN or SOURCE_PENDING, no second create or arbitrary substitute slug.",
+      "forbiddenClaim": "Earlier historical F1 test proves new combined-XPI live creation.",
+      "primaryRequirements": [
+        "REQ-G02",
+        "REQ-G03",
+        "REQ-G04",
+        "REQ-G08"
+      ],
+      "supplementaryAssertions": [
+        "S6-I06-GIT-MARKER-SAFETY",
+        "S6-I06-ALLOCATION"
+      ]
+    },
+    {
+      "id": "I07",
+      "title": "Existing generator adoption without source loss",
+      "dependsOn": [
+        "I04",
+        "I05"
+      ],
+      "primaryTests": [
+        "P52-03"
+      ],
+      "uxContracts": [
+        "UX-04"
+      ],
+      "testTiers": [
+        "F",
+        "B"
+      ],
+      "uiDestinations": [
+        "Generators",
+        "Work Queue"
+      ],
+      "authorities": [
+        "Perchance read-only",
+        "per-gens conditional",
+        "IndexedDB"
+      ],
+      "effectCapabilityPolicy": "READ_ONLY_OR_EXPLICIT_ARCHIVE",
+      "scope": "Explicit adoption consent, durable association, immutable original-source baseline plus non-overwriting Git archive with independently verified integrity.",
+      "proof": "Slug reincarnation, owner changes, mapped folder collision, archived byte readback, public/unlisted distinctions.",
+      "fallback": "Ambiguous original or Git archive => preserve provider source, no overwrite.",
+      "forbiddenClaim": "Adoption equals permission to publish or overwrite.",
+      "primaryRequirements": [
+        "REQ-G05",
+        "REQ-G07",
+        "REQ-G11"
+      ],
+      "supplementaryAssertions": [
+        "S6-I07-ORIGINAL-ARCHIVE",
+        "S6-I07-TOMBSTONE"
+      ]
+    },
+    {
+      "id": "I08",
+      "title": "Manual authenticated encrypted backup",
+      "dependsOn": [
+        "I02",
+        "I03"
+      ],
+      "primaryTests": [
+        "P55-01",
+        "P55-02",
+        "P55-05"
+      ],
+      "uxContracts": [
+        "UX-08"
+      ],
+      "testTiers": [
+        "F",
+        "B"
+      ],
+      "uiDestinations": [
+        "Settings",
+        "Overview"
+      ],
+      "authorities": [
+        "IndexedDB",
+        "PersonaMonkey portable data",
+        "Firefox Downloads",
+        "UI"
+      ],
+      "effectCapabilityPolicy": "LOCAL_BACKUP",
+      "scope": "One authenticated encrypted archive regardless of content category; consistent snapshot, offline decrypt/schema/source roundtrip of a disposable restore fixture, bounded size, actual Downloads states and excluded WG private config.",
+      "proof": "Header tamper, wrong passphrase, incomplete export, offline source roundtrip, storage quota, lost Download completion, secret scan.",
+      "fallback": "Encryption or completion unverified => failure receipt, no plaintext fallback.",
+      "forbiddenClaim": "Full restore or independent on-disk hash when browser only confirms download.",
+      "primaryRequirements": [
+        "REQ-X01"
+      ],
+      "supplementaryAssertions": [
+        "S6-I08-PORTABLE-DECRYPT"
+      ]
+    },
+    {
+      "id": "I09",
+      "title": "Private candidate staging, full-source verification and editor safety",
+      "dependsOn": [
+        "I05",
+        "I06",
+        "I08"
+      ],
+      "primaryTests": [
+        "P51-05",
+        "P52-04",
+        "P52-07"
+      ],
+      "uxContracts": [
+        "UX-04"
+      ],
+      "testTiers": [
+        "F",
+        "B"
+      ],
+      "uiDestinations": [
+        "Generators",
+        "Work Queue"
+      ],
+      "authorities": [
+        "Perchance",
+        "PersonaMonkey",
+        "IndexedDB",
+        "UI"
+      ],
+      "effectCapabilityPolicy": "PROVIDER_WRITE_GATED",
+      "scope": "Pin READY bytes, stage on private new generators, full PJS/HTML/src add/change/delete byte-readback, guarded human tab handoff, source diff and prior snapshot.",
+      "proof": "Dirty/unknown editor, asset 404 or binary mismatch, save accepted but incomplete readback, crash during tab ownership transfer.",
+      "fallback": "SOURCE_UNVERIFIED/EDITOR_UNKNOWN => preserve tab and previous source.",
+      "forbiddenClaim": "Existing public-generator overwrite or clean source on manifest metadata alone.",
+      "primaryRequirements": [
+        "REQ-D01",
+        "REQ-D10",
+        "REQ-U01"
+      ],
+      "supplementaryAssertions": [
+        "S6-I09-EDITOR-OVERLAY",
+        "S6-I09-FULL-SOURCE"
+      ]
+    },
+    {
+      "id": "I10",
+      "title": "Native AI repair and independently evidenced tests",
+      "dependsOn": [
+        "I09"
+      ],
+      "primaryTests": [
+        "P52-05",
+        "P52-06"
+      ],
+      "uxContracts": [
+        "UX-04",
+        "UX-05"
+      ],
+      "testTiers": [
+        "F",
+        "B"
+      ],
+      "uiDestinations": [
+        "Work Queue",
+        "Generators",
+        "Settings"
+      ],
+      "authorities": [
+        "Native Perchance AI through guard",
+        "IndexedDB",
+        "UI"
+      ],
+      "effectCapabilityPolicy": "AI_PROVIDER_GATED",
+      "scope": "Settings-versioned Chat 1, optional genuinely fresh Chat 2, observable test oracle on exact saved F, bounded repair convergence; AI may modify all generator-owned source but no privileged Git/approval.",
+      "proof": "Fresh-session violation, AI prose-only PASS, stale tests after change, source drift, handoff interrupt, prompt revision pin.",
+      "fallback": "TESTS_UNVERIFIED/KNOWN_FAILURE => hold candidate; no publication.",
+      "forbiddenClaim": "Narrative AI success is actual test success.",
+      "primaryRequirements": [
+        "REQ-D03",
+        "REQ-D04",
+        "REQ-D05",
+        "REQ-D06"
+      ],
+      "supplementaryAssertions": [
+        "S6-I10-PROMPT-VERSION-IMPORT-EXPORT",
+        "S6-I10-AI-CONCURRENCY"
+      ]
+    },
+    {
+      "id": "I11",
+      "title": "Revision-safe GitHub writeback",
+      "dependsOn": [
+        "I10"
+      ],
+      "primaryTests": [
+        "P53-04",
+        "P53-05",
+        "P53-06"
+      ],
+      "uxContracts": [
+        "UX-04",
+        "UX-05"
+      ],
+      "testTiers": [
+        "F",
+        "B"
+      ],
+      "uiDestinations": [
+        "Work Queue",
+        "Generators"
+      ],
+      "authorities": [
+        "per-gens Git",
+        "IndexedDB",
+        "UI"
+      ],
+      "effectCapabilityPolicy": "GITHUB_WRITE_GATED",
+      "scope": "Manual/opt-in automatic conditional Git-only multi-file commit of fully verified F (including deletions), nonforced ref with HEAD/readback, suggested message inert.",
+      "proof": "Fake DAG relevant/unrelated conflicts, blob partial, lost ack, policy changes, auto opt-out race.",
+      "fallback": "WRITEBACK_UNCERTAIN/CONFLICT; preserve exact F and no publication.",
+      "forbiddenClaim": "Git commit is Perchance publication or source-bound human approval.",
+      "primaryRequirements": [],
+      "supplementaryAssertions": [
+        "S6-I11-GIT-DAG-REPLAY"
+      ]
+    },
+    {
+      "id": "I12",
+      "title": "Refresher shadow scheduler, monitoring and fleet",
+      "dependsOn": [
+        "I02",
+        "I04"
+      ],
+      "primaryTests": [
+        "P51-07",
+        "P54-01",
+        "P54-02",
+        "P54-03",
+        "P54-04",
+        "P54-07",
+        "P54-08",
+        "P54-10",
+        "P54-11"
+      ],
+      "uxContracts": [
+        "UX-07"
+      ],
+      "testTiers": [
+        "F",
+        "B",
+        "X"
+      ],
+      "uiDestinations": [
+        "Refresher",
+        "Overview",
+        "Work Queue"
+      ],
+      "authorities": [
+        "IndexedDB",
+        "Firefox alarms",
+        "PersonaMonkey read-only",
+        "Perchance read-only"
+      ],
+      "effectCapabilityPolicy": "SHADOW_ONLY",
+      "scope": "One durable oldest-eligible queue, evidenced operational intervals, account grace, scoped Pauses, capacity hysteresis, coalesced alarms, shared recent-list observation/adaptive statistics.",
+      "proof": "Virtual clock, 50+ account/1,000+ generator fixture, outage distinction, duplicate cold wake, perf high-water marks.",
+      "fallback": "No mutating refresh until proven permissible effective method; freeze unobserved time.",
+      "forbiddenClaim": "Queue calculation proves real provider visibility or refresh validity.",
+      "primaryRequirements": [
+        "REQ-R01",
+        "REQ-R02",
+        "REQ-R03",
+        "REQ-R04",
+        "REQ-R05",
+        "REQ-R06",
+        "REQ-R07",
+        "REQ-R10"
+      ],
+      "supplementaryAssertions": [
+        "S6-I12-SLEEP-LISTED",
+        "S6-I12-DISPATCH-STAGGER"
+      ]
+    },
+    {
+      "id": "I13",
+      "title": "Exact-source release approval and existing-source updates",
+      "dependsOn": [
+        "I07",
+        "I08",
+        "I09",
+        "I10",
+        "I11",
+        "I12"
+      ],
+      "primaryTests": [
+        "P53-07",
+        "P53-08"
+      ],
+      "uxContracts": [
+        "UX-04",
+        "UX-05"
+      ],
+      "testTiers": [
+        "F",
+        "B",
+        "X"
+      ],
+      "uiDestinations": [
+        "Generators",
+        "Work Queue"
+      ],
+      "authorities": [
+        "Perchance",
+        "Git READY",
+        "PersonaMonkey",
+        "IndexedDB",
+        "UI"
+      ],
+      "effectCapabilityPolicy": "PUBLICATION_GATED_BY_HUMAN",
+      "scope": "Human exact-F publication approval and immediate source/test/owner/READY/editor revalidation; update adopted source only when proven sleeping/unlisted with verified prior-source baseline and decryptable recovery snapshot; safe readback/rollback.",
+      "proof": "Lost listing ack, changed full F, stale approval modal, changed READY, dirty editor, sleep/unlist race, rollback-to-P remains unlisted.",
+      "fallback": "PUBLICATION_UNCERTAIN/review hold; never auto-republish P.",
+      "forbiddenClaim": "GitHub writeback authorizes publication, or tested F can change after approval.",
+      "primaryRequirements": [
+        "REQ-D02",
+        "REQ-D07",
+        "REQ-D08",
+        "REQ-D09",
+        "REQ-D11",
+        "REQ-D12"
+      ],
+      "supplementaryAssertions": [
+        "S6-I13-REVISION-IGNORE",
+        "S6-I13-ORIGINAL-RESTORE"
+      ]
+    },
+    {
+      "id": "I14",
+      "title": "Permissible evidence-based mutating Refresher",
+      "dependsOn": [
+        "I12",
+        "I13"
+      ],
+      "primaryTests": [
+        "P54-05",
+        "P54-06"
+      ],
+      "uxContracts": [
+        "UX-07"
+      ],
+      "testTiers": [
+        "F",
+        "B",
+        "X"
+      ],
+      "uiDestinations": [
+        "Refresher",
+        "Overview"
+      ],
+      "authorities": [
+        "Perchance",
+        "PersonaMonkey",
+        "IndexedDB"
+      ],
+      "effectCapabilityPolicy": "LIVE_REFRESH_OFF_UNTIL_PROVEN",
+      "scope": "Qualify only legitimate effective mutating refresh candidate; bounded monitored attempt with separate save/effect/recent-feed evidence and gap/absence handling.",
+      "proof": "Fake effective/ineffective saves, absent/partial feed, provider drift and rate limits; H-04 only if essential late.",
+      "fallback": "If no permissible verified mechanism, mutation remains disabled and shadow monitoring continues.",
+      "forbiddenClaim": "An HTTP 200/save implies recent-feed visibility.",
+      "primaryRequirements": [
+        "REQ-R08",
+        "REQ-R09"
+      ],
+      "supplementaryAssertions": [
+        "S6-I14-BOUND-RETRY",
+        "S6-I14-REFRESH-PROOF"
+      ]
+    },
+    {
+      "id": "I15",
+      "title": "Scheduled encrypted backup and safe retention",
+      "dependsOn": [
+        "I08"
+      ],
+      "primaryTests": [
+        "P55-03",
+        "P55-04",
+        "P55-06"
+      ],
+      "uxContracts": [
+        "UX-08"
+      ],
+      "testTiers": [
+        "F",
+        "B"
+      ],
+      "uiDestinations": [
+        "Settings",
+        "Overview"
+      ],
+      "authorities": [
+        "Native narrow OS vault",
+        "Firefox Downloads",
+        "IndexedDB"
+      ],
+      "effectCapabilityPolicy": "UNATTENDED_BACKUP_GATED",
+      "scope": "Daily authenticated encryption with safe recoverable secret, optional KDE keyring integration, bounded tracked 14-good automatic archive retention and accurate file proof tiers.",
+      "proof": "Locked/missing vault, Downloads missing item, moved file, interrupted backup, manual/untracked/last-good preservation.",
+      "fallback": "Without safe key/vault => suspended, never plaintext or unsafe deletion.",
+      "forbiddenClaim": "Browser reported completion means independent disk-byte proof.",
+      "primaryRequirements": [
+        "REQ-X02"
+      ],
+      "supplementaryAssertions": [
+        "S6-I15-RETENTION-PATH"
+      ]
+    },
+    {
+      "id": "I16",
+      "title": "Staged restore and inactive fresh controller",
+      "dependsOn": [
+        "I02",
+        "I08"
+      ],
+      "primaryTests": [
+        "P51-08",
+        "P55-07",
+        "P55-08",
+        "P55-09",
+        "P55-10",
+        "P55-12"
+      ],
+      "uxContracts": [
+        "UX-08"
+      ],
+      "testTiers": [
+        "F",
+        "B",
+        "X"
+      ],
+      "uiDestinations": [
+        "Settings",
+        "Overview"
+      ],
+      "authorities": [
+        "IndexedDB",
+        "PersonaMonkey portable data",
+        "Firefox profiles",
+        "UI"
+      ],
+      "effectCapabilityPolicy": "RESTORE_ACTIVATION_GATED",
+      "scope": "Authenticated preview, verified pre-restore checkpoint, external immutable guard, group-by-group receipts/UID remap, new-profile disabled controller by default.",
+      "proof": "Crash at every restore boundary, old/new two-profile mock, import collisions, lack of old-controller proof, archive size quotas.",
+      "fallback": "Unknown group => scoped hold; new controller inactive until actual operator H-06 if migration claimed.",
+      "forbiddenClaim": "Staged restore is cross-store atomic or old profile automatically off.",
+      "primaryRequirements": [
+        "REQ-X03"
+      ],
+      "supplementaryAssertions": [
+        "S6-I16-SAME-AND-FRESH-PROFILE"
+      ]
+    },
+    {
+      "id": "I17",
+      "title": "Full integration, fleet and operator acceptance",
+      "dependsOn": [
+        "I13",
+        "I15",
+        "I16"
+      ],
+      "primaryTests": [
+        "P54-09",
+        "P56-01",
+        "P56-02",
+        "P56-03",
+        "P56-04",
+        "P56-05",
+        "P56-07",
+        "P56-08",
+        "P56-09",
+        "P56-10"
+      ],
+      "uxContracts": [
+        "UX-01",
+        "UX-02",
+        "UX-03",
+        "UX-04",
+        "UX-05",
+        "UX-06",
+        "UX-07",
+        "UX-08",
+        "UX-09",
+        "UX-10"
+      ],
+      "testTiers": [
+        "F",
+        "B",
+        "X",
+        "H"
+      ],
+      "uiDestinations": [
+        "Overview",
+        "Generators",
+        "Work Queue",
+        "Accounts",
+        "Refresher",
+        "Settings"
+      ],
+      "authorities": [
+        "All existing authority boundaries, no new controller"
+      ],
+      "effectCapabilityPolicy": "PER_CAPABILITY",
+      "scope": "Cross-system fault chains, accessibility, 50+/1,000+ measured envelope, clean build/installation, guided checklist with Markdown fallback and late operator acceptance.",
+      "proof": "All P56 composites and honest H-01/H-07, H-06 only if migration claimed, H-02–05 conditional residual unknowns.",
+      "fallback": "Critical failures prevent aggregate product claim; independent capabilities remain scoped OFF/HELD.",
+      "forbiddenClaim": "H tests performed from CI or capability enabled without necessary real proof.",
+      "primaryRequirements": [
+        "REQ-U06",
+        "REQ-X07"
+      ],
+      "supplementaryAssertions": [
+        "S6-I17-UX-OPERATOR-ACCEPTANCE",
+        "S6-I17-FLEET-ROLL-OUT"
+      ]
+    }
+  ]
+}
