@@ -115,6 +115,30 @@ def source_command(session, command):
                 {'script':script.replace('COMMAND',json.dumps(command)),'args':[]},timeout=30)
 
 
+
+def supply_command(session, command):
+    # Real packaged supply port, no external provider credential or remote writes.
+    script = '''const done=arguments[arguments.length-1];
+    const port=browser.runtime.connect({name:'pcms-i06-supply'});
+    port.onMessage.addListener(value=>{try{port.disconnect()}catch(e){}done(value)});
+    port.onDisconnect.addListener(()=>done({error:'supply-disconnected'}));
+    port.postMessage(COMMAND);'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script.replace('COMMAND',json.dumps(command)),'args':[]},timeout=30)
+
+
+def supply_isolated_wrong_origin(session):
+    script = '''const done=arguments[arguments.length-1];
+    (async()=>{
+      const {perchanceSupplyIsolated}=await import('./perchance-supply.mjs');
+      const res=await perchanceSupplyIsolated({kind:'CREATE',slug:'browser-test-only',
+        principalFingerprint:'a'.repeat(64)});
+      done(res);
+    })().catch(e=>done({code:'PROBE_ERROR',detail:String(e).slice(0,100)}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=30)
+
+
 def source_idb_probe(session):
     # A real packaged Firefox IDB transaction with an injected synthetic Git
     # snapshot. No live GitHub/per-gens request. F tests own Git byte semantics.
@@ -512,6 +536,54 @@ def main():
                     time.sleep(.15)
                 assert '51–100' in pagination,pagination
                 print('B I04_REAL_IDB_1250_FILTER_PAGINATION_OWNER_HOLD=PASS',flush=True)
+
+                # I06 actual installed Firefox IndexedDB and extension port
+                # retain frozen operator slugs and reject duplication. Effect
+                # activation is deliberately absent: NO provider request sent.
+                read_batches=supply_command(after,{'type':'LIST_BATCHES'})
+                assert read_batches.get('ok') is True,read_batches
+                assert read_batches.get('batches')==[],read_batches
+                frozen=supply_command(after,{'type':'FREEZE','params':{
+                    'batchId':'batch_browser_0001',
+                    'accountId':'fixture_inventory_01','expectedAccountRevision':2,
+                    'slugs':['supply-test-one','supply-test-two','supply-test-two','gen-0999']}})
+                assert frozen.get('ok') is True,frozen
+                assert [x['state'] for x in frozen['batch']['items']]==[
+                    'FROZEN','FROZEN','REJECTED','REJECTED'],frozen
+                same=supply_command(after,{'type':'FREEZE','params':{
+                    'batchId':'batch_browser_0002',
+                    'accountId':'fixture_inventory_01','expectedAccountRevision':2,
+                    'slugs':['supply-test-one','another-safe-name']}})
+                assert same.get('ok') is True,same
+                assert same['batch']['items'][0]['reason']=='ALREADY_OWNED',same
+                assert same['batch']['items'][1]['state']=='FROZEN',same
+                invalid=supply_command(after,{'type':'FREEZE','params':{
+                    'batchId':'batch_browser_0003',
+                    'accountId':'fixture_inventory_01','expectedAccountRevision':1,
+                    'slugs':['safe-name']}})
+                assert invalid.get('code')=='STALE_ACCOUNT_REVISION',invalid
+                held=supply_command(after,{'type':'EXECUTE_ITEM','params':{
+                    'batchId':'batch_browser_0001',
+                    'itemId':'batch_browser_0001_000','expectedRevision':1}})
+                assert held.get('code')=='PROVIDER_ACTIVATION_HELD',held
+                previous=supply_command(after,{'type':'GET_BATCH','params':{
+                    'batchId':'batch_browser_0001'}})
+                assert previous.get('batch',{}).get('items',[{}])[0].get('state')=='FROZEN',previous
+                unsafe=supply_command(after,{'type':'WRITE_PROVIDER','params':{}})
+                assert unsafe.get('code')=='CAPABILITY_OFF',unsafe
+                wrong_origin=supply_isolated_wrong_origin(after)
+                assert wrong_origin.get('code')=='WRONG_ORIGIN',wrong_origin
+                call('POST',f'/session/{after}/url',{'url':url+'#generators'})
+                visible=execute(after,"return {input:!!document.getElementById('pcms-supply-slugs'),"
+                    "queue:!!document.getElementById('pcms-supply-queue'),"
+                    "freeze:document.getElementById('pcms-supply-freeze')?.disabled,"
+                    "effects:document.getElementById('pcms-supply-feedback')?.textContent}")
+                assert visible.get('input') is True and visible.get('queue') is True,visible
+                assert visible.get('freeze') is True,visible
+                persisted=supply_command(after,{'type':'LIST_BATCHES'})
+                assert persisted.get('ok') is True and len(persisted['batches'])==2,persisted
+                print('B I06_REAL_IDB_FROZEN_BATCH_COLLISION_HOLDS_ZERO_PROVIDER_EFFECTS=PASS',flush=True)
+
 
                 # I05: real permanently installed XPI source port and canonical
                 # association; synthetic inspection only, zero private Git reads.
