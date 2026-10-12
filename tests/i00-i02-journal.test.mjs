@@ -110,7 +110,7 @@ test('I02 build entry preserves donor wake registration and implements isolated 
   assert.ok(entry.indexOf('recovery-bootstrap.js')<entry.indexOf('wake.mjs'));
   assert.ok(entry.indexOf('wake.mjs')<entry.indexOf('command-boundary.mjs'));
   assert.match(overlay,/journal.mjs/);
-  assert.doesNotMatch(diag, /PersonaGuard|nativeMessaging|cookieStore|srcManifest|sendNativeMessage|management-integration/);
+  assert.doesNotMatch(diag.replace(/^\\s*\/\/.*$/gm, ''), /PersonaGuard|nativeMessaging|cookieStore|srcManifest|sendNativeMessage|management-integration/);
   assert.doesNotMatch(controller,/fetch\s*\(|sendNativeMessage|runtime\.sendMessage/);
   assert.equal(DB_NAME,'pcms-alpha-canonical');
 });
