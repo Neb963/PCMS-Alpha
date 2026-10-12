@@ -11,6 +11,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -100,6 +102,51 @@ def inventory_command(session, command):
     return call('POST',f'/session/{session}/execute/async',
                 {'script':script.replace('COMMAND',json.dumps(command)),'args':[]},timeout=30)
 
+
+
+def observer_isolation_probe(session):
+    # Actual installed XPI's Firefox scripting.executeScript in a local
+    # controlled page. The fixed production reader must refuse wrong origin
+    # before parsing attacker-controlled app state or issuing any requests.
+    class Fixture(BaseHTTPRequestHandler):
+        def do_GET(self):
+            payload=b'<html><script>window.fetch=async()=>({status:200,json:async()=>({status:"success"})});window.app={store:{data:{user:{loggedIn:true}}}};</script><body>Local adversarial fixture</body></html>'
+            self.send_response(200)
+            self.send_header('Content-Type','text/html')
+            self.send_header('Content-Length',str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+        def log_message(self,*args):
+            return
+    server=ThreadingHTTPServer(('127.0.0.1',0),Fixture)
+    thread=threading.Thread(target=server.serve_forever,daemon=True)
+    thread.start()
+    try:
+        fixture_url='http://127.0.0.1:'+str(server.server_address[1])+'/fixture'
+        script='''const done=arguments[arguments.length-1];
+        (async()=>{
+          const {perchanceReadIsolated}=await import('./perchance-observer.mjs');
+          const tab=await browser.tabs.create({url:FIXTURE,active:false});
+          try {
+            for(let k=0;k<30;k++){
+              const current=await browser.tabs.get(tab.id);
+              if(current.status==='complete')break;
+              await new Promise(r=>setTimeout(r,100));
+            }
+            const out=await browser.scripting.executeScript({
+              target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
+              func:perchanceReadIsolated,args:[{}]
+            });
+            done({count:out.length,frameId:out[0]?.frameId,
+              rejected:out[0]?.result,scriptError:Boolean(out[0]?.error)});
+          }finally{await browser.tabs.remove(tab.id);}
+        })().catch(e=>done({error:String(e).slice(0,180)}));'''
+        script=script.replace('FIXTURE',json.dumps(fixture_url))
+        return call('POST',f'/session/{session}/execute/async',
+                    {'script':script,'args':[]},timeout=30)
+    finally:
+        server.shutdown()
+        server.server_close()
 
 def inventory_idb_probe(session):
     # Packaged Firefox uses REAL persistent IDB, synthetic readback only.
@@ -346,6 +393,11 @@ def main():
                 assert view['unsafe']==0,view
                 # The exact installed XPI must expose a read-only guarded
                 # background status; no valid status enables PCMS effects.
+                isolated=observer_isolation_probe(after)
+                assert isolated.get('count')==1 and isolated.get('frameId')==0,isolated
+                assert isolated.get('scriptError') is False,isolated
+                assert isolated.get('rejected',{}).get('code')=='WRONG_ORIGIN',isolated
+                print('B I04_REAL_ISOLATED_SCRIPT_WRONG_ORIGIN_HOLD=PASS',flush=True)
                 guard=guard_status(after)
                 assert guard and guard.get('phase')=='I01',f'Missing I01 wake status: {guard}'
                 assert guard.get('providerEffects')=='OFF',guard
