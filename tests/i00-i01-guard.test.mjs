@@ -88,11 +88,12 @@ test('P51-02 F negative: donor bootstrap/privacy loss and changed route during a
 });
 
 function fakeBrowser({ failStorage=false }={}) {
-  const listeners={message:[],startup:[],installed:[],alarm:[]};
+  const listeners={message:[],connect:[],startup:[],installed:[],alarm:[]};
   const storage={};
   const api={
     runtime:{id:'persona-route-manager@local',getURL:p=>'moz-extension://fixed-test-uuid/'+p,
       onMessage:{addListener:fn=>listeners.message.push(fn)},
+      onConnect:{addListener:fn=>listeners.connect.push(fn)},
       onStartup:{addListener:fn=>listeners.startup.push(fn)},
       onInstalled:{addListener:fn=>listeners.installed.push(fn)}},
     alarms:{created:[],create(name,settings){this.created.push([name,settings]);},
@@ -107,17 +108,25 @@ test('P51-01 F: registers all wake sources synchronously, no dashboard, recovery
   const f=fakeBrowser(), wake=createWakeService(f.api);
   wake.register();wake.register();
   assert.deepEqual(Object.fromEntries(Object.entries(f.listeners).map(([k,v])=>[k,v.length])),
-    {message:1,startup:1,installed:1,alarm:1});
+    {message:1,connect:1,startup:1,installed:1,alarm:1});
   assert.equal(f.api.alarms.created.length,1);
   const trusted={id:f.api.runtime.id,url:f.api.runtime.getURL('pcms/index.html')};
-  const data=f.listeners.message[0]({type:'PCMS_I01_STATUS'},trusted);
-  assert.equal(data.providerEffects,'OFF');
-  assert.equal(data.donorReady,false);
-  assert.equal(f.listeners.message[0]({type:'PCMS_I01_STATUS'},
-    {id:f.api.runtime.id,url:'https://perchance.org/pcms/index.html'}).code,'UNTRUSTED_SENDER');
+  const replies=[];
+  f.listeners.connect[0]({name:'pcms-i01-health-readonly',sender:trusted,
+    postMessage:reply=>replies.push(reply)});
+  assert.equal(replies[0].providerEffects,'OFF');
+  assert.equal(replies[0].donorReady,false);
+  const denied=[];
+  f.listeners.connect[0]({name:'pcms-i01-health-readonly',
+    sender:{id:f.api.runtime.id,url:'https://perchance.org/pcms/index.html'},
+    postMessage:reply=>denied.push(reply)});
+  assert.equal(denied[0].code,'UNTRUSTED_SENDER');
+  f.listeners.connect[0]({name:'legacy-donor-port',sender:trusted,postMessage:()=>{throw Error('wrong port')}});
   assert.equal(f.listeners.message[0]({type:'DONOR_MESSAGE'},trusted),undefined);
+  assert.equal(f.listeners.message[0]({type:'PCMS_I01_WAKE'},trusted),undefined);
+  assert.equal(wake.getLocalReceipt().lastEvent,'message');
   f.listeners.alarm[0]({name:'another-alarm'});
-  assert.equal(wake.getLocalReceipt().eventCount,1);
+  assert.equal(wake.getLocalReceipt().eventCount,2);
   f.listeners.startup[0]();
   f.listeners.alarm[0]({name:WAKE_ALARM});
   assert.equal(wake.getLocalReceipt().lastEvent,'alarm');
@@ -131,10 +140,12 @@ test('P51-01 F negative: storage fail does not fake success or allow effect disp
   wake.register();
   f.listeners.alarm[0]({name:WAKE_ALARM});
   await new Promise(resolve=>setImmediate(resolve));
-  const status=f.listeners.message[0]({type:'PCMS_I01_STATUS'},
-    {id:f.api.runtime.id,url:f.api.runtime.getURL('pcms/index.html')});
-  assert.equal(status.healthStorage,'DEGRADED');
-  assert.equal(status.providerEffects,'OFF');
+  const replies=[];
+  f.listeners.connect[0]({name:'pcms-i01-health-readonly',
+    sender:{id:f.api.runtime.id,url:f.api.runtime.getURL('pcms/index.html')},
+    postMessage:reply=>replies.push(reply)});
+  assert.equal(replies[0].healthStorage,'DEGRADED');
+  assert.equal(replies[0].providerEffects,'OFF');
 });
 
 test('I01 static entry keeps donor gate first and overlay prevents separate native controller',async()=>{

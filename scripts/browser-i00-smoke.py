@@ -60,8 +60,9 @@ def execute(session, script):
 
 def guard_status(session):
     script = '''const done=arguments[arguments.length-1];
-    browser.runtime.sendMessage({type:'PCMS_I01_STATUS'})
-      .then(value=>done(value), error=>done({error:String(error)}));'''
+    const port=browser.runtime.connect({name:'pcms-i01-health-readonly'});
+    port.onMessage.addListener(value=>{try{port.disconnect()}catch(e){}done(value)});
+    port.onDisconnect.addListener(()=>done({error:'health-port-disconnected'}));'''
     return call('POST',f'/session/{session}/execute/async', {'script':script,'args':[]},timeout=30)
 
 

@@ -2,6 +2,7 @@
 // is permitted before registering these wake-critical Firefox listeners.
 import { getPcmsGuardHealth } from './persona-guard.mjs';
 export const WAKE_ALARM = 'pcms-i01-health';
+export const HEALTH_PORT = 'pcms-i01-health-readonly';
 const STORE_KEY = 'pcmsI01WakeHealth';
 
 function trustedStatusSender(api, sender) {
@@ -36,8 +37,7 @@ export function createWakeService(api, { health = getPcmsGuardHealth } = {}) {
     catch { storageFailure = true; }
   }
 
-  function onMessage(message, sender) {
-    if (message?.type !== 'PCMS_I01_STATUS') return undefined;
+  function statusFor(sender) {
     if (!trustedStatusSender(api, sender)) return { ok: false, code: 'UNTRUSTED_SENDER' };
     const guard = health();
     return {
@@ -48,10 +48,26 @@ export function createWakeService(api, { health = getPcmsGuardHealth } = {}) {
     };
   }
 
+  function onConnect(port) {
+    if (port?.name !== HEALTH_PORT) return;
+    const response = statusFor(port.sender);
+    try { port.postMessage(response); } catch { /* closed port is not authority */ }
+  }
+
+  function onMessage(message, sender) {
+    // No competing return value with the donor's async legacy switch. Read-only
+    // health uses an isolated port; unknown messages remain donor-owned.
+    if (message?.type !== 'PCMS_I01_WAKE') return undefined;
+    if (!trustedStatusSender(api, sender)) return undefined;
+    receipt('message');
+    return undefined;
+  }
+
   function register() {
     if (registered) return;
     // Listener registration is synchronous. Do not move behind an await.
     api.runtime.onMessage.addListener(onMessage);
+    api.runtime.onConnect.addListener(onConnect);
     api.runtime.onStartup.addListener(() => { receipt('startup'); alarmSchedule(); });
     api.runtime.onInstalled.addListener(() => { receipt('installed'); alarmSchedule(); });
     api.alarms.onAlarm.addListener(alarm => {
@@ -61,7 +77,7 @@ export function createWakeService(api, { health = getPcmsGuardHealth } = {}) {
     alarmSchedule(); // Firefox alarms do not persist across full restarts.
     receipt('entry');
   }
-  return Object.freeze({ register, onMessage, getLocalReceipt: () => ({
+  return Object.freeze({ register, onMessage, onConnect, getLocalReceipt: () => ({
     bootId, eventCount, lastEvent, storageFailure
   }) });
 }
