@@ -54,13 +54,12 @@ export function createSupplyBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,
   // Deliberately OFF in packaged extension. Tests must explicitly supply
   // an independently controlled synthetic gate and fake isolated executor.
-  effectGate=()=>false
+  effectGate=()=>false,
+  makeStores=db=>({supply:createSupplyStore(db),accounts:createAccountStore(db)})
 }={}){
   let dbPromise;
   const sentinel=createRestoreSentinel(api.storage.local);
-  const stores=()=>dbPromise ||=open().then(db=>({
-    supply:createSupplyStore(db),accounts:createAccountStore(db)
-  }));
+  const stores=()=>dbPromise ||=open().then(makeStores);
   async function frozenPlan(s,p,previewOnly){
     const current=await s.accounts.get(p.accountId);
     if(!current.ok)return current;
