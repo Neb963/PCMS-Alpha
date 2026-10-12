@@ -48,7 +48,7 @@ test('P52-01 F: isolated reader obtains real modeled session then per-target own
   const out=await run();
   assert.equal(out.ok,true);
   assert.equal(out.ownerReplies.length,2);
-  assert.deepEqual(out.ownerReplies.map(x=>x[1].body.status),['is-owner','is-not-owner']);
+  assert.deepEqual([...out.ownerReplies].map(x=>x[1].body.status),['is-owner','is-not-owner']);
   assert.deepEqual(ledger.map(x=>x.path),[
     'getGeneratorsByUser','checkGeneratorOwnership','checkGeneratorOwnership']);
   assert.equal(out.principalFingerprint.length,64);
