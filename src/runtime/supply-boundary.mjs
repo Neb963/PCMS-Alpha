@@ -125,13 +125,23 @@ export function createSupplyBoundary(api,{
     // The last admission/capability/guard check is made BEFORE effect marker.
     const now=await s.accounts.get(b.accountId);
     if(!now.ok||!validateOwnerContext(b,now.account).ok||
-       (await sentinel.inspect()).held)return fail('PREPARED_HELD');
+       (await sentinel.inspect()).held||
+       effectGate({account:now.account,batch:b,item})!==true)
+      return fail('PREPARED_HELD');
     const guardAgain=await g.getSafeRouteReadiness(b.personaUid);
     if(!guardAgain?.ready||guardAgain.cookieStoreId!==readiness.cookieStoreId||
        guardAgain.routeId!==readiness.routeId)return fail('PREPARED_HELD');
     at=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
       expectedRevision:at.item.revision,event:kind+'_DISPATCH_POSSIBLE'});
     if(!at.ok)return at;  // no remote call without COMMITTED marker
+    // A Pause or restore hold may arrive after journal commit but before
+    // actual dispatch. This is now an UNCERTAIN fence, never a fresh retry.
+    if(effectGate({account:now.account,batch:b,item})!==true||
+       (await sentinel.inspect()).held){
+      await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
+        expectedRevision:at.item.revision,event:kind+'_UNCERTAIN'});
+      return fail('HELD_BEFORE_DISPATCH');
+    }
     const params={
       kind,slug:item.requestedSlug,temporarySlug:item.temporarySlug,
       remoteId:item.remoteId,principalFingerprint:account.account.identity.principalFingerprint
@@ -268,10 +278,18 @@ export function createSupplyBoundary(api,{
     if(!at.ok)return at;
     const current=await s.accounts.get(b.accountId);
     if(!current.ok||!validateOwnerContext(b,current.account).ok||
-       (await sentinel.inspect()).held)return fail('PREPARED_HELD');
+       (await sentinel.inspect()).held||
+       gitGate({account:current.account,batch:b,item})!==true)
+      return fail('PREPARED_HELD');
     at=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
       expectedRevision:at.item.revision,event:'GIT_DISPATCH_POSSIBLE'});
     if(!at.ok)return at;
+    if(gitGate({account:current.account,batch:b,item})!==true||
+       (await sentinel.inspect()).held){
+      await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
+        expectedRevision:at.item.revision,event:'GIT_UNCERTAIN'});
+      return fail('GIT_HELD_BEFORE_DISPATCH');
+    }
     let proof;
     try{proof=await gitWrite(params);}catch{proof={ok:false};}
     if(!proof?.ok||proof.source!=='GIT_READBACK'||proof.ready!==false||
