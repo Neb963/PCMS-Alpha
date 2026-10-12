@@ -10,7 +10,7 @@ const account={accountId:'account_alpha_01',personaUid:'persona-aaaa-0001',
 const context={accountId:account.accountId,personaUid:account.personaUid,
   accountRevision:3,bindingVersion:1,principalFingerprint:account.identity.principalFingerprint,
   routeId:'route-safe',cookieStoreId:'firefox-container-1'};
-const entry={generatorName:'owned-gen',isPrivate:true};
+const entry={name:'owned-gen',isPrivate:true};
 const sessionReply={httpStatus:200,body:{status:'success',
   generators:[entry],generatorFolderMap:{}}};
 const ownerReplies=new Map([['owned-gen',{httpStatus:200,body:{status:'is-owner'}}]]);
