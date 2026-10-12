@@ -136,8 +136,13 @@ def observer_isolation_probe(session,extension_url):
               const {perchanceReadIsolated}=await import(
                 browser.runtime.getURL('pcms/perchance-observer.mjs'));
               const tabs=await browser.tabs.query({});
-              const target=tabs.find(t=>t.url===__FIXTURE_URL__);
-              if(!target){done({error:'FIXTURE_TAB_NOT_FOUND'});return;}
+              const expected=__FIXTURE_URL__;
+              const target=tabs.find(t=>t.url===expected ||
+                (typeof t.url==='string' && t.url.startsWith('file:') &&
+                  t.url.endsWith('/fixture.html')));
+              if(!target){done({error:'FIXTURE_TAB_NOT_FOUND',
+                tabs:tabs.map(t=>({url:t.url||'',status:t.status||''})),
+                expected});return;}
               const permissions=await browser.permissions.getAll();
               try {
                 const out=await browser.scripting.executeScript({
