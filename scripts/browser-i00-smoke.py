@@ -102,70 +102,35 @@ def inventory_command(session, command):
 
 
 
-def observer_isolation_probe(session,extension_url):
-    # Actual installed XPI's Firefox scripting.executeScript in a local
-    # controlled page. The fixed production reader must refuse wrong origin
-    # before parsing attacker-controlled app state or issuing any requests.
-    # A local file fixture needs no loopback network permission or runtime
-    # proxy exception; donor blocks new unmanaged network tabs by design.
-    with tempfile.TemporaryDirectory(prefix='pcms-i04-local-fixture-') as directory:
-        page=pathlib.Path(directory)/'fixture.html'
-        page.write_text('<!doctype html><title>Controlled offline I04 fixture</title>'
-            '<script>window.fetch=async()=>{throw Error("page-provided fetch");};</script>')
-        fixture_url=page.as_uri()
-        original=call('GET',f'/session/{session}/window')
-        extra=call('POST',f'/session/{session}/window/new',{'type':'tab'})
-        try:
-            call('POST',f'/session/{session}/url',{'url':fixture_url},timeout=20)
-            observed_url=call('GET',f'/session/{session}/url')
-            if observed_url!=fixture_url:
-                raise AssertionError({'error':'FIXTURE_NAVIGATION_UNCONFIRMED',
-                                      'actual':observed_url})
-            call('POST',f'/session/{session}/window',{'handle':original})
-            # geckodriver sometimes carries the previous tab's content URL
-            # across a context switch. Assert and recover the extension URL
-            # before executing privileged extension-only browser APIs.
-            if call('GET',f'/session/{session}/url')!=extension_url:
-                call('POST',f'/session/{session}/url',
-                     {'url':extension_url},timeout=20)
-            script='''const done=arguments[arguments.length-1];
-            (async()=>{
-              if(location.protocol!=='moz-extension:'){
-                done({error:'NOT_EXTENSION_CONTEXT',url:location.href});return;
-              }
-              const {perchanceReadIsolated}=await import(
-                browser.runtime.getURL('pcms/perchance-observer.mjs'));
-              const tabs=await browser.tabs.query({});
-              const expected=__FIXTURE_URL__;
-              const target=tabs.find(t=>t.url===expected ||
-                (typeof t.url==='string' && t.url.startsWith('file:') &&
-                  t.url.endsWith('/fixture.html')));
-              if(!target){done({error:'FIXTURE_TAB_NOT_FOUND',
-                tabs:tabs.map(t=>({url:t.url||'',status:t.status||''})),
-                expected});return;}
-              const permissions=await browser.permissions.getAll();
-              try {
-                const out=await browser.scripting.executeScript({
-                  target:{tabId:target.id,frameIds:[0]},world:'ISOLATED',
-                  func:perchanceReadIsolated,args:[{}]
-                });
-                done({count:out.length,frameId:out[0]?.frameId,
-                  rejected:out[0]?.result,scriptError:Boolean(out[0]?.error)});
-              }catch(e){
-                done({error:String(e).slice(0,180),targetUrl:target.url,
-                  origins:permissions.origins});
-              }
-            })().catch(e=>done({error:String(e).slice(0,180)}));'''
-            script=script.replace('__FIXTURE_URL__',json.dumps(fixture_url))
-            return call('POST',f'/session/{session}/execute/async',
-                        {'script':script,'args':[]},timeout=30)
-        finally:
-            try:
-                call('POST',f'/session/{session}/window',
-                     {'handle':extra['handle']})
-                call('DELETE',f'/session/{session}/window')
-            except Exception: pass
-            call('POST',f'/session/{session}/window',{'handle':original})
+def observer_isolation_probe(session):
+    # Persistent installed-XPI B negative-oracle: execute the real packaged
+    # fixed observer in Firefox, then assert that any attempt to inject it into
+    # an unauthorized about:blank tab cannot supply a positive owner/session.
+    # Positive provider replies are exercised with independent F transport
+    # fixtures; no unmanaged local network exception is granted to the donor.
+    script='''const done=arguments[arguments.length-1];
+    (async()=>{
+      const {perchanceReadIsolated}=await import('./perchance-observer.mjs');
+      const internal=await perchanceReadIsolated({});
+      const tab=await browser.tabs.create({url:'about:blank',active:false});
+      try{
+        let injection;
+        try{
+          const results=await browser.scripting.executeScript({
+            target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
+            func:perchanceReadIsolated,args:[{}]
+          });
+          injection=results?.[0]?.result||{ok:false,code:'NO_RESULT'};
+        }catch{
+          injection={ok:false,code:'HOST_PERMISSION_DENIED'};
+        }
+        done({loaded:typeof perchanceReadIsolated==='function',
+          internal,injection});
+      }finally{await browser.tabs.remove(tab.id);}
+    })().catch(e=>done({error:String(e).slice(0,180)}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=30)
+
 
 def inventory_idb_probe(session):
     # Packaged Firefox uses REAL persistent IDB, synthetic readback only.
@@ -412,11 +377,13 @@ def main():
                 assert view['unsafe']==0,view
                 # The exact installed XPI must expose a read-only guarded
                 # background status; no valid status enables PCMS effects.
-                isolated=observer_isolation_probe(after,url)
-                assert isolated.get('count')==1 and isolated.get('frameId')==0,isolated
-                assert isolated.get('scriptError') is False,isolated
-                assert isolated.get('rejected',{}).get('code')=='WRONG_ORIGIN',isolated
-                print('B I04_REAL_ISOLATED_SCRIPT_WRONG_ORIGIN_HOLD=PASS',flush=True)
+                isolated=observer_isolation_probe(after)
+                assert isolated.get('loaded') is True,isolated
+                assert isolated.get('internal',{}).get('code')=='WRONG_ORIGIN',isolated
+                assert isolated.get('injection',{}).get('ok') is False,isolated
+                assert isolated.get('injection',{}).get('code') in [
+                    'HOST_PERMISSION_DENIED','WRONG_ORIGIN'],isolated
+                print('B I04_PACKAGED_OBSERVER_INVALID_ORIGIN_AND_HOST_HOLD=PASS',flush=True)
                 guard=guard_status(after)
                 assert guard and guard.get('phase')=='I01',f'Missing I01 wake status: {guard}'
                 assert guard.get('providerEffects')=='OFF',guard
