@@ -84,6 +84,12 @@ test('P51-03 F: browser-supplied sender identity and command shape, denied mutat
   const ui={id:api.runtime.id,url:api.runtime.getURL('pcms/index.html')};
   const external={id:api.runtime.id,url:'https://perchance.org/pcms/index.html'};
   assert.equal(trustedExtensionPage(api,ui),true);
+  assert.equal(trustedExtensionPage(api,{...ui,url:ui.url+'#overview'}),true);
+  assert.equal(trustedExtensionPage(api,{...ui,url:ui.url+'#accounts'}),true);
+  assert.equal(trustedExtensionPage(api,{...ui,url:ui.url+'#work-queue'}),true);
+  assert.equal(trustedExtensionPage(api,{...ui,url:ui.url+'#settings/activate'}),false);
+  assert.equal(trustedExtensionPage(api,{...ui,url:ui.url+'?token=foo#overview'}),false);
+  assert.equal(trustedExtensionPage(api,{...ui,url:ui.url+'.other#overview'}),false);
   assert.equal(validateCommand(api,ui,{type:'HEALTH'}).ok,true);
   assert.equal(validateCommand(api,external,{type:'HEALTH'}).code,'UNTRUSTED_SENDER');
   assert.equal(validateCommand(api,{...ui,url:api.runtime.getURL('options/options.html')},{type:'HEALTH'}).code,'UNTRUSTED_SENDER');

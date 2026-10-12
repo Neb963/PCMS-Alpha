@@ -6,8 +6,15 @@ const SAFE_NAMES = new Set(['HEALTH','SUMMARY','GET_OPERATION','GET_NOTICES','IG
 export function trustedExtensionPage(api, sender) {
   if (sender?.id !== api.runtime.id || typeof sender.url !== 'string') return false;
   const base = api.runtime.getURL('pcms/');
-  return sender.url === base + 'index.html' ||
-    sender.url === base + 'emergency.html';
+  const index = base + 'index.html';
+  if (sender.url === index || sender.url === base + 'emergency.html') return true;
+  // Firefox sender.url includes the same-origin dashboard fragment. Validate
+  // only the known six navigable hash routes, never a string-prefix query,
+  // unknown view or another extension URL.
+  if (!sender.url.startsWith(index + '#')) return false;
+  const hash = sender.url.slice(index.length + 1);
+  return new Set(['overview','generators','work-queue','accounts',
+    'refresher','settings']).has(hash);
 }
 export function validateCommand(api, sender, message) {
   if (!trustedExtensionPage(api, sender)) return fail('UNTRUSTED_SENDER');
