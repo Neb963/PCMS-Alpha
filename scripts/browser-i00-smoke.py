@@ -152,6 +152,7 @@ def source_idb_probe(session):
       const {createAccountStore}=await import('./accounts.mjs');
       const {openCanonicalDatabase}=await import('./journal.mjs');
       const canon=await openCanonicalDatabase();
+      drift=false; // Eliminate source drift so the negative oracle isolates the identity fence.
       const rotate=await createAccountStore(canon).apply({
         type:'VERIFY',accountId:'fixture_inventory_01',expectedRevision:2,
         proof:{source:'GUARDED_SESSION_READBACK',verified:true,
