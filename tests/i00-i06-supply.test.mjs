@@ -93,6 +93,25 @@ test('P56-06 F: lost response and crash never return to dispatchable state',()=>
     privateEmpty:true,ownerMatches:false,remoteId:'remote_aaaa_0001',
     slug:'alpha-slug',previousSlug:'temp-1234'}).code,'INDEPENDENT_RENAME_PROOF_REQUIRED');
 });
+test('P51-04/P52-02 F: PREPARED abort is reversible; POSSIBLE dispatch cannot cancel',()=>{
+  let item=plan().batch.items[0];
+  item=step(item,'CREATE_PREPARED',{operationId:'aborted_create_01'});
+  item=step(item,'ABORT_PREPARED');
+  assert.equal(item.state,'FROZEN');
+  item=step(item,'CREATE_PREPARED',{operationId:'new_create_0001'});
+  item=step(item,'CREATE_DISPATCH_POSSIBLE');
+  assert.equal(moveSupply(item,'ABORT_PREPARED').code,'CANNOT_ABORT_POSSIBLE_EFFECT');
+  item=step(item,'CREATE_OBSERVING');
+  item=step(item,'CREATE_CONFIRMED',{source:'INDEPENDENT_READBACK',
+    privateEmpty:true,ownerMatches:true,remoteId:'remote_aborted_01',
+    temporarySlug:'temp-a'});
+  item=step(item,'RENAME_PREPARED',{operationId:'aborted_rename_01'});
+  item=step(item,'ABORT_PREPARED');
+  assert.equal(item.state,'CREATE_CONFIRMED');
+  item=step(item,'RENAME_PREPARED',{operationId:'new_rename_0001'});
+  item=step(item,'RENAME_DISPATCH_POSSIBLE');
+  assert.equal(moveSupply(item,'ABORT_PREPARED').code,'CANNOT_ABORT_POSSIBLE_EFFECT');
+});
 test('S6-I06-ALLOCATION: bad identifiers, noncanonical names and invalid state fail closed',()=>{
   for(const slug of ['a'.repeat(101),'../escape','UPPER', ' leading','  ','áaaa']){
     assert.equal(plan([slug]).batch.items[0].state,'REJECTED',slug);
