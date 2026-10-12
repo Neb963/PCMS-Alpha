@@ -121,6 +121,14 @@ export function createInventoryStore(db) {
             current.personaUid!==account.personaUid ||
             current.identity?.principalFingerprint!==account.identity.principalFingerprint ||
             current.state!=='VERIFIED') {finish(fail('ACCOUNT_CONTEXT_CHANGED'));return;}
+        // Monotone per-account observation watermark prevents a slow older
+        // response or replay from overwriting a newer complete snapshot.
+        meta.get('inventory-batch:'+account.accountId).onsuccess=mark=>{
+          const last=mark.target.result;
+          if(last && (observation.observedAt<=last.observedAt ||
+              observation.observationId===last.observationId)){
+            finish(fail('STALE_OR_REPLAYED_OBSERVATION'));return;
+          }
         meta.openCursor().onsuccess=c=>{
           const row=c.target.result;
           if(row){
@@ -136,6 +144,8 @@ export function createInventoryStore(db) {
             if (!original || JSON.stringify(original)!==JSON.stringify(value))
               meta.put({key:inventoryKey(value.slug),generator:value});
           }
+          meta.put({key:'inventory-batch:'+account.accountId,
+            observedAt:observation.observedAt,observationId:observation.observationId});
           tx.objectStore('events').add({
             stage:'INVENTORY_OBSERVED',accountId:account.accountId,
             observationId:observation.observationId,entries:preliminary.items.length,
@@ -143,6 +153,7 @@ export function createInventoryStore(db) {
           });
           finish({ok:true,observed:preliminary.items.length,
             conflicts:outcome.incidents.length,held:outcome.incidents.length>0});
+        };
         };
       };
     });

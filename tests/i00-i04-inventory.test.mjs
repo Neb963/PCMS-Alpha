@@ -122,7 +122,7 @@ test('P51-03 I04 F: page cannot smuggle provider ownership or unlimited search',
   }}).ok,true);
   assert.equal(validateInventoryMessage(api,sender,{type:'SYNC_ACCOUNT',params:{
     accountId:account.accountId,expectedRevision:3,proof:batch([])
-  }}).code,'INVALID_MESSAGE');
+  }}).code,'INVALID_PARAMS');
   assert.equal(validateInventoryMessage(api,sender,{type:'LIST_INVENTORY',
     params:{query:'a'.repeat(81)}}).code,'INVALID_PARAMS');
   assert.equal(validateInventoryMessage(api,{id:'other',url:sender.url},
