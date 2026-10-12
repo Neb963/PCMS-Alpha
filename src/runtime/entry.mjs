@@ -8,3 +8,5 @@ import './command-boundary.mjs';
 import './account-boundary.mjs';
 // I04 read-only inventory and durable local observation registration.
 import './inventory-boundary.mjs';
+// Operator-triggered read-only private Git inspection and canonical mapping.
+import './source-boundary.mjs';

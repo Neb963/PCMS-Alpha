@@ -57,7 +57,13 @@ function draw(items) {
       showCounter();
     });
     const first=document.createElement('td');
-    first.append(pick,document.createTextNode(' '+item.slug));
+    first.append(pick,document.createTextNode(' '+item.slug+' '));
+    const sourcePick=document.createElement('button');
+    sourcePick.type='button';sourcePick.textContent='Source';
+    sourcePick.setAttribute('aria-label','Inspect Git source for '+item.slug);
+    sourcePick.addEventListener('click',()=>window.dispatchEvent(
+      new CustomEvent('pcms-source-target',{detail:{slug:item.slug,revision:item.revision}})));
+    first.append(sourcePick);
     cells.push(first);
     for(const value of [item.accountId, labels[item.ownerState]||'Evidence unknown',
        (item.visibility||'UNKNOWN')+' · '+(item.source||'SOURCE_PENDING')]) {

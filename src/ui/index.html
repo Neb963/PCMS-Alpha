@@ -28,7 +28,7 @@
       <p class="sidebar-note">Provider, Git source and scheduler effects remain disabled.</p>
     </aside>
     <main id="main" tabindex="-1" aria-label="Current PCMS workspace">
-      <div class="system-status" role="status" aria-live="polite" id="navigation-status">I04 · Read-only inventory · Provider effects OFF</div>
+      <div class="system-status" role="status" aria-live="polite" id="navigation-status">I05 · Source inspection · Provider effects OFF</div>
       <div id="unknown-route" class="notice" role="status" hidden>Unknown workspace. Showing Overview without changing any data.</div>
       <section class="workspace" id="view-overview" data-view="overview" aria-labelledby="heading-overview">
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 01</p><h1 id="heading-overview" tabindex="-1">Overview</h1><p>Local inventory and guarded read-only account state. Provider writes remain disabled.</p></div></header>
@@ -48,6 +48,22 @@
           <div class="table-wrap" role="region" aria-label="Generator inventory results" tabindex="0"><table><thead><tr><th scope="col">Generator</th><th scope="col">Account binding</th><th scope="col">Owner evidence</th><th scope="col">Visibility / source</th></tr></thead><tbody id="pcms-generators-rows"><tr><td colspan="4" class="empty">Loading canonical inventory.</td></tr></tbody></table></div>
           <div class="account-controls"><span id="pcms-generator-count" role="status">No verified rows</span><button type="button" id="pcms-generator-prev" disabled>Previous page</button><button type="button" id="pcms-generator-next" disabled>Next page</button></div>
           <p id="blocked-generators" class="reason">Reservation, adoption and provider writes are disabled. Read-only Sync uses the existing donor-guarded isolated browser observer and can hold on an unavailable or changed session. Edit keys and collaboration cannot prove ownership; historical observations never authorize writes. Missing generator observations never mean deletion.</p></section>
+        <section class="panel" aria-labelledby="pcms-source-heading">
+          <div class="panel-head"><h2 id="pcms-source-heading">Private Git source — read only</h2><span class="unknown">Operator-triggered</span></div>
+          <p class="reason">Inspect only <code>Neb963/per-gens</code> <code>main</code>. Requires a fine-grained GitHub token with Contents: Read-only, entered for this operation; token is never saved. No remote Git initialization, commit, asset rewrite or publication is available.</p>
+          <div class="account-controls"><label for="pcms-source-target">Generator</label>
+            <input id="pcms-source-target" readonly placeholder="Choose a generator from inventory" aria-describedby="pcms-source-status">
+            <label for="pcms-source-folder">Source folder</label><input id="pcms-source-folder" placeholder="gens/example or another configured root" maxlength="240" autocomplete="off">
+          </div>
+          <div class="account-controls"><label for="pcms-source-token">Read-only GitHub token</label>
+            <input id="pcms-source-token" type="password" autocomplete="off" spellcheck="false" placeholder="Not stored">
+            <button type="button" id="pcms-source-clear">Clear token</button>
+            <button type="button" id="pcms-source-inspect">Inspect HEAD</button>
+            <button type="button" id="pcms-source-associate" disabled>Confirm association</button>
+            <button type="button" id="pcms-source-recheck" disabled>Recheck linked source</button></div>
+          <p id="pcms-source-status" role="status" aria-live="polite">Select a generator with “Source” in its inventory row; inspect a folder before confirming association. Source readiness does not authorize deployment.</p>
+          <div id="pcms-source-files" class="table-wrap" role="region" aria-label="Pinned Git source file inventory" tabindex="0"></div>
+        </section>
       </section>
       <section class="workspace" id="view-work-queue" data-view="work-queue" aria-labelledby="heading-work-queue" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 03</p><h1 id="heading-work-queue" tabindex="-1">Work Queue</h1><p>Evidence-backed operator decisions and task receipts.</p></div><button type="button" disabled aria-describedby="blocked-work-queue">Start action</button></header>
@@ -82,12 +98,13 @@
         <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">All off</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Off — not implemented</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup, restore and AI tests</dt><dd>Off — not implemented</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No provider settings or operation commands can be changed here. PersonaMonkey retains advanced security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
       </section>
     </main>
-    <footer class="footer"><span>PCMS Alpha · Stage I04</span><span>UI navigation available · PCMS side effects disabled</span></footer>
+    <footer class="footer"><span>PCMS Alpha · Stage I05</span><span>UI navigation available · PCMS side effects disabled</span></footer>
   </div>
   <script type="module" src="shell.mjs"></script>
   <script type="module" src="health.mjs"></script>
   <script type="module" src="operations.mjs"></script>
   <script type="module" src="accounts-view.mjs"></script>
   <script type="module" src="inventory-view.mjs"></script>
+  <script type="module" src="source-view.mjs"></script>
 </body>
 </html>

@@ -1,0 +1,46 @@
+{
+  "phaseId": "I05",
+  "planRevision": "S7-AUDITED-DESIGN-1",
+  "proposedDisposition": "SCOPED_F_B_IMPLEMENTATION_COMPLETE_IF_PROVEN_ON_PROTECTED_MAIN",
+  "claim": "Operator-triggered read-only GitHub main/READY inspection and explicit canonical one-to-one generator↔source folder association with byte-exact manifest, pinned TESTING, independent relevant HEAD drift reconciliation and scoped holds; private source/live provider capabilities not activated.",
+  "requiredAssertions": [
+    "P53-01",
+    "P53-02",
+    "P53-03",
+    "S6-I05-EMPTY-GIT",
+    "S6-I05-ASSOCIATION",
+    "UX-04",
+    "UX-05",
+    "REQ-G06",
+    "REQ-G09",
+    "REQ-G10"
+  ],
+  "evidenceTierNotes": {
+    "F": "Synthetic Git DAG and independent effect ledger prove empty main no init, path/symlink/submodule/case validation, actual blob identity, binary source manifest, strict READY and test pinning, relevant/unrelated HEAD and revocation. Previous F/donor regressions; final candidate CI required.",
+    "B": "Actual persistent installed combined XPI in disposable Firefox Developer Edition 154.0b10 profile: same extension origin source port, real IndexedDB unique source association/target revision identity rotation holds, read-only and disabled write, retained I00–I04 wake/browser regressions. Git inspection is synthetic/offline; live private Git read not claimed.",
+    "X": "NOT_RUN separately; later cross-system provider/Git fault-chain acceptance remains pending.",
+    "H": "NOT_RUN; no real Perchance credentials, private per-gens access or operator-owned source verification authorized."
+  },
+  "capabilities": {
+    "gitInspector": "READ_ONLY_ON_DEMAND; PRIVATE_REPO_ACCESS_NOT_TESTED",
+    "canonicalSourceAssociation": "LOCAL_METADATA_ONLY; EXPLICIT_AND_REVISION_FENCED",
+    "ready": "HISTORICAL_PINNED_GIT_EVIDENCE_ONLY",
+    "providerWrites": "OFF",
+    "sourceGitWrites": "OFF",
+    "privateGitInitialization": "OFF",
+    "reservations": "OFF",
+    "ai": "OFF",
+    "refresherMutations": "OFF",
+    "publishing": "OFF",
+    "donorRouteControl": "UNCHANGED",
+    "liveProviderAcceptance": "NOT_CLAIMED"
+  },
+  "holds": [
+    "An empty or unavailable per-gens/main is GITHUB_UNINITIALIZED/SOURCE_PENDING, never READY. No initialization was attempted.",
+    "Only an explicit operator-provided read-only token may initiate private Git inspection. No live private source or active GitHub credential was checked.",
+    "Stale account identity, duplicated folder, source drift, malformed/partial blobs, missing READY or uncertain Git errors produce scoped holds and cannot grant downstream effects.",
+    "No application Git or Perchance remote writes, CI security/trust-root modifications, or provider live validation occurred.",
+    "Full cross-system X and late operator H acceptance remain distinct and are NOT_RUN; implementation F/B is not live provider/source proof."
+  ],
+  "provenance": "Completion proposal intentionally excludes its own branch/head, CI job, future merge SHA or XPI hash; corroborate using verified immutable current candidate GitHub CI and postmerge main evidence."
+}

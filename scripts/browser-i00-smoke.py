@@ -102,6 +102,72 @@ def inventory_command(session, command):
 
 
 
+
+
+def source_command(session, command):
+    # Actual packaged extension port, no Git credentials or external requests.
+    script = '''const done=arguments[arguments.length-1];
+    const port=browser.runtime.connect({name:'pcms-i05-source'});
+    port.onMessage.addListener(value=>{try{port.disconnect()}catch(e){}done(value)});
+    port.onDisconnect.addListener(()=>done({error:'source-disconnected'}));
+    port.postMessage(COMMAND);'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script.replace('COMMAND',json.dumps(command)),'args':[]},timeout=30)
+
+
+def source_idb_probe(session):
+    # A real packaged Firefox IDB transaction with an injected synthetic Git
+    # snapshot. No live GitHub/per-gens request. F tests own Git byte semantics.
+    script = '''const done=arguments[arguments.length-1];
+    (async()=>{
+      const {createSourceBoundary}=await import('./source-boundary.mjs');
+      const api={runtime:browser.runtime,storage:browser.storage};
+      const sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')+'#generators'};
+      let drift=false;
+      const inspect=async ({folder})=>({
+        ok:true,ready:true,folder,head:'b'.repeat(40),testingSha:null,
+        fingerprint:drift?'c'.repeat(64):'a'.repeat(64),source:'READY'
+      });
+      const boundary=createSourceBoundary(api,{inspect});
+      const get=(slug)=>boundary.run({type:'GET_ASSOCIATION',params:{slug}},sender);
+      const bind=(slug)=>boundary.run({type:'ASSOCIATE_SOURCE',params:{
+        slug,folder:'gens/a',token:'offline-fixture-token',expectedRevision:1,
+        pinnedHead:'b'.repeat(40),pinnedFingerprint:'a'.repeat(64),
+        pinnedTestingSha:null
+      }},sender);
+      const before=await get('gen-0999');
+      const created=await bind('gen-0999');
+      const duplicate=await bind('gen-0999');
+      const collision=await bind('gen-0998');
+      const linked=await get('gen-0999');
+      const equal=await boundary.run({type:'RECHECK_SOURCE',params:{
+        slug:'gen-0999',token:'offline-fixture-token'
+      }},sender);
+      drift=true;
+      const changed=await boundary.run({type:'RECHECK_SOURCE',params:{
+        slug:'gen-0999',token:'offline-fixture-token'
+      }},sender);
+      // Revise the actual account identity in Firefox IDB, leaving the old
+      // owner inventory snapshot intact. Source association must hold.
+      const {createAccountStore}=await import('./accounts.mjs');
+      const {openCanonicalDatabase}=await import('./journal.mjs');
+      const canon=await openCanonicalDatabase();
+      drift=false; // Eliminate source drift so the negative oracle isolates the identity fence.
+      const rotate=await createAccountStore(canon).apply({
+        type:'VERIFY',accountId:'fixture_inventory_01',expectedRevision:2,
+        proof:{source:'GUARDED_SESSION_READBACK',verified:true,
+          personaUid:'persona-fixture-0001',principalFingerprint:'b'.repeat(64),
+          observationId:'fixture_identity_rotated_01'}
+      });
+      canon.close();
+      const stale=await get('gen-0999');
+      const newBind=await bind('gen-0997');
+      done({before,created,duplicate,collision,linked,equal,changed,rotate,stale,newBind});
+    })().catch(e=>done({error:'I05_REAL_IDB_PROBE_FAILED',detail:String(e).slice(0,130)}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=45)
+
+
 def observer_isolation_probe(session):
     # Persistent installed-XPI B negative-oracle: execute the real packaged
     # fixed observer in Firefox, then assert that any attempt to inject it into
@@ -446,6 +512,35 @@ def main():
                     time.sleep(.15)
                 assert '51–100' in pagination,pagination
                 print('B I04_REAL_IDB_1250_FILTER_PAGINATION_OWNER_HOLD=PASS',flush=True)
+
+                # I05: real permanently installed XPI source port and canonical
+                # association; synthetic inspection only, zero private Git reads.
+                unknown=source_command(after,{'type':'GET_ASSOCIATION','params':{'slug':'gen-0999'}})
+                assert unknown.get('code')=='SOURCE_PENDING',unknown
+                denied=source_command(after,{'type':'INSPECT_SOURCE','params':{
+                    'folder':'gens/a','token':'short'}})
+                assert denied.get('code')=='GITHUB_ACCESS_REQUIRED',denied
+                no_write=source_command(after,{'type':'GIT_WRITE','params':{}})
+                assert no_write.get('code')=='CAPABILITY_OFF',no_write
+                scoped=source_idb_probe(after)
+                assert scoped.get('before',{}).get('code')=='SOURCE_PENDING',scoped
+                assert scoped.get('created',{}).get('associated') is True,scoped
+                assert scoped.get('duplicate',{}).get('duplicate') is True,scoped
+                assert scoped.get('collision',{}).get('code')=='SOURCE_ASSOCIATION_CONFLICT',scoped
+                assert scoped.get('linked',{}).get('link',{}).get('folder')=='gens/a',scoped
+                assert scoped.get('equal',{}).get('code')=='SOURCE_EQUIVALENT',scoped
+                assert scoped.get('changed',{}).get('code')=='SOURCE_DRIFT',scoped
+                assert scoped.get('rotate',{}).get('ok') is True,scoped
+                assert scoped.get('stale',{}).get('code')=='SOURCE_ASSOCIATION_STALE',scoped
+                assert scoped.get('newBind',{}).get('code')=='ACCOUNT_CONTEXT_CHANGED',scoped
+                real_link=source_command(after,{'type':'GET_ASSOCIATION','params':{'slug':'gen-0999'}})
+                assert real_link.get('code')=='SOURCE_ASSOCIATION_STALE',real_link
+                view=execute(after,"return {present:!!document.getElementById('pcms-source-token'),"
+                    "button:document.getElementById('pcms-source-associate')?.disabled,"
+                    "saved:document.getElementById('pcms-source-token')?.value}")
+                assert view=={'present':True,'button':True,'saved':''},view
+                print('B I05_REAL_IDB_ASSOCIATION_COLLISION_DRIFT_ZERO_GIT_EFFECTS=PASS',flush=True)
+
                 synthetic=canonical_probe(after)
                 assert synthetic.get('created',{}).get('ok') is True,synthetic
                 assert synthetic.get('prepared',{}).get('operation',{}).get('status')=='PREPARED',synthetic
