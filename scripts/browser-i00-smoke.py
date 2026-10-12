@@ -47,7 +47,8 @@ def open_session(firefox, profile):
         'moz:firefoxOptions':{
             'binary':str(firefox),
             'args':['-headless', '-no-remote', '-profile',str(profile)],
-            'prefs':{'xpinstall.signatures.required':False,'extensions.autoDisableScopes':0}
+            'prefs':{'xpinstall.signatures.required':False,'extensions.autoDisableScopes':0,
+                     'extensions.background.idle.timeout':1500}
         }
     }}}, timeout=60)
     return data['sessionId'] if 'sessionId' in data else data['value']['sessionId']
@@ -55,6 +56,31 @@ def open_session(firefox, profile):
 
 def execute(session, script):
     return call('POST',f'/session/{session}/execute/sync', {'script':script,'args':[]}, timeout=30)
+
+
+def guard_status(session):
+    script = '''const done=arguments[arguments.length-1];
+    const port=browser.runtime.connect({name:'pcms-i01-health-readonly'});
+    port.onMessage.addListener(value=>{try{port.disconnect()}catch(e){}done(value)});
+    port.onDisconnect.addListener(()=>done({error:'health-port-disconnected'}));'''
+    return call('POST',f'/session/{session}/execute/async', {'script':script,'args':[]},timeout=30)
+
+
+def storage_alarm_count(session):
+    script = '''const done=arguments[arguments.length-1];
+    browser.storage.local.get('pcmsI01WakeHealth')
+      .then(value=>done(value.pcmsI01WakeHealth?.alarmCount??0),
+            error=>done({error:String(error)}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=30)
+
+
+def schedule_test_alarm(session):
+    script = '''const done=arguments[arguments.length-1];
+    browser.alarms.create('pcms-i01-health',{when:Date.now()+6000})
+      .then(()=>done(true),error=>done({error:String(error)}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=30)
 
 
 def close(session):
@@ -115,6 +141,34 @@ def main():
                 assert view['selected']==['overview'],view
                 assert view['links']==['#overview','#generators','#work-queue','#accounts','#refresher','#settings'],view
                 assert view['enabled']==0,view
+                # The exact installed XPI must expose a read-only guarded
+                # background status; no valid status enables PCMS effects.
+                guard=guard_status(after)
+                assert guard and guard.get('phase')=='I01',f'Missing I01 wake status: {guard}'
+                assert guard.get('providerEffects')=='OFF',guard
+                boot_before=guard['bootId']
+                print('B I01_WAKE_STATUS_INITIAL=',guard,flush=True)
+                # Construct the alarm in an isolated disposable Firefox profile,
+                # then remove the PCMS UI while the event page is suspended.
+                # The persisted counter is independent of transient callbacks.
+                alarm_before=storage_alarm_count(after)
+                assert isinstance(alarm_before,int),alarm_before
+                assert schedule_test_alarm(after) is True
+                call('POST',f'/session/{after}/url',{'url':'about:blank'})
+                time.sleep(14)
+                call('POST',f'/session/{after}/url',{'url':url})
+                guard_after=guard_status(after)
+                alarm_after=storage_alarm_count(after)
+                assert isinstance(alarm_after,int),alarm_after
+                assert alarm_after>alarm_before,(
+                    'No persisted real Firefox alarm delivery',alarm_before,alarm_after)
+                print('B I01_REAL_ALARM_WAKE=PASS alarm count',
+                      alarm_before,'->',alarm_after,flush=True)
+                assert guard_after and guard_after.get('providerEffects')=='OFF',guard_after
+                assert guard_after.get('bootId')!=boot_before,(
+                    'Background did not demonstrably suspend/restart during idle',guard,guard_after)
+                print('B I01_EVENT_PAGE_COLD_WAKE=PASS before=',boot_before,
+                      'after=',guard_after['bootId'],flush=True)
                 call('POST',f'/session/{after}/url',{'url':url+'#accounts'})
                 view=execute(after,"return {selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view),active:document.querySelector('[aria-current=page]')?.dataset.workspace,blocked:document.querySelector('#view-accounts button')?.disabled}")
                 assert view=={'selected':['accounts'],'active':'accounts','blocked':True},view
