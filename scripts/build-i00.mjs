@@ -1,5 +1,6 @@
 import { cp, mkdir, readFile, rm, writeFile, stat } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
+import { verifyDonor } from './verify-donor.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,10 +13,8 @@ const PIN = '9995f6eadfa54be6cc0001f4e04f2a2d9b9401bf';
 const ID = 'persona-route-manager@local';
 
 export async function buildI00({ packageArchive = true } = {}) {
-  let actual;
-  try { actual = execFileSync('git', ['-C', donor, 'rev-parse', 'HEAD'], { encoding:'utf8' }).trim(); }
-  catch { throw new Error('Pinned donor submodule missing. Run git submodule update --init --recursive.'); }
-  if (actual !== PIN) throw new Error(`Donor SHA mismatch: ${actual}; required ${PIN}`);
+  // Verify all original donor bytes, modes and canonical pinned Git tree.
+  await verifyDonor();
   await stat(path.join(donor, 'LICENSE'));
   await rm(stage, {recursive:true,force:true});
   await mkdir(stage,{recursive:true});
