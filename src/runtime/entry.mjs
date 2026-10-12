@@ -6,3 +6,5 @@ import './wake.mjs';
 import './command-boundary.mjs';
 // I03 listeners are registered in the synchronous entry evaluation path.
 import './account-boundary.mjs';
+// I04 read-only inventory and durable local observation registration.
+import './inventory-boundary.mjs';
