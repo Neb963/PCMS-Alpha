@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 from urllib.parse import urlparse
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 ID = 'persona-route-manager@local'
@@ -22,8 +23,19 @@ HOST = f'http://127.0.0.1:{PORT}'
 def call(method, route, payload=None, timeout=30):
     b = json.dumps(payload).encode() if payload is not None else None
     req = Request(HOST + route, data=b, method=method, headers={'Content-Type':'application/json'})
-    with urlopen(req, timeout=timeout) as response:
-        body = json.loads(response.read())
+    try:
+        with urlopen(req, timeout=timeout) as response:
+            body = json.loads(response.read())
+    except HTTPError as exc:
+        # The original harness discarded the WebDriver W3C error payload,
+        # making Firefox product failures indistinguishable from harness defects.
+        raw = exc.read(8192).decode('utf-8', errors='replace')
+        try:
+            detail = json.loads(raw).get('value', {})
+            summary = {'error': detail.get('error'), 'message': detail.get('message')}
+        except (ValueError, AttributeError):
+            summary = {'response': raw[:1800]}
+        raise RuntimeError('WebDriver '+method+' '+route+' HTTP '+str(exc.code)+': '+json.dumps(summary)[:2400]) from exc
     if body.get('value') and isinstance(body['value'], dict) and body['value'].get('error'):
         raise RuntimeError(body['value'])
     return body.get('value')
@@ -90,6 +102,7 @@ def main():
             after=open_session(browser,profile)
             try:
                 uuid=addons_uuid(profile)
+                print('B RESTARTED_ADDON_UUID_PRESENT=', bool(uuid), flush=True)
                 url=f'moz-extension://{uuid}/pcms/index.html'
                 call('POST',f'/session/{after}/url',{'url':url},timeout=30)
                 for _ in range(40):
