@@ -45,8 +45,8 @@ test('new PCMS actions remain disabled, without network or browser mutation APIs
   assert.match(html, /id="pcms-enroll" disabled/);
   assert.match(html, /id="pcms-create-persona" disabled/);
   assert.match(html, /id="pcms-accounts-list"/);
-  assert.match(html, /accounts-view\\.mjs/);
-  assert.match(html, /inventory-view\\.mjs/);
+  assert.match(html, /accounts-view\.mjs/);
+  assert.match(html, /inventory-view\.mjs/);
   for (const name of ['Reserve generator','Start action','Start refresh'])
     assert.match(html, new RegExp('<button[^>]*disabled[^>]*>'+name+'</button>'));
 
