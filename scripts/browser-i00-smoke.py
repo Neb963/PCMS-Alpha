@@ -128,13 +128,17 @@ def observer_isolation_probe(session):
           const {perchanceReadIsolated}=await import('./perchance-observer.mjs');
           const tab=await browser.tabs.create({url:FIXTURE,active:false});
           try {
-            for(let k=0;k<30;k++){
-              const current=await browser.tabs.get(tab.id);
-              if(current.status==='complete')break;
+            let target;
+            for(let k=0;k<60;k++){
+              target=await browser.tabs.get(tab.id);
+              if(target.url===FIXTURE&&target.status==='complete')break;
               await new Promise(r=>setTimeout(r,100));
             }
+            if(target.url!==FIXTURE||target.status!=='complete'){
+              done({error:'FIXTURE_NAVIGATION_UNCONFIRMED',
+                targetUrl:target.url,targetStatus:target.status});return;
+            }
             const permissions=await browser.permissions.getAll();
-            const target=await browser.tabs.get(tab.id);
             let out;
             try{
               out=await browser.scripting.executeScript({
