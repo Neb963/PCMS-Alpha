@@ -4,7 +4,8 @@ let installed = null;
 const HOLD = code => Object.freeze({ ready: false, code });
 const BAD_PROXY = new Set(['controlled_by_other_extensions', 'not_controllable']);
 
-export function createPersonaGuard({ initialize, securityState, shared, getRouteTest }) {
+export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
+  listPersonas, listProtectedRoutes, createPersona, openHumanLogin }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -85,7 +86,59 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     catch { return HOLD('LEASE_ALREADY_LOST'); }
   }
 
+  async function listAvailablePersonas() {
+    try {
+      await initialize();
+      if (typeof listPersonas !== 'function') return [];
+      const items = await listPersonas();
+      if (!Array.isArray(items) || items.length > 1000) return [];
+      return items.filter(p => typeof p?.personaUid === 'string' &&
+        /^[a-z0-9-]{8,128}$/i.test(p.personaUid)).map(p=>({
+        personaUid:p.personaUid, name:String(p.name||'Persona').slice(0,64),
+        archived:p.archived===true, routeProtected:p.routeProtected===true
+      }));
+    } catch { return []; }
+  }
+  async function availableRoutes() {
+    try {
+      await initialize();
+      if(typeof listProtectedRoutes!=='function')return [];
+      const list=await listProtectedRoutes();
+      return Array.isArray(list) ? list.slice(0,128)
+        .filter(r=>typeof r?.routeId==='string' && /^[a-z0-9_-]{1,128}$/i.test(r.routeId))
+        .map(r=>({routeId:r.routeId,name:String(r.name||'Protected route').slice(0,64)})) : [];
+    }catch {return [];}
+  }
+  async function createProtectedPersona(name, routeId) {
+    if (typeof name!=='string'||!name.trim()||name.length>64 ||
+        typeof routeId!=='string' || !/^[a-z0-9_-]{1,128}$/i.test(routeId))
+      return {ok:false,code:'INVALID_PERSONA_CREATE'};
+    try {
+      await initialize();
+      if(securityState.ready!==true || securityState.privacySafe!==true ||
+          BAD_PROXY.has(securityState.proxyControl)) return {ok:false,code:'DONOR_SECURITY_UNAVAILABLE'};
+      if(!(await availableRoutes()).some(r=>r.routeId===routeId))
+        return {ok:false,code:'PROTECTED_ROUTE_UNAVAILABLE'};
+      if(typeof createPersona!=='function')return {ok:false,code:'DONOR_PERSONA_CREATE_UNAVAILABLE'};
+      await createPersona({name:name.trim(),routeId});
+      return {ok:true,created:true,providerEffects:'OFF'};
+    }catch {return {ok:false,code:'PERSONA_CREATE_UNCONFIRMED'};}
+  }
+  async function openLogin(personaUid) {
+    const before=await inspect(personaUid);
+    if(!before.ready)return {ok:false,code:before.code};
+    if(typeof openHumanLogin!=='function')return {ok:false,code:'DONOR_TAB_OPEN_UNAVAILABLE'};
+    try {
+      await openHumanLogin(before);
+      return {ok:true,opened:true,kind:'HUMAN_LOGIN_ONLY'};
+    }catch{return {ok:false,code:'HUMAN_TAB_OPEN_UNCONFIRMED'};}
+  }
+
   return Object.freeze({
+    listAvailablePersonas,
+    listProtectedRoutes: availableRoutes,
+    createProtectedPersona,
+    openHumanLogin: openLogin,
     resolveUid: inspect,
     getSafeRouteReadiness: inspect,
     acquireConflictGuard,
