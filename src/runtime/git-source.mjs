@@ -27,7 +27,7 @@ async function digest(bytes) {
     .map(x=>x.toString(16).padStart(2,'0')).join('');
 }
 async function verifyGitBlob(bytes, expected) {
-  const head=new TextEncoder().encode('blob '+bytes.length+'\\0');
+  const head=new TextEncoder().encode('blob '+bytes.length+'\0');
   const combined=new Uint8Array(head.length+bytes.length);
   combined.set(head);combined.set(bytes,head.length);
   const actual=[...new Uint8Array(await crypto.subtle.digest('SHA-1',combined))]
