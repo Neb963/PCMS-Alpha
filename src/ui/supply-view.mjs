@@ -69,6 +69,30 @@ function drawQueue(result){
       const li=document.createElement('li');
       li.textContent=item.slug+' — '+item.state+(item.reason?' ('+item.reason+')':'')+
         ' · '+item.source;
+      if(['CREATE_UNCERTAIN','RENAME_UNCERTAIN',
+          'CREATE_DISPATCH_POSSIBLE','RENAME_DISPATCH_POSSIBLE'].includes(item.state)){
+        const action=document.createElement('button');
+        action.type='button';action.textContent='Reconcile read-only';
+        action.setAttribute('aria-label','Inspect uncertain remote state for '+item.slug);
+        action.addEventListener('click',async()=>{
+          action.disabled=true;action.textContent='Inspecting…';
+          try{
+            const result=await supply('RECONCILE_ITEM',{
+              batchId:batch.batchId,itemId:item.itemId,expectedRevision:item.revision});
+            const status=document.createElement('span');
+            status.textContent=result?.ok?
+              ' Reconciled by independent owner and private-empty readback.' :
+              ' Held: '+(result?.code||'READBACK_UNKNOWN')+'. No remote retry.';
+            li.append(status);
+            await fetchBatches();
+          }catch{
+            const status=document.createElement('span');
+            status.textContent=' Readback unavailable; held without retry.';
+            li.append(status);
+          }finally{action.disabled=false;action.textContent='Reconcile read-only';}
+        });
+        li.append(document.createTextNode(' '),action);
+      }
       list.append(li);
     }
     section.append(heading,summary,list);queue.append(section);
