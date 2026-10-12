@@ -47,7 +47,8 @@ def open_session(firefox, profile):
         'moz:firefoxOptions':{
             'binary':str(firefox),
             'args':['-headless', '-no-remote', '-profile',str(profile)],
-            'prefs':{'xpinstall.signatures.required':False,'extensions.autoDisableScopes':0}
+            'prefs':{'xpinstall.signatures.required':False,'extensions.autoDisableScopes':0,
+                     'extensions.background.idle.timeout':1500}
         }
     }}}, timeout=60)
     return data['sessionId'] if 'sessionId' in data else data['value']['sessionId']
@@ -55,6 +56,13 @@ def open_session(firefox, profile):
 
 def execute(session, script):
     return call('POST',f'/session/{session}/execute/sync', {'script':script,'args':[]}, timeout=30)
+
+
+def guard_status(session):
+    script = '''const done=arguments[arguments.length-1];
+    browser.runtime.sendMessage({type:'PCMS_I01_STATUS'})
+      .then(value=>done(value), error=>done({error:String(error)}));'''
+    return call('POST',f'/session/{session}/execute/async', {'script':script,'args':[]},timeout=30)
 
 
 def close(session):
@@ -115,6 +123,25 @@ def main():
                 assert view['selected']==['overview'],view
                 assert view['links']==['#overview','#generators','#work-queue','#accounts','#refresher','#settings'],view
                 assert view['enabled']==0,view
+                # The exact installed XPI must expose a read-only guarded
+                # background status; no valid status enables PCMS effects.
+                guard=guard_status(after)
+                assert guard and guard.get('phase')=='I01',f'Missing I01 wake status: {guard}'
+                assert guard.get('providerEffects')=='OFF',guard
+                boot_before=guard['bootId']
+                print('B I01_WAKE_STATUS_INITIAL=',guard,flush=True)
+                # Close all PCMS UI contexts, allow the Firefox event page to
+                # idle/suspend, then provoke a genuine background wake via
+                # same-extension runtime messaging (never by re-installing).
+                call('POST',f'/session/{after}/url',{'url':'about:blank'})
+                time.sleep(8)
+                call('POST',f'/session/{after}/url',{'url':url})
+                guard_after=guard_status(after)
+                assert guard_after and guard_after.get('providerEffects')=='OFF',guard_after
+                assert guard_after.get('bootId')!=boot_before,(
+                    'Background did not demonstrably suspend/restart during idle',guard,guard_after)
+                print('B I01_EVENT_PAGE_COLD_WAKE=PASS before=',boot_before,
+                      'after=',guard_after['bootId'],flush=True)
                 call('POST',f'/session/{after}/url',{'url':url+'#accounts'})
                 view=execute(after,"return {selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view),active:document.querySelector('[aria-current=page]')?.dataset.workspace,blocked:document.querySelector('#view-accounts button')?.disabled}")
                 assert view=={'selected':['accounts'],'active':'accounts','blocked':True},view
