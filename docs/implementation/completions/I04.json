@@ -15,7 +15,7 @@
   ],
   "evidenceTierNotes": {
     "F": "Independent modeled Perchance GET generators / owner readback; explicit invalid token, wrong-origin, session drift, page route/lease revoked, duplicate generator, wrong account and collaborator/edit-key cases. Existing donor regressions and all previous fast tests. Must be verified on final candidate.",
-    "B": "Permanent combined XPI in disposable Firefox Dev Edition 154.0b10, full browser restart and route wake, real IndexedDB 1,250-record filter/pagination and stale-safe read-only guard, fixed isolated-world observer executed against controlled local wrong-origin fixture. Must be verified on final candidate.",
+    "B": "Same-run permanently installed combined XPI in disposable Firefox Developer Edition 154.0b10 with full browser restart, real canonical IDB 1,250-record search/filter/pagination and existing guarded sender/restore holds. The exact production observer module is executed in packaged Firefox and confirms wrong-origin rejection; actual ISOLATED scripting into an unauthorized about:blank tab cannot produce positive session/owner evidence. Controlled protected-Perchance-origin positive browser injection NOT_RUN: donor blocks unmanaged local/file fixture navigations and no authorized live provider route/account was available. Positive owner/session protocol and lease/route conditions instead validated by F independent fake-provider ledgers.",
     "X": "NOT_RUN_SEPARATELY; broader cross-system protected Persona and provider fault chains remain later integration.",
     "H": "NOT_RUN; live Perchance current provider session/ownership schema compatibility remains operator deferred, no account/provider access authorized."
   },
@@ -38,7 +38,8 @@
     "No synthetic owner proof or session flag enables publishing, provider mutation, Git writeback, account-specific action or subsequent I05 provider effects. A locally observed owner state is historical read-only.",
     "No provider/Cloudflare/Mullvad/private per-gens account mutation, access or operator live verification attempted.",
     "No CI required check/protected policy/donor pinned source was changed.",
-    "Packaged Firefox B negative fixture does not establish current live Perchance ownership."
+    "Packaged Firefox B negative fixture does not establish current live Perchance ownership.",
+    "B proves packaged invalid-origin and unauthorized-host fails closed; real protected Perchance-origin positive Firefox injection remains NOT_RUN and cannot be presented as a packaged live session/owner PASS."
   ],
   "provenance": "This proposal intentionally contains no branch/head or future merged-main SHA, run ID, or XPI hash. GitHub exact-current-candidate CI, protected squash result and postmerge main F/B evidence are authoritative."
 }
