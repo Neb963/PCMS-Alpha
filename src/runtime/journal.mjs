@@ -189,7 +189,67 @@ export function createCanonicalStore(db) {
       };
     });
   }
-  return Object.freeze({ provisionTarget, apply, getOperation, summary, recover, close: () => db.close() });
+
+  // Incidents are canonical, revision-fenced metadata; they never contain
+  // arbitrary provider text or override an operation/route hold.
+  const NOTICE_CODES = new Set(['ROUTE_UNAVAILABLE','ACCOUNT_UNVERIFIED',
+    'SOURCE_HELD','RESTORE_IN_PROGRESS','CANONICAL_UNAVAILABLE','OPERATION_UNCERTAIN']);
+  function recordNotice({ scopeId, code, severity, revision }) {
+    if (!isSafeId(scopeId) || !NOTICE_CODES.has(code) ||
+        !['SERIOUS','ACTION_REQUIRED','INFORMATIONAL'].includes(severity) ||
+        !Number.isSafeInteger(revision) || revision < 1)
+      return Promise.resolve(fail('INVALID_NOTICE'));
+    const key = 'attention:' + scopeId + ':' + code;
+    return transact(db, ['meta'], 'readwrite', (tx, finish) => {
+      const meta = tx.objectStore('meta');
+      meta.get(key).onsuccess = event => {
+        const prior = event.target.result;
+        if (prior && revision <= prior.revision) {
+          finish(revision === prior.revision
+            ? ok({ changed:false, ignored:prior.ignored === true })
+            : fail('STALE_REVISION'));
+          return;
+        }
+        meta.put({ key, scopeId, code, severity, revision, ignored:false });
+        finish(ok({ changed:true, ignored:false }));
+      };
+    });
+  }
+  function ignoreNotice({ scopeId, code, expectedRevision }) {
+    if (!isSafeId(scopeId) || !NOTICE_CODES.has(code) || !Number.isSafeInteger(expectedRevision))
+      return Promise.resolve(fail('INVALID_NOTICE'));
+    const key='attention:' + scopeId + ':' + code;
+    return transact(db,['meta'],'readwrite',(tx,finish)=>{
+      const meta=tx.objectStore('meta');
+      meta.get(key).onsuccess = event => {
+        const note=event.target.result;
+        if (!note) {finish(fail('NOTICE_NOT_FOUND'));return;}
+        if (note.revision !== expectedRevision) {finish(fail('STALE_REVISION'));return;}
+        if (!note.ignored) meta.put({ ...note, ignored:true });
+        finish(ok({ changed:!note.ignored, holdReleased:false }));
+      };
+    });
+  }
+  function noticeSummary() {
+    return transact(db,['meta'],'readonly',(tx,finish)=>{
+      const counts={ serious:0, actionRequired:0, informational:0, ignored:0 };
+      const cursor=tx.objectStore('meta').openCursor();
+      cursor.onsuccess = event => {
+        const row=event.target.result;
+        if (!row) {finish(ok({counts}));return;}
+        const n=row.value;
+        if (typeof n?.key==='string' && n.key.startsWith('attention:')) {
+          if (n.ignored === true) counts.ignored++;
+          else if (n.severity==='SERIOUS') counts.serious++;
+          else if (n.severity==='ACTION_REQUIRED') counts.actionRequired++;
+          else if (n.severity==='INFORMATIONAL') counts.informational++;
+        }
+        row.continue();
+      };
+    });
+  }
+  return Object.freeze({ provisionTarget, apply, getOperation, summary, recover,
+    recordNotice, ignoreNotice, noticeSummary, close: () => db.close() });
 }
 
 // Restore sentinel lives OUTSIDE replaceable IDB. It must not be cleared by
