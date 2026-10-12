@@ -64,6 +64,14 @@ export function moveSupply(item,event,proof={}) {
     createOperationId=item.createOperationId,renameOperationId=item.renameOperationId,
     gitOperationId=item.gitOperationId;
   switch(event) {
+    case 'ABORT_PREPARED':
+      if(state==='CREATE_PREPARED'){state='FROZEN';createOperationId=null;}
+      else if(state==='RENAME_PREPARED'){
+        state='CREATE_CONFIRMED';renameOperationId=null;
+      }else if(state==='GIT_PREPARED'){
+        state='SOURCE_PENDING';gitOperationId=null;
+      }else return error('CANNOT_ABORT_POSSIBLE_EFFECT');
+      reason=null;break;
     case 'CREATE_PREPARED':
       if(state!=='FROZEN'||!isId(proof.operationId))return error('NOT_ADMISSIBLE');
       createOperationId=proof.operationId;state='CREATE_PREPARED';break;
