@@ -160,6 +160,9 @@ export function publicSupply(batch) {
   return {batchId:batch.batchId,accountId:batch.accountId,revision:batch.revision,
     frozen:true,items:batch.items.map(item=>({
       itemId:item.itemId,index:item.index,slug:item.requestedSlug,state:item.state,reason:item.reason,
-      revision:item.revision,source:item.folder?'NON_READY_FOLDER':'SOURCE_PENDING'
+      revision:item.revision,source:item.folder?'NON_READY_FOLDER':
+        ['PROVIDER_CONFIRMED','SOURCE_PENDING','GIT_PREPARED',
+          'GIT_DISPATCH_POSSIBLE','GIT_UNCERTAIN','GIT_OBSERVING']
+          .includes(item.state)?'SOURCE_PENDING':'NOT_CREATED'
     }))};
 }
