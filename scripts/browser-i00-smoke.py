@@ -66,6 +66,41 @@ def guard_status(session):
     return call('POST',f'/session/{session}/execute/async', {'script':script,'args':[]},timeout=30)
 
 
+def canonical_command(session, command):
+    # Real packaged Firefox request to the isolated same-extension port.
+    expression = '''const done=arguments[arguments.length-1];
+    const port=browser.runtime.connect({name:'pcms-i02-canonical-readonly'});
+    port.onMessage.addListener(value=>{try{port.disconnect()}catch(e){}done(value)});
+    port.onDisconnect.addListener(()=>done({error:'canonical-disconnected'}));
+    port.postMessage(COMMAND);'''
+    expression=expression.replace('COMMAND',json.dumps(command))
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':expression,'args':[]},timeout=30)
+
+
+def canonical_probe(session):
+    # In a disposable profile only: exercise REAL IndexedDB transactions from
+    # the packaged add-on origin, not just a mocked callback.
+    script = '''const done=arguments[arguments.length-1];
+    (async()=>{
+      const module=await import('./journal.mjs');
+      const store=module.createCanonicalStore(await module.openCanonicalDatabase());
+      const targetId='fixture_target_01', operationId='fixture_operation_01';
+      const created=await store.provisionTarget(targetId);
+      const params={type:'RESERVE',targetId,operationId,effectType:'fake_effect_01',
+        fingerprint:'a'.repeat(64),expectedRevision:1};
+      const prepared=await store.apply(params);
+      const duplicate=await store.apply(params);
+      const stale=await store.apply({...params,operationId:'fixture_operation_02',expectedRevision:1});
+      const possible=await store.apply({...params,type:'MARK_DISPATCH',expectedRevision:1});
+      const cancelled=await store.apply({...params,type:'CANCEL',expectedRevision:2});
+      store.close();
+      done({created,prepared,duplicate,stale,possible,cancelled});
+    })().catch(()=>done({error:'CANONICAL_PROBE_FAILED'}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=30)
+
+
 def storage_alarm_count(session):
     script = '''const done=arguments[arguments.length-1];
     browser.storage.local.get('pcmsI01WakeHealth')
@@ -146,6 +181,17 @@ def main():
                 guard=guard_status(after)
                 assert guard and guard.get('phase')=='I01',f'Missing I01 wake status: {guard}'
                 assert guard.get('providerEffects')=='OFF',guard
+                canonical=canonical_command(after,{'type':'SUMMARY'})
+                assert canonical.get('ok') is True and canonical.get('storage')=='READY',canonical
+                assert canonical.get('providerEffects')=='OFF',canonical
+                synthetic=canonical_probe(after)
+                assert synthetic.get('created',{}).get('ok') is True,synthetic
+                assert synthetic.get('prepared',{}).get('operation',{}).get('status')=='PREPARED',synthetic
+                assert synthetic.get('duplicate',{}).get('duplicate') is True,synthetic
+                assert synthetic.get('stale',{}).get('code')=='STALE_REVISION',synthetic
+                assert synthetic.get('possible',{}).get('operation',{}).get('status')=='DISPATCH_POSSIBLE',synthetic
+                assert synthetic.get('cancelled',{}).get('code')=='CANNOT_CANCEL_POSSIBLE_EFFECT',synthetic
+                print('B I02_REAL_IDB_PREPARED_TO_DISPATCH_POSSIBLE=PASS',flush=True)
                 boot_before=guard['bootId']
                 print('B I01_WAKE_STATUS_INITIAL=',guard,flush=True)
                 # Construct the alarm in an isolated disposable Firefox profile,
@@ -167,6 +213,10 @@ def main():
                 assert guard_after and guard_after.get('providerEffects')=='OFF',guard_after
                 assert guard_after.get('bootId')!=boot_before,(
                     'Background did not demonstrably suspend/restart during idle',guard,guard_after)
+                outcome=canonical_command(after,{'type':'GET_OPERATION','operationId':'fixture_operation_01'})
+                assert outcome.get('ok') is True and outcome.get('state')=='HELD_UNCERTAIN',(
+                    'Cold wake must recover possible dispatch without replay',outcome)
+                print('B I02_REAL_IDB_CRASH_REHYDRATE_UNCERTAIN=PASS',flush=True)
                 print('B I01_EVENT_PAGE_COLD_WAKE=PASS before=',boot_before,
                       'after=',guard_after['bootId'],flush=True)
                 call('POST',f'/session/{after}/url',{'url':url+'#accounts'})
@@ -175,6 +225,19 @@ def main():
                 call('POST',f'/session/{after}/url',{'url':f'moz-extension://{uuid}/options/options.html'})
                 title=execute(after,'return document.title')
                 assert title, 'Original donor advanced option page not available'
+                call('POST',f'/session/{after}/url',
+                     {'url':f'moz-extension://{uuid}/pcms/emergency.html'})
+                for _ in range(40):
+                    report_json=execute(after,
+                        "return document.getElementById('report')?.textContent||''")
+                    if report_json.strip().startswith('{'): break
+                    time.sleep(.15)
+                safe=json.loads(report_json)
+                assert safe.get('schema')=='PCMS_SAFE_DIAGNOSTIC_V1',safe
+                assert safe.get('effects')=='OFF',safe
+                assert set(safe)=={'schema','phase','effects','sections','wake'},safe
+                assert safe['sections']['canonical']=='section_unavailable'
+                print('B I02_CORE_INDEPENDENT_EMERGENCY=PASS',flush=True)
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
             finally: close(after)
         finally:
