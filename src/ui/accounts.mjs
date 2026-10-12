@@ -135,6 +135,12 @@ function draw() {
           expectedRevision:a.revision},'PCMS account archived; donor Persona preserved.');
       }));
       section.append(controls);
+    } else {
+      section.append(button('Reactivate with the same Persona',async()=>{
+        if(!window.confirm('Reactivate this archived account? Identity evidence will be reset and a new login required.'))return;
+        await mutation('REACTIVATE',{accountId:a.accountId,expectedRevision:a.revision,
+          explicitReactivation:true},'Account reactivated locally; login and verification required.');
+      }));
     }
     accountsArea.append(section);
   }
