@@ -26,7 +26,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
       // A configured proxy is not evidence of a working protected route.
       // This is the donor's context-fenced cached test, never a new network probe.
       const evidence = await getRouteTest(current.cookieStoreId);
-      if (evidence?.result?.ok !== true) return HOLD('PROTECTED_ROUTE_UNVERIFIED');
+      if (evidence?.ok !== true) return HOLD('PROTECTED_ROUTE_UNVERIFIED');
       return Object.freeze({
         ready: true, code: 'GUARD_READY',
         personaUid: current.personaUid, cookieStoreId: current.cookieStoreId,
@@ -42,6 +42,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     const before = await inspect(personaUid);
     if (!before.ready) return before;
     let lease = null;
+    let accepted = false;
     try {
       lease = await shared.acquire(personaUid);
       const after = await inspect(personaUid);
@@ -49,6 +50,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
           after.routeId !== before.routeId) return HOLD('GUARD_CHANGED');
       const checked = await shared.validate(personaUid, lease.leaseId);
       if (checked.cookieStoreId !== before.cookieStoreId) return HOLD('PERSONA_CONTAINER_CHANGED');
+      accepted = true;
       return Object.freeze({
         ...after, leaseId: lease.leaseId, expiresAt: lease.expiresAt
       });
@@ -57,11 +59,10 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     } finally {
       // A lease acquired but not returned to its caller must never survive.
       // Inspect failures do not confer authority.
-      if (lease && !leaseReturned(lease)) {
+      if (lease && !accepted) {
         try { await shared.release(lease.leaseId); } catch {}
       }
     }
-    function leaseReturned(value) { return value === null; }
   }
 
   async function inspectOwnedAction(receipt) {

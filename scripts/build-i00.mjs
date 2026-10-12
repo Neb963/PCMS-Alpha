@@ -1,6 +1,7 @@
 import { cp, mkdir, readFile, rm, writeFile, stat } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { verifyDonor } from './verify-donor.mjs';
+import { applyI01Overlay } from '../src/runtime/overlay.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,9 +30,13 @@ export async function buildI00({ packageArchive = true } = {}) {
   // Do not rewrite the donor background, guards, integration, permissions or native host.
   await rm(path.join(stage,'pcms'),{recursive:true,force:true});
   await cp(path.join(root,'src/ui'),path.join(stage,'pcms'),{recursive:true});
+  await applyI01Overlay(root,stage);
   const combined = structuredClone(original);
   combined.name = 'PCMS Alpha + PersonaMonkey';
-  combined.description = 'PCMS-first interface with unchanged PersonaMonkey protected routing; PCMS effects remain OFF.';
+  combined.description = 'PCMS-first interface with inherited PersonaMonkey protected routing and guarded background wake; provider effects OFF.';
+  // Static entry imports the donor routing gate first; background guard uses
+  // the existing donor lease registry, never an independent routing controller.
+  combined.background = { scripts: ['pcms/entry.mjs'], type: 'module' };
   combined.options_ui = { page:'pcms/index.html', open_in_tab:true };
   await writeFile(path.join(stage,'manifest.json'),JSON.stringify(combined,null,2)+'\n');
   if(packageArchive){
