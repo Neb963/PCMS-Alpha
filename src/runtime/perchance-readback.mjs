@@ -93,6 +93,10 @@ export function createReadOnlyInterpreter({
 }) {
   if(typeof readProtectedPage!=='function')throw TypeError('Qualified protected-page executor required');
   return async function inventoryReader(context,account) {
+    // Stamp request admission, not completion. Two concurrent same-account
+    // reads may finish out of order: an old slow response must not acquire
+    // a newer watermark simply because it returned last.
+    const observedAt=now(),observationId=newObservationId();
     const packet=await readProtectedPage(context);
     // Refuse any credential-bearing or unexpected transport envelope.
     // A qualified executor must discard secrets BEFORE crossing the page
@@ -123,7 +127,7 @@ export function createReadOnlyInterpreter({
       sessionReply:packet.sessionReply,
       items:packet.sessionReply?.body?.generators,
       ownerReplies,context,account,
-      observationId:newObservationId(),observedAt:now()
+      observationId,observedAt
     });
     return value.ok?value.observation:null;
   };

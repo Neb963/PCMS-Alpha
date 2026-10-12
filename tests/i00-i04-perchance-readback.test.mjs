@@ -91,3 +91,27 @@ test('I04 F: interpreter passes only de-identified observations, not session sec
   })});
   assert.equal((await nestedLeak(context,account)).ok,false);
 });
+
+test('I04 F: slow older read keeps its earlier admission watermark',async()=>{
+  let release;
+  const gate=new Promise(resolve=>{release=resolve;});
+  let ordinal=0;
+  const readProtectedPage=async()=>{
+    const step=++ordinal;
+    if(step===1)await gate;
+    return {ok:true,principalFingerprint:account.identity.principalFingerprint,
+      sessionReply,ownerReplies:[...ownerReplies]};
+  };
+  let ticks=1000;
+  const adapter=createReadOnlyInterpreter({
+    readProtectedPage,now:()=>++ticks,
+    newObservationId:()=> 'obs_'+String(ticks).padStart(8,'0')
+  });
+  const older=adapter(context,account);
+  const newer=await adapter(context,account);
+  release();
+  const old=await older;
+  assert.equal(older instanceof Promise,true);
+  assert.equal(old.observedAt<newer.observedAt,true);
+  assert.equal(old.observationId!==newer.observationId,true);
+});
