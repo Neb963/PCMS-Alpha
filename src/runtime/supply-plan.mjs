@@ -38,7 +38,7 @@ export function freezeSupply({batchId,accountId,personaUid,
       index,requestedSlug:raw,accountId,personaUid,accountRevision,bindingVersion,
       state:issue?'REJECTED':'FROZEN',reason:issue,revision:1,
       createOperationId:null,renameOperationId:null,gitOperationId:null,
-      temporarySlug:null,remoteId:null,folder:null};
+      temporarySlug:null,ackTemporarySlug:null,remoteId:null,folder:null};
   });
   return {ok:true,batch:{batchId,accountId,personaUid,accountRevision,bindingVersion,
     state:'FROZEN',revision:1,items,createdAt:null,
@@ -60,6 +60,7 @@ export function moveSupply(item,event,proof={}) {
     return error('INVALID_ITEM');
   let state=item.state,reason=item.reason,temporarySlug=item.temporarySlug,
     remoteId=item.remoteId,folder=item.folder,
+    ackTemporarySlug=item.ackTemporarySlug,
     createOperationId=item.createOperationId,renameOperationId=item.renameOperationId,
     gitOperationId=item.gitOperationId;
   switch(event) {
@@ -72,6 +73,11 @@ export function moveSupply(item,event,proof={}) {
     case 'CREATE_UNCERTAIN':
       if(!['CREATE_DISPATCH_POSSIBLE','CREATE_OBSERVING'].includes(state))
         return error('NOT_ADMISSIBLE');
+      if(proof.temporarySlug!==undefined){
+        if(!SUPPLY_SLUG.test(proof.temporarySlug)||proof.temporarySlug===item.requestedSlug)
+          return error('INVALID_ACK_HINT');
+        ackTemporarySlug=proof.temporarySlug;
+      }
       state='CREATE_UNCERTAIN';reason='RECONCILIATION_REQUIRED';break;
     case 'CREATE_OBSERVING':
       if(!['CREATE_DISPATCH_POSSIBLE','CREATE_UNCERTAIN'].includes(state))
@@ -85,7 +91,7 @@ export function moveSupply(item,event,proof={}) {
         proof.temporarySlug===item.requestedSlug)
         return error('INDEPENDENT_CREATE_PROOF_REQUIRED');
       state='CREATE_CONFIRMED';reason=null;temporarySlug=proof.temporarySlug;
-      remoteId=proof.remoteId;break;
+      remoteId=proof.remoteId;ackTemporarySlug=null;break;
     case 'RENAME_PREPARED':
       if(state!=='CREATE_CONFIRMED'||!isId(proof.operationId))
         return error('NOT_ADMISSIBLE');
@@ -139,7 +145,7 @@ export function moveSupply(item,event,proof={}) {
       state='REJECTED';reason=proof.code;break;
     default:return error('INVALID_TRANSITION');
   }
-  return {ok:true,item:{...item,state,reason,temporarySlug,remoteId,folder,
+  return {ok:true,item:{...item,state,reason,temporarySlug,ackTemporarySlug,remoteId,folder,
     createOperationId,renameOperationId,gitOperationId,revision:item.revision+1}};
 }
 export function publicSupply(batch) {
