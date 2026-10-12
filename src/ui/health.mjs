@@ -8,7 +8,7 @@ function project(code, donorReady = false) {
   const label = donorReady ? 'Guarded · effects off' : 'Held · not ready';
   badge.textContent = label;
   status.textContent = code + '. PCMS provider writes remain disabled.';
-  account.textContent = 'Background: ' + label + '. Account enrollment remains disabled.';
+  account.textContent = 'Background: ' + label + '. Account binding uses the donor guard; provider writes remain disabled.';
 }
 
 // Dedicated health port avoids competing with the donor's legacy onMessage

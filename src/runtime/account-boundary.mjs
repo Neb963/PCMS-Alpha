@@ -21,7 +21,7 @@ export function validateAccountMessage(api,sender,m) {
   if(!['LIST_ACCOUNTS','LIST_PERSONAS','LIST_ROUTES'].includes(m.type)) {
     if(m.type==='CREATE_PERSONA') {
       if(typeof p.name!=='string'||p.name.length<1||p.name.length>64||
-          !uid(p.routeId))return fail('INVALID_PARAMS');
+          !/^[a-z0-9_-]{1,128}$/i.test(p.routeId))return fail('INVALID_PARAMS');
     }else if(m.type==='ENROLL') {
       if(!isSafeId(p.accountId)||!uid(p.personaUid)||p.expectedRevision!==0)
         return fail('INVALID_PARAMS');

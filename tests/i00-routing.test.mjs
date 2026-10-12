@@ -33,13 +33,20 @@ test('cross-workspace links and accessible route changes are present', () => {
 });
 
 test('new PCMS actions remain disabled, without network or browser mutation APIs', () => {
-  assert.equal((html.match(/<button\b[^>]*\bdisabled\b/g) || []).length, 4);
-  for(const [id, reason] of [['generators','blocked-generators'],['work-queue','blocked-work-queue'],['accounts','blocked-accounts'],['refresher','blocked-refresher']]){
+  assert.ok((html.match(/<button\\b[^>]*\\bdisabled\\b/g) || []).length >= 3);
+  for(const [id, reason] of [['generators','blocked-generators'],['work-queue','blocked-work-queue'],['refresher','blocked-refresher']]){
     assert.match(html, new RegExp(`aria-describedby="${reason}"`));
     assert.match(html, new RegExp(`id="${reason}"`));
   }
   assert.doesNotMatch(shell, /\b(?:browser|chrome|fetch|XMLHttpRequest|WebSocket|navigator\.sendBeacon)\s*\./);
   assert.match(html, /PersonaMonkey advanced controls/);
-  assert.match(html, /I02 · Local journal diagnostics · Provider effects OFF/);
+  assert.match(html, /I03 · Local account binding · Provider effects OFF/);
   assert.match(html, /Emergency redacted diagnostics/);
+  assert.match(html, /id="pcms-enroll" disabled/);
+  assert.match(html, /id="pcms-create-persona" disabled/);
+  assert.match(html, /id="pcms-accounts-list"/);
+  assert.match(html, /accounts.mjs/);
+  for (const name of ['Reserve generator','Start action','Start refresh'])
+    assert.match(html, new RegExp('<button[^>]*disabled[^>]*>'+name+'</button>'));
+
 });
