@@ -126,7 +126,7 @@ def observer_isolation_probe(session):
         script='''const done=arguments[arguments.length-1];
         (async()=>{
           const {perchanceReadIsolated}=await import('./perchance-observer.mjs');
-          const tab=await browser.tabs.create({url:__FIXTURE_URL__,active:false});
+          const tab=await browser.tabs.create({url:__FIXTURE_URL__,active:true});
           try {
             let target;
             for(let k=0;k<60;k++){
