@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>PCMS Alpha — Overview</title>
+  <link rel="stylesheet" href="shell.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="app">
+    <header class="topbar">
+      <button class="menu" type="button" id="menu" aria-expanded="false" aria-controls="navigation">Menu</button>
+      <div class="identity"><strong>PCMS</strong><span>Alpha</span></div>
+      <span class="phase">I00 · Interface only</span>
+      <a class="advanced" href="../options/options.html" id="advanced">PersonaMonkey advanced controls <span aria-hidden="true">↗</span></a>
+    </header>
+    <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+      <nav aria-label="PCMS workspaces" id="navigation">
+        <a href="#overview" data-workspace="overview" aria-current="page">Overview</a>
+        <a href="#generators" data-workspace="generators">Generators</a>
+        <a href="#work-queue" data-workspace="work-queue">Work Queue</a>
+        <a href="#accounts" data-workspace="accounts">Accounts</a>
+        <a href="#refresher" data-workspace="refresher">Refresher</a>
+        <a href="#settings" data-workspace="settings">Settings</a>
+      </nav>
+      <p class="sidebar-note">PCMS automation and provider actions are not installed at I00.</p>
+    </aside>
+    <main id="main" tabindex="-1" aria-label="Current PCMS workspace">
+      <div class="system-status" role="status" aria-live="polite" id="navigation-status">I00 shell · No PCMS data connection</div>
+      <div id="unknown-route" class="notice" role="status" hidden>Unknown workspace. Showing Overview without changing any data.</div>
+      <section class="workspace" id="view-overview" data-view="overview" aria-labelledby="heading-overview">
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 01</p><h1 id="heading-overview" tabindex="-1">Overview</h1><p>Operational evidence and actions will appear when their verified components exist.</p></div></header>
+        <div class="notice" role="status"><strong>Not connected</strong><p>No PCMS controller, account inventory, source authority or operation journal is active in I00. This is not a confirmation that there are no incidents.</p></div>
+        <section class="panel" aria-labelledby="attention-title"><div class="panel-head"><h2 id="attention-title">Attention</h2><span class="unknown">Unavailable</span></div><p class="empty">Cannot read attention records. A later phase will connect authoritative evidence.</p></section>
+      </section>
+      <section class="workspace" id="view-generators" data-view="generators" aria-labelledby="heading-generators" hidden>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 02</p><h1 id="heading-generators" tabindex="-1">Generators</h1><p>Generator inventory and source lineage.</p></div><button disabled type="button" aria-describedby="blocked-generators">Reserve generator</button></header>
+        <section class="panel" aria-labelledby="generators-table-title"><div class="panel-head"><h2 id="generators-table-title">Inventory</h2><span class="unknown">Source unavailable</span></div><div class="table-wrap" role="region" aria-label="Generators table" tabindex="0"><table><thead><tr><th scope="col">Generator</th><th scope="col">Account</th><th scope="col">Source</th><th scope="col">Evidence</th></tr></thead><tbody><tr><td colspan="4" class="empty">Inventory not connected; no records are asserted.</td></tr></tbody></table></div><p id="blocked-generators" class="reason">Disabled: reservation, discovery and remote source operations belong to later phases.</p></section>
+      </section>
+      <section class="workspace" id="view-work-queue" data-view="work-queue" aria-labelledby="heading-work-queue" hidden>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 03</p><h1 id="heading-work-queue" tabindex="-1">Work Queue</h1><p>Evidence-backed operator decisions and task receipts.</p></div><button type="button" disabled aria-describedby="blocked-work-queue">Start action</button></header>
+        <section class="panel"><div class="panel-head"><h2>Operations</h2><span class="unknown">Not initialized</span></div><p class="empty">No journal or queue connection is installed. Pending remote actions cannot be inferred.</p><p id="blocked-work-queue" class="reason">Disabled: command admission, effect journaling and execution are not implemented.</p></section>
+      </section>
+      <section class="workspace" id="view-accounts" data-view="accounts" aria-labelledby="heading-accounts" hidden>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 04</p><h1 id="heading-accounts" tabindex="-1">Accounts</h1><p>Dedicated Persona bindings and verified account identity.</p></div><button type="button" disabled aria-describedby="blocked-accounts">Enroll account</button></header>
+        <section class="panel"><div class="panel-head"><h2>Account inventory</h2><span class="unknown">Unknown</span></div><p class="empty">PCMS has not queried or verified any account or Persona binding. The PersonaMonkey donor continues to own its routing.</p><p id="blocked-accounts" class="reason">Disabled: enrollment, login handoff and rebind are not authorized in I00.</p><a href="../options/options.html">Open existing PersonaMonkey controls</a></section>
+      </section>
+      <section class="workspace" id="view-refresher" data-view="refresher" aria-labelledby="heading-refresher" hidden>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 05</p><h1 id="heading-refresher" tabindex="-1">Refresher</h1><p>Operational capacity, scheduling and observed visibility.</p></div><button type="button" disabled aria-describedby="blocked-refresher">Start refresh</button></header>
+        <section class="panel"><div class="panel-head"><h2>Scheduler</h2><span class="unknown">Off</span></div><p class="empty">No scheduler or recent-list monitor is installed. Occupancy and remaining time are unknown, not zero.</p><p id="blocked-refresher" class="reason">Disabled: monitoring, scheduling, saving and unlisting are later-phase capabilities.</p></section>
+      </section>
+      <section class="workspace" id="view-settings" data-view="settings" aria-labelledby="heading-settings" hidden>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 06</p><h1 id="heading-settings" tabindex="-1">Settings</h1><p>Configuration and capability exposure, explicitly limited to I00.</p></div></header>
+        <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">All off</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Off — not implemented</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup, restore and AI tests</dt><dd>Off — not implemented</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No settings changes are accepted in I00. PersonaMonkey retains its own advanced settings.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a></section>
+      </section>
+    </main>
+    <footer class="footer"><span>PCMS Alpha · Stage I00</span><span>UI navigation available · PCMS side effects disabled</span></footer>
+  </div>
+  <script type="module" src="shell.mjs"></script>
+</body>
+</html>
