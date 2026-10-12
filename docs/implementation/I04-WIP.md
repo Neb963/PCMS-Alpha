@@ -1,0 +1,21 @@
+# I04 — Owned generator read-only inventory: implementation and safety handoff
+
+The accepted I04 F/B scope is a useful read-only generator inventory with honest ownership and session holds. No account, Perchance, Mullvad, Cloudflare, native provider, or private `per-gens` live actions were performed. The donor remains pinned at `Neb963/persona-router@9995f6eadfa54be6cc0001f4e04f2a2d9b9401bf`.
+
+## Implementation
+
+The combined XPI registers I03 Accounts and I04 Inventory ports on startup. The same-XPI donor integration owns stable Persona UID/current container/protected route health and its existing short-lived control lease. For `CHECK_IDENTITY` and `SYNC_ACCOUNT`, the fixed `perchanceReadIsolated` function executes through donor-owned `browser.scripting.executeScript`, ISOLATED world, in a matching `https://perchance.org` main frame of the exact bound Persona container. The guard acquires/checks/releases an existing donor lease, verifies route and container before/after, refuses Direct, and never opens an automatic provider tab or creates a separate controller.
+
+The page-held `app-storage` token and normalized email remain confined to that Perchance browser context; the isolated function makes only `POST /api/getGeneratorsByUser` and `POST /api/checkGeneratorOwnership` requests on the same fixed origin with bounded timeouts and concurrency. It verifies authenticated server `status:success`, independently classifies per-slug `is-owner` versus `is-not-owner` (regardless of collaborator edit rights), checks session-store continuity, and returns only a SHA-256 identity fingerprint and strictly reduced responses. Unknown/invalid/403/redirect/partial status or route/lease/tab drift stops without committing remote absence. No page-world message, editable DOM, editKey or dynamically supplied script constitutes owner proof.
+
+The background interpreter validates that only the exact minimal fields reached the extension process, compares observed identity to the canonical account principal and binding revision, then IDB atomically rechecks canonical account context and per-account observation watermarks. Complete observations preserve absent generators as UNOBSERVED, conflicts as held, and never delete records or authorize mutation. Accounts/Generators/Overview render local read-only state, owner-status filters and 50-item pages for 1,250+ records, with guarded manual Sync and scoped recovery messages.
+
+## Evidence and limits
+
+Historical discovery (`discovery-v3.zip` appExtras, captured endpoint behavior and accepted F1 owner proof) grounds compatibility *hypotheses* and response shapes, **not** current live provider behavior. Deterministic F tests use independently controlled fake HTTP ledgers, cross-realm serialization and negative cases. Packaged Firefox B uses a persistently installed XPI, real IDB/restart/UI and the packaged fixed observer wrong-origin refusal in the extension UI plus unauthorized about:blank injection refusal. A controlled protected-origin positive browser injection is NOT performed: donor's unmanaged local/file test navigation correctly remained unavailable; no test privilege bypass or Direct fallback was introduced. Provider-positive B/H/live observations are NOT performed. See `docs/implementation/completions/I04.json` for proposed scoped acceptance and actual GitHub CI for final commit-proven execution.
+
+The verified implementation is allowed to make guarded on-demand **read-only** requests when a real bound operator-owned Perchance tab already exists. It is not guaranteed to succeed on an evolved provider. Live session persistence, eventual Perchance endpoint schema/anti-automation handling and protected multi-Persona scenarios remain unverified compatibility and late acceptance; failures produce explicit scoped UNVERIFIED/HELD outcomes. Existing IDB inventory remains available. All provider writes, source Git writes, reservations, AI operations, Refresher mutations and publishing remain OFF. Do not initiate operator-live tests from CI.
+
+## Recovery and completion
+
+Resume only this branch and draft PR #6 until final candidate F/B CI, trusted `pcms-required`, squash merge on protected main and postmerge smoke are verified. The completion proposal contains no self-referential SHA. I05 must not start in the I04 invocation.

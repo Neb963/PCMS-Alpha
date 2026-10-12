@@ -91,6 +91,88 @@ def account_command(session, command):
                 {'script':script.replace('COMMAND',json.dumps(command)),'args':[]},timeout=30)
 
 
+def inventory_command(session, command):
+    script = '''const done=arguments[arguments.length-1];
+    const port=browser.runtime.connect({name:'pcms-i04-inventory'});
+    port.onMessage.addListener(value=>{try{port.disconnect()}catch(e){}done(value)});
+    port.onDisconnect.addListener(()=>done({error:'inventory-disconnected'}));
+    port.postMessage(COMMAND);'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script.replace('COMMAND',json.dumps(command)),'args':[]},timeout=30)
+
+
+
+def observer_isolation_probe(session):
+    # Persistent installed-XPI B negative-oracle: execute the real packaged
+    # fixed observer in Firefox, then assert that any attempt to inject it into
+    # an unauthorized about:blank tab cannot supply a positive owner/session.
+    # Positive provider replies are exercised with independent F transport
+    # fixtures; no unmanaged local network exception is granted to the donor.
+    script='''const done=arguments[arguments.length-1];
+    (async()=>{
+      const {perchanceReadIsolated}=await import('./perchance-observer.mjs');
+      const internal=await perchanceReadIsolated({});
+      const tab=await browser.tabs.create({url:'about:blank',active:false});
+      try{
+        let injection;
+        try{
+          const results=await browser.scripting.executeScript({
+            target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
+            func:perchanceReadIsolated,args:[{}]
+          });
+          injection=results?.[0]?.result||{ok:false,code:'NO_RESULT'};
+        }catch{
+          injection={ok:false,code:'HOST_PERMISSION_DENIED'};
+        }
+        done({loaded:typeof perchanceReadIsolated==='function',
+          internal,injection});
+      }finally{await browser.tabs.remove(tab.id);}
+    })().catch(e=>done({error:String(e).slice(0,180)}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=30)
+
+
+def inventory_idb_probe(session):
+    # Packaged Firefox uses REAL persistent IDB, synthetic readback only.
+    # No external Perchance account, route or remote mutation is touched.
+    script = '''const done=arguments[arguments.length-1];
+    (async()=>{
+      const {openCanonicalDatabase}=await import('./journal.mjs');
+      const {createAccountStore}=await import('./accounts.mjs');
+      const {createInventoryStore}=await import('./inventory.mjs');
+      const db=await openCanonicalDatabase();
+      const accounts=createAccountStore(db), inventory=createInventoryStore(db);
+      const accountId='fixture_inventory_01',personaUid='persona-fixture-0001';
+      const enrolled=await accounts.apply({type:'ENROLL',accountId,
+        personaUid,expectedRevision:0});
+      const fingerprint='a'.repeat(64);
+      const verified=await accounts.apply({type:'VERIFY',accountId,
+        expectedRevision:1,proof:{source:'GUARDED_SESSION_READBACK',
+          verified:true,personaUid,principalFingerprint:fingerprint,
+          observationId:'fixture_identity_01'}});
+      const items=Array.from({length:1250},(_,i)=>({
+        slug:'gen-'+String(i).padStart(4,'0'),
+        remoteId:'remote-'+String(i).padStart(8,'0'),
+        ownerResult:'IS_OWNER',ownerObservationId:'owner_proof_01',
+        ownerPrincipalFingerprint:fingerprint,visibility:'UNLISTED'
+      }));
+      const obs={source:'GUARDED_PERCHANCE_READBACK',complete:true,
+        observationId:'fixture_inventory_observation_01',observedAt:1791841200000,
+        accountId,personaUid,bindingVersion:1,accountRevision:2,
+        principalFingerprint:fingerprint,generators:items};
+      const accepted=await inventory.applyObservation(verified.account,obs);
+      const first=await inventory.list({offset:0,limit:50});
+      const selected=await inventory.list({query:'gen-0999'});
+      const invalid=await inventory.list({offset:0,limit:101});
+      db.close();
+      done({enrolled:enrolled.ok,verified:verified.ok,accepted,first:{
+        count:first.items?.length,total:first.total,first:first.items?.[0],
+        last:first.items?.[49]},selected,invalid});
+    })().catch(e=>done({error:'I04_REAL_IDB_PROBE_FAILED',detail:String(e).slice(0,100)}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=60)
+
+
 def account_idb_probe(session):
     # Real IndexedDB transaction fence (not a Node-only state reducer).
     script = '''const done=arguments[arguments.length-1];
@@ -287,7 +369,7 @@ def main():
                 url=f'moz-extension://{uuid}/pcms/index.html'
                 call('POST',f'/session/{after}/url',{'url':url},timeout=30)
                 for _ in range(40):
-                    view=execute(after,"return {title:document.title, selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view), links:[...document.querySelectorAll('[data-workspace]')].map(x=>x.getAttribute('href')), unsafe:[...document.querySelectorAll('#view-generators button,#view-work-queue button,#view-refresher button')].filter(x=>!x.disabled).length}")
+                    view=execute(after,"return {title:document.title, selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view), links:[...document.querySelectorAll('[data-workspace]')].map(x=>x.getAttribute('href')), unsafe:[...document.querySelectorAll('#view-generators button[aria-describedby=blocked-generators],#view-work-queue button,#view-refresher button')].filter(x=>!x.disabled).length}")
                     if view.get('selected'): break
                     time.sleep(.15)
                 assert view['selected']==['overview'],view
@@ -295,6 +377,13 @@ def main():
                 assert view['unsafe']==0,view
                 # The exact installed XPI must expose a read-only guarded
                 # background status; no valid status enables PCMS effects.
+                isolated=observer_isolation_probe(after)
+                assert isolated.get('loaded') is True,isolated
+                assert isolated.get('internal',{}).get('code')=='WRONG_ORIGIN',isolated
+                assert isolated.get('injection',{}).get('ok') is False,isolated
+                assert isolated.get('injection',{}).get('code') in [
+                    'HOST_PERMISSION_DENIED','WRONG_ORIGIN'],isolated
+                print('B I04_PACKAGED_OBSERVER_INVALID_ORIGIN_AND_HOST_HOLD=PASS',flush=True)
                 guard=guard_status(after)
                 assert guard and guard.get('phase')=='I01',f'Missing I01 wake status: {guard}'
                 assert guard.get('providerEffects')=='OFF',guard
@@ -322,6 +411,41 @@ def main():
                     'accountId':'fixture_account_a01','expectedRevision':2}})
                 assert identity.get('ok') is not True,identity
                 print('B I03_REAL_IDB_EXCLUSIVITY_REVISION_OVERRIDE_AND_NO_FAKE_IDENTITY=PASS',flush=True)
+                blank_inventory=inventory_command(after,{'type':'LIST_INVENTORY'})
+                assert blank_inventory.get('ok') is True and blank_inventory.get('total')==0,blank_inventory
+                unauthorized=inventory_command(after,{'type':'SYNC_ACCOUNT','params':{
+                    'accountId':'fixture_account_a01','expectedRevision':2}})
+                assert unauthorized.get('code')=='ACCOUNT_IDENTITY_UNVERIFIED',unauthorized
+                seeded=inventory_idb_probe(after)
+                assert seeded.get('enrolled') is True and seeded.get('verified') is True,seeded
+                assert seeded.get('accepted',{}).get('ok') is True,seeded
+                assert seeded.get('first',{}).get('count')==50,seeded
+                assert seeded.get('first',{}).get('total')==1250,seeded
+                assert seeded.get('first',{}).get('first',{}).get('providerWrites')=='OFF',seeded
+                assert seeded.get('selected',{}).get('total')==1,seeded
+                assert seeded.get('invalid',{}).get('code')=='INVALID_INVENTORY_QUERY',seeded
+                inventory_page=inventory_command(after,{'type':'LIST_INVENTORY','params':{
+                    'query':'gen-0999','offset':0,'limit':50}})
+                assert inventory_page.get('ok') is True and inventory_page.get('total')==1,inventory_page
+                assert inventory_page['items'][0]['slug']=='gen-0999',inventory_page
+                assert inventory_page['items'][0]['evidence']=='HISTORICAL_READ_ONLY',inventory_page
+                assert inventory_command(after,{'type':'SYNC_ACCOUNT','params':{
+                    'accountId':'fixture_inventory_01','expectedRevision':2}}).get('ok') is not True
+                call('POST',f'/session/{after}/url',{'url':url+'#generators'})
+                for _ in range(40):
+                    view=execute(after,"return {rows:document.querySelectorAll('#pcms-generators-rows tr').length, "
+                        "count:document.getElementById('pcms-generator-count')?.textContent||'', "
+                        "sync:document.getElementById('pcms-generator-sync')?.disabled}")
+                    if '1250' in view.get('count',''):break
+                    time.sleep(.15)
+                assert view.get('rows')==50 and '1250' in view.get('count',''),view
+                execute(after,"document.getElementById('pcms-generator-next').click();return true")
+                for _ in range(40):
+                    pagination=execute(after,"return document.getElementById('pcms-generator-count')?.textContent||''")
+                    if '51–100' in pagination:break
+                    time.sleep(.15)
+                assert '51–100' in pagination,pagination
+                print('B I04_REAL_IDB_1250_FILTER_PAGINATION_OWNER_HOLD=PASS',flush=True)
                 synthetic=canonical_probe(after)
                 assert synthetic.get('created',{}).get('ok') is True,synthetic
                 assert synthetic.get('prepared',{}).get('operation',{}).get('status')=='PREPARED',synthetic

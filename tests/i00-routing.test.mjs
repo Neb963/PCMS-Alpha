@@ -40,12 +40,13 @@ test('new PCMS actions remain disabled, without network or browser mutation APIs
   }
   assert.doesNotMatch(shell, /\b(?:browser|chrome|fetch|XMLHttpRequest|WebSocket|navigator\.sendBeacon)\s*\./);
   assert.match(html, /PersonaMonkey advanced controls/);
-  assert.match(html, /I03 · Local account binding · Provider effects OFF/);
+  assert.match(html, /I04 · Read-only inventory · Provider effects OFF/);
   assert.match(html, /Emergency redacted diagnostics/);
   assert.match(html, /id="pcms-enroll" disabled/);
   assert.match(html, /id="pcms-create-persona" disabled/);
   assert.match(html, /id="pcms-accounts-list"/);
-  assert.match(html, /accounts.mjs/);
+  assert.match(html, /accounts-view\.mjs/);
+  assert.match(html, /inventory-view\.mjs/);
   for (const name of ['Reserve generator','Start action','Start refresh'])
     assert.match(html, new RegExp('<button[^>]*disabled[^>]*>'+name+'</button>'));
 

@@ -13,7 +13,7 @@
     <header class="topbar">
       <button class="menu" type="button" id="menu" aria-expanded="false" aria-controls="navigation">Menu</button>
       <div class="identity"><strong>PCMS</strong><span>Alpha</span></div>
-      <span class="phase">I03 · Guarded accounts · Provider effects OFF</span>
+      <span class="phase">I04 · Owned inventory · Provider effects OFF</span>
       <a class="advanced" href="../options/options.html" id="advanced">PersonaMonkey advanced controls <span aria-hidden="true">↗</span></a>
     </header>
     <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
@@ -28,10 +28,11 @@
       <p class="sidebar-note">Provider, Git source and scheduler effects remain disabled.</p>
     </aside>
     <main id="main" tabindex="-1" aria-label="Current PCMS workspace">
-      <div class="system-status" role="status" aria-live="polite" id="navigation-status">I03 · Local account binding · Provider effects OFF</div>
+      <div class="system-status" role="status" aria-live="polite" id="navigation-status">I04 · Read-only inventory · Provider effects OFF</div>
       <div id="unknown-route" class="notice" role="status" hidden>Unknown workspace. Showing Overview without changing any data.</div>
       <section class="workspace" id="view-overview" data-view="overview" aria-labelledby="heading-overview">
-        <header class="workspace-head"><div><p class="eyebrow">Workspace / 01</p><h1 id="heading-overview" tabindex="-1">Overview</h1><p>Operational evidence and actions will appear when their verified components exist.</p></div></header>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 01</p><h1 id="heading-overview" tabindex="-1">Overview</h1><p>Local inventory and guarded read-only account state. Provider writes remain disabled.</p></div></header>
+        <p id="pcms-overview-inventory" role="status" aria-live="polite">Inventory counts pending. No live owner status inferred.</p>
         <div class="notice" role="status"><strong>Provider effects disabled</strong><p>Local operation journaling and a fail-closed command boundary are installed. Account binding and manual login are enabled, but remote identity verification and provider mutation remain unavailable. Missing observations do not imply no incidents.</p></div>
         <section class="panel" aria-labelledby="runtime-health-title"><div class="panel-head"><h2 id="runtime-health-title">Background guard</h2><span class="unknown" id="pcms-guard-badge">Checking</span></div><p id="pcms-guard-health" role="status">Runtime evidence unavailable until checked. Provider actions remain off.</p></section>
         <section class="panel" aria-labelledby="journal-title"><div class="panel-head"><h2 id="journal-title">Canonical journal</h2><span class="unknown">Effects OFF</span></div><p id="pcms-journal-health" role="status">Checking isolated canonical storage.</p><a href="emergency.html">Open emergency diagnostics</a></section>
@@ -39,7 +40,14 @@
       </section>
       <section class="workspace" id="view-generators" data-view="generators" aria-labelledby="heading-generators" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 02</p><h1 id="heading-generators" tabindex="-1">Generators</h1><p>Generator inventory and source lineage.</p></div><button disabled type="button" aria-describedby="blocked-generators">Reserve generator</button></header>
-        <section class="panel" aria-labelledby="generators-table-title"><div class="panel-head"><h2 id="generators-table-title">Inventory</h2><span class="unknown">Source unavailable</span></div><div class="table-wrap" role="region" aria-label="Generators table" tabindex="0"><table><thead><tr><th scope="col">Generator</th><th scope="col">Account</th><th scope="col">Source</th><th scope="col">Evidence</th></tr></thead><tbody><tr><td colspan="4" class="empty">Inventory not connected; no records are asserted.</td></tr></tbody></table></div><p id="blocked-generators" class="reason">Disabled: reservation, discovery and remote source operations belong to later phases.</p></section>
+        <section class="panel" aria-labelledby="generators-table-title"><div class="panel-head"><h2 id="generators-table-title">Owned inventory observations</h2><span class="unknown">Historical local evidence · Read only</span></div>
+          <div class="account-controls"><label for="pcms-generator-query">Search slug or account</label><input id="pcms-generator-query" type="search" maxlength="80" autocomplete="off" placeholder="Search inventory">
+          <label for="pcms-generator-owner-filter">Owner evidence</label><select id="pcms-generator-owner-filter"><option value="ALL">All</option><option value="OBSERVED_OWNER">Previously verified</option><option value="OWNER_UNVERIFIED">Unknown</option><option value="OWNER_DISPUTED">Disputed</option><option value="UNOBSERVED">Unobserved</option><option value="IDENTITY_CONFLICT">Identity conflict</option><option value="OWNER_CONFLICT">Account conflict</option></select><button type="button" id="pcms-generator-refresh">Refresh local data</button></div>
+          <div class="account-controls"><label for="pcms-generator-account">Read-only remote Sync</label><select id="pcms-generator-account"><option value="">Loading accounts</option></select><button type="button" id="pcms-generator-sync" disabled>Sync verified account</button></div>
+          <p id="pcms-inventory-feedback" role="status" aria-live="polite">Loading local observations. No current ownership inferred.</p>
+          <div class="table-wrap" role="region" aria-label="Generator inventory results" tabindex="0"><table><thead><tr><th scope="col">Generator</th><th scope="col">Account binding</th><th scope="col">Owner evidence</th><th scope="col">Visibility / source</th></tr></thead><tbody id="pcms-generators-rows"><tr><td colspan="4" class="empty">Loading canonical inventory.</td></tr></tbody></table></div>
+          <div class="account-controls"><span id="pcms-generator-count" role="status">No verified rows</span><button type="button" id="pcms-generator-prev" disabled>Previous page</button><button type="button" id="pcms-generator-next" disabled>Next page</button></div>
+          <p id="blocked-generators" class="reason">Reservation, adoption and provider writes are disabled. Read-only Sync uses the existing donor-guarded isolated browser observer and can hold on an unavailable or changed session. Edit keys and collaboration cannot prove ownership; historical observations never authorize writes. Missing generator observations never mean deletion.</p></section>
       </section>
       <section class="workspace" id="view-work-queue" data-view="work-queue" aria-labelledby="heading-work-queue" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 03</p><h1 id="heading-work-queue" tabindex="-1">Work Queue</h1><p>Evidence-backed operator decisions and task receipts.</p></div><button type="button" disabled aria-describedby="blocked-work-queue">Start action</button></header>
@@ -74,11 +82,12 @@
         <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">All off</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Off — not implemented</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup, restore and AI tests</dt><dd>Off — not implemented</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No provider settings or operation commands can be changed here. PersonaMonkey retains advanced security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
       </section>
     </main>
-    <footer class="footer"><span>PCMS Alpha · Stage I03</span><span>UI navigation available · PCMS side effects disabled</span></footer>
+    <footer class="footer"><span>PCMS Alpha · Stage I04</span><span>UI navigation available · PCMS side effects disabled</span></footer>
   </div>
   <script type="module" src="shell.mjs"></script>
   <script type="module" src="health.mjs"></script>
   <script type="module" src="operations.mjs"></script>
-  <script type="module" src="accounts.mjs"></script>
+  <script type="module" src="accounts-view.mjs"></script>
+  <script type="module" src="inventory-view.mjs"></script>
 </body>
 </html>
