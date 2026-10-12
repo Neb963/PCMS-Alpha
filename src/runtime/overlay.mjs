@@ -41,7 +41,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -100,6 +100,35 @@ attachPcmsGuard({
       return {ok:false,code:'ISOLATED_OBSERVER_FAILED'};
     return results[0].result;
   },
+  supplyIsolatedTab: async ({personaUid,cookieStoreId,routeId},request) => {
+    // Donor owns which Persona tab may perform this ONE fixed request.
+    // No UI-controlled tab IDs, URL, world, script body or native calls.
+    const before=await getState(),profile=before.profiles?.[cookieStoreId];
+    if(!profile||profile.personaUid!==personaUid||profile.routeId!==routeId||
+       routeId==='direct'||routeId==='block'||before.routes?.[routeId]?.enabled===false)
+      return {ok:false,code:'PERSONA_ROUTE_CHANGED'};
+    const tabs=await browser.tabs.query({cookieStoreId});
+    const matching=tabs.filter(t=>t.cookieStoreId===cookieStoreId&&
+      typeof t.url==='string'&&(()=>{
+        try{return new URL(t.url).origin==='https://perchance.org';}
+        catch{return false;}
+      })());
+    if(!matching.length)return {ok:false,code:'NO_PERCHANCE_TAB'};
+    const tab=matching.find(t=>t.active)||matching[0];
+    const result=await browser.scripting.executeScript({
+      target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
+      func:perchanceSupplyIsolated,args:[request]
+    });
+    const after=await browser.tabs.get(tab.id),state=await getState();
+    if(after.cookieStoreId!==cookieStoreId||
+       !after.url?.startsWith('https://perchance.org/')||
+       state.profiles?.[cookieStoreId]?.personaUid!==personaUid||
+       state.profiles?.[cookieStoreId]?.routeId!==routeId)
+      return {ok:false,code:'POST_EFFECT_TAB_OR_ROUTE_CHANGED'};
+    if(result?.length!==1||result[0].frameId!==0||result[0].error)
+      return {ok:false,code:'SUPPLY_INJECTION_UNVERIFIED'};
+    return result[0].result;
+  },
   openHumanLogin: async ({personaUid,cookieStoreId,routeId}) =>
     localMutationFence(cookieStoreId,async()=>{
       const state=await getState(), p=state.profiles?.[cookieStoreId];
@@ -113,7 +142,7 @@ attachPcmsGuard({
 function localMutationFence(profileIds, operation, mode = "block", options = {}) {`,
     'donor guard host');
   await writeFile(bgPath, bg);
-  for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs']) {
+  for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-boundary.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }
 }
