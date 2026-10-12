@@ -50,10 +50,19 @@ function txRead(db,slug){
           row.ownerState!=='OBSERVED_OWNER'){
           out=fail('SOURCE_ASSOCIATION_STALE');return;
         }
-        out={ok:true,link:{slug:link.slug,folder:link.folder,accountId:link.accountId,
-          fingerprint:link.fingerprint,testingSha:link.testingSha,
-          mainHead:link.mainHead,readyAtInspection:link.readyAtInspection,
-          revision:link.revision,source:'HISTORICAL_GIT_INSPECTION'}};
+        t.objectStore('meta').get('account:'+row.accountId).onsuccess=a=>{
+          const account=a.target.result?.account;
+          if(!account||account.state!=='VERIFIED'||account.revision!==row.accountRevision||
+             account.personaUid!==row.personaUid||account.bindingVersion!==row.bindingVersion||
+             account.identity?.source!=='GUARDED_SESSION_READBACK'||
+             account.identity?.bindingVersion!==row.bindingVersion) {
+            out=fail('SOURCE_ASSOCIATION_STALE');return;
+          }
+          out={ok:true,link:{slug:link.slug,folder:link.folder,accountId:link.accountId,
+            fingerprint:link.fingerprint,testingSha:link.testingSha,
+            mainHead:link.mainHead,readyAtInspection:link.readyAtInspection,
+            revision:link.revision,source:'HISTORICAL_GIT_INSPECTION'}};
+        };
       };
     };
   });
@@ -71,6 +80,8 @@ function txAssociate(db,slug,expectedRevision,snapshot){
       m.get('account:'+row.accountId).onsuccess=a=>{
         const account=a.target.result?.account;
         if(!account||account.state!=='VERIFIED'||account.identity?.source!=='GUARDED_SESSION_READBACK'||
+          account.identity?.bindingVersion!==row.bindingVersion||
+          account.revision!==row.accountRevision||
           account.bindingVersion!==row.bindingVersion||
           account.personaUid!==row.personaUid) {out=fail('ACCOUNT_CONTEXT_CHANGED');return;}
         m.openCursor().onsuccess=e=>{

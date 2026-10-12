@@ -71,9 +71,9 @@ window.addEventListener('pcms-source-target',async event=>{
       '). Inspect a folder and confirm one-to-one mapping; no provider changes.');
   }catch{if(generation===mine)announce('Local association unavailable. No source inferred.');}
 });
-folder.addEventListener('input',()=>{preview=null;show(null);controls();});
-token.addEventListener('input',()=>{preview=null;controls();});
-clear.addEventListener('click',()=>{token.value='';preview=null;controls();announce('Token cleared; no source capability stored.');});
+folder.addEventListener('input',()=>{++generation;preview=null;show(null);controls();});
+token.addEventListener('input',()=>{++generation;preview=null;controls();});
+clear.addEventListener('click',()=>{++generation;token.value='';preview=null;controls();announce('Token cleared; no source capability stored.');});
 inspect.addEventListener('click',async()=>{
   const mine=++generation;preview=null;busy=true;controls();show(null);
   announce('Inspecting read-only pinned Git main; no commits or source edits…');
