@@ -1,15 +1,22 @@
-# I05 — GitHub READY inspection and source association (WIP)
+# I05 — GitHub READY inspection and explicit source association
 
-Phase I05 only, following verified I04 main `d90d9e24ea4369083059fd1e0c0faca4689384fc`.
+## Bounded implementation
+The I05 implementation is a **read-only** Git source inspection path for the *single fixed* private repository `Neb963/per-gens`, authoritative branch `main`. The operator supplies a fine-grained GitHub **Contents: Read-only** token in a password field for an on-demand inspection; it is not persisted, exported to diagnostics, or supplied to CI. The source folder is explicitly selected, independent of the generator slug, and can be located under any safe configurable relative root. The UI offers inspect, confirm one-to-one mapping and recheck, but no Git initialization/commit or provider write.
 
-## Authority and holds
+The inspector checks an actual commit/tree from `refs/heads/main`, rejects absent or ambiguous HEAD, truncated trees, traversal/encoded separators, unsupported modes (including symlinks/submodules), alias paths and malformed/mismatched Git blobs. It independently retrieves the exact bytes for each file in the selected folder, checks Git blob SHA-1, calculates a versioned SHA-256 byte/length/path manifest including binary assets, requires exactly `Status: READY` in `DEPLOYMENT.md` **plus nonempty** `main.pjs` and `index.html`, and separately pins optional `TESTING.md`. README alone or metadata alone never grants READY. Missing `main` returns `GITHUB_UNINITIALIZED` / `SOURCE_PENDING` with **zero attempted initialization**.
 
-No access to or initialization of private `Neb963/per-gens` without separate operator action. No provider changes, no application Git writes or publication. The implemented interface is a read-only, explicit Git snapshot inspection and canonical association path; `main` is authoritative, not a folder label or cached UI status. Missing `main` maps to GITHUB_UNINITIALIZED/SOURCE_PENDING, never READY.
+Canonical association uses the existing PCMS IndexedDB `meta` + causal `events` and restore hold. A source mapping is admitted only for a target's expected inventory revision and independently observed owner, current verified account/Persona binding/identity revision and a freshly re-fetched matching Git source/testing fingerprint. Folder collisions and implicit reassociation are held; persisted mapping is historical provenance, **never** a current release/owner grant. Recheck compares relevant full deployable byte manifest, strict READY and frozen testing inputs across HEAD revisions. Unrelated HEAD changes alone do not invalidate identical source; READY revoke/source byte drift does. Changed TESTING inputs remain pinned to already-started jobs but must be adopted explicitly by new jobs. Sensitive tokens are never stored.
 
-## Contracts
+The `src/runtime/source-boundary.mjs` same-XPI extension-page port only permits `GET_ASSOCIATION`, `INSPECT_SOURCE`, `ASSOCIATE_SOURCE`, and `RECHECK_SOURCE`; all other commands, including writes/bootstrap/publish, return `CAPABILITY_OFF`. The unmodified donor retains protected routing/native ownership. No live `per-gens`, Perchance, Cloudflare or Mullvad access or mutation occurred.
 
-P53-01 (empty main read-only slice), P53-02 (explicit folder/target association and hostile paths), P53-03 (READY, complete source files and relevant drift), S6-I05-EMPTY-GIT and S6-I05-ASSOCIATION; UX-04/UX-05. Require independent synthetic Git DAG and zero-write oracle, guarded DB revision/pinned-target checks, and installed-XPI Firefox B coverage.
+## Verification and evidence boundary
+- **F:** Synthetic Git DAG/tree and independent zero-write transport ledger exercise P53-01 empty `main`, P53-02 path/mode/collision, P53-03 READY and relevant vs unrelated HEAD drift, supplementary S6-I05-EMPTY-GIT/S6-I05-ASSOCIATION and previous fast/donor regressions. Exact Git blob hashes and binary asset length/content are validated; adverse endpoint behaviors return scoped holds. The operator's actual private repository and token are never used.
+- **B:** Packaged persistently installed Firefox Developer Edition 154.0b10, original Gecko ID `persona-route-manager@local`, real IndexedDB source mapping, duplicate/collision, identity rotation, source recheck/drift, extension-port disabled writes, UI controls and retained previous cold-wake/donor smoke. Synthetic inspection injected into packaged code in isolated profile; **not** positive live GitHub credential/remote readback.
+- **X:** Separate broader cross-system fault-chain suite NOT_RUN in I05. **H/live:** NOT_RUN; provider/user-owned source activation remains future operator authorization where required.
+- **CI/main:** See exact current-merge-candidate GitHub run and postmerge main run for executed PASS, XPI hash, and protected squash SHA; this file intentionally does not contain future refs.
 
-## Recovery
-
-Record final candidate sha, CI evidence tiers, hash and capability holds when known. Do not treat code or synthetic Git proof as permission to access private per-gens or enable application writeback.
+## Holds and recovery
+- No authorization to initialize or access `Neb963/per-gens`; no real READY state, current Git credentials or private source confirmed. Any missing main, unavailable API, truncated tree, unsupported content, changed target/owner or ambiguous head returns `SOURCE_PENDING`/scoped held status. Do **not** turn these activation unknowns into an implementation blocker.
+- Historical source association and prior READY alone never authorize staging, adoption, source writeback, mutation or publication. I06+ effects remain OFF. No private Git remote effects or developer-agent tests against operator accounts.
+- If response/transaction acknowledgment is lost, reload canonical mapping; do not claim a duplicate or blindly rebind. If operator identity rotates, old source association holds until reviewed.
+- The public implementation repository branch/PR is separate from the private `per-gens` application Git source.
