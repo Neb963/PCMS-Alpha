@@ -141,12 +141,12 @@ query.addEventListener('input',()=>{
   clearTimeout(debounce);debounce=setTimeout(()=>{offset=0;void load();},180);
 });
 filter.addEventListener('change',()=>{offset=0;void load();});
-reload.addEventListener('click',()=>{// Dashboard routes reuse one document. Revalidate the canonical projection
+reload.addEventListener('click',()=>{void loadAccounts();void load();});
+// Dashboard routes reuse one document. Revalidate the canonical projection
 // whenever an operator revisits Generators; old observations are not live.
 window.addEventListener('hashchange',()=>{
   if(location.hash==='#generators'){void loadAccounts();void load();}
 });
-void loadAccounts();void load();});
 before.addEventListener('click',()=>{offset=Math.max(0,offset-limit);void load();});
 after.addEventListener('click',()=>{if(offset+limit<total){offset+=limit;void load();}});
 void loadAccounts();void load();
