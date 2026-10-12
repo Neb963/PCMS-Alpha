@@ -140,5 +140,11 @@ test('I04 F: packaged entry points include read-only worker and UI, no unsafe ob
   assert.doesNotMatch(boundary,/fetch\s*\(|sendNativeMessage|XMLHttpRequest/);
   for (const id of ['pcms-generator-query','pcms-generator-owner-filter','pcms-generators-rows',
     'pcms-generator-prev','pcms-generator-sync'])assert.match(html,new RegExp('id="'+id+'"'));
+  // Never let a staged runtime file silently replace its UI counterpart.
+  assert.match(html,/src="accounts-view\\.mjs"/);
+  assert.match(html,/src="inventory-view\\.mjs"/);
+  assert.doesNotMatch(html,/src="accounts\\.mjs"/);
+  assert.doesNotMatch(html,/src="inventory\\.mjs"/);
+  assert.match(overlay,/'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs'/);
   assert.match(html,/Provider effects OFF|provider writes OFF|Provider effects disabled/);
 });
