@@ -1,6 +1,6 @@
 // I06 immutable supply planning and conservative effect receipts.
 // Pure logic: neither a UI claim nor a provider response is authorization.
-export const SUPPLY_SLUG=/^[a-z0-9][a-z0-9-]{2,98}[a-z0-9]$/;
+export const SUPPLY_SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const ID=/^[a-zA-Z0-9_-]{8,100}$/;
 const SAFE_STATE=new Set(['REJECTED','FROZEN','CREATE_PREPARED',
   'CREATE_DISPATCH_POSSIBLE','CREATE_UNCERTAIN','CREATE_OBSERVING',
