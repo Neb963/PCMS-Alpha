@@ -6,9 +6,10 @@ import {createSupplyStore} from './supply-store.mjs';
 import {createAccountStore} from './accounts.mjs';
 import {freezeSupply,validateOwnerContext,publicSupply} from './supply-plan.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
+import {writeNonReadyFolder,markerRequestAllowed} from './supply-git.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 export const SUPPLY_PORT='pcms-i06-supply';
-const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM']);
+const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM','FINISH_SOURCE_FOLDER']);
 const hex=/^[a-f0-9]{64}$/;
 export function validateSupplyMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
@@ -23,6 +24,7 @@ export function validateSupplyMessage(api,sender,message){
     ?['accountId','expectedAccountRevision','slugs','batchId']:
     message.type==='GET_BATCH'?['batchId']:
     message.type==='LIST_BATCHES'?[]:
+    message.type==='FINISH_SOURCE_FOLDER'?['batchId','itemId','expectedRevision','token']:
     ['batchId','itemId','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
   if(message.type==='PREVIEW'||message.type==='FREEZE'){
@@ -33,10 +35,12 @@ export function validateSupplyMessage(api,sender,message){
       return fail('INVALID_PARAMS');
   }else if(message.type==='GET_BATCH'&&!isSafeId(p.batchId))
     return fail('INVALID_PARAMS');
-  else if(message.type==='EXECUTE_ITEM'&&
+  else if(['EXECUTE_ITEM','FINISH_SOURCE_FOLDER'].includes(message.type)&&
     (!isSafeId(p.batchId)||!isSafeId(p.itemId)||
      !Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
     return fail('INVALID_PARAMS');
+  if(message.type==='FINISH_SOURCE_FOLDER'&&
+    (typeof p.token!=='string'||p.token.length>512))return fail('INVALID_PARAMS');
   return {ok:true};
 }
 async function fingerprint(parts){
@@ -54,7 +58,7 @@ export function createSupplyBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,
   // Deliberately OFF in packaged extension. Tests must explicitly supply
   // an independently controlled synthetic gate and fake isolated executor.
-  effectGate=()=>false,
+  effectGate=()=>false,gitGate=()=>false,gitWrite=writeNonReadyFolder,
   makeStores=db=>({supply:createSupplyStore(db),accounts:createAccountStore(db)})
 }={}){
   let dbPromise;
@@ -175,6 +179,53 @@ export function createSupplyBoundary(api,{
     }
     return redacted(confirmed);
   }
+  async function finishSource(s,p){
+    const found=await s.supply.get(p.batchId);
+    if(!found.ok)return found;
+    const b=found.batch,item=b.items.find(x=>x.itemId===p.itemId);
+    if(!item)return fail('ITEM_NOT_FOUND');
+    if(item.revision!==p.expectedRevision)return fail('STALE_REVISION');
+    if(!['PROVIDER_CONFIRMED','SOURCE_PENDING'].includes(item.state))
+      return fail(item.state.startsWith('GIT_')?'RECONCILIATION_REQUIRED':'NOT_ADMISSIBLE');
+    const foundAccount=await s.accounts.get(b.accountId);
+    if(!foundAccount.ok||!validateOwnerContext(b,foundAccount.account).ok)
+      return fail('ACCOUNT_STALE');
+    const params={token:p.token,slug:item.requestedSlug,folder:'gens/'+item.requestedSlug};
+    if(!markerRequestAllowed(params).ok)return fail('GITHUB_WRITE_TOKEN_REQUIRED');
+    if(gitGate({account:foundAccount.account,batch:b,item})!==true)
+      return fail('GIT_WRITE_ACTIVATION_HELD');
+    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+    const id='source_'+crypto.randomUUID().replaceAll('-','');
+    const fp=await fingerprint({kind:'GIT_MARKER',batchId:b.batchId,
+      itemId:item.itemId,slug:item.requestedSlug,remoteId:item.remoteId,
+      accountRevision:b.accountRevision,bindingVersion:b.bindingVersion,
+      folder:params.folder});
+    let at=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
+      expectedRevision:item.revision,event:'GIT_PREPARED',
+      operationId:id,fingerprint:fp});
+    if(!at.ok)return at;
+    const current=await s.accounts.get(b.accountId);
+    if(!current.ok||!validateOwnerContext(b,current.account).ok||
+       (await sentinel.inspect()).held)return fail('PREPARED_HELD');
+    at=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
+      expectedRevision:at.item.revision,event:'GIT_DISPATCH_POSSIBLE'});
+    if(!at.ok)return at;
+    let proof;
+    try{proof=await gitWrite(params);}catch{proof={ok:false};}
+    if(!proof?.ok||proof.source!=='GIT_READBACK'||proof.ready!==false||
+       proof.emptyFolder!==true||proof.folder!==params.folder){
+      await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
+        expectedRevision:at.item.revision,event:'GIT_UNCERTAIN'});
+      return fail('GIT_WRITE_UNCERTAIN');
+    }
+    const observing=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
+      expectedRevision:at.item.revision,event:'GIT_OBSERVING'});
+    if(!observing.ok)return fail('GIT_WRITE_UNCERTAIN');
+    const confirmed=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
+      expectedRevision:observing.item.revision,event:'SOURCE_CONFIRMED',
+      proof});
+    return confirmed.ok?redacted(confirmed):fail('GIT_WRITE_UNCERTAIN');
+  }
   async function run(message,sender){
     const allowed=validateSupplyMessage(api,sender,message);
     if(!allowed.ok)return allowed;
@@ -193,6 +244,7 @@ export function createSupplyBoundary(api,{
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(message.type==='PREVIEW'||message.type==='FREEZE')
         return await frozenPlan(s,p,message.type==='PREVIEW');
+      if(message.type==='FINISH_SOURCE_FOLDER')return await finishSource(s,p);
       return await execute(s,p);
     }catch{return fail('SUPPLY_CANONICAL_UNAVAILABLE');}
   }
