@@ -133,10 +133,21 @@ def observer_isolation_probe(session):
               if(current.status==='complete')break;
               await new Promise(r=>setTimeout(r,100));
             }
-            const out=await browser.scripting.executeScript({
-              target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
-              func:perchanceReadIsolated,args:[{}]
-            });
+            const permissions=await browser.permissions.getAll();
+            const target=await browser.tabs.get(tab.id);
+            let out;
+            try{
+              out=await browser.scripting.executeScript({
+                target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
+                func:perchanceReadIsolated,args:[{}]
+              });
+            }catch(e){
+              done({error:String(e).slice(0,180),targetUrl:target.url,
+                targetStatus:target.status,origins:permissions.origins,
+                hasExplicitOrigin:await browser.permissions.contains({
+                  origins:['http://127.0.0.1/*']})});
+              return;
+            }
             done({count:out.length,frameId:out[0]?.frameId,
               rejected:out[0]?.result,scriptError:Boolean(out[0]?.error)});
           }finally{await browser.tabs.remove(tab.id);}
