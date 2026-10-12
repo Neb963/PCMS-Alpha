@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { transitionAccount, publicAccount } from '../src/runtime/accounts.mjs';
-import { validateAccountMessage } from '../src/runtime/account-boundary.mjs';
+import { validateAccountMessage, guardedIdentityRead } from '../src/runtime/account-boundary.mjs';
 import { createPersonaGuard } from '../src/runtime/persona-guard.mjs';
 
 const personaA='persona-aaaa-0001', personaB='persona-bbbb-0002';
@@ -161,6 +161,40 @@ test('S6-I03-BINDING-EXCLUSIVITY F: guard rejects Direct, revoked lease and unve
   assert.equal((await guard.acquireConflictGuard(personaA)).code,'DONOR_LEASE_BUSY_OR_REVOKED');
   assert.equal((await guard.createProtectedPersona('Good','direct')).code,'PROTECTED_ROUTE_UNAVAILABLE');
   assert.equal((await guard.createProtectedPersona('Good','route-safe')).created,true);
+});
+
+
+test('S6-I03-BINDING-EXCLUSIVITY F: guarded identity observer is re-fenced after async route/container rotation',async()=>{
+  let routeId='route-alpha', cookieStoreId='firefox-container-1', called=0;
+  const guard={async getSafeRouteReadiness(uid){
+    return {ready:true,code:'GUARD_READY',personaUid:uid,routeId,cookieStoreId};
+  }};
+  const reader=async before=>{
+    called++;
+    assert.equal(before.personaUid,personaA);
+    routeId='route-beta';
+    return proof(personaA);
+  };
+  const changed=await guardedIdentityRead(guard,personaA,reader);
+  assert.equal(changed.code,'SESSION_CONTEXT_CHANGED');
+  assert.equal(called,1,'one bounded readback never retries under changed route');
+  routeId='route-alpha';
+  const matched=await guardedIdentityRead(guard,personaA,async()=>proof(personaA));
+  assert.equal(matched.ok,true);
+  cookieStoreId='firefox-container-2';
+  const rotated=await guardedIdentityRead(guard,personaA,async()=>{
+    cookieStoreId='firefox-container-3';
+    return proof(personaA);
+  });
+  assert.equal(rotated.code,'SESSION_CONTEXT_CHANGED');
+  assert.equal((await guardedIdentityRead(guard,personaA,async()=>null)).code,
+    'SESSION_IDENTITY_UNOBSERVABLE');
+  assert.equal((await guardedIdentityRead(guard,personaA,async()=>({
+    ...proof(personaA),source:'UI_DECLARATION'
+  }))).code,'INDEPENDENT_IDENTITY_PROOF_REQUIRED');
+  const down={getSafeRouteReadiness:async()=>({ready:false,code:'DIRECT_FORBIDDEN'})};
+  assert.equal((await guardedIdentityRead(down,personaA,async()=>proof(personaA))).code,
+    'DIRECT_FORBIDDEN');
 });
 
 test('I03 F: packaged entry includes accounted new modules but donor remains immutable',async()=>{
