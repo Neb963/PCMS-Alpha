@@ -100,7 +100,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
       donorReady: securityState.ready === true,
       privacySafe: securityState.privacySafe === true,
       providerEffects: 'OFF',
-      admission: 'HELD_UNTIL_DURABLE_JOURNAL'
+      admission: 'HELD_UNTIL_OWNER_VERIFICATION'
     })
   });
 }

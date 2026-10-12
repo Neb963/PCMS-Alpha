@@ -40,5 +40,6 @@ test('new PCMS actions remain disabled, without network or browser mutation APIs
   }
   assert.doesNotMatch(shell, /\b(?:browser|chrome|fetch|XMLHttpRequest|WebSocket|navigator\.sendBeacon)\s*\./);
   assert.match(html, /PersonaMonkey advanced controls/);
-  assert.match(html, /No PCMS data connection/);
+  assert.match(html, /I02 · Local journal diagnostics · Provider effects OFF/);
+  assert.match(html, /Emergency redacted diagnostics/);
 });
