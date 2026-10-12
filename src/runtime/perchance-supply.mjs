@@ -5,7 +5,7 @@
 // DISPATCH_POSSIBLE and exact owner/route/restore/capability verification.
 export async function perchanceSupplyIsolated(request) {
   const hold=code=>({ok:false,code});
-  const slug=x=>typeof x==='string'&&/^[a-z0-9][a-z0-9-]{2,98}[a-z0-9]$/.test(x);
+  const slug=x=>typeof x==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(x);
   const safeId=x=>typeof x==='string'&&/^[a-zA-Z0-9_-]{8,100}$/.test(x);
   const hex=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
   if(location.origin!=='https://perchance.org')return hold('WRONG_ORIGIN');
