@@ -139,6 +139,61 @@ def supply_isolated_wrong_origin(session):
                 {'script':script,'args':[]},timeout=30)
 
 
+
+def supply_effect_idb_probe(session):
+    # Actual installed Firefox IndexedDB journal with strictly injected fake
+    # Perchance/owner/Git ledgers. No live account or external effect.
+    script = '''const done=arguments[arguments.length-1];
+    (async()=>{
+      const {createSupplyBoundary}=await import('./supply-boundary.mjs');
+      const api={runtime:browser.runtime,storage:browser.storage};
+      const sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')+'#generators'};
+      const effects=[];
+      const guard={
+        getSafeRouteReadiness:async()=>({ready:true,
+          personaUid:'persona-fixture-0001',cookieStoreId:'fixture-container',
+          routeId:'fixture-protected'}),
+        runSupplyStep:async (persona,req)=>{
+          if(persona!=='persona-fixture-0001')throw Error('Wrong fake persona');
+          effects.push(req.kind);
+          if(req.kind==='CREATE')
+            return {ok:true,ack:'CREATED',temporarySlug:'temp-fake-01'};
+          if(req.kind==='READ_CREATE')
+            return {ok:true,source:'INDEPENDENT_READBACK',privateEmpty:true,
+              ownerMatches:true,temporarySlug:'temp-fake-01',remoteId:'remote_fake_0001'};
+          if(req.kind==='RENAME')return {ok:true,ack:'RENAMED'};
+          if(req.kind==='READ_RENAME')
+            return {ok:true,source:'INDEPENDENT_READBACK',privateEmpty:true,
+              ownerMatches:true,slug:req.slug,previousSlug:req.temporarySlug,
+              remoteId:req.remoteId};
+          throw Error('Unknown fake effect kind');
+        }
+      };
+      const boundary=createSupplyBoundary(api,{guard:()=>guard,
+        effectGate:()=>true,gitGate:()=>true,
+        gitWrite:async ({folder,slug,token})=>{
+          if(token!=='offline-git-write-token')throw Error('Wrong fixture token');
+          effects.push('GIT_MARKER');
+          return {ok:true,source:'GIT_READBACK',ready:false,emptyFolder:true,folder};
+        }});
+      const itemId='batch_browser_0002_001',batchId='batch_browser_0002';
+      async function effect(revision){
+        return boundary.run({type:'EXECUTE_ITEM',params:{batchId,itemId,
+          expectedRevision:revision}},sender);
+      }
+      const created=await effect(1);
+      const renamed=await effect(created.revision);
+      const linked=await boundary.run({type:'FINISH_SOURCE_FOLDER',params:{
+        batchId,itemId,expectedRevision:renamed.revision,
+        token:'offline-git-write-token'}},sender);
+      const fromPort=await boundary.run({type:'GET_BATCH',params:{batchId}},sender);
+      done({created,renamed,linked,effects,
+        final:fromPort?.batch?.items?.find(x=>x.itemId===itemId)});
+    })().catch(e=>done({error:'I06_EFFECT_IDB_PROBE_FAILED',detail:String(e).slice(0,220)}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=60)
+
+
 def source_idb_probe(session):
     # A real packaged Firefox IDB transaction with an injected synthetic Git
     # snapshot. No live GitHub/per-gens request. F tests own Git byte semantics.
@@ -583,6 +638,23 @@ def main():
                 persisted=supply_command(after,{'type':'LIST_BATCHES'})
                 assert persisted.get('ok') is True and len(persisted['batches'])==2,persisted
                 print('B I06_REAL_IDB_FROZEN_BATCH_COLLISION_HOLDS_ZERO_PROVIDER_EFFECTS=PASS',flush=True)
+
+                # The same packaged XPI's real canonical store also exercises
+                # distinct fake CREATE, RENAME and GIT dispatch journals.
+                # Each fake returns an independent readback envelope.
+                effect_probe=supply_effect_idb_probe(after)
+                assert effect_probe.get('created',{}).get('state')=='CREATE_CONFIRMED',effect_probe
+                assert effect_probe.get('renamed',{}).get('state')=='SOURCE_PENDING',effect_probe
+                assert effect_probe.get('linked',{}).get('state')=='CONFIRMED',effect_probe
+                assert effect_probe.get('effects')==[
+                    'CREATE','READ_CREATE','RENAME','READ_RENAME','GIT_MARKER'],effect_probe
+                assert effect_probe.get('final',{}).get('state')=='CONFIRMED',effect_probe
+                same_again=supply_command(after,{'type':'EXECUTE_ITEM','params':{
+                    'batchId':'batch_browser_0002','itemId':'batch_browser_0002_001',
+                    'expectedRevision':effect_probe['linked']['revision']}})
+                assert same_again.get('code')=='NOT_ADMISSIBLE',same_again
+                print('B I06_REAL_IDB_FAKE_PROVIDER_AND_GIT_SEPARATE_MARKERS=PASS',flush=True)
+
 
 
                 # I05: real permanently installed XPI source port and canonical
