@@ -94,7 +94,36 @@
       "supplementaryAssertions": [
         "S6-I00-PACKAGING",
         "S6-I00-DONOR-SECURITY"
-      ]
+      ],
+      "completion": {
+        "phaseId": "I00",
+        "planRevision": "S7-AUDITED-DESIGN-1",
+        "proposedDisposition": "ACCEPTED_ON_VERIFIED_PROTECTED_MAIN_ONLY",
+        "claim": "Combined PersonaMonkey XPI with six navigable PCMS destinations and genuinely disabled new PCMS actions",
+        "requiredAssertions": [
+          "S6-I00-PACKAGING",
+          "S6-I00-DONOR-SECURITY",
+          "UX-01",
+          "UX-02"
+        ],
+        "executedEvidence": [
+          "F: signed Stage 7 29-member hash verification, 223-file pinned donor blob/mode/tree verification and negative mutations, ten I00 tests, inherited extension/native regressions",
+          "B: exact packaged combined XPI installed persistently in Firefox Developer Edition 154.0b10, surviving full restart with original Gecko ID, six routes, disabled actions, original advanced options",
+          "CI: same-run final candidate jobs baseline, fast, firefox, pcms-required all successful, with independently exercised docs-only and failing-dependency aggregate cases"
+        ],
+        "effects": {
+          "pcmsProviderWrites": "OFF",
+          "pcmsGitSourceWrites": "OFF",
+          "liveProviderAcceptance": "NOT_CLAIMED",
+          "donorRoutingProtection": "UNCHANGED"
+        },
+        "holds": [
+          "I01 and later capabilities OFF",
+          "Human/live provider proof not claimed",
+          "No protected CI-root autonomous auto-merge approval"
+        ],
+        "provenance": "Do not embed PR/head/merge commit SHA or future run IDs; correlate through immutable GitHub CI and actual merged main ref"
+      }
     },
     {
       "id": "I01",
