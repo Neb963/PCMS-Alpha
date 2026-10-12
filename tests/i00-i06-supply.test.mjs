@@ -61,6 +61,11 @@ test('P52-02 F: two distinct journalable effects and independent create/rename r
   assert.equal(item.state,'PROVIDER_CONFIRMED');
   item=step(item,'SOURCE_PENDING');
   assert.equal(moveSupply(item,'SOURCE_CONFIRMED',{source:'GIT_READBACK',
+    ready:false,emptyFolder:true,folder:'gens/alpha-slug'}).code,'NOT_ADMISSIBLE');
+  item=step(item,'GIT_PREPARED',{operationId:'git_marker_0001'});
+  item=step(item,'GIT_DISPATCH_POSSIBLE');
+  item=step(item,'GIT_OBSERVING');
+  assert.equal(moveSupply(item,'SOURCE_CONFIRMED',{source:'GIT_READBACK',
     ready:true,emptyFolder:true,folder:'gens/alpha-slug'}).code,'GIT_MARKER_PROOF_REQUIRED');
   item=step(item,'SOURCE_CONFIRMED',{source:'GIT_READBACK',ready:false,
     emptyFolder:true,folder:'gens/alpha-slug'});
