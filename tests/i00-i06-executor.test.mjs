@@ -20,7 +20,7 @@ function fixture({gate=true,failDispatch=false,lostAck=false,wrongOwner=false,
   denyRoute=false,staleIdentity=false,wrongReadback=false}={}){
   let current={...batch,items:batch.items.map(i=>({...i}))};
   let identity=staleIdentity?{...account,revision:3}:account;
-  const trace=[],remote=[];
+  const trace=[],remote=[],gitLedger=[];
   const stores={
     accounts:{get:async id=>id===account.accountId?
       {ok:true,account:identity}:{ok:false,code:'ACCOUNT_NOT_FOUND'}},
@@ -79,12 +79,19 @@ function fixture({gate=true,failDispatch=false,lostAck=false,wrongOwner=false,
     }
   };
   const boundary=createSupplyBoundary(api,{open:async()=>({}),
-    makeStores:()=>stores,guard:()=>guard,effectGate:()=>gate});
+    makeStores:()=>stores,guard:()=>guard,effectGate:()=>gate,
+    gitGate:()=>gate,gitWrite:async ({folder,slug,token})=>{
+      assert.equal(trace.at(-1),'GIT_DISPATCH_POSSIBLE');
+      assert.equal(folder,'gens/'+slug);
+      assert.equal(token,'offline-git-token-01');
+      gitLedger.push({path:folder+'/DEPLOYMENT.md',content:'Status: SOURCE_PENDING\\n'});
+      return {ok:true,source:'GIT_READBACK',ready:false,emptyFolder:true,folder};
+    }});
   const run=(type,params={})=>boundary.run({type,params},sender);
   const item=()=>current.items[0];
   const dispatch=()=>run('EXECUTE_ITEM',{batchId:current.batchId,itemId:item().itemId,
     expectedRevision:item().revision});
-  return {run,dispatch,item,remote,trace};
+  return {run,dispatch,item,remote,trace,gitLedger};
 }
 test('P52-02 F: two independent remote effects only after durable markers and readback',async()=>{
   const f=fixture();
@@ -110,6 +117,23 @@ test('P52-02 F: two independent remote effects only after durable markers and re
   assert.equal(view.ok,true);
   assert.equal(view.batch.items[0].state,'SOURCE_PENDING');
   assert.equal('remoteId' in view.batch.items[0],false);
+});
+test('P56-06 F: Git marker uses its own journal, no premature READY or duplicate write',async()=>{
+  const f=fixture();
+  assert.equal((await f.dispatch()).state,'CREATE_CONFIRMED');
+  assert.equal((await f.dispatch()).state,'SOURCE_PENDING');
+  const request=()=>f.run('FINISH_SOURCE_FOLDER',{batchId:batch.batchId,
+    itemId:f.item().itemId,expectedRevision:f.item().revision,token:'offline-git-token-01'});
+  const result=await request();
+  assert.equal(result.ok,true,result.code);
+  assert.equal(result.state,'CONFIRMED');
+  assert.equal(f.gitLedger.length,1);
+  assert.equal(f.gitLedger[0].path,'gens/requested-slug/DEPLOYMENT.md');
+  assert.deepEqual(f.trace.slice(-4),[
+    'GIT_PREPARED','GIT_DISPATCH_POSSIBLE','GIT_OBSERVING','SOURCE_CONFIRMED'
+  ]);
+  assert.equal((await request()).code,'NOT_ADMISSIBLE');
+  assert.equal(f.gitLedger.length,1);
 });
 test('P56-06 F: crash/abort before dispatch marker means independent zero effects',async()=>{
   const f=fixture({failDispatch:true});
