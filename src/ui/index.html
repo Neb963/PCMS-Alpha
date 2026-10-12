@@ -48,6 +48,18 @@
           <div class="table-wrap" role="region" aria-label="Generator inventory results" tabindex="0"><table><thead><tr><th scope="col">Generator</th><th scope="col">Account binding</th><th scope="col">Owner evidence</th><th scope="col">Visibility / source</th></tr></thead><tbody id="pcms-generators-rows"><tr><td colspan="4" class="empty">Loading canonical inventory.</td></tr></tbody></table></div>
           <div class="account-controls"><span id="pcms-generator-count" role="status">No verified rows</span><button type="button" id="pcms-generator-prev" disabled>Previous page</button><button type="button" id="pcms-generator-next" disabled>Next page</button></div>
           <p id="blocked-generators" class="reason">Reservation, adoption and provider writes are disabled. Read-only Sync uses the existing donor-guarded isolated browser observer and can hold on an unavailable or changed session. Edit keys and collaboration cannot prove ownership; historical observations never authorize writes. Missing generator observations never mean deletion.</p></section>
+        <section class="panel" aria-labelledby="pcms-supply-heading">
+          <div class="panel-head"><h2 id="pcms-supply-heading">Slug supply — canonical plan</h2><span class="unknown">Local freeze only · Provider held</span></div>
+          <p class="reason">Paste one exact generator slug per line (up to 100). Preview preserves order and spelling. Freezing records the requests for a verified Persona-bound account in IndexedDB; it does not create, rename, reserve remotely, or write to private Git. Existing and conflicting local slugs are rejected per item.</p>
+          <div class="account-controls"><label for="pcms-supply-account">Account</label>
+            <select id="pcms-supply-account"><option value="">Loading verified accounts</option></select>
+            <button type="button" id="pcms-supply-refresh">Reload accounts and receipts</button></div>
+          <label for="pcms-supply-slugs">Requested slugs, one per line</label>
+          <textarea id="pcms-supply-slugs" rows="4" maxlength="12100" spellcheck="false" autocomplete="off" aria-describedby="pcms-supply-feedback" placeholder="my-private-gen-001"></textarea>
+          <div class="account-controls"><button type="button" id="pcms-supply-preview">Preview exact batch</button><button type="button" id="pcms-supply-freeze" disabled>Freeze locally</button></div>
+          <p id="pcms-supply-feedback" role="status" aria-live="polite">Provider create/rename and Git folder writes are held until separately proven capability activation.</p>
+          <div class="table-wrap" role="region" aria-label="Supply preview and item receipts" tabindex="0"><table><thead><tr><th scope="col">Item</th><th scope="col">Requested slug</th><th scope="col">Canonical state</th><th scope="col">Reason</th></tr></thead><tbody id="pcms-supply-items"><tr><td colspan="4">No batch preview.</td></tr></tbody></table></div>
+        </section>
         <section class="panel" aria-labelledby="pcms-source-heading">
           <div class="panel-head"><h2 id="pcms-source-heading">Private Git source — read only</h2><span class="unknown">Operator-triggered</span></div>
           <p class="reason">Inspect only <code>Neb963/per-gens</code> <code>main</code>. Requires a fine-grained GitHub token with Contents: Read-only, entered for this operation; token is never saved. No remote Git initialization, commit, asset rewrite or publication is available.</p>
@@ -67,7 +79,8 @@
       </section>
       <section class="workspace" id="view-work-queue" data-view="work-queue" aria-labelledby="heading-work-queue" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 03</p><h1 id="heading-work-queue" tabindex="-1">Work Queue</h1><p>Evidence-backed operator decisions and task receipts.</p></div><button type="button" disabled aria-describedby="blocked-work-queue">Start action</button></header>
-        <section class="panel"><div class="panel-head"><h2>Operations</h2><span class="unknown">Read-only</span></div><p id="pcms-work-queue-summary" role="status">Loading canonical journal status. Unknown outcomes must be reconciled, not repeated.</p><p id="blocked-work-queue" class="reason">Disabled: effect dispatcher and queued provider operations are unavailable. This screen cannot approve or replay them.</p></section>
+        <section class="panel"><div class="panel-head"><h2>Operations</h2><span class="unknown">Read-only</span></div><p id="pcms-work-queue-summary" role="status">Loading canonical journal status. Unknown outcomes must be reconciled, not repeated.</p><p id="blocked-work-queue" class="reason">Provider effects are held. Frozen local supply receipts may be inspected; this screen cannot dispatch, approve or replay an uncertain remote operation.</p></section>
+        <section class="panel" aria-labelledby="pcms-supply-queue-title"><div class="panel-head"><h2 id="pcms-supply-queue-title">Frozen supply batches</h2><span class="unknown">Canonical local receipts</span></div><div id="pcms-supply-queue" role="status" aria-live="polite">Loading local batches.</div></section>
       </section>
       <section class="workspace" id="view-accounts" data-view="accounts" aria-labelledby="heading-accounts" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 04</p><h1 id="heading-accounts" tabindex="-1">Accounts</h1><p>Dedicated Persona bindings, human login and provenance-aware verification.</p></div><button type="button" id="pcms-refresh-accounts">Refresh local state</button></header>
@@ -106,5 +119,6 @@
   <script type="module" src="accounts-view.mjs"></script>
   <script type="module" src="inventory-view.mjs"></script>
   <script type="module" src="source-view.mjs"></script>
+  <script type="module" src="supply-view.mjs"></script>
 </body>
 </html>
