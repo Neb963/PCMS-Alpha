@@ -9,7 +9,7 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {writeNonReadyFolder,markerRequestAllowed} from './supply-git.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 export const SUPPLY_PORT='pcms-i06-supply';
-const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER']);
+const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED']);
 const hex=/^[a-f0-9]{64}$/;
 export function validateSupplyMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
@@ -35,7 +35,7 @@ export function validateSupplyMessage(api,sender,message){
       return fail('INVALID_PARAMS');
   }else if(message.type==='GET_BATCH'&&!isSafeId(p.batchId))
     return fail('INVALID_PARAMS');
-  else if(['EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER'].includes(message.type)&&
+  else if(['EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED'].includes(message.type)&&
     (!isSafeId(p.batchId)||!isSafeId(p.itemId)||
      !Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
     return fail('INVALID_PARAMS');
@@ -324,6 +324,10 @@ export function createSupplyBoundary(api,{
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(message.type==='PREVIEW'||message.type==='FREEZE')
         return await frozenPlan(s,p,message.type==='PREVIEW');
+      if(message.type==='ABORT_PREPARED'){
+        const out=await s.supply.stage({...p,event:'ABORT_PREPARED'});
+        return redacted(out);
+      }
       if(message.type==='RECONCILE_ITEM')return await reconcile(s,p);
       if(message.type==='FINISH_SOURCE_FOLDER')return await finishSource(s,p);
       return await execute(s,p);
