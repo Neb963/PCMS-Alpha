@@ -13,7 +13,7 @@
     <header class="topbar">
       <button class="menu" type="button" id="menu" aria-expanded="false" aria-controls="navigation">Menu</button>
       <div class="identity"><strong>PCMS</strong><span>Alpha</span></div>
-      <span class="phase">I01 · Guarded background · Effects OFF</span>
+      <span class="phase">I02 · Durable journal · Effects OFF</span>
       <a class="advanced" href="../options/options.html" id="advanced">PersonaMonkey advanced controls <span aria-hidden="true">↗</span></a>
     </header>
     <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
@@ -25,15 +25,16 @@
         <a href="#refresher" data-workspace="refresher">Refresher</a>
         <a href="#settings" data-workspace="settings">Settings</a>
       </nav>
-      <p class="sidebar-note">PCMS automation and provider actions are not installed at I00.</p>
+      <p class="sidebar-note">Provider, Git source and scheduler effects remain disabled.</p>
     </aside>
     <main id="main" tabindex="-1" aria-label="Current PCMS workspace">
-      <div class="system-status" role="status" aria-live="polite" id="navigation-status">I00 shell · No PCMS data connection</div>
+      <div class="system-status" role="status" aria-live="polite" id="navigation-status">I02 · Local journal diagnostics · Provider effects OFF</div>
       <div id="unknown-route" class="notice" role="status" hidden>Unknown workspace. Showing Overview without changing any data.</div>
       <section class="workspace" id="view-overview" data-view="overview" aria-labelledby="heading-overview">
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 01</p><h1 id="heading-overview" tabindex="-1">Overview</h1><p>Operational evidence and actions will appear when their verified components exist.</p></div></header>
-        <div class="notice" role="status"><strong>Not connected</strong><p>Background wake and a read-only donor safety bridge are present. No PCMS operation journal, account inventory or provider mutation is active. This is not a confirmation that there are no incidents.</p></div>
+        <div class="notice" role="status"><strong>Provider effects disabled</strong><p>Local operation journaling and a fail-closed command boundary are installed. Account identity, remote inventory and provider mutation are not active. Missing observations do not imply no incidents.</p></div>
         <section class="panel" aria-labelledby="runtime-health-title"><div class="panel-head"><h2 id="runtime-health-title">Background guard</h2><span class="unknown" id="pcms-guard-badge">Checking</span></div><p id="pcms-guard-health" role="status">Runtime evidence unavailable until checked. Provider actions remain off.</p></section>
+        <section class="panel" aria-labelledby="journal-title"><div class="panel-head"><h2 id="journal-title">Canonical journal</h2><span class="unknown">Effects OFF</span></div><p id="pcms-journal-health" role="status">Checking isolated canonical storage.</p><a href="emergency.html">Open emergency diagnostics</a></section>
         <section class="panel" aria-labelledby="attention-title"><div class="panel-head"><h2 id="attention-title">Attention</h2><span class="unknown">Unavailable</span></div><p class="empty">Cannot read attention records. A later phase will connect authoritative evidence.</p></section>
       </section>
       <section class="workspace" id="view-generators" data-view="generators" aria-labelledby="heading-generators" hidden>
@@ -42,7 +43,7 @@
       </section>
       <section class="workspace" id="view-work-queue" data-view="work-queue" aria-labelledby="heading-work-queue" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 03</p><h1 id="heading-work-queue" tabindex="-1">Work Queue</h1><p>Evidence-backed operator decisions and task receipts.</p></div><button type="button" disabled aria-describedby="blocked-work-queue">Start action</button></header>
-        <section class="panel"><div class="panel-head"><h2>Operations</h2><span class="unknown">Not initialized</span></div><p class="empty">No journal or queue connection is installed. Pending remote actions cannot be inferred.</p><p id="blocked-work-queue" class="reason">Disabled: command admission, effect journaling and execution are not implemented.</p></section>
+        <section class="panel"><div class="panel-head"><h2>Operations</h2><span class="unknown">Read-only</span></div><p id="pcms-work-queue-summary" role="status">Loading canonical journal status. Unknown outcomes must be reconciled, not repeated.</p><p id="blocked-work-queue" class="reason">Disabled: effect dispatcher and queued provider operations are unavailable. This screen cannot approve or replay them.</p></section>
       </section>
       <section class="workspace" id="view-accounts" data-view="accounts" aria-labelledby="heading-accounts" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 04</p><h1 id="heading-accounts" tabindex="-1">Accounts</h1><p>Dedicated Persona bindings and verified account identity.</p></div><button type="button" disabled aria-describedby="blocked-accounts">Enroll account</button></header>
@@ -53,13 +54,14 @@
         <section class="panel"><div class="panel-head"><h2>Scheduler</h2><span class="unknown">Off</span></div><p class="empty">No scheduler or recent-list monitor is installed. Occupancy and remaining time are unknown, not zero.</p><p id="blocked-refresher" class="reason">Disabled: monitoring, scheduling, saving and unlisting are later-phase capabilities.</p></section>
       </section>
       <section class="workspace" id="view-settings" data-view="settings" aria-labelledby="heading-settings" hidden>
-        <header class="workspace-head"><div><p class="eyebrow">Workspace / 06</p><h1 id="heading-settings" tabindex="-1">Settings</h1><p>Configuration and capability exposure, explicitly limited to I00.</p></div></header>
-        <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">All off</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Off — not implemented</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup, restore and AI tests</dt><dd>Off — not implemented</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No settings changes are accepted in I00. PersonaMonkey retains its own advanced settings.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a></section>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 06</p><h1 id="heading-settings" tabindex="-1">Settings</h1><p>Configuration and safe diagnostics. Provider capabilities remain disabled.</p></div></header>
+        <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">All off</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Off — not implemented</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup, restore and AI tests</dt><dd>Off — not implemented</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No provider settings or operation commands can be changed here. PersonaMonkey retains advanced security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
       </section>
     </main>
-    <footer class="footer"><span>PCMS Alpha · Stage I01</span><span>UI navigation available · PCMS side effects disabled</span></footer>
+    <footer class="footer"><span>PCMS Alpha · Stage I02</span><span>UI navigation available · PCMS side effects disabled</span></footer>
   </div>
   <script type="module" src="shell.mjs"></script>
   <script type="module" src="health.mjs"></script>
+  <script type="module" src="operations.mjs"></script>
 </body>
 </html>
