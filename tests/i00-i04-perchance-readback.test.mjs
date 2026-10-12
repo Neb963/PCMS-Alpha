@@ -60,7 +60,7 @@ test('I04 F: provider drift, mismatched account, duplicate slug and incomplete o
 
 test('I04 F: deterministic combined package includes the dormant verifier',async()=>{
   const overlay=await readFile(new URL('../src/runtime/overlay.mjs',import.meta.url),'utf8');
-  assert.match(overlay,/'perchance-readback\\.mjs'/);
+  assert.ok(overlay.includes("'perchance-readback.mjs'"));
 });
 
 test('I04 F: interpreter passes only de-identified observations, not session secrets',async()=>{
