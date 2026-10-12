@@ -93,6 +93,28 @@ function drawQueue(result){
         });
         li.append(document.createTextNode(' '),action);
       }
+      if(['CREATE_PREPARED','RENAME_PREPARED','GIT_PREPARED'].includes(item.state)){
+        const abort=document.createElement('button');abort.type='button';
+        abort.textContent='Abort uncommitted intent';
+        abort.setAttribute('aria-label','Abort pre-dispatch intent for '+item.slug);
+        abort.addEventListener('click',async()=>{
+          abort.disabled=true;
+          try{
+            const result=await supply('ABORT_PREPARED',{
+              batchId:batch.batchId,itemId:item.itemId,expectedRevision:item.revision});
+            const status=document.createElement('span');
+            status.textContent=result?.ok?
+              ' Pre-dispatch intent cancelled in canonical journal.' :
+              ' Hold: '+(result?.code||'ABORT_UNVERIFIED');
+            li.append(status);await fetchBatches();
+          }catch{
+            const status=document.createElement('span');
+            status.textContent=' Journal unavailable; intent not confirmed cancelled.';
+            li.append(status);
+          }finally{abort.disabled=false;}
+        });
+        li.append(document.createTextNode(' '),abort);
+      }
       list.append(li);
     }
     section.append(heading,summary,list);queue.append(section);
