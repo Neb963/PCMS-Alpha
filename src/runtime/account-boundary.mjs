@@ -7,7 +7,7 @@ import { trustedExtensionPage } from './command-boundary.mjs';
 
 export const ACCOUNT_PORT='pcms-i03-accounts';
 const names=new Set(['LIST_ACCOUNTS','LIST_PERSONAS','LIST_ROUTES','ENROLL','ACK_LOGIN',
-  'MANUAL_OVERRIDE','ARCHIVE','REBIND','OPEN_LOGIN','CREATE_PERSONA','CHECK_IDENTITY']);
+  'MANUAL_OVERRIDE','ARCHIVE','REACTIVATE','REBIND','OPEN_LOGIN','CREATE_PERSONA','CHECK_IDENTITY']);
 const uid = value => typeof value==='string' && /^[a-z0-9-]{8,128}$/i.test(value);
 export function validateAccountMessage(api,sender,m) {
   if(!trustedExtensionPage(api,sender)) return fail('UNTRUSTED_SENDER');
@@ -24,6 +24,7 @@ export function validateAccountMessage(api,sender,m) {
     ACK_LOGIN:['accountId','expectedRevision'],OPEN_LOGIN:['accountId','expectedRevision'],
     CHECK_IDENTITY:['accountId','expectedRevision'],ARCHIVE:['accountId','expectedRevision'],
     MANUAL_OVERRIDE:['accountId','expectedRevision','reason','acknowledgeLimitedAuthority'],
+    REACTIVATE:['accountId','expectedRevision','explicitReactivation'],
     REBIND:['accountId','expectedRevision','personaUid','explicitRepair']
   };
   if(Object.keys(p).some(k=>!permitted[m.type].includes(k)))return fail('INVALID_PARAMS');
@@ -36,6 +37,7 @@ export function validateAccountMessage(api,sender,m) {
         return fail('INVALID_PARAMS');
     }else if(!isSafeId(p.accountId)||!Number.isSafeInteger(p.expectedRevision)||
       p.expectedRevision<1) return fail('INVALID_PARAMS');
+    if(m.type==='REACTIVATE'&&p.explicitReactivation!==true)return fail('INVALID_PARAMS');
     if(m.type==='REBIND'&&(!uid(p.personaUid)||p.explicitRepair!==true))
       return fail('INVALID_PARAMS');
     if(m.type==='MANUAL_OVERRIDE'&&(
@@ -76,6 +78,14 @@ export function createAccountBoundary(api,{
         // lost, operator must refresh Persona inventory before retrying.
         return await g.createProtectedPersona(p.name.trim(),p.routeId);
       }
+      if(message.type==='REACTIVATE') {
+        const old=await accounts.get(p.accountId);
+        if(!old.ok)return old;
+        if(old.account.revision!==p.expectedRevision)return fail('STALE_REVISION');
+        const available=await g.listAvailablePersonas();
+        if(!available.some(x=>x.personaUid===old.account.personaUid&&!x.archived))
+          return fail('PERSONA_NOT_AVAILABLE');
+      }
       if(message.type==='ENROLL'||message.type==='REBIND'){
         const available=await g.listAvailablePersonas();
         if(!available.some(x=>x.personaUid===p.personaUid&&!x.archived))
@@ -99,8 +109,9 @@ export function createAccountBoundary(api,{
         return result.ok?{ok:true,account:publicAccount(result.account)}:result;
       }
       const map={ENROLL:'ENROLL',ACK_LOGIN:'ACK_LOGIN',MANUAL_OVERRIDE:'MANUAL_OVERRIDE',
-        ARCHIVE:'ARCHIVE',REBIND:'REBIND'};
-      const out=await accounts.apply({...p,type:map[message.type]});
+        ARCHIVE:'ARCHIVE',REACTIVATE:'REACTIVATE',REBIND:'REBIND'};
+      const out=await accounts.apply({...p,type:map[message.type],
+        ...(message.type==='MANUAL_OVERRIDE'?{reportedAt:new Date().toISOString()}:{} )});
       return out.ok?{ok:true,account:publicAccount(out.account)}:out;
     }catch {
       // No browser/provider error strings, tokens or stack reach the UI.
