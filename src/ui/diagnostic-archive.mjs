@@ -1,3 +1,5 @@
+import { createSafeReport } from './safe-report.mjs';
+
 // Minimal deterministic ZIP writer: two known safe UTF-8 files only. Stored
 // entries, no source data, no zip library, no external modules or credentials.
 function u16(buf, n, x) { buf[n]=x & 255;buf[n+1]=(x>>>8)&255; }
@@ -14,7 +16,6 @@ export function makeSafeArchive(safeReport) {
   if (!safeReport || safeReport.schema !== 'PCMS_SAFE_DIAGNOSTIC_V1')
     throw new TypeError('Unvalidated diagnostic report');
   // Recreate from EXPLICIT known fields. No unknown property is serialized.
-  const { createSafeReport } = makeSafeArchive;
   const validated = createSafeReport({
     wakeCount:safeReport.wake?.count,
     alarmCount:safeReport.wake?.alarmCount,
@@ -55,5 +56,3 @@ export function makeSafeArchive(safeReport) {
   for(const part of [...chunks,...central,end]) {zip.set(part,pos);pos+=part.length;}
   return zip;
 }
-import { createSafeReport as safeReportFactory } from './safe-report.mjs';
-makeSafeArchive.createSafeReport=safeReportFactory;

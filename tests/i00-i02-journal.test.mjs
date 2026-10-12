@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { transition, createRestoreSentinel, DB_NAME } from '../src/runtime/journal.mjs';
 import { validateCommand, trustedExtensionPage } from '../src/runtime/command-boundary.mjs';
 import { createSafeReport } from '../src/ui/safe-report.mjs';
+import { makeSafeArchive } from '../src/ui/diagnostic-archive.mjs';
+import { createNoticeDispatcher } from '../src/runtime/notices.mjs';
 
 const target = { id:'target_alpha_001', revision:1, activeOperationId:null };
 const intent = { type:'RESERVE', targetId:target.id,
@@ -114,4 +116,52 @@ test('I02 build entry preserves donor wake registration and implements isolated 
   assert.doesNotMatch(executable, /PersonaGuard|nativeMessaging|cookieStore|srcManifest|sendNativeMessage|management-integration/);
   assert.doesNotMatch(controller,/fetch\s*\(|sendNativeMessage|runtime\.sendMessage/);
   assert.equal(DB_NAME,'pcms-alpha-canonical');
+});
+
+test('P55-11 F: archive structure only has predefined files and excludes hostile source sentinel',()=>{
+  const sentinel='secret_canary_unreviewed_token_url_payload';
+  const report=createSafeReport({wakeCount:3,alarmCount:0,lastWake:'alarm',
+    sourceBytes:sentinel,notes:sentinel,restoreActive:true});
+  const bytes=makeSafeArchive({...report,sourceBytes:sentinel,
+    wake:{...report.wake,privateNote:sentinel}});
+  assert.ok(bytes instanceof Uint8Array);
+  assert.equal(bytes[0],0x50); assert.equal(bytes[1],0x4b);
+  assert.ok(bytes.length<65536);
+  const archiveText=new TextDecoder().decode(bytes);
+  assert.ok(archiveText.includes('report.json'));
+  assert.ok(archiveText.includes('README.md'));
+  assert.ok(archiveText.includes('PCMS_SAFE_DIAGNOSTIC_V1'));
+  assert.ok(!archiveText.includes(sentinel));
+  assert.ok(!archiveText.includes('cookieStoreId'));
+  assert.throws(()=>makeSafeArchive({schema:'unknown',sourceBytes:sentinel}),/Unvalidated/);
+});
+
+test('S6-I02-NOTIFICATIONS F: scoped notices dedupe success bursts and desktop fallback without leaking IDs',async()=>{
+  const saved=[];
+  const os=[];
+  const store={async recordNotice(receipt){
+    saved.push(receipt);
+    if(receipt.code==='SOURCE_HELD')return {ok:true,changed:true};
+    if(saved.length===1)return {ok:true,changed:true};
+    return {ok:true,changed:false};
+  }};
+  const api={runtime:{getURL:p=>'moz-extension://disposable/'+p},
+    notifications:{async create(opts){os.push(opts);return 'notice';}}};
+  const dispatcher=createNoticeDispatcher(api,store);
+  const serious={scopeId:'account_fake_01',code:'ROUTE_UNAVAILABLE',
+    severity:'SERIOUS',revision:2};
+  assert.equal((await dispatcher.emit(serious)).desktop,'REQUESTED');
+  for(let i=0;i<50;i++)
+    assert.equal((await dispatcher.emit({...serious,severity:'INFORMATIONAL'})).changed,false);
+  assert.equal(os.length,1,'deduped burst yields one desktop notice');
+  assert.equal(JSON.stringify(os).includes('account_fake_01'),false);
+  assert.equal(JSON.stringify(os).includes('10.64.0.1'),false);
+  const fallback=createNoticeDispatcher({
+    ...api,notifications:{create:async()=>{throw Error('notifications permission denied');}}
+  },{recordNotice:async()=>({ok:true,changed:true})});
+  assert.equal((await fallback.emit({...serious,code:'SOURCE_HELD'})).desktop,
+    'UNAVAILABLE_DASHBOARD_ONLY');
+  const informational=createNoticeDispatcher(api,{recordNotice:async()=>({ok:true,changed:true})});
+  assert.equal((await informational.emit({...serious,severity:'INFORMATIONAL'})).desktop,undefined);
+  assert.equal(os.length,1);
 });
