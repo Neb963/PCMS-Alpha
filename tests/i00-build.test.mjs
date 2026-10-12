@@ -35,7 +35,7 @@ test('donor verification detects tampered routing, missing and unexpected paths'
     const target=path.join(dir,'extension/lib/routing-gate.js');
     const original=await readFile(target);
     await writeFile(target,Buffer.concat([original,Buffer.from('\\n// BAD_SOURCE\\n')]));
-    await assert.rejects(()=>verifyDonor(dir),/Donor blob mismatch: extension\\/lib\\/routing-gate\\.js/);
+    await assert.rejects(()=>verifyDonor(dir),error=>error.message.includes('Donor blob mismatch: extension/lib/routing-gate.js'));
     await writeFile(target,original);
     const unexpected=path.join(dir,'additional-source.js');
     await writeFile(unexpected,'// unexpected');
