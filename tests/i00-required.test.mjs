@@ -25,3 +25,6 @@ test('docs-only and protected root changes do not skip the PR check',()=>{
     assert.ok(path && flow.includes('pull_request:'));
   assert.match(flow,/permissions:\s*\n\s*contents: read/);
 });
+
+// Deliberate disposable CI enforcement fault injection; this branch MUST NEVER MERGE.
+test('INJECTED_FAILURE_FAST_JOB', () => { assert.fail('EXPECTED CI NEGATIVE CASE — intentional'); });
