@@ -165,4 +165,4 @@ window.addEventListener('hashchange',()=>{
 });
 before.addEventListener('click',()=>{offset=Math.max(0,offset-limit);void load();});
 after.addEventListener('click',()=>{if(offset+limit<total){offset+=limit;void load();}});
-void loadAccounts();void load();
+void loadAccounts();void load();void loadOverview();

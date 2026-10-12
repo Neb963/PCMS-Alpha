@@ -77,11 +77,17 @@ test('I04 F: interpreter passes only de-identified observations, not session sec
   const leaking=createReadOnlyInterpreter({readProtectedPage:async()=>({
     sessionReply,ownerReplies,sessionToken:'must-stay-in-page',email:'user@example.test'
   })});
-  assert.equal(await leaking(context,account),null,
+  assert.equal((await leaking(context,account)).ok,false,
     'credential-bearing page envelope must not be admitted');
   const blocked=createReadOnlyInterpreter({readProtectedPage:async()=>({
     ok:false,principalFingerprint:account.identity.principalFingerprint,
     sessionReply:{httpStatus:403,body:'challenge'},ownerReplies:[]
   })});
-  assert.equal(await blocked(context,account),null);
+  assert.equal((await blocked(context,account)).ok,false);
+  const nestedLeak=createReadOnlyInterpreter({readProtectedPage:async()=>({
+    ok:true,principalFingerprint:account.identity.principalFingerprint,
+    sessionReply:{httpStatus:200,body:{...sessionReply.body,sessionToken:'secret'}},
+    ownerReplies:[...ownerReplies]
+  })});
+  assert.equal((await nestedLeak(context,account)).ok,false);
 });

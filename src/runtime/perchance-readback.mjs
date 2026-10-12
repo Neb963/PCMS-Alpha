@@ -97,10 +97,27 @@ export function createReadOnlyInterpreter({
     // Refuse any credential-bearing or unexpected transport envelope.
     // A qualified executor must discard secrets BEFORE crossing the page
     // boundary; even a mistakenly returned token cannot become a PCMS fact.
-    if(!own(packet)||Object.keys(packet).some(key=>
-        key!=='sessionReply'&&key!=='ownerReplies'&&key!=='principalFingerprint'&&key!=='ok'))return null;
-    if(packet.ok!==true||packet.principalFingerprint!==account?.identity?.principalFingerprint ||
-       !Array.isArray(packet.ownerReplies))return null;
+    if(!own(packet))return fail('INVENTORY_OBSERVER_UNAVAILABLE');
+    if(packet.ok===false) {
+      const permitted=new Set(['NO_PERCHANCE_TAB','NO_PAGE_SESSION','SESSION_REJECTED',
+        'SESSION_CHANGED','PERSONA_ROUTE_CHANGED','TAB_CONTEXT_CHANGED',
+        'OWNER_READBACK_UNAVAILABLE','SESSION_PROBE_UNAVAILABLE',
+        'PROTECTED_ROUTE_UNVERIFIED','DIRECT_FORBIDDEN','DONOR_LEASE_BUSY_OR_REVOKED',
+        'GUARD_CHANGED','OBSERVER_UNAVAILABLE','ISOLATED_OBSERVER_FAILED',
+        'INVENTORY_SCHEMA_UNVERIFIED']);
+      return fail(permitted.has(packet.code)?packet.code:'INVENTORY_OBSERVER_UNAVAILABLE');
+    }
+    const keys=(obj,permitted)=>own(obj)&&Object.keys(obj).every(k=>permitted.includes(k));
+    if(!keys(packet,['sessionReply','ownerReplies','principalFingerprint','ok'])||
+       packet.ok!==true||packet.principalFingerprint!==account?.identity?.principalFingerprint ||
+       !Array.isArray(packet.ownerReplies)||
+       !keys(packet.sessionReply,['httpStatus','body'])||
+       !keys(packet.sessionReply.body,['status','generators','generatorFolderMap'])||
+       !Array.isArray(packet.sessionReply.body.generators)||
+       !packet.sessionReply.body.generators.every(item=>keys(item,['name','isPrivate']))||
+       !packet.ownerReplies.every(pair=>Array.isArray(pair)&&pair.length===2&&
+         keys(pair[1],['httpStatus','body'])&&keys(pair[1].body,['status'])))
+      return fail('INVENTORY_EVIDENCE_UNAVAILABLE');
     const ownerReplies=new Map(packet.ownerReplies);
     const value=normalizeReadOnlyInventory({
       sessionReply:packet.sessionReply,

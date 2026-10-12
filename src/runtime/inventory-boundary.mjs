@@ -88,7 +88,7 @@ export function createInventoryBoundary(api,{
         personaUid:before.personaUid,cookieStoreId:before.cookieStoreId,
         routeId:before.routeId
       },account.account);
-      if(!observed)return fail('INVENTORY_OBSERVER_UNAVAILABLE');
+      if(!observed||observed.ok===false)return fail(observed?.code||'INVENTORY_OBSERVER_UNAVAILABLE');
       const after=await g.getSafeRouteReadiness(account.account.personaUid);
       if(!sameGuardContext(before,after))return fail('SESSION_CONTEXT_CHANGED');
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
