@@ -15,6 +15,8 @@ test('combined XPI preserves guarded donor bytes, manifest permissions and brows
   assert.equal(combined.options_ui.page,'pcms/index.html');
   for(const p of critical) assert.equal(await sha(path.join(stage,p)),await sha(path.join('donor/personamonkey/extension',p)),p);
   assert.equal((await readdir(path.join(stage,'pcms'))).includes('shell.mjs'),true);
+  await assert.rejects(()=>stat(path.join(stage,'tests')), {code:'ENOENT'});
+  assert.equal((await readdir(path.join(stage,'lib'))).includes('routing-gate.js'),true);
 });
 test('exact donor pin is recorded with unmodified submodule provenance', async()=>{
   assert.match(await readFile('.gitmodules','utf8'),/Neb963\/persona-router\.git/);

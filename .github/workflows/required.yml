@@ -26,19 +26,29 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - name: Checkout pinned donor submodule
+      - name: Checkout public vendored donor
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          submodules: recursive
           persist-credentials: false
       - name: Configure Node 22.16.0
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22.16.0
+      - name: Independently verify all 223 original donor files and Git tree
+        run: node scripts/verify-donor.mjs
       - name: Fast I00 and CI adversarial tests
         run: node --test tests/i00-*.test.mjs
       - name: Pinned donor regression suite
-        run: npm --prefix donor/personamonkey test
+        run: |
+          set -euo pipefail
+          # Donor repository test uses git ls-files relative to its own root.
+          # Isolate a synthetic index solely for donor tests; source bytes are verified before copying.
+          testdir="$(mktemp -d)"
+          trap 'rm -rf "$testdir"' EXIT
+          cp -a donor/personamonkey "$testdir/personamonkey"
+          git -C "$testdir/personamonkey" init --quiet
+          git -C "$testdir/personamonkey" add -N .
+          npm --prefix "$testdir/personamonkey" test
       - name: Assemble combined XPI
         run: node scripts/build-i00.mjs
       - name: Verify XPI reproducibility

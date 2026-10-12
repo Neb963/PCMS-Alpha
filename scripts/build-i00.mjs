@@ -19,7 +19,10 @@ export async function buildI00({ packageArchive = true } = {}) {
   await stat(path.join(donor, 'LICENSE'));
   await rm(stage, {recursive:true,force:true});
   await mkdir(stage,{recursive:true});
-  await cp(sourceExtension, stage, {recursive:true,force:false});
+  await cp(sourceExtension, stage, {
+    recursive:true,force:false,
+    filter:source => path.relative(sourceExtension,source).split(path.sep)[0] !== 'tests'
+  });
   const original = JSON.parse(await readFile(path.join(sourceExtension,'manifest.json'),'utf8'));
   if(original.browser_specific_settings?.gecko?.id !== ID) throw new Error('Donor Gecko ID changed');
   if(original.background?.scripts?.[0] !== 'lib/recovery-bootstrap.js') throw new Error('Unexpected donor fail-closed bootstrap');
