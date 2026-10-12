@@ -12,7 +12,9 @@ export async function perchanceSupplyIsolated(request) {
   if(!request||!['CREATE','RENAME','READ_CREATE','READ_RENAME'].includes(request.kind)||
      !slug(request.slug)||!hex(request.principalFingerprint))
     return hold('INVALID_SUPPLY_REQUEST');
-  if(request.kind!=='CREATE'&&(!slug(request.temporarySlug)||!safeId(request.remoteId)))
+  if(request.kind!=='CREATE'&&!slug(request.temporarySlug))
+    return hold('INVALID_SUPPLY_REQUEST');
+  if(['RENAME','READ_RENAME'].includes(request.kind)&&!safeId(request.remoteId))
     return hold('INVALID_SUPPLY_REQUEST');
   try {
     const raw=localStorage.getItem('app-storage'),change=localStorage.getItem('sessionTokenLastChangeTime');
@@ -70,7 +72,7 @@ export async function perchanceSupplyIsolated(request) {
     };
     if(request.kind==='READ_CREATE') {
       const checked=await read(request.temporarySlug);
-      if(!checked.ok||checked.remoteId!==request.remoteId)return hold('CREATE_READBACK_UNVERIFIED');
+      if(!checked.ok)return hold('CREATE_READBACK_UNVERIFIED');
       return sameSession()?{ok:true,source:'INDEPENDENT_READBACK',
         temporarySlug:request.temporarySlug,remoteId:checked.remoteId,
         ownerMatches:true,privateEmpty:true}:hold('SESSION_CHANGED');
