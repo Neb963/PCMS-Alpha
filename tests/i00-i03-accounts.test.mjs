@@ -86,9 +86,19 @@ test('S6-I03-ARCHIVE-REPAIR F: stale revision, archive and reuse are explicit an
   const archived=transitionAccount(bound.account,action('ARCHIVE',bound.account),[]);
   assert.equal(archived.ok,true);
   assert.equal(archived.account.state,'ARCHIVED');
+  assert.equal(archived.account.history.length,2,'rebind and archive receipts persist');
+  assert.equal(archived.account.history[1].priorPersonaUid,personaB);
+  assert.equal(archived.account.history[1].priorIdentity,null);
   assert.equal(transitionAccount(archived.account,action('ACK_LOGIN',archived.account),[]).code,'ACCOUNT_ARCHIVED');
   assert.equal(transitionAccount(null,enroll(accountB,personaB),[archived.account]).ok,true,
     'archival releases exclusive active binding without deleting Persona');
+  assert.equal(transitionAccount(archived.account,action('REACTIVATE',archived.account,{
+    explicitReactivation:true
+  }),[archived.account]).account.state,'WAITING_LOGIN');
+  const other=transitionAccount(null,enroll(accountB,personaB),[archived.account]).account;
+  assert.equal(transitionAccount(archived.account,action('REACTIVATE',archived.account,{
+    explicitReactivation:true
+  }),[archived.account,other]).code,'PERSONA_ALREADY_BOUND');
 });
 
 test('I03 F: reject replacement with occupied Persona and duplicate remote principal',()=>{
