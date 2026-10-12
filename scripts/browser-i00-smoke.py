@@ -101,6 +101,67 @@ def canonical_probe(session):
                 {'script':script,'args':[]},timeout=30)
 
 
+def canonical_abort_probe(session):
+    # A real IndexedDB readwrite transaction is deliberately rolled back.
+    # No provider stub is invoked and aborted writes must not create state.
+    script = '''const done=arguments[arguments.length-1];
+    (async()=>{
+      const module=await import('./journal.mjs');
+      const db=await module.openCanonicalDatabase();
+      const tx=db.transaction(['entities','operations'],'readwrite');
+      const terminal=new Promise(resolve=>{
+        tx.onabort=()=>resolve('ABORTED');
+        tx.oncomplete=()=>resolve('COMMITTED');
+      });
+      tx.objectStore('entities').add({id:'aborted_target_01',
+        revision:1,activeOperationId:null});
+      tx.abort();
+      const actual=await terminal;
+      const store=module.createCanonicalStore(db);
+      const forbidden=await store.apply({type:'RESERVE',
+        targetId:'aborted_target_01',operationId:'aborted_operation_01',
+        expectedRevision:1,effectType:'fake_effect_01',fingerprint:'b'.repeat(64)});
+      store.close();
+      done({terminal:actual,forbidden});
+    })().catch(()=>done({error:'IDB_ABORT_PROBE_FAILED'}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=30)
+
+
+def restore_marker_probe(session):
+    script = '''const done=arguments[arguments.length-1];
+    (async()=>{
+      await browser.storage.local.set({pcmsRestoreInProgress:{active:true}});
+      done(true);
+    })().catch(()=>done(false));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=30)
+
+
+def clear_restore_marker(session):
+    script = '''const done=arguments[arguments.length-1];
+    browser.storage.local.remove('pcmsRestoreInProgress').then(
+      ()=>done(true),()=>done(false));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=30)
+
+
+def diagnostic_zip_probe(session):
+    script = '''const done=arguments[arguments.length-1];
+    (async()=>{
+      const {makeSafeArchive}=await import('./diagnostic-archive.mjs');
+      const source=document.getElementById('report').textContent;
+      const report=JSON.parse(source);
+      const zip=makeSafeArchive({...report,secretCanary:'DO_NOT_EXPOSE'});
+      const readback=new TextDecoder().decode(zip);
+      done({magic:Array.from(zip.slice(0,4)),length:zip.length,
+        files:readback.includes('report.json') && readback.includes('README.md'),
+        canary:readback.includes('DO_NOT_EXPOSE')});
+    })().catch(()=>done({error:'ARCHIVE_PROBE_FAILED'}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=30)
+
+
 def storage_alarm_count(session):
     script = '''const done=arguments[arguments.length-1];
     browser.storage.local.get('pcmsI01WakeHealth')
@@ -192,6 +253,19 @@ def main():
                 assert synthetic.get('possible',{}).get('operation',{}).get('status')=='DISPATCH_POSSIBLE',synthetic
                 assert synthetic.get('cancelled',{}).get('code')=='CANNOT_CANCEL_POSSIBLE_EFFECT',synthetic
                 print('B I02_REAL_IDB_PREPARED_TO_DISPATCH_POSSIBLE=PASS',flush=True)
+                abort=canonical_abort_probe(after)
+                assert abort.get('terminal')=='ABORTED',abort
+                assert abort.get('forbidden',{}).get('code')=='TARGET_UNVERIFIED',abort
+                print('B I02_REAL_IDB_ABORT_NO_EFFECT=PASS',flush=True)
+                assert restore_marker_probe(after) is True
+                held=canonical_command(after,{'type':'SUMMARY'})
+                assert held.get('held') is True and held.get('restore')=='RESTORE_IN_PROGRESS',held
+                denied=canonical_command(after,{'type':'GET_OPERATION','operationId':'fixture_operation_01'})
+                assert denied.get('code')=='CANONICAL_HOLD',denied
+                assert clear_restore_marker(after) is True
+                recovered=canonical_command(after,{'type':'SUMMARY'})
+                assert recovered.get('held') is False,recovered
+                print('B I02_OUTSIDE_IDB_RESTORE_SENTINEL=PASS',flush=True)
                 boot_before=guard['bootId']
                 print('B I01_WAKE_STATUS_INITIAL=',guard,flush=True)
                 # Construct the alarm in an isolated disposable Firefox profile,
@@ -237,6 +311,11 @@ def main():
                 assert safe.get('effects')=='OFF',safe
                 assert set(safe)=={'schema','phase','effects','sections','wake'},safe
                 assert safe['sections']['canonical']=='section_unavailable'
+                diagnostic=diagnostic_zip_probe(after)
+                assert diagnostic.get('magic')==[80,75,3,4],diagnostic
+                assert diagnostic.get('files') is True and diagnostic.get('canary') is False,diagnostic
+                assert 0 < diagnostic.get('length',0) < 65536,diagnostic
+                print('B I02_REDACTED_ZIP_MARKDOWN=PASS',flush=True)
                 print('B I02_CORE_INDEPENDENT_EMERGENCY=PASS',flush=True)
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
             finally: close(after)
