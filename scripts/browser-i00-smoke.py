@@ -84,7 +84,10 @@ def main():
         profile=pathlib.Path(folder)/'profile'
         profile.mkdir()
         (profile/'user.js').write_text('user_pref("xpinstall.signatures.required", false);\n')
-        server=subprocess.Popen([str(driver),'--port',str(PORT)],stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
+        # Firefox 153+ refuses WebDriver navigation to extension pages without a
+        # *test-only* opt-in. This agent runs only on disposable CI profile and
+        # geckodriver binds loopback; production XPI permissions stay unchanged.
+        server=subprocess.Popen([str(driver),'--port',str(PORT),'--allow-system-access'],stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
         try:
             for _ in range(80):
                 try:
