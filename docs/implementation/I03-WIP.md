@@ -22,3 +22,13 @@ Preserve current canonical IndexedDB journal; guard/restore failure denies PCMS 
 ## Next work
 
 Attach narrowly typed donor-owned Persona listing/human navigation, transactional account ledger, guarded identity observation, Accounts UI and negative-case/packaged Firefox proof. Draft PR remains incomplete until selected evidence is verified.
+
+## Implementation evidence proposal
+
+- Same-XPI donor facade lists stable Persona UID and protected routes and delegates local protected Persona creation and manual Perchance tab open through donor-owned mutation fence; Direct, Block and route uncertainty cannot authorize guarded navigation.
+- IndexedDB canonical account records serialize exclusivity and revision conflicts in one transaction; explicit repair, archive, reactivation, limited exception and bounded historical receipts do not mutate provider state.
+- Independent-identity proof is accepted **only** via a privileged observer seam. The production observer intentionally returns unavailable until its provider identity method is proven; manual override remains an enrollment label, not ownership.
+- Account control port rejects forged sender, oversized/extraneous fields and caller-supplied identity proof. The dashboard exposes only revision/state, not cookies, session tokens, principal fingerprints or raw browser containers.
+- Fast test path `node --test tests/i00-*.test.mjs`; browser path `python3 scripts/browser-i00-smoke.py build/pcms-alpha-i00.xpi` under pinned Firefox/isolated profile. The protected CI workflow executes exact XPI/reproducibility/donor checks.
+- Completion proposal: `docs/implementation/completions/I03.json`. It is **not** itself acceptance; only matched required check, squash merge and observed postmerge main prove the scoped implementation.
+- Future provider-dependent features remain blocked on independent owner/session evidence. No effectful Perchance operation is enabled by this phase.
