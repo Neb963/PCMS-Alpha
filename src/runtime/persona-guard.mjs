@@ -5,7 +5,7 @@ const HOLD = code => Object.freeze({ ready: false, code });
 const BAD_PROXY = new Set(['controlled_by_other_extensions', 'not_controllable']);
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
-  listPersonas, listProtectedRoutes, createPersona, openHumanLogin }) {
+  listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -134,7 +134,22 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     }catch{return {ok:false,code:'HUMAN_TAB_OPEN_UNCONFIRMED'};}
   }
 
+  async function observeReadOnly(personaUid, identityOnly=false) {
+    if(typeof readIsolatedTab!=='function')return {ok:false,code:'OBSERVER_UNAVAILABLE'};
+    const leased=await acquireConflictGuard(personaUid);
+    if(!leased?.ready||!leased.leaseId)return {ok:false,code:leased?.code||'GUARD_UNAVAILABLE'};
+    try {
+      const packet=await readIsolatedTab(leased,{identityOnly:identityOnly===true});
+      if(!packet?.ok)return {ok:false,code:packet?.code||'OBSERVER_UNVERIFIED'};
+      const rechecked=await inspectOwnedAction(leased);
+      if(!rechecked?.ready)return {ok:false,code:rechecked?.code||'GUARD_CHANGED'};
+      return packet;
+    }catch{return {ok:false,code:'OBSERVER_UNAVAILABLE'};}
+    finally{await releaseConflictGuard(leased);}
+  }
+
   return Object.freeze({
+    observeReadOnly,
     listAvailablePersonas,
     listProtectedRoutes: availableRoutes,
     createProtectedPersona,

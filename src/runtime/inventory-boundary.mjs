@@ -4,6 +4,7 @@ import { openCanonicalDatabase, createRestoreSentinel, fail, isSafeId } from './
 import { createAccountStore } from './accounts.mjs';
 import { createInventoryStore, eligibleInventoryAccount } from './inventory.mjs';
 import { internalPcmsGuard } from './persona-guard.mjs';
+import { createReadOnlyInterpreter } from './perchance-readback.mjs';
 import { trustedExtensionPage } from './command-boundary.mjs';
 
 export const INVENTORY_PORT='pcms-i04-inventory';
@@ -44,10 +45,10 @@ export function sameGuardContext(before,after) {
 
 export function createInventoryBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,
-  // Provider observation is not yet verified by accepted Stage 7 evidence.
-  // Production deliberately holds; a deterministic fake may supply a reader
-  // in F/B testing without giving the page a proof-injection method.
-  inventoryReader=async()=>null
+  // Fixed donor-owned guarded isolated-page observer; no page-supplied proof.
+  inventoryReader=createReadOnlyInterpreter({
+    readProtectedPage:async ctx=>internalPcmsGuard()?.observeReadOnly(ctx.personaUid,false)
+  })
 }={}) {
   let dbPromise;
   const sentinel=createRestoreSentinel(api.storage.local);
@@ -64,7 +65,7 @@ export function createInventoryBoundary(api,{
       if(message.type==='LIST_INVENTORY'){
         const out=await s.inventory.list(p);
         return out.ok?{...out,restoreHeld:restore.held,
-          holdCode:restore.code,remoteSync:'HELD_UNVERIFIED',
+          holdCode:restore.code,remoteSync:'ON_DEMAND_GUARDED_READ_ONLY',
           providerWrites:'OFF'}:out;
       }
       if(restore.held)return fail('RESTORE_HOLD');
@@ -86,7 +87,7 @@ export function createInventoryBoundary(api,{
         principalFingerprint:account.account.identity.principalFingerprint,
         personaUid:before.personaUid,cookieStoreId:before.cookieStoreId,
         routeId:before.routeId
-      });
+      },account.account);
       if(!observed)return fail('INVENTORY_OBSERVER_UNAVAILABLE');
       const after=await g.getSafeRouteReadiness(account.account.personaUid);
       if(!sameGuardContext(before,after))return fail('SESSION_CONTEXT_CHANGED');

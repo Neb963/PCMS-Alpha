@@ -41,7 +41,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -76,6 +76,30 @@ attachPcmsGuard({
       name,routeId,allowDirect:false
     }));
   },
+  readIsolatedTab: async ({personaUid,cookieStoreId,routeId},{identityOnly=false}={}) => {
+    // Donor-owned tab and protected-container selection. This is the SAME
+    // combined-XPI browser authority, not a separate automation controller.
+    const tabs=await browser.tabs.query({cookieStoreId});
+    const matching=tabs.filter(tab=>tab.cookieStoreId===cookieStoreId &&
+      typeof tab.url==='string' && (()=>{try{return new URL(tab.url).origin==='https://perchance.org';}catch{return false;}})());
+    if(!matching.length)return {ok:false,code:'NO_PERCHANCE_TAB'};
+    const tab=matching.find(item=>item.active)||matching[0];
+    const current=await getState(),profile=current.profiles?.[cookieStoreId];
+    if(!profile||profile.personaUid!==personaUid||profile.routeId!==routeId||
+       routeId==='direct'||routeId==='block'||current.routes?.[routeId]?.enabled!==true)
+      return {ok:false,code:'PERSONA_ROUTE_CHANGED'};
+    const results=await browser.scripting.executeScript({
+      target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
+      func:perchanceReadIsolated,args:[{identityOnly}]
+    });
+    const after=await browser.tabs.get(tab.id);
+    if(after.cookieStoreId!==cookieStoreId ||
+       !after.url?.startsWith('https://perchance.org/'))
+      return {ok:false,code:'TAB_CONTEXT_CHANGED'};
+    if(results?.length!==1||results[0].frameId!==0||results[0].error)
+      return {ok:false,code:'ISOLATED_OBSERVER_FAILED'};
+    return results[0].result;
+  },
   openHumanLogin: async ({personaUid,cookieStoreId,routeId}) =>
     localMutationFence(cookieStoreId,async()=>{
       const state=await getState(), p=state.profiles?.[cookieStoreId];
@@ -89,7 +113,7 @@ attachPcmsGuard({
 function localMutationFence(profileIds, operation, mode = "block", options = {}) {`,
     'donor guard host');
   await writeFile(bgPath, bg);
-  for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs']) {
+  for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }
 }

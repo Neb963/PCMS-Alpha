@@ -23,7 +23,7 @@ function command(portName,type,params) {
   return new Promise((resolve,reject)=>{
     const port=browser.runtime.connect({name:portName});
     let ended=false;
-    const timer=setTimeout(()=>done(null,Error('TIMEOUT')),5000);
+    const timer=setTimeout(()=>done(null,Error('TIMEOUT')),type==='SYNC_ACCOUNT'?25000:5000);
     function done(out,err){
       if(ended)return;
       ended=true;clearTimeout(timer);
@@ -106,7 +106,7 @@ async function loadAccounts() {
       o.textContent=a.accountId+' · '+a.identity;
       accountPicker.append(o);
     }
-    syncButton.disabled=true;
+    accountPicker.dispatchEvent(new Event('change'));
   }catch{
     if(mine!==accountEpoch)return;
     accounts=[];accountPicker.replaceChildren();

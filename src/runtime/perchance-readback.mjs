@@ -98,11 +98,14 @@ export function createReadOnlyInterpreter({
     // A qualified executor must discard secrets BEFORE crossing the page
     // boundary; even a mistakenly returned token cannot become a PCMS fact.
     if(!own(packet)||Object.keys(packet).some(key=>
-        key!=='sessionReply'&&key!=='ownerReplies'))return null;
+        key!=='sessionReply'&&key!=='ownerReplies'&&key!=='principalFingerprint'&&key!=='ok'))return null;
+    if(packet.ok!==true||packet.principalFingerprint!==account?.identity?.principalFingerprint ||
+       !Array.isArray(packet.ownerReplies))return null;
+    const ownerReplies=new Map(packet.ownerReplies);
     const value=normalizeReadOnlyInventory({
       sessionReply:packet.sessionReply,
       items:packet.sessionReply?.body?.generators,
-      ownerReplies:packet.ownerReplies,context,account,
+      ownerReplies,context,account,
       observationId:newObservationId(),observedAt:now()
     });
     return value.ok?value.observation:null;

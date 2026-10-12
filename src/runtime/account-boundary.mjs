@@ -66,7 +66,13 @@ export async function guardedIdentityRead(guard,personaUid,identityReader) {
 
 export function createAccountBoundary(api,{
   open=openCanonicalDatabase, guard=internalPcmsGuard,
-  identityReader=async()=>null
+  identityReader=async context=>{
+    const out=await internalPcmsGuard()?.observeReadOnly(context.personaUid,true);
+    if(!out?.ok||!(/^[a-f0-9]{64}$/).test(out.principalFingerprint))return null;
+    return {source:'GUARDED_SESSION_READBACK',verified:true,
+      personaUid:context.personaUid,principalFingerprint:out.principalFingerprint,
+      observationId:'identity_'+crypto.randomUUID().replaceAll('-','')};
+  }
 }={}) {
   let dbPromise;
   const sentinel=createRestoreSentinel(api.storage.local);
