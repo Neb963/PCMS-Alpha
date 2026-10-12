@@ -67,6 +67,8 @@ test('P53-01 and S6-I05-EMPTY-GIT: missing main stays uninitialized, zero remote
   assert.equal(f.hits.length,1);
   assert.equal(f.hits.every(h=>h.options.method==='GET'),true);
   assert.equal(safeFolder('gens/good-folder'),true);
+  assert.equal(safeFolder('my-generator'),true); // configurable folder root
+  assert.equal(safeFolder('custom-root/slug-99'),true);
   for(const p of ['../gens/a','/gens/a','gens/../a','gens/a%2fb','gens/a//b','gens/a\\b',
     'gens/a/./x','gens/é','gens/A.'])assert.equal(safeFolder(p),false,p);
   const bad=fixture();

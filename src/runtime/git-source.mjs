@@ -7,7 +7,7 @@ const segment = s => typeof s === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$
   s !== '.' && s !== '..' && !s.endsWith('.');
 export function safeFolder(path) {
   return typeof path === 'string' && path.length <= 240 &&
-    path.startsWith('gens/') && path.split('/').length >= 2 &&
+    path.split('/').length >= 1 &&
     path.split('/').length <= 6 && path.split('/').every(segment) &&
     path === path.normalize('NFC');
 }
