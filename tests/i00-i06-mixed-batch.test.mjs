@@ -83,7 +83,8 @@ test('P56-06 F: 40 frozen per-item outcomes across two dedicated protected Perso
   assert.equal(rows.filter(x=>x.state.endsWith('UNCERTAIN')).every(
     x=>moveSupply(x,'CREATE_DISPATCH_POSSIBLE').ok===false&&
       moveSupply(x,'RENAME_DISPATCH_POSSIBLE').ok===false),true);
-  assert.equal(rows.every(x=>x.accountId===(x.index<20?A.accountId:x.accountId)),true);
+  assert.equal(rows.slice(0,20).every(x=>x.accountId===A.accountId),true);
+  assert.equal(rows.slice(20).every(x=>x.accountId===B.accountId),true);
   const publicReceipts=[
     ...publicSupply({...a,items:rows.slice(0,20)}).items,
     ...publicSupply({...b,items:rows.slice(20)}).items
