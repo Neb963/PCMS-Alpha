@@ -101,6 +101,25 @@ def canonical_probe(session):
                 {'script':script,'args':[]},timeout=30)
 
 
+def canonical_notice_probe(session):
+    # Exact bundled IDB store, not a fabricated notification record.
+    script = '''const done=arguments[arguments.length-1];
+    (async()=>{
+      const module=await import('./journal.mjs');
+      const store=module.createCanonicalStore(await module.openCanonicalDatabase());
+      const note={scopeId:'fixture_scope_01',code:'SOURCE_HELD',
+        severity:'SERIOUS',revision:1};
+      const recorded=await store.recordNotice(note);
+      const duplicate=await store.recordNotice(note);
+      const stale=await store.ignoreNotice({...note,expectedRevision:0});
+      const summary=await store.noticeSummary();
+      store.close();
+      done({recorded,duplicate,stale,summary});
+    })().catch(()=>done({error:'IDB_NOTICE_PROBE_FAILED'}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=30)
+
+
 def canonical_abort_probe(session):
     # A real IndexedDB readwrite transaction is deliberately rolled back.
     # No provider stub is invoked and aborted writes must not create state.
@@ -257,6 +276,14 @@ def main():
                 assert abort.get('terminal')=='ABORTED',abort
                 assert abort.get('forbidden',{}).get('code')=='TARGET_UNVERIFIED',abort
                 print('B I02_REAL_IDB_ABORT_NO_EFFECT=PASS',flush=True)
+                noticed=canonical_notice_probe(after)
+                assert noticed.get('recorded',{}).get('changed') is True,noticed
+                assert noticed.get('duplicate',{}).get('changed') is False,noticed
+                assert noticed.get('stale',{}).get('code')=='STALE_REVISION',noticed
+                assert noticed.get('summary',{}).get('counts',{}).get('serious')==1,noticed
+                notices=canonical_command(after,{'type':'GET_NOTICES'})
+                assert notices.get('ok') is True and len(notices.get('notices',[]))==1,notices
+                print('B I02_REAL_ATTENTION_DEDUP_AND_REVISION=PASS',flush=True)
                 assert restore_marker_probe(after) is True
                 held=canonical_command(after,{'type':'SUMMARY'})
                 assert held.get('held') is True and held.get('restore')=='RESTORE_IN_PROGRESS',held
@@ -317,6 +344,24 @@ def main():
                 assert 0 < diagnostic.get('length',0) < 65536,diagnostic
                 print('B I02_REDACTED_ZIP_MARKDOWN=PASS',flush=True)
                 print('B I02_CORE_INDEPENDENT_EMERGENCY=PASS',flush=True)
+                call('POST',f'/session/{after}/url',{'url':url+'#overview'})
+                for _ in range(40):
+                    notice_ui=execute(after,
+                        "return {button:document.querySelector('#pcms-attention-list button')?.textContent||'',text:document.querySelector('#pcms-attention-list')?.textContent||''}")
+                    if notice_ui.get('button'):break
+                    time.sleep(.15)
+                assert notice_ui.get('button')=='Ignore notice',notice_ui
+                assert 'SOURCE_HELD' in notice_ui.get('text',''),notice_ui
+                execute(after,"document.querySelector('#pcms-attention-list button').click();return true")
+                for _ in range(40):
+                    residual=canonical_command(after,{'type':'GET_NOTICES'})
+                    if residual.get('ok') is True and residual.get('notices')==[]:break
+                    time.sleep(.15)
+                assert residual.get('ok') is True and residual.get('notices')==[],residual
+                uncertain=canonical_command(after,{'type':'GET_OPERATION',
+                    'operationId':'fixture_operation_01'})
+                assert uncertain.get('state')=='HELD_UNCERTAIN',uncertain
+                print('B I02_UI_IGNORE_DOES_NOT_RELEASE_OPERATION=PASS',flush=True)
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
             finally: close(after)
         finally:
