@@ -17,8 +17,10 @@ const batch=freezeSupply({batchId:'batch_alpha_01',accountId:account.accountId,
   personaUid:account.personaUid,accountRevision:2,bindingVersion:1,
   slugs:['requested-slug']}).batch;
 function fixture({gate=true,failDispatch=false,lostAck=false,wrongOwner=false,
-  denyRoute=false,staleIdentity=false,wrongReadback=false}={}){
+  denyRoute=false,staleIdentity=false,wrongReadback=false,
+  pauseAfterPrepare=false,routeLossAfterPrepare=false}={}){
   let current={...batch,items:batch.items.map(i=>({...i}))};
+  let gateOn=gate,routeChecks=0;
   let identity=staleIdentity?{...account,revision:3}:account;
   const trace=[],remote=[],gitLedger=[];
   const stores={
@@ -41,14 +43,16 @@ function fixture({gate=true,failDispatch=false,lostAck=false,wrongOwner=false,
         if(!moved.ok)return moved;
         current={...current,revision:current.revision+1,items:current.items.map(
           (x,index)=>index===i?moved.item:x)};
+        if(pauseAfterPrepare&&action.event==='CREATE_PREPARED')gateOn=false;
         return {ok:true,item:moved.item};
       }
     }
   };
   const guard={
-    getSafeRouteReadiness:async()=>denyRoute?
+    getSafeRouteReadiness:async()=>{routeChecks++;return (denyRoute||
+      (routeLossAfterPrepare&&routeChecks>=2))?
       {ready:false,code:'DIRECT_FORBIDDEN'}:
-      {ready:true,personaUid:account.personaUid,cookieStoreId:'safe-container',routeId:'protected-wg'},
+      {ready:true,personaUid:account.personaUid,cookieStoreId:'safe-container',routeId:'protected-wg'};}, 
     async runSupplyStep(personaUid,request){
       assert.equal(personaUid,account.personaUid);
       if(request.kind==='CREATE'){
@@ -79,7 +83,7 @@ function fixture({gate=true,failDispatch=false,lostAck=false,wrongOwner=false,
     }
   };
   const boundary=createSupplyBoundary(api,{open:async()=>({}),
-    makeStores:()=>stores,guard:()=>guard,effectGate:()=>gate,
+    makeStores:()=>stores,guard:()=>guard,effectGate:()=>gateOn,
     gitGate:()=>gate,gitWrite:async ({folder,slug,token})=>{
       assert.equal(trace.at(-1),'GIT_DISPATCH_POSSIBLE');
       assert.equal(folder,'gens/'+slug);
@@ -143,6 +147,20 @@ test('P56-06 F: crash/abort before dispatch marker means independent zero effect
   assert.deepEqual(f.trace,['CREATE_PREPARED','CREATE_DISPATCH_POSSIBLE']);
   assert.equal((await f.dispatch()).code,'NOT_ADMISSIBLE');
   assert.equal(f.remote.length,0);
+});
+test('P56-06 F: Pause or protected-route loss after PREPARED prevents effect; abort releases only pre-dispatch',async()=>{
+  for(const variant of [{pauseAfterPrepare:true},{routeLossAfterPrepare:true}]){
+    const f=fixture(variant);
+    const response=await f.dispatch();
+    assert.equal(response.code,'PREPARED_HELD',response.code);
+    assert.equal(f.remote.length,0);
+    assert.equal(f.item().state,'CREATE_PREPARED');
+    const cancelled=await f.run('ABORT_PREPARED',{batchId:batch.batchId,
+      itemId:f.item().itemId,expectedRevision:f.item().revision});
+    assert.equal(cancelled.state,'FROZEN',cancelled.code);
+    assert.equal(f.remote.length,0);
+    assert.equal(f.item().state,'FROZEN');
+  }
 });
 test('P52-02 F: lost ACK after remote effect is held, never blind second create',async()=>{
   const f=fixture({lostAck:true});
