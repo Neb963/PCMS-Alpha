@@ -10,6 +10,7 @@ const after=document.getElementById('pcms-generator-next');
 const reload=document.getElementById('pcms-generator-refresh');
 const syncButton=document.getElementById('pcms-generator-sync');
 const accountPicker=document.getElementById('pcms-generator-account');
+const overviewCount=document.getElementById('pcms-overview-inventory');
 let epoch=0,offset=0,total=0,accounts=[],latest=[],selection=new Set(),accountEpoch=0;
 const limit=50;
 const labels={
@@ -92,13 +93,25 @@ async function load() {
     feedback.textContent='Inventory read unavailable. No absence or ownership inferred.';
   }
 }
+async function loadOverview() {
+  if(!overviewCount)return;
+  try {
+    const result=await inv('LIST_INVENTORY',{offset:0,limit:1});
+    overviewCount.textContent=result?.ok ?
+      result.total+' local generator observations; ownership is historical. '+(result.truncated?'Inventory truncated. ':'')+
+      'Provider writes OFF.' :
+      'Inventory unavailable ('+(result?.code||'UNKNOWN')+'). No ownership or deletion inferred.';
+  } catch {overviewCount.textContent='Inventory unavailable. No remote absence inferred.';}
+}
 async function loadAccounts() {
   const mine=++accountEpoch;
   try{
     const r=await acct();
     if(mine!==accountEpoch)return;
     if(!r?.ok||r.truncated)throw Error('ACCOUNTS_UNAVAILABLE');
-    accounts=r.accounts;accountPicker.replaceChildren();
+    accounts=r.accounts;
+    const prior=accountPicker.value;
+    accountPicker.replaceChildren();
     const empty=document.createElement('option');empty.value='';empty.textContent='Choose bound account';
     accountPicker.append(empty);
     for(const a of accounts.filter(a=>a.state!=='ARCHIVED')) {
@@ -106,6 +119,8 @@ async function loadAccounts() {
       o.textContent=a.accountId+' · '+a.identity;
       accountPicker.append(o);
     }
+    if([...accountPicker.options].some(option=>option.value===prior))
+      accountPicker.value=prior;
     accountPicker.dispatchEvent(new Event('change'));
   }catch{
     if(mine!==accountEpoch)return;
@@ -125,10 +140,10 @@ syncButton.addEventListener('click',async()=>{
   feedback.textContent='Requesting guarded independent read-only observation…';
   try{
     const out=await inv('SYNC_ACCOUNT',{accountId:a.accountId,expectedRevision:a.revision});
-    feedback.textContent=out?.ok?
-      'Local observation stored. Owner evidence is historical, not mutation authority.':
-      'Sync held: '+(out?.code||'UNCONFIRMED')+'. No remote absence or ownership inferred.';
     await load();
+    feedback.textContent=out?.ok?
+      'Guarded observation stored. Owner readback is historical only; provider writes OFF.':
+      'Sync held: '+(out?.code||'UNVERIFIED')+'. Local records preserved; inspect Persona route and account login.';
   }catch{
     feedback.textContent='Sync acknowledgment unavailable. Read local state; do not infer completion.';
   }finally{
@@ -141,11 +156,12 @@ query.addEventListener('input',()=>{
   clearTimeout(debounce);debounce=setTimeout(()=>{offset=0;void load();},180);
 });
 filter.addEventListener('change',()=>{offset=0;void load();});
-reload.addEventListener('click',()=>{void loadAccounts();void load();});
+reload.addEventListener('click',()=>{void loadAccounts();void load();void loadOverview();});
 // Dashboard routes reuse one document. Revalidate the canonical projection
 // whenever an operator revisits Generators; old observations are not live.
 window.addEventListener('hashchange',()=>{
   if(location.hash==='#generators'){void loadAccounts();void load();}
+  if(location.hash==='#overview'){void loadOverview();}
 });
 before.addEventListener('click',()=>{offset=Math.max(0,offset-limit);void load();});
 after.addEventListener('click',()=>{if(offset+limit<total){offset+=limit;void load();}});
