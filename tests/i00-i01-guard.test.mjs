@@ -133,6 +133,7 @@ test('P51-01 F: registers all wake sources synchronously, no dashboard, recovery
   assert.equal(f.api.alarms.created.length,2,'startup must reconstruct Firefox alarm');
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(f.storage.pcmsI01WakeHealth.lastWake,'alarm');
+  assert.equal(f.storage.pcmsI01WakeHealth.alarmCount,1);
 });
 
 test('P51-01 F negative: storage fail does not fake success or allow effect dispatch',async()=>{

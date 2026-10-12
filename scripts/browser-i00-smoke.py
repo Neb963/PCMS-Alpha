@@ -66,6 +66,23 @@ def guard_status(session):
     return call('POST',f'/session/{session}/execute/async', {'script':script,'args':[]},timeout=30)
 
 
+def storage_alarm_count(session):
+    script = '''const done=arguments[arguments.length-1];
+    browser.storage.local.get('pcmsI01WakeHealth')
+      .then(value=>done(value.pcmsI01WakeHealth?.alarmCount??0),
+            error=>done({error:String(error)}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=30)
+
+
+def schedule_test_alarm(session):
+    script = '''const done=arguments[arguments.length-1];
+    browser.alarms.create('pcms-i01-health',{when:Date.now()+6000})
+      .then(()=>done(true),error=>done({error:String(error)}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=30)
+
+
 def close(session):
     try: call('DELETE',f'/session/{session}',timeout=25)
     except Exception as exc: print('Session cleanup:',exc,file=sys.stderr)
@@ -131,13 +148,22 @@ def main():
                 assert guard.get('providerEffects')=='OFF',guard
                 boot_before=guard['bootId']
                 print('B I01_WAKE_STATUS_INITIAL=',guard,flush=True)
-                # Close all PCMS UI contexts, allow the Firefox event page to
-                # idle/suspend, then provoke a genuine background wake via
-                # same-extension runtime messaging (never by re-installing).
+                # Construct the alarm in an isolated disposable Firefox profile,
+                # then remove the PCMS UI while the event page is suspended.
+                # The persisted counter is independent of transient callbacks.
+                alarm_before=storage_alarm_count(after)
+                assert isinstance(alarm_before,int),alarm_before
+                assert schedule_test_alarm(after) is True
                 call('POST',f'/session/{after}/url',{'url':'about:blank'})
-                time.sleep(8)
+                time.sleep(14)
                 call('POST',f'/session/{after}/url',{'url':url})
                 guard_after=guard_status(after)
+                alarm_after=storage_alarm_count(after)
+                assert isinstance(alarm_after,int),alarm_after
+                assert alarm_after>alarm_before,(
+                    'No persisted real Firefox alarm delivery',alarm_before,alarm_after)
+                print('B I01_REAL_ALARM_WAKE=PASS alarm count',
+                      alarm_before,'->',alarm_after,flush=True)
                 assert guard_after and guard_after.get('providerEffects')=='OFF',guard_after
                 assert guard_after.get('bootId')!=boot_before,(
                     'Background did not demonstrably suspend/restart during idle',guard,guard_after)

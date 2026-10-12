@@ -27,6 +27,8 @@ export function createWakeService(api, { health = getPcmsGuardHealth } = {}) {
       const previous = prior?.[STORE_KEY];
       await api.storage.local.set({ [STORE_KEY]: {
         bootId, wakeCount: eventCount, lastWake: kind,
+        alarmCount: Math.min(999999, (Number.isSafeInteger(previous?.alarmCount)
+          ? previous.alarmCount : 0) + (kind === 'alarm' ? 1 : 0)),
         priorBootSeen: Boolean(previous?.bootId && previous.bootId !== bootId)
       } });
     }).catch(() => { storageFailure = true; });
