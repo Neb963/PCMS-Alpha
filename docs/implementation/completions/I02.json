@@ -1,0 +1,77 @@
+{
+  "phaseId": "I02",
+  "planRevision": "S7-AUDITED-DESIGN-1",
+  "proposedDisposition": "SCOPED_IMPLEMENTATION_COMPLETE_ONLY_IF_VERIFIED_ON_PROTECTED_MAIN",
+  "claim": "Canonical revision-fenced IndexedDB intent journal with atomic PREPARED/DISPATCH_POSSIBLE, independent-readback requirement for confirmed reconciliation, uncertain target holds, external restore sentinel, restricted same-XPI command port, read-only Overview/Work Queue/Settings attention, and independent redacted ZIP diagnostics. All external mutations remain OFF.",
+  "assertions": [
+    {
+      "id": "P51-03",
+      "status": "PARTIAL_I02_SUBCASES_ONLY",
+      "evidence": "F origin/sender denial, malformed/oversized messages, revision-fenced target and operation ID/payload replay, in-browser read-only same-XPI command port; no provider dispatch",
+      "remaining": "Later account-binding and exact-source revision approval, two-window release/approval races and target-specific effect authority in I03/I13"
+    },
+    {
+      "id": "P51-04",
+      "status": "PARTIAL_I02_SUBCASES_ONLY",
+      "evidence": "F independent remote-effect ledger and lost acknowledgement; B real IDB PREPARED to DISPATCH_POSSIBLE, rolled-back transaction no target, full installed-XPI cold-wake HELD_UNCERTAIN with target lock",
+      "remaining": "Full concurrent wake and fake adapter effect/readback matrix, quota/upgradeblocked and multi-cutpoint crash cases including readback-positive crash before commit; no real effect integration"
+    },
+    {
+      "id": "P51-06",
+      "status": "PARTIAL_I02_SUBCASES_ONLY",
+      "evidence": "F sentinel read failure/invalid data denial, donor-first static import; B installed XPI restores hold after local marker, donor options still available after restart",
+      "remaining": "Full donor native/route isolation during deliberately corrupt IDB/schema and native unavailable, browser upgradeblocked/corrupt meta adversarial cases"
+    },
+    {
+      "id": "P55-11",
+      "status": "PARTIAL_I02_SUBCASES_ONLY",
+      "evidence": "F nested secret canary and ZIP allowlist; B independent diagnostic page packaged in real Firefox, ZIP structural and secret exclusion smoke",
+      "remaining": "Malformed Core bootstrap/unknown version, quota-fault and on-disk download proof for all hostile-data fixtures; Markdown late guided checklist is I17"
+    },
+    {
+      "id": "S6-I02-NOTIFICATIONS",
+      "status": "SCOPED_F_AND_B_PROOF_PENDING_FINAL_CANDIDATE",
+      "evidence": "F fixed-text desktop notice dedup and fallback; B IndexedDB notice revision and Overview Ignore action preserving unrelated HELD_UNCERTAIN operation",
+      "remaining": "Real OS notification delivery acceptance and full scoped incident sources are capability-gated to later phases"
+    },
+    {
+      "id": "S6-I02-EMERGENCY-ENTRY",
+      "status": "SCOPED_F_AND_B_PROOF_PENDING_FINAL_CANDIDATE",
+      "evidence": "F allowlisted report and safe ZIP; B independent emergency route, bundled ZIP and no source/credentials; no Core initialization",
+      "remaining": "Severe Core corruption and OS Downloads system acceptance remain held"
+    },
+    {
+      "id": "UX-01/UX-03/UX-08",
+      "status": "SCOPED_READONLY_I02",
+      "evidence": "Accessible six-view navigation remains; read-only canonical states and scoped attention with revision-fenced ignore, standalone emergency entry; provider UI actions disabled",
+      "remaining": "Full operator H-01/H-07 acceptance at I17; no remote operator action enabled"
+    }
+  ],
+  "capabilities": {
+    "providerWrites": "OFF",
+    "sourceGitWrites": "OFF",
+    "scheduler": "OFF",
+    "autoDirectFallback": "FORBIDDEN",
+    "guardedAdmission": "READ_ONLY_HELD_UNTIL_OWNER_VERIFICATION",
+    "liveProviderAcceptance": "NOT_CLAIMED",
+    "donorRoutingProtection": "UNCHANGED",
+    "manualAccountEnrollment": "OFF",
+    "canonicalJournal": "LOCAL_STRUCTURAL_ONLY",
+    "remoteEffectReconciliation": "NO_LIVE_ADAPTER"
+  },
+  "safetyHolds": [
+    "Do not treat the partial Stage 5 P-tests as full PASS; each outstanding subcase remains explicitly applicable to later phase integration and activation gates.",
+    "No Perchance/Mullvad/Cloudflare requests, native mutation, private per-gens access or Git writes were made.",
+    "DISPATCH_POSSIBLE/OBSERVING on recovery becomes HELD_UNCERTAIN; no blind replay or release without independent matched readback.",
+    "Failed/unavailable IDB or separate restore marker prevents mutation; donor routing is preserved.",
+    "No new provider/write/scheduling/publishing/AI effect capability is enabled by the journal or a green CI check.",
+    "No PR-controlled required-check/workflow/policy trust root was edited."
+  ],
+  "evidenceTierNotes": {
+    "F": "Deterministic Node tests including incorrect origin, stale IDs/revisions, fake effect ledger, restore holds, notice dedup and malicious diagnostic canaries, plus unchanged inherited pinned donor regressions; exact final-candidate CI required.",
+    "B": "Real persistent installed-XPI Firefox Developer Edition 154.0b10, second Firefox process, real IndexedDB commit/abort/restore marker, event-page cold wake and persisted alarm, independent emergency page and ZIP, scoped local notice UI; final candidate CI required.",
+    "X": "NOT_RUN_AS_SEPARATE_TIER; full external-emulator and fleet fault matrix held",
+    "H": "NOT_RUN; no live provider authority or manual acceptance"
+  },
+  "provenance": "Proposal has no PR/head/merge SHA, future CI run ID or squash SHA. Evidence becomes accepted only after final matched PR candidate protected-check success, squash merge, and independently observed postmerge main/package/Firefox evidence."
+}
