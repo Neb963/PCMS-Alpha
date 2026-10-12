@@ -76,8 +76,20 @@ export async function inspectGitSource({token,folder}, transport=fetch) {
   try {
     let ref;
     try {ref=await get('/git/ref/heads/main');}
-    catch(e) {return e.http===404||e.http===409?issue('GITHUB_UNINITIALIZED'):
-      issue(e.http===401||e.http===403?'GITHUB_ACCESS_DENIED':'GITHUB_UNAVAILABLE');}
+    catch(e) {
+      if(e.http===409)return issue('GITHUB_UNINITIALIZED');
+      if(e.http===404){
+        // GitHub masks private repositories as 404 without read access.
+        // Never claim an empty main until independently confirming that
+        // the actual private repository is visible to this credential.
+        try {
+          const repo=await get('');
+          return repo?.full_name===GIT_REPO&&repo?.private===true?
+            issue('GITHUB_UNINITIALIZED'):issue('GITHUB_ACCESS_DENIED');
+        } catch{return issue('GITHUB_ACCESS_DENIED');}
+      }
+      return issue(e.http===401||e.http===403?'GITHUB_ACCESS_DENIED':'GITHUB_UNAVAILABLE');
+    }
     const head=ref?.object?.sha;
     if(!shaOK(head) || ref.ref!=='refs/heads/main' ||
        ref.object?.type!=='commit')return issue('SOURCE_UNVERIFIED');

@@ -46,8 +46,13 @@ function fixture(changes={}, flags={}) {
     assert.ok(route.startsWith('/repos/Neb963/per-gens/'),route);
     let status=200,json;
     if(route.endsWith('/git/ref/heads/main')){
-      if(flags.empty)status=409;else json={ref:'refs/heads/main',
+      if(flags.empty)status=409;
+      else if(flags.missingMain)status=404;
+      else json={ref:'refs/heads/main',
         object:{type:'commit',sha:flags.head||HEAD}};
+    }else if(route==='/repos/Neb963/per-gens'){
+      if(flags.metadataDenied)status=404;
+      else json={full_name:'Neb963/per-gens',private:true};
     }else if(route.includes('/git/commits/'))json={tree:{sha:TREE}};
     else if(route.includes('/git/trees/'))json={truncated:Boolean(flags.truncated),tree:nodes};
     else if(route.includes('/git/blobs/'))json=blobs.get(route.split('/').at(-1));
@@ -66,6 +71,12 @@ test('P53-01 and S6-I05-EMPTY-GIT: missing main stays uninitialized, zero remote
   assert.equal(r.ready,false);
   assert.equal(f.hits.length,1);
   assert.equal(f.hits.every(h=>h.options.method==='GET'),true);
+  const invisible=fixture({}, {missingMain:true,metadataDenied:true});
+  assert.equal((await read(invisible)).code,'GITHUB_ACCESS_DENIED');
+  assert.equal(invisible.hits.length,2);
+  const visible=fixture({}, {missingMain:true});
+  assert.equal((await read(visible)).code,'GITHUB_UNINITIALIZED');
+  assert.equal(visible.hits.length,2);
   assert.equal(safeFolder('gens/good-folder'),true);
   assert.equal(safeFolder('my-generator'),true); // configurable folder root
   assert.equal(safeFolder('custom-root/slug-99'),true);
