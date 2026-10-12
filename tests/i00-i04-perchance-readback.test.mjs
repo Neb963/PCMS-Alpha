@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {classifySessionResponse,classifyOwnerResponse,normalizeReadOnlyInventory,
   createReadOnlyInterpreter} from '../src/runtime/perchance-readback.mjs';
 import {validateInventoryObservation} from '../src/runtime/inventory.mjs';
+import {readFile} from 'node:fs/promises';
 const account={accountId:'account_alpha_01',personaUid:'persona-aaaa-0001',
   revision:3,bindingVersion:1,state:'VERIFIED',
   identity:{source:'GUARDED_SESSION_READBACK',principalFingerprint:'a'.repeat(64),bindingVersion:1}};
@@ -55,6 +56,11 @@ test('I04 F: provider drift, mismatched account, duplicate slug and incomplete o
   const badshape={...sessionReply,body:{...sessionReply.body,generators:[{name:'private-gen'}]}};
   assert.equal(normalizeReadOnlyInventory({...a,sessionReply:badshape,items:badshape.body.generators,
     ownerReplies:new Map([['private-gen',{httpStatus:200,body:{status:'is-owner'}}]])}).ok,false);
+});
+
+test('I04 F: deterministic combined package includes the dormant verifier',async()=>{
+  const overlay=await readFile(new URL('../src/runtime/overlay.mjs',import.meta.url),'utf8');
+  assert.match(overlay,/'perchance-readback\\.mjs'/);
 });
 
 test('I04 F: interpreter passes only de-identified observations, not session secrets',async()=>{
