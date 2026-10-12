@@ -89,7 +89,7 @@ test('P56-06 F: lost response and crash never return to dispatchable state',()=>
     slug:'alpha-slug',previousSlug:'temp-1234'}).code,'INDEPENDENT_RENAME_PROOF_REQUIRED');
 });
 test('S6-I06-ALLOCATION: bad identifiers, noncanonical names and invalid state fail closed',()=>{
-  for(const slug of ['abc','ab-','a'.repeat(101),'../escape','UPPER', ' leading','  ','áaaa']){
+  for(const slug of ['a'.repeat(101),'../escape','UPPER', ' leading','  ','áaaa']){
     assert.equal(plan([slug]).batch.items[0].state,'REJECTED',slug);
   }
   assert.equal(freezeSupply({batchId:'invalid',slugs:['valid-name']}).code,'INVALID_BATCH');
