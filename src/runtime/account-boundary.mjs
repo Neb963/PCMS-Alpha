@@ -46,6 +46,24 @@ export function validateAccountMessage(api,sender,m) {
   }
   return {ok:true};
 }
+// The guard is checked before and after any asynchronous identity observation.
+// A correct session readback under a stale/rotated Persona context is NOT
+// allowed to revalidate the old account binding.
+export async function guardedIdentityRead(guard,personaUid,identityReader) {
+  const before=await guard.getSafeRouteReadiness(personaUid);
+  if(!before.ready)return fail(before.code);
+  const proof=await identityReader({personaUid:before.personaUid,
+    cookieStoreId:before.cookieStoreId,routeId:before.routeId});
+  if(!proof)return fail('SESSION_IDENTITY_UNOBSERVABLE');
+  const after=await guard.getSafeRouteReadiness(personaUid);
+  if(!after.ready||before.personaUid!==after.personaUid||
+      before.cookieStoreId!==after.cookieStoreId||
+      before.routeId!==after.routeId)return fail('SESSION_CONTEXT_CHANGED');
+  if(proof.source!=='GUARDED_SESSION_READBACK'||proof.verified!==true||
+      proof.personaUid!==personaUid)return fail('INDEPENDENT_IDENTITY_PROOF_REQUIRED');
+  return {ok:true,proof};
+}
+
 export function createAccountBoundary(api,{
   open=openCanonicalDatabase, guard=internalPcmsGuard,
   identityReader=async()=>null
@@ -97,15 +115,12 @@ export function createAccountBoundary(api,{
         if(old.account.revision!==p.expectedRevision)return fail('STALE_REVISION');
         if(old.account.state==='ARCHIVED')return fail('ACCOUNT_ARCHIVED');
         if(message.type==='OPEN_LOGIN') return await g.openHumanLogin(old.account.personaUid);
-        const readiness=await g.getSafeRouteReadiness(old.account.personaUid);
-        if(!readiness.ready)return fail(readiness.code);
-        // A mock/fixture can provide independently sourced proof, but a
-        // user-controlled message can never submit proof or grant verification.
-        const observed=await identityReader({personaUid:old.account.personaUid,
-          cookieStoreId:readiness.cookieStoreId,routeId:readiness.routeId});
-        if(!observed)return fail('SESSION_IDENTITY_UNOBSERVABLE');
+        // A fixture supplies an independent observer; the production reader
+        // deliberately holds until an authenticated provider method is proven.
+        const observed=await guardedIdentityRead(g,old.account.personaUid,identityReader);
+        if(!observed.ok)return observed;
         const result=await accounts.apply({type:'VERIFY',accountId:p.accountId,
-          expectedRevision:p.expectedRevision,proof:observed});
+          expectedRevision:p.expectedRevision,proof:observed.proof});
         return result.ok?{ok:true,account:publicAccount(result.account)}:result;
       }
       const map={ENROLL:'ENROLL',ACK_LOGIN:'ACK_LOGIN',MANUAL_OVERRIDE:'MANUAL_OVERRIDE',
