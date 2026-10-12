@@ -11,8 +11,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -108,21 +106,13 @@ def observer_isolation_probe(session):
     # Actual installed XPI's Firefox scripting.executeScript in a local
     # controlled page. The fixed production reader must refuse wrong origin
     # before parsing attacker-controlled app state or issuing any requests.
-    class Fixture(BaseHTTPRequestHandler):
-        def do_GET(self):
-            payload=b'<html><script>window.fetch=async()=>({status:200,json:async()=>({status:"success"})});window.app={store:{data:{user:{loggedIn:true}}}};</script><body>Local adversarial fixture</body></html>'
-            self.send_response(200)
-            self.send_header('Content-Type','text/html')
-            self.send_header('Content-Length',str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
-        def log_message(self,*args):
-            return
-    server=ThreadingHTTPServer(('127.0.0.1',0),Fixture)
-    thread=threading.Thread(target=server.serve_forever,daemon=True)
-    thread.start()
-    try:
-        fixture_url='http://127.0.0.1:'+str(server.server_address[1])+'/fixture'
+    # A local file fixture needs no loopback network permission or runtime
+    # proxy exception; donor blocks new unmanaged network tabs by design.
+    with tempfile.TemporaryDirectory(prefix='pcms-i04-local-fixture-') as directory:
+        page=pathlib.Path(directory)/'fixture.html'
+        page.write_text('<!doctype html><title>Controlled offline I04 fixture</title>'
+            '<script>window.fetch=async()=>{throw Error("page-provided fetch");};</script>')
+        fixture_url=page.as_uri()
         original=call('GET',f'/session/{session}/window')
         extra=call('POST',f'/session/{session}/window/new',{'type':'tab'})
         try:
@@ -161,9 +151,6 @@ def observer_isolation_probe(session):
                 call('DELETE',f'/session/{session}/window')
             except Exception: pass
             call('POST',f'/session/{session}/window',{'handle':original})
-    finally:
-        server.shutdown()
-        server.server_close()
 
 def inventory_idb_probe(session):
     # Packaged Firefox uses REAL persistent IDB, synthetic readback only.
