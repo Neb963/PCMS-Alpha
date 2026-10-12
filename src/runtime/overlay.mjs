@@ -50,13 +50,46 @@ attachPcmsGuard({
   shared: managementIntegration.pcmsGuard,
   // Donor's currentTest validates the route-test context and invalidates
   // stale/rotated/failed route evidence; it does not trigger a network probe.
-  getRouteTest: async (containerId) => currentTest(await getState(), containerId)
+  getRouteTest: async (containerId) => currentTest(await getState(), containerId),
+  listPersonas: async () => {
+    const state=await getState();
+    return Object.values(state.profiles||{})
+      .filter(p=>p?.managed && !p.rotationRole && p.personaUid)
+      .map(p=>({
+        personaUid:p.personaUid,name:p.name,archived:p.status==='archived',
+        routeProtected:p.routeId!=='direct' && p.routeId!=='block' &&
+          state.routes?.[p.routeId]?.enabled!==false && !!state.routes?.[p.routeId]
+      }));
+  },
+  listProtectedRoutes: async () => {
+    const state=await getState();
+    return Object.values(state.routes||{}).filter(r=>r?.id &&
+      r.id!=='direct' && r.id!=='block' && r.enabled!==false)
+      .map(r=>({routeId:r.id,name:r.name||'Protected route'}));
+  },
+  createPersona: async ({name,routeId}) => {
+    const state=await getState();
+    if(!state.routes?.[routeId] || state.routes[routeId].enabled===false ||
+        routeId==='direct'||routeId==='block')throw Error('PROTECTED_ROUTE_REQUIRED');
+    // Delegate to the original PersonaMonkey local mutation fence.
+    return localMutationFence([],()=>personaPlatform.create({
+      name,routeId,allowDirect:false
+    }));
+  },
+  openHumanLogin: async ({personaUid,cookieStoreId,routeId}) =>
+    localMutationFence(cookieStoreId,async()=>{
+      const state=await getState(), p=state.profiles?.[cookieStoreId];
+      if(!p || p.personaUid!==personaUid || p.routeId!==routeId ||
+          routeId==='direct'||routeId==='block'||state.routes?.[routeId]?.enabled===false)
+        throw Error('PERSONA_ROUTE_CHANGED');
+      return personaPlatform.open(cookieStoreId,'https://perchance.org/',true);
+    })
 });
 
 function localMutationFence(profileIds, operation, mode = "block", options = {}) {`,
     'donor guard host');
   await writeFile(bgPath, bg);
-  for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs']) {
+  for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }
 }
