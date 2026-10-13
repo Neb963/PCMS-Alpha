@@ -35,7 +35,7 @@ function fixture({origin='https://perchance.org',owner=true,editor=true,session=
   Object.defineProperty(globalThis,'navigator',{configurable:true,value:{
     locks:{query:async()=>({held:workerLock?
       [{name:'aiagent-live|'+sid,mode:'shared'}]:oldLock?
-      [{name:'aiagent-live|old-session',mode:'shared'}]:[]})},
+      [{name:'aiagent-live|previous-session-opaque',mode:'shared'}]:[]})},
     storage:storage==='missing'?{}:{getDirectory:async()=>{
       if(storage==='deniedRoot')throw Object.assign(Error('denied'),{name:'SecurityError'});
       return opfs();
@@ -45,7 +45,7 @@ function fixture({origin='https://perchance.org',owner=true,editor=true,session=
   globalThis.window={
     __editorReady:editor,app:{data:{generator:{name:slug,isPrivate:true}}},
     userOwnsThisGenerator:owner,srcState:{getDraftChatSid:()=>session},
-    __aiAgentLiveLockSid:workerLock?sid:oldLock?'old-session':undefined,
+    __aiAgentLiveLockSid:workerLock?sid:oldLock?'previous-session-opaque':undefined,
     yjsProvider:collabMode?{wsconnected:collabMode!=='offline',
       synced:collabMode!=='unsynced',roomname:'room'}:collab?{}:null,
     yDoc:collabMode?{clientID:10}:null,
