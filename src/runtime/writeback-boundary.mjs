@@ -1,0 +1,235 @@
+// I11 privileged Git writeback command admission. Git only, never Perchance
+// publication. Synthetic tests can inject guard/transport/effect gate; packaged
+// capability is OFF until independently approved credential/provider activation.
+import {fail,openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
+import {trustedExtensionPage} from './command-boundary.mjs';
+import {internalPcmsGuard} from './persona-guard.mjs';
+import {createAiStore} from './ai-store.mjs';
+import {createStagingStore} from './staging-store.mjs';
+import {createWritebackStore} from './writeback-store.mjs';
+import {exactSource,diffSource,verifyReadback} from './staging-core.mjs';
+import {inspectWriteback,writeGitCandidate,observeGitCandidate,
+  commitMessage,parseTerminalSuggestion} from './git-writeback.mjs';
+
+export const WRITEBACK_PORT='pcms-i11-writeback';
+const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
+const FP=/^[a-f0-9]{64}$/;
+const ACTIONS=new Set(['GET_SETTINGS','SET_AUTO','LIST','GET','PREVIEW',
+  'PREPARE','COMMIT','RECONCILE']);
+export function validateWritebackMessage(api,sender,msg){
+  if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
+  let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
+  if(!msg||typeof msg!=='object'||Array.isArray(msg)||!json||
+     json.length>1800||Object.keys(msg).some(x=>!['type','params'].includes(x))||
+     !ACTIONS.has(msg.type))return fail('INVALID_MESSAGE');
+  const p=msg.params||{};
+  if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
+  const allowed={
+    GET_SETTINGS:[],SET_AUTO:['expectedRevision','autoEnabled'],LIST:[],
+    GET:['slug'],PREVIEW:['slug'],
+    PREPARE:['slug','expectedJobRevision','fingerprint','mode','message','token'],
+    COMMIT:['slug','expectedRevision','token'],
+    RECONCILE:['slug','expectedRevision','token']
+  };
+  if(Object.keys(p).some(x=>!allowed[msg.type].includes(x))||
+     (allowed[msg.type].includes('slug')&&!SLUG.test(p.slug||''))||
+     (msg.type==='SET_AUTO'&&(!Number.isSafeInteger(p.expectedRevision)||
+        p.expectedRevision<1||typeof p.autoEnabled!=='boolean'))||
+     (msg.type==='PREPARE'&&(!Number.isSafeInteger(p.expectedJobRevision)||
+        p.expectedJobRevision<1||!FP.test(p.fingerprint||'')||
+        !['MANUAL','AUTO'].includes(p.mode)))||
+     (['COMMIT','RECONCILE'].includes(msg.type)&&
+        (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
+     (['PREPARE','COMMIT','RECONCILE'].includes(msg.type)&&
+        (typeof p.token!=='string'||p.token.length<12||p.token.length>512)))
+    return fail('INVALID_PARAMS');
+  return {ok:true};
+}
+function scopeMatches(stage,job){
+  if(!stage?.ok||!job?.ok||stage.record?.state!=='SOURCE_VERIFIED'||
+     !stage.record.verifiedAt||
+     job.job?.state!=='TESTS_VERIFIED'||!job.job?.executionSlotReleased||
+     job.job.verifiedFinal!==job.job.sourceFingerprint||
+     job.job.finalSource?.fingerprint!==job.job.verifiedFinal||
+     job.job.stageRevision!==stage.record.revision||
+     !['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(job.job.native?.state))
+    return fail('TESTED_FINAL_SOURCE_REQUIRED');
+  return {ok:true};
+}
+function context(r){
+  return {slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,
+    principalFingerprint:r.principalFingerprint,remotePublicId:r.remotePublicId};
+}
+async function guardedReadback(g,stage,job){
+  const r=stage.record;
+  if(!g?.observeReadOnly||!g?.getSafeRouteReadiness)
+    return fail('DONOR_GUARD_UNAVAILABLE');
+  const before=await g.getSafeRouteReadiness(r.personaUid);
+  if(!before?.ready)return fail(before?.code||'ROUTE_UNVERIFIED');
+  const observed=await g.observeReadOnly(r.personaUid,false,r.slug);
+  if(!observed?.ok||observed.principalFingerprint!==r.principalFingerprint||
+     !observed.original||!Array.isArray(observed.original.assets))
+    return fail('CURRENT_SOURCE_OWNER_UNVERIFIED');
+  const packet={ok:true,source:'DONOR_GUARDED_ORIGINAL_READBACK',
+    ...context(r),ownerResult:observed.original.ownerResult,
+    remotePublicId:observed.original.remotePublicId,
+    visibility:observed.original.visibility,pjs:observed.original.pjs,
+    html:observed.original.html,assets:observed.original.assets};
+  const exact=await exactSource(job.job.finalSource.blobs);
+  if(!exact.ok||exact.fingerprint!==job.job.verifiedFinal)
+    return fail('FINAL_BYTES_CHANGED');
+  const verified=await verifyReadback(exact,packet,context(r));
+  if(!verified.ok)return verified;
+  const after=await g.getSafeRouteReadiness(r.personaUid);
+  if(!after?.ready||after.cookieStoreId!==before.cookieStoreId||
+     after.routeId!==before.routeId)return fail('ROUTE_CHANGED');
+  return {ok:true,source:exact,route:after};
+}
+export function createWritebackBoundary(api,{
+  open=openCanonicalDatabase,guard=internalPcmsGuard,
+  storeFactory=createWritebackStore,aiFactory=createAiStore,
+  stageFactory=createStagingStore,inspect=inspectWriteback,
+  write=writeGitCandidate,observe=observeGitCandidate,
+  effectGate=()=>false
+}={}){
+  let dbPromise;
+  const database=()=>dbPromise ||=open();
+  const sentinel=createRestoreSentinel(api.storage.local);
+  async function runTrusted(msg){
+    const p=msg.params||{},db=await database(),store=storeFactory(db);
+    if(msg.type==='GET_SETTINGS')return store.settings();
+    if(msg.type==='LIST')return store.list();
+    if(msg.type==='GET')return store.get(p.slug);
+    if(msg.type==='SET_AUTO'){
+      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      return store.changeSettings(p.expectedRevision,p.autoEnabled);
+    }
+    const stage=await stageFactory(db).getFull(p.slug),
+      job=await aiFactory(db).getJobFull(p.slug);
+    if(msg.type==='RECONCILE'){
+      const row=await store.getFull(p.slug);
+      if(!row.ok||row.record.revision!==p.expectedRevision)
+        return fail('STALE_OR_MISSING_WRITEBACK');
+      if(row.record.state==='CONFIRMED')
+        return store.get(p.slug);
+      if(!['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(row.record.state))
+        return fail('RECONCILIATION_NOT_REQUIRED');
+      if(!scopeMatches(stage,job).ok||
+         job.job.revision!==row.record.jobRevision||
+         stage.record.revision!==row.record.stageRevision)
+        return fail('WRITEBACK_CONTEXT_CHANGED');
+      const found=await observe({token:p.token,folder:row.record.folder,
+        baseHead:row.record.baseHead,source:job.job.finalSource,
+        operationId:row.record.operationId});
+      // Equality without attributable commit ancestry is NOT an ack.
+      return {...(found.ok?{ok:true}:fail(found.code||'GIT_RECONCILIATION_UNKNOWN')),
+        state:'HELD_UNCERTAIN',code:found.ok?
+          'GIT_BYTES_EQUAL_ATTRIBUTION_UNPROVEN':found.code,
+        committed:false,canRetry:false};
+    }
+    const scope=scopeMatches(stage,job);
+    if(!scope.ok)return scope;
+    const r=stage.record,j=job.job;
+    if(msg.type==='PREVIEW'){
+      const previous=await exactSource(r.candidate.blobs);
+      const final=await exactSource(j.finalSource.blobs);
+      if(!previous.ok||!final.ok||final.fingerprint!==j.verifiedFinal)
+        return fail('PREVIEW_SOURCE_UNVERIFIED');
+      const diff=diffSource(previous,final);
+      if(!diff.ok)return diff;
+      return {ok:true,slug:r.slug,folder:r.sourceFolder,
+        sourceFingerprint:final.fingerprint,jobRevision:j.revision,
+        stageRevision:r.revision,
+        diff:diff.changes.map(x=>({...x,
+          before:previous.files.find(f=>f.path===x.path)||null,
+          after:final.files.find(f=>f.path===x.path)||null})),
+        policy:'NO_READY_OR_TESTING_FILE_EDIT',
+        publication:'OFF',review:'EXACT_FILE_HASH_AND_SIZE'};
+    }
+    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+    if(msg.type==='PREPARE'){
+      if(p.expectedJobRevision!==j.revision||
+         p.fingerprint!==j.verifiedFinal)return fail('STALE_PREVIEW');
+      const local=await guardedReadback(guard(),stage,job);
+      if(!local.ok)return local;
+      let message;
+      if(p.mode==='MANUAL')message=commitMessage(p.message);
+      else {
+        // No untrusted UI-provided terminal text is accepted. Query only the
+        // leased native assistant session; missing evidence holds AUTO.
+        const g=guard(),session=j.native?.sessionDigest;
+        if(!g?.runNativeAiStep||!FP.test(session||''))
+          return fail('AI_TERMINAL_UNVERIFIED');
+        const reply=await g.runNativeAiStep(r.personaUid,
+          {slug:r.slug,nonce:r.nonce,action:'OBSERVE_TERMINAL'});
+        message=parseTerminalSuggestion(reply,session);
+      }
+      if(!message.ok)return message;
+      const probe=await inspect({token:p.token,folder:r.sourceFolder,
+        baseHead:r.sourceHead});
+      if(!probe.ok)return probe;
+      const receipt=await store.prepare({name:p.slug,stage:r,job:j,probe,
+        mode:p.mode,message:message.text,
+        operationId:'writeback_'+crypto.randomUUID().replaceAll('-','')});
+      return receipt;
+    }
+    if(msg.type==='COMMIT'){
+      const prior=await store.getFull(p.slug);
+      if(!prior.ok||prior.record.revision!==p.expectedRevision)
+        return fail('STALE_OR_MISSING_WRITEBACK');
+      const record=prior.record;
+      if(record.state!=='PREPARED')
+        return fail('WRITEBACK_RECONCILIATION_REQUIRED');
+      if(effectGate({phase:'I11',record})!==true)
+        return fail('GITHUB_WRITE_ACTIVATION_HELD');
+      const read=await guardedReadback(guard(),stage,job);
+      if(!read.ok)return read;
+      // durable marker has all current AI/stage/settings CAS; duplicate
+      // requests from different Firefox wakes cannot arm twice.
+      const armed=await store.arm(p.slug,p.expectedRevision);
+      if(!armed.ok)return armed;
+      if(effectGate({phase:'I11',record})!==true||
+         (await sentinel.inspect()).held){
+        await store.finish(p.slug,armed.revision,{reason:'WRITEBACK_HELD_AFTER_ARM'});
+        return fail('WRITEBACK_DISPATCH_UNCERTAIN');
+      }
+      let outcome;
+      try{outcome=await write({token:p.token,folder:record.folder,
+        baseHead:record.baseHead,expectedHead:record.expectedHead,
+        message:record.message,operationId:record.operationId,
+        source:read.source});}
+      catch{outcome=fail('GIT_TRANSPORT_UNCERTAIN');}
+      const completed=await store.finish(p.slug,armed.revision,{
+        verified:outcome?.ok===true&&outcome.code==='GIT_COMMITTED_VERIFIED',
+        commitSha:outcome?.commitSha,
+        reason:outcome?.code||'WRITEBACK_OUTCOME_UNVERIFIED'
+      });
+      return completed.ok?{...completed,
+        github:completed.state==='CONFIRMED'?'GIT_ONLY_CONFIRMED':'HELD_UNCERTAIN'}:
+        fail('WRITEBACK_CHECKPOINT_UNCERTAIN');
+    }
+    return fail('COMMAND_NOT_ALLOWED');
+  }
+  async function run(message,sender){
+    const valid=validateWritebackMessage(api,sender,message);
+    if(!valid.ok)return valid;
+    try{return await runTrusted(message);}
+    catch{return fail('WRITEBACK_CANONICAL_HOLD');}
+  }
+  function register(){
+    api.runtime.onConnect.addListener(port=>{
+      if(port?.name!==WRITEBACK_PORT)return;
+      let busy=false;
+      port.onMessage.addListener(msg=>{
+        if(busy){try{port.postMessage(fail('BUSY'));}catch{}return;}
+        busy=true;
+        Promise.resolve(run(msg,port.sender))
+          .then(v=>{try{port.postMessage(v);}catch{}})
+          .catch(()=>{try{port.postMessage(fail('WRITEBACK_UNAVAILABLE'));}catch{}})
+          .finally(()=>{busy=false;});
+      });
+    });
+  }
+  return Object.freeze({register,run});
+}
+if(typeof browser!=='undefined')createWritebackBoundary(browser).register();
