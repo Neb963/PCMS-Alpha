@@ -278,8 +278,9 @@ export function createAiStore(db){
           finalSource:{fingerprint:snapshot.fingerprint,
             files:structuredClone(snapshot.files),blobs:structuredClone(snapshot.blobs),
             totalBytes:snapshot.totalBytes},
-          verifiedFinal:null,hold:'INDEPENDENT_BROWSER_TESTS_REQUIRED',
-          state:'TESTS_UNVERIFIED'};
+          verifiedFinal:changed?null:j.verifiedFinal,
+          hold:changed?'INDEPENDENT_BROWSER_TESTS_REQUIRED':j.hold,
+          state:changed?'TESTS_UNVERIFIED':j.state};
         if(changed){
           next.chat1={...next.chat1,tests:{}};
           if(next.chat2)next.chat2={...next.chat2,tests:{}};
