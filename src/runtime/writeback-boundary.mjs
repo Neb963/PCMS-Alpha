@@ -119,13 +119,16 @@ export function createWritebackBoundary(api,{
          stage.record.revision!==row.record.stageRevision)
         return fail('WRITEBACK_CONTEXT_CHANGED');
       const found=await observe({token:p.token,folder:row.record.folder,
-        baseHead:row.record.baseHead,source:job.job.finalSource,
-        operationId:row.record.operationId});
-      // Equality without attributable commit ancestry is NOT an ack.
-      return {...(found.ok?{ok:true}:fail(found.code||'GIT_RECONCILIATION_UNKNOWN')),
-        state:'HELD_UNCERTAIN',code:found.ok?
-          'GIT_BYTES_EQUAL_ATTRIBUTION_UNPROVEN':found.code,
-        committed:false,canRetry:false};
+        baseHead:row.record.baseHead,expectedHead:row.record.expectedHead,
+        source:job.job.finalSource,operationId:row.record.operationId});
+      if(found?.ok&&found.code==='GIT_COMMITTED_VERIFIED'&&
+         found.attribution==='COMMIT_PARENT_AND_BYTES_VERIFIED')
+        return store.finish(p.slug,row.record.revision,{
+          verified:true,commitSha:found.commitSha});
+      // Same-content independent commits are NOT success. Even an observed
+      // missing commit could mean the branch changed or an ACK was lost.
+      return {ok:false,state:'HELD_UNCERTAIN',code:found?.code||
+        'GIT_RECONCILIATION_UNKNOWN',canRetry:false};
     }
     const scope=scopeMatches(stage,job);
     if(!scope.ok)return scope;
