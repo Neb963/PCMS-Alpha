@@ -8,6 +8,7 @@ import {createReleaseStore} from './release-store.mjs';
 import {createExistingStore} from './existing-update-store.mjs';
 import {unlockPrevious} from './existing-update-core.mjs';
 import {REFRESHER_KEY} from './refresher-core.mjs';
+import {evaluation} from './ai-evidence.mjs';
 import {createStagingStore} from './staging-store.mjs';
 import {createAiStore} from './ai-store.mjs';
 import {inspectGitSource} from './git-source.mjs';
@@ -18,7 +19,7 @@ import {releaseContext,releaseTestContext,candidateManifest,releaseGitContext,
 export const RELEASE_PORT='pcms-i13-release';
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const fp=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
-const TYPES=new Set(['LIST','GET','PREVIEW','APPROVE','DISPATCH','RECONCILE']);
+const TYPES=new Set(['LIST','GET','PREVIEW','GET_REVIEW_CHUNK','APPROVE','DISPATCH','RECONCILE']);
 export function validateReleaseMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
@@ -27,6 +28,7 @@ export function validateReleaseMessage(api,sender,msg){
     return fail('INVALID_MESSAGE');
   const p=msg.params||{},allowed={
     LIST:[],GET:['slug'],PREVIEW:['slug','token','passphrase'],
+    GET_REVIEW_CHUNK:['slug','stageRevision','fingerprint','origin','path','offset'],
     APPROVE:['slug','token','expectedStageRevision','expectedJobRevision','fingerprint','explicitApproval','passphrase'],
     DISPATCH:['slug','token','expectedRevision','passphrase'],
     RECONCILE:['slug','token','expectedRevision']
@@ -38,6 +40,13 @@ export function validateReleaseMessage(api,sender,msg){
        (typeof p.token!=='string'||p.token.length<12||p.token.length>512||
         !/^[\x21-\x7e]+$/.test(p.token)))||
      (p.passphrase!==undefined&&(typeof p.passphrase!=='string'||p.passphrase.length<12||p.passphrase.length>256))||
+     (msg.type==='GET_REVIEW_CHUNK'&&(
+       !Number.isSafeInteger(p.stageRevision)||p.stageRevision<1||
+       !fp(p.fingerprint)||!['F','P'].includes(p.origin)||
+       typeof p.path!=='string'||p.path.length>240||
+       !/^(?:main\.pjs|index\.html|src\/[A-Za-z0-9._/-]+)$/.test(p.path)||
+       !Number.isSafeInteger(p.offset)||p.offset<0||p.offset>16*1024*1024||
+       p.offset%8192!==0))||
      (['DISPATCH','RECONCILE'].includes(msg.type)&&
        (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
      (msg.type==='APPROVE'&&(
@@ -189,6 +198,32 @@ export function createReleaseBoundary(api,{
     const p=msg.params||{},database=await db(),store=releaseFactory(database);
     if(msg.type==='GET')return store.get(p.slug);
     if(msg.type==='LIST')return store.list();
+    if(msg.type==='GET_REVIEW_CHUNK'){
+      // Source is taken only from sealed canonical stage/job. Read-only,
+      // revision-fenced review never grants publisher or Git authority.
+      const stage=await stageFactory(database).getFull(p.slug),
+        job=await aiFactory(database).getJobFull(p.slug);
+      if(!stage.ok||!job.ok||stage.record.revision!==p.stageRevision||
+         stage.record.slug!==p.slug||!releaseTestContext(stage.record,job.job).ok)
+        return fail('REVIEW_OUTDATED');
+      const f=await candidateManifest(stage.record,job.job);
+      if(!f.ok||f.fingerprint!==p.fingerprint)return fail('REVIEW_FINAL_F_STALE');
+      const selected=p.origin==='F'?f:await exactSource(stage.record.previous.blobs);
+      if(!selected.ok||selected.fingerprint!==stage.record.previous?.fingerprint&&p.origin==='P')
+        return fail('REVIEW_PREVIOUS_CORRUPT');
+      const file=selected.blobs.find(x=>x.path===p.path);
+      if(!file)return fail('REVIEW_FILE_NOT_FOUND');
+      const bytes=Uint8Array.from(atob(file.base64),c=>c.charCodeAt(0));
+      if(p.offset>bytes.length)return fail('REVIEW_OFFSET_INVALID');
+      const part=bytes.subarray(p.offset,p.offset+8192);
+      let raw='';for(let i=0;i<part.length;i++)raw+=String.fromCharCode(part[i]);
+      const metadata=selected.files.find(x=>x.path===p.path);
+      return {ok:true,slug:p.slug,stageRevision:p.stageRevision,
+        fingerprint:f.fingerprint,origin:p.origin,path:p.path,
+        offset:p.offset,length:part.length,total:bytes.length,
+        fileSha256:metadata.sha256,base64:btoa(raw),
+        nextOffset:p.offset+part.length<bytes.length?p.offset+8192:null};
+    }
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
     if(msg.type==='RECONCILE'){
       const row=await store.getFull(p.slug);
@@ -225,6 +260,14 @@ export function createReleaseBoundary(api,{
       return {ok:true,slug:p.slug,stageRevision:checked.r.revision,
         jobRevision:checked.j.revision,sourceFingerprint:checked.source.fingerprint,
         previousFingerprint:checked.previous.fingerprint,files:checked.source.files,
+        priorFiles:checked.previous.files,
+        promptRevision:checked.j.prompt.revision,
+        testingSha:checked.j.optionalTesting?.sha256||null,
+        tests:{default:checked.j.prompt.tests.map(name=>({name,
+          result:checked.j.chat1.tests[name]?.result||'UNVERIFIED'})),
+          optional:checked.j.optionalTesting?.tests?.map(name=>({name,
+            result:checked.j.chat2?.tests[name]?.result||'UNVERIFIED'}))||[],
+          state:evaluation(checked.j).state},
         diff:diffSource(checked.previous,checked.source).changes,
         gitHead:checked.git.head,mode:'INDIVIDUAL_HUMAN_APPROVAL',
         warning:'Approval alone cannot publish; remote effects held until proven'};
