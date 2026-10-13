@@ -6,8 +6,14 @@ import {internalPcmsGuard} from './persona-guard.mjs';
 import {createStagingStore} from './staging-store.mjs';
 import {createAiStore} from './ai-store.mjs';
 import {inspectGitSource} from './git-source.mjs';
-import {verifyReadback} from './staging-core.mjs';
+import {verifyReadback,exactSource} from './staging-core.mjs';
 export const AI_PORT='pcms-i10-ai';
+function encodeUtf8(text){
+  const bytes=new TextEncoder().encode(text);let binary='';
+  for(let i=0;i<bytes.length;i+=8192)
+    binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+  return btoa(binary);
+}
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const ACT=new Set(['GET_PROMPTS','SET_PROMPT','IMPORT_PROMPT','EXPORT_PROMPTS',
   'LIST_JOBS','GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE']);
@@ -126,7 +132,36 @@ export function createAiBoundary(api,{
         // External UI observations never prove test outcomes. The canonical
         // store retains only hashed native session identity and busy status.
         const reconciled=await store.observeNative(p.slug,p.expectedRevision,observation);
-        return reconciled.ok?{...reconciled,tests:'INDEPENDENT_ORACLE_REQUIRED'}:reconciled;
+        if(!reconciled.ok)return reconciled;
+        if(observation.busy||!['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(
+          (await store.getJobFull(p.slug)).job?.native?.state))
+          return {...reconciled,tests:'NATIVE_BUSY_OR_ORACLE_REQUIRED'};
+        if(observation.sourceSaved!==true||observation.editorClean!==true)
+          return fail('AI_NATIVE_SOURCE_UNSAVED');
+        const live=await g.observeReadOnly(r.personaUid,false,r.slug);
+        if(live?.ok!==true||live.principalFingerprint!==r.principalFingerprint||
+           live.original?.remotePublicId!==r.remotePublicId||
+           live.original?.ownerResult!=='IS_OWNER'||
+           live.original?.visibility!=='UNLISTED')
+          return fail('AI_SOURCE_OWNER_UNVERIFIED');
+        const original=live.original;
+        if(typeof original.pjs!=='string'||typeof original.html!=='string'||
+           !Array.isArray(original.assets))return fail('AI_SOURCE_BYTES_UNVERIFIED');
+        const snapshot=await exactSource([
+          {path:'main.pjs',base64:encodeUtf8(original.pjs)},
+          {path:'index.html',base64:encodeUtf8(original.html)},
+          ...original.assets
+        ]);
+        if(!snapshot.ok)return fail(snapshot.code||'AI_SOURCE_BYTES_UNVERIFIED');
+        const editor=await g.inspectStageEditor?.(r.personaUid,r.slug,r.nonce);
+        if(editor?.ok!==true||editor.clean!==true||(await sentinel.inspect()).held)
+          return fail('AI_EDITOR_CHANGED_AFTER_READBACK');
+        const afterSource=await g.getSafeRouteReadiness(r.personaUid);
+        if(!afterSource?.ready||afterSource.cookieStoreId!==route.cookieStoreId||
+           afterSource.routeId!==route.routeId)return fail('AI_POST_SOURCE_GUARD_CHANGED');
+        const checkpoint=await store.checkpointSource(p.slug,reconciled.revision,snapshot);
+        return checkpoint.ok?{...checkpoint,tests:'INDEPENDENT_ORACLE_REQUIRED',
+          source:'GUARDED_FULL_SOURCE_BYTES'}:checkpoint;
       }
       // Preparation only: no helper send, remote save, tab creation or test success.
       const stage=await stageFactory(db).getFull(p.slug);
