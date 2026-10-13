@@ -59,10 +59,29 @@ export async function perchanceAiOpfsProbe(request){
     }catch(e){
       if(e?.name!=='NotFoundError')return fail('WORKSPACE_OPFS_INSPECTION_FAILED');
     }
-    // Bound memory/time even if a future browser returns a surprising
-    // large or cyclic root iterator. Never enumerate contents or names.
+    // Archived aiAgentClient describes a per-session tools-worker
+    // namespace under agent/<sid>/workspace, but the actual worker module
+    // is unavailable here. Probe only existence of that exact session-local
+    // directory. Even PRESENT cannot prove its contents, active worker,
+    // isolation from old scratch, or remote server-session independence.
+    let workspaceRootState='ABSENT';
+    try{
+      const agent=await read(()=>root.getDirectoryHandle('agent',{create:false}));
+      const sessionRoot=await read(()=>
+        agent.getDirectoryHandle(sid,{create:false}));
+      const workspace=await read(()=>
+        sessionRoot.getDirectoryHandle('workspace',{create:false}));
+      if(!workspace||workspace.kind!=='directory')
+        return fail('WORKSPACE_ROOT_KIND_CHANGED');
+      workspaceRootState='PRESENT_UNTRUSTED';
+    }catch(e){
+      if(e?.name!=='NotFoundError')
+        return fail('WORKSPACE_OPFS_INSPECTION_FAILED');
+    }
+    // No listing, file reads, writes, child paths, or raw names cross the
+    // extension boundary; a seeded folder is not an isolation oracle.
     return {ok:true,code:'OPFS_LOCAL_OBSERVED_ONLY',slug:request.slug,
-      sessionDigest:digest,attachmentState,
+      sessionDigest:digest,attachmentState,workspaceRootState,
       localOpfsAccessible:true,serverEndAck:'UNOBSERVED',
       workerNamespace:'UNVERIFIED',isolation:'UNVERIFIED'};
   }catch{return fail('WORKSPACE_OPFS_INSPECTION_FAILED');}
