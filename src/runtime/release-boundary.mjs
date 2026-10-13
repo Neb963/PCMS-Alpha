@@ -19,7 +19,7 @@ import {releaseContext,releaseTestContext,candidateManifest,releaseGitContext,
 export const RELEASE_PORT='pcms-i13-release';
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const fp=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
-const TYPES=new Set(['LIST','GET','PREVIEW','GET_REVIEW_CHUNK','APPROVE','DISPATCH','RECONCILE']);
+const TYPES=new Set(['LIST','GET','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
 export function validateReleaseMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
@@ -30,6 +30,7 @@ export function validateReleaseMessage(api,sender,msg){
     LIST:[],GET:['slug'],PREVIEW:['slug','token','passphrase'],
     GET_REVIEW_CHUNK:['slug','stageRevision','fingerprint','origin','path','offset'],
     APPROVE:['slug','token','expectedStageRevision','expectedJobRevision','fingerprint','explicitApproval','passphrase'],
+    CANCEL_APPROVED:['slug','expectedRevision'],
     DISPATCH:['slug','token','expectedRevision','passphrase'],
     RECONCILE:['slug','token','expectedRevision']
   };
@@ -47,7 +48,7 @@ export function validateReleaseMessage(api,sender,msg){
        !/^(?:main\.pjs|index\.html|src\/[A-Za-z0-9._/-]+)$/.test(p.path)||
        !Number.isSafeInteger(p.offset)||p.offset<0||p.offset>16*1024*1024||
        p.offset%8192!==0))||
-     (['DISPATCH','RECONCILE'].includes(msg.type)&&
+     (['DISPATCH','RECONCILE','CANCEL_APPROVED'].includes(msg.type)&&
        (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
      (msg.type==='APPROVE'&&(
        !Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
@@ -225,6 +226,7 @@ export function createReleaseBoundary(api,{
         nextOffset:p.offset+part.length<bytes.length?p.offset+8192:null};
     }
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+    if(msg.type==='CANCEL_APPROVED')return store.cancelApproved(p.slug,p.expectedRevision);
     if(msg.type==='RECONCILE'){
       const row=await store.getFull(p.slug);
       if(!row.ok||row.record.revision!==p.expectedRevision)return fail('STALE_RELEASE');
