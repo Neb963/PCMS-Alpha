@@ -1969,6 +1969,36 @@ def main():
                            {'script':code,'args':[]},timeout=90)
                 assert proof.get('ok') is True,proof
                 print('B I13_PACKAGED_EXACT_APPROVAL_IDB_CAS_NO_REPLAY_AND_PORT=PASS',flush=True)
+                chunk_script="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const req=db.transaction('meta','readonly').objectStore('meta').get('stage:i13-fixture-release');
+                  const stage=await new Promise(resolve=>req.onsuccess=()=>resolve(req.result?.record));
+                  function ask(params){
+                    return new Promise(resolve=>{
+                      const port=browser.runtime.connect({name:'pcms-i13-release'});
+                      port.onMessage.addListener(v=>{resolve(v);port.disconnect();});
+                      port.postMessage({type:'GET_REVIEW_CHUNK',params});
+                    });
+                  }
+                  const base={slug:stage.slug,stageRevision:stage.revision,
+                    fingerprint:stage.candidate.fingerprint};
+                  const root=await ask({...base,origin:'F',path:'main.pjs',offset:0});
+                  const image=await ask({...base,origin:'F',path:'src/binary.bin',offset:0});
+                  const prior=await ask({...base,origin:'P',path:'main.pjs',offset:0});
+                  const invalid=await ask({...base,origin:'F',path:'../private',offset:0});
+                  done({ok:root.ok&&atob(root.base64)==='F source'&&
+                    image.ok&&atob(image.base64)===String.fromCharCode(0,255,1)&&
+                    prior.ok&&prior.length===0&&!invalid.ok,
+                    root:{ok:root.ok,total:root.total},image:{ok:image.ok,total:image.total},
+                    prior:{ok:prior.ok,total:prior.total},invalid});
+                  db.close();
+                })().catch(e=>done({error:String(e)}));"""
+                proof=call('POST',f'/session/{after}/execute/async',
+                           {'script':chunk_script,'args':[]},timeout=90)
+                assert proof.get('ok') is True,proof
+                print('B I13_PACKAGED_P_F_BINARY_PAGED_SOURCE_REVIEW=PASS',flush=True)
                 close(after)
                 after=open_session(browser,profile)
                 assert addons_uuid(profile)==uuid
