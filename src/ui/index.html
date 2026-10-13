@@ -13,7 +13,7 @@
     <header class="topbar">
       <button class="menu" type="button" id="menu" aria-expanded="false" aria-controls="navigation">Menu</button>
       <div class="identity"><strong>PCMS</strong><span>Alpha</span></div>
-      <span class="phase">I07 · Existing-source adoption · Provider writes HELD</span>
+      <span class="phase">I09 · Private staging · Provider writes HELD</span>
       <a class="advanced" href="../options/options.html" id="advanced">PersonaMonkey advanced controls <span aria-hidden="true">↗</span></a>
     </header>
     <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
@@ -78,6 +78,24 @@
           </div>
           <p id="pcms-adopt-status" role="status" aria-live="polite">Adoption not started. Git original archive pending; release and provider writes held.</p>
         </section>
+        <section class="panel" aria-labelledby="pcms-stage-heading">
+          <div class="panel-head"><h2 id="pcms-stage-heading">Private candidate staging · I09</h2><span class="unknown">No live provider activation</span></div>
+          <p class="reason">Only an independently confirmed private, empty and newly reserved generator can accept a pinned READY source. The candidate records full PJS, HTML and each source asset including deletes, plus the previous empty source. A successful save is never verified until a separate full-byte readback. Public/adopted sources cannot be staged here.</p>
+          <div class="account-controls">
+            <label for="pcms-stage-slug">Exact reserved slug</label><input id="pcms-stage-slug" maxlength="100" autocomplete="off" spellcheck="false" placeholder="private-reservation">
+            <label for="pcms-stage-token">Private Git read token (not stored)</label><input id="pcms-stage-token" type="password" autocomplete="off" spellcheck="false">
+            <button id="pcms-stage-pin" type="button">Pin READY source and previous bytes</button>
+            <button id="pcms-stage-clear" type="button">Clear token</button>
+          </div>
+          <div class="account-controls">
+            <button id="pcms-stage-start" type="button" disabled>Stage on private editor</button>
+            <button id="pcms-stage-reconcile" type="button" disabled>Recheck saved bytes</button>
+            <button id="pcms-stage-handoff" type="button" disabled>Offer human handoff</button>
+            <button id="pcms-stage-refresh" type="button">Refresh receipts</button>
+          </div>
+          <p id="pcms-stage-status" role="status" aria-live="polite">No I09 candidate pinned. Provider staging is held until independently qualified activation; no direct or public fallback.</p>
+          <div id="pcms-stage-diff" class="table-wrap" tabindex="0" role="region" aria-label="Source add, change and delete summary">No candidate diff.</div>
+        </section>
         <section class="panel" aria-labelledby="pcms-source-heading">
           <div class="panel-head"><h2 id="pcms-source-heading">Private Git source — read only</h2><span class="unknown">Operator-triggered</span></div>
           <p class="reason">Inspect only <code>Neb963/per-gens</code> <code>main</code>. Requires a fine-grained GitHub token with Contents: Read-only, entered for this operation; token is never saved. No remote Git initialization, commit, asset rewrite or publication is available.</p>
@@ -98,6 +116,7 @@
       <section class="workspace" id="view-work-queue" data-view="work-queue" aria-labelledby="heading-work-queue" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 03</p><h1 id="heading-work-queue" tabindex="-1">Work Queue</h1><p>Evidence-backed operator decisions and task receipts.</p></div><button type="button" disabled aria-describedby="blocked-work-queue">Start action</button></header>
         <section class="panel"><div class="panel-head"><h2>Operations</h2><span class="unknown">Read-only</span></div><p id="pcms-work-queue-summary" role="status">Loading canonical journal status. Unknown outcomes must be reconciled, not repeated.</p><p id="blocked-work-queue" class="reason">Provider effects are held. Frozen local supply receipts may be inspected; this screen cannot dispatch, approve or replay an uncertain remote operation.</p></section>
+        <section class="panel" aria-labelledby="pcms-stage-queue-title"><div class="panel-head"><h2 id="pcms-stage-queue-title">I09 private stage receipts</h2><span class="unknown">Canonical · no auto-retry</span></div><div id="pcms-stage-queue" role="status" aria-live="polite">Reading local stage journal.</div></section>
         <section class="panel" aria-labelledby="pcms-adoption-queue-title"><div class="panel-head"><h2 id="pcms-adoption-queue-title">Existing-source adoption receipts</h2><span class="unknown">Local originals · Git archive pending</span></div><div id="pcms-adopt-receipts" role="status" aria-live="polite">Loading adoption history.</div></section>
         <section class="panel" aria-labelledby="pcms-supply-queue-title"><div class="panel-head"><h2 id="pcms-supply-queue-title">Frozen supply batches</h2><span class="unknown">Canonical local receipts</span></div><div id="pcms-supply-queue" role="status" aria-live="polite">Loading local batches.</div></section>
       </section>
@@ -139,7 +158,7 @@
         <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">Remote effects off · local backup available</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Off — not implemented</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup / restore and AI tests</dt><dd>Manual encrypted backup available; restore, scheduled backups and AI tests OFF</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No provider settings or operation commands can be changed here. PersonaMonkey retains advanced security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
       </section>
     </main>
-    <footer class="footer"><span>PCMS Alpha · Stage I08</span><span>UI navigation available · PCMS side effects disabled</span></footer>
+    <footer class="footer"><span>PCMS Alpha · Stage I09</span><span>UI navigation available · PCMS side effects disabled</span></footer>
   </div>
   <script type="module" src="shell.mjs"></script>
   <script type="module" src="health.mjs"></script>
@@ -150,5 +169,6 @@
   <script type="module" src="supply-view.mjs"></script>
   <script type="module" src="adoption-view.mjs"></script>
   <script type="module" src="backup-view.mjs"></script>
+  <script type="module" src="staging-view.mjs"></script>
 </body>
 </html>
