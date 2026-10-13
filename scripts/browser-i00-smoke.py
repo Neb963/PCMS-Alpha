@@ -986,6 +986,67 @@ def main():
                 print('B I09_PACKAGED_FIREFOX_IDB_SOURCE_BYTES_CRASH_HOLD=PASS',flush=True)
                 print('B I09_PACKAGED_SYNTHETIC_EDITOR_STRIP_NO_PROVIDER_ACTIVATION=PASS',flush=True)
 
+                # I10 B: installed exact XPI, Firefox IndexedDB durable Settings
+                # revisions and positive/negative exact-source oracle state.
+                # No native AI transport/provider calls or external credentials.
+                call('POST',f'/session/{after}/url',{'url':url+'#settings'})
+                ai_settings=execute(after,"return {prompt:!!document.getElementById('pcms-ai-prompt'),save:!!document.getElementById('pcms-ai-save'),history:!!document.getElementById('pcms-ai-prompt-history')}")
+                assert ai_settings=={'prompt':True,'save':True,'history':True},ai_settings
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const policy=await import('./ai-evidence.mjs');
+                  const persistence=await import('./ai-store.mjs');
+                  const journal=await import('./journal.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const store=persistence.createAiStore(db);
+                  const before=await store.getPrompt();
+                  const updated=await store.changePrompt({text:'Independent B test',
+                    tests:['observed_smoke']},before.current.revision);
+                  const stale=await store.changePrompt({text:'stale',
+                    tests:['observed_smoke']},before.current.revision);
+                  const later=await store.getPrompt();
+                  const exported=store.exportPrompt(later.history);
+                  const stage={slug:'i10-b-private',revision:6,state:'SOURCE_VERIFIED',
+                    accountId:'account-i10',candidate:{fingerprint:'a'.repeat(64)},
+                    previous:{fingerprint:'b'.repeat(64)}};
+                  const prepared=await store.start(stage);
+                  const blockedDuplicate=await store.start({...stage,slug:'i10-b-other'});
+                  const untrusted=policy.applyAiEvidence(policy.beginAiJob({
+                    stage,prompt:later.current}).job,{type:'ASSISTANT_DONE',chat:1,
+                    text:'ALL PASS'});
+                  const fromPort=await new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-i10-ai'});
+                    port.onMessage.addListener(v=>{try{port.disconnect()}catch{}resolve(v)});
+                    port.onDisconnect.addListener(()=>resolve({code:'DISCONNECTED'}));
+                    port.postMessage({type:'LIST_JOBS'});
+                  });
+                  const job=await store.getJob('i10-b-private');
+                  const wrongProof=policy.applyAiEvidence(policy.beginAiJob({
+                    stage,prompt:later.current}).job,{type:'TEST',chat:1,
+                      name:'observed_smoke',result:'PASS',observedAt:1,
+                      sourceFingerprint:'a'.repeat(64),
+                      independentSource:'AI_PROSE'});
+                  done({ok:before.ok&&updated.ok&&
+                    later.current.revision===before.current.revision+1&&
+                    stale.code==='PROMPT_REVISION_STALE'&&exported.ok&&
+                    prepared.ok&&blockedDuplicate.code==='AI_ACCOUNT_CONCURRENCY_HELD'&&
+                    untrusted.ok===false&&wrongProof.ok===false&&
+                    fromPort.ok&&fromPort.jobs.some(j=>j.slug==='i10-b-private')&&
+                    job.evidence.state==='TESTS_UNVERIFIED'&&
+                    job.promptRevision===later.current.revision,
+                    savedRevision:later.current.revision,prepared,stale,
+                    count:fromPort.jobs?.length,untrusted,wrongProof});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
+                ai_b=call('POST',f'/session/{after}/execute/async',
+                          {'script':code,'args':[]},timeout=90)
+                assert ai_b.get('ok') is True,ai_b
+                print('B I10_PACKAGED_SETTINGS_CAS_PROMPT_PIN_AND_ORACLE_HOLDS=PASS',flush=True)
+                call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
+                ai_work=execute(after,"return {job:!!document.getElementById('pcms-ai-job-list'),prepare:!!document.getElementById('pcms-ai-prepare'),enabled:!document.getElementById('pcms-ai-prepare')?.disabled}")
+                assert ai_work=={'job':True,'prepare':True,'enabled':False},ai_work
+                print('B I10_PACKAGED_UI_HELD_NO_AI_PROVIDER_DISPATCH=PASS',flush=True)
+
                 # I08 B: real packaged Firefox crypto, canonical IDB, donor
                 # portable format, Settings action, and wrong-password failure.
                 # No live provider or native calls; no disk byte proof claimed.
