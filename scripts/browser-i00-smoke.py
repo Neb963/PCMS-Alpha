@@ -127,6 +127,18 @@ def supply_command(session, command):
                 {'script':script.replace('COMMAND',json.dumps(command)),'args':[]},timeout=30)
 
 
+
+def adoption_command(session,command):
+    # Actual installed same-XPI trusted I07 port; no live provider calls.
+    script = '''const done=arguments[arguments.length-1];
+    const port=browser.runtime.connect({name:'pcms-i07-adoption'});
+    port.onMessage.addListener(value=>{try{port.disconnect()}catch(e){}done(value)});
+    port.onDisconnect.addListener(()=>done({error:'adoption-disconnected'}));
+    port.postMessage(COMMAND);'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script.replace('COMMAND',json.dumps(command)),'args':[]},timeout=30)
+
+
 def supply_isolated_wrong_origin(session):
     script = '''const done=arguments[arguments.length-1];
     (async()=>{
@@ -716,6 +728,9 @@ def main():
 
 
 
+                live_adoption_port=adoption_command(after,{'type':'LIST_ADOPTIONS'})
+                assert live_adoption_port.get('ok') is True,live_adoption_port
+                assert live_adoption_port.get('items')==[],live_adoption_port
                 # I07: real packaged Firefox IndexedDB and guarded original
                 # readback using only injected non-effecting synthetic origins.
                 archive_probe=adoption_idb_probe(after)
@@ -730,6 +745,15 @@ def main():
                 assert archive_probe.get('trace')==[
                     'ORIGINAL_READ','ORIGINAL_READ','FAKE_GIT_AFTER_DURABLE_MARKER'],archive_probe
                 assert '// archived original' not in json.dumps(archive_probe),archive_probe
+                real_adoption=adoption_command(after,{'type':'GET_ADOPTION',
+                    'params':{'slug':'gen-0999'}})
+                assert real_adoption.get('archived') is True,real_adoption
+                assert real_adoption.get('originalFiles')==2,real_adoption
+                assert '// archived original' not in json.dumps(real_adoption),real_adoption
+                controls=execute(after,"return {capture:document.getElementById('pcms-adopt-capture')?.disabled,"
+                    "receipts:!!document.getElementById('pcms-adopt-receipts'),"
+                    "consent:document.getElementById('pcms-adopt-consent')?.disabled}")
+                assert controls=={'capture':True,'receipts':True,'consent':True},controls
                 print('B I07_PACKAGED_ORIGINAL_IDB_GIT_MARKER_TOMBSTONE_SYNTHETIC=PASS',flush=True)
 
                 # I05: real permanently installed XPI source port and canonical
