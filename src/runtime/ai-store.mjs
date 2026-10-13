@@ -144,14 +144,37 @@ export function createAiStore(db){
           }
           if(active>=limit){done(fail('AI_ACCOUNT_CONCURRENCY_HELD'));return;}
           m.get(key(stage.slug)).onsuccess=old=>{
-            if(old.target.result){done(fail('AI_EXISTING_JOB_RECONCILE'));return;}
-            // Fresh jobs always pin the current settings revision, never last
-            // generator creation's prompt or a mutable global prompt reference.
-            const job={...started.job,createdAt:Date.now()};
-            m.add({key:key(stage.slug),accountId:account,job});
-            t.objectStore('events').add({stage:'AI_JOB_CREATED',slug:stage.slug,
-              sourceFingerprint:job.sourceFingerprint,promptRevision:prompt.revision});
-            done(publicJob(job));
+            const previous=old.target.result?.job;
+            const commit=()=>{
+              // Fresh jobs pin current settings, never mutable earlier tests.
+              const job={...started.job,revision:previous?previous.revision+1:1,
+                createdAt:Date.now()};
+              if(previous){
+                m.add({key:'ai-history:'+stage.slug+':'+previous.revision,
+                  accountId:account,job:structuredClone(previous)});
+                m.put({key:key(stage.slug),accountId:account,job});
+              }else m.add({key:key(stage.slug),accountId:account,job});
+              t.objectStore('events').add({stage:'AI_JOB_CREATED',slug:stage.slug,
+                sourceFingerprint:job.sourceFingerprint,promptRevision:prompt.revision});
+              done(publicJob(job));
+            };
+            if(!previous){commit();return;}
+            if(!slotReleased(previous)||previous.state!=='TESTS_VERIFIED'||
+               previous.stageRevision===stage.revision){
+              done(fail('AI_EXISTING_JOB_RECONCILE'));return;
+            }
+            m.get('release:'+stage.slug).onsuccess=re=>{
+              const release=re.target.result?.release;
+              if(release?.state!=='CONFIRMED_PUBLIC'||
+                 release.source!=='INDEPENDENT_PUBLICATION_READBACK'||
+                 release.approval?.jobRevision!==previous.revision||
+                 release.approval?.sourceFingerprint!==previous.verifiedFinal||
+                 release.approval?.accountId!==stage.accountId||
+                 release.approval?.remotePublicId!==stage.remotePublicId){
+                done(fail('AI_PREVIOUS_RELEASE_NOT_CONFIRMED'));return;
+              }
+              commit();
+            };
           };
           };
         };
