@@ -52,3 +52,14 @@ test('P52-06 X: final Chat2 source changes force Chat1 retest on F, not stale pa
   assert.equal(step.type,'RUN_TESTS');assert.equal(step.chat,2);
   const known=planAiStep({...j,state:'KNOWN_FAILURE'});assert.equal(known.step,'CHAT2_REPAIR');
 });
+
+test('P52-06 X: distinct native Chat2 SID without independent OPFS isolation cannot test, PASS or release',()=>{
+  const unfinished=job({sourceFingerprint:J,finalSource:{fingerprint:J},
+    native:{step:'CHAT2_SEND',state:'CHAT2_OBSERVED_IDLE',sessionDigest:S2},
+    chat1:chat(S1,{default_generator_smoke:pass(H)}),
+    chat2:{...chat(S2),state:'FRESH_OBSERVED'},
+    optionalTesting:{tests:['default_generator_smoke']}});
+  assert.equal(planAiStep(unfinished).code,'AI_CHAT2_ISOLATION_UNVERIFIED');
+  assert.equal(planAiStep({...unfinished,executionSlotReleased:true}).code,
+    'AI_VERIFIED_REVIEW_REQUIRED');
+});
