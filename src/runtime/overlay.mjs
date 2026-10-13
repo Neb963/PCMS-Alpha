@@ -41,7 +41,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewSmoke } from "./pcms/perchance-ai-oracle.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -251,8 +251,8 @@ attachPcmsGuard({
     const result=await browser.scripting.executeScript({
       target:{tabId:tab.id,frameIds:[0]},
       world:request.action==='ORACLE_SMOKE'?'ISOLATED':'MAIN',
-      func:request.action==='ORACLE_SMOKE'?perchanceAiPreviewSmoke:perchanceAiNative,
-      args:request.action==='ORACLE_SMOKE'?[request.slug]:[request]
+      func:request.action==='ORACLE_SMOKE'?perchanceAiPreviewCheck:perchanceAiNative,
+      args:request.action==='ORACLE_SMOKE'?[request.slug,request.name]:[request]
     });
     const after=await browser.tabs.get(tab.id);
     const tag=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned');
