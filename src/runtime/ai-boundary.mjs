@@ -141,6 +141,8 @@ export function createAiBoundary(api,{
           return {ok:true,code:'OPFS_LOCAL_ONLY_SERVER_UNVERIFIED',
             localOpfsAccessible:inspected.localOpfsAccessible===true,
             attachmentState:inspected.attachmentState,
+            workspaceRootState:inspected.workspaceRootState,
+            workerNamespace:'UNVERIFIED',
             isolation:'UNVERIFIED',serverEndAck:'UNOBSERVED',
             sourceFingerprint:job.sourceFingerprint,
             tests:'AI_CHAT2_ISOLATION_UNVERIFIED'};
