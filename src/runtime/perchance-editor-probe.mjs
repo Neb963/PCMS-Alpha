@@ -43,6 +43,7 @@ export async function perchanceEditorProbe(slug) {
     if(isDirty!==false||model.isClean()!==true||html.isClean()!==true||
        window.__saveInFlight!==false||menu.saveState!=='saved')
       return hold('EDITOR_UNKNOWN');
+    if(!soloCollaboration())return hold('COLLABORATION_CHANGED_DURING_EDITOR_PROBE');
     // A beforeunload warning, tab ID or save response never establishes this.
     return {ok:true,source:'NATIVE_EDITOR_CLEAN_OBSERVATION',
       slug,clean:true,collaboration:'ABSENT_AT_OBSERVATION'};
