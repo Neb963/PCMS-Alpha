@@ -32,7 +32,19 @@ export async function perchanceAiOpfsProbe(request){
       .map(x=>x.toString(16).padStart(2,'0')).join('');
     if(typeof navigator.storage?.getDirectory!=='function')
       return fail('WORKSPACE_OPFS_UNAVAILABLE');
-    const root=await navigator.storage.getDirectory();
+    // Browser storage backends can stall. Bound each read without mutating
+    // OPFS; the unresolved provider promise cannot authorize a retry/effect.
+    const read=async operation=>{
+      let timer;
+      try{return await Promise.race([
+        Promise.resolve().then(operation),
+        new Promise((_,reject)=>{
+          timer=setTimeout(()=>reject(Error('WORKSPACE_READ_TIMEOUT')),3000);
+        })
+      ]);}
+      finally{clearTimeout(timer);}
+    };
+    const root=await read(()=>navigator.storage.getDirectory());
     if(!root||typeof root.getDirectoryHandle!=='function')
       return fail('WORKSPACE_OPFS_UNAVAILABLE');
     // The archived helper uses attachments/<sid>; the worker's actual
@@ -40,8 +52,8 @@ export async function perchanceAiOpfsProbe(request){
     // attachment directory is normal and cannot be an isolation proof.
     let attachmentState='ABSENT';
     try{
-      const parent=await root.getDirectoryHandle('attachments');
-      const own=await parent.getDirectoryHandle(sid);
+      const parent=await read(()=>root.getDirectoryHandle('attachments',{create:false}));
+      const own=await read(()=>parent.getDirectoryHandle(sid,{create:false}));
       if(!own||own.kind!=='directory')return fail('WORKSPACE_ATTACHMENT_KIND_CHANGED');
       attachmentState='PRESENT_UNTRUSTED';
     }catch(e){
