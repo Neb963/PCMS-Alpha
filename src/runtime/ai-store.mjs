@@ -127,7 +127,7 @@ export function createAiStore(db){
   // Durable external-effect marker. Firefox (or a disconnected response)
   // can die at any boundary; no code automatically retries this marker.
   function armNative(slugName,expectedRevision,step){
-    if(!slug(slugName)||!['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','STOP'].includes(step))
+    if(!slug(slugName)||!['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','STOP'].includes(step))
       return Promise.resolve(fail('AI_STEP_INVALID'));
     return tx(db,'readwrite',(t,done)=>{
       const m=t.objectStore('meta');
@@ -148,6 +148,14 @@ export function createAiStore(db){
            (j.native?.state!=='CHAT2_RESET_OBSERVED'||
             j.chat2?.sessionDigest||!j.optionalTesting))
           {done(fail('AI_FRESH_CHAT_REQUIRED'));return;}
+        if(['CHAT1_REPAIR','CHAT2_REPAIR'].includes(step)){
+          const chat=step==='CHAT1_REPAIR'?j.chat1:j.chat2;
+          const idle=step==='CHAT1_REPAIR'?'CHAT1_OBSERVED_IDLE':'CHAT2_OBSERVED_IDLE';
+          if(j.state!=='KNOWN_FAILURE'||j.native?.state!==idle||
+             !chat?.sessionDigest||j.native.sessionDigest!==chat.sessionDigest||
+             !j.finalSource||j.finalSource.fingerprint!==j.sourceFingerprint)
+            {done(fail('AI_VERIFIED_FAILURE_AND_SESSION_REQUIRED'));return;}
+        }
         if(step==='STOP'&&j.native?.state!=='RUNNING_OBSERVED')
           {done(fail('AI_STOP_NOT_ADMISSIBLE'));return;}
         const next={...j,revision:j.revision+1,
@@ -181,11 +189,14 @@ export function createAiStore(db){
           {done(fail('AI_NO_PENDING_NATIVE_EFFECT'));return;}
         const step=j.native.step,digest=observation.sessionDigest;
         let state;
-        if(step==='CHAT1_SEND'||step==='CHAT2_SEND'){
-          if(!digest||digest===j.native.previousSessionDigest)
+        if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR'].includes(step)){
+          if(!digest||
+             (step.endsWith('REPAIR')?
+               digest!==j.native.previousSessionDigest:
+               digest===j.native.previousSessionDigest))
             {done(fail('AI_SESSION_UNVERIFIED'));return;}
           state=observation.busy?'RUNNING_OBSERVED':
-            step==='CHAT1_SEND'?'CHAT1_OBSERVED_IDLE':'CHAT2_OBSERVED_IDLE';
+            ['CHAT1_SEND','CHAT1_REPAIR'].includes(step)?'CHAT1_OBSERVED_IDLE':'CHAT2_OBSERVED_IDLE';
         }else if(step==='CHAT2_RESET'){
           if(digest!==null||observation.busy||observation.chatEntries>1)
             {done(fail('AI_CHAT2_RESET_NOT_PROVEN'));return;}
@@ -199,10 +210,10 @@ export function createAiStore(db){
           state:'TESTS_UNVERIFIED',hold:'INDEPENDENT_BROWSER_TESTS_REQUIRED'};
         // Native session evidence is distinguished from proof of user-facing
         // test assertions: no success here comes from text or busy=false.
-        if(step==='CHAT1_SEND'||step==='CHAT2_SEND'){
-          const chat=step==='CHAT1_SEND'?next.chat1:next.chat2;
+        if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR'].includes(step)){
+          const chat=['CHAT1_SEND','CHAT1_REPAIR'].includes(step)?next.chat1:next.chat2;
           chat.sessionDigest=digest;
-          chat.state=step==='CHAT2_SEND'?'FRESH_VERIFIED':'RUNNING';
+          chat.state=['CHAT2_SEND','CHAT2_REPAIR'].includes(step)?'FRESH_VERIFIED':'RUNNING';
         }
         m.put({...row,job:next});
         t.objectStore('events').add({stage:'AI_NATIVE_OBSERVED',
