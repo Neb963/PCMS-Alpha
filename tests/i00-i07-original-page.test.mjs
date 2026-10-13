@@ -11,6 +11,7 @@ test('P52-03 F: guarded original source reads committed full PJS, HTML and src b
   const key='a'.repeat(32)+'.png';
   const source=Buffer.from([0,55,180,255]);
   const calls=[];
+  let hostilePath=false;
   globalThis.crypto??=webcrypto;
   globalThis.location={origin:'https://perchance.org'};
   globalThis.localStorage={getItem:k=>k==='app-storage'?raw:
@@ -28,7 +29,8 @@ test('P52-03 F: guarded original source reads committed full PJS, HTML and src b
       return {status:200,headers:new Headers({'content-type':'application/json'}),
         json:async()=>({status:'success',generator:{name:'alpha',isPrivate:false,
           publicId:'resource123',modelText:'let a=1',outputTemplate:'<p>saved</p>',
-          srcManifest:{'a.png':{key,size:source.length}}}})};
+          srcManifest:hostilePath?{'../escape.js':{key,size:source.length}}:
+            {'a.png':{key,size:source.length}}}})};
     }
     assert.equal(args.email,'user@example.test');
     assert.equal(args.sessionToken,user.sessionToken);
@@ -53,6 +55,11 @@ test('P52-03 F: guarded original source reads committed full PJS, HTML and src b
     assert.equal(calls.some(c=>c.url==='https://user.uploads.dev/file/'+key),true);
     assert.equal(calls.some(c=>c.options.method!=='GET'&&c.options.method!=='POST'),false);
     assert.equal(calls.some(c=>c.url.includes('/api/save')),false);
+    hostilePath=true;
+    const denied=await perchanceReadIsolated({originalSlug:'alpha'});
+    assert.equal(denied.code,'ORIGINAL_ASSET_BYTES_UNVERIFIED');
+    assert.equal(calls.filter(c=>c.url.includes('uploads.dev')).length,1,
+      'hostile virtual paths must fail before any CDN lookup');
     assert.equal(JSON.stringify(result).includes(user.sessionToken),false);
     assert.equal(JSON.stringify(result).includes(user.email),false);
   }finally{
