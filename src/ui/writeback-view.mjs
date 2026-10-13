@@ -7,6 +7,7 @@ const preview=get('pcms-writeback-preview'),prepare=get('pcms-writeback-prepare'
 const commit=get('pcms-writeback-commit'),reconcile=get('pcms-writeback-reconcile');
 const status=get('pcms-writeback-status'),diff=get('pcms-writeback-diff');
 const refresh=get('pcms-writeback-refresh'),optin=get('pcms-writeback-auto');
+const armAuto=get('pcms-writeback-arm-auto'),disarmAuto=get('pcms-writeback-disarm-auto');
 const save=get('pcms-writeback-save-auto'),settingStatus=get('pcms-writeback-auto-status');
 let inspected=null,receipt=null,setting=null,busy=false,seq=0;
 function request(type,params={}){
@@ -35,6 +36,8 @@ function controls(){
     !['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(receipt.state)||!token.value;
   refresh.disabled=busy||!selected;
   save.disabled=busy||!setting?.ok;
+  armAuto.disabled=busy||!setting?.setting?.autoEnabled||!selected||!token.value;
+  disarmAuto.disabled=busy||!selected;
 }
 function showReceipt(r){
   receipt=r?.ok?r:null;
@@ -117,6 +120,17 @@ reconcile.addEventListener('click',()=>transact(async()=>{
 refresh.addEventListener('click',()=>transact(async()=>{
   inspected=null;showDiff(null);
   showReceipt(await request('GET',{slug:slug.value.trim()}));
+}));
+armAuto.addEventListener('click',()=>transact(async()=>{
+  announce('Arming one exact generator for autonomous writeback. No credentials are persisted…');
+  const r=await request('ARM_AUTO',{slug:slug.value.trim(),token:token.value});
+  announce(r?.ok?'Ephemeral authorization armed for '+r.slug+
+    '. A verified F will be reconciled on a background wake; no public effect is authorized.':
+    r?.code||'AUTO_ARM_HELD');
+}));
+disarmAuto.addEventListener('click',()=>transact(async()=>{
+  const r=await request('DISARM_AUTO',{slug:slug.value.trim()});
+  announce(r?.code||'AUTO_DISARM_UNVERIFIED');
 }));
 async function loadSettings(){
   const r=await request('GET_SETTINGS');
