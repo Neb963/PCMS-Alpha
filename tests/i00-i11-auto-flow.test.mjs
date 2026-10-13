@@ -9,7 +9,10 @@ const slug='test-auto',session='1'.repeat(64),head='a'.repeat(40),commit='c'.rep
 const sender={id:'fixture',url:'moz-extension://fixture/pcms/index.html#work-queue'};
 const idle={ok:true,busy:false,sessionDigest:session,sourceSaved:true,
   editorClean:true,hasQueue:false,inputOccupied:false,attachmentsPending:false};
-async function fixture({activate=true,autoEnabled=true}={}){
+async function fixture({activate=true,autoEnabled=true,pauseInspect=false}={}){
+  let observed=()=>{},unlock=()=>{};
+  const inspectReached=new Promise(resolve=>{observed=resolve;});
+  const inspectHeld=new Promise(resolve=>{unlock=resolve;});
   const source=await exactSource([
     {path:'main.pjs',base64:Buffer.from('pjs-main').toString('base64')},
     {path:'index.html',base64:Buffer.from('<h1>safe</h1>').toString('base64')}
@@ -76,7 +79,10 @@ async function fixture({activate=true,autoEnabled=true}={}){
     open:async()=>({}),storeFactory:()=>store,
     aiFactory:()=>({getJobFull:async()=>({ok:true,job})}),
     stageFactory:()=>({getFull:async()=>({ok:true,record:stage})}),
-    guard,inspect:async()=>({ok:true,head,baseHead:head,folder:stage.sourceFolder}),
+    guard,inspect:async()=>{
+      if(pauseInspect){observed();await inspectHeld;}
+      return {ok:true,head,baseHead:head,folder:stage.sourceFolder};
+    },
     write:async request=>{
       writes++;
       assert.equal(request.operationId,record.operationId);
@@ -86,7 +92,8 @@ async function fixture({activate=true,autoEnabled=true}={}){
     },
     effectGate:()=>activate
   });
-  return {boundary,api,stats:()=>({writes,suggestions,arms,record,alarms}),
+  return {boundary,api,waitInspect:()=>inspectReached,releaseInspect:()=>unlock(),
+    stats:()=>({writes,suggestions,arms,record,alarms}),
     arm:()=>boundary.run({type:'ARM_AUTO',params:{slug,token}},sender)};
 }
 test('P53-06 F/X opted-in background wake auto-commits once from canonical tested F and isolated terminal only',async()=>{
@@ -118,4 +125,24 @@ test('P53-06 X disarm invalidates ephemeral authorization and duplicate wake no-
   assert.equal(stopped.code,'AUTO_CREDENTIAL_DISARMED');
   assert.equal((await f.boundary.autoTick()).code,'GIT_AUTO_NO_WORK');
   assert.equal(f.stats().writes,0);
+});
+
+test('P53-06 X explicit disarm/rearm during pending Git inspect cannot revive stale auto epoch',async()=>{
+  const f=await fixture({pauseInspect:true});
+  assert.equal((await f.arm()).ok,true);
+  const pending=f.boundary.autoTick();
+  await f.waitInspect();
+  assert.equal((await f.boundary.run({type:'DISARM_AUTO',params:{slug}},sender)).ok,true);
+  assert.equal((await f.arm()).ok,true); // fresh arm of same token has new epoch
+  f.releaseInspect();
+  const outcome=await pending;
+  assert.equal(outcome.code,'GIT_AUTO_DISARMED');
+  assert.equal(f.stats().writes,0);
+  assert.equal(f.stats().arms,0);
+  // Prepared journal is reusable ONLY after a new explicit arm; never
+  // silently reissues any already DISPATCH_POSSIBLE operation.
+  const now=await f.boundary.autoTick();
+  assert.equal(now.state,'CONFIRMED',JSON.stringify(now));
+  assert.equal(f.stats().writes,1);
+  assert.equal((await f.boundary.autoTick()).code,'GIT_AUTO_NO_WORK');
 });
