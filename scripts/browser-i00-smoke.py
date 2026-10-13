@@ -585,7 +585,7 @@ def main():
                 url=f'moz-extension://{uuid}/pcms/index.html'
                 call('POST',f'/session/{after}/url',{'url':url},timeout=30)
                 for _ in range(40):
-                    view=execute(after,"return {title:document.title, selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view), links:[...document.querySelectorAll('[data-workspace]')].map(x=>x.getAttribute('href')), unsafe:[...document.querySelectorAll('#view-generators button[aria-describedby=blocked-generators],#view-work-queue button,#view-refresher button')].filter(x=>!x.disabled).length}")
+                    view=execute(after,"return {title:document.title, selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view), links:[...document.querySelectorAll('[data-workspace]')].map(x=>x.getAttribute('href')), unsafe:[...document.querySelectorAll('#view-generators button[aria-describedby=blocked-generators],#view-work-queue > .workspace-head > button,#view-refresher > .workspace-head > button')].filter(x=>!x.disabled).length}")
                     if view.get('selected'): break
                     time.sleep(.15)
                 assert view['selected']==['overview'],view
