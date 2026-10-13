@@ -16,7 +16,12 @@ export async function perchanceAiNative(request){
     // Owners can automatically join their own Yjs room. A provider is
     // not itself a second collaborator: accept only a synchronized room
     // with exactly the local awareness client; peers/unknown state HOLD.
+    const initialRoom=window.yjsProvider,initialDoc=window.yDoc,
+      initialGeneration=window.__collabGeneration;
     const soloCollaboration=()=>{
+      if(window.yjsProvider!==initialRoom||
+         window.yDoc!==initialDoc||
+         window.__collabGeneration!==initialGeneration)return false;
       if(window.editorCollabInitialSyncIsPending!==false||
          window.__collabRoomFailed===true||
          window.collabEditKeyIsIncorrect===true)return false;
