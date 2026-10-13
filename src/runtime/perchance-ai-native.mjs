@@ -67,7 +67,13 @@ export async function perchanceAiNative(request){
          !current.canSend)return hold('AI_SEND_PRECONDITION_UNVERIFIED');
       // A new chat must have no prior persisted session before SEND; a
       // resumed same session is allowed only for Chat 1 reconciliation.
-      if(request.chat===2&&current.sessionDigest!==null)
+      if(request.repair===true){
+        // Continue only the exact already observed session; no replay into
+        // a replacement chat or after an unproved new-chat reset.
+        if(!/^[a-f0-9]{64}$/.test(request.expectedSessionDigest||'')||
+           request.expectedSessionDigest!==current.sessionDigest)
+          return hold('AI_REPAIR_SESSION_CHANGED');
+      }else if(request.chat===2&&current.sessionDigest!==null)
         return hold('FRESH_CHAT_NOT_PROVEN');
       input.value=text;
       input.dispatchEvent(new Event('input',{bubbles:true}));
