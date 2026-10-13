@@ -211,6 +211,50 @@ export function createAiStore(db){
       };
     });
   }
+  // Independently observed entire saved generator F. The native helper
+  // may edit PJS, HTML and src/ assets (accepted F2 amendment). This receipt
+  // never confers PASS and is not visible as full source through the UI port.
+  function checkpointSource(slugName,expectedRevision,snapshot){
+    if(!slug(slugName)||!Number.isSafeInteger(expectedRevision)||
+       snapshot?.ok!==true||!/^[a-f0-9]{64}$/.test(snapshot.fingerprint||'')||
+       !Array.isArray(snapshot.blobs)||!Array.isArray(snapshot.files)||
+       snapshot.blobs.length>502||snapshot.files.length!==snapshot.blobs.length||
+       snapshot.totalBytes>16*1024*1024)
+      return Promise.resolve(fail('AI_FULL_SOURCE_UNVERIFIED'));
+    return tx(db,'readwrite',(t,done)=>{
+      const m=t.objectStore('meta');
+      m.get(key(slugName)).onsuccess=e=>{
+        const row=e.target.result,j=row?.job;
+        if(!j){done(fail('AI_JOB_NOT_FOUND'));return;}
+        if(j.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
+        if(!['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(j.native?.state))
+          {done(fail('AI_NATIVE_IDLE_REQUIRED'));return;}
+        const changed=j.sourceFingerprint!==snapshot.fingerprint;
+        const next={...j,revision:j.revision+1,
+          sourceFingerprint:snapshot.fingerprint,
+          finalSource:{fingerprint:snapshot.fingerprint,
+            files:structuredClone(snapshot.files),blobs:structuredClone(snapshot.blobs),
+            totalBytes:snapshot.totalBytes},
+          verifiedFinal:null,hold:'INDEPENDENT_BROWSER_TESTS_REQUIRED',
+          state:'TESTS_UNVERIFIED'};
+        if(changed){
+          next.chat1={...next.chat1,tests:{}};
+          if(next.chat2)next.chat2={...next.chat2,tests:{}};
+          next.changes=[...next.changes,{fingerprint:snapshot.fingerprint,
+            kind:'GUARDED_NATIVE_FULL_SOURCE_READBACK'}];
+          if(next.changes.length>256){
+            next.state='HELD_NO_PROGRESS';next.hold='REPAIR_RESOURCE_BOUND';
+          }
+        }
+        m.put({...row,job:next});
+        t.objectStore('events').add({stage:'AI_FULL_SOURCE_CHECKPOINT',
+          slug:slugName,revision:next.revision,sourceFingerprint:snapshot.fingerprint,
+          changed});
+        done(publicJob(next));
+      };
+    });
+  }
+
   function recoverNative(){
     return tx(db,'readwrite',(t,done)=>{
       const m=t.objectStore('meta');let held=0;
@@ -234,6 +278,6 @@ export function createAiStore(db){
   }
   return Object.freeze({
     getPrompt,changePrompt,exportPrompt,getJob,getJobFull,list,start,record,
-    armNative,observeNative,recoverNative
+    armNative,observeNative,checkpointSource,recoverNative
   });
 }
