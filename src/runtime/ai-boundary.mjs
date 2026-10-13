@@ -104,6 +104,9 @@ export function createAiBoundary(api,{
           // a lost page acknowledgment cannot be replayed.
           const armed=await store.armNative(p.slug,p.expectedRevision,p.step);
           if(!armed.ok)return armed;
+          if(effectGate({phase:'I10',job,stage:r,step:p.step})!==true ||
+             (await sentinel.inspect()).held)
+            return fail('AI_ACTIVATION_REVOKED_AFTER_MARKER');
           const after=await g.getSafeRouteReadiness(r.personaUid);
           if(!after?.ready||after.cookieStoreId!==route.cookieStoreId||
              after.routeId!==route.routeId)
