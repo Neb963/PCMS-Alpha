@@ -12,10 +12,17 @@ function fixture({error=false,bodyText='ready',elements={},opaque=false}={}){
     textContent:value.text||'Visible',
     complete:value.complete,naturalWidth:value.width,naturalHeight:value.height,
     disabled:value.disabled,
+    css:value.css,
+    parentElement:value.parentElement||null,
     getAttribute:k=>k==='href'?value.href:null
   });
   const body=elem({text:bodyText});body.children=bodyText?[{}]:[];
   const page={readyState:'complete',body,
+    defaultView:{getComputedStyle:el=>({
+      display:el.css?.display||'block',
+      visibility:el.css?.visibility||'visible',
+      opacity:el.css?.opacity??'1'
+    })},
     querySelector:s=>s==='#perchance-error-indicator'&&error?{}:null,
     querySelectorAll:s=>(elements[s]||[]).map(elem)};
   globalThis.location={origin:'https://perchance.org',pathname:'/'+slug,hash:'#edit'};
@@ -46,7 +53,11 @@ test('P52-05 X: missing, hidden, broken or disabled semantic element is a proven
     ['preview_image_loaded','img',{complete:false,width:500,height:300}],
     ['preview_image_loaded','img',{complete:true,width:0,height:300}],
     ['preview_button_visible','button,input[type="button"],input[type="submit"]',{disabled:true}],
-    ['preview_link_visible','a[href]',{href:'  '}]
+    ['preview_link_visible','a[href]',{href:'  '}],
+    ['preview_heading_visible','h1,h2,h3,h4,h5,h6',
+      {text:'Invisible heading',css:{visibility:'hidden'}}],
+    ['preview_image_loaded','img',
+      {complete:true,width:64,height:64,css:{opacity:'0'}}]
   ]){
     const restore=fixture({elements:{[selector]:[entry]}});
     try{assert.equal(perchanceAiPreviewCheck(slug,name).result,'FAIL',name);}
