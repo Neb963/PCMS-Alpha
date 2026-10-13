@@ -22,3 +22,5 @@ import './staging-boundary.mjs';
 
 // I10 native AI policy/configuration port (provider execution gated).
 import './ai-boundary.mjs';
+// I11 Git-only revision-safe writeback (capability OFF by default).
+import './writeback-boundary.mjs';

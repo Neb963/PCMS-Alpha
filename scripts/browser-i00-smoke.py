@@ -1580,6 +1580,130 @@ def main():
                 print('B I10_PACKAGED_SYNTHETIC_CHAT2_HISTORY_WORKSPACE_CAS_AND_RETEST=PASS',flush=True)
 
 
+                # I11 B: exact installed-XPI UI controls and real IDB canonical
+                # writeback CAS. No real Git or provider effect is attempted.
+                call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
+                ui=execute(after,"return {preview:!!document.getElementById('pcms-writeback-preview'),prepare:!!document.getElementById('pcms-writeback-prepare'),commit:!!document.getElementById('pcms-writeback-commit'),reconcile:!!document.getElementById('pcms-writeback-reconcile'),status:!!document.getElementById('pcms-writeback-status'),cancel:!!document.getElementById('pcms-writeback-cancel'),arm:!!document.getElementById('pcms-writeback-arm-auto'),disarm:!!document.getElementById('pcms-writeback-disarm-auto')}")
+                assert ui=={'preview':True,'prepare':True,'commit':True,'reconcile':True,'status':True,'cancel':True,'arm':True,'disarm':True},ui
+                # Actual installed-XPI button clicks must produce visible
+                # responses rather than only existing in the DOM.
+                execute(after,"const el=document.getElementById('pcms-writeback-slug');el.value='missing-private';el.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('pcms-writeback-preview').click();return true")
+                preview_result=''
+                for _ in range(60):
+                    preview_result=execute(after,"return document.getElementById('pcms-writeback-status').textContent")
+                    if 'TESTED_FINAL_SOURCE_REQUIRED' in preview_result: break
+                    time.sleep(.1)
+                assert 'TESTED_FINAL_SOURCE_REQUIRED' in preview_result,preview_result
+                execute(after,"document.getElementById('pcms-writeback-disarm-auto').click();return true")
+                disarm_result=''
+                for _ in range(60):
+                    disarm_result=execute(after,"return document.getElementById('pcms-writeback-status').textContent")
+                    if 'AUTO_CREDENTIAL_DISARMED' in disarm_result: break
+                    time.sleep(.1)
+                assert 'AUTO_CREDENTIAL_DISARMED' in disarm_result,disarm_result
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const db=await (await import('./journal.mjs')).openCanonicalDatabase();
+                  const store=(await import('./writeback-store.mjs')).createWritebackStore(db);
+                  const exact=(await import('./staging-core.mjs')).exactSource;
+                  const source=await exact([
+                    {path:'main.pjs',base64:btoa('output = 77')},
+                    {path:'index.html',base64:btoa('<main>safe</main>')},
+                    {path:'src/test.bin',base64:btoa(String.fromCharCode(0,255,2))}
+                  ]);
+                  const slug='i11-b-synthetic',head='a'.repeat(40);
+                  const stage={slug,revision:5,state:'SOURCE_VERIFIED',
+                    verifiedAt:1,accountId:'i11-b-account',personaUid:'i11-b-persona',
+                    principalFingerprint:'b'.repeat(64),
+                    remotePublicId:'i11-b-remote',sourceHead:head,
+                    sourceFolder:'gens/i11-b-synthetic',
+                    candidate:{fingerprint:source.fingerprint}};
+                  const job={slug,revision:3,stageRevision:5,state:'TESTS_VERIFIED',
+                    sourceFingerprint:source.fingerprint,verifiedFinal:source.fingerprint,
+                    finalSource:{fingerprint:source.fingerprint,files:source.files,
+                      blobs:source.blobs},executionSlotReleased:true,
+                    native:{state:'CHAT1_OBSERVED_IDLE',sessionDigest:'1'.repeat(64)},
+                    prompt:{revision:1,tests:['default_generator_smoke']},
+                    chat1:{sessionDigest:'1'.repeat(64),
+                      tests:{default_generator_smoke:{
+                        result:'PASS',sourceFingerprint:source.fingerprint}}},chat2:null,
+                    changes:[]};
+                  await new Promise((resolve,reject)=>{
+                    const tx=db.transaction(['meta'],'readwrite');
+                    tx.objectStore('meta').put({key:'stage:'+slug,record:stage});
+                    tx.objectStore('meta').put({key:'ai-job:'+slug,accountId:stage.accountId,job});
+                    tx.oncomplete=resolve;tx.onabort=()=>reject('ABORT');
+                  });
+                  const before=await store.settings();
+                  const auto=await store.changeSettings(before.setting.revision,true);
+                  const wrong=await store.changeSettings(before.setting.revision,false);
+                  const prepared=await store.prepare({name:slug,stage,job,
+                    probe:{head,baseHead:head,folder:stage.sourceFolder},mode:'AUTO',
+                    message:'fix: exact synthetic',operationId:'writeback_'+'1'.repeat(32)});
+                  const disabled=await store.changeSettings(auto.setting.revision,false);
+                  const revoked=await store.arm(slug,prepared.revision);
+                  const still=await store.get(slug);
+                  // Off-by-default canonical port does not allow Git mutation.
+                  const ask=(type,params)=>new Promise((resolve)=>{
+                    const port=browser.runtime.connect({name:'pcms-i11-writeback'});
+                    port.onMessage.addListener(v=>{resolve(v);port.disconnect();});
+                    port.postMessage({type,params});
+                  });
+                  const effect=await ask('COMMIT',{slug,expectedRevision:prepared.revision,
+                    token:'test-github-write-token'});
+                  const secondSlug='i11-b-replay';
+                  const stage2={...stage,slug:secondSlug,sourceFolder:'gens/i11-b-replay'};
+                  const job2={...job,slug:secondSlug};
+                  await new Promise((resolve,reject)=>{
+                    const tx=db.transaction(['meta'],'readwrite');
+                    tx.objectStore('meta').put({key:'stage:'+secondSlug,record:stage2});
+                    tx.objectStore('meta').put({key:'ai-job:'+secondSlug,accountId:stage2.accountId,job:job2});
+                    tx.oncomplete=resolve;tx.onabort=()=>reject('ABORT');
+                  });
+                  const prepared2=await store.prepare({name:secondSlug,
+                    stage:stage2,job:job2,
+                    probe:{head,baseHead:head,folder:stage2.sourceFolder},
+                    mode:'MANUAL',message:'fix: synthetic safe',
+                    operationId:'writeback_'+'2'.repeat(32)});
+                  const sealed=(await store.getFull(secondSlug)).record.sealedSource;
+                  const sealedExact=sealed?.fingerprint===source.fingerprint&&
+                    JSON.stringify(sealed.blobs)===JSON.stringify(source.blobs)&&
+                    JSON.stringify(sealed.files)===JSON.stringify(source.files);
+                  const armed2=await store.arm(secondSlug,prepared2.revision);
+                  const duplicate2=await store.arm(secondSlug,armed2.revision);
+                  const reboot2=await store.get(secondSlug);
+                  const reopened=await (await import('./journal.mjs')).openCanonicalDatabase();
+                  const persisted=await (await import('./writeback-store.mjs')).createWritebackStore(reopened).get(slug);
+                  const canceled=await store.cancelPrepared(slug,persisted.revision);
+                  const repeatCancel=await store.cancelPrepared(slug,canceled.revision);
+                  const reprepared=await store.prepare({name:slug,stage,job,
+                    probe:{head,baseHead:head,folder:stage.sourceFolder},
+                    mode:'MANUAL',message:'fix: new explicit review',
+                    operationId:'writeback_'+'3'.repeat(32)});
+                  const persistedFull=(await (await import('./writeback-store.mjs')).createWritebackStore(reopened).getFull(secondSlug)).record;
+                  const sealedSurvivesRestart=JSON.stringify(persistedFull.sealedSource)===
+                    JSON.stringify(sealed);
+                  done({ok:source.ok&&before.ok&&auto.ok&&wrong.code==='STALE_REVISION'&&
+                    prepared.ok&&disabled.ok&&
+                    revoked.code==='WRITEBACK_ADMISSION_REVOKED'&&
+                    still.state==='PREPARED'&&persisted.state==='PREPARED'&&
+                    effect.code==='GIT_AUTO_DISARMED'&&
+                    prepared2.ok&&armed2.state==='DISPATCH_POSSIBLE'&&
+                    duplicate2.code==='WRITEBACK_RECONCILIATION_REQUIRED'&&
+                    reboot2.state==='DISPATCH_POSSIBLE'&&
+                    sealedExact&&sealedSurvivesRestart&&
+                    canceled.state==='CANCELED'&&
+                    repeatCancel.code==='CANNOT_CANCEL_POSSIBLE_GIT_EFFECT'&&
+                    reprepared.state==='PREPARED'&&
+                    reprepared.revision===canceled.revision+1,
+                    prepared,wrong,revoked,still,persisted,effect});
+                  reopened.close();db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,400)}));"""
+                proof=call('POST',f'/session/{after}/execute/async',
+                           {'script':code,'args':[]},timeout=90)
+                assert proof.get('ok') is True,proof
+                print('B I11_PACKAGED_GIT_HELD_CAS_AUTO_OPTOUT_AND_UI=PASS',flush=True)
+
                 # I08 B: real packaged Firefox crypto, canonical IDB, donor
                 # portable format, Settings action, and wrong-password failure.
                 # No live provider or native calls; no disk byte proof claimed.

@@ -41,7 +41,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -229,7 +229,7 @@ attachPcmsGuard({
     if(typeof request?.slug!=='string'||
        !/^[a-z0-9][a-z0-9-]{0,99}$/.test(request.slug)||
        typeof request?.nonce!=='string'||!/^[a-f0-9]{32}$/.test(request.nonce)||
-       !['OBSERVE','SEND','NEW_CHAT','STOP','ORACLE_SMOKE','OBSERVE_OPFS','OBSERVE_HISTORY'].includes(request.action))
+       !['OBSERVE','SEND','NEW_CHAT','STOP','ORACLE_SMOKE','OBSERVE_OPFS','OBSERVE_HISTORY','OBSERVE_TERMINAL'].includes(request.action))
       return {ok:false,code:'AI_NATIVE_REQUEST_INVALID'};
     const expected='https://perchance.org/'+request.slug+'#edit';
     const state=await getState(),profile=state.profiles?.[cookieStoreId];
@@ -249,7 +249,7 @@ attachPcmsGuard({
       return {ok:false,code:'AI_EDITOR_OWNERSHIP_AMBIGUOUS'};
     const tab=found[0];
     let result;
-    if(request.action==='OBSERVE_HISTORY'){
+    if(request.action==='OBSERVE_HISTORY'||request.action==='OBSERVE_TERMINAL'){
       // Never trust MAIN-world fetch: the page can override it. MAIN is
       // used only to select the native current draft's ephemeral SID/key.
       // ISOLATED fetches/authenticates the real server and returns only
@@ -269,7 +269,8 @@ attachPcmsGuard({
         return {ok:false,code:'AI_HISTORY_CONTEXT_UNVERIFIED'};
       result=await browser.scripting.executeScript({
         target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
-        func:perchanceAiHistoryIsolated,
+        func:request.action==='OBSERVE_TERMINAL'?
+          perchanceAiTerminalHistoryIsolated:perchanceAiHistoryIsolated,
         args:[{...selector,firstPrompt:request.firstPrompt,
           sessionId:handle.sessionId,routingKey:handle.routingKey,
           sessionDigest:handle.sessionDigest}]
@@ -340,7 +341,8 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   await writeFile(bgPath, bg);
   for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'adoption-boundary.mjs',
     'staging-core.mjs','staging-store.mjs','staging-boundary.mjs',
-    'perchance-stage.mjs','editor-strip.mjs','perchance-editor-probe.mjs','perchance-ai-native.mjs','perchance-ai-oracle.mjs','perchance-ai-opfs.mjs','perchance-ai-history.mjs','ai-supervisor.mjs','ai-testing.mjs','ai-evidence.mjs','ai-store.mjs','ai-boundary.mjs']) {
+    'perchance-stage.mjs','editor-strip.mjs','perchance-editor-probe.mjs','perchance-ai-native.mjs','perchance-ai-oracle.mjs','perchance-ai-opfs.mjs','perchance-ai-history.mjs','ai-supervisor.mjs','ai-testing.mjs','ai-evidence.mjs','ai-store.mjs','ai-boundary.mjs',
+    'git-writeback.mjs','writeback-store.mjs','writeback-boundary.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }
 }

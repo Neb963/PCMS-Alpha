@@ -116,3 +116,68 @@ export async function perchanceAiHistoryIsolated(request){
   }catch{return hold('AI_HISTORY_REMOTE_READ_UNVERIFIED');}
   finally{clearTimeout(timer);}
 }
+
+// I11: a bounded, authenticated, exact-session terminal assistant suggestion.
+// Only called through the donor-owned tab and guarded MAIN transient selection.
+// The server's assistant text is UNTRUSTED plain text, never a PASS or command.
+export async function perchanceAiTerminalHistoryIsolated(request){
+  const hold=code=>({ok:false,code});
+  const {slug,nonce,sessionId:sid,routingKey:key,sessionDigest,firstPrompt}=request||{};
+  if(!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug||'')||
+     !/^[a-f0-9]{32}$/.test(nonce||'')||
+     typeof sid!=='string'||sid.length<12||sid.length>256||
+     typeof key!=='string'||key.length>512||
+     !/^(0|[1-9][0-9]*)\.[A-Za-z0-9_-]+$/.test(key)||
+     !/^[a-f0-9]{64}$/.test(sessionDigest||'')||
+     typeof firstPrompt!=='string'||firstPrompt.length<1||
+     firstPrompt.length>16000||
+     location.origin!=='https://perchance.org'||
+     location.pathname!=='/'+slug||location.hash!=='#edit')
+    return hold('AI_TERMINAL_CONTEXT_INVALID');
+  const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(
+    'PCMS_AI_SESSION_V1:'+nonce+':'+sid));
+  const actual=Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  if(actual!==sessionDigest)return hold('AI_TERMINAL_SESSION_DRIFT');
+  const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),6000);
+  try{
+    const response=await fetch('https://ai-agent.perchance.org/api/aiAgent/history?k='+
+      encodeURIComponent(key),{method:'POST',credentials:'omit',cache:'no-store',
+      redirect:'error',signal:ctrl.signal,headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({sessionId:sid})});
+    if(!response?.ok||!response.body||typeof response.body.getReader!=='function')
+      return hold('AI_TERMINAL_HISTORY_UNAVAILABLE');
+    const advertised=Number(response.headers?.get('content-length')||0);
+    if(!Number.isFinite(advertised)||advertised>262144)
+      return hold('AI_TERMINAL_HISTORY_TOO_LARGE');
+    const reader=response.body.getReader(),chunks=[];let total=0;
+    try{
+      for(;;){
+        const {value,done}=await reader.read();if(done)break;
+        if(!(value instanceof Uint8Array)||value.length>262144-total)
+          return hold('AI_TERMINAL_HISTORY_TOO_LARGE');
+        chunks.push(value);total+=value.length;
+      }
+    }finally{try{await reader.cancel();}catch{}}
+    const bytes=new Uint8Array(total);let offset=0;
+    for(const part of chunks){bytes.set(part,offset);offset+=part.length;}
+    const data=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
+    if(data?.ok!==true||!Array.isArray(data.entries)||
+       data.entries.length<2||data.entries.length>512)
+      return hold('AI_TERMINAL_HISTORY_INVALID');
+    const list=data.entries,first=list.findIndex(e=>e?.k==='user');
+    if(first<0||first>16||list[first]?.t!==firstPrompt||
+       list.slice(0,first).some(e=>e?.k!=='sys'&&
+         !(e?.k==='fold'&&e.l==='instructions')))
+      return hold('AI_TERMINAL_OTHER_HISTORY');
+    const last=list.at(-1);
+    if(!['assistant','ai'].includes(last?.k)||
+       typeof last.t!=='string'||last.t.length<1||last.t.length>8192)
+      return hold('AI_TERMINAL_ASSISTANT_UNVERIFIED');
+    // This isolated origin transport returns suggestion text solely to the
+    // extension background; the unprivileged UI receives only a later receipt.
+    return {ok:true,kind:'TERMINAL_ASSISTANT',
+      origin:'DONOR_GUARDED_NATIVE_HISTORY',sessionDigest,
+      settled:true,text:last.t};
+  }catch{return hold('AI_TERMINAL_HISTORY_UNVERIFIED');}
+  finally{clearTimeout(timer);}
+}
