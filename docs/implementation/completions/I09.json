@@ -1,0 +1,48 @@
+{
+  "phaseId": "I09",
+  "planRevision": "S7-AUDITED-DESIGN-1",
+  "proposedDisposition": "SCOPED_F_B_IMPLEMENTATION_COMPLETE_IF_PROVEN_ON_PROTECTED_MAIN",
+  "claim": "I09 pins an independently verified READY revision and exact deployable source bytes from private per-gens against a previously confirmed owned, unlisted, empty new Perchance target. It preserves prior PJS/HTML/full src byte snapshot and displays added/changed/deleted paths without exposing bytes. Stage dispatch is behind the same donor PersonaGuard lease, current protected route, source HEAD/READY revalidation, account/revision and rollback-safe local IndexedDB journal. DISPATCH_POSSIBLE is committed before any possible provider effect and never auto-retried. Saved ACK is not success; source verification requires independent full PJS/HTML/src byte readback and exact tagged native editor clean observation. A contextual strip requests human takeover; the request is durably committed before tab untag and the tab is never closed on unknown state. Native editor wiring uses Discovery v3 observed CodeMirror, srcState and app.saveGenerator, not the proposed and unimplemented perchanceAutomation facade. Actual provider staging activation stays disabled until separately qualified external live capability.",
+  "requiredAssertions": [
+    "P51-05",
+    "P52-04",
+    "P52-07",
+    "S6-I09-EDITOR-OVERLAY",
+    "S6-I09-FULL-SOURCE",
+    "REQ-D01",
+    "REQ-D10",
+    "REQ-U01"
+  ],
+  "evidenceTierNotes": {
+    "F": "tests/i00-i09-staging-core.test.mjs, i00-i09-staging-store.test.mjs, i00-i09-boundary.test.mjs and i00-i09-native-editor.test.mjs: binary, zero-byte, deleted/changed paths, wrong owner, stale route/account/READY and principal, edit contamination, dirty/ambiguous editor, collab and human tab takeover. Exact Firefox/CI current-candidate run and inherited pinned donor regression required before actual disposition.",
+    "B": "scripts/browser-i00-smoke.py: actual installed combined XPI on Firefox Developer Edition, crypto and canonical IndexedDB pin/revision/journal/recovery, same-extension port activation hold, source diff and synthetic contextual strip. No Perchance live site, actual native editor save, real external route, CDN or multi-client collaboration acceptance claimed.",
+    "X": "Synthetic independent fake remote-effect ledger tests X-I09 (wrong principal, nonempty target, route loss after PREPARED) and F adversarial source mismatch, omitted binary/empty asset, lost ACK, dirty editor. These do not establish external adversarial/live outcomes.",
+    "H": "NOT RUN. Late separately authorized operator tests for real Perchance editor lifecycle, collaboration-free claim, saved asset completeness, protected Persona egress and actual provider activation are deferred. F/B scoped implementation acceptance is not live release authorization."
+  },
+  "capabilities": {
+    "privateReadyPin": "GUARDED_READ_ONLY_OPERATOR_ACTION",
+    "originalPrivateSource": "INDEPENDENT_BOUNDED_BYTE_SNAPSHOT",
+    "sourceRevision": "GIT_MAIN_READY_FINGERPRINT_PIN_AND_REVALIDATE",
+    "diff": "FULL_SOURCE_ADDS_CHANGES_DELETES",
+    "sourceVerification": "INDEPENDENT_BYTE_READBACK_PLUS_TAGGED_NATIVE_EDITOR_CLEAN_OR_HOLD",
+    "saveAcknowledgement": "NOT_VERIFIED",
+    "dispatchJournal": "DURABLE_POSSIBLE_EFFECT_BEFORE_CALL",
+    "uncertainty": "NO_BLIND_RETRY",
+    "editorHandoff": "DURABLE_HUMAN_INTENT_BEFORE_TAB_UNTAG_KEEP_TAB",
+    "providerWrites": "OFF_PENDING_SEPARATE_ACTIVATION",
+    "remoteWriteback": "OFF",
+    "existingPublicOverwrite": "FORBIDDEN",
+    "nativeAI": "OFF_I10",
+    "automaticPublish": "OFF",
+    "donorRouting": "PINNED_UNMODIFIED_NO_BYPASS",
+    "liveProviderAcceptance": "NOT_CLAIMED"
+  },
+  "holds": [
+    "Provider write activation is not enabled by green CI. Missing verified current editor session, true clean status, collaboration-free evidence, donor lease or protected route halts without Direct fallback.",
+    "Any Git READY/fingerprint drift, stale source-link identity, private owner mismatch, nonempty target, missing/changed asset, dirty human editor or missing tab session tag preserves local exact previous source and keeps a scoped hold.",
+    "Any dispatch/ACK uncertainty or crash after effect marker requires independent readback and never replays a provider save automatically.",
+    "An operator-requested handoff is recorded before untag; unknown completion keeps the tab and human intent held. PCMS does not close a human tab or reconstruct lost unsaved edits.",
+    "No private generator sources, credentials, real provider traffic or protected CI trust-root modifications are introduced in tests."
+  ],
+  "provenance": "In-PR completion proposal only; no branch/main SHA, XPI SHA, CI run or future merge SHA is self-asserted here. Actual final PR candidate checks, protected squash merge and postmerge main evidence determine acceptance."
+}
