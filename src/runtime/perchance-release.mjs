@@ -84,7 +84,9 @@ export async function perchanceReleaseMain(request) {
       return held('EDITOR_SRC_MANIFEST_DRIFT');
     for(const name of assetNames){
       const content=await src.readFile(name);
-      if(!(content instanceof Uint8Array)||!same(content,wanted.get('src/'+name)))
+      const bytes=content instanceof ArrayBuffer?new Uint8Array(content):
+        content instanceof Uint8Array?content:null;
+      if(!bytes||!same(bytes,wanted.get('src/'+name)))
         return held('EDITOR_SRC_BYTES_DRIFT');
     }
     if(!(await clean()))return held('EDITOR_CHANGED_BEFORE_PUBLICATION');
