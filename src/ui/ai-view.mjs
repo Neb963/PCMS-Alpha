@@ -158,6 +158,10 @@ async function nativeCommand(type,step){
   busy=true;controls();
   jobStatus.textContent=type==='PROBE_NATIVE'?
     'Observing native session without retry and checking saved source bytes…':
+    type==='INSPECT_WORKSPACE'?
+    'Inspecting local OPFS read-only; server termination and workspace isolation remain unverified…':
+    type==='RUN_TESTS'?
+    'Running an independently observed browser assertion on exact saved source…':
     'Checking guarded native effect capability; no dispatch without authorization…';
   try{
     const answer=await ai(type,{slug:name,expectedRevision:revision,
