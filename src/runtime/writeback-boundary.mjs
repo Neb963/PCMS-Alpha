@@ -15,7 +15,7 @@ export const WRITEBACK_PORT='pcms-i11-writeback';
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const FP=/^[a-f0-9]{64}$/;
 const ACTIONS=new Set(['GET_SETTINGS','SET_AUTO','LIST','GET','PREVIEW',
-  'PREPARE','COMMIT','RECONCILE']);
+  'PREPARE','COMMIT','RECONCILE','ARM_AUTO','DISARM_AUTO']);
 export function validateWritebackMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
@@ -29,7 +29,8 @@ export function validateWritebackMessage(api,sender,msg){
     GET:['slug'],PREVIEW:['slug'],
     PREPARE:['slug','expectedJobRevision','fingerprint','mode','message','token'],
     COMMIT:['slug','expectedRevision','token'],
-    RECONCILE:['slug','expectedRevision','token']
+    RECONCILE:['slug','expectedRevision','token'],
+    ARM_AUTO:['slug','token'],DISARM_AUTO:['slug']
   };
   if(Object.keys(p).some(x=>!allowed[msg.type].includes(x))||
      (allowed[msg.type].includes('slug')&&!SLUG.test(p.slug||''))||
@@ -40,7 +41,7 @@ export function validateWritebackMessage(api,sender,msg){
         !['MANUAL','AUTO'].includes(p.mode)))||
      (['COMMIT','RECONCILE'].includes(msg.type)&&
         (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
-     (['PREPARE','COMMIT','RECONCILE'].includes(msg.type)&&
+     (['PREPARE','COMMIT','RECONCILE','ARM_AUTO'].includes(msg.type)&&
         (typeof p.token!=='string'||p.token.length<12||p.token.length>512)))
     return fail('INVALID_PARAMS');
   return {ok:true};
@@ -112,6 +113,10 @@ export function createWritebackBoundary(api,{
   let dbPromise;
   const database=()=>dbPromise ||=open();
   const sentinel=createRestoreSentinel(api.storage.local);
+  // Ephemeral tokens are intentionally lost on background restart; canonical
+  // autoEnabled alone never authorizes a Git action or stores credentials.
+  const autoCredentials=new Map();
+  let autoBusy=false;
   async function runTrusted(msg){
     const p=msg.params||{},db=await database(),store=storeFactory(db);
     if(msg.type==='GET_SETTINGS')return store.settings();
@@ -119,7 +124,30 @@ export function createWritebackBoundary(api,{
     if(msg.type==='GET')return store.get(p.slug);
     if(msg.type==='SET_AUTO'){
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
-      return store.changeSettings(p.expectedRevision,p.autoEnabled);
+      const updated=await store.changeSettings(p.expectedRevision,p.autoEnabled);
+      if(updated.ok&&updated.setting.autoEnabled===false)autoCredentials.clear();
+      return updated;
+    }
+    if(msg.type==='DISARM_AUTO'){
+      autoCredentials.delete(p.slug);
+      return {ok:true,slug:p.slug,code:'AUTO_CREDENTIAL_DISARMED'};
+    }
+    if(msg.type==='ARM_AUTO'){
+      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      const settings=await store.settings();
+      if(!settings.ok||settings.setting.autoEnabled!==true)
+        return fail('GIT_AUTO_NOT_ENABLED');
+      if(effectGate({phase:'I11',step:'READ_ONLY_AI_TERMINAL'})!==true||
+         effectGate({phase:'I11',step:'GIT_WRITE_AUTO'})!==true)
+        return fail('GIT_AUTO_ACTIVATION_HELD');
+      if(autoCredentials.size>=16&&!autoCredentials.has(p.slug))
+        return fail('GIT_AUTO_EPHEMERAL_LIMIT');
+      const prior=await store.get(p.slug);
+      if(prior.ok)return fail('WRITEBACK_ALREADY_EXISTS');
+      autoCredentials.set(p.slug,p.token);
+      try{api.alarms?.create('pcms-i11-auto',{periodInMinutes:1});}catch{}
+      return {ok:true,slug:p.slug,code:'AUTO_EPHEMERAL_ARMED',
+        persistence:'NONE',publication:'OFF'};
     }
     const stage=await stageFactory(db).getFull(p.slug),
       job=await aiFactory(db).getJobFull(p.slug);
@@ -254,7 +282,41 @@ export function createWritebackBoundary(api,{
     try{return await runTrusted(message);}
     catch{return fail('WRITEBACK_CANONICAL_HOLD');}
   }
+  async function autoTick(){
+    if(autoBusy||autoCredentials.size===0)return fail('GIT_AUTO_NO_WORK');
+    autoBusy=true;
+    try{
+      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      const db=await database(),store=storeFactory(db);
+      const enabled=await store.settings();
+      if(!enabled.ok||!enabled.setting.autoEnabled){
+        autoCredentials.clear();return fail('GIT_AUTO_NOT_ENABLED');
+      }
+      for(const [slug,token] of autoCredentials){
+        const current=await store.get(slug);
+        if(current.ok){autoCredentials.delete(slug);continue;}
+        const candidate=await runTrusted({type:'PREVIEW',params:{slug}});
+        if(!candidate.ok)continue; // no verified final F; no Git effect
+        const prepared=await runTrusted({type:'PREPARE',params:{
+          slug,token,mode:'AUTO',message:'',
+          expectedJobRevision:candidate.jobRevision,
+          fingerprint:candidate.sourceFingerprint
+        }});
+        if(!prepared.ok)continue;
+        // Remove the only credential BEFORE attempting any Git mutation:
+        // wake duplicates cannot dispatch or re-arm the same operation.
+        autoCredentials.delete(slug);
+        return runTrusted({type:'COMMIT',params:{
+          slug,token,expectedRevision:prepared.revision}});
+      }
+      return {ok:true,code:'GIT_AUTO_WAITING_FOR_VERIFIED_F'};
+    }catch{return fail('GIT_AUTO_HELD_UNVERIFIED');}
+    finally{autoBusy=false;}
+  }
   function register(){
+    api.alarms?.onAlarm?.addListener(alarm=>{
+      if(alarm?.name==='pcms-i11-auto')void autoTick();
+    });
     api.runtime.onConnect.addListener(port=>{
       if(port?.name!==WRITEBACK_PORT)return;
       let busy=false;
@@ -268,6 +330,6 @@ export function createWritebackBoundary(api,{
       });
     });
   }
-  return Object.freeze({register,run});
+  return Object.freeze({register,run,autoTick});
 }
 if(typeof browser!=='undefined')createWritebackBoundary(browser).register();
