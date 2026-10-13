@@ -217,12 +217,25 @@ export function createExistingStore(db){
         if(!old||old.revision!==revision||old.state!=='STAGE_CONFIRMED'){
           done(fail('EXISTING_FINAL_CONTEXT_CHANGED'));return;
         }
-        const next={...old,revision:old.revision+1,
-          stagedFingerprint:source.fingerprint,stageSource:structuredClone(source)};
-        m.put({key:key(s),record:next});
-        t.objectStore('events').add({stage:'EXISTING_FINAL_F_PINNED',
-          slug:s,revision:next.revision,sourceFingerprint:source.fingerprint});
-        done(publicExisting(next));
+        m.get('stage:'+s).onsuccess=st=>{
+          m.get('ai-job:'+s).onsuccess=ai=>{
+            const stage=st.target.result?.record,job=ai.target.result?.job;
+            if(stage?.state!=='SOURCE_VERIFIED'||stage.nonce!==old.nonce||
+               stage.accountId!==old.accountId||
+               job?.state!=='TESTS_VERIFIED'||job.stageRevision!==stage.revision||
+               job.verifiedFinal!==source.fingerprint||
+               job.finalSource?.fingerprint!==source.fingerprint||
+               job.executionSlotReleased!==true){
+              done(fail('EXISTING_FINAL_TESTS_OR_STAGE_CHANGED'));return;
+            }
+            const next={...old,revision:old.revision+1,
+              stagedFingerprint:source.fingerprint,stageSource:structuredClone(source)};
+            m.put({key:key(s),record:next});
+            t.objectStore('events').add({stage:'EXISTING_FINAL_F_PINNED',
+              slug:s,revision:next.revision,sourceFingerprint:source.fingerprint});
+            done(publicExisting(next));
+          };
+        };
       };
     });
   }
