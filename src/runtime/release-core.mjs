@@ -80,7 +80,7 @@ export function existingUpdateAdmission({adoption,inventory,shadow,previous,arch
      !backup?.ok||backup.decryptable!==true||backup.sourceFingerprint!==previous.fingerprint)
     return fail('ORIGINAL_OR_RECOVERY_NOT_PROVEN');
   // Shadow queue computes availability; it never itself unlists.
-  if(shadow?.phase!=='SLEEP'||shadow.sleepEvidence!=='GUARDED_INTERVAL'||
+  if(shadow?.phase!=='SLEEPING'||shadow.sleepRemaining<=0||\n     shadow.sleepEvidence!=='GUARDED_OPERATIONAL_INTERVAL'||
      shadow.paused===true||inventory.visibility!=='UNLISTED'||
      shadow.listingEvidence!=='INDEPENDENT_UNLISTED_READBACK')
     return fail('SLEEP_OR_UNLIST_UNVERIFIED');
