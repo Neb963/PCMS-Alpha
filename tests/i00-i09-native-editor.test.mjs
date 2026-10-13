@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {perchanceStageMain} from '../src/runtime/perchance-stage.mjs';
 const b=s=>Buffer.from(s).toString('base64');
 const slug='stage-one';
-function fixture({dirty=false,collab=false,humanTab=false,handoffDuringWrite=false,
+function fixture({dirty=false,collab=false,collabMode=null,humanTab=false,handoffDuringWrite=false,
   noSrc=false}={}){
   const effect=[],saved=[],files=new Map();
   let humanIntent=false,pjs='',html='',srcDirty=false;
@@ -26,7 +26,13 @@ function fixture({dirty=false,collab=false,humanTab=false,handoffDuringWrite=fal
   }};
   globalThis.window={__editorReady:true,__saveInFlight:false,userOwnsThisGenerator:true,
     editorCollabInitialSyncIsPending:false,__collabRoomFailed:false,
-    yjsProvider:collab?{}:null,yDoc:null,saveCheckpointManager:{
+    yjsProvider:collabMode?{wsconnected:collabMode!=='offline',
+      synced:collabMode!=='unsynced',roomname:'private-room'}:collab?{}:null,
+    yDoc:collabMode?{clientID:111}:null,
+    yjsAwareness:collabMode?{getStates:()=>new Map(
+      collabMode==='peer'?[[111,{}],[222,{}]]:[[111,{}]])}:undefined,
+    yjsProviderRoomName:collabMode?'private-room':null,
+    saveCheckpointManager:{
       isDivergenceBlocked:()=>false},
     aiAgentWorkspaceSnapshot:async()=>({unavailable:false,preferWorkspace:null}),
     modelTextEditor:model,outputTemplateEditor:htmlEditor,srcState:source,menuBar:menu,
@@ -77,4 +83,15 @@ test('P52-07 native: revoked or unknown page API blocks before any write',async(
   globalThis.window.__editorReady=false;
   assert.equal((await f.run()).code,'NATIVE_EDITOR_CONTRACT_UNVERIFIED');
   assert.deepEqual(f.effect,[]);
+});
+
+test('I10 F/X compatible I09 staging: synced solo owner room is allowed; actual/uncertain collab peers are denied',async()=>{
+  const own=fixture({collabMode:'solo'});
+  assert.equal((await own.run()).code,'SAVE_ACK_ONLY');
+  assert.equal(own.effect.includes('REMOTE_SAVE'),true);
+  for(const collabMode of ['peer','offline','unsynced']){
+    const f=fixture({collabMode}),r=await f.run();
+    assert.equal(r.code,'COLLABORATION_UNVERIFIED',collabMode);
+    assert.deepEqual(f.effect,[],collabMode);
+  }
 });
