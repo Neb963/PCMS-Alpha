@@ -6,6 +6,7 @@ import {internalPcmsGuard} from './persona-guard.mjs';
 import {createStagingStore} from './staging-store.mjs';
 import {createAiStore} from './ai-store.mjs';
 import {inspectGitSource} from './git-source.mjs';
+import {verifyReadback} from './staging-core.mjs';
 export const AI_PORT='pcms-i10-ai';
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const ACT=new Set(['GET_PROMPTS','SET_PROMPT','IMPORT_PROMPT','EXPORT_PROMPTS',
@@ -84,6 +85,20 @@ export function createAiBoundary(api,{
          current?.original?.ownerResult!=='IS_OWNER'||
          current?.original?.visibility!=='UNLISTED')
         return fail('REMOTE_OWNER_UNVERIFIED');
+      // I09's previous good receipt does not prove the source is still saved
+      // unchanged. Repeat the independent full PJS/HTML/src byte-readback.
+      const original=current.original;
+      const observed={ok:true,source:'DONOR_GUARDED_ORIGINAL_READBACK',
+        slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,
+        principalFingerprint:current.principalFingerprint,
+        remotePublicId:original.remotePublicId,ownerResult:original.ownerResult,
+        visibility:original.visibility,pjs:original.pjs,html:original.html,
+        assets:original.assets};
+      const proof=await verifyReadback(r.candidate,observed,{
+        slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,
+        principalFingerprint:r.principalFingerprint,remotePublicId:r.remotePublicId
+      });
+      if(!proof.ok)return fail(proof.code||'SOURCE_DRIFT');
       // Saved source already has a separate I09 full-byte proof. Its local
       // stage revision and owner must remain stable for I10 job admission.
       const restaged=await stageFactory(db).getFull(p.slug);
