@@ -42,7 +42,7 @@ export function validateAiMessage(api,sender,message){
   if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
       (message.type==='BEGIN_NATIVE'&&
-       !['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','STOP'].includes(p.step))))
+       !['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','STOP'].includes(p.step))))
     return fail('INVALID_PARAMS');
   if(['SET_PROMPT','IMPORT_PROMPT'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
@@ -155,9 +155,11 @@ export function createAiBoundary(api,{
           // Do not admit new AI work over human-owned or dirty source.
           const clean=await g.inspectStageEditor?.(r.personaUid,r.slug,r.nonce);
           if(clean?.ok!==true||clean.clean!==true)return fail('EDITOR_UNKNOWN');
+          const isRepair=p.step==='CHAT1_REPAIR'||p.step==='CHAT2_REPAIR';
           const text=p.step==='CHAT1_SEND'?job.prompt.text:
-            p.step==='CHAT2_SEND'?job.optionalTesting?.text:null;
-          if(['CHAT1_SEND','CHAT2_SEND'].includes(p.step)&&
+            p.step==='CHAT2_SEND'?job.optionalTesting?.text:isRepair?
+            'A separate browser assertion previously observed a real failing required test. Re-examine the current generator-owned code and src files, make a bounded corrective change, save and run the tests again. Do not declare PASS without an independent browser observation. If no safe progress is possible, report a blocker.':null;
+          if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR'].includes(p.step)&&
              (typeof text!=='string'||!text.trim()))return fail('AI_PROMPT_UNVERIFIED');
           if((await sentinel.inspect()).held||effectGate({phase:'I10',job,stage:r,step:p.step})!==true)
             return fail('AI_PROVIDER_ACTIVATION_HELD');
@@ -175,10 +177,13 @@ export function createAiBoundary(api,{
           let observed;
           try{observed=await g.runNativeAiStep(r.personaUid,{
             slug:r.slug,nonce:r.nonce,
-            action:p.step.endsWith('SEND')?'SEND':
+            action:p.step.endsWith('SEND')||p.step.endsWith('REPAIR')?'SEND':
               p.step==='CHAT2_RESET'?'NEW_CHAT':'STOP',
             ...(text?{text}:{}),
-            chat:p.step==='CHAT2_SEND'?2:1
+            chat:p.step.startsWith('CHAT2')?2:1,
+            ...(isRepair?{repair:true,
+              expectedSessionDigest:p.step==='CHAT1_REPAIR'?
+                job.chat1.sessionDigest:job.chat2.sessionDigest}:{})
           });}catch{}
           // All outcomes are uncertain until a distinct read-only OBSERVE.
           return {ok:false,code:'AI_DISPATCH_POSSIBLE_RECONCILE',
