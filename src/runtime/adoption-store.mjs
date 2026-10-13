@@ -56,7 +56,8 @@ export function createAdoptionStore(db){
               const prior=old.target.result?.adoption;
               const candidate={slug,accountId:row.accountId,personaUid:row.personaUid,
                 bindingVersion:row.bindingVersion,accountRevision:account.revision,
-                inventoryRevision:row.revision,remotePublicId:original.remotePublicId};
+                inventoryRevision:row.revision,remotePublicId:original.remotePublicId,
+                principalFingerprint:account.identity.principalFingerprint};
               const cont=continuity(prior,candidate);
               if(!cont.ok){done(cont);return;}
               if(prior){done({...publicAdoption(prior),duplicate:true});return;}
@@ -145,7 +146,10 @@ export function createAdoptionStore(db){
             if(!account||account.state!=='VERIFIED'||
                account.personaUid!==a.personaUid||
                account.bindingVersion!==a.bindingVersion||
-               account.identity?.source!=='GUARDED_SESSION_READBACK'){
+               account.identity?.source!=='GUARDED_SESSION_READBACK'||
+             account.identity?.principalFingerprint!==a.principalFingerprint||
+             account.identity?.bindingVersion!==a.bindingVersion||
+             account.revision!==a.accountRevision){
               result=fail('ACCOUNT_CONTEXT_CHANGED');return;
             }
             m.get('source-link:'+slug).onsuccess=sl=>{
