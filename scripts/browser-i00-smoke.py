@@ -1883,6 +1883,110 @@ def main():
                 assert restarted['held']=='UNKNOWN',restarted
                 print('B I12_PERSISTENT_RESTART_BUDGET_PAUSE_SINGLE_ALARM_REPAIR=PASS',flush=True)
 
+                # I13 B: exact packaged XPI, real IndexedDB atomic approval
+                # vs duplicate dispatch, installed operator controls, and
+                # independent postrestart uncertainty. No live provider effects.
+                call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
+                ui=execute(after,"return {release:!!document.getElementById('pcms-release-preview'),approve:document.getElementById('pcms-release-approve').disabled,dispatch:document.getElementById('pcms-release-dispatch').disabled,resolve:document.getElementById('pcms-release-reconcile').disabled}")
+                assert ui=={'release':True,'approve':True,'dispatch':True,'resolve':True},ui
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const stageCore=await import('./staging-core.mjs');
+                  const core=await import('./release-core.mjs');
+                  const module=await import('./release-store.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const text=s=>btoa(s),slug='i13-fixture-release',fp='e'.repeat(64);
+                  const source=await stageCore.exactSource([
+                    {path:'main.pjs',base64:text('F source')},
+                    {path:'index.html',base64:text('<h1>F</h1>')},
+                    {path:'src/binary.bin',base64:btoa(String.fromCharCode(0,255,1))}]);
+                  const previous=await stageCore.exactSource([
+                    {path:'main.pjs',base64:text('')},
+                    {path:'index.html',base64:text('')}]);
+                  const stage={slug,accountId:'i13_account_fixture',
+                    personaUid:'persona-i13-fixture',bindingVersion:1,
+                    accountRevision:4,principalFingerprint:fp,
+                    remotePublicId:'public_i13_fixture',revision:2,
+                    state:'SOURCE_VERIFIED',verifiedAt:Date.now(),
+                    sourceFolder:'gens/i13-fixture-release',testingSha:fp,
+                    sourceHead:'f'.repeat(40),nonce:'1'.repeat(32),
+                    previous,candidate:source};
+                  const job={slug,revision:3,stageRevision:2,
+                    sourceFingerprint:source.fingerprint,verifiedFinal:source.fingerprint,
+                    finalSource:source,state:'TESTS_VERIFIED',executionSlotReleased:true,
+                    prompt:{revision:1,tests:['default_generator_smoke']},
+                    native:{state:'CHAT1_OBSERVED_IDLE',sessionDigest:fp},
+                    chat1:{tests:{default_generator_smoke:{
+                      result:'PASS',sourceFingerprint:source.fingerprint}}},chat2:null};
+                  const account={accountId:stage.accountId,personaUid:stage.personaUid,
+                    bindingVersion:1,revision:4,state:'VERIFIED',
+                    identity:{source:'GUARDED_SESSION_READBACK',
+                      bindingVersion:1,principalFingerprint:fp}};
+                  const inventory={slug,revision:5,accountId:account.accountId,
+                    personaUid:stage.personaUid,bindingVersion:1,
+                    remoteId:stage.remotePublicId,ownerState:'OBSERVED_OWNER',visibility:'UNLISTED'};
+                  await new Promise((resolve,reject)=>{
+                    const tx=db.transaction('meta','readwrite'),m=tx.objectStore('meta');
+                    m.put({key:'stage:'+slug,record:stage});
+                    m.put({key:'ai-job:'+slug,job});
+                    m.put({key:'account:'+account.accountId,account});
+                    m.put({key:'inventory:'+slug,generator:inventory});
+                    tx.oncomplete=resolve;tx.onabort=()=>reject(Error('I13 seed aborted'));
+                  });
+                  const git={ok:true,testingSha:fp};
+                  const approval=core.approvalTuple({slug,stage,job,source,previous,git});
+                  const store=module.createReleaseStore(db);
+                  const first=await store.approve({approval,stage,job,account,inventory,
+                    source,previous,kind:'PRIVATE_NEW',
+                    releaseId:'release_'+ 'f'.repeat(32)});
+                  const duplicate=await store.approve({approval,stage,job,account,inventory,
+                    source,previous,kind:'PRIVATE_NEW',
+                    releaseId:'release_'+ 'd'.repeat(32)});
+                  const results=await Promise.all([
+                    store.markDispatch(slug,first.revision,approval.tuple),
+                    store.markDispatch(slug,first.revision,approval.tuple)]);
+                  const successes=results.filter(r=>r.ok).length;
+                  const advanced=results.find(r=>r.ok);
+                  const uncertain=await store.settle(slug,advanced.revision,{
+                    proof:{ok:true,source:'INDEPENDENT_PUBLICATION_READBACK',
+                      sourceFingerprint:'0'.repeat(64)},
+                    reason:'MISMATCH_OR_LOST_ACK'});
+                  const retried=await store.markDispatch(slug,uncertain.revision,approval.tuple);
+                  const port=browser.runtime.connect({name:'pcms-i13-release'});
+                  const delivered=new Promise(resolve=>port.onMessage.addListener(v=>resolve(v)));
+                  port.postMessage({type:'GET',params:{slug}});
+                  const actual=await delivered;port.disconnect();
+                  const restored=await store.get(slug);
+                  done({ok:first.ok&&duplicate.code==='EXISTING_RELEASE_REQUIRES_REVIEW'&&
+                    successes===1&&uncertain.state==='PUBLICATION_UNCERTAIN'&&
+                    retried.ok===false&&restored.revision===uncertain.revision&&
+                    actual.state==='PUBLICATION_UNCERTAIN',
+                    first,duplicate,successes,uncertain,retried,actual});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,600)}));"""
+                proof=call('POST',f'/session/{after}/execute/async',
+                           {'script':code,'args':[]},timeout=90)
+                assert proof.get('ok') is True,proof
+                print('B I13_PACKAGED_EXACT_APPROVAL_IDB_CAS_NO_REPLAY_AND_PORT=PASS',flush=True)
+                close(after)
+                after=open_session(browser,profile)
+                assert addons_uuid(profile)==uuid
+                call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
+                proof=call('POST',f'/session/{after}/execute/async',{'script':"""
+                const done=arguments[arguments.length-1];
+                (async()=>{
+                  const db=await (await import('./journal.mjs')).openCanonicalDatabase();
+                  const r=await (await import('./release-store.mjs'))
+                    .createReleaseStore(db).get('i13-fixture-release');
+                  const port=browser.runtime.connect({name:'pcms-i13-release'});
+                  port.onMessage.addListener(x=>{done({receipt:r,port:x});port.disconnect();db.close();});
+                  port.postMessage({type:'GET',params:{slug:'i13-fixture-release'}});
+                })().catch(e=>done({error:String(e)}));""",'args':[]},timeout=90)
+                assert proof['receipt']['state']=='PUBLICATION_UNCERTAIN' and (
+                    proof['port']['state']=='PUBLICATION_UNCERTAIN'),proof
+                print('B I13_INSTALLED_RESTART_DURABLE_UNCERTAIN_PUBLICATION=PASS',flush=True)
+
                 # I08 B: real packaged Firefox crypto, canonical IDB, donor
                 # portable format, Settings action, and wrong-password failure.
                 # No live provider or native calls; no disk byte proof claimed.
