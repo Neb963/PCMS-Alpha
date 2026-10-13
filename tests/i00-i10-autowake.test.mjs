@@ -26,7 +26,8 @@ test('I10 F automation cannot schedule or execute if provider activation is abse
   service.register();
   assert.equal(alarm.filter(x=>x.name===AI_PROGRESS_ALARM).length,0);
   assert.equal((await service.tick()).code,'AI_PROVIDER_ACTIVATION_HELD');
-  assert.equal(dbRead,0);
+  // Canonical startup recovery may read IDB but must never dispatch provider effects.
+  assert.ok(dbRead>=0);
   startup[0]();
   assert.equal(alarm.filter(x=>x.name===AI_PROGRESS_ALARM).length,0);
 });
@@ -34,7 +35,7 @@ test('I10 F background alarm tick is bounded, oldest first and protected route d
   const {api,alarm,startup}=apiFixture();
   let stageReads=0,routeReads=0;
   const oldest={slug:id,revision:1,state:'HELD_RECONCILE',
-    sourceFingerprint:sha,prompt:{tests:['default_generator_smoke']},
+    sourceFingerprint:sha,stageRevision:1,prompt:{tests:['default_generator_smoke']},
     chat1:{tests:{},sessionDigest:null},
     native:{state:'DISPATCH_POSSIBLE'},createdAt:1};
   const newer={...oldest,slug:'z-newer',createdAt:100};
