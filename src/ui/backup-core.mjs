@@ -47,7 +47,14 @@ export function serializeClone(value,depth=0){
       kind:value instanceof ArrayBuffer?'ArrayBuffer':value.constructor.name};
   }
   if(Array.isArray(value))return value.map(v=>serializeClone(v,depth+1));
-  requireValid(plain(value),'BACKUP_UNSUPPORTED_VALUE');
+  if(!plain(value)){
+    // Fixed type taxonomy only: never export source values or arbitrary keys.
+    const kind=({'[object Map]':'MAP','[object Set]':'SET',
+      '[object Blob]':'BLOB','[object File]':'FILE',
+      '[object RegExp]':'REGEXP','[object Object]':'OBJECT',
+      '[object BigInt]':'BIGINT'})[Object.prototype.toString.call(value)]||'OTHER';
+    throw Error('BACKUP_UNSUPPORTED_VALUE_'+kind);
+  }
   requireValid(Object.keys(value).length<=100000,'BACKUP_TOO_LARGE');
   const out=Object.create(null);
   for(const key of Object.keys(value)){
