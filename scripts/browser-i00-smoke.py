@@ -1368,6 +1368,29 @@ def main():
                             {'script':code,'args':[]},timeout=90)
                 assert opfs_b.get('ok') is True,opfs_b
                 print('B I10_PACKAGED_OPFS_LOCAL_PROBE_WRONG_ORIGIN_HOLD=PASS',flush=True)
+                # I10 B: both halves of the history boundary really ship in
+                # the installed XPI, and wrong-origin browser code cannot
+                # extract credentials or perform an external history fetch.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const m=await import('./perchance-ai-history.mjs');
+                  const nonce='f'.repeat(32);
+                  const main=await m.perchanceAiHistoryCredentials({
+                    slug:'private-owned',nonce});
+                  const read=await m.perchanceAiHistoryIsolated({
+                    slug:'private-owned',nonce,sessionId:'session-opaque-01234567',
+                    routingKey:'1234.safefake',sessionDigest:'a'.repeat(64),
+                    firstPrompt:'Test T1'});
+                  done({ok:main.code==='AI_HISTORY_WRONG_EDITOR'&&
+                    read.code==='AI_HISTORY_WRONG_EDITOR'&&
+                    JSON.stringify({main,read}).indexOf('session-opaque')===-1,
+                    main,read});
+                })().catch(e=>done({error:String(e)}));"""
+                history_b=call('POST',f'/session/{after}/execute/async',
+                                 {'script':code,'args':[]},timeout=90)
+                assert history_b.get('ok') is True,history_b
+                print('B I10_PACKAGED_ISOLATED_HISTORY_WRONG_ORIGIN_GUARD=PASS',flush=True)
+
 
                 # I10 B: two genuinely distinct (synthetic) native sessions,
                 # final Chat2 source-changing repair, invalidated Chat1 suite,
