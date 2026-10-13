@@ -4,7 +4,9 @@ import {fail} from './journal.mjs';
 import {initialPrompt,revisePrompt,importPrompt,exportPrompt,beginAiJob,applyAiEvidence,evaluation} from './ai-evidence.mjs';
 const key=s=>'ai-job:'+s;
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
-const SAFE_STATES=new Set(['TESTS_VERIFIED','HELD_RECONCILE','HELD_NO_PROGRESS','HUMAN_OWNED']);
+// Interrupted, unknown or human-owned native sessions are NOT free execution
+// slots. Even verified test results do not prove the helper session stopped.
+const SAFE_STATES=new Set([]);
 function tx(db,mode,fn){
   return new Promise((resolve,reject)=>{
     let t,result=fail('AI_TRANSACTION_INCOMPLETE');
