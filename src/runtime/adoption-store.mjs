@@ -93,5 +93,118 @@ export function createAdoptionStore(db){
       };
     });
   }
-  return Object.freeze({get,list,adopt,archiveLocal});
+
+  function getFull(slug){
+    return tx(db,'readonly',(t,done)=>{
+      t.objectStore('meta').get(key(slug)).onsuccess=e=>{
+        const a=e.target.result?.adoption;
+        done(a?{ok:true,record:a}:fail('ADOPTION_NOT_FOUND'));
+      };
+    });
+  }
+  // Independent remote effect journal. The operation record and canonical
+  // archive fence commit in ONE IDB transaction before any Git ref attempt.
+  function archiveStage(slug,expectedRevision,event,proof=null){
+    if(!['PREPARE','MARK_DISPATCH','HELD_UNCERTAIN','CONFIRM'].includes(event))
+      return Promise.resolve(fail('CAPABILITY_OFF'));
+    return new Promise((resolve,reject)=>{
+      let result=fail('ARCHIVE_TRANSACTION_INCOMPLETE'),t;
+      try{t=db.transaction(['meta','events','operations'],'readwrite');}
+      catch{return reject(Error('IDB_UNAVAILABLE'));}
+      t.oncomplete=()=>resolve(result);t.onabort=()=>reject(Error('IDB_ABORTED'));
+      t.onerror=()=>{};
+      const m=t.objectStore('meta'),ops=t.objectStore('operations');
+      m.get(key(slug)).onsuccess=e=>{
+        const a=e.target.result?.adoption;
+        if(!a){result=fail('ADOPTION_NOT_FOUND');return;}
+        if(a.revision!==expectedRevision){result=fail('STALE_REVISION');return;}
+        if(a.archived){result=fail('TOMBSTONE_HELD');return;}
+        const allowed={
+          PREPARE:['ARCHIVE_PENDING'],
+          MARK_DISPATCH:['GIT_PREPARED'],
+          HELD_UNCERTAIN:['DISPATCH_POSSIBLE','HELD_UNCERTAIN'],
+          CONFIRM:['DISPATCH_POSSIBLE','HELD_UNCERTAIN']
+        };
+        if(!allowed[event].includes(a.archiveState)){
+          result=fail('ARCHIVE_RECONCILIATION_REQUIRED');return;
+        }
+        m.get('inventory:'+slug).onsuccess=iv=>{
+          const row=iv.target.result?.generator;
+          if(!row||row.accountId!==a.accountId||
+             row.personaUid!==a.personaUid||
+             row.bindingVersion!==a.bindingVersion||
+             row.ownerState!=='OBSERVED_OWNER'){
+            result=fail('OWNER_CONTEXT_CHANGED');return;
+          }
+          m.get('account:'+a.accountId).onsuccess=av=>{
+            const account=av.target.result?.account;
+            if(!account||account.state!=='VERIFIED'||
+               account.personaUid!==a.personaUid||
+               account.bindingVersion!==a.bindingVersion||
+               account.identity?.source!=='GUARDED_SESSION_READBACK'){
+              result=fail('ACCOUNT_CONTEXT_CHANGED');return;
+            }
+            m.get('source-link:'+slug).onsuccess=sl=>{
+              const link=sl.target.result?.link;
+              if(link&&(link.accountId!==a.accountId||
+                 link.remoteId!==row.remoteId||
+                 link.bindingVersion!==a.bindingVersion)){
+                result=fail('SOURCE_ASSOCIATION_CONFLICT');return;
+              }
+              const folder=link?.folder||'gens/'+slug;
+              if(event==='PREPARE'){
+                const opId='archive_'+crypto.randomUUID().replaceAll('-','');
+                const next={...a,archiveState:'GIT_PREPARED',revision:a.revision+1,
+                  archiveOperationId:opId,archiveFolder:folder};
+                ops.add({operationId:opId,targetId:'adoption_'+slug,
+                  fingerprint:a.original.fingerprint,effectType:'original_git_archive_v1',
+                  status:'PREPARED',revision:1});
+                m.put({key:key(slug),adoption:next});
+                t.objectStore('events').add({stage:'ADOPTION_GIT_PREPARED',slug,
+                  operationId:opId,originalFingerprint:a.original.fingerprint});
+                result={ok:true,record:next};return;
+              }
+              ops.get(a.archiveOperationId).onsuccess=ov=>{
+                const operation=ov.target.result;
+                if(!operation||operation.fingerprint!==a.original.fingerprint||
+                   operation.targetId!=='adoption_'+slug){
+                  result=fail('ARCHIVE_OPERATION_CONFLICT');return;
+                }
+                const required=event==='MARK_DISPATCH'?'PREPARED':
+                  event==='CONFIRM'?['DISPATCH_POSSIBLE','HELD_UNCERTAIN']:
+                  ['DISPATCH_POSSIBLE','HELD_UNCERTAIN'];
+                if(!(Array.isArray(required)?required.includes(operation.status):
+                   operation.status===required)){
+                  result=fail('ARCHIVE_OPERATION_CONFLICT');return;
+                }
+                if(event==='CONFIRM'&&
+                   (proof?.source!=='INDEPENDENT_GIT_BYTE_READBACK'||
+                    proof?.ready!==false||
+                    proof?.prefix!=='originals/'+slug+'/'+a.original.fingerprint||
+                    proof?.folder!==a.archiveFolder)){
+                  result=fail('INDEPENDENT_GIT_PROOF_REQUIRED');return;
+                }
+                const state=event==='MARK_DISPATCH'?'DISPATCH_POSSIBLE':
+                  event==='CONFIRM'?'ARCHIVED_GIT_CONFIRMED':'HELD_UNCERTAIN';
+                const opStatus=event==='CONFIRM'?'CONFIRMED':
+                  event==='MARK_DISPATCH'?'DISPATCH_POSSIBLE':'HELD_UNCERTAIN';
+                const next={...a,archiveState:state,revision:a.revision+1,
+                  ...(event==='CONFIRM'?{
+                    archiveHead:proof.head,
+                    management:a.visibility==='PUBLIC'?
+                      'CONSENTED_ORIGINAL_PROTECTED':'DISCOVERED_ORIGINAL_PROTECTED'
+                  }: {})};
+                ops.put({...operation,status:opStatus,revision:operation.revision+1});
+                m.put({key:key(slug),adoption:next});
+                t.objectStore('events').add({stage:'ADOPTION_GIT_'+opStatus,slug,
+                  operationId:a.archiveOperationId,originalFingerprint:a.original.fingerprint});
+                result={ok:true,record:next};
+              };
+            };
+          };
+        };
+      };
+    });
+  }
+  return Object.freeze({get,list,adopt,archiveLocal,getFull,archiveStage});
 }
