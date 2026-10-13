@@ -1060,7 +1060,12 @@ def main():
                   const repeat=await store.armNative('i10-b-private',armed.revision,'CHAT1_SEND');
                   const recovered=await store.recoverNative();
                   const after=await store.getJob('i10-b-private');
+                  const recoveredAgain=await store.recoverNative();
+                  const afterAgain=await store.getJob('i10-b-private');
                   const session='1'.repeat(64);
+                  const greetingOnly=await store.observeNative('i10-b-private',
+                    after.revision,{ok:true,slug:'i10-b-private',busy:false,
+                    sessionDigest:session,chatEntries:1,sourceSaved:true});
                   const busy=await store.observeNative('i10-b-private',after.revision,{
                     ok:true,slug:'i10-b-private',busy:true,sessionDigest:session,
                     chatEntries:2,sourceSaved:false});
@@ -1085,12 +1090,17 @@ def main():
                     slug:'i10-b-private',expectedRevision:full.revision,step:'CHAT1_SEND'
                   }});
                   done({ok:armed.ok&&repeat.code==='AI_EFFECT_RECONCILIATION_REQUIRED'&&
-                    recovered.ok&&recovered.held>=1&&busy.ok&&idle.ok&&
+                    recovered.ok&&recovered.held>=1&&
+                    recoveredAgain.ok&&recoveredAgain.held===0&&
+                    afterAgain.revision===after.revision&&
+                    greetingOnly.code==='AI_SESSION_UNVERIFIED'&&
+                    busy.ok&&idle.ok&&
                     full.ok&&stored.job.finalSource.blobs.length===3&&
                     stored.job.chat1.tests&&
                     stored.job.sourceFingerprint===snapshot.fingerprint&&
                     stored.job.state==='TESTS_UNVERIFIED'&&
                     denied.ok!==true,armed,repeat,recovered,denied,
+                    greetingOnly,recoveredAgain,afterAgainRevision:afterAgain.revision,
                     fingerprint:snapshot.fingerprint,held:stored.job.hold});
                   db.close();
                 })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
