@@ -9,6 +9,7 @@ const assetPath=p=>typeof p==='string' && p.startsWith('src/') &&
 const sha256=async bytes=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))]
   .map(x=>x.toString(16).padStart(2,'0')).join('');
 const utf8=s=>new TextEncoder().encode(s);
+const toBase64=bytes=>{let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(binary);};
 function decode(b64) {
   if(typeof b64!=='string'||b64.length>16000000||
      !/^[a-zA-Z0-9+/]*={0,2}$/.test(b64))throw Error('INVALID_BASE64');
@@ -87,7 +88,7 @@ export async function verifyOriginal(packet, row, account) {
     fingerprint,remotePublicId:packet.remotePublicId,
     visibility:packet.visibility,observedAt:packet.observedAt,
     files:fileProof,blobs:blobs.map(b=>({
-      path:b.path,base64:btoa([...b.bytes].map(c=>String.fromCharCode(c)).join(''))
+      path:b.path,base64:toBase64(b.bytes)
     }))};
 }
 export function publicAdoption(record) {
