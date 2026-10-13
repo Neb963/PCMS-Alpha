@@ -36,21 +36,32 @@ test('P52-05: known failure is not reclassified as an unavailable test',()=>{
   j=send(j,pass(1,'visible'));
   assert.equal(evaluation(j).state,'KNOWN_FAILURE');
 });
-test('P52-06: Chat 2 requires Chat 1 tests and proven different reset session',()=>{
+test('P52-06 X: caller-provided freshness flags cannot authorize any Chat 2 session',()=>{
   let j=send(start(true),session(1,S1));
-  assert.equal(applyAiEvidence(j,session(2,S2,{freshProof:true,resetObserved:true})).code,'FRESH_CHAT_UNVERIFIED');
+  assert.equal(applyAiEvidence(j,session(2,S2,{freshProof:true,resetObserved:true})).code,
+    'AI_CHAT2_ISOLATION_UNVERIFIED');
   j=send(j,pass(1,'smoke'));j=send(j,pass(1,'visible'));
   assert.equal(evaluation(j).state,'TESTS_UNVERIFIED');
-  assert.equal(applyAiEvidence(j,session(2,S1,{freshProof:true,resetObserved:true})).code,'FRESH_CHAT_UNVERIFIED');
-  assert.equal(applyAiEvidence(j,session(2,S2,{freshProof:false,resetObserved:true})).code,'FRESH_CHAT_UNVERIFIED');
-  j=send(j,session(2,S2,{freshProof:true,resetObserved:true}));
-  j=send(j,pass(2,'optional'));
-  assert.equal(evaluation(j).state,'TESTS_VERIFIED');
+  for(const claimed of [
+    session(2,S1,{freshProof:true,resetObserved:true}),
+    session(2,S2,{freshProof:false,resetObserved:true}),
+    session(2,S2,{freshProof:true,resetObserved:true,
+      serverEndAck:'ACCEPTED',opfsIsolated:true}),
+    session(2,S2,{freshProof:true,resetObserved:true,
+      independentSource:'TRUST_ME'})
+  ]){
+    const rejected=applyAiEvidence(j,claimed);
+    assert.equal(rejected.code,'AI_CHAT2_ISOLATION_UNVERIFIED');
+    assert.equal(j.chat2.state,'PENDING');
+    assert.equal(j.chat2.sessionDigest,null);
+  }
 });
-test('P52-06: a saved repair invalidates both chats and requires same final F',()=>{
+test('P52-06 F model-only: an externally proven Chat2 fixture still loses stale tests after F changes',()=>{
   let j=send(start(true),session(1,S1));
   j=send(j,pass(1,'smoke'));j=send(j,pass(1,'visible'));
-  j=send(j,session(2,S2,{freshProof:true,resetObserved:true}));
+  // Pure-state synthetic fixture tests invalidation only. Runtime/SESSION
+  // cannot produce FRESH_VERIFIED without a real independent isolation path.
+  j={...j,chat2:{...j.chat2,state:'FRESH_VERIFIED',sessionDigest:S2}};
   j=send(j,pass(2,'optional'));
   assert.equal(evaluation(j).state,'TESTS_VERIFIED');
   j=send(j,{type:'SAVED_READBACK',chat:2,sourceFingerprint:B,
