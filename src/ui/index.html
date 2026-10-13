@@ -119,6 +119,27 @@
         <section class="panel" aria-labelledby="pcms-stage-queue-title"><div class="panel-head"><h2 id="pcms-stage-queue-title">I09 private stage receipts</h2><span class="unknown">Canonical · no auto-retry</span></div><div id="pcms-stage-queue" role="status" aria-live="polite">Reading local stage journal.</div></section>
         <section class="panel" aria-labelledby="pcms-adoption-queue-title"><div class="panel-head"><h2 id="pcms-adoption-queue-title">Existing-source adoption receipts</h2><span class="unknown">Local originals · Git archive pending</span></div><div id="pcms-adopt-receipts" role="status" aria-live="polite">Loading adoption history.</div></section>
         <section class="panel" aria-labelledby="pcms-supply-queue-title"><div class="panel-head"><h2 id="pcms-supply-queue-title">Frozen supply batches</h2><span class="unknown">Canonical local receipts</span></div><div id="pcms-supply-queue" role="status" aria-live="polite">Loading local batches.</div></section>
+        <section class="panel" aria-labelledby="pcms-writeback-heading">
+          <div class="panel-head"><h2 id="pcms-writeback-heading">I11 · Git-only writeback of verified final F</h2><span class="unknown">Git mutation HELD until activated · Publication OFF</span></div>
+          <p class="reason">Manual or opt-in automatic source commit. A verified final generator source and independent tests are required. Preview paths, additions, changes and deletions before preparing a conditional Git commit. All Git credentials are ephemeral; a lost effect acknowledgment requires read-only reconciliation, never a blind second commit.</p>
+          <div class="account-controls">
+            <label for="pcms-writeback-slug">Exact staged slug</label><input id="pcms-writeback-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="private-generator">
+            <label for="pcms-writeback-token">Private per-gens write token (not stored)</label><input id="pcms-writeback-token" type="password" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="account-controls">
+            <label for="pcms-writeback-mode">Writeback mode</label><select id="pcms-writeback-mode"><option value="MANUAL">Manual — reviewed exact diff</option><option value="AUTO">Automatic — attributed terminal assistant suggestion only</option></select>
+            <label for="pcms-writeback-message">Manual Git commit message</label><input id="pcms-writeback-message" maxlength="120" value="fix: update tested generator source" spellcheck="false" autocomplete="off">
+          </div>
+          <div class="account-controls">
+            <button id="pcms-writeback-preview" type="button">Review source diff</button>
+            <button id="pcms-writeback-prepare" type="button" disabled>Prepare conditional commit</button>
+            <button id="pcms-writeback-commit" type="button" disabled>Commit verified F to Git</button>
+            <button id="pcms-writeback-reconcile" type="button" disabled>Read-only Git reconciliation</button>
+            <button id="pcms-writeback-refresh" type="button">Refresh canonical receipt</button>
+          </div>
+          <p id="pcms-writeback-status" role="status" aria-live="polite">No writeback prepared; publication and remote Git write remain OFF.</p>
+          <div id="pcms-writeback-diff" role="region" class="table-wrap" tabindex="0" aria-label="Full source add, change and delete diff"></div>
+        </section>
         <section class="panel" aria-labelledby="pcms-ai-jobs-heading">
           <div class="panel-head"><h2 id="pcms-ai-jobs-heading">I10 test and repair jobs</h2><span class="unknown">Source-bound · no AI provider activation</span></div>
           <p class="reason">Prepare a job only for an independently verified private stage. Preparation pins the Settings prompt and optional TESTING.md. No helper message is dispatched; no AI test is declared passed until separately observed.</p>
@@ -177,6 +198,11 @@
           <p class="reason">Tier 1: cryptographically verified in memory; tier 2: browser-reported completed download with existence and size; tier 3: independent on-disk file readback (not available here). Import/restore is a later phase.</p>
         </section>
         <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">Remote effects off · local backup available</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Off — not implemented</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup / restore and AI tests</dt><dd>Manual encrypted backup available; restore, scheduled backups and AI tests OFF</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No provider settings or operation commands can be changed here. PersonaMonkey retains advanced security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
+        <section class="panel" aria-labelledby="pcms-writeback-auto-heading">
+          <div class="panel-head"><h2 id="pcms-writeback-auto-heading">I11 · Git-only automatic writeback</h2><span class="unknown">Opt-in, revision-fenced · effects HELD</span></div>
+          <div class="account-controls"><label for="pcms-writeback-auto">Allow opt-in automatic Git writeback after verified final AI result</label><input id="pcms-writeback-auto" type="checkbox"><button id="pcms-writeback-save-auto" type="button" disabled>Save writeback preference</button></div>
+          <p id="pcms-writeback-auto-status" role="status" aria-live="polite">Automatic writeback defaults OFF. This preference never activates remote Git capabilities or approves publication.</p>
+        </section>
         <section class="panel" aria-labelledby="pcms-ai-config-heading">
           <div class="panel-head"><h2 id="pcms-ai-config-heading">Native AI testing · versioned default prompt</h2><span class="unknown">Native provider activation held</span></div>
           <p class="reason">New jobs, including updates to existing generators, pin the latest saved Settings revision. Existing jobs retain their original prompt and TESTING.md snapshot. Helper prose is never test evidence.</p>
@@ -216,5 +242,6 @@
   <script type="module" src="backup-view.mjs"></script>
   <script type="module" src="staging-view.mjs"></script>
   <script type="module" src="ai-view.mjs"></script>
+  <script type="module" src="writeback-view.mjs"></script>
 </body>
 </html>
