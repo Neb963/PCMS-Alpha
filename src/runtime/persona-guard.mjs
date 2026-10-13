@@ -6,7 +6,7 @@ const BAD_PROXY = new Set(['controlled_by_other_extensions', 'not_controllable']
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
-  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab }) {
+  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -202,6 +202,24 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     finally{await releaseConflictGuard(leased);}
   }
 
+  // I10 native AI executes only through the existing donor control lease.
+  // Return packets describe observations/attempts, not independent test PASS.
+  async function runNativeAiStep(personaUid,request){
+    if(typeof aiNativeStep!=='function')return {ok:false,code:'NATIVE_AI_NOT_WIRED'};
+    const leased=await acquireConflictGuard(personaUid);
+    if(!leased?.ready||!leased.leaseId)
+      return {ok:false,code:leased?.code||'PROTECTED_ROUTE_UNVERIFIED'};
+    try{
+      if(!(await inspectOwnedAction(leased)).ready)return {ok:false,code:'AI_LEASE_INVALID'};
+      const result=await aiNativeStep(leased,request);
+      if(!(await inspectOwnedAction(leased)).ready)
+        return {ok:false,code:'AI_POST_EFFECT_GUARD_UNVERIFIED'};
+      return result&&typeof result==='object'?result:
+        {ok:false,code:'NATIVE_AI_RESULT_UNVERIFIED'};
+    }catch{return {ok:false,code:'NATIVE_AI_OUTCOME_UNKNOWN'};}
+    finally{await releaseConflictGuard(leased);}
+  }
+
   async function releaseStagingTab(personaUid,slug,nonce) {
     if(typeof handoffStagingTab!=='function')return {ok:false,code:'HANDOFF_UNAVAILABLE'};
     // Release a HUMAN handoff regardless of stale protected route, but only
@@ -214,6 +232,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     observeReadOnly,
     runSupplyStep,
     runStageStep,
+    runNativeAiStep,
     inspectStageEditor,
     releaseStagingTab,
     listAvailablePersonas,
