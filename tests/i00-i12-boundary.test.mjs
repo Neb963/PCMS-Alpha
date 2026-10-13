@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {createRefresherBoundary,validateRefresherMessage,REFRESHER_ALARM} from '../src/runtime/refresher-boundary.mjs';
 import {perchanceMonitorIsolated} from '../src/runtime/perchance-monitor.mjs';
 import {createSafeReport} from '../src/ui/safe-report.mjs';
+import {cachedHealthDomain} from '../src/runtime/persona-guard.mjs';
 const sender={id:'fixture',url:'moz-extension://fixture/pcms/index.html'};
 function fixture({gate=false,dbFail=false,ackLost=false}={}){
   const callbacks={},alarms=new Map(),diag=[];let turns=0,reads=0,release;
@@ -96,6 +97,17 @@ test('I12 packaging F: static graph/guarded fixed executor/view available; no di
   for(const n of ['refresher-core.mjs','refresher-store.mjs','refresher-boundary.mjs','perchance-monitor.mjs'])assert.ok(overlay.includes(n));
   assert.match(overlay,/func:perchanceMonitorIsolated,args:\[monitoringRequest\]/);
   assert.match(overlay,/MONITOR_SESSION_CHANGED/);
-  assert.match(await readFile('src/runtime/entry.mjs','utf8'),/import '\.\/refresher-boundary\.mjs'/);
+  assert.match(await readFile('src/runtime/entry.mjs','utf8'),/import \{createRefresherBoundary\} from '\.\/refresher-boundary\.mjs'/);
+  assert.match(await readFile('src/runtime/entry.mjs','utf8'),/createRefresherBoundary\(browser\).register\(\)/);
   assert.match(await readFile('src/ui/index.html','utf8'),/refresher-view\.mjs/);
+});
+test('P54-08 X: current donor egress hashes, never route names, determine witness independence',async()=>{
+  const same=await cachedHealthDomain({ok:true,data:{ip:'203.0.113.9'}});
+  assert.equal(same,await cachedHealthDomain({ok:true,data:{ip:'203.0.113.9'}}));
+  assert.notEqual(same,await cachedHealthDomain({ok:true,data:{ip:'203.0.113.10'}}));
+  assert.equal(same.includes('203.0.113'),false);
+  assert.equal(await cachedHealthDomain({ok:false,data:{ip:'203.0.113.9'}}),null);
+  assert.equal(await cachedHealthDomain({ok:true,data:{ip:'999.0.113.9'}}),null);
+  assert.equal(await cachedHealthDomain({ok:true,data:{ip:'203.00.113.9'}}),null);
+  assert.equal(await cachedHealthDomain({ok:true,data:{ip:'::1'}}),null);
 });

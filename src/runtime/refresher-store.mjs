@@ -63,9 +63,9 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
     accountId:r.accountId,phase:r.phase,activeRemaining:r.activeRemaining,sleepRemaining:r.sleepRemaining,
     activeMs:r.activeMs,sleepMs:r.sleepMs,ordinal:r.ordinal,slot:r.slot,paused:r.paused,
     blockers:[...rowBlocks(s,r),r.readyUpdate&&'READY_UPDATE_FIRST'].filter(Boolean),
-    presence:r.presence?{...r.presence,stale:now-r.presence.observedAt>2*s.policy.recentMs}:null,
+    presence:r.presence?{...r.presence,stale:r.presence.observedAt>now||now-r.presence.observedAt>2*s.policy.recentMs}:null,
     statisticSuspended:r.metrics.suspended===true,
-    metric:r.metrics.latest?{...r.metrics.latest,stale:now-r.metrics.latest.observedAt>
+    metric:r.metrics.latest?{...r.metrics.latest,stale:r.metrics.latest.observedAt>now||now-r.metrics.latest.observedAt>
       s.policy.statsMaxMs}:null,nextStatisticAt:r.metrics.nextDueAt}));
   return {ok:true,revision:s.revision,mode:'SHADOW_ONLY',providerEffects:'OFF',items,
     total:match.length,occupied:s.rows.filter(r=>r.slot).length,
@@ -75,7 +75,7 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
       health:a.health,graceUsed:a.graceUsed})),policy:s.policy,
     recent:{observedAt:s.recent.observedAt,total:s.recent.total,complete:s.recent.complete,
       suspended:s.recent.suspended===true,
-      stale:!s.recent.observedAt||now-s.recent.observedAt>2*s.policy.recentMs},
+      stale:!s.recent.observedAt||s.recent.observedAt>now||now-s.recent.observedAt>2*s.policy.recentMs},
     nextWakeAt:s.nextWakeAt,diagnostics:{...s.diagnostics},
     timeline:s.timeline.slice(-8),clock:'EVIDENCED_ONLY',monitoring:'GATED_READ_ONLY'};
 }
@@ -199,14 +199,31 @@ export function createRefresherStore(db){
       if(metric.ok){out=metric.state;accepted=true;}
     }
     out.inflight=out.inflight.filter(x=>x.claimId!==claimId);
+    const group=packet?.group;
+    if(group?.source==='GUARDED_OVERLAP'&&group.bootId===c.bootId&&
+      Number.isSafeInteger(group.from)&&Number.isSafeInteger(group.to)&&
+      group.from>=c.startedAt&&group.to<=now&&group.to>group.from&&group.to-group.from<=30000&&
+      Array.isArray(group.accounts)&&group.accounts.length<=100&&Array.isArray(group.witnesses)){
+      const accounts=group.accounts.filter(h=>{
+        const current=out.accounts[h.accountId];
+        return current?.bindingVersion===h.bindingVersion&&current.personaUid===h.personaUid&&
+          (h.health!=='HEALTHY'||current.principalFingerprint===h.principalFingerprint);
+      });
+      const witnesses=group.witnesses.filter(w=>accounts.some(a=>a.accountId===w.accountId&&
+        a.principalFingerprint===w.principalFingerprint));
+      const proof={source:'GUARDED_OPERATIONAL_INTERVAL',id:group.id,bootId:c.bootId,
+        browserRunning:true,complete:true,from:group.from,to:group.to,accounts,witnesses};
+      const turn=advanceShadow(out,{now,bootId:c.bootId,receipt:proof});
+      if(turn.ok){out=turn.state;clockChanges.push(...turn.changes);}
+    }
     // Account/service availability is credited only over the actually
     // witnessed guarded request interval. No interpolation across ten-minute
     // polling gaps. This same path is used by the real alarm-backed observer.
     if(packet?.interval?.source==='GUARDED_MONITOR_INTERVAL'&&
       packet.interval.bootId===c.bootId&&packet.interval.from===c.startedAt&&
-      packet.interval.to===now&&now>c.startedAt&&now-c.startedAt<=30000&&
+      packet.interval.to<=now&&packet.interval.to>c.startedAt&&packet.interval.to-c.startedAt<=30000&&
       packet.principalFingerprint===c.principalFingerprint){
-      const interval={from:c.startedAt,to:now,accountId:c.accountId,
+      const interval={from:c.startedAt,to:packet.interval.to,accountId:c.accountId,
         bindingVersion:c.bindingVersion,personaUid:c.personaUid,
         health:accepted&&packet.ok?'HEALTHY':'UNKNOWN',protected:true,sessionVerified:accepted&&packet.ok===true,
         domain:isSafeId(packet.interval.domain)?packet.interval.domain:null,
@@ -218,7 +235,7 @@ export function createRefresherStore(db){
         bootId:c.bootId,browserRunning:true,complete:true,from:interval.from,to:interval.to,
         accounts:covering.filter((h,i,all)=>all.findIndex(x=>x.accountId===h.accountId)===i),
         witnesses:covering.filter(h=>h.domain).map(h=>({accountId:h.accountId,
-          domain:h.domain,result:h.providerResult,routeVerified:true,observedAt:now}))};
+          domain:h.domain,result:h.providerResult,routeVerified:true,observedAt:interval.to}))};
       const turn=advanceShadow(out,{now,bootId:c.bootId,receipt});
       if(turn.ok){out=turn.state;clockChanges=turn.changes;}
     }

@@ -3,6 +3,17 @@
 let installed = null;
 const HOLD = code => Object.freeze({ ready: false, code });
 const BAD_PROXY = new Set(['controlled_by_other_extensions', 'not_controllable']);
+export async function cachedHealthDomain(evidence){
+  // The donor already checked age, context and protected egress. Different
+  // route IDs sharing an observed exit are one witness. No new route probe,
+  // raw IP storage or network request. Unknown/noncanonical exit => no domain.
+  const ip=evidence?.data?.ip;
+  if(evidence?.ok!==true||typeof ip!=='string'||
+    !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip)||
+    !ip.split('.').every(p=>String(Number(p))===p&&Number(p)<=255))return null;
+  const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('pcms-provider-egress:'+ip));
+  return 'egress_'+Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
@@ -32,7 +43,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
       return Object.freeze({
         ready: true, code: 'GUARD_READY',
         personaUid: current.personaUid, cookieStoreId: current.cookieStoreId,
-        routeId: current.routeId
+        routeId: current.routeId,healthDomain:await cachedHealthDomain(evidence)
       });
     } catch {
       // Do not disclose thrown storage/native/route errors (potential secrets).

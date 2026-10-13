@@ -861,7 +861,10 @@ def main():
                 safe=json.loads(report_json)
                 assert safe.get('schema')=='PCMS_SAFE_DIAGNOSTIC_V1',safe
                 assert safe.get('effects')=='OFF',safe
-                assert set(safe)=={'schema','phase','effects','sections','wake'},safe
+                assert set(safe)=={'schema','phase','effects','sections','wake','refresher'},safe
+                assert set(safe['refresher'])=={'mode','mutations','turns','reads','queuePeak','readPeak','unknownIntervals','alarmHeld','code'},safe
+                assert safe['refresher']['mode']=='SHADOW_ONLY' and safe['refresher']['mutations']==0,safe
+                assert safe['refresher']['readPeak']<=2,safe
                 assert safe['sections']['canonical']=='section_unavailable'
                 diagnostic=diagnostic_zip_probe(after)
                 assert diagnostic.get('magic')==[80,75,3,4],diagnostic
@@ -1714,7 +1717,7 @@ def main():
                   const module=await import('./refresher-store.mjs');
                   const runtime=await import('./refresher-boundary.mjs');
                   const db=await journal.openCanonicalDatabase(),store=module.createRefresherStore(db);
-                  const hash='b'.repeat(64),now=Date.now(),boot='i12_packaged_synthetic_boot';
+                  const hash='b'.repeat(64),now=Date.now()+60000,boot='i12_packaged_synthetic_boot';
                   const begin=performance.now();
                   await new Promise((resolve,reject)=>{
                     const tx=db.transaction(['meta'],'readwrite'),m=tx.objectStore('meta');
@@ -1783,7 +1786,7 @@ def main():
                   const afterObservation=await store.list(now+2000,{query:'i12-b-',limit:25});
                   const absent=afterObservation.items.find(r=>r.slug==='i12-b-0001').presence;
                   const metric=afterObservation.items.find(r=>r.slug==='i12-b-0000').metric;
-                  let virtualNow=now+3000,requests=0,alarms=new Map();
+                  let virtualNow=now+3000,requests=0,sequence=0,alarms=new Map();
                   const api={runtime:{id:browser.runtime.id,getURL:browser.runtime.getURL},
                     storage:browser.storage,alarms:{create:async(n,p)=>alarms.set(n,{name:n,...p}),
                       get:async n=>alarms.get(n)}};
@@ -1794,14 +1797,15 @@ def main():
                     tx.oncomplete=resolve;tx.onabort=()=>reject(Error('observer seed aborted'));
                   });
                   const service=runtime.createRefresherBoundary(api,{open:async()=>db,
-                    clock:()=>virtualNow,newId:()=> 'i12_synthetic_service_boot',observationGate:()=>true,
-                    guard:()=>({getSafeRouteReadiness:async()=>({ready:true,cookieStoreId:'synthetic-container',routeId:'synthetic-protected'}),
+                    clock:()=>virtualNow,newId:()=> 'i12_synthetic_id_'+(++sequence),observationGate:()=>true,
+                    guard:()=>({getSafeRouteReadiness:async uid=>({ready:true,cookieStoreId:'synthetic-container-'+uid,routeId:'synthetic-protected-'+uid,healthDomain:'egress_'+uid}),
                       observeMonitoring:async(uid,request)=>{
                         requests++;virtualNow+=1000;
                         const live=(await store.read()).state;
                         const account=Object.values(live.accounts).find(a=>a.personaUid===uid);
-                        return {ok:true,complete:true,items:[{slug:'i12-b-0000',views:1207}],
-                          principalFingerprint:account.principalFingerprint};
+                        return request.kind==='RECENT'?{ok:true,complete:true,items:[{slug:'i12-b-0000',views:1207}],
+                          principalFingerprint:account.principalFingerprint}:
+                          {ok:true,views:777,unit:'VIEWS',source:'GUARDED_READ_ONLY',principalFingerprint:account.principalFingerprint};
                       }})});
                   const runtimeProof=await service.tick();
                   const runtimeState=(await store.read()).state;
@@ -1818,7 +1822,7 @@ def main():
                   done({ok:exact16===16*core.HOUR&&exact64===64*core.HOUR&&
                     firstRead.total===1250&&replay.occupied===occupied&&winners===1&&abort&&unchanged&&
                     observed.accepted&&absent.present===false&&absent.absence==='NOT_A_DELETION'&&metric.views===1200&&
-                    runtimeProof.ok&&runtimeProof.observation==='OBSERVED'&&requests===1&&
+                    runtimeProof.ok&&runtimeProof.observation==='OBSERVED'&&requests===2&&
                     runtimeState.healthIntervals.length>0&&runtimeState.diagnostics.readPeak<=2&&
                     isolated.code==='WRONG_ORIGIN'&&injection.ok===false&&activation.code==='MONITOR_ACTIVATION_HELD'&&
                     globalPause.ok&&invalid.code==='STALE_REVISION',
@@ -1845,7 +1849,7 @@ def main():
                 execute(after,"document.querySelector('#pcms-refresher-rows button').click();return true")
                 inspector=execute(after,"return {visible:!document.getElementById('pcms-refresher-inspector').hidden,selected:document.getElementById('pcms-refresher-selected').textContent}")
                 assert inspector['visible'] and 'i12-b-0000' in inspector['selected'],inspector
-                print('B I12_PACKAGED_REFREHSER_PAGING_PAUSE_INSPECTOR=PASS',flush=True)
+                print('B I12_PACKAGED_REFRESHER_PAGING_PAUSE_INSPECTOR=PASS',flush=True)
                 alarm_code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const prior=(await browser.storage.local.get('pcmsI12AlarmCount')).pcmsI12AlarmCount||0;

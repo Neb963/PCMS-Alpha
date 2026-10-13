@@ -87,37 +87,84 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     const g=guard();if(!g?.observeMonitoring)return fail('GUARDED_MONITOR_UNAVAILABLE');
     const snapshot=await s.read();if(!snapshot.ok)return snapshot;
     const now=clock(),state=snapshot.state;
-    const due=state.rows.filter(r=>!r.identityHeld&&r.ownerVerified&&!r.metrics.suspended&&r.metrics.nextDueAt<=now)
+    // Cached donor readiness only; no new route/native probe. The explicit
+    // bound limits liveness classification cost; unobserved scopes stay unknown.
+    const scopes=Object.entries(state.accounts).filter(([,a])=>a.verifiedIdentity).slice(0,100);
+    const before=new Map(await Promise.all(scopes.map(async([id,a])=>{
+      try{return [id,await g.getSafeRouteReadiness(a.personaUid)];}catch{return [id,{ready:false}];}
+    })));
+    const due=state.rows.filter(r=>!r.identityHeld&&r.ownerVerified&&!r.metrics.suspended&&
+      r.metrics.nextDueAt<=now&&before.get(r.accountId)?.ready)
       .sort((a,b)=>(b.metrics.demandUntil>now?1:0)-(a.metrics.demandUntil>now?1:0)||
         a.metrics.nextDueAt-b.metrics.nextDueAt||a.ordinal-b.ordinal);
-    const kind=!state.recent.suspended&&state.recent.nextDueAt<=now?'RECENT':'STATISTIC';
-    if(kind==='STATISTIC'&&!due.length)return {ok:true,code:'NO_OBSERVATION_DUE'};
-    const claimed=await s.claim({kind,stableId:kind==='STATISTIC'?due[0].stableId:null,
-      now,bootId,claimId:newId()});
-    if(!claimed.ok)return claimed;
-    const c=claimed.claim;
-    let packet;
-    try{
-      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
-      const before=await g.getSafeRouteReadiness(c.personaUid);
-      if(!before?.ready)packet={ok:false,code:'PROTECTED_ROUTE_UNAVAILABLE'};
-      else {
+    const claims=[];
+    if(!state.recent.suspended&&state.recent.nextDueAt<=now){
+      const accountId=scopes.find(([id])=>before.get(id)?.ready)?.[0];
+      if(accountId){const out=await s.claim({kind:'RECENT',preferredAccountId:accountId,
+        now,bootId,claimId:newId()});if(out.ok)claims.push(out.claim);}
+    }
+    for(const r of due){
+      if(claims.length>=2)break;
+      if(claims.some(c=>c.accountId===r.accountId))continue;
+      const out=await s.claim({kind:'STATISTIC',stableId:r.stableId,now:clock(),bootId,claimId:newId()});
+      if(out.ok)claims.push(out.claim);
+    }
+    if(!claims.length)return {ok:true,code:'NO_OBSERVATION_DUE'};
+    const results=await Promise.all(claims.map(async c=>{
+      let packet;
+      try{
+        if((await sentinel.inspect()).held)return {c,packet:{ok:false,code:'RESTORE_HOLD'}};
+        const first=before.get(c.accountId);
         packet=await g.observeMonitoring(c.personaUid,{kind:c.kind,
           ...(c.kind==='STATISTIC'?{slug:c.slug}:{})});
         const after=await g.getSafeRouteReadiness(c.personaUid);
-        if(!after?.ready||before.cookieStoreId!==after.cookieStoreId||before.routeId!==after.routeId)
+        if(!first?.ready||!after?.ready||first.cookieStoreId!==after.cookieStoreId||
+          first.routeId!==after.routeId||first.healthDomain!==after.healthDomain)
           packet={ok:false,code:'MONITOR_CONTEXT_CHANGED'};
         else packet={...packet,interval:{source:'GUARDED_MONITOR_INTERVAL',bootId,
-          from:c.startedAt,to:clock(),domain:before.healthDomain||null}};
-      }
-    }catch{packet={ok:false,code:'MONITOR_READ_UNAVAILABLE'};}
+          from:c.startedAt,to:clock(),domain:first.healthDomain||null}};
+      }catch{packet={ok:false,code:'MONITOR_READ_UNAVAILABLE'};}
+      return {c,packet};
+    }));
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
-    // Admission time is the observation watermark; slow stale responses must
-    // not look newer just because they arrive last.
-    const finished=clock();
-    return s.complete(c.claimId,{...packet,observedAt:c.startedAt,
-      ...(packet?.interval?{interval:{...packet.interval,to:finished}}:{})},finished);
+    const evidenced=results.filter(({c,packet:p})=>p?.interval&&
+      p.principalFingerprint===c.principalFingerprint&&
+      (p.ok||p.code==='PROVIDER_UNAVAILABLE'));
+    let group=null;
+    if(evidenced.length===2){
+      const from=Math.max(...evidenced.map(x=>x.packet.interval.from));
+      const to=Math.min(...evidenced.map(x=>x.packet.interval.to));
+      if(to>from){
+        const accounts=evidenced.map(({c,packet:p})=>({accountId:c.accountId,
+          personaUid:c.personaUid,bindingVersion:c.bindingVersion,
+          principalFingerprint:c.principalFingerprint,health:p.ok?'HEALTHY':'UNKNOWN',
+          protected:true,sessionVerified:p.ok===true}));
+        // Only an independently observed shared healthy interval can consume
+        // grace for a scoped protected-route failure. Unknown local errors
+        // and healthy scopes without current session evidence remain frozen.
+        for(const [id,a] of scopes){
+          if(accounts.some(x=>x.accountId===id))continue;
+          const old=before.get(id),current=await g.getSafeRouteReadiness(a.personaUid);
+          const known=new Set(['DIRECT_FORBIDDEN','PROTECTED_ROUTE_UNVERIFIED',
+            'PROTECTED_ROUTE_UNAVAILABLE','PERSONA_NOT_ACTIVE']);
+          if(!old?.ready&&!current?.ready&&known.has(old?.code)&&known.has(current?.code))
+            accounts.push({accountId:id,personaUid:a.personaUid,bindingVersion:a.bindingVersion,
+              principalFingerprint:a.principalFingerprint,health:'UNAVAILABLE',protected:false,sessionVerified:false});
+        }
+        group={source:'GUARDED_OVERLAP',id:newId(),bootId,from,to,accounts,
+          witnesses:evidenced.map(({c,packet:p})=>({accountId:c.accountId,
+            principalFingerprint:c.principalFingerprint,domain:p.interval.domain,
+            result:p.ok?'HEALTHY':'PROVIDER_UNAVAILABLE',routeVerified:true,observedAt:to}))};
+      }
+    }
+    const completed=[];
+    for(const {c,packet} of results)completed.push(await s.complete(c.claimId,
+      {...packet,observedAt:c.startedAt,...(group?{group}:{})},clock()));
+    const latest=completed.at(-1);
+    return {...latest,code:completed.some(r=>r.accepted)?'OBSERVED':latest.code,
+      changes:completed.flatMap(r=>r.changes||[])};
   }
+
   function tick(){
     if(turnPromise)return turnPromise;
     turnPromise=(async()=>{
@@ -126,7 +173,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         const s=await store(),now=clock(),result=await s.turn({now,bootId});
         if(!result.ok){await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return result;}
         await schedule(result.state.nextWakeAt);
-        // One bounded read per turn. Shared persistent quota/coalescing spans
+        // At most two protected reads per turn. Persistent quota/coalescing spans
         // all wake sources and both recent-list/statistics request classes.
         const observed=await observe(s);
         await notifyChanges(result);await notifyChanges(observed);
@@ -167,7 +214,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     if(registered)return;
     // Never await anything before these listener registrations.
     api.alarms.onAlarm.addListener(alarm=>{
-      if(alarm?.name===REFRESHER_ALARM)void alarmReceipt().then(()=>tick());
+      if(alarm?.name===REFRESHER_ALARM){void alarmReceipt();void tick();}
     });
     api.runtime.onStartup.addListener(()=>void tick());
     api.runtime.onInstalled.addListener(()=>void tick());
@@ -186,4 +233,5 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
   }
   return Object.freeze({register,tick,run});
 }
-if(typeof browser!=='undefined')createRefresherBoundary(browser).register();
+// Entry owns the single registration. Importing this factory for packaged
+// tests or another extension page must never create a second controller.

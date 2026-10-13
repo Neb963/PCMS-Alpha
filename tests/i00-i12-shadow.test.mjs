@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {emptyShadow,reconcileShadow,advanceShadow,observeCapacity,effectiveCapacity,
-  claimObservation,applyStatistic,classifyProvider,HOUR,MINUTE} from '../src/runtime/refresher-core.mjs';
+  claimObservation,applyStatistic,classifyProvider,HOUR,MINUTE,validatePolicy,DEFAULT_POLICY} from '../src/runtime/refresher-core.mjs';
 import {canonicalRefresherInputs} from '../src/runtime/refresher-store.mjs';
 const boot='browser_boot_01',hash='b'.repeat(64),at=100000;
 function fleet(n=1000,accounts=50){
@@ -174,6 +174,16 @@ test('I12 canonical seam: PUBLIC inventory, manual owner override and unconfirme
     sourceFingerprint:hash,principalFingerprint:hash,observedAt:at,observationId:'observation_test'};
   records.push({key:'release:test-gen',release});assert.equal(canonicalRefresherInputs(records)[0].releaseVerified,true);
   account.state='OVERRIDDEN';assert.equal(canonicalRefresherInputs(records)[0].releaseVerified,false);
+});
+test('I12 X: policy prototype keys and fake protected interval cannot persist secrets or credit time',()=>{
+  for(const k of ['constructor','__proto__','token']){
+    const extra=JSON.parse('{"'+k+'":{"secret":"canary"}}');
+    assert.equal(validatePolicy({...DEFAULT_POLICY,...extra}).ok,false);
+  }
+  let {s}=fleet(2,2);s.rows[0].phase='ACTIVE';s.rows[0].slot=true;
+  const e=receipt(s,at,at+HOUR);e.accounts[0].protected=false;
+  s=advanceShadow(s,{now:at+HOUR,bootId:boot,receipt:e}).state;
+  assert.equal(s.rows[0].activeRemaining,24*HOUR);
 });
 test('I12 F/X 50-account/1250-generator measured fixture: stable bounded queue and evidence state; no production SLO claim',()=>{
   const start=performance.now(),before=process.memoryUsage().heapUsed;

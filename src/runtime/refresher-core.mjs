@@ -188,12 +188,15 @@ export function advanceShadow(s,{now,bootId,receipt=null}={}){
     (!out.lastTurnAt||now>=out.lastTurnAt)){
     const e=receipt,provider=classifyProvider(e.witnesses,e.to);
     if(provider.observedAt>=out.provider.observedAt&&
-      (out.provider.state!=='OUTAGE'||provider.state==='HEALTHY'||provider.state==='OUTAGE'))
+      (['HEALTHY','OUTAGE'].includes(provider.state)||
+        (out.provider.state!=='OUTAGE'&&
+          (out.provider.state!=='HEALTHY'||provider.observedAt-out.provider.observedAt>MINUTE))))
       out.provider=provider;
     reason=provider.state==='OUTAGE'?'PROVIDER_OUTAGE':'EVIDENCED_INTERVAL';
     const health=new Map(e.accounts.map(a=>[a.accountId,a]));
     for(const [id,a] of Object.entries(out.accounts)){
       const h=health.get(id),matched=h?.bindingVersion===a.bindingVersion&&h.personaUid===a.personaUid;
+      if(!h)continue;
       const interval=Math.max(0,e.to-Math.max(e.from,a.checkpoint));
       if(!interval)continue;
       a.checkpoint=e.to;
@@ -211,6 +214,8 @@ export function advanceShadow(s,{now,bootId,receipt=null}={}){
     for(const r of out.rows){
       const delta=Math.max(0,e.to-Math.max(e.from,r.checkpoint,r.admittedAt||0));
       if(!delta){out.diagnostics.replayedIntervals++;continue;}
+      const h=health.get(r.accountId);
+      if(h?.health!=='HEALTHY'||h.bindingVersion!==r.bindingVersion||h.personaUid!==r.personaUid)continue;
       r.checkpoint=e.to;
       if(rowBlocks(out,r).length||r.phase==='WAITING')continue;
       let remaining=delta;
@@ -285,11 +290,12 @@ export function applyStatistic(s,claim,sample,now){
   r.metrics.nextDueAt=now+interval;
   return {ok:true,state:out};
 }
-export function claimObservation(s,{kind,stableId=null,now,bootId,claimId}={}){
+export function claimObservation(s,{kind,stableId=null,now,bootId,claimId,preferredAccountId=null}={}){
   if(!validShadow(s)||!['RECENT','STATISTIC'].includes(kind)||!stamp(now)||
     !isSafeId(bootId)||!isSafeId(claimId))return fail('INVALID_OBSERVATION_CLAIM');
   const out=structuredClone(s);
   if(out.inflight.length>=2)return fail('READ_BACKPRESSURE');
+  if(out.inflight.some(c=>c.claimId===claimId))return fail('OBSERVATION_ID_REUSED');
   if(now<out.readWindow.start||now-out.readWindow.start>=out.policy.recentMs)
     out.readWindow={start:now,used:0};
   if(out.readWindow.used>=out.policy.readBudget)return fail('SHARED_READ_BUDGET');
@@ -300,7 +306,7 @@ export function claimObservation(s,{kind,stableId=null,now,bootId,claimId}={}){
   if(kind==='STATISTIC'&&(!r||r.identityHeld||!r.ownerVerified||r.metrics.suspended||r.metrics.nextDueAt>now||
     out.inflight.some(c=>c.stableId===stableId||c.accountId===r.accountId)))
     return fail('STATISTIC_NOT_DUE');
-  const accountId=r?.accountId||Object.entries(out.accounts).find(([id,a])=>
+  const accountId=r?.accountId||preferredAccountId||Object.entries(out.accounts).find(([id,a])=>
     a.verifiedIdentity&&!out.inflight.some(c=>c.accountId===id))?.[0];
   const a=out.accounts[accountId];
   if(!a||!a.verifiedIdentity)return fail('ACCOUNT_UNAVAILABLE');

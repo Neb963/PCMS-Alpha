@@ -25,4 +25,5 @@ import './ai-boundary.mjs';
 // I11 Git-only revision-safe writeback (capability OFF by default).
 import './writeback-boundary.mjs';
 // I12 one durable shadow queue/alarm; provider observations gated OFF.
-import './refresher-boundary.mjs';
+import {createRefresherBoundary} from './refresher-boundary.mjs';
+if(typeof browser!=='undefined')createRefresherBoundary(browser).register();
