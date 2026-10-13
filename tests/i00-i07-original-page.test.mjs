@@ -5,7 +5,7 @@ import {perchanceReadIsolated} from '../src/runtime/perchance-observer.mjs';
 
 test('P52-03 F: guarded original source reads committed full PJS, HTML and src bytes without effects',async()=>{
   const old={location:globalThis.location,localStorage:globalThis.localStorage,
-    fetch:globalThis.fetch,crypto:globalThis.crypto};
+    fetch:globalThis.fetch};
   const user={loggedIn:true,email:'user@example.test',sessionToken:'secret-token-123'};
   const raw=JSON.stringify({user});
   const key='a'.repeat(32)+'.png';
