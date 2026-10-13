@@ -29,7 +29,7 @@ function controls(){
     token.value.length<10;
   clear.disabled=busy;
   refresh.disabled=busy;
-  start.disabled=busy||!found||selected.state!=='PINNED';
+  start.disabled=busy||!found||selected.state!=='PINNED'||token.value.length<10;
   reconcile.disabled=busy||!found||
     !['DISPATCH_POSSIBLE','HELD_UNCERTAIN','SAVED_UNVERIFIED'].includes(selected.state);
   handoff.disabled=busy||!found||selected.state==='HUMAN_OWNED'||
@@ -103,9 +103,12 @@ pin.addEventListener('click',()=>{
   invoke('PIN_STAGE',{slug:slug.value,token:t},
     'Rechecking Git HEAD/READY, current protected owner and empty private source…');
 });
-start.addEventListener('click',()=>selected&&invoke('STAGE_PRIVATE',{
-  slug:selected.slug,expectedRevision:selected.revision
-},'Checking guard and durable stage intent. Provider activation is normally held…'));
+start.addEventListener('click',()=>{if(!selected)return;
+  const t=token.value;token.value='';
+  invoke('STAGE_PRIVATE',{slug:selected.slug,token:t,
+    expectedRevision:selected.revision},
+    'Revalidating current READY, guard and durable stage intent; activation normally held…');
+});
 reconcile.addEventListener('click',()=>selected&&invoke('RECONCILE_STAGE',{
   slug:selected.slug,expectedRevision:selected.revision
 },'Independent guarded saved-byte readback, no remote retry…'));
