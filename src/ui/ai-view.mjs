@@ -7,6 +7,7 @@ const configStatus=id('pcms-ai-config-status'),historyHost=id('pcms-ai-prompt-hi
 const slug=id('pcms-ai-slug'),token=id('pcms-ai-git-token'),prepare=id('pcms-ai-prepare');
 const refresh=id('pcms-ai-refresh'),jobStatus=id('pcms-ai-jobs-status'),jobList=id('pcms-ai-job-list');
 const runNative=id('pcms-ai-run'),observeNative=id('pcms-ai-observe'),
+  testNative=id('pcms-ai-test'),
   resetNative=id('pcms-ai-newchat'),chat2Native=id('pcms-ai-chat2');
 let current=null,busy=false,queueSeq=0,selectedJob=null;
 function request(portName,type,params={}){
@@ -33,6 +34,7 @@ function controls(){
   runNative.disabled=busy||!selected||selectedJob.state!=='PENDING_NATIVE_SESSION';
   observeNative.disabled=busy||!selected||
     !['HELD_RECONCILE','TESTS_UNVERIFIED','KNOWN_FAILURE'].includes(selectedJob.state);
+  testNative.disabled=busy||!selected||selectedJob.state!=='TESTS_UNVERIFIED';
   resetNative.disabled=busy||!selected||
     selectedJob.evidence?.chat1Pass!==true;
   chat2Native.disabled=busy||!selected||
@@ -160,6 +162,7 @@ async function nativeCommand(type,step){
 }
 runNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT1_SEND'));
 observeNative.addEventListener('click',()=>nativeCommand('PROBE_NATIVE'));
+testNative.addEventListener('click',()=>nativeCommand('RUN_TESTS'));
 resetNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT2_RESET'));
 chat2Native.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT2_SEND'));
 prepare.addEventListener('click',prepareJob);
