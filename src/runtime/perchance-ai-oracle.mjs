@@ -36,8 +36,21 @@ export function perchanceAiPreviewCheck(slug,name){
     const visible=el=>{
       if(!el||typeof el.getClientRects!=='function'||
          el.getClientRects().length===0)return false;
-      const aria=el.closest?.('[hidden],[aria-hidden="true"]');
-      return !aria;
+      if(el.closest?.('[hidden],[aria-hidden="true"]'))return false;
+      // A bounding rectangle alone does not prove visibility: opacity:0
+      // and visibility:hidden retain layout boxes. Include ancestors.
+      if(typeof page.defaultView?.getComputedStyle!=='function')
+        throw Error('PREVIEW_CSS_UNOBSERVABLE');
+      let ancestor=el,depth=0;
+      while(ancestor&&depth++<64){
+        const style=page.defaultView.getComputedStyle(ancestor);
+        if(!style)throw Error('PREVIEW_CSS_UNOBSERVABLE');
+        if(style.display==='none'||style.visibility==='hidden'||
+           style.visibility==='collapse'||Number(style.opacity)===0)
+          return false;
+        ancestor=ancestor.parentElement;
+      }
+      return !ancestor;
     };
     const any=(selector,predicate=()=>true)=>
       [...page.querySelectorAll(selector)].some(el=>visible(el)&&predicate(el));
