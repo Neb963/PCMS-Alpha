@@ -257,8 +257,11 @@ export function createAiStore(db){
         const step=j.native.step,digest=observation.sessionDigest;
         let state;
         if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR'].includes(step)){
+          // One static native greeting is *not* evidence that an armed
+          // SEND actually entered the conversation. Require a separate
+          // native message row before accepting a session/idle receipt.
           if(!digest||!Number.isSafeInteger(observation.chatEntries)||
-             observation.chatEntries<1||
+             observation.chatEntries<2||
              (step.endsWith('REPAIR')?
                digest!==j.native.previousSessionDigest:
                digest===j.native.previousSessionDigest))
