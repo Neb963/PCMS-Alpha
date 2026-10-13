@@ -64,6 +64,17 @@ function draw(items) {
     sourcePick.addEventListener('click',()=>window.dispatchEvent(
       new CustomEvent('pcms-source-target',{detail:{slug:item.slug,revision:item.revision}})));
     first.append(sourcePick);
+    const adoptPick=document.createElement('button');
+    adoptPick.type='button';adoptPick.textContent='Adopt';
+    adoptPick.disabled=item.ownerState!=='OBSERVED_OWNER' ||
+      !['PUBLIC','UNLISTED'].includes(item.visibility);
+    adoptPick.setAttribute('aria-label','Adopt existing generator '+item.slug);
+    adoptPick.addEventListener('click',()=>window.dispatchEvent(
+      new CustomEvent('pcms-adoption-target',{detail:{
+        slug:item.slug,revision:item.revision,ownerState:item.ownerState,
+        visibility:item.visibility
+      }})));
+    first.append(document.createTextNode(' '),adoptPick);
     cells.push(first);
     for(const value of [item.accountId, labels[item.ownerState]||'Evidence unknown',
        (item.visibility||'UNKNOWN')+' · '+(item.source||'SOURCE_PENDING')]) {

@@ -13,7 +13,7 @@
     <header class="topbar">
       <button class="menu" type="button" id="menu" aria-expanded="false" aria-controls="navigation">Menu</button>
       <div class="identity"><strong>PCMS</strong><span>Alpha</span></div>
-      <span class="phase">I06 · Frozen slug supply · Provider writes HELD</span>
+      <span class="phase">I07 · Existing-source adoption · Provider writes HELD</span>
       <a class="advanced" href="../options/options.html" id="advanced">PersonaMonkey advanced controls <span aria-hidden="true">↗</span></a>
     </header>
     <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
@@ -47,7 +47,7 @@
           <p id="pcms-inventory-feedback" role="status" aria-live="polite">Loading local observations. No current ownership inferred.</p>
           <div class="table-wrap" role="region" aria-label="Generator inventory results" tabindex="0"><table><thead><tr><th scope="col">Generator</th><th scope="col">Account binding</th><th scope="col">Owner evidence</th><th scope="col">Visibility / source</th></tr></thead><tbody id="pcms-generators-rows"><tr><td colspan="4" class="empty">Loading canonical inventory.</td></tr></tbody></table></div>
           <div class="account-controls"><span id="pcms-generator-count" role="status">No verified rows</span><button type="button" id="pcms-generator-prev" disabled>Previous page</button><button type="button" id="pcms-generator-next" disabled>Next page</button></div>
-          <p id="blocked-generators" class="reason">Reservation, adoption and provider writes are disabled. Read-only Sync uses the existing donor-guarded isolated browser observer and can hold on an unavailable or changed session. Edit keys and collaboration cannot prove ownership; historical observations never authorize writes. Missing generator observations never mean deletion.</p></section>
+          <p id="blocked-generators" class="reason">Reservation and provider writes remain held; existing-generator original-source adoption is available with guarded readback. Read-only Sync uses the existing donor-guarded isolated browser observer and can hold on an unavailable or changed session. Edit keys and collaboration cannot prove ownership; historical observations never authorize writes. Missing generator observations never mean deletion.</p></section>
         <section class="panel" aria-labelledby="pcms-supply-heading">
           <div class="panel-head"><h2 id="pcms-supply-heading">Slug supply — canonical plan</h2><span class="unknown">Local freeze only · Provider held</span></div>
           <p class="reason">Paste one exact generator slug per line (up to 100). Preview preserves order and spelling. Freezing records the requests for a verified Persona-bound account in IndexedDB; it does not create, rename, reserve remotely, or write to private Git. Existing and conflicting local slugs are rejected per item.</p>
@@ -59,6 +59,23 @@
           <div class="account-controls"><button type="button" id="pcms-supply-preview">Preview exact batch</button><button type="button" id="pcms-supply-freeze" disabled>Freeze locally</button></div>
           <p id="pcms-supply-feedback" role="status" aria-live="polite">Provider create/rename and Git folder writes are held until separately proven capability activation.</p>
           <div class="table-wrap" role="region" aria-label="Supply preview and item receipts" tabindex="0"><table><thead><tr><th scope="col">Item</th><th scope="col">Requested slug</th><th scope="col">Canonical state</th><th scope="col">Reason</th></tr></thead><tbody id="pcms-supply-items"><tr><td colspan="4">No batch preview.</td></tr></tbody></table></div>
+        </section>
+        <section class="panel" aria-labelledby="pcms-adopt-heading">
+          <div class="panel-head"><h2 id="pcms-adopt-heading">Adopt an existing owned generator</h2><span class="unknown">Original source · Local immutable baseline</span></div>
+          <p class="reason">Choose “Adopt” in the inventory. A public generator requires explicit one-time consent. The donor-guarded read-only observer obtains two matching original-source byte readbacks. No live code, listing, source association or release is changed. Nonempty assets without independently verified bytes are held.</p>
+          <div class="account-controls"><label for="pcms-adopt-name">Selected generator</label><input id="pcms-adopt-name" readonly placeholder="Choose from owned inventory"></div>
+          <p id="pcms-adopt-visibility" class="reason">No source target selected.</p>
+          <label><input type="checkbox" id="pcms-adopt-consent" disabled> I authorize enrollment of this existing public generator for future guarded management (not publication or overwrite).</label>
+          <div class="account-controls"><button type="button" id="pcms-adopt-capture" disabled>Capture and preserve original</button><button type="button" id="pcms-adopt-local-archive" disabled>Archive local adoption · retain original</button></div>
+          <div class="account-controls">
+            <label for="pcms-adopt-git-token">Private Git archive write token (not stored)</label>
+            <input id="pcms-adopt-git-token" type="password" autocomplete="off" spellcheck="false" placeholder="Fine-grained Contents write; entered only when needed">
+            <button type="button" id="pcms-adopt-git-clear">Clear token</button>
+            <button type="button" id="pcms-adopt-git-write" disabled>Archive original to private Git</button>
+            <button type="button" id="pcms-adopt-git-recheck" disabled>Reconcile Git archive read-only</button>
+            <button type="button" id="pcms-adopt-git-cancel" disabled>Cancel pre-dispatch archive</button>
+          </div>
+          <p id="pcms-adopt-status" role="status" aria-live="polite">Adoption not started. Git original archive pending; release and provider writes held.</p>
         </section>
         <section class="panel" aria-labelledby="pcms-source-heading">
           <div class="panel-head"><h2 id="pcms-source-heading">Private Git source — read only</h2><span class="unknown">Operator-triggered</span></div>
@@ -80,6 +97,7 @@
       <section class="workspace" id="view-work-queue" data-view="work-queue" aria-labelledby="heading-work-queue" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 03</p><h1 id="heading-work-queue" tabindex="-1">Work Queue</h1><p>Evidence-backed operator decisions and task receipts.</p></div><button type="button" disabled aria-describedby="blocked-work-queue">Start action</button></header>
         <section class="panel"><div class="panel-head"><h2>Operations</h2><span class="unknown">Read-only</span></div><p id="pcms-work-queue-summary" role="status">Loading canonical journal status. Unknown outcomes must be reconciled, not repeated.</p><p id="blocked-work-queue" class="reason">Provider effects are held. Frozen local supply receipts may be inspected; this screen cannot dispatch, approve or replay an uncertain remote operation.</p></section>
+        <section class="panel" aria-labelledby="pcms-adoption-queue-title"><div class="panel-head"><h2 id="pcms-adoption-queue-title">Existing-source adoption receipts</h2><span class="unknown">Local originals · Git archive pending</span></div><div id="pcms-adopt-receipts" role="status" aria-live="polite">Loading adoption history.</div></section>
         <section class="panel" aria-labelledby="pcms-supply-queue-title"><div class="panel-head"><h2 id="pcms-supply-queue-title">Frozen supply batches</h2><span class="unknown">Canonical local receipts</span></div><div id="pcms-supply-queue" role="status" aria-live="polite">Loading local batches.</div></section>
       </section>
       <section class="workspace" id="view-accounts" data-view="accounts" aria-labelledby="heading-accounts" hidden>
@@ -120,5 +138,6 @@
   <script type="module" src="inventory-view.mjs"></script>
   <script type="module" src="source-view.mjs"></script>
   <script type="module" src="supply-view.mjs"></script>
+  <script type="module" src="adoption-view.mjs"></script>
 </body>
 </html>

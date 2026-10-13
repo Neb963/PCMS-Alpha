@@ -127,6 +127,18 @@ def supply_command(session, command):
                 {'script':script.replace('COMMAND',json.dumps(command)),'args':[]},timeout=30)
 
 
+
+def adoption_command(session,command):
+    # Actual installed same-XPI trusted I07 port; no live provider calls.
+    script = '''const done=arguments[arguments.length-1];
+    const port=browser.runtime.connect({name:'pcms-i07-adoption'});
+    port.onMessage.addListener(value=>{try{port.disconnect()}catch(e){}done(value)});
+    port.onDisconnect.addListener(()=>done({error:'adoption-disconnected'}));
+    port.postMessage(COMMAND);'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script.replace('COMMAND',json.dumps(command)),'args':[]},timeout=30)
+
+
 def supply_isolated_wrong_origin(session):
     script = '''const done=arguments[arguments.length-1];
     (async()=>{
@@ -193,6 +205,65 @@ def supply_effect_idb_probe(session):
     return call('POST',f'/session/{session}/execute/async',
                 {'script':script,'args':[]},timeout=60)
 
+
+
+def adoption_idb_probe(session):
+    # B: real packaged Firefox extension and real persistent IndexedDB.
+    # All Perchance and Git responses are explicit synthetic fixtures;
+    # no live identity, credentials, provider writes or Git operations.
+    script = '''const done=arguments[arguments.length-1];
+    (async()=>{
+      const {createAdoptionBoundary}=await import('./adoption-boundary.mjs');
+      const {createAdoptionStore}=await import('./adoption-store.mjs');
+      const {openCanonicalDatabase}=await import('./journal.mjs');
+      const api={runtime:browser.runtime,storage:browser.storage};
+      const sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')+'#generators'};
+      const slug='gen-0999',principal='a'.repeat(64),trace=[];
+      const original={ownerResult:'IS_OWNER',visibility:'UNLISTED',
+        remotePublicId:'public_fixture_0001',pjs:'// archived original',
+        html:'<main>Original</main>',assets:[]};
+      const guard={
+        getSafeRouteReadiness:async()=>({
+          ready:true,personaUid:'persona-fixture-0001',
+          cookieStoreId:'fixture-only',routeId:'fixture-protected'}),
+        observeReadOnly:async()=>{trace.push('ORIGINAL_READ');
+          return {ok:true,principalFingerprint:principal,original};}
+      };
+      const db=await openCanonicalDatabase();
+      const store=createAdoptionStore(db);
+      const boundary=createAdoptionBoundary(api,{guard:()=>guard,
+        gitGate:()=>true,
+        gitWrite:async ({folder,original:preserved})=>{
+          const onDisk=await store.getFull(slug);
+          if(onDisk.record?.archiveState!=='DISPATCH_POSSIBLE')
+            throw Error('Missing durable Git dispatch marker');
+          if(preserved.fingerprint!==onDisk.record.original.fingerprint)
+            throw Error('Source bytes changed before fake Git dispatcher');
+          trace.push('FAKE_GIT_AFTER_DURABLE_MARKER');
+          return {ok:true,source:'INDEPENDENT_GIT_BYTE_READBACK',ready:false,
+            prefix:'originals/'+slug+'/'+preserved.fingerprint,folder,
+            head:'f'.repeat(40)};
+        }});
+      const cmd=(type,params)=>boundary.run({type,params},sender);
+      const adopted=await cmd('CAPTURE_ADOPTION',{
+        slug,expectedRevision:1,explicitPublicConsent:false});
+      const listing=await cmd('GET_ADOPTION',{slug});
+      const held=await createAdoptionBoundary(api,{guard:()=>guard}).run({
+        type:'ARCHIVE_GIT',params:{slug,expectedRevision:adopted.revision,
+          token:'synthetic-git-token-01'}},sender);
+      const git=await cmd('ARCHIVE_GIT',{slug,
+        expectedRevision:adopted.revision,token:'synthetic-git-token-01'});
+      const protectedResult=await cmd('GET_ADOPTION',{slug});
+      const tombstone=await cmd('ARCHIVE_LOCAL',{slug,
+        expectedRevision:protectedResult.revision});
+      const after=await cmd('GET_ADOPTION',{slug});
+      const rejected=await cmd('ARCHIVE_GIT',{slug,
+        expectedRevision:after.revision,token:'synthetic-git-token-01'});
+      db.close();
+      done({adopted,listing,held,git,protectedResult,tombstone,after,rejected,trace});
+    })().catch(e=>done({error:'I07_IDB_PROBE_FAILED',detail:String(e).slice(0,200)}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=70)
 
 def source_idb_probe(session):
     # A real packaged Firefox IDB transaction with an injected synthetic Git
@@ -656,6 +727,34 @@ def main():
                 print('B I06_REAL_IDB_FAKE_PROVIDER_AND_GIT_SEPARATE_MARKERS=PASS',flush=True)
 
 
+
+                live_adoption_port=adoption_command(after,{'type':'LIST_ADOPTIONS'})
+                assert live_adoption_port.get('ok') is True,live_adoption_port
+                assert live_adoption_port.get('items')==[],live_adoption_port
+                # I07: real packaged Firefox IndexedDB and guarded original
+                # readback using only injected non-effecting synthetic origins.
+                archive_probe=adoption_idb_probe(after)
+                assert archive_probe.get('adopted',{}).get('ok') is True,archive_probe
+                assert archive_probe.get('adopted',{}).get('archive')=='ARCHIVE_PENDING',archive_probe
+                assert archive_probe.get('listing',{}).get('originalFiles')==2,archive_probe
+                assert archive_probe.get('held',{}).get('code')=='GIT_WRITE_ACTIVATION_HELD',archive_probe
+                assert archive_probe.get('git',{}).get('archive')=='ARCHIVED_GIT_CONFIRMED',archive_probe
+                assert archive_probe.get('protectedResult',{}).get('archive')=='ARCHIVED_GIT_CONFIRMED',archive_probe
+                assert archive_probe.get('after',{}).get('archived') is True,archive_probe
+                assert archive_probe.get('rejected',{}).get('code')=='TOMBSTONE_HELD',archive_probe
+                assert archive_probe.get('trace')==[
+                    'ORIGINAL_READ','ORIGINAL_READ','FAKE_GIT_AFTER_DURABLE_MARKER'],archive_probe
+                assert '// archived original' not in json.dumps(archive_probe),archive_probe
+                real_adoption=adoption_command(after,{'type':'GET_ADOPTION',
+                    'params':{'slug':'gen-0999'}})
+                assert real_adoption.get('archived') is True,real_adoption
+                assert real_adoption.get('originalFiles')==2,real_adoption
+                assert '// archived original' not in json.dumps(real_adoption),real_adoption
+                controls=execute(after,"return {capture:document.getElementById('pcms-adopt-capture')?.disabled,"
+                    "receipts:!!document.getElementById('pcms-adopt-receipts'),"
+                    "consent:document.getElementById('pcms-adopt-consent')?.disabled}")
+                assert controls=={'capture':True,'receipts':True,'consent':True},controls
+                print('B I07_PACKAGED_ORIGINAL_IDB_GIT_MARKER_TOMBSTONE_SYNTHETIC=PASS',flush=True)
 
                 # I05: real permanently installed XPI source port and canonical
                 # association; synthetic inspection only, zero private Git reads.
