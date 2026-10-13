@@ -85,7 +85,10 @@ export async function perchanceReadIsolated({identityOnly=false,originalSlug=nul
         manifest&&typeof manifest==='object'&&!Array.isArray(manifest)&&
         Object.keys(manifest).length===0;
       if(!empty)return denied('ORIGINAL_ASSET_BYTES_UNVERIFIED');
-      if(!sameSession())return denied('SESSION_CHANGED');
+      if(localStorage.getItem('sessionTokenLastChangeTime')!==startChange ||
+         localStorage.getItem('app-storage')!==raw ||
+         location.origin!=='https://perchance.org')
+        return denied('SESSION_CHANGED');
       return {ok:true,principalFingerprint,original:{
         remotePublicId:'public_'+page.generator.publicId,
         ownerResult:'IS_OWNER',visibility:listed[0].isPrivate?'UNLISTED':'PUBLIC',
