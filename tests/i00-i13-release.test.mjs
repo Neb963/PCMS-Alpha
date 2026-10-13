@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
+import {spawnSync} from 'node:child_process';
 import {exactSource} from '../src/runtime/staging-core.mjs';
 import {releaseContext,releaseTestContext,candidateManifest,releaseGitContext,
   existingUpdateAdmission,approvalTuple,matchesApproval,publicationReadback,
@@ -162,4 +163,20 @@ test('I13 F: assembled XPI imports fixed guard release adapter and shows no gene
   assert.match(overlay,/RELEASE_PROTECTED_ROUTE_CHANGED/);
   assert.match(guard,/acquireConflictGuard\(personaUid\)/);
   assert.match(guard,/runReleaseStep/);
+});
+
+test('I13 startup B-preflight: all release modules ship in combined XPI; entry parses',async()=>{
+  const overlay=await readFile('src/runtime/overlay.mjs','utf8');
+  const entry=await readFile('src/runtime/entry.mjs','utf8');
+  for(const name of ['release-core.mjs','release-store.mjs',
+    'release-boundary.mjs','perchance-release.mjs'])
+    assert.match(overlay,new RegExp("'"+name.replaceAll('.','\\.')+"'"));
+  assert.match(entry,/import '\.\/release-boundary\.mjs';/);
+  assert.equal(entry.includes('\\nimport'),false);
+  for(const file of ['src/runtime/entry.mjs','src/runtime/release-core.mjs',
+    'src/runtime/release-store.mjs','src/runtime/release-boundary.mjs',
+    'src/runtime/perchance-release.mjs']){
+    const parsed=spawnSync(process.execPath,['--check',file],{encoding:'utf8'});
+    assert.equal(parsed.status,0,file+': '+parsed.stderr);
+  }
 });
