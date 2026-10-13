@@ -51,7 +51,7 @@ test('I10 F background alarm tick is bounded, oldest first and protected route d
       return {ok:true,record:{slug,state:'SOURCE_VERIFIED',revision:1,
         personaUid:'persona',routeId:'protected'}};
     }}),
-    guard:()=>({getSafeRouteReadiness:async()=>{
+    guard:()=>({runNativeAiStep:async()=>{throw Error('MUST_NOT_DISPATCH')},getSafeRouteReadiness:async()=>{
       routeReads++;return {ready:false,code:'PROTECTED_ROUTE_UNVERIFIED'};
     }})
   });
