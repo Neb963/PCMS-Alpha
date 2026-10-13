@@ -49,8 +49,11 @@ test('P52-06 X: a failed prior end and distinct next SID can share one OPFS work
   r.dispatchSend(S2,{reuseWorkspace:true});
   assert.equal(r.isolated(S1,S2),false);
   assert.equal(r.sessions.get(S1).open,true);
-  assert.equal(planAiStep(job({state:'CHAT2_OBSERVED_IDLE',
-    sessionDigest:S2})).code,'AI_CHAT2_ISOLATION_UNVERIFIED');
+  const next=planAiStep(job({state:'CHAT2_OBSERVED_IDLE',
+    sessionDigest:S2}));
+  assert.equal(next.type,'VERIFY_FRESH_CHAT2');
+  assert.equal(next.effect,'GATED_READ_ONLY_HISTORY');
+  assert.equal(next.step,undefined);
 });
 test('P52-06 X: end accepted without ACK and genuine separate workspace also stays held',()=>{
   const r=new RemoteLedger();
@@ -59,8 +62,11 @@ test('P52-06 X: end accepted without ACK and genuine separate workspace also sta
   assert.equal(r.isolated(S1,S2),true);
   // This independent oracle is available ONLY to the fake: the deployed
   // extension cannot infer these server facts from a native chat transcript.
-  assert.equal(planAiStep(job({state:'CHAT2_OBSERVED_IDLE',
-    sessionDigest:S2})).code,'AI_CHAT2_ISOLATION_UNVERIFIED');
+  const next=planAiStep(job({state:'CHAT2_OBSERVED_IDLE',
+    sessionDigest:S2}));
+  assert.equal(next.type,'VERIFY_FRESH_CHAT2');
+  assert.equal(next.effect,'GATED_READ_ONLY_HISTORY');
+  assert.equal(next.step,undefined);
 });
 test('P52-06 X: cancelled native new-chat modal cannot authorize Chat2 Send',()=>{
   const r=new RemoteLedger();r.dispatchSend(S1);
