@@ -171,9 +171,14 @@ async function nativeCommand(type,step){
     const answer=await ai(type,{slug:name,expectedRevision:revision,
       ...(step?{step}:{})});
     // A send response itself never proves remote state, even if acknowledged.
+    const opfs=type==='INSPECT_WORKSPACE'&&answer?.ok?
+      ' · Current OPFS workspace root: '+
+      (answer.workspaceRootState==='PRESENT_UNTRUSTED'?
+        'present (not independently verified)':'absent/unknown')+
+      ' · server/worker isolation UNVERIFIED':'';
     jobStatus.textContent=(answer?.code||
       (answer?.ok?'Canonical observation recorded':'AI_OUTCOME_UNKNOWN'))+
-      ' · '+(answer?.tests||'no independent test PASS claimed');
+      ' · '+(answer?.tests||'no independent test PASS claimed')+opfs;
   }catch{
     jobStatus.textContent='Native command disconnected. Effect may have occurred; do not retry before independent reconciliation.';
   }finally{
