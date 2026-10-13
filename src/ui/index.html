@@ -145,6 +145,30 @@
           <p id="pcms-writeback-status" role="status" aria-live="polite">No writeback prepared; publication and remote Git write remain OFF.</p>
           <div id="pcms-writeback-diff" role="region" class="table-wrap" tabindex="0" aria-label="Full source add, change and delete diff"></div>
         </section>
+        <section class="panel" aria-labelledby="pcms-existing-heading">
+          <div class="panel-head"><h2 id="pcms-existing-heading">I13 · Existing public source recovery and update</h2><span class="unknown">All provider mutations gated OFF</span></div>
+          <p class="reason">Each generator must have archived original bytes, verified ownership, a sleeping I12 slot and an independent source baseline. The operator passphrase encrypts and verifies the previous-good full P locally; only a separately confirmed unlisting permits source staging. Never overwrite a human editor, repeat an ambiguous remote effect or republish a restored P.</p>
+          <div class="account-controls">
+            <label for="pcms-existing-slug">Existing generator slug</label><input id="pcms-existing-slug" maxlength="100" autocomplete="off" spellcheck="false" placeholder="generator">
+            <label for="pcms-existing-passphrase">Local recovery passphrase (not retained)</label><input id="pcms-existing-passphrase" type="password" autocomplete="off">
+            <label for="pcms-existing-token">Private Git read credential (not retained)</label><input id="pcms-existing-token" type="password" autocomplete="off">
+          </div>
+          <div class="account-controls">
+            <button id="pcms-existing-get" type="button" disabled>Load canonical state</button>
+            <button id="pcms-existing-prepare" type="button" disabled>Prepare encrypted previous P</button>
+            <button id="pcms-existing-unlist" type="button" disabled>Unlist public P (held until activation)</button>
+            <button id="pcms-existing-recheck-unlist" type="button" disabled>Verify P unlisted (read-only)</button>
+            <button id="pcms-existing-pin-stage" type="button" disabled>Pin current READY source</button>
+            <button id="pcms-existing-stage" type="button" disabled>Stage full F (held until activation)</button>
+            <button id="pcms-existing-recheck-stage" type="button" disabled>Verify saved F (read-only)</button>
+            <button id="pcms-existing-recovery-unlist" type="button" disabled>Unlist public F for recovery (held)</button>
+            <button id="pcms-existing-recheck-recovery-unlist" type="button" disabled>Verify F unlisted (read-only)</button>
+            <button id="pcms-existing-restore" type="button" disabled>Restore encrypted P, remain unlisted (held)</button>
+            <button id="pcms-existing-recheck-restore" type="button" disabled>Verify restored P unlisted (read-only)</button>
+          </div>
+          <p id="pcms-existing-status" role="status" aria-live="polite">Load a generator before any operation.</p>
+          <div id="pcms-existing-details" role="region" tabindex="0" aria-label="Canonical prior and uncertain-effect evidence"></div>
+        </section>
         <section class="panel" aria-labelledby="pcms-release-heading">
           <div class="panel-head"><h2 id="pcms-release-heading">I13 · Exact-source human publication approval</h2><span class="unknown">Production publishing OFF · Individual review</span></div>
           <p class="reason">Approval pins tested PJS, HTML and every binary src file, account/Persona binding, test inputs and prior source. Current protected route, owner, READY Git F, clean editor and actual remote unlisted F must all match. Git commit alone does not confer approval. Existing generator updates are held until independent sleep, unlisting, original archive and recovery proof. A lost publication reply cannot be retried.</p>
@@ -296,6 +320,7 @@
   <script type="module" src="staging-view.mjs"></script>
   <script type="module" src="ai-view.mjs"></script>
   <script type="module" src="writeback-view.mjs"></script>\n  <script type="module" src="release-view.mjs"></script>
+  <script type="module" src="existing-update-view.mjs"></script>
   <script type="module" src="refresher-view.mjs"></script>
 </body>
 </html>
