@@ -25,6 +25,7 @@ const publicJob=j=>j?{ok:true,slug:j.slug,revision:j.revision,state:j.state,
   evidence:evaluation(j),changes:j.changes,hold:j.hold,
   nativeState:j.native?.state||'NOT_STARTED',
   slotReleased:j.executionSlotReleased===true,
+  chat2IsolationVerified:j.chat2?.state==='FRESH_VERIFIED',
   provider:'NATIVE_AI_HELD_UNTIL_PROVEN',
   github:'NO_AI_WRITEBACK',publication:'OFF'}:fail('AI_JOB_NOT_FOUND');
 export function createAiStore(db){
@@ -186,6 +187,8 @@ export function createAiStore(db){
            (j.native?.state!=='CHAT2_RESET_OBSERVED'||
             j.chat2?.sessionDigest||!j.optionalTesting))
           {done(fail('AI_FRESH_CHAT_REQUIRED'));return;}
+        if(step==='CHAT2_REPAIR'&&j.chat2?.state!=='FRESH_VERIFIED')
+          {done(fail('AI_CHAT2_ISOLATION_UNVERIFIED'));return;}
         if(['CHAT1_REPAIR','CHAT2_REPAIR'].includes(step)){
           const chat=step==='CHAT1_REPAIR'?j.chat1:j.chat2;
           const idle=step==='CHAT1_REPAIR'?'CHAT1_OBSERVED_IDLE':'CHAT2_OBSERVED_IDLE';
