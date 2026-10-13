@@ -33,16 +33,29 @@ export function planAiStep(job,{oracleNames=['default_generator_smoke']}={}){
     return {ok:true,type:'BEGIN_NATIVE',step:'CHAT2_SEND',revision:job.revision};
   }
   if(!idle.has(native.state))return hold('AI_NATIVE_SESSION_RECONCILIATION_REQUIRED');
-  if(native.state==='CHAT2_OBSERVED_IDLE'&&job.chat2?.state!=='FRESH_VERIFIED')
-    return hold('AI_CHAT2_ISOLATION_UNVERIFIED');
+  const isolatedChat2Missing=native.state==='CHAT2_OBSERVED_IDLE'&&
+    job.chat2?.state!=='FRESH_VERIFIED';
   const active=native.state==='CHAT2_OBSERVED_IDLE'?2:1;
   if(!native.sessionDigest||
-     !chatReady(job,active)||
+     (!isolatedChat2Missing&&!chatReady(job,active))||
      native.sessionDigest!==(active===1?job.chat1:job.chat2).sessionDigest)
     return hold('AI_SESSION_IDENTITY_MISMATCH');
   if(!job.finalSource||job.finalSource.fingerprint!==job.sourceFingerprint)
     return {ok:true,type:'PROBE_NATIVE',revision:job.revision,
       effect:'READ_ONLY_FULL_SOURCE'};
+  if(isolatedChat2Missing){
+    // Browser-only reruns of Chat1 on the new final source are safe even
+    // while fresh Chat2 OPFS/server isolation is unverified. Do not issue
+    // any additional Chat2 provider actions or record Chat2 PASS.
+    if(job.state==='KNOWN_FAILURE')return hold('AI_CHAT2_ISOLATION_UNVERIFIED');
+    const pending=job.prompt.tests.filter(name=>
+      !sameF(job.chat1.tests?.[name],job.sourceFingerprint));
+    if(pending.some(name=>!oracleNames.includes(name)))
+      return hold('UNSUPPORTED_REQUIRED_ASSERTIONS');
+    if(pending.length)return {ok:true,type:'RUN_TESTS',revision:job.revision,
+      chat:1,effect:'BROWSER_OBSERVATION_ONLY'};
+    return hold('AI_CHAT2_ISOLATION_UNVERIFIED');
+  }
   if(job.state==='KNOWN_FAILURE'){
     const step=active===1?'CHAT1_REPAIR':'CHAT2_REPAIR';
     return {ok:true,type:'BEGIN_NATIVE',step,revision:job.revision};
