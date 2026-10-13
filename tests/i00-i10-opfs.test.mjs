@@ -174,9 +174,24 @@ test('P52-06 F/X worker attestation requires exact S2 lock acquired after native
       // A valid init lock without a workspace directory is still
       // independently insufficient; canonical fresh-chat CAS needs BOTH.
       assert.equal(r.workerNamespace,
-        options.workerLock?'CURRENT_SESSION_WORKER_INIT_LOCK':'UNVERIFIED');
+        options.workerLock?'CURRENT_SESSION_WORKER_INIT_LOCK':
+          options.oldLock?'STALE_PREVIOUS_SESSION_LOCK':'UNVERIFIED');
       if(options.workspace==='absent')assert.equal(r.workspaceRootState,'ABSENT');
       assert.equal(f.counts().creates,0);
     });
   }
+});
+
+test('P52-06 X native New Chat does not rotate the old Web Lock: its stale S1 marker is diagnostic only',async()=>{
+  await check({oldLock:true},async f=>{
+    const value=await perchanceAiOpfsProbe({slug,nonce});
+    assert.equal(value.ok,true);
+    assert.equal(value.workspaceRootState,'PRESENT_UNTRUSTED');
+    assert.equal(value.workerNamespace,'STALE_PREVIOUS_SESSION_LOCK');
+    assert.equal(value.isolation,'UNVERIFIED');
+    assert.equal(value.serverEndAck,'UNOBSERVED');
+    assert.equal(JSON.stringify(value).includes('old-session'),false);
+    assert.deepEqual({creates:f.counts().creates,files:f.counts().files},
+      {creates:0,files:0});
+  });
 });
