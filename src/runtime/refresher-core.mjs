@@ -1,6 +1,7 @@
 // I12: one shadow queue. No provider, browser, Git, tab or native execution.
 // Milliseconds are operational evidence budgets, never wall-clock deadlines.
 import {fail, isSafeId} from './journal.mjs';
+import {emptyRefreshEvidence,validRefreshEvidence} from './refresher-effect-core.mjs';
 export const HOUR=3600000, MINUTE=60000;
 export const REFRESHER_KEY='refresher:shadow:v1';
 export const DEFAULT_POLICY=Object.freeze({activeMs:24*HOUR,sleepMs:72*HOUR,
@@ -45,7 +46,8 @@ export function validShadow(s){
     s.rows.every(r=>isSafeId(r.stableId)&&slugOK(r.slug)&&isSafeId(r.accountId)&&
       number(r.ordinal,1,Number.MAX_SAFE_INTEGER)&&number(r.activeRemaining,0,365*24*HOUR)&&
       number(r.sleepRemaining,0,365*24*HOUR)&&
-      ['WAITING','ACTIVE','SLEEPING'].includes(r.phase))&&
+      ['WAITING','ACTIVE','SLEEPING'].includes(r.phase)&&
+      (!r.refresh||validRefreshEvidence(r.refresh)))&&
     Array.isArray(s.inflight)&&s.inflight.length<=2&&Array.isArray(s.timeline)&&
     s.timeline.length<=64&&Array.isArray(s.dueIndex)&&s.dueIndex.length<=5000;
 }
@@ -74,13 +76,15 @@ export function reconcileShadow(s,inputs){
         remoteId:input.remoteId,phase:'WAITING',activeRemaining:out.policy.activeMs,
         sleepRemaining:0,ordinal,cycle:0,slot:false,paused:false,
         activeMs:out.policy.activeMs,sleepMs:out.policy.sleepMs,checkpoint:0,
-        admittedAt:0,allocationEpoch:0,metrics:{raw:[],latest:null,nextDueAt:0,failures:0}};
+        admittedAt:0,allocationEpoch:0,refresh:emptyRefreshEvidence(),
+        metrics:{raw:[],latest:null,nextDueAt:0,failures:0}};
       out.rows.push(r);bySlug.set(r.slug,r);
     }
     // Never transplant an old allocation/approval to a reincarnated target.
     const identityChanged=r.remoteId!==input.remoteId||r.accountId!==input.accountId||
       r.personaUid!==input.personaUid||r.bindingVersion!==input.bindingVersion;
     r.identityHeld=identityChanged;
+    if(identityChanged||!r.refresh)r.refresh=emptyRefreshEvidence();
     r.ownerVerified=input.ownerVerified===true&&!identityChanged;
     r.releaseVerified=input.releaseVerified===true&&hex(input.releaseFingerprint)&&!identityChanged;
     r.releaseFingerprint=r.releaseVerified?input.releaseFingerprint:null;
@@ -120,7 +124,8 @@ export function rowBlocks(s,r){
   return [s.globalPause&&'GLOBAL_PAUSE',a?.paused&&'ACCOUNT_PAUSE',r.paused&&'GENERATOR_PAUSE',
     r.identityHeld&&'BINDING_CHANGED',!r.ownerVerified&&'OWNER_UNVERIFIED',
     !r.releaseVerified&&'PUBLICATION_UNVERIFIED',r.listing!=='PUBLIC'&&'LISTING_UNVERIFIED',
-    r.reviewHeld&&'REVIEW_UNLISTING',a?.health!=='HEALTHY'&&'ACCOUNT_UNAVAILABLE',
+    r.reviewHeld&&'REVIEW_UNLISTING',r.refresh?.suspended&&'VISIBILITY_SUSPENDED',
+    a?.health!=='HEALTHY'&&'ACCOUNT_UNAVAILABLE',
     s.provider.state==='OUTAGE'&&'PROVIDER_OUTAGE'].filter(Boolean);
 }
 export function admissionBlocks(s,r){
