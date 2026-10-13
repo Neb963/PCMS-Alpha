@@ -7,17 +7,27 @@ function fixture({origin='https://perchance.org',owner=true,editor=true,session=
   const before={location:globalThis.location,window:globalThis.window,
     document:globalThis.document,navigator:Object.getOwnPropertyDescriptor(globalThis,'navigator')};
   let gets=0,creates=0,files=0;
-  const opfs=()=>({
+  const seen=[];
+  const opfs=(parts=[])=>({
     kind:'directory',getDirectoryHandle:async(name,options)=>{
       gets++;if(options?.create){creates++;throw Error('CREATE_CALLED');}
+      seen.push([...parts,name].join('/'));
       if(storage==='absent')throw Object.assign(Error('not found'),{name:'NotFoundError'});
       if(storage==='denied')throw Object.assign(Error('permission'),{name:'SecurityError'});
-      if(workspace==='absent'&&name==='agent')
+      if(workspace==='absent'&&parts.length===0&&name==='agent')
         throw Object.assign(Error('no worker namespace'),{name:'NotFoundError'});
-      if(workspace==='denied'&&name==='workspace')
+      if(workspace==='denied'&&parts.join('/')==='agent/'+sid&&name==='workspace')
         throw Object.assign(Error('permission'),{name:'SecurityError'});
-      return ['agent','workspace','attachments',sid].includes(name)?opfs():
-        (()=>{throw Error('unexpected path')})();
+      const key=parts.join('/');
+      const allowed={
+        '':['attachments','agent'],
+        'attachments':[sid],
+        'agent':[sid],
+        ['agent/'+sid]:['workspace']
+      };
+      if(!allowed[key]?.includes(name))
+        throw Error('UNEXPECTED_OPFS_PATH:'+key+'/'+name);
+      return opfs([...parts,name]);
     },
     getFileHandle:async()=>{files++;throw Error('FILE_READ_FORBIDDEN');}
   });
@@ -35,7 +45,7 @@ function fixture({origin='https://perchance.org',owner=true,editor=true,session=
     editorCollabInitialSyncIsPending:false,
     saveCheckpointManager:{isDivergenceBlocked:()=>false}};
   globalThis.document={getElementById:()=>({dataset:{pcmsHumanIntent:human?'true':'false'}})};
-  return {counts:()=>({gets,creates,files}),restore:()=>{
+  return {counts:()=>({gets,creates,files}),paths:()=>[...seen],restore:()=>{
     globalThis.location=before.location;globalThis.window=before.window;
     globalThis.document=before.document;
     if(before.navigator)Object.defineProperty(globalThis,'navigator',before.navigator);
@@ -52,6 +62,10 @@ test('P52-06 F local OPFS presence never certifies server or worker isolation',a
     assert.equal(r.ok,true);
     assert.equal(r.attachmentState,'PRESENT_UNTRUSTED');
     assert.equal(r.workspaceRootState,'PRESENT_UNTRUSTED');
+    assert.deepEqual(f.paths(),[
+      'attachments','attachments/'+sid,
+      'agent','agent/'+sid,'agent/'+sid+'/workspace'
+    ]);
     assert.match(r.sessionDigest,/^[a-f0-9]{64}$/);
     assert.equal(r.isolation,'UNVERIFIED');
     assert.equal(r.serverEndAck,'UNOBSERVED');
