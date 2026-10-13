@@ -1306,7 +1306,7 @@ def main():
                     empty.ok&&send2.ok&&idle2.ok&&
                     sid1!==sid2&&saved2.evidence?.chat1Pass===false&&
                     saved2.evidence?.state==='TESTS_UNVERIFIED'&&
-                    planned1.code==='AI_CHAT2_ISOLATION_UNVERIFIED'&&
+                    planned1.type==='RUN_TESTS'&&planned1.chat===1&&
                     replay1.ok&&planned2.code==='AI_CHAT2_ISOLATION_UNVERIFIED'&&
                     replay2.code==='AI_CHAT2_ISOLATION_UNVERIFIED'&&
                     complete.state==='TESTS_UNVERIFIED'&&
