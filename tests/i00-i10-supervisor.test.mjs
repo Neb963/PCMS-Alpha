@@ -64,7 +64,10 @@ test('P52-06 X: distinct native Chat2 SID without independent OPFS isolation can
   assert.equal(policy.chat,1);
   const afterChat1={...unfinished,chat1:chat(S1,{
     default_generator_smoke:pass(J)})};
-  assert.equal(planAiStep(afterChat1).code,'AI_CHAT2_ISOLATION_UNVERIFIED');
+  const next=planAiStep(afterChat1);
+  assert.equal(next.type,'VERIFY_FRESH_CHAT2');
+  assert.equal(next.effect,'GATED_READ_ONLY_HISTORY');
+  assert.equal(next.step,undefined);
   assert.equal(planAiStep({...unfinished,executionSlotReleased:true}).code,
     'AI_VERIFIED_REVIEW_REQUIRED');
 });
