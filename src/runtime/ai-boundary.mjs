@@ -8,6 +8,7 @@ import {createAiStore} from './ai-store.mjs';
 import {inspectGitSource} from './git-source.mjs';
 import {verifyReadback,exactSource} from './staging-core.mjs';
 import {planAiStep} from './ai-supervisor.mjs';
+import {AI_BROWSER_ASSERTIONS} from './perchance-ai-oracle.mjs';
 export const AI_PORT='pcms-i10-ai';
 export const AI_PROGRESS_ALARM='pcms-i10-progress';
 function encodeUtf8(text){
@@ -85,7 +86,7 @@ export function createAiBoundary(api,{
         const sealed=await store.getJobFull(p.slug);
         if(!sealed.ok)return sealed;
         if(sealed.job.revision!==p.expectedRevision)return fail('STALE_REVISION');
-        const next=planAiStep(sealed.job);
+        const next=planAiStep(sealed.job,{oracleNames:AI_BROWSER_ASSERTIONS});
         if(!next.ok)return fail(next.code);
         const result=await executeTrusted({type:next.type,params:{
           slug:p.slug,expectedRevision:p.expectedRevision,
@@ -127,8 +128,8 @@ export function createAiBoundary(api,{
             (chat===1?job.chat1:job.chat2).tests?.[name]?.sourceFingerprint!==job.sourceFingerprint);
           // Unknown tests remain unverified; never silently count a smoke
           // result as a different named or natural-language requirement.
-          if(!pending.includes('default_generator_smoke'))
-            return fail('UNSUPPORTED_INDEPENDENT_ASSERTION');
+          const assertion=pending.find(name=>AI_BROWSER_ASSERTIONS.includes(name));
+          if(!assertion)return fail('UNSUPPORTED_INDEPENDENT_ASSERTION');
           const before=await g.runNativeAiStep(r.personaUid,{
             slug:r.slug,nonce:r.nonce,action:'OBSERVE'
           });
@@ -138,11 +139,11 @@ export function createAiBoundary(api,{
                job.chat2:job.chat1)?.sessionDigest)
             return fail('AI_NATIVE_TEST_SESSION_UNVERIFIED');
           const result=await g.runNativeAiStep(r.personaUid,{
-            slug:r.slug,nonce:r.nonce,action:'ORACLE_SMOKE'
+            slug:r.slug,nonce:r.nonce,action:'ORACLE_SMOKE',name:assertion
           });
           if(result?.ok!==true||
              result.source!=='INDEPENDENT_BROWSER_ASSERTION'||
-             result.name!=='default_generator_smoke'||
+             result.name!==assertion||
              !['PASS','FAIL'].includes(result.result)||
              !Number.isSafeInteger(result.observedAt)||result.observedAt<1)
             return fail(result?.code||'INDEPENDENT_TEST_UNAVAILABLE');
@@ -175,7 +176,7 @@ export function createAiBoundary(api,{
              still.routeId!==route.routeId)
             return fail('AI_TEST_ROUTE_CHANGED');
           return store.record(p.slug,p.expectedRevision,{
-            type:'TEST',chat,name:'default_generator_smoke',
+            type:'TEST',chat,name:assertion,
             sourceFingerprint:now.fingerprint,
             independentSource:'INDEPENDENT_BROWSER_ASSERTION',
             result:result.result,observedAt:result.observedAt
@@ -359,7 +360,7 @@ export function createAiBoundary(api,{
       all.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)||
         a.slug.localeCompare(b.slug,'en'));
       for(const job of all){
-        const next=planAiStep(job);
+        const next=planAiStep(job,{oracleNames:AI_BROWSER_ASSERTIONS});
         if(!next.ok)continue;
         // Each test assertion, native effect and reconciliation is bounded
         // by the same guarded command code as explicit operator UI actions.
