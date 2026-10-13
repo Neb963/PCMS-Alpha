@@ -47,7 +47,7 @@
           <p id="pcms-inventory-feedback" role="status" aria-live="polite">Loading local observations. No current ownership inferred.</p>
           <div class="table-wrap" role="region" aria-label="Generator inventory results" tabindex="0"><table><thead><tr><th scope="col">Generator</th><th scope="col">Account binding</th><th scope="col">Owner evidence</th><th scope="col">Visibility / source</th></tr></thead><tbody id="pcms-generators-rows"><tr><td colspan="4" class="empty">Loading canonical inventory.</td></tr></tbody></table></div>
           <div class="account-controls"><span id="pcms-generator-count" role="status">No verified rows</span><button type="button" id="pcms-generator-prev" disabled>Previous page</button><button type="button" id="pcms-generator-next" disabled>Next page</button></div>
-          <p id="blocked-generators" class="reason">Reservation, adoption and provider writes are disabled. Read-only Sync uses the existing donor-guarded isolated browser observer and can hold on an unavailable or changed session. Edit keys and collaboration cannot prove ownership; historical observations never authorize writes. Missing generator observations never mean deletion.</p></section>
+          <p id="blocked-generators" class="reason">Reservation and provider writes remain held; existing-generator original-source adoption is available with guarded readback. Read-only Sync uses the existing donor-guarded isolated browser observer and can hold on an unavailable or changed session. Edit keys and collaboration cannot prove ownership; historical observations never authorize writes. Missing generator observations never mean deletion.</p></section>
         <section class="panel" aria-labelledby="pcms-supply-heading">
           <div class="panel-head"><h2 id="pcms-supply-heading">Slug supply — canonical plan</h2><span class="unknown">Local freeze only · Provider held</span></div>
           <p class="reason">Paste one exact generator slug per line (up to 100). Preview preserves order and spelling. Freezing records the requests for a verified Persona-bound account in IndexedDB; it does not create, rename, reserve remotely, or write to private Git. Existing and conflicting local slugs are rejected per item.</p>
@@ -67,6 +67,13 @@
           <p id="pcms-adopt-visibility" class="reason">No source target selected.</p>
           <label><input type="checkbox" id="pcms-adopt-consent" disabled> I authorize enrollment of this existing public generator for future guarded management (not publication or overwrite).</label>
           <div class="account-controls"><button type="button" id="pcms-adopt-capture" disabled>Capture and preserve original</button><button type="button" id="pcms-adopt-local-archive" disabled>Archive local adoption · retain original</button></div>
+          <div class="account-controls">
+            <label for="pcms-adopt-git-token">Private Git archive write token (not stored)</label>
+            <input id="pcms-adopt-git-token" type="password" autocomplete="off" spellcheck="false" placeholder="Fine-grained Contents write; entered only when needed">
+            <button type="button" id="pcms-adopt-git-clear">Clear token</button>
+            <button type="button" id="pcms-adopt-git-write" disabled>Archive original to private Git</button>
+            <button type="button" id="pcms-adopt-git-recheck" disabled>Reconcile Git archive read-only</button>
+          </div>
           <p id="pcms-adopt-status" role="status" aria-live="polite">Adoption not started. Git original archive pending; release and provider writes held.</p>
         </section>
         <section class="panel" aria-labelledby="pcms-source-heading">
