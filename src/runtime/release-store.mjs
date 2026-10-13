@@ -1,7 +1,7 @@
 // I13 canonical release journal. No provider effect may occur in an IDB
 // transaction. A lost dispatch reply is always uncertain, never retried.
 import {fail} from './journal.mjs';
-import {matchesApproval} from './release-core.mjs';
+import {matchesApproval,releaseContext,releaseTestContext} from './release-core.mjs';
 const slug=x=>typeof x==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(x);
 const key=s=>'release:'+s;
 const display=r=>r?{
@@ -75,7 +75,15 @@ export function createReleaseStore(db){
                    liveInventory?.revision!==inventory.revision||
                    liveInventory?.remoteId!==stage.remotePublicId||
                    liveInventory?.ownerState!=='OBSERVED_OWNER'||
-                   !matchesApproval(approval.tuple,approval.tuple).ok){
+                   !releaseContext(liveStage,liveAccount,liveInventory).ok||
+                   !releaseTestContext(liveStage,liveJob).ok||
+                   !matchesApproval(approval.tuple,{
+                     ...approval.tuple,stageRevision:liveStage.revision,
+                     jobRevision:liveJob.revision,
+                     sourceFingerprint:liveJob.verifiedFinal,
+                     accountRevision:liveAccount.revision,
+                     remotePublicId:liveInventory.remoteId
+                   }).ok){
                   done(fail('RELEASE_CONTEXT_CHANGED'));return;
                 }
                 const record={slug:stage.slug,kind,revision:1,releaseId,
@@ -116,6 +124,8 @@ export function createReleaseStore(db){
                    stage.state!=='SOURCE_VERIFIED'||
                    job?.revision!==r.approval.jobRevision||
                    job.state!=='TESTS_VERIFIED'||
+                   !releaseTestContext(stage,job).ok||
+                   !releaseContext(stage,account,inventory).ok||
                    job.verifiedFinal!==r.approval.sourceFingerprint||
                    account?.revision!==r.approval.accountRevision||
                    account.bindingVersion!==r.approval.bindingVersion||
@@ -151,7 +161,11 @@ export function createReleaseStore(db){
           {done(fail('RELEASE_NOT_RECONCILABLE'));return;}
         const verified=proof?.ok===true&&
           proof.source==='INDEPENDENT_PUBLICATION_READBACK'&&
-          proof.sourceFingerprint===r.approval.sourceFingerprint;
+          proof.sourceFingerprint===r.approval.sourceFingerprint&&
+          typeof proof.observationId==='string'&&
+          /^observed_[a-f0-9]{32}$/.test(proof.observationId)&&
+          Number.isSafeInteger(proof.observedAt)&&
+          proof.observedAt>=r.changedAt&&proof.observedAt<=Date.now();
         ops.get(r.releaseId).onsuccess=o=>{
           const operation=o.target.result;
           if(!operation||operation.fingerprint!==r.approval.sourceFingerprint||
@@ -166,7 +180,9 @@ export function createReleaseStore(db){
             remoteId:r.approval.remotePublicId,
             observationId:verified?proof.observationId:null,
             observedAt:verified?proof.observedAt:null,
-            reason:verified?null:reason,changedAt:Date.now()};
+            reason:verified?null:(
+              /^[A-Z][A-Z0-9_]{2,79}$/.test(reason)?reason:'PUBLICATION_UNCERTAIN'
+            ),changedAt:Date.now()};
           m.put({key:key(name),release:next});
           ops.put({...operation,status:verified?'CONFIRMED':'HELD_UNCERTAIN',revision:operation.revision+1});
           t.objectStore('events').add({stage:'RELEASE_'+next.state,
