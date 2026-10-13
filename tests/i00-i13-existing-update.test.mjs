@@ -40,7 +40,7 @@ test('P53-07 F/X: adopted public P requires same owner, archived original and re
   const adoption={slug,accountId:account.accountId,accountRevision:4,
     personaUid:account.personaUid,bindingVersion:1,principalFingerprint:H,
     remotePublicId:'public_fixture01',archiveState:'ARCHIVED_GIT_CONFIRMED'};
-  const inventory={slug,accountId:account.accountId,
+  const inventory={slug,accountId:account.accountId,personaUid:account.personaUid,
     bindingVersion:1,remoteId:adoption.remotePublicId,ownerState:'OBSERVED_OWNER'};
   const shadow={phase:'SLEEPING',sleepRemaining:7200000,paused:false,slot:false,
     identityHeld:false,reviewHeld:false,ownerVerified:true,releaseVerified:true,
