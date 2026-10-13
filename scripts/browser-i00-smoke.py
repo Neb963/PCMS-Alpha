@@ -1271,10 +1271,15 @@ def main():
                     ok:true,slug,sessionDigest:null,busy:false,chatEntries:0,
                     inputOccupied:true,sourceSaved:true
                   });
+                  const pendingAttachment=await store.observeNative(slug,reset.revision,{
+                    ok:true,slug,sessionDigest:null,busy:false,chatEntries:1,
+                    resetGreetingVisible:true,inputOccupied:false,hasQueue:false,
+                    attachmentsPending:true,sourceSaved:true
+                  });
                   const empty=await store.observeNative(slug,reset.revision,{
                     ok:true,slug,sessionDigest:null,busy:false,chatEntries:1,
                     resetGreetingVisible:true,inputOccupied:false,hasQueue:false,
-                    sourceSaved:true
+                    attachmentsPending:false,sourceSaved:true
                   });
                   const send2=await store.armNative(slug,empty.revision,'CHAT2_SEND');
                   const idle2=await store.observeNative(slug,send2.revision,{
@@ -1297,6 +1302,7 @@ def main():
                     snapshot1.ok&&pass1.ok&&reset.ok&&
                     stale.code==='AI_CHAT2_RESET_NOT_PROVEN'&&
                     pendingDraft.code==='AI_CHAT2_RESET_NOT_PROVEN'&&
+                    pendingAttachment.code==='AI_CHAT2_RESET_NOT_PROVEN'&&
                     empty.ok&&send2.ok&&idle2.ok&&
                     sid1!==sid2&&saved2.evidence?.chat1Pass===false&&
                     saved2.evidence?.state==='TESTS_UNVERIFIED'&&
