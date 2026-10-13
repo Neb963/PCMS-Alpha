@@ -119,7 +119,6 @@
         <section class="panel" aria-labelledby="pcms-stage-queue-title"><div class="panel-head"><h2 id="pcms-stage-queue-title">I09 private stage receipts</h2><span class="unknown">Canonical · no auto-retry</span></div><div id="pcms-stage-queue" role="status" aria-live="polite">Reading local stage journal.</div></section>
         <section class="panel" aria-labelledby="pcms-adoption-queue-title"><div class="panel-head"><h2 id="pcms-adoption-queue-title">Existing-source adoption receipts</h2><span class="unknown">Local originals · Git archive pending</span></div><div id="pcms-adopt-receipts" role="status" aria-live="polite">Loading adoption history.</div></section>
         <section class="panel" aria-labelledby="pcms-supply-queue-title"><div class="panel-head"><h2 id="pcms-supply-queue-title">Frozen supply batches</h2><span class="unknown">Canonical local receipts</span></div><div id="pcms-supply-queue" role="status" aria-live="polite">Loading local batches.</div></section>
-      </section>
         <section class="panel" aria-labelledby="pcms-ai-jobs-heading">
           <div class="panel-head"><h2 id="pcms-ai-jobs-heading">I10 test and repair jobs</h2><span class="unknown">Source-bound · no AI provider activation</span></div>
           <p class="reason">Prepare a job only for an independently verified private stage. Preparation pins the Settings prompt and optional TESTING.md. No helper message is dispatched; no AI test is declared passed until separately observed.</p>
@@ -132,6 +131,7 @@
           <p id="pcms-ai-jobs-status" role="status" aria-live="polite">No AI job has been started.</p>
           <div id="pcms-ai-job-list" class="table-wrap" role="region" aria-label="AI job receipts" tabindex="0"></div>
         </section>
+      </section>
       <section class="workspace" id="view-accounts" data-view="accounts" aria-labelledby="heading-accounts" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 04</p><h1 id="heading-accounts" tabindex="-1">Accounts</h1><p>Dedicated Persona bindings, human login and provenance-aware verification.</p></div><button type="button" id="pcms-refresh-accounts">Refresh local state</button></header>
         <div class="notice" role="status"><strong>Human login only — no provider writes</strong><p>PersonaMonkey owns routing, container identity, protected browser navigation and route selection. A local account binding or manual override is not proof of Perchance ownership.</p></div>
@@ -156,6 +156,18 @@
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 05</p><h1 id="heading-refresher" tabindex="-1">Refresher</h1><p>Operational capacity, scheduling and observed visibility.</p></div><button type="button" disabled aria-describedby="blocked-refresher">Start refresh</button></header>
         <section class="panel"><div class="panel-head"><h2>Scheduler</h2><span class="unknown">Off</span></div><p class="empty">No scheduler or recent-list monitor is installed. Occupancy and remaining time are unknown, not zero.</p><p id="blocked-refresher" class="reason">Disabled: monitoring, scheduling, saving and unlisting are later-phase capabilities.</p></section>
       </section>
+      <section class="workspace" id="view-settings" data-view="settings" aria-labelledby="heading-settings" hidden>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 06</p><h1 id="heading-settings" tabindex="-1">Settings</h1><p>Configuration and safe diagnostics. Provider capabilities remain disabled.</p></div></header>
+        <section class="panel" aria-labelledby="pcms-backup-title">
+          <div class="panel-head"><h2 id="pcms-backup-title">Manual integrated encrypted backup</h2><span class="unknown">Local export · no restore</span></div>
+          <p class="reason">One encrypted file includes a consistent PCMS record/source snapshot and PersonaMonkey's separately encrypted supported portable data. Native WireGuard private configuration, external provider state and unsaved browser editors are excluded. No passwords are stored.</p>
+          <label for="pcms-backup-passphrase">Portable recovery passphrase (12 characters minimum)</label>
+          <input id="pcms-backup-passphrase" type="password" autocomplete="new-password" minlength="12" maxlength="4096">
+          <button type="button" id="pcms-backup-export">Create and download encrypted backup</button>
+          <p id="pcms-backup-status" role="status" aria-live="polite">No new backup attempted. Browser completion and independent disk-byte verification are different evidence tiers.</p>
+          <p class="reason">Tier 1: cryptographically verified in memory; tier 2: browser-reported completed download with existence and size; tier 3: independent on-disk file readback (not available here). Import/restore is a later phase.</p>
+        </section>
+        <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">Remote effects off · local backup available</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Off — not implemented</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup / restore and AI tests</dt><dd>Manual encrypted backup available; restore, scheduled backups and AI tests OFF</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No provider settings or operation commands can be changed here. PersonaMonkey retains advanced security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
         <section class="panel" aria-labelledby="pcms-ai-config-heading">
           <div class="panel-head"><h2 id="pcms-ai-config-heading">Native AI testing · versioned default prompt</h2><span class="unknown">Native provider activation held</span></div>
           <p class="reason">New jobs, including updates to existing generators, pin the latest saved Settings revision. Existing jobs retain their original prompt and TESTING.md snapshot. Helper prose is never test evidence.</p>
@@ -173,18 +185,6 @@
           <p id="pcms-ai-config-status" role="status" aria-live="polite">Loading canonical prompt history.</p>
           <div id="pcms-ai-prompt-history" class="table-wrap" tabindex="0" aria-label="Default AI prompt revision history"></div>
         </section>
-      <section class="workspace" id="view-settings" data-view="settings" aria-labelledby="heading-settings" hidden>
-        <header class="workspace-head"><div><p class="eyebrow">Workspace / 06</p><h1 id="heading-settings" tabindex="-1">Settings</h1><p>Configuration and safe diagnostics. Provider capabilities remain disabled.</p></div></header>
-        <section class="panel" aria-labelledby="pcms-backup-title">
-          <div class="panel-head"><h2 id="pcms-backup-title">Manual integrated encrypted backup</h2><span class="unknown">Local export · no restore</span></div>
-          <p class="reason">One encrypted file includes a consistent PCMS record/source snapshot and PersonaMonkey's separately encrypted supported portable data. Native WireGuard private configuration, external provider state and unsaved browser editors are excluded. No passwords are stored.</p>
-          <label for="pcms-backup-passphrase">Portable recovery passphrase (12 characters minimum)</label>
-          <input id="pcms-backup-passphrase" type="password" autocomplete="new-password" minlength="12" maxlength="4096">
-          <button type="button" id="pcms-backup-export">Create and download encrypted backup</button>
-          <p id="pcms-backup-status" role="status" aria-live="polite">No new backup attempted. Browser completion and independent disk-byte verification are different evidence tiers.</p>
-          <p class="reason">Tier 1: cryptographically verified in memory; tier 2: browser-reported completed download with existence and size; tier 3: independent on-disk file readback (not available here). Import/restore is a later phase.</p>
-        </section>
-        <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">Remote effects off · local backup available</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Off — not implemented</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup / restore and AI tests</dt><dd>Manual encrypted backup available; restore, scheduled backups and AI tests OFF</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No provider settings or operation commands can be changed here. PersonaMonkey retains advanced security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
       </section>
     </main>
     <footer class="footer"><span>PCMS Alpha · Stage I09</span><span>UI navigation available · PCMS side effects disabled</span></footer>
