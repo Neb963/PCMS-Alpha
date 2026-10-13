@@ -1226,6 +1226,13 @@ def main():
                   const {planAiStep}=await import('./ai-supervisor.mjs');
                   const db=await journal.openCanonicalDatabase();
                   const store=storeModule.createAiStore(db);
+                  // Earlier B checks deliberately change Settings. Each new
+                  // synthetic job MUST pin its own current canonical revision.
+                  const priorPrompt=await store.getPrompt();
+                  const configured=await store.changePrompt({
+                    text:'Run the independent fixed default generator smoke oracle; do not trust assistant text.',
+                    tests:['default_generator_smoke']
+                  },priorPrompt.current.revision);
                   const enc=s=>btoa(String.fromCharCode(...new TextEncoder().encode(s)));
                   const original=await core.exactSource([
                     {path:'main.pjs',base64:enc('output = 1')},
@@ -1285,7 +1292,8 @@ def main():
                   const afterRecheck=await store.getJob(slug);
                   const changedAgain=await store.checkpointSource(slug,recheck.revision,original);
                   const revoked=await store.getJob(slug);
-                  done({ok:original.ok&&repaired.ok&&begun.ok&&send1.ok&&idle1.ok&&
+                  done({ok:configured.ok&&
+                    original.ok&&repaired.ok&&begun.ok&&send1.ok&&idle1.ok&&
                     snapshot1.ok&&pass1.ok&&reset.ok&&
                     stale.code==='AI_CHAT2_RESET_NOT_PROVEN'&&
                     pendingDraft.code==='AI_CHAT2_RESET_NOT_PROVEN'&&
