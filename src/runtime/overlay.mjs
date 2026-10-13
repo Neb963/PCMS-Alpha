@@ -41,7 +41,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -223,6 +223,48 @@ attachPcmsGuard({
       return {ok:false,code:'EDITOR_PROBE_FAILED'};
     return out[0].result;
   },
+  // I10 fixed AI helper MAIN-world step. Exactly one I09-owned tab,
+  // no arbitrary frame, URL, code, browser tab ID or human editor selection.
+  aiNativeStep: async ({personaUid,cookieStoreId,routeId},request) => {
+    if(typeof request?.slug!=='string'||
+       !/^[a-z0-9][a-z0-9-]{0,99}$/.test(request.slug)||
+       typeof request?.nonce!=='string'||!/^[a-f0-9]{32}$/.test(request.nonce)||
+       !['OBSERVE','SEND','NEW_CHAT','STOP'].includes(request.action))
+      return {ok:false,code:'AI_NATIVE_REQUEST_INVALID'};
+    const expected='https://perchance.org/'+request.slug+'#edit';
+    const state=await getState(),profile=state.profiles?.[cookieStoreId];
+    if(!profile||profile.personaUid!==personaUid||profile.routeId!==routeId||
+       routeId==='direct'||routeId==='block'||state.routes?.[routeId]?.enabled!==true)
+      return {ok:false,code:'DONOR_PROTECTED_ROUTE_CHANGED'};
+    const tabs=await browser.tabs.query({}),found=[];
+    for(const tab of tabs){
+      if(tab?.cookieStoreId!==cookieStoreId||tab.url!==expected)continue;
+      let tag;
+      try{tag=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned');}catch{continue;}
+      if(tag?.nonce===request.nonce&&tag.slug===request.slug&&
+         tag.personaUid===personaUid&&tag.cookieStoreId===cookieStoreId&&
+         tag.createdBy==='PCMS_I09'&&tag.humanIntent!==true)found.push(tab);
+    }
+    if(found.length!==1||tabs.some(t=>t.id!==found[0]?.id&&t.url===expected))
+      return {ok:false,code:'AI_EDITOR_OWNERSHIP_AMBIGUOUS'};
+    const tab=found[0];
+    const result=await browser.scripting.executeScript({
+      target:{tabId:tab.id,frameIds:[0]},world:'MAIN',
+      func:perchanceAiNative,args:[request]
+    });
+    const after=await browser.tabs.get(tab.id);
+    const tag=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned');
+    const again=await getState();
+    if(after?.cookieStoreId!==cookieStoreId||after?.url!==expected||
+       tag?.nonce!==request.nonce||tag?.humanIntent===true||
+       again.profiles?.[cookieStoreId]?.personaUid!==personaUid||
+       again.profiles?.[cookieStoreId]?.routeId!==routeId||
+       again.routes?.[routeId]?.enabled!==true)
+      return {ok:false,code:'AI_NATIVE_POST_GUARD_CHANGED'};
+    if(result?.length!==1||result[0].frameId!==0||result[0].error)
+      return {ok:false,code:'AI_NATIVE_EXECUTION_UNVERIFIED'};
+    return result[0].result;
+  },
   // A human handoff never closes/navigates a tab, and never releases donor
   // automation ownership or any unmatched/recycled tab.
   handoffStagingTab: async ({personaUid,slug,nonce}) => {
@@ -257,7 +299,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   await writeFile(bgPath, bg);
   for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'adoption-boundary.mjs',
     'staging-core.mjs','staging-store.mjs','staging-boundary.mjs',
-    'perchance-stage.mjs','editor-strip.mjs','perchance-editor-probe.mjs','ai-evidence.mjs','ai-store.mjs','ai-boundary.mjs']) {
+    'perchance-stage.mjs','editor-strip.mjs','perchance-editor-probe.mjs','perchance-ai-native.mjs','ai-evidence.mjs','ai-store.mjs','ai-boundary.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }
 }
