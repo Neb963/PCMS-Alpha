@@ -25,6 +25,9 @@ export async function digest(bytes){
 }
 export function serializeClone(value,depth=0){
   requireValid(depth<=35,'BACKUP_DEPTH_LIMIT');
+  // IndexedDB structured-clone records can legitimately retain undefined.
+  // JSON.stringify would otherwise silently drop these fields.
+  if(value===undefined)return {[token]:'Undefined'};
   if(value===null||typeof value==='string'||typeof value==='boolean')return value;
   if(typeof value==='number'){requireValid(Number.isFinite(value),'BACKUP_UNSUPPORTED_VALUE');return value;}
   if(value instanceof Date){requireValid(Number.isFinite(value.getTime()),'BACKUP_UNSUPPORTED_VALUE');return {[token]:'Date',data:value.toISOString()};}
@@ -52,6 +55,9 @@ export function deserializeClone(value,depth=0){
   requireValid(plain(value),'BACKUP_INVALID_SCHEMA');
   if(Object.hasOwn(value,token)){
     requireValid(Object.keys(value).every(k=>[token,'data','kind'].includes(k)),'BACKUP_INVALID_SCHEMA');
+    if(value[token]==='Undefined'){
+      requireValid(Object.keys(value).length===1,'BACKUP_INVALID_SCHEMA');return undefined;
+    }
     if(value[token]==='Date'){
       requireValid(typeof value.data==='string'&&Number.isFinite(Date.parse(value.data)),'BACKUP_INVALID_SCHEMA');
       return new Date(value.data);
