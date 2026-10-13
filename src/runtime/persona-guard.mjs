@@ -149,6 +149,24 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     finally{await releaseConflictGuard(leased);}
   }
 
+  // Fixed public feed/statistics GETs use the SAME donor lease and isolated
+  // reader. Session proof is independently checked by the host around them.
+  async function observeMonitoring(personaUid,request){
+    if(!request||!['RECENT','STATISTIC'].includes(request.kind)||
+      Object.keys(request).some(k=>!['kind','slug'].includes(k))||
+      (request.kind==='STATISTIC'&&!/^[a-z0-9][a-z0-9-]{0,99}$/.test(request.slug||''))||
+      (request.kind==='RECENT'&&request.slug!=null))return {ok:false,code:'MONITOR_REQUEST_INVALID'};
+    if(typeof readIsolatedTab!=='function')return {ok:false,code:'OBSERVER_UNAVAILABLE'};
+    const leased=await acquireConflictGuard(personaUid);
+    if(!leased.ready)return {ok:false,code:leased.code};
+    try{
+      const result=await readIsolatedTab(leased,{identityOnly:true,monitoringRequest:request});
+      if(!(await inspectOwnedAction(leased)).ready)return {ok:false,code:'MONITOR_GUARD_CHANGED'};
+      return result||{ok:false,code:'MONITOR_UNAVAILABLE'};
+    }catch{return {ok:false,code:'MONITOR_UNAVAILABLE'};}
+    finally{await releaseConflictGuard(leased);}
+  }
+
   // Only the fixed same-XPI supply function is permitted. A donor lease
   // encloses admission and page execution; the postcheck never transforms
   // an unknown remote outcome into a safe retry.
@@ -230,6 +248,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
 
   return Object.freeze({
     observeReadOnly,
+    observeMonitoring,
     runSupplyStep,
     runStageStep,
     runNativeAiStep,

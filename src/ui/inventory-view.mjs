@@ -64,6 +64,9 @@ function draw(items) {
     sourcePick.addEventListener('click',()=>window.dispatchEvent(
       new CustomEvent('pcms-source-target',{detail:{slug:item.slug,revision:item.revision}})));
     first.append(sourcePick);
+    const timing=document.createElement('button');timing.type='button';timing.textContent='Timing';
+    timing.addEventListener('click',()=>window.dispatchEvent(new CustomEvent('pcms-refresher-target',{detail:{slug:item.slug}})));
+    first.append(document.createTextNode(' '),timing);
     const adoptPick=document.createElement('button');
     adoptPick.type='button';adoptPick.textContent='Adopt';
     adoptPick.disabled=item.ownerState!=='OBSERVED_OWNER' ||

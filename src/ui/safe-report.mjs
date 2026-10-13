@@ -27,5 +27,13 @@ export function createSafeReport(input) {
   report.sections.restore = input.restoreActive === true
     ? 'RESTORE_IN_PROGRESS'
     : input.restoreActive === undefined ? 'section_unavailable' : 'RESTORE_MARKER_INVALID';
+  const refresher=input.refresher;
+  report.sections.refresher=refresher?.mode==='SHADOW_ONLY'?'allowlisted':'section_unavailable';
+  if(refresher?.mode==='SHADOW_ONLY')report.refresher={
+    mode:'SHADOW_ONLY',mutations:0,turns:bounded(refresher.turns),reads:bounded(refresher.reads),
+    queuePeak:bounded(refresher.queuePeak),readPeak:bounded(refresher.readPeak),
+    unknownIntervals:bounded(refresher.unknownIntervals),alarmHeld:refresher.alarmHeld===true,
+    code:new Set(['SHADOW_READY','MONITOR_ACTIVATION_HELD','ALARM_UNVERIFIED',
+      'CANONICAL_UNAVAILABLE','RESTORE_HOLD']).has(refresher.code)?refresher.code:'UNKNOWN'};
   return report;
 }
