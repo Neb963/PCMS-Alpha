@@ -76,7 +76,7 @@ attachPcmsGuard({
       name,routeId,allowDirect:false
     }));
   },
-  readIsolatedTab: async ({personaUid,cookieStoreId,routeId},{identityOnly=false}={}) => {
+  readIsolatedTab: async ({personaUid,cookieStoreId,routeId},{identityOnly=false,originalSlug=null}={}) => {
     // Donor-owned tab and protected-container selection. This is the SAME
     // combined-XPI browser authority, not a separate automation controller.
     const tabs=await browser.tabs.query({cookieStoreId});
@@ -90,7 +90,7 @@ attachPcmsGuard({
       return {ok:false,code:'PERSONA_ROUTE_CHANGED'};
     const results=await browser.scripting.executeScript({
       target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
-      func:perchanceReadIsolated,args:[{identityOnly}]
+      func:perchanceReadIsolated,args:[{identityOnly,originalSlug}]
     });
     const after=await browser.tabs.get(tab.id);
     if(after.cookieStoreId!==cookieStoreId ||
@@ -142,7 +142,7 @@ attachPcmsGuard({
 function localMutationFence(profileIds, operation, mode = "block", options = {}) {`,
     'donor guard host');
   await writeFile(bgPath, bg);
-  for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs']) {
+  for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-boundary.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }
 }

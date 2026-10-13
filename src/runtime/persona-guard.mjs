@@ -135,12 +135,12 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     }catch{return {ok:false,code:'HUMAN_TAB_OPEN_UNCONFIRMED'};}
   }
 
-  async function observeReadOnly(personaUid, identityOnly=false) {
+  async function observeReadOnly(personaUid, identityOnly=false, originalSlug=null) {
     if(typeof readIsolatedTab!=='function')return {ok:false,code:'OBSERVER_UNAVAILABLE'};
     const leased=await acquireConflictGuard(personaUid);
     if(!leased?.ready||!leased.leaseId)return {ok:false,code:leased?.code||'GUARD_UNAVAILABLE'};
     try {
-      const packet=await readIsolatedTab(leased,{identityOnly:identityOnly===true});
+      const packet=await readIsolatedTab(leased,{identityOnly:identityOnly===true,originalSlug});
       if(!packet?.ok)return {ok:false,code:packet?.code||'OBSERVER_UNVERIFIED'};
       const rechecked=await inspectOwnedAction(leased);
       if(!rechecked?.ready)return {ok:false,code:rechecked?.code||'GUARD_CHANGED'};

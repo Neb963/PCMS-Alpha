@@ -3,7 +3,7 @@
 // world. No arbitrary code, caller URL, editKey or page message is accepted.
 // The donor-owned host selects the tab under Persona lease and checks the
 // route before/after injection. Returned data is strictly de-identified.
-export async function perchanceReadIsolated({identityOnly=false}={}) {
+export async function perchanceReadIsolated({identityOnly=false,originalSlug=null}={}) {
   const denied=(code)=>({ok:false,code});
   try {
     if(location.origin!=='https://perchance.org')return denied('WRONG_ORIGIN');
@@ -57,9 +57,41 @@ export async function perchanceReadIsolated({identityOnly=false}={}) {
         'SESSION_REJECTED':'SESSION_PROBE_UNAVAILABLE');
     if(localStorage.getItem('sessionTokenLastChangeTime')!==startChange ||
        localStorage.getItem('app-storage')!==raw)return denied('SESSION_CHANGED');
+    if(identityOnly&&originalSlug!==null)return denied('INVALID_OBSERVER_MODE');
     if(identityOnly)return {ok:true,principalFingerprint,
       sessionReply:{httpStatus:200,body:{status:'success',generators:[],generatorFolderMap:{}}},
       ownerReplies:[]};
+    if(originalSlug!==null){
+      if(typeof originalSlug!=='string' ||
+         !/^[a-z0-9][a-z0-9-]{0,99}$/.test(originalSlug))
+        return denied('INVALID_GENERATOR');
+      const listed=session.body.generators.filter(g=>g?.name===originalSlug);
+      if(listed.length!==1||typeof listed[0].isPrivate!=='boolean')
+        return denied('ORIGINAL_NOT_IN_OWNER_INVENTORY');
+      const owner=await call('checkGeneratorOwnership',{generatorName:originalSlug});
+      const page=await call('getGeneratorPageData',{generatorName:originalSlug});
+      if(owner.status!=='is-owner'||page.status!=='success'||
+         page.generator?.name!==originalSlug||
+         page.generator?.isPrivate!==listed[0].isPrivate||
+         typeof page.generator?.publicId!=='string'||
+         !/^[a-zA-Z0-9_-]{1,90}$/.test(page.generator.publicId)||
+         typeof page.generator.modelText!=='string'||
+         typeof page.generator.outputTemplate!=='string')
+        return denied('ORIGINAL_SOURCE_UNVERIFIED');
+      // srcManifest references alone do not prove asset bytes. Stop rather
+      // than constructing a falsely complete backup from filenames.
+      const manifest=page.generator.srcManifest;
+      const empty=Array.isArray(manifest)?manifest.length===0:
+        manifest&&typeof manifest==='object'&&!Array.isArray(manifest)&&
+        Object.keys(manifest).length===0;
+      if(!empty)return denied('ORIGINAL_ASSET_BYTES_UNVERIFIED');
+      if(!sameSession())return denied('SESSION_CHANGED');
+      return {ok:true,principalFingerprint,original:{
+        remotePublicId:'public_'+page.generator.publicId,
+        ownerResult:'IS_OWNER',visibility:listed[0].isPrivate?'UNLISTED':'PUBLIC',
+        pjs:page.generator.modelText,html:page.generator.outputTemplate,assets:[]
+      }};
+    }
     const generatorRecords=[],names=new Set();
     for(const item of session.body.generators){
       if(!item||typeof item!=='object'||Array.isArray(item)||
