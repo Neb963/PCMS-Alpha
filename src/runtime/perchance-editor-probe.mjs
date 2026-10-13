@@ -14,12 +14,29 @@ export async function perchanceEditorProbe(slug) {
        typeof model?.isClean!=='function'||typeof html?.isClean!=='function'||
        typeof src?.isDirty!=='function'||typeof menu?.saveState!=='string')
       return hold('EDITOR_CONTRACT_UNVERIFIED');
-    if(window.editorCollabInitialSyncIsPending!==false||
-       window.__collabRoomFailed===true||window.yjsProvider||window.yDoc||
+    if(!soloCollaboration()||
        typeof window.saveCheckpointManager?.isDivergenceBlocked!=='function'||
        window.saveCheckpointManager.isDivergenceBlocked()!==false||
        typeof src.conflictPaths!=='function'||src.conflictPaths().length!==0)
       return hold('COLLABORATION_UNVERIFIED');
+    // Owners can automatically join their own Yjs room. A provider is
+    // not itself a second collaborator: accept only a synchronized room
+    // with exactly the local awareness client; peers/unknown state HOLD.
+    const soloCollaboration=()=>{
+      if(window.editorCollabInitialSyncIsPending!==false||
+         window.__collabRoomFailed===true||
+         window.collabEditKeyIsIncorrect===true)return false;
+      const provider=window.yjsProvider;
+      if(!provider)return !window.yjsProviderRoomName;
+      const doc=window.yDoc,awareness=window.yjsAwareness;
+      if(!doc||!awareness||typeof awareness.getStates!=='function'||
+         !Number.isSafeInteger(doc.clientID)||
+         provider.wsconnected!==true||provider.synced!==true||
+         typeof window.yjsProviderRoomName!=='string'||
+         provider.roomname!==window.yjsProviderRoomName)return false;
+      const peers=awareness.getStates();
+      return peers instanceof Map&&peers.size===1&&peers.has(doc.clientID);
+    };
     const host=document.getElementById('pcms-alpha-editor-context');
     if(host?.dataset.pcmsHumanIntent==='true')return hold('HUMAN_HANDOFF_REQUESTED');
     const isDirty=await src.isDirty();
