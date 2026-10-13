@@ -50,9 +50,14 @@ export function canonicalRefresherInputs(records){
       principalFingerprint:a?.identity?.principalFingerprint||null,
       releaseVerified:!!released,releaseFingerprint:released?release.sourceFingerprint:null,
       listing:row.visibility,observedAt:row.lastObservedAt,
-      reviewHeld:(!!update&&update.state!=='RESTORE_CONFIRMED')||
-        (!!stage&&stage.state!=='HUMAN_OWNED'&&
-          (!released||stage.candidate?.fingerprint!==release.sourceFingerprint)),
+      // A confirmed, byte-exact final F closes the staged B->F review
+      // without requiring B to equal F after AI edits. An interrupted
+      // existing update remains held until final listing is confirmed.
+      reviewHeld:(!!update&&!(
+        update.state==='RESTORE_CONFIRMED'||(
+          update.state==='STAGE_CONFIRMED'&&released&&
+          update.stagedFingerprint===release.sourceFingerprint
+        )))||!!stage&&stage.state!=='HUMAN_OWNED'&&!released,
       readyUpdate:link?.readyUpdate===true||!!released&&link?.readyAtInspection===true&&
         link.fingerprint!==release.sourceFingerprint};
   });
