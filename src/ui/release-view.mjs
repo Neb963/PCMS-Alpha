@@ -6,6 +6,7 @@ const passphrase=document.getElementById('pcms-existing-passphrase');
 const previewBtn=document.getElementById('pcms-release-preview');
 const approveBtn=document.getElementById('pcms-release-approve');
 const dispatchBtn=document.getElementById('pcms-release-dispatch');
+const cancelBtn=document.getElementById('pcms-release-cancel');
 const reconcileBtn=document.getElementById('pcms-release-reconcile');
 const loadBtn=document.getElementById('pcms-release-load');
 const clearBtn=document.getElementById('pcms-release-clear');
@@ -35,6 +36,8 @@ function controls(){
   loadBtn.disabled=active||!target;
   clearBtn.disabled=active;
   approveBtn.disabled=active||!snapshot||snapshot.slug!==slug.value||!hasToken;
+  cancelBtn.disabled=active||!receipt||receipt.slug!==slug.value||
+    receipt.state!=='APPROVED';
   dispatchBtn.disabled=active||!receipt||receipt.slug!==slug.value||
     receipt.state!=='APPROVED'||!hasToken;
   reconcileBtn.disabled=active||!receipt||receipt.slug!==slug.value||!hasToken||
@@ -150,6 +153,8 @@ async function act(type,params,message){
         note('Exact saved F, current READY and editor checked. Individual approval available.');}
       else if(type==='APPROVE'){receipt=result;note('Durable source-bound approval '+result.releaseId+
         '. No provider effect performed.');}
+      else if(type==='CANCEL_APPROVED'){receipt=result;snapshot=null;
+        note('Unsent source approval canceled; publication not attempted. Review fresh F before reapproving.');}
       else if(type==='DISPATCH'){receipt=result;note('Dispatch may have occurred: '+
         result.state+'. Reconcile independently; do not click again.');}
       else if(type==='RECONCILE'){receipt=result;note(result.state==='CONFIRMED_PUBLIC'?
@@ -177,6 +182,11 @@ approveBtn.addEventListener('click',()=>{
     expectedStageRevision:f.stageRevision,expectedJobRevision:f.jobRevision,
     fingerprint:f.sourceFingerprint,explicitApproval:true,passphrase:passphrase.value},
     'Recording exact-F individual approval in canonical journal…');
+});
+cancelBtn.addEventListener('click',()=>{
+  if(!receipt||receipt.state!=='APPROVED')return;
+  act('CANCEL_APPROVED',{slug:receipt.slug,expectedRevision:receipt.revision},
+    'Canceling unsent exact-source approval; no remote effect…');
 });
 dispatchBtn.addEventListener('click',()=>{
   if(!receipt)return;
