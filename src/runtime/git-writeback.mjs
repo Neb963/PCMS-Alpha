@@ -196,6 +196,36 @@ async function verifyFiles(api,head,folder,expected,baseHead,commitSha=null){
   return {ok:true,head,treeSha:tree.treeSha,sourceFingerprint:expected.fingerprint,
     attribution:commitSha===null?'UNPROVEN':'COMMIT_HEAD_OBSERVED'};
 }
+const writeId=id=>typeof id==='string'&&/^writeback_[a-f0-9]{32}$/.test(id);
+// Parent-DAG verification is bounded and independent of the PATCH response.
+// Identical source bytes authored by someone else are NOT an operation ACK.
+async function linkedCommit(api,head,{operationId,expectedHead}){
+  if(!writeId(operationId)||!SHA.test(expectedHead||''))
+    return fail('GIT_WRITEBACK_ATTRIBUTION_UNKNOWN');
+  const trailer='\n\nPCMS-Writeback-Operation: '+operationId;
+  let current=head;
+  const visited=new Set();
+  for(let depth=0;depth<64;depth++){
+    if(!SHA.test(current)||visited.has(current))
+      return fail('GIT_WRITEBACK_ANCESTRY_UNVERIFIED');
+    visited.add(current);
+    const record=await api('GET','/git/commits/'+current);
+    if(!record.ok||!Array.isArray(record.data.parents)||
+       !record.data.parents.every(p=>SHA.test(p.sha||'')))
+      return fail('GIT_WRITEBACK_ANCESTRY_UNVERIFIED');
+    const parents=record.data.parents.map(x=>x.sha);
+    if(typeof record.data.message==='string'&&
+       record.data.message.endsWith(trailer)){
+      if(parents.length!==1||parents[0]!==expectedHead)
+        return fail('GIT_WRITEBACK_PARENT_MISMATCH');
+      return {ok:true,commitSha:current};
+    }
+    if(current===expectedHead)return fail('GIT_WRITEBACK_ATTRIBUTION_UNKNOWN');
+    if(parents.length!==1)return fail('GIT_WRITEBACK_ANCESTRY_UNVERIFIED');
+    current=parents[0];
+  }
+  return fail('GIT_WRITEBACK_ANCESTRY_BOUNDED');
+}
 export async function observeGitCandidate(request,transport=fetch){
   if(!validToken(request?.token)||!safeFolder(request?.folder)||
      !SHA.test(request?.baseHead||''))return fail('GIT_OBSERVATION_INVALID');
@@ -209,14 +239,39 @@ export async function observeGitCandidate(request,transport=fetch){
   if(!ref.ok||!SHA.test(ref.data.object?.sha||'')||
      ref.data.ref!=='refs/heads/main')return fail('GIT_HEAD_UNVERIFIED');
   const head=ref.data.object.sha;
-  const result=await verifyFiles(api,head,request.folder,expected,
-    request.baseHead,request.commitSha||null);
+  const result=await verifyFiles(api,head,request.folder,expected,request.baseHead);
   if(!result.ok)return result;
-  // Content equivalence is NOT provenance, especially after a lost ACK.
-  return {...result,code:request.commitSha?'GIT_CONFIRMED':'GIT_EQUIVALENT_ATTRIBUTION_UNKNOWN'};
+  const linked=await linkedCommit(api,head,request);
+  if(!linked.ok)return {...result,code:linked.code,ok:false};
+  if(request.commitSha&&request.commitSha!==linked.commitSha)
+    return fail('GIT_WRITEBACK_COMMIT_CHANGED');
+  const baseline=await readTree(api,request.baseHead,request.folder),
+    applied=await readTree(api,linked.commitSha,request.folder),
+    now=await readTree(api,head,request.folder);
+  if(!baseline.ok||!applied.ok||!now.ok)
+    return fail('GIT_WRITEBACK_TREE_UNVERIFIED');
+  // Confirm policy/TESTING/READY bytes untouched in both the authored commit
+  // and latest HEAD. A subsequent unrelated commit may coexist safely.
+  for(const name of ['DEPLOYMENT.md','TESTING.md']){
+    const path=request.folder+'/'+name;
+    const src=baseline.entries.get(path),a=applied.entries.get(path),
+      b=now.entries.get(path);
+    if(!src||!a||!b||src.sha!==a.sha||src.sha!==b.sha||
+       src.type!=='blob'||a.type!=='blob'||b.type!=='blob')
+      return fail('GIT_POLICY_OR_TESTING_CHANGED');
+  }
+  const appliedProof=await verifyFiles(api,linked.commitSha,request.folder,expected,
+    request.baseHead);
+  if(!appliedProof.ok)return fail('GIT_WRITEBACK_COMMIT_BYTES_UNVERIFIED');
+  const ready=await readyMarker(api,request.folder,now);
+  if(!ready.ok)return ready;
+  return {...result,ok:true,code:'GIT_COMMITTED_VERIFIED',
+    attribution:'COMMIT_PARENT_AND_BYTES_VERIFIED',
+    commitSha:linked.commitSha};
 }
 export async function writeGitCandidate(request,transport=fetch){
-  if(!validMessage(request?.message)||!SHA.test(request?.expectedHead||''))
+  if(!validMessage(request?.message)||!SHA.test(request?.expectedHead||'')||
+     !writeId(request?.operationId)
     return fail('WRITEBACK_REQUEST_INVALID');
   const expected=await expectedBytes(request.source);
   if(!expected.ok)return expected;
@@ -238,7 +293,8 @@ export async function writeGitCandidate(request,transport=fetch){
   const tree=await api('POST','/git/trees',{base_tree:check.treeSha,tree:entries});
   if(!tree.ok||!SHA.test(tree.data.sha||''))return fail('GIT_WRITE_UNCERTAIN');
   const commit=await api('POST','/git/commits',{
-    message:request.message,tree:tree.data.sha,parents:[check.head]});
+    message:request.message+'\n\nPCMS-Writeback-Operation: '+request.operationId,
+    tree:tree.data.sha,parents:[check.head]});
   if(!commit.ok||!SHA.test(commit.data.sha||''))return fail('GIT_WRITE_UNCERTAIN');
   // Non-forced fast-forward from the checked parent. No alternative REST
   // Contents writes or force-push are permitted.
