@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {initialPrompt,revisePrompt,importPrompt,exportPrompt,beginAiJob,applyAiEvidence,evaluation} from '../src/runtime/ai-evidence.mjs';
+import {DEFAULT_AI_PROMPT,initialPrompt,revisePrompt,importPrompt,exportPrompt,beginAiJob,applyAiEvidence,evaluation} from '../src/runtime/ai-evidence.mjs';
 const A='a'.repeat(64), B='b'.repeat(64), S1='1'.repeat(64),S2='2'.repeat(64);
 const stage={slug:'private-one',revision:8,state:'SOURCE_VERIFIED',accountId:'account-1',
   candidate:{fingerprint:A},previous:{fingerprint:B}};
@@ -96,4 +96,10 @@ test('P52-05: no known invalid source, missing verified stage or arbitrary sourc
     independentSource:'GUARDED_NATIVE_FULL_SOURCE',cleanEditor:false,ownerVerified:true}).ok,false);
   assert.equal(applyAiEvidence(j,{type:'TEST',chat:1,name:'smoke',sourceFingerprint:B,
     independentSource:'INDEPENDENT_BROWSER_ASSERTION',observedAt:1,result:'PASS'}).ok,false);
+});
+
+test('F2 Stage 3 supersession: default instruction permits full generator assets but denies Git and publication',()=>{
+  assert.match(DEFAULT_AI_PROMPT,/PJS, HTML and src assets/);
+  assert.doesNotMatch(DEFAULT_AI_PROMPT,/repair only main PJS and HTML|Do not touch src assets/);
+  assert.match(DEFAULT_AI_PROMPT,/Do not touch other generators, GitHub, account settings, publication or routing/);
 });
