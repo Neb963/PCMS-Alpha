@@ -59,7 +59,7 @@ function fixture({gate=false,lostAck=false,denyRoute=false,drift=false,dirtyOrig
           (breakReadback?files().slice(2,3):files().slice(2)):[]}};
   };
   const guard={getSafeRouteReadiness:async()=>{routeChecks++;return (denyRoute||
-    (routeLossAfterPrepare&&routeChecks>=3))?
+    (routeLossAfterPrepare&&routeChecks>=4))?
     {ready:false,code:'DIRECT_FORBIDDEN'}:
     {ready:true,routeId:'wg-a',cookieStoreId:'cookie-1'};},
     observeReadOnly:observer,
