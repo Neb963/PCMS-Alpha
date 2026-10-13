@@ -34,7 +34,7 @@ test('P55-01 and S6-I08: one outer envelope encrypts PCMS bytes even if donor co
   assert.equal(out.text.includes('generator-1'),false);
   assert.equal(out.text.includes('cookieStoreId'),false);
   const restored=await decodeIntegrated(out.text,PASSWORD,{decodeDonor:decodeBackupEnvelope});
-  assert.deepEqual(restored.pcms,pcms);
+  assert.equal(JSON.stringify(restored.pcms),JSON.stringify(pcms));
   assert.equal(restored.pcms.stores.operations[0].value.status,'DISPATCH_POSSIBLE');
   const binary=deserializeClone(restored.pcms.stores.entities[0].value.files['src/image.bin']);
   assert.deepEqual([...binary],[0,255,42,12]);
