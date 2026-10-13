@@ -1121,7 +1121,7 @@ def main():
                   });
                   const sealed=await store.getJobFull(slug);
                   const once=await store.checkpointSource(slug,seen.revision,
-                    sealed.job.finalSource);
+                    await (await import('./staging-core.mjs')).exactSource(sealed.job.finalSource.blobs));
                   const again=await store.armNative(slug,once.revision,'CHAT1_REPAIR');
                   const seenAgain=await store.observeNative(slug,again.revision,{
                     ok:true,slug,busy:false,sessionDigest:session,
@@ -1129,7 +1129,7 @@ def main():
                   });
                   const still=await store.getJobFull(slug);
                   const twice=await store.checkpointSource(slug,seenAgain.revision,
-                    still.job.finalSource);
+                    await (await import('./staging-core.mjs')).exactSource(still.job.finalSource.blobs));
                   const noThird=await store.armNative(slug,twice.revision,'CHAT1_REPAIR');
                   done({ok:failed.ok&&failed.state==='KNOWN_FAILURE'&&
                     armed.ok&&seen.ok&&once.state==='KNOWN_FAILURE'&&
