@@ -62,7 +62,8 @@ test('P55-01: all decision-bearing header fields authenticated or rejected and z
   ];
   for(const candidate of altered)await assert.rejects(()=>open(candidate));
   await assert.rejects(()=>decodeIntegrated(out.text,'wrong-passphrase',{decodeDonor:decodeBackupEnvelope}));
-  await assert.rejects(()=>encodeIntegrated({pcms:samplePcms(),donorEnvelope:await sampleDonor(),passphrase:''}));
+  const sealedDonor=await sampleDonor();
+  await assert.rejects(()=>encodeIntegrated({pcms:samplePcms(),donorEnvelope:sealedDonor,passphrase:''}));
   assert.equal(mutationCount,0);
 });
 test('P55-01: malformed or unknown required store, duplicate key, donor plaintext, unsupported binary hold',async()=>{
@@ -71,7 +72,7 @@ test('P55-01: malformed or unknown required store, duplicate key, donor plaintex
   const p2=samplePcms();p2.stores.meta.push(p2.stores.meta[0]);
   assert.throws(()=>validatePcmsSnapshot(p2),/BACKUP_DUPLICATE_ROW/);
   const p3=samplePcms();p3.stores.entities[0].value.cyclic=()=>{};
-  assert.rejects(()=>encodeIntegrated({pcms:p3,donorEnvelope:'{}',passphrase:PASSWORD}));
+  await assert.rejects(()=>encodeIntegrated({pcms:p3,donorEnvelope:'{}',passphrase:PASSWORD}));
   assert.throws(()=>serializeClone({danger:new Blob(['not supported'])}),/BACKUP_UNSUPPORTED_VALUE/);
   const x=serializeClone({src:new Uint8Array([0,1,255]),now:new Date('2026-01-01T00:00:00Z')});
   assert.deepEqual([...deserializeClone(x).src],[0,1,255]);
