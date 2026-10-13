@@ -1507,8 +1507,10 @@ def main():
                   const s1=await store.observeNative(slug,send.revision,{
                     ok:true,slug,sessionDigest:a,busy:false,chatEntries:2,sourceSaved:true});
                   const save=await store.checkpointSource(slug,s1.revision,source);
+                  const full=await store.getJobFull(slug);
                   const test=(rev,chat)=>store.record(slug,rev,{type:'TEST',chat,
-                    name:'default_generator_smoke',sourceFingerprint:source.fingerprint,
+                    name:chat===1?full.job.prompt.tests[0]:'default_generator_smoke',
+                    sourceFingerprint:source.fingerprint,
                     independentSource:'INDEPENDENT_BROWSER_ASSERTION',
                     result:'PASS',observedAt:Date.now()});
                   const first=await test(save.revision,1);
