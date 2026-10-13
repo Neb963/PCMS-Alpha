@@ -1282,6 +1282,8 @@ def main():
                   const complete=await store.getJob(slug);
                   const recheck=await store.checkpointSource(slug,replay2.revision,repaired);
                   const afterRecheck=await store.getJob(slug);
+                  const changedAgain=await store.checkpointSource(slug,recheck.revision,original);
+                  const revoked=await store.getJob(slug);
                   done({ok:original.ok&&repaired.ok&&begun.ok&&send1.ok&&idle1.ok&&
                     snapshot1.ok&&pass1.ok&&reset.ok&&
                     stale.code==='AI_CHAT2_RESET_NOT_PROVEN'&&
@@ -1294,7 +1296,11 @@ def main():
                     replay2.ok&&complete.state==='TESTS_VERIFIED'&&
                     complete.slotReleased===true&&recheck.ok&&
                     afterRecheck.state==='TESTS_VERIFIED'&&
-                    afterRecheck.slotReleased===true,
+                    afterRecheck.slotReleased===true&&changedAgain.ok&&
+                    revoked.state==='TESTS_UNVERIFIED'&&
+                    revoked.slotReleased===false&&
+                    revoked.evidence.chat1Pass===false&&
+                    revoked.evidence.chat2Pass===false,
                     saved:saved2.evidence.state,step1:planned1,step2:planned2,
                     pass2:replay2?.state,complete:complete.state,
                     afterRecheck:afterRecheck.state});
