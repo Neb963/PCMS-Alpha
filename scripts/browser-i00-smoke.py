@@ -1257,8 +1257,16 @@ def main():
                   });
                   const pass1=await smoke(snapshot1.revision,1,original.fingerprint);
                   const reset=await store.armNative(slug,pass1.revision,'CHAT2_RESET');
+                  const stale=await store.observeNative(slug,reset.revision,{
+                    ok:true,slug,sessionDigest:null,busy:false,chatEntries:1,sourceSaved:true
+                  });
+                  const pendingDraft=await store.observeNative(slug,reset.revision,{
+                    ok:true,slug,sessionDigest:null,busy:false,chatEntries:0,
+                    inputOccupied:true,sourceSaved:true
+                  });
                   const empty=await store.observeNative(slug,reset.revision,{
-                    ok:true,slug,sessionDigest:null,busy:false,chatEntries:0,sourceSaved:true
+                    ok:true,slug,sessionDigest:null,busy:false,chatEntries:0,
+                    inputOccupied:false,hasQueue:false,sourceSaved:true
                   });
                   const send2=await store.armNative(slug,empty.revision,'CHAT2_SEND');
                   const idle2=await store.observeNative(slug,send2.revision,{
@@ -1275,7 +1283,10 @@ def main():
                   const recheck=await store.checkpointSource(slug,replay2.revision,repaired);
                   const afterRecheck=await store.getJob(slug);
                   done({ok:original.ok&&repaired.ok&&begun.ok&&send1.ok&&idle1.ok&&
-                    snapshot1.ok&&pass1.ok&&reset.ok&&empty.ok&&send2.ok&&idle2.ok&&
+                    snapshot1.ok&&pass1.ok&&reset.ok&&
+                    stale.code==='AI_CHAT2_RESET_NOT_PROVEN'&&
+                    pendingDraft.code==='AI_CHAT2_RESET_NOT_PROVEN'&&
+                    empty.ok&&send2.ok&&idle2.ok&&
                     sid1!==sid2&&saved2.evidence.chat1Pass===false&&
                     saved2.evidence.state==='TESTS_UNVERIFIED'&&
                     planned1.type==='RUN_TESTS'&&planned1.chat===1&&
