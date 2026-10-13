@@ -96,7 +96,7 @@ export function createReleaseBoundary(api,{
   effectGate=()=>false,
   dispatch=async(g,r)=>g.runReleaseStep?.(r.personaUid,{
     slug:r.slug,nonce:r.nonce,action:'PUBLISH',remotePublicId:r.remotePublicId,
-    principalFingerprint:r.principalFingerprint})
+    principalFingerprint:r.principalFingerprint,files:r.releaseFiles})
 }={}){
   let dbPromise;
   const db=()=>dbPromise ||=open().catch(e=>{dbPromise=null;throw e;});
@@ -224,7 +224,7 @@ export function createReleaseBoundary(api,{
          (await sentinel.inspect()).held)return store.settle(p.slug,armed.revision,
            {reason:'ACTIVATION_REVOKED_AFTER_DISPATCH_MARK'});
       let attempt;
-      try{attempt=await dispatch(guard(),checked.r);}
+      try{attempt=await dispatch(guard(),{...checked.r,releaseFiles:checked.source.blobs});}
       catch{attempt=fail('PUBLISH_RESPONSE_UNKNOWN');}
       // Even ACK is NOT public proof. Reconcile with a fresh remote read,
       // and never automatically retry a possible publication effect.
