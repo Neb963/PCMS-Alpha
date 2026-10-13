@@ -19,8 +19,9 @@ const files=()=>[{path:'main.pjs',base64:encode('let x = 2;')},
   {path:'src/one.bin',base64:Buffer.from([0,127,255]).toString('base64')},
   {path:'src/empty.txt',base64:''}];
 function fixture({gate=false,lostAck=false,denyRoute=false,drift=false,dirtyOriginal=false,
-  release=false,breakReadback=false,editorDirty=false}={}){
-  let current=null,version=0;
+  release=false,breakReadback=false,editorDirty=false,
+  routeLossAfterPrepare=false,wrongPrincipal=false}={}){
+  let current=null,version=0,routeChecks=0;
   const trace=[],remote=[];
   const stage={
     list:async()=>({ok:true,items:current?[{ok:true,...current}]:[]}),
@@ -50,16 +51,17 @@ function fixture({gate=false,lostAck=false,denyRoute=false,drift=false,dirtyOrig
   };
   const observer=async(_uid,_identity,slug)=>{
     if(slug!=='stage-one')return {ok:false,code:'INVALID_TARGET'};
-    const pjs=remote.length?'let x = 2;':'';
+    const pjs=remote.length?'let x = 2;':dirtyOriginal?'// human edits':'';
     const html=remote.length?'<main>draft</main>':'';
-    return {ok:true,principalFingerprint:acct.identity.principalFingerprint,
+    return {ok:true,principalFingerprint:wrongPrincipal?'b'.repeat(64):acct.identity.principalFingerprint,
       original:{remotePublicId:item.remoteId,ownerResult:'IS_OWNER',visibility:'UNLISTED',
         pjs,html,assets:remote.length?
           (breakReadback?files().slice(2,3):files().slice(2)):[]}};
   };
-  const guard={getSafeRouteReadiness:async()=>denyRoute?
+  const guard={getSafeRouteReadiness:async()=>{routeChecks++;return (denyRoute||
+    (routeLossAfterPrepare&&routeChecks>=3))?
     {ready:false,code:'DIRECT_FORBIDDEN'}:
-    {ready:true,routeId:'wg-a',cookieStoreId:'cookie-1'},
+    {ready:true,routeId:'wg-a',cookieStoreId:'cookie-1'};},
     observeReadOnly:observer,
     async runStageStep(){
       assert.equal(trace.at(-1),'DISPATCH_POSSIBLE');
@@ -180,4 +182,23 @@ test('P52-07 negative: saved bytes match but dirty or unknown editor blocks acce
   assert.equal((await f.reconcile()).code,'EDITOR_UNKNOWN');
   assert.equal(f.current.state,'SAVED_UNVERIFIED');
   assert.equal(f.remote.length,1);
+});
+
+test('X-I09 adversarial: nonempty private target or wrong principal never pins or mutates',async()=>{
+  for(const variant of [{dirtyOriginal:true},{wrongPrincipal:true}]){
+    const f=fixture({gate:true,...variant});
+    const response=await f.pin();
+    assert.equal(response.ok,false,JSON.stringify(variant));
+    assert.deepEqual(f.trace,[]);
+    assert.deepEqual(f.remote,[]);
+  }
+});
+test('X-I09 adversarial: route loss after PREPARED leaves no possible dispatch or fallback',async()=>{
+  const f=fixture({gate:true,routeLossAfterPrepare:true});
+  assert.equal((await f.pin()).ok,true);
+  const response=await f.dispatch();
+  assert.equal(response.code,'PREPARED_GUARD_CHANGED');
+  assert.deepEqual(f.trace,['PREPARED']);
+  assert.deepEqual(f.remote,[]);
+  assert.equal((await f.dispatch()).code,'RECONCILIATION_REQUIRED');
 });
