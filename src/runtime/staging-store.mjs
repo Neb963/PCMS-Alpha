@@ -113,8 +113,7 @@ export function createStagingStore(db){
           const link=l.target.result?.link;
           m.get('account:'+eligibility.account.accountId).onsuccess=a=>{
             const account=a.target.result?.account;
-            if(!link||link.folder!==source.folder||link.fingerprint!==source.fingerprint||
-               link.testingSha!==source.testingSha||link.accountId!==account?.accountId||
+            if(!link||link.folder!==source.folder||link.accountId!==account?.accountId||
                !account||account.revision!==eligibility.account.revision||
                account.bindingVersion!==eligibility.account.bindingVersion||
                account.personaUid!==eligibility.account.personaUid){
