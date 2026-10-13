@@ -44,7 +44,8 @@ test('I10 F background alarm tick is bounded, oldest first and protected route d
     effectGate:()=>true,
     storeFactory:()=>({
       list:async()=>({ok:true,truncated:false,jobs:[{slug:newer.slug},{slug:oldest.slug}]}),
-      getJobFull:async slug=>({ok:true,job:slug===id?oldest:newer})
+      getJobFull:async slug=>({ok:true,job:slug===id?oldest:newer}),
+      deferScheduler:async()=>({ok:true})
     }),
     stageFactory:()=>({getFull:async slug=>{
       stageReads++;
@@ -83,4 +84,60 @@ test('I10 X overlapping wakes cannot run parallel scheduler passes',async()=>{
   unblock();
   assert.equal((await first).code,'AI_NO_ELIGIBLE_WORK');
   assert.equal(scans,1);
+});
+
+test('I10 F cold-wake model: durable deferral skips held oldest and admits independent next job',async()=>{
+  const {api}=apiFixture();
+  const jobs={
+    'a-older':{slug:'a-older',revision:1,state:'HELD_RECONCILE',
+      sourceFingerprint:sha,stageRevision:1,createdAt:100,
+      prompt:{tests:['default_generator_smoke']},chat1:{sessionDigest:null,tests:{}},
+      native:{step:'CHAT1_SEND',state:'DISPATCH_POSSIBLE'}},
+    'z-newer':{slug:'z-newer',revision:1,state:'HELD_RECONCILE',
+      sourceFingerprint:sha,stageRevision:1,createdAt:200,
+      prompt:{tests:['default_generator_smoke']},chat1:{sessionDigest:null,tests:{}},
+      native:{step:'CHAT1_SEND',state:'DISPATCH_POSSIBLE'}}
+  };
+  const visited=[],saved=[];
+  const store={
+    list:async()=>({ok:true,truncated:false,jobs:Object.values(jobs).map(j=>({slug:j.slug}))}),
+    getJobFull:async slug=>({ok:true,job:jobs[slug]}),
+    deferScheduler:async(slug,revision,until,code)=>{
+      assert.equal(jobs[slug].revision,revision);
+      jobs[slug]={...jobs[slug],revision:revision+1,
+        schedulerDeferredUntil:until,schedulerHold:code};
+      saved.push({slug,until,code});return{ok:true};
+    }
+  };
+  const options={
+    open:async()=>({}),clock:()=>1000,effectGate:()=>true,
+    storeFactory:()=>store,
+    stageFactory:()=>({getFull:async slug=>{
+      visited.push(slug);
+      return {ok:true,record:{slug,state:'SOURCE_VERIFIED',revision:1,personaUid:slug}};
+    }}),
+    guard:()=>({runNativeAiStep:async()=>{throw Error('SHOULD_NOT_RUN')},
+      getSafeRouteReadiness:async()=>({ready:false,code:'ROUTE_UNVERIFIED'})})
+  };
+  const first=createAiBoundary(api,options);
+  assert.equal((await first.tick()).code,'ROUTE_UNVERIFIED');
+  assert.deepEqual(visited,['a-older']);
+  assert.equal(saved[0].until,121000);
+  assert.equal(saved[0].code,'AI_WAKE_ROUTE_UNVERIFIED');
+  // Reconstruct controller instance: volatile tickBusy memory is gone.
+  const cold=createAiBoundary(api,options);
+  assert.equal((await cold.tick()).code,'ROUTE_UNVERIFIED');
+  assert.deepEqual(visited,['a-older','z-newer']);
+  assert.equal((await cold.tick()).code,'AI_NO_ELIGIBLE_WORK');
+  assert.equal(saved.length,2);
+  assert.equal(jobs['a-older'].native.state,'DISPATCH_POSSIBLE');
+  assert.equal(jobs['z-newer'].native.state,'DISPATCH_POSSIBLE');
+});
+test('I10 X virtual clock and failed canonical defer never imply successful scheduling',async()=>{
+  const {api}=apiFixture();
+  const bad=createAiBoundary(api,{open:async()=>({}),effectGate:()=>true,
+    clock:()=>NaN,storeFactory:()=>({
+      list:async()=>({ok:true,jobs:[],truncated:false})
+    })});
+  assert.equal((await bad.tick()).code,'AI_SCHEDULER_CLOCK_UNVERIFIED');
 });
