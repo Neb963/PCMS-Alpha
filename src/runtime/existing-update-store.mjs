@@ -1,7 +1,7 @@
 // I13 local existing-source mutation ledger. One independent step per command;
 // never infer safe retry from absent ACK or restart. No remote effect in IDB.
 import {fail} from './journal.mjs';
-import {REFRESHER_KEY} from './refresher-core.mjs';
+import {REFRESHER_KEY,validShadow} from './refresher-core.mjs';
 import {authorizeSleepingUpdate} from './existing-update-core.mjs';
 const valid=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const key=s=>'existing-update:'+s;
@@ -48,7 +48,10 @@ export function createExistingStore(db){
                   liveInventory=i.target.result?.generator,
                   liveAdoption=o.target.result?.adoption,
                   state=sh.target.result?.state,liveShadow=state?.rows?.find(v=>v.slug===s);
-                if(liveAccount?.revision!==account.revision||
+                if(!validShadow(state)||!liveAdoption||
+                   liveAdoption.original?.fingerprint!==context.originalArchiveFingerprint||
+                   liveAdoption.original?.source!=='INDEPENDENT_FULL_BYTE_READBACK'||
+                   liveAccount?.revision!==account.revision||
                    liveInventory?.revision!==inventory.revision||
                    liveAdoption?.revision!==adoption.revision||
                    !liveShadow||liveShadow.phase!==shadow.phase||
@@ -132,7 +135,7 @@ export function createExistingStore(db){
           function checkShadow(item){
           m.get(REFRESHER_KEY).onsuccess=sh=>{
             const state=sh.target.result?.state,row=state?.rows?.find(v=>v.slug===s);
-            if(!row||(
+            if(!validShadow(state)||!row||(
                  !['RESTORE_DISPATCH','RECOVERY_UNLIST_DISPATCH'].includes(event)&&
                  (row.phase!=='SLEEPING'||row.slot===true)
                )||row.paused===true||state.globalPause===true||
