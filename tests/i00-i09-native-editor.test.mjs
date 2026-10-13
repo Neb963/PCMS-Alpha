@@ -15,7 +15,7 @@ function fixture({dirty=false,collab=false,collabMode=null,humanTab=false,handof
   const source={ready:async()=>{if(rebindDuringReady&&window.yjsProvider)
     window.__collabGeneration=(window.__collabGeneration||0)+1;},
     list:()=>new Map(files),isDirty:async()=>srcDirty,
-    hasPending:()=>false,fileCount:0,conflictPaths:()=>[],
+    hasPending:()=>false,fileCount:()=>files.size,conflictPaths:()=>[],
     async writeFile(path,bytes){
       effect.push('src:'+path);files.set(path,bytes);srcDirty=true;
       if(handoffDuringWrite)humanIntent=true;

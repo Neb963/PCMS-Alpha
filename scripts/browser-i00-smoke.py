@@ -1883,6 +1883,414 @@ def main():
                 assert restarted['held']=='UNKNOWN',restarted
                 print('B I12_PERSISTENT_RESTART_BUDGET_PAUSE_SINGLE_ALARM_REPAIR=PASS',flush=True)
 
+                # I13 B: exact packaged XPI, real IndexedDB atomic approval
+                # vs duplicate dispatch, installed operator controls, and
+                # independent postrestart uncertainty. No live provider effects.
+                call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
+                ui=execute(after,"return {release:!!document.getElementById('pcms-release-preview'),approve:document.getElementById('pcms-release-approve').disabled,dispatch:document.getElementById('pcms-release-dispatch').disabled,resolve:document.getElementById('pcms-release-reconcile').disabled}")
+                assert ui=={'release':True,'approve':True,'dispatch':True,'resolve':True},ui
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const stageCore=await import('./staging-core.mjs');
+                  const core=await import('./release-core.mjs');
+                  const module=await import('./release-store.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const text=s=>btoa(s),slug='i13-fixture-release',fp='e'.repeat(64);
+                  const source=await stageCore.exactSource([
+                    {path:'main.pjs',base64:text('F source')},
+                    {path:'index.html',base64:text('<h1>F</h1>')},
+                    {path:'src/binary.bin',base64:btoa(String.fromCharCode(0,255,1))}]);
+                  const previous=await stageCore.exactSource([
+                    {path:'main.pjs',base64:text('')},
+                    {path:'index.html',base64:text('')}]);
+                  const stage={slug,accountId:'i13_account_fixture',
+                    personaUid:'persona-i13-fixture',bindingVersion:1,
+                    accountRevision:4,principalFingerprint:fp,
+                    remotePublicId:'public_i13_fixture',revision:2,
+                    state:'SOURCE_VERIFIED',verifiedAt:Date.now(),
+                    sourceFolder:'gens/i13-fixture-release',testingSha:fp,
+                    sourceHead:'f'.repeat(40),nonce:'1'.repeat(32),
+                    previous,candidate:source};
+                  const job={slug,revision:3,stageRevision:2,
+                    sourceFingerprint:source.fingerprint,verifiedFinal:source.fingerprint,
+                    finalSource:source,state:'TESTS_VERIFIED',executionSlotReleased:true,
+                    prompt:{revision:1,tests:['default_generator_smoke']},
+                    native:{state:'CHAT1_OBSERVED_IDLE',sessionDigest:fp},
+                    chat1:{tests:{default_generator_smoke:{
+                      result:'PASS',sourceFingerprint:source.fingerprint}}},chat2:null};
+                  const account={accountId:stage.accountId,personaUid:stage.personaUid,
+                    bindingVersion:1,revision:4,state:'VERIFIED',
+                    identity:{source:'GUARDED_SESSION_READBACK',
+                      bindingVersion:1,principalFingerprint:fp}};
+                  const inventory={slug,revision:5,accountId:account.accountId,
+                    personaUid:stage.personaUid,bindingVersion:1,
+                    remoteId:stage.remotePublicId,ownerState:'OBSERVED_OWNER',visibility:'UNLISTED'};
+                  await new Promise((resolve,reject)=>{
+                    const tx=db.transaction('meta','readwrite'),m=tx.objectStore('meta');
+                    m.put({key:'stage:'+slug,record:stage});
+                    m.put({key:'ai-job:'+slug,job});
+                    m.put({key:'account:'+account.accountId,account});
+                    m.put({key:'inventory:'+slug,generator:inventory});
+                    tx.oncomplete=resolve;tx.onabort=()=>reject(Error('I13 seed aborted'));
+                  });
+                  const git={ok:true,testingSha:fp};
+                  const approval=core.approvalTuple({slug,stage,job,source,previous,git});
+                  const store=module.createReleaseStore(db);
+                  const first=await store.approve({approval,stage,job,account,inventory,
+                    source,previous,kind:'PRIVATE_NEW',
+                    releaseId:'release_'+ 'f'.repeat(32)});
+                  const duplicate=await store.approve({approval,stage,job,account,inventory,
+                    source,previous,kind:'PRIVATE_NEW',
+                    releaseId:'release_'+ 'd'.repeat(32)});
+                  const results=await Promise.all([
+                    store.markDispatch(slug,first.revision,approval.tuple),
+                    store.markDispatch(slug,first.revision,approval.tuple)]);
+                  const successes=results.filter(r=>r.ok).length;
+                  const advanced=results.find(r=>r.ok);
+                  const uncertain=await store.settle(slug,advanced.revision,{
+                    proof:{ok:true,source:'INDEPENDENT_PUBLICATION_READBACK',
+                      sourceFingerprint:'0'.repeat(64)},
+                    reason:'MISMATCH_OR_LOST_ACK'});
+                  const retried=await store.markDispatch(slug,uncertain.revision,approval.tuple);
+                  const port=browser.runtime.connect({name:'pcms-i13-release'});
+                  const delivered=new Promise(resolve=>port.onMessage.addListener(v=>resolve(v)));
+                  port.postMessage({type:'GET',params:{slug}});
+                  const actual=await delivered;port.disconnect();
+                  const restored=await store.get(slug);
+                  done({ok:first.ok&&duplicate.code==='EXISTING_RELEASE_REQUIRES_REVIEW'&&
+                    successes===1&&uncertain.state==='PUBLICATION_UNCERTAIN'&&
+                    retried.ok===false&&restored.revision===uncertain.revision&&
+                    actual.state==='PUBLICATION_UNCERTAIN',
+                    first,duplicate,successes,uncertain,retried,actual});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,600)}));"""
+                proof=call('POST',f'/session/{after}/execute/async',
+                           {'script':code,'args':[]},timeout=90)
+                assert proof.get('ok') is True,proof
+                print('B I13_PACKAGED_EXACT_APPROVAL_IDB_CAS_NO_REPLAY_AND_PORT=PASS',flush=True)
+                chunk_script="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const req=db.transaction('meta','readonly').objectStore('meta').get('stage:i13-fixture-release');
+                  const stage=await new Promise(resolve=>req.onsuccess=()=>resolve(req.result?.record));
+                  function ask(params){
+                    return new Promise(resolve=>{
+                      const port=browser.runtime.connect({name:'pcms-i13-release'});
+                      port.onMessage.addListener(v=>{resolve(v);port.disconnect();});
+                      port.postMessage({type:'GET_REVIEW_CHUNK',params});
+                    });
+                  }
+                  const base={slug:stage.slug,stageRevision:stage.revision,
+                    fingerprint:stage.candidate.fingerprint};
+                  const root=await ask({...base,origin:'F',path:'main.pjs',offset:0});
+                  const image=await ask({...base,origin:'F',path:'src/binary.bin',offset:0});
+                  const prior=await ask({...base,origin:'P',path:'main.pjs',offset:0});
+                  const invalid=await ask({...base,origin:'F',path:'../private',offset:0});
+                  done({ok:root.ok&&atob(root.base64)==='F source'&&
+                    image.ok&&atob(image.base64)===String.fromCharCode(0,255,1)&&
+                    prior.ok&&prior.length===0&&!invalid.ok,
+                    root:{ok:root.ok,total:root.total},image:{ok:image.ok,total:image.total},
+                    prior:{ok:prior.ok,total:prior.total},invalid});
+                  db.close();
+                })().catch(e=>done({error:String(e)}));"""
+                proof=call('POST',f'/session/{after}/execute/async',
+                           {'script':chunk_script,'args':[]},timeout=90)
+                assert proof.get('ok') is True,proof
+                print('B I13_PACKAGED_P_F_BINARY_PAGED_SOURCE_REVIEW=PASS',flush=True)
+                close(after)
+                after=open_session(browser,profile)
+                assert addons_uuid(profile)==uuid
+                call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
+                proof=call('POST',f'/session/{after}/execute/async',{'script':"""
+                const done=arguments[arguments.length-1];
+                (async()=>{
+                  const db=await (await import('./journal.mjs')).openCanonicalDatabase();
+                  const r=await (await import('./release-store.mjs'))
+                    .createReleaseStore(db).get('i13-fixture-release');
+                  const port=browser.runtime.connect({name:'pcms-i13-release'});
+                  port.onMessage.addListener(x=>{done({receipt:r,port:x});port.disconnect();db.close();});
+                  port.postMessage({type:'GET',params:{slug:'i13-fixture-release'}});
+                })().catch(e=>done({error:String(e)}));""",'args':[]},timeout=90)
+                assert proof['receipt']['state']=='PUBLICATION_UNCERTAIN' and (
+                    proof['port']['state']=='PUBLICATION_UNCERTAIN'),proof
+                print('B I13_INSTALLED_RESTART_DURABLE_UNCERTAIN_PUBLICATION=PASS',flush=True)
+
+                # I13 B: existing public P is an encrypted sealed snapshot;
+                # real Firefox IDB serializes races and holds uncertain effects.
+                call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
+                current=execute(after,"return {prepare:!!document.getElementById('pcms-existing-prepare'),verify:!!document.getElementById('pcms-existing-recheck-unlist'),restore:!!document.getElementById('pcms-existing-recheck-restore'),held:document.getElementById('pcms-existing-unlist').disabled}")
+                assert current=={'prepare':True,'verify':True,'restore':True,'held':True},current
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const core=await import('./existing-update-core.mjs');
+                  const module=await import('./existing-update-store.mjs');
+                  const source=(await import('./staging-core.mjs'));
+                  const refresher=await import('./refresher-core.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const slug='i13-existing-fixture',fp='e'.repeat(64),
+                    accountId='i13_existing_account',personaUid='persona-i13-existing',
+                    remoteId='public_i13_existing01';
+                  const p=await source.exactSource([
+                    {path:'main.pjs',base64:btoa('original')},
+                    {path:'index.html',base64:btoa('<p>P</p>')},
+                    {path:'src/binary.bin',base64:btoa(String.fromCharCode(0,255,8))}
+                  ]);
+                  const seal=await core.sealPrevious(p,'browser-fixture-private-passphrase');
+                  const decrypted=await core.unlockPrevious(seal,'browser-fixture-private-passphrase');
+                  const negative=await core.unlockPrevious(seal,'wrong-browser-fixture-passphrase');
+                  const account={accountId,personaUid,revision:4,bindingVersion:1,state:'VERIFIED',
+                    identity:{source:'GUARDED_SESSION_READBACK',bindingVersion:1,
+                      principalFingerprint:fp}};
+                  const inventory={slug,accountId,personaUid,bindingVersion:1,revision:2,
+                    remoteId,ownerState:'OBSERVED_OWNER',visibility:'PUBLIC'};
+                  const adoption={slug,accountId,personaUid,bindingVersion:1,accountRevision:4,
+                    principalFingerprint:fp,remotePublicId:remoteId,
+                    revision:6,archiveState:'ARCHIVED_GIT_CONFIRMED',
+                    original:{source:'INDEPENDENT_FULL_BYTE_READBACK',
+                      fingerprint:p.fingerprint,blobs:p.blobs}};
+                  const state=refresher.emptyShadow();
+                  state.rows.push({stableId:'i13_existing_stable',slug,accountId,personaUid,
+                    bindingVersion:1,remoteId,phase:'SLEEPING',sleepRemaining:72*3600000,
+                    activeRemaining:0,ordinal:1,paused:false,slot:false,identityHeld:false,
+                    ownerVerified:true,releaseVerified:true,reviewHeld:false});
+                  state.accounts[accountId]={personaUid,bindingVersion:1,paused:false};
+                  if(!refresher.validShadow(state))throw Error('invalid synthetic shadow');
+                  await new Promise((resolve,reject)=>{
+                    const t=db.transaction(['meta'],'readwrite'),m=t.objectStore('meta');
+                    m.put({key:'account:'+accountId,account});
+                    m.put({key:'inventory:'+slug,generator:inventory});
+                    m.put({key:'adoption:'+slug,adoption});
+                    m.put({key:refresher.REFRESHER_KEY,state});
+                    t.oncomplete=resolve;t.onabort=()=>reject(Error('I13 seed aborted'));
+                  });
+                  const store=module.createExistingStore(db);
+                  const remote={ok:true,remotePublicId:remoteId,ownerResult:'IS_OWNER',
+                    visibility:'PUBLIC',source:p};
+                  const first=await store.prepare({context:{
+                    ok:true,originalArchiveFingerprint:p.fingerprint},
+                    original:p,seal,remote,shadow:state.rows[0],account,inventory,adoption});
+                  const second=await store.prepare({context:{
+                    ok:true,originalArchiveFingerprint:p.fingerprint},
+                    original:p,seal,remote,shadow:state.rows[0],account,inventory,adoption});
+                  const competing=await Promise.all([
+                    store.move(slug,first.revision,'UNLIST_DISPATCH'),
+                    store.move(slug,first.revision,'UNLIST_DISPATCH')]);
+                  const winners=competing.filter(x=>x.ok);
+                  const operations=await new Promise((resolve,reject)=>{
+                    const t=db.transaction('operations','readonly');
+                    const req=t.objectStore('operations').getAll();
+                    req.onsuccess=()=>resolve(req.result.filter(x=>
+                      x.targetId==='existing_'+slug));
+                    req.onerror=()=>reject(Error('operations unavailable'));
+                  });
+                  const uncertain=await store.move(slug,winners[0].revision,
+                    'UNLIST_UNCERTAIN',{reason:'LOST_ACK'});
+                  const retry=await store.move(slug,uncertain.revision,'UNLIST_DISPATCH');
+                  const port=browser.runtime.connect({name:'pcms-i13-existing'});
+                  const reply=new Promise(resolve=>port.onMessage.addListener(resolve));
+                  port.postMessage({type:'GET',params:{slug}});
+                  const actual=await reply;port.disconnect();
+                  done({ok:seal.ok&&decrypted.ok&&!negative.ok&&first.ok&&
+                    second.code==='EXISTING_ALREADY_PREPARED'&&winners.length===1&&
+                    operations.length===1&&
+                    operations[0].status==='DISPATCH_POSSIBLE'&&
+                    uncertain.state==='UNLIST_UNCERTAIN'&&retry.ok===false&&
+                    actual.state==='UNLIST_UNCERTAIN',
+                    first,second,competing,operations:operations.length,
+                    uncertain,retry,actual});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,600)}));"""
+                proof=call('POST',f'/session/{after}/execute/async',
+                           {'script':code,'args':[]},timeout=90)
+                assert proof.get('ok') is True,proof
+                print('B I13_INSTALLED_EXISTING_ENCRYPTED_P_CAS_UNLIST_UNCERTAIN=PASS',flush=True)
+                execute(after,"document.getElementById('pcms-existing-slug').value='i13-existing-fixture';document.getElementById('pcms-existing-slug').dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('pcms-existing-get').click();return true")
+                existing_ui=''
+                for _ in range(80):
+                    existing_ui=execute(after,"return document.getElementById('pcms-existing-status').textContent")
+                    if 'UNLIST_UNCERTAIN' in existing_ui:break
+                    time.sleep(.15)
+                assert 'UNLIST_UNCERTAIN' in existing_ui,existing_ui
+                assert execute(after,"return document.getElementById('pcms-existing-unlist').disabled") is True
+                print('B I13_EXISTING_UI_NO_BLIND_UNLIST_RETRY=PASS',flush=True)
+
+                # Synthetic prior confirmed public F permits a NEW source
+                # lifecycle only with archived immutable release/AI/stage/P.
+                cycle="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs'),core=await import('./staging-core.mjs');
+                  const rec=await import('./existing-update-core.mjs');
+                  const existing=await import('./existing-update-store.mjs');
+                  const stageModule=await import('./staging-store.mjs');
+                  const aiModule=await import('./ai-store.mjs');
+                  const releaseModule=await import('./release-store.mjs');
+                  const refresh=await import('./refresher-core.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const slug='i13-repeat-generator',fp='f'.repeat(64),
+                    accountId='i13_repeat_account',personaUid='persona-i13-repeat',
+                    remoteId='public_i13_repeat';
+                  const original=await core.exactSource([{path:'main.pjs',base64:btoa('previous P0')},
+                    {path:'index.html',base64:btoa('<p>P0</p>')}]);
+                  const p1=await core.exactSource([{path:'main.pjs',base64:btoa('published P1')},
+                    {path:'index.html',base64:btoa('<p>P1</p>')}]);
+                  const p2=await core.exactSource([{path:'main.pjs',base64:btoa('ready P2')},
+                    {path:'index.html',base64:btoa('<p>P2</p>')}]);
+                  const account={accountId,personaUid,revision:4,state:'VERIFIED',
+                    bindingVersion:1,identity:{source:'GUARDED_SESSION_READBACK',
+                      bindingVersion:1,principalFingerprint:fp}};
+                  const inventory={slug,revision:3,accountId,personaUid,
+                    bindingVersion:1,remoteId,ownerState:'OBSERVED_OWNER',visibility:'UNLISTED'};
+                  const adoption={slug,revision:6,accountId,accountRevision:4,personaUid,
+                    bindingVersion:1,principalFingerprint:fp,remotePublicId:remoteId,
+                    archiveState:'ARCHIVED_GIT_CONFIRMED',original:{
+                      source:'INDEPENDENT_FULL_BYTE_READBACK',
+                      fingerprint:original.fingerprint,blobs:original.blobs}};
+                  const initial={slug,revision:12,state:'STAGE_CONFIRMED',accountId,
+                    accountRevision:4,personaUid,bindingVersion:1,
+                    principalFingerprint:fp,remotePublicId:remoteId,
+                    previousFingerprint:original.fingerprint,
+                    stagedFingerprint:p1.fingerprint,
+                    stageSource:p1,recovery:(await rec.sealPrevious(original,'synthetic-history-passphrase')),
+                    nonce:'1'.repeat(32),operationId:'existing_'+ '1'.repeat(32)};
+                  const priorStage={slug,revision:5,state:'SOURCE_VERIFIED',
+                    accountId,accountRevision:4,personaUid,bindingVersion:1,
+                    principalFingerprint:fp,remotePublicId:remoteId,
+                    sourceFolder:'gens/'+slug,sourceHead:'a'.repeat(40),
+                    testingSha:fp,candidate:p1,previous:original,
+                    verifiedAt:Date.now(),nonce:'1'.repeat(32)};
+                  const priorJob={slug,revision:7,stageRevision:5,
+                    state:'TESTS_VERIFIED',executionSlotReleased:true,
+                    sourceFingerprint:p1.fingerprint,verifiedFinal:p1.fingerprint,
+                    finalSource:p1,prompt:{revision:1,tests:['default_generator_smoke']},
+                    native:{state:'CHAT1_OBSERVED_IDLE',sessionDigest:fp},
+                    chat1:{tests:{default_generator_smoke:{
+                      result:'PASS',sourceFingerprint:p1.fingerprint}}},chat2:null};
+                  const approved={slug,accountId,personaUid,bindingVersion:1,accountRevision:4,
+                    principalFingerprint:fp,remotePublicId:remoteId,
+                    stageRevision:5,jobRevision:7,sourceFingerprint:p1.fingerprint,
+                    previousFingerprint:original.fingerprint,kind:'PRIVATE_NEW',
+                    files:p1.files,gitFolder:'gens/'+slug,
+                    gitTestingSha:fp,testPromptRevision:1,testingFingerprint:null};
+                  const priorRelease={slug,revision:6,releaseId:'release_'+ '1'.repeat(32),
+                    kind:'PRIVATE_NEW',state:'CONFIRMED_PUBLIC',
+                    accountId,personaUid,bindingVersion:1,remoteId,
+                    principalFingerprint:fp,source:'INDEPENDENT_PUBLICATION_READBACK',
+                    sourceFingerprint:p1.fingerprint,approvedAt:Date.now()-10000,
+                    observedAt:Date.now()-1000,observationId:'observed_'+ '2'.repeat(32),
+                    approval:approved,sealedSource:p1};
+                  const sh=refresh.emptyShadow();
+                  sh.rows=[{stableId:'i13_repeat_stable',slug,accountId,personaUid,
+                    remoteId,bindingVersion:1,ordinal:1,phase:'SLEEPING',
+                    sleepRemaining:36*3600000,activeRemaining:0,paused:false,slot:false,
+                    ownerVerified:true,releaseVerified:true,reviewHeld:false,identityHeld:false}];
+                  sh.accounts[accountId]={paused:false,personaUid,bindingVersion:1};
+                  const link={slug,folder:'gens/'+slug,accountId,bindingVersion:1,
+                    remoteId,personaUid};
+                  await new Promise((resolve,reject)=>{
+                    const t=db.transaction('meta','readwrite'),m=t.objectStore('meta');
+                    for(const item of [{key:'account:'+accountId,account},
+                      {key:'inventory:'+slug,generator:inventory},{key:'adoption:'+slug,adoption},
+                      {key:'existing-update:'+slug,record:initial},
+                      {key:'stage:'+slug,record:priorStage},
+                      {key:'ai-job:'+slug,accountId,job:priorJob},
+                      {key:'release:'+slug,release:priorRelease},
+                      {key:'source-link:'+slug,link},
+                      {key:refresh.REFRESHER_KEY,state:sh}])m.put(item);
+                    t.oncomplete=resolve;t.onabort=()=>reject(Error('repeat seed abort'));
+                  });
+                  const ec=existing.createExistingStore(db);
+                  const previous=await rec.sealPrevious(p1,'synthetic-history-passphrase');
+                  const prepared=await ec.prepare({context:{ok:true,
+                    originalArchiveFingerprint:original.fingerprint},
+                    original:p1,seal:previous,shadow:sh.rows[0],
+                    account,inventory,adoption,remote:{ok:true,remotePublicId:remoteId,
+                      ownerResult:'IS_OWNER',visibility:'PUBLIC',source:p1}});
+                  const priorHist=await new Promise(resolve=>{
+                    const req=db.transaction('meta','readonly').objectStore('meta')
+                      .get('existing-history:'+slug+':'+initial.operationId);
+                    req.onsuccess=()=>resolve(req.result?.record);
+                  });
+                  // Unlisting and bytes are simulated evidence only; separate
+                  // native tests prove the fixed effect path.
+                  const stages=stageModule.createStagingStore(db);
+                  const pinned=await stages.pin({slug,candidate:p2,previous:p1,
+                    source:{ok:true,ready:true,folder:'gens/'+slug,head:'b'.repeat(40),
+                      fingerprint:fp,testingSha:fp,sourceBytes:p2.blobs},
+                    eligibility:{ok:true,account,item:{remoteId}},nonce:'2'.repeat(32)});
+                  const oldStage=await new Promise(resolve=>{
+                    const req=db.transaction('meta','readonly').objectStore('meta')
+                      .get('stage-history:'+slug+':5');
+                    req.onsuccess=()=>resolve(req.result?.record);
+                  });
+                  // Seal a new SOURCE_VERIFIED stage in this synthetic fixture.
+                  await new Promise((resolve,reject)=>{
+                    const t=db.transaction('meta','readwrite'),m=t.objectStore('meta');
+                    m.put({key:'stage:'+slug,record:{...priorStage,revision:pinned.revision,
+                      nonce:'2'.repeat(32),candidate:p2,previous:p1,
+                      state:'SOURCE_VERIFIED'}});
+                    t.oncomplete=resolve;t.onabort=()=>reject(Error('stage advance abort'));
+                  });
+                  const ai=await aiModule.createAiStore(db).start({...priorStage,
+                    revision:pinned.revision,nonce:'2'.repeat(32),
+                    candidate:p2,previous:p1,state:'SOURCE_VERIFIED'});
+                  const oldAi=await new Promise(resolve=>{
+                    const req=db.transaction('meta','readonly').objectStore('meta')
+                      .get('ai-history:'+slug+':7');
+                    req.onsuccess=()=>resolve(req.result?.job);
+                  });
+                  const newJob={...priorJob,revision:ai.revision,stageRevision:pinned.revision,
+                    sourceFingerprint:p2.fingerprint,verifiedFinal:p2.fingerprint,
+                    finalSource:p2,chat1:{tests:{default_generator_smoke:{
+                      result:'PASS',sourceFingerprint:p2.fingerprint}}}};
+                  await new Promise((resolve,reject)=>{
+                    const t=db.transaction('meta','readwrite');
+                    t.objectStore('meta').put({key:'ai-job:'+slug,accountId,job:newJob});
+                    t.oncomplete=resolve;t.onabort=()=>reject(Error('synthetic tests seed aborted'));
+                  });
+                  const newStage=(await stages.getFull(slug)).record;
+                  const releaseCore=await import('./release-core.mjs');
+                  const approve=releaseCore.approvalTuple({slug,stage:newStage,
+                    job:newJob,source:p2,previous:p1,git:{ok:true,testingSha:fp},
+                    kind:'EXISTING_UPDATE'});
+                  const releases=releaseModule.createReleaseStore(db);
+                  const firstApproval=await releases.approve({approval:approve,stage:newStage,
+                    job:newJob,account,inventory,source:p2,previous:p1,
+                    releaseId:'release_'+ '3'.repeat(32),kind:'EXISTING_UPDATE'});
+                  const canceled=await releases.cancelApproved(slug,firstApproval.revision);
+                  const renewed=await releases.approve({approval:approve,stage:newStage,
+                    job:newJob,account,inventory,source:p2,previous:p1,
+                    releaseId:'release_'+ '4'.repeat(32),kind:'EXISTING_UPDATE'});
+                  const previousRelease=await new Promise(resolve=>{
+                    const req=db.transaction('meta','readonly').objectStore('meta')
+                      .get('release-history:'+slug+':'+priorRelease.releaseId);
+                    req.onsuccess=()=>resolve(req.result?.release);
+                  });
+                  const canceledHistory=await new Promise(resolve=>{
+                    const req=db.transaction('meta','readonly').objectStore('meta')
+                      .get('release-history:'+slug+':'+firstApproval.releaseId);
+                    req.onsuccess=()=>resolve(req.result?.release);
+                  });
+                  done({ok:prepared.ok&&priorHist?.state==='STAGE_CONFIRMED'&&
+                    pinned.ok&&pinned.revision===6&&oldStage?.revision===5&&
+                    ai.ok&&ai.revision===8&&oldAi?.revision===7&&
+                    firstApproval.ok&&canceled.state==='CANCELED'&&
+                    renewed.state==='APPROVED'&&
+                    previousRelease?.state==='CONFIRMED_PUBLIC'&&
+                    canceledHistory?.state==='CANCELED',
+                    prepared,pinned,ai,priorArchived:!!priorHist,
+                    stageArchived:!!oldStage,aiArchived:!!oldAi,
+                    firstApproval,canceled,renewed,
+                    releaseArchived:!!previousRelease,canceledArchived:!!canceledHistory});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,600)}));"""
+                proof=call('POST',f'/session/{after}/execute/async',
+                           {'script':cycle,'args':[]},timeout=90)
+                assert proof.get('ok') is True,proof
+                print('B I13_REPEAT_CYCLE_IMMUTABLE_EXISTING_STAGE_AI_HISTORY=PASS',flush=True)
+
                 # I08 B: real packaged Firefox crypto, canonical IDB, donor
                 # portable format, Settings action, and wrong-password failure.
                 # No live provider or native calls; no disk byte proof claimed.
