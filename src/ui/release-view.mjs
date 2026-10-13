@@ -65,6 +65,79 @@ function renderPreview(v){
   warning.textContent='Approve only this exact generator and F. Any test, owner, READY, '+
     'editor or byte drift must block dispatch. Approval is not publication.';
   details.append(warning);
+  const tests=document.createElement('p');
+  tests.textContent='Actual test attribution: '+v.tests?.state+
+    ' · Default prompt revision '+v.promptRevision+
+    ' · TESTING.md '+(v.testingSha||'not configured');
+  details.append(tests);
+  const assertions=document.createElement('ul');
+  for(const t of [...(v.tests?.default||[]),...(v.tests?.optional||[])]){
+    const item=document.createElement('li');
+    item.textContent=t.name+' — '+t.result+' on exact saved F';
+    assertions.append(item);
+  }
+  details.append(assertions);
+  const header=document.createElement('p');
+  header.textContent='Inspect full source bytes. Select each path, then page through all 8 KiB chunks. Binary shown in hex; no source leaves the extension.';
+  details.append(header);
+  const paths=[...new Set([...(v.files||[]),...(v.priorFiles||[])].map(x=>x.path))].sort();
+  const sourceSelector=document.createElement('select');
+  sourceSelector.setAttribute('aria-label','Exact source file for byte-by-byte review');
+  for(const path of paths) {
+    const item=document.createElement('option');item.value=path;item.textContent=path;
+    sourceSelector.append(item);
+  }
+  details.append(sourceSelector);
+  const panes=document.createElement('div');
+  const createPane=origin=>{
+    const wrap=document.createElement('section');
+    const label=document.createElement('p');
+    label.textContent=origin==='F'?'Final candidate F':'Previous-good P';
+    wrap.append(label);
+    const controls=document.createElement('div');controls.className='account-controls';
+    const previous=document.createElement('button');previous.type='button';
+    previous.textContent='Previous 8 KiB';
+    const next=document.createElement('button');next.type='button';
+    next.textContent='Next 8 KiB';
+    const code=document.createElement('pre');code.setAttribute('tabindex','0');
+    code.setAttribute('aria-label',label.textContent+' (exact bytes)');
+    code.style.overflow='auto';code.style.maxHeight='340px';
+    let offset=0,busy=false;
+    const load=async n=>{
+      if(busy||!snapshot||snapshot!==v)return;
+      busy=true;previous.disabled=true;next.disabled=true;
+      code.textContent='Reading canonical bytes…';
+      try{
+        const out=await command('GET_REVIEW_CHUNK',{
+          slug:v.slug,stageRevision:v.stageRevision,
+          fingerprint:v.sourceFingerprint,origin,
+          path:sourceSelector.value,offset:n});
+        if(snapshot!==v)return;
+        if(!out?.ok){code.textContent=out?.code||'SOURCE_REVIEW_HELD';return;}
+        offset=out.offset;
+        const bytes=Uint8Array.from(atob(out.base64),c=>c.charCodeAt(0));
+        let view;
+        if(out.path==='main.pjs'||out.path==='index.html'){
+          try{view=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}
+          catch{view=[...bytes].map(x=>x.toString(16).padStart(2,'0')).join(' ');}
+        }else view=[...bytes].map(x=>x.toString(16).padStart(2,'0')).join(' ');
+        code.textContent=out.path+' · '+out.offset+'–'+(out.offset+out.length)+
+          ' of '+out.total+' bytes · SHA-256 '+out.fileSha256+'\n'+view;
+        previous.disabled=offset===0;next.disabled=out.nextOffset===null;
+      }catch{
+        code.textContent='Review unavailable; canonical source may be stale.';
+      }finally{busy=false;}
+    };
+    previous.addEventListener('click',()=>load(offset-8192));
+    next.addEventListener('click',()=>load(offset+8192));
+    sourceSelector.addEventListener('change',()=>load(0));
+    controls.append(previous,next);wrap.append(controls,code);
+    panes.append(wrap);
+    return ()=>load(0);
+  };
+  const loadF=createPane('F'),loadP=createPane('P');
+  details.append(panes);
+  void loadF();void loadP();
 }
 async function act(type,params,message){
   if(active)return;
