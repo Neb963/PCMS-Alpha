@@ -1144,6 +1144,76 @@ def main():
                 assert ai_loop.get('ok') is True,ai_loop
                 print('B I10_PACKAGED_KNOWN_FAILURE_NOT_DOWNGRADED_AND_REPAIR_NO_PROGRESS_HOLD=PASS',flush=True)
 
+                # I10 B: real canonical IndexedDB CAS on globally versioned
+                # per-account concurrency, independent accounts, and observed
+                # idle/exact-source slot release. Pure synthetic, no provider.
+                call('POST',f'/session/{after}/url',{'url':url+'#settings'})
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const storeModule=await import('./ai-store.mjs');
+                  const core=await import('./staging-core.mjs');
+                  const journal=await import('./journal.mjs');
+                  const enc=text=>btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+                  const source=await core.exactSource([
+                    {path:'main.pjs',base64:enc('output = 1')},
+                    {path:'index.html',base64:enc('<p>prepared</p>')}
+                  ]);
+                  const db=await journal.openCanonicalDatabase();
+                  const store=storeModule.createAiStore(db);
+                  const before=await store.getConcurrency();
+                  const next=await store.changeConcurrency(before.setting.revision,2);
+                  const stale=await store.changeConcurrency(before.setting.revision,3);
+                  const bad=await store.changeConcurrency(next.setting.revision,50);
+                  const stage=(slug,accountId)=>({
+                    slug,accountId,revision:1,state:'SOURCE_VERIFIED',
+                    candidate:{fingerprint:source.fingerprint},
+                    previous:{fingerprint:'b'.repeat(64)}
+                  });
+                  const a=await store.start(stage('i10-slot-a','account-i10-slots'));
+                  const b=await store.start(stage('i10-slot-b','account-i10-slots'));
+                  const full=await store.start(stage('i10-slot-c','account-i10-slots'));
+                  const independent=await store.start(stage('i10-slot-d','account-i10-separate'));
+                  const armed=await store.armNative('i10-slot-a',a.revision,'CHAT1_SEND');
+                  const observed=await store.observeNative('i10-slot-a',armed.revision,{
+                    ok:true,slug:'i10-slot-a',busy:false,
+                    sessionDigest:'d'.repeat(64),chatEntries:2,sourceSaved:true
+                  });
+                  const saved=await store.checkpointSource('i10-slot-a',
+                    observed.revision,source);
+                  const proof=await store.record('i10-slot-a',saved.revision,{
+                    type:'TEST',chat:1,name:'observed_smoke',
+                    sourceFingerprint:source.fingerprint,
+                    independentSource:'INDEPENDENT_BROWSER_ASSERTION',
+                    result:'PASS',observedAt:Date.now()
+                  });
+                  const released=await store.getJob('i10-slot-a');
+                  const afterRelease=await store.start(stage('i10-slot-c','account-i10-slots'));
+                  const portConfig=await new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-i10-ai'});
+                    port.onMessage.addListener(v=>{try{port.disconnect()}catch{}resolve(v)});
+                    port.onDisconnect.addListener(()=>resolve({code:'DISCONNECTED'}));
+                    port.postMessage({type:'GET_CONCURRENCY'});
+                  });
+                  done({ok:source.ok&&before.ok&&before.setting.perAccount===1&&
+                    next.ok&&next.setting.perAccount===2&&
+                    stale.code==='STALE_REVISION'&&bad.code==='AI_CONCURRENCY_INVALID'&&
+                    a.ok&&b.ok&&full.code==='AI_ACCOUNT_CONCURRENCY_HELD'&&
+                    independent.ok&&armed.ok&&observed.ok&&saved.ok&&
+                    proof.ok&&proof.state==='TESTS_VERIFIED'&&
+                    released.slotReleased===true&&afterRelease.ok&&
+                    portConfig.ok&&portConfig.setting.perAccount===2,
+                    before:before.setting,next:next.setting,stale,bad,
+                    first:a.ok,second:b.ok,third:full,
+                    independent:independent.ok,proof:proof.state,
+                    released:released.slotReleased,afterRelease:afterRelease.ok,
+                    portConfig:portConfig.setting});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
+                concurrency_b=call('POST',f'/session/{after}/execute/async',
+                                   {'script':code,'args':[]},timeout=90)
+                assert concurrency_b.get('ok') is True,concurrency_b
+                print('B I10_PACKAGED_VERSIONED_CONCURRENCY_CAS_IDLE_SLOT_RELEASE=PASS',flush=True)
+
                 # I08 B: real packaged Firefox crypto, canonical IDB, donor
                 # portable format, Settings action, and wrong-password failure.
                 # No live provider or native calls; no disk byte proof claimed.
