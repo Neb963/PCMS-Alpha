@@ -255,7 +255,11 @@ export function createAiStore(db){
         if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR'].includes(step)){
           const chat=['CHAT1_SEND','CHAT1_REPAIR'].includes(step)?next.chat1:next.chat2;
           chat.sessionDigest=digest;
-          chat.state=['CHAT2_SEND','CHAT2_REPAIR'].includes(step)?'FRESH_VERIFIED':'RUNNING';
+          // A new hashed SID plus cleared UI is necessary but insufficient
+          // to prove the native server/OPFS workspace is isolated. No
+          // independent OPFS namespace oracle currently exists.
+          chat.state=['CHAT2_SEND','CHAT2_REPAIR'].includes(step)?
+            'FRESH_OBSERVED':'RUNNING';
         }
         m.put({...row,job:next});
         t.objectStore('events').add({stage:'AI_NATIVE_OBSERVED',
