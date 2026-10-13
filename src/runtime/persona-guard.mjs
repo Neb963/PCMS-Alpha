@@ -17,7 +17,7 @@ export async function cachedHealthDomain(evidence){
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
-  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep, releaseIsolatedTab }) {
+  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep, releaseIsolatedTab, existingIsolatedTab }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -249,6 +249,25 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     finally{await releaseConflictGuard(leased);}
   }
 
+  // I13 existing-source effects share the single donor lease registry.
+  async function runExistingStep(personaUid,request){
+    if(typeof existingIsolatedTab!=='function')
+      return {ok:false,code:'EXISTING_EXECUTOR_UNAVAILABLE'};
+    const lease=await acquireConflictGuard(personaUid);
+    if(!lease?.ready||!lease.leaseId)
+      return {ok:false,code:lease?.code||'PROTECTED_ROUTE_UNVERIFIED'};
+    try{
+      if(!(await inspectOwnedAction(lease)).ready)
+        return {ok:false,code:'EXISTING_LEASE_REVOKED'};
+      const result=await existingIsolatedTab(lease,request);
+      if(!(await inspectOwnedAction(lease)).ready)
+        return {ok:false,code:'EXISTING_POST_EFFECT_ROUTE_CHANGED'};
+      return result&&typeof result==='object'?result:
+        {ok:false,code:'EXISTING_EFFECT_UNVERIFIED'};
+    }catch{return {ok:false,code:'EXISTING_EFFECT_UNVERIFIED'};}
+    finally{await releaseConflictGuard(lease);}
+  }
+
   // I13 effectful listing flip is a fixed donor-leased path. The caller must
   // commit DISPATCH_POSSIBLE before admission; protected route loss is held.
   async function runReleaseStep(personaUid,request){
@@ -284,6 +303,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     runStageStep,
     runNativeAiStep,
     runReleaseStep,
+    runExistingStep,
     inspectStageEditor,
     releaseStagingTab,
     listAvailablePersonas,
