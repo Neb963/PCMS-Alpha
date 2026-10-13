@@ -5,6 +5,7 @@ const slug=get('pcms-writeback-slug'),token=get('pcms-writeback-token');
 const message=get('pcms-writeback-message'),mode=get('pcms-writeback-mode');
 const preview=get('pcms-writeback-preview'),prepare=get('pcms-writeback-prepare');
 const commit=get('pcms-writeback-commit'),reconcile=get('pcms-writeback-reconcile');
+const cancel=get('pcms-writeback-cancel');
 const status=get('pcms-writeback-status'),diff=get('pcms-writeback-diff');
 const refresh=get('pcms-writeback-refresh'),optin=get('pcms-writeback-auto');
 const armAuto=get('pcms-writeback-arm-auto'),disarmAuto=get('pcms-writeback-disarm-auto');
@@ -31,7 +32,9 @@ function controls(){
   preview.disabled=busy||!selected;
   prepare.disabled=busy||!inspected?.ok||!token.value||
     inspected.slug!==slug.value.trim()||!!receipt;
-  commit.disabled=busy||!receipt?.ok||receipt.state!=='PREPARED'||!token.value;
+  commit.disabled=busy||!receipt?.ok||receipt.mode!=='MANUAL'||
+    receipt.state!=='PREPARED'||!token.value;
+  cancel.disabled=busy||!receipt?.ok||receipt.state!=='PREPARED';
   reconcile.disabled=busy||!receipt?.ok||
     !['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(receipt.state)||!token.value;
   refresh.disabled=busy||!selected;
@@ -127,6 +130,16 @@ commit.addEventListener('click',()=>transact(async()=>{
     receipt=null;controls();
     announce('Git outcome unknown; refresh canonical receipt. Never retry blindly.');
   }
+}));
+cancel.addEventListener('click',()=>transact(async()=>{
+  if(!receipt?.ok||receipt.state!=='PREPARED')return;
+  const r=await request('CANCEL_PREPARED',{slug:receipt.slug,
+    expectedRevision:receipt.revision});
+  if(r?.ok){
+    showReceipt(r);inspected=null;showDiff(null);
+    announce('Unsent Git preparation canceled. Review the latest F before preparing another.');
+  }else announce((r?.code||'CANCEL_UNVERIFIED')+
+    ' · possible Git dispatch can never be canceled or replayed.');
 }));
 reconcile.addEventListener('click',()=>transact(async()=>{
   if(!receipt?.ok)return;
