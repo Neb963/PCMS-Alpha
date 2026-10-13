@@ -1265,8 +1265,9 @@ def main():
                     inputOccupied:true,sourceSaved:true
                   });
                   const empty=await store.observeNative(slug,reset.revision,{
-                    ok:true,slug,sessionDigest:null,busy:false,chatEntries:0,
-                    inputOccupied:false,hasQueue:false,sourceSaved:true
+                    ok:true,slug,sessionDigest:null,busy:false,chatEntries:1,
+                    resetGreetingVisible:true,inputOccupied:false,hasQueue:false,
+                    sourceSaved:true
                   });
                   const send2=await store.armNative(slug,empty.revision,'CHAT2_SEND');
                   const idle2=await store.observeNative(slug,send2.revision,{
