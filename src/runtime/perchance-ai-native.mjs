@@ -13,17 +13,6 @@ export async function perchanceAiNative(request){
      location.pathname!=='/'+slug||location.hash!=='#edit')
     return hold('EDITOR_TARGET_CHANGED');
   try {
-    const app=window.app,src=window.srcState,model=window.modelTextEditor,
-      html=window.outputTemplateEditor,menu=window.menuBar;
-    if(window.__editorReady!==true||app?.data?.generator?.name!==slug||
-       app.data.generator.isPrivate!==true||
-       window.userOwnsThisGenerator!==true||
-       !src||typeof src.getDraftChatSid!=='function'||
-       !model||!html||!menu||
-       !soloCollaboration()||
-       typeof window.saveCheckpointManager?.isDivergenceBlocked!=='function'||
-       window.saveCheckpointManager.isDivergenceBlocked()!==false)
-      return hold('NATIVE_EDITOR_OR_OWNER_UNVERIFIED');
     // Owners can automatically join their own Yjs room. A provider is
     // not itself a second collaborator: accept only a synchronized room
     // with exactly the local awareness client; peers/unknown state HOLD.
@@ -42,6 +31,17 @@ export async function perchanceAiNative(request){
       const peers=awareness.getStates();
       return peers instanceof Map&&peers.size===1&&peers.has(doc.clientID);
     };
+    const app=window.app,src=window.srcState,model=window.modelTextEditor,
+      html=window.outputTemplateEditor,menu=window.menuBar;
+    if(window.__editorReady!==true||app?.data?.generator?.name!==slug||
+       app.data.generator.isPrivate!==true||
+       window.userOwnsThisGenerator!==true||
+       !src||typeof src.getDraftChatSid!=='function'||
+       !model||!html||!menu||
+       !soloCollaboration()||
+       typeof window.saveCheckpointManager?.isDivergenceBlocked!=='function'||
+       window.saveCheckpointManager.isDivergenceBlocked()!==false)
+      return hold('NATIVE_EDITOR_OR_OWNER_UNVERIFIED');
     const host=document.getElementById('pcms-alpha-editor-context');
     if(host?.dataset?.pcmsHumanIntent==='true')return hold('HUMAN_EDITOR_HOLD');
     const get=id=>document.getElementById(id);
