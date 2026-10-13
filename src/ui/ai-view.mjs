@@ -42,7 +42,9 @@ function controls(){
     !['HELD_RECONCILE','TESTS_UNVERIFIED','KNOWN_FAILURE'].includes(selectedJob.state);
   testNative.disabled=busy||!selected||selectedJob.state!=='TESTS_UNVERIFIED';
   repairNative.disabled=busy||!selected||selectedJob.state!=='KNOWN_FAILURE'||!
-    ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(selectedJob.nativeState);
+    ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(selectedJob.nativeState)||
+    (selectedJob.nativeState==='CHAT2_OBSERVED_IDLE'&&
+     selectedJob.chat2IsolationVerified!==true);
   resetNative.disabled=busy||!selected||
     selectedJob.evidence?.chat1Pass!==true;
   chat2Native.disabled=busy||!selected||
