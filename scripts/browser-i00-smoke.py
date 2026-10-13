@@ -1704,6 +1704,181 @@ def main():
                 assert proof.get('ok') is True,proof
                 print('B I11_PACKAGED_GIT_HELD_CAS_AUTO_OPTOUT_AND_UI=PASS',flush=True)
 
+                # I12 real packaged modules/IDB, synthetic provider evidence.
+                # Synthetic CONFIRMED_PUBLIC fixtures do not prove a live release.
+                call('POST',f'/session/{after}/url',{'url':url+'#refresher'})
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const core=await import('./refresher-core.mjs');
+                  const module=await import('./refresher-store.mjs');
+                  const runtime=await import('./refresher-boundary.mjs');
+                  const db=await journal.openCanonicalDatabase(),store=module.createRefresherStore(db);
+                  const hash='b'.repeat(64),now=Date.now(),boot='i12_packaged_synthetic_boot';
+                  const begin=performance.now();
+                  await new Promise((resolve,reject)=>{
+                    const tx=db.transaction(['meta'],'readwrite'),m=tx.objectStore('meta');
+                    for(let i=0;i<50;i++){
+                      const accountId='i12_account_'+String(i).padStart(4,'0');
+                      const personaUid='persona-i12-'+String(i).padStart(4,'0');
+                      m.put({key:'account:'+accountId,account:{accountId,personaUid,bindingVersion:1,
+                        state:'VERIFIED',revision:1,identity:{source:'GUARDED_SESSION_READBACK',
+                        bindingVersion:1,principalFingerprint:hash}}});
+                    }
+                    for(let i=0;i<1250;i++){
+                      const slug='i12-b-'+String(i).padStart(4,'0'),a=i%50;
+                      const accountId='i12_account_'+String(a).padStart(4,'0');
+                      const personaUid='persona-i12-'+String(a).padStart(4,'0');
+                      const remoteId='i12_remote_'+String(i).padStart(8,'0');
+                      m.put({key:'inventory:'+slug,generator:{slug,accountId,personaUid,bindingVersion:1,
+                        remoteId,ownerState:'OBSERVED_OWNER',visibility:'PUBLIC',lastObservedAt:now,revision:1}});
+                      m.put({key:'release:'+slug,release:{slug,accountId,personaUid,bindingVersion:1,
+                        remoteId,state:'CONFIRMED_PUBLIC',source:'INDEPENDENT_PUBLICATION_READBACK',
+                        sourceFingerprint:hash,principalFingerprint:hash,observationId:'i12_observed_'+String(i).padStart(8,'0'),
+                        observedAt:now}});
+                    }
+                    m.put({key:core.REFRESHER_KEY,state:core.emptyShadow()});
+                    tx.oncomplete=resolve;tx.onabort=()=>reject(Error('fixture aborted'));
+                  });
+                  let turn=await store.turn({now:now-8*core.HOUR,bootId:boot});
+                  if(!turn.ok)throw Error(turn.code);
+                  let state=turn.state;
+                  const first=state.rows.find(r=>r.slug==='i12-b-0000');
+                  const second=state.rows.find(r=>r.slug==='i12-b-0001');
+                  first.phase='ACTIVE';first.slot=true;first.activeRemaining=24*core.HOUR;
+                  first.admittedAt=now-8*core.HOUR;first.checkpoint=now-8*core.HOUR;
+                  second.phase='SLEEPING';second.sleepRemaining=72*core.HOUR;
+                  await new Promise((resolve,reject)=>{
+                    const tx=db.transaction('meta','readwrite');tx.objectStore('meta').put({key:core.REFRESHER_KEY,state});
+                    tx.oncomplete=resolve;tx.onabort=()=>reject(Error('seed aborted'));
+                  });
+                  const receipt={source:'GUARDED_OPERATIONAL_INTERVAL',id:'i12_interval_observed',
+                    bootId:boot,browserRunning:true,complete:true,from:now-8*core.HOUR,to:now,
+                    accounts:Object.entries(state.accounts).map(([accountId,a])=>({accountId,
+                      personaUid:a.personaUid,bindingVersion:a.bindingVersion,health:'HEALTHY',protected:true,sessionVerified:true})),
+                    witnesses:[0,1].map(i=>({accountId:'witness_'+i,domain:'independent_'+i,
+                      routeVerified:true,observedAt:now,result:'HEALTHY'}))};
+                  turn=await store.turn({now,bootId:boot,receipt});
+                  const firstRead=await store.list(now,{query:'i12-b-',limit:25});
+                  const exact16=firstRead.items.find(r=>r.slug==='i12-b-0000').activeRemaining;
+                  const exact64=firstRead.items.find(r=>r.slug==='i12-b-0001').sleepRemaining;
+                  const occupied=firstRead.occupied;
+                  await Promise.all([store.turn({now,bootId:boot,receipt}),store.turn({now,bootId:boot,receipt})]);
+                  const replay=await store.list(now,{query:'i12-b-',limit:25});
+                  const competing=await Promise.all([
+                    store.pause(replay.revision,'GLOBAL',null,true),
+                    store.changePolicy(replay.revision,{manualCap:5})]);
+                  const winners=competing.filter(r=>r.ok).length;
+                  const snapshot=await store.read();
+                  const transaction=db.transaction('meta','readwrite');
+                  transaction.objectStore('meta').put({key:core.REFRESHER_KEY,state:core.emptyShadow()});
+                  const abort=await new Promise(resolve=>{transaction.onabort=()=>resolve(true);transaction.abort();});
+                  const unchanged=(await store.read()).state.revision===snapshot.state.revision;
+                  await store.pause(snapshot.state.revision,'GLOBAL',null,false);
+                  const c=await store.claim({kind:'RECENT',now:now+1000,bootId:boot,claimId:'i12_recent_claim'});
+                  if(!c.ok)throw Error(c.code);
+                  const observed=await store.complete(c.claim.claimId,{ok:true,complete:true,
+                    observedAt:c.claim.startedAt,principalFingerprint:c.claim.principalFingerprint,
+                    items:[{slug:'i12-b-0000',views:1200}]},now+2000);
+                  const afterObservation=await store.list(now+2000,{query:'i12-b-',limit:25});
+                  const absent=afterObservation.items.find(r=>r.slug==='i12-b-0001').presence;
+                  const metric=afterObservation.items.find(r=>r.slug==='i12-b-0000').metric;
+                  let virtualNow=now+3000,requests=0,alarms=new Map();
+                  const api={runtime:{id:browser.runtime.id,getURL:browser.runtime.getURL},
+                    storage:browser.storage,alarms:{create:async(n,p)=>alarms.set(n,{name:n,...p}),
+                      get:async n=>alarms.get(n)}};
+                  // Make a recent observation due, keeping request budget shared.
+                  const preRuntime=(await store.read()).state;preRuntime.recent.nextDueAt=0;
+                  await new Promise((resolve,reject)=>{
+                    const tx=db.transaction('meta','readwrite');tx.objectStore('meta').put({key:core.REFRESHER_KEY,state:preRuntime});
+                    tx.oncomplete=resolve;tx.onabort=()=>reject(Error('observer seed aborted'));
+                  });
+                  const service=runtime.createRefresherBoundary(api,{open:async()=>db,
+                    clock:()=>virtualNow,newId:()=> 'i12_synthetic_service_boot',observationGate:()=>true,
+                    guard:()=>({getSafeRouteReadiness:async()=>({ready:true,cookieStoreId:'synthetic-container',routeId:'synthetic-protected'}),
+                      observeMonitoring:async(uid,request)=>{
+                        requests++;virtualNow+=1000;
+                        const live=(await store.read()).state;
+                        const account=Object.values(live.accounts).find(a=>a.personaUid===uid);
+                        return {ok:true,complete:true,items:[{slug:'i12-b-0000',views:1207}],
+                          principalFingerprint:account.principalFingerprint};
+                      }})});
+                  const runtimeProof=await service.tick();
+                  const runtimeState=(await store.read()).state;
+                  const isolated=await (await import('./perchance-monitor.mjs')).perchanceMonitorIsolated({kind:'RECENT'});
+                  const command=(type,params={})=>new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-i12-refresher'});
+                    port.onMessage.addListener(v=>{resolve(v);port.disconnect();});port.postMessage({type,params});
+                  });
+                  const injection=await command('GET_REFRESHER',{receipt:{healthy:true}});
+                  const activation=await command('OBSERVE_NOW');
+                  const view=await command('GET_REFRESHER',{query:'i12-b-',limit:25});
+                  const globalPause=await command('SET_PAUSE',{expectedRevision:view.revision,scope:'GLOBAL',paused:true});
+                  const invalid=await command('SET_PAUSE',{expectedRevision:view.revision,scope:'GLOBAL',paused:false});
+                  done({ok:exact16===16*core.HOUR&&exact64===64*core.HOUR&&
+                    firstRead.total===1250&&replay.occupied===occupied&&winners===1&&abort&&unchanged&&
+                    observed.accepted&&absent.present===false&&absent.absence==='NOT_A_DELETION'&&metric.views===1200&&
+                    runtimeProof.ok&&runtimeProof.observation==='OBSERVED'&&requests===1&&
+                    runtimeState.healthIntervals.length>0&&runtimeState.diagnostics.readPeak<=2&&
+                    isolated.code==='WRONG_ORIGIN'&&injection.ok===false&&activation.code==='MONITOR_ACTIVATION_HELD'&&
+                    globalPause.ok&&invalid.code==='STALE_REVISION',
+                    exact16,exact64,occupied,replayOccupied:replay.occupied,winners,abort,unchanged,
+                    observation:observed.code,runtimeProof,requests,activation,injection,globalPause,invalid,
+                    measurement:{accounts:50,generators:1250,elapsedMs:Math.round(performance.now()-begin),
+                      serializedBytes:JSON.stringify(runtimeState).length,queuePeak:runtimeState.diagnostics.queuePeak,
+                      readPeak:runtimeState.diagnostics.readPeak},
+                    persistedRevision:(await store.read()).state.revision});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,600)}));"""
+                i12_proof=call('POST',f'/session/{after}/execute/async',{'script':code,'args':[]},timeout=90)
+                assert i12_proof.get('ok') is True,i12_proof
+                print('B I12_PACKAGED_IDB_INTERVAL_CAS_FLEET_OBSERVER_AND_HELD_PORT=PASS',flush=True)
+                print('B I12_PACKAGED_MEASUREMENTS=',json.dumps(i12_proof['measurement']),flush=True)
+                execute(after,"location.hash='#refresher';document.getElementById('pcms-refresher-query').value='i12-b-';document.getElementById('pcms-refresher-reload').click();return true")
+                ui={}
+                for _ in range(60):
+                    ui=execute(after,"return {rows:document.querySelectorAll('#pcms-refresher-rows tr').length,summary:document.getElementById('pcms-refresher-summary').textContent,page:document.getElementById('pcms-refresher-page').textContent,pause:document.getElementById('pcms-refresher-global-pause').textContent,unsafe:document.querySelector('#view-refresher > .workspace-head > button').disabled}")
+                    if '1250' in ui.get('page','') and ui.get('pause')=='Resume globally': break
+                    time.sleep(.1)
+                assert ui['rows']==25 and '1250' in ui['page'] and ui['unsafe'] is True,ui
+                assert ui['pause']=='Resume globally',ui
+                execute(after,"document.querySelector('#pcms-refresher-rows button').click();return true")
+                inspector=execute(after,"return {visible:!document.getElementById('pcms-refresher-inspector').hidden,selected:document.getElementById('pcms-refresher-selected').textContent}")
+                assert inspector['visible'] and 'i12-b-0000' in inspector['selected'],inspector
+                print('B I12_PACKAGED_REFREHSER_PAGING_PAUSE_INSPECTOR=PASS',flush=True)
+                alarm_code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const prior=(await browser.storage.local.get('pcmsI12AlarmCount')).pcmsI12AlarmCount||0;
+                  await browser.alarms.create('pcms-refresher-turn',{when:Date.now()+6000});
+                  done({prior});
+                })().catch(e=>done({error:String(e)}));"""
+                alarm_prior=call('POST',f'/session/{after}/execute/async',{'script':alarm_code,'args':[]})
+                call('POST',f'/session/{after}/url',{'url':'about:blank'})
+                time.sleep(9)
+                call('POST',f'/session/{after}/url',{'url':url+'#refresher'})
+                alarm_after=call('POST',f'/session/{after}/execute/async',{'script':"const done=arguments[arguments.length-1];browser.storage.local.get('pcmsI12AlarmCount').then(v=>done(v.pcmsI12AlarmCount||0));",'args':[]})
+                assert alarm_after>alarm_prior['prior'],(alarm_prior,alarm_after)
+                print('B I12_REAL_ALARM_WITHOUT_DASHBOARD=PASS',flush=True)
+                # Full relaunch of the same persistent installation; no reinstall.
+                close(after)
+                after=open_session(browser,profile)
+                assert addons_uuid(profile)==uuid
+                call('POST',f'/session/{after}/url',{'url':url+'#refresher'})
+                restart_code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const db=await (await import('./journal.mjs')).openCanonicalDatabase();
+                  const state=(await (await import('./refresher-store.mjs')).createRefresherStore(db).read()).state;
+                  const alarm=await browser.alarms.get('pcms-refresher-turn');
+                  done({paused:state.globalPause,first:state.rows.find(r=>r.slug==='i12-b-0000').activeRemaining,
+                    alarm:!!alarm,alarms:(await browser.alarms.getAll()).filter(a=>a.name==='pcms-refresher-turn').length,
+                    held:state.accounts['i12_account_0000'].health});db.close();
+                })().catch(e=>done({error:String(e)}));"""
+                restarted=call('POST',f'/session/{after}/execute/async',{'script':restart_code,'args':[]})
+                assert restarted['paused'] is True and restarted['first']==16*3600000,restarted
+                assert restarted['alarm'] is True and restarted['alarms']==1,restarted
+                assert restarted['held']=='UNKNOWN',restarted
+                print('B I12_PERSISTENT_RESTART_BUDGET_PAUSE_SINGLE_ALARM_REPAIR=PASS',flush=True)
+
                 # I08 B: real packaged Firefox crypto, canonical IDB, donor
                 # portable format, Settings action, and wrong-password failure.
                 # No live provider or native calls; no disk byte proof claimed.

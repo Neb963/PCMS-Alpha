@@ -1,12 +1,13 @@
 // Synchronous listeners, one coalesced scheduler alarm, canonical turn/claim
 // fences. Production observation activation is OFF; mutations have no path.
-import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId} from './journal.mjs';
+import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId,createCanonicalStore} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 import {createRefresherStore} from './refresher-store.mjs';
 import {MINUTE} from './refresher-core.mjs';
+import {createNoticeDispatcher} from './notices.mjs';
 export const REFRESHER_PORT='pcms-i12-refresher',REFRESHER_ALARM='pcms-refresher-turn';
-const types=new Set(['GET_REFRESHER','SET_POLICY','SET_PAUSE','SET_GENERATOR_POLICY','DEMAND_STATISTIC','OBSERVE_NOW']);
+const types=new Set(['GET_REFRESHER','SET_POLICY','SET_PAUSE','SET_GENERATOR_POLICY','DEMAND_STATISTIC','OBSERVE_NOW','RESET_RECENT_BACKOFF']);
 export function validateRefresherMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let encoded;try{encoded=JSON.stringify(message);}catch{return fail('INVALID_MESSAGE');}
@@ -19,7 +20,8 @@ export function validateRefresherMessage(api,sender,message){
     message.type==='SET_POLICY'?['expectedRevision','policy']:
     message.type==='SET_PAUSE'?['expectedRevision','scope','target','paused']:
     message.type==='SET_GENERATOR_POLICY'?['expectedRevision','stableId','activeMs','sleepMs']:
-    message.type==='DEMAND_STATISTIC'?['expectedRevision','stableId']:[];
+    message.type==='DEMAND_STATISTIC'?['expectedRevision','stableId']:
+    message.type==='RESET_RECENT_BACKOFF'?['expectedRevision']:[];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
   if(message.type==='GET_REFRESHER'){
     if((p.query!=null&&(typeof p.query!=='string'||p.query.length>80))||
@@ -41,9 +43,16 @@ export function validateRefresherMessage(api,sender,message){
 export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFactory=createRefresherStore,
   guard=internalPcmsGuard,observationGate=()=>false,clock=Date.now,
   newId=()=>crypto.randomUUID().replaceAll('-','')}={}){
-  let dbPromise,turnPromise=null,registered=false,alarmHeld=false;
+  let dbPromise,turnPromise=null,registered=false,alarmHeld=false,alarmTail=Promise.resolve();
   const bootId=newId(),sentinel=createRestoreSentinel(api.storage.local);
   const store=async()=>storeFactory(await (dbPromise ||=open().catch(e=>{dbPromise=null;throw e;})));
+  async function notifyChanges(result){
+    for(const change of result?.changes||[])if(change.code==='ACCOUNT_GRACE_EXPIRED'){
+      try{await createNoticeDispatcher(api,createCanonicalStore(await dbPromise)).emit({
+        scopeId:change.scopeId,code:'ROUTE_UNAVAILABLE',severity:'ACTION_REQUIRED',
+        revision:result.revision});}catch{}
+    }
+  }
   async function schedule(when){
     try{
       await api.alarms.create(REFRESHER_ALARM,{when:Math.max(clock()+MINUTE,when||0)});
@@ -63,14 +72,25 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         alarmHeld,mutations:0}});
     }catch{}
   }
+  function alarmReceipt(){
+    // Independent non-business diagnostic. It proves actual Firefox delivery,
+    // while queue/clock/admission authority remains wholly in canonical IDB.
+    alarmTail=alarmTail.then(async()=>{
+      const old=(await api.storage.local.get('pcmsI12AlarmCount'))?.pcmsI12AlarmCount;
+      await api.storage.local.set({pcmsI12AlarmCount:Math.min(999999,
+        (Number.isSafeInteger(old)?old:0)+1)});
+    }).catch(()=>{});
+    return alarmTail;
+  }
   async function observe(s){
     if(!observationGate())return fail('MONITOR_ACTIVATION_HELD');
     const g=guard();if(!g?.observeMonitoring)return fail('GUARDED_MONITOR_UNAVAILABLE');
     const snapshot=await s.read();if(!snapshot.ok)return snapshot;
     const now=clock(),state=snapshot.state;
-    const due=state.rows.filter(r=>!r.identityHeld&&r.ownerVerified&&r.metrics.nextDueAt<=now)
-      .sort((a,b)=>a.metrics.nextDueAt-b.metrics.nextDueAt||a.ordinal-b.ordinal);
-    const kind=state.recent.nextDueAt<=now?'RECENT':'STATISTIC';
+    const due=state.rows.filter(r=>!r.identityHeld&&r.ownerVerified&&!r.metrics.suspended&&r.metrics.nextDueAt<=now)
+      .sort((a,b)=>(b.metrics.demandUntil>now?1:0)-(a.metrics.demandUntil>now?1:0)||
+        a.metrics.nextDueAt-b.metrics.nextDueAt||a.ordinal-b.ordinal);
+    const kind=!state.recent.suspended&&state.recent.nextDueAt<=now?'RECENT':'STATISTIC';
     if(kind==='STATISTIC'&&!due.length)return {ok:true,code:'NO_OBSERVATION_DUE'};
     const claimed=await s.claim({kind,stableId:kind==='STATISTIC'?due[0].stableId:null,
       now,bootId,claimId:newId()});
@@ -109,6 +129,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         // One bounded read per turn. Shared persistent quota/coalescing spans
         // all wake sources and both recent-list/statistics request classes.
         const observed=await observe(s);
+        await notifyChanges(result);await notifyChanges(observed);
         await safeBreadcrumb(result,alarmHeld?'ALARM_UNVERIFIED':
           observed.code==='MONITOR_ACTIVATION_HELD'?'MONITOR_ACTIVATION_HELD':'SHADOW_READY');
         return {ok:true,revision:result.revision,mode:'SHADOW_ONLY',providerEffects:'OFF',
@@ -138,13 +159,16 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       if(message.type==='SET_GENERATOR_POLICY')result=await s.generatorPolicy(
         p.expectedRevision,p.stableId,p.activeMs,p.sleepMs);
       if(message.type==='DEMAND_STATISTIC')result=await s.demand(p.expectedRevision,p.stableId,clock());
+      if(message.type==='RESET_RECENT_BACKOFF')result=await s.resetRecentBackoff(p.expectedRevision,clock());
       return result?.ok?{ok:true,revision:result.revision,providerEffects:'OFF'}:result||fail('CAPABILITY_OFF');
     }catch{return fail('REFRESHER_AUTHORITY_UNAVAILABLE');}
   }
   function register(){
     if(registered)return;
     // Never await anything before these listener registrations.
-    api.alarms.onAlarm.addListener(alarm=>{if(alarm?.name===REFRESHER_ALARM)void tick();});
+    api.alarms.onAlarm.addListener(alarm=>{
+      if(alarm?.name===REFRESHER_ALARM)void alarmReceipt().then(()=>tick());
+    });
     api.runtime.onStartup.addListener(()=>void tick());
     api.runtime.onInstalled.addListener(()=>void tick());
     api.runtime.onConnect.addListener(port=>{

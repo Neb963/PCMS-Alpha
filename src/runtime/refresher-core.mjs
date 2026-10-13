@@ -268,7 +268,7 @@ export function advanceShadow(s,{now,bootId,receipt=null}={}){
 export function applyStatistic(s,claim,sample,now){
   const out=structuredClone(s),r=out.rows.find(x=>x.stableId===claim?.stableId);
   if(!r||r.bindingVersion!==claim.bindingVersion||r.personaUid!==claim.personaUid||
-    r.remoteId!==claim.remoteId||r.identityHeld)return fail('STATISTIC_CONTEXT_CHANGED');
+    r.remoteId!==claim.remoteId||r.identityHeld||!r.ownerVerified)return fail('STATISTIC_CONTEXT_CHANGED');
   if(!stamp(sample?.observedAt)||sample.observedAt!==claim.startedAt||sample.observedAt>now||
     !number(sample.views,0,Number.MAX_SAFE_INTEGER)||sample.unit!=='VIEWS'||
     sample.source!=='GUARDED_READ_ONLY')return fail('STATISTIC_UNVERIFIED');
@@ -294,9 +294,10 @@ export function claimObservation(s,{kind,stableId=null,now,bootId,claimId}={}){
     out.readWindow={start:now,used:0};
   if(out.readWindow.used>=out.policy.readBudget)return fail('SHARED_READ_BUDGET');
   const r=kind==='STATISTIC'?out.rows.find(x=>x.stableId===stableId):null;
+  if(kind==='RECENT'&&out.recent.suspended)return fail('OBSERVATIONS_SUSPENDED');
   if(kind==='RECENT'&&(out.recent.nextDueAt>now||out.inflight.some(c=>c.kind==='RECENT')))
     return fail('OBSERVATION_COALESCED');
-  if(kind==='STATISTIC'&&(!r||r.identityHeld||!r.ownerVerified||r.metrics.nextDueAt>now||
+  if(kind==='STATISTIC'&&(!r||r.identityHeld||!r.ownerVerified||r.metrics.suspended||r.metrics.nextDueAt>now||
     out.inflight.some(c=>c.stableId===stableId||c.accountId===r.accountId)))
     return fail('STATISTIC_NOT_DUE');
   const accountId=r?.accountId||Object.entries(out.accounts).find(([id,a])=>

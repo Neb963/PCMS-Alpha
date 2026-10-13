@@ -31,14 +31,16 @@ function inspector(){
   el('metric').textContent=r.metric?
     r.metric.views+' observed views · '+age(r.metric.observedAt)+
     (r.metric.correction?' · correction/reset; interval delta unknown':'')+
-    (r.metric.stale?' · stale':''):'Views unobserved.';
+    (r.metric.stale?' · stale':'')+(r.statisticSuspended?' · polling suspended after bounded failures':''):'Views unobserved.';
 }
 function draw(s){
+  const focusId=document.activeElement?.dataset?.stableId;
   snapshot=s;
   const summary=s.occupied+' occupied shadow slots / '+s.capacity.cap+
     ' admission cap · '+s.eligible+' eligible · planning '+s.capacity.demand.toFixed(2)+
     ' · '+(s.capacity.warning||'multi-window observation')+' · '+
-    age(s.recent.observedAt)+(s.recent.stale?' (stale)':'')+'.';
+    age(s.recent.observedAt)+(s.recent.stale?' (stale)':'')+
+    (s.recent.suspended?' · recent polling suspended after bounded failures':'')+'.';
   el('summary').textContent=summary;
   for(const id of ['pcms-overview-refresher','pcms-queue-refresher']){
     const target=document.getElementById(id);if(target)target.textContent='Shadow Refresher: '+summary;
@@ -80,9 +82,10 @@ function draw(s){
   }
   el('page').textContent=(s.total?offset+1:0)+'–'+Math.min(s.total,offset+25)+' of '+s.total;
   el('prev').disabled=offset===0;el('next').disabled=offset+25>=s.total;
-  if(selected){const current=s.items.find(r=>r.stableId===selected.stableId);if(current)selected=current;}
+  if(selected)selected=s.items.find(r=>r.stableId===selected.stableId)||null;
+  if(focusId)rows.querySelector('[data-stable-id="'+focusId+'"]')?.focus({preventScroll:true});
   inspector();
-  for(const id of ['save','global-pause','generator-pause','generator-save','demand'])
+  for(const id of ['save','global-pause','generator-pause','generator-save','demand','retry-recent'])
     el(id).disabled=s.restoreHeld===true;
 }
 function accountButton(){
@@ -99,20 +102,23 @@ async function load(){
       'Shadow projection only. Unknown operational intervals freeze. Ordinary sleep remains public; no refresh or unlisting is sent.';
   }catch(error){if(mine!==epoch)return;snapshot=null;
     status.textContent='Shadow state unavailable. No healthy fleet or empty remote queue inferred.';
-    for(const id of ['save','global-pause','account-pause','generator-pause','generator-save','demand'])el(id).disabled=true;
+    for(const id of ['save','global-pause','account-pause','generator-pause','generator-save','demand','retry-recent'])el(id).disabled=true;
   }
 }
 async function change(type,params){
   if(!snapshot)return;const revision=snapshot.revision;status.textContent='Saving local change…';
   try{
     const result=await command(type,{...params,expectedRevision:revision});
-    if(!result?.ok){status.textContent=result?.code==='STALE_REVISION'?
+    if(!result?.ok){
+      if(result?.code==='STALE_REVISION')await load();
+      status.textContent=result?.code==='STALE_REVISION'?
       'State changed; review the refreshed values before trying again.':
-      'Change held: '+(result?.code||'UNKNOWN');if(result?.code==='STALE_REVISION')snapshot=null;return;}
+      'Change held: '+(result?.code||'UNKNOWN');return;}
     await load();status.textContent='Local change committed. Provider refresh mutations remain OFF.';
   }catch{status.textContent='Acknowledgment unavailable. Reload canonical state before trying again.';snapshot=null;}
 }
 el('reload').addEventListener('click',load);
+el('retry-recent').addEventListener('click',()=>change('RESET_RECENT_BACKOFF',{}));
 query.addEventListener('input',()=>{offset=0;void load();});phase.addEventListener('change',()=>{offset=0;void load();});
 el('prev').addEventListener('click',()=>{offset=Math.max(0,offset-25);void load();});
 el('next').addEventListener('click',()=>{offset+=25;void load();});

@@ -64,6 +64,7 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
     activeMs:r.activeMs,sleepMs:r.sleepMs,ordinal:r.ordinal,slot:r.slot,paused:r.paused,
     blockers:[...rowBlocks(s,r),r.readyUpdate&&'READY_UPDATE_FIRST'].filter(Boolean),
     presence:r.presence?{...r.presence,stale:now-r.presence.observedAt>2*s.policy.recentMs}:null,
+    statisticSuspended:r.metrics.suspended===true,
     metric:r.metrics.latest?{...r.metrics.latest,stale:now-r.metrics.latest.observedAt>
       s.policy.statsMaxMs}:null,nextStatisticAt:r.metrics.nextDueAt}));
   return {ok:true,revision:s.revision,mode:'SHADOW_ONLY',providerEffects:'OFF',items,
@@ -73,6 +74,7 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
     accounts:Object.entries(s.accounts).map(([id,a])=>({accountId:id,paused:a.paused,
       health:a.health,graceUsed:a.graceUsed})),policy:s.policy,
     recent:{observedAt:s.recent.observedAt,total:s.recent.total,complete:s.recent.complete,
+      suspended:s.recent.suspended===true,
       stale:!s.recent.observedAt||now-s.recent.observedAt>2*s.policy.recentMs},
     nextWakeAt:s.nextWakeAt,diagnostics:{...s.diagnostics},
     timeline:s.timeline.slice(-8),clock:'EVIDENCED_ONLY',monitoring:'GATED_READ_ONLY'};
@@ -153,6 +155,8 @@ export function createRefresherStore(db){
     const out=structuredClone(s),r=out.rows.find(r=>r.stableId===stableId);
     if(!r)return fail('GENERATOR_UNKNOWN');
     r.metrics.demandUntil=now+60*MINUTE;
+    r.metrics.suspended=false;r.metrics.failures=0;
+    r.metrics.nextDueAt=Math.min(r.metrics.nextDueAt,now+MINUTE);
     return {ok:true,state:out};
   });
   const claim=args=>mutate(null,s=>claimObservation(s,args));
@@ -163,7 +167,7 @@ export function createRefresherStore(db){
     if(!a||a.bindingVersion!==c.bindingVersion||a.personaUid!==c.personaUid||
       a.principalFingerprint!==c.principalFingerprint||
       !a.verifiedIdentity)return fail('OBSERVATION_CONTEXT_CHANGED');
-    let out=structuredClone(s),accepted=false;
+    let out=structuredClone(s),accepted=false,clockChanges=[];
     if(packet?.ok&&packet.principalFingerprint!==c.principalFingerprint)
       packet={ok:false,code:'MONITOR_PRINCIPAL_CHANGED'};
     if(packet?.ok&&c.kind==='RECENT'&&packet.observedAt===c.startedAt&&
@@ -204,9 +208,9 @@ export function createRefresherStore(db){
       packet.principalFingerprint===c.principalFingerprint){
       const interval={from:c.startedAt,to:now,accountId:c.accountId,
         bindingVersion:c.bindingVersion,personaUid:c.personaUid,
-        health:packet.ok?'HEALTHY':'UNKNOWN',protected:true,sessionVerified:packet.ok===true,
+        health:accepted&&packet.ok?'HEALTHY':'UNKNOWN',protected:true,sessionVerified:accepted&&packet.ok===true,
         domain:isSafeId(packet.interval.domain)?packet.interval.domain:null,
-        providerResult:packet.ok?'HEALTHY':packet.code==='PROVIDER_UNAVAILABLE'?
+        providerResult:accepted&&packet.ok?'HEALTHY':packet.code==='PROVIDER_UNAVAILABLE'?
           'PROVIDER_UNAVAILABLE':'UNKNOWN'};
       out.healthIntervals=[...(out.healthIntervals||[]),interval].slice(-50);
       const covering=out.healthIntervals.filter(h=>h.from<=interval.from&&h.to>=interval.to);
@@ -216,18 +220,22 @@ export function createRefresherStore(db){
         witnesses:covering.filter(h=>h.domain).map(h=>({accountId:h.accountId,
           domain:h.domain,result:h.providerResult,routeVerified:true,observedAt:now}))};
       const turn=advanceShadow(out,{now,bootId:c.bootId,receipt});
-      if(turn.ok)out=turn.state;
+      if(turn.ok){out=turn.state;clockChanges=turn.changes;}
     }
     if(!accepted){
       out.diagnostics.dropped++;
       const obj=c.kind==='RECENT'?out.recent:out.rows.find(r=>r.stableId===c.stableId)?.metrics;
-      if(obj){obj.failures=Math.min(8,obj.failures+1);
+      if(obj){obj.failures=Math.min(8,obj.failures+1);obj.suspended=obj.failures>=8;
         const floor=c.kind==='RECENT'?out.policy.recentMs:out.policy.statsMinMs;
         obj.nextDueAt=now+Math.max(Math.min(24*60*MINUTE,floor*2**obj.failures),
           Math.min(24*60*MINUTE,Math.max(0,packet?.retryAfterMs||0)));
       }
     }
-    return {ok:true,state:out,accepted,code:accepted?'OBSERVED':'OBSERVATION_HELD'};
+    return {ok:true,state:out,accepted,changes:clockChanges,code:accepted?'OBSERVED':'OBSERVATION_HELD'};
   },{sync:true});
-  return Object.freeze({read,list,turn,changePolicy,pause,generatorPolicy,demand,claim,complete});
+  const resetRecentBackoff=(expectedRevision,now)=>mutate(expectedRevision,s=>{
+    const out=structuredClone(s);out.recent.suspended=false;out.recent.failures=0;
+    out.recent.nextDueAt=now+MINUTE;return {ok:true,state:out};
+  });
+  return Object.freeze({read,list,turn,changePolicy,pause,generatorPolicy,demand,claim,complete,resetRecentBackoff});
 }
