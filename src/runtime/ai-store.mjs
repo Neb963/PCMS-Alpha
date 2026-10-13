@@ -177,7 +177,7 @@ export function createAiStore(db){
         const row=e.target.result,j=row?.job;
         if(!j){done(fail('AI_JOB_NOT_FOUND'));return;}
         if(j.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
-        if(!j.native||j.native.state!=='DISPATCH_POSSIBLE')
+        if(!j.native||!['DISPATCH_POSSIBLE','RUNNING_OBSERVED'].includes(j.native.state))
           {done(fail('AI_NO_PENDING_NATIVE_EFFECT'));return;}
         const step=j.native.step,digest=observation.sessionDigest;
         let state;
