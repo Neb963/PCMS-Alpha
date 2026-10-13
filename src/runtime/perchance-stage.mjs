@@ -111,18 +111,19 @@ export async function perchanceStageMain(request) {
        app.data.generator.name!==request.slug||
        menu.saveState!=='saved'||model.isClean()!==true||
        html.isClean()!==true||(await src.isDirty())!==false||
-       window.yjsProvider||window.yDoc||
+       !soloCollaboration()||
        window.saveCheckpointManager.isDivergenceBlocked()!==false)
       return held('EDITOR_CHANGED');
     model.setValue(materialized.get('main.pjs'));
     html.setValue(materialized.get('index.html'));
     for(const [path,value] of materialized) {
       if(intent())return held('HUMAN_HANDOFF_REQUESTED');
+      if(!soloCollaboration())return held('COLLABORATION_CHANGED_DURING_STAGE');
       if(path.startsWith('src/'))await src.writeFile(path.slice(4),value);
     }
     if(intent())return held('HUMAN_HANDOFF_REQUESTED');
     const hasSrcAssets=[...materialized.keys()].some(path=>path.startsWith('src/'));
-    if(window.yjsProvider||window.yDoc||window.__saveInFlight===true||
+    if(!soloCollaboration()||window.__saveInFlight===true||
        window.userOwnsThisGenerator!==true||
        app.data.generator.name!==request.slug||
        menu.saveState!=='unsaved'||
