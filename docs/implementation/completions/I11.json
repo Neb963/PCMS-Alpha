@@ -1,0 +1,42 @@
+{
+  "phaseId": "I11",
+  "planRevision": "S7-AUDITED-DESIGN-1",
+  "proposedDisposition": "SCOPED_F_B_IMPLEMENTATION_COMPLETE_IF_PROVEN_ON_PROTECTED_MAIN",
+  "claim": "I11 provides Git-only complete verified final F (PJS, HTML, binary src additions, changes and removals) through an explicit private per-gens/main revision fence: pin source/base; verify current private Git HEAD, scoped tree and READY; construct all blobs, tree, parented commit and one nonforced ref update; re-read exact SHA-256 and Git blob hashes. A Git commit is not Perchance source-save, READY promotion, approval or publication. A durable canonical PREPARED to DISPATCH_POSSIBLE marker precedes any remote mutation, and startup/duplicate-wake paths never blindly resend. Independently read the reachable commit DAG and match unpredictable operation trailer, exact parent, policy/TESTING continuity, unrelated paths and full bytes before confirming lost acknowledgments. Manual reviewed SHA/path diff and bounded inert terminal assistant suggestions are independently gated; opt-in background automation uses only ephemeral credentials and one-shot held failure. Guarded protected Persona, exact editor and source-F evidence are double-checked around readback. All live write/AI history gates are OFF by default.",
+  "requiredAssertions": [
+    "P53-04",
+    "P53-05",
+    "P53-06",
+    "S6-I11-GIT-DAG-REPLAY",
+    "REQ-D03",
+    "REQ-D04",
+    "REQ-D05",
+    "REQ-D06"
+  ],
+  "evidenceTierNotes": {
+    "F": "tests/i00-i11-git-writeback.test.mjs uses independent synthetic Git DAG/fault transport for addition/deletion/binary, unrelated/relevant drift, blob/tree/commit failure, nonforce, lost PATCH ACK, misleading same-content attribution, corrupted readback, terminal-role/parser and external sender injection. tests/i00-i11-auto-flow.test.mjs injects independent guarded readback/terminal and Git effect fakes to test opt-in one-time background trigger, disarm, capability holds, and duplicate wake. Required exact-head CI must execute these and all legacy fast donor regressions.",
+    "B": "scripts/browser-i00-smoke.py exercises actual installed combined XPI under Firefox Developer Edition, Work Queue control existence and real button event response, canonical IndexedDB opt-in revision CAS/opt-out, duplicate DISPATCH_POSSIBLE recovery marker and disabled packaged Git port. Synthetic provider/Git fixtures are not live-provider evidence. Required exact-head packaged B and restart checks must pass.",
+    "X": "Negative synthetic Git partial writes, stale parent, collision/other-writer same content, lost ref ACK, corrupt payload, terminal-role forgery, auto re-arm/disarm, UI sender privilege smuggling, active provider/route/edit holds. No live adversarial Mullvad/Perchance/Git mutation performed.",
+    "H": "Late operator live Git credential capability, actual private repository protections, Perchance editor, AI native terminal history, and human publication/approval require separate authorization; none are claimed at implementation acceptance."
+  },
+  "capabilities": {
+    "privatePerGensGitWrites": "OFF_PENDING_SEPARATE_ACTIVATION",
+    "automaticGitWriteback": "IMPLEMENTED_EPHEMERAL_OPT_IN_EFFECT_HELD",
+    "nativeAiTerminalHistory": "OFF_PENDING_SEPARATE_ACTIVATION",
+    "providerEditorEffects": "OFF_PENDING_SEPARATE_ACTIVATION",
+    "publish": "OFF_HUMAN_EXACT_SOURCE_APPROVAL_NOT_I11",
+    "forcePush": "FORBIDDEN",
+    "repositoryTarget": "NEB963_PRIVATE_PER_GENS_MAIN_ONLY",
+    "credentialPersistence": "NONE",
+    "uncertainGitDispatch": "DURABLY_HELD_AND_READ_ONLY_DAG_RECONCILED",
+    "donor": "PINNED_UNMODIFIED_NO_BYPASS",
+    "directRouteFallback": "FORBIDDEN"
+  },
+  "holds": [
+    "No CI green or merged PR by itself enables live Git/Perchance/AI history. Live provider facts and branch-protection policies require separately authorized operator activation; no real private per-gens write was attempted in this phase.",
+    "Unverified source F or tests, changed account/Persona/protected route, human-dirty/collaborative editor, stale READY/TESTING, relevant remote HEAD drift, branch protection rejection, lost Git response or ambiguous ancestry scope only this writeback; no blind replay or force update.",
+    "Opt-in auto credentials exist only in volatile background memory after explicit arming, are bounded, and disappear on background restart, disarm or one-shot effect attempt. An opt-in setting alone never supplies credentials or authorizes Git.",
+    "Git evidence never authorizes remote Perchance save, list, READY or release. Exact-source human approval and publication remain later separate gates."
+  ],
+  "provenance": "In-PR completion proposal only: no predicted future main SHA, CI result, XPI hash or live acceptance. Verify candidate F/B/X/donor gate, trusted protection, protected squash merge, actual merged main SHA and postmerge packaged Firefox build before recording MERGED_AND_VERIFIED."
+}
