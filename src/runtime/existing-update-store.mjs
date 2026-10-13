@@ -199,5 +199,26 @@ export function createExistingStore(db){
       };
     });
   }
-  return Object.freeze({get,getFull,prepare,move,pinStage});
+  // Once AI has independently produced exact tested F, replace only the
+  // recovery comparison candidate, never the original encrypted P.
+  function setFinal(s,revision,source){
+    if(!valid(s)||!source?.ok||!source.fingerprint||
+       !Array.isArray(source.blobs))return Promise.resolve(fail('FINAL_F_INVALID'));
+    return tx(db,'readwrite',(t,done)=>{
+      const m=t.objectStore('meta');
+      m.get(key(s)).onsuccess=e=>{
+        const old=e.target.result?.record;
+        if(!old||old.revision!==revision||old.state!=='STAGE_CONFIRMED'){
+          done(fail('EXISTING_FINAL_CONTEXT_CHANGED'));return;
+        }
+        const next={...old,revision:old.revision+1,
+          stagedFingerprint:source.fingerprint,stageSource:structuredClone(source)};
+        m.put({key:key(s),record:next});
+        t.objectStore('events').add({stage:'EXISTING_FINAL_F_PINNED',
+          slug:s,revision:next.revision,sourceFingerprint:source.fingerprint});
+        done(publicExisting(next));
+      };
+    });
+  }
+  return Object.freeze({get,getFull,prepare,move,pinStage,setFinal});
 }
