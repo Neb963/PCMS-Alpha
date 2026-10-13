@@ -108,30 +108,50 @@ export function createStagingStore(db){
     return txn(db,'readwrite',(tx,done)=>{
       const m=tx.objectStore('meta');
       m.get(key(slugName)).onsuccess=prior=>{
-        if(prior.target.result){done(fail('EXISTING_STAGE_REQUIRES_REVIEW'));return;}
-        m.get('source-link:'+slugName).onsuccess=l=>{
-          const link=l.target.result?.link;
-          m.get('account:'+eligibility.account.accountId).onsuccess=a=>{
-            const account=a.target.result?.account;
-            if(!link||link.folder!==source.folder||link.accountId!==account?.accountId||
-               !account||account.revision!==eligibility.account.revision||
-               account.bindingVersion!==eligibility.account.bindingVersion||
-               account.personaUid!==eligibility.account.personaUid){
-              done(fail('READY_OR_ACCOUNT_CHANGED'));return;
-            }
-            const r={slug:slugName,revision:1,state:'PINNED',
-              accountId:account.accountId,accountRevision:account.revision,
-              personaUid:account.personaUid,bindingVersion:account.bindingVersion,
-              principalFingerprint:account.identity.principalFingerprint,
-              remotePublicId:eligibility.item.remoteId,
-              sourceFolder:source.folder,sourceHead:source.head,
-              gitFingerprint:source.fingerprint,testingSha:source.testingSha,
-              candidate,previous,nonce,tab:null,reason:null};
-            m.add({key:key(slugName),record:r});
-            tx.objectStore('events').add({stage:'CANDIDATE_PINNED',slug:slugName,
-              candidateFingerprint:candidate.fingerprint,sourceHead:source.head,
-              previousFingerprint:previous.fingerprint});
-            done(publicView(r));
+        const old=prior.target.result?.record;
+        m.get('release:'+slugName).onsuccess=rv=>{
+          const release=rv.target.result?.release;
+          if(old&&!(
+            old.state==='SOURCE_VERIFIED'&&
+            release?.state==='CONFIRMED_PUBLIC'&&
+            release.source==='INDEPENDENT_PUBLICATION_READBACK'&&
+            release.approval?.stageRevision===old.revision&&
+            release.approval?.sourceFingerprint===previous.fingerprint&&
+            release.approval?.accountId===old.accountId&&
+            release.approval?.remotePublicId===old.remotePublicId&&
+            release.approval?.personaUid===old.personaUid&&
+            release.approval?.bindingVersion===old.bindingVersion
+          )){
+            done(fail('EXISTING_STAGE_REQUIRES_REVIEW'));return;
+          }
+          m.get('source-link:'+slugName).onsuccess=l=>{
+            const link=l.target.result?.link;
+            m.get('account:'+eligibility.account.accountId).onsuccess=a=>{
+              const account=a.target.result?.account;
+              if(!link||link.folder!==source.folder||link.accountId!==account?.accountId||
+                 !account||account.revision!==eligibility.account.revision||
+                 account.bindingVersion!==eligibility.account.bindingVersion||
+                 account.personaUid!==eligibility.account.personaUid){
+                done(fail('READY_OR_ACCOUNT_CHANGED'));return;
+              }
+              const r={slug:slugName,revision:old?old.revision+1:1,state:'PINNED',
+                accountId:account.accountId,accountRevision:account.revision,
+                personaUid:account.personaUid,bindingVersion:account.bindingVersion,
+                principalFingerprint:account.identity.principalFingerprint,
+                remotePublicId:eligibility.item.remoteId,
+                sourceFolder:source.folder,sourceHead:source.head,
+                gitFingerprint:source.fingerprint,testingSha:source.testingSha,
+                candidate,previous,nonce,tab:null,reason:null};
+              if(old){
+                m.add({key:'stage-history:'+slugName+':'+old.revision,
+                  record:structuredClone(old)});
+                m.put({key:key(slugName),record:r});
+              }else m.add({key:key(slugName),record:r});
+              tx.objectStore('events').add({stage:'CANDIDATE_PINNED',slug:slugName,
+                candidateFingerprint:candidate.fingerprint,sourceHead:source.head,
+                previousFingerprint:previous.fingerprint});
+              done(publicView(r));
+            };
           };
         };
       };
