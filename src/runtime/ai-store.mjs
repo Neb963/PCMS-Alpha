@@ -77,6 +77,29 @@ export function createAiStore(db){
         done(publicJob(e.target.result?.job));
       };
     });
+  // A failed single-step wake is deferred without changing canonical test
+  // evidence, the native DISPATCH_POSSIBLE marker or per-account admission.
+  // This avoids starving another healthy account on a persistently held tab.
+  function deferScheduler(slugName,expectedRevision,until,code){
+    if(!slug(slugName)||!Number.isSafeInteger(expectedRevision)||
+       !Number.isSafeInteger(until)||until<1||
+       typeof code!=='string'||!/^AI_[A-Z0-9_]{2,80}$/.test(code))
+      return Promise.resolve(fail('AI_SCHEDULER_DEFERRAL_INVALID'));
+    return tx(db,'readwrite',(t,done)=>{
+      const m=t.objectStore('meta');
+      m.get(key(slugName)).onsuccess=e=>{
+        const row=e.target.result,j=row?.job;
+        if(!j){done(fail('AI_JOB_NOT_FOUND'));return;}
+        if(j.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
+        const next={...j,revision:j.revision+1,
+          schedulerDeferredUntil:until,schedulerHold:code};
+        m.put({...row,job:next});
+        t.objectStore('events').add({stage:'AI_SCHEDULER_DEFERRED',
+          slug:slugName,revision:next.revision,until,code});
+        done(publicJob(next));
+      };
+    });
+  }
   const getJobFull=s=>!slug(s)?Promise.resolve(fail('INVALID_SLUG')):
     tx(db,'readonly',(t,done)=>{
       t.objectStore('meta').get(key(s)).onsuccess=e=>{
@@ -121,7 +144,7 @@ export function createAiStore(db){
             if(old.target.result){done(fail('AI_EXISTING_JOB_RECONCILE'));return;}
             // Fresh jobs always pin the current settings revision, never last
             // generator creation's prompt or a mutable global prompt reference.
-            const job=started.job;
+            const job={...started.job,createdAt:Date.now()};
             m.add({key:key(stage.slug),accountId:account,job});
             t.objectStore('events').add({stage:'AI_JOB_CREATED',slug:stage.slug,
               sourceFingerprint:job.sourceFingerprint,promptRevision:prompt.revision});
@@ -367,6 +390,6 @@ export function createAiStore(db){
   }
   return Object.freeze({
     getPrompt,changePrompt,getConcurrency,changeConcurrency,exportPrompt,getJob,getJobFull,list,start,record,
-    armNative,observeNative,checkpointSource,recoverNative
+    armNative,observeNative,checkpointSource,recoverNative,deferScheduler
   });
 }
