@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {perchanceAiNative} from '../src/runtime/perchance-ai-native.mjs';
 const nonce='f'.repeat(32), slug='test-owned-private', sid='fixture-session-id-87654321';
 function fixture({owner=true,dirty=false,session=sid,busy=false,human=false,
-  collab=false,collabMode=null,localInput='',attachments=0}={}){
+  collab=false,collabMode=null,rebindDuringRead=false,localInput='',attachments=0}={}){
   const prior={location:globalThis.location,window:globalThis.window,
     document:globalThis.document};
   const clicks={send:0,newChat:0,stop:0};
@@ -24,7 +24,10 @@ function fixture({owner=true,dirty=false,session=sid,busy=false,human=false,
   globalThis.location={origin:'https://perchance.org',pathname:'/'+slug,hash:'#edit'};
   globalThis.window={
     app:{data:{generator:{name:slug,isPrivate:true}}},
-    srcState:{getDraftChatSid:()=>session,isDirty:async()=>dirty},
+    srcState:{getDraftChatSid:()=>session,isDirty:async()=>{
+      if(rebindDuringRead)globalThis.window.__collabGeneration=
+        (globalThis.window.__collabGeneration||0)+1;
+      return dirty;}},
     modelTextEditor:{isClean:()=>!dirty},
     outputTemplateEditor:{isClean:()=>!dirty},
     menuBar:{saveState:dirty?'unsaved':'saved'},
@@ -130,6 +133,15 @@ test('I10 F/X automatic owner room is not a second editor; unknown/active peers 
   await within({collabMode:'solo',session:null},async f=>{
     globalThis.window.__collabRoomFailed=true;
     assert.equal((await perchanceAiNative({slug,nonce,action:'SEND',chat:1,text:'safe'})).ok,false);
+    assert.equal(f.clicks.send,0);
+  });
+});
+
+test('I10 X native AI may not send if Yjs room is replaced during async source check',async()=>{
+  await within({collabMode:'solo',session:null,rebindDuringRead:true},async f=>{
+    const result=await perchanceAiNative({slug,nonce,action:'SEND',chat:1,
+      text:'do not dispatch after rebind'});
+    assert.equal(result.code,'COLLABORATION_CHANGED_DURING_OBSERVATION');
     assert.equal(f.clicks.send,0);
   });
 });
