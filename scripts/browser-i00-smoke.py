@@ -1098,6 +1098,51 @@ def main():
                                  {'script':code,'args':[]},timeout=90)
                 assert ai_recovery.get('ok') is True,ai_recovery
                 print('B I10_PACKAGED_NATIVE_DISPATCH_JOURNAL_FULL_SOURCE_CRASH_HOLD=PASS',flush=True)
+                # I10 B: synthetic independent-failure receipt feeding the
+                # canonical no-progress state; never a fake live-provider PASS.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const persistence=await import('./ai-store.mjs');
+                  const journal=await import('./journal.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const store=persistence.createAiStore(db),slug='i10-b-private';
+                  const initial=await store.getJob(slug);
+                  const session='1'.repeat(64);
+                  const failed=await store.record(slug,initial.revision,{
+                    type:'TEST',chat:1,name:'observed_smoke',
+                    sourceFingerprint:initial.sourceFingerprint,
+                    independentSource:'INDEPENDENT_BROWSER_ASSERTION',
+                    result:'FAIL',observedAt:Date.now()
+                  });
+                  const armed=await store.armNative(slug,failed.revision,'CHAT1_REPAIR');
+                  const seen=await store.observeNative(slug,armed.revision,{
+                    ok:true,slug,busy:false,sessionDigest:session,
+                    chatEntries:3,sourceSaved:true
+                  });
+                  const sealed=await store.getJobFull(slug);
+                  const once=await store.checkpointSource(slug,seen.revision,
+                    sealed.job.finalSource);
+                  const again=await store.armNative(slug,once.revision,'CHAT1_REPAIR');
+                  const seenAgain=await store.observeNative(slug,again.revision,{
+                    ok:true,slug,busy:false,sessionDigest:session,
+                    chatEntries:4,sourceSaved:true
+                  });
+                  const still=await store.getJobFull(slug);
+                  const twice=await store.checkpointSource(slug,seenAgain.revision,
+                    still.job.finalSource);
+                  const noThird=await store.armNative(slug,twice.revision,'CHAT1_REPAIR');
+                  done({ok:failed.ok&&failed.state==='KNOWN_FAILURE'&&
+                    armed.ok&&seen.ok&&once.state==='KNOWN_FAILURE'&&
+                    again.ok&&seenAgain.ok&&twice.state==='HELD_NO_PROGRESS'&&
+                    twice.hold==='REPEATED_SAME_SOURCE_FAILED_REPAIR'&&
+                    noThird.code==='AI_VERIFIED_FAILURE_AND_SESSION_REQUIRED',
+                    failed,armed,once,again,twice,noThird});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
+                ai_loop=call('POST',f'/session/{after}/execute/async',
+                             {'script':code,'args':[]},timeout=90)
+                assert ai_loop.get('ok') is True,ai_loop
+                print('B I10_PACKAGED_KNOWN_FAILURE_NOT_DOWNGRADED_AND_REPAIR_NO_PROGRESS_HOLD=PASS',flush=True)
 
                 # I08 B: real packaged Firefox crypto, canonical IDB, donor
                 # portable format, Settings action, and wrong-password failure.
