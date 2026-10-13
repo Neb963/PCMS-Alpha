@@ -1,36 +1,71 @@
-// I10 fixed, browser-observed preview smoke oracle. Run in the ISOLATED
-// world on the exact donor-selected #edit tab; NEVER accept test payload
-// from model chat, page text, UI or a generic injected JS expression.
-// This is one smoke assertion, not a general evaluator of TESTING.md prose.
-export function perchanceAiPreviewSmoke(slug) {
+// I10 allowlisted independent browser-observed tests. This function is run
+// only as a fixed ISOLATED-world browser script on the donor-selected owned
+// editor tab. Model/chat text never supplies result, assertions, or code.
+export const AI_BROWSER_ASSERTIONS=Object.freeze([
+  'default_generator_smoke',
+  'preview_heading_visible',
+  'preview_image_loaded',
+  'preview_button_visible',
+  'preview_link_visible'
+]);
+export function perchanceAiPreviewCheck(slug,name){
   const unknown=code=>({ok:false,code});
   if(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)||
-     location.origin!=='https://perchance.org'||
+     !['default_generator_smoke','preview_heading_visible',
+       'preview_image_loaded','preview_button_visible',
+       'preview_link_visible'].includes(name))
+    return unknown('PREVIEW_ASSERTION_NOT_SUPPORTED');
+  if(location.origin!=='https://perchance.org'||
      location.pathname!=='/'+slug||location.hash!=='#edit')
     return unknown('PREVIEW_TARGET_UNKNOWN');
   try{
     const frame=document.getElementById('outputIframeEl');
-    // Cross-origin/opaque sandboxed frames cannot be claimed as checked.
     if(!frame||frame.tagName!=='IFRAME'||!frame.contentDocument)
       return unknown('PREVIEW_NOT_INSPECTABLE');
     const page=frame.contentDocument;
     if(page.readyState!=='complete'||!page.body)
       return unknown('PREVIEW_NOT_SETTLED');
-    const indicator=page.getElementById('perchance-error-indicator');
-    const errors=page.querySelectorAll('#perchance-error-indicator');
-    if(indicator||errors.length>0)
-      return {ok:true,source:'INDEPENDENT_BROWSER_ASSERTION',
-        name:'default_generator_smoke',result:'FAIL',observedAt:Date.now(),
-        reason:'OBSERVED_PREVIEW_ERROR'};
-    // A non-empty visible runtime document is the only supported assertion.
-    // An empty DOM, inaccessible iframe, or missing output structure is
-    // UNVERIFIED, NOT an implicit PASS.
-    const body=page.body;
-    if(body.children.length===0||!body.textContent?.trim()||
-       body.getClientRects?.().length===0)
-      return unknown('PREVIEW_OUTPUT_UNVERIFIED');
-    return {ok:true,source:'INDEPENDENT_BROWSER_ASSERTION',
-      name:'default_generator_smoke',result:'PASS',observedAt:Date.now(),
-      reason:'INSPECTED_SETTLED_NONEMPTY_PREVIEW'};
+    const observed=(result,reason)=>({
+      ok:true,source:'INDEPENDENT_BROWSER_ASSERTION',
+      name,result,observedAt:Date.now(),reason
+    });
+    // A visible runtime error is a real FAIL for every asserted outcome,
+    // even when some older output remains in the preview.
+    if(page.querySelector('#perchance-error-indicator'))
+      return observed('FAIL','OBSERVED_PREVIEW_ERROR');
+    const visible=el=>{
+      if(!el||typeof el.getClientRects!=='function'||
+         el.getClientRects().length===0)return false;
+      const aria=el.closest?.('[hidden],[aria-hidden="true"]');
+      return !aria;
+    };
+    const any=(selector,predicate=()=>true)=>
+      [...page.querySelectorAll(selector)].some(el=>visible(el)&&predicate(el));
+    let passed=false;
+    if(name==='default_generator_smoke'){
+      // Opaque/inaccessible iframe, empty body or missing visible content
+      // is UNVERIFIED, not a semantic "all generator tests passed".
+      if(!page.body.children.length||!page.body.textContent?.trim()||
+         !visible(page.body))
+        return unknown('PREVIEW_OUTPUT_UNVERIFIED');
+      passed=true;
+    }else if(name==='preview_heading_visible'){
+      passed=any('h1,h2,h3,h4,h5,h6',el=>Boolean(el.textContent?.trim()));
+    }else if(name==='preview_image_loaded'){
+      passed=any('img',el=>el.complete===true&&
+        Number.isFinite(el.naturalWidth)&&el.naturalWidth>0&&
+        Number.isFinite(el.naturalHeight)&&el.naturalHeight>0);
+    }else if(name==='preview_button_visible'){
+      passed=any('button,input[type="button"],input[type="submit"]',
+        el=>el.disabled!==true);
+    }else if(name==='preview_link_visible'){
+      passed=any('a[href]',el=>Boolean(el.getAttribute('href')?.trim()));
+    }
+    return observed(passed?'PASS':'FAIL',passed?
+      'BROWSER_OBSERVED_ASSERTION':'BROWSER_OBSERVED_ASSERTION_FALSE');
   }catch{return unknown('PREVIEW_OBSERVATION_UNVERIFIED');}
+}
+// Backward-compatible fixed smoke transport for earlier F/B consumers.
+export function perchanceAiPreviewSmoke(slug){
+  return perchanceAiPreviewCheck(slug,'default_generator_smoke');
 }
