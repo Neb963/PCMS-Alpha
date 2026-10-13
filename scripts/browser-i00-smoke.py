@@ -1213,6 +1213,22 @@ def main():
                                    {'script':code,'args':[]},timeout=90)
                 assert concurrency_b.get('ok') is True,concurrency_b
                 print('B I10_PACKAGED_VERSIONED_CONCURRENCY_CAS_IDLE_SLOT_RELEASE=PASS',flush=True)
+                # B verified XPI parser/registry; no provider interaction.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const oracle=await import('./perchance-ai-oracle.mjs');
+                  const testing=await import('./ai-testing.mjs');
+                  const ok=testing.pinTestingAssertions('PCMS_TEST: preview_heading_visible\\nPCMS_TEST: preview_image_loaded');
+                  const extra=testing.pinTestingAssertions('PCMS_TEST: preview_button_visible\\nCheck business rules manually.');
+                  done({ok:ok.ok&&ok.tests.join('|')==='preview_heading_visible|preview_image_loaded'&&
+                    oracle.AI_BROWSER_ASSERTIONS.length===5&&extra.ok&&
+                    extra.tests.includes('optional_generator_tests'),
+                    parsed:ok,extra});
+                })().catch(e=>done({error:String(e)}));"""
+                check_assertions=call('POST',f'/session/{after}/execute/async',
+                                      {'script':code,'args':[]},timeout=90)
+                assert check_assertions.get('ok') is True,check_assertions
+                print('B I10_PACKAGED_NAMED_ASSERTIONS_AND_PROSE_HOLD=PASS',flush=True)
 
                 # I10 B: two genuinely distinct (synthetic) native sessions,
                 # final Chat2 source-changing repair, invalidated Chat1 suite,
