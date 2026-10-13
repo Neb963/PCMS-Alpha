@@ -73,9 +73,11 @@ async function readTree(api,commitSha,folder){
     tree.data.tree.length>30000)return fail('GIT_TREE_UNVERIFIED');
   const entries=new Map(),seen=new Set();
   for(const e of tree.data.tree){
-    if((typeof e.path!=='string'||e.path.length>512||
-        (e.path===folder||e.path.startsWith(folder+'/'))&&!pathOK(e.path))||
-       !SHA.test(e.sha||'')||
+    if(typeof e?.path!=='string')return fail('GIT_MANIFEST_UNSAFE');
+    // All unrelated Git entries survive through base_tree unchanged,
+    // including executable files, dotfiles and symlinks outside this folder.
+    if(e.path!==folder&&!e.path.startsWith(folder+'/'))continue;
+    if(!pathOK(e.path)||!SHA.test(e.sha||'')||
        !['100644','040000'].includes(e.mode)||
        !['blob','tree'].includes(e.type)||
        (e.type==='blob'&&(e.mode!=='100644'||!Number.isSafeInteger(e.size)||
