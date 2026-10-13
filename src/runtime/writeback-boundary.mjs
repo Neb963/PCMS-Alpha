@@ -143,8 +143,12 @@ export function createWritebackBoundary(api,{
       if(autoCredentials.size>=16&&!autoCredentials.has(p.slug))
         return fail('GIT_AUTO_EPHEMERAL_LIMIT');
       const prior=await store.get(p.slug);
-      if(prior.ok)return fail('WRITEBACK_ALREADY_EXISTS');
-      autoCredentials.set(p.slug,p.token);
+      if(prior.ok&&!(prior.state==='PREPARED'&&prior.mode==='AUTO'))
+        return fail('WRITEBACK_ALREADY_EXISTS');
+      // Every explicit arm gets a NEW identity; disarm followed by rearm
+      // with the same token cannot revive an old suspended attempt.
+      autoCredentials.set(p.slug,{
+        token:p.token,armId:crypto.randomUUID()});
       try{api.alarms?.create('pcms-i11-auto',{periodInMinutes:1});}catch{}
       return {ok:true,slug:p.slug,code:'AUTO_EPHEMERAL_ARMED',
         persistence:'NONE',publication:'OFF'};
@@ -159,13 +163,15 @@ export function createWritebackBoundary(api,{
         return store.get(p.slug);
       if(!['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(row.record.state))
         return fail('RECONCILIATION_NOT_REQUIRED');
-      if(!scopeMatches(stage,job).ok||
-         job.job.revision!==row.record.jobRevision||
-         stage.record.revision!==row.record.stageRevision)
-        return fail('WRITEBACK_CONTEXT_CHANGED');
+      // Recovery belongs to the historical Git intent, not a mutable
+      // current AI job or stage. The original sealed F was stored in the
+      // same canonical transaction as PREPARED.
+      if(!row.record.sealedSource||
+         row.record.sealedSource.fingerprint!==row.record.sourceFingerprint)
+        return fail('GIT_RECONCILIATION_SOURCE_UNAVAILABLE');
       const found=await observe({token:p.token,folder:row.record.folder,
         baseHead:row.record.baseHead,expectedHead:row.record.expectedHead,
-        source:job.job.finalSource,operationId:row.record.operationId});
+        source:row.record.sealedSource,operationId:row.record.operationId});
       if(found?.ok&&found.code==='GIT_COMMITTED_VERIFIED'&&
          found.attribution==='COMMIT_PARENT_AND_BYTES_VERIFIED')
         return store.finish(p.slug,row.record.revision,{
@@ -246,6 +252,11 @@ export function createWritebackBoundary(api,{
       const record=prior.record;
       if(record.state!=='PREPARED')
         return fail('WRITEBACK_RECONCILIATION_REQUIRED');
+      const autoAuthorized=()=>record.mode!=='AUTO'||(
+        typeof p.autoArmId==='string'&&
+        autoCredentials.get(p.slug)?.armId===p.autoArmId&&
+        autoCredentials.get(p.slug)?.token===p.token);
+      if(!autoAuthorized())return fail('GIT_AUTO_DISARMED');
       if(effectGate({phase:'I11',record})!==true)
         return fail('GITHUB_WRITE_ACTIVATION_HELD');
       const read=await guardedReadback(guard(),stage,job);
@@ -254,7 +265,7 @@ export function createWritebackBoundary(api,{
       // requests from different Firefox wakes cannot arm twice.
       const armed=await store.arm(p.slug,p.expectedRevision);
       if(!armed.ok)return armed;
-      if(effectGate({phase:'I11',record})!==true||
+      if(!autoAuthorized()||effectGate({phase:'I11',record})!==true||
          (await sentinel.inspect()).held){
         await store.finish(p.slug,armed.revision,{reason:'WRITEBACK_HELD_AFTER_ARM'});
         return fail('WRITEBACK_DISPATCH_UNCERTAIN');
@@ -292,9 +303,23 @@ export function createWritebackBoundary(api,{
       if(!enabled.ok||!enabled.setting.autoEnabled){
         autoCredentials.clear();return fail('GIT_AUTO_NOT_ENABLED');
       }
-      for(const [slug,token] of autoCredentials){
+      for(const [slug,credential] of autoCredentials){
+        const {token,armId}=credential;
         const current=await store.get(slug);
-        if(current.ok){autoCredentials.delete(slug);continue;}
+        if(current.ok){
+          if(current.state==='PREPARED'&&current.mode==='AUTO'){
+            if(autoCredentials.get(slug)?.armId!==armId)
+              return fail('GIT_AUTO_DISARMED');
+            const result=await runTrusted({type:'COMMIT',params:{
+              slug,token,autoArmId:armId,expectedRevision:current.revision}});
+            if(autoCredentials.get(slug)?.armId===armId)
+              autoCredentials.delete(slug);
+            return result;
+          }
+          if(autoCredentials.get(slug)?.armId===armId)
+            autoCredentials.delete(slug);
+          continue;
+        }
         const candidate=await runTrusted({type:'PREVIEW',params:{slug}});
         if(!candidate.ok)continue; // no verified final F; no Git effect
         const prepared=await runTrusted({type:'PREPARE',params:{
@@ -306,14 +331,20 @@ export function createWritebackBoundary(api,{
           // Final F was eligible but its live evidence/remote comparison
           // failed. Do not poll/replay indefinitely on each browser wake.
           // Operator may explicitly re-arm after investigating the hold.
-          autoCredentials.delete(slug);
+          if(autoCredentials.get(slug)?.armId===armId)
+            autoCredentials.delete(slug);
           return fail(prepared.code||'GIT_AUTO_PREPARE_HELD');
         }
-        // Remove the only credential BEFORE attempting any Git mutation:
-        // wake duplicates cannot dispatch or re-arm the same operation.
-        autoCredentials.delete(slug);
-        return runTrusted({type:'COMMIT',params:{
-          slug,token,expectedRevision:prepared.revision}});
+        // An operator may disarm while PREPARE awaits remote readbacks.
+        // A matching ephemeral epoch is required again before and after
+        // durable DISPATCH_POSSIBLE; concurrent alarms are single-flight.
+        if(autoCredentials.get(slug)?.armId!==armId)
+          return fail('GIT_AUTO_DISARMED');
+        const result=await runTrusted({type:'COMMIT',params:{
+          slug,token,autoArmId:armId,expectedRevision:prepared.revision}});
+        if(autoCredentials.get(slug)?.armId===armId)
+          autoCredentials.delete(slug);
+        return result;
       }
       return {ok:true,code:'GIT_AUTO_WAITING_FOR_VERIFIED_F'};
     }catch{return fail('GIT_AUTO_HELD_UNVERIFIED');}
