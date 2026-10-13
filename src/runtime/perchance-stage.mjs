@@ -1,94 +1,117 @@
-// Fixed I09 MAIN-world source application. Inject only into a fresh PCMS
-// tagged tab selected by the same-XPI donor lease host. This function cannot
-// access GitHub credentials, native routes, other generator targets or tabs.
-// All unknown editor/collaboration states hold WITHOUT touching a buffer.
+// I09: fixed native Perchance editor adapter based on Discovery v3 source.
+// It is injected in Firefox MAIN world ONLY under the donor's existing
+// PersonaGuard lease. Current build activation gate is OFF. Never assume
+// the proposed 'window.perchanceAutomation' facade exists: it does not.
 export async function perchanceStageMain(request) {
-  const hold=code=>({ok:false,code});
-  const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
+  const held=code=>({ok:false,code});
+  const validPath=p=>typeof p==='string'&&p.startsWith('src/')&&p.length<=240&&
+    p===p.normalize('NFC')&&p.split('/').every(x=>
+      /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(x)&&x!=='.'&&x!=='..'&&!x.endsWith('.'));
   if(location.origin!=='https://perchance.org'||!request||
-     !SLUG.test(request.slug)||location.pathname!=='/'+request.slug||
-     location.hash!=='#edit'||!Array.isArray(request.files)||
-     request.files.length<2||request.files.length>502)
-    return hold('EDITOR_TARGET_CHANGED');
-  try{
-    // This API contract comes from Discovery v3. An unavailable version or
-    // unproven editor/collaboration signal is an ACTIVATION HOLD, not clean.
-    const p=window.perchanceAutomation;
-    if(!p||typeof p.ready!=='function'||!p.session||
-       !p.generator?.get||!p.generator?.save||
-       !p.editor?.setPjs||!p.editor?.setHtml||
-       !p.src?.list||!p.src?.isDirty||!p.src?.write||!p.src?.delete)
-      return hold('EDITOR_CONTRACT_UNAVAILABLE');
-    const timeout=ms=>new Promise((_,reject)=>setTimeout(()=>reject(Error('EDITOR_TIMEOUT')),ms));
-    await Promise.race([p.ready(12000),timeout(13000)]);
-    const status=await p.session();
-    if(status?.generatorName!==request.slug||status.isOwner!==true||
-       status.canSave!==true||status.saveState!=='saved')
-      return hold('EDITOR_OWNER_OR_SAVE_UNVERIFIED');
-    const pjs=window.modelTextEditor,html=window.outputTemplateEditor;
-    if(!pjs||!html||typeof pjs.isClean!=='function'||
-       typeof html.isClean!=='function'||pjs.isClean()!==true||
-       html.isClean()!==true||(await p.src.isDirty())!==false)
-      return hold('EDITOR_UNKNOWN');
-    // Discovery did NOT establish an authoritative collaboration-free signal.
-    // Merely lacking a collab URL, beforeunload prompt or open socket does not
-    // prove no human collaborator. A separately verified adapter must supply
-    // an unambiguous noncollaborative editor receipt before mutations unlock.
-    if(typeof p.collaborationStatus!=='function'||
-       (await p.collaborationStatus())!=='ABSENT')
-      return hold('COLLABORATION_UNVERIFIED');
-    const initial=await p.generator.get(request.slug);
-    if(initial?.name!==request.slug||initial.isPrivate!==true||
-       initial.modelText!==''||initial.outputTemplate!==''||
-       !initial.srcManifest||typeof initial.srcManifest!=='object'||
-       Object.keys(initial.srcManifest).length!==0)
-      return hold('PREVIOUS_SOURCE_NOT_EMPTY');
-    const current=await p.src.list();
-    if(!current||Object.keys(current).length!==0)return hold('SRC_EDITOR_NOT_EMPTY');
-    if(pjs.isClean()!==true||html.isClean()!==true||
-       (await p.src.isDirty())!==false)return hold('EDITOR_CHANGED');
-    if((await p.session())?.generatorName!==request.slug ||
-       (await p.session())?.saveState!=='saved')return hold('EDITOR_CHANGED');
-
-    const paths=new Set(),files=new Map();
-    for(const f of request.files){
-      if(!f||typeof f.path!=='string'||paths.has(f.path.toLowerCase())||
-         !/^(main\.pjs|index\.html|src\/[A-Za-z0-9._/-]+)$/.test(f.path)||
-         typeof f.base64!=='string'||f.base64.length>17_000_000)
-        return hold('SOURCE_PAYLOAD_UNVERIFIED');
-      paths.add(f.path.toLowerCase());files.set(f.path,f);
+     typeof request.slug!=='string'||
+     !/^[a-z0-9][a-z0-9-]{0,99}$/.test(request.slug)||
+     location.pathname!=='/'+request.slug||location.hash!=='#edit'||
+     !Array.isArray(request.files)||request.files.length<2||request.files.length>502)
+    return held('EDITOR_TARGET_CHANGED');
+  try {
+    const app=window.app, model=window.modelTextEditor, html=window.outputTemplateEditor,
+      src=window.srcState, menu=window.menuBar;
+    if(window.__editorReady!==true||window.__saveInFlight===true||
+       window.userOwnsThisGenerator!==true||
+       !app?.data?.generator||app.data.generator.name!==request.slug||
+       app.data.generator.isPrivate!==true||
+       typeof app.saveGenerator!=='function'||typeof src?.ready!=='function'||
+       typeof src?.list!=='function'||typeof src?.isDirty!=='function'||
+       typeof src?.writeFile!=='function'||
+       typeof model?.getValue!=='function'||typeof model?.setValue!=='function'||
+       typeof html?.getValue!=='function'||typeof html?.setValue!=='function'||
+       typeof model?.isClean!=='function'||typeof html?.isClean!=='function'||
+       typeof menu?.setSaveState!=='function')
+      return held('NATIVE_EDITOR_CONTRACT_UNVERIFIED');
+    // Actual editor collaborate/dirty structures in Discovery v3. Never treat
+    // a beforeunload prompt or HTTP 200 as clean-state evidence.
+    if(window.editorCollabInitialSyncIsPending!==false||
+       window.__collabRoomFailed===true||window.yjsProvider||
+       window.yDoc||window.collabEditKeyIsIncorrect===true)
+      return held('COLLABORATION_UNVERIFIED');
+    if(typeof window.saveCheckpointManager?.isDivergenceBlocked!=='function'||
+       window.saveCheckpointManager.isDivergenceBlocked()!==false||
+       typeof src.conflictPaths!=='function'||src.conflictPaths().length!==0)
+      return held('DIVERGENCE_OR_SOURCE_CONFLICT');
+    if(typeof window.aiAgentWorkspaceSnapshot!=='function')
+      return held('AI_WORKSPACE_UNVERIFIED');
+    const workspace=await window.aiAgentWorkspaceSnapshot();
+    if(!workspace||workspace.unavailable===true||workspace.preferWorkspace)
+      return held('AI_WORKSPACE_UNVERIFIED');
+    const opened=localStorage.getItem('perchanceTabsOpen');
+    if(typeof opened!=='string')return held('EDITOR_TAB_REGISTRY_UNVERIFIED');
+    const tabRecord=JSON.parse(opened),targetTabs=tabRecord?.[request.slug];
+    if(!targetTabs||typeof targetTabs!=='object'||
+       Object.keys(targetTabs).length!==1)
+      return held('HUMAN_OR_AMBIGUOUS_EDITOR');
+    await src.ready();
+    // This I09 scope is a genuinely private NEW empty target only.
+    if(menu.saveState!=='saved'||model.isClean()!==true||
+       html.isClean()!==true||(await src.isDirty())!==false||
+       model.getValue()!==''||html.getValue()!==''||
+       Object.keys(src.list()||{}).length!==0)
+      return held('EDITOR_DIRTY_OR_NONEMPTY');
+    const base=app.data.generator.srcManifest;
+    if(base&&((typeof base!=='object')||Object.keys(base).length!==0))
+      return held('PREVIOUS_MANIFEST_NOT_EMPTY');
+    const intent=()=>document.getElementById('pcms-alpha-editor-context')
+      ?.dataset.pcmsHumanIntent==='true';
+    if(intent())return held('HUMAN_HANDOFF_REQUESTED');
+    // Decode ALL sources before the first editor mutation. No duplicate,
+    // ambiguous case, unsafe path, or malformed base64 reaches srcState.
+    const materialized=new Map(),seen=new Set();
+    let total=0;
+    for(const file of request.files) {
+      if(!file||typeof file.path!=='string'||
+         !(file.path==='main.pjs'||file.path==='index.html'||validPath(file.path))||
+         seen.has(file.path.toLowerCase())||typeof file.base64!=='string'||
+         file.base64.length>17_000_000||
+         !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(file.base64))
+        return held('SOURCE_PAYLOAD_UNVERIFIED');
+      seen.add(file.path.toLowerCase());
+      const raw=Uint8Array.from(atob(file.base64),c=>c.charCodeAt(0));
+      if(raw.length>12*1024*1024||(total+=raw.length)>16*1024*1024)
+        return held('SOURCE_TOO_LARGE');
+      materialized.set(file.path,file.path.startsWith('src/')?raw:
+        new TextDecoder('utf-8',{fatal:true}).decode(raw));
     }
-    if(!files.has('main.pjs')||!files.has('index.html'))
-      return hold('SOURCE_ROOT_MISSING');
-    const humanIntent=()=>document.getElementById('pcms-alpha-editor-context')?.dataset.pcmsHumanIntent==='true';
-    if(humanIntent())return hold('HUMAN_HANDOFF_REQUESTED');
-    // Materialize *before* the first edit, so corrupted payloads cannot
-    // create partially changed local source. The outer verifier already
-    // pinned SHA-256 of all bytes; the authoritative readback comes later.
-    const decoded=new Map();
-    for(const [path,file] of files){
-      const raw=atob(file.base64);
-      const bytes=Uint8Array.from(raw,c=>c.charCodeAt(0));
-      decoded.set(path,path.startsWith('src/')?bytes:
-        new TextDecoder('utf-8',{fatal:true}).decode(bytes));
+    if(!materialized.has('main.pjs')||!materialized.has('index.html'))
+      return held('ROOT_FILES_REQUIRED');
+    // Main-world helpers remain untrusted. Recheck fresh page identity and
+    // CodeMirror/src clean markers immediately before local edits.
+    if(intent()||window.__saveInFlight===true||window.__editorReady!==true||
+       window.userOwnsThisGenerator!==true||
+       app.data.generator.name!==request.slug||
+       menu.saveState!=='saved'||model.isClean()!==true||
+       html.isClean()!==true||(await src.isDirty())!==false||
+       window.yjsProvider||window.yDoc||
+       window.saveCheckpointManager.isDivergenceBlocked()!==false)
+      return held('EDITOR_CHANGED');
+    model.setValue(materialized.get('main.pjs'));
+    html.setValue(materialized.get('index.html'));
+    for(const [path,value] of materialized) {
+      if(intent())return held('HUMAN_HANDOFF_REQUESTED');
+      if(path.startsWith('src/'))await src.writeFile(path.slice(4),value);
     }
-    // Last-moment owner and dirty recheck. Save response is never COMPLETE.
-    if((await p.src.isDirty())!==false||
-       pjs.isClean()!==true||html.isClean()!==true||
-       (await p.session())?.saveState!=='saved')return hold('EDITOR_CHANGED');
-    if(humanIntent())return hold('HUMAN_HANDOFF_REQUESTED');
-    await p.editor.setPjs(decoded.get('main.pjs'));
-    await p.editor.setHtml(decoded.get('index.html'));
-    for(const [path,bytes] of decoded){
-      if(path.startsWith('src/'))await p.src.write(path.slice(4),bytes);
-    }
-    if(humanIntent())return hold('HUMAN_HANDOFF_REQUESTED');
-    let response;
-    try{response=await p.generator.save({includeSrc:true});}
-    catch{return hold('SAVE_POSSIBLY_DISPATCHED');}
-    if(!response||!['saved','created'].includes(response.status)||
-       response.name!==request.slug)
-      return hold('SAVE_ACK_UNVERIFIED');
+    if(intent())return held('HUMAN_HANDOFF_REQUESTED');
+    if(window.yjsProvider||window.yDoc||window.__saveInFlight===true||
+       window.userOwnsThisGenerator!==true||
+       app.data.generator.name!==request.slug||
+       (await src.isDirty())!==true||
+       window.saveCheckpointManager.isDivergenceBlocked()!==false)
+      return held('SAVE_PRECONDITION_CHANGED');
+    // The native save may return void or trigger confirmation under drift;
+    // NEVER interpret its own return value as proof of saved source.
+    let result;
+    try{result=await app.saveGenerator();}
+    catch{return held('SAVE_POSSIBLY_DISPATCHED');}
+    if(result===false||menu.saveState!=='saved'||window.__saveInFlight===true)
+      return held('SAVE_ACK_UNVERIFIED');
     return {ok:true,code:'SAVE_ACK_ONLY'};
-  }catch{return hold('EDITOR_OR_SAVE_UNVERIFIED');}
+  }catch{return held('EDITOR_OR_SAVE_UNVERIFIED');}
 }
