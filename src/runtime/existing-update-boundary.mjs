@@ -169,6 +169,33 @@ export function createExistingBoundary(api,{
       }else if(o.visibility!=='UNLISTED'||o.source.fingerprint!==target)
         return fail('EXISTING_READBACK_CONTRADICTION');
       if(!(await recheck(g,r.personaUid,before)).ok)return fail('EXISTING_GUARD_CHANGED');
+      if(m.type==='RECHECK_STAGE'){
+        const staged=await stageFactory(database).getFull(p.slug);
+        if(!staged.ok||staged.record.nonce!==r.nonce||
+           !['DISPATCH_POSSIBLE','HELD_UNCERTAIN','SAVED_UNVERIFIED'].includes(staged.record.state)||
+           staged.record.candidate.fingerprint!==r.stagedFingerprint)
+          return fail('EXISTING_STAGE_JOURNAL_CHANGED');
+        const editor=await g.inspectStageEditor?.(r.personaUid,p.slug,r.nonce);
+        if(!editor?.ok||editor.clean!==true)
+          return fail('EXISTING_DIRTY_OR_AMBIGUOUS_EDITOR');
+        const sourceProof=await verifyReadback(staged.record.candidate,{
+          ok:true,source:'DONOR_GUARDED_ORIGINAL_READBACK',slug:p.slug,
+          accountId:r.accountId,personaUid:r.personaUid,
+          principalFingerprint:r.principalFingerprint,
+          remotePublicId:r.remotePublicId,ownerResult:'IS_OWNER',
+          visibility:'UNLISTED',
+          pjs:new TextDecoder('utf-8',{fatal:true}).decode(
+            Uint8Array.from(atob(o.source.blobs.find(x=>x.path==='main.pjs').base64),c=>c.charCodeAt(0))),
+          html:new TextDecoder('utf-8',{fatal:true}).decode(
+            Uint8Array.from(atob(o.source.blobs.find(x=>x.path==='index.html').base64),c=>c.charCodeAt(0))),
+          assets:o.source.blobs.filter(x=>x.path.startsWith('src/'))
+        },{slug:p.slug,accountId:r.accountId,personaUid:r.personaUid,
+          principalFingerprint:r.principalFingerprint,remotePublicId:r.remotePublicId});
+        if(!sourceProof.ok)return fail('EXISTING_FULL_F_NOT_REVERIFIED');
+        const moved=await stageFactory(database).move(p.slug,staged.record.revision,
+          'SOURCE_VERIFIED',{verified:sourceProof});
+        if(!moved.ok)return moved;
+      }
       const event={
         RECHECK_UNLIST:'UNLIST_CONFIRMED',
         RECHECK_STAGE:'STAGE_CONFIRMED',
@@ -267,7 +294,7 @@ export function createExistingBoundary(api,{
          (await sentinel.inspect()).held)return fail('EXISTING_EFFECT_POSSIBLE_HELD');
       const request={slug:p.slug,nonce:r.nonce,
         action:m.type==='RECOVERY_UNLIST'?'UNLIST':m.type,
-        previousFiles:m.type==='UNLIST'?prior.source.blobs:r.stageSource.blobs,
+        previousFiles:['UNLIST','STAGE'].includes(m.type)?prior.source.blobs:r.stageSource.blobs,
         ...(m.type==='STAGE'?{targetFiles:r.stageSource.blobs}:
           m.type==='RESTORE'?{targetFiles:prior.source.blobs}:{})};
       let attempt;
