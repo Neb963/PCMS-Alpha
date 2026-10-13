@@ -381,7 +381,9 @@ export function createAiStore(db){
         if(c){
           const j=c.value?.job;
           if(typeof c.key==='string'&&c.key.startsWith('ai-job:')&&
-             j?.native?.state==='DISPATCH_POSSIBLE'){
+             j?.native?.state==='DISPATCH_POSSIBLE'&&
+             !(j.state==='HELD_RECONCILE'&&
+               j.hold==='NATIVE_EFFECT_MAY_HAVE_OCCURRED')){
             const next={...j,revision:j.revision+1,
               state:'HELD_RECONCILE',hold:'NATIVE_EFFECT_MAY_HAVE_OCCURRED'};
             c.update({...c.value,job:next});
