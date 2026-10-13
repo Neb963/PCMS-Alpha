@@ -222,7 +222,8 @@ export function createAiStore(db){
         const step=j.native.step,digest=observation.sessionDigest;
         let state;
         if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR'].includes(step)){
-          if(!digest||
+          if(!digest||!Number.isSafeInteger(observation.chatEntries)||
+             observation.chatEntries<1||
              (step.endsWith('REPAIR')?
                digest!==j.native.previousSessionDigest:
                digest===j.native.previousSessionDigest))
@@ -230,7 +231,11 @@ export function createAiStore(db){
           state=observation.busy?'RUNNING_OBSERVED':
             ['CHAT1_SEND','CHAT1_REPAIR'].includes(step)?'CHAT1_OBSERVED_IDLE':'CHAT2_OBSERVED_IDLE';
         }else if(step==='CHAT2_RESET'){
-          if(digest!==null||observation.busy||observation.chatEntries>1)
+          // A session identifier reset alone cannot prove a new Chat2.
+          // All old visible messages, draft input and queued work must also
+          // have cleared; OPFS/server isolation still requires separate proof.
+          if(digest!==null||observation.busy||observation.chatEntries!==0||
+             observation.inputOccupied===true||observation.hasQueue===true)
             {done(fail('AI_CHAT2_RESET_NOT_PROVEN'));return;}
           state='CHAT2_RESET_OBSERVED';
         }else{
