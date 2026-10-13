@@ -127,6 +127,10 @@
             <label for="pcms-ai-git-token">Private Git read token (ephemeral)</label><input id="pcms-ai-git-token" type="password" autocomplete="off" spellcheck="false">
             <button id="pcms-ai-prepare" type="button">Prepare source-bound test job</button>
             <button id="pcms-ai-refresh" type="button">Refresh AI receipts</button>
+            <button id="pcms-ai-run" type="button" disabled>Attempt guarded Chat 1</button>
+            <button id="pcms-ai-observe" type="button" disabled>Reconcile native session and saved source</button>
+            <button id="pcms-ai-newchat" type="button" disabled>Request fresh Chat 2</button>
+            <button id="pcms-ai-chat2" type="button" disabled>Attempt guarded Chat 2</button>
           </div>
           <p id="pcms-ai-jobs-status" role="status" aria-live="polite">No AI job has been started.</p>
           <div id="pcms-ai-job-list" class="table-wrap" role="region" aria-label="AI job receipts" tabindex="0"></div>
