@@ -1230,6 +1230,29 @@ def main():
                 assert check_assertions.get('ok') is True,check_assertions
                 print('B I10_PACKAGED_NAMED_ASSERTIONS_AND_PROSE_HOLD=PASS',flush=True)
 
+                # I10 B: installed XPI imports the read-only OPFS inspector,
+                # and the trusted page cannot impersonate a provider editor.
+                # No live OPFS/server state is accessed by this negative.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const {perchanceAiOpfsProbe}=await import('./perchance-ai-opfs.mjs');
+                  const invalid=await perchanceAiOpfsProbe({
+                    slug:'private-opfs',nonce:'f'.repeat(32)
+                  });
+                  const bad=await perchanceAiOpfsProbe({
+                    slug:'private-opfs',nonce:'0'
+                  });
+                  done({ok:invalid.code==='WORKSPACE_EDITOR_CHANGED'&&
+                    invalid.isolation==='UNVERIFIED'&&
+                    bad.code==='WORKSPACE_REQUEST_INVALID'&&
+                    bad.isolation==='UNVERIFIED',
+                    invalid,bad});
+                })().catch(e=>done({error:String(e)}));"""
+                opfs_b=call('POST',f'/session/{after}/execute/async',
+                            {'script':code,'args':[]},timeout=90)
+                assert opfs_b.get('ok') is True,opfs_b
+                print('B I10_PACKAGED_OPFS_LOCAL_PROBE_WRONG_ORIGIN_HOLD=PASS',flush=True)
+
                 # I10 B: two genuinely distinct (synthetic) native sessions,
                 # final Chat2 source-changing repair, invalidated Chat1 suite,
                 # observed independent retests on one final F and slot release.
