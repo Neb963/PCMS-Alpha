@@ -429,7 +429,7 @@ attachPcmsGuard({
       catch{continue;}
       if(tag?.nonce===request.nonce&&tag.slug===request.slug&&
          tag.personaUid===personaUid&&tag.cookieStoreId===cookieStoreId&&
-         tag.createdBy==='PCMS_I09'&&tag.humanIntent!==true)found.push(tab);
+         ['PCMS_I09','PCMS_I13'].includes(tag.createdBy)&&tag.humanIntent!==true)found.push(tab);
     }
     if(found.length!==1||tabs.some(t=>t.id!==found[0].id&&t.url===expected))
       return {ok:false,code:'RELEASE_EDITOR_OWNERSHIP_AMBIGUOUS'};
