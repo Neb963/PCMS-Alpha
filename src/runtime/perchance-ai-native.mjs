@@ -58,7 +58,7 @@ export async function perchanceAiNative(request){
         (await src.isDirty?.())===false,
       collaboration:'ABSENT_AT_OBSERVATION'};
     if(action==='OBSERVE')return current;
-    if(current.hasQueue||current.inputOccupied||busy)
+    if(action!=='STOP'&&(current.hasQueue||current.inputOccupied||busy))
       return hold('AI_BUSY_OR_HUMAN_INPUT');
     if(action==='SEND'){
       const text=request?.text;
