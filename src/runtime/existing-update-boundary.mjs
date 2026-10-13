@@ -146,7 +146,7 @@ export function createExistingBoundary(api,{
       if(!unlocked.ok)return unlocked;
       if(!(await recheck(authority.g,record.personaUid,authority.before)).ok)
         return fail('EXISTING_GUARD_CHANGED');
-      return store.prepare({context:{ok:true},original,seal:sealed,
+      return store.prepare({context:{ok:true,originalArchiveFingerprint:f.adoption.original.fingerprint},original,seal:sealed,
         remote:{ok:true,remotePublicId:record.remotePublicId,
           ownerResult:'IS_OWNER',visibility:remote.visibility,source:remote.source},
         shadow:f.row,account:f.account,inventory:f.inventory,adoption:f.adoption});
