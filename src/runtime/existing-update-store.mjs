@@ -88,7 +88,10 @@ export function createExistingStore(db){
       STAGE_DISPATCH:['UNLIST_CONFIRMED'],
       STAGE_UNCERTAIN:['STAGE_DISPATCH_POSSIBLE','STAGE_UNCERTAIN'],
       STAGE_CONFIRMED:['STAGE_DISPATCH_POSSIBLE','STAGE_UNCERTAIN'],
-      RESTORE_DISPATCH:['STAGE_CONFIRMED','UNLIST_CONFIRMED','STAGE_UNCERTAIN','RECOVERY_HOLD'],
+      RECOVERY_UNLIST_DISPATCH:['STAGE_CONFIRMED'],
+      RECOVERY_UNLIST_UNCERTAIN:['RECOVERY_UNLIST_DISPATCH_POSSIBLE','RECOVERY_UNLIST_UNCERTAIN'],
+      RECOVERY_UNLIST_CONFIRMED:['RECOVERY_UNLIST_DISPATCH_POSSIBLE','RECOVERY_UNLIST_UNCERTAIN'],
+      RESTORE_DISPATCH:['STAGE_CONFIRMED','RECOVERY_UNLIST_CONFIRMED'],
       RESTORE_UNCERTAIN:['RESTORE_DISPATCH_POSSIBLE','RESTORE_UNCERTAIN'],
       RESTORE_CONFIRMED:['RESTORE_DISPATCH_POSSIBLE','RESTORE_UNCERTAIN']
     };
@@ -101,18 +104,38 @@ export function createExistingStore(db){
         if(!r){done(fail('EXISTING_NOT_FOUND'));return;}
         if(r.revision!==revision){done(fail('STALE_REVISION'));return;}
         if(!allow[event].includes(r.state)){done(fail('EXISTING_RECONCILIATION_REQUIRED'));return;}
-        const verified=['UNLIST_CONFIRMED','STAGE_CONFIRMED','RESTORE_CONFIRMED'].includes(event);
+        const verified=['UNLIST_CONFIRMED','STAGE_CONFIRMED','RESTORE_CONFIRMED','RECOVERY_UNLIST_CONFIRMED'].includes(event);
         if(verified&&(proof?.source!=='INDEPENDENT_FULL_BYTE_READBACK'||
-           proof.fingerprint!==(event==='STAGE_CONFIRMED'?r.stagedFingerprint:r.previousFingerprint)||
+           proof.fingerprint!==(event==='STAGE_CONFIRMED'||event==='RECOVERY_UNLIST_CONFIRMED'?r.stagedFingerprint:r.previousFingerprint)||
            proof.visibility!=='UNLISTED'||proof.ownerResult!=='IS_OWNER'||
            proof.remotePublicId!==r.remotePublicId))
           {done(fail('EXISTING_INDEPENDENT_BYTES_REQUIRED'));return;}
-        const dispatch=['UNLIST_DISPATCH','STAGE_DISPATCH','RESTORE_DISPATCH'].includes(event);
+        const dispatch=['UNLIST_DISPATCH','STAGE_DISPATCH','RESTORE_DISPATCH','RECOVERY_UNLIST_DISPATCH'].includes(event);
         if(dispatch) {
+          m.get('account:'+r.accountId).onsuccess=av=>{
+            const a=av.target.result?.account;
+            if(a?.revision!==r.accountRevision||a.bindingVersion!==r.bindingVersion||
+               a.personaUid!==r.personaUid||a.state!=='VERIFIED'||
+               a.identity?.principalFingerprint!==r.principalFingerprint){
+              done(fail('EXISTING_OWNER_CONTEXT_CHANGED'));return;
+            }
+            m.get('inventory:'+s).onsuccess=iv=>{
+              const item=iv.target.result?.generator;
+              if(item?.remoteId!==r.remotePublicId||
+                 item.bindingVersion!==r.bindingVersion||
+                 item.ownerState!=='OBSERVED_OWNER'){
+                done(fail('EXISTING_REMOTE_IDENTITY_CHANGED'));return;
+              }
+              checkShadow(item);
+            };
+          };
+          function checkShadow(item){
           m.get(REFRESHER_KEY).onsuccess=sh=>{
             const state=sh.target.result?.state,row=state?.rows?.find(v=>v.slug===s);
-            if(!row||row.phase!=='SLEEPING'||row.slot===true||
-               row.paused===true||state.globalPause===true||
+            if(!row||(
+                 !['RESTORE_DISPATCH','RECOVERY_UNLIST_DISPATCH'].includes(event)&&
+                 (row.phase!=='SLEEPING'||row.slot===true)
+               )||row.paused===true||state.globalPause===true||
                state.accounts?.[r.accountId]?.paused===true||
                row.bindingVersion!==r.bindingVersion||
                row.remoteId!==r.remotePublicId){
@@ -120,6 +143,7 @@ export function createExistingStore(db){
             }
             commit(r);
           };
+          }
         }else commit(r);
         function commit(current){
           const nextState=dispatch?event.replace('_DISPATCH','_DISPATCH_POSSIBLE'):event;
@@ -127,6 +151,19 @@ export function createExistingStore(db){
             reason:verified?null:reason||current.reason,
             changedAt:Date.now()};
           m.put({key:key(s),record:next});
+          if(event==='RESTORE_CONFIRMED'){
+            m.get('release:'+s).onsuccess=lv=>{
+              const release=lv.target.result?.release;
+              if(release&&['CONFIRMED_PUBLIC','PUBLICATION_UNCERTAIN',
+                  'RECOVERY_HOLD','DISPATCH_POSSIBLE'].includes(release.state)){
+                m.put({key:'release:'+s,release:{...release,
+                  revision:release.revision+1,state:'RESTORED_UNLISTED',
+                  reason:'PREVIOUS_P_UNLISTED_FOR_HUMAN_REVIEW',
+                  source:null,observationId:null,
+                  changedAt:Date.now()}});
+              }
+            };
+          }
           if(dispatch){
             t.objectStore('operations').put({operationId:current.operationId,
               targetId:'existing_'+s,fingerprint:current.previousFingerprint,
