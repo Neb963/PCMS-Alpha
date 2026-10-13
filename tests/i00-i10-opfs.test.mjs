@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {perchanceAiOpfsProbe} from '../src/runtime/perchance-ai-opfs.mjs';
 const slug='private-opfs',nonce='f'.repeat(32),sid='session-opaque-12345678';
 function fixture({origin='https://perchance.org',owner=true,editor=true,session=sid,
-   storage='present',workspace='present',human=false,collab=false,collabMode=null}={}){
+   storage='present',workspace='present',human=false,collab=false,collabMode=null,
+   workerLock=false,oldLock=false}={}){
   const before={location:globalThis.location,window:globalThis.window,
     document:globalThis.document,navigator:Object.getOwnPropertyDescriptor(globalThis,'navigator')};
   let gets=0,creates=0,files=0;
@@ -32,6 +33,9 @@ function fixture({origin='https://perchance.org',owner=true,editor=true,session=
     getFileHandle:async()=>{files++;throw Error('FILE_READ_FORBIDDEN');}
   });
   Object.defineProperty(globalThis,'navigator',{configurable:true,value:{
+    locks:{query:async()=>({held:workerLock?
+      [{name:'aiagent-live|'+sid,mode:'shared'}]:oldLock?
+      [{name:'aiagent-live|old-session',mode:'shared'}]:[]})},
     storage:storage==='missing'?{}:{getDirectory:async()=>{
       if(storage==='deniedRoot')throw Object.assign(Error('denied'),{name:'SecurityError'});
       return opfs();
@@ -41,6 +45,7 @@ function fixture({origin='https://perchance.org',owner=true,editor=true,session=
   globalThis.window={
     __editorReady:editor,app:{data:{generator:{name:slug,isPrivate:true}}},
     userOwnsThisGenerator:owner,srcState:{getDraftChatSid:()=>session},
+    __aiAgentLiveLockSid:workerLock?sid:oldLock?'old-session':undefined,
     yjsProvider:collabMode?{wsconnected:collabMode!=='offline',
       synced:collabMode!=='unsynced',roomname:'room'}:collab?{}:null,
     yDoc:collabMode?{clientID:10}:null,
@@ -147,6 +152,31 @@ test('I10 F/X OPFS read-only observation accepts synced solo owner and denies pe
       const r=await perchanceAiOpfsProbe({slug,nonce});
       assert.equal(r.ok,false,collabMode);
       assert.equal(f.counts().gets,0,collabMode);
+    });
+  }
+});
+
+test('P52-06 F/X worker attestation requires exact S2 lock acquired after native init',async()=>{
+  await check({workerLock:true},async f=>{
+    const r=await perchanceAiOpfsProbe({slug,nonce});
+    assert.equal(r.ok,true);
+    assert.equal(r.workerNamespace,'CURRENT_SESSION_WORKER_INIT_LOCK');
+    assert.equal(r.isolation,'UNVERIFIED');
+    assert.equal(JSON.stringify(r).includes(sid),false);
+    assert.equal(f.counts().files,0);
+    assert.equal(f.counts().creates,0);
+  });
+  for(const options of [{oldLock:true},{workerLock:false},
+    {workerLock:true,workspace:'absent'}]){
+    await check(options,async f=>{
+      const r=await perchanceAiOpfsProbe({slug,nonce});
+      assert.equal(r.ok,true);
+      // A valid init lock without a workspace directory is still
+      // independently insufficient; canonical fresh-chat CAS needs BOTH.
+      assert.equal(r.workerNamespace,
+        options.workerLock?'CURRENT_SESSION_WORKER_INIT_LOCK':'UNVERIFIED');
+      if(options.workspace==='absent')assert.equal(r.workspaceRootState,'ABSENT');
+      assert.equal(f.counts().creates,0);
     });
   }
 });
