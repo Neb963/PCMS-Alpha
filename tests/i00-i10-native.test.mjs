@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {perchanceAiNative} from '../src/runtime/perchance-ai-native.mjs';
 const nonce='f'.repeat(32), slug='test-owned-private', sid='fixture-session-id-87654321';
-function fixture({owner=true,dirty=false,session=sid,busy=false,human=false,collab=false,localInput=''}={}){
+function fixture({owner=true,dirty=false,session=sid,busy=false,human=false,collab=false,localInput='',attachments=0}={}){
   const prior={location:globalThis.location,window:globalThis.window,
     document:globalThis.document};
   const clicks={send:0,newChat:0,stop:0};
@@ -16,7 +16,7 @@ function fixture({owner=true,dirty=false,session=sid,busy=false,human=false,coll
     aiAgentMsgsEl:{childElementCount:2},
     aiAgentWallEl:{hidden:!busy},
     aiAgentQueueRowEl:{hidden:true,style:{display:'none'}},
-    aiAgentPanelEl:{},
+    aiAgentPanelEl:{},aiAgentAttachChipsEl:{childElementCount:attachments},
     'pcms-alpha-editor-context':{dataset:{pcmsHumanIntent:human?'true':'false'}}
   };
   globalThis.document={getElementById:k=>ids[k]||null};
@@ -57,7 +57,7 @@ test('P52-05 F: fixed native Send is attempt-only and needs an empty clean owned
 });
 test('P52-05 X synthetic: owner, collaboration, dirty, busy, human and conflicting input never dispatch',async()=>{
   for(const cfg of [{owner:false},{collab:true},{dirty:true},{busy:true},
-    {human:true},{localInput:'human unsent prompt'}]){
+    {human:true},{localInput:'human unsent prompt'},{attachments:1}]){
     await within(cfg,async f=>{
       const r=await perchanceAiNative({slug,nonce,action:'SEND',chat:1,text:'test'});
       assert.equal(r.ok,false,JSON.stringify(cfg));
