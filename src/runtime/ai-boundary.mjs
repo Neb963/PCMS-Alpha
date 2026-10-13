@@ -142,7 +142,8 @@ export function createAiBoundary(api,{
             localOpfsAccessible:inspected.localOpfsAccessible===true,
             attachmentState:inspected.attachmentState,
             workspaceRootState:inspected.workspaceRootState,
-            workerNamespace:'UNVERIFIED',
+            workerNamespace:inspected.workerNamespace==='CURRENT_SESSION_WORKER_INIT_LOCK'?
+              'CURRENT_SESSION_WORKER_INIT_LOCK':'UNVERIFIED',
             isolation:'UNVERIFIED',serverEndAck:'UNOBSERVED',
             sourceFingerprint:job.sourceFingerprint,
             tests:'AI_CHAT2_ISOLATION_UNVERIFIED'};
