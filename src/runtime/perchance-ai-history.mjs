@@ -25,6 +25,22 @@ export async function perchanceAiHistoryProbe(request){
        typeof src.getDraftChatRoutingKey!=='function'||
        document.getElementById('pcms-alpha-editor-context')?.dataset?.pcmsHumanIntent==='true')
       return hold('AI_HISTORY_EDITOR_UNVERIFIED');
+    const solo=()=>{
+      if(window.editorCollabInitialSyncIsPending!==false||
+         window.__collabRoomFailed===true||
+         window.collabEditKeyIsIncorrect===true)return false;
+      const provider=window.yjsProvider;
+      if(!provider)return !window.yjsProviderRoomName;
+      const doc=window.yDoc,aw=window.yjsAwareness;
+      if(!doc||!aw||typeof aw.getStates!=='function'||
+         !Number.isSafeInteger(doc.clientID)||
+         provider.wsconnected!==true||provider.synced!==true||
+         typeof window.yjsProviderRoomName!=='string'||
+         provider.roomname!==window.yjsProviderRoomName)return false;
+      const peers=aw.getStates();
+      return peers instanceof Map&&peers.size===1&&peers.has(doc.clientID);
+    };
+    if(!solo())return hold('AI_HISTORY_COLLABORATION_UNVERIFIED');
     const sid=src.getDraftChatSid();
     const route=src.getDraftChatRoutingKey();
     if(typeof sid!=='string'||sid.length<12||sid.length>256||
@@ -61,7 +77,7 @@ export async function perchanceAiHistoryProbe(request){
        entries[firstUser]?.t!==request.firstPrompt||
        entries.slice(0,firstUser).some(x=>x?.k==='fold'&&x?.l!=='instructions'))
       return hold('AI_HISTORY_PREVIOUS_CONVERSATION_OR_PROMPT');
-    if(src.getDraftChatSid()!==sid||
+    if(!solo()||src.getDraftChatSid()!==sid||
        src.getDraftChatRoutingKey()!==route||
        document.getElementById('pcms-alpha-editor-context')?.dataset?.pcmsHumanIntent==='true')
       return hold('AI_HISTORY_SESSION_CHANGED');
