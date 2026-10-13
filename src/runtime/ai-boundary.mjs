@@ -176,6 +176,8 @@ export function createAiBoundary(api,{
              workspace.sessionDigest!==before.sessionDigest||
              workspace.isolation!=='UNVERIFIED')
             return fail('AI_CHAT2_WORKSPACE_UNVERIFIED');
+          if(workspace.workerNamespace!=='CURRENT_SESSION_WORKER_INIT_LOCK')
+            return fail('AI_CHAT2_WORKER_UNVERIFIED');
           const history=await g.runNativeAiStep(r.personaUid,{
             slug:r.slug,nonce:r.nonce,action:'OBSERVE_HISTORY',
             firstPrompt:job.optionalTesting.text});
