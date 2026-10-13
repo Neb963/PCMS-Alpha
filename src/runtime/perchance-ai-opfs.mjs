@@ -13,15 +13,6 @@ export async function perchanceAiOpfsProbe(request){
      location.pathname!=='/'+request.slug||location.hash!=='#edit')
     return fail('WORKSPACE_EDITOR_CHANGED');
   try{
-    if(window.__editorReady!==true||
-       window.app?.data?.generator?.name!==request.slug||
-       window.app?.data?.generator?.isPrivate!==true||
-       window.userOwnsThisGenerator!==true||
-       !window.srcState?.getDraftChatSid||
-       !soloCollaboration()||
-       window.saveCheckpointManager?.isDivergenceBlocked?.()!==false||
-       document.getElementById('pcms-alpha-editor-context')?.dataset?.pcmsHumanIntent==='true')
-      return fail('WORKSPACE_OWNER_UNVERIFIED');
     // Owners can automatically join their own Yjs room. A provider is
     // not itself a second collaborator: accept only a synchronized room
     // with exactly the local awareness client; peers/unknown state HOLD.
@@ -40,6 +31,15 @@ export async function perchanceAiOpfsProbe(request){
       const peers=awareness.getStates();
       return peers instanceof Map&&peers.size===1&&peers.has(doc.clientID);
     };
+    if(window.__editorReady!==true||
+       window.app?.data?.generator?.name!==request.slug||
+       window.app?.data?.generator?.isPrivate!==true||
+       window.userOwnsThisGenerator!==true||
+       !window.srcState?.getDraftChatSid||
+       !soloCollaboration()||
+       window.saveCheckpointManager?.isDivergenceBlocked?.()!==false||
+       document.getElementById('pcms-alpha-editor-context')?.dataset?.pcmsHumanIntent==='true')
+      return fail('WORKSPACE_OWNER_UNVERIFIED');
     const sid=window.srcState.getDraftChatSid();
     if(typeof sid!=='string'||sid.length<12||sid.length>256)
       return fail('WORKSPACE_SESSION_UNVERIFIED');
