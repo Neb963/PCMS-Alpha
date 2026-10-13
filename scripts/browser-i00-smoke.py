@@ -1214,6 +1214,86 @@ def main():
                 assert concurrency_b.get('ok') is True,concurrency_b
                 print('B I10_PACKAGED_VERSIONED_CONCURRENCY_CAS_IDLE_SLOT_RELEASE=PASS',flush=True)
 
+                # I10 B: two genuinely distinct (synthetic) native sessions,
+                # final Chat2 source-changing repair, invalidated Chat1 suite,
+                # observed independent retests on one final F and slot release.
+                # Browser/IDB only: no live AI, Perchance account or writes.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const storeModule=await import('./ai-store.mjs');
+                  const core=await import('./staging-core.mjs');
+                  const {planAiStep}=await import('./ai-supervisor.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const store=storeModule.createAiStore(db);
+                  const enc=s=>btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+                  const original=await core.exactSource([
+                    {path:'main.pjs',base64:enc('output = 1')},
+                    {path:'index.html',base64:enc('<p>v1</p>')}
+                  ]);
+                  const repaired=await core.exactSource([
+                    {path:'main.pjs',base64:enc('output = 2')},
+                    {path:'index.html',base64:enc('<p>v2</p>')},
+                    {path:'src/new.bin',base64:'AAH/'}
+                  ]);
+                  const slug='i10-two-chat';
+                  const stage={slug,accountId:'two-chat-account',revision:1,
+                    state:'SOURCE_VERIFIED',candidate:{fingerprint:original.fingerprint},
+                    previous:{fingerprint:'b'.repeat(64)}};
+                  const begun=await store.start(stage,{
+                    sha256:'f'.repeat(64),text:'Use a fresh isolated conversation.',
+                    tests:['default_generator_smoke']
+                  });
+                  const sid1='1'.repeat(64),sid2='2'.repeat(64);
+                  const send1=await store.armNative(slug,begun.revision,'CHAT1_SEND');
+                  const idle1=await store.observeNative(slug,send1.revision,{
+                    ok:true,slug,sessionDigest:sid1,busy:false,chatEntries:2,sourceSaved:true
+                  });
+                  const snapshot1=await store.checkpointSource(slug,idle1.revision,original);
+                  const smoke=(revision,chat,fp)=>store.record(slug,revision,{
+                    type:'TEST',chat,name:'default_generator_smoke',
+                    sourceFingerprint:fp,independentSource:'INDEPENDENT_BROWSER_ASSERTION',
+                    result:'PASS',observedAt:Date.now()
+                  });
+                  const pass1=await smoke(snapshot1.revision,1,original.fingerprint);
+                  const reset=await store.armNative(slug,pass1.revision,'CHAT2_RESET');
+                  const empty=await store.observeNative(slug,reset.revision,{
+                    ok:true,slug,sessionDigest:null,busy:false,chatEntries:0,sourceSaved:true
+                  });
+                  const send2=await store.armNative(slug,empty.revision,'CHAT2_SEND');
+                  const idle2=await store.observeNative(slug,send2.revision,{
+                    ok:true,slug,sessionDigest:sid2,busy:false,chatEntries:2,sourceSaved:true
+                  });
+                  const saved2=await store.checkpointSource(slug,idle2.revision,repaired);
+                  const sealed=await store.getJobFull(slug);
+                  const planned1=planAiStep(sealed.job);
+                  const replay1=await smoke(saved2.revision,1,repaired.fingerprint);
+                  const sealed2=await store.getJobFull(slug);
+                  const planned2=planAiStep(sealed2.job);
+                  const replay2=await smoke(replay1.revision,2,repaired.fingerprint);
+                  const complete=await store.getJob(slug);
+                  const recheck=await store.checkpointSource(slug,replay2.revision,repaired);
+                  const afterRecheck=await store.getJob(slug);
+                  done({ok:original.ok&&repaired.ok&&begun.ok&&send1.ok&&idle1.ok&&
+                    snapshot1.ok&&pass1.ok&&reset.ok&&empty.ok&&send2.ok&&idle2.ok&&
+                    sid1!==sid2&&saved2.evidence.chat1Pass===false&&
+                    saved2.evidence.state==='TESTS_UNVERIFIED'&&
+                    planned1.type==='RUN_TESTS'&&planned1.chat===1&&
+                    replay1.ok&&planned2.type==='RUN_TESTS'&&planned2.chat===2&&
+                    replay2.ok&&complete.state==='TESTS_VERIFIED'&&
+                    complete.slotReleased===true&&recheck.ok&&
+                    afterRecheck.state==='TESTS_VERIFIED'&&
+                    afterRecheck.slotReleased===true,
+                    saved:saved2.evidence.state,step1:planned1,step2:planned2,
+                    pass2:replay2?.state,complete:complete.state,
+                    afterRecheck:afterRecheck.state});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
+                ai_twochat=call('POST',f'/session/{after}/execute/async',
+                                {'script':code,'args':[]},timeout=90)
+                assert ai_twochat.get('ok') is True,ai_twochat
+                print('B I10_PACKAGED_FRESH_CHAT2_FINAL_SOURCE_RETEST_AND_IDEMPOTENT_CHECKPOINT=PASS',flush=True)
+
                 # I08 B: real packaged Firefox crypto, canonical IDB, donor
                 # portable format, Settings action, and wrong-password failure.
                 # No live provider or native calls; no disk byte proof claimed.
