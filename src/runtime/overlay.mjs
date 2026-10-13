@@ -41,7 +41,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -191,6 +191,38 @@ attachPcmsGuard({
     return {ok:true,code:'SAVE_ACK_ONLY',
       tab:{tabId:tab.id,cookieStoreId,ownershipNonce:request.nonce,location:url}};
   },
+  // A current native editor clean/owner observation must accompany the
+  // independent saved-byte readback before staged source is accepted.
+  inspectStageTab: async ({personaUid,cookieStoreId,routeId},{slug,nonce}) => {
+    if(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)||
+       typeof nonce!=='string'||!/^[a-f0-9]{32}$/.test(nonce))
+      return {ok:false,code:'INVALID_EDITOR_TARGET'};
+    const expected='https://perchance.org/'+slug+'#edit';
+    const tabs=await browser.tabs.query({cookieStoreId}),found=[];
+    for(const t of tabs){
+      if(t?.url!==expected||t.cookieStoreId!==cookieStoreId)continue;
+      let tag;
+      try{tag=await browser.sessions.getTabValue(t.id,'pcmsI09Owned');}catch{continue;}
+      if(tag?.slug===slug&&tag.nonce===nonce&&tag.personaUid===personaUid&&
+         tag.cookieStoreId===cookieStoreId&&tag.createdBy==='PCMS_I09')
+        found.push(t);
+    }
+    if(found.length!==1)return {ok:false,code:'STAGING_TAB_OWNER_UNKNOWN'};
+    const tab=found[0],before=await getState();
+    if(before.profiles?.[cookieStoreId]?.personaUid!==personaUid||
+       before.profiles?.[cookieStoreId]?.routeId!==routeId)return {ok:false,code:'GUARD_CHANGED'};
+    const out=await browser.scripting.executeScript({
+      target:{tabId:tab.id,frameIds:[0]},world:'MAIN',
+      func:perchanceEditorProbe,args:[slug]
+    });
+    const after=await browser.tabs.get(tab.id),tag=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned');
+    if(after.cookieStoreId!==cookieStoreId||after.url!==expected||
+       tag?.nonce!==nonce||tag?.humanIntent===true)
+      return {ok:false,code:'POST_EDITOR_CONTEXT_CHANGED'};
+    if(out?.length!==1||out[0].frameId!==0||out[0].error)
+      return {ok:false,code:'EDITOR_PROBE_FAILED'};
+    return out[0].result;
+  },
   // A human handoff never closes/navigates a tab, and never releases donor
   // automation ownership or any unmatched/recycled tab.
   handoffStagingTab: async ({personaUid,slug,nonce}) => {
@@ -225,7 +257,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   await writeFile(bgPath, bg);
   for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'adoption-boundary.mjs',
     'staging-core.mjs','staging-store.mjs','staging-boundary.mjs',
-    'perchance-stage.mjs','editor-strip.mjs']) {
+    'perchance-stage.mjs','editor-strip.mjs','perchance-editor-probe.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }
 }
