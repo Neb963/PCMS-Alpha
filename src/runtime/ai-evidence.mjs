@@ -83,6 +83,9 @@ export function applyAiEvidence(job,entry){
   if(!job||job.schema!==1||!entry||typeof entry!=='object')
     return fail('AI_EVIDENCE_INVALID');
   if(job.state==='HUMAN_OWNED')return fail('HUMAN_EDITOR_HOLD');
+  // A Firefox restart/unknown native call invalidates confidence in the
+  // in-memory helper session. A later prose/test reply cannot lift the hold.
+  if(job.state==='HELD_RECONCILE')return fail('AI_NATIVE_SESSION_RECONCILIATION_REQUIRED');
   const j=structuredClone(job);
   const chat=entry.chat===1?j.chat1:entry.chat===2?j.chat2:null;
   if(!chat)return fail('CHAT_NOT_APPLICABLE');
