@@ -1665,11 +1665,18 @@ def main():
                     probe:{head,baseHead:head,folder:stage2.sourceFolder},
                     mode:'MANUAL',message:'fix: synthetic safe',
                     operationId:'writeback_'+'2'.repeat(32)});
+                  const sealed=(await store.getFull(secondSlug)).record.sealedSource;
+                  const sealedExact=sealed?.fingerprint===source.fingerprint&&
+                    JSON.stringify(sealed.blobs)===JSON.stringify(source.blobs)&&
+                    JSON.stringify(sealed.files)===JSON.stringify(source.files);
                   const armed2=await store.arm(secondSlug,prepared2.revision);
                   const duplicate2=await store.arm(secondSlug,armed2.revision);
                   const reboot2=await store.get(secondSlug);
                   const reopened=await (await import('./journal.mjs')).openCanonicalDatabase();
                   const persisted=await (await import('./writeback-store.mjs')).createWritebackStore(reopened).get(slug);
+                  const persistedFull=(await (await import('./writeback-store.mjs')).createWritebackStore(reopened).getFull(secondSlug)).record;
+                  const sealedSurvivesRestart=JSON.stringify(persistedFull.sealedSource)===
+                    JSON.stringify(sealed);
                   done({ok:source.ok&&before.ok&&auto.ok&&wrong.code==='STALE_REVISION'&&
                     prepared.ok&&disabled.ok&&
                     revoked.code==='WRITEBACK_ADMISSION_REVOKED'&&
@@ -1677,7 +1684,8 @@ def main():
                     effect.code==='GITHUB_WRITE_ACTIVATION_HELD'&&
                     prepared2.ok&&armed2.state==='DISPATCH_POSSIBLE'&&
                     duplicate2.code==='WRITEBACK_RECONCILIATION_REQUIRED'&&
-                    reboot2.state==='DISPATCH_POSSIBLE',
+                    reboot2.state==='DISPATCH_POSSIBLE'&&
+                    sealedExact&&sealedSurvivesRestart,
                     prepared,wrong,revoked,still,persisted,effect});
                   reopened.close();db.close();
                 })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,400)}));"""
