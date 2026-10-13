@@ -189,6 +189,47 @@ export function createAiStore(db){
       };
     });
   }
+  // Only the protected same-XPI boundary supplies both independently
+  // observed native-server first-message history and session-local OPFS.
+  // This does not claim test PASS or authorize writes/publication.
+  function verifySecondChat(slugName,expectedRevision,history,workspace){
+    if(!slug(slugName)||!Number.isSafeInteger(expectedRevision)||
+       history?.ok!==true||
+       history.code!=='AI_SERVER_HISTORY_FIRST_PROMPT_OBSERVED'||
+       history.serverHistory!=='FIRST_USER_IS_T1'||
+       workspace?.ok!==true||workspace.isolation!=='UNVERIFIED'||
+       workspace.workspaceRootState!=='PRESENT_UNTRUSTED'||
+       history.sessionDigest!==workspace.sessionDigest||
+       history.sessionDigest===undefined)
+      return Promise.resolve(fail('AI_FRESH_CHAT_EVIDENCE_UNVERIFIED'));
+    return tx(db,'readwrite',(t,done)=>{
+      const m=t.objectStore('meta');
+      m.get(key(slugName)).onsuccess=e=>{
+        const row=e.target.result,j=row?.job;
+        if(!j){done(fail('AI_JOB_NOT_FOUND'));return;}
+        if(j.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
+        if(j.native?.state!=='CHAT2_OBSERVED_IDLE'||
+           j.chat2?.state!=='FRESH_OBSERVED'||
+           !j.optionalTesting||
+           j.chat1?.sessionDigest===j.chat2.sessionDigest||
+           history.sessionDigest!==j.chat2.sessionDigest||
+           !j.finalSource||j.finalSource.fingerprint!==j.sourceFingerprint||
+           j.state==='HELD_RECONCILE'||j.state==='HUMAN_OWNED')
+          {done(fail('AI_FRESH_CHAT_CONTEXT_CHANGED'));return;}
+        const next={...j,revision:j.revision+1,
+          chat2:{...j.chat2,state:'FRESH_VERIFIED'},
+          state:'TESTS_UNVERIFIED',hold:'INDEPENDENT_BROWSER_TESTS_REQUIRED',
+          executionSlotReleased:false};
+        m.put({...row,job:next});
+        t.objectStore('events').add({
+          stage:'AI_CHAT2_FRESHNESS_OBSERVED',slug:slugName,revision:next.revision,
+          sessionDigest:next.chat2.sessionDigest,
+          sourceFingerprint:next.sourceFingerprint
+        });
+        done(publicJob(next));
+      };
+    });
+  }
   // Durable external-effect marker. Firefox (or a disconnected response)
   // can die at any boundary; no code automatically retries this marker.
   function armNative(slugName,expectedRevision,step){
@@ -398,6 +439,6 @@ export function createAiStore(db){
   }
   return Object.freeze({
     getPrompt,changePrompt,getConcurrency,changeConcurrency,exportPrompt,getJob,getJobFull,list,start,record,
-    armNative,observeNative,checkpointSource,recoverNative,deferScheduler
+    armNative,observeNative,checkpointSource,recoverNative,deferScheduler,verifySecondChat
   });
 }
