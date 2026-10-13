@@ -31,8 +31,10 @@ export async function perchanceAiNative(request){
     const send=get('aiAgentSendBtn'),stop=get('aiAgentStopBtn'),
       newChat=get('aiAgentNewChatBtn'),input=get('aiAgentInputEl'),
       msg=get('aiAgentMsgsEl'),wall=get('aiAgentWallEl'),
-      queue=get('aiAgentQueueRowEl');
+      queue=get('aiAgentQueueRowEl'),
+      attachments=get('aiAgentAttachChipsEl');
     if(!send||!stop||!newChat||!input||!msg||!wall||!queue||
+       !attachments||
        !get('aiAgentPanelEl'))
       return hold('NATIVE_HELPER_UNAVAILABLE');
     if(input.tagName!=='TEXTAREA'||send.tagName!=='BUTTON'||
@@ -59,12 +61,14 @@ export async function perchanceAiNative(request){
           '👋 I can edit the code and test it live. Ask me to build, change or test something.',
       hasQueue:queue.hidden===false||queue.style.display==='flex',
       inputOccupied:Boolean(input.value),
+      attachmentsPending:attachments.childElementCount>0,
       sourceSaved:menu.saveState==='saved'&&window.__saveInFlight===false,
       editorClean:model.isClean?.()===true&&html.isClean?.()===true&&
         (await src.isDirty?.())===false,
       collaboration:'ABSENT_AT_OBSERVATION'};
     if(action==='OBSERVE')return current;
-    if(action!=='STOP'&&(current.hasQueue||current.inputOccupied||busy))
+    if(action!=='STOP'&&(current.hasQueue||current.inputOccupied||
+       current.attachmentsPending||busy))
       return hold('AI_BUSY_OR_HUMAN_INPUT');
     if(action==='SEND'){
       const text=request?.text;
