@@ -214,11 +214,15 @@ export function createAiStore(db){
            j.chat1?.sessionDigest===j.chat2.sessionDigest||
            history.sessionDigest!==j.chat2.sessionDigest||
            !j.finalSource||j.finalSource.fingerprint!==j.sourceFingerprint||
-           j.state==='HELD_RECONCILE'||j.state==='HUMAN_OWNED')
+           j.state==='HELD_RECONCILE'||j.state==='HUMAN_OWNED'||
+           j.state==='HELD_NO_PROGRESS')
           {done(fail('AI_FRESH_CHAT_CONTEXT_CHANGED'));return;}
+        const existing=evaluation(j);
+        const known=existing.state==='KNOWN_FAILURE';
         const next={...j,revision:j.revision+1,
           chat2:{...j.chat2,state:'FRESH_VERIFIED'},
-          state:'TESTS_UNVERIFIED',hold:'INDEPENDENT_BROWSER_TESTS_REQUIRED',
+          state:known?'KNOWN_FAILURE':'TESTS_UNVERIFIED',
+          hold:known?'KNOWN_FAILURE':'INDEPENDENT_BROWSER_TESTS_REQUIRED',
           executionSlotReleased:false};
         m.put({...row,job:next});
         t.objectStore('events').add({
