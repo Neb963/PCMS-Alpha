@@ -6,7 +6,7 @@ const testName=s=>typeof s==='string'&&/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$/.test
 const promptText=s=>typeof s==='string'&&s.length>0&&s.length<=16000&&!s.includes('\0');
 const canonicalTests=a=>Array.isArray(a)&&a.length>0&&a.length<=64&&
   a.every(testName)&&new Set(a).size===a.length;
-export const DEFAULT_AI_PROMPT='Test the current saved generator. Report observed failures, repair only main PJS and HTML, save, and retest. Do not assume text alone proves tests passed. Do not touch src assets, GitHub, account settings, publication or routing.';
+export const DEFAULT_AI_PROMPT='Test the selected saved generator, diagnose observed failures, and repair generator-owned PJS, HTML and src assets as needed. Save and retest after every change. Do not claim test PASS from your own prose. Do not touch other generators, GitHub, account settings, publication or routing.';
 export function validPromptRevision(revision){
   return revision&&Number.isSafeInteger(revision.revision)&&revision.revision>0&&
     promptText(revision.text)&&canonicalTests(revision.tests);
