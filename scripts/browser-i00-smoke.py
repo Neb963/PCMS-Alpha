@@ -893,6 +893,99 @@ def main():
                     'operationId':'fixture_operation_01'})
                 assert uncertain.get('state')=='HELD_UNCERTAIN',uncertain
                 print('B I02_UI_IGNORE_DOES_NOT_RELEASE_OPERATION=PASS',flush=True)
+                # I09 B: exact installed Firefox Developer Edition XPI,
+                # actual IndexedDB transactions, full source SHA-256, runtime
+                # sender port, fail-closed staging and synthetic editor strip.
+                # No external Perchance/Git requests and NO provider B claim.
+                call('POST',f'/session/{after}/url',{'url':url+'#generators'})
+                stage_ui=execute(after,"return {slug:!!document.getElementById('pcms-stage-slug'),pin:!!document.getElementById('pcms-stage-pin'),queue:!!document.getElementById('pcms-stage-queue'),state:document.getElementById('pcms-stage-status')?.textContent||''}")
+                assert stage_ui.get('slug') and stage_ui.get('pin') and stage_ui.get('queue'),stage_ui
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const core=await import('./staging-core.mjs');
+                  const module=await import('./staging-store.mjs');
+                  const strip=await import('./editor-strip.mjs');
+                  const journal=await import('./journal.mjs');
+                  const enc=text=>btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+                  const slug='i09-b-fixture',fp='a'.repeat(64);
+                  const candidate=await core.exactSource([
+                    {path:'main.pjs',base64:enc('let x=2')},
+                    {path:'index.html',base64:enc('<p>private</p>')},
+                    {path:'src/nested/a.bin',base64:btoa(String.fromCharCode(0,255,128))},
+                    {path:'src/empty.txt',base64:''}
+                  ]);
+                  const previous=await core.exactSource([
+                    {path:'main.pjs',base64:''},
+                    {path:'index.html',base64:''}
+                  ]);
+                  const different=await core.exactSource([
+                    {path:'main.pjs',base64:enc('let x=1')},
+                    {path:'index.html',base64:enc('<p>private</p>')},
+                    {path:'src/obsolete.txt',base64:enc('old')}
+                  ]);
+                  const changes=core.diffSource(different,candidate).changes;
+                  const account={accountId:'account_i09_b',personaUid:'persona-i09-b',
+                    state:'VERIFIED',revision:2,bindingVersion:1,
+                    identity:{source:'GUARDED_SESSION_READBACK',
+                      bindingVersion:1,principalFingerprint:fp}};
+                  const source={ok:true,ready:true,folder:'gens/'+slug,
+                    fingerprint:'d'.repeat(64),testingSha:null,
+                    head:'e'.repeat(40),sourceBytes:candidate.blobs};
+                  const eligibility={ok:true,account,item:{remoteId:'public_i09_b'},
+                    link:{folder:source.folder,accountId:account.accountId,
+                      personaUid:account.personaUid,bindingVersion:1}};
+                  const db=await journal.openCanonicalDatabase();
+                  await new Promise((resolve,reject)=>{
+                    const tx=db.transaction('meta','readwrite');
+                    tx.objectStore('meta').put({key:'account:'+account.accountId,account});
+                    tx.objectStore('meta').put({key:'source-link:'+slug,
+                      link:{...eligibility.link}});
+                    tx.oncomplete=resolve;tx.onerror=reject;tx.onabort=reject;
+                  });
+                  const store=module.createStagingStore(db);
+                  const pinned=await store.pin({slug,candidate,previous,source,eligibility,
+                    nonce:'f'.repeat(32)});
+                  const cmd=msg=>new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-i09-staging'});
+                    port.onMessage.addListener(v=>{try{port.disconnect()}catch{}resolve(v)});
+                    port.onDisconnect.addListener(()=>resolve({code:'DISCONNECTED'}));
+                    port.postMessage(msg);
+                  });
+                  const actual=await cmd({type:'GET_STAGE',params:{slug}});
+                  const blocked=await cmd({type:'STAGE_PRIVATE',params:{
+                    slug,expectedRevision:pinned.revision,token:'read-only-git-token'}});
+                  const prepared=await store.move(slug,pinned.revision,'PREPARED');
+                  const possible=await store.move(slug,prepared.revision,'DISPATCH_POSSIBLE');
+                  const recovery=await store.recover();
+                  const held=await store.getFull(slug);
+                  const noReplay=await store.move(slug,held.record.revision,'DISPATCH_POSSIBLE');
+                  strip.renderPcmsEditorStrip({
+                    slug,nonce:'f'.repeat(32),accountId:account.accountId,
+                    personaUid:account.personaUid
+                  },{location:{origin:'https://perchance.org',pathname:'/'+slug,hash:'#edit'},
+                    document,browser});
+                  const host=document.getElementById('pcms-alpha-editor-context');
+                  const handoff=host?.querySelector('button');
+                  if(handoff)handoff.click();
+                  const handoffIntent=host?.dataset.pcmsHumanIntent==='true';
+                  done({ok:pinned.ok&&actual.ok&&blocked.code==='PROVIDER_ACTIVATION_HELD'&&
+                      held.record.state==='HELD_UNCERTAIN'&&
+                      noReplay.code==='ILLEGAL_STAGE_TRANSITION'&&handoffIntent&&
+                      previous.totalBytes===0&&changes.some(x=>x.kind==='DELETED')&&
+                      changes.some(x=>x.kind==='ADDED'),
+                    pinned,blocked,possible,recovery,held:held.record.state,
+                    noReplay,changes,handOffIntent:handoffIntent,
+                    digest:candidate.fingerprint});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
+                i09=call('POST',f'/session/{after}/execute/async',
+                         {'script':code,'args':[]},timeout=90)
+                assert i09.get('ok') is True,i09
+                assert re.fullmatch('[a-f0-9]{64}',i09.get('digest','')),i09
+                assert i09.get('held')=='HELD_UNCERTAIN',i09
+                print('B I09_PACKAGED_FIREFOX_IDB_SOURCE_BYTES_CRASH_HOLD=PASS',flush=True)
+                print('B I09_PACKAGED_SYNTHETIC_EDITOR_STRIP_NO_PROVIDER_ACTIVATION=PASS',flush=True)
+
                 # I08 B: real packaged Firefox crypto, canonical IDB, donor
                 # portable format, Settings action, and wrong-password failure.
                 # No live provider or native calls; no disk byte proof claimed.
