@@ -24,6 +24,8 @@ import './staging-boundary.mjs';
 import './ai-boundary.mjs';
 // I11 Git-only revision-safe writeback (capability OFF by default).
 import './writeback-boundary.mjs';
-// I13 exact-source human approval and fail-closed publication listener.\nimport './release-boundary.mjs';\n// I12 one durable shadow queue/alarm; provider observations gated OFF.
+// I13 exact-source human approval and fail-closed publication listener.
+import './release-boundary.mjs';
+// I12 one durable shadow queue/alarm; provider observations gated OFF.
 import {createRefresherBoundary} from './refresher-boundary.mjs';
 if(typeof browser!=='undefined')createRefresherBoundary(browser).register();
