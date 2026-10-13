@@ -4,7 +4,7 @@ import {perchanceStageMain} from '../src/runtime/perchance-stage.mjs';
 const b=s=>Buffer.from(s).toString('base64');
 const slug='stage-one';
 function fixture({dirty=false,collab=false,collabMode=null,humanTab=false,handoffDuringWrite=false,
-  noSrc=false}={}){
+  rebindDuringReady=false,noSrc=false}={}){
   const effect=[],saved=[],files=new Map();
   let humanIntent=false,pjs='',html='',srcDirty=false;
   const menu={saveState:'saved',setSaveState(v){this.saveState=v;}};
@@ -12,7 +12,9 @@ function fixture({dirty=false,collab=false,collabMode=null,humanTab=false,handof
     isClean:()=>!dirty&&menu.saveState==='saved'};
   const htmlEditor={getValue:()=>html,setValue(value){html=value;menu.saveState='unsaved';},
     isClean:()=>!dirty&&menu.saveState==='saved'};
-  const source={ready:async()=>{},list:()=>new Map(files),isDirty:async()=>srcDirty,
+  const source={ready:async()=>{if(rebindDuringReady&&window.yjsProvider)
+    window.__collabGeneration=(window.__collabGeneration||0)+1;},
+    list:()=>new Map(files),isDirty:async()=>srcDirty,
     hasPending:()=>false,fileCount:0,conflictPaths:()=>[],
     async writeFile(path,bytes){
       effect.push('src:'+path);files.set(path,bytes);srcDirty=true;
@@ -94,4 +96,11 @@ test('I10 F/X compatible I09 staging: synced solo owner room is allowed; actual/
     assert.equal(r.code,'COLLABORATION_UNVERIFIED',collabMode);
     assert.deepEqual(f.effect,[],collabMode);
   }
+});
+
+test('I10 X collaboration room generation changes while staging awaits; no local or remote mutation',async()=>{
+  const f=fixture({collabMode:'solo',rebindDuringReady:true});
+  const result=await f.run();
+  assert.equal(result.code,'EDITOR_CHANGED');
+  assert.deepEqual(f.effect,[]);
 });
