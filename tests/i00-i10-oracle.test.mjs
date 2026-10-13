@@ -8,7 +8,8 @@ async function withPage(config,fn){
     getClientRects:()=>[{}]};
   const preview={readyState:'complete',body,
     getElementById:()=>config.error?{id:'perchance-error-indicator'}:null,
-    querySelectorAll:()=>config.error?[{}]:[]};
+    querySelector:()=>config.error?{id:'perchance-error-indicator'}:null,
+    querySelectorAll:()=>[]};
   const frame={tagName:'IFRAME',
     get contentDocument(){if(config.throwAccess)throw Error('SecurityError');
       return config.crossOrigin?null:preview;}};
