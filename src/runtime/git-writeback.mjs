@@ -290,7 +290,7 @@ export async function observeGitCandidate(request,transport=fetch){
 }
 export async function writeGitCandidate(request,transport=fetch){
   if(!validMessage(request?.message)||!SHA.test(request?.expectedHead||'')||
-     !writeId(request?.operationId)
+     !writeId(request?.operationId))
     return fail('WRITEBACK_REQUEST_INVALID');
   const expected=await expectedBytes(request.source);
   if(!expected.ok)return expected;
