@@ -100,17 +100,24 @@ export async function perchanceAiOpfsProbe(request){
       if(e?.name!=='NotFoundError')
         return fail('WORKSPACE_OPFS_INSPECTION_FAILED');
     }
-    // The archived native helper acquires a session-named Web Lock only
-    // AFTER its toolsWorker init call resolves. The lock, unlike an OPFS
-    // directory, is live evidence of successful current-session init.
-    // A lock left behind for Chat1 is deliberately not proof for Chat2.
+    // Discovery v3: startToolsWorker(sid) acquires this lock after an
+    // init ACK, but __aiAgentLiveLockSid is assigned only once per *page*
+    // lifetime. newChat() does NOT rotate it. Therefore after an S1 -> S2
+    // reset, seeing an S1 lock means the page has NOT furnished independent
+    // S2 worker evidence. Do not infer S2 init from a present OPFS folder or
+    // the mere fact that a worker existed earlier. A page reloaded with S2
+    // can furnish the scoped marker after its own worker init.
+    // This marker is an init observation, NOT proof of ongoing worker
+    // liveness or complete file-system isolation.
     let workerNamespace='UNVERIFIED';
-    if(window.__aiAgentLiveLockSid===sid&&
-       typeof navigator.locks?.query==='function'){
+    const lockSid=window.__aiAgentLiveLockSid;
+    if(typeof navigator.locks?.query==='function'&&
+       typeof lockSid==='string'&&lockSid.length>=12){
       const locks=await read(()=>navigator.locks.query());
       if(Array.isArray(locks?.held)&&locks.held.some(x=>
-        x?.name==='aiagent-live|'+sid&&x.mode==='shared'))
-        workerNamespace='CURRENT_SESSION_WORKER_INIT_LOCK';
+        x?.name==='aiagent-live|'+lockSid&&x.mode==='shared'))
+        workerNamespace=lockSid===sid?
+          'CURRENT_SESSION_WORKER_INIT_LOCK':'STALE_PREVIOUS_SESSION_LOCK';
     }
     if(!soloCollaboration())return fail('WORKSPACE_COLLABORATION_CHANGED');
     // Never export raw lock names/SIDs, root names, history or file bytes.
