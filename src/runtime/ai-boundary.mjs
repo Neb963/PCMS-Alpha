@@ -16,7 +16,8 @@ function encodeUtf8(text){
 }
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const ACT=new Set(['GET_PROMPTS','SET_PROMPT','IMPORT_PROMPT','EXPORT_PROMPTS',
-  'LIST_JOBS','GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS']);
+  'LIST_JOBS','GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS',
+  'GET_CONCURRENCY','SET_CONCURRENCY']);
 export function validateAiMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;
@@ -30,6 +31,7 @@ export function validateAiMessage(api,sender,message){
     message.type==='PREPARE_JOB'?['slug','expectedStageRevision','token']:
     message.type==='BEGIN_NATIVE'?['slug','expectedRevision','step']:
     ['PROBE_NATIVE','RUN_TESTS'].includes(message.type)?['slug','expectedRevision']:
+    message.type==='SET_CONCURRENCY'?['perAccount','expectedRevision']:
     message.type==='SET_PROMPT'?['text','tests','expectedRevision']:
     message.type==='IMPORT_PROMPT'?['envelope','expectedRevision']:[];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
@@ -44,7 +46,7 @@ export function validateAiMessage(api,sender,message){
       (message.type==='BEGIN_NATIVE'&&
        !['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','STOP'].includes(p.step))))
     return fail('INVALID_PARAMS');
-  if(['SET_PROMPT','IMPORT_PROMPT'].includes(message.type)&&
+  if(['SET_PROMPT','IMPORT_PROMPT','SET_CONCURRENCY'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
     return fail('INVALID_PARAMS');
   return {ok:true};
@@ -63,6 +65,7 @@ export function createAiBoundary(api,{
     try{
       const db=await database(),store=storeFactory(db),p=message.params||{};
       if(message.type==='GET_PROMPTS')return store.getPrompt();
+      if(message.type==='GET_CONCURRENCY')return store.getConcurrency();
       if(message.type==='EXPORT_PROMPTS'){
         const history=await store.getPrompt();
         return history.ok?store.exportPrompt(history.history):history;
@@ -70,6 +73,8 @@ export function createAiBoundary(api,{
       if(message.type==='LIST_JOBS')return store.list();
       if(message.type==='GET_JOB')return store.getJob(p.slug);
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      if(message.type==='SET_CONCURRENCY')
+        return store.changeConcurrency(p.expectedRevision,p.perAccount);
       if(message.type==='SET_PROMPT')
         return store.changePrompt({text:p.text,tests:p.tests},p.expectedRevision);
       if(message.type==='IMPORT_PROMPT')
