@@ -1462,7 +1462,8 @@ def main():
                     sid1!==sid2&&saved2.evidence?.chat1Pass===false&&
                     saved2.evidence?.state==='TESTS_UNVERIFIED'&&
                     planned1.type==='RUN_TESTS'&&planned1.chat===1&&
-                    replay1.ok&&planned2.code==='AI_CHAT2_ISOLATION_UNVERIFIED'&&
+                    replay1.ok&&planned2.type==='VERIFY_FRESH_CHAT2'&&
+                    planned2.effect==='GATED_READ_ONLY_HISTORY'&&
                     replay2.code==='AI_CHAT2_ISOLATION_UNVERIFIED'&&
                     complete.state==='TESTS_UNVERIFIED'&&
                     complete.slotReleased===false&&recheck.ok&&
@@ -1483,6 +1484,71 @@ def main():
                                 {'script':code,'args':[]},timeout=90)
                 assert ai_twochat.get('ok') is True,ai_twochat
                 print('B I10_PACKAGED_CHAT2_DISTINCT_SID_WITHOUT_OPFS_PROOF_HELD=PASS',flush=True)
+                # I10 B: positive *synthetic* canonical revision-checked fresh
+                # Chat2 history+OPFS witness and negative forged/stale receipts.
+                # Executes in the real packaged extension and IndexedDB.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const db=await (await import('./journal.mjs')).openCanonicalDatabase();
+                  const store=(await import('./ai-store.mjs')).createAiStore(db);
+                  const exact=(await import('./staging-core.mjs')).exactSource;
+                  const source=await exact([
+                    {path:'main.pjs',base64:btoa('output = 42')},
+                    {path:'index.html',base64:btoa('<p>verified</p>')}
+                  ]);
+                  const slug='i10-positive-chat2',a='a'.repeat(64),b='b'.repeat(64);
+                  const created=await store.start({slug,accountId:'i10-positive-owner',
+                    state:'SOURCE_VERIFIED',revision:1,
+                    candidate:{fingerprint:source.fingerprint},
+                    previous:{fingerprint:'f'.repeat(64)}},
+                    {sha256:'c'.repeat(64),text:'Pinned T1',
+                      tests:['default_generator_smoke']});
+                  const send=await store.armNative(slug,created.revision,'CHAT1_SEND');
+                  const s1=await store.observeNative(slug,send.revision,{
+                    ok:true,slug,sessionDigest:a,busy:false,chatEntries:2,sourceSaved:true});
+                  const save=await store.checkpointSource(slug,s1.revision,source);
+                  const test=(rev,chat)=>store.record(slug,rev,{type:'TEST',chat,
+                    name:'default_generator_smoke',sourceFingerprint:source.fingerprint,
+                    independentSource:'INDEPENDENT_BROWSER_ASSERTION',
+                    result:'PASS',observedAt:Date.now()});
+                  const first=await test(save.revision,1);
+                  const reset=await store.armNative(slug,first.revision,'CHAT2_RESET');
+                  const clear=await store.observeNative(slug,reset.revision,{
+                    ok:true,slug,sessionDigest:null,busy:false,chatEntries:1,
+                    resetGreetingVisible:true,inputOccupied:false,hasQueue:false,
+                    attachmentsPending:false,sourceSaved:true});
+                  const ask=await store.armNative(slug,clear.revision,'CHAT2_SEND');
+                  const s2=await store.observeNative(slug,ask.revision,{
+                    ok:true,slug,sessionDigest:b,busy:false,chatEntries:2,sourceSaved:true});
+                  const final=await store.checkpointSource(slug,s2.revision,source);
+                  const hist={ok:true,code:'AI_SERVER_HISTORY_FIRST_PROMPT_OBSERVED',
+                    serverHistory:'FIRST_USER_IS_T1',sessionDigest:b};
+                  const opfs={ok:true,isolation:'UNVERIFIED',
+                    workspaceRootState:'PRESENT_UNTRUSTED',sessionDigest:b};
+                  const missing=await store.verifySecondChat(slug,final.revision,
+                    hist,{...opfs,workspaceRootState:'ABSENT'});
+                  const forged=await store.verifySecondChat(slug,final.revision,
+                    {...hist,sessionDigest:a},opfs);
+                  const permitted=await store.verifySecondChat(slug,final.revision,hist,opfs);
+                  const stale=await store.verifySecondChat(slug,final.revision,hist,opfs);
+                  const second=await test(permitted.revision,2);
+                  const job=await store.getJob(slug);
+                  done({ok:created.ok&&send.ok&&s1.ok&&save.ok&&first.ok&&
+                    reset.ok&&clear.ok&&ask.ok&&s2.ok&&final.ok&&
+                    missing.code==='AI_FRESH_CHAT_EVIDENCE_UNVERIFIED'&&
+                    forged.code==='AI_FRESH_CHAT_EVIDENCE_UNVERIFIED'&&
+                    permitted.ok&&permitted.chat2IsolationVerified===true&&
+                    stale.code==='STALE_REVISION'&&second.ok&&
+                    second.state==='TESTS_VERIFIED'&&
+                    job.evidence.chat2Pass===true&&job.slotReleased===true,
+                    missing,forged,permitted,stale,second:second.state});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
+                chat2_positive=call('POST',f'/session/{after}/execute/async',
+                                     {'script':code,'args':[]},timeout=90)
+                assert chat2_positive.get('ok') is True,chat2_positive
+                print('B I10_PACKAGED_SYNTHETIC_CHAT2_HISTORY_WORKSPACE_CAS_AND_RETEST=PASS',flush=True)
+
 
                 # I08 B: real packaged Firefox crypto, canonical IDB, donor
                 # portable format, Settings action, and wrong-password failure.
