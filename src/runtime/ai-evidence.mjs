@@ -110,6 +110,10 @@ export function applyAiEvidence(job,entry){
       if(j.changes.length>256){j.state='HELD_NO_PROGRESS';j.hold='REPAIR_RESOURCE_BOUND';}
     }
   }else if(entry.type==='TEST'){
+    // Chat2 test receipt is not a valid proof of isolation by itself.
+    // Its exact session must have a separately verified workspace boundary.
+    if(entry.chat===2&&chat.state!=='FRESH_VERIFIED')
+      return fail('AI_CHAT2_ISOLATION_UNVERIFIED');
     if(!chat.sessionDigest||!testName(entry.name)||
        !required(j,entry.chat)?.includes(entry.name)||
        entry.sourceFingerprint!==j.sourceFingerprint||
