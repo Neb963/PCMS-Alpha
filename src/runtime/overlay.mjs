@@ -234,7 +234,7 @@ attachPcmsGuard({
     const expected='https://perchance.org/'+request.slug+'#edit';
     const state=await getState(),profile=state.profiles?.[cookieStoreId];
     if(!profile||profile.personaUid!==personaUid||profile.routeId!==routeId||
-       routeId==='direct'||routeId==='block'||state.routes?.[routeId]?.enabled!==true)
+       routeId==='direct'||routeId==='block'||(!state.routes?.[routeId]||state.routes[routeId].enabled===false))
       return {ok:false,code:'DONOR_PROTECTED_ROUTE_CHANGED'};
     const tabs=await browser.tabs.query({}),found=[];
     for(const tab of tabs){
@@ -261,7 +261,7 @@ attachPcmsGuard({
        tag?.nonce!==request.nonce||tag?.humanIntent===true||
        again.profiles?.[cookieStoreId]?.personaUid!==personaUid||
        again.profiles?.[cookieStoreId]?.routeId!==routeId||
-       again.routes?.[routeId]?.enabled!==true)
+       (!again.routes?.[routeId]||again.routes[routeId].enabled===false))
       return {ok:false,code:'AI_NATIVE_POST_GUARD_CHANGED'};
     if(result?.length!==1||result[0].frameId!==0||result[0].error)
       return {ok:false,code:'AI_NATIVE_EXECUTION_UNVERIFIED'};
