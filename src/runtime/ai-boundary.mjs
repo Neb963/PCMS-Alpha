@@ -142,8 +142,10 @@ export function createAiBoundary(api,{
             localOpfsAccessible:inspected.localOpfsAccessible===true,
             attachmentState:inspected.attachmentState,
             workspaceRootState:inspected.workspaceRootState,
-            workerNamespace:inspected.workerNamespace==='CURRENT_SESSION_WORKER_INIT_LOCK'?
-              'CURRENT_SESSION_WORKER_INIT_LOCK':'UNVERIFIED',
+            workerNamespace:[
+              'CURRENT_SESSION_WORKER_INIT_LOCK','STALE_PREVIOUS_SESSION_LOCK'
+            ].includes(inspected.workerNamespace)?
+              inspected.workerNamespace:'UNVERIFIED',
             isolation:'UNVERIFIED',serverEndAck:'UNOBSERVED',
             sourceFingerprint:job.sourceFingerprint,
             tests:'AI_CHAT2_ISOLATION_UNVERIFIED'};
@@ -177,6 +179,8 @@ export function createAiBoundary(api,{
              workspace.sessionDigest!==before.sessionDigest||
              workspace.isolation!=='UNVERIFIED')
             return fail('AI_CHAT2_WORKSPACE_UNVERIFIED');
+          if(workspace.workerNamespace==='STALE_PREVIOUS_SESSION_LOCK')
+            return fail('AI_CHAT2_PREVIOUS_WORKER_LOCK_RELOAD_REQUIRED');
           if(workspace.workerNamespace!=='CURRENT_SESSION_WORKER_INIT_LOCK')
             return fail('AI_CHAT2_WORKER_UNVERIFIED');
           const history=await g.runNativeAiStep(r.personaUid,{
