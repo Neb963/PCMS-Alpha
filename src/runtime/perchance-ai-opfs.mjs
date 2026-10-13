@@ -95,6 +95,7 @@ export async function perchanceAiOpfsProbe(request){
       if(e?.name!=='NotFoundError')
         return fail('WORKSPACE_OPFS_INSPECTION_FAILED');
     }
+    if(!soloCollaboration())return fail('WORKSPACE_COLLABORATION_CHANGED');
     // No listing, file reads, writes, child paths, or raw names cross the
     // extension boundary; a seeded folder is not an isolation oracle.
     return {ok:true,code:'OPFS_LOCAL_OBSERVED_ONLY',slug:request.slug,
