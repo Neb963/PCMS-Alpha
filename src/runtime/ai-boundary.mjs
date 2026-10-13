@@ -9,6 +9,7 @@ import {inspectGitSource} from './git-source.mjs';
 import {verifyReadback,exactSource} from './staging-core.mjs';
 import {planAiStep} from './ai-supervisor.mjs';
 export const AI_PORT='pcms-i10-ai';
+export const AI_PROGRESS_ALARM='pcms-i10-progress';
 function encodeUtf8(text){
   const bytes=new TextEncoder().encode(text);let binary='';
   for(let i=0;i<bytes.length;i+=8192)
@@ -57,12 +58,10 @@ export function createAiBoundary(api,{
   storeFactory=createAiStore,stageFactory=createStagingStore,
   inspect=inspectGitSource,effectGate=()=>false
 }={}){
-  let databasePromise;
+  let databasePromise,tickBusy=false;
   const database=()=>databasePromise ||=open();
   const sentinel=createRestoreSentinel(api.storage.local);
-  async function run(message,sender){
-    const auth=validateAiMessage(api,sender,message);
-    if(!auth.ok)return auth;
+  async function executeTrusted(message){
     try{
       const db=await database(),store=storeFactory(db),p=message.params||{};
       if(message.type==='GET_PROMPTS')return store.getPrompt();
@@ -88,10 +87,10 @@ export function createAiBoundary(api,{
         if(sealed.job.revision!==p.expectedRevision)return fail('STALE_REVISION');
         const next=planAiStep(sealed.job);
         if(!next.ok)return fail(next.code);
-        const result=await run({type:next.type,params:{
+        const result=await executeTrusted({type:next.type,params:{
           slug:p.slug,expectedRevision:p.expectedRevision,
           ...(next.step?{step:next.step}:{})
-        }},sender);
+        }});
         return {...result,plannedStep:next.type+(next.step?'_'+next.step:'')};
       }
       if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS'].includes(message.type)){
@@ -333,12 +332,65 @@ export function createAiBoundary(api,{
       return {...result,help:'Job prepared with pinned Settings prompt and TESTING.md; native AI dispatch and independent test evidence remain held.'};
     }catch{return fail('AI_CANONICAL_HOLD');}
   }
+  async function run(message,sender){
+    const auth=validateAiMessage(api,sender,message);
+    return auth.ok?executeTrusted(message):auth;
+  }
+  // An alarm processes at most ONE bounded step per wake. It is disabled
+  // unless a separate operator capability gate affirmatively authorizes
+  // background native AI work; green CI never enables it. Cold wake and
+  // lost ACK can only move into read-only observation, never blind replay.
+  async function tick(){
+    if(tickBusy)return fail('AI_TICK_BUSY');
+    if(effectGate({phase:'I10',step:'AUTOMATION'})!==true)
+      return fail('AI_PROVIDER_ACTIVATION_HELD');
+    tickBusy=true;
+    try{
+      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      const store=storeFactory(await database());
+      const listing=await store.list();
+      if(!listing.ok||listing.truncated)return fail('AI_SCHEDULER_LIST_UNVERIFIED');
+      const all=[];
+      for(const row of listing.jobs){
+        const exact=await store.getJobFull(row.slug);
+        if(!exact.ok)return fail('AI_SCHEDULER_JOB_UNKNOWN');
+        all.push(exact.job);
+      }
+      all.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)||
+        a.slug.localeCompare(b.slug,'en'));
+      for(const job of all){
+        const next=planAiStep(job);
+        if(!next.ok)continue;
+        // Each test assertion, native effect and reconciliation is bounded
+        // by the same guarded command code as explicit operator UI actions.
+        return executeTrusted({type:'ADVANCE_JOB',params:{
+          slug:job.slug,expectedRevision:job.revision
+        }});
+      }
+      return {ok:true,code:'AI_NO_ELIGIBLE_WORK'};
+    }catch{return fail('AI_TICK_UNVERIFIED');}
+    finally{tickBusy=false;}
+  }
+  function schedule(){
+    if(effectGate({phase:'I10',step:'AUTOMATION'})!==true)return;
+    try{api.alarms.create(AI_PROGRESS_ALARM,{periodInMinutes:1});}catch{}
+  }
   function register(){
     // Interrupted dispatch remains a hold. This never re-sends AI messages.
     Promise.resolve().then(async()=>{
       if(!(await sentinel.inspect()).held)
         await storeFactory(await database()).recoverNative();
     }).catch(()=>{});
+    // Background operation remains extension-owned, not tied to a PCMS tab.
+    // Firefox alarms are volatile across full process restarts.
+    if(api.alarms?.onAlarm){
+      api.alarms.onAlarm.addListener(alarm=>{
+        if(alarm?.name===AI_PROGRESS_ALARM)void tick();
+      });
+      api.runtime.onStartup.addListener(schedule);
+      api.runtime.onInstalled.addListener(schedule);
+      schedule();
+    }
     api.runtime.onConnect.addListener(port=>{
       if(port?.name!==AI_PORT)return;
       let busy=false;
@@ -352,6 +404,6 @@ export function createAiBoundary(api,{
       });
     });
   }
-  return Object.freeze({register,run});
+  return Object.freeze({register,run,tick});
 }
 if(typeof browser!=='undefined')createAiBoundary(browser).register();
