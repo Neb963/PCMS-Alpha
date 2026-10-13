@@ -220,6 +220,7 @@ def adoption_idb_probe(session):
       const db=await openCanonicalDatabase();
       const store=createAdoptionStore(db);
       const boundary=createAdoptionBoundary(api,{guard:()=>guard,
+        gitGate:()=>true,
         gitWrite:async ({folder,original:preserved})=>{
           const onDisk=await store.getFull(slug);
           if(onDisk.record?.archiveState!=='DISPATCH_POSSIBLE')
@@ -235,6 +236,9 @@ def adoption_idb_probe(session):
       const adopted=await cmd('CAPTURE_ADOPTION',{
         slug,expectedRevision:1,explicitPublicConsent:false});
       const listing=await cmd('GET_ADOPTION',{slug});
+      const held=await createAdoptionBoundary(api,{guard:()=>guard}).run({
+        type:'ARCHIVE_GIT',params:{slug,expectedRevision:adopted.revision,
+          token:'synthetic-git-token-01'}},sender);
       const git=await cmd('ARCHIVE_GIT',{slug,
         expectedRevision:adopted.revision,token:'synthetic-git-token-01'});
       const protectedResult=await cmd('GET_ADOPTION',{slug});
@@ -244,7 +248,7 @@ def adoption_idb_probe(session):
       const rejected=await cmd('ARCHIVE_GIT',{slug,
         expectedRevision:protectedResult.revision,token:'synthetic-git-token-01'});
       db.close();
-      done({adopted,listing,git,protectedResult,tombstone,after,rejected,trace});
+      done({adopted,listing,held,git,protectedResult,tombstone,after,rejected,trace});
     })().catch(e=>done({error:'I07_IDB_PROBE_FAILED',detail:String(e).slice(0,200)}));'''
     return call('POST',f'/session/{session}/execute/async',
                 {'script':script,'args':[]},timeout=70)
@@ -718,6 +722,7 @@ def main():
                 assert archive_probe.get('adopted',{}).get('ok') is True,archive_probe
                 assert archive_probe.get('adopted',{}).get('archive')=='ARCHIVE_PENDING',archive_probe
                 assert archive_probe.get('listing',{}).get('originalFiles')==2,archive_probe
+                assert archive_probe.get('held',{}).get('code')=='GIT_WRITE_ACTIVATION_HELD',archive_probe
                 assert archive_probe.get('git',{}).get('archive')=='ARCHIVED_GIT_CONFIRMED',archive_probe
                 assert archive_probe.get('protectedResult',{}).get('archive')=='ARCHIVED_GIT_CONFIRMED',archive_probe
                 assert archive_probe.get('after',{}).get('archived') is True,archive_probe
