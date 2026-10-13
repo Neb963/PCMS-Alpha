@@ -98,16 +98,30 @@ export function createAiBoundary(api,{
           if(!job.finalSource||job.finalSource.fingerprint!==job.sourceFingerprint||
              !['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(job.native?.state))
             return fail('EXACT_SAVED_FINAL_SOURCE_REQUIRED');
-          const chat=job.native.state==='CHAT2_OBSERVED_IDLE'?2:1;
+          const firstMissing=job.prompt.tests.some(name=>
+            job.chat1.tests?.[name]?.result!=='PASS'||
+            job.chat1.tests?.[name]?.sourceFingerprint!==job.sourceFingerprint);
+          // Chat 2 edits must invalidate both suites. Re-run pinned Chat 1
+          // assertions on final F even while the *native* helper remains
+          // attached to Chat 2; execution oracle is browser-owned, not chat.
+          const chat=firstMissing?1:2;
+          if(chat===2&&(!job.chat2||job.chat2.state!=='FRESH_VERIFIED'))
+            return fail('CHAT2_SESSION_NOT_READY');
           const needed=chat===1?job.prompt.tests:job.optionalTesting?.tests;
-          if(!needed?.includes('default_generator_smoke'))
+          const pending=(needed||[]).filter(name=>
+            (chat===1?job.chat1:job.chat2).tests?.[name]?.result!=='PASS'||
+            (chat===1?job.chat1:job.chat2).tests?.[name]?.sourceFingerprint!==job.sourceFingerprint);
+          // Unknown tests remain unverified; never silently count a smoke
+          // result as a different named or natural-language requirement.
+          if(!pending.includes('default_generator_smoke'))
             return fail('UNSUPPORTED_INDEPENDENT_ASSERTION');
           const before=await g.runNativeAiStep(r.personaUid,{
             slug:r.slug,nonce:r.nonce,action:'OBSERVE'
           });
           if(!before?.ok||before.busy||before.editorClean!==true||
              before.sourceSaved!==true||
-             before.sessionDigest!==(chat===1?job.chat1:job.chat2)?.sessionDigest)
+             before.sessionDigest!==(job.native.state==='CHAT2_OBSERVED_IDLE'?
+               job.chat2:job.chat1)?.sessionDigest)
             return fail('AI_NATIVE_TEST_SESSION_UNVERIFIED');
           const result=await g.runNativeAiStep(r.personaUid,{
             slug:r.slug,nonce:r.nonce,action:'ORACLE_SMOKE'
@@ -205,8 +219,19 @@ export function createAiBoundary(api,{
         if(!observation?.ok)return fail(observation?.code||'AI_NATIVE_UNVERIFIED');
         // External UI observations never prove test outcomes. The canonical
         // store retains only hashed native session identity and busy status.
-        const reconciled=await store.observeNative(p.slug,p.expectedRevision,observation);
-        if(!reconciled.ok)return reconciled;
+        let reconciled;
+        if(['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(job.native?.state)){
+          // A previous idle probe may have seen an in-flight save. Subsequent
+          // read-only probes must be possible without marking a new effect,
+          // replaying the send or discarding previously proven test evidence.
+          if(observation.busy||!observation.sessionDigest||
+             observation.sessionDigest!==job.native.sessionDigest)
+            return fail('AI_IDLE_RECHECK_SESSION_CHANGED');
+          reconciled={ok:true,revision:job.revision};
+        }else {
+          reconciled=await store.observeNative(p.slug,p.expectedRevision,observation);
+          if(!reconciled.ok)return reconciled;
+        }
         if(observation.busy||!['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(
           (await store.getJobFull(p.slug)).job?.native?.state))
           return {...reconciled,tests:'NATIVE_BUSY_OR_ORACLE_REQUIRED'};
