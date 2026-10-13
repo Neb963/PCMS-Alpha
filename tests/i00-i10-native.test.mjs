@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {perchanceAiNative} from '../src/runtime/perchance-ai-native.mjs';
 const nonce='f'.repeat(32), slug='test-owned-private', sid='fixture-session-id-87654321';
-function fixture({owner=true,dirty=false,session=sid,busy=false,human=false,collab=false,localInput='',attachments=0}={}){
+function fixture({owner=true,dirty=false,session=sid,busy=false,human=false,
+  collab=false,collabMode=null,localInput='',attachments=0}={}){
   const prior={location:globalThis.location,window:globalThis.window,
     document:globalThis.document};
   const clicks={send:0,newChat:0,stop:0};
@@ -29,7 +30,13 @@ function fixture({owner=true,dirty=false,session=sid,busy=false,human=false,coll
     menuBar:{saveState:dirty?'unsaved':'saved'},
     __editorReady:true,__saveInFlight:false,userOwnsThisGenerator:owner,
     editorCollabInitialSyncIsPending:false,
-    yjsProvider:collab?{}:null,yDoc:null,
+    yjsProvider:collabMode?{wsconnected:collabMode!=='offline',
+      synced:collabMode!=='unsynced',roomname:'solo-room'}:collab?{}:null,
+    yDoc:collabMode?{clientID:123}:null,
+    yjsAwareness:collabMode?{getStates:()=>new Map(
+      collabMode==='peer'?[[123,{}],[456,{}]]:[[123,{}]])}:undefined,
+    yjsProviderRoomName:collabMode?'solo-room':null,
+    __collabRoomFailed:false,
     saveCheckpointManager:{isDivergenceBlocked:()=>false}
   };
   return {clicks,ids,restore:()=>{
@@ -104,5 +111,25 @@ test('P52-05 F: busy Stop is explicitly only an attempt, no source or PASS recei
     assert.equal(f.clicks.stop,1);
     const notSent=await perchanceAiNative({slug,nonce,action:'SEND',chat:1,text:'retry'});
     assert.equal(notSent.ok,false);assert.equal(f.clicks.send,0);
+  });
+});
+
+test('I10 F/X automatic owner room is not a second editor; unknown/active peers block Send',async()=>{
+  await within({collabMode:'solo',session:null},async f=>{
+    const r=await perchanceAiNative({slug,nonce,action:'SEND',chat:1,text:'safe'});
+    assert.equal(r.code,'SEND_ATTEMPTED_UNVERIFIED');
+    assert.equal(f.clicks.send,1);
+  });
+  for(const collabMode of ['peer','offline','unsynced']){
+    await within({collabMode,session:null},async f=>{
+      const r=await perchanceAiNative({slug,nonce,action:'SEND',chat:1,text:'safe'});
+      assert.equal(r.ok,false,collabMode);
+      assert.equal(f.clicks.send,0,collabMode);
+    });
+  }
+  await within({collabMode:'solo',session:null},async f=>{
+    globalThis.window.__collabRoomFailed=true;
+    assert.equal((await perchanceAiNative({slug,nonce,action:'SEND',chat:1,text:'safe'})).ok,false);
+    assert.equal(f.clicks.send,0);
   });
 });
