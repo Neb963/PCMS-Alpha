@@ -1213,6 +1213,41 @@ def main():
                                    {'script':code,'args':[]},timeout=90)
                 assert concurrency_b.get('ok') is True,concurrency_b
                 print('B I10_PACKAGED_VERSIONED_CONCURRENCY_CAS_IDLE_SLOT_RELEASE=PASS',flush=True)
+                # I10 B: real canonical IDB persists scheduler admission clock,
+                # CAS deferral and previous uncertain native state across
+                # closing/reopening DB handles, without any provider effect.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const {createAiStore}=await import('./ai-store.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const store=createAiStore(db);
+                  const original=await store.getJobFull('i10-slot-d');
+                  const created=original.job?.createdAt;
+                  const until=Date.now()+120000;
+                  const deferred=await store.deferScheduler('i10-slot-d',
+                    original.job.revision,until,'AI_WAKE_ROUTE_UNVERIFIED');
+                  const stale=await store.deferScheduler('i10-slot-d',
+                    original.job.revision,until,'AI_WAKE_ROUTE_UNVERIFIED');
+                  db.close();
+                  const secondDb=await journal.openCanonicalDatabase();
+                  const readback=await createAiStore(secondDb).getJobFull('i10-slot-d');
+                  done({ok:original.ok&&Number.isSafeInteger(created)&&created>0&&
+                    deferred.ok&&stale.code==='STALE_REVISION'&&
+                    readback.ok&&readback.job.schedulerDeferredUntil===until&&
+                    readback.job.schedulerHold==='AI_WAKE_ROUTE_UNVERIFIED'&&
+                    readback.job.createdAt===created&&
+                    readback.job.native===null&&
+                    readback.job.executionSlotReleased!==true&&
+                    readback.job.sourceFingerprint===original.job.sourceFingerprint,
+                    created,deferred,stale,persisted:readback.job.schedulerDeferredUntil,
+                    native:readback.job.native});
+                  secondDb.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,400)}));"""
+                deferral_b=call('POST',f'/session/{after}/execute/async',
+                                {'script':code,'args':[]},timeout=90)
+                assert deferral_b.get('ok') is True,deferral_b
+                print('B I10_PACKAGED_SCHEDULER_DURABLE_DEFERRAL_CAS=PASS',flush=True)
                 # B verified XPI parser/registry; no provider interaction.
                 code="""const done=arguments[arguments.length-1];
                 (async()=>{
