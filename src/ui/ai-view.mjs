@@ -124,10 +124,14 @@ async function refreshJobs(){
       });
       li.append(choose,document.createTextNode(' '));
       const label=document.createElement('span');
+      const retry=Number.isSafeInteger(j.schedulerDeferredUntil)&&
+        j.schedulerDeferredUntil>Date.now()?
+        ' · scheduler held until '+new Date(j.schedulerDeferredUntil).toLocaleString()+
+        ' ('+(j.schedulerHold||'AI_WAKE_HELD')+')':'';
       label.textContent=j.slug+' · '+j.state+' · Settings P'+j.promptRevision+
         ' · source '+j.sourceFingerprint.slice(0,12)+
         ' · '+(j.evidence?.state||'TESTS_UNVERIFIED')+
-        ' · '+(j.hold||'No external PASS claimed');
+        ' · '+(j.hold||'No external PASS claimed')+retry;
       li.append(label);ul.append(li);
     }
     jobList.append(ul);
