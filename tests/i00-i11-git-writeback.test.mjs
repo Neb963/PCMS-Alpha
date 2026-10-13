@@ -185,6 +185,7 @@ test('P53-06 UI port rejects arbitrary source, source paths or untrusted sender'
 test('P53-05 default packaged write capability is never activated through a UI call',async()=>{
   const api={runtime:{id:'donor-id',getURL:x=>'moz-extension://test/'+x}};
   const sender={id:'donor-id',url:'moz-extension://test/pcms/index.html'};
+  api.storage={local:{get:async()=>({}),set:async()=>{}}};
   const boundary=createWritebackBoundary(api,{open:async()=>{throw Error('db off');}});
   const result=await boundary.run({type:'COMMIT',params:{
     slug:'demo',expectedRevision:1,token:TOKEN}},sender);
