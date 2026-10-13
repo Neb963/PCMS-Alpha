@@ -243,7 +243,8 @@ export function createAiStore(db){
           if(digest!==null||observation.busy||
              !(observation.chatEntries===0||
                (observation.chatEntries===1&&observation.resetGreetingVisible===true))||
-             observation.inputOccupied===true||observation.hasQueue===true)
+             observation.inputOccupied!==false||observation.hasQueue!==false||
+             observation.attachmentsPending!==false)
             {done(fail('AI_CHAT2_RESET_NOT_PROVEN'));return;}
           state='CHAT2_RESET_OBSERVED';
         }else{
