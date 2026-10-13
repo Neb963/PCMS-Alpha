@@ -9,6 +9,7 @@ import {inspectGitSource} from './git-source.mjs';
 import {verifyReadback,exactSource} from './staging-core.mjs';
 import {planAiStep} from './ai-supervisor.mjs';
 import {AI_BROWSER_ASSERTIONS} from './perchance-ai-oracle.mjs';
+import {pinTestingAssertions} from './ai-testing.mjs';
 export const AI_PORT='pcms-i10-ai';
 export const AI_PROGRESS_ALARM='pcms-i10-progress';
 function encodeUtf8(text){
@@ -325,8 +326,10 @@ export function createAiBoundary(api,{
       if(!after?.ready||after.cookieStoreId!==before.cookieStoreId||
          after.routeId!==before.routeId||(await sentinel.inspect()).held)
         return fail('GUARD_CHANGED');
+      const testPlan=fresh.testingSha?pinTestingAssertions(fresh.testingText):null;
+      if(testPlan&&!testPlan.ok)return fail(testPlan.code);
       const testing=fresh.testingSha?{
-        sha256:fresh.testingSha,text:fresh.testingText,tests:['optional_generator_tests']
+        sha256:fresh.testingSha,text:fresh.testingText,tests:testPlan.tests
       }:null;
       const result=await store.start(r,testing);
       if(!result.ok)return result;
