@@ -2,6 +2,7 @@
 // bytes or credentials. Pending and disconnected outcomes never claim publish.
 const slug=document.getElementById('pcms-release-slug');
 const token=document.getElementById('pcms-release-token');
+const passphrase=document.getElementById('pcms-existing-passphrase');
 const previewBtn=document.getElementById('pcms-release-preview');
 const approveBtn=document.getElementById('pcms-release-approve');
 const dispatchBtn=document.getElementById('pcms-release-dispatch');
@@ -95,19 +96,19 @@ async function act(type,params,message){
   }finally{if(serial===sequence){active=false;controls();}}
 }
 previewBtn.addEventListener('click',()=>act('PREVIEW',{
-  slug:slug.value,token:token.value},'Checking current owner, route, clean editor, Git READY and full saved F…'));
+  slug:slug.value,token:token.value,passphrase:passphrase.value},'Checking current owner, route, clean editor, Git READY and full saved F…'));
 approveBtn.addEventListener('click',()=>{
   const f=snapshot;
   if(!f||f.slug!==slug.value)return;
   act('APPROVE',{slug:f.slug,token:token.value,
     expectedStageRevision:f.stageRevision,expectedJobRevision:f.jobRevision,
-    fingerprint:f.sourceFingerprint,explicitApproval:true},
+    fingerprint:f.sourceFingerprint,explicitApproval:true,passphrase:passphrase.value},
     'Recording exact-F individual approval in canonical journal…');
 });
 dispatchBtn.addEventListener('click',()=>{
   if(!receipt)return;
   act('DISPATCH',{slug:receipt.slug,token:token.value,
-    expectedRevision:receipt.revision},
+    expectedRevision:receipt.revision,passphrase:passphrase.value},
     'Revalidating exact F, READY and owner before a single fenced publication attempt…');
 });
 reconcileBtn.addEventListener('click',()=>{
@@ -127,4 +128,5 @@ slug.addEventListener('input',()=>{
   controls();
 });
 token.addEventListener('input',controls);
+passphrase?.addEventListener('input',controls);
 controls();
