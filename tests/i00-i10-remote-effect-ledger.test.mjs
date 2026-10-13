@@ -30,7 +30,7 @@ class RemoteLedger {
 }
 const job=(native)=>({slug:'fake-owned',revision:2,state:'HELD_RECONCILE',
   sourceFingerprint:F,prompt:{revision:2,tests:['default_generator_smoke']},
-  chat1:{sessionDigest:S1,tests:{}},
+  chat1:{sessionDigest:S1,tests:{default_generator_smoke:{result:'PASS',sourceFingerprint:F}}},
   chat2:{state:'FRESH_OBSERVED',sessionDigest:S2,tests:{}},
   native,optionalTesting:{tests:['default_generator_smoke']},
   finalSource:{fingerprint:F},executionSlotReleased:false});
