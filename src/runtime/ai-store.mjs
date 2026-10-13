@@ -237,7 +237,9 @@ export function createAiStore(db){
           // A session identifier reset alone cannot prove a new Chat2.
           // All old visible messages, draft input and queued work must also
           // have cleared; OPFS/server isolation still requires separate proof.
-          if(digest!==null||observation.busy||observation.chatEntries!==0||
+          if(digest!==null||observation.busy||
+             !(observation.chatEntries===0||
+               (observation.chatEntries===1&&observation.resetGreetingVisible===true))||
              observation.inputOccupied===true||observation.hasQueue===true)
             {done(fail('AI_CHAT2_RESET_NOT_PROVEN'));return;}
           state='CHAT2_RESET_OBSERVED';
