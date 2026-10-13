@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {perchanceAiOpfsProbe} from '../src/runtime/perchance-ai-opfs.mjs';
 const slug='private-opfs',nonce='f'.repeat(32),sid='session-opaque-12345678';
 function fixture({origin='https://perchance.org',owner=true,editor=true,session=sid,
-   storage='present',workspace='present',human=false,collab=false}={}){
+   storage='present',workspace='present',human=false,collab=false,collabMode=null}={}){
   const before={location:globalThis.location,window:globalThis.window,
     document:globalThis.document,navigator:Object.getOwnPropertyDescriptor(globalThis,'navigator')};
   let gets=0,creates=0,files=0;
@@ -41,7 +41,12 @@ function fixture({origin='https://perchance.org',owner=true,editor=true,session=
   globalThis.window={
     __editorReady:editor,app:{data:{generator:{name:slug,isPrivate:true}}},
     userOwnsThisGenerator:owner,srcState:{getDraftChatSid:()=>session},
-    yjsProvider:collab?{}:null,yDoc:null,
+    yjsProvider:collabMode?{wsconnected:collabMode!=='offline',
+      synced:collabMode!=='unsynced',roomname:'room'}:collab?{}:null,
+    yDoc:collabMode?{clientID:10}:null,
+    yjsAwareness:collabMode?{getStates:()=>new Map(
+      collabMode==='peer'?[[10,{}],[20,{}]]:[[10,{}]])}:undefined,
+    yjsProviderRoomName:collabMode?'room':null,
     editorCollabInitialSyncIsPending:false,
     saveCheckpointManager:{isDivergenceBlocked:()=>false}};
   globalThis.document={getElementById:()=>({dataset:{pcmsHumanIntent:human?'true':'false'}})};
@@ -126,6 +131,22 @@ test('P52-06 X absent or inaccessible session-local workspace cannot be promoted
       assert.deepEqual({creates:f.counts().creates,files:f.counts().files},
         {creates:0,files:0});
       assert.equal(JSON.stringify(r).includes(sid),false);
+    });
+  }
+});
+
+test('I10 F/X OPFS read-only observation accepts synced solo owner and denies peers',async()=>{
+  await check({collabMode:'solo'},async f=>{
+    const r=await perchanceAiOpfsProbe({slug,nonce});
+    assert.equal(r.ok,true);
+    assert.equal(r.isolation,'UNVERIFIED');
+    assert.deepEqual({creates:f.counts().creates,files:f.counts().files},{creates:0,files:0});
+  });
+  for(const collabMode of ['peer','offline','unsynced']){
+    await check({collabMode},async f=>{
+      const r=await perchanceAiOpfsProbe({slug,nonce});
+      assert.equal(r.ok,false,collabMode);
+      assert.equal(f.counts().gets,0,collabMode);
     });
   }
 });
