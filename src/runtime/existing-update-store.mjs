@@ -39,7 +39,11 @@ export function createExistingStore(db){
     return tx(db,'readwrite',(t,done)=>{
       const m=t.objectStore('meta');
       m.get(key(s)).onsuccess=e=>{
-        if(e.target.result){done(fail('EXISTING_ALREADY_PREPARED'));return;}
+        const prior=e.target.result?.record;
+        if(prior&&(prior.state!=='STAGE_CONFIRMED'||
+           prior.stagedFingerprint!==original.fingerprint)){
+          done(fail('EXISTING_ALREADY_PREPARED'));return;
+        }
         m.get('account:'+account.accountId).onsuccess=a=>{
           m.get('inventory:'+s).onsuccess=i=>{
             m.get('adoption:'+s).onsuccess=o=>{
@@ -62,7 +66,8 @@ export function createExistingStore(db){
                      original,remote}).ok){
                   done(fail('EXISTING_CONTEXT_CHANGED'));return;
                 }
-                const record={slug:s,revision:1,state:'PREPARED',
+                const commit=()=>{
+                const record={slug:s,revision:prior?prior.revision+1:1,state:'PREPARED',
                   accountId:account.accountId,accountRevision:account.revision,
                   personaUid:account.personaUid,bindingVersion:account.bindingVersion,
                   principalFingerprint:account.identity.principalFingerprint,
@@ -72,10 +77,29 @@ export function createExistingStore(db){
                   recovery:seal,nonce:crypto.randomUUID().replaceAll('-',''),
                   operationId:'existing_'+crypto.randomUUID().replaceAll('-',''),
                   reason:null,createdAt:Date.now()};
-                m.add({key:key(s),record});
+                if(prior){
+                  m.add({key:'existing-history:'+s+':'+prior.operationId,
+                    record:structuredClone(prior)});
+                  m.put({key:key(s),record});
+                }else m.add({key:key(s),record});
                 t.objectStore('events').add({stage:'EXISTING_PREPARED',slug:s,
                   operationId:record.operationId,previousFingerprint:original.fingerprint});
                 done(publicExisting(record));
+                };
+                if(!prior){commit();return;}
+                m.get('release:'+s).onsuccess=releaseRequest=>{
+                  const released=releaseRequest.target.result?.release;
+                  if(released?.state!=='CONFIRMED_PUBLIC'||
+                     released.source!=='INDEPENDENT_PUBLICATION_READBACK'||
+                     released.sourceFingerprint!==prior.stagedFingerprint||
+                     released.approval?.sourceFingerprint!==original.fingerprint||
+                     released.remoteId!==inventory.remoteId||
+                     released.accountId!==account.accountId||
+                     released.bindingVersion!==account.bindingVersion){
+                    done(fail('PREVIOUS_RELEASE_NOT_CONFIRMED'));return;
+                  }
+                  commit();
+                };
               };
             };
           };
