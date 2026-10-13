@@ -6,7 +6,8 @@ const key=s=>'ai-job:'+s;
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 // Interrupted, unknown or human-owned native sessions are NOT free execution
 // slots. Even verified test results do not prove the helper session stopped.
-const SAFE_STATES=new Set([]);
+const slotReleased=j=>j?.executionSlotReleased===true &&
+  j.native?.state!=='DISPATCH_POSSIBLE';
 function tx(db,mode,fn){
   return new Promise((resolve,reject)=>{
     let t,result=fail('AI_TRANSACTION_INCOMPLETE');
@@ -23,6 +24,7 @@ const publicJob=j=>j?{ok:true,slug:j.slug,revision:j.revision,state:j.state,
   optionalTestingSha:j.optionalTesting?.sha256||null,
   evidence:evaluation(j),changes:j.changes,hold:j.hold,
   nativeState:j.native?.state||'NOT_STARTED',
+  slotReleased:j.executionSlotReleased===true,
   provider:'NATIVE_AI_HELD_UNTIL_PROVEN',
   github:'NO_AI_WRITEBACK',publication:'OFF'}:fail('AI_JOB_NOT_FOUND');
 export function createAiStore(db){
@@ -32,6 +34,27 @@ export function createAiStore(db){
       done({ok:true,current:history.at(-1),history});
     };
   });
+  const getConcurrency=()=>tx(db,'readonly',(t,done)=>{
+    t.objectStore('meta').get('ai-concurrency').onsuccess=e=>
+      done({ok:true,setting:e.target.result?.setting||{revision:1,perAccount:1}});
+  });
+  function changeConcurrency(expectedRevision,perAccount){
+    if(!Number.isSafeInteger(expectedRevision)||expectedRevision<1||
+       !Number.isSafeInteger(perAccount)||perAccount<1||perAccount>4)
+      return Promise.resolve(fail('AI_CONCURRENCY_INVALID'));
+    return tx(db,'readwrite',(t,done)=>{
+      const m=t.objectStore('meta');
+      m.get('ai-concurrency').onsuccess=e=>{
+        const old=e.target.result?.setting||{revision:1,perAccount:1};
+        if(old.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
+        const setting={revision:expectedRevision+1,perAccount};
+        m.put({key:'ai-concurrency',setting});
+        t.objectStore('events').add({stage:'AI_CONCURRENCY_UPDATED',
+          revision:setting.revision,perAccount});
+        done({ok:true,setting});
+      };
+    });
+  }
   function changePrompt(request,expectedRevision,imported=false){
     return tx(db,'readwrite',(t,done)=>{
       const m=t.objectStore('meta');
@@ -79,19 +102,20 @@ export function createAiStore(db){
         const prompt=(p.target.result?.history||initialPrompt()).at(-1);
         const started=beginAiJob({stage,prompt,optionalTesting});
         if(!started.ok){done(started);return;}
-        // The same account cannot run parallel native helper jobs by default.
-        // More concurrent work requires explicit later versioned configuration.
+        // Settings affect new admissions only; default one active job/account.
         const account=stage.accountId;
-        let busy=false;
-        m.openCursor().onsuccess=e=>{
+        m.get('ai-concurrency').onsuccess=settingRequest=>{
+          const limit=settingRequest.target.result?.setting?.perAccount||1;
+          let active=0;
+          m.openCursor().onsuccess=e=>{
           const c=e.target.result;
           if(c){
             if(typeof c.key==='string'&&c.key.startsWith('ai-job:')&&
-              c.value?.accountId===account&&!SAFE_STATES.has(c.value.job.state))
-              busy=true;
+              c.value?.accountId===account&&!slotReleased(c.value.job))
+              active++;
             c.continue();return;
           }
-          if(busy){done(fail('AI_ACCOUNT_CONCURRENCY_HELD'));return;}
+          if(active>=limit){done(fail('AI_ACCOUNT_CONCURRENCY_HELD'));return;}
           m.get(key(stage.slug)).onsuccess=old=>{
             if(old.target.result){done(fail('AI_EXISTING_JOB_RECONCILE'));return;}
             // Fresh jobs always pin the current settings revision, never last
@@ -101,6 +125,7 @@ export function createAiStore(db){
             t.objectStore('events').add({stage:'AI_JOB_CREATED',slug:stage.slug,
               sourceFingerprint:job.sourceFingerprint,promptRevision:prompt.revision});
             done(publicJob(job));
+          };
           };
         };
       };
@@ -117,6 +142,12 @@ export function createAiStore(db){
         if(prior.job.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
         const result=applyAiEvidence(prior.job,evidence);
         if(!result.ok){done(result);return;}
+        // A truthful PASS does not itself prove native helper quiescence.
+        // The same exact saved F and a separately observed idle session do.
+        if(result.job.state==='TESTS_VERIFIED'&&
+           result.job.finalSource?.fingerprint===result.job.verifiedFinal&&
+           ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(result.job.native?.state))
+          result.job.executionSlotReleased=true;
         m.put({...prior,job:result.job});
         t.objectStore('events').add({stage:'AI_EVIDENCE_RECORDED',slug:slugName,
           revision:result.job.revision,kind:evidence.type,
@@ -275,6 +306,9 @@ export function createAiStore(db){
             }
           }
         }
+        if(next.state==='HELD_NO_PROGRESS'&&
+           ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(next.native?.state))
+          next.executionSlotReleased=true;
         m.put({...row,job:next});
         t.objectStore('events').add({stage:'AI_FULL_SOURCE_CHECKPOINT',
           slug:slugName,revision:next.revision,sourceFingerprint:snapshot.fingerprint,
@@ -306,7 +340,7 @@ export function createAiStore(db){
     });
   }
   return Object.freeze({
-    getPrompt,changePrompt,exportPrompt,getJob,getJobFull,list,start,record,
+    getPrompt,changePrompt,getConcurrency,changeConcurrency,exportPrompt,getJob,getJobFull,list,start,record,
     armNative,observeNative,checkpointSource,recoverNative
   });
 }
