@@ -102,20 +102,41 @@ prepare.addEventListener('click',()=>transact(async()=>{
     slug:inspected.slug,expectedJobRevision:inspected.jobRevision,
     fingerprint:inspected.sourceFingerprint,token:token.value,
     mode:mode.value,message:mode.value==='MANUAL'?message.value:''});
+  if(!r?.ok){
+    // A disconnected PREPARE may have committed only the local intent.
+    // Always read canonical state; never manufacture an ACK.
+    const latest=await request('GET',{slug:inspected.slug});
+    if(latest?.ok){showReceipt(latest);return;}
+  }
   showReceipt(r);
 }));
 commit.addEventListener('click',()=>transact(async()=>{
   if(!receipt?.ok||receipt.state!=='PREPARED')return;
-  const r=await request('COMMIT',{slug:receipt.slug,token:token.value,
+  const name=receipt.slug;
+  const r=await request('COMMIT',{slug:name,token:token.value,
     expectedRevision:receipt.revision});
-  showReceipt(r);
-  if(!r?.ok)announce('Git effect outcome unknown or held. Do NOT repeat commit. Use read-only reconciliation.');
+  if(r?.ok){showReceipt(r);return;}
+  // Remote effects could have occurred even if their response was lost.
+  // Refresh the persisted journal before enabling read-only reconciliation.
+  const latest=await request('GET',{slug:name});
+  if(latest?.ok){
+    showReceipt(latest);
+    announce(name+': '+latest.state+' · '+(r?.code||'UNKNOWN_ACK')+
+      ' · read-only reconciliation required for uncertain Git effects.');
+  }else{
+    receipt=null;controls();
+    announce('Git outcome unknown; refresh canonical receipt. Never retry blindly.');
+  }
 }));
 reconcile.addEventListener('click',()=>transact(async()=>{
   if(!receipt?.ok)return;
   const r=await request('RECONCILE',{slug:receipt.slug,
     expectedRevision:receipt.revision,token:token.value});
-  announce(r?.code||'GIT_RECONCILIATION_UNVERIFIED');
+  if(r?.ok&&r.state==='CONFIRMED'){
+    showReceipt(r);
+    announce('Git commit and historical F independently verified. Publication OFF.');
+  }else announce((r?.code||'GIT_RECONCILIATION_UNVERIFIED')+
+    ' · writeback remains held; no automatic retry.');
 }));
 refresh.addEventListener('click',()=>transact(async()=>{
   inspected=null;showDiff(null);
@@ -130,7 +151,8 @@ armAuto.addEventListener('click',()=>transact(async()=>{
 }));
 disarmAuto.addEventListener('click',()=>transact(async()=>{
   const r=await request('DISARM_AUTO',{slug:slug.value.trim()});
-  announce(r?.code||'AUTO_DISARM_UNVERIFIED');
+  announce((r?.code||'AUTO_DISARM_UNVERIFIED')+
+    ' · future dispatch disarmed; a Git effect already started may still require reconciliation.');
 }));
 async function loadSettings(){
   const r=await request('GET_SETTINGS');
