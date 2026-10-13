@@ -257,7 +257,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   await writeFile(bgPath, bg);
   for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'adoption-boundary.mjs',
     'staging-core.mjs','staging-store.mjs','staging-boundary.mjs',
-    'perchance-stage.mjs','editor-strip.mjs','perchance-editor-probe.mjs']) {
+    'perchance-stage.mjs','editor-strip.mjs','perchance-editor-probe.mjs','ai-evidence.mjs','ai-store.mjs','ai-boundary.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }
 }
