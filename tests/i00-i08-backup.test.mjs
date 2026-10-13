@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
+import {runInNewContext} from 'node:vm';
 import {createPortableBackupPayload,encodeBackupEnvelope,decodeBackupEnvelope} from '../donor/personamonkey/extension/lib/backup-package.js';
 import {FORMAT,DB_STORES,serializeClone,deserializeClone,validatePcmsSnapshot,
   encodeIntegrated,decodeIntegrated,consistentOrThrow,verifyBrowserDownload,
@@ -81,6 +82,9 @@ test('P55-01: malformed or unknown required store, duplicate key, donor plaintex
   const recovered=deserializeClone(withMissing);
   assert.equal(Object.hasOwn(recovered,'unset'),true);
   assert.equal(recovered.unset,undefined);
+  const fromOtherRealm=runInNewContext('({ nested:{ value: 3 } })');
+  assert.equal(serializeClone(fromOtherRealm).nested.value,3);
+  assert.throws(()=>serializeClone(new (class Foo {constructor(){this.x=3;}})()),/BACKUP_UNSUPPORTED_VALUE/);
 });
 test('P55-02: independent pre/post local and donor cuts reject concurrent revision/source changes',()=>{
   const a=samplePcms(),b=samplePcms();
