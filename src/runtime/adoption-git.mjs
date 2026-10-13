@@ -10,7 +10,7 @@ const utf8=s=>new TextEncoder().encode(s);
 const hex=bytes=>[...bytes].map(x=>x.toString(16).padStart(2,'0')).join('');
 const hash=async(alg,bytes)=>hex(new Uint8Array(await crypto.subtle.digest(alg,bytes)));
 const decode=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
-const encode=bytes=>btoa([...bytes].map(c=>String.fromCharCode(c)).join(''));
+const encode=bytes=>{let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(binary);};
 const gitSha=async bytes=>{
   const prefix=utf8('blob '+bytes.length+'\0');
   const all=new Uint8Array(prefix.length+bytes.length);
