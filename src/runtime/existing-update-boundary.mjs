@@ -312,6 +312,18 @@ export function createExistingBoundary(api,{
       if(!armed.ok)return armed;
       if(effectGate({phase:'I13',action:m.type,record:r})!==true||
          (await sentinel.inspect()).held)return fail('EXISTING_EFFECT_POSSIBLE_HELD');
+      if(['UNLIST','STAGE','RECOVERY_UNLIST'].includes(m.type)){
+        const latest=await canonical(database,p.slug);
+        if(!latest.ok||latest.shadow.globalPause===true||
+           latest.shadow.accounts?.[r.accountId]?.paused===true||
+           latest.row?.phase!=='SLEEPING'||latest.row.slot===true||
+           latest.row.paused===true||
+           latest.row.remoteId!==r.remotePublicId||
+           latest.row.bindingVersion!==r.bindingVersion||
+           latest.account.revision!==r.accountRevision||
+           latest.inventory.remoteId!==r.remotePublicId)
+          return fail('EXISTING_DISPATCH_POSSIBLE_SLEEP_OR_OWNER_REVOKED');
+      }
       const request={slug:p.slug,nonce:r.nonce,
         action:m.type==='RECOVERY_UNLIST'?'UNLIST':m.type,
         previousFiles:['UNLIST','STAGE'].includes(m.type)?prior.source.blobs:r.stageSource.blobs,
