@@ -74,17 +74,19 @@ async function readTree(api,commitSha,folder){
   const entries=new Map(),seen=new Set();
   for(const e of tree.data.tree){
     if(typeof e?.path!=='string')return fail('GIT_MANIFEST_UNSAFE');
-    // All unrelated Git entries survive through base_tree unchanged,
-    // including executable files, dotfiles and symlinks outside this folder.
-    if(e.path!==folder&&!e.path.startsWith(folder+'/'))continue;
-    if(!pathOK(e.path)||!SHA.test(e.sha||'')||
+    // Preserve irrelevant entries for independent before/after comparison,
+    // including executable files, dotfiles and symlinks outside the scope.
+    const scoped=e.path===folder||e.path.startsWith(folder+'/');
+    if(!SHA.test(e.sha||'')||typeof e.mode!=='string'||
+       typeof e.type!=='string')return fail('GIT_MANIFEST_UNSAFE');
+    if(scoped&&(!pathOK(e.path)||
        !['100644','040000'].includes(e.mode)||
        !['blob','tree'].includes(e.type)||
        (e.type==='blob'&&(e.mode!=='100644'||!Number.isSafeInteger(e.size)||
           e.size<0||e.size>12*1024*1024))||
        (e.type==='tree'&&e.mode!=='040000')||
-       seen.has(e.path.toLowerCase()))return fail('GIT_MANIFEST_UNSAFE');
-    seen.add(e.path.toLowerCase());
+       seen.has(e.path.toLowerCase())))return fail('GIT_MANIFEST_UNSAFE');
+    if(scoped)seen.add(e.path.toLowerCase());
     entries.set(e.path,{sha:e.sha,mode:e.mode,type:e.type,size:e.size});
   }
   return {ok:true,treeSha:commit.data.tree.sha,entries,parents:commit.data.parents};
@@ -102,6 +104,18 @@ function equalFolder(left,right){
     const b=right.get(path);
     if(!b||a.type!==b.type||a.mode!==b.mode||a.sha!==b.sha||
        a.size!==b.size)return false;
+  }
+  return true;
+}
+function unchangedOutside(parent,child,folder){
+  const outside=([path])=>path!==folder&&!path.startsWith(folder+'/')&&
+    !folder.startsWith(path+'/');
+  const before=[...parent.entries].filter(outside),after=[...child.entries].filter(outside);
+  if(before.length!==after.length)return false;
+  for(const [path,item] of before){
+    const now=child.entries.get(path);
+    if(!now||item.type!==now.type||item.mode!==now.mode||
+       item.sha!==now.sha||item.size!==now.size)return false;
   }
   return true;
 }
@@ -217,7 +231,7 @@ async function linkedCommit(api,head,{operationId,expectedHead}){
       return fail('GIT_WRITEBACK_ANCESTRY_UNVERIFIED');
     const parents=record.data.parents.map(x=>x.sha);
     if(typeof record.data.message==='string'&&
-       record.data.message.endsWith(trailer)){
+       record.data.message.trimEnd().endsWith(trailer)){
       if(parents.length!==1||parents[0]!==expectedHead)
         return fail('GIT_WRITEBACK_PARENT_MISMATCH');
       return {ok:true,commitSha:current};
@@ -262,6 +276,9 @@ export async function observeGitCandidate(request,transport=fetch){
        src.type!=='blob'||a.type!=='blob'||b.type!=='blob')
       return fail('GIT_POLICY_OR_TESTING_CHANGED');
   }
+  const parent=await readTree(api,request.expectedHead,request.folder);
+  if(!parent.ok||!unchangedOutside(parent,applied,request.folder))
+    return fail('GIT_UNRELATED_TREE_CHANGED');
   const appliedProof=await verifyFiles(api,linked.commitSha,request.folder,expected,
     request.baseHead);
   if(!appliedProof.ok)return fail('GIT_WRITEBACK_COMMIT_BYTES_UNVERIFIED');
