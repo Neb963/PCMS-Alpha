@@ -16,7 +16,7 @@ function encodeUtf8(text){
 }
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const ACT=new Set(['GET_PROMPTS','SET_PROMPT','IMPORT_PROMPT','EXPORT_PROMPTS',
-  'LIST_JOBS','GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE']);
+  'LIST_JOBS','GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS']);
 export function validateAiMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;
@@ -29,17 +29,17 @@ export function validateAiMessage(api,sender,message){
   const allowed=message.type==='GET_JOB'?['slug']:
     message.type==='PREPARE_JOB'?['slug','expectedStageRevision','token']:
     message.type==='BEGIN_NATIVE'?['slug','expectedRevision','step']:
-    message.type==='PROBE_NATIVE'?['slug','expectedRevision']:
+    ['PROBE_NATIVE','RUN_TESTS'].includes(message.type)?['slug','expectedRevision']:
     message.type==='SET_PROMPT'?['text','tests','expectedRevision']:
     message.type==='IMPORT_PROMPT'?['envelope','expectedRevision']:[];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
-  if(['GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE'].includes(message.type)&&!SLUG.test(p.slug||''))
+  if(['GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS'].includes(message.type)&&!SLUG.test(p.slug||''))
     return fail('INVALID_SLUG');
   if(message.type==='PREPARE_JOB'&&
      (!Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
       typeof p.token!=='string'||p.token.length<10||p.token.length>512))
     return fail('INVALID_PARAMS');
-  if(['BEGIN_NATIVE','PROBE_NATIVE'].includes(message.type)&&
+  if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
       (message.type==='BEGIN_NATIVE'&&
        !['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','STOP'].includes(p.step))))
@@ -74,7 +74,7 @@ export function createAiBoundary(api,{
         return store.changePrompt({text:p.text,tests:p.tests},p.expectedRevision);
       if(message.type==='IMPORT_PROMPT')
         return store.changePrompt(p.envelope,p.expectedRevision,true);
-      if(['BEGIN_NATIVE','PROBE_NATIVE'].includes(message.type)){
+      if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS'].includes(message.type)){
         const sealed=await store.getJobFull(p.slug);
         if(!sealed.ok)return sealed;
         const job=sealed.job;
@@ -87,6 +87,67 @@ export function createAiBoundary(api,{
           return fail('NATIVE_AI_GUARD_UNAVAILABLE');
         const route=await g.getSafeRouteReadiness(r.personaUid);
         if(!route?.ready)return fail(route?.code||'ROUTE_UNVERIFIED');
+        if(message.type==='RUN_TESTS'){
+          // No UI/model-supplied assertion source, result, test ID, frame,
+          // run timestamp or claimed session: the guarded browser supplies it.
+          if(!job.finalSource||job.finalSource.fingerprint!==job.sourceFingerprint||
+             !['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(job.native?.state))
+            return fail('EXACT_SAVED_FINAL_SOURCE_REQUIRED');
+          const chat=job.native.state==='CHAT2_OBSERVED_IDLE'?2:1;
+          const needed=chat===1?job.prompt.tests:job.optionalTesting?.tests;
+          if(!needed?.includes('default_generator_smoke'))
+            return fail('UNSUPPORTED_INDEPENDENT_ASSERTION');
+          const before=await g.runNativeAiStep(r.personaUid,{
+            slug:r.slug,nonce:r.nonce,action:'OBSERVE'
+          });
+          if(!before?.ok||before.busy||before.editorClean!==true||
+             before.sourceSaved!==true||
+             before.sessionDigest!==(chat===1?job.chat1:job.chat2)?.sessionDigest)
+            return fail('AI_NATIVE_TEST_SESSION_UNVERIFIED');
+          const result=await g.runNativeAiStep(r.personaUid,{
+            slug:r.slug,nonce:r.nonce,action:'ORACLE_SMOKE'
+          });
+          if(result?.ok!==true||
+             result.source!=='INDEPENDENT_BROWSER_ASSERTION'||
+             result.name!=='default_generator_smoke'||
+             !['PASS','FAIL'].includes(result.result)||
+             !Number.isSafeInteger(result.observedAt)||result.observedAt<1)
+            return fail(result?.code||'INDEPENDENT_TEST_UNAVAILABLE');
+          const after=await g.runNativeAiStep(r.personaUid,{
+            slug:r.slug,nonce:r.nonce,action:'OBSERVE'
+          });
+          if(!after?.ok||after.busy||after.editorClean!==true||
+             after.sourceSaved!==true||
+             after.sessionDigest!==before.sessionDigest||
+             (await sentinel.inspect()).held)
+            return fail('AI_TEST_CONTEXT_CHANGED');
+          const owner=await g.observeReadOnly(r.personaUid,false,r.slug);
+          if(owner?.ok!==true||owner.principalFingerprint!==r.principalFingerprint||
+             owner.original?.remotePublicId!==r.remotePublicId||
+             owner.original?.ownerResult!=='IS_OWNER'||
+             owner.original?.visibility!=='UNLISTED'||
+             typeof owner.original?.pjs!=='string'||
+             typeof owner.original?.html!=='string'||
+             !Array.isArray(owner.original?.assets))
+            return fail('AI_TEST_OWNER_OR_SOURCE_UNVERIFIED');
+          const now=await exactSource([
+            {path:'main.pjs',base64:encodeUtf8(owner.original.pjs)},
+            {path:'index.html',base64:encodeUtf8(owner.original.html)},
+            ...owner.original.assets
+          ]);
+          if(!now.ok||now.fingerprint!==job.sourceFingerprint)
+            return fail('AI_TEST_SOURCE_CHANGED');
+          const still=await g.getSafeRouteReadiness(r.personaUid);
+          if(!still?.ready||still.cookieStoreId!==route.cookieStoreId||
+             still.routeId!==route.routeId)
+            return fail('AI_TEST_ROUTE_CHANGED');
+          return store.record(p.slug,p.expectedRevision,{
+            type:'TEST',chat,name:'default_generator_smoke',
+            sourceFingerprint:now.fingerprint,
+            independentSource:'INDEPENDENT_BROWSER_ASSERTION',
+            result:result.result,observedAt:result.observedAt
+          });
+        }
         if(message.type==='BEGIN_NATIVE'){
           // Live native provider AI action is NEVER enabled by a green CI.
           if(effectGate({phase:'I10',job,stage:r,step:p.step})!==true)
