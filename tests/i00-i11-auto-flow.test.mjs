@@ -33,7 +33,7 @@ async function fixture({activate=true,autoEnabled=true}={}){
     getFull:async()=>record?{ok:true,record}:{ok:false,code:'WRITEBACK_NOT_FOUND'},
     prepare:async x=>{
       record={slug,revision:1,operationId:x.operationId,mode:x.mode,
-        folder:x.probe.folder,baseHead:head,expectedHead:head,
+        message:x.message,folder:x.probe.folder,baseHead:head,expectedHead:head,
         state:'PREPARED',jobRevision:8,stageRevision:4,sourceFingerprint:source.fingerprint};
       return {ok:true,...record};
     },
