@@ -1,6 +1,7 @@
 // Injected into the PCMS-tagged editor tab (ISOLATED world).
 // UI is advisory; backend tab tag + canonical journal alone authorize handoff.
-export function renderPcmsEditorStrip({slug,nonce,accountId,personaUid}) {
+export function renderPcmsEditorStrip({slug,nonce,accountId,personaUid}, env={location,document,browser}) {
+  const {location,document,browser}=env;
   if(location.origin!=='https://perchance.org'||
      location.pathname!=='/'+slug||location.hash!=='#edit')return;
   const existing=document.getElementById('pcms-alpha-editor-context');
