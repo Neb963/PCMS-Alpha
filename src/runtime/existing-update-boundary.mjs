@@ -59,13 +59,16 @@ function canonical(db,name){
         m.get('adoption:'+name).onsuccess=o=>{
           m.get(REFRESHER_KEY).onsuccess=s=>{
             m.get('source-link:'+name).onsuccess=l=>{
-              const account=a.target.result?.account,
-                adoption=o.target.result?.adoption,
-                shadow=s.target.result?.state,
-                row=shadow?.rows?.find(z=>z.slug===name);
-              result=account&&adoption&&row?{
-                ok:true,account,adoption,inventory,shadow,row,
-                link:l.target.result?.link}:fail('EXISTING_SOURCE_OR_SLEEP_NOT_FOUND');
+              m.get('release:'+name).onsuccess=re=>{
+                const account=a.target.result?.account,
+                  adoption=o.target.result?.adoption,
+                  shadow=s.target.result?.state,
+                  row=shadow?.rows?.find(z=>z.slug===name);
+                result=account&&adoption&&row?{
+                  ok:true,account,adoption,inventory,shadow,row,
+                  release:re.target.result?.release,
+                  link:l.target.result?.link}:fail('EXISTING_SOURCE_OR_SLEEP_NOT_FOUND');
+              };
             };
           };
         };
@@ -133,8 +136,25 @@ export function createExistingBoundary(api,{
         remotePublicId:f.inventory.remoteId};
       const remote=await observe(authority.g,record);
       if(!remote.ok)return remote;
-      const original=await exactSource(f.adoption.original?.blobs);
-      if(!original.ok)return fail('EXISTING_ORIGINAL_BYTES_UNVERIFIED');
+      const archive=await exactSource(f.adoption.original?.blobs);
+      if(!archive.ok)return fail('EXISTING_ORIGINAL_BYTES_UNVERIFIED');
+      let original=archive;
+      if(f.release){
+        // Repeated updates use only independently confirmed prior public F,
+        // never a mutable Git folder or stale initial adoption source.
+        const prior=f.release;
+        if(prior.state!=='CONFIRMED_PUBLIC'||
+           prior.source!=='INDEPENDENT_PUBLICATION_READBACK'||
+           prior.accountId!==f.account.accountId||
+           prior.personaUid!==f.account.personaUid||
+           prior.bindingVersion!==f.account.bindingVersion||
+           prior.remoteId!==f.inventory.remoteId||
+           prior.principalFingerprint!==f.account.identity?.principalFingerprint)
+          return fail('PRIOR_RELEASE_RECONCILIATION_REQUIRED');
+        original=await exactSource(prior.sealedSource?.blobs);
+        if(!original.ok||original.fingerprint!==prior.sourceFingerprint)
+          return fail('PRIOR_RELEASE_P_BYTES_UNVERIFIED');
+      }
       if(!authorizeSleepingUpdate({account:f.account,inventory:f.inventory,
         adoption:f.adoption,shadow:f.row,original,remote:{
           ok:true,remotePublicId:f.inventory.remoteId,ownerResult:'IS_OWNER',
