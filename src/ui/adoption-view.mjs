@@ -6,6 +6,7 @@ const feedback=el('pcms-adopt-status'),receipts=el('pcms-adopt-receipts');
 const archive=el('pcms-adopt-local-archive');
 const gitToken=el('pcms-adopt-git-token'),gitWrite=el('pcms-adopt-git-write');
 const gitRecheck=el('pcms-adopt-git-recheck'),gitClear=el('pcms-adopt-git-clear');
+const gitCancel=el('pcms-adopt-git-cancel');
 let chosen=null,busy=false,generation=0,last=null;
 function port(type,params={}){
   return new Promise((resolve,reject)=>{
@@ -33,6 +34,7 @@ function controls(){
   gitRecheck.disabled=busy||!pending||
     !['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(last.archive)||gitToken.value.length<12;
   gitClear.disabled=busy;
+  gitCancel.disabled=busy||!pending||last.archive!=='GIT_PREPARED';
 }
 function announce(v){feedback.textContent=v;}
 async function refresh(){
@@ -108,6 +110,22 @@ async function githubArchive(type){
     }
   }finally{busy=false;controls();}
 }
+gitCancel.addEventListener('click',async()=>{
+  if(gitCancel.disabled||!chosen||!last)return;
+  busy=true;controls();const seq=generation;
+  announce('Cancelling only a pre-dispatch journal entry; no Git requests.');
+  try{
+    const out=await port('ABORT_GIT_PREPARED',{
+      slug:chosen.slug,expectedRevision:last.revision});
+    if(seq!==generation)return;
+    announce(out?.ok?'Pre-dispatch archive intent safely cancelled. No remote ref was attempted.':
+      'Cancellation held: '+(out?.code||'UNVERIFIED')+'. Resolve before retry.');
+    const next=await port('GET_ADOPTION',{slug:chosen.slug});
+    if(seq===generation&&next?.ok)last=next;
+    await refresh();
+  }catch{if(seq===generation)announce('Cancellation unknown. Re-select to read canonical state.');}
+  finally{busy=false;controls();}
+});
 gitWrite.addEventListener('click',()=>{if(!gitWrite.disabled)void githubArchive('ARCHIVE_GIT');});
 gitRecheck.addEventListener('click',()=>{if(!gitRecheck.disabled)void githubArchive('RECHECK_GIT');});
 capture.addEventListener('click',async()=>{
