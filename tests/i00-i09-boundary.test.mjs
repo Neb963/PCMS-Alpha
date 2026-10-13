@@ -19,7 +19,7 @@ const files=()=>[{path:'main.pjs',base64:encode('let x = 2;')},
   {path:'src/one.bin',base64:Buffer.from([0,127,255]).toString('base64')},
   {path:'src/empty.txt',base64:''}];
 function fixture({gate=false,lostAck=false,denyRoute=false,drift=false,dirtyOriginal=false,
-  release=false,breakReadback=false}={}){
+  release=false,breakReadback=false,editorDirty=false}={}){
   let current=null,version=0;
   const trace=[],remote=[];
   const stage={
@@ -65,6 +65,10 @@ function fixture({gate=false,lostAck=false,denyRoute=false,drift=false,dirtyOrig
       assert.equal(trace.at(-1),'DISPATCH_POSSIBLE');
       remote.push('save');return lostAck?{ok:false,code:'ACK_LOST'}:
         {ok:true,tab:{tabId:122,ownershipNonce:current.nonce}};
+    },
+    async inspectStageEditor() {
+      return editorDirty?{ok:false,code:'EDITOR_UNKNOWN'}:
+        {ok:true,source:'GUARDED_EDITOR_CLEAN',clean:true};
     },
     async releaseStagingTab(){
       trace.push('UNTAG_ATTEMPT');
@@ -167,4 +171,13 @@ test('P52-04 F: relevant Git source drift after pin prevents stage mutation',asy
   assert.equal((await f.pin()).ok,true);
   assert.equal((await f.dispatch()).code,'READY_REVOKED_OR_CHANGED');
   assert.equal(f.remote.length,0);
+});
+
+test('P52-07 negative: saved bytes match but dirty or unknown editor blocks acceptance',async()=>{
+  const f=fixture({gate:true,editorDirty:true});
+  assert.equal((await f.pin()).ok,true);
+  assert.equal((await f.dispatch()).state,'SAVED_UNVERIFIED');
+  assert.equal((await f.reconcile()).code,'EDITOR_UNKNOWN');
+  assert.equal(f.current.state,'SAVED_UNVERIFIED');
+  assert.equal(f.remote.length,1);
 });
