@@ -24,7 +24,7 @@ test('P52-03 public requires explicit scoped consent, current account and revisi
 });
 test('P52-03 reused slug, owner rotation and tombstones never inherit adoption',()=>{
   const base={slug:'alpha',accountId:row.accountId,personaUid:row.personaUid,
-    bindingVersion:2,remotePublicId:'public_00111'};
+    bindingVersion:2,remotePublicId:'public_00111',principalFingerprint:'a'.repeat(64)};
   assert.equal(continuity(base,{...base}).ok,true);
   for(const change of [{remotePublicId:'public_00222'},{accountId:'account_0002'},
     {personaUid:'persona-22222222'},{slug:'Alpha'},{bindingVersion:3}])
