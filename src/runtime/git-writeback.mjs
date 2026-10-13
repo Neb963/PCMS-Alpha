@@ -33,8 +33,10 @@ export function parseTerminalSuggestion(packet,sessionDigest){
      packet?.sessionDigest!==sessionDigest||!HEX.test(sessionDigest||'')||
      packet?.settled!==true||typeof packet.text!=='string'||
      packet.text.length>8192)return fail('AI_TERMINAL_UNVERIFIED');
-  const markers=packet.text.split(/\r?\n/).filter(s=>s.startsWith('PCMS_COMMIT_MESSAGE:'));
-  if(markers.length!==1)return fail('AI_COMMIT_SUGGESTION_ABSENT_OR_AMBIGUOUS');
+  const lines=packet.text.split(/\r?\n/).filter(x=>x.length);
+  const markers=lines.filter(s=>s.startsWith('PCMS_COMMIT_MESSAGE:'));
+  if(markers.length!==1||lines.at(-1)!==markers[0])
+    return fail('AI_COMMIT_SUGGESTION_ABSENT_OR_AMBIGUOUS');
   const match=/^PCMS_COMMIT_MESSAGE: ([\x20-\x7e]{3,120})$/.exec(markers[0]);
   return match?commitMessage(match[1]):fail('AI_COMMIT_SUGGESTION_INVALID');
 }
