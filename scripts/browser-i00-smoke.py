@@ -1288,7 +1288,7 @@ def main():
                   const planned2=planAiStep(sealed2.job);
                   const replay2=await smoke(replay1.revision,2,repaired.fingerprint);
                   const complete=await store.getJob(slug);
-                  const recheck=await store.checkpointSource(slug,replay2.revision,repaired);
+                  const recheck=await store.checkpointSource(slug,replay1.revision,repaired);
                   const afterRecheck=await store.getJob(slug);
                   const changedAgain=await store.checkpointSource(slug,recheck.revision,original);
                   const revoked=await store.getJob(slug);
@@ -1300,12 +1300,13 @@ def main():
                     empty.ok&&send2.ok&&idle2.ok&&
                     sid1!==sid2&&saved2.evidence?.chat1Pass===false&&
                     saved2.evidence?.state==='TESTS_UNVERIFIED'&&
-                    planned1.type==='RUN_TESTS'&&planned1.chat===1&&
-                    replay1.ok&&planned2.type==='RUN_TESTS'&&planned2.chat===2&&
-                    replay2.ok&&complete.state==='TESTS_VERIFIED'&&
-                    complete.slotReleased===true&&recheck.ok&&
-                    afterRecheck.state==='TESTS_VERIFIED'&&
-                    afterRecheck.slotReleased===true&&changedAgain.ok&&
+                    planned1.code==='AI_CHAT2_ISOLATION_UNVERIFIED'&&
+                    replay1.ok&&planned2.code==='AI_CHAT2_ISOLATION_UNVERIFIED'&&
+                    replay2.code==='AI_CHAT2_ISOLATION_UNVERIFIED'&&
+                    complete.state==='TESTS_UNVERIFIED'&&
+                    complete.slotReleased===false&&recheck.ok&&
+                    afterRecheck.state==='TESTS_UNVERIFIED'&&
+                    afterRecheck.slotReleased===false&&changedAgain.ok&&
                     revoked.state==='TESTS_UNVERIFIED'&&
                     revoked.slotReleased===false&&
                     revoked.evidence.chat1Pass===false&&
@@ -1320,7 +1321,7 @@ def main():
                 ai_twochat=call('POST',f'/session/{after}/execute/async',
                                 {'script':code,'args':[]},timeout=90)
                 assert ai_twochat.get('ok') is True,ai_twochat
-                print('B I10_PACKAGED_FRESH_CHAT2_FINAL_SOURCE_RETEST_AND_IDEMPOTENT_CHECKPOINT=PASS',flush=True)
+                print('B I10_PACKAGED_CHAT2_DISTINCT_SID_WITHOUT_OPFS_PROOF_HELD=PASS',flush=True)
 
                 # I08 B: real packaged Firefox crypto, canonical IDB, donor
                 # portable format, Settings action, and wrong-password failure.
