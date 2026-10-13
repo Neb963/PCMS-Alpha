@@ -81,7 +81,7 @@ export async function perchanceStageMain(request) {
        model.getValue()!==''||html.getValue()!==''||
        entries===null||entries.length!==0||
        typeof src.hasPending!=='function'||src.hasPending()!==false||
-       !Number.isSafeInteger(src.fileCount)||src.fileCount!==0)
+       typeof src.fileCount!=='function'||src.fileCount()!==0)
       return held('EDITOR_DIRTY_OR_NONEMPTY');
     const base=app.data.generator.srcManifest;
     if(base&&((typeof base!=='object')||Object.keys(base).length!==0))
