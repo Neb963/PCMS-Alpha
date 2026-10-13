@@ -182,9 +182,14 @@ async function nativeCommand(type,step){
       (answer.workspaceRootState==='PRESENT_UNTRUSTED'?
         'present (not independently verified)':'absent/unknown')+
       ' · server/worker isolation UNVERIFIED':'';
+    const workerHold=answer?.code==='AI_CHAT2_PREVIOUS_WORKER_LOCK_RELOAD_REQUIRED'?
+      ' · Perchance retained Chat 1’s page-lifetime worker lock after New Chat.'+
+      ' Do not resend or reload a dirty editor. Once the source is saved and'+
+      ' idle, manually reload the exact protected Chat 2 tab, reconcile its'+
+      ' current S2 session, then request verification again.' : '';
     jobStatus.textContent=(answer?.code||
       (answer?.ok?'Canonical observation recorded':'AI_OUTCOME_UNKNOWN'))+
-      ' · '+(answer?.tests||'no independent test PASS claimed')+opfs;
+      ' · '+(answer?.tests||'no independent test PASS claimed')+opfs+workerHold;
   }catch{
     jobStatus.textContent='Native command disconnected. Effect may have occurred; do not retry before independent reconciliation.';
   }finally{
