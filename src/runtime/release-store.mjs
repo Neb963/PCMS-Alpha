@@ -61,7 +61,20 @@ export function createReleaseStore(db){
       const meta=t.objectStore('meta');
       meta.get(key(stage.slug)).onsuccess=e=>{
         const old=e.target.result?.release;
-        if(old){done(fail('EXISTING_RELEASE_REQUIRES_REVIEW'));return;}
+        if(old){
+          const published=old.state==='CONFIRMED_PUBLIC'&&
+            kind==='EXISTING_UPDATE'&&
+            old.approval.sourceFingerprint===previous.fingerprint;
+          const canceled=old.state==='CANCELED'&&
+            old.approval.previousFingerprint===previous.fingerprint;
+          if(!(published||canceled)||
+             old.approval.accountId!==account.accountId||
+             old.approval.remotePublicId!==inventory.remoteId||
+             old.approval.personaUid!==stage.personaUid||
+             old.approval.bindingVersion!==stage.bindingVersion){
+            done(fail('EXISTING_RELEASE_REQUIRES_REVIEW'));return;
+          }
+        }
         meta.get('stage:'+stage.slug).onsuccess=s=>{
           meta.get('ai-job:'+stage.slug).onsuccess=j=>{
             meta.get('account:'+stage.accountId).onsuccess=a=>{
@@ -87,12 +100,16 @@ export function createReleaseStore(db){
                    }).ok){
                   done(fail('RELEASE_CONTEXT_CHANGED'));return;
                 }
-                const record={slug:stage.slug,kind,revision:1,releaseId,
+                const record={slug:stage.slug,kind,revision:old?old.revision+1:1,releaseId,
                   state:'APPROVED',approval:structuredClone(approval.tuple),
                   sealedSource:structuredClone(source),previousSource:structuredClone(previous),
                   approvedAt:Date.now(),changedAt:Date.now(),
                   dispatchPossible:false,reason:null};
-                meta.add({key:key(stage.slug),release:record});
+                if(old){
+                  meta.add({key:'release-history:'+stage.slug+':'+old.releaseId,
+                    release:structuredClone(old)});
+                  meta.put({key:key(stage.slug),release:record});
+                }else meta.add({key:key(stage.slug),release:record});
                 t.objectStore('events').add({stage:'RELEASE_APPROVED',
                   slug:stage.slug,releaseId,sourceFingerprint:source.fingerprint,
                   kind,accountId:stage.accountId});
@@ -104,6 +121,29 @@ export function createReleaseStore(db){
       };
     });
   }
+  // Explicit cancellation is possible ONLY before possible provider effects.
+  // History remains immutable; a canceled approval is not a publish receipt.
+  function cancelApproved(name,revision){
+    if(!slug(name)||!Number.isSafeInteger(revision)||revision<1)
+      return Promise.resolve(fail('INVALID_CANCEL'));
+    return transact(db,'readwrite',(t,done)=>{
+      const m=t.objectStore('meta');
+      m.get(key(name)).onsuccess=e=>{
+        const r=e.target.result?.release;
+        if(!r||r.revision!==revision){done(fail('STALE_RELEASE'));return;}
+        if(r.state!=='APPROVED'||r.dispatchPossible===true){
+          done(fail('CANNOT_CANCEL_POSSIBLE_PUBLICATION'));return;
+        }
+        const next={...r,state:'CANCELED',reason:'OPERATOR_CANCELED_UNSENT',
+          revision:r.revision+1,changedAt:Date.now()};
+        m.put({key:key(name),release:next});
+        t.objectStore('events').add({stage:'RELEASE_CANCELED',slug:name,
+          releaseId:r.releaseId,sourceFingerprint:r.approval.sourceFingerprint});
+        done(display(next));
+      };
+    });
+  }
+
   // All authority state and immutable approval are CAS checked in the same
   // journal transaction immediately before DISPATCH_POSSIBLE.
   function markDispatch(name,expectedRevision,tuple){
@@ -223,5 +263,5 @@ export function createReleaseStore(db){
       };
     });
   }
-  return Object.freeze({get,getFull,list,approve,markDispatch,settle});
+  return Object.freeze({get,getFull,list,approve,cancelApproved,markDispatch,settle});
 }
