@@ -4,6 +4,8 @@ const name=el('pcms-adopt-name'),visibility=el('pcms-adopt-visibility');
 const consent=el('pcms-adopt-consent'),capture=el('pcms-adopt-capture');
 const feedback=el('pcms-adopt-status'),receipts=el('pcms-adopt-receipts');
 const archive=el('pcms-adopt-local-archive');
+const gitToken=el('pcms-adopt-git-token'),gitWrite=el('pcms-adopt-git-write');
+const gitRecheck=el('pcms-adopt-git-recheck'),gitClear=el('pcms-adopt-git-clear');
 let chosen=null,busy=false,generation=0,last=null;
 function port(type,params={}){
   return new Promise((resolve,reject)=>{
@@ -26,6 +28,11 @@ function controls(){
     (chosen.visibility==='PUBLIC'&&!consent.checked);
   archive.disabled=busy||!last?.ok||last.archived===true;
   consent.disabled=busy||!chosen||chosen.visibility!=='PUBLIC';
+  const pending=last?.ok&&!last.archived;
+  gitWrite.disabled=busy||!pending||last.archive!=='ARCHIVE_PENDING'||gitToken.value.length<12;
+  gitRecheck.disabled=busy||!pending||
+    !['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(last.archive)||gitToken.value.length<12;
+  gitClear.disabled=busy;
 }
 function announce(v){feedback.textContent=v;}
 async function refresh(){
@@ -52,7 +59,7 @@ window.addEventListener('pcms-adoption-target',async event=>{
   const d=event.detail;
   if(!d||typeof d.slug!=='string'||!Number.isSafeInteger(d.revision))return;
   const seq=++generation;
-  chosen=d;last=null;consent.checked=false;
+  chosen=d;last=null;consent.checked=false;gitToken.value='';
   name.value=d.slug+' · inventory rev '+d.revision;
   visibility.textContent=d.visibility==='PUBLIC'?
     'Public source: explicit adoption consent required. Captured bytes are preserved locally; archive is pending.':
@@ -72,6 +79,37 @@ window.addEventListener('pcms-adoption-target',async event=>{
   finally{controls();}
 });
 consent.addEventListener('change',controls);
+gitToken.addEventListener('input',controls);
+gitClear.addEventListener('click',()=>{
+  gitToken.value='';controls();
+  announce('Git token cleared from input; no stored credentials.');
+});
+async function githubArchive(type){
+  if(busy||!chosen||!last?.ok)return;
+  busy=true;controls();const seq=generation;
+  const token=gitToken.value;gitToken.value='';
+  announce(type==='ARCHIVE_GIT'?
+    'Journaling before Git commit; response may be uncertain.':'Independent remote Git archive byte readback…');
+  try{
+    const result=await port(type,{slug:chosen.slug,
+      expectedRevision:last.revision,token});
+    if(seq!==generation)return;
+    if(!result?.ok)announce('Git archive held ('+(result?.code||'UNVERIFIED')+
+      '). Never blindly retry after possible ref movement; use Reconcile after refreshing canonical receipt.');
+    else announce('Verified original Git archive; source unchanged, NOT READY, no release approval.');
+    const recent=await port('GET_ADOPTION',{slug:chosen.slug});
+    if(seq===generation)last=recent?.ok?recent:last;
+    await refresh();
+  }catch{
+    if(seq===generation){
+      announce('Git acknowledgment unknown; re-select the generator and use independent Reconcile before any new write.');
+      try{const recent=await port('GET_ADOPTION',{slug:chosen.slug});
+        if(seq===generation&&recent?.ok)last=recent;}catch{}
+    }
+  }finally{busy=false;controls();}
+}
+gitWrite.addEventListener('click',()=>{if(!gitWrite.disabled)void githubArchive('ARCHIVE_GIT');});
+gitRecheck.addEventListener('click',()=>{if(!gitRecheck.disabled)void githubArchive('RECHECK_GIT');});
 capture.addEventListener('click',async()=>{
   if(capture.disabled||!chosen)return;
   busy=true;controls();const seq=generation,d={...chosen};
