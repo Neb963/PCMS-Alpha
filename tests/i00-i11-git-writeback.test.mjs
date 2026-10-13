@@ -6,7 +6,7 @@ import {inspectWriteback,writeGitCandidate,observeGitCandidate,
   parseTerminalSuggestion,commitMessage} from '../src/runtime/git-writeback.mjs';
 import {validateWritebackMessage,createWritebackBoundary} from '../src/runtime/writeback-boundary.mjs';
 globalThis.crypto??=webcrypto;
-const TOKEN='test-github-write-token',FOLDER='gens/demo';
+const TOKEN='test-github-write-token',FOLDER='gens/demo',OPID='writeback_'+'1'.repeat(32);
 const b64=x=>Buffer.from(x).toString('base64');
 const sha256=x=>createHash('sha256').update(x).digest('hex');
 const gitsha=x=>{const b=Buffer.from(x);return createHash('sha1').update('blob '+b.length+'\0').update(b).digest('hex');};
@@ -30,7 +30,7 @@ function fake(options={}){
     put(FOLDER+'/src/obsolete.css','obsolete'),
     put('.github/workflows/ci.yml','name: unrelated'),
     put('other/readme.md','unrelated')];
-  trees.set(T0,old);commits.set(H0,{tree:T0,parents:[]});
+  trees.set(T0,old);commits.set(H0,{tree:T0,parents:[],message:'initial'});
   const respond=(status,data)=>({status,json:async()=>data});
   let afterBlob=0;
   async function transport(url,init){
@@ -43,7 +43,7 @@ function fake(options={}){
       if(options.unrelatedDrift&&!options.didDrift){
         options.didDrift=true;
         const newer=[...old,put('other/advanced.md','changed unrelated')];
-        trees.set(T2,newer);commits.set(H2,{tree:T2,parents:[H0]});head=H2;
+        trees.set(T2,newer);commits.set(H2,{tree:T2,parents:[H0],message:'independent change'});head=H2;
       }
       if(options.relevantDrift&&!options.didDrift){
         options.didDrift=true;
@@ -54,7 +54,7 @@ function fake(options={}){
     }
     if(method==='GET'&&path.startsWith('/git/commits/')){
       const c=commits.get(path.split('/').at(-1));
-      return c?respond(200,{tree:{sha:c.tree},parents:c.parents.map(sha=>({sha}))}):respond(404,{});
+      return c?respond(200,{tree:{sha:c.tree},parents:c.parents.map(sha=>({sha})),message:c.message||''}):respond(404,{});
     }
     if(method==='GET'&&path.startsWith('/git/trees/')){
       const t=trees.get(path.split('/').at(-1));
@@ -85,7 +85,7 @@ function fake(options={}){
       posts++;
       if(options.failCommit)return respond(500,{});
       const v=JSON.parse(init.body);
-      commits.set(H1,{tree:v.tree,parents:v.parents});return respond(201,{sha:H1});
+      commits.set(H1,{tree:v.tree,parents:v.parents,message:options.stripTrailer?'other writer':v.message});return respond(201,{sha:H1});
     }
     if(method==='PATCH'&&path==='/git/refs/heads/main'){
       patches++;const v=JSON.parse(init.body);
@@ -104,7 +104,7 @@ function fake(options={}){
 }
 const write=async(f,extra={})=>writeGitCandidate({
   token:TOKEN,folder:FOLDER,baseHead:'a'.repeat(40),expectedHead:extra.expectedHead||'a'.repeat(40),
-  source:await base(),message:'fix: validated source',
+  source:await base(),message:'fix: validated source',operationId:OPID,
   ...extra},f.transport);
 test('P53-04 all add/change/delete bytes in one nonforced update; policy files and unrelated trees retained',async()=>{
   const f=fake();
@@ -146,9 +146,22 @@ test('P53-05 lost ref ACK is uncertain, independently observed bytes do not inve
   assert.equal(r.code,'GIT_WRITE_UNCERTAIN');
   assert.equal(f.metrics().patches,1);
   const observation=await observeGitCandidate({token:TOKEN,folder:FOLDER,
-    baseHead:'a'.repeat(40),source:await base()},f.transport);
-  assert.equal(observation.code,'GIT_EQUIVALENT_ATTRIBUTION_UNKNOWN');
+    baseHead:'a'.repeat(40),expectedHead:'a'.repeat(40),
+    operationId:OPID,source:await base()},f.transport);
+  assert.equal(observation.code,'GIT_COMMITTED_VERIFIED');
+  assert.equal(observation.attribution,'COMMIT_PARENT_AND_BYTES_VERIFIED');
   assert.equal(f.metrics().patches,1);
+});
+test('P53-05 same-content independent author cannot impersonate operation linkage',async()=>{
+  const f=fake({stripTrailer:true});
+  const r=await write(f);
+  assert.equal(r.ok,false);
+  assert.equal(r.code,'GIT_READBACK_UNCERTAIN');
+  assert.equal(f.metrics().patches,1);
+  const observed=await observeGitCandidate({token:TOKEN,folder:FOLDER,
+    baseHead:'a'.repeat(40),expectedHead:'a'.repeat(40),operationId:OPID,
+    source:await base()},f.transport);
+  assert.equal(observed.code,'GIT_WRITEBACK_ATTRIBUTION_UNKNOWN');
 });
 test('P53-04 corrupted readback never certifies committed bytes',async()=>{
   const f=fake({corruptRead:true});
