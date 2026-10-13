@@ -51,10 +51,16 @@ export async function perchanceStageMain(request) {
       return held('HUMAN_OR_AMBIGUOUS_EDITOR');
     await src.ready();
     // This I09 scope is a genuinely private NEW empty target only.
+    const listing=src.list();
+    const entries=listing instanceof Map?[...listing.keys()]:
+      Array.isArray(listing)?listing:
+      listing&&Object.getPrototypeOf(listing)===Object.prototype?Object.keys(listing):null;
     if(menu.saveState!=='saved'||model.isClean()!==true||
        html.isClean()!==true||(await src.isDirty())!==false||
        model.getValue()!==''||html.getValue()!==''||
-       Object.keys(src.list()||{}).length!==0)
+       entries===null||entries.length!==0||
+       typeof src.hasPending!=='function'||src.hasPending()!==false||
+       !Number.isSafeInteger(src.fileCount)||src.fileCount!==0)
       return held('EDITOR_DIRTY_OR_NONEMPTY');
     const base=app.data.generator.srcManifest;
     if(base&&((typeof base!=='object')||Object.keys(base).length!==0))
@@ -99,10 +105,12 @@ export async function perchanceStageMain(request) {
       if(path.startsWith('src/'))await src.writeFile(path.slice(4),value);
     }
     if(intent())return held('HUMAN_HANDOFF_REQUESTED');
+    const hasSrcAssets=[...materialized.keys()].some(path=>path.startsWith('src/'));
     if(window.yjsProvider||window.yDoc||window.__saveInFlight===true||
        window.userOwnsThisGenerator!==true||
        app.data.generator.name!==request.slug||
-       (await src.isDirty())!==true||
+       menu.saveState!=='unsaved'||
+       (hasSrcAssets&&(await src.isDirty())!==true)||
        window.saveCheckpointManager.isDivergenceBlocked()!==false)
       return held('SAVE_PRECONDITION_CHANGED');
     // The native save may return void or trigger confirmation under drift;
