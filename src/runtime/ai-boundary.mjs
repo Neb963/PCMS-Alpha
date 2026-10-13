@@ -215,6 +215,11 @@ export function createAiBoundary(api,{
           if(!still?.ready||still.cookieStoreId!==route.cookieStoreId||
              still.routeId!==route.routeId)
             return fail('AI_TEST_ROUTE_CHANGED');
+          const stageStill=await stageFactory(db).getFull(p.slug);
+          if(!stageStill?.ok||stageStill.record.state!=='SOURCE_VERIFIED'||
+             stageStill.record.revision!==r.revision||
+             stageStill.record.nonce!==r.nonce)
+            return fail('AI_TEST_STAGE_CHANGED');
           return store.record(p.slug,p.expectedRevision,{
             type:'TEST',chat,name:assertion,
             sourceFingerprint:now.fingerprint,
