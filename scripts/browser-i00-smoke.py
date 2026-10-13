@@ -1526,7 +1526,9 @@ def main():
                   const hist={ok:true,code:'AI_SERVER_HISTORY_FIRST_PROMPT_OBSERVED',
                     serverHistory:'FIRST_USER_IS_T1',sessionDigest:b};
                   const opfs={ok:true,isolation:'UNVERIFIED',
-                    workspaceRootState:'PRESENT_UNTRUSTED',sessionDigest:b};
+                    workspaceRootState:'PRESENT_UNTRUSTED',
+                    workerNamespace:'CURRENT_SESSION_WORKER_INIT_LOCK',
+                    sessionDigest:b};
                   const missing=await store.verifySecondChat(slug,final.revision,
                     hist,{...opfs,workspaceRootState:'ABSENT'});
                   const forged=await store.verifySecondChat(slug,final.revision,
