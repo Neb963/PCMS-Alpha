@@ -25,6 +25,9 @@ const publicJob=j=>j?{ok:true,slug:j.slug,revision:j.revision,state:j.state,
   evidence:evaluation(j),changes:j.changes,hold:j.hold,
   nativeState:j.native?.state||'NOT_STARTED',
   slotReleased:j.executionSlotReleased===true,
+  schedulerDeferredUntil:Number.isSafeInteger(j.schedulerDeferredUntil)?
+    j.schedulerDeferredUntil:null,
+  schedulerHold:typeof j.schedulerHold==='string'?j.schedulerHold:null,
   chat2IsolationVerified:j.chat2?.state==='FRESH_VERIFIED',
   provider:'NATIVE_AI_HELD_UNTIL_PROVEN',
   github:'NO_AI_WRITEBACK',publication:'OFF'}:fail('AI_JOB_NOT_FOUND');
