@@ -1046,6 +1046,58 @@ def main():
                 ai_work=execute(after,"return {job:!!document.getElementById('pcms-ai-job-list'),prepare:!!document.getElementById('pcms-ai-prepare'),enabled:!document.getElementById('pcms-ai-prepare')?.disabled}")
                 assert ai_work=={'job':True,'prepare':True,'enabled':False},ai_work
                 print('B I10_PACKAGED_UI_HELD_NO_AI_PROVIDER_DISPATCH=PASS',flush=True)
+                # I10 B: durable uncertain native send on real IndexedDB, actual
+                # process-cold recovery state and full generator asset checkpoint.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const persistence=await import('./ai-store.mjs');
+                  const stageCore=await import('./staging-core.mjs');
+                  const journal=await import('./journal.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const store=persistence.createAiStore(db);
+                  const current=await store.getJob('i10-b-private');
+                  const armed=await store.armNative('i10-b-private',current.revision,'CHAT1_SEND');
+                  const repeat=await store.armNative('i10-b-private',armed.revision,'CHAT1_SEND');
+                  const recovered=await store.recoverNative();
+                  const after=await store.getJob('i10-b-private');
+                  const session='1'.repeat(64);
+                  const busy=await store.observeNative('i10-b-private',after.revision,{
+                    ok:true,slug:'i10-b-private',busy:true,sessionDigest:session,
+                    chatEntries:2,sourceSaved:false});
+                  const idle=await store.observeNative('i10-b-private',busy.revision,{
+                    ok:true,slug:'i10-b-private',busy:false,sessionDigest:session,
+                    chatEntries:3,sourceSaved:true});
+                  const enc=text=>btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+                  const snapshot=await stageCore.exactSource([
+                    {path:'main.pjs',base64:enc('list\u005cn  value')},
+                    {path:'index.html',base64:enc('<h1>fixed</h1>')},
+                    {path:'src/asset.dat',base64:btoa(String.fromCharCode(0,1,255))}
+                  ]);
+                  const full=await store.checkpointSource('i10-b-private',idle.revision,snapshot);
+                  const stored=await store.getJobFull('i10-b-private');
+                  const port=msg=>new Promise(resolve=>{
+                    const p=browser.runtime.connect({name:'pcms-i10-ai'});
+                    p.onMessage.addListener(v=>{try{p.disconnect()}catch{}resolve(v)});
+                    p.onDisconnect.addListener(()=>resolve({code:'DISCONNECTED'}));
+                    p.postMessage(msg);
+                  });
+                  const denied=await port({type:'BEGIN_NATIVE',params:{
+                    slug:'i10-b-private',expectedRevision:full.revision,step:'CHAT1_SEND'
+                  }});
+                  done({ok:armed.ok&&repeat.code==='AI_EFFECT_RECONCILIATION_REQUIRED'&&
+                    recovered.ok&&recovered.held>=1&&busy.ok&&idle.ok&&
+                    full.ok&&stored.job.finalSource.blobs.length===3&&
+                    stored.job.chat1.tests&&
+                    stored.job.sourceFingerprint===snapshot.fingerprint&&
+                    stored.job.state==='TESTS_UNVERIFIED'&&
+                    denied.ok!==true,armed,repeat,recovered,denied,
+                    fingerprint:snapshot.fingerprint,held:stored.job.hold});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
+                ai_recovery=call('POST',f'/session/{after}/execute/async',
+                                 {'script':code,'args':[]},timeout=90)
+                assert ai_recovery.get('ok') is True,ai_recovery
+                print('B I10_PACKAGED_NATIVE_DISPATCH_JOURNAL_FULL_SOURCE_CRASH_HOLD=PASS',flush=True)
 
                 # I08 B: real packaged Firefox crypto, canonical IDB, donor
                 # portable format, Settings action, and wrong-password failure.
