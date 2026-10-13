@@ -22,7 +22,8 @@ export function continuity(previous, observed) {
      previous.accountId!==observed?.accountId ||
      previous.personaUid!==observed?.personaUid ||
      previous.bindingVersion!==observed?.bindingVersion ||
-     previous.remotePublicId!==observed?.remotePublicId)
+     previous.remotePublicId!==observed?.remotePublicId ||
+     previous.principalFingerprint!==observed?.principalFingerprint)
     return fail('REASSOCIATION_REQUIRED');
   if(previous.archived===true)return fail('TOMBSTONE_HELD');
   return {ok:true,code:'SAME_TARGET'};
