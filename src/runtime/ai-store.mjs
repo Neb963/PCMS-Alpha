@@ -144,10 +144,13 @@ export function createAiStore(db){
         if(!result.ok){done(result);return;}
         // A truthful PASS does not itself prove native helper quiescence.
         // The same exact saved F and a separately observed idle session do.
-        if(result.job.state==='TESTS_VERIFIED'&&
-           result.job.finalSource?.fingerprint===result.job.verifiedFinal&&
-           ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(result.job.native?.state))
-          result.job.executionSlotReleased=true;
+        // Any newly observed FAIL, changed source or revoked evidence must
+        // reoccupy the job's execution slot. A prior successful result is
+        // never permanent scheduling authority for subsequent source.
+        result.job.executionSlotReleased=Boolean(
+          result.job.state==='TESTS_VERIFIED'&&
+          result.job.finalSource?.fingerprint===result.job.verifiedFinal&&
+          ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(result.job.native?.state));
         m.put({...prior,job:result.job});
         t.objectStore('events').add({stage:'AI_EVIDENCE_RECORDED',slug:slugName,
           revision:result.job.revision,kind:evidence.type,
@@ -280,6 +283,7 @@ export function createAiStore(db){
         const changed=j.sourceFingerprint!==snapshot.fingerprint;
         const next={...j,revision:j.revision+1,
           sourceFingerprint:snapshot.fingerprint,
+          executionSlotReleased:changed?false:j.executionSlotReleased===true,
           finalSource:{fingerprint:snapshot.fingerprint,
             files:structuredClone(snapshot.files),blobs:structuredClone(snapshot.blobs),
             totalBytes:snapshot.totalBytes},
