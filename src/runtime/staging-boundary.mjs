@@ -136,6 +136,9 @@ export function createStagingBoundary(api,{
          current.fingerprint!==r.gitFingerprint||
          current.testingSha!==r.testingSha)
         return fail('READY_REVOKED_OR_CHANGED');
+      const pinnedBytes=await exactSource(r.candidate.blobs);
+      if(!pinnedBytes.ok||pinnedBytes.fingerprint!==r.candidate.fingerprint)
+        return fail('PINNED_SOURCE_BYTES_CHANGED');
       const eligible=await supplyLookup(await database(),r.slug);
       if(!eligible.ok||eligible.account.accountId!==r.accountId||
          eligible.account.revision!==r.accountRevision||
@@ -184,6 +187,12 @@ export function createStagingBoundary(api,{
     const proof=await verifyReadback(r.candidate,asEvidence(observed,r),recordContext(r));
     if(!proof.ok)return {ok:false,code:proof.code||'SOURCE_UNVERIFIED',
       ...(proof.paths?{paths:proof.paths}:{} )};
+    // A remote saved response does not prove the human editor is clean.
+    // Missing/stale tab nonce, collaboration state or buffered edits retain
+    // an independent, scope-local hold even after byte-exact saved readback.
+    const editor=await g.inspectStageEditor?.(r.personaUid,r.slug,r.nonce);
+    if(!editor?.ok||editor.clean!==true)
+      return fail(editor?.code||'EDITOR_UNKNOWN');
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
     return s.move(r.slug,r.revision,'SOURCE_VERIFIED',{verified:proof});
   }
