@@ -98,7 +98,10 @@ export function createWritebackStore(db){
     return transact(db,'readwrite',(t,done)=>{
       const m=t.objectStore('meta');
       m.get(key(name)).onsuccess=existing=>{
-        if(existing.target.result){done(fail('WRITEBACK_ALREADY_EXISTS'));return;}
+        const old=existing.target.result?.record;
+        if(old&&old.state!=='CANCELED'){
+          done(fail('WRITEBACK_ALREADY_EXISTS'));return;
+        }
         m.get('stage:'+name).onsuccess=st=>{
           m.get('ai-job:'+name).onsuccess=ai=>{
             m.get(settingsKey).onsuccess=setting=>{
@@ -111,8 +114,8 @@ export function createWritebackStore(db){
                  (mode==='AUTO'&&!currentSettings.autoEnabled)){
                 done(fail('WRITEBACK_CONTEXT_CHANGED'));return;
               }
-              const r={slug:name,revision:1,operationId,mode,message,
-                state:'PREPARED',folder:stage.sourceFolder,baseHead:stage.sourceHead,
+              const r={slug:name,revision:old?old.revision+1:1,
+                operationId,mode,message,state:'PREPARED',folder:stage.sourceFolder,baseHead:stage.sourceHead,
                 expectedHead:probe.head,sourceFingerprint:job.sourceFingerprint,
                 stageRevision:stage.revision,jobRevision:job.revision,
                 settingRevision:currentSettings.revision,
@@ -125,13 +128,38 @@ export function createWritebackStore(db){
                 // this snapshot, never whatever F happens to be current.
                 sealedSource:structuredClone(currentJob.finalSource),
                 commitSha:null,reason:null,attribution:'UNVERIFIED',changedAt:Date.now()};
-              m.add({key:key(name),record:r});
+              m.put({key:key(name),record:r});
               t.objectStore('events').add({stage:'GIT_WRITEBACK_PREPARED',
                 slug:name,operationId,sourceFingerprint:r.sourceFingerprint});
               done(show(r));
             };
           };
         };
+      };
+    });
+  }
+  // Only a PREPARED intent is provably free of Git effects. Archive a
+  // redacted cancellation receipt and permit a new manually reviewed intent.
+  // A DISPATCH_POSSIBLE/HELD_UNCERTAIN/CONFIRMED operation is never reset.
+  function cancelPrepared(name,expectedRevision){
+    if(!slug(name)||!Number.isSafeInteger(expectedRevision)||expectedRevision<1)
+      return Promise.resolve(fail('WRITEBACK_CANCEL_INVALID'));
+    return transact(db,'readwrite',(t,done)=>{
+      const m=t.objectStore('meta');
+      m.get(key(name)).onsuccess=e=>{
+        const r=e.target.result?.record;
+        if(!r){done(fail('WRITEBACK_NOT_FOUND'));return;}
+        if(r.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
+        if(r.state!=='PREPARED'){
+          done(fail('CANNOT_CANCEL_POSSIBLE_GIT_EFFECT'));return;
+        }
+        const next={...r,state:'CANCELED',revision:r.revision+1,
+          reason:'UNSENT_PREPARATION_CANCELED',changedAt:Date.now()};
+        m.put({key:key(name),record:next});
+        t.objectStore('events').add({stage:'GIT_WRITEBACK_CANCELED',
+          slug:name,operationId:r.operationId,revision:next.revision,
+          sourceFingerprint:r.sourceFingerprint});
+        done(show(next));
       };
     });
   }
@@ -192,5 +220,6 @@ export function createWritebackStore(db){
       };
     });
   }
-  return Object.freeze({settings,changeSettings,get,getFull,list,prepare,arm,finish});
+  return Object.freeze({settings,changeSettings,get,getFull,list,prepare,
+    cancelPrepared,arm,finish});
 }
