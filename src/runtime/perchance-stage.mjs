@@ -60,6 +60,8 @@ export async function perchanceStageMain(request) {
     }
     if(!files.has('main.pjs')||!files.has('index.html'))
       return hold('SOURCE_ROOT_MISSING');
+    const humanIntent=()=>document.getElementById('pcms-alpha-editor-context')?.dataset.pcmsHumanIntent==='true';
+    if(humanIntent())return hold('HUMAN_HANDOFF_REQUESTED');
     // Materialize *before* the first edit, so corrupted payloads cannot
     // create partially changed local source. The outer verifier already
     // pinned SHA-256 of all bytes; the authoritative readback comes later.
@@ -74,11 +76,13 @@ export async function perchanceStageMain(request) {
     if((await p.src.isDirty())!==false||
        pjs.isClean()!==true||html.isClean()!==true||
        (await p.session())?.saveState!=='saved')return hold('EDITOR_CHANGED');
+    if(humanIntent())return hold('HUMAN_HANDOFF_REQUESTED');
     await p.editor.setPjs(decoded.get('main.pjs'));
     await p.editor.setHtml(decoded.get('index.html'));
     for(const [path,bytes] of decoded){
       if(path.startsWith('src/'))await p.src.write(path.slice(4),bytes);
     }
+    if(humanIntent())return hold('HUMAN_HANDOFF_REQUESTED');
     let response;
     try{response=await p.generator.save({includeSrc:true});}
     catch{return hold('SAVE_POSSIBLY_DISPATCHED');}
