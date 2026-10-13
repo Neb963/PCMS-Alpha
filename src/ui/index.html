@@ -188,6 +188,12 @@
             <label for="pcms-ai-prompt-json">Versioned JSON for import/export</label>
             <textarea id="pcms-ai-prompt-json" rows="3" maxlength="34000" spellcheck="false"></textarea>
           </div>
+          <div class="account-controls">
+            <label for="pcms-ai-per-account">Maximum concurrently active AI jobs per account</label>
+            <input id="pcms-ai-per-account" type="number" min="1" max="4" step="1" value="1">
+            <button id="pcms-ai-save-concurrency" type="button">Save AI concurrency</button>
+          </div>
+          <p id="pcms-ai-concurrency-status" role="status" aria-live="polite">Loading canonical AI concurrency.</p>
           <p id="pcms-ai-config-status" role="status" aria-live="polite">Loading canonical prompt history.</p>
           <div id="pcms-ai-prompt-history" class="table-wrap" tabindex="0" aria-label="Default AI prompt revision history"></div>
         </section>
