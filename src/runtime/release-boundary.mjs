@@ -5,6 +5,9 @@ import {fail,openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 import {createReleaseStore} from './release-store.mjs';
+import {createExistingStore} from './existing-update-store.mjs';
+import {unlockPrevious} from './existing-update-core.mjs';
+import {REFRESHER_KEY} from './refresher-core.mjs';
 import {createStagingStore} from './staging-store.mjs';
 import {createAiStore} from './ai-store.mjs';
 import {inspectGitSource} from './git-source.mjs';
@@ -23,9 +26,9 @@ export function validateReleaseMessage(api,sender,msg){
      Object.keys(msg).some(k=>!['type','params'].includes(k))||!TYPES.has(msg.type))
     return fail('INVALID_MESSAGE');
   const p=msg.params||{},allowed={
-    LIST:[],GET:['slug'],PREVIEW:['slug','token'],
-    APPROVE:['slug','token','expectedStageRevision','expectedJobRevision','fingerprint','explicitApproval'],
-    DISPATCH:['slug','token','expectedRevision'],
+    LIST:[],GET:['slug'],PREVIEW:['slug','token','passphrase'],
+    APPROVE:['slug','token','expectedStageRevision','expectedJobRevision','fingerprint','explicitApproval','passphrase'],
+    DISPATCH:['slug','token','expectedRevision','passphrase'],
     RECONCILE:['slug','token','expectedRevision']
   };
   if(!p||typeof p!=='object'||Array.isArray(p)||
@@ -34,6 +37,7 @@ export function validateReleaseMessage(api,sender,msg){
      (['PREVIEW','APPROVE','DISPATCH','RECONCILE'].includes(msg.type)&&
        (typeof p.token!=='string'||p.token.length<12||p.token.length>512||
         !/^[\x21-\x7e]+$/.test(p.token)))||
+     (p.passphrase!==undefined&&(typeof p.passphrase!=='string'||p.passphrase.length<12||p.passphrase.length>256))||
      (['DISPATCH','RECONCILE'].includes(msg.type)&&
        (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
      (msg.type==='APPROVE'&&(
@@ -101,7 +105,7 @@ export function createReleaseBoundary(api,{
   let dbPromise;
   const db=()=>dbPromise ||=open().catch(e=>{dbPromise=null;throw e;});
   const sentinel=createRestoreSentinel(api.storage.local);
-  async function checkCurrent(database,name,token,{requireEditor=true}={}){
+  async function checkCurrent(database,name,token,{requireEditor=true,passphrase=null}={}){
     const stage=await stageFactory(database).getFull(name),
       job=await aiFactory(database).getJobFull(name),
       facts=await ownerFacts(database,name);
@@ -110,12 +114,37 @@ export function createReleaseBoundary(api,{
     const owner=releaseContext(r,account,inventory),tests=releaseTestContext(r,j);
     if(!owner.ok)return owner;
     if(!tests.ok)return tests;
-    // I13 new private-target admission: an existing public generator must
-    // first satisfy separate archived P + sleeping/unlisted recovery proof.
-    if(r.previous?.files?.length!==2||
-       r.previous.files.some(f=>f.size!==0)||
-       !['UNLISTED'].includes(inventory.visibility))
-      return fail('EXISTING_UPDATE_NOT_SAFELY_ADMITTED');
+    const privateNew=r.previous?.files?.length===2&&
+      r.previous.files.every(f=>f.size===0);
+    const existingRow=privateNew?null:
+      await createExistingStore(database).getFull(name);
+    if(!privateNew){
+      if(!existingRow?.ok||existingRow.record.state!=='STAGE_CONFIRMED'||
+         existingRow.record.nonce!==r.nonce||
+         existingRow.record.previousFingerprint!==r.previous.fingerprint||
+         existingRow.record.remotePublicId!==r.remotePublicId||
+         existingRow.record.accountRevision!==r.accountRevision||
+         existingRow.record.bindingVersion!==r.bindingVersion||
+         existingRow.record.stagedFingerprint!==j.verifiedFinal)
+        return fail('EXISTING_STAGE_OR_FINAL_F_UNVERIFIED');
+      const unlocked=await unlockPrevious(existingRow.record.recovery,passphrase);
+      if(!unlocked.ok||unlocked.source.fingerprint!==r.previous.fingerprint)
+        return fail('EXISTING_RECOVERY_DECRYPTION_REQUIRED');
+      const shadow=await new Promise((resolve,reject)=>{
+        const tx=database.transaction('meta','readonly');
+        const req=tx.objectStore('meta').get(REFRESHER_KEY);
+        req.onsuccess=()=>resolve(req.result?.state);
+        req.onerror=()=>reject(Error('SHADOW_READ_FAILED'));
+      });
+      const row=shadow?.rows?.find(v=>v.slug===name);
+      if(!row||row.phase!=='SLEEPING'||row.slot===true||
+         row.paused===true||shadow.globalPause===true||
+         shadow.accounts?.[r.accountId]?.paused===true||
+         row.remoteId!==r.remotePublicId||row.bindingVersion!==r.bindingVersion)
+        return fail('EXISTING_SLEEP_REVOKED');
+    }
+    if(inventory.visibility!=='UNLISTED')
+      return fail('UNLISTED_LISTING_OBSERVATION_REQUIRED');
     const source=await candidateManifest(r,j);
     if(!source.ok)return source;
     const fresh=await inspect({token,folder:r.sourceFolder,includeSourceBytes:true});
@@ -149,9 +178,11 @@ export function createReleaseBoundary(api,{
     const previous=await exactSource(r.previous.blobs);
     if(!previous.ok||previous.fingerprint!==r.previous.fingerprint)
       return fail('PREVIOUS_SOURCE_CORRUPT');
-    const approved=approvalTuple({slug:name,stage:r,job:j,source,git,previous});
+    const approved=approvalTuple({slug:name,stage:r,job:j,source,git,
+      previous,kind:privateNew?'PRIVATE_NEW':'EXISTING_UPDATE'});
     if(!approved.ok)return approved;
     return {ok:true,r,j,source,previous,approval:approved.tuple,
+      kind:privateNew?'PRIVATE_NEW':'EXISTING_UPDATE',existing:existingRow?.record,
       editor,route:after,remote,git};
   }
   async function runTrusted(msg){
@@ -188,7 +219,7 @@ export function createReleaseBoundary(api,{
         proof:evidence.ok?evidence:null,reason:evidence.code||'PUBLICATION_UNCERTAIN'
       });
     }
-    const checked=await checkCurrent(database,p.slug,p.token);
+    const checked=await checkCurrent(database,p.slug,p.token,{passphrase:p.passphrase});
     if(!checked.ok)return checked;
     if(msg.type==='PREVIEW'){
       return {ok:true,slug:p.slug,stageRevision:checked.r.revision,
@@ -206,7 +237,7 @@ export function createReleaseBoundary(api,{
       return store.approve({approval:{ok:true,tuple:checked.approval},
         stage:checked.r,job:checked.j,account:facts.account,
         inventory:facts.inventory,source:checked.source,
-        previous:checked.previous,kind:'PRIVATE_NEW',
+        previous:checked.previous,kind:checked.kind,
         releaseId:'release_'+crypto.randomUUID().replaceAll('-','')});
     }
     if(msg.type==='DISPATCH'){
