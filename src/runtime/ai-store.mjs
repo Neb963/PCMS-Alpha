@@ -22,6 +22,7 @@ const publicJob=j=>j?{ok:true,slug:j.slug,revision:j.revision,state:j.state,
   sourceFingerprint:j.sourceFingerprint,promptRevision:j.prompt.revision,
   optionalTestingSha:j.optionalTesting?.sha256||null,
   evidence:evaluation(j),changes:j.changes,hold:j.hold,
+  nativeState:j.native?.state||'NOT_STARTED',
   provider:'NATIVE_AI_HELD_UNTIL_PROVEN',
   github:'NO_AI_WRITEBACK',publication:'OFF'}:fail('AI_JOB_NOT_FOUND');
 export function createAiStore(db){
