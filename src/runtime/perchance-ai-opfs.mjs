@@ -100,12 +100,23 @@ export async function perchanceAiOpfsProbe(request){
       if(e?.name!=='NotFoundError')
         return fail('WORKSPACE_OPFS_INSPECTION_FAILED');
     }
+    // The archived native helper acquires a session-named Web Lock only
+    // AFTER its toolsWorker init call resolves. The lock, unlike an OPFS
+    // directory, is live evidence of successful current-session init.
+    // A lock left behind for Chat1 is deliberately not proof for Chat2.
+    let workerNamespace='UNVERIFIED';
+    if(window.__aiAgentLiveLockSid===sid&&
+       typeof navigator.locks?.query==='function'){
+      const locks=await read(()=>navigator.locks.query());
+      if(Array.isArray(locks?.held)&&locks.held.some(x=>
+        x?.name==='aiagent-live|'+sid&&x.mode==='shared'))
+        workerNamespace='CURRENT_SESSION_WORKER_INIT_LOCK';
+    }
     if(!soloCollaboration())return fail('WORKSPACE_COLLABORATION_CHANGED');
-    // No listing, file reads, writes, child paths, or raw names cross the
-    // extension boundary; a seeded folder is not an isolation oracle.
+    // Never export raw lock names/SIDs, root names, history or file bytes.
     return {ok:true,code:'OPFS_LOCAL_OBSERVED_ONLY',slug:request.slug,
       sessionDigest:digest,attachmentState,workspaceRootState,
       localOpfsAccessible:true,serverEndAck:'UNOBSERVED',
-      workerNamespace:'UNVERIFIED',isolation:'UNVERIFIED'};
+      workerNamespace,isolation:'UNVERIFIED'};
   }catch{return fail('WORKSPACE_OPFS_INSPECTION_FAILED');}
 }
