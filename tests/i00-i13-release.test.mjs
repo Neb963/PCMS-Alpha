@@ -116,7 +116,7 @@ test('I13 F existing-source mutation held without original archive, sleep and re
     inventory:f.inventory,previous:f.previous,
     archive:{ok:true,fingerprint:f.previous.fingerprint},
     backup:{ok:true,decryptable:true,sourceFingerprint:f.previous.fingerprint},
-    shadow:{phase:'SLEEP',sleepEvidence:'GUARDED_INTERVAL',paused:false,
+    shadow:{phase:'SLEEPING',sleepRemaining:7200000,\n      sleepEvidence:'GUARDED_OPERATIONAL_INTERVAL',paused:false,
       listingEvidence:'INDEPENDENT_UNLISTED_READBACK'}};
   assert.equal(existingUpdateAdmission(gate).ok,true);
   for(const bad of [
