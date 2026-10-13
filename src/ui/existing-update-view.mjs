@@ -26,7 +26,7 @@ const withToken=new Set(['PIN_STAGE']);
 function paint(){
   for(const action of actions) {
     const eligible=action==='GET'?safeSlug(slug.value):
-      action==='PREPARE'?safeSlug(slug.value)&&!receipt:
+      action==='PREPARE'?safeSlug(slug.value)&&(!receipt||receipt.state==='STAGE_CONFIRMED'):
       receipt&&receipt.slug===slug.value&&allowed[action]?.includes(receipt.state);
     buttons[action].disabled=busy||!eligible||
       (withPass.has(action)&&password.value.length<12)||
