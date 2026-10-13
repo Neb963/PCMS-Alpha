@@ -4,12 +4,14 @@ const id=s=>document.getElementById(s);
 const prompt=id('pcms-ai-prompt'),testNames=id('pcms-ai-tests'),json=id('pcms-ai-prompt-json');
 const save=id('pcms-ai-save'),importButton=id('pcms-ai-import'),exportButton=id('pcms-ai-export');
 const configStatus=id('pcms-ai-config-status'),historyHost=id('pcms-ai-prompt-history');
+const perAccount=id('pcms-ai-per-account'),saveConcurrency=id('pcms-ai-save-concurrency'),
+  concurrencyStatus=id('pcms-ai-concurrency-status');
 const slug=id('pcms-ai-slug'),token=id('pcms-ai-git-token'),prepare=id('pcms-ai-prepare');
 const refresh=id('pcms-ai-refresh'),jobStatus=id('pcms-ai-jobs-status'),jobList=id('pcms-ai-job-list');
 const runNative=id('pcms-ai-run'),observeNative=id('pcms-ai-observe'),
   testNative=id('pcms-ai-test'),repairNative=id('pcms-ai-repair'),
   resetNative=id('pcms-ai-newchat'),chat2Native=id('pcms-ai-chat2');
-let current=null,busy=false,queueSeq=0,selectedJob=null;
+let current=null,concurrency=null,busy=false,queueSeq=0,selectedJob=null;
 function request(portName,type,params={}){
   return new Promise((resolve,reject)=>{
     const port=browser.runtime.connect({name:portName});let ended=false;
@@ -27,6 +29,7 @@ function request(portName,type,params={}){
 const ai=(type,params)=>request('pcms-i10-ai',type,params);
 function controls(){
   save.disabled=busy||!current?.ok;
+  saveConcurrency.disabled=busy||!concurrency?.ok;
   importButton.disabled=busy||!current?.ok;
   exportButton.disabled=busy;
   refresh.disabled=busy;
@@ -169,6 +172,39 @@ repairNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE',
   selectedJob?.nativeState==='CHAT2_OBSERVED_IDLE'?'CHAT2_REPAIR':'CHAT1_REPAIR'));
 resetNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT2_RESET'));
 chat2Native.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT2_SEND'));
+async function refreshConcurrency(){
+  try{
+    const r=await ai('GET_CONCURRENCY');
+    concurrency=r;
+    if(r?.ok){
+      perAccount.value=String(r.setting.perAccount);
+      concurrencyStatus.textContent='Revision '+r.setting.revision+
+        ' · new jobs only; default one per account.';
+    }else concurrencyStatus.textContent=r?.code||'CONCURRENCY_UNVERIFIED';
+  }catch{concurrencyStatus.textContent='Concurrency read unavailable; no setting assumed.';}
+  controls();
+}
+saveConcurrency.addEventListener('click',async()=>{
+  if(busy||!concurrency?.ok)return;
+  const limit=Number(perAccount.value);
+  if(!Number.isSafeInteger(limit)||limit<1||limit>4){
+    concurrencyStatus.textContent='Enter an integer from 1 to 4.';return;
+  }
+  busy=true;controls();
+  try{
+    const r=await ai('SET_CONCURRENCY',{
+      perAccount:limit,expectedRevision:concurrency.setting.revision
+    });
+    if(!r?.ok)concurrencyStatus.textContent=(r?.code||'SETTING_UNVERIFIED')+
+      ' · refresh before retrying';
+    else {
+      concurrency=r;
+      concurrencyStatus.textContent='Saved revision '+r.setting.revision+
+        ' · affects only new job admissions.';
+    }
+  }catch{concurrencyStatus.textContent='Setting acknowledgment unknown; reload canonical revision.';}
+  finally{busy=false;controls();}
+});
 prepare.addEventListener('click',prepareJob);
 refresh.addEventListener('click',refreshJobs);
 slug.addEventListener('input',controls);
@@ -178,3 +214,5 @@ ai('GET_PROMPTS').then(renderPrompt).catch(()=>{
   configStatus.textContent='Cannot load Settings revision. No update can be claimed.';
 });
 refreshJobs();
+
+refreshConcurrency();
