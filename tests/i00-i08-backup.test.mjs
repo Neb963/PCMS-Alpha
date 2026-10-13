@@ -77,6 +77,10 @@ test('P55-01: malformed or unknown required store, duplicate key, donor plaintex
   const x=serializeClone({src:new Uint8Array([0,1,255]),now:new Date('2026-01-01T00:00:00Z')});
   assert.deepEqual([...deserializeClone(x).src],[0,1,255]);
   assert.equal(deserializeClone(x).now.getTime(),new Date('2026-01-01Z').getTime());
+  const withMissing=serializeClone({owner:'fixture',unset:undefined});
+  const recovered=deserializeClone(withMissing);
+  assert.equal(Object.hasOwn(recovered,'unset'),true);
+  assert.equal(recovered.unset,undefined);
 });
 test('P55-02: independent pre/post local and donor cuts reject concurrent revision/source changes',()=>{
   const a=samplePcms(),b=samplePcms();
