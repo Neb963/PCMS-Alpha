@@ -159,7 +159,7 @@ test('I13 F: assembled XPI imports fixed guard release adapter and shows no gene
   const guard=await readFile('src/runtime/persona-guard.mjs','utf8');
   assert.match(entry,/import '\.\/release-boundary\.mjs'/);
   assert.match(overlay,/func:perchanceReleaseMain,args:\[request\]/);
-  assert.match(overlay,/tag\.createdBy==='PCMS_I09'/);
+  assert.match(overlay,/\['PCMS_I09','PCMS_I13'\]\.includes\(tag\.createdBy\)/);
   assert.match(overlay,/RELEASE_PROTECTED_ROUTE_CHANGED/);
   assert.match(guard,/acquireConflictGuard\(personaUid\)/);
   assert.match(guard,/runReleaseStep/);
