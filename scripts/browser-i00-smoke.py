@@ -1237,7 +1237,7 @@ def main():
                     readback.ok&&readback.job.schedulerDeferredUntil===until&&
                     readback.job.schedulerHold==='AI_WAKE_ROUTE_UNVERIFIED'&&
                     readback.job.createdAt===created&&
-                    readback.job.native===null&&
+                    !readback.job.native&&
                     readback.job.executionSlotReleased!==true&&
                     readback.job.sourceFingerprint===original.job.sourceFingerprint,
                     created,deferred,stale,persisted:readback.job.schedulerDeferredUntil,
