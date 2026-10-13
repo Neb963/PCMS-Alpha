@@ -252,10 +252,26 @@ export function createExistingBoundary(api,{
       if(!candidate.ok)return candidate;
       if(!(await recheck(g,r.personaUid,before)).ok)return fail('EXISTING_GUARD_CHANGED');
       const stage=stageFactory(database);
-      const result=await stage.pin({slug:p.slug,candidate,
-        previous:opened.source,source:git,
-        eligibility:{ok:true,account:f.account,item:{
-          remoteId:r.remotePublicId}},nonce:r.nonce});
+      const earlier=await stage.getFull(p.slug);
+      let result;
+      if(earlier.ok&&earlier.record.state==='PINNED'&&
+         earlier.record.slug===p.slug&&earlier.record.nonce===r.nonce&&
+         earlier.record.accountId===r.accountId&&
+         earlier.record.remotePublicId===r.remotePublicId&&
+         earlier.record.previous?.fingerprint===r.previousFingerprint&&
+         earlier.record.candidate?.fingerprint===candidate.fingerprint&&
+         earlier.record.sourceFolder===git.folder&&
+         earlier.record.sourceHead===git.head&&
+         earlier.record.testingSha===git.testingSha){
+        // Repair a crash between the earlier stage pin and existing-update
+        // pin. No new editor tab, source overwrite or provider effect.
+        result={ok:true,revision:earlier.record.revision};
+      }else{
+        result=await stage.pin({slug:p.slug,candidate,
+          previous:opened.source,source:git,
+          eligibility:{ok:true,account:f.account,item:{
+            remoteId:r.remotePublicId}},nonce:r.nonce});
+      }
       if(!result.ok)return result;
       const pinned=await store.pinStage(p.slug,r.revision,{candidate,source:git});
       return pinned.ok?{...pinned,stageRevision:result.revision,
