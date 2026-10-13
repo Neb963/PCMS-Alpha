@@ -117,7 +117,116 @@ export function createAiStore(db){
       };
     });
   }
+  // Durable external-effect marker. Firefox (or a disconnected response)
+  // can die at any boundary; no code automatically retries this marker.
+  function armNative(slugName,expectedRevision,step){
+    if(!slug(slugName)||!['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','STOP'].includes(step))
+      return Promise.resolve(fail('AI_STEP_INVALID'));
+    return tx(db,'readwrite',(t,done)=>{
+      const m=t.objectStore('meta');
+      m.get(key(slugName)).onsuccess=e=>{
+        const row=e.target.result,j=row?.job;
+        if(!j){done(fail('AI_JOB_NOT_FOUND'));return;}
+        if(j.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
+        if(j.native?.state==='DISPATCH_POSSIBLE'){done(fail('AI_EFFECT_RECONCILIATION_REQUIRED'));return;}
+        const decision=evaluation(j);
+        if(step==='CHAT1_SEND'&&
+           (j.chat1.sessionDigest!==null||j.native))
+          {done(fail('AI_EXISTING_SESSION_RECONCILE'));return;}
+        if(step==='CHAT2_RESET'&&
+           (decision.chat1Pass!==true||!j.optionalTesting||
+            !j.chat1.sessionDigest||j.native?.state!=='CHAT1_OBSERVED_IDLE'))
+          {done(fail('AI_CHAT1_PROOF_REQUIRED'));return;}
+        if(step==='CHAT2_SEND'&&
+           (j.native?.state!=='CHAT2_RESET_OBSERVED'||
+            j.chat2?.sessionDigest||!j.optionalTesting))
+          {done(fail('AI_FRESH_CHAT_REQUIRED'));return;}
+        if(step==='STOP'&&j.native?.state!=='RUNNING_OBSERVED')
+          {done(fail('AI_STOP_NOT_ADMISSIBLE'));return;}
+        const next={...j,revision:j.revision+1,
+          native:{step,state:'DISPATCH_POSSIBLE',
+            previousSessionDigest:j.native?.sessionDigest||j.chat1.sessionDigest||null,
+            armedAt:Date.now()},state:'HELD_RECONCILE',
+          hold:'NATIVE_EFFECT_MAY_HAVE_OCCURRED'};
+        m.put({...row,job:next});
+        t.objectStore('events').add({stage:'AI_DISPATCH_POSSIBLE',
+          slug:slugName,revision:next.revision,step});
+        done(publicJob(next));
+      };
+    });
+  }
+  // A *read-only* observation may release one uncertainty, never replay it.
+  // The caller alone supplies an observation from its pinned donor-owned tab.
+  function observeNative(slugName,expectedRevision,observation){
+    if(!slug(slugName)||!Number.isSafeInteger(expectedRevision)||
+       observation?.ok!==true||observation.slug!==slugName||
+       !['boolean'].includes(typeof observation.busy)||
+       (observation.sessionDigest!==null &&
+        !/^[a-f0-9]{64}$/.test(observation.sessionDigest||'')))
+      return Promise.resolve(fail('AI_NATIVE_OBSERVATION_INVALID'));
+    return tx(db,'readwrite',(t,done)=>{
+      const m=t.objectStore('meta');
+      m.get(key(slugName)).onsuccess=e=>{
+        const row=e.target.result,j=row?.job;
+        if(!j){done(fail('AI_JOB_NOT_FOUND'));return;}
+        if(j.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
+        if(!j.native||j.native.state!=='DISPATCH_POSSIBLE')
+          {done(fail('AI_NO_PENDING_NATIVE_EFFECT'));return;}
+        const step=j.native.step,digest=observation.sessionDigest;
+        let state;
+        if(step==='CHAT1_SEND'||step==='CHAT2_SEND'){
+          if(!digest||digest===j.native.previousSessionDigest)
+            {done(fail('AI_SESSION_UNVERIFIED'));return;}
+          state=observation.busy?'RUNNING_OBSERVED':
+            step==='CHAT1_SEND'?'CHAT1_OBSERVED_IDLE':'CHAT2_OBSERVED_IDLE';
+        }else if(step==='CHAT2_RESET'){
+          if(digest!==null||observation.busy||observation.chatEntries>1)
+            {done(fail('AI_CHAT2_RESET_NOT_PROVEN'));return;}
+          state='CHAT2_RESET_OBSERVED';
+        }else{
+          if(observation.busy){done(fail('AI_STOP_NOT_OBSERVED'));return;}
+          state='STOP_OBSERVED';
+        }
+        const next={...j,revision:j.revision+1,
+          native:{...j.native,state,sessionDigest:digest,observedAt:Date.now()},
+          state:'TESTS_UNVERIFIED',hold:'INDEPENDENT_BROWSER_TESTS_REQUIRED'};
+        // Native session evidence is distinguished from proof of user-facing
+        // test assertions: no success here comes from text or busy=false.
+        if(step==='CHAT1_SEND'||step==='CHAT2_SEND'){
+          const chat=step==='CHAT1_SEND'?next.chat1:next.chat2;
+          chat.sessionDigest=digest;
+          chat.state=step==='CHAT2_SEND'?'FRESH_VERIFIED':'RUNNING';
+        }
+        m.put({...row,job:next});
+        t.objectStore('events').add({stage:'AI_NATIVE_OBSERVED',
+          slug:slugName,revision:next.revision,observation:state});
+        done(publicJob(next));
+      };
+    });
+  }
+  function recoverNative(){
+    return tx(db,'readwrite',(t,done)=>{
+      const m=t.objectStore('meta');let held=0;
+      m.openCursor().onsuccess=e=>{
+        const c=e.target.result;
+        if(c){
+          const j=c.value?.job;
+          if(typeof c.key==='string'&&c.key.startsWith('ai-job:')&&
+             j?.native?.state==='DISPATCH_POSSIBLE'){
+            const next={...j,revision:j.revision+1,
+              state:'HELD_RECONCILE',hold:'NATIVE_EFFECT_MAY_HAVE_OCCURRED'};
+            c.update({...c.value,job:next});
+            t.objectStore('events').add({stage:'AI_CRASH_HOLD',slug:j.slug,
+              revision:next.revision});held++;
+          }
+          c.continue();return;
+        }
+        done({ok:true,held});
+      };
+    });
+  }
   return Object.freeze({
-    getPrompt,changePrompt,exportPrompt,getJob,list,start,record
+    getPrompt,changePrompt,exportPrompt,getJob,list,start,record,
+    armNative,observeNative,recoverNative
   });
 }
