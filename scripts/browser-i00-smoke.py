@@ -2241,11 +2241,49 @@ def main():
                       .get('ai-history:'+slug+':7');
                     req.onsuccess=()=>resolve(req.result?.job);
                   });
+                  const newJob={...priorJob,revision:ai.revision,stageRevision:pinned.revision,
+                    sourceFingerprint:p2.fingerprint,verifiedFinal:p2.fingerprint,
+                    finalSource:p2,chat1:{tests:{default_generator_smoke:{
+                      result:'PASS',sourceFingerprint:p2.fingerprint}}}};
+                  await new Promise((resolve,reject)=>{
+                    const t=db.transaction('meta','readwrite');
+                    t.objectStore('meta').put({key:'ai-job:'+slug,accountId,job:newJob});
+                    t.oncomplete=resolve;t.onabort=()=>reject(Error('synthetic tests seed aborted'));
+                  });
+                  const newStage=(await stages.getFull(slug)).record;
+                  const releaseCore=await import('./release-core.mjs');
+                  const approve=releaseCore.approvalTuple({slug,stage:newStage,
+                    job:newJob,source:p2,previous:p1,git:{ok:true,testingSha:fp},
+                    kind:'EXISTING_UPDATE'});
+                  const releases=releaseModule.createReleaseStore(db);
+                  const firstApproval=await releases.approve({approval:approve,stage:newStage,
+                    job:newJob,account,inventory,source:p2,previous:p1,
+                    releaseId:'release_'+ '3'.repeat(32),kind:'EXISTING_UPDATE'});
+                  const canceled=await releases.cancelApproved(slug,firstApproval.revision);
+                  const renewed=await releases.approve({approval:approve,stage:newStage,
+                    job:newJob,account,inventory,source:p2,previous:p1,
+                    releaseId:'release_'+ '4'.repeat(32),kind:'EXISTING_UPDATE'});
+                  const previousRelease=await new Promise(resolve=>{
+                    const req=db.transaction('meta','readonly').objectStore('meta')
+                      .get('release-history:'+slug+':'+priorRelease.releaseId);
+                    req.onsuccess=()=>resolve(req.result?.release);
+                  });
+                  const canceledHistory=await new Promise(resolve=>{
+                    const req=db.transaction('meta','readonly').objectStore('meta')
+                      .get('release-history:'+slug+':'+firstApproval.releaseId);
+                    req.onsuccess=()=>resolve(req.result?.release);
+                  });
                   done({ok:prepared.ok&&priorHist?.state==='STAGE_CONFIRMED'&&
                     pinned.ok&&pinned.revision===6&&oldStage?.revision===5&&
-                    ai.ok&&ai.revision===8&&oldAi?.revision===7,
+                    ai.ok&&ai.revision===8&&oldAi?.revision===7&&
+                    firstApproval.ok&&canceled.state==='CANCELED'&&
+                    renewed.state==='APPROVED'&&
+                    previousRelease?.state==='CONFIRMED_PUBLIC'&&
+                    canceledHistory?.state==='CANCELED',
                     prepared,pinned,ai,priorArchived:!!priorHist,
-                    stageArchived:!!oldStage,aiArchived:!!oldAi});
+                    stageArchived:!!oldStage,aiArchived:!!oldAi,
+                    firstApproval,canceled,renewed,
+                    releaseArchived:!!previousRelease,canceledArchived:!!canceledHistory});
                   db.close();
                 })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,600)}));"""
                 proof=call('POST',f'/session/{after}/execute/async',
