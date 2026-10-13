@@ -120,7 +120,7 @@ loadBtn.addEventListener('click',()=>act('GET',{slug:slug.value},
   'Loading persisted approval/dispatch/uncertainty receipt…'));
 clearBtn.addEventListener('click',()=>{token.value='';controls();});
 slug.addEventListener('input',()=>{
-  sequence++;snapshot=null;receipt=null;
+  if(active)return;\n  sequence++;snapshot=null;receipt=null;
   details.textContent='Target changed. Previous preview and approval controls invalidated.';
   note('Selection changed; review new target before any approval.');
   controls();
