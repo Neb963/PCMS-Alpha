@@ -54,7 +54,8 @@ export function planAiStep(job,{oracleNames=['default_generator_smoke']}={}){
       return hold('UNSUPPORTED_REQUIRED_ASSERTIONS');
     if(pending.length)return {ok:true,type:'RUN_TESTS',revision:job.revision,
       chat:1,effect:'BROWSER_OBSERVATION_ONLY'};
-    return hold('AI_CHAT2_ISOLATION_UNVERIFIED');
+    return {ok:true,type:'VERIFY_FRESH_CHAT2',revision:job.revision,
+      effect:'GATED_READ_ONLY_HISTORY'};
   }
   if(job.state==='KNOWN_FAILURE'){
     const step=active===1?'CHAT1_REPAIR':'CHAT2_REPAIR';
