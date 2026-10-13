@@ -26,6 +26,7 @@ import './ai-boundary.mjs';
 import './writeback-boundary.mjs';
 // I13 exact-source human approval and fail-closed publication listener.
 import './release-boundary.mjs';
+import './existing-update-boundary.mjs';
 // I12 one durable shadow queue/alarm; provider observations gated OFF.
 import {createRefresherBoundary} from './refresher-boundary.mjs';
 if(typeof browser!=='undefined')createRefresherBoundary(browser).register();
