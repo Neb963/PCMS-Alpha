@@ -51,13 +51,22 @@ test('P55-01: all decision-bearing header fields authenticated or rejected and z
     mutationCount++;return result;
   };
   const original=JSON.parse(out.text);
+  // Alter the first encoded sextet, not a random last character: base64
+  // trailing pad bits can change text without changing the decoded bytes.
+  // Assert byte inequality independently so this negative oracle cannot
+  // silently become a no-op for random salt/IV/ciphertext endings.
+  const corruptBytes=encoded=>{
+    const changed=(encoded[0]==='A'?'B':'A')+encoded.slice(1);
+    assert.notDeepEqual(Buffer.from(changed,'base64'),Buffer.from(encoded,'base64'));
+    return changed;
+  };
   const altered=[
     {...original,version:2},
     {...original,createdAt:'forged'},
     {...original,encryption:{...original.encryption,iterations:1}},
-    {...original,encryption:{...original.encryption,salt:original.encryption.salt.slice(0,-1)+'A'}},
-    {...original,encryption:{...original.encryption,iv:original.encryption.iv.slice(0,-1)+'A'}},
-    {...original,sealedPayload:original.sealedPayload.slice(0,-3)+'AAA'},
+    {...original,encryption:{...original.encryption,salt:corruptBytes(original.encryption.salt)}},
+    {...original,encryption:{...original.encryption,iv:corruptBytes(original.encryption.iv)}},
+    {...original,sealedPayload:corruptBytes(original.sealedPayload)},
     {...original,format:'personamonkey-backup'},
     {...original,encryption:null}
   ];
