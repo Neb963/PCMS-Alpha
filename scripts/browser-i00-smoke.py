@@ -246,7 +246,7 @@ def adoption_idb_probe(session):
         expectedRevision:protectedResult.revision});
       const after=await cmd('GET_ADOPTION',{slug});
       const rejected=await cmd('ARCHIVE_GIT',{slug,
-        expectedRevision:protectedResult.revision,token:'synthetic-git-token-01'});
+        expectedRevision:after.revision,token:'synthetic-git-token-01'});
       db.close();
       done({adopted,listing,held,git,protectedResult,tombstone,after,rejected,trace});
     })().catch(e=>done({error:'I07_IDB_PROBE_FAILED',detail:String(e).slice(0,200)}));'''
