@@ -22,6 +22,7 @@ export function renderPcmsEditorStrip({slug,nonce,accountId,personaUid}) {
   const button=document.createElement('button');
   button.type='button';button.textContent='Take human ownership (keep tab)';
   button.addEventListener('click',()=>{
+    host.dataset.pcmsHumanIntent='true';
     button.disabled=true;status.textContent='Persisting human handoff…';
     try{
       const port=browser.runtime.connect({name:'pcms-i09-editor-handoff'});
