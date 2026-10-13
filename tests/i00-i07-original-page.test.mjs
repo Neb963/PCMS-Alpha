@@ -28,7 +28,7 @@ test('P52-03 F: guarded original source reads committed full PJS, HTML and src b
       return {status:200,headers:new Headers({'content-type':'application/json'}),
         json:async()=>({status:'success',generator:{name:'alpha',isPrivate:false,
           publicId:'resource123',modelText:'let a=1',outputTemplate:'<p>saved</p>',
-          srcManifest:{'src/a.png':{key,size:source.length}}}})};
+          srcManifest:{'a.png':{key,size:source.length}}}})};
     }
     assert.equal(args.email,'user@example.test');
     assert.equal(args.sessionToken,user.sessionToken);
@@ -47,6 +47,7 @@ test('P52-03 F: guarded original source reads committed full PJS, HTML and src b
     assert.equal(result.original.ownerResult,'IS_OWNER');
     assert.equal(result.original.visibility,'PUBLIC');
     assert.equal(result.original.assets.length,1);
+    assert.equal(result.original.assets[0].path,'src/a.png');
     assert.equal(Buffer.from(result.original.assets[0].base64,'base64').equals(source),true);
     assert.equal(result.original.assets[0].sha256,createHash('sha256').update(source).digest('hex'));
     assert.equal(calls.some(c=>c.url==='https://user.uploads.dev/file/'+key),true);
