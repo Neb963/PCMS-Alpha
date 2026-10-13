@@ -160,8 +160,26 @@ export function createWritebackBoundary(api,{
         const g=guard(),session=j.native?.sessionDigest;
         if(!g?.runNativeAiStep||!FP.test(session||''))
           return fail('AI_TERMINAL_UNVERIFIED');
+        if(effectGate({phase:'I11',step:'READ_ONLY_AI_TERMINAL'})!==true)
+          return fail('AI_TERMINAL_HISTORY_ACTIVATION_HELD');
+        const before=await g.runNativeAiStep(r.personaUid,
+          {slug:r.slug,nonce:r.nonce,action:'OBSERVE'});
+        if(!before?.ok||before.busy!==false||before.editorClean!==true||
+           before.sourceSaved!==true||before.sessionDigest!==session||
+           before.hasQueue!==false||before.inputOccupied!==false||
+           before.attachmentsPending!==false)
+          return fail('AI_TERMINAL_NATIVE_NOT_IDLE');
         const reply=await g.runNativeAiStep(r.personaUid,
-          {slug:r.slug,nonce:r.nonce,action:'OBSERVE_TERMINAL'});
+          {slug:r.slug,nonce:r.nonce,action:'OBSERVE_TERMINAL',
+           firstPrompt:j.native.state==='CHAT2_OBSERVED_IDLE'?
+             j.optionalTesting?.text:j.prompt.text});
+        const after=await g.runNativeAiStep(r.personaUid,
+          {slug:r.slug,nonce:r.nonce,action:'OBSERVE'});
+        if(!after?.ok||after.busy!==false||after.editorClean!==true||
+           after.sourceSaved!==true||after.sessionDigest!==session||
+           after.inputOccupied!==false||after.attachmentsPending!==false||
+           after.hasQueue!==false)
+          return fail('AI_TERMINAL_NATIVE_CHANGED');
         message=parseTerminalSuggestion(reply,session);
       }
       if(!message.ok)return message;
