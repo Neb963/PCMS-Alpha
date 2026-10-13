@@ -147,7 +147,10 @@ export function createExistingStore(db){
         }else commit(r);
         function commit(current){
           const nextState=dispatch?event.replace('_DISPATCH','_DISPATCH_POSSIBLE'):event;
+          const effectId=dispatch?'existing_'+crypto.randomUUID().replaceAll('-',''):
+            current.operationId;
           const next={...current,revision:current.revision+1,state:nextState,
+            operationId:effectId,
             reason:verified?null:reason||current.reason,
             changedAt:Date.now()};
           m.put({key:key(s),record:next});
@@ -165,13 +168,13 @@ export function createExistingStore(db){
             };
           }
           if(dispatch){
-            t.objectStore('operations').put({operationId:current.operationId,
+            t.objectStore('operations').add({operationId:effectId,
               targetId:'existing_'+s,fingerprint:current.previousFingerprint,
               effectType:'existing_'+event.toLowerCase(),status:'DISPATCH_POSSIBLE',
               revision:next.revision});
           }
           t.objectStore('events').add({stage:'EXISTING_'+nextState,slug:s,
-            revision:next.revision,operationId:current.operationId});
+            revision:next.revision,operationId:effectId});
           done(publicExisting(next));
         }
       };
