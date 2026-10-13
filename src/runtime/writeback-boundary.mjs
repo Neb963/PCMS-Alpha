@@ -62,10 +62,23 @@ function context(r){
 }
 async function guardedReadback(g,stage,job){
   const r=stage.record;
-  if(!g?.observeReadOnly||!g?.getSafeRouteReadiness)
+  if(!g?.observeReadOnly||!g?.getSafeRouteReadiness||
+     !g?.inspectStageEditor||!g?.runNativeAiStep)
     return fail('DONOR_GUARD_UNAVAILABLE');
+  const expectedSession=job.job.native?.sessionDigest;
+  if(!FP.test(expectedSession||''))return fail('AI_SESSION_UNVERIFIED');
+  const observeNative=()=>g.runNativeAiStep(r.personaUid,{
+    slug:r.slug,nonce:r.nonce,action:'OBSERVE'});
+  const validNative=o=>o?.ok===true&&o.busy===false&&
+    o.sessionDigest===expectedSession&&o.sourceSaved===true&&
+    o.editorClean===true&&o.hasQueue===false&&
+    o.inputOccupied===false&&o.attachmentsPending===false;
   const before=await g.getSafeRouteReadiness(r.personaUid);
   if(!before?.ready)return fail(before?.code||'ROUTE_UNVERIFIED');
+  const idleBefore=await observeNative();
+  const editorBefore=await g.inspectStageEditor(r.personaUid,r.slug,r.nonce);
+  if(!validNative(idleBefore)||!editorBefore?.ok||editorBefore.clean!==true)
+    return fail('EDITOR_OR_AI_SESSION_UNVERIFIED');
   const observed=await g.observeReadOnly(r.personaUid,false,r.slug);
   if(!observed?.ok||observed.principalFingerprint!==r.principalFingerprint||
      !observed.original||!Array.isArray(observed.original.assets))
@@ -80,9 +93,13 @@ async function guardedReadback(g,stage,job){
     return fail('FINAL_BYTES_CHANGED');
   const verified=await verifyReadback(exact,packet,context(r));
   if(!verified.ok)return verified;
+  const editorAfter=await g.inspectStageEditor(r.personaUid,r.slug,r.nonce);
+  const idleAfter=await observeNative();
   const after=await g.getSafeRouteReadiness(r.personaUid);
   if(!after?.ready||after.cookieStoreId!==before.cookieStoreId||
-     after.routeId!==before.routeId)return fail('ROUTE_CHANGED');
+     after.routeId!==before.routeId||!editorAfter?.ok||
+     editorAfter.clean!==true||!validNative(idleAfter))
+    return fail('EDITOR_OR_ROUTE_CHANGED_DURING_READBACK');
   return {ok:true,source:exact,route:after};
 }
 export function createWritebackBoundary(api,{
