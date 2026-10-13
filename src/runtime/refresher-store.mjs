@@ -21,7 +21,7 @@ function transact(db,mode,fn){
 // independently confirmed exact-source publication; historical PUBLIC alone
 // never satisfies this seam. B/F fixtures exercise the same canonical seam.
 export function canonicalRefresherInputs(records){
-  const accounts=new Map(),stages=new Map(),releases=new Map(),links=new Map(),inventory=[];
+  const accounts=new Map(),stages=new Map(),releases=new Map(),links=new Map(),updates=new Map(),inventory=[];
   for(const record of records){
     const k=record?.key;
     if(typeof k!=='string')continue;
@@ -30,10 +30,11 @@ export function canonicalRefresherInputs(records){
     if(k.startsWith('stage:')&&record.record)stages.set(record.record.slug,record.record);
     if(k.startsWith('release:')&&record.release)releases.set(record.release.slug,record.release);
     if(k.startsWith('source-link:')&&record.link)links.set(record.link.slug,record.link);
+    if(k.startsWith('existing-update:')&&record.record)updates.set(record.record.slug,record.record);
   }
   return inventory.map(row=>{
     const a=accounts.get(row.accountId),release=releases.get(row.slug),stage=stages.get(row.slug),
-      link=links.get(row.slug);
+      link=links.get(row.slug),update=updates.get(row.slug);
     const accountVerified=a?.state==='VERIFIED'&&a.identity?.source==='GUARDED_SESSION_READBACK'&&
       a.identity.bindingVersion===a.bindingVersion&&hex(a.identity.principalFingerprint);
     const matched=accountVerified&&a.personaUid===row.personaUid&&a.bindingVersion===row.bindingVersion;
@@ -49,8 +50,9 @@ export function canonicalRefresherInputs(records){
       principalFingerprint:a?.identity?.principalFingerprint||null,
       releaseVerified:!!released,releaseFingerprint:released?release.sourceFingerprint:null,
       listing:row.visibility,observedAt:row.lastObservedAt,
-      reviewHeld:!!stage&&stage.state!=='HUMAN_OWNED'&&
-        (!released||stage.candidate?.fingerprint!==release.sourceFingerprint),
+      reviewHeld:(!!update&&update.state!=='RESTORE_CONFIRMED')||
+        (!!stage&&stage.state!=='HUMAN_OWNED'&&
+          (!released||stage.candidate?.fingerprint!==release.sourceFingerprint)),
       readyUpdate:link?.readyUpdate===true||!!released&&link?.readyAtInspection===true&&
         link.fingerprint!==release.sourceFingerprint};
   });
@@ -108,7 +110,7 @@ export function createRefresherStore(db){
           const c=ev.target.result;
           if(!c){apply(records);return;}
           if(++seen>50000){done(fail('CANONICAL_SCAN_LIMIT'));return;}
-          if(typeof c.key==='string'&&/^(account|inventory|stage|release|source-link):/.test(c.key))
+          if(typeof c.key==='string'&&/^(account|inventory|stage|release|source-link|existing-update):/.test(c.key))
             records.push(c.value);
           c.continue();
         };
