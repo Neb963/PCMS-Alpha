@@ -3,6 +3,17 @@
 let installed = null;
 const HOLD = code => Object.freeze({ ready: false, code });
 const BAD_PROXY = new Set(['controlled_by_other_extensions', 'not_controllable']);
+export async function cachedHealthDomain(evidence){
+  // The donor already checked age, context and protected egress. Different
+  // route IDs sharing an observed exit are one witness. No new route probe,
+  // raw IP storage or network request. Unknown/noncanonical exit => no domain.
+  const ip=evidence?.data?.ip;
+  if(evidence?.ok!==true||typeof ip!=='string'||
+    !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip)||
+    !ip.split('.').every(p=>String(Number(p))===p&&Number(p)<=255))return null;
+  const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('pcms-provider-egress:'+ip));
+  return 'egress_'+Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
@@ -32,7 +43,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
       return Object.freeze({
         ready: true, code: 'GUARD_READY',
         personaUid: current.personaUid, cookieStoreId: current.cookieStoreId,
-        routeId: current.routeId
+        routeId: current.routeId,healthDomain:await cachedHealthDomain(evidence)
       });
     } catch {
       // Do not disclose thrown storage/native/route errors (potential secrets).
@@ -149,6 +160,24 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     finally{await releaseConflictGuard(leased);}
   }
 
+  // Fixed public feed/statistics GETs use the SAME donor lease and isolated
+  // reader. Session proof is independently checked by the host around them.
+  async function observeMonitoring(personaUid,request){
+    if(!request||!['RECENT','STATISTIC'].includes(request.kind)||
+      Object.keys(request).some(k=>!['kind','slug'].includes(k))||
+      (request.kind==='STATISTIC'&&!/^[a-z0-9][a-z0-9-]{0,99}$/.test(request.slug||''))||
+      (request.kind==='RECENT'&&request.slug!=null))return {ok:false,code:'MONITOR_REQUEST_INVALID'};
+    if(typeof readIsolatedTab!=='function')return {ok:false,code:'OBSERVER_UNAVAILABLE'};
+    const leased=await acquireConflictGuard(personaUid);
+    if(!leased.ready)return {ok:false,code:leased.code};
+    try{
+      const result=await readIsolatedTab(leased,{identityOnly:true,monitoringRequest:request});
+      if(!(await inspectOwnedAction(leased)).ready)return {ok:false,code:'MONITOR_GUARD_CHANGED'};
+      return result||{ok:false,code:'MONITOR_UNAVAILABLE'};
+    }catch{return {ok:false,code:'MONITOR_UNAVAILABLE'};}
+    finally{await releaseConflictGuard(leased);}
+  }
+
   // Only the fixed same-XPI supply function is permitted. A donor lease
   // encloses admission and page execution; the postcheck never transforms
   // an unknown remote outcome into a safe retry.
@@ -230,6 +259,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
 
   return Object.freeze({
     observeReadOnly,
+    observeMonitoring,
     runSupplyStep,
     runStageStep,
     runNativeAiStep,

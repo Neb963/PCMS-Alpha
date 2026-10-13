@@ -33,6 +33,7 @@
       <section class="workspace" id="view-overview" data-view="overview" aria-labelledby="heading-overview">
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 01</p><h1 id="heading-overview" tabindex="-1">Overview</h1><p>Local inventory and guarded read-only account state. Provider writes remain disabled.</p></div></header>
         <p id="pcms-overview-inventory" role="status" aria-live="polite">Inventory counts pending. No live owner status inferred.</p>
+        <p id="pcms-overview-refresher" role="status">Shadow timing pending; mutations OFF.</p>
         <p id="pcms-overview-backup" role="status" aria-live="polite">Manual backup receipt not yet inspected.</p>
         <div class="notice" role="status"><strong>Provider effects disabled</strong><p>Local operation journaling and a fail-closed command boundary are installed. Account binding and manual login are enabled, but remote identity verification and provider mutation remain unavailable. Missing observations do not imply no incidents.</p></div>
         <section class="panel" aria-labelledby="runtime-health-title"><div class="panel-head"><h2 id="runtime-health-title">Background guard</h2><span class="unknown" id="pcms-guard-badge">Checking</span></div><p id="pcms-guard-health" role="status">Runtime evidence unavailable until checked. Provider actions remain off.</p></section>
@@ -115,6 +116,7 @@
       </section>
       <section class="workspace" id="view-work-queue" data-view="work-queue" aria-labelledby="heading-work-queue" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 03</p><h1 id="heading-work-queue" tabindex="-1">Work Queue</h1><p>Evidence-backed operator decisions and task receipts.</p></div><button type="button" disabled aria-describedby="blocked-work-queue">Start action</button></header>
+        <p id="pcms-queue-refresher" role="status">Shadow scheduler state pending.</p><p><a href="#refresher">Inspect the global Refresher queue</a></p>
         <section class="panel"><div class="panel-head"><h2>Operations</h2><span class="unknown">Read-only</span></div><p id="pcms-work-queue-summary" role="status">Loading canonical journal status. Unknown outcomes must be reconciled, not repeated.</p><p id="blocked-work-queue" class="reason">Provider effects are held. Frozen local supply receipts may be inspected; this screen cannot dispatch, approve or replay an uncertain remote operation.</p></section>
         <section class="panel" aria-labelledby="pcms-stage-queue-title"><div class="panel-head"><h2 id="pcms-stage-queue-title">I09 private stage receipts</h2><span class="unknown">Canonical · no auto-retry</span></div><div id="pcms-stage-queue" role="status" aria-live="polite">Reading local stage journal.</div></section>
         <section class="panel" aria-labelledby="pcms-adoption-queue-title"><div class="panel-head"><h2 id="pcms-adoption-queue-title">Existing-source adoption receipts</h2><span class="unknown">Local originals · Git archive pending</span></div><div id="pcms-adopt-receipts" role="status" aria-live="polite">Loading adoption history.</div></section>
@@ -187,7 +189,37 @@
       </section>
       <section class="workspace" id="view-refresher" data-view="refresher" aria-labelledby="heading-refresher" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 05</p><h1 id="heading-refresher" tabindex="-1">Refresher</h1><p>Operational capacity, scheduling and observed visibility.</p></div><button type="button" disabled aria-describedby="blocked-refresher">Start refresh</button></header>
-        <section class="panel"><div class="panel-head"><h2>Scheduler</h2><span class="unknown">Off</span></div><p class="empty">No scheduler or recent-list monitor is installed. Occupancy and remaining time are unknown, not zero.</p><p id="blocked-refresher" class="reason">Disabled: monitoring, scheduling, saving and unlisting are later-phase capabilities.</p></section>
+        <section class="panel">
+          <div class="panel-head"><h2>Global oldest-eligible queue</h2><span class="unknown">Shadow only · mutations off</span></div>
+          <p id="blocked-refresher" class="reason">Refresh activation requires independently proven permissible provider behavior. Shadow allocations never send saves, create tabs, unlist or publish.</p>
+          <p id="pcms-refresher-summary" role="status">Canonical capacity pending; no remote visibility promised.</p>
+          <p id="pcms-refresher-provider"></p><p id="pcms-refresher-diagnostics"></p>
+          <button type="button" id="pcms-refresher-reload">Reload local shadow</button>
+          <button type="button" id="pcms-refresher-retry-recent" disabled>Reset recent observation backoff</button>
+          <button type="button" id="pcms-refresher-global-pause" disabled>Pause globally</button>
+          <label for="pcms-refresher-account">Account Pause</label><select id="pcms-refresher-account"></select>
+          <button type="button" id="pcms-refresher-account-pause" disabled>Pause account</button>
+          <p id="pcms-refresher-status" role="status" aria-live="polite">Reading canonical state…</p>
+          <div class="account-controls">
+            <label for="pcms-refresher-active">Default active hours</label><input id="pcms-refresher-active" type="number" min="1" max="8760" value="24">
+            <label for="pcms-refresher-sleep">Minimum sleep hours</label><input id="pcms-refresher-sleep" type="number" min="1" max="8760" value="72">
+            <label for="pcms-refresher-grace">Account grace minutes</label><input id="pcms-refresher-grace" type="number" min="1" max="1440" value="60">
+            <label for="pcms-refresher-cap">Admission override (blank = automatic)</label><input id="pcms-refresher-cap" type="number" min="1" max="200">
+            <button type="button" id="pcms-refresher-save" disabled>Save shadow policy</button>
+          </div>
+          <p class="reason">New duration settings apply to subsequent full periods. Remaining time and queue priority are preserved. Cap reductions stop admissions without evicting active allocations. Sleep remains public unless a separate release/review requires unlisting.</p>
+          <label for="pcms-refresher-query">Search generator or account</label><input id="pcms-refresher-query" type="search" maxlength="80">
+          <label for="pcms-refresher-phase">Phase</label><select id="pcms-refresher-phase"><option value="ALL">All</option><option value="WAITING">Waiting</option><option value="ACTIVE">Active</option><option value="SLEEPING">Sleeping</option></select>
+          <div class="table-scroll"><table><caption>Canonical shadow timing and historical observations</caption><thead><tr><th scope="col">Generator</th><th scope="col">Account</th><th scope="col">Budget / hold</th><th scope="col">Queue ordinal</th><th scope="col">Recent-list observation</th></tr></thead><tbody id="pcms-refresher-rows"></tbody></table></div>
+          <button type="button" id="pcms-refresher-prev" disabled>Previous</button><span id="pcms-refresher-page"></span><button type="button" id="pcms-refresher-next" disabled>Next</button>
+        </section>
+        <section class="panel" id="pcms-refresher-inspector" hidden>
+          <h2>Generator timing policy</h2><p id="pcms-refresher-selected"></p><p id="pcms-refresher-metric"></p>
+          <label for="pcms-refresher-generator-active">Active hours</label><input id="pcms-refresher-generator-active" type="number" min="1" max="8760">
+          <label for="pcms-refresher-generator-sleep">Minimum sleep hours</label><input id="pcms-refresher-generator-sleep" type="number" min="1" max="8760">
+          <button type="button" id="pcms-refresher-generator-save" disabled>Save next-cycle policy</button><button type="button" id="pcms-refresher-generator-pause" disabled>Pause generator</button>
+          <button type="button" id="pcms-refresher-demand" disabled>Prioritize next statistics read</button>
+        </section>
       </section>
       <section class="workspace" id="view-settings" data-view="settings" aria-labelledby="heading-settings" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 06</p><h1 id="heading-settings" tabindex="-1">Settings</h1><p>Configuration and safe diagnostics. Provider capabilities remain disabled.</p></div></header>
@@ -200,7 +232,7 @@
           <p id="pcms-backup-status" role="status" aria-live="polite">No new backup attempted. Browser completion and independent disk-byte verification are different evidence tiers.</p>
           <p class="reason">Tier 1: cryptographically verified in memory; tier 2: browser-reported completed download with existence and size; tier 3: independent on-disk file readback (not available here). Import/restore is a later phase.</p>
         </section>
-        <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">Remote effects off · local backup available</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Off — not implemented</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup / restore and AI tests</dt><dd>Manual encrypted backup available; restore, scheduled backups and AI tests OFF</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No provider settings or operation commands can be changed here. PersonaMonkey retains advanced security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
+        <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">Remote effects off · local backup available</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Canonical shadow scheduler available; provider observations gated, mutations OFF</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup / restore and AI tests</dt><dd>Manual encrypted backup available; restore, scheduled backups and AI tests OFF</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No provider settings or operation commands can be changed here. PersonaMonkey retains advanced security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
         <section class="panel" aria-labelledby="pcms-writeback-auto-heading">
           <div class="panel-head"><h2 id="pcms-writeback-auto-heading">I11 · Git-only automatic writeback</h2><span class="unknown">Opt-in, revision-fenced · effects HELD</span></div>
           <div class="account-controls"><label for="pcms-writeback-auto">Allow opt-in automatic Git writeback after verified final AI result</label><input id="pcms-writeback-auto" type="checkbox"><button id="pcms-writeback-save-auto" type="button" disabled>Save writeback preference</button></div>
@@ -246,5 +278,6 @@
   <script type="module" src="staging-view.mjs"></script>
   <script type="module" src="ai-view.mjs"></script>
   <script type="module" src="writeback-view.mjs"></script>
+  <script type="module" src="refresher-view.mjs"></script>
 </body>
 </html>

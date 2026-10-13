@@ -41,7 +41,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -76,7 +76,7 @@ attachPcmsGuard({
       name,routeId,allowDirect:false
     }));
   },
-  readIsolatedTab: async ({personaUid,cookieStoreId,routeId},{identityOnly=false,originalSlug=null}={}) => {
+  readIsolatedTab: async ({personaUid,cookieStoreId,routeId},{identityOnly=false,originalSlug=null,monitoringRequest=null}={}) => {
     // Donor-owned tab and protected-container selection. This is the SAME
     // combined-XPI browser authority, not a separate automation controller.
     const tabs=await browser.tabs.query({cookieStoreId});
@@ -88,7 +88,29 @@ attachPcmsGuard({
     if(!profile||profile.personaUid!==personaUid||profile.routeId!==routeId||
        routeId==='direct'||routeId==='block'||!current.routes?.[routeId]||current.routes[routeId].enabled===false)
       return {ok:false,code:'PERSONA_ROUTE_CHANGED'};
-    const results=await browser.scripting.executeScript({
+    let results;
+    if(monitoringRequest){
+      const identity=await browser.scripting.executeScript({
+        target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
+        func:perchanceReadIsolated,args:[{identityOnly:true}]
+      });
+      if(identity?.length!==1||identity[0].frameId!==0||identity[0].error||
+         !identity[0].result?.ok)return {ok:false,code:'MONITOR_SESSION_UNVERIFIED'};
+      results=await browser.scripting.executeScript({
+        target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
+        func:perchanceMonitorIsolated,args:[monitoringRequest]
+      });
+      const recheck=await browser.scripting.executeScript({
+        target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
+        func:perchanceReadIsolated,args:[{identityOnly:true}]
+      });
+      if(recheck?.length!==1||recheck[0].frameId!==0||recheck[0].error||
+         !recheck[0].result?.ok||recheck[0].result.principalFingerprint!==
+         identity[0].result.principalFingerprint)return {ok:false,code:'MONITOR_SESSION_CHANGED'};
+      if(results?.length===1&&results[0].result)
+        results[0].result={...results[0].result,
+          principalFingerprint:identity[0].result.principalFingerprint};
+    }else results=await browser.scripting.executeScript({
       target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
       func:perchanceReadIsolated,args:[{identityOnly,originalSlug}]
     });
@@ -342,7 +364,8 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'adoption-boundary.mjs',
     'staging-core.mjs','staging-store.mjs','staging-boundary.mjs',
     'perchance-stage.mjs','editor-strip.mjs','perchance-editor-probe.mjs','perchance-ai-native.mjs','perchance-ai-oracle.mjs','perchance-ai-opfs.mjs','perchance-ai-history.mjs','ai-supervisor.mjs','ai-testing.mjs','ai-evidence.mjs','ai-store.mjs','ai-boundary.mjs',
-    'git-writeback.mjs','writeback-store.mjs','writeback-boundary.mjs']) {
+    'git-writeback.mjs','writeback-store.mjs','writeback-boundary.mjs',
+    'refresher-core.mjs','refresher-store.mjs','refresher-boundary.mjs','perchance-monitor.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }
 }

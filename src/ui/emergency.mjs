@@ -9,13 +9,14 @@ async function inspect() {
   try {
     const key = 'pcmsI01WakeHealth';
     const restoreKey = 'pcmsRestoreInProgress';
-    const stored = await browser.storage.local.get([key, restoreKey]);
+    const stored = await browser.storage.local.get([key, restoreKey, 'pcmsI12Status']);
     snapshot = {
       wakeCount: stored[key]?.wakeCount,
       alarmCount: stored[key]?.alarmCount,
       lastWake: stored[key]?.lastWake,
       previousBoot: stored[key]?.priorBootSeen,
-      restoreActive: stored[restoreKey]?.active
+      restoreActive: stored[restoreKey]?.active,
+      refresher:stored.pcmsI12Status
     };
   } catch { /* report section unavailable */ }
   report = createSafeReport(snapshot);
