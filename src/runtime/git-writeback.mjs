@@ -62,7 +62,7 @@ function client(token,transport){
     finally{clearTimeout(timer);}
   };
 }
-async function readTree(api,commitSha){
+async function readTree(api,commitSha,folder){
   const commit=await api('GET','/git/commits/'+commitSha);
   if(!commit.ok||!SHA.test(commit.data?.tree?.sha||''))
     return fail('GIT_COMMIT_UNVERIFIED');
@@ -71,7 +71,9 @@ async function readTree(api,commitSha){
     tree.data.tree.length>30000)return fail('GIT_TREE_UNVERIFIED');
   const entries=new Map(),seen=new Set();
   for(const e of tree.data.tree){
-    if(!pathOK(e.path)||!SHA.test(e.sha||'')||
+    if((typeof e.path!=='string'||e.path.length>512||
+        (e.path===folder||e.path.startsWith(folder+'/'))&&!pathOK(e.path))||
+       !SHA.test(e.sha||'')||
        !['100644','040000'].includes(e.mode)||
        !['blob','tree'].includes(e.type)||
        (e.type==='blob'&&(e.mode!=='100644'||!Number.isSafeInteger(e.size)||
@@ -126,7 +128,7 @@ export async function inspectWriteback({token,folder,baseHead},transport=fetch){
   if(!ref.ok||ref.data.ref!=='refs/heads/main'||ref.data.object?.type!=='commit'||
      !SHA.test(ref.data.object.sha||''))return fail('GIT_MAIN_UNVERIFIED');
   const head=ref.data.object.sha;
-  const base=await readTree(api,baseHead),now=await readTree(api,head);
+  const base=await readTree(api,baseHead,folder),now=await readTree(api,head,folder);
   if(!base.ok||!now.ok)return fail('GIT_BASE_OR_HEAD_UNVERIFIED');
   const old=folderSet(base,folder),current=folderSet(now,folder);
   if(!equalFolder(old,current))return fail('GIT_RELEVANT_PATH_CONFLICT');
@@ -165,7 +167,7 @@ async function expectedBytes(source){
 // Independent remote bytes are required; the API's own SHA field or tree
 // metadata does not independently prove file bytes.
 async function verifyFiles(api,head,folder,expected,baseHead,commitSha=null){
-  const tree=await readTree(api,head);
+  const tree=await readTree(api,head,folder);
   if(!tree.ok)return tree;
   const scope=folderSet(tree,folder),wanted=new Map(expected.files.map(f=>[
     folder+'/'+f.path,f]));
