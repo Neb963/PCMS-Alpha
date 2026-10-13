@@ -84,7 +84,60 @@ export async function perchanceReadIsolated({identityOnly=false,originalSlug=nul
       const empty=Array.isArray(manifest)?manifest.length===0:
         manifest&&typeof manifest==='object'&&!Array.isArray(manifest)&&
         Object.keys(manifest).length===0;
-      if(!empty)return denied('ORIGINAL_ASSET_BYTES_UNVERIFIED');
+      const assets=[];
+      if(!empty){
+        if(!manifest||typeof manifest!=='object'||Array.isArray(manifest)||
+           Object.getPrototypeOf(manifest)!==Object.prototype ||
+           Object.keys(manifest).length>500)
+          return denied('ORIGINAL_ASSET_BYTES_UNVERIFIED');
+        const paths=Object.keys(manifest),seen=new Set();
+        let total=0;
+        for(const path of paths){
+          const parts=path.split('/');
+          const entry=manifest[path];
+          if(!path.startsWith('src/')||path.length>240||
+             path!==path.normalize('NFC')||
+             parts.some(part=>!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(part)||
+               part==='.'||part==='..'||part.endsWith('.'))||
+             seen.has(path.toLowerCase())||
+             !entry||typeof entry!=='object'||
+             typeof entry.key!=='string'||
+             !/^[0-9a-f]{32}\.[a-z0-9]{1,20}$/.test(entry.key)||
+             !Number.isSafeInteger(entry.size)||entry.size<0||
+             entry.size>12*1024*1024)
+            return denied('ORIGINAL_ASSET_BYTES_UNVERIFIED');
+          seen.add(path.toLowerCase());total+=entry.size;
+          if(total>16*1024*1024)return denied('ORIGINAL_ASSET_BYTES_UNVERIFIED');
+        }
+        for(const path of paths.sort()){
+          const entry=manifest[path],ctrl=new AbortController();
+          const timeout=setTimeout(()=>ctrl.abort(),12000);
+          try{
+            // Read-only fixed CDN URL from a strictly validated committed
+            // manifest key. A URL without byte evidence is never accepted.
+            const response=await fetch('https://user.uploads.dev/file/'+entry.key,{
+              method:'GET',credentials:'omit',cache:'no-store',
+              redirect:'error',signal:ctrl.signal});
+            if(response.status!==200||
+               (Number(response.headers.get('content-length')||'0')>entry.size))
+              return denied('ORIGINAL_ASSET_BYTES_UNVERIFIED');
+            const bytes=new Uint8Array(await response.arrayBuffer());
+            if(bytes.length!==entry.size||
+               bytes.length>12*1024*1024)
+              return denied('ORIGINAL_ASSET_BYTES_UNVERIFIED');
+            const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
+            const sha256=[...digest].map(v=>v.toString(16).padStart(2,'0')).join('');
+            let binary='';
+            for(let i=0;i<bytes.length;i+=8192)
+              binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+            assets.push({path,size:bytes.length,sha256,base64:btoa(binary)});
+          }catch{return denied('ORIGINAL_ASSET_BYTES_UNVERIFIED');}
+          finally{clearTimeout(timeout);}
+          if(localStorage.getItem('app-storage')!==raw ||
+             localStorage.getItem('sessionTokenLastChangeTime')!==startChange)
+            return denied('SESSION_CHANGED');
+        }
+      }
       if(localStorage.getItem('sessionTokenLastChangeTime')!==startChange ||
          localStorage.getItem('app-storage')!==raw ||
          location.origin!=='https://perchance.org')
@@ -92,7 +145,7 @@ export async function perchanceReadIsolated({identityOnly=false,originalSlug=nul
       return {ok:true,principalFingerprint,original:{
         remotePublicId:'public_'+page.generator.publicId,
         ownerResult:'IS_OWNER',visibility:listed[0].isPrivate?'UNLISTED':'PUBLIC',
-        pjs:page.generator.modelText,html:page.generator.outputTemplate,assets:[]
+        pjs:page.generator.modelText,html:page.generator.outputTemplate,assets
       }};
     }
     const generatorRecords=[],names=new Set();
