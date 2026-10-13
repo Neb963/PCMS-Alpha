@@ -13,7 +13,7 @@ export function validateAdoptionMessage(api,sender,msg){
   if(!msg||typeof msg!=='object'||Array.isArray(msg)||typeof json!=='string'||
      json.length>700||Object.keys(msg).some(k=>!['type','params'].includes(k)))
     return fail('INVALID_MESSAGE');
-  if(!['GET_ADOPTION','LIST_ADOPTIONS','CAPTURE_ADOPTION','ARCHIVE_LOCAL','ARCHIVE_GIT','RECHECK_GIT'].includes(msg.type))
+  if(!['GET_ADOPTION','LIST_ADOPTIONS','CAPTURE_ADOPTION','ARCHIVE_LOCAL','ARCHIVE_GIT','RECHECK_GIT','ABORT_GIT_PREPARED'].includes(msg.type))
     return fail('CAPABILITY_OFF');
   const p=msg.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
@@ -24,7 +24,7 @@ export function validateAdoptionMessage(api,sender,msg){
     ['slug','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k))||
      (msg.type!=='LIST_ADOPTIONS'&&!slug(p.slug)))return fail('INVALID_PARAMS');
-  if(['ARCHIVE_LOCAL','CAPTURE_ADOPTION','ARCHIVE_GIT','RECHECK_GIT'].includes(msg.type)&&
+  if(['ARCHIVE_LOCAL','CAPTURE_ADOPTION','ARCHIVE_GIT','RECHECK_GIT','ABORT_GIT_PREPARED'].includes(msg.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
     return fail('INVALID_PARAMS');
   if(['ARCHIVE_GIT','RECHECK_GIT'].includes(msg.type)&&
@@ -67,6 +67,11 @@ export function createAdoptionBoundary(api,{
       if(msg.type==='GET_ADOPTION')return await store.get(p.slug);
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(msg.type==='ARCHIVE_LOCAL')return await store.archiveLocal(p.slug,p.expectedRevision);
+      if(msg.type==='ABORT_GIT_PREPARED'){
+        const cancelled=await store.archiveStage(p.slug,p.expectedRevision,'ABORT_PREPARED');
+        return cancelled.ok?{ok:true,slug:p.slug,archive:'ARCHIVE_PENDING',
+          providerWrites:'OFF'}:cancelled;
+      }
 
       if(['ARCHIVE_GIT','RECHECK_GIT'].includes(msg.type)){
         const saved=await store.getFull(p.slug);
