@@ -201,6 +201,49 @@ export function createStagingBoundary(api,{
           .finally(()=>{busy=false;});
       });
     });
+
+    // The editor strip is a content script in one EXACT PCMS-tagged tab.
+    // Web page JS cannot request privileged handoff by forging a port sender.
+    api.runtime.onConnect.addListener(port=>{
+      if(port?.name!=='pcms-i09-editor-handoff')return;
+      const sender=port.sender,tab=sender?.tab;
+      const tabURL=typeof sender?.url==='string'?sender.url:'';
+      let busy=false;
+      port.onMessage.addListener(msg=>{
+        if(busy){try{port.postMessage(fail('BUSY'));}catch{}return;}
+        busy=true;
+        Promise.resolve().then(async()=>{
+          if(sender?.id!==api.runtime.id||!Number.isSafeInteger(tab?.id)||
+             typeof msg?.slug!=='string'||!SLUG.test(msg.slug)||
+             typeof msg.nonce!=='string'||!/^[a-f0-9]{32}$/.test(msg.nonce)||
+             tabURL!=='https://perchance.org/'+msg.slug+'#edit'||
+             Object.keys(msg).some(k=>!['slug','nonce'].includes(k)))
+            return fail('UNTRUSTED_EDITOR');
+          const tag=await api.sessions?.getTabValue(tab.id,'pcmsI09Owned');
+          const actual=await api.tabs.get(tab.id);
+          if(tag?.nonce!==msg.nonce||tag.slug!==msg.slug||
+             tag.createdBy!=='PCMS_I09'||actual?.cookieStoreId!==tag.cookieStoreId||
+             actual?.url!==tabURL)return fail('TAB_OWNER_UNKNOWN');
+          const db=await database(),store=storeFactory(db),saved=await store.getFull(msg.slug);
+          if(!saved.ok)return saved;
+          const record=saved.record;
+          if(record.nonce!==msg.nonce||record.personaUid!==tag.personaUid||
+             record.state==='HUMAN_OWNED')return fail('HANDOFF_CONTEXT_CHANGED');
+          if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+          // Durable intent precedes untag. If interrupted, tab must survive
+          // and no auto retry of a dirty/ambiguous editor may occur.
+          const next=await store.move(msg.slug,record.revision,
+            'HANDOFF_REQUESTED',{reason:'HUMAN_TAKEOVER'});
+          if(!next.ok)return next;
+          const release=await guard()?.releaseStagingTab?.(record.personaUid,msg.slug,msg.nonce);
+          if(release?.ok!==true)return fail('HANDOFF_RELEASE_UNVERIFIED');
+          return store.move(msg.slug,next.revision,'HUMAN_OWNED');
+        }).then(v=>{try{port.postMessage(v);}catch{}})
+          .catch(()=>{try{port.postMessage(fail('HANDOFF_UNVERIFIED'));}catch{}})
+          .finally(()=>{busy=false;});
+      });
+    });
+
     // Never repeat dispatch after restart. HOLD possible effect; keep tabs.
     Promise.resolve().then(async()=>{
       if(!(await sentinel.inspect()).held)
