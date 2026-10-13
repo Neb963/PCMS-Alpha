@@ -52,7 +52,9 @@ function readRow(db,slug){
 }
 export function createAdoptionBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,storeFactory=createAdoptionStore,
-  gitWrite=writeArchive,gitRead=inspectArchive
+  gitWrite=writeArchive,gitRead=inspectArchive,
+  // Packaged Git mutation activation remains HELD pending separate operator proof.
+  gitGate=()=>false
 }={}){
   let dbPromise;
   const db=()=>dbPromise ||=open();
@@ -98,15 +100,28 @@ export function createAdoptionBoundary(api,{
         }
         if(rec.archiveState!=='ARCHIVE_PENDING')
           return fail('ARCHIVE_RECONCILIATION_REQUIRED');
+        if(gitGate({slug:p.slug,record:rec})!==true)
+          return fail('GIT_WRITE_ACTIVATION_HELD');
         let at=await store.archiveStage(p.slug,rec.revision,'PREPARE');
         if(!at.ok)return at;
         const route2=await g.getSafeRouteReadiness(rec.personaUid);
         if(!route2?.ready||route2.cookieStoreId!==route.cookieStoreId||
            route2.routeId!==route.routeId||(await sentinel.inspect()).held)
           return fail('GIT_PREPARED_HELD');
+        if(gitGate({slug:p.slug,record:at.record})!==true)
+          return fail('GIT_PREPARED_HELD');
         at=await store.archiveStage(p.slug,at.record.revision,'MARK_DISPATCH');
         if(!at.ok)return at;
         // DISPATCH_POSSIBLE committed before the first Git API write.
+        // A late hold here is UNCERTAIN, never a safe unjournaled restart.
+        const finalRoute=await g.getSafeRouteReadiness(rec.personaUid);
+        if(gitGate({slug:p.slug,record:at.record})!==true||
+           !finalRoute?.ready||finalRoute.cookieStoreId!==route.cookieStoreId||
+           finalRoute.routeId!==route.routeId||
+           (await sentinel.inspect()).held){
+          await store.archiveStage(p.slug,at.record.revision,'HELD_UNCERTAIN');
+          return fail('GIT_DISPATCH_HELD_UNCERTAIN');
+        }
         let result;
         try{result=await gitWrite({...params,folder:at.record.archiveFolder});}
         catch{result=fail('GIT_WRITE_UNCERTAIN');}
