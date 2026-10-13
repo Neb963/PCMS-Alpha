@@ -83,6 +83,7 @@ export async function perchanceAiNative(request){
       editorClean:model.isClean?.()===true&&html.isClean?.()===true&&
         (await src.isDirty?.())===false,
       collaboration:'ABSENT_AT_OBSERVATION'};
+    if(!soloCollaboration())return hold('COLLABORATION_CHANGED_DURING_OBSERVATION');
     if(action==='OBSERVE')return current;
     if(action!=='STOP'&&(current.hasQueue||current.inputOccupied||
        current.attachmentsPending||busy))
