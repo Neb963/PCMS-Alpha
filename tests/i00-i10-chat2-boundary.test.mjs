@@ -6,7 +6,8 @@ const H='a'.repeat(64);
 const api={runtime:{id:'fixture-extension',getURL:p=>'moz-extension://fixture/'+p},
   storage:{local:{get:async()=>({})}}};
 const sender={id:'fixture-extension',url:'moz-extension://fixture/pcms/index.html#work-queue'};
-function start({workspace=true,worker=true,history=true,gated=true,stageChanged=false,routeChanged=false}={}){
+function start({workspace=true,worker=true,history=true,gated=true,stageChanged=false,routeChanged=false,
+  staleS1Lock=false}={}){
  const stage={slug,nonce,revision:6,state:'SOURCE_VERIFIED',personaUid:'persona',
    remotePublicId:'remote'};
  const job={slug,revision:12,stageRevision:6,
@@ -30,7 +31,8 @@ function start({workspace=true,worker=true,history=true,gated=true,stageChanged=
        attachmentsPending:false};
      if(req.action==='OBSERVE_OPFS')return {ok:true,sessionDigest:sid,
        isolation:'UNVERIFIED',workspaceRootState:workspace?'PRESENT_UNTRUSTED':'ABSENT',
-       workerNamespace:worker?'CURRENT_SESSION_WORKER_INIT_LOCK':'UNVERIFIED'};
+       workerNamespace:staleS1Lock?'STALE_PREVIOUS_SESSION_LOCK':
+         worker?'CURRENT_SESSION_WORKER_INIT_LOCK':'UNVERIFIED'};
      if(req.action==='OBSERVE_HISTORY')return history?
        {ok:true,code:'AI_SERVER_HISTORY_FIRST_PROMPT_OBSERVED',
          sessionDigest:sid,serverHistory:'FIRST_USER_IS_T1'}:
@@ -62,6 +64,7 @@ test('P52-06 X missing activation, OPFS, server history, stage or route cannot m
    [{gated:false},'AI_SERVER_HISTORY_ACTIVATION_HELD',[]],
    [{workspace:false},'AI_CHAT2_WORKSPACE_UNVERIFIED',['OBSERVE','OBSERVE_OPFS']],
    [{worker:false},'AI_CHAT2_WORKER_UNVERIFIED',['OBSERVE','OBSERVE_OPFS']],
+   [{staleS1Lock:true},'AI_CHAT2_PREVIOUS_WORKER_LOCK_RELOAD_REQUIRED',['OBSERVE','OBSERVE_OPFS']],
    [{history:false},'AI_HISTORY_PREVIOUS_CONVERSATION_OR_PROMPT',[
       'OBSERVE','OBSERVE_OPFS','OBSERVE_HISTORY']],
    [{stageChanged:true},'AI_CHAT2_CONTEXT_CHANGED_DURING_HISTORY',[
