@@ -1583,8 +1583,24 @@ def main():
                 # I11 B: exact installed-XPI UI controls and real IDB canonical
                 # writeback CAS. No real Git or provider effect is attempted.
                 call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
-                ui=execute(after,"return {preview:!!document.getElementById('pcms-writeback-preview'),prepare:!!document.getElementById('pcms-writeback-prepare'),commit:!!document.getElementById('pcms-writeback-commit'),reconcile:!!document.getElementById('pcms-writeback-reconcile'),status:!!document.getElementById('pcms-writeback-status')}")
-                assert ui=={'preview':True,'prepare':True,'commit':True,'reconcile':True,'status':True},ui
+                ui=execute(after,"return {preview:!!document.getElementById('pcms-writeback-preview'),prepare:!!document.getElementById('pcms-writeback-prepare'),commit:!!document.getElementById('pcms-writeback-commit'),reconcile:!!document.getElementById('pcms-writeback-reconcile'),status:!!document.getElementById('pcms-writeback-status'),arm:!!document.getElementById('pcms-writeback-arm-auto'),disarm:!!document.getElementById('pcms-writeback-disarm-auto')}")
+                assert ui=={'preview':True,'prepare':True,'commit':True,'reconcile':True,'status':True,'arm':True,'disarm':True},ui
+                # Actual installed-XPI button clicks must produce visible
+                # responses rather than only existing in the DOM.
+                execute(after,"const el=document.getElementById('pcms-writeback-slug');el.value='missing-private';el.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('pcms-writeback-preview').click();return true")
+                preview_result=''
+                for _ in range(60):
+                    preview_result=execute(after,"return document.getElementById('pcms-writeback-status').textContent")
+                    if 'TESTED_FINAL_SOURCE_REQUIRED' in preview_result: break
+                    time.sleep(.1)
+                assert 'TESTED_FINAL_SOURCE_REQUIRED' in preview_result,preview_result
+                execute(after,"document.getElementById('pcms-writeback-disarm-auto').click();return true")
+                disarm_result=''
+                for _ in range(60):
+                    disarm_result=execute(after,"return document.getElementById('pcms-writeback-status').textContent")
+                    if 'AUTO_CREDENTIAL_DISARMED' in disarm_result: break
+                    time.sleep(.1)
+                assert 'AUTO_CREDENTIAL_DISARMED' in disarm_result,disarm_result
                 code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const db=await (await import('./journal.mjs')).openCanonicalDatabase();
