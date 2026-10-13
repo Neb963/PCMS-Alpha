@@ -58,7 +58,7 @@ export function validateAiMessage(api,sender,message){
 export function createAiBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,
   storeFactory=createAiStore,stageFactory=createStagingStore,
-  inspect=inspectGitSource,effectGate=()=>false
+  inspect=inspectGitSource,effectGate=()=>false,clock=Date.now
 }={}){
   let databasePromise,tickBusy=false;
   const database=()=>databasePromise ||=open();
@@ -399,16 +399,37 @@ export function createAiBoundary(api,{
         if(!exact.ok)return fail('AI_SCHEDULER_JOB_UNKNOWN');
         all.push(exact.job);
       }
+      const now=clock();
+      if(!Number.isSafeInteger(now)||now<1)
+        return fail('AI_SCHEDULER_CLOCK_UNVERIFIED');
       all.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)||
         a.slug.localeCompare(b.slug,'en'));
       for(const job of all){
+        // Deferred jobs are *not eligible* until their bounded independent
+        // recheck window; a dead protected route must not starve a different
+        // healthy account every wake. Durable across event-page suspension.
+        if((job.schedulerDeferredUntil||0)>now)continue;
         const next=planAiStep(job,{oracleNames:AI_BROWSER_ASSERTIONS});
         if(!next.ok)continue;
-        // Each test assertion, native effect and reconciliation is bounded
-        // by the same guarded command code as explicit operator UI actions.
-        return executeTrusted({type:'ADVANCE_JOB',params:{
+        // One attempted guarded step per wake, never simultaneous provider
+        // operations or a retry of DISPATCH_POSSIBLE.
+        const outcome=await executeTrusted({type:'ADVANCE_JOB',params:{
           slug:job.slug,expectedRevision:job.revision
         }});
+        if(outcome?.ok===false){
+          // The operation may have advanced the journal before failing.
+          // Re-read revision, never overwriting a concurrent human edit.
+          const current=await store.getJobFull(job.slug);
+          if(current?.ok){
+            const code='AI_WAKE_'+String(outcome.code||'UNKNOWN')
+              .replace(/[^A-Z0-9_]/g,'_').slice(0,55);
+            const deferred=await store.deferScheduler(
+              job.slug,current.job.revision,now+120000,code);
+            if(!deferred?.ok&&deferred?.code!=='STALE_REVISION')
+              return fail('AI_SCHEDULER_DEFER_UNVERIFIED');
+          }
+        }
+        return outcome;
       }
       return {ok:true,code:'AI_NO_ELIGIBLE_WORK'};
     }catch{return fail('AI_TICK_UNVERIFIED');}
