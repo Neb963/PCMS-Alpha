@@ -119,6 +119,11 @@ export function createWritebackStore(db){
                 accountId:stage.accountId,personaUid:stage.personaUid,
                 principalFingerprint:stage.principalFingerprint,
                 remotePublicId:stage.remotePublicId,
+                // Persist immutable tested F in the SAME transaction as the
+                // intent. An AI job may later change or disappear while a
+                // Git acknowledgement remains unknown. Recovery compares
+                // this snapshot, never whatever F happens to be current.
+                sealedSource:structuredClone(currentJob.finalSource),
                 commitSha:null,reason:null,attribution:'UNVERIFIED',changedAt:Date.now()};
               m.add({key:key(name),record:r});
               t.objectStore('events').add({stage:'GIT_WRITEBACK_PREPARED',
