@@ -17,7 +17,7 @@ export async function cachedHealthDomain(evidence){
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
-  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep }) {
+  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep, releaseIsolatedTab }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -249,6 +249,26 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     finally{await releaseConflictGuard(leased);}
   }
 
+  // I13 effectful listing flip is a fixed donor-leased path. The caller must
+  // commit DISPATCH_POSSIBLE before admission; protected route loss is held.
+  async function runReleaseStep(personaUid,request){
+    if(typeof releaseIsolatedTab!=='function')
+      return {ok:false,code:'RELEASE_EXECUTOR_UNAVAILABLE'};
+    const leased=await acquireConflictGuard(personaUid);
+    if(!leased?.ready||!leased.leaseId)
+      return {ok:false,code:leased?.code||'PROTECTED_ROUTE_UNVERIFIED'};
+    try{
+      if(!(await inspectOwnedAction(leased)).ready)
+        return {ok:false,code:'RELEASE_LEASE_INVALID'};
+      const result=await releaseIsolatedTab(leased,request);
+      if(!(await inspectOwnedAction(leased)).ready)
+        return {ok:false,code:'RELEASE_POST_EFFECT_GUARD_CHANGED'};
+      return result&&typeof result==='object'?result:
+        {ok:false,code:'RELEASE_OUTCOME_UNKNOWN'};
+    }catch{return {ok:false,code:'RELEASE_OUTCOME_UNKNOWN'};}
+    finally{await releaseConflictGuard(leased);}
+  }
+
   async function releaseStagingTab(personaUid,slug,nonce) {
     if(typeof handoffStagingTab!=='function')return {ok:false,code:'HANDOFF_UNAVAILABLE'};
     // Release a HUMAN handoff regardless of stale protected route, but only
@@ -263,6 +283,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     runSupplyStep,
     runStageStep,
     runNativeAiStep,
+    runReleaseStep,
     inspectStageEditor,
     releaseStagingTab,
     listAvailablePersonas,
