@@ -25,7 +25,12 @@ export async function perchanceAiHistoryProbe(request){
        typeof src.getDraftChatRoutingKey!=='function'||
        document.getElementById('pcms-alpha-editor-context')?.dataset?.pcmsHumanIntent==='true')
       return hold('AI_HISTORY_EDITOR_UNVERIFIED');
+    const initialRoom=window.yjsProvider,initialDoc=window.yDoc,
+      initialGeneration=window.__collabGeneration;
     const solo=()=>{
+      if(window.yjsProvider!==initialRoom||
+         window.yDoc!==initialDoc||
+         window.__collabGeneration!==initialGeneration)return false;
       if(window.editorCollabInitialSyncIsPending!==false||
          window.__collabRoomFailed===true||
          window.collabEditKeyIsIncorrect===true)return false;
