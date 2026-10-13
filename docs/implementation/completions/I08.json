@@ -1,0 +1,44 @@
+{
+  "phaseId": "I08",
+  "planRevision": "S7-AUDITED-DESIGN-1",
+  "proposedDisposition": "SCOPED_F_B_IMPLEMENTATION_COMPLETE_IF_PROVEN_ON_PROTECTED_MAIN",
+  "claim": "Explicit Settings-only manual encrypted integrated single-file backup of the canonical PCMS IndexedDB records/source bytes and independently encrypted PersonaMonkey supported full portable data. Password required for both independent authenticated seals even when donor considers its own payload nonsensitive. Snapshot takes short multi-store readonly transaction with double-read equality checks of local, donor, cookies and GM/history; overlapping exports serialized with durable local receipts and fail-closed unresolved download states. Actual Firefox Downloads id/onChanged/search/existence/size verified as tier 2; tier 3 on-disk byte proof not claimed. Excluded native WireGuard configuration, unsaved editor/provider state. No import/restore, automatic retention, scheduled backup or provider writes.",
+  "requiredAssertions": [
+    "P55-01",
+    "P55-02",
+    "P55-05",
+    "S6-I08-PORTABLE-DECRYPT",
+    "REQ-X01",
+    "UX-08"
+  ],
+  "evidenceTierNotes": {
+    "F": "tests/i00-i08-backup.test.mjs: real donor portable format, empty-donor encrypted outer, wrong passphrase/tamper/header/duplicate/missing store/unsupported structured clone, source/binary roundtrip, 1000 record size, pre/post cut divergence, missing/renamed/interrupted/size mismatched Downloads metadata and lost event. CI tests must run on exact current merge candidate.",
+    "B": "scripts/browser-i00-smoke.py in real installed combined Firefox Developer Edition XPI: persistent canonical IndexedDB synthetic F/B account/inventory/adoption source, donor portable full format, in-browser authenticated double-decrypt and wrong-passphrase rejection, real Settings action and Firefox Downloads browser-reported tier 2 with on-disk readback expressly unavailable. Independent Firefox current candidate and postmerge CI required.",
+    "X": "No independent live-provider or filesystem adversarial proof; independent synthetic F negative oracles do not upgrade to X.",
+    "H": "NOT RUN. Operator passphrase management, user-profile portable disaster restore and any direct filesystem byte re-import belong to separately authorized later acceptance, not manual I08 F/B implementation requirement."
+  },
+  "capabilities": {
+    "manualIntegratedBackup": "ON_OPERATOR_ACTION_NO_AUTOMATION",
+    "encryptedOuter": "ALWAYS_PBKDF2_SHA256_AES256_GCM",
+    "donorPortableSection": "SEPARATELY_ENCRYPTED_BY_PINNED_DONOR",
+    "canonicalSourceBinary": "PRESERVED_WITH_BOUNDED_CODEC",
+    "logicalSnapshot": "REQUIRED_CONSISTENT_DOUBLE_READ_OR_HOLD",
+    "localRetentionReceipts": "REVISION_FENCED_NO_SUCCESS_ON_DOWNLOAD_START",
+    "downloadEvidence": "TIER_1_MEMORY_AND_TIER_2_BROWSER_REPORT_ONLY",
+    "independentDiskBytes": "TIER_3_NOT_AVAILABLE_NOT_CLAIMED",
+    "providerWrites": "OFF",
+    "autoBackupVault": "OFF_LATER_PHASE",
+    "automaticRetention": "OFF_LATER_PHASE",
+    "restoreApply": "OFF_LATER_PHASE",
+    "donorRouteControl": "UNCHANGED",
+    "liveProviderAcceptance": "NOT_CLAIMED"
+  },
+  "holds": [
+    "Any donor/PCMS/cookie/GM revision drift, missing required store, unsupported clone, failed donor portable serialization or bounded-size violation cancels export without plaintext fallback or success receipt.",
+    "A lost download callback, incomplete Firefox history, file-size mismatch or external move leaves tier 1/unknown, never a recoverable-file success claim; no Tier 3 independent filesystem readback.",
+    "Only operator-provided passphrase lives temporarily in memory; no key storage, native vault assumption, restore authority or provider effect.",
+    "Snapshot does not claim browser/IndexedDB/provider-wide physical atomicity and does not create a new controller or security bypass.",
+    "No live Perchance/Mullvad/Cloudflare or private Git writes were executed; no donor/CI trust root mutation."
+  ],
+  "provenance": "This is an in-PR completion proposal; contains no branch SHA, CI run, artifact SHA, future merge SHA or self-referential main SHA. Protected squash and actual postmerge B/F evidence govern acceptance."
+}

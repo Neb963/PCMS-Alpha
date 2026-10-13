@@ -893,6 +893,75 @@ def main():
                     'operationId':'fixture_operation_01'})
                 assert uncertain.get('state')=='HELD_UNCERTAIN',uncertain
                 print('B I02_UI_IGNORE_DOES_NOT_RELEASE_OPERATION=PASS',flush=True)
+                # I08 B: real packaged Firefox crypto, canonical IDB, donor
+                # portable format, Settings action, and wrong-password failure.
+                # No live provider or native calls; no disk byte proof claimed.
+                call('POST',f'/session/{after}/url',{'url':url+'#settings'})
+                settings=execute(after,"return {button:!!document.getElementById('pcms-backup-export'),password:!!document.getElementById('pcms-backup-passphrase'),status:!!document.getElementById('pcms-backup-status')}")
+                assert settings=={'button':True,'password':True,'status':True},settings
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const core=await import('./backup-core.mjs');
+                  const donor=await import('../lib/backup-package.js');
+                  const journal=await import('./journal.mjs');
+                  const password='real-packaged-firefox-fixture-passphrase';
+                  const db=await journal.openCanonicalDatabase();
+                  const original=await core.snapshotCanonical(db);
+                  db.close();
+                  const payload=donor.createPortableBackupPayload({
+                    state:{},containers:[],selection:{kind:'full'}
+                  });
+                  const inner=await donor.encodeBackupEnvelope({payload,password});
+                  const archived=await core.encodeIntegrated({
+                    pcms:original,donorEnvelope:inner,passphrase:password
+                  });
+                  const decoded=await core.decodeIntegrated(archived.text,password,{
+                    decodeDonor:donor.decodeBackupEnvelope
+                  });
+                  const encryptedOnly=!archived.text.includes('fixture_operation_01')&&
+                    !archived.text.includes('fixture_account_a01');
+                  let wrongPasswordHeld=false;
+                  try{await core.decodeIntegrated(archived.text,'wrong-password',{
+                    decodeDonor:donor.decodeBackupEnvelope});}
+                  catch{wrongPasswordHeld=true;}
+                  const storePresent=original.stores.operations.some(
+                    row=>row.value.operationId==='fixture_operation_01');
+                  done({ok:encryptedOnly&&wrongPasswordHeld&&storePresent&&
+                    JSON.stringify(decoded.pcms)===JSON.stringify(original),
+                    encryptedOnly,wrongPasswordHeld,storePresent,
+                    rows:decoded.pcms.stores.operations.length,hash:archived.sha256});
+                })().catch(e=>done({error:String(e)}));"""
+                proof=call('POST',f'/session/{after}/execute/async',
+                           {'script':code,'args':[]},timeout=90)
+                assert proof.get('ok') is True,proof
+                assert re.fullmatch('[a-f0-9]{64}',proof.get('hash','')),proof
+                print('B I08_PACKAGED_FIREFOX_ENCRYPTED_IDB_DONOR_ROUNDTRIP=PASS',flush=True)
+
+                # Exercise the actual operator UI and Firefox Downloads API in
+                # this disposable profile. This is not a production on-disk
+                # byte re-read, and must never be called tier 3.
+                bad_password=execute(after,"document.getElementById('pcms-backup-passphrase').value='short';document.getElementById('pcms-backup-export').click();return document.getElementById('pcms-backup-status').textContent")
+                assert '12 characters' in bad_password,bad_password
+                execute(after,"document.getElementById('pcms-backup-passphrase').value='real-packaged-firefox-fixture-passphrase';document.getElementById('pcms-backup-export').click();return true")
+                backup_status=''
+                for _ in range(120):
+                    backup_status=execute(after,"return document.getElementById('pcms-backup-status')?.textContent||''")
+                    if 'Browser reported complete (tier 2)' in backup_status or (
+                        'Backup not confirmed:' in backup_status) or (
+                        'browser download not confirmed:' in backup_status):
+                        break
+                    time.sleep(.25)
+                assert 'Browser reported complete (tier 2)' in backup_status,backup_status
+                assert 'Exact on-disk bytes have NOT been independently re-read' in backup_status,backup_status
+                receipt=execute(after,"return document.getElementById('pcms-overview-backup')?.textContent||''")
+                # Receipt projection is refreshed asynchronously after export.
+                for _ in range(30):
+                    receipt=execute(after,"return document.getElementById('pcms-overview-backup')?.textContent||''")
+                    if 'BROWSER_REPORTED_COMPLETE' in receipt: break
+                    time.sleep(.2)
+                assert 'BROWSER_REPORTED_COMPLETE' in receipt,receipt
+                print('B I08_MANUAL_UI_FIREFOX_DOWNLOAD_TIER2=PASS',flush=True)
+
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
             finally: close(after)
         finally:
