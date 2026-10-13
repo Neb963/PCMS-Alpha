@@ -142,6 +142,9 @@ export function createAiStore(db){
         if(prior.job.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
         const result=applyAiEvidence(prior.job,evidence);
         if(!result.ok){done(result);return;}
+        if(result.job.native?.state==='CHAT2_OBSERVED_IDLE'&&
+           result.job.chat2?.state!=='FRESH_VERIFIED')
+          result.job.hold='AI_CHAT2_ISOLATION_UNVERIFIED';
         // A truthful PASS does not itself prove native helper quiescence.
         // The same exact saved F and a separately observed idle session do.
         // Any newly observed FAIL, changed source or revoked evidence must
@@ -249,7 +252,8 @@ export function createAiStore(db){
         }
         const next={...j,revision:j.revision+1,
           native:{...j.native,state,sessionDigest:digest,observedAt:Date.now()},
-          state:'TESTS_UNVERIFIED',hold:'INDEPENDENT_BROWSER_TESTS_REQUIRED'};
+          state:'TESTS_UNVERIFIED',hold:step==='CHAT2_SEND'||step==='CHAT2_REPAIR'?
+            'AI_CHAT2_ISOLATION_UNVERIFIED':'INDEPENDENT_BROWSER_TESTS_REQUIRED'};
         // Native session evidence is distinguished from proof of user-facing
         // test assertions: no success here comes from text or busy=false.
         if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR'].includes(step)){
@@ -294,7 +298,9 @@ export function createAiStore(db){
             files:structuredClone(snapshot.files),blobs:structuredClone(snapshot.blobs),
             totalBytes:snapshot.totalBytes},
           verifiedFinal:changed?null:j.verifiedFinal,
-          hold:changed?'INDEPENDENT_BROWSER_TESTS_REQUIRED':j.hold,
+          hold:j.native?.state==='CHAT2_OBSERVED_IDLE'&&j.chat2?.state!=='FRESH_VERIFIED'?
+            'AI_CHAT2_ISOLATION_UNVERIFIED':
+            changed?'INDEPENDENT_BROWSER_TESTS_REQUIRED':j.hold,
           state:changed?'TESTS_UNVERIFIED':j.state};
         if(changed){
           next.chat1={...next.chat1,tests:{}};
