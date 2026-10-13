@@ -10,6 +10,7 @@ const slug=id('pcms-ai-slug'),token=id('pcms-ai-git-token'),prepare=id('pcms-ai-
 const refresh=id('pcms-ai-refresh'),jobStatus=id('pcms-ai-jobs-status'),jobList=id('pcms-ai-job-list');
 const runNative=id('pcms-ai-run'),observeNative=id('pcms-ai-observe'),
   advanceNative=id('pcms-ai-advance'),opfsNative=id('pcms-ai-opfs'),
+  freshNative=id('pcms-ai-fresh'),
   testNative=id('pcms-ai-test'),repairNative=id('pcms-ai-repair'),
   resetNative=id('pcms-ai-newchat'),chat2Native=id('pcms-ai-chat2');
 let current=null,concurrency=null,busy=false,queueSeq=0,selectedJob=null;
@@ -37,6 +38,9 @@ function controls(){
   const selected=selectedJob?.ok===true;
   runNative.disabled=busy||!selected||selectedJob.state!=='PENDING_NATIVE_SESSION';
   opfsNative.disabled=busy||!selected||selectedJob.nativeState!=='CHAT2_OBSERVED_IDLE'||
+    selectedJob.chat2IsolationVerified===true;
+  freshNative.disabled=busy||!selected||
+    selectedJob.nativeState!=='CHAT2_OBSERVED_IDLE'||
     selectedJob.chat2IsolationVerified===true;
   advanceNative.disabled=busy||!selected||selectedJob.slotReleased===true||
     ['TESTS_VERIFIED','HELD_NO_PROGRESS','HUMAN_OWNED'].includes(selectedJob.state);
@@ -164,6 +168,8 @@ async function nativeCommand(type,step){
     'Observing native session without retry and checking saved source bytes…':
     type==='INSPECT_WORKSPACE'?
     'Inspecting local OPFS read-only; server termination and workspace isolation remain unverified…':
+    type==='VERIFY_FRESH_CHAT2'?
+    'Read-only server-history check requires separate provider activation; no conversation text or session key is exported…':
     type==='RUN_TESTS'?
     'Running an independently observed browser assertion on exact saved source…':
     'Checking guarded native effect capability; no dispatch without authorization…';
@@ -189,6 +195,7 @@ advanceNative.addEventListener('click',()=>nativeCommand('ADVANCE_JOB'));
 runNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT1_SEND'));
 observeNative.addEventListener('click',()=>nativeCommand('PROBE_NATIVE'));
 opfsNative.addEventListener('click',()=>nativeCommand('INSPECT_WORKSPACE'));
+freshNative.addEventListener('click',()=>nativeCommand('VERIFY_FRESH_CHAT2'));
 testNative.addEventListener('click',()=>nativeCommand('RUN_TESTS'));
 repairNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE',
   selectedJob?.nativeState==='CHAT2_OBSERVED_IDLE'?'CHAT2_REPAIR':'CHAT1_REPAIR'));
