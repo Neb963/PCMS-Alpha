@@ -90,14 +90,15 @@ export function applyAiEvidence(job,entry){
   const chat=entry.chat===1?j.chat1:entry.chat===2?j.chat2:null;
   if(!chat)return fail('CHAT_NOT_APPLICABLE');
   if(entry.type==='SESSION'){
+    // A caller-provided boolean can never attest to native server/session
+    // termination or OPFS tools-worker isolation. The production store
+    // retains Chat2 as FRESH_OBSERVED until an independently trusted
+    // isolation observer exists; synthetic evidence cannot mint that state.
+    if(entry.chat===2)return fail('AI_CHAT2_ISOLATION_UNVERIFIED');
     if(chat.sessionDigest||chat.state!=='PENDING'||!HEX.test(entry.sessionDigest||''))
       return fail('SESSION_ALREADY_STARTED');
-    if(entry.chat===2&&(evaluation(j).chat1Pass!==true||
-       entry.freshProof!==true||entry.resetObserved!==true||
-       entry.sessionDigest===j.chat1.sessionDigest))
-      return fail('FRESH_CHAT_UNVERIFIED');
     chat.sessionDigest=entry.sessionDigest;
-    chat.state=entry.chat===2?'FRESH_VERIFIED':'RUNNING';
+    chat.state='RUNNING';
   }else if(entry.type==='SAVED_READBACK'){
     if(!chat.sessionDigest||!HEX.test(entry.sourceFingerprint||'')||
        entry.independentSource!=='GUARDED_NATIVE_FULL_SOURCE'||
