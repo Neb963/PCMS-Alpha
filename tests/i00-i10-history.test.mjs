@@ -4,7 +4,7 @@ import {perchanceAiHistoryProbe} from '../src/runtime/perchance-ai-history.mjs';
 const slug='private-owned',nonce='d'.repeat(32),sid='opaque-server-session-12345678';
 const prompt='Pinned TESTING.md first message';
 function fixture({entries=[{k:'user',t:prompt},{k:'md',t:'assistant'}],
-  owner=true,collab='solo',wrongSid=false,badServer=false}={}){
+  owner=true,collab='solo',wrongSid=false,rebind=false,badServer=false}={}){
   const before={location:globalThis.location,window:globalThis.window,
     document:globalThis.document,fetch:globalThis.fetch};
   const seen=[];let token='1234.X_routing';
@@ -26,6 +26,8 @@ function fixture({entries=[{k:'user',t:prompt},{k:'md',t:'assistant'}],
     seen.push({method:opts.method,body:JSON.parse(opts.body),
       endpoint:new URL(url).pathname,credentials:opts.credentials});
     if(wrongSid)token='1234.another';
+    if(rebind)globalThis.window.__collabGeneration=
+      (globalThis.window.__collabGeneration||0)+1;
     return {ok:!badServer,headers:{get:()=>null},
       text:async()=>JSON.stringify({ok:true,entries})};
   };
@@ -56,6 +58,7 @@ test('P52-06 X inherited conversation, changed SID, changed routing and untruste
   [{entries:[{k:'md',t:'old assistant'},{k:'user',t:prompt}]},'AI_HISTORY_PREVIOUS_CONVERSATION_OR_PROMPT'],
   [{entries:[{k:'user',t:'wrong message'}]},'AI_HISTORY_PREVIOUS_CONVERSATION_OR_PROMPT'],
   [{wrongSid:true},'AI_HISTORY_SESSION_CHANGED'],
+  [{rebind:true},'AI_HISTORY_SESSION_CHANGED'],
   [{owner:false},'AI_HISTORY_EDITOR_UNVERIFIED'],
   [{collab:'peer'},'AI_HISTORY_COLLABORATION_UNVERIFIED'],
   [{badServer:true},'AI_HISTORY_SERVER_UNAVAILABLE'],
