@@ -70,17 +70,19 @@ export async function perchanceReadIsolated({identityOnly=false,originalSlug=nul
         return denied('ORIGINAL_NOT_IN_OWNER_INVENTORY');
       const owner=await call('checkGeneratorOwnership',{generatorName:originalSlug});
       const page=await call('getGeneratorPageData',{generatorName:originalSlug},{unauthenticated:true});
-      if(owner.status!=='is-owner'||page.status!=='success'||
-         page.generator?.name!==originalSlug||
-         page.generator?.isPrivate!==listed[0].isPrivate||
-         typeof page.generator?.publicId!=='string'||
-         !/^[a-zA-Z0-9_-]{1,90}$/.test(page.generator.publicId)||
-         typeof page.generator.modelText!=='string'||
-         typeof page.generator.outputTemplate!=='string')
+      const generator=page.body?.generator;
+      if(owner.httpStatus!==200||owner.body?.status!=='is-owner'||
+         page.httpStatus!==200||page.body?.status!=='success'||
+         generator?.name!==originalSlug||
+         generator?.isPrivate!==listed[0].isPrivate||
+         typeof generator?.publicId!=='string'||
+         !/^[a-zA-Z0-9_-]{1,90}$/.test(generator.publicId)||
+         typeof generator.modelText!=='string'||
+         typeof generator.outputTemplate!=='string')
         return denied('ORIGINAL_SOURCE_UNVERIFIED');
       // srcManifest references alone do not prove asset bytes. Stop rather
       // than constructing a falsely complete backup from filenames.
-      const manifest=page.generator.srcManifest;
+      const manifest=generator.srcManifest;
       const empty=Array.isArray(manifest)?manifest.length===0:
         manifest&&typeof manifest==='object'&&!Array.isArray(manifest)&&
         Object.keys(manifest).length===0;
@@ -143,9 +145,9 @@ export async function perchanceReadIsolated({identityOnly=false,originalSlug=nul
          location.origin!=='https://perchance.org')
         return denied('SESSION_CHANGED');
       return {ok:true,principalFingerprint,original:{
-        remotePublicId:'public_'+page.generator.publicId,
+        remotePublicId:'public_'+generator.publicId,
         ownerResult:'IS_OWNER',visibility:listed[0].isPrivate?'UNLISTED':'PUBLIC',
-        pjs:page.generator.modelText,html:page.generator.outputTemplate,assets
+        pjs:generator.modelText,html:generator.outputTemplate,assets
       }};
     }
     const generatorRecords=[],names=new Set();
