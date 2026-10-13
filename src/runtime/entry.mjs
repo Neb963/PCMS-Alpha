@@ -19,3 +19,6 @@ import './adoption-boundary.mjs';
 
 // I09 durable staged source and content-script handoff listeners.
 import './staging-boundary.mjs';
+
+// I10 native AI policy/configuration port (provider execution gated).
+import './ai-boundary.mjs';
