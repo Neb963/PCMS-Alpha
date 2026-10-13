@@ -69,7 +69,7 @@ export async function perchanceReadIsolated({identityOnly=false,originalSlug=nul
       if(listed.length!==1||typeof listed[0].isPrivate!=='boolean')
         return denied('ORIGINAL_NOT_IN_OWNER_INVENTORY');
       const owner=await call('checkGeneratorOwnership',{generatorName:originalSlug});
-      const page=await call('getGeneratorPageData',{generatorName:originalSlug});
+      const page=await call('getGeneratorPageData',{generatorName:originalSlug},{unauthenticated:true});
       if(owner.status!=='is-owner'||page.status!=='success'||
          page.generator?.name!==originalSlug||
          page.generator?.isPrivate!==listed[0].isPrivate||
