@@ -123,6 +123,8 @@ export function createAiBoundary(api,{
           const chat=firstMissing?1:2;
           if(chat===2&&(!job.chat2||job.chat2.state!=='FRESH_VERIFIED'))
             return fail('CHAT2_SESSION_NOT_READY');
+          if(chat===2&&job.chat2?.state!=='FRESH_VERIFIED')
+            return fail('AI_CHAT2_ISOLATION_UNVERIFIED');
           const needed=chat===1?job.prompt.tests:job.optionalTesting?.tests;
           const pending=(needed||[]).filter(name=>
             (chat===1?job.chat1:job.chat2).tests?.[name]?.result!=='PASS'||
