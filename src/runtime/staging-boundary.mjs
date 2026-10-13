@@ -22,11 +22,11 @@ export function validateStagingMessage(api,sender,message){
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
   const allowed=message.type==='LIST_STAGES'?[]:
-    message.type==='PIN_STAGE'?['slug','token']:
+    ['PIN_STAGE','STAGE_PRIVATE'].includes(message.type)?['slug','token','expectedRevision']:
     message.type==='GET_STAGE'?['slug']:['slug','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k))||
      (message.type!=='LIST_STAGES'&&!SLUG.test(p.slug||''))||
-     (message.type==='PIN_STAGE'&&
+     (['PIN_STAGE','STAGE_PRIVATE'].includes(message.type)&&
        (typeof p.token!=='string'||p.token.length<10||p.token.length>512))||
      (['STAGE_PRIVATE','RECONCILE_STAGE','HANDOFF_STAGE'].includes(message.type)&&
        (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1)))
@@ -88,12 +88,10 @@ export function createStagingBoundary(api,{
       const eligible=await supplyLookup(await database(),p.slug);
       if(!eligible.ok)return eligible;
       const {item,account,link}=eligible;
-      if(!link.readyAtInspection)return fail('READY_NOT_PINNED');
       const route=await g.getSafeRouteReadiness(account.personaUid);
       if(!route?.ready)return fail(route?.code||'ROUTE_UNVERIFIED');
       const fresh=await inspect({folder:link.folder,token:p.token,includeSourceBytes:true});
-      if(!fresh.ok||!fresh.ready||fresh.fingerprint!==link.fingerprint||
-         fresh.testingSha!==link.testingSha)return fail('READY_REVOKED_OR_CHANGED');
+      if(!fresh.ok||!fresh.ready)return fail('READY_REVOKED_OR_CHANGED');
       const candidate=await exactSource(fresh.sourceBytes);
       if(!candidate.ok)return candidate;
       const owner={slug:p.slug,accountId:account.accountId,personaUid:account.personaUid,
@@ -131,6 +129,13 @@ export function createStagingBoundary(api,{
       if(r.state!=='PINNED')return fail('RECONCILIATION_REQUIRED');
       if(effectGate({phase:'I09',stage:r})!==true)
         return fail('PROVIDER_ACTIVATION_HELD');
+      // READY is current effect admission, not an eternal property of an
+      // earlier SOURCE_PENDING association. Compare only the pinned bytes.
+      const current=await inspect({folder:r.sourceFolder,token:p.token});
+      if(!current.ok||!current.ready||
+         current.fingerprint!==r.gitFingerprint||
+         current.testingSha!==r.testingSha)
+        return fail('READY_REVOKED_OR_CHANGED');
       const eligible=await supplyLookup(await database(),r.slug);
       if(!eligible.ok||eligible.account.accountId!==r.accountId||
          eligible.account.revision!==r.accountRevision||
