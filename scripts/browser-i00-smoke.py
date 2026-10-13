@@ -585,7 +585,7 @@ def main():
                 url=f'moz-extension://{uuid}/pcms/index.html'
                 call('POST',f'/session/{after}/url',{'url':url},timeout=30)
                 for _ in range(40):
-                    view=execute(after,"return {title:document.title, selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view), links:[...document.querySelectorAll('[data-workspace]')].map(x=>x.getAttribute('href')), unsafe:[...document.querySelectorAll('#view-generators button[aria-describedby=blocked-generators],#view-work-queue button,#view-refresher button')].filter(x=>!x.disabled).length}")
+                    view=execute(after,"return {title:document.title, selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view), links:[...document.querySelectorAll('[data-workspace]')].map(x=>x.getAttribute('href')), unsafe:[...document.querySelectorAll('#view-generators button[aria-describedby=blocked-generators],#view-work-queue > .workspace-head > button,#view-refresher > .workspace-head > button')].filter(x=>!x.disabled).length}")
                     if view.get('selected'): break
                     time.sleep(.15)
                 assert view['selected']==['overview'],view
@@ -985,6 +985,600 @@ def main():
                 assert i09.get('held')=='HELD_UNCERTAIN',i09
                 print('B I09_PACKAGED_FIREFOX_IDB_SOURCE_BYTES_CRASH_HOLD=PASS',flush=True)
                 print('B I09_PACKAGED_SYNTHETIC_EDITOR_STRIP_NO_PROVIDER_ACTIVATION=PASS',flush=True)
+
+                # I10 B: installed exact XPI, Firefox IndexedDB durable Settings
+                # revisions and positive/negative exact-source oracle state.
+                # No native AI transport/provider calls or external credentials.
+                call('POST',f'/session/{after}/url',{'url':url+'#settings'})
+                ai_settings=execute(after,"return {prompt:!!document.getElementById('pcms-ai-prompt'),save:!!document.getElementById('pcms-ai-save'),history:!!document.getElementById('pcms-ai-prompt-history')}")
+                assert ai_settings=={'prompt':True,'save':True,'history':True},ai_settings
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const policy=await import('./ai-evidence.mjs');
+                  const persistence=await import('./ai-store.mjs');
+                  const journal=await import('./journal.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const store=persistence.createAiStore(db);
+                  const before=await store.getPrompt();
+                  const updated=await store.changePrompt({text:'Independent B test',
+                    tests:['observed_smoke']},before.current.revision);
+                  const stale=await store.changePrompt({text:'stale',
+                    tests:['observed_smoke']},before.current.revision);
+                  const later=await store.getPrompt();
+                  const exported=store.exportPrompt(later.history);
+                  const stage={slug:'i10-b-private',revision:6,state:'SOURCE_VERIFIED',
+                    accountId:'account-i10',candidate:{fingerprint:'a'.repeat(64)},
+                    previous:{fingerprint:'b'.repeat(64)}};
+                  const prepared=await store.start(stage);
+                  const blockedDuplicate=await store.start({...stage,slug:'i10-b-other'});
+                  const untrusted=policy.applyAiEvidence(policy.beginAiJob({
+                    stage,prompt:later.current}).job,{type:'ASSISTANT_DONE',chat:1,
+                    text:'ALL PASS'});
+                  const fromPort=await new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-i10-ai'});
+                    port.onMessage.addListener(v=>{try{port.disconnect()}catch{}resolve(v)});
+                    port.onDisconnect.addListener(()=>resolve({code:'DISCONNECTED'}));
+                    port.postMessage({type:'LIST_JOBS'});
+                  });
+                  const job=await store.getJob('i10-b-private');
+                  const wrongProof=policy.applyAiEvidence(policy.beginAiJob({
+                    stage,prompt:later.current}).job,{type:'TEST',chat:1,
+                      name:'observed_smoke',result:'PASS',observedAt:1,
+                      sourceFingerprint:'a'.repeat(64),
+                      independentSource:'AI_PROSE'});
+                  done({ok:before.ok&&updated.ok&&
+                    later.current.revision===before.current.revision+1&&
+                    stale.code==='PROMPT_REVISION_STALE'&&exported.ok&&
+                    prepared.ok&&blockedDuplicate.code==='AI_ACCOUNT_CONCURRENCY_HELD'&&
+                    untrusted.ok===false&&wrongProof.ok===false&&
+                    fromPort.ok&&fromPort.jobs.some(j=>j.slug==='i10-b-private')&&
+                    job.evidence.state==='TESTS_UNVERIFIED'&&
+                    job.promptRevision===later.current.revision,
+                    savedRevision:later.current.revision,prepared,stale,
+                    count:fromPort.jobs?.length,untrusted,wrongProof});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
+                ai_b=call('POST',f'/session/{after}/execute/async',
+                          {'script':code,'args':[]},timeout=90)
+                assert ai_b.get('ok') is True,ai_b
+                print('B I10_PACKAGED_SETTINGS_CAS_PROMPT_PIN_AND_ORACLE_HOLDS=PASS',flush=True)
+                call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
+                ai_work=execute(after,"return {job:!!document.getElementById('pcms-ai-job-list'),prepare:!!document.getElementById('pcms-ai-prepare'),enabled:!document.getElementById('pcms-ai-prepare')?.disabled}")
+                assert ai_work=={'job':True,'prepare':True,'enabled':False},ai_work
+                print('B I10_PACKAGED_UI_HELD_NO_AI_PROVIDER_DISPATCH=PASS',flush=True)
+                # I10 B: durable uncertain native send on real IndexedDB, actual
+                # process-cold recovery state and full generator asset checkpoint.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const persistence=await import('./ai-store.mjs');
+                  const stageCore=await import('./staging-core.mjs');
+                  const journal=await import('./journal.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const store=persistence.createAiStore(db);
+                  const current=await store.getJob('i10-b-private');
+                  const armed=await store.armNative('i10-b-private',current.revision,'CHAT1_SEND');
+                  const repeat=await store.armNative('i10-b-private',armed.revision,'CHAT1_SEND');
+                  const recovered=await store.recoverNative();
+                  const after=await store.getJob('i10-b-private');
+                  const recoveredAgain=await store.recoverNative();
+                  const afterAgain=await store.getJob('i10-b-private');
+                  const session='1'.repeat(64);
+                  const greetingOnly=await store.observeNative('i10-b-private',
+                    after.revision,{ok:true,slug:'i10-b-private',busy:false,
+                    sessionDigest:session,chatEntries:1,sourceSaved:true});
+                  const busy=await store.observeNative('i10-b-private',after.revision,{
+                    ok:true,slug:'i10-b-private',busy:true,sessionDigest:session,
+                    chatEntries:2,sourceSaved:false});
+                  const idle=await store.observeNative('i10-b-private',busy.revision,{
+                    ok:true,slug:'i10-b-private',busy:false,sessionDigest:session,
+                    chatEntries:3,sourceSaved:true});
+                  const enc=text=>btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+                  const snapshot=await stageCore.exactSource([
+                    {path:'main.pjs',base64:enc('list\u005cn  value')},
+                    {path:'index.html',base64:enc('<h1>fixed</h1>')},
+                    {path:'src/asset.dat',base64:btoa(String.fromCharCode(0,1,255))}
+                  ]);
+                  const full=await store.checkpointSource('i10-b-private',idle.revision,snapshot);
+                  const stored=await store.getJobFull('i10-b-private');
+                  const port=msg=>new Promise(resolve=>{
+                    const p=browser.runtime.connect({name:'pcms-i10-ai'});
+                    p.onMessage.addListener(v=>{try{p.disconnect()}catch{}resolve(v)});
+                    p.onDisconnect.addListener(()=>resolve({code:'DISCONNECTED'}));
+                    p.postMessage(msg);
+                  });
+                  const denied=await port({type:'BEGIN_NATIVE',params:{
+                    slug:'i10-b-private',expectedRevision:full.revision,step:'CHAT1_SEND'
+                  }});
+                  done({ok:armed.ok&&repeat.code==='AI_EFFECT_RECONCILIATION_REQUIRED'&&
+                    recovered.ok&&recovered.held>=1&&
+                    recoveredAgain.ok&&recoveredAgain.held===0&&
+                    afterAgain.revision===after.revision&&
+                    greetingOnly.code==='AI_SESSION_UNVERIFIED'&&
+                    busy.ok&&idle.ok&&
+                    full.ok&&stored.job.finalSource.blobs.length===3&&
+                    stored.job.chat1.tests&&
+                    stored.job.sourceFingerprint===snapshot.fingerprint&&
+                    stored.job.state==='TESTS_UNVERIFIED'&&
+                    denied.ok!==true,armed,repeat,recovered,denied,
+                    greetingOnly,recoveredAgain,afterAgainRevision:afterAgain.revision,
+                    fingerprint:snapshot.fingerprint,held:stored.job.hold});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
+                ai_recovery=call('POST',f'/session/{after}/execute/async',
+                                 {'script':code,'args':[]},timeout=90)
+                assert ai_recovery.get('ok') is True,ai_recovery
+                print('B I10_PACKAGED_NATIVE_DISPATCH_JOURNAL_FULL_SOURCE_CRASH_HOLD=PASS',flush=True)
+                # I10 B: synthetic independent-failure receipt feeding the
+                # canonical no-progress state; never a fake live-provider PASS.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const persistence=await import('./ai-store.mjs');
+                  const journal=await import('./journal.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const store=persistence.createAiStore(db),slug='i10-b-private';
+                  const initial=await store.getJob(slug);
+                  const session='1'.repeat(64);
+                  const failed=await store.record(slug,initial.revision,{
+                    type:'TEST',chat:1,name:'observed_smoke',
+                    sourceFingerprint:initial.sourceFingerprint,
+                    independentSource:'INDEPENDENT_BROWSER_ASSERTION',
+                    result:'FAIL',observedAt:Date.now()
+                  });
+                  const armed=await store.armNative(slug,failed.revision,'CHAT1_REPAIR');
+                  const seen=await store.observeNative(slug,armed.revision,{
+                    ok:true,slug,busy:false,sessionDigest:session,
+                    chatEntries:3,sourceSaved:true
+                  });
+                  const sealed=await store.getJobFull(slug);
+                  const once=await store.checkpointSource(slug,seen.revision,
+                    await (await import('./staging-core.mjs')).exactSource(sealed.job.finalSource.blobs));
+                  const again=await store.armNative(slug,once.revision,'CHAT1_REPAIR');
+                  const seenAgain=await store.observeNative(slug,again.revision,{
+                    ok:true,slug,busy:false,sessionDigest:session,
+                    chatEntries:4,sourceSaved:true
+                  });
+                  const still=await store.getJobFull(slug);
+                  const twice=await store.checkpointSource(slug,seenAgain.revision,
+                    await (await import('./staging-core.mjs')).exactSource(still.job.finalSource.blobs));
+                  const noThird=await store.armNative(slug,twice.revision,'CHAT1_REPAIR');
+                  done({ok:failed.ok&&failed.state==='KNOWN_FAILURE'&&
+                    armed.ok&&seen.ok&&once.state==='KNOWN_FAILURE'&&
+                    again.ok&&seenAgain.ok&&twice.state==='HELD_NO_PROGRESS'&&
+                    twice.hold==='REPEATED_SAME_SOURCE_FAILED_REPAIR'&&
+                    noThird.code==='AI_VERIFIED_FAILURE_AND_SESSION_REQUIRED',
+                    failed,armed,once,again,twice,noThird});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
+                ai_loop=call('POST',f'/session/{after}/execute/async',
+                             {'script':code,'args':[]},timeout=90)
+                assert ai_loop.get('ok') is True,ai_loop
+                print('B I10_PACKAGED_KNOWN_FAILURE_NOT_DOWNGRADED_AND_REPAIR_NO_PROGRESS_HOLD=PASS',flush=True)
+                # I10 B: synthetic *real canonical IDB* one-repair convergence
+                # with independent F1 FAIL / F2 PASS; no Perchance request.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const core=await import('./staging-core.mjs');
+                  const {createAiStore}=await import('./ai-store.mjs');
+                  const b64=t=>btoa(String.fromCharCode(...new TextEncoder().encode(t)));
+                  const A=await core.exactSource([
+                    {path:'main.pjs',base64:b64('output = 1')},
+                    {path:'index.html',base64:b64('<b>failed before repair</b>')}
+                  ]);
+                  const F=await core.exactSource([
+                    {path:'main.pjs',base64:b64('output = 2')},
+                    {path:'index.html',base64:b64('<b>observed after repair</b>')},
+                    {path:'src/new.dat',base64:btoa(String.fromCharCode(0,255,8))}
+                  ]);
+                  const db=await journal.openCanonicalDatabase(),store=createAiStore(db);
+                  const slug='i10-convergence',sid='f'.repeat(64);
+                  const prepared=await store.start({
+                    slug,revision:2,state:'SOURCE_VERIFIED',accountId:'i10-convergence-owner',
+                    candidate:{fingerprint:A.fingerprint},previous:{fingerprint:'b'.repeat(64)}
+                  });
+                  const sent=await store.armNative(slug,prepared.revision,'CHAT1_SEND');
+                  const seen=await store.observeNative(slug,sent.revision,{
+                    ok:true,slug,sessionDigest:sid,busy:false,chatEntries:2,sourceSaved:true
+                  });
+                  const sourceA=await store.checkpointSource(slug,seen.revision,A);
+                  const failed=await store.record(slug,sourceA.revision,{
+                    type:'TEST',chat:1,name:'observed_smoke',
+                    sourceFingerprint:A.fingerprint,independentSource:'INDEPENDENT_BROWSER_ASSERTION',
+                    result:'FAIL',observedAt:Date.now()
+                  });
+                  const repair=await store.armNative(slug,failed.revision,'CHAT1_REPAIR');
+                  const repaired=await store.observeNative(slug,repair.revision,{
+                    ok:true,slug,sessionDigest:sid,busy:false,chatEntries:4,sourceSaved:true
+                  });
+                  const sourceF=await store.checkpointSource(slug,repaired.revision,F);
+                  const oldResult=await store.record(slug,sourceF.revision,{
+                    type:'TEST',chat:1,name:'observed_smoke',
+                    sourceFingerprint:A.fingerprint,independentSource:'INDEPENDENT_BROWSER_ASSERTION',
+                    result:'PASS',observedAt:Date.now()
+                  });
+                  const pass=await store.record(slug,sourceF.revision,{
+                    type:'TEST',chat:1,name:'observed_smoke',
+                    sourceFingerprint:F.fingerprint,independentSource:'INDEPENDENT_BROWSER_ASSERTION',
+                    result:'PASS',observedAt:Date.now()
+                  });
+                  const noRepair=await store.armNative(slug,pass.revision,'CHAT1_REPAIR');
+                  const recheck=await store.checkpointSource(slug,pass.revision,F);
+                  const final=await store.getJobFull(slug);
+                  done({ok:A.ok&&F.ok&&prepared.ok&&sent.ok&&seen.ok&&sourceA.ok&&
+                    failed.state==='KNOWN_FAILURE'&&repair.ok&&repaired.ok&&
+                    sourceF.ok&&sourceF.state==='TESTS_UNVERIFIED'&&
+                    oldResult.code==='INDEPENDENT_TEST_EVIDENCE_REQUIRED'&&
+                    pass.ok&&pass.state==='TESTS_VERIFIED'&&
+                    pass.slotReleased===true&&
+                    noRepair.code==='AI_VERIFIED_FAILURE_AND_SESSION_REQUIRED'&&
+                    recheck.ok&&recheck.state==='TESTS_VERIFIED'&&
+                    final.ok&&final.job.sourceFingerprint===F.fingerprint&&
+                    final.job.finalSource.files.length===3&&
+                    final.job.chat1.tests.observed_smoke?.sourceFingerprint===F.fingerprint&&
+                    final.job.executionSlotReleased===true,
+                    failed:failed.state,sourceF:sourceF.state,oldResult,
+                    after:pass.state,noRepair,rechecked:recheck.state});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
+                convergence_b=call('POST',f'/session/{after}/execute/async',
+                                    {'script':code,'args':[]},timeout=90)
+                assert convergence_b.get('ok') is True,convergence_b
+                print('B I10_PACKAGED_SYNTHETIC_F1_FAIL_F2_ASSET_REPAIR_RETEST=PASS',flush=True)
+
+                # I10 B: real canonical IndexedDB CAS on globally versioned
+                # per-account concurrency, independent accounts, and observed
+                # idle/exact-source slot release. Pure synthetic, no provider.
+                call('POST',f'/session/{after}/url',{'url':url+'#settings'})
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const storeModule=await import('./ai-store.mjs');
+                  const core=await import('./staging-core.mjs');
+                  const journal=await import('./journal.mjs');
+                  const enc=text=>btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+                  const source=await core.exactSource([
+                    {path:'main.pjs',base64:enc('output = 1')},
+                    {path:'index.html',base64:enc('<p>prepared</p>')}
+                  ]);
+                  const db=await journal.openCanonicalDatabase();
+                  const store=storeModule.createAiStore(db);
+                  const before=await store.getConcurrency();
+                  const next=await store.changeConcurrency(before.setting.revision,2);
+                  const stale=await store.changeConcurrency(before.setting.revision,3);
+                  const bad=await store.changeConcurrency(next.setting.revision,50);
+                  const stage=(slug,accountId)=>({
+                    slug,accountId,revision:1,state:'SOURCE_VERIFIED',
+                    candidate:{fingerprint:source.fingerprint},
+                    previous:{fingerprint:'b'.repeat(64)}
+                  });
+                  const a=await store.start(stage('i10-slot-a','account-i10-slots'));
+                  const b=await store.start(stage('i10-slot-b','account-i10-slots'));
+                  const full=await store.start(stage('i10-slot-c','account-i10-slots'));
+                  const independent=await store.start(stage('i10-slot-d','account-i10-separate'));
+                  const armed=await store.armNative('i10-slot-a',a.revision,'CHAT1_SEND');
+                  const observed=await store.observeNative('i10-slot-a',armed.revision,{
+                    ok:true,slug:'i10-slot-a',busy:false,
+                    sessionDigest:'d'.repeat(64),chatEntries:2,sourceSaved:true
+                  });
+                  const saved=await store.checkpointSource('i10-slot-a',
+                    observed.revision,source);
+                  const proof=await store.record('i10-slot-a',saved.revision,{
+                    type:'TEST',chat:1,name:'observed_smoke',
+                    sourceFingerprint:source.fingerprint,
+                    independentSource:'INDEPENDENT_BROWSER_ASSERTION',
+                    result:'PASS',observedAt:Date.now()
+                  });
+                  const released=await store.getJob('i10-slot-a');
+                  const afterRelease=await store.start(stage('i10-slot-c','account-i10-slots'));
+                  const portConfig=await new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-i10-ai'});
+                    port.onMessage.addListener(v=>{try{port.disconnect()}catch{}resolve(v)});
+                    port.onDisconnect.addListener(()=>resolve({code:'DISCONNECTED'}));
+                    port.postMessage({type:'GET_CONCURRENCY'});
+                  });
+                  done({ok:source.ok&&before.ok&&before.setting.perAccount===1&&
+                    next.ok&&next.setting.perAccount===2&&
+                    stale.code==='STALE_REVISION'&&bad.code==='AI_CONCURRENCY_INVALID'&&
+                    a.ok&&b.ok&&full.code==='AI_ACCOUNT_CONCURRENCY_HELD'&&
+                    independent.ok&&armed.ok&&observed.ok&&saved.ok&&
+                    proof.ok&&proof.state==='TESTS_VERIFIED'&&
+                    released.slotReleased===true&&afterRelease.ok&&
+                    portConfig.ok&&portConfig.setting.perAccount===2,
+                    before:before.setting,next:next.setting,stale,bad,
+                    first:a.ok,second:b.ok,third:full,
+                    independent:independent.ok,proof:proof.state,
+                    released:released.slotReleased,afterRelease:afterRelease.ok,
+                    portConfig:portConfig.setting});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
+                concurrency_b=call('POST',f'/session/{after}/execute/async',
+                                   {'script':code,'args':[]},timeout=90)
+                assert concurrency_b.get('ok') is True,concurrency_b
+                print('B I10_PACKAGED_VERSIONED_CONCURRENCY_CAS_IDLE_SLOT_RELEASE=PASS',flush=True)
+                # I10 B: real canonical IDB persists scheduler admission clock,
+                # CAS deferral and previous uncertain native state across
+                # closing/reopening DB handles, without any provider effect.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const {createAiStore}=await import('./ai-store.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const store=createAiStore(db);
+                  const original=await store.getJobFull('i10-slot-d');
+                  const created=original.job?.createdAt;
+                  const until=Date.now()+120000;
+                  const deferred=await store.deferScheduler('i10-slot-d',
+                    original.job.revision,until,'AI_WAKE_ROUTE_UNVERIFIED');
+                  const stale=await store.deferScheduler('i10-slot-d',
+                    original.job.revision,until,'AI_WAKE_ROUTE_UNVERIFIED');
+                  db.close();
+                  const secondDb=await journal.openCanonicalDatabase();
+                  const readback=await createAiStore(secondDb).getJobFull('i10-slot-d');
+                  done({ok:original.ok&&Number.isSafeInteger(created)&&created>0&&
+                    deferred.ok&&stale.code==='STALE_REVISION'&&
+                    readback.ok&&readback.job.schedulerDeferredUntil===until&&
+                    readback.job.schedulerHold==='AI_WAKE_ROUTE_UNVERIFIED'&&
+                    readback.job.createdAt===created&&
+                    !readback.job.native&&
+                    readback.job.executionSlotReleased!==true&&
+                    readback.job.sourceFingerprint===original.job.sourceFingerprint,
+                    created,deferred,stale,persisted:readback.job.schedulerDeferredUntil,
+                    native:readback.job.native});
+                  secondDb.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,400)}));"""
+                deferral_b=call('POST',f'/session/{after}/execute/async',
+                                {'script':code,'args':[]},timeout=90)
+                assert deferral_b.get('ok') is True,deferral_b
+                print('B I10_PACKAGED_SCHEDULER_DURABLE_DEFERRAL_CAS=PASS',flush=True)
+                # B verified XPI parser/registry; no provider interaction.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const oracle=await import('./perchance-ai-oracle.mjs');
+                  const testing=await import('./ai-testing.mjs');
+                  const ok=testing.pinTestingAssertions('PCMS_TEST: preview_heading_visible\\nPCMS_TEST: preview_image_loaded');
+                  const extra=testing.pinTestingAssertions('PCMS_TEST: preview_button_visible\\nCheck business rules manually.');
+                  done({ok:ok.ok&&ok.tests.join('|')==='preview_heading_visible|preview_image_loaded'&&
+                    oracle.AI_BROWSER_ASSERTIONS.length===5&&extra.ok&&
+                    extra.tests.includes('optional_generator_tests'),
+                    parsed:ok,extra});
+                })().catch(e=>done({error:String(e)}));"""
+                check_assertions=call('POST',f'/session/{after}/execute/async',
+                                      {'script':code,'args':[]},timeout=90)
+                assert check_assertions.get('ok') is True,check_assertions
+                print('B I10_PACKAGED_NAMED_ASSERTIONS_AND_PROSE_HOLD=PASS',flush=True)
+
+                # I10 B: installed XPI imports the read-only OPFS inspector,
+                # and the trusted page cannot impersonate a provider editor.
+                # No live OPFS/server state is accessed by this negative.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const {perchanceAiOpfsProbe}=await import('./perchance-ai-opfs.mjs');
+                  const invalid=await perchanceAiOpfsProbe({
+                    slug:'private-opfs',nonce:'f'.repeat(32)
+                  });
+                  const bad=await perchanceAiOpfsProbe({
+                    slug:'private-opfs',nonce:'0'
+                  });
+                  done({ok:invalid.code==='WORKSPACE_EDITOR_CHANGED'&&
+                    invalid.isolation==='UNVERIFIED'&&
+                    bad.code==='WORKSPACE_REQUEST_INVALID'&&
+                    bad.isolation==='UNVERIFIED',
+                    invalid,bad});
+                })().catch(e=>done({error:String(e)}));"""
+                opfs_b=call('POST',f'/session/{after}/execute/async',
+                            {'script':code,'args':[]},timeout=90)
+                assert opfs_b.get('ok') is True,opfs_b
+                print('B I10_PACKAGED_OPFS_LOCAL_PROBE_WRONG_ORIGIN_HOLD=PASS',flush=True)
+                # I10 B: both halves of the history boundary really ship in
+                # the installed XPI, and wrong-origin browser code cannot
+                # extract credentials or perform an external history fetch.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const m=await import('./perchance-ai-history.mjs');
+                  const nonce='f'.repeat(32);
+                  const main=await m.perchanceAiHistoryCredentials({
+                    slug:'private-owned',nonce});
+                  const read=await m.perchanceAiHistoryIsolated({
+                    slug:'private-owned',nonce,sessionId:'session-opaque-01234567',
+                    routingKey:'1234.safefake',sessionDigest:'a'.repeat(64),
+                    firstPrompt:'Test T1'});
+                  done({ok:main.code==='AI_HISTORY_WRONG_EDITOR'&&
+                    read.code==='AI_HISTORY_WRONG_EDITOR'&&
+                    JSON.stringify({main,read}).indexOf('session-opaque')===-1,
+                    main,read});
+                })().catch(e=>done({error:String(e)}));"""
+                history_b=call('POST',f'/session/{after}/execute/async',
+                                 {'script':code,'args':[]},timeout=90)
+                assert history_b.get('ok') is True,history_b
+                print('B I10_PACKAGED_ISOLATED_HISTORY_WRONG_ORIGIN_GUARD=PASS',flush=True)
+
+
+                # I10 B: two genuinely distinct (synthetic) native sessions,
+                # final Chat2 source-changing repair, invalidated Chat1 suite,
+                # observed independent retests on one final F and slot release.
+                # Browser/IDB only: no live AI, Perchance account or writes.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const storeModule=await import('./ai-store.mjs');
+                  const core=await import('./staging-core.mjs');
+                  const {planAiStep}=await import('./ai-supervisor.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const store=storeModule.createAiStore(db);
+                  // Earlier B checks deliberately change Settings. Each new
+                  // synthetic job MUST pin its own current canonical revision.
+                  const priorPrompt=await store.getPrompt();
+                  const configured=await store.changePrompt({
+                    text:'Run the independent fixed default generator smoke oracle; do not trust assistant text.',
+                    tests:['default_generator_smoke']
+                  },priorPrompt.current.revision);
+                  const enc=s=>btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+                  const original=await core.exactSource([
+                    {path:'main.pjs',base64:enc('output = 1')},
+                    {path:'index.html',base64:enc('<p>v1</p>')}
+                  ]);
+                  const repaired=await core.exactSource([
+                    {path:'main.pjs',base64:enc('output = 2')},
+                    {path:'index.html',base64:enc('<p>v2</p>')},
+                    {path:'src/new.bin',base64:'AAH/'}
+                  ]);
+                  const slug='i10-two-chat';
+                  const stage={slug,accountId:'two-chat-account',revision:1,
+                    state:'SOURCE_VERIFIED',candidate:{fingerprint:original.fingerprint},
+                    previous:{fingerprint:'b'.repeat(64)}};
+                  const begun=await store.start(stage,{
+                    sha256:'f'.repeat(64),text:'Use a fresh isolated conversation.',
+                    tests:['default_generator_smoke']
+                  });
+                  const sid1='1'.repeat(64),sid2='2'.repeat(64);
+                  const send1=await store.armNative(slug,begun.revision,'CHAT1_SEND');
+                  const idle1=await store.observeNative(slug,send1.revision,{
+                    ok:true,slug,sessionDigest:sid1,busy:false,chatEntries:2,sourceSaved:true
+                  });
+                  const snapshot1=await store.checkpointSource(slug,idle1.revision,original);
+                  const smoke=(revision,chat,fp)=>store.record(slug,revision,{
+                    type:'TEST',chat,name:'default_generator_smoke',
+                    sourceFingerprint:fp,independentSource:'INDEPENDENT_BROWSER_ASSERTION',
+                    result:'PASS',observedAt:Date.now()
+                  });
+                  const pass1=await smoke(snapshot1.revision,1,original.fingerprint);
+                  const reset=await store.armNative(slug,pass1.revision,'CHAT2_RESET');
+                  const stale=await store.observeNative(slug,reset.revision,{
+                    ok:true,slug,sessionDigest:null,busy:false,chatEntries:1,sourceSaved:true
+                  });
+                  const pendingDraft=await store.observeNative(slug,reset.revision,{
+                    ok:true,slug,sessionDigest:null,busy:false,chatEntries:0,
+                    inputOccupied:true,sourceSaved:true
+                  });
+                  const pendingAttachment=await store.observeNative(slug,reset.revision,{
+                    ok:true,slug,sessionDigest:null,busy:false,chatEntries:1,
+                    resetGreetingVisible:true,inputOccupied:false,hasQueue:false,
+                    attachmentsPending:true,sourceSaved:true
+                  });
+                  const empty=await store.observeNative(slug,reset.revision,{
+                    ok:true,slug,sessionDigest:null,busy:false,chatEntries:1,
+                    resetGreetingVisible:true,inputOccupied:false,hasQueue:false,
+                    attachmentsPending:false,sourceSaved:true
+                  });
+                  const send2=await store.armNative(slug,empty.revision,'CHAT2_SEND');
+                  const idle2=await store.observeNative(slug,send2.revision,{
+                    ok:true,slug,sessionDigest:sid2,busy:false,chatEntries:2,sourceSaved:true
+                  });
+                  const saved2=await store.checkpointSource(slug,idle2.revision,repaired);
+                  const sealed=await store.getJobFull(slug);
+                  const planned1=planAiStep(sealed.job);
+                  const replay1=await smoke(saved2.revision,1,repaired.fingerprint);
+                  const sealed2=await store.getJobFull(slug);
+                  const planned2=planAiStep(sealed2.job);
+                  const replay2=await smoke(replay1.revision,2,repaired.fingerprint);
+                  const complete=await store.getJob(slug);
+                  const recheck=await store.checkpointSource(slug,replay1.revision,repaired);
+                  const afterRecheck=await store.getJob(slug);
+                  const changedAgain=await store.checkpointSource(slug,recheck.revision,original);
+                  const revoked=await store.getJob(slug);
+                  done({ok:configured.ok&&
+                    original.ok&&repaired.ok&&begun.ok&&send1.ok&&idle1.ok&&
+                    snapshot1.ok&&pass1.ok&&reset.ok&&
+                    stale.code==='AI_CHAT2_RESET_NOT_PROVEN'&&
+                    pendingDraft.code==='AI_CHAT2_RESET_NOT_PROVEN'&&
+                    pendingAttachment.code==='AI_CHAT2_RESET_NOT_PROVEN'&&
+                    empty.ok&&send2.ok&&idle2.ok&&
+                    sid1!==sid2&&saved2.evidence?.chat1Pass===false&&
+                    saved2.evidence?.state==='TESTS_UNVERIFIED'&&
+                    planned1.type==='RUN_TESTS'&&planned1.chat===1&&
+                    replay1.ok&&planned2.type==='VERIFY_FRESH_CHAT2'&&
+                    planned2.effect==='GATED_READ_ONLY_HISTORY'&&
+                    replay2.code==='AI_CHAT2_ISOLATION_UNVERIFIED'&&
+                    complete.state==='TESTS_UNVERIFIED'&&
+                    complete.slotReleased===false&&recheck.ok&&
+                    afterRecheck.state==='TESTS_UNVERIFIED'&&
+                    afterRecheck.slotReleased===false&&changedAgain.ok&&
+                    revoked.state==='TESTS_UNVERIFIED'&&
+                    revoked.slotReleased===false&&
+                    revoked.evidence.chat1Pass===false&&
+                    revoked.evidence.chat2Pass===false,
+                    saved:saved2,step1:planned1,step2:planned2,
+                    begun,send1,idle1,snapshot1,pass1,reset,stale,pendingDraft,
+                    empty,send2,idle2,
+                    pass2:replay2?.state,complete:complete.state,
+                    afterRecheck:afterRecheck.state});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
+                ai_twochat=call('POST',f'/session/{after}/execute/async',
+                                {'script':code,'args':[]},timeout=90)
+                assert ai_twochat.get('ok') is True,ai_twochat
+                print('B I10_PACKAGED_CHAT2_DISTINCT_SID_WITHOUT_OPFS_PROOF_HELD=PASS',flush=True)
+                # I10 B: positive *synthetic* canonical revision-checked fresh
+                # Chat2 history+OPFS witness and negative forged/stale receipts.
+                # Executes in the real packaged extension and IndexedDB.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const db=await (await import('./journal.mjs')).openCanonicalDatabase();
+                  const store=(await import('./ai-store.mjs')).createAiStore(db);
+                  const exact=(await import('./staging-core.mjs')).exactSource;
+                  const source=await exact([
+                    {path:'main.pjs',base64:btoa('output = 42')},
+                    {path:'index.html',base64:btoa('<p>verified</p>')}
+                  ]);
+                  const slug='i10-positive-chat2',a='a'.repeat(64),b='b'.repeat(64);
+                  const created=await store.start({slug,accountId:'i10-positive-owner',
+                    state:'SOURCE_VERIFIED',revision:1,
+                    candidate:{fingerprint:source.fingerprint},
+                    previous:{fingerprint:'f'.repeat(64)}},
+                    {sha256:'c'.repeat(64),text:'Pinned T1',
+                      tests:['default_generator_smoke']});
+                  const send=await store.armNative(slug,created.revision,'CHAT1_SEND');
+                  const s1=await store.observeNative(slug,send.revision,{
+                    ok:true,slug,sessionDigest:a,busy:false,chatEntries:2,sourceSaved:true});
+                  const save=await store.checkpointSource(slug,s1.revision,source);
+                  const full=await store.getJobFull(slug);
+                  const test=(rev,chat)=>store.record(slug,rev,{type:'TEST',chat,
+                    name:chat===1?full.job.prompt.tests[0]:'default_generator_smoke',
+                    sourceFingerprint:source.fingerprint,
+                    independentSource:'INDEPENDENT_BROWSER_ASSERTION',
+                    result:'PASS',observedAt:Date.now()});
+                  const first=await test(save.revision,1);
+                  const reset=await store.armNative(slug,first.revision,'CHAT2_RESET');
+                  const clear=await store.observeNative(slug,reset.revision,{
+                    ok:true,slug,sessionDigest:null,busy:false,chatEntries:1,
+                    resetGreetingVisible:true,inputOccupied:false,hasQueue:false,
+                    attachmentsPending:false,sourceSaved:true});
+                  const ask=await store.armNative(slug,clear.revision,'CHAT2_SEND');
+                  const s2=await store.observeNative(slug,ask.revision,{
+                    ok:true,slug,sessionDigest:b,busy:false,chatEntries:2,sourceSaved:true});
+                  const final=await store.checkpointSource(slug,s2.revision,source);
+                  const hist={ok:true,code:'AI_SERVER_HISTORY_FIRST_PROMPT_OBSERVED',
+                    serverHistory:'FIRST_USER_IS_T1',sessionDigest:b};
+                  const opfs={ok:true,isolation:'UNVERIFIED',
+                    workspaceRootState:'PRESENT_UNTRUSTED',
+                    workerNamespace:'CURRENT_SESSION_WORKER_INIT_LOCK',
+                    sessionDigest:b};
+                  const missing=await store.verifySecondChat(slug,final.revision,
+                    hist,{...opfs,workspaceRootState:'ABSENT'});
+                  const forged=await store.verifySecondChat(slug,final.revision,
+                    {...hist,sessionDigest:a},opfs);
+                  const onlyFolder=await store.verifySecondChat(slug,final.revision,
+                    hist,{...opfs,workerNamespace:'UNVERIFIED'});
+                  const permitted=await store.verifySecondChat(slug,final.revision,hist,opfs);
+                  const stale=await store.verifySecondChat(slug,final.revision,hist,opfs);
+                  const second=await test(permitted.revision,2);
+                  const job=await store.getJob(slug);
+                  done({ok:created.ok&&send.ok&&s1.ok&&save.ok&&first.ok&&
+                    reset.ok&&clear.ok&&ask.ok&&s2.ok&&final.ok&&
+                    missing.code==='AI_FRESH_CHAT_EVIDENCE_UNVERIFIED'&&
+                    forged.code==='AI_FRESH_CHAT_EVIDENCE_UNVERIFIED'&&
+                    onlyFolder.code==='AI_FRESH_CHAT_EVIDENCE_UNVERIFIED'&&
+                    permitted.ok&&permitted.chat2IsolationVerified===true&&
+                    stale.code==='STALE_REVISION'&&second.ok&&
+                    second.state==='TESTS_VERIFIED'&&
+                    job.evidence.chat2Pass===true&&job.slotReleased===true,
+                    missing,forged,onlyFolder,permitted,stale,second:second.state});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
+                chat2_positive=call('POST',f'/session/{after}/execute/async',
+                                     {'script':code,'args':[]},timeout=90)
+                assert chat2_positive.get('ok') is True,chat2_positive
+                print('B I10_PACKAGED_SYNTHETIC_CHAT2_HISTORY_WORKSPACE_CAS_AND_RETEST=PASS',flush=True)
+
 
                 # I08 B: real packaged Firefox crypto, canonical IDB, donor
                 # portable format, Settings action, and wrong-password failure.

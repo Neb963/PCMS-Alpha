@@ -54,7 +54,7 @@ export function compareGitSource(pinned, fresh, { pinnedTesting = true }={}) {
     ready:true,source:'READY',testingSha:pinnedTesting?pinned.testingSha:fresh.testingSha,
     head:fresh.head,fingerprint:fresh.fingerprint};
 }
-export async function inspectGitSource({token,folder,includeSourceBytes=false}, transport=fetch) {
+export async function inspectGitSource({token,folder,includeSourceBytes=false,includeTestingBytes=false}, transport=fetch) {
   if(!safeFolder(folder))return issue('UNSAFE_SOURCE_PATH');
   if(typeof token!=='string'||token.length<10||token.length>512||
     /[^\x21-\x7e]/.test(token))return issue('GITHUB_ACCESS_REQUIRED');
@@ -131,7 +131,7 @@ export async function inspectGitSource({token,folder,includeSourceBytes=false}, 
     const html=entries.find(x=>x.path==='index.html');
     // A folder with no strict marker or without both deployable root files
     // is inspectable, but cannot become a READY candidate.
-    const hashes=new Map(), sourceBytes=[], rawMarker={value:null};
+    const hashes=new Map(), sourceBytes=[], rawMarker={value:null}, rawTesting={value:null};
     if(includeSourceBytes && entries.some(e=>!['DEPLOYMENT.md','README.md','TESTING.md','main.pjs','index.html'].includes(e.path) && !e.path.startsWith('src/')))
       return issue('UNSUPPORTED_DEPLOYABLE_FILE');
     for(const e of entries) {
@@ -146,6 +146,7 @@ export async function inspectGitSource({token,folder,includeSourceBytes=false}, 
       if(includeSourceBytes && (e.path==='main.pjs'||e.path==='index.html'||e.path.startsWith('src/')))
         sourceBytes.push({path:e.path,size:raw.length,sha256:checksum,base64:blob.content.replace(/\s/g,'')});
       if(e.path==='DEPLOYMENT.md')rawMarker.value=raw;
+      if(includeTestingBytes && e.path==='TESTING.md')rawTesting.value=raw;
     }
     const meta=marker&&rawMarker.value?readiness(rawMarker.value):{valid:false,ready:false};
     if(marker&&!meta.valid)return issue('SOURCE_MANIFEST_UNSUPPORTED');
@@ -160,6 +161,11 @@ export async function inspectGitSource({token,folder,includeSourceBytes=false}, 
     return {ok:true,code:ready?'READY':'NOT_READY',ready,source:ready?'READY':'SOURCE_PENDING',
       repo:GIT_REPO,branch:'main',head,treeSha:commit.tree.sha,folder,
       fingerprint,testingSha:test?hashes.get('TESTING.md'):null,
+      // Internal sealed call only. Never echo pinned testing instructions to a UI port.
+      ...(includeTestingBytes && rawTesting.value ? {testingText:(()=>{try{
+        if(rawTesting.value.length>16000)return null;
+        return new TextDecoder('utf-8',{fatal:true}).decode(rawTesting.value);
+      }catch{return null;}})()} : {}),
       // Private sealed internal boundary only; never return sourceBytes to a UI port.
       ...(includeSourceBytes?{sourceBytes}:{}),
       paths:entries.sort((a,b)=>a.path.localeCompare(b.path,'en')).map(e=>({

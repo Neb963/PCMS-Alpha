@@ -119,6 +119,27 @@
         <section class="panel" aria-labelledby="pcms-stage-queue-title"><div class="panel-head"><h2 id="pcms-stage-queue-title">I09 private stage receipts</h2><span class="unknown">Canonical · no auto-retry</span></div><div id="pcms-stage-queue" role="status" aria-live="polite">Reading local stage journal.</div></section>
         <section class="panel" aria-labelledby="pcms-adoption-queue-title"><div class="panel-head"><h2 id="pcms-adoption-queue-title">Existing-source adoption receipts</h2><span class="unknown">Local originals · Git archive pending</span></div><div id="pcms-adopt-receipts" role="status" aria-live="polite">Loading adoption history.</div></section>
         <section class="panel" aria-labelledby="pcms-supply-queue-title"><div class="panel-head"><h2 id="pcms-supply-queue-title">Frozen supply batches</h2><span class="unknown">Canonical local receipts</span></div><div id="pcms-supply-queue" role="status" aria-live="polite">Loading local batches.</div></section>
+        <section class="panel" aria-labelledby="pcms-ai-jobs-heading">
+          <div class="panel-head"><h2 id="pcms-ai-jobs-heading">I10 test and repair jobs</h2><span class="unknown">Source-bound · no AI provider activation</span></div>
+          <p class="reason">Prepare a job only for an independently verified private stage. Preparation pins the Settings prompt and optional TESTING.md. No helper message is dispatched; no AI test is declared passed until separately observed.</p>
+          <div class="account-controls">
+            <label for="pcms-ai-slug">Exact private stage slug</label><input id="pcms-ai-slug" maxlength="100" spellcheck="false">
+            <label for="pcms-ai-git-token">Private Git read token (ephemeral)</label><input id="pcms-ai-git-token" type="password" autocomplete="off" spellcheck="false">
+            <button id="pcms-ai-prepare" type="button">Prepare source-bound test job</button>
+            <button id="pcms-ai-refresh" type="button">Refresh AI receipts</button>
+            <button id="pcms-ai-run" type="button" disabled>Attempt guarded Chat 1</button>
+            <button id="pcms-ai-observe" type="button" disabled>Reconcile native session and saved source</button>
+            <button id="pcms-ai-opfs" type="button" disabled>Inspect local OPFS (not server proof)</button>
+            <button id="pcms-ai-fresh" type="button" disabled>Verify Chat 2 (gated read-only server history)</button>
+            <button id="pcms-ai-advance" type="button" disabled>Advance one guarded step</button>
+            <button id="pcms-ai-test" type="button" disabled>Run independent browser smoke assertion</button>
+            <button id="pcms-ai-repair" type="button" disabled>Attempt guarded repair of known failure</button>
+            <button id="pcms-ai-newchat" type="button" disabled>Request fresh Chat 2</button>
+            <button id="pcms-ai-chat2" type="button" disabled>Attempt guarded Chat 2</button>
+          </div>
+          <p id="pcms-ai-jobs-status" role="status" aria-live="polite">No AI job has been started.</p>
+          <div id="pcms-ai-job-list" class="table-wrap" role="region" aria-label="AI job receipts" tabindex="0"></div>
+        </section>
       </section>
       <section class="workspace" id="view-accounts" data-view="accounts" aria-labelledby="heading-accounts" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 04</p><h1 id="heading-accounts" tabindex="-1">Accounts</h1><p>Dedicated Persona bindings, human login and provenance-aware verification.</p></div><button type="button" id="pcms-refresh-accounts">Refresh local state</button></header>
@@ -156,6 +177,30 @@
           <p class="reason">Tier 1: cryptographically verified in memory; tier 2: browser-reported completed download with existence and size; tier 3: independent on-disk file readback (not available here). Import/restore is a later phase.</p>
         </section>
         <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">Remote effects off · local backup available</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Off — not implemented</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup / restore and AI tests</dt><dd>Manual encrypted backup available; restore, scheduled backups and AI tests OFF</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No provider settings or operation commands can be changed here. PersonaMonkey retains advanced security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
+        <section class="panel" aria-labelledby="pcms-ai-config-heading">
+          <div class="panel-head"><h2 id="pcms-ai-config-heading">Native AI testing · versioned default prompt</h2><span class="unknown">Native provider activation held</span></div>
+          <p class="reason">New jobs, including updates to existing generators, pin the latest saved Settings revision. Existing jobs retain their original prompt and TESTING.md snapshot. Helper prose is never test evidence.</p>
+          <div class="account-controls">
+            <label for="pcms-ai-prompt">Default testing instructions</label>
+            <textarea id="pcms-ai-prompt" rows="5" maxlength="16000" spellcheck="false" aria-describedby="pcms-ai-config-status"></textarea>
+            <label for="pcms-ai-tests">Independent named assertions (comma separated)</label>
+            <p class="reason">Independent checks currently supported: <code>default_generator_smoke</code>, <code>preview_heading_visible</code>, <code>preview_image_loaded</code>, <code>preview_button_visible</code>, <code>preview_link_visible</code>. Unsupported names remain unverified, never PASS. Optional TESTING.md can declare <code>PCMS_TEST: preview_image_loaded</code>; unstructured testing requests retain a separate unverified hold.</p>
+            <input id="pcms-ai-tests" maxlength="2048" spellcheck="false" placeholder="default_generator_smoke">
+            <button id="pcms-ai-save" type="button">Save new prompt revision</button>
+            <button id="pcms-ai-export" type="button">Export version history</button>
+            <button id="pcms-ai-import" type="button">Import as new revision</button>
+            <label for="pcms-ai-prompt-json">Versioned JSON for import/export</label>
+            <textarea id="pcms-ai-prompt-json" rows="3" maxlength="34000" spellcheck="false"></textarea>
+          </div>
+          <div class="account-controls">
+            <label for="pcms-ai-per-account">Maximum concurrently active AI jobs per account</label>
+            <input id="pcms-ai-per-account" type="number" min="1" max="4" step="1" value="1">
+            <button id="pcms-ai-save-concurrency" type="button">Save AI concurrency</button>
+          </div>
+          <p id="pcms-ai-concurrency-status" role="status" aria-live="polite">Loading canonical AI concurrency.</p>
+          <p id="pcms-ai-config-status" role="status" aria-live="polite">Loading canonical prompt history.</p>
+          <div id="pcms-ai-prompt-history" class="table-wrap" tabindex="0" aria-label="Default AI prompt revision history"></div>
+        </section>
       </section>
     </main>
     <footer class="footer"><span>PCMS Alpha · Stage I09</span><span>UI navigation available · PCMS side effects disabled</span></footer>
@@ -170,5 +215,6 @@
   <script type="module" src="adoption-view.mjs"></script>
   <script type="module" src="backup-view.mjs"></script>
   <script type="module" src="staging-view.mjs"></script>
+  <script type="module" src="ai-view.mjs"></script>
 </body>
 </html>

@@ -28,11 +28,32 @@ export async function perchanceStageMain(request) {
        typeof model?.isClean!=='function'||typeof html?.isClean!=='function'||
        typeof menu?.setSaveState!=='function')
       return held('NATIVE_EDITOR_CONTRACT_UNVERIFIED');
+    // Owners can automatically join their own Yjs room. A provider is
+    // not itself a second collaborator: accept only a synchronized room
+    // with exactly the local awareness client; peers/unknown state HOLD.
+    const initialRoom=window.yjsProvider,initialDoc=window.yDoc,
+      initialGeneration=window.__collabGeneration;
+    const soloCollaboration=()=>{
+      if(window.yjsProvider!==initialRoom||
+         window.yDoc!==initialDoc||
+         window.__collabGeneration!==initialGeneration)return false;
+      if(window.editorCollabInitialSyncIsPending!==false||
+         window.__collabRoomFailed===true||
+         window.collabEditKeyIsIncorrect===true)return false;
+      const provider=window.yjsProvider;
+      if(!provider)return !window.yjsProviderRoomName;
+      const doc=window.yDoc,awareness=window.yjsAwareness;
+      if(!doc||!awareness||typeof awareness.getStates!=='function'||
+         !Number.isSafeInteger(doc.clientID)||
+         provider.wsconnected!==true||provider.synced!==true||
+         typeof window.yjsProviderRoomName!=='string'||
+         provider.roomname!==window.yjsProviderRoomName)return false;
+      const peers=awareness.getStates();
+      return peers instanceof Map&&peers.size===1&&peers.has(doc.clientID);
+    };
     // Actual editor collaborate/dirty structures in Discovery v3. Never treat
     // a beforeunload prompt or HTTP 200 as clean-state evidence.
-    if(window.editorCollabInitialSyncIsPending!==false||
-       window.__collabRoomFailed===true||window.yjsProvider||
-       window.yDoc||window.collabEditKeyIsIncorrect===true)
+    if(!soloCollaboration())
       return held('COLLABORATION_UNVERIFIED');
     if(typeof window.saveCheckpointManager?.isDivergenceBlocked!=='function'||
        window.saveCheckpointManager.isDivergenceBlocked()!==false||
@@ -95,18 +116,19 @@ export async function perchanceStageMain(request) {
        app.data.generator.name!==request.slug||
        menu.saveState!=='saved'||model.isClean()!==true||
        html.isClean()!==true||(await src.isDirty())!==false||
-       window.yjsProvider||window.yDoc||
+       !soloCollaboration()||
        window.saveCheckpointManager.isDivergenceBlocked()!==false)
       return held('EDITOR_CHANGED');
     model.setValue(materialized.get('main.pjs'));
     html.setValue(materialized.get('index.html'));
     for(const [path,value] of materialized) {
       if(intent())return held('HUMAN_HANDOFF_REQUESTED');
+      if(!soloCollaboration())return held('COLLABORATION_CHANGED_DURING_STAGE');
       if(path.startsWith('src/'))await src.writeFile(path.slice(4),value);
     }
     if(intent())return held('HUMAN_HANDOFF_REQUESTED');
     const hasSrcAssets=[...materialized.keys()].some(path=>path.startsWith('src/'));
-    if(window.yjsProvider||window.yDoc||window.__saveInFlight===true||
+    if(!soloCollaboration()||window.__saveInFlight===true||
        window.userOwnsThisGenerator!==true||
        app.data.generator.name!==request.slug||
        menu.saveState!=='unsaved'||

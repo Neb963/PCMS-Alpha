@@ -1,0 +1,42 @@
+{
+  "phaseId": "I10",
+  "planRevision": "S7-AUDITED-DESIGN-1",
+  "proposedDisposition": "SCOPED_F_B_IMPLEMENTATION_COMPLETE_IF_PROVEN_ON_PROTECTED_MAIN",
+  "claim": "I10 implements Settings-versioned and pinned Chat1/optional TESTING Chat2, durable per-account admission and revision-fenced jobs, exact saved-source PJS/HTML/binary src readback, observable named browser assertions, bounded repair/retouch, source-change invalidation, lost ACK and crash recovery, guarded same-route Persona execution and single-owner Yjs collaboration semantics. The first S2 user turn is verified through guarded MAIN-world transient native session selection, independently isolated-world authenticated bounded server history, and site-origin OPFS directory plus current-session worker-init Web Lock witnesses; all facts are fenced by source/revision/route/editor readbacks and cannot grant test PASS before independent browser assertions. Archive-confirmed old S1 Web Lock is sticky after New Chat and explicitly HOLDS until operator reloads clean/idle S2 tab; never equate it with S2 worker proof. Provider activation is gated OFF and true external server/worker behavior is unverified. AI text and commit metadata are untrusted and never authorize Git or publication; exact final-response commit-hint grammar remains proposed under Stage 3 and writeback authority belongs to I11.",
+  "requiredAssertions": [
+    "P52-05",
+    "P52-06",
+    "REQ-D03",
+    "REQ-D04",
+    "REQ-D05",
+    "REQ-D06",
+    "S6-I10-PROMPT-VERSION-IMPORT-EXPORT",
+    "S6-I10-AI-CONCURRENCY"
+  ],
+  "evidenceTierNotes": {
+    "F": "Node fast F suite: i00-i10-history.test.mjs isolated transport vs MAIN session selection and adversarial old transcript, stale session, owner/peer, oversized history; i00-i10-opfs.test.mjs S1 sticky Web Lock and session-local OPFS; i00-i10-chat2-boundary.test.mjs protected gated FRESH_VERIFIED positive/negative; native/editor/staging/core/source-fence/supervisor/store/remote-effect-ledger tests cover revision, dirty, routing, source F, restart, retry, bounded convergence, synthetic server failure and known FAIL. Required candidate exact-head F verification must pass.",
+    "B": "scripts/browser-i00-smoke.py actual persistent combined-XPI installed Firefox Developer Edition: packaged extension module and own sender guards, donor ABI, canonical IndexedDB Chat1/Chat2 source-bound verified/held states, bounded concurrency and CAS, F1 FAIL to F2 full-source/asset repair synthetic convergence and independent retest, protected/native dispatch journaling and crash recovery, isolated server-history wrong-origin negative (no live provider), XPI process restart. Installed Firefox is real; simulated Perchance responses remain synthetic.",
+    "X": "Independent synthetic hostile server/OPFS ledger and native owner/Yjs peer/rebind/dirty, stale source, lost end/send ACK, no arbitrary helper text PASS, forged transcript and routing-key non-exfiltration, S1 sticky lock and wrong-origin negatives. No real multi-client provider or remote-worker X evidence asserted.",
+    "H": "User previously performed one operator-side disposable generator diagnostic: observed local New Chat reset and distinct native S1/S2 salted hashes, clean source; both local OPFS directories absent; no server history or active tools-worker isolation proven. Full live Perchance, Mullvad route, external worker and interrupted provider AI repair requires separately authorized late operator acceptance and is NOT claimed here."
+  },
+  "capabilities": {
+    "aiProviderEffects": "OFF_PENDING_SEPARATE_ACTIVATION",
+    "historyRead": "GATED_OFF_PENDING_SEPARATE_ACTIVATION",
+    "privatePerGensWrites": "OFF_I11",
+    "liveProviderAcceptance": "NOT_CLAIMED",
+    "publish": "OFF_EXACT_SOURCE_HUMAN_APPROVAL_LATER_PHASE",
+    "independentSourceTests": "F_B_SYNTHETIC_PROVEN",
+    "chat2Freshness": "GUARDED_READ_ONLY_POSITIVE_F_B_IMPL_LIVE_UNVERIFIED",
+    "uncertainDispatch": "JOURNALED_POSSIBLE_EFFECT_NO_BLIND_RETRY",
+    "donor": "PINNED_UNMODIFIED_NO_BYPASS",
+    "directRouteFallback": "FORBIDDEN"
+  },
+  "holds": [
+    "Provider AI, site-native session history and protected live operations remain explicitly OFF. Green F/B PR CI is not a current Perchance/provider acceptance.",
+    "A prior S1 page-lifetime Web Lock cannot prove Chat2 worker init; on stale lock fail closed with documented manual clean/idle tab reload rather than auto replay/reload. Missing S2 OPFS namespace or independently isolated server history holds.",
+    "Unknown natural-language tests remain TESTS_UNVERIFIED; known independently observed FAIL remains KNOWN_FAILURE and cannot take an unavailable-test exception. Source F changes invalidate every earlier test.",
+    "Dirty/changed human editor, Yjs peer or collab generation change, route or Persona loss, lost ACK, provider unknown response or canonical revision change hold; no privileged action, Direct fallback, private Git writes or publication.",
+    "No raw native SID, auth routing key, transcript or per-gens source is written to GitHub, AI model responses, diagnostics, or CI."
+  ],
+  "provenance": "In-PR scoped completion proposal only. Do not self-assert future merge SHA, main SHA, CI status, XPI hash or live-provider PASS. The protected exact-candidate workflow, squash merge and postmerge main build/Firefox smoke must separately prove acceptance. Late activation/H remains disabled."
+}
