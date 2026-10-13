@@ -6,7 +6,7 @@ const BAD_PROXY = new Set(['controlled_by_other_extensions', 'not_controllable']
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
-  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab }) {
+  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -184,6 +184,24 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     finally{await releaseConflictGuard(leased);}
   }
 
+  async function inspectStageEditor(personaUid,slug,nonce) {
+    if(typeof inspectStageTab!=='function')return {ok:false,code:'EDITOR_PROBE_UNAVAILABLE'};
+    const leased=await acquireConflictGuard(personaUid);
+    if(!leased?.ready||!leased.leaseId)
+      return {ok:false,code:leased?.code||'GUARD_UNAVAILABLE'};
+    try{
+      const before=await inspectOwnedAction(leased);
+      if(!before?.ready)return {ok:false,code:'GUARD_CHANGED'};
+      const proof=await inspectStageTab(leased,{slug,nonce});
+      const after=await inspectOwnedAction(leased);
+      if(!after?.ready)return {ok:false,code:'POST_READBACK_GUARD_CHANGED'};
+      return proof?.ok===true&&proof.clean===true?
+        {ok:true,source:'GUARDED_EDITOR_CLEAN',clean:true}:
+        {ok:false,code:proof?.code||'EDITOR_UNKNOWN'};
+    }catch{return {ok:false,code:'EDITOR_UNKNOWN'};}
+    finally{await releaseConflictGuard(leased);}
+  }
+
   async function releaseStagingTab(personaUid,slug,nonce) {
     if(typeof handoffStagingTab!=='function')return {ok:false,code:'HANDOFF_UNAVAILABLE'};
     // Release a HUMAN handoff regardless of stale protected route, but only
@@ -196,6 +214,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     observeReadOnly,
     runSupplyStep,
     runStageStep,
+    inspectStageEditor,
     releaseStagingTab,
     listAvailablePersonas,
     listProtectedRoutes: availableRoutes,
