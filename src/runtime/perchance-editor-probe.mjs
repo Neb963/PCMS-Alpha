@@ -6,19 +6,6 @@ export async function perchanceEditorProbe(slug) {
   if(location.origin!=='https://perchance.org'||location.pathname!=='/'+slug||
      location.hash!=='#edit')return hold('EDITOR_TARGET_CHANGED');
   try{
-    const app=window.app,model=window.modelTextEditor,
-      html=window.outputTemplateEditor,src=window.srcState,menu=window.menuBar;
-    if(window.__editorReady!==true||!app?.data?.generator||
-       app.data.generator.name!==slug||app.data.generator.isPrivate!==true||
-       window.userOwnsThisGenerator!==true||
-       typeof model?.isClean!=='function'||typeof html?.isClean!=='function'||
-       typeof src?.isDirty!=='function'||typeof menu?.saveState!=='string')
-      return hold('EDITOR_CONTRACT_UNVERIFIED');
-    if(!soloCollaboration()||
-       typeof window.saveCheckpointManager?.isDivergenceBlocked!=='function'||
-       window.saveCheckpointManager.isDivergenceBlocked()!==false||
-       typeof src.conflictPaths!=='function'||src.conflictPaths().length!==0)
-      return hold('COLLABORATION_UNVERIFIED');
     // Owners can automatically join their own Yjs room. A provider is
     // not itself a second collaborator: accept only a synchronized room
     // with exactly the local awareness client; peers/unknown state HOLD.
@@ -37,6 +24,19 @@ export async function perchanceEditorProbe(slug) {
       const peers=awareness.getStates();
       return peers instanceof Map&&peers.size===1&&peers.has(doc.clientID);
     };
+    const app=window.app,model=window.modelTextEditor,
+      html=window.outputTemplateEditor,src=window.srcState,menu=window.menuBar;
+    if(window.__editorReady!==true||!app?.data?.generator||
+       app.data.generator.name!==slug||app.data.generator.isPrivate!==true||
+       window.userOwnsThisGenerator!==true||
+       typeof model?.isClean!=='function'||typeof html?.isClean!=='function'||
+       typeof src?.isDirty!=='function'||typeof menu?.saveState!=='string')
+      return hold('EDITOR_CONTRACT_UNVERIFIED');
+    if(!soloCollaboration()||
+       typeof window.saveCheckpointManager?.isDivergenceBlocked!=='function'||
+       window.saveCheckpointManager.isDivergenceBlocked()!==false||
+       typeof src.conflictPaths!=='function'||src.conflictPaths().length!==0)
+      return hold('COLLABORATION_UNVERIFIED');
     const host=document.getElementById('pcms-alpha-editor-context');
     if(host?.dataset.pcmsHumanIntent==='true')return hold('HUMAN_HANDOFF_REQUESTED');
     const isDirty=await src.isDirty();
