@@ -1290,8 +1290,8 @@ def main():
                     stale.code==='AI_CHAT2_RESET_NOT_PROVEN'&&
                     pendingDraft.code==='AI_CHAT2_RESET_NOT_PROVEN'&&
                     empty.ok&&send2.ok&&idle2.ok&&
-                    sid1!==sid2&&saved2.evidence.chat1Pass===false&&
-                    saved2.evidence.state==='TESTS_UNVERIFIED'&&
+                    sid1!==sid2&&saved2.evidence?.chat1Pass===false&&
+                    saved2.evidence?.state==='TESTS_UNVERIFIED'&&
                     planned1.type==='RUN_TESTS'&&planned1.chat===1&&
                     replay1.ok&&planned2.type==='RUN_TESTS'&&planned2.chat===2&&
                     replay2.ok&&complete.state==='TESTS_VERIFIED'&&
@@ -1302,7 +1302,9 @@ def main():
                     revoked.slotReleased===false&&
                     revoked.evidence.chat1Pass===false&&
                     revoked.evidence.chat2Pass===false,
-                    saved:saved2.evidence.state,step1:planned1,step2:planned2,
+                    saved:saved2,step1:planned1,step2:planned2,
+                    begun,send1,idle1,snapshot1,pass1,reset,stale,pendingDraft,
+                    empty,send2,idle2,
                     pass2:replay2?.state,complete:complete.state,
                     afterRecheck:afterRecheck.state});
                   db.close();
