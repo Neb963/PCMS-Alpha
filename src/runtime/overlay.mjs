@@ -41,7 +41,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryProbe } from "./pcms/perchance-ai-history.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -248,12 +248,51 @@ attachPcmsGuard({
     if(found.length!==1||tabs.some(t=>t.id!==found[0]?.id&&t.url===expected))
       return {ok:false,code:'AI_EDITOR_OWNERSHIP_AMBIGUOUS'};
     const tab=found[0];
-    const result=await browser.scripting.executeScript({
-      target:{tabId:tab.id,frameIds:[0]},
-      world:request.action==='ORACLE_SMOKE'?'ISOLATED':'MAIN',
-      func:request.action==='ORACLE_SMOKE'?perchanceAiPreviewCheck:\n        request.action==='OBSERVE_OPFS'?perchanceAiOpfsProbe:\n        request.action==='OBSERVE_HISTORY'?perchanceAiHistoryProbe:perchanceAiNative,
-      args:request.action==='ORACLE_SMOKE'?[request.slug,request.name]:[request]
-    });
+    let result;
+    if(request.action==='OBSERVE_HISTORY'){
+      // Never trust MAIN-world fetch: the page can override it. MAIN is
+      // used only to select the native current draft's ephemeral SID/key.
+      // ISOLATED fetches/authenticates the real server and returns only
+      // deidentified evidence. No transcript or secret enters PCMS state.
+      const selector={slug:request.slug,nonce:request.nonce};
+      const selected=await browser.scripting.executeScript({
+        target:{tabId:tab.id,frameIds:[0]},world:'MAIN',
+        func:perchanceAiHistoryCredentials,args:[selector]
+      });
+      if(selected?.length!==1||selected[0].frameId!==0||
+         selected[0].error||selected[0].result?.ok!==true)
+        return {ok:false,code:selected?.[0]?.result?.code||'AI_HISTORY_CREDENTIALS_UNVERIFIED'};
+      const handle=selected[0].result;
+      if(typeof request.firstPrompt!=='string'||request.firstPrompt.length<1||
+         request.firstPrompt.length>16000||
+         !/^[a-f0-9]{64}$/.test(handle.sessionDigest||''))
+        return {ok:false,code:'AI_HISTORY_CONTEXT_UNVERIFIED'};
+      result=await browser.scripting.executeScript({
+        target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
+        func:perchanceAiHistoryIsolated,
+        args:[{...selector,firstPrompt:request.firstPrompt,
+          sessionId:handle.sessionId,routingKey:handle.routingKey,
+          sessionDigest:handle.sessionDigest}]
+      });
+      const reselected=await browser.scripting.executeScript({
+        target:{tabId:tab.id,frameIds:[0]},world:'MAIN',
+        func:perchanceAiHistoryCredentials,args:[selector]
+      });
+      const now=reselected?.[0]?.result;
+      if(reselected?.length!==1||reselected[0].frameId!==0||
+         reselected[0].error||!now?.ok||
+         now.sessionId!==handle.sessionId||
+         now.routingKey!==handle.routingKey||
+         now.sessionDigest!==handle.sessionDigest)
+        return {ok:false,code:'AI_HISTORY_CONTEXT_CHANGED'};
+    }else{
+      result=await browser.scripting.executeScript({
+        target:{tabId:tab.id,frameIds:[0]},
+        world:request.action==='ORACLE_SMOKE'?'ISOLATED':'MAIN',
+        func:request.action==='ORACLE_SMOKE'?perchanceAiPreviewCheck:\n          request.action==='OBSERVE_OPFS'?perchanceAiOpfsProbe:perchanceAiNative,
+        args:request.action==='ORACLE_SMOKE'?[request.slug,request.name]:[request]
+      });
+    }
     const after=await browser.tabs.get(tab.id);
     const tag=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned');
     const again=await getState();
