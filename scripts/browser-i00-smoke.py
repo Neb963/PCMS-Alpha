@@ -936,6 +936,32 @@ def main():
                 assert proof.get('ok') is True,proof
                 assert re.fullmatch('[a-f0-9]{64}',proof.get('hash','')),proof
                 print('B I08_PACKAGED_FIREFOX_ENCRYPTED_IDB_DONOR_ROUNDTRIP=PASS',flush=True)
+
+                # Exercise the actual operator UI and Firefox Downloads API in
+                # this disposable profile. This is not a production on-disk
+                # byte re-read, and must never be called tier 3.
+                bad_password=execute(after,"document.getElementById('pcms-backup-passphrase').value='short';document.getElementById('pcms-backup-export').click();return document.getElementById('pcms-backup-status').textContent")
+                assert '12 characters' in bad_password,bad_password
+                execute(after,"document.getElementById('pcms-backup-passphrase').value='real-packaged-firefox-fixture-passphrase';document.getElementById('pcms-backup-export').click();return true")
+                backup_status=''
+                for _ in range(120):
+                    backup_status=execute(after,"return document.getElementById('pcms-backup-status')?.textContent||''")
+                    if 'Browser reported complete (tier 2)' in backup_status or (
+                        'Backup not confirmed:' in backup_status) or (
+                        'browser download not confirmed:' in backup_status):
+                        break
+                    time.sleep(.25)
+                assert 'Browser reported complete (tier 2)' in backup_status,backup_status
+                assert 'Exact on-disk bytes have NOT been independently re-read' in backup_status,backup_status
+                receipt=execute(after,"return document.getElementById('pcms-overview-backup')?.textContent||''")
+                # Receipt projection is refreshed asynchronously after export.
+                for _ in range(30):
+                    receipt=execute(after,"return document.getElementById('pcms-overview-backup')?.textContent||''")
+                    if 'BROWSER_REPORTED_COMPLETE' in receipt: break
+                    time.sleep(.2)
+                assert 'BROWSER_REPORTED_COMPLETE' in receipt,receipt
+                print('B I08_MANUAL_UI_FIREFOX_DOWNLOAD_TIER2=PASS',flush=True)
+
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
             finally: close(after)
         finally:
