@@ -21,7 +21,7 @@ function encodeUtf8(text){
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const ACT=new Set(['GET_PROMPTS','SET_PROMPT','IMPORT_PROMPT','EXPORT_PROMPTS',
   'LIST_JOBS','GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS',
-  'GET_CONCURRENCY','SET_CONCURRENCY','ADVANCE_JOB','INSPECT_WORKSPACE']);
+  'GET_CONCURRENCY','SET_CONCURRENCY','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2']);
 export function validateAiMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;
@@ -34,18 +34,18 @@ export function validateAiMessage(api,sender,message){
   const allowed=message.type==='GET_JOB'?['slug']:
     message.type==='PREPARE_JOB'?['slug','expectedStageRevision','token']:
     message.type==='BEGIN_NATIVE'?['slug','expectedRevision','step']:
-    ['PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE'].includes(message.type)?['slug','expectedRevision']:
+    ['PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)?['slug','expectedRevision']:
     message.type==='SET_CONCURRENCY'?['perAccount','expectedRevision']:
     message.type==='SET_PROMPT'?['text','tests','expectedRevision']:
     message.type==='IMPORT_PROMPT'?['envelope','expectedRevision']:[];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
-  if(['GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE'].includes(message.type)&&!SLUG.test(p.slug||''))
+  if(['GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&!SLUG.test(p.slug||''))
     return fail('INVALID_SLUG');
   if(message.type==='PREPARE_JOB'&&
      (!Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
       typeof p.token!=='string'||p.token.length<10||p.token.length>512))
     return fail('INVALID_PARAMS');
-  if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE'].includes(message.type)&&
+  if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
       (message.type==='BEGIN_NATIVE'&&
        !['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','STOP'].includes(p.step))))
@@ -95,7 +95,7 @@ export function createAiBoundary(api,{
         }});
         return {...result,plannedStep:next.type+(next.step?'_'+next.step:'')};
       }
-      if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','INSPECT_WORKSPACE'].includes(message.type)){
+      if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)){
         const sealed=await store.getJobFull(p.slug);
         if(!sealed.ok)return sealed;
         const job=sealed.job;
@@ -146,6 +146,62 @@ export function createAiBoundary(api,{
             isolation:'UNVERIFIED',serverEndAck:'UNOBSERVED',
             sourceFingerprint:job.sourceFingerprint,
             tests:'AI_CHAT2_ISOLATION_UNVERIFIED'};
+        }
+        if(message.type==='VERIFY_FRESH_CHAT2'){
+          // A deliberate read-only server history request is still a live
+          // provider observation. It is separately gated OFF by default;
+          // a green PR or background alarm must never activate it.
+          if(effectGate({phase:'I10',job,stage:r,step:'READ_ONLY_HISTORY'})!==true)
+            return fail('AI_SERVER_HISTORY_ACTIVATION_HELD');
+          if(job.native?.state!=='CHAT2_OBSERVED_IDLE'||
+             job.chat2?.state!=='FRESH_OBSERVED'||
+             !job.chat2.sessionDigest||!job.optionalTesting?.text||
+             job.chat2.sessionDigest===job.chat1.sessionDigest||
+             !job.finalSource||job.finalSource.fingerprint!==job.sourceFingerprint)
+            return fail('AI_CHAT2_SESSION_UNVERIFIED');
+          const before=await g.runNativeAiStep(r.personaUid,{
+            slug:r.slug,nonce:r.nonce,action:'OBSERVE'});
+          if(!before?.ok||before.busy!==false||
+             before.sessionDigest!==job.chat2.sessionDigest||
+             before.editorClean!==true||before.sourceSaved!==true||
+             before.hasQueue!==false||before.inputOccupied!==false||
+             before.attachmentsPending!==false)
+            return fail('AI_CHAT2_CONTEXT_UNVERIFIED');
+          const workspace=await g.runNativeAiStep(r.personaUid,{
+            slug:r.slug,nonce:r.nonce,action:'OBSERVE_OPFS'});
+          // A missing or inaccessible namespace is NOT a negative assertion
+          // of isolation: hold rather than searching/recreating directories.
+          if(!workspace?.ok||
+             workspace.workspaceRootState!=='PRESENT_UNTRUSTED'||
+             workspace.sessionDigest!==before.sessionDigest||
+             workspace.isolation!=='UNVERIFIED')
+            return fail('AI_CHAT2_WORKSPACE_UNVERIFIED');
+          const history=await g.runNativeAiStep(r.personaUid,{
+            slug:r.slug,nonce:r.nonce,action:'OBSERVE_HISTORY',
+            firstPrompt:job.optionalTesting.text});
+          if(!history?.ok||history.sessionDigest!==before.sessionDigest||
+             history.serverHistory!=='FIRST_USER_IS_T1')
+            return fail(history?.code||'AI_CHAT2_SERVER_HISTORY_UNVERIFIED');
+          const afterRoute=await g.getSafeRouteReadiness(r.personaUid);
+          const after=await g.runNativeAiStep(r.personaUid,{
+            slug:r.slug,nonce:r.nonce,action:'OBSERVE'});
+          const stageNow=await stageFactory(db).getFull(p.slug);
+          const editor=await g.inspectStageEditor?.(r.personaUid,r.slug,r.nonce);
+          if(!afterRoute?.ready||
+             afterRoute.cookieStoreId!==route.cookieStoreId||
+             afterRoute.routeId!==route.routeId||
+             !after?.ok||after.busy!==false||
+             after.sessionDigest!==before.sessionDigest||
+             after.editorClean!==true||after.sourceSaved!==true||
+             after.hasQueue!==false||after.inputOccupied!==false||
+             after.attachmentsPending!==false||
+             !stageNow?.ok||stageNow.record.state!=='SOURCE_VERIFIED'||
+             stageNow.record.revision!==r.revision||
+             stageNow.record.nonce!==r.nonce||
+             editor?.ok!==true||editor.clean!==true||
+             (await sentinel.inspect()).held)
+            return fail('AI_CHAT2_CONTEXT_CHANGED_DURING_HISTORY');
+          return store.verifySecondChat(p.slug,p.expectedRevision,history,workspace);
         }
         if(message.type==='RUN_TESTS'){
           // No UI/model-supplied assertion source, result, test ID, frame,
