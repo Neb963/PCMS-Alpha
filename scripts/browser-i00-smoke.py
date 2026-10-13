@@ -1583,8 +1583,8 @@ def main():
                 # I11 B: exact installed-XPI UI controls and real IDB canonical
                 # writeback CAS. No real Git or provider effect is attempted.
                 call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
-                ui=execute(after,"return {preview:!!document.getElementById('pcms-writeback-preview'),prepare:!!document.getElementById('pcms-writeback-prepare'),commit:!!document.getElementById('pcms-writeback-commit'),reconcile:!!document.getElementById('pcms-writeback-reconcile'),status:!!document.getElementById('pcms-writeback-status'),arm:!!document.getElementById('pcms-writeback-arm-auto'),disarm:!!document.getElementById('pcms-writeback-disarm-auto')}")
-                assert ui=={'preview':True,'prepare':True,'commit':True,'reconcile':True,'status':True,'arm':True,'disarm':True},ui
+                ui=execute(after,"return {preview:!!document.getElementById('pcms-writeback-preview'),prepare:!!document.getElementById('pcms-writeback-prepare'),commit:!!document.getElementById('pcms-writeback-commit'),reconcile:!!document.getElementById('pcms-writeback-reconcile'),status:!!document.getElementById('pcms-writeback-status'),cancel:!!document.getElementById('pcms-writeback-cancel'),arm:!!document.getElementById('pcms-writeback-arm-auto'),disarm:!!document.getElementById('pcms-writeback-disarm-auto')}")
+                assert ui=={'preview':True,'prepare':True,'commit':True,'reconcile':True,'status':True,'cancel':True,'arm':True,'disarm':True},ui
                 # Actual installed-XPI button clicks must produce visible
                 # responses rather than only existing in the DOM.
                 execute(after,"const el=document.getElementById('pcms-writeback-slug');el.value='missing-private';el.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('pcms-writeback-preview').click();return true")
@@ -1674,6 +1674,12 @@ def main():
                   const reboot2=await store.get(secondSlug);
                   const reopened=await (await import('./journal.mjs')).openCanonicalDatabase();
                   const persisted=await (await import('./writeback-store.mjs')).createWritebackStore(reopened).get(slug);
+                  const canceled=await store.cancelPrepared(slug,persisted.revision);
+                  const repeatCancel=await store.cancelPrepared(slug,canceled.revision);
+                  const reprepared=await store.prepare({name:slug,stage,job,
+                    probe:{head,baseHead:head,folder:stage.sourceFolder},
+                    mode:'MANUAL',message:'fix: new explicit review',
+                    operationId:'writeback_'+'3'.repeat(32)});
                   const persistedFull=(await (await import('./writeback-store.mjs')).createWritebackStore(reopened).getFull(secondSlug)).record;
                   const sealedSurvivesRestart=JSON.stringify(persistedFull.sealedSource)===
                     JSON.stringify(sealed);
@@ -1685,7 +1691,11 @@ def main():
                     prepared2.ok&&armed2.state==='DISPATCH_POSSIBLE'&&
                     duplicate2.code==='WRITEBACK_RECONCILIATION_REQUIRED'&&
                     reboot2.state==='DISPATCH_POSSIBLE'&&
-                    sealedExact&&sealedSurvivesRestart,
+                    sealedExact&&sealedSurvivesRestart&&
+                    canceled.state==='CANCELED'&&
+                    repeatCancel.code==='CANNOT_CANCEL_POSSIBLE_GIT_EFFECT'&&
+                    reprepared.state==='PREPARED'&&
+                    reprepared.revision===canceled.revision+1,
                     prepared,wrong,revoked,still,persisted,effect});
                   reopened.close();db.close();
                 })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,400)}));"""
