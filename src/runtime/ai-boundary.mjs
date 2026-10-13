@@ -313,6 +313,27 @@ export function createAiBoundary(api,{
         const afterSource=await g.getSafeRouteReadiness(r.personaUid);
         if(!afterSource?.ready||afterSource.cookieStoreId!==route.cookieStoreId||
            afterSource.routeId!==route.routeId)return fail('AI_POST_SOURCE_GUARD_CHANGED');
+        // A full source readback may take seconds. An AI edit, human draft,
+        // resume or changed native session during that interval invalidates
+        // the initial idle observation; source F must not be checkpointed
+        // against a stale conversation snapshot.
+        const finalNative=await g.runNativeAiStep(r.personaUid,{
+          slug:r.slug,nonce:r.nonce,action:'OBSERVE'
+        });
+        if(!finalNative?.ok||finalNative.busy!==false||
+           finalNative.sessionDigest!==observation.sessionDigest||
+           finalNative.sourceSaved!==true||finalNative.editorClean!==true||
+           finalNative.inputOccupied!==false||
+           finalNative.attachmentsPending!==false||
+           finalNative.hasQueue!==false||(await sentinel.inspect()).held)
+          return fail('AI_NATIVE_CHANGED_DURING_SOURCE_READBACK');
+        // Stage identity also belongs to the source fence: a concurrent
+        // human handoff or restage must not certify the previous owner.
+        const stageNow=await stageFactory(db).getFull(p.slug);
+        if(!stageNow?.ok||stageNow.record.revision!==r.revision||
+           stageNow.record.state!=='SOURCE_VERIFIED'||
+           stageNow.record.nonce!==r.nonce)
+          return fail('AI_STAGE_CHANGED_DURING_SOURCE_READBACK');
         const checkpoint=await store.checkpointSource(p.slug,reconciled.revision,snapshot);
         return checkpoint.ok?{...checkpoint,tests:'INDEPENDENT_ORACLE_REQUIRED',
           source:'GUARDED_FULL_SOURCE_BYTES'}:checkpoint;
