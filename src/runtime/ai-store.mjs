@@ -382,9 +382,9 @@ export function createAiStore(db){
           const j=c.value?.job;
           if(typeof c.key==='string'&&c.key.startsWith('ai-job:')&&
              j?.native?.state==='DISPATCH_POSSIBLE'&&
-             !(j.state==='HELD_RECONCILE'&&
-               j.hold==='NATIVE_EFFECT_MAY_HAVE_OCCURRED')){
+             j.native.recoveryObserved!==true){
             const next={...j,revision:j.revision+1,
+              native:{...j.native,recoveryObserved:true},
               state:'HELD_RECONCILE',hold:'NATIVE_EFFECT_MAY_HAVE_OCCURRED'};
             c.update({...c.value,job:next});
             t.objectStore('events').add({stage:'AI_CRASH_HOLD',slug:j.slug,
