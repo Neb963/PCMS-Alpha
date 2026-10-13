@@ -1687,7 +1687,7 @@ def main():
                     prepared.ok&&disabled.ok&&
                     revoked.code==='WRITEBACK_ADMISSION_REVOKED'&&
                     still.state==='PREPARED'&&persisted.state==='PREPARED'&&
-                    effect.code==='GITHUB_WRITE_ACTIVATION_HELD'&&
+                    effect.code==='GIT_AUTO_DISARMED'&&
                     prepared2.ok&&armed2.state==='DISPATCH_POSSIBLE'&&
                     duplicate2.code==='WRITEBACK_RECONCILIATION_REQUIRED'&&
                     reboot2.state==='DISPATCH_POSSIBLE'&&
