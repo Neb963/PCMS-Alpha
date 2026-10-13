@@ -7,7 +7,15 @@ export const MAX_ARCHIVE_BYTES=64*1024*1024;
 const codec=new TextEncoder(),decoder=new TextDecoder('utf-8',{fatal:true});
 const token='__pcmsType';
 const requireValid=(ok,code)=>{if(!ok)throw Error(code);};
-const plain=o=>o!==null&&typeof o==='object'&&(Object.getPrototypeOf(o)===Object.prototype||Object.getPrototypeOf(o)===null);
+// IndexedDB/Firefox WebDriver may cross JS compartments. Recognize ordinary
+// objects by a direct root prototype while still rejecting class instances.
+const plain=o=>{
+  if(o===null||typeof o!=='object')return false;
+  const p=Object.getPrototypeOf(o);
+  return p===null||p===Object.prototype||
+    (Object.prototype.toString.call(o)==='[object Object]'&&
+      p!==null&&Object.getPrototypeOf(p)===null);
+};
 function base64(bytes){
   let out='';
   for(let i=0;i<bytes.length;i+=0x4000)out+=String.fromCharCode(...bytes.subarray(i,i+0x4000));
