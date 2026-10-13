@@ -21,7 +21,7 @@ function encodeUtf8(text){
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const ACT=new Set(['GET_PROMPTS','SET_PROMPT','IMPORT_PROMPT','EXPORT_PROMPTS',
   'LIST_JOBS','GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS',
-  'GET_CONCURRENCY','SET_CONCURRENCY','ADVANCE_JOB']);
+  'GET_CONCURRENCY','SET_CONCURRENCY','ADVANCE_JOB','INSPECT_WORKSPACE']);
 export function validateAiMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;
@@ -34,18 +34,18 @@ export function validateAiMessage(api,sender,message){
   const allowed=message.type==='GET_JOB'?['slug']:
     message.type==='PREPARE_JOB'?['slug','expectedStageRevision','token']:
     message.type==='BEGIN_NATIVE'?['slug','expectedRevision','step']:
-    ['PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB'].includes(message.type)?['slug','expectedRevision']:
+    ['PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE'].includes(message.type)?['slug','expectedRevision']:
     message.type==='SET_CONCURRENCY'?['perAccount','expectedRevision']:
     message.type==='SET_PROMPT'?['text','tests','expectedRevision']:
     message.type==='IMPORT_PROMPT'?['envelope','expectedRevision']:[];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
-  if(['GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB'].includes(message.type)&&!SLUG.test(p.slug||''))
+  if(['GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE'].includes(message.type)&&!SLUG.test(p.slug||''))
     return fail('INVALID_SLUG');
   if(message.type==='PREPARE_JOB'&&
      (!Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
       typeof p.token!=='string'||p.token.length<10||p.token.length>512))
     return fail('INVALID_PARAMS');
-  if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB'].includes(message.type)&&
+  if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
       (message.type==='BEGIN_NATIVE'&&
        !['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','STOP'].includes(p.step))))
@@ -95,7 +95,7 @@ export function createAiBoundary(api,{
         }});
         return {...result,plannedStep:next.type+(next.step?'_'+next.step:'')};
       }
-      if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS'].includes(message.type)){
+      if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','INSPECT_WORKSPACE'].includes(message.type)){
         const sealed=await store.getJobFull(p.slug);
         if(!sealed.ok)return sealed;
         const job=sealed.job;
@@ -108,6 +108,43 @@ export function createAiBoundary(api,{
           return fail('NATIVE_AI_GUARD_UNAVAILABLE');
         const route=await g.getSafeRouteReadiness(r.personaUid);
         if(!route?.ready)return fail(route?.code||'ROUTE_UNVERIFIED');
+        if(message.type==='INSPECT_WORKSPACE'){
+          // A local OPFS read is only a diagnostic; no server end ACK or
+          // tools-worker workspace namespace proof is available.
+          if(job.native?.state!=='CHAT2_OBSERVED_IDLE'||
+             job.chat2?.state!=='FRESH_OBSERVED'||
+             !job.chat2.sessionDigest||job.chat2.sessionDigest===job.chat1.sessionDigest)
+            return fail('AI_CHAT2_SESSION_UNVERIFIED');
+          const before=await g.runNativeAiStep(r.personaUid,{
+            slug:r.slug,nonce:r.nonce,action:'OBSERVE'
+          });
+          if(!before?.ok||before.busy||
+             before.sessionDigest!==job.chat2.sessionDigest)
+            return fail('AI_WORKSPACE_SESSION_CHANGED');
+          const inspected=await g.runNativeAiStep(r.personaUid,{
+            slug:r.slug,nonce:r.nonce,action:'OBSERVE_OPFS'
+          });
+          const after=await g.getSafeRouteReadiness(r.personaUid);
+          if(!after?.ready||after.cookieStoreId!==route.cookieStoreId||
+             after.routeId!==route.routeId||(await sentinel.inspect()).held)
+            return fail('AI_WORKSPACE_ROUTE_CHANGED');
+          const again=await g.runNativeAiStep(r.personaUid,{
+            slug:r.slug,nonce:r.nonce,action:'OBSERVE'
+          });
+          if(!again?.ok||again.busy||again.sessionDigest!==before.sessionDigest)
+            return fail('AI_WORKSPACE_CONTEXT_CHANGED');
+          if(!inspected?.ok||inspected.sessionDigest!==before.sessionDigest||
+             inspected.slug!==r.slug||
+             inspected.isolation!=='UNVERIFIED'||
+             inspected.serverEndAck!=='UNOBSERVED')
+            return fail(inspected?.code||'AI_LOCAL_WORKSPACE_UNVERIFIED');
+          return {ok:true,code:'OPFS_LOCAL_ONLY_SERVER_UNVERIFIED',
+            localOpfsAccessible:inspected.localOpfsAccessible===true,
+            attachmentState:inspected.attachmentState,
+            isolation:'UNVERIFIED',serverEndAck:'UNOBSERVED',
+            sourceFingerprint:job.sourceFingerprint,
+            tests:'AI_CHAT2_ISOLATION_UNVERIFIED'};
+        }
         if(message.type==='RUN_TESTS'){
           // No UI/model-supplied assertion source, result, test ID, frame,
           // run timestamp or claimed session: the guarded browser supplies it.
