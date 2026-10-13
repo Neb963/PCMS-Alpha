@@ -302,7 +302,13 @@ export function createWritebackBoundary(api,{
           expectedJobRevision:candidate.jobRevision,
           fingerprint:candidate.sourceFingerprint
         }});
-        if(!prepared.ok)continue;
+        if(!prepared.ok){
+          // Final F was eligible but its live evidence/remote comparison
+          // failed. Do not poll/replay indefinitely on each browser wake.
+          // Operator may explicitly re-arm after investigating the hold.
+          autoCredentials.delete(slug);
+          return fail(prepared.code||'GIT_AUTO_PREPARE_HELD');
+        }
         // Remove the only credential BEFORE attempting any Git mutation:
         // wake duplicates cannot dispatch or re-arm the same operation.
         autoCredentials.delete(slug);
