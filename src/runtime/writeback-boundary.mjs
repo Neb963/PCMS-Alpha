@@ -15,7 +15,7 @@ export const WRITEBACK_PORT='pcms-i11-writeback';
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const FP=/^[a-f0-9]{64}$/;
 const ACTIONS=new Set(['GET_SETTINGS','SET_AUTO','LIST','GET','PREVIEW',
-  'PREPARE','COMMIT','RECONCILE','ARM_AUTO','DISARM_AUTO']);
+  'PREPARE','COMMIT','RECONCILE','CANCEL_PREPARED','ARM_AUTO','DISARM_AUTO']);
 export function validateWritebackMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
@@ -30,6 +30,7 @@ export function validateWritebackMessage(api,sender,msg){
     PREPARE:['slug','expectedJobRevision','fingerprint','mode','message','token'],
     COMMIT:['slug','expectedRevision','token'],
     RECONCILE:['slug','expectedRevision','token'],
+    CANCEL_PREPARED:['slug','expectedRevision'],
     ARM_AUTO:['slug','token'],DISARM_AUTO:['slug']
   };
   if(Object.keys(p).some(x=>!allowed[msg.type].includes(x))||
@@ -39,7 +40,7 @@ export function validateWritebackMessage(api,sender,msg){
      (msg.type==='PREPARE'&&(!Number.isSafeInteger(p.expectedJobRevision)||
         p.expectedJobRevision<1||!FP.test(p.fingerprint||'')||
         !['MANUAL','AUTO'].includes(p.mode)))||
-     (['COMMIT','RECONCILE'].includes(msg.type)&&
+     (['COMMIT','RECONCILE','CANCEL_PREPARED'].includes(msg.type)&&
         (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
      (['PREPARE','COMMIT','RECONCILE','ARM_AUTO'].includes(msg.type)&&
         (typeof p.token!=='string'||p.token.length<12||p.token.length>512)))
@@ -143,7 +144,9 @@ export function createWritebackBoundary(api,{
       if(autoCredentials.size>=16&&!autoCredentials.has(p.slug))
         return fail('GIT_AUTO_EPHEMERAL_LIMIT');
       const prior=await store.get(p.slug);
-      if(prior.ok&&!(prior.state==='PREPARED'&&prior.mode==='AUTO'))
+      if(prior.ok&&!(
+        (prior.state==='PREPARED'&&prior.mode==='AUTO')||
+        prior.state==='CANCELED'))
         return fail('WRITEBACK_ALREADY_EXISTS');
       // Every explicit arm gets a NEW identity; disarm followed by rearm
       // with the same token cannot revive an old suspended attempt.
@@ -152,6 +155,12 @@ export function createWritebackBoundary(api,{
       try{api.alarms?.create('pcms-i11-auto',{periodInMinutes:1});}catch{}
       return {ok:true,slug:p.slug,code:'AUTO_EPHEMERAL_ARMED',
         persistence:'NONE',publication:'OFF'};
+    }
+    if(msg.type==='CANCEL_PREPARED'){
+      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      const result=await store.cancelPrepared(p.slug,p.expectedRevision);
+      if(result.ok)autoCredentials.delete(p.slug);
+      return result;
     }
     const stage=await stageFactory(db).getFull(p.slug),
       job=await aiFactory(db).getJobFull(p.slug);
@@ -306,7 +315,7 @@ export function createWritebackBoundary(api,{
       for(const [slug,credential] of autoCredentials){
         const {token,armId}=credential;
         const current=await store.get(slug);
-        if(current.ok){
+        if(current.ok&&current.state!=='CANCELED'){
           if(current.state==='PREPARED'&&current.mode==='AUTO'){
             if(autoCredentials.get(slug)?.armId!==armId)
               return fail('GIT_AUTO_DISARMED');
