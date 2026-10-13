@@ -50,7 +50,7 @@ export function releaseGitContext(stage,probe) {
   // A relevant Git HEAD change must be interpreted by inspectGitSource,
   // never by comparing raw main HEADs (unrelated commits are allowed).
   if(!probe?.ok||probe.ready!==true||probe.folder!==stage?.sourceFolder||
-     !fp(probe.fingerprint)||!Array.isArray(probe.files)||
+     !fp(probe.fingerprint)||!Array.isArray(probe.paths)||
      !/^[a-f0-9]{40}$/.test(probe.head||''))
     return fail('RELEASE_READY_NOT_VERIFIED');
   if(probe.testingSha!==stage.testingSha)
