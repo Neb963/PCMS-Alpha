@@ -125,7 +125,7 @@ export function createReleaseBoundary(api,{
          existingRow.record.remotePublicId!==r.remotePublicId||
          existingRow.record.accountRevision!==r.accountRevision||
          existingRow.record.bindingVersion!==r.bindingVersion||
-         existingRow.record.stagedFingerprint!==j.verifiedFinal)
+         !existingRow.record.stageSource?.ok)
         return fail('EXISTING_STAGE_OR_FINAL_F_UNVERIFIED');
       const unlocked=await unlockPrevious(existingRow.record.recovery,passphrase);
       if(!unlocked.ok||unlocked.source.fingerprint!==r.previous.fingerprint)
@@ -233,6 +233,12 @@ export function createReleaseBoundary(api,{
       if(p.expectedStageRevision!==checked.r.revision||
          p.expectedJobRevision!==checked.j.revision||
          p.fingerprint!==checked.source.fingerprint)return fail('APPROVAL_VIEW_STALE');
+      if(checked.kind==='EXISTING_UPDATE'&&
+         checked.existing.stagedFingerprint!==checked.source.fingerprint){
+        const stored=await createExistingStore(database).setFinal(p.slug,
+          checked.existing.revision,checked.source);
+        if(!stored.ok)return stored;
+      }
       const facts=await ownerFacts(database,p.slug);
       return store.approve({approval:{ok:true,tuple:checked.approval},
         stage:checked.r,job:checked.j,account:facts.account,
@@ -246,6 +252,9 @@ export function createReleaseBoundary(api,{
         return fail('STALE_RELEASE');
       if(!matchesApproval(stored.record.approval,checked.approval).ok)
         return fail('APPROVAL_STALE');
+      if(checked.kind==='EXISTING_UPDATE'&&
+         checked.existing.stagedFingerprint!==checked.source.fingerprint)
+        return fail('EXISTING_FINAL_F_NOT_PINNED');
       if(effectGate({phase:'I13',record:stored.record})!==true)
         return fail('PUBLICATION_ACTIVATION_HELD');
       // The dispatch-possible transition commits *before* the only effect.
