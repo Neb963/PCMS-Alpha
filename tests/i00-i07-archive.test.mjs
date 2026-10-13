@@ -78,7 +78,7 @@ test('P53-04/05 early Git archive preserves byte-equivalent local originals and 
   assert.equal(result.source,'INDEPENDENT_GIT_BYTE_READBACK');
   assert.equal(result.createdMarker,true);
   assert.equal(result.ready,false);
-  assert.equal(result.prefix,archiveLocation(slug,f));
+  assert.equal(result.prefix,archiveLocation(slug,original.fingerprint));
   assert.equal(f.counts().patch,1);
   const read=await inspectArchive(request,f.transport);
   assert.equal(read.ok,true);
@@ -123,7 +123,7 @@ test('independent archive readback rejects corrupted provider Git blob',async()=
 });
 test('I07 trusted port rejects forged caller, arbitrary Git writes and payload',async()=>{
   const api={runtime:{id:'persona-route-manager@local',
-    getURL:()=> 'moz-extension://fixture/pcms/index.html'}};
+    getURL:path=>'moz-extension://fixture/'+path}};
   const sender={id:api.runtime.id,url:'moz-extension://fixture/pcms/index.html#generators'};
   assert.equal(validateAdoptionMessage(api,sender,{type:'ARCHIVE_GIT',
     params:{slug:'example',expectedRevision:1,token}}).ok,true);
