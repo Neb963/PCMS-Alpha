@@ -7,6 +7,7 @@ async function withPage(config,fn){
   const body={children:[{}],textContent:'Generator ready',
     getClientRects:()=>[{}]};
   const preview={readyState:'complete',body,
+    defaultView:{getComputedStyle:()=>({display:'block',visibility:'visible',opacity:'1'})},
     getElementById:()=>config.error?{id:'perchance-error-indicator'}:null,
     querySelector:()=>config.error?{id:'perchance-error-indicator'}:null,
     querySelectorAll:()=>[]};
