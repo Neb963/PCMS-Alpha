@@ -103,3 +103,13 @@ test('F2 Stage 3 supersession: default instruction permits full generator assets
   assert.doesNotMatch(DEFAULT_AI_PROMPT,/repair only main PJS and HTML|Do not touch src assets/);
   assert.match(DEFAULT_AI_PROMPT,/Do not touch other generators, GitHub, account settings, publication or routing/);
 });
+
+test('P52-06 X: distinct Chat2 SID without independent OPFS/workspace evidence cannot convert test result into PASS',()=>{
+  let j=send(start(true),session(1,S1));
+  j=send(j,pass(1,'smoke'));j=send(j,pass(1,'visible'));
+  j.chat2.sessionDigest=S2;
+  j.chat2.state='FRESH_OBSERVED'; // native hashed SID + empty local transcript only
+  assert.equal(evaluation(j).state,'TESTS_UNVERIFIED');
+  assert.equal(applyAiEvidence(j,pass(2,'optional')).code,'AI_CHAT2_ISOLATION_UNVERIFIED');
+  assert.equal(j.chat2.tests.optional,undefined);
+});
