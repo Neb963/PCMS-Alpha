@@ -1,0 +1,40 @@
+{
+  "phaseId": "I07",
+  "planRevision": "S7-AUDITED-DESIGN-1",
+  "proposedDisposition": "SCOPED_F_B_IMPLEMENTATION_COMPLETE_IF_PROVEN_ON_PROTECTED_MAIN",
+  "claim": "Current-owner and principal-fenced public/unlisted existing-generator adoption, explicit public consent, independently repeated original-source readback including PJS/HTML and verified /src bytes, canonical immutable local baseline, scoped tombstone and no-overwrite private Git original archive with durable before-dispatch journal, independent ref/blob readback and reconciliation. Ordinary provider writes, live private Git mutation and publication remain OFF.",
+  "requiredAssertions": [
+    "P52-03",
+    "S6-I07-ORIGINAL-ARCHIVE",
+    "S6-I07-TOMBSTONE",
+    "REQ-G07",
+    "REQ-D11"
+  ],
+  "evidenceTierNotes": {
+    "F": "tests/i00-i07-adoption.test.mjs, i00-i07-original-page.test.mjs, i00-i07-archive.test.mjs: exact-byte original, hostile manifest, slug/owner/consent, no overwrite, uncertain PATCH and independent Git DAG. Exact candidate green required.",
+    "B": "scripts/browser-i00-smoke.py: real installed combined-XPI Firefox Developer Edition, canonical IndexedDB and trusted adoption port with two fixed synthetic protected source readbacks, synthetic Git effect marker, default packaged Git gate HOLD and tombstone. Packaged current-merge-candidate and postmerge actual green required.",
+    "X": "No independent cross-system or live adversarial proof. F includes deliberately independent negative oracles and fault injection; do not upgrade their evidence tier.",
+    "H": "NOT RUN: live Perchance/asset CDN, donor protected route owner status and private per-gens write compatibility require separately authorized operator acceptance and are not implementation F/B tests."
+  },
+  "capabilities": {
+    "originalReadOnlyCapture": "GUARDED_OPERATOR_ACTION",
+    "publicConsent": "EXPLICIT_TARGET_SCOPED",
+    "localImmutableOriginal": "ON_WITH_CANONICAL_VERIFIED_BYTES",
+    "originalTombstone": "LOCAL_ONLY_NO_PROVIDER_DELETION",
+    "nonOverwriteGitArchive": "IMPLEMENTED_F_B_SYNTHETIC; LIVE_ACTIVATION_OFF",
+    "gitReconciliation": "READ_ONLY_AFTER_DISPATCH_POSSIBLE",
+    "providerWrites": "OFF",
+    "sourceGitWrites": "OFF",
+    "publishing": "OFF",
+    "donorRouteControl": "UNCHANGED",
+    "liveProviderAcceptance": "NOT_CLAIMED"
+  },
+  "holds": [
+    "Unexpected owner/persona/principal/slug/revision change, missing or corrupt source files, unknown source manifest or CDN byte evidence remains held; public adoption does not grant deployment authority.",
+    "Originals are immutable local byte snapshots, not a substitute for encrypted I08 backup or operator approval. No overwrite or change to the remote published generator.",
+    "Git private main is nonforced, exact archive prefix collision held, non-READY source marker only; lost commit/ref ack stays DISPATCH_POSSIBLE/HELD_UNCERTAIN until independent reconciliation.",
+    "Packaged private Git write gate remains OFF pending independent live activation; dormant implementation is exercised with positive fake remote and packaged real IDB oracles.",
+    "No live Perchance, native, Mullvad, Cloudflare, private per-gens mutation or CI trust-root modification performed in this phase."
+  ],
+  "provenance": "In-PR completion proposal excludes branch/head, CI run SHA, XPI hash, future merge or self-referential main SHA. Protected squash merge and actual postmerge proof determine acceptance."
+}
