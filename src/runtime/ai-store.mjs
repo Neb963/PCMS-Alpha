@@ -199,6 +199,7 @@ export function createAiStore(db){
        history.serverHistory!=='FIRST_USER_IS_T1'||
        workspace?.ok!==true||workspace.isolation!=='UNVERIFIED'||
        workspace.workspaceRootState!=='PRESENT_UNTRUSTED'||
+       workspace.workerNamespace!=='CURRENT_SESSION_WORKER_INIT_LOCK'||
        history.sessionDigest!==workspace.sessionDigest||
        history.sessionDigest===undefined)
       return Promise.resolve(fail('AI_FRESH_CHAT_EVIDENCE_UNVERIFIED'));
