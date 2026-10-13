@@ -85,6 +85,9 @@ export function createAdoptionStore(db){
         if(!a){done(fail('ADOPTION_NOT_FOUND'));return;}
         if(a.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
         if(a.archived){done(publicAdoption(a));return;}
+        if(!['ARCHIVE_PENDING','ARCHIVED_GIT_CONFIRMED'].includes(a.archiveState)){
+          done(fail('ARCHIVE_RECONCILIATION_REQUIRED'));return;
+        }
         const next={...a,revision:a.revision+1,archived:true,management:'ARCHIVED_TOMBSTONE'};
         m.put({key:key(slug),adoption:next});
         t.objectStore('events').add({stage:'ADOPTION_ARCHIVED_TOMBSTONE',slug,
@@ -105,7 +108,7 @@ export function createAdoptionStore(db){
   // Independent remote effect journal. The operation record and canonical
   // archive fence commit in ONE IDB transaction before any Git ref attempt.
   function archiveStage(slug,expectedRevision,event,proof=null){
-    if(!['PREPARE','MARK_DISPATCH','HELD_UNCERTAIN','CONFIRM'].includes(event))
+    if(!['PREPARE','MARK_DISPATCH','HELD_UNCERTAIN','CONFIRM','ABORT_PREPARED'].includes(event))
       return Promise.resolve(fail('CAPABILITY_OFF'));
     return new Promise((resolve,reject)=>{
       let result=fail('ARCHIVE_TRANSACTION_INCOMPLETE'),t;
@@ -121,6 +124,7 @@ export function createAdoptionStore(db){
         if(a.archived){result=fail('TOMBSTONE_HELD');return;}
         const allowed={
           PREPARE:['ARCHIVE_PENDING'],
+          ABORT_PREPARED:['GIT_PREPARED'],
           MARK_DISPATCH:['GIT_PREPARED'],
           HELD_UNCERTAIN:['DISPATCH_POSSIBLE','HELD_UNCERTAIN'],
           CONFIRM:['DISPATCH_POSSIBLE','HELD_UNCERTAIN']
@@ -170,7 +174,7 @@ export function createAdoptionStore(db){
                    operation.targetId!=='adoption_'+slug){
                   result=fail('ARCHIVE_OPERATION_CONFLICT');return;
                 }
-                const required=event==='MARK_DISPATCH'?'PREPARED':
+                const required=['MARK_DISPATCH','ABORT_PREPARED'].includes(event)?'PREPARED':
                   event==='CONFIRM'?['DISPATCH_POSSIBLE','HELD_UNCERTAIN']:
                   ['DISPATCH_POSSIBLE','HELD_UNCERTAIN'];
                 if(!(Array.isArray(required)?required.includes(operation.status):
@@ -184,11 +188,14 @@ export function createAdoptionStore(db){
                     proof?.folder!==a.archiveFolder)){
                   result=fail('INDEPENDENT_GIT_PROOF_REQUIRED');return;
                 }
-                const state=event==='MARK_DISPATCH'?'DISPATCH_POSSIBLE':
+                const state=event==='ABORT_PREPARED'?'ARCHIVE_PENDING':
+                  event==='MARK_DISPATCH'?'DISPATCH_POSSIBLE':
                   event==='CONFIRM'?'ARCHIVED_GIT_CONFIRMED':'HELD_UNCERTAIN';
-                const opStatus=event==='CONFIRM'?'CONFIRMED':
+                const opStatus=event==='ABORT_PREPARED'?'ABORTED':
+                  event==='CONFIRM'?'CONFIRMED':
                   event==='MARK_DISPATCH'?'DISPATCH_POSSIBLE':'HELD_UNCERTAIN';
                 const next={...a,archiveState:state,revision:a.revision+1,
+                  ...(event==='ABORT_PREPARED'?{archiveOperationId:null,archiveFolder:null}:{}),
                   ...(event==='CONFIRM'?{
                     archiveHead:proof.head,
                     management:a.visibility==='PUBLIC'?
