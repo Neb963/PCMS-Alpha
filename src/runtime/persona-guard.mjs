@@ -6,7 +6,7 @@ const BAD_PROXY = new Set(['controlled_by_other_extensions', 'not_controllable']
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
-  supplyIsolatedTab }) {
+  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -168,9 +168,35 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     finally{await releaseConflictGuard(leased);}
   }
 
+  // I09: never obtain a second browser or native control path. The same donor
+  // lease registry owns editor selection; a lost response is ambiguous.
+  async function runStageStep(personaUid,request) {
+    if(typeof stageIsolatedTab!=='function')return {ok:false,code:'STAGE_EXECUTOR_UNAVAILABLE'};
+    const leased=await acquireConflictGuard(personaUid);
+    if(!leased?.ready||!leased.leaseId)
+      return {ok:false,code:leased?.code||'GUARD_UNAVAILABLE'};
+    try {
+      if(!(await inspectOwnedAction(leased)).ready)return {ok:false,code:'LEASE_UNVERIFIED'};
+      const reply=await stageIsolatedTab(leased,request);
+      if(!(await inspectOwnedAction(leased)).ready)return {ok:false,code:'POST_EFFECT_GUARD_CHANGED'};
+      return reply&&typeof reply==='object'?reply:{ok:false,code:'STAGING_RESULT_UNVERIFIED'};
+    }catch{return {ok:false,code:'STAGING_EXECUTOR_UNAVAILABLE'};}
+    finally{await releaseConflictGuard(leased);}
+  }
+
+  async function releaseStagingTab(personaUid,slug,nonce) {
+    if(typeof handoffStagingTab!=='function')return {ok:false,code:'HANDOFF_UNAVAILABLE'};
+    // Release a HUMAN handoff regardless of stale protected route, but only
+    // the exact already-tagged tab may be relinquished; never create/close.
+    try{return await handoffStagingTab({personaUid,slug,nonce});}
+    catch{return {ok:false,code:'HANDOFF_UNVERIFIED'};}
+  }
+
   return Object.freeze({
     observeReadOnly,
     runSupplyStep,
+    runStageStep,
+    releaseStagingTab,
     listAvailablePersonas,
     listProtectedRoutes: availableRoutes,
     createProtectedPersona,
