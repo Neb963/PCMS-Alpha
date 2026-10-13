@@ -16,3 +16,6 @@ import './supply-boundary.mjs';
 
 // I07 explicitly consented, read-only original-source capture.
 import './adoption-boundary.mjs';
+
+// I09 durable staged source and content-script handoff listeners.
+import './staging-boundary.mjs';
