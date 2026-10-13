@@ -25,7 +25,7 @@ export async function perchanceReadIsolated({identityOnly=false,originalSlug=nul
       .map(b=>b.toString(16).padStart(2,'0')).join('');
     const startChange=localStorage.getItem('sessionTokenLastChangeTime');
     const safeStatus=x=>['success','is-owner','is-not-owner','session-token-error'].includes(x)?x:'unknown';
-    async function call(path,params) {
+    async function call(path,params,{unauthenticated=false}={}) {
       // Isolated-world fetch, fixed same-origin URL, bounded response; no
       // underlying mutable editor APIs or page-world fetch monkeypatch.
       const ctrl=new AbortController();
@@ -34,7 +34,7 @@ export async function perchanceReadIsolated({identityOnly=false,originalSlug=nul
         const res=await fetch('https://perchance.org/api/'+path,{
           method:'POST',credentials:'same-origin',
           headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({email,sessionToken:user.sessionToken,...params}),
+          body:JSON.stringify(unauthenticated?params:{email,sessionToken:user.sessionToken,...params}),
           signal:ctrl.signal,redirect:'error',cache:'no-store'
         });
         if(res.status!==200)return {httpStatus:res.status===403?403:0,body:{status:'unknown'}};
