@@ -51,6 +51,12 @@ export async function perchanceAiNative(request){
       canSend:send.hidden===false&&send.disabled!==true,
       canNewChat:newChat.disabled===false&&busy===false,
       chatEntries:msg.childElementCount,
+      // The native helper rebuilds a single static greeting after newChat.
+      // A leftover user/assistant turn is NOT a cleared history. This is
+      // only local UI reset evidence, never server/OPFS isolation proof.
+      resetGreetingVisible:msg.childElementCount===1&&
+        msg.textContent?.trim()===
+          '👋 I can edit the code and test it live. Ask me to build, change or test something.',
       hasQueue:queue.hidden===false||queue.style.display==='flex',
       inputOccupied:Boolean(input.value),
       sourceSaved:menu.saveState==='saved'&&window.__saveInFlight===false,
