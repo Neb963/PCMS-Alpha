@@ -7,6 +7,7 @@ import {createStagingStore} from './staging-store.mjs';
 import {createAiStore} from './ai-store.mjs';
 import {inspectGitSource} from './git-source.mjs';
 import {verifyReadback,exactSource} from './staging-core.mjs';
+import {planAiStep} from './ai-supervisor.mjs';
 export const AI_PORT='pcms-i10-ai';
 function encodeUtf8(text){
   const bytes=new TextEncoder().encode(text);let binary='';
@@ -17,7 +18,7 @@ function encodeUtf8(text){
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const ACT=new Set(['GET_PROMPTS','SET_PROMPT','IMPORT_PROMPT','EXPORT_PROMPTS',
   'LIST_JOBS','GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS',
-  'GET_CONCURRENCY','SET_CONCURRENCY']);
+  'GET_CONCURRENCY','SET_CONCURRENCY','ADVANCE_JOB']);
 export function validateAiMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;
@@ -30,18 +31,18 @@ export function validateAiMessage(api,sender,message){
   const allowed=message.type==='GET_JOB'?['slug']:
     message.type==='PREPARE_JOB'?['slug','expectedStageRevision','token']:
     message.type==='BEGIN_NATIVE'?['slug','expectedRevision','step']:
-    ['PROBE_NATIVE','RUN_TESTS'].includes(message.type)?['slug','expectedRevision']:
+    ['PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB'].includes(message.type)?['slug','expectedRevision']:
     message.type==='SET_CONCURRENCY'?['perAccount','expectedRevision']:
     message.type==='SET_PROMPT'?['text','tests','expectedRevision']:
     message.type==='IMPORT_PROMPT'?['envelope','expectedRevision']:[];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
-  if(['GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS'].includes(message.type)&&!SLUG.test(p.slug||''))
+  if(['GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB'].includes(message.type)&&!SLUG.test(p.slug||''))
     return fail('INVALID_SLUG');
   if(message.type==='PREPARE_JOB'&&
      (!Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
       typeof p.token!=='string'||p.token.length<10||p.token.length>512))
     return fail('INVALID_PARAMS');
-  if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS'].includes(message.type)&&
+  if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
       (message.type==='BEGIN_NATIVE'&&
        !['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','STOP'].includes(p.step))))
@@ -79,6 +80,20 @@ export function createAiBoundary(api,{
         return store.changePrompt({text:p.text,tests:p.tests},p.expectedRevision);
       if(message.type==='IMPORT_PROMPT')
         return store.changePrompt(p.envelope,p.expectedRevision,true);
+      if(message.type==='ADVANCE_JOB'){
+        // Exactly one policy-selected step per call. Never spin across a
+        // potentially external effect, and never silently retry a lost ACK.
+        const sealed=await store.getJobFull(p.slug);
+        if(!sealed.ok)return sealed;
+        if(sealed.job.revision!==p.expectedRevision)return fail('STALE_REVISION');
+        const next=planAiStep(sealed.job);
+        if(!next.ok)return fail(next.code);
+        const result=await run({type:next.type,params:{
+          slug:p.slug,expectedRevision:p.expectedRevision,
+          ...(next.step?{step:next.step}:{})
+        }},sender);
+        return {...result,plannedStep:next.type+(next.step?'_'+next.step:'')};
+      }
       if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS'].includes(message.type)){
         const sealed=await store.getJobFull(p.slug);
         if(!sealed.ok)return sealed;
