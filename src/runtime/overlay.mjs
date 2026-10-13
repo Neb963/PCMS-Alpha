@@ -41,7 +41,9 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";
+import { perchanceStageMain } from "./pcms/perchance-stage.mjs";
+import { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -129,6 +131,87 @@ attachPcmsGuard({
       return {ok:false,code:'SUPPLY_INJECTION_UNVERIFIED'};
     return result[0].result;
   },
+
+  // One donor-guarded, protected-container stage tab; never touch an
+  // unrelated human editor or reuse a tab merely because its number matches.
+  stageIsolatedTab: async ({personaUid,cookieStoreId,routeId},request) => {
+    const valid=typeof request?.slug==='string'&&
+      /^[a-z0-9][a-z0-9-]{0,99}$/.test(request.slug)&&
+      /^[a-f0-9]{32}$/.test(request.nonce)&&
+      Array.isArray(request.candidate)&&request.candidate.length<=502;
+    if(!valid)return {ok:false,code:'INVALID_STAGING_REQUEST'};
+    const tagKey='pcmsI09Owned';
+    const before=await getState(),profile=before.profiles?.[cookieStoreId];
+    if(!profile||profile.personaUid!==personaUid||profile.routeId!==routeId||
+       routeId==='direct'||routeId==='block'||!before.routes?.[routeId]||
+       before.routes[routeId].enabled===false)
+      return {ok:false,code:'PERSONA_ROUTE_CHANGED'};
+    const tabs=await browser.tabs.query({});
+    const url='https://perchance.org/'+request.slug+'#edit';
+    // A conflicting human/PCMS editor anywhere in this same container or
+    // at this target is not safe to overwrite.
+    if(tabs.some(t=>t?.url?.startsWith('https://perchance.org/'+request.slug)&&
+        (t.cookieStoreId===cookieStoreId||t.url?.includes('#edit'))))
+      return {ok:false,code:'HUMAN_OR_AMBIGUOUS_EDITOR'};
+    const tab=await browser.tabs.create({url,cookieStoreId,active:false});
+    if(!Number.isSafeInteger(tab?.id))return {ok:false,code:'TAB_CREATE_UNVERIFIED'};
+    // An interruption before tagging leaves a HUMAN-PRESERVED unknown tab.
+    await browser.sessions.setTabValue(tab.id,tagKey,{
+      slug:request.slug,nonce:request.nonce,personaUid,cookieStoreId,
+      createdBy:'PCMS_I09',humanIntent:false
+    });
+    const identity=await browser.sessions.getTabValue(tab.id,tagKey);
+    const current=await browser.tabs.get(tab.id),again=await getState();
+    if(identity?.nonce!==request.nonce||current?.cookieStoreId!==cookieStoreId||
+       current?.url!==url||again.profiles?.[cookieStoreId]?.personaUid!==personaUid||
+       again.profiles?.[cookieStoreId]?.routeId!==routeId)
+      return {ok:false,code:'TAB_CONTEXT_UNVERIFIED'};
+    await browser.scripting.executeScript({
+      target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
+      func:renderPcmsEditorStrip,args:[{
+        slug:request.slug,nonce:request.nonce,
+        accountId:'Verified account',personaUid
+      }]
+    });
+    // Same-XPI fixed function; payload was byte-pinned in canonical IDB.
+    // MAIN editor API is untrusted and must affirmatively prove safe/clean.
+    const results=await browser.scripting.executeScript({
+      target:{tabId:tab.id,frameIds:[0]},world:'MAIN',
+      func:perchanceStageMain,
+      args:[{slug:request.slug,files:request.candidate}]
+    });
+    const post=await browser.tabs.get(tab.id),receipt=await browser.sessions.getTabValue(tab.id,tagKey);
+    const after=await getState();
+    if(post?.url!==url||post.cookieStoreId!==cookieStoreId||
+       receipt?.nonce!==request.nonce||receipt.humanIntent===true||
+       after.profiles?.[cookieStoreId]?.personaUid!==personaUid||
+       after.profiles?.[cookieStoreId]?.routeId!==routeId)
+      return {ok:false,code:'STAGING_TAB_OR_ROUTE_CHANGED'};
+    if(results?.length!==1||results[0].frameId!==0||results[0].error||
+       results[0].result?.ok!==true)
+      return {ok:false,code:results?.[0]?.result?.code||'EDITOR_SAVE_UNKNOWN'};
+    return {ok:true,code:'SAVE_ACK_ONLY',
+      tab:{tabId:tab.id,cookieStoreId,ownershipNonce:request.nonce,location:url}};
+  },
+  // A human handoff never closes/navigates a tab, and never releases donor
+  // automation ownership or any unmatched/recycled tab.
+  handoffStagingTab: async ({personaUid,slug,nonce}) => {
+    if(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)||
+       typeof nonce!=='string'||!/^[a-f0-9]{32}$/.test(nonce))
+      return {ok:false,code:'HANDOFF_IDENTITY_INVALID'};
+    const tabs=await browser.tabs.query({}),found=[];
+    for(const t of tabs){
+      if(!Number.isSafeInteger(t?.id))continue;
+      let value;
+      try{value=await browser.sessions.getTabValue(t.id,'pcmsI09Owned');}catch{continue;}
+      if(value?.nonce===nonce&&value.slug===slug&&value.personaUid===personaUid)
+        found.push({tab:t,tag:value});
+    }
+    if(found.length!==1||found[0].tab.url!=='https://perchance.org/'+slug+'#edit')
+      return {ok:false,code:'HANDOFF_TAB_UNVERIFIED'};
+    await browser.sessions.removeTabValue(found[0].tab.id,'pcmsI09Owned');
+    return {ok:true,code:'HUMAN_TAB_RETAINED'};
+  },
   openHumanLogin: async ({personaUid,cookieStoreId,routeId}) =>
     localMutationFence(cookieStoreId,async()=>{
       const state=await getState(), p=state.profiles?.[cookieStoreId];
@@ -142,7 +225,9 @@ attachPcmsGuard({
 function localMutationFence(profileIds, operation, mode = "block", options = {}) {`,
     'donor guard host');
   await writeFile(bgPath, bg);
-  for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'adoption-boundary.mjs']) {
+  for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'adoption-boundary.mjs',
+    'staging-core.mjs','staging-store.mjs','staging-boundary.mjs',
+    'perchance-stage.mjs','editor-strip.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }
 }
