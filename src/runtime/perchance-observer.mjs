@@ -94,10 +94,12 @@ export async function perchanceReadIsolated({identityOnly=false,originalSlug=nul
           return denied('ORIGINAL_ASSET_BYTES_UNVERIFIED');
         const paths=Object.keys(manifest),seen=new Set();
         let total=0;
-        for(const path of paths){
-          const parts=path.split('/');
-          const entry=manifest[path];
-          if(!path.startsWith('src/')||path.length>240||
+        for(const virtualPath of paths){
+          // The Perchance saved srcManifest keys are relative to /src, not
+          // rooted at 'src/'. Normalize exactly once into Git source paths.
+          const path='src/'+virtualPath,parts=virtualPath.split('/');
+          const entry=manifest[virtualPath];
+          if(virtualPath.length>200||parts.length>10||path.length>240||
              path!==path.normalize('NFC')||
              parts.some(part=>!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(part)||
                part==='.'||part==='..'||part.endsWith('.'))||
@@ -111,8 +113,9 @@ export async function perchanceReadIsolated({identityOnly=false,originalSlug=nul
           seen.add(path.toLowerCase());total+=entry.size;
           if(total>16*1024*1024)return denied('ORIGINAL_ASSET_BYTES_UNVERIFIED');
         }
-        for(const path of paths.sort()){
-          const entry=manifest[path],ctrl=new AbortController();
+        for(const virtualPath of paths.sort()){
+          const path='src/'+virtualPath;
+          const entry=manifest[virtualPath],ctrl=new AbortController();
           const timeout=setTimeout(()=>ctrl.abort(),12000);
           try{
             // Read-only fixed CDN URL from a strictly validated committed
