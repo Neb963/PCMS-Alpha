@@ -41,7 +41,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -327,6 +327,56 @@ attachPcmsGuard({
       return {ok:false,code:'AI_NATIVE_POST_GUARD_CHANGED'};
     if(result?.length!==1||result[0].frameId!==0||result[0].error)
       return {ok:false,code:'AI_NATIVE_EXECUTION_UNVERIFIED'};
+    return result[0].result;
+  },
+  // I13 fixed publication path, never a generic script or tab dispatcher.
+  releaseIsolatedTab: async ({personaUid,cookieStoreId,routeId},request) => {
+    if(request?.action!=='PUBLISH'||typeof request.slug!=='string'||
+       !/^[a-z0-9][a-z0-9-]{0,99}$/.test(request.slug)||
+       typeof request.nonce!=='string'||!/^[a-f0-9]{32}$/.test(request.nonce)||
+       !Array.isArray(request.files)||request.files.length<2||request.files.length>502)
+      return {ok:false,code:'INVALID_RELEASE_REQUEST'};
+    const state=await getState(),profile=state.profiles?.[cookieStoreId];
+    if(!profile||profile.personaUid!==personaUid||profile.routeId!==routeId||
+       routeId==='direct'||routeId==='block'||!state.routes?.[routeId]||
+       state.routes[routeId].enabled===false)
+      return {ok:false,code:'RELEASE_PROTECTED_ROUTE_CHANGED'};
+    const expected='https://perchance.org/'+request.slug+'#edit';
+    const tabs=await browser.tabs.query({}),found=[];
+    for(const tab of tabs) {
+      if(tab.cookieStoreId!==cookieStoreId||tab.url!==expected)continue;
+      let tag;
+      try{tag=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned');}
+      catch{continue;}
+      if(tag?.nonce===request.nonce&&tag.slug===request.slug&&
+         tag.personaUid===personaUid&&tag.cookieStoreId===cookieStoreId&&
+         tag.createdBy==='PCMS_I09'&&tag.humanIntent!==true)found.push(tab);
+    }
+    if(found.length!==1||tabs.some(t=>t.id!==found[0].id&&t.url===expected))
+      return {ok:false,code:'RELEASE_EDITOR_OWNERSHIP_AMBIGUOUS'};
+    const tab=found[0];
+    const prior=await browser.scripting.executeScript({
+      target:{tabId:tab.id,frameIds:[0]},world:'MAIN',
+      func:perchanceEditorProbe,args:[request.slug]
+    });
+    if(prior?.length!==1||prior[0].frameId!==0||prior[0].error||
+       prior[0].result?.ok!==true||prior[0].result?.clean!==true)
+      return {ok:false,code:'RELEASE_EDITOR_DIRTY_OR_UNKNOWN'};
+    const result=await browser.scripting.executeScript({
+      target:{tabId:tab.id,frameIds:[0]},world:'MAIN',
+      func:perchanceReleaseMain,args:[request]
+    });
+    const after=await browser.tabs.get(tab.id),
+      tag=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned'),
+      again=await getState();
+    if(after?.cookieStoreId!==cookieStoreId||after?.url!==expected||
+       tag?.nonce!==request.nonce||tag?.humanIntent===true||
+       again.profiles?.[cookieStoreId]?.personaUid!==personaUid||
+       again.profiles?.[cookieStoreId]?.routeId!==routeId||
+       !again.routes?.[routeId]||again.routes[routeId].enabled===false)
+      return {ok:false,code:'RELEASE_POST_EFFECT_CONTEXT_CHANGED'};
+    if(result?.length!==1||result[0].frameId!==0||result[0].error)
+      return {ok:false,code:'RELEASE_NATIVE_OUTCOME_UNKNOWN'};
     return result[0].result;
   },
   // A human handoff never closes/navigates a tab, and never releases donor
