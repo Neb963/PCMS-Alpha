@@ -33,6 +33,8 @@ export function planAiStep(job,{oracleNames=['default_generator_smoke']}={}){
     return {ok:true,type:'BEGIN_NATIVE',step:'CHAT2_SEND',revision:job.revision};
   }
   if(!idle.has(native.state))return hold('AI_NATIVE_SESSION_RECONCILIATION_REQUIRED');
+  if(native.state==='CHAT2_OBSERVED_IDLE'&&job.chat2?.state!=='FRESH_VERIFIED')
+    return hold('AI_CHAT2_ISOLATION_UNVERIFIED');
   const active=native.state==='CHAT2_OBSERVED_IDLE'?2:1;
   if(!native.sessionDigest||
      !chatReady(job,active)||
