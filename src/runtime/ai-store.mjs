@@ -52,6 +52,13 @@ export function createAiStore(db){
         done(publicJob(e.target.result?.job));
       };
     });
+  const getJobFull=s=>!slug(s)?Promise.resolve(fail('INVALID_SLUG')):
+    tx(db,'readonly',(t,done)=>{
+      t.objectStore('meta').get(key(s)).onsuccess=e=>{
+        const job=e.target.result?.job;
+        done(job?{ok:true,job}:fail('AI_JOB_NOT_FOUND'));
+      };
+    });
   const list=()=>tx(db,'readonly',(t,done)=>{
     const jobs=[];let truncated=false;
     t.objectStore('meta').openCursor().onsuccess=e=>{
@@ -226,7 +233,7 @@ export function createAiStore(db){
     });
   }
   return Object.freeze({
-    getPrompt,changePrompt,exportPrompt,getJob,list,start,record,
+    getPrompt,changePrompt,exportPrompt,getJob,getJobFull,list,start,record,
     armNative,observeNative,recoverNative
   });
 }
