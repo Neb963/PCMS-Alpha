@@ -6,7 +6,9 @@ const save=id('pcms-ai-save'),importButton=id('pcms-ai-import'),exportButton=id(
 const configStatus=id('pcms-ai-config-status'),historyHost=id('pcms-ai-prompt-history');
 const slug=id('pcms-ai-slug'),token=id('pcms-ai-git-token'),prepare=id('pcms-ai-prepare');
 const refresh=id('pcms-ai-refresh'),jobStatus=id('pcms-ai-jobs-status'),jobList=id('pcms-ai-job-list');
-let current=null,busy=false,queueSeq=0;
+const runNative=id('pcms-ai-run'),observeNative=id('pcms-ai-observe'),
+  resetNative=id('pcms-ai-newchat'),chat2Native=id('pcms-ai-chat2');
+let current=null,busy=false,queueSeq=0,selectedJob=null;
 function request(portName,type,params={}){
   return new Promise((resolve,reject)=>{
     const port=browser.runtime.connect({name:portName});let ended=false;
@@ -27,6 +29,14 @@ function controls(){
   importButton.disabled=busy||!current?.ok;
   exportButton.disabled=busy;
   refresh.disabled=busy;
+  const selected=selectedJob?.ok===true;
+  runNative.disabled=busy||!selected||selectedJob.state!=='PENDING_NATIVE_SESSION';
+  observeNative.disabled=busy||!selected||
+    !['HELD_RECONCILE','TESTS_UNVERIFIED','KNOWN_FAILURE'].includes(selectedJob.state);
+  resetNative.disabled=busy||!selected||
+    selectedJob.evidence?.chat1Pass!==true;
+  chat2Native.disabled=busy||!selected||
+    selectedJob.optionalTestingSha===null;
   prepare.disabled=busy||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug.value)||
     token.value.length<10;
 }
@@ -91,11 +101,20 @@ async function refreshJobs(){
     const ul=document.createElement('ul');
     for(const j of data.jobs){
       const li=document.createElement('li');
-      li.textContent=j.slug+' · '+j.state+' · Settings P'+j.promptRevision+
+      const choose=document.createElement('button');
+      choose.type='button';choose.textContent='Select '+j.slug;
+      choose.addEventListener('click',()=>{
+        selectedJob=j;slug.value=j.slug;controls();
+        jobStatus.textContent=j.slug+' selected · '+j.state+
+          ' · native AI activation remains separately gated.';
+      });
+      li.append(choose,document.createTextNode(' '));
+      const label=document.createElement('span');
+      label.textContent=j.slug+' · '+j.state+' · Settings P'+j.promptRevision+
         ' · source '+j.sourceFingerprint.slice(0,12)+
         ' · '+(j.evidence?.state||'TESTS_UNVERIFIED')+
         ' · '+(j.hold||'No external PASS claimed');
-      ul.append(li);
+      li.append(label);ul.append(li);
     }
     jobList.append(ul);
     if(data.truncated)jobList.append(document.createTextNode(' Additional jobs omitted.'));
@@ -119,6 +138,30 @@ async function prepareJob(){
   }catch{jobStatus.textContent='Unknown preparation outcome; refresh canonical receipts before trying again.';}
   finally{busy=false;controls();await refreshJobs();}
 }
+async function nativeCommand(type,step){
+  if(busy||!selectedJob?.ok)return;
+  const name=selectedJob.slug,revision=selectedJob.revision;
+  busy=true;controls();
+  jobStatus.textContent=type==='PROBE_NATIVE'?
+    'Observing native session without retry and checking saved source bytes…':
+    'Checking guarded native effect capability; no dispatch without authorization…';
+  try{
+    const answer=await ai(type,{slug:name,expectedRevision:revision,
+      ...(step?{step}:{})});
+    // A send response itself never proves remote state, even if acknowledged.
+    jobStatus.textContent=(answer?.code||
+      (answer?.ok?'Canonical observation recorded':'AI_OUTCOME_UNKNOWN'))+
+      ' · '+(answer?.tests||'no independent test PASS claimed');
+  }catch{
+    jobStatus.textContent='Native command disconnected. Effect may have occurred; do not retry before independent reconciliation.';
+  }finally{
+    busy=false;selectedJob=null;controls();await refreshJobs();
+  }
+}
+runNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT1_SEND'));
+observeNative.addEventListener('click',()=>nativeCommand('PROBE_NATIVE'));
+resetNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT2_RESET'));
+chat2Native.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT2_SEND'));
 prepare.addEventListener('click',prepareJob);
 refresh.addEventListener('click',refreshJobs);
 slug.addEventListener('input',controls);
