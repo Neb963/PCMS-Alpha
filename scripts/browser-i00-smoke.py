@@ -1153,6 +1153,77 @@ def main():
                              {'script':code,'args':[]},timeout=90)
                 assert ai_loop.get('ok') is True,ai_loop
                 print('B I10_PACKAGED_KNOWN_FAILURE_NOT_DOWNGRADED_AND_REPAIR_NO_PROGRESS_HOLD=PASS',flush=True)
+                # I10 B: synthetic *real canonical IDB* one-repair convergence
+                # with independent F1 FAIL / F2 PASS; no Perchance request.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const core=await import('./staging-core.mjs');
+                  const {createAiStore}=await import('./ai-store.mjs');
+                  const b64=t=>btoa(String.fromCharCode(...new TextEncoder().encode(t)));
+                  const A=await core.exactSource([
+                    {path:'main.pjs',base64:b64('output = 1')},
+                    {path:'index.html',base64:b64('<b>failed before repair</b>')}
+                  ]);
+                  const F=await core.exactSource([
+                    {path:'main.pjs',base64:b64('output = 2')},
+                    {path:'index.html',base64:b64('<b>observed after repair</b>')},
+                    {path:'src/new.dat',base64:btoa(String.fromCharCode(0,255,8))}
+                  ]);
+                  const db=await journal.openCanonicalDatabase(),store=createAiStore(db);
+                  const slug='i10-convergence',sid='f'.repeat(64);
+                  const prepared=await store.start({
+                    slug,revision:2,state:'SOURCE_VERIFIED',accountId:'i10-convergence-owner',
+                    candidate:{fingerprint:A.fingerprint},previous:{fingerprint:'b'.repeat(64)}
+                  });
+                  const sent=await store.armNative(slug,prepared.revision,'CHAT1_SEND');
+                  const seen=await store.observeNative(slug,sent.revision,{
+                    ok:true,slug,sessionDigest:sid,busy:false,chatEntries:2,sourceSaved:true
+                  });
+                  const sourceA=await store.checkpointSource(slug,seen.revision,A);
+                  const failed=await store.record(slug,sourceA.revision,{
+                    type:'TEST',chat:1,name:'observed_smoke',
+                    sourceFingerprint:A.fingerprint,independentSource:'INDEPENDENT_BROWSER_ASSERTION',
+                    result:'FAIL',observedAt:Date.now()
+                  });
+                  const repair=await store.armNative(slug,failed.revision,'CHAT1_REPAIR');
+                  const repaired=await store.observeNative(slug,repair.revision,{
+                    ok:true,slug,sessionDigest:sid,busy:false,chatEntries:4,sourceSaved:true
+                  });
+                  const sourceF=await store.checkpointSource(slug,repaired.revision,F);
+                  const oldResult=await store.record(slug,sourceF.revision,{
+                    type:'TEST',chat:1,name:'observed_smoke',
+                    sourceFingerprint:A.fingerprint,independentSource:'INDEPENDENT_BROWSER_ASSERTION',
+                    result:'PASS',observedAt:Date.now()
+                  });
+                  const pass=await store.record(slug,sourceF.revision,{
+                    type:'TEST',chat:1,name:'observed_smoke',
+                    sourceFingerprint:F.fingerprint,independentSource:'INDEPENDENT_BROWSER_ASSERTION',
+                    result:'PASS',observedAt:Date.now()
+                  });
+                  const noRepair=await store.armNative(slug,pass.revision,'CHAT1_REPAIR');
+                  const recheck=await store.checkpointSource(slug,pass.revision,F);
+                  const final=await store.getJobFull(slug);
+                  done({ok:A.ok&&F.ok&&prepared.ok&&sent.ok&&seen.ok&&sourceA.ok&&
+                    failed.state==='KNOWN_FAILURE'&&repair.ok&&repaired.ok&&
+                    sourceF.ok&&sourceF.state==='TESTS_UNVERIFIED'&&
+                    oldResult.code==='INDEPENDENT_TEST_EVIDENCE_REQUIRED'&&
+                    pass.ok&&pass.state==='TESTS_VERIFIED'&&
+                    pass.slotReleased===true&&
+                    noRepair.code==='AI_VERIFIED_FAILURE_AND_SESSION_REQUIRED'&&
+                    recheck.ok&&recheck.state==='TESTS_VERIFIED'&&
+                    final.ok&&final.job.sourceFingerprint===F.fingerprint&&
+                    final.job.finalSource.files.length===3&&
+                    final.job.chat1.tests.observed_smoke?.sourceFingerprint===F.fingerprint&&
+                    final.job.executionSlotReleased===true,
+                    failed:failed.state,sourceF:sourceF.state,oldResult,
+                    after:pass.state,noRepair,rechecked:recheck.state});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
+                convergence_b=call('POST',f'/session/{after}/execute/async',
+                                    {'script':code,'args':[]},timeout=90)
+                assert convergence_b.get('ok') is True,convergence_b
+                print('B I10_PACKAGED_SYNTHETIC_F1_FAIL_F2_ASSET_REPAIR_RETEST=PASS',flush=True)
 
                 # I10 B: real canonical IndexedDB CAS on globally versioned
                 # per-account concurrency, independent accounts, and observed
