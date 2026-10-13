@@ -182,6 +182,7 @@
             <label for="pcms-ai-prompt">Default testing instructions</label>
             <textarea id="pcms-ai-prompt" rows="5" maxlength="16000" spellcheck="false" aria-describedby="pcms-ai-config-status"></textarea>
             <label for="pcms-ai-tests">Independent named assertions (comma separated)</label>
+            <p class="reason">Independent checks currently supported: <code>default_generator_smoke</code>, <code>preview_heading_visible</code>, <code>preview_image_loaded</code>, <code>preview_button_visible</code>, <code>preview_link_visible</code>. Unsupported names remain unverified, never PASS. Optional TESTING.md can declare <code>PCMS_TEST: preview_image_loaded</code>; unstructured testing requests retain a separate unverified hold.</p>
             <input id="pcms-ai-tests" maxlength="2048" spellcheck="false" placeholder="default_generator_smoke">
             <button id="pcms-ai-save" type="button">Save new prompt revision</button>
             <button id="pcms-ai-export" type="button">Export version history</button>
