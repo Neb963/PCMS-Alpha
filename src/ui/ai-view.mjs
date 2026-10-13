@@ -9,6 +9,7 @@ const perAccount=id('pcms-ai-per-account'),saveConcurrency=id('pcms-ai-save-conc
 const slug=id('pcms-ai-slug'),token=id('pcms-ai-git-token'),prepare=id('pcms-ai-prepare');
 const refresh=id('pcms-ai-refresh'),jobStatus=id('pcms-ai-jobs-status'),jobList=id('pcms-ai-job-list');
 const runNative=id('pcms-ai-run'),observeNative=id('pcms-ai-observe'),
+  advanceNative=id('pcms-ai-advance'),
   testNative=id('pcms-ai-test'),repairNative=id('pcms-ai-repair'),
   resetNative=id('pcms-ai-newchat'),chat2Native=id('pcms-ai-chat2');
 let current=null,concurrency=null,busy=false,queueSeq=0,selectedJob=null;
@@ -35,6 +36,8 @@ function controls(){
   refresh.disabled=busy;
   const selected=selectedJob?.ok===true;
   runNative.disabled=busy||!selected||selectedJob.state!=='PENDING_NATIVE_SESSION';
+  advanceNative.disabled=busy||!selected||selectedJob.slotReleased===true||
+    ['TESTS_VERIFIED','HELD_NO_PROGRESS','HUMAN_OWNED'].includes(selectedJob.state);
   observeNative.disabled=busy||!selected||
     !['HELD_RECONCILE','TESTS_UNVERIFIED','KNOWN_FAILURE'].includes(selectedJob.state);
   testNative.disabled=busy||!selected||selectedJob.state!=='TESTS_UNVERIFIED';
@@ -165,6 +168,7 @@ async function nativeCommand(type,step){
     busy=false;selectedJob=null;controls();await refreshJobs();
   }
 }
+advanceNative.addEventListener('click',()=>nativeCommand('ADVANCE_JOB'));
 runNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT1_SEND'));
 observeNative.addEventListener('click',()=>nativeCommand('PROBE_NATIVE'));
 testNative.addEventListener('click',()=>nativeCommand('RUN_TESTS'));
