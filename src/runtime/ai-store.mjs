@@ -257,6 +257,23 @@ export function createAiStore(db){
             next.state='HELD_NO_PROGRESS';next.hold='REPAIR_RESOURCE_BOUND';
           }
         }
+        if(changed)next.noProgressCount=0;
+        else {
+          // A verified failing assertion on identical F remains a KNOWN
+          // FAILURE. Repeated native repair turns with no source movement
+          // demonstrate lack of progress, not unavailable testing.
+          const stillFailing=evaluation(next).state==='KNOWN_FAILURE';
+          if(stillFailing){
+            next.state='KNOWN_FAILURE';next.hold='KNOWN_FAILURE_RETEST_REQUIRED';
+          }
+          if(stillFailing&&['CHAT1_REPAIR','CHAT2_REPAIR'].includes(j.native.step)){
+            next.noProgressCount=(j.noProgressCount||0)+1;
+            if(next.noProgressCount>=2){
+              next.state='HELD_NO_PROGRESS';
+              next.hold='REPEATED_SAME_SOURCE_FAILED_REPAIR';
+            }
+          }
+        }
         m.put({...row,job:next});
         t.objectStore('events').add({stage:'AI_FULL_SOURCE_CHECKPOINT',
           slug:slugName,revision:next.revision,sourceFingerprint:snapshot.fingerprint,
