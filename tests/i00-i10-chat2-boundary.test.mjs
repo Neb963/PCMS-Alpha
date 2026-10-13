@@ -29,7 +29,8 @@ function start({workspace=true,history=true,gated=true,stageChanged=false,routeC
        editorClean:true,sourceSaved:true,hasQueue:false,inputOccupied:false,
        attachmentsPending:false};
      if(req.action==='OBSERVE_OPFS')return {ok:true,sessionDigest:sid,
-       isolation:'UNVERIFIED',workspaceRootState:workspace?'PRESENT_UNTRUSTED':'ABSENT'};
+       isolation:'UNVERIFIED',workspaceRootState:workspace?'PRESENT_UNTRUSTED':'ABSENT',
+       workerNamespace:'CURRENT_SESSION_WORKER_INIT_LOCK'};
      if(req.action==='OBSERVE_HISTORY')return history?
        {ok:true,code:'AI_SERVER_HISTORY_FIRST_PROMPT_OBSERVED',
          sessionDigest:sid,serverHistory:'FIRST_USER_IS_T1'}:
