@@ -2,6 +2,7 @@
 // transaction. A lost dispatch reply is always uncertain, never retried.
 import {fail} from './journal.mjs';
 import {matchesApproval,releaseContext,releaseTestContext} from './release-core.mjs';
+import {REFRESHER_KEY,validShadow} from './refresher-core.mjs';
 const slug=x=>typeof x==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(x);
 const key=s=>'release:'+s;
 const display=r=>r?{
@@ -135,15 +136,45 @@ export function createReleaseStore(db){
                    inventory.visibility!=='UNLISTED'||inventory.bindingVersion!==r.approval.bindingVersion){
                   done(fail('RELEASE_REVALIDATION_FAILED'));return;
                 }
-                const next={...r,revision:r.revision+1,
-                  state:'DISPATCH_POSSIBLE',dispatchPossible:true,changedAt:Date.now()};
-                m.put({key:key(name),release:next});
-                t.objectStore('operations').add({operationId:r.releaseId,
-                  targetId:'release_'+name,fingerprint:r.approval.sourceFingerprint,
-                  status:'DISPATCH_POSSIBLE',effectType:'publish_exact_f_v1',revision:1});
-                t.objectStore('events').add({stage:'RELEASE_DISPATCH_POSSIBLE',
-                  slug:name,releaseId:r.releaseId,sourceFingerprint:r.approval.sourceFingerprint});
-                done(display(next));
+                function mark(){
+                  const next={...r,revision:r.revision+1,
+                    state:'DISPATCH_POSSIBLE',dispatchPossible:true,changedAt:Date.now()};
+                  m.put({key:key(name),release:next});
+                  t.objectStore('operations').add({operationId:r.releaseId,
+                    targetId:'release_'+name,fingerprint:r.approval.sourceFingerprint,
+                    status:'DISPATCH_POSSIBLE',effectType:'publish_exact_f_v1',revision:1});
+                  t.objectStore('events').add({stage:'RELEASE_DISPATCH_POSSIBLE',
+                    slug:name,releaseId:r.releaseId,sourceFingerprint:r.approval.sourceFingerprint});
+                  done(display(next));
+                }
+                if(r.kind==='EXISTING_UPDATE'){
+                  m.get('existing-update:'+name).onsuccess=ex=>{
+                    const update=ex.target.result?.record;
+                    if(update?.state!=='STAGE_CONFIRMED'||
+                       update.nonce!==stage.nonce||
+                       update.remotePublicId!==r.approval.remotePublicId||
+                       update.bindingVersion!==r.approval.bindingVersion||
+                       update.stagedFingerprint!==r.approval.sourceFingerprint||
+                       update.previousFingerprint!==r.approval.previousFingerprint||
+                       update.recovery?.fingerprint!==r.approval.previousFingerprint){
+                      done(fail('EXISTING_RECOVERY_OR_STAGE_CHANGED'));return;
+                    }
+                    m.get(REFRESHER_KEY).onsuccess=sh=>{
+                      const state=sh.target.result?.state,
+                        row=state?.rows?.find(z=>z.slug===name);
+                      if(!validShadow(state)||!row||row.phase!=='SLEEPING'||
+                         row.slot===true||row.paused===true||
+                         row.remoteId!==r.approval.remotePublicId||
+                         row.bindingVersion!==r.approval.bindingVersion||
+                         state.globalPause===true||
+                         state.accounts?.[r.approval.accountId]?.paused===true){
+                        done(fail('EXISTING_SLEEP_REVOKED'));return;
+                      }
+                      mark();
+                    };
+                  };
+                }else if(r.kind==='PRIVATE_NEW')mark();
+                else done(fail('RELEASE_KIND_INVALID'));
               };
             };
           };
