@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {perchanceAiOpfsProbe} from '../src/runtime/perchance-ai-opfs.mjs';
 const slug='private-opfs',nonce='f'.repeat(32),sid='session-opaque-12345678';
 function fixture({origin='https://perchance.org',owner=true,editor=true,session=sid,
-   storage='present',human=false,collab=false}={}){
+   storage='present',workspace='present',human=false,collab=false}={}){
   const before={location:globalThis.location,window:globalThis.window,
     document:globalThis.document,navigator:Object.getOwnPropertyDescriptor(globalThis,'navigator')};
   let gets=0,creates=0,files=0;
@@ -12,7 +12,11 @@ function fixture({origin='https://perchance.org',owner=true,editor=true,session=
       gets++;if(options?.create){creates++;throw Error('CREATE_CALLED');}
       if(storage==='absent')throw Object.assign(Error('not found'),{name:'NotFoundError'});
       if(storage==='denied')throw Object.assign(Error('permission'),{name:'SecurityError'});
-      return name==='attachments'?opfs():name===sid?opfs():
+      if(workspace==='absent'&&name==='agent')
+        throw Object.assign(Error('no worker namespace'),{name:'NotFoundError'});
+      if(workspace==='denied'&&name==='workspace')
+        throw Object.assign(Error('permission'),{name:'SecurityError'});
+      return ['agent','workspace','attachments',sid].includes(name)?opfs():
         (()=>{throw Error('unexpected path')})();
     },
     getFileHandle:async()=>{files++;throw Error('FILE_READ_FORBIDDEN');}
@@ -47,6 +51,7 @@ test('P52-06 F local OPFS presence never certifies server or worker isolation',a
     const r=await perchanceAiOpfsProbe({slug,nonce});
     assert.equal(r.ok,true);
     assert.equal(r.attachmentState,'PRESENT_UNTRUSTED');
+    assert.equal(r.workspaceRootState,'PRESENT_UNTRUSTED');
     assert.match(r.sessionDigest,/^[a-f0-9]{64}$/);
     assert.equal(r.isolation,'UNVERIFIED');
     assert.equal(r.serverEndAck,'UNOBSERVED');
@@ -92,4 +97,21 @@ test('P52-06 X request with wrong nonce/slug fails before accessing origin stora
       'WORKSPACE_EDITOR_CHANGED');
     assert.equal(f.counts().gets,0);
   });
+});
+
+test('P52-06 X absent or inaccessible session-local workspace cannot be promoted to isolation proof',async()=>{
+  for(const [workspace,code,rootState] of [
+    ['absent','OPFS_LOCAL_OBSERVED_ONLY','ABSENT'],
+    ['denied','WORKSPACE_OPFS_INSPECTION_FAILED',undefined]]){
+    await check({workspace},async f=>{
+      const r=await perchanceAiOpfsProbe({slug,nonce});
+      assert.equal(r.code,code);
+      assert.equal(r.isolation,'UNVERIFIED');
+      assert.equal(r.workerNamespace,rootState?'UNVERIFIED':undefined);
+      if(rootState)assert.equal(r.workspaceRootState,rootState);
+      assert.deepEqual({creates:f.counts().creates,files:f.counts().files},
+        {creates:0,files:0});
+      assert.equal(JSON.stringify(r).includes(sid),false);
+    });
+  }
 });
