@@ -2117,6 +2117,142 @@ def main():
                 assert execute(after,"return document.getElementById('pcms-existing-unlist').disabled") is True
                 print('B I13_EXISTING_UI_NO_BLIND_UNLIST_RETRY=PASS',flush=True)
 
+                # Synthetic prior confirmed public F permits a NEW source
+                # lifecycle only with archived immutable release/AI/stage/P.
+                cycle="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs'),core=await import('./staging-core.mjs');
+                  const rec=await import('./existing-update-core.mjs');
+                  const existing=await import('./existing-update-store.mjs');
+                  const stageModule=await import('./staging-store.mjs');
+                  const aiModule=await import('./ai-store.mjs');
+                  const releaseModule=await import('./release-store.mjs');
+                  const refresh=await import('./refresher-core.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const slug='i13-repeat-generator',fp='f'.repeat(64),
+                    accountId='i13_repeat_account',personaUid='persona-i13-repeat',
+                    remoteId='public_i13_repeat';
+                  const original=await core.exactSource([{path:'main.pjs',base64:btoa('previous P0')},
+                    {path:'index.html',base64:btoa('<p>P0</p>')}]);
+                  const p1=await core.exactSource([{path:'main.pjs',base64:btoa('published P1')},
+                    {path:'index.html',base64:btoa('<p>P1</p>')}]);
+                  const p2=await core.exactSource([{path:'main.pjs',base64:btoa('ready P2')},
+                    {path:'index.html',base64:btoa('<p>P2</p>')}]);
+                  const account={accountId,personaUid,revision:4,state:'VERIFIED',
+                    bindingVersion:1,identity:{source:'GUARDED_SESSION_READBACK',
+                      bindingVersion:1,principalFingerprint:fp}};
+                  const inventory={slug,revision:3,accountId,personaUid,
+                    bindingVersion:1,remoteId,ownerState:'OBSERVED_OWNER',visibility:'UNLISTED'};
+                  const adoption={slug,revision:6,accountId,accountRevision:4,personaUid,
+                    bindingVersion:1,principalFingerprint:fp,remotePublicId:remoteId,
+                    archiveState:'ARCHIVED_GIT_CONFIRMED',original:{
+                      source:'INDEPENDENT_FULL_BYTE_READBACK',
+                      fingerprint:original.fingerprint,blobs:original.blobs}};
+                  const initial={slug,revision:12,state:'STAGE_CONFIRMED',accountId,
+                    accountRevision:4,personaUid,bindingVersion:1,
+                    principalFingerprint:fp,remotePublicId:remoteId,
+                    previousFingerprint:original.fingerprint,
+                    stagedFingerprint:p1.fingerprint,
+                    stageSource:p1,recovery:(await rec.sealPrevious(original,'synthetic-history-passphrase')),
+                    nonce:'1'.repeat(32),operationId:'existing_'+ '1'.repeat(32)};
+                  const priorStage={slug,revision:5,state:'SOURCE_VERIFIED',
+                    accountId,accountRevision:4,personaUid,bindingVersion:1,
+                    principalFingerprint:fp,remotePublicId:remoteId,
+                    sourceFolder:'gens/'+slug,sourceHead:'a'.repeat(40),
+                    testingSha:fp,candidate:p1,previous:original,
+                    verifiedAt:Date.now(),nonce:'1'.repeat(32)};
+                  const priorJob={slug,revision:7,stageRevision:5,
+                    state:'TESTS_VERIFIED',executionSlotReleased:true,
+                    sourceFingerprint:p1.fingerprint,verifiedFinal:p1.fingerprint,
+                    finalSource:p1,prompt:{revision:1,tests:['default_generator_smoke']},
+                    native:{state:'CHAT1_OBSERVED_IDLE',sessionDigest:fp},
+                    chat1:{tests:{default_generator_smoke:{
+                      result:'PASS',sourceFingerprint:p1.fingerprint}}},chat2:null};
+                  const approved={slug,accountId,personaUid,bindingVersion:1,accountRevision:4,
+                    principalFingerprint:fp,remotePublicId:remoteId,
+                    stageRevision:5,jobRevision:7,sourceFingerprint:p1.fingerprint,
+                    previousFingerprint:original.fingerprint,kind:'PRIVATE_NEW',
+                    files:p1.files,gitFolder:'gens/'+slug,
+                    gitTestingSha:fp,testPromptRevision:1,testingFingerprint:null};
+                  const priorRelease={slug,revision:6,releaseId:'release_'+ '1'.repeat(32),
+                    kind:'PRIVATE_NEW',state:'CONFIRMED_PUBLIC',
+                    accountId,personaUid,bindingVersion:1,remoteId,
+                    principalFingerprint:fp,source:'INDEPENDENT_PUBLICATION_READBACK',
+                    sourceFingerprint:p1.fingerprint,approvedAt:Date.now()-10000,
+                    observedAt:Date.now()-1000,observationId:'observed_'+ '2'.repeat(32),
+                    approval:approved,sealedSource:p1};
+                  const sh=refresh.emptyShadow();
+                  sh.rows=[{stableId:'i13_repeat_stable',slug,accountId,personaUid,
+                    remoteId,bindingVersion:1,ordinal:1,phase:'SLEEPING',
+                    sleepRemaining:36*3600000,activeRemaining:0,paused:false,slot:false,
+                    ownerVerified:true,releaseVerified:true,reviewHeld:false,identityHeld:false}];
+                  sh.accounts[accountId]={paused:false,personaUid,bindingVersion:1};
+                  const link={slug,folder:'gens/'+slug,accountId,bindingVersion:1,
+                    remoteId,personaUid};
+                  await new Promise((resolve,reject)=>{
+                    const t=db.transaction('meta','readwrite'),m=t.objectStore('meta');
+                    for(const item of [{key:'account:'+accountId,account},
+                      {key:'inventory:'+slug,generator:inventory},{key:'adoption:'+slug,adoption},
+                      {key:'existing-update:'+slug,record:initial},
+                      {key:'stage:'+slug,record:priorStage},
+                      {key:'ai-job:'+slug,accountId,job:priorJob},
+                      {key:'release:'+slug,release:priorRelease},
+                      {key:'source-link:'+slug,link},
+                      {key:refresh.REFRESHER_KEY,state:sh}])m.put(item);
+                    t.oncomplete=resolve;t.onabort=()=>reject(Error('repeat seed abort'));
+                  });
+                  const ec=existing.createExistingStore(db);
+                  const previous=await rec.sealPrevious(p1,'synthetic-history-passphrase');
+                  const prepared=await ec.prepare({context:{ok:true,
+                    originalArchiveFingerprint:original.fingerprint},
+                    original:p1,seal:previous,shadow:sh.rows[0],
+                    account,inventory,adoption,remote:{ok:true,remotePublicId:remoteId,
+                      ownerResult:'IS_OWNER',visibility:'PUBLIC',source:p1}});
+                  const priorHist=await new Promise(resolve=>{
+                    const req=db.transaction('meta','readonly').objectStore('meta')
+                      .get('existing-history:'+slug+':'+initial.operationId);
+                    req.onsuccess=()=>resolve(req.result?.record);
+                  });
+                  // Unlisting and bytes are simulated evidence only; separate
+                  // native tests prove the fixed effect path.
+                  const stages=stageModule.createStagingStore(db);
+                  const pinned=await stages.pin({slug,candidate:p2,previous:p1,
+                    source:{ok:true,ready:true,folder:'gens/'+slug,head:'b'.repeat(40),
+                      fingerprint:fp,testingSha:fp,sourceBytes:p2.blobs},
+                    eligibility:{ok:true,account,item:{remoteId}},nonce:'2'.repeat(32)});
+                  const oldStage=await new Promise(resolve=>{
+                    const req=db.transaction('meta','readonly').objectStore('meta')
+                      .get('stage-history:'+slug+':5');
+                    req.onsuccess=()=>resolve(req.result?.record);
+                  });
+                  // Seal a new SOURCE_VERIFIED stage in this synthetic fixture.
+                  await new Promise((resolve,reject)=>{
+                    const t=db.transaction('meta','readwrite'),m=t.objectStore('meta');
+                    m.put({key:'stage:'+slug,record:{...priorStage,revision:pinned.revision,
+                      nonce:'2'.repeat(32),candidate:p2,previous:p1,
+                      state:'SOURCE_VERIFIED'}});
+                    t.oncomplete=resolve;t.onabort=()=>reject(Error('stage advance abort'));
+                  });
+                  const ai=await aiModule.createAiStore(db).start({...priorStage,
+                    revision:pinned.revision,nonce:'2'.repeat(32),
+                    candidate:p2,previous:p1,state:'SOURCE_VERIFIED'});
+                  const oldAi=await new Promise(resolve=>{
+                    const req=db.transaction('meta','readonly').objectStore('meta')
+                      .get('ai-history:'+slug+':7');
+                    req.onsuccess=()=>resolve(req.result?.job);
+                  });
+                  done({ok:prepared.ok&&priorHist?.state==='STAGE_CONFIRMED'&&
+                    pinned.ok&&pinned.revision===6&&oldStage?.revision===5&&
+                    ai.ok&&ai.revision===8&&oldAi?.revision===7,
+                    prepared,pinned,ai,priorArchived:!!priorHist,
+                    stageArchived:!!oldStage,aiArchived:!!oldAi});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,600)}));"""
+                proof=call('POST',f'/session/{after}/execute/async',
+                           {'script':cycle,'args':[]},timeout=90)
+                assert proof.get('ok') is True,proof
+                print('B I13_REPEAT_CYCLE_IMMUTABLE_EXISTING_STAGE_AI_HISTORY=PASS',flush=True)
+
                 # I08 B: real packaged Firefox crypto, canonical IDB, donor
                 # portable format, Settings action, and wrong-password failure.
                 # No live provider or native calls; no disk byte proof claimed.
