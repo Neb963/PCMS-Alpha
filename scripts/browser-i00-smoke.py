@@ -1533,6 +1533,8 @@ def main():
                     hist,{...opfs,workspaceRootState:'ABSENT'});
                   const forged=await store.verifySecondChat(slug,final.revision,
                     {...hist,sessionDigest:a},opfs);
+                  const onlyFolder=await store.verifySecondChat(slug,final.revision,
+                    hist,{...opfs,workerNamespace:'UNVERIFIED'});
                   const permitted=await store.verifySecondChat(slug,final.revision,hist,opfs);
                   const stale=await store.verifySecondChat(slug,final.revision,hist,opfs);
                   const second=await test(permitted.revision,2);
@@ -1541,11 +1543,12 @@ def main():
                     reset.ok&&clear.ok&&ask.ok&&s2.ok&&final.ok&&
                     missing.code==='AI_FRESH_CHAT_EVIDENCE_UNVERIFIED'&&
                     forged.code==='AI_FRESH_CHAT_EVIDENCE_UNVERIFIED'&&
+                    onlyFolder.code==='AI_FRESH_CHAT_EVIDENCE_UNVERIFIED'&&
                     permitted.ok&&permitted.chat2IsolationVerified===true&&
                     stale.code==='STALE_REVISION'&&second.ok&&
                     second.state==='TESTS_VERIFIED'&&
                     job.evidence.chat2Pass===true&&job.slotReleased===true,
-                    missing,forged,permitted,stale,second:second.state});
+                    missing,forged,onlyFolder,permitted,stale,second:second.state});
                   db.close();
                 })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
                 chat2_positive=call('POST',f'/session/{after}/execute/async',
