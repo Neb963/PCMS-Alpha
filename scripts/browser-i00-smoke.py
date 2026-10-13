@@ -1987,6 +1987,106 @@ def main():
                     proof['port']['state']=='PUBLICATION_UNCERTAIN'),proof
                 print('B I13_INSTALLED_RESTART_DURABLE_UNCERTAIN_PUBLICATION=PASS',flush=True)
 
+                # I13 B: existing public P is an encrypted sealed snapshot;
+                # real Firefox IDB serializes races and holds uncertain effects.
+                call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
+                current=execute(after,"return {prepare:!!document.getElementById('pcms-existing-prepare'),verify:!!document.getElementById('pcms-existing-recheck-unlist'),restore:!!document.getElementById('pcms-existing-recheck-restore'),held:document.getElementById('pcms-existing-unlist').disabled}")
+                assert current=={'prepare':True,'verify':True,'restore':True,'held':True},current
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const core=await import('./existing-update-core.mjs');
+                  const module=await import('./existing-update-store.mjs');
+                  const source=(await import('./staging-core.mjs'));
+                  const refresher=await import('./refresher-core.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const slug='i13-existing-fixture',fp='e'.repeat(64),
+                    accountId='i13_existing_account',personaUid='persona-i13-existing',
+                    remoteId='public_i13_existing01';
+                  const p=await source.exactSource([
+                    {path:'main.pjs',base64:btoa('original')},
+                    {path:'index.html',base64:btoa('<p>P</p>')},
+                    {path:'src/binary.bin',base64:btoa(String.fromCharCode(0,255,8))}
+                  ]);
+                  const seal=await core.sealPrevious(p,'browser-fixture-private-passphrase');
+                  const decrypted=await core.unlockPrevious(seal,'browser-fixture-private-passphrase');
+                  const negative=await core.unlockPrevious(seal,'wrong-browser-fixture-passphrase');
+                  const account={accountId,personaUid,revision:4,bindingVersion:1,state:'VERIFIED',
+                    identity:{source:'GUARDED_SESSION_READBACK',bindingVersion:1,
+                      principalFingerprint:fp}};
+                  const inventory={slug,accountId,personaUid,bindingVersion:1,revision:2,
+                    remoteId,ownerState:'OBSERVED_OWNER',visibility:'PUBLIC'};
+                  const adoption={slug,accountId,personaUid,bindingVersion:1,accountRevision:4,
+                    principalFingerprint:fp,remotePublicId:remoteId,
+                    revision:6,archiveState:'ARCHIVED_GIT_CONFIRMED',
+                    original:{source:'INDEPENDENT_FULL_BYTE_READBACK',
+                      fingerprint:p.fingerprint,blobs:p.blobs}};
+                  const state=refresher.emptyShadow();
+                  state.rows.push({stableId:'i13_existing_stable',slug,accountId,personaUid,
+                    bindingVersion:1,remoteId,phase:'SLEEPING',sleepRemaining:72*3600000,
+                    activeRemaining:0,ordinal:1,paused:false,slot:false,identityHeld:false,
+                    ownerVerified:true,releaseVerified:true,reviewHeld:false});
+                  state.accounts[accountId]={personaUid,bindingVersion:1,paused:false};
+                  if(!refresher.validShadow(state))throw Error('invalid synthetic shadow');
+                  await new Promise((resolve,reject)=>{
+                    const t=db.transaction(['meta'],'readwrite'),m=t.objectStore('meta');
+                    m.put({key:'account:'+accountId,account});
+                    m.put({key:'inventory:'+slug,generator:inventory});
+                    m.put({key:'adoption:'+slug,adoption});
+                    m.put({key:refresher.REFRESHER_KEY,state});
+                    t.oncomplete=resolve;t.onabort=()=>reject(Error('I13 seed aborted'));
+                  });
+                  const store=module.createExistingStore(db);
+                  const remote={ok:true,remotePublicId:remoteId,ownerResult:'IS_OWNER',
+                    visibility:'PUBLIC',source:p};
+                  const first=await store.prepare({context:{
+                    ok:true,originalArchiveFingerprint:p.fingerprint},
+                    original:p,seal,remote,shadow:state.rows[0],account,inventory,adoption});
+                  const second=await store.prepare({context:{
+                    ok:true,originalArchiveFingerprint:p.fingerprint},
+                    original:p,seal,remote,shadow:state.rows[0],account,inventory,adoption});
+                  const competing=await Promise.all([
+                    store.move(slug,first.revision,'UNLIST_DISPATCH'),
+                    store.move(slug,first.revision,'UNLIST_DISPATCH')]);
+                  const winners=competing.filter(x=>x.ok);
+                  const operations=await new Promise((resolve,reject)=>{
+                    const t=db.transaction('operations','readonly');
+                    const req=t.objectStore('operations').getAll();
+                    req.onsuccess=()=>resolve(req.result.filter(x=>
+                      x.targetId==='existing_'+slug));
+                    req.onerror=()=>reject(Error('operations unavailable'));
+                  });
+                  const uncertain=await store.move(slug,winners[0].revision,
+                    'UNLIST_UNCERTAIN',{reason:'LOST_ACK'});
+                  const retry=await store.move(slug,uncertain.revision,'UNLIST_DISPATCH');
+                  const port=browser.runtime.connect({name:'pcms-i13-existing'});
+                  const reply=new Promise(resolve=>port.onMessage.addListener(resolve));
+                  port.postMessage({type:'GET',params:{slug}});
+                  const actual=await reply;port.disconnect();
+                  done({ok:seal.ok&&decrypted.ok&&!negative.ok&&first.ok&&
+                    second.code==='EXISTING_ALREADY_PREPARED'&&winners.length===1&&
+                    operations.length===1&&
+                    operations[0].status==='DISPATCH_POSSIBLE'&&
+                    uncertain.state==='UNLIST_UNCERTAIN'&&retry.ok===false&&
+                    actual.state==='UNLIST_UNCERTAIN',
+                    first,second,competing,operations:operations.length,
+                    uncertain,retry,actual});
+                  db.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,600)}));"""
+                proof=call('POST',f'/session/{after}/execute/async',
+                           {'script':code,'args':[]},timeout=90)
+                assert proof.get('ok') is True,proof
+                print('B I13_INSTALLED_EXISTING_ENCRYPTED_P_CAS_UNLIST_UNCERTAIN=PASS',flush=True)
+                execute(after,"document.getElementById('pcms-existing-slug').value='i13-existing-fixture';document.getElementById('pcms-existing-slug').dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('pcms-existing-get').click();return true")
+                existing_ui=''
+                for _ in range(80):
+                    existing_ui=execute(after,"return document.getElementById('pcms-existing-status').textContent")
+                    if 'UNLIST_UNCERTAIN' in existing_ui:break
+                    time.sleep(.15)
+                assert 'UNLIST_UNCERTAIN' in existing_ui,existing_ui
+                assert execute(after,"return document.getElementById('pcms-existing-unlist').disabled") is True
+                print('B I13_EXISTING_UI_NO_BLIND_UNLIST_RETRY=PASS',flush=True)
+
                 # I08 B: real packaged Firefox crypto, canonical IDB, donor
                 # portable format, Settings action, and wrong-password failure.
                 # No live provider or native calls; no disk byte proof claimed.
