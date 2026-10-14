@@ -5,7 +5,7 @@ const deny=code=>{throw Error(code);};
 const keyOf=r=>JSON.stringify(r.key);
 const exact=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 function copyRow(row){return {key:structuredClone(row.key),value:deserializeClone(row.value)};}
-function inertMeta(key,row,remap){
+function inertMeta(key,row,remap,existing=null){
   const data=row.value;
   if(!data||typeof data!=='object')return row;
   if(typeof key==='string'&&key.startsWith('account:')&&data.account){
@@ -18,11 +18,15 @@ function inertMeta(key,row,remap){
     a.identity=null;a.override=null;
     if(a.state!=='ARCHIVED')a.state='VERIFICATION_PENDING';
     a.revision=(Number.isSafeInteger(a.revision)?a.revision:0)+1;
+    a.bindingVersion=(Number.isSafeInteger(a.bindingVersion)?a.bindingVersion:0)+1;
   }
   if(typeof key==='string'&&key.startsWith('inventory:')&&data.generator){
     const g=data.generator;
     if(typeof g.personaUid==='string')g.personaUid=remap[g.personaUid]||null;
-    g.ownerResult='UNKNOWN';g.ownerVerified=false;g.visibility='UNKNOWN';
+    // Restored owner observation is history, never current account authority.
+    g.ownerState='OWNER_UNVERIFIED';g.ownerResult='UNKNOWN';
+    g.ownerVerified=false;g.visibility='UNKNOWN';g.management='OBSERVED_ONLY';
+    g.source='SOURCE_PENDING';g.lastObservationId=null;g.lastObservedAt=0;
     g.ownerObservationId=null;g.principalFingerprint=null;
     g.reviewHeld=true;g.identityHeld=true;
   }
@@ -46,11 +50,22 @@ function inertMeta(key,row,remap){
       status:'SUSPENDED',code:'RESTORED_KEY_NOT_AUTHORITY'};
   }
   if(key==='refresher:shadow:v1'&&data.state){
-    data.state={...data.state,globalPause:true,
-      rows:(data.state.rows||[]).map(r=>({...r,paused:true})),
+    const prior=existing?.state||{};
+    const oldRows=new Map((prior.rows||[]).map(r=>[r.stableId,r]));
+    data.state={...data.state,
+      // Independent guard enforces safety; manual Pauses remain distinct.
+      globalPause:data.state.globalPause===true||prior.globalPause===true,
+      rows:(data.state.rows||[]).map(r=>({...r,
+        paused:r.paused===true||oldRows.get(r.stableId)?.paused===true,
+        personaUid:typeof r.personaUid==='string'?
+          (remap[r.personaUid]||null):null,slot:false})),
       accounts:Object.fromEntries(Object.entries(data.state.accounts||{})
-        .map(([id,a])=>[id,{...a,paused:true}])),
-      inflight:[],nextWakeAt:0};
+        .map(([id,a])=>[id,{...a,
+          paused:a.paused===true||prior.accounts?.[id]?.paused===true,
+          personaUid:typeof a.personaUid==='string'?
+            (remap[a.personaUid]||null):null,
+          verifiedIdentity:false,principalFingerprint:null}])),
+      inflight:[],dueIndex:[],nextWakeAt:0,nextAdmissionAt:0};
   }
   // Other metadata remains preserved under the independent global guard.
   return row;
@@ -69,6 +84,7 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',uidRemap
   const stores={};
   for(const name of DB_STORES){
     const previous=current.stores[name].map(copyRow);
+    const priorByKey=new Map(previous.map(row=>[keyOf(row),row.value]));
     const restored=incoming.stores[name].map(copyRow).map(row=>{
       const value=row.value;
       if(name==='entities'&&value&&typeof value==='object'){
@@ -78,7 +94,7 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',uidRemap
         !['CONFIRMED','ABORTED','REJECTED'].includes(value.status)){
         value.status='HELD_UNCERTAIN';value.revision=(Number.isSafeInteger(value.revision)?value.revision:0)+1;
       }
-      if(name==='meta')inertMeta(row.key,row,uidRemap);
+      if(name==='meta')inertMeta(row.key,row,uidRemap,priorByKey.get(keyOf(row)));
       if(name==='observations'&&value&&typeof value==='object'){
         value.restoredHistorical=true;
       }
@@ -99,6 +115,20 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',uidRemap
       return String(x).localeCompare(String(y),'en');
     }).map(row=>({key:structuredClone(row.key),value:serializeClone(row.value)}));
   }
+  // Never treat inventory belonging to a replaced binding as current.
+  const accounts=new Map(stores.meta.filter(r=>typeof r.key==='string'&&
+    r.key.startsWith('account:')&&r.value?.account)
+    .map(r=>[r.value.account.accountId,r.value.account]));
+  for(const record of stores.meta){
+    const g=record.value?.generator;
+    if(typeof record.key!=='string'||!record.key.startsWith('inventory:')||!g)continue;
+    const account=accounts.get(g.accountId);
+    if(!account)deny('RESTORE_ACCOUNT_REFERENCE_MISSING');
+    g.personaUid=account.personaUid;
+    g.bindingVersion=account.bindingVersion;
+    g.accountRevision=account.revision;
+  }
+  stores.meta=stores.meta.map(row=>({key:row.key,value:serializeClone(row.value)}));
   const snapshot={schema:1,stores};
   validatePcmsSnapshot(snapshot);
   return snapshot;
