@@ -172,6 +172,39 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     if(!refreshGate()||!refreshAdapter||!observationGate())return 'REFRESH_ACTIVATION_HELD';
     const g=guard();if(!g?.getSafeRouteReadiness)return 'GUARDED_REFRESH_UNAVAILABLE';
     const snapshot=await s.read();if(!snapshot.ok)return 'CANONICAL_UNAVAILABLE';
+    // Reconcile a possibly-dispatched effect by independent READBACK ONLY.
+    // A cold wake or lost response must never invoke execute a second time.
+    const uncertain=snapshot.state.rows.find(r=>r.refresh?.intent?.state==='DISPATCH_POSSIBLE'&&
+      (r.refresh.probes||0)<3&&(r.refresh.nextAttemptAt||0)<=clock());
+    if(uncertain){
+      const intent=uncertain.refresh.intent,a=snapshot.state.accounts[uncertain.accountId];
+      if(!uncertain.ownerVerified||!uncertain.releaseVerified||uncertain.identityHeld||
+        uncertain.reviewHeld||uncertain.listing!=='PUBLIC'||!a?.verifiedIdentity||
+        uncertain.releaseFingerprint!==intent.sourceFingerprint)
+        return 'REFRESH_RECONCILIATION_HELD';
+      const first=await g.getSafeRouteReadiness(uncertain.personaUid);
+      if(!first?.ready)return 'REFRESH_RECONCILIATION_ROUTE_HELD';
+      const claim={id:intent.id,slug:uncertain.slug,stableId:uncertain.stableId,
+        accountId:uncertain.accountId,personaUid:uncertain.personaUid,
+        bindingVersion:uncertain.bindingVersion,
+        principalFingerprint:a.principalFingerprint,releaseFingerprint:intent.sourceFingerprint};
+      let receipt={at:clock(),kind:'UNKNOWN',sourceFingerprint:null,
+        targetMatched:false,principalMatched:false};
+      try{
+        const check=await refreshAdapter.readback(claim);
+        const after=await g.getSafeRouteReadiness(uncertain.personaUid);
+        const stable=after?.ready&&first.routeId===after.routeId&&
+          first.cookieStoreId===after.cookieStoreId&&
+          first.healthDomain===after.healthDomain;
+        receipt={at:clock(),kind:check?.kind||'UNKNOWN',
+          sourceFingerprint:check?.sourceFingerprint||null,
+          targetMatched:check?.targetMatched===true&&stable===true,
+          principalMatched:check?.principalMatched===true&&stable===true,feed:check?.feed};
+      }catch{/* readback remains uncertain; bounded backoff applies */}
+      const settled=await s.settleAttempt(uncertain.stableId,intent.id,receipt);
+      return settled.ok?(settled.proof.effectVerified?
+        'REFRESH_READBACK_EFFECT_PROVEN':'REFRESH_READBACK_HELD'):settled.code;
+    }
     const row=snapshot.state.rows.find(r=>r.slot&&r.phase==='ACTIVE'&&
       r.ownerVerified&&r.releaseVerified&&!r.identityHeld&&!r.reviewHeld&&
       !r.refresh?.intent&&!r.refresh?.suspended&&
