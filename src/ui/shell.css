@@ -222,3 +222,38 @@ button.pcms-generator-row-target:hover{text-decoration:underline}
 #view-generators #pcms-generator-count{color:var(--muted);font-size:11px}
 @media(max-width:1250px){.pcms-inventory-stage{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:650px){.pcms-inventory-toolbar{flex-wrap:wrap}.pcms-inventory-toolbar .pcms-field:first-child{max-width:none}.pcms-matches{margin-left:0}.pcms-head-actions{width:100%}.pcms-secondary-tools-body{display:flex}.pcms-mini-evidence{display:none}}
+
+/* I17 operator feedback: Refresher is a schedule at a glance, not debug text. */
+.pcms-refresher-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 0 16px}
+.pcms-refresher-stat{background:var(--paper);border:1px solid var(--line);border-radius:7px;padding:13px 17px;display:grid;gap:4px;min-width:0}
+.pcms-refresher-stat>span{font-size:11px;color:var(--muted);font-weight:600}
+.pcms-refresher-stat strong{font-size:22px;letter-spacing:-.4px;font-weight:720;overflow-wrap:anywhere}
+.pcms-refresher-stat small{font-size:10px;color:var(--muted)}
+.pcms-refresher-main>.panel-head{margin:0}
+.pcms-refresher-alert{margin-top:13px!important;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;font-weight:650;color:var(--warn)}
+.pcms-inline-help{font-weight:400;color:var(--muted);font-size:11px}
+.pcms-inline-help summary{cursor:pointer;color:var(--accent)}.pcms-inline-help p{max-width:650px;line-height:1.6}
+.pcms-refresher-feedback{font-size:11px;color:var(--muted);margin-top:8px}
+.pcms-refresher-account-controls{display:flex;align-items:center;gap:9px;margin-top:16px!important;margin-bottom:12px!important;flex-wrap:wrap}
+.pcms-refresher-account-controls>label{font-weight:600;white-space:nowrap}
+.pcms-refresher-account-controls>select{flex:1 1 250px;max-width:430px}
+.pcms-refresher-settings{margin-left:auto;min-width:0}
+.pcms-refresher-settings summary,.pcms-refresher-diagnostics summary{cursor:pointer;color:var(--accent);font-size:12px;font-weight:650;white-space:normal}
+.pcms-refresher-settings[open]{flex-basis:100%;margin:8px 0}
+.pcms-refresher-policy-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;align-items:end;margin:12px 0}
+.pcms-refresher-policy-grid label{display:grid;gap:5px;font-size:11px;color:var(--muted)}
+.pcms-refresher-policy-grid input{width:100%;min-width:0}
+.pcms-refresher-policy-grid button{width:max-content}
+.pcms-refresher-filters{display:flex;align-items:center;gap:10px;margin-top:18px!important;margin-bottom:12px!important}
+.pcms-refresher-filters input{width:min(360px,60%)}.pcms-refresher-filters label{color:var(--muted)}
+.pcms-refresher-table{margin-top:4px!important}
+.pcms-refresher-table table{min-width:600px}
+.pcms-refresher-table th{height:34px}.pcms-refresher-table td{height:41px;vertical-align:middle;font-size:12px}
+.pcms-refresher-table td:first-child button{padding:4px!important;border:0!important;color:var(--ink)!important;background:transparent!important;font-weight:670!important}
+.pcms-refresher-budget{white-space:normal}.pcms-refresher-budget>span{margin-right:6px}.pcms-refresher-budget small{color:var(--warn);font-size:10px}
+.pcms-refresher-pager{display:flex;justify-content:flex-end;gap:9px;align-items:center;margin-top:12px!important;margin-bottom:12px!important;font-size:11px;color:var(--muted)}
+.pcms-refresher-diagnostics{margin-top:10px!important;padding:12px 0;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+.pcms-refresher-diagnostics p{overflow-wrap:anywhere}
+#pcms-refresher-inspector .pcms-refresher-policy-grid{margin:13px 18px 17px}
+@media(max-width:900px){.pcms-refresher-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.pcms-refresher-policy-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:500px){.pcms-refresher-stats{grid-template-columns:minmax(0,1fr)}.pcms-refresher-filters{flex-wrap:wrap}.pcms-refresher-filters input{width:100%}.pcms-refresher-policy-grid{grid-template-columns:minmax(0,1fr)}.pcms-refresher-account-controls>select{flex:1 1 100%}.pcms-refresher-settings{margin-left:0}}

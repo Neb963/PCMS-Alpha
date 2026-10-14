@@ -48,12 +48,17 @@ function draw(s){
     (s.recent.suspended?' · recent polling suspended after bounded failures':'')+
     ' · '+s.visibilitySuspended+' visibility-held (slot released; active budget preserved).';
   el('summary').textContent=summary;
+  el('occupied').textContent=String(s.occupied);
+  el('capacity').textContent=String(s.capacity.cap);
+  el('eligible').textContent=String(s.eligible);
+  el('observed').textContent=s.recent.stale?'Stale':s.recent.observedAt?'Observed':'Unknown';
+  el('observed-detail').textContent=age(s.recent.observedAt);
+  el('mode').textContent=s.globalPause?'Paused · planning only':'Planning only';
   for(const id of ['pcms-overview-refresher','pcms-queue-refresher']){
     const target=document.getElementById(id);if(target)target.textContent='Shadow Refresher: '+summary;
   }
-  el('provider').textContent='Provider '+s.provider.state+
-    ' · effective refresh method unverified (mutation disabled) · clocks: '+s.clock+
-    ' · observations: '+s.monitoring+' · refresh mutations OFF.';
+  el('provider').textContent='Live refresh held · Provider '+s.provider.state+
+    ' · Monitoring '+s.monitoring;
   el('diagnostics').textContent=s.diagnostics.turns+' durable turns · '+s.diagnostics.unknownIntervals+
     ' unknown intervals frozen · read peak '+s.diagnostics.readPeak+' · queue peak '+s.diagnostics.queuePeak+
     ' · next wake '+(s.nextWakeAt?new Date(s.nextWakeAt).toLocaleTimeString():'not verified')+
@@ -64,7 +69,10 @@ function draw(s){
   const oldAccount=el('account').value;el('account').replaceChildren();
   for(const a of s.accounts){
     const opt=document.createElement('option');opt.value=a.accountId;
-    opt.textContent=a.accountId+' · '+a.health+' · grace '+(a.graceUsed/60000).toFixed(1)+' min';
+    const id=a.accountId;
+    opt.textContent=(id.length>22?id.slice(0,14)+'…'+id.slice(-5):id)+
+      ' · '+a.health+(a.paused?' · paused':'');
+    opt.title=id+' · '+a.health+' · grace '+(a.graceUsed/60000).toFixed(1)+' min';
     el('account').append(opt);
   }
   if(s.accounts.some(a=>a.accountId===oldAccount))el('account').value=oldAccount;
@@ -78,9 +86,23 @@ function draw(s){
     button.addEventListener('click',()=>{selected=r;inspector();});td.append(button);tr.append(td);
     const present=r.presence?(r.presence.present?'present at '+r.presence.position:'absent; not deleted')+
       ' · '+age(r.presence.observedAt)+(r.presence.stale?' · stale':''):'unobserved';
-    for(const text of [r.accountId,rowText(r),String(r.ordinal),present]){
-      const c=document.createElement('td');c.textContent=text;tr.append(c);
-    }
+    const account=document.createElement('td');
+    account.textContent=r.accountId?.length>21?r.accountId.slice(0,14)+'…'+r.accountId.slice(-4):r.accountId;
+    account.title=r.accountId;tr.append(account);
+    const budget=document.createElement('td');budget.className='pcms-refresher-budget';
+    const tag=document.createElement('span');tag.className='pcms-status-tag';
+    tag.dataset.tone=r.phase==='ACTIVE'?'good':r.phase==='SLEEPING'?'neutral':'info';
+    tag.textContent=r.phase==='ACTIVE'?'Active':r.phase==='SLEEPING'?'Sleeping':'Waiting';
+    const remaining=document.createElement('span');
+    remaining.textContent=duration(r.phase==='SLEEPING'?r.sleepRemaining:r.activeRemaining)+' left';
+    const blockers=document.createElement('small');
+    blockers.textContent=r.blockers.length?r.blockers.length+' hold(s)':'';
+    blockers.title=r.blockers.join(', ');
+    budget.append(tag,remaining,blockers);tr.append(budget);
+    const ordinal=document.createElement('td');ordinal.textContent=String(r.ordinal);tr.append(ordinal);
+    const observed=document.createElement('td');observed.textContent=r.presence?
+      (r.presence.present?'Present':r.presence.stale?'Stale':'Not seen'):'Unknown';
+    observed.title=present;tr.append(observed);
     rows.append(tr);
   }
   if(!s.items.length){
@@ -105,8 +127,8 @@ async function load(){
     const s=await command('GET_REFRESHER',{query:query.value,phase:phase.value,offset,limit:25});
     if(mine!==epoch)return;
     if(!s?.ok)throw Error(s?.code||'READ_UNAVAILABLE');
-    draw(s);status.textContent=s.restoreHeld?'Restore hold; local changes held.':
-      'Shadow projection only. Unknown operational intervals freeze. Ordinary sleep remains public; no refresh or unlisting is sent.';
+    draw(s);status.textContent=s.restoreHeld?
+      'Restore hold · local schedule locked':'Shadow planning · no provider mutation';
   }catch(error){if(mine!==epoch)return;snapshot=null;
     status.textContent='Shadow state unavailable. No healthy fleet or empty remote queue inferred.';
     for(const id of ['save','global-pause','account-pause','generator-pause','generator-save','demand','retry-recent'])el(id).disabled=true;

@@ -268,37 +268,57 @@
         </section>
       </section>
       <section class="workspace" id="view-refresher" data-view="refresher" aria-labelledby="heading-refresher" hidden>
-        <header class="workspace-head"><div><p class="eyebrow">Workspace / 05</p><h1 id="heading-refresher" tabindex="-1">Refresher</h1><p>Operational capacity, scheduling and observed visibility.</p></div><button type="button" disabled aria-describedby="blocked-refresher">Start refresh</button></header>
-        <section class="panel">
-          <div class="panel-head"><h2>Global oldest-eligible queue</h2><span class="unknown">Shadow only · mutations off</span></div>
-          <p id="blocked-refresher" class="reason">Refresh activation requires independently proven permissible provider behavior. Shadow allocations never send saves, create tabs, unlist or publish.</p>
-          <p id="pcms-refresher-summary" role="status">Canonical capacity pending; no remote visibility promised.</p>
-          <p id="pcms-refresher-provider"></p><p id="pcms-refresher-diagnostics"></p>
-          <button type="button" id="pcms-refresher-reload">Reload local shadow</button>
-          <button type="button" id="pcms-refresher-retry-recent" disabled>Reset recent observation backoff</button>
-          <button type="button" id="pcms-refresher-global-pause" disabled>Pause globally</button>
-          <label for="pcms-refresher-account">Account Pause</label><select id="pcms-refresher-account"></select>
-          <button type="button" id="pcms-refresher-account-pause" disabled>Pause account</button>
-          <p id="pcms-refresher-status" role="status" aria-live="polite">Reading canonical state…</p>
-          <div class="account-controls">
-            <label for="pcms-refresher-active">Default active hours</label><input id="pcms-refresher-active" type="number" min="1" max="8760" value="24">
-            <label for="pcms-refresher-sleep">Minimum sleep hours</label><input id="pcms-refresher-sleep" type="number" min="1" max="8760" value="72">
-            <label for="pcms-refresher-grace">Account grace minutes</label><input id="pcms-refresher-grace" type="number" min="1" max="1440" value="60">
-            <label for="pcms-refresher-cap">Admission override (blank = automatic)</label><input id="pcms-refresher-cap" type="number" min="1" max="200">
-            <button type="button" id="pcms-refresher-save" disabled>Save shadow policy</button>
+        <header class="workspace-head">
+          <div><p class="eyebrow">Capacity / Visibility / Scheduling</p><h1 id="heading-refresher" tabindex="-1">Refresher</h1><p>Manage time budgets and account pauses.</p></div>
+          <div class="pcms-head-actions"><button type="button" id="pcms-refresher-reload">Reload</button><button type="button" id="pcms-refresher-global-pause" disabled>Pause globally</button></div>
+        </header>
+        <div class="pcms-refresher-stats" aria-label="Current local scheduling projection">
+          <div class="pcms-refresher-stat"><span>Occupied</span><strong id="pcms-refresher-occupied">—</strong><small>Shadow slots</small></div>
+          <div class="pcms-refresher-stat"><span>Capacity</span><strong id="pcms-refresher-capacity">—</strong><small>Admission cap</small></div>
+          <div class="pcms-refresher-stat"><span>Eligible</span><strong id="pcms-refresher-eligible">—</strong><small>Waiting for allocation</small></div>
+          <div class="pcms-refresher-stat"><span>Recent list</span><strong id="pcms-refresher-observed">Unknown</strong><small id="pcms-refresher-observed-detail">Not yet measured</small></div>
+        </div>
+        <section class="panel pcms-refresher-main" aria-label="Refresher queue and controls">
+          <div class="panel-head"><h2>Global queue</h2><span class="unknown" id="pcms-refresher-mode">Planning only</span></div>
+          <div class="pcms-refresher-alert"><span id="pcms-refresher-provider">Provider status unknown · mutating refresh held</span><details class="pcms-inline-help"><summary>Why?</summary><p id="blocked-refresher">Live refresh remains held until an independently permissible, effective provider method is proven. Shadow calculations never save or unlist.</p></details></div>
+          <p id="pcms-refresher-summary" class="sr-only" role="status">Canonical capacity pending; no remote visibility promised.</p>
+          <p id="pcms-refresher-status" class="pcms-refresher-feedback" role="status" aria-live="polite">Reading local schedule…</p>
+          <div class="pcms-refresher-account-controls">
+            <label for="pcms-refresher-account">Account</label><select id="pcms-refresher-account"></select>
+            <button type="button" id="pcms-refresher-account-pause" disabled>Pause account</button>
+            <details class="pcms-refresher-settings"><summary>Scheduling policy</summary>
+              <div class="pcms-refresher-policy-grid">
+                <label for="pcms-refresher-active">Active hours<input id="pcms-refresher-active" type="number" min="1" max="8760" value="24"></label>
+                <label for="pcms-refresher-sleep">Sleep hours<input id="pcms-refresher-sleep" type="number" min="1" max="8760" value="72"></label>
+                <label for="pcms-refresher-grace">Grace minutes<input id="pcms-refresher-grace" type="number" min="1" max="1440" value="60"></label>
+                <label for="pcms-refresher-cap">Manual capacity<input id="pcms-refresher-cap" type="number" min="1" max="200" placeholder="Auto"></label>
+                <button type="button" id="pcms-refresher-save" disabled>Save policy</button>
+              </div>
+              <p class="reason">Changes apply to future periods; existing allocations retain their earned budget. Cap reductions do not evict active generators.</p>
+            </details>
           </div>
-          <p class="reason">New duration settings apply to subsequent full periods. Remaining time and queue priority are preserved. Cap reductions stop admissions without evicting active allocations. Sleep remains public unless a separate release/review requires unlisting.</p>
-          <label for="pcms-refresher-query">Search generator or account</label><input id="pcms-refresher-query" type="search" maxlength="80">
-          <label for="pcms-refresher-phase">Phase</label><select id="pcms-refresher-phase"><option value="ALL">All</option><option value="WAITING">Waiting</option><option value="ACTIVE">Active</option><option value="SLEEPING">Sleeping</option></select>
-          <div class="table-scroll"><table><caption>Canonical shadow timing and historical observations</caption><thead><tr><th scope="col">Generator</th><th scope="col">Account</th><th scope="col">Budget / hold</th><th scope="col">Queue ordinal</th><th scope="col">Recent-list observation</th></tr></thead><tbody id="pcms-refresher-rows"></tbody></table></div>
-          <button type="button" id="pcms-refresher-prev" disabled>Previous</button><span id="pcms-refresher-page"></span><button type="button" id="pcms-refresher-next" disabled>Next</button>
+          <div class="pcms-refresher-filters">
+            <label for="pcms-refresher-query" class="sr-only">Search generator or account</label><input id="pcms-refresher-query" type="search" maxlength="80" placeholder="Find generator or account…">
+            <label for="pcms-refresher-phase">Phase</label><select id="pcms-refresher-phase"><option value="ALL">All</option><option value="WAITING">Waiting</option><option value="ACTIVE">Active</option><option value="SLEEPING">Sleeping</option></select>
+          </div>
+          <div class="table-wrap pcms-refresher-table" role="region" aria-label="Canonical shadow scheduling queue" tabindex="0">
+            <table><thead><tr><th scope="col">Generator</th><th scope="col">Account</th><th scope="col">Time budget / hold</th><th scope="col">Order</th><th scope="col">Recent list</th></tr></thead><tbody id="pcms-refresher-rows"></tbody></table>
+          </div>
+          <div class="pcms-refresher-pager"><button type="button" id="pcms-refresher-prev" disabled>Previous</button><span id="pcms-refresher-page"></span><button type="button" id="pcms-refresher-next" disabled>Next</button></div>
+          <details class="pcms-refresher-diagnostics"><summary>Scheduling diagnostics and observation recovery</summary>
+            <p id="pcms-refresher-diagnostics"></p><button type="button" id="pcms-refresher-retry-recent" disabled>Reset recent observation backoff</button>
+          </details>
         </section>
         <section class="panel" id="pcms-refresher-inspector" hidden>
-          <h2>Generator timing policy</h2><p id="pcms-refresher-selected"></p><p id="pcms-refresher-metric"></p>
-          <label for="pcms-refresher-generator-active">Active hours</label><input id="pcms-refresher-generator-active" type="number" min="1" max="8760">
-          <label for="pcms-refresher-generator-sleep">Minimum sleep hours</label><input id="pcms-refresher-generator-sleep" type="number" min="1" max="8760">
-          <button type="button" id="pcms-refresher-generator-save" disabled>Save next-cycle policy</button><button type="button" id="pcms-refresher-generator-pause" disabled>Pause generator</button>
-          <button type="button" id="pcms-refresher-demand" disabled>Prioritize next statistics read</button>
+          <div class="panel-head"><h2>Generator timing</h2><span class="unknown">Individual policy</span></div>
+          <p id="pcms-refresher-selected"></p><p id="pcms-refresher-metric"></p>
+          <div class="pcms-refresher-policy-grid">
+            <label for="pcms-refresher-generator-active">Active hours<input id="pcms-refresher-generator-active" type="number" min="1" max="8760"></label>
+            <label for="pcms-refresher-generator-sleep">Sleep hours<input id="pcms-refresher-generator-sleep" type="number" min="1" max="8760"></label>
+            <button type="button" id="pcms-refresher-generator-save" disabled>Save next-cycle policy</button>
+            <button type="button" id="pcms-refresher-generator-pause" disabled>Pause generator</button>
+            <button type="button" id="pcms-refresher-demand" disabled>Check statistics next</button>
+          </div>
         </section>
       </section>
       <section class="workspace" id="view-settings" data-view="settings" aria-labelledby="heading-settings" hidden>

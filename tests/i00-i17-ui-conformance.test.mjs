@@ -16,6 +16,11 @@ test('I17: shell implements prototype workstation chrome without losing operatio
     assert.match(html,new RegExp('data-workspace="'+d+'"'));
   }
   assert.match(css,/@media\(max-width:550px\)/);
+  for(const stat of ['occupied','capacity','eligible','observed'])
+    assert.match(html,new RegExp('id="pcms-refresher-'+stat+'"'));
+  assert.match(html,/class="pcms-refresher-stats"/);
+  assert.match(html,/class="pcms-refresher-policy-grid"/);
+  assert.match(html,/Scheduling diagnostics and observation recovery/);
   assert.match(shell,/quickSearch\.addEventListener/);
   assert.match(shell,/showGeneratorPanel\('inventory'\)/);
   assert.match(shell,/pcms-source-target/);
