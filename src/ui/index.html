@@ -137,11 +137,20 @@
       <section class="workspace" id="view-work-queue" data-view="work-queue" aria-labelledby="heading-work-queue" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 03</p><h1 id="heading-work-queue" tabindex="-1">Work Queue</h1><p>Evidence-backed operator decisions and task receipts.</p></div><button type="button" disabled aria-describedby="blocked-work-queue">Start action</button></header>
         <p id="pcms-queue-refresher" role="status">Shadow scheduler state pending.</p><p><a href="#refresher">Inspect the global Refresher queue</a></p>
+        <nav class="pcms-workspace-shortcuts" aria-label="Work Queue workflows">
+          <button type="button" data-pcms-work-show="activity" aria-pressed="true">Activity</button>
+          <button type="button" data-pcms-work-show="ai" aria-pressed="false">AI tests</button>
+          <button type="button" data-pcms-work-show="writeback" aria-pressed="false">Git writeback</button>
+          <button type="button" data-pcms-work-show="release" aria-pressed="false">Release approval</button>
+          <button type="button" data-pcms-work-show="recovery" aria-pressed="false">Recovery</button>
+        </nav>
+        <div class="pcms-work-activity-grid" data-pcms-work-panel="activity">
         <section class="panel"><div class="panel-head"><h2>Operations</h2><span class="unknown">Read-only</span></div><p id="pcms-work-queue-summary" role="status">Loading canonical journal status. Unknown outcomes must be reconciled, not repeated.</p><p id="blocked-work-queue" class="reason">Provider effects are held. Frozen local supply receipts may be inspected; this screen cannot dispatch, approve or replay an uncertain remote operation.</p></section>
         <section class="panel" aria-labelledby="pcms-stage-queue-title"><div class="panel-head"><h2 id="pcms-stage-queue-title">I09 private stage receipts</h2><span class="unknown">Canonical · no auto-retry</span></div><div id="pcms-stage-queue" role="status" aria-live="polite">Reading local stage journal.</div></section>
         <section class="panel" aria-labelledby="pcms-adoption-queue-title"><div class="panel-head"><h2 id="pcms-adoption-queue-title">Existing-source adoption receipts</h2><span class="unknown">Local originals · Git archive pending</span></div><div id="pcms-adopt-receipts" role="status" aria-live="polite">Loading adoption history.</div></section>
         <section class="panel" aria-labelledby="pcms-supply-queue-title"><div class="panel-head"><h2 id="pcms-supply-queue-title">Frozen supply batches</h2><span class="unknown">Canonical local receipts</span></div><div id="pcms-supply-queue" role="status" aria-live="polite">Loading local batches.</div></section>
-        <section class="panel" aria-labelledby="pcms-writeback-heading">
+        </div>
+        <section class="panel" data-pcms-work-panel="writeback" aria-labelledby="pcms-writeback-heading" hidden>
           <div class="panel-head"><h2 id="pcms-writeback-heading">I11 · Git-only writeback of verified final F</h2><span class="unknown">Git mutation HELD until activated · Publication OFF</span></div>
           <p class="reason">Manual or opt-in automatic source commit. An automatic job must be explicitly armed with an ephemeral credential; credentials disappear on Firefox restart. A verified final generator source and independent tests are required. Preview paths, additions, changes and deletions before preparing a conditional Git commit. All Git credentials are ephemeral; a lost effect acknowledgment requires read-only reconciliation, never a blind second commit.</p>
           <div class="account-controls">
@@ -165,7 +174,7 @@
           <p id="pcms-writeback-status" role="status" aria-live="polite">No writeback prepared; publication and remote Git write remain OFF.</p>
           <div id="pcms-writeback-diff" role="region" class="table-wrap" tabindex="0" aria-label="Full source add, change and delete diff"></div>
         </section>
-        <section class="panel" aria-labelledby="pcms-existing-heading">
+        <section class="panel" data-pcms-work-panel="recovery" aria-labelledby="pcms-existing-heading" hidden>
           <div class="panel-head"><h2 id="pcms-existing-heading">I13 · Existing public source recovery and update</h2><span class="unknown">All provider mutations gated OFF</span></div>
           <p class="reason">Each generator must have archived original bytes, verified ownership, a sleeping I12 slot and an independent source baseline. The operator passphrase encrypts and verifies the previous-good full P locally; only a separately confirmed unlisting permits source staging. Never overwrite a human editor, repeat an ambiguous remote effect or republish a restored P.</p>
           <div class="account-controls">
@@ -189,7 +198,7 @@
           <p id="pcms-existing-status" role="status" aria-live="polite">Load a generator before any operation.</p>
           <div id="pcms-existing-details" role="region" tabindex="0" aria-label="Canonical prior and uncertain-effect evidence"></div>
         </section>
-        <section class="panel" aria-labelledby="pcms-release-heading">
+        <section class="panel" data-pcms-work-panel="release" aria-labelledby="pcms-release-heading" hidden>
           <div class="panel-head"><h2 id="pcms-release-heading">I13 · Exact-source human publication approval</h2><span class="unknown">Production publishing OFF · Individual review</span></div>
           <p class="reason">Approval pins tested PJS, HTML and every binary src file, account/Persona binding, test inputs and prior source. Current protected route, owner, READY Git F, clean editor and actual remote unlisted F must all match. Git commit alone does not confer approval. Existing generator updates are held until independent sleep, unlisting, original archive and recovery proof. A lost publication reply cannot be retried.</p>
           <div class="account-controls">
@@ -208,7 +217,7 @@
           <p id="pcms-release-status" role="status" aria-live="polite">No release selected; publication remains disabled.</p>
           <div id="pcms-release-diff" class="table-wrap" role="region" tabindex="0" aria-label="Exact F and previous byte manifest"></div>
         </section>
-        <section class="panel" aria-labelledby="pcms-ai-jobs-heading">
+        <section class="panel" data-pcms-work-panel="ai" aria-labelledby="pcms-ai-jobs-heading" hidden>
           <div class="panel-head"><h2 id="pcms-ai-jobs-heading">I10 test and repair jobs</h2><span class="unknown">Source-bound · no AI provider activation</span></div>
           <p class="reason">Prepare a job only for an independently verified private stage. Preparation pins the Settings prompt and optional TESTING.md. No helper message is dispatched; no AI test is declared passed until separately observed.</p>
           <div class="account-controls">

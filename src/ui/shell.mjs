@@ -91,6 +91,34 @@ document.querySelectorAll('[data-pcms-jump]').forEach(button=>{
 // existing source/adoption handler displays its canonical revision-fenced data.
 window.addEventListener('pcms-source-target',()=>showGeneratorPanel('source'));
 window.addEventListener('pcms-adoption-target',()=>showGeneratorPanel('adopt'));
+// Work Queue exposes one real workflow at a time, preserving all DOM targets,
+// historical receipts and pending input while hiding unrelated complexity.
+const workPanels=new Map(
+  [...document.querySelectorAll('#view-work-queue [data-pcms-work-panel]')]
+    .map(panel=>[panel.dataset.pcmsWorkPanel,panel]));
+function showWorkPanel(name,{focus=false}={}){
+  const selected=workPanels.get(name);
+  if(!selected)return false;
+  for(const [key,panel] of workPanels)panel.hidden=key!==name;
+  for(const button of document.querySelectorAll('[data-pcms-work-show]')){
+    button.setAttribute('aria-pressed',String(button.dataset.pcmsWorkShow===name));
+  }
+  if(focus){
+    const heading=selected.querySelector('h2');
+    if(heading){
+      heading.tabIndex=-1;
+      heading.scrollIntoView({block:'start'});
+      heading.focus({preventScroll:true});
+    }
+  }
+  return true;
+}
+document.querySelectorAll('[data-pcms-work-show]').forEach(button=>{
+  button.addEventListener('click',()=>{
+    if(!document.getElementById('view-work-queue').hidden)
+      showWorkPanel(button.dataset.pcmsWorkShow,{focus:true});
+  });
+});
 quickSearch.addEventListener('keydown', event => {
   if (event.key === 'Escape') { quickSearch.value = ''; quickSearch.blur(); return; }
   if (event.key !== 'Enter') return;

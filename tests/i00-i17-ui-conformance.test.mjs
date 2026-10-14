@@ -20,6 +20,10 @@ test('I17: shell implements prototype workstation chrome without losing operatio
   assert.match(shell,/showGeneratorPanel\('inventory'\)/);
   assert.match(shell,/pcms-source-target/);
   assert.match(shell,/pcms-adoption-target/);
+  assert.match(shell,/showWorkPanel/);
+  for(const work of ['writeback','release','ai','recovery'])
+    assert.match(html,new RegExp('data-pcms-work-panel="'+work+'"[^>]*hidden'));
+  assert.match(html,/data-pcms-work-panel="activity"/);
   for(const panel of ['supply','adopt','stage','source'])
     assert.match(html,new RegExp('data-pcms-generator-panel="'+panel+'" hidden'));
   assert.match(shell,/query\.dispatchEvent\(new Event\('input'/);
