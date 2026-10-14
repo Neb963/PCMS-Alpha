@@ -493,7 +493,12 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   snapshot:()=>getSnapshot(),
   cookies:id=>cookieService.list(id),
   containers:()=>personaManager.listContainers(),
-  createContainer:async ({name,color,icon})=>localMutationFence([],()=>browser.contextualIdentities.create({name,color,icon})),
+  createContainer:async ({name,color,icon})=>localMutationFence([],async()=>{
+    const made=await personaPlatform.create({name,color,icon,routeId:'block',
+      allowDirect:false,profile:{killSwitch:true,blockLocalNetwork:true}});
+    return {cookieStoreId:made?.container?.cookieStoreId,
+      personaUid:made?.profile?.personaUid};
+  }),
   prepare:async ({payload,mappings,mode})=>{
     const snap=await getSnapshot(), bindings=new Map(Object.entries(mappings));
     const imported=await buildImportedState({payload,currentState:snap.state,
