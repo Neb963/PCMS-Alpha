@@ -297,6 +297,7 @@
           <label for="pcms-restore-consent">I approve this exact plan, mappings, holds and local import with the controller remaining inactive</label>
           <input id="pcms-restore-consent" type="checkbox">
           <button type="button" id="pcms-restore-apply" disabled>Apply staged restore (controller stays inactive)</button>
+          <button type="button" id="pcms-restore-reconcile">Read back uncertain restore (never retry)</button>
           <pre id="pcms-restore-details" class="table-wrap" style="white-space:pre-wrap" tabindex="0">No authenticated restore plan. Existing state remains unchanged.</pre>
           <p id="pcms-restore-status" role="status" aria-live="polite">Checking independent restoration guard.</p>
           <p class="reason">Restored approvals, authentication, routes and native secrets cannot be activated by a backup. Fresh-controller activation requires explicit predecessor shutdown proof and later H-06. If a partial restore guard exists, opening this view never clears it.</p>
