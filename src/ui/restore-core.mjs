@@ -59,7 +59,8 @@ export async function previewRestore({archiveText,password,mode='merge',fresh=fa
   const sourceSha256=await digest(JSON.stringify(opened.archive.pcms));
   const risk={
     importedPersonas:groups.length,
-    unmappedPersonas:groups.filter(g=>g.status==='MAPPING_REQUIRED').length,\n    newContainers:groups.filter(g=>g.status==='CREATE_REQUESTED').length,
+    unmappedPersonas:groups.filter(g=>g.status==='MAPPING_REQUIRED').length,
+    newContainers:groups.filter(g=>g.status==='CREATE_REQUESTED').length,
     directRouteReviews:groups.filter(g=>g.status==='DIRECT_REVIEW_REQUIRED').length,
     importedRoutes:(opened.donor.routes||[]).length,
     importedScripts:(opened.donor.scripts||[]).length,
