@@ -16,3 +16,10 @@ main{grid-column:2;grid-row:2;min-width:0;padding:22px 26px 36px;max-width:1400p
 .account-controls label{display:inline-flex;gap:.35rem;align-items:center}
 .account-controls button{max-width:100%}
 #pcms-accounts-feedback{min-height:1.5rem}
+
+/* I17 acceptance evidence: inline Settings controls, natural reading order and narrow reflow. */
+.pcms-acceptance-controls{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:8px 12px;align-items:start}
+.pcms-acceptance-controls>*{min-width:0;max-width:100%}.pcms-acceptance-controls input,.pcms-acceptance-controls select,.pcms-acceptance-controls textarea{padding:7px}
+.pcms-acceptance-controls button{grid-column:1/-1;justify-self:start;padding:8px}
+.pcms-acceptance li{overflow-wrap:anywhere;margin:4px 0}
+@media(max-width:650px){.pcms-acceptance-controls{grid-template-columns:minmax(0,1fr)}}
