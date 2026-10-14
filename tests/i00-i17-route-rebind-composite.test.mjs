@@ -96,7 +96,7 @@ test('P56-02 / REQ-R01..10 F/X: 50 accounts, 12 affected slots, route loss, prov
     },override:null,history:[]};
   const rebinding=transitionAccount(before,{
     type:'REBIND',accountId:target,expectedRevision:2,
-    personaUid:'persona_repair_17',explicitRepair:true
+    personaUid:'persona-repair-17',explicitRepair:true
   },[before]);
   assert.equal(rebinding.ok,true,rebinding.code);
   assert.equal(rebinding.account.bindingVersion,2);
