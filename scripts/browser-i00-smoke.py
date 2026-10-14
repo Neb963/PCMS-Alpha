@@ -1075,6 +1075,11 @@ def main():
                     port.postMessage(msg);
                   });
                   const actual=await cmd({type:'GET_STAGE',params:{slug}});
+                  const deniedPilot=await cmd({type:'ARM_DISPOSABLE_STAGE',params:{
+                    slug,expectedRevision:pinned.revision,confirmation:'STAGE '+slug}});
+                  const spoofedPilot=await cmd({type:'ARM_DISPOSABLE_STAGE',params:{
+                    slug,expectedRevision:pinned.revision,confirmation:'STAGE '+slug,
+                    allowDirtyEditor:true}});
                   const blocked=await cmd({type:'STAGE_PRIVATE',params:{
                     slug,expectedRevision:pinned.revision,token:'read-only-git-token'}});
                   const prepared=await store.move(slug,pinned.revision,'PREPARED');
@@ -1092,11 +1097,13 @@ def main():
                   if(handoff)handoff.click();
                   const handoffIntent=host?.dataset.pcmsHumanIntent==='true';
                   done({ok:pinned.ok&&actual.ok&&blocked.code==='PROVIDER_ACTIVATION_HELD'&&
+                      deniedPilot.code==='PILOT_DISPOSABLE_SLUG_REQUIRED'&&
+                      spoofedPilot.code==='INVALID_PARAMS'&&
                       held.record.state==='HELD_UNCERTAIN'&&
                       noReplay.code==='ILLEGAL_STAGE_TRANSITION'&&handoffIntent&&
                       previous.totalBytes===0&&changes.some(x=>x.kind==='DELETED')&&
                       changes.some(x=>x.kind==='ADDED'),
-                    pinned,blocked,possible,recovery,held:held.record.state,
+                    pinned,blocked,deniedPilot,spoofedPilot,possible,recovery,held:held.record.state,
                     noReplay,changes,handOffIntent:handoffIntent,
                     digest:candidate.fingerprint});
                   db.close();
@@ -1106,6 +1113,7 @@ def main():
                 assert i09.get('ok') is True,i09
                 assert re.fullmatch('[a-f0-9]{64}',i09.get('digest','')),i09
                 assert i09.get('held')=='HELD_UNCERTAIN',i09
+                print('B I17_STAGING_DISPOSABLE_ARM_REJECTS_NORMAL_OR_SPOOFED_STAGE=PASS',flush=True)
                 print('B I09_PACKAGED_FIREFOX_IDB_SOURCE_BYTES_CRASH_HOLD=PASS',flush=True)
                 print('B I09_PACKAGED_SYNTHETIC_EDITOR_STRIP_NO_PROVIDER_ACTIVATION=PASS',flush=True)
 

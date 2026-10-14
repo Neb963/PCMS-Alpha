@@ -115,11 +115,11 @@ arm.addEventListener('click',()=>{if(!selected||!/^pcms-test-[a-z0-9-]{8,88}$/.t
     'Checking exact pinned target, owner, protected Persona route and restore state…');
 });
 start.addEventListener('click',()=>{if(!selected)return;
+  if(!window.confirm('Stage private '+selected.slug+' once? A lost reply is uncertain; reconcile rather than retry.'))return;
   const t=token.value;token.value='';
-  if(window.confirm('Stage private '+selected.slug+' once? A lost reply is uncertain; reconcile rather than retry.'))
-    invoke('STAGE_PRIVATE',{slug:selected.slug,token:t,
-      expectedRevision:selected.revision},
-      'Revalidating current READY, guard and durable stage intent…');
+  invoke('STAGE_PRIVATE',{slug:selected.slug,token:t,
+    expectedRevision:selected.revision},
+    'Revalidating current READY, guard and durable stage intent…');
 });
 reconcile.addEventListener('click',()=>selected&&invoke('RECONCILE_STAGE',{
   slug:selected.slug,expectedRevision:selected.revision

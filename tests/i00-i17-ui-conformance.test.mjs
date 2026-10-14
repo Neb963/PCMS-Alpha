@@ -120,3 +120,12 @@ test('I17 operator private stage requires an explicit disposable arm distinct fr
   assert.match(boundary,/intent\.revision,'DISPATCH_POSSIBLE'/);
   assert.match(boundary,/if\(stagePilotMatches\(r\)\)pilotArm=null/);
 });
+
+test('I17 packaged Firefox checks private staging pilot rejection without provider writes',async()=>{
+  const harness=await readFile('scripts/browser-i00-smoke.py','utf8');
+  assert.match(harness,/B I17_STAGING_DISPOSABLE_ARM_REJECTS_NORMAL_OR_SPOOFED_STAGE=PASS/);
+  assert.match(harness,/deniedPilot\.code==='PILOT_DISPOSABLE_SLUG_REQUIRED'/);
+  assert.match(harness,/spoofedPilot\.code==='INVALID_PARAMS'/);
+  const stage=await readFile('src/ui/staging-view.mjs','utf8');
+  assert.match(stage,/if\(!window\.confirm\('Stage private '/);
+});
