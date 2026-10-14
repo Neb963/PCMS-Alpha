@@ -20,8 +20,11 @@ const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 const assert=(value,code)=>{if(!value)throw Error(code);};
 const createKey=(epoch,i)=>'PCMS Restore '+epoch.slice(8,20)+' '+String(i).padStart(3,'0');
 export function trustedRestoreSender(api,sender){
-  return sender?.id===api.runtime.id&&sender.url===
-    api.runtime.getURL('pcms/index.html#settings');
+  if(sender?.id!==api.runtime.id||typeof sender.url!=='string')return false;
+  const page=api.runtime.getURL('pcms/index.html');
+  // Firefox may omit the fragment from runtime.Port.sender.url. Never use
+  // prefix matching: content-script URLs and sibling extension pages fail.
+  return sender.url===page||sender.url===page+'#settings';
 }
 async function readPortable(api,donor,snapshot){
   const stored=await api.storage.local.get(null),extras=Object.create(null);
