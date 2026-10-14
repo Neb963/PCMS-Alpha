@@ -1973,10 +1973,12 @@ def main():
                 due_ms=alarm_prior['scheduledAt']-alarm_prior['now']
                 assert -1000<=due_ms<=80000,('CONTROLLER_ALARM_DUE_UNVERIFIED',alarm_prior)
                 call('POST',f'/session/{after}/url',{'url':'about:blank'})
-                # Firefox's minimum alarm cadence may be near one minute.
-                # This bounds waiting to 86 seconds without synthetic wake,
-                # replay, reschedule or any privileged provider operation.
-                time.sleep(min(86,max(15,due_ms/1000+7)))
+                # Firefox's real scheduler can deliver more than 7 seconds
+                # after its nominal due time under the 50-account Firefox
+                # workload (measured pending +1s at +7s). Allow 30s bounded
+                # post-due delivery, but demand a real increment and never
+                # create/rearm a test-controlled alarm on this name.
+                time.sleep(min(115,max(35,due_ms/1000+30)))
                 call('POST',f'/session/{after}/url',{'url':url+'#refresher'})
                 alarm_after=call('POST',f'/session/{after}/execute/async',
                     {'script':"const done=arguments[arguments.length-1];browser.storage.local.get('pcmsI12AlarmCount').then(v=>done(v.pcmsI12AlarmCount||0));",'args':[]})
