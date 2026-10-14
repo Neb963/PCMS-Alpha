@@ -54,6 +54,12 @@ async function withProvider(t,config,work){
         out={status:'success',generator:{...owned.get(body.generatorName),
           ...(body.generatorName==='server-temp-slug'
             ?config.tempReadbackExtras:config.finalReadbackExtras)}};
+      else if(config.oldTempGloballyResolvableAfterRename&&
+        body.generatorName==='server-temp-slug'&&
+        owned.has('disposable-exact-slug'))
+        out={status:'success',generator:{name:'server-temp-slug',
+          isPrivate:true,modelText:'',outputTemplate:'',srcManifest:[],
+          publicId:'servernewpublic'}};
       else out={status:config.ambiguousAbsence?'unverified':'not-found'};
     }else if(name==='checkGeneratorOwnership')
       out={status:body.generatorName==='minimal'?'is-not-owner':
@@ -345,4 +351,37 @@ test('P56-06 X: contradictory readback metadata blocks create proof and rename',
       assert.equal(ledger.filter(x=>x.name==='changeGeneratorName').length,0);
     });
   }
+});
+
+test('P56-06 X: old temporary URL still resolves after rename despite its absence from account census',async t=>{
+  await withProvider(t,{oldTempGloballyResolvableAfterRename:true},
+    async({ledger,fingerprint})=>{
+      const created=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
+      assert.equal(created.ok,true,created.code);
+      const first=await perchanceSupplyIsolated({...req,kind:'READ_CREATE',
+        principalFingerprint:fingerprint,temporarySlug:created.temporarySlug});
+      assert.equal(first.ok,true,first.code);
+      const renamed=await perchanceSupplyIsolated({...req,kind:'RENAME',
+        principalFingerprint:fingerprint,temporarySlug:created.temporarySlug,
+        remoteId:first.remoteId});
+      assert.equal(renamed.ack,'RENAMED');
+      const proof=await perchanceSupplyIsolated({...req,kind:'READ_RENAME',
+        principalFingerprint:fingerprint,temporarySlug:created.temporarySlug,
+        remoteId:first.remoteId});
+      assert.equal(proof.code,'OLD_SLUG_PAGE_UNVERIFIED');
+      assert.equal(ledger.filter(x=>x.name==='changeGeneratorName').length,1);
+      assert.equal(ledger.filter(x=>x.name==='save').length,1);
+    });
+});
+
+test('P56-06 X: untyped collaboration readback cannot prove a private empty generator',async t=>{
+  await withProvider(t,{tempReadbackExtras:{collabEditModeIsEnabled:'true'}},
+    async({ledger,fingerprint})=>{
+      const result=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
+      assert.equal(result.ok,true,result.code);
+      const probe=await perchanceSupplyIsolated({...req,kind:'READ_CREATE',
+        principalFingerprint:fingerprint,temporarySlug:result.temporarySlug});
+      assert.equal(probe.code,'CREATE_READBACK_UNVERIFIED');
+      assert.equal(ledger.filter(x=>x.name==='changeGeneratorName').length,0);
+    });
 });

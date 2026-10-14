@@ -80,7 +80,8 @@ export async function perchanceSupplyIsolated(request) {
          g.name!==name||g.isPrivate!==true||
          g.modelText!==''||g.outputTemplate!==''||
          !manifestVerified||!emptyImports||
-         g.collabEditModeIsEnabled===true||!privateAliases||!privateMode)
+         ![undefined,false].includes(g.collabEditModeIsEnabled)||
+         !privateAliases||!privateMode)
         return hold('PRIVATE_EMPTY_OWNER_UNVERIFIED');
       const publicId=page.generator.publicId;
       if(typeof publicId!=='string'||!safeId('public_'+publicId))
@@ -108,6 +109,13 @@ export async function perchanceSupplyIsolated(request) {
       const checked=await read(request.slug);
       if(!checked.ok||checked.remoteId!==request.remoteId)return hold('RENAME_READBACK_UNVERIFIED');
       if(currentNames.has(request.temporarySlug))return hold('OLD_SLUG_STILL_PRESENT');
+      // Account inventory absence alone cannot establish that the old
+      // temporary public URL stopped resolving after the rename. Read it
+      // independently; redirects, aliases and stale replication are held.
+      const oldPage=await call('getGeneratorPageData',
+        {generatorName:request.temporarySlug},{unauthenticated:true});
+      if(!['not-found','generator-does-not-exist'].includes(oldPage.status))
+        return hold('OLD_SLUG_PAGE_UNVERIFIED');
       return sameSession()?{ok:true,source:'INDEPENDENT_READBACK',
         slug:request.slug,previousSlug:request.temporarySlug,
         remoteId:checked.remoteId,ownerMatches:true,privateEmpty:true}:
