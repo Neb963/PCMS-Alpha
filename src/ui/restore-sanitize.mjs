@@ -85,6 +85,7 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',uidRemap
   for(const name of DB_STORES){
     const previous=current.stores[name].map(copyRow);
     const priorByKey=new Map(previous.map(row=>[keyOf(row),row.value]));
+    const rawByKey=new Map(incoming.stores[name].map(row=>[JSON.stringify(row.key),row.value]));
     const restored=incoming.stores[name].map(copyRow).map(row=>{
       const value=row.value;
       if(name==='entities'&&value&&typeof value==='object'){
@@ -103,7 +104,10 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',uidRemap
     const map=new Map((mode==='replace'?[]:previous).map(row=>[keyOf(row),row]));
     for(const item of restored){
       const key=keyOf(item);
-      if(map.has(key)&&!exact(map.get(key).value,item.value))
+      // The exact same source/destination row is an idempotent merge even
+      // when restore sanitization removes its old live authority.
+      if(map.has(key)&&!exact(map.get(key).value,item.value)&&
+        !exact(serializeClone(map.get(key).value),rawByKey.get(key)))
         deny('RESTORE_MERGE_CONFLICT');
       map.set(key,item);
     }
@@ -116,9 +120,19 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',uidRemap
     }).map(row=>({key:structuredClone(row.key),value:serializeClone(row.value)}));
   }
   // Never treat inventory belonging to a replaced binding as current.
+  for(const row of stores.meta)row.value=deserializeClone(row.value);
   const accounts=new Map(stores.meta.filter(r=>typeof r.key==='string'&&
     r.key.startsWith('account:')&&r.value?.account)
     .map(r=>[r.value.account.accountId,r.value.account]));
+  const uidOwners=new Map();
+  for(const a of accounts.values()){
+    if(a.state==='ARCHIVED')continue;
+    if(typeof a.personaUid!=='string'||!a.personaUid)
+      deny('RESTORE_ACTIVE_BINDING_MISSING');
+    const priorOwner=uidOwners.get(a.personaUid);
+    if(priorOwner&&priorOwner!==a.accountId)deny('RESTORE_DUPLICATE_ACTIVE_BINDING');
+    uidOwners.set(a.personaUid,a.accountId);
+  }
   for(const record of stores.meta){
     const g=record.value?.generator;
     if(typeof record.key!=='string'||!record.key.startsWith('inventory:')||!g)continue;
