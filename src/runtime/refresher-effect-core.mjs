@@ -6,7 +6,7 @@ const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
 const time=t=>Number.isSafeInteger(t)&&t>0;
 export function emptyRefreshEvidence(){
   return {version:REFRESH_PROOF_VERSION,state:'UNOBSERVED',misses:0,lastMissAt:0,
-    lastSeenAt:0,lastRank:null,suspended:false,attempts:0,nextAttemptAt:0,
+    lastSeenAt:0,lastRank:null,suspended:false,attempts:0,probes:0,nextAttemptAt:0,
     intent:null,history:[]};
 }
 export function validRefreshEvidence(e){
@@ -15,6 +15,7 @@ export function validRefreshEvidence(e){
     'EFFECT_UNVERIFIED','EFFECT_CONFIRMED','INEFFECTIVE'].includes(e.state)&&
     Number.isSafeInteger(e.misses)&&e.misses>=0&&e.misses<=3&&
     Number.isSafeInteger(e.attempts)&&e.attempts>=0&&e.attempts<=RETRY_LIMIT&&
+    Number.isSafeInteger(e.probes)&&e.probes>=0&&e.probes<=3&&
     Array.isArray(e.history)&&e.history.length<=8&&
     (e.intent===null||safeId(e.intent.id));
 }
@@ -98,7 +99,9 @@ export function reconcileRefreshAttempt(evidence,id,{at,kind,sourceFingerprint,
     kind==='NO_EFFECT'&&sourceFingerprint===e.intent.sourceFingerprint;
   const prior=e.intent;
   const already=e.history.some(h=>h.id===id);
+  if(e.probes>=3&&kind==='UNKNOWN')return {ok:false,code:'READBACK_BUDGET_EXHAUSTED'};
   if(!already)e.attempts=Math.min(RETRY_LIMIT,e.attempts+1);
+  e.probes=Math.min(3,e.probes+1);
   e.nextAttemptAt=at+Math.min(MAX_BACKOFF,600000*2**e.attempts);
   e.state=verified?'EFFECT_CONFIRMED':noEffect?'INEFFECTIVE':'EFFECT_UNVERIFIED';
   e.history=[...e.history.filter(h=>h.id!==id),{id,at,methodVersion:prior.version,
