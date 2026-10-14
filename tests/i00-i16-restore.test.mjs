@@ -278,3 +278,69 @@ test('P55-12 X: bounded 50 account and 1000 generator archive stays inactive and
     uidRemap:Object.fromEntries(Object.keys(uidMap).map(k=>[k,'duplicate']))}),
     /RESTORE_UID_MAPPING_COLLISION/);
 });
+
+test('P51-08/P55-09 X: same-profile idempotent merge invalidates owner evidence and maps revisions',async()=>{
+  const {prepareRestoredCanonical}=await import('../src/ui/restore-sanitize.mjs');
+  const a=empty(),old='11111111-1111-4111-8111-111111111111',
+    next='22222222-2222-4222-8222-222222222222';
+  a.stores.meta.push({key:'account:a',value:serializeClone({
+    key:'account:a',account:{accountId:'a',personaUid:old,
+      state:'VERIFIED',revision:5,bindingVersion:3,identity:{principalFingerprint:'f'.repeat(64)}}})});
+  a.stores.meta.push({key:'inventory:g',value:serializeClone({
+    key:'inventory:g',generator:{slug:'g',accountId:'a',personaUid:old,
+      bindingVersion:3,accountRevision:5,ownerState:'OBSERVED_OWNER',
+      management:'MANAGED',source:'SOURCE_READY',lastObservationId:'old-proof'}})});
+  const same=structuredClone(a);
+  const result=prepareRestoredCanonical({incoming:a,current:same,mode:'merge',
+    uidRemap:{[old]:next}});
+  const byKey=Object.fromEntries(result.stores.meta.map(r=>[r.key,r.value]));
+  assert.equal(byKey['account:a'].account.state,'VERIFICATION_PENDING');
+  assert.equal(byKey['account:a'].account.bindingVersion,4);
+  assert.equal(byKey['inventory:g'].generator.ownerState,'OWNER_UNVERIFIED');
+  assert.equal(byKey['inventory:g'].generator.source,'SOURCE_PENDING');
+  assert.equal(byKey['inventory:g'].generator.personaUid,next);
+  assert.equal(byKey['inventory:g'].generator.accountRevision,6);
+  assert.equal(byKey['inventory:g'].generator.bindingVersion,4);
+  assert.equal(byKey['inventory:g'].generator.lastObservationId,null);
+  assert.deepEqual(same,a);
+});
+test('P51-08 X: operator Pauses survive replacement; synthetic shadow hold is not a manual Pause',async()=>{
+  const {prepareRestoredCanonical}=await import('../src/ui/restore-sanitize.mjs');
+  const incoming=empty(),current=empty();
+  const old='11111111-1111-4111-8111-111111111111',
+    next='22222222-2222-4222-8222-222222222222';
+  incoming.stores.meta.push({key:'refresher:shadow:v1',value:serializeClone({
+    key:'refresher:shadow:v1',state:{globalPause:false,
+      rows:[{stableId:'r1',personaUid:old,paused:false},
+            {stableId:'r2',personaUid:old,paused:false}],
+      accounts:{a:{personaUid:old,paused:false,verifiedIdentity:true,
+        principalFingerprint:'f'.repeat(64)}},inflight:[{claimId:'old'}],
+      dueIndex:['old'],nextWakeAt:90,nextAdmissionAt:91}})});
+  current.stores.meta.push({key:'refresher:shadow:v1',value:serializeClone({
+    key:'refresher:shadow:v1',state:{globalPause:true,
+      rows:[{stableId:'r1',paused:true}],
+      accounts:{a:{paused:true}}}})});
+  const o=prepareRestoredCanonical({incoming,current,mode:'replace',
+    uidRemap:{[old]:next}});
+  const state=o.stores.meta[0].value.state;
+  assert.equal(state.globalPause,true);
+  assert.equal(state.rows[0].paused,true);
+  assert.equal(state.rows[1].paused,false);
+  assert.equal(state.accounts.a.paused,true);
+  assert.equal(state.accounts.a.verifiedIdentity,false);
+  assert.equal(state.accounts.a.principalFingerprint,null);
+  assert.equal(state.rows[0].personaUid,next);
+  assert.equal(state.inflight.length,0);
+  assert.deepEqual(state.dueIndex,[]);
+  assert.equal(state.nextWakeAt,0);
+});
+test('P55-09 X: two active accounts cannot bind the same restored target UID',async()=>{
+  const {prepareRestoredCanonical}=await import('../src/ui/restore-sanitize.mjs');
+  const a=empty(),uid='11111111-1111-4111-8111-111111111111',
+    target='22222222-2222-4222-8222-222222222222';
+  for(const id of ['a','b'])a.stores.meta.push({key:'account:'+id,
+    value:serializeClone({key:'account:'+id,account:{accountId:id,personaUid:uid,
+      state:'VERIFIED',revision:1,bindingVersion:1}})});
+  assert.throws(()=>prepareRestoredCanonical({incoming:a,current:empty(),
+    mode:'replace',uidRemap:{[uid]:target}}),/RESTORE_DUPLICATE_ACTIVE_BINDING/);
+});
