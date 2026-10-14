@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { eligibleInventoryAccount, validateInventoryObservation, reconcileInventory,
-  publicGenerator } from '../src/runtime/inventory.mjs';
+  publicGenerator, selectInventoryPage } from '../src/runtime/inventory.mjs';
 import { validateInventoryMessage, sameGuardContext } from '../src/runtime/inventory-boundary.mjs';
 
 const p='persona-aaaa-0001', fp='a'.repeat(64);
@@ -147,4 +147,45 @@ test('I04 F: packaged entry points include read-only worker and UI, no unsafe ob
   assert.doesNotMatch(html,/src="inventory\.mjs"/);
   assert.match(overlay,/'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs'/);
   assert.match(html,/id="navigation-status"[^>]*>Remote actions held until verified<\/div>/);
+});
+
+test('I17 F/X: global ordering before pagination with a deterministic slug tie-break',()=>{
+  const rows=Array.from({length:1250},(_,i)=>({
+    slug:'gen-'+String(1249-i).padStart(4,'0'),
+    accountId:i%2===0?'account_zeta_02':'account_alpha_01',
+    visibility:i%3===0?'PUBLIC':'UNLISTED',
+    source:i%5===0?'READY':'SOURCE_PENDING',
+    lastObservedAt:1791841200000+(i%4)*1000,
+    ownerState:'OBSERVED_OWNER',revision:1
+  }));
+  const page=(options={})=>selectInventoryPage(rows,{offset:0,limit:50,...options});
+  const a=page({sortBy:'slug'}),b=selectInventoryPage(rows,{offset:50,limit:50,sortBy:'slug'});
+  assert.equal(a.ok,true);
+  assert.deepEqual(a.items.map(x=>x.slug),Array.from({length:50},(_,i)=>'gen-'+String(i).padStart(4,'0')));
+  assert.deepEqual(b.items.map(x=>x.slug),Array.from({length:50},(_,i)=>'gen-'+String(i+50).padStart(4,'0')));
+  assert(a.items.at(-1).slug<b.items[0].slug);
+  const reverse=page({sortBy:'slug',sortDirection:'desc'});
+  assert.deepEqual(reverse.items.map(x=>x.slug),Array.from({length:50},(_,i)=>'gen-'+String(1249-i).padStart(4,'0')));
+  const byAccount=page({sortBy:'account'});
+  assert.equal(byAccount.items.every(x=>x.accountId==='account_alpha_01'),true);
+  assert.deepEqual(byAccount.items.map(x=>x.slug),byAccount.items.map(x=>x.slug).toSorted(),
+    'same-account page must tie-break by stable slug');
+  const observed=page({sortBy:'observed',sortDirection:'desc'});
+  assert.equal(observed.items.every(x=>rows.find(r=>r.slug===x.slug).lastObservedAt===1791841203000),true);
+  assert.deepEqual(rows.slice(0,1).map(x=>x.slug),['gen-1249'],'sort may not mutate source');
+});
+test('I17 X: unknown sort, oversized page or direction fails closed',()=>{
+  const rows=[{slug:'a',accountId:'account_alpha_01'}];
+  for(const options of [{sortBy:'__proto__'},{sortDirection:'up'},
+    {offset:-1},{limit:101},{sortBy:[]},{sortDirection:null}]){
+    assert.equal(selectInventoryPage(rows,options).code,'INVALID_INVENTORY_QUERY');
+  }
+  const api={runtime:{id:'persona-route-manager@local',getURL:path=>'moz-extension://fixture/'+path}};
+  const sender={id:api.runtime.id,url:api.runtime.getURL('pcms/index.html')+'#generators'};
+  assert.equal(validateInventoryMessage(api,sender,{type:'LIST_INVENTORY',
+    params:{sortBy:'observed',sortDirection:'desc',limit:50}}).ok,true);
+  for(const bad of [{sortBy:'route'},{sortDirection:'RANDOM'},{sortBy:42},
+    {sortDirection:'asc',proof:'forged-owner'}]){
+    assert.equal(validateInventoryMessage(api,sender,{type:'LIST_INVENTORY',params:bad}).code,'INVALID_PARAMS');
+  }
 });

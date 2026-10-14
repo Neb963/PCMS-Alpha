@@ -74,12 +74,14 @@
           <div class="pcms-inventory-toolbar">
             <label class="pcms-field" for="pcms-generator-query"><span class="sr-only">Find slug or account</span><input id="pcms-generator-query" type="search" maxlength="80" autocomplete="off" placeholder="Find generator or account…"></label>
             <label class="pcms-field pcms-inline-field" for="pcms-generator-owner-filter"><span>Owner</span><select id="pcms-generator-owner-filter"><option value="ALL">All</option><option value="OBSERVED_OWNER">Previously verified</option><option value="OWNER_UNVERIFIED">Unknown</option><option value="OWNER_DISPUTED">Disputed</option><option value="UNOBSERVED">Unobserved</option><option value="IDENTITY_CONFLICT">Identity conflict</option><option value="OWNER_CONFLICT">Account conflict</option></select></label>
-            <label class="pcms-field pcms-inline-field" for="pcms-generator-sort"><span>Sort page</span><select id="pcms-generator-sort"><option value="slug">Generator</option><option value="account">Account</option><option value="visibility">Visibility</option><option value="source">Source</option></select></label>
+            <label class="pcms-field pcms-inline-field" for="pcms-generator-sort"><span>Sort fleet</span><select id="pcms-generator-sort"><option value="slug">Generator</option><option value="account">Account</option><option value="visibility">Visibility</option><option value="source">Source</option><option value="observed">Last observed</option></select></label>
+            <label class="pcms-field pcms-inline-field" for="pcms-generator-sort-direction"><span class="sr-only">Sort direction</span><select id="pcms-generator-sort-direction" aria-label="Sort direction"><option value="asc">Ascending</option><option value="desc">Descending</option></select></label>
             <details class="pcms-column-picker"><summary>Columns</summary>
               <div role="group" aria-label="Visible inventory columns">
                 <label><input type="checkbox" data-pcms-inventory-column="account" checked> Account</label>
                 <label><input type="checkbox" data-pcms-inventory-column="visibility" checked> Perchance</label>
                 <label><input type="checkbox" data-pcms-inventory-column="source" checked> Git source</label>
+                <label><input type="checkbox" data-pcms-inventory-column="observed" checked> Observed</label>
               </div>
             </details>
             <button type="button" id="pcms-generator-refresh">Reload</button>
@@ -89,7 +91,7 @@
             <label for="pcms-generator-account">Verified account</label><select id="pcms-generator-account"><option value="">Loading accounts</option></select><button type="button" id="pcms-generator-sync" disabled>Sync account</button>
           </div></details>
           <p id="pcms-inventory-feedback" class="pcms-inventory-status" role="status" aria-live="polite">Loading local observations…</p>
-          <div class="pcms-inventory-stage"><div class="table-wrap" role="region" aria-label="Generator inventory results" tabindex="0"><table><thead><tr><th scope="col">Generator</th><th scope="col" data-pcms-inventory-th="account">Account</th><th scope="col" data-pcms-inventory-th="visibility">Perchance</th><th scope="col" data-pcms-inventory-th="source">Git source / owner</th></tr></thead><tbody id="pcms-generators-rows"><tr><td colspan="4" class="empty">Loading canonical inventory.</td></tr></tbody></table></div>
+          <div class="pcms-inventory-stage"><div class="table-wrap" role="region" aria-label="Generator inventory results" tabindex="0"><table><thead><tr><th scope="col">Generator</th><th scope="col" data-pcms-inventory-th="account">Account</th><th scope="col" data-pcms-inventory-th="visibility">Perchance</th><th scope="col" data-pcms-inventory-th="source">Git source / owner</th><th scope="col" data-pcms-inventory-th="observed">Observed</th></tr></thead><tbody id="pcms-generators-rows"><tr><td colspan="5" class="empty">Loading canonical inventory.</td></tr></tbody></table></div>
             <aside class="pcms-inventory-inspector" id="pcms-generator-inspector" aria-label="Selected historical generator evidence">
               <div class="pcms-inspector-head"><span class="eyebrow">Record inspector</span><h3 id="pcms-generator-inspector-title" tabindex="-1">Select a generator</h3></div>
               <div id="pcms-generator-inspector-body" class="pcms-inspector-body" role="status" aria-live="polite">Select a row to inspect local evidence and available actions.</div>

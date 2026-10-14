@@ -87,6 +87,29 @@ export function reconcileInventory(existing, account, observation) {
   return {ok:true,rows:[...next.values()],incidents};
 }
 
+// Canonical read-only ordering runs before paging. Never sort only the
+// currently visible UI page: it would misrepresent a 50+/1,000+ fleet.
+export const INVENTORY_SORTS=new Set(['slug','account','visibility','source','observed']);
+export const INVENTORY_DIRECTIONS=new Set(['asc','desc']);
+const asciiCompare=(a,b)=>a<b?-1:a>b?1:0;
+export function selectInventoryPage(rows,{offset=0,limit=50,sortBy='slug',sortDirection='asc'}={}){
+  if(!Array.isArray(rows)||!Number.isSafeInteger(offset)||offset<0||offset>100000||
+     !Number.isSafeInteger(limit)||limit<1||limit>100||
+     !INVENTORY_SORTS.has(sortBy)||!INVENTORY_DIRECTIONS.has(sortDirection))
+    return fail('INVALID_INVENTORY_QUERY');
+  const key=sortBy==='account'?'accountId':sortBy==='observed'?'lastObservedAt':sortBy;
+  const multiplier=sortDirection==='desc'?-1:1;
+  const ordered=rows.slice().sort((a,b)=>{
+    const av=key==='lastObservedAt'?Number(a[key]||0):String(a[key]||'');
+    const bv=key==='lastObservedAt'?Number(b[key]||0):String(b[key]||'');
+    const primary=key==='lastObservedAt'?
+      (av<bv?-1:av>bv?1:0):asciiCompare(av,bv);
+    // A fixed slug tie-break stabilizes page boundaries across refreshes.
+    return multiplier*primary||asciiCompare(String(a.slug),String(b.slug));
+  });
+  return {ok:true,items:ordered.slice(offset,offset+limit).map(publicGenerator)};
+}
+
 export function publicGenerator(row) {
   return {slug:row.slug,accountId:row.accountId,ownerState:row.ownerState,
     visibility:row.visibility,management:row.management,source:row.source,
@@ -158,28 +181,32 @@ export function createInventoryStore(db) {
       };
     });
   }
-  function list({query='',ownerState='ALL',accountId='',offset=0,limit=50}={}) {
+  function list({query='',ownerState='ALL',accountId='',offset=0,limit=50,
+    sortBy='slug',sortDirection='asc'}={}) {
     if(typeof query!=='string' || query.length>80 ||
         (ownerState!=='ALL'&&!states.has(ownerState)) ||
         (accountId!==''&&!isSafeId(accountId)) ||
         !Number.isSafeInteger(offset)||offset<0||offset>100000 ||
-        !Number.isSafeInteger(limit)||limit<1||limit>100)
+        !Number.isSafeInteger(limit)||limit<1||limit>100||
+        !INVENTORY_SORTS.has(sortBy)||!INVENTORY_DIRECTIONS.has(sortDirection))
       return Promise.resolve(fail('INVALID_INVENTORY_QUERY'));
     const search=query.trim().toLowerCase();
     return transact('readonly',(tx,finish)=>{
-      const matches=[];let count=0,truncated=false;
+      const candidates=[];let count=0,truncated=false;
       tx.objectStore('meta').openCursor().onsuccess=e=>{
         const row=e.target.result;
-        if(!row){finish({ok:true,items:matches,total:count,truncated});return;}
+        if(!row){
+          const page=selectInventoryPage(candidates,{offset,limit,sortBy,sortDirection});
+          finish(page.ok?{...page,total:count,truncated}:page);return;
+        }
         const g=row.value?.generator;
-        if(typeof row.key==='string'&&row.key.startsWith('inventory:')&&g){
-          if(count>=10000){truncated=true;row.continue();return;}
-          if((!accountId||g.accountId===accountId)&&
-             (ownerState==='ALL'||g.ownerState===ownerState)&&
-             (g.slug.toLowerCase().includes(search)||g.accountId.toLowerCase().includes(search))){
-            if(count>=offset&&matches.length<limit)matches.push(publicGenerator(g));
-            count++;
-          }
+        if(typeof row.key==='string'&&row.key.startsWith('inventory:')&&g &&
+           (!accountId||g.accountId===accountId)&&
+           (ownerState==='ALL'||g.ownerState===ownerState)&&
+           (g.slug.toLowerCase().includes(search)||g.accountId.toLowerCase().includes(search))){
+          count++;
+          // Cap sorted candidate memory, but never misreport a complete fleet.
+          if(candidates.length<10000)candidates.push(g);else truncated=true;
         }
         row.continue();
       };

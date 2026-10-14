@@ -21,39 +21,39 @@ const previewList=document.getElementById('pcms-generator-selection-items');
 const VIEWS=Object.freeze({all:'ALL',owner:'OBSERVED_OWNER',
   attention:'OWNER_UNVERIFIED',missing:'UNOBSERVED'});
 const SORTS=new Set(['slug','account','visibility','source']);
-const COLUMN_KEYS=['account','visibility','source'];
+const COLUMN_KEYS=['account','visibility','source','observed'];
+const DIRECTIONS=new Set(['asc','desc']);
+const directionPicker=document.getElementById('pcms-generator-sort-direction');
 const prefKey='pcmsI17InventoryDisplayV1';
 function safePrefs(){
   try{const raw=JSON.parse(localStorage.getItem(prefKey)||'null');
     if(!raw||typeof raw!=='object')return {};
     return {view:Object.hasOwn(VIEWS,raw.view)?raw.view:'all',
       sort:SORTS.has(raw.sort)?raw.sort:'slug',
+      direction:DIRECTIONS.has(raw.direction)?raw.direction:'asc',
       columns:Array.isArray(raw.columns)?
         raw.columns.filter(k=>COLUMN_KEYS.includes(k)):COLUMN_KEYS};
   }catch{return {};}
 }
 const prefs=safePrefs();
-let view= prefs.view||'all',sort=prefs.sort||'slug';
+let view= prefs.view||'all',sort=prefs.sort||'slug',
+  direction=prefs.direction||'asc';
 let columns=new Set(prefs.columns||COLUMN_KEYS);
 let epoch=0,offset=0,total=0,accounts=[],latest=[],selection=new Set(),accountEpoch=0;
 function persistDisplay(){
-  try{localStorage.setItem(prefKey,JSON.stringify({view,sort,columns:[...columns]}));}
+  try{localStorage.setItem(prefKey,JSON.stringify({view,sort,direction,columns:[...columns]}));}
   catch{/* display preferences must not affect canonical state */}
 }
 function renderControls(){
   for(const b of presetButtons)b.setAttribute('aria-pressed',String(b.dataset.pcmsInventoryView===view));
   sortPicker.value=sort;
+  directionPicker.value=direction;
   for(const c of columnInputs)c.checked=columns.has(c.dataset.pcmsInventoryColumn);
   for(const th of document.querySelectorAll('[data-pcms-inventory-th]'))
     th.hidden=!columns.has(th.dataset.pcmsInventoryTh);
 }
-function sortPage(items){
-  const field=sort==='account'?'accountId':sort==='visibility'?'visibility':
-    sort==='source'?'source':'slug';
-  return items.toSorted((a,b)=>
-    String(a[field]??'').localeCompare(String(b[field]??''),undefined,{numeric:true})
-    ||String(a.slug).localeCompare(String(b.slug)));
-}
+// Sorting comes from canonical IndexedDB, before offset/limit; the UI must
+// preserve returned order rather than invent page-local rank.
 function previewSelection(){
   previewList.replaceChildren();
   const names=[...selection].sort();
@@ -158,7 +158,7 @@ function draw(items) {
       'No observed records. Absence is not a remote census.';
     tr.append(td);rows.append(tr);
   }
-  for(const item of sortPage(items)) {
+  for(const item of items) {
     const tr=document.createElement('tr'),cells=[];
     const pick=document.createElement('input');
     pick.type='checkbox';pick.checked=selection.has(item.slug);
@@ -192,6 +192,16 @@ function draw(items) {
     owner.title=labels[item.ownerState]||'Owner evidence unavailable';
     owner.textContent=item.ownerState==='OBSERVED_OWNER'?'Owner seen':item.ownerState==='OWNER_UNVERIFIED'?'Owner unknown':'Check owner';
     source.append(src,owner);cells.push(source);
+    const observed=document.createElement('td');
+    observed.className='pcms-gen-observed';
+    if(Number.isSafeInteger(item.lastObservedAt)&&item.lastObservedAt>0){
+      const time=document.createElement('time');
+      time.dateTime=new Date(item.lastObservedAt).toISOString();
+      time.textContent=new Date(item.lastObservedAt).toLocaleDateString();
+      time.title=new Date(item.lastObservedAt).toLocaleString();
+      observed.append(time);
+    }else observed.textContent='Not observed';
+    cells.push(observed);
     cells.slice(1).forEach((cell,i)=>{cell.hidden=!columns.has(COLUMN_KEYS[i]);});
     tr.append(...cells);rows.append(tr);
   }
@@ -212,7 +222,8 @@ async function load() {
   feedback.textContent='Reading local inventory…';
   try{
     const res=await inv('LIST_INVENTORY',{
-      query:query.value,ownerState:filter.value,offset,limit
+      query:query.value,ownerState:filter.value,offset,limit,
+      sortBy:sort,sortDirection:direction
     });
     if(mine!==epoch)return;
     if(res?.ok!==true)throw Error(res?.code||'READ_UNAVAILABLE');
@@ -299,7 +310,11 @@ for(const b of presetButtons)b.addEventListener('click',()=>{
 });
 sortPicker.addEventListener('change',()=>{
   if(!SORTS.has(sortPicker.value))return;
-  sort=sortPicker.value;persistDisplay();draw(latest);
+  sort=sortPicker.value;persistDisplay();offset=0;void load();
+});
+directionPicker.addEventListener('change',()=>{
+  if(!DIRECTIONS.has(directionPicker.value))return;
+  direction=directionPicker.value;persistDisplay();offset=0;void load();
 });
 for(const input of columnInputs)input.addEventListener('change',()=>{
   const key=input.dataset.pcmsInventoryColumn;

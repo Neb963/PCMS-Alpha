@@ -56,16 +56,16 @@ test('I17: reject inherited toolbar donor popup and escaped-markup regressions',
 test('I17 real inventory affordances follow approved v3.1 workstation interactions',()=>{
   for(const key of ['all','owner','attention','missing'])
     assert.match(html,new RegExp('data-pcms-inventory-view="'+key+'"'));
-  for(const key of ['account','visibility','source'])
+  for(const key of ['account','visibility','source','observed'])
     assert.match(html,new RegExp('data-pcms-inventory-column="'+key+'"'));
   for(const id of ['pcms-generator-sort','pcms-generator-preview-selection',
-    'pcms-generator-clear-selection','pcms-generator-selection-preview'])
+    'pcms-generator-clear-selection','pcms-generator-selection-preview','pcms-generator-sort-direction'])
     assert.match(html,new RegExp('id="'+id+'"'));
-  assert.match(inv,/function sortPage\(items\)/);
+  assert.doesNotMatch(inv,/function sortPage\(items\)/);
   assert.match(inv,/function previewSelection\(\)/);
   assert.match(inv,/renderControls\(\)/);
   assert.match(inv,/filter\.value=VIEWS\[view\]/);
-  assert.match(inv,/sortPage\(items\)/);
+  assert.match(inv,/sortBy:sort,sortDirection:direction/);
   assert.match(css,/\.pcms-inventory-presets/);
   assert.match(css,/\.pcms-column-picker/);
   assert.doesNotMatch(inv,/innerHTML\s*=/);
