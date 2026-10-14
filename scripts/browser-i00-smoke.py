@@ -507,11 +507,16 @@ def diagnostic_zip_probe(session):
       const {makeSafeArchive}=await import('./diagnostic-archive.mjs');
       const source=document.getElementById('report').textContent;
       const report=JSON.parse(source);
-      const zip=makeSafeArchive({...report,secretCanary:'DO_NOT_EXPOSE'});
+      const zip=makeSafeArchive({...report,secretCanary:'DO_NOT_EXPOSE',
+        refresher:{...report.refresher,other:'DO_NOT_EXPOSE'}});
       const readback=new TextDecoder().decode(zip);
+      const markdown=document.getElementById('markdown')?.value||'';
       done({magic:Array.from(zip.slice(0,4)),length:zip.length,
         files:readback.includes('report.json') && readback.includes('README.md'),
-        canary:readback.includes('DO_NOT_EXPOSE')});
+        canary:readback.includes('DO_NOT_EXPOSE'),
+        keptStatus:readback.includes('"readPeak": '+report.refresher.readPeak),
+        markdown:markdown.includes('Refresher mode: SHADOW_ONLY')&&
+          markdown.includes('Read peak: '+report.refresher.readPeak)});
     })().catch(()=>done({error:'ARCHIVE_PROBE_FAILED'}));'''
     return call('POST',f'/session/{session}/execute/async',
                 {'script':script,'args':[]},timeout=30)
@@ -933,6 +938,8 @@ def main():
                 diagnostic=diagnostic_zip_probe(after)
                 assert diagnostic.get('magic')==[80,75,3,4],diagnostic
                 assert diagnostic.get('files') is True and diagnostic.get('canary') is False,diagnostic
+                assert diagnostic.get('keptStatus') and diagnostic.get('markdown'),diagnostic
+                print('B I17_P56_08_EMERGENCY_EXPORT_MATCHES_SAFE_UI=PASS',flush=True)
                 assert 0 < diagnostic.get('length',0) < 65536,diagnostic
                 print('B I02_REDACTED_ZIP_MARKDOWN=PASS',flush=True)
                 print('B I02_CORE_INDEPENDENT_EMERGENCY=PASS',flush=True)
