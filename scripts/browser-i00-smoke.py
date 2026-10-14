@@ -3003,7 +3003,7 @@ def main():
                 # workload in real Firefox. Record measured time and byte
                 # footprint; this does not measure real-provider throughput,
                 # extension-wide peak heap or an operator's production SLO.
-                fleet=execute(after,"""return import('../runtime/refresher-core.mjs').then(c=>{
+                fleet=execute(after,"""return import('./refresher-core.mjs').then(c=>{
                   const hash='a'.repeat(64),n=1250,started=performance.now();
                   const input=Array.from({length:n},(_,i)=>{
                     const id=String(i%50).padStart(3,'0');
