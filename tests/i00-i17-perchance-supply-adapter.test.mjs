@@ -33,8 +33,18 @@ async function withProvider(t,config,work){
       assert.equal(body.sessionToken,token);
     }
     let out;
-    if(name==='getGeneratorsByUser')out={status:'success',
-      generators:[...owned.entries()].map(([key,g])=>({name:key,isPrivate:g.isPrivate}))};
+    if(name==='getGeneratorsByUser'){
+      // An account census is an independent remote witness: it can lag,
+      // omit a just-created/renamed slug, or still show the old temporary ID
+      // even when page and ownership endpoints appear to agree.
+      const rows=[...owned.entries()].filter(([key])=>
+        !(config.omitTempFromCensus&&key==='server-temp-slug')&&
+        !(config.omitFinalFromCensus&&key==='disposable-exact-slug'))
+        .map(([key,g])=>({name:key,isPrivate:g.isPrivate}));
+      if(config.staleOldSlugAfterRename&&owned.has('disposable-exact-slug'))
+        rows.push({name:'server-temp-slug',isPrivate:true});
+      out={status:'success',generators:rows};
+    }
     else if(name==='getGeneratorPageData'){
       if(body.generatorName==='minimal')out={status:'success',generator:template};
       else if(owned.has(body.generatorName))
@@ -141,5 +151,57 @@ test('P56-06 X: lost save acknowledgement and session rotation remain uncertain,
     const v=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
     assert.equal(v.code,'SESSION_CHANGED_AFTER_EFFECT');
     assert.equal(ledger.filter(x=>x.name==='save').length,1);
+  });
+});
+
+test('P56-06 F/X: page and owner agree, but missing temporary slug in account census refuses create proof and rename',async t=>{
+  await withProvider(t,{omitTempFromCensus:true},async({ledger,fingerprint})=>{
+    const created=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
+    assert.equal(created.ok,true,created.code);
+    const check=await perchanceSupplyIsolated({...req,kind:'READ_CREATE',
+      principalFingerprint:fingerprint,temporarySlug:created.temporarySlug});
+    assert.equal(check.code,'TEMP_NOT_IN_ACCOUNT_INVENTORY');
+    const rename=await perchanceSupplyIsolated({...req,kind:'RENAME',
+      principalFingerprint:fingerprint,temporarySlug:created.temporarySlug,
+      remoteId:'public_servernewpublic'});
+    assert.equal(rename.code,'TEMP_NOT_IN_ACCOUNT_INVENTORY');
+    assert.equal(ledger.filter(x=>x.name==='save').length,1);
+    assert.equal(ledger.filter(x=>x.name==='changeGeneratorName').length,0);
+  });
+});
+test('P56-06 F/X: rename ACK and owner/page readback cannot confirm final slug absent from account census',async t=>{
+  await withProvider(t,{omitFinalFromCensus:true},async({ledger,fingerprint})=>{
+    const created=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
+    assert.equal(created.ok,true,created.code);
+    const first=await perchanceSupplyIsolated({...req,kind:'READ_CREATE',
+      principalFingerprint:fingerprint,temporarySlug:created.temporarySlug});
+    assert.equal(first.ok,true,first.code);
+    const renamed=await perchanceSupplyIsolated({...req,kind:'RENAME',
+      principalFingerprint:fingerprint,temporarySlug:created.temporarySlug,
+      remoteId:first.remoteId});
+    assert.equal(renamed.ack,'RENAMED');
+    const check=await perchanceSupplyIsolated({...req,kind:'READ_RENAME',
+      principalFingerprint:fingerprint,temporarySlug:created.temporarySlug,
+      remoteId:first.remoteId});
+    assert.equal(check.code,'FINAL_SLUG_NOT_IN_ACCOUNT_INVENTORY');
+    assert.equal(ledger.filter(x=>x.name==='changeGeneratorName').length,1);
+  });
+});
+test('P56-06 F/X: stale temporary census after rename cannot confirm completion',async t=>{
+  await withProvider(t,{staleOldSlugAfterRename:true},async({ledger,fingerprint})=>{
+    const created=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
+    assert.equal(created.ok,true,created.code);
+    const checked=await perchanceSupplyIsolated({...req,kind:'READ_CREATE',
+      principalFingerprint:fingerprint,temporarySlug:created.temporarySlug});
+    assert.equal(checked.ok,true,checked.code);
+    const renamed=await perchanceSupplyIsolated({...req,kind:'RENAME',
+      principalFingerprint:fingerprint,temporarySlug:created.temporarySlug,
+      remoteId:checked.remoteId});
+    assert.equal(renamed.ack,'RENAMED');
+    const after=await perchanceSupplyIsolated({...req,kind:'READ_RENAME',
+      principalFingerprint:fingerprint,temporarySlug:created.temporarySlug,
+      remoteId:checked.remoteId});
+    assert.equal(after.code,'OLD_SLUG_STILL_PRESENT');
+    assert.equal(ledger.filter(x=>x.name==='changeGeneratorName').length,1);
   });
 });
