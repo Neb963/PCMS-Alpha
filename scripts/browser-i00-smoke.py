@@ -3064,6 +3064,45 @@ def main():
                 assert ui_conformance.get('overviewSignals'),ui_conformance
                 print('B I17_UI_PROTOTYPE_SHELL_ACTION_ESCAPES_AND_KEYBOARD_JUMP=PASS',flush=True)
 
+                # Firefox may enforce a 500px minimum outer window. A 200%
+                # tab zoom is the only available browser-native way to inspect
+                # a smaller effective CSS viewport in this harness. Distinguish
+                # observed zoom from H accessibility and avoid false 320 claims.
+                zoom_start=execute(after,"""return browser.tabs.getCurrent().then(async tab=>{
+                  if(!tab?.id)return {ok:false,code:'NO_TAB_ID'};
+                  const prior=await browser.tabs.getZoom(tab.id);
+                  await browser.tabs.setZoom(tab.id,2);
+                  return {ok:true,tab:tab.id,prior};}).catch(e=>({ok:false,code:e.name||'ZOOM_UNAVAILABLE'}))""")
+                if zoom_start.get('ok'):
+                    try:
+                        time.sleep(.2)
+                        narrow=execute(after,"""return {cssWidth:window.innerWidth,
+                          documentWidth:document.documentElement.scrollWidth,
+                          clientWidth:document.documentElement.clientWidth,
+                          menuVisible:getComputedStyle(document.getElementById('menu')).display!=='none',
+                          inspectorInDocument:!!document.getElementById('pcms-generator-inspector')};""")
+                        if narrow.get('cssWidth',1000)<=320:
+                            assert narrow['documentWidth']<=narrow['clientWidth'],narrow
+                            assert narrow.get('menuVisible') and narrow.get('inspectorInDocument'),narrow
+                            print('B I17_EFFECTIVE_NARROW_CSS_REFLOW=PASS '+json.dumps(narrow),flush=True)
+                        else:
+                            print('B I17_EFFECTIVE_NARROW_CSS_REFLOW=NOT_TESTED '+json.dumps(narrow),flush=True)
+                    finally:
+                        execute(after,"return browser.tabs.getCurrent().then(t=>browser.tabs.setZoom(t.id,"+str(zoom_start['prior'])+")).then(()=>true)")
+                else:
+                    print('B I17_EFFECTIVE_NARROW_CSS_REFLOW=NOT_TESTED '+json.dumps(zoom_start),flush=True)
+                call('POST',f'/session/{after}/url',
+                     {'url':f'moz-extension://{new_uuid}/pcms/index.html#work-queue'})
+                work_ui=execute(after,"""const current=()=>[...document.querySelectorAll('[data-pcms-work-panel]')].filter(p=>!p.hidden).map(x=>x.dataset.pcmsWorkPanel);
+                  const before=current(),release=document.querySelector('[data-pcms-work-show="release"]');
+                  release.click();return {before,after:current(),selected:release.getAttribute('aria-pressed'),
+                    activeElement:document.activeElement?.id};""")
+                assert work_ui.get('before')==['activity'],work_ui
+                assert work_ui.get('after')==['release'] and work_ui.get('selected')=='true',work_ui
+                assert work_ui.get('activeElement')=='pcms-release-heading',work_ui
+                print('B I17_WORK_QUEUE_CONTEXTUAL_UI=PASS',flush=True)
+
+
 
 
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
