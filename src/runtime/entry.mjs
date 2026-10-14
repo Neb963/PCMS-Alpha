@@ -34,3 +34,15 @@ import './restore-boundary.mjs';
 // I12 one durable shadow queue/alarm; provider observations gated OFF.
 import {createRefresherBoundary} from './refresher-boundary.mjs';
 if(typeof browser!=='undefined')createRefresherBoundary(browser).register();
+
+
+// A single browser-action click opens the real PCMS tab, never a donor route
+// mutation or a synthetic popup. The original PersonaMonkey control UI stays
+// available via the named secondary link within the dashboard.
+if (typeof browser !== 'undefined' && browser.action?.onClicked) {
+  browser.action.onClicked.addListener(() => {
+    browser.runtime.openOptionsPage().catch(() => {
+      // The click cannot grant capabilities. User can still open Add-ons > Options.
+    });
+  });
+}

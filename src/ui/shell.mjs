@@ -4,6 +4,8 @@ const nav = document.getElementById('navigation');
 const menu = document.getElementById('menu');
 const sidebar = document.getElementById('sidebar');
 const currentStatus = document.getElementById('navigation-status');
+const workspaceCrumb = document.getElementById('pcms-current-workspace');
+const quickSearch = document.getElementById('pcms-quick-generator-search');
 const invalidNotice = document.getElementById('unknown-route');
 
 function closeMenu(restoreFocus = false) {
@@ -24,6 +26,7 @@ function render({ focusHeading = false } = {}) {
   const heading = document.getElementById(`heading-${selected}`);
   document.title = `PCMS Alpha — ${heading.textContent}`;
   currentStatus.textContent = `${heading.textContent} · I17 integration verification · Provider writes HELD`;
+  workspaceCrumb.textContent = heading.textContent;
   invalidNotice.hidden = !invalidDestination(location.hash);
   closeMenu();
   if (focusHeading) heading.focus({ preventScroll: true });
@@ -49,6 +52,26 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && menu.getAttribute('aria-expanded') === 'true') {
     event.preventDefault();
     closeMenu(true);
+  }
+});
+
+// Search uses the existing bounded local inventory filter; it must never
+// suggest account/source/operation or remote search capability.
+quickSearch.addEventListener('keydown', event => {
+  if (event.key === 'Escape') { quickSearch.value = ''; quickSearch.blur(); return; }
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  const query = document.getElementById('pcms-generator-query');
+  query.value = quickSearch.value;
+  location.hash = '#generators';
+  query.dispatchEvent(new Event('input', {bubbles:true}));
+  query.focus({preventScroll:true});
+});
+document.addEventListener('keydown', event => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault();
+    quickSearch.focus();
+    quickSearch.select();
   }
 });
 render();

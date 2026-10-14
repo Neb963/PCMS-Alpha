@@ -12,30 +12,37 @@
   <div class="app">
     <header class="topbar">
       <button class="menu" type="button" id="menu" aria-expanded="false" aria-controls="navigation">Menu</button>
-      <div class="identity"><strong>PCMS</strong><span>Alpha</span></div>
+      <div class="pcms-breadcrumb" aria-label="Current workspace"><span>Workspaces</span><span aria-hidden="true">/</span><strong id="pcms-current-workspace">Overview</strong></div>
+      <label class="pcms-quick-search" for="pcms-quick-generator-search"><span class="pcms-magnifier" aria-hidden="true">⌕</span><span class="sr-only">Find in local generator inventory</span><input id="pcms-quick-generator-search" type="search" maxlength="80" placeholder="Find local generator…" autocomplete="off" aria-describedby="pcms-quick-search-hint"><kbd>Ctrl K</kbd></label>
+      <span id="pcms-quick-search-hint" class="sr-only">Searches existing local generator observations only, not remote providers. Press Enter to show matching Generators.</span>
       <span class="phase">I17 · Verification · Provider writes HELD</span>
       <a class="advanced" href="../options/options.html" id="advanced">PersonaMonkey advanced controls <span aria-hidden="true">↗</span></a>
     </header>
     <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+      <div class="pcms-brand" aria-label="PCMS Alpha"><span class="pcms-brand-mark" aria-hidden="true">P</span><div class="pcms-brand-name"><strong>PCMS</strong><small>Alpha workstation</small></div></div>
       <nav aria-label="PCMS workspaces" id="navigation">
-        <a href="#overview" data-workspace="overview" aria-current="page">Overview</a>
-        <a href="#generators" data-workspace="generators">Generators</a>
-        <a href="#work-queue" data-workspace="work-queue">Work Queue</a>
-        <a href="#accounts" data-workspace="accounts">Accounts</a>
-        <a href="#refresher" data-workspace="refresher">Refresher</a>
-        <a href="#settings" data-workspace="settings">Settings</a>
+        <span class="pcms-nav-group">Workspaces</span>
+        <a href="#overview" data-workspace="overview" aria-current="page"><span class="pcms-nav-icon" aria-hidden="true">▦</span><span>Overview</span></a>
+        <a href="#generators" data-workspace="generators"><span class="pcms-nav-icon" aria-hidden="true">▤</span><span>Generators</span></a>
+        <a href="#work-queue" data-workspace="work-queue"><span class="pcms-nav-icon" aria-hidden="true">☷</span><span>Work Queue</span></a>
+        <a href="#accounts" data-workspace="accounts"><span class="pcms-nav-icon" aria-hidden="true">♙</span><span>Accounts</span></a>
+        <a href="#refresher" data-workspace="refresher"><span class="pcms-nav-icon" aria-hidden="true">↻</span><span>Refresher</span></a>
+        <span class="pcms-nav-group">System</span>
+        <a href="#settings" data-workspace="settings"><span class="pcms-nav-icon" aria-hidden="true">⚙</span><span>Settings</span></a>
       </nav>
-      <p class="sidebar-note">Provider, Git source and scheduler effects remain disabled.</p>
+      <div class="pcms-sidebar-foot"><div class="pcms-sidebar-indicator"><span aria-hidden="true">●</span> Guarded mode</div><p class="sidebar-note">Unproven provider capabilities remain held. Protected routing is donor-controlled.</p></div>
     </aside>
     <main id="main" tabindex="-1" aria-label="Current PCMS workspace">
       <div class="system-status" role="status" aria-live="polite" id="navigation-status">I17 · Integration verification · Provider writes HELD</div>
       <div id="unknown-route" class="notice" role="status" hidden>Unknown workspace. Showing Overview without changing any data.</div>
       <section class="workspace" id="view-overview" data-view="overview" aria-labelledby="heading-overview">
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 01</p><h1 id="heading-overview" tabindex="-1">Overview</h1><p>Local inventory and guarded read-only account state. Provider writes remain disabled.</p></div></header>
-        <p id="pcms-overview-inventory" role="status" aria-live="polite">Inventory counts pending. No live owner status inferred.</p>
-        <p id="pcms-overview-refresher" role="status">Shadow timing pending; mutations OFF.</p>
-        <p id="pcms-overview-backup" role="status" aria-live="polite">Manual backup receipt not yet inspected.</p>
-        <p id="pcms-overview-restore" role="status" aria-live="polite">Restore guard not yet inspected; controller activation unverified.</p>
+        <div class="pcms-overview-signals" aria-label="Current local evidence">
+          <div class="pcms-signal"><span>Inventory</span><p id="pcms-overview-inventory" role="status" aria-live="polite">Inventory counts pending. No live owner status inferred.</p></div>
+          <div class="pcms-signal"><span>Refresher</span><p id="pcms-overview-refresher" role="status">Shadow timing pending; mutations OFF.</p></div>
+          <div class="pcms-signal"><span>Backups</span><p id="pcms-overview-backup" role="status" aria-live="polite">Manual backup receipt not yet inspected.</p></div>
+          <div class="pcms-signal"><span>Restore guard</span><p id="pcms-overview-restore" role="status" aria-live="polite">Restore guard not yet inspected; controller activation unverified.</p></div>
+        </div>
         <div class="notice" role="status"><strong>Provider effects disabled</strong><p>Local operation journaling and a fail-closed command boundary are installed. Account binding and manual login are enabled, but remote identity verification and provider mutation remain unavailable. Missing observations do not imply no incidents.</p></div>
         <section class="panel" aria-labelledby="runtime-health-title"><div class="panel-head"><h2 id="runtime-health-title">Background guard</h2><span class="unknown" id="pcms-guard-badge">Checking</span></div><p id="pcms-guard-health" role="status">Runtime evidence unavailable until checked. Provider actions remain off.</p></section>
         <section class="panel" aria-labelledby="journal-title"><div class="panel-head"><h2 id="journal-title">Canonical journal</h2><span class="unknown">Effects OFF</span></div><p id="pcms-journal-health" role="status">Checking isolated canonical storage.</p><a href="emergency.html">Open emergency diagnostics</a></section>
@@ -368,7 +375,8 @@
   <script type="module" src="restore-view.mjs"></script>
   <script type="module" src="staging-view.mjs"></script>
   <script type="module" src="ai-view.mjs"></script>
-  <script type="module" src="writeback-view.mjs"></script>\n  <script type="module" src="release-view.mjs"></script>
+  <script type="module" src="writeback-view.mjs"></script>
+  <script type="module" src="release-view.mjs"></script>
   <script type="module" src="existing-update-view.mjs"></script>
   <script type="module" src="refresher-view.mjs"></script>
   <script type="module" src="acceptance-view.mjs"></script>
