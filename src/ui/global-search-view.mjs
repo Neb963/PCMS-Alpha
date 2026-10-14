@@ -70,18 +70,19 @@ async function refresh(){
       needNew=false;
       const id=epoch,q=validSearchQuery(field.value);
       if(q.length<2){hide();last=[];break;}
-      let inventory=null,accounts=null;
-      try{
-        [inventory,accounts]=await Promise.all([
-          queryPort('pcms-i04-inventory','LIST_INVENTORY',{query:q,offset:0,limit:10}),
-          queryPort('pcms-i03-accounts','LIST_ACCOUNTS')
-        ]);
-        available=inventory?.ok===true&&accounts?.ok===true;
-      }catch{available=false;}
+      // Each canonical authority is independent: one degraded read must not
+      // erase a healthy result from the other. Partial stays explicitly marked.
+      const [i,a]=await Promise.allSettled([
+        queryPort('pcms-i04-inventory','LIST_INVENTORY',{query:q,offset:0,limit:10}),
+        queryPort('pcms-i03-accounts','LIST_ACCOUNTS')
+      ]);
+      const inventory=i.status==='fulfilled'&&i.value?.ok===true?i.value:null;
+      const accounts=a.status==='fulfilled'&&a.value?.ok===true?a.value:null;
+      available=!!inventory||!!accounts;
       if(id!==epoch){needNew=true;continue;}
-      const projected=localSearchResults(q,available?inventory.items:[],
-        available?accounts.accounts:[],{inventoryPartial:!available||inventory?.total>10||inventory?.truncated===true,
-          accountsPartial:!available||accounts?.truncated===true});
+      const projected=localSearchResults(q,inventory?.items||[],
+        accounts?.accounts||[],{inventoryPartial:!inventory||inventory.total>10||inventory.truncated===true,
+          accountsPartial:!accounts||accounts.truncated===true});
       draw(projected);
     }while(needNew);
   }finally{inflight=false;}

@@ -1888,9 +1888,15 @@ def main():
                 })().catch(e=>done({error:String(e)}));"""
                 alarm_prior=call('POST',f'/session/{after}/execute/async',{'script':alarm_code,'args':[]})
                 call('POST',f'/session/{after}/url',{'url':'about:blank'})
-                time.sleep(9)
+                # The alarm is due after 6s; leave an independent 15s
+                # dashboard-absent window for heavily loaded Firefox startup.
+                # Do not reschedule or blindly retry if the wake is missing.
+                time.sleep(15)
                 call('POST',f'/session/{after}/url',{'url':url+'#refresher'})
                 alarm_after=call('POST',f'/session/{after}/execute/async',{'script':"const done=arguments[arguments.length-1];browser.storage.local.get('pcmsI12AlarmCount').then(v=>done(v.pcmsI12AlarmCount||0));",'args':[]})
+                if alarm_after<=alarm_prior['prior']:
+                    alarm_diagnostic=execute(after,"return Promise.all([browser.alarms.get('pcms-refresher-turn'),browser.storage.local.get('pcmsI12AlarmCount')]).then(([a,v])=>({nextScheduledAt:a?.scheduledTime||null,count:v.pcmsI12AlarmCount||0,clock:Date.now()}))")
+                    print('B I12_ALARM_MISSING_DIAGNOSTIC='+json.dumps(alarm_diagnostic),flush=True)
                 assert alarm_after>alarm_prior['prior'],(alarm_prior,alarm_after)
                 print('B I12_REAL_ALARM_WITHOUT_DASHBOARD=PASS',flush=True)
                 # Full relaunch of the same persistent installation; no reinstall.

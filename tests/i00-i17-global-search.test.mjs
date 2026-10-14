@@ -33,6 +33,8 @@ test('P56-05 / UX-01 X: search UI only connects existing readonly ports and fenc
  assert.match(ui,/pcms-i04-inventory.*LIST_INVENTORY/);
  assert.match(ui,/pcms-i03-accounts.*LIST_ACCOUNTS/);
  assert.match(ui,/id!==epoch/);
+ assert.match(ui,/Promise\.allSettled/);
+ assert.match(ui,/available=!!inventory\|\|!!accounts/);
  assert.match(ui,/if\(inflight\)\{needNew=true;return;\}/);
  assert.match(ui,/button\.textContent|name\.textContent=item\.title/);
  assert.doesNotMatch(ui,/innerHTML|fetch\s*\(|sendMessage\s*\(|browser\.tabs|browser\.storage/);
