@@ -17,7 +17,7 @@ export function validAuto(s){
     typeof s.enabled==='boolean'&&Number.isSafeInteger(s.lastSuccessDay)&&
     Number.isSafeInteger(s.lastAttemptDay)&&Number.isFinite(s.nextAttemptAt)&&
     Array.isArray(s.archives)&&s.archives.length<=500&&
-    s.archives.every(a=>idOK(a.runId)&&Number.isSafeInteger(a.downloadId)&&
+    s.archives.every(a=>a.kind==='AUTO'&&idOK(a.runId)&&Number.isSafeInteger(a.downloadId)&&
       a.downloadId>=0&&hex(a.sha256)&&Number.isSafeInteger(a.bytes)&&a.bytes>0&&
       typeof a.filename==='string'&&Number.isSafeInteger(a.day)&&
       ['COMPLETE','DELETION_POSSIBLE','REMOVED','DELETE_HELD'].includes(a.state))&&
@@ -63,13 +63,14 @@ export function archiveFromDownload(runId,day,sha256,bytes,row){
   if(!idOK(runId)||!Number.isSafeInteger(day)||!hex(sha256)||
     !Number.isSafeInteger(bytes)||bytes<=0||!ownedFile(row)||row.fileSize!==bytes)
     return null;
-  return {runId,day,downloadId:row.id,sha256,bytes,
+  if(!row.filename.includes(runId))return null;
+  return {kind:'AUTO',runId,day,downloadId:row.id,sha256,bytes,
     filename:row.filename,state:'COMPLETE',tier:2};
 }
 export function selectRetention(archives){
   // Includes only independently tracked Tier 2 successes. Protect newest 14,
   // and never trust an ambiguous/missing/duplicate download identifier.
-  const good=archives.filter(a=>a.state==='COMPLETE'&&a.tier>=2)
+  const good=archives.filter(a=>a.kind==='AUTO'&&a.state==='COMPLETE'&&a.tier>=2)
     .sort((a,b)=>b.day-a.day||b.runId.localeCompare(a.runId));
   if(good.length<=RETAIN)return [];
   const unique=new Set(),duplicate=new Set();
@@ -81,7 +82,7 @@ export function selectRetention(archives){
 }
 export function deletionProof(archive,item){
   // No deletion on name collision, missing history, moved or edited files.
-  if(!archive||archive.state!=='DELETION_POSSIBLE'||!ownedFile(item)||
+  if(!archive||archive.kind!=='AUTO'||archive.state!=='DELETION_POSSIBLE'||!ownedFile(item)||
     archive.downloadId!==item.id||archive.filename!==item.filename||
     archive.bytes!==item.fileSize)return {ok:false,code:'DELETE_PROOF_MISSING'};
   return {ok:true};
@@ -92,5 +93,5 @@ export function safeStatus(s){
     retained:s.archives.filter(x=>x.state==='COMPLETE').length,
     deletionHeld:s.archives.filter(x=>x.state==='DELETE_HELD').length,
     lastSuccessDay:s.lastSuccessDay,active:s.active?.status||null,
-    tier:2,proof:'BROWSER_REPORTED_ONLY'};
+    tier:s.archives.some(a=>a.state==='COMPLETE')?2:0,proof:'BROWSER_REPORTED_ONLY'};
 }
