@@ -20,8 +20,10 @@ const files=()=>[{path:'main.pjs',base64:encode('let x = 2;')},
   {path:'src/empty.txt',base64:''}];
 function fixture({gate=false,lostAck=false,denyRoute=false,drift=false,dirtyOriginal=false,
   release=false,breakReadback=false,editorDirty=false,
-  routeLossAfterPrepare=false,wrongPrincipal=false}={}){
+  routeLossAfterPrepare=false,wrongPrincipal=false,slug='stage-one',
+  pilotClock=()=>performance.now()}={}){
   let current=null,version=0,routeChecks=0;
+  const ownItem={...item,requestedSlug:slug},ownLink={...link,folder:'gens/'+slug};
   const trace=[],remote=[];
   const stage={
     list:async()=>({ok:true,items:current?[{ok:true,...current}]:[]}),
@@ -50,7 +52,7 @@ function fixture({gate=false,lostAck=false,denyRoute=false,drift=false,dirtyOrig
     recover:async()=>({ok:true,held:0})
   };
   const observer=async(_uid,_identity,slug)=>{
-    if(slug!=='stage-one')return {ok:false,code:'INVALID_TARGET'};
+    if(slug!==ownItem.requestedSlug)return {ok:false,code:'INVALID_TARGET'};
     const pjs=remote.length?'let x = 2;':dirtyOriginal?'// human edits':'';
     const html=remote.length?'<main>draft</main>':'';
     return {ok:true,principalFingerprint:wrongPrincipal?'b'.repeat(64):acct.identity.principalFingerprint,
@@ -83,15 +85,15 @@ function fixture({gate=false,lostAck=false,denyRoute=false,drift=false,dirtyOrig
     testingSha:'c'.repeat(64),sourceBytes:files()
   });
   const boundary=createStagingBoundary(api,{open:async()=>({}),guard:()=>guard,
-    storeFactory:()=>stage,supplyLookup:async()=>({ok:true,account:acct,item,link}),
-    effectGate:()=>gate,inspect});
+    storeFactory:()=>stage,supplyLookup:async()=>({ok:true,account:acct,item:ownItem,link:ownLink}),
+    effectGate:()=>gate,pilotClock,inspect});
   const run=(type,params={})=>boundary.run({type,params},sender);
-  const pin=()=>run('PIN_STAGE',{slug:'stage-one',token:'read-only-git-token'});
-  const dispatch=()=>run('STAGE_PRIVATE',{slug:'stage-one',token:'read-only-git-token',
+  const pin=()=>run('PIN_STAGE',{slug,token:'read-only-git-token'});
+  const dispatch=()=>run('STAGE_PRIVATE',{slug,token:'read-only-git-token',
     expectedRevision:current.revision});
-  const reconcile=()=>run('RECONCILE_STAGE',{slug:'stage-one',
+  const reconcile=()=>run('RECONCILE_STAGE',{slug,
     expectedRevision:current.revision});
-  const handoff=()=>run('HANDOFF_STAGE',{slug:'stage-one',
+  const handoff=()=>run('HANDOFF_STAGE',{slug,
     expectedRevision:current.revision});
   return {run,pin,dispatch,reconcile,handoff,remote,trace,stage,get current(){return current;}};
 }
@@ -201,4 +203,55 @@ test('X-I09 adversarial: route loss after PREPARED leaves no possible dispatch o
   assert.deepEqual(f.trace,['PREPARED']);
   assert.deepEqual(f.remote,[]);
   assert.equal((await f.dispatch()).code,'RECONCILIATION_REQUIRED');
+});
+
+test('I17 F/X: one-shot private disposable stage requires exact human authorization and no retry',async()=>{
+  const slug='pcms-test-disposable-stage-0001',f=fixture({slug,gate:false});
+  assert.equal((await f.pin()).ok,true);
+  assert.equal((await f.dispatch()).code,'PROVIDER_ACTIVATION_HELD');
+  const arm=confirmation=>f.run('ARM_DISPOSABLE_STAGE',{
+    slug,expectedRevision:f.current.revision,confirmation});
+  assert.equal((await arm('STAGE something-else')).code,'PILOT_CONFIRMATION_REQUIRED');
+  assert.equal((await arm('STAGE '+slug)).scope,'SINGLE_DISPOSABLE_PRIVATE_STAGE');
+  assert.equal((await arm('STAGE '+slug)).code,'PILOT_ALREADY_ARMED');
+  assert.equal(f.remote.length,0);
+  const receipt=await f.dispatch();
+  assert.equal(receipt.state,'SAVED_UNVERIFIED',receipt.code);
+  assert.deepEqual(f.trace,['PREPARED','DISPATCH_POSSIBLE','SAVED_UNVERIFIED']);
+  assert.deepEqual(f.remote,['save']);
+  assert.equal((await f.dispatch()).code,'RECONCILIATION_REQUIRED');
+  assert.equal((await f.reconcile()).state,'SOURCE_VERIFIED');
+  assert.deepEqual(f.remote,['save']);
+});
+test('I17 X: pilot denies non-disposable, expiry, stale revision, spoofed fields and route loss',async()=>{
+  const normal=fixture({gate:false});
+  assert.equal((await normal.pin()).ok,true);
+  assert.equal((await normal.run('ARM_DISPOSABLE_STAGE',{slug:'stage-one',
+    expectedRevision:1,confirmation:'STAGE stage-one'})).code,
+    'PILOT_DISPOSABLE_SLUG_REQUIRED');
+  const slug='pcms-test-disposable-stage-0002',f=fixture({gate:false,slug});
+  assert.equal((await f.pin()).ok,true);
+  assert.equal((await f.run('ARM_DISPOSABLE_STAGE',{slug,
+    expectedRevision:20,confirmation:'STAGE '+slug})).code,'STALE_REVISION');
+  assert.equal(validateStagingMessage(api,{...sender,url:'https://evil.test'},
+    {type:'ARM_DISPOSABLE_STAGE',params:{slug,expectedRevision:1,confirmation:'STAGE '+slug}})
+    .code,'UNTRUSTED_SENDER');
+  assert.equal(validateStagingMessage(api,sender,
+    {type:'ARM_DISPOSABLE_STAGE',params:{slug,expectedRevision:1,
+      confirmation:'STAGE '+slug,allowPublic:true}}).code,'INVALID_PARAMS');
+  let ticks=0;
+  const ex=fixture({gate:false,slug,pilotClock:()=>ticks});
+  assert.equal((await ex.pin()).ok,true);
+  assert.equal((await ex.run('ARM_DISPOSABLE_STAGE',{slug,expectedRevision:1,
+    confirmation:'STAGE '+slug})).ok,true);
+  ticks=120001;
+  assert.equal((await ex.dispatch()).code,'PROVIDER_ACTIVATION_HELD');
+  assert.deepEqual(ex.remote,[]);assert.deepEqual(ex.trace,[]);
+  const route=fixture({gate:false,slug,routeLossAfterPrepare:true});
+  assert.equal((await route.pin()).ok,true);
+  assert.equal((await route.run('ARM_DISPOSABLE_STAGE',{slug,expectedRevision:1,
+    confirmation:'STAGE '+slug})).ok,true);
+  assert.equal((await route.dispatch()).code,'PREPARED_GUARD_CHANGED');
+  assert.deepEqual(route.trace,['PREPARED']);
+  assert.deepEqual(route.remote,[]);
 });

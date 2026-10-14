@@ -106,3 +106,17 @@ test('I17 operator supply presents narrow pilot honestly, without general activa
   assert.match(supply,/No external effect yet/);
   assert.match(supply,/Git writes remain held/);
 });
+
+test('I17 operator private stage requires an explicit disposable arm distinct from publication',async()=>{
+  const stage=await readFile('src/ui/staging-view.mjs','utf8');
+  const boundary=await readFile('src/runtime/staging-boundary.mjs','utf8');
+  assert.match(html,/id="pcms-stage-arm"/);
+  assert.match(stage,/window\.prompt\('Type '/);
+  assert.match(stage,/invoke\('ARM_DISPOSABLE_STAGE'/);
+  assert.match(stage,/invoke\('STAGE_PRIVATE'/);
+  assert.match(stage,/pcms-test-\[a-z0-9-\]/);
+  assert.match(boundary,/const stageAuthorized=r=>/);
+  assert.match(boundary,/pilotClock\(\)\+120000/);
+  assert.match(boundary,/intent\.revision,'DISPATCH_POSSIBLE'/);
+  assert.match(boundary,/if\(stagePilotMatches\(r\)\)pilotArm=null/);
+});
