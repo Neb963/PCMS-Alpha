@@ -19,7 +19,8 @@ const batch=freezeSupply({batchId:'batch_alpha_01',accountId:account.accountId,
 function fixture({gate=true,failDispatch=false,lostAck=false,wrongOwner=false,
   denyRoute=false,staleIdentity=false,wrongReadback=false,
   pauseAfterPrepare=false,routeLossAfterPrepare=false,
-  slug='requested-slug',pilotClock=()=>performance.now()}={}){
+  slug='requested-slug',pilotClock=()=>performance.now(),gitPilotGate=gate,
+  onStage=()=>{}}={}){
   const planned=slug==='requested-slug'?batch:freezeSupply({
     batchId:batch.batchId,accountId:account.accountId,personaUid:account.personaUid,
     accountRevision:2,bindingVersion:1,slugs:[slug]}).batch;
@@ -36,6 +37,7 @@ function fixture({gate=true,failDispatch=false,lostAck=false,wrongOwner=false,
       list:async()=>({ok:true,batches:[publicSupply(current)],truncated:false}),
       async stage(action){
         trace.push(action.event);
+        onStage(action.event);
         if(failDispatch&&action.event.endsWith('DISPATCH_POSSIBLE'))
           return {ok:false,code:'DB_ABORTED'};
         const i=current.items.findIndex(x=>x.itemId===action.itemId);
@@ -88,7 +90,7 @@ function fixture({gate=true,failDispatch=false,lostAck=false,wrongOwner=false,
   };
   const boundary=createSupplyBoundary(api,{open:async()=>({}),
     makeStores:()=>stores,guard:()=>guard,effectGate:()=>gateOn,pilotClock,
-    gitGate:()=>gate,gitWrite:async ({folder,slug,token})=>{
+    gitGate:()=>gitPilotGate,gitWrite:async ({folder,slug,token})=>{
       assert.equal(trace.at(-1),'GIT_DISPATCH_POSSIBLE');
       assert.equal(folder,'gens/'+slug);
       assert.equal(token,'offline-git-token-01');
@@ -256,4 +258,46 @@ test('I17 X: pilot rejects wrong slug, stale CAS, untrusted sender, route loss a
   assert.equal((await expired.dispatch()).code,'PROVIDER_ACTIVATION_HELD');
   assert.equal(expired.remote.length,0);
   assert.equal(expired.trace.length,0);
+});
+
+test('I17 F/X: independent disposable Git marker grant is separate from private provider grant',async()=>{
+  const slug='pcms-test-git-marker-0001',f=fixture({slug,gate:true,gitPilotGate:false});
+  assert.equal((await f.dispatch()).state,'CREATE_CONFIRMED');
+  assert.equal((await f.dispatch()).state,'SOURCE_PENDING');
+  const intent=()=>({batchId:batch.batchId,itemId:f.item().itemId,
+    expectedRevision:f.item().revision});
+  const git=()=>f.run('FINISH_SOURCE_FOLDER',{...intent(),token:'offline-git-token-01'});
+  assert.equal((await git()).code,'GIT_WRITE_ACTIVATION_HELD');
+  assert.equal((await f.run('ARM_DISPOSABLE_GIT',{...intent(),
+    confirmation:'GIT not-the-slug'})).code,'PILOT_CONFIRMATION_REQUIRED');
+  assert.equal((await f.run('ARM_DISPOSABLE_GIT',{...intent(),
+    confirmation:'GIT '+slug})).scope,'SINGLE_DISPOSABLE_NON_READY_GIT_MARKER');
+  assert.equal((await f.run('ARM_DISPOSABLE_GIT',{...intent(),
+    confirmation:'GIT '+slug})).code,'PILOT_ALREADY_ARMED');
+  const marked=await git();
+  assert.equal(marked.state,'CONFIRMED',marked.code);
+  assert.equal(f.gitLedger.length,1);
+  assert.equal(f.gitLedger[0].path,'gens/'+slug+'/DEPLOYMENT.md');
+  assert.equal((await git()).code,'NOT_ADMISSIBLE');
+  assert.equal(f.gitLedger.length,1);
+});
+test('I17 X: expired pilot after Git possible marker never calls private transport',async()=>{
+  let ticks=0;
+  const slug='pcms-test-git-marker-0002',f=fixture({slug,gate:true,
+    gitPilotGate:false,pilotClock:()=>ticks,
+    onStage:event=>{if(event==='GIT_DISPATCH_POSSIBLE')ticks=120001;}});
+  assert.equal((await f.dispatch()).state,'CREATE_CONFIRMED');
+  assert.equal((await f.dispatch()).state,'SOURCE_PENDING');
+  const params={batchId:batch.batchId,itemId:f.item().itemId,
+    expectedRevision:f.item().revision,confirmation:'GIT '+slug};
+  assert.equal((await f.run('ARM_DISPOSABLE_GIT',params)).ok,true);
+  const effect=await f.run('FINISH_SOURCE_FOLDER',{
+    batchId:params.batchId,itemId:params.itemId,
+    expectedRevision:params.expectedRevision,token:'offline-git-token-01'});
+  assert.equal(effect.code,'GIT_HELD_BEFORE_DISPATCH');
+  assert.deepEqual(f.trace.slice(-3),['GIT_PREPARED','GIT_DISPATCH_POSSIBLE','GIT_UNCERTAIN']);
+  assert.equal(f.gitLedger.length,0);
+  assert.equal(f.item().state,'GIT_UNCERTAIN');
+  assert.equal((await f.run('ARM_DISPOSABLE_GIT',{...params,
+    expectedRevision:f.item().revision})).code,'NOT_ADMISSIBLE');
 });

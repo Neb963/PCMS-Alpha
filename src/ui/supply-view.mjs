@@ -13,7 +13,7 @@ function request(portName,type,params){
     // A guarded remote create/rename may take several bounded independent
     // provider observations. Timeout does not authorize a second dispatch.
     const timeout=setTimeout(()=>finish(null,Error('TIMEOUT')),
-      type==='EXECUTE_ITEM'?75000:6500);
+      type==='EXECUTE_ITEM'?75000:type==='FINISH_SOURCE_FOLDER'?150000:6500);
     function finish(out,err){
       if(completed)return;completed=true;clearTimeout(timeout);
       try{port.disconnect();}catch{}
@@ -118,6 +118,42 @@ function drawQueue(result){
           }
         });
         li.append(document.createTextNode(' '),action);
+      }
+      // A separate, non-READY marker is the only Git effect this test can
+      // authorize. Existing per-gens folders are never overwritten.
+      if(['PROVIDER_CONFIRMED','SOURCE_PENDING'].includes(item.state)&&
+         /^pcms-test-[a-z0-9-]{8,88}$/.test(item.slug)){
+        const credential=document.createElement('input');
+        credential.type='password';credential.autocomplete='off';
+        credential.placeholder='Private per-gens write token';
+        credential.setAttribute('aria-label','Ephemeral Git marker token for '+item.slug);
+        credential.maxLength=512;
+        const git=document.createElement('button');git.type='button';
+        git.textContent='Create non-READY Git folder';
+        git.addEventListener('click',async()=>{
+          const expected='GIT '+item.slug;
+          const confirmation=window.prompt('Type '+expected+' to create ONLY a non-READY marker in the empty private per-gens folder (no retries):','');
+          if(confirmation===null)return;
+          if(confirmation!==expected){notice('Git marker confirmation mismatch. No action.');return;}
+          const token=credential.value;credential.value='';
+          git.disabled=true;git.textContent='Checking Git marker intent…';
+          try{
+            const armed=await supply('ARM_DISPOSABLE_GIT',{
+              batchId:batch.batchId,itemId:item.itemId,expectedRevision:item.revision,
+              confirmation});
+            if(armed?.ok!==true){notice('Git pilot held: '+(armed?.code||'GUARD_UNVERIFIED'));return;}
+            git.textContent='Attempting one Git marker…';
+            const out=await supply('FINISH_SOURCE_FOLDER',{
+              batchId:batch.batchId,itemId:item.itemId,expectedRevision:item.revision,token});
+            notice(out?.ok?'Non-READY marker independently confirmed. Source remains NOT READY.':
+              'Git marker held: '+(out?.code||'OUTCOME_UNKNOWN')+
+              '. Reconcile canonical receipts; do not repeat an unknown write.');
+          }catch{notice('Git reply unknown; inspect canonical receipts. No automatic retry.');}
+          finally{git.disabled=false;git.textContent='Create non-READY Git folder';await fetchBatches();}
+        });
+        const label=document.createElement('label');label.textContent='Private Git token (not stored)';
+        label.append(credential);
+        li.append(document.createTextNode(' '),label,git);
       }
       if(['CREATE_UNCERTAIN','RENAME_UNCERTAIN',
           'CREATE_DISPATCH_POSSIBLE','RENAME_DISPATCH_POSSIBLE'].includes(item.state)){

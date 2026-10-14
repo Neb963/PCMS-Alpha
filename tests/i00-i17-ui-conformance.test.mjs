@@ -141,3 +141,14 @@ test('I17 private staging matches compact prototype control hierarchy and keeps 
   assert.match(css,/\.pcms-stage-fields\{display:grid/);
   assert.match(css,/@media\(max-width:730px\)/);
 });
+
+test('I17 private non-READY Git marker requires exact disposable arm and ephemeral token',async()=>{
+  const src=await readFile('src/ui/supply-view.mjs','utf8');
+  const gate=await readFile('src/runtime/supply-boundary.mjs','utf8');
+  assert.match(src,/supply\('ARM_DISPOSABLE_GIT'/);
+  assert.match(src,/supply\('FINISH_SOURCE_FOLDER'/);
+  assert.match(src,/credential\.type='password'/);
+  assert.match(src,/credential\.value=''/);
+  assert.match(gate,/gitPilotMatches/);
+  assert.match(gate,/if\(gitPilotMatches\(\{account:current\.account,batch:b,item\}\)\)gitPilotArm=null/);
+});

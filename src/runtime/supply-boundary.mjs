@@ -10,7 +10,8 @@ import {writeNonReadyFolder,markerRequestAllowed} from './supply-git.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 export const SUPPLY_PORT='pcms-i06-supply';
 const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM',
-  'RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED','ARM_DISPOSABLE_TEST']);
+  'RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED','ARM_DISPOSABLE_TEST',
+  'ARM_DISPOSABLE_GIT']);
 const hex=/^[a-f0-9]{64}$/;
 // Only a disposable, explicitly named target may be tested live. This does
 // not qualify general generator supply, Git writeback or publication.
@@ -29,7 +30,8 @@ export function validateSupplyMessage(api,sender,message){
     message.type==='GET_BATCH'?['batchId']:
     message.type==='LIST_BATCHES'?[]:
     message.type==='FINISH_SOURCE_FOLDER'?['batchId','itemId','expectedRevision','token']:
-    message.type==='ARM_DISPOSABLE_TEST'?['batchId','itemId','expectedRevision','confirmation']:
+    ['ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT'].includes(message.type)?
+      ['batchId','itemId','expectedRevision','confirmation']:
     ['batchId','itemId','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
   if(message.type==='PREVIEW'||message.type==='FREEZE'){
@@ -41,13 +43,13 @@ export function validateSupplyMessage(api,sender,message){
   }else if(message.type==='GET_BATCH'&&!isSafeId(p.batchId))
     return fail('INVALID_PARAMS');
   else if(['EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED',
-    'ARM_DISPOSABLE_TEST'].includes(message.type)&&
+    'ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT'].includes(message.type)&&
     (!isSafeId(p.batchId)||!isSafeId(p.itemId)||
      !Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
     return fail('INVALID_PARAMS');
   if(message.type==='FINISH_SOURCE_FOLDER'&&
     (typeof p.token!=='string'||p.token.length>512))return fail('INVALID_PARAMS');
-  if(message.type==='ARM_DISPOSABLE_TEST'&&
+  if(['ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT'].includes(message.type)&&
     (typeof p.confirmation!=='string'||p.confirmation.length>120))
     return fail('INVALID_PARAMS');
   return {ok:true};
@@ -76,7 +78,7 @@ export function createSupplyBoundary(api,{
   const stores=()=>dbPromise ||=open().then(makeStores);
   // A pilot arm is never persisted. Firefox event-page suspension or restart
   // revokes it, and a possible dispatch consumes it before the remote call.
-  let pilotArm=null;
+  let pilotArm=null,gitPilotArm=null;
   const pilotMatches=({account,batch,item})=>{
     const g=pilotArm;
     return !!g&&pilotClock()<g.expiresAt&&g.batchId===batch.batchId&&
@@ -87,6 +89,50 @@ export function createSupplyBoundary(api,{
       g.principalFingerprint===account.identity?.principalFingerprint;
   };
   const supplyAuthorized=ctx=>effectGate(ctx)===true||pilotMatches(ctx);
+  const gitPilotMatches=({account,batch,item})=>{
+    const a=gitPilotArm;
+    return !!a&&pilotClock()<a.expiresAt&&
+      a.batchId===batch.batchId&&a.itemId===item.itemId&&
+      a.itemRevision===item.revision&&a.itemState===item.state&&
+      a.accountId===account.accountId&&a.accountRevision===account.revision&&
+      a.bindingVersion===account.bindingVersion&&
+      a.principalFingerprint===account.identity?.principalFingerprint&&
+      a.remoteId===item.remoteId;
+  };
+  const gitAuthorized=ctx=>gitGate(ctx)===true||gitPilotMatches(ctx);
+  async function armDisposableGit(s,p){
+    const found=await s.supply.get(p.batchId);
+    if(!found.ok)return found;
+    const b=found.batch,item=b.items.find(x=>x.itemId===p.itemId);
+    if(!item)return fail('ITEM_NOT_FOUND');
+    if(item.revision!==p.expectedRevision)return fail('STALE_REVISION');
+    if(!['PROVIDER_CONFIRMED','SOURCE_PENDING'].includes(item.state))
+      return fail('NOT_ADMISSIBLE');
+    if(!disposable.test(item.requestedSlug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
+    if(p.confirmation!=='GIT '+item.requestedSlug)return fail('PILOT_CONFIRMATION_REQUIRED');
+    if(gitPilotArm&&pilotClock()<gitPilotArm.expiresAt)return fail('PILOT_ALREADY_ARMED');
+    const foundAccount=await s.accounts.get(b.accountId);
+    if(!foundAccount.ok||!validateOwnerContext(b,foundAccount.account).ok||
+       !hex.test(foundAccount.account.identity?.principalFingerprint||''))
+      return fail('ACCOUNT_STALE');
+    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+    const g=guard(),route=await g?.getSafeRouteReadiness?.(b.personaUid);
+    if(!route?.ready||route.personaUid!==b.personaUid||
+       !route.cookieStoreId||!route.routeId)
+      return fail(route?.code||'PROTECTED_ROUTE_UNVERIFIED');
+    const again=await s.supply.get(b.batchId);
+    const accountAgain=await s.accounts.get(b.accountId);
+    const still=again.ok?again.batch.items.find(x=>x.itemId===item.itemId):null;
+    if(!again.ok||!still||still.revision!==item.revision||
+       !accountAgain.ok||!validateOwnerContext(b,accountAgain.account).ok||
+       (await sentinel.inspect()).held)return fail('PILOT_CONTEXT_CHANGED');
+    gitPilotArm={batchId:b.batchId,itemId:item.itemId,itemRevision:item.revision,
+      itemState:item.state,accountId:b.accountId,accountRevision:b.accountRevision,
+      bindingVersion:b.bindingVersion,principalFingerprint:accountAgain.account.identity.principalFingerprint,
+      remoteId:item.remoteId,routeId:route.routeId,cookieStoreId:route.cookieStoreId,
+      expiresAt:pilotClock()+120000};
+    return {ok:true,scope:'SINGLE_DISPOSABLE_NON_READY_GIT_MARKER',expiresInSeconds:120};
+  }
   async function armDisposablePilot(s,p){
     const found=await s.supply.get(p.batchId);
     if(!found.ok)return found;
@@ -331,8 +377,14 @@ export function createSupplyBoundary(api,{
       return fail('ACCOUNT_STALE');
     const params={token:p.token,slug:item.requestedSlug,folder:'gens/'+item.requestedSlug};
     if(!markerRequestAllowed(params).ok)return fail('GITHUB_WRITE_TOKEN_REQUIRED');
-    if(gitGate({account:foundAccount.account,batch:b,item})!==true)
-      return fail('GIT_WRITE_ACTIVATION_HELD');
+    const gitCtx={account:foundAccount.account,batch:b,item};
+    if(!gitAuthorized(gitCtx))return fail('GIT_WRITE_ACTIVATION_HELD');
+    if(gitPilotMatches(gitCtx)){
+      const g=guard(),route=await g?.getSafeRouteReadiness?.(b.personaUid);
+      if(!route?.ready||route.personaUid!==b.personaUid||
+         route.cookieStoreId!==gitPilotArm.cookieStoreId||
+         route.routeId!==gitPilotArm.routeId)return fail('PILOT_ROUTE_CHANGED');
+    }
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
     const id='source_'+crypto.randomUUID().replaceAll('-','');
     const fp=await fingerprint({kind:'GIT_MARKER',batchId:b.batchId,
@@ -346,17 +398,19 @@ export function createSupplyBoundary(api,{
     const current=await s.accounts.get(b.accountId);
     if(!current.ok||!validateOwnerContext(b,current.account).ok||
        (await sentinel.inspect()).held||
-       gitGate({account:current.account,batch:b,item})!==true)
+       !gitAuthorized({account:current.account,batch:b,item}))
       return fail('PREPARED_HELD');
     at=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
       expectedRevision:at.item.revision,event:'GIT_DISPATCH_POSSIBLE'});
     if(!at.ok)return at;
-    if(gitGate({account:current.account,batch:b,item})!==true||
+    if(!gitAuthorized({account:current.account,batch:b,item})||
        (await sentinel.inspect()).held){
+      gitPilotArm=null;
       await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
         expectedRevision:at.item.revision,event:'GIT_UNCERTAIN'});
       return fail('GIT_HELD_BEFORE_DISPATCH');
     }
+    if(gitPilotMatches({account:current.account,batch:b,item}))gitPilotArm=null;
     let proof;
     try{proof=await gitWrite(params);}catch{proof={ok:false};}
     if(!proof?.ok||proof.source!=='GIT_READBACK'||proof.ready!==false||
@@ -396,6 +450,7 @@ export function createSupplyBoundary(api,{
         return redacted(out);
       }
       if(message.type==='ARM_DISPOSABLE_TEST')return await armDisposablePilot(s,p);
+      if(message.type==='ARM_DISPOSABLE_GIT')return await armDisposableGit(s,p);
       if(message.type==='RECONCILE_ITEM')return await reconcile(s,p);
       if(message.type==='FINISH_SOURCE_FOLDER')return await finishSource(s,p);
       return await execute(s,p);
