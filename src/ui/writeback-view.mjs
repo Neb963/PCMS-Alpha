@@ -4,7 +4,8 @@ const get=id=>document.getElementById(id);
 const slug=get('pcms-writeback-slug'),token=get('pcms-writeback-token');
 const message=get('pcms-writeback-message'),mode=get('pcms-writeback-mode');
 const preview=get('pcms-writeback-preview'),prepare=get('pcms-writeback-prepare');
-const commit=get('pcms-writeback-commit'),reconcile=get('pcms-writeback-reconcile');
+const commit=get('pcms-writeback-commit'),armManual=get('pcms-writeback-arm-manual'),
+  reconcile=get('pcms-writeback-reconcile');
 const cancel=get('pcms-writeback-cancel');
 const status=get('pcms-writeback-status'),diff=get('pcms-writeback-diff');
 const refresh=get('pcms-writeback-refresh'),optin=get('pcms-writeback-auto');
@@ -32,6 +33,8 @@ function controls(){
   preview.disabled=busy||!selected;
   prepare.disabled=busy||!inspected?.ok||!token.value||
     inspected.slug!==slug.value.trim()||!!receipt;
+  armManual.disabled=busy||!receipt?.ok||receipt.mode!=='MANUAL'||
+    receipt.state!=='PREPARED'||!/^pcms-test-[a-z0-9-]{8,88}$/.test(receipt.slug);
   commit.disabled=busy||!receipt?.ok||receipt.mode!=='MANUAL'||
     receipt.state!=='PREPARED'||!token.value;
   cancel.disabled=busy||!receipt?.ok||receipt.state!=='PREPARED';
@@ -113,9 +116,22 @@ prepare.addEventListener('click',()=>transact(async()=>{
   }
   showReceipt(r);
 }));
+armManual.addEventListener('click',()=>transact(async()=>{
+  if(!receipt?.ok||receipt.state!=='PREPARED')return;
+  const expected='GIT COMMIT '+receipt.slug;
+  const confirmation=window.prompt('Type '+expected+
+    ' to authorize only one nonforced Git write of the tested source F:', '');
+  if(confirmation===null)return;
+  if(confirmation!==expected){announce('Exact confirmation mismatch. No Git write.');return;}
+  const armed=await request('ARM_DISPOSABLE_COMMIT',{
+    slug:receipt.slug,expectedRevision:receipt.revision,confirmation});
+  announce(armed?.ok?'Single disposable Git commit armed for two minutes. Click Commit to execute.':
+    'Git commit not armed: '+(armed?.code||'UNVERIFIED'));
+}));
 commit.addEventListener('click',()=>transact(async()=>{
   if(!receipt?.ok||receipt.state!=='PREPARED')return;
   const name=receipt.slug;
+  if(!window.confirm('Commit this exact tested source F to private Git? A lost response requires read-only reconciliation.'))return;
   const r=await request('COMMIT',{slug:name,token:token.value,
     expectedRevision:receipt.revision});
   if(r?.ok){showReceipt(r);return;}

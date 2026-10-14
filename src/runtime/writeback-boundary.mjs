@@ -14,8 +14,10 @@ import {inspectWriteback,writeGitCandidate,observeGitCandidate,
 export const WRITEBACK_PORT='pcms-i11-writeback';
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const FP=/^[a-f0-9]{64}$/;
+const DISPOSABLE=/^pcms-test-[a-z0-9-]{8,88}$/;
 const ACTIONS=new Set(['GET_SETTINGS','SET_AUTO','LIST','GET','PREVIEW',
-  'PREPARE','COMMIT','RECONCILE','CANCEL_PREPARED','ARM_AUTO','DISARM_AUTO']);
+  'PREPARE','COMMIT','RECONCILE','CANCEL_PREPARED','ARM_AUTO','DISARM_AUTO',
+  'ARM_DISPOSABLE_COMMIT']);
 export function validateWritebackMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
@@ -31,7 +33,8 @@ export function validateWritebackMessage(api,sender,msg){
     COMMIT:['slug','expectedRevision','token'],
     RECONCILE:['slug','expectedRevision','token'],
     CANCEL_PREPARED:['slug','expectedRevision'],
-    ARM_AUTO:['slug','token'],DISARM_AUTO:['slug']
+    ARM_AUTO:['slug','token'],DISARM_AUTO:['slug'],
+    ARM_DISPOSABLE_COMMIT:['slug','expectedRevision','confirmation']
   };
   if(Object.keys(p).some(x=>!allowed[msg.type].includes(x))||
      (allowed[msg.type].includes('slug')&&!SLUG.test(p.slug||''))||
@@ -40,8 +43,10 @@ export function validateWritebackMessage(api,sender,msg){
      (msg.type==='PREPARE'&&(!Number.isSafeInteger(p.expectedJobRevision)||
         p.expectedJobRevision<1||!FP.test(p.fingerprint||'')||
         !['MANUAL','AUTO'].includes(p.mode)))||
-     (['COMMIT','RECONCILE','CANCEL_PREPARED'].includes(msg.type)&&
+     (['COMMIT','RECONCILE','CANCEL_PREPARED','ARM_DISPOSABLE_COMMIT'].includes(msg.type)&&
         (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
+     (msg.type==='ARM_DISPOSABLE_COMMIT'&&
+       (typeof p.confirmation!=='string'||p.confirmation.length>140))||
      (['PREPARE','COMMIT','RECONCILE','ARM_AUTO'].includes(msg.type)&&
         (typeof p.token!=='string'||p.token.length<12||p.token.length>512)))
     return fail('INVALID_PARAMS');
@@ -109,7 +114,7 @@ export function createWritebackBoundary(api,{
   storeFactory=createWritebackStore,aiFactory=createAiStore,
   stageFactory=createStagingStore,inspect=inspectWriteback,
   write=writeGitCandidate,observe=observeGitCandidate,
-  effectGate=()=>false
+  effectGate=()=>false,pilotClock=()=>performance.now()
 }={}){
   let dbPromise;
   const database=()=>dbPromise ||=open();
@@ -117,12 +122,52 @@ export function createWritebackBoundary(api,{
   // Ephemeral tokens are intentionally lost on background restart; canonical
   // autoEnabled alone never authorizes a Git action or stores credentials.
   const autoCredentials=new Map();
-  let autoBusy=false;
+  let autoBusy=false,manualPilot=null;
+  const pilotMatches=record=>{
+    const a=manualPilot;
+    return !!a&&pilotClock()<a.expiresAt&&record?.mode==='MANUAL'&&
+      a.slug===record.slug&&a.revision===record.revision&&
+      a.operationId===record.operationId&&
+      a.sourceFingerprint===record.sourceFingerprint&&
+      a.expectedHead===record.expectedHead;
+  };
+  const manualAuthorized=record=>effectGate({phase:'I11',record})===true||
+    pilotMatches(record);
+  async function armDisposableCommit(database,store,p){
+    if(!DISPOSABLE.test(p.slug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
+    if(p.confirmation!=='GIT COMMIT '+p.slug)
+      return fail('PILOT_CONFIRMATION_REQUIRED');
+    if(manualPilot&&pilotClock()<manualPilot.expiresAt)
+      return fail('PILOT_ALREADY_ARMED');
+    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+    const receipt=await store.getFull(p.slug);
+    if(!receipt.ok||receipt.record.revision!==p.expectedRevision)
+      return fail('STALE_OR_MISSING_WRITEBACK');
+    const r=receipt.record;
+    if(r.state!=='PREPARED'||r.mode!=='MANUAL')return fail('NOT_ADMISSIBLE');
+    const stage=await stageFactory(database).getFull(p.slug),
+      job=await aiFactory(database).getJobFull(p.slug);
+    if(!scopeMatches(stage,job).ok||
+       job.job.verifiedFinal!==r.sourceFingerprint||
+       r.stageRevision!==stage.record.revision)
+      return fail('TESTED_FINAL_SOURCE_REQUIRED');
+    const fresh=await store.getFull(p.slug);
+    if(!fresh.ok||fresh.record.revision!==r.revision||
+       fresh.record.state!=='PREPARED'||(await sentinel.inspect()).held)
+      return fail('PILOT_CONTEXT_CHANGED');
+    manualPilot={slug:r.slug,revision:r.revision,
+      operationId:r.operationId,sourceFingerprint:r.sourceFingerprint,
+      expectedHead:r.expectedHead,expiresAt:pilotClock()+120000};
+    return {ok:true,scope:'SINGLE_DISPOSABLE_TESTED_F_GIT_COMMIT',
+      expiresInSeconds:120};
+  }
   async function runTrusted(msg){
     const p=msg.params||{},db=await database(),store=storeFactory(db);
     if(msg.type==='GET_SETTINGS')return store.settings();
     if(msg.type==='LIST')return store.list();
     if(msg.type==='GET')return store.get(p.slug);
+    if(msg.type==='ARM_DISPOSABLE_COMMIT')
+      return armDisposableCommit(db,store,p);
     if(msg.type==='SET_AUTO'){
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       const updated=await store.changeSettings(p.expectedRevision,p.autoEnabled);
@@ -266,7 +311,7 @@ export function createWritebackBoundary(api,{
         autoCredentials.get(p.slug)?.armId===p.autoArmId&&
         autoCredentials.get(p.slug)?.token===p.token);
       if(!autoAuthorized())return fail('GIT_AUTO_DISARMED');
-      if(effectGate({phase:'I11',record})!==true)
+      if(!manualAuthorized(record))
         return fail('GITHUB_WRITE_ACTIVATION_HELD');
       const read=await guardedReadback(guard(),stage,job);
       if(!read.ok)return read;
@@ -274,11 +319,27 @@ export function createWritebackBoundary(api,{
       // requests from different Firefox wakes cannot arm twice.
       const armed=await store.arm(p.slug,p.expectedRevision);
       if(!armed.ok)return armed;
-      if(!autoAuthorized()||effectGate({phase:'I11',record})!==true||
+      if(!autoAuthorized()||!manualAuthorized(record)||
          (await sentinel.inspect()).held){
+        manualPilot=null;
         await store.finish(p.slug,armed.revision,{reason:'WRITEBACK_HELD_AFTER_ARM'});
         return fail('WRITEBACK_DISPATCH_UNCERTAIN');
       }
+      // Re-check the protected route and saved editor immediately before the
+      // first possible Git effect. Do not interpret a route change as a retry.
+      if(pilotMatches(record)){
+        const g=guard(),route=await g?.getSafeRouteReadiness?.(stage.record.personaUid);
+        const editor=await g?.inspectStageEditor?.(stage.record.personaUid,
+          stage.record.slug,stage.record.nonce);
+        if(!route?.ready||route.routeId!==read.route.routeId||
+           route.cookieStoreId!==read.route.cookieStoreId||
+           editor?.ok!==true||editor.clean!==true){
+          manualPilot=null;
+          await store.finish(p.slug,armed.revision,{reason:'GIT_ROUTE_OR_EDITOR_CHANGED_AFTER_MARKER'});
+          return fail('GIT_DISPATCH_RECONCILIATION_REQUIRED');
+        }
+      }
+      if(pilotMatches(record))manualPilot=null;
       let outcome;
       try{outcome=await write({token:p.token,folder:record.folder,
         baseHead:record.baseHead,expectedHead:record.expectedHead,

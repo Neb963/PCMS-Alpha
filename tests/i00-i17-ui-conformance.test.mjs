@@ -194,3 +194,14 @@ test('I17 native AI panel separates preparation, Chat 1/2 and advanced controls'
   assert.match(css,/\.pcms-ai-actions\{display:grid/);
   assert.match(css,/@media\(max-width:680px\)/);
 });
+
+test('I17 operator writeback includes separate one-time private Git authorization',async()=>{
+  const b=await readFile('src/runtime/writeback-boundary.mjs','utf8');
+  const v=await readFile('src/ui/writeback-view.mjs','utf8');
+  assert.match(html,/id="pcms-writeback-arm-manual"/);
+  assert.match(b,/ARM_DISPOSABLE_COMMIT/);
+  assert.match(b,/pilotClock\(\)\+120000/);
+  assert.match(v,/window\.prompt\('Type '/);
+  assert.match(v,/request\('ARM_DISPOSABLE_COMMIT'/);
+  assert.match(b,/if\(pilotMatches\(record\)\)manualPilot=null/);
+});
