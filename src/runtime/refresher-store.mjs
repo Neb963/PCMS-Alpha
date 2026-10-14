@@ -300,13 +300,18 @@ export function createRefresherStore(db){
       releaseFingerprint:r.releaseFingerprint},
       changes:[{code:'REFRESH_RESERVED',scopeId:stableId}]};
   },{sync:true});
-  const markDispatch=(stableId,id,now)=>mutate(null,s=>{
-    const r=s.rows.find(x=>x.stableId===stableId);
-    if(!r)return fail('REFRESH_TARGET_UNAVAILABLE');
-    const packet=dispatchPossible(r.refresh,id,now);
+  const markDispatch=(claim,now)=>mutate(null,s=>{
+    const r=s.rows.find(x=>x.stableId===claim?.stableId);
+    if(!r||r.accountId!==claim.accountId||r.personaUid!==claim.personaUid||
+      r.bindingVersion!==claim.bindingVersion||r.releaseFingerprint!==claim.releaseFingerprint||
+      !r.ownerVerified||!r.releaseVerified||r.identityHeld||r.reviewHeld||
+      r.listing!=='PUBLIC'||s.accounts[r.accountId]?.principalFingerprint!==claim.principalFingerprint||
+      !r.slot||r.phase!=='ACTIVE'||rowBlocks(s,r).length)
+      return fail('REFRESH_CONTEXT_CHANGED');
+    const packet=dispatchPossible(r.refresh,claim.id,now);
     if(!packet.ok)return packet;
-    const out=structuredClone(s);out.rows.find(x=>x.stableId===stableId).refresh=packet.evidence;
-    return {ok:true,state:out,changes:[{code:'REFRESH_DISPATCH_POSSIBLE',scopeId:stableId}]};
+    const out=structuredClone(s);out.rows.find(x=>x.stableId===claim.stableId).refresh=packet.evidence;
+    return {ok:true,state:out,changes:[{code:'REFRESH_DISPATCH_POSSIBLE',scopeId:claim.stableId}]};
   },{sync:true});
   const settleAttempt=(stableId,id,receipt)=>mutate(null,s=>{
     const r=s.rows.find(x=>x.stableId===stableId);
