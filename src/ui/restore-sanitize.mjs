@@ -1,0 +1,151 @@
+// I16: restore data is history, never a portable authorization token.
+// Deterministic plan over already authenticated structured-clone rows.
+import {DB_STORES,validatePcmsSnapshot,serializeClone,deserializeClone} from './backup-core.mjs';
+const deny=code=>{throw Error(code);};
+const keyOf=r=>JSON.stringify(r.key);
+const exact=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+function copyRow(row){return {key:structuredClone(row.key),value:deserializeClone(row.value)};}
+function inertMeta(key,row,remap,existing=null){
+  const data=row.value;
+  if(!data||typeof data!=='object')return row;
+  if(typeof key==='string'&&key.startsWith('account:')&&data.account){
+    const a=data.account;
+    if(typeof a.personaUid==='string'&&a.state!=='ARCHIVED'){
+      const uid=remap[a.personaUid];
+      if(!uid)deny('RESTORE_UID_MAPPING_MISSING');
+      a.personaUid=uid;
+    }
+    a.identity=null;a.override=null;
+    if(a.state!=='ARCHIVED')a.state='VERIFICATION_PENDING';
+    a.revision=(Number.isSafeInteger(a.revision)?a.revision:0)+1;
+    a.bindingVersion=(Number.isSafeInteger(a.bindingVersion)?a.bindingVersion:0)+1;
+  }
+  if(typeof key==='string'&&key.startsWith('inventory:')&&data.generator){
+    const g=data.generator;
+    if(typeof g.personaUid==='string')g.personaUid=remap[g.personaUid]||null;
+    // Restored owner observation is history, never current account authority.
+    g.ownerState='OWNER_UNVERIFIED';g.ownerResult='UNKNOWN';
+    g.ownerVerified=false;g.visibility='UNKNOWN';g.management='OBSERVED_ONLY';
+    g.source='SOURCE_PENDING';g.lastObservationId=null;g.lastObservedAt=0;
+    g.ownerObservationId=null;g.principalFingerprint=null;
+    g.reviewHeld=true;g.identityHeld=true;
+  }
+  if(typeof key==='string'&&key.startsWith('release:')&&data.release){
+    data.release={...data.release,
+      state:'RESTORE_REVIEW_REQUIRED',dispatchPossible:false,
+      approval:null,reason:'RESTORED_APPROVAL_IS_HISTORY'};
+  }
+  if(typeof key==='string'&&key.startsWith('ai-job:')&&data.job){
+    data.job={...data.job,state:'TESTS_UNVERIFIED',
+      hold:'RESTORED_TESTS_NEED_NEW_OBSERVATION',executionSlotReleased:true};
+  }
+  if(typeof key==='string'&&key.startsWith('writeback:')&&data.record){
+    data.record={...data.record,state:'RESTORE_REVIEW_REQUIRED'};
+  }
+  if(key==='writeback-settings'&&data.setting){
+    data.setting={...data.setting,autoEnabled:false};
+  }
+  if(key==='backup:auto-state'&&data.state){
+    data.state={...data.state,enabled:false,active:null,
+      status:'SUSPENDED',code:'RESTORED_KEY_NOT_AUTHORITY'};
+  }
+  if(key==='refresher:shadow:v1'&&data.state){
+    const prior=existing?.state||{};
+    const oldRows=new Map((prior.rows||[]).map(r=>[r.stableId,r]));
+    data.state={...data.state,
+      // Independent guard enforces safety; manual Pauses remain distinct.
+      globalPause:data.state.globalPause===true||prior.globalPause===true,
+      rows:(data.state.rows||[]).map(r=>({...r,
+        paused:r.paused===true||oldRows.get(r.stableId)?.paused===true,
+        personaUid:typeof r.personaUid==='string'?
+          (remap[r.personaUid]||null):null,slot:false})),
+      accounts:Object.fromEntries(Object.entries(data.state.accounts||{})
+        .map(([id,a])=>[id,{...a,
+          paused:a.paused===true||prior.accounts?.[id]?.paused===true,
+          personaUid:typeof a.personaUid==='string'?
+            (remap[a.personaUid]||null):null,
+          verifiedIdentity:false,principalFingerprint:null}])),
+      inflight:[],dueIndex:[],nextWakeAt:0,nextAdmissionAt:0};
+  }
+  // Other metadata remains preserved under the independent global guard.
+  return row;
+}
+export function prepareRestoredCanonical({incoming,current,mode='merge',uidRemap={}}={}){
+  validatePcmsSnapshot(incoming);validatePcmsSnapshot(current);
+  if(!['merge','replace'].includes(mode))deny('RESTORE_MODE_INVALID');
+  if(!uidRemap||typeof uidRemap!=='object'||Array.isArray(uidRemap))
+    deny('RESTORE_UID_MAP_INVALID');
+  const dests=new Set();
+  for(const [oldId,newId] of Object.entries(uidRemap)){
+    if(typeof oldId!=='string'||!oldId||typeof newId!=='string'||!newId||
+      dests.has(newId))deny('RESTORE_UID_MAPPING_COLLISION');
+    dests.add(newId);
+  }
+  const stores={};
+  for(const name of DB_STORES){
+    const previous=current.stores[name].map(copyRow);
+    const priorByKey=new Map(previous.map(row=>[keyOf(row),row.value]));
+    const rawByKey=new Map(incoming.stores[name].map(row=>[JSON.stringify(row.key),row.value]));
+    const restored=incoming.stores[name].map(copyRow).map(row=>{
+      const value=row.value;
+      if(name==='entities'&&value&&typeof value==='object'){
+        value.activeOperationId=null;value.revision=(Number.isSafeInteger(value.revision)?value.revision:0)+1;
+      }
+      if(name==='operations'&&value&&typeof value==='object'&&
+        !['CONFIRMED','ABORTED','REJECTED'].includes(value.status)){
+        value.status='HELD_UNCERTAIN';value.revision=(Number.isSafeInteger(value.revision)?value.revision:0)+1;
+      }
+      if(name==='meta')inertMeta(row.key,row,uidRemap,priorByKey.get(keyOf(row)));
+      if(name==='observations'&&value&&typeof value==='object'){
+        value.restoredHistorical=true;
+      }
+      return row;
+    });
+    const map=new Map((mode==='replace'?[]:previous).map(row=>[keyOf(row),row]));
+    for(const item of restored){
+      const key=keyOf(item);
+      // The exact same source/destination row is an idempotent merge even
+      // when restore sanitization removes its old live authority.
+      if(map.has(key)&&!exact(map.get(key).value,item.value)&&
+        !exact(serializeClone(map.get(key).value),rawByKey.get(key)))
+        deny('RESTORE_MERGE_CONFLICT');
+      map.set(key,item);
+    }
+    stores[name]=[...map.values()].sort((a,b)=>{
+      const x=a.key,y=b.key;
+      if(typeof indexedDB!=='undefined'&&typeof indexedDB.cmp==='function')
+        return indexedDB.cmp(x,y);
+      if(typeof x==='number'&&typeof y==='number')return x-y;
+      // IndexedDB compares string keys by code units, not locale collation.
+      const sx=String(x),sy=String(y);
+      return sx<sy?-1:sx>sy?1:0;
+    }).map(row=>({key:structuredClone(row.key),value:serializeClone(row.value)}));
+  }
+  // Never treat inventory belonging to a replaced binding as current.
+  for(const row of stores.meta)row.value=deserializeClone(row.value);
+  const accounts=new Map(stores.meta.filter(r=>typeof r.key==='string'&&
+    r.key.startsWith('account:')&&r.value?.account)
+    .map(r=>[r.value.account.accountId,r.value.account]));
+  const uidOwners=new Map();
+  for(const a of accounts.values()){
+    if(a.state==='ARCHIVED')continue;
+    if(typeof a.personaUid!=='string'||!a.personaUid)
+      deny('RESTORE_ACTIVE_BINDING_MISSING');
+    const priorOwner=uidOwners.get(a.personaUid);
+    if(priorOwner&&priorOwner!==a.accountId)deny('RESTORE_DUPLICATE_ACTIVE_BINDING');
+    uidOwners.set(a.personaUid,a.accountId);
+  }
+  for(const record of stores.meta){
+    const g=record.value?.generator;
+    if(typeof record.key!=='string'||!record.key.startsWith('inventory:')||!g)continue;
+    const account=accounts.get(g.accountId);
+    if(!account)deny('RESTORE_ACCOUNT_REFERENCE_MISSING');
+    g.personaUid=account.personaUid;
+    g.bindingVersion=account.bindingVersion;
+    g.accountRevision=account.revision;
+  }
+  stores.meta=stores.meta.map(row=>({key:row.key,value:serializeClone(row.value)}));
+  const snapshot={schema:1,stores};
+  validatePcmsSnapshot(snapshot);
+  return snapshot;
+}

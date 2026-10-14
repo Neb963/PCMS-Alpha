@@ -563,6 +563,7 @@ def main():
         # Firefox 153+ refuses WebDriver navigation to extension pages without a
         # *test-only* opt-in. This agent runs only on disposable CI profile and
         # geckodriver binds loopback; production XPI permissions stay unchanged.
+        old_daemon=None
         server=subprocess.Popen([str(driver),'--port',str(PORT),'--allow-system-access'],stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
         try:
             for _ in range(80):
@@ -2469,9 +2470,481 @@ def main():
                 assert i15.get('ok') is True,i15
                 print('B I15_INSTALLED_BACKGROUND_PORT_DAILY_VAULT_SUSPENSION_AND_TRACKED_DOWNLOAD=PASS',flush=True)
 
+                # I16 B: actual installed XPI, extension Settings DOM and real
+                # canonical IDB + Firefox local-storage guard. Independent
+                # synthetic archives only; no donor/provider/live mutation.
+                i16_ui=execute(after,"return {archive:!!document.getElementById('pcms-restore-archive'),checkpoint:!!document.getElementById('pcms-restore-checkpoint'),preview:!!document.getElementById('pcms-restore-preview'),stage:!!document.getElementById('pcms-restore-verify')}")
+                assert all(i16_ui.values()),i16_ui
+
+                # I16 B/UX: exercise actual file-input UI, not just existence.
+                # The checkpoint is a separate on-disk file that Firefox must
+                # read via WebDriver's native file input.
+                ui_seal="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const pkg=await import('../lib/backup-package.js');
+                  const core=await import('./backup-core.mjs');
+                  const journal=await import('./journal.mjs');
+                  const hist=await import('../lib/automation-history.js');
+                  const db=await journal.openCanonicalDatabase();
+                  const pcms=await core.snapshotCanonical(db);db.close();
+                  const donor=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  const local=await browser.storage.local.get(null),userscriptData={};
+                  for(const [key,value] of Object.entries(local))
+                    if(key==='automationJobs'||key.startsWith('gm-values:'))
+                      userscriptData[key]=value;
+                  const opts={state:donor.state,containers:donor.containers,
+                    userscriptData,selection:{kind:'full'},
+                    automationHistory:hist.filterOrdinaryAutomationJobs(
+                      Object.values(userscriptData.automationJobs||{}))};
+                  const first=pkg.createPortableBackupPayload(opts),cookies={};
+                  const mappings={};
+                  for(const persona of first.personas){
+                    mappings[persona.key]=persona.sourceId;
+                    cookies[persona.sourceId]=await browser.runtime.sendMessage({
+                      type:'PERSONA_COOKIES_LIST',profileId:persona.sourceId});
+                    if(!Array.isArray(cookies[persona.sourceId]))
+                      throw Error('UI_COOKIE_RETRIEVAL_FAILED');
+                  }
+                  const password='i16-ui-file-checkpoint-local-only-passphrase';
+                  const wrapped=await pkg.encodeBackupEnvelope({
+                    payload:pkg.createPortableBackupPayload({...opts,cookiesByProfile:cookies}),
+                    password,scope:{kind:'full'}});
+                  const archive=await core.encodeIntegrated({
+                    pcms,donorEnvelope:wrapped,passphrase:password});
+                  return {archive:archive.text,password,mappings};
+                })().then(done).catch(e=>done({error:String(e)}));"""
+                ui_data=call('POST',f'/session/{after}/execute/async',
+                             {'script':ui_seal,'args':[]},timeout=90)
+                assert isinstance(ui_data.get('archive'),str),ui_data
+                path_a=pathlib.Path(folder)/'i16-ui-import.encrypted'
+                path_b=pathlib.Path(folder)/'i16-pre-restore-on-disk.encrypted'
+                path_a.write_text(ui_data['archive'])
+                path_b.write_text(ui_data['archive'])
+                for css,filepath in [('#pcms-restore-archive',path_a),
+                                      ('#pcms-restore-checkpoint',path_b)]:
+                    element=call('POST',f'/session/{after}/element',
+                                 {'using':'css selector','value':css})
+                    element_id=element['element-6066-11e4-a52e-4f735466cecf']
+                    call('POST',f'/session/{after}/element/{element_id}/value',
+                         {'text':str(filepath),'value':list(str(filepath))})
+                setup_ui="const p=document.getElementById('pcms-restore-passphrase');p.value="+json.dumps(ui_data['password'])+";document.getElementById('pcms-restore-mappings').value="+json.dumps(json.dumps(ui_data['mappings']))+";document.getElementById('pcms-restore-preview').click();return true"
+                assert execute(after,setup_ui) is True
+                preview_result=None
+                for _ in range(80):
+                    preview_result=execute(after,"return {status:document.getElementById('pcms-restore-status').textContent,plan:document.getElementById('pcms-restore-details').textContent,verifyDisabled:document.getElementById('pcms-restore-verify').disabled}")
+                    if not preview_result['verifyDisabled'] or 'Restore held:' in preview_result['status']:break
+                    time.sleep(.1)
+                assert preview_result['verifyDisabled'] is False,preview_result
+                assert 'Authenticated plan:' in preview_result['plan'],preview_result
+                assert execute(after,"document.getElementById('pcms-restore-verify').click();return true")
+                disk_result=None
+                for _ in range(80):
+                    disk_result=execute(after,"return {status:document.getElementById('pcms-restore-status').textContent,button:document.getElementById('pcms-restore-apply').disabled}")
+                    if 'Checkpoint file independently re-read' in disk_result['status'] or 'Checkpoint not proven' in disk_result['status']:break
+                    time.sleep(.1)
+                assert 'Checkpoint file independently re-read' in disk_result['status'],disk_result
+                assert disk_result['button'] is True,disk_result
+                print('B I16_REAL_FILE_INPUT_AUTHENTICATED_PREVIEW_CHECKPOINT_UI=PASS',flush=True)
+
+                i16_code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const restore=await import('./restore-core.mjs');
+                  const gateModule=await import('./restore-gate.mjs');
+                  const stages=await import('./restore-stage.mjs');
+                  const core=await import('./backup-core.mjs');
+                  const pkg=await import('../lib/backup-package.js');
+                  const journal=await import('./journal.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const currentPcms=await core.snapshotCanonical(db);db.close();
+                  const password='I16-real-packaged-synthetic-passphrase';
+                  const currentDonor={state:{},containers:[]};
+                  const portable=pkg.createPortableBackupPayload({
+                    state:{},containers:[],selection:{kind:'full'}});
+                  const inner=await pkg.encodeBackupEnvelope({payload:portable,password});
+                  const a=await core.encodeIntegrated({
+                    pcms:currentPcms,donorEnvelope:inner,passphrase:password});
+                  const pre=await restore.previewRestore({
+                    archiveText:a.text,password,decodeDonor:pkg.decodeBackupEnvelope,
+                    mode:'merge',fresh:false,mappings:{},currentPcms,
+                    currentDonor,currentPortable:portable,containers:[]});
+                  let wrongPasswordHeld=false;
+                  try{await restore.previewRestore({
+                    archiveText:a.text,password:'wrong',
+                    decodeDonor:pkg.decodeBackupEnvelope,mode:'merge',
+                    mappings:{},currentPcms,currentDonor,currentPortable:portable,containers:[]});}
+                  catch{wrongPasswordHeld=true;}
+                  let tier2Held=false;
+                  try{await restore.verifyCheckpoint({
+                    checkpointText:a.text,password,
+                    decodeDonor:pkg.decodeBackupEnvelope,currentPcms,
+                    currentPortable:portable,archivedAtLeastTier:2});}
+                  catch{tier2Held=true;}
+                  const disk=await restore.verifyCheckpoint({
+                    checkpointText:a.text,password,
+                    decodeDonor:pkg.decodeBackupEnvelope,currentPcms,
+                    currentPortable:portable,archivedAtLeastTier:3});
+                  const gate=gateModule.createRestoreGate(browser.storage.local);
+                  const before=await gate.inspect();
+                  if(before.held)throw Error('UNEXPECTED_EXISTING_RESTORE_HOLD');
+                  const row=await gate.begin({
+                    planSha256:pre.planSha256,reviewedPlanSha256:pre.planSha256,
+                    archiveSha256:pre.plan.archiveSha256,
+                    destinationSha256:pre.plan.destinationSha256,
+                    checkpointSha256:disk.sha256,checkpointTier:3,fresh:true});
+                  const sentinel=await journal.createRestoreSentinel(browser.storage.local).inspect();
+                  const read=await gateModule.createRestoreGate(browser.storage.local).inspect();
+                  let unintended=0;
+                  const engine=stages.createRestoreStageEngine(gate,{
+                    dispatch:async()=>{unintended++;},readback:async()=>({
+                      source:'INDEPENDENT_READBACK',digest:'f'.repeat(64)})});
+                  const forbidden=await engine.execute({epoch:row.epoch,
+                    revision:row.revision,group:'donor-personas',step:'synthetic',
+                    fingerprint:'a'.repeat(64)});
+                  if(unintended!==1||forbidden.groups['donor-personas'].status!=='HELD_UNCERTAIN')
+                    throw Error('STAGED_HOLD_NOT_DURABLE');
+                  let duplicateBlocked=false;
+                  try{await engine.execute({epoch:row.epoch,revision:forbidden.revision,
+                    group:'donor-personas',step:'synthetic',
+                    fingerprint:'a'.repeat(64)});}
+                  catch{duplicateBlocked=true;}
+                  if(!wrongPasswordHeld||!tier2Held||!disk.verified||
+                    !sentinel.held||!read.held||!duplicateBlocked)
+                    throw Error('RESTORE_SECURITY_ORACLE_MISSING');
+                  done({ok:true,wrongPasswordHeld,tier2Held,
+                    canonicalRecords:currentPcms.stores.meta.length,
+                    noBlindReplay:duplicateBlocked,restoreHold:sentinel.code,
+                    controller:read.controller,sha:a.sha256});
+                })().catch(e=>done({ok:false,error:String(e)}));"""
+                proof=call('POST',f'/session/{after}/execute/async',
+                           {'script':i16_code,'args':[]},timeout=90)
+                assert proof.get('ok') is True,proof
+                assert proof.get('controller')=='INACTIVE',proof
+                assert re.fullmatch('[a-f0-9]{64}',proof.get('sha','')),proof
+                # The extension page cannot remove the independent restore
+                # sentinel. A full page navigation must retain the hold.
+                call('POST',f'/session/{after}/url',{'url':url+'#settings'})
+                persistence=execute(after,"return browser.storage.local.get('pcmsRestoreInProgress').then(v=>v.pcmsRestoreInProgress?.active===true)")
+                assert persistence is True,persistence
+                print('B I16_INSTALLED_AUTHENTICATED_PREVIEW_DURABLE_GUARD_NO_REPLAY=PASS',flush=True)
+
+
+
+                i16_db_code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const core=await import('./backup-core.mjs');
+                  const sanitize=await import('./restore-sanitize.mjs');
+                  const idb=await import('./restore-idb.mjs');
+                  const gate=await import('./restore-gate.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  try{
+                    const before=await core.snapshotCanonical(db);
+                    const incoming={schema:1,stores:Object.fromEntries(
+                      core.DB_STORES.map(s=>[s,[]]))};
+                    incoming.stores.meta.push({key:'release:restore-b',
+                      value:core.serializeClone({key:'release:restore-b',
+                        release:{state:'APPROVED',approval:{human:true},
+                          dispatchPossible:false}})});
+                    const prepared=sanitize.prepareRestoredCanonical({
+                      incoming,current:before,mode:'replace',uidRemap:{}});
+                    let unheldBlocked=false;
+                    try{await idb.applyCanonicalSnapshot(db,prepared,{
+                      assertHeld:async()=>false,expectedBefore:before});}
+                    catch{unheldBlocked=true;}
+                    const untouched=await core.snapshotCanonical(db);
+                    if(!unheldBlocked||
+                      JSON.stringify(before)!==JSON.stringify(untouched))
+                      throw Error('CANONICAL_UNGUARDED_WRITE');
+                    const sentinel=gate.createRestoreGate(browser.storage.local);
+                    if(!(await sentinel.inspect()).held)
+                      throw Error('RESTORE_SENTINEL_NOT_DURABLE');
+                    const receipt=await idb.applyCanonicalSnapshot(db,prepared,{
+                      assertHeld:async()=>(await sentinel.inspect()).held,expectedBefore:before});
+                    const after=await core.snapshotCanonical(db);
+                    const release=after.stores.meta.find(r=>r.key==='release:restore-b');
+                    if(receipt.source!=='INDEPENDENT_READBACK'||
+                       release?.value?.release?.state!=='RESTORE_REVIEW_REQUIRED'||
+                       release?.value?.release?.approval!==null)
+                      throw Error('IMPORTED_APPROVAL_NOT_INERT');
+                    return {ok:true,hold:true,
+                      receiptDigest:receipt.digest,
+                      status:release.value.release.state};
+                  }finally{db.close();}
+                })().then(done).catch(e=>done({ok:false,error:String(e)}));"""
+                i16_db=call('POST',f'/session/{after}/execute/async',
+                            {'script':i16_db_code,'args':[]},timeout=75)
+                assert i16_db.get('ok') is True,i16_db
+                print('B I16_REAL_IDB_GUARDED_ATOMIC_RESTORE_AND_APPROVAL_HOLD=PASS',flush=True)
+
+                # I16 actual same-XPI restore port, actual guarded donor state
+                # manager and real IndexedDB, all within isolated Firefox CI.
+                # Clearing the previous fake-test guard is harness-only fixture
+                # cleanup; shipped UI/runtime expose no guard-clear command.
+                i16_end_to_end="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  await browser.storage.local.remove('pcmsRestoreInProgress');
+                  const core=await import('./backup-core.mjs');
+                  const restore=await import('./restore-core.mjs');
+                  const journal=await import('./journal.mjs');
+                  const pkg=await import('../lib/backup-package.js');
+                  const automation=await import('../lib/automation-history.js');
+                  const db=await journal.openCanonicalDatabase();
+                  const current=await core.snapshotCanonical(db);db.close();
+                  const donor=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  if(!donor?.state||!Array.isArray(donor.containers))
+                    throw Error('DONOR_SNAPSHOT_UNAVAILABLE');
+                  const stored=await browser.storage.local.get(null);
+                  const extra=Object.create(null);
+                  for(const [k,v] of Object.entries(stored))
+                    if(k==='automationJobs'||k.startsWith('gm-values:'))extra[k]=v;
+                  const args={state:donor.state,containers:donor.containers,
+                    userscriptData:extra,selection:{kind:'full'},
+                    automationHistory:automation.filterOrdinaryAutomationJobs(
+                      Object.values(extra.automationJobs||{}))};
+                  const initial=pkg.createPortableBackupPayload(args),cookies={};
+                  const mappings={};
+                  for(const person of initial.personas){
+                    mappings[person.key]=person.sourceId;
+                    cookies[person.sourceId]=await browser.runtime.sendMessage({
+                      type:'PERSONA_COOKIES_LIST',profileId:person.sourceId});
+                    if(!Array.isArray(cookies[person.sourceId]))
+                      throw Error('COOKIE_READ_MISSING');
+                  }
+                  const portable=pkg.createPortableBackupPayload({...args,cookiesByProfile:cookies});
+                  const password='synthetic-i16-installed-local-restore-passphrase';
+                  const donorFile=await pkg.encodeBackupEnvelope({
+                    payload:portable,password,scope:{kind:'full'}});
+                  const checkpoint=await core.encodeIntegrated({
+                    pcms:current,donorEnvelope:donorFile,passphrase:password});
+                  const incoming=structuredClone(current);
+                  incoming.stores.meta.push({key:'release:i16-new-historical',
+                    value:core.serializeClone({key:'release:i16-new-historical',
+                      release:{state:'APPROVED',approval:{old:true},dispatchPossible:false}})});
+                  const source=await core.encodeIntegrated({
+                    pcms:incoming,donorEnvelope:donorFile,passphrase:password});
+                  const reviewed=await restore.previewRestore({
+                    archiveText:source.text,password,mode:'merge',mappings,
+                    currentPcms:current,currentDonor:donor,currentPortable:portable,
+                    containers:donor.containers,decodeDonor:pkg.decodeBackupEnvelope
+                  });
+                  const answer=await new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-i16-restore'});
+                    let complete=false;
+                    const done=result=>{
+                      if(complete)return;complete=true;
+                      try{port.disconnect();}catch{}
+                      resolve(result);
+                    };
+                    port.onMessage.addListener(done);
+                    port.onDisconnect.addListener(()=>done({ok:false,code:'RESTORE_PORT_CLOSED'}));
+                    port.postMessage({action:'APPLY',params:{
+                      archiveText:source.text,checkpointText:checkpoint.text,
+                      password,mode:'merge',fresh:false,mappings,
+                      reviewedPlanSha256:reviewed.planSha256}});
+                  });
+                  const marker=(await browser.storage.local.get('pcmsRestoreInProgress'))
+                    .pcmsRestoreInProgress;
+                  const checked=await journal.openCanonicalDatabase();
+                  const after=await core.snapshotCanonical(checked);checked.close();
+                  const extraRelease=after.stores.meta.find(r=>r.key==='release:i16-new-historical');
+                  if(!answer.ok||marker?.status!=='COMPLETE_INACTIVE'||
+                    !marker.active||extraRelease?.value?.release?.state!=='RESTORE_REVIEW_REQUIRED'||
+                    extraRelease.value.release.approval!==null)
+                    throw Error('RESTORE_COMPLETE_OR_AUTHORITY_INCORRECT:'+JSON.stringify({
+                      code:answer.code,marker:marker?.status,release:extraRelease?.value?.release?.state
+                    }));
+                  return {ok:true,groups:Object.keys(marker.groups).length,
+                    status:marker.status,source:source.sha256};
+                })().then(done).catch(e=>done({ok:false,error:String(e)}));"""
+                i16_full=call('POST',f'/session/{after}/execute/async',
+                              {'script':i16_end_to_end,'args':[]},timeout=120)
+                assert i16_full.get('ok') is True,i16_full
+                assert i16_full.get('groups')==4,i16_full
+                print('B I16_REAL_GUARDED_DONOR_AND_CANONICAL_STAGED_RESTORE_INACTIVE=PASS',flush=True)
+
+                # Full Firefox process restart, not just UI navigation.
+                close(after)
+                after=open_session(browser,profile)
+                uuid=addons_uuid(profile)
+                call('POST',f'/session/{after}/url',
+                     {'url':f'moz-extension://{uuid}/pcms/index.html#settings'})
+                recovery=execute(after,"return Promise.all([browser.storage.local.get('pcmsRestoreInProgress'),import('./journal.mjs').then(j=>j.openCanonicalDatabase()).then(async db=>{try{const r=await new Promise(resolve=>{const q=db.transaction('meta','readonly').objectStore('meta').get('release:restore-b');q.onsuccess=()=>resolve(q.result)});return r?.release?.state;}finally{db.close()}})]).then(([s,r])=>({held:s.pcmsRestoreInProgress?.active===true,release:r}))")
+                assert recovery=={'held':True,'release':'RESTORE_REVIEW_REQUIRED'},recovery
+                print('B I16_PACKAGED_FULL_FIREFOX_RESTART_INACTIVE_RESTORE_PERSISTED=PASS',flush=True)
+
+
+                # I16 fresh disposable Firefox profile, separate from the old
+                # controller. Only synthetic local Persona/IDB writes. A
+                # pre-existing UID forces donor-authoritative collision remap.
+                close(after)
+                # Old controller process genuinely alive in parallel with NEW.
+                # Both profiles are CI-disposable and use the same installed XPI.
+                old_daemon=subprocess.Popen([
+                    str(browser),'-headless','-no-remote','-profile',str(profile)],
+                    stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                time.sleep(.7)
+                assert old_daemon.poll() is None,'OLD_PROFILE_NOT_RUNNING'
+                fresh_profile=pathlib.Path(folder)/'fresh-profile'
+                fresh_profile.mkdir()
+                (fresh_profile/'user.js').write_text('user_pref("xpinstall.signatures.required", false);\n')
+                fresh_initial=open_session(browser,fresh_profile)
+                try:
+                    installed=call('POST',f'/session/{fresh_initial}/moz/addon/install',
+                                   {'path':str(archive),'temporary':False},timeout=45)
+                    assert installed==ID,installed
+                finally: close(fresh_initial)
+                after=open_session(browser,fresh_profile)
+                new_uuid=addons_uuid(fresh_profile)
+                call('POST',f'/session/{after}/url',
+                     {'url':f'moz-extension://{new_uuid}/pcms/index.html#settings'})
+                fresh_script="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const core=await import('./backup-core.mjs');
+                  const review=await import('./restore-core.mjs');
+                  const journal=await import('./journal.mjs');
+                  const pkg=await import('../lib/backup-package.js');
+                  const automation=await import('../lib/automation-history.js');
+                  const previousUid='11111111-1111-4111-8111-111111111111';
+                  const holder=await browser.runtime.sendMessage({
+                    type:'CREATE_PERSONA',input:{name:'CI collision holder',
+                      routeId:'__block__',profile:{personaUid:previousUid,
+                        killSwitch:true,blockLocalNetwork:true}}});
+                  const sourceId=holder?.container?.cookieStoreId;
+                  if(!sourceId||holder?.profile?.personaUid!==previousUid)
+                    throw Error('DONOR_HOLDER_NOT_CREATED');
+                  const donor=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  const db=await journal.openCanonicalDatabase();
+                  const canonical=await core.snapshotCanonical(db);db.close();
+                  const stored=await browser.storage.local.get(null);
+                  const extras=Object.create(null);
+                  for(const [k,v] of Object.entries(stored||{}))
+                    if(k==='automationJobs'||k.startsWith('gm-values:'))extras[k]=v;
+                  const params={state:donor.state,containers:donor.containers,
+                    userscriptData:extras,selection:{kind:'full'},
+                    automationHistory:automation.filterOrdinaryAutomationJobs(
+                      Object.values(extras.automationJobs||{}))};
+                  const initial=pkg.createPortableBackupPayload(params);
+                  const cookieData=Object.create(null);
+                  for(const p of initial.personas){
+                    const found=await browser.runtime.sendMessage({
+                      type:'PERSONA_COOKIES_LIST',profileId:p.sourceId});
+                    if(!Array.isArray(found))throw Error('COOKIE_LIST_UNAVAILABLE');
+                    cookieData[p.sourceId]=found;
+                  }
+                  const currentPortable=pkg.createPortableBackupPayload({
+                    ...params,cookiesByProfile:cookieData});
+                  const password='synthetic-i16-fresh-profile-backup-passphrase';
+                  const prevEnvelope=await pkg.encodeBackupEnvelope({
+                    payload:currentPortable,password,scope:{kind:'full'}});
+                  const checkpoint=await core.encodeIntegrated({
+                    pcms:canonical,donorEnvelope:prevEnvelope,passphrase:password});
+                  const importedProfile=structuredClone(holder.profile);
+                  importedProfile.containerId='firefox-container-old';
+                  importedProfile.personaUid=previousUid;
+                  importedProfile.routeId='__block__';
+                  importedProfile.killSwitch=true;
+                  importedProfile.blockLocalNetwork=true;
+                  importedProfile.managed=true;
+                  const incomingDonor=structuredClone(donor.state);
+                  incomingDonor.profiles={'firefox-container-old':importedProfile};
+                  incomingDonor.scripts={};incomingDonor.workflows={};
+                  const importedPortable=pkg.createPortableBackupPayload({
+                    state:incomingDonor,selection:{kind:'full'},
+                    containers:[{cookieStoreId:'firefox-container-old',name:'CI imported'}],
+                    cookiesByProfile:{'firefox-container-old':[]}});
+                  if(importedPortable.personas.length!==1)
+                    throw Error('IMPORT_FIXTURE_PERSONA_MISSING');
+                  const portableEnvelope=await pkg.encodeBackupEnvelope({
+                    payload:importedPortable,password,scope:{kind:'full'}});
+                  const restoredPcms={schema:1,stores:Object.fromEntries(
+                    core.DB_STORES.map(k=>[k,[]]))};
+                  restoredPcms.stores.meta.push({key:'account:restored-fresh',
+                    value:core.serializeClone({key:'account:restored-fresh',
+                      account:{accountId:'restored-fresh',personaUid:previousUid,
+                        state:'VERIFIED',revision:1,identity:{session:'old-evidence'}}})});
+                  const archive=await core.encodeIntegrated({
+                    pcms:restoredPcms,donorEnvelope:portableEnvelope,passphrase:password});
+                  const mappings={[importedPortable.personas[0].key]:'__create__'};
+                  const inspected=await review.previewRestore({
+                    archiveText:archive.text,password,mode:'merge',fresh:true,
+                    mappings,currentPcms:canonical,currentDonor:donor,
+                    currentPortable,containers:donor.containers,
+                    decodeDonor:pkg.decodeBackupEnvelope});
+                  if(inspected.plan.risk.newContainers!==1||
+                     inspected.plan.groups[0].status!=='CREATE_REQUESTED')
+                    throw Error('FRESH_RESTORE_RISK_NOT_DISCLOSED');
+                  async function send(action,params){
+                    return new Promise(resolve=>{
+                      const port=browser.runtime.connect({name:'pcms-i16-restore'});
+                      let settled=false;
+                      function settle(x){
+                        if(settled)return;settled=true;
+                        try{port.disconnect();}catch{}
+                        resolve(x);
+                      }
+                      port.onMessage.addListener(settle);
+                      port.onDisconnect.addListener(()=>settle({ok:false,code:'PORT_CLOSED'}));
+                      port.postMessage({action,params});
+                    });
+                  }
+                  const result=await send('APPLY',{
+                    archiveText:archive.text,checkpointText:checkpoint.text,
+                    password,mode:'merge',fresh:true,mappings,
+                    reviewedPlanSha256:inspected.planSha256});
+                  const after=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  const marker=(await browser.storage.local.get('pcmsRestoreInProgress'))
+                    .pcmsRestoreInProgress;
+                  const imported=Object.entries(after.state.profiles||{})
+                    .filter(([id,p])=>id!==sourceId&&p.managed===true&&
+                      p.routeId==='__block__'&&p.personaUid!==previousUid);
+                  const saved=await journal.openCanonicalDatabase();
+                  const receipt=await new Promise(resolve=>{
+                    const req=saved.transaction('meta','readonly').objectStore('meta')
+                      .get('account:restored-fresh');
+                    req.onsuccess=()=>resolve(req.result);
+                  });
+                  saved.close();
+                  const again=await send('APPLY',{});
+                  const activate=await send('ACTIVATE',{});
+                  if(!result.ok||marker?.status!=='COMPLETE_INACTIVE'||
+                    marker.fresh!==true||
+                    after.state.profiles[sourceId]?.personaUid!==previousUid||
+                    imported.length!==1||
+                    receipt?.account?.personaUid!==imported[0][1].personaUid||
+                    receipt?.account?.identity!==null||
+                    receipt?.account?.state!=='VERIFICATION_PENDING'||
+                    again.code!=='RESTORE_INPUT_INVALID'&&again.code!=='RESTORE_ALREADY_HELD'||
+                    activate.code!=='RESTORE_COMMAND_NOT_ALLOWED')
+                    throw Error('FRESH_RESTORE_COLLISION_OR_HOLD:'+JSON.stringify({
+                      code:result.code,status:marker?.status,fresh:marker?.fresh,
+                      imported:imported.length,account:receipt?.account?.state,
+                      reapply:again.code,activate:activate.code
+                    }));
+                  return {ok:true,targetUid:imported[0][1].personaUid,
+                    originalUid:previousUid,sourceContainer:sourceId,
+                    status:marker.status,groups:Object.keys(marker.groups).length};
+                })().then(done).catch(e=>done({ok:false,error:String(e)}));"""
+                fresh_result=call('POST',f'/session/{after}/execute/async',
+                                  {'script':fresh_script,'args':[]},timeout=120)
+                assert fresh_result.get('ok') is True,fresh_result
+                assert old_daemon.poll() is None,'OLD_CONTROLLER_NOT_CONCURRENT'
+                assert fresh_result.get('groups')==4,fresh_result
+                close(after)
+                after=open_session(browser,fresh_profile)
+                new_uuid=addons_uuid(fresh_profile)
+                call('POST',f'/session/{after}/url',
+                     {'url':f'moz-extension://{new_uuid}/pcms/index.html#settings'})
+                fresh_restored=execute(after,"return browser.storage.local.get('pcmsRestoreInProgress').then(s=>({active:s.pcmsRestoreInProgress?.active,fresh:s.pcmsRestoreInProgress?.fresh,status:s.pcmsRestoreInProgress?.status}))")
+                assert fresh_restored=={'active':True,'fresh':True,'status':'COMPLETE_INACTIVE'},fresh_restored
+                print('B I16_FRESH_PROFILE_UID_COLLISION_BLOCK_ROUTE_INACTIVE_RESTART=PASS',flush=True)
+
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
             finally: close(after)
         finally:
+            if old_daemon is not None:
+                old_daemon.terminate()
+                try: old_daemon.wait(timeout=5)
+                except subprocess.TimeoutExpired: old_daemon.kill()
             server.terminate()
             try: server.wait(timeout=4)
             except subprocess.TimeoutExpired: server.kill()

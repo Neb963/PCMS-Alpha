@@ -29,6 +29,8 @@ import './release-boundary.mjs';
 import './existing-update-boundary.mjs';
 // I15 local scheduled backup must wake without a PCMS tab.
 import './backup-auto-boundary.mjs';
+// I16 staged restore, with permanent inactive controller under review.
+import './restore-boundary.mjs';
 // I12 one durable shadow queue/alarm; provider observations gated OFF.
 import {createRefresherBoundary} from './refresher-boundary.mjs';
 if(typeof browser!=='undefined')createRefresherBoundary(browser).register();
