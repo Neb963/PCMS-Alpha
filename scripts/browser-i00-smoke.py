@@ -2556,6 +2556,63 @@ def main():
                 print('B I16_INSTALLED_AUTHENTICATED_PREVIEW_DURABLE_GUARD_NO_REPLAY=PASS',flush=True)
 
 
+
+                i16_db_code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const core=await import('./backup-core.mjs');
+                  const sanitize=await import('./restore-sanitize.mjs');
+                  const idb=await import('./restore-idb.mjs');
+                  const gate=await import('./restore-gate.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  try{
+                    const before=await core.snapshotCanonical(db);
+                    const incoming={schema:1,stores:Object.fromEntries(
+                      core.DB_STORES.map(s=>[s,[]]))};
+                    incoming.stores.meta.push({key:'release:restore-b',
+                      value:core.serializeClone({key:'release:restore-b',
+                        release:{state:'APPROVED',approval:{human:true},
+                          dispatchPossible:false}})});
+                    const prepared=sanitize.prepareRestoredCanonical({
+                      incoming,current:before,mode:'replace',uidRemap:{}});
+                    let unheldBlocked=false;
+                    try{await idb.applyCanonicalSnapshot(db,prepared,{
+                      assertHeld:async()=>false});}
+                    catch{unheldBlocked=true;}
+                    const untouched=await core.snapshotCanonical(db);
+                    if(!unheldBlocked||
+                      JSON.stringify(before)!==JSON.stringify(untouched))
+                      throw Error('CANONICAL_UNGUARDED_WRITE');
+                    const sentinel=gate.createRestoreGate(browser.storage.local);
+                    if(!(await sentinel.inspect()).held)
+                      throw Error('RESTORE_SENTINEL_NOT_DURABLE');
+                    const receipt=await idb.applyCanonicalSnapshot(db,prepared,{
+                      assertHeld:async()=>(await sentinel.inspect()).held});
+                    const after=await core.snapshotCanonical(db);
+                    const release=after.stores.meta.find(r=>r.key==='release:restore-b');
+                    if(receipt.source!=='INDEPENDENT_READBACK'||
+                       release?.value?.release?.state!=='RESTORE_REVIEW_REQUIRED'||
+                       release?.value?.release?.approval!==null)
+                      throw Error('IMPORTED_APPROVAL_NOT_INERT');
+                    return {ok:true,hold:true,
+                      receiptDigest:receipt.digest,
+                      status:release.value.release.state};
+                  }finally{db.close();}
+                })().then(done).catch(e=>done({ok:false,error:String(e)}));"""
+                i16_db=call('POST',f'/session/{after}/execute/async',
+                            {'script':i16_db_code,'args':[]},timeout=75)
+                assert i16_db.get('ok') is True,i16_db
+                print('B I16_REAL_IDB_GUARDED_ATOMIC_RESTORE_AND_APPROVAL_HOLD=PASS',flush=True)
+                # Full Firefox process restart, not just UI navigation.
+                close(after)
+                after=open_session(browser,profile)
+                uuid=addons_uuid(profile)
+                call('POST',f'/session/{after}/url',
+                     {'url':f'moz-extension://{uuid}/pcms/index.html#settings'})
+                recovery=execute(after,"return Promise.all([browser.storage.local.get('pcmsRestoreInProgress'),import('./journal.mjs').then(j=>j.openCanonicalDatabase()).then(async db=>{try{const r=await new Promise(resolve=>{const q=db.transaction('meta','readonly').objectStore('meta').get('release:restore-b');q.onsuccess=()=>resolve(q.result)});return r?.release?.state;}finally{db.close()}})]).then(([s,r])=>({held:s.pcmsRestoreInProgress?.active===true,release:r}))")
+                assert recovery=={'held':True,'release':'RESTORE_REVIEW_REQUIRED'},recovery
+                print('B I16_PACKAGED_FULL_FIREFOX_RESTART_INACTIVE_RESTORE_PERSISTED=PASS',flush=True)
+
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
             finally: close(after)
         finally:
