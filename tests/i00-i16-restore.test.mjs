@@ -256,7 +256,7 @@ test('P55-08 X: merge conflict aborts all groups instead of overwriting active d
     /RESTORE_MERGE_CONFLICT/);
   assert.equal(current.stores.meta[0].value.release.state,'CONFIRMED_PUBLIC');
 });
-test('P55-12 X: bounded 50 account and 1000 generator archive stays inactive and preserves row count',()=>{
+test('P55-12 X: bounded 50 account and 1000 generator archive stays inactive and preserves row count',async()=>{
   const {prepareRestoredCanonical}=await import('../src/ui/restore-sanitize.mjs');
   const incoming=empty(),current=empty(),uidMap={};
   for(let i=0;i<50;i++){
