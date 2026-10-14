@@ -20,8 +20,8 @@ const files=()=>[{path:'main.pjs',base64:encode('let x = 2;')},
   {path:'src/empty.txt',base64:''}];
 function fixture({gate=false,lostAck=false,denyRoute=false,drift=false,dirtyOriginal=false,
   release=false,breakReadback=false,editorDirty=false,
-  routeLossAfterPrepare=false,wrongPrincipal=false,slug='stage-one',
-  pilotClock=()=>performance.now()}={}){
+  routeLossAfterPrepare=false,routeLossAt=4,wrongPrincipal=false,slug='stage-one',
+  pilotClock=()=>performance.now(),onStage=()=>{}}={}){
   let current=null,version=0,routeChecks=0;
   const ownItem={...item,requestedSlug:slug},ownLink={...link,folder:'gens/'+slug};
   const trace=[],remote=[];
@@ -47,6 +47,7 @@ function fixture({gate=false,lostAck=false,denyRoute=false,drift=false,dirtyOrig
         return {ok:false,code:'UNVERIFIED'};
       current={...current,state,revision:revision+1,reason,
         ...(tab?{tab}:{} )};
+      onStage(state);
       return {ok:true,state,revision:current.revision,candidateFingerprint:current.candidate.fingerprint};
     },
     recover:async()=>({ok:true,held:0})
@@ -61,7 +62,7 @@ function fixture({gate=false,lostAck=false,denyRoute=false,drift=false,dirtyOrig
           (breakReadback?files().slice(2,3):files().slice(2)):[]}};
   };
   const guard={getSafeRouteReadiness:async()=>{routeChecks++;return (denyRoute||
-    (routeLossAfterPrepare&&routeChecks>=4))?
+    (routeLossAfterPrepare&&routeChecks>=routeLossAt))?
     {ready:false,code:'DIRECT_FORBIDDEN'}:
     {ready:true,routeId:'wg-a',cookieStoreId:'cookie-1'};},
     observeReadOnly:observer,
@@ -247,11 +248,28 @@ test('I17 X: pilot denies non-disposable, expiry, stale revision, spoofed fields
   ticks=120001;
   assert.equal((await ex.dispatch()).code,'PROVIDER_ACTIVATION_HELD');
   assert.deepEqual(ex.remote,[]);assert.deepEqual(ex.trace,[]);
-  const route=fixture({gate:false,slug,routeLossAfterPrepare:true});
+  const route=fixture({gate:false,slug,routeLossAfterPrepare:true,routeLossAt:5});
   assert.equal((await route.pin()).ok,true);
   assert.equal((await route.run('ARM_DISPOSABLE_STAGE',{slug,expectedRevision:1,
     confirmation:'STAGE '+slug})).ok,true);
   assert.equal((await route.dispatch()).code,'PREPARED_GUARD_CHANGED');
   assert.deepEqual(route.trace,['PREPARED']);
   assert.deepEqual(route.remote,[]);
+});
+
+test('I17 X: expiring an arm after durable dispatch marker preserves uncertainty without a remote call',async()=>{
+  let ticks=0;
+  const slug='pcms-test-disposable-stage-0003';
+  const f=fixture({gate:false,slug,pilotClock:()=>ticks,
+    onStage:state=>{if(state==='DISPATCH_POSSIBLE')ticks=120001;}});
+  assert.equal((await f.pin()).ok,true);
+  assert.equal((await f.run('ARM_DISPOSABLE_STAGE',{
+    slug,expectedRevision:1,confirmation:'STAGE '+slug})).ok,true);
+  const attempted=await f.dispatch();
+  assert.equal(attempted.code,'STAGING_HELD_BEFORE_DISPATCH');
+  assert.deepEqual(f.trace,['PREPARED','DISPATCH_POSSIBLE','HELD_UNCERTAIN']);
+  assert.deepEqual(f.remote,[]);
+  assert.equal(f.current.state,'HELD_UNCERTAIN');
+  assert.equal((await f.dispatch()).code,'RECONCILIATION_REQUIRED');
+  assert.deepEqual(f.remote,[]);
 });
