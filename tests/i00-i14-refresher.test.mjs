@@ -150,3 +150,15 @@ test('P54-06 F: actual scheduler rowBlocks suspension freezes retained active bu
   assert.equal(s.rows[0].activeRemaining,12*HOUR);
   assert.equal(s.rows[0].slot,false);
 });
+
+test('I14 PACKAGING F/X: exact refresh evidence import graph is included in packaged XPI',async()=>{
+  const {readFile}=await import('node:fs/promises');
+  const overlay=await readFile('src/runtime/overlay.mjs','utf8');
+  const evidence=await readFile('src/runtime/refresher-effect-core.mjs','utf8');
+  const core=await readFile('src/runtime/refresher-core.mjs','utf8');
+  const store=await readFile('src/runtime/refresher-store.mjs','utf8');
+  assert.ok(overlay.includes("'refresher-effect-core.mjs'"));
+  assert.ok(core.includes("from './refresher-effect-core.mjs'"));
+  assert.ok(store.includes("from './refresher-effect-core.mjs'"));
+  assert.ok(evidence.includes('dispatchPossible'));
+});
