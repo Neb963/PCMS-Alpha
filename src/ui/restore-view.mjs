@@ -16,6 +16,7 @@ const fault=e=>/^[A-Z][A-Z0-9_]{3,64}$/.test(e?.message||'')?e.message:'RESTORE_
 let review=null,checkpointProof=null;
 function invalidate(){
   review=null;checkpointProof=null;verify.disabled=true;
+  $('pcms-restore-apply').disabled=true;
   details.textContent='No authenticated restore plan. Existing state remains unchanged.';
 }
 for(const el of [source,checkpoint,pass,mode,mappings,fresh])
@@ -90,6 +91,7 @@ preview.addEventListener('click',async()=>{
 });
 verify.addEventListener('click',async()=>{
   if(verify.disabled||!review)return;verify.disabled=true;
+  $('pcms-restore-apply').disabled=true;
   status.textContent='Re-reading selected checkpoint and current destination. No restore or remote action.';
   try{
     const checkpointText=await readFile(checkpoint);
@@ -104,8 +106,9 @@ verify.addEventListener('click',async()=>{
       currentPortable:donorPortable,archivedAtLeastTier:3});
     checkpointProof=proof;
     summary(review.plan,proof);
+    syncApply();
     status.textContent='Checkpoint file independently re-read, authenticated and matched to current destination. Restore mutation remains OFF.';
-  }catch(e){checkpointProof=null;status.textContent='Checkpoint not proven: '+fault(e)+'. Restore not started.';}
+  }catch(e){checkpointProof=null;syncApply();status.textContent='Checkpoint not proven: '+fault(e)+'. Restore not started.';}
   finally{verify.disabled=false;}
 });
 async function health(){
@@ -121,3 +124,70 @@ async function health(){
   }
 }
 void health();
+
+const reviewedHash=$('pcms-restore-reviewed-hash');
+const approval=$('pcms-restore-consent');
+const apply=$('pcms-restore-apply');
+function syncApply(){
+  apply.disabled=!(review&&checkpointProof?.verified&&approval.checked&&
+    reviewedHash.value===review.plan.planSha256);
+}
+reviewedHash.addEventListener('input',syncApply);
+approval.addEventListener('change',syncApply);
+function portCommand(message){
+  return new Promise(resolve=>{
+    let done=false,port;
+    try{port=browser.runtime.connect({name:'pcms-i16-restore'});}
+    catch{return resolve({ok:false,code:'RESTORE_PORT_UNAVAILABLE'});}
+    const settle=result=>{
+      if(done)return;done=true;
+      try{port.disconnect();}catch{}
+      resolve(result);
+    };
+    port.onMessage.addListener(settle);
+    port.onDisconnect.addListener(()=>settle({ok:false,code:'RESTORE_RESULT_UNKNOWN'}));
+    try{port.postMessage(message);}
+    catch{settle({ok:false,code:'RESTORE_PORT_WRITE_FAILED'});}
+  });
+}
+apply.addEventListener('click',async()=>{
+  if(apply.disabled||!review||!checkpointProof?.verified||!approval.checked||
+    reviewedHash.value!==review.plan.planSha256)return;
+  apply.disabled=true;verify.disabled=true;preview.disabled=true;
+  status.textContent='Restoring under the independent safety hold. Do not repeat an uncertain import.';
+  try{
+    const [archiveText,checkpointText,current]=await Promise.all([
+      readFile(source),readFile(checkpoint),snapshot()
+    ]);
+    const currentPortable=await portableCurrent(current.donor);
+    await revalidateRestorePlan({
+      expectedPlanSha256:review.plan.planSha256,
+      expectedDestinationSha256:review.plan.plan.destinationSha256,
+      currentPcms:current.pcms,currentDonor:current.donor,
+      currentPortable,plan:review.plan.plan
+    });
+    const independent=await verifyCheckpoint({
+      checkpointText,password:pass.value,decodeDonor:decodeBackupEnvelope,
+      currentPcms:current.pcms,currentPortable,archivedAtLeastTier:3
+    });
+    if(independent.sha256!==checkpointProof.sha256)
+      throw Error('RESTORE_CHECKPOINT_CHANGED');
+    const requested=JSON.parse(mappings.value||'{}');
+    const result=await portCommand({action:'APPLY',params:{
+      archiveText,checkpointText,password:pass.value,
+      reviewedPlanSha256:review.plan.planSha256,
+      mode:mode.value,fresh:fresh.checked,mappings:requested
+    }});
+    const held=await portCommand({action:'STATUS'});
+    status.textContent=result?.ok?
+      'Restored data under inactive controller. Routes, accounts and approvals still require independent review. '+(held.status||'RESTORE_HELD'):
+      'Restore uncertain/held: '+(result?.code||'RESTORE_RESULT_UNKNOWN')+
+      ' / '+(held?.status||'STATUS_UNAVAILABLE')+'. Never resend a possibly completed write.';
+  }catch(e){
+    status.textContent='Restore not confirmed: '+fault(e)+'. Inspect restore guard before any further action.';
+  }finally{
+    pass.value='';review=null;checkpointProof=null;
+    apply.disabled=true;preview.disabled=false;
+    void health();
+  }
+});
