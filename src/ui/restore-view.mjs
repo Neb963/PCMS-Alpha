@@ -191,3 +191,23 @@ apply.addEventListener('click',async()=>{
     void health();
   }
 });
+
+$('pcms-restore-reconcile').addEventListener('click',async event=>{
+  const button=event.currentTarget;
+  if(button.disabled)return;button.disabled=true;
+  status.textContent='Observing the interrupted restore. No remote or local import is retried.';
+  try{
+    const [archiveText,checkpointText]=await Promise.all([readFile(source),readFile(checkpoint)]);
+    if(pass.value.length<12)throw Error('RESTORE_PASSPHRASE_REQUIRED');
+    const result=await portCommand({action:'RECONCILE',params:{
+      archiveText,checkpointText,password:pass.value}});
+    const current=await portCommand({action:'STATUS'});
+    status.textContent=(result?.ok?
+      'Readback: '+result.code:
+      'Readback held: '+(result?.code||'RESTORE_RESULT_UNKNOWN'))+
+      '. '+(result?.group||'No stage')+'; '+(current?.status||'INACTIVE')+
+      '. No duplicate effect dispatched; activation OFF.';
+  }catch(e){
+    status.textContent='Reconciliation held: '+fault(e)+'. No retry performed.';
+  }finally{pass.value='';button.disabled=false;void health();}
+});
