@@ -1,5 +1,5 @@
 // Synchronous listeners, one coalesced scheduler alarm, canonical turn/claim
-// fences. Production observation activation is OFF; mutations have no path.
+// fences. I14 conditional executor is present but default production gate OFF.
 import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId,createCanonicalStore} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
@@ -41,7 +41,8 @@ export function validateRefresherMessage(api,sender,message){
   return {ok:true};
 }
 export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFactory=createRefresherStore,
-  guard=internalPcmsGuard,observationGate=()=>false,clock=Date.now,
+  guard=internalPcmsGuard,observationGate=()=>false,
+  refreshGate=()=>false,qualificationFor=()=>null,refreshAdapter=null,clock=Date.now,
   newId=()=>crypto.randomUUID().replaceAll('-','')}={}){
   let dbPromise,turnPromise=null,registered=false,alarmHeld=false,alarmTail=Promise.resolve();
   const bootId=newId(),sentinel=createRestoreSentinel(api.storage.local);
@@ -165,6 +166,99 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       changes:completed.flatMap(r=>r.changes||[])};
   }
 
+  async function maybeRefresh(s){
+    // No UI message can enable this gate or supply provider qualifications.
+    // Production has no verified method/adapter and is unconditionally OFF.
+    if(!refreshGate()||!refreshAdapter||!observationGate())return 'REFRESH_ACTIVATION_HELD';
+    const g=guard();if(!g?.getSafeRouteReadiness)return 'GUARDED_REFRESH_UNAVAILABLE';
+    const snapshot=await s.read();if(!snapshot.ok)return 'CANONICAL_UNAVAILABLE';
+    // Reconcile a possibly-dispatched effect by independent READBACK ONLY.
+    // A cold wake or lost response must never invoke execute a second time.
+    const stranded=snapshot.state.rows.find(r=>r.refresh?.intent?.state==='RESERVED'&&
+      clock()-r.refresh.intent.at>=MINUTE);
+    if(stranded){
+      // A RESERVED transaction has not crossed DISPATCH_POSSIBLE. A fresh
+      // canonical read may clear it after cooldown, without touching provider.
+      const done=await s.cancelReserved(stranded.stableId,stranded.refresh.intent.id,clock());
+      return done.ok?'STALE_RESERVATION_ABORTED':done.code;
+    }
+    const uncertain=snapshot.state.rows.find(r=>r.refresh?.intent?.state==='DISPATCH_POSSIBLE'&&
+      (r.refresh.probes||0)<3&&(r.refresh.nextAttemptAt||0)<=clock());
+    if(uncertain){
+      const intent=uncertain.refresh.intent,a=snapshot.state.accounts[uncertain.accountId];
+      if(!uncertain.ownerVerified||!uncertain.releaseVerified||uncertain.identityHeld||
+        uncertain.reviewHeld||uncertain.listing!=='PUBLIC'||!a?.verifiedIdentity||
+        uncertain.releaseFingerprint!==intent.sourceFingerprint)
+        return 'REFRESH_RECONCILIATION_HELD';
+      const first=await g.getSafeRouteReadiness(uncertain.personaUid);
+      if(!first?.ready)return 'REFRESH_RECONCILIATION_ROUTE_HELD';
+      const claim={id:intent.id,slug:uncertain.slug,stableId:uncertain.stableId,
+        accountId:uncertain.accountId,personaUid:uncertain.personaUid,
+        bindingVersion:uncertain.bindingVersion,
+        principalFingerprint:a.principalFingerprint,releaseFingerprint:intent.sourceFingerprint};
+      let receipt={at:clock(),kind:'UNKNOWN',sourceFingerprint:null,
+        targetMatched:false,principalMatched:false};
+      try{
+        const check=await refreshAdapter.readback(claim);
+        const after=await g.getSafeRouteReadiness(uncertain.personaUid);
+        const stable=after?.ready&&first.routeId===after.routeId&&
+          first.cookieStoreId===after.cookieStoreId&&
+          first.healthDomain===after.healthDomain;
+        receipt={at:clock(),kind:check?.kind||'UNKNOWN',
+          sourceFingerprint:check?.sourceFingerprint||null,
+          targetMatched:check?.targetMatched===true&&stable===true,
+          principalMatched:check?.principalMatched===true&&stable===true,feed:check?.feed};
+      }catch{/* readback remains uncertain; bounded backoff applies */}
+      const settled=await s.settleAttempt(uncertain.stableId,intent.id,receipt);
+      return settled.ok?(settled.proof.effectVerified?
+        'REFRESH_READBACK_EFFECT_PROVEN':'REFRESH_READBACK_HELD'):settled.code;
+    }
+    const row=snapshot.state.rows.find(r=>r.slot&&r.phase==='ACTIVE'&&
+      r.ownerVerified&&r.releaseVerified&&!r.identityHeld&&!r.reviewHeld&&
+      !r.refresh?.intent&&!r.refresh?.suspended&&
+      (r.refresh?.nextAttemptAt||0)<=clock()&&
+      snapshot.state.accounts[r.accountId]?.verifiedIdentity===true);
+    if(!row)return 'NO_REFRESH_DUE';
+    const candidate=qualificationFor(row);
+    // A candidate from a fixture, code comment or stale source is not enough.
+    const first=await g.getSafeRouteReadiness(row.personaUid);
+    if(!first?.ready)return 'PROTECTED_ROUTE_UNAVAILABLE';
+    const claimId=newId();
+    const reserved=await s.reserveAttempt({stableId:row.stableId,id:claimId,now:clock(),
+      candidate,liveAuthorized:refreshGate()});
+    if(!reserved.ok)return reserved.code;
+    const claim=reserved.claim;
+    // All durable and guarded checks precede the dispatch-may-have-happened
+    // receipt. After this receipt, NEVER replay on lost ACK or cold wake.
+    if((await sentinel.inspect()).held||!refreshGate())return 'REFRESH_RESERVED_HELD';
+    const second=await g.getSafeRouteReadiness(row.personaUid);
+    if(!second?.ready||first.cookieStoreId!==second.cookieStoreId||
+      first.routeId!==second.routeId||first.healthDomain!==second.healthDomain){
+      await s.cancelReserved(claim.stableId,claim.id,clock());
+      return 'REFRESH_ROUTE_CHANGED';
+    }
+    const possible=await s.markDispatch(claim,clock());
+    if(!possible.ok)return possible.code;
+    let receipt={at:clock(),kind:'UNKNOWN',sourceFingerprint:null,
+      targetMatched:false,principalMatched:false};
+    try{
+      // The installed application has no provider-specific implementation or
+      // authorization. Tests inject an isolated deterministic effect ledger.
+      await refreshAdapter.execute({...claim,method:candidate.method,methodVersion:candidate.version});
+      const check=await refreshAdapter.readback(claim);
+      const final=await g.getSafeRouteReadiness(row.personaUid);
+      const routeStable=final?.ready&&second.cookieStoreId===final.cookieStoreId&&
+        second.routeId===final.routeId&&second.healthDomain===final.healthDomain;
+      receipt={at:clock(),kind:check?.kind||'UNKNOWN',
+        sourceFingerprint:check?.sourceFingerprint||null,
+        targetMatched:check?.targetMatched===true&&routeStable===true,
+        principalMatched:check?.principalMatched===true&&routeStable===true,
+        feed:check?.feed};
+    }catch{/* ambiguous remote effect: record held, never repeat */}
+    const settled=await s.settleAttempt(claim.stableId,claim.id,receipt);
+    return settled.ok?(settled.proof.effectVerified?'EFFECT_INDEPENDENTLY_PROVEN':
+      'REFRESH_EFFECT_HELD'):settled.code;
+  }
   function tick(){
     if(turnPromise)return turnPromise;
     turnPromise=(async()=>{
@@ -176,11 +270,14 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         // At most two protected reads per turn. Persistent quota/coalescing spans
         // all wake sources and both recent-list/statistics request classes.
         const observed=await observe(s);
+        // Mutation failure cannot block the healthy shadow monitor.
+        let refresh='REFRESH_ACTIVATION_HELD';
+        try{refresh=await maybeRefresh(s);}catch{refresh='REFRESH_EFFECT_UNCERTAIN';}
         await notifyChanges(result);await notifyChanges(observed);
         await safeBreadcrumb(result,alarmHeld?'ALARM_UNVERIFIED':
           observed.code==='MONITOR_ACTIVATION_HELD'?'MONITOR_ACTIVATION_HELD':'SHADOW_READY');
         return {ok:true,revision:result.revision,mode:'SHADOW_ONLY',providerEffects:'OFF',
-          alarmHeld,observation:observed.code||'OBSERVED'};
+          alarmHeld,observation:observed.code||'OBSERVED',refresh};
       }catch{await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return fail('REFRESHER_AUTHORITY_UNAVAILABLE');}
       finally{turnPromise=null;}
     })();
@@ -193,7 +290,9 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       if(message.type==='GET_REFRESHER'){
         const view=await s.list(clock(),p),restore=await sentinel.inspect();
         return {...view,restoreHeld:restore.held,alarmHeld,monitoring:
-          observationGate()?'GUARDED_READ_ONLY':'OFF_PENDING_ACTIVATION'};
+          observationGate()?'GUARDED_READ_ONLY':'OFF_PENDING_ACTIVATION',
+          refreshCapability:refreshGate()&&refreshAdapter?
+            'TEST_OR_AUTHORIZED_CAPABILITY_GATED':'LIVE_REFRESH_OFF_UNTIL_PROVEN'};
       }
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(message.type==='OBSERVE_NOW'){

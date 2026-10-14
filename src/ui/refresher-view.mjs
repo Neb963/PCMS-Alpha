@@ -28,6 +28,11 @@ function inspector(){
   el('selected').textContent=r.slug+' · '+r.stableId+' · '+rowText(r);
   el('generator-active').value=r.activeMs/3600000;el('generator-sleep').value=r.sleepMs/3600000;
   el('generator-pause').textContent=r.paused?'Resume generator':'Pause generator';
+  const proof=r.refresh;
+  el('selected').textContent+=' · visibility '+(proof?.state||'UNOBSERVED')+
+    ' · misses '+(proof?.misses||0)+' · attempts '+(proof?.attempts||0)+
+    ' · independent effect '+(proof?.proof?.effect||'UNVERIFIED')+
+    ' · recent feed '+(proof?.proof?.feed?.state||'UNKNOWN');
   el('metric').textContent=r.metric?
     r.metric.views+' observed views · '+age(r.metric.observedAt)+
     (r.metric.correction?' · correction/reset; interval delta unknown':'')+
@@ -40,12 +45,14 @@ function draw(s){
     ' admission cap · '+s.eligible+' eligible · planning '+s.capacity.demand.toFixed(2)+
     ' · '+(s.capacity.warning||'multi-window observation')+' · '+
     age(s.recent.observedAt)+(s.recent.stale?' (stale)':'')+
-    (s.recent.suspended?' · recent polling suspended after bounded failures':'')+'.';
+    (s.recent.suspended?' · recent polling suspended after bounded failures':'')+
+    ' · '+s.visibilitySuspended+' visibility-held (slot released; active budget preserved).';
   el('summary').textContent=summary;
   for(const id of ['pcms-overview-refresher','pcms-queue-refresher']){
     const target=document.getElementById(id);if(target)target.textContent='Shadow Refresher: '+summary;
   }
-  el('provider').textContent='Provider '+s.provider.state+' · clocks: '+s.clock+
+  el('provider').textContent='Provider '+s.provider.state+
+    ' · effective refresh method unverified (mutation disabled) · clocks: '+s.clock+
     ' · observations: '+s.monitoring+' · refresh mutations OFF.';
   el('diagnostics').textContent=s.diagnostics.turns+' durable turns · '+s.diagnostics.unknownIntervals+
     ' unknown intervals frozen · read peak '+s.diagnostics.readPeak+' · queue peak '+s.diagnostics.queuePeak+

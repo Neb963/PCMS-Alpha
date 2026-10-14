@@ -1,6 +1,8 @@
 // One revision-fenced canonical scheduler snapshot, with a durable sorted due
 // index, in the existing PCMS DB. All async IO occurs outside transactions.
 import {fail,isSafeId} from './journal.mjs';
+import {emptyRefreshEvidence,observeRefreshPresence,reserveRefreshAttempt,
+  dispatchPossible,reconcileRefreshAttempt} from './refresher-effect-core.mjs';
 import {REFRESHER_KEY,emptyShadow,validShadow,reconcileShadow,advanceShadow,
   effectiveCapacity,rowBlocks,queueOrder,validatePolicy,claimObservation,
   applyStatistic,observeCapacity,MINUTE} from './refresher-core.mjs';
@@ -72,11 +74,16 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
     blockers:[...rowBlocks(s,r),r.readyUpdate&&'READY_UPDATE_FIRST'].filter(Boolean),
     presence:r.presence?{...r.presence,stale:r.presence.observedAt>now||now-r.presence.observedAt>2*s.policy.recentMs}:null,
     statisticSuspended:r.metrics.suspended===true,
+    refresh:{state:r.refresh?.state||'UNOBSERVED',misses:r.refresh?.misses||0,
+      attempts:r.refresh?.attempts||0,suspended:r.refresh?.suspended===true,
+      nextAttemptAt:r.refresh?.nextAttemptAt||0,
+      proof:r.refresh?.history?.at(-1)||null},
     metric:r.metrics.latest?{...r.metrics.latest,stale:r.metrics.latest.observedAt>now||now-r.metrics.latest.observedAt>
       s.policy.statsMaxMs}:null,nextStatisticAt:r.metrics.nextDueAt}));
   return {ok:true,revision:s.revision,mode:'SHADOW_ONLY',providerEffects:'OFF',items,
     total:match.length,occupied:s.rows.filter(r=>r.slot).length,
     eligible:s.rows.filter(r=>r.phase==='WAITING'&&!rowBlocks(s,r).length&&!r.readyUpdate).length,
+    visibilitySuspended:s.rows.filter(r=>r.refresh?.suspended).length,
     capacity:effectiveCapacity(s,now),provider:s.provider,globalPause:s.globalPause,
     accounts:Object.entries(s.accounts).map(([id,a])=>({accountId:id,paused:a.paused,
       health:a.health,graceUsed:a.graceUsed})),policy:s.policy,
@@ -188,6 +195,25 @@ export function createRefresherStore(db){
         const item=ranks.get(r.slug);
         r.presence={present:!!item,position:item?.position||null,observedAt:c.startedAt,
           source:'GUARDED_RECENT_LIST',absence:'NOT_A_DELETION'};
+        const owner=out.accounts[r.accountId];
+        const healthy=r.ownerVerified&&r.releaseVerified&&r.listing==='PUBLIC'&&
+          !r.reviewHeld&&!r.identityHeld&&owner?.verifiedIdentity===true&&
+          owner.health==='HEALTHY'&&Number.isSafeInteger(owner.healthAt)&&
+          c.startedAt-owner.healthAt<=out.policy.recentMs&&
+          out.provider.state!=='OUTAGE';
+        const evidence=observeRefreshPresence(r.refresh||emptyRefreshEvidence(),{
+          at:c.startedAt,present:!!item,rank:item?.position,complete:true,
+          healthy,windowMs:out.policy.recentMs});
+        if(evidence.ok){
+          r.refresh=evidence.evidence;
+          if(evidence.releaseSlot&&r.slot){
+            r.slot=false;
+            if(r.phase==='ACTIVE')r.phase='WAITING';
+            clockChanges.push({code:'VISIBILITY_SUSPENDED',scopeId:r.stableId});
+          }else if(evidence.resumed){
+            clockChanges.push({code:'VISIBILITY_RECOVERED',scopeId:r.stableId});
+          }
+        }
       }
       for(const r of [...out.rows]){
         const item=ranks.get(r.slug);
@@ -257,9 +283,64 @@ export function createRefresherStore(db){
     }
     return {ok:true,state:out,accepted,changes:clockChanges,code:accepted?'OBSERVED':'OBSERVATION_HELD'};
   },{sync:true});
+  // Single canonical transaction for each step. A crash after possible
+  // dispatch is never treated as permission to repeat a provider effect.
+  const reserveAttempt=({stableId,id,now,candidate,liveAuthorized})=>mutate(null,s=>{
+    const r=s.rows.find(x=>x.stableId===stableId);
+    if(!r||r.phase!=='ACTIVE'||!r.slot||rowBlocks(s,r).length)
+      return fail('REFRESH_ADMISSION_HELD');
+    const attempt=reserveRefreshAttempt(r.refresh,{id,at:now,slug:r.slug,
+      sourceFingerprint:r.releaseFingerprint,candidate,eligible:true,liveAuthorized});
+    if(!attempt.ok)return attempt;
+    const out=structuredClone(s);
+    out.rows.find(x=>x.stableId===stableId).refresh=attempt.evidence;
+    return {ok:true,state:out,claim:{id,stableId,slug:r.slug,accountId:r.accountId,
+      personaUid:r.personaUid,bindingVersion:r.bindingVersion,
+      principalFingerprint:s.accounts[r.accountId]?.principalFingerprint,
+      releaseFingerprint:r.releaseFingerprint},
+      changes:[{code:'REFRESH_RESERVED',scopeId:stableId}]};
+  },{sync:true});
+  const cancelReserved=(stableId,id,now)=>mutate(null,s=>{
+    const row=s.rows.find(r=>r.stableId===stableId);
+    if(!row||row.refresh?.intent?.id!==id||
+      row.refresh.intent.state!=='RESERVED')return fail('REFRESH_RESERVATION_NOT_CANCELABLE');
+    const out=structuredClone(s),r=out.rows.find(x=>x.stableId===stableId);
+    r.refresh.intent=null;r.refresh.state=r.refresh.suspended?
+      'VISIBILITY_SUSPENDED':r.refresh.lastSeenAt?'PRESENT':'UNOBSERVED';
+    r.refresh.nextAttemptAt=Math.max(r.refresh.nextAttemptAt,now+MINUTE);
+    return {ok:true,state:out,changes:[{code:'REFRESH_RESERVATION_ABORTED',scopeId:stableId}]};
+  },{sync:true});
+  const markDispatch=(claim,now)=>mutate(null,s=>{
+    const r=s.rows.find(x=>x.stableId===claim?.stableId);
+    if(!r||r.accountId!==claim.accountId||r.personaUid!==claim.personaUid||
+      r.bindingVersion!==claim.bindingVersion||r.releaseFingerprint!==claim.releaseFingerprint||
+      !r.ownerVerified||!r.releaseVerified||r.identityHeld||r.reviewHeld||
+      r.listing!=='PUBLIC'||s.accounts[r.accountId]?.principalFingerprint!==claim.principalFingerprint||
+      !r.slot||r.phase!=='ACTIVE'||rowBlocks(s,r).length)
+      return fail('REFRESH_CONTEXT_CHANGED');
+    const packet=dispatchPossible(r.refresh,claim.id,now);
+    if(!packet.ok)return packet;
+    const out=structuredClone(s);out.rows.find(x=>x.stableId===claim.stableId).refresh=packet.evidence;
+    return {ok:true,state:out,changes:[{code:'REFRESH_DISPATCH_POSSIBLE',scopeId:claim.stableId}]};
+  },{sync:true});
+  const settleAttempt=(stableId,id,receipt)=>mutate(null,s=>{
+    const r=s.rows.find(x=>x.stableId===stableId);
+    if(!r)return fail('REFRESH_TARGET_UNAVAILABLE');
+    const packet=reconcileRefreshAttempt(r.refresh,id,receipt);
+    if(!packet.ok)return packet;
+    const out=structuredClone(s),row=out.rows.find(x=>x.stableId===stableId);
+    row.refresh=packet.evidence;
+    if(packet.evidence.suspended&&row.slot){
+      row.slot=false;if(row.phase==='ACTIVE')row.phase='WAITING';
+    }
+    return {ok:true,state:out,proof:{effectVerified:packet.effectVerified,
+      feedState:packet.feedState},changes:[{code:packet.effectVerified?
+      'REFRESH_EFFECT_PROVEN':'REFRESH_EFFECT_HELD',scopeId:stableId}]};
+  },{sync:true});
   const resetRecentBackoff=(expectedRevision,now)=>mutate(expectedRevision,s=>{
     const out=structuredClone(s);out.recent.suspended=false;out.recent.failures=0;
     out.recent.nextDueAt=now+MINUTE;return {ok:true,state:out};
   });
-  return Object.freeze({read,list,turn,changePolicy,pause,generatorPolicy,demand,claim,complete,resetRecentBackoff});
+  return Object.freeze({read,list,turn,changePolicy,pause,generatorPolicy,demand,claim,complete,
+    reserveAttempt,cancelReserved,markDispatch,settleAttempt,resetRecentBackoff});
 }
