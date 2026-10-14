@@ -40,7 +40,7 @@ test('new PCMS actions remain disabled, without network or browser mutation APIs
   }
   assert.doesNotMatch(shell, /\b(?:browser|chrome|fetch|XMLHttpRequest|WebSocket|navigator\.sendBeacon)\s*\./);
   assert.match(html, /PersonaMonkey advanced controls/);
-  assert.match(html, /I06 · Local supply receipts · Provider writes HELD/);
+  assert.match(html, /I17 · Integration verification · Provider writes HELD/);
   assert.match(html, /Emergency redacted diagnostics/);
   assert.match(html, /id="pcms-enroll" disabled/);
   assert.match(html, /id="pcms-create-persona" disabled/);
