@@ -51,7 +51,9 @@ async function withProvider(t,config,work){
     else if(name==='getGeneratorPageData'){
       if(body.generatorName==='minimal')out={status:'success',generator:template};
       else if(owned.has(body.generatorName))
-        out={status:'success',generator:owned.get(body.generatorName)};
+        out={status:'success',generator:{...owned.get(body.generatorName),
+          ...(body.generatorName==='server-temp-slug'
+            ?config.tempReadbackExtras:config.finalReadbackExtras)}};
       else out={status:config.ambiguousAbsence?'unverified':'not-found'};
     }else if(name==='checkGeneratorOwnership')
       out={status:body.generatorName==='minimal'?'is-not-owner':
@@ -291,4 +293,56 @@ test('P56-06 X: alternate public/listed template metadata cannot override privat
     assert.equal(ledger.filter(x=>x.name==='save').length,1);
     assert.equal(ledger.find(x=>x.name==='save').body.generator.isPrivate,true);
   });
+});
+
+test('P56-06 X: native first save uses an explicit private/empty allowlist, never template metadata',async t=>{
+  await withProvider(t,{template:{
+    imports:[],collabEditModeIsEnabled:false,
+    customEditorState:{unsaved:'operator-owned'},privateNotes:'do not clone',
+    revisionToken:'a-previous-remote-version',arbitraryOwnerId:'other-owner'
+  }},async({ledger,fingerprint})=>{
+    const res=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
+    assert.equal(res.ok,true,res.code);
+    const saves=ledger.filter(x=>x.name==='save');
+    assert.equal(saves.length,1);
+    assert.deepEqual(Object.keys(saves[0].body.generator).sort(),[
+      'collabEditModeIsEnabled','imports','isPrivate','modelText','name',
+      'outputTemplate','srcManifest'].sort());
+    assert.deepEqual(saves[0].body.generator.imports,[]);
+    assert.equal(saves[0].body.generator.collabEditModeIsEnabled,false);
+    assert.equal(saves[0].body.generator.name,'minimal');
+  });
+});
+
+test('P56-06 X: imported template dependencies are rejected before any create effect',async t=>{
+  for(const template of [{imports:['upstream-plugin']},
+    {modelTextImports:['remote-generator']},
+    {imports:{'upstream-plugin':true}}]){
+    await withProvider(t,{template},async({ledger,fingerprint})=>{
+      const res=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
+      assert.equal(res.code,'TEMPLATE_SOURCE_UNVERIFIED');
+      assert.equal(ledger.filter(x=>x.name==='save').length,0);
+    });
+  }
+});
+
+test('P56-06 X: contradictory readback metadata blocks create proof and rename',async t=>{
+  for(const tempReadbackExtras of [{imports:['inherited-plugin']},
+    {modelTextImports:['unverified-import']},
+    {collabEditModeIsEnabled:true},{isListed:true},
+    {visibility:'public'},{privacy:'PUBLIC'}]){
+    await withProvider(t,{tempReadbackExtras},async({ledger,fingerprint})=>{
+      const create=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
+      assert.equal(create.ok,true,create.code);
+      const probe=await perchanceSupplyIsolated({...req,kind:'READ_CREATE',
+        principalFingerprint:fingerprint,temporarySlug:create.temporarySlug});
+      assert.equal(probe.code,'CREATE_READBACK_UNVERIFIED');
+      const rename=await perchanceSupplyIsolated({...req,kind:'RENAME',
+        principalFingerprint:fingerprint,temporarySlug:create.temporarySlug,
+        remoteId:'public_servernewpublic'});
+      assert.equal(rename.code,'TEMP_OWNER_UNVERIFIED');
+      assert.equal(ledger.filter(x=>x.name==='save').length,1);
+      assert.equal(ledger.filter(x=>x.name==='changeGeneratorName').length,0);
+    });
+  }
 });

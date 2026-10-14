@@ -65,10 +65,22 @@ export async function perchanceSupplyIsolated(request) {
           manifest.length===0:
           Object.getPrototypeOf(manifest)===Object.prototype&&
           Object.keys(manifest).length===0);
-      if(owner.status!=='is-owner'||page.status!=='success'||!page.generator||
-         page.generator.name!==name||page.generator.isPrivate!==true||
-         page.generator.modelText!==''||page.generator.outputTemplate!==''||
-         !manifestVerified)
+      // Readback must corroborate no inherited imports, collaboration or
+      // contradictory public-listing aliases, not only empty editors.
+      const g=page.generator;
+      const emptyImports=['imports','modelTextImports'].every(k=>
+        g?.[k]===undefined||(Array.isArray(g[k])&&g[k].length===0));
+      const privateAliases=['isPublic','isListed','listed','published',
+        'isPublished','showInRecent','isFeatured'].every(k=>
+        g?.[k]===undefined||g[k]===null||g[k]===false);
+      const privateMode=['visibility','privacy'].every(k=>
+        g?.[k]===undefined||g[k]===null||
+        g[k]==='private'||g[k]==='PRIVATE');
+      if(owner.status!=='is-owner'||page.status!=='success'||!g||
+         g.name!==name||g.isPrivate!==true||
+         g.modelText!==''||g.outputTemplate!==''||
+         !manifestVerified||!emptyImports||
+         g.collabEditModeIsEnabled===true||!privateAliases||!privateMode)
         return hold('PRIVATE_EMPTY_OWNER_UNVERIFIED');
       const publicId=page.generator.publicId;
       if(typeof publicId!=='string'||!safeId('public_'+publicId))
@@ -127,7 +139,8 @@ export async function perchanceSupplyIsolated(request) {
         (Object.getPrototypeOf(assets)===Object.prototype&&
           Object.keys(assets).length===0);
       const sourceFields=['html','pjs','src','scripts','files','javascript','js','source',
-        'sourceFiles','assets','generatorCode','css','script','styles','plugins'];
+        'sourceFiles','assets','generatorCode','css','script','styles','plugins',
+        'imports','modelTextImports'];
       if(!emptyAssets||sourceFields.some(k=>Object.hasOwn(original,k)&&
           original[k]!=null&&original[k]!==''&&
           (!Array.isArray(original[k])||original[k].length!==0)))
@@ -141,12 +154,17 @@ export async function perchanceSupplyIsolated(request) {
       if(visibilityFields.some(k=>Object.hasOwn(original,k)&&
           ![undefined,null,false,'','private','PRIVATE'].includes(original[k])))
         return hold('TEMPLATE_VISIBILITY_UNVERIFIED');
-      const {id,publicId,owner,ownerId,userId,createdAt,updatedAt,...safeTemplate}=original;
+      // Never forward arbitrary server-side template metadata. Only fields
+      // evidenced in F1's native save shape are admitted. A future provider
+      // schema change must be qualified independently before live activation.
+      // In particular, neither inherited imports nor collaboration state nor
+      // unknown template keys may cross into a new generator's first save.
+      const firstSave={
+        name:'minimal',isPrivate:true,collabEditModeIsEnabled:false,
+        imports:[],modelText:'',outputTemplate:'',srcManifest:[]
+      };
       // One provider request only, AFTER outer dispatcher journaling.
-      const result=await call('save',{generator:{
-        ...safeTemplate,name:'minimal',isPrivate:true,modelText:'',outputTemplate:'',
-        srcManifest:[]
-      },srcManifest:[]});
+      const result=await call('save',{generator:firstSave,srcManifest:[]});
       if(!sameSession())return hold('SESSION_CHANGED_AFTER_EFFECT');
       // A successful-looking ACK is not an independent readback. Never
       // accept a temporary identity that was already owned before dispatch,
