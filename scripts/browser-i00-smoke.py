@@ -633,6 +633,8 @@ def main():
                 unauthorized=inventory_command(after,{'type':'SYNC_ACCOUNT','params':{
                     'accountId':'fixture_account_a01','expectedRevision':2}})
                 assert unauthorized.get('code')=='ACCOUNT_IDENTITY_UNVERIFIED',unauthorized
+                rss_before=subprocess.run(['ps','-C','firefox','-o','rss=,time='],
+                    capture_output=True,text=True,timeout=5).stdout.strip().splitlines()[:24]
                 seeded=inventory_idb_probe(after)
                 assert seeded.get('enrolled') is True and seeded.get('verified') is True,seeded
                 assert seeded.get('accepted',{}).get('ok') is True,seeded
@@ -663,6 +665,12 @@ def main():
                     time.sleep(.15)
                 assert '51–100' in pagination,pagination
                 print('B I04_REAL_IDB_1250_FILTER_PAGINATION_OWNER_HOLD=PASS',flush=True)
+                rss_after=subprocess.run(['ps','-C','firefox','-o','rss=,time='],
+                    capture_output=True,text=True,timeout=5).stdout.strip().splitlines()[:24]
+                print('B I17_FIREFOX_PROCFS_MAIN_PROCESS_SAMPLE='+json.dumps({
+                    'before':rss_before,'after':rss_after,
+                    'units':'KiB_RSS_AND_CPU_TIME','scope':'FIREFOX_NAMED_PROCESSES_ONLY',
+                    'acceptance':'POINT_SAMPLES_NOT_PEAK_OR_SLO'}),flush=True)
 
                 # I17 UX-01 B: real packaged installed Firefox, actual local
                 # read-only ports and canonical entity identities. A result is
@@ -3068,6 +3076,23 @@ def main():
                 assert fleet.get('ok') and fleet.get('rows')==1250 and fleet.get('accounts')==50,fleet
                 assert fleet.get('mode')=='SHADOW_ONLY',fleet
                 print('B I17_FIREFOX_1250_LOCAL_FLEET_PROFILE='+json.dumps(fleet),flush=True)
+                envelope=execute(after,"""return Promise.allSettled([
+                  navigator.storage.estimate(),browser.tabs.query({})
+                ]).then(([q,t])=>{
+                  const quota=q.status==='fulfilled'?q.value:null;
+                  const tabs=t.status==='fulfilled'?t.value:null;
+                  return {quotaAvailable:Number.isFinite(quota?.quota)&&Number.isFinite(quota?.usage),
+                    quotaBytes:Number.isFinite(quota?.quota)?quota.quota:null,
+                    usageBytes:Number.isFinite(quota?.usage)?quota.usage:null,
+                    tabsAvailable:Array.isArray(tabs),openTabs:Array.isArray(tabs)?tabs.length:null};
+                })""")
+                if envelope.get('quotaAvailable'):
+                    assert 0<=envelope['usageBytes']<=envelope['quotaBytes'],envelope
+                if envelope.get('tabsAvailable'):
+                    assert envelope['openTabs']>=1,envelope
+                print('B I17_FIREFOX_IDB_QUOTA_TABS_SAMPLE='+json.dumps({
+                  **envelope,'scope':'INSTALLED_FIREFOX_PROFILE',
+                  'acceptance':'POINT_SAMPLE_ONLY_NO_PRODUCTION_SLO'}),flush=True)
                 # Ensure the form remains keyboard-addressable after real
                 # Firefox viewport reduction. Browser minimum window size is
                 # independently reported; never mislabel a larger viewport 320.
