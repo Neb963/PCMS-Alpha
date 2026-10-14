@@ -89,3 +89,11 @@ test('I17 installed Firefox B contains full-fleet sorted pagination oracle',asyn
   assert.match(browserHarness,/second_sort\.get\('first'\)=='gen-1199'/);
   assert.match(browserHarness,/bad_sort\.get\('code'\)=='INVALID_PARAMS'/);
 });
+
+test('I17 installed Firefox B denies disguised provider arms without side effects',async()=>{
+  const harness=await readFile('scripts/browser-i00-smoke.py','utf8');
+  assert.match(harness,/B I17_DISPOSABLE_ARM_REJECTS_NORMAL_SLUG_NO_PROVIDER_EFFECT=PASS/);
+  assert.match(harness,/normal_arm\.get\('code'\)=='PILOT_DISPOSABLE_SLUG_REQUIRED'/);
+  assert.match(harness,/malformed_arm\.get\('code'\)=='INVALID_PARAMS'/);
+  assert.match(harness,/still_frozen\.get\('batch'/);
+});

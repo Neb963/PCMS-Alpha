@@ -810,6 +810,22 @@ def main():
                 assert visible.get('freeze') is True,visible
                 persisted=supply_command(after,{'type':'LIST_BATCHES'})
                 assert persisted.get('ok') is True and len(persisted['batches'])==2,persisted
+                # I17 B: the real installed combined XPI accepts only exact
+                # disposable pilot names. An existing normal frozen slug must
+                # remain FROZEN without any remote dispatch or extra marker.
+                normal_arm=supply_command(after,{'type':'ARM_DISPOSABLE_TEST','params':{
+                    'batchId':'batch_browser_0001','itemId':'batch_browser_0001_000',
+                    'expectedRevision':1,'confirmation':'CREATE supply-test-one'}})
+                assert normal_arm.get('code')=='PILOT_DISPOSABLE_SLUG_REQUIRED',normal_arm
+                malformed_arm=supply_command(after,{'type':'ARM_DISPOSABLE_TEST','params':{
+                    'batchId':'batch_browser_0001','itemId':'batch_browser_0001_000',
+                    'expectedRevision':1,'confirmation':'CREATE supply-test-one',
+                    'arbitraryProviderUrl':'https://example.invalid'}})
+                assert malformed_arm.get('code')=='INVALID_PARAMS',malformed_arm
+                still_frozen=supply_command(after,{'type':'GET_BATCH','params':{
+                    'batchId':'batch_browser_0001'}})
+                assert still_frozen.get('batch',{}).get('items',[{}])[0].get('state')=='FROZEN',still_frozen
+                print('B I17_DISPOSABLE_ARM_REJECTS_NORMAL_SLUG_NO_PROVIDER_EFFECT=PASS',flush=True)
                 print('B I06_REAL_IDB_FROZEN_BATCH_COLLISION_HOLDS_ZERO_PROVIDER_EFFECTS=PASS',flush=True)
 
                 # The same packaged XPI's real canonical store also exercises
