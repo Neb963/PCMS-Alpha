@@ -396,3 +396,70 @@ test('P55-08 X: guarded per-Persona created IDs persist and duplicate receipt is
   assert.equal(observed.groups['donor-personas'].status,'OBSERVED');
   assert.equal((await fresh.inspect()).controller,'INACTIVE');
 });
+
+test('P55-08 X: every restore group crash cut is independently observed, never replayed',async()=>{
+  const {createRestoreStageEngine}=await import('../src/ui/restore-stage.mjs');
+  const {RESTORE_GROUPS}=await import('../src/ui/restore-core.mjs');
+  const digest='c'.repeat(64),fingerprint='d'.repeat(64);
+  for(const target of RESTORE_GROUPS){
+    const store=storage(),gate=createRestoreGate(store,{uuid:()=>('a'.repeat(32))});
+    let row=await gate.begin({planSha256:digest,archiveSha256:digest,
+      destinationSha256:digest,checkpointSha256:digest,
+      reviewedPlanSha256:digest,checkpointTier:3});
+    for(const group of RESTORE_GROUPS){
+      if(group===target)break;
+      row=await gate.advance({epoch:row.epoch,revision:row.revision,
+        group,step:group,status:'BEFORE_DISPATCH',fingerprint});
+      row=await gate.advance({epoch:row.epoch,revision:row.revision,
+        group,step:group,status:'DISPATCH_POSSIBLE'});
+      row=await gate.advance({epoch:row.epoch,revision:row.revision,
+        group,step:group,status:'OBSERVED',fingerprint,
+        observation:{source:'INDEPENDENT_READBACK',digest:fingerprint}});
+    }
+    let effects=0,visible=false;
+    const runner=createRestoreStageEngine(gate,{
+      dispatch:async()=>{
+        assert.equal((await gate.read()).groups[target].status,'DISPATCH_POSSIBLE');
+        effects++;throw Error('RESPONSE_LOST_AFTER_EFFECT');
+      },
+      readback:async()=>({source:'INDEPENDENT_READBACK',
+        digest:visible?fingerprint:'0'.repeat(64)})
+    });
+    row=await runner.execute({epoch:row.epoch,revision:row.revision,
+      group:target,step:target,fingerprint});
+    assert.equal(row.groups[target].status,'HELD_UNCERTAIN',target);
+    assert.equal(effects,1,target);
+    const restarted=createRestoreGate(store);
+    await assert.rejects(()=>createRestoreStageEngine(restarted,{
+      dispatch:async()=>{effects++;},
+      readback:async()=>({source:'INDEPENDENT_READBACK',digest:fingerprint})
+    }).execute({epoch:row.epoch,revision:row.revision,
+      group:target,step:target,fingerprint}),/RESTORE_GROUP_ALREADY_STARTED/);
+    visible=true;
+    const recovered=await createRestoreStageEngine(restarted,{
+      dispatch:async()=>{effects++;throw Error('FORBIDDEN_RETRY');},
+      readback:async()=>({source:'INDEPENDENT_READBACK',digest:fingerprint})
+    }).reconcile({epoch:row.epoch,revision:row.revision,group:target,
+      step:target,fingerprint});
+    assert.equal(recovered.groups[target].status,'OBSERVED');
+    assert.equal(effects,1,'no duplicate effect for '+target);
+    assert.equal((await restarted.inspect()).activation,'OFF');
+  }
+});
+test('P55-08 X: crash after PREPARED but before DISPATCH cannot resume blindly',async()=>{
+  const store=storage(),h='f'.repeat(64),g=createRestoreGate(store,{
+    uuid:()=>('b'.repeat(32))});
+  const r=await g.begin({planSha256:h,archiveSha256:h,destinationSha256:h,
+    checkpointSha256:h,reviewedPlanSha256:h,checkpointTier:3});
+  const prepared=await g.advance({epoch:r.epoch,revision:r.revision,
+    group:'donor-personas',step:'donor-personas',status:'BEFORE_DISPATCH',fingerprint:h});
+  let effects=0;
+  const runner=(await import('../src/ui/restore-stage.mjs')).createRestoreStageEngine(
+    createRestoreGate(store),{dispatch:async()=>effects++,
+      readback:async()=>({source:'INDEPENDENT_READBACK',digest:h})});
+  await assert.rejects(()=>runner.execute({epoch:r.epoch,
+    revision:prepared.revision,group:'donor-personas',
+    step:'donor-personas',fingerprint:h}),/RESTORE_GROUP_ALREADY_STARTED/);
+  assert.equal(effects,0);
+  assert.equal((await g.inspect()).held,true);
+});
