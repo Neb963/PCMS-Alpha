@@ -10,7 +10,10 @@ function request(portName,type,params){
   return new Promise((resolve,reject)=>{
     const port=browser.runtime.connect({name:portName});
     let completed=false;
-    const timeout=setTimeout(()=>finish(null,Error('TIMEOUT')),6500);
+    // A guarded remote create/rename may take several bounded independent
+    // provider observations. Timeout does not authorize a second dispatch.
+    const timeout=setTimeout(()=>finish(null,Error('TIMEOUT')),
+      type==='EXECUTE_ITEM'?75000:6500);
     function finish(out,err){
       if(completed)return;completed=true;clearTimeout(timeout);
       try{port.disconnect();}catch{}
@@ -63,12 +66,47 @@ function drawQueue(result){
     const counts=Object.create(null);
     for(const item of batch.items)counts[item.state]=(counts[item.state]||0)+1;
     summary.textContent=Object.entries(counts).map(([k,v])=>k+': '+v).join(' · ')+
-      ' · Provider effects not activated';
+      (result.activation==='HELD'?' · Remote actions held':' · Read canonical receipts');
     const list=document.createElement('ul');
     for(const item of batch.items){
       const li=document.createElement('li');
       li.textContent=item.slug+' — '+item.state+(item.reason?' ('+item.reason+')':'')+
         ' · '+item.source;
+      // Explicit single-item operator dispatch. No batch-run or automatic
+      // retry. The protected donor, current owner/route and durable
+      // DISPATCH_POSSIBLE marker are independently enforced by Core.
+      if(['FROZEN','CREATE_CONFIRMED'].includes(item.state)){
+        const isCreate=item.state==='FROZEN';
+        const action=document.createElement('button');
+        action.type='button';action.className='pcms-supply-guarded-step';
+        action.textContent=isCreate?'Create private generator':'Rename to reserved slug';
+        action.setAttribute('aria-label',(isCreate?'Create private generator for ':'Rename private generator to ')+item.slug);
+        action.addEventListener('click',async()=>{
+          const prompt=isCreate?
+            'Attempt one guarded private/empty create for '+item.slug+'?':
+            'Attempt one guarded rename to '+item.slug+'?';
+          if(!window.confirm(prompt+' A lost reply requires read-only reconciliation; never repeat blindly.'))return;
+          action.disabled=true;action.textContent='Checking guarded operation…';
+          try{
+            const out=await supply('EXECUTE_ITEM',{
+              batchId:batch.batchId,itemId:item.itemId,expectedRevision:item.revision});
+            const status=document.createElement('span');
+            status.textContent=out?.ok?
+              ' Canonical receipt saved. Inspect current item state before the next action.':
+              ' Held: '+(out?.code||'OUTCOME_UNVERIFIED')+
+                '. Inspect receipts; do not blindly retry.';
+            li.append(status);
+          }catch{
+            const status=document.createElement('span');
+            status.textContent=' No confirmed reply. The effect may have reached the provider. Re-read canonical receipts; no retry.';
+            li.append(status);
+          }finally{
+            action.disabled=false;action.textContent=isCreate?'Create private generator':'Rename to reserved slug';
+            await fetchBatches();
+          }
+        });
+        li.append(document.createTextNode(' '),action);
+      }
       if(['CREATE_UNCERTAIN','RENAME_UNCERTAIN',
           'CREATE_DISPATCH_POSSIBLE','RENAME_DISPATCH_POSSIBLE'].includes(item.state)){
         const action=document.createElement('button');
