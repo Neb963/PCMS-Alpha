@@ -489,7 +489,7 @@ attachPcmsGuard({
 function localMutationFence(profileIds, operation, mode = "block", options = {}) {`,
     'donor guard host');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
-    '\nattachPcmsBackupDonor({ snapshot: () => getSnapshot(), cookies: id => cookieService.list(id) });\nattachPcmsRestoreDonor({
+    `\nattachPcmsBackupDonor({ snapshot: () => getSnapshot(), cookies: id => cookieService.list(id) });\nattachPcmsRestoreDonor({
   snapshot:()=>getSnapshot(),
   cookies:id=>cookieService.list(id),
   containers:()=>personaManager.listContainers(),
@@ -522,7 +522,8 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
       targetUid:imported.maps.personaUid.get(p.key)||null,
       sourceId:p.sourceId||null,
       containerId:bindings.get(p.key)})),
-      cookieMap:Object.fromEntries([...imported.maps.profile]),\n      scriptMap:Object.fromEntries([...imported.maps.script])};
+      cookieMap:Object.fromEntries([...imported.maps.profile]),
+      scriptMap:Object.fromEntries([...imported.maps.script])};
   },
   commit:async candidate=>localMutationFence(allPersonaUids,async()=>{
     const preview=await stateManager.previewState(candidate,{requireMetadata:true});
@@ -532,7 +533,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   }),
   importCookies:async (id,rows)=>localMutationFence(id,()=>cookieService.importRecords(id,rows,'merge'))
 });
-\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
+\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {`,
     'I15 donor backup read seam');
   await writeFile(bgPath, bg);
   for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'adoption-boundary.mjs',
