@@ -708,6 +708,23 @@ def main():
                     time.sleep(.12)
                 assert focussed=='fixture_inventory_01',focussed
                 print('B I17_LOCAL_ACCOUNT_GENERATOR_SEARCH_CANONICAL_NAVIGATION=PASS',flush=True)
+                # P56-05 B: late local search must not reopen a dismissed
+                # panel or navigate to an invented generator while unresolved.
+                search_dismiss=execute(after,"""const box=document.getElementById('pcms-quick-generator-search');
+                  box.value='unknown-not-a-generator-123';
+                  box.dispatchEvent(new Event('input',{bubbles:true}));
+                  const before=location.hash;
+                  box.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+                  const afterEnter=location.hash;
+                  box.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+                  return {before,afterEnter,hidden:document.getElementById('pcms-global-results').hidden};""")
+                assert search_dismiss.get('before')==search_dismiss.get('afterEnter'),search_dismiss
+                assert search_dismiss.get('hidden'),search_dismiss
+                time.sleep(.55)
+                search_post=execute(after,"return {hash:location.hash,hidden:document.getElementById('pcms-global-results').hidden}")
+                assert search_post.get('hidden') and search_post.get('hash')==search_dismiss['before'],search_post
+                print('B I17_SEARCH_DISMISS_AND_NO_GUESSED_TARGET=PASS',flush=True)
+
 
 
                 # I06 actual installed Firefox IndexedDB and extension port

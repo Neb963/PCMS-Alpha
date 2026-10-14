@@ -3,7 +3,10 @@
 import {validSearchQuery,localSearchResults} from './global-search-core.mjs';
 const field=document.getElementById('pcms-quick-generator-search');
 const panel=document.getElementById('pcms-global-results');
-let epoch=0,inflight=false,needNew=false,last=[],delay=0,available=true;
+let epoch=0,inflight=false,needNew=false,last=[],delay=0,available=true,dismissed=false;
+function dismiss(){
+  dismissed=true;epoch++;clearTimeout(delay);needNew=false;last=[];hide();
+}
 function hide(){
   panel.hidden=true;
   field.setAttribute('aria-expanded','false');
@@ -28,7 +31,7 @@ function queryPort(name,type,params={}){
   });
 }
 function navigate(item){
-  hide();field.value=item.key;
+  dismiss();field.value=item.key;
   if(item.kind==='generator'){
     window.dispatchEvent(new CustomEvent('pcms-global-generator-target',{detail:{slug:item.key}}));
   }else{
@@ -69,7 +72,7 @@ async function refresh(){
     do{
       needNew=false;
       const id=epoch,q=validSearchQuery(field.value);
-      if(q.length<2){hide();last=[];break;}
+      if(q.length<2||dismissed){hide();last=[];break;}
       // Each canonical authority is independent: one degraded read must not
       // erase a healthy result from the other. Partial stays explicitly marked.
       const [i,a]=await Promise.allSettled([
@@ -79,7 +82,8 @@ async function refresh(){
       const inventory=i.status==='fulfilled'&&i.value?.ok===true?i.value:null;
       const accounts=a.status==='fulfilled'&&a.value?.ok===true?a.value:null;
       available=!!inventory||!!accounts;
-      if(id!==epoch){needNew=true;continue;}
+      if(id!==epoch){needNew=!dismissed;continue;}
+      if(dismissed)break;
       const projected=localSearchResults(q,inventory?.items||[],
         accounts?.accounts||[],{inventoryPartial:!inventory||inventory.total>10||inventory.truncated===true,
           accountsPartial:!accounts||accounts.truncated===true});
@@ -90,12 +94,12 @@ async function refresh(){
 field.addEventListener('input',()=>{
   // Invalidate displayed results immediately. Enter must never navigate to a
   // prior query's entity while a new local-only lookup is pending.
-  epoch++;clearTimeout(delay);hide();last=[];
+  dismissed=false;epoch++;clearTimeout(delay);hide();last=[];
   if(validSearchQuery(field.value).length<2)return;
   delay=setTimeout(()=>{void refresh();},160);
 });
 field.addEventListener('keydown',event=>{
-  if(event.key==='Escape'){event.preventDefault();epoch++;hide();field.blur();return;}
+  if(event.key==='Escape'){event.preventDefault();dismiss();field.blur();return;}
   if(event.key==='ArrowDown'&&!panel.hidden){
     const first=panel.querySelector('button');
     if(first){event.preventDefault();first.focus();}
@@ -104,24 +108,25 @@ field.addEventListener('keydown',event=>{
   if(event.key==='Enter'){
     event.preventDefault();
     if(last.length&&!panel.hidden){navigate(last[0]);return;}
-    const q=validSearchQuery(field.value);
-    if(q.length>1)
-      window.dispatchEvent(new CustomEvent('pcms-global-generator-target',{detail:{slug:q}}));
-    hide();
+    // Never guess that an unresolved cross-entity query is a generator.
+    // Wait for a canonical local result; unsupported/absent stays unknown.
+    if(validSearchQuery(field.value).length>1){dismissed=false;void refresh();}
   }
 });
 panel.addEventListener('keydown',event=>{
   const buttons=[...panel.querySelectorAll('button')],idx=buttons.indexOf(document.activeElement);
-  if(event.key==='Escape'){event.preventDefault();hide();field.focus();return;}
+  if(event.key==='Escape'){event.preventDefault();dismiss();field.focus();return;}
   if(event.key==='ArrowDown'&&idx>=0){event.preventDefault();buttons[Math.min(idx+1,buttons.length-1)]?.focus();}
   if(event.key==='ArrowUp'&&idx>=0){event.preventDefault();idx>0?buttons[idx-1]?.focus():field.focus();}
 });
-field.addEventListener('focus',()=>{if(validSearchQuery(field.value).length>1){void refresh();}});
+field.addEventListener('focus',()=>{
+  if(!dismissed&&validSearchQuery(field.value).length>1)void refresh();
+});
 document.addEventListener('pointerdown',event=>{
-  if(!panel.contains(event.target)&&event.target!==field)hide();
+  if(!panel.contains(event.target)&&event.target!==field)dismiss();
 });
 document.addEventListener('keydown',event=>{
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){
-    event.preventDefault();field.focus();field.select();
+    event.preventDefault();dismissed=false;field.focus();field.select();
   }
 });
