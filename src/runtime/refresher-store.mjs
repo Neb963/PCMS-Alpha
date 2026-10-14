@@ -300,6 +300,16 @@ export function createRefresherStore(db){
       releaseFingerprint:r.releaseFingerprint},
       changes:[{code:'REFRESH_RESERVED',scopeId:stableId}]};
   },{sync:true});
+  const cancelReserved=(stableId,id,now)=>mutate(null,s=>{
+    const row=s.rows.find(r=>r.stableId===stableId);
+    if(!row||row.refresh?.intent?.id!==id||
+      row.refresh.intent.state!=='RESERVED')return fail('REFRESH_RESERVATION_NOT_CANCELABLE');
+    const out=structuredClone(s),r=out.rows.find(x=>x.stableId===stableId);
+    r.refresh.intent=null;r.refresh.state=r.refresh.suspended?
+      'VISIBILITY_SUSPENDED':r.refresh.lastSeenAt?'PRESENT':'UNOBSERVED';
+    r.refresh.nextAttemptAt=Math.max(r.refresh.nextAttemptAt,now+MINUTE);
+    return {ok:true,state:out,changes:[{code:'REFRESH_RESERVATION_ABORTED',scopeId:stableId}]};
+  },{sync:true});
   const markDispatch=(claim,now)=>mutate(null,s=>{
     const r=s.rows.find(x=>x.stableId===claim?.stableId);
     if(!r||r.accountId!==claim.accountId||r.personaUid!==claim.personaUid||
@@ -332,5 +342,5 @@ export function createRefresherStore(db){
     out.recent.nextDueAt=now+MINUTE;return {ok:true,state:out};
   });
   return Object.freeze({read,list,turn,changePolicy,pause,generatorPolicy,demand,claim,complete,
-    reserveAttempt,markDispatch,settleAttempt,resetRecentBackoff});
+    reserveAttempt,cancelReserved,markDispatch,settleAttempt,resetRecentBackoff});
 }

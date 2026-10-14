@@ -174,6 +174,14 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     const snapshot=await s.read();if(!snapshot.ok)return 'CANONICAL_UNAVAILABLE';
     // Reconcile a possibly-dispatched effect by independent READBACK ONLY.
     // A cold wake or lost response must never invoke execute a second time.
+    const reserved=snapshot.state.rows.find(r=>r.refresh?.intent?.state==='RESERVED'&&
+      clock()-r.refresh.intent.at>=MINUTE);
+    if(reserved){
+      // A RESERVED transaction has not crossed DISPATCH_POSSIBLE. A fresh
+      // canonical read may clear it after cooldown, without touching provider.
+      const done=await s.cancelReserved(reserved.stableId,reserved.refresh.intent.id,clock());
+      return done.ok?'STALE_RESERVATION_ABORTED':done.code;
+    }
     const uncertain=snapshot.state.rows.find(r=>r.refresh?.intent?.state==='DISPATCH_POSSIBLE'&&
       (r.refresh.probes||0)<3&&(r.refresh.nextAttemptAt||0)<=clock());
     if(uncertain){
@@ -225,8 +233,10 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     if((await sentinel.inspect()).held||!refreshGate())return 'REFRESH_RESERVED_HELD';
     const second=await g.getSafeRouteReadiness(row.personaUid);
     if(!second?.ready||first.cookieStoreId!==second.cookieStoreId||
-      first.routeId!==second.routeId||first.healthDomain!==second.healthDomain)
+      first.routeId!==second.routeId||first.healthDomain!==second.healthDomain){
+      await s.cancelReserved(claim.stableId,claim.id,clock());
       return 'REFRESH_ROUTE_CHANGED';
+    }
     const possible=await s.markDispatch(claim,clock());
     if(!possible.ok)return possible.code;
     let receipt={at:clock(),kind:'UNKNOWN',sourceFingerprint:null,

@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import {createRefresherBoundary,validateRefresherMessage} from '../src/runtime/refresher-boundary.mjs';
 
 const H='a'.repeat(64),events=[];
-function fixture({gate=false,changeRoute=false,lostReadback=false,uncertain=false}={}){
+function fixture({gate=false,changeRoute=false,lostReadback=false,uncertain=false,reserved=false}={}){
   const history=[],row={stableId:'target_01',slug:'fixture-generator',accountId:'account_01',
     personaUid:'persona_01',bindingVersion:1,remoteId:'remote_01',slot:true,
     phase:'ACTIVE',ownerVerified:true,releaseVerified:true,releaseFingerprint:H,
     listing:'PUBLIC',identityHeld:false,reviewHeld:false,
-    refresh:{intent:uncertain?{state:'DISPATCH_POSSIBLE',id:'attempt_01',sourceFingerprint:H}:null,
+    refresh:{intent:uncertain?{state:'DISPATCH_POSSIBLE',id:'attempt_01',sourceFingerprint:H}:
+      reserved?{state:'RESERVED',id:'attempt_01',at:1000,sourceFingerprint:H}:null,
       suspended:uncertain,nextAttemptAt:0,probes:uncertain?1:0},metrics:{nextDueAt:999999999}};
   const state={rows:[row],accounts:{account_01:{verifiedIdentity:true,principalFingerprint:H}},
     recent:{nextDueAt:999999999,suspended:false}};
@@ -18,6 +19,7 @@ function fixture({gate=false,changeRoute=false,lostReadback=false,uncertain=fals
     reserveAttempt:async()=>{history.push('reserve');return {ok:true,claim:{
       stableId:'target_01',slug:row.slug,id:'attempt_01',accountId:row.accountId,
       personaUid:row.personaUid,bindingVersion:1,principalFingerprint:H,releaseFingerprint:H}};},
+    cancelReserved:async()=>{history.push('cancel');return {ok:true};},
     markDispatch:async()=>{history.push('dispatch');return {ok:true};},
     settleAttempt:async(_stable,_id,receipt)=>{history.push('settle');return {
       ok:true,proof:{effectVerified:receipt.kind==='EFFECT_CHANGED'&&receipt.targetMatched}};}
@@ -60,7 +62,7 @@ test('P54-05 F: synthetic guarded lane journals before effect, then independentl
 test('P54-05 / S6-I14-BOUND-RETRY X: changed protected route cancels before any dispatch',async()=>{
   const f=fixture({gate:true,changeRoute:true});const result=await f.boundary.tick();
   assert.equal(result.refresh,'REFRESH_ROUTE_CHANGED');
-  assert.deepEqual(f.history,['reserve']);
+  assert.deepEqual(f.history,['reserve','cancel']);
 });
 test('P54-05 X: lost response after dispatch never causes duplicate provider execute',async()=>{
   const f=fixture({gate:true,lostReadback:true});const result=await f.boundary.tick();
@@ -85,4 +87,11 @@ test('P54-05 X: lost reconciliation readback is held, never repeated as mutation
   const result=await f.boundary.tick();
   assert.equal(result.refresh,'REFRESH_READBACK_HELD');
   assert.deepEqual(f.history,['readback','settle']);
+});
+
+test('P54-05 X: stale un-dispatched reservation can be canceled without any remote read/write',async()=>{
+  const f=fixture({gate:true,reserved:true});
+  const result=await f.boundary.tick();
+  assert.equal(result.refresh,'STALE_RESERVATION_ABORTED');
+  assert.deepEqual(f.history,['cancel']);
 });
