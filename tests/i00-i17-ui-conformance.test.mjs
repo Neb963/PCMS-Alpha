@@ -169,3 +169,14 @@ test('I17 packaged Firefox B refuses premature Git write and readback for frozen
   assert.match(harness,/frozen_git_arm\.get\('code'\)=='NOT_ADMISSIBLE'/);
   assert.match(harness,/frozen_git_read\.get\('code'\)=='NOT_ADMISSIBLE'/);
 });
+
+test('I17 operator native AI asks for exact disposable step instead of implying general capability',async()=>{
+  const boundary=await readFile('src/runtime/ai-boundary.mjs','utf8');
+  const aiView=await readFile('src/ui/ai-view.mjs','utf8');
+  assert.match(boundary,/ARM_DISPOSABLE_AI/);
+  assert.match(boundary,/pilotClock\(\)\+120000/);
+  assert.match(boundary,/if\(pilotMatches\(ctx\)\)pilotArm=null/);
+  assert.match(aiView,/window\.prompt\('Type '/);
+  assert.match(aiView,/await ai\('ARM_DISPOSABLE_AI'/);
+  assert.match(aiView,/testSlug\.test\(name\)/);
+});

@@ -14,6 +14,7 @@ const runNative=id('pcms-ai-run'),observeNative=id('pcms-ai-observe'),
   testNative=id('pcms-ai-test'),repairNative=id('pcms-ai-repair'),
   resetNative=id('pcms-ai-newchat'),chat2Native=id('pcms-ai-chat2');
 let current=null,concurrency=null,busy=false,queueSeq=0,selectedJob=null;
+const testSlug=/^pcms-test-[a-z0-9-]{8,88}$/;
 function request(portName,type,params={}){
   return new Promise((resolve,reject)=>{
     const port=browser.runtime.connect({name:portName});let ended=false;
@@ -35,11 +36,11 @@ function controls(){
   importButton.disabled=busy||!current?.ok;
   exportButton.disabled=busy;
   refresh.disabled=busy;
-  const selected=selectedJob?.ok===true;
-  runNative.disabled=busy||!selected||selectedJob.state!=='PENDING_NATIVE_SESSION';
+  const selected=selectedJob?.ok===true,eligible=selected&&testSlug.test(selectedJob.slug);
+  runNative.disabled=busy||!eligible||selectedJob.state!=='PENDING_NATIVE_SESSION';
   opfsNative.disabled=busy||!selected||selectedJob.nativeState!=='CHAT2_OBSERVED_IDLE'||
     selectedJob.chat2IsolationVerified===true;
-  freshNative.disabled=busy||!selected||
+  freshNative.disabled=busy||!eligible||
     selectedJob.nativeState!=='CHAT2_OBSERVED_IDLE'||
     selectedJob.chat2IsolationVerified===true;
   advanceNative.disabled=busy||!selected||selectedJob.slotReleased===true||
@@ -47,13 +48,13 @@ function controls(){
   observeNative.disabled=busy||!selected||
     !['HELD_RECONCILE','TESTS_UNVERIFIED','KNOWN_FAILURE'].includes(selectedJob.state);
   testNative.disabled=busy||!selected||selectedJob.state!=='TESTS_UNVERIFIED';
-  repairNative.disabled=busy||!selected||selectedJob.state!=='KNOWN_FAILURE'||!
+  repairNative.disabled=busy||!eligible||selectedJob.state!=='KNOWN_FAILURE'||!
     ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(selectedJob.nativeState)||
     (selectedJob.nativeState==='CHAT2_OBSERVED_IDLE'&&
      selectedJob.chat2IsolationVerified!==true);
-  resetNative.disabled=busy||!selected||
+  resetNative.disabled=busy||!eligible||
     selectedJob.evidence?.chat1Pass!==true;
-  chat2Native.disabled=busy||!selected||
+  chat2Native.disabled=busy||!eligible||
     selectedJob.optionalTestingSha===null;
   prepare.disabled=busy||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug.value)||
     token.value.length<10;
@@ -115,7 +116,7 @@ async function refreshJobs(){
     if(own!==queueSeq)return;
     jobList.replaceChildren();
     if(!data?.ok){jobStatus.textContent=data?.code||'AI_JOBS_UNAVAILABLE';return;}
-    if(!data.jobs.length){jobStatus.textContent='No jobs prepared. Native AI execution remains held.';return;}
+    if(!data.jobs.length){jobStatus.textContent='No jobs prepared. Native AI requires explicit disposable-test authorization.';return;}
     const ul=document.createElement('ul');
     for(const j of data.jobs){
       const li=document.createElement('li');
@@ -124,7 +125,8 @@ async function refreshJobs(){
       choose.addEventListener('click',()=>{
         selectedJob=j;slug.value=j.slug;controls();
         jobStatus.textContent=j.slug+' selected · '+j.state+
-          ' · native AI activation remains separately gated.';
+          (testSlug.test(j.slug)?' · authorize each native step separately.':
+            ' · native execution held for non-disposable targets.');
       });
       li.append(choose,document.createTextNode(' '));
       const label=document.createElement('span');
@@ -156,13 +158,33 @@ async function prepareJob(){
     });
     if(!result?.ok){jobStatus.textContent=(result?.code||'AI_JOB_UNVERIFIED')+
       ' · held; no AI provider action';return;}
-    jobStatus.textContent='Job prepared against exact saved source. Native AI execution/test oracle NOT VERIFIED; provider activation OFF.';
+    jobStatus.textContent='Job prepared against exact saved source. Select it to authorize individual AI steps. No tests proven yet.';
   }catch{jobStatus.textContent='Unknown preparation outcome; refresh canonical receipts before trying again.';}
   finally{busy=false;controls();await refreshJobs();}
 }
 async function nativeCommand(type,step){
   if(busy||!selectedJob?.ok)return;
   const name=selectedJob.slug,revision=selectedJob.revision;
+  const armStep=type==='BEGIN_NATIVE'?step:
+    type==='VERIFY_FRESH_CHAT2'?'READ_ONLY_HISTORY':null;
+  if(armStep){
+    if(!testSlug.test(name)){
+      jobStatus.textContent='Live native AI testing requires a disposable pcms-test- generator.';return;
+    }
+    const required=armStep+' '+name;
+    const confirmation=window.prompt('Type '+required+
+      ' to authorize ONE guarded AI step. If the acknowledgment is lost, reconcile; never blindly repeat:','');
+    if(confirmation===null)return;
+    if(confirmation!==required){jobStatus.textContent='Confirmation mismatch. Nothing sent.';return;}
+    busy=true;controls();
+    try{
+      const armed=await ai('ARM_DISPOSABLE_AI',{
+        slug:name,expectedRevision:revision,step:armStep,confirmation});
+      if(!armed?.ok){jobStatus.textContent='AI authorization held: '+
+        (armed?.code||'CONTEXT_UNVERIFIED');return;}
+    }catch{jobStatus.textContent='AI arm reply unknown; no native step submitted. Inspect job.';return;}
+    finally{busy=false;controls();}
+  }
   busy=true;controls();
   jobStatus.textContent=type==='PROBE_NATIVE'?
     'Observing native session without retry and checking saved source bytes…':

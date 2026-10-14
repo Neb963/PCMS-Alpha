@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createAiBoundary} from '../src/runtime/ai-boundary.mjs';
+import {createAiBoundary,validateAiMessage} from '../src/runtime/ai-boundary.mjs';
 const slug='two-private',nonce='f'.repeat(32),sid='2'.repeat(64),one='1'.repeat(64);
 const H='a'.repeat(64);
 const api={runtime:{id:'fixture-extension',getURL:p=>'moz-extension://fixture/'+p},
@@ -77,4 +77,25 @@ test('P52-06 X missing activation, OPFS, server history, stage or route cannot m
    assert.deepEqual(p.calls,steps,JSON.stringify(options));
    assert.equal(p.writes.length,0);
  }
+});
+
+test('I17 F/X: disposable native AI refuses non-disposable job without querying canonical state',async()=>{
+  const service=createAiBoundary(api,{open:async()=>({}),
+    storeFactory:()=>({getJobFull:async()=>{throw Error('MUST_NOT_READ_JOB')}})});
+  const result=await service.run({type:'ARM_DISPOSABLE_AI',
+    params:{slug,expectedRevision:12,step:'CHAT1_SEND',
+      confirmation:'CHAT1_SEND '+slug}},sender);
+  assert.equal(result.code,'PILOT_DISPOSABLE_SLUG_REQUIRED');
+});
+test('I17 X: forged AI step, extra privilege and web sender denied',()=>{
+  const name='pcms-test-disposable-native-0001';
+  for(const bad of [
+    {slug:name,expectedRevision:1,step:'AUTOMATION',confirmation:'AUTOMATION '+name},
+    {slug:name,expectedRevision:1,step:'CHAT1_SEND',
+      confirmation:'CHAT1_SEND '+name,allowDirtyEditor:true}
+  ])assert.equal(validateAiMessage(api,sender,
+    {type:'ARM_DISPOSABLE_AI',params:bad}).code,'INVALID_PARAMS');
+  assert.equal(validateAiMessage(api,{...sender,url:'https://evil.invalid'},
+    {type:'ARM_DISPOSABLE_AI',params:{slug:name,expectedRevision:1,
+      step:'CHAT1_SEND',confirmation:'CHAT1_SEND '+name}}).code,'UNTRUSTED_SENDER');
 });
