@@ -204,3 +204,77 @@ test('P55-07 UX-08: unresolved and Direct source preview discloses review flags 
     plan:{archiveSha256:'b'.repeat(64),fresh:false,groups:missing}},
     {verified:true,tier:3}).code,'RESTORE_MAPPING_OR_ROUTE_REVIEW_REQUIRED');
 });
+
+test('P55-09 X: imported accounts are rebound without carrying session or release approval',async()=>{
+  const {prepareRestoredCanonical}=await import('../src/ui/restore-sanitize.mjs');
+  const imported=empty(),current=empty(),oldUid='11111111-1111-4111-8111-111111111111',
+    newUid='22222222-2222-4222-8222-222222222222';
+  imported.stores.meta.push(
+    {key:'account:restored-a',value:serializeClone({key:'account:restored-a',
+      account:{accountId:'restored-a',personaUid:oldUid,state:'VERIFIED',
+        identity:{principalFingerprint:'a'.repeat(64)},revision:2}})},
+    {key:'release:test',value:serializeClone({key:'release:test',
+      release:{state:'APPROVED',approval:{canPublish:true},
+        dispatchPossible:false,source:'historical'}})},
+    {key:'refresher:shadow:v1',value:serializeClone({key:'refresher:shadow:v1',
+      state:{globalPause:false,rows:[{paused:false}],accounts:{x:{paused:false}},
+        inflight:[{id:'historic'}]}})},
+    {key:'backup:auto-state',value:serializeClone({key:'backup:auto-state',
+      state:{enabled:true,active:{runId:'auto_fake'},status:'ACTIVE'}}),
+    {key:'writeback-settings',value:serializeClone({key:'writeback-settings',
+      setting:{revision:8,autoEnabled:true}})}
+  );
+  imported.stores.entities.push({key:'generator-1',value:serializeClone({
+    id:'generator-1',revision:7,activeOperationId:'pending-operation'})});
+  imported.stores.operations.push({key:'pending-operation',value:serializeClone({
+    operationId:'pending-operation',status:'DISPATCH_POSSIBLE',revision:2})});
+  const prepared=prepareRestoredCanonical({incoming:imported,current,mode:'replace',
+    uidRemap:{[oldUid]:newUid}});
+  const meta=Object.fromEntries(prepared.stores.meta.map(x=>[x.key,x.value]));
+  assert.equal(meta['account:restored-a'].account.personaUid,newUid);
+  assert.equal(meta['account:restored-a'].account.identity,null);
+  assert.equal(meta['account:restored-a'].account.state,'VERIFICATION_PENDING');
+  assert.equal(meta['release:test'].release.state,'RESTORE_REVIEW_REQUIRED');
+  assert.equal(meta['release:test'].release.approval,null);
+  assert.equal(meta['refresher:shadow:v1'].state.globalPause,true);
+  assert.equal(meta['refresher:shadow:v1'].state.inflight.length,0);
+  assert.equal(meta['backup:auto-state'].state.enabled,false);
+  assert.equal(meta['writeback-settings'].setting.autoEnabled,false);
+  assert.equal(prepared.stores.entities[0].value.activeOperationId,null);
+  assert.equal(prepared.stores.operations[0].value.status,'HELD_UNCERTAIN');
+  await assert.rejects(async()=>prepareRestoredCanonical({
+    incoming:imported,current,mode:'replace',uidRemap:{}}),/RESTORE_UID_MAPPING_MISSING/);
+});
+test('P55-08 X: merge conflict aborts all groups instead of overwriting active destination',()=>{
+  const {prepareRestoredCanonical}=await import('../src/ui/restore-sanitize.mjs');
+  const incoming=empty(),current=empty();
+  incoming.stores.meta.push({key:'release:a',value:serializeClone({key:'release:a',
+    release:{state:'APPROVED'}})});
+  current.stores.meta.push({key:'release:a',value:serializeClone({key:'release:a',
+    release:{state:'CONFIRMED_PUBLIC'}})});
+  assert.throws(()=>prepareRestoredCanonical({incoming,current,mode:'merge'}),
+    /RESTORE_MERGE_CONFLICT/);
+  assert.equal(current.stores.meta[0].value.release.state,'CONFIRMED_PUBLIC');
+});
+test('P55-12 X: bounded 50 account and 1000 generator archive stays inactive and preserves row count',()=>{
+  const {prepareRestoredCanonical}=await import('../src/ui/restore-sanitize.mjs');
+  const incoming=empty(),current=empty(),uidMap={};
+  for(let i=0;i<50;i++){
+    const uid='00000000-0000-4000-8000-'+String(i+1).padStart(12,'0');
+    const next='10000000-0000-4000-8000-'+String(i+1).padStart(12,'0');
+    uidMap[uid]=next;
+    incoming.stores.meta.push({key:'account:acc-'+i,value:serializeClone({
+      key:'account:acc-'+i,account:{accountId:'acc-'+i,
+      personaUid:uid,state:'VERIFIED',revision:1,identity:{observed:'fake'}}})});
+  }
+  for(let j=0;j<1000;j++)incoming.stores.entities.push({key:'gen-'+j,
+    value:serializeClone({id:'gen-'+j,revision:1,activeOperationId:null})});
+  const mapped=prepareRestoredCanonical({incoming,current,mode:'replace',uidRemap:uidMap});
+  assert.equal(mapped.stores.entities.length,1000);
+  assert.equal(mapped.stores.meta.length,50);
+  for(const row of mapped.stores.meta)
+    assert.equal(row.value.account.state,'VERIFICATION_PENDING');
+  assert.throws(()=>prepareRestoredCanonical({incoming,current,mode:'replace',
+    uidRemap:Object.fromEntries(Object.keys(uidMap).map(k=>[k,'duplicate']))}),
+    /RESTORE_UID_MAPPING_COLLISION/);
+});
