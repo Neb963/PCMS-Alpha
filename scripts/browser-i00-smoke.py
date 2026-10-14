@@ -2474,6 +2474,77 @@ def main():
                 # synthetic archives only; no donor/provider/live mutation.
                 i16_ui=execute(after,"return {archive:!!document.getElementById('pcms-restore-archive'),checkpoint:!!document.getElementById('pcms-restore-checkpoint'),preview:!!document.getElementById('pcms-restore-preview'),stage:!!document.getElementById('pcms-restore-verify')}")
                 assert all(i16_ui.values()),i16_ui
+
+                # I16 B/UX: exercise actual file-input UI, not just existence.
+                # The checkpoint is a separate on-disk file that Firefox must
+                # read via WebDriver's native file input.
+                ui_seal="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const pkg=await import('../lib/backup-package.js');
+                  const core=await import('./backup-core.mjs');
+                  const journal=await import('./journal.mjs');
+                  const hist=await import('../lib/automation-history.js');
+                  const db=await journal.openCanonicalDatabase();
+                  const pcms=await core.snapshotCanonical(db);db.close();
+                  const donor=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  const local=await browser.storage.local.get(null),userscriptData={};
+                  for(const [key,value] of Object.entries(local))
+                    if(key==='automationJobs'||key.startsWith('gm-values:'))
+                      userscriptData[key]=value;
+                  const opts={state:donor.state,containers:donor.containers,
+                    userscriptData,selection:{kind:'full'},
+                    automationHistory:hist.filterOrdinaryAutomationJobs(
+                      Object.values(userscriptData.automationJobs||{}))};
+                  const first=pkg.createPortableBackupPayload(opts),cookies={};
+                  const mappings={};
+                  for(const persona of first.personas){
+                    mappings[persona.key]=persona.sourceId;
+                    cookies[persona.sourceId]=await browser.runtime.sendMessage({
+                      type:'PERSONA_COOKIES_LIST',profileId:persona.sourceId});
+                    if(!Array.isArray(cookies[persona.sourceId]))
+                      throw Error('UI_COOKIE_RETRIEVAL_FAILED');
+                  }
+                  const password='i16-ui-file-checkpoint-local-only-passphrase';
+                  const wrapped=await pkg.encodeBackupEnvelope({
+                    payload:pkg.createPortableBackupPayload({...opts,cookiesByProfile:cookies}),
+                    password,scope:{kind:'full'}});
+                  const archive=await core.encodeIntegrated({
+                    pcms,donorEnvelope:wrapped,passphrase:password});
+                  return {archive:archive.text,password,mappings};
+                })().then(done).catch(e=>done({error:String(e)}));"""
+                ui_data=call('POST',f'/session/{after}/execute/async',
+                             {'script':ui_seal,'args':[]},timeout=90)
+                assert isinstance(ui_data.get('archive'),str),ui_data
+                path_a=pathlib.Path(folder)/'i16-ui-import.encrypted'
+                path_b=pathlib.Path(folder)/'i16-pre-restore-on-disk.encrypted'
+                path_a.write_text(ui_data['archive'])
+                path_b.write_text(ui_data['archive'])
+                for css,filepath in [('#pcms-restore-archive',path_a),
+                                      ('#pcms-restore-checkpoint',path_b)]:
+                    element=call('POST',f'/session/{after}/element',
+                                 {'using':'css selector','value':css})
+                    element_id=element['element-6066-11e4-a52e-4f735466cecf']
+                    call('POST',f'/session/{after}/element/{element_id}/value',
+                         {'text':str(filepath),'value':list(str(filepath))})
+                setup_ui="const p=document.getElementById('pcms-restore-passphrase');p.value="+json.dumps(ui_data['password'])+";document.getElementById('pcms-restore-mappings').value="+json.dumps(json.dumps(ui_data['mappings']))+";document.getElementById('pcms-restore-preview').click();return true"
+                assert execute(after,setup_ui) is True
+                preview_result=None
+                for _ in range(80):
+                    preview_result=execute(after,"return {status:document.getElementById('pcms-restore-status').textContent,plan:document.getElementById('pcms-restore-details').textContent,verifyDisabled:document.getElementById('pcms-restore-verify').disabled}")
+                    if not preview_result['verifyDisabled'] or 'Restore held:' in preview_result['status']:break
+                    time.sleep(.1)
+                assert preview_result['verifyDisabled'] is False,preview_result
+                assert 'Authenticated plan:' in preview_result['plan'],preview_result
+                assert execute(after,"document.getElementById('pcms-restore-verify').click();return true")
+                disk_result=None
+                for _ in range(80):
+                    disk_result=execute(after,"return {status:document.getElementById('pcms-restore-status').textContent,button:document.getElementById('pcms-restore-apply').disabled}")
+                    if 'Checkpoint file independently re-read' in disk_result['status'] or 'Checkpoint not proven' in disk_result['status']:break
+                    time.sleep(.1)
+                assert 'Checkpoint file independently re-read' in disk_result['status'],disk_result
+                assert disk_result['button'] is True,disk_result
+                print('B I16_REAL_FILE_INPUT_AUTHENTICATED_PREVIEW_CHECKPOINT_UI=PASS',flush=True)
+
                 i16_code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const restore=await import('./restore-core.mjs');
