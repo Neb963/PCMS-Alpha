@@ -60,8 +60,11 @@ export function createRestoreGate(storage,{now=()=>Date.now(),
     // Do not store raw imported data, credentials, cookies or service replies.
     const groups={...prior.groups,[group]:{status,step,
       observedDigest:status==='OBSERVED'?observation.digest:null}};
+    const allDone=['donor-personas','donor-cookies','donor-portable','pcms-canonical']
+      .every(k=>groups[k]?.status==='OBSERVED');
     return persist({...prior,revision:prior.revision+1,
-      step,status:status==='HELD_UNCERTAIN'?'RESTORE_PARTIAL_HELD':'RESTORE_IN_PROGRESS',
+      step,status:status==='HELD_UNCERTAIN'?'RESTORE_PARTIAL_HELD':
+        allDone?'COMPLETE_INACTIVE':'RESTORE_IN_PROGRESS',
       groups});
   }
   return Object.freeze({read,begin,advance,inspect:async()=>safeRestoreReceipt(await read())});

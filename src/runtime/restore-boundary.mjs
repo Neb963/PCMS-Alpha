@@ -191,12 +191,10 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
         const gm=Object.create(null);
         for(const [key,items] of Object.entries(payload.gmValues||{})){
           const source=payload.scripts?.find(s=>s.key===key);
-          const mapped=preparedDonor?.candidate?.scripts?
-            Object.values(preparedDonor.candidate.scripts).find(s=>source&&s.name===source.script?.name):
-            null;
+          const mappedId=preparedDonor?.scriptMap?.[key];
+          const mapped=mappedId?preparedDonor.candidate.scripts?.[mappedId]:null;
           // Ambiguous script names are not authoritative Git/GM identifiers.
-          if(source&&mapped&&Object.values(preparedDonor.candidate.scripts)
-            .filter(s=>s.name===source.script?.name).length===1)
+          if(source&&mapped&&mapped.id===mappedId)
             gm['gm-values:'+mapped.id]=items;
           else throw Error('RESTORE_GM_MAPPING_UNVERIFIED');
         }

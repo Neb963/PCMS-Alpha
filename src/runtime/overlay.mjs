@@ -522,7 +522,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
       targetUid:imported.maps.personaUid.get(p.key)||null,
       sourceId:p.sourceId||null,
       containerId:bindings.get(p.key)})),
-      cookieMap:Object.fromEntries([...imported.maps.profile])};
+      cookieMap:Object.fromEntries([...imported.maps.profile]),\n      scriptMap:Object.fromEntries([...imported.maps.script])};
   },
   commit:async candidate=>localMutationFence(allPersonaUids,async()=>{
     const preview=await stateManager.previewState(candidate,{requireMetadata:true});

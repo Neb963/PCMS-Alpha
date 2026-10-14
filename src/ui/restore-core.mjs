@@ -26,8 +26,8 @@ export function inspectRestoreMappings(donor,mappings,containers,{fresh=false,st
   for(const p of donor.personas){
     check(typeof p.key==='string'&&p.key.length<=256&&!keys.has(p.key),'RESTORE_DUPLICATE_PERSONA');
     keys.add(p.key);
-    const chosen=mappings[p.key],known=typeof chosen==='string'&&chosen.length>0&&available.has(chosen);
-    if(strict)check(known,'RESTORE_MAPPING_UNVERIFIED');
+    const chosen=mappings[p.key],create=chosen==='__create__',known=typeof chosen==='string'&&chosen.length>0&&available.has(chosen);
+    if(strict)check(known||create,'RESTORE_MAPPING_UNVERIFIED');
     if(known){
       if(strict)check(!used.has(chosen),'RESTORE_MAPPING_COLLISION');
       used.add(chosen);
@@ -38,7 +38,7 @@ export function inspectRestoreMappings(donor,mappings,containers,{fresh=false,st
     results.push({key:p.key,sourceId:p.sourceId||null,
       targetId:known?chosen:null,targetName:current?.name||null,
       sourcePersonaUid:p.profile?.personaUid||null,
-      status:direct?'DIRECT_REVIEW_REQUIRED':!known?'MAPPING_REQUIRED':
+      status:direct?'DIRECT_REVIEW_REQUIRED':create?'CREATE_REQUESTED':!known?'MAPPING_REQUIRED':
         'MAPPING_ONLY_UNVERIFIED',
       freshProfile:fresh?'PREDECESSOR_UNVERIFIED':'NOT_FRESH'});
   }
@@ -59,7 +59,7 @@ export async function previewRestore({archiveText,password,mode='merge',fresh=fa
   const sourceSha256=await digest(JSON.stringify(opened.archive.pcms));
   const risk={
     importedPersonas:groups.length,
-    unmappedPersonas:groups.filter(g=>g.status==='MAPPING_REQUIRED').length,
+    unmappedPersonas:groups.filter(g=>g.status==='MAPPING_REQUIRED').length,\n    newContainers:groups.filter(g=>g.status==='CREATE_REQUESTED').length,
     directRouteReviews:groups.filter(g=>g.status==='DIRECT_REVIEW_REQUIRED').length,
     importedRoutes:(opened.donor.routes||[]).length,
     importedScripts:(opened.donor.scripts||[]).length,
