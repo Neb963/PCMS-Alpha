@@ -1,7 +1,7 @@
 // I06 one-time private per-gens folder marker. NEVER call before durable Git
 // DISPATCH_POSSIBLE and separately authorized write capability. Every ref
 // update is nonforced; errors after object creation mean UNKNOWN, not retry.
-import {safeFolder} from './git-source.mjs';
+import {safeFolder,inspectGitSource} from './git-source.mjs';
 import {fail} from './journal.mjs';
 const ROOT='https://api.github.com/repos/Neb963/per-gens';
 const SHA=/^[a-f0-9]{40}$/;
@@ -112,4 +112,31 @@ export async function writeNonReadyFolder(request,transport=fetch){
     return {ok:true,source:'GIT_READBACK',ready:false,emptyFolder:true,
       folder,head:candidate,markerSha};
   }catch{return uncertain(fail('GIT_WRITE_UNCERTAIN'));}
+}
+
+
+// Independent, READ-ONLY reconciliation of an ambiguous marker. We verify
+// actual private Git bytes via the existing SHA-verified Git inspector; a
+// missing folder/404 is not authority to retry a possible write.
+export async function readNonReadyFolder(request,inspect=inspectGitSource){
+  const allowed=markerRequestAllowed(request);
+  if(!allowed.ok)return allowed;
+  const {slug,folder,token}=request;
+  if(folder!=='gens/'+slug)return fail('UNSAFE_SOURCE_PATH');
+  let result;
+  try{result=await inspect({folder,token,includeSourceBytes:false});}
+  catch{return fail('GIT_MARKER_READBACK_UNAVAILABLE');}
+  if(!result?.ok||result.repo!=='Neb963/per-gens'||result.branch!=='main'||
+     result.folder!==folder||result.ready!==false||result.files!==1||
+     !Array.isArray(result.paths)||result.paths.length!==1||
+     result.paths[0]?.path!=='DEPLOYMENT.md')
+    return fail('GIT_MARKER_UNVERIFIED');
+  const bytes=utf8(NON_READY_MARKER);
+  const expected=[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))]
+    .map(v=>v.toString(16).padStart(2,'0')).join('');
+  if(result.paths[0].size!==bytes.length||
+     result.paths[0].sha256!==expected)
+    return fail('GIT_MARKER_UNVERIFIED');
+  return {ok:true,source:'GIT_READBACK',ready:false,emptyFolder:true,
+    folder,head:result.head};
 }

@@ -6,12 +6,12 @@ import {createSupplyStore} from './supply-store.mjs';
 import {createAccountStore} from './accounts.mjs';
 import {freezeSupply,validateOwnerContext,publicSupply} from './supply-plan.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
-import {writeNonReadyFolder,markerRequestAllowed} from './supply-git.mjs';
+import {writeNonReadyFolder,readNonReadyFolder,markerRequestAllowed} from './supply-git.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 export const SUPPLY_PORT='pcms-i06-supply';
 const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM',
-  'RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED','ARM_DISPOSABLE_TEST',
-  'ARM_DISPOSABLE_GIT']);
+  'RECONCILE_ITEM','FINISH_SOURCE_FOLDER','RECONCILE_GIT',
+  'ABORT_PREPARED','ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT']);
 const hex=/^[a-f0-9]{64}$/;
 // Only a disposable, explicitly named target may be tested live. This does
 // not qualify general generator supply, Git writeback or publication.
@@ -29,7 +29,8 @@ export function validateSupplyMessage(api,sender,message){
     ?['accountId','expectedAccountRevision','slugs','batchId']:
     message.type==='GET_BATCH'?['batchId']:
     message.type==='LIST_BATCHES'?[]:
-    message.type==='FINISH_SOURCE_FOLDER'?['batchId','itemId','expectedRevision','token']:
+    ['FINISH_SOURCE_FOLDER','RECONCILE_GIT'].includes(message.type)?
+      ['batchId','itemId','expectedRevision','token']:
     ['ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT'].includes(message.type)?
       ['batchId','itemId','expectedRevision','confirmation']:
     ['batchId','itemId','expectedRevision'];
@@ -43,11 +44,11 @@ export function validateSupplyMessage(api,sender,message){
   }else if(message.type==='GET_BATCH'&&!isSafeId(p.batchId))
     return fail('INVALID_PARAMS');
   else if(['EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED',
-    'ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT'].includes(message.type)&&
+    'ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT','RECONCILE_GIT'].includes(message.type)&&
     (!isSafeId(p.batchId)||!isSafeId(p.itemId)||
      !Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
     return fail('INVALID_PARAMS');
-  if(message.type==='FINISH_SOURCE_FOLDER'&&
+  if(['FINISH_SOURCE_FOLDER','RECONCILE_GIT'].includes(message.type)&&
     (typeof p.token!=='string'||p.token.length>512))return fail('INVALID_PARAMS');
   if(['ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT'].includes(message.type)&&
     (typeof p.confirmation!=='string'||p.confirmation.length>120))
@@ -69,7 +70,8 @@ export function createSupplyBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,
   // Deliberately OFF in packaged extension. Tests must explicitly supply
   // an independently controlled synthetic gate and fake isolated executor.
-  effectGate=()=>false,gitGate=()=>false,gitWrite=writeNonReadyFolder,
+  effectGate=()=>false,gitGate=()=>false,
+  gitWrite=writeNonReadyFolder,gitRead=readNonReadyFolder,
   pilotClock=()=>performance.now(),
   makeStores=db=>({supply:createSupplyStore(db),accounts:createAccountStore(db)})
 }={}){
@@ -427,6 +429,40 @@ export function createSupplyBoundary(api,{
       proof});
     return confirmed.ok?redacted(confirmed):fail('GIT_WRITE_UNCERTAIN');
   }
+  async function reconcileGit(s,p){
+    const found=await s.supply.get(p.batchId);
+    if(!found.ok)return found;
+    const b=found.batch,item=b.items.find(x=>x.itemId===p.itemId);
+    if(!item)return fail('ITEM_NOT_FOUND');
+    if(item.revision!==p.expectedRevision)return fail('STALE_REVISION');
+    if(!['GIT_DISPATCH_POSSIBLE','GIT_UNCERTAIN','GIT_OBSERVING'].includes(item.state))
+      return fail('NOT_ADMISSIBLE');
+    const account=await s.accounts.get(b.accountId);
+    if(!account.ok||!validateOwnerContext(b,account.account).ok)
+      return fail('ACCOUNT_STALE');
+    const params={token:p.token,slug:item.requestedSlug,folder:'gens/'+item.requestedSlug};
+    if(!markerRequestAllowed(params).ok)return fail('GITHUB_READ_TOKEN_REQUIRED');
+    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+    let proof;
+    try{proof=await gitRead(params);}catch{proof={ok:false};}
+    if(!proof?.ok||proof.source!=='GIT_READBACK'||proof.ready!==false||
+       proof.emptyFolder!==true||proof.folder!==params.folder){
+      if(item.state!=='GIT_UNCERTAIN')await s.supply.stage({
+        batchId:b.batchId,itemId:item.itemId,expectedRevision:item.revision,
+        event:'GIT_UNCERTAIN'});
+      return fail('GIT_RECONCILIATION_REQUIRED');
+    }
+    const accountAgain=await s.accounts.get(b.accountId);
+    if(!accountAgain.ok||!validateOwnerContext(b,accountAgain.account).ok||
+       (await sentinel.inspect()).held)return fail('GIT_PROOF_CONTEXT_CHANGED');
+    const observed=item.state==='GIT_OBSERVING'?{ok:true,item}:
+      await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
+        expectedRevision:item.revision,event:'GIT_OBSERVING'});
+    if(!observed.ok)return fail('GIT_RECONCILIATION_REQUIRED');
+    const confirmed=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
+      expectedRevision:observed.item.revision,event:'SOURCE_CONFIRMED',proof});
+    return confirmed.ok?redacted(confirmed):fail('GIT_RECONCILIATION_REQUIRED');
+  }
   async function run(message,sender){
     const allowed=validateSupplyMessage(api,sender,message);
     if(!allowed.ok)return allowed;
@@ -452,6 +488,7 @@ export function createSupplyBoundary(api,{
       if(message.type==='ARM_DISPOSABLE_TEST')return await armDisposablePilot(s,p);
       if(message.type==='ARM_DISPOSABLE_GIT')return await armDisposableGit(s,p);
       if(message.type==='RECONCILE_ITEM')return await reconcile(s,p);
+      if(message.type==='RECONCILE_GIT')return await reconcileGit(s,p);
       if(message.type==='FINISH_SOURCE_FOLDER')return await finishSource(s,p);
       return await execute(s,p);
     }catch{return fail('SUPPLY_CANONICAL_UNAVAILABLE');}

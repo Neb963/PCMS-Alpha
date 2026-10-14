@@ -152,3 +152,13 @@ test('I17 private non-READY Git marker requires exact disposable arm and ephemer
   assert.match(gate,/gitPilotMatches/);
   assert.match(gate,/if\(gitPilotMatches\(\{account:current\.account,batch:b,item\}\)\)gitPilotArm=null/);
 });
+
+test('I17 uncertain Git marker has distinct read-only reconciliation control',async()=>{
+  const supply=await readFile('src/ui/supply-view.mjs','utf8');
+  const boundary=await readFile('src/runtime/supply-boundary.mjs','utf8');
+  assert.match(supply,/Reconcile Git marker \(read-only\)/);
+  assert.match(supply,/supply\('RECONCILE_GIT'/);
+  assert.match(boundary,/async function reconcileGit/);
+  assert.match(boundary,/gitRead\(params\)/);
+  assert.match(boundary,/event:'GIT_OBSERVING'/);
+});

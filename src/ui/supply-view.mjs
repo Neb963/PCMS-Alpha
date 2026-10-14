@@ -155,6 +155,27 @@ function drawQueue(result){
         label.append(credential);
         li.append(document.createTextNode(' '),label,git);
       }
+      if(['GIT_DISPATCH_POSSIBLE','GIT_UNCERTAIN','GIT_OBSERVING'].includes(item.state)){
+        const credential=document.createElement('input');
+        credential.type='password';credential.autocomplete='off';credential.maxLength=512;
+        credential.setAttribute('aria-label','Git read token for reconciliation of '+item.slug);
+        const label=document.createElement('label');label.textContent='Private Git read token';
+        label.append(credential);
+        const read=document.createElement('button');read.type='button';
+        read.textContent='Reconcile Git marker (read-only)';
+        read.addEventListener('click',async()=>{
+          const token=credential.value;credential.value='';
+          read.disabled=true;
+          try{
+            const out=await supply('RECONCILE_GIT',{
+              batchId:batch.batchId,itemId:item.itemId,expectedRevision:item.revision,token});
+            notice(out?.ok?'Marker independently confirmed; still NOT READY.':
+              'Marker readback held: '+(out?.code||'UNVERIFIED')+'. No Git write or retry.');
+          }catch{notice('Git readback unavailable. Preserve uncertain state.');}
+          finally{read.disabled=false;await fetchBatches();}
+        });
+        li.append(document.createTextNode(' '),label,read);
+      }
       if(['CREATE_UNCERTAIN','RENAME_UNCERTAIN',
           'CREATE_DISPATCH_POSSIBLE','RENAME_DISPATCH_POSSIBLE'].includes(item.state)){
         const action=document.createElement('button');

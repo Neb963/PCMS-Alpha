@@ -20,7 +20,7 @@ function fixture({gate=true,failDispatch=false,lostAck=false,wrongOwner=false,
   denyRoute=false,staleIdentity=false,wrongReadback=false,
   pauseAfterPrepare=false,routeLossAfterPrepare=false,
   slug='requested-slug',pilotClock=()=>performance.now(),gitPilotGate=gate,
-  onStage=()=>{}}={}){
+  onStage=()=>{},lostGitAck=false,gitReadOk=true}={}){
   const planned=slug==='requested-slug'?batch:freezeSupply({
     batchId:batch.batchId,accountId:account.accountId,personaUid:account.personaUid,
     accountRevision:2,bindingVersion:1,slugs:[slug]}).batch;
@@ -95,7 +95,13 @@ function fixture({gate=true,failDispatch=false,lostAck=false,wrongOwner=false,
       assert.equal(folder,'gens/'+slug);
       assert.equal(token,'offline-git-token-01');
       gitLedger.push({path:folder+'/DEPLOYMENT.md',content:'Status: SOURCE_PENDING\\n'});
-      return {ok:true,source:'GIT_READBACK',ready:false,emptyFolder:true,folder};
+      return lostGitAck?{ok:false,code:'ACK_LOST'}:
+        {ok:true,source:'GIT_READBACK',ready:false,emptyFolder:true,folder};
+    },gitRead:async({folder,token})=>{
+      assert.equal(token,'offline-git-token-01');
+      return gitReadOk&&gitLedger.some(x=>x.path===folder+'/DEPLOYMENT.md')?
+        {ok:true,source:'GIT_READBACK',ready:false,emptyFolder:true,folder}:
+        {ok:false,code:'MARKER_UNVERIFIED'};
     }});
   const run=(type,params={})=>boundary.run({type,params},sender);
   const item=()=>current.items[0];
@@ -300,4 +306,44 @@ test('I17 X: expired pilot after Git possible marker never calls private transpo
   assert.equal(f.item().state,'GIT_UNCERTAIN');
   assert.equal((await f.run('ARM_DISPOSABLE_GIT',{...params,
     expectedRevision:f.item().revision})).code,'NOT_ADMISSIBLE');
+});
+
+test('I17 X: lost Git write ACK is read-only reconciled, never written again',async()=>{
+  const slug='pcms-test-git-marker-0003',f=fixture({slug,gate:true,
+    gitPilotGate:false,lostGitAck:true});
+  assert.equal((await f.dispatch()).state,'CREATE_CONFIRMED');
+  assert.equal((await f.dispatch()).state,'SOURCE_PENDING');
+  const params=()=>({batchId:batch.batchId,itemId:f.item().itemId,
+    expectedRevision:f.item().revision});
+  assert.equal((await f.run('ARM_DISPOSABLE_GIT',{...params(),
+    confirmation:'GIT '+slug})).ok,true);
+  const attempted=await f.run('FINISH_SOURCE_FOLDER',{...params(),
+    token:'offline-git-token-01'});
+  assert.equal(attempted.code,'GIT_WRITE_UNCERTAIN');
+  assert.equal(f.item().state,'GIT_UNCERTAIN');
+  assert.equal(f.gitLedger.length,1);
+  const reconciled=await f.run('RECONCILE_GIT',{...params(),
+    token:'offline-git-token-01'});
+  assert.equal(reconciled.state,'CONFIRMED',reconciled.code);
+  assert.equal(f.gitLedger.length,1,'reconciliation must not repeat private Git write');
+  assert.equal((await f.run('RECONCILE_GIT',{...params(),
+    token:'offline-git-token-01'})).code,'NOT_ADMISSIBLE');
+});
+test('I17 X: uncertain Git marker absent or malformed remains held, no fresh write',async()=>{
+  const slug='pcms-test-git-marker-0004',f=fixture({slug,gate:true,
+    gitPilotGate:false,lostGitAck:true,gitReadOk:false});
+  assert.equal((await f.dispatch()).state,'CREATE_CONFIRMED');
+  assert.equal((await f.dispatch()).state,'SOURCE_PENDING');
+  const params=()=>({batchId:batch.batchId,itemId:f.item().itemId,
+    expectedRevision:f.item().revision});
+  assert.equal((await f.run('ARM_DISPOSABLE_GIT',{...params(),
+    confirmation:'GIT '+slug})).ok,true);
+  assert.equal((await f.run('FINISH_SOURCE_FOLDER',{...params(),
+    token:'offline-git-token-01'})).code,'GIT_WRITE_UNCERTAIN');
+  assert.equal((await f.run('RECONCILE_GIT',{...params(),
+    token:'offline-git-token-01'})).code,'GIT_RECONCILIATION_REQUIRED');
+  assert.equal(f.item().state,'GIT_UNCERTAIN');
+  assert.equal(f.gitLedger.length,1);
+  assert.equal(validateSupplyMessage(api,sender,{type:'RECONCILE_GIT',
+    params:{...params(),token:'offline-git-token-01',force:true}}).code,'INVALID_PARAMS');
 });
