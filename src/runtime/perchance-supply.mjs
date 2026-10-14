@@ -107,9 +107,25 @@ export async function perchanceSupplyIsolated(request) {
       if(templateOwner.status!=='is-not-owner')return hold('TEMPLATE_OWNER_UNVERIFIED');
       if(!sameSession())return hold('SESSION_CHANGED');
       const original=template.generator;
+      // A template is NOT an owned generator. Before the first private/empty
+      // save, reject source-bearing template assets and strip previous remote
+      // identity/ownership fields. Copying a publicId or an asset into an
+      // alleged new, empty generator could overwrite or publish wrong bytes.
+      const assets=original.srcManifest;
+      const emptyAssets=assets===undefined||assets===null||
+        (Array.isArray(assets)&&assets.length===0)||
+        (Object.getPrototypeOf(assets)===Object.prototype&&
+          Object.keys(assets).length===0);
+      const sourceFields=['html','pjs','src','scripts','files','javascript','js','source'];
+      if(!emptyAssets||sourceFields.some(k=>Object.hasOwn(original,k)&&
+          original[k]!=null&&original[k]!==''&&
+          (!Array.isArray(original[k])||original[k].length!==0)))
+        return hold('TEMPLATE_SOURCE_UNVERIFIED');
+      const {id,publicId,owner,ownerId,userId,createdAt,updatedAt,...safeTemplate}=original;
       // One provider request only, AFTER outer dispatcher journaling.
       const result=await call('save',{generator:{
-        ...original,name:'minimal',isPrivate:true,modelText:'',outputTemplate:''
+        ...safeTemplate,name:'minimal',isPrivate:true,modelText:'',outputTemplate:'',
+        srcManifest:[]
       },srcManifest:[]});
       if(!sameSession())return hold('SESSION_CHANGED_AFTER_EFFECT');
       if(result.status!=='created'||!slug(result.name))
