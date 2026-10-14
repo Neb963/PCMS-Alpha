@@ -2603,6 +2603,93 @@ def main():
                             {'script':i16_db_code,'args':[]},timeout=75)
                 assert i16_db.get('ok') is True,i16_db
                 print('B I16_REAL_IDB_GUARDED_ATOMIC_RESTORE_AND_APPROVAL_HOLD=PASS',flush=True)
+
+                # I16 actual same-XPI restore port, actual guarded donor state
+                # manager and real IndexedDB, all within isolated Firefox CI.
+                # Clearing the previous fake-test guard is harness-only fixture
+                # cleanup; shipped UI/runtime expose no guard-clear command.
+                i16_end_to_end="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  await browser.storage.local.remove('pcmsRestoreInProgress');
+                  const core=await import('./backup-core.mjs');
+                  const restore=await import('./restore-core.mjs');
+                  const journal=await import('./journal.mjs');
+                  const pkg=await import('../lib/backup-package.js');
+                  const automation=await import('../lib/automation-history.js');
+                  const db=await journal.openCanonicalDatabase();
+                  const current=await core.snapshotCanonical(db);db.close();
+                  const donor=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  if(!donor?.state||!Array.isArray(donor.containers))
+                    throw Error('DONOR_SNAPSHOT_UNAVAILABLE');
+                  const stored=await browser.storage.local.get(null);
+                  const extra=Object.create(null);
+                  for(const [k,v] of Object.entries(stored))
+                    if(k==='automationJobs'||k.startsWith('gm-values:'))extra[k]=v;
+                  const args={state:donor.state,containers:donor.containers,
+                    userscriptData:extra,selection:{kind:'full'},
+                    automationHistory:automation.filterOrdinaryAutomationJobs(
+                      Object.values(extra.automationJobs||{}))};
+                  const initial=pkg.createPortableBackupPayload(args),cookies={};
+                  const mappings={};
+                  for(const person of initial.personas){
+                    mappings[person.key]=person.sourceId;
+                    cookies[person.sourceId]=await browser.runtime.sendMessage({
+                      type:'PERSONA_COOKIES_LIST',profileId:person.sourceId});
+                    if(!Array.isArray(cookies[person.sourceId]))
+                      throw Error('COOKIE_READ_MISSING');
+                  }
+                  const portable=pkg.createPortableBackupPayload({...args,cookiesByProfile:cookies});
+                  const password='synthetic-i16-installed-local-restore-passphrase';
+                  const donorFile=await pkg.encodeBackupEnvelope({
+                    payload:portable,password,scope:{kind:'full'}});
+                  const checkpoint=await core.encodeIntegrated({
+                    pcms:current,donorEnvelope:donorFile,passphrase:password});
+                  const incoming=structuredClone(current);
+                  incoming.stores.meta.push({key:'release:i16-new-historical',
+                    value:core.serializeClone({key:'release:i16-new-historical',
+                      release:{state:'APPROVED',approval:{old:true},dispatchPossible:false}})});
+                  const source=await core.encodeIntegrated({
+                    pcms:incoming,donorEnvelope:donorFile,passphrase:password});
+                  const reviewed=await restore.previewRestore({
+                    archiveText:source.text,password,mode:'merge',mappings,
+                    currentPcms:current,currentDonor:donor,currentPortable:portable,
+                    containers:donor.containers,decodeDonor:pkg.decodeBackupEnvelope
+                  });
+                  const answer=await new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-i16-restore'});
+                    let complete=false;
+                    const done=result=>{
+                      if(complete)return;complete=true;
+                      try{port.disconnect();}catch{}
+                      resolve(result);
+                    };
+                    port.onMessage.addListener(done);
+                    port.onDisconnect.addListener(()=>done({ok:false,code:'RESTORE_PORT_CLOSED'}));
+                    port.postMessage({action:'APPLY',params:{
+                      archiveText:source.text,checkpointText:checkpoint.text,
+                      password,mode:'merge',fresh:false,mappings,
+                      reviewedPlanSha256:reviewed.planSha256}});
+                  });
+                  const marker=(await browser.storage.local.get('pcmsRestoreInProgress'))
+                    .pcmsRestoreInProgress;
+                  const checked=await journal.openCanonicalDatabase();
+                  const after=await core.snapshotCanonical(checked);checked.close();
+                  const extraRelease=after.stores.meta.find(r=>r.key==='release:i16-new-historical');
+                  if(!answer.ok||marker?.status!=='COMPLETE_INACTIVE'||
+                    !marker.active||extraRelease?.value?.release?.state!=='RESTORE_REVIEW_REQUIRED'||
+                    extraRelease.value.release.approval!==null)
+                    throw Error('RESTORE_COMPLETE_OR_AUTHORITY_INCORRECT:'+JSON.stringify({
+                      code:answer.code,marker:marker?.status,release:extraRelease?.value?.release?.state
+                    }));
+                  return {ok:true,groups:Object.keys(marker.groups).length,
+                    status:marker.status,source:source.sha256};
+                })().then(done).catch(e=>done({ok:false,error:String(e)}));"""
+                i16_full=call('POST',f'/session/{after}/execute/async',
+                              {'script':i16_end_to_end,'args':[]},timeout=120)
+                assert i16_full.get('ok') is True,i16_full
+                assert i16_full.get('groups')==4,i16_full
+                print('B I16_REAL_GUARDED_DONOR_AND_CANONICAL_STAGED_RESTORE_INACTIVE=PASS',flush=True)
+
                 # Full Firefox process restart, not just UI navigation.
                 close(after)
                 after=open_session(browser,profile)
