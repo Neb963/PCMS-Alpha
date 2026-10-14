@@ -236,7 +236,9 @@ test('P55-09 X: imported accounts are rebound without carrying session or releas
   assert.equal(meta['account:restored-a'].account.state,'VERIFICATION_PENDING');
   assert.equal(meta['release:test'].release.state,'RESTORE_REVIEW_REQUIRED');
   assert.equal(meta['release:test'].release.approval,null);
-  assert.equal(meta['refresher:shadow:v1'].state.globalPause,true);
+  // The out-of-IDB restore sentinel is the safety hold; do not create a
+  // fictitious user Pause where the operator did not set one.
+  assert.equal(meta['refresher:shadow:v1'].state.globalPause,false);
   assert.equal(meta['refresher:shadow:v1'].state.inflight.length,0);
   assert.equal(meta['backup:auto-state'].state.enabled,false);
   assert.equal(meta['writeback-settings'].setting.autoEnabled,false);
