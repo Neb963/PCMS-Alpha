@@ -2937,6 +2937,88 @@ def main():
                 fresh_restored=execute(after,"return browser.storage.local.get('pcmsRestoreInProgress').then(s=>({active:s.pcmsRestoreInProgress?.active,fresh:s.pcmsRestoreInProgress?.fresh,status:s.pcmsRestoreInProgress?.status}))")
                 assert fresh_restored=={'active':True,'fresh':True,'status':'COMPLETE_INACTIVE'},fresh_restored
                 print('B I16_FRESH_PROFILE_UID_COLLISION_BLOCK_ROUTE_INACTIVE_RESTART=PASS',flush=True)
+                # I17 tests real persistently installed combined XPI, not a
+                # prototype page. This fixture does NOT constitute human H.
+                for _ in range(35):
+                    ready=execute(after,"return Boolean(document.getElementById('pcms-acceptance-save') && document.getElementById('pcms-acceptance-list')?.textContent.includes('H-07'))")
+                    if ready: break
+                    time.sleep(.12)
+                assert ready,'I17_ACCEPTANCE_UI_NOT_INITIALIZED'
+                pre=execute(after,"return {destinations:document.querySelectorAll('#navigation [data-workspace]').length, first:document.querySelector('a.skip')?.textContent, cases:document.querySelectorAll('#pcms-acceptance-case option').length, h01:document.getElementById('pcms-acceptance-list')?.textContent.includes('H-01 — NOT_TESTED'), heading:!!document.getElementById('heading-settings')}")
+                assert pre=={'destinations':6,'first':'Skip to content','cases':17,'h01':True,'heading':True},pre
+                # Wrongly declaring H-01 PASS from synthetic B evidence must
+                # not persist, even if the operator opens the form.
+                execute(after,"""return (()=>{
+                  document.getElementById('pcms-acceptance-case').value='H-01';
+                  document.getElementById('pcms-acceptance-case').dispatchEvent(new Event('change'));
+                  document.getElementById('pcms-acceptance-result').value='PASS';
+                  document.getElementById('pcms-acceptance-tier').value='PACKAGED_FIREFOX_B';
+                  document.getElementById('pcms-acceptance-reference').value='fake-h01-001';
+                  document.getElementById('pcms-acceptance-note').value='Synthetic automation is not a human witness';
+                  document.getElementById('pcms-acceptance-save').click();
+                  return true;
+                })()""")
+                time.sleep(.25)
+                rejected=execute(after,"return browser.storage.local.get('pcmsI17OperatorChecklist').then(s=>({h01:s.pcmsI17OperatorChecklist?.entries?.['H-01']?.state||'NOT_TESTED',status:document.getElementById('pcms-acceptance-status')?.textContent}))")
+                assert rejected['h01']=='NOT_TESTED',rejected
+                assert 'Not saved' in rejected['status'],rejected
+                # Synthetic FAIL may be recorded for a negative evidence
+                # demonstration, never an automatic human PASS.
+                execute(after,"""return (()=>{
+                  const sel=document.getElementById('pcms-acceptance-case');
+                  sel.value='P56-10';sel.dispatchEvent(new Event('change'));
+                  document.getElementById('pcms-acceptance-result').value='FAIL';
+                  document.getElementById('pcms-acceptance-tier').value='PACKAGED_FIREFOX_B';
+                  document.getElementById('pcms-acceptance-reference').value='synthetic-ui-001';
+                  document.getElementById('pcms-acceptance-note').value='Injected synthetic issue for negative evidence audit';
+                  document.getElementById('pcms-acceptance-save').click();
+                  return true;
+                })()""")
+                stored=None
+                for _ in range(35):
+                    stored=execute(after,"return browser.storage.local.get('pcmsI17OperatorChecklist').then(s=>({revision:s.pcmsI17OperatorChecklist?.revision||0,fail:s.pcmsI17OperatorChecklist?.entries?.['P56-10']?.state,h07:s.pcmsI17OperatorChecklist?.entries?.['H-07']?.state}))")
+                    if stored.get('revision')==2: break
+                    time.sleep(.12)
+                assert stored=={'revision':2,'fail':'FAIL','h07':'NOT_TESTED'},stored
+                fallback=execute(after,"return import('./acceptance-core.mjs').then(async c=>{const d=(await browser.storage.local.get('pcmsI17OperatorChecklist')).pcmsI17OperatorChecklist;const md=c.checklistMarkdown(d,{},null);return {failed:md.includes('P56-10'),note:md.includes('synthetic-ui-001'),notH:md.includes('H-07 — Required: human checklist evidence and Markdown fallback | NOT_TESTED'),bytes:md.length}})")
+                assert fallback.get('failed') and fallback.get('note') and fallback.get('notH'),fallback
+                assert fallback.get('bytes',0)<16000,fallback
+                # Execute a 1,250-generator/50-account local isolated planning
+                # workload in real Firefox. Record measured time and byte
+                # footprint; this does not measure real-provider throughput,
+                # extension-wide peak heap or an operator's production SLO.
+                fleet=execute(after,"""return import('../runtime/refresher-core.mjs').then(c=>{
+                  const hash='a'.repeat(64),n=1250,started=performance.now();
+                  const input=Array.from({length:n},(_,i)=>{
+                    const id=String(i%50).padStart(3,'0');
+                    return {slug:'fleet-'+String(i).padStart(5,'0'),
+                      accountId:'account_'+id,personaUid:'persona_'+id,
+                      remoteId:'remote_'+i,bindingVersion:1,ownerVerified:true,
+                      accountVerified:true,principalFingerprint:hash,
+                      releaseVerified:true,releaseFingerprint:hash,listing:'PUBLIC'};
+                  });
+                  const out=c.reconcileShadow(c.emptyShadow(),input);
+                  const elapsed=performance.now()-started;
+                  const size=out.ok?JSON.stringify(out.state).length:null;
+                  return {ok:out.ok,rows:out.state?.rows.length,
+                    accounts:Object.keys(out.state?.accounts||{}).length,
+                    mode:out.state?.mode,elapsedMs:Math.round(elapsed*100)/100,
+                    serializedBytes:size};
+                })""")
+                assert fleet.get('ok') and fleet.get('rows')==1250 and fleet.get('accounts')==50,fleet
+                assert fleet.get('mode')=='SHADOW_ONLY',fleet
+                print('B I17_FIREFOX_1250_LOCAL_FLEET_PROFILE='+json.dumps(fleet),flush=True)
+                # Ensure the form remains keyboard-addressable after real
+                # Firefox viewport reduction. Browser minimum window size is
+                # independently reported; never mislabel a larger viewport 320.
+                try:
+                    rect=call('POST',f'/session/{after}/window/rect',{'width':390,'height':800})
+                except Exception as exc: rect={'error':type(exc).__name__}
+                sized=execute(after,"return {innerWidth:window.innerWidth,scrollWidth:document.documentElement.scrollWidth,viewport:document.documentElement.clientWidth,inputs:[...document.querySelectorAll('.pcms-acceptance-controls input,.pcms-acceptance-controls select')].every(x=>x.labels?.length>0),hiddenTabbable:[...document.querySelectorAll('#pcms-acceptance-list [tabindex]')].filter(x=>x.offsetParent===null).length}")
+                assert sized.get('inputs') and sized.get('hiddenTabbable')==0,sized
+                print('B I17_FIREFOX_VIEWPORT_MEASUREMENT='+json.dumps({'requested':390,'actual':sized,'windowRect':rect}),flush=True)
+                print('B I17_PACKAGED_CHECKLIST_NEGATIVE_EVIDENCE_AND_SAFE_MARKDOWN=PASS (H=NOT_TESTED)',flush=True)
+
 
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
             finally: close(after)
