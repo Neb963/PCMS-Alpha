@@ -25,8 +25,13 @@ async function withProvider(t,config,work){
     const name=url.slice('https://perchance.org/api/'.length);
     const body=JSON.parse(opts.body);
     ledger.push({name,body});
-    assert.equal(body.email,email);
-    assert.equal(body.sessionToken,token);
+    if(name==='getGeneratorPageData'){
+      assert.equal(body.email,undefined);
+      assert.equal(body.sessionToken,undefined);
+    }else{
+      assert.equal(body.email,email);
+      assert.equal(body.sessionToken,token);
+    }
     let out;
     if(name==='getGeneratorsByUser')out={status:'success',
       generators:[...owned.entries()].map(([key,g])=>({name:key,isPrivate:g.isPrivate}))};
