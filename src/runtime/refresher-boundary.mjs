@@ -174,12 +174,12 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     const snapshot=await s.read();if(!snapshot.ok)return 'CANONICAL_UNAVAILABLE';
     // Reconcile a possibly-dispatched effect by independent READBACK ONLY.
     // A cold wake or lost response must never invoke execute a second time.
-    const reserved=snapshot.state.rows.find(r=>r.refresh?.intent?.state==='RESERVED'&&
+    const stranded=snapshot.state.rows.find(r=>r.refresh?.intent?.state==='RESERVED'&&
       clock()-r.refresh.intent.at>=MINUTE);
-    if(reserved){
+    if(stranded){
       // A RESERVED transaction has not crossed DISPATCH_POSSIBLE. A fresh
       // canonical read may clear it after cooldown, without touching provider.
-      const done=await s.cancelReserved(reserved.stableId,reserved.refresh.intent.id,clock());
+      const done=await s.cancelReserved(stranded.stableId,stranded.refresh.intent.id,clock());
       return done.ok?'STALE_RESERVATION_ABORTED':done.code;
     }
     const uncertain=snapshot.state.rows.find(r=>r.refresh?.intent?.state==='DISPATCH_POSSIBLE'&&
