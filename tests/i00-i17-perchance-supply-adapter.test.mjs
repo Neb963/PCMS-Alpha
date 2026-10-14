@@ -43,12 +43,12 @@ async function withProvider(t,config,work){
         e.body.generatorName==='disposable-exact-slug'),true);
       if(config.loseAck){
         owned.set('server-temp-slug',{name:'server-temp-slug',isPrivate:true,
-          modelText:'',outputTemplate:'',srcManifest:[],publicId:'server-new-public'});
+          modelText:'',outputTemplate:'',srcManifest:[],publicId:'servernewpublic'});
         out={status:'unverified'};
       }else{
         owned.set('server-temp-slug',{name:'server-temp-slug',isPrivate:true,
           modelText:body.generator.modelText,outputTemplate:body.generator.outputTemplate,
-          srcManifest:body.srcManifest,publicId:'server-new-public'});
+          srcManifest:body.srcManifest,publicId:'servernewpublic'});
         out={status:'created',name:'server-temp-slug'};
       }
       if(config.rotateSessionAfterSave)change='timestamp-rotated';
@@ -69,11 +69,12 @@ async function withProvider(t,config,work){
       k==='sessionTokenLastChangeTime'?change:null},
     crypto:webcrypto,fetch
   }))Object.defineProperty(globalThis,k,{configurable:true,writable:true,value:v});
-  t.after(()=>{
+  try{
+    return await work({ledger,owned,fingerprint,rotateSession:()=>{change='trotated';}});
+  }finally{
     for(const [key,desc] of old)desc?
       Object.defineProperty(globalThis,key,desc):delete globalThis[key];
-  });
-  return work({ledger,owned,fingerprint,rotateSession:()=>{change='trotated';}});
+  }
 }
 test('P56-06 / P52-02 F/X: private empty first save excludes copied template authority and proves exact new ID',async t=>{
   await withProvider(t,{},async({ledger,fingerprint})=>{
@@ -93,7 +94,7 @@ test('P56-06 / P52-02 F/X: private empty first save excludes copied template aut
     assert.equal(observed.ok,true,observed.code);
     assert.equal(observed.privateEmpty,true);
     assert.equal(observed.ownerMatches,true);
-    assert.equal(observed.remoteId,'public_server-new-public');
+    assert.equal(observed.remoteId,'public_servernewpublic');
     const rename=await perchanceSupplyIsolated({...req,kind:'RENAME',
       principalFingerprint:fingerprint,temporarySlug:r.temporarySlug,
       remoteId:observed.remoteId});
