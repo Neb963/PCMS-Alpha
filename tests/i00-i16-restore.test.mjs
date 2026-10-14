@@ -245,7 +245,7 @@ test('P55-09 X: imported accounts are rebound without carrying session or releas
   await assert.rejects(async()=>prepareRestoredCanonical({
     incoming:imported,current,mode:'replace',uidRemap:{}}),/RESTORE_UID_MAPPING_MISSING/);
 });
-test('P55-08 X: merge conflict aborts all groups instead of overwriting active destination',()=>{
+test('P55-08 X: merge conflict aborts all groups instead of overwriting active destination',async()=>{
   const {prepareRestoredCanonical}=await import('../src/ui/restore-sanitize.mjs');
   const incoming=empty(),current=empty();
   incoming.stores.meta.push({key:'release:a',value:serializeClone({key:'release:a',
