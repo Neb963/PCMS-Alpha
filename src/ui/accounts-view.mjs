@@ -22,8 +22,11 @@ window.addEventListener('pcms-global-account-target',event=>{
   const accountId=event.detail?.accountId;
   if(typeof accountId!=='string'||accountId.length>128)return;
   requestedAccount=accountId;
+  const alreadyHere=location.hash==='#accounts';
   location.hash='#accounts';
-  if(!document.getElementById('view-accounts').hidden)focusRequestedAccount();
+  if(alreadyHere)void read().catch(()=>{
+    held=true;draw();report('Local account state unavailable; no account assumed.');
+  });
 });
 const statuses={
   WAITING_LOGIN:'Awaiting manual login',VERIFICATION_PENDING:'Identity not verified',
@@ -178,8 +181,12 @@ async function read() {
   routes=r.routes;
   draw();
 }
+// Canonical account rows can change while another workspace is open.
+ // Navigate-then-reload, rather than focusing an obsolete initial snapshot.
 window.addEventListener('hashchange',()=>{
-  if(location.hash==='#accounts')focusRequestedAccount();
+  if(location.hash==='#accounts')void read().catch(()=>{
+    held=true;draw();report('Local account state unavailable; no account assumed.');
+  });
 });
 refresh.addEventListener('click',async()=>{
   report('Refreshing authoritative account and Persona state…');
