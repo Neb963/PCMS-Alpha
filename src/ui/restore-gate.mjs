@@ -51,6 +51,12 @@ export function createRestoreGate(storage,{now=()=>Date.now(),
     if(status==='OBSERVED'&&
       (!observation||observation.source!=='INDEPENDENT_READBACK'||
         !digest64(observation.digest)))fail('RESTORE_INDEPENDENT_READBACK_REQUIRED');
+    const before=prior.groups[group]?.status||null;
+    const allowed=before===null?status==='BEFORE_DISPATCH':
+      before==='BEFORE_DISPATCH'?status==='DISPATCH_POSSIBLE':
+      ['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(before)?
+        ['OBSERVED','HELD_UNCERTAIN'].includes(status):false;
+    if(!allowed)fail('RESTORE_STEP_TRANSITION_DENIED');
     // Do not store raw imported data, credentials, cookies or service replies.
     const groups={...prior.groups,[group]:{status,step,
       observedDigest:status==='OBSERVED'?observation.digest:null}};
