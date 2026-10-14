@@ -76,6 +76,10 @@ export async function perchanceSupplyIsolated(request) {
       return {ok:true,remoteId:'public_'+publicId};
     };
     if(request.kind==='READ_CREATE') {
+      // Owner endpoint and anonymous page bytes must agree with the current
+      // authenticated account census; absence there is not creation proof.
+      if(!currentNames.has(request.temporarySlug))
+        return hold('TEMP_NOT_IN_ACCOUNT_INVENTORY');
       const checked=await read(request.temporarySlug);
       if(!checked.ok)return hold('CREATE_READBACK_UNVERIFIED');
       return sameSession()?{ok:true,source:'INDEPENDENT_READBACK',
@@ -83,6 +87,10 @@ export async function perchanceSupplyIsolated(request) {
         ownerMatches:true,privateEmpty:true}:hold('SESSION_CHANGED');
     }
     if(request.kind==='READ_RENAME') {
+      // Positive final account membership is independent of rename ACK,
+      // while the old temporary slug must have disappeared.
+      if(!currentNames.has(request.slug))
+        return hold('FINAL_SLUG_NOT_IN_ACCOUNT_INVENTORY');
       const checked=await read(request.slug);
       if(!checked.ok||checked.remoteId!==request.remoteId)return hold('RENAME_READBACK_UNVERIFIED');
       if(currentNames.has(request.temporarySlug))return hold('OLD_SLUG_STILL_PRESENT');
