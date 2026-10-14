@@ -346,3 +346,23 @@ test('P55-09 X: two active accounts cannot bind the same restored target UID',as
   assert.throws(()=>prepareRestoredCanonical({incoming:a,current:empty(),
     mode:'replace',uidRemap:{[uid]:target}}),/RESTORE_DUPLICATE_ACTIVE_BINDING/);
 });
+
+test('P55-07/P55-12 X: restore port bounds input before any archive decode or donor write',async()=>{
+  const {validateRestoreTransport}=await import('../src/runtime/restore-boundary.mjs');
+  const template={archiveText:'archive',checkpointText:'checkpoint',
+    password:'safe operator password',reviewedPlanSha256:'a'.repeat(64),
+    mode:'merge',fresh:false,mappings:{'p-1':'container-1'}};
+  assert.equal(validateRestoreTransport(template,{maxBytes:32}).ok,true);
+  assert.equal(validateRestoreTransport({...template,
+    archiveText:'x'.repeat(33)},{maxBytes:32}).code,'RESTORE_INPUT_INVALID');
+  assert.equal(validateRestoreTransport({...template,
+    checkpointText:'x'.repeat(33)},{maxBytes:32}).code,'RESTORE_INPUT_INVALID');
+  assert.equal(validateRestoreTransport({...template,
+    password:'x'.repeat(4097)},{maxBytes:32}).code,'RESTORE_INPUT_INVALID');
+  assert.equal(validateRestoreTransport({...template,
+    mode:'overwrite'},{maxBytes:32}).code,'RESTORE_INPUT_INVALID');
+  assert.equal(validateRestoreTransport({...template,
+    mappings:{'p-1':4}},{maxBytes:32}).code,'RESTORE_MAPPING_INVALID');
+  assert.equal(validateRestoreTransport({...template,
+    mappings:Array(4)},{maxBytes:32}).code,'RESTORE_INPUT_INVALID');
+});
