@@ -72,22 +72,34 @@ function drawQueue(result){
       const li=document.createElement('li');
       li.textContent=item.slug+' — '+item.state+(item.reason?' ('+item.reason+')':'')+
         ' · '+item.source;
-      // Explicit single-item operator dispatch. No batch-run or automatic
-      // retry. The protected donor, current owner/route and durable
-      // DISPATCH_POSSIBLE marker are independently enforced by Core.
+      // Exact-target, human-initiated disposable pilot only. A general
+      // source/AI/publication/refresh capability remains independently OFF.
+      // No batch-run or automatic retry, even if a provider reply is lost.
       if(['FROZEN','CREATE_CONFIRMED'].includes(item.state)){
         const isCreate=item.state==='FROZEN';
         const action=document.createElement('button');
         action.type='button';action.className='pcms-supply-guarded-step';
-        action.textContent=isCreate?'Create private generator':'Rename to reserved slug';
-        action.setAttribute('aria-label',(isCreate?'Create private generator for ':'Rename private generator to ')+item.slug);
+        const pilotSlug=/^pcms-test-[a-z0-9-]{8,88}$/.test(item.slug);
+        action.textContent=isCreate?'Create private test':'Rename private test';
+        action.setAttribute('aria-label',(isCreate?'Create private test for ':'Rename private test to ')+item.slug);
+        action.disabled=!pilotSlug;
+        if(!pilotSlug)action.title='Manual live testing is limited to disposable pcms-test- slugs.';
         action.addEventListener('click',async()=>{
-          const prompt=isCreate?
-            'Attempt one guarded private/empty create for '+item.slug+'?':
-            'Attempt one guarded rename to '+item.slug+'?';
-          if(!window.confirm(prompt+' A lost reply requires read-only reconciliation; never repeat blindly.'))return;
-          action.disabled=true;action.textContent='Checking guarded operation…';
+          const typed=(isCreate?'CREATE ':'RENAME ')+item.slug;
+          const confirmation=window.prompt('Type '+typed+' to authorize exactly one protected, private test write. No automatic retry:', '');
+          if(confirmation===null)return;
+          if(confirmation!==typed){notice('Exact disposable confirmation did not match. No remote action.');return;}
+          action.disabled=true;action.textContent='Verifying owner and route…';
           try{
+            const armed=await supply('ARM_DISPOSABLE_TEST',{
+              batchId:batch.batchId,itemId:item.itemId,expectedRevision:item.revision,
+              confirmation:typed});
+            if(armed?.ok!==true){
+              const status=document.createElement('span');
+              status.textContent=' Pilot held: '+(armed?.code||'GUARD_UNVERIFIED');
+              li.append(status);return;
+            }
+            action.textContent='Executing one guarded step…';
             const out=await supply('EXECUTE_ITEM',{
               batchId:batch.batchId,itemId:item.itemId,expectedRevision:item.revision});
             const status=document.createElement('span');
@@ -101,7 +113,7 @@ function drawQueue(result){
             status.textContent=' No confirmed reply. The effect may have reached the provider. Re-read canonical receipts; no retry.';
             li.append(status);
           }finally{
-            action.disabled=false;action.textContent=isCreate?'Create private generator':'Rename to reserved slug';
+            action.disabled=!pilotSlug;action.textContent=isCreate?'Create private test':'Rename private test';
             await fetchBatches();
           }
         });

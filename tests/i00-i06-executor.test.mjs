@@ -18,8 +18,12 @@ const batch=freezeSupply({batchId:'batch_alpha_01',accountId:account.accountId,
   slugs:['requested-slug']}).batch;
 function fixture({gate=true,failDispatch=false,lostAck=false,wrongOwner=false,
   denyRoute=false,staleIdentity=false,wrongReadback=false,
-  pauseAfterPrepare=false,routeLossAfterPrepare=false}={}){
-  let current={...batch,items:batch.items.map(i=>({...i}))};
+  pauseAfterPrepare=false,routeLossAfterPrepare=false,
+  slug='requested-slug',pilotClock=()=>performance.now()}={}){
+  const planned=slug==='requested-slug'?batch:freezeSupply({
+    batchId:batch.batchId,accountId:account.accountId,personaUid:account.personaUid,
+    accountRevision:2,bindingVersion:1,slugs:[slug]}).batch;
+  let current={...planned,items:planned.items.map(i=>({...i}))};
   let gateOn=gate,routeChecks=0;
   let identity=staleIdentity?{...account,revision:3}:account;
   const trace=[],remote=[],gitLedger=[];
@@ -83,7 +87,7 @@ function fixture({gate=true,failDispatch=false,lostAck=false,wrongOwner=false,
     }
   };
   const boundary=createSupplyBoundary(api,{open:async()=>({}),
-    makeStores:()=>stores,guard:()=>guard,effectGate:()=>gateOn,
+    makeStores:()=>stores,guard:()=>guard,effectGate:()=>gateOn,pilotClock,
     gitGate:()=>gate,gitWrite:async ({folder,slug,token})=>{
       assert.equal(trace.at(-1),'GIT_DISPATCH_POSSIBLE');
       assert.equal(folder,'gens/'+slug);
@@ -201,4 +205,55 @@ test('P56-06 F: sender, owner/cookie proof, raw transport, and oversized list de
   assert.equal((await f.dispatch()).code,'PROVIDER_ACTIVATION_HELD');
   assert.equal(f.remote.length,0);
   assert.equal((await f.run('LIST_BATCHES')).batches.length,1);
+});
+
+test('I17 F/X: exact disposable operator arm permits only one journaled CREATE and separate RENAME',async()=>{
+  const slug='pcms-test-disposable-0001',f=fixture({gate:false,slug});
+  assert.equal((await f.dispatch()).code,'PROVIDER_ACTIVATION_HELD');
+  assert.equal(f.remote.length,0);
+  const arm=confirmation=>f.run('ARM_DISPOSABLE_TEST',{
+    batchId:batch.batchId,itemId:f.item().itemId,
+    expectedRevision:f.item().revision,confirmation});
+  assert.equal((await arm('CREATE other-slug')).code,'PILOT_CONFIRMATION_REQUIRED');
+  const createArm=await arm('CREATE '+slug);
+  assert.equal(createArm.ok,true,createArm.code);
+  assert.equal(createArm.scope,'SINGLE_DISPOSABLE_STEP_NOT_GENERAL_ACTIVATION');
+  assert.equal((await arm('CREATE '+slug)).code,'PILOT_ALREADY_ARMED');
+  const created=await f.dispatch();
+  assert.equal(created.state,'CREATE_CONFIRMED',created.code);
+  assert.deepEqual(f.remote.map(x=>x.kind),['CREATE']);
+  assert.equal((await f.dispatch()).code,'PROVIDER_ACTIVATION_HELD',
+    'an acknowledged create does not automatically arm rename');
+  const renameArm=await arm('RENAME '+slug);
+  assert.equal(renameArm.ok,true,renameArm.code);
+  const renamed=await f.dispatch();
+  assert.equal(renamed.state,'SOURCE_PENDING',renamed.code);
+  assert.deepEqual(f.remote.map(x=>x.kind),['CREATE','RENAME']);
+  assert.equal((await f.dispatch()).code,'NOT_ADMISSIBLE');
+});
+test('I17 X: pilot rejects wrong slug, stale CAS, untrusted sender, route loss and expiry',async()=>{
+  const normal=fixture({gate:false});
+  assert.equal((await normal.run('ARM_DISPOSABLE_TEST',{
+    batchId:batch.batchId,itemId:normal.item().itemId,expectedRevision:1,
+    confirmation:'CREATE requested-slug'})).code,'PILOT_DISPOSABLE_SLUG_REQUIRED');
+  const f=fixture({gate:false,slug:'pcms-test-disposable-0002'});
+  const params={batchId:batch.batchId,itemId:f.item().itemId,expectedRevision:1,
+    confirmation:'CREATE pcms-test-disposable-0002'};
+  assert.equal((await f.run('ARM_DISPOSABLE_TEST',{...params,expectedRevision:2})).code,'STALE_REVISION');
+  assert.equal(validateSupplyMessage(api,{id:'web',url:sender.url},
+    {type:'ARM_DISPOSABLE_TEST',params}).code,'UNTRUSTED_SENDER');
+  for(const value of [null,1,'A'.repeat(121)])
+    assert.equal(validateSupplyMessage(api,sender,{
+      type:'ARM_DISPOSABLE_TEST',params:{...params,confirmation:value}}).code,'INVALID_PARAMS');
+  assert.equal((await fixture({gate:false,slug:'pcms-test-disposable-0003',
+    denyRoute:true}).run('ARM_DISPOSABLE_TEST',{...params,
+      confirmation:'CREATE pcms-test-disposable-0003'})).ok,false);
+  let ticks=0;
+  const expired=fixture({gate:false,slug:'pcms-test-disposable-0004',pilotClock:()=>ticks});
+  assert.equal((await expired.run('ARM_DISPOSABLE_TEST',{...params,
+    confirmation:'CREATE pcms-test-disposable-0004'})).ok,true);
+  ticks=120001;
+  assert.equal((await expired.dispatch()).code,'PROVIDER_ACTIVATION_HELD');
+  assert.equal(expired.remote.length,0);
+  assert.equal(expired.trace.length,0);
 });

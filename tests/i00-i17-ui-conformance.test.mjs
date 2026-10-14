@@ -74,7 +74,8 @@ test('I17 real inventory affordances follow approved v3.1 workstation interactio
 test('I17 guarded operator supply uses exactly one item command and never auto-replays',async()=>{
   const supply=await readFile('src/ui/supply-view.mjs','utf8');
   assert.match(supply,/type==='EXECUTE_ITEM'\?75000:6500/);
-  assert.match(supply,/window\.confirm\(prompt/);
+  assert.match(supply,/window\.prompt\('Type '/);
+  assert.match(supply,/supply\('ARM_DISPOSABLE_TEST'/);
   assert.match(supply,/supply\('EXECUTE_ITEM'/);
   assert.match(supply,/expectedRevision:item\.revision/);
   assert.match(supply,/do not blindly retry/i);

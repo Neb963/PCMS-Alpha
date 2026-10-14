@@ -9,8 +9,12 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {writeNonReadyFolder,markerRequestAllowed} from './supply-git.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 export const SUPPLY_PORT='pcms-i06-supply';
-const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED']);
+const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM',
+  'RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED','ARM_DISPOSABLE_TEST']);
 const hex=/^[a-f0-9]{64}$/;
+// Only a disposable, explicitly named target may be tested live. This does
+// not qualify general generator supply, Git writeback or publication.
+const disposable=/^pcms-test-[a-z0-9-]{8,88}$/;
 export function validateSupplyMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(message);}catch{return fail('INVALID_MESSAGE');}
@@ -25,6 +29,7 @@ export function validateSupplyMessage(api,sender,message){
     message.type==='GET_BATCH'?['batchId']:
     message.type==='LIST_BATCHES'?[]:
     message.type==='FINISH_SOURCE_FOLDER'?['batchId','itemId','expectedRevision','token']:
+    message.type==='ARM_DISPOSABLE_TEST'?['batchId','itemId','expectedRevision','confirmation']:
     ['batchId','itemId','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
   if(message.type==='PREVIEW'||message.type==='FREEZE'){
@@ -35,12 +40,16 @@ export function validateSupplyMessage(api,sender,message){
       return fail('INVALID_PARAMS');
   }else if(message.type==='GET_BATCH'&&!isSafeId(p.batchId))
     return fail('INVALID_PARAMS');
-  else if(['EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED'].includes(message.type)&&
+  else if(['EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED',
+    'ARM_DISPOSABLE_TEST'].includes(message.type)&&
     (!isSafeId(p.batchId)||!isSafeId(p.itemId)||
      !Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
     return fail('INVALID_PARAMS');
   if(message.type==='FINISH_SOURCE_FOLDER'&&
     (typeof p.token!=='string'||p.token.length>512))return fail('INVALID_PARAMS');
+  if(message.type==='ARM_DISPOSABLE_TEST'&&
+    (typeof p.confirmation!=='string'||p.confirmation.length>120))
+    return fail('INVALID_PARAMS');
   return {ok:true};
 }
 async function fingerprint(parts){
@@ -59,11 +68,61 @@ export function createSupplyBoundary(api,{
   // Deliberately OFF in packaged extension. Tests must explicitly supply
   // an independently controlled synthetic gate and fake isolated executor.
   effectGate=()=>false,gitGate=()=>false,gitWrite=writeNonReadyFolder,
+  pilotClock=()=>performance.now(),
   makeStores=db=>({supply:createSupplyStore(db),accounts:createAccountStore(db)})
 }={}){
   let dbPromise;
   const sentinel=createRestoreSentinel(api.storage.local);
   const stores=()=>dbPromise ||=open().then(makeStores);
+  // A pilot arm is never persisted. Firefox event-page suspension or restart
+  // revokes it, and a possible dispatch consumes it before the remote call.
+  let pilotArm=null;
+  const pilotMatches=({account,batch,item})=>{
+    const g=pilotArm;
+    return !!g&&pilotClock()<g.expiresAt&&g.batchId===batch.batchId&&
+      g.itemId===item.itemId&&g.itemRevision===item.revision&&
+      g.itemState===item.state&&g.accountId===account.accountId&&
+      g.accountRevision===account.revision&&
+      g.bindingVersion===account.bindingVersion&&
+      g.principalFingerprint===account.identity?.principalFingerprint;
+  };
+  const supplyAuthorized=ctx=>effectGate(ctx)===true||pilotMatches(ctx);
+  async function armDisposablePilot(s,p){
+    const found=await s.supply.get(p.batchId);
+    if(!found.ok)return found;
+    const b=found.batch,item=b.items.find(x=>x.itemId===p.itemId);
+    if(!item)return fail('ITEM_NOT_FOUND');
+    if(item.revision!==p.expectedRevision)return fail('STALE_REVISION');
+    if(!['FROZEN','CREATE_CONFIRMED'].includes(item.state))return fail('NOT_ADMISSIBLE');
+    if(!disposable.test(item.requestedSlug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
+    const action=item.state==='FROZEN'?'CREATE':'RENAME';
+    if(p.confirmation!==action+' '+item.requestedSlug)return fail('PILOT_CONFIRMATION_REQUIRED');
+    if(pilotArm&&pilotClock()<pilotArm.expiresAt)return fail('PILOT_ALREADY_ARMED');
+    const observed=await s.accounts.get(b.accountId);
+    if(!observed.ok||!validateOwnerContext(b,observed.account).ok||
+       !hex.test(observed.account.identity?.principalFingerprint||''))
+      return fail('ACCOUNT_STALE');
+    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+    const g=guard();
+    if(!g?.getSafeRouteReadiness||!g.runSupplyStep)return fail('DONOR_GUARD_UNAVAILABLE');
+    const route=await g.getSafeRouteReadiness(b.personaUid);
+    if(!route?.ready||route.personaUid!==b.personaUid||
+       !route.cookieStoreId||!route.routeId)
+      return fail(route?.code||'PROTECTED_ROUTE_UNVERIFIED');
+    // Re-read canonical owner after async route admission; a concurrent
+    // rebind must never arm an old session or move a new generator.
+    const again=await s.accounts.get(b.accountId);
+    if(!again.ok||!validateOwnerContext(b,again.account).ok||
+       (await sentinel.inspect()).held)return fail('ACCOUNT_STALE');
+    pilotArm={batchId:b.batchId,itemId:item.itemId,itemRevision:item.revision,
+      itemState:item.state,accountId:b.accountId,accountRevision:b.accountRevision,
+      bindingVersion:b.bindingVersion,
+      principalFingerprint:again.account.identity.principalFingerprint,
+      cookieStoreId:route.cookieStoreId,routeId:route.routeId,
+      expiresAt:pilotClock()+120000};
+    return {ok:true,action,slug:item.requestedSlug,expiresInSeconds:120,
+      scope:'SINGLE_DISPOSABLE_STEP_NOT_GENERAL_ACTIVATION'};
+  }
   async function frozenPlan(s,p,previewOnly){
     const current=await s.accounts.get(p.accountId);
     if(!current.ok)return current;
@@ -103,7 +162,8 @@ export function createSupplyBoundary(api,{
       return fail('ACCOUNT_STALE');
     // Historic inventory and account verification alone are NOT authorization
     // to mutate. The gate is a local trusted integration decision, never UI.
-    if(effectGate({account:account.account,batch:b,item})!==true)
+    const ctx={account:account.account,batch:b,item};
+    if(!supplyAuthorized(ctx))
       return fail('PROVIDER_ACTIVATION_HELD');
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
     const g=guard();
@@ -112,6 +172,9 @@ export function createSupplyBoundary(api,{
     const readiness=await g.getSafeRouteReadiness(b.personaUid);
     if(!readiness?.ready||readiness.personaUid!==b.personaUid)
       return fail(readiness?.code||'PROTECTED_ROUTE_UNVERIFIED');
+    if(pilotMatches(ctx)&&(pilotArm.routeId!==readiness.routeId||
+       pilotArm.cookieStoreId!==readiness.cookieStoreId))
+      return fail('PILOT_ROUTE_CHANGED');
     const create=item.state==='FROZEN';
     const kind=create?'CREATE':'RENAME';
     const event=kind+'_PREPARED',operationId='supply_'+crypto.randomUUID().replaceAll('-','');
@@ -126,7 +189,7 @@ export function createSupplyBoundary(api,{
     const now=await s.accounts.get(b.accountId);
     if(!now.ok||!validateOwnerContext(b,now.account).ok||
        (await sentinel.inspect()).held||
-       effectGate({account:now.account,batch:b,item})!==true)
+       !supplyAuthorized({account:now.account,batch:b,item}))
       return fail('PREPARED_HELD');
     const guardAgain=await g.getSafeRouteReadiness(b.personaUid);
     if(!guardAgain?.ready||guardAgain.cookieStoreId!==readiness.cookieStoreId||
@@ -136,12 +199,16 @@ export function createSupplyBoundary(api,{
     if(!at.ok)return at;  // no remote call without COMMITTED marker
     // A Pause or restore hold may arrive after journal commit but before
     // actual dispatch. This is now an UNCERTAIN fence, never a fresh retry.
-    if(effectGate({account:now.account,batch:b,item})!==true||
+    if(!supplyAuthorized({account:now.account,batch:b,item})||
        (await sentinel.inspect()).held){
+      pilotArm=null;
       await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
         expectedRevision:at.item.revision,event:kind+'_UNCERTAIN'});
       return fail('HELD_BEFORE_DISPATCH');
     }
+    // The one-off operator pilot is consumed before any remote effect. A
+    // timeout, crash or lost acknowledgment cannot silently rearm a retry.
+    if(pilotMatches({account:now.account,batch:b,item}))pilotArm=null;
     const params={
       kind,slug:item.requestedSlug,temporarySlug:item.temporarySlug,
       remoteId:item.remoteId,principalFingerprint:account.account.identity.principalFingerprint
@@ -328,6 +395,7 @@ export function createSupplyBoundary(api,{
         const out=await s.supply.stage({...p,event:'ABORT_PREPARED'});
         return redacted(out);
       }
+      if(message.type==='ARM_DISPOSABLE_TEST')return await armDisposablePilot(s,p);
       if(message.type==='RECONCILE_ITEM')return await reconcile(s,p);
       if(message.type==='FINISH_SOURCE_FOLDER')return await finishSource(s,p);
       return await execute(s,p);
