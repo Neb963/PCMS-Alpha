@@ -57,19 +57,45 @@ document.addEventListener('keydown', event => {
 
 // Search uses the existing bounded local inventory filter; it must never
 // suggest account/source/operation or remote search capability.
-document.querySelectorAll('[data-pcms-jump]').forEach(button => {
-  button.addEventListener('click', () => {
+const generatorPanels=new Map(
+  [...document.querySelectorAll('#view-generators [data-pcms-generator-panel]')]
+    .map(panel=>[panel.dataset.pcmsGeneratorPanel,panel])
+);
+function showGeneratorPanel(name,{focus=false}={}){
+  const selected=generatorPanels.get(name);
+  if(!selected)return false;
+  for(const [key,panel] of generatorPanels)panel.hidden=key!==name;
+  for(const button of document.querySelectorAll('[data-pcms-jump]')){
+    button.setAttribute('aria-pressed',String(
+      selected.contains(document.getElementById(button.dataset.pcmsJump))));
+  }
+  if(focus){
+    const heading=selected.querySelector('h2');
+    if(heading){
+      heading.tabIndex=-1;
+      heading.scrollIntoView({block:'start'});
+      heading.focus({preventScroll:true});
+    }
+  }
+  return true;
+}
+document.querySelectorAll('[data-pcms-jump]').forEach(button=>{
+  button.addEventListener('click',()=>{
     const target=document.getElementById(button.dataset.pcmsJump);
-    if(!target || target.closest('.workspace')?.hidden)return;
-    target.tabIndex=-1;
-    target.scrollIntoView({block:'start'});
-    target.focus({preventScroll:true});
+    if(target && !target.closest('.workspace')?.hidden){
+      showGeneratorPanel(target.closest('[data-pcms-generator-panel]')?.dataset.pcmsGeneratorPanel,{focus:true});
+    }
   });
 });
+// Cross-workspace target events also select the correct panel before an
+// existing source/adoption handler displays its canonical revision-fenced data.
+window.addEventListener('pcms-source-target',()=>showGeneratorPanel('source'));
+window.addEventListener('pcms-adoption-target',()=>showGeneratorPanel('adopt'));
 quickSearch.addEventListener('keydown', event => {
   if (event.key === 'Escape') { quickSearch.value = ''; quickSearch.blur(); return; }
   if (event.key !== 'Enter') return;
   event.preventDefault();
+  showGeneratorPanel('inventory');
   const query = document.getElementById('pcms-generator-query');
   query.value = quickSearch.value;
   location.hash = '#generators';

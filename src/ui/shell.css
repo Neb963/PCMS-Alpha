@@ -152,3 +152,13 @@ td{font-size:12px;padding:10px 9px;overflow-wrap:anywhere}
 .pcms-evidence-kv dt{color:var(--muted)}.pcms-evidence-kv dd{margin:0;color:var(--ink);overflow-wrap:anywhere}
 @media(max-width:1280px){.pcms-inventory-stage{grid-template-columns:minmax(0,1fr)}.pcms-inventory-inspector{position:static}}
 @media(max-width:550px){.pcms-inventory-stage table{min-width:640px}.pcms-workspace-shortcuts{flex-wrap:nowrap;overflow-x:auto;scrollbar-gutter:stable}.pcms-workspace-shortcuts button{white-space:nowrap}}
+
+/* I17 generators subflows are real hidden, reentrant workspaces, not synthetic
+   prototype panels. Reentering a source/adoption target shows its owner. */
+.pcms-workspace-shortcuts{gap:3px;border-bottom:1px solid var(--line);margin-bottom:18px}
+.pcms-workspace-shortcuts button{border-color:transparent!important;background:transparent!important;color:var(--muted);font-weight:650}
+.pcms-workspace-shortcuts button[aria-pressed=true]{background:var(--accent-light)!important;color:var(--accent);border-color:transparent!important}
+#view-generators [data-pcms-generator-panel="inventory"] .pcms-inventory-stage .table-wrap{min-height:280px}
+#view-generators [data-pcms-generator-panel="inventory"] .pcms-inventory-inspector{min-height:280px}
+#view-generators [data-pcms-generator-panel="inventory"] .pcms-inventory-inspector:focus-within{outline:1px solid var(--focus)}
+@media(max-width:550px){#view-generators [data-pcms-generator-panel="inventory"] .pcms-inventory-stage .table-wrap{min-height:160px}}

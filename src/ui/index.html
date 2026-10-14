@@ -51,13 +51,13 @@
       <section class="workspace" id="view-generators" data-view="generators" aria-labelledby="heading-generators" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 02</p><h1 id="heading-generators" tabindex="-1">Generators</h1><p>Generator inventory and source lineage.</p></div><button disabled type="button" aria-describedby="blocked-generators">Reserve generator</button></header>
         <nav class="pcms-workspace-shortcuts" aria-label="Generator workflows">
-          <button type="button" data-pcms-jump="generators-table-title">Inventory</button>
-          <button type="button" data-pcms-jump="pcms-supply-heading">Slug supply</button>
-          <button type="button" data-pcms-jump="pcms-adopt-heading">Adoption</button>
-          <button type="button" data-pcms-jump="pcms-stage-heading">Private staging</button>
-          <button type="button" data-pcms-jump="pcms-source-heading">Git source</button>
+          <button type="button" data-pcms-jump="generators-table-title" aria-pressed="true">Inventory</button>
+          <button type="button" data-pcms-jump="pcms-supply-heading" aria-pressed="false">Slug supply</button>
+          <button type="button" data-pcms-jump="pcms-adopt-heading" aria-pressed="false">Adoption</button>
+          <button type="button" data-pcms-jump="pcms-stage-heading" aria-pressed="false">Private staging</button>
+          <button type="button" data-pcms-jump="pcms-source-heading" aria-pressed="false">Git source</button>
         </nav>
-        <section class="panel" aria-labelledby="generators-table-title"><div class="panel-head"><h2 id="generators-table-title">Owned inventory observations</h2><span class="unknown">Historical local evidence · Read only</span></div>
+        <section class="panel" aria-labelledby="generators-table-title" data-pcms-generator-panel="inventory"><div class="panel-head"><h2 id="generators-table-title">Owned inventory observations</h2><span class="unknown">Historical local evidence · Read only</span></div>
           <div class="account-controls"><label for="pcms-generator-query">Search slug or account</label><input id="pcms-generator-query" type="search" maxlength="80" autocomplete="off" placeholder="Search inventory">
           <label for="pcms-generator-owner-filter">Owner evidence</label><select id="pcms-generator-owner-filter"><option value="ALL">All</option><option value="OBSERVED_OWNER">Previously verified</option><option value="OWNER_UNVERIFIED">Unknown</option><option value="OWNER_DISPUTED">Disputed</option><option value="UNOBSERVED">Unobserved</option><option value="IDENTITY_CONFLICT">Identity conflict</option><option value="OWNER_CONFLICT">Account conflict</option></select><button type="button" id="pcms-generator-refresh">Refresh local data</button></div>
           <div class="account-controls"><label for="pcms-generator-account">Read-only remote Sync</label><select id="pcms-generator-account"><option value="">Loading accounts</option></select><button type="button" id="pcms-generator-sync" disabled>Sync verified account</button></div>
@@ -70,7 +70,7 @@
           </div>
           <div class="account-controls"><span id="pcms-generator-count" role="status">No verified rows</span><button type="button" id="pcms-generator-prev" disabled>Previous page</button><button type="button" id="pcms-generator-next" disabled>Next page</button></div>
           <p id="blocked-generators" class="reason">Reservation and provider writes remain held; existing-generator original-source adoption is available with guarded readback. Read-only Sync uses the existing donor-guarded isolated browser observer and can hold on an unavailable or changed session. Edit keys and collaboration cannot prove ownership; historical observations never authorize writes. Missing generator observations never mean deletion.</p></section>
-        <section class="panel" aria-labelledby="pcms-supply-heading">
+        <section class="panel" aria-labelledby="pcms-supply-heading" data-pcms-generator-panel="supply" hidden>
           <div class="panel-head"><h2 id="pcms-supply-heading">Slug supply — canonical plan</h2><span class="unknown">Local freeze only · Provider held</span></div>
           <p class="reason">Paste one exact generator slug per line (up to 100). Preview preserves order and spelling. Freezing records the requests for a verified Persona-bound account in IndexedDB; it does not create, rename, reserve remotely, or write to private Git. Existing and conflicting local slugs are rejected per item.</p>
           <div class="account-controls"><label for="pcms-supply-account">Account</label>
@@ -82,7 +82,7 @@
           <p id="pcms-supply-feedback" role="status" aria-live="polite">Provider create/rename and Git folder writes are held until separately proven capability activation.</p>
           <div class="table-wrap" role="region" aria-label="Supply preview and item receipts" tabindex="0"><table><thead><tr><th scope="col">Item</th><th scope="col">Requested slug</th><th scope="col">Canonical state</th><th scope="col">Reason</th></tr></thead><tbody id="pcms-supply-items"><tr><td colspan="4">No batch preview.</td></tr></tbody></table></div>
         </section>
-        <section class="panel" aria-labelledby="pcms-adopt-heading">
+        <section class="panel" aria-labelledby="pcms-adopt-heading" data-pcms-generator-panel="adopt" hidden>
           <div class="panel-head"><h2 id="pcms-adopt-heading">Adopt an existing owned generator</h2><span class="unknown">Original source · Local immutable baseline</span></div>
           <p class="reason">Choose “Adopt” in the inventory. A public generator requires explicit one-time consent. The donor-guarded read-only observer obtains two matching original-source byte readbacks. No live code, listing, source association or release is changed. Nonempty assets without independently verified bytes are held.</p>
           <div class="account-controls"><label for="pcms-adopt-name">Selected generator</label><input id="pcms-adopt-name" readonly placeholder="Choose from owned inventory"></div>
@@ -99,7 +99,7 @@
           </div>
           <p id="pcms-adopt-status" role="status" aria-live="polite">Adoption not started. Git original archive pending; release and provider writes held.</p>
         </section>
-        <section class="panel" aria-labelledby="pcms-stage-heading">
+        <section class="panel" aria-labelledby="pcms-stage-heading" data-pcms-generator-panel="stage" hidden>
           <div class="panel-head"><h2 id="pcms-stage-heading">Private candidate staging · I09</h2><span class="unknown">No live provider activation</span></div>
           <p class="reason">Only an independently confirmed private, empty and newly reserved generator can accept a pinned READY source. The candidate records full PJS, HTML and each source asset including deletes, plus the previous empty source. A successful save is never verified until a separate full-byte readback. Public/adopted sources cannot be staged here.</p>
           <div class="account-controls">
@@ -117,7 +117,7 @@
           <p id="pcms-stage-status" role="status" aria-live="polite">No I09 candidate pinned. Provider staging is held until independently qualified activation; no direct or public fallback.</p>
           <div id="pcms-stage-diff" class="table-wrap" tabindex="0" role="region" aria-label="Source add, change and delete summary">No candidate diff.</div>
         </section>
-        <section class="panel" aria-labelledby="pcms-source-heading">
+        <section class="panel" aria-labelledby="pcms-source-heading" data-pcms-generator-panel="source" hidden>
           <div class="panel-head"><h2 id="pcms-source-heading">Private Git source — read only</h2><span class="unknown">Operator-triggered</span></div>
           <p class="reason">Inspect only <code>Neb963/per-gens</code> <code>main</code>. Requires a fine-grained GitHub token with Contents: Read-only, entered for this operation; token is never saved. No remote Git initialization, commit, asset rewrite or publication is available.</p>
           <div class="account-controls"><label for="pcms-source-target">Generator</label>

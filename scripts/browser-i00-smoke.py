@@ -3053,11 +3053,14 @@ def main():
                     advanced:!!document.getElementById('advanced')?.href.includes('options/options.html'),
                     literalEscapedNewline:directText.includes(String.fromCharCode(92)+'n'),
                     inspector:!!inspector,focusedJump:document.activeElement===target,
+                    panelHidden:document.querySelector('[data-pcms-generator-panel="inventory"]')?.hidden===true,
+                    panelVisible:document.querySelector('[data-pcms-generator-panel="adopt"]')?.hidden===false,
                     overviewSignals:!!document.querySelector('.pcms-overview-signals'),
                     defaultRoute:document.querySelector('#navigation a[aria-current="page"]')?.dataset?.workspace};""")
                 assert ui_conformance.get('donorPopupGone') and 'PCMS Alpha' in (ui_conformance.get('actionTitle') or ''),ui_conformance
                 assert ui_conformance.get('advanced') and not ui_conformance.get('literalEscapedNewline'),ui_conformance
                 assert ui_conformance.get('inspector') and ui_conformance.get('focusedJump'),ui_conformance
+                assert ui_conformance.get('panelHidden') and ui_conformance.get('panelVisible'),ui_conformance
                 assert ui_conformance.get('overviewSignals'),ui_conformance
                 print('B I17_UI_PROTOTYPE_SHELL_ACTION_ESCAPES_AND_KEYBOARD_JUMP=PASS',flush=True)
 

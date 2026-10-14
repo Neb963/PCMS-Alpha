@@ -17,6 +17,11 @@ test('I17: shell implements prototype workstation chrome without losing operatio
   }
   assert.match(css,/@media\(max-width:550px\)/);
   assert.match(shell,/quickSearch\.addEventListener/);
+  assert.match(shell,/showGeneratorPanel\('inventory'\)/);
+  assert.match(shell,/pcms-source-target/);
+  assert.match(shell,/pcms-adoption-target/);
+  for(const panel of ['supply','adopt','stage','source'])
+    assert.match(html,new RegExp('data-pcms-generator-panel="'+panel+'" hidden'));
   assert.match(shell,/query\.dispatchEvent\(new Event\('input'/);
   assert.match(inv,/inspectPick\.addEventListener/);
   assert.match(inv,/Historical local observation/);
