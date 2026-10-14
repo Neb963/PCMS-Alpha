@@ -124,7 +124,8 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           archiveSha256:reviewed.plan.archiveSha256,
           destinationSha256:reviewed.plan.destinationSha256,
           checkpointSha256:checkpoint.sha256,reviewedPlanSha256:args.reviewedPlanSha256,
-          checkpointTier:checkpoint.tier,fresh:args.fresh===true});
+          checkpointTier:checkpoint.tier,fresh:args.fresh===true,
+          recovery:{mode:args.mode,mappings:req}});
         // Once guard is written/read back, any crash or failed adapter leaves
         // the controller inactive. No automatic retry or rollback.
         const afterGuard=await destination(api,donor);

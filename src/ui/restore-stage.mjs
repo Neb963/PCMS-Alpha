@@ -35,7 +35,7 @@ export function createRestoreStageEngine(gate,{dispatch,readback}={}){
     if(typeof dispatch!=='function'||typeof readback!=='function')
       err('RESTORE_ADAPTER_NOT_CONFIGURED');
     await check({epoch,revision,group,fingerprint});
-    const prepared=await gate.advance({epoch,revision,group,step,status:'BEFORE_DISPATCH'});
+    const prepared=await gate.advance({epoch,revision,group,step,status:'BEFORE_DISPATCH',fingerprint});
     // Durable DISPATCH_POSSIBLE is a hard precondition to calling the adapter.
     const possible=await gate.advance({epoch,revision:prepared.revision,group,
       step,status:'DISPATCH_POSSIBLE'});
