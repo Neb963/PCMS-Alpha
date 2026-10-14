@@ -38,11 +38,14 @@ function inertMeta(key,row,remap){
   if(typeof key==='string'&&key.startsWith('writeback:')&&data.record){
     data.record={...data.record,state:'RESTORE_REVIEW_REQUIRED'};
   }
+  if(key==='writeback-settings'&&data.setting){
+    data.setting={...data.setting,autoEnabled:false};
+  }
   if(key==='backup:auto-state'&&data.state){
     data.state={...data.state,enabled:false,active:null,
       status:'SUSPENDED',code:'RESTORED_KEY_NOT_AUTHORITY'};
   }
-  if(key==='refresher:shadow'&&data.state){
+  if(key==='refresher:shadow:v1'&&data.state){
     data.state={...data.state,globalPause:true,
       rows:(data.state.rows||[]).map(r=>({...r,paused:true})),
       accounts:Object.fromEntries(Object.entries(data.state.accounts||{})
@@ -88,7 +91,13 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',uidRemap
         deny('RESTORE_MERGE_CONFLICT');
       map.set(key,item);
     }
-    stores[name]=[...map.values()].map(row=>({key:structuredClone(row.key),value:serializeClone(row.value)}));
+    stores[name]=[...map.values()].sort((a,b)=>{
+      const x=a.key,y=b.key;
+      if(typeof indexedDB!=='undefined'&&typeof indexedDB.cmp==='function')
+        return indexedDB.cmp(x,y);
+      if(typeof x==='number'&&typeof y==='number')return x-y;
+      return String(x).localeCompare(String(y),'en');
+    }).map(row=>({key:structuredClone(row.key),value:serializeClone(row.value)}));
   }
   const snapshot={schema:1,stores};
   validatePcmsSnapshot(snapshot);
