@@ -67,7 +67,7 @@ function summary(plan,proof){
     'Unverified identities: '+plan.plan.risk.sessionStatus,
     'Excluded: '+plan.plan.exclusions.join('; '),
     'Pre-restore checkpoint: '+(proof?.verified?'independent selected-file readback + authenticated destination cut':'NOT VERIFIED'),
-    'Restore activation: OFF. No imported source, routes, cookies or provider commands applied.'
+    'Restore activation: OFF. Preview does not apply imported source, routes, cookies or provider commands.'
   ].join('\n');
 }
 preview.addEventListener('click',async()=>{
@@ -84,7 +84,11 @@ preview.addEventListener('click',async()=>{
       containers:current.donor.containers});
     review={plan,current,raw};
     summary(plan,null);
-    status.textContent='Preview authenticated; mapping is only a proposed identity association. Review exclusions and checkpoint.';
+    const risk=plan.plan.risk;
+    status.textContent=risk.unmappedPersonas||risk.directRouteReviews?
+      'Authenticated preview only: '+risk.unmappedPersonas+' missing mappings; '+
+      risk.directRouteReviews+' Direct-route reviews. Apply is held until every identity is explicitly mapped and Direct is excluded.':
+      'Authenticated preview. Review exact Persona associations and exclusions, then select an independent checkpoint.';
     verify.disabled=false;
   }catch(e){invalidate();status.textContent='Restore held: '+fault(e)+'. No donor or canonical write.';}
   finally{preview.disabled=false;}
@@ -137,7 +141,14 @@ const reviewedHash=$('pcms-restore-reviewed-hash');
 const approval=$('pcms-restore-consent');
 const apply=$('pcms-restore-apply');
 function syncApply(){
-  apply.disabled=!(review&&checkpointProof?.verified&&approval.checked&&
+  const plan=review?.plan?.plan;
+  const complete=!!plan&&plan.risk.unmappedPersonas===0&&
+    plan.risk.directRouteReviews===0&&plan.groups.every(g=>
+      ['MAPPING_ONLY_UNVERIFIED','CREATE_REQUESTED'].includes(g.status));
+  let count=0;
+  try{count=Object.keys(JSON.parse(mappings.value||'{}')).length;}catch{}
+  apply.disabled=!(complete&&count===plan.risk.importedPersonas&&
+    checkpointProof?.verified&&approval.checked&&
     reviewedHash.value===review.plan.planSha256);
 }
 reviewedHash.addEventListener('input',syncApply);
@@ -191,6 +202,9 @@ apply.addEventListener('click',async()=>{
       'Restored data under inactive controller. Routes, accounts and approvals still require independent review. '+(held.status||'RESTORE_HELD'):
       'Restore uncertain/held: '+(result?.code||'RESTORE_RESULT_UNKNOWN')+
       ' / '+(held?.status||'STATUS_UNAVAILABLE')+'. Never resend a possibly completed write.';
+    details.textContent+='\nLocal apply result: '+(result?.ok?'DATA_RECOVERED_INACTIVE':
+      'HELD_UNCERTAIN')+'; group guard: '+(held?.status||'UNAVAILABLE')+
+      '; live owner/session/route checks: NOT VERIFIED; controller activation: OFF.';
   }catch(e){
     status.textContent='Restore not confirmed: '+fault(e)+'. Inspect restore guard before any further action.';
   }finally{
