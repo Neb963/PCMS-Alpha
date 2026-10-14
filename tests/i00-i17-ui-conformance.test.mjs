@@ -34,7 +34,7 @@ test('I17: shell implements prototype workstation chrome without losing operatio
   assert.match(html,/data-pcms-work-panel="activity"/);
   for(const panel of ['supply','adopt','stage','source'])
     assert.match(html,new RegExp('data-pcms-generator-panel="'+panel+'" hidden'));
-  assert.match(shell,/query\.dispatchEvent\(new Event\('input'/);
+  assert.match(shell,/field\.dispatchEvent\(new Event\('input'/);
   assert.match(inv,/pcms-generator-row-target/);
   assert.match(inv,/pcms-generator-inspector-actions/);
   assert.doesNotMatch(inv,/first\.append\(document\.createTextNode\(' '\),timing\)/);
