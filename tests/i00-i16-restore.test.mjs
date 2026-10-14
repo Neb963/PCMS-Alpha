@@ -220,7 +220,7 @@ test('P55-09 X: imported accounts are rebound without carrying session or releas
       state:{globalPause:false,rows:[{paused:false}],accounts:{x:{paused:false}},
         inflight:[{id:'historic'}]}})},
     {key:'backup:auto-state',value:serializeClone({key:'backup:auto-state',
-      state:{enabled:true,active:{runId:'auto_fake'},status:'ACTIVE'}}),
+      state:{enabled:true,active:{runId:'auto_fake'},status:'ACTIVE'}})},
     {key:'writeback-settings',value:serializeClone({key:'writeback-settings',
       setting:{revision:8,autoEnabled:true}})}
   );
