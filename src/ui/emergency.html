@@ -6,7 +6,14 @@
 <p>This report contains only allowlisted local status. PCMS capabilities remain disabled.</p>
 <p id="diagnostic-state" role="status">Reading diagnostic status</p>
 <button id="export" type="button">Export redacted ZIP</button>
-<p>The report is also shown below if browser Downloads is unavailable.</p><pre id="report"></pre>
+<p id="download-status" role="status" aria-live="polite">ZIP not requested. Verify any downloaded file independently.</p>
+<p>The safe JSON report remains visible even if storage or Downloads fails.</p>
+<pre id="report" tabindex="0" aria-label="Redacted diagnostic JSON"></pre>
+<details>
+  <summary>Markdown fallback — select and copy</summary>
+  <label for="markdown">Redacted report (no provider actions or credentials)</label>
+  <textarea id="markdown" readonly rows="17" spellcheck="false" style="display:block;width:100%;max-width:70ch;resize:vertical"></textarea>
+</details>
 <a href="index.html#settings">Back to Settings</a>
 </main>
 <script type="module" src="emergency.mjs"></script>
