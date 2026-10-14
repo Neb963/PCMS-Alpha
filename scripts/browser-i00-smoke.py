@@ -664,6 +664,35 @@ def main():
                 assert '51–100' in pagination,pagination
                 print('B I04_REAL_IDB_1250_FILTER_PAGINATION_OWNER_HOLD=PASS',flush=True)
 
+                # I17 UX-01 B: real packaged installed Firefox, actual local
+                # read-only ports and canonical entity identities. A result is
+                # navigation, never login proof or a provider-side mutation.
+                quick_field='pcms-quick-generator-search'
+                execute(after,"const el=document.getElementById('pcms-quick-generator-search');el.value='gen-0999';el.dispatchEvent(new Event('input',{bubbles:true}));return true")
+                search_result={}
+                for _ in range(45):
+                    search_result=execute(after,"return {expanded:document.getElementById('pcms-quick-generator-search').getAttribute('aria-expanded'),text:document.getElementById('pcms-global-results').textContent,buttons:document.querySelectorAll('#pcms-global-results button').length}")
+                    if search_result.get('buttons',0)>0:break
+                    time.sleep(.13)
+                assert search_result.get('buttons')==1 and 'gen-0999' in search_result.get('text',''),search_result
+                result=execute(after,"const el=document.querySelector('#pcms-global-results button');el.click();return {hash:location.hash,value:document.getElementById('pcms-generator-query').value,hidden:document.getElementById('pcms-global-results').hidden}")
+                assert result=={'hash':'#generators','value':'gen-0999','hidden':True},result
+                execute(after,"const el=document.getElementById('pcms-quick-generator-search');el.value='fixture_inventory_01';el.dispatchEvent(new Event('input',{bubbles:true}));return true")
+                for _ in range(45):
+                    search_result=execute(after,"return {text:document.getElementById('pcms-global-results').textContent,buttonLabels:[...document.querySelectorAll('#pcms-global-results button')].map(x=>x.getAttribute('aria-label'))}")
+                    if any('account fixture_inventory_01'==x for x in search_result.get('buttonLabels',[])):break
+                    time.sleep(.13)
+                assert 'account fixture_inventory_01' in search_result.get('buttonLabels',[]),search_result
+                account_nav=execute(after,"document.querySelector('[aria-label=\"account fixture_inventory_01\"]').click();return {hash:location.hash,selected:[...document.querySelectorAll('[data-pcms-account-id]')].some(x=>x.dataset.pcmsAccountId==='fixture_inventory_01')}")
+                assert account_nav.get('hash')=='#accounts',account_nav
+                for _ in range(20):
+                    focussed=execute(after,"return document.activeElement?.dataset?.pcmsAccountId||null")
+                    if focussed=='fixture_inventory_01':break
+                    time.sleep(.12)
+                assert focussed=='fixture_inventory_01',focussed
+                print('B I17_LOCAL_ACCOUNT_GENERATOR_SEARCH_CANONICAL_NAVIGATION=PASS',flush=True)
+
+
                 # I06 actual installed Firefox IndexedDB and extension port
                 # retain frozen operator slugs and reject duplication. Effect
                 # activation is deliberately absent: NO provider request sent.
