@@ -26,31 +26,31 @@ function storage(){
 test('P55-07: preview authenticates both encrypted layers; invalid password has zero side effects',async()=>{
   const {pcms,archive}=await disposable(),target=donor();
   let writes=0;
-  const output=await previewRestore({archiveText:archive.text,password:pw,
+  const output=await previewRestore({decodeDonor:decodeBackupEnvelope,archiveText:archive.text,password:pw,
     currentPcms:pcms,currentDonor:target,containers:[],mappings:{}});
   assert.match(output.planSha256,/^[0-9a-f]{64}$/);
   assert.equal(output.plan.risk.importedApprovalStatus,'HISTORICAL_ONLY');
   assert.equal(output.plan.risk.routeStatus,'BLOCK_UNTIL_INDEPENDENT_ROUTE_REVIEW');
   for(const password of ['wrong','']){
-    await assert.rejects(()=>previewRestore({archiveText:archive.text,password,
+    await assert.rejects(()=>previewRestore({decodeDonor:decodeBackupEnvelope,archiveText:archive.text,password,
       currentPcms:pcms,currentDonor:target,containers:[],mappings:{}}));
   }
   assert.equal(writes,0);
 });
 test('P55-07 and P55-12: independently read checkpoint must match every PCMS and donor byte',async()=>{
   const {pcms,payload,archive}=await disposable();
-  await assert.rejects(()=>verifyCheckpoint({checkpointText:archive.text,
+  await assert.rejects(()=>verifyCheckpoint({decodeDonor:decodeBackupEnvelope,checkpointText:archive.text,
     password:pw,currentPcms:pcms,currentPortable:payload,archivedAtLeastTier:2}),
     /RESTORE_CHECKPOINT_DISK_PROOF_REQUIRED/);
-  const proof=await verifyCheckpoint({checkpointText:archive.text,password:pw,
+  const proof=await verifyCheckpoint({decodeDonor:decodeBackupEnvelope,checkpointText:archive.text,password:pw,
     currentPcms:pcms,currentPortable:payload,archivedAtLeastTier:3});
   assert.equal(proof.tier,3);
   const changed=structuredClone(pcms);
   changed.stores.meta.push({key:'target',value:serializeClone({value:'after-cut'})});
-  await assert.rejects(()=>verifyCheckpoint({checkpointText:archive.text,password:pw,
+  await assert.rejects(()=>verifyCheckpoint({decodeDonor:decodeBackupEnvelope,checkpointText:archive.text,password:pw,
     currentPcms:changed,currentPortable:payload,archivedAtLeastTier:3}),
     /RESTORE_CHECKPOINT_PCMS_DRIFT/);
-  await assert.rejects(()=>verifyCheckpoint({checkpointText:archive.text,password:pw,
+  await assert.rejects(()=>verifyCheckpoint({decodeDonor:decodeBackupEnvelope,checkpointText:archive.text,password:pw,
     currentPcms:pcms,currentPortable:{...payload,personas:[{key:'other'}]},
     archivedAtLeastTier:3}),/RESTORE_CHECKPOINT_DONOR_DRIFT/);
 });
@@ -106,7 +106,7 @@ test('P51-08/P55-08/P55-10: out-of-store barrier readback before stage; crash/un
 });
 test('P55-07: destination changed or plan changed after approval blocks before donor effect',async()=>{
   const {pcms,archive}=await disposable();
-  const got=await previewRestore({archiveText:archive.text,password:pw,
+  const got=await previewRestore({decodeDonor:decodeBackupEnvelope,archiveText:archive.text,password:pw,
     currentPcms:pcms,currentDonor:donor(),mappings:{}});
   assert.equal(await revalidateRestorePlan({
     expectedPlanSha256:got.planSha256,expectedDestinationSha256:got.plan.destinationSha256,

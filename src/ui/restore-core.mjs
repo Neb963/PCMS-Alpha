@@ -1,7 +1,6 @@
 // I16 authenticated restore preflight. No import, identity or remote mutation authority.
 // Plans carry digests, not decrypted archive content, into persistent diagnostics.
 import {decodeIntegrated,digest,validatePcmsSnapshot,MAX_ARCHIVE_BYTES} from './backup-core.mjs';
-import {decodeBackupEnvelope,createPortableBackupPayload} from '../lib/backup-package.js';
 
 const eq=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 const check=(v,c)=>{if(!v)throw Error(c);};
@@ -11,10 +10,11 @@ export const RESTORE_EXCLUSIONS=Object.freeze([
   'native WireGuard private configurations','external provider sessions',
   'unsaved editor content','source controller authority','pre-existing publication approvals'
 ]);
-export async function openRestoreArchive(bytes,password){
+export async function openRestoreArchive(bytes,password,{decodeDonor}={}){
+  check(typeof decodeDonor==='function','RESTORE_DONOR_DECODER_REQUIRED');
   check(typeof bytes==='string'&&new TextEncoder().encode(bytes).length<=MAX_ARCHIVE_BYTES,'RESTORE_ARCHIVE_LIMIT');
-  const archive=await decodeIntegrated(bytes,password,{decodeDonor:decodeBackupEnvelope});
-  const donor=(await decodeBackupEnvelope(archive.donorEnvelope,password)).payload;
+  const archive=await decodeIntegrated(bytes,password,{decodeDonor});
+  const donor=(await decodeDonor(archive.donorEnvelope,password)).payload;
   return {archive,donor,archiveSha256:await digest(bytes)};
 }
 export function inspectRestoreMappings(donor,mappings,containers,{fresh=false}={}){
@@ -40,11 +40,11 @@ export function inspectRestoreMappings(donor,mappings,containers,{fresh=false}={
   return results;
 }
 export async function previewRestore({archiveText,password,mode='merge',fresh=false,
-  mappings={},currentPcms,currentDonor,containers=[]}){
+  mappings={},currentPcms,currentDonor,containers=[],decodeDonor}){
   check(RESTORE_MODES.includes(mode),'RESTORE_MODE_INVALID');
   validatePcmsSnapshot(currentPcms);
   check(currentDonor?.state&&Array.isArray(currentDonor.containers),'RESTORE_DESTINATION_UNAVAILABLE');
-  const opened=await openRestoreArchive(archiveText,password);
+  const opened=await openRestoreArchive(archiveText,password,{decodeDonor});
   const groups=inspectRestoreMappings(opened.donor,mappings,containers,{fresh});
   // The archive itself is encrypted and authenticated. The destination cut is
   // not a lock: it must be re-read immediately before a guarded write.
@@ -70,11 +70,11 @@ export async function previewRestore({archiveText,password,mode='merge',fresh=fa
   return {plan,planSha256,opened};
 }
 export async function verifyCheckpoint({checkpointText,password,currentPcms,
-  currentPortable,archivedAtLeastTier=0}){
+  currentPortable,archivedAtLeastTier=0,decodeDonor}){
   // A disk-selected file proves byte readback, but does not by itself prove
   // the current destination matches; compare both full canonical and donor cuts.
   check(archivedAtLeastTier===3,'RESTORE_CHECKPOINT_DISK_PROOF_REQUIRED');
-  const opened=await openRestoreArchive(checkpointText,password);
+  const opened=await openRestoreArchive(checkpointText,password,{decodeDonor});
   check(eq(opened.archive.pcms,currentPcms),'RESTORE_CHECKPOINT_PCMS_DRIFT');
   check(eq(opened.donor,currentPortable),'RESTORE_CHECKPOINT_DONOR_DRIFT');
   return {sha256:opened.archiveSha256,verified:true,tier:3};
