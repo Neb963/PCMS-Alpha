@@ -11,6 +11,7 @@ import {createRestoreStageEngine} from './restore-stage.mjs';
 import {prepareRestoredCanonical} from './restore-sanitize.mjs';
 import {applyCanonicalSnapshot} from './restore-idb.mjs';
 import {getPcmsRestoreDonor} from './restore-donor.mjs';
+import {reconcileRestore} from './restore-reconcile.mjs';
 export const RESTORE_PORT='pcms-i16-restore';
 const fail=code=>({ok:false,code});
 const redacted=e=>/^(RESTORE_|BACKUP_)[A-Z0-9_]{3,70}$/.test(e?.message||'')?e.message:'RESTORE_HELD_UNKNOWN';
@@ -228,6 +229,18 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
     if(!trustedRestoreSender(api,sender))return fail('UNTRUSTED_SENDER');
     if(!message||typeof message!=='object'||Array.isArray(message))return fail('RESTORE_INPUT_INVALID');
     if(message.action==='STATUS')return status();
+    if(message.action==='RECONCILE'){
+      if(running)return fail('RESTORE_BUSY');
+      let db;
+      try{
+        db=await database();
+        return await reconcileRestore({gate,api,donor:getDonor(),db,
+          archiveText:message.params?.archiveText,
+          checkpointText:message.params?.checkpointText,
+          password:message.params?.password});
+      }catch(e){return fail(redacted(e));}
+      finally{try{db?.close();}catch{}}
+    }
     if(message.action==='APPLY')return apply(message.params);
     return fail('RESTORE_COMMAND_NOT_ALLOWED');
   }
