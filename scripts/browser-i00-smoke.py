@@ -2314,7 +2314,7 @@ def main():
                       core.qualifyRefreshCandidate(null).ok===false,
                       beforeRows:before.state.rows.length,
                       denied:denied.code,capability:result.refreshCapability,
-                      unchanged:before.state.revision===after.state.revision});
+                      response:result,unchanged:before.state.revision===after.state.revision});
                     port.disconnect();db.close();
                   });
                   port.postMessage({type:'GET_REFRESHER',params:{limit:5}});
