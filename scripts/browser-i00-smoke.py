@@ -3035,6 +3035,31 @@ def main():
                 print('B I17_FIREFOX_VIEWPORT_MEASUREMENT='+json.dumps({'requested':390,'actual':sized,'windowRect':rect}),flush=True)
                 print('B I17_PACKAGED_CHECKLIST_NEGATIVE_EVIDENCE_AND_SAFE_MARKDOWN=PASS (H=NOT_TESTED)',flush=True)
 
+                # I17 operator-reported packaged UI regressions. The action is
+                # PCMS-first while donor protected controls remain independently
+                # accessible from the dashboard. Synthetic F assertions cannot
+                # replace this actual installed-XPI browser proof.
+                ui_conformance=execute(after,"""const manifest=browser.runtime.getManifest();
+                  const directText=[...document.body.childNodes].filter(x=>x.nodeType===Node.TEXT_NODE).map(x=>x.textContent).join('');
+                  const inspector=document.getElementById('pcms-generator-inspector');
+                  const jump=document.querySelector('[data-pcms-jump="pcms-adopt-heading"]');
+                  const target=document.getElementById('pcms-adopt-heading');
+                  const before=document.activeElement;
+                  jump.click();
+                  return {actionTitle:manifest.action?.default_title,
+                    donorPopupGone:!manifest.action?.default_popup,
+                    advanced:!!document.getElementById('advanced')?.href.includes('options/options.html'),
+                    literalEscapedNewline:directText.includes(String.fromCharCode(92)+'n'),
+                    inspector:!!inspector,focusedJump:document.activeElement===target,
+                    overviewSignals:!!document.querySelector('.pcms-overview-signals'),
+                    defaultRoute:document.querySelector('#navigation a[aria-current="page"]')?.dataset?.workspace};""")
+                assert ui_conformance.get('donorPopupGone') and 'PCMS Alpha' in (ui_conformance.get('actionTitle') or ''),ui_conformance
+                assert ui_conformance.get('advanced') and not ui_conformance.get('literalEscapedNewline'),ui_conformance
+                assert ui_conformance.get('inspector') and ui_conformance.get('focusedJump'),ui_conformance
+                assert ui_conformance.get('overviewSignals'),ui_conformance
+                print('B I17_UI_PROTOTYPE_SHELL_ACTION_ESCAPES_AND_KEYBOARD_JUMP=PASS',flush=True)
+
+
 
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
             finally: close(after)

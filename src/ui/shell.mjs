@@ -57,6 +57,15 @@ document.addEventListener('keydown', event => {
 
 // Search uses the existing bounded local inventory filter; it must never
 // suggest account/source/operation or remote search capability.
+document.querySelectorAll('[data-pcms-jump]').forEach(button => {
+  button.addEventListener('click', () => {
+    const target=document.getElementById(button.dataset.pcmsJump);
+    if(!target || target.closest('.workspace')?.hidden)return;
+    target.tabIndex=-1;
+    target.scrollIntoView({block:'start'});
+    target.focus({preventScroll:true});
+  });
+});
 quickSearch.addEventListener('keydown', event => {
   if (event.key === 'Escape') { quickSearch.value = ''; quickSearch.blur(); return; }
   if (event.key !== 'Enter') return;

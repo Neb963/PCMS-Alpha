@@ -135,3 +135,20 @@ td{font-size:12px;padding:10px 9px;overflow-wrap:anywhere}
  .notice{background:var(--warn-bg)}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+
+/* Stage 4.7 inspectable generator record and compact workflow jump links. */
+.pcms-workspace-shortcuts{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid var(--line);padding:0 0 12px;margin:0 0 16px}
+.pcms-workspace-shortcuts button{min-height:32px;border:1px solid var(--line)!important;background:var(--paper)!important;border-radius:5px;padding:5px 11px}
+.pcms-workspace-shortcuts button:hover{background:var(--hover)!important}
+.pcms-inventory-stage{display:grid;grid-template-columns:minmax(0,1fr) minmax(240px,318px);align-items:start;gap:14px}
+.pcms-inventory-stage .table-wrap{min-width:0;margin:0}
+.pcms-inventory-stage table{min-width:660px}
+.pcms-inventory-inspector{border:1px solid var(--line);background:var(--paper);border-radius:7px;min-width:0;overflow-wrap:anywhere;position:sticky;top:0}
+.pcms-inspector-head{padding:13px 15px;border-bottom:1px solid var(--line)}
+.pcms-inspector-head h3{font-size:15px;margin:3px 0 0}
+.pcms-inspector-body{padding:13px 15px;font-size:12px;color:var(--muted)}
+.pcms-inspector-body p{margin:0 0 12px}
+.pcms-evidence-kv{display:grid;grid-template-columns:100px minmax(0,1fr);gap:7px 9px;margin:0}
+.pcms-evidence-kv dt{color:var(--muted)}.pcms-evidence-kv dd{margin:0;color:var(--ink);overflow-wrap:anywhere}
+@media(max-width:1280px){.pcms-inventory-stage{grid-template-columns:minmax(0,1fr)}.pcms-inventory-inspector{position:static}}
+@media(max-width:550px){.pcms-inventory-stage table{min-width:640px}.pcms-workspace-shortcuts{flex-wrap:nowrap;overflow-x:auto;scrollbar-gutter:stable}.pcms-workspace-shortcuts button{white-space:nowrap}}

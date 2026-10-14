@@ -13,6 +13,35 @@ const accountPicker=document.getElementById('pcms-generator-account');
 const overviewCount=document.getElementById('pcms-overview-inventory');
 let epoch=0,offset=0,total=0,accounts=[],latest=[],selection=new Set(),accountEpoch=0;
 const limit=50;
+const inspectorTitle=document.getElementById('pcms-generator-inspector-title');
+const inspectorBody=document.getElementById('pcms-generator-inspector-body');
+let inspectedSlug=null;
+function inspect(item,focus=false){
+  inspectedSlug=item.slug;
+  inspectorTitle.textContent=item.slug;
+  inspectorBody.replaceChildren();
+  const note=document.createElement('p');
+  note.textContent='Historical local observation. Reverify account/route/source before any write.';
+  const dl=document.createElement('dl');dl.className='pcms-evidence-kv';
+  const details=[
+    ['Account',item.accountId||'Unknown'],
+    ['Owner evidence',labels[item.ownerState]||'Unknown/held'],
+    ['Perchance listing',item.visibility||'UNKNOWN'],
+    ['Git source',item.source||'SOURCE_PENDING'],
+    ['Local revision',String(item.revision??'Unknown')]
+  ];
+  for(const [label,value] of details) {
+    const dt=document.createElement('dt');dt.textContent=label;
+    const dd=document.createElement('dd');dd.textContent=value;
+    dl.append(dt,dd);
+  }
+  inspectorBody.append(note,dl);
+  if(focus)inspectorTitle.focus({preventScroll:true});
+}
+function emptyInspector(){
+  inspectedSlug=null;inspectorTitle.textContent='Select a generator';
+  inspectorBody.textContent='Choose Inspect in an inventory row. This is local historical evidence; no ownership or write permission is inferred.';
+}
 const labels={
   OBSERVED_OWNER:'Owner previously observed (not current authorization)',
   OWNER_UNVERIFIED:'Ownership unknown',OWNER_DISPUTED:'Owner evidence disputed',
@@ -40,6 +69,10 @@ const inv=(type,params)=>command('pcms-i04-inventory',type,params);
 const acct=()=>command('pcms-i03-accounts','LIST_ACCOUNTS');
 function draw(items) {
   rows.replaceChildren();
+  if(inspectedSlug){
+    const updated=items.find(x=>x.slug===inspectedSlug);
+    if(updated)inspect(updated);else emptyInspector();
+  }
   if(!items.length) {
     const tr=document.createElement('tr'),td=document.createElement('td');
     td.colSpan=4;td.className='empty';
@@ -58,6 +91,11 @@ function draw(items) {
     });
     const first=document.createElement('td');
     first.append(pick,document.createTextNode(' '+item.slug+' '));
+    const inspectPick=document.createElement('button');
+    inspectPick.type='button';inspectPick.textContent='Inspect';
+    inspectPick.setAttribute('aria-label','Inspect local evidence for '+item.slug);
+    inspectPick.addEventListener('click',()=>inspect(item,true));
+    first.append(inspectPick,document.createTextNode(' '));
     const sourcePick=document.createElement('button');
     sourcePick.type='button';sourcePick.textContent='Source';
     sourcePick.setAttribute('aria-label','Inspect Git source for '+item.slug);
