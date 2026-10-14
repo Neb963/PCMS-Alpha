@@ -278,3 +278,34 @@ button.pcms-generator-row-target:hover{text-decoration:underline}
 .account-record:focus{outline:2px solid var(--focus);outline-offset:2px;border-radius:5px}
 @media(max-width:850px){.pcms-global-results{right:9px;top:51px}}
 @media(max-width:550px){.pcms-global-results{right:9px;left:9px;width:auto;max-height:60dvh}}
+
+
+/* I17 prototype v3.1 parity: real filtered local views, page sorting,
+   column preferences and persisted cross-page local selection preview. */
+.pcms-inventory-presets{display:flex;align-items:center;gap:4px;flex-wrap:wrap;
+  padding:0 0 10px;border-bottom:1px solid var(--line);margin:2px 0 12px}
+.pcms-inventory-presets button{border:1px solid transparent!important;background:transparent!important;
+  color:var(--muted);border-radius:5px;padding:6px 11px;min-height:33px;font-size:12px;font-weight:600}
+.pcms-inventory-presets button[aria-pressed=true]{background:var(--accent-light)!important;
+  color:var(--accent);border-color:var(--line)!important}
+.pcms-inventory-presets-summary{font-size:10px;color:var(--faint);margin-left:auto}
+.pcms-column-picker{position:relative;flex:none;font-size:12px;z-index:2}
+.pcms-column-picker summary{cursor:pointer;display:flex;align-items:center;min-height:32px;
+  padding:4px 12px;border:1px solid var(--line);border-radius:5px;font-weight:600}
+.pcms-column-picker[open]>div{position:absolute;top:calc(100% + 4px);right:0;
+  width:180px;padding:9px 12px;background:var(--paper);border:1px solid var(--line);
+  border-radius:6px;box-shadow:0 10px 24px #0002;display:grid;gap:8px}
+.pcms-column-picker label{display:flex;gap:8px;align-items:center;white-space:nowrap}
+.pcms-inventory-toolbar .pcms-inline-field{gap:5px}
+.pcms-inventory-toolbar #pcms-generator-sort{min-width:116px;max-width:142px}
+.pcms-inventory-pagination{display:flex;justify-content:space-between;align-items:center;
+  flex-wrap:wrap;gap:10px;margin:13px 0 5px;font-size:12px}
+.pcms-pagination-buttons{display:flex;gap:6px;flex-wrap:wrap}
+.pcms-pagination-buttons button{min-height:33px}
+.pcms-selection-preview{border-top:1px solid var(--line);margin:12px 0;padding:12px 4px}
+.pcms-selection-preview h3{font-size:13px;margin:0}
+.pcms-selection-preview p{font-size:11px;color:var(--muted);margin:4px 0}
+.pcms-selection-preview ol{margin:8px 0 0;padding-left:24px;columns:2;overflow-wrap:anywhere;font-size:12px}
+@media(max-width:780px){.pcms-inventory-presets-summary{display:none}
+.pcms-inventory-toolbar .pcms-inline-field{flex:1 1 140px}
+.pcms-selection-preview ol{columns:1}}

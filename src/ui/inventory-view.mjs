@@ -11,7 +11,60 @@ const reload=document.getElementById('pcms-generator-refresh');
 const syncButton=document.getElementById('pcms-generator-sync');
 const accountPicker=document.getElementById('pcms-generator-account');
 const overviewCount=document.getElementById('pcms-overview-inventory');
+const sortPicker=document.getElementById('pcms-generator-sort');
+const presetButtons=[...document.querySelectorAll('[data-pcms-inventory-view]')];
+const columnInputs=[...document.querySelectorAll('[data-pcms-inventory-column]')];
+const previewButton=document.getElementById('pcms-generator-preview-selection');
+const clearButton=document.getElementById('pcms-generator-clear-selection');
+const selectionPreview=document.getElementById('pcms-generator-selection-preview');
+const previewList=document.getElementById('pcms-generator-selection-items');
+const VIEWS=Object.freeze({all:'ALL',owner:'OBSERVED_OWNER',
+  attention:'OWNER_UNVERIFIED',missing:'UNOBSERVED'});
+const SORTS=new Set(['slug','account','visibility','source']);
+const COLUMN_KEYS=['account','visibility','source'];
+const prefKey='pcmsI17InventoryDisplayV1';
+function safePrefs(){
+  try{const raw=JSON.parse(localStorage.getItem(prefKey)||'null');
+    if(!raw||typeof raw!=='object')return {};
+    return {view:Object.hasOwn(VIEWS,raw.view)?raw.view:'all',
+      sort:SORTS.has(raw.sort)?raw.sort:'slug',
+      columns:Array.isArray(raw.columns)?
+        raw.columns.filter(k=>COLUMN_KEYS.includes(k)):COLUMN_KEYS};
+  }catch{return {};}
+}
+const prefs=safePrefs();
+let view= prefs.view||'all',sort=prefs.sort||'slug';
+let columns=new Set(prefs.columns||COLUMN_KEYS);
 let epoch=0,offset=0,total=0,accounts=[],latest=[],selection=new Set(),accountEpoch=0;
+function persistDisplay(){
+  try{localStorage.setItem(prefKey,JSON.stringify({view,sort,columns:[...columns]}));}
+  catch{/* display preferences must not affect canonical state */}
+}
+function renderControls(){
+  for(const b of presetButtons)b.setAttribute('aria-pressed',String(b.dataset.pcmsInventoryView===view));
+  sortPicker.value=sort;
+  for(const c of columnInputs)c.checked=columns.has(c.dataset.pcmsInventoryColumn);
+  for(const th of document.querySelectorAll('[data-pcms-inventory-th]'))
+    th.hidden=!columns.has(th.dataset.pcmsInventoryTh);
+}
+function sortPage(items){
+  const field=sort==='account'?'accountId':sort==='visibility'?'visibility':
+    sort==='source'?'source':'slug';
+  return items.toSorted((a,b)=>
+    String(a[field]??'').localeCompare(String(b[field]??''),undefined,{numeric:true})
+    ||String(a.slug).localeCompare(String(b.slug)));
+}
+function previewSelection(){
+  previewList.replaceChildren();
+  const names=[...selection].sort();
+  for(const slug of names.slice(0,30)){
+    const li=document.createElement('li');li.textContent=slug;previewList.append(li);
+  }
+  if(names.length>30){
+    const li=document.createElement('li');li.textContent=(names.length-30)+' more selected';
+    previewList.append(li);
+  }
+}
 const limit=50;
 const syncShortcut=document.getElementById('pcms-generator-sync-shortcut');
 syncShortcut.addEventListener('click',()=>{
@@ -100,12 +153,12 @@ function draw(items) {
   }
   if(!items.length) {
     const tr=document.createElement('tr'),td=document.createElement('td');
-    td.colSpan=4;td.className='empty';
+    td.colSpan=1+columns.size;td.className='empty';
     td.textContent=total?'No entries on this page. Adjust filters.':
       'No observed records. Absence is not a remote census.';
     tr.append(td);rows.append(tr);
   }
-  for(const item of items) {
+  for(const item of sortPage(items)) {
     const tr=document.createElement('tr'),cells=[];
     const pick=document.createElement('input');
     pick.type='checkbox';pick.checked=selection.has(item.slug);
@@ -139,6 +192,7 @@ function draw(items) {
     owner.title=labels[item.ownerState]||'Owner evidence unavailable';
     owner.textContent=item.ownerState==='OBSERVED_OWNER'?'Owner seen':item.ownerState==='OWNER_UNVERIFIED'?'Owner unknown':'Check owner';
     source.append(src,owner);cells.push(source);
+    cells.slice(1).forEach((cell,i)=>{cell.hidden=!columns.has(COLUMN_KEYS[i]);});
     tr.append(...cells);rows.append(tr);
   }
 }
@@ -149,6 +203,9 @@ function showCounter(){
   if(headingTotal)headingTotal.textContent=total?' '+total.toLocaleString():'';
   before.disabled=offset===0;
   after.disabled=offset+limit>=total;
+  previewButton.disabled=selection.size===0;
+  clearButton.disabled=selection.size===0;
+  if(!selectionPreview.hidden)previewSelection();
 }
 async function load() {
   const mine=++epoch;
@@ -231,7 +288,34 @@ let debounce;
 query.addEventListener('input',()=>{
   clearTimeout(debounce);debounce=setTimeout(()=>{offset=0;void load();},180);
 });
-filter.addEventListener('change',()=>{offset=0;void load();});
+filter.addEventListener('change',()=>{
+  view=Object.keys(VIEWS).find(k=>VIEWS[k]===filter.value)||'all';
+  renderControls();persistDisplay();offset=0;void load();
+});
+for(const b of presetButtons)b.addEventListener('click',()=>{
+  view=b.dataset.pcmsInventoryView;
+  filter.value=VIEWS[view];
+  renderControls();persistDisplay();offset=0;void load();
+});
+sortPicker.addEventListener('change',()=>{
+  if(!SORTS.has(sortPicker.value))return;
+  sort=sortPicker.value;persistDisplay();draw(latest);
+});
+for(const input of columnInputs)input.addEventListener('change',()=>{
+  const key=input.dataset.pcmsInventoryColumn;
+  if(!COLUMN_KEYS.includes(key))return;
+  if(input.checked)columns.add(key);else columns.delete(key);
+  persistDisplay();renderControls();draw(latest);
+});
+previewButton.addEventListener('click',()=>{
+  selectionPreview.hidden=!selectionPreview.hidden;
+  if(!selectionPreview.hidden)previewSelection();
+});
+clearButton.addEventListener('click',()=>{
+  selection.clear();selectionPreview.hidden=true;draw(latest);showCounter();
+});
+renderControls();
+filter.value=VIEWS[view];
 reload.addEventListener('click',()=>{void loadAccounts();void load();void loadOverview();});
 // Dashboard routes reuse one document. Revalidate the canonical projection
 // whenever an operator revisits Generators; old observations are not live.

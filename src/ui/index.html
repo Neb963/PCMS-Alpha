@@ -60,9 +60,24 @@
         </nav>
         <section class="panel pcms-inventory-panel" aria-labelledby="generators-table-title" data-pcms-generator-panel="inventory">
           <div class="panel-head pcms-compact-head"><h2 id="generators-table-title">Inventory</h2><span class="unknown">Last recorded · verify before edits</span></div>
+          <div class="pcms-inventory-presets" role="group" aria-label="Inventory saved filters">
+            <button type="button" data-pcms-inventory-view="all" aria-pressed="true">All</button>
+            <button type="button" data-pcms-inventory-view="owner" aria-pressed="false">Owner observed</button>
+            <button type="button" data-pcms-inventory-view="attention" aria-pressed="false">Check ownership</button>
+            <button type="button" data-pcms-inventory-view="missing" aria-pressed="false">Not observed</button>
+            <span class="pcms-inventory-presets-summary">Saved local views</span>
+          </div>
           <div class="pcms-inventory-toolbar">
             <label class="pcms-field" for="pcms-generator-query"><span class="sr-only">Find slug or account</span><input id="pcms-generator-query" type="search" maxlength="80" autocomplete="off" placeholder="Find generator or account…"></label>
             <label class="pcms-field pcms-inline-field" for="pcms-generator-owner-filter"><span>Owner</span><select id="pcms-generator-owner-filter"><option value="ALL">All</option><option value="OBSERVED_OWNER">Previously verified</option><option value="OWNER_UNVERIFIED">Unknown</option><option value="OWNER_DISPUTED">Disputed</option><option value="UNOBSERVED">Unobserved</option><option value="IDENTITY_CONFLICT">Identity conflict</option><option value="OWNER_CONFLICT">Account conflict</option></select></label>
+            <label class="pcms-field pcms-inline-field" for="pcms-generator-sort"><span>Sort page</span><select id="pcms-generator-sort"><option value="slug">Generator</option><option value="account">Account</option><option value="visibility">Visibility</option><option value="source">Source</option></select></label>
+            <details class="pcms-column-picker"><summary>Columns</summary>
+              <div role="group" aria-label="Visible inventory columns">
+                <label><input type="checkbox" data-pcms-inventory-column="account" checked> Account</label>
+                <label><input type="checkbox" data-pcms-inventory-column="visibility" checked> Perchance</label>
+                <label><input type="checkbox" data-pcms-inventory-column="source" checked> Git source</label>
+              </div>
+            </details>
             <button type="button" id="pcms-generator-refresh">Reload</button>
             <span id="pcms-generator-matches" class="pcms-matches" role="status">Loading…</span>
           </div>
@@ -70,14 +85,15 @@
             <label for="pcms-generator-account">Verified account</label><select id="pcms-generator-account"><option value="">Loading accounts</option></select><button type="button" id="pcms-generator-sync" disabled>Sync account</button>
           </div></details>
           <p id="pcms-inventory-feedback" class="pcms-inventory-status" role="status" aria-live="polite">Loading local observations…</p>
-          <div class="pcms-inventory-stage"><div class="table-wrap" role="region" aria-label="Generator inventory results" tabindex="0"><table><thead><tr><th scope="col">Generator</th><th scope="col">Account</th><th scope="col">Perchance</th><th scope="col">Git source / owner</th></tr></thead><tbody id="pcms-generators-rows"><tr><td colspan="4" class="empty">Loading canonical inventory.</td></tr></tbody></table></div>
+          <div class="pcms-inventory-stage"><div class="table-wrap" role="region" aria-label="Generator inventory results" tabindex="0"><table><thead><tr><th scope="col">Generator</th><th scope="col" data-pcms-inventory-th="account">Account</th><th scope="col" data-pcms-inventory-th="visibility">Perchance</th><th scope="col" data-pcms-inventory-th="source">Git source / owner</th></tr></thead><tbody id="pcms-generators-rows"><tr><td colspan="4" class="empty">Loading canonical inventory.</td></tr></tbody></table></div>
             <aside class="pcms-inventory-inspector" id="pcms-generator-inspector" aria-label="Selected historical generator evidence">
               <div class="pcms-inspector-head"><span class="eyebrow">Record inspector</span><h3 id="pcms-generator-inspector-title" tabindex="-1">Select a generator</h3></div>
               <div id="pcms-generator-inspector-body" class="pcms-inspector-body" role="status" aria-live="polite">Select a row to inspect local evidence and available actions.</div>
               <div id="pcms-generator-inspector-actions" class="pcms-inspector-actions" aria-label="Actions for selected generator"></div>
             </aside>
           </div>
-          <div class="account-controls"><span id="pcms-generator-count" role="status">No verified rows</span><button type="button" id="pcms-generator-prev" disabled>Previous page</button><button type="button" id="pcms-generator-next" disabled>Next page</button></div>
+          <div class="pcms-inventory-pagination"><span id="pcms-generator-count" role="status">No verified rows</span><div class="pcms-pagination-buttons"><button type="button" id="pcms-generator-preview-selection" disabled>Preview selection</button><button type="button" id="pcms-generator-clear-selection" disabled>Clear</button><button type="button" id="pcms-generator-prev" disabled>Previous page</button><button type="button" id="pcms-generator-next" disabled>Next page</button></div></div>
+          <section id="pcms-generator-selection-preview" class="pcms-selection-preview" aria-label="Selected local generators" hidden><h3>Selected generators · local preview</h3><p>Preview only. Selection does not queue provider effects or approve publication.</p><ol id="pcms-generator-selection-items"></ol></section>
           <details class="pcms-technical-help" id="blocked-generators"><summary>About ownership and protected actions</summary><p>Existing-source adoption needs independent owner readback. Sync uses the donor-guarded read-only observer. Edit keys and collaboration do not prove ownership; an absent generator observation is not a deletion. Provider writes remain held until individually qualified.</p></details></section>
         <section class="panel" aria-labelledby="pcms-supply-heading" data-pcms-generator-panel="supply" hidden>
           <button type="button" disabled aria-describedby="blocked-generators" class="pcms-guarded-action">Reserve generator</button>

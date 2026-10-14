@@ -52,3 +52,21 @@ test('I17: reject inherited toolbar donor popup and escaped-markup regressions',
   // The existing i00-build test independently verifies the built manifest;
   // do not run a concurrent destructive build against the same staging tree.
 });
+
+test('I17 real inventory affordances follow approved v3.1 workstation interactions',()=>{
+  for(const key of ['all','owner','attention','missing'])
+    assert.match(html,new RegExp('data-pcms-inventory-view="'+key+'"'));
+  for(const key of ['account','visibility','source'])
+    assert.match(html,new RegExp('data-pcms-inventory-column="'+key+'"'));
+  for(const id of ['pcms-generator-sort','pcms-generator-preview-selection',
+    'pcms-generator-clear-selection','pcms-generator-selection-preview'])
+    assert.match(html,new RegExp('id="'+id+'"'));
+  assert.match(inv,/function sortPage\(items\)/);
+  assert.match(inv,/function previewSelection\(\)/);
+  assert.match(inv,/renderControls\(\)/);
+  assert.match(inv,/filter\.value=VIEWS\[view\]/);
+  assert.match(inv,/sortPage\(items\)/);
+  assert.match(css,/\.pcms-inventory-presets/);
+  assert.match(css,/\.pcms-column-picker/);
+  assert.doesNotMatch(inv,/innerHTML\s*=/);
+});
