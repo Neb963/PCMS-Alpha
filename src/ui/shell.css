@@ -373,3 +373,11 @@ button.pcms-generator-row-target:hover{text-decoration:underline}
 @media(max-width:680px){.pcms-ai-actions{grid-template-columns:1fr}}
 @media(max-width:460px){.pcms-ai-fields{grid-template-columns:1fr}
   .pcms-ai-preparation button,.pcms-ai-advanced button{flex:1 1 130px}}
+
+/* I17 last operator pass: reuse the symmetric two-column task panel on
+   writeback and release, with low-priority policy in disclosure controls. */
+.pcms-wb-help,.pcms-release-help{margin:12px 0!important}
+.pcms-wb-advanced{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:12px 0 0}
+.pcms-wb-advanced button{min-height:35px;padding:7px 11px}
+#pcms-writeback-status,#pcms-release-status{min-height:28px;overflow-wrap:anywhere}
+@media(max-width:460px){.pcms-wb-advanced button{flex:1 1 130px}}

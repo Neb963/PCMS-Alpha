@@ -217,3 +217,21 @@ test('I17 publication requires distinct one-use exact source authorization',asyn
   assert.match(ui,/command\('ARM_DISPOSABLE_RELEASE'/);
   assert.match(svc,/if\(pilotMatches\(stored.record\)\)releasePilot=null/);
 });
+
+test('I17 Git writeback and release have symmetric operator step flows, not inert controls',async()=>{
+  const writeback=await readFile('src/ui/writeback-view.mjs','utf8');
+  const release=await readFile('src/ui/release-view.mjs','utf8');
+  for(const [id,module] of [
+    ['pcms-writeback-preview',writeback],['pcms-writeback-prepare',writeback],
+    ['pcms-writeback-arm-manual',writeback],['pcms-writeback-commit',writeback],
+    ['pcms-writeback-reconcile',writeback],['pcms-release-preview',release],
+    ['pcms-release-approve',release],['pcms-release-arm',release],
+    ['pcms-release-dispatch',release],['pcms-release-reconcile',release]]){
+    assert.equal((html.match(new RegExp('id="'+id+'"','g'))||[]).length,1,id);
+    assert.match(module,new RegExp("['\"]"+id+"['\"]"),id);
+  }
+  assert.match(html,/class="pcms-inline-help pcms-wb-help"/);
+  assert.match(html,/class="pcms-inline-help pcms-release-help"/);
+  assert.match(html,/3 · Authorize private test/);
+  assert.match(html,/4 · Publish once/);
+});

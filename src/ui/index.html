@@ -189,28 +189,44 @@
         <section class="panel" aria-labelledby="pcms-supply-queue-title"><div class="panel-head"><h2 id="pcms-supply-queue-title">Frozen supply batches</h2><span class="unknown">Canonical local receipts</span></div><div id="pcms-supply-queue" role="status" aria-live="polite">Loading local batches.</div></section>
         </div>
         <section class="panel" data-pcms-work-panel="writeback" aria-labelledby="pcms-writeback-heading" hidden>
-          <div class="panel-head"><h2 id="pcms-writeback-heading">I11 · Git-only writeback of verified final F</h2><span class="unknown">Git mutation HELD until activated · Publication OFF</span></div>
-          <p class="reason">Manual or opt-in automatic source commit. An automatic job must be explicitly armed with an ephemeral credential; credentials disappear on Firefox restart. A verified final generator source and independent tests are required. Preview paths, additions, changes and deletions before preparing a conditional Git commit. All Git credentials are ephemeral; a lost effect acknowledgment requires read-only reconciliation, never a blind second commit.</p>
-          <div class="account-controls">
-            <label for="pcms-writeback-slug">Exact staged slug</label><input id="pcms-writeback-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="private-generator">
-            <label for="pcms-writeback-token">Private per-gens write token (not stored)</label><input id="pcms-writeback-token" type="password" autocomplete="off" spellcheck="false">
+          <div class="panel-head"><h2 id="pcms-writeback-heading">Git writeback</h2><span class="unknown">Reviewed source F · private test</span></div>
+          <div class="pcms-ai-fields">
+            <label for="pcms-writeback-slug">Generator
+              <input id="pcms-writeback-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="pcms-test-private-001">
+            </label>
+            <label for="pcms-writeback-token">Private Git write token
+              <input id="pcms-writeback-token" type="password" autocomplete="off" spellcheck="false" placeholder="Not stored">
+            </label>
+            <label for="pcms-writeback-mode">Mode
+              <select id="pcms-writeback-mode"><option value="MANUAL">Manual · reviewed source</option><option value="AUTO">Automatic · advanced</option></select>
+            </label>
+            <label for="pcms-writeback-message">Commit message
+              <input id="pcms-writeback-message" maxlength="120" value="fix: update tested generator source" spellcheck="false" autocomplete="off">
+            </label>
           </div>
-          <div class="account-controls">
-            <label for="pcms-writeback-mode">Writeback mode</label><select id="pcms-writeback-mode"><option value="MANUAL">Manual — reviewed exact diff</option><option value="AUTO">Automatic — attributed terminal assistant suggestion only</option></select>
-            <label for="pcms-writeback-message">Manual Git commit message</label><input id="pcms-writeback-message" maxlength="120" value="fix: update tested generator source" spellcheck="false" autocomplete="off">
+          <div class="pcms-ai-actions">
+            <section aria-labelledby="pcms-wb-steps">
+              <h3 id="pcms-wb-steps">Review and commit</h3>
+              <button id="pcms-writeback-preview" type="button">1 · Review exact F diff</button>
+              <button id="pcms-writeback-prepare" type="button" disabled>2 · Prepare Git commit</button>
+              <button id="pcms-writeback-arm-manual" type="button" disabled>3 · Authorize private test</button>
+              <button id="pcms-writeback-commit" type="button" disabled>4 · Commit once</button>
+            </section>
+            <section aria-labelledby="pcms-wb-recovery">
+              <h3 id="pcms-wb-recovery">Receipts and recovery</h3>
+              <button id="pcms-writeback-refresh" type="button">Reload canonical receipt</button>
+              <button id="pcms-writeback-reconcile" type="button" disabled>Verify Git readback</button>
+              <button id="pcms-writeback-cancel" type="button" disabled>Cancel unsent commit</button>
+            </section>
           </div>
-          <div class="account-controls">
-            <button id="pcms-writeback-preview" type="button">Review source diff</button>
-            <button id="pcms-writeback-prepare" type="button" disabled>Prepare conditional commit</button>
-            <button id="pcms-writeback-arm-manual" type="button" disabled>Authorize private Git test</button>
-            <button id="pcms-writeback-commit" type="button" disabled>Commit verified F to Git</button>
-            <button id="pcms-writeback-cancel" type="button" disabled>Cancel unsent preparation</button>
-            <button id="pcms-writeback-reconcile" type="button" disabled>Read-only Git reconciliation</button>
-            <button id="pcms-writeback-refresh" type="button">Refresh canonical receipt</button>
-            <button id="pcms-writeback-arm-auto" type="button" disabled>Arm automatic writeback (ephemeral token)</button>
-            <button id="pcms-writeback-disarm-auto" type="button">Disarm automatic writeback</button>
-          </div>
-          <p id="pcms-writeback-status" role="status" aria-live="polite">No writeback prepared; publication and remote Git write remain OFF.</p>
+          <details class="pcms-inline-help pcms-wb-help"><summary>Advanced automatic writeback and safety</summary>
+            <p>Only an independently tested exact F may be committed. Credentials are never stored. Lost acknowledgments require read-only reconciliation, not retries. Git writeback never authorizes Perchance publication. General autonomous writeback remains held until separately qualified.</p>
+            <div class="pcms-wb-advanced">
+              <button id="pcms-writeback-arm-auto" type="button" disabled>Arm automatic writeback</button>
+              <button id="pcms-writeback-disarm-auto" type="button">Disarm automatic writeback</button>
+            </div>
+          </details>
+          <p id="pcms-writeback-status" role="status" aria-live="polite">Select a verified generator and review its source diff.</p>
           <div id="pcms-writeback-diff" role="region" class="table-wrap" tabindex="0" aria-label="Full source add, change and delete diff"></div>
         </section>
         <section class="panel" data-pcms-work-panel="recovery" aria-labelledby="pcms-existing-heading" hidden>
@@ -238,23 +254,35 @@
           <div id="pcms-existing-details" role="region" tabindex="0" aria-label="Canonical prior and uncertain-effect evidence"></div>
         </section>
         <section class="panel" data-pcms-work-panel="release" aria-labelledby="pcms-release-heading" hidden>
-          <div class="panel-head"><h2 id="pcms-release-heading">I13 · Exact-source human publication approval</h2><span class="unknown">Production publishing OFF · Individual review</span></div>
-          <p class="reason">Approval pins tested PJS, HTML and every binary src file, account/Persona binding, test inputs and prior source. Current protected route, owner, READY Git F, clean editor and actual remote unlisted F must all match. Git commit alone does not confer approval. Existing generator updates are held until independent sleep, unlisting, original archive and recovery proof. A lost publication reply cannot be retried.</p>
-          <div class="account-controls">
-            <label for="pcms-release-slug">Exact private staged slug</label><input id="pcms-release-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="generator">
-            <label for="pcms-release-token">Private Git read token (ephemeral, never stored)</label><input id="pcms-release-token" type="password" autocomplete="off" spellcheck="false">
+          <div class="panel-head"><h2 id="pcms-release-heading">Publish verified source</h2><span class="unknown">Exact F · individual approval</span></div>
+          <div class="pcms-ai-fields">
+            <label for="pcms-release-slug">Private generator
+              <input id="pcms-release-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="pcms-test-private-001">
+            </label>
+            <label for="pcms-release-token">Private Git read token
+              <input id="pcms-release-token" type="password" autocomplete="off" spellcheck="false" placeholder="Not stored">
+            </label>
           </div>
-          <div class="account-controls">
-            <button id="pcms-release-preview" type="button">Review full F and tests</button>
-            <button id="pcms-release-approve" type="button" disabled>Approve this exact F</button>
-            <button id="pcms-release-cancel" type="button" disabled>Cancel unsent approval</button>
-            <button id="pcms-release-arm" type="button" disabled>Authorize exact-source publication</button>
-            <button id="pcms-release-dispatch" type="button" disabled>Attempt guarded publication (activation held)</button>
-            <button id="pcms-release-reconcile" type="button" disabled>Independently reconcile public listing</button>
-            <button id="pcms-release-load" type="button">Load canonical release</button>
-            <button id="pcms-release-clear" type="button">Clear credential</button>
+          <div class="pcms-ai-actions">
+            <section aria-labelledby="pcms-release-steps">
+              <h3 id="pcms-release-steps">Review and approve</h3>
+              <button id="pcms-release-preview" type="button">1 · Review source and tests</button>
+              <button id="pcms-release-approve" type="button" disabled>2 · Approve exact F</button>
+              <button id="pcms-release-arm" type="button" disabled>3 · Authorize private publication</button>
+              <button id="pcms-release-dispatch" type="button" disabled>4 · Publish once</button>
+            </section>
+            <section aria-labelledby="pcms-release-recovery">
+              <h3 id="pcms-release-recovery">Confirm and recover</h3>
+              <button id="pcms-release-reconcile" type="button" disabled>Verify public source and listing</button>
+              <button id="pcms-release-load" type="button">Reload release receipt</button>
+              <button id="pcms-release-cancel" type="button" disabled>Cancel unsent approval</button>
+              <button id="pcms-release-clear" type="button">Clear token</button>
+            </section>
           </div>
-          <p id="pcms-release-status" role="status" aria-live="polite">No release selected; publication remains disabled.</p>
+          <details class="pcms-inline-help pcms-release-help"><summary>Safety conditions and exact-byte review</summary>
+            <p>Publication requires a tested and idle final F, current Git READY and identical saved Perchance source, verified protected owner, clean editor and separately recorded human approval. Only disposable private-new publishing can be armed for a one-shot operator test. A lost publication response must never be retried.</p>
+          </details>
+          <p id="pcms-release-status" role="status" aria-live="polite">No release selected. Review exact F and tests first.</p>
           <div id="pcms-release-diff" class="table-wrap" role="region" tabindex="0" aria-label="Exact F and previous byte manifest"></div>
         </section>
         <section class="panel" data-pcms-work-panel="ai" aria-labelledby="pcms-ai-jobs-heading" hidden>
