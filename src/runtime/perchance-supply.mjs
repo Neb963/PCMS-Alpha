@@ -138,7 +138,14 @@ export async function perchanceSupplyIsolated(request) {
         srcManifest:[]
       },srcManifest:[]});
       if(!sameSession())return hold('SESSION_CHANGED_AFTER_EFFECT');
-      if(result.status!=='created'||!slug(result.name))
+      // A successful-looking ACK is not an independent readback. Never
+      // accept a temporary identity that was already owned before dispatch,
+      // names the template, or equals the requested final slug. Such an ACK
+      // may refer to an existing unrelated generator; the effect remains
+      // uncertain and the coordinator must not blindly retry.
+      if(result.status!=='created'||!slug(result.name)||
+         result.name==='minimal'||result.name===request.slug||
+         currentNames.has(result.name))
         return hold('CREATE_ACK_UNCERTAIN');
       return {ok:true,ack:'CREATED',temporarySlug:result.name};
     }

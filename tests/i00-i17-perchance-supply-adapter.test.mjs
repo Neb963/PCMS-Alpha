@@ -10,7 +10,7 @@ async function withProvider(t,config,work){
   const raw=JSON.stringify({user:{loggedIn:true,email,sessionToken:token}});
   const fingerprint=Array.from(new Uint8Array(await webcrypto.subtle.digest('SHA-256',
     new TextEncoder().encode(email)))).map(x=>x.toString(16).padStart(2,'0')).join('');
-  const ledger=[],owned=new Map();
+  const ledger=[],owned=new Map(config.preexistingOwned||[]);
   const template={name:'minimal',isPrivate:false,modelText:'example template',
     outputTemplate:'example html',srcManifest:[],id:'template-id-old',
     publicId:'template-public-old',owner:'somebody-else',
@@ -59,7 +59,12 @@ async function withProvider(t,config,work){
     else if(name==='save'){
       assert.equal(ledger.some(e=>e.name==='getGeneratorPageData'&&
         e.body.generatorName==='disposable-exact-slug'),true);
-      if(config.loseAck){
+      if(config.reportCreatedIdentity){
+        // Model a provider which says "created" but returns a known owned
+        // generator or the template ID. The fake remote ledger records the
+        // dispatch but does not mint a novel resource.
+        out={status:'created',name:config.reportCreatedIdentity};
+      }else if(config.loseAck){
         owned.set('server-temp-slug',{name:'server-temp-slug',isPrivate:true,
           modelText:'',outputTemplate:'',srcManifest:[],publicId:'servernewpublic'});
         out={status:'unverified'};
@@ -241,4 +246,24 @@ test('P56-06 F/X: final account census reports public despite private page/owner
     assert.equal(observed.code,'FINAL_ACCOUNT_PRIVACY_UNVERIFIED');
     assert.equal(ledger.filter(x=>x.name==='changeGeneratorName').length,1);
   });
+});
+
+test('P56-06 X: created ACK naming pre-owned resource or template never becomes a newly verified generator',async t=>{
+  const preexisting={name:'owned-previous-generator',isPrivate:true,
+    modelText:'old human content',outputTemplate:'old html',
+    srcManifest:[],publicId:'previousownerid'};
+  for(const responseName of ['owned-previous-generator','minimal',
+    'disposable-exact-slug']){
+    await withProvider(t,{preexistingOwned:[['owned-previous-generator',preexisting]],
+      reportCreatedIdentity:responseName},async({ledger,fingerprint,owned})=>{
+      const result=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
+      assert.equal(result.ok,false,result);
+      assert.equal(result.code,'CREATE_ACK_UNCERTAIN');
+      assert.equal(ledger.filter(x=>x.name==='save').length,1,
+        'a potentially dispatched effect must not be blindly repeated');
+      assert.equal(ledger.filter(x=>x.name==='changeGeneratorName').length,0);
+      assert.deepEqual(owned.get('owned-previous-generator'),preexisting,
+        'existing operator source remains untouched');
+    });
+  }
 });
