@@ -50,11 +50,11 @@ export async function perchanceSupplyIsolated(request) {
        census.generators.length>5000||!sameSession())
       return hold('SESSION_UNVERIFIED');
     const all=census.generators;
-    const currentNames=new Set();
+    const currentNames=new Set(),currentPrivacy=new Map();
     for(const g of all){
       if(typeof g?.name!=='string'||typeof g.isPrivate!=='boolean'||currentNames.has(g.name))
         return hold('INVENTORY_SCHEMA_UNVERIFIED');
-      currentNames.add(g.name);
+      currentNames.add(g.name);currentPrivacy.set(g.name,g.isPrivate);
     }
     const read=async name=>{
       const owner=await call('checkGeneratorOwnership',{generatorName:name});
@@ -76,10 +76,11 @@ export async function perchanceSupplyIsolated(request) {
       return {ok:true,remoteId:'public_'+publicId};
     };
     if(request.kind==='READ_CREATE') {
-      // Owner endpoint and anonymous page bytes must agree with the current
-      // authenticated account census; absence there is not creation proof.
+      // Independent account inventory must confirm both membership AND privacy.
       if(!currentNames.has(request.temporarySlug))
         return hold('TEMP_NOT_IN_ACCOUNT_INVENTORY');
+      if(currentPrivacy.get(request.temporarySlug)!==true)
+        return hold('TEMP_ACCOUNT_PRIVACY_UNVERIFIED');
       const checked=await read(request.temporarySlug);
       if(!checked.ok)return hold('CREATE_READBACK_UNVERIFIED');
       return sameSession()?{ok:true,source:'INDEPENDENT_READBACK',
@@ -87,10 +88,11 @@ export async function perchanceSupplyIsolated(request) {
         ownerMatches:true,privateEmpty:true}:hold('SESSION_CHANGED');
     }
     if(request.kind==='READ_RENAME') {
-      // Positive final account membership is independent of rename ACK,
-      // while the old temporary slug must have disappeared.
+      // Independent account membership AND privacy must agree with page/owner.
       if(!currentNames.has(request.slug))
         return hold('FINAL_SLUG_NOT_IN_ACCOUNT_INVENTORY');
+      if(currentPrivacy.get(request.slug)!==true)
+        return hold('FINAL_ACCOUNT_PRIVACY_UNVERIFIED');
       const checked=await read(request.slug);
       if(!checked.ok||checked.remoteId!==request.remoteId)return hold('RENAME_READBACK_UNVERIFIED');
       if(currentNames.has(request.temporarySlug))return hold('OLD_SLUG_STILL_PRESENT');
@@ -145,6 +147,8 @@ export async function perchanceSupplyIsolated(request) {
         return hold('SLUG_COLLISION');
       if(!currentNames.has(request.temporarySlug))
         return hold('TEMP_NOT_IN_ACCOUNT_INVENTORY');
+      if(currentPrivacy.get(request.temporarySlug)!==true)
+        return hold('TEMP_ACCOUNT_PRIVACY_UNVERIFIED');
       const checked=await read(request.temporarySlug);
       if(!checked.ok||checked.remoteId!==request.remoteId)return hold('TEMP_OWNER_UNVERIFIED');
       const target=await call('getGeneratorPageData',{generatorName:request.slug},{unauthenticated:true});

@@ -40,7 +40,10 @@ async function withProvider(t,config,work){
       const rows=[...owned.entries()].filter(([key])=>
         !(config.omitTempFromCensus&&key==='server-temp-slug')&&
         !(config.omitFinalFromCensus&&key==='disposable-exact-slug'))
-        .map(([key,g])=>({name:key,isPrivate:g.isPrivate}));
+        .map(([key,g])=>({name:key,isPrivate:
+          (config.tempPublicInCensus&&key==='server-temp-slug')||
+          (config.finalPublicInCensus&&key==='disposable-exact-slug')
+            ?false:g.isPrivate}));
       if(config.staleOldSlugAfterRename&&owned.has('disposable-exact-slug'))
         rows.push({name:'server-temp-slug',isPrivate:true});
       out={status:'success',generators:rows};
@@ -202,6 +205,40 @@ test('P56-06 F/X: stale temporary census after rename cannot confirm completion'
       principalFingerprint:fingerprint,temporarySlug:created.temporarySlug,
       remoteId:checked.remoteId});
     assert.equal(after.code,'OLD_SLUG_STILL_PRESENT');
+    assert.equal(ledger.filter(x=>x.name==='changeGeneratorName').length,1);
+  });
+});
+
+test('P56-06 F/X: inventory reports temporary slug public despite private page; create confirmation and rename held',async t=>{
+  await withProvider(t,{tempPublicInCensus:true},async({ledger,fingerprint})=>{
+    const created=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
+    assert.equal(created.ok,true,created.code);
+    const observed=await perchanceSupplyIsolated({...req,kind:'READ_CREATE',
+      principalFingerprint:fingerprint,temporarySlug:created.temporarySlug});
+    assert.equal(observed.code,'TEMP_ACCOUNT_PRIVACY_UNVERIFIED');
+    const rename=await perchanceSupplyIsolated({...req,kind:'RENAME',
+      principalFingerprint:fingerprint,temporarySlug:created.temporarySlug,
+      remoteId:'public_servernewpublic'});
+    assert.equal(rename.code,'TEMP_ACCOUNT_PRIVACY_UNVERIFIED');
+    assert.equal(ledger.filter(x=>x.name==='save').length,1);
+    assert.equal(ledger.filter(x=>x.name==='changeGeneratorName').length,0);
+  });
+});
+test('P56-06 F/X: final account census reports public despite private page/owner; no rename confirmation',async t=>{
+  await withProvider(t,{finalPublicInCensus:true},async({ledger,fingerprint})=>{
+    const created=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
+    assert.equal(created.ok,true,created.code);
+    const checked=await perchanceSupplyIsolated({...req,kind:'READ_CREATE',
+      principalFingerprint:fingerprint,temporarySlug:created.temporarySlug});
+    assert.equal(checked.ok,true,checked.code);
+    const renamed=await perchanceSupplyIsolated({...req,kind:'RENAME',
+      principalFingerprint:fingerprint,temporarySlug:created.temporarySlug,
+      remoteId:checked.remoteId});
+    assert.equal(renamed.ack,'RENAMED');
+    const observed=await perchanceSupplyIsolated({...req,kind:'READ_RENAME',
+      principalFingerprint:fingerprint,temporarySlug:created.temporarySlug,
+      remoteId:checked.remoteId});
+    assert.equal(observed.code,'FINAL_ACCOUNT_PRIVACY_UNVERIFIED');
     assert.equal(ledger.filter(x=>x.name==='changeGeneratorName').length,1);
   });
 });
