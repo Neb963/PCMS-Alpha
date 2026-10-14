@@ -24,16 +24,16 @@ function storage(){
     async set(values){if(failWrite)throw Error('quota');for(const [k,v] of Object.entries(values))map.set(k,structuredClone(v));}};
 }
 test('P55-07: preview authenticates both encrypted layers; invalid password has zero side effects',async()=>{
-  const {pcms,archive}=await disposable(),target=donor();
+  const {pcms,payload,archive}=await disposable(),target=donor();
   let writes=0;
   const output=await previewRestore({decodeDonor:decodeBackupEnvelope,archiveText:archive.text,password:pw,
-    currentPcms:pcms,currentDonor:target,containers:[],mappings:{}});
+    currentPcms:pcms,currentDonor:target,currentPortable:payload,containers:[],mappings:{}});
   assert.match(output.planSha256,/^[0-9a-f]{64}$/);
   assert.equal(output.plan.risk.importedApprovalStatus,'HISTORICAL_ONLY');
   assert.equal(output.plan.risk.routeStatus,'BLOCK_UNTIL_INDEPENDENT_ROUTE_REVIEW');
   for(const password of ['wrong','']){
     await assert.rejects(()=>previewRestore({decodeDonor:decodeBackupEnvelope,archiveText:archive.text,password,
-      currentPcms:pcms,currentDonor:target,containers:[],mappings:{}}));
+      currentPcms:pcms,currentDonor:target,currentPortable:payload,containers:[],mappings:{}}));
   }
   assert.equal(writes,0);
 });
@@ -107,15 +107,15 @@ test('P51-08/P55-08/P55-10: out-of-store barrier readback before stage; crash/un
   assert.equal((await another.inspect()).held,true);
 });
 test('P55-07: destination changed or plan changed after approval blocks before donor effect',async()=>{
-  const {pcms,archive}=await disposable();
+  const {pcms,payload,archive}=await disposable();
   const got=await previewRestore({decodeDonor:decodeBackupEnvelope,archiveText:archive.text,password:pw,
-    currentPcms:pcms,currentDonor:donor(),mappings:{}});
+    currentPcms:pcms,currentDonor:donor(),currentPortable:payload,mappings:{}});
   assert.equal(await revalidateRestorePlan({
     expectedPlanSha256:got.planSha256,expectedDestinationSha256:got.plan.destinationSha256,
-    currentPcms:pcms,currentDonor:donor(),plan:got.plan}),true);
+    currentPcms:pcms,currentDonor:donor(),currentPortable:payload,plan:got.plan}),true);
   await assert.rejects(()=>revalidateRestorePlan({
     expectedPlanSha256:got.planSha256,expectedDestinationSha256:got.plan.destinationSha256,
-    currentPcms:pcms,currentDonor:{state:{revision:2},containers:[]},plan:got.plan}),
+    currentPcms:pcms,currentDonor:{state:{revision:2},containers:[]},currentPortable:payload,plan:got.plan}),
     /RESTORE_DESTINATION_DRIFT/);
 });
 
@@ -177,4 +177,16 @@ test('P55-08 X: partial failed independent readback holds; recovery only observe
   assert.equal(calls,1);
   assert.equal((await g.inspect()).controller,'INACTIVE');
   assert.equal((await g.inspect()).activation,'OFF');
+});
+
+test('P55-07 X: independent portable/cookie/GM cut drift invalidates reviewed restore destination',async()=>{
+  const {pcms,payload,archive}=await disposable();
+  const p=await previewRestore({archiveText:archive.text,password:pw,
+    decodeDonor:decodeBackupEnvelope,currentPcms:pcms,currentDonor:donor(),
+    currentPortable:payload,mappings:{}});
+  const changed=structuredClone(payload);changed.gmValues['imported-fixture']={counter:5};
+  await assert.rejects(()=>revalidateRestorePlan({expectedPlanSha256:p.planSha256,
+    expectedDestinationSha256:p.plan.destinationSha256,
+    currentPcms:pcms,currentDonor:donor(),currentPortable:changed,plan:p.plan}),
+    /RESTORE_DESTINATION_DRIFT/);
 });

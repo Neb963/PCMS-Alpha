@@ -40,15 +40,17 @@ export function inspectRestoreMappings(donor,mappings,containers,{fresh=false}={
   return results;
 }
 export async function previewRestore({archiveText,password,mode='merge',fresh=false,
-  mappings={},currentPcms,currentDonor,containers=[],decodeDonor}){
+  mappings={},currentPcms,currentDonor,currentPortable,containers=[],decodeDonor}){
   check(RESTORE_MODES.includes(mode),'RESTORE_MODE_INVALID');
   validatePcmsSnapshot(currentPcms);
+  check(currentPortable&&typeof currentPortable==='object'&&Array.isArray(currentPortable.personas),
+    'RESTORE_DESTINATION_PORTABLE_MISSING');
   check(currentDonor?.state&&Array.isArray(currentDonor.containers),'RESTORE_DESTINATION_UNAVAILABLE');
   const opened=await openRestoreArchive(archiveText,password,{decodeDonor});
   const groups=inspectRestoreMappings(opened.donor,mappings,containers,{fresh});
   // The archive itself is encrypted and authenticated. The destination cut is
   // not a lock: it must be re-read immediately before a guarded write.
-  const destinationSha256=await digest(JSON.stringify({pcms:currentPcms,donor:currentDonor}));
+  const destinationSha256=await digest(JSON.stringify({pcms:currentPcms,donor:currentDonor,portable:currentPortable}));
   const sourceSha256=await digest(JSON.stringify(opened.archive.pcms));
   const risk={
     importedPersonas:groups.length,
@@ -80,7 +82,7 @@ export async function verifyCheckpoint({checkpointText,password,currentPcms,
   return {sha256:opened.archiveSha256,verified:true,tier:3};
 }
 export async function revalidateRestorePlan({expectedPlanSha256,expectedDestinationSha256,
-  currentPcms,currentDonor,plan}){
+  currentPcms,currentDonor,currentPortable,plan}){
   check(await digest(JSON.stringify(plan))===expectedPlanSha256,'RESTORE_PLAN_CHANGED');
   check(await digest(JSON.stringify({pcms:currentPcms,donor:currentDonor}))===
     expectedDestinationSha256,'RESTORE_DESTINATION_DRIFT');

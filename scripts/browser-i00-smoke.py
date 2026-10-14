@@ -2494,12 +2494,12 @@ def main():
                   const pre=await restore.previewRestore({
                     archiveText:a.text,password,decodeDonor:pkg.decodeBackupEnvelope,
                     mode:'merge',fresh:false,mappings:{},currentPcms,
-                    currentDonor,containers:[]});
+                    currentDonor,currentPortable:portable,containers:[]});
                   let wrongPasswordHeld=false;
                   try{await restore.previewRestore({
                     archiveText:a.text,password:'wrong',
                     decodeDonor:pkg.decodeBackupEnvelope,mode:'merge',
-                    mappings:{},currentPcms,currentDonor,containers:[]});}
+                    mappings:{},currentPcms,currentDonor,currentPortable:portable,containers:[]});}
                   catch{wrongPasswordHeld=true;}
                   let tier2Held=false;
                   try{await restore.verifyCheckpoint({

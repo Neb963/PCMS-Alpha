@@ -71,10 +71,12 @@ preview.addEventListener('click',async()=>{
   try{
     if(pass.value.length<12)throw Error('RESTORE_PASSPHRASE_REQUIRED');
     const raw=await readFile(source),current=await snapshot();
+    const currentPortable=await portableCurrent(current.donor);
     let map;try{map=JSON.parse(mappings.value||'{}');}catch{throw Error('RESTORE_MAPPING_INVALID');}
     const plan=await previewRestore({archiveText:raw,password:pass.value,decodeDonor:decodeBackupEnvelope,
       mode:mode.value,fresh:fresh.checked,mappings:map,
-      currentPcms:current.pcms,currentDonor:current.donor,containers:current.donor.containers});
+      currentPcms:current.pcms,currentDonor:current.donor,currentPortable,
+      containers:current.donor.containers});
     review={plan,current,raw};
     summary(plan,null);
     status.textContent='Preview authenticated; mapping is only a proposed identity association. Review exclusions and checkpoint.';
@@ -88,10 +90,11 @@ verify.addEventListener('click',async()=>{
   try{
     const checkpointText=await readFile(checkpoint);
     const observed=await snapshot();
+    const donorPortable=await portableCurrent(observed.donor);
     await revalidateRestorePlan({expectedPlanSha256:review.plan.planSha256,
       expectedDestinationSha256:review.plan.plan.destinationSha256,
-      currentPcms:observed.pcms,currentDonor:observed.donor,plan:review.plan.plan});
-    const donorPortable=await portableCurrent(observed.donor);
+      currentPcms:observed.pcms,currentDonor:observed.donor,
+      currentPortable:donorPortable,plan:review.plan.plan});
     const proof=await verifyCheckpoint({checkpointText,password:pass.value,
       decodeDonor:decodeBackupEnvelope,currentPcms:observed.pcms,
       currentPortable:donorPortable,archivedAtLeastTier:3});
