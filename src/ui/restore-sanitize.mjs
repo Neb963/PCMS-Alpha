@@ -116,7 +116,9 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',uidRemap
       if(typeof indexedDB!=='undefined'&&typeof indexedDB.cmp==='function')
         return indexedDB.cmp(x,y);
       if(typeof x==='number'&&typeof y==='number')return x-y;
-      return String(x).localeCompare(String(y),'en');
+      // IndexedDB compares string keys by code units, not locale collation.
+      const sx=String(x),sy=String(y);
+      return sx<sy?-1:sx>sy?1:0;
     }).map(row=>({key:structuredClone(row.key),value:serializeClone(row.value)}));
   }
   // Never treat inventory belonging to a replaced binding as current.
