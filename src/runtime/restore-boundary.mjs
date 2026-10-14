@@ -211,7 +211,8 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           current:baseline.pcms,mode:args.mode,uidRemap:remaps});
         await step('pcms-canonical',{pcms:await digest(JSON.stringify(preparedCanonical))},
           async()=>applyCanonicalSnapshot(db,preparedCanonical,{
-            assertHeld:async()=>(await gate.inspect()).held===true}),
+            assertHeld:async()=>(await gate.inspect()).held===true,
+            expectedBefore:baseline.pcms}),
           async fp=>{
             const got=await snapshotCanonical(db);
             return {source:'INDEPENDENT_READBACK',

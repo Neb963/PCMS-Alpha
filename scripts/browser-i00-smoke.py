@@ -2577,7 +2577,7 @@ def main():
                       incoming,current:before,mode:'replace',uidRemap:{}});
                     let unheldBlocked=false;
                     try{await idb.applyCanonicalSnapshot(db,prepared,{
-                      assertHeld:async()=>false});}
+                      assertHeld:async()=>false,expectedBefore:before});}
                     catch{unheldBlocked=true;}
                     const untouched=await core.snapshotCanonical(db);
                     if(!unheldBlocked||
@@ -2587,7 +2587,7 @@ def main():
                     if(!(await sentinel.inspect()).held)
                       throw Error('RESTORE_SENTINEL_NOT_DURABLE');
                     const receipt=await idb.applyCanonicalSnapshot(db,prepared,{
-                      assertHeld:async()=>(await sentinel.inspect()).held});
+                      assertHeld:async()=>(await sentinel.inspect()).held,expectedBefore:before});
                     const after=await core.snapshotCanonical(db);
                     const release=after.stores.meta.find(r=>r.key==='release:restore-b');
                     if(receipt.source!=='INDEPENDENT_READBACK'||
