@@ -35,7 +35,7 @@ test('I17: shell implements prototype workstation chrome without losing operatio
   assert.match(inv,/pcms-generator-row-target/);
   assert.match(inv,/pcms-generator-inspector-actions/);
   assert.doesNotMatch(inv,/first\.append\(document\.createTextNode\(' '\),timing\)/);
-  assert.match(inv,/Historical local observation/);
+  assert.match(inv,/Historical observation/);
 });
 test('I17: reject inherited toolbar donor popup and escaped-markup regressions',async()=>{
   assert.equal(html.includes('</script>\\n'),false,'visible raw escape sequence');

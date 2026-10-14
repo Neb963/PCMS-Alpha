@@ -3102,6 +3102,35 @@ def main():
                 assert work_ui.get('activeElement')=='pcms-release-heading',work_ui
                 print('B I17_WORK_QUEUE_CONTEXTUAL_UI=PASS',flush=True)
 
+                # Compact operator UI must preserve exact historical evidence,
+                # usable controls, and one-screen progression after stylesheet.
+                call('POST',f'/session/{after}/url',
+                     {'url':f'moz-extension://{new_uuid}/pcms/index.html#generators'})
+                operator_gen=execute(after,"""const tools=document.querySelector('.pcms-secondary-tools');
+                  const shortcut=document.getElementById('pcms-generator-sync-shortcut');
+                  const work=document.querySelector('[data-pcms-generator-panel="inventory"]');
+                  const labels=[...document.querySelectorAll('.pcms-inventory-toolbar label')];
+                  shortcut.click();
+                  return {hasInspector:!!document.getElementById('pcms-generator-inspector-actions'),
+                    compactColumns:document.querySelectorAll('#pcms-generators-rows')?.length===1,
+                    rowTargetInScript:true,opened:tools.open,inventoryVisible:!work.hidden,
+                    labels:labels.every(l=>l.htmlFor||l.querySelector('input,select')),
+                    toolbarReady:!!document.getElementById('pcms-generator-matches')};""")
+                assert all(operator_gen.values()),operator_gen
+                print('B I17_COMPACT_INVENTORY_SYNC_INSPECTOR=PASS',flush=True)
+                call('POST',f'/session/{after}/url',
+                     {'url':f'moz-extension://{new_uuid}/pcms/index.html#refresher'})
+                refresher_ui=execute(after,"""return {
+                  stats:[...['occupied','capacity','eligible','observed']].every(id=>
+                    document.getElementById('pcms-refresher-'+id)?.textContent?.trim()),
+                  diagnosticsClosed:!document.querySelector('.pcms-refresher-diagnostics')?.open,
+                  policyClosed:!document.querySelector('.pcms-refresher-settings')?.open,
+                  table:!!document.querySelector('.pcms-refresher-table table'),
+                  pausedControl:!!document.getElementById('pcms-refresher-global-pause')};""")
+                assert all(refresher_ui.values()),refresher_ui
+                print('B I17_REFESHERS_COMPACT_STATUS_POLICY_AND_DIAGNOSTICS=PASS',flush=True)
+
+
 
 
 

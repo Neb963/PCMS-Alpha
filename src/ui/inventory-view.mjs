@@ -15,6 +15,7 @@ let epoch=0,offset=0,total=0,accounts=[],latest=[],selection=new Set(),accountEp
 const limit=50;
 const syncShortcut=document.getElementById('pcms-generator-sync-shortcut');
 syncShortcut.addEventListener('click',()=>{
+  document.querySelector('[data-pcms-jump="generators-table-title"]')?.click();
   const section=document.querySelector('#view-generators .pcms-secondary-tools');
   if(section)section.open=true;
   accountPicker.focus({preventScroll:true});
