@@ -2395,6 +2395,80 @@ def main():
                 assert 'BROWSER_REPORTED_COMPLETE' in receipt,receipt
                 print('B I08_MANUAL_UI_FIREFOX_DOWNLOAD_TIER2=PASS',flush=True)
 
+                # I15: real installed combined XPI. No provider/native-vault effects.
+                i15_ui=execute(after,"return {enabled:!!document.getElementById('pcms-auto-backup-enabled'),vault:!!document.getElementById('pcms-auto-backup-vault'),status:!!document.getElementById('pcms-auto-backup-status')}")
+                assert i15_ui=={'enabled':True,'vault':True,'status':True},i15_ui
+                i15_code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const core=await import('./backup-auto-core.mjs');
+                  const runnerModule=await import('./backup-auto-run.mjs');
+                  const storeModule=await import('./backup-auto-store.mjs');
+                  async function portStatus(){
+                    return new Promise((resolve,reject)=>{
+                      const port=browser.runtime.connect({name:core.AUTO_PORT});
+                      port.onMessage.addListener(value=>{port.disconnect();resolve(value)});
+                      port.onDisconnect.addListener(()=>reject(Error('STATUS_PORT_DISCONNECTED')));
+                      port.postMessage({action:'STATUS'});
+                    });
+                  }
+                  const actual=await portStatus();
+                  if(!actual.ok||actual.enabled!==false||actual.tier!==0)
+                    throw Error('CANONICAL_AUTO_BACKUP_NOT_OFF');
+                  async function makeDb(){
+                    return new Promise((resolve,reject)=>{
+                      const req=indexedDB.open('pcms-i15-b-'+crypto.randomUUID(),1);
+                      req.onupgradeneeded=()=>req.result.createObjectStore('meta',{keyPath:'key'});
+                      req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+                    });
+                  }
+                  const db=await makeDb(),secondDb=await makeDb();
+                  const timestamp=25*86400000,runId='auto_'+('2'.repeat(32));
+                  const state=storeModule.createAutoStore(db,()=>timestamp);
+                  await state.enabled(true);
+                  let downloads=0,filename='',nativeCalls=0;
+                  const downloadsAPI={
+                    async download(request){downloads++;filename=request.filename;return 700;},
+                    async search({id}){return id===700?[{id,filename:'/home/fixture/Downloads/'+filename,
+                      state:'complete',exists:true,fileSize:3}]:[];},
+                    onChanged:{addListener(){},removeListener(){}},
+                    async removeFile(){throw Error('SHOULD_NOT_REMOVE_IN_1_ARCHIVE')}
+                  };
+                  const api={storage:{local:browser.storage.local},downloads:downloadsAPI,
+                    runtime:{getManifest:()=>browser.runtime.getManifest()}};
+                  const runner=runnerModule.createAutoRunner(api,{
+                    open:async()=>db,clock:()=>timestamp,newId:()=>('2'.repeat(32)),
+                    native:async()=>{nativeCalls++;return {ok:true,passphrase:'synthetic-portable-recovery-passphrase'};},
+                    seal:async()=>({bytes:new Uint8Array([2,3,4]),sha256:'b'.repeat(64)})
+                  });
+                  const first=await runner.tick(),duplicate=await runner.tick();
+                  const saved=await state.read();
+                  if(first.ok!==true||duplicate.code!=='BACKUP_ALREADY_DONE'||
+                    downloads!==1||nativeCalls!==1||saved.state.archives.length!==1||
+                    saved.state.archives[0].state!=='COMPLETE'||saved.state.archives[0].kind!=='AUTO'||
+                    saved.state.archives[0].filename!==('/home/fixture/Downloads/'+filename))
+                    throw Error('SYNTHETIC_DOWNLOAD_OR_DUPLICATE');
+                  const blockedStore=storeModule.createAutoStore(secondDb,()=>timestamp);
+                  await blockedStore.enabled(true);
+                  let blockedDownloads=0;
+                  const locked=runnerModule.createAutoRunner({
+                    storage:{local:browser.storage.local},
+                    downloads:{...downloadsAPI,download:async()=>{blockedDownloads++;return 701;}}
+                  },{
+                    open:async()=>secondDb,clock:()=>timestamp,newId:()=>('3'.repeat(32)),
+                    native:async()=>({ok:false,code:'LOCKED'}),
+                    seal:async()=>{throw Error('ENCRYPTION_ON_LOCKED_VAULT');}
+                  });
+                  const held=await locked.tick(),heldState=await blockedStore.read();
+                  if(held.code!=='SUSPENDED_KEY_UNAVAILABLE'||blockedDownloads!==0||
+                    heldState.state.archives.length!==0||heldState.state.status!=='SUSPENDED')
+                    throw Error('LOCKED_VAULT_FALLBACK_FAILED');
+                  db.close();secondDb.close();
+                  return {ok:true,actual,downloads,held:held.code};
+                })().then(done).catch(e=>done({ok:false,code:String(e)}));"""
+                i15=call('POST',f'/session/{after}/execute/async',{'script':i15_code,'args':[]},timeout=90)
+                assert i15.get('ok') is True,i15
+                print('B I15_INSTALLED_BACKGROUND_PORT_DAILY_VAULT_SUSPENSION_AND_TRACKED_DOWNLOAD=PASS',flush=True)
+
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
             finally: close(after)
         finally:

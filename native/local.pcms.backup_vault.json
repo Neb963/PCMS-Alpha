@@ -1,0 +1,7 @@
+{
+  "name": "local.pcms.backup_vault",
+  "description": "PCMS Alpha isolated portable backup vault",
+  "path": "/INSTALL/ABSOLUTE/PATH/backup_vault_host.py",
+  "type": "stdio",
+  "allowed_extensions": ["persona-route-manager@local"]
+}

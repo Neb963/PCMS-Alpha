@@ -41,7 +41,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain } from "./pcms/perchance-existing.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain } from "./pcms/perchance-existing.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -488,6 +488,9 @@ attachPcmsGuard({
 
 function localMutationFence(profileIds, operation, mode = "block", options = {}) {`,
     'donor guard host');
+  bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
+    '\nattachPcmsBackupDonor({ snapshot: () => getSnapshot(), cookies: id => cookieService.list(id) });\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
+    'I15 donor backup read seam');
   await writeFile(bgPath, bg);
   for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'adoption-boundary.mjs',
     'staging-core.mjs','staging-store.mjs','staging-boundary.mjs',
@@ -495,6 +498,8 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
     'git-writeback.mjs','writeback-store.mjs','writeback-boundary.mjs',
     'release-core.mjs','release-store.mjs','release-boundary.mjs','perchance-release.mjs',
     'existing-update-core.mjs','existing-update-store.mjs','existing-update-boundary.mjs','perchance-existing.mjs',
+    'backup-auto-donor.mjs','backup-auto-core.mjs','backup-auto-store.mjs','backup-auto-download.mjs',
+    'backup-auto-retention.mjs','backup-auto-export.mjs','backup-auto-run.mjs','backup-auto-boundary.mjs',
     'refresher-effect-core.mjs','refresher-core.mjs','refresher-store.mjs','refresher-boundary.mjs','perchance-monitor.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }
