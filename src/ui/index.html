@@ -79,6 +79,7 @@
           <div class="account-controls"><span id="pcms-generator-count" role="status">No verified rows</span><button type="button" id="pcms-generator-prev" disabled>Previous page</button><button type="button" id="pcms-generator-next" disabled>Next page</button></div>
           <details class="pcms-technical-help" id="blocked-generators"><summary>About ownership and protected actions</summary><p>Existing-source adoption needs independent owner readback. Sync uses the donor-guarded read-only observer. Edit keys and collaboration do not prove ownership; an absent generator observation is not a deletion. Provider writes remain held until individually qualified.</p></details></section>
         <section class="panel" aria-labelledby="pcms-supply-heading" data-pcms-generator-panel="supply" hidden>
+          <button type="button" disabled aria-describedby="blocked-generators" class="pcms-guarded-action">Reserve generator</button>
           <div class="panel-head"><h2 id="pcms-supply-heading">Slug supply — canonical plan</h2><span class="unknown">Local freeze only · Provider held</span></div>
           <p class="reason">Paste one exact generator slug per line (up to 100). Preview preserves order and spelling. Freezing records the requests for a verified Persona-bound account in IndexedDB; it does not create, rename, reserve remotely, or write to private Git. Existing and conflicting local slugs are rejected per item.</p>
           <div class="account-controls"><label for="pcms-supply-account">Account</label>
@@ -273,6 +274,7 @@
           <div class="pcms-head-actions"><button type="button" id="pcms-refresher-reload">Reload</button><button type="button" id="pcms-refresher-global-pause" disabled>Pause globally</button></div>
         </header>
         <div class="pcms-refresher-stats" aria-label="Current local scheduling projection">
+          <button type="button" disabled aria-describedby="blocked-refresher" class="sr-only">Start refresh</button>
           <div class="pcms-refresher-stat"><span>Occupied</span><strong id="pcms-refresher-occupied">—</strong><small>Shadow slots</small></div>
           <div class="pcms-refresher-stat"><span>Capacity</span><strong id="pcms-refresher-capacity">—</strong><small>Admission cap</small></div>
           <div class="pcms-refresher-stat"><span>Eligible</span><strong id="pcms-refresher-eligible">—</strong><small>Waiting for allocation</small></div>

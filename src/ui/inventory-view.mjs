@@ -13,6 +13,12 @@ const accountPicker=document.getElementById('pcms-generator-account');
 const overviewCount=document.getElementById('pcms-overview-inventory');
 let epoch=0,offset=0,total=0,accounts=[],latest=[],selection=new Set(),accountEpoch=0;
 const limit=50;
+const syncShortcut=document.getElementById('pcms-generator-sync-shortcut');
+syncShortcut.addEventListener('click',()=>{
+  const section=document.querySelector('#view-generators .pcms-secondary-tools');
+  if(section)section.open=true;
+  accountPicker.focus({preventScroll:true});
+});
 const inspectorTitle=document.getElementById('pcms-generator-inspector-title');
 const inspectorBody=document.getElementById('pcms-generator-inspector-body');
 const inspectorActions=document.getElementById('pcms-generator-inspector-actions');
