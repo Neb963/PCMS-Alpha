@@ -1950,11 +1950,16 @@ def main():
                   done({prior});
                 })().catch(e=>done({error:String(e)}));"""
                 alarm_prior=call('POST',f'/session/{after}/execute/async',{'script':alarm_code,'args':[]})
+                alarm_schedule=execute(after,"return browser.alarms.get('pcms-refresher-turn').then(a=>({scheduledAt:a?.scheduledTime||null,now:Date.now()}))")
+                assert isinstance(alarm_schedule.get('scheduledAt'),(int,float)),alarm_schedule
+                due_ms=alarm_schedule['scheduledAt']-alarm_schedule['now']
+                # Firefox may clamp alarms to its minimum trigger granularity.
+                # Observe the browser-owned scheduled time rather than falsely
+                # interpreting an unexpired alarm as a missing background wake.
+                # Bounds are finite; NEVER reschedule an uncertain alarm.
+                assert -1000<=due_ms<=80000,('ALARM_DUE_OUT_OF_BOUNDS',alarm_schedule)
                 call('POST',f'/session/{after}/url',{'url':'about:blank'})
-                # The alarm is due after 6s; leave an independent 15s
-                # dashboard-absent window for heavily loaded Firefox startup.
-                # Do not reschedule or blindly retry if the wake is missing.
-                time.sleep(15)
+                time.sleep(min(86,max(15,due_ms/1000+7)))
                 call('POST',f'/session/{after}/url',{'url':url+'#refresher'})
                 alarm_after=call('POST',f'/session/{after}/execute/async',{'script':"const done=arguments[arguments.length-1];browser.storage.local.get('pcmsI12AlarmCount').then(v=>done(v.pcmsI12AlarmCount||0));",'args':[]})
                 if alarm_after<=alarm_prior['prior']:
