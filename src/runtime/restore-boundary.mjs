@@ -2,6 +2,7 @@
 // No provider/API calls or fresh-controller activation. Source/checkpoint secrets
 // exist only in the caller's live extension port and this invocation.
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
+import {trustedExtensionPage} from './command-boundary.mjs';
 import {snapshotCanonical,digest} from './backup-core.mjs';
 import {createPortableBackupPayload,decodeBackupEnvelope} from '../lib/backup-package.js';
 import {filterOrdinaryAutomationJobs} from '../lib/automation-history.js';
@@ -20,11 +21,13 @@ const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 const assert=(value,code)=>{if(!value)throw Error(code);};
 const createKey=(epoch,i)=>'PCMS Restore '+epoch.slice(8,20)+' '+String(i).padStart(3,'0');
 export function trustedRestoreSender(api,sender){
-  if(sender?.id!==api.runtime.id||typeof sender.url!=='string')return false;
-  const page=api.runtime.getURL('pcms/index.html');
-  // Firefox may omit the fragment from runtime.Port.sender.url. Never use
-  // prefix matching: content-script URLs and sibling extension pages fail.
-  return sender.url===page||sender.url===page+'#settings';
+  // Reuse the exercised I02/I15 extension-page sender authority instead of
+  // inventing a second Firefox-specific URL/fragment interpretation.
+  if(!trustedExtensionPage(api,sender))return false;
+  try {
+    return new URL(sender.url).pathname===
+      new URL(api.runtime.getURL('pcms/index.html')).pathname;
+  }catch{return false;}
 }
 async function readPortable(api,donor,snapshot){
   const stored=await api.storage.local.get(null),extras=Object.create(null);
