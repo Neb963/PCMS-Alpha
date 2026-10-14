@@ -126,11 +126,21 @@ export async function perchanceSupplyIsolated(request) {
         (Array.isArray(assets)&&assets.length===0)||
         (Object.getPrototypeOf(assets)===Object.prototype&&
           Object.keys(assets).length===0);
-      const sourceFields=['html','pjs','src','scripts','files','javascript','js','source'];
+      const sourceFields=['html','pjs','src','scripts','files','javascript','js','source',
+        'sourceFiles','assets','generatorCode','css','script','styles','plugins'];
       if(!emptyAssets||sourceFields.some(k=>Object.hasOwn(original,k)&&
           original[k]!=null&&original[k]!==''&&
           (!Array.isArray(original[k])||original[k].length!==0)))
         return hold('TEMPLATE_SOURCE_UNVERIFIED');
+      // isPrivate is the known F1 privacy contract. Additional template
+      // publicity switches are not known safe merely because the save also
+      // sends isPrivate:true; reject rather than clone potentially public
+      // visibility metadata into a new resource.
+      const visibilityFields=['isPublic','isListed','listed','published',
+        'isPublished','showInRecent','isFeatured','visibility','privacy'];
+      if(visibilityFields.some(k=>Object.hasOwn(original,k)&&
+          ![undefined,null,false,'','private','PRIVATE'].includes(original[k])))
+        return hold('TEMPLATE_VISIBILITY_UNVERIFIED');
       const {id,publicId,owner,ownerId,userId,createdAt,updatedAt,...safeTemplate}=original;
       // One provider request only, AFTER outer dispatcher journaling.
       const result=await call('save',{generator:{

@@ -133,7 +133,11 @@ test('P56-06 / P52-02 F/X: private empty first save excludes copied template aut
 });
 test('P56-06 X: unverified template assets or clone-bearing code never reaches provider save',async t=>{
   for(const template of [{srcManifest:[{path:'main.pjs',content:'code'}]},
-    {html:'old html'}, {pjs:'old pjs'}, {src:{'asset.txt':'bytes'}}]){
+    {html:'old html'}, {pjs:'old pjs'}, {src:{'asset.txt':'bytes'}},
+    {assets:[{path:'old.dat',body:'content'}]},
+    {sourceFiles:{'main.pjs':'old content'}},
+    {generatorCode:'old source'}, {plugins:[{name:'unsafe-clone'}]},
+    {css:'body{background:red}'}, {script:'alert(1)'}]){
     await withProvider(t,{template},async({ledger,fingerprint})=>{
       const res=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
       assert.equal(res.ok,false,res);
@@ -266,4 +270,25 @@ test('P56-06 X: created ACK naming pre-owned resource or template never becomes 
         'existing operator source remains untouched');
     });
   }
+});
+
+test('P56-06 X: alternate public/listed template metadata cannot override private-first save',async t=>{
+  for(const template of [{isPublic:true},{isListed:true},{listed:'yes'},
+    {published:true},{showInRecent:true},{isFeatured:true},
+    {visibility:'PUBLIC'},{privacy:{mode:'public'}}]){
+    await withProvider(t,{template},async({ledger,fingerprint})=>{
+      const result=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
+      assert.equal(result.code,'TEMPLATE_VISIBILITY_UNVERIFIED');
+      assert.equal(ledger.filter(x=>x.name==='save').length,0);
+    });
+  }
+  // Explicitly false aliases cannot override isPrivate:true; they may be
+  // preserved when supplied by a template, but do not authorize publishing.
+  await withProvider(t,{template:{isPublic:false,isListed:false,
+    visibility:'private'}},async({ledger,fingerprint})=>{
+    const result=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
+    assert.equal(result.ok,true,result.code);
+    assert.equal(ledger.filter(x=>x.name==='save').length,1);
+    assert.equal(ledger.find(x=>x.name==='save').body.generator.isPrivate,true);
+  });
 });
