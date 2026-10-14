@@ -1883,6 +1883,41 @@ def main():
                 assert restarted['held']=='UNKNOWN',restarted
                 print('B I12_PERSISTENT_RESTART_BUDGET_PAUSE_SINGLE_ALARM_REPAIR=PASS',flush=True)
 
+                # I14 B: exact installed XPI, canonical CAS holds and
+                # operator projection. No fake result can enable real effects.
+                call('POST',f'/session/{after}/url',{'url':url+'#refresher'})
+                i14_code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const core=await import('./refresher-effect-core.mjs');
+                  const journal=await import('./journal.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const store=(await import('./refresher-store.mjs')).createRefresherStore(db);
+                  const before=await store.read();
+                  const row=before.state.rows[0];
+                  const denied=await store.reserveAttempt({stableId:row?.stableId,
+                    id:'packaged_test_attempt',now:Date.now(),candidate:null,liveAuthorized:false});
+                  const after=await store.read();
+                  const port=browser.runtime.connect({name:'pcms-i12-refresher'});
+                  port.onMessage.addListener(result=>{
+                    done({ok:before.ok&&after.ok&&!denied.ok&&
+                      before.revision===after.revision&&
+                      before.state.revision===after.state.revision&&
+                      result.ok&&result.refreshCapability==='LIVE_REFRESH_OFF_UNTIL_PROVEN'&&
+                      core.qualifyRefreshCandidate(null).ok===false,
+                      beforeRows:before.state.rows.length,
+                      denied:denied.code,capability:result.refreshCapability,
+                      response:result,unchanged:before.state.revision===after.state.revision});
+                    port.disconnect();db.close();
+                  });
+                  port.postMessage({type:'GET_REFRESHER',params:{limit:5}});
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
+                i14=call('POST',f'/session/{after}/execute/async',
+                         {'script':i14_code,'args':[]},timeout=90)
+                assert i14.get('ok') is True,i14
+                ui=execute(after,"return {provider:document.getElementById('pcms-refresher-provider')?.textContent||'',summary:document.getElementById('pcms-refresher-summary')?.textContent||''}")
+                assert 'mutation disabled' in ui['provider'] and 'visibility-held' in ui['summary'],ui
+                print('B I14_PACKAGED_PERSISTENT_IDB_GATED_EFFECTS_AND_REFERSHER_PROOF_UI=PASS',flush=True)
+
                 # I13 B: exact packaged XPI, real IndexedDB atomic approval
                 # vs duplicate dispatch, installed operator controls, and
                 # independent postrestart uncertainty. No live provider effects.
@@ -2290,41 +2325,6 @@ def main():
                            {'script':cycle,'args':[]},timeout=90)
                 assert proof.get('ok') is True,proof
                 print('B I13_REPEAT_CYCLE_IMMUTABLE_EXISTING_STAGE_AI_HISTORY=PASS',flush=True)
-
-                # I14 B: exact installed XPI, canonical CAS holds and
-                # operator projection. No fake result can enable real effects.
-                call('POST',f'/session/{after}/url',{'url':url+'#refresher'})
-                i14_code="""const done=arguments[arguments.length-1];
-                (async()=>{
-                  const core=await import('./refresher-effect-core.mjs');
-                  const journal=await import('./journal.mjs');
-                  const db=await journal.openCanonicalDatabase();
-                  const store=(await import('./refresher-store.mjs')).createRefresherStore(db);
-                  const before=await store.read();
-                  const row=before.state.rows[0];
-                  const denied=await store.reserveAttempt({stableId:row?.stableId,
-                    id:'packaged_test_attempt',now:Date.now(),candidate:null,liveAuthorized:false});
-                  const after=await store.read();
-                  const port=browser.runtime.connect({name:'pcms-i12-refresher'});
-                  port.onMessage.addListener(result=>{
-                    done({ok:before.ok&&after.ok&&!denied.ok&&
-                      before.revision===after.revision&&
-                      before.state.revision===after.state.revision&&
-                      result.ok&&result.refreshCapability==='LIVE_REFRESH_OFF_UNTIL_PROVEN'&&
-                      core.qualifyRefreshCandidate(null).ok===false,
-                      beforeRows:before.state.rows.length,
-                      denied:denied.code,capability:result.refreshCapability,
-                      response:result,unchanged:before.state.revision===after.state.revision});
-                    port.disconnect();db.close();
-                  });
-                  port.postMessage({type:'GET_REFRESHER',params:{limit:5}});
-                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
-                i14=call('POST',f'/session/{after}/execute/async',
-                         {'script':i14_code,'args':[]},timeout=90)
-                assert i14.get('ok') is True,i14
-                ui=execute(after,"return {provider:document.getElementById('pcms-refresher-provider')?.textContent||'',summary:document.getElementById('pcms-refresher-summary')?.textContent||''}")
-                assert 'mutation disabled' in ui['provider'] and 'visibility-held' in ui['summary'],ui
-                print('B I14_PACKAGED_PERSISTENT_IDB_GATED_EFFECTS_AND_REFERSHER_PROOF_UI=PASS',flush=True)
 
                 # I08 B: real packaged Firefox crypto, canonical IDB, donor
                 # portable format, Settings action, and wrong-password failure.
