@@ -2707,7 +2707,7 @@ def main():
                 close(after)
                 fresh_profile=pathlib.Path(folder)/'fresh-profile'
                 fresh_profile.mkdir()
-                (fresh_profile/'user.js').write_text('user_pref("xpinstall.signatures.required", false);\\n')
+                (fresh_profile/'user.js').write_text('user_pref("xpinstall.signatures.required", false);\n')
                 fresh_initial=open_session(browser,fresh_profile)
                 try:
                     installed=call('POST',f'/session/{fresh_initial}/moz/addon/install',
