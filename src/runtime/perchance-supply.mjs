@@ -143,6 +143,8 @@ export async function perchanceSupplyIsolated(request) {
     if(request.kind==='RENAME'){
       if(request.temporarySlug===request.slug||currentNames.has(request.slug))
         return hold('SLUG_COLLISION');
+      if(!currentNames.has(request.temporarySlug))
+        return hold('TEMP_NOT_IN_ACCOUNT_INVENTORY');
       const checked=await read(request.temporarySlug);
       if(!checked.ok||checked.remoteId!==request.remoteId)return hold('TEMP_OWNER_UNVERIFIED');
       const target=await call('getGeneratorPageData',{generatorName:request.slug},{unauthenticated:true});
