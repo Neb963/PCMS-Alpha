@@ -184,7 +184,7 @@ test('I17 operator native AI asks for exact disposable step instead of implying 
 test('I17 native AI panel separates preparation, Chat 1/2 and advanced controls',()=>{
   assert.match(html,/class="pcms-ai-fields"/);
   assert.match(html,/class="pcms-ai-actions"/);
-  assert.match(html,/class="pcms-ai-recovery"/);
+  assert.match(html,/class="pcms-inline-help pcms-ai-recovery"/);
   assert.match(html,/Chat 1 · Test and repair/);
   assert.match(html,/Chat 2 · Optional tests/);
   for(const id of ['pcms-ai-prepare','pcms-ai-refresh','pcms-ai-run',
