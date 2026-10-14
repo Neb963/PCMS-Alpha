@@ -5,7 +5,7 @@ import {emptyAuto,admission,dayAt,vaultResponse,archiveFromDownload,
 const D=86400000;
 const runId=n=>'auto_'+n.toString(16).padStart(32,'0');
 const row=n=>({id:n,state:'complete',exists:true,fileSize:120,
-  filename:'/home/fixture/Downloads/pcms-backups/pcms-alpha-auto-'+
+  filename:'/home/fixture/Downloads/pcms-backups/pcms-alpha-auto_'+
     n.toString(16).padStart(32,'0')+'.encrypted'});
 const archive=n=>archiveFromDownload(runId(n),n,'a'.repeat(64),120,row(n));
 test('P55-04: daily durable admission, five-day catchup once, clock backwards, Pause independent',()=>{
