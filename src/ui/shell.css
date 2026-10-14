@@ -170,3 +170,55 @@ td{font-size:12px;padding:10px 9px;overflow-wrap:anywhere}
 #view-work-queue [data-pcms-work-panel]:not(.pcms-work-activity-grid){margin-top:16px}
 #view-work-queue>.pcms-workspace-shortcuts{margin:13px 0 18px}
 @media(max-width:900px){.pcms-work-activity-grid{grid-template-columns:minmax(0,1fr)}}
+
+
+/* I17 operator UX: compact prototype-first inventory, stable row identity,
+   actionable inspector; do not hide scoped holds or imply remote authorization. */
+#view-generators .workspace-head{margin-bottom:14px}
+#view-generators .pcms-heading-total{font-weight:430;color:var(--faint)}
+.pcms-head-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.pcms-head-actions button{min-height:33px!important}
+.pcms-head-actions button[data-pcms-jump]{background:var(--accent)!important;color:#fff!important;border-color:var(--accent)!important}
+#view-generators .pcms-inventory-panel{overflow:visible}
+#view-generators .pcms-inventory-panel>.panel-head{display:none}
+.pcms-inventory-toolbar{display:flex;align-items:center;gap:9px;margin-top:13px!important;margin-bottom:10px!important}
+.pcms-inventory-toolbar .pcms-field{display:flex;align-items:center;gap:7px;font-weight:550;color:var(--muted)}
+.pcms-inventory-toolbar .pcms-field:first-child{flex:1 1 220px;max-width:310px}
+.pcms-inventory-toolbar .pcms-field:first-child input{width:100%}
+.pcms-inventory-toolbar .pcms-inline-field{flex:0 0 auto}
+.pcms-inventory-toolbar .pcms-inline-field select{min-width:120px}
+.pcms-matches{margin-left:auto;color:var(--muted);font-size:11px;white-space:nowrap}
+.pcms-inventory-status{font-size:11px;color:var(--muted);margin-top:0;margin-bottom:12px}
+.pcms-secondary-tools{border-top:1px solid var(--line);padding:0;margin:0 18px 10px}
+.pcms-secondary-tools summary{font-size:11px;color:var(--accent);cursor:pointer;list-style:revert;padding:5px 0}
+.pcms-secondary-tools-body{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 0}
+.pcms-secondary-tools-body select{flex:1 1 200px;max-width:350px}
+.pcms-technical-help{font-size:11px;line-height:1.45;color:var(--muted);margin-top:10px!important;padding:10px 0 14px;border-top:1px solid var(--line)}
+.pcms-technical-help summary{cursor:pointer;color:var(--muted)}
+.pcms-technical-help p{margin:10px 0 0}
+.pcms-inventory-stage{grid-template-columns:minmax(0,1fr) minmax(270px,348px);gap:14px}
+.pcms-inventory-stage .table-wrap{background:var(--paper)}
+.pcms-inventory-stage table{min-width:510px;table-layout:auto}
+.pcms-inventory-stage table th,.pcms-inventory-stage table td{padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:middle;font-size:12px}
+.pcms-inventory-stage table th{height:35px;font-size:10px;font-weight:730;color:var(--muted)}
+.pcms-inventory-stage table td{height:41px}
+.pcms-gen-identity{display:flex;gap:8px;align-items:center;white-space:nowrap;max-width:250px}
+.pcms-gen-identity input{flex:none}
+button.pcms-generator-row-target{min-height:30px!important;border:0!important;background:transparent!important;color:var(--ink)!important;padding:2px 0!important;font-weight:670!important;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+button.pcms-generator-row-target:hover{text-decoration:underline}
+.pcms-gen-account{font-size:11px!important;color:var(--muted)}
+.pcms-source-cell{white-space:nowrap}
+.pcms-mini-evidence{margin-left:7px;color:var(--faint);font-size:10px}
+.pcms-status-tag{display:inline-flex;align-items:center;border-radius:4px;padding:3px 7px;font-size:10px;line-height:1.35;font-weight:680;background:var(--quiet);color:var(--muted)}
+.pcms-status-tag[data-tone=good]{background:var(--good-bg);color:var(--good)}
+.pcms-status-tag[data-tone=info]{background:var(--accent-light);color:var(--accent)}
+.pcms-status-tag[data-tone=held]{background:var(--warn-bg);color:var(--warn)}
+.pcms-inventory-inspector{border:1px solid var(--line);border-radius:7px}
+.pcms-inventory-inspector .pcms-inspector-head{padding:16px}
+.pcms-inventory-inspector .pcms-inspector-body{padding:12px 16px}
+.pcms-inspector-actions{display:flex;gap:6px;flex-wrap:wrap;padding:12px 16px;border-top:1px solid var(--line)}
+.pcms-inspector-actions:empty{display:none}
+.pcms-inspector-actions button{flex:1 1 70px;min-height:32px}
+#view-generators #pcms-generator-count{color:var(--muted);font-size:11px}
+@media(max-width:1250px){.pcms-inventory-stage{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:650px){.pcms-inventory-toolbar{flex-wrap:wrap}.pcms-inventory-toolbar .pcms-field:first-child{max-width:none}.pcms-matches{margin-left:0}.pcms-head-actions{width:100%}.pcms-secondary-tools-body{display:flex}.pcms-mini-evidence{display:none}}

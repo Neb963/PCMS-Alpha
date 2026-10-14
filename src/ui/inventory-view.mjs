@@ -15,13 +15,16 @@ let epoch=0,offset=0,total=0,accounts=[],latest=[],selection=new Set(),accountEp
 const limit=50;
 const inspectorTitle=document.getElementById('pcms-generator-inspector-title');
 const inspectorBody=document.getElementById('pcms-generator-inspector-body');
+const inspectorActions=document.getElementById('pcms-generator-inspector-actions');
+const headingTotal=document.getElementById('pcms-generator-heading-total');
+const matches=document.getElementById('pcms-generator-matches');
 let inspectedSlug=null;
 function inspect(item,focus=false){
   inspectedSlug=item.slug;
   inspectorTitle.textContent=item.slug;
   inspectorBody.replaceChildren();
   const note=document.createElement('p');
-  note.textContent='Historical local observation. Reverify account/route/source before any write.';
+  note.textContent='Historical observation · recheck owner and route before edits.';
   const dl=document.createElement('dl');dl.className='pcms-evidence-kv';
   const details=[
     ['Account',item.accountId||'Unknown'],
@@ -36,11 +39,26 @@ function inspect(item,focus=false){
     dl.append(dt,dd);
   }
   inspectorBody.append(note,dl);
+  inspectorActions.replaceChildren();
+  const action=(label,handler,{disabled=false}={})=>{
+    const button=document.createElement('button');
+    button.type='button';button.textContent=label;button.disabled=disabled;
+    button.addEventListener('click',handler);inspectorActions.append(button);
+  };
+  action('Git source',()=>window.dispatchEvent(new CustomEvent('pcms-source-target',{
+    detail:{slug:item.slug,revision:item.revision}})));
+  action('Refresher',()=>window.dispatchEvent(new CustomEvent('pcms-refresher-target',{
+    detail:{slug:item.slug}})));
+  action('Adopt',()=>window.dispatchEvent(new CustomEvent('pcms-adoption-target',{
+    detail:{slug:item.slug,revision:item.revision,ownerState:item.ownerState,
+      visibility:item.visibility}})),{disabled:item.ownerState!=='OBSERVED_OWNER'||
+        !['PUBLIC','UNLISTED'].includes(item.visibility)});
   if(focus)inspectorTitle.focus({preventScroll:true});
 }
 function emptyInspector(){
   inspectedSlug=null;inspectorTitle.textContent='Select a generator';
-  inspectorBody.textContent='Choose Inspect in an inventory row. This is local historical evidence; no ownership or write permission is inferred.';
+  inspectorBody.textContent='Select a generator to inspect evidence and actions.';
+  inspectorActions.replaceChildren();
 }
 const labels={
   OBSERVED_OWNER:'Owner previously observed (not current authorization)',
@@ -89,45 +107,39 @@ function draw(items) {
       if(pick.checked)selection.add(item.slug);else selection.delete(item.slug);
       showCounter();
     });
-    const first=document.createElement('td');
-    first.append(pick,document.createTextNode(' '+item.slug+' '));
-    const inspectPick=document.createElement('button');
-    inspectPick.type='button';inspectPick.textContent='Inspect';
-    inspectPick.setAttribute('aria-label','Inspect local evidence for '+item.slug);
-    inspectPick.addEventListener('click',()=>inspect(item,true));
-    first.append(inspectPick,document.createTextNode(' '));
-    const sourcePick=document.createElement('button');
-    sourcePick.type='button';sourcePick.textContent='Source';
-    sourcePick.setAttribute('aria-label','Inspect Git source for '+item.slug);
-    sourcePick.addEventListener('click',()=>window.dispatchEvent(
-      new CustomEvent('pcms-source-target',{detail:{slug:item.slug,revision:item.revision}})));
-    first.append(sourcePick);
-    const timing=document.createElement('button');timing.type='button';timing.textContent='Timing';
-    timing.addEventListener('click',()=>window.dispatchEvent(new CustomEvent('pcms-refresher-target',{detail:{slug:item.slug}})));
-    first.append(document.createTextNode(' '),timing);
-    const adoptPick=document.createElement('button');
-    adoptPick.type='button';adoptPick.textContent='Adopt';
-    adoptPick.disabled=item.ownerState!=='OBSERVED_OWNER' ||
-      !['PUBLIC','UNLISTED'].includes(item.visibility);
-    adoptPick.setAttribute('aria-label','Adopt existing generator '+item.slug);
-    adoptPick.addEventListener('click',()=>window.dispatchEvent(
-      new CustomEvent('pcms-adoption-target',{detail:{
-        slug:item.slug,revision:item.revision,ownerState:item.ownerState,
-        visibility:item.visibility
-      }})));
-    first.append(document.createTextNode(' '),adoptPick);
-    cells.push(first);
-    for(const value of [item.accountId, labels[item.ownerState]||'Evidence unknown',
-       (item.visibility||'UNKNOWN')+' · '+(item.source||'SOURCE_PENDING')]) {
-      const td=document.createElement('td');td.textContent=value;cells.push(td);
-    }
+    const first=document.createElement('td');first.className='pcms-gen-identity';
+    const choose=document.createElement('button');choose.type='button';
+    choose.className='pcms-generator-row-target';
+    choose.textContent=item.slug;
+    choose.setAttribute('aria-label','Inspect '+item.slug);
+    choose.addEventListener('click',()=>inspect(item,true));
+    first.append(pick,choose);cells.push(first);
+    const account=document.createElement('td');account.className='pcms-gen-account';
+    const exact=String(item.accountId||'');
+    account.textContent=exact.length>19?exact.slice(0,13)+'…'+exact.slice(-4):exact||'Unknown';
+    account.title=exact||'Unknown';cells.push(account);
+    const visibility=document.createElement('td');
+    const visibilityTag=document.createElement('span');
+    visibilityTag.className='pcms-status-tag';
+    visibilityTag.dataset.tone=['UNLISTED','PRIVATE'].includes(item.visibility)?'neutral':item.visibility==='PUBLIC'?'info':'held';
+    visibilityTag.textContent=item.visibility==='UNLISTED'?'Unlisted':item.visibility==='PUBLIC'?'Public':item.visibility||'Unknown';
+    visibility.append(visibilityTag);cells.push(visibility);
+    const source=document.createElement('td');source.className='pcms-source-cell';
+    const src=document.createElement('span');src.className='pcms-status-tag';
+    src.dataset.tone=item.source==='READY'?'good':'neutral';
+    src.textContent=item.source==='READY'?'READY':item.source==='SOURCE_PENDING'?'Not linked':item.source||'Unknown';
+    const owner=document.createElement('span');owner.className='pcms-mini-evidence';
+    owner.title=labels[item.ownerState]||'Owner evidence unavailable';
+    owner.textContent=item.ownerState==='OBSERVED_OWNER'?'Owner seen':item.ownerState==='OWNER_UNVERIFIED'?'Owner unknown':'Check owner';
+    source.append(src,owner);cells.push(source);
     tr.append(...cells);rows.append(tr);
   }
 }
 function showCounter(){
   const first=total===0?0:offset+1,last=Math.min(total,offset+limit);
-  counter.textContent=first+'–'+last+' of '+total+' matching · '+selection.size+
-    ' selected (no bulk mutations enabled)';
+  counter.textContent=first+'–'+last+' of '+total+(selection.size?' · '+selection.size+' selected':'');
+  if(matches)matches.textContent=total+' matching';
+  if(headingTotal)headingTotal.textContent=total?' '+total.toLocaleString():'';
   before.disabled=offset===0;
   after.disabled=offset+limit>=total;
 }
@@ -141,14 +153,13 @@ async function load() {
     if(mine!==epoch)return;
     if(res?.ok!==true)throw Error(res?.code||'READ_UNAVAILABLE');
     total=res.total;latest=res.items;draw(latest);showCounter();
-    feedback.textContent=(res.truncated?'Result limit reached. Narrow filters. ':
-      'Local inventory only. ')+(res.restoreHeld?
-      'Restore hold active. ':'')+
-      'Real-time ownership is not asserted; provider writes OFF.';
+    feedback.textContent=res.restoreHeld?'Restore hold · local data only':
+      res.truncated?'Some records omitted · narrow your search':
+      'Local observations · owner status may be stale';
   }catch{
     if(mine!==epoch)return;
     total=0;latest=[];rows.replaceChildren();showCounter();
-    feedback.textContent='Inventory read unavailable. No absence or ownership inferred.';
+    feedback.textContent='Inventory unavailable · no deletion inferred';
   }
 }
 async function loadOverview() {
