@@ -116,7 +116,10 @@ async function refreshJobs(){
     if(own!==queueSeq)return;
     jobList.replaceChildren();
     if(!data?.ok){jobStatus.textContent=data?.code||'AI_JOBS_UNAVAILABLE';return;}
-    if(!data.jobs.length){jobStatus.textContent='No jobs prepared. Native AI requires explicit disposable-test authorization.';return;}
+    // Keep selection tied to a current canonical revision, not a stale
+    // pre-dispatch object. Disappeared jobs cannot remain operable.
+    if(selectedJob)selectedJob=data.jobs.find(j=>j.slug===selectedJob.slug)||null;
+    if(!data.jobs.length){jobStatus.textContent='No jobs prepared. Native AI requires explicit disposable-test authorization.';controls();return;}
     const ul=document.createElement('ul');
     for(const j of data.jobs){
       const li=document.createElement('li');
@@ -142,7 +145,11 @@ async function refreshJobs(){
     }
     jobList.append(ul);
     if(data.truncated)jobList.append(document.createTextNode(' Additional jobs omitted.'));
-    jobStatus.textContent='Canonical job receipts · no helper session or source body disclosed.';
+    jobStatus.textContent=selectedJob?
+      selectedJob.slug+' · '+selectedJob.state+' · revision '+selectedJob.revision+
+      ' · canonical observation; no test PASS inferred.':
+      'Canonical job receipts · select a job; no helper session or source body disclosed.';
+    controls();
   }catch{if(own===queueSeq)jobStatus.textContent='AI receipts unavailable; do not infer completion.';}
 }
 async function prepareJob(){
@@ -215,7 +222,7 @@ async function nativeCommand(type,step){
   }catch{
     jobStatus.textContent='Native command disconnected. Effect may have occurred; do not retry before independent reconciliation.';
   }finally{
-    busy=false;selectedJob=null;controls();await refreshJobs();
+    busy=false;controls();await refreshJobs();
   }
 }
 advanceNative.addEventListener('click',()=>nativeCommand('ADVANCE_JOB'));

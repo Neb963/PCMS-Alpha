@@ -384,6 +384,40 @@ export function createAiBoundary(api,{
             'A separate browser assertion previously observed a real failing required test. Re-examine the current generator-owned code and src files, make a bounded corrective change, save and run the tests again. Do not declare PASS without an independent browser observation. If no safe progress is possible, report a blocker.':null;
           if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR'].includes(p.step)&&
              (typeof text!=='string'||!text.trim()))return fail('AI_PROMPT_UNVERIFIED');
+          if(pilotMatches(ctx)){
+            // A prepared job is not a fresh saved-source observation. An
+            // independent private owner + complete PJS/HTML/src readback must
+            // match its byte-pinned I09 candidate before any effect marker.
+            if(!g.observeReadOnly)return fail('AI_PILOT_SOURCE_OBSERVER_UNAVAILABLE');
+            const current=await g.observeReadOnly(r.personaUid,false,r.slug);
+            const original=current?.original;
+            if(current?.ok!==true||
+               current.principalFingerprint!==r.principalFingerprint||
+               original?.remotePublicId!==r.remotePublicId||
+               original?.ownerResult!=='IS_OWNER'||
+               original?.visibility!=='UNLISTED'||
+               typeof original?.pjs!=='string'||typeof original?.html!=='string'||
+               !Array.isArray(original?.assets))
+              return fail('AI_PILOT_PRIVATE_OWNER_CHANGED');
+            const observed={ok:true,source:'DONOR_GUARDED_ORIGINAL_READBACK',
+              slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,
+              principalFingerprint:current.principalFingerprint,
+              remotePublicId:original.remotePublicId,
+              ownerResult:original.ownerResult,visibility:original.visibility,
+              pjs:original.pjs,html:original.html,assets:original.assets};
+            const proof=await verifyReadback(r.candidate,observed,{
+              slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,
+              principalFingerprint:r.principalFingerprint,remotePublicId:r.remotePublicId});
+            if(!proof.ok)return fail('AI_PILOT_REMOTE_SOURCE_CHANGED');
+            const stageNow=await stageFactory(db).getFull(p.slug);
+            if(!stageNow.ok||stageNow.record.revision!==r.revision||
+               stageNow.record.state!=='SOURCE_VERIFIED'||
+               stageNow.record.nonce!==r.nonce)return fail('AI_PILOT_STAGE_CHANGED');
+            const routeNow=await g.getSafeRouteReadiness(r.personaUid);
+            if(!routeNow?.ready||routeNow.cookieStoreId!==route.cookieStoreId||
+               routeNow.routeId!==route.routeId)
+              return fail('AI_PILOT_ROUTE_CHANGED');
+          }
           if((await sentinel.inspect()).held||!nativeAuthorized(ctx))
             return fail('AI_PROVIDER_ACTIVATION_HELD');
           // Commit DISPATCH_POSSIBLE before ANY possible remote AI effect;

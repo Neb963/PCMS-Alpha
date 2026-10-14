@@ -1,15 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createAiBoundary,validateAiMessage} from '../src/runtime/ai-boundary.mjs';
+import {exactSource} from '../src/runtime/staging-core.mjs';
 
-const slug='pcms-test-native-private-0001',fingerprint='a'.repeat(64),sid='1'.repeat(64);
+const slug='pcms-test-native-private-0001',sid='1'.repeat(64);
+const original={pjs:'output = 1',html:'<h1>source</h1>',assets:[]};
+const enc=x=>Buffer.from(x,'utf8').toString('base64');
+const saved=await exactSource([{path:'main.pjs',base64:enc(original.pjs)},
+  {path:'index.html',base64:enc(original.html)}]);
+assert.equal(saved.ok,true);
+const fingerprint=saved.fingerprint;
 const api={runtime:{id:'persona-route-manager@local',
   getURL:p=>'moz-extension://fixture/'+p},
   storage:{local:{get:async()=>({})}}};
 const sender={id:api.runtime.id,url:api.runtime.getURL('pcms/index.html')+'#work-queue'};
 function fixture({clock=()=>0,expireAtMarker=false,lostAck=false,
   dirtyAfterMarker=false,routeChangeAfterMarker=false,history=false,
-  wrongSource=false,stageChanged=false}={}){
+  wrongSource=false,stageChanged=false,remoteDrift=false}={}){
   const events=[],external=[];
   let marked=false,reads=0,jobReads=0;
   let job={slug,revision:7,stageRevision:4,state:history?'TESTS_UNVERIFIED':'PENDING_NATIVE_SESSION',
@@ -23,7 +30,7 @@ function fixture({clock=()=>0,expireAtMarker=false,lostAck=false,
   const stage={slug,revision:4,state:'SOURCE_VERIFIED',accountId:'account-private',
     personaUid:'persona-verified',remotePublicId:'remote-private',
     principalFingerprint:'f'.repeat(64),nonce:'c'.repeat(32),
-    candidate:{fingerprint}};
+    candidate:saved};
   const store={
     getJobFull:async()=>{jobReads++;return {ok:true,job:structuredClone(job)}},
     armNative:async(_slug,revision,step)=>{
@@ -45,6 +52,11 @@ function fixture({clock=()=>0,expireAtMarker=false,lostAck=false,
         cookieStoreId:'protected-container'};
     },
     inspectStageEditor:async()=>({ok:true,clean:!(dirtyAfterMarker&&marked)}),
+    observeReadOnly:async()=>({ok:true,
+      principalFingerprint:stage.principalFingerprint,
+      original:{...original,html:remoteDrift?'<h1>human update</h1>':original.html,
+        remotePublicId:stage.remotePublicId,ownerResult:'IS_OWNER',
+        visibility:'UNLISTED'}}),
     runNativeAiStep:async(_persona,request)=>{
       external.push(request.action);
       if(request.action==='OBSERVE')return {ok:true,sessionDigest:'2'.repeat(64),
@@ -142,5 +154,13 @@ test('I17 X native operator arm never authorizes AUTOMATION or forged web comman
   assert.equal(validateAiMessage(api,sender,{type:'ARM_DISPOSABLE_AI',
     params:{slug,expectedRevision:7,step:'CHAT1_SEND',
       confirmation:'CHAT1_SEND '+slug,force:true}}).code,'INVALID_PARAMS');
+  assert.deepEqual(x.external,[]);
+});
+
+test('I17 X external Perchance saved-byte drift stops disposable AI before journal/effect',async()=>{
+  const x=fixture({remoteDrift:true});
+  assert.equal((await x.arm()).ok,true);
+  assert.equal((await x.begin()).code,'AI_PILOT_REMOTE_SOURCE_CHANGED');
+  assert.deepEqual(x.events,[]);
   assert.deepEqual(x.external,[]);
 });
