@@ -173,11 +173,18 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
         },async fp=>{
           if(!preparedDonor||!mappings)return {source:'INDEPENDENT_READBACK',digest:'0'.repeat(64)};
           const now=await donor.snapshot();
-          const valid=preparedDonor.sourcePersonas.every(p=>{
+          const personasVerified=preparedDonor.sourcePersonas.every(p=>{
             const row=now.state.profiles?.[p.containerId];
             return row?.personaUid===p.targetUid&&row?.routeId==='block'&&
-              row?.killSwitch===true&&row.managed===true;
+              row?.killSwitch===true&&row.blockLocalNetwork===true&&row.managed===true;
           });
+          // An acknowledged donor commit does not prove source was persisted.
+          // Compare each imported script and workflow including source text.
+          const scriptsVerified=Object.values(preparedDonor.scriptMap||{})
+            .every(id=>same(now.state.scripts?.[id],preparedDonor.candidate.scripts?.[id]));
+          const workflowsVerified=Object.values(preparedDonor.workflowMap||{})
+            .every(id=>same(now.state.workflows?.[id],preparedDonor.candidate.workflows?.[id]));
+          const valid=personasVerified&&scriptsVerified&&workflowsVerified;
           return {source:'INDEPENDENT_READBACK',digest:valid?fp:'0'.repeat(64)};
         });
         await step('donor-cookies',{cookies:await digest(JSON.stringify(payload.cookies||{})),
