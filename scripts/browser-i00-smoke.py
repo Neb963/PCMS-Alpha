@@ -2700,6 +2700,164 @@ def main():
                 assert recovery=={'held':True,'release':'RESTORE_REVIEW_REQUIRED'},recovery
                 print('B I16_PACKAGED_FULL_FIREFOX_RESTART_INACTIVE_RESTORE_PERSISTED=PASS',flush=True)
 
+
+                # I16 fresh disposable Firefox profile, separate from the old
+                # controller. Only synthetic local Persona/IDB writes. A
+                # pre-existing UID forces donor-authoritative collision remap.
+                close(after)
+                fresh_profile=pathlib.Path(folder)/'fresh-profile'
+                fresh_profile.mkdir()
+                (fresh_profile/'user.js').write_text('user_pref("xpinstall.signatures.required", false);\\n')
+                fresh_initial=open_session(browser,fresh_profile)
+                try:
+                    installed=call('POST',f'/session/{fresh_initial}/moz/addon/install',
+                                   {'path':str(archive),'temporary':False},timeout=45)
+                    assert installed==ID,installed
+                finally: close(fresh_initial)
+                after=open_session(browser,fresh_profile)
+                new_uuid=addons_uuid(fresh_profile)
+                call('POST',f'/session/{after}/url',
+                     {'url':f'moz-extension://{new_uuid}/pcms/index.html#settings'})
+                fresh_script="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const core=await import('./backup-core.mjs');
+                  const review=await import('./restore-core.mjs');
+                  const journal=await import('./journal.mjs');
+                  const pkg=await import('../lib/backup-package.js');
+                  const automation=await import('../lib/automation-history.js');
+                  const previousUid='11111111-1111-4111-8111-111111111111';
+                  const holder=await browser.runtime.sendMessage({
+                    type:'CREATE_PERSONA',input:{name:'CI collision holder',
+                      routeId:'block',profile:{personaUid:previousUid,
+                        killSwitch:true,blockLocalNetwork:true}}});
+                  const sourceId=holder?.container?.cookieStoreId;
+                  if(!sourceId||holder?.profile?.personaUid!==previousUid)
+                    throw Error('DONOR_HOLDER_NOT_CREATED');
+                  const donor=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  const db=await journal.openCanonicalDatabase();
+                  const canonical=await core.snapshotCanonical(db);db.close();
+                  const stored=await browser.storage.local.get(null);
+                  const extras=Object.create(null);
+                  for(const [k,v] of Object.entries(stored||{}))
+                    if(k==='automationJobs'||k.startsWith('gm-values:'))extras[k]=v;
+                  const params={state:donor.state,containers:donor.containers,
+                    userscriptData:extras,selection:{kind:'full'},
+                    automationHistory:automation.filterOrdinaryAutomationJobs(
+                      Object.values(extras.automationJobs||{}))};
+                  const initial=pkg.createPortableBackupPayload(params);
+                  const cookieData=Object.create(null);
+                  for(const p of initial.personas){
+                    const found=await browser.runtime.sendMessage({
+                      type:'PERSONA_COOKIES_LIST',profileId:p.sourceId});
+                    if(!Array.isArray(found))throw Error('COOKIE_LIST_UNAVAILABLE');
+                    cookieData[p.sourceId]=found;
+                  }
+                  const currentPortable=pkg.createPortableBackupPayload({
+                    ...params,cookiesByProfile:cookieData});
+                  const password='synthetic-i16-fresh-profile-backup-passphrase';
+                  const prevEnvelope=await pkg.encodeBackupEnvelope({
+                    payload:currentPortable,password,scope:{kind:'full'}});
+                  const checkpoint=await core.encodeIntegrated({
+                    pcms:canonical,donorEnvelope:prevEnvelope,passphrase:password});
+                  const importedProfile=structuredClone(holder.profile);
+                  importedProfile.containerId='firefox-container-old';
+                  importedProfile.personaUid=previousUid;
+                  importedProfile.routeId='block';
+                  importedProfile.killSwitch=true;
+                  importedProfile.blockLocalNetwork=true;
+                  importedProfile.managed=true;
+                  const incomingDonor=structuredClone(donor.state);
+                  incomingDonor.profiles={'firefox-container-old':importedProfile};
+                  incomingDonor.scripts={};incomingDonor.workflows={};
+                  const importedPortable=pkg.createPortableBackupPayload({
+                    state:incomingDonor,selection:{kind:'full'},
+                    containers:[{cookieStoreId:'firefox-container-old',name:'CI imported'}],
+                    cookiesByProfile:{'firefox-container-old':[]}});
+                  if(importedPortable.personas.length!==1)
+                    throw Error('IMPORT_FIXTURE_PERSONA_MISSING');
+                  const portableEnvelope=await pkg.encodeBackupEnvelope({
+                    payload:importedPortable,password,scope:{kind:'full'}});
+                  const restoredPcms={schema:1,stores:Object.fromEntries(
+                    core.DB_STORES.map(k=>[k,[]]))};
+                  restoredPcms.stores.meta.push({key:'account:restored-fresh',
+                    value:core.serializeClone({key:'account:restored-fresh',
+                      account:{accountId:'restored-fresh',personaUid:previousUid,
+                        state:'VERIFIED',revision:1,identity:{session:'old-evidence'}}})});
+                  const archive=await core.encodeIntegrated({
+                    pcms:restoredPcms,donorEnvelope:portableEnvelope,passphrase:password});
+                  const mappings={[importedPortable.personas[0].key]:'__create__'};
+                  const inspected=await review.previewRestore({
+                    archiveText:archive.text,password,mode:'merge',fresh:true,
+                    mappings,currentPcms:canonical,currentDonor:donor,
+                    currentPortable,containers:donor.containers,
+                    decodeDonor:pkg.decodeBackupEnvelope});
+                  if(inspected.plan.risk.newContainers!==1||
+                     inspected.plan.groups[0].status!=='CREATE_REQUESTED')
+                    throw Error('FRESH_RESTORE_RISK_NOT_DISCLOSED');
+                  async function send(action,params){
+                    return new Promise(resolve=>{
+                      const port=browser.runtime.connect({name:'pcms-i16-restore'});
+                      let settled=false;
+                      function settle(x){
+                        if(settled)return;settled=true;
+                        try{port.disconnect();}catch{}
+                        resolve(x);
+                      }
+                      port.onMessage.addListener(settle);
+                      port.onDisconnect.addListener(()=>settle({ok:false,code:'PORT_CLOSED'}));
+                      port.postMessage({action,params});
+                    });
+                  }
+                  const result=await send('APPLY',{
+                    archiveText:archive.text,checkpointText:checkpoint.text,
+                    password,mode:'merge',fresh:true,mappings,
+                    reviewedPlanSha256:inspected.planSha256});
+                  const after=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  const marker=(await browser.storage.local.get('pcmsRestoreInProgress'))
+                    .pcmsRestoreInProgress;
+                  const imported=Object.entries(after.state.profiles||{})
+                    .filter(([id,p])=>id!==sourceId&&p.managed===true&&
+                      p.routeId==='block'&&p.personaUid!==previousUid);
+                  const saved=await journal.openCanonicalDatabase();
+                  const receipt=await new Promise(resolve=>{
+                    const req=saved.transaction('meta','readonly').objectStore('meta')
+                      .get('account:restored-fresh');
+                    req.onsuccess=()=>resolve(req.result);
+                  });
+                  saved.close();
+                  const again=await send('APPLY',{});
+                  const activate=await send('ACTIVATE',{});
+                  if(!result.ok||marker?.status!=='COMPLETE_INACTIVE'||
+                    marker.fresh!==true||
+                    after.state.profiles[sourceId]?.personaUid!==previousUid||
+                    imported.length!==1||
+                    receipt?.account?.personaUid!==imported[0][1].personaUid||
+                    receipt?.account?.identity!==null||
+                    receipt?.account?.state!=='VERIFICATION_PENDING'||
+                    again.code!=='RESTORE_INPUT_INVALID'&&again.code!=='RESTORE_ALREADY_HELD'||
+                    activate.code!=='RESTORE_COMMAND_NOT_ALLOWED')
+                    throw Error('FRESH_RESTORE_COLLISION_OR_HOLD:'+JSON.stringify({
+                      code:result.code,status:marker?.status,fresh:marker?.fresh,
+                      imported:imported.length,account:receipt?.account?.state,
+                      reapply:again.code,activate:activate.code
+                    }));
+                  return {ok:true,targetUid:imported[0][1].personaUid,
+                    originalUid:previousUid,sourceContainer:sourceId,
+                    status:marker.status,groups:Object.keys(marker.groups).length};
+                })().then(done).catch(e=>done({ok:false,error:String(e)}));"""
+                fresh_result=call('POST',f'/session/{after}/execute/async',
+                                  {'script':fresh_script,'args':[]},timeout=120)
+                assert fresh_result.get('ok') is True,fresh_result
+                assert fresh_result.get('groups')==4,fresh_result
+                close(after)
+                after=open_session(browser,fresh_profile)
+                new_uuid=addons_uuid(fresh_profile)
+                call('POST',f'/session/{after}/url',
+                     {'url':f'moz-extension://{new_uuid}/pcms/index.html#settings'})
+                fresh_restored=execute(after,"return browser.storage.local.get('pcmsRestoreInProgress').then(s=>({active:s.pcmsRestoreInProgress?.active,fresh:s.pcmsRestoreInProgress?.fresh,status:s.pcmsRestoreInProgress?.status}))")
+                assert fresh_restored=={'active':True,'fresh':True,'status':'COMPLETE_INACTIVE'},fresh_restored
+                print('B I16_FRESH_PROFILE_UID_COLLISION_BLOCK_ROUTE_INACTIVE_RESTART=PASS',flush=True)
+
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
             finally: close(after)
         finally:
