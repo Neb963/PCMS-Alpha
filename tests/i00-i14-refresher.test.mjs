@@ -90,9 +90,18 @@ test('P54-05 / S6-I14-BOUND-RETRY X: lost ACK, wrong account and stale readback 
   assert.equal(uncertain.evidence.suspended,true);
   assert.equal(request(e,'attempt_02',at+600000).ok,false);
   assert.equal(request(uncertain.evidence,'attempt_02',at+600000).ok,false);
-  assert.equal(reconcileRefreshAttempt(uncertain.evidence,'attempt_01',{
-    at:at+3,kind:'EFFECT_CHANGED',sourceFingerprint:changed,
-    targetMatched:true,principalMatched:true}).ok,false);
+  const later=reconcileRefreshAttempt(uncertain.evidence,'attempt_01',{
+    at:at+1200001,kind:'EFFECT_CHANGED',sourceFingerprint:changed,
+    targetMatched:true,principalMatched:true});
+  assert.equal(later.ok,true);
+  assert.equal(later.effectVerified,true);
+  assert.equal(later.evidence.attempts,1);
+  assert.equal(later.evidence.intent,null);
+  assert.equal(uncertain.evidence.intent.state,'DISPATCH_POSSIBLE');
+  const mereFeed=observeRefreshPresence(uncertain.evidence,{at:at+10*MINUTE,
+    present:true,rank:1,complete:true,healthy:true});
+  assert.equal(mereFeed.evidence.suspended,true);
+  assert.equal(request(mereFeed.evidence,'attempt_03',at+2*HOUR).ok,false);
 });
 
 test('P54-05 F/X: exact independent saved effect and observed feed rank remain separate facts',()=>{

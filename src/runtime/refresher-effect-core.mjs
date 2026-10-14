@@ -30,10 +30,11 @@ export function observeRefreshPresence(current,{at,present,rank,complete,healthy
   if(at<=Math.max(e.lastSeenAt,e.lastMissAt))return {ok:false,code:'STALE_VISIBILITY'};
   if(present){
     const wasSuspended=e.suspended;
-    e.misses=0;e.lastSeenAt=at;e.lastRank=rank;e.suspended=false;
-    // A pending/uncertain dispatch is not resolved merely by seeing a list item.
-    if(!e.intent)e.state='PRESENT';
-    return {ok:true,evidence:e,resumed:wasSuspended,releaseSlot:false};
+    const uncertain=e.state==='EFFECT_UNVERIFIED'||e.intent?.state==='DISPATCH_POSSIBLE';
+    e.misses=0;e.lastSeenAt=at;e.lastRank=rank;
+    // Seeing a feed item cannot reconcile a possibly-dispatched mutation.
+    if(!uncertain){e.suspended=false;if(!e.intent)e.state='PRESENT';}
+    return {ok:true,evidence:e,resumed:wasSuspended&&!uncertain,releaseSlot:false};
   }
   e.lastRank=null;
   if(e.lastMissAt&&at-e.lastMissAt<windowMs)
@@ -96,10 +97,11 @@ export function reconcileRefreshAttempt(evidence,id,{at,kind,sourceFingerprint,
   const noEffect=targetMatched===true&&principalMatched===true&&
     kind==='NO_EFFECT'&&sourceFingerprint===e.intent.sourceFingerprint;
   const prior=e.intent;
-  e.attempts=Math.min(RETRY_LIMIT,e.attempts+1);
+  const already=e.history.some(h=>h.id===id);
+  if(!already)e.attempts=Math.min(RETRY_LIMIT,e.attempts+1);
   e.nextAttemptAt=at+Math.min(MAX_BACKOFF,600000*2**e.attempts);
   e.state=verified?'EFFECT_CONFIRMED':noEffect?'INEFFECTIVE':'EFFECT_UNVERIFIED';
-  e.history=[...e.history,{id,at,methodVersion:prior.version,
+  e.history=[...e.history.filter(h=>h.id!==id),{id,at,methodVersion:prior.version,
     dispatchAt:prior.dispatchAt,effect:e.state,
     // A feed result must carry its own complete timestamped independent proof.
     feed:feed?.independent===true&&feed.complete===true&&time(feed.observedAt)&&
@@ -111,7 +113,9 @@ export function reconcileRefreshAttempt(evidence,id,{at,kind,sourceFingerprint,
         {state:'UNKNOWN',at:0,rank:null}}].slice(-8);
   // No retry after an uncertain dispatch even if an adapter times out. No
   // automatic retry after an ineffective attempt without a fresh verified method.
-  e.intent=null;
+  // Retain the dispatch receipt until independent saved-state readback
+  // resolves it; a later guarded read can settle this SAME id without execute.
+  e.intent=verified||noEffect?null:prior;
   if(!verified)e.suspended=true;
   return {ok:true,evidence:e,effectVerified:verified,
     feedState:e.history.at(-1).feed.state};

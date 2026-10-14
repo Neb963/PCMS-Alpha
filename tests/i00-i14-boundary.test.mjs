@@ -27,7 +27,7 @@ function fixture({gate=false,changeRoute=false,lostReadback=false}={}){
     storage:{local:{get:async()=>({}),set:async()=>{}}}};
   let calls=0;
   const guard=()=>({getSafeRouteReadiness:async()=>{
-    calls++;return {ready:true,cookieStoreId:'container',routeId:changeRoute&&calls>1?
+    calls++;return {ready:true,cookieStoreId:'container',routeId:changeRoute&&calls>2?
       'different':'protected',healthDomain:'unique_domain'};},
     observeMonitoring:async()=>{history.push('read');return {ok:false,code:'NOT_DUE'};}});
   const adapter={execute:async()=>{history.push('execute');},
