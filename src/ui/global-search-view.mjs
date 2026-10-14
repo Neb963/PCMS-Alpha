@@ -87,8 +87,10 @@ async function refresh(){
   }finally{inflight=false;}
 }
 field.addEventListener('input',()=>{
-  epoch++;clearTimeout(delay);
-  if(validSearchQuery(field.value).length<2){hide();last=[];return;}
+  // Invalidate displayed results immediately. Enter must never navigate to a
+  // prior query's entity while a new local-only lookup is pending.
+  epoch++;clearTimeout(delay);hide();last=[];
+  if(validSearchQuery(field.value).length<2)return;
   delay=setTimeout(()=>{void refresh();},160);
 });
 field.addEventListener('keydown',event=>{
