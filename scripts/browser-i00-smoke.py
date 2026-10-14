@@ -2832,6 +2832,15 @@ def main():
                 new_uuid=addons_uuid(fresh_profile)
                 call('POST',f'/session/{after}/url',
                      {'url':f'moz-extension://{new_uuid}/pcms/index.html#settings'})
+                # Read-only bounded donor bootstrap preflight: on a *new*
+                # profile the listener can be registering after navigation.
+                # Never repeat CREATE or any restore operation on uncertainty.
+                donor_startup={'ready':False}
+                for _ in range(40):
+                    donor_startup=execute(after,"return browser.runtime.sendMessage({type:'GET_SNAPSHOT'}).then(x=>({ready:!!x?.state&&Array.isArray(x?.containers)})).catch(()=>({ready:false}))")
+                    if donor_startup.get('ready'):break
+                    time.sleep(.2)
+                assert donor_startup.get('ready'),'I16_FRESH_DONOR_BOOTSTRAP_UNAVAILABLE'
                 fresh_script="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const core=await import('./backup-core.mjs');
