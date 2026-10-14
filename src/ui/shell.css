@@ -328,3 +328,27 @@ button.pcms-generator-row-target:hover{text-decoration:underline}
 .pcms-overview-safety p{max-width:70ch;margin:9px 0}
 .system-status{font-size:11px;margin:0 0 12px;color:var(--warn);font-weight:650}
 @media(max-width:960px){.pcms-overview-workspace{grid-template-columns:minmax(0,1fr)}}
+
+
+/* I17 prototype-parity: task-first, consistently aligned private staging. */
+.pcms-stage-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;
+  padding:0;margin:0 0 17px;list-style:none;counter-reset:stage-step}
+.pcms-stage-steps li{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:650;
+  color:var(--muted);min-width:0}
+.pcms-stage-steps li:before{counter-increment:stage-step;content:counter(stage-step);
+  display:grid;place-items:center;flex:none;width:23px;height:23px;
+  background:var(--quiet);border:1px solid var(--line);border-radius:50%;font-size:11px}
+.pcms-stage-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+.pcms-stage-fields label{min-width:0;display:grid;align-content:start;gap:5px;
+  font-size:12px;color:var(--muted);font-weight:650}
+.pcms-stage-fields input{width:100%;min-width:0;padding:8px 10px;min-height:37px;
+  border:1px solid var(--line);border-radius:5px;background:var(--paper);color:var(--ink)}
+.pcms-stage-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+  padding:13px 0 3px;border-bottom:1px solid var(--line)}
+.pcms-stage-actions button{min-height:35px;padding:6px 11px}
+.pcms-stage-help{margin:10px 0!important;padding:5px 0}
+#pcms-stage-status{min-height:28px;overflow-wrap:anywhere}
+@media(max-width:730px){.pcms-stage-fields{grid-template-columns:1fr}
+  .pcms-stage-steps{gap:5px}.pcms-stage-steps li{font-size:10px}}
+@media(max-width:430px){.pcms-stage-steps{grid-template-columns:1fr}
+  .pcms-stage-actions button{flex:1 1 130px}}

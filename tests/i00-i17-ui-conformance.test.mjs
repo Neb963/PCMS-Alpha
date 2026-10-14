@@ -129,3 +129,15 @@ test('I17 packaged Firefox checks private staging pilot rejection without provid
   const stage=await readFile('src/ui/staging-view.mjs','utf8');
   assert.match(stage,/if\(!window\.confirm\('Stage private '/);
 });
+
+test('I17 private staging matches compact prototype control hierarchy and keeps actions real',()=>{
+  assert.match(html,/class="pcms-stage-steps"/);
+  assert.match(html,/class="pcms-stage-fields"/);
+  assert.match(html,/class="pcms-stage-actions"/);
+  assert.match(html,/Staging requirements and recovery/);
+  for(const id of ['pcms-stage-pin','pcms-stage-arm','pcms-stage-start',
+    'pcms-stage-reconcile','pcms-stage-handoff','pcms-stage-refresh','pcms-stage-clear'])
+    assert.match(html,new RegExp('id="'+id+'"'));
+  assert.match(css,/\.pcms-stage-fields\{display:grid/);
+  assert.match(css,/@media\(max-width:730px\)/);
+});

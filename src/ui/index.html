@@ -132,21 +132,26 @@
           <p id="pcms-adopt-status" role="status" aria-live="polite">Adoption not started. Git original archive pending; release and provider writes held.</p>
         </section>
         <section class="panel" aria-labelledby="pcms-stage-heading" data-pcms-generator-panel="stage" hidden>
-          <div class="panel-head"><h2 id="pcms-stage-heading">Private candidate staging · I09</h2><span class="unknown">No live provider activation</span></div>
-          <p class="reason">Only an independently confirmed private, empty and newly reserved generator can accept a pinned READY source. The candidate records full PJS, HTML and each source asset including deletes, plus the previous empty source. A successful save is never verified until a separate full-byte readback. Public/adopted sources cannot be staged here.</p>
-          <div class="account-controls">
-            <label for="pcms-stage-slug">Exact reserved slug</label><input id="pcms-stage-slug" maxlength="100" autocomplete="off" spellcheck="false" placeholder="private-reservation">
-            <label for="pcms-stage-token">Private Git read token (not stored)</label><input id="pcms-stage-token" type="password" autocomplete="off" spellcheck="false">
-            <button id="pcms-stage-pin" type="button">Pin READY source and previous bytes</button>
+          <div class="panel-head"><h2 id="pcms-stage-heading">Private staging</h2><span class="unknown">Disposable test · no publication</span></div>
+          <ol class="pcms-stage-steps" aria-label="Private staging steps"><li>Pin READY source</li><li>Authorize test</li><li>Stage and verify</li></ol>
+          <div class="pcms-stage-fields">
+            <label for="pcms-stage-slug">Reserved generator
+              <input id="pcms-stage-slug" maxlength="100" autocomplete="off" spellcheck="false" placeholder="pcms-test-private-001">
+            </label>
+            <label for="pcms-stage-token">Private Git read token
+              <input id="pcms-stage-token" type="password" autocomplete="off" spellcheck="false" placeholder="Not stored">
+            </label>
+          </div>
+          <div class="pcms-stage-actions" role="group" aria-label="Private staging actions">
+            <button id="pcms-stage-pin" type="button">1 · Pin READY source</button>
+            <button id="pcms-stage-arm" type="button" disabled>2 · Authorize test</button>
+            <button id="pcms-stage-start" type="button" disabled>3 · Stage privately</button>
+            <button id="pcms-stage-reconcile" type="button" disabled>Verify saved bytes</button>
+            <button id="pcms-stage-handoff" type="button" disabled>Hand off editor</button>
+            <button id="pcms-stage-refresh" type="button">Reload</button>
             <button id="pcms-stage-clear" type="button">Clear token</button>
           </div>
-          <div class="account-controls">
-            <button id="pcms-stage-arm" type="button" disabled>Authorize disposable test</button>
-<button id="pcms-stage-start" type="button" disabled>Stage on private editor</button>
-            <button id="pcms-stage-reconcile" type="button" disabled>Recheck saved bytes</button>
-            <button id="pcms-stage-handoff" type="button" disabled>Offer human handoff</button>
-            <button id="pcms-stage-refresh" type="button">Refresh receipts</button>
-          </div>
+          <details class="pcms-inline-help pcms-stage-help"><summary>Staging requirements and recovery</summary><p>Only a private, empty generator with verified ownership and pinned READY source may be staged. Human or dirty editors, route changes, collaboration and source drift hold the operation. A save acknowledgment is not proof: verify full saved bytes separately. Unknown dispatch outcomes must be reconciled rather than repeated. Public/adopted generators are excluded.</p></details>
           <p id="pcms-stage-status" role="status" aria-live="polite">No candidate pinned. Pin a READY source for an exact private-empty generator, then authorize one disposable pcms-test- stage. General provider staging and public publication remain held.</p>
           <div id="pcms-stage-diff" class="table-wrap" tabindex="0" role="region" aria-label="Source add, change and delete summary">No candidate diff.</div>
         </section>
