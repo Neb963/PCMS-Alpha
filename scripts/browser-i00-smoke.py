@@ -3039,6 +3039,8 @@ def main():
                 # PCMS-first while donor protected controls remain independently
                 # accessible from the dashboard. Synthetic F assertions cannot
                 # replace this actual installed-XPI browser proof.
+                call('POST',f'/session/{after}/url',
+                     {'url':f'moz-extension://{new_uuid}/pcms/index.html#generators'})
                 ui_conformance=execute(after,"""const manifest=browser.runtime.getManifest();
                   const directText=[...document.body.childNodes].filter(x=>x.nodeType===Node.TEXT_NODE).map(x=>x.textContent).join('');
                   const inspector=document.getElementById('pcms-generator-inspector');

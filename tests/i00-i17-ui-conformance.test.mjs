@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {readFile} from 'node:fs/promises';
-import {buildI00} from '../scripts/build-i00.mjs';
 const html=await readFile('src/ui/index.html','utf8');
 const css=await readFile('src/ui/shell.css','utf8');
 const shell=await readFile('src/ui/shell.mjs','utf8');
@@ -24,10 +23,13 @@ test('I17: shell implements prototype workstation chrome without losing operatio
 });
 test('I17: reject inherited toolbar donor popup and escaped-markup regressions',async()=>{
   assert.equal(html.includes('</script>\\n'),false,'visible raw escape sequence');
-  const {original,combined}=await buildI00({packageArchive:false});
-  assert.equal(original.action.default_popup,'popup/popup.html');
-  assert.equal(combined.action.default_popup,undefined,'donor action not used as PCMS first entry');
-  assert.match(combined.action.default_title,/PCMS Alpha/);
-  assert.deepEqual(combined.action.default_icon,original.action.default_icon);
-  assert.equal(combined.options_ui.page,'pcms/index.html');
+  const donor=JSON.parse(await readFile('donor/personamonkey/extension/manifest.json','utf8'));
+  const build=await readFile('scripts/build-i00.mjs','utf8');
+  assert.equal(donor.action.default_popup,'popup/popup.html');
+  assert.match(build,/delete combined\.action\.default_popup/);
+  assert.match(build,/default_title:'PCMS Alpha/);
+  assert.match(build,/combined\.action = \{\.\.\.original\.action/);
+  assert.match(build,/page:'pcms\/index.html'/);
+  // The existing i00-build test independently verifies the built manifest;
+  // do not run a concurrent destructive build against the same staging tree.
 });
