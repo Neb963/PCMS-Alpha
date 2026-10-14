@@ -17,25 +17,30 @@ export async function openRestoreArchive(bytes,password,{decodeDonor}={}){
   const donor=(await decodeDonor(archive.donorEnvelope,password)).payload;
   return {archive,donor,archiveSha256:await digest(bytes)};
 }
-export function inspectRestoreMappings(donor,mappings,containers,{fresh=false}={}){
+export function inspectRestoreMappings(donor,mappings,containers,{fresh=false,strict=true}={}){
   check(Array.isArray(donor?.personas)&&donor.personas.length<=10000,'RESTORE_PERSONAS_INVALID');
   check(mappings&&typeof mappings==='object'&&!Array.isArray(mappings),'RESTORE_MAPPING_REQUIRED');
   const available=new Map((containers||[]).filter(x=>typeof x?.cookieStoreId==='string').map(x=>[x.cookieStoreId,x]));
   const results=[],used=new Set(),keys=new Set();
-  check(Object.keys(mappings).length===donor.personas.length,'RESTORE_MAPPING_INCOMPLETE');
+  if(strict)check(Object.keys(mappings).length===donor.personas.length,'RESTORE_MAPPING_INCOMPLETE');
   for(const p of donor.personas){
     check(typeof p.key==='string'&&p.key.length<=256&&!keys.has(p.key),'RESTORE_DUPLICATE_PERSONA');
     keys.add(p.key);
-    const chosen=mappings[p.key];
-    check(typeof chosen==='string'&&chosen.length>0&&available.has(chosen),'RESTORE_MAPPING_UNVERIFIED');
-    check(!used.has(chosen),'RESTORE_MAPPING_COLLISION');used.add(chosen);
-    const current=available.get(chosen);
-    if(fresh)check(current.verifiedDisposable===true,'RESTORE_FRESH_BINDING_UNVERIFIED');
-    check(p.profile?.routeMode!=='direct','RESTORE_DIRECT_REVIEW_REQUIRED');
+    const chosen=mappings[p.key],known=typeof chosen==='string'&&chosen.length>0&&available.has(chosen);
+    if(strict)check(known,'RESTORE_MAPPING_UNVERIFIED');
+    if(known){
+      if(strict)check(!used.has(chosen),'RESTORE_MAPPING_COLLISION');
+      used.add(chosen);
+    }
+    const current=known?available.get(chosen):null;
+    const direct=p.profile?.routeMode==='direct';
+    if(strict)check(!direct,'RESTORE_DIRECT_REVIEW_REQUIRED');
     results.push({key:p.key,sourceId:p.sourceId||null,
-      targetId:chosen,targetName:current.name||'Existing container',
+      targetId:known?chosen:null,targetName:current?.name||null,
       sourcePersonaUid:p.profile?.personaUid||null,
-      status:'MAPPING_ONLY_UNVERIFIED'});
+      status:direct?'DIRECT_REVIEW_REQUIRED':!known?'MAPPING_REQUIRED':
+        'MAPPING_ONLY_UNVERIFIED',
+      freshProfile:fresh?'PREDECESSOR_UNVERIFIED':'NOT_FRESH'});
   }
   return results;
 }
@@ -47,13 +52,15 @@ export async function previewRestore({archiveText,password,mode='merge',fresh=fa
     'RESTORE_DESTINATION_PORTABLE_MISSING');
   check(currentDonor?.state&&Array.isArray(currentDonor.containers),'RESTORE_DESTINATION_UNAVAILABLE');
   const opened=await openRestoreArchive(archiveText,password,{decodeDonor});
-  const groups=inspectRestoreMappings(opened.donor,mappings,containers,{fresh});
+  const groups=inspectRestoreMappings(opened.donor,mappings,containers,{fresh,strict:false});
   // The archive itself is encrypted and authenticated. The destination cut is
   // not a lock: it must be re-read immediately before a guarded write.
   const destinationSha256=await digest(JSON.stringify({pcms:currentPcms,donor:currentDonor,portable:currentPortable}));
   const sourceSha256=await digest(JSON.stringify(opened.archive.pcms));
   const risk={
     importedPersonas:groups.length,
+    unmappedPersonas:groups.filter(g=>g.status==='MAPPING_REQUIRED').length,
+    directRouteReviews:groups.filter(g=>g.status==='DIRECT_REVIEW_REQUIRED').length,
     importedRoutes:(opened.donor.routes||[]).length,
     importedScripts:(opened.donor.scripts||[]).length,
     importedCookies:Object.values(opened.donor.cookies||{}).reduce((n,a)=>n+(Array.isArray(a)?a.length:0),0),
@@ -91,6 +98,8 @@ export async function revalidateRestorePlan({expectedPlanSha256,expectedDestinat
 export function restoreReadiness(plan,checkpoint){
   if(!checkpoint?.verified||checkpoint.tier!==3)return {ok:false,code:'RESTORE_CHECKPOINT_REQUIRED'};
   if(!plan?.planSha256||!plan.plan?.archiveSha256)return {ok:false,code:'RESTORE_PLAN_REQUIRED'};
+  if(plan.plan.groups?.some(g=>g.status!=='MAPPING_ONLY_UNVERIFIED'))
+    return {ok:false,code:'RESTORE_MAPPING_OR_ROUTE_REVIEW_REQUIRED'};
   if(plan.plan.fresh)return {ok:false,code:'RESTORE_FRESH_CONTROLLER_INACTIVE'};
   return {ok:true,code:'RESTORE_GUARD_ALLOWED'};
 }

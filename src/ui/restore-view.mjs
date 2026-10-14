@@ -55,6 +55,10 @@ function summary(plan,proof){
     'Authenticated plan: '+plan.planSha256,
     'Destination mode: '+plan.plan.mode+(plan.plan.fresh?' · fresh controller remains inactive':' · existing controller held'),
     'Imported Personas: '+plan.plan.risk.importedPersonas,
+    'Missing explicit mappings: '+plan.plan.risk.unmappedPersonas,
+    'Direct-route security review required: '+plan.plan.risk.directRouteReviews,
+    ...plan.plan.groups.map(g=>'Persona '+g.key+': '+g.status+
+      (g.targetId?' → '+g.targetId:' · no trusted mapping')),
     'Imported cookies: '+plan.plan.risk.importedCookies,
     'Canonical rows: '+plan.plan.risk.canonicalRows,
     'Route status: '+plan.plan.risk.routeStatus,
@@ -109,12 +113,11 @@ async function health(){
     const gate=createRestoreGate(browser.storage.local);
     const state=await gate.inspect();
     if(state.held){
-      preview.disabled=true;verify.disabled=true;
-      status.textContent='Restore hold active ('+state.status+'). No automatic resume, retry or activation. Use emergency diagnostics.';
+      status.textContent='Restore hold active ('+state.status+'). Read-only preview remains accessible; no automatic resume, retry or activation. Groups: '+
+        state.groups.map(g=>g.key+'='+g.status).join(', ')+'. Use emergency diagnostics for recovery.';
     }
   }catch{
-    preview.disabled=true;verify.disabled=true;
-    status.textContent='Restore guard cannot be read. Fail closed; no restore available.';
+    status.textContent='Restore guard cannot be read. Mutating restore is unavailable; read-only archive inspection remains possible.';
   }
 }
 void health();

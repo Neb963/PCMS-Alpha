@@ -62,8 +62,8 @@ test('P55-09: explicit distinct positively observed existing-container mapping; 
   assert.throws(()=>inspectRestoreMappings(p,{one:'missing'},containers),/RESTORE_MAPPING_UNVERIFIED/);
   assert.equal(inspectRestoreMappings(p,{one:'firefox-container-1'},containers)[0].status,
     'MAPPING_ONLY_UNVERIFIED');
-  assert.throws(()=>inspectRestoreMappings(p,{one:'firefox-container-1'},containers,
-    {fresh:true}),/RESTORE_FRESH_BINDING_UNVERIFIED/);
+  assert.equal(inspectRestoreMappings(p,{one:'firefox-container-1'},containers,
+    {fresh:true})[0].freshProfile,'PREDECESSOR_UNVERIFIED');
   const direct=structuredClone(p);direct.personas[0].profile.routeMode='direct';
   assert.throws(()=>inspectRestoreMappings(direct,{one:'firefox-container-1'},containers),
     /RESTORE_DIRECT_REVIEW_REQUIRED/);
@@ -189,4 +189,18 @@ test('P55-07 X: independent portable/cookie/GM cut drift invalidates reviewed re
     expectedDestinationSha256:p.plan.destinationSha256,
     currentPcms:pcms,currentDonor:donor(),currentPortable:changed,plan:p.plan}),
     /RESTORE_DESTINATION_DRIFT/);
+});
+
+test('P55-07 UX-08: unresolved and Direct source preview discloses review flags instead of hiding archive',()=>{
+  const donor={personas:[{key:'persona-1',sourceId:'firefox-old',profile:{routeMode:'direct'}}]};
+  const readOnly=inspectRestoreMappings(donor,{},[],{fresh:true,strict:false});
+  assert.equal(readOnly[0].status,'DIRECT_REVIEW_REQUIRED');
+  assert.equal(readOnly[0].freshProfile,'PREDECESSOR_UNVERIFIED');
+  assert.throws(()=>inspectRestoreMappings(donor,{},[],{fresh:true}),/RESTORE_MAPPING_INCOMPLETE/);
+  const named={personas:[{key:'persona-1',profile:{routeMode:'route'}}]};
+  const missing=inspectRestoreMappings(named,{},[{cookieStoreId:'id-1',name:'same'}],{strict:false});
+  assert.equal(missing[0].status,'MAPPING_REQUIRED');
+  assert.equal(restoreReadiness({planSha256:'a'.repeat(64),
+    plan:{archiveSha256:'b'.repeat(64),fresh:false,groups:missing}},
+    {verified:true,tier:3}).code,'RESTORE_MAPPING_OR_ROUTE_REVIEW_REQUIRED');
 });
