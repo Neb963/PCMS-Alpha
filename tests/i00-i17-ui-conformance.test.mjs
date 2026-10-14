@@ -5,6 +5,7 @@ const html=await readFile('src/ui/index.html','utf8');
 const css=await readFile('src/ui/shell.css','utf8');
 const shell=await readFile('src/ui/shell.mjs','utf8');
 const inv=await readFile('src/ui/inventory-view.mjs','utf8');
+const search=await readFile('src/ui/global-search-view.mjs','utf8');
 test('I17: shell implements prototype workstation chrome without losing operational destinations',()=>{
   assert.match(css,/grid-template-columns:var\(--nav-w\) minmax\(0,1fr\)/);
   assert.match(html,/class="pcms-brand"/);
@@ -21,7 +22,9 @@ test('I17: shell implements prototype workstation chrome without losing operatio
   assert.match(html,/class="pcms-refresher-stats"/);
   assert.match(html,/class="pcms-refresher-policy-grid"/);
   assert.match(html,/Scheduling diagnostics and observation recovery/);
-  assert.match(shell,/quickSearch\.addEventListener/);
+  assert.match(search,/field\.addEventListener\('input'/);
+  assert.match(search,/pcms-i04-inventory/);
+  assert.match(search,/pcms-i03-accounts/);
   assert.match(shell,/showGeneratorPanel\('inventory'\)/);
   assert.match(shell,/pcms-source-target/);
   assert.match(shell,/pcms-adoption-target/);
