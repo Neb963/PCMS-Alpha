@@ -1897,6 +1897,52 @@ def main():
                 inspector=execute(after,"return {visible:!document.getElementById('pcms-refresher-inspector').hidden,selected:document.getElementById('pcms-refresher-selected').textContent}")
                 assert inspector['visible'] and 'i12-b-0000' in inspector['selected'],inspector
                 print('B I12_PACKAGED_REFRESHER_PAGING_PAUSE_INSPECTOR=PASS',flush=True)
+
+                # P56-05 B two *real* installed-XPI UI views. B remains at
+                # revision R while A writes R+1. Stale B cannot override A,
+                # and an explicit re-read is required before another action.
+                first_handle=call('GET',f'/session/{after}/window')
+                second=call('POST',f'/session/{after}/window/new',{'type':'tab'})
+                second_handle=second['handle']
+                call('POST',f'/session/{after}/window',{'handle':second_handle})
+                call('POST',f'/session/{after}/url',{'url':url+'#refresher'})
+                second_initial=''
+                for _ in range(45):
+                    second_initial=execute(after,"return document.getElementById('pcms-refresher-global-pause')?.textContent||''")
+                    if second_initial=='Resume globally':break
+                    time.sleep(.12)
+                assert second_initial=='Resume globally',second_initial
+                call('POST',f'/session/{after}/window',{'handle':first_handle})
+                first_before=execute(after,"return document.getElementById('pcms-refresher-global-pause')?.textContent")
+                assert first_before=='Resume globally',first_before
+                execute(after,"document.getElementById('pcms-refresher-global-pause').click();return true")
+                first_after=''
+                for _ in range(45):
+                    first_after=execute(after,"return document.getElementById('pcms-refresher-global-pause')?.textContent||''")
+                    if first_after=='Pause globally':break
+                    time.sleep(.12)
+                assert first_after=='Pause globally',first_after
+                call('POST',f'/session/{after}/window',{'handle':second_handle})
+                execute(after,"document.getElementById('pcms-refresher-global-pause').click();return true")
+                stale_status=''
+                for _ in range(45):
+                    stale_status=execute(after,"return document.getElementById('pcms-refresher-status')?.textContent||''")
+                    if stale_status.startswith('State changed; review'):break
+                    time.sleep(.12)
+                assert stale_status.startswith('State changed; review'),stale_status
+                second_final=execute(after,"return {pause:document.getElementById('pcms-refresher-global-pause').textContent,mode:document.getElementById('pcms-refresher-mode').textContent}")
+                assert second_final['pause']=='Pause globally',second_final
+                call('DELETE',f'/session/{after}/window')
+                call('POST',f'/session/{after}/window',{'handle':first_handle})
+                execute(after,"document.getElementById('pcms-refresher-global-pause').click();return true")
+                restored_pause=''
+                for _ in range(45):
+                    restored_pause=execute(after,"return document.getElementById('pcms-refresher-global-pause')?.textContent||''")
+                    if restored_pause=='Resume globally':break
+                    time.sleep(.12)
+                assert restored_pause=='Resume globally',restored_pause
+                print('B I17_P56_05_TWO_VIEW_STALE_REVISION_NO_LOST_PAUSE=PASS',flush=True)
+
                 alarm_code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const prior=(await browser.storage.local.get('pcmsI12AlarmCount')).pcmsI12AlarmCount||0;
