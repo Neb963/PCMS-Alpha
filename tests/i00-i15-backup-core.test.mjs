@@ -39,7 +39,7 @@ test('P55-06: retain 14 tracked verified automatic, never manual/untracked/moved
   assert.equal(ownedFile(row(3)),true);
   assert.equal(ownedFile({...row(3),filename:'/tmp/fake.encrypted'}),false);
   assert.equal(archiveFromDownload(runId(1),1,'a'.repeat(64),120,{...row(1),state:'in_progress'}),null);
-  assert.deepEqual(selectRetention(list).map(x=>x.runId),[runId(2),runId(1)]);
+  assert.deepEqual(selectRetention(list).map(x=>x.runId),[runId(1),runId(2)]);
   assert.equal(selectRetention(list.slice(0,14)).length,0);
   const candidates=selectRetention([...list,{...manual,state:'REMOVED'}]);
   assert.equal(candidates.length,2);

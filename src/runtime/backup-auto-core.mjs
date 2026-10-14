@@ -78,7 +78,8 @@ export function selectRetention(archives){
   const keep=new Set(good.slice(0,RETAIN).map(a=>a.runId));
   const lastGood=good[0]?.runId;
   return good.filter(a=>!keep.has(a.runId)&&a.runId!==lastGood&&
-    !duplicate.has(a.downloadId)&&idOK(a.runId)&&hex(a.sha256));
+    !duplicate.has(a.downloadId)&&idOK(a.runId)&&hex(a.sha256))
+    .sort((a,b)=>a.day-b.day||a.runId.localeCompare(b.runId));
 }
 export function deletionProof(archive,item){
   // No deletion on name collision, missing history, moved or edited files.
