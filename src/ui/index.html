@@ -275,6 +275,27 @@
           <p id="pcms-backup-status" role="status" aria-live="polite">No new backup attempted. Browser completion and independent disk-byte verification are different evidence tiers.</p>
           <p class="reason">Tier 1: cryptographically verified in memory; tier 2: browser-reported completed download with existence and size; tier 3: independent on-disk file readback (not available here). Import/restore is a later phase.</p>
         </section>
+        <section class="panel" aria-labelledby="pcms-restore-title">
+          <div class="panel-head"><h2 id="pcms-restore-title">I16 · Authenticated staged restore preview</h2><span class="unknown">Review-only · mutation OFF</span></div>
+          <p>Choose the integrated encrypted archive and its recovery passphrase. Preview authenticates both layers, inventories exclusions and requires explicit mappings. A separate pre-restore checkpoint must be selected and independently re-read before any destructive restore. The staged donor and PCMS apply path is not yet activated.</p>
+          <label for="pcms-restore-archive">Incoming encrypted archive</label>
+          <input id="pcms-restore-archive" type="file" accept=".encrypted,.json">
+          <label for="pcms-restore-passphrase">Portable recovery passphrase</label>
+          <input id="pcms-restore-passphrase" type="password" autocomplete="off" maxlength="4096">
+          <label for="pcms-restore-mode">Destination policy</label>
+          <select id="pcms-restore-mode"><option value="merge">Merge with existing</option><option value="replace">Replace after explicit review</option></select>
+          <label for="pcms-restore-fresh">Fresh disposable Firefox profile</label>
+          <input id="pcms-restore-fresh" type="checkbox">
+          <label for="pcms-restore-mappings">Explicit Persona-key to current container-ID mapping (JSON)</label>
+          <textarea id="pcms-restore-mappings" rows="3" spellcheck="false" placeholder='{"persona-1":"firefox-container-1"}'>{}</textarea>
+          <button type="button" id="pcms-restore-preview">Authenticate and preview without changes</button>
+          <label for="pcms-restore-checkpoint">Separate pre-restore encrypted checkpoint (select actual disk file)</label>
+          <input type="file" id="pcms-restore-checkpoint" accept=".encrypted,.json">
+          <button type="button" id="pcms-restore-verify" disabled>Verify checkpoint against current destination</button>
+          <pre id="pcms-restore-details" class="table-wrap" style="white-space:pre-wrap" tabindex="0">No authenticated restore plan. Existing state remains unchanged.</pre>
+          <p id="pcms-restore-status" role="status" aria-live="polite">Checking independent restoration guard.</p>
+          <p class="reason">Restored approvals, authentication, routes and native secrets cannot be activated by a backup. Fresh-controller activation requires explicit predecessor shutdown proof and later H-06. If a partial restore guard exists, opening this view never clears it.</p>
+        </section>
         <section class="panel" aria-labelledby="pcms-auto-backup-title">
           <div class="panel-head"><h2 id="pcms-auto-backup-title">I15 · Scheduled encrypted backup</h2><span class="unknown">OS vault gated</span></div>
           <p>Automatic backup runs in the Firefox background, independently of Refresher Pause. It requires a separately installed, unlocked Secret Service OS vault. Keep the portable recovery passphrase independently; an inaccessible vault suspends unattended exports without plaintext fallback.</p>
@@ -337,6 +358,7 @@
   <script type="module" src="adoption-view.mjs"></script>
   <script type="module" src="backup-view.mjs"></script>
   <script type="module" src="backup-auto-view.mjs"></script>
+  <script type="module" src="restore-view.mjs"></script>
   <script type="module" src="staging-view.mjs"></script>
   <script type="module" src="ai-view.mjs"></script>
   <script type="module" src="writeback-view.mjs"></script>\n  <script type="module" src="release-view.mjs"></script>
