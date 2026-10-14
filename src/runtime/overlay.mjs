@@ -494,7 +494,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   cookies:id=>cookieService.list(id),
   containers:()=>personaManager.listContainers(),
   createContainer:async ({name,color,icon})=>localMutationFence([],async()=>{
-    const made=await personaPlatform.create({name,color,icon,routeId:'block',
+    const made=await personaPlatform.create({name,color,icon,routeId:BLOCK_ROUTE_ID,
       allowDirect:false,profile:{killSwitch:true,blockLocalNetwork:true}});
     return {cookieStoreId:made?.container?.cookieStoreId,
       personaUid:made?.profile?.personaUid};
@@ -510,7 +510,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
     for(const [key,containerId] of bindings){
       const p=imported.state.profiles?.[containerId];
       if(!p||!p.managed)throw Error('RESTORE_PERSONA_MAPPING_INVALID');
-      p.routeId='block';p.killSwitch=true;p.blockLocalNetwork=true;
+      p.routeId=BLOCK_ROUTE_ID;p.killSwitch=true;p.blockLocalNetwork=true;
       p.rotationRole=null;p.rotationOperationId=null;
     }
     for(const id of imported.maps.script.values()){

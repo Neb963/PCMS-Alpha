@@ -2728,7 +2728,7 @@ def main():
                   const previousUid='11111111-1111-4111-8111-111111111111';
                   const holder=await browser.runtime.sendMessage({
                     type:'CREATE_PERSONA',input:{name:'CI collision holder',
-                      routeId:'block',profile:{personaUid:previousUid,
+                      routeId:'__block__',profile:{personaUid:previousUid,
                         killSwitch:true,blockLocalNetwork:true}}});
                   const sourceId=holder?.container?.cookieStoreId;
                   if(!sourceId||holder?.profile?.personaUid!==previousUid)
@@ -2762,7 +2762,7 @@ def main():
                   const importedProfile=structuredClone(holder.profile);
                   importedProfile.containerId='firefox-container-old';
                   importedProfile.personaUid=previousUid;
-                  importedProfile.routeId='block';
+                  importedProfile.routeId='__block__';
                   importedProfile.killSwitch=true;
                   importedProfile.blockLocalNetwork=true;
                   importedProfile.managed=true;
@@ -2817,7 +2817,7 @@ def main():
                     .pcmsRestoreInProgress;
                   const imported=Object.entries(after.state.profiles||{})
                     .filter(([id,p])=>id!==sourceId&&p.managed===true&&
-                      p.routeId==='block'&&p.personaUid!==previousUid);
+                      p.routeId==='__block__'&&p.personaUid!==previousUid);
                   const saved=await journal.openCanonicalDatabase();
                   const receipt=await new Promise(resolve=>{
                     const req=saved.transaction('meta','readonly').objectStore('meta')

@@ -12,6 +12,7 @@ import {createRestoreStageEngine} from './restore-stage.mjs';
 import {prepareRestoredCanonical} from './restore-sanitize.mjs';
 import {applyCanonicalSnapshot} from './restore-idb.mjs';
 import {getPcmsRestoreDonor} from './restore-donor.mjs';
+import {BLOCK_ROUTE_ID} from '../lib/constants.js';
 import {reconcileRestore} from './restore-reconcile.mjs';
 export const RESTORE_PORT='pcms-i16-restore';
 const fail=code=>({ok:false,code});
@@ -175,7 +176,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           const now=await donor.snapshot();
           const personasVerified=preparedDonor.sourcePersonas.every(p=>{
             const row=now.state.profiles?.[p.containerId];
-            return row?.personaUid===p.targetUid&&row?.routeId==='block'&&
+            return row?.personaUid===p.targetUid&&row?.routeId===BLOCK_ROUTE_ID&&
               row?.killSwitch===true&&row.blockLocalNetwork===true&&row.managed===true;
           });
           // An acknowledged donor commit does not prove source was persisted.

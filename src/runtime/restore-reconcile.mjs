@@ -1,6 +1,7 @@
 // I16 recovery is observation-only: never create a context, import cookies,
 // commit donor state or replace canonical rows after a lost acknowledgement.
 import {decodeBackupEnvelope} from '../lib/backup-package.js';
+import {BLOCK_ROUTE_ID} from '../lib/constants.js';
 import {digest,snapshotCanonical} from './backup-core.mjs';
 import {openRestoreArchive} from './restore-core.mjs';
 import {prepareRestoredCanonical} from './restore-sanitize.mjs';
@@ -29,7 +30,7 @@ function remaps(payload,bindings,state){
   const uid=Object.create(null),targets=new Set();
   for(const p of payload.personas||[]){
     const target=state.profiles?.[bindings[p.key]];
-    if(!target||target.managed!==true||target.routeId!=='block'||
+    if(!target||target.managed!==true||target.routeId!==BLOCK_ROUTE_ID||
       target.killSwitch!==true||target.blockLocalNetwork!==true||
       typeof target.personaUid!=='string')refuse('RESTORE_PERSONA_NOT_RECONCILED');
     if(p.profile?.personaUid){
