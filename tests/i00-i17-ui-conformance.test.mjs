@@ -162,3 +162,10 @@ test('I17 uncertain Git marker has distinct read-only reconciliation control',as
   assert.match(boundary,/gitRead\(params\)/);
   assert.match(boundary,/event:'GIT_OBSERVING'/);
 });
+
+test('I17 packaged Firefox B refuses premature Git write and readback for frozen source',async()=>{
+  const harness=await readFile('scripts/browser-i00-smoke.py','utf8');
+  assert.match(harness,/B I17_GIT_MARKER_ARM_AND_READ_ONLY_RECONCILE_DENY_FROZEN=PASS/);
+  assert.match(harness,/frozen_git_arm\.get\('code'\)=='NOT_ADMISSIBLE'/);
+  assert.match(harness,/frozen_git_read\.get\('code'\)=='NOT_ADMISSIBLE'/);
+});

@@ -817,6 +817,18 @@ def main():
                     'batchId':'batch_browser_0001','itemId':'batch_browser_0001_000',
                     'expectedRevision':1,'confirmation':'CREATE supply-test-one'}})
                 assert normal_arm.get('code')=='PILOT_DISPOSABLE_SLUG_REQUIRED',normal_arm
+                # A normal frozen generator can never be used to probe a
+                # private Git marker; the read-only reconciliation port also
+                # must refuse it before initiating any network read.
+                frozen_git_arm=supply_command(after,{'type':'ARM_DISPOSABLE_GIT','params':{
+                    'batchId':'batch_browser_0001','itemId':'batch_browser_0001_000',
+                    'expectedRevision':1,'confirmation':'GIT supply-test-one'}})
+                assert frozen_git_arm.get('code')=='NOT_ADMISSIBLE',frozen_git_arm
+                frozen_git_read=supply_command(after,{'type':'RECONCILE_GIT','params':{
+                    'batchId':'batch_browser_0001','itemId':'batch_browser_0001_000',
+                    'expectedRevision':1,'token':'offline-git-token-01'}})
+                assert frozen_git_read.get('code')=='NOT_ADMISSIBLE',frozen_git_read
+                print('B I17_GIT_MARKER_ARM_AND_READ_ONLY_RECONCILE_DENY_FROZEN=PASS',flush=True)
                 malformed_arm=supply_command(after,{'type':'ARM_DISPOSABLE_TEST','params':{
                     'batchId':'batch_browser_0001','itemId':'batch_browser_0001_000',
                     'expectedRevision':1,'confirmation':'CREATE supply-test-one',
