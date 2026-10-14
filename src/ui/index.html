@@ -13,8 +13,9 @@
     <header class="topbar">
       <button class="menu" type="button" id="menu" aria-expanded="false" aria-controls="navigation">Menu</button>
       <div class="pcms-breadcrumb" aria-label="Current workspace"><span>Workspaces</span><span aria-hidden="true">/</span><strong id="pcms-current-workspace">Overview</strong></div>
-      <label class="pcms-quick-search" for="pcms-quick-generator-search"><span class="pcms-magnifier" aria-hidden="true">⌕</span><span class="sr-only">Find in local generator inventory</span><input id="pcms-quick-generator-search" type="search" maxlength="80" placeholder="Find local generator…" autocomplete="off" aria-describedby="pcms-quick-search-hint"><kbd>Ctrl K</kbd></label>
-      <span id="pcms-quick-search-hint" class="sr-only">Searches existing local generator observations only, not remote providers. Press Enter to show matching Generators.</span>
+      <label class="pcms-quick-search" for="pcms-quick-generator-search"><span class="pcms-magnifier" aria-hidden="true">⌕</span><span class="sr-only">Find in local generator inventory</span><input id="pcms-quick-generator-search" type="search" maxlength="80" placeholder="Find generator or account…" autocomplete="off" aria-describedby="pcms-quick-search-hint" aria-controls="pcms-global-results" aria-expanded="false"><kbd>Ctrl K</kbd></label>
+      <span id="pcms-quick-search-hint" class="sr-only">Searches bounded local generator observations and PCMS account bindings only. No remote lookups or authority changes. Select a result with Tab and Enter; Escape closes results.</span>
+      <div id="pcms-global-results" class="pcms-global-results" role="region" aria-label="Local generator and account search results" hidden></div>
       <span class="phase">I17 · Verification · Provider writes HELD</span>
       <a class="advanced" href="../options/options.html" id="advanced">PersonaMonkey advanced controls <span aria-hidden="true">↗</span></a>
     </header>
@@ -414,6 +415,7 @@
     <footer class="footer"><span>PCMS Alpha · Stage I17</span><span>UI navigation available · PCMS side effects disabled</span></footer>
   </div>
   <script type="module" src="shell.mjs"></script>
+  <script type="module" src="global-search-view.mjs"></script>
   <script type="module" src="health.mjs"></script>
   <script type="module" src="operations.mjs"></script>
   <script type="module" src="accounts-view.mjs"></script>

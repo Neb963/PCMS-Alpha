@@ -55,8 +55,8 @@ document.addEventListener('keydown', event => {
   }
 });
 
-// Search uses the existing bounded local inventory filter; it must never
-// suggest account/source/operation or remote search capability.
+// Read-only cross-workspace lookup is implemented in global-search-view.mjs.
+// The shell only supplies explicit navigation to the real inventory panel.
 const generatorPanels=new Map(
   [...document.querySelectorAll('#view-generators [data-pcms-generator-panel]')]
     .map(panel=>[panel.dataset.pcmsGeneratorPanel,panel])
@@ -119,22 +119,15 @@ document.querySelectorAll('[data-pcms-work-show]').forEach(button=>{
       showWorkPanel(button.dataset.pcmsWorkShow,{focus:true});
   });
 });
-quickSearch.addEventListener('keydown', event => {
-  if (event.key === 'Escape') { quickSearch.value = ''; quickSearch.blur(); return; }
-  if (event.key !== 'Enter') return;
-  event.preventDefault();
+// A result is never provider authorization; route through existing inspectors.
+window.addEventListener('pcms-global-generator-target', event=>{
+  const slug=event.detail?.slug;
+  if(typeof slug!=='string'||slug.length>80)return;
   showGeneratorPanel('inventory');
-  const query = document.getElementById('pcms-generator-query');
-  query.value = quickSearch.value;
-  location.hash = '#generators';
-  query.dispatchEvent(new Event('input', {bubbles:true}));
-  query.focus({preventScroll:true});
-});
-document.addEventListener('keydown', event => {
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
-    event.preventDefault();
-    quickSearch.focus();
-    quickSearch.select();
-  }
+  const field=document.getElementById('pcms-generator-query');
+  field.value=slug;
+  location.hash='#generators';
+  field.dispatchEvent(new Event('input',{bubbles:true}));
+  field.focus({preventScroll:true});
 });
 render();
