@@ -2805,13 +2805,29 @@ def main():
                   const pkg=await import('../lib/backup-package.js');
                   const automation=await import('../lib/automation-history.js');
                   const previousUid='11111111-1111-4111-8111-111111111111';
+                  // Read-only donor startup/readiness and collision evidence
+                  // precede the ONE synthetic CREATE. Never repeat uncertain
+                  // external/local effects just because a reply looks wrong.
+                  const beforeHolder=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  if(!beforeHolder?.state||!Array.isArray(beforeHolder.containers))
+                    throw Error('DONOR_FRESH_SNAPSHOT_UNAVAILABLE');
+                  if(Object.values(beforeHolder.state.profiles||{})
+                    .some(p=>p.personaUid===previousUid))
+                    throw Error('DONOR_FRESH_UID_PREEXISTING');
                   const holder=await browser.runtime.sendMessage({
                     type:'CREATE_PERSONA',input:{name:'CI collision holder',
                       routeId:'__block__',profile:{personaUid:previousUid,
                         killSwitch:true,blockLocalNetwork:true}}});
                   const sourceId=holder?.container?.cookieStoreId;
                   if(!sourceId||holder?.profile?.personaUid!==previousUid)
-                    throw Error('DONOR_HOLDER_NOT_CREATED');
+                    throw Error('DONOR_HOLDER_NOT_CREATED:'+JSON.stringify({
+                      replyKeys:Object.keys(holder||{}).sort().slice(0,12),
+                      hasProfile:!!holder?.profile,hasContainer:!!holder?.container,
+                      uidMatches:holder?.profile?.personaUid===previousUid,
+                      returnedCode:new Set(['PERSONA_NOT_FOUND','INVALID_PERSONA_NAME',
+                        'DUPLICATE_PERSONA_UID','STATE_UNAVAILABLE']).has(holder?.code)
+                          ?holder.code:'UNKNOWN'
+                    }));
                   const donor=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
                   const db=await journal.openCanonicalDatabase();
                   const canonical=await core.snapshotCanonical(db);db.close();
