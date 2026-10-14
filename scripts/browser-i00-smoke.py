@@ -2469,6 +2469,93 @@ def main():
                 assert i15.get('ok') is True,i15
                 print('B I15_INSTALLED_BACKGROUND_PORT_DAILY_VAULT_SUSPENSION_AND_TRACKED_DOWNLOAD=PASS',flush=True)
 
+                # I16 B: actual installed XPI, extension Settings DOM and real
+                # canonical IDB + Firefox local-storage guard. Independent
+                # synthetic archives only; no donor/provider/live mutation.
+                i16_ui=execute(after,"return {archive:!!document.getElementById('pcms-restore-archive'),checkpoint:!!document.getElementById('pcms-restore-checkpoint'),preview:!!document.getElementById('pcms-restore-preview'),stage:!!document.getElementById('pcms-restore-verify')}")
+                assert all(i16_ui.values()),i16_ui
+                i16_code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const restore=await import('./restore-core.mjs');
+                  const gateModule=await import('./restore-gate.mjs');
+                  const stages=await import('./restore-stage.mjs');
+                  const core=await import('./backup-core.mjs');
+                  const pkg=await import('../lib/backup-package.js');
+                  const journal=await import('./journal.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  const currentPcms=await core.snapshotCanonical(db);db.close();
+                  const password='I16-real-packaged-synthetic-passphrase';
+                  const currentDonor={state:{},containers:[]};
+                  const portable=pkg.createPortableBackupPayload({
+                    state:{},containers:[],selection:{kind:'full'}});
+                  const inner=await pkg.encodeBackupEnvelope({payload:portable,password});
+                  const a=await core.encodeIntegrated({
+                    pcms:currentPcms,donorEnvelope:inner,passphrase:password});
+                  const pre=await restore.previewRestore({
+                    archiveText:a.text,password,decodeDonor:pkg.decodeBackupEnvelope,
+                    mode:'merge',fresh:false,mappings:{},currentPcms,
+                    currentDonor,containers:[]});
+                  let wrongPasswordHeld=false;
+                  try{await restore.previewRestore({
+                    archiveText:a.text,password:'wrong',
+                    decodeDonor:pkg.decodeBackupEnvelope,mode:'merge',
+                    mappings:{},currentPcms,currentDonor,containers:[]});}
+                  catch{wrongPasswordHeld=true;}
+                  let tier2Held=false;
+                  try{await restore.verifyCheckpoint({
+                    checkpointText:a.text,password,
+                    decodeDonor:pkg.decodeBackupEnvelope,currentPcms,
+                    currentPortable:portable,archivedAtLeastTier:2});}
+                  catch{tier2Held=true;}
+                  const disk=await restore.verifyCheckpoint({
+                    checkpointText:a.text,password,
+                    decodeDonor:pkg.decodeBackupEnvelope,currentPcms,
+                    currentPortable:portable,archivedAtLeastTier:3});
+                  const gate=gateModule.createRestoreGate(browser.storage.local);
+                  const before=await gate.inspect();
+                  if(before.held)throw Error('UNEXPECTED_EXISTING_RESTORE_HOLD');
+                  const row=await gate.begin({
+                    planSha256:pre.planSha256,reviewedPlanSha256:pre.planSha256,
+                    archiveSha256:pre.plan.archiveSha256,
+                    destinationSha256:pre.plan.destinationSha256,
+                    checkpointSha256:disk.sha256,checkpointTier:3,fresh:true});
+                  const sentinel=await journal.createRestoreSentinel(browser.storage.local).inspect();
+                  const read=await gateModule.createRestoreGate(browser.storage.local).inspect();
+                  let unintended=0;
+                  const engine=stages.createRestoreStageEngine(gate,{
+                    dispatch:async()=>{unintended++;},readback:async()=>({
+                      source:'INDEPENDENT_READBACK',digest:'f'.repeat(64)})});
+                  const forbidden=await engine.execute({epoch:row.epoch,
+                    revision:row.revision,group:'donor-personas',step:'synthetic',
+                    fingerprint:'a'.repeat(64)});
+                  if(unintended!==1||forbidden.groups['donor-personas'].status!=='HELD_UNCERTAIN')
+                    throw Error('STAGED_HOLD_NOT_DURABLE');
+                  let duplicateBlocked=false;
+                  try{await engine.execute({epoch:row.epoch,revision:forbidden.revision,
+                    group:'donor-personas',step:'synthetic',
+                    fingerprint:'a'.repeat(64)});}
+                  catch{duplicateBlocked=true;}
+                  if(!wrongPasswordHeld||!tier2Held||!disk.verified||
+                    !sentinel.held||!read.held||!duplicateBlocked)
+                    throw Error('RESTORE_SECURITY_ORACLE_MISSING');
+                  done({ok:true,wrongPasswordHeld,tier2Held,
+                    canonicalRecords:currentPcms.stores.meta.length,
+                    noBlindReplay:duplicateBlocked,restoreHold:sentinel.code,
+                    controller:read.controller,sha:a.sha256});
+                })().catch(e=>done({ok:false,error:String(e)}));"""
+                proof=call('POST',f'/session/{after}/execute/async',
+                           {'script':i16_code,'args':[]},timeout=90)
+                assert proof.get('ok') is True,proof
+                assert proof.get('controller')=='INACTIVE',proof
+                assert re.fullmatch('[a-f0-9]{64}',proof.get('sha','')),proof
+                # The extension page cannot remove the independent restore
+                # sentinel. A full page navigation must retain the hold.
+                call('POST',f'/session/{after}/url',{'url':url+'#settings'})
+                persistence=execute(after,"return browser.storage.local.get('pcmsRestoreInProgress').then(v=>v.pcmsRestoreInProgress?.active===true)")
+                assert persistence is True,persistence
+                print('B I16_INSTALLED_AUTHENTICATED_PREVIEW_DURABLE_GUARD_NO_REPLAY=PASS',flush=True)
+
+
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
             finally: close(after)
         finally:
