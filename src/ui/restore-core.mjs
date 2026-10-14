@@ -91,7 +91,7 @@ export async function verifyCheckpoint({checkpointText,password,currentPcms,
 export async function revalidateRestorePlan({expectedPlanSha256,expectedDestinationSha256,
   currentPcms,currentDonor,currentPortable,plan}){
   check(await digest(JSON.stringify(plan))===expectedPlanSha256,'RESTORE_PLAN_CHANGED');
-  check(await digest(JSON.stringify({pcms:currentPcms,donor:currentDonor}))===
+  check(await digest(JSON.stringify({pcms:currentPcms,donor:currentDonor,portable:currentPortable}))===
     expectedDestinationSha256,'RESTORE_DESTINATION_DRIFT');
   return true;
 }
