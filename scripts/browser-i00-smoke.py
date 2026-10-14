@@ -1943,28 +1943,30 @@ def main():
                 assert restored_pause=='Resume globally',restored_pause
                 print('B I17_P56_05_TWO_VIEW_STALE_REVISION_NO_LOST_PAUSE=PASS',flush=True)
 
-                alarm_code="""const done=arguments[arguments.length-1];
-                (async()=>{
-                  const prior=(await browser.storage.local.get('pcmsI12AlarmCount')).pcmsI12AlarmCount||0;
-                  await browser.alarms.create('pcms-refresher-turn',{when:Date.now()+6000});
-                  done({prior});
-                })().catch(e=>done({error:String(e)}));"""
-                alarm_prior=call('POST',f'/session/{after}/execute/async',{'script':alarm_code,'args':[]})
-                alarm_schedule=execute(after,"return browser.alarms.get('pcms-refresher-turn').then(a=>({scheduledAt:a?.scheduledTime||null,now:Date.now()}))")
-                assert isinstance(alarm_schedule.get('scheduledAt'),(int,float)),alarm_schedule
-                due_ms=alarm_schedule['scheduledAt']-alarm_schedule['now']
-                # Firefox may clamp alarms to its minimum trigger granularity.
-                # Observe the browser-owned scheduled time rather than falsely
-                # interpreting an unexpired alarm as a missing background wake.
-                # Bounds are finite; NEVER reschedule an uncertain alarm.
-                assert -1000<=due_ms<=80000,('ALARM_DUE_OUT_OF_BOUNDS',alarm_schedule)
+                # Observe the one REAL controller-owned alarm. Do not create
+                # a second alarm with the same name: the I12 scheduler may
+                # legitimately re-arm it, making a synthetic short alarm a
+                # false negative and changing production scheduler state.
+                alarm_prior=execute(after,"""return Promise.all([
+                  browser.storage.local.get('pcmsI12AlarmCount'),
+                  browser.alarms.get('pcms-refresher-turn')
+                ]).then(([v,a])=>({prior:v.pcmsI12AlarmCount||0,
+                  scheduledAt:a?.scheduledTime||null,now:Date.now()}))""")
+                assert isinstance(alarm_prior.get('scheduledAt'),(int,float)),alarm_prior
+                due_ms=alarm_prior['scheduledAt']-alarm_prior['now']
+                assert -1000<=due_ms<=80000,('CONTROLLER_ALARM_DUE_UNVERIFIED',alarm_prior)
                 call('POST',f'/session/{after}/url',{'url':'about:blank'})
+                # Firefox's minimum alarm cadence may be near one minute.
+                # This bounds waiting to 86 seconds without synthetic wake,
+                # replay, reschedule or any privileged provider operation.
                 time.sleep(min(86,max(15,due_ms/1000+7)))
                 call('POST',f'/session/{after}/url',{'url':url+'#refresher'})
-                alarm_after=call('POST',f'/session/{after}/execute/async',{'script':"const done=arguments[arguments.length-1];browser.storage.local.get('pcmsI12AlarmCount').then(v=>done(v.pcmsI12AlarmCount||0));",'args':[]})
+                alarm_after=call('POST',f'/session/{after}/execute/async',
+                    {'script':"const done=arguments[arguments.length-1];browser.storage.local.get('pcmsI12AlarmCount').then(v=>done(v.pcmsI12AlarmCount||0));",'args':[]})
                 if alarm_after<=alarm_prior['prior']:
                     alarm_diagnostic=execute(after,"return Promise.all([browser.alarms.get('pcms-refresher-turn'),browser.storage.local.get('pcmsI12AlarmCount')]).then(([a,v])=>({nextScheduledAt:a?.scheduledTime||null,count:v.pcmsI12AlarmCount||0,clock:Date.now()}))")
-                    print('B I12_ALARM_MISSING_DIAGNOSTIC='+json.dumps(alarm_diagnostic),flush=True)
+                    print('B I12_ALARM_MISSING_DIAGNOSTIC='+json.dumps({
+                        'prior':alarm_prior,'after':alarm_diagnostic}),flush=True)
                 assert alarm_after>alarm_prior['prior'],(alarm_prior,alarm_after)
                 print('B I12_REAL_ALARM_WITHOUT_DASHBOARD=PASS',flush=True)
                 # Full relaunch of the same persistent installation; no reinstall.
