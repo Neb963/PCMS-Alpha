@@ -35,7 +35,7 @@ test('P56-08 X: unavailable Core leaves minimal redacted report and no fabricate
   const [report,markdown]=extract(makeSafeArchive(createSafeReport(null)));
   assert.equal(report.effects,'OFF');
   assert.equal(report.sections.canonical,'section_unavailable');
-  assert.equal(report.sections.refresher,undefined);
+  assert.equal(report.sections.refresher,'section_unavailable');
   assert.match(markdown,/Refresher section: section_unavailable/);
   assert.throws(()=>makeSafeArchive({schema:'FOREIGN'}),/Unvalidated diagnostic report/);
   assert.equal(normalizeSafeReport(createSafeReport(null)).effects,'OFF');
