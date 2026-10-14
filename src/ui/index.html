@@ -258,21 +258,41 @@
         <section class="panel" data-pcms-work-panel="ai" aria-labelledby="pcms-ai-jobs-heading" hidden>
           <div class="panel-head"><h2 id="pcms-ai-jobs-heading">AI test and repair</h2><span class="unknown">One disposable step at a time</span></div>
           <p class="reason">Select a private, saved pcms-test- generator. Prepare its pinned source and prompt, then explicitly authorize each native AI step. Observe before advancing; only independent browser checks establish test results.</p>
-          <div class="account-controls">
-            <label for="pcms-ai-slug">Exact private stage slug</label><input id="pcms-ai-slug" maxlength="100" spellcheck="false">
-            <label for="pcms-ai-git-token">Private Git read token (ephemeral)</label><input id="pcms-ai-git-token" type="password" autocomplete="off" spellcheck="false">
-            <button id="pcms-ai-prepare" type="button">Prepare source-bound test job</button>
-            <button id="pcms-ai-refresh" type="button">Refresh AI receipts</button>
-            <button id="pcms-ai-run" type="button" disabled>Attempt guarded Chat 1</button>
-            <button id="pcms-ai-observe" type="button" disabled>Reconcile native session and saved source</button>
-            <button id="pcms-ai-opfs" type="button" disabled>Inspect local OPFS (not server proof)</button>
-            <button id="pcms-ai-fresh" type="button" disabled>Verify Chat 2 (gated read-only server history)</button>
-            <button id="pcms-ai-advance" type="button" disabled>Advance one guarded step</button>
-            <button id="pcms-ai-test" type="button" disabled>Run independent browser smoke assertion</button>
-            <button id="pcms-ai-repair" type="button" disabled>Attempt guarded repair of known failure</button>
-            <button id="pcms-ai-newchat" type="button" disabled>Request fresh Chat 2</button>
-            <button id="pcms-ai-chat2" type="button" disabled>Attempt guarded Chat 2</button>
+          <div class="pcms-ai-fields">
+            <label for="pcms-ai-slug">Private generator
+              <input id="pcms-ai-slug" maxlength="100" spellcheck="false" placeholder="pcms-test-private-001">
+            </label>
+            <label for="pcms-ai-git-token">Private Git read token
+              <input id="pcms-ai-git-token" type="password" autocomplete="off" spellcheck="false" placeholder="Not stored">
+            </label>
           </div>
+          <div class="pcms-ai-preparation" role="group" aria-label="Prepare source-bound job">
+            <button id="pcms-ai-prepare" type="button">Prepare test job</button>
+            <button id="pcms-ai-refresh" type="button">Reload job receipts</button>
+          </div>
+          <div class="pcms-ai-actions">
+            <section aria-labelledby="pcms-ai-chat1-title">
+              <h3 id="pcms-ai-chat1-title">Chat 1 · Test and repair</h3>
+              <button id="pcms-ai-run" type="button" disabled>Run Chat 1</button>
+              <button id="pcms-ai-observe" type="button" disabled>Reconcile saved result</button>
+              <button id="pcms-ai-test" type="button" disabled>Run browser checks</button>
+            </section>
+            <section aria-labelledby="pcms-ai-chat2-title">
+              <h3 id="pcms-ai-chat2-title">Chat 2 · Optional tests</h3>
+              <button id="pcms-ai-newchat" type="button" disabled>Request fresh chat</button>
+              <button id="pcms-ai-chat2" type="button" disabled>Run Chat 2</button>
+              <button id="pcms-ai-fresh" type="button" disabled>Verify session isolation</button>
+            </section>
+          </div>
+          <details class="pcms-inline-help pcms-ai-recovery">
+            <summary>Recovery and advanced controls</summary>
+            <div class="pcms-ai-advanced" role="group" aria-label="AI recovery controls">
+              <button id="pcms-ai-advance" type="button" disabled>Inspect next guarded step</button>
+              <button id="pcms-ai-repair" type="button" disabled>Repair known failure</button>
+              <button id="pcms-ai-opfs" type="button" disabled>Inspect local workspace</button>
+            </div>
+            <p>Every native action requires typed authorization for an exact disposable generator. A possible send is never retried automatically. A saved reply alone never proves source, editor ownership, Chat 2 isolation or test PASS.</p>
+          </details>
           <p id="pcms-ai-jobs-status" role="status" aria-live="polite">No AI job has been started.</p>
           <div id="pcms-ai-job-list" class="table-wrap" role="region" aria-label="AI job receipts" tabindex="0"></div>
         </section>

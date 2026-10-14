@@ -180,3 +180,17 @@ test('I17 operator native AI asks for exact disposable step instead of implying 
   assert.match(aiView,/await ai\('ARM_DISPOSABLE_AI'/);
   assert.match(aiView,/testSlug\.test\(name\)/);
 });
+
+test('I17 native AI panel separates preparation, Chat 1/2 and advanced controls',()=>{
+  assert.match(html,/class="pcms-ai-fields"/);
+  assert.match(html,/class="pcms-ai-actions"/);
+  assert.match(html,/class="pcms-ai-recovery"/);
+  assert.match(html,/Chat 1 · Test and repair/);
+  assert.match(html,/Chat 2 · Optional tests/);
+  for(const id of ['pcms-ai-prepare','pcms-ai-refresh','pcms-ai-run',
+    'pcms-ai-observe','pcms-ai-test','pcms-ai-newchat','pcms-ai-chat2',
+    'pcms-ai-fresh','pcms-ai-advance','pcms-ai-repair','pcms-ai-opfs'])
+    assert.equal((html.match(new RegExp('id="'+id+'"','g'))||[]).length,1,id);
+  assert.match(css,/\.pcms-ai-actions\{display:grid/);
+  assert.match(css,/@media\(max-width:680px\)/);
+});
