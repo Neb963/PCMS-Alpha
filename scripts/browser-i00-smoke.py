@@ -635,6 +635,7 @@ def main():
                     'accountId':'fixture_account_a01','expectedRevision':2}})
                 assert unauthorized.get('code')=='ACCOUNT_IDENTITY_UNVERIFIED',unauthorized
                 rss_before=sample_firefox_processes(browser)
+                quota_before=execute(after,"return navigator.storage.estimate().then(v=>({usageBytes:v.usage??null,quotaBytes:v.quota??null})).catch(()=>({usageBytes:null,quotaBytes:null}))")
                 seeded=inventory_idb_probe(after)
                 assert seeded.get('enrolled') is True and seeded.get('verified') is True,seeded
                 assert seeded.get('accepted',{}).get('ok') is True,seeded
@@ -666,6 +667,13 @@ def main():
                 assert '51–100' in pagination,pagination
                 print('B I04_REAL_IDB_1250_FILTER_PAGINATION_OWNER_HOLD=PASS',flush=True)
                 rss_after=sample_firefox_processes(browser)
+                quota_after=execute(after,"return navigator.storage.estimate().then(v=>({usageBytes:v.usage??null,quotaBytes:v.quota??null})).catch(()=>({usageBytes:null,quotaBytes:null}))")
+                print('B I17_FIREFOX_1250_IDB_QUOTA_DELTA='+json.dumps({
+                  'before':quota_before,'after':quota_after,
+                  'deltaUsageBytes':quota_after['usageBytes']-quota_before['usageBytes']
+                    if isinstance(quota_after.get('usageBytes'),int) and isinstance(quota_before.get('usageBytes'),int) else None,
+                  'scope':'SAME_PACKAGED_FIREFOX_PROFILE_IDB_SEED_1250',
+                  'acceptance':'POINT_SAMPLE_ONLY_NOT_QUOTA_STRESS'}),flush=True)
                 measured=rss_before.get('available') and rss_after.get('available')
                 print('B I17_FIREFOX_PROCFS_RESOURCE_SAMPLES='+json.dumps({
                     'before':rss_before,'after':rss_after,
