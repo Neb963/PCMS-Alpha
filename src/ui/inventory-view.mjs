@@ -194,11 +194,13 @@ function draw(items) {
     source.append(src,owner);cells.push(source);
     const observed=document.createElement('td');
     observed.className='pcms-gen-observed';
-    if(Number.isSafeInteger(item.lastObservedAt)&&item.lastObservedAt>0){
+    const observedDate=Number.isSafeInteger(item.lastObservedAt)&&item.lastObservedAt>0
+      ?new Date(item.lastObservedAt):null;
+    if(observedDate&&!Number.isNaN(observedDate.getTime())){
       const time=document.createElement('time');
-      time.dateTime=new Date(item.lastObservedAt).toISOString();
-      time.textContent=new Date(item.lastObservedAt).toLocaleDateString();
-      time.title=new Date(item.lastObservedAt).toLocaleString();
+      time.dateTime=observedDate.toISOString();
+      time.textContent=observedDate.toLocaleDateString();
+      time.title=observedDate.toLocaleString();
       observed.append(time);
     }else observed.textContent='Not observed';
     cells.push(observed);

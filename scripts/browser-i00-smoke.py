@@ -671,6 +671,39 @@ def main():
                     time.sleep(.15)
                 assert '51–100' in pagination,pagination
                 print('B I04_REAL_IDB_1250_FILTER_PAGINATION_OWNER_HOLD=PASS',flush=True)
+                # I17 B: a real installed-XPI inventory sorts the entire
+                # canonical 1,250-row dataset before paging, not merely the
+                # first 50 rows already displayed. A page-local reverse sort
+                # would expose gen-0049 first and fail this independent oracle.
+                execute(after,"""const direction=document.getElementById('pcms-generator-sort-direction');
+                  direction.value='desc';direction.dispatchEvent(new Event('change'));
+                  return true;""")
+                first_sort={}
+                for _ in range(50):
+                    first_sort=execute(after,"""const slugs=[...document.querySelectorAll('#pcms-generators-rows .pcms-generator-row-target')].map(x=>x.textContent);
+                      return {first:slugs[0],last:slugs.at(-1),count:slugs.length,
+                        range:document.getElementById('pcms-generator-count').textContent,
+                        observed:document.querySelectorAll('#pcms-generators-rows .pcms-gen-observed time').length};""")
+                    if first_sort.get('first')=='gen-1249' and first_sort.get('last')=='gen-1200':break
+                    time.sleep(.15)
+                assert first_sort.get('first')=='gen-1249' and first_sort.get('last')=='gen-1200',first_sort
+                assert first_sort.get('count')==50 and first_sort.get('observed')==50,first_sort
+                execute(after,"document.getElementById('pcms-generator-next').click();return true")
+                second_sort={}
+                for _ in range(50):
+                    second_sort=execute(after,"""const slugs=[...document.querySelectorAll('#pcms-generators-rows .pcms-generator-row-target')].map(x=>x.textContent);
+                      return {first:slugs[0],last:slugs.at(-1),count:slugs.length,
+                        range:document.getElementById('pcms-generator-count').textContent};""")
+                    if second_sort.get('first')=='gen-1199' and second_sort.get('last')=='gen-1150':break
+                    time.sleep(.15)
+                assert second_sort.get('first')=='gen-1199' and second_sort.get('last')=='gen-1150',second_sort
+                assert second_sort.get('count')==50 and '51–100' in second_sort.get('range',''),second_sort
+                # An injected arbitrary sort key must be rejected at the
+                # extension port, not interpolated into a canonical field.
+                bad_sort=inventory_command(after,{'type':'LIST_INVENTORY','params':{
+                  'sortBy':'route', 'sortDirection':'asc'}})
+                assert bad_sort.get('code')=='INVALID_PARAMS',bad_sort
+                print('B I17_GLOBAL_1250_SORT_PAGING_AND_OBSERVED_COLUMN=PASS',flush=True)
                 rss_after=sample_firefox_processes(browser)
                 quota_after=execute(after,"return navigator.storage.estimate().then(v=>({usageBytes:v.usage??null,quotaBytes:v.quota??null})).catch(()=>({usageBytes:null,quotaBytes:null}))")
                 print('B I17_FIREFOX_1250_IDB_QUOTA_DELTA='+json.dumps({

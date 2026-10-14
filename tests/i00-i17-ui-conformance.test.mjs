@@ -80,3 +80,11 @@ test('I17 guarded operator supply uses exactly one item command and never auto-r
   assert.match(supply,/do not blindly retry/i);
   assert.doesNotMatch(supply,/setInterval\(/);
 });
+
+test('I17 installed Firefox B contains full-fleet sorted pagination oracle',async()=>{
+  const browserHarness=await readFile('scripts/browser-i00-smoke.py','utf8');
+  assert.match(browserHarness,/B I17_GLOBAL_1250_SORT_PAGING_AND_OBSERVED_COLUMN=PASS/);
+  assert.match(browserHarness,/first_sort\.get\('first'\)=='gen-1249'/);
+  assert.match(browserHarness,/second_sort\.get\('first'\)=='gen-1199'/);
+  assert.match(browserHarness,/bad_sort\.get\('code'\)=='INVALID_PARAMS'/);
+});
