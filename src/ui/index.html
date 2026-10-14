@@ -35,6 +35,7 @@
         <p id="pcms-overview-inventory" role="status" aria-live="polite">Inventory counts pending. No live owner status inferred.</p>
         <p id="pcms-overview-refresher" role="status">Shadow timing pending; mutations OFF.</p>
         <p id="pcms-overview-backup" role="status" aria-live="polite">Manual backup receipt not yet inspected.</p>
+        <p id="pcms-overview-restore" role="status" aria-live="polite">Restore guard not yet inspected; controller activation unverified.</p>
         <div class="notice" role="status"><strong>Provider effects disabled</strong><p>Local operation journaling and a fail-closed command boundary are installed. Account binding and manual login are enabled, but remote identity verification and provider mutation remain unavailable. Missing observations do not imply no incidents.</p></div>
         <section class="panel" aria-labelledby="runtime-health-title"><div class="panel-head"><h2 id="runtime-health-title">Background guard</h2><span class="unknown" id="pcms-guard-badge">Checking</span></div><p id="pcms-guard-health" role="status">Runtime evidence unavailable until checked. Provider actions remain off.</p></section>
         <section class="panel" aria-labelledby="journal-title"><div class="panel-head"><h2 id="journal-title">Canonical journal</h2><span class="unknown">Effects OFF</span></div><p id="pcms-journal-health" role="status">Checking isolated canonical storage.</p><a href="emergency.html">Open emergency diagnostics</a></section>
@@ -273,11 +274,11 @@
           <input id="pcms-backup-passphrase" type="password" autocomplete="new-password" minlength="12" maxlength="4096">
           <button type="button" id="pcms-backup-export">Create and download encrypted backup</button>
           <p id="pcms-backup-status" role="status" aria-live="polite">No new backup attempted. Browser completion and independent disk-byte verification are different evidence tiers.</p>
-          <p class="reason">Tier 1: cryptographically verified in memory; tier 2: browser-reported completed download with existence and size; tier 3: independent on-disk file readback (not available here). Import/restore is a later phase.</p>
+          <p class="reason">Tier 1: cryptographically verified in memory; tier 2: browser-reported completed download with existence and size; tier 3: independent on-disk file readback. The staged local restore controls are in the next panel; no provider activation follows a backup.</p>
         </section>
         <section class="panel" aria-labelledby="pcms-restore-title">
-          <div class="panel-head"><h2 id="pcms-restore-title">I16 · Authenticated staged restore preview</h2><span class="unknown">Review-only · mutation OFF</span></div>
-          <p>Choose the integrated encrypted archive and its recovery passphrase. Preview authenticates both layers, inventories exclusions and requires explicit mappings. A separate pre-restore checkpoint must be selected and independently re-read before any destructive restore. The staged donor and PCMS apply path is not yet activated.</p>
+          <div class="panel-head"><h2 id="pcms-restore-title">I16 · Authenticated staged restore</h2><span class="unknown">Local guarded apply · provider effects OFF</span></div>
+          <p>Choose the integrated encrypted archive and recovery passphrase. Preview authenticates both layers and inventories exact Persona mappings, exclusions and collision risks. A separate pre-restore checkpoint must be selected and independently re-read before local application. Applying changes donor/cookie/PCMS local state under a durable guard; no cross-store atomicity, provider effects or fresh-controller activation is implied. An uncertain group requires read-only reconciliation, never automatic retry.</p>
           <label for="pcms-restore-archive">Incoming encrypted archive</label>
           <input id="pcms-restore-archive" type="file" accept=".encrypted,.json">
           <label for="pcms-restore-passphrase">Portable recovery passphrase</label>

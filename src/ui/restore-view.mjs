@@ -115,11 +115,19 @@ async function health(){
   try{
     const gate=createRestoreGate(browser.storage.local);
     const state=await gate.inspect();
+    const overview=$('pcms-overview-restore');
+    if(overview)overview.textContent=state.held?
+      'Restore controller INACTIVE; '+state.status+'; independently observed groups: '+
+        state.groups.filter(g=>g.status==='OBSERVED').length+
+        '/4. Provider effects OFF; review in Settings.':
+      'No restore guard installed. A restored archive never grants remote authority.';
     if(state.held){
       status.textContent='Restore hold active ('+state.status+'). Read-only preview remains accessible; no automatic resume, retry or activation. Groups: '+
         state.groups.map(g=>g.key+'='+g.status).join(', ')+'. Use emergency diagnostics for recovery.';
     }
   }catch{
+    const overview=$('pcms-overview-restore');
+    if(overview)overview.textContent='Restore guard unavailable; never infer an active controller.';
     status.textContent='Restore guard cannot be read. Mutating restore is unavailable; read-only archive inspection remains possible.';
   }
 }
