@@ -103,7 +103,7 @@
           <details class="pcms-technical-help" id="blocked-generators"><summary>About ownership and protected actions</summary><p>Existing-source adoption needs independent owner readback. Sync uses the donor-guarded read-only observer. Edit keys and collaboration do not prove ownership; an absent generator observation is not a deletion. Provider writes remain held until individually qualified.</p></details></section>
         <section class="panel" aria-labelledby="pcms-supply-heading" data-pcms-generator-panel="supply" hidden>
           <button type="button" disabled aria-describedby="blocked-generators" class="pcms-guarded-action">Reserve generator</button>
-          <div class="panel-head"><h2 id="pcms-supply-heading">Slug supply — canonical plan</h2><span class="unknown">Local freeze only · Provider held</span></div>
+          <div class="panel-head"><h2 id="pcms-supply-heading">Slug supply — canonical plan</h2><span class="unknown">Local plan · Disposable test</span></div>
           <p class="reason">Paste one exact generator slug per line (up to 100). Preview preserves order and spelling. Freezing records the requests for a verified Persona-bound account in IndexedDB; it does not create, rename, reserve remotely, or write to private Git. Existing and conflicting local slugs are rejected per item.</p>
           <div class="account-controls"><label for="pcms-supply-account">Account</label>
             <select id="pcms-supply-account"><option value="">Loading verified accounts</option></select>
@@ -111,7 +111,7 @@
           <label for="pcms-supply-slugs">Requested slugs, one per line</label>
           <textarea id="pcms-supply-slugs" rows="4" maxlength="12100" spellcheck="false" autocomplete="off" aria-describedby="pcms-supply-feedback" placeholder="my-private-gen-001"></textarea>
           <div class="account-controls"><button type="button" id="pcms-supply-preview">Preview exact batch</button><button type="button" id="pcms-supply-freeze" disabled>Freeze locally</button></div>
-          <p id="pcms-supply-feedback" role="status" aria-live="polite">Provider create/rename and Git folder writes are held until separately proven capability activation.</p>
+          <p id="pcms-supply-feedback" role="status" aria-live="polite">General creation and Git writes remain held. For an individual live test, freeze a pcms-test- slug, then open Work Queue and confirm its private create/rename step.</p>
           <div class="table-wrap" role="region" aria-label="Supply preview and item receipts" tabindex="0"><table><thead><tr><th scope="col">Item</th><th scope="col">Requested slug</th><th scope="col">Canonical state</th><th scope="col">Reason</th></tr></thead><tbody id="pcms-supply-items"><tr><td colspan="4">No batch preview.</td></tr></tbody></table></div>
         </section>
         <section class="panel" aria-labelledby="pcms-adopt-heading" data-pcms-generator-panel="adopt" hidden>
@@ -177,7 +177,7 @@
           <button type="button" data-pcms-work-show="recovery" aria-pressed="false">Recovery</button>
         </nav>
         <div class="pcms-work-activity-grid" data-pcms-work-panel="activity">
-        <section class="panel"><div class="panel-head"><h2>Operations</h2><span class="unknown">Read-only</span></div><p id="pcms-work-queue-summary" role="status">Loading canonical journal status. Unknown outcomes must be reconciled, not repeated.</p><p id="blocked-work-queue" class="reason">Provider effects are held. Frozen local supply receipts may be inspected; this screen cannot dispatch, approve or replay an uncertain remote operation.</p></section>
+        <section class="panel"><div class="panel-head"><h2>Operations</h2><span class="unknown">Read-only</span></div><p id="pcms-work-queue-summary" role="status">Loading canonical journal status. Unknown outcomes must be reconciled, not repeated.</p><p id="blocked-work-queue" class="reason">General provider operations remain held. Only a disposable pcms-test- supply item can be run after exact confirmation; an uncertain remote effect can only be reconciled, never blindly repeated.</p></section>
         <section class="panel" aria-labelledby="pcms-stage-queue-title"><div class="panel-head"><h2 id="pcms-stage-queue-title">I09 private stage receipts</h2><span class="unknown">Canonical · no auto-retry</span></div><div id="pcms-stage-queue" role="status" aria-live="polite">Reading local stage journal.</div></section>
         <section class="panel" aria-labelledby="pcms-adoption-queue-title"><div class="panel-head"><h2 id="pcms-adoption-queue-title">Existing-source adoption receipts</h2><span class="unknown">Local originals · Git archive pending</span></div><div id="pcms-adopt-receipts" role="status" aria-live="polite">Loading adoption history.</div></section>
         <section class="panel" aria-labelledby="pcms-supply-queue-title"><div class="panel-head"><h2 id="pcms-supply-queue-title">Frozen supply batches</h2><span class="unknown">Canonical local receipts</span></div><div id="pcms-supply-queue" role="status" aria-live="polite">Loading local batches.</div></section>

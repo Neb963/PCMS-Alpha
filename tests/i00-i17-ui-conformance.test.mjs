@@ -97,3 +97,12 @@ test('I17 installed Firefox B denies disguised provider arms without side effect
   assert.match(harness,/malformed_arm\.get\('code'\)=='INVALID_PARAMS'/);
   assert.match(harness,/still_frozen\.get\('batch'/);
 });
+
+test('I17 operator supply presents narrow pilot honestly, without general activation claims',async()=>{
+  assert.match(html,/General creation and Git writes remain held/);
+  assert.match(html,/Only a disposable pcms-test- supply item/);
+  const supply=await readFile('src/ui/supply-view.mjs','utf8');
+  assert.match(supply,/only exact disposable private tests may be armed/);
+  assert.match(supply,/No external effect yet/);
+  assert.match(supply,/Git writes remain held/);
+});

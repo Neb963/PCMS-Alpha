@@ -66,7 +66,7 @@ function drawQueue(result){
     const counts=Object.create(null);
     for(const item of batch.items)counts[item.state]=(counts[item.state]||0)+1;
     summary.textContent=Object.entries(counts).map(([k,v])=>k+': '+v).join(' · ')+
-      (result.activation==='HELD'?' · Remote actions held':' · Read canonical receipts');
+      ' · General writes held; only exact disposable private tests may be armed';
     const list=document.createElement('ul');
     for(const item of batch.items){
       const li=document.createElement('li');
@@ -191,7 +191,7 @@ async function loadAccounts(){
       select.append(option);
     }
     if(accounts.some(a=>a.accountId===value))select.value=value;
-    notice('Local draft only. Freeze records immutable requested slugs, not a remote reservation. Provider activation is held.');
+    notice('Preview and freeze preserve exact slugs locally. For a disposable private test, use a pcms-test- slug and confirm its single step in Work Queue.');
   }catch{
     if(mine===seq){accounts=[];select.replaceChildren();
       notice('Account authority unavailable. Cannot freeze a batch.');}
@@ -246,8 +246,8 @@ freeze.addEventListener('click',async()=>{
     if(mine!==seq)return;
     if(!res?.ok)throw Error(res?.code||'NOT_COMMITTED');
     latest=null;paint(res.batch.items,true);
-    notice('Batch '+res.batch.batchId+' committed locally. Each item retains its requested slug. '+
-      'Provider create/rename and Git folder writes remain held; no external effect claimed.');
+    notice('Batch '+res.batch.batchId+' frozen locally. No external effect yet. '+
+      'Open Work Queue for an explicitly confirmed pcms-test- private creation; Git writes remain held.');
     await fetchBatches();
   }catch(e){
     if(mine===seq)notice('Freeze not confirmed ('+(e.message||'UNKNOWN')+
