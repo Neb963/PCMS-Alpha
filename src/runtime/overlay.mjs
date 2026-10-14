@@ -507,6 +507,14 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
     // endpoints, global privileges and formerly approved jobs have NO authority.
     imported.state.global=structuredClone(snap.state.global);
     imported.state.routes=structuredClone(snap.state.routes);
+    // Replacing portable donor data must never orphan a destination
+    // contextual identity into the local unmanaged/Direct routing policy.
+    // Unselected destination Personas remain owned and unchanged.
+    const targetIds=new Set(bindings.values());
+    for(const [id,profile] of Object.entries(snap.state.profiles||{})){
+      if(!targetIds.has(id))
+        imported.state.profiles[id]=structuredClone(profile);
+    }
     for(const [key,containerId] of bindings){
       const p=imported.state.profiles?.[containerId];
       if(!p||!p.managed)throw Error('RESTORE_PERSONA_MAPPING_INVALID');

@@ -185,7 +185,13 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
             .every(id=>same(now.state.scripts?.[id],preparedDonor.candidate.scripts?.[id]));
           const workflowsVerified=Object.values(preparedDonor.workflowMap||{})
             .every(id=>same(now.state.workflows?.[id],preparedDonor.candidate.workflows?.[id]));
-          const valid=personasVerified&&scriptsVerified&&workflowsVerified;
+          const untouchedPreserved=Object.entries(baseline.snap.state.profiles||{})
+            .filter(([id])=>!Object.values(mappings).includes(id))
+            .every(([id,p])=>same(now.state.profiles?.[id],p));
+          const policyPreserved=same(now.state.global,baseline.snap.state.global)&&
+            same(now.state.routes,baseline.snap.state.routes);
+          const valid=personasVerified&&scriptsVerified&&workflowsVerified&&
+            untouchedPreserved&&policyPreserved;
           return {source:'INDEPENDENT_READBACK',digest:valid?fp:'0'.repeat(64)};
         });
         await step('donor-cookies',{cookies:await digest(JSON.stringify(payload.cookies||{})),
