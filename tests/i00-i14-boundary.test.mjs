@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import {createRefresherBoundary,validateRefresherMessage} from '../src/runtime/refresher-boundary.mjs';
 
 const H='a'.repeat(64),events=[];
-function fixture({gate=false,changeRoute=false,lostReadback=false}={}){
+function fixture({gate=false,changeRoute=false,lostReadback=false,uncertain=false}={}){
   const history=[],row={stableId:'target_01',slug:'fixture-generator',accountId:'account_01',
     personaUid:'persona_01',bindingVersion:1,remoteId:'remote_01',slot:true,
     phase:'ACTIVE',ownerVerified:true,releaseVerified:true,releaseFingerprint:H,
     listing:'PUBLIC',identityHeld:false,reviewHeld:false,
-    refresh:{intent:null,suspended:false,nextAttemptAt:0},metrics:{nextDueAt:999999999}};
+    refresh:{intent:uncertain?{state:'DISPATCH_POSSIBLE',id:'attempt_01',sourceFingerprint:H}:null,
+      suspended:uncertain,nextAttemptAt:0,probes:uncertain?1:0},metrics:{nextDueAt:999999999}};
   const state={rows:[row],accounts:{account_01:{verifiedIdentity:true,principalFingerprint:H}},
     recent:{nextDueAt:999999999,suspended:false}};
   const store={
@@ -65,4 +66,23 @@ test('P54-05 X: lost response after dispatch never causes duplicate provider exe
   const f=fixture({gate:true,lostReadback:true});const result=await f.boundary.tick();
   assert.equal(result.refresh,'REFRESH_EFFECT_HELD');
   assert.deepEqual(f.history,['reserve','dispatch','execute','readback','settle']);
+});
+
+test('P54-05 / S6-I14-BOUND-RETRY F/X: cold wake resolves uncertain effect by readback without repeating execute',async()=>{
+  const f=fixture({gate:true,uncertain:true});
+  const result=await f.boundary.tick();
+  assert.equal(result.refresh,'REFRESH_READBACK_EFFECT_PROVEN');
+  assert.deepEqual(f.history,['readback','settle']);
+});
+test('P54-05 X: activation gate stays off even with a persisted uncertain dispatch',async()=>{
+  const f=fixture({uncertain:true});
+  const result=await f.boundary.tick();
+  assert.equal(result.refresh,'REFRESH_ACTIVATION_HELD');
+  assert.deepEqual(f.history,[]);
+});
+test('P54-05 X: lost reconciliation readback is held, never repeated as mutation',async()=>{
+  const f=fixture({gate:true,uncertain:true,lostReadback:true});
+  const result=await f.boundary.tick();
+  assert.equal(result.refresh,'REFRESH_READBACK_HELD');
+  assert.deepEqual(f.history,['readback','settle']);
 });
