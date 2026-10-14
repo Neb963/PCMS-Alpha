@@ -205,3 +205,15 @@ test('I17 operator writeback includes separate one-time private Git authorizatio
   assert.match(v,/request\('ARM_DISPOSABLE_COMMIT'/);
   assert.match(b,/if\(pilotMatches\(record\)\)manualPilot=null/);
 });
+
+test('I17 publication requires distinct one-use exact source authorization',async()=>{
+  const svc=await readFile('src/runtime/release-boundary.mjs','utf8');
+  const ui=await readFile('src/ui/release-view.mjs','utf8');
+  assert.match(html,/id="pcms-release-arm"/);
+  assert.match(svc,/ARM_DISPOSABLE_RELEASE/);
+  assert.match(svc,/pilotClock\(\)\+120000/);
+  assert.match(svc,/record.kind==='PRIVATE_NEW'/);
+  assert.match(ui,/window\.prompt\('Type exactly '/);
+  assert.match(ui,/command\('ARM_DISPOSABLE_RELEASE'/);
+  assert.match(svc,/if\(pilotMatches\(stored.record\)\)releasePilot=null/);
+});

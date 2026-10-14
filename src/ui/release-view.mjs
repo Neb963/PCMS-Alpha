@@ -6,6 +6,7 @@ const passphrase=document.getElementById('pcms-existing-passphrase');
 const previewBtn=document.getElementById('pcms-release-preview');
 const approveBtn=document.getElementById('pcms-release-approve');
 const dispatchBtn=document.getElementById('pcms-release-dispatch');
+const armBtn=document.getElementById('pcms-release-arm');
 const cancelBtn=document.getElementById('pcms-release-cancel');
 const reconcileBtn=document.getElementById('pcms-release-reconcile');
 const loadBtn=document.getElementById('pcms-release-load');
@@ -38,6 +39,8 @@ function controls(){
   approveBtn.disabled=active||!snapshot||snapshot.slug!==slug.value||!hasToken;
   cancelBtn.disabled=active||!receipt||receipt.slug!==slug.value||
     receipt.state!=='APPROVED';
+  armBtn.disabled=active||!receipt||receipt.slug!==slug.value||
+    receipt.state!=='APPROVED'||!/^pcms-test-[a-z0-9-]{8,88}$/.test(receipt.slug);
   dispatchBtn.disabled=active||!receipt||receipt.slug!==slug.value||
     receipt.state!=='APPROVED'||!hasToken;
   reconcileBtn.disabled=active||!receipt||receipt.slug!==slug.value||!hasToken||
@@ -187,6 +190,22 @@ cancelBtn.addEventListener('click',()=>{
   if(!receipt||receipt.state!=='APPROVED')return;
   act('CANCEL_APPROVED',{slug:receipt.slug,expectedRevision:receipt.revision},
     'Canceling unsent exact-source approval; no remote effect…');
+});
+armBtn.addEventListener('click',async()=>{
+  if(active||receipt?.state!=='APPROVED')return;
+  const expected='PUBLISH '+receipt.slug+' '+receipt.sourceFingerprint;
+  const confirmation=window.prompt('Type exactly '+expected+
+    ' to permit ONE publication of this private tested source F:', '');
+  if(confirmation===null)return;
+  if(confirmation!==expected){note('Exact-source confirmation mismatch. No provider effect.');return;}
+  active=true;controls();
+  try{
+    const result=await command('ARM_DISPOSABLE_RELEASE',{
+      slug:receipt.slug,expectedRevision:receipt.revision,confirmation});
+    note(result?.ok?'Exact-source publication armed for two minutes. Click Publish to dispatch once.':
+      'Publication not armed: '+(result?.code||'UNVERIFIED'));
+  }catch{note('Arm acknowledgment unknown. Reinspect approval; do not infer authorization.');}
+  finally{active=false;controls();}
 });
 dispatchBtn.addEventListener('click',()=>{
   if(!receipt)return;
