@@ -275,7 +275,25 @@
           <p id="pcms-backup-status" role="status" aria-live="polite">No new backup attempted. Browser completion and independent disk-byte verification are different evidence tiers.</p>
           <p class="reason">Tier 1: cryptographically verified in memory; tier 2: browser-reported completed download with existence and size; tier 3: independent on-disk file readback (not available here). Import/restore is a later phase.</p>
         </section>
-        <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">Remote effects off · local backup available</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Canonical shadow scheduler available; provider observations gated, mutations OFF</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup / restore and AI tests</dt><dd>Manual encrypted backup available; restore, scheduled backups and AI tests OFF</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No provider settings or operation commands can be changed here. PersonaMonkey retains advanced security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
+        <section class="panel" aria-labelledby="pcms-auto-backup-title">
+          <div class="panel-head"><h2 id="pcms-auto-backup-title">I15 · Scheduled encrypted backup</h2><span class="unknown">OS vault gated</span></div>
+          <p>Automatic backup runs in the Firefox background, independently of Refresher Pause. It requires a separately installed, unlocked Secret Service OS vault. Keep the portable recovery passphrase independently; an inaccessible vault suspends unattended exports without plaintext fallback.</p>
+          <label for="pcms-auto-backup-pass">Portable recovery passphrase (at least 12 characters)</label>
+          <input type="password" id="pcms-auto-backup-pass" maxlength="4096" autocomplete="new-password">
+          <label for="pcms-auto-backup-confirm">Confirm recovery passphrase</label>
+          <input type="password" id="pcms-auto-backup-confirm" maxlength="4096" autocomplete="new-password">
+          <div class="account-controls">
+            <button type="button" id="pcms-auto-backup-vault">Store in OS vault</button>
+            <label for="pcms-auto-backup-enabled">Enable daily backup</label>
+            <input type="checkbox" id="pcms-auto-backup-enabled">
+            <button type="button" id="pcms-auto-backup-save">Save setting</button>
+            <button type="button" id="pcms-auto-backup-run">Attempt now</button>
+            <button type="button" id="pcms-auto-backup-refresh">Refresh status</button>
+          </div>
+          <p role="status" aria-live="polite" id="pcms-auto-backup-status">Checking canonical backup state.</p>
+          <p class="reason">Up to 14 confirmed automatic archives are retained. Only positively tracked matching excess downloads may be deleted. Manual, untracked, uncertain and missing files are preserved. No independent on-disk byte proof is claimed.</p>
+        </section>
+        <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">Remote effects off · local backup available</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Canonical shadow scheduler available; provider observations gated, mutations OFF</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup / restore and AI tests</dt><dd>Manual encrypted backup available; scheduled backup requires OS vault; restore OFF</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No provider settings or operation commands can be changed here. PersonaMonkey retains advanced security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
         <section class="panel" aria-labelledby="pcms-writeback-auto-heading">
           <div class="panel-head"><h2 id="pcms-writeback-auto-heading">I11 · Git-only automatic writeback</h2><span class="unknown">Opt-in, revision-fenced · effects HELD</span></div>
           <div class="account-controls"><label for="pcms-writeback-auto">Allow opt-in automatic Git writeback after verified final AI result</label><input id="pcms-writeback-auto" type="checkbox"><button id="pcms-writeback-save-auto" type="button" disabled>Save writeback preference</button></div>
@@ -318,6 +336,7 @@
   <script type="module" src="supply-view.mjs"></script>
   <script type="module" src="adoption-view.mjs"></script>
   <script type="module" src="backup-view.mjs"></script>
+  <script type="module" src="backup-auto-view.mjs"></script>
   <script type="module" src="staging-view.mjs"></script>
   <script type="module" src="ai-view.mjs"></script>
   <script type="module" src="writeback-view.mjs"></script>\n  <script type="module" src="release-view.mjs"></script>
