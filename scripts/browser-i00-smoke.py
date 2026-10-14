@@ -563,6 +563,7 @@ def main():
         # Firefox 153+ refuses WebDriver navigation to extension pages without a
         # *test-only* opt-in. This agent runs only on disposable CI profile and
         # geckodriver binds loopback; production XPI permissions stay unchanged.
+        old_daemon=None
         server=subprocess.Popen([str(driver),'--port',str(PORT),'--allow-system-access'],stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
         try:
             for _ in range(80):
@@ -2776,6 +2777,13 @@ def main():
                 # controller. Only synthetic local Persona/IDB writes. A
                 # pre-existing UID forces donor-authoritative collision remap.
                 close(after)
+                # Old controller process genuinely alive in parallel with NEW.
+                # Both profiles are CI-disposable and use the same installed XPI.
+                old_daemon=subprocess.Popen([
+                    str(browser),'-headless','-no-remote','-profile',str(profile)],
+                    stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                time.sleep(.7)
+                assert old_daemon.poll() is None,'OLD_PROFILE_NOT_RUNNING'
                 fresh_profile=pathlib.Path(folder)/'fresh-profile'
                 fresh_profile.mkdir()
                 (fresh_profile/'user.js').write_text('user_pref("xpinstall.signatures.required", false);\n')
@@ -2919,6 +2927,7 @@ def main():
                 fresh_result=call('POST',f'/session/{after}/execute/async',
                                   {'script':fresh_script,'args':[]},timeout=120)
                 assert fresh_result.get('ok') is True,fresh_result
+                assert old_daemon.poll() is None,'OLD_CONTROLLER_NOT_CONCURRENT'
                 assert fresh_result.get('groups')==4,fresh_result
                 close(after)
                 after=open_session(browser,fresh_profile)
@@ -2932,6 +2941,10 @@ def main():
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
             finally: close(after)
         finally:
+            if old_daemon is not None:
+                old_daemon.terminate()
+                try: old_daemon.wait(timeout=5)
+                except subprocess.TimeoutExpired: old_daemon.kill()
             server.terminate()
             try: server.wait(timeout=4)
             except subprocess.TimeoutExpired: server.kill()
