@@ -13,14 +13,17 @@ function cookiesMatch(expected,observed){
   const actual=new Set(observed.map(tuple));
   return expected.every(x=>actual.has(tuple(x)));
 }
-function resolved(payload,settings,containers,epoch){
+function resolved(payload,settings,containers,epoch,recorded={}){
   const map=Object.create(null),used=new Set();
   for(const [i,p] of (payload.personas||[]).entries()){
     const original=settings[p.key];
-    const id=original==='__create__'?
+    const matches=original==='__create__'?
       containers.filter(x=>x.name==='PCMS Restore '+epoch.slice(8,20)+' '+
-        String(i).padStart(3,'0')).map(x=>x.cookieStoreId):
-      containers.filter(x=>x.cookieStoreId===original).map(x=>x.cookieStoreId);
+        String(i).padStart(3,'0')):
+      containers.filter(x=>x.cookieStoreId===original);
+    const id=matches.map(x=>x.cookieStoreId);
+    if(recorded[p.key]&&id[0]!==recorded[p.key])
+      refuse('RESTORE_CONTEXT_RECEIPT_MISMATCH');
     if(id.length!==1||used.has(id[0]))refuse('RESTORE_MAPPING_NOT_RECONCILED');
     map[p.key]=id[0];used.add(id[0]);
   }
@@ -53,7 +56,7 @@ export async function reconcileRestore({gate,api,donor,db,archiveText,
     decodeDonor:decodeBackupEnvelope});
   const current=await donor.snapshot();
   const containers=await donor.containers();
-  const bindings=resolved(incoming.donor,row.recovery.mappings,containers,row.epoch);
+  const bindings=resolved(incoming.donor,row.recovery.mappings,containers,row.epoch,row.createdContainers);
   const map=remaps(incoming.donor,bindings,current.state);
   const incomplete=Object.entries(row.groups).find(([,g])=>
     ['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(g?.status));

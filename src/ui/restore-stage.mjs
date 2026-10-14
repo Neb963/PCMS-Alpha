@@ -41,7 +41,12 @@ export function createRestoreStageEngine(gate,{dispatch,readback}={}){
       step,status:'DISPATCH_POSSIBLE'});
     try{await dispatch({group,step,fingerprint,epoch});}
     catch{/* lost reply != proof that no effect occurred */}
-    return observe(possible,group,step,fingerprint);
+    const current=await gate.read();
+    if(current?.epoch!==epoch||
+       current.groups[group]?.status!=='DISPATCH_POSSIBLE'||
+       current.groups[group]?.fingerprint!==fingerprint)
+      err('RESTORE_STEP_CHANGED_DURING_DISPATCH');
+    return observe(current,group,step,fingerprint);
   }
   async function reconcile({epoch,revision,group,step,fingerprint}){
     if(typeof readback!=='function')err('RESTORE_READBACK_UNAVAILABLE');

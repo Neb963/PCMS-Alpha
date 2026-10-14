@@ -167,6 +167,11 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
               icon:p.icon||'fingerprint'});
             assert(made?.cookieStoreId,'RESTORE_CONTEXT_RESULT_UNKNOWN');
             containers=await donor.containers();
+            assert(containers.some(c=>c.cookieStoreId===made.cookieStoreId&&
+              c.name===name),'RESTORE_CONTEXT_READBACK_FAILED');
+            const snapshot=await gate.read();
+            await gate.recordContainer({epoch:intent.epoch,
+              revision:snapshot.revision,personaKey:p.key,cookieStoreId:made.cookieStoreId});
           }
           mappings=mappingFromContainers(payload,req,containers,intent.epoch);
           preparedDonor=await donor.prepare({payload,mappings,mode:args.mode});

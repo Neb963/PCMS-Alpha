@@ -366,3 +366,33 @@ test('P55-07/P55-12 X: restore port bounds input before any archive decode or do
   assert.equal(validateRestoreTransport({...template,
     mappings:Array(4)},{maxBytes:32}).code,'RESTORE_INPUT_INVALID');
 });
+
+test('P55-08 X: guarded per-Persona created IDs persist and duplicate receipt is rejected',async()=>{
+  const s=storage(),h='a'.repeat(64),gate=createRestoreGate(s,{uuid:()=>('a'.repeat(32))});
+  const start=await gate.begin({planSha256:h,archiveSha256:h,
+    destinationSha256:h,checkpointSha256:h,reviewedPlanSha256:h,
+    checkpointTier:3,recovery:{mode:'merge',
+      mappings:{p:'__create__',q:'__create__'}}});
+  const a=await gate.advance({epoch:start.epoch,revision:start.revision,
+    group:'donor-personas',step:'donor-personas',status:'BEFORE_DISPATCH',fingerprint:h});
+  const b=await gate.advance({epoch:start.epoch,revision:a.revision,
+    group:'donor-personas',step:'donor-personas',status:'DISPATCH_POSSIBLE'});
+  const first=await gate.recordContainer({epoch:start.epoch,revision:b.revision,
+    personaKey:'p',cookieStoreId:'firefox-container-101'});
+  const fresh=createRestoreGate(s);
+  assert.equal((await fresh.inspect()).createdContainers,1);
+  assert.equal((await fresh.read()).createdContainers.p,'firefox-container-101');
+  await assert.rejects(()=>fresh.recordContainer({epoch:start.epoch,
+    revision:first.revision,personaKey:'q',
+    cookieStoreId:'firefox-container-101'}),/RESTORE_CONTAINER_ID_DUPLICATE/);
+  await assert.rejects(()=>fresh.recordContainer({epoch:start.epoch,
+    revision:first.revision,personaKey:'p',
+    cookieStoreId:'firefox-container-102'}),/RESTORE_CONTAINER_ID_CHANGED/);
+  const second=await fresh.recordContainer({epoch:start.epoch,revision:first.revision,
+    personaKey:'q',cookieStoreId:'firefox-container-102'});
+  const observed=await fresh.advance({epoch:start.epoch,revision:second.revision,
+    group:'donor-personas',step:'donor-personas',status:'OBSERVED',
+    fingerprint:h,observation:{source:'INDEPENDENT_READBACK',digest:h}});
+  assert.equal(observed.groups['donor-personas'].status,'OBSERVED');
+  assert.equal((await fresh.inspect()).controller,'INACTIVE');
+});

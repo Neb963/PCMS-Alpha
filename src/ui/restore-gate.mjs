@@ -7,7 +7,7 @@ const fail=c=>{throw Error(c);};
 export function safeRestoreReceipt(s){
   if(!s||s.active!==true)return {held:false,code:'NO_RESTORE_MARKER'};
   return {held:true,code:'RESTORE_IN_PROGRESS',epoch:s.epoch||null,
-    status:s.status||'UNKNOWN',step:s.step||'NONE',groups:Object.entries(s.groups||{})
+    status:s.status||'UNKNOWN',step:s.step||'NONE',createdContainers:Object.keys(s.createdContainers||{}).length,groups:Object.entries(s.groups||{})
       .map(([key,v])=>({key,status:v.status})),controller:'INACTIVE',activation:'OFF'};
 }
 export function createRestoreGate(storage,{now=()=>Date.now(),
@@ -41,7 +41,7 @@ export function createRestoreGate(storage,{now=()=>Date.now(),
        fail('RESTORE_RECOVERY_PLAN_INVALID');
     const row={active:true,revision:1,epoch:'restore_'+uuid(),fresh:fresh===true,
       status:'GUARD_INSTALLED',step:'GUARD',planSha256,archiveSha256,
-      destinationSha256,checkpointSha256,startedAt:now(),groups:{},recovery};
+      destinationSha256,checkpointSha256,startedAt:now(),groups:{},createdContainers:{},recovery};
     if(!token(row.epoch))fail('RESTORE_EPOCH_INVALID');
     // Any failure after this point retains a global mutating hold.
     return persist(row);
@@ -78,5 +78,23 @@ export function createRestoreGate(storage,{now=()=>Date.now(),
         allDone?'COMPLETE_INACTIVE':'RESTORE_IN_PROGRESS',
       groups});
   }
-  return Object.freeze({read,begin,advance,inspect:async()=>safeRestoreReceipt(await read())});
+  async function recordContainer({epoch,revision,personaKey,cookieStoreId}){
+    const prior=await read();
+    if(!prior||prior.epoch!==epoch||prior.revision!==revision||
+       prior.groups['donor-personas']?.status!=='DISPATCH_POSSIBLE')
+      fail('RESTORE_CONTAINER_RECEIPT_STALE');
+    if(typeof personaKey!=='string'||personaKey.length>256||
+       prior.recovery?.mappings?.[personaKey]!=='__create__'||
+       typeof cookieStoreId!=='string'||!/^firefox-container-[0-9]+$/.test(cookieStoreId))
+      fail('RESTORE_CONTAINER_RECEIPT_INVALID');
+    const entries=prior.createdContainers||{};
+    if(entries[personaKey]&&entries[personaKey]!==cookieStoreId)
+      fail('RESTORE_CONTAINER_ID_CHANGED');
+    if(Object.entries(entries).some(([k,id])=>k!==personaKey&&id===cookieStoreId))
+      fail('RESTORE_CONTAINER_ID_DUPLICATE');
+    return persist({...prior,revision:prior.revision+1,
+      createdContainers:{...entries,[personaKey]:cookieStoreId}});
+  }
+  return Object.freeze({read,begin,advance,recordContainer,
+    inspect:async()=>safeRestoreReceipt(await read())});
 }
