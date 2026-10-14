@@ -6,6 +6,7 @@ import http.client
 import json
 import os
 import pathlib
+from i17_firefox_resource import sample_firefox_processes
 import re
 import subprocess
 import sys
@@ -633,8 +634,7 @@ def main():
                 unauthorized=inventory_command(after,{'type':'SYNC_ACCOUNT','params':{
                     'accountId':'fixture_account_a01','expectedRevision':2}})
                 assert unauthorized.get('code')=='ACCOUNT_IDENTITY_UNVERIFIED',unauthorized
-                rss_before=subprocess.run(['ps','-C','firefox','-o','rss=,time='],
-                    capture_output=True,text=True,timeout=5).stdout.strip().splitlines()[:24]
+                rss_before=sample_firefox_processes(browser)
                 seeded=inventory_idb_probe(after)
                 assert seeded.get('enrolled') is True and seeded.get('verified') is True,seeded
                 assert seeded.get('accepted',{}).get('ok') is True,seeded
@@ -665,12 +665,13 @@ def main():
                     time.sleep(.15)
                 assert '51–100' in pagination,pagination
                 print('B I04_REAL_IDB_1250_FILTER_PAGINATION_OWNER_HOLD=PASS',flush=True)
-                rss_after=subprocess.run(['ps','-C','firefox','-o','rss=,time='],
-                    capture_output=True,text=True,timeout=5).stdout.strip().splitlines()[:24]
-                print('B I17_FIREFOX_PROCFS_MAIN_PROCESS_SAMPLE='+json.dumps({
+                rss_after=sample_firefox_processes(browser)
+                measured=rss_before.get('available') and rss_after.get('available')
+                print('B I17_FIREFOX_PROCFS_RESOURCE_SAMPLES='+json.dumps({
                     'before':rss_before,'after':rss_after,
-                    'units':'KiB_RSS_AND_CPU_TIME','scope':'FIREFOX_NAMED_PROCESSES_ONLY',
-                    'acceptance':'POINT_SAMPLES_NOT_PEAK_OR_SLO'}),flush=True)
+                    'rssSumDeltaKiB':rss_after['rssSumKiB']-rss_before['rssSumKiB'] if measured else None,
+                    'cpuDeltaTicks':rss_after['cpuTicks']-rss_before['cpuTicks'] if measured else None,
+                    'acceptance':'POINT_SAMPLES_NOT_PEAK_OR_PRODUCTION_SLO'}),flush=True)
 
                 # I17 UX-01 B: real packaged installed Firefox, actual local
                 # read-only ports and canonical entity identities. A result is
