@@ -304,7 +304,7 @@ test('P51-08/P55-09 X: same-profile idempotent merge invalidates owner evidence 
   assert.equal(byKey['inventory:g'].generator.accountRevision,6);
   assert.equal(byKey['inventory:g'].generator.bindingVersion,4);
   assert.equal(byKey['inventory:g'].generator.lastObservationId,null);
-  assert.deepEqual(same,a);
+  assert.equal(JSON.stringify(same),JSON.stringify(a));
 });
 test('P51-08 X: operator Pauses survive replacement; synthetic shadow hold is not a manual Pause',async()=>{
   const {prepareRestoredCanonical}=await import('../src/ui/restore-sanitize.mjs');
