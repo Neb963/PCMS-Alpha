@@ -43,18 +43,19 @@ test('P54-09 / P56-03 / S6-I17-FLEET-ROLL-OUT F/X: 50/1240 bounded in memory, st
  const reordered=timed('fleet_reconcile_reversed',()=>reconcileShadow(s,fixtures.toReversed()));
  assert.equal(reordered.ok,true);
  assert(reordered.state.rows.every(r=>oldOrdinals.get(r.slug)===r.ordinal));
- assert.equal(effectiveCapacity(reordered.state,start+11*MINUTE).warning,'CAPACITY_STALE');
+ assert.equal(effectiveCapacity(reordered.state,start+11*MINUTE).warning,'OVERRIDE_ABOVE_OBSERVATION');
+ // A nominal manual cap above observed positions is a HOLD warning, not usable capacity.
 });
 test('P56-02 / P56-03 F/X: one local failed dependency or rate limit never elevates to global outage',()=>{
  const witness=(accountId,domain,result)=>({accountId,domain,result,routeVerified:true,observedAt:start});
  assert.equal(classifyProvider([witness('account_001','same-hop','PROVIDER_UNAVAILABLE'),
    witness('account_002','same-hop','PROVIDER_UNAVAILABLE')],start).state,'SUSPECT');
- assert.equal(classifyProvider([witness('account_001','hop-a','RATE_LIMITED'),
-   witness('account_002','hop-b','PROVIDER_UNAVAILABLE')],start).state,'SUSPECT');
- assert.equal(classifyProvider([witness('account_001','hop-a','PROVIDER_UNAVAILABLE'),
-   witness('account_002','hop-b','PROVIDER_UNAVAILABLE')],start).state,'OUTAGE');
- assert.equal(classifyProvider([witness('account_001','hop-a','HEALTHY'),
-   witness('account_002','hop-b','PROVIDER_UNAVAILABLE')],start).state,'SUSPECT');
+ assert.equal(classifyProvider([witness('account_001','route-hop-a','RATE_LIMITED'),
+   witness('account_002','route-hop-b','PROVIDER_UNAVAILABLE')],start).state,'SUSPECT');
+ assert.equal(classifyProvider([witness('account_001','route-hop-a','PROVIDER_UNAVAILABLE'),
+   witness('account_002','route-hop-b','PROVIDER_UNAVAILABLE')],start).state,'OUTAGE');
+ assert.equal(classifyProvider([witness('account_001','route-hop-a','HEALTHY'),
+   witness('account_002','route-hop-b','PROVIDER_UNAVAILABLE')],start).state,'SUSPECT');
 });
 test('P54-09 / P56-03 X: burst of 500 read requests after cold wake is coalesced or backpressured',()=>{
  const inputs=Array.from({length:1240},(_,i)=>input(i));let s=reconcileShadow(emptyShadow(),inputs).state;
