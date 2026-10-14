@@ -16,7 +16,7 @@
       <label class="pcms-quick-search" for="pcms-quick-generator-search"><span class="pcms-magnifier" aria-hidden="true">⌕</span><span class="sr-only">Find in local generator inventory</span><input id="pcms-quick-generator-search" type="search" maxlength="80" placeholder="Find generator or account…" autocomplete="off" aria-describedby="pcms-quick-search-hint" aria-controls="pcms-global-results" aria-expanded="false"><kbd>Ctrl K</kbd></label>
       <span id="pcms-quick-search-hint" class="sr-only">Searches bounded local generator observations and PCMS account bindings only. No remote lookups or authority changes. Select a result with Tab and Enter; Escape closes results.</span>
       <div id="pcms-global-results" class="pcms-global-results" role="region" aria-label="Local generator and account search results" hidden></div>
-      <span class="phase">I17 · Verification · Provider writes HELD</span>
+      <span class="phase" title="Remote writes require qualified, guarded capability activation">Live writes held</span>
       <a class="advanced" href="../options/options.html" id="advanced">PersonaMonkey advanced controls <span aria-hidden="true">↗</span></a>
     </header>
     <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
@@ -31,23 +31,27 @@
         <span class="pcms-nav-group">System</span>
         <a href="#settings" data-workspace="settings"><span class="pcms-nav-icon" aria-hidden="true">⚙</span><span>Settings</span></a>
       </nav>
-      <div class="pcms-sidebar-foot"><div class="pcms-sidebar-indicator"><span aria-hidden="true">●</span> Guarded mode</div><p class="sidebar-note">Unproven provider capabilities remain held. Protected routing is donor-controlled.</p></div>
+      <div class="pcms-sidebar-foot"><div class="pcms-sidebar-indicator"><span aria-hidden="true">●</span> Guarded mode</div><p class="sidebar-note">Routing: PersonaMonkey</p></div>
     </aside>
     <main id="main" tabindex="-1" aria-label="Current PCMS workspace">
-      <div class="system-status" role="status" aria-live="polite" id="navigation-status">I17 · Integration verification · Provider writes HELD</div>
+      <div class="system-status" role="status" aria-live="polite" id="navigation-status">Remote actions held until verified</div>
       <div id="unknown-route" class="notice" role="status" hidden>Unknown workspace. Showing Overview without changing any data.</div>
       <section class="workspace" id="view-overview" data-view="overview" aria-labelledby="heading-overview">
-        <header class="workspace-head"><div><p class="eyebrow">Workspace / 01</p><h1 id="heading-overview" tabindex="-1">Overview</h1><p>Local inventory and guarded read-only account state. Provider writes remain disabled.</p></div></header>
+        <header class="workspace-head"><div><p class="eyebrow">Fleet / Overview</p><h1 id="heading-overview" tabindex="-1">Overview</h1><p>Exceptions, active work and account health.</p></div><div class="pcms-head-actions"><a class="pcms-overview-action" href="#work-queue">Work queue</a><a class="pcms-overview-action" href="#generators">Generators</a></div></header>
         <div class="pcms-overview-signals" aria-label="Current local evidence">
           <div class="pcms-signal"><span>Inventory</span><p id="pcms-overview-inventory" role="status" aria-live="polite">Inventory counts pending. No live owner status inferred.</p></div>
           <div class="pcms-signal"><span>Refresher</span><p id="pcms-overview-refresher" role="status">Shadow timing pending; mutations OFF.</p></div>
           <div class="pcms-signal"><span>Backups</span><p id="pcms-overview-backup" role="status" aria-live="polite">Manual backup receipt not yet inspected.</p></div>
           <div class="pcms-signal"><span>Restore guard</span><p id="pcms-overview-restore" role="status" aria-live="polite">Restore guard not yet inspected; controller activation unverified.</p></div>
         </div>
-        <div class="notice" role="status"><strong>Provider effects disabled</strong><p>Local operation journaling and a fail-closed command boundary are installed. Account binding and manual login are enabled, but remote identity verification and provider mutation remain unavailable. Missing observations do not imply no incidents.</p></div>
-        <section class="panel" aria-labelledby="runtime-health-title"><div class="panel-head"><h2 id="runtime-health-title">Background guard</h2><span class="unknown" id="pcms-guard-badge">Checking</span></div><p id="pcms-guard-health" role="status">Runtime evidence unavailable until checked. Provider actions remain off.</p></section>
-        <section class="panel" aria-labelledby="journal-title"><div class="panel-head"><h2 id="journal-title">Canonical journal</h2><span class="unknown">Effects OFF</span></div><p id="pcms-journal-health" role="status">Checking isolated canonical storage.</p><a href="emergency.html">Open emergency diagnostics</a></section>
-        <section class="panel" aria-labelledby="attention-title"><div class="panel-head"><h2 id="attention-title">Attention</h2><span class="unknown">Local receipts</span></div><div id="pcms-attention-list" role="status" tabindex="-1">Reading local notice receipts. Missing data is not healthy.</div></section>
+        <div class="pcms-overview-workspace">
+          <section class="panel pcms-overview-attention" aria-labelledby="attention-title"><div class="panel-head"><h2 id="attention-title">Needs attention</h2><a href="#work-queue">View work queue</a></div><div id="pcms-attention-list" role="status" tabindex="-1">Reading local notice receipts. Missing data is not healthy.</div></section>
+          <div class="pcms-overview-side">
+            <section class="panel" aria-labelledby="runtime-health-title"><div class="panel-head"><h2 id="runtime-health-title">Background guard</h2><span class="unknown" id="pcms-guard-badge">Checking</span></div><p id="pcms-guard-health" role="status">Checking controller.</p></section>
+            <section class="panel" aria-labelledby="journal-title"><div class="panel-head"><h2 id="journal-title">Operation journal</h2><span class="unknown">Read-only</span></div><p id="pcms-journal-health" role="status">Checking local storage.</p><a href="emergency.html">Diagnostics</a></section>
+          </div>
+        </div>
+        <details class="pcms-overview-safety"><summary>Remote action eligibility</summary><p>Unqualified remote effects remain disabled. Account binding, manual login and local receipts are available. Protected routing is controlled by PersonaMonkey. Unknown observations are not healthy confirmations.</p></details>
       </section>
       <section class="workspace" id="view-generators" data-view="generators" aria-labelledby="heading-generators" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Inventory / Source / Management</p><h1 id="heading-generators" tabindex="-1">Generators <span class="pcms-heading-total" id="pcms-generator-heading-total"></span></h1><p>Inventory across your bound accounts.</p></div><div class="pcms-head-actions"><button type="button" id="pcms-generator-sync-shortcut">Sync inventory</button><button type="button" data-pcms-jump="pcms-supply-heading">Plan generators</button></div></header>

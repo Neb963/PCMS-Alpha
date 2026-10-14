@@ -309,3 +309,22 @@ button.pcms-generator-row-target:hover{text-decoration:underline}
 @media(max-width:780px){.pcms-inventory-presets-summary{display:none}
 .pcms-inventory-toolbar .pcms-inline-field{flex:1 1 140px}
 .pcms-selection-preview ol{columns:1}}
+
+
+/* I17 accepted prototype: decision-first overview, compact permanent status,
+   guarded capability explanation on demand instead of multiple repeated banners. */
+#view-overview .workspace-head{margin-bottom:16px}
+.pcms-overview-action{display:inline-flex;align-items:center;justify-content:center;min-height:33px;
+  padding:5px 12px;border:1px solid var(--line);border-radius:5px;
+  text-decoration:none;font-size:12px;font-weight:650;background:var(--paper)}
+.pcms-overview-workspace{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(270px,1fr);
+  gap:14px;align-items:start;margin-top:16px}
+.pcms-overview-workspace .panel{margin:0;min-width:0}
+.pcms-overview-side{display:grid;gap:14px;min-width:0}
+.pcms-overview-workspace .panel-head{min-height:35px}
+.pcms-overview-workspace .panel-head a{font-size:11px}
+.pcms-overview-safety{margin:14px 0 0;padding:9px 2px;font-size:11px;color:var(--muted)}
+.pcms-overview-safety summary{cursor:pointer}
+.pcms-overview-safety p{max-width:70ch;margin:9px 0}
+.system-status{font-size:11px;margin:0 0 12px;color:var(--warn);font-weight:650}
+@media(max-width:960px){.pcms-overview-workspace{grid-template-columns:minmax(0,1fr)}}

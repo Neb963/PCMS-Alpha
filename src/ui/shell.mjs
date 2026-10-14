@@ -25,7 +25,7 @@ function render({ focusHeading = false } = {}) {
   }
   const heading = document.getElementById(`heading-${selected}`);
   document.title = `PCMS Alpha — ${heading.textContent}`;
-  currentStatus.textContent = `${heading.textContent} · I17 integration verification · Provider writes HELD`;
+  currentStatus.textContent = 'Remote actions held until verified';
   workspaceCrumb.textContent = heading.textContent;
   invalidNotice.hidden = !invalidDestination(location.hash);
   closeMenu();
