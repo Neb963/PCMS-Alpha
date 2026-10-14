@@ -6,7 +6,7 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {snapshotCanonical,digest,MAX_ARCHIVE_BYTES} from './backup-core.mjs';
 import {createPortableBackupPayload,decodeBackupEnvelope} from '../lib/backup-package.js';
 import {filterOrdinaryAutomationJobs} from '../lib/automation-history.js';
-import {previewRestore,verifyCheckpoint} from './restore-core.mjs';
+import {previewRestore,verifyCheckpoint,validateRestoreTransport} from './restore-core.mjs';
 import {createRestoreGate} from './restore-gate.mjs';
 import {createRestoreStageEngine} from './restore-stage.mjs';
 import {prepareRestoredCanonical} from './restore-sanitize.mjs';
@@ -21,21 +21,6 @@ const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 const assert=(value,code)=>{if(!value)throw Error(code);};
 const createKey=(epoch,i)=>'PCMS Restore '+epoch.slice(8,20)+' '+String(i).padStart(3,'0');
-
-export function validateRestoreTransport(args,{maxBytes=MAX_ARCHIVE_BYTES}={}){
-  if(!args||typeof args!=='object'||Array.isArray(args)||
-     typeof args.archiveText!=='string'||args.archiveText.length>maxBytes||
-     typeof args.checkpointText!=='string'||args.checkpointText.length>maxBytes||
-     typeof args.password!=='string'||args.password.length<12||
-     args.password.length>4096||!hex(args.reviewedPlanSha256)||
-     !['merge','replace'].includes(args.mode)||typeof args.fresh!=='boolean'||
-     !args.mappings||typeof args.mappings!=='object'||Array.isArray(args.mappings))
-    return fail('RESTORE_INPUT_INVALID');
-  const entries=Object.entries(args.mappings);
-  if(entries.length>10000||entries.some(([k,v])=>k.length>256||
-    typeof v!=='string'||v.length>256))return fail('RESTORE_MAPPING_INVALID');
-  return {ok:true};
-}
 
 export function trustedRestoreSender(api,sender){
   // Reuse the exercised I02/I15 extension-page sender authority instead of

@@ -104,3 +104,19 @@ export function restoreReadiness(plan,checkpoint){
   if(plan.plan.fresh)return {ok:false,code:'RESTORE_FRESH_CONTROLLER_INACTIVE'};
   return {ok:true,code:'RESTORE_GUARD_ALLOWED'};
 }
+
+export function validateRestoreTransport(args,{maxBytes=MAX_ARCHIVE_BYTES}={}){
+  if(!args||typeof args!=='object'||Array.isArray(args)||
+     typeof args.archiveText!=='string'||args.archiveText.length>maxBytes||
+     typeof args.checkpointText!=='string'||args.checkpointText.length>maxBytes||
+     typeof args.password!=='string'||args.password.length<12||
+     args.password.length>4096||!/^[a-f0-9]{64}$/.test(args.reviewedPlanSha256)||
+     !['merge','replace'].includes(args.mode)||typeof args.fresh!=='boolean'||
+     !args.mappings||typeof args.mappings!=='object'||Array.isArray(args.mappings))
+    return {ok:false,code:'RESTORE_INPUT_INVALID'};
+  const entries=Object.entries(args.mappings);
+  if(entries.length>10000||entries.some(([k,v])=>k.length>256||
+    typeof v!=='string'||v.length>256))return {ok:false,code:'RESTORE_MAPPING_INVALID'};
+  return {ok:true};
+}
+

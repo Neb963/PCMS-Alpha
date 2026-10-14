@@ -348,7 +348,7 @@ test('P55-09 X: two active accounts cannot bind the same restored target UID',as
 });
 
 test('P55-07/P55-12 X: restore port bounds input before any archive decode or donor write',async()=>{
-  const {validateRestoreTransport}=await import('../src/runtime/restore-boundary.mjs');
+  const {validateRestoreTransport}=await import('../src/ui/restore-core.mjs');
   const template={archiveText:'archive',checkpointText:'checkpoint',
     password:'safe operator password',reviewedPlanSha256:'a'.repeat(64),
     mode:'merge',fresh:false,mappings:{'p-1':'container-1'}};
