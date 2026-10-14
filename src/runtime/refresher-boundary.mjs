@@ -55,8 +55,19 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     }
   }
   async function schedule(when){
+    const now=clock(),target=Math.max(now+MINUTE,when||0);
+    let existing=null;
+    try{existing=await api.alarms.get(REFRESHER_ALARM);}catch{}
+    // Every Firefox event-page wake re-evaluates the shadow scheduler. Do NOT
+    // postpone an already valid earlier alarm on unrelated donor/UI wakes;
+    // otherwise repeated wakes can starve onAlarm indefinitely. Preserve a
+    // slightly overdue browser-owned alarm for late Firefox delivery too.
+    if(existing?.name===REFRESHER_ALARM&&
+       Number.isFinite(existing.scheduledTime)&&
+       existing.scheduledTime>=now-2*MINUTE&&
+       existing.scheduledTime<=target){alarmHeld=false;return;}
     try{
-      await api.alarms.create(REFRESHER_ALARM,{when:Math.max(clock()+MINUTE,when||0)});
+      await api.alarms.create(REFRESHER_ALARM,{when:target});
       const actual=await api.alarms.get(REFRESHER_ALARM);
       if(!actual||actual.name!==REFRESHER_ALARM)alarmHeld=true;else alarmHeld=false;
     }catch{
