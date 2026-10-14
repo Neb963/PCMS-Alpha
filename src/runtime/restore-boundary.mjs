@@ -3,7 +3,7 @@
 // exist only in the caller's live extension port and this invocation.
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
-import {snapshotCanonical,digest} from './backup-core.mjs';
+import {snapshotCanonical,digest,MAX_ARCHIVE_BYTES} from './backup-core.mjs';
 import {createPortableBackupPayload,decodeBackupEnvelope} from '../lib/backup-package.js';
 import {filterOrdinaryAutomationJobs} from '../lib/automation-history.js';
 import {previewRestore,verifyCheckpoint} from './restore-core.mjs';
@@ -21,6 +21,22 @@ const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 const assert=(value,code)=>{if(!value)throw Error(code);};
 const createKey=(epoch,i)=>'PCMS Restore '+epoch.slice(8,20)+' '+String(i).padStart(3,'0');
+
+export function validateRestoreTransport(args,{maxBytes=MAX_ARCHIVE_BYTES}={}){
+  if(!args||typeof args!=='object'||Array.isArray(args)||
+     typeof args.archiveText!=='string'||args.archiveText.length>maxBytes||
+     typeof args.checkpointText!=='string'||args.checkpointText.length>maxBytes||
+     typeof args.password!=='string'||args.password.length<12||
+     args.password.length>4096||!hex(args.reviewedPlanSha256)||
+     !['merge','replace'].includes(args.mode)||typeof args.fresh!=='boolean'||
+     !args.mappings||typeof args.mappings!=='object'||Array.isArray(args.mappings))
+    return fail('RESTORE_INPUT_INVALID');
+  const entries=Object.entries(args.mappings);
+  if(entries.length>10000||entries.some(([k,v])=>k.length>256||
+    typeof v!=='string'||v.length>256))return fail('RESTORE_MAPPING_INVALID');
+  return {ok:true};
+}
+
 export function trustedRestoreSender(api,sender){
   // Reuse the exercised I02/I15 extension-page sender authority instead of
   // inventing a second Firefox-specific URL/fragment interpretation.
@@ -104,10 +120,8 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
     running=(async()=>{
       let db=null;
       try{
-        assert(args&&typeof args==='object'&&typeof args.archiveText==='string'&&
-          typeof args.checkpointText==='string'&&typeof args.password==='string'&&
-          args.password.length>=12&&hex(args.reviewedPlanSha256),
-          'RESTORE_INPUT_INVALID');
+        const admitted=validateRestoreTransport(args);
+        assert(admitted.ok,admitted.code);
         assert(await gate.read()===null,'RESTORE_ALREADY_HELD');
         const donor=getDonor(),baseline=await destination(api,donor);
         const req=args.mappings||{};
@@ -116,6 +130,8 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           mappings:req,currentPcms:baseline.pcms,currentDonor:baseline.snap,
           currentPortable:baseline.portable,containers:baseline.snap.containers});
         assert(reviewed.planSha256===args.reviewedPlanSha256,'RESTORE_PLAN_CHANGED');
+        assert(Object.keys(req).length===reviewed.opened.donor.personas.length,
+          'RESTORE_MAPPING_INCOMPLETE');
         assert(!reviewed.plan.groups.some(g=>g.status==='DIRECT_REVIEW_REQUIRED'),
           'RESTORE_DIRECT_REVIEW_REQUIRED');
         assert(reviewed.plan.groups.every(g=>g.status==='MAPPING_ONLY_UNVERIFIED'||
@@ -252,6 +268,13 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
     if(message.action==='STATUS')return status();
     if(message.action==='RECONCILE'){
       if(running)return fail('RESTORE_BUSY');
+      if(typeof message.params?.archiveText!=='string'||
+         message.params.archiveText.length>MAX_ARCHIVE_BYTES||
+         typeof message.params?.checkpointText!=='string'||
+         message.params.checkpointText.length>MAX_ARCHIVE_BYTES||
+         typeof message.params?.password!=='string'||
+         message.params.password.length<12||message.params.password.length>4096)
+        return fail('RESTORE_INPUT_INVALID');
       let db;
       try{
         db=await database();
