@@ -881,6 +881,41 @@ def main():
                     'batchId':'batch_browser_ui_confirm_0001'}})
                 assert still_held.get('batch',{}).get('items',[{}])[0].get('state')=='FROZEN',still_held
                 print('B I17_ESR007_REAL_WORK_QUEUE_INLINE_CANCEL_MISMATCH_GUARDED_DENIAL_ZERO_DISPATCH=PASS',flush=True)
+                # I17 B: the ordinary-generator workflow must be visible,
+                # exact-target and guarded in the real installed combined XPI.
+                # No route exists for the synthetic fixture: one real UI
+                # confirmation reaches donor admission but CANNOT dispatch.
+                ordinary='another-safe-name'
+                normal_view=execute(after,"""const b=[...document.querySelectorAll('button.pcms-supply-guarded-step')]
+                  .find(x=>x.getAttribute('aria-label')?.includes('another-safe-name'));
+                  return {present:!!b,enabled:!!b&&!b.disabled};""")
+                assert normal_view=={'present':True,'enabled':True},normal_view
+                ordinary_clicked=execute(after,"""const b=[...document.querySelectorAll('button.pcms-supply-guarded-step')]
+                  .find(x=>x.getAttribute('aria-label')?.includes('another-safe-name'));
+                  b.click();const form=b.nextElementSibling;
+                  const phrase=form?.textContent||'';
+                  const input=form?.querySelector('input');
+                  input.value='CREATE another-safe-name';
+                  form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+                  return {phrase,removed:!document.querySelector('.pcms-typed-intent')};""")
+                assert ordinary_clicked['removed'] and 'CREATE '+ordinary in ordinary_clicked['phrase'],ordinary_clicked
+                ordinary_status=''
+                for _ in range(90):
+                    ordinary_status=execute(after,"""const li=[...document.querySelectorAll('#pcms-supply-queue li')]
+                      .find(x=>x.textContent.includes('another-safe-name'));
+                      return li?.querySelector('.pcms-supply-row-status')?.textContent||'';""")
+                    if ordinary_status.startswith('Authorization held:'):break
+                    time.sleep(.15)
+                assert ordinary_status.startswith('Authorization held:'),ordinary_status
+                ordinary_still=supply_command(after,{'type':'GET_BATCH','params':{
+                    'batchId':'batch_browser_0002'}})
+                assert ordinary_still.get('batch',{}).get('items',[{},{}])[1].get('state')=='FROZEN',ordinary_still
+                forged_general=supply_command(after,{'type':'ARM_EXACT_ITEM','params':{
+                    'batchId':'batch_browser_0002','itemId':'batch_browser_0002_001',
+                    'expectedRevision':1,'confirmation':'CREATE another-safe-name',
+                    'allowDirect':True}})
+                assert forged_general.get('code')=='INVALID_PARAMS',forged_general
+                print('B I17_ORDINARY_GENERATOR_REAL_INLINE_AUTH_GUARD_NO_EFFECT=PASS',flush=True)
                 # I17 B: the real installed combined XPI accepts only exact
                 # disposable pilot names. An existing normal frozen slug must
                 # remain FROZEN without any remote dispatch or extra marker.
