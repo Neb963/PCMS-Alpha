@@ -452,8 +452,9 @@ export function createAiBoundary(api,{
             'A separate browser assertion previously observed a real failing required test. Re-examine the current generator-owned code and src files, make a bounded corrective change, save and run the tests again. Do not declare PASS without an independent browser observation. If no safe progress is possible, report a blocker.':null;
           if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR'].includes(p.step)&&
              (typeof text!=='string'||!text.trim()))return fail('AI_PROMPT_UNVERIFIED');
-          if(pilotMatches(ctx)){
-            // A prepared job is not a fresh saved-source observation. An
+          if(nativeAuthorized(ctx)){
+            // Manual and automated steps share identical current owner/source
+            // readback. Prepared job metadata is never permission to mutate. An
             // independent private owner + complete PJS/HTML/src readback must
             // match its byte-pinned I09 candidate before any effect marker.
             if(!g.observeReadOnly)return fail('AI_PILOT_SOURCE_OBSERVER_UNAVAILABLE');
@@ -473,7 +474,11 @@ export function createAiBoundary(api,{
               remotePublicId:original.remotePublicId,
               ownerResult:original.ownerResult,visibility:original.visibility,
               pjs:original.pjs,html:original.html,assets:original.assets};
-            const proof=await verifyReadback(r.candidate,observed,{
+            const expected=job.finalSource?.fingerprint===job.sourceFingerprint?
+              job.finalSource:r.candidate;
+            if(expected.fingerprint!==job.sourceFingerprint)
+              return fail('AI_EXACT_CURRENT_SOURCE_REQUIRED');
+            const proof=await verifyReadback(expected,observed,{
               slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,
               principalFingerprint:r.principalFingerprint,remotePublicId:r.remotePublicId});
             if(!proof.ok)return fail('AI_PILOT_REMOTE_SOURCE_CHANGED');
@@ -509,6 +514,20 @@ export function createAiBoundary(api,{
           if(!nativeAuthorized(ctx)){
             pilotArm=null;return fail('AI_ACTIVATION_REVOKED_AFTER_MARKER');
           }
+          // In particular, an AUTO revocation racing with a committed
+          // DISPATCH_POSSIBLE marker must stop *before* the native effect.
+          // This fresh canonical read cannot undo the marker or authorize replay.
+          if(!pilotMatches(ctx)&&job.automation?.enabled===true){
+            const latest=await store.getJobFull(p.slug);
+            if(!latest.ok||latest.job.automation?.enabled!==true||
+               latest.job.stageRevision!==r.revision)
+              return fail('AI_AUTO_DISARMED_AFTER_MARKER');
+          }
+          const latestStage=await stageFactory(db).getFull(p.slug);
+          if(!latestStage.ok||latestStage.record.revision!==r.revision||
+             latestStage.record.state!=='SOURCE_VERIFIED'||
+             latestStage.record.nonce!==r.nonce)
+            return fail('AI_STAGE_CHANGED_AFTER_MARKER');
           if(pilotMatches(ctx))pilotArm=null;
           let observed;
           try{observed=await g.runNativeAiStep(r.personaUid,{
@@ -763,7 +782,7 @@ export function productionAiGate(ctx){
   if(scope?.enabled!==true)return false;
   if(!r)return ctx.step==='AUTOMATION'&&scope.slug===job.slug&&
     scope.stageRevision===job.stageRevision&&
-    scope.sourceFingerprint===job.sourceFingerprint;
+    /^[a-f0-9]{64}$/.test(scope.sourceFingerprint||'');
   return r.state==='SOURCE_VERIFIED'&&scope.slug===job.slug&&
     scope.stageRevision===r.revision&&job.stageRevision===r.revision&&
     scope.sourceFingerprint===r.candidate?.fingerprint&&
