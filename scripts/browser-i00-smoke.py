@@ -2072,7 +2072,7 @@ def main():
                     runtimeState.healthIntervals.length>0&&runtimeState.diagnostics.readPeak<=2&&
                     isolated.code==='WRONG_ORIGIN'&&injection.ok===false&&
                      activation.ok===true&&activation.providerEffects==='OFF'&&
-                     activation.observation in ('NO_OBSERVATION_DUE','OBSERVED')&&
+                     ['NO_OBSERVATION_DUE','OBSERVED'].includes(activation.observation)&&
                     globalPause.ok&&invalid.code==='STALE_REVISION',
                     exact16,exact64,occupied,replayOccupied:replay.occupied,winners,abort,unchanged,
                     observation:observed.code,runtimeProof,requests,activation,injection,globalPause,invalid,
