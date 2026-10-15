@@ -15,7 +15,7 @@ const runNative=id('pcms-ai-run'),observeNative=id('pcms-ai-observe'),
   testNative=id('pcms-ai-test'),repairNative=id('pcms-ai-repair'),
   resetNative=id('pcms-ai-newchat'),chat2Native=id('pcms-ai-chat2');
 let current=null,concurrency=null,busy=false,queueSeq=0,selectedJob=null;
-const testSlug=/^pcms-test-[a-z0-9-]{8,88}$/;
+const testSlug=/^[a-z0-9][a-z0-9-]{0,99}$/;
 function request(portName,type,params={}){
   return new Promise((resolve,reject)=>{
     const port=browser.runtime.connect({name:portName});let ended=false;
@@ -120,7 +120,7 @@ async function refreshJobs(){
     // Keep selection tied to a current canonical revision, not a stale
     // pre-dispatch object. Disappeared jobs cannot remain operable.
     if(selectedJob)selectedJob=data.jobs.find(j=>j.slug===selectedJob.slug)||null;
-    if(!data.jobs.length){jobStatus.textContent='No jobs prepared. Native AI requires explicit disposable-test authorization.';controls();return;}
+    if(!data.jobs.length){jobStatus.textContent='No jobs prepared. Native AI steps require exact source, owner, route and per-step authorization.';controls();return;}
     const ul=document.createElement('ul');
     for(const j of data.jobs){
       const li=document.createElement('li');
@@ -130,7 +130,7 @@ async function refreshJobs(){
         selectedJob=j;slug.value=j.slug;controls();
         jobStatus.textContent=j.slug+' selected · '+j.state+
           (testSlug.test(j.slug)?' · authorize each native step separately.':
-            ' · native execution held for non-disposable targets.');
+            ' · native execution requires exact target authorization.');
       });
       li.append(choose,document.createTextNode(' '));
       const label=document.createElement('span');
@@ -177,7 +177,7 @@ async function nativeCommand(type,step,trigger){
     type==='VERIFY_FRESH_CHAT2'?'READ_ONLY_HISTORY':null;
   if(armStep){
     if(!testSlug.test(name)){
-      jobStatus.textContent='Live native AI testing requires a disposable pcms-test- generator.';return;
+      jobStatus.textContent='Native AI testing requires a valid exact generator target.';return;
     }
     const required=armStep+' '+name;
     const confirmedJob=selectedJob;
@@ -190,7 +190,7 @@ async function nativeCommand(type,step,trigger){
     }
     busy=true;controls();
     try{
-      const armed=await ai('ARM_DISPOSABLE_AI',{
+      const armed=await ai('ARM_EXACT_AI',{
         slug:name,expectedRevision:revision,step:armStep,confirmation});
       if(!armed?.ok){jobStatus.textContent='AI authorization held: '+
         (armed?.code||'CONTEXT_UNVERIFIED');return;}

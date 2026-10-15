@@ -75,7 +75,7 @@ function drawQueue(result){
     const counts=Object.create(null);
     for(const item of batch.items)counts[item.state]=(counts[item.state]||0)+1;
     summary.textContent=Object.entries(counts).map(([k,v])=>k+': '+v).join(' · ')+
-      ' · General writes held; only exact disposable private tests may be armed';
+      ' · Each exact private operation requires a fresh account/route check and typed authorization';
     const list=document.createElement('ul');
     for(const item of batch.items){
       const li=document.createElement('li');
@@ -95,11 +95,11 @@ function drawQueue(result){
         const isCreate=item.state==='FROZEN';
         const action=document.createElement('button');
         action.type='button';action.className='pcms-supply-guarded-step';
-        const pilotSlug=/^pcms-test-[a-z0-9-]{8,88}$/.test(item.slug);
+        const pilotSlug=/^[a-z0-9][a-z0-9-]{0,99}$/.test(item.slug);
         action.textContent=isCreate?'Create private test':'Rename private test';
         action.setAttribute('aria-label',(isCreate?'Create private test for ':'Rename private test to ')+item.slug);
         action.disabled=!pilotSlug;
-        if(!pilotSlug)action.title='Manual live testing is limited to disposable pcms-test- slugs.';
+        if(!pilotSlug)action.title='Invalid or unverified canonical slug.';
         action.addEventListener('click',async()=>{
           if(pendingSteps.has(rowKey))return;
           pendingSteps.add(rowKey);
@@ -111,7 +111,7 @@ function drawQueue(result){
               'Authorize one protected private test operation. Cancel is safe. Never repeat a possibly-dispatched action without reconciliation.');
             if(confirmation===null){report('Cancelled. No remote command sent.');return;}
             report('Checking the current account binding, protected route and exact frozen revision…');
-            const armed=await supply('ARM_DISPOSABLE_TEST',{
+            const armed=await supply('ARM_EXACT_ITEM',{
               batchId:batch.batchId,itemId:item.itemId,expectedRevision:item.revision,
               confirmation});
             if(armed?.ok!==true){
@@ -150,7 +150,7 @@ function drawQueue(result){
       // A separate, non-READY marker is the only Git effect this test can
       // authorize. Existing per-gens folders are never overwritten.
       if(['PROVIDER_CONFIRMED','SOURCE_PENDING'].includes(item.state)&&
-         /^pcms-test-[a-z0-9-]{8,88}$/.test(item.slug)){
+         /^[a-z0-9][a-z0-9-]{0,99}$/.test(item.slug)){
         const credential=document.createElement('input');
         credential.type='password';credential.autocomplete='off';
         credential.placeholder='Private per-gens write token';
@@ -171,7 +171,7 @@ function drawQueue(result){
             if(confirmation===null){report('Git marker cancelled. No effect sent.');return;}
             const token=credential.value;credential.value='';
             report('Checking private Git marker authorization…');
-            const armed=await supply('ARM_DISPOSABLE_GIT',{
+            const armed=await supply('ARM_EXACT_GIT',{
               batchId:batch.batchId,itemId:item.itemId,expectedRevision:item.revision,
               confirmation});
             if(armed?.ok!==true){
@@ -290,7 +290,7 @@ async function loadAccounts(){
       select.append(option);
     }
     if(accounts.some(a=>a.accountId===value))select.value=value;
-    notice('Preview and freeze preserve exact slugs locally. For a disposable private test, use a pcms-test- slug and confirm its single step in Work Queue.');
+    notice('Preview and freeze preserve exact slugs locally. Each requested slug requires exact, separate private creation and rename confirmation in Work Queue.');
   }catch{
     if(mine===seq){accounts=[];select.replaceChildren();
       notice('Account authority unavailable. Cannot freeze a batch.');}
@@ -346,7 +346,7 @@ freeze.addEventListener('click',async()=>{
     if(!res?.ok)throw Error(res?.code||'NOT_COMMITTED');
     latest=null;paint(res.batch.items,true);
     notice('Batch '+res.batch.batchId+' frozen locally. No external effect yet. '+
-      'Open Work Queue for an explicitly confirmed pcms-test- private creation; Git writes remain held.');
+      'Open Work Queue for separately confirmed private creation and rename; Git marker creation requires an additional exact authorization.');
     await fetchBatches();
   }catch(e){
     if(mine===seq)notice('Freeze not confirmed ('+(e.message||'UNKNOWN')+
