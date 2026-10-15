@@ -146,7 +146,7 @@ test('I04 F: packaged entry points include read-only worker and UI, no unsafe ob
   assert.doesNotMatch(html,/src="accounts\.mjs"/);
   assert.doesNotMatch(html,/src="inventory\.mjs"/);
   assert.match(overlay,/'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs'/);
-  assert.match(html,/id="navigation-status"[^>]*>Remote actions held until verified<\/div>/);
+  assert.match(html,/id="navigation-status"[^>]*>Checking current operation eligibility<\/div>/);
 });
 
 test('I17 F/X: global ordering before pagination with a deterministic slug tie-break',()=>{
