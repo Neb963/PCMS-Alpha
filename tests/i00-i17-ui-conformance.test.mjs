@@ -73,7 +73,8 @@ test('I17 real inventory affordances follow approved v3.1 workstation interactio
 
 test('I17 guarded operator supply uses exactly one item command and never auto-replays',async()=>{
   const supply=await readFile('src/ui/supply-view.mjs','utf8');
-  assert.match(supply,/type==='EXECUTE_ITEM'\?75000:type==='FINISH_SOURCE_FOLDER'\?150000:6500/);
+  assert.match(supply,/type==='EXECUTE_ITEM'\?75000:type==='FINISH_SOURCE_FOLDER'\?150000:/);
+  assert.match(supply,/portName==='pcms-i17-initial-ready'/);
   assert.match(supply,/requestTypedConfirmation\(action,typed/);
   assert.doesNotMatch(supply,/window\.prompt\(/);
   assert.match(supply,/pendingSteps\.has\(rowKey\)/);

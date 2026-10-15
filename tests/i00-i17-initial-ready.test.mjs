@@ -68,7 +68,7 @@ test('I17 F: initial READY Git uses expected-head nonforced commit plus independ
   const exact=await exactInitialSource({slug,pjs,html}),git=fakeGit();
   const out=await writeInitialReadySource({slug,pjs,html,token,
     expectedHead:head,fingerprint:exact.fingerprint},git.transport);
-  assert.equal(out.ok,true,out.code);
+  assert.equal(out.ok,true,(out.code||'UNKNOWN')+' TRACE '+JSON.stringify(git.reads()));
   assert.equal(out.ready,true);assert.equal(out.head,newCommit);
   assert.equal(out.baseHead,head);assert.equal(git.patches(),1);
   assert.deepEqual(git.reads().filter(x=>x.startsWith('POST ')).length,5);
@@ -97,7 +97,7 @@ test('I17 X: lost Git update ACK is held and MUST NOT issue another PATCH',async
   const out=await writeInitialReadySource({slug,pjs,html,token,
     expectedHead:head,fingerprint:exact.fingerprint},git.transport);
   assert.equal(out.code,'READY_GIT_OUTCOME_UNKNOWN');
-  assert.equal(git.patches(),1);
+  assert.equal(git.patches(),1,JSON.stringify(git.reads()));
 });
 test('I17 X: forged sources and untrusted callers cannot enter a READY command',async()=>{
   const msg={type:'ARM',params:{slug,pjs,html,token,batchId:'batch_alpha_01',
@@ -124,7 +124,7 @@ test('I17 X: read-only reconciliation requires original parent and actual source
     message:'pcms: approve initial exact source '+slug+' '+exact.fingerprint})});
   const v=await inspectInitialReadySource({slug,token,expectedHead:head,
     fingerprint:exact.fingerprint,files:exact.files},inspect,transport);
-  assert.equal(v.ok,true,v.code);
+  assert.equal(v.ok,true,v.code+' '+JSON.stringify({paths,files:exact.files}));
   const changed=async()=>({...await inspect(),paths:[...paths.slice(0,1),
     {...paths[1],sha256:'f'.repeat(64)},paths[2]]});
   assert.equal((await inspectInitialReadySource({slug,token,expectedHead:head,
