@@ -1,3 +1,5 @@
+> I17 source-save clarification: [2026-10-15 additive amendment](I17-REFRESHER-SAVE-AMENDMENT.md). Controlled consented marker saves replace the historic distinct-method restriction; recurring and H gates remain.
+
 > Current implementation: [I17 authorization amendment](../implementation/I17-AUTHORIZATION-2026-10-15.md), 2026-10-15. The following signed design remains historical authority for requirements; its old implementation/live-activation wording is superseded only as specified in that amendment. H acceptance and protected merge gates remain required.
 
 # PCMS-Alpha — Stage 6.5 Phase Contracts (Stage 7 audited design)

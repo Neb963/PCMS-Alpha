@@ -914,6 +914,7 @@
     "codingAgentLiveProviderEffects": false,
     "codingAgentFirefoxDevMcp": false,
     "HAcceptance": "PENDING_INDEPENDENT_OPERATOR_EVIDENCE",
-    "merge": "HELD_UNTIL_REQUIRED_INDEPENDENT_ACCEPTANCE"
+    "merge": "HELD_UNTIL_REQUIRED_INDEPENDENT_ACCEPTANCE",
+    "refresherSaveAmendment": "docs/implementation/I17-REFRESHER-SAVE-AMENDMENT.md"
   }
 }
