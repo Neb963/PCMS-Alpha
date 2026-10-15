@@ -1,3 +1,4 @@
+import {requestTypedConfirmation} from './typed-confirm.mjs';
 // I06 Generators/Work Queue: durable local plan and per-item receipts.
 // No UI-supplied route/owner evidence and no implicit remote dispatch.
 const el=id=>document.getElementById(id);
@@ -6,6 +7,12 @@ const preview=el('pcms-supply-preview'),freeze=el('pcms-supply-freeze');
 const feedback=el('pcms-supply-feedback'),rows=el('pcms-supply-items');
 const queue=el('pcms-supply-queue'),refresh=el('pcms-supply-refresh');
 let accounts=[],latest=null,seq=0,busy=false;
+const rowMessages=new Map(),pendingSteps=new Set();
+function remember(key,message){
+  if(!rowMessages.has(key)&&rowMessages.size>=100)
+    rowMessages.delete(rowMessages.keys().next().value);
+  rowMessages.set(key,message);
+}
 function request(portName,type,params){
   return new Promise((resolve,reject)=>{
     const port=browser.runtime.connect({name:portName});
@@ -72,6 +79,13 @@ function drawQueue(result){
       const li=document.createElement('li');
       li.textContent=item.slug+' — '+item.state+(item.reason?' ('+item.reason+')':'')+
         ' · '+item.source;
+      const rowKey=batch.batchId+'/'+item.itemId;
+      const rowStatus=document.createElement('p');
+      rowStatus.className='pcms-supply-row-status';
+      rowStatus.setAttribute('role','status');
+      rowStatus.setAttribute('aria-live','polite');
+      rowStatus.textContent=rowMessages.get(rowKey)||'';
+      const report=message=>{remember(rowKey,message);rowStatus.textContent=message;};
       // Exact-target, human-initiated disposable pilot only. A general
       // source/AI/publication/refresh capability remains independently OFF.
       // No batch-run or automatic retry, even if a provider reply is lost.
@@ -85,35 +99,35 @@ function drawQueue(result){
         action.disabled=!pilotSlug;
         if(!pilotSlug)action.title='Manual live testing is limited to disposable pcms-test- slugs.';
         action.addEventListener('click',async()=>{
+          if(pendingSteps.has(rowKey))return;
+          pendingSteps.add(rowKey);
+          action.disabled=true;
           const typed=(isCreate?'CREATE ':'RENAME ')+item.slug;
-          const confirmation=window.prompt('Type '+typed+' to authorize exactly one protected, private test write. No automatic retry:', '');
-          if(confirmation===null)return;
-          if(confirmation!==typed){notice('Exact disposable confirmation did not match. No remote action.');return;}
-          action.disabled=true;action.textContent='Verifying owner and route…';
           try{
+            report('Awaiting exact confirmation; no remote operation has been attempted.');
+            const confirmation=await requestTypedConfirmation(action,typed,
+              'Authorize one protected private test operation. Cancel is safe. Never repeat a possibly-dispatched action without reconciliation.');
+            if(confirmation===null){report('Cancelled. No remote command sent.');return;}
+            report('Checking the current account binding, protected route and exact frozen revision…');
             const armed=await supply('ARM_DISPOSABLE_TEST',{
               batchId:batch.batchId,itemId:item.itemId,expectedRevision:item.revision,
-              confirmation:typed});
+              confirmation});
             if(armed?.ok!==true){
-              const status=document.createElement('span');
-              status.textContent=' Pilot held: '+(armed?.code||'GUARD_UNVERIFIED');
-              li.append(status);return;
+              report('Authorization held: '+(armed?.code||'GUARD_UNVERIFIED')+
+                '. No create or rename command sent.');return;
             }
-            action.textContent='Executing one guarded step…';
+            report('Authorized one scoped step. Dispatching only after durable journal admission…');
             const out=await supply('EXECUTE_ITEM',{
               batchId:batch.batchId,itemId:item.itemId,expectedRevision:item.revision});
-            const status=document.createElement('span');
-            status.textContent=out?.ok?
-              ' Canonical receipt saved. Inspect current item state before the next action.':
-              ' Held: '+(out?.code||'OUTCOME_UNVERIFIED')+
-                '. Inspect receipts; do not blindly retry.';
-            li.append(status);
+            report(out?.ok?
+              'Canonical receipt saved. Inspect the new item state before proceeding.':
+              'Held: '+(out?.code||'OUTCOME_UNVERIFIED')+
+                '. Inspect canonical receipts and independently reconcile before any retry.');
           }catch{
-            const status=document.createElement('span');
-            status.textContent=' No confirmed reply. The effect may have reached the provider. Re-read canonical receipts; no retry.';
-            li.append(status);
+            report('Response unavailable. Effect MAY have occurred; preserve the journal and do not retry blindly.');
           }finally{
-            action.disabled=!pilotSlug;action.textContent=isCreate?'Create private test':'Rename private test';
+            pendingSteps.delete(rowKey);
+            action.disabled=!pilotSlug;
             await fetchBatches();
           }
         });
@@ -131,25 +145,38 @@ function drawQueue(result){
         const git=document.createElement('button');git.type='button';
         git.textContent='Create non-READY Git folder';
         git.addEventListener('click',async()=>{
+          const guardKey=rowKey+':git';
+          if(pendingSteps.has(guardKey))return;
+          pendingSteps.add(guardKey);
+          git.disabled=true;
           const expected='GIT '+item.slug;
-          const confirmation=window.prompt('Type '+expected+' to create ONLY a non-READY marker in the empty private per-gens folder (no retries):','');
-          if(confirmation===null)return;
-          if(confirmation!==expected){notice('Git marker confirmation mismatch. No action.');return;}
-          const token=credential.value;credential.value='';
-          git.disabled=true;git.textContent='Checking Git marker intent…';
           try{
+            report('Awaiting exact Git marker confirmation. No Git write sent.');
+            const confirmation=await requestTypedConfirmation(git,expected,
+              'Create only an isolated non-READY marker in a new private Git folder. No overwrite or automatic retry.');
+            if(confirmation===null){report('Git marker cancelled. No effect sent.');return;}
+            const token=credential.value;credential.value='';
+            report('Checking private Git marker authorization…');
             const armed=await supply('ARM_DISPOSABLE_GIT',{
               batchId:batch.batchId,itemId:item.itemId,expectedRevision:item.revision,
               confirmation});
-            if(armed?.ok!==true){notice('Git pilot held: '+(armed?.code||'GUARD_UNVERIFIED'));return;}
-            git.textContent='Attempting one Git marker…';
+            if(armed?.ok!==true){
+              report('Git marker held: '+(armed?.code||'GUARD_UNVERIFIED'));return;
+            }
+            report('One non-READY Git marker attempt; awaiting independent HEAD/tree readback…');
             const out=await supply('FINISH_SOURCE_FOLDER',{
               batchId:batch.batchId,itemId:item.itemId,expectedRevision:item.revision,token});
-            notice(out?.ok?'Non-READY marker independently confirmed. Source remains NOT READY.':
+            report(out?.ok?'Non-READY marker independently confirmed. Source is NOT READY.':
               'Git marker held: '+(out?.code||'OUTCOME_UNKNOWN')+
-              '. Reconcile canonical receipts; do not repeat an unknown write.');
-          }catch{notice('Git reply unknown; inspect canonical receipts. No automatic retry.');}
-          finally{git.disabled=false;git.textContent='Create non-READY Git folder';await fetchBatches();}
+              '. Read canonical receipts; do not repeat an uncertain Git write.');
+          }catch{
+            credential.value='';
+            report('Git reply unknown; inspect canonical receipts. No automatic retry.');
+          }finally{
+            pendingSteps.delete(guardKey);
+            git.disabled=false;
+            await fetchBatches();
+          }
         });
         const label=document.createElement('label');label.textContent='Private Git token (not stored)';
         label.append(credential);
@@ -222,6 +249,7 @@ function drawQueue(result){
         });
         li.append(document.createTextNode(' '),abort);
       }
+      li.append(rowStatus);
       list.append(li);
     }
     section.append(heading,summary,list);queue.append(section);
