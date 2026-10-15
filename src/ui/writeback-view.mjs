@@ -35,7 +35,7 @@ function controls(){
   prepare.disabled=busy||!inspected?.ok||!token.value||
     inspected.slug!==slug.value.trim()||!!receipt;
   armManual.disabled=busy||!receipt?.ok||receipt.mode!=='MANUAL'||
-    receipt.state!=='PREPARED'||!/^pcms-test-[a-z0-9-]{8,88}$/.test(receipt.slug);
+    receipt.state!=='PREPARED';
   commit.disabled=busy||!receipt?.ok||receipt.mode!=='MANUAL'||
     receipt.state!=='PREPARED'||!token.value;
   cancel.disabled=busy||!receipt?.ok||receipt.state!=='PREPARED';
@@ -123,9 +123,9 @@ armManual.addEventListener('click',()=>transact(async()=>{
   const confirmation=await requestTypedConfirmation(armManual,expected,
     'Authorize only one nonforced private Git commit of the exact tested source F. No automatic retry.');
   if(confirmation===null)return;
-  const armed=await request('ARM_DISPOSABLE_COMMIT',{
+  const armed=await request('ARM_EXACT_COMMIT',{
     slug:receipt.slug,expectedRevision:receipt.revision,confirmation});
-  announce(armed?.ok?'Single disposable Git commit armed for two minutes. Click Commit to execute.':
+  announce(armed?.ok?'One exact tested-F Git commit armed for two minutes. Click Commit to execute.':
     'Git commit not armed: '+(armed?.code||'UNVERIFIED'));
 }));
 commit.addEventListener('click',()=>transact(async()=>{

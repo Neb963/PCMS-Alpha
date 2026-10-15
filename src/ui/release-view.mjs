@@ -41,7 +41,7 @@ function controls(){
   cancelBtn.disabled=active||!receipt||receipt.slug!==slug.value||
     receipt.state!=='APPROVED';
   armBtn.disabled=active||!receipt||receipt.slug!==slug.value||
-    receipt.state!=='APPROVED'||!/^pcms-test-[a-z0-9-]{8,88}$/.test(receipt.slug);
+    receipt.state!=='APPROVED';
   dispatchBtn.disabled=active||!receipt||receipt.slug!==slug.value||
     receipt.state!=='APPROVED'||!hasToken;
   reconcileBtn.disabled=active||!receipt||receipt.slug!==slug.value||!hasToken||
@@ -202,7 +202,7 @@ armBtn.addEventListener('click',async()=>{
   if(receipt!==pinned){note('Release receipt changed. Authorization not sent.');return;}
   active=true;controls();
   try{
-    const result=await command('ARM_DISPOSABLE_RELEASE',{
+    const result=await command('ARM_EXACT_RELEASE',{
       slug:receipt.slug,expectedRevision:receipt.revision,confirmation});
     note(result?.ok?'Exact-source publication armed for two minutes. Click Publish to dispatch once.':
       'Publication not armed: '+(result?.code||'UNVERIFIED'));
