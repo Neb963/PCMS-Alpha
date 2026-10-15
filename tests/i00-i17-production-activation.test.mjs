@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createAiBoundary,validateAiMessage,productionAiGate} from '../src/runtime/ai-boundary.mjs';
 import {productionAutoGitGate} from '../src/runtime/writeback-boundary.mjs';
+import {productionAdoptionArchiveGate} from '../src/runtime/adoption-boundary.mjs';
+import {productionExistingUpdateGate} from '../src/runtime/existing-update-boundary.mjs';
 import {exactSource} from '../src/runtime/staging-core.mjs';
 
 const slug='ordinary-source-001';
@@ -92,4 +94,44 @@ test('I17 Git automation is limited to opt-in AUTO or read-only terminal; MANUAL
   assert.equal(productionAutoGitGate({phase:'I11',step:'GIT_WRITE_AUTO'}),true);
   assert.equal(productionAutoGitGate({phase:'I11',step:'READ_ONLY_AI_TERMINAL'}),true);
   assert.equal(productionAutoGitGate({phase:'I10',record:{mode:'AUTO'}}),false);
+});
+
+test('I17 F: adoption Git archive is admitted for exact captured owner and each journalled substep',()=>{
+  const record={slug,archived:false,archiveState:'ARCHIVE_PENDING',
+    original:{fingerprint:candidate.fingerprint,blobs:[
+      {path:'main.pjs',base64:b64(original.pjs)},
+      {path:'index.html',base64:b64(original.html)}]}};
+  for(const archiveState of ['ARCHIVE_PENDING','GIT_PREPARED','DISPATCH_POSSIBLE'])
+    assert.equal(productionAdoptionArchiveGate({slug,record:{...record,archiveState}}),true);
+  for(const broken of [
+    {...record,archived:true},
+    {...record,slug:'other-owned-generator'},
+    {...record,archiveState:'HELD_UNCERTAIN'},
+    {...record,archiveState:'ARCHIVED_GIT_CONFIRMED'},
+    {...record,original:{...record.original,fingerprint:'x'.repeat(64)}},
+    {...record,original:{...record.original,blobs:[]}},
+  ])assert.equal(Boolean(productionAdoptionArchiveGate({slug,record:broken})),false);
+  assert.equal(Boolean(productionAdoptionArchiveGate({slug:'different-slug',record})),false);
+  assert.equal(Boolean(productionAdoptionArchiveGate({record})),false);
+});
+test('I17 F/X: existing public update gate covers only guarded explicit source operations',()=>{
+  const r={slug,personaUid:stage.personaUid,
+    principalFingerprint:stage.principalFingerprint,
+    remotePublicId:stage.remotePublicId,state:'PREPARED'};
+  for(const [action,state] of [
+    ['UNLIST','PREPARED'],['STAGE','UNLIST_CONFIRMED'],
+    ['RECOVERY_UNLIST','STAGE_CONFIRMED'],['RESTORE','STAGE_CONFIRMED'],
+    ['RESTORE','RECOVERY_UNLIST_CONFIRMED']])
+    assert.equal(productionExistingUpdateGate({phase:'I13',action,
+      record:{...r,state}}),true,action+' / '+state);
+  for(const changed of [
+    {phase:'I12',action:'UNLIST',record:r},
+    {phase:'I13',action:'PUBLISH',record:r},
+    {phase:'I13',action:'STAGE',record:r},
+    {phase:'I13',action:'UNLIST',record:{...r,state:'DISPATCH_POSSIBLE'}},
+    {phase:'I13',action:'UNLIST',record:{...r,principalFingerprint:null}},
+    {phase:'I13',action:'UNLIST',record:{...r,archived:true}},
+    {phase:'I13',action:'UNLIST',record:{...r,personaUid:null}},
+    {phase:'I13',action:'UNLIST',record:{...r,slug:'../escaped'}},
+  ])assert.equal(productionExistingUpdateGate(changed),false,JSON.stringify(changed));
 });

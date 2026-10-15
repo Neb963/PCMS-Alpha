@@ -1,4 +1,4 @@
-// I07 explicit, revision-scoped source preservation. Remote effects stay OFF.
+// I17: original capture is read-only; explicit Git archive is available with scoped authority.
 const el=id=>document.getElementById(id);
 const name=el('pcms-adopt-name'),visibility=el('pcms-adopt-visibility');
 const consent=el('pcms-adopt-consent'),capture=el('pcms-adopt-capture');
@@ -50,7 +50,7 @@ async function refresh(){
       const li=document.createElement('li');
       li.textContent=item.slug+' · '+item.visibility+' · '+item.management+
         ' · original '+(item.originalFingerprint||'UNKNOWN').slice(0,16)+
-        ' · '+item.archive+' · provider changes OFF';
+        ' · '+item.archive+' · provider edits remain disabled';
       list.append(li);
     }
     receipts.append(list);

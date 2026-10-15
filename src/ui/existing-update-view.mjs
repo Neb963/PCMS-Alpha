@@ -1,4 +1,4 @@
-// I13 existing public-source inspector. Every operation is an explicit click;
+// I17 existing public-source update actions are activated per operator click;
 // no auto-advance after lost acknowledgement, even across tab reloads.
 const prefix='pcms-existing-';
 const get=id=>document.getElementById(prefix+id);

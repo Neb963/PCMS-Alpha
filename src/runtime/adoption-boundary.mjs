@@ -53,7 +53,7 @@ function readRow(db,slug){
 export function createAdoptionBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,storeFactory=createAdoptionStore,
   gitWrite=writeArchive,gitRead=inspectArchive,
-  // Packaged Git mutation activation remains HELD pending separate operator proof.
+  // Per-record gate is supplied by the packaged production registration.
   gitGate=()=>false
 }={}){
   let dbPromise;
@@ -187,4 +187,19 @@ export function createAdoptionBoundary(api,{
   }
   return Object.freeze({run,register});
 }
-if(typeof browser!=='undefined')createAdoptionBoundary(browser).register();
+// Production operator archive: the exact selected original has already been
+// guarded, double-read and durably captured. The UI requires a fresh, short-
+// lived Git credential for this single click; every write remains journaled.
+export function productionAdoptionArchiveGate(ctx){
+  const r=ctx?.record;
+  return typeof ctx?.slug==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(ctx.slug)&&
+    r?.slug===ctx.slug&&r.archived===false&&
+    ['ARCHIVE_PENDING','GIT_PREPARED','DISPATCH_POSSIBLE'].includes(r.archiveState)&&
+    r.original?.fingerprint&&/^[a-f0-9]{64}$/.test(r.original.fingerprint)&&
+    Array.isArray(r.original.blobs)&&r.original.blobs.length>=2&&
+    r.original.blobs.some(x=>x.path==='main.pjs')&&
+    r.original.blobs.some(x=>x.path==='index.html');
+}
+if(typeof browser!=='undefined')createAdoptionBoundary(browser,{
+  gitGate:productionAdoptionArchiveGate
+}).register();

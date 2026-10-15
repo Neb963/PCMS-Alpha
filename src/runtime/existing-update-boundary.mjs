@@ -378,4 +378,25 @@ export function createExistingBoundary(api,{
   }
   return Object.freeze({run,register});
 }
-if(typeof browser!=='undefined')createExistingBoundary(browser).register();
+// The exact existing-source UI actions, not an unattended write scheduler.
+// Each operation still needs its canonical source, release/sleep admission,
+// protected donor lease, encrypted recovery, clean editor and journal marker.
+export function productionExistingUpdateGate(ctx){
+  if(ctx?.phase!=='I13')return false;
+  const r=ctx.record;
+  if(!r||typeof r.slug!=='string'||
+     !/^[a-z0-9][a-z0-9-]{0,99}$/.test(r.slug)||
+     typeof r.personaUid!=='string'||!r.personaUid||
+     typeof r.remotePublicId!=='string'||!r.remotePublicId||
+     typeof r.principalFingerprint!=='string'||
+     !/^[a-f0-9]{64}$/.test(r.principalFingerprint)||r.archived===true)
+    return false;
+  return ctx.action==='UNLIST'&&r.state==='PREPARED'||
+    ctx.action==='STAGE'&&r.state==='UNLIST_CONFIRMED'||
+    ctx.action==='RESTORE'&&
+      ['STAGE_CONFIRMED','RECOVERY_UNLIST_CONFIRMED'].includes(r.state)||
+    ctx.action==='RECOVERY_UNLIST'&&r.state==='STAGE_CONFIRMED';
+}
+if(typeof browser!=='undefined')createExistingBoundary(browser,{
+  effectGate:productionExistingUpdateGate
+}).register();
