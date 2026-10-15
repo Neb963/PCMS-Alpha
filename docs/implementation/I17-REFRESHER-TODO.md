@@ -61,8 +61,8 @@
 - [x] Source-provenance regression: marker recognized precisely; altered code/assets or stale human approval held; previous-good/source recovery intact.
 - [x] Scheduler load/stress: at least 50 accounts and 1,000 generators, oldest eligible, pause/grace/slot/capacity, no restart burst, bounded CPU/I/O/IDB and resource report without invented production rate allowances.
 - [x] Packaged persistent Firefox B: installed combined XPI, real `entry.mjs` registration, donor-fixed execution, UI lifecycle, alarm wake; assert adapter cannot be absent or null. Donor regressions included.
-- [ ] Restore `pcms-required` green **at exact head** without weakening gates; investigate pre-existing Supply B `RENAME admission INVALID_PARAMS` independently and minimally if needed.
-- [ ] Confirm reproducible build twice, XPI Gecko ID `persona-route-manager@local`, SHA-256 and exact HEAD/CI correspondence; no live H PASS claimed.
+- [x] Restore `pcms-required` green **at exact head** without weakening gates; investigate pre-existing Supply B `RENAME admission INVALID_PARAMS` independently and minimally if needed.
+- [x] Confirm reproducible build twice, XPI Gecko ID `persona-route-manager@local`, SHA-256 and exact HEAD/CI correspondence; no live H PASS claimed.
 
 ## Operator H-04 (outside coding-agent environment)
 
@@ -74,8 +74,8 @@
 ## Publish / stop
 
 - [x] Commit coherent increments via connected GitHub, verify remote branch HEAD/tree after each checkpoint, update this checklist with test IDs, observed outcomes and commit SHAs.
-- [ ] Deliver complete combined XPI, SHA-256, capability report, exact CI F/X/B jobs, H-04 guide and one first-causal-failure diagnosis for any hold.
-- [ ] Keep PR #20 draft, **do not merge** without required H/independent governance. Report `IN_PROGRESS_CHECKPOINTED` or `BLOCKED_SAFELY` truthfully; `MERGED_AND_VERIFIED` only after protected postmerge evidence.
+- [x] Deliver complete combined XPI, SHA-256, capability report, exact CI F/X/B jobs, H-04 guide and one first-causal-failure diagnosis for any hold.
+- [x] Keep PR #20 draft, **do not merge** without required H/independent governance. Report `IN_PROGRESS_CHECKPOINTED` or `BLOCKED_SAFELY` truthfully; `MERGED_AND_VERIFIED` only after protected postmerge evidence.
 
 ### Completion gate
 
@@ -155,3 +155,14 @@ The code is **not done** if the packaged Refresher still has a null `refreshAdap
 - Final review found a context-renewal edge: preview merged an old record while replacing its owner/F fields. It now drops old consent, canonical test proof, qualification and schedule enablement when those authority fields change, the exact base F is separately republished, or history was restored. A fresh preview/typed consent uses a monotonically newer consent epoch; it cannot reuse the old signature. Exact marker provenance remains available only for byte reconstruction. A restored flag is cleared only by that fresh explicit consent after independent protected preview and the existing restore gate.
 - New F/X renewal matrix covers account/binding/principal/F/restore/base-reset changes, positive same-lineage continuity and unknown functional drift rejection. **415/415 fast PASS** (~4.7 s). No Supply/donor/trust-root changes.
 - Revised package rebuilt twice identically: SHA-256 `c4361e704006235affaa6e24cfe7171cf39e1378091c5970726cd35efdcbf871`. This supersedes the previous candidate hash; final native/UI/cold-wake and exact-head CI binding follow below when executed.
+
+
+### Verified runtime and operator-test delivery checkpoint
+
+- Complete runtime `b7e3c376c7fd2241fd28a9951982f353a4a01800` / tree `7735ea7c5c883ca23f51653cc9ed55c3e249940f` verified remotely, with [required CI 38805139754](https://github.com/Neb963/PCMS-Alpha/actions/runs/38805139754) **SUCCESS at that exact head**. Jobs: baseline `116663925525`, fast/donor/reproducibility `116663925135`, Firefox `116664372147`, pcms-required `116665403386`, all SUCCESS, none skipped. Full native/UI/process-cold and inherited packaged B pass after the final source-authority renewal change.
+- **415/415 fast PASS** both locally and independently in CI. Offline signing helper, source/F/asset/consent/binding/restore negatives, observed storage pressure and all existing stress/backpressure/clock oracles included.
+- Final combined XPI: **662,727 bytes**, 182 members, Gecko ID `persona-route-manager@local`; SHA-256 **`c4361e704006235affaa6e24cfe7171cf39e1378091c5970726cd35efdcbf871`**. Two local builds, two independent CI builds and the actual installed-Firefox log agree on the hash. Published CI artifact `pcms-alpha-i00-xpi` ID `12005763061`; the final handoff also supplies this exact XPI with guide/helper/report/evidence.
+- Final CI source-save proof: real registered production port/UI + donor shared lease/protected fixture route + native save + exact independent source and separate feed. Same-XPI signed recurring marker replacement, preflight/IDB no-write negatives, lost ACK, concurrent-claim fencing and read-only process-cold reconciliation all pass against the independent ledger. UI exports, key pin/import/opt-in/disable/revoke and keyboard focus pass.
+- Final CI point measurements: 50 accounts / 1,250 rows, observer read peak 2, 2,709,294 serialized bytes, observer scenario 3,985 ms; IDB delta 647,168 bytes. Matched Firefox before/after process RSS sums 993,420/1,101,348 KiB and CPU ticks 316/368. Full installed-browser scenario about 121 s, excluding setup. These remain isolated point samples, not production capacities or peak/SLO claims.
+- `docs/verification/I17-REFRESHER-VERIFICATION-REPORT.md` and the H-04 guide contain capability/provenance/resource limits, the Supply fixture first-cause diagnosis and only the actual external acceptance gates. Original Supply runtime, donor files, signed originals, workflows and required aggregator are unchanged. Main remains `34a5c48fbfac6c15ef86a453668b3b353402ab18`.
+- Outcome **IN_PROGRESS_CHECKPOINTED**: implementation and all achievable automated acceptance are ready for operator testing. No external coding/build blocker remains. Authenticated live H evidence/provider permissibility and independent governance sign-off remain pending; PR #20 stays draft, auto-merge disabled and unmerged. A documentation-only checkpoint follows; its final ref/CI binding is provided externally to avoid a self-referential commit SHA.
