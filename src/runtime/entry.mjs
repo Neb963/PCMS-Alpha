@@ -35,14 +35,23 @@ import './backup-auto-boundary.mjs';
 import './restore-boundary.mjs';
 // I12 one durable queue/alarm and protected read-only observations.
 import {createRefresherBoundary} from './refresher-boundary.mjs';
-if(typeof browser!=='undefined')createRefresherBoundary(browser,{
-  // I17: fixed read-only Perchance monitoring is admitted only through the
-  // donor's current protected Persona lease and independent response schema.
-  // Discovery v3 establishes no legitimate recurring refresh method.
-  // Operator qualification observes an ordinary reviewed update separately.
-  observationGate:()=>true
-}).register();
-
+import {createRefresherProviderAdapter} from './refresher-provider-adapter.mjs';
+import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
+import {internalPcmsGuard} from './persona-guard.mjs';
+if(typeof browser!=='undefined'){
+  let connection;
+  const database=()=>connection||=(openCanonicalDatabase().catch(e=>{connection=null;throw e;}));
+  const refreshAdapter=createRefresherProviderAdapter(browser,{database,guard:internalPcmsGuard,
+    sentinel:createRestoreSentinel(browser.storage.local)});
+  createRefresherBoundary(browser,{
+    open:database,observationGate:()=>true,refreshAdapter,
+    // Adapter availability permits explicit one-shot operator tests. Recurring
+    // admission additionally requires canonical per-target opt-in/review and
+    // the scheduler's release, clock, Pause, capacity and backpressure checks.
+    refreshGate:row=>row?row.sourceRefresh?.scheduleEnabled===true:true,
+    qualificationFor:row=>refreshAdapter.qualificationFor(row)
+  }).register();
+}
 
 // A single browser-action click opens the real PCMS tab, never a donor route
 // mutation or a synthetic popup. The original PersonaMonkey control UI stays

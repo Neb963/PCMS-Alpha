@@ -91,3 +91,14 @@ The code is **not done** if the packaged Refresher still has a null `refreshAdap
 - Read operator prompt/checklist, root instructions, execution/CI contracts, I12/I14/I17 plan, I17 authorization, Stage 2 §5, Stage 3 source/release and F1/F2 amendment, Stage 5 P54/P56 contracts; extracted discovery source/save/feed evidence locally.
 - Product amendment added before runtime edits. Frozen originals untouched. Checkpoint SHA is recorded in the following verified checkpoint, avoiding self-reference.
 - Runtime, UI, qualification, F/X/B and final package remain IN PROGRESS. No H PASS or merge.
+
+### Source-save implementation checkpoint (before UI/B verification)
+
+- Amendment checkpoint verified remote HEAD/tree: `4cfa11108499e3eec378f38d4bfd0725d79f63e7` / `ec7d10cb2d981f47941d9eaae492992f7d67b2a8`.
+- Added exact `html_prefix_v1` transform, immutable base/pre/post receipts, fixed native preflight/save, donor-owned editor/lease bridge, canonical consent, detached H-04 signature verification, same-XPI local resource sample, production entry wiring and scheduler/recovery integration. These are implemented, not yet packaged-B accepted.
+- Executed 9 new F/X source-save tests and all 17 inherited I14 tests: PASS. Positive remote ledger distinguishes actual persisted bytes/feed from native ACK; negative signature/owner/editor/source/feed cases reject.
+- Build succeeds; `check-stage7.py` verifies 29/29 original signed members. No donor source, Supply runtime, workflow or required-check changes.
+- Full fast regression in progress. UI, true installed-Firefox execution, resource/failure matrix, operator guide and final reproducibility remain pending.
+- Local pinned Firefox downloaded; geckodriver extraction hit container ownership metadata restriction after extracting binary. Use existing extracted binary/ownership-neutral extraction for local verification; CI setup unchanged.
+
+- Serial full fast regression: **405/405 PASS**, ~4.8 s. An earlier overlapping standalone build collided with the suite's own packaging directory; serial execution resolves it without product/test changes.

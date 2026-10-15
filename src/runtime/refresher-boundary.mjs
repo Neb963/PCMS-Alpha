@@ -6,18 +6,23 @@ import {internalPcmsGuard} from './persona-guard.mjs';
 import {createRefresherStore} from './refresher-store.mjs';
 import {MINUTE} from './refresher-core.mjs';
 import {createQualificationStore,createRefreshQualification} from './refresh-qualification.mjs';
+import {SOURCE_REFRESH_COMMANDS} from './refresher-provider-adapter.mjs';
 import {createNoticeDispatcher} from './notices.mjs';
 export const REFRESHER_PORT='pcms-i12-refresher',REFRESHER_ALARM='pcms-refresher-turn';
-const types=new Set(['GET_REFRESHER','SET_POLICY','SET_PAUSE','SET_GENERATOR_POLICY','DEMAND_STATISTIC','OBSERVE_NOW','RESET_RECENT_BACKOFF','GET_QUALIFICATION','BEGIN_QUALIFICATION','OBSERVE_QUALIFICATION']);
+const types=new Set([...SOURCE_REFRESH_COMMANDS,'GET_REFRESHER','SET_POLICY','SET_PAUSE','SET_GENERATOR_POLICY','DEMAND_STATISTIC','OBSERVE_NOW','RESET_RECENT_BACKOFF','GET_QUALIFICATION','BEGIN_QUALIFICATION','OBSERVE_QUALIFICATION']);
 export function validateRefresherMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let encoded;try{encoded=JSON.stringify(message);}catch{return fail('INVALID_MESSAGE');}
   if(!message||typeof message!=='object'||Array.isArray(message)||!types.has(message.type)||
-    !encoded||encoded.length>1600||Object.keys(message).some(k=>!['type','params'].includes(k)))
+    !encoded||encoded.length>16384||Object.keys(message).some(k=>!['type','params'].includes(k)))
     return fail('INVALID_MESSAGE');
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
-  const allowed=message.type==='GET_REFRESHER'?['query','phase','accountId','offset','limit']:
+  const sourceCommand=SOURCE_REFRESH_COMMANDS.has(message.type);
+  const allowed=sourceCommand?(['TRUST_REFRESH_REVIEWER'].includes(message.type)?['publicKey','confirmation']:
+    message.type==='MEASURE_REFRESH_RESOURCES'?[]:
+    ['GET_SOURCE_REFRESH','GET_REFRESH_REVIEW_CHALLENGE'].includes(message.type)?['stableId']:
+    ['stableId','expectedRevision','confirmation','envelope','enabled']):message.type==='GET_REFRESHER'?['query','phase','accountId','offset','limit']:
     message.type==='GET_QUALIFICATION'?['stableId']:
     ['BEGIN_QUALIFICATION','OBSERVE_QUALIFICATION'].includes(message.type)?['stableId','expectedRevision','confirmation']:
     message.type==='SET_POLICY'?['expectedRevision','policy']:
@@ -26,7 +31,13 @@ export function validateRefresherMessage(api,sender,message){
     message.type==='DEMAND_STATISTIC'?['expectedRevision','stableId']:
     message.type==='RESET_RECENT_BACKOFF'?['expectedRevision']:[];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
-  if(message.type==='GET_REFRESHER'){
+  if(sourceCommand){
+    if(message.type==='TRUST_REFRESH_REVIEWER'){
+      if(!p.publicKey||typeof p.publicKey!=='object'||Array.isArray(p.publicKey)||typeof p.confirmation!=='string'||p.confirmation.length>80)return fail('INVALID_PARAMS');
+    }else if(message.type!=='MEASURE_REFRESH_RESOURCES'&&(!isSafeId(p.stableId)||
+      (!['GET_SOURCE_REFRESH','GET_REFRESH_REVIEW_CHALLENGE'].includes(message.type)&&(!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<0))||
+      (p.confirmation!==undefined&&(typeof p.confirmation!=='string'||p.confirmation.length>200))))return fail('INVALID_PARAMS');
+  }else if(message.type==='GET_REFRESHER'){
     if((p.query!=null&&(typeof p.query!=='string'||p.query.length>80))||
       (p.accountId!=null&&p.accountId!==''&&!isSafeId(p.accountId))||
       (p.phase!=null&&!['ALL','WAITING','ACTIVE','SLEEPING'].includes(p.phase))||
@@ -82,13 +93,14 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       try{alarmHeld=!(await api.alarms.get(REFRESHER_ALARM));}catch{alarmHeld=true;}
     }
   }
+  const executionMode=()=>refreshAdapter?.requiresPreflight?'SCOPED_SOURCE_SAVE':'SHADOW_ONLY';
   async function safeBreadcrumb(result,code){
     try{
       const d=result?.state?.diagnostics||{};
-      await api.storage.local.set({pcmsI12Status:{mode:'SHADOW_ONLY',
+      await api.storage.local.set({pcmsI12Status:{mode:executionMode(),
         code:code||'SHADOW_READY',turns:d.turns||0,reads:d.reads||0,
         queuePeak:d.queuePeak||0,readPeak:d.readPeak||0,unknownIntervals:d.unknownIntervals||0,
-        alarmHeld,mutations:0}});
+        alarmHeld,mutations:result?.state?.rows?.reduce((n,r)=>n+(r.refresh?.history?.length||0),0)||0}});
     }catch{}
   }
   function alarmReceipt(){
@@ -184,6 +196,39 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       changes:completed.flatMap(r=>r.changes||[])};
   }
 
+  async function performRefresh(s,row,candidate){
+    const first=await guard()?.getSafeRouteReadiness(row.personaUid);
+    if(!first?.ready)return fail(first?.code||'PROTECTED_ROUTE_UNAVAILABLE');
+    const reserved=await s.reserveAttempt({stableId:row.stableId,id:candidate.plan?.operationId||newId(),
+      now:clock(),candidate,liveAuthorized:true});
+    if(!reserved.ok)return reserved;
+    const claim=reserved.claim;let marked=false,result;
+    try{
+      result=await refreshAdapter.execute(claim,{beforeSave:async phase=>{
+        if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+        if(phase==='CHECK')return s.checkDispatch(claim,clock());
+        const out=await s.markDispatch(claim,clock());marked=out.ok;return out;
+      }});
+    }catch{result={ok:false,code:'REFRESH_EXECUTOR_UNKNOWN',effectBoundary:marked?'DISPATCH_POSSIBLE':'NOT_DISPATCHED'};}
+    if(!marked){
+      await s.cancelReserved(claim.stableId,claim.id,clock());
+      return fail(result?.code||'REFRESH_PREFLIGHT_HELD');
+    }
+    let receipt={kind:'UNKNOWN',targetMatched:false,principalMatched:false};
+    // Lost native ACK does not suppress independent observation.
+    try{receipt=await refreshAdapter.readback(claim);}catch{}
+    const final=await guard()?.getSafeRouteReadiness(row.personaUid);
+    const stable=final?.ready&&first.cookieStoreId===final.cookieStoreId&&
+      first.routeId===final.routeId&&first.healthDomain===final.healthDomain;
+    const settled=await s.settleAttempt(claim.stableId,claim.id,{...receipt,at:clock(),
+      targetMatched:receipt.targetMatched===true&&stable===true,
+      principalMatched:receipt.principalMatched===true&&stable===true,
+      attemptResult:{ack:result?.ok===true?'ACK_ONLY':'UNKNOWN',
+        code:/^[A-Z0-9_]{1,80}$/.test(result?.code||'')?result.code:'REFRESH_OUTCOME_UNKNOWN'}});
+    return settled.ok?{...settled,code:settled.proof.effectVerified?
+      settled.proof.feedState==='PRESENT'?'RECENT_PRESENT':settled.proof.feedState==='ABSENT'?
+        'RECENT_ABSENT':'SOURCE_CONFIRMED_RECENT_UNKNOWN':'HELD_UNCERTAIN'}:settled;
+  }
   async function maybeRefresh(s){
     // A UI observation never grants fleet mutation authority. No legitimate
     // recurring provider action is established by frozen Discovery v3.
@@ -206,14 +251,14 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       const intent=uncertain.refresh.intent,a=snapshot.state.accounts[uncertain.accountId];
       if(!uncertain.ownerVerified||!uncertain.releaseVerified||uncertain.identityHeld||
         uncertain.reviewHeld||uncertain.listing!=='PUBLIC'||!a?.verifiedIdentity||
-        uncertain.releaseFingerprint!==intent.sourceFingerprint)
+        uncertain.releaseFingerprint!==(intent.plan?.approvedBaseFingerprint||intent.sourceFingerprint))
         return 'REFRESH_RECONCILIATION_HELD';
       const first=await g.getSafeRouteReadiness(uncertain.personaUid);
       if(!first?.ready)return 'REFRESH_RECONCILIATION_ROUTE_HELD';
-      const claim={id:intent.id,slug:uncertain.slug,stableId:uncertain.stableId,
+      const claim={...intent,...(intent.plan?{plan:intent.plan,remoteId:uncertain.remoteId}:{}),id:intent.id,slug:uncertain.slug,stableId:uncertain.stableId,
         accountId:uncertain.accountId,personaUid:uncertain.personaUid,
         bindingVersion:uncertain.bindingVersion,
-        principalFingerprint:a.principalFingerprint,releaseFingerprint:intent.sourceFingerprint};
+        principalFingerprint:a.principalFingerprint,releaseFingerprint:intent.plan?.approvedBaseFingerprint||intent.sourceFingerprint};
       let receipt={at:clock(),kind:'UNKNOWN',sourceFingerprint:null,
         targetMatched:false,principalMatched:false};
       try{
@@ -231,13 +276,27 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       return settled.ok?(settled.proof.effectVerified?
         'REFRESH_READBACK_EFFECT_PROVEN':'REFRESH_READBACK_HELD'):settled.code;
     }
-    const row=snapshot.state.rows.find(r=>r.slot&&r.phase==='ACTIVE'&&
+    const pendingFeed=refreshAdapter.requiresPreflight&&snapshot.state.rows.find(r=>
+      r.sourceRefresh?.lastProof?.effect==='EFFECT_CONFIRMED'&&!r.refresh?.intent&&
+      r.refresh?.methodHold?.startsWith('SOURCE_CONFIRMED_RECENT_')&&
+      (r.refresh.feedProbes||0)<3&&r.refresh.nextAttemptAt<=clock());
+    if(pendingFeed){
+      const a=snapshot.state.accounts[pendingFeed.accountId];
+      const out=await s.observeSourceRefresh(pendingFeed.stableId,clock(),intent=>refreshAdapter.readback({
+        ...pendingFeed,...intent,remoteId:pendingFeed.remoteId,principalFingerprint:a?.principalFingerprint}));
+      return out.code||'RECENT_REOBSERVED';
+    }
+    const row=snapshot.state.rows.find(r=>(!refreshAdapter.requiresPreflight||refreshGate(r))&&r.slot&&r.phase==='ACTIVE'&&
       r.ownerVerified&&r.releaseVerified&&!r.identityHeld&&!r.reviewHeld&&
       !r.refresh?.intent&&!r.refresh?.suspended&&
       (r.refresh?.nextAttemptAt||0)<=clock()&&
       snapshot.state.accounts[r.accountId]?.verifiedIdentity===true);
     if(!row)return 'NO_REFRESH_DUE';
-    const candidate=qualificationFor(row);
+    const candidate=await qualificationFor(row);
+    if(!candidate)return 'REFRESH_SCOPE_NOT_QUALIFIED';
+    if(refreshAdapter.requiresPreflight){
+      const out=await performRefresh(s,row,candidate);return out.code||'REFRESH_EFFECT_HELD';
+    }
     // A candidate from a fixture, code comment or stale source is not enough.
     const first=await g.getSafeRouteReadiness(row.personaUid);
     if(!first?.ready)return 'PROTECTED_ROUTE_UNAVAILABLE';
@@ -290,11 +349,11 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         const observed=await observe(s);
         // Mutation failure cannot block the healthy shadow monitor.
         let refresh='REFRESH_ACTIVATION_HELD';
-        try{refresh=await maybeRefresh(s);}catch{refresh='REFRESH_EFFECT_UNCERTAIN';}
+        try{if(!qualifying)refresh=await maybeRefresh(s);}catch{refresh='REFRESH_EFFECT_UNCERTAIN';}
         await notifyChanges(result);await notifyChanges(observed);
         await safeBreadcrumb(result,alarmHeld?'ALARM_UNVERIFIED':
           observed.code==='MONITOR_ACTIVATION_HELD'?'MONITOR_ACTIVATION_HELD':'SHADOW_READY');
-        return {ok:true,revision:result.revision,mode:'SHADOW_ONLY',providerEffects:'OFF',
+        return {ok:true,revision:result.revision,mode:executionMode(),providerEffects:executionMode()==='SHADOW_ONLY'?'OFF':'SCOPED',
           alarmHeld,observation:observed.code||'OBSERVED',refresh};
       }catch{await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return fail('REFRESHER_AUTHORITY_UNAVAILABLE');}
       finally{turnPromise=null;}
@@ -307,13 +366,27 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       const s=await store(),p=message.params||{};
       if(message.type==='GET_REFRESHER'){
         const view=await s.list(clock(),p),restore=await sentinel.inspect();
-        return {...view,restoreHeld:restore.held,alarmHeld,monitoring:
+        return {...view,mode:executionMode(),providerEffects:executionMode()==='SHADOW_ONLY'?'OFF':'SCOPED',restoreHeld:restore.held,alarmHeld,monitoring:
           observationGate()?'GUARDED_READ_ONLY':'OFF_PENDING_ACTIVATION',
           refreshCapability:refreshGate()&&refreshAdapter?
-            'QUALIFIED_ADAPTER':'OPERATOR_QUALIFICATION_REQUIRED',
-          qualificationAvailable:observationGate(),fleetMutationReady:refreshGate()&&!!refreshAdapter};
+            refreshAdapter.requiresPreflight?'GUARDED_SOURCE_SAVE':'QUALIFIED_ADAPTER':'OPERATOR_QUALIFICATION_REQUIRED',
+          qualificationAvailable:observationGate(),sourceSaveAvailable:refreshAdapter?.requiresPreflight===true,
+          fleetMutationReady:view.items?.some(r=>r.schedulingEnabled===true)||false};
       }
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      if(SOURCE_REFRESH_COMMANDS.has(message.type)){
+        if(!refreshAdapter?.requiresPreflight||qualifying||turnPromise)return fail('REFRESH_OPERATION_BUSY_OR_UNAVAILABLE');
+        qualifying=true;
+        try{
+          await s.turn({now:clock(),bootId});
+          const snap=await s.read();if(!snap.ok)return snap;
+          const row=snap.state.rows.find(r=>r.stableId===p.stableId),account=snap.state.accounts[row?.accountId];
+          const out=await refreshAdapter.command(message.type,{row,account,p,s,
+            perform:(r,c)=>performRefresh(s,r,c)});
+          await s.turn({now:clock(),bootId});
+          return out;
+        }finally{qualifying=false;}
+      }
       if(message.type.includes('QUALIFICATION')){
         if(qualifying)return fail('QUALIFICATION_BUSY');
         if(!observationGate())return fail('MONITOR_ACTIVATION_HELD');

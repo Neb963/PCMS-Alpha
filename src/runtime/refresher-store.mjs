@@ -3,6 +3,7 @@
 import {fail,isSafeId} from './journal.mjs';
 import {emptyRefreshEvidence,observeRefreshPresence,reserveRefreshAttempt,
   dispatchPossible,reconcileRefreshAttempt} from './refresher-effect-core.mjs';
+import {MARKER_POLICY,REFRESH_METHOD} from './refresh-marker.mjs';
 import {REFRESHER_KEY,emptyShadow,validShadow,reconcileShadow,advanceShadow,
   effectiveCapacity,rowBlocks,queueOrder,validatePolicy,claimObservation,
   applyStatistic,observeCapacity,MINUTE} from './refresher-core.mjs';
@@ -23,7 +24,7 @@ function transact(db,mode,fn){
 // independently confirmed exact-source publication; historical PUBLIC alone
 // never satisfies this seam. B/F fixtures exercise the same canonical seam.
 export function canonicalRefresherInputs(records){
-  const accounts=new Map(),stages=new Map(),releases=new Map(),links=new Map(),updates=new Map(),inventory=[];
+  const accounts=new Map(),stages=new Map(),releases=new Map(),links=new Map(),updates=new Map(),refreshSources=new Map(),inventory=[];
   for(const record of records){
     const k=record?.key;
     if(typeof k!=='string')continue;
@@ -32,6 +33,7 @@ export function canonicalRefresherInputs(records){
     if(k.startsWith('stage:')&&record.record)stages.set(record.record.slug,record.record);
     if(k.startsWith('release:')&&record.release)releases.set(record.release.slug,record.release);
     if(k.startsWith('source-link:')&&record.link)links.set(record.link.slug,record.link);
+    if(k.startsWith('refresh-source:')&&record.record)refreshSources.set(record.record.slug,record.record);
     if(k.startsWith('existing-update:')&&record.record)updates.set(record.record.slug,record.record);
   }
   return inventory.map(row=>{
@@ -46,7 +48,7 @@ export function canonicalRefresherInputs(records){
       release.remoteId===row.remoteId&&release.principalFingerprint===a.identity.principalFingerprint&&
       hex(release.sourceFingerprint)&&isSafeId(release.observationId)&&
       Number.isSafeInteger(release.observedAt)&&release.observedAt>0;
-    return {slug:row.slug,accountId:row.accountId,remoteId:row.remoteId,
+    return {sourceRefresh:refreshSources.get(row.slug)||null,slug:row.slug,accountId:row.accountId,remoteId:row.remoteId,
       personaUid:a?.personaUid||row.personaUid,bindingVersion:a?.bindingVersion||row.bindingVersion,
       ownerVerified:matched&&row.ownerState==='OBSERVED_OWNER',accountVerified:!!accountVerified,
       principalFingerprint:a?.identity?.principalFingerprint||null,
@@ -74,6 +76,8 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
     blockers:[...rowBlocks(s,r),r.readyUpdate&&'READY_UPDATE_FIRST'].filter(Boolean),
     presence:r.presence?{...r.presence,stale:r.presence.observedAt>now||now-r.presence.observedAt>2*s.policy.recentMs}:null,
     statisticSuspended:r.metrics.suspended===true,
+    schedulingEnabled:r.sourceRefresh?.scheduleEnabled===true,
+    sourceSaveState:r.sourceRefresh?.state||'METHOD_NOT_CONFIGURED',
     refresh:{state:r.refresh?.state||'UNOBSERVED',misses:r.refresh?.misses||0,
       attempts:r.refresh?.attempts||0,suspended:r.refresh?.suspended===true,
       nextAttemptAt:r.refresh?.nextAttemptAt||0,
@@ -105,7 +109,7 @@ export function createRefresherStore(db){
           try{
             const merged=sync?reconcileShadow(state,canonicalRefresherInputs(records)):{ok:true,state};
             if(!merged.ok){done(merged);return;}
-            const out=fn(merged.state);
+            const out=fn(merged.state,meta,tx);
             if(!out?.ok){done(out||fail('REFRESHER_REDUCER_FAILED'));return;}
             out.state.revision=state.revision+1;
             if(!validShadow(out.state)){done(fail('REFRESHER_STATE_CORRUPT'));return;}
@@ -122,7 +126,7 @@ export function createRefresherStore(db){
           const c=ev.target.result;
           if(!c){apply(records);return;}
           if(++seen>50000){done(fail('CANONICAL_SCAN_LIMIT'));return;}
-          if(typeof c.key==='string'&&/^(account|inventory|stage|release|source-link|existing-update):/.test(c.key))
+          if(typeof c.key==='string'&&/^(account|inventory|stage|release|source-link|existing-update|refresh-source):/.test(c.key))
             records.push(c.value);
           c.continue();
         };
@@ -285,51 +289,125 @@ export function createRefresherStore(db){
   },{sync:true});
   // Single canonical transaction for each step. A crash after possible
   // dispatch is never treated as permission to repeat a provider effect.
-  const reserveAttempt=({stableId,id,now,candidate,liveAuthorized})=>mutate(null,s=>{
-    const r=s.rows.find(x=>x.stableId===stableId);
-    if(!r||r.phase!=='ACTIVE'||!r.slot||rowBlocks(s,r).length)
-      return fail('REFRESH_ADMISSION_HELD');
+  const reserveAttempt=({stableId,id,now,candidate,liveAuthorized})=>mutate(null,(s,meta)=>{
+    const r=s.rows.find(x=>x.stableId===stableId),marker=candidate?.method===REFRESH_METHOD;
+    const test=marker&&candidate.purpose==='SINGLE_TEST',cfg=r?.sourceRefresh,p=candidate?.plan;
+    if(!r)return fail('REFRESH_ADMISSION_HELD');
+    if(marker){
+      if(!cfg||cfg.restoredHistorical||cfg.policy!==MARKER_POLICY||!cfg.consent||
+        cfg.consent.revision!==p?.consentRevision||cfg.consent.approvedBaseFingerprint!==r.releaseFingerprint||
+        cfg.approvedBaseFingerprint!==r.releaseFingerprint||p.approvedBaseFingerprint!==r.releaseFingerprint||
+        cfg.effectiveCurrentFingerprint!==p.expectedPreSaveFingerprint||id!==p.operationId||
+        cfg.principalFingerprint!==s.accounts[r.accountId]?.principalFingerprint||
+        cfg.accountId!==r.accountId||cfg.remoteId!==r.remoteId||cfg.personaUid!==r.personaUid||
+        cfg.bindingVersion!==r.bindingVersion||r.readyUpdate)
+        return fail('REFRESH_SOURCE_CONSENT_STALE');
+      if(test){
+        if(cfg.preview?.expiresAt<now||cfg.preview?.plan?.operationId!==id||cfg.preview?.consented!==true||
+          cfg.testAttempted===true)return fail('REFRESH_TEST_NOT_ARMED');
+      }else{
+        const q=cfg.qualification;
+        if(!cfg.scheduleEnabled||!q||q.validUntil<=now||q.reviewDigest!==candidate.reviewDigest||
+          q.approvedBaseFingerprint!==r.releaseFingerprint||s.nextRefreshAt>now||
+          s.accounts[r.accountId]?.nextRefreshAt>now)return fail('REFRESH_RECURRING_NOT_QUALIFIED');
+        const last=r.refresh?.history?.at(-1);
+        if(last?.allocationEpoch===r.allocationEpoch&&
+          last.budgetAtSave-r.activeRemaining<(q.minimumIntervalMs||600000))
+          return fail('REFRESH_OPERATIONAL_INTERVAL_NOT_DUE');
+      }
+    }
+    const blocks=rowBlocks(s,r).filter(x=>!(test&&x==='ACCOUNT_UNAVAILABLE'));
+    if((!test&&(r.phase!=='ACTIVE'||!r.slot))||blocks.length||
+      (test&&(r.sleepRemaining>0||r.phase==='SLEEPING')))return fail('REFRESH_ADMISSION_HELD');
     const attempt=reserveRefreshAttempt(r.refresh,{id,at:now,slug:r.slug,
-      sourceFingerprint:r.releaseFingerprint,candidate,eligible:true,liveAuthorized});
+      sourceFingerprint:marker?p.expectedPreSaveFingerprint:r.releaseFingerprint,
+      candidate,eligible:true,liveAuthorized});
     if(!attempt.ok)return attempt;
-    const out=structuredClone(s);
-    out.rows.find(x=>x.stableId===stableId).refresh=attempt.evidence;
+    const out=structuredClone(s),target=out.rows.find(x=>x.stableId===stableId);
+    target.refresh=attempt.evidence;
+    target.refresh.intent.budgetAtSave=r.activeRemaining;
+    target.refresh.intent.allocationEpoch=r.allocationEpoch;
+    if(marker){
+      const next={...cfg,testAttempted:cfg.testAttempted||test,revision:cfg.revision+1};
+      meta.put({key:'refresh-source:'+r.slug,record:next});target.sourceRefresh=next;
+      out.nextRefreshAt=now+MINUTE;out.accounts[r.accountId].nextRefreshAt=now+MINUTE;
+    }
     return {ok:true,state:out,claim:{id,stableId,slug:r.slug,accountId:r.accountId,
-      personaUid:r.personaUid,bindingVersion:r.bindingVersion,
+      personaUid:r.personaUid,bindingVersion:r.bindingVersion,remoteId:r.remoteId,
       principalFingerprint:s.accounts[r.accountId]?.principalFingerprint,
-      releaseFingerprint:r.releaseFingerprint},
+      releaseFingerprint:r.releaseFingerprint,...(marker?{plan:p,purpose:candidate.purpose}:{})},
       changes:[{code:'REFRESH_RESERVED',scopeId:stableId}]};
   },{sync:true});
-  const cancelReserved=(stableId,id,now)=>mutate(null,s=>{
+  const cancelReserved=(stableId,id,now)=>mutate(null,(s,meta)=>{
     const row=s.rows.find(r=>r.stableId===stableId);
     if(!row||row.refresh?.intent?.id!==id||
       row.refresh.intent.state!=='RESERVED')return fail('REFRESH_RESERVATION_NOT_CANCELABLE');
     const out=structuredClone(s),r=out.rows.find(x=>x.stableId===stableId);
+    if(r.refresh.intent.purpose==='SINGLE_TEST'&&r.sourceRefresh&&!r.sourceRefresh.lastReceipt){
+      r.sourceRefresh={...r.sourceRefresh,testAttempted:false,preview:null,revision:r.sourceRefresh.revision+1};
+      meta.put({key:'refresh-source:'+r.slug,record:r.sourceRefresh});
+    }
     r.refresh.intent=null;r.refresh.state=r.refresh.suspended?
       'VISIBILITY_SUSPENDED':r.refresh.lastSeenAt?'PRESENT':'UNOBSERVED';
     r.refresh.nextAttemptAt=Math.max(r.refresh.nextAttemptAt,now+MINUTE);
     return {ok:true,state:out,changes:[{code:'REFRESH_RESERVATION_ABORTED',scopeId:stableId}]};
   },{sync:true});
-  const markDispatch=(claim,now)=>mutate(null,s=>{
+  const dispatchContext=(s,claim,now)=>{
     const r=s.rows.find(x=>x.stableId===claim?.stableId);
     if(!r||r.accountId!==claim.accountId||r.personaUid!==claim.personaUid||
       r.bindingVersion!==claim.bindingVersion||r.releaseFingerprint!==claim.releaseFingerprint||
       !r.ownerVerified||!r.releaseVerified||r.identityHeld||r.reviewHeld||
       r.listing!=='PUBLIC'||s.accounts[r.accountId]?.principalFingerprint!==claim.principalFingerprint||
-      !r.slot||r.phase!=='ACTIVE'||rowBlocks(s,r).length)
+      (!(claim.purpose==='SINGLE_TEST')&&(!r.slot||r.phase!=='ACTIVE'))||
+      rowBlocks(s,r).filter(x=>!(claim.purpose==='SINGLE_TEST'&&x==='ACCOUNT_UNAVAILABLE')).length||
+      (claim.plan&&(r.sourceRefresh?.consent?.revision!==claim.plan.consentRevision||
+        r.sourceRefresh?.restoredHistorical||r.sourceRefresh?.effectiveCurrentFingerprint!==claim.plan.expectedPreSaveFingerprint||
+        (claim.purpose==='RECURRING'&&(!r.sourceRefresh?.scheduleEnabled||r.sourceRefresh?.qualification?.validUntil<=now)))))
       return fail('REFRESH_CONTEXT_CHANGED');
+    return {ok:true};
+  };
+  const markDispatch=(claim,now)=>mutate(null,s=>{
+    const allowed=dispatchContext(s,claim,now);if(!allowed.ok)return allowed;
+    const r=s.rows.find(x=>x.stableId===claim.stableId);
     const packet=dispatchPossible(r.refresh,claim.id,now);
     if(!packet.ok)return packet;
     const out=structuredClone(s);out.rows.find(x=>x.stableId===claim.stableId).refresh=packet.evidence;
     return {ok:true,state:out,changes:[{code:'REFRESH_DISPATCH_POSSIBLE',scopeId:claim.stableId}]};
   },{sync:true});
-  const settleAttempt=(stableId,id,receipt)=>mutate(null,s=>{
+  const checkDispatch=(claim,now)=>mutate(null,s=>{
+    const allowed=dispatchContext(s,claim,now);if(!allowed.ok)return allowed;
+    const r=s.rows.find(x=>x.stableId===claim.stableId);
+    if(r.refresh?.intent?.id!==claim.id||r.refresh.intent.state!=='DISPATCH_POSSIBLE')return fail('REFRESH_INTENT_STALE');
+    return {ok:true,state:structuredClone(s)};
+  },{sync:true});
+  const settleAttempt=(stableId,id,receipt)=>mutate(null,(s,meta,tx)=>{
     const r=s.rows.find(x=>x.stableId===stableId);
     if(!r)return fail('REFRESH_TARGET_UNAVAILABLE');
     const packet=reconcileRefreshAttempt(r.refresh,id,receipt);
     if(!packet.ok)return packet;
     const out=structuredClone(s),row=out.rows.find(x=>x.stableId===stableId);
     row.refresh=packet.evidence;
+    const prior=r.refresh.intent,last=row.refresh.history.at(-1);
+    if(prior?.plan){
+      last.allocationEpoch=prior.allocationEpoch;last.budgetAtSave=prior.budgetAtSave;
+      last.attemptResult=receipt.attemptResult||{ack:'UNKNOWN'};
+      const cfg=r.sourceRefresh;
+      if(cfg){
+        const next={...cfg,revision:cfg.revision+1,lastProof:last,
+          ...(packet.effectVerified?{effectiveCurrentFingerprint:prior.plan.expectedPostSaveFingerprint,
+            lastReceipt:last.marker}:{}),
+          state:packet.effectVerified?(packet.feedState==='PRESENT'?'RECENT_PRESENT':
+            packet.feedState==='ABSENT'?'RECENT_ABSENT':'SOURCE_CONFIRMED_RECENT_UNKNOWN'):
+            packet.evidence.state==='INEFFECTIVE'?'SOURCE_SAVE_INEFFECTIVE':'HELD_UNCERTAIN'};
+        if(!packet.effectVerified||packet.feedState!=='PRESENT')next.scheduleEnabled=false;
+        meta.put({key:'refresh-source:'+r.slug,record:next});row.sourceRefresh=next;
+        if(packet.effectVerified){
+          // Immutable operation-keyed receipt: never rewrite earlier provenance.
+          meta.add({key:'refresh-marker:'+id,record:last.marker});
+          tx.objectStore('events').add({stage:'PCMS_REFRESH_MARKER',...last.marker});
+        }
+      }
+    }
     if(packet.evidence.suspended&&row.slot){
       row.slot=false;if(row.phase==='ACTIVE')row.phase='WAITING';
     }
@@ -337,10 +415,46 @@ export function createRefresherStore(db){
       feedState:packet.feedState},changes:[{code:packet.effectVerified?
       'REFRESH_EFFECT_PROVEN':'REFRESH_EFFECT_HELD',scopeId:stableId}]};
   },{sync:true});
+  async function observeSourceRefresh(stableId,now,reader){
+    const snapshot=await read();if(!snapshot.ok)return snapshot;
+    const row=snapshot.state.rows.find(r=>r.stableId===stableId),cfg=row?.sourceRefresh;
+    if(!row||!cfg)return fail('REFRESH_SOURCE_UNKNOWN');
+    if(row.refresh.intent){
+      const intent=row.refresh.intent;
+      if(intent.state!=='DISPATCH_POSSIBLE')return fail('REFRESH_RESERVATION_PENDING');
+      if(row.refresh.probes>=3||row.refresh.nextAttemptAt>now)return fail('REFRESH_READBACK_BACKOFF');
+      const observed=await reader(intent);
+      return settleAttempt(stableId,intent.id,{...observed,at:now});
+    }
+    if(cfg.lastProof?.effect!=='EFFECT_CONFIRMED'||(row.refresh.feedProbes||0)>=3||
+      row.refresh.nextAttemptAt>now)return fail('RECENT_OBSERVATION_BACKOFF_OR_EXHAUSTED');
+    const observed=await reader({id:cfg.lastProof.id,plan:cfg.lastReceipt});
+    return mutate(null,(s,meta,tx)=>{
+      const r=s.rows.find(x=>x.stableId===stableId),current=r?.sourceRefresh;
+      if(!current||current.revision!==cfg.revision||r.refresh.intent)return fail('STALE_REFRESH_SOURCE');
+      const out=structuredClone(s),target=out.rows.find(x=>x.stableId===stableId),e=target.refresh;
+      e.feedProbes=(e.feedProbes||0)+1;e.nextAttemptAt=now+600000*2**e.feedProbes;
+      const f=observed?.feed,valid=observed?.kind==='EFFECT_CHANGED'&&observed.targetMatched===true&&
+        observed.principalMatched===true&&observed.sourceFingerprint===cfg.effectiveCurrentFingerprint&&
+        f?.independent===true&&f.complete===true&&f.observedAt>=cfg.lastProof.dispatchAt&&
+        f.observedAt>=cfg.lastProof.feed.at&&f.observedAt<=now+60000&&
+        (f.present===false||f.present===true&&Number.isSafeInteger(f.rank)&&f.rank>0&&f.rank<=5000);
+      const feed=valid?{state:f.present?'PRESENT':'ABSENT',at:f.observedAt,rank:f.present?f.rank:null}:
+        {state:'UNKNOWN',at:0,rank:null};
+      const last={...cfg.lastProof,feed};
+      e.history=e.history.map(h=>h.id===last.id?last:h);
+      e.suspended=feed.state!=='PRESENT';e.methodHold=e.suspended?'SOURCE_CONFIRMED_RECENT_'+feed.state:null;
+      const next={...current,lastProof:last,revision:current.revision+1,
+        state:feed.state==='PRESENT'?'RECENT_PRESENT':feed.state==='ABSENT'?'RECENT_ABSENT':'SOURCE_CONFIRMED_RECENT_UNKNOWN'};
+      meta.put({key:'refresh-source:'+r.slug,record:next});target.sourceRefresh=next;
+      tx.objectStore('events').add({stage:'REFRESH_FEED_OBSERVED',operationId:last.id,feed});
+      return {ok:true,state:out,code:next.state,proof:{effectVerified:true,feedState:feed.state}};
+    },{sync:true});
+  }
   const resetRecentBackoff=(expectedRevision,now)=>mutate(expectedRevision,s=>{
     const out=structuredClone(s);out.recent.suspended=false;out.recent.failures=0;
     out.recent.nextDueAt=now+MINUTE;return {ok:true,state:out};
   });
   return Object.freeze({read,list,turn,changePolicy,pause,generatorPolicy,demand,claim,complete,
-    reserveAttempt,cancelReserved,markDispatch,settleAttempt,resetRecentBackoff});
+    reserveAttempt,cancelReserved,markDispatch,checkDispatch,settleAttempt,observeSourceRefresh,resetRecentBackoff});
 }

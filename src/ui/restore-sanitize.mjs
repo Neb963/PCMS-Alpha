@@ -55,6 +55,10 @@ function inertMeta(key,row,remap,existing=null){
     data.state={...data.state,enabled:false,active:null,
       status:'SUSPENDED',code:'RESTORED_KEY_NOT_AUTHORITY'};
   }
+  if(typeof key==='string'&&/^(refresh-source:|refresh-reviewer:|refresh-resource:)/.test(key)&&data.record){
+    data.record={...data.record,restoredHistorical:true,consent:null,qualification:null,
+      scheduleEnabled:false,revoked:true,preview:null,state:'RESTORE_REVIEW_REQUIRED'};
+  }
   if(key==='refresher:shadow:v1'&&data.state){
     const prior=existing?.state||{};
     const oldRows=new Map((prior.rows||[]).map(r=>[r.stableId,r]));
@@ -64,7 +68,7 @@ function inertMeta(key,row,remap,existing=null){
       rows:(data.state.rows||[]).map(r=>({...r,
         paused:r.paused===true||oldRows.get(r.stableId)?.paused===true,
         personaUid:typeof r.personaUid==='string'?
-          (remap[r.personaUid]||null):null,slot:false})),
+          (remap[r.personaUid]||null):null,slot:false,sourceRefresh:null})),
       accounts:Object.fromEntries(Object.entries(data.state.accounts||{})
         .map(([id,a])=>[id,{...a,
           paused:a.paused===true||prior.accounts?.[id]?.paused===true,
