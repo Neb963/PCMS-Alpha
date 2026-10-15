@@ -810,6 +810,54 @@ def main():
                 assert visible.get('freeze') is True,visible
                 persisted=supply_command(after,{'type':'LIST_BATCHES'})
                 assert persisted.get('ok') is True and len(persisted['batches'])==2,persisted
+                # PCMS-ESR-007: exercise the real Work Queue button in an
+                # installed combined XPI. A synthetic verified account has NO
+                # donor protected route: authorization must hold, not dispatch.
+                disposable='pcms-test-browser-confirm-0001'
+                ui_batch=supply_command(after,{'type':'FREEZE','params':{
+                    'batchId':'batch_browser_ui_confirm_0001',
+                    'accountId':'fixture_inventory_01','expectedAccountRevision':2,
+                    'slugs':[disposable]}})
+                assert ui_batch.get('ok') is True,ui_batch
+                assert ui_batch['batch']['items'][0]['state']=='FROZEN',ui_batch
+                call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
+                queue_ready=False
+                for _ in range(50):
+                    queue_ready=execute(after,"return [...document.querySelectorAll('button.pcms-supply-guarded-step')].some(b=>b.getAttribute('aria-label')?.includes('pcms-test-browser-confirm-0001'))")
+                    if queue_ready:break
+                    time.sleep(.15)
+                assert queue_ready,'Exact frozen disposable button not rendered in real Work Queue'
+                opened=execute(after,"""const b=[...document.querySelectorAll('button.pcms-supply-guarded-step')]
+                  .find(x=>x.getAttribute('aria-label')?.includes('pcms-test-browser-confirm-0001'));
+                  b.click();const f=b.nextElementSibling;
+                  return {form:f?.classList.contains('pcms-typed-intent'),
+                    text:f?.textContent,input:f?.querySelector('input')?.value,
+                    fieldFocus:document.activeElement===f?.querySelector('input')};""")
+                assert opened['form'] and opened['fieldFocus'],opened
+                assert 'CREATE '+disposable in opened['text'],opened
+                canceled=execute(after,"""const f=document.querySelector('.pcms-typed-intent');
+                  f.querySelector('button[type=button]').click();
+                  return {gone:!document.querySelector('.pcms-typed-intent')};""")
+                assert canceled['gone'],canceled
+                before=supply_command(after,{'type':'GET_BATCH','params':{
+                    'batchId':'batch_browser_ui_confirm_0001'}})
+                assert before.get('batch',{}).get('items',[{}])[0].get('state')=='FROZEN',before
+                # A nonmatching confirmation must never enter the backend.
+                invalid_form=execute(after,"""const b=[...document.querySelectorAll('button.pcms-supply-guarded-step')]
+                  .find(x=>x.getAttribute('aria-label')?.includes('pcms-test-browser-confirm-0001'));
+                  b.click();const f=document.querySelector('.pcms-typed-intent');
+                  const input=f.querySelector('input');input.value='CREATE wrong-slug';
+                  f.querySelector('button[type=submit]').click();
+                  return {shown:!!document.querySelector('.pcms-typed-intent'),
+                    invalid:input.getAttribute('aria-invalid'),
+                    feedback:f.querySelector('[role=status]').textContent};""")
+                assert invalid_form['shown'] and invalid_form['invalid']=='true',invalid_form
+                assert 'No action authorized' in invalid_form['feedback'],invalid_form
+                execute(after,"document.querySelector('.pcms-typed-intent button[type=button]').click();return true")
+                unchanged=supply_command(after,{'type':'GET_BATCH','params':{
+                    'batchId':'batch_browser_ui_confirm_0001'}})
+                assert unchanged.get('batch',{}).get('items',[{}])[0].get('state')=='FROZEN',unchanged
+                print('B I17_ESR007_REAL_WORK_QUEUE_INLINE_CANCEL_MISMATCH_ZERO_DISPATCH=PASS',flush=True)
                 # I17 B: the real installed combined XPI accepts only exact
                 # disposable pilot names. An existing normal frozen slug must
                 # remain FROZEN without any remote dispatch or extra marker.

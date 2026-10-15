@@ -43,7 +43,8 @@ function paint(items,persisted){
   rows.replaceChildren();
   for(const row of items){
     const tr=document.createElement('tr');
-    for(const value of [String(row.index??'—'),row.slug,row.state,
+    for(const value of [String(row.index??'—'),row.slug,
+        !persisted&&row.state==='FROZEN'?'PREVIEWED':row.state,
         row.reason||'—']){
       const td=document.createElement('td');td.textContent=value;tr.append(td);
     }

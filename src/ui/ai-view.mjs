@@ -170,7 +170,7 @@ async function prepareJob(){
   }catch{jobStatus.textContent='Unknown preparation outcome; refresh canonical receipts before trying again.';}
   finally{busy=false;controls();await refreshJobs();}
 }
-async function nativeCommand(type,step){
+async function nativeCommand(type,step,trigger){
   if(busy||!selectedJob?.ok)return;
   const name=selectedJob.slug,revision=selectedJob.revision;
   const armStep=type==='BEGIN_NATIVE'?step:
@@ -182,7 +182,7 @@ async function nativeCommand(type,step){
     const required=armStep+' '+name;
     const confirmedJob=selectedJob;
     const confirmation=await requestTypedConfirmation(
-      type==='BEGIN_NATIVE'?runNative:freshNative,required,
+      trigger,required,
       'Authorize exactly one guarded AI step. A lost reply requires independent reconciliation, never blind replay.');
     if(confirmation===null)return;
     if(selectedJob!==confirmedJob||selectedJob.revision!==revision){
@@ -231,15 +231,15 @@ async function nativeCommand(type,step){
   }
 }
 advanceNative.addEventListener('click',()=>nativeCommand('ADVANCE_JOB'));
-runNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT1_SEND'));
+runNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT1_SEND',runNative));
 observeNative.addEventListener('click',()=>nativeCommand('PROBE_NATIVE'));
 opfsNative.addEventListener('click',()=>nativeCommand('INSPECT_WORKSPACE'));
-freshNative.addEventListener('click',()=>nativeCommand('VERIFY_FRESH_CHAT2'));
+freshNative.addEventListener('click',()=>nativeCommand('VERIFY_FRESH_CHAT2',undefined,freshNative));
 testNative.addEventListener('click',()=>nativeCommand('RUN_TESTS'));
 repairNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE',
-  selectedJob?.nativeState==='CHAT2_OBSERVED_IDLE'?'CHAT2_REPAIR':'CHAT1_REPAIR'));
-resetNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT2_RESET'));
-chat2Native.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT2_SEND'));
+  selectedJob?.nativeState==='CHAT2_OBSERVED_IDLE'?'CHAT2_REPAIR':'CHAT1_REPAIR',repairNative));
+resetNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT2_RESET',resetNative));
+chat2Native.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT2_SEND',chat2Native));
 async function refreshConcurrency(){
   try{
     const r=await ai('GET_CONCURRENCY');
