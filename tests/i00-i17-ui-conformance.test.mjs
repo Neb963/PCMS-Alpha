@@ -78,7 +78,7 @@ test('I17 guarded operator supply uses exactly one item command and never auto-r
   assert.doesNotMatch(supply,/window\.prompt\(/);
   assert.match(supply,/pendingSteps\.has\(rowKey\)/);
   assert.match(supply,/rowStatus\.setAttribute\('aria-live','polite'\)/);
-  assert.match(supply,/supply\('ARM_DISPOSABLE_TEST'/);
+  assert.match(supply,/supply\('ARM_EXACT_ITEM'/);
   assert.match(supply,/supply\('EXECUTE_ITEM'/);
   assert.match(supply,/expectedRevision:item\.revision/);
   assert.match(supply,/do not blindly retry|do not retry blindly/i);
@@ -105,7 +105,7 @@ test('I17 operator supply presents narrow pilot honestly, without general activa
   assert.match(html,/General creation and Git writes remain held/);
   assert.match(html,/Only a disposable pcms-test- supply item/);
   const supply=await readFile('src/ui/supply-view.mjs','utf8');
-  assert.match(supply,/only exact disposable private tests may be armed/);
+  assert.match(supply,/Each exact private operation requires a fresh account/route check and typed authorization/);
   assert.match(supply,/No external effect yet/);
   assert.match(supply,/Git writes remain held/);
 });
@@ -116,7 +116,7 @@ test('I17 operator private stage requires an explicit disposable arm distinct fr
   assert.match(html,/id="pcms-stage-arm"/);
   assert.match(stage,/requestTypedConfirmation\(arm,expected/);
   assert.doesNotMatch(stage,/window\.prompt\(/);
-  assert.match(stage,/invoke\('ARM_DISPOSABLE_STAGE'/);
+  assert.match(stage,/invoke\('ARM_EXACT_STAGE'/);
   assert.match(stage,/invoke\('STAGE_PRIVATE'/);
   assert.match(stage,/pcms-test-\[a-z0-9-\]/);
   assert.match(boundary,/const stageAuthorized=r=>/);
@@ -150,7 +150,7 @@ test('I17 private staging matches compact prototype control hierarchy and keeps 
 test('I17 private non-READY Git marker requires exact disposable arm and ephemeral token',async()=>{
   const src=await readFile('src/ui/supply-view.mjs','utf8');
   const gate=await readFile('src/runtime/supply-boundary.mjs','utf8');
-  assert.match(src,/supply\('ARM_DISPOSABLE_GIT'/);
+  assert.match(src,/supply\('ARM_EXACT_GIT'/);
   assert.match(src,/supply\('FINISH_SOURCE_FOLDER'/);
   assert.match(src,/credential\.type='password'/);
   assert.match(src,/credential\.value=''/);
@@ -184,7 +184,7 @@ test('I17 operator native AI asks for exact disposable step instead of implying 
   assert.match(aiView,/requestTypedConfirmation\(/);
   assert.match(aiView,/selectedJob!==confirmedJob/);
   assert.doesNotMatch(aiView,/window\.prompt\(/);
-  assert.match(aiView,/await ai\('ARM_DISPOSABLE_AI'/);
+  assert.match(aiView,/await ai\('ARM_EXACT_AI'/);
   assert.match(aiView,/testSlug\.test\(name\)/);
 });
 
@@ -210,7 +210,7 @@ test('I17 operator writeback includes separate one-time private Git authorizatio
   assert.match(b,/pilotClock\(\)\+120000/);
   assert.match(v,/requestTypedConfirmation\(armManual,expected/);
   assert.doesNotMatch(v,/window\.prompt\(/);
-  assert.match(v,/request\('ARM_DISPOSABLE_COMMIT'/);
+  assert.match(v,/request\('ARM_EXACT_COMMIT'/);
   assert.match(b,/if\(pilotMatches\(record\)\)manualPilot=null/);
 });
 
@@ -220,10 +220,11 @@ test('I17 publication requires distinct one-use exact source authorization',asyn
   assert.match(html,/id="pcms-release-arm"/);
   assert.match(svc,/ARM_DISPOSABLE_RELEASE/);
   assert.match(svc,/pilotClock\(\)\+120000/);
-  assert.match(svc,/record.kind==='PRIVATE_NEW'/);
+  assert.match(svc,/record.kind===a.kind/);
+  assert.match(svc,/!\['PRIVATE_NEW','EXISTING_UPDATE'\].includes\(record.kind\)/);
   assert.match(ui,/requestTypedConfirmation\(armBtn,expected/);
   assert.doesNotMatch(ui,/window\.prompt\(/);
-  assert.match(ui,/command\('ARM_DISPOSABLE_RELEASE'/);
+  assert.match(ui,/command\('ARM_EXACT_RELEASE'/);
   assert.match(svc,/if\(pilotMatches\(stored.record\)\)releasePilot=null/);
 });
 
@@ -258,9 +259,27 @@ test('PCMS-ESR-007 F/X: inline exact intent is accessible, cancellable and never
   assert.match(helper,/status\.setAttribute\('aria-live', 'polite'\)/);
   assert.match(helper,/form\.addEventListener\('submit'/);
   assert.doesNotMatch(helper,/browser\.|fetch\(|runtime\.connect/);
-  assert.match(supply,/supply\('ARM_DISPOSABLE_TEST'/);
+  assert.match(supply,/supply\('ARM_EXACT_ITEM'/);
   assert.match(supply,/supply\('EXECUTE_ITEM'/);
   assert.match(supply,/pendingSteps\.delete\(rowKey\)/);
   assert.match(browserHarness,/B I17_ESR007_REAL_WORK_QUEUE_INLINE_CANCEL_MISMATCH_GUARDED_DENIAL_ZERO_DISPATCH=PASS/);
   assert.match(browserHarness,/still_frozen|unchanged\.get\('batch'/);
+});
+
+test('I17 production UI uses exact per-target confirmations for ordinary generator slugs',async()=>{
+  const supply=await readFile('src/ui/supply-view.mjs','utf8');
+  const stage=await readFile('src/ui/staging-view.mjs','utf8');
+  const ai=await readFile('src/ui/ai-view.mjs','utf8');
+  const write=await readFile('src/ui/writeback-view.mjs','utf8');
+  const release=await readFile('src/ui/release-view.mjs','utf8');
+  for(const src of [supply,stage,ai,write,release])
+    assert.doesNotMatch(src,/window\\.(prompt|confirm)\\(/);
+  assert.match(supply,/ARM_EXACT_ITEM/);
+  assert.match(supply,/ARM_EXACT_GIT/);
+  assert.match(supply,/!persisted&&row.state==='FROZEN'\\?'PREVIEWED'/);
+  assert.match(stage,/ARM_EXACT_STAGE/);
+  assert.match(ai,/ARM_EXACT_AI/);
+  assert.match(write,/ARM_EXACT_COMMIT/);
+  assert.match(release,/ARM_EXACT_RELEASE/);
+  assert.doesNotMatch(release,/receipt.state!=='APPROVED'\\|\\|!\\/\\^pcms-test-/);
 });
