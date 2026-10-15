@@ -28,6 +28,7 @@ const publicJob=j=>j?{ok:true,slug:j.slug,revision:j.revision,state:j.state,
   schedulerDeferredUntil:Number.isSafeInteger(j.schedulerDeferredUntil)?
     j.schedulerDeferredUntil:null,
   schedulerHold:typeof j.schedulerHold==='string'?j.schedulerHold:null,
+  autoEnabled:j.automation?.enabled===true,
   chat2IsolationVerified:j.chat2?.state==='FRESH_VERIFIED',
   provider:'NATIVE_AI_HELD_UNTIL_PROVEN',
   github:'NO_AI_WRITEBACK',publication:'OFF'}:fail('AI_JOB_NOT_FOUND');
@@ -99,6 +100,39 @@ export function createAiStore(db){
         m.put({...row,job:next});
         t.objectStore('events').add({stage:'AI_SCHEDULER_DEFERRED',
           slug:slugName,revision:next.revision,until,code});
+        done(publicJob(next));
+      };
+    });
+  }
+  // Durable, revision-fenced operator consent for a SINGLE pinned staged
+  // generator. No credential or route IP is persisted. A restore, source
+  // change, identity rotation or human takeover holds each subsequent step.
+  function setAutomation(slugName,expectedRevision,enabled,scope=null){
+    if(!slug(slugName)||!Number.isSafeInteger(expectedRevision)||
+       expectedRevision<1||typeof enabled!=='boolean'||
+       (enabled&&(!scope||scope.slug!==slugName||
+         !/^[a-f0-9]{64}$/.test(scope.sourceFingerprint||'')||
+         !Number.isSafeInteger(scope.stageRevision)||scope.stageRevision<1||
+         !scope.personaUid||!scope.accountId||!scope.remotePublicId||
+         !scope.principalFingerprint||!scope.nonce)))
+      return Promise.resolve(fail('AI_AUTO_SCOPE_INVALID'));
+    return tx(db,'readwrite',(t,done)=>{
+      const m=t.objectStore('meta');
+      m.get(key(slugName)).onsuccess=e=>{
+        const row=e.target.result,j=row?.job;
+        if(!j){done(fail('AI_JOB_NOT_FOUND'));return;}
+        if(j.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
+        if(enabled&&(j.stageRevision!==scope.stageRevision||
+           j.sourceFingerprint!==scope.sourceFingerprint||
+           ['HELD_RECONCILE','HELD_NO_PROGRESS','HUMAN_OWNED','TESTS_VERIFIED'].includes(j.state)||
+           j.native?.state==='DISPATCH_POSSIBLE'))
+          {done(fail('AI_AUTOMATION_NOT_ELIGIBLE'));return;}
+        const next={...j,revision:j.revision+1,
+          automation:enabled?{...scope,enabled:true,authorizedAt:Date.now()}:null,
+          schedulerDeferredUntil:null,schedulerHold:null};
+        m.put({...row,job:next});
+        t.objectStore('events').add({stage:enabled?'AI_AUTO_EXACT_ARMED':'AI_AUTO_DISARMED',
+          slug:slugName,revision:next.revision});
         done(publicJob(next));
       };
     });
@@ -467,6 +501,6 @@ export function createAiStore(db){
   }
   return Object.freeze({
     getPrompt,changePrompt,getConcurrency,changeConcurrency,exportPrompt,getJob,getJobFull,list,start,record,
-    armNative,observeNative,checkpointSource,recoverNative,deferScheduler,verifySecondChat
+    armNative,observeNative,checkpointSource,recoverNative,deferScheduler,verifySecondChat,setAutomation
   });
 }
