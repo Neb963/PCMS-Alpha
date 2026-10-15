@@ -25,7 +25,7 @@ const PILOT_STEPS=new Set(['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND',
 const ACT=new Set(['GET_PROMPTS','SET_PROMPT','IMPORT_PROMPT','EXPORT_PROMPTS',
   'LIST_JOBS','GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS',
   'GET_CONCURRENCY','SET_CONCURRENCY','ADVANCE_JOB','INSPECT_WORKSPACE',
-  'VERIFY_FRESH_CHAT2','ARM_DISPOSABLE_AI','ARM_EXACT_AI']);
+  'VERIFY_FRESH_CHAT2','ARM_DISPOSABLE_AI','ARM_EXACT_AI','SET_AUTO_JOB']);
 export function validateAiMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;
@@ -39,13 +39,19 @@ export function validateAiMessage(api,sender,message){
     message.type==='PREPARE_JOB'?['slug','expectedStageRevision','token']:
     message.type==='BEGIN_NATIVE'?['slug','expectedRevision','step']:
     ['ARM_DISPOSABLE_AI','ARM_EXACT_AI'].includes(message.type)?['slug','expectedRevision','step','confirmation']:
+    message.type==='SET_AUTO_JOB'?['slug','expectedRevision','enabled','confirmation']:
     ['PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)?['slug','expectedRevision']:
     message.type==='SET_CONCURRENCY'?['perAccount','expectedRevision']:
     message.type==='SET_PROMPT'?['text','tests','expectedRevision']:
     message.type==='IMPORT_PROMPT'?['envelope','expectedRevision']:[];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
-  if(['GET_JOB','PREPARE_JOB','BEGIN_NATIVE','ARM_DISPOSABLE_AI','ARM_EXACT_AI','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&!SLUG.test(p.slug||''))
+  if(['GET_JOB','PREPARE_JOB','BEGIN_NATIVE','ARM_DISPOSABLE_AI','ARM_EXACT_AI','SET_AUTO_JOB','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&!SLUG.test(p.slug||''))
     return fail('INVALID_SLUG');
+  if(message.type==='SET_AUTO_JOB'&&
+     (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
+      typeof p.enabled!=='boolean'||
+      (p.enabled&&(typeof p.confirmation!=='string'||p.confirmation.length>130))||
+      (!p.enabled&&p.confirmation!=null)))return fail('INVALID_PARAMS');
   if(message.type==='PREPARE_JOB'&&
      (!Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
       typeof p.token!=='string'||p.token.length<10||p.token.length>512))
@@ -129,6 +135,67 @@ export function createAiBoundary(api,{
     return {ok:true,scope:p.type==='ARM_DISPOSABLE_AI'?'SINGLE_DISPOSABLE_NATIVE_AI_STEP':'SINGLE_EXACT_NATIVE_AI_STEP',step:p.step,
       expiresInSeconds:120};
   }
+
+  async function changeAutonomy(db,store,p){
+    if(!p.enabled)return store.setAutomation(p.slug,p.expectedRevision,false);
+    if(p.confirmation!=='AUTO AI '+p.slug)
+      return fail('AI_AUTO_EXACT_CONFIRMATION_REQUIRED');
+    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+    const sealed=await store.getJobFull(p.slug);
+    if(!sealed.ok||sealed.job.revision!==p.expectedRevision)
+      return fail('STALE_AI_JOB');
+    const job=sealed.job;
+    const staged=await stageFactory(db).getFull(p.slug);
+    if(!staged.ok)return staged;
+    const r=staged.record;
+    if(r.state!=='SOURCE_VERIFIED'||r.revision!==job.stageRevision||
+       r.slug!==job.slug||job.sourceFingerprint!==r.candidate?.fingerprint||
+       ['HELD_RECONCILE','HELD_NO_PROGRESS','HUMAN_OWNED','TESTS_VERIFIED'].includes(job.state))
+      return fail('AI_AUTO_SOURCE_OR_JOB_UNVERIFIED');
+    const g=guard();
+    if(!g?.getSafeRouteReadiness||!g?.inspectStageEditor||!g?.observeReadOnly)
+      return fail('NATIVE_AI_GUARD_UNAVAILABLE');
+    const route=await g.getSafeRouteReadiness(r.personaUid);
+    if(!route?.ready||!route.cookieStoreId||!route.routeId)
+      return fail(route?.code||'PROTECTED_ROUTE_UNVERIFIED');
+    const editor=await g.inspectStageEditor(r.personaUid,r.slug,r.nonce);
+    if(editor?.ok!==true||editor.clean!==true)return fail('EDITOR_UNKNOWN');
+    const current=await g.observeReadOnly(r.personaUid,false,r.slug);
+    const original=current?.original;
+    if(current?.ok!==true||
+       current.principalFingerprint!==r.principalFingerprint||
+       original?.remotePublicId!==r.remotePublicId||
+       original?.ownerResult!=='IS_OWNER'||original.visibility!=='UNLISTED'||
+       typeof original.pjs!=='string'||typeof original.html!=='string'||
+       !Array.isArray(original.assets))
+      return fail('AI_AUTO_OWNER_OR_SOURCE_UNVERIFIED');
+    const proof=await verifyReadback(r.candidate,{
+      ok:true,source:'DONOR_GUARDED_ORIGINAL_READBACK',slug:r.slug,
+      accountId:r.accountId,personaUid:r.personaUid,
+      principalFingerprint:current.principalFingerprint,
+      remotePublicId:original.remotePublicId,
+      ownerResult:original.ownerResult,visibility:original.visibility,
+      pjs:original.pjs,html:original.html,assets:original.assets
+    },{slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,
+      principalFingerprint:r.principalFingerprint,remotePublicId:r.remotePublicId});
+    if(!proof.ok)return fail('AI_AUTO_SOURCE_DRIFT');
+    const after=await g.getSafeRouteReadiness(r.personaUid);
+    const fresh=await store.getJobFull(p.slug);
+    const stageNow=await stageFactory(db).getFull(p.slug);
+    if(!after?.ready||after.cookieStoreId!==route.cookieStoreId||
+       after.routeId!==route.routeId||!fresh.ok||
+       fresh.job.revision!==job.revision||
+       !stageNow.ok||stageNow.record.revision!==r.revision||
+       (await sentinel.inspect()).held)
+      return fail('AI_AUTO_CONTEXT_CHANGED');
+    const scope={slug:r.slug,sourceFingerprint:r.candidate.fingerprint,
+      stageRevision:r.revision,personaUid:r.personaUid,
+      accountId:r.accountId,remotePublicId:r.remotePublicId,
+      principalFingerprint:r.principalFingerprint,nonce:r.nonce};
+    const armed=await store.setAutomation(p.slug,p.expectedRevision,true,scope);
+    if(armed.ok)try{api.alarms?.create(AI_PROGRESS_ALARM,{periodInMinutes:1});}catch{}
+    return armed;
+  }
   async function executeTrusted(message){
     try{
       const db=await database(),store=storeFactory(db),p=message.params||{};
@@ -142,6 +209,7 @@ export function createAiBoundary(api,{
       if(message.type==='GET_JOB')return store.getJob(p.slug);
       if(['ARM_DISPOSABLE_AI','ARM_EXACT_AI'].includes(message.type))
         return armDisposableAi(db,store,{...p,type:message.type});
+      if(message.type==='SET_AUTO_JOB')return changeAutonomy(db,store,p);
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(message.type==='SET_CONCURRENCY')
         return store.changeConcurrency(p.expectedRevision,p.perAccount);
@@ -624,6 +692,7 @@ export function createAiBoundary(api,{
         // recheck window; a dead protected route must not starve a different
         // healthy account every wake. Durable across event-page suspension.
         if((job.schedulerDeferredUntil||0)>now)continue;
+        if(effectGate({phase:'I10',step:'AUTOMATION',job})!==true)continue;
         const next=planAiStep(job,{oracleNames:AI_BROWSER_ASSERTIONS});
         if(!next.ok)continue;
         // One attempted guarded step per wake, never simultaneous provider
@@ -685,4 +754,23 @@ export function createAiBoundary(api,{
   }
   return Object.freeze({register,run,tick});
 }
-if(typeof browser!=='undefined')createAiBoundary(browser).register();
+// Production: only a separately consented exact job may use the automatic
+// engine. Manual native sends continue to require a short-lived exact arm.
+export function productionAiGate(ctx){
+  if(ctx?.phase!=='I10')return false;
+  if(ctx.step==='AUTOMATION'&&!ctx.job)return true; // alarm admission, not a write
+  const job=ctx.job,scope=job?.automation,r=ctx.stage;
+  if(scope?.enabled!==true)return false;
+  if(!r)return ctx.step==='AUTOMATION'&&scope.slug===job.slug&&
+    scope.stageRevision===job.stageRevision&&
+    scope.sourceFingerprint===job.sourceFingerprint;
+  return r.state==='SOURCE_VERIFIED'&&scope.slug===job.slug&&
+    scope.stageRevision===r.revision&&job.stageRevision===r.revision&&
+    scope.sourceFingerprint===r.candidate?.fingerprint&&
+    scope.accountId===r.accountId&&scope.personaUid===r.personaUid&&
+    scope.remotePublicId===r.remotePublicId&&
+    scope.principalFingerprint===r.principalFingerprint&&scope.nonce===r.nonce;
+}
+if(typeof browser!=='undefined')createAiBoundary(browser,{
+  effectGate:productionAiGate
+}).register();
