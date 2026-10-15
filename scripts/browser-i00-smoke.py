@@ -2035,7 +2035,9 @@ def main():
                     observed.accepted&&absent.present===false&&absent.absence==='NOT_A_DELETION'&&metric.views===1200&&
                     runtimeProof.ok&&runtimeProof.observation==='OBSERVED'&&requests===2&&
                     runtimeState.healthIntervals.length>0&&runtimeState.diagnostics.readPeak<=2&&
-                    isolated.code==='WRONG_ORIGIN'&&injection.ok===false&&activation.code==='MONITOR_ACTIVATION_HELD'&&
+                    isolated.code==='WRONG_ORIGIN'&&injection.ok===false&&
+                     activation.ok===true&&activation.providerEffects==='OFF'&&
+                     activation.observation in ('NO_OBSERVATION_DUE','OBSERVED')&&
                     globalPause.ok&&invalid.code==='STALE_REVISION',
                     exact16,exact64,occupied,replayOccupied:replay.occupied,winners,abort,unchanged,
                     observation:observed.code,runtimeProof,requests,activation,injection,globalPause,invalid,
@@ -2047,7 +2049,7 @@ def main():
                 })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,600)}));"""
                 i12_proof=call('POST',f'/session/{after}/execute/async',{'script':code,'args':[]},timeout=90)
                 assert i12_proof.get('ok') is True,i12_proof
-                print('B I12_PACKAGED_IDB_INTERVAL_CAS_FLEET_OBSERVER_AND_HELD_PORT=PASS',flush=True)
+                print('B I12_PACKAGED_IDB_INTERVAL_CAS_FLEET_OBSERVER_AND_GUARDED_MONITOR=PASS',flush=True)
                 print('B I12_PACKAGED_MEASUREMENTS=',json.dumps(i12_proof['measurement']),flush=True)
                 execute(after,"location.hash='#refresher';document.getElementById('pcms-refresher-query').value='i12-b-';document.getElementById('pcms-refresher-reload').click();return true")
                 ui={}
