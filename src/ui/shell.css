@@ -395,3 +395,28 @@ button.pcms-generator-row-target:hover{text-decoration:underline}
 .pcms-typed-intent [aria-invalid=true]{border-color:var(--bad,#b23e3a)}
 .pcms-typed-intent [role=status]{flex-basis:100%;color:var(--bad,#b23e3a)}
 .pcms-supply-row-status{margin:6px 0 8px;color:var(--muted);overflow-wrap:anywhere}
+
+/* Initial source authoring is an optional exact Git task, not an opaque
+   developer-only textarea. Keep the source review legible and keyboard safe. */
+.pcms-ready-bootstrap{margin:10px 0;max-width:100%;min-width:0;
+  padding:10px 12px;border:1px solid var(--line);border-radius:7px;
+  background:var(--paper);overflow-wrap:anywhere}
+.pcms-ready-bootstrap>summary{cursor:pointer;color:var(--accent);
+  font-size:12px;font-weight:700;line-height:1.45}
+.pcms-ready-bootstrap[open]{display:flex;flex-direction:column;align-items:stretch;gap:10px}
+.pcms-ready-bootstrap>label{display:grid;min-width:0;gap:5px;
+  font-size:12px;font-weight:650;color:var(--muted)}
+.pcms-ready-bootstrap textarea{width:100%;min-height:100px;max-width:100%;
+  resize:vertical;white-space:pre;overflow:auto;
+  font:12px/1.55 var(--mono,monospace);color:var(--ink)}
+.pcms-ready-bootstrap input{width:100%;max-width:100%;min-height:37px}
+.pcms-ready-bootstrap button{min-height:36px;padding:8px 12px;max-width:100%}
+.pcms-ready-bootstrap>[role=status]{color:var(--muted);
+  margin:3px 0;line-height:1.5;overflow-wrap:anywhere}
+@media(min-width:780px){
+  .pcms-ready-bootstrap[open]{display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+  .pcms-ready-bootstrap>summary,
+  .pcms-ready-bootstrap>label:nth-of-type(3),
+  .pcms-ready-bootstrap>[role=status]{grid-column:1/-1}
+}
