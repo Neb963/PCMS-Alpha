@@ -11,7 +11,7 @@ import {internalPcmsGuard} from './persona-guard.mjs';
 export const SUPPLY_PORT='pcms-i06-supply';
 const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM',
   'RECONCILE_ITEM','FINISH_SOURCE_FOLDER','RECONCILE_GIT',
-  'ABORT_PREPARED','ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT']);
+  'ABORT_PREPARED','ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT','ARM_EXACT_ITEM','ARM_EXACT_GIT','ARM_EXACT_ITEM','ARM_EXACT_GIT','ARM_EXACT_ITEM','ARM_EXACT_GIT','ARM_EXACT_ITEM','ARM_EXACT_GIT']);
 const hex=/^[a-f0-9]{64}$/;
 // Only a disposable, explicitly named target may be tested live. This does
 // not qualify general generator supply, Git writeback or publication.
@@ -110,7 +110,7 @@ export function createSupplyBoundary(api,{
     if(item.revision!==p.expectedRevision)return fail('STALE_REVISION');
     if(!['PROVIDER_CONFIRMED','SOURCE_PENDING'].includes(item.state))
       return fail('NOT_ADMISSIBLE');
-    if(!disposable.test(item.requestedSlug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
+    if(p.type==='ARM_DISPOSABLE_GIT'&&!disposable.test(item.requestedSlug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
     if(p.confirmation!=='GIT '+item.requestedSlug)return fail('PILOT_CONFIRMATION_REQUIRED');
     if(gitPilotArm&&pilotClock()<gitPilotArm.expiresAt)return fail('PILOT_ALREADY_ARMED');
     const foundAccount=await s.accounts.get(b.accountId);
@@ -133,7 +133,7 @@ export function createSupplyBoundary(api,{
       bindingVersion:b.bindingVersion,principalFingerprint:accountAgain.account.identity.principalFingerprint,
       remoteId:item.remoteId,routeId:route.routeId,cookieStoreId:route.cookieStoreId,
       expiresAt:pilotClock()+120000};
-    return {ok:true,scope:'SINGLE_DISPOSABLE_NON_READY_GIT_MARKER',expiresInSeconds:120};
+    return {ok:true,scope:'SINGLE_EXACT_NON_READY_GIT_MARKER',expiresInSeconds:120};
   }
   async function armDisposablePilot(s,p){
     const found=await s.supply.get(p.batchId);
@@ -142,7 +142,7 @@ export function createSupplyBoundary(api,{
     if(!item)return fail('ITEM_NOT_FOUND');
     if(item.revision!==p.expectedRevision)return fail('STALE_REVISION');
     if(!['FROZEN','CREATE_CONFIRMED'].includes(item.state))return fail('NOT_ADMISSIBLE');
-    if(!disposable.test(item.requestedSlug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
+    if(p.type==='ARM_DISPOSABLE_TEST'&&!disposable.test(item.requestedSlug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
     const action=item.state==='FROZEN'?'CREATE':'RENAME';
     if(p.confirmation!==action+' '+item.requestedSlug)return fail('PILOT_CONFIRMATION_REQUIRED');
     if(pilotArm&&pilotClock()<pilotArm.expiresAt)return fail('PILOT_ALREADY_ARMED');
@@ -169,7 +169,7 @@ export function createSupplyBoundary(api,{
       cookieStoreId:route.cookieStoreId,routeId:route.routeId,
       expiresAt:pilotClock()+120000};
     return {ok:true,action,slug:item.requestedSlug,expiresInSeconds:120,
-      scope:'SINGLE_DISPOSABLE_STEP_NOT_GENERAL_ACTIVATION'};
+      scope:'SINGLE_EXACT_OPERATOR_STEP'};
   }
   async function frozenPlan(s,p,previewOnly){
     const current=await s.accounts.get(p.accountId);
@@ -485,8 +485,8 @@ export function createSupplyBoundary(api,{
         const out=await s.supply.stage({...p,event:'ABORT_PREPARED'});
         return redacted(out);
       }
-      if(message.type==='ARM_DISPOSABLE_TEST')return await armDisposablePilot(s,p);
-      if(message.type==='ARM_DISPOSABLE_GIT')return await armDisposableGit(s,p);
+      if(['ARM_DISPOSABLE_TEST','ARM_EXACT_ITEM'].includes(message.type))return await armDisposablePilot(s,{...p,type:message.type});
+      if(['ARM_DISPOSABLE_GIT','ARM_EXACT_GIT'].includes(message.type))return await armDisposableGit(s,{...p,type:message.type});
       if(message.type==='RECONCILE_ITEM')return await reconcile(s,p);
       if(message.type==='RECONCILE_GIT')return await reconcileGit(s,p);
       if(message.type==='FINISH_SOURCE_FOLDER')return await finishSource(s,p);

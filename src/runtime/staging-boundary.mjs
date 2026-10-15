@@ -10,7 +10,7 @@ import {inspectGitSource} from './git-source.mjs';
 
 export const STAGING_PORT='pcms-i09-staging';
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
-const actions=new Set(['LIST_STAGES','GET_STAGE','PIN_STAGE','STAGE_PRIVATE','RECONCILE_STAGE','HANDOFF_STAGE','ARM_DISPOSABLE_STAGE']);
+const actions=new Set(['LIST_STAGES','GET_STAGE','PIN_STAGE','STAGE_PRIVATE','RECONCILE_STAGE','HANDOFF_STAGE','ARM_DISPOSABLE_STAGE','ARM_EXACT_STAGE']);
 const disposable=/^pcms-test-[a-z0-9-]{8,88}$/;
 export function validateStagingMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
@@ -24,15 +24,15 @@ export function validateStagingMessage(api,sender,message){
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
   const allowed=message.type==='LIST_STAGES'?[]:
     ['PIN_STAGE','STAGE_PRIVATE'].includes(message.type)?['slug','token','expectedRevision']:
-    message.type==='ARM_DISPOSABLE_STAGE'?['slug','expectedRevision','confirmation']:
+    ['ARM_DISPOSABLE_STAGE','ARM_EXACT_STAGE'].includes(message.type)?['slug','expectedRevision','confirmation']:
     message.type==='GET_STAGE'?['slug']:['slug','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k))||
      (message.type!=='LIST_STAGES'&&!SLUG.test(p.slug||''))||
      (['PIN_STAGE','STAGE_PRIVATE'].includes(message.type)&&
        (typeof p.token!=='string'||p.token.length<10||p.token.length>512))||
-     (['STAGE_PRIVATE','RECONCILE_STAGE','HANDOFF_STAGE','ARM_DISPOSABLE_STAGE'].includes(message.type)&&
+     (['STAGE_PRIVATE','RECONCILE_STAGE','HANDOFF_STAGE','ARM_DISPOSABLE_STAGE','ARM_EXACT_STAGE'].includes(message.type)&&
        (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
-     (message.type==='ARM_DISPOSABLE_STAGE'&&
+     (['ARM_DISPOSABLE_STAGE','ARM_EXACT_STAGE'].includes(message.type)&&
        (typeof p.confirmation!=='string'||p.confirmation.length>120)))
     return fail('INVALID_PARAMS');
   return {ok:true};
@@ -96,7 +96,7 @@ export function createStagingBoundary(api,{
   const stageAuthorized=r=>effectGate({phase:'I09',stage:r})===true||stagePilotMatches(r);
   async function armDisposableStage(s,r,p,g){
     if(r.state!=='PINNED')return fail('STAGE_NOT_PINNED');
-    if(!disposable.test(r.slug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
+    if(p.type==='ARM_DISPOSABLE_STAGE'&&!disposable.test(r.slug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
     if(p.confirmation!=='STAGE '+r.slug)return fail('PILOT_CONFIRMATION_REQUIRED');
     if(pilotArm&&pilotClock()<pilotArm.expiresAt)return fail('PILOT_ALREADY_ARMED');
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
@@ -122,7 +122,7 @@ export function createStagingBoundary(api,{
       nonce:r.nonce,candidateFingerprint:r.candidate.fingerprint,
       gitFingerprint:r.gitFingerprint,routeId:route.routeId,
       cookieStoreId:route.cookieStoreId,expiresAt:pilotClock()+120000};
-    return {ok:true,scope:'SINGLE_DISPOSABLE_PRIVATE_STAGE',expiresInSeconds:120};
+    return {ok:true,scope:'SINGLE_EXACT_PRIVATE_STAGE',expiresInSeconds:120};
   }
   async function statusFor(msg,s){
     const p=msg.params||{};
@@ -159,8 +159,8 @@ export function createStagingBoundary(api,{
     if(!stored.ok)return stored;
     const r=stored.record;
     if(r.revision!==p.expectedRevision)return fail('STALE_REVISION');
-    if(msg.type==='ARM_DISPOSABLE_STAGE')
-      return armDisposableStage(s,r,p,g);
+    if(['ARM_DISPOSABLE_STAGE','ARM_EXACT_STAGE'].includes(msg.type))
+      return armDisposableStage(s,r,{...p,type:msg.type},g);
     if(msg.type==='HANDOFF_STAGE'){
       if(r.state==='HUMAN_OWNED')return {ok:true,state:'HUMAN_OWNED'};
       // Commit durable human intent FIRST. If crash, no automatic cleanup or
