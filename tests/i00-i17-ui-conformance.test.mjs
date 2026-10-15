@@ -110,7 +110,7 @@ test('I17 operator supply presents exact per-operation authorization and uncerta
   assert.match(supply,/Git marker creation requires an additional exact authorization/);
 });
 
-test('I17 operator private stage requires an explicit disposable arm distinct from publication',async()=>{
+test('I17 operator private stage requires exact target arm distinct from publication',async()=>{
   const stage=await readFile('src/ui/staging-view.mjs','utf8');
   const boundary=await readFile('src/runtime/staging-boundary.mjs','utf8');
   assert.match(html,/id="pcms-stage-arm"/);
@@ -118,7 +118,8 @@ test('I17 operator private stage requires an explicit disposable arm distinct fr
   assert.doesNotMatch(stage,/window\.prompt\(/);
   assert.match(stage,/invoke\('ARM_EXACT_STAGE'/);
   assert.match(stage,/invoke\('STAGE_PRIVATE'/);
-  assert.match(stage,/pcms-test-\[a-z0-9-\]/);
+  assert.match(stage,/ARM_EXACT_STAGE/);
+  assert.doesNotMatch(stage,/selected.slug\)\)return;\s*const expected/);
   assert.match(boundary,/const stageAuthorized=r=>/);
   assert.match(boundary,/pilotClock\(\)\+120000/);
   assert.match(boundary,/intent\.revision,'DISPATCH_POSSIBLE'/);
