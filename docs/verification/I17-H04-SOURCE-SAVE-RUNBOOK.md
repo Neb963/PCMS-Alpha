@@ -111,3 +111,11 @@ previous-good P are never silently rewritten by refresh.
 Record H outcome, local source/feed evidence, permission reference, actual XPI
 hash, reviewer identity outside public diagnostics, and first causal failure.
 H-01/H-07 and independent governance review remain separate merge gates.
+
+
+After a source F, owner binding or restored-lineage change, a new independently
+protected preview discards the old consent/test qualification and disables that
+target's schedule. Explicit fresh consent advances the consent epoch; previous
+signatures cannot authorize the new context. Existing exact marker provenance
+is usable only to reconstruct approved bytes, never as transferred authority.
+An unresolved possible save still requires read-only reconciliation first.

@@ -14,6 +14,7 @@ export function validMarkerPlan(p){
   return p?.policy===MARKER_POLICY&&p.anchor==='HTML_BYTE_ZERO'&&opId(p.operationId)&&
     hex(p.approvedBaseFingerprint)&&hex(p.expectedPreSaveFingerprint)&&
     hex(p.expectedPostSaveFingerprint)&&p.expectedPreSaveFingerprint!==p.expectedPostSaveFingerprint&&
+    Number.isSafeInteger(p.consentRevision)&&p.consentRevision>=0&&
     Number.isSafeInteger(p.sequence)&&p.sequence>0&&p.sequence<=4096&&
     p.afterMarker===markerText(p.approvedBaseFingerprint,p.sequence,p.operationId)&&
     typeof p.beforeMarker==='string'&&p.beforeMarker.length<=260&&

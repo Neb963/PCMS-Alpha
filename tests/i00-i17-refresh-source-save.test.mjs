@@ -7,7 +7,7 @@ import {exactSource} from '../src/runtime/staging-core.mjs';
 import {prepareMarker,recognizeMarker,markerReceipt,encodeText,MARKER_POLICY,REFRESH_METHOD} from '../src/runtime/refresh-marker.mjs';
 import {runRefreshOwnedTab} from '../src/runtime/refresh-owned-tab.mjs';
 import {perchanceRefreshMain} from '../src/runtime/perchance-refresh.mjs';
-import {createRefresherProviderAdapter,sourceRefreshProjection} from '../src/runtime/refresher-provider-adapter.mjs';
+import {createRefresherProviderAdapter,sourceRefreshProjection,refreshPreviewAuthority} from '../src/runtime/refresher-provider-adapter.mjs';
 import {emptyRefreshEvidence,reserveRefreshAttempt,dispatchPossible,reconcileRefreshAttempt} from '../src/runtime/refresher-effect-core.mjs';
 import {canonicalJson,verifyRefreshReview,digestReview} from '../src/runtime/refresh-review.mjs';
 import {measureRefreshResources} from '../src/runtime/refresh-resource.mjs';
@@ -262,6 +262,32 @@ test('I17 read-only reconciliation cannot transfer an old marker receipt across 
     {principalFingerprint:'b'.repeat(64)},{approvedBaseFingerprint:'c'.repeat(64)}])
     assert.equal(currentMarkerAuthority(state,{...row,sourceRefresh:{...row.sourceRefresh,...change}},prepared.plan),false);
   assert.equal(currentMarkerAuthority({accounts:{account_one:{verifiedIdentity:true,principalFingerprint:'d'.repeat(64)}}},row,prepared.plan),false);
+});
+
+test('I17 preview cannot transplant source consent, canonical test proof or scheduling qualification to a new binding/F/restored lineage',async()=>{
+  const row={slug,accountId:'account_one',personaUid:'fixture-persona',bindingVersion:1,remoteId,releaseFingerprint:base.fingerprint};
+  const old={policy:MARKER_POLICY,...row,principalFingerprint:principal,approvedBaseFingerprint:base.fingerprint,
+    consent:{revision:1,approvedBaseFingerprint:base.fingerprint},qualification:{reviewDigest:'b'.repeat(64)},
+    scheduleEnabled:true,testAttempted:true,lastProof:{id},lastReceipt:markerReceipt(prepared.plan,10000)};
+  const same=refreshPreviewAuthority(old,row,principal,prepared.post.fingerprint);
+  assert.equal(same.record,old);assert.equal(same.consentRevision,1);
+  const newerFiles=files.map(f=>f.path==='main.pjs'?{...f,base64:encodeText('output = new approved source')}:f),newer=await exactSource(newerFiles);
+  for(const [record,target,identity,source] of [[old,{...row,accountId:'account_other'},principal,prepared.post.fingerprint],
+    [old,{...row,bindingVersion:2},principal,prepared.post.fingerprint],
+    [old,row,'d'.repeat(64),prepared.post.fingerprint],
+    [old,{...row,releaseFingerprint:newer.fingerprint},principal,newer.fingerprint],
+    [{...old,restoredHistorical:true},row,principal,prepared.post.fingerprint],
+    [old,row,principal,base.fingerprint]]){
+    const x=refreshPreviewAuthority(record,target,identity,source);
+    assert.equal(x.record.consent,null);assert.equal(x.record.qualification,null);assert.equal(x.record.scheduleEnabled,false);
+    assert.equal(x.record.lastProof,null);assert.equal(x.record.testAttempted,false);assert.equal(x.consentRevision,2);
+    const candidate=source===newer.fingerprint?newer.blobs:source===base.fingerprint?files:prepared.post.blobs;
+    assert.equal((await prepareMarker(candidate,{approvedBaseFingerprint:target.releaseFingerprint,
+      previous:x.previous,id:'e'.repeat(32),consentRevision:x.consentRevision})).ok,true);
+  }
+  assert.equal(old.scheduleEnabled,true);assert.equal(old.lastReceipt.effectiveCurrentFingerprint,prepared.post.fingerprint);
+  const unknown=await prepareMarker(newerFiles,{approvedBaseFingerprint:base.fingerprint,previous:same.previous,
+    id:'e'.repeat(32),consentRevision:1});assert.equal(unknown.ok,false);
 });
 
 test('I17 redacted source receipt strictly rejects nested private-source/token canaries even from corrupt metadata',()=>{

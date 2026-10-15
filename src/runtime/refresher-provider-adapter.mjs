@@ -76,6 +76,22 @@ export function sourceRefreshProjection(r){
       minimumIntervalMs:safeTime(q.minimumIntervalMs),validUntil:safeTime(q.validUntil),
       approvedBaseFingerprint:safeHash(q.approvedBaseFingerprint),reviewedAt:safeTime(q.reviewedAt)}:null};
 }
+export function refreshPreviewAuthority(record,row,principalFingerprint,observedFingerprint){
+  const same=record?.policy===MARKER_POLICY&&!record.restoredHistorical&&record.consent&&
+    record.slug===row.slug&&record.accountId===row.accountId&&record.personaUid===row.personaUid&&
+    record.bindingVersion===row.bindingVersion&&record.remoteId===row.remoteId&&
+    record.principalFingerprint===principalFingerprint&&record.approvedBaseFingerprint===row.releaseFingerprint;
+  // A separately published exact base F starts a new reviewed lineage. Unknown
+  // functional bytes still fail prepareMarker; old signatures cannot migrate.
+  const resetBase=!!record?.lastReceipt&&observedFingerprint===row.releaseFingerprint;
+  const renew=!same||resetBase;
+  const previous=record?.lastReceipt?.approvedBaseFingerprint===row.releaseFingerprint&&!resetBase?record.lastReceipt:null;
+  const consentRevision=renew?Math.max(record?.consentEpoch||0,record?.consent?.revision||0,
+    record?.lastReceipt?.consentRevision||0)+1:record.consent.revision;
+  const next=renew?{...record,consent:null,qualification:null,scheduleEnabled:false,testAttempted:false,
+    lastProof:null,lastReceipt:previous}:record;
+  return {record:next,previous,consentRevision};
+}
 export function createRefresherProviderAdapter(api,{database,guard,sentinel,clock=Date.now,
   newId=()=>crypto.randomUUID().replaceAll('-','')}={}){
   const sourceStore=async()=>createRefreshSourceStore(await database());
@@ -209,20 +225,21 @@ export function createRefresherProviderAdapter(api,{database,guard,sentinel,cloc
       if(row.refresh?.intent)return fail('REFRESH_PENDING_RECONCILIATION_REQUIRED');
       if(cfg?.testAttempted&&!cfg?.lastReceipt)return fail('REFRESH_TEST_ALREADY_ATTEMPTED');
       const read=await observeSource(claim);if(!read.ok)return read;
+      const authority=refreshPreviewAuthority(cfg,row,account.principalFingerprint,read.source.fingerprint);
       const prepared=await prepareMarker(read.source.blobs,{approvedBaseFingerprint:row.releaseFingerprint,
-        previous:cfg?.lastReceipt,id:newId(),consentRevision:cfg?.consent?.revision||1});
+        previous:authority.previous,id:newId(),consentRevision:authority.consentRevision});
       if(!prepared.ok)return prepared;
       const beforeFeed=await observeFeed(claim);
-      cfg={...cfg,schema:1,policy:MARKER_POLICY,slug:row.slug,accountId:row.accountId,
+      cfg={...authority.record,schema:1,policy:MARKER_POLICY,slug:row.slug,accountId:row.accountId,
         personaUid:row.personaUid,bindingVersion:row.bindingVersion,remoteId:row.remoteId,
         principalFingerprint:account.principalFingerprint,approvedBaseFingerprint:row.releaseFingerprint,
-        effectiveCurrentFingerprint:prepared.pre.fingerprint,state:'TEST_READY',
+        effectiveCurrentFingerprint:prepared.pre.fingerprint,state:'TEST_READY',lastHold:null,consentEpoch:authority.consentRevision,
         preview:{plan:prepared.plan,expiresAt:clock()+300000,consented:false,beforeFeed}};
     }else if(type==='CONSENT_SOURCE_REFRESH'){
-      if(!cfg?.preview||cfg.preview.expiresAt<clock()||cfg.restoredHistorical||
+      if(!cfg?.preview||cfg.preview.expiresAt<clock()||!validMarkerPlan(cfg.preview.plan)||
         p.confirmation!=='CONSENT '+row.slug+' '+row.releaseFingerprint)return fail('MARKER_EXACT_CONSENT_REQUIRED');
-      const revision=cfg.consent?.revision||1;
-      cfg={...cfg,consent:{revision,policy:MARKER_POLICY,anchor:'HTML_BYTE_ZERO',
+      const revision=cfg.preview.plan.consentRevision;
+      cfg={...cfg,restoredHistorical:false,consent:{revision,policy:MARKER_POLICY,anchor:'HTML_BYTE_ZERO',
         approvedBaseFingerprint:row.releaseFingerprint,at:clock()},
         preview:{...cfg.preview,consented:true}};
     }else if(type==='TEST_SOURCE_REFRESH'){

@@ -147,3 +147,11 @@ The code is **not done** if the packaged Refresher still has a null `refreshAdap
 - Final package rebuilt twice identically: SHA-256 `17ae760d60c54c3a88069a5189428d2df986dc12aea0c81d10243e3b0fa80231`; Gecko ID `persona-route-manager@local`. Final exact-head required CI and external delivery binding are pending publication of this checkpoint; no merge or H PASS.
 
 - Preflight cancellation now persists its safe causal hold and clears only the unconsumed preview. Source receipt/UI show the next bounded read-only observation time and remaining budget; failed or ambiguous native attempts remain consumed. No further runtime changes planned before exact-head CI.
+
+
+### Authority-renewal regression closed
+
+- Runtime checkpoint `e2992f5e72dad643fd50c9b0bdec2c78f7289aa4` / tree `90e622312808e9f63109c7890e6ad3402feeda99` verified remote and independently green in [CI 38804020022](https://github.com/Neb963/PCMS-Alpha/actions/runs/38804020022): baseline `116660077554`, fast/donor/reproducibility `116660077244`, Firefox `116660475202`, pcms-required `116661529307`, all SUCCESS. That candidate's XPI hash is the historical `17ae760d60c54c3a88069a5189428d2df986dc12aea0c81d10243e3b0fa80231`.
+- Final review found a context-renewal edge: preview merged an old record while replacing its owner/F fields. It now drops old consent, canonical test proof, qualification and schedule enablement when those authority fields change, the exact base F is separately republished, or history was restored. A fresh preview/typed consent uses a monotonically newer consent epoch; it cannot reuse the old signature. Exact marker provenance remains available only for byte reconstruction. A restored flag is cleared only by that fresh explicit consent after independent protected preview and the existing restore gate.
+- New F/X renewal matrix covers account/binding/principal/F/restore/base-reset changes, positive same-lineage continuity and unknown functional drift rejection. **415/415 fast PASS** (~4.7 s). No Supply/donor/trust-root changes.
+- Revised package rebuilt twice identically: SHA-256 `c4361e704006235affaa6e24cfe7171cf39e1378091c5970726cd35efdcbf871`. This supersedes the previous candidate hash; final native/UI/cold-wake and exact-head CI binding follow below when executed.
