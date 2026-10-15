@@ -1,3 +1,4 @@
+import {requestTypedConfirmation,requestExplicitConfirmation} from './typed-confirm.mjs';
 // I11 operator Git-only writeback. Credentials and source bytes never enter
 // extension URLs or local storage; each command reports its exact outcome.
 const get=id=>document.getElementById(id);
@@ -119,10 +120,9 @@ prepare.addEventListener('click',()=>transact(async()=>{
 armManual.addEventListener('click',()=>transact(async()=>{
   if(!receipt?.ok||receipt.state!=='PREPARED')return;
   const expected='GIT COMMIT '+receipt.slug;
-  const confirmation=window.prompt('Type '+expected+
-    ' to authorize only one nonforced Git write of the tested source F:', '');
+  const confirmation=await requestTypedConfirmation(armManual,expected,
+    'Authorize only one nonforced private Git commit of the exact tested source F. No automatic retry.');
   if(confirmation===null)return;
-  if(confirmation!==expected){announce('Exact confirmation mismatch. No Git write.');return;}
   const armed=await request('ARM_DISPOSABLE_COMMIT',{
     slug:receipt.slug,expectedRevision:receipt.revision,confirmation});
   announce(armed?.ok?'Single disposable Git commit armed for two minutes. Click Commit to execute.':
@@ -131,7 +131,8 @@ armManual.addEventListener('click',()=>transact(async()=>{
 commit.addEventListener('click',()=>transact(async()=>{
   if(!receipt?.ok||receipt.state!=='PREPARED')return;
   const name=receipt.slug;
-  if(!window.confirm('Commit this exact tested source F to private Git? A lost response requires read-only reconciliation.'))return;
+  if(!await requestExplicitConfirmation(commit,
+    'Commit this exact tested source F to private Git once? A lost reply requires read-only reconciliation.'))return;
   const r=await request('COMMIT',{slug:name,token:token.value,
     expectedRevision:receipt.revision});
   if(r?.ok){showReceipt(r);return;}

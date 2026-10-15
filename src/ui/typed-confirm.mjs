@@ -56,3 +56,35 @@ export function requestTypedConfirmation(trigger, expected, description) {
   active.set(trigger, result);
   return result;
 }
+
+export function requestExplicitConfirmation(trigger, description) {
+  if (active.has(trigger)) return active.get(trigger);
+  if (!trigger?.isConnected) return Promise.resolve(false);
+  const pending = new Promise(resolve => {
+    const wasDisabled=trigger.disabled;
+    trigger.disabled=true;
+    const form=document.createElement('form');
+    form.className='pcms-typed-intent';
+    form.setAttribute('aria-label','Confirm one guarded action');
+    const explanation=document.createElement('p');
+    explanation.textContent=description;
+    const approve=document.createElement('button');
+    approve.type='submit';approve.textContent='Proceed once';
+    const cancel=document.createElement('button');
+    cancel.type='button';cancel.textContent='Cancel';
+    function finish(ok) {
+      form.remove();
+      trigger.disabled=wasDisabled;
+      if(trigger.isConnected)trigger.focus();
+      resolve(ok);
+    }
+    form.addEventListener('submit',event=>{event.preventDefault();finish(true);});
+    cancel.addEventListener('click',()=>finish(false));
+    form.append(explanation,approve,cancel);
+    trigger.insertAdjacentElement('afterend',form);
+    cancel.focus();
+  });
+  const result=pending.finally(()=>active.delete(trigger));
+  active.set(trigger,result);
+  return result;
+}

@@ -1,3 +1,4 @@
+import {requestTypedConfirmation} from './typed-confirm.mjs';
 // I13 Work Queue inspector: fingerprints and test provenance, never source
 // bytes or credentials. Pending and disconnected outcomes never claim publish.
 const slug=document.getElementById('pcms-release-slug');
@@ -194,10 +195,11 @@ cancelBtn.addEventListener('click',()=>{
 armBtn.addEventListener('click',async()=>{
   if(active||receipt?.state!=='APPROVED')return;
   const expected='PUBLISH '+receipt.slug+' '+receipt.sourceFingerprint;
-  const confirmation=window.prompt('Type exactly '+expected+
-    ' to permit ONE publication of this private tested source F:', '');
+  const pinned=receipt;
+  const confirmation=await requestTypedConfirmation(armBtn,expected,
+    'Authorize one individual public release of the exact approved private tested source F. Never retry an uncertain publication.');
   if(confirmation===null)return;
-  if(confirmation!==expected){note('Exact-source confirmation mismatch. No provider effect.');return;}
+  if(receipt!==pinned){note('Release receipt changed. Authorization not sent.');return;}
   active=true;controls();
   try{
     const result=await command('ARM_DISPOSABLE_RELEASE',{

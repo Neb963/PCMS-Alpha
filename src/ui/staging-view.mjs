@@ -1,3 +1,4 @@
+import {requestTypedConfirmation,requestExplicitConfirmation} from './typed-confirm.mjs';
 // I09 operator-only private source inspector. No source bytes, credentials,
 // provider tokens or browser tab identities are rendered or retained.
 const el=id=>document.getElementById(id);
@@ -106,19 +107,23 @@ pin.addEventListener('click',()=>{
   invoke('PIN_STAGE',{slug:slug.value,token:t},
     'Rechecking Git HEAD/READY, current protected owner and empty private source…');
 });
-arm.addEventListener('click',()=>{if(!selected||!/^pcms-test-[a-z0-9-]{8,88}$/.test(selected.slug))return;
-  const expected='STAGE '+selected.slug;
-  const confirmation=window.prompt('Type '+expected+' to authorize ONE guarded private staging write (no public listing, no retry):','');
+arm.addEventListener('click',async()=>{if(!selected||!/^pcms-test-[a-z0-9-]{8,88}$/.test(selected.slug))return;
+  const pinned=selected,expected='STAGE '+pinned.slug;
+  const confirmation=await requestTypedConfirmation(arm,expected,
+    'Authorize one protected private stage operation on the pinned exact source. No public listing or automatic retry.');
   if(confirmation===null)return;
-  if(confirmation!==expected){announce('Confirmation mismatch. No remote action.');return;}
-  invoke('ARM_DISPOSABLE_STAGE',{slug:selected.slug,expectedRevision:selected.revision,confirmation},
+  if(selected!==pinned){announce('Pinned stage target changed. No authorization sent.');return;}
+  invoke('ARM_DISPOSABLE_STAGE',{slug:pinned.slug,expectedRevision:pinned.revision,confirmation},
     'Checking exact pinned target, owner, protected Persona route and restore state…');
 });
-start.addEventListener('click',()=>{if(!selected)return;
-  if(!window.confirm('Stage private '+selected.slug+' once? A lost reply is uncertain; reconcile rather than retry.'))return;
+start.addEventListener('click',async()=>{if(!selected)return;
+  const pinned=selected;
+  if(!await requestExplicitConfirmation(start,
+    'Stage '+pinned.slug+' privately once? A lost reply is uncertain; reconcile rather than retry.'))return;
+  if(selected!==pinned){announce('Stage target changed. No dispatch sent.');return;}
   const t=token.value;token.value='';
-  invoke('STAGE_PRIVATE',{slug:selected.slug,token:t,
-    expectedRevision:selected.revision},
+  invoke('STAGE_PRIVATE',{slug:pinned.slug,token:t,
+    expectedRevision:pinned.revision},
     'Revalidating current READY, guard and durable stage intent…');
 });
 reconcile.addEventListener('click',()=>selected&&invoke('RECONCILE_STAGE',{

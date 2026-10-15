@@ -1,3 +1,4 @@
+import {requestTypedConfirmation} from './typed-confirm.mjs';
 // I10 operator UI: immutable prompt versions, bounded source-bound jobs.
 // Never send page code, proof objects, session identifiers or privileged Git commands.
 const id=s=>document.getElementById(s);
@@ -179,10 +180,14 @@ async function nativeCommand(type,step){
       jobStatus.textContent='Live native AI testing requires a disposable pcms-test- generator.';return;
     }
     const required=armStep+' '+name;
-    const confirmation=window.prompt('Type '+required+
-      ' to authorize ONE guarded AI step. If the acknowledgment is lost, reconcile; never blindly repeat:','');
+    const confirmedJob=selectedJob;
+    const confirmation=await requestTypedConfirmation(
+      type==='BEGIN_NATIVE'?runNative:freshNative,required,
+      'Authorize exactly one guarded AI step. A lost reply requires independent reconciliation, never blind replay.');
     if(confirmation===null)return;
-    if(confirmation!==required){jobStatus.textContent='Confirmation mismatch. Nothing sent.';return;}
+    if(selectedJob!==confirmedJob||selectedJob.revision!==revision){
+      jobStatus.textContent='Selected AI job changed. No operation authorized.';return;
+    }
     busy=true;controls();
     try{
       const armed=await ai('ARM_DISPOSABLE_AI',{

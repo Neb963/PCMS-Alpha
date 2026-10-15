@@ -381,3 +381,17 @@ button.pcms-generator-row-target:hover{text-decoration:underline}
 .pcms-wb-advanced button{min-height:35px;padding:7px 11px}
 #pcms-writeback-status,#pcms-release-status{min-height:28px;overflow-wrap:anywhere}
 @media(max-width:460px){.pcms-wb-advanced button{flex:1 1 130px}}
+
+/* I17 inline exact-intent receipts: always visible within the active workflow. */
+.pcms-typed-intent{display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  border:1px solid var(--line);border-left:3px solid var(--accent);
+  border-radius:6px;margin:8px 0;padding:11px;background:var(--paper);
+  max-width:100%;overflow-wrap:anywhere}
+.pcms-typed-intent p{flex-basis:100%;margin:0;color:var(--muted)}
+.pcms-typed-intent label{display:grid;gap:5px;flex:1 1 260px;min-width:0;
+  font-weight:600;overflow-wrap:anywhere}
+.pcms-typed-intent input{width:100%;min-width:0;padding:7px;
+  border:1px solid var(--line);border-radius:4px;font-family:var(--mono,monospace)}
+.pcms-typed-intent [aria-invalid=true]{border-color:var(--bad,#b23e3a)}
+.pcms-typed-intent [role=status]{flex-basis:100%;color:var(--bad,#b23e3a)}
+.pcms-supply-row-status{margin:6px 0 8px;color:var(--muted);overflow-wrap:anywhere}
