@@ -324,7 +324,7 @@
         "UI"
       ],
       "effectCapabilityPolicy": "READ_ONLY",
-      "scope": "Explicit folder↔generator association, full tree/READY/test-input inspection, reject hostile paths and relevant HEAD drift; empty main yields GITHUB_UNINITIALIZED.",
+      "scope": "Explicit folder\u2194generator association, full tree/READY/test-input inspection, reject hostile paths and relevant HEAD drift; empty main yields GITHUB_UNINITIALIZED.",
       "proof": "Fake Git DAG and path collisions/reincarnation, absent HEAD, READY revocation, irrelevant vs relevant drift.",
       "fallback": "Absent Git main or ambiguous tree => SOURCE_PENDING, no writeback.",
       "forbiddenClaim": "Private per-gens initialized or READY automatically granted.",
@@ -880,7 +880,7 @@
       ],
       "effectCapabilityPolicy": "PER_CAPABILITY",
       "scope": "Cross-system fault chains, accessibility, 50+/1,000+ measured envelope, clean build/installation, guided checklist with Markdown fallback and late operator acceptance.",
-      "proof": "All P56 composites and honest H-01/H-07, H-06 only if migration claimed, H-02–05 conditional residual unknowns.",
+      "proof": "All P56 composites and honest H-01/H-07, H-06 only if migration claimed, H-02\u201305 conditional residual unknowns.",
       "fallback": "Critical failures prevent aggregate product claim; independent capabilities remain scoped OFF/HELD.",
       "forbiddenClaim": "H tests performed from CI or capability enabled without necessary real proof.",
       "primaryRequirements": [
@@ -902,5 +902,18 @@
     "statedBy": "operator separate from Stage 7 design sign-off",
     "noLiveProviderEffects": true,
     "acceptance": "IN_PROGRESS_NOT_ACCEPTED"
+  },
+  "currentImplementationAuthorization": {
+    "authorizedOn": "2026-10-15",
+    "scope": [
+      "I17"
+    ],
+    "amendment": "docs/implementation/I17-AUTHORIZATION-2026-10-15.md",
+    "productionWiring": true,
+    "operatorLiveTesting": "EXPLICIT_EXACT_OPERATIONS",
+    "codingAgentLiveProviderEffects": false,
+    "codingAgentFirefoxDevMcp": false,
+    "HAcceptance": "PENDING_INDEPENDENT_OPERATOR_EVIDENCE",
+    "merge": "HELD_UNTIL_REQUIRED_INDEPENDENT_ACCEPTANCE"
   }
 }

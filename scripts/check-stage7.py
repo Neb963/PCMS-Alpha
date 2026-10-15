@@ -7,6 +7,8 @@ import json
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ALIASES = {
     "AGENTS.md": "docs/audit/stage7-originals/AGENTS.md",
+    "docs/implementation/PHASES.md": "docs/audit/stage7-originals/docs--implementation--PHASES.md",
+    "docs/engineering/AGENT-PROTOCOL.md": "docs/audit/stage7-originals/docs--engineering--AGENT-PROTOCOL.md",
     "README.md": "docs/audit/stage7-originals/README.md",
     "docs/implementation/plan.json": "docs/audit/stage7-originals/docs--implementation--plan.json",
 }
