@@ -64,6 +64,8 @@ These are isolated point samples, not provider allowances, production throughput
 
 All runtime files whose names contain Supply remain byte-identical to initial PR head `4787240733862f114f38f133e31786a204cb3f4c`. The earlier CI failure `I06_EFFECT_IDB_PROBE_FAILED: RENAME admission INVALID_PARAMS` predates this task. Its first cause was a browser fixture throwing on the paused repair's new read-only PREFLIGHT_CREATE/RENAME v2 contract; Create failed, then Rename received an undefined revision. Only the obsolete fixture was repaired, and the causal Create error is now reported explicitly.
 
+A later documentation-only CI rerun (`38805968990`, Firefox job `116667189398`) exposed a harness startup race before source tests: install acknowledgement preceded allocation/persistence of the extension UUID. Fixture setup now waits up to five seconds for the actual mapping, saves it, and verifies exact disk persistence before restarting Firefox. It does not retry installation or any effect. The final repaired-harness head/CI is bound in `PROVENANCE.json`; the XPI bytes remain identical.
+
 All 29 signed originals and all 223 original donor files/pinned tree verify unchanged. Required workflows, permissions, required-job aggregation and donor source are unchanged. The additive dated amendment records the operator's narrow comment-only save clarification without re-signing archived specifications.
 
 ## Remaining external acceptance

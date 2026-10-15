@@ -61,9 +61,19 @@ def seed_refresher_network(session, profile, proxy_port):
     # Configure ONLY a disposable local protected proxy before process restart.
     # Raw fixture storage seed is not an application command or production API.
     call('POST',f'/session/{session}/moz/context',{'context':'chrome'})
+    # moz/addon/install returns before asynchronous WebExtension startup may
+    # allocate its UUID. Wait for that read-only identity barrier, then persist
+    # and verify it on disk. Never retry installation or infer an absent ID.
+    mapping={}
+    for _ in range(100):
+        mapping=execute(session,"return JSON.parse(Services.prefs.getStringPref('extensions.webextensions.uuids','{}')); ")
+        if ID in mapping: break
+        time.sleep(.05)
+    else: raise RuntimeError('Installed Gecko ID did not acquire its UUID within the startup bound')
     execute(session,'Services.prefs.savePrefFile(null); return true;')
     call('POST',f'/session/{session}/moz/context',{'context':'content'})
     uuid=addons_uuid(profile)
+    assert uuid==mapping[ID], 'Installed UUID did not persist exactly'
     call('POST',f'/session/{session}/url',{'url':f'moz-extension://{uuid}/pcms/index.html'})
     code="""const done=arguments[arguments.length-1];
     (async()=>{
