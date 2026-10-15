@@ -104,7 +104,7 @@ export async function writeInitialReadySource({slug,pjs,html,token,expectedHead,
       head:commit,baseHead:expectedHead,fingerprint};
   }catch{return uncertain();}
 }
-export async function inspectInitialReadySource({slug,token,expectedHead,fingerprint}={},
+export async function inspectInitialReadySource({slug,token,expectedHead,fingerprint,files}={},
   inspect=inspectGitSource,transport=fetch){
   if(!slugOK(slug)||!tokenOK(token)||!sha.test(expectedHead||'')||
     !/^[a-f0-9]{64}$/.test(fingerprint||''))return bad('READY_RECONCILE_INVALID');

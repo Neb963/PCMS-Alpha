@@ -36,7 +36,7 @@ function fakeGit({drift=false,collision=false,wrongMarker=false,uncertain=false}
     if(method==='GET'&&path.startsWith('/git/blobs/'))
       return good({sha:path.slice('/git/blobs/'.length),encoding:'base64',
         content:uploaded.get(path.slice('/git/blobs/'.length))});
-    if(method==='POST'&&path==='/git/blobs/'){
+    if(method==='POST'&&path==='/git/blobs'){
       posts++;const id=shaList[index++];uploaded.set(id,JSON.parse(options.body).content);
       return good({sha:id});
     }
