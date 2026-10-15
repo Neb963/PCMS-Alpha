@@ -40,7 +40,7 @@
         <header class="workspace-head"><div><p class="eyebrow">Fleet / Overview</p><h1 id="heading-overview" tabindex="-1">Overview</h1><p>Exceptions, active work and account health.</p></div><div class="pcms-head-actions"><a class="pcms-overview-action" href="#work-queue">Work queue</a><a class="pcms-overview-action" href="#generators">Generators</a></div></header>
         <div class="pcms-overview-signals" aria-label="Current local evidence">
           <div class="pcms-signal"><span>Inventory</span><p id="pcms-overview-inventory" role="status" aria-live="polite">Inventory counts pending. No live owner status inferred.</p></div>
-          <div class="pcms-signal"><span>Refresher</span><p id="pcms-overview-refresher" role="status">Shadow timing pending; mutations OFF.</p></div>
+          <div class="pcms-signal"><span>Refresher</span><p id="pcms-overview-refresher" role="status">Protected Refresher status pending.</p></div>
           <div class="pcms-signal"><span>Backups</span><p id="pcms-overview-backup" role="status" aria-live="polite">Manual backup receipt not yet inspected.</p></div>
           <div class="pcms-signal"><span>Restore guard</span><p id="pcms-overview-restore" role="status" aria-live="polite">Restore guard not yet inspected; controller activation unverified.</p></div>
         </div>
@@ -367,7 +367,7 @@
         </div>
         <section class="panel pcms-refresher-main" aria-label="Refresher queue and controls">
           <div class="panel-head"><h2>Global queue</h2><span class="unknown" id="pcms-refresher-mode">Planning only</span></div>
-          <div class="pcms-refresher-alert"><span id="pcms-refresher-provider">Provider status unknown · mutating refresh held</span><details class="pcms-inline-help"><summary>Why?</summary><p id="blocked-refresher">Live refresh remains held until an independently permissible, effective provider method is proven. Shadow calculations never save or unlist.</p></details></div>
+          <div class="pcms-refresher-alert"><span id="pcms-refresher-provider">Provider status unknown · mutating refresh held</span><details class="pcms-inline-help"><summary>Why?</summary><p id="blocked-refresher">An exact-source marker test requires your separate consent and one-attempt confirmation. Recurring saves require reviewed H-04 evidence, resource safeguards and target opt-in. Timing calculations never authorize a save or unlisting.</p></details></div>
           <p id="pcms-refresher-summary" class="sr-only" role="status">Canonical capacity pending; no remote visibility promised.</p>
           <p id="pcms-refresher-status" class="pcms-refresher-feedback" role="status" aria-live="polite">Reading local schedule…</p>
           <div class="pcms-refresher-account-controls">
@@ -388,7 +388,7 @@
             <label for="pcms-refresher-query" class="sr-only">Search generator or account</label><input id="pcms-refresher-query" type="search" maxlength="80" placeholder="Find generator or account…">
             <label for="pcms-refresher-phase">Phase</label><select id="pcms-refresher-phase"><option value="ALL">All</option><option value="WAITING">Waiting</option><option value="ACTIVE">Active</option><option value="SLEEPING">Sleeping</option></select>
           </div>
-          <div class="table-wrap pcms-refresher-table" role="region" aria-label="Canonical shadow scheduling queue" tabindex="0">
+          <div class="table-wrap pcms-refresher-table" role="region" aria-label="Canonical scheduling queue" tabindex="0">
             <table><thead><tr><th scope="col">Generator</th><th scope="col">Account</th><th scope="col">Time budget / hold</th><th scope="col">Order</th><th scope="col">Recent list</th></tr></thead><tbody id="pcms-refresher-rows"></tbody></table>
           </div>
           <div class="pcms-refresher-pager"><button type="button" id="pcms-refresher-prev" disabled>Previous</button><span id="pcms-refresher-page"></span><button type="button" id="pcms-refresher-next" disabled>Next</button></div>
@@ -399,6 +399,38 @@
         <section class="panel" id="pcms-refresher-inspector" hidden>
           <div class="panel-head"><h2>Generator timing</h2><span class="unknown">Individual policy</span></div>
           <p id="pcms-refresher-selected"></p><p id="pcms-refresher-metric"></p>
+          <div class="pcms-refresh-source" aria-labelledby="pcms-refresher-source-heading">
+            <h3 id="pcms-refresher-source-heading">Source-save refresh</h3>
+            <p>Preview one replaceable HTML comment on this exact published source. Consent covers this marker only. Saving and appearing in a recent-list snapshot are separate results.</p>
+            <p id="pcms-refresher-source-status" role="status" aria-live="polite">Load the selected generator's source-marker eligibility.</p>
+            <p id="pcms-refresher-source-fingerprint" class="pcms-source-fingerprint"></p>
+            <pre id="pcms-refresher-source-diff" tabindex="0" role="region" aria-label="Exact marker-only HTML diff">No preview captured.</pre>
+            <div class="account-controls">
+              <button type="button" id="pcms-refresher-source-preview">Preview marker</button>
+              <button type="button" id="pcms-refresher-source-consent" disabled>Consent to marker</button>
+              <button type="button" id="pcms-refresher-source-test" disabled>Test one refresh</button>
+              <button type="button" id="pcms-refresher-source-observe" disabled>Reconcile / observe only</button>
+              <button type="button" id="pcms-refresher-source-load">Reload receipt</button>
+              <button type="button" id="pcms-refresher-source-export" disabled>Export redacted receipt</button>
+            </div>
+            <p id="pcms-refresher-source-result">No save attempted.</p>
+            <details class="pcms-technical-help"><summary>Qualify and opt in to recurring scheduling</summary>
+              <p>A reviewer must independently assess the observed test, permission for repeated marker saves and measured resource limits. Pin their public key by its independently checked fingerprint, then import their signed H-04 receipt. Qualification applies only to this target and policy. Pauses and source holds still apply.</p>
+              <div class="account-controls">
+                <button type="button" id="pcms-refresher-source-measure">Measure local resource fixture</button>
+                <button type="button" id="pcms-refresher-source-challenge" disabled>Export review challenge</button>
+                <button type="button" id="pcms-refresher-source-schedule" disabled>Enable this target's schedule</button>
+                <button type="button" id="pcms-refresher-source-revoke" disabled>Revoke qualification</button>
+              </div>
+              <p id="pcms-refresher-source-review-state">No qualified recurring scope.</p>
+              <label for="pcms-refresher-source-key">Reviewer public JWK JSON</label>
+              <textarea id="pcms-refresher-source-key" rows="3" maxlength="1500" spellcheck="false"></textarea>
+              <button type="button" id="pcms-refresher-source-trust">Pin reviewer key</button>
+              <label for="pcms-refresher-source-review">Signed H-04 receipt JSON</label>
+              <textarea id="pcms-refresher-source-review" rows="4" maxlength="12000" spellcheck="false"></textarea>
+              <button type="button" id="pcms-refresher-source-import">Verify signed receipt</button>
+            </details>
+          </div>
           <details class="pcms-technical-help"><summary>Qualify a meaningful source update</summary>
             <p>Capture a public baseline, then use the existing-source update, tests and exact-source publication workflow. No automatic save is performed here. PCMS independently compares persisted bytes and recent-list presence. This observation cannot enable recurring fleet refresh.</p>
             <div class="account-controls"><button type="button" id="pcms-refresher-qualify-begin">Capture public baseline</button><button type="button" id="pcms-refresher-qualify-observe" disabled>Observe update result</button><button type="button" id="pcms-refresher-qualify-load">Load qualification receipt</button></div>

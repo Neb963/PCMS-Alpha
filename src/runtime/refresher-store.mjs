@@ -13,7 +13,7 @@ const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
 function transact(db,mode,fn){
   return new Promise((resolve,reject)=>{
     let tx,result=fail('REFRESHER_TRANSACTION_INCOMPLETE');
-    try{tx=db.transaction(mode==='readonly'?['meta']:['meta','events'],mode);}
+    try{tx=db.transaction(mode==='readonly'?['meta']:['meta','events','observations'],mode);}
     catch{return reject(Error('REFRESHER_DB_UNAVAILABLE'));}
     tx.oncomplete=()=>resolve(result);tx.onabort=()=>reject(Error('REFRESHER_DB_ABORTED'));
     tx.onerror=()=>{};
@@ -87,6 +87,7 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
   return {ok:true,revision:s.revision,mode:'SHADOW_ONLY',providerEffects:'OFF',items,
     total:match.length,occupied:s.rows.filter(r=>r.slot).length,
     eligible:s.rows.filter(r=>r.phase==='WAITING'&&!rowBlocks(s,r).length&&!r.readyUpdate).length,
+    enabledTargets:s.rows.filter(r=>r.sourceRefresh?.scheduleEnabled).length,
     visibilitySuspended:s.rows.filter(r=>r.refresh?.suspended).length,
     capacity:effectiveCapacity(s,now),provider:s.provider,globalPause:s.globalPause,
     accounts:Object.entries(s.accounts).map(([id,a])=>({accountId:id,paused:a.paused,
@@ -403,7 +404,7 @@ export function createRefresherStore(db){
         meta.put({key:'refresh-source:'+r.slug,record:next});row.sourceRefresh=next;
         if(packet.effectVerified){
           // Immutable operation-keyed receipt: never rewrite earlier provenance.
-          meta.add({key:'refresh-marker:'+id,record:last.marker});
+          tx.objectStore('observations').add({id:'refresh_marker_'+id,...last.marker});
           tx.objectStore('events').add({stage:'PCMS_REFRESH_MARKER',...last.marker});
         }
       }
@@ -412,7 +413,7 @@ export function createRefresherStore(db){
       row.slot=false;if(row.phase==='ACTIVE')row.phase='WAITING';
     }
     return {ok:true,state:out,proof:{effectVerified:packet.effectVerified,
-      feedState:packet.feedState},changes:[{code:packet.effectVerified?
+      feedState:packet.feedState,effectState:packet.evidence.state},changes:[{code:packet.effectVerified?
       'REFRESH_EFFECT_PROVEN':'REFRESH_EFFECT_HELD',scopeId:stableId}]};
   },{sync:true});
   async function observeSourceRefresh(stableId,now,reader){

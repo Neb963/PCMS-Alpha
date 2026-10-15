@@ -28,12 +28,12 @@ export function createSafeReport(input) {
     ? 'RESTORE_IN_PROGRESS'
     : input.restoreActive === undefined ? 'section_unavailable' : 'RESTORE_MARKER_INVALID';
   const refresher=input.refresher;
-  report.sections.refresher=refresher?.mode==='SHADOW_ONLY'?'allowlisted':'section_unavailable';
-  if(refresher?.mode==='SHADOW_ONLY')report.refresher={
-    mode:'SHADOW_ONLY',mutations:0,turns:bounded(refresher.turns),reads:bounded(refresher.reads),
+  report.sections.refresher=['SHADOW_ONLY','SCOPED_SOURCE_SAVE'].includes(refresher?.mode)?'allowlisted':'section_unavailable';
+  if(['SHADOW_ONLY','SCOPED_SOURCE_SAVE'].includes(refresher?.mode))report.refresher={
+    mode:refresher.mode,mutations:refresher.mode==='SHADOW_ONLY'?0:bounded(refresher.mutations),turns:bounded(refresher.turns),reads:bounded(refresher.reads),
     queuePeak:bounded(refresher.queuePeak),readPeak:bounded(refresher.readPeak),
     unknownIntervals:bounded(refresher.unknownIntervals),alarmHeld:refresher.alarmHeld===true,
-    code:new Set(['SHADOW_READY','MONITOR_ACTIVATION_HELD','ALARM_UNVERIFIED',
+    code:new Set(['SHADOW_READY','SOURCE_SAVE_READY','MONITOR_ACTIVATION_HELD','ALARM_UNVERIFIED',
       'CANONICAL_UNAVAILABLE','RESTORE_HOLD']).has(refresher.code)?refresher.code:'UNKNOWN'};
   return report;
 }
@@ -53,8 +53,8 @@ export function normalizeSafeReport(report) {
     lastWake:report.wake?.lastEvent,
     previousBoot:report.wake?.previousBootObserved,
     restoreActive:report.sections?.restore==='RESTORE_IN_PROGRESS'?true:undefined,
-    ...(ref?.mode==='SHADOW_ONLY'?{refresher:{
-      mode:'SHADOW_ONLY',turns:ref.turns,reads:ref.reads,
+    ...(['SHADOW_ONLY','SCOPED_SOURCE_SAVE'].includes(ref?.mode)?{refresher:{
+      mode:ref.mode,mutations:ref.mutations,turns:ref.turns,reads:ref.reads,
       queuePeak:ref.queuePeak,readPeak:ref.readPeak,
       unknownIntervals:ref.unknownIntervals,alarmHeld:ref.alarmHeld,
       code:ref.code
@@ -81,8 +81,10 @@ export function safeMarkdownReport(report) {
     '- Refresher section: '+(sections.refresher||'section_unavailable')
   ];
   if(checked.refresher)text.push(
-    '- Refresher mode: SHADOW_ONLY',
-    '- Provider mutations: OFF',
+    '- Refresher mode: '+checked.refresher.mode,
+    checked.refresher.mode==='SHADOW_ONLY'?'- Provider mutations: OFF':
+      '- Provider mutations: scoped source-save admission; live qualification is separate',
+    '- Recorded attempts (bounded history): '+number(checked.refresher.mutations),
     '- Refresher code: '+checked.refresher.code,
     '- Turns: '+number(checked.refresher.turns),
     '- Reads: '+number(checked.refresher.reads),

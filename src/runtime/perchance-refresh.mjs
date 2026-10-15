@@ -10,7 +10,7 @@ export async function perchanceRefreshMain(request){
     p?.policy!=='html_prefix_v1'||p.anchor!=='HTML_BYTE_ZERO'||
     !/^[a-f0-9]{32}$/.test(p.operationId||'')||
     !/^[a-f0-9]{64}$/.test(p.approvedBaseFingerprint||'')||
-    !Number.isSafeInteger(p.sequence)||p.sequence<1||p.sequence>1000000||
+    !Number.isSafeInteger(p.sequence)||p.sequence<1||p.sequence>4096||
     typeof p.beforeMarker!=='string'||p.beforeMarker.length>260||
     p.afterMarker!==`<!-- PCMS_REFRESH_MARKER:html_prefix_v1:F=${p.approvedBaseFingerprint}:S=${p.sequence}:O=${p.operationId} -->\n`||
     !Array.isArray(request.previousFiles)||request.previousFiles.length<2||request.previousFiles.length>502)

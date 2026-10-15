@@ -102,3 +102,12 @@ The code is **not done** if the packaged Refresher still has a null `refreshAdap
 - Local pinned Firefox downloaded; geckodriver extraction hit container ownership metadata restriction after extracting binary. Use existing extracted binary/ownership-neutral extraction for local verification; CI setup unchanged.
 
 - Serial full fast regression: **405/405 PASS**, ~4.8 s. An earlier overlapping standalone build collided with the suite's own packaging directory; serial execution resolves it without product/test changes.
+
+### UI and packaged verification checkpoint
+
+- Core checkpoint verified remote HEAD/tree: `402375d15b6c6c4cf09ebc9091fe079717758792` / `7e06d42354608958d38abaa57eb6495e2b726115`. Its CI baseline/fast/donor/reproducibility passed; Firefox retained the known Supply fixture failure, not a Refresher regression.
+- Implemented existing-view marker diff/consent/test/read-only reconcile, source/feed receipts, detached-review key pin/import/revoke, target scheduling opt-in, local resource measurement and redacted export. Emergency diagnostics now allowlist the new scoped source-save mode while retaining historical shadow-mode semantics.
+- Supply first-cause diagnosis: browser fixture throws on `PREFLIGHT_CREATE`, which the paused repair now correctly requires; Create fails and Rename receives undefined revision. Narrow fixture-only repair supplies v2 read-only preflight, and adds explicit Create failure diagnosis. Supply runtime remains byte-identical to baseline.
+- Executed local persistent installed Firefox 154.0b10: same Gecko ID survives process restart, original Supply causal failure is passed, and real alarm/event-page cold wake passes. A later new-mode diagnostics mismatch was identified and repaired; full final B remains pending.
+- Added a loopback-only TLS provider fixture and a real MAIN/ISOLATED injection probe for marker save, persisted/no-persist/feed/lost-ACK, same-XPI signed qualification and recurring replacement. No production provider writes or credentials. This container denies low-port binding and cannot start the isolated 443 fixture; mandatory independent GitHub Firefox verification will execute it on the normal runner. Never fall through to the real Perchance site.
+- Frozen originals, donor sources, protected required workflow/permissions/aggregator remain unchanged. New package is still a candidate, not H accepted.

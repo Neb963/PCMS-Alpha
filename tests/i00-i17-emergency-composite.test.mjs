@@ -50,3 +50,12 @@ test('P56-08 X: emergency page does not import normal controller or provider mut
   assert.match(page,/id="markdown" readonly/);
   assert.match(page,/download-status/);
 });
+
+test('I17 source-save diagnostics keep new execution mode and actual bounded attempt count without private fields',()=>{
+  const report=createSafeReport({refresher:{mode:'SCOPED_SOURCE_SAVE',mutations:2,turns:10,reads:3,
+    code:'SOURCE_SAVE_READY',privateSource:'SECRET_SOURCE',token:'SECRET_TOKEN',route:'SECRET_IP'}});
+  assert.equal(report.refresher.mode,'SCOPED_SOURCE_SAVE');assert.equal(report.refresher.mutations,2);
+  assert.equal(JSON.stringify(report).includes('SECRET_'),false);
+  const markdown=safeMarkdownReport(report);assert.match(markdown,/SCOPED_SOURCE_SAVE/);
+  assert.match(markdown,/Recorded attempts.*2/);assert.doesNotMatch(markdown,/Provider mutations: OFF/);
+});

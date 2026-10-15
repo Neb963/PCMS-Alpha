@@ -420,3 +420,9 @@ button.pcms-generator-row-target:hover{text-decoration:underline}
   .pcms-ready-bootstrap>label:nth-of-type(3),
   .pcms-ready-bootstrap>[role=status]{grid-column:1/-1}
 }
+
+.pcms-refresh-source{padding:16px 18px;border-block:1px solid var(--line);min-width:0}
+.pcms-refresh-source h3{margin:0 0 8px}.pcms-refresh-source p{overflow-wrap:anywhere}
+.pcms-refresh-source pre{max-height:210px;max-width:100%;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;background:var(--paper);border:1px solid var(--line)}
+.pcms-refresh-source label{display:block;margin-top:12px}.pcms-refresh-source textarea{width:100%;max-width:100%;font:inherit;resize:vertical}
+.pcms-source-fingerprint{font-family:monospace;font-size:11px;overflow-wrap:anywhere}

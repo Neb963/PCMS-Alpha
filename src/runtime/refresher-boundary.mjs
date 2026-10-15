@@ -4,7 +4,7 @@ import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId,createCanonica
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 import {createRefresherStore} from './refresher-store.mjs';
-import {MINUTE} from './refresher-core.mjs';
+import {MINUTE,rowBlocks,queueOrder} from './refresher-core.mjs';
 import {createQualificationStore,createRefreshQualification} from './refresh-qualification.mjs';
 import {SOURCE_REFRESH_COMMANDS} from './refresher-provider-adapter.mjs';
 import {createNoticeDispatcher} from './notices.mjs';
@@ -227,7 +227,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         code:/^[A-Z0-9_]{1,80}$/.test(result?.code||'')?result.code:'REFRESH_OUTCOME_UNKNOWN'}});
     return settled.ok?{...settled,code:settled.proof.effectVerified?
       settled.proof.feedState==='PRESENT'?'RECENT_PRESENT':settled.proof.feedState==='ABSENT'?
-        'RECENT_ABSENT':'SOURCE_CONFIRMED_RECENT_UNKNOWN':'HELD_UNCERTAIN'}:settled;
+        'RECENT_ABSENT':'SOURCE_CONFIRMED_RECENT_UNKNOWN':settled.proof.effectState==='INEFFECTIVE'?'SOURCE_SAVE_INEFFECTIVE':'HELD_UNCERTAIN'}:settled;
   }
   async function maybeRefresh(s){
     // A UI observation never grants fleet mutation authority. No legitimate
@@ -286,11 +286,21 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         ...pendingFeed,...intent,remoteId:pendingFeed.remoteId,principalFingerprint:a?.principalFingerprint}));
       return out.code||'RECENT_REOBSERVED';
     }
-    const row=snapshot.state.rows.find(r=>(!refreshAdapter.requiresPreflight||refreshGate(r))&&r.slot&&r.phase==='ACTIVE'&&
+    const row=snapshot.state.rows.filter(r=>(!refreshAdapter.requiresPreflight||
+      refreshGate(r)&&!rowBlocks(snapshot.state,r).length&&!r.readyUpdate&&
+      !snapshot.state.recent.suspended&&!snapshot.state.recent.failures&&
+      snapshot.state.recent.observedAt>0&&clock()-snapshot.state.recent.observedAt<=2*snapshot.state.policy.recentMs&&
+      clock()-(snapshot.state.accounts[r.accountId]?.healthAt||0)<=2*snapshot.state.policy.recentMs&&
+      r.sourceRefresh?.qualification?.validUntil>clock()&&
+      (snapshot.state.nextRefreshAt||0)<=clock()&&
+      (snapshot.state.accounts[r.accountId]?.nextRefreshAt||0)<=clock()&&
+      (!r.refresh?.history?.length||r.refresh.history.at(-1).allocationEpoch!==r.allocationEpoch||
+        r.refresh.history.at(-1).budgetAtSave-r.activeRemaining>=
+          r.sourceRefresh.qualification.minimumIntervalMs))&&r.slot&&r.phase==='ACTIVE'&&
       r.ownerVerified&&r.releaseVerified&&!r.identityHeld&&!r.reviewHeld&&
-      !r.refresh?.intent&&!r.refresh?.suspended&&
-      (r.refresh?.nextAttemptAt||0)<=clock()&&
-      snapshot.state.accounts[r.accountId]?.verifiedIdentity===true);
+      !r.refresh?.intent&&!r.refresh?.suspended&&(r.refresh?.nextAttemptAt||0)<=clock()&&
+      snapshot.state.accounts[r.accountId]?.verifiedIdentity===true)
+      .sort((a,b)=>(a.refresh?.history?.at(-1)?.at||0)-(b.refresh?.history?.at(-1)?.at||0)||queueOrder(a,b))[0];
     if(!row)return 'NO_REFRESH_DUE';
     const candidate=await qualificationFor(row);
     if(!candidate)return 'REFRESH_SCOPE_NOT_QUALIFIED';
@@ -352,7 +362,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         try{if(!qualifying)refresh=await maybeRefresh(s);}catch{refresh='REFRESH_EFFECT_UNCERTAIN';}
         await notifyChanges(result);await notifyChanges(observed);
         await safeBreadcrumb(result,alarmHeld?'ALARM_UNVERIFIED':
-          observed.code==='MONITOR_ACTIVATION_HELD'?'MONITOR_ACTIVATION_HELD':'SHADOW_READY');
+          observed.code==='MONITOR_ACTIVATION_HELD'?'MONITOR_ACTIVATION_HELD':executionMode()==='SHADOW_ONLY'?'SHADOW_READY':'SOURCE_SAVE_READY');
         return {ok:true,revision:result.revision,mode:executionMode(),providerEffects:executionMode()==='SHADOW_ONLY'?'OFF':'SCOPED',
           alarmHeld,observation:observed.code||'OBSERVED',refresh};
       }catch{await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return fail('REFRESHER_AUTHORITY_UNAVAILABLE');}
@@ -371,7 +381,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
           refreshCapability:refreshGate()&&refreshAdapter?
             refreshAdapter.requiresPreflight?'GUARDED_SOURCE_SAVE':'QUALIFIED_ADAPTER':'OPERATOR_QUALIFICATION_REQUIRED',
           qualificationAvailable:observationGate(),sourceSaveAvailable:refreshAdapter?.requiresPreflight===true,
-          fleetMutationReady:view.items?.some(r=>r.schedulingEnabled===true)||false};
+          fleetMutationReady:(view.enabledTargets||0)>0};
       }
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(SOURCE_REFRESH_COMMANDS.has(message.type)){

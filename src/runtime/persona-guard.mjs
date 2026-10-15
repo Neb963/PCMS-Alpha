@@ -33,8 +33,8 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
       if (!current?.cookieStoreId || current.personaUid?.toLowerCase() !== personaUid.toLowerCase())
         return HOLD('PERSONA_IDENTITY_UNVERIFIED');
       if (current.archived || current.rotating) return HOLD('PERSONA_NOT_ACTIVE');
-      if (current.routeId === 'direct') return HOLD('DIRECT_FORBIDDEN');
-      if (!current.route || current.routeId === 'block' || current.route.enabled === false)
+      if (['direct','__direct__'].includes(current.routeId)) return HOLD('DIRECT_FORBIDDEN');
+      if (!current.route || ['block','__block__'].includes(current.routeId) || current.route.enabled === false)
         return HOLD('PROTECTED_ROUTE_UNAVAILABLE');
       // A configured proxy is not evidence of a working protected route.
       // This is the donor's context-fenced cached test, never a new network probe.

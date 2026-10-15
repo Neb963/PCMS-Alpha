@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from i17_refresher_fixture import Fixture as RefresherFixture
 import time
 from urllib.parse import urlparse
 from urllib.error import HTTPError
@@ -44,12 +45,13 @@ def call(method, route, payload=None, timeout=30):
 
 def open_session(firefox, profile):
     data = call('POST','/session',{'capabilities': {'alwaysMatch': {
-        'browserName':'firefox',
+        'browserName':'firefox','acceptInsecureCerts':True,
         'moz:firefoxOptions':{
             'binary':str(firefox),
             'args':['-headless', '-no-remote', '-profile',str(profile)],
             'prefs':{'xpinstall.signatures.required':False,'extensions.autoDisableScopes':0,
-                     'extensions.background.idle.timeout':1500}
+                     'extensions.background.idle.timeout':1500,
+                     'network.dns.localDomains':'perchance.org','network.trr.mode':5}
         }
     }}}, timeout=60)
     return data['sessionId'] if 'sessionId' in data else data['value']['sessionId']
@@ -168,6 +170,9 @@ def supply_effect_idb_probe(session):
           routeId:'fixture-protected'}),
         runSupplyStep:async (persona,req)=>{
           if(persona!=='persona-fixture-0001')throw Error('Wrong fake persona');
+          if(req.kind==='PREFLIGHT_CREATE'||req.kind==='PREFLIGHT_RENAME')
+            return {ok:true,effectBoundary:'NOT_DISPATCHED',preflight:{version:2,
+              operationId:req.operationId,kind:req.kind.slice(10),slug:req.slug}};
           effects.push(req.kind);
           if(req.kind==='CREATE')
             return {ok:true,ack:'CREATED',temporarySlug:'temp-fake-01'};
@@ -200,6 +205,7 @@ def supply_effect_idb_probe(session):
       const createArm=await arm(1,'CREATE');
       if(!createArm.ok)throw Error('CREATE admission '+createArm.code);
       const created=await effect(1);
+      if(!created.ok)throw Error('CREATE first causal '+created.code+' / '+created.state);
       const renameArm=await arm(created.revision,'RENAME');
       if(!renameArm.ok)throw Error('RENAME admission '+renameArm.code);
       const renamed=await effect(created.revision);
@@ -593,7 +599,7 @@ def diagnostic_zip_probe(session):
         files:readback.includes('report.json') && readback.includes('README.md'),
         canary:readback.includes('DO_NOT_EXPOSE'),
         keptStatus:readback.includes('"readPeak": '+report.refresher.readPeak),
-        markdown:markdown.includes('Refresher mode: SHADOW_ONLY')&&
+        markdown:markdown.includes('Refresher mode: '+report.refresher.mode)&&
           markdown.includes('Read peak: '+report.refresher.readPeak)});
     })().catch(()=>done({error:'ARCHIVE_PROBE_FAILED'}));'''
     return call('POST',f'/session/{session}/execute/async',
@@ -640,7 +646,7 @@ def main():
     expected_hash=hashlib.sha256(archive.read_bytes()).hexdigest()
     print('B XPI_SHA256=',expected_hash,flush=True)
     print('B FF_DEV_BINARY=',browser,flush=True)
-    with tempfile.TemporaryDirectory(prefix='pcms-i00-firefox-') as folder:
+    with tempfile.TemporaryDirectory(prefix='pcms-i00-firefox-') as folder, RefresherFixture() as refresher_fixture:
         profile=pathlib.Path(folder)/'profile'
         profile.mkdir()
         (profile/'user.js').write_text('user_pref("xpinstall.signatures.required", false);\n')
@@ -1192,7 +1198,7 @@ def main():
                 assert safe.get('effects')=='OFF',safe
                 assert set(safe)=={'schema','phase','effects','sections','wake','refresher'},safe
                 assert set(safe['refresher'])=={'mode','mutations','turns','reads','queuePeak','readPeak','unknownIntervals','alarmHeld','code'},safe
-                assert safe['refresher']['mode']=='SHADOW_ONLY' and safe['refresher']['mutations']==0,safe
+                assert safe['refresher']['mode']=='SCOPED_SOURCE_SAVE' and safe['refresher']['mutations']==0,safe
                 assert safe['refresher']['readPeak']<=2,safe
                 assert safe['sections']['canonical']=='section_unavailable'
                 diagnostic=diagnostic_zip_probe(after)
@@ -2354,7 +2360,7 @@ def main():
                     done({ok:before.ok&&after.ok&&!denied.ok&&
                       before.revision===after.revision&&
                       before.state.revision===after.state.revision&&
-                      result.ok&&result.refreshCapability==='OPERATOR_QUALIFICATION_REQUIRED'&&
+                      result.ok&&result.refreshCapability==='GUARDED_SOURCE_SAVE'&&result.sourceSaveAvailable===true&&
                       result.qualificationAvailable===true&&result.fleetMutationReady===false&&
                       core.qualifyRefreshCandidate(null).ok===false,
                       beforeRows:before.state.rows.length,
@@ -2368,7 +2374,7 @@ def main():
                          {'script':i14_code,'args':[]},timeout=90)
                 assert i14.get('ok') is True,i14
                 ui=execute(after,"return {provider:document.getElementById('pcms-refresher-provider')?.textContent||'',summary:document.getElementById('pcms-refresher-summary')?.textContent||''}")
-                assert 'Refresh qualification required' in ui['provider'] and 'GUARDED_READ_ONLY' in ui['provider'] and 'visibility-held' in ui['summary'],ui
+                assert 'Guarded marker tests available' in ui['provider'] and 'GUARDED_READ_ONLY' in ui['provider'] and 'visibility-held' in ui['summary'],ui
                 print('B I14_PACKAGED_PERSISTENT_IDB_GATED_EFFECTS_AND_REFERSHER_PROOF_UI=PASS',flush=True)
 
                 # Normal qualification commands, real packaged modules and IDB;
@@ -2412,6 +2418,27 @@ def main():
                     'stale':'STALE_QUALIFICATION','reads':4,'persisted':'UNVERIFIED_UPDATE','revision':2,
                     'mutationAuthority':False,'sourceLeaked':False,'ui':True},qualification
                 print('B I17_NORMAL_REFRESH_QUALIFICATION_DURABLE_DISTINCT_EVIDENCE=PASS',flush=True)
+
+                # Production source-save modules, actual native MAIN/ISOLATED
+                # injection and committed Firefox IDB against loopback HTTPS.
+                source_probe=call('POST',f'/session/{after}/execute/async',{
+                    'script':pathlib.Path(__file__).with_name('i17_refresher_probe.js').read_text(),
+                    'args':[]},timeout=120)
+                assert source_probe.get('ok') is True,source_probe
+                observed=source_probe['results']
+                assert observed['present']['effect']=='EFFECT_CONFIRMED' and observed['present']['feed']=='PRESENT',source_probe
+                assert observed['absent']['effect']=='EFFECT_CONFIRMED' and observed['absent']['feed']=='ABSENT',source_probe
+                assert observed['no-persist']['effect']=='INEFFECTIVE',source_probe
+                assert observed['lost-ack']['effect']=='EFFECT_CONFIRMED',source_probe
+                assert observed['recurring']['sequence']==2 and observed['recurring']['enabled'] is True,source_probe
+                assert source_probe['markedBeforeSave']==source_probe['saves']==5,source_probe
+                ledger=refresher_fixture.ledger()
+                assert ledger['i17-native-present']['saves']==2,ledger
+                for scenario in ['absent','no-persist','lost-ack']:
+                    assert ledger['i17-native-'+scenario]['saves']==1,ledger
+                assert ledger['i17-native-present']['outputTemplate'].count('PCMS_REFRESH_MARKER')==1,ledger
+                assert ledger['i17-native-no-persist']['outputTemplate'].count('PCMS_REFRESH_MARKER')==0,ledger
+                print('B I17_SOURCE_SAVE_NATIVE_GUARD_IDB_AND_SAME_XPI_RECURRING='+json.dumps(source_probe),flush=True)
 
                 # I13 B: exact packaged XPI, real IndexedDB atomic approval
                 # vs duplicate dispatch, installed operator controls, and

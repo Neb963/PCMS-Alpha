@@ -14,7 +14,7 @@ export async function runRefreshOwnedTab(browser,{getState,validate,routeTest},l
   async function valid(){
     try{
       const s=await getState(),p=s.profiles?.[cookieStoreId],l=await validate(personaUid,lease.leaseId);
-      return p?.personaUid===personaUid&&p.routeId===routeId&&routeId!=='direct'&&routeId!=='block'&&
+      return p?.personaUid===personaUid&&p.routeId===routeId&&!['direct','block','__direct__','__block__'].includes(routeId)&&
         !!s.routes?.[routeId]&&s.routes[routeId].enabled!==false&&l.cookieStoreId===cookieStoreId&&
         (await routeTest(s,cookieStoreId))?.ok===true;
     }catch{return false;}

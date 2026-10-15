@@ -73,6 +73,11 @@ export function createRefresherProviderAdapter(api,{database,guard,sentinel,cloc
   }
   async function execute(claim,{beforeSave}={}){
     if(!validMarkerPlan(claim.plan)||typeof beforeSave!=='function')return fail('REFRESH_DISPATCH_AUTHORITY_REQUIRED');
+    const measure=globalThis.navigator?.storage?.estimate?.bind(globalThis.navigator.storage);
+    if(measure){const usage=await measure().catch(()=>null);
+      if(usage&&Number.isFinite(usage.quota)&&usage.quota>0&&usage.usage>=usage.quota*0.8)
+        return {...fail('REFRESH_STORAGE_PRESSURE'),effectBoundary:'NOT_DISPATCHED'};
+    }
     const store=await sourceStore(),cfg=(await store.read(claim.slug)).record;
     if(!cfg?.consent||cfg.restoredHistorical)return fail('REFRESH_SOURCE_CONSENT_REQUIRED');
     const read=await observeSource(claim);if(!read.ok)return {...read,effectBoundary:'NOT_DISPATCHED'};
@@ -160,6 +165,7 @@ export function createRefresherProviderAdapter(api,{database,guard,sentinel,cloc
         approvedBaseFingerprint:row.releaseFingerprint,at:clock()},
         preview:{...cfg.preview,consented:true}};
     }else if(type==='TEST_SOURCE_REFRESH'){
+      if(cfg?.preview?.beforeFeed?.code==='RATE_LIMITED')return fail('REFRESH_RECENT_RATE_LIMITED_HOLD');
       const plan=cfg?.preview?.plan;
       if(!cfg?.consent||cfg.preview?.consented!==true||cfg.preview.expiresAt<clock()||cfg.testAttempted||
         p.confirmation!=='TEST '+row.slug+' '+plan.expectedPostSaveFingerprint)return fail('REFRESH_EXACT_TEST_ARM_REQUIRED');

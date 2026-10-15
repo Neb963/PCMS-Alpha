@@ -137,7 +137,8 @@ export function reconcileRefreshAttempt(evidence,id,{at,kind,sourceFingerprint,
   e.intent=verified||noEffect?null:prior;
   if(!verified)e.suspended=true;
   if(prior.plan){
-    e.nextAttemptAt=at+Math.max(600000,prior.minimumIntervalMs||600000);
+    e.nextAttemptAt=at+Math.max(600000,prior.minimumIntervalMs||600000,
+      Math.min(MAX_BACKOFF,Math.max(0,feed?.retryAfterMs||0)));
     if(verified){
       e.attempts=0;e.probes=0;
       e.suspended=e.history.at(-1).feed.state!=='PRESENT';

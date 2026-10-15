@@ -15,7 +15,8 @@ export async function measureRefreshResources(api,{clock=Date.now}={}){
     if(!out.ok)throw Error('RESOURCE_ORACLE_FAILED');state=out.state;
     queuePeak=Math.max(queuePeak,state.rows.length);
   }
-  const estimate=await api.storage.estimate?.().catch(()=>null);
+  const measure=api.storage.estimate?.bind(api.storage)||globalThis.navigator?.storage?.estimate?.bind(globalThis.navigator.storage);
+  const estimate=await measure?.().catch(()=>null);
   const report={schema:1,kind:'PACKAGED_LOCAL_RESOURCE_MEASUREMENT',id:crypto.randomUUID().replaceAll('-',''),
     at,accounts:50,generators:1250,turns:8,queuePeak,maxConcurrentSaves:1,
     turnMs:Math.ceil(performance.now()-start),serializedBytes:new TextEncoder().encode(JSON.stringify(state)).length,

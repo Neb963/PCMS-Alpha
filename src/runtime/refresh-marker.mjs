@@ -14,7 +14,7 @@ export function validMarkerPlan(p){
   return p?.policy===MARKER_POLICY&&p.anchor==='HTML_BYTE_ZERO'&&opId(p.operationId)&&
     hex(p.approvedBaseFingerprint)&&hex(p.expectedPreSaveFingerprint)&&
     hex(p.expectedPostSaveFingerprint)&&p.expectedPreSaveFingerprint!==p.expectedPostSaveFingerprint&&
-    Number.isSafeInteger(p.sequence)&&p.sequence>0&&p.sequence<=1000000&&
+    Number.isSafeInteger(p.sequence)&&p.sequence>0&&p.sequence<=4096&&
     p.afterMarker===markerText(p.approvedBaseFingerprint,p.sequence,p.operationId)&&
     typeof p.beforeMarker==='string'&&p.beforeMarker.length<=260;
 }
@@ -43,6 +43,7 @@ export async function prepareMarker(files,{approvedBaseFingerprint,previous=null
      html.includes('PCMS_REFRESH_MARKER'))return fail('MARKER_SAFE_SLOT_REQUIRED');
   const base=await exactSource(pre.blobs.map(f=>f.path==='index.html'?{path:f.path,base64:encodeText(html)}:f));
   if(!base.ok||base.fingerprint!==approvedBaseFingerprint)return fail('FUNCTIONAL_SOURCE_DRIFT');
+  if(sequence>4096)return fail('MARKER_PROVENANCE_ARCHIVE_REVIEW_REQUIRED');
   const afterMarker=markerText(approvedBaseFingerprint,sequence,id);
   const post=await exactSource(pre.blobs.map(f=>f.path==='index.html'?{path:f.path,base64:encodeText(afterMarker+html)}:f));
   if(!post.ok)return post;

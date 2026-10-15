@@ -2,7 +2,7 @@ import {requestTypedConfirmation} from './typed-confirm.mjs';
 // Read canonical projections. UI numbers/labels never confer live authority.
 const el=id=>document.getElementById('pcms-refresher-'+id);
 const rows=el('rows'),status=el('status'),query=el('query'),phase=el('phase');
-let snapshot=null,epoch=0,offset=0,selected=null,qualification=null,qualificationBusy=false,qualificationEpoch=0;
+let snapshot=null,epoch=0,offset=0,selected=null,qualification=null,qualificationBusy=false,qualificationEpoch=0,sourceRefresh=null,sourceBusy=false,sourceEpoch=0,sourceResource=null,reviewerFingerprint=null;
 function command(type,params={}){
   return new Promise((resolve,reject)=>{
     let ended=false;const port=browser.runtime.connect({name:'pcms-i12-refresher'});
@@ -26,6 +26,7 @@ function inspector(){
   const r=selected;
   el('inspector').hidden=!r;
   if(!r)return;
+  sourceDraw();
   el('selected').textContent=r.slug+' · '+r.stableId+' · '+rowText(r);
   el('generator-active').value=r.activeMs/3600000;el('generator-sleep').value=r.sleepMs/3600000;
   el('generator-pause').textContent=r.paused?'Resume generator':'Pause generator';
@@ -42,7 +43,7 @@ function inspector(){
 function draw(s){
   const focusId=document.activeElement?.dataset?.stableId;
   snapshot=s;
-  const summary=s.occupied+' occupied shadow slots / '+s.capacity.cap+
+  const summary=s.occupied+' occupied slots / '+s.capacity.cap+
     ' admission cap · '+s.eligible+' eligible · planning '+s.capacity.demand.toFixed(2)+
     ' · '+(s.capacity.warning||'multi-window observation')+' · '+
     age(s.recent.observedAt)+(s.recent.stale?' (stale)':'')+
@@ -54,11 +55,11 @@ function draw(s){
   el('eligible').textContent=String(s.eligible);
   el('observed').textContent=s.recent.stale?'Stale':s.recent.observedAt?'Observed':'Unknown';
   el('observed-detail').textContent=age(s.recent.observedAt);
-  el('mode').textContent=s.globalPause?'Paused · planning only':'Planning only';
+  el('mode').textContent=s.globalPause?'Paused':s.fleetMutationReady?'Scoped scheduling':'Marker test available';
   for(const id of ['pcms-overview-refresher','pcms-queue-refresher']){
-    const target=document.getElementById(id);if(target)target.textContent='Shadow Refresher: '+summary;
+    const target=document.getElementById(id);if(target)target.textContent=(s.sourceSaveAvailable?'Source-save Refresher: ':'Shadow Refresher: ')+summary;
   }
-  el('provider').textContent=(s.fleetMutationReady?'Qualified refresh adapter':'Refresh qualification required')+
+  el('provider').textContent=(s.fleetMutationReady?'Qualified target scheduling':s.sourceSaveAvailable?'Guarded marker tests available':'Refresh qualification required')+
     ' · Provider '+s.provider.state+' · Monitoring '+s.monitoring;
   el('diagnostics').textContent=s.diagnostics.turns+' durable turns · '+s.diagnostics.unknownIntervals+
     ' unknown intervals frozen · read peak '+s.diagnostics.readPeak+' · queue peak '+s.diagnostics.queuePeak+
@@ -84,7 +85,7 @@ function draw(s){
     const tr=document.createElement('tr'),td=document.createElement('td');
     const button=document.createElement('button');button.type='button';button.textContent=r.slug;
     button.dataset.stableId=r.stableId;button.setAttribute('aria-label','Inspect Refresher for '+r.slug);
-    button.addEventListener('click',()=>{selected=r;qualification=null;inspector();void qualificationAction('GET_QUALIFICATION');});td.append(button);tr.append(td);
+    button.addEventListener('click',()=>{selected=r;qualification=null;sourceRefresh=null;inspector();void qualificationAction('GET_QUALIFICATION');void sourceAction('GET_SOURCE_REFRESH');});td.append(button);tr.append(td);
     const present=r.presence?(r.presence.present?'present at '+r.presence.position:'absent; not deleted')+
       ' · '+age(r.presence.observedAt)+(r.presence.stale?' · stale':''):'unobserved';
     const account=document.createElement('td');
@@ -123,15 +124,15 @@ function accountButton(){
   el('account-pause').textContent=a?.paused?'Resume account':'Pause account';
 }
 async function load(){
-  const mine=++epoch;status.textContent='Reading canonical shadow state…';
+  const mine=++epoch;status.textContent='Reading canonical schedule…';
   try{
     const s=await command('GET_REFRESHER',{query:query.value,phase:phase.value,offset,limit:25});
     if(mine!==epoch)return;
     if(!s?.ok)throw Error(s?.code||'READ_UNAVAILABLE');
     draw(s);status.textContent=s.restoreHeld?
-      'Restore hold · local schedule locked':'Shadow planning · no provider mutation';
+      'Restore hold · local schedule locked':s.sourceSaveAvailable?'Protected marker tests available; recurring saves require target qualification.':'Shadow planning · no provider mutation';
   }catch(error){if(mine!==epoch)return;snapshot=null;
-    status.textContent='Shadow state unavailable. No healthy fleet or empty remote queue inferred.';
+    status.textContent='Refresher state unavailable. No healthy fleet or empty remote queue inferred.';
     for(const id of ['save','global-pause','account-pause','generator-pause','generator-save','demand','retry-recent'])el(id).disabled=true;
   }
 }
@@ -207,3 +208,101 @@ async function qualificationAction(type){
 el('qualify-begin').addEventListener('click',()=>qualificationAction('BEGIN_QUALIFICATION'));
 el('qualify-observe').addEventListener('click',()=>qualificationAction('OBSERVE_QUALIFICATION'));
 el('qualify-load').addEventListener('click',()=>qualificationAction('GET_QUALIFICATION'));
+
+
+const sourceButtons=['preview','consent','test','observe','load','export','measure','challenge','schedule','revoke','trust','import'];
+function sourceDraw(){
+  const q=sourceRefresh,plan=q?.preview?.plan,held=snapshot?.restoreHeld||!selected;
+  el('source-status').textContent=q?String(q.state).replaceAll('_',' '):'Source-marker eligibility not loaded.';
+  el('source-fingerprint').textContent=q?.approvedBaseFingerprint?
+    'Reviewed base F: '+q.approvedBaseFingerprint+' · Verified current: '+q.effectiveCurrentFingerprint:'';
+  el('source-diff').textContent=plan?'index.html · byte zero only\n− '+(plan.beforeMarker||'(no marker)')+
+    '+ '+plan.afterMarker+'\nExact pre-save: '+plan.expectedPreSaveFingerprint+
+    '\nExact post-save: '+plan.expectedPostSaveFingerprint+'\nConsent expires: '+new Date(q.preview.expiresAt).toLocaleString():'No marker preview captured.';
+  const proof=q?.proof;
+  el('source-result').textContent=proof?'Native attempt: '+(proof.attemptResult?.code||'ACK UNKNOWN')+
+    ' · Persisted source: '+(proof.effect==='EFFECT_CONFIRMED'?'independently confirmed':proof.effect)+
+    ' · Recent snapshot: '+(proof.feed.state==='PRESENT'?'present, rank '+proof.feed.rank:
+      proof.feed.state==='ABSENT'?'absent from this snapshot':'unknown')+
+    (proof.feed.at?' · '+new Date(proof.feed.at).toLocaleString():''):'No save attempted. Preview and consent do not save.';
+  el('source-review-state').textContent=(q?.qualification?'Qualified until '+new Date(q.qualification.validUntil).toLocaleString():
+    'No signed target qualification.')+' · '+(q?.scheduleEnabled?'Schedule enabled':'Schedule disabled')+
+    (sourceResource?' · Local fixture '+sourceResource.accounts+' accounts / '+sourceResource.generators+' generators, '+sourceResource.turnMs+' ms':' · Resource measurement missing')+
+    (reviewerFingerprint?' · Reviewer '+reviewerFingerprint:'');
+  for(const name of sourceButtons)el('source-'+name).disabled=!!held||sourceBusy;
+  el('source-consent').disabled=held||sourceBusy||!plan||q.preview.expiresAt<Date.now()||q.testAttempted;
+  el('source-test').disabled=held||sourceBusy||!q?.preview?.consented||q.preview.expiresAt<Date.now()||q.testAttempted;
+  el('source-observe').disabled=held||sourceBusy||!q?.testAttempted;
+  el('source-export').disabled=sourceBusy||!q;
+  el('source-challenge').disabled=held||sourceBusy||!sourceResource||proof?.effect!=='EFFECT_CONFIRMED'||proof.feed?.state!=='PRESENT';
+  el('source-schedule').disabled=held||sourceBusy||!q?.qualification;
+  el('source-schedule').textContent=q?.scheduleEnabled?"Disable this target's schedule":"Enable this target's schedule";
+  el('source-revoke').disabled=held||sourceBusy||!q?.qualification;
+}
+function downloadReceipt(name,data){
+  const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)+'\n'],{type:'application/json'}));
+  const link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+async function sourceAction(type,extra={}){
+  if(!selected||sourceBusy)return;
+  const target=selected.stableId,slug=selected.slug,revision=sourceRefresh?.revision||0,mine=++sourceEpoch;
+  const p={stableId:target,...extra};
+  if(!['GET_SOURCE_REFRESH','GET_REFRESH_REVIEW_CHALLENGE'].includes(type))p.expectedRevision=revision;
+  const confirmations={CONSENT_SOURCE_REFRESH:'CONSENT '+slug+' '+sourceRefresh?.approvedBaseFingerprint,
+    TEST_SOURCE_REFRESH:'TEST '+slug+' '+sourceRefresh?.preview?.plan?.expectedPostSaveFingerprint,
+    SET_REFRESH_SCHEDULE:'SCHEDULE '+slug};
+  if(confirmations[type]&&!(type==='SET_REFRESH_SCHEDULE'&&extra.enabled===false)){
+    const trigger=el(type==='CONSENT_SOURCE_REFRESH'?'source-consent':type==='TEST_SOURCE_REFRESH'?'source-test':'source-schedule');
+    const answer=await requestTypedConfirmation(trigger,confirmations[type],type==='TEST_SOURCE_REFRESH'?
+      'One native save on this exact listed generator. An uncertain result will be reconciled without another save.':
+      'Review the exact target and source. This grants only the displayed marker policy or qualified target schedule.');
+    if(answer===null)return;p.confirmation=answer;
+  }
+  if(selected?.stableId!==target||sourceBusy||revision!==(sourceRefresh?.revision||0))return;
+  sourceBusy=true;sourceDraw();el('source-status').textContent=type==='TEST_SOURCE_REFRESH'?'Saving one guarded marker attempt…':'Reading protected source/review state…';
+  try{
+    const out=await command(type,p);
+    if(mine!==sourceEpoch||selected?.stableId!==target)return;
+    if(!out?.ok){el('source-status').textContent='Held: '+(out?.code||'UNKNOWN')+'. Reload the receipt before another action.';return;}
+    if(type==='GET_REFRESH_REVIEW_CHALLENGE'){downloadReceipt('pcms-h04-review-challenge.json',out);return;}
+    const latest=out.sourceRefresh?out:await command('GET_SOURCE_REFRESH',{stableId:target});
+    if(selected?.stableId!==target)return;
+    if(latest.ok){sourceRefresh=latest.sourceRefresh;sourceResource=latest.resource||sourceResource;reviewerFingerprint=latest.reviewerFingerprint||reviewerFingerprint;}
+    sourceDraw();
+    if(out.code)el('source-status').textContent=out.code.replaceAll('_',' ');
+  }catch{el('source-status').textContent='Reply unavailable. Reload the canonical receipt; do not repeat the save.';}
+  finally{sourceBusy=false;
+    // Restore controls without replacing a causal failure message.
+    const message=el('source-status').textContent;sourceDraw();el('source-status').textContent=message;
+    if(selected?.stableId!==target)void sourceAction('GET_SOURCE_REFRESH');
+  }
+}
+for(const [name,type] of Object.entries({preview:'PREVIEW_SOURCE_REFRESH',consent:'CONSENT_SOURCE_REFRESH',
+  test:'TEST_SOURCE_REFRESH',observe:'OBSERVE_SOURCE_REFRESH',load:'GET_SOURCE_REFRESH',challenge:'GET_REFRESH_REVIEW_CHALLENGE',
+  revoke:'REVOKE_REFRESH_REVIEW'}))el('source-'+name).addEventListener('click',()=>sourceAction(type));
+el('source-schedule').addEventListener('click',()=>sourceAction('SET_REFRESH_SCHEDULE',{enabled:!sourceRefresh?.scheduleEnabled}));
+el('source-export').addEventListener('click',()=>sourceRefresh&&downloadReceipt('pcms-refresh-redacted-receipt.json',sourceRefresh));
+el('source-measure').addEventListener('click',async()=>{
+  if(sourceBusy)return;sourceBusy=true;sourceDraw();
+  try{const out=await command('MEASURE_REFRESH_RESOURCES');if(out.ok)sourceResource=out.resource;
+    else el('source-status').textContent='Measurement held: '+out.code;
+  }catch{el('source-status').textContent='Measurement receipt unavailable.';}
+  finally{sourceBusy=false;sourceDraw();}
+});
+el('source-trust').addEventListener('click',async()=>{
+  try{
+    const raw=JSON.parse(el('source-key').value),publicKey={kty:raw.kty,crv:raw.crv,x:raw.x,y:raw.y};
+    const text=JSON.stringify(Object.fromEntries(Object.keys(publicKey).sort().map(k=>[k,publicKey[k]])));
+    const hash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))].map(x=>x.toString(16).padStart(2,'0')).join('');
+    const confirmation=await requestTypedConfirmation(el('source-trust'),'TRUST '+hash,
+      'Independently check this reviewer key fingerprint before trusting signed target evidence.');
+    if(confirmation===null)return;
+    const out=await command('TRUST_REFRESH_REVIEWER',{publicKey,confirmation});
+    if(out.ok)reviewerFingerprint=hash;else el('source-status').textContent='Key held: '+out.code;
+    sourceDraw();
+  }catch{el('source-status').textContent='Provide a public P-256 JWK; never paste a private key.';}
+});
+el('source-import').addEventListener('click',()=>{
+  try{void sourceAction('IMPORT_REFRESH_REVIEW',{envelope:JSON.parse(el('source-review').value)});}
+  catch{el('source-status').textContent='Invalid signed receipt JSON.';}
+});
