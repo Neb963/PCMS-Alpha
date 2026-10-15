@@ -213,7 +213,8 @@ el('qualify-load').addEventListener('click',()=>qualificationAction('GET_QUALIFI
 const sourceButtons=['preview','consent','test','observe','load','export','measure','challenge','schedule','revoke','trust','import'];
 function sourceDraw(){
   const q=sourceRefresh,plan=q?.preview?.plan,held=snapshot?.restoreHeld||!selected;
-  el('source-status').textContent=q?String(q.state).replaceAll('_',' '):'Source-marker eligibility not loaded.';
+  el('source-status').textContent=q?String(q.state).replaceAll('_',' ')+
+    (q.lastHold?' · '+q.lastHold.replaceAll('_',' '):''):'Source-marker eligibility not loaded.';
   el('source-fingerprint').textContent=q?.approvedBaseFingerprint?
     'Reviewed base F: '+q.approvedBaseFingerprint+' · Verified current: '+q.effectiveCurrentFingerprint:'';
   el('source-diff').textContent=plan?'index.html · byte zero only\n− '+(plan.beforeMarker||'(no marker)')+
@@ -224,7 +225,10 @@ function sourceDraw(){
     ' · Persisted source: '+(proof.effect==='EFFECT_CONFIRMED'?'independently confirmed':proof.effect)+
     ' · Recent snapshot: '+(proof.feed.state==='PRESENT'?'present, rank '+proof.feed.rank:
       proof.feed.state==='ABSENT'?'absent from this snapshot':'unknown')+
-    (proof.feed.at?' · '+new Date(proof.feed.at).toLocaleString():''):'No save attempted. Preview and consent do not save.';
+    (proof.feed.at?' · '+new Date(proof.feed.at).toLocaleString():'')+
+    (q.observation?.remaining>0&&q.observation.nextAt&&
+      (q.intent||proof.feed.state!=='PRESENT')?' · Next read-only observation: '+new Date(q.observation.nextAt).toLocaleString()+
+        ' ('+q.observation.remaining+' remaining)':''):'No save attempted. Preview and consent do not save.';
   el('source-review-state').textContent=(q?.qualification?'Qualified until '+new Date(q.qualification.validUntil).toLocaleString():
     'No signed target qualification.')+' · '+(q?.scheduleEnabled?'Schedule enabled':'Schedule disabled')+
     (sourceResource?' · Local fixture '+sourceResource.accounts+' accounts / '+sourceResource.generators+' generators, '+sourceResource.turnMs+' ms':' · Resource measurement missing')+
@@ -233,7 +237,8 @@ function sourceDraw(){
   el('source-consent').disabled=held||sourceBusy||!plan||q.preview.expiresAt<Date.now()||q.testAttempted;
   el('source-test').disabled=held||sourceBusy||snapshot?.globalPause||selected?.paused||
     selected?.phase==='SLEEPING'||selected?.blockers?.includes('ACCOUNT_PAUSE')||!q?.preview?.consented||q.preview.expiresAt<Date.now()||q.testAttempted;
-  el('source-observe').disabled=held||sourceBusy||!q?.testAttempted;
+  el('source-observe').disabled=held||sourceBusy||!q?.testAttempted||
+    !q.observation?.remaining||q.observation.nextAt>Date.now();
   el('source-export').disabled=sourceBusy||!q;
   el('source-challenge').disabled=held||sourceBusy||!sourceResource||proof?.effect!=='EFFECT_CONFIRMED'||proof.feed?.state!=='PRESENT';
   el('source-schedule').disabled=held||sourceBusy||!q?.qualification;
@@ -256,7 +261,9 @@ async function sourceAction(type,extra={}){
     const trigger=el(type==='CONSENT_SOURCE_REFRESH'?'source-consent':type==='TEST_SOURCE_REFRESH'?'source-test':'source-schedule');
     const answer=await requestTypedConfirmation(trigger,confirmations[type],type==='TEST_SOURCE_REFRESH'?
       'One native save on this exact listed generator. An uncertain result will be reconciled without another save.':
-      'Review the exact target and source. This grants only the displayed marker policy or qualified target schedule.');
+      type==='CONSENT_SOURCE_REFRESH'?
+        'Confirm that the displayed HTML byte-zero comment is safe for this generator. This approves only that marker derivation of the exact reviewed source F.':
+        'Enable only this independently qualified target under the existing active/sleep policy.');
     if(answer===null)return;p.confirmation=answer;
   }
   if(selected?.stableId!==target||sourceBusy||revision!==(sourceRefresh?.revision||0))return;
@@ -286,11 +293,11 @@ for(const [name,type] of Object.entries({preview:'PREVIEW_SOURCE_REFRESH',consen
 el('source-schedule').addEventListener('click',()=>sourceAction('SET_REFRESH_SCHEDULE',{enabled:!sourceRefresh?.scheduleEnabled}));
 el('source-export').addEventListener('click',()=>sourceRefresh&&downloadReceipt('pcms-refresh-redacted-receipt.json',sourceRefresh));
 el('source-measure').addEventListener('click',async()=>{
-  if(sourceBusy)return;sourceBusy=true;sourceDraw();
+  if(sourceBusy)return;sourceBusy=true;sourceDraw();let message='';
   try{const out=await command('MEASURE_REFRESH_RESOURCES');if(out.ok)sourceResource=out.resource;
-    else el('source-status').textContent='Measurement held: '+out.code;
-  }catch{el('source-status').textContent='Measurement receipt unavailable.';}
-  finally{sourceBusy=false;sourceDraw();}
+    else message='Measurement held: '+out.code;
+  }catch{message='Measurement receipt unavailable.';}
+  finally{sourceBusy=false;sourceDraw();if(message)el('source-status').textContent=message;}
 });
 el('source-trust').addEventListener('click',async()=>{
   try{
@@ -302,8 +309,8 @@ el('source-trust').addEventListener('click',async()=>{
       'Independently check this reviewer key fingerprint before trusting signed target evidence.');
     if(confirmation===null)return;
     const out=await command('TRUST_REFRESH_REVIEWER',{publicKey,confirmation});
-    if(out.ok)reviewerFingerprint=hash;else el('source-status').textContent='Key held: '+out.code;
-    sourceDraw();
+    if(out.ok){reviewerFingerprint=hash;sourceDraw();}
+    else el('source-status').textContent='Key held: '+out.code;
   }catch{el('source-status').textContent='Provide a public P-256 JWK; never paste a private key.';}
 });
 el('source-import').addEventListener('click',()=>{

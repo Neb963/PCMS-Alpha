@@ -86,7 +86,11 @@ window.app={data:{generator:initial},saveGenerator:async()=>{
             self.reply({'status':'success','generators':rows,'generatorFolderMap':{}});return
         if path=='/api/checkGeneratorOwnership':self.reply({'status':'is-owner'});return
         if path=='/api/getGeneratorPageData':
-            self.reply({'status':'success','generator':generator(p.get('generatorName','invalid'))});return
+            g=generator(p.get('generatorName','invalid'))
+            with LOCK:
+                if g.get('holdAfterSave') and g['saves']:
+                    self.reply({'status':'unavailable'},503);return
+            self.reply({'status':'success','generator':g});return
         self.reply({},404)
 
 class Proxy(socketserver.StreamRequestHandler):
@@ -119,6 +123,7 @@ class Fixture:
         for scenario in ('present','absent','no-persist','lost-ack','dirty','idb-abort'):
             generator('i17-native-'+scenario)
         generator('i17-entry-present')
+        generator('i17-entry-wake')['holdAfterSave']=True
         self.folder=tempfile.TemporaryDirectory(prefix='i17-local-provider-')
         root=pathlib.Path(self.folder.name);cert=root/'cert.pem';key=root/'key.pem'
         subprocess.run(['openssl','req','-x509','-newkey','rsa:2048','-nodes','-days','1',
@@ -136,6 +141,8 @@ class Fixture:
         return self
     def ledger(self):
         with LOCK:return json.loads(json.dumps(DATA))
+    def release_readback(self,slug):
+        with LOCK:DATA[slug]['holdAfterSave']=False
     def __exit__(self,*_):
         for server in (self.proxy,self.server):server.shutdown();server.server_close()
         self.folder.cleanup()

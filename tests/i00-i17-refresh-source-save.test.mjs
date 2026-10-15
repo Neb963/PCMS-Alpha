@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {matchesApproval,safeRollbackAdmission} from '../src/runtime/release-core.mjs';
-import {canonicalRefresherInputs} from '../src/runtime/refresher-store.mjs';
+import {canonicalRefresherInputs,currentMarkerAuthority} from '../src/runtime/refresher-store.mjs';
 import {exactSource} from '../src/runtime/staging-core.mjs';
 import {prepareMarker,recognizeMarker,markerReceipt,encodeText,MARKER_POLICY,REFRESH_METHOD} from '../src/runtime/refresh-marker.mjs';
 import {runRefreshOwnedTab} from '../src/runtime/refresh-owned-tab.mjs';
@@ -126,6 +126,29 @@ test('I17/P54-05 F/X: production provider bridge uses fixed native save and inde
     assert.deepEqual(order.slice(0,2),['PREFLIGHT','JOURNAL_COMMIT']);
   }
 });
+test('I17/P54-09: observed storage pressure holds before journal/native save; below the threshold the protected adapter remains executable',async()=>{
+  const descriptor=Object.getOwnPropertyDescriptor(globalThis,'navigator');
+  try{
+    for(const usage of [799,800,1001]){
+      Object.defineProperty(globalThis,'navigator',{configurable:true,value:{storage:{estimate:async()=>({quota:1000,usage})}}});
+      const f=nativeFixture();let marks=0;
+      const route={ready:true,cookieStoreId:'fixture-container',routeId:'protected',healthDomain:'fixture-egress'};
+      const adapter=createRefresherProviderAdapter({storage:{}},{database:async()=>readDb({consent:{revision:1}}),
+        sentinel:{inspect:async()=>({held:false})},guard:()=>({getSafeRouteReadiness:async()=>route,
+          observeReadOnly:async()=>({ok:true,principalFingerprint:principal,original:{ownerResult:'IS_OWNER',remotePublicId:remoteId,visibility:'PUBLIC',
+            pjs:Buffer.from(files[0].base64,'base64').toString(),html:Buffer.from(files[1].base64,'base64').toString(),assets:[files[2]]}}),
+          runRefreshStep:async(_uid,request,commit)=>{
+            const pre=await perchanceRefreshMain({...request,action:'PREFLIGHT'});if(!pre.ok)return pre;
+            const mark=await commit('MARK');if(!mark.ok)return mark;return perchanceRefreshMain({...request,action:'SAVE'});
+          }})});
+      const result=await adapter.execute({id,slug,remoteId,personaUid:'fixture-persona',principalFingerprint:principal,
+        releaseFingerprint:base.fingerprint,plan:prepared.plan},{beforeSave:async()=>{marks++;return {ok:true};}});
+      assert.equal(result.ok,usage<800);assert.equal(f.ledger.length,usage<800?1:0);assert.equal(marks,usage<800?1:0);
+      if(usage>=800){assert.equal(result.code,'REFRESH_STORAGE_PRESSURE');assert.equal(result.effectBoundary,'NOT_DISPATCHED');}
+    }
+  }finally{if(descriptor)Object.defineProperty(globalThis,'navigator',descriptor);else delete globalThis.navigator;}
+});
+
 test('I17 X: effect reducer accepts only exact expected post-source, preserves uncertainty, separates absent feed',()=>{
   const candidate={method:REFRESH_METHOD,version:MARKER_POLICY,status:'ARMED_SINGLE_TEST',purpose:'SINGLE_TEST',
     evidenceId:id,sourceFingerprint:base.fingerprint,plan:prepared.plan};
@@ -162,6 +185,23 @@ test('I17 H-04 X/F: independently pinned signature binds actual canonical source
   for(const change of [{reviewer:{...reviewer,revoked:true}},{proof:{...proof,feed:{state:'ABSENT'}}},
     {resource:{...resource,generators:10}},{now:100001}])
     assert.equal((await verifyRefreshReview({payload,signature},{...context,...change})).ok,false);
+  // Exercise the operator's delivered offline helper, including its actual
+  // file/CLI envelope, against the same production verifier.
+  const {mkdtemp,writeFile,stat,rm}=await import('node:fs/promises'),{tmpdir}=await import('node:os');
+  const {execFileSync}=await import('node:child_process'),folder=await mkdtemp(tmpdir()+'/pcms-h04-review-helper-');
+  try{
+    const keys=folder+'/keys',challenge=folder+'/challenge.json',output=folder+'/signed.json';
+    execFileSync(process.execPath,['scripts/i17-h04-review.mjs','key',keys]);
+    assert.equal((await stat(keys+'/private-key.json')).mode&0o777,0o600);
+    await writeFile(challenge,JSON.stringify({challenge:payload,resource}));
+    execFileSync(process.execPath,['scripts/i17-h04-review.mjs','sign',keys+'/private-key.json',challenge,
+      'operator-reviewed-helper-evidence','10','100',output,'--approve-repeated-use']);
+    const signed=JSON.parse(await readFile(output,'utf8')),publicKey=JSON.parse(await readFile(keys+'/public-key.json','utf8'));
+    const localReviewer={publicKey,fingerprint:await digestReview(publicKey)};
+    assert.equal((await verifyRefreshReview(signed,{...context,reviewer:localReviewer,now:Date.now()})).ok,true);
+    assert.throws(()=>execFileSync(process.execPath,['scripts/i17-h04-review.mjs','sign',keys+'/private-key.json',challenge,
+      'operator-reviewed-helper-evidence','10','100',folder+'/must-not-sign.json'],{stdio:'pipe'}));
+  }finally{await rm(folder,{recursive:true,force:true});}
 });
 test('I17/P54-09 F: same-XPI resource sample is bounded at 50 accounts/1250 generators and excludes provider capacity claims',async()=>{
   const report=await measureRefreshResources({storage:{}},{clock:()=>10000});
@@ -205,6 +245,24 @@ test('I17 production source provenance: historical Git B does not falsely block 
   release.principalFingerprint='f'.repeat(64);assert.equal(canonicalRefresherInputs(records)[0].releaseVerified,false);
 });
 
+
+test('I17 read-only reconciliation cannot transfer an old marker receipt across released F, account/Persona/session or consent changes',()=>{
+  const row={slug,accountId:'account_one',personaUid:'fixture-persona',bindingVersion:1,remoteId,
+    ownerVerified:true,releaseVerified:true,listing:'PUBLIC',releaseFingerprint:base.fingerprint,
+    sourceRefresh:{policy:MARKER_POLICY,accountId:'account_one',personaUid:'fixture-persona',bindingVersion:1,remoteId,
+      principalFingerprint:principal,approvedBaseFingerprint:base.fingerprint,
+      consent:{revision:1,approvedBaseFingerprint:base.fingerprint}}};
+  const state={accounts:{account_one:{verifiedIdentity:true,principalFingerprint:principal}}};
+  assert.equal(currentMarkerAuthority(state,row,prepared.plan),true);
+  for(const change of [{accountId:'account_other'},{personaUid:'other-persona'},{bindingVersion:2},
+    {remoteId:'other_remote'},{ownerVerified:false},{releaseVerified:false},{listing:'UNLISTED'},
+    {releaseFingerprint:'b'.repeat(64)},{identityHeld:true},{reviewHeld:true}])
+    assert.equal(currentMarkerAuthority(state,{...row,...change},prepared.plan),false,JSON.stringify(change));
+  for(const change of [{restoredHistorical:true},{consent:{revision:2,approvedBaseFingerprint:base.fingerprint}},
+    {principalFingerprint:'b'.repeat(64)},{approvedBaseFingerprint:'c'.repeat(64)}])
+    assert.equal(currentMarkerAuthority(state,{...row,sourceRefresh:{...row.sourceRefresh,...change}},prepared.plan),false);
+  assert.equal(currentMarkerAuthority({accounts:{account_one:{verifiedIdentity:true,principalFingerprint:'d'.repeat(64)}}},row,prepared.plan),false);
+});
 
 test('I17 redacted source receipt strictly rejects nested private-source/token canaries even from corrupt metadata',()=>{
   const sentinel='DO_NOT_EXPORT_SECRET_SOURCE_TOKEN';

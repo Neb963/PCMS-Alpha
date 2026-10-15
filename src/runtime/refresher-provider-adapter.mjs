@@ -26,7 +26,12 @@ const receiptCodes=new Set(['UNKNOWN','METHOD_NOT_CONFIGURED','TEST_READY','RESE
   'HUMAN_OR_AMBIGUOUS_EDITOR','REFRESH_EDITOR_DIRTY_OR_UNVERIFIED','REFRESH_PRE_SAVE_CONTEXT_CHANGED',
   'REFRESH_LEASE_REVOKED','REFRESH_PLAN_OR_SOURCE_CHANGED','REFRESH_ROUTE_CHANGED','REFRESH_QUALIFICATION_REVOKED',
   'REFRESH_SOURCE_CONSENT_REQUIRED','REFRESH_PRE_SAVE_GUARD_CHANGED','REFRESH_CONTEXT_CHANGED','RESTORE_HOLD',
-  'REFRESH_STORAGE_PRESSURE','REFRESH_PREFLIGHT_HELD']);
+  'REFRESH_STORAGE_PRESSURE','REFRESH_PREFLIGHT_HELD','REFRESH_RECONCILIATION_CONTEXT_CHANGED',
+  'EDITOR_READINESS_CONTEXT_CHANGED','EDITOR_READINESS_LEASE_CHANGED','EDITOR_LOAD_TIMEOUT_RECONCILE',
+  'REFRESH_OWNED_TAB_CHANGED','REFRESH_EDITOR_SESSION_OR_OWNER_CHANGED','REFRESH_PERSISTED_SOURCE_CHANGED',
+  'REFRESH_PROTECTED_ROUTE_CHANGED','REFRESH_PRE_DISPATCH_GUARD_CHANGED','REFRESH_JOURNAL_NOT_COMMITTED',
+  'REFRESH_NATIVE_CONTRACT_UNVERIFIED','REFRESH_AI_WORKSPACE_UNVERIFIED','REFRESH_SOURCE_DRIFT',
+  'REFRESH_EDITOR_CHANGED','FUNCTIONAL_SOURCE_DRIFT','MARKER_SAFE_SLOT_REQUIRED']);
 const safeCode=s=>receiptCodes.has(s)?s:'UNKNOWN';
 export function projectMarkerPlan(p){
   if(!validMarkerPlan(p))return null;
@@ -176,6 +181,8 @@ export function createRefresherProviderAdapter(api,{database,guard,sentinel,cloc
       const view=sourceRefreshProjection(record);
       if(intent)view.intent={id:opId(intent.id)?intent.id:null,state:safeCode(intent.state),at:safeTime(intent.at),dispatchAt:safeTime(intent.dispatchAt),
         plan:projectMarkerPlan(intent.plan)};
+      view.observation={nextAt:safeTime(row.refresh?.nextAttemptAt),remaining:Math.max(0,3-
+        safeTime(intent?row.refresh?.probes:row.refresh?.feedProbes)),effectPending:!!intent};
       if(intent)view.state=intent.state==='DISPATCH_POSSIBLE'?'HELD_UNCERTAIN':'RESERVED';
       return {ok:true,sourceRefresh:view};
     };

@@ -1,5 +1,6 @@
 // Synchronous listeners, one coalesced scheduler alarm, canonical turn/claim
-// fences. I14 conditional executor is present but default production gate OFF.
+// fences. Production entry supplies the scoped native source-save adapter;
+// bare factories retain their effect-free default for isolated callers.
 import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId,createCanonicalStore} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
@@ -329,8 +330,8 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     let receipt={at:clock(),kind:'UNKNOWN',sourceFingerprint:null,
       targetMatched:false,principalMatched:false};
     try{
-      // The installed application has no provider-specific implementation or
-      // authorization. Tests inject an isolated deterministic effect ledger.
+      // Legacy explicit-method factory path retained for inherited oracles.
+      // Production source saves use the protected preflight branch above.
       await refreshAdapter.execute({...claim,method:candidate.method,methodVersion:candidate.version});
       const check=await refreshAdapter.readback(claim);
       const final=await g.getSafeRouteReadiness(row.personaUid);

@@ -9,6 +9,16 @@ import {REFRESHER_KEY,emptyShadow,validShadow,reconcileShadow,advanceShadow,
   applyStatistic,observeCapacity,MINUTE} from './refresher-core.mjs';
 const slugOK=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
+export function currentMarkerAuthority(state,row,plan){
+  const cfg=row?.sourceRefresh,a=state?.accounts?.[row?.accountId];
+  return !!(cfg&&plan&&row.ownerVerified&&row.releaseVerified&&!row.identityHeld&&!row.reviewHeld&&
+    row.listing==='PUBLIC'&&a?.verifiedIdentity&&hex(a.principalFingerprint)&&
+    cfg.policy===MARKER_POLICY&&!cfg.restoredHistorical&&cfg.consent?.revision===plan.consentRevision&&
+    cfg.approvedBaseFingerprint===plan.approvedBaseFingerprint&&row.releaseFingerprint===plan.approvedBaseFingerprint&&
+    cfg.consent.approvedBaseFingerprint===row.releaseFingerprint&&cfg.accountId===row.accountId&&
+    cfg.personaUid===row.personaUid&&cfg.bindingVersion===row.bindingVersion&&cfg.remoteId===row.remoteId&&
+    cfg.principalFingerprint===a.principalFingerprint);
+}
 
 function transact(db,mode,fn){
   return new Promise((resolve,reject)=>{
@@ -355,7 +365,8 @@ export function createRefresherStore(db){
       meta.put({key:'refresh-source:'+r.slug,record:r.sourceRefresh});
     }
     if(r.refresh.intent.purpose==='SINGLE_TEST'&&r.sourceRefresh&&!r.sourceRefresh.lastReceipt){
-      r.sourceRefresh={...r.sourceRefresh,testAttempted:false,preview:null,revision:r.sourceRefresh.revision+1};
+      r.sourceRefresh={...r.sourceRefresh,testAttempted:false,preview:null,state:'PREFLIGHT_HELD',
+        lastHold:/^[A-Z0-9_]{1,80}$/.test(reason)?reason:'REFRESH_PREFLIGHT_HELD',revision:r.sourceRefresh.revision+1};
       meta.put({key:'refresh-source:'+r.slug,record:r.sourceRefresh});
     }
     r.refresh.intent=null;r.refresh.state=r.refresh.suspended?
@@ -396,6 +407,8 @@ export function createRefresherStore(db){
   const settleAttempt=(stableId,id,receipt)=>mutate(null,(s,meta,tx)=>{
     const r=s.rows.find(x=>x.stableId===stableId);
     if(!r)return fail('REFRESH_TARGET_UNAVAILABLE');
+    if(r.refresh?.intent?.plan&&!currentMarkerAuthority(s,r,r.refresh.intent.plan))
+      return fail('REFRESH_RECONCILIATION_CONTEXT_CHANGED');
     const packet=reconcileRefreshAttempt(r.refresh,id,receipt);
     if(!packet.ok)return packet;
     const out=structuredClone(s),row=out.rows.find(x=>x.stableId===stableId);
@@ -432,6 +445,8 @@ export function createRefresherStore(db){
     const snapshot=await read();if(!snapshot.ok)return snapshot;
     const row=snapshot.state.rows.find(r=>r.stableId===stableId),cfg=row?.sourceRefresh;
     if(!row||!cfg)return fail('REFRESH_SOURCE_UNKNOWN');
+    if(!currentMarkerAuthority(snapshot.state,row,row.refresh?.intent?.plan||cfg.lastReceipt))
+      return fail('REFRESH_RECONCILIATION_CONTEXT_CHANGED');
     if(row.refresh.intent){
       const intent=row.refresh.intent;
       if(intent.state!=='DISPATCH_POSSIBLE')return fail('REFRESH_RESERVATION_PENDING');
@@ -445,6 +460,7 @@ export function createRefresherStore(db){
     return mutate(null,(s,meta,tx)=>{
       const r=s.rows.find(x=>x.stableId===stableId),current=r?.sourceRefresh;
       if(!current||current.revision!==cfg.revision||r.refresh.intent)return fail('STALE_REFRESH_SOURCE');
+      if(!currentMarkerAuthority(s,r,cfg.lastReceipt))return fail('REFRESH_RECONCILIATION_CONTEXT_CHANGED');
       const out=structuredClone(s),target=out.rows.find(x=>x.stableId===stableId),e=target.refresh;
       e.feedProbes=(e.feedProbes||0)+1;e.nextAttemptAt=now+600000*2**e.feedProbes;
       const f=observed?.feed,valid=observed?.kind==='EFFECT_CHANGED'&&observed.targetMatched===true&&

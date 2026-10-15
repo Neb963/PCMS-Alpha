@@ -43,24 +43,24 @@
 - [x] Show one eligible generator's explicitly authorized test action **in the same XPI** before fleet qualification.
 - [x] Implement operator H-04 evidence verification and versioned per-target/method qualification; prevent UI-manufactured support evidence.
 - [x] Enable opt-in recurring execution in the **same installed XPI** after defensible method proof and P54-09 resource evidence; no code rebuild after H-04.
-- [ ] Preserve 24h active / 72h sleep defaults, fairness, grace, capacity/hysteresis, global/account/generator Pauses and existing single coalesced alarm.
+- [x] Preserve 24h active / 72h sleep defaults, fairness, grace, capacity/hysteresis, global/account/generator Pauses and existing single coalesced alarm.
 - [x] Rate limits, feed filtering, absent rank, unknown effects and quota exhaustion cause bounded re-observation/scoped holds, not repeated marker variations or unattended spam saves.
 
 ## UX and diagnostics
 
-- [ ] Refresher UI: eligible generator → exact marker diff → explicit scoped consent → one test → persisted source result → feed observation → qualify → optional recurring enable / Pause.
-- [ ] Show accurate nontechnical states, recent rank/time, source fingerprint and bounded next action; update Overview based on actual runtime status.
-- [ ] Add one-click **redacted diagnostic receipt**; no raw IPs, tokens, credential material or private source bytes.
-- [ ] Verify all buttons work, are keyboard accessible and survive delayed responses, tab closure and background wake without phantom commits.
+- [x] Refresher UI: eligible generator → exact marker diff → explicit scoped consent → one test → persisted source result → feed observation → qualify → optional recurring enable / Pause.
+- [x] Show accurate nontechnical states, recent rank/time, source fingerprint and bounded next action; update Overview based on actual runtime status.
+- [x] Add one-click **redacted diagnostic receipt**; no raw IPs, tokens, credential material or private source bytes.
+- [x] Verify all buttons work, are keyboard accessible and survive delayed responses, tab closure and background wake without phantom commits.
 
 ## Tests and independent evidence
 
-- [ ] F/X positive: true production caller reaches a fixed effect ledger and exact marker-only full-byte save/readback; second refresh replaces marker, not appends.
-- [ ] F/X negatives: private/unlisted, wrong owner, Direct/unprotected or changed route, human/dirty/collaborative editor, bad anchor, stale functional source, Git/release mismatch, no provider support; **zero external writes**.
-- [ ] F/X uncertainty: IDB abort, lost save ACK, saved-but-not-persisted, saved-but-feed-absent, stale/partial/429 feed, duplicate alarm, cold wake, failed readback; no blind repeat.
-- [ ] Source-provenance regression: marker recognized precisely; altered code/assets or stale human approval held; previous-good/source recovery intact.
-- [ ] Scheduler load/stress: at least 50 accounts and 1,000 generators, oldest eligible, pause/grace/slot/capacity, no restart burst, bounded CPU/I/O/IDB and resource report without invented production rate allowances.
-- [ ] Packaged persistent Firefox B: installed combined XPI, real `entry.mjs` registration, donor-fixed execution, UI lifecycle, alarm wake; assert adapter cannot be absent or null. Donor regressions included.
+- [x] F/X positive: true production caller reaches a fixed effect ledger and exact marker-only full-byte save/readback; second refresh replaces marker, not appends.
+- [x] F/X negatives: private/unlisted, wrong owner, Direct/unprotected or changed route, human/dirty/collaborative editor, bad anchor, stale functional source, Git/release mismatch, no provider support; **zero external writes**.
+- [x] F/X uncertainty: IDB abort, lost save ACK, saved-but-not-persisted, saved-but-feed-absent, stale/partial/429 feed, duplicate alarm, cold wake, failed readback; no blind repeat.
+- [x] Source-provenance regression: marker recognized precisely; altered code/assets or stale human approval held; previous-good/source recovery intact.
+- [x] Scheduler load/stress: at least 50 accounts and 1,000 generators, oldest eligible, pause/grace/slot/capacity, no restart burst, bounded CPU/I/O/IDB and resource report without invented production rate allowances.
+- [x] Packaged persistent Firefox B: installed combined XPI, real `entry.mjs` registration, donor-fixed execution, UI lifecycle, alarm wake; assert adapter cannot be absent or null. Donor regressions included.
 - [ ] Restore `pcms-required` green **at exact head** without weakening gates; investigate pre-existing Supply B `RENAME admission INVALID_PARAMS` independently and minimally if needed.
 - [ ] Confirm reproducible build twice, XPI Gecko ID `persona-route-manager@local`, SHA-256 and exact HEAD/CI correspondence; no live H PASS claimed.
 
@@ -130,7 +130,20 @@ The code is **not done** if the packaged Refresher still has a null `refreshAdap
 - Replaced the low-port test-server dependency with an isolated high-port TLS server and a protected loopback CONNECT proxy. Only fixed fixture hosts terminate locally; global unmanaged Block remains enabled. This supersedes the earlier local port-443 limitation; local native B is now achievable. No donor route bypass, live DNS or production sockets.
 - Firefox 154.0b10, persistently installed combined XPI after process restart: actual production command port/UI -> real donor shared lease/protected route -> fixed MAIN/ISOLATED injection -> native save -> independent source/feed receipt **PASS**. Inline keyboard focus and mismatched intent rejection also pass. Independent provider ledger records exactly one entry-point save; duplicate request rejected.
 - Installed packaged fault matrix **PASS**: present, persisted-but-absent, no persistence despite ACK, lost ACK with independently proven persistence; dirty editor and actual IDB dispatch-commit abort each produce zero saves. Canonical DISPATCH_POSSIBLE is independently read before each native save.
-- The same installed XPI verifies a pinned detached review, performs the 50-account/1,250-generator resource sample, opts in, and schedules sequence 2 by replacing exactly one marker. Canonical resource sample: 1,213,252 serialized bytes; observed Firefox turn maximum 125 ms in this isolated run (local measurement, no provider rate claim). Revocation/Pause are exercised.
+- The same installed XPI verifies a pinned detached review, performs the 50-account/1,250-generator resource sample, opts in, and schedules sequence 2 by replacing exactly one marker. Canonical resource sample: 1,213,252 serialized bytes; observed Firefox eight-turn sample elapsed 125 ms in this isolated run (local measurement, no provider rate claim). Revocation/Pause are exercised.
 - Firefox returns a just-created tab's transient about:blank document as complete as well as loading. The bounded readiness wait now accepts either under the exact owned tag/lease, never injects on blank, and still requires the exact target before preflight or effect. Focused F test covers both states.
 - Strict source-receipt projection rejects nested token/source canaries. Permanent operation-ID intent/dispatch tombstones are committed with canonical state, alongside immutable successful marker receipts.
 - Serial full fast suite **412/412 PASS** (~4.8 s). Full inherited Firefox regression, source-save process-cold recovery, independent final-head CI, final reproducibility and delivery remain in progress. H and independent governance acceptance remain pending.
+
+
+### Complete operator-test execution and final-candidate verification
+
+- Checkpoint `00ec59da5cdabf55ca2e9369d6090fb2508f48cb` / tree `ea242929ce70fe58701a7d25c9ec6eb5cce2e363` is independently green in [CI 38802195682](https://github.com/Neb963/PCMS-Alpha/actions/runs/38802195682): baseline `116653821298`, fast/donor/reproducibility `116653820746`, Firefox `116654282476`, pcms-required `116655337794`, all SUCCESS. It preserves the paused Supply runtime and all trust-root workflows.
+- Local full installed-Firefox suite PASS, including new real production source-save process-cold recovery: concurrent commands admit exactly one native save; unavailable source readback retains DISPATCH_POSSIBLE; after full browser process restart the same intent resolves through independent READS ONLY. The separate provider ledger remains exactly one save, and each permanent intent/dispatch/success marker observation exists exactly once. Duplicate wakes/requests cannot replay it.
+- Actual existing Refresher UI additionally PASS in the installed final package: keyboard focus, mismatch rejection, exact preview/consent/test, canonical reload, redacted receipt Blob export, canonical review challenge export, resource measurement, public-key pin, detached signed qualification import, target schedule enable/disable and revocation. Export contains no synthetic session token or functional source. No live H evidence is implied by synthetic reviewer keys.
+- Hardened read-only reconciliation against changed released F, owner/account/Persona binding, authenticated principal, consent version and restore. A historical marker proof cannot be promoted into a new context even when a delayed readback arrives. New F/X matrix covers those independent negative contexts.
+- Final serial fast **414/414 PASS** (~4.9 s), including the delivered offline Node key/sign helper against the production signature verifier and the below/at/above 80% storage-pressure no-save oracle. Final native/UI/cold-restart focused B PASS after the last runtime changes. Earlier full local B also passes all inherited Supply/AI/Git/release/backup/restore/scheduler/UI checks, real alarm and event-page wake.
+- Local full B measured 50 accounts / 1,250 rows, observer read peak 2, canonical runtime snapshot 2,709,294 bytes, fleet observer scenario 3,820 ms; local eight-turn source resource sample 111–139 ms in observed runs. Independent checkpoint CI: 4,254 ms fleet observer scenario, 128 ms eight-turn source sample. These are isolated point samples, not peak memory/CPU, quota exhaustion proof, provider allowance or live SLO claims. Existing adversarial capacity/backpressure/quota/restore checks remain mandatory.
+- Final package rebuilt twice identically: SHA-256 `17ae760d60c54c3a88069a5189428d2df986dc12aea0c81d10243e3b0fa80231`; Gecko ID `persona-route-manager@local`. Final exact-head required CI and external delivery binding are pending publication of this checkpoint; no merge or H PASS.
+
+- Preflight cancellation now persists its safe causal hold and clears only the unconsumed preview. Source receipt/UI show the next bounded read-only observation time and remaining budget; failed or ambiguous native attempts remain consumed. No further runtime changes planned before exact-head CI.

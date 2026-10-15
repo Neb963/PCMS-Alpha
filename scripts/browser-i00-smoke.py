@@ -737,6 +737,22 @@ def main():
                 assert entry_probe.get('ok') is True,entry_probe
                 assert refresher_fixture.ledger()['i17-entry-present']['saves']==1,refresher_fixture.ledger()
                 print('B I17_REAL_ENTRY_UI_DONOR_LEASE_SOURCE_SAVE='+json.dumps(entry_probe),flush=True)
+                wake_script=pathlib.Path(__file__).with_name('i17_refresher_wake_probe.js').read_text()
+                source_wake=call('POST',f'/session/{after}/execute/async',{
+                    'script':wake_script,'args':['PREPARE']},timeout=120)
+                assert source_wake.get('ok') is True,source_wake
+                assert refresher_fixture.ledger()['i17-entry-wake']['saves']==1,refresher_fixture.ledger()
+                close(after)
+                refresher_fixture.release_readback('i17-entry-wake')
+                after=open_session(browser,profile)
+                assert addons_uuid(profile)==uuid
+                call('POST',f'/session/{after}/url',{'url':url})
+                recovered_source=call('POST',f'/session/{after}/execute/async',{
+                    'script':wake_script,'args':['VERIFY']},timeout=120)
+                assert recovered_source.get('ok') is True,recovered_source
+                assert recovered_source['id']==source_wake['id'],(source_wake,recovered_source)
+                assert refresher_fixture.ledger()['i17-entry-wake']['saves']==1,refresher_fixture.ledger()
+                print('B I17_REAL_PROCESS_COLD_SOURCE_RECONCILIATION_NO_REPLAY='+json.dumps(recovered_source),flush=True)
 
 
                 assert view['links']==['#overview','#generators','#work-queue','#accounts','#refresher','#settings'],view
