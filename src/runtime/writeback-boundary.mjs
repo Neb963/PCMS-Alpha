@@ -159,7 +159,7 @@ export function createWritebackBoundary(api,{
     manualPilot={slug:r.slug,revision:r.revision,
       operationId:r.operationId,sourceFingerprint:r.sourceFingerprint,
       expectedHead:r.expectedHead,expiresAt:pilotClock()+120000};
-    return {ok:true,scope:'SINGLE_EXACT_TESTED_F_GIT_COMMIT',
+    return {ok:true,scope:p.type==='ARM_DISPOSABLE_COMMIT'?'SINGLE_DISPOSABLE_TESTED_F_GIT_COMMIT':'SINGLE_EXACT_TESTED_F_GIT_COMMIT',
       expiresInSeconds:120};
   }
   async function runTrusted(msg){

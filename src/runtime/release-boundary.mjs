@@ -253,14 +253,14 @@ export function createReleaseBoundary(api,{
       if(record.state!=='APPROVED'||
          (msg.type==='ARM_DISPOSABLE_RELEASE'&&record.kind!=='PRIVATE_NEW')||
          !['PRIVATE_NEW','EXISTING_UPDATE'].includes(record.kind))
-        return fail('EXACT_SOURCE_APPROVAL_REQUIRED');
+        return fail(msg.type==='ARM_DISPOSABLE_RELEASE'?'PILOT_PRIVATE_NEW_APPROVAL_REQUIRED':'EXACT_SOURCE_APPROVAL_REQUIRED');
       if(p.confirmation!=='PUBLISH '+p.slug+' '+record.approval.sourceFingerprint)
         return fail('PILOT_EXACT_SOURCE_CONFIRMATION_REQUIRED');
       releasePilot={slug:p.slug,kind:record.kind,releaseId:record.releaseId,
         revision:record.revision,sourceFingerprint:record.approval.sourceFingerprint,
         remotePublicId:record.approval.remotePublicId,
         expiresAt:pilotClock()+120000};
-      return {ok:true,scope:'SINGLE_EXACT_SOURCE_PUBLICATION',
+      return {ok:true,scope:msg.type==='ARM_DISPOSABLE_RELEASE'?'SINGLE_PRIVATE_NEW_EXACT_SOURCE_PUBLICATION':'SINGLE_EXACT_SOURCE_PUBLICATION',
         sourceFingerprint:record.approval.sourceFingerprint,expiresInSeconds:120};
     }
     if(msg.type==='CANCEL_APPROVED')return store.cancelApproved(p.slug,p.expectedRevision);
