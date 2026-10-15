@@ -18,6 +18,7 @@ function freezeFor(a,id,slugs){
   return planned.batch;
 }
 function next(row,stage,proof={}){
+  if(['CREATE_DISPATCH_POSSIBLE','RENAME_DISPATCH_POSSIBLE'].includes(stage))row=next(row,stage.split('_')[0]+'_READY_TO_DISPATCH',{preflight:{version:2}});
   const outcome=moveSupply(row,stage,proof);
   assert.equal(outcome.ok,true,stage+':'+outcome.code);
   return outcome.item;

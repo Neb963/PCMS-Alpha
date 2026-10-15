@@ -15,6 +15,7 @@ const input=i=>{
     principalFingerprint:FINGERPRINT,listing:'PUBLIC'};
 };
 const take=(item,event,proof)=>{
+  if(['CREATE_DISPATCH_POSSIBLE','RENAME_DISPATCH_POSSIBLE'].includes(event))item=take(item,event.split('_')[0]+'_READY_TO_DISPATCH',{preflight:{version:2}});
   const next=moveSupply(item,event,proof);
   assert.equal(next.ok,true,next.code||event);
   return next.item;

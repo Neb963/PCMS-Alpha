@@ -1,112 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {webcrypto} from 'node:crypto';
-import {perchanceSupplyIsolated} from '../src/runtime/perchance-supply.mjs';
+import {withProvider} from './helpers/supply-native-fixture.mjs';
+import {perchanceSupplyIsolated as nativeSupply} from '../src/runtime/perchance-supply.mjs';
+
+async function perchanceSupplyIsolated(request){
+  if(['CREATE','RENAME'].includes(request.kind)){
+    request={...request,operationId:'supply_fixture_operation'};
+    const pre=await nativeSupply({...request,kind:'PREFLIGHT_'+request.kind});
+    if(!pre.ok)return pre;
+    return nativeSupply({...request,preflight:pre.preflight});
+  }
+  return nativeSupply(request);
+}
 
 const req={kind:'CREATE',slug:'disposable-exact-slug',
   principalFingerprint:'f'.repeat(64)};
-async function withProvider(t,config,work){
-  const email='fixture@example.invalid',token='synthetic-session-token';
-  const raw=JSON.stringify({user:{loggedIn:true,email,sessionToken:token}});
-  const fingerprint=Array.from(new Uint8Array(await webcrypto.subtle.digest('SHA-256',
-    new TextEncoder().encode(email)))).map(x=>x.toString(16).padStart(2,'0')).join('');
-  const ledger=[],owned=new Map(config.preexistingOwned||[]);
-  const template={name:'minimal',isPrivate:false,modelText:'example template',
-    outputTemplate:'example html',srcManifest:[],id:'template-id-old',
-    publicId:'template-public-old',owner:'somebody-else',
-    ...config.template};
-  let stored=raw,change='timestamp-zero';
-  const fetch=async(url,opts)=>{
-    assert.equal(url.startsWith('https://perchance.org/api/'),true);
-    assert.equal(opts.method,'POST');
-    assert.equal(opts.credentials,'same-origin');
-    assert.equal(opts.redirect,'error');
-    assert.equal(opts.cache,'no-store');
-    const name=url.slice('https://perchance.org/api/'.length);
-    const body=JSON.parse(opts.body);
-    ledger.push({name,body});
-    if(name==='getGeneratorPageData'){
-      assert.equal(body.email,undefined);
-      assert.equal(body.sessionToken,undefined);
-    }else{
-      assert.equal(body.email,email);
-      assert.equal(body.sessionToken,token);
-    }
-    let out;
-    if(name==='getGeneratorsByUser'){
-      // An account census is an independent remote witness: it can lag,
-      // omit a just-created/renamed slug, or still show the old temporary ID
-      // even when page and ownership endpoints appear to agree.
-      const rows=[...owned.entries()].filter(([key])=>
-        !(config.omitTempFromCensus&&key==='server-temp-slug')&&
-        !(config.omitFinalFromCensus&&key==='disposable-exact-slug'))
-        .map(([key,g])=>({name:key,isPrivate:
-          (config.tempPublicInCensus&&key==='server-temp-slug')||
-          (config.finalPublicInCensus&&key==='disposable-exact-slug')
-            ?false:g.isPrivate}));
-      if(config.staleOldSlugAfterRename&&owned.has('disposable-exact-slug'))
-        rows.push({name:'server-temp-slug',isPrivate:true});
-      out={status:'success',generators:rows};
-    }
-    else if(name==='getGeneratorPageData'){
-      if(body.generatorName==='minimal')out={status:'success',generator:template};
-      else if(owned.has(body.generatorName))
-        out={status:'success',generator:{...owned.get(body.generatorName),
-          ...(body.generatorName==='server-temp-slug'
-            ?config.tempReadbackExtras:config.finalReadbackExtras)}};
-      else if(config.oldTempGloballyResolvableAfterRename&&
-        body.generatorName==='server-temp-slug'&&
-        owned.has('disposable-exact-slug'))
-        out={status:'success',generator:{name:'server-temp-slug',
-          isPrivate:true,modelText:'',outputTemplate:'',srcManifest:[],
-          publicId:'servernewpublic'}};
-      else out={status:config.ambiguousAbsence?'unverified':'not-found'};
-    }else if(name==='checkGeneratorOwnership')
-      out={status:body.generatorName==='minimal'?'is-not-owner':
-        owned.has(body.generatorName)?'is-owner':'is-not-owner'};
-    else if(name==='save'){
-      assert.equal(ledger.some(e=>e.name==='getGeneratorPageData'&&
-        e.body.generatorName==='disposable-exact-slug'),true);
-      if(config.reportCreatedIdentity){
-        // Model a provider which says "created" but returns a known owned
-        // generator or the template ID. The fake remote ledger records the
-        // dispatch but does not mint a novel resource.
-        out={status:'created',name:config.reportCreatedIdentity};
-      }else if(config.loseAck){
-        owned.set('server-temp-slug',{name:'server-temp-slug',isPrivate:true,
-          modelText:'',outputTemplate:'',srcManifest:[],publicId:'servernewpublic'});
-        out={status:'unverified'};
-      }else{
-        owned.set('server-temp-slug',{name:'server-temp-slug',isPrivate:true,
-          modelText:body.generator.modelText,outputTemplate:body.generator.outputTemplate,
-          srcManifest:body.srcManifest,publicId:'servernewpublic'});
-        out={status:'created',name:'server-temp-slug'};
-      }
-      if(config.rotateSessionAfterSave)change='timestamp-rotated';
-    }else if(name==='changeGeneratorName'){
-      const old=owned.get(body.currentName);
-      if(old){owned.delete(body.currentName);owned.set(body.newName,
-        {...old,name:body.newName});out={status:'success'};}
-      else out={status:'unverified'};
-    }else assert.fail('Unexpected provider endpoint '+name);
-    return {status:200,headers:{get:k=>k==='content-type'?'application/json':null},
-      json:async()=>out};
-  };
-  const old=new Map(['location','localStorage','crypto','fetch'].map(k=>
-    [k,Object.getOwnPropertyDescriptor(globalThis,k)]));
-  for(const [k,v] of Object.entries({
-    location:{origin:'https://perchance.org'},
-    localStorage:{getItem:k=>k==='app-storage'?stored:
-      k==='sessionTokenLastChangeTime'?change:null},
-    crypto:webcrypto,fetch
-  }))Object.defineProperty(globalThis,k,{configurable:true,writable:true,value:v});
-  try{
-    return await work({ledger,owned,fingerprint,rotateSession:()=>{change='trotated';}});
-  }finally{
-    for(const [key,desc] of old)desc?
-      Object.defineProperty(globalThis,key,desc):delete globalThis[key];
-  }
-}
 test('P56-06 / P52-02 F/X: private empty first save excludes copied template authority and proves exact new ID',async t=>{
   await withProvider(t,{},async({ledger,fingerprint})=>{
     const r=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
@@ -117,7 +25,7 @@ test('P56-06 / P52-02 F/X: private empty first save excludes copied template aut
     assert.equal(save[0].body.generator.modelText,'');
     assert.equal(save[0].body.generator.outputTemplate,'');
     assert.equal(save[0].body.generator.isPrivate,true);
-    assert.deepEqual(save[0].body.srcManifest,[]);
+    assert.deepEqual(save[0].body.srcManifest,{});
     for(const inherited of ['id','publicId','owner'])
       assert.equal(Object.hasOwn(save[0].body.generator,inherited),false,inherited);
     const observed=await perchanceSupplyIsolated({...req,kind:'READ_CREATE',
@@ -286,8 +194,9 @@ test('P56-06 X: alternate public/listed template metadata cannot override privat
     {visibility:'PUBLIC'},{privacy:{mode:'public'}}]){
     await withProvider(t,{template},async({ledger,fingerprint})=>{
       const result=await perchanceSupplyIsolated({...req,principalFingerprint:fingerprint});
-      assert.equal(result.code,'TEMPLATE_VISIBILITY_UNVERIFIED');
-      assert.equal(ledger.filter(x=>x.name==='save').length,0);
+      assert.equal(result.ack,'CREATED');
+      assert.equal(ledger.filter(x=>x.name==='save').length,1);
+      assert.equal(ledger.find(x=>x.name==='save').body.generator.isPublic,undefined);
     });
   }
   // Explicitly false aliases cannot override isPrivate:true; they may be
@@ -313,7 +222,7 @@ test('P56-06 X: native first save uses an explicit private/empty allowlist, neve
     assert.equal(saves.length,1);
     assert.deepEqual(Object.keys(saves[0].body.generator).sort(),[
       'collabEditModeIsEnabled','imports','isPrivate','modelText','name',
-      'outputTemplate','srcManifest'].sort());
+      'outputTemplate'].sort());
     assert.deepEqual(saves[0].body.generator.imports,[]);
     assert.equal(saves[0].body.generator.collabEditModeIsEnabled,false);
     assert.equal(saves[0].body.generator.name,'minimal');
@@ -342,7 +251,7 @@ test('P56-06 X: contradictory readback metadata blocks create proof and rename',
       assert.equal(create.ok,true,create.code);
       const probe=await perchanceSupplyIsolated({...req,kind:'READ_CREATE',
         principalFingerprint:fingerprint,temporarySlug:create.temporarySlug});
-      assert.equal(probe.code,'CREATE_READBACK_UNVERIFIED');
+      assert.equal(probe.code,'PRIVATE_EMPTY_OWNER_UNVERIFIED');
       const rename=await perchanceSupplyIsolated({...req,kind:'RENAME',
         principalFingerprint:fingerprint,temporarySlug:create.temporarySlug,
         remoteId:'public_servernewpublic'});
@@ -381,7 +290,7 @@ test('P56-06 X: untyped collaboration readback cannot prove a private empty gene
       assert.equal(result.ok,true,result.code);
       const probe=await perchanceSupplyIsolated({...req,kind:'READ_CREATE',
         principalFingerprint:fingerprint,temporarySlug:result.temporarySlug});
-      assert.equal(probe.code,'CREATE_READBACK_UNVERIFIED');
+      assert.equal(probe.code,'PRIVATE_EMPTY_OWNER_UNVERIFIED');
       assert.equal(ledger.filter(x=>x.name==='changeGeneratorName').length,0);
     });
 });

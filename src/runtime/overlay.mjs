@@ -146,7 +146,9 @@ attachPcmsGuard({
        !after.url?.startsWith('https://perchance.org/')||
        state.profiles?.[cookieStoreId]?.personaUid!==personaUid||
        state.profiles?.[cookieStoreId]?.routeId!==routeId)
-      return {ok:false,code:'POST_EFFECT_TAB_OR_ROUTE_CHANGED'};
+      return {...result?.[0]?.result,ok:false,code:result?.[0]?.result?.ok===false?
+        result[0].result.code:'POST_EFFECT_TAB_OR_ROUTE_CHANGED',
+        effectBoundary:result?.[0]?.result?.effectBoundary||'DISPATCH_POSSIBLE'};
     if(result?.length!==1||result[0].frameId!==0||result[0].error)
       return {ok:false,code:'SUPPLY_INJECTION_UNVERIFIED'};
     return result[0].result;

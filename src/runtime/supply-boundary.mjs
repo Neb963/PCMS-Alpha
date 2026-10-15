@@ -10,6 +10,7 @@ import {writeNonReadyFolder,readNonReadyFolder,markerRequestAllowed} from './sup
 import {internalPcmsGuard} from './persona-guard.mjs';
 export const SUPPLY_PORT='pcms-i06-supply';
 const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM',
+  'CHECK_AVAILABILITY','INVESTIGATE_ITEM','QUARANTINE_ITEM','GET_DIAGNOSTIC',
   'RECONCILE_ITEM','FINISH_SOURCE_FOLDER','RECONCILE_GIT',
   'ABORT_PREPARED','ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT','ARM_EXACT_ITEM','ARM_EXACT_GIT']);
 const hex=/^[a-f0-9]{64}$/;
@@ -25,29 +26,32 @@ export function validateSupplyMessage(api,sender,message){
      !commands.has(message.type))return fail('CAPABILITY_OFF');
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
-  const allowed=message.type==='PREVIEW'||message.type==='FREEZE'
+  const allowed=['PREVIEW','FREEZE','CHECK_AVAILABILITY'].includes(message.type)
     ?['accountId','expectedAccountRevision','slugs','batchId']:
     message.type==='GET_BATCH'?['batchId']:
     message.type==='LIST_BATCHES'?[]:
+    message.type==='INVESTIGATE_ITEM'?['batchId','itemId','expectedRevision','candidateSlug']:
     ['FINISH_SOURCE_FOLDER','RECONCILE_GIT'].includes(message.type)?
       ['batchId','itemId','expectedRevision','token']:
     ['ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT','ARM_EXACT_ITEM','ARM_EXACT_GIT'].includes(message.type)?
       ['batchId','itemId','expectedRevision','confirmation']:
     ['batchId','itemId','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
-  if(message.type==='PREVIEW'||message.type==='FREEZE'){
+  if(['PREVIEW','FREEZE','CHECK_AVAILABILITY'].includes(message.type)){
     if(!isSafeId(p.accountId)||!Number.isSafeInteger(p.expectedAccountRevision)||
        p.expectedAccountRevision<1||!Array.isArray(p.slugs)||p.slugs.length<1||
        p.slugs.length>100||p.slugs.some(s=>typeof s!=='string'||s.length>120)||
        (message.type==='FREEZE'&&(!isSafeId(p.batchId)||p.batchId.length>95)))
       return fail('INVALID_PARAMS');
+    if(message.type==='CHECK_AVAILABILITY'&&p.slugs.length>5)return fail('AVAILABILITY_LIMIT_FIVE');
   }else if(message.type==='GET_BATCH'&&!isSafeId(p.batchId))
     return fail('INVALID_PARAMS');
-  else if(['EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED',
+  else if(['EXECUTE_ITEM','RECONCILE_ITEM','INVESTIGATE_ITEM','QUARANTINE_ITEM','GET_DIAGNOSTIC','FINISH_SOURCE_FOLDER','ABORT_PREPARED',
     'ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT','ARM_EXACT_ITEM','ARM_EXACT_GIT','RECONCILE_GIT'].includes(message.type)&&
     (!isSafeId(p.batchId)||!isSafeId(p.itemId)||
      !Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
     return fail('INVALID_PARAMS');
+  if(p.candidateSlug!==undefined&&(typeof p.candidateSlug!=='string'||!(/^[a-z0-9][a-z0-9-]{0,99}$/.test(p.candidateSlug))))return fail('INVALID_PARAMS');
   if(['FINISH_SOURCE_FOLDER','RECONCILE_GIT'].includes(message.type)&&
     (typeof p.token!=='string'||p.token.length>512))return fail('INVALID_PARAMS');
   if(['ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT','ARM_EXACT_ITEM','ARM_EXACT_GIT'].includes(message.type)&&
@@ -68,8 +72,7 @@ function redacted(out) {
 }
 export function createSupplyBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,
-  // Deliberately OFF in packaged extension. Tests must explicitly supply
-  // an independently controlled synthetic gate and fake isolated executor.
+  // Production uses exact per-item arms; these defaults grant no authority.
   effectGate=()=>false,gitGate=()=>false,
   gitWrite=writeNonReadyFolder,gitRead=readNonReadyFolder,
   pilotClock=()=>performance.now(),
@@ -184,6 +187,7 @@ export function createSupplyBoundary(api,{
       batchId:previewOnly?'preview_00000001':p.batchId,
       accountId:account.accountId,personaUid:account.personaUid,
       accountRevision:account.revision,bindingVersion:account.bindingVersion,
+      principalFingerprint:account.identity.principalFingerprint,
       slugs:p.slugs
     };
     if(previewOnly){
@@ -203,7 +207,8 @@ export function createSupplyBoundary(api,{
     if(!item)return fail('ITEM_NOT_FOUND');
     if(item.revision!==p.expectedRevision)return fail('STALE_REVISION');
     if(!['FROZEN','CREATE_CONFIRMED'].includes(item.state))
-      return fail(item.state.includes('UNCERTAIN')||item.state.includes('DISPATCH')||
+      return fail(item.state.endsWith('_READY_TO_DISPATCH')||item.state.includes('PREFLIGHT_FAILED')?'UNSENT_INTENT_REVIEW_REQUIRED':
+        item.state.includes('UNCERTAIN')||item.state.includes('DISPATCH')||item.state.includes('INVESTIGATION')||
         item.state.includes('OBSERVING')?'RECONCILIATION_REQUIRED':'NOT_ADMISSIBLE');
     const account=await s.accounts.get(b.accountId);
     if(!account.ok||!validateOwnerContext(b,account.account).ok)
@@ -233,69 +238,65 @@ export function createSupplyBoundary(api,{
     let at=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
       expectedRevision:item.revision,event,operationId,fingerprint:fp});
     if(!at.ok)return at;
-    // The last admission/capability/guard check is made BEFORE effect marker.
-    const now=await s.accounts.get(b.accountId);
-    if(!now.ok||!validateOwnerContext(b,now.account).ok||
-       (await sentinel.inspect()).held||
-       !supplyAuthorized({account:now.account,batch:b,item}))
-      return fail('PREPARED_HELD');
-    const guardAgain=await g.getSafeRouteReadiness(b.personaUid);
-    if(!guardAgain?.ready||guardAgain.cookieStoreId!==readiness.cookieStoreId||
-       guardAgain.routeId!==readiness.routeId)return fail('PREPARED_HELD');
+    const params={kind,slug:item.requestedSlug,temporarySlug:item.temporarySlug,
+      remoteId:item.remoteId,operationId,principalFingerprint:account.account.identity.principalFingerprint};
+    const recordFailure=async(response,knownNoEffect=false)=>{
+      pilotArm=null;
+      const code=/^[A-Z][A-Z0-9_]{2,79}$/.test(response?.code||'')?response.code:'DISPATCH_OUTCOME_UNKNOWN';
+      const saved=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
+        expectedRevision:at.item.revision,event:kind+(knownNoEffect?'_PREFLIGHT_FAILED':'_UNCERTAIN'),
+        proof:{code,stage:response?.stage||kind+'_PREFLIGHT',operationId,
+          effectBoundary:knownNoEffect?'NOT_DISPATCHED':'DISPATCH_POSSIBLE',route:'PROTECTED',
+          ...(create&&response?.temporarySlug?{temporarySlug:response.temporarySlug}:{})}});
+      return {...fail(code),state:saved.item?.state||at.item.state,
+        dispatchMayHaveOccurred:!knownNoEffect,nextAction:knownNoEffect?
+          'Review cause, cancel unsent intent, then authorize a fresh attempt':'Read-only reconciliation or investigation; never resend'};
+    };
+    // All template/session/availability checks happen before possible effect.
+    let pre;
+    try{pre=await g.runSupplyStep(b.personaUid,{...params,kind:'PREFLIGHT_'+kind});}
+    catch{pre=fail('SUPPLY_PREFLIGHT_UNAVAILABLE');}
+    if(!pre?.ok||pre.preflight?.version!==2)return recordFailure(pre||fail('PREFLIGHT_UNVERIFIED'),true);
+    at=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,expectedRevision:at.item.revision,
+      event:kind+'_READY_TO_DISPATCH',proof:{preflight:pre.preflight}});
+    if(!at.ok)return at;
+    const now=await s.accounts.get(b.accountId),guardAgain=await g.getSafeRouteReadiness(b.personaUid);
+    if(!now.ok||!validateOwnerContext(b,now.account).ok||(await sentinel.inspect()).held||
+      !supplyAuthorized({account:now.account,batch:b,item})||!guardAgain?.ready||
+      guardAgain.cookieStoreId!==readiness.cookieStoreId||guardAgain.routeId!==readiness.routeId)
+      return recordFailure(fail('PREFLIGHT_CONTEXT_CHANGED'),true);
     at=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
       expectedRevision:at.item.revision,event:kind+'_DISPATCH_POSSIBLE'});
-    if(!at.ok)return at;  // no remote call without COMMITTED marker
-    // A Pause or restore hold may arrive after journal commit but before
-    // actual dispatch. This is now an UNCERTAIN fence, never a fresh retry.
-    if(!supplyAuthorized({account:now.account,batch:b,item})||
-       (await sentinel.inspect()).held){
-      pilotArm=null;
-      await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
-        expectedRevision:at.item.revision,event:kind+'_UNCERTAIN'});
-      return fail('HELD_BEFORE_DISPATCH');
-    }
-    // The one-off operator pilot is consumed before any remote effect. A
-    // timeout, crash or lost acknowledgment cannot silently rearm a retry.
+    if(!at.ok)return at;
+    if(!supplyAuthorized({account:now.account,batch:b,item})||(await sentinel.inspect()).held)
+      return recordFailure(fail('DISPATCH_CANCELLED_BEFORE_INVOCATION'),true);
     if(pilotMatches({account:now.account,batch:b,item}))pilotArm=null;
-    const params={
-      kind,slug:item.requestedSlug,temporarySlug:item.temporarySlug,
-      remoteId:item.remoteId,principalFingerprint:account.account.identity.principalFingerprint
-    };
     let response;
-    try{response=await g.runSupplyStep(b.personaUid,params);}
-    catch{response={ok:false,code:'DISPATCH_OUTCOME_UNKNOWN'};}
+    try{response=await g.runSupplyStep(b.personaUid,{...params,preflight:pre.preflight});}
+    catch{response=fail('SUPPLY_TRANSPORT_UNCERTAIN');}
     if(!response?.ok||response.ack!==(create?'CREATED':'RENAMED')||
-       (create&&typeof response.temporarySlug!=='string')){
-      const uncertain=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
-        expectedRevision:at.item.revision,event:kind+'_UNCERTAIN'});
-      return fail(uncertain.ok?'HELD_UNCERTAIN':'DISPATCH_OUTCOME_UNKNOWN');
-    }
-    // Acknowledged response alone cannot verify source, owner or visibility.
-    const observed=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
+       (create&&typeof response.temporarySlug!=='string'))
+      return recordFailure(response||fail('DISPATCH_OUTCOME_UNKNOWN'),response?.effectBoundary==='NOT_DISPATCHED');
+    // Persist the returned identity BEFORE any independent read can fail.
+    at=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,expectedRevision:at.item.revision,
+      event:kind+'_ACKNOWLEDGED',proof:{ack:response.ack,temporarySlug:response.temporarySlug,remoteId:response.remoteId}});
+    if(!at.ok)return fail('ACK_CHECKPOINT_UNCERTAIN');
+    at=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
       expectedRevision:at.item.revision,event:kind+'_OBSERVING'});
-    if(!observed.ok)return fail('HELD_UNCERTAIN');
-    const probe={...params,kind:create?'READ_CREATE':'READ_RENAME',
-      temporarySlug:create?response.temporarySlug:item.temporarySlug};
+    if(!at.ok)return fail('READBACK_CHECKPOINT_UNCERTAIN');
     let evidence;
-    try{evidence=await g.runSupplyStep(b.personaUid,probe);}
-    catch{evidence={ok:false};}
+    try{evidence=await g.runSupplyStep(b.personaUid,{...params,kind:create?'READ_CREATE':'READ_RENAME',
+      remoteId:response.remoteId||item.remoteId,temporarySlug:create?response.temporarySlug:item.temporarySlug});}
+    catch{evidence=fail('READBACK_TRANSPORT_UNAVAILABLE');}
     const valid=evidence?.ok===true&&evidence.source==='INDEPENDENT_READBACK'&&
       evidence.ownerMatches===true&&evidence.privateEmpty===true&&
       (create?evidence.temporarySlug===response.temporarySlug:
-        evidence.slug===item.requestedSlug&&
-        evidence.previousSlug===item.temporarySlug&&
-        evidence.remoteId===item.remoteId);
-    if(!valid){
-      await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
-        expectedRevision:observed.item.revision,event:kind+'_UNCERTAIN',
-        proof:create?{temporarySlug:response.temporarySlug}:undefined});
-      return fail('HELD_UNCERTAIN');
-    }
+        evidence.slug===item.requestedSlug&&evidence.previousSlug===item.temporarySlug&&
+        evidence.remoteId===(response.remoteId||item.remoteId));
+    if(!valid)return recordFailure(evidence?.code?evidence:fail(create?'CREATE_READBACK_UNVERIFIED':'RENAME_READBACK_UNVERIFIED'));
     const confirmed=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
-      expectedRevision:observed.item.revision,
-      event:create?'CREATE_CONFIRMED':'PROVIDER_CONFIRMED',
-      proof:evidence});
-    if(!confirmed.ok)return fail('HELD_UNCERTAIN');
+      expectedRevision:at.item.revision,event:create?'CREATE_CONFIRMED':'PROVIDER_CONFIRMED',proof:evidence});
+    if(!confirmed.ok)return fail('EFFECT_CONFIRMATION_UNCERTAIN');
     // Git write/readback is separate conditional authority. Never promote
     // source READY or invent a folder if Git is not proven writable.
     if(!create){
@@ -316,10 +317,10 @@ export function createSupplyBoundary(api,{
     const create=item.state.startsWith('CREATE_');
     const kind=create?'CREATE':'RENAME';
     if(!['CREATE_UNCERTAIN','CREATE_DISPATCH_POSSIBLE','CREATE_OBSERVING',
-          'RENAME_UNCERTAIN','RENAME_DISPATCH_POSSIBLE','RENAME_OBSERVING'].includes(item.state))
+          'CREATE_INVESTIGATION','RENAME_UNCERTAIN','RENAME_DISPATCH_POSSIBLE','RENAME_OBSERVING'].includes(item.state))
       return fail('NOT_ADMISSIBLE');
-    const temporarySlug=create?item.ackTemporarySlug:item.temporarySlug;
-    if(!temporarySlug)return fail('TEMP_IDENTITY_UNVERIFIED');
+    const temporarySlug=create?(item.ackTemporarySlug||item.temporarySlug):item.temporarySlug;
+    if(!temporarySlug)return investigate(s,p);
     const account=await s.accounts.get(b.accountId);
     if(!account.ok||!validateOwnerContext(b,account.account).ok)
       return fail('ACCOUNT_STALE');
@@ -342,18 +343,19 @@ export function createSupplyBoundary(api,{
     try{
       evidence=await g.runSupplyStep(b.personaUid,{
         kind:create?'READ_CREATE':'READ_RENAME',
-        slug:item.requestedSlug,temporarySlug,remoteId:item.remoteId,
+        slug:item.requestedSlug,temporarySlug,remoteId:item.ackRemoteId||item.remoteId,
         principalFingerprint:account.account.identity.principalFingerprint});
     }catch{evidence={ok:false};}
     const valid=evidence?.ok===true&&evidence.source==='INDEPENDENT_READBACK'&&
       evidence.ownerMatches===true&&evidence.privateEmpty===true&&
       (create?evidence.temporarySlug===temporarySlug:
         evidence.slug===item.requestedSlug&&evidence.previousSlug===temporarySlug&&
-        evidence.remoteId===item.remoteId);
+        evidence.remoteId===(item.ackRemoteId||item.remoteId));
     if(!valid){
       await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
-        expectedRevision:at.item.revision,event:kind+'_UNCERTAIN'});
-      return fail('RECONCILIATION_REQUIRED');
+        expectedRevision:at.item.revision,event:kind+'_UNCERTAIN',proof:{code:evidence?.code||'READBACK_UNVERIFIED',
+          stage:'INDEPENDENT_READBACK',effectBoundary:'DISPATCH_POSSIBLE',route:'PROTECTED'}});
+      return {...fail(evidence?.code||'RECONCILIATION_REQUIRED'),nextAction:'Inspect readback cause; no second mutation'};
     }
     const confirmed=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,
       expectedRevision:at.item.revision,
@@ -365,6 +367,60 @@ export function createSupplyBoundary(api,{
       return redacted(pending.ok?pending:confirmed);
     }
     return redacted(confirmed);
+  }
+  function diagnostic(b,item){
+    const view=publicSupply({...b,items:[item]}).items[0];
+    return {version:2,operationId:view.operationId||null,target:item.requestedSlug,intendedOperation:
+      item.state.startsWith('GIT_')?'GIT_MARKER':item.renameOperationId?'RENAME':'CREATE',
+      preflight:item.preflight?'READY_TO_DISPATCH':item.state.includes('PREFLIGHT_FAILED')?'PREFLIGHT_FAILED':'UNRECORDED_LEGACY',
+      lastConfirmedState:item.folder?'GIT_INITIALIZED':item.remoteId?'PRIVATE_CREATED':'PLANNED',
+      dispatchMayHaveOccurred:view.effectBoundary==='DISPATCH_POSSIBLE',
+      firstFailure:item.diagnostic?.first||{code:'HISTORICAL_CAUSE_NOT_RECORDED'},
+      latestObservation:item.diagnostic?.latest||null,providerResponse:item.ack?.classification||'UNKNOWN',
+      independentReadback:item.investigation||null,revision:item.revision,
+      protectedRoute:item.diagnostic?.route||'UNRECORDED_LEGACY',
+      nextAction:item.state.includes('PREFLIGHT_FAILED')?'Review cause and cancel unsent intent before reauthorization':
+        item.state==='CREATE_INVESTIGATION'?'Retain quarantine; correlate captured provider receipt with local agent; never create again':
+        view.effectBoundary==='DISPATCH_POSSIBLE'?'Read-only reconciliation; no replay':'Continue the next confirmed step'};
+  }
+  async function investigate(s,p){
+    const f=await s.supply.get(p.batchId);if(!f.ok)return f;
+    const b=f.batch,item=b.items.find(x=>x.itemId===p.itemId);
+    if(!item||item.revision!==p.expectedRevision)return fail('STALE_REVISION');
+    if(!['CREATE_UNCERTAIN','CREATE_DISPATCH_POSSIBLE','CREATE_OBSERVING','CREATE_INVESTIGATION'].includes(item.state))return fail('NOT_ADMISSIBLE');
+    const a=await s.accounts.get(b.accountId);
+    if(!a.ok||!validateOwnerContext(b,a.account).ok)return fail('ACCOUNT_STALE');
+    const g=guard(),route=await g?.getSafeRouteReadiness?.(b.personaUid);
+    if(!route?.ready)return fail(route?.code||'PROTECTED_ROUTE_UNVERIFIED');
+    let evidence={source:'NO_REMOTE_OBSERVATION',attribution:'UNPROVEN',candidates:[]};
+    if(p.type!=='QUARANTINE_ITEM'){
+      const read=await g.runSupplyStep(b.personaUid,{kind:'INVESTIGATE_CREATE',slug:item.requestedSlug,
+        operationId:item.createOperationId,principalFingerprint:a.account.identity.principalFingerprint,
+        preflight:item.preflight||null,candidateSlug:p.candidateSlug});
+      if(!read?.ok)return {...fail(read?.code||'INVESTIGATION_UNAVAILABLE'),diagnostic:diagnostic(b,item)};
+      evidence={source:read.source,baselineAvailable:read.baselineAvailable===true,attribution:'UNPROVEN',
+        observedAt:read.observedAt,accountCount:read.accountCount,candidates:(read.candidates||[]).slice(0,10),truncated:read.truncated===true};
+    }
+    const current=await s.accounts.get(b.accountId),after=await g.getSafeRouteReadiness(b.personaUid);
+    if(!current.ok||!validateOwnerContext(b,current.account).ok||!after?.ready||
+      after.routeId!==route.routeId||after.cookieStoreId!==route.cookieStoreId||(await sentinel.inspect()).held)return fail('INVESTIGATION_CONTEXT_CHANGED');
+    const saved=await s.supply.stage({batchId:b.batchId,itemId:item.itemId,expectedRevision:item.revision,
+      event:'CREATE_INVESTIGATION',proof:{investigation:evidence,code:'OPERATOR_INVESTIGATION_REQUIRED',
+        stage:'READ_ONLY_INVESTIGATION',effectBoundary:'DISPATCH_POSSIBLE',route:'PROTECTED'}});
+    return saved.ok?{...redacted(saved),resolution:'QUARANTINED_UNRESOLVED',diagnostic:diagnostic(b,saved.item)}:saved;
+  }
+  async function availability(s,p){
+    const a=await s.accounts.get(p.accountId);
+    if(!a.ok||a.account.state!=='VERIFIED'||a.account.revision!==p.expectedAccountRevision)return fail('ACCOUNT_STALE');
+    const g=guard(),r=await g?.getSafeRouteReadiness?.(a.account.personaUid);
+    if(!r?.ready)return fail(r?.code||'PROTECTED_ROUTE_UNVERIFIED');
+    const items=[];
+    for(const slug of p.slugs){
+      const out=await g.runSupplyStep(a.account.personaUid,{kind:'CHECK_AVAILABILITY',slug,
+        principalFingerprint:a.account.identity.principalFingerprint});
+      items.push({slug,availability:out?.availability||'UNKNOWN',code:out?.code||null,observedAt:out?.observedAt||null});
+    }
+    return {ok:true,items,reservation:false};
   }
   async function finishSource(s,p){
     const found=await s.supply.get(p.batchId);
@@ -471,16 +527,22 @@ export function createSupplyBoundary(api,{
       const s=await stores();
       if(message.type==='LIST_BATCHES'){
         const out=await s.supply.list();
-        return out.ok?{...out,providerEffects:'OFF',activation:'HELD'}:out;
+        return out.ok?{...out,providerEffects:'READ_ONLY',activation:'PER_ITEM'}:out;
       }
       if(message.type==='GET_BATCH'){
         const out=await s.supply.get(p.batchId);
         return out.ok?{ok:true,batch:publicSupply(out.batch),
-          providerEffects:'OFF',activation:'HELD'}:out;
+          providerEffects:'READ_ONLY',activation:'PER_ITEM'}:out;
+      }
+      if(message.type==='GET_DIAGNOSTIC'){
+        const b=await s.supply.get(p.batchId),i=b.batch?.items.find(x=>x.itemId===p.itemId);
+        return b.ok&&i?{ok:true,diagnostic:diagnostic(b.batch,i)}:fail('ITEM_NOT_FOUND');
       }
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(message.type==='PREVIEW'||message.type==='FREEZE')
         return await frozenPlan(s,p,message.type==='PREVIEW');
+      if(message.type==='CHECK_AVAILABILITY')return availability(s,p);
+      if(['INVESTIGATE_ITEM','QUARANTINE_ITEM'].includes(message.type))return investigate(s,{...p,type:message.type});
       if(message.type==='ABORT_PREPARED'){
         const out=await s.supply.stage({...p,event:'ABORT_PREPARED'});
         return redacted(out);

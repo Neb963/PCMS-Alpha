@@ -110,12 +110,18 @@ export function createSupplyStore(db){
   function list(limit=50){
     if(!Number.isSafeInteger(limit)||limit<1||limit>100)return Promise.resolve(fail('INVALID_LIMIT'));
     return transact(db,'readonly',(tx,finish)=>{
-      const rows=[];let truncated=false;
+      const rows=[],lifecycle=new Map();let truncated=false;
       tx.objectStore('meta').openCursor().onsuccess=e=>{
         const cur=e.target.result;
-        if(!cur){finish({ok:true,batches:rows,truncated});return;}
+        if(!cur){finish({ok:true,batches:rows.map(b=>publicSupply(b,lifecycle)),truncated});return;}
+        if(typeof cur.key==='string'){
+          const k=cur.key,v=cur.value;
+          if(k.startsWith('ready-source:'))lifecycle.set(k.slice(13),{...lifecycle.get(k.slice(13)),ready:v.record?.state==='CONFIRMED',readyState:v.record?.state});
+          if(k.startsWith('source-link:'))lifecycle.set(k.slice(12),{...lifecycle.get(k.slice(12)),associated:v.link?.readyAtInspection===true});
+          if(k.startsWith('stage:'))lifecycle.set(k.slice(6),{...lifecycle.get(k.slice(6)),staged:v.record?.state==='SOURCE_VERIFIED',stageState:v.record?.state});
+        }
         if(typeof cur.key==='string'&&cur.key.startsWith('supply-batch:')&&cur.value?.batch){
-          if(rows.length<limit)rows.push(publicSupply(cur.value.batch));
+          if(rows.length<limit)rows.push(cur.value.batch);
           else truncated=true;
         }
         cur.continue();
@@ -153,8 +159,8 @@ export function createSupplyStore(db){
           }
           const opId=creating?operationId:
             event==='ABORT_PREPARED'?
-              (prior.state==='CREATE_PREPARED'?prior.createOperationId:
-               prior.state==='RENAME_PREPARED'?prior.renameOperationId:prior.gitOperationId):
+              (prior.state.startsWith('CREATE_')?prior.createOperationId:
+               prior.state.startsWith('RENAME_')?prior.renameOperationId:prior.gitOperationId):
             (event.startsWith('GIT_')||event==='SOURCE_CONFIRMED')?prior.gitOperationId:
             event.startsWith('CREATE_')?prior.createOperationId:prior.renameOperationId;
           if(!isSafeId(opId)&&event!=='SOURCE_PENDING'){ 
@@ -184,23 +190,29 @@ export function createSupplyStore(db){
                 out=fail('OPERATION_MISSING');return;
               }
               const expectedOpState={
-                CREATE_DISPATCH_POSSIBLE:'PREPARED',RENAME_DISPATCH_POSSIBLE:'PREPARED',
+                CREATE_READY_TO_DISPATCH:'PREPARED',RENAME_READY_TO_DISPATCH:'PREPARED',
+                CREATE_DISPATCH_POSSIBLE:'READY_TO_DISPATCH',RENAME_DISPATCH_POSSIBLE:'READY_TO_DISPATCH',
+                CREATE_ACKNOWLEDGED:'DISPATCH_POSSIBLE',RENAME_ACKNOWLEDGED:'DISPATCH_POSSIBLE',
                 CREATE_OBSERVING:'DISPATCH_POSSIBLE',RENAME_OBSERVING:'DISPATCH_POSSIBLE',
                 CREATE_CONFIRMED:'OBSERVING',PROVIDER_CONFIRMED:'OBSERVING',
                 GIT_DISPATCH_POSSIBLE:'PREPARED',GIT_OBSERVING:'DISPATCH_POSSIBLE',
                 SOURCE_CONFIRMED:'OBSERVING',ABORT_PREPARED:'PREPARED'
               }[event];
               if(expectedOpState&&operation.status!==expectedOpState&&
-                 !(event.endsWith('_OBSERVING')&&operation.status==='HELD_UNCERTAIN')){
+                 !(event.endsWith('_OBSERVING')&&operation.status==='HELD_UNCERTAIN')&&
+                 !(event==='ABORT_PREPARED'&&['READY_TO_DISPATCH','PREFLIGHT_FAILED'].includes(operation.status))){
                 out=fail('OPERATION_STATE_CHANGED');return;
               }
               const moved=moveSupply(prior,event,creating?{operationId}:proof);
               if(!moved.ok){out=moved;return;}
               let status;
               if(creating)status='PREPARED';
+              else if(event.endsWith('_READY_TO_DISPATCH'))status='READY_TO_DISPATCH';
+              else if(event.endsWith('_PREFLIGHT_FAILED'))status='PREFLIGHT_FAILED';
               else if(event.endsWith('_DISPATCH_POSSIBLE'))status='DISPATCH_POSSIBLE';
+              else if(event.endsWith('_ACKNOWLEDGED'))status='DISPATCH_POSSIBLE';
               else if(event.endsWith('_OBSERVING'))status='OBSERVING';
-              else if(event.endsWith('_UNCERTAIN'))status='HELD_UNCERTAIN';
+              else if(event.endsWith('_UNCERTAIN')||event.endsWith('_INVESTIGATION'))status='HELD_UNCERTAIN';
               else if(event==='ABORT_PREPARED')status='ABORTED';
               else status='CONFIRMED';
               const nextOp=creating?{operationId:opId,targetId:itemId,
@@ -208,11 +220,16 @@ export function createSupplyStore(db){
                   'supply_create_v1':event==='RENAME_PREPARED'?
                     'supply_rename_v1':'supply_git_marker_v1',status,revision:1}:
                 {...operation,status,revision:operation.revision+1};
+              nextOp.firstFailure=moved.item.diagnostic?.first||operation?.firstFailure||null;
+              nextOp.effectBoundary=['PREPARED','READY_TO_DISPATCH','PREFLIGHT_FAILED','ABORTED'].includes(status)?'NOT_DISPATCHED':
+                status==='CONFIRMED'?'EFFECT_CONFIRMED':'DISPATCH_POSSIBLE';
+              nextOp.preflight=event.endsWith('_READY_TO_DISPATCH')?'READY_TO_DISPATCH':
+                event.endsWith('_PREFLIGHT_FAILED')?'PREFLIGHT_FAILED':operation?.preflight||'UNRECORDED_LEGACY';
               const items=batch.items.slice();items[index]=moved.item;
               m.put({key:batchKey(batchId),batch:{...batch,items,revision:batch.revision+1}});
               ops.put(nextOp);
               const nextEntity=entity?{...entity,revision:entity.revision+1,
-                activeOperationId:['CONFIRMED','ABORTED'].includes(status)?null:opId}:
+                activeOperationId:['CONFIRMED','ABORTED','PREFLIGHT_FAILED'].includes(status)?null:opId}:
                 {id:itemId,revision:1,activeOperationId:opId};
               entities.put(nextEntity);
               tx.objectStore('events').add({stage:'SUPPLY_'+event,batchId,itemId,

@@ -61,6 +61,7 @@ function fixture({gate=true,failDispatch=false,lostAck=false,wrongOwner=false,
       {ready:true,personaUid:account.personaUid,cookieStoreId:'safe-container',routeId:'protected-wg'};}, 
     async runSupplyStep(personaUid,request){
       assert.equal(personaUid,account.personaUid);
+      if(request.kind.startsWith('PREFLIGHT_'))return {ok:true,preflight:{version:2,kind:request.kind.slice(10),operationId:request.operationId}};
       if(request.kind==='CREATE'){
         assert.equal(trace.at(-1),'CREATE_DISPATCH_POSSIBLE');
         remote.push({kind:'CREATE',slug:'temp-created',privateEmpty:true,owner:account.accountId});
@@ -116,14 +117,14 @@ test('P52-02 F: two independent remote effects only after durable markers and re
   assert.equal(a.state,'CREATE_CONFIRMED');
   assert.equal(f.remote.length,1);
   assert.deepEqual(f.trace,[
-    'CREATE_PREPARED','CREATE_DISPATCH_POSSIBLE','CREATE_OBSERVING','CREATE_CONFIRMED'
+    'CREATE_PREPARED','CREATE_READY_TO_DISPATCH','CREATE_DISPATCH_POSSIBLE','CREATE_ACKNOWLEDGED','CREATE_OBSERVING','CREATE_CONFIRMED'
   ]);
   const b=await f.dispatch();
   assert.equal(b.ok,true,b.code);
   assert.equal(b.state,'SOURCE_PENDING');
   assert.deepEqual(f.remote.map(x=>x.kind),['CREATE','RENAME']);
-  assert.deepEqual(f.trace.slice(4),[
-    'RENAME_PREPARED','RENAME_DISPATCH_POSSIBLE','RENAME_OBSERVING',
+  assert.deepEqual(f.trace.slice(6),[
+    'RENAME_PREPARED','RENAME_READY_TO_DISPATCH','RENAME_DISPATCH_POSSIBLE','RENAME_ACKNOWLEDGED','RENAME_OBSERVING',
     'PROVIDER_CONFIRMED','SOURCE_PENDING'
   ]);
   const third=await f.dispatch();
@@ -156,17 +157,17 @@ test('P56-06 F: crash/abort before dispatch marker means independent zero effect
   const response=await f.dispatch();
   assert.equal(response.code,'DB_ABORTED');
   assert.equal(f.remote.length,0);
-  assert.deepEqual(f.trace,['CREATE_PREPARED','CREATE_DISPATCH_POSSIBLE']);
-  assert.equal((await f.dispatch()).code,'NOT_ADMISSIBLE');
+  assert.deepEqual(f.trace,['CREATE_PREPARED','CREATE_READY_TO_DISPATCH','CREATE_DISPATCH_POSSIBLE']);
+  assert.equal((await f.dispatch()).code,'UNSENT_INTENT_REVIEW_REQUIRED');
   assert.equal(f.remote.length,0);
 });
 test('P56-06 F: Pause or protected-route loss after PREPARED prevents effect; abort releases only pre-dispatch',async()=>{
   for(const variant of [{pauseAfterPrepare:true},{routeLossAfterPrepare:true}]){
     const f=fixture(variant);
     const response=await f.dispatch();
-    assert.equal(response.code,'PREPARED_HELD',response.code);
+    assert.equal(response.code,'PREFLIGHT_CONTEXT_CHANGED',response.code);
     assert.equal(f.remote.length,0);
-    assert.equal(f.item().state,'CREATE_PREPARED');
+    assert.equal(f.item().state,'CREATE_PREFLIGHT_FAILED');
     const cancelled=await f.run('ABORT_PREPARED',{batchId:batch.batchId,
       itemId:f.item().itemId,expectedRevision:f.item().revision});
     assert.equal(cancelled.state,'FROZEN',cancelled.code);
@@ -176,7 +177,7 @@ test('P56-06 F: Pause or protected-route loss after PREPARED prevents effect; ab
 });
 test('P52-02 F: lost ACK after remote effect is held, never blind second create',async()=>{
   const f=fixture({lostAck:true});
-  assert.equal((await f.dispatch()).code,'HELD_UNCERTAIN');
+  assert.equal((await f.dispatch()).code,'TIMEOUT');
   assert.deepEqual(f.remote.map(x=>x.kind),['CREATE']);
   assert.equal(f.item().state,'CREATE_UNCERTAIN');
   assert.equal((await f.dispatch()).code,'RECONCILIATION_REQUIRED');
@@ -184,7 +185,7 @@ test('P52-02 F: lost ACK after remote effect is held, never blind second create'
 });
 test('P52-02 F: provider owner mismatch after ACK keeps item uncertain',async()=>{
   const f=fixture({wrongOwner:true});
-  assert.equal((await f.dispatch()).code,'HELD_UNCERTAIN');
+  assert.equal((await f.dispatch()).code,'CREATE_READBACK_UNVERIFIED');
   assert.equal(f.item().state,'CREATE_UNCERTAIN');
   assert.equal(f.remote.length,1);
 });

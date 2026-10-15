@@ -185,13 +185,14 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     if(typeof supplyIsolatedTab!=='function')return {ok:false,code:'SUPPLY_EXECUTOR_UNAVAILABLE'};
     const leased=await acquireConflictGuard(personaUid);
     if(!leased?.ready||!leased.leaseId)
-      return {ok:false,code:leased?.code||'GUARD_UNAVAILABLE'};
+      return {ok:false,code:leased?.code||'GUARD_UNAVAILABLE',effectBoundary:'NOT_DISPATCHED'};
     try {
       const before=await inspectOwnedAction(leased);
-      if(!before?.ready)return {ok:false,code:before?.code||'GUARD_CHANGED'};
+      if(!before?.ready)return {ok:false,code:before?.code||'GUARD_CHANGED',effectBoundary:'NOT_DISPATCHED'};
       const packet=await supplyIsolatedTab(leased,request);
       const after=await inspectOwnedAction(leased);
-      if(!after?.ready)return {ok:false,code:'POST_EFFECT_GUARD_CHANGED'};
+      if(!after?.ready)return {...packet,ok:false,code:packet?.ok===false?packet.code:'POST_EFFECT_GUARD_CHANGED',
+        effectBoundary:packet?.effectBoundary||'DISPATCH_POSSIBLE',routeQualification:'CHANGED'};
       return packet&&typeof packet==='object'?packet:{ok:false,code:'SUPPLY_PACKET_UNVERIFIED'};
     }catch{return {ok:false,code:'SUPPLY_EXECUTOR_UNAVAILABLE'};}
     finally{await releaseConflictGuard(leased);}
