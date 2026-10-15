@@ -74,7 +74,10 @@ export function evaluateQualification(before,after,release){
     recentPresenceObserved:confirmed&&fresh&&after.feed.present===true,
     // Correlation is not a provider guarantee, nor evidence of permissibility
     // of repeated saves or ranking manipulation.
-    causationProven:false,releaseId:confirmed?release.releaseId:null};
+    causationProven:false,releaseId:confirmed?release.releaseId:null,
+    action:confirmed?{releaseId:release.releaseId,dispatchPossible:true,
+      result:release.actionResult||{ack:'UNKNOWN',code:'HISTORICAL_RESULT_UNAVAILABLE'},
+      independentlyConfirmedAt:release.observedAt}:null};
 }
 export function createRefreshQualification({store,guard,verify=async()=>true,clock=Date.now,newId=()=>crypto.randomUUID().replaceAll('-','')}){
   async function observe(row,account){

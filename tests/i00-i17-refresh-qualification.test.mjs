@@ -34,6 +34,8 @@ test('I17 P54-05 H-04 preparation records independent before/after facts; source
   const q=(await f.run('OBSERVE_QUALIFICATION')).qualification;
   assert.equal(q.state,'RECENT_PRESENCE_OBSERVED');assert.equal(q.approvedEffectConfirmed,true);
   assert.equal(q.fleetEnabled,false);assert.equal(q.causationProven,false);assert.equal(f.writes,0);
+  assert.equal(q.action.result.ack,'UNKNOWN');
+  assert.equal(q.action.independentlyConfirmedAt>0,true);
   assert.notEqual(q.before.fingerprint,q.after.fingerprint);assert.equal(q.after.feed.rank,1);
   assert.equal(JSON.stringify(q).includes('meaningfully updated'),false);
 });

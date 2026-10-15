@@ -30,7 +30,9 @@ const publicJob=j=>j?{ok:true,slug:j.slug,revision:j.revision,state:j.state,
   schedulerHold:typeof j.schedulerHold==='string'?j.schedulerHold:null,
   autoEnabled:j.automation?.enabled===true,
   chat2IsolationVerified:j.chat2?.state==='FRESH_VERIFIED',
-  provider:'NATIVE_AI_HELD_UNTIL_PROVEN',
+  provider:j.native?.state==='DISPATCH_POSSIBLE'?'NATIVE_EFFECT_UNCERTAIN':
+    j.native?.state==='RUNNING_OBSERVED'?'NATIVE_SESSION_RUNNING':
+    j.native?.state||'EXACT_STEP_AUTHORIZATION_REQUIRED',
   github:'NO_AI_WRITEBACK',publication:'OFF'}:fail('AI_JOB_NOT_FOUND');
 export function createAiStore(db){
   const getPrompt=()=>tx(db,'readonly',(t,done)=>{
@@ -384,11 +386,12 @@ export function createAiStore(db){
           state='CHAT2_RESET_OBSERVED';
         }else{
           if(observation.busy){done(fail('AI_STOP_NOT_OBSERVED'));return;}
+          if(!digest||digest!==j.native.previousSessionDigest){done(fail('AI_STOP_SESSION_CHANGED'));return;}
           state='STOP_OBSERVED';
         }
         const next={...j,revision:j.revision+1,
           native:{...j.native,state,sessionDigest:digest,observedAt:Date.now()},
-          state:'TESTS_UNVERIFIED',hold:step==='CHAT2_SEND'||step==='CHAT2_REPAIR'?
+          state:'TESTS_UNVERIFIED',hold:step==='STOP'?'STOP_OBSERVED_OPERATOR_REVIEW_REQUIRED':step==='CHAT2_SEND'||step==='CHAT2_REPAIR'?
             'AI_CHAT2_ISOLATION_UNVERIFIED':'INDEPENDENT_BROWSER_TESTS_REQUIRED'};
         // Native session evidence is distinguished from proof of user-facing
         // test assertions: no success here comes from text or busy=false.

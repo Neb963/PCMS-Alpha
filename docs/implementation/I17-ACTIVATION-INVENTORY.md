@@ -24,5 +24,25 @@ Reviewed baseline: e1e1172953b63d65fee610c623da8c5eef37b104. Operator-live evide
 
 - Replaced obsolete global shell hold with actual guard/canonical availability events. Per-workflow authorization remains local to its boundary.
 - New owned editor tabs wait for native readiness under the existing donor lease; no write retry or second controller. Timeout preserves unknown state/tab.
+- AI continuation rehashes the independently checkpointed F instead of requiring it to equal original B or trusting a transient `ok` flag absent from persisted records. Normal repair, optional Chat 2 authorization and mid-job AUTO consent can reach their actual adapters after legitimate source changes.
+- Stop is exposed in AI tests, bound to the independently observed running session and journaled before its native click. It can cancel AI-owned unsaved work without overwriting source; changed session, human ownership/input and route failure still hold. Independent stopped-session readback is required and does not claim tests passed. AUTO controls now reside with their selected AI job, and result messages survive receipt refresh.
 - Qualification observations cannot grant fleet permission, mutate source, or turn source/list correlation into causal proof. Wrong owner/route/rebind, stale canonical revisions and inadequate publication proof remain held. Feed failure does not erase a separately verified source change.
 - Signed originals are retained; only the signed-file alias verifier changes to accommodate amended current instructions. Required CI jobs, privileges and test policy are unchanged. Independent review remains mandatory before merge.
+
+## Remaining packaged OFF / HELD conditions
+
+| Pattern / location | Actual authority, not a global production denial |
+|---|---|
+| Default `effectGate` false in factories | Default factories alone confer no effect authority. Normal UI uses exact arms for supply/staging/manual AI/manual Git/release; production registrations add bounded per-job AUTO, adoption archive and existing-update gates. Packaged supply and AI tests use ordinary slugs and default gates, with independent synthetic provider ledgers. |
+| `ARM_DISPOSABLE_*`, `PILOT_*` | Retained backward-compatible restricted commands/internal error names. Normal UI calls `ARM_EXACT_*`; ordinary slugs do not need disposable prefixes. Expiration/context/route holds remain real. |
+| `CAPABILITY_OFF` in legacy command/guard facades, unsupported actions | Read-only legacy APIs deliberately cannot dispatch arbitrary writes. Visible production actions use separate validated boundaries. Unknown/unsupported commands are rejected, not an eligible operation. |
+| `providerEffects: OFF`, `publication: OFF`, `NO_AI_WRITEBACK` | Scope of that read-only/local/Git/AI response; publication is a separate human-approved release. Health and journal UI no longer infer a global hold from these fields. |
+| `SHADOW_ONLY`, `REFRESH_ACTIVATION_HELD`, provider UNQUALIFIED | Genuine unresolved permissible recurring provider method. Live monitoring and operator qualification are wired; fleet mutation is not claimed. Preserve P54-09/P56/H-04 requirements. |
+| Native history/isolation/test/source/editor/owner/HEAD/approval holds | Actual prerequisites and independently observed evidence, including supported test assertions and exact fresh Chat 2 attribution. No synthetic evidence unlocks a real capability. |
+| Restore INACTIVE / sentinel hold, backup vault held | Deliberate safety requirements: predecessor/controller authority and H-06; accessible OS vault for scheduled backup. They are not pilot-only gates. |
+
+## Verification and independent review
+
+Added fast regressions cover binary initial source, wrong-target Git tree, readiness timeout/lease loss, exact AI continuation/Stop, owner/session drift, lost ACK/no replay, and distinct Refresher source/approval/recent evidence. Packaged Firefox exercises normal supply consent, real IDB AI send → changed F → independently failed check → repair → observed running → exact Stop, and persisted operator qualification with stale-revision rejection. Provider ledgers remain isolated; no H PASS follows.
+
+Observed repository ruleset `24945151` still requires `pcms-required`, prohibits non-fast-forward/deletion, and has no bypass actors. It currently requires **zero approving reviews**, so independent trusted-review enforcement for the signed-original alias/agent-authorization change remains a **merge prerequisite**, not a self-awarded check. PR #20 stays draft with auto-merge disabled. Required workflow, aggregation, permissions and donor pins were not relaxed. The operator live-test candidate can be packaged while merge remains held.

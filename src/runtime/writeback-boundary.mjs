@@ -1,6 +1,6 @@
 // I11 privileged Git writeback command admission. Git only, never Perchance
-// publication. Synthetic tests can inject guard/transport/effect gate; packaged
-// capability is OFF until independently approved credential/provider activation.
+// publication. Production uses exact manual consent or opted-in per-job AUTO,
+// ephemeral credentials and the same journal/CAS/readback checks.
 import {fail,openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';

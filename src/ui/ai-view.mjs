@@ -11,7 +11,7 @@ const slug=id('pcms-ai-slug'),token=id('pcms-ai-git-token'),prepare=id('pcms-ai-
 const refresh=id('pcms-ai-refresh'),jobStatus=id('pcms-ai-jobs-status'),jobList=id('pcms-ai-job-list');
 const runNative=id('pcms-ai-run'),observeNative=id('pcms-ai-observe'),
   advanceNative=id('pcms-ai-advance'),opfsNative=id('pcms-ai-opfs'),
-  freshNative=id('pcms-ai-fresh'),
+  freshNative=id('pcms-ai-fresh'),stopNative=id('pcms-ai-stop'),
   testNative=id('pcms-ai-test'),repairNative=id('pcms-ai-repair'),
   enableAuto=id('pcms-ai-enable-auto'),disableAuto=id('pcms-ai-disable-auto'),
   resetNative=id('pcms-ai-newchat'),chat2Native=id('pcms-ai-chat2');
@@ -42,6 +42,7 @@ function controls(){
   enableAuto.disabled=busy||!eligible||selectedJob.autoEnabled===true||
     ['HELD_RECONCILE','HELD_NO_PROGRESS','HUMAN_OWNED','TESTS_VERIFIED'].includes(selectedJob.state);
   disableAuto.disabled=busy||!selected||selectedJob.autoEnabled!==true;
+  stopNative.disabled=busy||!eligible||selectedJob.nativeState!=='RUNNING_OBSERVED';
   runNative.disabled=busy||!eligible||selectedJob.state!=='PENDING_NATIVE_SESSION';
   opfsNative.disabled=busy||!selected||selectedJob.nativeState!=='CHAT2_OBSERVED_IDLE'||
     selectedJob.chat2IsolationVerified===true;
@@ -52,7 +53,8 @@ function controls(){
     ['TESTS_VERIFIED','HELD_NO_PROGRESS','HUMAN_OWNED'].includes(selectedJob.state);
   observeNative.disabled=busy||!selected||
     !['HELD_RECONCILE','TESTS_UNVERIFIED','KNOWN_FAILURE'].includes(selectedJob.state);
-  testNative.disabled=busy||!selected||selectedJob.state!=='TESTS_UNVERIFIED';
+  testNative.disabled=busy||!selected||selectedJob.state!=='TESTS_UNVERIFIED'||
+    !['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(selectedJob.nativeState);
   repairNative.disabled=busy||!eligible||selectedJob.state!=='KNOWN_FAILURE'||!
     ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(selectedJob.nativeState)||
     (selectedJob.nativeState==='CHAT2_OBSERVED_IDLE'&&
@@ -114,7 +116,8 @@ importButton.addEventListener('click',()=>{
   change('IMPORT_PROMPT',{envelope,expectedRevision:current?.current?.revision},
     'Importing the latest supplied instructions as a NEW revision…');
 });
-async function refreshJobs(){
+async function refreshJobs({preserveStatus=false}={}){
+  const previousStatus=jobStatus.textContent;
   const own=++queueSeq;
   try{
     const data=await ai('LIST_JOBS');
@@ -155,6 +158,7 @@ async function refreshJobs(){
       selectedJob.slug+' · '+selectedJob.state+' · revision '+selectedJob.revision+
       ' · canonical observation; no test PASS inferred.':
       'Canonical job receipts · select a job; no helper session or source body disclosed.';
+    if(preserveStatus)jobStatus.textContent=previousStatus;
     controls();
   }catch{if(own===queueSeq)jobStatus.textContent='AI receipts unavailable; do not infer completion.';}
 }
@@ -173,7 +177,7 @@ async function prepareJob(){
       ' · held; no AI provider action';return;}
     jobStatus.textContent='Job prepared against exact saved source. Select it to authorize individual AI steps. No tests proven yet.';
   }catch{jobStatus.textContent='Unknown preparation outcome; refresh canonical receipts before trying again.';}
-  finally{busy=false;controls();await refreshJobs();}
+  finally{busy=false;controls();await refreshJobs({preserveStatus:true});}
 }
 async function nativeCommand(type,step,trigger){
   if(busy||!selectedJob?.ok)return;
@@ -232,7 +236,7 @@ async function nativeCommand(type,step,trigger){
   }catch{
     jobStatus.textContent='Native command disconnected. Effect may have occurred; do not retry before independent reconciliation.';
   }finally{
-    busy=false;controls();await refreshJobs();
+    busy=false;controls();await refreshJobs({preserveStatus:true});
   }
 }
 enableAuto.addEventListener('click',async()=>{
@@ -250,7 +254,7 @@ enableAuto.addEventListener('click',async()=>{
       'Background AI armed for exact verified job. Steps remain guarded, bounded and individually journaled.':
       'Background AI held: '+(out?.code||'CONTEXT_UNVERIFIED');
   }catch{jobStatus.textContent='AI activation reply unknown; reload canonical job before further action.';}
-  finally{busy=false;await refreshJobs();}
+  finally{busy=false;await refreshJobs({preserveStatus:true});}
 });
 disableAuto.addEventListener('click',async()=>{
   if(busy||!selectedJob?.ok||!selectedJob.autoEnabled)return;
@@ -263,10 +267,11 @@ disableAuto.addEventListener('click',async()=>{
       'Future background AI admissions disabled. Reconcile any already possible effect separately.':
       'Automation disable not confirmed: '+(out?.code||'STALE_REVISION');
   }catch{jobStatus.textContent='Disable reply unknown; inspect current canonical state.';}
-  finally{busy=false;await refreshJobs();}
+  finally{busy=false;await refreshJobs({preserveStatus:true});}
 });
 advanceNative.addEventListener('click',()=>nativeCommand('ADVANCE_JOB'));
 runNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT1_SEND',runNative));
+stopNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','STOP',stopNative));
 observeNative.addEventListener('click',()=>nativeCommand('PROBE_NATIVE'));
 opfsNative.addEventListener('click',()=>nativeCommand('INSPECT_WORKSPACE'));
 freshNative.addEventListener('click',()=>nativeCommand('VERIFY_FRESH_CHAT2',undefined,freshNative));

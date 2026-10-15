@@ -192,7 +192,7 @@
           <div class="panel-head"><h2 id="pcms-writeback-heading">Git writeback</h2><span class="unknown">Reviewed source F · guarded action</span></div>
           <div class="pcms-ai-fields">
             <label for="pcms-writeback-slug">Generator
-              <input id="pcms-writeback-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="pcms-test-private-001">
+              <input id="pcms-writeback-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="my-private-generator">
             </label>
             <label for="pcms-writeback-token">Private Git write token
               <input id="pcms-writeback-token" type="password" autocomplete="off" spellcheck="false" placeholder="Not stored">
@@ -203,11 +203,6 @@
             <label for="pcms-writeback-message">Commit message
               <input id="pcms-writeback-message" maxlength="120" value="fix: update tested generator source" spellcheck="false" autocomplete="off">
             </label>
-          </div>
-          <div class="pcms-ai-preparation" role="group" aria-label="Exact job background automation">
-            <button id="pcms-ai-enable-auto" type="button" disabled>Enable background AI for selected job</button>
-            <button id="pcms-ai-disable-auto" type="button" disabled>Disable background AI</button>
-            <p class="reason">Background AI runs only after exact-job consent and fresh private owner, protected route, clean editor and saved-source verification. A lost dispatch remains held for independent reconciliation. Disabling cancels future admissions, not already possible effects.</p>
           </div>
           <div class="pcms-ai-actions">
             <section aria-labelledby="pcms-wb-steps">
@@ -262,7 +257,7 @@
           <div class="panel-head"><h2 id="pcms-release-heading">Publish verified source</h2><span class="unknown">Exact F · individual approval</span></div>
           <div class="pcms-ai-fields">
             <label for="pcms-release-slug">Private generator
-              <input id="pcms-release-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="pcms-test-private-001">
+              <input id="pcms-release-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="my-private-generator">
             </label>
             <label for="pcms-release-token">Private Git read token
               <input id="pcms-release-token" type="password" autocomplete="off" spellcheck="false" placeholder="Not stored">
@@ -295,11 +290,16 @@
           <p class="reason">Select a private, saved generator. Prepare its pinned source and prompt, then explicitly authorize each native AI step. Observe before advancing; only independent browser checks establish test results.</p>
           <div class="pcms-ai-fields">
             <label for="pcms-ai-slug">Private generator
-              <input id="pcms-ai-slug" maxlength="100" spellcheck="false" placeholder="pcms-test-private-001">
+              <input id="pcms-ai-slug" maxlength="100" spellcheck="false" placeholder="my-private-generator">
             </label>
             <label for="pcms-ai-git-token">Private Git read token
               <input id="pcms-ai-git-token" type="password" autocomplete="off" spellcheck="false" placeholder="Not stored">
             </label>
+          </div>
+          <div class="pcms-ai-preparation" role="group" aria-label="Exact job background automation">
+            <button id="pcms-ai-enable-auto" type="button" disabled>Enable background AI for selected job</button>
+            <button id="pcms-ai-disable-auto" type="button" disabled>Disable background AI</button>
+            <p class="reason">Background AI runs only after exact-job consent and fresh private owner, protected route, clean editor and saved-source verification. A lost dispatch remains held for independent reconciliation. Disabling cancels future admissions, not already possible effects.</p>
           </div>
           <div class="pcms-ai-preparation" role="group" aria-label="Prepare source-bound job">
             <button id="pcms-ai-prepare" type="button">Prepare test job</button>
@@ -310,6 +310,7 @@
               <h3 id="pcms-ai-chat1-title">Chat 1 · Test and repair</h3>
               <button id="pcms-ai-run" type="button" disabled>Run Chat 1</button>
               <button id="pcms-ai-observe" type="button" disabled>Reconcile saved result</button>
+              <button id="pcms-ai-stop" type="button" disabled>Stop observed session</button>
               <button id="pcms-ai-test" type="button" disabled>Run browser checks</button>
             </section>
             <section aria-labelledby="pcms-ai-chat2-title">

@@ -218,6 +218,74 @@ def supply_effect_idb_probe(session):
 
 
 
+def ai_production_idb_probe(session):
+    # Real packaged admission, real IDB journal. Provider reads/effects are
+    # an independent in-memory fixture ledger; no gate override or network.
+    script = '''const done=arguments[arguments.length-1];
+    (async()=>{
+      const db=await (await import('./journal.mjs')).openCanonicalDatabase();
+      const store=(await import('./ai-store.mjs')).createAiStore(db);
+      const {exactSource}=await import('./staging-core.mjs');
+      const {createAiBoundary}=await import('./ai-boundary.mjs');
+      const slug='ordinary-ai-production-path',sid='8'.repeat(64),effects=[];
+      const encode=s=>btoa(s),html='<p>fixture</p>';
+      const bytes=async pjs=>exactSource([{path:'main.pjs',base64:encode(pjs)},{path:'index.html',base64:encode(html)}]);
+      const initial=await bytes('initial'),final=await bytes('meaningful native repair');
+      const stage={slug,revision:1,state:'SOURCE_VERIFIED',accountId:'ai-production-account',
+        personaUid:'ai-production-persona',remotePublicId:'ai-production-target',principalFingerprint:'f'.repeat(64),
+        nonce:'a'.repeat(32),candidate:initial,previous:initial};
+      await new Promise((resolve,reject)=>{const tx=db.transaction(['meta'],'readwrite');
+        tx.objectStore('meta').put({key:'stage:'+slug,record:stage});tx.oncomplete=resolve;tx.onabort=reject;});
+      const started=await store.start(stage);
+      if(!started.ok)throw Error('start '+started.code);
+      let saved='initial',busy=false,dirty=false;
+      const guard=()=>({getSafeRouteReadiness:async()=>({ready:true,routeId:'protected',cookieStoreId:'fixture-container'}),
+        inspectStageEditor:async()=>({ok:!dirty,clean:!dirty}),
+        observeReadOnly:async()=>({ok:true,principalFingerprint:stage.principalFingerprint,
+          original:{ownerResult:'IS_OWNER',remotePublicId:stage.remotePublicId,visibility:'UNLISTED',pjs:saved,html,assets:[]}}),
+        runNativeAiStep:async(_,request)=>{
+          if(request.action==='OBSERVE')return {ok:true,slug,sessionDigest:sid,busy,chatEntries:2,
+            sourceSaved:!dirty,editorClean:!dirty,hasQueue:false,inputOccupied:false,attachmentsPending:false};
+          if(request.action==='ORACLE_SMOKE')return {ok:true,source:'INDEPENDENT_BROWSER_ASSERTION',
+            name:request.name,result:'FAIL',observedAt:Date.now()};
+          if((await store.getJobFull(slug)).job.native.state!=='DISPATCH_POSSIBLE')throw Error('effect before journal');
+          if(request.action==='STOP'&&request.expectedSessionDigest!==sid)throw Error('wrong stop session');
+          effects.push(request.action);
+          if(request.action==='SEND'){saved='meaningful native repair';busy=effects.length===2;dirty=busy;}
+          if(request.action==='STOP'){busy=false;dirty=false;}
+          throw Error('fixture effect committed, acknowledgment lost');
+        }});
+      const api={runtime:browser.runtime,storage:browser.storage};
+      const sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')+'#work-queue'};
+      const boundary=createAiBoundary(api,{open:async()=>db,guard});
+      const cmd=async(type,extra={})=>boundary.run({type,params:{slug,
+        expectedRevision:(await store.getJobFull(slug)).job.revision,...extra}},sender);
+      const act=async step=>{const armed=await cmd('ARM_EXACT_AI',{step,confirmation:step+' '+slug});
+        if(!armed.ok)throw Error('admission '+step+' '+armed.code);
+        const result=await cmd('BEGIN_NATIVE',{step});
+        if(result.code!=='AI_DISPATCH_POSSIBLE_RECONCILE')throw Error('dispatch '+step+' '+JSON.stringify(result));
+        return result;};
+      const sent=await act('CHAT1_SEND');
+      const duplicate=await cmd('BEGIN_NATIVE',{step:'CHAT1_SEND'});
+      const observed=await cmd('PROBE_NATIVE');
+      if(!observed.ok)throw Error('source checkpoint '+observed.code);
+      if((await store.getJobFull(slug)).job.finalSource?.fingerprint!==final.fingerprint)throw Error('F not checkpointed');
+      const failed=await cmd('RUN_TESTS');
+      if(failed.state!=='KNOWN_FAILURE')throw Error('independent failure '+failed.code);
+      const repaired=await act('CHAT1_REPAIR');
+      const running=await cmd('PROBE_NATIVE');
+      const stop=await act('STOP');
+      const stopped=await cmd('PROBE_NATIVE');
+      const after=(await store.getJobFull(slug)).job;
+      done({effects,sent:sent.code,duplicate:duplicate.ok,repaired:repaired.code,stop:stop.code,
+        running:running.nativeState,stopped:stopped.nativeState,testsVerified:after.state==='TESTS_VERIFIED',
+        source:after.sourceFingerprint===final.fingerprint,
+        ui:!!document.getElementById('pcms-ai-stop')&&document.getElementById('pcms-ai-enable-auto').closest('[data-pcms-work-panel]')?.dataset.pcmsWorkPanel==='ai'});
+      db.close();
+    })().catch(e=>done({error:String(e)}));'''
+    return call('POST',f'/session/{session}/execute/async',{'script':script,'args':[]},timeout=60)
+
+
 def adoption_idb_probe(session):
     # B: real packaged Firefox extension and real persistent IndexedDB.
     # All Perchance and Git responses are explicit synthetic fixtures;
@@ -1852,6 +1920,12 @@ def main():
                                      {'script':code,'args':[]},timeout=90)
                 assert chat2_positive.get('ok') is True,chat2_positive
                 print('B I10_PACKAGED_SYNTHETIC_CHAT2_HISTORY_WORKSPACE_CAS_AND_RETEST=PASS',flush=True)
+                ai_production=ai_production_idb_probe(after)
+                assert ai_production=={'effects':['SEND','SEND','STOP'],
+                    'sent':'AI_DISPATCH_POSSIBLE_RECONCILE','duplicate':False,
+                    'repaired':'AI_DISPATCH_POSSIBLE_RECONCILE','stop':'AI_DISPATCH_POSSIBLE_RECONCILE',
+                    'running':'RUNNING_OBSERVED','stopped':'STOP_OBSERVED','testsVerified':False,'source':True,'ui':True},ai_production
+                print('B I17_PRODUCTION_AI_ORDINARY_SLUG_CHANGED_F_REPAIR_STOP_NO_REPLAY=PASS',flush=True)
 
                 # I17 B: the final installed XPI's real same-extension AI
                 # port does not allow AUTO on an unlinked synthetic staged
@@ -2407,6 +2481,7 @@ def main():
                   const uncertain=await store.settle(slug,advanced.revision,{
                     proof:{ok:true,source:'INDEPENDENT_PUBLICATION_READBACK',
                       sourceFingerprint:'0'.repeat(64)},
+                    attempt:{ok:true,code:'SAVE_ACK_ONLY'},
                     reason:'MISMATCH_OR_LOST_ACK'});
                   const retried=await store.markDispatch(slug,uncertain.revision,approval.tuple);
                   const port=browser.runtime.connect({name:'pcms-i13-release'});
@@ -2417,7 +2492,8 @@ def main():
                   done({ok:first.ok&&duplicate.code==='EXISTING_RELEASE_REQUIRES_REVIEW'&&
                     successes===1&&uncertain.state==='PUBLICATION_UNCERTAIN'&&
                     retried.ok===false&&restored.revision===uncertain.revision&&
-                    actual.state==='PUBLICATION_UNCERTAIN',
+                    actual.state==='PUBLICATION_UNCERTAIN'&&
+                    actual.actionResult?.ack==='UNVERIFIED_ACK'&&actual.actionResult.code==='SAVE_ACK_ONLY',
                     first,duplicate,successes,uncertain,retried,actual});
                   db.close();
                 })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,600)}));"""

@@ -1,6 +1,6 @@
 // I06: guarded, canonical reservation admission. No web page, untrusted UI,
 // or generic public donor API can invoke a provider write. Provider execution
-// remains held until a separately proven, explicit capability gate activates.
+// requires exact operator consent and current guarded account/target admission.
 import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId} from './journal.mjs';
 import {createSupplyStore} from './supply-store.mjs';
 import {createAccountStore} from './accounts.mjs';

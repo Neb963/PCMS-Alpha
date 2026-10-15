@@ -368,7 +368,8 @@ export function createReleaseBoundary(api,{
       // Even ACK is NOT public proof. Reconcile with a fresh remote read,
       // and never automatically retry a possible publication effect.
       const held=await store.settle(p.slug,armed.revision,{
-        reason:attempt?.code||'INDEPENDENT_PUBLICATION_READBACK_REQUIRED'});
+        reason:attempt?.code||'INDEPENDENT_PUBLICATION_READBACK_REQUIRED',
+        attempt:{ok:attempt?.ok===true,code:attempt?.code}});
       return held.ok?{...held,ack:attempt?.ok===true?'UNVERIFIED_ACK':'UNKNOWN'}:held;
     }
     return fail('COMMAND_NOT_ALLOWED');

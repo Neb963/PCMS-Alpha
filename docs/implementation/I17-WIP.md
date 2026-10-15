@@ -1,5 +1,7 @@
 # I17 — Full integration, fleet and operator acceptance
 
+**Current authority, 2026-10-15:** [I17 production amendment](I17-AUTHORIZATION-2026-10-15.md) supersedes the historical implementation holds below for normal qualified operator workflows. See [activation inventory](I17-ACTIVATION-INVENTORY.md) and [current operator guide](../verification/I17-OPERATOR-RUNBOOK.md). Coding-agent/CI live effects remain prohibited; H acceptance and merge remain pending. The following text is preserved as the original work record, not current production admission policy.
+
 **IN PROGRESS — not an acceptance marker.** Base: protected I16 main. This is a remotely recoverable I17-only work record; no implementation or H acceptance is claimed by this file.
 
 ## Contract
