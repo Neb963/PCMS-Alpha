@@ -314,3 +314,16 @@ test('I17 implemented operator capabilities must not be mislabeled as globally d
   assert.doesNotMatch(html,/<button[^>]+disabled[^>]*>Start action<\/button>/);
   assert.doesNotMatch(html,/<button[^>]+disabled[^>]*>Reserve generator<\/button>/);
 });
+
+test('I17 health and canonical summary may not claim all independent provider writers are off',async()=>{
+  const health=await readFile('src/ui/health.mjs','utf8');
+  const journal=await readFile('src/ui/operations.mjs','utf8');
+  assert.match(health,/this health view does not authorize writes/);
+  assert.match(journal,/Individual remote actions require their own guarded journals/);
+  assert.match(health,/result\.providerEffects === 'OFF'/);
+  assert.match(journal,/state\?\.providerEffects!=='OFF'/);
+  assert.doesNotMatch(health,/PCMS provider writes remain disabled/);
+  assert.doesNotMatch(journal,/All remote effects OFF/);
+  assert.doesNotMatch(journal,/No provider work admitted or dispatched/);
+  assert.doesNotMatch(journal,/fetch\(|XMLHttpRequest|sendNativeMessage/);
+});
