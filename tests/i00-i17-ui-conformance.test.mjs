@@ -81,7 +81,7 @@ test('I17 guarded operator supply uses exactly one item command and never auto-r
   assert.match(supply,/supply\('ARM_DISPOSABLE_TEST'/);
   assert.match(supply,/supply\('EXECUTE_ITEM'/);
   assert.match(supply,/expectedRevision:item\.revision/);
-  assert.match(supply,/do not blindly retry/i);
+  assert.match(supply,/do not blindly retry|do not retry blindly/i);
   assert.doesNotMatch(supply,/setInterval\(/);
 });
 
