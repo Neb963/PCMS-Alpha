@@ -122,7 +122,7 @@ export function createStagingBoundary(api,{
       nonce:r.nonce,candidateFingerprint:r.candidate.fingerprint,
       gitFingerprint:r.gitFingerprint,routeId:route.routeId,
       cookieStoreId:route.cookieStoreId,expiresAt:pilotClock()+120000};
-    return {ok:true,scope:'SINGLE_EXACT_PRIVATE_STAGE',expiresInSeconds:120};
+    return {ok:true,scope:p.type==='ARM_DISPOSABLE_STAGE'?'SINGLE_DISPOSABLE_PRIVATE_STAGE':'SINGLE_EXACT_PRIVATE_STAGE',expiresInSeconds:120};
   }
   async function statusFor(msg,s){
     const p=msg.params||{};

@@ -126,7 +126,7 @@ export function createAiBoundary(api,{
       stageFingerprint:r.candidate.fingerprint,
       routeId:route.routeId,cookieStoreId:route.cookieStoreId,
       expiresAt:pilotClock()+120000};
-    return {ok:true,scope:'SINGLE_EXACT_NATIVE_AI_STEP',step:p.step,
+    return {ok:true,scope:p.type==='ARM_DISPOSABLE_AI'?'SINGLE_DISPOSABLE_NATIVE_AI_STEP':'SINGLE_EXACT_NATIVE_AI_STEP',step:p.step,
       expiresInSeconds:120};
   }
   async function executeTrusted(message){

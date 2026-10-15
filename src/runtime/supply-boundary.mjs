@@ -133,7 +133,7 @@ export function createSupplyBoundary(api,{
       bindingVersion:b.bindingVersion,principalFingerprint:accountAgain.account.identity.principalFingerprint,
       remoteId:item.remoteId,routeId:route.routeId,cookieStoreId:route.cookieStoreId,
       expiresAt:pilotClock()+120000};
-    return {ok:true,scope:'SINGLE_EXACT_NON_READY_GIT_MARKER',expiresInSeconds:120};
+    return {ok:true,scope:p.type==='ARM_DISPOSABLE_GIT'?'SINGLE_DISPOSABLE_NON_READY_GIT_MARKER':'SINGLE_EXACT_NON_READY_GIT_MARKER',expiresInSeconds:120};
   }
   async function armDisposablePilot(s,p){
     const found=await s.supply.get(p.batchId);
@@ -169,7 +169,7 @@ export function createSupplyBoundary(api,{
       cookieStoreId:route.cookieStoreId,routeId:route.routeId,
       expiresAt:pilotClock()+120000};
     return {ok:true,action,slug:item.requestedSlug,expiresInSeconds:120,
-      scope:'SINGLE_EXACT_OPERATOR_STEP'};
+      scope:p.type==='ARM_DISPOSABLE_TEST'?'SINGLE_DISPOSABLE_STEP_NOT_GENERAL_ACTIVATION':'SINGLE_EXACT_OPERATOR_STEP'};
   }
   async function frozenPlan(s,p,previewOnly){
     const current=await s.accounts.get(p.accountId);
