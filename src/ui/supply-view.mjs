@@ -88,18 +88,19 @@ function drawQueue(result){
       rowStatus.setAttribute('aria-live','polite');
       rowStatus.textContent=rowMessages.get(rowKey)||'';
       const report=message=>{remember(rowKey,message);rowStatus.textContent=message;};
-      // Exact-target, human-initiated disposable pilot only. A general
-      // source/AI/publication/refresh capability remains independently OFF.
+      // Exact-target, human-confirmed operation; no fleet-wide standing
+      // provider grant. Staging, AI, release and mutating refresh each have
+      // independent authority and recovery paths.
       // No batch-run or automatic retry, even if a provider reply is lost.
       if(['FROZEN','CREATE_CONFIRMED'].includes(item.state)){
         const isCreate=item.state==='FROZEN';
         const action=document.createElement('button');
         action.type='button';action.className='pcms-supply-guarded-step';
-        const pilotSlug=/^[a-z0-9][a-z0-9-]{0,99}$/.test(item.slug);
-        action.textContent=isCreate?'Create private test':'Rename private test';
-        action.setAttribute('aria-label',(isCreate?'Create private test for ':'Rename private test to ')+item.slug);
-        action.disabled=!pilotSlug;
-        if(!pilotSlug)action.title='Invalid or unverified canonical slug.';
+        const eligibleSlug=/^[a-z0-9][a-z0-9-]{0,99}$/.test(item.slug);
+        action.textContent=isCreate?'Create private':'Rename private';
+        action.setAttribute('aria-label',(isCreate?'Create private generator ':'Rename private generator to ')+item.slug);
+        action.disabled=!eligibleSlug;
+        if(!eligibleSlug)action.title='Invalid or unverified canonical slug.';
         action.addEventListener('click',async()=>{
           if(pendingSteps.has(rowKey))return;
           pendingSteps.add(rowKey);
@@ -108,7 +109,7 @@ function drawQueue(result){
           try{
             report('Awaiting exact confirmation; no remote operation has been attempted.');
             const confirmation=await requestTypedConfirmation(action,typed,
-              'Authorize one protected private test operation. Cancel is safe. Never repeat a possibly-dispatched action without reconciliation.');
+              'Authorize this exact private operation. Cancel makes no changes. Reconcile an uncertain dispatch; do not retry it.');
             if(confirmation===null){report('Cancelled. No remote command sent.');return;}
             report('Checking the current account binding, protected route and exact frozen revision…');
             const armed=await supply('ARM_EXACT_ITEM',{
@@ -129,7 +130,7 @@ function drawQueue(result){
             report('Response unavailable. Effect MAY have occurred; preserve the journal and do not retry blindly.');
           }finally{
             pendingSteps.delete(rowKey);
-            action.disabled=!pilotSlug;
+            action.disabled=!eligibleSlug;
             const returnFocus=document.activeElement===action &&
               location.hash==='#work-queue';
             await fetchBatches();
@@ -147,8 +148,8 @@ function drawQueue(result){
         });
         li.append(document.createTextNode(' '),action);
       }
-      // A separate, non-READY marker is the only Git effect this test can
-      // authorize. Existing per-gens folders are never overwritten.
+      // A separate, exact-authorized non-READY marker never overwrites an
+      // existing per-gens source folder or asserts READY.
       if(['PROVIDER_CONFIRMED','SOURCE_PENDING'].includes(item.state)&&
          /^[a-z0-9][a-z0-9-]{0,99}$/.test(item.slug)){
         const credential=document.createElement('input');

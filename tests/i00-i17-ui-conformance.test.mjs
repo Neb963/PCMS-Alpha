@@ -243,7 +243,7 @@ test('I17 Git writeback and release have symmetric operator step flows, not iner
   }
   assert.match(html,/class="pcms-inline-help pcms-wb-help"/);
   assert.match(html,/class="pcms-inline-help pcms-release-help"/);
-  assert.match(html,/3 · Authorize private test/);
+  assert.match(html,/3 · Authorize tested source/);
   assert.match(html,/4 · Publish once/);
 });
 
@@ -278,6 +278,8 @@ test('I17 production UI uses exact per-target confirmations for ordinary generat
     assert.equal(src.includes('window.confirm('),false);
   }
   assert.match(supply,/ARM_EXACT_ITEM/);
+  assert.match(supply,/Create private generator/);
+  assert.doesNotMatch(supply,/Create private test/);
   assert.match(supply,/ARM_EXACT_GIT/);
   assert.ok(supply.includes("!persisted&&row.state==='FROZEN'?'PREVIEWED'"));
   assert.match(stage,/ARM_EXACT_STAGE/);
