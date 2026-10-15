@@ -2224,7 +2224,7 @@ def main():
                          {'script':i14_code,'args':[]},timeout=90)
                 assert i14.get('ok') is True,i14
                 ui=execute(after,"return {provider:document.getElementById('pcms-refresher-provider')?.textContent||'',summary:document.getElementById('pcms-refresher-summary')?.textContent||''}")
-                assert 'Live refresh held' in ui['provider'] and 'OFF_PENDING_ACTIVATION' in ui['provider'] and 'visibility-held' in ui['summary'],ui
+                assert 'Live refresh held' in ui['provider'] and 'GUARDED_READ_ONLY' in ui['provider'] and 'visibility-held' in ui['summary'],ui
                 print('B I14_PACKAGED_PERSISTENT_IDB_GATED_EFFECTS_AND_REFERSHER_PROOF_UI=PASS',flush=True)
 
                 # I13 B: exact packaged XPI, real IndexedDB atomic approval
