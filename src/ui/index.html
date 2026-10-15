@@ -34,7 +34,7 @@
       <div class="pcms-sidebar-foot"><div class="pcms-sidebar-indicator"><span aria-hidden="true">●</span> Guarded mode</div><p class="sidebar-note">Routing: PersonaMonkey</p></div>
     </aside>
     <main id="main" tabindex="-1" aria-label="Current PCMS workspace">
-      <div class="system-status" role="status" aria-live="polite" id="navigation-status">Remote actions held until verified</div>
+      <div class="system-status" role="status" aria-live="polite" id="navigation-status">Checking current operation eligibility</div>
       <div id="unknown-route" class="notice" role="status" hidden>Unknown workspace. Showing Overview without changing any data.</div>
       <section class="workspace" id="view-overview" data-view="overview" aria-labelledby="heading-overview">
         <header class="workspace-head"><div><p class="eyebrow">Fleet / Overview</p><h1 id="heading-overview" tabindex="-1">Overview</h1><p>Exceptions, active work and account health.</p></div><div class="pcms-head-actions"><a class="pcms-overview-action" href="#work-queue">Work queue</a><a class="pcms-overview-action" href="#generators">Generators</a></div></header>
@@ -51,7 +51,7 @@
             <section class="panel" aria-labelledby="journal-title"><div class="panel-head"><h2 id="journal-title">Operation journal</h2><span class="unknown">Read-only</span></div><p id="pcms-journal-health" role="status">Checking local storage.</p><a href="emergency.html">Diagnostics</a></section>
           </div>
         </div>
-        <details class="pcms-overview-safety"><summary>Remote action eligibility</summary><p>Unqualified remote effects remain disabled. Account binding, manual login and local receipts are available. Protected routing is controlled by PersonaMonkey. Unknown observations are not healthy confirmations.</p></details>
+        <details class="pcms-overview-safety"><summary>Remote action eligibility</summary><p>Source/owner-verified private generator operations, Git operations and human-approved publication are available as individual guarded actions. Perchance routing remains controlled by PersonaMonkey. Unknown effects require independent reconciliation; unattended mutating Refresher remains unavailable.</p></details>
       </section>
       <section class="workspace" id="view-generators" data-view="generators" aria-labelledby="heading-generators" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Inventory / Source / Management</p><h1 id="heading-generators" tabindex="-1">Generators <span class="pcms-heading-total" id="pcms-generator-heading-total"></span></h1><p>Inventory across your bound accounts.</p></div><div class="pcms-head-actions"><button type="button" id="pcms-generator-sync-shortcut">Sync inventory</button><button type="button" data-pcms-jump="pcms-supply-heading">Plan generators</button></div></header>
@@ -102,7 +102,7 @@
           <section id="pcms-generator-selection-preview" class="pcms-selection-preview" aria-label="Selected local generators" hidden><h3>Selected generators · local preview</h3><p>Preview only. Selection does not queue provider effects or approve publication.</p><ol id="pcms-generator-selection-items"></ol></section>
           <details class="pcms-technical-help" id="blocked-generators"><summary>About ownership and protected actions</summary><p>Existing-source adoption needs independent owner readback. Sync uses the donor-guarded read-only observer. Edit keys and collaboration do not prove ownership; an absent generator observation is not a deletion. Provider writes remain held until individually qualified.</p></details></section>
         <section class="panel" aria-labelledby="pcms-supply-heading" data-pcms-generator-panel="supply" hidden>
-          <button type="button" disabled aria-describedby="blocked-generators" class="pcms-guarded-action">Reserve generator</button>
+          <a class="pcms-overview-action" href="#generators" data-pcms-jump="pcms-supply-heading">Plan new generators</a>
           <div class="panel-head"><h2 id="pcms-supply-heading">Slug supply — canonical plan</h2><span class="unknown">Local plan · exact private confirmation</span></div>
           <p class="reason">Paste one exact generator slug per line (up to 100). Preview preserves order and spelling. Freezing records the requests for a verified Persona-bound account in IndexedDB; it does not create, rename, reserve remotely, or write to private Git. Existing and conflicting local slugs are rejected per item.</p>
           <div class="account-controls"><label for="pcms-supply-account">Account</label>
@@ -133,7 +133,7 @@
         </section>
         <section class="panel" aria-labelledby="pcms-stage-heading" data-pcms-generator-panel="stage" hidden>
           <div class="panel-head"><h2 id="pcms-stage-heading">Private staging</h2><span class="unknown">Private staging · source verified</span></div>
-          <ol class="pcms-stage-steps" aria-label="Private staging steps"><li>Pin READY source</li><li>Authorize test</li><li>Stage and verify</li></ol>
+          <ol class="pcms-stage-steps" aria-label="Private staging steps"><li>Pin READY source</li><li>Authorize exact stage</li><li>Stage and verify</li></ol>
           <div class="pcms-stage-fields">
             <label for="pcms-stage-slug">Reserved generator
               <input id="pcms-stage-slug" maxlength="100" autocomplete="off" spellcheck="false" placeholder="my-generator">
@@ -144,7 +144,7 @@
           </div>
           <div class="pcms-stage-actions" role="group" aria-label="Private staging actions">
             <button id="pcms-stage-pin" type="button">1 · Pin READY source</button>
-            <button id="pcms-stage-arm" type="button" disabled>2 · Authorize test</button>
+            <button id="pcms-stage-arm" type="button" disabled>2 · Authorize exact stage</button>
             <button id="pcms-stage-start" type="button" disabled>3 · Stage privately</button>
             <button id="pcms-stage-reconcile" type="button" disabled>Verify saved bytes</button>
             <button id="pcms-stage-handoff" type="button" disabled>Hand off editor</button>
@@ -173,7 +173,7 @@
         </section>
       </section>
       <section class="workspace" id="view-work-queue" data-view="work-queue" aria-labelledby="heading-work-queue" hidden>
-        <header class="workspace-head"><div><p class="eyebrow">Workspace / 03</p><h1 id="heading-work-queue" tabindex="-1">Work Queue</h1><p>Evidence-backed operator decisions and task receipts.</p></div><button type="button" disabled aria-describedby="blocked-work-queue">Start action</button></header>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 03</p><h1 id="heading-work-queue" tabindex="-1">Work Queue</h1><p>Evidence-backed operator decisions and task receipts.</p></div><a class="pcms-overview-action" href="#generators">Plan generator</a></header>
         <p id="pcms-queue-refresher" role="status">Shadow scheduler state pending.</p><p><a href="#refresher">Inspect the global Refresher queue</a></p>
         <nav class="pcms-workspace-shortcuts" aria-label="Work Queue workflows">
           <button type="button" data-pcms-work-show="activity" aria-pressed="true">Activity</button>
@@ -189,7 +189,7 @@
         <section class="panel" aria-labelledby="pcms-supply-queue-title"><div class="panel-head"><h2 id="pcms-supply-queue-title">Frozen supply batches</h2><span class="unknown">Canonical local receipts</span></div><div id="pcms-supply-queue" role="status" aria-live="polite">Loading local batches.</div></section>
         </div>
         <section class="panel" data-pcms-work-panel="writeback" aria-labelledby="pcms-writeback-heading" hidden>
-          <div class="panel-head"><h2 id="pcms-writeback-heading">Git writeback</h2><span class="unknown">Reviewed source F · private test</span></div>
+          <div class="panel-head"><h2 id="pcms-writeback-heading">Git writeback</h2><span class="unknown">Reviewed source F · guarded action</span></div>
           <div class="pcms-ai-fields">
             <label for="pcms-writeback-slug">Generator
               <input id="pcms-writeback-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="pcms-test-private-001">
@@ -235,7 +235,7 @@
           <div id="pcms-writeback-diff" role="region" class="table-wrap" tabindex="0" aria-label="Full source add, change and delete diff"></div>
         </section>
         <section class="panel" data-pcms-work-panel="recovery" aria-labelledby="pcms-existing-heading" hidden>
-          <div class="panel-head"><h2 id="pcms-existing-heading">I13 · Existing public source recovery and update</h2><span class="unknown">All provider mutations gated OFF</span></div>
+          <div class="panel-head"><h2 id="pcms-existing-heading">I13 · Existing public source recovery and update</h2><span class="unknown">Owner/route-guarded individual actions</span></div>
           <p class="reason">Each generator must have archived original bytes, verified ownership, a sleeping I12 slot and an independent source baseline. The operator passphrase encrypts and verifies the previous-good full P locally; only a separately confirmed unlisting permits source staging. Never overwrite a human editor, repeat an ambiguous remote effect or republish a restored P.</p>
           <div class="account-controls">
             <label for="pcms-existing-slug">Existing generator slug</label><input id="pcms-existing-slug" maxlength="100" autocomplete="off" spellcheck="false" placeholder="generator">
@@ -245,14 +245,14 @@
           <div class="account-controls">
             <button id="pcms-existing-get" type="button" disabled>Load canonical state</button>
             <button id="pcms-existing-prepare" type="button" disabled>Prepare encrypted previous P</button>
-            <button id="pcms-existing-unlist" type="button" disabled>Unlist public P (held until activation)</button>
+            <button id="pcms-existing-unlist" type="button" disabled>Unlist public P once</button>
             <button id="pcms-existing-recheck-unlist" type="button" disabled>Verify P unlisted (read-only)</button>
             <button id="pcms-existing-pin-stage" type="button" disabled>Pin current READY source</button>
-            <button id="pcms-existing-stage" type="button" disabled>Stage full F (held until activation)</button>
+            <button id="pcms-existing-stage" type="button" disabled>Stage full F once</button>
             <button id="pcms-existing-recheck-stage" type="button" disabled>Verify saved F (read-only)</button>
-            <button id="pcms-existing-recovery-unlist" type="button" disabled>Unlist public F for recovery (held)</button>
+            <button id="pcms-existing-recovery-unlist" type="button" disabled>Unlist public F for recovery</button>
             <button id="pcms-existing-recheck-recovery-unlist" type="button" disabled>Verify F unlisted (read-only)</button>
-            <button id="pcms-existing-restore" type="button" disabled>Restore encrypted P, remain unlisted (held)</button>
+            <button id="pcms-existing-restore" type="button" disabled>Restore encrypted P, remain unlisted</button>
             <button id="pcms-existing-recheck-restore" type="button" disabled>Verify restored P unlisted (read-only)</button>
           </div>
           <p id="pcms-existing-status" role="status" aria-live="polite">Load a generator before any operation.</p>
@@ -358,7 +358,7 @@
           <div class="pcms-head-actions"><button type="button" id="pcms-refresher-reload">Reload</button><button type="button" id="pcms-refresher-global-pause" disabled>Pause globally</button></div>
         </header>
         <div class="pcms-refresher-stats" aria-label="Current local scheduling projection">
-          <button type="button" disabled aria-describedby="blocked-refresher" class="sr-only">Start refresh</button>
+          
           <div class="pcms-refresher-stat"><span>Occupied</span><strong id="pcms-refresher-occupied">—</strong><small>Shadow slots</small></div>
           <div class="pcms-refresher-stat"><span>Capacity</span><strong id="pcms-refresher-capacity">—</strong><small>Admission cap</small></div>
           <div class="pcms-refresher-stat"><span>Eligible</span><strong id="pcms-refresher-eligible">—</strong><small>Waiting for allocation</small></div>
@@ -408,7 +408,7 @@
         </section>
       </section>
       <section class="workspace" id="view-settings" data-view="settings" aria-labelledby="heading-settings" hidden>
-        <header class="workspace-head"><div><p class="eyebrow">Workspace / 06</p><h1 id="heading-settings" tabindex="-1">Settings</h1><p>Configuration and safe diagnostics. Provider capabilities remain disabled.</p></div></header>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 06</p><h1 id="heading-settings" tabindex="-1">Settings</h1><p>Configuration, diagnostics and capability-scoped operator actions.</p></div></header>
         <section class="panel" aria-labelledby="pcms-backup-title">
           <div class="panel-head"><h2 id="pcms-backup-title">Manual integrated encrypted backup</h2><span class="unknown">Local export · no restore</span></div>
           <p class="reason">One encrypted file includes a consistent PCMS record/source snapshot and PersonaMonkey's separately encrypted supported portable data. Native WireGuard private configuration, external provider state and unsaved browser editors are excluded. No passwords are stored.</p>
@@ -463,14 +463,14 @@
           <p role="status" aria-live="polite" id="pcms-auto-backup-status">Checking canonical backup state.</p>
           <p class="reason">Up to 14 confirmed automatic archives are retained. Only positively tracked matching excess downloads may be deleted. Manual, untracked, uncertain and missing files are preserved. No independent on-disk byte proof is claimed.</p>
         </section>
-        <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">Remote effects off · local backup available</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Canonical shadow scheduler available; provider observations gated, mutations OFF</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup / restore and AI tests</dt><dd>Manual encrypted backup and guarded staged restore available; scheduled backup requires OS vault; restored controller inactive</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No provider settings or operation commands can be changed here. PersonaMonkey retains advanced security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
+        <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">Per-operation authority · local backup available</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Guarded private generator create/rename, existing-source unlist/stage/restore, and human-approved release.</dd></div><div><dt>Automated source operations</dt><dd>Manual exact-source operations and individually opted-in AI/Git background work. All actions remain revision- and owner-guarded.</dd></div><div><dt>Scheduling and Refresher</dt><dd>Background fleet scheduler, guarded recent-list/statistics observations and controls operational. Mutating periodic refresh is not activated.</dd></div><div><dt>Private generator-source Git writes</dt><dd>Non-READY marker, exact reviewed initial READY source, adoption-original archive and tested-F writeback available after scoped Git authorization.</dd></div><div><dt>Backup / restore and AI tests</dt><dd>Manual encrypted backup and guarded staged restore available; scheduled backup requires OS vault; restored controller inactive</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">Configure opt-in AI, Git and backup here. Generator actions are performed in their exact workspaces. PersonaMonkey retains routing and security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
         <section class="panel" aria-labelledby="pcms-writeback-auto-heading">
-          <div class="panel-head"><h2 id="pcms-writeback-auto-heading">I11 · Git-only automatic writeback</h2><span class="unknown">Opt-in, revision-fenced · effects HELD</span></div>
+          <div class="panel-head"><h2 id="pcms-writeback-auto-heading">I11 · Git-only automatic writeback</h2><span class="unknown">Opt-in, revision-fenced · credentials ephemeral</span></div>
           <div class="account-controls"><label for="pcms-writeback-auto">Allow opt-in automatic Git writeback after verified final AI result</label><input id="pcms-writeback-auto" type="checkbox"><button id="pcms-writeback-save-auto" type="button" disabled>Save writeback preference</button></div>
           <p id="pcms-writeback-auto-status" role="status" aria-live="polite">Automatic writeback defaults OFF. This preference never activates remote Git capabilities or approves publication.</p>
         </section>
         <section class="panel" aria-labelledby="pcms-ai-config-heading">
-          <div class="panel-head"><h2 id="pcms-ai-config-heading">Native AI testing · versioned default prompt</h2><span class="unknown">Native provider activation held</span></div>
+          <div class="panel-head"><h2 id="pcms-ai-config-heading">Native AI testing · versioned default prompt</h2><span class="unknown">Exact manual steps · opt-in background</span></div>
           <p class="reason">New jobs, including updates to existing generators, pin the latest saved Settings revision. Existing jobs retain their original prompt and TESTING.md snapshot. Helper prose is never test evidence.</p>
           <div class="account-controls">
             <label for="pcms-ai-prompt">Default testing instructions</label>
@@ -495,7 +495,7 @@
         </section>
       </section>
     </main>
-    <footer class="footer"><span>PCMS Alpha · Stage I17</span><span>UI navigation available · PCMS side effects disabled</span></footer>
+    <footer class="footer"><span>PCMS Alpha · Stage I17</span><span>Guarded per-action workflows · live outcomes require verification</span></footer>
   </div>
   <script type="module" src="shell.mjs"></script>
   <script type="module" src="global-search-view.mjs"></script>

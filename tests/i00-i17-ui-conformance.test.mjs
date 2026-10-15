@@ -289,3 +289,28 @@ test('I17 production UI uses exact per-target confirmations for ordinary generat
   assert.match(release,/ARM_EXACT_RELEASE/);
   assert.ok(!release.includes("receipt.state!=='APPROVED'||!/^pcms-test-"));
 });
+
+test('I17 implemented operator capabilities must not be mislabeled as globally disabled',()=>{
+  for(const obsolete of [
+    'All provider mutations gated OFF',
+    'Unlist public P (held until activation)',
+    'Stage full F (held until activation)',
+    'Off — not implemented',
+    'Off — not configured',
+    'Native provider activation held',
+    'UI navigation available · PCMS side effects disabled'
+  ])assert.equal(html.includes(obsolete),false,obsolete);
+  for(const expected of [
+    'Owner/route-guarded individual actions',
+    'Unlist public P once',
+    'Stage full F once',
+    'Exact manual steps · opt-in background',
+    'Non-READY marker, exact reviewed initial READY source',
+    'Mutating periodic refresh is not activated',
+    'Guarded per-action workflows'
+  ])assert.ok(html.includes(expected),expected);
+  // Remove inert old-prototype action buttons rather than suggesting a
+  // disabled product in the Work Queue.
+  assert.doesNotMatch(html,/<button[^>]+disabled[^>]*>Start action<\/button>/);
+  assert.doesNotMatch(html,/<button[^>]+disabled[^>]*>Reserve generator<\/button>/);
+});
