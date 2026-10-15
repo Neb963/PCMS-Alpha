@@ -101,13 +101,13 @@ test('I17 installed Firefox B denies disguised provider arms without side effect
   assert.match(harness,/still_frozen\.get\('batch'/);
 });
 
-test('I17 operator supply presents narrow pilot honestly, without general activation claims',async()=>{
-  assert.match(html,/General creation and Git writes remain held/);
-  assert.match(html,/Only a disposable pcms-test- supply item/);
+test('I17 operator supply presents exact per-operation authorization and uncertainty honestly',async()=>{
+  assert.match(html,/Preview and freeze any valid new slug/);
+  assert.match(html,/Every live private operation requires exact typed authorization/);
   const supply=await readFile('src/ui/supply-view.mjs','utf8');
-  assert.match(supply,/Each exact private operation requires a fresh account/route check and typed authorization/);
+  assert.ok(supply.includes('Each exact private operation requires a fresh account/route check and typed authorization'));
   assert.match(supply,/No external effect yet/);
-  assert.match(supply,/Git writes remain held/);
+  assert.match(supply,/Git marker creation requires an additional exact authorization/);
 });
 
 test('I17 operator private stage requires an explicit disposable arm distinct from publication',async()=>{

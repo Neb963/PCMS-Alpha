@@ -33,7 +33,12 @@ import './backup-auto-boundary.mjs';
 import './restore-boundary.mjs';
 // I12 one durable shadow queue/alarm; provider observations gated OFF.
 import {createRefresherBoundary} from './refresher-boundary.mjs';
-if(typeof browser!=='undefined')createRefresherBoundary(browser).register();
+if(typeof browser!=='undefined')createRefresherBoundary(browser,{
+  // I17: fixed read-only Perchance monitoring is admitted only through the
+  // donor's current protected Persona lease and independent response schema.
+  // Mutating refresh intentionally has no qualified provider adapter.
+  observationGate:()=>true
+}).register();
 
 
 // A single browser-action click opens the real PCMS tab, never a donor route
