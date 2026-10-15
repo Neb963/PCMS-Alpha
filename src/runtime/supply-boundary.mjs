@@ -11,7 +11,7 @@ import {internalPcmsGuard} from './persona-guard.mjs';
 export const SUPPLY_PORT='pcms-i06-supply';
 const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM',
   'RECONCILE_ITEM','FINISH_SOURCE_FOLDER','RECONCILE_GIT',
-  'ABORT_PREPARED','ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT','ARM_EXACT_ITEM','ARM_EXACT_GIT','ARM_EXACT_ITEM','ARM_EXACT_GIT','ARM_EXACT_ITEM','ARM_EXACT_GIT','ARM_EXACT_ITEM','ARM_EXACT_GIT']);
+  'ABORT_PREPARED','ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT','ARM_EXACT_ITEM','ARM_EXACT_GIT']);
 const hex=/^[a-f0-9]{64}$/;
 // Only a disposable, explicitly named target may be tested live. This does
 // not qualify general generator supply, Git writeback or publication.
@@ -31,7 +31,7 @@ export function validateSupplyMessage(api,sender,message){
     message.type==='LIST_BATCHES'?[]:
     ['FINISH_SOURCE_FOLDER','RECONCILE_GIT'].includes(message.type)?
       ['batchId','itemId','expectedRevision','token']:
-    ['ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT'].includes(message.type)?
+    ['ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT','ARM_EXACT_ITEM','ARM_EXACT_GIT'].includes(message.type)?
       ['batchId','itemId','expectedRevision','confirmation']:
     ['batchId','itemId','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
@@ -44,13 +44,13 @@ export function validateSupplyMessage(api,sender,message){
   }else if(message.type==='GET_BATCH'&&!isSafeId(p.batchId))
     return fail('INVALID_PARAMS');
   else if(['EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED',
-    'ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT','RECONCILE_GIT'].includes(message.type)&&
+    'ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT','ARM_EXACT_ITEM','ARM_EXACT_GIT','RECONCILE_GIT'].includes(message.type)&&
     (!isSafeId(p.batchId)||!isSafeId(p.itemId)||
      !Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
     return fail('INVALID_PARAMS');
   if(['FINISH_SOURCE_FOLDER','RECONCILE_GIT'].includes(message.type)&&
     (typeof p.token!=='string'||p.token.length>512))return fail('INVALID_PARAMS');
-  if(['ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT'].includes(message.type)&&
+  if(['ARM_DISPOSABLE_TEST','ARM_DISPOSABLE_GIT','ARM_EXACT_ITEM','ARM_EXACT_GIT'].includes(message.type)&&
     (typeof p.confirmation!=='string'||p.confirmation.length>120))
     return fail('INVALID_PARAMS');
   return {ok:true};
