@@ -68,3 +68,15 @@ test('I17 readiness waits for native document before first effect; lease change 
     assert.ok(probes<=4);if(scenario==='ready')assert.equal(probes,3);
   }
 });
+test('I17 newly created loading blank tab is awaited without injection; wrong navigation is held',async()=>{
+  for(const changed of [false,true]){
+    let now=0,injections=0;
+    const api={tabs:{get:async()=>now===0?{url:'about:blank',status:'loading',cookieStoreId:'c'}:
+      {url:changed?'https://example.invalid/':'https://perchance.org/'+slug+'#edit',cookieStoreId:'c'}},
+      sessions:{getTabValue:async()=>({nonce:'n'})},
+      scripting:{executeScript:async()=>{injections++;return [{frameId:0,result:true}];}}};
+    const out=await waitForOwnedEditor(api,{tabId:1,slug,cookieStoreId:'c',nonce:'n',validate:async()=>true},
+      {clock:()=>now,pause:async ms=>{now+=ms;},timeoutMs:400});
+    assert.equal(out.ok,!changed);assert.equal(injections,changed?0:1);
+  }
+});

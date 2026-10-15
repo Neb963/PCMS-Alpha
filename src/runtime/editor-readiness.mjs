@@ -13,9 +13,13 @@ export async function waitForOwnedEditor(api,{tabId,slug,cookieStoreId,nonce,val
   const deadline=clock()+Math.min(8000,timeoutMs),url='https://perchance.org/'+slug+'#edit';
   do {
     const tab=await api.tabs.get(tabId),tag=await api.sessions.getTabValue(tabId,'pcmsI09Owned');
-    if(tab.cookieStoreId!==cookieStoreId||tab.url!==url||tag?.nonce!==nonce||
+    const loadingBlank=tab.url==='about:blank'&&tab.status==='loading';
+    if(tab.cookieStoreId!==cookieStoreId||(!loadingBlank&&tab.url!==url)||tag?.nonce!==nonce||
        tag.humanIntent===true||!(await validate()))return {ok:false,code:'EDITOR_READINESS_CONTEXT_CHANGED'};
     try {
+      // Firefox can return the transient empty document just after tabs.create.
+      // Wait under the same lease, but never inject or dispatch into that page.
+      if(loadingBlank){await pause(100);continue;}
       const r=await api.scripting.executeScript({target:{tabId,frameIds:[0]},world:'MAIN',
         func:nativeEditorReady,args:[slug]});
       if(r?.length===1&&r[0].frameId===0&&!r[0].error&&r[0].result===true) {
