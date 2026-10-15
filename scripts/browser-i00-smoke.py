@@ -857,7 +857,30 @@ def main():
                 unchanged=supply_command(after,{'type':'GET_BATCH','params':{
                     'batchId':'batch_browser_ui_confirm_0001'}})
                 assert unchanged.get('batch',{}).get('items',[{}])[0].get('state')=='FROZEN',unchanged
-                print('B I17_ESR007_REAL_WORK_QUEUE_INLINE_CANCEL_MISMATCH_ZERO_DISPATCH=PASS',flush=True)
+                # Exact text is now submitted through the real installed
+                # Work Queue handler and real background port. The fixture
+                # has NO protected donor Persona, so ARM must visibly deny
+                # before EXECUTE_ITEM or any provider operation can occur.
+                correct=execute(after,"""const b=[...document.querySelectorAll('button.pcms-supply-guarded-step')]
+                  .find(x=>x.getAttribute('aria-label')?.includes('pcms-test-browser-confirm-0001'));
+                  b.click();const f=document.querySelector('.pcms-typed-intent');
+                  const input=f.querySelector('input');
+                  input.value='CREATE pcms-test-browser-confirm-0001';
+                  f.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+                  return !document.querySelector('.pcms-typed-intent');""")
+                assert correct is True,'Exact inline form did not submit through actual click path'
+                denied_ui=None
+                for _ in range(90):
+                    denied_ui=execute(after,"""const li=[...document.querySelectorAll('#pcms-supply-queue li')]
+                      .find(x=>x.textContent.includes('pcms-test-browser-confirm-0001'));
+                      return li?.querySelector('.pcms-supply-row-status')?.textContent||'';""")
+                    if denied_ui.startswith('Authorization held:'):break
+                    time.sleep(.15)
+                assert denied_ui.startswith('Authorization held:'),denied_ui
+                still_held=supply_command(after,{'type':'GET_BATCH','params':{
+                    'batchId':'batch_browser_ui_confirm_0001'}})
+                assert still_held.get('batch',{}).get('items',[{}])[0].get('state')=='FROZEN',still_held
+                print('B I17_ESR007_REAL_WORK_QUEUE_INLINE_CANCEL_MISMATCH_GUARDED_DENIAL_ZERO_DISPATCH=PASS',flush=True)
                 # I17 B: the real installed combined XPI accepts only exact
                 # disposable pilot names. An existing normal frozen slug must
                 # remain FROZEN without any remote dispatch or extra marker.
