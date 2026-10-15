@@ -222,7 +222,13 @@ test('P55-09 X: imported accounts are rebound without carrying session or releas
     {key:'backup:auto-state',value:serializeClone({key:'backup:auto-state',
       state:{enabled:true,active:{runId:'auto_fake'},status:'ACTIVE'}})},
     {key:'writeback-settings',value:serializeClone({key:'writeback-settings',
-      setting:{revision:8,autoEnabled:true}})}
+      setting:{revision:8,autoEnabled:true}})},
+    {key:'ai-job:restored-test',value:serializeClone({key:'ai-job:restored-test',
+      job:{slug:'restored-test',revision:7,sourceFingerprint:'a'.repeat(64),
+        state:'PENDING_NATIVE_SESSION',
+        automation:{enabled:true,slug:'restored-test',sourceFingerprint:'a'.repeat(64),
+          stageRevision:2,personaUid:oldUid,nonce:'b'.repeat(32)},
+        schedulerDeferredUntil:123456789,schedulerHold:'AI_AWAITING_ROUTE'}})}
   );
   imported.stores.entities.push({key:'generator-1',value:serializeClone({
     id:'generator-1',revision:7,activeOperationId:'pending-operation'})});
@@ -242,6 +248,11 @@ test('P55-09 X: imported accounts are rebound without carrying session or releas
   assert.equal(meta['refresher:shadow:v1'].state.inflight.length,0);
   assert.equal(meta['backup:auto-state'].state.enabled,false);
   assert.equal(meta['writeback-settings'].setting.autoEnabled,false);
+  assert.equal(meta['ai-job:restored-test'].job.automation,null,
+    'a restored source hash cannot resurrect authorized native AI effects');
+  assert.equal(meta['ai-job:restored-test'].job.schedulerDeferredUntil,null);
+  assert.equal(meta['ai-job:restored-test'].job.schedulerHold,null);
+  assert.equal(meta['ai-job:restored-test'].job.state,'TESTS_UNVERIFIED');
   assert.equal(prepared.stores.entities[0].value.activeOperationId,null);
   assert.equal(prepared.stores.operations[0].value.status,'HELD_UNCERTAIN');
   await assert.rejects(async()=>prepareRestoredCanonical({

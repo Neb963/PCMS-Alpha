@@ -37,7 +37,10 @@ function inertMeta(key,row,remap,existing=null){
   }
   if(typeof key==='string'&&key.startsWith('ai-job:')&&data.job){
     data.job={...data.job,state:'TESTS_UNVERIFIED',
-      hold:'RESTORED_TESTS_NEED_NEW_OBSERVATION',executionSlotReleased:true};
+      hold:'RESTORED_TESTS_NEED_NEW_OBSERVATION',executionSlotReleased:true,
+      // An exact-job live native-AI grant is local controller authority,
+      // never transferable in a backup even with an unchanged source hash.
+      automation:null,schedulerDeferredUntil:null,schedulerHold:null};
   }
   if(typeof key==='string'&&key.startsWith('writeback:')&&data.record){
     data.record={...data.record,state:'RESTORE_REVIEW_REQUIRED'};
