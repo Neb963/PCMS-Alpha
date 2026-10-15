@@ -1828,6 +1828,50 @@ def main():
                 assert chat2_positive.get('ok') is True,chat2_positive
                 print('B I10_PACKAGED_SYNTHETIC_CHAT2_HISTORY_WORKSPACE_CAS_AND_RETEST=PASS',flush=True)
 
+                # I17 B: the final installed XPI's real same-extension AI
+                # port does not allow AUTO on an unlinked synthetic staged
+                # job, even with a correctly typed target. The UI controls
+                # must be installed; no provider session is dispatched.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const cmd=(type,params={})=>new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-i10-ai'});
+                    port.onMessage.addListener(answer=>{
+                      resolve(answer);try{port.disconnect();}catch{}
+                    });
+                    port.onDisconnect.addListener(()=>resolve({ok:false,code:'PORT_CLOSED'}));
+                    port.postMessage({type,params});
+                  });
+                  const slug='i10-two-chat';
+                  const before=await cmd('GET_JOB',{slug});
+                  const wrong=await cmd('SET_AUTO_JOB',{slug,enabled:true,
+                    expectedRevision:before.revision,confirmation:'AUTO AI wrong'});
+                  const forged=await cmd('SET_AUTO_JOB',{slug,enabled:true,
+                    expectedRevision:before.revision,confirmation:'AUTO AI '+slug,
+                    bypassRoute:true});
+                  const exact=await cmd('SET_AUTO_JOB',{slug,enabled:true,
+                    expectedRevision:before.revision,confirmation:'AUTO AI '+slug});
+                  const after=await cmd('GET_JOB',{slug});
+                  const controls={
+                    enable:!!document.getElementById('pcms-ai-enable-auto'),
+                    disable:!!document.getElementById('pcms-ai-disable-auto')
+                  };
+                  done({ok:before.ok===true&&
+                    wrong.code==='AI_AUTO_EXACT_CONFIRMATION_REQUIRED'&&
+                    forged.code==='INVALID_PARAMS'&&
+                    exact.ok===false&&
+                    after.ok===true&&after.autoEnabled!==true&&
+                    controls.enable&&controls.disable,
+                    wrong:wrong.code,forged:forged.code,exact:exact.code,
+                    beforeRevision:before.revision,afterRevision:after.revision,
+                    auto:after.autoEnabled,controls});
+                })().catch(e=>done({ok:false,error:String(e).slice(0,170)}));"""
+                ai_auto_b=call('POST',f'/session/{after}/execute/async',
+                    {'script':code,'args':[]},timeout=60)
+                assert ai_auto_b.get('ok') is True,ai_auto_b
+                print('B I17_PACKAGED_AUTO_AI_EXACT_JOB_GUARD_NEGATIVE=PASS',flush=True)
+
+
 
                 # I11 B: exact installed-XPI UI controls and real IDB canonical
                 # writeback CAS. No real Git or provider effect is attempted.
