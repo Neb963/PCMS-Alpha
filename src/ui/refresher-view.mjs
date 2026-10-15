@@ -231,7 +231,8 @@ function sourceDraw(){
     (reviewerFingerprint?' · Reviewer '+reviewerFingerprint:'');
   for(const name of sourceButtons)el('source-'+name).disabled=!!held||sourceBusy;
   el('source-consent').disabled=held||sourceBusy||!plan||q.preview.expiresAt<Date.now()||q.testAttempted;
-  el('source-test').disabled=held||sourceBusy||!q?.preview?.consented||q.preview.expiresAt<Date.now()||q.testAttempted;
+  el('source-test').disabled=held||sourceBusy||snapshot?.globalPause||selected?.paused||
+    selected?.phase==='SLEEPING'||selected?.blockers?.includes('ACCOUNT_PAUSE')||!q?.preview?.consented||q.preview.expiresAt<Date.now()||q.testAttempted;
   el('source-observe').disabled=held||sourceBusy||!q?.testAttempted;
   el('source-export').disabled=sourceBusy||!q;
   el('source-challenge').disabled=held||sourceBusy||!sourceResource||proof?.effect!=='EFFECT_CONFIRMED'||proof.feed?.state!=='PRESENT';
@@ -263,14 +264,16 @@ async function sourceAction(type,extra={}){
   try{
     const out=await command(type,p);
     if(mine!==sourceEpoch||selected?.stableId!==target)return;
-    if(!out?.ok){el('source-status').textContent='Held: '+(out?.code||'UNKNOWN')+'. Reload the receipt before another action.';return;}
+    if(!out?.ok){if(type==='TEST_SOURCE_REFRESH'&&sourceRefresh)sourceRefresh={...sourceRefresh,preview:null};
+      el('source-status').textContent='Held: '+(out?.code||'UNKNOWN')+'. Reload the receipt before another action.';return;}
     if(type==='GET_REFRESH_REVIEW_CHALLENGE'){downloadReceipt('pcms-h04-review-challenge.json',out);return;}
     const latest=out.sourceRefresh?out:await command('GET_SOURCE_REFRESH',{stableId:target});
     if(selected?.stableId!==target)return;
     if(latest.ok){sourceRefresh=latest.sourceRefresh;sourceResource=latest.resource||sourceResource;reviewerFingerprint=latest.reviewerFingerprint||reviewerFingerprint;}
     sourceDraw();
     if(out.code)el('source-status').textContent=out.code.replaceAll('_',' ');
-  }catch{el('source-status').textContent='Reply unavailable. Reload the canonical receipt; do not repeat the save.';}
+  }catch{if(type==='TEST_SOURCE_REFRESH'&&sourceRefresh)sourceRefresh={...sourceRefresh,preview:null};
+    el('source-status').textContent='Reply unavailable. Reload the canonical receipt; do not repeat the save.';}
   finally{sourceBusy=false;
     // Restore controls without replacing a causal failure message.
     const message=el('source-status').textContent;sourceDraw();el('source-status').textContent=message;
@@ -291,7 +294,8 @@ el('source-measure').addEventListener('click',async()=>{
 });
 el('source-trust').addEventListener('click',async()=>{
   try{
-    const raw=JSON.parse(el('source-key').value),publicKey={kty:raw.kty,crv:raw.crv,x:raw.x,y:raw.y};
+    const raw=JSON.parse(el('source-key').value);if(raw.d!==undefined)throw Error('PRIVATE_KEY_FORBIDDEN');
+    const publicKey={kty:raw.kty,crv:raw.crv,x:raw.x,y:raw.y};
     const text=JSON.stringify(Object.fromEntries(Object.keys(publicKey).sort().map(k=>[k,publicKey[k]])));
     const hash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))].map(x=>x.toString(16).padStart(2,'0')).join('');
     const confirmation=await requestTypedConfirmation(el('source-trust'),'TRUST '+hash,

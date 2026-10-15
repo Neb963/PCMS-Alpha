@@ -62,8 +62,11 @@ export function canonicalRefresherInputs(records){
           update.state==='STAGE_CONFIRMED'&&released&&
           update.stagedFingerprint===release.sourceFingerprint
         )))||!!stage&&stage.state!=='HUMAN_OWNED'&&!released,
-      readyUpdate:link?.readyUpdate===true||!!released&&link?.readyAtInspection===true&&
-        link.fingerprint!==release.sourceFingerprint};
+      // source-link is the immutable historical association B, not a
+      // fresh Git probe after AI's approved B->F contribution. Its differing
+      // old fingerprint cannot masquerade as a new READY update. Explicit
+      // independently recorded READY work still takes precedence.
+      readyUpdate:link?.readyUpdate===true};
   });
 }
 function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={}){

@@ -46,17 +46,28 @@ Then perform one step at a time: **Unlist public P once → Verify P unlisted �
 
 Recovery is distinct from a new release: if F is public, **Unlist public F for recovery → Verify F unlisted** first. **Restore encrypted P, remain unlisted → Verify restored P unlisted** checks exact prior bytes and privacy. It does not silently re-publish P. A wrong passphrase, changed target or uncertain prior action stops recovery; no overwrite or blind replay.
 
-## Refresher qualification — separate, bounded operator observation
+## Source-save Refresher — one approved target
 
-**Actual limitation:** frozen discovery proves native meaningful source updates and recent-list reads, but does not establish a dedicated permissible recurring refresh method or guarantee that saves cause recent-list inclusion. This XPI implements guarded observation around the real existing-update/publication path. It does **not** claim a fleet mutating refresh adapter, causal ranking proof, H-04 PASS, or P54-09/P56 live acceptance. No comment spam, no-op saves, repetitive ranking manipulation or automatic unlist/relist testing.
+The [2026-10-15 source-save amendment](../implementation/I17-REFRESHER-SAVE-AMENDMENT.md)
+defines refresh as a consented, deterministic HTML-comment revision and one
+native Save, with independently verified complete source and a separate recent
+list. A distinct refresh endpoint is not required. The packaged production
+entry includes the fixed native donor adapter and uses the existing scheduler.
 
-1. Choose one already public, owned disposable generator for which the operator actually wants a meaningful source change. Record its canonical identity and current public full-source fingerprint. In **Refresher**, select it; open **Qualify a meaningful source update** and **Capture public baseline**. Confirm `OBSERVE <slug>`. This performs guarded read-only owner/source and recent-list observations, not a save. Require `READY_FOR_OPERATOR_UPDATE`. Record before-list completeness, presence/rank and observation time separately from source.
-2. Execute the normal existing-generator workflow above, including immutable original, encrypted P, guarded unlisting/staging, real tests, verified writeback and human-approved publication. Record the exact legitimate change and native/provider operation receipts. The Refresher panel does not dispatch a second mutation or bypass source approval.
-3. Return to the same Refresher row; **Observe update result** (at least 60 seconds between qualification reads; provider rate limits impose a longer hold). PCMS compares fresh persisted full-source bytes against the original baseline and the canonical exact-source publication receipt, then independently reads recent-list presence/rank/completeness/time. **Load qualification receipt** reads the durable result after a lost UI reply.
-4. Interpret facts precisely: `UNVERIFIED_UPDATE` = changed bytes without sufficient matching approved publication proof; `EFFECT_CONFIRMED` = independently persisted approved change, recent presence not proved; `RECENT_PRESENCE_OBSERVED` = both facts observed, still not a causal guarantee or recurring refresh permission. Incomplete/stale/error feed evidence is not absence. Changed identity/target/route is a real hold. A previous baseline is retained; use another separately authorized disposable target for another experiment, not a reset that erases evidence.
-5. Retain redacted local baseline/post receipts and remote observations for independent H-04 review. If the generator is absent, do not repeat the mutation to chase rank. Determine provider semantics/permissibility from evidence. Fleet refresh requires a separately established effective method and measured P54-09/appropriate P56 resource/backpressure acceptance; no general switch is exposed.
+Follow [H-04 source-save runbook](I17-H04-SOURCE-SAVE-RUNBOOK.md): select one owned,
+listed, released target → preview exact marker diff → scoped consent → test
+once → inspect source/feed receipts → bounded read-only reconciliation if
+needed. Signed independent target review, resource evidence and explicit opt-in
+can enable recurring scheduling in this same XPI. No rebuild or coding phase is
+required after legitimate evidence. A signature cannot manufacture absent
+canonical source/feed facts, repeated-use permission or ranking guarantees.
 
-The existing single Refresher alarm continues bounded read-only recent-list/statistics monitoring and durable schedule/pauses. Refresher Pause affects its queue, not backup or unrelated manual actions. A held refresh method does not disable creation, AI, Git or publication. Shadow scheduling remains honestly identified; it does not promise visibility or perform hidden saves.
+The older meaningful-update observation remains available as historical
+read-only evidence, separate from this operation. Unqualified targets stay
+non-mutating; uncertain, ineffective, absent or provider-refused cases do not
+cause another save. Pauses remain scoped, and unrelated workflows remain
+independently guarded. H-04 and final operator/governance acceptance remain
+pending real evidence.
 
 ## Backup and staged restore
 

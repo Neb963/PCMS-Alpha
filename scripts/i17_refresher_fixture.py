@@ -17,7 +17,7 @@ DATA = {}
 LOCK = threading.Lock()
 def generator(slug):
     with LOCK:
-        return DATA.setdefault(slug, {'name':slug,'publicId':'public_'+slug,
+        return DATA.setdefault(slug, {'name':slug,'publicId':slug,
             'isPrivate':False,'modelText':'output = fixture',
             'outputTemplate':'<!doctype html>\n<main>[output]</main>', 'srcManifest':{},'saves':0})
 

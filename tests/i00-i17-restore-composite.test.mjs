@@ -95,3 +95,17 @@ test('P56-04 X: crash at first dispatch retains independent external hold; stale
   assert.equal(restoreReadiness({planSha256:H,plan:{archiveSha256:K,
     groups:[],fresh:true}},{verified:true,tier:3}).code,'RESTORE_FRESH_CONTROLLER_INACTIVE');
 });
+
+
+test('I17 restore invalidates source-transform consent, recurring qualification and reviewer trust while retaining provenance history',()=>{
+  const incoming=state(),current={schema:1,stores:Object.fromEntries(DB_STORES.map(x=>[x,[]]))};
+  for(const key of ['refresh-source:gen01','refresh-reviewer:v1','refresh-resource:v1'])
+    incoming.stores.meta.push({key,value:serializeClone({record:{consent:{revision:1},qualification:{validUntil:999999},
+      scheduleEnabled:true,publicKey:{kty:'EC'},lastReceipt:{source:'PCMS_REFRESH_MARKER',effectiveCurrentFingerprint:H}}})});
+  const result=prepareRestoredCanonical({incoming,current,mode:'replace',uidRemap:{'persona-old-01':'persona-new-01'}});
+  for(const key of ['refresh-source:gen01','refresh-reviewer:v1','refresh-resource:v1']){
+    const r=value(result,key).record;assert.equal(r.restoredHistorical,true);assert.equal(r.consent,null);
+    assert.equal(r.qualification,null);assert.equal(r.scheduleEnabled,false);assert.equal(r.revoked,true);
+    assert.equal(r.lastReceipt.effectiveCurrentFingerprint,H);
+  }
+});

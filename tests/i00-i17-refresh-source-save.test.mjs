@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+import {matchesApproval,safeRollbackAdmission} from '../src/runtime/release-core.mjs';
+import {canonicalRefresherInputs} from '../src/runtime/refresher-store.mjs';
 import {exactSource} from '../src/runtime/staging-core.mjs';
 import {prepareMarker,recognizeMarker,markerReceipt,encodeText,MARKER_POLICY,REFRESH_METHOD} from '../src/runtime/refresh-marker.mjs';
 import {perchanceRefreshMain} from '../src/runtime/perchance-refresh.mjs';
@@ -8,7 +10,7 @@ import {createRefresherProviderAdapter} from '../src/runtime/refresher-provider-
 import {emptyRefreshEvidence,reserveRefreshAttempt,dispatchPossible,reconcileRefreshAttempt} from '../src/runtime/refresher-effect-core.mjs';
 import {canonicalJson,verifyRefreshReview,digestReview} from '../src/runtime/refresh-review.mjs';
 import {measureRefreshResources} from '../src/runtime/refresh-resource.mjs';
-const slug='ordinary-listed-refresh',remoteId='fixture_public_01',principal='a'.repeat(64);
+const slug='ordinary-listed-refresh',remoteId='public_fixture_public_01',principal='a'.repeat(64);
 const files=[{path:'main.pjs',base64:encodeText('output = ["unchanged"]')},
   {path:'index.html',base64:encodeText('<!doctype html>\n<div>[output]</div>\n<script>const s="literal";</script>')},
   {path:'src/image.bin',base64:Buffer.from([0,255,1,128]).toString('base64')}];
@@ -29,7 +31,7 @@ function nativeFixture({persist=true,lostAck=false,workspace=null}={}){
     srcState:{ready:async()=>{},list:()=>['image.bin'],readFile:async()=>Uint8Array.from([0,255,1,128]),
       isDirty:async()=>false,hasPending:()=>false,conflictPaths:()=>[]},menuBar:menu,
     aiAgentWorkspaceSnapshot:async()=>workspace,saveCheckpointManager:{isDivergenceBlocked:()=>false},
-    app:{data:{generator:{name:slug,isPrivate:false,publicId:remoteId}},saveGenerator:async()=>{
+    app:{data:{generator:{name:slug,isPrivate:false,publicId:remoteId.slice(7)}},saveGenerator:async()=>{
       // Independent remote ledger, never derived from PCMS's effect result.
       ledger.push({html,pjs,asset:[0,255,1,128]});
       if(persist)remote.files=[{path:'main.pjs',base64:encodeText(pjs)},{path:'index.html',base64:encodeText(html)},files[2]];
@@ -171,4 +173,33 @@ test('I17 F: package production graph includes native donor executor and non-nul
   for(const name of ['perchance-refresh.mjs','refresh-owned-tab.mjs','refresher-provider-adapter.mjs','refresh-source-store.mjs'])assert.ok(overlay.includes("'"+name+"'"));
   assert.match(overlay,/refreshIsolatedTab: async \(lease,request,beforeSave\)=>runRefreshOwnedTab/);
   assert.match(guard,/async function runRefreshStep/);
+});
+
+
+test('I17/P53-07 source provenance never transfers base-F publication/rollback approval to marked bytes',async()=>{
+  const approval={slug,sourceFingerprint:base.fingerprint,files:base.files,previousFingerprint:base.fingerprint};
+  assert.equal((await recognizeMarker(prepared.post.blobs,markerReceipt(prepared.plan,1000))).ok,true);
+  assert.equal(matchesApproval(approval,{...approval,sourceFingerprint:prepared.post.fingerprint,files:prepared.post.files}).ok,false);
+  assert.equal(safeRollbackAdmission({release:{state:'CONFIRMED_PUBLIC',approval},
+    previous:base,observed:{source:'INDEPENDENT_FULL_BYTE_READBACK',fingerprint:prepared.post.fingerprint,visibility:'UNLISTED'},
+    editor:{ok:true,clean:true},restore:{held:false}}).ok,false);
+  assert.deepEqual(base.blobs,prepared.pre.blobs);
+});
+
+
+test('I17 production source provenance: historical Git B does not falsely block an independently approved/released F; explicit READY work still holds',()=>{
+  const account={accountId:'account_01',personaUid:'persona-01',bindingVersion:1,state:'VERIFIED',
+    identity:{source:'GUARDED_SESSION_READBACK',bindingVersion:1,principalFingerprint:principal}};
+  const generator={slug,accountId:account.accountId,personaUid:account.personaUid,bindingVersion:1,
+    remoteId,ownerState:'OBSERVED_OWNER',visibility:'PUBLIC'};
+  const release={slug,...generator,remoteId,principalFingerprint:principal,state:'CONFIRMED_PUBLIC',
+    source:'INDEPENDENT_PUBLICATION_READBACK',sourceFingerprint:base.fingerprint,
+    observationId:'observed_f_01',observedAt:10000};
+  const link={slug,fingerprint:'c'.repeat(64),readyAtInspection:true};
+  const records=[{key:'account:account_01',account},{key:'inventory:'+slug,generator},
+    {key:'release:'+slug,release},{key:'source-link:'+slug,link}];
+  const r=canonicalRefresherInputs(records)[0];assert.equal(r.releaseVerified,true);assert.equal(r.readyUpdate,false);
+  assert.equal(r.releaseFingerprint,base.fingerprint);assert.equal(link.fingerprint,'c'.repeat(64));
+  link.readyUpdate=true;assert.equal(canonicalRefresherInputs(records)[0].readyUpdate,true);
+  release.principalFingerprint='f'.repeat(64);assert.equal(canonicalRefresherInputs(records)[0].releaseVerified,false);
 });

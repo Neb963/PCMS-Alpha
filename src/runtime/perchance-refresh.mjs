@@ -39,7 +39,7 @@ export async function perchanceRefreshMain(request){
       location.hash==='#edit'&&window.app===app&&window.srcState===src&&
       window.modelTextEditor===model&&window.outputTemplateEditor===html&&
       window.__editorReady===true&&window.__saveInFlight===false&&window.userOwnsThisGenerator===true&&
-      app.data?.generator?.name===request.slug&&app.data.generator.publicId===request.remoteId&&
+      app.data?.generator?.name===request.slug&&'public_'+app.data.generator.publicId===request.remoteId&&
       app.data.generator.isPrivate===false&&solo()&&!human()&&
       window.saveCheckpointManager?.isDivergenceBlocked?.()===false&&src.conflictPaths().length===0;
     const clean=async()=>context()&&src.hasPending()===false&&(await src.isDirty())===false&&

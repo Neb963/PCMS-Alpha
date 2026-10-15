@@ -9,6 +9,7 @@ import {authorizeSleepingUpdate,sealPrevious,unlockPrevious} from './existing-up
 import {createStagingStore} from './staging-store.mjs';
 import {exactSource,verifyReadback} from './staging-core.mjs';
 import {inspectGitSource} from './git-source.mjs';
+import {recognizeMarker} from './refresh-marker.mjs';
 import {REFRESHER_KEY} from './refresher-core.mjs';
 
 export const EXISTING_PORT='pcms-i13-existing';
@@ -60,14 +61,16 @@ function canonical(db,name){
           m.get(REFRESHER_KEY).onsuccess=s=>{
             m.get('source-link:'+name).onsuccess=l=>{
               m.get('release:'+name).onsuccess=re=>{
+              m.get('refresh-source:'+name).onsuccess=rf=>{
                 const account=a.target.result?.account,
                   adoption=o.target.result?.adoption,
                   shadow=s.target.result?.state,
                   row=shadow?.rows?.find(z=>z.slug===name);
                 result=account&&adoption&&row?{
                   ok:true,account,adoption,inventory,shadow,row,
-                  release:re.target.result?.release,
+                  release:re.target.result?.release,refreshSource:rf.target.result?.record,
                   link:l.target.result?.link}:fail('EXISTING_SOURCE_OR_SLEEP_NOT_FOUND');
+              };
               };
             };
           };
@@ -155,6 +158,12 @@ export function createExistingBoundary(api,{
         if(!original.ok||original.fingerprint!==prior.sourceFingerprint)
           return fail('PRIOR_RELEASE_P_BYTES_UNVERIFIED');
       }
+      if(remote.source.fingerprint!==original.fingerprint&&f.refreshSource?.lastReceipt&&
+        f.refreshSource.approvedBaseFingerprint===original.fingerprint&&
+        f.refreshSource.accountId===f.account.accountId&&f.refreshSource.remoteId===f.inventory.remoteId&&
+        f.refreshSource.personaUid===f.account.personaUid&&f.refreshSource.bindingVersion===f.account.bindingVersion&&
+        (await recognizeMarker(remote.source.blobs,f.refreshSource.lastReceipt)).ok)
+        return fail('KNOWN_REFRESH_DERIVATION_RECONCILIATION_REQUIRED');
       if(!authorizeSleepingUpdate({account:f.account,inventory:f.inventory,
         adoption:f.adoption,shadow:f.row,original,remote:{
           ok:true,remotePublicId:f.inventory.remoteId,ownerResult:'IS_OWNER',

@@ -33,7 +33,8 @@ export function createRefresherProviderAdapter(api,{database,guard,sentinel,cloc
     const g=guard(),before=await g?.getSafeRouteReadiness(claim.personaUid);
     if(!before?.ready)return fail(before?.code||'PROTECTED_ROUTE_REQUIRED');
     const raw=await g.observeReadOnly(claim.personaUid,false,claim.slug),o=raw?.original;
-    if(!raw?.ok||raw.principalFingerprint!==claim.principalFingerprint||o?.ownerResult!=='IS_OWNER'||
+    if(!raw?.ok)return fail(/^[A-Z0-9_]{1,80}$/.test(raw?.code||'')?raw.code:'REFRESH_OBSERVER_UNVERIFIED');
+    if(raw.principalFingerprint!==claim.principalFingerprint||o?.ownerResult!=='IS_OWNER'||
       o.remotePublicId!==claim.remoteId||o.visibility!=='PUBLIC'||typeof o.pjs!=='string'||
       typeof o.html!=='string'||!Array.isArray(o.assets))return fail('REFRESH_OWNER_SOURCE_OR_LISTING_CHANGED');
     const source=await exactSource([{path:'main.pjs',base64:encodeText(o.pjs)},
@@ -123,17 +124,25 @@ export function createRefresherProviderAdapter(api,{database,guard,sentinel,cloc
       const out=await st.putKey(resourceKey,old.record?.revision||0,report);
       return out.ok?{ok:true,resource:report}:out;
     }
-    if(!row?.ownerVerified||!row.releaseVerified||row.identityHeld||row.reviewHeld||row.listing!=='PUBLIC'||
-      row.readyUpdate||!account?.verifiedIdentity)return fail('REFRESH_RELEASED_LISTED_OWNER_REQUIRED');
+    if(!row)return fail('REFRESH_TARGET_UNKNOWN');
     const old=await st.read(row.slug);if(!old.ok)return old;let cfg=old.record;
-    const result=record=>({ok:true,sourceRefresh:sourceRefreshProjection(record)});
+    const result=record=>{
+      const intent=row.refresh?.intent;
+      const view=sourceRefreshProjection(record);
+      if(intent)view.intent={id:intent.id,state:intent.state,at:intent.at,dispatchAt:intent.dispatchAt,
+        plan:intent.plan||null};
+      if(intent)view.state=intent.state==='DISPATCH_POSSIBLE'?'HELD_UNCERTAIN':'RESERVED';
+      return {ok:true,sourceRefresh:view};
+    };
     if(type==='GET_SOURCE_REFRESH'){
       const reviewer=(await st.readKey(key)).record,resource=(await st.readKey(resourceKey)).record;
       return {...result(cfg),reviewerFingerprint:reviewer?.fingerprint||null,resource:resource||null};
     }
+    if(!row.ownerVerified||!row.releaseVerified||row.identityHeld||row.reviewHeld||row.listing!=='PUBLIC'||
+      row.readyUpdate||!account?.verifiedIdentity)return fail('REFRESH_RELEASED_LISTED_OWNER_REQUIRED');
     if(type==='GET_REFRESH_REVIEW_CHALLENGE'){
       const proof=cfg?.lastProof,resource=(await st.readKey(resourceKey)).record;
-      if(proof?.effect!=='EFFECT_CONFIRMED'||proof.feed?.state!=='PRESENT'||!resource)return fail('H04_CANONICAL_TEST_AND_RESOURCE_REQUIRED');
+      if(row.refresh?.intent||proof?.effect!=='EFFECT_CONFIRMED'||proof.feed?.state!=='PRESENT'||!resource)return fail('H04_CANONICAL_TEST_AND_RESOURCE_REQUIRED');
       return {ok:true,challenge:{schema:1,kind:'PCMS_H04_REVIEW',method:REFRESH_METHOD,policy:MARKER_POLICY,
         slug:cfg.slug,accountId:cfg.accountId,personaUid:cfg.personaUid,bindingVersion:cfg.bindingVersion,
         principalFingerprint:cfg.principalFingerprint,approvedBaseFingerprint:cfg.approvedBaseFingerprint,
@@ -174,7 +183,7 @@ export function createRefresherProviderAdapter(api,{database,guard,sentinel,cloc
     }else if(type==='OBSERVE_SOURCE_REFRESH'){
       return s.observeSourceRefresh(row.stableId,clock(),async intent=>readback({...claim,...intent,plan:intent.plan}));
     }else if(type==='IMPORT_REFRESH_REVIEW'){
-      if(!cfg?.consent||!cfg.lastProof)return fail('H04_CANONICAL_TEST_EVIDENCE_REQUIRED');
+      if(row.refresh?.intent||!cfg?.consent||!cfg.lastProof)return fail('H04_CANONICAL_TEST_EVIDENCE_REQUIRED');
       const reviewer=(await st.readKey(key)).record,resource=(await st.readKey(resourceKey)).record;
       const verified=await verifyRefreshReview(p.envelope,{reviewer,record:cfg,proof:cfg.lastProof,resource,now:clock()});
       if(!verified.ok)return verified;

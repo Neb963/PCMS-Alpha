@@ -385,6 +385,11 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       }
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(SOURCE_REFRESH_COMMANDS.has(message.type)){
+        if(message.type==='GET_SOURCE_REFRESH'&&refreshAdapter?.requiresPreflight){
+          const snap=await s.read();if(!snap.ok)return snap;
+          const row=snap.state.rows.find(r=>r.stableId===p.stableId),account=snap.state.accounts[row?.accountId];
+          return refreshAdapter.command(message.type,{row,account,p,s});
+        }
         if(!refreshAdapter?.requiresPreflight||qualifying||turnPromise)return fail('REFRESH_OPERATION_BUSY_OR_UNAVAILABLE');
         qualifying=true;
         try{
