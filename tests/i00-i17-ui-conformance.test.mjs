@@ -272,14 +272,16 @@ test('I17 production UI uses exact per-target confirmations for ordinary generat
   const ai=await readFile('src/ui/ai-view.mjs','utf8');
   const write=await readFile('src/ui/writeback-view.mjs','utf8');
   const release=await readFile('src/ui/release-view.mjs','utf8');
-  for(const src of [supply,stage,ai,write,release])
-    assert.doesNotMatch(src,/window\\.(prompt|confirm)\\(/);
+  for(const src of [supply,stage,ai,write,release]){
+    assert.equal(src.includes('window.prompt('),false);
+    assert.equal(src.includes('window.confirm('),false);
+  }
   assert.match(supply,/ARM_EXACT_ITEM/);
   assert.match(supply,/ARM_EXACT_GIT/);
-  assert.match(supply,/!persisted&&row.state==='FROZEN'\\?'PREVIEWED'/);
+  assert.ok(supply.includes("!persisted&&row.state==='FROZEN'?'PREVIEWED'"));
   assert.match(stage,/ARM_EXACT_STAGE/);
   assert.match(ai,/ARM_EXACT_AI/);
   assert.match(write,/ARM_EXACT_COMMIT/);
   assert.match(release,/ARM_EXACT_RELEASE/);
-  assert.doesNotMatch(release,/receipt.state!=='APPROVED'\\|\\|!\\/\\^pcms-test-/);
+  assert.ok(!release.includes("receipt.state!=='APPROVED'||!/^pcms-test-"));
 });
