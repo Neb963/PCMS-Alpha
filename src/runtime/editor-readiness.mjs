@@ -13,7 +13,10 @@ export async function waitForOwnedEditor(api,{tabId,slug,cookieStoreId,nonce,val
   const deadline=clock()+Math.min(8000,timeoutMs),url='https://perchance.org/'+slug+'#edit';
   do {
     const tab=await api.tabs.get(tabId),tag=await api.sessions.getTabValue(tabId,'pcmsI09Owned');
-    const loadingBlank=tab.url==='about:blank'&&tab.status==='loading';
+    // Firefox may report the newly created empty document as either complete
+    // or loading before it starts the requested navigation. The exact owned
+    // tag and lease still have to match; blank pages never receive injection.
+    const loadingBlank=tab.url==='about:blank';
     if(tab.cookieStoreId!==cookieStoreId||(!loadingBlank&&tab.url!==url)||tag?.nonce!==nonce||
        tag.humanIntent===true||!(await validate()))return {ok:false,code:'EDITOR_READINESS_CONTEXT_CHANGED'};
     try {

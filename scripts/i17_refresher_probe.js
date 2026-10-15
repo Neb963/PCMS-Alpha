@@ -1,4 +1,4 @@
-const done=arguments[arguments.length-1];
+const done=arguments[arguments.length-1],trace=[];
 (async()=>{
   const journal=await import('./journal.mjs'),core=await import('./refresher-core.mjs');
   const {createRefresherStore}=await import('./refresher-store.mjs');
@@ -12,7 +12,13 @@ const done=arguments[arguments.length-1];
   const {canonicalJson,digestReview}=await import('./refresh-review.mjs');
   const db=await journal.openCanonicalDatabase({open:(_name,version)=>indexedDB.open('pcms-i17-source-save-b-fixture',version)});
   let now=Date.now(),sequence=1,closed=false,leaseCount=0,markedBeforeSave=0,saves=0;
-  const personaUid='persona-i17-native-fixture',accountId='i17_native_account',cookieStoreId='firefox-default',routeId='synthetic_protected_route';
+  const {pcmsI17FixtureContext:context}=await browser.storage.local.get('pcmsI17FixtureContext');
+  if(!context)throw Error('No protected local fixture route');
+  const {personaUid,cookieStoreId,routeId}=context,accountId='i17_native_account';
+  const snapshot=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+  trace.push({actualProfile:snapshot.state.profiles[cookieStoreId],actualRoute:snapshot.state.routes[routeId],security:snapshot.security});
+  browser.webRequest.onErrorOccurred.addListener(d=>trace.push({networkError:d.error,url:d.url}),{urls:['https://perchance.org/*']});
+  browser.webRequest.onCompleted.addListener(d=>trace.push({networkComplete:d.statusCode,url:d.url}),{urls:['https://perchance.org/*']});
   const principal=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('fixture@example.invalid')))].map(x=>x.toString(16).padStart(2,'0')).join('');
   const baseFiles=[{path:'main.pjs',base64:btoa('output = fixture')},
     {path:'index.html',base64:btoa('<!doctype html>\n<main>[output]</main>')}];
@@ -46,13 +52,18 @@ const done=arguments[arguments.length-1];
     personaUid,cookieStoreId,routeId,route:{enabled:true}};},
     acquire:async()=>{leaseCount++;return {leaseId:'lease_'+leaseCount,expiresAt:Date.now()+15000};},
     validate:async()=>({cookieStoreId}),release:async()=>{}};
-  const login=await browser.tabs.create({url:'https://perchance.org/fixture-login',active:false});
-  for(let i=0;i<80;i++){
-    const t=await browser.tabs.get(login.id);if(t.status==='complete')break;
+  const login=await browser.tabs.create({url:'https://perchance.org/fixture-login',cookieStoreId,active:false});
+  let loginReady=false;
+  for(let i=0;i<160;i++){
+    const t=await browser.tabs.get(login.id);if(t.status==='complete'&&t.url==='https://perchance.org/fixture-login')break;
     await new Promise(r=>setTimeout(r,50));
   }
+  {const t=await browser.tabs.get(login.id);loginReady=t.status==='complete'&&t.url==='https://perchance.org/fixture-login';}
+  if(!loginReady)throw Error('Protected login fixture did not load; refusing injection');
   const inject=async(tabId,func,args,world='ISOLATED')=>{
-    const out=await browser.scripting.executeScript({target:{tabId,frameIds:[0]},world,func,args});
+    let out;try{out=await browser.scripting.executeScript({target:{tabId,frameIds:[0]},world,func,args});}
+    catch(e){trace.push({func:func.name,world,error:String(e).slice(0,200),tab:await browser.tabs.get(tabId)});throw e;}
+    trace.push({func:func.name,world,code:out?.[0]?.result?.code||null,error:out?.[0]?.error?.message||null});
     if(out?.length!==1||out[0].frameId!==0||out[0].error)throw Error('injection failed');return out[0].result;
   };
   const isolated=async(_lease,options)=>{
@@ -65,7 +76,11 @@ const done=arguments[arguments.length-1];
   // Only low-level provider/native-route dependencies are fixtures. Real
   // packaged guard, donor fixed executor, native MAIN/ISOLATED injection,
   // source adapter, command boundary and committed IDB are all exercised.
-  const fixtureBrowser={...browser,scripting:{...browser.scripting,executeScript:async request=>{
+  const fixtureBrowser={...browser,tabs:{...browser.tabs,
+    query:q=>browser.tabs.query(q),create:async p=>{const t=await browser.tabs.create(p);trace.push({tabCreated:t});return t;},
+    get:async id=>{const t=await browser.tabs.get(id);trace.push({tabRead:t});return t;},remove:id=>browser.tabs.remove(id)},
+    sessions:{...browser.sessions,setTabValue:(...p)=>browser.sessions.setTabValue(...p),
+      getTabValue:async(...p)=>{const tag=await browser.sessions.getTabValue(...p);trace.push({tag});return tag;}},scripting:{...browser.scripting,executeScript:async request=>{
     if(request.func?.name==='perchanceRefreshMain'&&request.args?.[0]?.action==='SAVE'){
       const read=await createRefresherStore(db).read(),slug=request.args[0].slug;
       const row=read.state.rows.find(r=>r.slug===slug);
@@ -147,7 +162,7 @@ const done=arguments[arguments.length-1];
       results.recurring={tick:tick.refresh,sequence:scheduled.proof.marker?.sequence,source:scheduled.proof.marker?.source,
         enabled:opted.scheduleEnabled,resource:{accounts:resource.accounts,generators:resource.generators,turnMs:resource.turnMs,
           serializedBytes:resource.serializedBytes,storageUsage:resource.storageUsage,storageQuota:resource.storageQuota}};
-      const after=await store.read();must(await store.pause(after.revision,'GENERATOR',row.stableId,true),'pause');
+      const after=await store.read();must(await store.pause(after.state.revision,'GENERATOR',row.stableId,true),'pause');
       await boundary.tick();
       const revoked=await command('REVOKE_REFRESH_REVIEW',{...params,expectedRevision:scheduled.revision});
       must(revoked,'revoke');
@@ -159,4 +174,4 @@ const done=arguments[arguments.length-1];
   }
   await browser.tabs.remove(login.id);db.close();
   done({ok:true,results,markedBeforeSave,saves,leaseCount});
-})().catch(e=>done({error:'I17_SOURCE_SAVE_PACKAGED_PROBE_FAILED',detail:String(e),stack:e?.stack?.slice(0,900)}));
+})().catch(e=>done({error:'I17_SOURCE_SAVE_PACKAGED_PROBE_FAILED',detail:String(e),stack:e?.stack?.slice(0,900),trace:[trace[0],...trace.slice(-14)]}));

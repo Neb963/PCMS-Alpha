@@ -293,7 +293,7 @@ export function createRefresherStore(db){
   },{sync:true});
   // Single canonical transaction for each step. A crash after possible
   // dispatch is never treated as permission to repeat a provider effect.
-  const reserveAttempt=({stableId,id,now,candidate,liveAuthorized})=>mutate(null,(s,meta)=>{
+  const reserveAttempt=({stableId,id,now,candidate,liveAuthorized})=>mutate(null,(s,meta,tx)=>{
     const r=s.rows.find(x=>x.stableId===stableId),marker=candidate?.method===REFRESH_METHOD;
     const test=marker&&candidate.purpose==='SINGLE_TEST',cfg=r?.sourceRefresh,p=candidate?.plan;
     if(!r)return fail('REFRESH_ADMISSION_HELD');
@@ -332,6 +332,8 @@ export function createRefresherStore(db){
     target.refresh.intent.budgetAtSave=r.activeRemaining;
     target.refresh.intent.allocationEpoch=r.allocationEpoch;
     if(marker){
+      tx.objectStore('observations').add({id:'refresh_intent_'+id,source:'PCMS_REFRESH_INTENT',
+        at:now,slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,bindingVersion:r.bindingVersion,plan:p});
       const next={...cfg,testAttempted:cfg.testAttempted||test,revision:cfg.revision+1};
       meta.put({key:'refresh-source:'+r.slug,record:next});target.sourceRefresh=next;
       out.nextRefreshAt=now+MINUTE;out.accounts[r.accountId].nextRefreshAt=now+MINUTE;
@@ -375,11 +377,13 @@ export function createRefresherStore(db){
       return fail('REFRESH_CONTEXT_CHANGED');
     return {ok:true};
   };
-  const markDispatch=(claim,now)=>mutate(null,s=>{
+  const markDispatch=(claim,now)=>mutate(null,(s,meta,tx)=>{
     const allowed=dispatchContext(s,claim,now);if(!allowed.ok)return allowed;
     const r=s.rows.find(x=>x.stableId===claim.stableId);
     const packet=dispatchPossible(r.refresh,claim.id,now);
     if(!packet.ok)return packet;
+    if(claim.plan)tx.objectStore('observations').add({id:'refresh_dispatch_'+claim.id,
+      source:'PCMS_REFRESH_DISPATCH_POSSIBLE',at:now,slug:claim.slug,plan:claim.plan});
     const out=structuredClone(s);out.rows.find(x=>x.stableId===claim.stableId).refresh=packet.evidence;
     return {ok:true,state:out,changes:[{code:'REFRESH_DISPATCH_POSSIBLE',scopeId:claim.stableId}]};
   },{sync:true});

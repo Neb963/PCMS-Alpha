@@ -5,8 +5,9 @@ import {matchesApproval,safeRollbackAdmission} from '../src/runtime/release-core
 import {canonicalRefresherInputs} from '../src/runtime/refresher-store.mjs';
 import {exactSource} from '../src/runtime/staging-core.mjs';
 import {prepareMarker,recognizeMarker,markerReceipt,encodeText,MARKER_POLICY,REFRESH_METHOD} from '../src/runtime/refresh-marker.mjs';
+import {runRefreshOwnedTab} from '../src/runtime/refresh-owned-tab.mjs';
 import {perchanceRefreshMain} from '../src/runtime/perchance-refresh.mjs';
-import {createRefresherProviderAdapter} from '../src/runtime/refresher-provider-adapter.mjs';
+import {createRefresherProviderAdapter,sourceRefreshProjection} from '../src/runtime/refresher-provider-adapter.mjs';
 import {emptyRefreshEvidence,reserveRefreshAttempt,dispatchPossible,reconcileRefreshAttempt} from '../src/runtime/refresher-effect-core.mjs';
 import {canonicalJson,verifyRefreshReview,digestReview} from '../src/runtime/refresh-review.mjs';
 import {measureRefreshResources} from '../src/runtime/refresh-resource.mjs';
@@ -202,4 +203,46 @@ test('I17 production source provenance: historical Git B does not falsely block 
   assert.equal(r.releaseFingerprint,base.fingerprint);assert.equal(link.fingerprint,'c'.repeat(64));
   link.readyUpdate=true;assert.equal(canonicalRefresherInputs(records)[0].readyUpdate,true);
   release.principalFingerprint='f'.repeat(64);assert.equal(canonicalRefresherInputs(records)[0].releaseVerified,false);
+});
+
+
+test('I17 redacted source receipt strictly rejects nested private-source/token canaries even from corrupt metadata',()=>{
+  const sentinel='DO_NOT_EXPORT_SECRET_SOURCE_TOKEN';
+  const receipt=sourceRefreshProjection({revision:1,state:'TEST_READY',slug,accountId:'account_one',
+    approvedBaseFingerprint:base.fingerprint,effectiveCurrentFingerprint:base.fingerprint,
+    preview:{plan:{...prepared.plan,extra:sentinel},beforeFeed:{complete:true,code:'RECENT_PRESENT',token:sentinel}},
+    lastProof:{id,at:10000,effect:'EFFECT_CONFIRMED',token:sentinel,marker:{...markerReceipt(prepared.plan,10000),secret:sentinel},
+      feed:{state:'PRESENT',rank:1,at:10000,html:sentinel},attemptResult:{code:'SAVE_ACK_ONLY',secret:sentinel}},
+    qualification:{method:REFRESH_METHOD,policy:MARKER_POLICY,secret:sentinel,reviewDigest:'b'.repeat(64)}});
+  assert.equal(JSON.stringify(receipt).includes(sentinel),false);
+  assert.equal(receipt.preview.plan.expectedPostSaveFingerprint,prepared.post.fingerprint);
+  assert.equal(receipt.proof.marker.source,'PCMS_REFRESH_MARKER');
+  assert.equal(sourceRefreshProjection({state:sentinel,lastHold:sentinel}).state,'UNKNOWN');
+  const bad=sourceRefreshProjection({preview:{plan:{...prepared.plan,beforeMarker:sentinel}}});
+  assert.equal(bad.preview.plan,null);assert.equal(JSON.stringify(bad).includes(sentinel),false);
+});
+
+
+test('I17 fixed donor executor waits through complete/loading owned blank documents, journals, saves once and verifies clean before close',async()=>{
+  const f=nativeFixture(),tags=new Map(),closed=[],order=[];let reads=0,marked=false;
+  const cookieStoreId='fixture-container',personaUid='fixture-persona',routeId='protected';
+  const api={tabs:{query:async()=>[],create:async()=>({id:10}),get:async()=>({id:10,cookieStoreId,active:false,
+      url:++reads<=3?'about:blank':'https://perchance.org/'+slug+'#edit',status:reads===1?'complete':reads<=3?'loading':'complete'}),
+      remove:async id=>closed.push(id)},sessions:{setTabValue:async(_id,_key,value)=>tags.set(10,value),
+      getTabValue:async()=>tags.get(10)},scripting:{executeScript:async req=>{
+        assert.ok(reads>3,'Never inject into the owned empty document');
+        if(req.func.name==='renderPcmsEditorStrip')return [{frameId:0,result:null}];
+        if(req.func.name==='perchanceReadIsolated')return [{frameId:0,result:{ok:true,principalFingerprint:principal,original:{
+          remotePublicId:remoteId,ownerResult:'IS_OWNER',visibility:'PUBLIC',
+          pjs:Buffer.from(files[0].base64,'base64').toString(),html:Buffer.from(files[1].base64,'base64').toString(),assets:[files[2]]}}}];
+        if(req.func.name==='perchanceRefreshMain'&&req.args[0].action==='SAVE'){assert.equal(marked,true);order.push('NATIVE_SAVE');}
+        return [{frameId:0,result:await req.func(...req.args)}];
+      }}};
+  const result=await runRefreshOwnedTab(api,{getState:async()=>({profiles:{[cookieStoreId]:{personaUid,routeId}},
+    routes:{protected:{enabled:true}}}),validate:async()=>({cookieStoreId}),routeTest:()=>({ok:true})},
+    {personaUid,cookieStoreId,routeId,leaseId:'fixture-lease'},{...f.request,nonce:id,principalFingerprint:principal},async phase=>{
+      if(phase==='MARK'){marked=true;order.push('COMMITTED_DISPATCH');}return {ok:true};
+    });
+  assert.equal(result.ok,true,result.code);assert.equal(f.ledger.length,1);assert.deepEqual(closed,[10]);
+  assert.deepEqual(order,['COMMITTED_DISPATCH','NATIVE_SAVE']);
 });

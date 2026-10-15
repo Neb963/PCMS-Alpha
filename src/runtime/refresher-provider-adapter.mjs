@@ -4,7 +4,7 @@
 import {fail} from './journal.mjs';
 import {exactSource} from './staging-core.mjs';
 import {createRefreshSourceStore} from './refresh-source-store.mjs';
-import {MARKER_POLICY,REFRESH_METHOD,prepareMarker,encodeText,validMarkerPlan} from './refresh-marker.mjs';
+import {MARKER_POLICY,REFRESH_METHOD,prepareMarker,encodeText,validMarkerPlan,hex,opId} from './refresh-marker.mjs';
 import {publicReviewKey,digestReview,verifyRefreshReview} from './refresh-review.mjs';
 import {measureRefreshResources} from './refresh-resource.mjs';
 const sameRoute=(a,b)=>a?.ready&&b?.ready&&a.cookieStoreId===b.cookieStoreId&&
@@ -13,18 +13,63 @@ const key='refresh-reviewer:v1',resourceKey='refresh-resource:v1';
 export const SOURCE_REFRESH_COMMANDS=new Set(['GET_SOURCE_REFRESH','PREVIEW_SOURCE_REFRESH',
   'GET_REFRESH_REVIEW_CHALLENGE','CONSENT_SOURCE_REFRESH','TEST_SOURCE_REFRESH','OBSERVE_SOURCE_REFRESH','TRUST_REFRESH_REVIEWER',
   'MEASURE_REFRESH_RESOURCES','IMPORT_REFRESH_REVIEW','SET_REFRESH_SCHEDULE','REVOKE_REFRESH_REVIEW']);
+const safeId=s=>typeof s==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(s)?s:null;
+const safeTime=n=>Number.isSafeInteger(n)&&n>=0?n:0;
+const safeHash=s=>hex(s)?s:null;
+const receiptCodes=new Set(['UNKNOWN','METHOD_NOT_CONFIGURED','TEST_READY','RESERVED','HELD_UNCERTAIN',
+  'RECENT_PRESENT','RECENT_ABSENT','RECENT_UNKNOWN','RATE_LIMITED','SOURCE_CONFIRMED_RECENT_UNKNOWN',
+  'SOURCE_CONFIRMED_RECENT_ABSENT','SOURCE_SAVE_INEFFECTIVE','FLEET_READY','SCHEDULE_PAUSED',
+  'QUALIFICATION_REVOKED','RESTORE_REVIEW_REQUIRED','PREFLIGHT_HELD','EFFECT_CONFIRMED','INEFFECTIVE',
+  'EFFECT_UNVERIFIED','DISPATCH_POSSIBLE','REFRESH_SAVE_ACK_ONLY','REFRESH_SAVE_ACK_LOST','REFRESH_PROVIDER_REFUSED',
+  'REFRESH_NATIVE_RESPONSE_LOST','REFRESH_POST_SAVE_GUARD_CHANGED','REFRESH_INJECTION_UNVERIFIED',
+  'REFRESH_EXECUTOR_UNKNOWN','REFRESH_FINAL_ADMISSION_CHANGED','REFRESH_OUTCOME_UNKNOWN','SAVE_ACK_ONLY',
+  'HUMAN_OR_AMBIGUOUS_EDITOR','REFRESH_EDITOR_DIRTY_OR_UNVERIFIED','REFRESH_PRE_SAVE_CONTEXT_CHANGED',
+  'REFRESH_LEASE_REVOKED','REFRESH_PLAN_OR_SOURCE_CHANGED','REFRESH_ROUTE_CHANGED','REFRESH_QUALIFICATION_REVOKED',
+  'REFRESH_SOURCE_CONSENT_REQUIRED','REFRESH_PRE_SAVE_GUARD_CHANGED','REFRESH_CONTEXT_CHANGED','RESTORE_HOLD',
+  'REFRESH_STORAGE_PRESSURE','REFRESH_PREFLIGHT_HELD']);
+const safeCode=s=>receiptCodes.has(s)?s:'UNKNOWN';
+export function projectMarkerPlan(p){
+  if(!validMarkerPlan(p))return null;
+  const {policy,anchor,operationId,sequence,consentRevision,approvedBaseFingerprint,
+    expectedPreSaveFingerprint,expectedPostSaveFingerprint,beforeMarker,afterMarker}=p;
+  return {policy,anchor,operationId,sequence,consentRevision:safeTime(consentRevision),approvedBaseFingerprint,
+    expectedPreSaveFingerprint,expectedPostSaveFingerprint,beforeMarker,afterMarker};
+}
+function projectMarker(m){
+  if(m?.source!=='PCMS_REFRESH_MARKER'||m.policy!==MARKER_POLICY||!opId(m.operationId)||
+    !hex(m.approvedBaseFingerprint)||!hex(m.effectiveCurrentFingerprint))return null;
+  return {source:'PCMS_REFRESH_MARKER',policy:MARKER_POLICY,anchor:'HTML_BYTE_ZERO',operationId:m.operationId,
+    sequence:safeTime(m.sequence),consentRevision:safeTime(m.consentRevision),
+    approvedBaseFingerprint:m.approvedBaseFingerprint,expectedPreSaveFingerprint:safeHash(m.expectedPreSaveFingerprint),
+    expectedPostSaveFingerprint:safeHash(m.expectedPostSaveFingerprint),effectiveCurrentFingerprint:m.effectiveCurrentFingerprint,
+    observedAt:safeTime(m.observedAt)};
+}
 export function sourceRefreshProjection(r){
   if(!r)return {revision:0,state:'METHOD_NOT_CONFIGURED',method:REFRESH_METHOD,policy:MARKER_POLICY};
-  // Deliberate allowlist; no private source, identity principal or arbitrary
-  // provider/page errors are exported by the one-click diagnostic receipt.
-  return {revision:r.revision,state:r.state||'TEST_READY',method:REFRESH_METHOD,policy:MARKER_POLICY,
-    lastHold:r.lastHold||null,slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,bindingVersion:r.bindingVersion,
-    approvedBaseFingerprint:r.approvedBaseFingerprint,effectiveCurrentFingerprint:r.effectiveCurrentFingerprint,
-    consentRevision:r.consent?.revision||0,testAttempted:r.testAttempted===true,
+  const proof=r.lastProof,marker=projectMarker(proof?.marker),feed=proof?.feed,q=r.qualification;
+  // Strict allowlist even for malformed/corrupt/restored records. Never copy
+  // a raw proof/plan/qualification into the shareable diagnostic receipt.
+  return {revision:safeTime(r.revision),state:safeCode(r.state||'TEST_READY'),method:REFRESH_METHOD,policy:MARKER_POLICY,
+    lastHold:r.lastHold?safeCode(r.lastHold):null,slug:safeId(r.slug),accountId:safeId(r.accountId),
+    personaUid:safeId(r.personaUid),bindingVersion:safeTime(r.bindingVersion),
+    approvedBaseFingerprint:safeHash(r.approvedBaseFingerprint),effectiveCurrentFingerprint:safeHash(r.effectiveCurrentFingerprint),
+    consentRevision:safeTime(r.consent?.revision),testAttempted:r.testAttempted===true,
     scheduleEnabled:r.scheduleEnabled===true,restoredHistorical:r.restoredHistorical===true,
-    preview:r.preview?{plan:r.preview.plan,expiresAt:r.preview.expiresAt,consented:r.preview.consented===true,
-      beforeFeed:r.preview.beforeFeed}:null,
-    proof:r.lastProof||null,qualification:r.qualification||null};
+    preview:r.preview?{plan:projectMarkerPlan(r.preview.plan),expiresAt:safeTime(r.preview.expiresAt),
+      consented:r.preview.consented===true,beforeFeed:{complete:r.preview.beforeFeed?.complete===true,
+        present:typeof r.preview.beforeFeed?.present==='boolean'?r.preview.beforeFeed.present:null,
+        rank:safeTime(r.preview.beforeFeed?.rank)||null,observedAt:safeTime(r.preview.beforeFeed?.observedAt),
+        code:safeCode(r.preview.beforeFeed?.code)}}:null,
+    proof:proof?{id:safeId(proof.id),at:safeTime(proof.at),dispatchAt:safeTime(proof.dispatchAt),
+      methodVersion:proof.methodVersion===MARKER_POLICY?MARKER_POLICY:'UNKNOWN',effect:safeCode(proof.effect),marker,
+      allocationEpoch:safeTime(proof.allocationEpoch),budgetAtSave:safeTime(proof.budgetAtSave),
+      attemptResult:{ack:proof.attemptResult?.ack==='ACK_ONLY'?'ACK_ONLY':'UNKNOWN',code:safeCode(proof.attemptResult?.code)},
+      feed:{state:['PRESENT','ABSENT'].includes(feed?.state)?feed.state:'UNKNOWN',at:safeTime(feed?.at),rank:safeTime(feed?.rank)||null}}:null,
+    qualification:q&&q.method===REFRESH_METHOD&&q.policy===MARKER_POLICY?{
+      method:REFRESH_METHOD,policy:MARKER_POLICY,evidenceId:safeId(q.evidenceId),reviewDigest:safeHash(q.reviewDigest),
+      reviewerFingerprint:safeHash(q.reviewerFingerprint),resourceDigest:safeHash(q.resourceDigest),
+      minimumIntervalMs:safeTime(q.minimumIntervalMs),validUntil:safeTime(q.validUntil),
+      approvedBaseFingerprint:safeHash(q.approvedBaseFingerprint),reviewedAt:safeTime(q.reviewedAt)}:null};
 }
 export function createRefresherProviderAdapter(api,{database,guard,sentinel,clock=Date.now,
   newId=()=>crypto.randomUUID().replaceAll('-','')}={}){
@@ -129,14 +174,14 @@ export function createRefresherProviderAdapter(api,{database,guard,sentinel,cloc
     const result=record=>{
       const intent=row.refresh?.intent;
       const view=sourceRefreshProjection(record);
-      if(intent)view.intent={id:intent.id,state:intent.state,at:intent.at,dispatchAt:intent.dispatchAt,
-        plan:intent.plan||null};
+      if(intent)view.intent={id:opId(intent.id)?intent.id:null,state:safeCode(intent.state),at:safeTime(intent.at),dispatchAt:safeTime(intent.dispatchAt),
+        plan:projectMarkerPlan(intent.plan)};
       if(intent)view.state=intent.state==='DISPATCH_POSSIBLE'?'HELD_UNCERTAIN':'RESERVED';
       return {ok:true,sourceRefresh:view};
     };
     if(type==='GET_SOURCE_REFRESH'){
       const reviewer=(await st.readKey(key)).record,resource=(await st.readKey(resourceKey)).record;
-      return {...result(cfg),reviewerFingerprint:reviewer?.fingerprint||null,resource:resource||null};
+      return {...result(cfg),reviewerFingerprint:safeHash(reviewer?.fingerprint),resource:resource||null};
     }
     if(!row.ownerVerified||!row.releaseVerified||row.identityHeld||row.reviewHeld||row.listing!=='PUBLIC'||
       row.readyUpdate||!account?.verifiedIdentity)return fail('REFRESH_RELEASED_LISTED_OWNER_REQUIRED');

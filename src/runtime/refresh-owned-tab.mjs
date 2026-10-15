@@ -30,15 +30,15 @@ export async function runRefreshOwnedTab(browser,{getState,validate,routeTest},l
   if(!Number.isSafeInteger(tab?.id))return fail('REFRESH_TAB_CREATE_UNKNOWN');
   await browser.sessions.setTabValue(tab.id,tagKey,{slug:request.slug,nonce:request.nonce,
     personaUid,cookieStoreId,createdBy:'PCMS_I17_REFRESH',humanIntent:false});
-  async function owned(){
+  async function owned(allowLoading=false){
     try{
       const t=await browser.tabs.get(tab.id),tag=await browser.sessions.getTabValue(tab.id,tagKey);
-      return t?.url===url&&t.active!==true&&t.cookieStoreId===cookieStoreId&&tag?.nonce===request.nonce&&
+      return (t?.url===url||allowLoading&&t?.url==='about:blank')&&t.active!==true&&t.cookieStoreId===cookieStoreId&&tag?.nonce===request.nonce&&
         tag.personaUid===personaUid&&tag.createdBy==='PCMS_I17_REFRESH'&&tag.humanIntent!==true&&await valid();
     }catch{return false;}
   }
   const loaded=await waitForOwnedEditor(browser,{tabId:tab.id,slug:request.slug,cookieStoreId,
-    nonce:request.nonce,validate:owned});
+    nonce:request.nonce,validate:()=>owned(true)});
   if(!loaded.ok)return {...loaded,effectBoundary:'NOT_DISPATCHED'};
   await browser.scripting.executeScript({target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
     func:renderPcmsEditorStrip,args:[{slug:request.slug,nonce:request.nonce,accountId:'Verified account',personaUid,mode:'SOURCE_REFRESH'}]});

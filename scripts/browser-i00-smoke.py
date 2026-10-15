@@ -57,6 +57,32 @@ def open_session(firefox, profile):
     return data['sessionId'] if 'sessionId' in data else data['value']['sessionId']
 
 
+def seed_refresher_network(session, profile, proxy_port):
+    # Configure ONLY a disposable local protected proxy before process restart.
+    # Raw fixture storage seed is not an application command or production API.
+    call('POST',f'/session/{session}/moz/context',{'context':'chrome'})
+    execute(session,'Services.prefs.savePrefFile(null); return true;')
+    call('POST',f'/session/{session}/moz/context',{'context':'content'})
+    uuid=addons_uuid(profile)
+    call('POST',f'/session/{session}/url',{'url':f'moz-extension://{uuid}/pcms/index.html'})
+    code="""const done=arguments[arguments.length-1];
+    (async()=>{
+      await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+      const container=await browser.contextualIdentities.create({name:'I17 isolated provider fixture',color:'blue',icon:'fingerprint'});
+      await new Promise(r=>setTimeout(r,250));
+      const {makeDefaultState}=await import('../lib/storage.js');
+      const state=makeDefaultState(),personaUid='11111111-1111-4111-8111-111111111111',routeId='i17_fixture_proxy';
+      state.global.unmanagedPolicy='block';state.global.mullvadNative.enabled=false;state.global.mullvadNative.autoStart=false;
+      state.routes[routeId]={id:routeId,name:'Loopback-only I17 fixture',provider:'generic',type:'http',host:'127.0.0.1',port:PROXY_PORT,enabled:true};
+      state.profiles[container.cookieStoreId]={containerId:container.cookieStoreId,personaUid,managed:true,
+        routeId,killSwitch:true,blockLocalNetwork:true,domainMode:'allowlist',allowedDomains:['perchance.org'],status:'active'};
+      const context={cookieStoreId:container.cookieStoreId,personaUid,routeId};
+      await browser.storage.local.set({state,pcmsI17FixtureContext:context});
+      done(context);
+    })().catch(e=>done({error:'FIXTURE_NETWORK_SEED_FAILED',detail:String(e)}));""".replace('PROXY_PORT',str(proxy_port))
+    return call('POST',f'/session/{session}/execute/async',{'script':code,'args':[]},timeout=30)
+
+
 def execute(session, script):
     return call('POST',f'/session/{session}/execute/sync', {'script':script,'args':[]}, timeout=30)
 
@@ -667,6 +693,9 @@ def main():
                 installed=call('POST',f'/session/{first}/moz/addon/install',{'path':str(archive),'temporary':False},timeout=45)
                 assert installed == ID, f'Unexpected installed add-on ID {installed}'
                 print('B INSTALLED_ADDON_ID=',installed,flush=True)
+                fixture_network=seed_refresher_network(first,profile,refresher_fixture.proxy_port)
+                assert fixture_network.get('cookieStoreId'),fixture_network
+                print('B I17_LOOPBACK_ONLY_PROTECTED_FIXTURE_ROUTE_SEEDED=PASS',flush=True)
             finally: close(first)
             # A *second process* with the same disposable profile distinguishes installed XPI from temp web-ext.
             after=open_session(browser,profile)
@@ -702,6 +731,13 @@ def main():
                 assert ledger['i17-native-present']['outputTemplate'].count('PCMS_REFRESH_MARKER')==1,ledger
                 assert ledger['i17-native-no-persist']['outputTemplate'].count('PCMS_REFRESH_MARKER')==0,ledger
                 print('B I17_SOURCE_SAVE_NATIVE_GUARD_IDB_AND_SAME_XPI_RECURRING='+json.dumps(source_probe),flush=True)
+                entry_probe=call('POST',f'/session/{after}/execute/async',{
+                    'script':pathlib.Path(__file__).with_name('i17_refresher_entry_probe.js').read_text(),
+                    'args':[]},timeout=120)
+                assert entry_probe.get('ok') is True,entry_probe
+                assert refresher_fixture.ledger()['i17-entry-present']['saves']==1,refresher_fixture.ledger()
+                print('B I17_REAL_ENTRY_UI_DONOR_LEASE_SOURCE_SAVE='+json.dumps(entry_probe),flush=True)
+
 
                 assert view['links']==['#overview','#generators','#work-queue','#accounts','#refresher','#settings'],view
                 assert view['unsafe']==0,view

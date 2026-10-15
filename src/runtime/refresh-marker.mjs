@@ -16,7 +16,9 @@ export function validMarkerPlan(p){
     hex(p.expectedPostSaveFingerprint)&&p.expectedPreSaveFingerprint!==p.expectedPostSaveFingerprint&&
     Number.isSafeInteger(p.sequence)&&p.sequence>0&&p.sequence<=4096&&
     p.afterMarker===markerText(p.approvedBaseFingerprint,p.sequence,p.operationId)&&
-    typeof p.beforeMarker==='string'&&p.beforeMarker.length<=260;
+    typeof p.beforeMarker==='string'&&p.beforeMarker.length<=260&&
+    (p.sequence===1?p.beforeMarker==='':new RegExp('^<!-- PCMS_REFRESH_MARKER:'+MARKER_POLICY+':F='+
+      p.approvedBaseFingerprint+':S='+(p.sequence-1)+':O=[a-f0-9]{32} -->\\n$').test(p.beforeMarker));
 }
 export async function prepareMarker(files,{approvedBaseFingerprint,previous=null,id,consentRevision=0}={}){
   if(!hex(approvedBaseFingerprint)||!opId(id))return fail('MARKER_AUTHORITY_UNVERIFIED');

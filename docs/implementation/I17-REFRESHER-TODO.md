@@ -40,9 +40,9 @@
 ## Monitoring and scheduled fleet
 
 - [x] Use existing `GET /api/getGeneratorList` with **exact slug** and complete fresh schema. Record save, persisted change, feed presence/rank, absence and UNKNOWN separately; do not parse raw HTML or infer ban/private/deletion from absence.
-- [ ] Show one eligible generator's explicitly authorized test action **in the same XPI** before fleet qualification.
+- [x] Show one eligible generator's explicitly authorized test action **in the same XPI** before fleet qualification.
 - [x] Implement operator H-04 evidence verification and versioned per-target/method qualification; prevent UI-manufactured support evidence.
-- [ ] Enable opt-in recurring execution in the **same installed XPI** after defensible method proof and P54-09 resource evidence; no code rebuild after H-04.
+- [x] Enable opt-in recurring execution in the **same installed XPI** after defensible method proof and P54-09 resource evidence; no code rebuild after H-04.
 - [ ] Preserve 24h active / 72h sleep defaults, fairness, grace, capacity/hysteresis, global/account/generator Pauses and existing single coalesced alarm.
 - [x] Rate limits, feed filtering, absent rank, unknown effects and quota exhaustion cause bounded re-observation/scoped holds, not repeated marker variations or unattended spam saves.
 
@@ -68,7 +68,7 @@
 
 - [x] Deliver short script for one explicitly approved, owned, listed generator: before source + feed, single safe marker save, independent source/visibility readback, redacted receipt, stop.
 - [x] Define independent provider-permissibility/efficacy evidence needed for scope-limited recurring activation. Feed appearance once ≠ guaranteed repeated rank.
-- [ ] Provide in-XPI import/verify/promote/revoke path for legitimate H evidence; no second coding cycle required after successful proof.
+- [x] Provide in-XPI import/verify/promote/revoke path for legitimate H evidence; no second coding cycle required after successful proof.
 - [x] Keep H-series and protected governance acceptance **pending** until real operator evidence and independent review.
 
 ## Publish / stop
@@ -123,3 +123,14 @@ The code is **not done** if the packaged Refresher still has a null `refreshAdap
 - Full local fast **410/410 PASS**. Added publication/rollback stale-approval rejection for recognized marker bytes and restore revocation of marker consent, reviewer trust and recurring scope while preserving immutable history.
 - Existing-update explicitly recognizes an exact verified marker derivation and returns `KNOWN_REFRESH_DERIVATION_RECONCILIATION_REQUIRED`; it cannot overwrite it under an old base-F/P approval. Historical source-link B is no longer misclassified as a new READY update merely because approved AI release F differs; explicit READY work still holds and original link/release bytes remain separate.
 - Canonical pending intent is exposed in source receipts, including expected pre/post hashes; receipt reload remains read-only during in-flight execution. UI disables another test after an ambiguous reply and rejects private reviewer keys. Current operator/capability docs reference the new H-04 source-save procedure.
+
+### Real packaged native and production-entry evidence
+
+- Previous checkpoint `66e1ea11449e2e3b37fb96b42d949858f616f560` / tree `9deca54d25d29d7ce7566a506c651882b04347ae` verified remote; CI baseline/fast passed, native B exposed a readiness/context failure before saving.
+- Replaced the low-port test-server dependency with an isolated high-port TLS server and a protected loopback CONNECT proxy. Only fixed fixture hosts terminate locally; global unmanaged Block remains enabled. This supersedes the earlier local port-443 limitation; local native B is now achievable. No donor route bypass, live DNS or production sockets.
+- Firefox 154.0b10, persistently installed combined XPI after process restart: actual production command port/UI -> real donor shared lease/protected route -> fixed MAIN/ISOLATED injection -> native save -> independent source/feed receipt **PASS**. Inline keyboard focus and mismatched intent rejection also pass. Independent provider ledger records exactly one entry-point save; duplicate request rejected.
+- Installed packaged fault matrix **PASS**: present, persisted-but-absent, no persistence despite ACK, lost ACK with independently proven persistence; dirty editor and actual IDB dispatch-commit abort each produce zero saves. Canonical DISPATCH_POSSIBLE is independently read before each native save.
+- The same installed XPI verifies a pinned detached review, performs the 50-account/1,250-generator resource sample, opts in, and schedules sequence 2 by replacing exactly one marker. Canonical resource sample: 1,213,252 serialized bytes; observed Firefox turn maximum 125 ms in this isolated run (local measurement, no provider rate claim). Revocation/Pause are exercised.
+- Firefox returns a just-created tab's transient about:blank document as complete as well as loading. The bounded readiness wait now accepts either under the exact owned tag/lease, never injects on blank, and still requires the exact target before preflight or effect. Focused F test covers both states.
+- Strict source-receipt projection rejects nested token/source canaries. Permanent operation-ID intent/dispatch tombstones are committed with canonical state, alongside immutable successful marker receipts.
+- Serial full fast suite **412/412 PASS** (~4.8 s). Full inherited Firefox regression, source-save process-cold recovery, independent final-head CI, final reproducibility and delivery remain in progress. H and independent governance acceptance remain pending.
