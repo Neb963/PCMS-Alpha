@@ -43,6 +43,12 @@ export async function perchanceMonitorIsolated(request){
         return no('STATISTIC_SCHEMA_UNVERIFIED');
       return {ok:true,views:payload.views,unit:'VIEWS',source:'GUARDED_READ_ONLY'};
     }
+    const age=Number(response.headers.get('age')||0);
+    const dated=Date.parse(response.headers.get('date')||'');
+    if(!Number.isFinite(age)||age>0||Number.isFinite(dated)&&Math.abs(Date.now()-dated)>300000)
+      return no('RECENT_STALE_SNAPSHOT');
+    if(payload.complete===false||payload.partial===true||payload.truncated===true||payload.hasMore===true||
+      payload.nextCursor!=null||payload.nextPage!=null)return no('RECENT_PARTIAL_SNAPSHOT');
     if(!Array.isArray(payload.generators)||payload.generators.length>5000)
       return no('RECENT_SCHEMA_UNVERIFIED');
     const seen=new Set(),items=[];

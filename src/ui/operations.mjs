@@ -25,15 +25,16 @@ async function read() {
   const state=await command({type:'SUMMARY'});
   if(mine!==generation)return;
   if(state?.ok!==true || state?.providerEffects!=='OFF')throw Error('unsafe status');
+  window.dispatchEvent(new CustomEvent('pcms-canonical-health',{detail:{storage:state.storage,held:state.held}}));
   journalStatus.textContent=state.storage==='READY'
-    ? 'Canonical IndexedDB available. Restore: '+state.restore+'. All remote effects OFF.'
+    ? 'Canonical IndexedDB available. Restore: '+state.restore+'. Individual remote actions require their own guarded journals and independent verification.'
     : 'Canonical store unavailable; global PCMS operation hold. Restore: '+state.restore;
   const c=state.states||{};
   queue.textContent=state.storage==='READY'
     ? 'Persisted status counts: Prepared '+(c.PREPARED||0)+
       ', possible '+(c.DISPATCH_POSSIBLE||0)+
       ', uncertain '+(c.HELD_UNCERTAIN||0)+
-      ', confirmed '+(c.CONFIRMED||0)+'. No provider work admitted or dispatched.'
+      ', confirmed '+(c.CONFIRMED||0)+'. This read-only tally neither grants authority nor proves an external result.'
     : 'Canonical journal inaccessible. Operation outcomes unknown; no retry allowed.';
   if(state.storage!=='READY'||state.held) {
     attention.textContent='Safety hold active or unverified. Local notices may be unavailable.';

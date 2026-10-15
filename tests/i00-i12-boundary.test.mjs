@@ -6,16 +6,16 @@ import {perchanceMonitorIsolated} from '../src/runtime/perchance-monitor.mjs';
 import {createSafeReport} from '../src/ui/safe-report.mjs';
 import {cachedHealthDomain} from '../src/runtime/persona-guard.mjs';
 const sender={id:'fixture',url:'moz-extension://fixture/pcms/index.html'};
-function fixture({gate=false,dbFail=false,ackLost=false}={}){
+function fixture({gate=false,dbFail=false,ackLost=false,clock=()=>100000}={}){
   const callbacks={},alarms=new Map(),diag=[];let turns=0,reads=0,release;
   const blocker=new Promise(r=>{release=r;});
   const event=name=>({addListener:cb=>{callbacks[name]=cb;}});
   const api={runtime:{id:'fixture',getURL:p=>'moz-extension://fixture/'+p,
     onStartup:event('startup'),onInstalled:event('installed'),onConnect:event('connect')},
-    alarms:{onAlarm:event('alarm'),create:async(name,p)=>{alarms.set(name,{name,...p});if(ackLost)throw Error('lost');},
+    alarms:{onAlarm:event('alarm'),create:async(name,p)=>{alarms.set(name,{name,...p,scheduledTime:p.when});if(ackLost)throw Error('lost');},
       get:async name=>alarms.get(name)},storage:{local:{get:async()=>({}),set:async x=>diag.push(x)}}};
   const boundary=createRefresherBoundary(api,{open:async()=>{if(dbFail)throw Error('quota');return {};},
-    newId:()=> 'synthetic_boot_01',clock:()=>100000,observationGate:()=>gate,
+    newId:()=> 'synthetic_boot_01',clock,observationGate:()=>gate,
     storeFactory:()=>({turn:async()=>{turns++;await blocker;
       return {ok:true,revision:2,state:{nextWakeAt:160000,diagnostics:{turns}}};},
       read:async()=>({ok:true,state:{rows:[],recent:{nextDueAt:200000}}})}),
@@ -98,7 +98,10 @@ test('I12 packaging F: static graph/guarded fixed executor/view available; no di
   assert.match(overlay,/func:perchanceMonitorIsolated,args:\[monitoringRequest\]/);
   assert.match(overlay,/MONITOR_SESSION_CHANGED/);
   assert.match(await readFile('src/runtime/entry.mjs','utf8'),/import \{createRefresherBoundary\} from '\.\/refresher-boundary\.mjs'/);
-  assert.match(await readFile('src/runtime/entry.mjs','utf8'),/createRefresherBoundary\(browser\).register\(\)/);
+  const entry=await readFile('src/runtime/entry.mjs','utf8');
+  assert.match(entry,/createRefresherBoundary\(browser,/);
+  assert.match(entry,/observationGate:\(\)=>true/);
+  assert.doesNotMatch(entry,/refreshGate:\(\)=>true/);
   assert.match(await readFile('src/ui/index.html','utf8'),/refresher-view\.mjs/);
 });
 test('P54-08 X: current donor egress hashes, never route names, determine witness independence',async()=>{
@@ -110,4 +113,39 @@ test('P54-08 X: current donor egress hashes, never route names, determine witnes
   assert.equal(await cachedHealthDomain({ok:true,data:{ip:'999.0.113.9'}}),null);
   assert.equal(await cachedHealthDomain({ok:true,data:{ip:'203.00.113.9'}}),null);
   assert.equal(await cachedHealthDomain({ok:true,data:{ip:'::1'}}),null);
+});
+
+test('I17 F/X: unrelated wake must not postpone existing Firefox scheduler alarm',async()=>{
+  let now=100000;
+  const f=fixture({clock:()=>now});
+  f.release();
+  await f.boundary.tick();
+  const first=f.alarms.get(REFRESHER_ALARM)?.scheduledTime;
+  assert.equal(first,160000);
+  now=120000;
+  // Before fix, a new tick moved the alarm to now+minute=180000.
+  await f.boundary.tick();
+  assert.equal(f.alarms.get(REFRESHER_ALARM)?.scheduledTime,first,
+    'unrelated event-page wakes must preserve the earlier live alarm');
+  now=155000;
+  await f.boundary.tick();
+  assert.equal(f.alarms.get(REFRESHER_ALARM)?.scheduledTime,first);
+  now=170000;
+  await f.boundary.tick();
+  assert.equal(f.alarms.get(REFRESHER_ALARM)?.scheduledTime,first,
+    'Firefox may deliver alarm slightly later than nominal time');
+});
+test('I17 F/X: missing, stale or later alarm may be repaired without a duplicate',async()=>{
+  let now=100000;
+  const f=fixture({clock:()=>now});
+  f.release();
+  f.alarms.set(REFRESHER_ALARM,{name:REFRESHER_ALARM,scheduledTime:300000});
+  await f.boundary.tick();
+  assert.equal(f.alarms.get(REFRESHER_ALARM)?.scheduledTime,160000,
+    'an alarm later than due turn is moved earlier');
+  now=300001;
+  await f.boundary.tick();
+  assert.equal(f.alarms.get(REFRESHER_ALARM)?.scheduledTime,360001,
+    'an alarm over two minutes overdue is rearmed safely');
+  assert.equal(f.alarms.size,1,'exactly one named browser-owned alarm');
 });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {NON_READY_MARKER,markerRequestAllowed,writeNonReadyFolder}
+import {NON_READY_MARKER,markerRequestAllowed,writeNonReadyFolder,readNonReadyFolder}
   from '../src/runtime/supply-git.mjs';
 const H='a'.repeat(40),T='b'.repeat(40),B='c'.repeat(40),
   N='d'.repeat(40),C='e'.repeat(40);
@@ -105,4 +105,27 @@ test('S6-I06-GIT-MARKER-SAFETY F: marker policy excludes READY and path traversa
   assert.equal(NON_READY_MARKER.includes('Status: READY\n'),false);
   assert.equal(markerRequestAllowed({folder,slug,token}).ok,true);
   assert.equal(markerRequestAllowed({folder:'../gens/foo',slug,token}).ok,false);
+});
+
+test('I17 F/X: only byte-exact one-file non-READY marker independently reconciles',async()=>{
+  const {webcrypto}=await import('node:crypto');
+  globalThis.crypto??=webcrypto;
+  const expected=Buffer.from(await crypto.subtle.digest('SHA-256',
+    new TextEncoder().encode(NON_READY_MARKER))).toString('hex');
+  const proof={ok:true,repo:'Neb963/per-gens',branch:'main',folder,
+    head:'a'.repeat(40),ready:false,files:1,
+    paths:[{path:'DEPLOYMENT.md',size:NON_READY_MARKER.length,sha256:expected}]};
+  const read=async()=>proof;
+  const good=await readNonReadyFolder({token,folder,slug},read);
+  assert.deepEqual(good,{ok:true,source:'GIT_READBACK',ready:false,
+    emptyFolder:true,folder,head:'a'.repeat(40)});
+  for(const bad of [
+    {...proof,ready:true},{...proof,repo:'other/private'},
+    {...proof,files:2},{...proof,paths:[{...proof.paths[0],sha256:'a'.repeat(64)}]},
+    {...proof,paths:[{...proof.paths[0],size:0}]},
+    {...proof,paths:[{...proof.paths[0],path:'human.txt'}]}
+  ])assert.equal((await readNonReadyFolder({token,folder,slug},
+    async()=>bad)).code,'GIT_MARKER_UNVERIFIED');
+  assert.equal((await readNonReadyFolder({token,folder,slug},
+    async()=>{throw Error('transport lost')})).code,'GIT_MARKER_READBACK_UNAVAILABLE');
 });

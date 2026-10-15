@@ -1,3 +1,4 @@
+import {validMarkerPlan,markerReceipt,REFRESH_METHOD,MARKER_POLICY} from './refresh-marker.mjs';
 // I14: deterministic proof and visibility reducer. Never calls a provider.
 // A save ACK is not persisted effect evidence; feed rank is a separate observation.
 export const REFRESH_PROOF_VERSION=1, RETRY_LIMIT=2, MAX_BACKOFF=24*3600000;
@@ -34,7 +35,7 @@ export function observeRefreshPresence(current,{at,present,rank,complete,healthy
     const uncertain=e.state==='EFFECT_UNVERIFIED'||e.intent?.state==='DISPATCH_POSSIBLE';
     e.misses=0;e.lastSeenAt=at;e.lastRank=rank;
     // Seeing a feed item cannot reconcile a possibly-dispatched mutation.
-    if(!uncertain){e.suspended=false;if(!e.intent)e.state='PRESENT';}
+    if(!uncertain&&!e.methodHold){e.suspended=false;if(!e.intent)e.state='PRESENT';}
     return {ok:true,evidence:e,resumed:wasSuspended&&!uncertain,releaseSlot:false};
   }
   e.lastRank=null;
@@ -46,8 +47,19 @@ export function observeRefreshPresence(current,{at,present,rank,complete,healthy
   return {ok:true,evidence:e,releaseSlot:e.suspended,resumed:false};
 }
 // Provider support must be established outside the UI and separately activated.
-// Neither HTTP success, an ordinary save nor a no-op is a qualifying method.
+// Native marker saves require a canonical exact-source plan and either one
+// expiring consented test or a detached, scope-verified operator review.
 export function qualifyRefreshCandidate(candidate){
+  if(candidate?.method===REFRESH_METHOD){
+    const p=candidate.plan;
+    if(!validMarkerPlan(p)||candidate.version!==MARKER_POLICY||candidate.sourceFingerprint!==p.expectedPreSaveFingerprint||
+      !safeId(candidate.evidenceId)||!(candidate.status==='ARMED_SINGLE_TEST'&&candidate.purpose==='SINGLE_TEST'||
+      candidate.status==='SUPPORTED_AND_VERIFIED'&&candidate.purpose==='RECURRING'&&hex(candidate.reviewDigest)))
+      return {ok:false,code:'REFRESH_UNSUPPORTED'};
+    return {ok:true,version:candidate.version,sourceFingerprint:candidate.sourceFingerprint,
+      evidenceId:candidate.evidenceId,method:candidate.method,plan:p,purpose:candidate.purpose,
+      minimumIntervalMs:candidate.minimumIntervalMs||600000};
+  }
   if(candidate?.status!=='SUPPORTED_AND_VERIFIED'||candidate.method!=='EXPLICIT_PROVIDER_REFRESH'||
     candidate.allowedByProvider!==true||!safeId(candidate.version)||
     !hex(candidate.sourceFingerprint)||!safeId(candidate.evidenceId)||
@@ -63,10 +75,12 @@ export function reserveRefreshAttempt(evidence,{id,at,slug,sourceFingerprint,
   if(liveAuthorized!==true)return {ok:false,code:'REFRESH_ACTIVATION_HELD'};
   if(!validRefreshEvidence(e)||!safeId(id)||!safeId(slug)||!time(at)||!hex(sourceFingerprint)||
     q.sourceFingerprint!==sourceFingerprint||eligible!==true||
-    e.intent||e.attempts>=RETRY_LIMIT||e.nextAttemptAt>at||e.suspended)
+    e.intent||e.attempts>=RETRY_LIMIT||e.nextAttemptAt>at||e.suspended||
+    e.history.some(h=>h.id===id))
     return {ok:false,code:'REFRESH_ADMISSION_HELD'};
   e.intent={id,slug,at,sourceFingerprint,version:q.version,
-    evidenceId:q.evidenceId,state:'RESERVED',dispatchAt:0};
+    evidenceId:q.evidenceId,state:'RESERVED',dispatchAt:0,
+    ...(q.plan?{plan:q.plan,method:q.method,purpose:q.purpose,minimumIntervalMs:q.minimumIntervalMs}:{})};
   e.state='ATTEMPT_PENDING';
   return {ok:true,evidence:e};
 }
@@ -94,7 +108,8 @@ export function reconcileRefreshAttempt(evidence,id,{at,kind,sourceFingerprint,
     return {ok:false,code:'REFRESH_READBACK_INVALID'};
   const verified=targetMatched===true&&principalMatched===true&&
     hex(sourceFingerprint)&&kind==='EFFECT_CHANGED'&&
-    sourceFingerprint!==e.intent.sourceFingerprint;
+    sourceFingerprint!==e.intent.sourceFingerprint&&
+    (!e.intent.plan||sourceFingerprint===e.intent.plan.expectedPostSaveFingerprint);
   const noEffect=targetMatched===true&&principalMatched===true&&
     kind==='NO_EFFECT'&&sourceFingerprint===e.intent.sourceFingerprint;
   const prior=e.intent;
@@ -106,6 +121,7 @@ export function reconcileRefreshAttempt(evidence,id,{at,kind,sourceFingerprint,
   e.state=verified?'EFFECT_CONFIRMED':noEffect?'INEFFECTIVE':'EFFECT_UNVERIFIED';
   e.history=[...e.history.filter(h=>h.id!==id),{id,at,methodVersion:prior.version,
     dispatchAt:prior.dispatchAt,effect:e.state,
+    ...(verified&&prior.plan?{marker:markerReceipt(prior.plan,at)}:{}),
     // A feed result must carry its own complete timestamped independent proof.
     feed:feed?.independent===true&&feed.complete===true&&time(feed.observedAt)&&
       feed.observedAt>=prior.dispatchAt&&
@@ -120,6 +136,16 @@ export function reconcileRefreshAttempt(evidence,id,{at,kind,sourceFingerprint,
   // resolves it; a later guarded read can settle this SAME id without execute.
   e.intent=verified||noEffect?null:prior;
   if(!verified)e.suspended=true;
+  if(prior.plan){
+    e.nextAttemptAt=at+Math.max(600000,prior.minimumIntervalMs||600000,
+      Math.min(MAX_BACKOFF,Math.max(0,feed?.retryAfterMs||0)));
+    if(verified){
+      e.attempts=0;e.probes=0;
+      e.suspended=e.history.at(-1).feed.state!=='PRESENT';
+      e.methodHold=e.suspended?'SOURCE_CONFIRMED_RECENT_'+e.history.at(-1).feed.state:null;
+      e.feedProbes=0;
+    }else e.methodHold=noEffect?'SOURCE_SAVE_INEFFECTIVE':'UNCERTAIN_EFFECT';
+  }
   return {ok:true,evidence:e,effectVerified:verified,
     feedState:e.history.at(-1).feed.state};
 }

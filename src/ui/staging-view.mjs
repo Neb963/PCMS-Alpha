@@ -1,3 +1,4 @@
+import {requestTypedConfirmation,requestExplicitConfirmation} from './typed-confirm.mjs';
 // I09 operator-only private source inspector. No source bytes, credentials,
 // provider tokens or browser tab identities are rendered or retained.
 const el=id=>document.getElementById(id);
@@ -5,7 +6,7 @@ const slug=el('pcms-stage-slug'),token=el('pcms-stage-token');
 const status=el('pcms-stage-status'),diff=el('pcms-stage-diff');
 const queue=el('pcms-stage-queue');
 const pin=el('pcms-stage-pin'),clear=el('pcms-stage-clear');
-const start=el('pcms-stage-start'),reconcile=el('pcms-stage-reconcile');
+const start=el('pcms-stage-start'),arm=el('pcms-stage-arm'),reconcile=el('pcms-stage-reconcile');
 const handoff=el('pcms-stage-handoff'),refresh=el('pcms-stage-refresh');
 let selected=null,busy=false,seq=0;
 function command(type,params={}){
@@ -29,7 +30,9 @@ function controls(){
     token.value.length<10;
   clear.disabled=busy;
   refresh.disabled=busy;
-  start.disabled=busy||!found||selected.state!=='PINNED'||token.value.length<10;
+  const disposable=/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug.value);
+  arm.disabled=busy||!found||selected.state!=='PINNED'||!disposable;
+  start.disabled=busy||!found||selected.state!=='PINNED'||token.value.length<10||!disposable;
   reconcile.disabled=busy||!found||
     !['DISPATCH_POSSIBLE','HELD_UNCERTAIN','SAVED_UNVERIFIED'].includes(selected.state);
   handoff.disabled=busy||!found||selected.state==='HUMAN_OWNED'||
@@ -88,6 +91,7 @@ async function invoke(type,params,description){
       if(result.candidateFingerprint)render(result);
       else if(result.state==='HUMAN_OWNED'&&selected)selected={...selected,state:'HUMAN_OWNED'};
       announce(type==='PIN_STAGE'?'Pinned immutable READY and exact previous source. No remote write.':
+        type==='ARM_EXACT_STAGE'?'Exact private stage armed for one step (expires after 2 minutes). Paste Git read token and Stage.':
         type==='STAGE_PRIVATE'?'Saved acknowledgment only; independent byte reconciliation required.':
         type==='RECONCILE_STAGE'?'Independent full saved-byte readback confirmed. No publication.':
         'Durable handoff recorded; tab retained and PCMS mutation held.');
@@ -103,11 +107,24 @@ pin.addEventListener('click',()=>{
   invoke('PIN_STAGE',{slug:slug.value,token:t},
     'Rechecking Git HEAD/READY, current protected owner and empty private source…');
 });
-start.addEventListener('click',()=>{if(!selected)return;
+arm.addEventListener('click',async()=>{if(!selected||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(selected.slug))return;
+  const pinned=selected,expected='STAGE '+pinned.slug;
+  const confirmation=await requestTypedConfirmation(arm,expected,
+    'Authorize one protected private stage operation on the pinned exact source. No public listing or automatic retry.');
+  if(confirmation===null)return;
+  if(selected!==pinned){announce('Pinned stage target changed. No authorization sent.');return;}
+  invoke('ARM_EXACT_STAGE',{slug:pinned.slug,expectedRevision:pinned.revision,confirmation},
+    'Checking exact pinned target, owner, protected Persona route and restore state…');
+});
+start.addEventListener('click',async()=>{if(!selected)return;
+  const pinned=selected;
+  if(!await requestExplicitConfirmation(start,
+    'Stage '+pinned.slug+' privately once? A lost reply is uncertain; reconcile rather than retry.'))return;
+  if(selected!==pinned){announce('Stage target changed. No dispatch sent.');return;}
   const t=token.value;token.value='';
-  invoke('STAGE_PRIVATE',{slug:selected.slug,token:t,
-    expectedRevision:selected.revision},
-    'Revalidating current READY, guard and durable stage intent; activation normally held…');
+  invoke('STAGE_PRIVATE',{slug:pinned.slug,token:t,
+    expectedRevision:pinned.revision},
+    'Revalidating current READY, guard and durable stage intent…');
 });
 reconcile.addEventListener('click',()=>selected&&invoke('RECONCILE_STAGE',{
   slug:selected.slug,expectedRevision:selected.revision

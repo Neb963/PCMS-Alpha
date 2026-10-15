@@ -124,6 +124,9 @@ export async function perchanceAiNative(request){
       return {ok:true,code:'NEW_CHAT_REQUESTED_UNVERIFIED',
         priorSessionDigest:current.sessionDigest};
     }
+    if(!/^[a-f0-9]{64}$/.test(request.expectedSessionDigest||'')||
+       request.expectedSessionDigest!==current.sessionDigest||current.hasQueue||
+       current.inputOccupied||current.attachmentsPending)return hold('AI_STOP_SESSION_CHANGED');
     if(!busy||stop.hidden!==false)return hold('STOP_NOT_APPLICABLE');
     stop.click();
     return {ok:true,code:'STOP_REQUESTED_UNVERIFIED'};

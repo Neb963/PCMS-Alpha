@@ -9,6 +9,7 @@ import {authorizeSleepingUpdate,sealPrevious,unlockPrevious} from './existing-up
 import {createStagingStore} from './staging-store.mjs';
 import {exactSource,verifyReadback} from './staging-core.mjs';
 import {inspectGitSource} from './git-source.mjs';
+import {recognizeMarker} from './refresh-marker.mjs';
 import {REFRESHER_KEY} from './refresher-core.mjs';
 
 export const EXISTING_PORT='pcms-i13-existing';
@@ -60,14 +61,16 @@ function canonical(db,name){
           m.get(REFRESHER_KEY).onsuccess=s=>{
             m.get('source-link:'+name).onsuccess=l=>{
               m.get('release:'+name).onsuccess=re=>{
+              m.get('refresh-source:'+name).onsuccess=rf=>{
                 const account=a.target.result?.account,
                   adoption=o.target.result?.adoption,
                   shadow=s.target.result?.state,
                   row=shadow?.rows?.find(z=>z.slug===name);
                 result=account&&adoption&&row?{
                   ok:true,account,adoption,inventory,shadow,row,
-                  release:re.target.result?.release,
+                  release:re.target.result?.release,refreshSource:rf.target.result?.record,
                   link:l.target.result?.link}:fail('EXISTING_SOURCE_OR_SLEEP_NOT_FOUND');
+              };
               };
             };
           };
@@ -155,6 +158,12 @@ export function createExistingBoundary(api,{
         if(!original.ok||original.fingerprint!==prior.sourceFingerprint)
           return fail('PRIOR_RELEASE_P_BYTES_UNVERIFIED');
       }
+      if(remote.source.fingerprint!==original.fingerprint&&f.refreshSource?.lastReceipt&&
+        f.refreshSource.approvedBaseFingerprint===original.fingerprint&&
+        f.refreshSource.accountId===f.account.accountId&&f.refreshSource.remoteId===f.inventory.remoteId&&
+        f.refreshSource.personaUid===f.account.personaUid&&f.refreshSource.bindingVersion===f.account.bindingVersion&&
+        (await recognizeMarker(remote.source.blobs,f.refreshSource.lastReceipt)).ok)
+        return fail('KNOWN_REFRESH_DERIVATION_RECONCILIATION_REQUIRED');
       if(!authorizeSleepingUpdate({account:f.account,inventory:f.inventory,
         adoption:f.adoption,shadow:f.row,original,remote:{
           ok:true,remotePublicId:f.inventory.remoteId,ownerResult:'IS_OWNER',
@@ -378,4 +387,25 @@ export function createExistingBoundary(api,{
   }
   return Object.freeze({run,register});
 }
-if(typeof browser!=='undefined')createExistingBoundary(browser).register();
+// The exact existing-source UI actions, not an unattended write scheduler.
+// Each operation still needs its canonical source, release/sleep admission,
+// protected donor lease, encrypted recovery, clean editor and journal marker.
+export function productionExistingUpdateGate(ctx){
+  if(ctx?.phase!=='I13')return false;
+  const r=ctx.record;
+  if(!r||typeof r.slug!=='string'||
+     !/^[a-z0-9][a-z0-9-]{0,99}$/.test(r.slug)||
+     typeof r.personaUid!=='string'||!r.personaUid||
+     typeof r.remotePublicId!=='string'||!r.remotePublicId||
+     typeof r.principalFingerprint!=='string'||
+     !/^[a-f0-9]{64}$/.test(r.principalFingerprint)||r.archived===true)
+    return false;
+  return ctx.action==='UNLIST'&&r.state==='PREPARED'||
+    ctx.action==='STAGE'&&r.state==='UNLIST_CONFIRMED'||
+    ctx.action==='RESTORE'&&
+      ['STAGE_CONFIRMED','RECOVERY_UNLIST_CONFIRMED'].includes(r.state)||
+    ctx.action==='RECOVERY_UNLIST'&&r.state==='STAGE_CONFIRMED';
+}
+if(typeof browser!=='undefined')createExistingBoundary(browser,{
+  effectGate:productionExistingUpdateGate
+}).register();

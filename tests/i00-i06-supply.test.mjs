@@ -9,6 +9,7 @@ const plan=(slugs=['alpha-slug'])=>freezeSupply({batchId:'batch_aaaa_0001',
   accountId:account.accountId,personaUid:account.personaUid,
   accountRevision:3,bindingVersion:1,slugs});
 const step=(r,event,proof)=> {
+  if(['CREATE_DISPATCH_POSSIBLE','RENAME_DISPATCH_POSSIBLE'].includes(event))r=step(r,event.split('_')[0]+'_READY_TO_DISPATCH',{preflight:{version:2}});
   const next=moveSupply(r,event,proof);
   assert.equal(next.ok,true,next.code||event);
   return next.item;

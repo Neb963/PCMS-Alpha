@@ -5,10 +5,13 @@ const badge = document.getElementById('pcms-guard-badge');
 const account = document.getElementById('pcms-account-guard');
 
 function project(code, donorReady = false) {
-  const label = donorReady ? 'Guarded · effects off' : 'Held · not ready';
+  // I01 is a read-only health endpoint; its providerEffects='OFF' only
+  // describes the guard facade, NOT the separately guarded I06-I17 writers.
+  const label = donorReady ? 'Donor guard ready' : 'Donor guard unavailable';
+  window.dispatchEvent(new CustomEvent('pcms-runtime-health',{detail:{donorReady,code}}));
   badge.textContent = label;
-  status.textContent = code + '. PCMS provider writes remain disabled.';
-  account.textContent = 'Background: ' + label + '. Account binding uses the donor guard; provider writes remain disabled.';
+  status.textContent = code + '. Protected Persona checks are required for each provider operation; this health view does not authorize writes.';
+  account.textContent = 'Background: ' + label + '. Account identity and protected route eligibility are rechecked by each workflow.';
 }
 
 // Dedicated health port avoids competing with the donor's legacy onMessage

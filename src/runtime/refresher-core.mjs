@@ -92,6 +92,8 @@ export function reconcileShadow(s,inputs){
     r.reviewHeld=input.reviewHeld===true;
     r.readyUpdate=input.readyUpdate===true;
     r.observedAt=input.observedAt||0;
+    r.sourceRefresh=input.sourceRefresh||null;
+    if(r.sourceRefresh?.approvedBaseFingerprint!==r.releaseFingerprint)r.sourceRefresh=null;
     const a=out.accounts[r.accountId]||{paused:false,graceUsed:0,checkpoint:0,
       health:'UNKNOWN',bindingVersion:r.bindingVersion,personaUid:r.personaUid};
     if(a.bindingVersion!==input.bindingVersion||a.personaUid!==input.personaUid){

@@ -17,7 +17,7 @@ export async function cachedHealthDomain(evidence){
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
-  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep, releaseIsolatedTab, existingIsolatedTab }) {
+  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, refreshIsolatedTab }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -33,8 +33,8 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
       if (!current?.cookieStoreId || current.personaUid?.toLowerCase() !== personaUid.toLowerCase())
         return HOLD('PERSONA_IDENTITY_UNVERIFIED');
       if (current.archived || current.rotating) return HOLD('PERSONA_NOT_ACTIVE');
-      if (current.routeId === 'direct') return HOLD('DIRECT_FORBIDDEN');
-      if (!current.route || current.routeId === 'block' || current.route.enabled === false)
+      if (['direct','__direct__'].includes(current.routeId)) return HOLD('DIRECT_FORBIDDEN');
+      if (!current.route || ['block','__block__'].includes(current.routeId) || current.route.enabled === false)
         return HOLD('PROTECTED_ROUTE_UNAVAILABLE');
       // A configured proxy is not evidence of a working protected route.
       // This is the donor's context-fenced cached test, never a new network probe.
@@ -185,13 +185,14 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     if(typeof supplyIsolatedTab!=='function')return {ok:false,code:'SUPPLY_EXECUTOR_UNAVAILABLE'};
     const leased=await acquireConflictGuard(personaUid);
     if(!leased?.ready||!leased.leaseId)
-      return {ok:false,code:leased?.code||'GUARD_UNAVAILABLE'};
+      return {ok:false,code:leased?.code||'GUARD_UNAVAILABLE',effectBoundary:'NOT_DISPATCHED'};
     try {
       const before=await inspectOwnedAction(leased);
-      if(!before?.ready)return {ok:false,code:before?.code||'GUARD_CHANGED'};
+      if(!before?.ready)return {ok:false,code:before?.code||'GUARD_CHANGED',effectBoundary:'NOT_DISPATCHED'};
       const packet=await supplyIsolatedTab(leased,request);
       const after=await inspectOwnedAction(leased);
-      if(!after?.ready)return {ok:false,code:'POST_EFFECT_GUARD_CHANGED'};
+      if(!after?.ready)return {...packet,ok:false,code:packet?.ok===false?packet.code:'POST_EFFECT_GUARD_CHANGED',
+        effectBoundary:packet?.effectBoundary||'DISPATCH_POSSIBLE',routeQualification:'CHANGED'};
       return packet&&typeof packet==='object'?packet:{ok:false,code:'SUPPLY_PACKET_UNVERIFIED'};
     }catch{return {ok:false,code:'SUPPLY_EXECUTOR_UNAVAILABLE'};}
     finally{await releaseConflictGuard(leased);}
@@ -249,6 +250,27 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     finally{await releaseConflictGuard(leased);}
   }
 
+  // I17: the callback is host-owned durable admission, never a page/UI
+  // function. The same exclusive donor lease encloses read preflight + save.
+  async function runRefreshStep(personaUid,request,beforeSave){
+    if(typeof refreshIsolatedTab!=='function'||typeof beforeSave!=='function')
+      return {ok:false,code:'REFRESH_EXECUTOR_UNAVAILABLE',effectBoundary:'NOT_DISPATCHED'};
+    const lease=await acquireConflictGuard(personaUid);
+    if(!lease?.ready)return {ok:false,code:lease?.code||'REFRESH_GUARD_UNAVAILABLE',effectBoundary:'NOT_DISPATCHED'};
+    let dispatched=false;
+    try{
+      if(!(await inspectOwnedAction(lease)).ready)return {ok:false,code:'REFRESH_LEASE_REVOKED',effectBoundary:'NOT_DISPATCHED'};
+      const result=await refreshIsolatedTab(lease,request,async phase=>{
+        if(!(await inspectOwnedAction(lease)).ready)return {ok:false,code:'REFRESH_LEASE_REVOKED'};
+        const marked=await beforeSave(phase);if(phase==='MARK'&&marked?.ok)dispatched=true;return marked;
+      });
+      if(!(await inspectOwnedAction(lease)).ready)return {ok:false,code:'REFRESH_POST_GUARD_CHANGED',
+        effectBoundary:dispatched?'DISPATCH_POSSIBLE':'NOT_DISPATCHED'};
+      return result||{ok:false,code:'REFRESH_RESULT_UNVERIFIED',effectBoundary:dispatched?'DISPATCH_POSSIBLE':'NOT_DISPATCHED'};
+    }catch{return {ok:false,code:'REFRESH_EXECUTOR_UNKNOWN',effectBoundary:dispatched?'DISPATCH_POSSIBLE':'NOT_DISPATCHED'};}
+    finally{await releaseConflictGuard(lease);}
+  }
+
   // I13 existing-source effects share the single donor lease registry.
   async function runExistingStep(personaUid,request){
     if(typeof existingIsolatedTab!=='function')
@@ -304,6 +326,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     runNativeAiStep,
     runReleaseStep,
     runExistingStep,
+    runRefreshStep,
     inspectStageEditor,
     releaseStagingTab,
     listAvailablePersonas,

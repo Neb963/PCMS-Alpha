@@ -109,7 +109,10 @@ test('P52-06 F: fresh Chat 2 requires prior session absence and native reset req
 });
 test('P52-05 F: busy Stop is explicitly only an attempt, no source or PASS receipt',async()=>{
   await within({busy:true},async f=>{
-    const x=await perchanceAiNative({slug,nonce,action:'STOP'});
+    const observed=await perchanceAiNative({slug,nonce,action:'OBSERVE'});
+    const blocked=await perchanceAiNative({slug,nonce,action:'STOP',expectedSessionDigest:'f'.repeat(64)});
+    assert.equal(blocked.code,'AI_STOP_SESSION_CHANGED');assert.equal(f.clicks.stop,0);
+    const x=await perchanceAiNative({slug,nonce,action:'STOP',expectedSessionDigest:observed.sessionDigest});
     assert.equal(x.code,'STOP_REQUESTED_UNVERIFIED');
     assert.equal(f.clicks.stop,1);
     const notSent=await perchanceAiNative({slug,nonce,action:'SEND',chat:1,text:'retry'});

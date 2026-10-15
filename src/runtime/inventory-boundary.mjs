@@ -2,7 +2,8 @@
 // native bridge, login replay or caller-provided ownership proof.
 import { openCanonicalDatabase, createRestoreSentinel, fail, isSafeId } from './journal.mjs';
 import { createAccountStore } from './accounts.mjs';
-import { createInventoryStore, eligibleInventoryAccount } from './inventory.mjs';
+import { createInventoryStore, eligibleInventoryAccount, INVENTORY_SORTS,
+  INVENTORY_DIRECTIONS } from './inventory.mjs';
 import { internalPcmsGuard } from './persona-guard.mjs';
 import { createReadOnlyInterpreter } from './perchance-readback.mjs';
 import { trustedExtensionPage } from './command-boundary.mjs';
@@ -22,7 +23,7 @@ export function validateInventoryMessage(api,sender,message) {
   const p=message.params||{};
   if(typeof p!=='object'||!p||Array.isArray(p))return fail('INVALID_PARAMS');
   const allowed=message.type==='LIST_INVENTORY'?
-    ['query','ownerState','accountId','offset','limit']:
+    ['query','ownerState','accountId','offset','limit','sortBy','sortDirection']:
     ['accountId','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
   if(message.type==='SYNC_ACCOUNT'){
@@ -32,7 +33,9 @@ export function validateInventoryMessage(api,sender,message) {
     (p.ownerState!==undefined&&!filterStates.has(p.ownerState))||
     (p.accountId!==undefined&&p.accountId!==''&&!isSafeId(p.accountId))||
     (p.offset!==undefined&&(!Number.isSafeInteger(p.offset)||p.offset<0||p.offset>100000))||
-    (p.limit!==undefined&&(!Number.isSafeInteger(p.limit)||p.limit<1||p.limit>100)))
+    (p.limit!==undefined&&(!Number.isSafeInteger(p.limit)||p.limit<1||p.limit>100))||
+    (p.sortBy!==undefined&&!INVENTORY_SORTS.has(p.sortBy))||
+    (p.sortDirection!==undefined&&!INVENTORY_DIRECTIONS.has(p.sortDirection)))
     return fail('INVALID_PARAMS');
   return {ok:true};
 }

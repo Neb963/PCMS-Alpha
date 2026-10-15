@@ -3,6 +3,8 @@
 export const SUPPLY_SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const ID=/^[a-zA-Z0-9_-]{8,100}$/;
 const SAFE_STATE=new Set(['REJECTED','FROZEN','CREATE_PREPARED',
+  'CREATE_PREFLIGHT_FAILED','CREATE_READY_TO_DISPATCH','CREATE_INVESTIGATION',
+  'RENAME_PREFLIGHT_FAILED','RENAME_READY_TO_DISPATCH',
   'CREATE_DISPATCH_POSSIBLE','CREATE_UNCERTAIN','CREATE_OBSERVING',
   'CREATE_CONFIRMED','RENAME_PREPARED','RENAME_DISPATCH_POSSIBLE',
   'RENAME_UNCERTAIN','RENAME_OBSERVING','PROVIDER_CONFIRMED',
@@ -22,7 +24,7 @@ export function slugIssue(slug) {
   return null;
 }
 export function freezeSupply({batchId,accountId,personaUid,
-  accountRevision,bindingVersion,slugs}) {
+  accountRevision,bindingVersion,principalFingerprint=null,slugs}) {
   if(!isId(batchId)||batchId.length>95||!isId(accountId)||!isId(personaUid)||
      !Number.isSafeInteger(accountRevision)||accountRevision<1||
      !Number.isSafeInteger(bindingVersion)||bindingVersion<1||
@@ -40,7 +42,7 @@ export function freezeSupply({batchId,accountId,personaUid,
       createOperationId:null,renameOperationId:null,gitOperationId:null,
       temporarySlug:null,ackTemporarySlug:null,remoteId:null,folder:null};
   });
-  return {ok:true,batch:{batchId,accountId,personaUid,accountRevision,bindingVersion,
+  return {ok:true,batch:{batchId,accountId,personaUid,accountRevision,bindingVersion,principalFingerprint,
     state:'FROZEN',revision:1,items,createdAt:null,
     // No canonicalization, reallocation or implicit membership update later.
     frozen:true}};
@@ -48,7 +50,8 @@ export function freezeSupply({batchId,accountId,personaUid,
 export function validateOwnerContext(batch,account) {
   if(!batch||!account||account.accountId!==batch.accountId||
     account.personaUid!==batch.personaUid||
-    account.revision!==batch.accountRevision||
+    (batch.principalFingerprint?account.identity?.principalFingerprint!==batch.principalFingerprint:
+      account.revision!==batch.accountRevision)||
     account.bindingVersion!==batch.bindingVersion||
     account.state!=='VERIFIED'||account.identity?.source!=='GUARDED_SESSION_READBACK'||
     account.identity?.bindingVersion!==batch.bindingVersion)
@@ -64,9 +67,23 @@ export function moveSupply(item,event,proof={}) {
     createOperationId=item.createOperationId,renameOperationId=item.renameOperationId,
     gitOperationId=item.gitOperationId;
   switch(event) {
+    case 'CREATE_ACKNOWLEDGED':case 'RENAME_ACKNOWLEDGED':
+      if(state!==event.split('_')[0]+'_DISPATCH_POSSIBLE')return error('NOT_ADMISSIBLE');break;
+    case 'CREATE_PREFLIGHT_FAILED':case 'RENAME_PREFLIGHT_FAILED':{
+      const kind=event.split('_')[0];
+      if(![kind+'_PREPARED',kind+'_READY_TO_DISPATCH',kind+'_DISPATCH_POSSIBLE'].includes(state)||
+        proof.effectBoundary!=='NOT_DISPATCHED')return error('POSSIBLE_EFFECT_REQUIRES_RECONCILIATION');
+      state=event;reason=proof.code;break;
+    }
+    case 'CREATE_READY_TO_DISPATCH':case 'RENAME_READY_TO_DISPATCH':
+      if(state!==event.split('_')[0]+'_PREPARED'||proof.preflight?.version!==2)return error('PREFLIGHT_REQUIRED');
+      state=event;reason=null;break;
+    case 'CREATE_INVESTIGATION':
+      if(!['CREATE_UNCERTAIN','CREATE_DISPATCH_POSSIBLE','CREATE_OBSERVING','CREATE_INVESTIGATION'].includes(state))return error('NOT_ADMISSIBLE');
+      state=event;reason='OPERATOR_INVESTIGATION_REQUIRED';break;
     case 'ABORT_PREPARED':
-      if(state==='CREATE_PREPARED'){state='FROZEN';createOperationId=null;}
-      else if(state==='RENAME_PREPARED'){
+      if(['CREATE_PREPARED','CREATE_READY_TO_DISPATCH','CREATE_PREFLIGHT_FAILED'].includes(state)){state='FROZEN';createOperationId=null;}
+      else if(['RENAME_PREPARED','RENAME_READY_TO_DISPATCH','RENAME_PREFLIGHT_FAILED'].includes(state)){
         state='CREATE_CONFIRMED';renameOperationId=null;
       }else if(state==='GIT_PREPARED'){
         state='SOURCE_PENDING';gitOperationId=null;
@@ -76,10 +93,10 @@ export function moveSupply(item,event,proof={}) {
       if(state!=='FROZEN'||!isId(proof.operationId))return error('NOT_ADMISSIBLE');
       createOperationId=proof.operationId;state='CREATE_PREPARED';break;
     case 'CREATE_DISPATCH_POSSIBLE':
-      if(state!=='CREATE_PREPARED')return error('NOT_ADMISSIBLE');
+      if(state!=='CREATE_READY_TO_DISPATCH')return error('NOT_ADMISSIBLE');
       state='CREATE_DISPATCH_POSSIBLE';break;
     case 'CREATE_UNCERTAIN':
-      if(!['CREATE_DISPATCH_POSSIBLE','CREATE_OBSERVING'].includes(state))
+      if(!['CREATE_DISPATCH_POSSIBLE','CREATE_OBSERVING','CREATE_INVESTIGATION'].includes(state))
         return error('NOT_ADMISSIBLE');
       if(proof.temporarySlug!==undefined){
         if(!SUPPLY_SLUG.test(proof.temporarySlug)||proof.temporarySlug===item.requestedSlug)
@@ -88,7 +105,7 @@ export function moveSupply(item,event,proof={}) {
       }
       state='CREATE_UNCERTAIN';reason='RECONCILIATION_REQUIRED';break;
     case 'CREATE_OBSERVING':
-      if(!['CREATE_DISPATCH_POSSIBLE','CREATE_UNCERTAIN'].includes(state))
+      if(!['CREATE_DISPATCH_POSSIBLE','CREATE_UNCERTAIN','CREATE_INVESTIGATION'].includes(state))
         return error('NOT_ADMISSIBLE');
       state='CREATE_OBSERVING';break;
     case 'CREATE_CONFIRMED':
@@ -105,7 +122,7 @@ export function moveSupply(item,event,proof={}) {
         return error('NOT_ADMISSIBLE');
       renameOperationId=proof.operationId;state='RENAME_PREPARED';break;
     case 'RENAME_DISPATCH_POSSIBLE':
-      if(state!=='RENAME_PREPARED')return error('NOT_ADMISSIBLE');
+      if(state!=='RENAME_READY_TO_DISPATCH')return error('NOT_ADMISSIBLE');
       state='RENAME_DISPATCH_POSSIBLE';break;
     case 'RENAME_UNCERTAIN':
       if(!['RENAME_DISPATCH_POSSIBLE','RENAME_OBSERVING'].includes(state))
@@ -119,9 +136,9 @@ export function moveSupply(item,event,proof={}) {
       if(state!=='RENAME_OBSERVING')return error('NOT_ADMISSIBLE');
       if(proof.source!=='INDEPENDENT_READBACK'||
         proof.privateEmpty!==true||proof.ownerMatches!==true||
-        proof.remoteId!==remoteId||proof.slug!==item.requestedSlug||
+        proof.remoteId!==(item.ackRemoteId||remoteId)||proof.slug!==item.requestedSlug||
         proof.previousSlug!==temporarySlug)return error('INDEPENDENT_RENAME_PROOF_REQUIRED');
-      state='PROVIDER_CONFIRMED';reason=null;break;
+      state='PROVIDER_CONFIRMED';remoteId=proof.remoteId;reason=null;break;
     case 'SOURCE_PENDING':
       if(!['PROVIDER_CONFIRMED','SOURCE_PENDING'].includes(state))
         return error('NOT_ADMISSIBLE');
@@ -153,14 +170,34 @@ export function moveSupply(item,event,proof={}) {
       state='REJECTED';reason=proof.code;break;
     default:return error('INVALID_TRANSITION');
   }
+  const safeCode=x=>typeof x==='string'&&/^[A-Z][A-Z0-9_]{2,79}$/.test(x)?x:null;
+  const causal=safeCode(proof.code);
+  const diagnostic=causal?{first:item.diagnostic?.first||{code:causal,stage:safeCode(proof.stage)||event,
+    operationId:proof.operationId||createOperationId||renameOperationId,
+    effectBoundary:proof.effectBoundary==='NOT_DISPATCHED'?'NOT_DISPATCHED':'DISPATCH_POSSIBLE',at:Date.now()},
+    latest:{code:causal,stage:safeCode(proof.stage)||event,at:Date.now()},
+    route:proof.route==='PROTECTED'?'PROTECTED':item.diagnostic?.route||'UNVERIFIED'}:item.diagnostic;
   return {ok:true,item:{...item,state,reason,temporarySlug,ackTemporarySlug,remoteId,folder,
+    ...(proof.preflight?{preflight:proof.preflight}:{}),
+    ...(proof.investigation?{investigation:proof.investigation}:{}),
+    ...(proof.ack?{ack:{classification:proof.ack,at:Date.now()},
+      ...(SUPPLY_SLUG.test(proof.temporarySlug||'')?{ackTemporarySlug:proof.temporarySlug}:{}),
+      ...(isId(proof.remoteId)?{ackRemoteId:proof.remoteId}:{})}:{}),
+    ...(diagnostic?{diagnostic}:{}),
     createOperationId,renameOperationId,gitOperationId,revision:item.revision+1}};
 }
-export function publicSupply(batch) {
+export function publicSupply(batch,lifecycle=new Map()) {
   return {batchId:batch.batchId,accountId:batch.accountId,revision:batch.revision,
     frozen:true,items:batch.items.map(item=>({
       itemId:item.itemId,index:item.index,slug:item.requestedSlug,state:item.state,reason:item.reason,
-      revision:item.revision,source:item.folder?'NON_READY_FOLDER':
+      revision:item.revision,diagnostic:item.diagnostic||null,
+      investigation:item.investigation||null,
+      effectBoundary:['FROZEN','REJECTED','CREATE_PREPARED','RENAME_PREPARED','GIT_PREPARED',
+        'CREATE_READY_TO_DISPATCH','RENAME_READY_TO_DISPATCH','CREATE_PREFLIGHT_FAILED','RENAME_PREFLIGHT_FAILED'].includes(item.state)?'NOT_DISPATCHED':
+        item.state.includes('UNCERTAIN')||item.state.includes('DISPATCH')||item.state.includes('INVESTIGATION')||item.state.includes('OBSERVING')?'DISPATCH_POSSIBLE':'EFFECT_CONFIRMED',
+      operationId:item.gitOperationId||item.renameOperationId||item.createOperationId,
+      lifecycle:lifecycle.get(item.requestedSlug)||null,
+      source:item.folder?'NON_READY_FOLDER':
         ['PROVIDER_CONFIRMED','SOURCE_PENDING','GIT_PREPARED',
           'GIT_DISPATCH_POSSIBLE','GIT_UNCERTAIN','GIT_OBSERVING']
           .includes(item.state)?'SOURCE_PENDING':'NOT_CREATED'

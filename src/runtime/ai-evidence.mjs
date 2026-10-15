@@ -53,7 +53,7 @@ export function beginAiJob({stage,prompt,optionalTesting=null}){
     revision:1,state:'PENDING_NATIVE_SESSION',turns:0,
     chat1:{state:'PENDING',sessionDigest:null,tests:{}},
     chat2:optionalTesting?{state:'PENDING',sessionDigest:null,tests:{}}:null,
-    changes:[],hold:'NATIVE_AI_ACTIVATION_NOT_PROVEN',verifiedFinal:null
+    changes:[],hold:'EXACT_NATIVE_STEP_AUTHORIZATION_REQUIRED',verifiedFinal:null
   }};
 }
 const required=(j,c)=>c===1?j.prompt.tests:j.optionalTesting?.tests;

@@ -11,8 +11,12 @@ const critical=['lib/recovery-bootstrap.js','lib/routing-gate.js','lib/mullvad-n
 const sha=async p=>createHash('sha256').update(await readFile(p)).digest('hex');
 test('combined XPI preserves guarded donor bytes, manifest permissions and browser action',async()=>{
   const {original,combined,stage}=await buildI00({packageArchive:false});
-  for(const key of ['permissions','optional_permissions','host_permissions','content_scripts','browser_specific_settings','action'])
+  for(const key of ['permissions','optional_permissions','host_permissions','content_scripts','browser_specific_settings'])
     assert.deepEqual(combined[key],original[key],`donor ${key} was modified`);
+  assert.deepEqual(combined.action.default_icon,original.action.default_icon);
+  assert.equal(combined.action.default_popup,undefined,'toolbar must not open donor route popup');
+  assert.match(combined.action.default_title,/PCMS Alpha/);
+  assert.match(await readFile('src/runtime/entry.mjs','utf8'),/browser.action.onClicked.addListener/);
   assert.equal(combined.browser_specific_settings.gecko.id,'persona-route-manager@local');
   assert.deepEqual(combined.background,{scripts:['pcms/entry.mjs'],type:'module'});
   const entry=await readFile(path.join(stage,'pcms/entry.mjs'),'utf8');

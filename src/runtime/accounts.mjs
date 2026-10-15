@@ -74,6 +74,13 @@ export function transitionAccount(previous, action, all = []) {
       if (all.some(a => active(a) && a.accountId !== action.accountId &&
           a.identity?.principalFingerprint === proof.principalFingerprint))
         return fail('IDENTITY_ALREADY_BOUND');
+      if(previous.state==='VERIFIED'&&previous.identity?.source==='GUARDED_SESSION_READBACK'&&
+        previous.identity.bindingVersion===bindingVersion&&
+        previous.identity.principalFingerprint===proof.principalFingerprint){
+        return {ok:true,account:{...previous,identity:{...previous.identity,observationId:proof.observationId}},
+          event:'IDENTITY_REOBSERVED'};
+      }
+      if(previous.identity&&previous.identity.principalFingerprint!==proof.principalFingerprint)bindingVersion++;
       identity={principalFingerprint:proof.principalFingerprint,observationId:proof.observationId,
         source:'GUARDED_SESSION_READBACK',bindingVersion};
       state='VERIFIED'; override=null; break;

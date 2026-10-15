@@ -19,9 +19,13 @@ function encodeUtf8(text){
   return btoa(binary);
 }
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
+const DISPOSABLE=/^pcms-test-[a-z0-9-]{8,88}$/;
+const PILOT_STEPS=new Set(['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND',
+  'CHAT1_REPAIR','CHAT2_REPAIR','STOP','READ_ONLY_HISTORY']);
 const ACT=new Set(['GET_PROMPTS','SET_PROMPT','IMPORT_PROMPT','EXPORT_PROMPTS',
   'LIST_JOBS','GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS',
-  'GET_CONCURRENCY','SET_CONCURRENCY','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2']);
+  'GET_CONCURRENCY','SET_CONCURRENCY','ADVANCE_JOB','INSPECT_WORKSPACE',
+  'VERIFY_FRESH_CHAT2','ARM_DISPOSABLE_AI','ARM_EXACT_AI','SET_AUTO_JOB']);
 export function validateAiMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;
@@ -34,21 +38,31 @@ export function validateAiMessage(api,sender,message){
   const allowed=message.type==='GET_JOB'?['slug']:
     message.type==='PREPARE_JOB'?['slug','expectedStageRevision','token']:
     message.type==='BEGIN_NATIVE'?['slug','expectedRevision','step']:
+    ['ARM_DISPOSABLE_AI','ARM_EXACT_AI'].includes(message.type)?['slug','expectedRevision','step','confirmation']:
+    message.type==='SET_AUTO_JOB'?['slug','expectedRevision','enabled','confirmation']:
     ['PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)?['slug','expectedRevision']:
     message.type==='SET_CONCURRENCY'?['perAccount','expectedRevision']:
     message.type==='SET_PROMPT'?['text','tests','expectedRevision']:
     message.type==='IMPORT_PROMPT'?['envelope','expectedRevision']:[];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
-  if(['GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&!SLUG.test(p.slug||''))
+  if(['GET_JOB','PREPARE_JOB','BEGIN_NATIVE','ARM_DISPOSABLE_AI','ARM_EXACT_AI','SET_AUTO_JOB','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&!SLUG.test(p.slug||''))
     return fail('INVALID_SLUG');
+  if(message.type==='SET_AUTO_JOB'&&
+     (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
+      typeof p.enabled!=='boolean'||
+      (p.enabled&&(typeof p.confirmation!=='string'||p.confirmation.length>130))||
+      (!p.enabled&&p.confirmation!=null)))return fail('INVALID_PARAMS');
   if(message.type==='PREPARE_JOB'&&
      (!Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
       typeof p.token!=='string'||p.token.length<10||p.token.length>512))
     return fail('INVALID_PARAMS');
-  if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&
+  if(['BEGIN_NATIVE','ARM_DISPOSABLE_AI','ARM_EXACT_AI','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
       (message.type==='BEGIN_NATIVE'&&
-       !['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','STOP'].includes(p.step))))
+       !['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','STOP'].includes(p.step))||
+      (['ARM_DISPOSABLE_AI','ARM_EXACT_AI'].includes(message.type)&&
+       (!PILOT_STEPS.has(p.step)||typeof p.confirmation!=='string'||
+        p.confirmation.length>160))))
     return fail('INVALID_PARAMS');
   if(['SET_PROMPT','IMPORT_PROMPT','SET_CONCURRENCY'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
@@ -58,11 +72,151 @@ export function validateAiMessage(api,sender,message){
 export function createAiBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,
   storeFactory=createAiStore,stageFactory=createStagingStore,
-  inspect=inspectGitSource,effectGate=()=>false,clock=Date.now
+  inspect=inspectGitSource,effectGate=()=>false,clock=Date.now,
+  pilotClock=()=>performance.now()
 }={}){
   let databasePromise,tickBusy=false;
   const database=()=>databasePromise ||=open();
   const sentinel=createRestoreSentinel(api.storage.local);
+  // Volatile exact-step consent is independent of persistent per-job AUTO.
+  // An interrupted event page revokes the unsent manual arm.
+  let pilotArm=null;
+  const pilotMatches=({job,stage,step})=>{
+    const a=pilotArm;
+    return !!a&&pilotClock()<a.expiresAt&&a.step===step&&
+      a.slug===stage.slug&&a.jobRevision===job.revision&&
+      a.stageRevision===stage.revision&&a.nonce===stage.nonce&&
+      a.personaUid===stage.personaUid&&a.accountId===stage.accountId&&
+      a.remotePublicId===stage.remotePublicId&&
+      a.principalFingerprint===stage.principalFingerprint&&
+      a.sourceFingerprint===job.sourceFingerprint&&
+      a.stageFingerprint===stage.candidate?.fingerprint;
+  };
+  const nativeAuthorized=ctx=>pilotMatches(ctx)||ctx.step!=='STOP'&&effectGate({phase:'I10',...ctx})===true;
+  async function currentJobSource(job,stage){
+    const saved=job.finalSource?.fingerprint===job.sourceFingerprint?job.finalSource:stage.candidate;
+    const exact=await exactSource(saved?.blobs);
+    return exact.ok&&exact.fingerprint===job.sourceFingerprint?exact:fail('AI_EXACT_CURRENT_SOURCE_REQUIRED');
+  }
+  async function stopSessionMatches(g,r,job){
+    if(job.native?.state!=='RUNNING_OBSERVED'||
+       !/^[a-f0-9]{64}$/.test(job.native.sessionDigest||''))return false;
+    const current=await g.runNativeAiStep(r.personaUid,{slug:r.slug,nonce:r.nonce,action:'OBSERVE'});
+    // Cancellation does not write source; an AI-owned unsaved edit need not
+    // block Stop. Human ownership/input and a changed session still do.
+    return current?.ok===true&&current.busy===true&&
+      current.sessionDigest===job.native.sessionDigest&&current.hasQueue===false&&
+      current.inputOccupied===false&&current.attachmentsPending===false;
+  }
+  async function armDisposableAi(db,store,p){
+    if(p.type==='ARM_DISPOSABLE_AI'&&!DISPOSABLE.test(p.slug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
+    if(p.confirmation!==p.step+' '+p.slug)return fail('PILOT_CONFIRMATION_REQUIRED');
+    if(pilotArm&&pilotClock()<pilotArm.expiresAt)return fail('PILOT_ALREADY_ARMED');
+    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+    const sealed=await store.getJobFull(p.slug);
+    if(!sealed.ok)return sealed;
+    const job=sealed.job;
+    if(job.revision!==p.expectedRevision)return fail('STALE_REVISION');
+    if(job.state==='HUMAN_OWNED'||job.state==='HELD_NO_PROGRESS'||
+       job.native?.state==='DISPATCH_POSSIBLE')return fail('AI_JOB_HELD');
+    const current=await stageFactory(db).getFull(p.slug);
+    if(!current.ok)return current;
+    const r=current.record;
+    if(r.state!=='SOURCE_VERIFIED'||r.revision!==job.stageRevision||
+       r.slug!==job.slug||!r.nonce||!r.candidate?.fingerprint||
+       (job.sourceFingerprint!==r.candidate.fingerprint&&
+        job.finalSource?.fingerprint!==job.sourceFingerprint))
+      return fail('AI_STAGE_CONTEXT_CHANGED');
+    const g=guard();
+    if(!g?.getSafeRouteReadiness||!g?.runNativeAiStep||!g?.inspectStageEditor)
+      return fail('NATIVE_AI_GUARD_UNAVAILABLE');
+    const route=await g.getSafeRouteReadiness(r.personaUid);
+    if(!route?.ready||!route.cookieStoreId||!route.routeId)
+      return fail(route?.code||'PROTECTED_ROUTE_UNVERIFIED');
+    if(p.step==='STOP'){
+      if(!(await stopSessionMatches(g,r,job)))return fail('AI_STOP_SESSION_UNVERIFIED');
+    }else{
+      const editor=await g.inspectStageEditor(r.personaUid,r.slug,r.nonce);
+      if(editor?.ok!==true||editor.clean!==true)return fail('EDITOR_UNKNOWN');
+    }
+    const fresh=await store.getJobFull(p.slug),stageNow=await stageFactory(db).getFull(p.slug);
+    if(!fresh.ok||fresh.job.revision!==job.revision||
+       !stageNow.ok||stageNow.record.revision!==r.revision||
+       stageNow.record.state!=='SOURCE_VERIFIED'||
+       (await sentinel.inspect()).held)return fail('PILOT_CONTEXT_CHANGED');
+    pilotArm={slug:r.slug,jobRevision:job.revision,step:p.step,
+      stageRevision:r.revision,nonce:r.nonce,personaUid:r.personaUid,
+      accountId:r.accountId,remotePublicId:r.remotePublicId,
+      principalFingerprint:r.principalFingerprint,
+      sourceFingerprint:job.sourceFingerprint,
+      stageFingerprint:r.candidate.fingerprint,
+      routeId:route.routeId,cookieStoreId:route.cookieStoreId,
+      expiresAt:pilotClock()+120000};
+    return {ok:true,scope:p.type==='ARM_DISPOSABLE_AI'?'SINGLE_DISPOSABLE_NATIVE_AI_STEP':'SINGLE_EXACT_NATIVE_AI_STEP',step:p.step,
+      expiresInSeconds:120};
+  }
+
+  async function changeAutonomy(db,store,p){
+    if(!p.enabled)return store.setAutomation(p.slug,p.expectedRevision,false,null);
+    if(p.confirmation!=='AUTO AI '+p.slug)
+      return fail('AI_AUTO_EXACT_CONFIRMATION_REQUIRED');
+    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+    const sealed=await store.getJobFull(p.slug);
+    if(!sealed.ok||sealed.job.revision!==p.expectedRevision)
+      return fail('STALE_AI_JOB');
+    const job=sealed.job;
+    const staged=await stageFactory(db).getFull(p.slug);
+    if(!staged.ok)return staged;
+    const r=staged.record;
+    const currentSource=await currentJobSource(job,r);
+    if(r.state!=='SOURCE_VERIFIED'||r.revision!==job.stageRevision||
+       r.slug!==job.slug||job.sourceFingerprint!==currentSource?.fingerprint||
+       ['HELD_RECONCILE','HELD_NO_PROGRESS','HUMAN_OWNED','TESTS_VERIFIED'].includes(job.state))
+      return fail('AI_AUTO_SOURCE_OR_JOB_UNVERIFIED');
+    const g=guard();
+    if(!g?.getSafeRouteReadiness||!g?.inspectStageEditor||!g?.observeReadOnly)
+      return fail('NATIVE_AI_GUARD_UNAVAILABLE');
+    const route=await g.getSafeRouteReadiness(r.personaUid);
+    if(!route?.ready||!route.cookieStoreId||!route.routeId)
+      return fail(route?.code||'PROTECTED_ROUTE_UNVERIFIED');
+    const editor=await g.inspectStageEditor(r.personaUid,r.slug,r.nonce);
+    if(editor?.ok!==true||editor.clean!==true)return fail('EDITOR_UNKNOWN');
+    const current=await g.observeReadOnly(r.personaUid,false,r.slug);
+    const original=current?.original;
+    if(current?.ok!==true||
+       current.principalFingerprint!==r.principalFingerprint||
+       original?.remotePublicId!==r.remotePublicId||
+       original?.ownerResult!=='IS_OWNER'||original.visibility!=='UNLISTED'||
+       typeof original.pjs!=='string'||typeof original.html!=='string'||
+       !Array.isArray(original.assets))
+      return fail('AI_AUTO_OWNER_OR_SOURCE_UNVERIFIED');
+    const proof=await verifyReadback(currentSource,{
+      ok:true,source:'DONOR_GUARDED_ORIGINAL_READBACK',slug:r.slug,
+      accountId:r.accountId,personaUid:r.personaUid,
+      principalFingerprint:current.principalFingerprint,
+      remotePublicId:original.remotePublicId,
+      ownerResult:original.ownerResult,visibility:original.visibility,
+      pjs:original.pjs,html:original.html,assets:original.assets
+    },{slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,
+      principalFingerprint:r.principalFingerprint,remotePublicId:r.remotePublicId});
+    if(!proof.ok)return fail('AI_AUTO_SOURCE_DRIFT');
+    const after=await g.getSafeRouteReadiness(r.personaUid);
+    const fresh=await store.getJobFull(p.slug);
+    const stageNow=await stageFactory(db).getFull(p.slug);
+    if(!after?.ready||after.cookieStoreId!==route.cookieStoreId||
+       after.routeId!==route.routeId||!fresh.ok||
+       fresh.job.revision!==job.revision||
+       !stageNow.ok||stageNow.record.revision!==r.revision||
+       (await sentinel.inspect()).held)
+      return fail('AI_AUTO_CONTEXT_CHANGED');
+    const scope={slug:r.slug,sourceFingerprint:job.sourceFingerprint,stageFingerprint:r.candidate.fingerprint,
+      stageRevision:r.revision,personaUid:r.personaUid,
+      accountId:r.accountId,remotePublicId:r.remotePublicId,
+      principalFingerprint:r.principalFingerprint,nonce:r.nonce};
+    const armed=await store.setAutomation(p.slug,p.expectedRevision,true,scope);
+    if(armed.ok)try{api.alarms?.create(AI_PROGRESS_ALARM,{periodInMinutes:1});}catch{}
+    return armed;
+  }
   async function executeTrusted(message){
     try{
       const db=await database(),store=storeFactory(db),p=message.params||{};
@@ -74,6 +228,9 @@ export function createAiBoundary(api,{
       }
       if(message.type==='LIST_JOBS')return store.list();
       if(message.type==='GET_JOB')return store.getJob(p.slug);
+      if(['ARM_DISPOSABLE_AI','ARM_EXACT_AI'].includes(message.type))
+        return armDisposableAi(db,store,{...p,type:message.type});
+      if(message.type==='SET_AUTO_JOB')return changeAutonomy(db,store,p);
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(message.type==='SET_CONCURRENCY')
         return store.changeConcurrency(p.expectedRevision,p.perAccount);
@@ -154,8 +311,15 @@ export function createAiBoundary(api,{
           // A deliberate read-only server history request is still a live
           // provider observation. It is separately gated OFF by default;
           // a green PR or background alarm must never activate it.
-          if(effectGate({phase:'I10',job,stage:r,step:'READ_ONLY_HISTORY'})!==true)
+          const historyCtx={job,stage:r,step:'READ_ONLY_HISTORY'};
+          if(!nativeAuthorized(historyCtx))
             return fail('AI_SERVER_HISTORY_ACTIVATION_HELD');
+          if(pilotMatches(historyCtx)){
+            if(pilotArm.routeId!==route.routeId||
+               pilotArm.cookieStoreId!==route.cookieStoreId)
+              return fail('AI_PILOT_ROUTE_CHANGED');
+            pilotArm=null;
+          }
           if(job.native?.state!=='CHAT2_OBSERVED_IDLE'||
              job.chat2?.state!=='FRESH_OBSERVED'||
              !job.chat2.sessionDigest||!job.optionalTesting?.text||
@@ -294,36 +458,110 @@ export function createAiBoundary(api,{
         }
         if(message.type==='BEGIN_NATIVE'){
           // Live native provider AI action is NEVER enabled by a green CI.
-          if(effectGate({phase:'I10',job,stage:r,step:p.step})!==true)
-            return fail('AI_PROVIDER_ACTIVATION_HELD');
+          const ctx={job,stage:r,step:p.step};
+          if(!nativeAuthorized(ctx))return fail('AI_PROVIDER_ACTIVATION_HELD');
+          if(pilotMatches(ctx)&&
+             (pilotArm.routeId!==route.routeId||
+              pilotArm.cookieStoreId!==route.cookieStoreId))
+            return fail('AI_PILOT_ROUTE_CHANGED');
           // Do not admit new AI work over human-owned or dirty source.
-          const clean=await g.inspectStageEditor?.(r.personaUid,r.slug,r.nonce);
-          if(clean?.ok!==true||clean.clean!==true)return fail('EDITOR_UNKNOWN');
+          const stopping=p.step==='STOP';
+          if(stopping){
+            if(!(await stopSessionMatches(g,r,job)))return fail('AI_STOP_SESSION_UNVERIFIED');
+          }else{
+            const clean=await g.inspectStageEditor?.(r.personaUid,r.slug,r.nonce);
+            if(clean?.ok!==true||clean.clean!==true)return fail('EDITOR_UNKNOWN');
+          }
           const isRepair=p.step==='CHAT1_REPAIR'||p.step==='CHAT2_REPAIR';
           const text=p.step==='CHAT1_SEND'?job.prompt.text:
             p.step==='CHAT2_SEND'?job.optionalTesting?.text:isRepair?
             'A separate browser assertion previously observed a real failing required test. Re-examine the current generator-owned code and src files, make a bounded corrective change, save and run the tests again. Do not declare PASS without an independent browser observation. If no safe progress is possible, report a blocker.':null;
           if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR'].includes(p.step)&&
              (typeof text!=='string'||!text.trim()))return fail('AI_PROMPT_UNVERIFIED');
-          if((await sentinel.inspect()).held||effectGate({phase:'I10',job,stage:r,step:p.step})!==true)
+          if(nativeAuthorized(ctx)){
+            // Manual and automated steps share identical current owner/source
+            // readback. Prepared job metadata is never permission to mutate. An
+            // independent private owner + complete PJS/HTML/src readback must
+            // match its byte-pinned I09 candidate before any effect marker.
+            if(!g.observeReadOnly)return fail('AI_PILOT_SOURCE_OBSERVER_UNAVAILABLE');
+            const current=await g.observeReadOnly(r.personaUid,false,r.slug);
+            const original=current?.original;
+            if(current?.ok!==true||
+               current.principalFingerprint!==r.principalFingerprint||
+               original?.remotePublicId!==r.remotePublicId||
+               original?.ownerResult!=='IS_OWNER'||
+               original?.visibility!=='UNLISTED'||
+               typeof original?.pjs!=='string'||typeof original?.html!=='string'||
+               !Array.isArray(original?.assets))
+              return fail('AI_PILOT_PRIVATE_OWNER_CHANGED');
+            const observed={ok:true,source:'DONOR_GUARDED_ORIGINAL_READBACK',
+              slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,
+              principalFingerprint:current.principalFingerprint,
+              remotePublicId:original.remotePublicId,
+              ownerResult:original.ownerResult,visibility:original.visibility,
+              pjs:original.pjs,html:original.html,assets:original.assets};
+            const expected=await currentJobSource(job,r);
+            if(!expected.ok)
+              return fail('AI_EXACT_CURRENT_SOURCE_REQUIRED');
+            const proof=stopping?{ok:true}:await verifyReadback(expected,observed,{
+              slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,
+              principalFingerprint:r.principalFingerprint,remotePublicId:r.remotePublicId});
+            if(!proof.ok)return fail('AI_PILOT_REMOTE_SOURCE_CHANGED');
+            const stageNow=await stageFactory(db).getFull(p.slug);
+            if(!stageNow.ok||stageNow.record.revision!==r.revision||
+               stageNow.record.state!=='SOURCE_VERIFIED'||
+               stageNow.record.nonce!==r.nonce)return fail('AI_PILOT_STAGE_CHANGED');
+            const routeNow=await g.getSafeRouteReadiness(r.personaUid);
+            if(!routeNow?.ready||routeNow.cookieStoreId!==route.cookieStoreId||
+               routeNow.routeId!==route.routeId)
+              return fail('AI_PILOT_ROUTE_CHANGED');
+          }
+          if((await sentinel.inspect()).held||!nativeAuthorized(ctx))
             return fail('AI_PROVIDER_ACTIVATION_HELD');
           // Commit DISPATCH_POSSIBLE before ANY possible remote AI effect;
           // a lost page acknowledgment cannot be replayed.
           const armed=await store.armNative(p.slug,p.expectedRevision,p.step);
           if(!armed.ok)return armed;
-          if(effectGate({phase:'I10',job,stage:r,step:p.step})!==true ||
-             (await sentinel.inspect()).held)
+          if(!nativeAuthorized(ctx)||(await sentinel.inspect()).held){
+            pilotArm=null;
             return fail('AI_ACTIVATION_REVOKED_AFTER_MARKER');
+          }
           const after=await g.getSafeRouteReadiness(r.personaUid);
           if(!after?.ready||after.cookieStoreId!==route.cookieStoreId||
-             after.routeId!==route.routeId)
-            return fail('AI_DISPATCH_GUARD_CHANGED_RECONCILE');
+             after.routeId!==route.routeId){
+            pilotArm=null;return fail('AI_DISPATCH_GUARD_CHANGED_RECONCILE');
+          }
+          const editorNow=stopping?{ok:await stopSessionMatches(g,r,job),clean:true}:
+            await g.inspectStageEditor?.(r.personaUid,r.slug,r.nonce);
+          if(editorNow?.ok!==true||editorNow.clean!==true||
+             (await sentinel.inspect()).held){
+            pilotArm=null;return fail('AI_EDITOR_CHANGED_AFTER_MARKER');
+          }
+          if(!nativeAuthorized(ctx)){
+            pilotArm=null;return fail('AI_ACTIVATION_REVOKED_AFTER_MARKER');
+          }
+          // In particular, an AUTO revocation racing with a committed
+          // DISPATCH_POSSIBLE marker must stop *before* the native effect.
+          // This fresh canonical read cannot undo the marker or authorize replay.
+          if(!pilotMatches(ctx)&&job.automation?.enabled===true){
+            const latest=await store.getJobFull(p.slug);
+            if(!latest.ok||latest.job.automation?.enabled!==true||
+               latest.job.stageRevision!==r.revision)
+              return fail('AI_AUTO_DISARMED_AFTER_MARKER');
+          }
+          const latestStage=await stageFactory(db).getFull(p.slug);
+          if(!latestStage.ok||latestStage.record.revision!==r.revision||
+             latestStage.record.state!=='SOURCE_VERIFIED'||
+             latestStage.record.nonce!==r.nonce)
+            return fail('AI_STAGE_CHANGED_AFTER_MARKER');
+          if(pilotMatches(ctx))pilotArm=null;
           let observed;
           try{observed=await g.runNativeAiStep(r.personaUid,{
             slug:r.slug,nonce:r.nonce,
             action:p.step.endsWith('SEND')||p.step.endsWith('REPAIR')?'SEND':
               p.step==='CHAT2_RESET'?'NEW_CHAT':'STOP',
             ...(text?{text}:{}),
+            ...(stopping?{expectedSessionDigest:job.native.sessionDigest}:{}),
             chat:p.step.startsWith('CHAT2')?2:1,
             ...(isRepair?{repair:true,
               expectedSessionDigest:p.step==='CHAT1_REPAIR'?
@@ -500,6 +738,7 @@ export function createAiBoundary(api,{
         // recheck window; a dead protected route must not starve a different
         // healthy account every wake. Durable across event-page suspension.
         if((job.schedulerDeferredUntil||0)>now)continue;
+        if(effectGate({phase:'I10',step:'AUTOMATION',job})!==true)continue;
         const next=planAiStep(job,{oracleNames:AI_BROWSER_ASSERTIONS});
         if(!next.ok)continue;
         // One attempted guarded step per wake, never simultaneous provider
@@ -561,4 +800,23 @@ export function createAiBoundary(api,{
   }
   return Object.freeze({register,run,tick});
 }
-if(typeof browser!=='undefined')createAiBoundary(browser).register();
+// Production: only a separately consented exact job may use the automatic
+// engine. Manual native sends continue to require a short-lived exact arm.
+export function productionAiGate(ctx){
+  if(ctx?.phase!=='I10')return false;
+  if(ctx.step==='AUTOMATION'&&!ctx.job)return true; // alarm admission, not a write
+  const job=ctx.job,scope=job?.automation,r=ctx.stage;
+  if(scope?.enabled!==true)return false;
+  if(!r)return ctx.step==='AUTOMATION'&&scope.slug===job.slug&&
+    scope.stageRevision===job.stageRevision&&
+    /^[a-f0-9]{64}$/.test(scope.sourceFingerprint||'');
+  return r.state==='SOURCE_VERIFIED'&&scope.slug===job.slug&&
+    scope.stageRevision===r.revision&&job.stageRevision===r.revision&&
+    (scope.stageFingerprint||scope.sourceFingerprint)===r.candidate?.fingerprint&&
+    scope.accountId===r.accountId&&scope.personaUid===r.personaUid&&
+    scope.remotePublicId===r.remotePublicId&&
+    scope.principalFingerprint===r.principalFingerprint&&scope.nonce===r.nonce;
+}
+if(typeof browser!=='undefined')createAiBoundary(browser,{
+  effectGate:productionAiGate
+}).register();

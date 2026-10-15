@@ -8,7 +8,26 @@ const feedback=document.getElementById('pcms-accounts-feedback');
 const enroll=document.getElementById('pcms-enroll');
 const create=document.getElementById('pcms-create-persona');
 const refresh=document.getElementById('pcms-refresh-accounts');
-let generation=0, personas=[], routes=[], accounts=[], held=true;
+let generation=0, personas=[], routes=[], accounts=[], held=true, requestedAccount=null;
+function focusRequestedAccount(){
+  if(!requestedAccount)return;
+  const found=[...accountsArea.querySelectorAll('[data-pcms-account-id]')]
+    .find(x=>x.dataset.pcmsAccountId===requestedAccount);
+  if(!found)return;
+  requestedAccount=null;
+  found.scrollIntoView({block:'nearest'});
+  found.focus({preventScroll:true});
+}
+window.addEventListener('pcms-global-account-target',event=>{
+  const accountId=event.detail?.accountId;
+  if(typeof accountId!=='string'||accountId.length>128)return;
+  requestedAccount=accountId;
+  const alreadyHere=location.hash==='#accounts';
+  location.hash='#accounts';
+  if(alreadyHere)void read().catch(()=>{
+    held=true;draw();report('Local account state unavailable; no account assumed.');
+  });
+});
 const statuses={
   WAITING_LOGIN:'Awaiting manual login',VERIFICATION_PENDING:'Identity not verified',
   VERIFIED:'Independent identity observed',OVERRIDDEN:'Manual enrollment exception — not verified',
@@ -79,6 +98,9 @@ function draw() {
   }
   for(const a of accounts) {
     const section=document.createElement('section');section.className='account-record';
+    section.dataset.pcmsAccountId=a.accountId;
+    section.tabIndex=-1;
+    section.setAttribute('aria-label','PCMS account '+a.accountId);
     const heading=document.createElement('h3');
     heading.textContent=labelFor(a.personaUid)+' — '+(statuses[a.state]||'Unknown/held');
     section.append(heading);
@@ -144,6 +166,7 @@ function draw() {
     }
     accountsArea.append(section);
   }
+  if(location.hash==='#accounts')focusRequestedAccount();
 }
 async function read() {
   const mine=++generation;
@@ -158,6 +181,13 @@ async function read() {
   routes=r.routes;
   draw();
 }
+// Canonical account rows can change while another workspace is open.
+ // Navigate-then-reload, rather than focusing an obsolete initial snapshot.
+window.addEventListener('hashchange',()=>{
+  if(location.hash==='#accounts')void read().catch(()=>{
+    held=true;draw();report('Local account state unavailable; no account assumed.');
+  });
+});
 refresh.addEventListener('click',async()=>{
   report('Refreshing authoritative account and Persona state…');
   try{await read();report('Fresh local state loaded; provider identity may remain unknown.');}

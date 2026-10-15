@@ -1,3 +1,4 @@
+import {requestTypedConfirmation} from './typed-confirm.mjs';
 // I10 operator UI: immutable prompt versions, bounded source-bound jobs.
 // Never send page code, proof objects, session identifiers or privileged Git commands.
 const id=s=>document.getElementById(s);
@@ -10,10 +11,12 @@ const slug=id('pcms-ai-slug'),token=id('pcms-ai-git-token'),prepare=id('pcms-ai-
 const refresh=id('pcms-ai-refresh'),jobStatus=id('pcms-ai-jobs-status'),jobList=id('pcms-ai-job-list');
 const runNative=id('pcms-ai-run'),observeNative=id('pcms-ai-observe'),
   advanceNative=id('pcms-ai-advance'),opfsNative=id('pcms-ai-opfs'),
-  freshNative=id('pcms-ai-fresh'),
+  freshNative=id('pcms-ai-fresh'),stopNative=id('pcms-ai-stop'),
   testNative=id('pcms-ai-test'),repairNative=id('pcms-ai-repair'),
+  enableAuto=id('pcms-ai-enable-auto'),disableAuto=id('pcms-ai-disable-auto'),
   resetNative=id('pcms-ai-newchat'),chat2Native=id('pcms-ai-chat2');
 let current=null,concurrency=null,busy=false,queueSeq=0,selectedJob=null;
+const testSlug=/^[a-z0-9][a-z0-9-]{0,99}$/;
 function request(portName,type,params={}){
   return new Promise((resolve,reject)=>{
     const port=browser.runtime.connect({name:portName});let ended=false;
@@ -35,25 +38,30 @@ function controls(){
   importButton.disabled=busy||!current?.ok;
   exportButton.disabled=busy;
   refresh.disabled=busy;
-  const selected=selectedJob?.ok===true;
-  runNative.disabled=busy||!selected||selectedJob.state!=='PENDING_NATIVE_SESSION';
+  const selected=selectedJob?.ok===true,eligible=selected&&testSlug.test(selectedJob.slug);
+  enableAuto.disabled=busy||!eligible||selectedJob.autoEnabled===true||
+    ['HELD_RECONCILE','HELD_NO_PROGRESS','HUMAN_OWNED','TESTS_VERIFIED'].includes(selectedJob.state);
+  disableAuto.disabled=busy||!selected||selectedJob.autoEnabled!==true;
+  stopNative.disabled=busy||!eligible||selectedJob.nativeState!=='RUNNING_OBSERVED';
+  runNative.disabled=busy||!eligible||selectedJob.state!=='PENDING_NATIVE_SESSION';
   opfsNative.disabled=busy||!selected||selectedJob.nativeState!=='CHAT2_OBSERVED_IDLE'||
     selectedJob.chat2IsolationVerified===true;
-  freshNative.disabled=busy||!selected||
+  freshNative.disabled=busy||!eligible||
     selectedJob.nativeState!=='CHAT2_OBSERVED_IDLE'||
     selectedJob.chat2IsolationVerified===true;
   advanceNative.disabled=busy||!selected||selectedJob.slotReleased===true||
     ['TESTS_VERIFIED','HELD_NO_PROGRESS','HUMAN_OWNED'].includes(selectedJob.state);
   observeNative.disabled=busy||!selected||
     !['HELD_RECONCILE','TESTS_UNVERIFIED','KNOWN_FAILURE'].includes(selectedJob.state);
-  testNative.disabled=busy||!selected||selectedJob.state!=='TESTS_UNVERIFIED';
-  repairNative.disabled=busy||!selected||selectedJob.state!=='KNOWN_FAILURE'||!
+  testNative.disabled=busy||!selected||selectedJob.state!=='TESTS_UNVERIFIED'||
+    !['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(selectedJob.nativeState);
+  repairNative.disabled=busy||!eligible||selectedJob.state!=='KNOWN_FAILURE'||!
     ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(selectedJob.nativeState)||
     (selectedJob.nativeState==='CHAT2_OBSERVED_IDLE'&&
      selectedJob.chat2IsolationVerified!==true);
-  resetNative.disabled=busy||!selected||
+  resetNative.disabled=busy||!eligible||
     selectedJob.evidence?.chat1Pass!==true;
-  chat2Native.disabled=busy||!selected||
+  chat2Native.disabled=busy||!eligible||
     selectedJob.optionalTestingSha===null;
   prepare.disabled=busy||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug.value)||
     token.value.length<10;
@@ -108,14 +116,18 @@ importButton.addEventListener('click',()=>{
   change('IMPORT_PROMPT',{envelope,expectedRevision:current?.current?.revision},
     'Importing the latest supplied instructions as a NEW revision…');
 });
-async function refreshJobs(){
+async function refreshJobs({preserveStatus=false}={}){
+  const previousStatus=jobStatus.textContent;
   const own=++queueSeq;
   try{
     const data=await ai('LIST_JOBS');
     if(own!==queueSeq)return;
     jobList.replaceChildren();
     if(!data?.ok){jobStatus.textContent=data?.code||'AI_JOBS_UNAVAILABLE';return;}
-    if(!data.jobs.length){jobStatus.textContent='No jobs prepared. Native AI execution remains held.';return;}
+    // Keep selection tied to a current canonical revision, not a stale
+    // pre-dispatch object. Disappeared jobs cannot remain operable.
+    if(selectedJob)selectedJob=data.jobs.find(j=>j.slug===selectedJob.slug)||null;
+    if(!data.jobs.length){jobStatus.textContent='No jobs prepared. Native AI steps require exact source, owner, route and per-step authorization.';controls();return;}
     const ul=document.createElement('ul');
     for(const j of data.jobs){
       const li=document.createElement('li');
@@ -124,7 +136,8 @@ async function refreshJobs(){
       choose.addEventListener('click',()=>{
         selectedJob=j;slug.value=j.slug;controls();
         jobStatus.textContent=j.slug+' selected · '+j.state+
-          ' · native AI activation remains separately gated.';
+          (testSlug.test(j.slug)?' · authorize each native step separately.':
+            ' · native execution requires exact target authorization.');
       });
       li.append(choose,document.createTextNode(' '));
       const label=document.createElement('span');
@@ -135,12 +148,18 @@ async function refreshJobs(){
       label.textContent=j.slug+' · '+j.state+' · Settings P'+j.promptRevision+
         ' · source '+j.sourceFingerprint.slice(0,12)+
         ' · '+(j.evidence?.state||'TESTS_UNVERIFIED')+
-        ' · '+(j.hold||'No external PASS claimed')+retry;
+        ' · '+(j.hold||'No external PASS claimed')+
+        (j.autoEnabled?' · Background AI armed for this exact job':' · Background AI not armed')+retry;
       li.append(label);ul.append(li);
     }
     jobList.append(ul);
     if(data.truncated)jobList.append(document.createTextNode(' Additional jobs omitted.'));
-    jobStatus.textContent='Canonical job receipts · no helper session or source body disclosed.';
+    jobStatus.textContent=selectedJob?
+      selectedJob.slug+' · '+selectedJob.state+' · revision '+selectedJob.revision+
+      ' · canonical observation; no test PASS inferred.':
+      'Canonical job receipts · select a job; no helper session or source body disclosed.';
+    if(preserveStatus)jobStatus.textContent=previousStatus;
+    controls();
   }catch{if(own===queueSeq)jobStatus.textContent='AI receipts unavailable; do not infer completion.';}
 }
 async function prepareJob(){
@@ -156,13 +175,37 @@ async function prepareJob(){
     });
     if(!result?.ok){jobStatus.textContent=(result?.code||'AI_JOB_UNVERIFIED')+
       ' · held; no AI provider action';return;}
-    jobStatus.textContent='Job prepared against exact saved source. Native AI execution/test oracle NOT VERIFIED; provider activation OFF.';
+    jobStatus.textContent='Job prepared against exact saved source. Select it to authorize individual AI steps. No tests proven yet.';
   }catch{jobStatus.textContent='Unknown preparation outcome; refresh canonical receipts before trying again.';}
-  finally{busy=false;controls();await refreshJobs();}
+  finally{busy=false;controls();await refreshJobs({preserveStatus:true});}
 }
-async function nativeCommand(type,step){
+async function nativeCommand(type,step,trigger){
   if(busy||!selectedJob?.ok)return;
   const name=selectedJob.slug,revision=selectedJob.revision;
+  const armStep=type==='BEGIN_NATIVE'?step:
+    type==='VERIFY_FRESH_CHAT2'?'READ_ONLY_HISTORY':null;
+  if(armStep){
+    if(!testSlug.test(name)){
+      jobStatus.textContent='Native AI testing requires a valid exact generator target.';return;
+    }
+    const required=armStep+' '+name;
+    const confirmedJob=selectedJob;
+    const confirmation=await requestTypedConfirmation(
+      trigger,required,
+      'Authorize exactly one guarded AI step. A lost reply requires independent reconciliation, never blind replay.');
+    if(confirmation===null)return;
+    if(selectedJob!==confirmedJob||selectedJob.revision!==revision){
+      jobStatus.textContent='Selected AI job changed. No operation authorized.';return;
+    }
+    busy=true;controls();
+    try{
+      const armed=await ai('ARM_EXACT_AI',{
+        slug:name,expectedRevision:revision,step:armStep,confirmation});
+      if(!armed?.ok){jobStatus.textContent='AI authorization held: '+
+        (armed?.code||'CONTEXT_UNVERIFIED');return;}
+    }catch{jobStatus.textContent='AI arm reply unknown; no native step submitted. Inspect job.';return;}
+    finally{busy=false;controls();}
+  }
   busy=true;controls();
   jobStatus.textContent=type==='PROBE_NATIVE'?
     'Observing native session without retry and checking saved source bytes…':
@@ -193,19 +236,50 @@ async function nativeCommand(type,step){
   }catch{
     jobStatus.textContent='Native command disconnected. Effect may have occurred; do not retry before independent reconciliation.';
   }finally{
-    busy=false;selectedJob=null;controls();await refreshJobs();
+    busy=false;controls();await refreshJobs({preserveStatus:true});
   }
 }
+enableAuto.addEventListener('click',async()=>{
+  if(busy||!selectedJob?.ok||selectedJob.autoEnabled)return;
+  const held=selectedJob,name=held.slug;
+  const confirmation=await requestTypedConfirmation(enableAuto,'AUTO AI '+name,
+    'Authorize background native AI only on this exact, currently source-verified job. No broad generator permission. A lost reply is never blindly retried.');
+  if(confirmation===null)return;
+  if(selectedJob!==held){jobStatus.textContent='Job selection changed. No automation sent.';return;}
+  busy=true;controls();
+  try{
+    const out=await ai('SET_AUTO_JOB',{slug:name,expectedRevision:held.revision,
+      enabled:true,confirmation});
+    jobStatus.textContent=out?.ok?
+      'Background AI armed for exact verified job. Steps remain guarded, bounded and individually journaled.':
+      'Background AI held: '+(out?.code||'CONTEXT_UNVERIFIED');
+  }catch{jobStatus.textContent='AI activation reply unknown; reload canonical job before further action.';}
+  finally{busy=false;await refreshJobs({preserveStatus:true});}
+});
+disableAuto.addEventListener('click',async()=>{
+  if(busy||!selectedJob?.ok||!selectedJob.autoEnabled)return;
+  const held=selectedJob;
+  busy=true;controls();
+  try{
+    const out=await ai('SET_AUTO_JOB',{slug:held.slug,
+      expectedRevision:held.revision,enabled:false});
+    jobStatus.textContent=out?.ok?
+      'Future background AI admissions disabled. Reconcile any already possible effect separately.':
+      'Automation disable not confirmed: '+(out?.code||'STALE_REVISION');
+  }catch{jobStatus.textContent='Disable reply unknown; inspect current canonical state.';}
+  finally{busy=false;await refreshJobs({preserveStatus:true});}
+});
 advanceNative.addEventListener('click',()=>nativeCommand('ADVANCE_JOB'));
-runNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT1_SEND'));
+runNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT1_SEND',runNative));
+stopNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','STOP',stopNative));
 observeNative.addEventListener('click',()=>nativeCommand('PROBE_NATIVE'));
 opfsNative.addEventListener('click',()=>nativeCommand('INSPECT_WORKSPACE'));
-freshNative.addEventListener('click',()=>nativeCommand('VERIFY_FRESH_CHAT2'));
+freshNative.addEventListener('click',()=>nativeCommand('VERIFY_FRESH_CHAT2',undefined,freshNative));
 testNative.addEventListener('click',()=>nativeCommand('RUN_TESTS'));
 repairNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE',
-  selectedJob?.nativeState==='CHAT2_OBSERVED_IDLE'?'CHAT2_REPAIR':'CHAT1_REPAIR'));
-resetNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT2_RESET'));
-chat2Native.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT2_SEND'));
+  selectedJob?.nativeState==='CHAT2_OBSERVED_IDLE'?'CHAT2_REPAIR':'CHAT1_REPAIR',repairNative));
+resetNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT2_RESET',resetNative));
+chat2Native.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT2_SEND',chat2Native));
 async function refreshConcurrency(){
   try{
     const r=await ai('GET_CONCURRENCY');

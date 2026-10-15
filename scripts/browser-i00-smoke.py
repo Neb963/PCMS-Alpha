@@ -6,10 +6,12 @@ import http.client
 import json
 import os
 import pathlib
+from i17_firefox_resource import sample_firefox_processes
 import re
 import subprocess
 import sys
 import tempfile
+from i17_refresher_fixture import Fixture as RefresherFixture
 import time
 from urllib.parse import urlparse
 from urllib.error import HTTPError
@@ -43,15 +45,52 @@ def call(method, route, payload=None, timeout=30):
 
 def open_session(firefox, profile):
     data = call('POST','/session',{'capabilities': {'alwaysMatch': {
-        'browserName':'firefox',
+        'browserName':'firefox','acceptInsecureCerts':True,
         'moz:firefoxOptions':{
             'binary':str(firefox),
             'args':['-headless', '-no-remote', '-profile',str(profile)],
             'prefs':{'xpinstall.signatures.required':False,'extensions.autoDisableScopes':0,
-                     'extensions.background.idle.timeout':1500}
+                     'extensions.background.idle.timeout':1500,
+                     'network.dns.localDomains':'perchance.org','network.trr.mode':5}
         }
     }}}, timeout=60)
     return data['sessionId'] if 'sessionId' in data else data['value']['sessionId']
+
+
+def seed_refresher_network(session, profile, proxy_port):
+    # Configure ONLY a disposable local protected proxy before process restart.
+    # Raw fixture storage seed is not an application command or production API.
+    call('POST',f'/session/{session}/moz/context',{'context':'chrome'})
+    # moz/addon/install returns before asynchronous WebExtension startup may
+    # allocate its UUID. Wait for that read-only identity barrier, then persist
+    # and verify it on disk. Never retry installation or infer an absent ID.
+    mapping={}
+    for _ in range(100):
+        mapping=execute(session,"return JSON.parse(Services.prefs.getStringPref('extensions.webextensions.uuids','{}')); ")
+        if ID in mapping: break
+        time.sleep(.05)
+    else: raise RuntimeError('Installed Gecko ID did not acquire its UUID within the startup bound')
+    execute(session,'Services.prefs.savePrefFile(null); return true;')
+    call('POST',f'/session/{session}/moz/context',{'context':'content'})
+    uuid=addons_uuid(profile)
+    assert uuid==mapping[ID], 'Installed UUID did not persist exactly'
+    call('POST',f'/session/{session}/url',{'url':f'moz-extension://{uuid}/pcms/index.html'})
+    code="""const done=arguments[arguments.length-1];
+    (async()=>{
+      await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+      const container=await browser.contextualIdentities.create({name:'I17 isolated provider fixture',color:'blue',icon:'fingerprint'});
+      await new Promise(r=>setTimeout(r,250));
+      const {makeDefaultState}=await import('../lib/storage.js');
+      const state=makeDefaultState(),personaUid='11111111-1111-4111-8111-111111111111',routeId='i17_fixture_proxy';
+      state.global.unmanagedPolicy='block';state.global.mullvadNative.enabled=false;state.global.mullvadNative.autoStart=false;
+      state.routes[routeId]={id:routeId,name:'Loopback-only I17 fixture',provider:'generic',type:'http',host:'127.0.0.1',port:PROXY_PORT,enabled:true};
+      state.profiles[container.cookieStoreId]={containerId:container.cookieStoreId,personaUid,managed:true,
+        routeId,killSwitch:true,blockLocalNetwork:true,domainMode:'allowlist',allowedDomains:['perchance.org'],status:'active'};
+      const context={cookieStoreId:container.cookieStoreId,personaUid,routeId};
+      await browser.storage.local.set({state,pcmsI17FixtureContext:context});
+      done(context);
+    })().catch(e=>done({error:'FIXTURE_NETWORK_SEED_FAILED',detail:String(e)}));""".replace('PROXY_PORT',str(proxy_port))
+    return call('POST',f'/session/{session}/execute/async',{'script':code,'args':[]},timeout=30)
 
 
 def execute(session, script):
@@ -167,6 +206,9 @@ def supply_effect_idb_probe(session):
           routeId:'fixture-protected'}),
         runSupplyStep:async (persona,req)=>{
           if(persona!=='persona-fixture-0001')throw Error('Wrong fake persona');
+          if(req.kind==='PREFLIGHT_CREATE'||req.kind==='PREFLIGHT_RENAME')
+            return {ok:true,effectBoundary:'NOT_DISPATCHED',preflight:{version:2,
+              operationId:req.operationId,kind:req.kind.slice(10),slug:req.slug}};
           effects.push(req.kind);
           if(req.kind==='CREATE')
             return {ok:true,ack:'CREATED',temporarySlug:'temp-fake-01'};
@@ -182,7 +224,6 @@ def supply_effect_idb_probe(session):
         }
       };
       const boundary=createSupplyBoundary(api,{guard:()=>guard,
-        effectGate:()=>true,gitGate:()=>true,
         gitWrite:async ({folder,slug,token})=>{
           if(token!=='offline-git-write-token')throw Error('Wrong fixture token');
           effects.push('GIT_MARKER');
@@ -193,18 +234,98 @@ def supply_effect_idb_probe(session):
         return boundary.run({type:'EXECUTE_ITEM',params:{batchId,itemId,
           expectedRevision:revision}},sender);
       }
+      const batch=await boundary.run({type:'GET_BATCH',params:{batchId}},sender);
+      const slug=batch.batch.items.find(x=>x.itemId===itemId).slug;
+      const arm=async(revision,action)=>boundary.run({type:'ARM_EXACT_ITEM',params:{
+        batchId,itemId,expectedRevision:revision,confirmation:action+' '+slug}},sender);
+      const createArm=await arm(1,'CREATE');
+      if(!createArm.ok)throw Error('CREATE admission '+createArm.code);
       const created=await effect(1);
+      if(!created.ok)throw Error('CREATE first causal '+created.code+' / '+created.state);
+      const renameArm=await arm(created.revision,'RENAME');
+      if(!renameArm.ok)throw Error('RENAME admission '+renameArm.code);
       const renamed=await effect(created.revision);
+      const gitArm=await boundary.run({type:'ARM_EXACT_GIT',params:{
+        batchId,itemId,expectedRevision:renamed.revision,confirmation:'GIT '+slug}},sender);
+      if(!gitArm.ok)throw Error('Git admission '+gitArm.code);
       const linked=await boundary.run({type:'FINISH_SOURCE_FOLDER',params:{
         batchId,itemId,expectedRevision:renamed.revision,
         token:'offline-git-write-token'}},sender);
       const fromPort=await boundary.run({type:'GET_BATCH',params:{batchId}},sender);
-      done({created,renamed,linked,effects,
+      done({createArm,renameArm,gitArm,created,renamed,linked,effects,
         final:fromPort?.batch?.items?.find(x=>x.itemId===itemId)});
     })().catch(e=>done({error:'I06_EFFECT_IDB_PROBE_FAILED',detail:String(e).slice(0,220)}));'''
     return call('POST',f'/session/{session}/execute/async',
                 {'script':script,'args':[]},timeout=60)
 
+
+
+def ai_production_idb_probe(session):
+    # Real packaged admission, real IDB journal. Provider reads/effects are
+    # an independent in-memory fixture ledger; no gate override or network.
+    script = '''const done=arguments[arguments.length-1];
+    (async()=>{
+      const db=await (await import('./journal.mjs')).openCanonicalDatabase();
+      const store=(await import('./ai-store.mjs')).createAiStore(db);
+      const {exactSource}=await import('./staging-core.mjs');
+      const {createAiBoundary}=await import('./ai-boundary.mjs');
+      const slug='ordinary-ai-production-path',sid='8'.repeat(64),effects=[];
+      const encode=s=>btoa(s),html='<p>fixture</p>';
+      const bytes=async pjs=>exactSource([{path:'main.pjs',base64:encode(pjs)},{path:'index.html',base64:encode(html)}]);
+      const initial=await bytes('initial'),final=await bytes('meaningful native repair');
+      const stage={slug,revision:1,state:'SOURCE_VERIFIED',accountId:'ai-production-account',
+        personaUid:'ai-production-persona',remotePublicId:'ai-production-target',principalFingerprint:'f'.repeat(64),
+        nonce:'a'.repeat(32),candidate:initial,previous:initial};
+      await new Promise((resolve,reject)=>{const tx=db.transaction(['meta'],'readwrite');
+        tx.objectStore('meta').put({key:'stage:'+slug,record:stage});tx.oncomplete=resolve;tx.onabort=reject;});
+      const started=await store.start(stage);
+      if(!started.ok)throw Error('start '+started.code);
+      let saved='initial',busy=false,dirty=false;
+      const guard=()=>({getSafeRouteReadiness:async()=>({ready:true,routeId:'protected',cookieStoreId:'fixture-container'}),
+        inspectStageEditor:async()=>({ok:!dirty,clean:!dirty}),
+        observeReadOnly:async()=>({ok:true,principalFingerprint:stage.principalFingerprint,
+          original:{ownerResult:'IS_OWNER',remotePublicId:stage.remotePublicId,visibility:'UNLISTED',pjs:saved,html,assets:[]}}),
+        runNativeAiStep:async(_,request)=>{
+          if(request.action==='OBSERVE')return {ok:true,slug,sessionDigest:sid,busy,chatEntries:2,
+            sourceSaved:!dirty,editorClean:!dirty,hasQueue:false,inputOccupied:false,attachmentsPending:false};
+          if(request.action==='ORACLE_SMOKE')return {ok:true,source:'INDEPENDENT_BROWSER_ASSERTION',
+            name:request.name,result:'FAIL',observedAt:Date.now()};
+          if((await store.getJobFull(slug)).job.native.state!=='DISPATCH_POSSIBLE')throw Error('effect before journal');
+          if(request.action==='STOP'&&request.expectedSessionDigest!==sid)throw Error('wrong stop session');
+          effects.push(request.action);
+          if(request.action==='SEND'){saved='meaningful native repair';busy=effects.length===2;dirty=busy;}
+          if(request.action==='STOP'){busy=false;dirty=false;}
+          throw Error('fixture effect committed, acknowledgment lost');
+        }});
+      const api={runtime:browser.runtime,storage:browser.storage};
+      const sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')+'#work-queue'};
+      const boundary=createAiBoundary(api,{open:async()=>db,guard});
+      const cmd=async(type,extra={})=>boundary.run({type,params:{slug,
+        expectedRevision:(await store.getJobFull(slug)).job.revision,...extra}},sender);
+      const act=async step=>{const armed=await cmd('ARM_EXACT_AI',{step,confirmation:step+' '+slug});
+        if(!armed.ok)throw Error('admission '+step+' '+armed.code);
+        const result=await cmd('BEGIN_NATIVE',{step});
+        if(result.code!=='AI_DISPATCH_POSSIBLE_RECONCILE')throw Error('dispatch '+step+' '+JSON.stringify(result));
+        return result;};
+      const sent=await act('CHAT1_SEND');
+      const duplicate=await cmd('BEGIN_NATIVE',{step:'CHAT1_SEND'});
+      const observed=await cmd('PROBE_NATIVE');
+      if(!observed.ok)throw Error('source checkpoint '+observed.code);
+      if((await store.getJobFull(slug)).job.finalSource?.fingerprint!==final.fingerprint)throw Error('F not checkpointed');
+      const failed=await cmd('RUN_TESTS');
+      if(failed.state!=='KNOWN_FAILURE')throw Error('independent failure '+failed.code);
+      const repaired=await act('CHAT1_REPAIR');
+      const running=await cmd('PROBE_NATIVE');
+      const stop=await act('STOP');
+      const stopped=await cmd('PROBE_NATIVE');
+      const after=(await store.getJobFull(slug)).job;
+      done({effects,sent:sent.code,duplicate:duplicate.ok,repaired:repaired.code,stop:stop.code,
+        running:running.nativeState,stopped:stopped.nativeState,testsVerified:after.state==='TESTS_VERIFIED',
+        source:after.sourceFingerprint===final.fingerprint,
+        ui:!!document.getElementById('pcms-ai-stop')&&document.getElementById('pcms-ai-enable-auto').closest('[data-pcms-work-panel]')?.dataset.pcmsWorkPanel==='ai'});
+      db.close();
+    })().catch(e=>done({error:String(e)}));'''
+    return call('POST',f'/session/{session}/execute/async',{'script':script,'args':[]},timeout=60)
 
 
 def adoption_idb_probe(session):
@@ -213,7 +334,7 @@ def adoption_idb_probe(session):
     # no live identity, credentials, provider writes or Git operations.
     script = '''const done=arguments[arguments.length-1];
     (async()=>{
-      const {createAdoptionBoundary}=await import('./adoption-boundary.mjs');
+      const {createAdoptionBoundary,productionAdoptionArchiveGate}=await import('./adoption-boundary.mjs');
       const {createAdoptionStore}=await import('./adoption-store.mjs');
       const {openCanonicalDatabase}=await import('./journal.mjs');
       const api={runtime:browser.runtime,storage:browser.storage};
@@ -232,7 +353,7 @@ def adoption_idb_probe(session):
       const db=await openCanonicalDatabase();
       const store=createAdoptionStore(db);
       const boundary=createAdoptionBoundary(api,{guard:()=>guard,
-        gitGate:()=>true,
+        gitGate:productionAdoptionArchiveGate,
         gitWrite:async ({folder,original:preserved})=>{
           const onDisk=await store.getFull(slug);
           if(onDisk.record?.archiveState!=='DISPATCH_POSSIBLE')
@@ -506,11 +627,16 @@ def diagnostic_zip_probe(session):
       const {makeSafeArchive}=await import('./diagnostic-archive.mjs');
       const source=document.getElementById('report').textContent;
       const report=JSON.parse(source);
-      const zip=makeSafeArchive({...report,secretCanary:'DO_NOT_EXPOSE'});
+      const zip=makeSafeArchive({...report,secretCanary:'DO_NOT_EXPOSE',
+        refresher:{...report.refresher,other:'DO_NOT_EXPOSE'}});
       const readback=new TextDecoder().decode(zip);
+      const markdown=document.getElementById('markdown')?.value||'';
       done({magic:Array.from(zip.slice(0,4)),length:zip.length,
         files:readback.includes('report.json') && readback.includes('README.md'),
-        canary:readback.includes('DO_NOT_EXPOSE')});
+        canary:readback.includes('DO_NOT_EXPOSE'),
+        keptStatus:readback.includes('"readPeak": '+report.refresher.readPeak),
+        markdown:markdown.includes('Refresher mode: '+report.refresher.mode)&&
+          markdown.includes('Read peak: '+report.refresher.readPeak)});
     })().catch(()=>done({error:'ARCHIVE_PROBE_FAILED'}));'''
     return call('POST',f'/session/{session}/execute/async',
                 {'script':script,'args':[]},timeout=30)
@@ -556,7 +682,7 @@ def main():
     expected_hash=hashlib.sha256(archive.read_bytes()).hexdigest()
     print('B XPI_SHA256=',expected_hash,flush=True)
     print('B FF_DEV_BINARY=',browser,flush=True)
-    with tempfile.TemporaryDirectory(prefix='pcms-i00-firefox-') as folder:
+    with tempfile.TemporaryDirectory(prefix='pcms-i00-firefox-') as folder, RefresherFixture() as refresher_fixture:
         profile=pathlib.Path(folder)/'profile'
         profile.mkdir()
         (profile/'user.js').write_text('user_pref("xpinstall.signatures.required", false);\n')
@@ -577,6 +703,9 @@ def main():
                 installed=call('POST',f'/session/{first}/moz/addon/install',{'path':str(archive),'temporary':False},timeout=45)
                 assert installed == ID, f'Unexpected installed add-on ID {installed}'
                 print('B INSTALLED_ADDON_ID=',installed,flush=True)
+                fixture_network=seed_refresher_network(first,profile,refresher_fixture.proxy_port)
+                assert fixture_network.get('cookieStoreId'),fixture_network
+                print('B I17_LOOPBACK_ONLY_PROTECTED_FIXTURE_ROUTE_SEEDED=PASS',flush=True)
             finally: close(first)
             # A *second process* with the same disposable profile distinguishes installed XPI from temp web-ext.
             after=open_session(browser,profile)
@@ -590,6 +719,52 @@ def main():
                     if view.get('selected'): break
                     time.sleep(.15)
                 assert view['selected']==['overview'],view
+                # Production source-save modules, actual native MAIN/ISOLATED
+                # injection and committed Firefox IDB against loopback HTTPS.
+                source_probe=call('POST',f'/session/{after}/execute/async',{
+                    'script':pathlib.Path(__file__).with_name('i17_refresher_probe.js').read_text(),
+                    'args':[]},timeout=120)
+                assert source_probe.get('ok') is True,source_probe
+                observed=source_probe['results']
+                assert observed['present']['effect']=='EFFECT_CONFIRMED' and observed['present']['feed']=='PRESENT',source_probe
+                assert observed['absent']['effect']=='EFFECT_CONFIRMED' and observed['absent']['feed']=='ABSENT',source_probe
+                assert observed['no-persist']['effect']=='INEFFECTIVE',source_probe
+                assert observed['lost-ack']['effect']=='EFFECT_CONFIRMED',source_probe
+                assert observed['dirty']['effect']==observed['idb-abort']['effect']=='NOT_DISPATCHED',source_probe
+                assert observed['recurring']['sequence']==2 and observed['recurring']['enabled'] is True,source_probe
+                assert source_probe['markedBeforeSave']==source_probe['saves']==5,source_probe
+                ledger=refresher_fixture.ledger()
+                assert ledger['i17-native-present']['saves']==2,ledger
+                for scenario in ['absent','no-persist','lost-ack']:
+                    assert ledger['i17-native-'+scenario]['saves']==1,ledger
+                assert ledger['i17-native-dirty']['saves']==ledger['i17-native-idb-abort']['saves']==0,ledger
+                assert ledger['i17-native-present']['outputTemplate'].count('PCMS_REFRESH_MARKER')==1,ledger
+                assert ledger['i17-native-no-persist']['outputTemplate'].count('PCMS_REFRESH_MARKER')==0,ledger
+                print('B I17_SOURCE_SAVE_NATIVE_GUARD_IDB_AND_SAME_XPI_RECURRING='+json.dumps(source_probe),flush=True)
+                entry_probe=call('POST',f'/session/{after}/execute/async',{
+                    'script':pathlib.Path(__file__).with_name('i17_refresher_entry_probe.js').read_text(),
+                    'args':[]},timeout=120)
+                assert entry_probe.get('ok') is True,entry_probe
+                assert refresher_fixture.ledger()['i17-entry-present']['saves']==1,refresher_fixture.ledger()
+                print('B I17_REAL_ENTRY_UI_DONOR_LEASE_SOURCE_SAVE='+json.dumps(entry_probe),flush=True)
+                wake_script=pathlib.Path(__file__).with_name('i17_refresher_wake_probe.js').read_text()
+                source_wake=call('POST',f'/session/{after}/execute/async',{
+                    'script':wake_script,'args':['PREPARE']},timeout=120)
+                assert source_wake.get('ok') is True,source_wake
+                assert refresher_fixture.ledger()['i17-entry-wake']['saves']==1,refresher_fixture.ledger()
+                close(after)
+                refresher_fixture.release_readback('i17-entry-wake')
+                after=open_session(browser,profile)
+                assert addons_uuid(profile)==uuid
+                call('POST',f'/session/{after}/url',{'url':url})
+                recovered_source=call('POST',f'/session/{after}/execute/async',{
+                    'script':wake_script,'args':['VERIFY']},timeout=120)
+                assert recovered_source.get('ok') is True,recovered_source
+                assert recovered_source['id']==source_wake['id'],(source_wake,recovered_source)
+                assert refresher_fixture.ledger()['i17-entry-wake']['saves']==1,refresher_fixture.ledger()
+                print('B I17_REAL_PROCESS_COLD_SOURCE_RECONCILIATION_NO_REPLAY='+json.dumps(recovered_source),flush=True)
+
+
                 assert view['links']==['#overview','#generators','#work-queue','#accounts','#refresher','#settings'],view
                 assert view['unsafe']==0,view
                 # The exact installed XPI must expose a read-only guarded
@@ -633,6 +808,8 @@ def main():
                 unauthorized=inventory_command(after,{'type':'SYNC_ACCOUNT','params':{
                     'accountId':'fixture_account_a01','expectedRevision':2}})
                 assert unauthorized.get('code')=='ACCOUNT_IDENTITY_UNVERIFIED',unauthorized
+                rss_before=sample_firefox_processes(browser)
+                quota_before=execute(after,"return navigator.storage.estimate().then(v=>({usageBytes:v.usage??null,quotaBytes:v.quota??null})).catch(()=>({usageBytes:null,quotaBytes:null}))")
                 seeded=inventory_idb_probe(after)
                 assert seeded.get('enrolled') is True and seeded.get('verified') is True,seeded
                 assert seeded.get('accepted',{}).get('ok') is True,seeded
@@ -663,6 +840,99 @@ def main():
                     time.sleep(.15)
                 assert '51–100' in pagination,pagination
                 print('B I04_REAL_IDB_1250_FILTER_PAGINATION_OWNER_HOLD=PASS',flush=True)
+                # I17 B: a real installed-XPI inventory sorts the entire
+                # canonical 1,250-row dataset before paging, not merely the
+                # first 50 rows already displayed. A page-local reverse sort
+                # would expose gen-0049 first and fail this independent oracle.
+                execute(after,"""const direction=document.getElementById('pcms-generator-sort-direction');
+                  direction.value='desc';direction.dispatchEvent(new Event('change'));
+                  return true;""")
+                first_sort={}
+                for _ in range(50):
+                    first_sort=execute(after,"""const slugs=[...document.querySelectorAll('#pcms-generators-rows .pcms-generator-row-target')].map(x=>x.textContent);
+                      return {first:slugs[0],last:slugs.at(-1),count:slugs.length,
+                        range:document.getElementById('pcms-generator-count').textContent,
+                        observed:document.querySelectorAll('#pcms-generators-rows .pcms-gen-observed time').length};""")
+                    if first_sort.get('first')=='gen-1249' and first_sort.get('last')=='gen-1200':break
+                    time.sleep(.15)
+                assert first_sort.get('first')=='gen-1249' and first_sort.get('last')=='gen-1200',first_sort
+                assert first_sort.get('count')==50 and first_sort.get('observed')==50,first_sort
+                execute(after,"document.getElementById('pcms-generator-next').click();return true")
+                second_sort={}
+                for _ in range(50):
+                    second_sort=execute(after,"""const slugs=[...document.querySelectorAll('#pcms-generators-rows .pcms-generator-row-target')].map(x=>x.textContent);
+                      return {first:slugs[0],last:slugs.at(-1),count:slugs.length,
+                        range:document.getElementById('pcms-generator-count').textContent};""")
+                    if second_sort.get('first')=='gen-1199' and second_sort.get('last')=='gen-1150':break
+                    time.sleep(.15)
+                assert second_sort.get('first')=='gen-1199' and second_sort.get('last')=='gen-1150',second_sort
+                assert second_sort.get('count')==50 and '51–100' in second_sort.get('range',''),second_sort
+                # An injected arbitrary sort key must be rejected at the
+                # extension port, not interpolated into a canonical field.
+                bad_sort=inventory_command(after,{'type':'LIST_INVENTORY','params':{
+                  'sortBy':'route', 'sortDirection':'asc'}})
+                assert bad_sort.get('code')=='INVALID_PARAMS',bad_sort
+                print('B I17_GLOBAL_1250_SORT_PAGING_AND_OBSERVED_COLUMN=PASS',flush=True)
+                rss_after=sample_firefox_processes(browser)
+                quota_after=execute(after,"return navigator.storage.estimate().then(v=>({usageBytes:v.usage??null,quotaBytes:v.quota??null})).catch(()=>({usageBytes:null,quotaBytes:null}))")
+                print('B I17_FIREFOX_1250_IDB_QUOTA_DELTA='+json.dumps({
+                  'before':quota_before,'after':quota_after,
+                  'deltaUsageBytes':quota_after['usageBytes']-quota_before['usageBytes']
+                    if isinstance(quota_after.get('usageBytes'),int) and isinstance(quota_before.get('usageBytes'),int) else None,
+                  'scope':'SAME_PACKAGED_FIREFOX_PROFILE_IDB_SEED_1250',
+                  'acceptance':'POINT_SAMPLE_ONLY_NOT_QUOTA_STRESS'}),flush=True)
+                measured=rss_before.get('available') and rss_after.get('available')
+                print('B I17_FIREFOX_PROCFS_RESOURCE_SAMPLES='+json.dumps({
+                    'before':rss_before,'after':rss_after,
+                    'rssSumDeltaKiB':rss_after['rssSumKiB']-rss_before['rssSumKiB'] if measured else None,
+                    'cpuDeltaTicks':rss_after['cpuTicks']-rss_before['cpuTicks'] if measured else None,
+                    'acceptance':'POINT_SAMPLES_NOT_PEAK_OR_PRODUCTION_SLO'}),flush=True)
+
+                # I17 UX-01 B: real packaged installed Firefox, actual local
+                # read-only ports and canonical entity identities. A result is
+                # navigation, never login proof or a provider-side mutation.
+                quick_field='pcms-quick-generator-search'
+                execute(after,"const el=document.getElementById('pcms-quick-generator-search');el.value='gen-0999';el.dispatchEvent(new Event('input',{bubbles:true}));return true")
+                search_result={}
+                for _ in range(45):
+                    search_result=execute(after,"return {expanded:document.getElementById('pcms-quick-generator-search').getAttribute('aria-expanded'),text:document.getElementById('pcms-global-results').textContent,buttons:document.querySelectorAll('#pcms-global-results button').length}")
+                    if search_result.get('buttons',0)>0:break
+                    time.sleep(.13)
+                assert search_result.get('buttons')==1 and 'gen-0999' in search_result.get('text',''),search_result
+                result=execute(after,"const el=document.querySelector('#pcms-global-results button');el.click();return {hash:location.hash,value:document.getElementById('pcms-generator-query').value,hidden:document.getElementById('pcms-global-results').hidden}")
+                assert result=={'hash':'#generators','value':'gen-0999','hidden':True},result
+                execute(after,"const el=document.getElementById('pcms-quick-generator-search');el.value='fixture_inventory_01';el.dispatchEvent(new Event('input',{bubbles:true}));return true")
+                for _ in range(45):
+                    search_result=execute(after,"return {text:document.getElementById('pcms-global-results').textContent,buttonLabels:[...document.querySelectorAll('#pcms-global-results button')].map(x=>x.getAttribute('aria-label'))}")
+                    if any('account fixture_inventory_01'==x for x in search_result.get('buttonLabels',[])):break
+                    time.sleep(.13)
+                assert 'account fixture_inventory_01' in search_result.get('buttonLabels',[]),search_result
+                account_nav=execute(after,"document.querySelector('[aria-label=\"account fixture_inventory_01\"]').click();return {hash:location.hash,selected:[...document.querySelectorAll('[data-pcms-account-id]')].some(x=>x.dataset.pcmsAccountId==='fixture_inventory_01')}")
+                assert account_nav.get('hash')=='#accounts',account_nav
+                for _ in range(20):
+                    focussed=execute(after,"return document.activeElement?.dataset?.pcmsAccountId||null")
+                    if focussed=='fixture_inventory_01':break
+                    time.sleep(.12)
+                assert focussed=='fixture_inventory_01',focussed
+                print('B I17_LOCAL_ACCOUNT_GENERATOR_SEARCH_CANONICAL_NAVIGATION=PASS',flush=True)
+                # P56-05 B: late local search must not reopen a dismissed
+                # panel or navigate to an invented generator while unresolved.
+                search_dismiss=execute(after,"""const box=document.getElementById('pcms-quick-generator-search');
+                  box.value='unknown-not-a-generator-123';
+                  box.dispatchEvent(new Event('input',{bubbles:true}));
+                  const before=location.hash;
+                  box.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
+                  const afterEnter=location.hash;
+                  box.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+                  return {before,afterEnter,hidden:document.getElementById('pcms-global-results').hidden};""")
+                assert search_dismiss.get('before')==search_dismiss.get('afterEnter'),search_dismiss
+                assert search_dismiss.get('hidden'),search_dismiss
+                time.sleep(.55)
+                search_post=execute(after,"return {hash:location.hash,hidden:document.getElementById('pcms-global-results').hidden}")
+                assert search_post.get('hidden') and search_post.get('hash')==search_dismiss['before'],search_post
+                print('B I17_SEARCH_DISMISS_AND_NO_GUESSED_TARGET=PASS',flush=True)
+
+
 
                 # I06 actual installed Firefox IndexedDB and extension port
                 # retain frozen operator slugs and reject duplication. Effect
@@ -709,6 +979,140 @@ def main():
                 assert visible.get('freeze') is True,visible
                 persisted=supply_command(after,{'type':'LIST_BATCHES'})
                 assert persisted.get('ok') is True and len(persisted['batches'])==2,persisted
+                # PCMS-ESR-007: exercise the real Work Queue button in an
+                # installed combined XPI. A synthetic verified account has NO
+                # donor protected route: authorization must hold, not dispatch.
+                disposable='pcms-test-browser-confirm-0001'
+                ui_batch=supply_command(after,{'type':'FREEZE','params':{
+                    'batchId':'batch_browser_ui_confirm_0001',
+                    'accountId':'fixture_inventory_01','expectedAccountRevision':2,
+                    'slugs':[disposable]}})
+                assert ui_batch.get('ok') is True,ui_batch
+                assert ui_batch['batch']['items'][0]['state']=='FROZEN',ui_batch
+                call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
+                queue_ready=False
+                for _ in range(50):
+                    queue_ready=execute(after,"return [...document.querySelectorAll('button.pcms-supply-guarded-step')].some(b=>b.getAttribute('aria-label')?.includes('pcms-test-browser-confirm-0001'))")
+                    if queue_ready:break
+                    time.sleep(.15)
+                assert queue_ready,'Exact frozen disposable button not rendered in real Work Queue'
+                opened=execute(after,"""const b=[...document.querySelectorAll('button.pcms-supply-guarded-step')]
+                  .find(x=>x.getAttribute('aria-label')?.includes('pcms-test-browser-confirm-0001'));
+                  b.click();const f=b.nextElementSibling;
+                  return {form:f?.classList.contains('pcms-typed-intent'),
+                    text:f?.textContent,input:f?.querySelector('input')?.value,
+                    fieldFocus:document.activeElement===f?.querySelector('input')};""")
+                assert opened['form'] and opened['fieldFocus'],opened
+                assert 'CREATE '+disposable in opened['text'],opened
+                canceled=execute(after,"""const f=document.querySelector('.pcms-typed-intent');
+                  f.querySelector('button[type=button]').click();
+                  return {gone:!document.querySelector('.pcms-typed-intent')};""")
+                assert canceled['gone'],canceled
+                before=supply_command(after,{'type':'GET_BATCH','params':{
+                    'batchId':'batch_browser_ui_confirm_0001'}})
+                assert before.get('batch',{}).get('items',[{}])[0].get('state')=='FROZEN',before
+                # A nonmatching confirmation must never enter the backend.
+                invalid_form=execute(after,"""const b=[...document.querySelectorAll('button.pcms-supply-guarded-step')]
+                  .find(x=>x.getAttribute('aria-label')?.includes('pcms-test-browser-confirm-0001'));
+                  b.click();const f=document.querySelector('.pcms-typed-intent');
+                  const input=f.querySelector('input');input.value='CREATE wrong-slug';
+                  f.querySelector('button[type=submit]').click();
+                  return {shown:!!document.querySelector('.pcms-typed-intent'),
+                    invalid:input.getAttribute('aria-invalid'),
+                    feedback:f.querySelector('[role=status]').textContent};""")
+                assert invalid_form['shown'] and invalid_form['invalid']=='true',invalid_form
+                assert 'No action authorized' in invalid_form['feedback'],invalid_form
+                execute(after,"document.querySelector('.pcms-typed-intent button[type=button]').click();return true")
+                unchanged=supply_command(after,{'type':'GET_BATCH','params':{
+                    'batchId':'batch_browser_ui_confirm_0001'}})
+                assert unchanged.get('batch',{}).get('items',[{}])[0].get('state')=='FROZEN',unchanged
+                # Exact text is now submitted through the real installed
+                # Work Queue handler and real background port. The fixture
+                # has NO protected donor Persona, so ARM must visibly deny
+                # before EXECUTE_ITEM or any provider operation can occur.
+                correct=execute(after,"""const b=[...document.querySelectorAll('button.pcms-supply-guarded-step')]
+                  .find(x=>x.getAttribute('aria-label')?.includes('pcms-test-browser-confirm-0001'));
+                  b.click();const f=document.querySelector('.pcms-typed-intent');
+                  const input=f.querySelector('input');
+                  input.value='CREATE pcms-test-browser-confirm-0001';
+                  f.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+                  return !document.querySelector('.pcms-typed-intent');""")
+                assert correct is True,'Exact inline form did not submit through actual click path'
+                denied_ui=None
+                for _ in range(90):
+                    denied_ui=execute(after,"""const li=[...document.querySelectorAll('#pcms-supply-queue li')]
+                      .find(x=>x.textContent.includes('pcms-test-browser-confirm-0001'));
+                      return li?.querySelector('.pcms-supply-row-status')?.textContent||'';""")
+                    if denied_ui.startswith('Authorization held:'):break
+                    time.sleep(.15)
+                assert denied_ui.startswith('Authorization held:'),denied_ui
+                still_held=supply_command(after,{'type':'GET_BATCH','params':{
+                    'batchId':'batch_browser_ui_confirm_0001'}})
+                assert still_held.get('batch',{}).get('items',[{}])[0].get('state')=='FROZEN',still_held
+                print('B I17_ESR007_REAL_WORK_QUEUE_INLINE_CANCEL_MISMATCH_GUARDED_DENIAL_ZERO_DISPATCH=PASS',flush=True)
+                # I17 B: the ordinary-generator workflow must be visible,
+                # exact-target and guarded in the real installed combined XPI.
+                # No route exists for the synthetic fixture: one real UI
+                # confirmation reaches donor admission but CANNOT dispatch.
+                ordinary='another-safe-name'
+                normal_view=execute(after,"""const b=[...document.querySelectorAll('button.pcms-supply-guarded-step')]
+                  .find(x=>x.getAttribute('aria-label')?.includes('another-safe-name'));
+                  return {present:!!b,enabled:!!b&&!b.disabled};""")
+                assert normal_view=={'present':True,'enabled':True},normal_view
+                ordinary_clicked=execute(after,"""const b=[...document.querySelectorAll('button.pcms-supply-guarded-step')]
+                  .find(x=>x.getAttribute('aria-label')?.includes('another-safe-name'));
+                  b.click();const form=b.nextElementSibling;
+                  const phrase=form?.textContent||'';
+                  const input=form?.querySelector('input');
+                  input.value='CREATE another-safe-name';
+                  form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+                  return {phrase,removed:!document.querySelector('.pcms-typed-intent')};""")
+                assert ordinary_clicked['removed'] and 'CREATE '+ordinary in ordinary_clicked['phrase'],ordinary_clicked
+                ordinary_status=''
+                for _ in range(90):
+                    ordinary_status=execute(after,"""const li=[...document.querySelectorAll('#pcms-supply-queue li')]
+                      .find(x=>x.textContent.includes('another-safe-name'));
+                      return li?.querySelector('.pcms-supply-row-status')?.textContent||'';""")
+                    if ordinary_status.startswith('Authorization held:'):break
+                    time.sleep(.15)
+                assert ordinary_status.startswith('Authorization held:'),ordinary_status
+                ordinary_still=supply_command(after,{'type':'GET_BATCH','params':{
+                    'batchId':'batch_browser_0002'}})
+                assert ordinary_still.get('batch',{}).get('items',[{},{}])[1].get('state')=='FROZEN',ordinary_still
+                forged_general=supply_command(after,{'type':'ARM_EXACT_ITEM','params':{
+                    'batchId':'batch_browser_0002','itemId':'batch_browser_0002_001',
+                    'expectedRevision':1,'confirmation':'CREATE another-safe-name',
+                    'allowDirect':True}})
+                assert forged_general.get('code')=='INVALID_PARAMS',forged_general
+                print('B I17_ORDINARY_GENERATOR_REAL_INLINE_AUTH_GUARD_NO_EFFECT=PASS',flush=True)
+                # I17 B: the real installed combined XPI accepts only exact
+                # disposable pilot names. An existing normal frozen slug must
+                # remain FROZEN without any remote dispatch or extra marker.
+                normal_arm=supply_command(after,{'type':'ARM_DISPOSABLE_TEST','params':{
+                    'batchId':'batch_browser_0001','itemId':'batch_browser_0001_000',
+                    'expectedRevision':1,'confirmation':'CREATE supply-test-one'}})
+                assert normal_arm.get('code')=='PILOT_DISPOSABLE_SLUG_REQUIRED',normal_arm
+                # A normal frozen generator can never be used to probe a
+                # private Git marker; the read-only reconciliation port also
+                # must refuse it before initiating any network read.
+                frozen_git_arm=supply_command(after,{'type':'ARM_DISPOSABLE_GIT','params':{
+                    'batchId':'batch_browser_0001','itemId':'batch_browser_0001_000',
+                    'expectedRevision':1,'confirmation':'GIT supply-test-one'}})
+                assert frozen_git_arm.get('code')=='NOT_ADMISSIBLE',frozen_git_arm
+                frozen_git_read=supply_command(after,{'type':'RECONCILE_GIT','params':{
+                    'batchId':'batch_browser_0001','itemId':'batch_browser_0001_000',
+                    'expectedRevision':1,'token':'offline-git-token-01'}})
+                assert frozen_git_read.get('code')=='NOT_ADMISSIBLE',frozen_git_read
+                print('B I17_GIT_MARKER_ARM_AND_READ_ONLY_RECONCILE_DENY_FROZEN=PASS',flush=True)
+                malformed_arm=supply_command(after,{'type':'ARM_DISPOSABLE_TEST','params':{
+                    'batchId':'batch_browser_0001','itemId':'batch_browser_0001_000',
+                    'expectedRevision':1,'confirmation':'CREATE supply-test-one',
+                    'arbitraryProviderUrl':'https://example.invalid'}})
+                assert malformed_arm.get('code')=='INVALID_PARAMS',malformed_arm
+                still_frozen=supply_command(after,{'type':'GET_BATCH','params':{
+                    'batchId':'batch_browser_0001'}})
+                assert still_frozen.get('batch',{}).get('items',[{}])[0].get('state')=='FROZEN',still_frozen
+                print('B I17_DISPOSABLE_ARM_REJECTS_NORMAL_SLUG_NO_PROVIDER_EFFECT=PASS',flush=True)
                 print('B I06_REAL_IDB_FROZEN_BATCH_COLLISION_HOLDS_ZERO_PROVIDER_EFFECTS=PASS',flush=True)
 
                 # The same packaged XPI's real canonical store also exercises
@@ -726,6 +1130,21 @@ def main():
                     'expectedRevision':effect_probe['linked']['revision']}})
                 assert same_again.get('code')=='NOT_ADMISSIBLE',same_again
                 print('B I06_REAL_IDB_FAKE_PROVIDER_AND_GIT_SEPARATE_MARKERS=PASS',flush=True)
+                # I17 B: initial source authoring must actually render in the
+                # installed combined XPI for a confirmed non-READY marker,
+                # without fetching credentials or performing a Git mutation.
+                execute(after,"window.dispatchEvent(new HashChangeEvent('hashchange'));return true")
+                ready_ui=None
+                for _ in range(50):
+                    ready_ui=execute(after,"""const panel=document.querySelector('.pcms-ready-bootstrap');
+                      return {present:!!panel,summary:panel?.querySelector('summary')?.textContent||'',
+                        fields:panel?.querySelectorAll('textarea').length||0,
+                        controls:panel?.querySelectorAll('button').length||0};""")
+                    if ready_ui.get('present'):break
+                    time.sleep(.15)
+                assert ready_ui.get('present') is True and ready_ui.get('fields')==2 and ready_ui.get('controls')==2,ready_ui
+                assert 'initial READY source' in ready_ui['summary'],ready_ui
+                print('B I17_INSTALLED_INITIAL_READY_SOURCE_AUTHORING_NO_REMOTE_WRITE=PASS',flush=True)
 
 
 
@@ -864,12 +1283,14 @@ def main():
                 assert safe.get('effects')=='OFF',safe
                 assert set(safe)=={'schema','phase','effects','sections','wake','refresher'},safe
                 assert set(safe['refresher'])=={'mode','mutations','turns','reads','queuePeak','readPeak','unknownIntervals','alarmHeld','code'},safe
-                assert safe['refresher']['mode']=='SHADOW_ONLY' and safe['refresher']['mutations']==0,safe
+                assert safe['refresher']['mode']=='SCOPED_SOURCE_SAVE' and safe['refresher']['mutations']==0,safe
                 assert safe['refresher']['readPeak']<=2,safe
                 assert safe['sections']['canonical']=='section_unavailable'
                 diagnostic=diagnostic_zip_probe(after)
                 assert diagnostic.get('magic')==[80,75,3,4],diagnostic
                 assert diagnostic.get('files') is True and diagnostic.get('canary') is False,diagnostic
+                assert diagnostic.get('keptStatus') and diagnostic.get('markdown'),diagnostic
+                print('B I17_P56_08_EMERGENCY_EXPORT_MATCHES_SAFE_UI=PASS',flush=True)
                 assert 0 < diagnostic.get('length',0) < 65536,diagnostic
                 print('B I02_REDACTED_ZIP_MARKDOWN=PASS',flush=True)
                 print('B I02_CORE_INDEPENDENT_EMERGENCY=PASS',flush=True)
@@ -956,6 +1377,11 @@ def main():
                     port.postMessage(msg);
                   });
                   const actual=await cmd({type:'GET_STAGE',params:{slug}});
+                  const deniedPilot=await cmd({type:'ARM_DISPOSABLE_STAGE',params:{
+                    slug,expectedRevision:pinned.revision,confirmation:'STAGE '+slug}});
+                  const spoofedPilot=await cmd({type:'ARM_DISPOSABLE_STAGE',params:{
+                    slug,expectedRevision:pinned.revision,confirmation:'STAGE '+slug,
+                    allowDirtyEditor:true}});
                   const blocked=await cmd({type:'STAGE_PRIVATE',params:{
                     slug,expectedRevision:pinned.revision,token:'read-only-git-token'}});
                   const prepared=await store.move(slug,pinned.revision,'PREPARED');
@@ -973,11 +1399,13 @@ def main():
                   if(handoff)handoff.click();
                   const handoffIntent=host?.dataset.pcmsHumanIntent==='true';
                   done({ok:pinned.ok&&actual.ok&&blocked.code==='PROVIDER_ACTIVATION_HELD'&&
+                      deniedPilot.code==='PILOT_DISPOSABLE_SLUG_REQUIRED'&&
+                      spoofedPilot.code==='INVALID_PARAMS'&&
                       held.record.state==='HELD_UNCERTAIN'&&
                       noReplay.code==='ILLEGAL_STAGE_TRANSITION'&&handoffIntent&&
                       previous.totalBytes===0&&changes.some(x=>x.kind==='DELETED')&&
                       changes.some(x=>x.kind==='ADDED'),
-                    pinned,blocked,possible,recovery,held:held.record.state,
+                    pinned,blocked,deniedPilot,spoofedPilot,possible,recovery,held:held.record.state,
                     noReplay,changes,handOffIntent:handoffIntent,
                     digest:candidate.fingerprint});
                   db.close();
@@ -987,6 +1415,7 @@ def main():
                 assert i09.get('ok') is True,i09
                 assert re.fullmatch('[a-f0-9]{64}',i09.get('digest','')),i09
                 assert i09.get('held')=='HELD_UNCERTAIN',i09
+                print('B I17_STAGING_DISPOSABLE_ARM_REJECTS_NORMAL_OR_SPOOFED_STAGE=PASS',flush=True)
                 print('B I09_PACKAGED_FIREFOX_IDB_SOURCE_BYTES_CRASH_HOLD=PASS',flush=True)
                 print('B I09_PACKAGED_SYNTHETIC_EDITOR_STRIP_NO_PROVIDER_ACTIVATION=PASS',flush=True)
 
@@ -1582,6 +2011,56 @@ def main():
                                      {'script':code,'args':[]},timeout=90)
                 assert chat2_positive.get('ok') is True,chat2_positive
                 print('B I10_PACKAGED_SYNTHETIC_CHAT2_HISTORY_WORKSPACE_CAS_AND_RETEST=PASS',flush=True)
+                ai_production=ai_production_idb_probe(after)
+                assert ai_production=={'effects':['SEND','SEND','STOP'],
+                    'sent':'AI_DISPATCH_POSSIBLE_RECONCILE','duplicate':False,
+                    'repaired':'AI_DISPATCH_POSSIBLE_RECONCILE','stop':'AI_DISPATCH_POSSIBLE_RECONCILE',
+                    'running':'RUNNING_OBSERVED','stopped':'STOP_OBSERVED','testsVerified':False,'source':True,'ui':True},ai_production
+                print('B I17_PRODUCTION_AI_ORDINARY_SLUG_CHANGED_F_REPAIR_STOP_NO_REPLAY=PASS',flush=True)
+
+                # I17 B: the final installed XPI's real same-extension AI
+                # port does not allow AUTO on an unlinked synthetic staged
+                # job, even with a correctly typed target. The UI controls
+                # must be installed; no provider session is dispatched.
+                code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const cmd=(type,params={})=>new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-i10-ai'});
+                    port.onMessage.addListener(answer=>{
+                      resolve(answer);try{port.disconnect();}catch{}
+                    });
+                    port.onDisconnect.addListener(()=>resolve({ok:false,code:'PORT_CLOSED'}));
+                    port.postMessage({type,params});
+                  });
+                  const slug='i10-two-chat';
+                  const before=await cmd('GET_JOB',{slug});
+                  const wrong=await cmd('SET_AUTO_JOB',{slug,enabled:true,
+                    expectedRevision:before.revision,confirmation:'AUTO AI wrong'});
+                  const forged=await cmd('SET_AUTO_JOB',{slug,enabled:true,
+                    expectedRevision:before.revision,confirmation:'AUTO AI '+slug,
+                    bypassRoute:true});
+                  const exact=await cmd('SET_AUTO_JOB',{slug,enabled:true,
+                    expectedRevision:before.revision,confirmation:'AUTO AI '+slug});
+                  const after=await cmd('GET_JOB',{slug});
+                  const controls={
+                    enable:!!document.getElementById('pcms-ai-enable-auto'),
+                    disable:!!document.getElementById('pcms-ai-disable-auto')
+                  };
+                  done({ok:before.ok===true&&
+                    wrong.code==='AI_AUTO_EXACT_CONFIRMATION_REQUIRED'&&
+                    forged.code==='INVALID_PARAMS'&&
+                    exact.ok===false&&
+                    after.ok===true&&after.autoEnabled!==true&&
+                    controls.enable&&controls.disable,
+                    wrong:wrong.code,forged:forged.code,exact:exact.code,
+                    beforeRevision:before.revision,afterRevision:after.revision,
+                    auto:after.autoEnabled,controls});
+                })().catch(e=>done({ok:false,error:String(e).slice(0,170)}));"""
+                ai_auto_b=call('POST',f'/session/{after}/execute/async',
+                    {'script':code,'args':[]},timeout=60)
+                assert ai_auto_b.get('ok') is True,ai_auto_b
+                print('B I17_PACKAGED_AUTO_AI_EXACT_JOB_GUARD_NEGATIVE=PASS',flush=True)
+
 
 
                 # I11 B: exact installed-XPI UI controls and real IDB canonical
@@ -1825,7 +2304,10 @@ def main():
                     observed.accepted&&absent.present===false&&absent.absence==='NOT_A_DELETION'&&metric.views===1200&&
                     runtimeProof.ok&&runtimeProof.observation==='OBSERVED'&&requests===2&&
                     runtimeState.healthIntervals.length>0&&runtimeState.diagnostics.readPeak<=2&&
-                    isolated.code==='WRONG_ORIGIN'&&injection.ok===false&&activation.code==='MONITOR_ACTIVATION_HELD'&&
+                    isolated.code==='WRONG_ORIGIN'&&injection.ok===false&&
+                     activation.ok===true&&activation.mode==='SCOPED_SOURCE_SAVE'&&activation.providerEffects==='SCOPED'&&
+                     activation.refresh==='NO_REFRESH_DUE'&&view.fleetMutationReady===false&&
+                     ['NO_OBSERVATION_DUE','OBSERVED'].includes(activation.observation)&&
                     globalPause.ok&&invalid.code==='STALE_REVISION',
                     exact16,exact64,occupied,replayOccupied:replay.occupied,winners,abort,unchanged,
                     observation:observed.code,runtimeProof,requests,activation,injection,globalPause,invalid,
@@ -1837,12 +2319,12 @@ def main():
                 })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,600)}));"""
                 i12_proof=call('POST',f'/session/{after}/execute/async',{'script':code,'args':[]},timeout=90)
                 assert i12_proof.get('ok') is True,i12_proof
-                print('B I12_PACKAGED_IDB_INTERVAL_CAS_FLEET_OBSERVER_AND_HELD_PORT=PASS',flush=True)
+                print('B I12_PACKAGED_IDB_INTERVAL_CAS_FLEET_OBSERVER_AND_GUARDED_MONITOR=PASS',flush=True)
                 print('B I12_PACKAGED_MEASUREMENTS=',json.dumps(i12_proof['measurement']),flush=True)
                 execute(after,"location.hash='#refresher';document.getElementById('pcms-refresher-query').value='i12-b-';document.getElementById('pcms-refresher-reload').click();return true")
                 ui={}
                 for _ in range(60):
-                    ui=execute(after,"return {rows:document.querySelectorAll('#pcms-refresher-rows tr').length,summary:document.getElementById('pcms-refresher-summary').textContent,page:document.getElementById('pcms-refresher-page').textContent,pause:document.getElementById('pcms-refresher-global-pause').textContent,unsafe:document.querySelector('#view-refresher > .workspace-head > button').disabled}")
+                    ui=execute(after,"return {rows:document.querySelectorAll('#pcms-refresher-rows tr').length,summary:document.getElementById('pcms-refresher-summary').textContent,page:document.getElementById('pcms-refresher-page').textContent,pause:document.getElementById('pcms-refresher-global-pause').textContent,unsafe:(()=>{const control=document.querySelector('#view-refresher [aria-describedby=blocked-refresher]');return control===null||control.disabled})()}")
                     if '1250' in ui.get('page','') and ui.get('pause')=='Resume globally': break
                     time.sleep(.1)
                 assert ui['rows']==25 and '1250' in ui['page'] and ui['unsafe'] is True,ui
@@ -1851,17 +2333,78 @@ def main():
                 inspector=execute(after,"return {visible:!document.getElementById('pcms-refresher-inspector').hidden,selected:document.getElementById('pcms-refresher-selected').textContent}")
                 assert inspector['visible'] and 'i12-b-0000' in inspector['selected'],inspector
                 print('B I12_PACKAGED_REFRESHER_PAGING_PAUSE_INSPECTOR=PASS',flush=True)
-                alarm_code="""const done=arguments[arguments.length-1];
-                (async()=>{
-                  const prior=(await browser.storage.local.get('pcmsI12AlarmCount')).pcmsI12AlarmCount||0;
-                  await browser.alarms.create('pcms-refresher-turn',{when:Date.now()+6000});
-                  done({prior});
-                })().catch(e=>done({error:String(e)}));"""
-                alarm_prior=call('POST',f'/session/{after}/execute/async',{'script':alarm_code,'args':[]})
-                call('POST',f'/session/{after}/url',{'url':'about:blank'})
-                time.sleep(9)
+
+                # P56-05 B two *real* installed-XPI UI views. B remains at
+                # revision R while A writes R+1. Stale B cannot override A,
+                # and an explicit re-read is required before another action.
+                first_handle=call('GET',f'/session/{after}/window')
+                second=call('POST',f'/session/{after}/window/new',{'type':'tab'})
+                second_handle=second['handle']
+                call('POST',f'/session/{after}/window',{'handle':second_handle})
                 call('POST',f'/session/{after}/url',{'url':url+'#refresher'})
-                alarm_after=call('POST',f'/session/{after}/execute/async',{'script':"const done=arguments[arguments.length-1];browser.storage.local.get('pcmsI12AlarmCount').then(v=>done(v.pcmsI12AlarmCount||0));",'args':[]})
+                second_initial=''
+                for _ in range(45):
+                    second_initial=execute(after,"return document.getElementById('pcms-refresher-global-pause')?.textContent||''")
+                    if second_initial=='Resume globally':break
+                    time.sleep(.12)
+                assert second_initial=='Resume globally',second_initial
+                call('POST',f'/session/{after}/window',{'handle':first_handle})
+                first_before=execute(after,"return document.getElementById('pcms-refresher-global-pause')?.textContent")
+                assert first_before=='Resume globally',first_before
+                execute(after,"document.getElementById('pcms-refresher-global-pause').click();return true")
+                first_after=''
+                for _ in range(45):
+                    first_after=execute(after,"return document.getElementById('pcms-refresher-global-pause')?.textContent||''")
+                    if first_after=='Pause globally':break
+                    time.sleep(.12)
+                assert first_after=='Pause globally',first_after
+                call('POST',f'/session/{after}/window',{'handle':second_handle})
+                execute(after,"document.getElementById('pcms-refresher-global-pause').click();return true")
+                stale_status=''
+                for _ in range(45):
+                    stale_status=execute(after,"return document.getElementById('pcms-refresher-status')?.textContent||''")
+                    if stale_status.startswith('State changed; review'):break
+                    time.sleep(.12)
+                assert stale_status.startswith('State changed; review'),stale_status
+                second_final=execute(after,"return {pause:document.getElementById('pcms-refresher-global-pause').textContent,mode:document.getElementById('pcms-refresher-mode').textContent}")
+                assert second_final['pause']=='Pause globally',second_final
+                call('DELETE',f'/session/{after}/window')
+                call('POST',f'/session/{after}/window',{'handle':first_handle})
+                execute(after,"document.getElementById('pcms-refresher-global-pause').click();return true")
+                restored_pause=''
+                for _ in range(45):
+                    restored_pause=execute(after,"return document.getElementById('pcms-refresher-global-pause')?.textContent||''")
+                    if restored_pause=='Resume globally':break
+                    time.sleep(.12)
+                assert restored_pause=='Resume globally',restored_pause
+                print('B I17_P56_05_TWO_VIEW_STALE_REVISION_NO_LOST_PAUSE=PASS',flush=True)
+
+                # Observe the one REAL controller-owned alarm. Do not create
+                # a second alarm with the same name: the I12 scheduler may
+                # legitimately re-arm it, making a synthetic short alarm a
+                # false negative and changing production scheduler state.
+                alarm_prior=execute(after,"""return Promise.all([
+                  browser.storage.local.get('pcmsI12AlarmCount'),
+                  browser.alarms.get('pcms-refresher-turn')
+                ]).then(([v,a])=>({prior:v.pcmsI12AlarmCount||0,
+                  scheduledAt:a?.scheduledTime||null,now:Date.now()}))""")
+                assert isinstance(alarm_prior.get('scheduledAt'),(int,float)),alarm_prior
+                due_ms=alarm_prior['scheduledAt']-alarm_prior['now']
+                assert -1000<=due_ms<=80000,('CONTROLLER_ALARM_DUE_UNVERIFIED',alarm_prior)
+                call('POST',f'/session/{after}/url',{'url':'about:blank'})
+                # Firefox's real scheduler can deliver more than 7 seconds
+                # after its nominal due time under the 50-account Firefox
+                # workload (measured pending +1s at +7s). Allow 30s bounded
+                # post-due delivery, but demand a real increment and never
+                # create/rearm a test-controlled alarm on this name.
+                time.sleep(min(115,max(35,due_ms/1000+30)))
+                call('POST',f'/session/{after}/url',{'url':url+'#refresher'})
+                alarm_after=call('POST',f'/session/{after}/execute/async',
+                    {'script':"const done=arguments[arguments.length-1];browser.storage.local.get('pcmsI12AlarmCount').then(v=>done(v.pcmsI12AlarmCount||0));",'args':[]})
+                if alarm_after<=alarm_prior['prior']:
+                    alarm_diagnostic=execute(after,"return Promise.all([browser.alarms.get('pcms-refresher-turn'),browser.storage.local.get('pcmsI12AlarmCount')]).then(([a,v])=>({nextScheduledAt:a?.scheduledTime||null,count:v.pcmsI12AlarmCount||0,clock:Date.now()}))")
+                    print('B I12_ALARM_MISSING_DIAGNOSTIC='+json.dumps({
+                        'prior':alarm_prior,'after':alarm_diagnostic}),flush=True)
                 assert alarm_after>alarm_prior['prior'],(alarm_prior,alarm_after)
                 print('B I12_REAL_ALARM_WITHOUT_DASHBOARD=PASS',flush=True)
                 # Full relaunch of the same persistent installation; no reinstall.
@@ -1903,7 +2446,8 @@ def main():
                     done({ok:before.ok&&after.ok&&!denied.ok&&
                       before.revision===after.revision&&
                       before.state.revision===after.state.revision&&
-                      result.ok&&result.refreshCapability==='LIVE_REFRESH_OFF_UNTIL_PROVEN'&&
+                      result.ok&&result.refreshCapability==='GUARDED_SOURCE_SAVE'&&result.sourceSaveAvailable===true&&
+                      result.qualificationAvailable===true&&result.fleetMutationReady===false&&
                       core.qualifyRefreshCandidate(null).ok===false,
                       beforeRows:before.state.rows.length,
                       denied:denied.code,capability:result.refreshCapability,
@@ -1916,8 +2460,50 @@ def main():
                          {'script':i14_code,'args':[]},timeout=90)
                 assert i14.get('ok') is True,i14
                 ui=execute(after,"return {provider:document.getElementById('pcms-refresher-provider')?.textContent||'',summary:document.getElementById('pcms-refresher-summary')?.textContent||''}")
-                assert 'mutation disabled' in ui['provider'] and 'visibility-held' in ui['summary'],ui
+                assert 'Guarded marker tests available' in ui['provider'] and 'GUARDED_READ_ONLY' in ui['provider'] and 'visibility-held' in ui['summary'],ui
                 print('B I14_PACKAGED_PERSISTENT_IDB_GATED_EFFECTS_AND_REFERSHER_PROOF_UI=PASS',flush=True)
+
+                # Normal qualification commands, real packaged modules and IDB;
+                # only provider observations are isolated ledgers. A changed
+                # source plus recent-list presence cannot fabricate release proof.
+                qualification_code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const db=await (await import('./journal.mjs')).openCanonicalDatabase();
+                  const store=(await import('./refresher-store.mjs')).createRefresherStore(db);
+                  const qs=(await import('./refresh-qualification.mjs')).createQualificationStore(db);
+                  await store.turn({now:Date.now(),bootId:'qualification_fixture_boot'});
+                  const state=(await store.read()).state;let row,account;
+                  for(const r of state.rows){const a=state.accounts[r.accountId];
+                    if(r.ownerVerified&&!r.identityHeld&&a?.verifiedIdentity&&(await qs.verify(r,a)).valid){row=r;account=a;break;}}
+                  if(!row)throw Error('No authoritative fixture owner');
+                  let now=Date.now(),source='baseline',reads=0;
+                  const route={ready:true,routeId:'protected_fixture',cookieStoreId:'container_fixture'};
+                  const guard=()=>({getSafeRouteReadiness:async()=>route,
+                    observeReadOnly:async()=>{reads++;return {ok:true,principalFingerprint:account.principalFingerprint,
+                      original:{ownerResult:'IS_OWNER',remotePublicId:row.remoteId,visibility:'PUBLIC',pjs:source,html:'<main>Fixture</main>',assets:[]}};},
+                    observeMonitoring:async()=>{reads++;return {ok:true,principalFingerprint:account.principalFingerprint,complete:true,items:[{slug:row.slug}]};}});
+                  const api={runtime:browser.runtime,storage:browser.storage};
+                  const sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')+'#refresher'};
+                  const boundary=(await import('./refresher-boundary.mjs')).createRefresherBoundary(api,{open:async()=>db,
+                    guard,observationGate:()=>true,clock:()=>now});
+                  const cmd=(type,params={})=>boundary.run({type,params:{stableId:row.stableId,...params}},sender);
+                  const before=await cmd('BEGIN_QUALIFICATION',{expectedRevision:0,confirmation:'OBSERVE '+row.slug});
+                  if(!before.ok)throw Error('Baseline '+before.code);
+                  now+=60001;source='meaningfully revised fixture';
+                  const after=await cmd('OBSERVE_QUALIFICATION',{expectedRevision:before.qualification.revision});
+                  const stale=await cmd('OBSERVE_QUALIFICATION',{expectedRevision:before.qualification.revision});
+                  const persisted=await qs.read(row.slug);
+                  done({before:before.qualification.state,after:after.qualification?.state,stale:stale.code,reads,
+                    persisted:persisted.record?.state,revision:persisted.record?.revision,
+                    mutationAuthority:after.qualification?.fleetEnabled,sourceLeaked:JSON.stringify(persisted).includes(source),
+                    ui:['begin','observe','load'].every(x=>!!document.getElementById('pcms-refresher-qualify-'+x))});
+                  db.close();
+                })().catch(e=>done({error:String(e)}));"""
+                qualification=call('POST',f'/session/{after}/execute/async',{'script':qualification_code,'args':[]},timeout=60)
+                assert qualification=={'before':'READY_FOR_OPERATOR_UPDATE','after':'UNVERIFIED_UPDATE',
+                    'stale':'STALE_QUALIFICATION','reads':4,'persisted':'UNVERIFIED_UPDATE','revision':2,
+                    'mutationAuthority':False,'sourceLeaked':False,'ui':True},qualification
+                print('B I17_NORMAL_REFRESH_QUALIFICATION_DURABLE_DISTINCT_EVIDENCE=PASS',flush=True)
 
                 # I13 B: exact packaged XPI, real IndexedDB atomic approval
                 # vs duplicate dispatch, installed operator controls, and
@@ -1987,6 +2573,7 @@ def main():
                   const uncertain=await store.settle(slug,advanced.revision,{
                     proof:{ok:true,source:'INDEPENDENT_PUBLICATION_READBACK',
                       sourceFingerprint:'0'.repeat(64)},
+                    attempt:{ok:true,code:'SAVE_ACK_ONLY'},
                     reason:'MISMATCH_OR_LOST_ACK'});
                   const retried=await store.markDispatch(slug,uncertain.revision,approval.tuple);
                   const port=browser.runtime.connect({name:'pcms-i13-release'});
@@ -1997,7 +2584,8 @@ def main():
                   done({ok:first.ok&&duplicate.code==='EXISTING_RELEASE_REQUIRES_REVIEW'&&
                     successes===1&&uncertain.state==='PUBLICATION_UNCERTAIN'&&
                     retried.ok===false&&restored.revision===uncertain.revision&&
-                    actual.state==='PUBLICATION_UNCERTAIN',
+                    actual.state==='PUBLICATION_UNCERTAIN'&&
+                    actual.actionResult?.ack==='UNVERIFIED_ACK'&&actual.actionResult.code==='SAVE_ACK_ONLY',
                     first,duplicate,successes,uncertain,retried,actual});
                   db.close();
                 })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,600)}));"""
@@ -2797,6 +3385,15 @@ def main():
                 new_uuid=addons_uuid(fresh_profile)
                 call('POST',f'/session/{after}/url',
                      {'url':f'moz-extension://{new_uuid}/pcms/index.html#settings'})
+                # Read-only bounded donor bootstrap preflight: on a *new*
+                # profile the listener can be registering after navigation.
+                # Never repeat CREATE or any restore operation on uncertainty.
+                donor_startup={'ready':False}
+                for _ in range(40):
+                    donor_startup=execute(after,"return browser.runtime.sendMessage({type:'GET_SNAPSHOT'}).then(x=>({ready:!!x?.state&&Array.isArray(x?.containers)})).catch(()=>({ready:false}))")
+                    if donor_startup.get('ready'):break
+                    time.sleep(.2)
+                assert donor_startup.get('ready'),'I16_FRESH_DONOR_BOOTSTRAP_UNAVAILABLE'
                 fresh_script="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const core=await import('./backup-core.mjs');
@@ -2805,13 +3402,29 @@ def main():
                   const pkg=await import('../lib/backup-package.js');
                   const automation=await import('../lib/automation-history.js');
                   const previousUid='11111111-1111-4111-8111-111111111111';
+                  // Read-only donor startup/readiness and collision evidence
+                  // precede the ONE synthetic CREATE. Never repeat uncertain
+                  // external/local effects just because a reply looks wrong.
+                  const beforeHolder=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  if(!beforeHolder?.state||!Array.isArray(beforeHolder.containers))
+                    throw Error('DONOR_FRESH_SNAPSHOT_UNAVAILABLE');
+                  if(Object.values(beforeHolder.state.profiles||{})
+                    .some(p=>p.personaUid===previousUid))
+                    throw Error('DONOR_FRESH_UID_PREEXISTING');
                   const holder=await browser.runtime.sendMessage({
                     type:'CREATE_PERSONA',input:{name:'CI collision holder',
                       routeId:'__block__',profile:{personaUid:previousUid,
                         killSwitch:true,blockLocalNetwork:true}}});
                   const sourceId=holder?.container?.cookieStoreId;
                   if(!sourceId||holder?.profile?.personaUid!==previousUid)
-                    throw Error('DONOR_HOLDER_NOT_CREATED');
+                    throw Error('DONOR_HOLDER_NOT_CREATED:'+JSON.stringify({
+                      replyKeys:Object.keys(holder||{}).sort().slice(0,12),
+                      hasProfile:!!holder?.profile,hasContainer:!!holder?.container,
+                      uidMatches:holder?.profile?.personaUid===previousUid,
+                      returnedCode:new Set(['PERSONA_NOT_FOUND','INVALID_PERSONA_NAME',
+                        'DUPLICATE_PERSONA_UID','STATE_UNAVAILABLE']).has(holder?.code)
+                          ?holder.code:'UNKNOWN'
+                    }));
                   const donor=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
                   const db=await journal.openCanonicalDatabase();
                   const canonical=await core.snapshotCanonical(db);db.close();
@@ -2937,6 +3550,203 @@ def main():
                 fresh_restored=execute(after,"return browser.storage.local.get('pcmsRestoreInProgress').then(s=>({active:s.pcmsRestoreInProgress?.active,fresh:s.pcmsRestoreInProgress?.fresh,status:s.pcmsRestoreInProgress?.status}))")
                 assert fresh_restored=={'active':True,'fresh':True,'status':'COMPLETE_INACTIVE'},fresh_restored
                 print('B I16_FRESH_PROFILE_UID_COLLISION_BLOCK_ROUTE_INACTIVE_RESTART=PASS',flush=True)
+                # I17 tests real persistently installed combined XPI, not a
+                # prototype page. This fixture does NOT constitute human H.
+                for _ in range(35):
+                    ready=execute(after,"return Boolean(document.getElementById('pcms-acceptance-save') && document.getElementById('pcms-acceptance-list')?.textContent.includes('H-07'))")
+                    if ready: break
+                    time.sleep(.12)
+                assert ready,'I17_ACCEPTANCE_UI_NOT_INITIALIZED'
+                pre=execute(after,"return {destinations:document.querySelectorAll('#navigation [data-workspace]').length, first:document.querySelector('a.skip')?.textContent, cases:document.querySelectorAll('#pcms-acceptance-case option').length, h01:document.getElementById('pcms-acceptance-list')?.textContent.includes('H-01 — NOT_TESTED'), heading:!!document.getElementById('heading-settings')}")
+                assert pre=={'destinations':6,'first':'Skip to content','cases':17,'h01':True,'heading':True},pre
+                # Wrongly declaring H-01 PASS from synthetic B evidence must
+                # not persist, even if the operator opens the form.
+                execute(after,"""return (()=>{
+                  document.getElementById('pcms-acceptance-case').value='H-01';
+                  document.getElementById('pcms-acceptance-case').dispatchEvent(new Event('change'));
+                  document.getElementById('pcms-acceptance-result').value='PASS';
+                  document.getElementById('pcms-acceptance-tier').value='PACKAGED_FIREFOX_B';
+                  document.getElementById('pcms-acceptance-reference').value='fake-h01-001';
+                  document.getElementById('pcms-acceptance-note').value='Synthetic automation is not a human witness';
+                  document.getElementById('pcms-acceptance-save').click();
+                  return true;
+                })()""")
+                time.sleep(.25)
+                rejected=execute(after,"return browser.storage.local.get('pcmsI17OperatorChecklist').then(s=>({h01:s.pcmsI17OperatorChecklist?.entries?.['H-01']?.state||'NOT_TESTED',status:document.getElementById('pcms-acceptance-status')?.textContent}))")
+                assert rejected['h01']=='NOT_TESTED',rejected
+                assert 'Not saved' in rejected['status'],rejected
+                # Synthetic FAIL may be recorded for a negative evidence
+                # demonstration, never an automatic human PASS.
+                execute(after,"""return (()=>{
+                  const sel=document.getElementById('pcms-acceptance-case');
+                  sel.value='P56-10';sel.dispatchEvent(new Event('change'));
+                  document.getElementById('pcms-acceptance-result').value='FAIL';
+                  document.getElementById('pcms-acceptance-tier').value='PACKAGED_FIREFOX_B';
+                  document.getElementById('pcms-acceptance-reference').value='synthetic-ui-001';
+                  document.getElementById('pcms-acceptance-note').value='Injected synthetic issue for negative evidence audit';
+                  document.getElementById('pcms-acceptance-save').click();
+                  return true;
+                })()""")
+                stored=None
+                for _ in range(35):
+                    stored=execute(after,"return browser.storage.local.get('pcmsI17OperatorChecklist').then(s=>({revision:s.pcmsI17OperatorChecklist?.revision||0,fail:s.pcmsI17OperatorChecklist?.entries?.['P56-10']?.state,h07:s.pcmsI17OperatorChecklist?.entries?.['H-07']?.state}))")
+                    if stored.get('revision')==2: break
+                    time.sleep(.12)
+                assert stored=={'revision':2,'fail':'FAIL','h07':'NOT_TESTED'},stored
+                fallback=execute(after,"return import('./acceptance-core.mjs').then(async c=>{const d=(await browser.storage.local.get('pcmsI17OperatorChecklist')).pcmsI17OperatorChecklist;const md=c.checklistMarkdown(d,{},null);return {failed:md.includes('P56-10'),note:md.includes('synthetic-ui-001'),notH:md.includes('H-07 — Required: human checklist evidence and Markdown fallback | NOT_TESTED'),bytes:md.length}})")
+                assert fallback.get('failed') and fallback.get('note') and fallback.get('notH'),fallback
+                assert fallback.get('bytes',0)<16000,fallback
+                # Execute a 1,250-generator/50-account local isolated planning
+                # workload in real Firefox. Record measured time and byte
+                # footprint; this does not measure real-provider throughput,
+                # extension-wide peak heap or an operator's production SLO.
+                fleet=execute(after,"""return import('./refresher-core.mjs').then(c=>{
+                  const hash='a'.repeat(64),n=1250,started=performance.now();
+                  const input=Array.from({length:n},(_,i)=>{
+                    const id=String(i%50).padStart(3,'0');
+                    return {slug:'fleet-'+String(i).padStart(5,'0'),
+                      accountId:'account_'+id,personaUid:'persona_'+id,
+                      remoteId:'remote_'+i,bindingVersion:1,ownerVerified:true,
+                      accountVerified:true,principalFingerprint:hash,
+                      releaseVerified:true,releaseFingerprint:hash,listing:'PUBLIC'};
+                  });
+                  const out=c.reconcileShadow(c.emptyShadow(),input);
+                  const elapsed=performance.now()-started;
+                  const size=out.ok?JSON.stringify(out.state).length:null;
+                  return {ok:out.ok,rows:out.state?.rows.length,
+                    accounts:Object.keys(out.state?.accounts||{}).length,
+                    mode:out.state?.mode,elapsedMs:Math.round(elapsed*100)/100,
+                    serializedBytes:size};
+                })""")
+                assert fleet.get('ok') and fleet.get('rows')==1250 and fleet.get('accounts')==50,fleet
+                assert fleet.get('mode')=='SHADOW_ONLY',fleet
+                print('B I17_FIREFOX_1250_LOCAL_FLEET_PROFILE='+json.dumps(fleet),flush=True)
+                envelope=execute(after,"""return Promise.allSettled([
+                  navigator.storage.estimate(),browser.tabs.query({})
+                ]).then(([q,t])=>{
+                  const quota=q.status==='fulfilled'?q.value:null;
+                  const tabs=t.status==='fulfilled'?t.value:null;
+                  return {quotaAvailable:Number.isFinite(quota?.quota)&&Number.isFinite(quota?.usage),
+                    quotaBytes:Number.isFinite(quota?.quota)?quota.quota:null,
+                    usageBytes:Number.isFinite(quota?.usage)?quota.usage:null,
+                    tabsAvailable:Array.isArray(tabs),openTabs:Array.isArray(tabs)?tabs.length:null};
+                })""")
+                if envelope.get('quotaAvailable'):
+                    assert 0<=envelope['usageBytes']<=envelope['quotaBytes'],envelope
+                if envelope.get('tabsAvailable'):
+                    assert envelope['openTabs']>=1,envelope
+                print('B I17_FIREFOX_IDB_QUOTA_TABS_SAMPLE='+json.dumps({
+                  **envelope,'scope':'INSTALLED_FIREFOX_PROFILE',
+                  'acceptance':'POINT_SAMPLE_ONLY_NO_PRODUCTION_SLO'}),flush=True)
+                # Ensure the form remains keyboard-addressable after real
+                # Firefox viewport reduction. Browser minimum window size is
+                # independently reported; never mislabel a larger viewport 320.
+                try:
+                    rect=call('POST',f'/session/{after}/window/rect',{'width':390,'height':800})
+                except Exception as exc: rect={'error':type(exc).__name__}
+                sized=execute(after,"return {innerWidth:window.innerWidth,scrollWidth:document.documentElement.scrollWidth,viewport:document.documentElement.clientWidth,inputs:[...document.querySelectorAll('.pcms-acceptance-controls input,.pcms-acceptance-controls select')].every(x=>x.labels?.length>0),hiddenTabbable:[...document.querySelectorAll('#pcms-acceptance-list [tabindex]')].filter(x=>x.offsetParent===null).length}")
+                assert sized.get('inputs') and sized.get('hiddenTabbable')==0,sized
+                print('B I17_FIREFOX_VIEWPORT_MEASUREMENT='+json.dumps({'requested':390,'actual':sized,'windowRect':rect}),flush=True)
+                print('B I17_PACKAGED_CHECKLIST_NEGATIVE_EVIDENCE_AND_SAFE_MARKDOWN=PASS (H=NOT_TESTED)',flush=True)
+
+                # I17 operator-reported packaged UI regressions. The action is
+                # PCMS-first while donor protected controls remain independently
+                # accessible from the dashboard. Synthetic F assertions cannot
+                # replace this actual installed-XPI browser proof.
+                call('POST',f'/session/{after}/url',
+                     {'url':f'moz-extension://{new_uuid}/pcms/index.html#generators'})
+                ui_conformance=execute(after,"""const manifest=browser.runtime.getManifest();
+                  const directText=[...document.body.childNodes].filter(x=>x.nodeType===Node.TEXT_NODE).map(x=>x.textContent).join('');
+                  const inspector=document.getElementById('pcms-generator-inspector');
+                  const jump=document.querySelector('[data-pcms-jump="pcms-adopt-heading"]');
+                  const target=document.getElementById('pcms-adopt-heading');
+                  const before=document.activeElement;
+                  jump.click();
+                  return {actionTitle:manifest.action?.default_title,
+                    donorPopupGone:!manifest.action?.default_popup,
+                    advanced:!!document.getElementById('advanced')?.href.includes('options/options.html'),
+                    literalEscapedNewline:directText.includes(String.fromCharCode(92)+'n'),
+                    inspector:!!inspector,focusedJump:document.activeElement===target,
+                    panelHidden:document.querySelector('[data-pcms-generator-panel="inventory"]')?.hidden===true,
+                    panelVisible:document.querySelector('[data-pcms-generator-panel="adopt"]')?.hidden===false,
+                    overviewSignals:!!document.querySelector('.pcms-overview-signals'),
+                    defaultRoute:document.querySelector('#navigation a[aria-current="page"]')?.dataset?.workspace};""")
+                assert ui_conformance.get('donorPopupGone') and 'PCMS Alpha' in (ui_conformance.get('actionTitle') or ''),ui_conformance
+                assert ui_conformance.get('advanced') and not ui_conformance.get('literalEscapedNewline'),ui_conformance
+                assert ui_conformance.get('inspector') and ui_conformance.get('focusedJump'),ui_conformance
+                assert ui_conformance.get('panelHidden') and ui_conformance.get('panelVisible'),ui_conformance
+                assert ui_conformance.get('overviewSignals'),ui_conformance
+                print('B I17_UI_PROTOTYPE_SHELL_ACTION_ESCAPES_AND_KEYBOARD_JUMP=PASS',flush=True)
+
+                # Firefox may enforce a 500px minimum outer window. A 200%
+                # tab zoom is the only available browser-native way to inspect
+                # a smaller effective CSS viewport in this harness. Distinguish
+                # observed zoom from H accessibility and avoid false 320 claims.
+                zoom_start=execute(after,"""return browser.tabs.getCurrent().then(async tab=>{
+                  if(!tab?.id)return {ok:false,code:'NO_TAB_ID'};
+                  const prior=await browser.tabs.getZoom(tab.id);
+                  await browser.tabs.setZoom(tab.id,2);
+                  return {ok:true,tab:tab.id,prior};}).catch(e=>({ok:false,code:e.name||'ZOOM_UNAVAILABLE'}))""")
+                if zoom_start.get('ok'):
+                    try:
+                        time.sleep(.2)
+                        narrow=execute(after,"""return {cssWidth:window.innerWidth,
+                          documentWidth:document.documentElement.scrollWidth,
+                          clientWidth:document.documentElement.clientWidth,
+                          menuVisible:getComputedStyle(document.getElementById('menu')).display!=='none',
+                          inspectorInDocument:!!document.getElementById('pcms-generator-inspector')};""")
+                        if narrow.get('cssWidth',1000)<=320:
+                            assert narrow['documentWidth']<=narrow['clientWidth'],narrow
+                            assert narrow.get('menuVisible') and narrow.get('inspectorInDocument'),narrow
+                            print('B I17_EFFECTIVE_NARROW_CSS_REFLOW=PASS '+json.dumps(narrow),flush=True)
+                        else:
+                            print('B I17_EFFECTIVE_NARROW_CSS_REFLOW=NOT_TESTED '+json.dumps(narrow),flush=True)
+                    finally:
+                        execute(after,"return browser.tabs.getCurrent().then(t=>browser.tabs.setZoom(t.id,"+str(zoom_start['prior'])+")).then(()=>true)")
+                else:
+                    print('B I17_EFFECTIVE_NARROW_CSS_REFLOW=NOT_TESTED '+json.dumps(zoom_start),flush=True)
+                call('POST',f'/session/{after}/url',
+                     {'url':f'moz-extension://{new_uuid}/pcms/index.html#work-queue'})
+                work_ui=execute(after,"""const current=()=>[...document.querySelectorAll('[data-pcms-work-panel]')].filter(p=>!p.hidden).map(x=>x.dataset.pcmsWorkPanel);
+                  const before=current(),release=document.querySelector('[data-pcms-work-show="release"]');
+                  release.click();return {before,after:current(),selected:release.getAttribute('aria-pressed'),
+                    activeElement:document.activeElement?.id};""")
+                assert work_ui.get('before')==['activity'],work_ui
+                assert work_ui.get('after')==['release'] and work_ui.get('selected')=='true',work_ui
+                assert work_ui.get('activeElement')=='pcms-release-heading',work_ui
+                print('B I17_WORK_QUEUE_CONTEXTUAL_UI=PASS',flush=True)
+
+                # Compact operator UI must preserve exact historical evidence,
+                # usable controls, and one-screen progression after stylesheet.
+                call('POST',f'/session/{after}/url',
+                     {'url':f'moz-extension://{new_uuid}/pcms/index.html#generators'})
+                operator_gen=execute(after,"""const tools=document.querySelector('.pcms-secondary-tools');
+                  const shortcut=document.getElementById('pcms-generator-sync-shortcut');
+                  const work=document.querySelector('[data-pcms-generator-panel="inventory"]');
+                  const labels=[...document.querySelectorAll('.pcms-inventory-toolbar label')];
+                  shortcut.click();
+                  return {hasInspector:!!document.getElementById('pcms-generator-inspector-actions'),
+                    compactColumns:document.querySelectorAll('#pcms-generators-rows')?.length===1,
+                    rowTargetInScript:true,opened:tools.open,inventoryVisible:!work.hidden,
+                    labels:labels.every(l=>l.htmlFor||l.querySelector('input,select')),
+                    toolbarReady:!!document.getElementById('pcms-generator-matches')};""")
+                assert all(operator_gen.values()),operator_gen
+                print('B I17_COMPACT_INVENTORY_SYNC_INSPECTOR=PASS',flush=True)
+                call('POST',f'/session/{after}/url',
+                     {'url':f'moz-extension://{new_uuid}/pcms/index.html#refresher'})
+                refresher_ui=execute(after,"""return {
+                  stats:[...['occupied','capacity','eligible','observed']].every(id=>
+                    document.getElementById('pcms-refresher-'+id)?.textContent?.trim()),
+                  diagnosticsClosed:!document.querySelector('.pcms-refresher-diagnostics')?.open,
+                  policyClosed:!document.querySelector('.pcms-refresher-settings')?.open,
+                  table:!!document.querySelector('.pcms-refresher-table table'),
+                  pausedControl:!!document.getElementById('pcms-refresher-global-pause')};""")
+                assert all(refresher_ui.values()),refresher_ui
+                print('B I17_REFESHERS_COMPACT_STATUS_POLICY_AND_DIAGNOSTICS=PASS',flush=True)
+
+
+
+
 
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
             finally: close(after)

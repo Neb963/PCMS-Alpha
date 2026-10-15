@@ -11,8 +11,115 @@ const reload=document.getElementById('pcms-generator-refresh');
 const syncButton=document.getElementById('pcms-generator-sync');
 const accountPicker=document.getElementById('pcms-generator-account');
 const overviewCount=document.getElementById('pcms-overview-inventory');
+const sortPicker=document.getElementById('pcms-generator-sort');
+const presetButtons=[...document.querySelectorAll('[data-pcms-inventory-view]')];
+const columnInputs=[...document.querySelectorAll('[data-pcms-inventory-column]')];
+const previewButton=document.getElementById('pcms-generator-preview-selection');
+const clearButton=document.getElementById('pcms-generator-clear-selection');
+const selectionPreview=document.getElementById('pcms-generator-selection-preview');
+const previewList=document.getElementById('pcms-generator-selection-items');
+const VIEWS=Object.freeze({all:'ALL',owner:'OBSERVED_OWNER',
+  attention:'OWNER_UNVERIFIED',missing:'UNOBSERVED'});
+const SORTS=new Set(['slug','account','visibility','source']);
+const COLUMN_KEYS=['account','visibility','source','observed'];
+const DIRECTIONS=new Set(['asc','desc']);
+const directionPicker=document.getElementById('pcms-generator-sort-direction');
+const prefKey='pcmsI17InventoryDisplayV1';
+function safePrefs(){
+  try{const raw=JSON.parse(localStorage.getItem(prefKey)||'null');
+    if(!raw||typeof raw!=='object')return {};
+    return {view:Object.hasOwn(VIEWS,raw.view)?raw.view:'all',
+      sort:SORTS.has(raw.sort)?raw.sort:'slug',
+      direction:DIRECTIONS.has(raw.direction)?raw.direction:'asc',
+      columns:Array.isArray(raw.columns)?
+        raw.columns.filter(k=>COLUMN_KEYS.includes(k)):COLUMN_KEYS};
+  }catch{return {};}
+}
+const prefs=safePrefs();
+let view= prefs.view||'all',sort=prefs.sort||'slug',
+  direction=prefs.direction||'asc';
+let columns=new Set(prefs.columns||COLUMN_KEYS);
 let epoch=0,offset=0,total=0,accounts=[],latest=[],selection=new Set(),accountEpoch=0;
+function persistDisplay(){
+  try{localStorage.setItem(prefKey,JSON.stringify({view,sort,direction,columns:[...columns]}));}
+  catch{/* display preferences must not affect canonical state */}
+}
+function renderControls(){
+  for(const b of presetButtons)b.setAttribute('aria-pressed',String(b.dataset.pcmsInventoryView===view));
+  sortPicker.value=sort;
+  directionPicker.value=direction;
+  for(const c of columnInputs)c.checked=columns.has(c.dataset.pcmsInventoryColumn);
+  for(const th of document.querySelectorAll('[data-pcms-inventory-th]'))
+    th.hidden=!columns.has(th.dataset.pcmsInventoryTh);
+}
+// Sorting comes from canonical IndexedDB, before offset/limit; the UI must
+// preserve returned order rather than invent page-local rank.
+function previewSelection(){
+  previewList.replaceChildren();
+  const names=[...selection].sort();
+  for(const slug of names.slice(0,30)){
+    const li=document.createElement('li');li.textContent=slug;previewList.append(li);
+  }
+  if(names.length>30){
+    const li=document.createElement('li');li.textContent=(names.length-30)+' more selected';
+    previewList.append(li);
+  }
+}
 const limit=50;
+const syncShortcut=document.getElementById('pcms-generator-sync-shortcut');
+syncShortcut.addEventListener('click',()=>{
+  document.querySelector('[data-pcms-jump="generators-table-title"]')?.click();
+  const section=document.querySelector('#view-generators .pcms-secondary-tools');
+  if(section)section.open=true;
+  accountPicker.focus({preventScroll:true});
+});
+const inspectorTitle=document.getElementById('pcms-generator-inspector-title');
+const inspectorBody=document.getElementById('pcms-generator-inspector-body');
+const inspectorActions=document.getElementById('pcms-generator-inspector-actions');
+const headingTotal=document.getElementById('pcms-generator-heading-total');
+const matches=document.getElementById('pcms-generator-matches');
+let inspectedSlug=null;
+function inspect(item,focus=false){
+  inspectedSlug=item.slug;
+  inspectorTitle.textContent=item.slug;
+  inspectorBody.replaceChildren();
+  const note=document.createElement('p');
+  note.textContent='Historical observation · recheck owner and route before edits.';
+  const dl=document.createElement('dl');dl.className='pcms-evidence-kv';
+  const details=[
+    ['Account',item.accountId||'Unknown'],
+    ['Owner evidence',labels[item.ownerState]||'Unknown/held'],
+    ['Perchance listing',item.visibility||'UNKNOWN'],
+    ['Git source',item.source||'SOURCE_PENDING'],
+    ['Local revision',String(item.revision??'Unknown')]
+  ];
+  for(const [label,value] of details) {
+    const dt=document.createElement('dt');dt.textContent=label;
+    const dd=document.createElement('dd');dd.textContent=value;
+    dl.append(dt,dd);
+  }
+  inspectorBody.append(note,dl);
+  inspectorActions.replaceChildren();
+  const action=(label,handler,{disabled=false}={})=>{
+    const button=document.createElement('button');
+    button.type='button';button.textContent=label;button.disabled=disabled;
+    button.addEventListener('click',handler);inspectorActions.append(button);
+  };
+  action('Git source',()=>window.dispatchEvent(new CustomEvent('pcms-source-target',{
+    detail:{slug:item.slug,revision:item.revision}})));
+  action('Refresher',()=>window.dispatchEvent(new CustomEvent('pcms-refresher-target',{
+    detail:{slug:item.slug}})));
+  action('Adopt',()=>window.dispatchEvent(new CustomEvent('pcms-adoption-target',{
+    detail:{slug:item.slug,revision:item.revision,ownerState:item.ownerState,
+      visibility:item.visibility}})),{disabled:item.ownerState!=='OBSERVED_OWNER'||
+        !['PUBLIC','UNLISTED'].includes(item.visibility)});
+  if(focus)inspectorTitle.focus({preventScroll:true});
+}
+function emptyInspector(){
+  inspectedSlug=null;inspectorTitle.textContent='Select a generator';
+  inspectorBody.textContent='Select a generator to inspect evidence and actions.';
+  inspectorActions.replaceChildren();
+}
 const labels={
   OBSERVED_OWNER:'Owner previously observed (not current authorization)',
   OWNER_UNVERIFIED:'Ownership unknown',OWNER_DISPUTED:'Owner evidence disputed',
@@ -40,9 +147,13 @@ const inv=(type,params)=>command('pcms-i04-inventory',type,params);
 const acct=()=>command('pcms-i03-accounts','LIST_ACCOUNTS');
 function draw(items) {
   rows.replaceChildren();
+  if(inspectedSlug){
+    const updated=items.find(x=>x.slug===inspectedSlug);
+    if(updated)inspect(updated);else emptyInspector();
+  }
   if(!items.length) {
     const tr=document.createElement('tr'),td=document.createElement('td');
-    td.colSpan=4;td.className='empty';
+    td.colSpan=1+columns.size;td.className='empty';
     td.textContent=total?'No entries on this page. Adjust filters.':
       'No observed records. Absence is not a remote census.';
     tr.append(td);rows.append(tr);
@@ -56,61 +167,76 @@ function draw(items) {
       if(pick.checked)selection.add(item.slug);else selection.delete(item.slug);
       showCounter();
     });
-    const first=document.createElement('td');
-    first.append(pick,document.createTextNode(' '+item.slug+' '));
-    const sourcePick=document.createElement('button');
-    sourcePick.type='button';sourcePick.textContent='Source';
-    sourcePick.setAttribute('aria-label','Inspect Git source for '+item.slug);
-    sourcePick.addEventListener('click',()=>window.dispatchEvent(
-      new CustomEvent('pcms-source-target',{detail:{slug:item.slug,revision:item.revision}})));
-    first.append(sourcePick);
-    const timing=document.createElement('button');timing.type='button';timing.textContent='Timing';
-    timing.addEventListener('click',()=>window.dispatchEvent(new CustomEvent('pcms-refresher-target',{detail:{slug:item.slug}})));
-    first.append(document.createTextNode(' '),timing);
-    const adoptPick=document.createElement('button');
-    adoptPick.type='button';adoptPick.textContent='Adopt';
-    adoptPick.disabled=item.ownerState!=='OBSERVED_OWNER' ||
-      !['PUBLIC','UNLISTED'].includes(item.visibility);
-    adoptPick.setAttribute('aria-label','Adopt existing generator '+item.slug);
-    adoptPick.addEventListener('click',()=>window.dispatchEvent(
-      new CustomEvent('pcms-adoption-target',{detail:{
-        slug:item.slug,revision:item.revision,ownerState:item.ownerState,
-        visibility:item.visibility
-      }})));
-    first.append(document.createTextNode(' '),adoptPick);
-    cells.push(first);
-    for(const value of [item.accountId, labels[item.ownerState]||'Evidence unknown',
-       (item.visibility||'UNKNOWN')+' · '+(item.source||'SOURCE_PENDING')]) {
-      const td=document.createElement('td');td.textContent=value;cells.push(td);
-    }
+    const first=document.createElement('td');first.className='pcms-gen-identity';
+    const choose=document.createElement('button');choose.type='button';
+    choose.className='pcms-generator-row-target';
+    choose.textContent=item.slug;
+    choose.setAttribute('aria-label','Inspect '+item.slug);
+    choose.addEventListener('click',()=>inspect(item,true));
+    first.append(pick,choose);cells.push(first);
+    const account=document.createElement('td');account.className='pcms-gen-account';
+    const exact=String(item.accountId||'');
+    account.textContent=exact.length>19?exact.slice(0,13)+'…'+exact.slice(-4):exact||'Unknown';
+    account.title=exact||'Unknown';cells.push(account);
+    const visibility=document.createElement('td');
+    const visibilityTag=document.createElement('span');
+    visibilityTag.className='pcms-status-tag';
+    visibilityTag.dataset.tone=['UNLISTED','PRIVATE'].includes(item.visibility)?'neutral':item.visibility==='PUBLIC'?'info':'held';
+    visibilityTag.textContent=item.visibility==='UNLISTED'?'Unlisted':item.visibility==='PUBLIC'?'Public':item.visibility||'Unknown';
+    visibility.append(visibilityTag);cells.push(visibility);
+    const source=document.createElement('td');source.className='pcms-source-cell';
+    const src=document.createElement('span');src.className='pcms-status-tag';
+    src.dataset.tone=item.source==='READY'?'good':'neutral';
+    src.textContent=item.source==='READY'?'READY':item.source==='SOURCE_PENDING'?'Not linked':item.source||'Unknown';
+    const owner=document.createElement('span');owner.className='pcms-mini-evidence';
+    owner.title=labels[item.ownerState]||'Owner evidence unavailable';
+    owner.textContent=item.ownerState==='OBSERVED_OWNER'?'Owner seen':item.ownerState==='OWNER_UNVERIFIED'?'Owner unknown':'Check owner';
+    source.append(src,owner);cells.push(source);
+    const observed=document.createElement('td');
+    observed.className='pcms-gen-observed';
+    const observedDate=Number.isSafeInteger(item.lastObservedAt)&&item.lastObservedAt>0
+      ?new Date(item.lastObservedAt):null;
+    if(observedDate&&!Number.isNaN(observedDate.getTime())){
+      const time=document.createElement('time');
+      time.dateTime=observedDate.toISOString();
+      time.textContent=observedDate.toLocaleDateString();
+      time.title=observedDate.toLocaleString();
+      observed.append(time);
+    }else observed.textContent='Not observed';
+    cells.push(observed);
+    cells.slice(1).forEach((cell,i)=>{cell.hidden=!columns.has(COLUMN_KEYS[i]);});
     tr.append(...cells);rows.append(tr);
   }
 }
 function showCounter(){
   const first=total===0?0:offset+1,last=Math.min(total,offset+limit);
-  counter.textContent=first+'–'+last+' of '+total+' matching · '+selection.size+
-    ' selected (no bulk mutations enabled)';
+  counter.textContent=first+'–'+last+' of '+total+(selection.size?' · '+selection.size+' selected':'');
+  if(matches)matches.textContent=total+' matching';
+  if(headingTotal)headingTotal.textContent=total?' '+total.toLocaleString():'';
   before.disabled=offset===0;
   after.disabled=offset+limit>=total;
+  previewButton.disabled=selection.size===0;
+  clearButton.disabled=selection.size===0;
+  if(!selectionPreview.hidden)previewSelection();
 }
 async function load() {
   const mine=++epoch;
   feedback.textContent='Reading local inventory…';
   try{
     const res=await inv('LIST_INVENTORY',{
-      query:query.value,ownerState:filter.value,offset,limit
+      query:query.value,ownerState:filter.value,offset,limit,
+      sortBy:sort,sortDirection:direction
     });
     if(mine!==epoch)return;
     if(res?.ok!==true)throw Error(res?.code||'READ_UNAVAILABLE');
     total=res.total;latest=res.items;draw(latest);showCounter();
-    feedback.textContent=(res.truncated?'Result limit reached. Narrow filters. ':
-      'Local inventory only. ')+(res.restoreHeld?
-      'Restore hold active. ':'')+
-      'Real-time ownership is not asserted; provider writes OFF.';
+    feedback.textContent=res.restoreHeld?'Restore hold · local data only':
+      res.truncated?'Some records omitted · narrow your search':
+      'Local observations · owner status may be stale';
   }catch{
     if(mine!==epoch)return;
     total=0;latest=[];rows.replaceChildren();showCounter();
-    feedback.textContent='Inventory read unavailable. No absence or ownership inferred.';
+    feedback.textContent='Inventory unavailable · no deletion inferred';
   }
 }
 async function loadOverview() {
@@ -175,7 +301,38 @@ let debounce;
 query.addEventListener('input',()=>{
   clearTimeout(debounce);debounce=setTimeout(()=>{offset=0;void load();},180);
 });
-filter.addEventListener('change',()=>{offset=0;void load();});
+filter.addEventListener('change',()=>{
+  view=Object.keys(VIEWS).find(k=>VIEWS[k]===filter.value)||'all';
+  renderControls();persistDisplay();offset=0;void load();
+});
+for(const b of presetButtons)b.addEventListener('click',()=>{
+  view=b.dataset.pcmsInventoryView;
+  filter.value=VIEWS[view];
+  renderControls();persistDisplay();offset=0;void load();
+});
+sortPicker.addEventListener('change',()=>{
+  if(!SORTS.has(sortPicker.value))return;
+  sort=sortPicker.value;persistDisplay();offset=0;void load();
+});
+directionPicker.addEventListener('change',()=>{
+  if(!DIRECTIONS.has(directionPicker.value))return;
+  direction=directionPicker.value;persistDisplay();offset=0;void load();
+});
+for(const input of columnInputs)input.addEventListener('change',()=>{
+  const key=input.dataset.pcmsInventoryColumn;
+  if(!COLUMN_KEYS.includes(key))return;
+  if(input.checked)columns.add(key);else columns.delete(key);
+  persistDisplay();renderControls();draw(latest);
+});
+previewButton.addEventListener('click',()=>{
+  selectionPreview.hidden=!selectionPreview.hidden;
+  if(!selectionPreview.hidden)previewSelection();
+});
+clearButton.addEventListener('click',()=>{
+  selection.clear();selectionPreview.hidden=true;draw(latest);showCounter();
+});
+renderControls();
+filter.value=VIEWS[view];
 reload.addEventListener('click',()=>{void loadAccounts();void load();void loadOverview();});
 // Dashboard routes reuse one document. Revalidate the canonical projection
 // whenever an operator revisits Generators; old observations are not live.

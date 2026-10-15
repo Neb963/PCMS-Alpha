@@ -1,0 +1,86 @@
+# I17 — Final operator / local-agent live test
+
+This guide applies to the combined I17 XPI from draft PR #20, branch `phase/I17-integration-acceptance`. Use the exact candidate commit, successful mandatory run and SHA-256 in the delivered candidate receipt; do not substitute `main` or a previous artifact. Gecko ID: `persona-route-manager@local`. The authorization amendment dated **2026-10-15** permits production wiring and separately chosen operator live tests. Coding-agent and CI tests use isolated fixtures only. No H-series case is claimed executed here.
+
+## Shortest complete live workflow
+
+Choose **one disposable ordinary valid slug**, one verified protected Persona/account, and its exact `Neb963/per-gens` `main` folder `gens/<slug>`. The existing private repository must already exist with authorized access; this guide does not authorize creating it. Use a disposable operator-controlled Firefox Developer Edition profile that permits unsigned XPI installation. Install the supplied combined XPI persistently, verify its ID/hash, and retain the pinned donor configuration. Use a protected route already authorized by the operator; never fall back to Direct. The local agent may use the operator's separately authorized browser tools. The coding agent does not operate the authenticated browser.
+
+For **each numbered effect**, retain the evidence row below before moving on. Enter credentials only in the extension's password fields, never in chat, command transcripts, exported evidence or public logs. Exact-operation confirmations expire after 120 seconds and are revoked by event-page restart. Re-arm only an operation independently shown to be **unsent**.
+
+1. **Accounts → bind and verify.** Select an unbound protected Persona (or explicitly create one on an authorized protected route), choose **Bind account**, **Open login**, complete human login, **I completed login**, then **Check identity evidence**. Confirm canonical VERIFIED identity and unchanged binding. A manual enrollment exception is insufficient. In **Generators**, perform guarded inventory sync and verify owner identity. Record pre-existing tabs; do not let PCMS take over a dirty/human editor.
+2. **Generators → Plan new generators.** Enter the single slug; **Preview exact batch → Freeze locally**. In **Work Queue → Activity → Frozen supply batches**, choose **Create private**, type the requested exact `CREATE <slug>` authorization, and observe `CREATE_CONFIRMED`. Confirm the actual temporary generator belongs to the chosen account and is private. Then **Rename private**, authorize `RENAME <slug>` and confirm the requested name, unchanged remote identity, private empty source and old-name disposition. A collision or uncertain creation stops this branch; no second CREATE.
+3. **Private source reservation.** In that supply receipt, enter an ephemeral scoped Git write credential and choose **Create non-READY Git folder**, confirming `GIT <slug>`. Independently verify the private repository, expected parent HEAD and exact `gens/<slug>/DEPLOYMENT.md` non-READY marker. `SOURCE_LINKED` requires readback; an HTTP acknowledgment is insufficient.
+4. **Initial READY source in PCMS.** Expand **Prepare initial READY source (private Git)**. Author the real `main.pjs` and `index.html`; optionally select local binary/text assets. Filenames are retained under `src/`; duplicate/traversal paths are rejected. Review every file, byte size and complete fingerprint. **Review and save initial READY source**, then type the displayed `READY <slug> <fingerprint>`. Independently inspect the new nonforced commit, exact tree paths, source bytes and READY marker. No out-of-band repository edit is needed for this initial source. Sync inventory if needed; choose the generator's **Source** action, inspect `gens/<slug>`, and **Confirm association** at current HEAD.
+5. **Generators → Private staging.** Enter the reserved slug and a read credential. **1 · Pin READY source → 2 · Authorize exact stage → 3 · Stage privately**. PCMS opens its own protected editor and waits for readiness. Keep human hands out of this owned tab until handoff. Use **Verify saved bytes** if not already independently confirmed. Require `SOURCE_VERIFIED`, exact PJS/HTML/all assets, private visibility, owner, clean editor and stable binding/route. Do not count a save response as verification.
+6. **Work Queue → AI tests.** Set useful pinned instructions and supported independent browser assertions in Settings first. Enter the staged slug/read credential; **Prepare test job**, select its receipt, then **Run Chat 1** and type the exact step authorization. Observe native streaming in the owned editor without modifying it. **Reconcile saved result** until the independent session/source observation is idle; use **Run browser checks** for each required assertion. A real FAIL permits **Repair known failure**, followed by reconciliation and fresh checks on the new full-source fingerprint. Require canonical `TESTS_VERIFIED`; assistant prose is not an oracle. Stop and optional Chat 2 are covered below.
+7. **Work Queue → Git writeback.** Select the same slug, MANUAL mode and scoped write credential. **Review exact F diff → Prepare Git commit → Authorize tested source → Commit once**. Require canonical CONFIRMED and independent current HEAD/parent/tree/blob proof of the exact tested F. If HEAD moved, stop and inspect the competing change; no force update, merge guess or repeated PATCH. Use read-only reconciliation for a possibly dispatched commit.
+8. **Work Queue → Release approval.** Enter the same slug and read credential. **Review source and tests**. The human must inspect the full exact source/diff and fingerprints, then **Approve exact F → Authorize exact publication → Publish once**. Use **Verify public source and listing**. Require `CONFIRMED_PUBLIC`, current owner, the same F and independently observed PUBLIC state. Save/action acknowledgment and recent-list inclusion are separate facts. Stop here for the shortest complete end-to-end result. This does not grant permission to publish other generators.
+
+After any target, source, approval, HEAD, binding or route change, discard the stale intended action and inspect its canonical receipt. An unknown effect is never a successful effect and never permission to retry.
+
+## Required evidence for each effect
+
+Keep detailed evidence in operator-controlled local storage. Public reports contain only opaque fixture references, hashes, state codes, UTC timestamps and sanitized causal findings.
+
+| Before dispatch | One authorized effect | Independent after-state |
+|---|---|---|
+| Exact slug/remote target, account/Persona binding revision, route protected/current, ownership proof, visibility, full source fingerprint, Git HEAD if relevant, canonical state/revision, chosen consent | Exact UI control and typed confirmation where requested; operation/intent ID; durable `DISPATCH_POSSIBLE` or corresponding specific marker; native/provider ACK separately | Fresh remote read independent of the initiating ACK; target/owner/visibility/full bytes or Git DAG proof; canonical receipt/state/revision; observation time; first causal failure if any |
+
+Local source comparisons must include PJS, HTML, asset paths, sizes and hashes, including binary files and deletions. Keep source bodies, transcripts, session identifiers/keys, cookies, raw IPs, passphrases and tokens out of public GitHub/CI/chat evidence. Redact screenshots before sharing. A lost reply requires loading the durable receipt and independent readback, not clicking the effect again.
+
+## AI automation, optional fresh chat and Stop
+
+- **Background AI:** In **AI tests**, select the exact qualified job and **Enable background AI for selected job**, confirming `AUTO AI <slug>`. Close the dashboard and observe bounded progress through the existing AI alarm. Consent is job/source/stage/owner bound; route loss, human takeover, unverified source, account concurrency, rate limits and unknown effects hold that job. **Disable background AI** cancels future admissions; it cannot erase an already possible effect. Inspect canonical receipts after reload rather than assuming progress.
+- **Stop:** First reconcile until `RUNNING_OBSERVED`. Choose **Stop observed session** and confirm `STOP <slug>`. This targets that exact native session and does not overwrite an AI-owned unsaved edit. Human input, ambiguous ownership, a changed session or route still blocks it. Reconcile once more; require independently observed `STOP_OBSERVED` for the same hashed session. STOP leaves operator review required, not test PASS or automatic resume. If the session is already idle, inspect it rather than retry Stop. If human intervention is needed, use explicit editor handoff and retain the unsaved work.
+- **Optional Chat 2:** Only use a deliberately supplied READY `TESTING.md` with supported assertions. After Chat 1 proof, **Request fresh chat**, respond to the provider's native confirmation, reconcile its reset, then **Run Chat 2**. **Verify session isolation** independently checks the exact S2 session, workspace and server history. Distinct SID/UI alone is insufficient. If PCMS reports the previous-worker lock, save and wait for idle, manually reload only that exact protected tab, reconcile S2, then verify; never resend an unknown prompt. If the provider cannot establish isolation, retain the hold. All required Chat 1 and Chat 2 checks must pass on the same final F after any Chat 2 edits.
+- **Automatic Git:** Opt in separately in Settings, then arm the exact selected generator in **Git writeback** with an ephemeral token. Background writeback still requires terminal native-history evidence, exact tested F, current READY/HEAD and no source drift. Credentials are memory-only; event-page suspension/restart requires explicit re-arm after reading the receipt. This is independent of publication approval.
+
+## Existing generators and a subsequent update
+
+For an existing owned generator, use **Generators → Adopt**. Consent explicitly if public; **Capture and preserve original** obtains two matching full source reads. **Archive original to private Git** creates the immutable original archive, with independent Git readback. This does not modify provider source or listing. Unknown archive results use **Reconcile Git archive read-only**.
+
+For a deliberately reviewed READY update, associate/recheck its private Git source. In **Work Queue → Recovery**, select the exact generator and enter a local recovery passphrase (12+ characters). **Prepare encrypted previous P** must retain the actual current previous-good source and prove account/owner/sleeping eligibility. Observe the canonical scheduler's actual sleeping eligibility; do not fabricate a sleep receipt or alter source just to qualify.
+
+Then perform one step at a time: **Unlist public P once → Verify P unlisted → Pin current READY source → Stage full F once → Verify saved F**. Each step needs its own canonical revision and current prerequisites. Continue through the same AI, writeback and human publication workflow above. Preserve encrypted P and its passphrase independently throughout.
+
+Recovery is distinct from a new release: if F is public, **Unlist public F for recovery → Verify F unlisted** first. **Restore encrypted P, remain unlisted → Verify restored P unlisted** checks exact prior bytes and privacy. It does not silently re-publish P. A wrong passphrase, changed target or uncertain prior action stops recovery; no overwrite or blind replay.
+
+## Source-save Refresher — one approved target
+
+The [2026-10-15 source-save amendment](../implementation/I17-REFRESHER-SAVE-AMENDMENT.md)
+defines refresh as a consented, deterministic HTML-comment revision and one
+native Save, with independently verified complete source and a separate recent
+list. A distinct refresh endpoint is not required. The packaged production
+entry includes the fixed native donor adapter and uses the existing scheduler.
+
+Follow [H-04 source-save runbook](I17-H04-SOURCE-SAVE-RUNBOOK.md): select one owned,
+listed, released target → preview exact marker diff → scoped consent → test
+once → inspect source/feed receipts → bounded read-only reconciliation if
+needed. Signed independent target review, resource evidence and explicit opt-in
+can enable recurring scheduling in this same XPI. No rebuild or coding phase is
+required after legitimate evidence. A signature cannot manufacture absent
+canonical source/feed facts, repeated-use permission or ranking guarantees.
+
+The older meaningful-update observation remains available as historical
+read-only evidence, separate from this operation. Unqualified targets stay
+non-mutating; uncertain, ineffective, absent or provider-refused cases do not
+cause another save. Pauses remain scoped, and unrelated workflows remain
+independently guarded. H-04 and final operator/governance acceptance remain
+pending real evidence.
+
+## Backup and staged restore
+
+Choose **Settings → encrypted backup** and retain the downloaded archive plus a separately stored recovery passphrase. Check the evidence tier: in-memory authentication, browser completed-download/existence/size, and independent on-disk decrypt/readback are different proofs. For scheduled backup, install/configure the repository's native Secret Service host through the operator's normal local process, verify the unlocked OS vault and opt in. Test one scheduled export and a locked-vault hold; never put secrets in CI or add a plaintext fallback.
+
+For staged restore, use a separate disposable destination and the exact archive/passphrase. Authenticate the preview, inspect mappings/collisions and exclusions, create/select the pre-restore checkpoint, independently verify it, then explicitly apply the staged groups. Inspect every group receipt after interruption. An uncertain group is reconciled read-only, never reapplied blindly. The restored controller remains INACTIVE under its persistent guard. Fresh-controller activation needs predecessor shutdown and separate H-06 authority/evidence; this candidate does not expose a bypass.
+
+## First-failure and handoff rules
+
+Stop the affected workflow at the **first causal failure**. Record expected target and state, action, first runtime/provider code, journal revision, observed remote state and safe evidence reference. Distinguish validation failure before dispatch, dispatch possible/ACK lost, mismatched independent readback, and genuine provider/session failure. Preserve the owned tab and receipts. Do not reload a dirty editor, delete a journal, toggle routes, clear restore guards or retry an unknown effect to make a test pass. Other independently healthy capabilities remain usable.
+
+Use **Settings → I17 Operator acceptance checklist** for the executed case and real evidence tier. Keep unexecuted H cases `NOT_TESTED`/`BLOCKED`. Export marked results and safe diagnostics and independently open the saved file; use the emergency diagnostic page if Core is unavailable. H-01 usability/accessibility and H-07 evidence/fallback sign-offs remain required; H-02/03/04/05/06 apply to the operations actually chosen. No repeat of historical I00–I16 smoke testing is requested here.
+
+Draft PR #20 remains unmerged. Green F/B/X CI demonstrates only its isolated coverage. Independent live acceptance and independent review of the signed-original alias/authorization amendment are still required before final acceptance. Never report `MERGED_AND_VERIFIED` from this guide, a local checkbox, synthetic provider ledger or packaged-browser run.
+
+Discovery input: `discovery-v3.zip`, SHA-256 `65c52533702bc210556acadd2f39f9d848e302644f6c17652e5bc9066e7a9080`. The proposed `perchanceAutomation` abstraction is not a global object. This candidate uses the actual discovered native APIs and guarded adapters.

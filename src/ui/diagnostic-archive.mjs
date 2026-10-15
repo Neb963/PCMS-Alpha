@@ -1,4 +1,4 @@
-import { createSafeReport } from './safe-report.mjs';
+import { normalizeSafeReport, safeMarkdownReport } from './safe-report.mjs';
 
 // Minimal deterministic ZIP writer: two known safe UTF-8 files only. Stored
 // entries, no source data, no zip library, no external modules or credentials.
@@ -13,21 +13,9 @@ function crc32(bytes) {
   return (crc ^ 0xffffffff)>>>0;
 }
 export function makeSafeArchive(safeReport) {
-  if (!safeReport || safeReport.schema !== 'PCMS_SAFE_DIAGNOSTIC_V1')
-    throw new TypeError('Unvalidated diagnostic report');
-  // Recreate from EXPLICIT known fields. No unknown property is serialized.
-  const validated = createSafeReport({
-    wakeCount:safeReport.wake?.count,
-    alarmCount:safeReport.wake?.alarmCount,
-    lastWake:safeReport.wake?.lastEvent,
-    previousBoot:safeReport.wake?.previousBootObserved,
-    restoreActive:safeReport.sections?.restore==='RESTORE_IN_PROGRESS' ? true : undefined
-  });
+  const validated=normalizeSafeReport(safeReport);
   const safeJson=JSON.stringify(validated,null,2)+'\n';
-  const markdown='# PCMS Alpha — emergency diagnostics\n\n'
-    +'This export is redacted. It is not a backup and contains no provider secrets.\n\n'
-    +'Canonical data: section_unavailable (independent recovery view).\n'
-    +'No remote effects were performed to create this report.\n';
+  const markdown=safeMarkdownReport(validated);
   const encoder=new TextEncoder();
   const entries=[['report.json',safeJson],['README.md',markdown]];
   const chunks=[], central=[];

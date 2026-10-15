@@ -12,6 +12,7 @@ const display=r=>r?{
   fileCount:r.approval.files.length,
   accountId:r.approval.accountId,observedAt:r.observedAt||null,
   reason:r.reason||null,dispatchPossible:r.dispatchPossible===true,
+  actionResult:r.actionResult||null,
   publication:r.state==='CONFIRMED_PUBLIC'?'INDEPENDENTLY_VERIFIED':'HELD_OR_UNVERIFIED',
   review:r.state==='APPROVED'?'SOURCE_BOUND_APPROVAL':'READ_ONLY_RECOVERY'
 }:fail('RELEASE_NOT_FOUND');
@@ -222,7 +223,7 @@ export function createReleaseStore(db){
       };
     });
   }
-  function settle(name,expectedRevision,{proof=null,reason='PUBLICATION_UNCERTAIN'}={}){
+  function settle(name,expectedRevision,{proof=null,reason='PUBLICATION_UNCERTAIN',attempt=null}={}){
     return transact(db,'readwrite',(t,done)=>{
       const m=t.objectStore('meta'),ops=t.objectStore('operations');
       m.get(key(name)).onsuccess=e=>{
@@ -242,6 +243,9 @@ export function createReleaseStore(db){
           if(!operation||operation.fingerprint!==r.approval.sourceFingerprint||
              operation.targetId!=='release_'+name){done(fail('RELEASE_JOURNAL_CONFLICT'));return;}
           const next={...r,revision:r.revision+1,
+            actionResult:attempt?{ack:attempt.ok===true?'UNVERIFIED_ACK':'UNKNOWN',
+              code:/^[A-Z][A-Z0-9_]{2,79}$/.test(attempt.code||'')?attempt.code:'PUBLISH_RESPONSE_UNKNOWN',
+              recordedAt:Date.now()}:r.actionResult||null,
             state:verified?'CONFIRMED_PUBLIC':'PUBLICATION_UNCERTAIN',
             source:verified?'INDEPENDENT_PUBLICATION_READBACK':null,
             sourceFingerprint:verified?r.approval.sourceFingerprint:null,

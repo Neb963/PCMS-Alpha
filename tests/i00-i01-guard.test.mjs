@@ -156,3 +156,12 @@ test('I01 static entry keeps donor gate first and overlay prevents separate nati
   assert.match(overlay,/shared donor control-lease registry|EXISTING donor control-lease registry/i);
   assert.doesNotMatch(entry,/await\b|setTimeout/);
 });
+
+test('I17 P51-02: donor canonical Direct/Block IDs are rejected even with misleading cached route evidence',async()=>{
+  for(const routeId of ['direct','__direct__','block','__block__']){
+    const f=donorFixture();f.all.aaaaaaaa.routeId=routeId;
+    const result=await f.guard.acquireConflictGuard('aaaaaaaa');
+    assert.equal(result.ready,false,routeId);assert.equal(f.active.size,0);
+    assert.equal(f.forbiddenEffects(),0);
+  }
+});

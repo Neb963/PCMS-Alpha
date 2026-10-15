@@ -1,3 +1,5 @@
+> Current implementation: [I17 authorization amendment](../implementation/I17-AUTHORIZATION-2026-10-15.md), 2026-10-15. The following signed design remains historical authority for requirements; its old implementation/live-activation wording is superseded only as specified in that amendment. H acceptance and protected merge gates remain required.
+
 # PCMS-Alpha — Stage 6.2 Agent Execution and Recovery Protocol
 
 **Prepared:** 2026-10-12  

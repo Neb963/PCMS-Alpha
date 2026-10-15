@@ -19,7 +19,8 @@ import {releaseContext,releaseTestContext,candidateManifest,releaseGitContext,
 export const RELEASE_PORT='pcms-i13-release';
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const fp=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
-const TYPES=new Set(['LIST','GET','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
+const disposable=/^pcms-test-[a-z0-9-]{8,88}$/;
+const TYPES=new Set(['LIST','GET','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE','ARM_DISPOSABLE_RELEASE','ARM_EXACT_RELEASE']);
 export function validateReleaseMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
@@ -31,6 +32,8 @@ export function validateReleaseMessage(api,sender,msg){
     GET_REVIEW_CHUNK:['slug','stageRevision','fingerprint','origin','path','offset'],
     APPROVE:['slug','token','expectedStageRevision','expectedJobRevision','fingerprint','explicitApproval','passphrase'],
     CANCEL_APPROVED:['slug','expectedRevision'],
+    ARM_DISPOSABLE_RELEASE:['slug','expectedRevision','confirmation'],
+    ARM_EXACT_RELEASE:['slug','expectedRevision','confirmation'],
     DISPATCH:['slug','token','expectedRevision','passphrase'],
     RECONCILE:['slug','token','expectedRevision']
   };
@@ -48,8 +51,10 @@ export function validateReleaseMessage(api,sender,msg){
        !/^(?:main\.pjs|index\.html|src\/[A-Za-z0-9._/-]+)$/.test(p.path)||
        !Number.isSafeInteger(p.offset)||p.offset<0||p.offset>16*1024*1024||
        p.offset%8192!==0))||
-     (['DISPATCH','RECONCILE','CANCEL_APPROVED'].includes(msg.type)&&
+     (['DISPATCH','RECONCILE','CANCEL_APPROVED','ARM_DISPOSABLE_RELEASE','ARM_EXACT_RELEASE'].includes(msg.type)&&
        (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
+     (['ARM_DISPOSABLE_RELEASE','ARM_EXACT_RELEASE'].includes(msg.type)&&
+       (typeof p.confirmation!=='string'||p.confirmation.length>250))||
      (msg.type==='APPROVE'&&(
        !Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
        !Number.isSafeInteger(p.expectedJobRevision)||p.expectedJobRevision<1||
@@ -107,7 +112,7 @@ export function createReleaseBoundary(api,{
   releaseFactory=createReleaseStore,inspect=inspectGitSource,
   // Only an independently activated fixed native publish adapter may
   // change listing. Default packaged capability is held.
-  effectGate=()=>false,
+  effectGate=()=>false,pilotClock=()=>performance.now(),
   dispatch=async(g,r)=>g.runReleaseStep?.(r.personaUid,{
     slug:r.slug,nonce:r.nonce,action:'PUBLISH',remotePublicId:r.remotePublicId,
     principalFingerprint:r.principalFingerprint,files:r.releaseFiles})
@@ -115,6 +120,17 @@ export function createReleaseBoundary(api,{
   let dbPromise;
   const db=()=>dbPromise ||=open().catch(e=>{dbPromise=null;throw e;});
   const sentinel=createRestoreSentinel(api.storage.local);
+  let releasePilot=null;
+  const pilotMatches=record=>{
+    const a=releasePilot;
+    return !!a&&pilotClock()<a.expiresAt&&record.kind===a.kind&&
+      record.state==='APPROVED'&&record.slug===a.slug&&
+      record.releaseId===a.releaseId&&record.revision===a.revision&&
+      record.approval?.sourceFingerprint===a.sourceFingerprint&&
+      record.approval?.remotePublicId===a.remotePublicId;
+  };
+  const publicationAuthorized=record=>effectGate({phase:'I13',record})===true||
+    pilotMatches(record);
   async function checkCurrent(database,name,token,{requireEditor=true,passphrase=null}={}){
     const stage=await stageFactory(database).getFull(name),
       job=await aiFactory(database).getJobFull(name),
@@ -226,6 +242,27 @@ export function createReleaseBoundary(api,{
         nextOffset:p.offset+part.length<bytes.length?p.offset+8192:null};
     }
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+    if(['ARM_DISPOSABLE_RELEASE','ARM_EXACT_RELEASE'].includes(msg.type)){
+      if(msg.type==='ARM_DISPOSABLE_RELEASE'&&!disposable.test(p.slug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
+      if(releasePilot&&pilotClock()<releasePilot.expiresAt)
+        return fail('PILOT_ALREADY_ARMED');
+      const row=await store.getFull(p.slug);
+      if(!row.ok||row.record.revision!==p.expectedRevision)
+        return fail('STALE_RELEASE');
+      const record=row.record;
+      if(record.state!=='APPROVED'||
+         (msg.type==='ARM_DISPOSABLE_RELEASE'&&record.kind!=='PRIVATE_NEW')||
+         !['PRIVATE_NEW','EXISTING_UPDATE'].includes(record.kind))
+        return fail(msg.type==='ARM_DISPOSABLE_RELEASE'?'PILOT_PRIVATE_NEW_APPROVAL_REQUIRED':'EXACT_SOURCE_APPROVAL_REQUIRED');
+      if(p.confirmation!=='PUBLISH '+p.slug+' '+record.approval.sourceFingerprint)
+        return fail('PILOT_EXACT_SOURCE_CONFIRMATION_REQUIRED');
+      releasePilot={slug:p.slug,kind:record.kind,releaseId:record.releaseId,
+        revision:record.revision,sourceFingerprint:record.approval.sourceFingerprint,
+        remotePublicId:record.approval.remotePublicId,
+        expiresAt:pilotClock()+120000};
+      return {ok:true,scope:msg.type==='ARM_DISPOSABLE_RELEASE'?'SINGLE_PRIVATE_NEW_EXACT_SOURCE_PUBLICATION':'SINGLE_EXACT_SOURCE_PUBLICATION',
+        sourceFingerprint:record.approval.sourceFingerprint,expiresInSeconds:120};
+    }
     if(msg.type==='CANCEL_APPROVED')return store.cancelApproved(p.slug,p.expectedRevision);
     if(msg.type==='RECONCILE'){
       const row=await store.getFull(p.slug);
@@ -300,21 +337,39 @@ export function createReleaseBoundary(api,{
       if(checked.kind==='EXISTING_UPDATE'&&
          checked.existing.stagedFingerprint!==checked.source.fingerprint)
         return fail('EXISTING_FINAL_F_NOT_PINNED');
-      if(effectGate({phase:'I13',record:stored.record})!==true)
+      if(!publicationAuthorized(stored.record))
         return fail('PUBLICATION_ACTIVATION_HELD');
       // The dispatch-possible transition commits *before* the only effect.
       const armed=await store.markDispatch(p.slug,p.expectedRevision,checked.approval);
       if(!armed.ok)return armed;
-      if(effectGate({phase:'I13',record:stored.record})!==true||
-         (await sentinel.inspect()).held)return store.settle(p.slug,armed.revision,
-           {reason:'ACTIVATION_REVOKED_AFTER_DISPATCH_MARK'});
+      if(!publicationAuthorized(stored.record)||
+         (await sentinel.inspect()).held){
+        releasePilot=null;
+        return store.settle(p.slug,armed.revision,
+          {reason:'ACTIVATION_REVOKED_AFTER_DISPATCH_MARK'});
+      }
+      if(pilotMatches(stored.record)){
+        const g=guard();
+        const routeNow=await g?.getSafeRouteReadiness?.(checked.r.personaUid);
+        const editorNow=await g?.inspectStageEditor?.(checked.r.personaUid,
+          checked.r.slug,checked.r.nonce);
+        if(!routeNow?.ready||routeNow.routeId!==checked.route.routeId||
+           routeNow.cookieStoreId!==checked.route.cookieStoreId||
+           editorNow?.ok!==true||editorNow.clean!==true){
+          releasePilot=null;
+          return store.settle(p.slug,armed.revision,
+            {reason:'RELEASE_ROUTE_OR_EDITOR_CHANGED_AFTER_MARKER'});
+        }
+      }
+      if(pilotMatches(stored.record))releasePilot=null;
       let attempt;
       try{attempt=await dispatch(guard(),{...checked.r,releaseFiles:checked.source.blobs});}
       catch{attempt=fail('PUBLISH_RESPONSE_UNKNOWN');}
       // Even ACK is NOT public proof. Reconcile with a fresh remote read,
       // and never automatically retry a possible publication effect.
       const held=await store.settle(p.slug,armed.revision,{
-        reason:attempt?.code||'INDEPENDENT_PUBLICATION_READBACK_REQUIRED'});
+        reason:attempt?.code||'INDEPENDENT_PUBLICATION_READBACK_REQUIRED',
+        attempt:{ok:attempt?.ok===true,code:attempt?.code}});
       return held.ok?{...held,ack:attempt?.ok===true?'UNVERIFIED_ACK':'UNKNOWN'}:held;
     }
     return fail('COMMAND_NOT_ALLOWED');

@@ -1,3 +1,4 @@
+import {requestTypedConfirmation} from './typed-confirm.mjs';
 // I13 Work Queue inspector: fingerprints and test provenance, never source
 // bytes or credentials. Pending and disconnected outcomes never claim publish.
 const slug=document.getElementById('pcms-release-slug');
@@ -6,6 +7,7 @@ const passphrase=document.getElementById('pcms-existing-passphrase');
 const previewBtn=document.getElementById('pcms-release-preview');
 const approveBtn=document.getElementById('pcms-release-approve');
 const dispatchBtn=document.getElementById('pcms-release-dispatch');
+const armBtn=document.getElementById('pcms-release-arm');
 const cancelBtn=document.getElementById('pcms-release-cancel');
 const reconcileBtn=document.getElementById('pcms-release-reconcile');
 const loadBtn=document.getElementById('pcms-release-load');
@@ -37,6 +39,8 @@ function controls(){
   clearBtn.disabled=active;
   approveBtn.disabled=active||!snapshot||snapshot.slug!==slug.value||!hasToken;
   cancelBtn.disabled=active||!receipt||receipt.slug!==slug.value||
+    receipt.state!=='APPROVED';
+  armBtn.disabled=active||!receipt||receipt.slug!==slug.value||
     receipt.state!=='APPROVED';
   dispatchBtn.disabled=active||!receipt||receipt.slug!==slug.value||
     receipt.state!=='APPROVED'||!hasToken;
@@ -187,6 +191,23 @@ cancelBtn.addEventListener('click',()=>{
   if(!receipt||receipt.state!=='APPROVED')return;
   act('CANCEL_APPROVED',{slug:receipt.slug,expectedRevision:receipt.revision},
     'Canceling unsent exact-source approval; no remote effect…');
+});
+armBtn.addEventListener('click',async()=>{
+  if(active||receipt?.state!=='APPROVED')return;
+  const expected='PUBLISH '+receipt.slug+' '+receipt.sourceFingerprint;
+  const pinned=receipt;
+  const confirmation=await requestTypedConfirmation(armBtn,expected,
+    'Authorize one individual public release of the exact approved private tested source F. Never retry an uncertain publication.');
+  if(confirmation===null)return;
+  if(receipt!==pinned){note('Release receipt changed. Authorization not sent.');return;}
+  active=true;controls();
+  try{
+    const result=await command('ARM_EXACT_RELEASE',{
+      slug:receipt.slug,expectedRevision:receipt.revision,confirmation});
+    note(result?.ok?'Exact-source publication armed for two minutes. Click Publish to dispatch once.':
+      'Publication not armed: '+(result?.code||'UNVERIFIED'));
+  }catch{note('Arm acknowledgment unknown. Reinspect approval; do not infer authorization.');}
+  finally{active=false;controls();}
 });
 dispatchBtn.addEventListener('click',()=>{
   if(!receipt)return;
