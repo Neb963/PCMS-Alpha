@@ -13,6 +13,8 @@ import './source-boundary.mjs';
 
 // I06 frozen allocation and held guarded two-stage provider dispatcher.
 import './supply-boundary.mjs';
+// Exact reviewed initial source promotion inside the protected PCMS XPI.
+import './ready-source-boundary.mjs';
 
 // I07 explicitly consented, read-only original-source capture.
 import './adoption-boundary.mjs';

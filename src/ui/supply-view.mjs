@@ -20,7 +20,8 @@ function request(portName,type,params){
     // A guarded remote create/rename may take several bounded independent
     // provider observations. Timeout does not authorize a second dispatch.
     const timeout=setTimeout(()=>finish(null,Error('TIMEOUT')),
-      type==='EXECUTE_ITEM'?75000:type==='FINISH_SOURCE_FOLDER'?150000:6500);
+      type==='EXECUTE_ITEM'?75000:type==='FINISH_SOURCE_FOLDER'?150000:
+      portName==='pcms-i17-initial-ready'&&['ARM','COMMIT','RECONCILE'].includes(type)?150000:6500);
     function finish(out,err){
       if(completed)return;completed=true;clearTimeout(timeout);
       try{port.disconnect();}catch{}
@@ -33,6 +34,7 @@ function request(portName,type,params){
   });
 }
 const supply=(type,params)=>request('pcms-i06-supply',type,params);
+const ready=(type,params)=>request('pcms-i17-initial-ready',type,params);
 const parsed=()=>input.value.replace(/\r\n/g,'\n').split('\n').filter(x=>x.length>0);
 function setBusy(value){
   busy=value;preview.disabled=value;freeze.disabled=value||!latest||!latest.items.some(i=>i.state==='FROZEN');
@@ -263,6 +265,84 @@ function drawQueue(result){
           }finally{abort.disabled=false;}
         });
         li.append(document.createTextNode(' '),abort);
+      }
+
+      if(item.state==='CONFIRMED'){
+        // The initial Git marker exists, but it is NOT source READY.
+        // A short-lived exact-source approval may promote an isolated folder
+        // without relying on a second external Git editor.
+        const details=document.createElement('details');
+        details.className='pcms-ready-bootstrap';
+        const summary=document.createElement('summary');
+        summary.textContent='Prepare initial READY source (private Git)';
+        const pjs=document.createElement('textarea');
+        pjs.rows=5;pjs.maxLength=1048576;
+        pjs.setAttribute('aria-label','Initial main.pjs for '+item.slug);
+        pjs.value='output\n  Hello from '+item.slug;
+        const html=document.createElement('textarea');
+        html.rows=5;html.maxLength=1048576;
+        html.setAttribute('aria-label','Initial index.html for '+item.slug);
+        html.value='<main><h1>Initial generator</h1><p>Created for '+item.slug+'</p></main>';
+        const label1=document.createElement('label');
+        label1.textContent='main.pjs';label1.append(pjs);
+        const label2=document.createElement('label');
+        label2.textContent='index.html';label2.append(html);
+        const token=document.createElement('input');
+        token.type='password';token.autocomplete='off';token.maxLength=512;
+        token.setAttribute('aria-label','Ephemeral private Git source token for '+item.slug);
+        const label3=document.createElement('label');
+        label3.textContent='Private Git write token (not saved)';label3.append(token);
+        const act=document.createElement('button');act.type='button';
+        act.textContent='Review and save initial READY source';
+        const reconcile=document.createElement('button');reconcile.type='button';
+        reconcile.textContent='Reconcile uncertain READY commit (read-only)';
+        const state=document.createElement('p');state.setAttribute('role','status');
+        state.setAttribute('aria-live','polite');
+        state.textContent='Only this newly reserved folder. Not a release; the final tested source still needs separate approval.';
+        const busyKey=rowKey+':ready';
+        act.addEventListener('click',async()=>{
+          if(pendingSteps.has(busyKey))return;
+          pendingSteps.add(busyKey);act.disabled=true;reconcile.disabled=true;
+          const creds=token.value;token.value='';
+          const candidate={slug:item.slug,pjs:pjs.value,html:html.value};
+          try{
+            const preview=await ready('PREVIEW',candidate);
+            if(!preview?.ok){
+              state.textContent='Source invalid: '+(preview?.code||'PREVIEW_FAILED');return;
+            }
+            const typed='READY '+item.slug+' '+preview.fingerprint;
+            state.textContent='Review the two exact source files, then type the complete source fingerprint. No Git write attempted yet.';
+            const confirmation=await requestTypedConfirmation(act,typed,
+              'One source-only commit, exact files and HEAD. A successful Git commit creates READY but does not publish Perchance.');
+            if(confirmation===null){state.textContent='Cancelled; no READY commit sent.';return;}
+            const intent={...candidate,token:creds,batchId:batch.batchId,
+              itemId:item.itemId,expectedRevision:item.revision,confirmation};
+            state.textContent='Checking original non-READY Git marker, source and protected account context…';
+            const armed=await ready('ARM',intent);
+            if(!armed?.ok){state.textContent='Held before effect: '+(armed?.code||'READY_ARM_UNVERIFIED');return;}
+            state.textContent='Exact source authorized. Committing once with journal-first Git CAS…';
+            const committed=await ready('COMMIT',{slug:item.slug,batchId:batch.batchId,
+              itemId:item.itemId,expectedRevision:item.revision,fingerprint:preview.fingerprint});
+            state.textContent=committed?.ok?
+              'READY source independently confirmed in Git. Associate this generator with its READY folder in Generators → Source.':
+              'READY effect uncertain/held: '+(committed?.code||'UNKNOWN')+
+              '. Do not retry; use independent reconciliation.';
+          }catch{state.textContent='READY response unknown. Read journal and reconcile; never repeat the commit blindly.';}
+          finally{pendingSteps.delete(busyKey);act.disabled=false;reconcile.disabled=false;}
+        });
+        reconcile.addEventListener('click',async()=>{
+          if(pendingSteps.has(busyKey))return;
+          pendingSteps.add(busyKey);act.disabled=true;reconcile.disabled=true;
+          const readToken=token.value;token.value='';
+          try{
+            const out=await ready('RECONCILE',{slug:item.slug,token:readToken});
+            state.textContent=out?.ok?'READY independently attributed and confirmed.':
+              'Reconciliation held: '+(out?.code||'SOURCE_UNVERIFIED')+'. No second Git write.';
+          }catch{state.textContent='Git observation unavailable; the READY dispatch remains held.';}
+          finally{pendingSteps.delete(busyKey);act.disabled=false;reconcile.disabled=false;}
+        });
+        details.append(summary,label1,label2,label3,act,reconcile,state);
+        li.append(document.createTextNode(' '),details);
       }
       li.append(rowStatus);
       list.append(li);
