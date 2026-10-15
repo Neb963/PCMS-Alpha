@@ -1,4 +1,4 @@
-import {requestTypedConfirmation} from './typed-confirm.mjs';
+import {requestTypedConfirmation,cancelPendingConfirmations} from './typed-confirm.mjs';
 // I06 Generators/Work Queue: durable local plan and per-item receipts.
 // No UI-supplied route/owner evidence and no implicit remote dispatch.
 const el=id=>document.getElementById(id);
@@ -57,6 +57,7 @@ function paint(items,persisted){
   freeze.disabled=busy||persisted||!items.some(i=>i.state==='FROZEN');
 }
 function drawQueue(result){
+  cancelPendingConfirmations(queue);
   queue.replaceChildren();
   if(!result?.ok){
     queue.textContent='Local reservation receipts unavailable; no external action is implied.';
@@ -129,7 +130,19 @@ function drawQueue(result){
           }finally{
             pendingSteps.delete(rowKey);
             action.disabled=!pilotSlug;
+            const returnFocus=document.activeElement===action &&
+              location.hash==='#work-queue';
             await fetchBatches();
+            if(returnFocus) {
+              const row=[...queue.querySelectorAll('li')]
+                .find(node=>node.textContent.includes(item.slug));
+              const next=row?.querySelector('button.pcms-supply-guarded-step')||
+                row?.querySelector('.pcms-supply-row-status');
+              if(next) {
+                if(next.tagName!=='BUTTON')next.tabIndex=-1;
+                if(!next.disabled)next.focus();
+              }
+            }
           }
         });
         li.append(document.createTextNode(' '),action);

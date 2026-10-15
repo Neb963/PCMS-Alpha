@@ -252,6 +252,7 @@ test('PCMS-ESR-007 F/X: inline exact intent is accessible, cancellable and never
   assert.match(helper,/input\.value !== expected/);
   assert.match(helper,/finish\(null\)/);
   assert.match(helper,/finish\(expected\)/);
+  assert.match(helper,/cancelPendingConfirmations\(root\)/);
   assert.match(helper,/input\.focus\(\)/);
   assert.match(helper,/trigger\.disabled = true/);
   assert.match(helper,/status\.setAttribute\('aria-live', 'polite'\)/);
@@ -260,6 +261,6 @@ test('PCMS-ESR-007 F/X: inline exact intent is accessible, cancellable and never
   assert.match(supply,/supply\('ARM_DISPOSABLE_TEST'/);
   assert.match(supply,/supply\('EXECUTE_ITEM'/);
   assert.match(supply,/pendingSteps\.delete\(rowKey\)/);
-  assert.match(browserHarness,/B I17_ESR007_REAL_WORK_QUEUE_INLINE_CANCEL_MISMATCH_ZERO_DISPATCH=PASS/);
+  assert.match(browserHarness,/B I17_ESR007_REAL_WORK_QUEUE_INLINE_CANCEL_MISMATCH_GUARDED_DENIAL_ZERO_DISPATCH=PASS/);
   assert.match(browserHarness,/still_frozen|unchanged\.get\('batch'/);
 });

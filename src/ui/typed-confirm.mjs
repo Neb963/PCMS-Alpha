@@ -88,3 +88,11 @@ export function requestExplicitConfirmation(trigger, description) {
   active.set(trigger,result);
   return result;
 }
+
+/* Cancel an inline intent before the owning list is redrawn. It must not
+   leave an orphaned pending Promise that permanently holds the row lock. */
+export function cancelPendingConfirmations(root) {
+  if (!root?.querySelectorAll) return;
+  for (const form of root.querySelectorAll('form.pcms-typed-intent'))
+    form.querySelector('button[type=button]')?.click();
+}
