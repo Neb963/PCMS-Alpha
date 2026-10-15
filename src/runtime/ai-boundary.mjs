@@ -137,7 +137,7 @@ export function createAiBoundary(api,{
   }
 
   async function changeAutonomy(db,store,p){
-    if(!p.enabled)return store.setAutomation(p.slug,p.expectedRevision,false);
+    if(!p.enabled)return store.setAutomation(p.slug,p.expectedRevision,false,null);
     if(p.confirmation!=='AUTO AI '+p.slug)
       return fail('AI_AUTO_EXACT_CONFIRMATION_REQUIRED');
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
