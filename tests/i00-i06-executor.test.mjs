@@ -347,3 +347,45 @@ test('I17 X: uncertain Git marker absent or malformed remains held, no fresh wri
   assert.equal(validateSupplyMessage(api,sender,{type:'RECONCILE_GIT',
     params:{...params(),token:'offline-git-token-01',force:true}}).code,'INVALID_PARAMS');
 });
+
+test('I17 F/X: ordinary exact generator must be armed, journaled, and reconciled like a disposable slug',async()=>{
+  const f=fixture({gate:false,gitPilotGate:false,slug:'ordinary-generator-a01'});
+  const args=()=>({batchId:batch.batchId,itemId:f.item().itemId,
+    expectedRevision:f.item().revision});
+  assert.equal((await f.dispatch()).code,'PROVIDER_ACTIVATION_HELD');
+  assert.deepEqual(f.remote,[]);
+  assert.equal((await f.run('ARM_DISPOSABLE_TEST',{...args(),
+    confirmation:'CREATE ordinary-generator-a01'})).code,'PILOT_DISPOSABLE_SLUG_REQUIRED');
+  assert.equal((await f.run('ARM_EXACT_ITEM',{...args(),
+    confirmation:'CREATE wrong-generator'})).code,'PILOT_CONFIRMATION_REQUIRED');
+  assert.equal((await f.run('ARM_EXACT_ITEM',{...args(),
+    confirmation:'CREATE ordinary-generator-a01'})).scope,'SINGLE_EXACT_OPERATOR_STEP');
+  assert.equal((await f.dispatch()).state,'CREATE_CONFIRMED');
+  assert.deepEqual(f.remote.map(x=>x.kind),['CREATE']);
+  assert.equal((await f.dispatch()).code,'PROVIDER_ACTIVATION_HELD');
+  assert.equal((await f.run('ARM_EXACT_ITEM',{...args(),
+    confirmation:'RENAME ordinary-generator-a01'})).scope,'SINGLE_EXACT_OPERATOR_STEP');
+  assert.equal((await f.dispatch()).state,'SOURCE_PENDING');
+  assert.deepEqual(f.remote.map(x=>x.kind),['CREATE','RENAME']);
+  assert.equal((await f.run('FINISH_SOURCE_FOLDER',{...args(),
+    token:'offline-git-token-01'})).code,'GIT_WRITE_ACTIVATION_HELD');
+  assert.equal((await f.run('ARM_EXACT_GIT',{...args(),
+    confirmation:'GIT ordinary-generator-a01'})).scope,'SINGLE_EXACT_NON_READY_GIT_MARKER');
+  assert.equal((await f.run('FINISH_SOURCE_FOLDER',{...args(),
+    token:'offline-git-token-01'})).state,'CONFIRMED');
+  assert.equal(f.gitLedger.length,1);
+  assert.equal((await f.run('FINISH_SOURCE_FOLDER',{...args(),
+    token:'offline-git-token-01'})).code,'NOT_ADMISSIBLE');
+});
+test('I17 X: ordinary exact generator cannot arm on stale revision, untrusted sender or unsafe route',async()=>{
+  const f=fixture({gate:false,denyRoute:true,slug:'ordinary-generator-b01'});
+  const params={batchId:batch.batchId,itemId:f.item().itemId,
+    expectedRevision:f.item().revision,confirmation:'CREATE ordinary-generator-b01'};
+  assert.equal(validateSupplyMessage(api,{id:'untrusted-page',url:sender.url},
+    {type:'ARM_EXACT_ITEM',params}).code,'UNTRUSTED_SENDER');
+  assert.equal((await f.run('ARM_EXACT_ITEM',{...params,expectedRevision:2})).code,'STALE_REVISION');
+  const denied=await f.run('ARM_EXACT_ITEM',params);
+  assert.equal(denied.ok,false);
+  assert.deepEqual(f.remote,[]);
+  assert.deepEqual(f.trace,[]);
+});
