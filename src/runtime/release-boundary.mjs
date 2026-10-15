@@ -20,7 +20,7 @@ export const RELEASE_PORT='pcms-i13-release';
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const fp=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
 const disposable=/^pcms-test-[a-z0-9-]{8,88}$/;
-const TYPES=new Set(['LIST','GET','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE','ARM_DISPOSABLE_RELEASE']);
+const TYPES=new Set(['LIST','GET','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE','ARM_DISPOSABLE_RELEASE','ARM_EXACT_RELEASE']);
 export function validateReleaseMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
@@ -33,6 +33,7 @@ export function validateReleaseMessage(api,sender,msg){
     APPROVE:['slug','token','expectedStageRevision','expectedJobRevision','fingerprint','explicitApproval','passphrase'],
     CANCEL_APPROVED:['slug','expectedRevision'],
     ARM_DISPOSABLE_RELEASE:['slug','expectedRevision','confirmation'],
+    ARM_EXACT_RELEASE:['slug','expectedRevision','confirmation'],
     DISPATCH:['slug','token','expectedRevision','passphrase'],
     RECONCILE:['slug','token','expectedRevision']
   };
@@ -50,9 +51,9 @@ export function validateReleaseMessage(api,sender,msg){
        !/^(?:main\.pjs|index\.html|src\/[A-Za-z0-9._/-]+)$/.test(p.path)||
        !Number.isSafeInteger(p.offset)||p.offset<0||p.offset>16*1024*1024||
        p.offset%8192!==0))||
-     (['DISPATCH','RECONCILE','CANCEL_APPROVED','ARM_DISPOSABLE_RELEASE'].includes(msg.type)&&
+     (['DISPATCH','RECONCILE','CANCEL_APPROVED','ARM_DISPOSABLE_RELEASE','ARM_EXACT_RELEASE'].includes(msg.type)&&
        (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
-     (msg.type==='ARM_DISPOSABLE_RELEASE'&&
+     (['ARM_DISPOSABLE_RELEASE','ARM_EXACT_RELEASE'].includes(msg.type)&&
        (typeof p.confirmation!=='string'||p.confirmation.length>250))||
      (msg.type==='APPROVE'&&(
        !Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
@@ -122,7 +123,7 @@ export function createReleaseBoundary(api,{
   let releasePilot=null;
   const pilotMatches=record=>{
     const a=releasePilot;
-    return !!a&&pilotClock()<a.expiresAt&&record.kind==='PRIVATE_NEW'&&
+    return !!a&&pilotClock()<a.expiresAt&&record.kind===a.kind&&
       record.state==='APPROVED'&&record.slug===a.slug&&
       record.releaseId===a.releaseId&&record.revision===a.revision&&
       record.approval?.sourceFingerprint===a.sourceFingerprint&&
@@ -241,23 +242,25 @@ export function createReleaseBoundary(api,{
         nextOffset:p.offset+part.length<bytes.length?p.offset+8192:null};
     }
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
-    if(msg.type==='ARM_DISPOSABLE_RELEASE'){
-      if(!disposable.test(p.slug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
+    if(['ARM_DISPOSABLE_RELEASE','ARM_EXACT_RELEASE'].includes(msg.type)){
+      if(msg.type==='ARM_DISPOSABLE_RELEASE'&&!disposable.test(p.slug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
       if(releasePilot&&pilotClock()<releasePilot.expiresAt)
         return fail('PILOT_ALREADY_ARMED');
       const row=await store.getFull(p.slug);
       if(!row.ok||row.record.revision!==p.expectedRevision)
         return fail('STALE_RELEASE');
       const record=row.record;
-      if(record.state!=='APPROVED'||record.kind!=='PRIVATE_NEW')
-        return fail('PILOT_PRIVATE_NEW_APPROVAL_REQUIRED');
+      if(record.state!=='APPROVED'||
+         (msg.type==='ARM_DISPOSABLE_RELEASE'&&record.kind!=='PRIVATE_NEW')||
+         !['PRIVATE_NEW','EXISTING_UPDATE'].includes(record.kind))
+        return fail('EXACT_SOURCE_APPROVAL_REQUIRED');
       if(p.confirmation!=='PUBLISH '+p.slug+' '+record.approval.sourceFingerprint)
         return fail('PILOT_EXACT_SOURCE_CONFIRMATION_REQUIRED');
-      releasePilot={slug:p.slug,releaseId:record.releaseId,
+      releasePilot={slug:p.slug,kind:record.kind,releaseId:record.releaseId,
         revision:record.revision,sourceFingerprint:record.approval.sourceFingerprint,
         remotePublicId:record.approval.remotePublicId,
         expiresAt:pilotClock()+120000};
-      return {ok:true,scope:'SINGLE_PRIVATE_NEW_EXACT_SOURCE_PUBLICATION',
+      return {ok:true,scope:'SINGLE_EXACT_SOURCE_PUBLICATION',
         sourceFingerprint:record.approval.sourceFingerprint,expiresInSeconds:120};
     }
     if(msg.type==='CANCEL_APPROVED')return store.cancelApproved(p.slug,p.expectedRevision);

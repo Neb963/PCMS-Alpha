@@ -25,7 +25,7 @@ const PILOT_STEPS=new Set(['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND',
 const ACT=new Set(['GET_PROMPTS','SET_PROMPT','IMPORT_PROMPT','EXPORT_PROMPTS',
   'LIST_JOBS','GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS',
   'GET_CONCURRENCY','SET_CONCURRENCY','ADVANCE_JOB','INSPECT_WORKSPACE',
-  'VERIFY_FRESH_CHAT2','ARM_DISPOSABLE_AI']);
+  'VERIFY_FRESH_CHAT2','ARM_DISPOSABLE_AI','ARM_EXACT_AI']);
 export function validateAiMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;
@@ -38,23 +38,23 @@ export function validateAiMessage(api,sender,message){
   const allowed=message.type==='GET_JOB'?['slug']:
     message.type==='PREPARE_JOB'?['slug','expectedStageRevision','token']:
     message.type==='BEGIN_NATIVE'?['slug','expectedRevision','step']:
-    message.type==='ARM_DISPOSABLE_AI'?['slug','expectedRevision','step','confirmation']:
+    ['ARM_DISPOSABLE_AI','ARM_EXACT_AI'].includes(message.type)?['slug','expectedRevision','step','confirmation']:
     ['PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)?['slug','expectedRevision']:
     message.type==='SET_CONCURRENCY'?['perAccount','expectedRevision']:
     message.type==='SET_PROMPT'?['text','tests','expectedRevision']:
     message.type==='IMPORT_PROMPT'?['envelope','expectedRevision']:[];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
-  if(['GET_JOB','PREPARE_JOB','BEGIN_NATIVE','ARM_DISPOSABLE_AI','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&!SLUG.test(p.slug||''))
+  if(['GET_JOB','PREPARE_JOB','BEGIN_NATIVE','ARM_DISPOSABLE_AI','ARM_EXACT_AI','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&!SLUG.test(p.slug||''))
     return fail('INVALID_SLUG');
   if(message.type==='PREPARE_JOB'&&
      (!Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
       typeof p.token!=='string'||p.token.length<10||p.token.length>512))
     return fail('INVALID_PARAMS');
-  if(['BEGIN_NATIVE','ARM_DISPOSABLE_AI','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&
+  if(['BEGIN_NATIVE','ARM_DISPOSABLE_AI','ARM_EXACT_AI','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
       (message.type==='BEGIN_NATIVE'&&
        !['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','STOP'].includes(p.step))||
-      (message.type==='ARM_DISPOSABLE_AI'&&
+      (['ARM_DISPOSABLE_AI','ARM_EXACT_AI'].includes(message.type)&&
        (!PILOT_STEPS.has(p.step)||typeof p.confirmation!=='string'||
         p.confirmation.length>160))))
     return fail('INVALID_PARAMS');
@@ -88,7 +88,7 @@ export function createAiBoundary(api,{
   };
   const nativeAuthorized=ctx=>effectGate({phase:'I10',...ctx})===true||pilotMatches(ctx);
   async function armDisposableAi(db,store,p){
-    if(!DISPOSABLE.test(p.slug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
+    if(p.type==='ARM_DISPOSABLE_AI'&&!DISPOSABLE.test(p.slug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
     if(p.confirmation!==p.step+' '+p.slug)return fail('PILOT_CONFIRMATION_REQUIRED');
     if(pilotArm&&pilotClock()<pilotArm.expiresAt)return fail('PILOT_ALREADY_ARMED');
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
@@ -126,7 +126,7 @@ export function createAiBoundary(api,{
       stageFingerprint:r.candidate.fingerprint,
       routeId:route.routeId,cookieStoreId:route.cookieStoreId,
       expiresAt:pilotClock()+120000};
-    return {ok:true,scope:'SINGLE_DISPOSABLE_NATIVE_AI_STEP',step:p.step,
+    return {ok:true,scope:'SINGLE_EXACT_NATIVE_AI_STEP',step:p.step,
       expiresInSeconds:120};
   }
   async function executeTrusted(message){
@@ -140,8 +140,8 @@ export function createAiBoundary(api,{
       }
       if(message.type==='LIST_JOBS')return store.list();
       if(message.type==='GET_JOB')return store.getJob(p.slug);
-      if(message.type==='ARM_DISPOSABLE_AI')
-        return armDisposableAi(db,store,p);
+      if(['ARM_DISPOSABLE_AI','ARM_EXACT_AI'].includes(message.type))
+        return armDisposableAi(db,store,{...p,type:message.type});
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(message.type==='SET_CONCURRENCY')
         return store.changeConcurrency(p.expectedRevision,p.perAccount);

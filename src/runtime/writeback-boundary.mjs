@@ -17,7 +17,7 @@ const FP=/^[a-f0-9]{64}$/;
 const DISPOSABLE=/^pcms-test-[a-z0-9-]{8,88}$/;
 const ACTIONS=new Set(['GET_SETTINGS','SET_AUTO','LIST','GET','PREVIEW',
   'PREPARE','COMMIT','RECONCILE','CANCEL_PREPARED','ARM_AUTO','DISARM_AUTO',
-  'ARM_DISPOSABLE_COMMIT']);
+  'ARM_DISPOSABLE_COMMIT','ARM_EXACT_COMMIT']);
 export function validateWritebackMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
@@ -34,7 +34,8 @@ export function validateWritebackMessage(api,sender,msg){
     RECONCILE:['slug','expectedRevision','token'],
     CANCEL_PREPARED:['slug','expectedRevision'],
     ARM_AUTO:['slug','token'],DISARM_AUTO:['slug'],
-    ARM_DISPOSABLE_COMMIT:['slug','expectedRevision','confirmation']
+    ARM_DISPOSABLE_COMMIT:['slug','expectedRevision','confirmation'],
+    ARM_EXACT_COMMIT:['slug','expectedRevision','confirmation']
   };
   if(Object.keys(p).some(x=>!allowed[msg.type].includes(x))||
      (allowed[msg.type].includes('slug')&&!SLUG.test(p.slug||''))||
@@ -43,9 +44,9 @@ export function validateWritebackMessage(api,sender,msg){
      (msg.type==='PREPARE'&&(!Number.isSafeInteger(p.expectedJobRevision)||
         p.expectedJobRevision<1||!FP.test(p.fingerprint||'')||
         !['MANUAL','AUTO'].includes(p.mode)))||
-     (['COMMIT','RECONCILE','CANCEL_PREPARED','ARM_DISPOSABLE_COMMIT'].includes(msg.type)&&
+     (['COMMIT','RECONCILE','CANCEL_PREPARED','ARM_DISPOSABLE_COMMIT','ARM_EXACT_COMMIT'].includes(msg.type)&&
         (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
-     (msg.type==='ARM_DISPOSABLE_COMMIT'&&
+     (['ARM_DISPOSABLE_COMMIT','ARM_EXACT_COMMIT'].includes(msg.type)&&
        (typeof p.confirmation!=='string'||p.confirmation.length>140))||
      (['PREPARE','COMMIT','RECONCILE','ARM_AUTO'].includes(msg.type)&&
         (typeof p.token!=='string'||p.token.length<12||p.token.length>512)))
@@ -134,7 +135,7 @@ export function createWritebackBoundary(api,{
   const manualAuthorized=record=>effectGate({phase:'I11',record})===true||
     pilotMatches(record);
   async function armDisposableCommit(database,store,p){
-    if(!DISPOSABLE.test(p.slug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
+    if(p.type==='ARM_DISPOSABLE_COMMIT'&&!DISPOSABLE.test(p.slug))return fail('PILOT_DISPOSABLE_SLUG_REQUIRED');
     if(p.confirmation!=='GIT COMMIT '+p.slug)
       return fail('PILOT_CONFIRMATION_REQUIRED');
     if(manualPilot&&pilotClock()<manualPilot.expiresAt)
@@ -158,7 +159,7 @@ export function createWritebackBoundary(api,{
     manualPilot={slug:r.slug,revision:r.revision,
       operationId:r.operationId,sourceFingerprint:r.sourceFingerprint,
       expectedHead:r.expectedHead,expiresAt:pilotClock()+120000};
-    return {ok:true,scope:'SINGLE_DISPOSABLE_TESTED_F_GIT_COMMIT',
+    return {ok:true,scope:'SINGLE_EXACT_TESTED_F_GIT_COMMIT',
       expiresInSeconds:120};
   }
   async function runTrusted(msg){
@@ -166,8 +167,8 @@ export function createWritebackBoundary(api,{
     if(msg.type==='GET_SETTINGS')return store.settings();
     if(msg.type==='LIST')return store.list();
     if(msg.type==='GET')return store.get(p.slug);
-    if(msg.type==='ARM_DISPOSABLE_COMMIT')
-      return armDisposableCommit(db,store,p);
+    if(['ARM_DISPOSABLE_COMMIT','ARM_EXACT_COMMIT'].includes(msg.type))
+      return armDisposableCommit(db,store,{...p,type:msg.type});
     if(msg.type==='SET_AUTO'){
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       const updated=await store.changeSettings(p.expectedRevision,p.autoEnabled);
