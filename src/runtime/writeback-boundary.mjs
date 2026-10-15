@@ -328,7 +328,10 @@ export function createWritebackBoundary(api,{
       }
       // Re-check the protected route and saved editor immediately before the
       // first possible Git effect. Do not interpret a route change as a retry.
-      if(pilotMatches(record)){
+      {
+        // Applies equally to automatic Git authorization. A locally armed
+        // AUTO mode is not permission to skip current protected route or a
+        // human-clean editor immediately before the first possible write.
         const g=guard(),route=await g?.getSafeRouteReadiness?.(stage.record.personaUid);
         const editor=await g?.inspectStageEditor?.(stage.record.personaUid,
           stage.record.slug,stage.record.nonce);
@@ -440,4 +443,15 @@ export function createWritebackBoundary(api,{
   }
   return Object.freeze({register,run,autoTick});
 }
-if(typeof browser!=='undefined')createWritebackBoundary(browser).register();
+// Only explicitly enabled and ephemerally armed AUTO Git may run in
+// production. MANUAL still needs its exact one-time typed authorization.
+// No credential is persisted or resurrected after event-page suspension.
+export function productionAutoGitGate(context){
+  return context?.phase==='I11'&&(
+    context.step==='READ_ONLY_AI_TERMINAL'||
+    context.step==='GIT_WRITE_AUTO'||
+    context.record?.mode==='AUTO');
+}
+if(typeof browser!=='undefined')createWritebackBoundary(browser,{
+  effectGate:productionAutoGitGate
+}).register();
