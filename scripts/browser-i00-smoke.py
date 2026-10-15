@@ -961,6 +961,21 @@ def main():
                     'expectedRevision':effect_probe['linked']['revision']}})
                 assert same_again.get('code')=='NOT_ADMISSIBLE',same_again
                 print('B I06_REAL_IDB_FAKE_PROVIDER_AND_GIT_SEPARATE_MARKERS=PASS',flush=True)
+                # I17 B: initial source authoring must actually render in the
+                # installed combined XPI for a confirmed non-READY marker,
+                # without fetching credentials or performing a Git mutation.
+                execute(after,"window.dispatchEvent(new HashChangeEvent('hashchange'));return true")
+                ready_ui=None
+                for _ in range(50):
+                    ready_ui=execute(after,"""const panel=document.querySelector('.pcms-ready-bootstrap');
+                      return {present:!!panel,summary:panel?.querySelector('summary')?.textContent||'',
+                        fields:panel?.querySelectorAll('textarea').length||0,
+                        controls:panel?.querySelectorAll('button').length||0};""")
+                    if ready_ui.get('present'):break
+                    time.sleep(.15)
+                assert ready_ui.get('present') is True and ready_ui.get('fields')==2 and ready_ui.get('controls')==2,ready_ui
+                assert 'initial READY source' in ready_ui['summary'],ready_ui
+                print('B I17_INSTALLED_INITIAL_READY_SOURCE_AUTHORING_NO_REMOTE_WRITE=PASS',flush=True)
 
 
 

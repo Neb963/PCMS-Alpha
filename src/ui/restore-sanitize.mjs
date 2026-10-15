@@ -42,6 +42,9 @@ function inertMeta(key,row,remap,existing=null){
       // never transferable in a backup even with an unchanged source hash.
       automation:null,schedulerDeferredUntil:null,schedulerHold:null};
   }
+  if(typeof key==='string'&&key.startsWith('ready-source:')&&data.record){
+    data.record={...data.record,state:'RESTORE_REVIEW_REQUIRED'};
+  }
   if(typeof key==='string'&&key.startsWith('writeback:')&&data.record){
     data.record={...data.record,state:'RESTORE_REVIEW_REQUIRED'};
   }
