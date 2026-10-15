@@ -1,5 +1,6 @@
 // One narrowly fixed operation hosted by the existing donor lease registry.
 import {perchanceRefreshMain} from './perchance-refresh.mjs';
+import {perchanceEditorProbe} from './perchance-editor-probe.mjs';
 import {perchanceReadIsolated} from './perchance-observer.mjs';
 import {waitForOwnedEditor} from './editor-readiness.mjs';
 import {renderPcmsEditorStrip} from './editor-strip.mjs';
@@ -32,7 +33,7 @@ export async function runRefreshOwnedTab(browser,{getState,validate,routeTest},l
   async function owned(){
     try{
       const t=await browser.tabs.get(tab.id),tag=await browser.sessions.getTabValue(tab.id,tagKey);
-      return t?.url===url&&t.cookieStoreId===cookieStoreId&&tag?.nonce===request.nonce&&
+      return t?.url===url&&t.active!==true&&t.cookieStoreId===cookieStoreId&&tag?.nonce===request.nonce&&
         tag.personaUid===personaUid&&tag.createdBy==='PCMS_I17_REFRESH'&&tag.humanIntent!==true&&await valid();
     }catch{return false;}
   }
@@ -40,7 +41,7 @@ export async function runRefreshOwnedTab(browser,{getState,validate,routeTest},l
     nonce:request.nonce,validate:owned});
   if(!loaded.ok)return {...loaded,effectBoundary:'NOT_DISPATCHED'};
   await browser.scripting.executeScript({target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
-    func:renderPcmsEditorStrip,args:[{slug:request.slug,nonce:request.nonce,accountId:'Verified account',personaUid}]});
+    func:renderPcmsEditorStrip,args:[{slug:request.slug,nonce:request.nonce,accountId:'Verified account',personaUid,mode:'SOURCE_REFRESH'}]});
   const execute=async(action)=>{
     if(!await owned())return fail('REFRESH_OWNED_TAB_CHANGED');
     const out=await browser.scripting.executeScript({target:{tabId:tab.id,frameIds:[0]},world:'MAIN',
@@ -69,7 +70,12 @@ export async function runRefreshOwnedTab(browser,{getState,validate,routeTest},l
     if(!await owned())return {ok:false,code:'REFRESH_POST_SAVE_GUARD_CHANGED',effectBoundary:'DISPATCH_POSSIBLE'};
     // The native adapter affirmatively checked clean/saved. Only this exact
     // PCMS tab may be closed. Uncertain/dirty/human-taken tabs are preserved.
-    if(result?.ok===true)await browser.tabs.remove(tab.id);
+    if(result?.ok===true){
+      const clean=await browser.scripting.executeScript({target:{tabId:tab.id,frameIds:[0]},world:'MAIN',
+        func:perchanceEditorProbe,args:[request.slug,{expectedPrivate:false}]});
+      if(clean?.length===1&&!clean[0].error&&clean[0].result?.clean===true&&await owned())
+        await browser.tabs.remove(tab.id);
+    }
     return {...result,effectBoundary:'DISPATCH_POSSIBLE'};
   }catch{return {ok:false,code:'REFRESH_NATIVE_RESPONSE_LOST',effectBoundary:'DISPATCH_POSSIBLE'};}
 }

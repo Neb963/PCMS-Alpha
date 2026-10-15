@@ -50,7 +50,7 @@ localStorage.setItem('perchanceTabsOpen',JSON.stringify({[initial.name]:{fixture
 let pjs=initial.modelText,html=initial.outputTemplate;
 window.__editorReady=true;window.__saveInFlight=false;window.userOwnsThisGenerator=true;
 window.editorCollabInitialSyncIsPending=false;window.__collabRoomFailed=false;
-window.menuBar={saveState:'saved'};
+window.menuBar={saveState:initial.name.endsWith('-dirty')?'unsaved':'saved'};
 window.modelTextEditor={getValue:()=>pjs,isClean:()=>menuBar.saveState==='saved'};
 window.outputTemplateEditor={getValue:()=>html,isClean:()=>menuBar.saveState==='saved',setValue:v=>{html=v;menuBar.saveState='unsaved';}};
 window.srcState={ready:async()=>{},list:()=>[],readFile:async()=>null,isDirty:async()=>false,hasPending:()=>false,conflictPaths:()=>[]};
@@ -118,7 +118,7 @@ class Fixture:
 
 if __name__=='__main__':
     if len(sys.argv)!=4 or sys.argv[1]!='--serve':raise SystemExit('fixture server arguments required')
-    for scenario in ('present','absent','no-persist','lost-ack'):
+    for scenario in ('present','absent','no-persist','lost-ack','dirty','idb-abort'):
         generator('i17-native-'+scenario)
     server=http.server.ThreadingHTTPServer(('127.0.0.1',443),Handler)
     context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain(sys.argv[2],sys.argv[3])

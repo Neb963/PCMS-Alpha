@@ -211,7 +211,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       }});
     }catch{result={ok:false,code:'REFRESH_EXECUTOR_UNKNOWN',effectBoundary:marked?'DISPATCH_POSSIBLE':'NOT_DISPATCHED'};}
     if(!marked){
-      await s.cancelReserved(claim.stableId,claim.id,clock());
+      await s.cancelReserved(claim.stableId,claim.id,clock(),result?.code);
       return fail(result?.code||'REFRESH_PREFLIGHT_HELD');
     }
     let receipt={kind:'UNKNOWN',targetMatched:false,principalMatched:false};
@@ -440,6 +440,31 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     api.runtime.onStartup.addListener(()=>void tick());
     api.runtime.onInstalled.addListener(()=>void tick());
     api.runtime.onConnect.addListener(port=>{
+      if(port?.name==='pcms-i17-refresh-handoff'){
+        let used=false;
+        port.onMessage.addListener(msg=>{
+          if(used)return;used=true;
+          (async()=>{
+            const sender=port.sender,tab=sender?.tab;
+            if(sender?.id!==api.runtime.id||sender.frameId!==0||!Number.isSafeInteger(tab?.id)||
+              typeof msg?.slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(msg.slug)||
+              !/^[a-f0-9]{32}$/.test(msg.nonce||'')||Object.keys(msg).some(k=>!['slug','nonce'].includes(k))||
+              sender.url!=='https://perchance.org/'+msg.slug+'#edit')return fail('UNTRUSTED_EDITOR');
+            const tag=await api.sessions.getTabValue(tab.id,'pcmsI09Owned'),actual=await api.tabs.get(tab.id);
+            if(tag?.createdBy!=='PCMS_I17_REFRESH'||tag.nonce!==msg.nonce||tag.slug!==msg.slug||
+              actual.url!==sender.url||actual.cookieStoreId!==tag.cookieStoreId)return fail('REFRESH_TAB_OWNER_UNKNOWN');
+            // Retain this exact tab even if canonical storage is currently
+            // unavailable. This only removes PCMS authority; never grants it.
+            await api.sessions.setTabValue(tab.id,'pcmsI09Owned',{...tag,humanIntent:true});
+            const s=await store(),snap=await s.read(),row=snap.state?.rows.find(r=>r.slug===msg.slug&&r.personaUid===tag.personaUid);
+            if(!row)return fail('REFRESH_HANDOFF_RECORDED_CANONICAL_UNAVAILABLE');
+            const pause=await s.pause(snap.state.revision,'GENERATOR',row.stableId,true);
+            return pause.ok?{ok:true,state:'HUMAN_OWNED'}:pause;
+          })().then(out=>{try{port.postMessage(out);}catch{}})
+            .catch(()=>{try{port.postMessage(fail('REFRESH_HANDOFF_UNCERTAIN_TAB_RETAINED'));}catch{}});
+        });
+        return;
+      }
       if(port?.name!==REFRESHER_PORT)return;
       let busy=false;
       port.onMessage.addListener(message=>{

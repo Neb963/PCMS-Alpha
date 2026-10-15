@@ -1,9 +1,9 @@
 // I09 fixed read-only native editor probe. Executed in the MAIN world
 // exclusively on an exact PCMS session-tagged Firefox tab. No page-supplied
 // privileged commands, source content or session tokens leave the page.
-export async function perchanceEditorProbe(slug) {
+export async function perchanceEditorProbe(slug,{expectedPrivate=true}={}) {
   const hold=code=>({ok:false,code});
-  if(location.origin!=='https://perchance.org'||location.pathname!=='/'+slug||
+  if(typeof expectedPrivate!=='boolean'||location.origin!=='https://perchance.org'||location.pathname!=='/'+slug||
      location.hash!=='#edit')return hold('EDITOR_TARGET_CHANGED');
   try{
     // Owners can automatically join their own Yjs room. A provider is
@@ -32,7 +32,7 @@ export async function perchanceEditorProbe(slug) {
     const app=window.app,model=window.modelTextEditor,
       html=window.outputTemplateEditor,src=window.srcState,menu=window.menuBar;
     if(window.__editorReady!==true||!app?.data?.generator||
-       app.data.generator.name!==slug||app.data.generator.isPrivate!==true||
+       app.data.generator.name!==slug||app.data.generator.isPrivate!==expectedPrivate||
        window.userOwnsThisGenerator!==true||
        typeof model?.isClean!=='function'||typeof html?.isClean!=='function'||
        typeof src?.isDirty!=='function'||typeof menu?.saveState!=='string')

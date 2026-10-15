@@ -339,11 +339,16 @@ export function createRefresherStore(db){
       releaseFingerprint:r.releaseFingerprint,...(marker?{plan:p,purpose:candidate.purpose}:{})},
       changes:[{code:'REFRESH_RESERVED',scopeId:stableId}]};
   },{sync:true});
-  const cancelReserved=(stableId,id,now)=>mutate(null,(s,meta)=>{
+  const cancelReserved=(stableId,id,now,reason='REFRESH_PREFLIGHT_HELD')=>mutate(null,(s,meta)=>{
     const row=s.rows.find(r=>r.stableId===stableId);
     if(!row||row.refresh?.intent?.id!==id||
       row.refresh.intent.state!=='RESERVED')return fail('REFRESH_RESERVATION_NOT_CANCELABLE');
     const out=structuredClone(s),r=out.rows.find(x=>x.stableId===stableId);
+    if(r.refresh.intent.purpose==='RECURRING'&&r.sourceRefresh){
+      r.sourceRefresh={...r.sourceRefresh,state:'PREFLIGHT_HELD',scheduleEnabled:false,
+        lastHold:/^[A-Z0-9_]{1,80}$/.test(reason)?reason:'REFRESH_PREFLIGHT_HELD',revision:r.sourceRefresh.revision+1};
+      meta.put({key:'refresh-source:'+r.slug,record:r.sourceRefresh});
+    }
     if(r.refresh.intent.purpose==='SINGLE_TEST'&&r.sourceRefresh&&!r.sourceRefresh.lastReceipt){
       r.sourceRefresh={...r.sourceRefresh,testAttempted:false,preview:null,revision:r.sourceRefresh.revision+1};
       meta.put({key:'refresh-source:'+r.slug,record:r.sourceRefresh});

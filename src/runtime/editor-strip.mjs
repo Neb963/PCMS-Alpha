@@ -1,6 +1,6 @@
 // Injected into the PCMS-tagged editor tab (ISOLATED world).
 // UI is advisory; backend tab tag + canonical journal alone authorize handoff.
-export function renderPcmsEditorStrip({slug,nonce,accountId,personaUid}, env={location,document,browser}) {
+export function renderPcmsEditorStrip({slug,nonce,accountId,personaUid,mode='PRIVATE_CANDIDATE'}, env={location,document,browser}) {
   const {location,document,browser}=env;
   if(location.origin!=='https://perchance.org'||
      location.pathname!=='/'+slug||location.hash!=='#edit')return;
@@ -17,7 +17,8 @@ export function renderPcmsEditorStrip({slug,nonce,accountId,personaUid}, env={lo
   summary.textContent='PCMS · '+slug+' · held until saved-byte verification';
   const data=document.createElement('p');
   data.textContent='Account '+accountId+' · Persona '+personaUid+
-    ' · PCMS-managed private candidate; dirty/unknown editor blocks changes.';
+    (mode==='SOURCE_REFRESH'?' · PCMS-managed source-marker operation; dirty/unknown editor blocks changes.':
+      ' · PCMS-managed private candidate; dirty/unknown editor blocks changes.');
   const status=document.createElement('p');
   status.setAttribute('role','status');status.textContent='Handoff not requested.';
   const button=document.createElement('button');
@@ -26,7 +27,7 @@ export function renderPcmsEditorStrip({slug,nonce,accountId,personaUid}, env={lo
     host.dataset.pcmsHumanIntent='true';
     button.disabled=true;status.textContent='Persisting human handoff…';
     try{
-      const port=browser.runtime.connect({name:'pcms-i09-editor-handoff'});
+      const port=browser.runtime.connect({name:mode==='SOURCE_REFRESH'?'pcms-i17-refresh-handoff':'pcms-i09-editor-handoff'});
       port.onMessage.addListener(v=>{
         status.textContent=v?.ok&&v.state==='HUMAN_OWNED'?
           'Human ownership recorded. PCMS must not close or edit this tab.':

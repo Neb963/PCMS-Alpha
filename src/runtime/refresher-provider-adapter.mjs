@@ -18,7 +18,7 @@ export function sourceRefreshProjection(r){
   // Deliberate allowlist; no private source, identity principal or arbitrary
   // provider/page errors are exported by the one-click diagnostic receipt.
   return {revision:r.revision,state:r.state||'TEST_READY',method:REFRESH_METHOD,policy:MARKER_POLICY,
-    slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,bindingVersion:r.bindingVersion,
+    lastHold:r.lastHold||null,slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,bindingVersion:r.bindingVersion,
     approvedBaseFingerprint:r.approvedBaseFingerprint,effectiveCurrentFingerprint:r.effectiveCurrentFingerprint,
     consentRevision:r.consent?.revision||0,testAttempted:r.testAttempted===true,
     scheduleEnabled:r.scheduleEnabled===true,restoredHistorical:r.restoredHistorical===true,

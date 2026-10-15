@@ -680,6 +680,29 @@ def main():
                     if view.get('selected'): break
                     time.sleep(.15)
                 assert view['selected']==['overview'],view
+                # Production source-save modules, actual native MAIN/ISOLATED
+                # injection and committed Firefox IDB against loopback HTTPS.
+                source_probe=call('POST',f'/session/{after}/execute/async',{
+                    'script':pathlib.Path(__file__).with_name('i17_refresher_probe.js').read_text(),
+                    'args':[]},timeout=120)
+                assert source_probe.get('ok') is True,source_probe
+                observed=source_probe['results']
+                assert observed['present']['effect']=='EFFECT_CONFIRMED' and observed['present']['feed']=='PRESENT',source_probe
+                assert observed['absent']['effect']=='EFFECT_CONFIRMED' and observed['absent']['feed']=='ABSENT',source_probe
+                assert observed['no-persist']['effect']=='INEFFECTIVE',source_probe
+                assert observed['lost-ack']['effect']=='EFFECT_CONFIRMED',source_probe
+                assert observed['dirty']['effect']==observed['idb-abort']['effect']=='NOT_DISPATCHED',source_probe
+                assert observed['recurring']['sequence']==2 and observed['recurring']['enabled'] is True,source_probe
+                assert source_probe['markedBeforeSave']==source_probe['saves']==5,source_probe
+                ledger=refresher_fixture.ledger()
+                assert ledger['i17-native-present']['saves']==2,ledger
+                for scenario in ['absent','no-persist','lost-ack']:
+                    assert ledger['i17-native-'+scenario]['saves']==1,ledger
+                assert ledger['i17-native-dirty']['saves']==ledger['i17-native-idb-abort']['saves']==0,ledger
+                assert ledger['i17-native-present']['outputTemplate'].count('PCMS_REFRESH_MARKER')==1,ledger
+                assert ledger['i17-native-no-persist']['outputTemplate'].count('PCMS_REFRESH_MARKER')==0,ledger
+                print('B I17_SOURCE_SAVE_NATIVE_GUARD_IDB_AND_SAME_XPI_RECURRING='+json.dumps(source_probe),flush=True)
+
                 assert view['links']==['#overview','#generators','#work-queue','#accounts','#refresher','#settings'],view
                 assert view['unsafe']==0,view
                 # The exact installed XPI must expose a read-only guarded
@@ -2220,7 +2243,8 @@ def main():
                     runtimeProof.ok&&runtimeProof.observation==='OBSERVED'&&requests===2&&
                     runtimeState.healthIntervals.length>0&&runtimeState.diagnostics.readPeak<=2&&
                     isolated.code==='WRONG_ORIGIN'&&injection.ok===false&&
-                     activation.ok===true&&activation.providerEffects==='OFF'&&
+                     activation.ok===true&&activation.mode==='SCOPED_SOURCE_SAVE'&&activation.providerEffects==='SCOPED'&&
+                     activation.refresh==='NO_REFRESH_DUE'&&view.fleetMutationReady===false&&
                      ['NO_OBSERVATION_DUE','OBSERVED'].includes(activation.observation)&&
                     globalPause.ok&&invalid.code==='STALE_REVISION',
                     exact16,exact64,occupied,replayOccupied:replay.occupied,winners,abort,unchanged,
@@ -2418,27 +2442,6 @@ def main():
                     'stale':'STALE_QUALIFICATION','reads':4,'persisted':'UNVERIFIED_UPDATE','revision':2,
                     'mutationAuthority':False,'sourceLeaked':False,'ui':True},qualification
                 print('B I17_NORMAL_REFRESH_QUALIFICATION_DURABLE_DISTINCT_EVIDENCE=PASS',flush=True)
-
-                # Production source-save modules, actual native MAIN/ISOLATED
-                # injection and committed Firefox IDB against loopback HTTPS.
-                source_probe=call('POST',f'/session/{after}/execute/async',{
-                    'script':pathlib.Path(__file__).with_name('i17_refresher_probe.js').read_text(),
-                    'args':[]},timeout=120)
-                assert source_probe.get('ok') is True,source_probe
-                observed=source_probe['results']
-                assert observed['present']['effect']=='EFFECT_CONFIRMED' and observed['present']['feed']=='PRESENT',source_probe
-                assert observed['absent']['effect']=='EFFECT_CONFIRMED' and observed['absent']['feed']=='ABSENT',source_probe
-                assert observed['no-persist']['effect']=='INEFFECTIVE',source_probe
-                assert observed['lost-ack']['effect']=='EFFECT_CONFIRMED',source_probe
-                assert observed['recurring']['sequence']==2 and observed['recurring']['enabled'] is True,source_probe
-                assert source_probe['markedBeforeSave']==source_probe['saves']==5,source_probe
-                ledger=refresher_fixture.ledger()
-                assert ledger['i17-native-present']['saves']==2,ledger
-                for scenario in ['absent','no-persist','lost-ack']:
-                    assert ledger['i17-native-'+scenario]['saves']==1,ledger
-                assert ledger['i17-native-present']['outputTemplate'].count('PCMS_REFRESH_MARKER')==1,ledger
-                assert ledger['i17-native-no-persist']['outputTemplate'].count('PCMS_REFRESH_MARKER')==0,ledger
-                print('B I17_SOURCE_SAVE_NATIVE_GUARD_IDB_AND_SAME_XPI_RECURRING='+json.dumps(source_probe),flush=True)
 
                 # I13 B: exact packaged XPI, real IndexedDB atomic approval
                 # vs duplicate dispatch, installed operator controls, and
