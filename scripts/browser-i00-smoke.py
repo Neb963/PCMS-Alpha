@@ -2148,7 +2148,7 @@ def main():
                 execute(after,"location.hash='#refresher';document.getElementById('pcms-refresher-query').value='i12-b-';document.getElementById('pcms-refresher-reload').click();return true")
                 ui={}
                 for _ in range(60):
-                    ui=execute(after,"return {rows:document.querySelectorAll('#pcms-refresher-rows tr').length,summary:document.getElementById('pcms-refresher-summary').textContent,page:document.getElementById('pcms-refresher-page').textContent,pause:document.getElementById('pcms-refresher-global-pause').textContent,unsafe:document.querySelector('#view-refresher [aria-describedby=blocked-refresher]').disabled}")
+                    ui=execute(after,"return {rows:document.querySelectorAll('#pcms-refresher-rows tr').length,summary:document.getElementById('pcms-refresher-summary').textContent,page:document.getElementById('pcms-refresher-page').textContent,pause:document.getElementById('pcms-refresher-global-pause').textContent,unsafe:(()=>{const control=document.querySelector('#view-refresher [aria-describedby=blocked-refresher]');return control===null||control.disabled})()}")
                     if '1250' in ui.get('page','') and ui.get('pause')=='Resume globally': break
                     time.sleep(.1)
                 assert ui['rows']==25 and '1250' in ui['page'] and ui['unsafe'] is True,ui
