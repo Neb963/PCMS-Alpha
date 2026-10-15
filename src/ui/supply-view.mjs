@@ -285,6 +285,8 @@ function drawQueue(result){
         html.value='<main><h1>Initial generator</h1><p>Created for '+item.slug+'</p></main>';
         const label1=document.createElement('label');
         label1.textContent='main.pjs';label1.append(pjs);
+        const assets=document.createElement('input');assets.type='file';assets.multiple=true;
+        const assetLabel=document.createElement('label');assetLabel.textContent='Initial src assets (filenames retained under src/, up to 16 MiB total source)';assetLabel.append(assets);
         const label2=document.createElement('label');
         label2.textContent='index.html';label2.append(html);
         const token=document.createElement('input');
@@ -304,16 +306,25 @@ function drawQueue(result){
           if(pendingSteps.has(busyKey))return;
           pendingSteps.add(busyKey);act.disabled=true;reconcile.disabled=true;
           const creds=token.value;token.value='';
-          const candidate={slug:item.slug,pjs:pjs.value,html:html.value};
+          const candidate={slug:item.slug,pjs:pjs.value,html:html.value,assets:[]};
           try{
+          if(assets.files.length>500||[...assets.files].reduce((n,f)=>n+f.size,0)>16*1024*1024){
+            pendingSteps.delete(busyKey);act.disabled=false;reconcile.disabled=false;
+            state.textContent='Asset limit exceeded; no request sent.';return;
+          }
+          for(const f of assets.files){
+            const bytes=new Uint8Array(await f.arrayBuffer());let binary='';
+            for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+            candidate.assets.push({path:'src/'+(f.webkitRelativePath||f.name),base64:btoa(binary)});
+          }
             const preview=await ready('PREVIEW',candidate);
             if(!preview?.ok){
               state.textContent='Source invalid: '+(preview?.code||'PREVIEW_FAILED');return;
             }
             const typed='READY '+item.slug+' '+preview.fingerprint;
-            state.textContent='Review the two exact source files, then type the complete source fingerprint. No Git write attempted yet.';
+            state.textContent='Review the complete source file set, then type the complete source fingerprint. No Git write attempted yet.';
             const confirmation=await requestTypedConfirmation(act,typed,
-              'One source-only commit, exact files and HEAD. A successful Git commit creates READY but does not publish Perchance.');
+              'Review '+preview.files.map(f=>f.path+' ('+f.bytes+' bytes)').join(', ')+'. One source-only commit, exact files and HEAD. A successful Git commit creates READY but does not publish Perchance.');
             if(confirmation===null){state.textContent='Cancelled; no READY commit sent.';return;}
             const intent={...candidate,token:creds,batchId:batch.batchId,
               itemId:item.itemId,expectedRevision:item.revision,confirmation};
@@ -341,7 +352,7 @@ function drawQueue(result){
           }catch{state.textContent='Git observation unavailable; the READY dispatch remains held.';}
           finally{pendingSteps.delete(busyKey);act.disabled=false;reconcile.disabled=false;}
         });
-        details.append(summary,label1,label2,label3,act,reconcile,state);
+        details.append(summary,label1,label2,assetLabel,label3,act,reconcile,state);
         li.append(document.createTextNode(' '),details);
       }
       li.append(rowStatus);

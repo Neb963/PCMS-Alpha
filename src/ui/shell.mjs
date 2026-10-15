@@ -14,6 +14,16 @@ function closeMenu(restoreFocus = false) {
   if (restoreFocus) menu.focus();
 }
 
+let runtimeHealth=null,canonicalHealth=null;
+function renderCapabilityStatus(){
+  currentStatus.textContent=canonicalHealth?.held===true?'Restore or storage hold · inspect Settings':
+    runtimeHealth?.donorReady===false?'Donor guard unavailable · inspect Accounts':
+    runtimeHealth?.donorReady===true&&canonicalHealth?.storage==='READY'?
+      'Protected workflows available · each action checks its target':
+      'Reading runtime eligibility…';
+}
+window.addEventListener('pcms-runtime-health',e=>{runtimeHealth=e.detail;renderCapabilityStatus();});
+window.addEventListener('pcms-canonical-health',e=>{canonicalHealth=e.detail;renderCapabilityStatus();});
 function render({ focusHeading = false } = {}) {
   const selected = resolveDestination(location.hash);
   for (const destination of DESTINATIONS) {
@@ -25,7 +35,7 @@ function render({ focusHeading = false } = {}) {
   }
   const heading = document.getElementById(`heading-${selected}`);
   document.title = `PCMS Alpha — ${heading.textContent}`;
-  currentStatus.textContent = 'Remote actions held until verified';
+  renderCapabilityStatus();
   workspaceCrumb.textContent = heading.textContent;
   invalidNotice.hidden = !invalidDestination(location.hash);
   closeMenu();

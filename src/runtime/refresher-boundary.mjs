@@ -5,9 +5,10 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 import {createRefresherStore} from './refresher-store.mjs';
 import {MINUTE} from './refresher-core.mjs';
+import {createQualificationStore,createRefreshQualification} from './refresh-qualification.mjs';
 import {createNoticeDispatcher} from './notices.mjs';
 export const REFRESHER_PORT='pcms-i12-refresher',REFRESHER_ALARM='pcms-refresher-turn';
-const types=new Set(['GET_REFRESHER','SET_POLICY','SET_PAUSE','SET_GENERATOR_POLICY','DEMAND_STATISTIC','OBSERVE_NOW','RESET_RECENT_BACKOFF']);
+const types=new Set(['GET_REFRESHER','SET_POLICY','SET_PAUSE','SET_GENERATOR_POLICY','DEMAND_STATISTIC','OBSERVE_NOW','RESET_RECENT_BACKOFF','GET_QUALIFICATION','BEGIN_QUALIFICATION','OBSERVE_QUALIFICATION']);
 export function validateRefresherMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let encoded;try{encoded=JSON.stringify(message);}catch{return fail('INVALID_MESSAGE');}
@@ -17,6 +18,8 @@ export function validateRefresherMessage(api,sender,message){
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
   const allowed=message.type==='GET_REFRESHER'?['query','phase','accountId','offset','limit']:
+    message.type==='GET_QUALIFICATION'?['stableId']:
+    ['BEGIN_QUALIFICATION','OBSERVE_QUALIFICATION'].includes(message.type)?['stableId','expectedRevision','confirmation']:
     message.type==='SET_POLICY'?['expectedRevision','policy']:
     message.type==='SET_PAUSE'?['expectedRevision','scope','target','paused']:
     message.type==='SET_GENERATOR_POLICY'?['expectedRevision','stableId','activeMs','sleepMs']:
@@ -29,6 +32,10 @@ export function validateRefresherMessage(api,sender,message){
       (p.phase!=null&&!['ALL','WAITING','ACTIVE','SLEEPING'].includes(p.phase))||
       (p.offset!=null&&(!Number.isSafeInteger(p.offset)||p.offset<0||p.offset>5000))||
       (p.limit!=null&&(!Number.isSafeInteger(p.limit)||p.limit<1||p.limit>50)))return fail('INVALID_PARAMS');
+  }else if(message.type.includes('QUALIFICATION')){
+    if(!isSafeId(p.stableId)||
+      (message.type!=='GET_QUALIFICATION'&&(!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<0))||
+      (p.confirmation!==undefined&&(typeof p.confirmation!=='string'||p.confirmation.length>120)))return fail('INVALID_PARAMS');
   }else if(message.type!=='OBSERVE_NOW'){
     if(!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1)return fail('INVALID_PARAMS');
     if(['DEMAND_STATISTIC','SET_GENERATOR_POLICY'].includes(message.type)&&!isSafeId(p.stableId))
@@ -44,7 +51,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
   guard=internalPcmsGuard,observationGate=()=>false,
   refreshGate=()=>false,qualificationFor=()=>null,refreshAdapter=null,clock=Date.now,
   newId=()=>crypto.randomUUID().replaceAll('-','')}={}){
-  let dbPromise,turnPromise=null,registered=false,alarmHeld=false,alarmTail=Promise.resolve();
+  let dbPromise,turnPromise=null,qualifying=false,registered=false,alarmHeld=false,alarmTail=Promise.resolve();
   const bootId=newId(),sentinel=createRestoreSentinel(api.storage.local);
   const store=async()=>storeFactory(await (dbPromise ||=open().catch(e=>{dbPromise=null;throw e;})));
   async function notifyChanges(result){
@@ -178,8 +185,8 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
   }
 
   async function maybeRefresh(s){
-    // No UI message can enable this gate or supply provider qualifications.
-    // Production has no verified method/adapter and is unconditionally OFF.
+    // A UI observation never grants fleet mutation authority. No legitimate
+    // recurring provider action is established by frozen Discovery v3.
     if(!refreshGate()||!refreshAdapter||!observationGate())return 'REFRESH_ACTIVATION_HELD';
     const g=guard();if(!g?.getSafeRouteReadiness)return 'GUARDED_REFRESH_UNAVAILABLE';
     const snapshot=await s.read();if(!snapshot.ok)return 'CANONICAL_UNAVAILABLE';
@@ -303,9 +310,30 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         return {...view,restoreHeld:restore.held,alarmHeld,monitoring:
           observationGate()?'GUARDED_READ_ONLY':'OFF_PENDING_ACTIVATION',
           refreshCapability:refreshGate()&&refreshAdapter?
-            'TEST_OR_AUTHORIZED_CAPABILITY_GATED':'LIVE_REFRESH_OFF_UNTIL_PROVEN'};
+            'QUALIFIED_ADAPTER':'OPERATOR_QUALIFICATION_REQUIRED',
+          qualificationAvailable:observationGate(),fleetMutationReady:refreshGate()&&!!refreshAdapter};
       }
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      if(message.type.includes('QUALIFICATION')){
+        if(qualifying)return fail('QUALIFICATION_BUSY');
+        if(!observationGate())return fail('MONITOR_ACTIVATION_HELD');
+        qualifying=true;
+        try {
+          const snap=await s.read();if(!snap.ok)return snap;
+          const row=snap.state.rows.find(r=>r.stableId===p.stableId);
+          const account=snap.state.accounts[row?.accountId];
+          const qualificationStore=createQualificationStore(await dbPromise);
+          const service=createRefreshQualification({store:qualificationStore,guard,clock,
+            verify:async()=>{
+              const latest=await s.read(),r=latest.state?.rows.find(x=>x.stableId===p.stableId),a=latest.state?.accounts[row?.accountId];
+              return latest.ok&&!(await sentinel.inspect()).held&&r?.ownerVerified&&!r.identityHeld&&
+                r.remoteId===row.remoteId&&r.personaUid===row.personaUid&&r.bindingVersion===row.bindingVersion&&
+                a?.verifiedIdentity&&a.principalFingerprint===account.principalFingerprint&&
+                (await qualificationStore.verify(row,account)).valid===true;
+            }});
+          return await service.run(message.type,{...p,row,account});
+        } finally {qualifying=false;}
+      }
       if(message.type==='OBSERVE_NOW'){
         if(!observationGate())return fail('MONITOR_ACTIVATION_HELD');
         return tick();

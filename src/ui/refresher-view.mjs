@@ -1,11 +1,12 @@
+import {requestTypedConfirmation} from './typed-confirm.mjs';
 // Read canonical projections. UI numbers/labels never confer live authority.
 const el=id=>document.getElementById('pcms-refresher-'+id);
 const rows=el('rows'),status=el('status'),query=el('query'),phase=el('phase');
-let snapshot=null,epoch=0,offset=0,selected=null;
+let snapshot=null,epoch=0,offset=0,selected=null,qualification=null,qualificationBusy=false,qualificationEpoch=0;
 function command(type,params={}){
   return new Promise((resolve,reject)=>{
     let ended=false;const port=browser.runtime.connect({name:'pcms-i12-refresher'});
-    const timer=setTimeout(()=>finish(null,Error('TIMEOUT')),6000);
+    const timer=setTimeout(()=>finish(null,Error('TIMEOUT')),30000);
     function finish(value,error){
       if(ended)return;ended=true;clearTimeout(timer);try{port.disconnect();}catch{}
       error?reject(error):resolve(value);
@@ -57,8 +58,8 @@ function draw(s){
   for(const id of ['pcms-overview-refresher','pcms-queue-refresher']){
     const target=document.getElementById(id);if(target)target.textContent='Shadow Refresher: '+summary;
   }
-  el('provider').textContent='Live refresh held · Provider '+s.provider.state+
-    ' · Monitoring '+s.monitoring;
+  el('provider').textContent=(s.fleetMutationReady?'Qualified refresh adapter':'Refresh qualification required')+
+    ' · Provider '+s.provider.state+' · Monitoring '+s.monitoring;
   el('diagnostics').textContent=s.diagnostics.turns+' durable turns · '+s.diagnostics.unknownIntervals+
     ' unknown intervals frozen · read peak '+s.diagnostics.readPeak+' · queue peak '+s.diagnostics.queuePeak+
     ' · next wake '+(s.nextWakeAt?new Date(s.nextWakeAt).toLocaleTimeString():'not verified')+
@@ -83,7 +84,7 @@ function draw(s){
     const tr=document.createElement('tr'),td=document.createElement('td');
     const button=document.createElement('button');button.type='button';button.textContent=r.slug;
     button.dataset.stableId=r.stableId;button.setAttribute('aria-label','Inspect Refresher for '+r.slug);
-    button.addEventListener('click',()=>{selected=r;inspector();});td.append(button);tr.append(td);
+    button.addEventListener('click',()=>{selected=r;qualification=null;inspector();void qualificationAction('GET_QUALIFICATION');});td.append(button);tr.append(td);
     const present=r.presence?(r.presence.present?'present at '+r.presence.position:'absent; not deleted')+
       ' · '+age(r.presence.observedAt)+(r.presence.stale?' · stale':''):'unobserved';
     const account=document.createElement('td');
@@ -143,7 +144,7 @@ async function change(type,params){
       status.textContent=result?.code==='STALE_REVISION'?
       'State changed; review the refreshed values before trying again.':
       'Change held: '+(result?.code||'UNKNOWN');return;}
-    await load();status.textContent='Local change committed. Provider refresh mutations remain OFF.';
+    await load();status.textContent='Local change committed. '+(snapshot?.fleetMutationReady?'Qualified adapter admission remains target-specific.':'Monitoring active; recurring refresh awaits provider qualification.');
   }catch{status.textContent='Acknowledgment unavailable. Reload canonical state before trying again.';snapshot=null;}
 }
 el('reload').addEventListener('click',load);
@@ -171,3 +172,38 @@ window.addEventListener('pcms-refresher-target',event=>{
   query.value=event.detail.slug;offset=0;location.hash='#refresher';void load();
 });
 await load();
+
+async function qualificationAction(type){
+  if(!selected||qualificationBusy)return;
+  const target=selected.stableId,slug=selected.slug,mine=++qualificationEpoch;
+  const params={stableId:target};
+  if(type!=='GET_QUALIFICATION')params.expectedRevision=qualification?.revision||0;
+  if(type==='BEGIN_QUALIFICATION'){
+    const text=await requestTypedConfirmation(el('qualify-begin'),'OBSERVE '+slug,'Capture public source and recent-list evidence. This action does not change the provider.');
+    if(text===null)return;params.confirmation=text;
+  }
+  if(selected?.stableId!==target||qualificationBusy)return;
+  qualificationBusy=true;el('qualify-status').textContent='Reading protected owner, saved source and recent list…';
+  for(const name of ['begin','observe','load'])el('qualify-'+name).disabled=true;
+  try{
+    const out=await command(type,params);
+    if(mine!==qualificationEpoch||selected?.stableId!==target)return;
+    if(!out?.ok){el('qualify-status').textContent=(out?.code||'UNKNOWN')+' · Load receipt before any further action.';return;}
+    qualification=out.qualification;
+    const q=qualification,f=q.after?.feed||q.before?.feed;
+    el('qualify-status').textContent=q.state+' · '+q.nextAction+
+      (f?' · Recent: '+(f.complete?(f.present?'present, rank '+f.rank:'absent'):'unverified')+
+        ' · '+new Date(f.observedAt).toLocaleString():'')+
+      (q.approvedEffectConfirmed?' · Exact approved change independently confirmed.':'');
+  }catch{el('qualify-status').textContent='Observation reply unavailable. Load canonical receipt; do not repeat the update.';}
+  finally{
+    qualificationBusy=false;
+    el('qualify-begin').disabled=!!qualification?.revision||snapshot?.restoreHeld===true;
+    el('qualify-observe').disabled=!qualification?.revision||snapshot?.restoreHeld===true;
+    el('qualify-load').disabled=false;
+    if(selected&&selected.stableId!==target)void qualificationAction('GET_QUALIFICATION');
+  }
+}
+el('qualify-begin').addEventListener('click',()=>qualificationAction('BEGIN_QUALIFICATION'));
+el('qualify-observe').addEventListener('click',()=>qualificationAction('OBSERVE_QUALIFICATION'));
+el('qualify-load').addEventListener('click',()=>qualificationAction('GET_QUALIFICATION'));

@@ -8,6 +8,7 @@ function project(code, donorReady = false) {
   // I01 is a read-only health endpoint; its providerEffects='OFF' only
   // describes the guard facade, NOT the separately guarded I06-I17 writers.
   const label = donorReady ? 'Donor guard ready' : 'Donor guard unavailable';
+  window.dispatchEvent(new CustomEvent('pcms-runtime-health',{detail:{donorReady,code}}));
   badge.textContent = label;
   status.textContent = code + '. Protected Persona checks are required for each provider operation; this health view does not authorize writes.';
   account.textContent = 'Background: ' + label + '. Account identity and protected route eligibility are rechecked by each workflow.';

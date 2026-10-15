@@ -11,7 +11,7 @@ import './inventory-boundary.mjs';
 // Operator-triggered read-only private Git inspection and canonical mapping.
 import './source-boundary.mjs';
 
-// I06 frozen allocation and held guarded two-stage provider dispatcher.
+// I06 exact operator authorization and guarded two-stage provider dispatcher.
 import './supply-boundary.mjs';
 // Exact reviewed initial source promotion inside the protected PCMS XPI.
 import './ready-source-boundary.mjs';
@@ -24,7 +24,7 @@ import './staging-boundary.mjs';
 
 // I10 native AI policy/configuration port (provider execution gated).
 import './ai-boundary.mjs';
-// I11 Git-only revision-safe writeback (capability OFF by default).
+// I11 manual and opted-in automatic revision-safe Git-only writeback.
 import './writeback-boundary.mjs';
 // I13 exact-source human approval and fail-closed publication listener.
 import './release-boundary.mjs';
@@ -33,12 +33,13 @@ import './existing-update-boundary.mjs';
 import './backup-auto-boundary.mjs';
 // I16 staged restore, with permanent inactive controller under review.
 import './restore-boundary.mjs';
-// I12 one durable shadow queue/alarm; provider observations gated OFF.
+// I12 one durable queue/alarm and protected read-only observations.
 import {createRefresherBoundary} from './refresher-boundary.mjs';
 if(typeof browser!=='undefined')createRefresherBoundary(browser,{
   // I17: fixed read-only Perchance monitoring is admitted only through the
   // donor's current protected Persona lease and independent response schema.
-  // Mutating refresh intentionally has no qualified provider adapter.
+  // Discovery v3 establishes no legitimate recurring refresh method.
+  // Operator qualification observes an ordinary reviewed update separately.
   observationGate:()=>true
 }).register();
 

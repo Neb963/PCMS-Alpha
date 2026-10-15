@@ -20,12 +20,12 @@ export function validateReadyMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let encoded;try{encoded=JSON.stringify(message);}catch{return fail('INVALID_MESSAGE');}
   if(!clean(message)||Object.keys(message).some(x=>!['type','params'].includes(x))||
-     !allowed.has(message.type)||!encoded||encoded.length>2200000)
+     !allowed.has(message.type)||!encoded||encoded.length>24000000)
     return fail('INVALID_MESSAGE');
   const p=message.params||{};
   if(!clean(p))return fail('INVALID_PARAMS');
-  const fields=message.type==='PREVIEW'?['slug','pjs','html']:
-    message.type==='ARM'?['slug','pjs','html','token','batchId','itemId','expectedRevision','confirmation']:
+  const fields=message.type==='PREVIEW'?['slug','pjs','html','assets']:
+    message.type==='ARM'?['slug','pjs','html','assets','token','batchId','itemId','expectedRevision','confirmation']:
     message.type==='COMMIT'?['slug','batchId','itemId','expectedRevision','fingerprint']:
     message.type==='RECONCILE'?['slug','token']:['slug'];
   if(Object.keys(p).some(x=>!fields.includes(x))||!SLUG.test(p.slug||''))

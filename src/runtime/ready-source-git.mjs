@@ -2,6 +2,7 @@
 // PCMS-created non-READY marker. No mutation without caller's durable
 // DISPATCH_POSSIBLE. A Git ACK is never proof of READY.
 import {inspectGitSource} from './git-source.mjs';
+import {exactSource} from './staging-core.mjs';
 import {NON_READY_MARKER} from './supply-git.mjs';
 const ROOT='https://api.github.com/repos/Neb963/per-gens';
 const sha=/^[a-f0-9]{40}$/;
@@ -11,11 +12,21 @@ const enc=new TextEncoder();
 const base64=b=>{let s='';for(let i=0;i<b.length;i+=8192)s+=String.fromCharCode(...b.subarray(i,i+8192));return btoa(s);};
 const hex=bytes=>Array.from(new Uint8Array(bytes),v=>v.toString(16).padStart(2,'0')).join('');
 const bad=code=>({ok:false,code});
-export async function exactInitialSource({slug,pjs,html}={}){
+export async function exactInitialSource({slug,pjs,html,assets=[]}={}){
   if(!slugOK(slug)||typeof pjs!=='string'||typeof html!=='string'||
      !pjs.trim()||!html.trim()||pjs.includes('\0')||html.includes('\0')||
      enc.encode(pjs).length>1048576||enc.encode(html).length>1048576)
     return bad('INITIAL_SOURCE_INVALID');
+  if(!Array.isArray(assets)||assets.length>500||assets.some(f=>!f||
+    typeof f.path!=='string'||!f.path.startsWith('src/')||Object.keys(f).some(k=>!['path','base64'].includes(k))))
+    return bad('INITIAL_ASSETS_INVALID');
+  const full=await exactSource([{path:'main.pjs',base64:base64(enc.encode(pjs))},
+    {path:'index.html',base64:base64(enc.encode(html))},...assets]);
+  if(!full.ok)return bad('INITIAL_ASSETS_INVALID');
+  if(assets.length){
+    const fingerprint=hex(await crypto.subtle.digest('SHA-256',enc.encode(JSON.stringify({version:2,slug,source:full.fingerprint}))));
+    return {ok:true,slug,fingerprint,files:full.files.map(f=>({path:f.path,sha256:f.sha256,bytes:f.size}))};
+  }
   // Canonical length-prefix framing prevents concatenation aliasing.
   const a=enc.encode(pjs),b=enc.encode(html);
   const frame=JSON.stringify({version:1,slug,pjsBytes:a.length,htmlBytes:b.length})+'\n';
@@ -27,9 +38,9 @@ export async function exactInitialSource({slug,pjs,html}={}){
     {path:'main.pjs',sha256:hex(await crypto.subtle.digest('SHA-256',a)),bytes:a.length},
     {path:'index.html',sha256:hex(await crypto.subtle.digest('SHA-256',b)),bytes:b.length}]};
 }
-export async function writeInitialReadySource({slug,pjs,html,token,expectedHead,fingerprint}={},transport=fetch){
+export async function writeInitialReadySource({slug,pjs,html,assets=[],token,expectedHead,fingerprint}={},transport=fetch){
   if(!slugOK(slug)||!tokenOK(token)||!sha.test(expectedHead||''))return bad('READY_GIT_INPUT_INVALID');
-  const exact=await exactInitialSource({slug,pjs,html});
+  const exact=await exactInitialSource({slug,pjs,html,assets});
   if(!exact.ok||exact.fingerprint!==fingerprint)return bad('READY_SOURCE_FINGERPRINT_MISMATCH');
   const folder='gens/'+slug, markerPath=folder+'/DEPLOYMENT.md';
   let effectPossible=false;
@@ -68,11 +79,11 @@ export async function writeInitialReadySource({slug,pjs,html,token,expectedHead,
     if(!r.ok||r.data.encoding!=='base64'||r.data.content?.replace(/\s/g,'')!==base64(enc.encode(NON_READY_MARKER)))
       return bad('READY_MARKER_CHANGED');
     const marker='Status: READY\nSource SHA-256: '+fingerprint+'\n';
-    const files=[{path:'main.pjs',text:pjs},{path:'index.html',text:html},{path:'DEPLOYMENT.md',text:marker}];
+    const files=[{path:'main.pjs',base64:base64(enc.encode(pjs))},{path:'index.html',base64:base64(enc.encode(html))},...assets,{path:'DEPLOYMENT.md',base64:base64(enc.encode(marker))}];
     const entries=[];
     effectPossible=true; // object creations may already have happened even if ref stays unchanged
     for(const file of files){
-      r=await api('POST','/git/blobs',{content:base64(enc.encode(file.text)),encoding:'base64'});
+      r=await api('POST','/git/blobs',{content:file.base64,encoding:'base64'});
       if(!r.ok||!sha.test(r.data.sha||''))return uncertain();
       entries.push({path:folder+'/'+file.path,mode:'100644',type:'blob',sha:r.data.sha});
     }
@@ -92,14 +103,24 @@ export async function writeInitialReadySource({slug,pjs,html,token,expectedHead,
     const readCommit=await api('GET','/git/commits/'+commit);
     if(!remote.ok||remote.data.object?.sha!==commit||
        !readCommit.ok||readCommit.data.tree?.sha!==newTree||
+       readCommit.data.parents?.length!==1||
        readCommit.data.parents?.[0]?.sha!==expectedHead||
        readCommit.data.message!==message)return uncertain();
+    const readTree=await api('GET','/git/trees/'+newTree+'?recursive=1');
+    if(!readTree.ok||readTree.data.truncated!==false||!Array.isArray(readTree.data.tree))return uncertain();
+    const saved=readTree.data.tree.filter(x=>typeof x.path==='string'&&
+      x.path.toLowerCase().startsWith(folder.toLowerCase()+'/'));
+    if(saved.filter(x=>x.type==='blob').length!==entries.length||saved.some(x=>
+      x.type==='tree'?!entries.some(e=>e.path.startsWith(x.path+'/')):
+      !entries.some(e=>e.path===x.path&&e.sha===x.sha&&e.mode===x.mode&&e.type===x.type)))return uncertain();
     for(const entry of entries){
       const b=await api('GET','/git/blobs/'+entry.sha);
       const wanted=files.find(f=>folder+'/'+f.path===entry.path);
       if(!b.ok||b.data.encoding!=='base64'||
-        b.data.content?.replace(/\s/g,'')!==base64(enc.encode(wanted.text)))return uncertain();
+        b.data.content?.replace(/\s/g,'')!==wanted.base64)return uncertain();
     }
+    const finalHead=await api('GET','/git/ref/heads/main');
+    if(!finalHead.ok||finalHead.data.object?.sha!==commit)return uncertain();
     return {ok:true,source:'INDEPENDENT_GIT_HEAD_TREE_BYTES',ready:true,folder,
       head:commit,baseHead:expectedHead,fingerprint};
   }catch{return uncertain();}
@@ -114,7 +135,7 @@ export async function inspectInitialReadySource({slug,token,expectedHead,fingerp
   catch{return bad('READY_RECONCILE_UNAVAILABLE');}
   if(!current?.ok||!current.ready||current.folder!==folder||
      current.repo!=='Neb963/per-gens'||!sha.test(current.head||'')||
-     current.paths?.length!==3)return bad('READY_RECONCILE_HELD');
+     current.paths?.length!==files?.length+1)return bad('READY_RECONCILE_HELD');
   try{
     const ac=new AbortController(),timeout=setTimeout(()=>ac.abort(),12000);
     let response;
@@ -129,7 +150,7 @@ export async function inspectInitialReadySource({slug,token,expectedHead,fingerp
        commit.message!=='pcms: approve initial exact source '+slug+' '+fingerprint)
       return bad('READY_GIT_ATTRIBUTION_UNVERIFIED');
     // Independently hashed remote source bytes must match the journal.
-    if(!Array.isArray(files)||files.length!==2||
+    if(!Array.isArray(files)||files.length<2||files.length>502||
        files.some(expected=>{
          const observed=current.paths.find(p=>p.path===expected.path);
          return !observed||observed.sha256!==expected.sha256||

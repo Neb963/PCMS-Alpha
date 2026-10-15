@@ -41,7 +41,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain } from "./pcms/perchance-existing.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { waitForOwnedEditor } from "./pcms/editor-readiness.mjs";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain } from "./pcms/perchance-existing.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -154,7 +154,7 @@ attachPcmsGuard({
 
   // One donor-guarded, protected-container stage tab; never touch an
   // unrelated human editor or reuse a tab merely because its number matches.
-  stageIsolatedTab: async ({personaUid,cookieStoreId,routeId},request) => {
+  stageIsolatedTab: async ({personaUid,cookieStoreId,routeId,leaseId},request) => {
     const valid=typeof request?.slug==='string'&&
       /^[a-z0-9][a-z0-9-]{0,99}$/.test(request.slug)&&
       /^[a-f0-9]{32}$/.test(request.nonce)&&
@@ -186,6 +186,17 @@ attachPcmsGuard({
        current?.url!==url||again.profiles?.[cookieStoreId]?.personaUid!==personaUid||
        again.profiles?.[cookieStoreId]?.routeId!==routeId)
       return {ok:false,code:'TAB_CONTEXT_UNVERIFIED'};
+    const loaded=await waitForOwnedEditor(browser,{tabId:tab.id,slug:request.slug,
+      cookieStoreId,nonce:request.nonce,validate:async()=>{
+        try {
+          const lease=await managementIntegration.pcmsGuard.validate(personaUid,leaseId);
+          const state=await getState();
+          return lease.cookieStoreId===cookieStoreId&&
+            state.profiles?.[cookieStoreId]?.routeId===routeId&&
+            !!currentTest(state,cookieStoreId)?.ok;
+        } catch {return false;}
+      }});
+    if(!loaded.ok)return loaded;
     await browser.scripting.executeScript({
       target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
       func:renderPcmsEditorStrip,args:[{
@@ -332,7 +343,7 @@ attachPcmsGuard({
   // I13 unlist creates exactly one owned tab. Subsequent update/restore
   // requires that exact tagged tab; missing or ambiguous state never opens
   // another or acquires human-owned editor authority.
-  existingIsolatedTab: async ({personaUid,cookieStoreId,routeId},request)=>{
+  existingIsolatedTab: async ({personaUid,cookieStoreId,routeId,leaseId},request)=>{
     if(!['UNLIST','STAGE','RESTORE'].includes(request?.action)||
        typeof request.slug!=='string'||
        !/^[a-z0-9][a-z0-9-]{0,99}$/.test(request.slug)||
@@ -363,6 +374,17 @@ attachPcmsGuard({
       const matched=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned');
       if(matched?.nonce!==request.nonce)
         return {ok:false,code:'EXISTING_TAB_TAG_UNVERIFIED'};
+      const loaded=await waitForOwnedEditor(browser,{tabId:tab.id,slug:request.slug,
+        cookieStoreId,nonce:request.nonce,validate:async()=>{
+          try {
+            const lease=await managementIntegration.pcmsGuard.validate(personaUid,leaseId);
+            const state=await getState();
+            return lease.cookieStoreId===cookieStoreId&&
+              state.profiles?.[cookieStoreId]?.routeId===routeId&&
+              !!currentTest(state,cookieStoreId)?.ok;
+          } catch {return false;}
+        }});
+      if(!loaded.ok)return loaded;
       await browser.scripting.executeScript({
         target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
         func:renderPcmsEditorStrip,args:[{
@@ -552,13 +574,13 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   await writeFile(bgPath, bg);
   for (const name of ['entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'ready-source-git.mjs','ready-source-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'adoption-boundary.mjs',
     'staging-core.mjs','staging-store.mjs','staging-boundary.mjs',
-    'perchance-stage.mjs','editor-strip.mjs','perchance-editor-probe.mjs','perchance-ai-native.mjs','perchance-ai-oracle.mjs','perchance-ai-opfs.mjs','perchance-ai-history.mjs','ai-supervisor.mjs','ai-testing.mjs','ai-evidence.mjs','ai-store.mjs','ai-boundary.mjs',
+    'perchance-stage.mjs','editor-readiness.mjs','editor-strip.mjs','perchance-editor-probe.mjs','perchance-ai-native.mjs','perchance-ai-oracle.mjs','perchance-ai-opfs.mjs','perchance-ai-history.mjs','ai-supervisor.mjs','ai-testing.mjs','ai-evidence.mjs','ai-store.mjs','ai-boundary.mjs',
     'git-writeback.mjs','writeback-store.mjs','writeback-boundary.mjs',
     'release-core.mjs','release-store.mjs','release-boundary.mjs','perchance-release.mjs',
     'existing-update-core.mjs','existing-update-store.mjs','existing-update-boundary.mjs','perchance-existing.mjs',
     'backup-auto-donor.mjs','restore-donor.mjs','restore-boundary.mjs','restore-reconcile.mjs','backup-auto-core.mjs','backup-auto-store.mjs','backup-auto-download.mjs',
     'backup-auto-retention.mjs','backup-auto-export.mjs','backup-auto-run.mjs','backup-auto-boundary.mjs',
-    'refresher-effect-core.mjs','refresher-core.mjs','refresher-store.mjs','refresher-boundary.mjs','perchance-monitor.mjs']) {
+    'refresher-effect-core.mjs','refresher-core.mjs','refresher-store.mjs','refresher-boundary.mjs','refresh-qualification.mjs','perchance-monitor.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }
 }

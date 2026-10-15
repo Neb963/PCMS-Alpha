@@ -25,6 +25,7 @@ async function read() {
   const state=await command({type:'SUMMARY'});
   if(mine!==generation)return;
   if(state?.ok!==true || state?.providerEffects!=='OFF')throw Error('unsafe status');
+  window.dispatchEvent(new CustomEvent('pcms-canonical-health',{detail:{storage:state.storage,held:state.held}}));
   journalStatus.textContent=state.storage==='READY'
     ? 'Canonical IndexedDB available. Restore: '+state.restore+'. Individual remote actions require their own guarded journals and independent verification.'
     : 'Canonical store unavailable; global PCMS operation hold. Restore: '+state.restore;

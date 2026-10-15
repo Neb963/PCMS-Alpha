@@ -225,7 +225,7 @@
             </section>
           </div>
           <details class="pcms-inline-help pcms-wb-help"><summary>Advanced automatic writeback and safety</summary>
-            <p>Only an independently tested exact F may be committed. Credentials are never stored. Lost acknowledgments require read-only reconciliation, not retries. Git writeback never authorizes Perchance publication. General autonomous writeback remains held until separately qualified.</p>
+            <p>Only an independently tested exact F may be committed. Credentials are never stored. Lost acknowledgments require read-only reconciliation, not retries. Git writeback never authorizes Perchance publication. Automatic writeback requires opt-in and a separate exact-job credential arm. Restart or event-page suspension clears credentials; re-arm explicitly.</p>
             <div class="pcms-wb-advanced">
               <button id="pcms-writeback-arm-auto" type="button" disabled>Arm automatic writeback</button>
               <button id="pcms-writeback-disarm-auto" type="button">Disarm automatic writeback</button>
@@ -273,7 +273,7 @@
               <h3 id="pcms-release-steps">Review and approve</h3>
               <button id="pcms-release-preview" type="button">1 · Review source and tests</button>
               <button id="pcms-release-approve" type="button" disabled>2 · Approve exact F</button>
-              <button id="pcms-release-arm" type="button" disabled>3 · Authorize private publication</button>
+              <button id="pcms-release-arm" type="button" disabled>3 · Authorize exact publication</button>
               <button id="pcms-release-dispatch" type="button" disabled>4 · Publish once</button>
             </section>
             <section aria-labelledby="pcms-release-recovery">
@@ -398,6 +398,11 @@
         <section class="panel" id="pcms-refresher-inspector" hidden>
           <div class="panel-head"><h2>Generator timing</h2><span class="unknown">Individual policy</span></div>
           <p id="pcms-refresher-selected"></p><p id="pcms-refresher-metric"></p>
+          <details class="pcms-technical-help"><summary>Qualify a meaningful source update</summary>
+            <p>Capture a public baseline, then use the existing-source update, tests and exact-source publication workflow. No automatic save is performed here. PCMS independently compares persisted bytes and recent-list presence. This observation cannot enable recurring fleet refresh.</p>
+            <div class="account-controls"><button type="button" id="pcms-refresher-qualify-begin">Capture public baseline</button><button type="button" id="pcms-refresher-qualify-observe" disabled>Observe update result</button><button type="button" id="pcms-refresher-qualify-load">Load qualification receipt</button></div>
+            <p id="pcms-refresher-qualify-status" role="status" aria-live="polite">Select a generator to inspect qualification.</p>
+          </details>
           <div class="pcms-refresher-policy-grid">
             <label for="pcms-refresher-generator-active">Active hours<input id="pcms-refresher-generator-active" type="number" min="1" max="8760"></label>
             <label for="pcms-refresher-generator-sleep">Sleep hours<input id="pcms-refresher-generator-sleep" type="number" min="1" max="8760"></label>

@@ -14,12 +14,11 @@ const enc=s=>Buffer.from(s,'utf8').toString('base64');
 const api={runtime:{id:'persona-route-manager@local',
   getURL:p=>'moz-extension://fixture/'+p}};
 const sender={id:api.runtime.id,url:api.runtime.getURL('pcms/index.html')};
-function fakeGit({drift=false,collision=false,wrongMarker=false,uncertain=false}={}){
+function fakeGit({drift=false,collision=false,wrongMarker=false,uncertain=false,wrongTarget=false}={}){
   let current=head,posts=0,patches=0,index=0;
   const uploaded=new Map([[markerSha,wrongMarker?enc('Status: READY\n'):enc(NON_READY_MARKER)]]);
   const requests=[];
-  const shaList=['1','2','3'].map(x=>x.repeat(40));
-  let savedCommit=null;
+  let savedCommit=null,savedTree=[];
   const transport=async(url,options)=>{
     const u=new URL(url),path=u.pathname.replace('/repos/Neb963/per-gens','')+u.search,method=options.method;
     requests.push(method+' '+path);
@@ -37,22 +36,24 @@ function fakeGit({drift=false,collision=false,wrongMarker=false,uncertain=false}
       return good({sha:path.slice('/git/blobs/'.length),encoding:'base64',
         content:uploaded.get(path.slice('/git/blobs/'.length))});
     if(method==='POST'&&path==='/git/blobs'){
-      posts++;const id=shaList[index++];uploaded.set(id,JSON.parse(options.body).content);
+      posts++;const id=String(++index).repeat(40).slice(0,40);uploaded.set(id,JSON.parse(options.body).content);
       return good({sha:id});
     }
-    if(method==='POST'&&path==='/git/trees'){posts++;return good({sha:newTree});}
+    if(method==='POST'&&path==='/git/trees'){posts++;savedTree=JSON.parse(options.body).tree;return good({sha:newTree});}
+    if(method==='GET'&&path==='/git/trees/'+newTree+'?recursive=1')return good({truncated:false,
+      tree:savedTree.map((e,i)=>wrongTarget&&i===0?{...e,path:'gens/another-target/main.pjs'}:e)});
     if(method==='POST'&&path==='/git/commits'){
       posts++;savedCommit=JSON.parse(options.body);return good({sha:newCommit});
     }
     if(method==='PATCH'&&path==='/git/refs/heads/main'){
-      patches++;if(uncertain)throw Error('LOST_ACK');
-      current=JSON.parse(options.body).sha;return good({object:{sha:current}});
+      patches++;current=JSON.parse(options.body).sha;if(uncertain)throw Error('LOST_ACK');
+      return good({object:{sha:current}});
     }
     if(method==='GET'&&path==='/git/commits/'+newCommit)
       return good({tree:{sha:newTree},parents:[{sha:head}],message:savedCommit.message});
     throw Error('Unexpected fake endpoint '+method+' '+path);
   };
-  return {transport,reads:()=>requests,posts:()=>posts,patches:()=>patches};
+  return {transport,reads:()=>requests,posts:()=>posts,patches:()=>patches,uploaded,tree:()=>savedTree};
 }
 test('I17 F: initial READY source canonical fingerprint is content and slug bound',async()=>{
   const a=await exactInitialSource({slug,pjs,html});
@@ -109,6 +110,23 @@ test('I17 X: forged sources and untrusted callers cannot enter a READY command',
   assert.equal(validateReadyMessage(api,sender,{type:'COMMIT',params:{slug,
     batchId:'batch_alpha_01',itemId:'item_alpha_01',
     expectedRevision:4,fingerprint:'a'.repeat(64),token}}).code,'INVALID_PARAMS');
+});
+test('I17 F/X: binary READY assets are reviewed, written and independently attributed to the exact paths',async()=>{
+  const assets=[{path:'src/image.bin',base64:Buffer.from([0,255,128,42]).toString('base64')},
+    {path:'src/nested/style.css',base64:enc('main {color: navy;}')}];
+  const exact=await exactInitialSource({slug,pjs,html,assets}),git=fakeGit();
+  assert.equal(exact.files.length,4);
+  assert.notEqual(exact.fingerprint,(await exactInitialSource({slug,pjs,html})).fingerprint);
+  const out=await writeInitialReadySource({slug,pjs,html,assets,token,expectedHead:head,fingerprint:exact.fingerprint},git.transport);
+  assert.equal(out.ok,true,out.code);assert.equal(git.patches(),1);
+  for(const asset of assets){const entry=git.tree().find(e=>e.path==='gens/'+slug+'/'+asset.path);
+    assert.equal(git.uploaded.get(entry.sha),asset.base64);
+    assert.ok(git.reads().includes('GET /git/blobs/'+entry.sha));}
+  for(const badAssets of [[...assets,assets[0]],[{path:'src/../main.pjs',base64:enc('bad')}],[{path:'main.pjs',base64:enc('bad')}]] )
+    assert.equal((await exactInitialSource({slug,pjs,html,assets:badAssets})).ok,false);
+  const wrong=fakeGit({wrongTarget:true});
+  assert.equal((await writeInitialReadySource({slug,pjs,html,assets,token,expectedHead:head,fingerprint:exact.fingerprint},wrong.transport)).code,'READY_GIT_OUTCOME_UNKNOWN');
+  assert.equal(wrong.patches(),1);
 });
 test('I17 X: read-only reconciliation requires original parent and actual source byte digests',async()=>{
   const exact=await exactInitialSource({slug,pjs,html});

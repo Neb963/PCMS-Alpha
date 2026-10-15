@@ -183,7 +183,6 @@ def supply_effect_idb_probe(session):
         }
       };
       const boundary=createSupplyBoundary(api,{guard:()=>guard,
-        effectGate:()=>true,gitGate:()=>true,
         gitWrite:async ({folder,slug,token})=>{
           if(token!=='offline-git-write-token')throw Error('Wrong fixture token');
           effects.push('GIT_MARKER');
@@ -194,13 +193,24 @@ def supply_effect_idb_probe(session):
         return boundary.run({type:'EXECUTE_ITEM',params:{batchId,itemId,
           expectedRevision:revision}},sender);
       }
+      const batch=await boundary.run({type:'GET_BATCH',params:{batchId}},sender);
+      const slug=batch.batch.items.find(x=>x.itemId===itemId).slug;
+      const arm=async(revision,action)=>boundary.run({type:'ARM_EXACT_ITEM',params:{
+        batchId,itemId,expectedRevision:revision,confirmation:action+' '+slug}},sender);
+      const createArm=await arm(1,'CREATE');
+      if(!createArm.ok)throw Error('CREATE admission '+createArm.code);
       const created=await effect(1);
+      const renameArm=await arm(created.revision,'RENAME');
+      if(!renameArm.ok)throw Error('RENAME admission '+renameArm.code);
       const renamed=await effect(created.revision);
+      const gitArm=await boundary.run({type:'ARM_EXACT_GIT',params:{
+        batchId,itemId,expectedRevision:renamed.revision,confirmation:'GIT '+slug}},sender);
+      if(!gitArm.ok)throw Error('Git admission '+gitArm.code);
       const linked=await boundary.run({type:'FINISH_SOURCE_FOLDER',params:{
         batchId,itemId,expectedRevision:renamed.revision,
         token:'offline-git-write-token'}},sender);
       const fromPort=await boundary.run({type:'GET_BATCH',params:{batchId}},sender);
-      done({created,renamed,linked,effects,
+      done({createArm,renameArm,gitArm,created,renamed,linked,effects,
         final:fromPort?.batch?.items?.find(x=>x.itemId===itemId)});
     })().catch(e=>done({error:'I06_EFFECT_IDB_PROBE_FAILED',detail:String(e).slice(0,220)}));'''
     return call('POST',f'/session/{session}/execute/async',
@@ -214,7 +224,7 @@ def adoption_idb_probe(session):
     # no live identity, credentials, provider writes or Git operations.
     script = '''const done=arguments[arguments.length-1];
     (async()=>{
-      const {createAdoptionBoundary}=await import('./adoption-boundary.mjs');
+      const {createAdoptionBoundary,productionAdoptionArchiveGate}=await import('./adoption-boundary.mjs');
       const {createAdoptionStore}=await import('./adoption-store.mjs');
       const {openCanonicalDatabase}=await import('./journal.mjs');
       const api={runtime:browser.runtime,storage:browser.storage};
@@ -233,7 +243,7 @@ def adoption_idb_probe(session):
       const db=await openCanonicalDatabase();
       const store=createAdoptionStore(db);
       const boundary=createAdoptionBoundary(api,{guard:()=>guard,
-        gitGate:()=>true,
+        gitGate:productionAdoptionArchiveGate,
         gitWrite:async ({folder,original:preserved})=>{
           const onDisk=await store.getFull(slug);
           if(onDisk.record?.archiveState!=='DISPATCH_POSSIBLE')
@@ -2270,7 +2280,8 @@ def main():
                     done({ok:before.ok&&after.ok&&!denied.ok&&
                       before.revision===after.revision&&
                       before.state.revision===after.state.revision&&
-                      result.ok&&result.refreshCapability==='LIVE_REFRESH_OFF_UNTIL_PROVEN'&&
+                      result.ok&&result.refreshCapability==='OPERATOR_QUALIFICATION_REQUIRED'&&
+                      result.qualificationAvailable===true&&result.fleetMutationReady===false&&
                       core.qualifyRefreshCandidate(null).ok===false,
                       beforeRows:before.state.rows.length,
                       denied:denied.code,capability:result.refreshCapability,
@@ -2283,8 +2294,50 @@ def main():
                          {'script':i14_code,'args':[]},timeout=90)
                 assert i14.get('ok') is True,i14
                 ui=execute(after,"return {provider:document.getElementById('pcms-refresher-provider')?.textContent||'',summary:document.getElementById('pcms-refresher-summary')?.textContent||''}")
-                assert 'Live refresh held' in ui['provider'] and 'GUARDED_READ_ONLY' in ui['provider'] and 'visibility-held' in ui['summary'],ui
+                assert 'Refresh qualification required' in ui['provider'] and 'GUARDED_READ_ONLY' in ui['provider'] and 'visibility-held' in ui['summary'],ui
                 print('B I14_PACKAGED_PERSISTENT_IDB_GATED_EFFECTS_AND_REFERSHER_PROOF_UI=PASS',flush=True)
+
+                # Normal qualification commands, real packaged modules and IDB;
+                # only provider observations are isolated ledgers. A changed
+                # source plus recent-list presence cannot fabricate release proof.
+                qualification_code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const db=await (await import('./journal.mjs')).openCanonicalDatabase();
+                  const store=(await import('./refresher-store.mjs')).createRefresherStore(db);
+                  const qs=(await import('./refresh-qualification.mjs')).createQualificationStore(db);
+                  await store.turn({now:Date.now(),bootId:'qualification_fixture_boot'});
+                  const state=(await store.read()).state;let row,account;
+                  for(const r of state.rows){const a=state.accounts[r.accountId];
+                    if(r.ownerVerified&&!r.identityHeld&&a?.verifiedIdentity&&(await qs.verify(r,a)).valid){row=r;account=a;break;}}
+                  if(!row)throw Error('No authoritative fixture owner');
+                  let now=Date.now(),source='baseline',reads=0;
+                  const route={ready:true,routeId:'protected_fixture',cookieStoreId:'container_fixture'};
+                  const guard=()=>({getSafeRouteReadiness:async()=>route,
+                    observeReadOnly:async()=>{reads++;return {ok:true,principalFingerprint:account.principalFingerprint,
+                      original:{ownerResult:'IS_OWNER',remotePublicId:row.remoteId,visibility:'PUBLIC',pjs:source,html:'<main>Fixture</main>',assets:[]}};},
+                    observeMonitoring:async()=>{reads++;return {ok:true,principalFingerprint:account.principalFingerprint,complete:true,items:[{slug:row.slug}]};}});
+                  const api={runtime:browser.runtime,storage:browser.storage};
+                  const sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')+'#refresher'};
+                  const boundary=(await import('./refresher-boundary.mjs')).createRefresherBoundary(api,{open:async()=>db,
+                    guard,observationGate:()=>true,clock:()=>now});
+                  const cmd=(type,params={})=>boundary.run({type,params:{stableId:row.stableId,...params}},sender);
+                  const before=await cmd('BEGIN_QUALIFICATION',{expectedRevision:0,confirmation:'OBSERVE '+row.slug});
+                  if(!before.ok)throw Error('Baseline '+before.code);
+                  now+=60001;source='meaningfully revised fixture';
+                  const after=await cmd('OBSERVE_QUALIFICATION',{expectedRevision:before.qualification.revision});
+                  const stale=await cmd('OBSERVE_QUALIFICATION',{expectedRevision:before.qualification.revision});
+                  const persisted=await qs.read(row.slug);
+                  done({before:before.qualification.state,after:after.qualification?.state,stale:stale.code,reads,
+                    persisted:persisted.record?.state,revision:persisted.record?.revision,
+                    mutationAuthority:after.qualification?.fleetEnabled,sourceLeaked:JSON.stringify(persisted).includes(source),
+                    ui:['begin','observe','load'].every(x=>!!document.getElementById('pcms-refresher-qualify-'+x))});
+                  db.close();
+                })().catch(e=>done({error:String(e)}));"""
+                qualification=call('POST',f'/session/{after}/execute/async',{'script':qualification_code,'args':[]},timeout=60)
+                assert qualification=={'before':'READY_FOR_OPERATOR_UPDATE','after':'UNVERIFIED_UPDATE',
+                    'stale':'STALE_QUALIFICATION','reads':4,'persisted':'UNVERIFIED_UPDATE','revision':2,
+                    'mutationAuthority':False,'sourceLeaked':False,'ui':True},qualification
+                print('B I17_NORMAL_REFRESH_QUALIFICATION_DURABLE_DISTINCT_EVIDENCE=PASS',flush=True)
 
                 # I13 B: exact packaged XPI, real IndexedDB atomic approval
                 # vs duplicate dispatch, installed operator controls, and
