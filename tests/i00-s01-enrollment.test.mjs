@@ -44,10 +44,11 @@ function fakeDonor(relays){
       const f=byUid(personaUid);
       if(f.length!==1)return {ok:false,code:f.length?'PERSONA_AMBIGUOUS':'PERSONA_NOT_FOUND'};
       const [contextId,p]=f[0];
-      if(!routes.has(p.routeId))return {ok:true,releasable:false,reason:'NO_ROUTE_RESOURCE',routeId:p.routeId};
-      if([...profiles.values()].some(o=>o!==p&&o.routeId===p.routeId))return {ok:true,releasable:false,reason:'RESOURCE_SHARED'};
-      if(tabs.has(contextId)||leases.has(contextId))return {ok:true,releasable:false,reason:'RESOURCE_IN_USE'};
-      return {ok:true,releasable:true,routeId:p.routeId,contextId};
+      const inUse=tabs.has(contextId)||leases.has(contextId);
+      if(!routes.has(p.routeId))return {ok:true,releasable:false,reason:'NO_ROUTE_RESOURCE',routeId:p.routeId,inUse};
+      if([...profiles.values()].some(o=>o!==p&&o.routeId===p.routeId))return {ok:true,releasable:false,reason:'RESOURCE_SHARED',inUse};
+      if(inUse)return {ok:true,releasable:false,reason:'RESOURCE_IN_USE',inUse};
+      return {ok:true,releasable:true,routeId:p.routeId,contextId,inUse};
     },
     async releaseIdleRoute({personaUid,routeId}){
       const [contextId,p]=byUid(personaUid)[0]||[];
@@ -658,4 +659,119 @@ test('S01 C-58 D: a route shared with another Persona or without a Mullvad resou
   assert.equal(stored(h,a.accountId).route.code,'RESOURCE_SHARED');
   assert.equal(h.effects.filter(e=>e.kind==='RELEASE').length,0);
   assert.equal(h.live.has(routeA),true,'ordinary Persona keeps its forwarder');
+});
+
+// ---- Second independent review: regression tests ----
+async function rawPut(h,account){
+  await new Promise(done=>{const tx=h.db.transaction(['meta'],'readwrite');
+    tx.objectStore('meta').put({key:'account:'+account.accountId,account});tx.oncomplete=done;});
+}
+test('S01 review2 D: upgrade refuses a principal preserved only in ANOTHER account\'s history',async()=>{
+  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
+  const {account}=await legacyAccount(h,'10.124.0.1',fp('9'));
+  // Archived pre-S01 account A holds P only in its archive history.
+  await rawPut(h,{accountId:'legacy_archived_a1',personaUid:'persona-old-0001',state:'ARCHIVED',revision:3,
+    bindingVersion:1,identity:null,override:null,history:[{event:'ARCHIVED',revision:3,
+      priorIdentity:{principalFingerprint:fp('9'),source:'GUARDED_SESSION_READBACK'}}]});
+  const out=await h.flow.upgrade(account.accountId);
+  assert.equal(out.code,'IDENTITY_ALREADY_BOUND',JSON.stringify(out));
+  assert.equal(h.effects.filter(e=>e.kind==='TAG').length,0);
+});
+test('S01 review2 D: a pre-S01 record naming two different principals is held as ambiguous',async()=>{
+  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
+  const {account}=await legacyAccount(h,'10.124.0.1',fp('a'));
+  const raw=stored(h,account.accountId);
+  raw.history=[{event:'REBIND',priorIdentity:{principalFingerprint:fp('b'),source:'GUARDED_SESSION_READBACK'}}];
+  await rawPut(h,raw);
+  assert.equal((await h.flow.upgrade(account.accountId)).code,'IDENTITY_AMBIGUOUS');
+});
+test('S01 review2 D: accounts archived before release existed (or interrupted) are released by upkeep',async()=>{
+  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
+  const a=await enroll(h);
+  const routeA=h.profileOf(a).routeId;
+  // v1.0-style archive: state ARCHIVED, route status still PINNED, no release.
+  const raw=stored(h,a.accountId);raw.state='ARCHIVED';raw.route={status:'PINNED',code:null};
+  await rawPut(h,raw);
+  await h.flow.upkeep();
+  assert.equal(stored(h,a.accountId).route.status,'RELEASED');
+  assert.equal(h.live.has(routeA),false);
+  // Store-level ARCHIVE persists the release intent before any effect.
+  const h2=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
+  const b=await enroll(h2);
+  await h2.accounts.apply({type:'ARCHIVE',accountId:b.accountId,expectedRevision:stored(h2,b.accountId).revision});
+  assert.equal(stored(h2,b.accountId).route.code,'RELEASE_PENDING');
+  await h2.flow.upkeep();
+  assert.equal(stored(h2,b.accountId).route.status,'RELEASED');
+});
+test('S01 review2 D: a stale upkeep snapshot never releases an account reactivated meanwhile',async()=>{
+  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
+  const a=await enroll(h);h.sessions.set(a.personaUid,fp('a'));
+  await h.flow.confirm(a.accountId);
+  h.leases.add(h.profileOf(a).containerId);
+  await h.flow.archive(a.accountId,stored(h,a.accountId).revision);
+  const snapshot=stored(h,a.accountId); // what upkeep listed
+  h.leases.clear();
+  await h.flow.reactivate(a.accountId,snapshot.revision);
+  assert.equal(stored(h,a.accountId).state,'VERIFIED');
+  const before=h.effects.filter(e=>e.kind==='RELEASE').length;
+  // Upkeep iterating an old list: the record is re-read inside releaseIdle.
+  const flow=createEnrollment({accounts:{...h.accounts,list:async()=>({ok:true,accounts:[snapshot]})},
+    ledger:h.ledger,donor:h.donor,pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},
+    openLogin:async()=>({ok:true}),identify:async()=>({ok:false,code:'NO_PAGE_SESSION'})});
+  await flow.upkeep();
+  assert.equal(h.effects.filter(e=>e.kind==='RELEASE').length,before);
+  assert.equal(inspectRoutePin(h.profileOf(a)).allow,true);
+});
+test('S01 review2 D: deferred archived account still in human use is observed for drift (no rotation)',async()=>{
+  const relays=[relay('10.124.0.1','45.83.1.1','BLOCKED'),relay('10.124.0.2','45.83.2.2','BLOCKED')];
+  const h=setup({relays});
+  const a=await enroll(h),b=await enroll(h);
+  h.tabs.add(h.profileOf(b).containerId);
+  await h.flow.archive(b.accountId,stored(h,b.accountId).revision);
+  assert.equal(inspectRoutePin(h.profileOf(b)).allow,true);
+  relays[1].v4='45.83.1.1';
+  const assigns=h.effects.filter(e=>e.kind==='ASSIGN').length;
+  await h.flow.upkeep();
+  assert.equal(inspectRoutePin(h.profileOf(b)).allow,false,'drift onto A\'s exit holds the archived Persona');
+  assert.deepEqual([stored(h,b.accountId).route.status,stored(h,b.accountId).route.code],['HELD','EXIT_DRIFT_CONFLICT']);
+  assert.equal(h.effects.filter(e=>e.kind==='ASSIGN').length,assigns,'never rotated');
+  assert.equal(inspectRoutePin(h.profileOf(a)).allow,true);
+});
+test('S01 review2 D: automatic upgrade never starts while the legacy Persona is in use; transient holds retry',async()=>{
+  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
+  const {persona,account}=await legacyAccount(h,'10.124.0.1',fp('a'));
+  h.sessions.set(persona.personaUid,fp('a'));
+  h.tabs.add(persona.contextId);
+  await h.flow.upkeep();
+  assert.equal(h.effects.filter(e=>e.kind==='TAG').length,0,'open human tab: upgrade not started automatically');
+  h.tabs.clear();h.faults.host=true;
+  await h.flow.upkeep();
+  assert.equal(stored(h,account.accountId).upgrade.code,'MULLVAD_LOCAL_SERVICE_UNAVAILABLE');
+  h.faults.host=false;
+  await h.flow.upkeep();
+  assert.equal(stored(h,account.accountId).upgrade.phase,'COMPLETE','transient hold retried automatically');
+});
+test('S01 review2 D: an uncommitted replacement Persona is never adopted by upkeep; the explicit action completes it',async()=>{
+  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
+  const a=await enroll(h);
+  const [ctx]=[...h.profiles.entries()].find(([,p])=>p.pcmsBindingId===a.bindingId);
+  h.profiles.delete(ctx);
+  // Crash after the donor created the replacement, before REPLACE_PERSONA committed.
+  await h.donor.createBoundPersona({bindingId:a.bindingId});
+  assert.equal((await h.flow.verifyRoute(a.accountId)).code,'BINDING_PERSONA_CONFLICT');
+  assert.equal(Object.values(h.db.read('meta',LEDGER_KEY).bindings)[0].personaUid,a.personaUid,
+    'binding not moved to an unrecorded Persona');
+  const out=await h.flow.replacePersona(a.accountId,stored(h,a.accountId).revision);
+  assert.equal(out.ok,true,JSON.stringify(out));
+  assert.equal(h.effects.filter(e=>e.kind==='PERSONA_CREATE').length,2,'adopted, not created a third time');
+});
+test('S01 review2 D: reactivating a pre-S01 record with a principal conflict returns it to Archive',async()=>{
+  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED'),relay('10.124.0.2','45.83.2.2','BLOCKED')]});
+  const a=await enroll(h);h.sessions.set(a.personaUid,fp('a'));
+  await h.flow.confirm(a.accountId);
+  const {account}=await legacyAccount(h,'10.124.0.2',fp('a'),{accountId:'legacy_account_02'});
+  const raw=stored(h,account.accountId);raw.state='ARCHIVED';
+  raw.history=[{event:'ARCHIVED',priorIdentity:raw.identity}];raw.identity=null;await rawPut(h,raw);
+  assert.equal((await h.flow.reactivate(account.accountId,raw.revision)).code,'IDENTITY_ALREADY_BOUND');
+  assert.equal(stored(h,account.accountId).state,'ARCHIVED');
 });

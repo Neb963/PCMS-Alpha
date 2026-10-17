@@ -229,14 +229,19 @@ function createPcmsEnrollmentDonor(){
       const state=await getState(),found=pcmsProfileByUid(state,personaUid);
       if(found.code)return {ok:false,code:found.code};
       const p=found.profile,route=state.routes?.[p.routeId];
-      if(!route||route.provider!=='mullvad')return {ok:true,releasable:false,reason:'NO_ROUTE_RESOURCE',routeId:p.routeId};
-      if(Object.values(state.profiles||{}).some(o=>o!==p&&o?.routeId===p.routeId))
-        return {ok:true,releasable:false,reason:'RESOURCE_SHARED',routeId:p.routeId};
+      // In use: any tab in the container, a running donor job, or ANY donor
+      // control lease (in-flight PCMS or external work) on this Persona.
       const tabs=await browser.tabs.query({cookieStoreId:p.containerId});
       const jobs=await listActiveProfileIds();
-      if(tabs.length||jobs.includes(p.containerId))
-        return {ok:true,releasable:false,reason:'RESOURCE_IN_USE',routeId:p.routeId};
-      return {ok:true,releasable:true,routeId:p.routeId,contextId:p.containerId};
+      const leases=await managementIntegration.listControlLeases();
+      const inUse=tabs.length>0||jobs.includes(p.containerId)||leases.some(l=>
+        String(l?.personaUid||'').toLowerCase()===String(p.personaUid).toLowerCase());
+      if(!route||route.provider!=='mullvad')
+        return {ok:true,releasable:false,reason:'NO_ROUTE_RESOURCE',routeId:p.routeId,inUse};
+      if(Object.values(state.profiles||{}).some(o=>o!==p&&o?.routeId===p.routeId))
+        return {ok:true,releasable:false,reason:'RESOURCE_SHARED',routeId:p.routeId,inUse};
+      if(inUse)return {ok:true,releasable:false,reason:'RESOURCE_IN_USE',routeId:p.routeId,inUse};
+      return {ok:true,releasable:true,routeId:p.routeId,contextId:p.containerId,inUse};
     },
     // Release ONLY this Persona's own idle Mullvad forwarder. The donor
     // mutation fence refuses while any control lease exists; tabs, jobs and
@@ -273,8 +278,11 @@ function createPcmsEnrollmentDonor(){
 }
 function pcmsProfileByUid(state,personaUid){
   const uid=String(personaUid||'').toLowerCase();
-  const found=Object.values(state.profiles||{}).filter(p=>p?.managed&&!p.rotationRole&&
+  const found=Object.values(state.profiles||{}).filter(p=>p?.managed&&
     String(p.personaUid||'').toLowerCase()===uid);
+  // A Persona mid-rotation exists: never report it missing (that would
+  // offer a replacement while the original and its session still exist).
+  if(found.some(p=>p.rotationRole||p.rotationOperationId))return {code:'PERSONA_NOT_ACTIVE'};
   if(found.length!==1)return {code:found.length?'PERSONA_AMBIGUOUS':'PERSONA_NOT_FOUND'};
   return {profile:found[0]};
 }

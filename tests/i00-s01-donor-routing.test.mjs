@@ -112,6 +112,8 @@ function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=fal
     ...pins,issueBoundPersonaCreatePermit,issueExistingPersonaTagPermit,BLOCK_ROUTE_ID:'__block__',
     browser:{tabs:{query:async({cookieStoreId})=>tabs.get(cookieStoreId)||[]}},
     listActiveProfileIds:async()=>jobs,
+    managementIntegration:{listControlLeases:async()=>[...leased].map(ctx=>({personaUid:
+      Object.values(state.profiles).find(p=>p.containerId===ctx)?.personaUid}))},
     async releaseExit(routeId){effects.push('RELEASE_EXIT:'+routeId);if(releaseFails)throw Error('native host disconnected');
       const had=activeExits.includes(routeId);activeExits.splice(activeExits.indexOf(routeId)>>>0,had?1:0);return {ok:true,released:had};},
     getNativeStatus:async()=>nativeError==='HOST'?{installed:false}:{installed:true,active_exits:activeExits.map(route_id=>({route_id}))},
@@ -248,7 +250,13 @@ test('S01 release adapter D: only an idle, unshared, unleased forwarder is relea
   const job=adapter(bg,{jobs:['firefox-container-7']});job.set(legacyState());
   assert.equal((await job.donor.releaseIdleRoute({personaUid:'persona-legacy-0007',routeId:'mullvad-7'})).code,'RESOURCE_IN_USE');
   const lease=adapter(bg,{leased:new Set(['firefox-container-7'])});lease.set(legacyState());
+  assert.equal((await lease.donor.inspectRouteUse({personaUid:'persona-legacy-0007'})).reason,'RESOURCE_IN_USE',
+    'a control lease is seen BEFORE the pin is withdrawn');
   assert.equal((await lease.donor.releaseIdleRoute({personaUid:'persona-legacy-0007',routeId:'mullvad-7'})).code,'RESOURCE_IN_USE');
+  const rotating=adapter(bg);const rs=legacyState();
+  rs.profiles['firefox-container-7'].rotationRole='source';rotating.set(rs);
+  assert.equal((await rotating.donor.inspectRouteUse({personaUid:'persona-legacy-0007'})).code,'PERSONA_NOT_ACTIVE',
+    'a rotating Persona is never reported missing');
   const shared=adapter(bg);const st=legacyState();
   st.profiles['firefox-container-8']={...st.profiles['firefox-container-7'],containerId:'firefox-container-8',personaUid:'persona-other-0008'};
   shared.set(st);

@@ -39,7 +39,7 @@
 
 **Lifecycle:**
 1. Archive transition (durable first). All new automation stops, because every effect path requires the account to be active and verified. Dispatched operations keep their journals for observation; nothing is cancelled or retried.
-2. `inspectRouteUse` must show a Mullvad route used only by this Persona, with no tabs, jobs or lease. Otherwise the account is `RELEASE_DEFERRED`; the human tab keeps working and the pin stays.
+2. `inspectRouteUse` must show a Mullvad route used only by this Persona, with no tabs, jobs or control lease (all checked before the pin is touched). Otherwise the account is `RELEASE_DEFERRED`; the human tab keeps working and the pin stays.
 3. Release order: withdraw the pin, then ledger `HELD ARCHIVED_RELEASED`, then the donor release, which re-checks inside the fence. Results:
    - `RELEASED`;
    - `RELEASE_DEFERRED` if the route came into use in between;
@@ -50,7 +50,19 @@
 
 **Security note:** a released archived Persona carries no traffic until reactivation, so exit drift on an archived route can never be exercised unobserved. While a release is deferred because a human tab is open, protected browsing continues as in v1.0.
 
-## 3. Evidence
+## 3. Independent review refinements
+
+A second independent review agent audited this correction. It found no route-pin bypass. Each finding below is fixed with a regression test and was mutation-checked.
+
+- **Principal rule:** one cross-account rule (bound, current or history-preserved principal of any other account) now guards `VERIFY`, `BEGIN_UPGRADE` and replacement. A pre-S01 record naming two different principals holds as `IDENTITY_AMBIGUOUS`. A reactivation that cannot upgrade for an identity conflict returns the record to Archive.
+- **Release intent:** the `ARCHIVE` transition itself records `RELEASE_DEFERRED / RELEASE_PENDING`. Upkeep completes the release for every archived account not yet `RELEASED`, including accounts archived under v1.0 and an interrupted Archive. The release always re-reads the account and acts only while it is still archived.
+- **Lease check:** `inspectRouteUse` sees donor control leases (`listControlLeases`), tabs and jobs **before** the pin is withdrawn.
+- **Deferred accounts still in use:** while a release is deferred because a human tab is open, the exit is still observed without rotation; drift onto another account's exit holds it, as in v1.0.
+- **Automatic upgrade:** it never starts tagging while the legacy Persona has a tab, job or lease. Transient holds (helper unavailable, unconfirmed acknowledgement) are retried automatically.
+- **Persona checks:** a Persona mid-rotation is `PERSONA_NOT_ACTIVE`, never "missing", so no duplicate replacement is offered. A donor-tagged Persona that the account record does not name (a replacement whose commit was interrupted) is `BINDING_PERSONA_CONFLICT` until the explicit replacement action adopts it.
+- **Confirm:** confirm accepts a record held under a pre-S01 manual exception (`OVERRIDDEN`).
+
+## 4. Evidence
 
 - **D:** production modules over a fake PersonaMonkey with its own effect log, plus the production adapter extracted from the staged `background.js`. Covers upgrade in place, archived pre-S01 records, principal collision, foreign exits, missing Persona and replacement, a non-Mullvad or unknown-IPv6 legacy route, lost tag acknowledgement and crash resume, idempotency, idle release, lease/tab/job/shared deferral, native loss, upkeep not re-probing, and repeated Archive/Reactivate. Each new rule was mutation-checked.
 - **B:** the installed XPI upgrades a seeded pre-S01 record in place (same ID, Persona, principal and revision). The tagged legacy Persona is blocked until it is pinned. Archive defers on an open tab and releases idle through the real donor fence, which reports `RELEASE_UNCONFIRMED` without a native host.

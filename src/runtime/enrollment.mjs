@@ -7,6 +7,9 @@ import {fail} from './journal.mjs';
 import {normalizeRouteEvidence,exitSetDigest} from './network-ledger.mjs';
 
 const MAX_CANDIDATES=8;
+// Hold codes that a later automatic attempt may clear without operator input.
+const TRANSIENT=new Set(['MULLVAD_LOCAL_SERVICE_UNAVAILABLE','DONOR_SECURITY_UNAVAILABLE',
+  'PERSONA_TAG_UNCONFIRMED','ROUTE_ASSIGN_UNCONFIRMED','NO_ROUTE_CANDIDATES','ENROLLMENT_INTERRUPTED']);
 const rid=prefix=>prefix+crypto.randomUUID().replaceAll('-','');
 // Codes shown to the operator; anything else is summarized generically.
 export const SETUP_MESSAGES=Object.freeze({
@@ -78,6 +81,10 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     const bindingId=account.bindingId;
     const persona=await donor.boundPersona({bindingId});
     if(!persona.ok)return persona;
+    // The donor's tagged Persona must be the one the account record names;
+    // a replacement is adopted only after REPLACE_PERSONA has committed.
+    if(String(persona.personaUid).toLowerCase()!==String(account.personaUid).toLowerCase())
+      return fail('BINDING_PERSONA_CONFLICT');
     const prior=await ledger.binding(bindingId);
     const failed=[];
     if(prior.ok&&prior.binding.routeId===persona.routeId&&!change){
@@ -175,7 +182,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     const got=await accounts.get(accountId);
     if(!got.ok)return got;
     let account=got.account;
-    if(!['WAITING_LOGIN','VERIFICATION_PENDING','REBIND_PENDING','VERIFIED'].includes(account.state)||
+    if(!['WAITING_LOGIN','VERIFICATION_PENDING','REBIND_PENDING','VERIFIED','OVERRIDDEN'].includes(account.state)||
        typeof account.bindingId!=='string')return fail('INVALID_ACCOUNT_STATE');
     const route=await ensurePinnedRoute(account);
     if(!route.ok){await routeStatus(accountId,'HELD',route.code);return route;}
@@ -294,8 +301,12 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     const release=await releaseIdle(out.account);
     return {ok:true,state:'ARCHIVED',release:release.status};
   }
-  async function releaseIdle(account){
-    const accountId=account.accountId;
+  async function releaseIdle(snapshot){
+    const accountId=snapshot.accountId;
+    // Act only on the CURRENT record: a reactivation in between wins.
+    const fresh=await accounts.get(accountId);
+    if(!fresh.ok||fresh.account.state!=='ARCHIVED')return {status:'NOT_ARCHIVED'};
+    const account=fresh.account;
     const set=(status,code=null)=>routeStatus(accountId,status,code).then(()=>({status,code}));
     if(!account.personaUid)return set('RELEASED','NO_PERSONA');
     // Reconcile an earlier unconfirmed release by observation first.
@@ -305,8 +316,16 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     }
     const use=await donor.inspectRouteUse({personaUid:account.personaUid});
     if(!use.ok)return set('RELEASE_DEFERRED',use.code);
-    if(!use.releasable)return use.reason==='NO_ROUTE_RESOURCE'?set('RELEASED','NO_ROUTE_RESOURCE'):
-      set('RELEASE_DEFERRED',use.reason);
+    if(!use.releasable){
+      if(use.reason==='NO_ROUTE_RESOURCE')return set('RELEASED','NO_ROUTE_RESOURCE');
+      // Still carrying human traffic: keep observing its exit (no rotation),
+      // so drift onto another account's exit holds it as in active use.
+      if(use.reason==='RESOURCE_IN_USE'&&typeof account.bindingId==='string'){
+        const observed=await ensurePinnedRoute(account,{rotate:false});
+        if(!observed.ok&&observed.code==='EXIT_DRIFT_CONFLICT')return set('HELD','EXIT_DRIFT_CONFLICT');
+      }
+      return set('RELEASE_DEFERRED',use.reason);
+    }
     // Withdraw network authority before touching the resource; reactivation
     // re-verifies the exit before any traffic resumes.
     if(typeof account.bindingId==='string'){
@@ -331,7 +350,15 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     // A pre-S01 record is upgraded in place through the SAME account.
     if(typeof out.account.bindingId!=='string'){
       const up=await upgrade(accountId);
-      if(!up.ok)return up;
+      if(!up.ok){
+        // An identity conflict cannot be resolved by reactivation: return the
+        // record to Archive rather than leave it active and unusable.
+        if(['IDENTITY_ALREADY_BOUND','IDENTITY_AMBIGUOUS'].includes(up.code)){
+          const now=await accounts.get(accountId);
+          if(now.ok)await accounts.apply({type:'ARCHIVE',accountId,expectedRevision:now.account.revision});
+        }
+        return up;
+      }
     }
     const again=await confirm(accountId,{silent:true});
     if(again.ok)return again;
@@ -367,16 +394,24 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       for(const a of listed.accounts){
         const id=a.accountId;
         if(a.state==='ARCHIVED'){
-          if(['RELEASE_DEFERRED','RELEASE_UNCONFIRMED'].includes(a.route?.status))
-            results.push(await exclusive(id,()=>releaseIdle(a)));
+          // Includes accounts archived before release existed or interrupted
+          // between the Archive commit and the release.
+          if(a.route?.status!=='RELEASED')results.push(await exclusive(id,()=>releaseIdle(a)));
           continue;
         }
         if(a.state==='PREPARING'){
           if(typeof a.bindingId==='string'&&a.setup?.phase!=='HELD')
             results.push(await exclusive(id,()=>prepare(id)));
-        }else if(typeof a.bindingId!=='string'||(a.upgrade&&!['COMPLETE','HELD'].includes(a.upgrade.phase)))
+        }else if(typeof a.bindingId!=='string'||(a.upgrade&&a.upgrade.phase!=='COMPLETE'&&
+            (a.upgrade.phase!=='HELD'||TRANSIENT.has(a.upgrade.code)))){
+          // Never start tagging (which blocks the Persona until pinned) while
+          // a human tab or running work uses it; the operator can still start it.
+          if(!a.upgrade){
+            const use=await donor.inspectRouteUse({personaUid:a.personaUid});
+            if(use.ok&&use.inUse)continue;
+          }
           results.push(await exclusive(id,()=>upgrade(id)));
-        else if(!a.upgrade||a.upgrade.phase==='COMPLETE')
+        }else if(!a.upgrade||a.upgrade.phase==='COMPLETE')
           results.push(await exclusive(id,()=>verifyRoute(id,{automatic:true})));
       }
       return {ok:true,checked:results.length};

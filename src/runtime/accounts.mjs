@@ -16,14 +16,25 @@ const routeStatuses = new Set(['PINNED','HELD','CHECKING','RELEASED','RELEASE_DE
 const upgradePhases = new Set(['START','PERSONA','ROUTE','IDENTITY','COMPLETE','HELD']);
 // The account's original verified principal: explicit, else its current
 // verified identity, else the identity preserved by its latest archive entry.
+// Pre-S01 data naming two different principals is ambiguous and never
+// silently resolved to one of them.
 function originalPrincipal(a) {
   if (a.boundPrincipal) return a.boundPrincipal;
+  const seen = new Set();
   if (a.identity?.source === 'GUARDED_SESSION_READBACK' && digest(a.identity.principalFingerprint))
-    return a.identity.principalFingerprint;
-  const archived = [...(Array.isArray(a.history) ? a.history : [])].reverse()
-    .find(h => h?.priorIdentity?.source === 'GUARDED_SESSION_READBACK' &&
-      digest(h.priorIdentity.principalFingerprint));
-  return archived ? archived.priorIdentity.principalFingerprint : null;
+    seen.add(a.identity.principalFingerprint);
+  for (const h of Array.isArray(a.history) ? a.history : [])
+    if (h?.priorIdentity?.source === 'GUARDED_SESSION_READBACK' && digest(h.priorIdentity.principalFingerprint))
+      seen.add(h.priorIdentity.principalFingerprint);
+  if (seen.size > 1) return 'AMBIGUOUS';
+  return seen.size ? [...seen][0] : null;
+}
+// One cross-account rule for every path that binds a principal: any other
+// account's bound, current or historically preserved principal is taken.
+function principalHeldByOther(all, accountId, fingerprint) {
+  return all.some(a => a && a.accountId !== accountId &&
+    (a.boundPrincipal === fingerprint || a.identity?.principalFingerprint === fingerprint ||
+     (Array.isArray(a.history) && a.history.some(h => h?.priorIdentity?.principalFingerprint === fingerprint))));
 }
 function withHistory(previous,entry) {
   return [...(Array.isArray(previous.history)?previous.history:[]),entry].slice(-32);
@@ -57,6 +68,8 @@ export function transitionAccount(previous, action, all = []) {
     if (!active(previous)) return fail('ALREADY_ARCHIVED');
     return {ok:true,account:{...previous,state:'ARCHIVED',
       identity:null, override:null, revision:previous.revision+1,
+      // Durable release intent: upkeep completes it even after a crash.
+      route:{status:'RELEASE_DEFERRED',code:'RELEASE_PENDING',at:null,routeId:previous.route?.routeId ?? null},
       history:withHistory(previous,{event:'ARCHIVED',revision:previous.revision+1,
         priorPersonaUid:previous.personaUid,priorIdentity:previous.identity,
         priorOverride:previous.override})},event:'ARCHIVED'};
@@ -118,8 +131,8 @@ export function transitionAccount(previous, action, all = []) {
     if (!uid(previous.personaUid) || !isSafeId(action.bindingId) ||
         all.some(a => a?.bindingId === action.bindingId)) return fail('INVALID_BINDING');
     const principal = originalPrincipal(previous);
-    if (principal && all.some(a => a && a.accountId !== previous.accountId &&
-        (a.boundPrincipal === principal || a.identity?.principalFingerprint === principal)))
+    if (principal === 'AMBIGUOUS') return fail('IDENTITY_AMBIGUOUS');
+    if (principal && principalHeldByOther(all, previous.accountId, principal))
       return fail('IDENTITY_ALREADY_BOUND');
     return {ok:true,account:{...previous,bindingId:action.bindingId,boundPrincipal:principal,
       upgrade:{phase:'START',code:null,priorExitHistory:'UNOBSERVED'}},event:'UPGRADE_STARTED'};
@@ -135,7 +148,7 @@ export function transitionAccount(previous, action, all = []) {
       return fail('PERSONA_ALREADY_BOUND');
     return {ok:true,account:{...previous,personaUid:action.personaUid,state:'REBIND_PENDING',
       bindingVersion:previous.bindingVersion+1,identity:null,override:null,
-      boundPrincipal:originalPrincipal(previous),revision:previous.revision+1,
+      boundPrincipal:previous.boundPrincipal,revision:previous.revision+1,
       history:withHistory(previous,{event:'PERSONA_REPLACED',revision:previous.revision+1,
         priorPersonaUid:previous.personaUid,priorIdentity:previous.identity})},event:'PERSONA_REPLACED'};
   }
@@ -177,11 +190,7 @@ export function transitionAccount(previous, action, all = []) {
         return fail('IDENTITY_CHANGED');
       // Any other account's principal (including archived and pre-S01
       // records, and identities preserved in history) is never reused.
-      if (all.some(a => a && a.accountId !== action.accountId &&
-          (a.boundPrincipal === proof.principalFingerprint ||
-           a.identity?.principalFingerprint === proof.principalFingerprint ||
-           (Array.isArray(a.history) && a.history.some(h =>
-             h?.priorIdentity?.principalFingerprint === proof.principalFingerprint)))))
+      if (principalHeldByOther(all, action.accountId, proof.principalFingerprint))
         return fail('IDENTITY_ALREADY_BOUND');
       identity={principalFingerprint:proof.principalFingerprint,observationId:proof.observationId,
         source:'GUARDED_SESSION_READBACK',bindingVersion};
