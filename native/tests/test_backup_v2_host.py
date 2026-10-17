@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from backup_stream_v2 import BUFFER
@@ -172,6 +173,55 @@ class TestHost(unittest.TestCase):
         self.assertEqual(result["code"],"BACKUP_ROOT_UNSAFE")
         self.assertFalse((source/"backup-root").exists(),
                          "no side effects may occur via an ancestor symlink")
+
+    def test_f1_duplicate_begin_releases_lock_same_native_connection(self):
+        self.assertTrue(self.begin(b"ABCD")["ok"])
+        self.host.close()
+        self.host=V2ArchiveHost(self.root,lambda:PASS)
+        self.assertEqual(self.begin(b"ABCD")["code"],"BACKUP_RUN_ALREADY_USED")
+        self.assertIsNone(self.host._export_lock)
+        different="s02_"+"a"*32
+        answer=self.request("export.begin",runId=different,cutDigest=CUT,
+                            expectedPlaintextBytes=5,keyRef="portable-recovery")
+        self.assertTrue(answer["ok"],answer)
+        self.assertEqual(self.request("archive.inspect",runId=RUN)["state"],
+                         "OPEN_OBSERVED")
+        self.assertEqual(self.request("archive.inspect",runId=different)["state"],
+                         "OPEN_OBSERVED")
+
+    def test_f1_vault_unavailable_releases_lock_without_creating_ledger(self):
+        values=iter([None,PASS])
+        self.host.vault_get=lambda:next(values)
+        self.assertEqual(self.begin(b"ABC")["code"],"BACKUP_VAULT_UNAVAILABLE")
+        self.assertIsNone(self.host._export_lock)
+        self.assertFalse((self.root/(RUN+".ledger")).exists())
+        alternate="s02_"+"a"*32
+        answer=self.request("export.begin",runId=alternate,cutDigest=CUT,
+                            expectedPlaintextBytes=3,keyRef="portable-recovery")
+        self.assertTrue(answer["ok"],answer)
+        self.assertFalse((self.root/(RUN+".encrypted")).exists())
+
+    def test_f1_file_open_error_keeps_possible_journal_but_releases_lock(self):
+        # Actual writer creation/open failure after durable CREATE_POSSIBLE.
+        original=self.host
+        with patch("backup_v2_host.EncryptedWriter",
+                   side_effect=OSError("injected disk open failure")):
+            result=self.begin(b"ABC")
+        self.assertEqual(result["code"],"BACKUP_NATIVE_UNAVAILABLE")
+        self.assertIsNone(original._export_lock)
+        self.assertIsNone(original.current)
+        self.assertIsNone(original.writer)
+        self.assertEqual(self.request("archive.inspect",runId=RUN)["state"],
+                         "CREATE_POSSIBLE")
+        self.assertFalse((self.root/(RUN+".encrypted")).exists())
+        distinct="s02_"+"a"*32
+        answer=self.request("export.begin",runId=distinct,cutDigest=CUT,
+                            expectedPlaintextBytes=3,keyRef="portable-recovery")
+        self.assertTrue(answer["ok"],answer)
+        self.assertEqual(self.request("archive.inspect",runId=RUN)["state"],
+                         "CREATE_POSSIBLE")
+        self.assertFalse(self.request("export.append",runId=RUN,sequence=0,
+            bytes="QQ==",sha256=hashlib.sha256(b"A").hexdigest())["ok"])
 
     def test_concurrent_native_process_contexts_have_exactly_one_writer(self):
         payload=make_payload()
