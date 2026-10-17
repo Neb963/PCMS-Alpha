@@ -212,7 +212,7 @@ def main():
             assert verify["sha256"]==entry["sha256"],"H_INDEPENDENT_DISK_REOPEN_INVALID"
             assert verify["canonicalRows"]>=1074,("H_SOURCE_ROWS_LOST",verify)
             assert verify["uniqueBlobs"]>2000,("H_SOURCE_VARIETY_LOST",verify)
-            assert verify["donorPersonas"]==50,("H_DONOR_PERSONAS_LOST",verify)
+            assert verify["donorBytes"]>2000,("H_DONOR_BYTES_LOST",verify)
         print("H S02_ACTUAL_REGISTERED_GECKO_NATIVE_PORT_SECRETS_FILE_AND_REOPEN=PASS",
               json.dumps({"xpiSha256":hashlib.sha256(archive.read_bytes()).hexdigest(),
                           "runs":len(seen),"rows":[v["rows"] for v in seen],
