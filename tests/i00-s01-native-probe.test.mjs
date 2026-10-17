@@ -28,6 +28,9 @@ def fixed(relay,port,request):
   assert request['max_redirects']==0 and request['method']=='GET'
   assert not request['headers']
   assert request['url'] in (V4_URL,V6_URL)
+  assert request['network_policy']['domain_mode']=='allowlist'
+  assert request['network_policy']['block_local_network'] is True
+  assert request['connect_policy']==dict(page_url=request['url'],rules=[])
   ip='45.66.77.88' if request['url']==V4_URL else '2a01:4f8:1c1c::1'
   return dict(ok=True,status=200,final_url=request['url'],
     body_base64=base64.b64encode(json.dumps({'ip':ip}).encode()).decode())
