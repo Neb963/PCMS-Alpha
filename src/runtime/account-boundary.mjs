@@ -105,7 +105,8 @@ export function createAccountBoundary(api,{
     const p=message.params||{};
     try {
       const g=guard();
-      if(!g)return fail('GUARD_NOT_READY');
+      // Local records are readable while PersonaMonkey is still starting.
+      if(!g&&message.type!=='LIST_ACCOUNTS')return fail('GUARD_NOT_READY');
       if(message.type==='LIST_PERSONAS')return {ok:true,personas:await g.listAvailablePersonas()};
       if(message.type==='LIST_ROUTES')return {ok:true,routes:await g.listProtectedRoutes()};
       if(message.type==='WITNESS_STATUS'){

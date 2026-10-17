@@ -654,11 +654,11 @@ def s01_add_account_profile(browser, archive, folder):
         uuid=addons_uuid(profile)
         call('POST',f'/session/{session}/url',{'url':f'moz-extension://{uuid}/pcms/index.html#accounts'})
         wait_donor_ready(session)
-        for _ in range(60):
+        for _ in range(120):
             ui=execute(session,"return {add:document.getElementById('pcms-add-account')?.disabled,legacy:!!document.getElementById('pcms-persona-picker')}")
             if ui.get('add') is False: break
             time.sleep(.25)
-        assert ui=={'add':False,'legacy':False},ui
+        assert ui=={'add':False,'legacy':False},(ui,account_command(session,{'type':'LIST_ACCOUNTS'}))
         print('B S01_ADD_ACCOUNT_CONTROL_ENABLED_NO_MANUAL_PERSONA_PICKER=PASS',flush=True)
         started=account_command(session,{'type':'ADD_ACCOUNT'})
         assert started.get('ok') is True,started

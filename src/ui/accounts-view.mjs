@@ -179,4 +179,11 @@ refresh.addEventListener('click',async()=>{
   catch{report('Account read unavailable. Actions remain disabled.');held=true;draw();}
 });
 try{await read();report('Account state loaded.');}
-catch{held=true;draw();report('Account read unavailable. No actions enabled.');}
+catch{
+  held=true;draw();report('Account state not available yet; retrying…');
+  // Background may still be starting after a browser restart or install.
+  const retry=async(n)=>{try{await read();report('Account state loaded.');}
+    catch{if(n>0)setTimeout(()=>void retry(n-1),2000);
+      else report('Account read unavailable. No actions enabled.');}};
+  setTimeout(()=>void retry(30),2000);
+}
