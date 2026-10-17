@@ -194,6 +194,7 @@ def main():
         uuid=harness.addons_uuid(profile)
         harness.call("POST",f"/session/{session}/url",
              {"url":f"moz-extension://{uuid}/pcms/index.html"})
+        # Source-heavy AES/IndexedDB/native two-pass work exceeds the W3C\n        # default 30s script deadline; set only this disposable session.\n        harness.call("POST",f"/session/{session}/timeouts",\n             {"script":240000},timeout=15)
         result=harness.call("POST",f"/session/{session}/execute/async",
              {"script":native_script(),"args":[]},timeout=180)
         assert result.get("ok") is True,result
