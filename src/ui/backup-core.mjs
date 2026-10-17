@@ -87,6 +87,12 @@ export function deserializeClone(value,depth=0){
       requireValid(typeof value.data==='string'&&Number.isFinite(Date.parse(value.data)),'BACKUP_INVALID_SCHEMA');
       return new Date(value.data);
     }
+    // Source-complete v2 may encode negative zero explicitly because JSON
+    // renders -0 as 0. Legacy v1 never emits this tag and remains unchanged.
+    if(value[token]==='NumberNegativeZero'){
+      requireValid(Object.keys(value).length===1,'BACKUP_INVALID_SCHEMA');
+      return -0;
+    }
     requireValid(value[token]==='Bytes'&&typeof value.kind==='string','BACKUP_INVALID_SCHEMA');
     const bytes=unbase64(value.data,MAX_ARCHIVE_BYTES);
     if(value.kind==='ArrayBuffer')return bytes.buffer;
