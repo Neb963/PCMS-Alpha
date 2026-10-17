@@ -16,8 +16,13 @@ import tempfile
 import struct
 import sys
 
-from backup_stream_v2 import (BackupError, EncryptedWriter, verify_two_pass, BUFFER,
-                              _fd_read, _read_header, _key, TAG_BYTES, HEADER)
+# Support both the real standalone native executable and importable test module.
+try:
+    from .backup_stream_v2 import (BackupError, EncryptedWriter, verify_two_pass, BUFFER,
+                                   _fd_read, _read_header, _key, TAG_BYTES, HEADER)
+except ImportError:
+    from backup_stream_v2 import (BackupError, EncryptedWriter, verify_two_pass, BUFFER,
+                                  _fd_read, _read_header, _key, TAG_BYTES, HEADER)
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.exceptions import InvalidTag
 
