@@ -41,7 +41,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { createProtectedAdmission } from "./pcms/protected-admission.mjs";\nimport { installDonorAdmissionFence } from "./pcms/pcms-donor-fence.mjs";\nimport { pcmsReadRuntimeWitness } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain } from "./pcms/perchance-existing.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { createProtectedAdmission } from "./pcms/protected-admission.mjs";\nimport { installDonorAdmissionFence } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain } from "./pcms/perchance-existing.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -555,15 +555,6 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   donorManager=substituteOnce(donorManager,"    assertSecurityAuthorization(sanitized, authorization);\n    const saved = await save(sanitized);","    assertSecurityAuthorization(sanitized, authorization);\n    beforeDonorStateCommit(cache, sanitized);\n    const saved = await save(sanitized);","revocation before async save");
   donorManager=substituteOnce(donorManager,"      cache = incoming;\n      revision += 1;","      try { beforeDonorStateCommit(cache, incoming); }\n      catch { await save(cache); return {state:snapshot(cache),accepted:false,revision,bootId}; }\n      cache = incoming;\n      revision += 1;","external storage rollback");
   await writeFile(donorManagerPath,donorManager);
-  // Observational clock request stays on the donor's EXISTING native
-  // connection. The operator's native installation is never edited by build.
-  const nativeLibPath=path.join(stage,'lib/mullvad-native.js');
-  let nativeLib=await readFile(nativeLibPath,'utf8');
-  nativeLib=substituteOnce(nativeLib,
-    'export function releaseExit(routeId) {',
-    'export function pcmsReadRuntimeWitness() { return nativeRequest("pcms.runtime_witness",{},6000); }\nexport function releaseExit(routeId) {',
-    'S01 read-only native clock request');
-  await writeFile(nativeLibPath,nativeLib);
   // S01 donor-only request gate: no committed observer yet means all marked
   // managed Personas remain BLOCKED, never implicitly Direct.
   bg = substituteOnce(bg, "\nasync function handleProxyRequest(details) {", "\nconst pcmsAdmission = createProtectedAdmission({\n  donorBootId: 'boot_' + crypto.randomUUID().replaceAll('-', ''),\n  readCommitted: () => ({allow:false})\n});\nasync function handleProxyRequest(details) {", "S01 private donor admission");
@@ -595,7 +586,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   bg = substituteOnce(bg, "  if (extensionRequest) {\n    if (isRouteTestFetchUrl(details.url)) {", "  if (extensionRequest) {\n    if(isPcmsProviderUrl(details.url)){\n      recordBlock(details,'pcms-unbound-extension-provider');return {cancel:true};\n    }\n    if (isRouteTestFetchUrl(details.url)) {", "S01 extension account blocking bypass denied");
   bg = substituteOnce(bg,"  readCommitted: () => ({allow:false})\n});\nasync function handleProxyRequest(details) {","  readCommitted: () => ({allow:false})\n});\ninstallDonorAdmissionFence(pcmsAdmission);\nasync function handleProxyRequest(details) {",'install donor synchronous revoker');
   bg = substituteOnce(bg,"attachPcmsGuard({\n  initialize, securityState,\n  shared:",
-  "attachPcmsGuard({\n  initialize, securityState,\n  readRuntimeWitness:()=>pcmsReadRuntimeWitness(),\n  shared:",
+  "attachPcmsGuard({\n  initialize, securityState,\n  readRuntimeWitness:()=>nativeRequest('pcms.runtime_witness',{},6000),\n  shared:",
   'S01 guard native witness binding');
   // Preserve donor's normalized durable binding tag in the BUILD COPY only.
   const donorStoragePath = path.join(stage, 'lib/storage.js');
