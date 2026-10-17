@@ -11,6 +11,6 @@ test('S02 host effects and lost ACK are observable independent of its in-memory 
     timeout:60000,maxBuffer:2*1024*1024});
   assert.equal(run.error,undefined);
   assert.equal(run.status,0,run.stderr?.slice(-3000));
-  assert.match(run.stderr,/Ran 14 tests in /);
+  assert.match(run.stderr,/Ran 15 tests in /);
   assert.match(run.stderr,/\nOK\n/);
 });
