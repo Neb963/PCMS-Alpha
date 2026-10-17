@@ -2887,16 +2887,24 @@ def main():
                     }
                   });
                   const first=await runner.tick(),second=await runner.tick();
+                  const manual=await runner.manualV2Candidate();
+                  const disallowed=auto.createAutoRunner(browser,{
+                    reviewedV2:async()=>false});
+                  const held=await disallowed.manualV2Candidate();
                   const journal=(await stored.read()).state;
                   done({ok:first.code==='BACKUP_V2_FULL_RECOVERY_PENDING'&&
                     second.code==='DOWNLOAD_OUTCOME_UNKNOWN'&&
-                    calls.length===1&&calls[0]==='s02_'+run&&
+                    manual.ok===true&&manual.state==='AUTHENTICATED_INVENTORY_ONLY'&&
+                    manual.retentionSuccess===false&&
+                    held.code==='BACKUP_V2_REVIEW_REQUIRED'&&
+                    calls.length===2&&calls[0]==='s02_'+run&&
+                    calls[1]==='s02_'+run&&
                     journal.status==='HELD_UNCERTAIN'&&
                     journal.archives.length===0&&
                     journal.lastSuccessDay===-1&&
                     journal.active?.status==='DISPATCH_POSSIBLE',
                     first:first.code,second:second.code,
-                    count:calls.length,ledgerStatus:journal.status});
+                    count:calls.length,manual:manual.state,ledgerStatus:journal.status});
                   db.close();
                 })().catch(e=>done({ok:false,error:String(e)}));"""
                 auto_result=call('POST',f'/session/{after}/execute/async',
