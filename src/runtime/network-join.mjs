@@ -2,7 +2,7 @@
 // are supplied ONLY by the private same-XPI background composition.
 // There is no page/port command and no authority inferred from a UI result.
 import {isSafeId,fail} from './journal.mjs';
-import {validAdmissionKey} from './protected-admission.mjs';
+import {validAdmissionKey,admissionKeyOf} from './protected-admission.mjs';
 import {proposeExitReservation,createExitLedger} from './network-ledger.mjs';
 
 const KEY_PREFIX='network:s01:join:';
@@ -36,7 +36,10 @@ export function createCommittedNetworkObserver({onInvalidate}={}){
    {allow:true,committed:record}:{allow:false,reason:'RESERVATION_MISMATCH'};
  }
  function publish(record){
-  if(failed||!validAdmissionKey(record))return false;
+  if(failed||!validAdmissionKey(admissionKeyOf(record))||
+     record.authority!=='BOUND_ACCOUNT_NETWORK'||
+     !Number.isSafeInteger(record.publicationSafetyGeneration)||
+     record.publicationSafetyGeneration<0||!positive(record.snapshotValidUntil))return false;
   committed.set(record.bindingId,Object.freeze({...record}));
   return true;
  }
