@@ -1,4 +1,5 @@
 // I06 immutable supply planning and conservative effect receipts.
+import {isI17Quarantined,I17_QUARANTINE_CODE} from './legacy-quarantine.mjs';
 // Pure logic: neither a UI claim nor a provider response is authorization.
 export const SUPPLY_SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const ID=/^[a-zA-Z0-9_-]{8,100}$/;
@@ -33,7 +34,7 @@ export function freezeSupply({batchId,accountId,personaUid,
     const raw=typeof slug==='string'?slug:'';
     const duplicate=seen.has(raw.toLowerCase());
     seen.add(raw.toLowerCase());
-    const issue=slugIssue(raw)|| (duplicate?'DUPLICATE_SLUG':null);
+    const issue=slugIssue(raw)||(isI17Quarantined({batchId,slug:raw})?I17_QUARANTINE_CODE:null)||(duplicate?'DUPLICATE_SLUG':null);
     return {itemId:batchId+'_'+String(index).padStart(3,'0'),
       index,requestedSlug:raw,accountId,personaUid,accountRevision,bindingVersion,
       state:issue?'REJECTED':'FROZEN',reason:issue,revision:1,

@@ -4,6 +4,8 @@ import '../lib/recovery-bootstrap.js';
 import './wake.mjs';
 // Independent PCMS journal/command listener; it never controls donor recovery.
 import './command-boundary.mjs';
+// S00 effect-free coordinator intake; no remote operations or migration.
+import './coordinator-boundary.mjs';
 // I03 listeners are registered in the synchronous entry evaluation path.
 import './account-boundary.mjs';
 // I04 read-only inventory and durable local observation registration.
