@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {attachPcmsBackupDonor,waitForPcmsBackupDonor} from '../src/runtime/backup-auto-donor.mjs';
-import {BACKUP_DONOR_PORT,createDonorSnapshotPortHandler} from '../src/runtime/backup-auto-boundary.mjs';
+import {BACKUP_DONOR_PORT,createDonorSnapshotPortHandler} from '../src/runtime/backup-donor-port.mjs';
 
 const api={runtime:{id:'persona-route-manager@local',
   getURL:path=>'moz-extension://s02-test/'+path}};
