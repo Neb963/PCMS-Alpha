@@ -1,3 +1,5 @@
+// S02 source recovery: audit all retained exact source bytes before a backup export.
+import {auditSourceClosure} from './backup-source-closure.mjs';
 // I08: offline-verifiable, always-encrypted integrated PCMS + donor portable archive.
 // No persistence, provider calls, filesystem reads, imports or activation authority.
 export const FORMAT='pcms-alpha-integrated-backup';
@@ -131,6 +133,7 @@ const outerKeys=['format','version','encryption','sealedPayload'];
 export async function encodeIntegrated({pcms,donorEnvelope,passphrase,createdAt=new Date().toISOString(),appVersion=''}={}){
   requireValid(typeof passphrase==='string'&&passphrase.length>=12&&codec.encode(passphrase).length<=4096,'BACKUP_PASSPHRASE_REQUIRED');
   validatePcmsSnapshot(pcms);
+  const sourceAudit=await auditSourceClosure(pcms);
   requireValid(typeof donorEnvelope==='string'&&donorEnvelope.length<=MAX_ARCHIVE_BYTES,'BACKUP_DONOR_REQUIRED');
   let donor;try{donor=JSON.parse(donorEnvelope)}catch{throw Error('BACKUP_DONOR_INVALID');}
   requireValid(donor.format==='personamonkey-backup'&&donor.formatVersion===1&&
@@ -148,7 +151,10 @@ export async function encodeIntegrated({pcms,donorEnvelope,passphrase,createdAt=
     encryption:{scheme:'PBKDF2-SHA256/AES-256-GCM',iterations:250000,salt:base64(salt),iv:base64(iv)},
     sealedPayload:base64(encrypted)});
   return {text:envelope,bytes:codec.encode(envelope),sha256:await digest(envelope),
-    inventory:{pcmsRows:DB_STORES.reduce((n,store)=>n+pcms.stores[store].length,0)}};
+    inventory:{pcmsRows:DB_STORES.reduce((n,store)=>n+pcms.stores[store].length,0),
+      auditedSourceManifests:sourceAudit.manifests,
+      auditedUniqueSourceBytes:sourceAudit.uniqueBytes,
+      recoveryTier:'IN_MEMORY_ONLY'}};
 }
 export async function decodeIntegrated(text,passphrase,{decodeDonor}={}){
   requireValid(typeof text==='string'&&codec.encode(text).length<=MAX_ARCHIVE_BYTES,'BACKUP_TOO_LARGE');
