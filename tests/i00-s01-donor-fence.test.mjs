@@ -52,7 +52,7 @@ test('S01 donor fence revokes synchronously before async write; failed write can
 
 test('S01 GB01: opaque donor stage permit tags only an originally BLOCK-routed never-admitted Persona',()=>{
  const before=state(),target=before.profiles['firefox-container-001'];
- target.routeId='block';target.pcmsBindingId=null;
+ target.routeId='block';target.pcmsBindingId=null;target.managed=true;
  const after=structuredClone(before);
  after.profiles['firefox-container-001'].pcmsBindingId='binding_001';
  assert.equal(bindingTagChanges(before,after).code,'PCMS_BINDING_TAG_MUTATION_HELD');
