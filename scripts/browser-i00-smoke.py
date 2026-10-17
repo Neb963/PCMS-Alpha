@@ -702,6 +702,12 @@ def main():
                 assert personas.get('ok') is True and isinstance(personas.get('personas'),list),personas
                 records=account_command(after,{'type':'LIST_ACCOUNTS'})
                 assert records.get('ok') is True and records.get('accounts')==[],records
+                network=account_command(after,{'type':'NETWORK_STATUS'})
+                assert network.get('ok') is True,network
+                assert network.get('revision')==0 and network.get('ownedExits')==0,network
+                assert network.get('reservations')==0,network
+                assert network.get('admission')=='HELD_E01_E04',network
+                print('B S01_INSTALLED_CANONICAL_EXIT_LEDGER_READONLY_AND_ROUTE_HOLD=PASS',flush=True)
                 denied_enroll=account_command(after,{'type':'ENROLL','params':{
                     'accountId':'fixture_forbidden_a01','personaUid':'persona-aaaa-0001','expectedRevision':0}})
                 assert denied_enroll.get('code')=='PERSONA_NOT_AVAILABLE',denied_enroll
