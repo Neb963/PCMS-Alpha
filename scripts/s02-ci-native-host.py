@@ -156,6 +156,84 @@ def native_script():
       }finally{db.close();}
     })().then(done).catch(e=>done({ok:false,error:String(e)}));"""
 
+def fresh_script(run_id):
+    # This starts in a distinct Firefox profile with no original browser
+    # backup ledger. All reads use the registered OS native host.
+    return r"""const done=arguments[arguments.length-1];
+    (async()=>{
+      const runId=RUN_ID;
+      const qualified=await import('./restore-v2-qualified.mjs');
+      const native=await import('./backup-v2-session.mjs');
+      const gateModule=await import('./restore-gate.mjs');
+      const core=await import('./backup-core.mjs');
+      const journal=await import('./journal.mjs');
+      const idb=await import('./restore-idb.mjs');
+      const db=await journal.openCanonicalDatabase();
+      try{
+        const current=await core.snapshotCanonical(db);
+        if(current.stores.meta.some(r=>r.key==='backup:v2:'+runId))
+          throw Error('H_FRESH_BROWSER_LEDGER_NOT_EMPTY');
+        const port=native.createV2NativeConnection(browser);
+        let receipt,disk;
+        try{
+          receipt=await port.exchange({action:'archive.inspect',runId});
+          disk=await port.exchange({action:'backup.verify',runId,
+            keyRef:'portable-recovery'});
+        }finally{port.close();}
+        if(receipt?.state!=='RECOVERY_VERIFIED'||disk?.ok!==true||
+           disk.sha256!==receipt.ciphertextSha256)
+          throw Error('H_FRESH_QUALIFIED_NATIVE_FILE_REQUIRED');
+        const guard=gateModule.createRestoreGate(browser.storage.local);
+        // CI-only surrogate plan identity, not a production operator approval.
+        // This verifies the real durable I16 hold and never permits activation.
+        const plan=await core.digest('CI_DISPOSABLE_INACTIVE_PLAN:'+runId);
+        await guard.begin({planSha256:plan,reviewedPlanSha256:plan,
+          destinationSha256:await core.digest(JSON.stringify(current)),
+          archiveSha256:receipt.ciphertextSha256,
+          checkpointSha256:disk.sha256,checkpointTier:3,fresh:true});
+        const accountChoices=Object.fromEntries(Array.from({length:50},
+          (_,i)=>['s02-ci-'+i,'INCLUDE_INACTIVE']));
+        const restored=await qualified.prepareQualifiedV2FreshProfile({
+          api:browser,runId,currentPcms:current,mode:'replace',
+          accountChoices,guard});
+        const payload=restored.prepared.donor;
+        const candidate=restored.prepared.prepared;
+        const last=candidate.stores.meta.find(r=>
+          r.key==='stage-history:s02-ci-1023');
+        const exact=last?.value?.record?.candidate;
+        const raw=exact?.blobs.find(f=>f.path==='main.pjs');
+        if(restored.activation!=='OFF'||restored.providerEffects!=='OFF'||
+           restored.donorApply!=='NOT_AUTHORIZED'||
+           payload.personas?.length!==50||
+           payload.scripts?.length!==50||
+           Object.keys(payload.cookies||{}).length!==50||
+           candidate.stores.meta.length<1074||
+           atob(raw?.base64||'')!=='output="h-source-1023";')
+          throw Error('H_FRESH_INACTIVE_SOURCE_OR_DONOR_MISMATCH');
+        const saved=await idb.applyCanonicalSnapshot(db,candidate,{
+          assertHeld:async()=>(await guard.inspect()).held,
+          expectedBefore:current});
+        const independent=await core.snapshotCanonical(db);
+        const final=independent.stores.meta.find(r=>
+          r.key==='stage-history:s02-ci-1023');
+        const held=await guard.inspect();
+        if(saved.source!=='INDEPENDENT_READBACK'||
+           final?.value?.record?.candidate?.blobs?.length!==3||
+           held.held!==true||held.activation!=='OFF')
+          throw Error('H_FRESH_CANONICAL_READBACK_OR_HOLD_MISSING');
+        const repeated=await native.createV2NativeConnection(browser)
+          .exchange({action:'archive.inspect',runId});
+        if(repeated?.state!=='RECOVERY_VERIFIED'||
+           repeated.ciphertextSha256!==receipt.ciphertextSha256)
+          throw Error('H_NATIVE_AFTER_FRESH_RESTORE_CHANGED');
+        return {ok:true,rows:independent.stores.meta.length,
+          donorPersonas:payload.personas.length,
+          sourceManifests:restored.prepared.sourceAudit?.manifests,
+          held:held.held,controller:held.controller,activation:held.activation,
+          nativeRunId:runId};
+      }finally{db.close();}
+    })().then(done).catch(e=>done({ok:false,error:String(e)}));""".replace("RUN_ID",json.dumps(run_id))
+
 def main():
     assert len(sys.argv)==2,"usage: s02-ci-native-host.py build/pcms-alpha-i00.xpi"
     archive=(ROOT/sys.argv[1]).resolve()
@@ -217,6 +295,33 @@ def main():
             assert verify["canonicalRows"]>=1074,("H_SOURCE_ROWS_LOST",verify)
             assert verify["uniqueBlobs"]>2000,("H_SOURCE_VARIETY_LOST",verify)
             assert verify["donorBytes"]>2000,("H_DONOR_BYTES_LOST",verify)
+        print("H S02_NATIVE_50_PERSONAS_1024_SOURCE_ARCHIVE_ON_DISK=PASS",
+              json.dumps({"runId":seen[0]["runId"],"rows":seen[0]["rows"]}),
+              flush=True)
+        # A genuinely new installed Firefox profile has no browser v2 ledger.
+        # Native inspection/readback crosses real Firefox + OS host + disk;
+        # canonical restoration writes only the isolated profile under I16 hold.
+        harness.close(session);session=None
+        profile2=home/"firefox-fresh"
+        profile2.mkdir()
+        (profile2/"user.js").write_text('user_pref("xpinstall.signatures.required", false);\n')
+        session=harness.open_session(browser,profile2)
+        assert harness.call("POST",f"/session/{session}/moz/addon/install",
+            {"path":str(archive),"temporary":False},timeout=45)==ADDON_ID
+        harness.close(session);session=None
+        session=harness.open_session(browser,profile2)
+        fresh_uuid=harness.addons_uuid(profile2)
+        harness.call("POST",f"/session/{session}/url",
+            {"url":f"moz-extension://{fresh_uuid}/pcms/index.html"})
+        harness.call("POST",f"/session/{session}/timeouts",
+            {"script":240000},timeout=15)
+        restored=harness.call("POST",f"/session/{session}/execute/async",
+            {"script":fresh_script(seen[0]["runId"]),"args":[]},timeout=220)
+        assert restored.get("ok") is True,("H_FRESH_NATIVE_RECOVERY",restored)
+        assert restored.get("donorPersonas")==50 and restored.get("rows",0)>=1074
+        assert restored.get("activation")=="OFF" and restored.get("held") is True
+        print("H S02_ACTUAL_NATIVE_DISK_TO_FRESH_PROFILE_CANONICAL_INACTIVE_RESTORE=PASS",
+              json.dumps(restored),flush=True)
         print("H S02_ACTUAL_REGISTERED_GECKO_NATIVE_PORT_SECRETS_FILE_AND_REOPEN=PASS",
               json.dumps({"xpiSha256":hashlib.sha256(archive.read_bytes()).hexdigest(),
                           "runs":len(seen),"rows":[v["rows"] for v in seen],
