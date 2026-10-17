@@ -897,7 +897,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
     'release-core.mjs','release-store.mjs','release-boundary.mjs','perchance-release.mjs',
     'existing-update-core.mjs','existing-update-store.mjs','existing-update-boundary.mjs','perchance-existing.mjs',
     'backup-auto-donor.mjs','backup-donor-port.mjs','restore-donor.mjs','restore-boundary.mjs','restore-reconcile.mjs','backup-auto-core.mjs','backup-auto-store.mjs','backup-auto-download.mjs',
-    'backup-auto-retention.mjs','backup-auto-export.mjs','backup-v2-verify.mjs','backup-auto-run.mjs','backup-auto-boundary.mjs','restore-v2-candidate.mjs','restore-v2-qualified.mjs',
+    'backup-auto-retention.mjs','backup-auto-export.mjs','backup-v2-verify.mjs','backup-auto-run.mjs','backup-auto-boundary.mjs','restore-v2-candidate.mjs',
     'refresher-effect-core.mjs','refresher-core.mjs','refresher-store.mjs','refresher-boundary.mjs','perchance-monitor.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }
