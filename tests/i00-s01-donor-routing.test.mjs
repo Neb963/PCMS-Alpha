@@ -37,7 +37,7 @@ function harness(bg,{managed=true,admitted=false,mode='proxy',interrupt=false,ex
   buildProxyInfo:()=>({type:'socks',host:'127.0.0.1',port:1080}),
   isPcmsProviderUrl:vm.runInNewContext(bg.slice(
     bg.indexOf('function isPcmsProviderUrl(raw) {'),
-    bg.indexOf('const pcmsAdmission = createProtectedAdmission({'))+'\nisPcmsProviderUrl;'),
+    bg.indexOf('const pcmsAdmission = createProtectedAdmission({'))+'\nisPcmsProviderUrl;', {URL}),
   proxyInfoMatches:()=>true,directInfoIsDirect:()=>true,
   mullvadRuntime:{resolve:async()=>{resolveCalls++;if(interrupt)grant.invalidateNow({bindingId:key.bindingId});return fakeRoute;}}};
  const proxy=isolateFunction(bg,'async function handleProxyRequest(details) {','function recordBlock(details, reason) {',
