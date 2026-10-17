@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
 import {DB_STORES} from '../src/ui/backup-core.mjs';
-import {prepareQualifiedV2FreshProfile} from '../src/runtime/restore-v2-qualified.mjs';
+import {prepareQualifiedV2FreshProfile} from '../src/ui/restore-v2-qualified.mjs';
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
 const runId='s02_'+('3'.repeat(32));
 const sha='a'.repeat(64),cut='b'.repeat(64),prepared='c'.repeat(64);
