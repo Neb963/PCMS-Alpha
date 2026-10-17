@@ -332,16 +332,24 @@ def source_idb_probe(session):
       const {openCanonicalDatabase}=await import('./journal.mjs');
       const canon=await openCanonicalDatabase();
       drift=false; // Eliminate source drift so the negative oracle isolates the identity fence.
-      const rotate=await createAccountStore(canon).apply({
+      // S01/C-59: a DIFFERENT principal can never rebind the account.
+      const rotateDenied=await createAccountStore(canon).apply({
         type:'VERIFY',accountId:'fixture_inventory_01',expectedRevision:2,
         proof:{source:'GUARDED_SESSION_READBACK',verified:true,
           personaUid:'persona-fixture-0001',principalFingerprint:'b'.repeat(64),
           observationId:'fixture_identity_rotated_01'}
       });
+      // A fresh same-principal observation still revises the account context.
+      const rotate=await createAccountStore(canon).apply({
+        type:'VERIFY',accountId:'fixture_inventory_01',expectedRevision:2,
+        proof:{source:'GUARDED_SESSION_READBACK',verified:true,
+          personaUid:'persona-fixture-0001',principalFingerprint:'a'.repeat(64),
+          observationId:'fixture_identity_reobserved_01'}
+      });
       canon.close();
       const stale=await get('gen-0999');
       const newBind=await bind('gen-0997');
-      done({before,created,duplicate,collision,linked,equal,changed,rotate,stale,newBind});
+      done({before,created,duplicate,collision,linked,equal,changed,rotateDenied,rotate,stale,newBind});
     })().catch(e=>done({error:'I05_REAL_IDB_PROBE_FAILED',detail:String(e).slice(0,130)}));'''
     return call('POST',f'/session/{session}/execute/async',
                 {'script':script,'args':[]},timeout=45)
@@ -986,6 +994,7 @@ def main():
                 assert scoped.get('linked',{}).get('link',{}).get('folder')=='gens/a',scoped
                 assert scoped.get('equal',{}).get('code')=='SOURCE_EQUIVALENT',scoped
                 assert scoped.get('changed',{}).get('code')=='SOURCE_DRIFT',scoped
+                assert scoped.get('rotateDenied',{}).get('code')=='IDENTITY_CHANGED',scoped
                 assert scoped.get('rotate',{}).get('ok') is True,scoped
                 assert scoped.get('stale',{}).get('code')=='SOURCE_ASSOCIATION_STALE',scoped
                 assert scoped.get('newBind',{}).get('code')=='ACCOUNT_CONTEXT_CHANGED',scoped
