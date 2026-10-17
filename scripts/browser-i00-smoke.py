@@ -66,6 +66,24 @@ def guard_status(session):
     return call('POST',f'/session/{session}/execute/async', {'script':script,'args':[]},timeout=30)
 
 
+def wait_donor_ready(session, timeout_seconds=12):
+    # Read-only bootstrap witness, not a retry of a mutating operation.
+    # The static PCMS listeners wake before PersonaMonkey's asynchronous
+    # recovery/bootstrap dynamically imports its guarded background.
+    last = None
+    until = time.monotonic() + timeout_seconds
+    while time.monotonic() < until:
+        last = guard_status(session)
+        if last.get('donorReady') is True:
+            assert last.get('providerEffects') == 'OFF', last
+            return last
+        assert last.get('admission') in (
+            'HELD_DONOR_BOOTSTRAP','HELD_UNTIL_OWNER_VERIFICATION'), last
+        time.sleep(.15)
+    raise AssertionError({'code':'DONOR_STARTUP_READINESS_TIMEOUT',
+                          'last':last})
+
+
 def canonical_command(session, command):
     # Real packaged Firefox request to the isolated same-extension port.
     expression = '''const done=arguments[arguments.length-1];
@@ -612,7 +630,7 @@ def main():
                 assert isolated.get('injection',{}).get('code') in [
                     'HOST_PERMISSION_DENIED','WRONG_ORIGIN'],isolated
                 print('B I04_PACKAGED_OBSERVER_INVALID_ORIGIN_AND_HOST_HOLD=PASS',flush=True)
-                guard=guard_status(after)
+                guard=wait_donor_ready(after)
                 assert guard and guard.get('phase')=='I01',f'Missing I01 wake status: {guard}'
                 assert guard.get('providerEffects')=='OFF',guard
                 canonical=canonical_command(after,{'type':'SUMMARY'})
@@ -2831,6 +2849,7 @@ def main():
                 new_uuid=addons_uuid(fresh_profile)
                 call('POST',f'/session/{after}/url',
                      {'url':f'moz-extension://{new_uuid}/pcms/index.html#settings'})
+                wait_donor_ready(after)  # No synthetic CREATE before donor bootstrap.
                 fresh_script="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const core=await import('./backup-core.mjs');
