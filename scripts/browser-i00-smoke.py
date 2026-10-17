@@ -2727,8 +2727,8 @@ def main():
                   files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
                   const blobs=raw.map(([path,bytes])=>({path,base64:
                     btoa(String.fromCharCode(...bytes))})).sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
-                  const fingerprint=await cryptoCore.digest('PCMS_STAGED_SOURCE_V1\\n'+files.map(
-                    f=>JSON.stringify([f.path,f.size,f.sha256])).join('\\n'));
+                  const fingerprint=await cryptoCore.digest('PCMS_STAGED_SOURCE_V1'+String.fromCharCode(10)+files.map(
+                    f=>JSON.stringify([f.path,f.size,f.sha256])).join(String.fromCharCode(10)));
                   const source={ok:true,files,blobs,fingerprint};
                   const pcms={schema:1,stores:{entities:[],operations:[{key:'uncertain',
                     value:{status:'HELD_UNCERTAIN'}}],events:[],meta:[
