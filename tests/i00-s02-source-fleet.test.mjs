@@ -125,7 +125,7 @@ async function sourceVariant(seed){
   const asBytes=(length,salt)=>Uint8Array.from({length},(_,i)=>
     (seed*71+i*29+salt*43+Math.floor(i/13))&255);
   const values=[
-    ['main.pjs',enc.encode('output="source-'+seed+'";\\nvar rev='+seed+';')],
+    ['main.pjs',enc.encode('output="source-'+seed+'";\nvar rev='+seed+';')],
     ['index.html',enc.encode('<div data-source="'+(seed%17)+'">safe</div>')],
     ['src/asset.bin',asBytes(300+seed%4096,1)],
     ['src/preview.bin',asBytes(seed%89,2)],
@@ -137,8 +137,8 @@ async function sourceVariant(seed){
   files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
   return {ok:true,files,blobs:files.map(f=>({
     path:f.path,base64:Buffer.from(values.find(v=>v[0]===f.path)[1]).toString('base64')
-  })),fingerprint:await digest('PCMS_STAGED_SOURCE_V1\\n'+
-    files.map(f=>JSON.stringify([f.path,f.size,f.sha256])).join('\\n'))};
+  })),fingerprint:await digest('PCMS_STAGED_SOURCE_V1\n'+
+    files.map(f=>JSON.stringify([f.path,f.size,f.sha256])).join('\n'))};
 }
 test('S02 F3 heterogeneous 50/1024 fleet: thousands of distinct raw assets and long donor, no omission',async()=>{
   const memBefore=process.memoryUsage(),began=performance.now();
@@ -185,7 +185,7 @@ test('S02 F3 heterogeneous 50/1024 fleet: thousands of distinct raw assets and l
       'result["peakNativeRssKiB"]=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss',
       'result["encryptedDiskBytes"]=os.stat(sys.argv[1]).st_size',
       'print(json.dumps(result))'
-    ].join('\\n');
+    ].join('\n');
     const native=spawnSync('python3',['-c',script,destination,passphrase],{
       cwd:root,input:Buffer.from(content),encoding:'utf8',timeout:120000,
       maxBuffer:2*1024*1024
