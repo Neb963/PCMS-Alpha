@@ -3418,6 +3418,14 @@ def main():
                     });
                   }
                   const actual=await portStatus();
+                  const v2Denied=await new Promise((resolve,reject)=>{
+                    const port=browser.runtime.connect({name:core.AUTO_PORT});
+                    port.onMessage.addListener(value=>{try{port.disconnect()}catch{}resolve(value)});
+                    port.onDisconnect.addListener(()=>reject(Error('V2_MANUAL_PORT_DISCONNECTED')));
+                    port.postMessage({action:'RUN_V2_MANUAL'});
+                  });
+                  if(v2Denied?.ok!==false||v2Denied.code!=='BACKUP_V2_REVIEW_REQUIRED')
+                    throw Error('S02_PRODUCTION_MANUAL_NATIVE_NOT_FENCED');
                   if(!actual.ok||actual.enabled!==false||actual.tier!==0)
                     throw Error('CANONICAL_AUTO_BACKUP_NOT_OFF');
                   async function makeDb(){
