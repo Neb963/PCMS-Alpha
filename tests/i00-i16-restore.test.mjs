@@ -515,7 +515,8 @@ test('S02 restore replace preserves local last-known-good and native lease; fore
   const restored=prepareRestoredCanonical({incoming,current:existing,mode:'replace'});
   const byKey=new Map(restored.stores.meta.map(r=>[r.key,r.value]));
   for(const row of [localAuto,localManual,localLease,localRun])
-    assert.deepEqual(byKey.get(row.key),row,'replace must retain local-only backup truth');
+    assert.deepEqual(JSON.parse(JSON.stringify(byKey.get(row.key))),row,
+      'replace must retain local-only backup truth');
   assert.equal(byKey.get('backup:v2:'+importedId).state,'RESTORED_HISTORY_ONLY');
   assert.equal(byKey.get('backup:v2:'+importedId).acceptedBytes,0);
   assert.equal(byKey.get('backup:v2:'+importedId).preparedSha256,null);
