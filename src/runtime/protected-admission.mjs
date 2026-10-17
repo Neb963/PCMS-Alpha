@@ -25,7 +25,7 @@ export function createProtectedAdmission({readCommitted, now=Date.now, donorBoot
   let lastTime=0;
   let clockInvalid=false;
   const generations=new Map(), grants=new Map(), latches=new Set();
-  const publication=new Map();
+  const publication=new Map(), highestRevision=new Map();
   function clock() {
     const t=now();
     if(!Number.isSafeInteger(t)||t<=0||t<lastTime) clockInvalid=true;
@@ -57,12 +57,9 @@ export function createProtectedAdmission({readCommitted, now=Date.now, donorBoot
       committed.publicationSafetyGeneration!==generation(key.bindingId)||
       !Number.isSafeInteger(committed.snapshotValidUntil)||
       committed.snapshotValidUntil<=t)return {ok:false,code:'COMMITTED_AUTHORITY_INVALID'};
-    const previous=publication.get(key.bindingId);
-    if(previous && key.grantRevision<=previous.key.grantRevision)
+    if(key.grantRevision <= (highestRevision.get(key.bindingId)||0))
       return {ok:false,code:'STALE_GRANT_REVISION'};
-    if(latches.has(key.bindingId) &&
-      !(previous===undefined && committed.publicationSafetyGeneration===generation(key.bindingId)))
-      return {ok:false,code:'STALE_PUBLICATION'};
+    highestRevision.set(key.bindingId,key.grantRevision);
     publication.set(key.bindingId,{key:{...key},validUntil:committed.snapshotValidUntil,
       safetyGeneration:generation(key.bindingId)});
     latches.delete(key.bindingId);
