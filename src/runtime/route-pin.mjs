@@ -23,11 +23,38 @@ function replace(list){
 export function closeRoutePins(){pins=new Map();loaded=false;generation++;}
 
 export function configureRoutePinSource(read){source=typeof read==='function'?read:null;}
+// A monitored connection is needed to invalidate pins on schema replacement.
+// Reopening a new unclosed IndexedDB handle at every route refresh leaks
+ // connections and can block later restore/schema upgrades at fleet scale.
+let sourceDb=null,openingDb=null;
+async function monitoredDatabase(){
+  if(sourceDb)return sourceDb;
+  if(!openingDb)openingDb=openCanonicalDatabase().then(db=>{
+    const invalidate=()=>{
+      if(sourceDb===db)sourceDb=null;
+      closeRoutePins();
+      try{db.close();}catch{}
+    };
+    db.addEventListener?.('versionchange',invalidate);
+    db.addEventListener?.('close',invalidate);
+    sourceDb=db;
+    return db;
+  }).finally(()=>{openingDb=null;});
+  return openingDb;
+}
 async function defaultSource(){
-  const db=await openCanonicalDatabase();
-  db.addEventListener?.('versionchange',()=>{closeRoutePins();try{db.close();}catch{}});
-  db.addEventListener?.('close',closeRoutePins);
-  return createExitLedger(db).pins();
+  const db=await monitoredDatabase();
+  try{return await createExitLedger(db).pins();}
+  catch(error){
+    // A broken connection must not stay cached indefinitely. The request
+    // guard remains denied; the next read can attempt a fresh connection.
+    if(sourceDb===db){
+      sourceDb=null;
+      closeRoutePins();
+      try{db.close();}catch{}
+    }
+    throw error;
+  }
 }
 // Re-read committed ledger state. A read that started before a newer
 // close/hold cannot publish older authority.

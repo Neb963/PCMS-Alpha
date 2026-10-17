@@ -809,3 +809,37 @@ test('S01 audit D: unknown or failing idle inspection never starts automatic leg
   await h.flow.upkeep();
   assert.equal(stored(h,account.accountId).upgrade.phase,'COMPLETE','retried later once positively idle');
 });
+
+test('S01 D: route-pin refresh reuses one monitored IndexedDB connection, invalidates on schema replacement',async()=>{
+  const {routePinsReady,routePinSummary}=await import('../src/runtime/route-pin.mjs');
+  const priorFactory=globalThis.indexedDB,connections=[];
+  globalThis.indexedDB={open(){
+    const db=fakeDatabase(),listeners={};
+    const entry={db,listeners,closed:0};
+    db.addEventListener=(kind,callback)=>{listeners[kind]=callback;};
+    db.close=()=>{entry.closed++;};
+    connections.push(entry);
+    const request={result:db,onsuccess:null,onerror:null,onblocked:null};
+    setImmediate(()=>request.onsuccess?.());
+    return request;
+  }};
+  try{
+    configureRoutePinSource(null);
+    closeRoutePins();
+    for(let i=0;i<4;i++)assert.equal(await reloadRoutePins(),true);
+    assert.equal(connections.length,1,'repeated refresh cannot leak an IndexedDB connection per account');
+    assert.equal(connections[0].closed,0,'keep monitored connection for versionchange');
+    assert.equal(routePinSummary().loaded,true);
+    connections[0].listeners.versionchange();
+    assert.equal(routePinSummary().loaded,false,'schema change closes all network pins');
+    assert.equal(connections[0].closed,1,'stale handle is closed');
+    assert.equal(await routePinsReady(500),true,'next request reopens after safe invalidation');
+    assert.equal(connections.length,2,'new clean handle replaces invalidated handle');
+    assert.equal(await reloadRoutePins(),true);
+    assert.equal(connections.length,2,'new handle is reused');
+  }finally{
+    globalThis.indexedDB=priorFactory;
+    configureRoutePinSource(async()=>({ok:true,pins:[]}));
+    closeRoutePins();
+  }
+});
