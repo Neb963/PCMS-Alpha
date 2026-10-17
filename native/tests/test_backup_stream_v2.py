@@ -138,6 +138,20 @@ class TestBackupV2(unittest.TestCase):
             self.denied(code)
             pathlib.Path(self.path).unlink()
 
+    def test_duplicate_or_noncanonical_json_is_denied_before_accepting_inventory(self):
+        samples = [
+            b'{"key":"a","refs":[],"store":"meta","value":{},"key":"a"}',
+            b'{"store":"meta","key":"a","refs":[],"value":{}}',
+            b'{"key":"a","refs":[],"store":"meta","value":{"x":NaN}}',
+            b' {"key":"a","refs":[],"store":"meta","value":{}}',
+            b'{"key":"a","refs":[],"store":"meta","value":{"b":1,"a":2}}'
+        ]
+        for raw in samples:
+            parser = _Inventory()
+            with self.assertRaisesRegex(BackupError,"BACKUP_CANONICAL_INVALID"):
+                parser.feed(frame(CANONICAL,raw))
+            self.assertEqual(parser.canonical,0)
+
     def test_short_finish_never_completes(self):
         w = EncryptedWriter(self.path, self.passphrase, 100)
         w.append(b'partial')
