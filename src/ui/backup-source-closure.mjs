@@ -47,7 +47,11 @@ function references(row) {
   for (const field of fields) {
     if (required || (field === 'finalSource' && record.verifiedFinal) ||
         (field === 'stageSource' && record.stagedFingerprint)) {
-      requireSource(record[field] !== undefined && record[field] !== null);
+      requireSource(record[field] !== undefined && record[field] !== null,
+        'BACKUP_SOURCE_INCOMPLETE_' +
+        (owner === 'adoption' ? 'ORIGINAL' :
+         owner === 'record' ? 'STAGE' :
+         owner === 'release' ? 'RELEASE' : 'AI'));
     }
   }
   return fields.filter(field => record[field] !== undefined &&
