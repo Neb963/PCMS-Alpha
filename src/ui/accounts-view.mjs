@@ -165,6 +165,17 @@ async function read() {
   routes=r.routes;
   draw();
 }
+document.getElementById('pcms-check-native-witness')?.addEventListener('click',async()=>{
+  report('Requesting one read-only native clock sample…');
+  try {
+    const sampled=await command('WITNESS_STATUS');
+    if(sampled?.ok===true)
+      report('Native clock sample received (sequence '+sampled.sequence+'). Qualified uptime and protected exit remain unproved.');
+    else report('Native witness unavailable: '+(sampled?.code||'UNVERIFIED')+'. Enrollment remains held.');
+  } catch {
+    report('Native witness response unknown. No route or account operation attempted.');
+  }
+});
 refresh.addEventListener('click',async()=>{
   report('Refreshing authoritative account and Persona state…');
   try{await read();report('Fresh local state loaded; provider identity may remain unknown.');}
