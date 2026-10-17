@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {bindingTagChanges,beforeDonorStateCommit,installDonorAdmissionFence} from '../src/runtime/pcms-donor-fence.mjs';
+import {bindingTagChanges,beforeDonorStateCommit,installDonorAdmissionFence,issueBlockedBindingStagePermit} from '../src/runtime/pcms-donor-fence.mjs';
 
 const state=()=>({global:{unmanagedPolicy:'block'},routes:{
  'route_001':{id:'route_001',enabled:true,host:'192.0.2.2'}},
@@ -48,4 +48,32 @@ test('S01 donor fence revokes synchronously before async write; failed write can
  const wrong=structuredClone(old);wrong.profiles['firefox-container-001'].routeId='direct';
  beforeDonorStateCommit(old,wrong);
  assert.equal(calls.length,2);
+});
+
+test('S01 GB01: opaque donor stage permit tags only an originally BLOCK-routed never-admitted Persona',()=>{
+ const before=state(),target=before.profiles['firefox-container-001'];
+ target.routeId='block';target.pcmsBindingId=null;
+ const after=structuredClone(before);
+ after.profiles['firefox-container-001'].pcmsBindingId='binding_001';
+ assert.equal(bindingTagChanges(before,after).code,'PCMS_BINDING_TAG_MUTATION_HELD');
+ const permit=issueBlockedBindingStagePermit({bindingId:'binding_001',
+   personaUid:'persona_001',contextId:'firefox-container-001'});
+ assert.deepEqual(beforeDonorStateCommit(before,after,permit),
+   {ok:true,held:[],staged:true});
+ assert.throws(()=>beforeDonorStateCommit(before,after,permit),
+   e=>e.code==='PCMS_BINDING_STAGE_UNAUTHORIZED');
+ assert.throws(()=>beforeDonorStateCommit(before,after),
+   e=>e.code==='PCMS_BINDING_TAG_MUTATION_HELD');
+ const dangerous=structuredClone(after);
+ dangerous.profiles['firefox-container-001'].routeId='route_001';
+ const stale=issueBlockedBindingStagePermit({bindingId:'binding_001',
+   personaUid:'persona_001',contextId:'firefox-container-001'});
+ assert.throws(()=>beforeDonorStateCommit(before,dangerous,stale),
+   e=>e.code==='PCMS_BINDING_STAGE_UNAUTHORIZED');
+ const inserted=structuredClone(after);
+ inserted.global.webRTCMode='unchanged';
+ const unrelated=issueBlockedBindingStagePermit({bindingId:'binding_001',
+   personaUid:'persona_001',contextId:'firefox-container-001'});
+ assert.throws(()=>beforeDonorStateCommit(before,inserted,unrelated),
+   e=>e.code==='PCMS_BINDING_STAGE_UNAUTHORIZED');
 });
