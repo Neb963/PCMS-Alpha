@@ -204,3 +204,33 @@ test('S02 oversized valid canonical record holds before native dispatch and neve
   await assert.rejects(compileV2(pcms,donor),/BACKUP_V2_CANONICAL_LIMIT/);
   assert.equal(pcms.stores.meta.at(-1).value.humanNotes.length,many.length);
 });
+test('S02 archive and inactive apply preserve original exit exclusions/removal/uncertainty evidence',async()=>{
+  const {pcms,donor,password}=await fixture();
+  const exit={key:'network:s01:exit-ownership-v1',schema:2,revision:8,
+    owners:{'IPv4:198.19.11.1':'account-old'},
+    bindings:{'binding-old':{bindingId:'binding-old',accountId:'account-old',
+      pin:'HELD',routeId:'route-old',lastObservedAt:120}}};
+  const removal={key:'removal:account-old',state:'REMOVED_ONLY_LOCALLY',
+    personaUid:'legacy-persona-uid',revision:11,
+    excludedOnRestore:true,when:'historical'};
+  const lost={key:'op-uncertain',status:'DISPATCH_POSSIBLE',
+    effect:{kind:'CREATE',providerReceipt:'UNKNOWN',retryCount:0}};
+  pcms.stores.meta.push({key:exit.key,value:exit});
+  pcms.stores.meta.push({key:removal.key,value:removal});
+  pcms.stores.operations.push({key:'op-uncertain',value:lost});
+  const plan=await compileV2(pcms,donor),pieces=[];
+  for await(const p of streamV2Frames(plan))pieces.push(p);
+  const receipt='e'.repeat(64);
+  const result=await prepareInactiveV2({
+    authenticatedPlaintext:concat(pieces),
+    readback:{state:'AUTHENTICATED_SECOND_PASS',sha256:receipt},
+    expectedCiphertextSha256:receipt,password,
+    decodeDonor:decodeBackupEnvelope,currentPcms:empty(),mode:'replace'});
+  const meta=new Map(result.prepared.stores.meta.map(row=>[row.key,row.value]));
+  assert.deepEqual(meta.get(exit.key),exit);
+  assert.deepEqual(meta.get(removal.key),removal);
+  const oldOp=result.prepared.stores.operations.find(x=>x.key==='op-uncertain').value;
+  assert.equal(oldOp.status,'HELD_UNCERTAIN');
+  assert.deepEqual(oldOp.effect,lost.effect);
+  assert.equal(result.activation,'OFF');
+});
