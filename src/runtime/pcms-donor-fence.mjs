@@ -1,6 +1,10 @@
 // S01: installed only inside the same XPI donor background. No page/port API.
 // Protected Persona tag removal is never an ordinary donor state edit.
 const ids = v => typeof v === 'string' && /^[a-z0-9_-]{8,128}$/i.test(v);
+const networkGlobals = g => Object.fromEntries([
+  'enforcePrivacyControls','strictProxyVerification','unmanagedPolicy',
+  'blockSpeculative','webRTCMode','mullvadNative'
+].map(k=>[k,g?.[k]]));
 let admission = null;
 export function installDonorAdmissionFence(gate) {
   if (admission || !gate || typeof gate.invalidateNow !== 'function')
@@ -20,8 +24,13 @@ export function bindingTagChanges(before, after) {
        profile.status!==candidate.status ||
        profile.killSwitch!==candidate.killSwitch ||
        profile.blockLocalNetwork!==candidate.blockLocalNetwork ||
+       profile.domainMode!==candidate.domainMode ||
+       JSON.stringify(profile.allowedDomains)!==JSON.stringify(candidate.allowedDomains) ||
+       JSON.stringify(profile.blockedDomains)!==JSON.stringify(candidate.blockedDomains) ||
+       profile.rotationRole!==candidate.rotationRole ||
+       profile.rotationOperationId!==candidate.rotationOperationId ||
        JSON.stringify(routeA)!==JSON.stringify(routeB) ||
-       JSON.stringify(before?.global)!==JSON.stringify(after?.global)) {
+       JSON.stringify(networkGlobals(before?.global))!==JSON.stringify(networkGlobals(after?.global))) {
       held.add(profile.pcmsBindingId);
     }
   }
