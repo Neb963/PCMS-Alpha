@@ -264,14 +264,15 @@ class V2ArchiveHost:
             self._write(state)
             return {"ok":True,"state":"OPEN_OBSERVED","runId":run}
         except BaseException:
-            # F1: only a *never-opened* attempt may release the OS lock
-            # synchronously. Its POSSIBLE ledger and any partially created
-            # ciphertext remain untouched. If a writer was opened and the
-            # open ACK/ledger failed, keep it fenced until explicit close,
-            # never silently grant a second writer.
-            if self.writer is None:
-                self.current = None
-                self._release_export_lock()
+            # F1: no unsuccessful begin may leave this native connection
+            # monopolizing the OS lock. An opened-but-unacknowledged writer is
+            # abandoned (never finalized or retried); its CREATE_POSSIBLE
+            # ledger and any ciphertext bytes remain for explicit inspection.
+            if self.writer is not None:
+                self.writer.abandon()
+                self.writer = None
+            self.current = None
+            self._release_export_lock()
             raise
 
     def _append(self,msg):
