@@ -1,3 +1,4 @@
+import {prepareInactiveV2} from '../src/ui/restore-v2-prep.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
@@ -93,4 +94,46 @@ test('S02 bytes retain exact SHA256 across Firefox-like JS realm boundaries',asy
   const two=await digest(new Uint8Array([0,255,1,0,42]));
   assert.equal(one,two,'never hash typed-array string representation');
   assert.notEqual(one,await digest('0,255,1,0,42'));
+});
+
+test('S02 inactive v2 source recovery preserves history, remaps persona and rejects imported effect authority',async()=>{
+  const {pcms,donor,password}=await fixture();
+  const source=pcms.stores.meta[1].value.record.candidate;
+  pcms.stores.meta.push({key:'account:old',value:{key:'account:old',account:{
+    accountId:'old',personaUid:'persona-old',revision:1,state:'VERIFIED',
+    bindingVersion:1,identity:{principal:'historical'},override:{enabled:true}
+  }}});
+  pcms.stores.meta.push({key:'inventory:old',value:{key:'inventory:old',
+    generator:{accountId:'old',personaUid:'persona-old',ownerVerified:true,
+      ownerState:'VERIFIED',source:'READY',approval:'not-portable'}}});
+  pcms.stores.meta.push({key:'release:old',value:{key:'release:old',
+    release:{sealedSource:source,previousSource:source,state:'PUBLISHED',
+      approval:{exactSource:'historical'},dispatchPossible:true}}});
+  pcms.stores.operations[0].value.status='DISPATCH_POSSIBLE';
+  const plan=await compileV2(pcms,donor),parts=[];
+  for await(const block of streamV2Frames(plan))parts.push(block);
+  const plain=concat(parts),receipt='a'.repeat(64);
+  const destination=empty();
+  const prepared=await prepareInactiveV2({authenticatedPlaintext:plain,
+    readback:{state:'AUTHENTICATED_SECOND_PASS',sha256:receipt},
+    expectedCiphertextSha256:receipt,
+    currentPcms:destination,decodeDonor:decodeBackupEnvelope,password,mode:'replace',
+    uidRemap:{'persona-old':'persona-new'}});
+  const rows=new Map(prepared.prepared.stores.meta.map(row=>[row.key,row.value]));
+  assert.equal(rows.get('account:old').account.personaUid,'persona-new');
+  assert.equal(rows.get('account:old').account.state,'VERIFICATION_PENDING');
+  assert.equal(rows.get('account:old').account.identity,null);
+  assert.equal(rows.get('inventory:old').generator.personaUid,'persona-new');
+  assert.equal(rows.get('inventory:old').generator.ownerVerified,false);
+  assert.equal(rows.get('release:old').release.approval,null);
+  assert.equal(rows.get('release:old').release.state,'RESTORE_REVIEW_REQUIRED');
+  assert.equal(prepared.prepared.stores.operations[0].value.status,'HELD_UNCERTAIN');
+  assert.equal(rows.get('stage-history:a:1').record.candidate.blobs[2].base64,
+    source.blobs[2].base64);
+  assert.equal(prepared.activation,'OFF');
+  await assert.rejects(prepareInactiveV2({authenticatedPlaintext:plain,
+    readback:{state:'AUTHENTICATED_SECOND_PASS',sha256:receipt},
+    expectedCiphertextSha256:receipt,currentPcms:destination,
+    decodeDonor:decodeBackupEnvelope,password,mode:'replace',uidRemap:{}}),
+    /RESTORE_UID_MAPPING_MISSING/);
 });
