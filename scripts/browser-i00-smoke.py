@@ -2860,8 +2860,27 @@ def main():
                   stage=module.createV2InactiveStage(db,{assertHeld:guard});
                   const out=[];for await(const item of stage.fragments(id))out.push(...item);
                   const info=await stage.inspect(id);
+                  const frameCodec=await import('./backup-v2-codec.mjs');
+                  const second='s02_'+('1'.repeat(32));
+                  const donorBytes=new TextEncoder().encode('opaque donor fixture');
+                  const endBytes=new TextEncoder().encode('{"schema":2}');
+                  const parts=[
+                    frameCodec.frameHeader(frameCodec.V2_FRAME.DONOR,donorBytes.length),donorBytes,
+                    frameCodec.frameHeader(frameCodec.V2_FRAME.END,endBytes.length),endBytes
+                  ];
+                  const framed=new Uint8Array(parts.reduce((total,v)=>total+v.length,0));
+                  let cursor=0;
+                  for(const part of parts){framed.set(part,cursor);cursor+=part.length;}
+                  await stage.begin(second,{state:'INACTIVE_STAGING_REQUIRED',
+                    sha256:digest,plaintextBytes:framed.length});
+                  await stage.append(second,0,framed);
+                  await stage.finish(second,{state:'AUTHENTICATED_SECOND_PASS',
+                    sha256:digest,complete:true},1);
+                  const frames=[];
+                  for await(const frame of stage.frames(second))frames.push(frame.kind);
                   db.close();
                   done({ok:early&&guardFailed&&sequenceFailed&&wrongReceipt&&
+                    JSON.stringify(frames)==='["DONOR_FRAGMENT","DONOR_END","END"]'&&
                     a.acceptedBytes===3&&info.state==='READY_FOR_INACTIVE_DECODER'&&
                     JSON.stringify(out)==='[0,255,1,17,0,42]'&&
                     info.acceptedBytes===6,info});
