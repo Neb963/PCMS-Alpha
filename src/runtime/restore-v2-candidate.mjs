@@ -49,7 +49,8 @@ export async function prepareTrackedV2Restore({
   try{
     const opened=await connection.exchange({
       action:'restore.begin',runId,keyRef:'portable-recovery'});
-    check(opened?.ok===true&&opened.state==='INACTIVE_STAGING_REQUIRED'&&
+    check(opened?.ok===true&&opened.runId===runId&&
+      opened.state==='INACTIVE_STAGING_REQUIRED'&&
       opened.sha256===previous.ciphertextSha256&&
       Number.isSafeInteger(opened.plaintextBytes)&&opened.plaintextBytes>0&&
       opened.plaintextBytes===previous.plaintextBytes,
@@ -65,7 +66,8 @@ export async function prepareTrackedV2Restore({
     while(terminal===null){
       await held();
       const answer=await connection.exchange({action:'restore.read',runId,sequence});
-      check(answer?.ok===true&&answer.sequence===sequence&&
+      check(answer?.ok===true&&answer.runId===runId&&
+        answer.sequence===sequence&&
         typeof answer.bytes==='string'&&
         (answer.state==='INACTIVE_STAGING_FRAGMENT'||
          answer.state==='AUTHENTICATED_SECOND_PASS'),
