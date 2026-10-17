@@ -2710,6 +2710,51 @@ def main():
                 assert 'Source-complete recovery HELD: BACKUP_SOURCE_INCOMPLETE' in audit_status,audit_status
                 assert 'No external effects' in audit_status,audit_status
                 print('B S02_PACKAGED_READONLY_SOURCE_RECOVERY_HOLD=PASS',flush=True)
+                # S02 B: production packaged v2 codec runs on real Firefox
+                # with complete original/current/history/binary source and
+                # donor portable encoder. This is NOT a native-host or H proof.
+                v2_code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const v2=await import('./backup-v2-codec.mjs');
+                  const cryptoCore=await import('./backup-core.mjs');
+                  const donor=await import('../lib/backup-package.js');
+                  const pass='disposable-s02-browser-password';
+                  const raw=[['main.pjs',new TextEncoder().encode('output = "hello"')],
+                    ['index.html',new TextEncoder().encode('<b>hello</b>')],
+                    ['src/binary.bin',new Uint8Array([0,255,1,0,42])]];
+                  const files=await Promise.all(raw.map(async([path,bytes])=>({
+                    path,size:bytes.length,sha256:await cryptoCore.digest(bytes)})));
+                  files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+                  const blobs=raw.map(([path,bytes])=>({path,base64:
+                    btoa(String.fromCharCode(...bytes))})).sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+                  const fingerprint=await cryptoCore.digest('PCMS_STAGED_SOURCE_V1\\n'+files.map(
+                    f=>JSON.stringify([f.path,f.size,f.sha256])).join('\\n'));
+                  const source={ok:true,files,blobs,fingerprint};
+                  const pcms={schema:1,stores:{entities:[],operations:[{key:'uncertain',
+                    value:{status:'HELD_UNCERTAIN'}}],events:[],meta:[
+                    {key:'stage:fixture',value:{record:{candidate:source,previous:source}}},
+                    {key:'stage-history:fixture:1',value:{record:{candidate:source,previous:source}}}
+                  ],observations:[]}};
+                  const payload=donor.createPortableBackupPayload({state:{},
+                    containers:[],selection:{kind:'full'}});
+                  const sealed=await donor.encodeBackupEnvelope({payload,password:pass});
+                  const plan=await v2.compileV2(pcms,sealed),chunks=[];
+                  for await(const chunk of v2.streamV2Frames(plan))chunks.push(chunk);
+                  const all=new Uint8Array(plan.plaintextBytes);let o=0;
+                  for(const chunk of chunks){all.set(chunk,o);o+=chunk.length;}
+                  const restored=await v2.decodeAuthenticatedV2(all,{
+                    decodeDonor:donor.decodeBackupEnvelope,password:pass});
+                  const exact=restored.pcms.stores.meta[0].value.record.candidate;
+                  done({ok:o===all.length&&plan.terminal.uniqueBlobs===3&&
+                    restored.pcms.stores.operations[0].value.status==='HELD_UNCERTAIN'&&
+                    exact.blobs.length===3&&
+                    exact.blobs.some(x=>x.path==='src/binary.bin'&&x.base64==='AP8BACo=')&&
+                    restored.donor.personas.length===0});
+                })().catch(e=>done({error:String(e)}));"""
+                result=call('POST',f'/session/{after}/execute/async',
+                            {'script':v2_code,'args':[]},timeout=90)
+                assert result.get('ok') is True,result
+                print('B S02_PACKAGED_V2_SOURCE_FRAME_BINARY_AND_DONOR_ROUNDTRIP=PASS',flush=True)
                 code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const core=await import('./backup-core.mjs');
