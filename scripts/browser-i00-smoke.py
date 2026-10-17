@@ -578,6 +578,40 @@ def addons_uuid(profile):
     return mapping[ID]
 
 
+
+def owned_firefox_pids(profile):
+    # Linux CI H oracle: inspect the OS process commandline rather than trusting
+    # a WebDriver session ID or a JS boot token. Never search/stop other profiles.
+    target=str(profile.resolve())
+    found=set()
+    proc=pathlib.Path('/proc')
+    if not proc.exists():
+        raise AssertionError('S01_OS_PROCESS_INSPECTION_UNAVAILABLE')
+    for item in proc.iterdir():
+        if not item.name.isdigit():
+            continue
+        try:
+            argv=[os.fsdecode(a) for a in (item/'cmdline').read_bytes().split(b'\\0') if a]
+            for idx,arg in enumerate(argv[:-1]):
+                if (arg in ('-profile','--profile') and
+                    pathlib.Path(argv[idx+1]).resolve()==pathlib.Path(target)):
+                    found.add(int(item.name))
+                    break
+        except (OSError,ValueError,PermissionError):
+            continue
+    return found
+
+
+def require_owned_exit(profile, previous, timeout=5):
+    limit=time.monotonic()+timeout
+    while time.monotonic()<limit:
+        live=owned_firefox_pids(profile)&previous
+        if not live:
+            return True
+        time.sleep(.1)
+    raise AssertionError('S01_OWNED_FIREFOX_PROCESS_NOT_EXITED')
+
+
 def main():
     archive=pathlib.Path(sys.argv[1]).resolve()
     browser=pathlib.Path(os.environ['FIREFOX_BINARY'])
@@ -602,13 +636,24 @@ def main():
                 except Exception: time.sleep(.25)
             else: raise RuntimeError('geckodriver did not become ready')
             first=open_session(browser,profile)
+            original_firefox_pids=owned_firefox_pids(profile)
+            assert original_firefox_pids,'S01_FIRST_FIREFOX_PROCESS_NOT_OBSERVED'
             try:
                 installed=call('POST',f'/session/{first}/moz/addon/install',{'path':str(archive),'temporary':False},timeout=45)
                 assert installed == ID, f'Unexpected installed add-on ID {installed}'
                 print('B INSTALLED_ADDON_ID=',installed,flush=True)
             finally: close(first)
-            # A *second process* with the same disposable profile distinguishes installed XPI from temp web-ext.
+            require_owned_exit(profile,original_firefox_pids)
+            # The same original-profile process must actually be dead before
+            # reusing the persisted XPI profile in a NEW process.
             after=open_session(browser,profile)
+            restarted_firefox_pids=owned_firefox_pids(profile)
+            assert restarted_firefox_pids,'S01_RESTART_FIREFOX_NOT_OBSERVED'
+            assert not restarted_firefox_pids.intersection(original_firefox_pids),(
+                'S01_OS_PROCESS_ID_REUSED_OR_NOT_TERMINATED')
+            print('H S01_OWNED_OS_FIREFOX_EXIT_RELAUNCH=PASS; old_count=',
+                  len(original_firefox_pids),'new_count=',len(restarted_firefox_pids),
+                  flush=True)
             try:
                 uuid=addons_uuid(profile)
                 print('B RESTARTED_ADDON_UUID_PRESENT=', bool(uuid), flush=True)
