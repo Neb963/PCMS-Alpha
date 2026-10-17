@@ -49,6 +49,16 @@ function inertMeta(key,row,remap,existing=null){
     data.state={...data.state,enabled:false,active:null,
       status:'SUSPENDED',code:'RESTORED_KEY_NOT_AUTHORITY'};
   }
+  if(key==='backup:manual-active'){
+    data.status='RESTORED_HISTORY_ONLY';data.downloadId=null;
+    data.tier=0;data.code='RESTORED_FILE_NOT_VERIFIED';
+  }
+  if(typeof key==='string'&&key.startsWith('backup:v2:')&&
+     key!=='backup:v2:active'){
+    data.state='RESTORED_HISTORY_ONLY';
+    // Hashes survive as archival facts; they cannot qualify a native file.
+    data.acceptedBytes=0;data.preparedSha256=null;
+  }
   if(key==='refresher:shadow:v1'&&data.state){
     const prior=existing?.state||{};
     const oldRows=new Map((prior.rows||[]).map(r=>[r.stableId,r]));
@@ -120,13 +130,17 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
   // manual backup evidence. These local-only records track disk outcomes and
   // last-known-good files; importing a different profile's receipts as live
   // controller state would either lose the local good copy or invent one.
-  const LOCAL_BACKUP_EVIDENCE=new Set(['backup:auto-state','backup:manual-active']);
+  const localBackupEvidence=key=>typeof key==='string'&&
+    (key==='backup:auto-state'||key==='backup:manual-active'||
+     key.startsWith('backup:v2:'));
   const stores={};
   for(const name of DB_STORES){
     const previous=current.stores[name].map(copyRow);
     const priorByKey=new Map(previous.map(row=>[keyOf(row),row.value]));
     const rawByKey=new Map(incoming.stores[name].map(row=>[JSON.stringify(row.key),row.value]));
     const restored=incoming.stores[name].filter(row=>{
+      // A different profile's in-flight native lease is never authority.
+      if(name==='meta'&&row.key==='backup:v2:active')return false;
       if(name!=='meta'||typeof row.key!=='string'||
          !row.key.startsWith('account:'))return true;
       return !excluded.has(row.value?.account?.accountId);
@@ -152,14 +166,14 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
         if(typeof row.key==='string'&&
           (row.key.startsWith('removal:')||
            row.key==='network:s01:exit-ownership-v1'||
-           LOCAL_BACKUP_EVIDENCE.has(row.key)))
+           localBackupEvidence(row.key)))
           map.set(keyOf(row),row);
       }
     }
     for(const item of restored){
       const key=keyOf(item);
       if(name==='meta'&&typeof item.key==='string'&&
-         LOCAL_BACKUP_EVIDENCE.has(item.key)&&map.has(key))
+         localBackupEvidence(item.key)&&map.has(key))
         continue; // The observed destination disk/retention truth wins.
       // The exact same source/destination row is an idempotent merge even
       // when restore sanitization removes its old live authority.
