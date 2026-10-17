@@ -1,3 +1,4 @@
+import {scanV2AuthenticatedFrames} from './restore-v2-frame-scanner.mjs';
 // S02 bounded-memory, inactive second-pass staging in a disposable/held Firefox
 // profile. Plaintext cannot be read as authoritative until terminal native
 // second-pass authentication and exact immutable ciphertext digest agree.
@@ -141,5 +142,11 @@ export function createV2InactiveStage(db,{assertHeld}={}){
     return row?{runId,state:row.state,acceptedBytes:row.acceptedBytes,
       expectedBytes:row.expectedBytes,nextSequence:row.nextSequence}:null;
   }
-  return Object.freeze({begin,append,finish,fragments,inspect});
+  // Streaming decoder is available only through the same terminal-gated,
+  // reopened IndexedDB fragments. No complete-archive allocation here.
+  async function* frames(runId){
+    for await(const frame of scanV2AuthenticatedFrames(fragments(runId)))
+      yield frame;
+  }
+  return Object.freeze({begin,append,finish,fragments,frames,inspect});
 }
