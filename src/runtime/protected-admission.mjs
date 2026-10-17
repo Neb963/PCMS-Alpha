@@ -102,6 +102,18 @@ export function createProtectedAdmission({readCommitted, now=Date.now, donorBoot
       profile.managed!==true||profile.status!=='active'||
       profile.killSwitch!==true || profile.blockLocalNetwork!==true)
       return {managed:true,allow:false,reason:'PCMS_ADMISSION_HELD'};
+    // A cached in-memory grant is not independent authority. The trusted
+    // synchronous observer must still attest this exact committed network
+    // binding (or store/observer teardown immediately invalidates authority).
+    let joined;
+    try { joined=readCommitted(grant); } catch { joined=null; }
+    if(!joined?.allow || !joined.committed || !equal(joined.committed,grant) ||
+       joined.committed.authority!=='BOUND_ACCOUNT_NETWORK' ||
+       joined.committed.publicationSafetyGeneration!==grant.safetyGeneration ||
+       joined.committed.snapshotValidUntil!==current.validUntil) {
+      invalidateNow({bindingId,reason:'CONFLICT'});
+      return {managed:true,allow:false,reason:'PCMS_LEDGER_UNAVAILABLE'};
+    }
     return {managed:true,allow:true,reason:'PCMS_ADMITTED'};
   }
   function describe(){return Object.freeze({admissionContract:2,networkGate:'PER_REQUEST_BOUNDED_GRANT',
