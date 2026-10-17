@@ -44,7 +44,14 @@ test('S02 frames are deterministic, deduplicate binary assets and losslessly res
   const encoded=concat(items);
   assert.equal(encoded.length,plan.plaintextBytes);
   const restored=await decodeAuthenticatedV2(encoded,{decodeDonor:decodeBackupEnvelope,password});
-  assert.deepEqual(restored.pcms,pcms);
+  // Encoded rows use deterministic lexical key order; original IndexedDB
+  // fixture insertion order and null prototypes are not wire identity.
+  const normal=v=>JSON.parse(JSON.stringify(v));
+  const sorted=normal(pcms);
+  for(const store of Object.values(sorted.stores))store.sort((a,b)=>
+    JSON.stringify(a.key)<JSON.stringify(b.key)?-1:
+    JSON.stringify(a.key)>JSON.stringify(b.key)?1:0);
+  assert.deepEqual(normal(restored.pcms),sorted);
   assert.deepEqual(restored.donor.personas,[]);
   const items2=[];for await(const piece of streamV2Frames(await compileV2(pcms,donor)))items2.push(piece);
   assert.deepEqual(concat(items2),encoded);
