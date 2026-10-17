@@ -1,6 +1,6 @@
 // S02 candidate-A source-bearing binary frame encoder/decoder (no native authority).
 // Legacy v1 is unchanged. This module is NOT a production cryptographic verifier.
-import {DB_STORES,validatePcmsSnapshot,deserializeClone,digest} from './backup-core.mjs';
+import {DB_STORES,validatePcmsSnapshot,serializeClone,digest} from './backup-core.mjs';
 import {preflightSourceRecovery} from './backup-core.mjs';
 
 const utf8=new TextEncoder(),readText=new TextDecoder('utf-8',{fatal:true});
@@ -108,7 +108,7 @@ export async function compileV2(pcms,donorEnvelope){
     counts[store]=0;
     for(const row of [...pcms.stores[store]].sort((a,b)=>canonicalJSON(a.key)<canonicalJSON(b.key)?-1:canonicalJSON(a.key)>canonicalJSON(b.key)?1:0)){
       const refs=new Set();
-      const transformed=replaceSource(row.value,refs,blobs);
+      const transformed=replaceSource(serializeClone(row.value),refs,blobs);
       const record={store,key:row.key,value:transformed,refs:[...refs].sort()};
       const payload=bytes(canonicalJSON(record));
       check(payload.length>0&&payload.length<=V2_LIMITS.canonical,'BACKUP_V2_CANONICAL_LIMIT');
