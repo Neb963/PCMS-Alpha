@@ -1,4 +1,5 @@
 import {admissionForI17Supply} from './legacy-quarantine.mjs';
+import {validateNativeWitness} from './qualified-clock.mjs';
 // This facade shares donor Management Integration's actual control-lease
 // registry. Nothing here can execute a browser/native/provider mutation at I01.
 let installed = null;
@@ -18,7 +19,7 @@ export async function cachedHealthDomain(evidence){
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
-  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep, releaseIsolatedTab, existingIsolatedTab }) {
+  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, readRuntimeWitness }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -299,7 +300,16 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     catch{return {ok:false,code:'HANDOFF_UNVERIFIED'};}
   }
 
+  async function sampleNativeWitness() {
+    if(typeof readRuntimeWitness!=='function')return {ok:false,code:'NATIVE_WITNESS_UNAVAILABLE'};
+    try {
+      const native=await readRuntimeWitness();
+      return validateNativeWitness(native);
+    } catch { return {ok:false,code:'NATIVE_WITNESS_UNAVAILABLE'}; }
+  }
+
   return Object.freeze({
+    sampleNativeWitness,
     observeReadOnly,
     observeMonitoring,
     runSupplyStep,
