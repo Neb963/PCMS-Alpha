@@ -71,6 +71,25 @@ class TestBackupV2(unittest.TestCase):
             verify_two_pass(self.path, self.passphrase)
         self.assertEqual(str(err.exception), expected)
 
+    def test_review_packet_fixed_crypto_vector_exact_interoperability(self):
+        """Pinned review vector generated with an independently checked GCM implementation."""
+        payload=bytes.fromhex(
+            "5330322d4145532d47434d2d746573742d766563746f722d763100ff01")
+        passphrase="S02 isolated vector password"
+        expected=("50434d53424b320002010003d090000102030405060708090a0b0c0d0e0f"
+                  "000102030405060708090a0b000000000000001d"
+                  "c205af95bb20da760ead82265a77822702d401dd93c86757b9b8a6733b4e"
+                  "059c45349cb423505b51ac4f497889")
+        w=EncryptedWriter(self.path,passphrase,len(payload),
+                          _test_entropy=(bytes(range(16)),bytes(range(12))))
+        for p in range(0,len(payload),3):
+            w.append(payload[p:p+3])
+        self.assertEqual(w.finish()["status"],"WRITTEN_UNVERIFIED")
+        file_bytes=pathlib.Path(self.path).read_bytes()
+        self.assertEqual(file_bytes.hex(),expected)
+        self.assertEqual(hashlib.sha256(file_bytes).hexdigest(),
+                         "bdee3e26470109bf15263d891fd7d9289746bdd645e614df9bea5cc07a07e94c")
+
     def test_full_authentication_and_source_inventory(self):
         payload = make_payload()
         result = self.seal(payload, step=127)
