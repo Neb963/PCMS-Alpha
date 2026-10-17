@@ -50,8 +50,8 @@ test('S02 detects deduplicated original/stage/AI/release/history sources with ex
     {key: 'network-ledger', value: {state: 'KEEP'}}
   ];
   const result = await auditSourceClosure(snapshot(rows));
-  assert.equal(result.manifests, 9);
-  assert.equal(result.references, 27);
+  assert.equal(result.manifests, 10);
+  assert.equal(result.references, 30);
   assert.equal(result.uniqueBlobs, 3);
   assert.ok(result.uniqueBytes < result.referencedBytes);
   assert.equal(result.status, 'SOURCE_BYTES_AUDITED_NOT_DISK_VERIFIED');
