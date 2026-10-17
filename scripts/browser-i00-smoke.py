@@ -3639,7 +3639,70 @@ def main():
                   db.close();db=await open();
                   const after=await core.snapshotCanonical(db);
                   db.close();
+                  // F2: even a receipt-shaped UI object cannot authorize
+                  // restore without a matching previously committed v2
+                  // source/cut/run ledger AND the actual one-port terminal ACK.
+                  const protectedRestore=await import('./restore-v2-candidate.mjs');
+                  const v2Ledger=await import('./backup-v2-session.mjs');
+                  const traceDb=await open();
+                  const runId='s02_'+crypto.randomUUID().replaceAll('-','');
+                  const ledger=v2Ledger.createV2Ledger(traceDb);
+                  let active=await ledger.claim(runId,'c'.repeat(64),plain.length);
+                  for(const [prior,next,patch] of [
+                    ['PREPARED','CREATE_POSSIBLE',{}],
+                    ['CREATE_POSSIBLE','OPEN_OBSERVED',{}],
+                    ['OPEN_OBSERVED','APPEND_POSSIBLE',{}],
+                    ['APPEND_POSSIBLE','OPEN_OBSERVED',
+                      {acceptedBytes:plain.length,nextSequence:1}],
+                    ['OPEN_OBSERVED','FINISH_POSSIBLE',{}],
+                    ['FINISH_POSSIBLE','WRITTEN_UNVERIFIED',{}],
+                    ['WRITTEN_UNVERIFIED','AUTHENTICATED_INVENTORY_ONLY',
+                      {ciphertextSha256:digest,observedBlobs:3}]
+                  ])active=await ledger.advance(runId,active.revision,prior,next,patch);
+                  const nativeCalls=[],nativeBytes=[];
+                  for(let j=0;j<plain.length;j+=30000)
+                    nativeBytes.push(plain.subarray(j,j+30000));
+                  const conn=()=>({close(){},
+                    async exchange(cmd){
+                      nativeCalls.push(cmd.action);
+                      if(cmd.action==='restore.begin')return {ok:true,
+                        state:'INACTIVE_STAGING_REQUIRED',
+                        plaintextBytes:plain.length,sha256:digest};
+                      if(cmd.action==='restore.read'){
+                        const bytes=nativeBytes[cmd.sequence];
+                        if(!bytes)throw Error('NO_MORE_NATIVE_BYTES');
+                        const complete=cmd.sequence===nativeBytes.length-1;
+                        return {ok:true,sequence:cmd.sequence,complete,
+                          bytes:btoa(String.fromCharCode(...bytes)),
+                          state:complete?'AUTHENTICATED_SECOND_PASS':
+                            'INACTIVE_STAGING_FRAGMENT',
+                          ...(complete?{sha256:digest}:{})};
+                      }
+                      return {ok:false,code:'UNEXPECTED_NATIVE'};
+                    }});
+                  let falseReceiptDenied=false;
+                  try{await protectedRestore.prepareTrackedV2Restore({
+                    api:browser,canonicalDb:traceDb,
+                    runId:'s02_'+crypto.randomUUID().replaceAll('-',''),
+                    currentPcms:empty,connectionFactory:conn,
+                    guard:{inspect:async()=>({held:true,activation:'OFF'})}
+                  });}catch{falseReceiptDenied=true;}
+                  const nativeStaged=await protectedRestore.prepareTrackedV2Restore({
+                    api:browser,canonicalDb:traceDb,runId,currentPcms:empty,
+                    uidRemap:{},mode:'replace',
+                    vaultRead:async()=>({ok:true,passphrase:password}),
+                    connectionFactory:conn,
+                    guard:{inspect:async()=>({held:true,activation:'OFF'})}
+                  });
+                  traceDb.close();
+                  const provenanceOkay=falseReceiptDenied&&
+                    nativeStaged.status==='INACTIVE_PREPARED_NOT_APPLIED'&&
+                    nativeStaged.prepared.prepared.stores.meta[0].value.record.candidate
+                      .blobs.some(x=>x.path==='src/asset.bin'&&x.base64==='AP8HAAw=')&&
+                    nativeCalls[0]==='restore.begin'&&
+                    nativeCalls.filter(x=>x==='restore.read').length===nativeBytes.length;
                   done({ok:applied.source==='INDEPENDENT_READBACK'&&
+                    provenanceOkay&&
                     restored.activation==='OFF'&&restored.controller==='RESTORE_HELD'&&
                     after.stores.meta.length===1&&
                     after.stores.meta[0].value.record.candidate.blobs.find(x=>
