@@ -3476,8 +3476,57 @@ def main():
                   if(held.code!=='SUSPENDED_KEY_UNAVAILABLE'||blockedDownloads!==0||
                     heldState.state.archives.length!==0||heldState.state.status!=='SUSPENDED')
                     throw Error('LOCKED_VAULT_FALLBACK_FAILED');
+                  // B-tier: the real packaged production runner, guarded
+                  // by an explicit privileged construction-only test grant.
+                  // No actual native file or provider effect in this case;
+                  // the separate H witness exercises the installed OS host.
+                  let manualNative=0,manualVerified=0;
+                  const makeReviewed=({bad=false,delayed=null,token='4'}={})=>
+                    runnerModule.createAutoRunner(api,{
+                      open:async()=>db,reviewedV2:async()=>true,
+                      newId:()=>token.repeat(32),
+                      native:async()=>({ok:true,passphrase:'synthetic-b-v2-portable-vault'}),
+                      captureV2:async()=>({pcms:{schema:1,stores:{}},
+                        donorEnvelope:'synthetic-b-donor-only'}),
+                      dispatchV2:async({runId})=>{
+                        manualNative++;
+                        if(delayed)await delayed;
+                        return {ok:true,runId,state:'AUTHENTICATED_INVENTORY_ONLY',
+                          ciphertextSha256:'a'.repeat(64)};
+                      },
+                      verifyV2:async({runId})=>{
+                        manualVerified++;
+                        return {ok:true,runId:bad?'s02_'+('9'.repeat(32)):runId,
+                          state:'RECOVERY_VERIFIED',sha256:'a'.repeat(64),
+                          preparedSha256:'b'.repeat(64),sourceRows:30};
+                      }
+                    });
+                  const manual=await makeReviewed().manualV2Candidate();
+                  if(!manual.ok||manual.state!=='RECOVERY_VERIFIED'||
+                     manual.sourceRows!==30||manual.retentionSuccess!==false||
+                     manual.activation!=='OFF'||manualNative!==1||manualVerified!==1)
+                    throw Error('S02_PACKAGED_MANUAL_NATIVE_RECOVERY_UNQUALIFIED');
+                  const bad=await makeReviewed({bad:true,token:'5'}).manualV2Candidate();
+                  if(bad.ok!==false||bad.code!=='V2_NATIVE_OUTCOME_UNKNOWN')
+                    throw Error('S02_PACKAGED_WRONG_MANUAL_NATIVE_RECEIPT_ACCEPTED');
+                  let resolveDispatch,entered=false;
+                  const delayed=new Promise(resolve=>resolveDispatch=resolve);
+                  const concurrent=makeReviewed({delayed,token:'6'});
+                  const pending=concurrent.manualV2Candidate();
+                  for(let n=0;n<30&&manualNative<3;n++)await Promise.resolve();
+                  if(manualNative!==3)throw Error('S02_MANUAL_ASYNC_NOT_STARTED');
+                  const competing=await concurrent.manualV2Candidate();
+                  const competingDaily=await concurrent.tick();
+                  if(competing.code!=='BACKUP_INFLIGHT'||
+                     competingDaily.code!=='BACKUP_INFLIGHT')
+                    throw Error('S02_MANUAL_DAILY_CONCURRENT_DISPATCH');
+                  resolveDispatch();
+                  if((await pending).state!=='RECOVERY_VERIFIED'||
+                     manualNative!==3||manualVerified!==3)
+                    throw Error('S02_MANUAL_RECEIPT_AFTER_SERIALIZATION_MISSING');
                   db.close();secondDb.close();
-                  return {ok:true,actual,downloads,held:held.code};
+                  return {ok:true,actual,downloads,held:held.code,
+                    nativeManual:'EXACT_SOURCE_RECOVERY_AND_SINGLE_FLIGHT_VERIFIED'};
                 })().then(done).catch(e=>done({ok:false,code:String(e)}));"""
                 i15=call('POST',f'/session/{after}/execute/async',{'script':i15_code,'args':[]},timeout=90)
                 assert i15.get('ok') is True,i15
