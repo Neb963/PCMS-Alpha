@@ -2694,6 +2694,22 @@ def main():
                 call('POST',f'/session/{after}/url',{'url':url+'#settings'})
                 settings=execute(after,"return {button:!!document.getElementById('pcms-backup-export'),password:!!document.getElementById('pcms-backup-passphrase'),status:!!document.getElementById('pcms-backup-status')}")
                 assert settings=={'button':True,'password':True,'status':True},settings
+                # S02 B: new source-completeness action runs in the same installed
+                # XPI, reads the real synthetic historical IDB, and truthfully
+                # holds a source-incomplete legacy publication. v1 codec stays
+                # usable to preserve that historical record, not to bless it.
+                audit_button=execute(after,"const b=document.getElementById('pcms-backup-audit');if(b)b.click();return !!b")
+                assert audit_button is True,'S02 read-only source audit not packaged'
+                audit_status=''
+                for _ in range(50):
+                    audit_status=execute(after,"return document.getElementById('pcms-backup-audit-status')?.textContent||''")
+                    if 'Source-complete recovery HELD:' in audit_status or (
+                        'Local source-byte audit passed' in audit_status):
+                        break
+                    time.sleep(.1)
+                assert 'Source-complete recovery HELD: BACKUP_SOURCE_INCOMPLETE_' in audit_status,audit_status
+                assert 'No external effects' in audit_status,audit_status
+                print('B S02_PACKAGED_READONLY_SOURCE_RECOVERY_HOLD=PASS',flush=True)
                 code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const core=await import('./backup-core.mjs');
