@@ -4,9 +4,9 @@ import {createPortableBackupPayload,encodeBackupEnvelope,decodeBackupEnvelope} f
 import {filterOrdinaryAutomationJobs} from '../lib/automation-history.js';
 import {snapshotCanonical,consistentOrThrow,encodeIntegrated,decodeIntegrated,
   preflightSourceRecovery} from './backup-core.mjs';
-import {getPcmsBackupDonor} from './backup-auto-donor.mjs';
+import {waitForPcmsBackupDonor} from './backup-auto-donor.mjs';
 async function donor(api){
-  const data=await getPcmsBackupDonor().snapshot();
+  const data=await (await waitForPcmsBackupDonor()).snapshot();
   if(!data?.state||!Array.isArray(data.containers))throw Error('BACKUP_DONOR_UNAVAILABLE');
   return {state:data.state,containers:data.containers};
 }
@@ -19,7 +19,7 @@ async function storage(api){
 async function cookies(api,portable){
   const out=Object.create(null);
   for(const person of portable.personas){
-    const data=await getPcmsBackupDonor().cookies(person.sourceId);
+    const data=await (await waitForPcmsBackupDonor()).cookies(person.sourceId);
     if(!Array.isArray(data))throw Error('BACKUP_COOKIE_UNAVAILABLE');
     out[person.sourceId]=data;
   }

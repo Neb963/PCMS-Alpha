@@ -3141,12 +3141,17 @@ def main():
 
                 # CI diagnosis: never print donor values, identities or secrets.
                 donor_probe_script="""const done=arguments[arguments.length-1];
-                browser.runtime.sendMessage({type:'GET_SNAPSHOT'}).then(v=>done({
-                  ok:!!v?.state&&Array.isArray(v?.containers),
+                const port=browser.runtime.connect({name:'pcms-s02-backup-donor-readonly'});
+                let once=false;
+                const finish=data=>{if(once)return;once=true;
+                  done(data);try{port.disconnect()}catch{}};
+                port.onMessage.addListener(v=>finish({
+                  ok:v?.ok===true&&!!v?.state&&Array.isArray(v?.containers),
                   response:!!v,hasState:!!v?.state,
                   hasContainers:Array.isArray(v?.containers),
-                  keys:v&&typeof v==='object'?Object.keys(v).sort():[]
-                }),e=>done({ok:false,rejected:true,errorType:e?.name||'unknown'}));"""
+                  keys:v&&typeof v==='object'?Object.keys(v).sort():[]}));
+                port.onDisconnect.addListener(()=>finish({ok:false,disconnected:true}));
+                port.postMessage({action:'SNAPSHOT'});"""
                 def donor_probe(stage):
                     result=call('POST',f'/session/{after}/execute/async',
                       {'script':donor_probe_script,'args':[]},timeout=45)
