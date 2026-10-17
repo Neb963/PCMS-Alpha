@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import threading
 
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location("pcms_firefox_harness",ROOT/"scripts/browser-i00-smoke.py")
@@ -23,6 +24,61 @@ HOST_NAME="local.pcms.backup_v2"
 ADDON_ID="persona-route-manager@local"
 PASSWORD="synthetic-disposable-v2-native-vault-secret-2026"
 PORT=44448
+
+class PeakProcessRSS:
+    """Best-effort aggregate sampled RSS across this isolated WebDriver tree.
+
+    Process RSS includes shared pages in each process, so this is an upper
+    accounting sum, NOT unique PSS, VRAM or a capacity guarantee.
+    """
+    def __init__(self,root):
+        self.root=root
+        self.peak_kib=0
+        self.max_processes=0
+        self.native_observed=False
+        self.stop_event=threading.Event()
+        self.worker=threading.Thread(target=self._sample_loop,daemon=True)
+
+    def start(self):
+        self.worker.start()
+
+    def stop(self):
+        self.stop_event.set()
+        self.worker.join(timeout=3)
+
+    def _sample_loop(self):
+        while not self.stop_event.wait(0.12):
+            try:
+                table={}
+                for pid_path in Path("/proc").iterdir():
+                    if not pid_path.name.isdigit():continue
+                    pid=int(pid_path.name)
+                    try:
+                        fields=(pid_path/"stat").read_text().rsplit(")",1)[1].split()
+                        parent=int(fields[1])
+                        pages=int((pid_path/"statm").read_text().split()[1])
+                        table[pid]=(parent,pages)
+                    except (OSError,ValueError,IndexError):continue
+                descendants={self.root,os.getpid()}
+                old=-1
+                while len(descendants)!=old:
+                    old=len(descendants)
+                    descendants.update(pid for pid,(parent,_) in table.items()
+                                       if parent in descendants)
+                self.max_processes=max(self.max_processes,len(descendants))
+                page_kib=os.sysconf("SC_PAGE_SIZE")//1024
+                rss=sum(table[pid][1] for pid in descendants if pid in table)*page_kib
+                self.peak_kib=max(self.peak_kib,rss)
+                if not self.native_observed:
+                    for pid in descendants:
+                        try:
+                            if b"backup_v2_host.py" in (Path("/proc")/str(pid)/"cmdline").read_bytes():
+                                self.native_observed=True;break
+                        except OSError:continue
+            except (OSError,ValueError):
+                # A racing process exit cannot become a fabricated reading.
+                continue
+
 
 def register(home,name,target):
     directory=home/".mozilla/native-messaging-hosts"
@@ -251,6 +307,8 @@ def main():
     driver=Path(os.environ["GECKODRIVER_BINARY"])
     gecko=subprocess.Popen([str(driver),"--port",str(PORT),"--allow-system-access"],
                             stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    sampler=PeakProcessRSS(gecko.pid)
+    sampler.start()
     session=None
     try:
         for _ in range(60):
@@ -322,11 +380,21 @@ def main():
         assert restored.get("activation")=="OFF" and restored.get("held") is True
         print("H S02_ACTUAL_NATIVE_DISK_TO_FRESH_PROFILE_CANONICAL_INACTIVE_RESTORE=PASS",
               json.dumps(restored),flush=True)
+        assert sampler.peak_kib>0 and sampler.max_processes>=2, \
+            "H_AGGREGATE_OS_PROCESS_RSS_UNAVAILABLE"
+        print("H S02_AGGREGATE_OS_PROCESS_RSS_OBSERVED=PASS",
+              json.dumps({"peakSumRssKiB":sampler.peak_kib,
+                          "maxObservedProcesses":sampler.max_processes,
+                          "nativeHostProcessSeen":sampler.native_observed,
+                          "basis":"sampled procfs per-process RSS sum; shared pages counted multiple times",
+                          "scope":"disposable geckodriver/Firefox/native descendants plus Python driver"}),
+              flush=True)
         print("H S02_ACTUAL_REGISTERED_GECKO_NATIVE_PORT_SECRETS_FILE_AND_REOPEN=PASS",
               json.dumps({"xpiSha256":hashlib.sha256(archive.read_bytes()).hexdigest(),
                           "runs":len(seen),"rows":[v["rows"] for v in seen],
                           "firefox":str(browser),"host":HOST_NAME}),flush=True)
     finally:
+        sampler.stop()
         if session:harness.close(session)
         gecko.terminate()
         try:gecko.wait(timeout=5)
