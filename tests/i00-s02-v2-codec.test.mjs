@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
+import {runInNewContext} from 'node:vm';
 import {compileV2,streamV2Frames,decodeAuthenticatedV2} from '../src/ui/backup-v2-codec.mjs';
 import {digest,serializeClone} from '../src/ui/backup-core.mjs';
 import {createPortableBackupPayload,encodeBackupEnvelope,decodeBackupEnvelope}
@@ -83,4 +84,13 @@ test('S02 refuses incomplete source, unsupported donor or mutated source bytes b
   const changed=structuredClone(pcms);
   changed.stores.meta[0].value.record.candidate.blobs[0].base64='AA==';
   await assert.rejects(compileV2(changed,donor),/BACKUP_SOURCE_BYTE_MISMATCH/);
+});
+test('S02 bytes retain exact SHA256 across Firefox-like JS realm boundaries',async()=>{
+  const cross=runInNewContext('new Uint8Array([0,255,1,0,42])');
+  assert.equal(cross instanceof Uint8Array,false,'assert actual realm boundary');
+  assert.equal(ArrayBuffer.isView(cross),true);
+  const one=await digest(cross);
+  const two=await digest(new Uint8Array([0,255,1,0,42]));
+  assert.equal(one,two,'never hash typed-array string representation');
+  assert.notEqual(one,await digest('0,255,1,0,42'));
 });
