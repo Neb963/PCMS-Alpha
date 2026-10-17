@@ -20,7 +20,7 @@ function isolateFunction(source,begin,end,name,context) {
  assert.ok(start>=0 && stop>start, 'Production routing function present');
  return vm.runInNewContext(source.slice(start,stop)+'\n'+name+';',context);
 }
-function harness(bg,{managed=true,admitted=false,mode='proxy',interrupt=false}={}) {
+function harness(bg,{managed=true,admitted=false,mode='proxy',interrupt=false,extension=false}={}) {
  let timestamp=1000,resolveCalls=0,denyLedger=false;
  const grant=createProtectedAdmission({readCommitted:()=>denyLedger?{allow:false}:{allow:true,committed:record},
   now:()=>timestamp,donorBootId:'boot_001'});
@@ -31,10 +31,13 @@ function harness(bg,{managed=true,admitted=false,mode='proxy',interrupt=false}={
  const state={global:{blockSpeculative:false,enforcePrivacyControls:false,strictProxyVerification:false},profiles:{'firefox-container-001':managed?profile:{...profile,pcmsBindingId:null}}};
  const ctx={pcmsAdmission:grant,BLACKHOLE_PROXY:{type:'http',host:'127.0.0.1',port:9},
   initialize:async()=>{},getState:async()=>state,extensionBaseUrl:'moz-extension://test/',
-  isExtensionOrigin:()=>false,getRouteTestRequestOverride:()=>null,
+  isExtensionOrigin:()=>extension,getRouteTestRequestOverride:()=>null,
   isRouteTestFetchUrl:()=>false,routeDecision:()=>({mode,route:fakeRoute}),
   securityState:{privacySafe:true},recordBlock:(_d,why)=>requests.push(why),
   buildProxyInfo:()=>({type:'socks',host:'127.0.0.1',port:1080}),
+  isPcmsProviderUrl:vm.runInNewContext(bg.slice(
+    bg.indexOf('function isPcmsProviderUrl(raw) {'),
+    bg.indexOf('const pcmsAdmission = createProtectedAdmission({'))+'\nisPcmsProviderUrl;'),
   proxyInfoMatches:()=>true,directInfoIsDirect:()=>true,
   mullvadRuntime:{resolve:async()=>{resolveCalls++;if(interrupt)grant.invalidateNow({bindingId:key.bindingId});return fakeRoute;}}};
  const proxy=isolateFunction(bg,'async function handleProxyRequest(details) {','function recordBlock(details, reason) {',
@@ -70,4 +73,15 @@ test('admitted managed session rejects Direct and revocation while resolver awai
  const revoked=harness(bg,{admitted:true,interrupt:true});
  assert.equal((await revoked.proxy(revoked.details))[0].port,9);
  assert.deepEqual(JSON.parse(JSON.stringify(await revoked.before(revoked.details))),{cancel:true});
+});
+
+test('extension-origin Perchance requests never inherit Direct exemption; unrelated extension unaffected',async()=>{
+ const {stage}=await buildI00({packageArchive:false});
+ const bg=await readFile(path.join(stage,'background.js'),'utf8');
+ const h=harness(bg,{managed:false,extension:true});
+ const provider={...h.details,url:'https://perchance.org/account'};
+ assert.equal((await h.proxy(provider))[0].port,9);
+ assert.deepEqual(JSON.parse(JSON.stringify(await h.before(provider))),{cancel:true});
+ assert.equal((await h.proxy({...provider,url:'https://github.com/example'})).type,'direct');
+ assert.deepEqual(JSON.parse(JSON.stringify(await h.before({...provider,url:'https://github.com/example'}))),{});
 });
