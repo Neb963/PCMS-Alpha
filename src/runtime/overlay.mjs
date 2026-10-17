@@ -588,7 +588,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   bg = substituteOnce(bg, "  if (extensionRequest) {\n    if (isRouteTestFetchUrl(details.url)) {", "  if (extensionRequest) {\n    if(isPcmsProviderUrl(details.url)){\n      recordBlock(details,'pcms-unbound-extension-provider');return {cancel:true};\n    }\n    if (isRouteTestFetchUrl(details.url)) {", "S01 extension account blocking bypass denied");
   bg = substituteOnce(bg,"  readCommitted: key => pcmsCommittedObserver.readCommitted(key)\n});\nasync function handleProxyRequest(details) {","  readCommitted: () => ({allow:false})\n});\ninstallDonorAdmissionFence(pcmsAdmission);\nasync function handleProxyRequest(details) {",'install donor synchronous revoker');
   bg = substituteOnce(bg,"attachPcmsGuard({\n  initialize, securityState,\n  shared:",
-  "attachPcmsGuard({\n  initialize, securityState,\n  readRuntimeWitness:()=>nativeRequest('pcms.runtime_witness',{},6000),\n  shared:",
+  "attachPcmsGuard({\n  initialize, securityState,\n  readRuntimeWitness:()=>nativeRequest('pcms.runtime_witness',{},6000),\n  verifyFixedCandidate:({routeId,contextId})=>nativeRequest('pcms.verify_exit',{route_id:routeId,context_id:contextId},45000),\n  shared:",
   'S01 guard native witness binding');
   // Preserve donor's normalized durable binding tag in the BUILD COPY only.
   const donorStoragePath = path.join(stage, 'lib/storage.js');
