@@ -44,3 +44,25 @@ export function closeQualifiedWindow(previous,next,{maxGapMs,uncertaintyMs=0,
  return {creditedMs:total,coveredMs:Math.max(0,end-start),
    reason:total?'QUALIFIED':'ELIGIBILITY_EXPIRED'};
 }
+
+const witnessInt=v=>Number.isSafeInteger(v)&&v>=1;
+const witnessId=v=>typeof v==='string'&&/^[a-z0-9-]{8,128}$/i.test(v);
+const positiveDecimal=v=>typeof v==='string'&&/^\d+$/.test(v)&&BigInt(v)>0n;
+// The sample is an observation of the ORIGINAL, browser-owned native pipe;
+// the returned counters alone never grant healthy time or route admission.
+export function validateNativeWitness(sample){
+ if(!sample||sample.ok!==true||sample.schema!==1||
+    sample.clockSemantics!=='LINUX_MONOTONIC_EXCLUDES_SUSPEND_BOOTTIME_INCLUDES_SUSPEND'||
+    !witnessInt(sample.sequence)||
+    !['observerConnectionId','nativeLifetimeId','systemBootId','observerEpoch']
+       .every(name=>witnessId(sample[name]))||
+    !positiveDecimal(sample.hostAwakeNs)||!positiveDecimal(sample.hostBootNs)||
+    BigInt(sample.hostBootNs)<BigInt(sample.hostAwakeNs))
+   return {ok:false,code:'NATIVE_WITNESS_UNQUALIFIED'};
+ return {ok:true,witness:{
+   observerConnectionId:sample.observerConnectionId,
+   nativeLifetimeId:sample.nativeLifetimeId,systemBootId:sample.systemBootId,
+   observerEpoch:sample.observerEpoch,sequence:sample.sequence,
+   hostAwakeNs:sample.hostAwakeNs,hostBootNs:sample.hostBootNs
+ }};
+}
