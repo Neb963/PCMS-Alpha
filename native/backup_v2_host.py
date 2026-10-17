@@ -41,16 +41,24 @@ def _require(ok, code):
 
 def _safe_root(root, create=False):
     """Root selected by trusted installation only; never from a message."""
-    root = Path(root)
-    if create:
-        root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if not root.exists():
-        return None
-    for folder in (root, *root.parents):
+    # Path.resolve() would follow a symlink and silently bless its target.
+    # Examine every existing component *before* creating any missing child.
+    root = Path(os.path.abspath(root))
+    ancestry = (*reversed(root.parents), root)
+    for folder in ancestry:
+        if folder.is_symlink():
+            raise BackupError("BACKUP_ROOT_UNSAFE")
         if folder.exists():
             info = folder.lstat()
             _require(stat.S_ISDIR(info.st_mode) and
                      not stat.S_ISLNK(info.st_mode), "BACKUP_ROOT_UNSAFE")
+    if create:
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not root.exists():
+        return None
+    for folder in ancestry:
+        if folder.is_symlink() or not stat.S_ISDIR(folder.lstat().st_mode):
+            raise BackupError("BACKUP_ROOT_UNSAFE")
     _require(not bool(root.stat().st_mode & 0o077), "BACKUP_ROOT_PERMISSIONS")
     return root
 
