@@ -156,9 +156,31 @@ test('S02 F3 heterogeneous 50/1024 fleet: thousands of distinct raw assets and l
   const data=Object.fromEntries(Array.from({length:50},(_,i)=>
     ['gm-values:stress-'+i,{generators:Array.from({length:45},
       (_,j)=>('src-'+i+'-'+j+'-').repeat(20))}]));
-  const rawDonor=createPortableBackupPayload({state:{},containers:[],
-    userscriptData:data,selection:{kind:'full'}});
+  const donorState={profiles:{},scripts:{},routes:{},workflows:{}};
+  const containers=[],cookiesByProfile={},syntheticValues={};
+  for(let i=0;i<50;i++){
+    const context='firefox-container-'+(200+i),script='script-'+i;
+    donorState.profiles[context]={containerId:context,managed:true,
+      routeId:'__block__',name:'Restorable Synthetic '+i,
+      scriptIds:[script],personaUid:undefined};
+    donorState.scripts[script]={id:script,name:'Synthetic Script '+i,
+      code:'// synthetic source '+i+'\n'+('var a='+i+';').repeat(30)};
+    containers.push({cookieStoreId:context,name:'Restorable Synthetic '+i,
+      color:'blue',icon:'fingerprint'});
+    cookiesByProfile[context]=[{name:'synthetic-'+i,
+      value:'disposable-'+i+'-'+('x'.repeat(120)),domain:'example.invalid',
+      path:'/',secure:true,httpOnly:true}];
+    syntheticValues['gm-values:'+script]={sourceKey:'synthetic-'+i,
+      data:('payload-'+i+'-').repeat(400)};
+  }
+  const rawDonor=createPortableBackupPayload({state:donorState,containers,
+    cookiesByProfile,userscriptData:syntheticValues,selection:{kind:'full'}});
+  assert.equal(rawDonor.personas.length,50);
+  assert.equal(rawDonor.scripts.length,50);
+  assert.equal(Object.keys(rawDonor.cookies).length,50);
+  assert.equal(Object.keys(rawDonor.gmValues).length,50);
   const donor=await encodeBackupEnvelope({payload:rawDonor,password:passphrase});
+  assert.ok(donor.length>100000,'donor must be materially sized, not empty');
   const plan=await compileV2(pcms,donor);
   assert.equal(plan.terminal.canonicalRows,1074);
   assert.ok(plan.terminal.uniqueBlobs>3000,
@@ -214,6 +236,10 @@ test('S02 F3 heterogeneous 50/1024 fleet: thousands of distinct raw assets and l
       scanV2AuthenticatedFrames(segments()),{
         password:passphrase,decodeDonor:decodeBackupEnvelope});
     assert.equal(decoded.pcms.stores.meta.length,1074);
+    assert.equal(decoded.donor.personas.length,50);
+    assert.equal(decoded.donor.scripts.length,50);
+    assert.equal(Object.keys(decoded.donor.cookies).length,50);
+    assert.equal(Object.keys(decoded.donor.gmValues).length,50);
     assert.equal(decoded.inventory.uniqueBlobs,plan.terminal.uniqueBlobs);
     for(const i of [0,31,127,511,1023]){
       const record=decoded.pcms.stores.meta.find(x=>x.key==='stage-history:stress-'+i);
@@ -224,7 +250,11 @@ test('S02 F3 heterogeneous 50/1024 fleet: thousands of distinct raw assets and l
         pcms.stores.meta[50+i].value.record.previous);
     }
     const stats={accounts:50,historyRows:1024,canonicalRows:1074,
-      uniqueSourceBlobs:result.uniqueBlobs,plaintextBytes:content.length,
+      uniqueSourceBlobs:result.uniqueBlobs,
+      donorEncryptedBytes:new TextEncoder().encode(donor).length,
+      donorPersonas:decoded.donor.personas.length,
+      donorCookies:Object.keys(decoded.donor.cookies).length,
+      plaintextBytes:content.length,
       encryptedDiskBytes:result.encryptedDiskBytes,
       peakNativeRssKiB:result.peakNativeRssKiB,
       nodeHeapDelta:process.memoryUsage().heapUsed-memBefore.heapUsed,
