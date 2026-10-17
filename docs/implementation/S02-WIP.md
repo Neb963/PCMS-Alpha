@@ -88,3 +88,60 @@ The independent `COMMENTED` review `5559457184` evaluated `cf8262d7d…` and req
 - **CI discipline** earlier first corrective branch runs diagnosed actual failed Native FD/quarantine tests, corrected with accurate identity/fd oracles, then diagnosed installed-Firefox I16 plan drift. All changes are coherent commits on **existing** PR #24; no protected CI strategy, developer hosts, real provider or production profile changed.
 
 Exact up-to-date Git SHA/tree, XPI digest, final CI/Firefox outcome and pending re-review must be pinned on PR #24 after the final run and GitHub readback; this ledger makes no unsupported claim about still-pending checks. Status is **PARTIAL / NOT PROMOTED**. A different authorized independent reviewer must re-review the final code/format; privileged host testing separately requires narrow installation authority. Do not start S03.
+
+
+## S02 E-06 continuation ledger — installed native, measured evidence (2026-10-17)
+
+**Gate:** PARTIAL / independent E-06 still CHANGES REQUIRED. No merge, no
+production activation, no S03. These are *separately tiered* evidence records;
+do not convert a successful H step within a failed parent run into full CI PASS.
+
+**Re-established starting point:** PR #24 draft, main
+`5fc070a1136b076d957581fd890d5b49f6ccda37`, E-06 reviewed
+`cf8262d7db3348b968f203bd4cfc3d5367c8f60a` followed by corrective
+R1–R6 commits, source v2 native host and restored-canonical improvements.
+
+**Observed actual completed evidence:**
+
+| Tier / run | Actual observations | Limit |
+| --- | --- | --- |
+| D; fast tests on post-R1–R6 candidates | Diverse **50/1,024** source workload: **3,332** unique blobs, **5,009,728** plaintext bytes, **5,009,794** encrypted disk bytes, native high-water **42,512 KiB RSS**, Node process RSS delta **67,743,744 bytes**, approximately **5,699 ms**. | Node/native sampled separately, not simultaneous total or operator fleet guarantee. |
+| D; >64 MiB pre-dedup fixture | **170,307,124** serialized pre-dedup bytes reduced to **522,157** V2 plaintext bytes with preserved 76 stage-history rows; observed Node heap increase **700,945,048 bytes**. | Explicit evidence of a large heap footprint; NOT a constant-memory claim. |
+| B; installed source-heavy Firefox | 50 accounts, 1,024 historical records, 2,049 unique blobs, 2,401,713 plaintext bytes, 49 inactive IndexedDB fragments and approximately 5 MiB storage growth; controlled source rehydration and no activation. | B test uses a synthetic native terminal receipt, not native host-H. |
+| H-CI; run [39071954993](https://github.com/Neb963/PCMS-Alpha/actions/runs/39071954993), head `9809511b012fa09200fef96c248fcf88ce314955` | Actual installed XPI SHA-256 `5675cdfd281b4fe9778ad1f0530e3a15da70b7236d6c44ec7e6f386336fc92fd`; two separately qualified/disk-reopened files, **1,075 canonical rows each**, 50 synthetic donor Personas and **2,048** audited historical source manifests restored into a second Firefox profile, canonical IndexedDB independently read back and I16 hold retained. OS D-Bus/Secret Service and dedicated native executable were genuine. | H **step PASSED** but parent CI **FAILED** later on a B harness concurrency assertion; this is NOT exact-head acceptance. Donor decoded/inactive, not applied to real PersonaMonkey controller. No real Fedora/provider data. |
+
+**Implemented since the original review:** full native run/cut/file journal,
+source closure and independently authenticated terminal; single-flight guarded
+I15 daily and manually addressed v2 transport; review-fenced production
+`RUN_V2_MANUAL`; actual host-vault/disk binding in disposable CI; fresh
+profile no-origin-ledger native qualification and guarded canonical recovery;
+destination file-retention truth wins over imported foreign receipts; automated
+regressions for corrupt/mismatched frames, lost ACK, direct URI/root/path
+injection, retained-history ambiguities, stale plan changes, concurrent
+requests and wrong key. The synthetic manual/B harness now waits for an
+observable dispatch handshake, not microtask polling.
+
+**Current test infrastructure:** standard public GitHub-hosted runner and
+existing required workflow; `scripts/s02-ci-native-host.py` creates an
+owner-only temporary HOME, D-Bus session, real Secret Service, exact Firefox
+Developer Edition and actual registered native manifests, and then destroys
+the context. It also samples aggregate `/proc` per-process resident memory
+during source-heavy recovery. Such a sum double counts shared pages, is not
+PSS/VRAM, and will be reported **only from a completed exact-head CI log**;
+there is no invented fleet ceiling.
+
+**Incomplete/blocked:** exact post-documentation HEAD checks; independent
+cryptographic/format/security signoff; installed-H crash/lost-ACK, many-writer
+and 15-file retention adversarial proof beyond existing D/B cases; full
+source-heavy *donor-controller application* and real UID/route inactivity
+under fresh-profile import rather than donor decode alone; supportable
+long-running aggregate memory upper bound and >4 MiB row continuation;
+actual operator Fedora and Perchance effects. The native
+`RECOVERY_VERIFIED` state does not transfer publish, route, session,
+ownership, approval or controller authority.
+
+**Quarantine and compatibility:** keep v1 read/restore, no automatic I17
+CREATE/RENAME on batch `batch_e2c328e54f9c4a6ab89f1084134fde52`
+or slug `pcms-test-esr-chain-20261015-a01`; no `per-gens` writeback or
+live Perchance effect. PR remains draft; an independently qualified E-06
+reviewer must decide the actual final head/tree and outstanding holds.
