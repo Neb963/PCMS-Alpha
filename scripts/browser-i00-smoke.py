@@ -3139,6 +3139,21 @@ def main():
                 assert stage_result.get('ok') is True,stage_result
                 print('B S02_INACTIVE_STAGE_BLOCKS_PARTIAL_AUTH_AND_REOPENS_EXACT_BYTES=PASS',flush=True)
 
+                # CI diagnosis: never print donor values, identities or secrets.
+                donor_probe_script="""const done=arguments[arguments.length-1];
+                browser.runtime.sendMessage({type:'GET_SNAPSHOT'}).then(v=>done({
+                  ok:!!v?.state&&Array.isArray(v?.containers),
+                  response:!!v,hasState:!!v?.state,
+                  hasContainers:Array.isArray(v?.containers),
+                  keys:v&&typeof v==='object'?Object.keys(v).sort():[]
+                }),e=>done({ok:false,rejected:true,errorType:e?.name||'unknown'}));"""
+                def donor_probe(stage):
+                    result=call('POST',f'/session/{after}/execute/async',
+                      {'script':donor_probe_script,'args':[]},timeout=45)
+                    print('B S02_DONOR_WITNESS_'+stage+'=',result,flush=True)
+                    return result
+                assert donor_probe('BEFORE_STRESS').get('ok') is True
+
                 # S02 B F3: unique source assets and revisions, actual Firefox
                 # IndexedDB second-pass restore. No native privilege/source
                 # provider effect, and the native terminal is synthetic.
@@ -3229,6 +3244,8 @@ def main():
                 print('B S02_HETEROGENEOUS_50_1024_SOURCE_IDB_INACTIVE_RECOVERY=PASS',
                       fleet_result,flush=True)
 
+                assert donor_probe('AFTER_STRESS').get('ok') is True
+
                 code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const core=await import('./backup-core.mjs');
@@ -3281,6 +3298,8 @@ def main():
                         'browser download not confirmed:' in backup_status):
                         break
                     time.sleep(.25)
+                if 'Browser reported complete (tier 2)' not in backup_status:
+                    donor_probe('MANUAL_FAILURE')
                 assert 'Browser reported complete (tier 2)' in backup_status,backup_status
                 assert 'Exact on-disk bytes have NOT been independently re-read' in backup_status,backup_status
                 receipt=execute(after,"return document.getElementById('pcms-overview-backup')?.textContent||''")
