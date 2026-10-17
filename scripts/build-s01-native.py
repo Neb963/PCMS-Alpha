@@ -43,10 +43,10 @@ def build():
     # byte-identical. The new command cannot accept caller-selected endpoints.
     daemon_original=ROOT / "donor/personamonkey/native/routerd.py"
     daemon=daemon_original.read_text(encoding="utf-8")
-    daemon=unique_replace(daemon, "import time\\n",
-       "import time\\nfrom pcms_probe import measure_prepared_exit\\n", "daemon import")
+    daemon=unique_replace(daemon, "import time\n",
+       "import time\nfrom pcms_probe import measure_prepared_exit\n", "daemon import")
     daemon=unique_replace(daemon,
-       '        if cmd == "status":\\n            return self.status()',
+       '        if cmd == "status":\n            return self.status()',
        '''        if cmd == "pcms.verify_exit":
             if set(req) - {"id", "command", "route_id", "context_id"}:
                 raise ValueError("fixed verifier rejects extra fields")
