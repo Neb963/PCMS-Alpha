@@ -72,3 +72,81 @@ Review source: https://github.com/Neb963/PCMS-Alpha/pull/24#pullrequestreview-55
 **Evidence policy:** D native disposable roots and synthetic browser effect ledgers; B actual persistently installed packaged Firefox with synthetic native responses; H **NOT TESTED** for authorized installed privileged v2 host/vault/cold-restart; GIT limited to implementation PR effects; L provider/private-generator writes **NOT AUTHORIZED/NOT TESTED**. Do not assert S02/E-06 PASS or merge/enable host before genuinely independent approval.
 
 The original I17 batch `batch_e2c328e54f9c4a6ab89f1084134fde52` and slug `pcms-test-esr-chain-20261015-a01` remain under absolute no-auto-CREATE/RENAME quarantine, including restored and migrated profiles. Unknown provider/native effects are not replayed.
+
+
+## E-06 follow-up: installed native H recovery and production-entrypoint candidate (2026-10-17)
+
+**Independent review status: CHANGES REQUIRED, still not approved.** This
+section supersedes earlier statements that *no* disposable v2 host-H test had
+ever run, but does not retroactively approve the frozen earlier review HEAD or
+the subsequent source changes. Only an independent reviewer can close R1–R6
+against the new exact PR HEAD/tree. PR #24 remains DRAFT/UNMERGED.
+
+### Verified host-H precursor and exact scope
+
+The GitHub-hosted ephemeral-runner witness at
+[CI run 39071954993](https://github.com/Neb963/PCMS-Alpha/actions/runs/39071954993)
+for commit `9809511b012fa09200fef96c248fcf88ce314955` passed its individual
+privileged-host step, while its overall required CI run **FAILED** later in a
+packaged-Firefox manual-concurrency test. The H step independently observed:
+
+- Pinned Firefox Developer Edition 154.0b10, persistent XPI with actual Gecko
+  ID `persona-route-manager@local`, registered
+  `local.pcms.backup_v2` and `local.pcms.backup_vault`, an OS child host,
+  disposable D-Bus and real Secret Service secret store/read. Everything ran
+  beneath a freshly created temporary HOME and disposable profiles; no
+  operator Fedora filesystem/profile, provider or production backup was used.
+- Two actual authenticated, independently reopened native filesystem backups,
+  each with **1,075 canonical rows**; the source-heavy fixture included **50
+  synthetic account/Persona records** and **1,024 distinct stage histories**.
+  The fresh-profile recovery independently inspected the qualified native
+  terminal, authenticated its file again, decoded the real donor package with
+  **50 synthetic Personas**, verified **2,048 referenced source manifests**
+  and wrote/read back the prepared canonical stores in a separate installed
+  Firefox profile under an actual durable I16 restore hold.
+- The fresh profile remained `activation=OFF`, controller `INACTIVE`,
+  with no inherited browser-native authority, provider effects, source
+  publication, route assignment or account rebinding. The donor package was
+  independently decrypted/decoded and held **for review**, not applied to
+  PersonaMonkey's live donor container/profile controller.
+
+**Evidence classification:** H-CI = genuine installed native messaging +
+actual OS Secret Service + actual fixed-root disk readback and fresh-profile
+*canonical* recovery with synthetic data. It is **not** operator-Fedora H,
+real-persona live-route H, provider L, or full donor-controller application.
+The terminal-review plan in the fresh H harness is a disclosed disposable
+synthetic plan; it is not independent human review. B = packaged Firefox
+application and negative guards with synthetic external receipts. D = native
+filesystem and deterministic adversarial tests. Only the exact current
+postdocumentation candidate CI can authorize a green required-workflow claim.
+
+### Product wiring, admission and remaining signoff
+
+- The installed I15 protected background port now recognizes
+  `RUN_V2_MANUAL`. Both daily and manual paths share the actual source-cut
+  and native recovery modules; success requires full native-qualified
+  source/donor receipt, exact run/hash and inactivity. An inventory-only
+  manual receipt no longer reports a success or retention credit.
+- The **production** `reviewedV2` authority remains **false**; the command is
+  denied with `BACKUP_V2_REVIEW_REQUIRED` even when an unrelated host is
+  installed. CI's injected review authority is construction-only and not a
+  user/storage/browser toggle. No auto activation or production installation.
+- The v2 fresh-profile module requires a qualified native inspect receipt,
+  separate disk authentication, another same-file native second pass, source
+  closure, explicit archived-account inclusion choices and a pre-existing
+  global I16 hold. Imported backup-native leases and receipts are inert
+  historical facts; destination backup/retention provenance is protected.
+- Pending E-06 independent closure: prove end-to-end *donor-controller*
+  application in the fresh profile (versus decoded inactive donor data);
+  review adversarial cross-profile credentials/Persona UID/removals/exit
+  exclusions, native concurrency and post-crash installed-host recovery,
+  same-UID storage races, large single-row/long-fleet memory limits and
+  source-history completeness; verify 14-success retention with held uncertain
+  files and final protected-head CI. Genuine Fedora and Perchance evidence
+  remain unavailable and are not implied.
+
+**Nonnegotiable holds:** v1 backward compatibility, original I17 unknown
+batch `batch_e2c328e54f9c4a6ab89f1084134fde52` and slug
+`pcms-test-esr-chain-20261015-a01` no-auto-CREATE/RENAME quarantine, no
+private `per-gens` writeback, no provider effects, no production v2 host
+activation, no S03 and no merge without new independent E-06 approval.
