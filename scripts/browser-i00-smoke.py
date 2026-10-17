@@ -3480,7 +3480,7 @@ def main():
                   // No actual native file or provider effect in this case;
                   // the separate H witness exercises the installed OS host.
                   let manualNative=0,manualVerified=0;
-                  const makeReviewed=({bad=false,delayed=null,token='4'}={})=>
+                  const makeReviewed=({bad=false,delayed=null,onDispatch=null,token='4'}={})=>
                     runnerModule.createAutoRunner(api,{
                       open:async()=>db,reviewedV2:async()=>true,
                       newId:()=>token.repeat(32),
@@ -3489,6 +3489,7 @@ def main():
                         donorEnvelope:'synthetic-b-donor-only'}),
                       dispatchV2:async({runId})=>{
                         manualNative++;
+                        onDispatch?.();
                         if(delayed)await delayed;
                         return {ok:true,runId,state:'AUTHENTICATED_INVENTORY_ONLY',
                           ciphertextSha256:'a'.repeat(64)};
@@ -3508,12 +3509,15 @@ def main():
                   const bad=await makeReviewed({bad:true,token:'5'}).manualV2Candidate();
                   if(bad.ok!==false||bad.code!=='V2_NATIVE_OUTCOME_UNKNOWN')
                     throw Error('S02_PACKAGED_WRONG_MANUAL_NATIVE_RECEIPT_ACCEPTED');
-                  let resolveDispatch,entered=false;
+                  let resolveDispatch,signalDispatch;
                   const delayed=new Promise(resolve=>resolveDispatch=resolve);
-                  const concurrent=makeReviewed({delayed,token:'6'});
+                  const arrived=new Promise(resolve=>signalDispatch=resolve);
+                  const concurrent=makeReviewed({delayed,token:'6',
+                    onDispatch:signalDispatch});
                   const pending=concurrent.manualV2Candidate();
-                  for(let n=0;n<30&&manualNative<3;n++)await Promise.resolve();
-                  if(manualNative!==3)throw Error('S02_MANUAL_ASYNC_NOT_STARTED');
+                  await Promise.race([arrived,new Promise((_,reject)=>
+                    setTimeout(()=>reject(Error('S02_MANUAL_DISPATCH_NOT_REACHED')),5000))]);
+                  if(manualNative!==3)throw Error('S02_MANUAL_DISPATCH_WRONG_COUNT');
                   const competing=await concurrent.manualV2Candidate();
                   const competingDaily=await concurrent.tick();
                   if(competing.code!=='BACKUP_INFLIGHT'||
