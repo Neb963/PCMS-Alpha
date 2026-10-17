@@ -2853,6 +2853,96 @@ def main():
                 assert check.get('ok') is True,check
                 print('B S02_INSTALLED_V2_IDB_EFFECT_JOURNAL_AND_SYNTHETIC_HOST_NO_REPLAY=PASS',flush=True)
 
+                # S02 B: real packaged candidate self-verifier, actual IDB
+                # encrypted staging and donor/source decoder. The native port
+                # is an independent synthetic byte/effect ledger; NOT host H.
+                v2_verify="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const v2=await import('./backup-v2-codec.mjs');
+                  const session=await import('./backup-v2-session.mjs');
+                  const checker=await import('./backup-v2-verify.mjs');
+                  const donor=await import('../lib/backup-package.js');
+                  const open=()=>new Promise((resolve,reject)=>{
+                    const req=indexedDB.open('s02-v2-verify-'+crypto.randomUUID(),1);
+                    req.onupgradeneeded=()=>req.result.createObjectStore('meta',{keyPath:'key'});
+                    req.onsuccess=()=>resolve(req.result);
+                    req.onerror=()=>reject(req.error);
+                  });
+                  const db=await open(),runId='s02_'+crypto.randomUUID().replaceAll('-','');
+                  const password='S02_disposable_b_verifier_password';
+                  const portable=donor.createPortableBackupPayload({
+                    state:{},containers:[],selection:{kind:'full'}});
+                  const envelope=await donor.encodeBackupEnvelope({payload:portable,password});
+                  const empty={schema:1,stores:{entities:[],operations:[],
+                    events:[],meta:[],observations:[]}};
+                  const plan=await v2.compileV2(empty,envelope);
+                  const raw=new Uint8Array(plan.plaintextBytes),parts=[];
+                  let cursor=0;
+                  for await(const chunk of v2.streamV2Frames(plan)){
+                    raw.set(chunk,cursor);cursor+=chunk.length;
+                  }
+                  const nativeSteps=[],cipher='c'.repeat(64);
+                  const native=()=>({close(){},async exchange(req){
+                    nativeSteps.push(req.action);
+                    if(req.action==='export.begin')return {
+                      ok:true,state:'OPEN_OBSERVED',runId:req.runId};
+                    if(req.action==='export.append')return {
+                      ok:true,state:'APPEND_OBSERVED',runId:req.runId,
+                      sequence:req.sequence,acceptedBytes:0};
+                    if(req.action==='restore.begin')return {
+                      ok:true,runId:req.runId,state:'INACTIVE_STAGING_REQUIRED',
+                      plaintextBytes:raw.length,sha256:cipher};
+                    if(req.action==='restore.read'){
+                      const size=30000,start=req.sequence*size;
+                      const fragment=raw.subarray(start,start+size);
+                      const complete=start+fragment.length===raw.length;
+                      return {ok:true,runId:req.runId,sequence:req.sequence,
+                        bytes:btoa(String.fromCharCode(...fragment)),complete,
+                        state:complete?'AUTHENTICATED_SECOND_PASS':
+                          'INACTIVE_STAGING_FRAGMENT',
+                        ...(complete?{sha256:cipher}:{})};
+                    }
+                    if(req.action==='archive.recovery.complete')return {
+                      ok:true,runId:req.runId,state:'RECOVERY_VERIFIED',
+                      sha256:cipher,activation:'OFF'};
+                    if(req.action==='restore.abort')return {ok:true,
+                      runId:req.runId,state:'RESTORE_READER_ABORTED'};
+                    throw Error('BAD_TEST_NATIVE');
+                  }});
+                  const ledger=session.createV2Ledger(db);
+                  let row=await ledger.claim(runId,'d'.repeat(64),raw.length);
+                  for(const [from,to,patch] of [
+                    ['PREPARED','CREATE_POSSIBLE',{}],
+                    ['CREATE_POSSIBLE','OPEN_OBSERVED',{}],
+                    ['OPEN_OBSERVED','APPEND_POSSIBLE',{}],
+                    ['APPEND_POSSIBLE','OPEN_OBSERVED',
+                     {acceptedBytes:raw.length,nextSequence:1}],
+                    ['OPEN_OBSERVED','FINISH_POSSIBLE',{}],
+                    ['FINISH_POSSIBLE','WRITTEN_UNVERIFIED',{}],
+                    ['WRITTEN_UNVERIFIED','AUTHENTICATED_INVENTORY_ONLY',
+                     {ciphertextSha256:cipher,observedBlobs:0}]
+                  ])row=await ledger.advance(runId,row.revision,from,to,patch);
+                  const restored=await checker.verifyV2StoredArchive({
+                    api:browser,db,runId,password,
+                    assertNotRestoring:async()=>true,
+                    connectionFactory:native
+                  });
+                  const after=await ledger.inspect(runId);
+                  db.close();
+                  done({ok:restored.ok&&restored.state==='RECOVERY_VERIFIED'&&
+                    after.state==='RECOVERY_VERIFIED'&&
+                    after.preparedSha256===restored.preparedSha256&&
+                    restored.activation==='OFF'&&
+                    restored.sourceRows===0&&
+                    nativeSteps.includes('archive.recovery.complete'),
+                    actions:nativeSteps.length,status:after.state});
+                })().catch(e=>done({error:String(e)}));"""
+                verified_result=call('POST',f'/session/{after}/execute/async',
+                                      {'script':v2_verify,'args':[]},timeout=90)
+                assert verified_result.get('ok') is True,verified_result
+                print('B S02_INSTALLED_READONLY_RESTORABLE_NATIVE_CANDIDATE_LEDGERS_AND_EPHEMERAL_IDB=PASS',flush=True)
+
+
                 # S02 B: real existing daily I15 runner and durable I15 claim
                 # admit a source-complete v2 candidate only through a trusted
                 # background-only review-injected branch. Mock native ledger
