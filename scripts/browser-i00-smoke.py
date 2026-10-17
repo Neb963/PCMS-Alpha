@@ -2992,7 +2992,8 @@ def main():
                       ['main.pjs',text.encode('output="source-'+i+'";')],
                       ['index.html',text.encode('<b>source</b>')],
                       ['src/asset.bin',Uint8Array.from({length:80+i%512},
-                        (_,n)=>(i*37+n*19+(n>>3))&255)]
+                        (_,n)=>n===0?(i&255):n===1?((i>>8)&255):
+                          (i*37+n*19+(n>>3))&255)]
                     ];
                     const files=await Promise.all(raw.map(async([path,bytes])=>({
                       path,size:bytes.length,sha256:await core.digest(bytes)})));
