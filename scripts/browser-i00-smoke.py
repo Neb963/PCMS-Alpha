@@ -2813,6 +2813,51 @@ def main():
                            {'script':v2_session,'args':[]},timeout=90)
                 assert check.get('ok') is True,check
                 print('B S02_INSTALLED_V2_IDB_EFFECT_JOURNAL_AND_SYNTHETIC_HOST_NO_REPLAY=PASS',flush=True)
+                # S02 B: actual separate Firefox IndexedDB staging is
+                # strictly inactive until full second-pass native receipt,
+                # and survives DB reopen without promoting partial fragments.
+                v2_stage="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const module=await import('./restore-v2-inactive-stage.mjs');
+                  const digest='a'.repeat(64),id='s02_'+('f'.repeat(32));
+                  let authorized=true;
+                  const guard=()=>Promise.resolve(authorized);
+                  let db=await module.openV2StageDB();
+                  let stage=module.createV2InactiveStage(db,{assertHeld:guard});
+                  await stage.begin(id,{state:'INACTIVE_STAGING_REQUIRED',
+                    plaintextBytes:6,sha256:digest});
+                  const part1=new Uint8Array([0,255,1]);
+                  const part2=new Uint8Array([17,0,42]);
+                  const a=await stage.append(id,0,part1);
+                  let early=false;
+                  try{const it=stage.fragments(id);await it.next();}
+                  catch{early=true;}
+                  authorized=false;let guardFailed=false;
+                  try{await stage.append(id,1,part2)}catch{guardFailed=true;}
+                  authorized=true;
+                  let sequenceFailed=false;
+                  try{await stage.append(id,0,part2)}catch{sequenceFailed=true;}
+                  await stage.append(id,1,part2);
+                  let wrongReceipt=false;
+                  try{await stage.finish(id,{state:'AUTHENTICATED_SECOND_PASS',
+                    sha256:'0'.repeat(64),complete:true},2)}
+                  catch{wrongReceipt=true;}
+                  await stage.finish(id,{state:'AUTHENTICATED_SECOND_PASS',
+                    sha256:digest,complete:true},2);
+                  db.close();db=await module.openV2StageDB();
+                  stage=module.createV2InactiveStage(db,{assertHeld:guard});
+                  const out=[];for await(const item of stage.fragments(id))out.push(...item);
+                  const info=await stage.inspect(id);
+                  db.close();
+                  done({ok:early&&guardFailed&&sequenceFailed&&wrongReceipt&&
+                    a.acceptedBytes===3&&info.state==='READY_FOR_INACTIVE_DECODER'&&
+                    JSON.stringify(out)==='[0,255,1,17,0,42]'&&
+                    info.acceptedBytes===6,info});
+                })().catch(e=>done({error:String(e)}));"""
+                stage_result=call('POST',f'/session/{after}/execute/async',
+                                  {'script':v2_stage,'args':[]},timeout=90)
+                assert stage_result.get('ok') is True,stage_result
+                print('B S02_INACTIVE_STAGE_BLOCKS_PARTIAL_AUTH_AND_REOPENS_EXACT_BYTES=PASS',flush=True)
                 code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const core=await import('./backup-core.mjs');
