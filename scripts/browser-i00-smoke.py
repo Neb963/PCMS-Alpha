@@ -2755,6 +2755,64 @@ def main():
                             {'script':v2_code,'args':[]},timeout=90)
                 assert result.get('ok') is True,result
                 print('B S02_PACKAGED_V2_SOURCE_FRAME_BINARY_AND_DONOR_ROUNDTRIP=PASS',flush=True)
+                # S02 B: real installed Firefox IndexedDB intent/CAS with an
+                # independently recorded synthetic native-effect ledger.
+                # This is NOT an actual installed privileged native H test.
+                v2_session="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const module=await import('./backup-v2-session.mjs');
+                  const donor=await import('../lib/backup-package.js');
+                  const open=()=>new Promise((resolve,reject)=>{
+                    const req=indexedDB.open('s02-v2-'+crypto.randomUUID(),1);
+                    req.onupgradeneeded=()=>req.result.createObjectStore('meta',{keyPath:'key'});
+                    req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+                  });
+                  const db=await open(),runId='s02_'+('d'.repeat(32));
+                  const pass='disposable-S02-browser-passphrase';
+                  const payload=donor.createPortableBackupPayload({state:{},
+                    containers:[],selection:{kind:'full'}});
+                  const envelope=await donor.encodeBackupEnvelope({payload,password:pass});
+                  const pcms={schema:1,stores:{entities:[],operations:[],events:[],
+                    meta:[],observations:[]}};
+                  const ledger=[],observations={bytes:0,seq:0};
+                  const transport=()=>({close(){},async exchange(cmd){
+                    ledger.push({action:cmd.action,sequence:cmd.sequence});
+                    if(cmd.action==='export.begin')return {ok:true,state:'OPEN_OBSERVED'};
+                    if(cmd.action==='export.append'){
+                      if(cmd.sequence!==observations.seq)throw Error('DOUBLE_APPEND');
+                      observations.seq++;
+                      observations.bytes+=atob(cmd.bytes).length;
+                      return {ok:true,state:'APPEND_OBSERVED',
+                        sequence:cmd.sequence,acceptedBytes:observations.bytes};
+                    }
+                    if(cmd.action==='export.finish')return {ok:true,state:'WRITTEN_UNVERIFIED'};
+                    if(cmd.action==='backup.verify')return {ok:true,state:'AUTHENTICATED_INVENTORY_ONLY',
+                      sha256:'a'.repeat(64),uniqueBlobs:0,canonicalRows:0};
+                    throw Error('UNEXPECTED_NATIVE_OPERATION');
+                  }});
+                  const state=await module.exportV2Candidate({db,api:browser,pcms,
+                    donorEnvelope:envelope,checkScope:async()=>true,
+                    checkRestoreHold:async()=>false,connect:transport,runId});
+                  const inspected=await module.createV2Ledger(db).inspect(runId);
+                  let duplicateHeld=false;
+                  try{await module.exportV2Candidate({db,api:browser,pcms,
+                    donorEnvelope:envelope,checkScope:async()=>true,
+                    checkRestoreHold:async()=>false,connect:transport,
+                    runId:'s02_'+('e'.repeat(32))});}
+                  catch{duplicateHeld=true;}
+                  done({ok:state.ok&&duplicateHeld&&
+                    inspected.state==='AUTHENTICATED_INVENTORY_ONLY'&&
+                    inspected.acceptedBytes===inspected.plaintextBytes&&
+                    ledger[0]?.action==='export.begin'&&
+                    ledger.at(-1)?.action==='backup.verify'&&
+                    ledger.filter(e=>e.action==='export.begin').length===1,
+                    status:inspected.state,parts:observations.seq});
+                  db.close();
+                })().catch(e=>done({error:String(e)}));"""
+                check=call('POST',f'/session/{after}/execute/async',
+                           {'script':v2_session,'args':[]},timeout=90)
+                assert check.get('ok') is True,check
+                print('B S02_INSTALLED_V2_IDB_EFFECT_JOURNAL_AND_SYNTHETIC_HOST_NO_REPLAY=PASS',flush=True)
                 code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const core=await import('./backup-core.mjs');
