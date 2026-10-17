@@ -1,0 +1,144 @@
+// S02 bounded-memory, inactive second-pass staging in a disposable/held Firefox
+// profile. Plaintext cannot be read as authoritative until terminal native
+// second-pass authentication and exact immutable ciphertext digest agree.
+// Does not mutate the canonical database, donor, routes, provider or Git.
+const NAME='pcms-alpha-v2-restore-stage',MAX_CHUNK=49152;
+const runOK=s=>typeof s==='string'&&/^s02_[a-f0-9]{32}$/.test(s);
+const digestOK=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
+const insist=(v,code)=>{if(!v)throw Error(code)};
+const validEvidence=e=>e&&e.state==='INACTIVE_STAGING_REQUIRED'&&
+  digestOK(e.sha256)&&Number.isSafeInteger(e.plaintextBytes)&&
+  e.plaintextBytes>=0&&e.plaintextBytes<=2**36-32;
+function base64(bytes){
+  let raw='';for(let i=0;i<bytes.length;i+=32768)
+    raw+=String.fromCharCode(...bytes.subarray(i,i+32768));
+  return btoa(raw);
+}
+function unbase64(value){
+  insist(typeof value==='string'&&value.length<=Math.ceil(MAX_CHUNK/3)*4+4,
+    'RESTORE_V2_FRAGMENT_INVALID');
+  const b=atob(value);
+  insist(b.length<=MAX_CHUNK,'RESTORE_V2_FRAGMENT_INVALID');
+  return Uint8Array.from(b,ch=>ch.charCodeAt(0));
+}
+export function openV2StageDB({indexed=indexedDB}={}){
+  return new Promise((resolve,reject)=>{
+    const req=indexed.open(NAME,1);
+    req.onupgradeneeded=()=>{
+      const db=req.result;
+      db.createObjectStore('runs',{keyPath:'runId'});
+      db.createObjectStore('chunks',{keyPath:'key'});
+    };
+    req.onerror=()=>reject(Error('RESTORE_V2_STAGE_DB_UNAVAILABLE'));
+    req.onsuccess=()=>resolve(req.result);
+  });
+}
+function transact(db,callback){
+  return new Promise((resolve,reject)=>{
+    let result,code='RESTORE_V2_STAGE_TRANSACTION_FAILED';
+    let tx;
+    try{tx=db.transaction(['runs','chunks'],'readwrite')}
+    catch{return reject(Error(code))}
+    tx.oncomplete=()=>resolve(result);
+    tx.onabort=()=>reject(Error(code));
+    tx.onerror=()=>{};
+    const abort=c=>{code=c;try{tx.abort()}catch{}};
+    try{callback(tx.objectStore('runs'),tx.objectStore('chunks'),v=>{result=v},abort)}
+    catch{abort('RESTORE_V2_STAGE_TRANSACTION_FAILED')}
+  });
+}
+function find(db,runId){
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('runs','readonly');
+    tx.objectStore('runs').get(runId).onsuccess=e=>resolve(e.target.result||null);
+    tx.onabort=()=>reject(Error('RESTORE_V2_STAGE_READ_FAILED'));
+  });
+}
+const fragmentKey=(runId,sequence)=>runId+':'+String(sequence).padStart(15,'0');
+export function createV2InactiveStage(db,{assertHeld}={}){
+  insist(typeof assertHeld==='function','RESTORE_V2_OUTER_GUARD_REQUIRED');
+  async function held(){
+    insist(await assertHeld()===true,'RESTORE_V2_OUTER_GUARD_REQUIRED');
+  }
+  async function begin(runId,evidence){
+    insist(runOK(runId)&&validEvidence(evidence),'RESTORE_V2_INITIAL_PROOF_INVALID');
+    await held();
+    return transact(db,(runs,chunks,done,abort)=>{
+      runs.get(runId).onsuccess=e=>{
+        if(e.target.result){abort('RESTORE_V2_RUN_ALREADY_USED');return;}
+        const row={runId,state:'INACTIVE_STAGING',ciphertextSha256:evidence.sha256,
+          expectedBytes:evidence.plaintextBytes,acceptedBytes:0,nextSequence:0};
+        runs.add(row);done({state:row.state,runId});
+      };
+    });
+  }
+  async function append(runId,sequence,bytes){
+    insist(runOK(runId)&&Number.isSafeInteger(sequence)&&sequence>=0&&
+      bytes instanceof Uint8Array&&bytes.length<=MAX_CHUNK&&bytes.length>0,
+      'RESTORE_V2_FRAGMENT_INVALID');
+    await held();
+    return transact(db,(runs,chunks,done,abort)=>{
+      runs.get(runId).onsuccess=e=>{
+        const row=e.target.result;
+        if(!row||row.state!=='INACTIVE_STAGING'||row.nextSequence!==sequence)
+          {abort('RESTORE_V2_FRAGMENT_SEQUENCE_INVALID');return;}
+        if(row.acceptedBytes+bytes.length>row.expectedBytes)
+          {abort('RESTORE_V2_FRAGMENT_OVERRUN');return;}
+        chunks.add({key:fragmentKey(runId,sequence),data:base64(bytes)});
+        const next={...row,acceptedBytes:row.acceptedBytes+bytes.length,
+          nextSequence:sequence+1};
+        runs.put(next);done({state:next.state,nextSequence:next.nextSequence,
+          acceptedBytes:next.acceptedBytes});
+      };
+    });
+  }
+  async function finish(runId,terminal,expectedSequence){
+    insist(runOK(runId)&&terminal?.state==='AUTHENTICATED_SECOND_PASS'&&
+      terminal.complete===true&&digestOK(terminal.sha256)&&
+      Number.isSafeInteger(expectedSequence)&&expectedSequence>=0,
+      'RESTORE_V2_TERMINAL_AUTH_REQUIRED');
+    await held();
+    return transact(db,(runs,chunks,done,abort)=>{
+      runs.get(runId).onsuccess=e=>{
+        const row=e.target.result;
+        if(!row||row.state!=='INACTIVE_STAGING'||row.nextSequence!==expectedSequence||
+           row.acceptedBytes!==row.expectedBytes||row.ciphertextSha256!==terminal.sha256)
+          {abort('RESTORE_V2_SOURCE_INCOMPLETE');return;}
+        const next={...row,state:'READY_FOR_INACTIVE_DECODER'};
+        runs.put(next);
+        done({state:next.state,runId,acceptedBytes:next.acceptedBytes,
+          ciphertextSha256:next.ciphertextSha256,
+          activation:'OFF',providerEffects:'OFF'});
+      };
+    });
+  }
+  async function* fragments(runId){
+    insist(runOK(runId),'RESTORE_V2_RUN_INVALID');
+    await held();
+    const row=await find(db,runId);
+    insist(row?.state==='READY_FOR_INACTIVE_DECODER'&&
+      Number.isSafeInteger(row.nextSequence),'RESTORE_V2_NOT_AUTHENTICATED');
+    for(let i=0;i<row.nextSequence;i++){
+      await held();
+      const observed=await find(db,runId);
+      insist(observed?.state==='READY_FOR_INACTIVE_DECODER'&&
+        observed.ciphertextSha256===row.ciphertextSha256,
+        'RESTORE_V2_STAGE_INVALIDATED');
+      const data=await new Promise((resolve,reject)=>{
+        const tx=db.transaction('chunks','readonly');
+        tx.objectStore('chunks').get(fragmentKey(runId,i)).onsuccess=e=>
+          resolve(e.target.result?.data||null);
+        tx.onabort=()=>reject(Error('RESTORE_V2_STAGE_READ_FAILED'));
+      });
+      insist(data!==null,'RESTORE_V2_FRAGMENT_MISSING');
+      yield unbase64(data);
+    }
+  }
+  async function inspect(runId){
+    insist(runOK(runId),'RESTORE_V2_RUN_INVALID');
+    const row=await find(db,runId);
+    return row?{runId,state:row.state,acceptedBytes:row.acceptedBytes,
+      expectedBytes:row.expectedBytes,nextSequence:row.nextSequence}:null;
+  }
+  return Object.freeze({begin,append,finish,fragments,inspect});
+}
