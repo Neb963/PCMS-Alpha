@@ -8,7 +8,7 @@ globalThis.crypto??=webcrypto;
 // Disposable deterministic IDB with independent committed backing ledger.
 // Writes are staged, visible only after tx.oncomplete, never through the join cache.
 function database(){
- const data=new Map(),commits=[];
+ const data=new Map(),commits=[],listeners=new Map();
  let rejectCommit=false;
  function transaction(_name,mode){
   const pending=new Map(),deletes=new Set();
@@ -48,7 +48,9 @@ function database(){
   setImmediate(finish);
   return tx;
  }
- return {transaction,data,commits,failNextCommit(){rejectCommit=true}};
+ return {transaction,data,commits,failNextCommit(){rejectCommit=true},
+   addEventListener(type,fn){listeners.set(type,fn);},
+   signal(type){listeners.get(type)?.();}};
 }
 const input={
  operationId:'operation_001',bindingId:'binding_001',accountId:'account_001',
@@ -156,4 +158,15 @@ test('S01 GB01: no stale committed callback after observer failure, and boot nev
  assert.deepEqual(f.effects,[]);
  assert.equal(f.db.commits.length,0);
  assert.equal(f.observer.isClosed(),true);
+});
+
+test('S01 E01 N03: database version change closes observer and forbids new native dispatch',async()=>{
+ const f=fixture();
+ assert.equal(f.observer.isClosed(),false);
+ f.db.signal('versionchange');
+ assert.equal(f.observer.isClosed(),true);
+ const result=await f.join.prepare(input);
+ assert.equal(result.ok,false);
+ assert.equal(result.code,'E01_NATIVE_FAMILY_PROOF_UNAVAILABLE');
+ assert.equal(f.effects.length,0);
 });
