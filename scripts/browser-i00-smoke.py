@@ -2928,6 +2928,15 @@ def main():
                   const part1=new Uint8Array([0,255,1]);
                   const part2=new Uint8Array([17,0,42]);
                   const a=await stage.append(id,0,part1);
+                  const sealedRow=await new Promise(resolve=>{
+                    const t=db.transaction('chunks','readonly');
+                    t.objectStore('chunks').get(id+':000000000000000').onsuccess=e=>
+                      resolve(e.target.result||null);
+                  });
+                  const diskCipherOnly=sealedRow?.data===undefined&&
+                    typeof sealedRow?.ciphertext==='string'&&
+                    typeof sealedRow?.iv==='string'&&
+                    sealedRow.ciphertext!==btoa(String.fromCharCode(...part1));
                   let early=false;
                   try{const it=stage.fragments(id);await it.next();}
                   catch{early=true;}
@@ -2967,6 +2976,7 @@ def main():
                   for await(const frame of stage.frames(second))frames.push(frame.kind);
                   db.close();
                   done({ok:early&&guardFailed&&sequenceFailed&&wrongReceipt&&
+                    diskCipherOnly&&
                     JSON.stringify(frames)==='["DONOR_FRAGMENT","DONOR_END","END"]'&&
                     a.acceptedBytes===3&&info.state==='READY_FOR_INACTIVE_DECODER'&&
                     JSON.stringify(out)==='[0,255,1,17,0,42]'&&
