@@ -23,7 +23,7 @@ export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
     try{return await port.exchange({action:'archive.retention.prune'});}
     finally{port.close();}}
 }={}){
-  let dbPromise=null,task=null;
+  let dbPromise=null,task=null,manualTask=null;
   const sentinel=createRestoreSentinel(api.storage.local);
   const database=()=>dbPromise ||= open().catch(e=>{dbPromise=null;throw e;});
   const store=async()=>createAutoStore(await database(),clock);
@@ -49,6 +49,7 @@ export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
     return fail('BACKUP_INFLIGHT');
   }
   async function tick(){
+    if(manualTask)return fail('BACKUP_INFLIGHT');
     if(task)return task;
     task=(async()=>{
       try{
@@ -203,28 +204,53 @@ export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
   // Manual source-complete v2 export shares I15's source cut, OS-vault
   // lookup, restore sentinel and same native ledger; no second scheduler.
   // Not wired into an operator command before independent E-06 review.
+  // Same reviewed background coordinator as I15 daily. The privileged
+  // admission token is injectable only by trusted construction; production
+  // always supplies false until E-06 approval. No UI/stored toggle enables it.
   async function manualV2Candidate(){
-    if(await reviewedV2()!==true)return fail('BACKUP_V2_REVIEW_REQUIRED');
-    if(task)return fail('BACKUP_INFLIGHT');
-    try{
-      if((await sentinel.inspect()).held)return fail('BACKUP_RESTORE_HOLD');
-      const key=vaultResponse(await native({action:'get'}));
-      if(!key.ok)return fail('SUSPENDED_KEY_UNAVAILABLE');
-      const cut=await captureV2(api,await database(),key.passphrase,sentinel);
-      const runId='s02_'+newId();
-      const receipt=await dispatchV2({
-        db:await database(),api,pcms:cut.pcms,
-        donorEnvelope:cut.donorEnvelope,runId,
-        checkScope:async()=>!(await sentinel.inspect()).held,
-        checkRestoreHold:async()=>(await sentinel.inspect()).held
-      });
-      return receipt?.ok===true&&receipt.state==='AUTHENTICATED_INVENTORY_ONLY'?
-        {ok:true,runId,state:receipt.state,code:'FULL_RECOVERY_NOT_PROVEN',
-          retentionSuccess:false,providerEffects:'OFF'}:
-        fail('BACKUP_V2_NATIVE_OUTCOME_UNKNOWN');
-    }catch(e){
-      return fail(sanitize(e));
-    }
+    if(task||manualTask)return fail('BACKUP_INFLIGHT');
+    manualTask=(async()=>{
+      if(await reviewedV2()!==true)return fail('BACKUP_V2_REVIEW_REQUIRED');
+      let dispatched=false;
+      try{
+        if((await sentinel.inspect()).held)return fail('BACKUP_RESTORE_HOLD');
+        const key=vaultResponse(await native({action:'get'}));
+        if(!key.ok)return fail('SUSPENDED_KEY_UNAVAILABLE');
+        const db=await database();
+        const cut=await captureV2(api,db,key.passphrase,sentinel);
+        const runId='s02_'+newId();
+        dispatched=true;
+        const receipt=await dispatchV2({
+          db,api,pcms:cut.pcms,donorEnvelope:cut.donorEnvelope,runId,
+          checkScope:async()=>!(await sentinel.inspect()).held,
+          checkRestoreHold:async()=>(await sentinel.inspect()).held
+        });
+        if(receipt?.ok!==true||receipt.runId!==runId||
+           receipt.state!=='AUTHENTICATED_INVENTORY_ONLY')
+          throw Error('BACKUP_V2_NATIVE_OUTCOME_UNKNOWN');
+        const verified=await verifyV2({
+          api,db,runId,password:key.passphrase,
+          assertNotRestoring:async()=>!(await sentinel.inspect()).held
+        });
+        if(verified?.ok!==true||verified.runId!==runId||
+           verified.state!=='RECOVERY_VERIFIED'||
+           verified.sha256!==receipt.ciphertextSha256||
+           !/^[a-f0-9]{64}$/.test(verified.preparedSha256||''))
+          throw Error('BACKUP_V2_RECOVERY_UNVERIFIED');
+        return {ok:true,runId,state:'RECOVERY_VERIFIED',
+          code:'NATIVE_SOURCE_AND_DONOR_RECOVERY_VERIFIED',
+          ciphertextSha256:verified.sha256,
+          preparedSha256:verified.preparedSha256,
+          sourceRows:verified.sourceRows,retentionSuccess:false,
+          activation:'OFF',providerEffects:'OFF'};
+      }catch(e){
+        // A possible native file effect always remains journal-held. Never
+        // retry or silently fall back to a legacy/manual download.
+        return fail(dispatched?'V2_NATIVE_OUTCOME_UNKNOWN':sanitize(e));
+      }
+    })();
+    try{return await manualTask;}
+    finally{manualTask=null;}
   }
   async function setVault(secret){
     if(typeof secret!=='string'||secret.length<12||
