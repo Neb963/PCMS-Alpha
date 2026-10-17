@@ -1,3 +1,4 @@
+import {admissionForI17Supply} from './legacy-quarantine.mjs';
 // This facade shares donor Management Integration's actual control-lease
 // registry. Nothing here can execute a browser/native/provider mutation at I01.
 let installed = null;
@@ -182,6 +183,8 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
   // encloses admission and page execution; the postcheck never transforms
   // an unknown remote outcome into a safe retry.
   async function runSupplyStep(personaUid,request) {
+    const quarantine=admissionForI17Supply(request?.kind,request);
+    if(!quarantine.ok)return quarantine;
     if(typeof supplyIsolatedTab!=='function')return {ok:false,code:'SUPPLY_EXECUTOR_UNAVAILABLE'};
     const leased=await acquireConflictGuard(personaUid);
     if(!leased?.ready||!leased.leaseId)

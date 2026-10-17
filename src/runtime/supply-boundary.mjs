@@ -8,6 +8,7 @@ import {freezeSupply,validateOwnerContext,publicSupply} from './supply-plan.mjs'
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {writeNonReadyFolder,markerRequestAllowed} from './supply-git.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
+import {isI17Quarantined,I17_QUARANTINE_CODE} from './legacy-quarantine.mjs';
 export const SUPPLY_PORT='pcms-i06-supply';
 const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED']);
 const hex=/^[a-f0-9]{64}$/;
@@ -95,6 +96,8 @@ export function createSupplyBoundary(api,{
     const b=batchResult.batch,item=b.items.find(i=>i.itemId===p.itemId);
     if(!item)return fail('ITEM_NOT_FOUND');
     if(item.revision!==p.expectedRevision)return fail('STALE_REVISION');
+    if(isI17Quarantined({batchId:b.batchId,itemId:item.itemId,slug:item.requestedSlug}))
+      return fail(I17_QUARANTINE_CODE);
     if(!['FROZEN','CREATE_CONFIRMED'].includes(item.state))
       return fail(item.state.includes('UNCERTAIN')||item.state.includes('DISPATCH')||
         item.state.includes('OBSERVING')?'RECONCILIATION_REQUIRED':'NOT_ADMISSIBLE');
