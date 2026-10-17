@@ -173,6 +173,32 @@ class TestHost(unittest.TestCase):
         self.assertFalse((source/"backup-root").exists(),
                          "no side effects may occur via an ancestor symlink")
 
+    def test_concurrent_native_process_contexts_have_exactly_one_writer(self):
+        payload=make_payload()
+        first=self.begin(payload)
+        self.assertTrue(first["ok"],first)
+        other=V2ArchiveHost(self.root,lambda:PASS)
+        alternative="s02_"+"d"*32
+        denied=other.action({"action":"export.begin","runId":alternative,
+            "cutDigest":CUT,"expectedPlaintextBytes":3,
+            "keyRef":"portable-recovery"})
+        self.assertEqual(denied["code"],"BACKUP_SESSION_BUSY")
+        self.assertFalse((self.root/(alternative+".ledger")).exists())
+        self.assertFalse((self.root/(alternative+".encrypted")).exists())
+        self.host.close()
+        # Releasing the OS lock cannot authorize resuming the uncertain
+        # original run, but a distinct new operator intent may start.
+        accepted=other.action({"action":"export.begin","runId":alternative,
+            "cutDigest":CUT,"expectedPlaintextBytes":3,
+            "keyRef":"portable-recovery"})
+        self.assertTrue(accepted["ok"],accepted)
+        other.close()
+        observed=V2ArchiveHost(self.root,lambda:PASS)
+        self.assertEqual(observed.action({"action":"archive.inspect",
+            "runId":RUN})["state"],"OPEN_OBSERVED")
+        self.assertEqual(observed.action({"action":"archive.inspect",
+            "runId":alternative})["state"],"OPEN_OBSERVED")
+
     def test_symlink_root_and_injected_command_fail_closed(self):
         other=Path(self.tmp.name)/"real"
         other.mkdir()
