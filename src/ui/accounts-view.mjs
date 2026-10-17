@@ -18,7 +18,7 @@ function command(type,params) {
   return new Promise((resolve,reject)=>{
     const port=browser.runtime.connect({name:'pcms-i03-accounts'});
     let settled=false;
-    const timer=setTimeout(()=>finish(null,Error('TIMEOUT')),5000);
+    const timer=setTimeout(()=>finish(null,Error('TIMEOUT')),type==='WITNESS_STATUS'?8000:5000);
     function finish(value,error) {
       if(settled)return;
       settled=true;clearTimeout(timer);
