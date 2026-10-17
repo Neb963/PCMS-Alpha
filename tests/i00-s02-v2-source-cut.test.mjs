@@ -45,11 +45,12 @@ test('R2 production v2 cursor cut exceeds 64MiB before dedup; no history omissio
   const initial=process.memoryUsage().heapUsed;
   const raw=new Uint8Array(420000).fill(77);
   const sha256=await digest(raw);
-  const files=[{path:'main.pjs',size:raw.length,sha256}];
+  const files=[{path:'index.html',size:raw.length,sha256},
+    {path:'main.pjs',size:raw.length,sha256}];
   const fingerprint=await digest('PCMS_STAGED_SOURCE_V1\n'+
     files.map(f=>JSON.stringify([f.path,f.size,f.sha256])).join('\n'));
   const source={ok:true,files,fingerprint,
-    blobs:[{path:'main.pjs',base64:Buffer.from(raw).toString('base64')}]};
+    blobs:files.map(f=>({path:f.path,base64:Buffer.from(raw).toString('base64')}))};
   const rows=Object.fromEntries(DB_STORES.map(k=>[k,[]]));
   for(let i=0;i<76;i++)rows.meta.push({
     key:'stage-history:review-'+String(i).padStart(4,'0'),
