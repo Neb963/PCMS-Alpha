@@ -163,3 +163,36 @@ test('S02 bounded frame-stream decoder fully restores source and encrypted donor
       password:'wrong-but-valid-secret',decodeDonor:decodeBackupEnvelope}),
       /RESTORE_V2_DONOR_AUTH_FAILED/);
 });
+
+test('S02 canonical numeric grammar preserves negative zero and rejects nonfinite structured-clone values',async()=>{
+  const {password,donor,pcms}=await fixture();
+  pcms.stores.operations.push({key:'numeric',value:{
+    negativeZero:-0,positiveZero:0,large:1e21,tiny:1e-7,
+    decimal:0.000001,integer:9007199254740991
+  }});
+  const plan=await compileV2(pcms,donor),parts=[];
+  for await(const part of streamV2Frames(plan))parts.push(part);
+  const opened=await decodeAuthenticatedV2(concat(parts),{
+    password,decodeDonor:decodeBackupEnvelope});
+  const numerical=opened.pcms.stores.operations.find(x=>x.key==='numeric').value;
+  assert.deepEqual(numerical.negativeZero,{__pcmsType:'NumberNegativeZero'});
+  assert.equal(numerical.positiveZero,0);
+  assert.equal(numerical.large,1e21);
+  assert.equal(numerical.tiny,1e-7);
+  const receipt='d'.repeat(64);
+  const prepared=await prepareInactiveV2({
+    authenticatedPlaintext:concat(parts),
+    readback:{state:'AUTHENTICATED_SECOND_PASS',sha256:receipt},
+    expectedCiphertextSha256:receipt,
+    currentPcms:empty(),mode:'replace',password,
+    decodeDonor:decodeBackupEnvelope
+  });
+  const record=prepared.prepared.stores.operations.find(x=>x.key==='numeric').value;
+  assert.equal(Object.is(record.negativeZero,-0),true);
+  assert.equal(Object.is(record.positiveZero,-0),false);
+  for(const invalid of [NaN,Infinity,-Infinity]){
+    const bad=structuredClone(pcms);
+    bad.stores.operations[1].value.negativeZero=invalid;
+    await assert.rejects(compileV2(bad,donor),/BACKUP_UNSUPPORTED_VALUE/);
+  }
+});
