@@ -21,6 +21,11 @@ def read_fixed_exit(fetch, relay_ip, relay_port, url, expected_family):
     packet=fetch(relay_ip,relay_port,{
         "url":url,"method":"GET","headers":{},
         "max_redirects":0,"timeout_seconds":8,
+        # Match the donor's actual strict URL and @connect validators. A
+        # probe must not bypass those just because it is internally generated.
+        "network_policy":{"block_local_network":True,"domain_mode":"allowlist",
+          "allowed_domains":["api4.ipify.org","api6.ipify.org"],"blocked_domains":[]},
+        "connect_policy":{"page_url":url,"rules":[]},
     })
     if not isinstance(packet,dict) or packet.get("ok") is not True or (
         packet.get("status")!=200 or packet.get("final_url")!=url
