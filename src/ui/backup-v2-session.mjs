@@ -167,6 +167,7 @@ export async function exportV2Candidate({
     await move('WRITTEN_UNVERIFIED','AUTHENTICATED_INVENTORY_ONLY',{
       ciphertextSha256:proof.sha256,observedBlobs:proof.uniqueBlobs});
     return {ok:true,runId,state:'AUTHENTICATED_INVENTORY_ONLY',
+      plaintextBytes:plan.plaintextBytes,
       ciphertextSha256:proof.sha256,
       recovery:'FULL_DONOR_AND_FRESH_PROFILE_NOT_PROVEN'};
   }finally{
