@@ -196,3 +196,11 @@ test('S02 canonical numeric grammar preserves negative zero and rejects nonfinit
     await assert.rejects(compileV2(bad,donor),/BACKUP_UNSUPPORTED_VALUE/);
   }
 });
+test('S02 oversized valid canonical record holds before native dispatch and never truncates history',async()=>{
+  const {pcms,donor}=await fixture();
+  const many='L'.repeat(4*1024*1024+200);
+  pcms.stores.meta.push({key:'meta:oversized-but-valid',
+    value:{humanNotes:many,history:['original','previous-good']}});
+  await assert.rejects(compileV2(pcms,donor),/BACKUP_V2_CANONICAL_LIMIT/);
+  assert.equal(pcms.stores.meta.at(-1).value.humanNotes.length,many.length);
+});
