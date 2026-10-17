@@ -206,29 +206,27 @@ class V2ArchiveHost:
                 "archive.retention.prune": {"action"}
             }
             _require(set(message) == schemas[action], "BACKUP_COMMAND_SCHEMA")
-            if action == "export.begin":
-                return self._begin(message)
-            if action == "export.append":
-                return self._append(message)
-            if action == "export.finish":
-                return self._finish(message)
-            if action == "archive.inspect":
-                return self._inspect(message)
-            if action == "archive.read":
-                return self._read(message)
-            if action == "restore.begin":
-                return self._restore_begin(message)
-            if action == "restore.read":
-                return self._restore_read(message)
-            if action == "restore.abort":
-                return self._restore_abort(message)
-            if action == "archive.recovery.complete":
-                return self._qualify_recovery(message)
-            if action == "archive.retention.plan":
-                return self._retention_plan()
-            if action == "archive.retention.prune":
-                return self._retention_prune()
-            return self._verify(message)
+            dispatch={
+                "export.begin":self._begin,
+                "export.append":self._append,
+                "export.finish":self._finish,
+                "archive.inspect":self._inspect,
+                "archive.read":self._read,
+                "backup.verify":self._verify,
+                "restore.begin":self._restore_begin,
+                "restore.read":self._restore_read,
+                "restore.abort":self._restore_abort,
+                "archive.recovery.complete":self._qualify_recovery,
+                "archive.retention.plan":self._retention_plan,
+                "archive.retention.prune":self._retention_prune
+            }
+            result=dispatch[action](message) if "runId" in message else dispatch[action]()
+            if result.get("ok") is True and "runId" in message:
+                # Every native receipt is pinned to its initiating archive.
+                _require(result.get("runId",message["runId"])==message["runId"],
+                         "BACKUP_NATIVE_RUN_MISMATCH")
+                return {**result,"runId":message["runId"]}
+            return result
         except (BackupError, OSError, ValueError, TypeError) as exc:
             code = str(exc)
             return {"ok":False,"code":code if re.fullmatch(r"BACKUP_[A-Z0-9_]{3,70}",code)
