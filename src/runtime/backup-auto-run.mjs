@@ -6,7 +6,8 @@ import {createAutoStore} from './backup-auto-store.mjs';
 import {makeRetention} from './backup-auto-retention.mjs';
 import {inspectAuto,awaitAuto} from './backup-auto-download.mjs';
 import {sealAutomatic,captureV2SourceCut} from './backup-auto-export.mjs';
-import {exportV2Candidate} from './backup-v2-session.mjs';
+import {exportV2Candidate,createV2NativeConnection} from './backup-v2-session.mjs';
+import {verifyV2StoredArchive} from './backup-v2-verify.mjs';
 import {digest} from './backup-core.mjs';
 const fail=code=>({ok:false,code});
 const sanitize=e=>/^[A-Z_]{4,60}$/.test(e?.message||'')?e.message:'BACKUP_FAILED';
@@ -17,7 +18,11 @@ export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
   // Not supplied by production until independent E-06 review. This is a
   // protected coordinator injection, never a UI message or stored toggle.
   reviewedV2=()=>false,captureV2=captureV2SourceCut,
-  dispatchV2=exportV2Candidate}={}){
+  dispatchV2=exportV2Candidate,verifyV2=verifyV2StoredArchive,
+  nativeRetention=async()=>{const port=createV2NativeConnection(api);
+    try{return await port.exchange({action:'archive.retention.prune'});}
+    finally{port.close();}}
+}={}){
   let dbPromise=null,task=null;
   const sentinel=createRestoreSentinel(api.storage.local);
   const database=()=>dbPromise ||= open().catch(e=>{dbPromise=null;throw e;});
@@ -91,13 +96,34 @@ export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
                 (await s.read()).state?.active?.runId===runId,
               checkRestoreHold:async()=>(await sentinel.inspect()).held
             });
-            // Even a valid full-disk GCM receipt is NOT a source-complete,
-            // independently applied, successfully restorable daily archive.
-            const held=await s.move(runId,'DISPATCH_POSSIBLE','HELD',{
-              code:v2?.state==='AUTHENTICATED_INVENTORY_ONLY'?
-                'V2_NATIVE_INVENTORY_ONLY':'V2_NATIVE_RESULT_UNKNOWN'});
-            if(!held.ok)return held;
-            return fail('BACKUP_V2_FULL_RECOVERY_PENDING');
+            // Only actual host-file re-open, full typed source/donor
+            // restoration in ephemeral-key staging and a second run-bound
+            // native receipt can qualify a successful automatic archive.
+            if(v2?.ok!==true||v2?.state!=='AUTHENTICATED_INVENTORY_ONLY')
+              throw Error('BACKUP_V2_NATIVE_RESULT_UNKNOWN');
+            const recovered=await verifyV2({
+              api,db:await database(),runId:v2.runId,
+              password:key.passphrase,
+              assertNotRestoring:async()=>!(await sentinel.inspect()).held
+            });
+            if(recovered?.ok!==true||recovered.state!=='RECOVERY_VERIFIED'||
+               recovered.runId!==v2.runId||
+               recovered.sha256!==v2.ciphertextSha256||
+               !/^[a-f0-9]{64}$/.test(recovered.preparedSha256||''))
+              throw Error('BACKUP_V2_RECOVERY_UNVERIFIED');
+            const certified=await s.move(runId,'DISPATCH_POSSIBLE','COMPLETE',{
+              archive:{kind:'AUTO_NATIVE',runId,nativeRunId:v2.runId,
+                sha256:recovered.sha256,
+                preparedSha256:recovered.preparedSha256,
+                day:claimed.day,tier:3,state:'COMPLETE',
+                bytes:v2.plaintextBytes+66}
+            });
+            if(!certified.ok)return certified;
+            // Native retention is distinct from legacy Downloads, but reuses
+            // the same daily success and last-known-good controller. An
+            // uncertain file removal never disqualifies the last good archive.
+            try{await nativeRetention()}catch{}
+            return {ok:true,code:'NATIVE_READONLY_SOURCE_RECOVERY'};
           }catch(e){
             const code=attemptedNative?'V2_NATIVE_OUTCOME_UNKNOWN':
               sanitize(e);
