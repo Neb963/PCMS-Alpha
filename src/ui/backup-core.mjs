@@ -31,7 +31,15 @@ function unbase64(value,max){
   return data;
 }
 export async function digest(bytes){
-  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes instanceof Uint8Array?bytes:codec.encode(bytes)))).map(v=>v.toString(16).padStart(2,'0')).join('');
+  // WebDriver/Firefox extensions may supply a typed-array from another JS
+  // compartment; instanceof Uint8Array then fails even though bytes are real.
+  // Never hash Uint8Array.toString() instead of the original source bytes.
+  const raw=ArrayBuffer.isView(bytes)?
+    new Uint8Array(bytes.buffer,bytes.byteOffset,bytes.byteLength):
+    Object.prototype.toString.call(bytes)==='[object ArrayBuffer]'?
+      new Uint8Array(bytes):codec.encode(bytes);
+  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',raw)))
+    .map(v=>v.toString(16).padStart(2,'0')).join('');
 }
 export function serializeClone(value,depth=0){
   requireValid(depth<=35,'BACKUP_DEPTH_LIMIT');
