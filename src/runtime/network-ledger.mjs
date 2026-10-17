@@ -16,8 +16,9 @@ function ip4(raw) {
    (a[0]===100&&a[1]>=64&&a[1]<128)||
    (a[0]===169&&a[1]===254)||
    (a[0]===172&&a[1]>=16&&a[1]<=31)||
-   (a[0]===192&&(a[1]===168||a[1]===0))||
-   (a[0]===198&&(a[1]===18||a[1]===19)))return null;
+   (a[0]===192&&(a[1]===168||a[1]===0||a[1]===88&&a[2]===99||a[1]===0&&a[2]===2))||
+   (a[0]===198&&(a[1]===18||a[1]===19||a[1]===51&&a[2]===100))||
+   (a[0]===203&&a[1]===0&&a[2]===113))return null;
  return p.join('.');
 }
 function ip6(raw) {
@@ -30,7 +31,9 @@ function ip6(raw) {
    // Global unicast 2000::/3. Never treat v4-mapped, link-local, multicast,
    // unspecified or ULA as independent public IPv6 exit evidence.
    const first=parseInt(value.split(':')[0],16);
-   if(!Number.isInteger(first)||first<0x2000||first>0x3fff)return null;
+   // RFC 3849 documentation space is inside 2000::/3, but not a public exit.
+   if(!Number.isInteger(first)||first<0x2000||first>0x3fff||
+      value.startsWith('2001:db8:')||value==='2001:db8::')return null;
    return value;
  }catch{return null;}
 }
@@ -58,7 +61,18 @@ export function normalizeProtectedExitProof(e,nowMs) {
    ipv6Disposition:ipv6?'VERIFIED':'BLOCKED_VERIFIED',exits};
 }
 async function digest(exits){
- const bytes=new TextEncoder().encode(exits.map(e=>e.family+':'+e.address).sort().join('\n'));
+ // GB-01 v1: explicit version and length framing, never an ambiguous
+ // concatenation of variable-length family/address strings.
+ const encoder=new TextEncoder(),items=exits.map(e=>e.family+':'+e.address).sort();
+ const parts=[encoder.encode('PCMS-EXIT-SET-V1\\0')];
+ for(const item of items){
+   const bytes=encoder.encode(item),size=new Uint8Array(4);
+   new DataView(size.buffer).setUint32(0,bytes.length,false);
+   parts.push(size,bytes);
+ }
+ const total=parts.reduce((n,a)=>n+a.length,0),bytes=new Uint8Array(total);
+ let offset=0;
+ for(const item of parts){bytes.set(item,offset);offset+=item.length;}
  const hash=await crypto.subtle.digest('SHA-256',bytes);
  return Array.from(new Uint8Array(hash),x=>x.toString(16).padStart(2,'0')).join('');
 }
@@ -85,6 +99,10 @@ export function transitionExitReservation(existing,proposal){
    !Array.isArray(proposal.exits)||proposal.exits.length<1||proposal.exits.length>2||
    !HEX.test(proposal.exitSetDigest)||!number(proposal.expectedLedgerRevision))
    return fail('RESERVATION_INPUT_INVALID');
+ if(proposal.exits[0]?.family!=='IPv4'||
+    proposal.exits.length===2&&proposal.exits[1]?.family!=='IPv6'||
+    proposal.ipv6Disposition!==(proposal.exits.length===2?'VERIFIED':'BLOCKED_VERIFIED'))
+   return fail('RESERVATION_EXIT_INVALID');
  const prior=existing||{key:KEY,schema:1,revision:0,owners:{},reservations:{}};
  if(prior.schema!==1||prior.key!==KEY||!number(prior.revision)||
    !prior.owners||!prior.reservations||Array.isArray(prior.owners)||
@@ -107,8 +125,8 @@ export function transitionExitReservation(existing,proposal){
  }
  for(const exit of proposal.exits){
    if(!exit||!['IPv4','IPv6'].includes(exit.family)||
-      (exit.family==='IPv4'&&!ip4(exit.address))||
-      (exit.family==='IPv6'&&!ip6(exit.address)))return fail('RESERVATION_EXIT_INVALID');
+      (exit.family==='IPv4'&&ip4(exit.address)!==exit.address)||
+      (exit.family==='IPv6'&&ip6(exit.address)!==exit.address))return fail('RESERVATION_EXIT_INVALID');
    const owner=prior.owners[exit.family+':'+exit.address];
    if(owner&&owner!==proposal.accountId)return fail('EXIT_HISTORICALLY_OWNED');
  }
