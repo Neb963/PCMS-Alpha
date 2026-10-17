@@ -16,6 +16,7 @@ import stat
 import tempfile
 import struct
 import sys
+import time
 
 # Support both the real standalone native executable and importable test module.
 try:
@@ -26,12 +27,18 @@ except ImportError:
                                   _fd_read, _read_header, _key, TAG_BYTES, HEADER)
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.exceptions import InvalidTag
+try:
+    from .backup_v2_retention import eligible_for_prune
+except ImportError:
+    from backup_v2_retention import eligible_for_prune
 
 _ID = re.compile(r"^s02_[a-f0-9]{32}$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
 _ALLOWED = ("export.begin", "export.append", "export.finish",
             "archive.inspect", "archive.read", "backup.verify",
-            "restore.begin", "restore.read", "restore.abort")
+            "restore.begin", "restore.read", "restore.abort",
+            "archive.recovery.complete", "archive.retention.plan",
+            "archive.retention.prune")
 _MAX_CIPHERTEXT_READ = 49152
 
 
@@ -131,6 +138,7 @@ class V2ArchiveHost:
         self.current = None
         self.restore = None
         self._export_lock = None
+        self._last_restore = None
 
     def _acquire_export_lock(self):
         # One OS-owned export context per fixed backup root, even when Firefox
@@ -191,7 +199,11 @@ class V2ArchiveHost:
                 "backup.verify": {"action","runId","keyRef"},
                 "restore.begin": {"action","runId","keyRef"},
                 "restore.read": {"action","runId","sequence"},
-                "restore.abort": {"action","runId"}
+                "restore.abort": {"action","runId"},
+                "archive.recovery.complete": {"action","runId","sha256",
+                                               "preparedSha256","status"},
+                "archive.retention.plan": {"action"},
+                "archive.retention.prune": {"action"}
             }
             _require(set(message) == schemas[action], "BACKUP_COMMAND_SCHEMA")
             if action == "export.begin":
@@ -210,6 +222,12 @@ class V2ArchiveHost:
                 return self._restore_read(message)
             if action == "restore.abort":
                 return self._restore_abort(message)
+            if action == "archive.recovery.complete":
+                return self._qualify_recovery(message)
+            if action == "archive.retention.plan":
+                return self._retention_plan()
+            if action == "archive.retention.prune":
+                return self._retention_prune()
             return self._verify(message)
         except (BackupError, OSError, ValueError, TypeError) as exc:
             code = str(exc)
@@ -307,6 +325,7 @@ class V2ArchiveHost:
         state["state"]="WRITTEN_UNVERIFIED"
         self._write(state)
         self.current=None
+        self._last_restore=None
         self._release_export_lock()
         return {"ok":True,"state":state["state"],"bytes":receipt["bytes"]}
 
@@ -355,7 +374,8 @@ class V2ArchiveHost:
         _require(self.restore is None and self.writer is None,
                  "BACKUP_RESTORE_BUSY")
         state=self._observe(msg["runId"])
-        _require(state is not None and state["state"]=="WRITTEN_UNVERIFIED" and
+        _require(state is not None and state["state"] in
+                 ("WRITTEN_UNVERIFIED","RECOVERY_VERIFIED") and
                  msg["keyRef"]=="portable-recovery","BACKUP_RESTORE_HELD")
         _,path=self._paths(msg["runId"])
         password=self.vault_get()
@@ -364,6 +384,7 @@ class V2ArchiveHost:
         # Independent first pass authenticates and validates complete v2
         # inventory; no source or identity is exposed before that.
         proof=verify_two_pass(path,password)
+        self._last_restore=None
         file=_fd_read(path)
         try:
             info=os.fstat(file.fileno())
@@ -423,6 +444,8 @@ class V2ArchiveHost:
                       "complete":complete}
             if complete:
                 response["sha256"]=current["sha256"]
+                self._last_restore={"runId":current["runId"],
+                                    "sha256":current["sha256"]}
                 file.close()
                 self.restore=None
             return response
@@ -444,6 +467,99 @@ class V2ArchiveHost:
         current["file"].close()
         self.restore=None
         return {"ok":True,"state":"RESTORE_READER_ABORTED"}
+
+    def _qualify_recovery(self,msg):
+        """Protected v2 coordinator confirms full donor/source decoder result.
+
+        Never trust a GCM verification alone. This receipt is still a candidate
+        until E-06 authorizes the same-XPI native-port authority and host proof.
+        """
+        run=msg["runId"]
+        ledger, artifact=self._paths(run)
+        previous=self._observe(run)
+        _require(previous is not None and previous["state"]=="WRITTEN_UNVERIFIED" and
+                 self._last_restore is not None and
+                 self._last_restore["runId"]==run and
+                 self._last_restore["sha256"]==msg["sha256"] and
+                 isinstance(msg["preparedSha256"],str) and
+                 _DIGEST.fullmatch(msg["preparedSha256"]) and
+                 msg["status"]=="INACTIVE_PREPARED_NOT_APPLIED",
+                 "BACKUP_RECOVERY_RECEIPT_REQUIRED")
+        secret=self.vault_get()
+        _require(isinstance(secret,str) and len(secret)>=12,
+                 "BACKUP_VAULT_UNAVAILABLE")
+        try:
+            proof=verify_two_pass(artifact,secret)
+        finally:
+            secret=None
+        _require(proof["sha256"]==msg["sha256"],"BACKUP_RECOVERY_FILE_CHANGED")
+        # A completed, observed inactive decoder may qualify retention, but
+        # cannot authorize Persona activation, provider/Git or replayed jobs.
+        next_state={**previous,"state":"RECOVERY_VERIFIED",
+                    "ciphertextSha256":msg["sha256"],
+                    "preparedSha256":msg["preparedSha256"],
+                    "verifiedAtNs":time.time_ns()}
+        self._write(next_state)
+        self._last_restore=None
+        return {"ok":True,"state":"RECOVERY_VERIFIED","runId":run,
+                "sha256":msg["sha256"],"activation":"OFF"}
+
+    def _retained(self):
+        if _safe_root(self.root,create=False) is None:
+            return []
+        ledgers=[]
+        for name in os.listdir(self.root):
+            if not name.endswith(".ledger"):
+                continue
+            run=name[:-7]
+            _require(_ID.fullmatch(run) is not None,
+                     "BACKUP_RETENTION_LEDGER_UNSAFE")
+            row=_read_json(self.root/name)
+            _require(row is not None and row.get("runId")==run,
+                     "BACKUP_RETENTION_LEDGER_UNSAFE")
+            ledgers.append(row)
+            _require(len(ledgers)<=100000,"BACKUP_RETENTION_CATALOG_LIMIT")
+        return ledgers
+
+    def _retention_plan(self):
+        options=eligible_for_prune(self._retained())
+        # No delete, unlock, vault lookup, recovery state change or path leak.
+        return {"ok":True,"state":"PLAN_ONLY","qualified":len([
+            v for v in self._retained() if v.get("state")=="RECOVERY_VERIFIED"]),
+                "pruneCandidate":options[0]["runId"] if options else None}
+
+    def _retention_prune(self):
+        # This unregistered candidate is an actual bounded native disk effect;
+        # allowed ONLY against isolated disposable test root pre-review.
+        _require(self.writer is None and self.restore is None and
+                 self._export_lock is None,"BACKUP_SESSION_BUSY")
+        _require(_safe_root(self.root,create=False) is not None,
+                 "BACKUP_RETENTION_NO_ROOT")
+        self._acquire_export_lock()
+        try:
+            options=eligible_for_prune(self._retained())
+            if not options:
+                return {"ok":True,"state":"NO_ELIGIBLE_DELETE"}
+            prior=options[0]
+            ledger,artifact=self._paths(prior["runId"])
+            password=self.vault_get()
+            _require(isinstance(password,str) and len(password)>=12,
+                     "BACKUP_VAULT_UNAVAILABLE")
+            try:
+                proof=verify_two_pass(artifact,password)
+            finally:
+                password=None
+            _require(proof["sha256"]==prior["ciphertextSha256"],
+                     "BACKUP_RETENTION_FILE_CHANGED")
+            # Journal intent before unlink. A lost-ACK/OS error leaves a
+            # DELETE_POSSIBLE state, never automatically reissues the unlink.
+            self._write({**prior,"state":"DELETE_POSSIBLE"})
+            os.unlink(artifact)
+            _fsync_directory(self.root)
+            self._write({**prior,"state":"REMOVED"})
+            return {"ok":True,"state":"REMOVED","runId":prior["runId"]}
+        finally:
+            self._release_export_lock()
 
     def close(self):
         if self.restore is not None:
