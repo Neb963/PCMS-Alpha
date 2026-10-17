@@ -2878,11 +2878,13 @@ def main():
                     captureV2:async()=>({pcms:{schema:1,stores:{
                       entities:[],operations:[],events:[],meta:[],observations:[]}},
                       donorEnvelope:'actual-donor-envelope-encoded-in-fixture'}),
+                    verifyV2:async()=>({ok:false,state:'INVENTORY_ONLY'}),
                     dispatchV2:async({runId,checkScope,checkRestoreHold})=>{
                       calls.push(runId);
                       if(!await checkScope()||await checkRestoreHold())
                         throw Error('BACKUP_V2_NOT_ADMITTED');
-                      return {ok:true,state:'AUTHENTICATED_INVENTORY_ONLY',
+                      return {ok:true,runId,state:'AUTHENTICATED_INVENTORY_ONLY',
+                        plaintextBytes:100,
                         ciphertextSha256:'a'.repeat(64)};
                     }
                   });
@@ -2892,7 +2894,7 @@ def main():
                     reviewedV2:async()=>false});
                   const held=await disallowed.manualV2Candidate();
                   const journal=(await stored.read()).state;
-                  done({ok:first.code==='BACKUP_V2_FULL_RECOVERY_PENDING'&&
+                  done({ok:first.code==='V2_NATIVE_OUTCOME_UNKNOWN'&&
                     second.code==='DOWNLOAD_OUTCOME_UNKNOWN'&&
                     manual.ok===true&&manual.state==='AUTHENTICATED_INVENTORY_ONLY'&&
                     manual.retentionSuccess===false&&
@@ -2911,6 +2913,66 @@ def main():
                                   {'script':v2_auto,'args':[]},timeout=90)
                 assert auto_result.get('ok') is True,auto_result
                 print('B S02_EXISTING_I15_DAILY_CANDIDATE_HELD_NO_NATIVE_REPLAY_OR_FALSE_RETENTION=PASS',flush=True)
+
+                # S02 B: native-tested source/donor recovery can be qualified
+                # as a real I15 tracked successful file; the provider only
+                # supplies synthetic independent-effects observations here.
+                v2_success="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const auto=await import('./backup-auto-run.mjs');
+                  const journal=await import('./backup-auto-store.mjs');
+                  const open=()=>new Promise((resolve,reject)=>{
+                    const req=indexedDB.open('s02-native-success-'+crypto.randomUUID(),1);
+                    req.onupgradeneeded=()=>req.result.createObjectStore('meta',{keyPath:'key'});
+                    req.onsuccess=()=>resolve(req.result);
+                    req.onerror=()=>reject(req.error);
+                  });
+                  const db=await open(),save=journal.createAutoStore(db);
+                  await save.enabled(true);
+                  let nativeExports=0,nativeRestores=0,prunes=0;
+                  const key='7'.repeat(32);
+                  const app=auto.createAutoRunner(browser,{
+                    open:async()=>db,newId:()=>key,
+                    reviewedV2:async()=>true,
+                    native:async()=>({ok:true,passphrase:'long-synthetic-key-not-saved'}),
+                    captureV2:async()=>({pcms:{schema:1,stores:{
+                      entities:[],operations:[],events:[],meta:[],observations:[]}},
+                      donorEnvelope:'long-synthetic-native-envelope'}),
+                    dispatchV2:async({runId})=>{
+                      nativeExports++;
+                      return {ok:true,runId,state:'AUTHENTICATED_INVENTORY_ONLY',
+                        plaintextBytes:1024,ciphertextSha256:'a'.repeat(64)};
+                    },
+                    verifyV2:async({runId,password})=>{
+                      nativeRestores++;
+                      if(password!=='long-synthetic-key-not-saved')
+                        throw Error('MISSING_OS_VAULT');
+                      return {ok:true,runId,state:'RECOVERY_VERIFIED',
+                        sha256:'a'.repeat(64),preparedSha256:'b'.repeat(64)};
+                    },
+                    nativeRetention:async()=>{prunes++;return {ok:true,
+                      state:'NO_ELIGIBLE_DELETE'};}
+                  });
+                  const first=await app.tick(),second=await app.tick();
+                  const inspected=(await save.read()).state,report=await app.status();
+                  db.close();
+                  done({ok:first.ok===true&&
+                    first.code==='NATIVE_READONLY_SOURCE_RECOVERY'&&
+                    second.code==='BACKUP_ALREADY_DONE'&&
+                    nativeExports===1&&nativeRestores===1&&prunes===1&&
+                    inspected.active===null&&inspected.archives.length===1&&
+                    inspected.archives[0].kind==='AUTO_NATIVE'&&
+                    inspected.archives[0].tier===3&&
+                    inspected.lastSuccessDay>=0&&
+                    report.tier===3&&
+                    report.proof==='NATIVE_READONLY_SOURCE_RECOVERY',
+                    first:first.code,second:second.code,retained:report.retained});
+                })().catch(e=>done({error:String(e)}));"""
+                v2_success_result=call('POST',f'/session/{after}/execute/async',
+                                       {'script':v2_success,'args':[]},timeout=90)
+                assert v2_success_result.get('ok') is True,v2_success_result
+                print('B S02_EXISTING_I15_DAILY_NATIVE_SOURCE_RECOVERY_QUALIFIED_ONCE=PASS',flush=True)
+
 
                 # S02 B: actual separate Firefox IndexedDB staging is
                 # strictly inactive until full second-pass native receipt,
