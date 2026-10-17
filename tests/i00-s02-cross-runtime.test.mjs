@@ -11,6 +11,7 @@ import {tmpdir} from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {compileV2,streamV2Frames,decodeAuthenticatedV2} from '../src/ui/backup-v2-codec.mjs';
 import {digest} from '../src/ui/backup-core.mjs';
+import {prepareInactiveV2} from '../src/ui/restore-v2-prep.mjs';
 import {createPortableBackupPayload,encodeBackupEnvelope,decodeBackupEnvelope}
  from '../donor/personamonkey/extension/lib/backup-package.js';
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
@@ -75,5 +76,80 @@ test('S02 actual JS source frames survive native encrypted disk and two independ
       blobs[2].base64);
     assert.equal(opened.pcms.stores.operations[0].value.state,'HELD_UNCERTAIN');
     assert.equal(opened.donor.personas.length,0);
+  }finally{await rm(temp,{recursive:true,force:true});}
+});
+
+test('S02 native fixed-purpose host readback -> real v2 inactive sanitizer without activation',async()=>{
+  const temp=await mkdtemp(path.join(tmpdir(),'pcms-s02-restore-'));
+  try{
+    const password='S02 private disposable restore password';
+    const sourceText='output = "restore exact"';
+    const sourceBytes=new TextEncoder().encode(sourceText);
+    const rootBytes=new TextEncoder().encode('<b>page</b>');
+    const records=[['main.pjs',sourceBytes],['index.html',rootBytes],
+      ['src/asset.bin',Uint8Array.from([0,255,8,3])]];
+    const files=await Promise.all(records.map(async([name,bytes])=>({
+      path:name,size:bytes.length,sha256:await digest(bytes)})));
+    files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+    const blobs=files.map(f=>({path:f.path,base64:Buffer.from(records.find(x=>x[0]===f.path)[1]).toString('base64')}));
+    const fingerprint=await digest('PCMS_STAGED_SOURCE_V1\n'+files.map(
+      f=>JSON.stringify([f.path,f.size,f.sha256])).join('\n'));
+    const source={ok:true,fingerprint,files,blobs};
+    const current={schema:1,stores:{entities:[],operations:[],events:[],meta:[],observations:[]}};
+    const incoming=structuredClone(current);
+    incoming.stores.meta.push({key:'stage:alpha',value:{record:{candidate:source,previous:source}}});
+    incoming.stores.operations.push({key:'uncertain',value:{status:'HELD_UNCERTAIN'}});
+    const portable=createPortableBackupPayload({state:{},containers:[],selection:{kind:'full'}});
+    const donor=await encodeBackupEnvelope({payload:portable,password});
+    const compiled=await compileV2(incoming,donor);
+    const pieces=[];for await(const p of streamV2Frames(compiled))pieces.push(p);
+    const raw=concat(pieces);
+    const script=[
+      'import sys,json,base64,hashlib',
+      'from native.backup_v2_host import V2ArchiveHost',
+      'from native.backup_stream_v2 import BUFFER',
+      'data=sys.stdin.buffer.read()',
+      'h=V2ArchiveHost(sys.argv[1],lambda:sys.argv[2])',
+      "run='s02_'+'c'*32",
+      "cut='a'*64",
+      "assert h.action(dict(action='export.begin',runId=run,cutDigest=cut,expectedPlaintextBytes=len(data),keyRef='portable-recovery'))['ok']",
+      'for seq,i in enumerate(range(0,len(data),BUFFER)):',
+      ' part=data[i:i+BUFFER]',
+      " assert h.action(dict(action='export.append',runId=run,sequence=seq,bytes=base64.b64encode(part).decode(),sha256=hashlib.sha256(part).hexdigest()))['ok']",
+      'count=(len(data)+BUFFER-1)//BUFFER',
+      "assert h.action(dict(action='export.finish',runId=run,sequence=count,cutDigest=cut))['ok']",
+      "start=h.action(dict(action='restore.begin',runId=run,keyRef='portable-recovery'))",
+      "assert start['ok'],start",
+      'chunks=[];seq=0',
+      'while True:',
+      " result=h.action(dict(action='restore.read',runId=run,sequence=seq))",
+      " assert result['ok'],result",
+      " chunks.append(result['bytes'])",
+      " if result['complete']:break",
+      ' seq+=1',
+      "print(json.dumps(dict(readback=result,plaintext=base64.b64encode(b''.join(base64.b64decode(x) for x in chunks)).decode()),separators=(',',':')))",
+      'h.close()'
+    ].join('\n');
+    const run=spawnSync('python3',['-c',script,temp,password],
+      {cwd:root,input:Buffer.from(raw),timeout:60000,maxBuffer:10*1024*1024});
+    assert.equal(run.status,0,run.stderr?.toString());
+    const output=JSON.parse(run.stdout.toString());
+    assert.equal(output.readback.state,'AUTHENTICATED_SECOND_PASS');
+    const decoded=new Uint8Array(Buffer.from(output.plaintext,'base64'));
+    assert.deepEqual(decoded,raw);
+    const prep=await prepareInactiveV2({authenticatedPlaintext:decoded,
+      readback:output.readback,expectedCiphertextSha256:output.readback.sha256,
+      password,decodeDonor:decodeBackupEnvelope,currentPcms:current,mode:'replace'});
+    assert.equal(prep.status,'INACTIVE_PREPARED_NOT_APPLIED');
+    assert.equal(prep.controller,'RESTORE_HELD');
+    assert.equal(prep.activation,'OFF');
+    assert.equal(prep.prepared.stores.meta[0].value.record.candidate.blobs[2].base64,
+      blobs[2].base64);
+    assert.equal(prep.prepared.stores.operations[0].value.status,'HELD_UNCERTAIN');
+    await assert.rejects(prepareInactiveV2({authenticatedPlaintext:decoded,
+      readback:{...output.readback,sha256:'0'.repeat(64)},
+      expectedCiphertextSha256:output.readback.sha256,
+      password,decodeDonor:decodeBackupEnvelope,currentPcms:current}),
+      /RESTORE_V2_AUTHENTICATED_SOURCE_REQUIRED/);
   }finally{await rm(temp,{recursive:true,force:true});}
 });
