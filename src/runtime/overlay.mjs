@@ -552,7 +552,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   const donorManagerPath=path.join(stage,'lib/state-manager.js');
   let donorManager=await readFile(donorManagerPath,'utf8');
   donorManager=substituteOnce(donorManager,"import { BLOCK_ROUTE_ID, DIRECT_ROUTE_ID } from \"./constants.js\";","import { BLOCK_ROUTE_ID, DIRECT_ROUTE_ID } from \"./constants.js\";\nimport { beforeDonorStateCommit } from \"../pcms/pcms-donor-fence.mjs\";","state manager import");
-  donorManager=substituteOnce(donorManager,"    assertSecurityAuthorization(sanitized, authorization);\n    const saved = await save(sanitized);","    assertSecurityAuthorization(sanitized, authorization);\n    beforeDonorStateCommit(cache, sanitized);\n    const saved = await save(sanitized);","revocation before async save");
+  donorManager=substituteOnce(donorManager,"    assertSecurityAuthorization(sanitized, authorization);\n    const saved = await save(sanitized);","    assertSecurityAuthorization(sanitized, authorization);\n    beforeDonorStateCommit(cache, sanitized, authorization.pcmsStagePermit??null);\n    const saved = await save(sanitized);","revocation before async save");
   donorManager=substituteOnce(donorManager,"      cache = incoming;\n      revision += 1;","      try { beforeDonorStateCommit(cache, incoming); }\n      catch { await save(cache); return {state:snapshot(cache),accepted:false,revision,bootId}; }\n      cache = incoming;\n      revision += 1;","external storage rollback");
   await writeFile(donorManagerPath,donorManager);
   // S01 trusted committed observer starts EMPTY on every Firefox boot; no
