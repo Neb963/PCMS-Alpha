@@ -3,12 +3,13 @@
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {createPortableBackupPayload,encodeBackupEnvelope,decodeBackupEnvelope} from '../lib/backup-package.js';
 import {filterOrdinaryAutomationJobs} from '../lib/automation-history.js';
-import {snapshotCanonical,consistentOrThrow,encodeIntegrated,decodeIntegrated,
+import {snapshotCanonical,consistentOrThrow,encodeIntegrated,decodeIntegrated,preflightSourceRecovery,
   observeDownload,MAX_ARCHIVE_BYTES} from './backup-core.mjs';
 
 const $=id=>document.getElementById(id);
 const button=$('pcms-backup-export'),pass=$('pcms-backup-passphrase');
 const result=$('pcms-backup-status'),overview=$('pcms-overview-backup');
+const auditButton=$('pcms-backup-audit'),auditStatus=$('pcms-backup-audit-status');
 const waitMs=10*60*1000;
 const codeOf=e=>{
   const code=e?.message||'BACKUP_FAILED';
@@ -188,6 +189,31 @@ async function showLast(){
     overview.textContent='Backup receipt unavailable. No verified backup inferred.';
   }finally{try{db?.close();}catch{}}
 }
+// Source-only, snapshot-scoped, independently hashed audit. No mutation,
+ // donor/Git/Perchance authority, vault access or disk-backup proof.
+auditButton?.addEventListener('click',()=>{
+  if(auditButton.disabled)return;
+  auditButton.disabled=true;
+  auditStatus.textContent='Checking retained local source bytes and history…';
+  void (async()=>{
+    let db;
+    try{
+      db=await openCanonicalDatabase();
+      const snap=await snapshotCanonical(db);
+      const proof=await preflightSourceRecovery(snap);
+      auditStatus.textContent='Local source-byte audit passed for '+
+        proof.manifests+' source manifests / '+proof.uniqueBlobs+
+        ' unique blobs ('+proof.uniqueBytes+' unique bytes). '+
+        'This is not a disk-backup or complete restore proof.';
+    }catch(e){
+      auditStatus.textContent='Source-complete recovery HELD: '+codeOf(e)+
+        '. Legacy v1 can retain this historical record, but does not prove the missing source. No external effects.';
+    }finally{
+      try{db?.close();}catch{}
+      auditButton.disabled=false;
+    }
+  })();
+});
 button.addEventListener('click',()=>{
   if(button.disabled)return;
   const value=pass.value;
