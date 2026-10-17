@@ -728,8 +728,13 @@ def s01_add_account_profile(browser, archive, folder):
 def _options(session,uuid,body,timeout=60):
     """Run a script as the PersonaMonkey settings page (the donor security-review sender)."""
     call('POST',f'/session/{session}/url',{'url':f'moz-extension://{uuid}/options/options.html'})
-    script="const done=arguments[arguments.length-1];(async()=>{const send=m=>browser.runtime.sendMessage(m);"+body+\
-        "})().then(done).catch(e=>done({error:String(e)}));"
+    # The harness idles the event page after 1.5s; after a wake the donor's
+    # message listener registers only once its dynamic import finishes. Wake
+    # it with a read-only call before sending any mutating message.
+    script=("const done=arguments[arguments.length-1];(async()=>{const send=m=>browser.runtime.sendMessage(m);"
+        "for(let i=0;i<80;i++){const s=await send({type:'GET_SNAPSHOT'}).catch(()=>null);if(s&&s.state)break;"
+        "await new Promise(r=>setTimeout(r,250));}"+body+
+        "})().then(done).catch(e=>done({error:String(e)}));")
     out=call('POST',f'/session/{session}/execute/async',{'script':script,'args':[]},timeout=timeout)
     assert 'error' not in out,out
     return out
