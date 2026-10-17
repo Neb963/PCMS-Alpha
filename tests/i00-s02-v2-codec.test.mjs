@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
 import {compileV2,streamV2Frames,decodeAuthenticatedV2} from '../src/ui/backup-v2-codec.mjs';
-import {digest,deserializeClone} from '../src/ui/backup-core.mjs';
+import {digest,serializeClone} from '../src/ui/backup-core.mjs';
 import {createPortableBackupPayload,encodeBackupEnvelope,decodeBackupEnvelope}
   from '../donor/personamonkey/extension/lib/backup-package.js';
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
@@ -27,8 +27,8 @@ async function fixture(){
   const password='long disposable recovery password';
   const donor=await encodeBackupEnvelope({payload,password});
   const src=await source(),pcms=empty();
-  pcms.stores.meta.push({key:'stage:a',value:{record:{
-    candidate:src,previous:src,reason:undefined,exactTime:new Date('2020-01-01T00:00:00Z')}}});
+  pcms.stores.meta.push({key:'stage:a',value:serializeClone({record:{
+    candidate:src,previous:src,reason:undefined,exactTime:new Date('2020-01-01T00:00:00Z')}})});
   pcms.stores.meta.push({key:'stage-history:a:1',value:{record:{candidate:src,previous:src}}});
   pcms.stores.operations.push({key:'op:one',value:{status:'HELD_UNCERTAIN',legacyBytes:{__pcmsType:'Bytes',
     data:Buffer.from([255,0,3]).toString('base64'),kind:'Uint8Array'}}});
