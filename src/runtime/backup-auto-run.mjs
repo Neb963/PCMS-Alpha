@@ -174,6 +174,32 @@ export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
     })().finally(()=>{task=null;});
     return task;
   }
+  // Manual source-complete v2 export shares I15's source cut, OS-vault
+  // lookup, restore sentinel and same native ledger; no second scheduler.
+  // Not wired into an operator command before independent E-06 review.
+  async function manualV2Candidate(){
+    if(await reviewedV2()!==true)return fail('BACKUP_V2_REVIEW_REQUIRED');
+    if(task)return fail('BACKUP_INFLIGHT');
+    try{
+      if((await sentinel.inspect()).held)return fail('BACKUP_RESTORE_HOLD');
+      const key=vaultResponse(await native({action:'get'}));
+      if(!key.ok)return fail('SUSPENDED_KEY_UNAVAILABLE');
+      const cut=await captureV2(api,await database(),key.passphrase,sentinel);
+      const runId='s02_'+newId();
+      const receipt=await dispatchV2({
+        db:await database(),api,pcms:cut.pcms,
+        donorEnvelope:cut.donorEnvelope,runId,
+        checkScope:async()=>!(await sentinel.inspect()).held,
+        checkRestoreHold:async()=>(await sentinel.inspect()).held
+      });
+      return receipt?.ok===true&&receipt.state==='AUTHENTICATED_INVENTORY_ONLY'?
+        {ok:true,runId,state:receipt.state,code:'FULL_RECOVERY_NOT_PROVEN',
+          retentionSuccess:false,providerEffects:'OFF'}:
+        fail('BACKUP_V2_NATIVE_OUTCOME_UNKNOWN');
+    }catch(e){
+      return fail(sanitize(e));
+    }
+  }
   async function setVault(secret){
     if(typeof secret!=='string'||secret.length<12||
       new TextEncoder().encode(secret).length>4096)return fail('INVALID_RECOVERY_PASSPHRASE');
@@ -185,7 +211,7 @@ export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
     return {ok:true,code:'VAULT_STORED_OPERATOR_RECOVERY_REQUIRED'};
   }
   return Object.freeze({
-    tick,status,setVault,
+    tick,status,setVault,manualV2Candidate,
     enable:async enabled=>{
       const s=await store(),result=await s.enabled(enabled);
       if(result.ok&&enabled)void tick();return result;
