@@ -3694,7 +3694,7 @@ def main():
                   const pkg=await import('../lib/backup-package.js');
                   const automation=await import('../lib/automation-history.js');
                   const db=await journal.openCanonicalDatabase();
-                  const current=await core.snapshotCanonical(db);db.close();
+                  let current=await core.snapshotCanonical(db);db.close();
                   const donor=await (await import('./donor-snapshot.mjs')).readProtectedDonorSnapshot(browser);
                   if(!donor?.state||!Array.isArray(donor.containers))
                     throw Error('DONOR_SNAPSHOT_UNAVAILABLE');
@@ -3719,7 +3719,7 @@ def main():
                   const password='synthetic-i16-installed-local-restore-passphrase';
                   const donorFile=await pkg.encodeBackupEnvelope({
                     payload:portable,password,scope:{kind:'full'}});
-                  const checkpoint=await core.encodeIntegrated({
+                  let checkpoint=await core.encodeIntegrated({
                     pcms:current,donorEnvelope:donorFile,passphrase:password});
                   const incoming=structuredClone(current);
                   incoming.stores.meta.push({key:'release:i16-new-historical',
@@ -3727,12 +3727,12 @@ def main():
                       release:{state:'APPROVED',approval:{old:true},dispatchPossible:false}})});
                   const source=await core.encodeIntegrated({
                     pcms:incoming,donorEnvelope:donorFile,passphrase:password});
-                  const reviewed=await restore.previewRestore({
+                  let reviewed=await restore.previewRestore({
                     archiveText:source.text,password,mode:'merge',mappings,
                     currentPcms:current,currentDonor:donor,currentPortable:portable,
                     containers:donor.containers,decodeDonor:pkg.decodeBackupEnvelope
                   });
-                  const answer=await new Promise(resolve=>{
+                  const submit=async(checkpointText,reviewedPlanSha256)=>new Promise(resolve=>{
                     const port=browser.runtime.connect({name:'pcms-i16-restore'});
                     let complete=false;
                     const done=result=>{
@@ -3743,10 +3743,40 @@ def main():
                     port.onMessage.addListener(done);
                     port.onDisconnect.addListener(()=>done({ok:false,code:'RESTORE_PORT_CLOSED'}));
                     port.postMessage({action:'APPLY',params:{
-                      archiveText:source.text,checkpointText:checkpoint.text,
+                      archiveText:source.text,checkpointText,
                       password,mode:'merge',fresh:false,mappings,
-                      reviewedPlanSha256:reviewed.planSha256}});
+                      reviewedPlanSha256}});
                   });
+                  let staleRejected=0,answer=await submit(checkpoint.text,reviewed.planSha256);
+                  for(let attempt=0;attempt<3&&!answer.ok&&
+                    answer.code==='RESTORE_PLAN_CHANGED';attempt++){
+                    // A real concurrent canonical mutation invalidates operator
+                    // review. Inspect the absence of any effect before manually
+                    // approving a newly observed destination cut.
+                    const guard=(await browser.storage.local.get('pcmsRestoreInProgress'))
+                      .pcmsRestoreInProgress;
+                    if(guard?.active)throw Error('I16_STALE_PLAN_CAUSED_EFFECT');
+                    const latestDb=await journal.openCanonicalDatabase();
+                    const updated=await core.snapshotCanonical(latestDb);latestDb.close();
+                    if(JSON.stringify(updated)===JSON.stringify(current))
+                      throw Error('I16_REVIEW_DRIFT_UNEXPLAINED');
+                    const oldKeys=new Set(current.stores.meta.map(r=>r.key));
+                    const categories=updated.stores.meta.filter(r=>!oldKeys.has(r.key))
+                      .map(r=>typeof r.key==='string'?
+                        (r.key.startsWith('backup:')?'backup:':
+                        r.key.startsWith('release:')?'release:':
+                        r.key.startsWith('account:')?'account:':'other'):'other');
+                    if(categories.length>3)throw Error('I16_UNBOUNDED_BACKGROUND_DRIFT');
+                    staleRejected++;
+                    current=updated;
+                    checkpoint=await core.encodeIntegrated({
+                      pcms:current,donorEnvelope:donorFile,passphrase:password});
+                    reviewed=await restore.previewRestore({
+                      archiveText:source.text,password,mode:'merge',mappings,
+                      currentPcms:current,currentDonor:donor,currentPortable:portable,
+                      containers:donor.containers,decodeDonor:pkg.decodeBackupEnvelope});
+                    answer=await submit(checkpoint.text,reviewed.planSha256);
+                  }
                   const marker=(await browser.storage.local.get('pcmsRestoreInProgress'))
                     .pcmsRestoreInProgress;
                   const checked=await journal.openCanonicalDatabase();
@@ -3773,12 +3803,15 @@ def main():
                       }:null
                     }));
                   return {ok:true,groups:Object.keys(marker.groups).length,
-                    status:marker.status,source:source.sha256};
+                    status:marker.status,source:source.sha256,staleRejected};
                 })().then(done).catch(e=>done({ok:false,error:String(e)}));"""
                 i16_full=call('POST',f'/session/{after}/execute/async',
                               {'script':i16_end_to_end,'args':[]},timeout=120)
                 assert i16_full.get('ok') is True,i16_full
                 assert i16_full.get('groups')==4,i16_full
+                if i16_full.get('staleRejected',0):
+                    print('B I16_DESTINATION_DRIFT_HELD_BEFORE_EFFECT_AND_FRESH_OPERATOR_REVIEW=PASS',
+                          i16_full['staleRejected'],flush=True)
                 print('B I16_REAL_GUARDED_DONOR_AND_CANONICAL_STAGED_RESTORE_INACTIVE=PASS',flush=True)
 
                 # Full Firefox process restart, not just UI navigation.
