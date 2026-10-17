@@ -74,9 +74,10 @@ export function createV2InactiveStage(db,{assertHeld}={}){
   }
   async function append(runId,sequence,bytes){
     insist(runOK(runId)&&Number.isSafeInteger(sequence)&&sequence>=0&&
-      bytes instanceof Uint8Array&&bytes.length<=MAX_CHUNK&&bytes.length>0,
+      ArrayBuffer.isView(bytes)&&bytes.byteLength<=MAX_CHUNK&&bytes.byteLength>0,
       'RESTORE_V2_FRAGMENT_INVALID');
     await held();
+    const dataBytes=new Uint8Array(bytes.buffer,bytes.byteOffset,bytes.byteLength);
     return transact(db,(runs,chunks,done,abort)=>{
       runs.get(runId).onsuccess=e=>{
         const row=e.target.result;
@@ -84,7 +85,7 @@ export function createV2InactiveStage(db,{assertHeld}={}){
           {abort('RESTORE_V2_FRAGMENT_SEQUENCE_INVALID');return;}
         if(row.acceptedBytes+bytes.length>row.expectedBytes)
           {abort('RESTORE_V2_FRAGMENT_OVERRUN');return;}
-        chunks.add({key:fragmentKey(runId,sequence),data:base64(bytes)});
+        chunks.add({key:fragmentKey(runId,sequence),data:base64(dataBytes)});
         const next={...row,acceptedBytes:row.acceptedBytes+bytes.length,
           nextSequence:sequence+1};
         runs.put(next);done({state:next.state,nextSequence:next.nextSequence,
