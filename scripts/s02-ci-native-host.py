@@ -73,10 +73,61 @@ def native_script():
         throw Error('H_NATIVE_MALICIOUS_COMMAND_NOT_DENIED');
       const db=await journal.openCanonicalDatabase();
       try{
+        // Genuine installed Firefox IndexedDB, not the D-tier in-memory
+        // 50/1024 fixture: every archived revision carries exact source bytes.
+        const enc=new TextEncoder(),records=[],profiles={},scripts={},
+          containers=[],cookiesByProfile={};
+        for(let i=0;i<50;i++){
+          const cid='firefox-container-'+(200+i),sid='script-'+i;
+          records.push({key:'account:s02-ci-'+i,account:{
+            accountId:'s02-ci-'+i,state:'ARCHIVED',revision:1}});
+          profiles[cid]={containerId:cid,managed:true,routeId:'__block__',
+            name:'CI archived Persona '+i,scriptIds:[sid],
+            killSwitch:true,blockLocalNetwork:true};
+          scripts[sid]={id:sid,name:'CI source '+i,
+            code:'// synthetic donor '+i,enabled:false};
+          containers.push({cookieStoreId:cid,name:'CI archived Persona '+i,
+            color:'blue',icon:'fingerprint'});
+          cookiesByProfile[cid]=[{name:'ci-'+i,value:'disposable-only-'+i,
+            domain:'example.invalid',path:'/',secure:true,httpOnly:true}];
+        }
+        for(let i=0;i<1024;i++){
+          const raw=[
+            ['main.pjs',enc.encode('output="h-source-'+i+'";')],
+            ['index.html',enc.encode('<div data-history="'+i+'">CI</div>')],
+            ['src/asset.bin',Uint8Array.from({length:160+i%256},
+              (_,n)=>(i*67+n*31+(n>>3))&255)]
+          ];
+          const files=await Promise.all(raw.map(async([path,bytes])=>({
+            path,size:bytes.length,sha256:await core.digest(bytes)})));
+          files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+          const fingerprint=await core.digest('PCMS_STAGED_SOURCE_V1'+
+            String.fromCharCode(10)+files.map(f=>
+              JSON.stringify([f.path,f.size,f.sha256])).join(String.fromCharCode(10)));
+          const source={ok:true,fingerprint,files,
+            blobs:files.map(f=>({path:f.path,base64:btoa(
+              String.fromCharCode(...raw.find(v=>v[0]===f.path)[1]))}))};
+          records.push({key:'stage-history:s02-ci-'+i,
+            record:{candidate:source,previous:source}});
+        }
+        const tx=db.transaction(['meta'],'readwrite');
+        const meta=tx.objectStore('meta');
+        for(const record of records)meta.put(record);
+        await new Promise((resolve,reject)=>{
+          tx.oncomplete=resolve;
+          tx.onabort=()=>reject(Error('H_SOURCE_FLEET_IDB_ABORT'));
+          tx.onerror=()=>reject(Error('H_SOURCE_FLEET_IDB_FAILURE'));
+        });
         const pcms=await core.snapshotCanonicalV2(db);
+        if(pcms.stores.meta.length<1074)
+          throw Error('H_SOURCE_FLEET_INCOMPLETE');
         const password=vault.passphrase;
         const payload=donor.createPortableBackupPayload({
-          state:{},containers:[],selection:{kind:'full'}});
+          state:{profiles,scripts,routes:{},workflows:{},global:{}},
+          containers,cookiesByProfile,selection:{kind:'full'}});
+        if(payload.personas.length!==50||payload.scripts.length!==50||
+           Object.keys(payload.cookies).length!==50)
+          throw Error('H_DONOR_SYNTHETIC_FLEET_INCOMPLETE');
         const envelope=await donor.encodeBackupEnvelope({payload,password});
         const observed=[];
         for(let i=0;i<2;i++){
@@ -149,6 +200,7 @@ def main():
         assert result.get("geckoId")==ADDON_ID,result
         seen=result["observed"]
         assert len(seen)==2 and seen[0]["runId"]!=seen[1]["runId"],seen
+        assert min(v["rows"] for v in seen)>=1074,("H_SOURCE_HISTORY_ROW_LOSS",seen)
         from importlib.machinery import SourceFileLoader
         sys.path.insert(0,str(ROOT/"native"))
         from backup_stream_v2 import verify_two_pass
@@ -158,6 +210,9 @@ def main():
             assert hashlib.sha256(file.read_bytes()).hexdigest()==entry["sha256"]
             verify=verify_two_pass(file,PASSWORD)
             assert verify["sha256"]==entry["sha256"],"H_INDEPENDENT_DISK_REOPEN_INVALID"
+            assert verify["canonicalRows"]>=1074,("H_SOURCE_ROWS_LOST",verify)
+            assert verify["uniqueBlobs"]>2000,("H_SOURCE_VARIETY_LOST",verify)
+            assert verify["donorPersonas"]==50,("H_DONOR_PERSONAS_LOST",verify)
         print("H S02_ACTUAL_REGISTERED_GECKO_NATIVE_PORT_SECRETS_FILE_AND_REOPEN=PASS",
               json.dumps({"xpiSha256":hashlib.sha256(archive.read_bytes()).hexdigest(),
                           "runs":len(seen),"rows":[v["rows"] for v in seen],
