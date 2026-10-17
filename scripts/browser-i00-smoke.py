@@ -2716,6 +2716,7 @@ def main():
                 v2_code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const v2=await import('./backup-v2-codec.mjs');
+                  const scanner=await import('./restore-v2-frame-scanner.mjs');
                   const cryptoCore=await import('./backup-core.mjs');
                   const donor=await import('../lib/backup-package.js');
                   const pass='disposable-s02-browser-password';
@@ -2742,10 +2743,21 @@ def main():
                   for await(const chunk of v2.streamV2Frames(plan))chunks.push(chunk);
                   const all=new Uint8Array(plan.plaintextBytes);let o=0;
                   for(const chunk of chunks){all.set(chunk,o);o+=chunk.length;}
+                  let scannerBlobs=0,scannerDonorBytes=0,scannerEnds=0;
+                  async function* pieces(){
+                    for(let j=0;j<all.length;j+=31)yield all.subarray(j,j+31);
+                  }
+                  for await(const frame of scanner.scanV2AuthenticatedFrames(pieces())){
+                    if(frame.kind==='BLOB')scannerBlobs++;
+                    if(frame.kind==='DONOR_FRAGMENT')scannerDonorBytes+=frame.bytes.length;
+                    if(frame.kind==='END')scannerEnds++;
+                  }
                   const restored=await v2.decodeAuthenticatedV2(all,{
                     decodeDonor:donor.decodeBackupEnvelope,password:pass});
                   const exact=restored.pcms.stores.meta[0].value.record.candidate;
                   done({ok:o===all.length&&plan.terminal.uniqueBlobs===3&&
+                    scannerBlobs===3&&scannerEnds===1&&
+                    scannerDonorBytes===new TextEncoder().encode(sealed).length&&
                     restored.pcms.stores.operations[0].value.status==='HELD_UNCERTAIN'&&
                     exact.blobs.length===3&&
                     exact.blobs.some(x=>x.path==='src/binary.bin'&&x.base64==='AP8BACo=')&&
