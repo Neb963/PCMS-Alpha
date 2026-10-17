@@ -46,7 +46,7 @@ export function closeQualifiedWindow(previous,next,{maxGapMs,uncertaintyMs=0,
 }
 
 const witnessInt=v=>Number.isSafeInteger(v)&&v>=1;
-const witnessId=v=>typeof v==='string'&&/^[a-z0-9-]{8,128}$/i.test(v);
+const witnessId=v=>typeof v==='string'&&/^[a-z0-9_-]{8,128}$/i.test(v);
 const positiveDecimal=v=>typeof v==='string'&&/^\d+$/.test(v)&&BigInt(v)>0n;
 // The sample is an observation of the ORIGINAL, browser-owned native pipe;
 // the returned counters alone never grant healthy time or route admission.
