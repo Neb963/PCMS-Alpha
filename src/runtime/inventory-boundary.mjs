@@ -58,6 +58,9 @@ export function createInventoryBoundary(api,{
   async function run(message,sender) {
     const auth=validateInventoryMessage(api,sender,message);
     if(!auth.ok)return auth;
+    return perform(message);
+  }
+  async function perform(message) {
     const p=message.params||{};
     try{
       const s=await store();
@@ -109,6 +112,11 @@ export function createInventoryBoundary(api,{
       });
     });
   }
-  return Object.freeze({register,run});
+  // Same guarded path, invoked by the Add Account Confirm step after identity
+  // verification (not a separate UI authority).
+  const syncAccount=(accountId,expectedRevision)=>
+    perform({type:'SYNC_ACCOUNT',params:{accountId,expectedRevision}});
+  return Object.freeze({register,run,syncAccount});
 }
-if(typeof browser!=='undefined')createInventoryBoundary(browser).register();
+export const inventoryBoundary=typeof browser!=='undefined'?createInventoryBoundary(browser):null;
+inventoryBoundary?.register();

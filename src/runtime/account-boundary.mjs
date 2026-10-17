@@ -1,46 +1,43 @@
-// I03: isolated same-XPI account port. Read-only Persona queries and strictly
-// local account state; browser navigation is delegated to the donor guard.
+// I03/S01: isolated same-XPI account port. Add Account, Confirm and route
+// repair orchestrate donor-owned Persona/route operations through the
+// enrollment module; this port accepts only operator intents, never proofs,
+// Persona IDs, route IDs or endpoints from the page.
 import { openCanonicalDatabase, createRestoreSentinel, fail, isSafeId } from './journal.mjs';
 import { createAccountStore, publicAccount } from './accounts.mjs';
 import { createExitLedger } from './network-ledger.mjs';
+import { createEnrollment, SETUP_MESSAGES } from './enrollment.mjs';
+import { holdRoutePin, releaseRoutePinHold, reloadRoutePins, routePinSummary } from './route-pin.mjs';
 import { internalPcmsGuard } from './persona-guard.mjs';
+import { inventoryBoundary } from './inventory-boundary.mjs';
 import { trustedExtensionPage } from './command-boundary.mjs';
 
 export const ACCOUNT_PORT='pcms-i03-accounts';
-const names=new Set(['LIST_ACCOUNTS','LIST_PERSONAS','LIST_ROUTES','ENROLL','ACK_LOGIN',
-  'MANUAL_OVERRIDE','ARCHIVE','REACTIVATE','REBIND','OPEN_LOGIN','CREATE_PERSONA','CHECK_IDENTITY','NETWORK_STATUS','WITNESS_STATUS']);
-const uid = value => typeof value==='string' && /^[a-z0-9-]{8,128}$/i.test(value);
+export const ROUTE_UPKEEP_ALARM='pcms-s01-route-upkeep';
+const READS=['LIST_ACCOUNTS','LIST_PERSONAS','LIST_ROUTES','NETWORK_STATUS','WITNESS_STATUS','ADD_ACCOUNT'];
+const permitted={
+  LIST_ACCOUNTS:[],LIST_PERSONAS:[],LIST_ROUTES:[],NETWORK_STATUS:[],WITNESS_STATUS:[],ADD_ACCOUNT:[],
+  RESUME_SETUP:['accountId','expectedRevision'],CONFIRM_LOGIN:['accountId','expectedRevision'],
+  CHECK_IDENTITY:['accountId','expectedRevision'],VERIFY_ROUTE:['accountId','expectedRevision'],
+  CHANGE_ROUTE:['accountId','expectedRevision'],
+  ACK_LOGIN:['accountId','expectedRevision'],OPEN_LOGIN:['accountId','expectedRevision'],
+  ARCHIVE:['accountId','expectedRevision'],
+  MANUAL_OVERRIDE:['accountId','expectedRevision','reason','acknowledgeLimitedAuthority'],
+  REACTIVATE:['accountId','expectedRevision','explicitReactivation']
+};
 export function validateAccountMessage(api,sender,m) {
   if(!trustedExtensionPage(api,sender)) return fail('UNTRUSTED_SENDER');
   if(!m||typeof m!=='object'||Array.isArray(m))return fail('INVALID_MESSAGE');
   let s;try{s=JSON.stringify(m);}catch{return fail('INVALID_MESSAGE');}
-  if(!s||s.length>1800||Object.keys(m).length>2||!names.has(m.type))
+  if(!s||s.length>1800||Object.keys(m).length>2||!Object.hasOwn(permitted,m.type))
     return fail('COMMAND_NOT_ALLOWED');
   if(m.params !== undefined && (!m.params||typeof m.params!=='object'||Array.isArray(m.params)||
       Object.keys(m.params).length>5))return fail('INVALID_PARAMS');
   const p=m.params||{};
-  const permitted={
-    LIST_ACCOUNTS:[],LIST_PERSONAS:[],LIST_ROUTES:[],NETWORK_STATUS:[],WITNESS_STATUS:[],
-    CREATE_PERSONA:['name','routeId'],ENROLL:['accountId','personaUid','expectedRevision'],
-    ACK_LOGIN:['accountId','expectedRevision'],OPEN_LOGIN:['accountId','expectedRevision'],
-    CHECK_IDENTITY:['accountId','expectedRevision'],ARCHIVE:['accountId','expectedRevision'],
-    MANUAL_OVERRIDE:['accountId','expectedRevision','reason','acknowledgeLimitedAuthority'],
-    REACTIVATE:['accountId','expectedRevision','explicitReactivation'],
-    REBIND:['accountId','expectedRevision','personaUid','explicitRepair']
-  };
   if(Object.keys(p).some(k=>!permitted[m.type].includes(k)))return fail('INVALID_PARAMS');
-  if(!['LIST_ACCOUNTS','LIST_PERSONAS','LIST_ROUTES','NETWORK_STATUS','WITNESS_STATUS'].includes(m.type)) {
-    if(m.type==='CREATE_PERSONA') {
-      if(typeof p.name!=='string'||p.name.length<1||p.name.length>64||
-          !/^[a-z0-9_-]{1,128}$/i.test(p.routeId))return fail('INVALID_PARAMS');
-    }else if(m.type==='ENROLL') {
-      if(!isSafeId(p.accountId)||!uid(p.personaUid)||p.expectedRevision!==0)
-        return fail('INVALID_PARAMS');
-    }else if(!isSafeId(p.accountId)||!Number.isSafeInteger(p.expectedRevision)||
+  if(!READS.includes(m.type)) {
+    if(!isSafeId(p.accountId)||!Number.isSafeInteger(p.expectedRevision)||
       p.expectedRevision<1) return fail('INVALID_PARAMS');
     if(m.type==='REACTIVATE'&&p.explicitReactivation!==true)return fail('INVALID_PARAMS');
-    if(m.type==='REBIND'&&(!uid(p.personaUid)||p.explicitRepair!==true))
-      return fail('INVALID_PARAMS');
     if(m.type==='MANUAL_OVERRIDE'&&(
       p.acknowledgeLimitedAuthority!==true||typeof p.reason!=='string'))
       return fail('INVALID_PARAMS');
@@ -73,22 +70,42 @@ export function createAccountBoundary(api,{
     return {source:'GUARDED_SESSION_READBACK',verified:true,
       personaUid:context.personaUid,principalFingerprint:out.principalFingerprint,
       observationId:'identity_'+crypto.randomUUID().replaceAll('-','')};
-  }
+  },
+  pins={hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},
+  syncInventory=(accountId,revision)=>inventoryBoundary?inventoryBoundary.syncAccount(accountId,revision):
+    Promise.resolve(fail('INVENTORY_UNAVAILABLE'))
 }={}) {
-  let dbPromise;
+  let dbPromise,enrollment;
   const sentinel=createRestoreSentinel(api.storage.local);
   const connection=()=>dbPromise ||= open();
   const store=async()=>createAccountStore(await connection());
   const exitLedger=async()=>createExitLedger(await connection());
+  // The SAME production instance serves the UI port and background upkeep.
+  async function flow(){
+    if(enrollment)return enrollment;
+    const g=guard();
+    if(!g?.enrollmentDonor)return null;
+    enrollment=createEnrollment({accounts:await store(),ledger:await exitLedger(),
+      donor:g.enrollmentDonor,pins,
+      openLogin:personaUid=>g.openHumanLogin(personaUid),
+      identify:personaUid=>guardedIdentityRead(g,personaUid,identityReader),
+      syncInventory});
+    return enrollment;
+  }
+  const explain=code=>SETUP_MESSAGES[code]||null;
+  async function current(accounts,p){
+    const old=await accounts.get(p.accountId);
+    if(!old.ok)return old;
+    if(old.account.revision!==p.expectedRevision)return fail('STALE_REVISION');
+    return old;
+  }
   async function run(message,sender) {
     const auth=validateAccountMessage(api,sender,message);
     if(!auth.ok)return auth;
-    const g=guard();
-    if(!g)return fail('GUARD_NOT_READY');
     const p=message.params||{};
     try {
-      // Read-only queries are still possible during restore, but report the
-      // explicit hold so UI cannot treat their values as operational authority.
+      const g=guard();
+      if(!g)return fail('GUARD_NOT_READY');
       if(message.type==='LIST_PERSONAS')return {ok:true,personas:await g.listAvailablePersonas()};
       if(message.type==='LIST_ROUTES')return {ok:true,routes:await g.listProtectedRoutes()};
       if(message.type==='WITNESS_STATUS'){
@@ -100,70 +117,62 @@ export function createAccountBoundary(api,{
           sequence:result.witness.sequence,observedAtMs:Date.now()};
       }
       if(message.type==='NETWORK_STATUS'){
-        // Read-only, redacted count. No IPs, native endpoints or assertions of readiness.
+        // Redacted counts only. No IPs, routes or native endpoints.
         const out=await (await exitLedger()).inspect();
-        return out.ok?{...out,admission:'HELD_E01_E04',providerEffects:'OFF'}:out;
+        return out.ok?{...out,pins:routePinSummary(),admission:'PER_ACCOUNT_ROUTE_PIN'}:out;
       }
       if(message.type==='LIST_ACCOUNTS') {
         const restore=await sentinel.inspect();
-        const routeGateHeld=g.getHealth?.().admission==='HELD_UNTIL_OWNER_VERIFICATION';
         const out=await (await store()).list();
-        return out.ok?{ok:true,accounts:out.accounts.map(publicAccount),
-          truncated:out.truncated,held:restore.held,holdCode:restore.code,routeGateHeld}:out;
+        const f=await flow();
+        return out.ok?{ok:true,accounts:out.accounts.map(a=>({...publicAccount(a),
+          working:f?.running(a.accountId)===true,
+          message:explain(a.setup?.code)||explain(a.route?.code)})),
+          truncated:out.truncated,held:restore.held,holdCode:restore.code,
+          enrollment:f?'AVAILABLE':'DONOR_UNAVAILABLE'}:out;
       }
       const restore=await sentinel.inspect();
       if(restore.held)return fail('RESTORE_HOLD');
-      // S01: legacy cached route test + lease is not an exclusive reservation.
-      // Do not let PCMS initiate login/rebind through an unjoined donor gate.
-      // Archive and local limited exception remain usable while route proof holds.
-      const routeGateHeld=g.getHealth?.().admission==='HELD_UNTIL_OWNER_VERIFICATION';
-      if(routeGateHeld && ['CREATE_PERSONA','ENROLL','REBIND','REACTIVATE',
-          'OPEN_LOGIN','CHECK_IDENTITY'].includes(message.type)) {
-        // Preserve the existing missing-Persona negative oracle independently
-        // of this architecture hold. Even a real Persona cannot pass without
-        // the exclusive reservation, dual-family proof and donor grant.
-        if(message.type==='ENROLL'||message.type==='REBIND') {
+      const accounts=await store();
+      if(message.type==='ADD_ACCOUNT'){
+        const f=await flow();
+        return f?await f.begin():fail('ENROLLMENT_UNAVAILABLE');
+      }
+      const old=await current(accounts,p);
+      if(!old.ok)return old;
+      const f=await flow();
+      const pinned=typeof old.account.bindingId==='string';
+      if(['RESUME_SETUP','CONFIRM_LOGIN','CHECK_IDENTITY','VERIFY_ROUTE','CHANGE_ROUTE','OPEN_LOGIN'].includes(message.type)){
+        if(old.account.state==='ARCHIVED')return fail('ACCOUNT_ARCHIVED');
+        // Accounts bound by the pre-S01 manual flow have no reserved exit.
+        if(!pinned)return fail('ROUTE_RESERVATION_REQUIRED');
+        if(!f)return fail('ENROLLMENT_UNAVAILABLE');
+      }
+      if(message.type==='RESUME_SETUP'){
+        if(old.account.state!=='PREPARING')return fail('INVALID_ACCOUNT_STATE');
+        void f.prepare(p.accountId);
+        return {ok:true,started:true};
+      }
+      if(message.type==='CONFIRM_LOGIN'||message.type==='CHECK_IDENTITY'){
+        const out=await f.confirm(p.accountId);
+        return out.ok?out:{...out,message:explain(out.code)};
+      }
+      if(message.type==='VERIFY_ROUTE'||message.type==='CHANGE_ROUTE'){
+        // Operator-requested; may take several probes, progress is listed.
+        void f.verifyRoute(p.accountId,{change:message.type==='CHANGE_ROUTE'});
+        return {ok:true,started:true};
+      }
+      if(message.type==='OPEN_LOGIN')return await g.openHumanLogin(old.account.personaUid);
+      if(message.type==='REACTIVATE'){
+        if(pinned&&f){void f.reactivate(p.accountId,p.expectedRevision);return {ok:true,started:true};}
+        if(old.account.personaUid){
           const available=await g.listAvailablePersonas();
-          if(!available.some(x=>x.personaUid===p.personaUid&&!x.archived))
+          if(!available.some(x=>x.personaUid===old.account.personaUid&&!x.archived))
             return fail('PERSONA_NOT_AVAILABLE');
         }
-        return fail('PROTECTED_ADMISSION_UNPROVEN');
       }
-      const accounts=await store();
-      if(message.type==='CREATE_PERSONA') {
-        // Donor's own mutation fence is authoritative. If acknowledgement is
-        // lost, operator must refresh Persona inventory before retrying.
-        return await g.createProtectedPersona(p.name.trim(),p.routeId);
-      }
-      if(message.type==='REACTIVATE') {
-        const old=await accounts.get(p.accountId);
-        if(!old.ok)return old;
-        if(old.account.revision!==p.expectedRevision)return fail('STALE_REVISION');
-        const available=await g.listAvailablePersonas();
-        if(!available.some(x=>x.personaUid===old.account.personaUid&&!x.archived))
-          return fail('PERSONA_NOT_AVAILABLE');
-      }
-      if(message.type==='ENROLL'||message.type==='REBIND'){
-        const available=await g.listAvailablePersonas();
-        if(!available.some(x=>x.personaUid===p.personaUid&&!x.archived))
-          return fail('PERSONA_NOT_AVAILABLE');
-      }
-      if(message.type==='OPEN_LOGIN'||message.type==='CHECK_IDENTITY') {
-        const old=await accounts.get(p.accountId);
-        if(!old.ok)return old;
-        if(old.account.revision!==p.expectedRevision)return fail('STALE_REVISION');
-        if(old.account.state==='ARCHIVED')return fail('ACCOUNT_ARCHIVED');
-        if(message.type==='OPEN_LOGIN') return await g.openHumanLogin(old.account.personaUid);
-        // A fixture supplies an independent observer; the production reader
-        // deliberately holds until an authenticated provider method is proven.
-        const observed=await guardedIdentityRead(g,old.account.personaUid,identityReader);
-        if(!observed.ok)return observed;
-        const result=await accounts.apply({type:'VERIFY',accountId:p.accountId,
-          expectedRevision:p.expectedRevision,proof:observed.proof});
-        return result.ok?{ok:true,account:publicAccount(result.account)}:result;
-      }
-      const map={ENROLL:'ENROLL',ACK_LOGIN:'ACK_LOGIN',MANUAL_OVERRIDE:'MANUAL_OVERRIDE',
-        ARCHIVE:'ARCHIVE',REACTIVATE:'REACTIVATE',REBIND:'REBIND'};
+      const map={ACK_LOGIN:'ACK_LOGIN',MANUAL_OVERRIDE:'MANUAL_OVERRIDE',
+        ARCHIVE:'ARCHIVE',REACTIVATE:'REACTIVATE'};
       const out=await accounts.apply({...p,type:map[message.type],
         ...(message.type==='MANUAL_OVERRIDE'?{reportedAt:new Date().toISOString()}:{} )});
       return out.ok?{ok:true,account:publicAccount(out.account)}:out;
@@ -171,6 +180,15 @@ export function createAccountBoundary(api,{
       // No browser/provider error strings, tokens or stack reach the UI.
       return fail('ACCOUNT_AUTHORITY_UNAVAILABLE');
     }
+  }
+  // Route upkeep: resume operator-started setups and re-verify pinned routes
+  // without an open dashboard. Probes reach only the fixed Mullvad echo.
+  async function upkeep(){
+    try{
+      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      const f=await flow();
+      return f?await f.upkeep():fail('ENROLLMENT_UNAVAILABLE');
+    }catch{return fail('ROUTE_UPKEEP_UNAVAILABLE');}
   }
   function register() {
     api.runtime.onConnect.addListener(port=>{
@@ -185,7 +203,9 @@ export function createAccountBoundary(api,{
           .finally(()=>{busy=false;});
       });
     });
+    try{api.alarms?.create(ROUTE_UPKEEP_ALARM,{periodInMinutes:30});}catch{}
+    api.alarms?.onAlarm?.addListener(alarm=>{if(alarm?.name===ROUTE_UPKEEP_ALARM)void upkeep();});
   }
-  return Object.freeze({register,run});
+  return Object.freeze({register,run,upkeep});
 }
 if(typeof browser!=='undefined')createAccountBoundary(browser).register();

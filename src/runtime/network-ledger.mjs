@@ -1,9 +1,10 @@
-// S01 canonical protected exit reservation. No native call, browser route mutation,
-// remote probe or provider effect is allowed by this module. A donor-authorized
-// fixed-probe result is required before requesting a canonical reservation.
+// S01 canonical historical exit ledger and per-binding route pin. No native
+// call, browser route mutation, probe or provider effect occurs here. Exits
+// come only from donor route-probe evidence; a caller cannot assert a digest.
 import {fail,isSafeId} from './journal.mjs';
 
-const KEY='network:s01:exit-ownership-v1';
+export const LEDGER_KEY='network:s01:exit-ownership-v1';
+const KEY=LEDGER_KEY;
 const HEX=/^[a-f0-9]{64}$/;
 const number=n=>Number.isSafeInteger(n)&&n>=0;
 function ip4(raw) {
@@ -37,29 +38,6 @@ function ip6(raw) {
    return value;
  }catch{return null;}
 }
-export function normalizeProtectedExitProof(e,nowMs) {
- if(!e||!number(nowMs)||!isSafeId(e.evidenceId)||
-   e.source!=='DONOR_FIXED_PROBE'||e.dns!=='VERIFIED_PROTECTED'||
-   e.protection!=='READY'||!number(e.observedAtMs)||
-   !number(e.validUntilMs)||e.observedAtMs>nowMs||
-   e.validUntilMs<=nowMs||!isSafeId(e.nativeLifetimeId)||
-   !isSafeId(e.routeId)||!isSafeId(e.contextId))
-   return fail('PROTECTED_EVIDENCE_UNVERIFIED');
- const ipv4=e.ipv4?.state==='VERIFIED' ? ip4(e.ipv4.address) : null;
- if(!ipv4)return fail('IPV4_EVIDENCE_UNVERIFIED');
- let ipv6=null;
- if(e.ipv6?.state==='VERIFIED') {
-   ipv6=ip6(e.ipv6.address);
-   if(!ipv6)return fail('IPV6_EVIDENCE_UNVERIFIED');
- } else if(e.ipv6?.state!=='BLOCKED_VERIFIED'||
-   e.ipv6?.verifiedBlocking!==true||!isSafeId(e.ipv6.blockEvidenceId))
-   return fail('IPV6_EVIDENCE_UNVERIFIED');
- const exits=ipv6?[{family:'IPv4',address:ipv4},{family:'IPv6',address:ipv6}]:
-   [{family:'IPv4',address:ipv4}];
- return {ok:true,evidenceId:e.evidenceId,routeId:e.routeId,contextId:e.contextId,
-   nativeLifetimeId:e.nativeLifetimeId,validUntilMs:e.validUntilMs,
-   ipv6Disposition:ipv6?'VERIFIED':'BLOCKED_VERIFIED',exits};
-}
 async function digest(exits){
  // GB-01 v1: explicit version and length framing, never an ambiguous
  // concatenation of variable-length family/address strings.
@@ -76,82 +54,133 @@ async function digest(exits){
  const hash=await crypto.subtle.digest('SHA-256',bytes);
  return Array.from(new Uint8Array(hash),x=>x.toString(16).padStart(2,'0')).join('');
 }
-export async function proposeExitReservation(input,{nowMs=Date.now}={}){
- if(!input||!isSafeId(input.reservationId)||!isSafeId(input.bindingId)||
-    !isSafeId(input.accountId)||!isSafeId(input.personaUid)||
-    !number(input.expectedLedgerRevision))
-   return fail('RESERVATION_INPUT_INVALID');
- const checked=normalizeProtectedExitProof(input.evidence,nowMs());
- if(!checked.ok)return checked;
- return {ok:true,proposal:Object.freeze({
-   accountId:input.accountId,bindingId:input.bindingId,
-   reservationId:input.reservationId,personaUid:input.personaUid,
-   routeId:checked.routeId,contextId:checked.contextId,
-   evidenceId:checked.evidenceId,nativeLifetimeId:checked.nativeLifetimeId,
-   validUntilMs:checked.validUntilMs,ipv6Disposition:checked.ipv6Disposition,
-   exits:checked.exits,exitSetDigest:await digest(checked.exits),
-   expectedLedgerRevision:input.expectedLedgerRevision
- })};
+
+const PIN=new Set(['PENDING','ACTIVE','HELD']);
+const HISTORY=16;
+// One parser for donor evidence. IPv4 must be an observed public Mullvad exit.
+// IPv6 is either an observed public exit or a POSITIVE relay report that the
+// IPv6 network is unreachable; an absent/failed IPv6 probe is UNKNOWN and holds.
+export function normalizeRouteEvidence(e) {
+ if(!e||e.ok!==true||e.source!=='DONOR_ROUTE_PROBE'||!isSafeId(e.evidenceId)||
+    !isSafeId(e.routeId)||e.dns!=='VERIFIED_PROTECTED'||!number(e.observedAtMs))
+   return fail('PROTECTED_EVIDENCE_UNVERIFIED');
+ const v4=e.ipv4?.state==='OBSERVED'?ip4(e.ipv4.address):null;
+ if(!v4)return fail('IPV4_EVIDENCE_UNVERIFIED');
+ let v6=null;
+ if(e.ipv6?.state==='OBSERVED'){
+   v6=ip6(e.ipv6.address);
+   if(!v6)return fail('IPV6_EVIDENCE_UNVERIFIED');
+ }else if(e.ipv6?.state!=='BLOCKED_VERIFIED'||e.ipv6.basis!=='RELAY_REPORTED_IPV6_UNREACHABLE')
+   return fail('IPV6_EVIDENCE_UNVERIFIED');
+ const exits=[{family:'IPv4',address:v4},...(v6?[{family:'IPv6',address:v6}]:[])];
+ return {ok:true,evidenceId:e.evidenceId,routeId:e.routeId,observedAtMs:e.observedAtMs,
+   ipv6Disposition:v6?'OBSERVED':'BLOCKED_VERIFIED',exits};
 }
-export function transitionExitReservation(existing,proposal){
- if(!proposal||!isSafeId(proposal.bindingId)||!isSafeId(proposal.accountId)||
-   !isSafeId(proposal.reservationId)||!isSafeId(proposal.personaUid)||
-   !Array.isArray(proposal.exits)||proposal.exits.length<1||proposal.exits.length>2||
-   !HEX.test(proposal.exitSetDigest)||!number(proposal.expectedLedgerRevision))
-   return fail('RESERVATION_INPUT_INVALID');
- if(proposal.exits[0]?.family!=='IPv4'||
-    proposal.exits.length===2&&proposal.exits[1]?.family!=='IPv6'||
-    proposal.ipv6Disposition!==(proposal.exits.length===2?'VERIFIED':'BLOCKED_VERIFIED'))
-   return fail('RESERVATION_EXIT_INVALID');
- const prior=existing||{key:KEY,schema:1,revision:0,owners:{},reservations:{}};
- if(prior.schema!==1||prior.key!==KEY||!number(prior.revision)||
-   !prior.owners||!prior.reservations||Array.isArray(prior.owners)||
-   Array.isArray(prior.reservations))return fail('EXIT_LEDGER_CORRUPT');
- const already=prior.reservations[proposal.bindingId];
- if(already?.reservationId===proposal.reservationId){
-   const same=already.accountId===proposal.accountId&&
-     already.personaUid===proposal.personaUid&&
-     already.exitSetDigest===proposal.exitSetDigest&&
-     already.routeId===proposal.routeId&&already.contextId===proposal.contextId&&
-     already.evidenceId===proposal.evidenceId;
-   return same?{ok:true,ledger:prior,reservation:already,duplicate:true}:fail('RESERVATION_ID_REUSED');
- }
- if(prior.revision!==proposal.expectedLedgerRevision)return fail('STALE_EXIT_LEDGER');
- if(already)return fail('BINDING_RESERVATION_BUSY');
- for(const reservation of Object.values(prior.reservations)) {
-   if(reservation?.personaUid===proposal.personaUid&&
-      reservation.accountId!==proposal.accountId)
-     return fail('PERSONA_RESERVED_BY_ANOTHER_ACCOUNT');
- }
- for(const exit of proposal.exits){
-   if(!exit||!['IPv4','IPv6'].includes(exit.family)||
-      (exit.family==='IPv4'&&ip4(exit.address)!==exit.address)||
-      (exit.family==='IPv6'&&ip6(exit.address)!==exit.address))return fail('RESERVATION_EXIT_INVALID');
-   const owner=prior.owners[exit.family+':'+exit.address];
-   if(owner&&owner!==proposal.accountId)return fail('EXIT_HISTORICALLY_OWNED');
- }
- const allocationRevision=prior.revision+1;
- const reservation={accountId:proposal.accountId,bindingId:proposal.bindingId,
-   personaUid:proposal.personaUid,reservationId:proposal.reservationId,
-   routeId:proposal.routeId,contextId:proposal.contextId,
-   evidenceId:proposal.evidenceId,nativeLifetimeId:proposal.nativeLifetimeId,
-   exitSetDigest:proposal.exitSetDigest,
-   ipv6Disposition:proposal.ipv6Disposition,validUntilMs:proposal.validUntilMs,
-   allocationRevision,ledgerEpoch:'ledger_'+crypto.randomUUID().replaceAll('-','')};
- const owners={...prior.owners};
- for(const exit of proposal.exits)owners[exit.family+':'+exit.address]=proposal.accountId;
- const ledger={key:KEY,schema:1,revision:allocationRevision,owners,
-   reservations:{...prior.reservations,[proposal.bindingId]:reservation}};
- return {ok:true,ledger,reservation,duplicate:false};
+export async function exitSetDigest(exits){return digest(exits);}
+function emptyLedger(){return {key:KEY,schema:2,revision:0,owners:{},bindings:{}};}
+// Schema 1 (pre-amendment S01) owners are preserved; its never-admitted
+// reservations carry no network authority and are not converted into pins.
+export function readLedger(raw){
+ if(raw==null)return {ok:true,ledger:emptyLedger()};
+ if(raw.key!==KEY||!raw.owners||typeof raw.owners!=='object'||Array.isArray(raw.owners)||
+    !number(raw.revision))return fail('EXIT_LEDGER_CORRUPT');
+ if(raw.schema===1)return {ok:true,ledger:{key:KEY,schema:2,revision:raw.revision,
+   owners:{...raw.owners},bindings:{}}};
+ if(raw.schema!==2||!raw.bindings||typeof raw.bindings!=='object'||Array.isArray(raw.bindings))
+   return fail('EXIT_LEDGER_CORRUPT');
+ for(const b of Object.values(raw.bindings))
+   if(!b||!PIN.has(b.pin)||!isSafeId(b.accountId)||!isSafeId(b.bindingId))
+     return fail('EXIT_LEDGER_CORRUPT');
+ return {ok:true,ledger:raw};
 }
-// Shared canonical PCMS IndexedDB meta object store; no read-modify-write
-// outside a single readwrite transaction, and no awaits within the transaction.
+function conflict(ledger,accountId,exits){
+ for(const exit of exits){
+   const owner=ledger.owners[exit.family+':'+exit.address];
+   if(owner&&owner!==accountId)return true;
+ }
+ return false;
+}
+function claim(owners,accountId,exits){
+ const next={...owners};
+ for(const exit of exits)next[exit.family+':'+exit.address]=accountId;
+ return next;
+}
+function bump(ledger,bindings,owners=ledger.owners){
+ return {...ledger,revision:ledger.revision+1,owners,bindings};
+}
+// Reserve a probed candidate for one account binding. Historical owners are
+// never released: a different account's exit is EXIT_HISTORICALLY_OWNED even
+// after archive or route change. A route already pinned for another binding
+// is never shared. The binding's previous route enters its history.
+export function reserveCandidate(raw,p){
+ const read=readLedger(raw);if(!read.ok)return read;
+ const ledger=read.ledger;
+ if(!p||![p.accountId,p.bindingId,p.personaUid,p.contextId,p.routeId,p.evidenceId].every(isSafeId)||
+    !Array.isArray(p.exits)||!p.exits.length||!HEX.test(p.exitSetDigest||''))
+   return fail('RESERVATION_INPUT_INVALID');
+ for(const b of Object.values(ledger.bindings)){
+   if(b.bindingId===p.bindingId)continue;
+   if(b.accountId===p.accountId)return fail('ACCOUNT_HAS_OTHER_BINDING');
+   if(b.personaUid===p.personaUid||b.contextId===p.contextId)return fail('PERSONA_BOUND_TO_OTHER_ACCOUNT');
+   if(b.routeId===p.routeId)return fail('ROUTE_ASSIGNED_TO_OTHER_ACCOUNT');
+ }
+ const prior=ledger.bindings[p.bindingId];
+ if(prior&&(prior.accountId!==p.accountId||prior.personaUid!==p.personaUid))
+   return fail('BINDING_IDENTITY_CONFLICT');
+ if(conflict(ledger,p.accountId,p.exits))return fail('EXIT_HISTORICALLY_OWNED');
+ const history=prior?[...(prior.history||[]),
+   {routeId:prior.routeId,exitSetDigest:prior.exitSetDigest,pin:prior.pin}].slice(-HISTORY):[];
+ const binding={accountId:p.accountId,bindingId:p.bindingId,personaUid:p.personaUid,
+   contextId:p.contextId,routeId:p.routeId,exits:p.exits,exitSetDigest:p.exitSetDigest,
+   ipv6Disposition:p.ipv6Disposition,evidenceId:p.evidenceId,verifiedAtMs:p.observedAtMs,
+   pin:'PENDING',holdCode:null,history};
+ return {ok:true,binding,ledger:bump(ledger,{...ledger.bindings,[p.bindingId]:binding},
+   claim(ledger.owners,p.accountId,p.exits))};
+}
+// Observation of the ASSIGNED Persona route. Unowned new exits are claimed
+// for this account; an exit owned by another account holds the pin. The
+// pin becomes ACTIVE only from PENDING/ACTIVE on the exact reserved route.
+export function observeAssigned(raw,{bindingId,routeId,exits,exitSetDigest,observedAtMs,activate=false}={}){
+ const read=readLedger(raw);if(!read.ok)return read;
+ const ledger=read.ledger,b=ledger.bindings[bindingId];
+ if(!b)return fail('BINDING_RESERVATION_ABSENT');
+ if(!Array.isArray(exits)||!exits.length||!HEX.test(exitSetDigest||'')||!number(observedAtMs))
+   return fail('RESERVATION_INPUT_INVALID');
+ if(b.routeId!==routeId){
+   const held={...b,pin:'HELD',holdCode:'ROUTE_CHANGED_OUTSIDE_PCMS'};
+   return {ok:false,code:'ROUTE_CHANGED_OUTSIDE_PCMS',binding:held,
+     ledger:bump(ledger,{...ledger.bindings,[bindingId]:held})};
+ }
+ if(conflict(ledger,b.accountId,exits)){
+   const held={...b,pin:'HELD',holdCode:'EXIT_DRIFT_CONFLICT'};
+   return {ok:false,code:'EXIT_DRIFT_CONFLICT',binding:held,
+     ledger:bump(ledger,{...ledger.bindings,[bindingId]:held})};
+ }
+ if(b.pin==='HELD'&&!activate)return {ok:false,code:b.holdCode||'ROUTE_HELD',binding:b,ledger};
+ const next={...b,exits,exitSetDigest,verifiedAtMs:observedAtMs,
+   pin:activate||b.pin==='ACTIVE'?'ACTIVE':b.pin,holdCode:null};
+ return {ok:true,binding:next,ledger:bump(ledger,{...ledger.bindings,[bindingId]:next},
+   claim(ledger.owners,b.accountId,exits))};
+}
+export function holdBinding(raw,bindingId,code){
+ const read=readLedger(raw);if(!read.ok)return read;
+ const b=read.ledger.bindings[bindingId];
+ if(!b)return fail('BINDING_RESERVATION_ABSENT');
+ const held={...b,pin:'HELD',holdCode:/^[A-Z0-9_]{3,64}$/.test(code)?code:'ROUTE_HELD'};
+ return {ok:true,binding:held,ledger:bump(read.ledger,{...read.ledger.bindings,[bindingId]:held})};
+}
+export function activePins(raw){
+ const read=readLedger(raw);if(!read.ok)return read;
+ return {ok:true,pins:Object.values(read.ledger.bindings).filter(b=>b.pin==='ACTIVE')
+   .map(b=>({bindingId:b.bindingId,personaUid:b.personaUid,contextId:b.contextId,routeId:b.routeId}))};
+}
+// Shared canonical PCMS IndexedDB meta object store; each change is one
+// readwrite transaction with no await inside it.
 export function createExitLedger(db){
  if(!db||typeof db.transaction!=='function')throw new TypeError('Canonical IndexedDB required');
- function reserve(proposal){
+ function change(fn){
    return new Promise((resolve,reject)=>{
-     let result=fail('TRANSACTION_INCOMPLETE');
-     let tx;
+     let result=fail('TRANSACTION_INCOMPLETE'),tx;
      try{tx=db.transaction('meta','readwrite');}
      catch{return reject(new Error('EXIT_LEDGER_TRANSACTION_FAILED'));}
      tx.oncomplete=()=>resolve(result);
@@ -159,28 +188,41 @@ export function createExitLedger(db){
      tx.onerror=()=>{};
      const meta=tx.objectStore('meta');
      meta.get(KEY).onsuccess=event=>{
-       result=transitionExitReservation(event.target.result,proposal);
-       if(result.ok&&!result.duplicate)meta.put(result.ledger);
+       result=fn(event.target.result);
+       if(result?.ledger&&result.ledger!==event.target.result&&
+          result.ledger.revision!==event.target.result?.revision)meta.put(result.ledger);
+       if(result)result={...result,ledger:undefined};
      };
    });
  }
- function inspect(){
+ function read(){
    return new Promise((resolve,reject)=>{
      let tx;
      try{tx=db.transaction('meta','readonly');}
      catch{return reject(new Error('EXIT_LEDGER_TRANSACTION_FAILED'));}
      const request=tx.objectStore('meta').get(KEY);
-     request.onsuccess=()=>{
-       const data=request.result;
-       if(!data)return resolve({ok:true,revision:0,ownedExits:0,reservations:0});
-       if(data.schema!==1||!number(data.revision)||
-          !data.owners||!data.reservations)return resolve(fail('EXIT_LEDGER_CORRUPT'));
-       resolve({ok:true,revision:data.revision,
-         ownedExits:Object.keys(data.owners).length,
-         reservations:Object.keys(data.reservations).length});
-     };
+     request.onsuccess=()=>resolve(readLedger(request.result));
      request.onerror=()=>reject(new Error('EXIT_LEDGER_READ_FAILED'));
    });
  }
- return Object.freeze({reserve,inspect});
+ async function inspect(){
+   const out=await read();
+   if(!out.ok)return out;
+   const bindings=Object.values(out.ledger.bindings);
+   return {ok:true,revision:out.ledger.revision,ownedExits:Object.keys(out.ledger.owners).length,
+     reservations:bindings.length,activePins:bindings.filter(b=>b.pin==='ACTIVE').length};
+ }
+ async function binding(bindingId){
+   const out=await read();
+   if(!out.ok)return out;
+   const b=out.ledger.bindings[bindingId];
+   return b?{ok:true,binding:b}:fail('BINDING_RESERVATION_ABSENT');
+ }
+ return Object.freeze({
+   reserve:p=>change(raw=>reserveCandidate(raw,p)),
+   observe:p=>change(raw=>observeAssigned(raw,p)),
+   hold:(bindingId,code)=>change(raw=>holdBinding(raw,bindingId,code)),
+   read,inspect,binding,
+   pins:async()=>{const out=await read();return out.ok?activePins(out.ledger):out;}
+ });
 }

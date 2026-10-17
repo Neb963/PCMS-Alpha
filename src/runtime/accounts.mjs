@@ -7,7 +7,11 @@ const digest = v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
 const active = a => a && a.state !== 'ARCHIVED';
 const key = id => 'account:' + id;
 const reasons = new Set(['IDENTITY_UNOBSERVABLE','CHALLENGE','SESSION_UNAVAILABLE']);
-const allowed = new Set(['ENROLL','ACK_LOGIN','VERIFY','MANUAL_OVERRIDE','ARCHIVE','REACTIVATE','REBIND']);
+const allowed = new Set(['ENROLL','ACK_LOGIN','VERIFY','MANUAL_OVERRIDE','ARCHIVE','REACTIVATE','REBIND',
+  'BEGIN_SETUP','SETUP_PROGRESS','SETUP_COMPLETE','ROUTE_STATUS','REVERIFY']);
+const code = v => v===null || (typeof v==='string' && /^[A-Z0-9_]{3,64}$/.test(v));
+const phases = new Set(['START','PERSONA','ROUTE','LOGIN','HELD']);
+const routeStatuses = new Set(['PINNED','HELD','CHECKING']);
 function withHistory(previous,entry) {
   return [...(Array.isArray(previous.history)?previous.history:[]),entry].slice(-32);
 }
@@ -15,10 +19,19 @@ function withHistory(previous,entry) {
 export function transitionAccount(previous, action, all = []) {
   if (!action || !allowed.has(action.type) || !isSafeId(action.accountId))
     return fail('INVALID_ACCOUNT_COMMAND');
+  if (action.type === 'BEGIN_SETUP') {
+    // Operator Add Account: durable intent BEFORE any donor Persona/route effect.
+    if (previous) return fail('ACCOUNT_ALREADY_EXISTS');
+    if (action.expectedRevision !== 0 || !isSafeId(action.bindingId) ||
+        all.some(a => a?.bindingId === action.bindingId)) return fail('INVALID_BINDING');
+    return {ok:true, account:{ accountId:action.accountId, personaUid:null, bindingId:action.bindingId,
+      state:'PREPARING', revision:1, bindingVersion:1, identity:null, override:null, history:[],
+      setup:{phase:'START',code:null}, route:null, boundPrincipal:null }, event:'SETUP_STARTED'};
+  }
   if (action.type === 'ENROLL') {
     if (previous) return fail('ACCOUNT_ALREADY_EXISTS');
     if (action.expectedRevision !== 0 || !uid(action.personaUid)) return fail('INVALID_BINDING');
-    if (all.some(a => active(a) && a.personaUid.toLowerCase() === action.personaUid.toLowerCase()))
+    if (all.some(a => active(a) && a.personaUid?.toLowerCase() === action.personaUid.toLowerCase()))
       return fail('PERSONA_ALREADY_BOUND');
     return {ok:true, account:{ accountId:action.accountId, personaUid:action.personaUid,
       state:'WAITING_LOGIN', revision:1, bindingVersion:1, identity:null, override:null, history:[] },
@@ -38,16 +51,50 @@ export function transitionAccount(previous, action, all = []) {
   if (action.type === 'REACTIVATE') {
     if (previous.state!=='ARCHIVED'||action.explicitReactivation!==true)
       return fail('REACTIVATION_NOT_AUTHORIZED');
-    if (all.some(a=>a && active(a) && a.accountId!==previous.accountId &&
-      a.personaUid.toLowerCase()===previous.personaUid.toLowerCase()))
+    if (previous.personaUid && all.some(a=>a && active(a) && a.accountId!==previous.accountId &&
+      a.personaUid?.toLowerCase()===previous.personaUid.toLowerCase()))
       return fail('PERSONA_ALREADY_BOUND');
-    return {ok:true,account:{...previous,state:'WAITING_LOGIN',
+    // A setup archived before its Persona existed resumes setup, not login.
+    const resumeSetup = !previous.personaUid;
+    return {ok:true,account:{...previous,state:resumeSetup?'PREPARING':'WAITING_LOGIN',
+      ...(resumeSetup?{setup:{phase:'START',code:null}}:{}),
       identity:null,override:null,revision:previous.revision+1,
       bindingVersion:previous.bindingVersion+1,
       history:withHistory(previous,{event:'REACTIVATE',revision:previous.revision+1})},
       event:'REACTIVATE'};
   }
+  if (action.type === 'ROUTE_STATUS') {
+    // Internal route-pin projection; never identity or provider authority.
+    if (!routeStatuses.has(action.status) || !code(action.code ?? null)) return fail('INVALID_ROUTE_STATUS');
+    return {ok:true,account:{...previous,route:{status:action.status,code:action.code ?? null,
+      at:Number.isSafeInteger(action.at)?action.at:null},revision:previous.revision+1},event:'ROUTE_STATUS'};
+  }
   if (!active(previous)) return fail('ACCOUNT_ARCHIVED');
+  if (action.type === 'SETUP_PROGRESS' || action.type === 'SETUP_COMPLETE') {
+    if (previous.state !== 'PREPARING') return fail('INVALID_ACCOUNT_STATE');
+    let personaUid = previous.personaUid;
+    if (action.personaUid !== undefined && action.personaUid !== previous.personaUid) {
+      if (previous.personaUid || !uid(action.personaUid)) return fail('INVALID_BINDING');
+      if (all.some(a => active(a) && a.accountId !== previous.accountId &&
+          a.personaUid?.toLowerCase() === action.personaUid.toLowerCase()))
+        return fail('PERSONA_ALREADY_BOUND');
+      personaUid = action.personaUid;
+    }
+    if (action.type === 'SETUP_COMPLETE') {
+      if (!personaUid) return fail('INVALID_BINDING');
+      return {ok:true,account:{...previous,personaUid,state:'WAITING_LOGIN',
+        setup:{phase:'LOGIN',code:null},revision:previous.revision+1},event:'SETUP_COMPLETE'};
+    }
+    if (!phases.has(action.phase) || !code(action.code ?? null)) return fail('INVALID_SETUP_PHASE');
+    return {ok:true,account:{...previous,personaUid,setup:{phase:action.phase,code:action.code ?? null},
+      revision:previous.revision+1},event:'SETUP_PROGRESS'};
+  }
+  if (action.type === 'REVERIFY') {
+    // A route change keeps the binding but requires fresh session evidence.
+    if (previous.state !== 'VERIFIED') return fail('INVALID_ACCOUNT_STATE');
+    return {ok:true,account:{...previous,state:'VERIFICATION_PENDING',identity:null,
+      revision:previous.revision+1},event:'REVERIFY'};
+  }
   let state, identity=previous.identity, override=previous.override, personaUid=previous.personaUid;
   let bindingVersion=previous.bindingVersion;
   switch (action.type) {
@@ -74,6 +121,13 @@ export function transitionAccount(previous, action, all = []) {
       if (all.some(a => active(a) && a.accountId !== action.accountId &&
           a.identity?.principalFingerprint === proof.principalFingerprint))
         return fail('IDENTITY_ALREADY_BOUND');
+      // The first verified principal is permanent for this account: a later
+      // different login (changed credentials, wrong account) never rebinds.
+      if (previous.boundPrincipal && previous.boundPrincipal !== proof.principalFingerprint)
+        return fail('IDENTITY_CHANGED');
+      if (all.some(a => a && a.accountId !== action.accountId &&
+          a.boundPrincipal === proof.principalFingerprint))
+        return fail('IDENTITY_ALREADY_BOUND');
       identity={principalFingerprint:proof.principalFingerprint,observationId:proof.observationId,
         source:'GUARDED_SESSION_READBACK',bindingVersion};
       state='VERIFIED'; override=null; break;
@@ -82,7 +136,7 @@ export function transitionAccount(previous, action, all = []) {
       if (!uid(action.personaUid) || action.personaUid === previous.personaUid ||
           action.explicitRepair !== true) return fail('REBIND_NOT_AUTHORIZED');
       if (all.some(a => active(a) && a.accountId !== action.accountId &&
-          a.personaUid.toLowerCase() === action.personaUid.toLowerCase()))
+          a.personaUid?.toLowerCase() === action.personaUid.toLowerCase()))
         return fail('PERSONA_ALREADY_BOUND');
       personaUid=action.personaUid; bindingVersion=previous.bindingVersion+1;
       state='REBIND_PENDING'; identity=null; override=null; break;
@@ -95,8 +149,10 @@ export function transitionAccount(previous, action, all = []) {
       ...(action.type==='MANUAL_OVERRIDE'?{reportedReason:action.reason,
         reportedAt:action.reportedAt || null,routeAtReport:action.routeAtReport || null}:{})
     }) : previous.history;
+  const boundPrincipal = action.type==='VERIFY' ? (previous.boundPrincipal || identity.principalFingerprint)
+    : (previous.boundPrincipal ?? null);
   return {ok:true,account:{...previous,personaUid,bindingVersion,state,identity,override,
-    history,revision:previous.revision+1},event:action.type};
+    history,boundPrincipal,revision:previous.revision+1},event:action.type};
 }
 
 export function createAccountStore(db) {
@@ -136,6 +192,30 @@ export function createAccountStore(db) {
       };
     });
   }
+  // Internal orchestrator transitions are evaluated against the CURRENT
+  // committed revision inside the same transaction (no UI revision race).
+  function applyCurrent(action) {
+    if (!action || !isSafeId(action.accountId)) return Promise.resolve(fail('INVALID_ACCOUNT_COMMAND'));
+    return transact('readwrite',(tx,finish)=>{
+      const meta=tx.objectStore('meta'), all=[];
+      meta.openCursor().onsuccess=e=>{
+        const cur=e.target.result;
+        if (cur) {
+          if (typeof cur.key==='string' && cur.key.startsWith('account:')) all.push(cur.value?.account);
+          cur.continue();return;
+        }
+        const previous=all.find(a=>a?.accountId===action.accountId)||null;
+        const result=transitionAccount(previous,{...action,
+          expectedRevision:previous?previous.revision:0},all);
+        if (result.ok) {
+          meta.put({key:key(action.accountId),account:result.account});
+          tx.objectStore('events').add({stage:'ACCOUNT_'+result.event,
+            accountId:action.accountId,revision:result.account.revision});
+        }
+        finish(result);
+      };
+    });
+  }
   function list() {
     return transact('readonly',(tx,finish)=>{
       const rows=[];
@@ -158,7 +238,7 @@ export function createAccountStore(db) {
       };
     });
   }
-  return Object.freeze({apply,list,get});
+  return Object.freeze({apply,applyCurrent,list,get});
 }
 
 // Account command replies do not expose session fingerprints, cookieStoreIds,
@@ -167,5 +247,7 @@ export function publicAccount(account) {
   return {accountId:account.accountId,personaUid:account.personaUid,state:account.state,
     revision:account.revision,bindingVersion:account.bindingVersion,
     identity:account.identity?'VERIFIED':'UNVERIFIED',
-    override:account.override?.reason||null,providerWrites:'OFF'};
+    override:account.override?.reason||null,providerWrites:'OFF',
+    setup:account.setup||null,route:account.route||null,
+    protectedRoute:typeof account.bindingId==='string'?'PCMS_PINNED':'LEGACY_UNPINNED'};
 }

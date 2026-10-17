@@ -78,7 +78,7 @@ def wait_donor_ready(session, timeout_seconds=12):
             assert last.get('providerEffects') == 'OFF', last
             return last
         assert last.get('admission') in (
-            'HELD_DONOR_BOOTSTRAP','HELD_UNTIL_OWNER_VERIFICATION'), last
+            'HELD_DONOR_BOOTSTRAP','PER_ACCOUNT_ROUTE_PIN'), last
         time.sleep(.15)
     raise AssertionError({'code':'DONOR_STARTUP_READINESS_TIMEOUT',
                           'last':last})
@@ -612,6 +612,110 @@ def require_owned_exit(profile, previous, timeout=5):
     raise AssertionError('S01_OWNED_FIREFOX_PROCESS_NOT_EXITED')
 
 
+class _ProxyOracle:
+    """Loopback HTTP proxy that only RECORDS request targets (independent oracle)."""
+    def __init__(self):
+        import http.server, threading
+        seen=self.seen=[]
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(inner):
+                seen.append(inner.path)
+                body=b'ok'
+                inner.send_response(200);inner.send_header('Content-Length',str(len(body)))
+                inner.end_headers();inner.wfile.write(body)
+            def log_message(inner,*args): pass
+        self.server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
+        self.port=self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever,daemon=True).start()
+    def close(self): self.server.shutdown()
+
+
+def s01_add_account_profile(browser, archive, folder):
+    """S01 B: real Add Account in a disposable profile, then donor pin enforcement."""
+    profile=folder/'s01-enrollment-profile'
+    profile.mkdir()
+    (profile/'user.js').write_text('user_pref("xpinstall.signatures.required", false);\n')
+    first=open_session(browser,profile)
+    try:
+        assert call('POST',f'/session/{first}/moz/addon/install',
+                    {'path':str(archive),'temporary':False},timeout=45)==ID
+    finally: close(first)
+    session=open_session(browser,profile)
+    oracle=_ProxyOracle()
+    try:
+        uuid=addons_uuid(profile)
+        call('POST',f'/session/{session}/url',{'url':f'moz-extension://{uuid}/pcms/index.html#accounts'})
+        wait_donor_ready(session)
+        for _ in range(60):
+            ui=execute(session,"return {add:document.getElementById('pcms-add-account')?.disabled,legacy:!!document.getElementById('pcms-persona-picker')}")
+            if ui.get('add') is False: break
+            time.sleep(.25)
+        assert ui=={'add':False,'legacy':False},ui
+        print('B S01_ADD_ACCOUNT_CONTROL_ENABLED_NO_MANUAL_PERSONA_PICKER=PASS',flush=True)
+        started=account_command(session,{'type':'ADD_ACCOUNT'})
+        assert started.get('ok') is True,started
+        account=None
+        for _ in range(240):
+            listed=account_command(session,{'type':'LIST_ACCOUNTS'})
+            account=next((a for a in listed.get('accounts',[]) if a['accountId']==started['accountId']),None)
+            if account and not account.get('working') and account.get('setup',{}).get('phase') in ('HELD','LOGIN'):
+                break
+            time.sleep(.5)
+        assert account,listed
+        # CI has no PersonaMonkey native Mullvad helper: setup must hold, never
+        # reach login or fall back to an unprotected route.
+        assert account['state']=='PREPARING' and account['setup']['phase']=='HELD',account
+        assert account['setup']['code'] in ('MULLVAD_LOCAL_SERVICE_UNAVAILABLE','NO_ROUTE_CANDIDATES',
+            'DONOR_SECURITY_UNAVAILABLE'),account
+        assert account.get('message'),account
+        print('B S01_REAL_ADD_ACCOUNT_HELD_WITHOUT_NATIVE=',account['setup']['code'],flush=True)
+        network=account_command(session,{'type':'NETWORK_STATUS'})
+        assert network.get('ok') is True and network.get('activePins')==0,network
+        # Inspect donor state from the PersonaMonkey settings page (security review sender).
+        call('POST',f'/session/{session}/url',{'url':f'moz-extension://{uuid}/options/options.html'})
+        script="""const done=arguments[arguments.length-1];(async()=>{
+          const send=m=>browser.runtime.sendMessage(m);
+          let snap=await send({type:'GET_SNAPSHOT'});
+          const tagged=Object.values(snap.state.profiles).filter(p=>p.pcmsBindingId);
+          if(tagged.length!==1)return {error:'TAGGED_COUNT_'+tagged.length};
+          const t=tagged[0];
+          const initial={routeId:t.routeId,killSwitch:t.killSwitch,blockLocal:t.blockLocalNetwork};
+          const state=structuredClone(snap.state);
+          state.routes['ci-s01-http']={id:'ci-s01-http',name:'CI proxy oracle',type:'http',
+            host:'127.0.0.1',port:PORT,enabled:true};
+          const preview=await send({type:'PREVIEW_STATE_CHANGE',state});
+          await send({type:'AUTHORIZE_SECURITY_PREVIEW',previewId:preview.previewId,approvedDelta:preview.delta});
+          await send({type:'COMMIT_STATE_PREVIEW',authorizationId:preview.previewId});
+          await send({type:'UPDATE_PROFILE_ROUTE',profileId:t.containerId,routeId:'ci-s01-http'});
+          const ordinary=await send({type:'CREATE_PERSONA',input:{name:'CI ordinary',routeId:'ci-s01-http',
+            profile:{killSwitch:true,blockLocalNetwork:false}}});
+          snap=await send({type:'GET_SNAPSHOT'});
+          const after=snap.state.profiles[t.containerId];
+          await browser.tabs.create({url:'http://s01-oracle.example/tagged',cookieStoreId:t.containerId,active:false});
+          await browser.tabs.create({url:'http://s01-oracle.example/ordinary',
+            cookieStoreId:ordinary.container.cookieStoreId,active:false});
+          await new Promise(r=>setTimeout(r,5000));
+          return {initial,tagStillPresent:after.pcmsBindingId===t.pcmsBindingId,assigned:after.routeId,
+            privacySafe:snap.security.privacySafe===true};
+        })().then(done).catch(e=>done({error:String(e)}));""".replace('PORT',str(oracle.port))
+        out=call('POST',f'/session/{session}/execute/async',{'script':script,'args':[]},timeout=60)
+        assert 'error' not in out,out
+        assert out['initial']=={'routeId':'__block__','killSwitch':True,'blockLocal':True},out
+        assert out['tagStillPresent'] is True and out['assigned']=='ci-s01-http',out
+        print('B S01_DONOR_PERSONA_CREATED_TAGGED_BLOCK_ROUTE=PASS',flush=True)
+        tagged_seen=[p for p in oracle.seen if p.endswith('/tagged')]
+        assert not tagged_seen,('S01_UNPINNED_MANAGED_REQUEST_ESCAPED',oracle.seen)
+        print('B S01_UNPINNED_TAGGED_PERSONA_REQUEST_NEVER_REACHED_PROXY=PASS',flush=True)
+        if out['privacySafe']:
+            assert any(p.endswith('/ordinary') for p in oracle.seen),('S01_ORDINARY_PERSONA_BROKEN',oracle.seen)
+            print('B S01_ORDINARY_PERSONA_SAME_ROUTE_UNAFFECTED=PASS',flush=True)
+        else:
+            print('B S01_ORDINARY_PERSONA_SAME_ROUTE_UNAFFECTED=NOT_TESTED (donor privacy not safe in this runner)',flush=True)
+    finally:
+        oracle.close()
+        close(session)
+
+
 def main():
     archive=pathlib.Path(sys.argv[1]).resolve()
     browser=pathlib.Path(os.environ['FIREFOX_BINARY'])
@@ -706,8 +810,9 @@ def main():
                 assert network.get('ok') is True,network
                 assert network.get('revision')==0 and network.get('ownedExits')==0,network
                 assert network.get('reservations')==0,network
-                assert network.get('admission')=='HELD_E01_E04',network
-                print('B S01_INSTALLED_CANONICAL_EXIT_LEDGER_READONLY_AND_ROUTE_HOLD=PASS',flush=True)
+                assert network.get('admission')=='PER_ACCOUNT_ROUTE_PIN',network
+                assert network.get('pins',{}).get('active')==0,network
+                print('B S01_INSTALLED_CANONICAL_EXIT_LEDGER_EMPTY_PIN_TABLE=PASS',flush=True)
                 assert execute(after,"return !!document.getElementById('pcms-check-native-witness')") is True
                 witness=account_command(after,{'type':'WITNESS_STATUS'})
                 assert witness.get('ok') in (False,True),witness
@@ -720,7 +825,7 @@ def main():
                 print('B S01_EXPLICIT_SAME_XPI_NATIVE_WITNESS_DIAGNOSTIC_NO_CREDIT=PASS',flush=True)
                 denied_enroll=account_command(after,{'type':'ENROLL','params':{
                     'accountId':'fixture_forbidden_a01','personaUid':'persona-aaaa-0001','expectedRevision':0}})
-                assert denied_enroll.get('code')=='PERSONA_NOT_AVAILABLE',denied_enroll
+                assert denied_enroll.get('code')=='COMMAND_NOT_ALLOWED',denied_enroll
                 tested=account_idb_probe(after)
                 assert tested.get('first',{}).get('ok') is True,tested
                 assert tested.get('collision',{}).get('code')=='PERSONA_ALREADY_BOUND',tested
@@ -958,7 +1063,7 @@ def main():
                 assert s00_after_wake.get('record',{}).get('revision')==1,s00_after_wake
                 print('B S00_INSTALLED_COLD_WAKE_PERSISTED_HELD_INTENT=PASS',flush=True)
                 call('POST',f'/session/{after}/url',{'url':url+'#accounts'})
-                view=execute(after,"return {selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view),active:document.querySelector('[aria-current=page]')?.dataset.workspace,blocked:document.querySelector('#pcms-enroll')?.disabled,refresh:document.querySelector('#pcms-refresh-accounts')?.disabled}")
+                view=execute(after,"return {selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view),active:document.querySelector('[aria-current=page]')?.dataset.workspace,blocked:document.querySelector('#pcms-persona-picker')===null,refresh:document.querySelector('#pcms-refresh-accounts')?.disabled}")
                 assert view=={'selected':['accounts'],'active':'accounts','blocked':True,'refresh':False},view
                 account_ui=execute(after,"return {controls:!!document.getElementById('pcms-accounts-list'),description:document.getElementById('pcms-accounts-list')?.textContent||''}")
                 assert account_ui.get('controls'),account_ui
@@ -3053,7 +3158,11 @@ def main():
                 print('B I16_FRESH_PROFILE_UID_COLLISION_BLOCK_ROUTE_INACTIVE_RESTART=PASS',flush=True)
 
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
-            finally: close(after)
+                close(after)
+                after=None
+                s01_add_account_profile(browser,archive,pathlib.Path(folder))
+            finally:
+                if after: close(after)
         finally:
             if old_daemon is not None:
                 old_daemon.terminate()

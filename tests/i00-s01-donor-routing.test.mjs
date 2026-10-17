@@ -1,87 +1,194 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import {webcrypto} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {buildI00} from '../scripts/build-i00.mjs';
-import {createProtectedAdmission} from '../src/runtime/protected-admission.mjs';
+import * as pins from '../src/runtime/route-pin.mjs';
+import {beforeDonorStateCommit,issueBoundPersonaCreatePermit} from '../src/runtime/pcms-donor-fence.mjs';
+globalThis.crypto??=webcrypto;
 
-const fakeRoute={id:'protected_route_01',host:'127.0.0.1',port:1080};
-const key={bindingId:'binding_001',assignmentEpoch:'assignment_001',personaUid:'persona_001',
- routeId:fakeRoute.id,contextId:'firefox-container-001',routeRevision:1,
- evidenceId:'evidence_001',reservationId:'reservation_001',allocationRevision:1,
- ledgerEpoch:'ledger_001',exitSetDigest:'a'.repeat(64),grantRevision:1,
- pcmsEpoch:'pcms_epoch_001'};
-const record={...key,authority:'BOUND_ACCOUNT_NETWORK',publicationSafetyGeneration:0,snapshotValidUntil:5000};
-const profile={pcmsBindingId:key.bindingId,personaUid:key.personaUid,routeId:key.routeId,
- containerId:key.contextId,managed:true,status:'active',killSwitch:true,blockLocalNetwork:true};
-function isolateFunction(source,begin,end,name,context) {
- const start=source.indexOf(begin),stop=source.indexOf(end,start+begin.length);
- assert.ok(start>=0 && stop>start, 'Production routing function present');
- return vm.runInNewContext(source.slice(start,stop)+'\n'+name+';',context);
+const route={id:'mullvad-0001',provider:'mullvad',host:'10.124.0.1',port:1080,type:'socks',enabled:true};
+const tagged={pcmsBindingId:'binding_0001',personaUid:'persona-0001',routeId:route.id,
+  containerId:'firefox-container-001',managed:true,status:'active',killSwitch:true,blockLocalNetwork:true};
+let staged;
+async function background(){
+  staged??=(await buildI00({packageArchive:false})).stage;
+  return readFile(path.join(staged,'background.js'),'utf8');
 }
-function harness(bg,{managed=true,admitted=false,mode='proxy',interrupt=false,extension=false}={}) {
- let timestamp=1000,resolveCalls=0,denyLedger=false;
- const grant=createProtectedAdmission({readCommitted:()=>denyLedger?{allow:false}:{allow:true,committed:record},
-  now:()=>timestamp,donorBootId:'boot_001'});
- if(admitted){assert.equal(grant.publishCommitted(key,record).ok,true);
-   assert.equal(grant.admit(key,{expectedSafetyGeneration:0,routeRevision:1,
-    evidenceValidUntil:4000}).ok,true);}
- const requests=[];
- const state={global:{blockSpeculative:false,enforcePrivacyControls:false,strictProxyVerification:false},profiles:{'firefox-container-001':managed?profile:{...profile,pcmsBindingId:null}}};
- const ctx={pcmsAdmission:grant,BLACKHOLE_PROXY:{type:'http',host:'127.0.0.1',port:9},
-  initialize:async()=>{},getState:async()=>state,extensionBaseUrl:'moz-extension://test/',
-  isExtensionOrigin:()=>extension,getRouteTestRequestOverride:()=>null,
-  isRouteTestFetchUrl:()=>false,routeDecision:()=>({mode,route:fakeRoute}),
-  securityState:{privacySafe:true},recordBlock:(_d,why)=>requests.push(why),
-  buildProxyInfo:()=>({type:'socks',host:'127.0.0.1',port:1080}),
-  isPcmsProviderUrl:vm.runInNewContext(bg.slice(
-    bg.indexOf('function isPcmsProviderUrl(raw) {'),
-    bg.indexOf('const pcmsAdmission = createProtectedAdmission({'))+'\nisPcmsProviderUrl;', {URL}),
-  proxyInfoMatches:()=>true,directInfoIsDirect:()=>true,
-  mullvadRuntime:{resolve:async()=>{resolveCalls++;if(interrupt)grant.invalidateNow({bindingId:key.bindingId});return fakeRoute;}}};
- const proxy=isolateFunction(bg,'async function handleProxyRequest(details) {','function recordBlock(details, reason) {',
- 'handleProxyRequest',ctx);
- const before=isolateFunction(bg,'async function handleBeforeRequest(details) {','async function fetchMullvadRelays()',
- 'handleBeforeRequest',ctx);
- const details={tabId:3,cookieStoreId:'firefox-container-001',url:'https://example.invalid/',
-  proxyInfo:{type:'socks',host:'127.0.0.1',port:1080}};
- return {proxy,before,details,grant,requests,calls:()=>resolveCalls,time:v=>{timestamp=v}};
+const slice=(bg,begin,end)=>{
+  const a=bg.indexOf(begin),b=bg.indexOf(end,a+begin.length);
+  assert.ok(a>=0&&b>a,'production splice present: '+begin);
+  return bg.slice(a,b);
+};
+// The exact staged donor gate + handlers, with real route-pin module.
+function handlers(bg,{profile=tagged,mode='proxy',onResolve=()=>{}}={}){
+  const blocks=[];let resolves=0;
+  const state={global:{},routes:{[route.id]:route},profiles:{[profile.containerId]:profile}};
+  const ctx={...pins,URL,crypto,setTimeout,BLACKHOLE_PROXY:{type:'socks',host:'127.0.0.1',port:9},
+    initialize:async()=>{},getState:async()=>structuredClone(state),extensionBaseUrl:'moz-extension://x/',
+    isExtensionOrigin:d=>d.extension===true,getRouteTestRequestOverride:()=>null,isRouteTestFetchUrl:()=>false,
+    routeDecision:()=>({mode,route}),securityState:{privacySafe:true},recordBlock:(_d,r)=>blocks.push(r),
+    buildProxyInfo:()=>({type:'socks',host:'127.0.0.1',port:4444}),proxyInfoMatches:()=>true,
+    directInfoIsDirect:()=>true,
+    mullvadRuntime:{resolve:async()=>{resolves++;onResolve(state);return route;}}};
+  const gate=slice(bg,'function isPcmsProviderUrl(raw) {','void reloadRoutePins();');
+  const fns=vm.runInNewContext(gate+'\n'+
+    slice(bg,'async function handleProxyRequest(details) {','function recordBlock(details, reason) {')+
+    slice(bg,'async function handleBeforeRequest(details) {','async function fetchMullvadRelays()')+
+    '\n({proxy:handleProxyRequest,before:handleBeforeRequest});',ctx);
+  return {...fns,blocks,state,resolves:()=>resolves,
+    details:{tabId:3,cookieStoreId:profile.containerId,url:'https://perchance.org/',proxyInfo:{}}};
 }
-test('actual staged donor proxy AND blocking hooks deny tagged managed Persona before routing',async()=>{
- const {stage}=await buildI00({packageArchive:false});
- const bg=await readFile(path.join(stage,'background.js'),'utf8');
- const h=harness(bg);
- const a=await h.proxy(h.details),b=await h.before(h.details);
- assert.equal(a[0].port,9); assert.deepEqual(JSON.parse(JSON.stringify(b)),{cancel:true});
- assert.equal(h.calls(),0); // native resolver never runs for held managed traffic
- assert.ok(h.requests.includes('pcms-admission-held'));
+const pinned=async(list)=>{pins.closeRoutePins();pins.configureRoutePinSource(async()=>({ok:true,pins:list}));
+  assert.equal(await pins.reloadRoutePins(),true);};
+const pinOf=p=>({bindingId:p.pcmsBindingId,personaUid:p.personaUid,contextId:p.containerId,routeId:p.routeId});
+const plain=v=>JSON.parse(JSON.stringify(v));
+
+test('S01 B-equivalent D: staged donor proxy AND blocking hooks block a tagged Persona with no committed pin',async()=>{
+  const h=handlers(await background());
+  await pinned([]);
+  assert.equal((await h.proxy(h.details))[0].port,9);
+  assert.deepEqual(plain(await h.before(h.details)),{cancel:true});
+  assert.equal(h.resolves(),0,'native resolver never runs for unpinned managed traffic');
+  assert.ok(h.blocks.includes('pcms-route-not-pinned'));
 });
-test('unmanaged donor Persona retains original proxy and listener behavior',async()=>{
- const {stage}=await buildI00({packageArchive:false});
- const bg=await readFile(path.join(stage,'background.js'),'utf8');
- const h=harness(bg,{managed:false});
- assert.equal((await h.proxy(h.details)).type,'socks');
- assert.deepEqual(JSON.parse(JSON.stringify(await h.before(h.details))),{});
+test('S01 positive D: a committed pin for exactly this Persona/container/route lets donor routing proceed',async()=>{
+  const h=handlers(await background());
+  await pinned([pinOf(tagged)]);
+  assert.equal((await h.proxy(h.details)).port,4444);
+  assert.deepEqual(plain(await h.before(h.details)),{});
+  for(const wrong of [{routeId:'mullvad-other'},{contextId:'firefox-container-999'},{personaUid:'persona-other'}]){
+    await pinned([{...pinOf(tagged),...wrong}]);
+    assert.equal((await h.proxy(h.details))[0].port,9,JSON.stringify(wrong));
+  }
 });
-test('admitted managed session rejects Direct and revocation while resolver awaits',async()=>{
- const {stage}=await buildI00({packageArchive:false});
- const bg=await readFile(path.join(stage,'background.js'),'utf8');
- const direct=harness(bg,{admitted:true,mode:'direct'});
- assert.equal((await direct.proxy(direct.details))[0].port,9);
- assert.deepEqual(JSON.parse(JSON.stringify(await direct.before(direct.details))),{cancel:true});
- const revoked=harness(bg,{admitted:true,interrupt:true});
- assert.equal((await revoked.proxy(revoked.details))[0].port,9);
- assert.deepEqual(JSON.parse(JSON.stringify(await revoked.before(revoked.details))),{cancel:true});
+test('S01 D: pin withdrawn or route changed while the donor resolver awaits is caught at the final check',async()=>{
+  const bg=await background();
+  await pinned([pinOf(tagged)]);
+  const held=handlers(bg,{onResolve:()=>pins.holdRoutePin(tagged.pcmsBindingId)});
+  assert.equal((await held.proxy(held.details))[0].port,9);
+  pins.releaseRoutePinHold(tagged.pcmsBindingId);
+  const moved=handlers(bg,{onResolve:s=>{s.profiles[tagged.containerId].routeId='mullvad-other';}});
+  assert.deepEqual(plain(await moved.before(moved.details)),{cancel:true});
+});
+test('S01 D: pinned managed Persona can never go Direct; untagged ordinary Persona is unchanged',async()=>{
+  const bg=await background();
+  await pinned([pinOf(tagged)]);
+  const direct=handlers(bg,{mode:'direct'});
+  assert.equal((await direct.proxy(direct.details))[0].port,9);
+  assert.deepEqual(plain(await direct.before(direct.details)),{cancel:true});
+  pins.closeRoutePins(); // even with PCMS storage down
+  const ordinary=handlers(bg,{profile:{...tagged,pcmsBindingId:null}});
+  assert.equal((await ordinary.proxy(ordinary.details)).port,4444);
+  assert.deepEqual(plain(await ordinary.before(ordinary.details)),{});
+});
+test('S01 D: extension-origin Perchance requests never inherit the donor extension-Direct exemption',async()=>{
+  const h=handlers(await background(),{profile:{...tagged,pcmsBindingId:null}});
+  const provider={...h.details,extension:true,cookieStoreId:'firefox-default'};
+  assert.equal((await h.proxy(provider))[0].port,9);
+  assert.deepEqual(plain(await h.before(provider)),{cancel:true});
+  assert.equal((await h.proxy({...provider,url:'https://github.com/'})).type,'direct');
 });
 
-test('extension-origin Perchance requests never inherit Direct exemption; unrelated extension unaffected',async()=>{
- const {stage}=await buildI00({packageArchive:false});
- const bg=await readFile(path.join(stage,'background.js'),'utf8');
- const h=harness(bg,{managed:false,extension:true});
- const provider={...h.details,url:'https://perchance.org/account'};
- assert.equal((await h.proxy(provider))[0].port,9);
- assert.deepEqual(JSON.parse(JSON.stringify(await h.before(provider))),{cancel:true});
- assert.equal((await h.proxy({...provider,url:'https://github.com/example'})).type,'direct');
- assert.deepEqual(JSON.parse(JSON.stringify(await h.before({...provider,url:'https://github.com/example'}))),{});
+// Production enrollment adapter from the staged background, over fake donor primitives.
+function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=false}={}){
+  const effects=[];
+  let state={global:{},routes:{},profiles:{}};
+  const securityState={ready:true,privacySafe:true};
+  const commit=(next,permit=null)=>{beforeDonorStateCommit(state,next,permit);state=next;};
+  const echo=url=>url.includes('ipv6')?(v6==='OBSERVED'?{ip:'2a03:1b20::1',mullvad_exit_ip:true}:null):
+    url.includes('dnsleak')?[{ip:'10.64.0.1',mullvad_dns:true}]:{ip:'45.83.1.1',mullvad_exit_ip:true};
+  const ctx={URL,crypto,setTimeout,Uint32Array,JSON,Object,Array,Number,String,Promise,Set,Map,
+    ...pins,issueBoundPersonaCreatePermit,BLOCK_ROUTE_ID:'__block__',
+    MULLVAD_IPV4_CHECK_URL:'https://ipv4.am.i.mullvad.net/json',
+    PCMS_IPV6_CHECK_URL:'https://ipv6.am.i.mullvad.net/json',routeTestRequests:new Map(),
+    securityState,initialize:async()=>{},getState:async()=>structuredClone(state),
+    allPersonaUids:()=>[],localMutationFence:async(_ids,op)=>op(),
+    personaPlatform:{
+      async create(input,options){
+        const next=structuredClone(state),id='firefox-container-'+(Object.keys(next.profiles).length+1);
+        next.profiles[id]={...input.profile,routeId:input.routeId,personaUid:'persona-'+id.slice(-1)+'-0000',
+          containerId:id,managed:true,status:'active'};
+        effects.push('PERSONA_CREATE');commit(next,options?.pcmsStagePermit??null);
+      },
+      async assignRoute(id,routeId){const next=structuredClone(state);next.profiles[id].routeId=routeId;
+        effects.push('ASSIGN');commit(next);}
+    },
+    stateManager:{async authorizePreview(id,delta){effects.push('AUTHORIZE:'+delta.length);}},
+    async createMullvadRoute(relay,authorizationId){
+      if(!authorizationId)return {previewId:'preview_0001',delta:[{kind:'proxy-destination-added',
+        after:{scheme:'socks',host:relay.ipv4_address,port:1080}}]};
+      const next=structuredClone(state),id='mullvad-'+relay.ipv4_address.split('.').pop();
+      next.routes[id]={id,provider:'mullvad',host:relay.ipv4_address,port:1080,type:'socks',enabled:true};
+      effects.push('ROUTE_CREATE');commit(next);
+    },
+    fetchMullvadRelays:async()=>relays,
+    mullvadRuntime:{resolve:async r=>nativeError==='HOST'?null:r},
+    async fetchJsonThroughRouteTest(_iso,_route,url){
+      effects.push('PROBE:'+new URL(url).hostname.split('.')[0]);
+      if(routeTestFails)throw Error('Route check timed out');
+      const body=echo(url);if(!body)throw Error('NetworkError');return body;
+    },
+    async testProfile(id){effects.push('TEST_PROFILE');
+      return routeTestFails?{ok:false,error:'Connection check failed'}:{ok:true,data:echo('ipv4')};},
+    async pcmsFetchViaExit(){effects.push('NATIVE_V6_CHECK');
+      if(nativeError)throw Error(nativeError);return {ok:true};}
+  };
+  const code=slice(bg,'function isPcmsProviderUrl(raw) {','\nasync function handleProxyRequest(details) {')
+    .replace('void reloadRoutePins();','');
+  const donor=vm.runInNewContext(code+'\ncreatePcmsEnrollmentDonor();',ctx);
+  return {donor,effects,state:()=>state};
+}
+const relayList=[{hostname:'se-sto-wg-socks5-001',ipv4_address:'10.124.0.7',port:1080},
+  {hostname:'bad',ipv4_address:'192.168.1.1',port:1080},{hostname:'bad-port',ipv4_address:'10.124.0.8',port:9050}];
+
+test('S01 adapter D: production adapter creates one tagged Block Persona and reconciles a repeated create',async()=>{
+  const a=adapter(await background());
+  const first=await a.donor.createBoundPersona({bindingId:'binding_0001',name:'PCMS account'});
+  assert.equal(first.ok,true);assert.equal(first.routeId,'__block__');
+  const again=await a.donor.createBoundPersona({bindingId:'binding_0001',name:'PCMS account'});
+  assert.equal(again.existing,true);assert.equal(again.personaUid,first.personaUid);
+  assert.deepEqual(a.effects,['PERSONA_CREATE']);
+  const p=a.state().profiles[first.contextId];
+  assert.equal(p.pcmsBindingId,'binding_0001');assert.equal(p.killSwitch,true);
+});
+test('S01 adapter D: only official Mullvad relays (10.124/16, port 1080) become routes, via one exact reviewed delta',async()=>{
+  const a=adapter(await background(),{relays:relayList});
+  const listed=await a.donor.candidateRoutes({bindingId:'binding_0001'});
+  assert.deepEqual(plain(listed.candidates.map(c=>c.relay?.ipv4_address)),['10.124.0.7']);
+  const made=await a.donor.ensureRoute(listed.candidates[0]);
+  assert.equal(made.ok,true);
+  assert.equal((await a.donor.ensureRoute(listed.candidates[0])).routeId,made.routeId,'idempotent by relay');
+  assert.deepEqual(a.effects,['AUTHORIZE:1','ROUTE_CREATE']);
+  assert.equal((await a.donor.ensureRoute({kind:'RELAY',relay:{ipv4_address:'1.2.3.4',port:1080}})).code,'RELAY_INVALID');
+});
+test('S01 adapter D: probe reports observed IPv4/IPv6; IPv6 blocking only from a relay SOCKS reply 3/8',async()=>{
+  const bg=await background();
+  for(const [opts,expected] of [
+    [{},'OBSERVED'],
+    [{v6:'FAIL',nativeError:'Mullvad SOCKS connect failed with code 3'},'BLOCKED_VERIFIED'],
+    [{v6:'FAIL',nativeError:'Mullvad SOCKS connect failed with code 4'},'UNKNOWN'],
+    [{v6:'FAIL',nativeError:'Route check timed out'},'UNKNOWN']]){
+    const a=adapter(bg,{relays:relayList,...opts});
+    const r=await a.donor.ensureRoute((await a.donor.candidateRoutes({bindingId:'binding_0001'})).candidates[0]);
+    const ev=await a.donor.probeCandidate({routeId:r.routeId});
+    assert.equal(ev.ok,true);assert.equal(ev.ipv6.state,expected,JSON.stringify(opts));
+    assert.equal(ev.ipv4.address,'45.83.1.1');assert.equal(ev.dns,'VERIFIED_PROTECTED');
+  }
+});
+test('S01 adapter D: native loss is HOST scope (no rotation); a failing route test is ROUTE scope',async()=>{
+  const bg=await background();
+  const host=adapter(bg,{relays:relayList,nativeError:'HOST'});
+  const r=await host.donor.ensureRoute((await host.donor.candidateRoutes({bindingId:'binding_0001'})).candidates[0]);
+  assert.equal((await host.donor.probeCandidate({routeId:r.routeId})).failure,'HOST');
+  const down=adapter(bg,{relays:relayList,routeTestFails:true});
+  const persona=await down.donor.createBoundPersona({bindingId:'binding_0001',name:'x'});
+  const r2=await down.donor.ensureRoute((await down.donor.candidateRoutes({bindingId:'binding_0001'})).candidates[0]);
+  assert.equal((await down.donor.assignRoute({bindingId:'binding_0001',personaUid:persona.personaUid,
+    contextId:persona.contextId,routeId:r2.routeId})).ok,true);
+  const probed=await down.donor.probeAssigned({bindingId:'binding_0001',contextId:persona.contextId,routeId:r2.routeId});
+  assert.equal(probed.failure,'ROUTE');assert.equal(probed.code,'ROUTE_CONNECTION_FAILED');
+  assert.ok(down.effects.includes('TEST_PROFILE'),'assigned check uses donor testProfile');
 });

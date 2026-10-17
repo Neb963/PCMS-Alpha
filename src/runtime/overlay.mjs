@@ -1,6 +1,198 @@
 import { readFile, writeFile, cp } from 'node:fs/promises';
 import path from 'node:path';
 
+// S01 donor-side route pin gate and private enrollment adapter, spliced into
+// the BUILD COPY of donor background.js. Reuses donor route tests, Persona
+// platform, route assignment and mutation fence; no new router.
+const PCMS_ROUTE_GATE = String.raw`function isPcmsProviderUrl(raw) {
+  try {
+    const host=new URL(raw).hostname.toLowerCase();
+    return host==='perchance.org'||host.endsWith('.perchance.org');
+  } catch { return false; }
+}
+// Tagged Personas wait (bounded) for the committed pin table, then decide
+// synchronously. Untagged Personas never wait on PCMS storage.
+async function pcmsRouteGate(profile) {
+  if(typeof profile?.pcmsBindingId!=='string'||!profile.pcmsBindingId)return {managed:false,allow:true};
+  await routePinsReady(2000);
+  return inspectRoutePin(profile);
+}
+void reloadRoutePins();
+const PCMS_RELAY_NET=/^10\.124\.(25[0-5]|2[0-4]\d|1?\d?\d)\.(25[0-5]|2[0-4]\d|1?\d?\d)$/;
+function pcmsBoundProfile(state,bindingId){
+  const found=Object.values(state.profiles||{}).filter(p=>p?.pcmsBindingId===bindingId);
+  return found.length===1?found[0]:(found.length?false:null);
+}
+// Host-wide native/tunnel loss is never route-specific failure evidence and
+// never authorizes rotating to another exit.
+function pcmsFailure(code,scope){return {ok:false,code,failure:scope};}
+async function pcmsDnsProtected(isolationId,effective){
+  const servers=[],used=new Set();
+  for(let i=0;i<3;i++){
+    let target;
+    do { target='https://'+crypto.randomUUID()+'.dnsleak.am.i.mullvad.net/'; }
+    while(used.has(target)||routeTestRequests.has(target));
+    used.add(target);
+    const body=await fetchJsonThroughRouteTest(isolationId,effective,target,15000);
+    if(Array.isArray(body))servers.push(...body);
+    else if(body&&typeof body==='object')servers.push(body);
+  }
+  return servers.length>0&&servers.every(s=>s?.mullvad_dns===true);
+}
+// Positive relay-side statement only: the SOCKS relay itself reports the
+// IPv6 network unreachable (RFC 1928 reply 3) or address type unsupported (8).
+async function pcmsIpv6Blocking(route){
+  const blocked={state:'BLOCKED_VERIFIED',basis:'RELAY_REPORTED_IPV6_UNREACHABLE'};
+  const positive=text=>/SOCKS connect failed with code (3|8)\b/.test(String(text||''));
+  try{
+    const out=await pcmsFetchViaExit(route,{url:PCMS_IPV6_CHECK_URL,method:'GET',headers:{},
+      max_redirects:0,timeout_seconds:10,
+      network_policy:{block_local_network:true,domain_mode:'allowlist',
+        allowed_domains:['ipv6.am.i.mullvad.net'],blocked_domains:[]},
+      connect_policy:{page_url:PCMS_IPV6_CHECK_URL,rules:[]}},20000);
+    return out?.ok===false&&positive(out.error)?blocked:{state:'UNKNOWN'};
+  }catch(error){return positive(error?.message||error)?blocked:{state:'UNKNOWN'};}
+}
+// Cookie-free fixed Mullvad echo probes through the donor's existing
+// route-test override. A candidate is probed unassigned; an assigned Persona
+// is probed through the donor's own testProfile (which also caches the
+// donor route evidence used by every guarded PCMS effect).
+async function pcmsProbeExits({routeId,profileId=null}){
+  await initialize();
+  const before=await getState(),route=before.routes?.[routeId];
+  if(!route||route.enabled===false||route.provider!=='mullvad')return pcmsFailure('MULLVAD_ROUTE_REQUIRED','ROUTE');
+  if(securityState.ready!==true||securityState.privacySafe!==true)return pcmsFailure('DONOR_SECURITY_UNAVAILABLE','HOST');
+  if(profileId){
+    const p=before.profiles?.[profileId];
+    if(!p?.pcmsBindingId||p.routeId!==routeId)return pcmsFailure('ASSIGNED_ROUTE_CHANGED','ROUTE');
+  }
+  const effective=await mullvadRuntime.resolve(route);
+  if(!effective)return pcmsFailure('MULLVAD_LOCAL_SERVICE_UNAVAILABLE','HOST');
+  const isolationId=profileId||('pcms-probe-'+routeId);
+  let v4;
+  try{
+    if(profileId){
+      const tested=await testProfile(profileId);
+      if(tested?.ok!==true)return pcmsFailure(tested?.dns?.leaking===true?'DNS_LEAK_DETECTED':'ROUTE_CONNECTION_FAILED','ROUTE');
+      v4=tested.data;
+    }else{
+      v4=await fetchJsonThroughRouteTest(isolationId,effective,MULLVAD_IPV4_CHECK_URL,15000);
+      if(!(await pcmsDnsProtected(isolationId,effective)))return pcmsFailure('DNS_LEAK_DETECTED','ROUTE');
+    }
+  }catch{return pcmsFailure('ROUTE_CONNECTION_FAILED','ROUTE');}
+  if(v4?.mullvad_exit_ip!==true||typeof v4.ip!=='string')return pcmsFailure('NOT_A_MULLVAD_EXIT','ROUTE');
+  let ipv6;
+  try{
+    const d=await fetchJsonThroughRouteTest(isolationId,effective,PCMS_IPV6_CHECK_URL,15000);
+    ipv6=d?.mullvad_exit_ip===true&&typeof d.ip==='string'&&d.ip.includes(':')?
+      {state:'OBSERVED',address:d.ip}:{state:'UNKNOWN'};
+  }catch{ipv6=await pcmsIpv6Blocking(route);}
+  const after=await getState();
+  if(JSON.stringify(after.routes?.[routeId])!==JSON.stringify(route)||
+     (profileId&&after.profiles?.[profileId]?.routeId!==routeId))
+    return pcmsFailure('ROUTE_CHANGED_DURING_PROBE','ROUTE');
+  return {ok:true,source:'DONOR_ROUTE_PROBE',evidenceId:'evidence_'+crypto.randomUUID().replaceAll('-',''),
+    routeId,ipv4:{state:'OBSERVED',address:v4.ip},ipv6,dns:'VERIFIED_PROTECTED',observedAtMs:Date.now()};
+}
+// Private same-XPI donor operations for PCMS Add Account / route repair.
+// Every mutation goes through the donor's own mutation fence and is
+// reconcilable by reading donor state; nothing here accepts a raw endpoint.
+function createPcmsEnrollmentDonor(){
+  return Object.freeze({
+    async boundPersona({bindingId}){
+      await initialize();
+      const p=pcmsBoundProfile(await getState(),bindingId);
+      if(p===false)return {ok:false,code:'BINDING_PERSONA_AMBIGUOUS'};
+      return p?{ok:true,personaUid:p.personaUid,contextId:p.containerId,routeId:p.routeId}:{ok:false,code:'BINDING_PERSONA_ABSENT'};
+    },
+    async createBoundPersona({bindingId,name}){
+      await initialize();
+      const prior=pcmsBoundProfile(await getState(),bindingId);
+      if(prior===false)return {ok:false,code:'BINDING_PERSONA_AMBIGUOUS'};
+      if(!prior){
+        const permit=issueBoundPersonaCreatePermit({bindingId});
+        try{
+          await localMutationFence([],()=>personaPlatform.create({name,routeId:BLOCK_ROUTE_ID,allowDirect:false,
+            profile:{killSwitch:true,blockLocalNetwork:true,pcmsBindingId:bindingId}},{pcmsStagePermit:permit}));
+        }catch{}
+      }
+      const made=pcmsBoundProfile(await getState(),bindingId);
+      return made?{ok:true,personaUid:made.personaUid,contextId:made.containerId,routeId:made.routeId,existing:!!prior}:
+        {ok:false,code:made===false?'BINDING_PERSONA_AMBIGUOUS':'PERSONA_CREATE_UNCONFIRMED'};
+    },
+    async candidateRoutes({bindingId,excludeRouteIds=[],preferRouteIds=[]}={}){
+      await initialize();
+      const state=await getState(),exclude=new Set(excludeRouteIds);
+      const used=new Set(Object.values(state.profiles||{})
+        .filter(p=>p?.pcmsBindingId!==bindingId).map(p=>p?.routeId));
+      const usable=Object.values(state.routes||{}).filter(r=>r?.provider==='mullvad'&&
+        r.enabled!==false&&!used.has(r.id)&&!exclude.has(r.id));
+      const rank=r=>preferRouteIds.includes(r.id)?0:1;
+      usable.sort((a,b)=>rank(a)-rank(b));
+      let relays=[],relayList='AVAILABLE';
+      try{relays=await fetchMullvadRelays();}catch{relayList='UNAVAILABLE';}
+      const hosts=new Set(Object.values(state.routes||{}).map(r=>String(r?.host)+':'+Number(r?.port||0)));
+      relays=relays.filter(r=>PCMS_RELAY_NET.test(r.ipv4_address)&&Number(r.port)===1080&&
+        !hosts.has(r.ipv4_address+':1080'));
+      for(let i=relays.length-1;i>0;i--){
+        const j=crypto.getRandomValues(new Uint32Array(1))[0]%(i+1);
+        [relays[i],relays[j]]=[relays[j],relays[i]];
+      }
+      return {ok:true,relayList,candidates:[
+        ...usable.slice(0,8).map(r=>({kind:'ROUTE',routeId:r.id})),
+        ...relays.slice(0,8).map(r=>({kind:'RELAY',relay:{hostname:r.hostname,ipv4_address:r.ipv4_address,
+          port:1080,country:r.country,city:r.city}}))]};
+    },
+    // Adds one Mullvad relay route. The donor security preview must contain
+    // exactly that one new Mullvad SOCKS destination; anything else is refused.
+    async ensureRoute(candidate){
+      await initialize();
+      const state=await getState();
+      if(candidate?.kind==='ROUTE'){
+        const r=state.routes?.[candidate.routeId];
+        return r?.provider==='mullvad'&&r.enabled!==false?{ok:true,routeId:r.id}:{ok:false,code:'ROUTE_UNAVAILABLE'};
+      }
+      const relay=candidate?.relay;
+      if(candidate?.kind!=='RELAY'||!PCMS_RELAY_NET.test(relay?.ipv4_address||'')||Number(relay.port)!==1080)
+        return {ok:false,code:'RELAY_INVALID'};
+      const existing=Object.values(state.routes||{}).find(r=>r?.provider==='mullvad'&&
+        r.host===relay.ipv4_address&&Number(r.port)===1080&&r.enabled!==false);
+      if(existing)return {ok:true,routeId:existing.id,existing:true};
+      try{
+        const preview=await createMullvadRoute(relay,null);
+        const d=preview?.delta;
+        if(!Array.isArray(d)||d.length!==1||d[0].kind!=='proxy-destination-added'||
+           d[0].after?.scheme!=='socks'||d[0].after?.host!==relay.ipv4_address||d[0].after?.port!==1080)
+          return {ok:false,code:'ROUTE_PREVIEW_UNEXPECTED'};
+        await stateManager.authorizePreview(preview.previewId,d);
+        await localMutationFence(allPersonaUids,()=>createMullvadRoute(relay,preview.previewId));
+      }catch{}
+      const made=Object.values((await getState()).routes||{}).find(r=>r?.provider==='mullvad'&&
+        r.host===relay.ipv4_address&&Number(r.port)===1080);
+      return made?{ok:true,routeId:made.id}:{ok:false,code:'ROUTE_CREATE_UNCONFIRMED'};
+    },
+    probeCandidate:({routeId})=>pcmsProbeExits({routeId}),
+    probeAssigned:async({bindingId,contextId,routeId})=>{
+      const p=(await getState()).profiles?.[contextId];
+      if(p?.pcmsBindingId!==bindingId)return pcmsFailure('BINDING_PERSONA_CHANGED','ROUTE');
+      return pcmsProbeExits({routeId,profileId:contextId});
+    },
+    async assignRoute({bindingId,personaUid,contextId,routeId}){
+      await initialize();
+      const p=(await getState()).profiles?.[contextId];
+      if(p?.pcmsBindingId!==bindingId||p.personaUid!==personaUid)return {ok:false,code:'BINDING_PERSONA_CHANGED'};
+      if(p.routeId!==routeId){
+        try{await localMutationFence(contextId,()=>personaPlatform.assignRoute(contextId,routeId,{allowDirect:false}));}
+        catch{}
+      }
+      const after=(await getState()).profiles?.[contextId];
+      return after?.routeId===routeId&&after.pcmsBindingId===bindingId?{ok:true}:{ok:false,code:'ROUTE_ASSIGN_UNCONFIRMED'};
+    },
+    reloadPins:()=>reloadRoutePins()
+  });
+}
+`;
+
 function substituteOnce(source, needle, replacement, label) {
   if (source.split(needle).length !== 2) throw new Error('I01 donor overlay anchor mismatch: ' + label);
   return source.replace(needle, replacement);
@@ -20,7 +212,7 @@ export async function applyI01Overlay(root, stage) {
         const { profile, state } = await resolvePersona(uid);
         return {
           personaUid: profile.personaUid, cookieStoreId: profile.containerId,
-          routeId: profile.routeId, route: state.routes?.[profile.routeId] || null,
+          routeId: profile.routeId, pcmsBindingId: profile.pcmsBindingId || null, route: state.routes?.[profile.routeId] || null,
           archived: Boolean(profile.archivedAt),
           rotating: Boolean(profile.rotationRole || profile.rotationOperationId)
         };
@@ -41,7 +233,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { createProtectedAdmission } from "./pcms/protected-admission.mjs";\nimport { createCommittedNetworkObserver } from "./pcms/network-join.mjs";\nimport { installDonorAdmissionFence, issueBlockedBindingStagePermit } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain } from "./pcms/perchance-existing.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { inspectRoutePin, routePinsReady, reloadRoutePins } from "./pcms/route-pin.mjs";\nimport { issueBoundPersonaCreatePermit } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest, fetchViaExit as pcmsFetchViaExit } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain } from "./pcms/perchance-existing.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -51,35 +243,7 @@ attachPcmsGuard({
   // Donor's currentTest validates the route-test context and invalidates
   // stale/rotated/failed route evidence; it does not trigger a network probe.
   getRouteTest: async (containerId) => currentTest(await getState(), containerId),
-  // An initial PCMS binding must be marked while the donor route is BLOCK.
-  // This method grants no proxy, tab, native resource or account authority.
-  stageBlockedBinding: async ({bindingId,personaUid,contextId}) => {
-    await initialize();
-    const prior=await getState(),profile=prior.profiles?.[contextId];
-    if(profile?.personaUid!==personaUid||profile?.routeId!=='block'||
-       profile?.pcmsBindingId||profile?.managed!==true||
-       profile?.killSwitch!==true||profile?.blockLocalNetwork!==true||
-       !Number.isSafeInteger(prior.__stateMeta?.revision)||
-       typeof prior.__stateMeta?.bootId!=='string')
-      return {ok:false,code:'DONOR_NOT_INITIAL_BLOCK'};
-    const permit=issueBlockedBindingStagePermit({bindingId,personaUid,contextId});
-    try {
-      await stateManager.mutate(draft=>{
-        const item=draft.profiles?.[contextId];
-        if(!item||item.pcmsBindingId||item.routeId!=='block'||
-           item.personaUid!==personaUid||
-           item.killSwitch!==true||item.blockLocalNetwork!==true)
-          throw Error('DONOR_BLOCK_STAGE_CHANGED');
-        item.pcmsBindingId=bindingId;
-      },{expectedRevision:prior.__stateMeta.revision,
-          expectedBootId:prior.__stateMeta.bootId,pcmsStagePermit:permit});
-    }catch{return {ok:false,code:'DONOR_BLOCK_STAGE_UNCONFIRMED'};}
-    const after=await getState(),tagged=after.profiles?.[contextId];
-    return tagged?.pcmsBindingId===bindingId&&tagged.routeId==='block'&&
-      tagged.personaUid===personaUid?
-      {ok:true,blocked:true,routeId:'block'}:
-      {ok:false,code:'DONOR_BLOCK_STAGE_UNCONFIRMED'};
-  },
+  enrollmentDonor: createPcmsEnrollmentDonor(),
   listPersonas: async () => {
     const state=await getState();
     return Object.values(state.profiles||{})
@@ -584,15 +748,15 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   donorManager=substituteOnce(donorManager,"    assertSecurityAuthorization(sanitized, authorization);\n    const saved = await save(sanitized);","    assertSecurityAuthorization(sanitized, authorization);\n    beforeDonorStateCommit(cache, sanitized, authorization.pcmsStagePermit??null);\n    const saved = await save(sanitized);","revocation before async save");
   donorManager=substituteOnce(donorManager,"      cache = incoming;\n      revision += 1;","      try { beforeDonorStateCommit(cache, incoming); }\n      catch { await save(cache); return {state:snapshot(cache),accepted:false,revision,bootId}; }\n      cache = incoming;\n      revision += 1;","external storage rollback");
   await writeFile(donorManagerPath,donorManager);
-  // S01 trusted committed observer starts EMPTY on every Firefox boot; no
-  // persistent ADMITTED field can reactivate route traffic.
-  // S01 donor-only request gate: no committed observer yet means all marked
-  // managed Personas remain BLOCKED, never implicitly Direct.
-  bg = substituteOnce(bg, "\nasync function handleProxyRequest(details) {", "\nconst pcmsCommittedObserver = createCommittedNetworkObserver({\n  onInvalidate: ({bindingId,reason}) => pcmsAdmission.invalidateNow({bindingId,reason})\n});\nconst pcmsAdmission = createProtectedAdmission({\n  donorBootId: 'boot_' + crypto.randomUUID().replaceAll('-', ''),\n  readCommitted: key => pcmsCommittedObserver.readCommitted(key)\n});\nasync function handleProxyRequest(details) {", "S01 private donor admission");
-  bg = substituteOnce(bg, "async function handleProxyRequest(details) {\n  await initialize();\n  const state = await getState();", "async function handleProxyRequest(details) {\n  await initialize();\n  const state = await getState();\n  const pcmsContext = pcmsAdmission.inspect(state.profiles?.[details.cookieStoreId]);\n  if(pcmsContext.managed && !pcmsContext.allow)\n    return [{...BLACKHOLE_PROXY,connectionIsolationKey:details.cookieStoreId||'pcms-held'},null];", "S01 proxy initial admission");
-  bg = substituteOnce(bg, "    return buildProxyInfo(effectiveRoute, details.cookieStoreId || `tab-${details.tabId}`);", "    const latestPcmsState = pcmsContext.managed ? await getState() : state;\n    if(pcmsContext.managed &&\n        (!pcmsAdmission.inspect(latestPcmsState.profiles?.[details.cookieStoreId]).allow ||\n         decision.route?.id !== latestPcmsState.profiles?.[details.cookieStoreId]?.routeId))\n      return [{...BLACKHOLE_PROXY,connectionIsolationKey:details.cookieStoreId||'pcms-stale'},null];\n    return buildProxyInfo(effectiveRoute, details.cookieStoreId || `tab-${details.tabId}`);", "S01 proxy final admission");
-  bg = substituteOnce(bg, "async function handleBeforeRequest(details) {\n  await initialize();\n  const state = await getState();", "async function handleBeforeRequest(details) {\n  await initialize();\n  const state = await getState();\n  const pcmsContext = pcmsAdmission.inspect(state.profiles?.[details.cookieStoreId]);\n  if(pcmsContext.managed && !pcmsContext.allow) {\n    recordBlock(details,'pcms-admission-held');return {cancel:true};\n  }", "S01 blocking initial admission");
-  bg = substituteOnce(bg, "  return {};\n}\n\nasync function fetchMullvadRelays()", "  const latestPcmsState = pcmsContext.managed ? await getState() : state;\n  if(pcmsContext.managed &&\n     (decision.mode!=='proxy' ||\n      !pcmsAdmission.inspect(latestPcmsState.profiles?.[details.cookieStoreId]).allow ||\n      decision.route?.id !== latestPcmsState.profiles?.[details.cookieStoreId]?.routeId)) {\n    recordBlock(details,'pcms-admission-revoked');return {cancel:true};\n  }\n  return {};\n}\n\nasync function fetchMullvadRelays()", "S01 blocking final admission");
+  // S01 donor route pin: a Persona carrying a durable pcmsBindingId may use
+  // the network only while PCMS's committed exit ledger pins this exact
+  // binding/Persona/container/route. Untagged ordinary Personas are unchanged.
+  // The pin table starts EMPTY each boot, so tagged Personas start blocked.
+  bg = substituteOnce(bg, "\nasync function handleProxyRequest(details) {", "\n" + PCMS_ROUTE_GATE + "\nasync function handleProxyRequest(details) {", "S01 donor route pin gate");
+  bg = substituteOnce(bg, "async function handleProxyRequest(details) {\n  await initialize();\n  const state = await getState();", "async function handleProxyRequest(details) {\n  await initialize();\n  const state = await getState();\n  const pcmsContext = await pcmsRouteGate(state.profiles?.[details.cookieStoreId]);\n  if(pcmsContext.managed && !pcmsContext.allow)\n    return [{...BLACKHOLE_PROXY,connectionIsolationKey:details.cookieStoreId||'pcms-held'},null];", "S01 proxy initial pin");
+  bg = substituteOnce(bg, "    return buildProxyInfo(effectiveRoute, details.cookieStoreId || `tab-${details.tabId}`);", "    const latestPcmsState = pcmsContext.managed ? await getState() : state;\n    if(pcmsContext.managed &&\n        (!inspectRoutePin(latestPcmsState.profiles?.[details.cookieStoreId]).allow ||\n         decision.route?.id !== latestPcmsState.profiles?.[details.cookieStoreId]?.routeId))\n      return [{...BLACKHOLE_PROXY,connectionIsolationKey:details.cookieStoreId||'pcms-stale'},null];\n    return buildProxyInfo(effectiveRoute, details.cookieStoreId || `tab-${details.tabId}`);", "S01 proxy final pin");
+  bg = substituteOnce(bg, "async function handleBeforeRequest(details) {\n  await initialize();\n  const state = await getState();", "async function handleBeforeRequest(details) {\n  await initialize();\n  const state = await getState();\n  const pcmsContext = await pcmsRouteGate(state.profiles?.[details.cookieStoreId]);\n  if(pcmsContext.managed && !pcmsContext.allow) {\n    recordBlock(details,'pcms-route-not-pinned');return {cancel:true};\n  }", "S01 blocking initial pin");
+  bg = substituteOnce(bg, "  return {};\n}\n\nasync function fetchMullvadRelays()", "  const latestPcmsState = pcmsContext.managed ? await getState() : state;\n  if(pcmsContext.managed &&\n     (decision.mode!=='proxy' ||\n      !inspectRoutePin(latestPcmsState.profiles?.[details.cookieStoreId]).allow ||\n      decision.route?.id !== latestPcmsState.profiles?.[details.cookieStoreId]?.routeId)) {\n    recordBlock(details,'pcms-route-pin-changed');return {cancel:true};\n  }\n  return {};\n}\n\nasync function fetchMullvadRelays()", "S01 blocking final pin");
   bg = substituteOnce(bg,
     "  const decision = routeDecision(state, details);\n  if (decision.mode === \"block\") {\n    return [{ ...BLACKHOLE_PROXY",
     `  const decision = routeDecision(state, details);
@@ -612,12 +776,14 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   // Account/provider requests from the extension origin have no implicit
   // cookieStoreId binding. Do not let the donor's generic extension-Direct
   // exemption become a PCMS provider routing bypass.
-  bg = substituteOnce(bg, "const pcmsAdmission = createProtectedAdmission({", "function isPcmsProviderUrl(raw) {\n  try {\n    const host=new URL(raw).hostname.toLowerCase();\n    return host==='perchance.org'||host.endsWith('.perchance.org');\n  } catch { return false; }\n}\nconst pcmsAdmission = createProtectedAdmission({", "S01 fixed provider origin classifier");
   bg = substituteOnce(bg, "  if (extensionRequest) {\n    // Route verification requests generated by PersonaMonkey must never silently", "  if (extensionRequest) {\n    if(isPcmsProviderUrl(details.url))\n      return [{...BLACKHOLE_PROXY,connectionIsolationKey:'pcms-unbound-extension'},null];\n    // Route verification requests generated by PersonaMonkey must never silently", "S01 extension account proxy bypass denied");
   bg = substituteOnce(bg, "  if (extensionRequest) {\n    if (isRouteTestFetchUrl(details.url)) {", "  if (extensionRequest) {\n    if(isPcmsProviderUrl(details.url)){\n      recordBlock(details,'pcms-unbound-extension-provider');return {cancel:true};\n    }\n    if (isRouteTestFetchUrl(details.url)) {", "S01 extension account blocking bypass denied");
-  bg = substituteOnce(bg,"  readCommitted: key => pcmsCommittedObserver.readCommitted(key)\n});\nasync function handleProxyRequest(details) {","  readCommitted: () => ({allow:false})\n});\ninstallDonorAdmissionFence(pcmsAdmission);\nasync function handleProxyRequest(details) {",'install donor synchronous revoker');
+  // The donor's existing route-test override additionally admits the fixed
+  // Mullvad IPv6 echo endpoint, under the same single-request binding.
+  bg = substituteOnce(bg, "    || target === canonicalNetworkUrl(MULLVAD_IPV4_CHECK_URL)\n", "    || target === canonicalNetworkUrl(MULLVAD_IPV4_CHECK_URL)\n    || target === canonicalNetworkUrl(PCMS_IPV6_CHECK_URL)\n", "S01 IPv6 route-test endpoint");
+  bg = substituteOnce(bg, 'const MULLVAD_IPV4_CHECK_URL = "https://ipv4.am.i.mullvad.net/json";', 'const MULLVAD_IPV4_CHECK_URL = "https://ipv4.am.i.mullvad.net/json";\nconst PCMS_IPV6_CHECK_URL = "https://ipv6.am.i.mullvad.net/json";', "S01 IPv6 echo constant");
   bg = substituteOnce(bg,"attachPcmsGuard({\n  initialize, securityState,\n  shared:",
-  "attachPcmsGuard({\n  initialize, securityState,\n  readRuntimeWitness:()=>nativeRequest('pcms.runtime_witness',{},6000),\n  verifyFixedCandidate:({routeId,contextId})=>nativeRequest('pcms.verify_exit',{route_id:routeId,context_id:contextId},45000),\n  shared:",
+  "attachPcmsGuard({\n  initialize, securityState,\n  readRuntimeWitness:()=>nativeRequest('pcms.runtime_witness',{},6000),\n  shared:",
   'S01 guard native witness binding');
   // Preserve donor's normalized durable binding tag in the BUILD COPY only.
   const donorStoragePath = path.join(stage, 'lib/storage.js');
@@ -629,7 +795,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   await writeFile(donorStoragePath,donorStorage);
 
   await writeFile(bgPath, bg);
-  for (const name of ['legacy-quarantine.mjs','coordinator-core.mjs','coordinator-store.mjs','coordinator-boundary.mjs','protected-admission.mjs','pcms-donor-fence.mjs','network-ledger.mjs','network-join.mjs','qualified-clock.mjs','entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'adoption-boundary.mjs',
+  for (const name of ['legacy-quarantine.mjs','coordinator-core.mjs','coordinator-store.mjs','coordinator-boundary.mjs','pcms-donor-fence.mjs','network-ledger.mjs','route-pin.mjs','enrollment.mjs','qualified-clock.mjs','entry.mjs', 'wake.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'adoption-boundary.mjs',
     'staging-core.mjs','staging-store.mjs','staging-boundary.mjs',
     'perchance-stage.mjs','editor-strip.mjs','perchance-editor-probe.mjs','perchance-ai-native.mjs','perchance-ai-oracle.mjs','perchance-ai-opfs.mjs','perchance-ai-history.mjs','ai-supervisor.mjs','ai-testing.mjs','ai-evidence.mjs','ai-store.mjs','ai-boundary.mjs',
     'git-writeback.mjs','writeback-store.mjs','writeback-boundary.mjs',

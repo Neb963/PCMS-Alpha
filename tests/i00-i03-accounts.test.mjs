@@ -122,14 +122,17 @@ test('P51-03 I03 F: local command boundary denies forged sender, invalid target 
     params:{accountId:accountA,proof:proof(personaA)}}).code,'COMMAND_NOT_ALLOWED');
   assert.equal(validateAccountMessage(api,sender,{type:'CHECK_IDENTITY',
     params:{accountId:accountA,expectedRevision:1,proof:proof(personaA)}}).code,'INVALID_PARAMS');
-  assert.equal(validateAccountMessage(api,sender,{type:'CREATE_PERSONA',
-    params:{name:'New',routeId:'direct'}}).ok,true,
-    'shape validation is separate from donor guard route authorization');
+  // S01: manual Persona creation / binding of an arbitrary Persona is no
+  // longer a port command; only Add Account can create a pinned binding.
+  for(const type of ['CREATE_PERSONA','ENROLL','REBIND'])
+    assert.equal(validateAccountMessage(api,sender,{type,params:{}}).code,'COMMAND_NOT_ALLOWED',type);
+  assert.equal(validateAccountMessage(api,sender,{type:'ADD_ACCOUNT'}).ok,true);
+  assert.equal(validateAccountMessage(api,sender,{type:'ADD_ACCOUNT',params:{personaUid:personaA}}).code,
+    'INVALID_PARAMS','Add Account accepts no page-supplied Persona or route');
+  assert.equal(validateAccountMessage(api,sender,{type:'CHANGE_ROUTE',
+    params:{accountId:accountA,expectedRevision:2,routeId:'mullvad-1'}}).code,'INVALID_PARAMS');
   assert.equal(validateAccountMessage(api,sender,{type:'LIST_ACCOUNTS',
     padding:'x'.repeat(1801)}).code,'COMMAND_NOT_ALLOWED');
-  assert.equal(validateAccountMessage(api,sender,{type:'ENROLL',
-    params:{accountId:accountA,personaUid:'firefox-container-1',expectedRevision:0}}).ok,true,
-    'a syntactically valid UID still needs donor-backed existence check');
 });
 
 test('S6-I03-BINDING-EXCLUSIVITY F: guard rejects Direct, revoked lease and unverified route',async()=>{
@@ -140,7 +143,7 @@ test('S6-I03-BINDING-EXCLUSIVITY F: guard rejects Direct, revoked lease and unve
     securityState,
     shared:{
       resolve:async uid=>({personaUid:uid,cookieStoreId:'firefox-container-1',
-        routeId,route:{enabled:true}}),
+        routeId,route:{enabled:true},pcmsBindingId:'binding_fixture_01'}),
       acquire:async()=>({leaseId:'lease-fixture',expiresAt:1000}),
       validate:async()=>{if(!leaseOK)throw Error('revoked');
         return {cookieStoreId:'firefox-container-1'};},
@@ -150,7 +153,8 @@ test('S6-I03-BINDING-EXCLUSIVITY F: guard rejects Direct, revoked lease and unve
     listPersonas:async()=>[{personaUid:personaA,name:'A',archived:false,routeProtected:true}],
     listProtectedRoutes:async()=>[{routeId:'route-safe',name:'Protected'}],
     createPersona:async()=>({ok:true}),
-    openHumanLogin:async()=>({ok:true})
+    openHumanLogin:async()=>({ok:true}),
+    pinGate:p=>({allow:p.routeId==='route-safe'&&p.pcmsBindingId==='binding_fixture_01'})
   });
   assert.equal((await guard.openHumanLogin(personaA)).code,'DIRECT_FORBIDDEN');
   routeId='route-safe'; routeOK=false;
@@ -205,7 +209,25 @@ test('I03 F: packaged entry includes accounted new modules but donor remains imm
   assert.ok(entry.indexOf('wake.mjs')<entry.indexOf('account-boundary.mjs'));
   assert.match(overlay,/accounts.mjs/);assert.match(overlay,/account-boundary.mjs/);
   assert.doesNotMatch(boundary,/sendNativeMessage|fetch\s*\(|XMLHttpRequest/);
-  for(const id of ['pcms-enroll','pcms-accounts-list','pcms-create-persona'])
+  for(const id of ['pcms-add-account','pcms-accounts-list'])
     assert.match(html,new RegExp('id="'+id+'"'));
   assert.match(html,/Provider writes HELD/);
+});
+
+test('S01 F: every guarded PCMS effect requires a committed route pin; untagged Personas are never operable',async()=>{
+  let tag='binding_fixture_01',pinned=false;
+  const guard=createPersonaGuard({initialize:async()=>{},
+    securityState:{ready:true,privacySafe:true,proxyControl:'controllable'},
+    shared:{resolve:async uid=>({personaUid:uid,cookieStoreId:'firefox-container-1',
+      routeId:'route-safe',route:{enabled:true},pcmsBindingId:tag}),
+      acquire:async()=>({leaseId:'lease-fixture'}),validate:async()=>({cookieStoreId:'firefox-container-1'}),
+      release:async()=>{}},
+    getRouteTest:async()=>({ok:true}),pinGate:()=>({allow:pinned}),
+    openHumanLogin:async()=>({ok:true})});
+  assert.equal((await guard.getSafeRouteReadiness(personaA)).code,'PROTECTED_ROUTE_NOT_PINNED');
+  assert.equal((await guard.openHumanLogin(personaA)).code,'PROTECTED_ROUTE_NOT_PINNED');
+  tag=null;pinned=true;
+  assert.equal((await guard.getSafeRouteReadiness(personaA)).code,'ROUTE_RESERVATION_REQUIRED');
+  tag='binding_fixture_01';
+  assert.equal((await guard.getSafeRouteReadiness(personaA)).ready,true);
 });

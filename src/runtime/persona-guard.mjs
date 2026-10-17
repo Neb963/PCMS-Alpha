@@ -1,5 +1,6 @@
 import {admissionForI17Supply} from './legacy-quarantine.mjs';
 import {validateNativeWitness} from './qualified-clock.mjs';
+import {inspectRoutePin} from './route-pin.mjs';
 // This facade shares donor Management Integration's actual control-lease
 // registry. Nothing here can execute a browser/native/provider mutation at I01.
 let installed = null;
@@ -19,7 +20,7 @@ export async function cachedHealthDomain(evidence){
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
-  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, readRuntimeWitness, verifyFixedCandidate, stageBlockedBinding }) {
+  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, readRuntimeWitness, enrollmentDonor, pinGate = inspectRoutePin }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -38,6 +39,13 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
       if (current.routeId === 'direct') return HOLD('DIRECT_FORBIDDEN');
       if (!current.route || current.routeId === 'block' || current.route.enabled === false)
         return HOLD('PROTECTED_ROUTE_UNAVAILABLE');
+      // Every PCMS effect requires the S01 route pin: an exit reserved in
+      // the historical ledger for THIS binding on THIS route. Personas
+      // without a PCMS binding tag are never PCMS-operable.
+      if (typeof current.pcmsBindingId !== 'string') return HOLD('ROUTE_RESERVATION_REQUIRED');
+      const pin = pinGate({ pcmsBindingId: current.pcmsBindingId, personaUid: current.personaUid,
+        containerId: current.cookieStoreId, routeId: current.routeId, managed: true, killSwitch: true });
+      if (!pin.allow) return HOLD('PROTECTED_ROUTE_NOT_PINNED');
       // A configured proxy is not evidence of a working protected route.
       // This is the donor's context-fenced cached test, never a new network probe.
       const evidence = await getRouteTest(current.cookieStoreId);
@@ -300,59 +308,6 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     catch{return {ok:false,code:'HANDOFF_UNVERIFIED'};}
   }
 
-  // First stage is intentionally donor BLOCK only. No protected route is
-  // assigned or account tab opened until the verified reservation join is
-  // complete. This method is private background composition, not a port API.
-  async function stageInitialBlockedBinding({bindingId,personaUid,contextId}={}){
-    if(typeof stageBlockedBinding!=='function')
-      return {ok:false,code:'DONOR_BLOCKED_STAGE_UNAVAILABLE'};
-    try{
-      const receipt=await stageBlockedBinding({bindingId,personaUid,contextId});
-      return receipt?.ok===true&&receipt.blocked===true?
-        {ok:true,blocked:true,routeId:'block',bindingId}: 
-        {ok:false,code:receipt?.code||'DONOR_BLOCKED_STAGE_UNCONFIRMED'};
-    }catch{return {ok:false,code:'DONOR_BLOCKED_STAGE_UNCONFIRMED'};}
-  }
-
-  // S01 candidate measurement never grants account admission. It only
-  // invokes the existing donor-owned native pipe and fixed endpoint command.
-  // A positive echo without H-qualified TTL/route ownership is not E01 PASS.
-  async function verifyProtectedCandidate({personaUid,contextId,routeId}={}) {
-    if(typeof verifyFixedCandidate!=='function')
-      return {ok:false,code:'NATIVE_FAMILY_VERIFIER_UNAVAILABLE'};
-    if(!/^[a-z0-9_-]{8,128}$/i.test(personaUid||'')||
-       !/^[a-z0-9_-]{8,128}$/i.test(contextId||'')||
-       !/^[a-z0-9_-]{8,128}$/i.test(routeId||''))
-      return {ok:false,code:'NATIVE_CANDIDATE_INVALID'};
-    try {
-      await initialize();
-      if(securityState.ready!==true||securityState.privacySafe!==true||
-         BAD_PROXY.has(securityState.proxyControl))
-        return {ok:false,code:'DONOR_SECURITY_UNAVAILABLE'};
-      const before=await shared.resolve(personaUid);
-      if(before.cookieStoreId!==contextId||before.routeId!==routeId||
-         !before.route||before.route.enabled===false||
-         routeId==='direct'||routeId==='block'||before.archived||before.rotating)
-        return {ok:false,code:'NATIVE_CANDIDATE_CONTEXT_CHANGED'};
-      const proof=await verifyFixedCandidate({routeId,contextId});
-      const after=await shared.resolve(personaUid);
-      if(after.cookieStoreId!==before.cookieStoreId||
-         after.routeId!==before.routeId||after.archived||after.rotating)
-        return {ok:false,code:'NATIVE_CANDIDATE_CONTEXT_CHANGED'};
-      if(proof?.source!=='DONOR_FIXED_PROBE'||
-         proof.routeId!==routeId||proof.contextId!==contextId||
-         proof.ipv4?.state!=='VERIFIED'||proof.ipv6?.state!=='VERIFIED'||
-         proof.dns!=='VERIFIED_PROTECTED'||proof.protection!=='READY'||
-         proof.disposition!=='HOLD_TTL_UNQUALIFIED')
-        return {ok:false,code:'NATIVE_FAMILY_PROOF_INCOMPLETE'};
-      // The original probe receipt is intentionally NOT returned to a page.
-      return {ok:true,familiesObserved:true,admission:'HELD_TTL_UNQUALIFIED',
-        providerEffects:'OFF'};
-    } catch {
-      return {ok:false,code:'NATIVE_FAMILY_VERIFIER_UNAVAILABLE'};
-    }
-  }
-
   async function sampleNativeWitness() {
     if(typeof readRuntimeWitness!=='function')return {ok:false,code:'NATIVE_WITNESS_UNAVAILABLE'};
     try {
@@ -362,9 +317,8 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
   }
 
   return Object.freeze({
-    verifyProtectedCandidate,
-    stageInitialBlockedBinding,
     sampleNativeWitness,
+    enrollmentDonor: enrollmentDonor || null,
     observeReadOnly,
     observeMonitoring,
     runSupplyStep,
@@ -392,7 +346,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
       donorReady: securityState.ready === true,
       privacySafe: securityState.privacySafe === true,
       providerEffects: 'OFF',
-      admission: 'HELD_UNTIL_OWNER_VERIFICATION'
+      admission: 'PER_ACCOUNT_ROUTE_PIN'
     })
   });
 }

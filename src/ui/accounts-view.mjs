@@ -1,24 +1,36 @@
-// I03 Accounts workspace. All changes are revision-fenced and re-read after
-// acknowledgement. No UI-provided data can assert a verified Perchance login.
+// S01 Accounts workspace. The page sends only operator intents (Add Account,
+// Confirm, Change route...). Personas, routes, exits and identity proof are
+// chosen and observed by the background; nothing here can assert them.
 const accountsArea=document.getElementById('pcms-accounts-list');
-const personaPicker=document.getElementById('pcms-persona-picker');
-const routePicker=document.getElementById('pcms-protected-route');
-const createName=document.getElementById('pcms-new-persona-name');
 const feedback=document.getElementById('pcms-accounts-feedback');
-const enroll=document.getElementById('pcms-enroll');
-const create=document.getElementById('pcms-create-persona');
+const add=document.getElementById('pcms-add-account');
 const refresh=document.getElementById('pcms-refresh-accounts');
-let generation=0, personas=[], routes=[], accounts=[], held=true, routeGateHeld=true;
+let generation=0, accounts=[], held=true, available=false, poll=null;
 const statuses={
-  WAITING_LOGIN:'Awaiting manual login',VERIFICATION_PENDING:'Identity not verified',
-  VERIFIED:'Independent identity observed',OVERRIDDEN:'Manual enrollment exception — not verified',
-  REBIND_PENDING:'Replacement Persona — verification required',ARCHIVED:'Archived'
+  PREPARING:'Preparing protected route',WAITING_LOGIN:'Waiting for you to log in',
+  VERIFICATION_PENDING:'Waiting for login confirmation',VERIFIED:'Ready — identity verified',
+  OVERRIDDEN:'Manual exception — not verified',REBIND_PENDING:'Replacement Persona — verification required',
+  ARCHIVED:'Archived'
 };
-function command(type,params) {
+const phases={START:'Starting…',PERSONA:'Creating the dedicated Persona…',
+  ROUTE:'Finding and verifying a unique Mullvad exit…',LOGIN:'Ready for login',HELD:'Waiting'};
+const fallback={
+  NO_PAGE_SESSION:'No logged-in Perchance session was found in this account’s tab.',
+  SESSION_REJECTED:'Perchance rejected the session. Log in again in the account tab.',
+  SESSION_PROBE_UNAVAILABLE:'Perchance could not be reached from the account tab (it may be showing a challenge). Complete it there, then confirm again.',
+  NO_PERCHANCE_TAB:'Open the account’s Perchance tab and log in first.',
+  IDENTITY_CHANGED:'A different Perchance account is logged in than the one bound here. Log in with the original account.',
+  IDENTITY_ALREADY_BOUND:'That Perchance account is already managed by another PCMS account.',
+  ROUTE_RESERVATION_REQUIRED:'This record was created by an earlier build without a reserved exit. Archive it and use Add Account.',
+  RESTORE_HOLD:'A restore safety hold is active; account changes are paused.',
+  STALE_REVISION:'The account changed meanwhile. The list was refreshed; try again.'
+};
+function command(type,params,timeoutMs=type==='CONFIRM_LOGIN'||type==='CHECK_IDENTITY'?90000:
+    type==='WITNESS_STATUS'?8000:5000) {
   return new Promise((resolve,reject)=>{
     const port=browser.runtime.connect({name:'pcms-i03-accounts'});
     let settled=false;
-    const timer=setTimeout(()=>finish(null,Error('TIMEOUT')),type==='WITNESS_STATUS'?8000:5000);
+    const timer=setTimeout(()=>finish(null,Error('TIMEOUT')),timeoutMs);
     function finish(value,error) {
       if(settled)return;
       settled=true;clearTimeout(timer);
@@ -41,157 +53,130 @@ function button(label,onClick,disabled=false) {
   return el;
 }
 function report(text){feedback.textContent=text;}
-async function mutation(type,params,message){
-  report('Saving local account state…');
+const explain=(out)=>out?.message||fallback[out?.code]||
+  ('Not completed ('+String(out?.code||'unknown').toLowerCase().replaceAll('_',' ')+').');
+async function act(type,a,message,extra={}){
+  report('Working…');
   try{
-    const result=await command(type,params);
-    if(result?.ok!==true)throw Error(result?.code||'UNCONFIRMED');
-    report(message);
-    await read();
-  }catch(e){
-    report('Not confirmed: '+(e.message||'UNAVAILABLE')+'. Refresh before any retry.');
-  }
+    const result=await command(type,{accountId:a.accountId,expectedRevision:a.revision,...extra});
+    report(result?.ok===true?message(result):explain(result));
+  }catch{report('No answer from the background yet. The list will show the actual state.');}
+  await read().catch(()=>{});
 }
-function labelFor(uid) {
-  return personas.find(p=>p.personaUid===uid)?.name || 'Persona not found (held)';
+function describe(a){
+  if(a.state==='PREPARING'){
+    const phase=phases[a.setup?.phase]||'Preparing…';
+    return a.setup?.phase==='HELD'?'Setup is waiting: '+(a.message||'the protected route could not be prepared yet.'):phase;
+  }
+  if(a.protectedRoute==='LEGACY_UNPINNED')return fallback.ROUTE_RESERVATION_REQUIRED;
+  if(a.route?.status==='HELD')return 'Traffic held: '+(a.message||'the protected route needs attention.');
+  return a.working?'Checking route…':'Protected exit reserved for this account only.';
 }
 function draw() {
-  const occupied=new Set(accounts.filter(a=>a.state!=='ARCHIVED').map(a=>a.personaUid));
-  const prior=personaPicker.value;
-  personaPicker.replaceChildren(option('','Choose an unbound Persona'));
-  for(const p of personas.filter(p=>!p.archived&&!occupied.has(p.personaUid)))
-    personaPicker.append(option(p.personaUid,p.name+(p.routeProtected?'':' — route held')));
-  if([...personaPicker.options].some(o=>o.value===prior))personaPicker.value=prior;
-  const selectedRoute=routePicker.value;
-  routePicker.replaceChildren(option('','Select protected route'));
-  for(const r of routes)routePicker.append(option(r.routeId,r.name));
-  if([...routePicker.options].some(o=>o.value===selectedRoute))routePicker.value=selectedRoute;
-  enroll.disabled=held||routeGateHeld||!personaPicker.value;
-  create.disabled=held||routeGateHeld||!routePicker.value||!createName.value.trim();
+  add.disabled=held||!available;
   accountsArea.replaceChildren();
   if(held) {
     accountsArea.textContent='Canonical storage/restore safety hold. All account changes disabled.';
     return;
   }
-  if(routeGateHeld) {
-    const status=document.createElement('p');
-    status.textContent='Protected-route admission not yet proven (E-01/E-04). New enrollment, login and rebind are held; existing Personas and their tabs are unchanged.';
-    accountsArea.append(status);
+  if(!available){
+    const p=document.createElement('p');
+    p.textContent='PersonaMonkey is still starting; Add Account becomes available when it is ready.';
+    accountsArea.append(p);
   }
   if(!accounts.length) {
     const empty=document.createElement('p');
-    empty.textContent='No PCMS account bindings recorded. This is not a Perchance account census.';
+    empty.textContent='No managed accounts yet. Use Add Account to set up the first one.';
     accountsArea.append(empty);return;
   }
   for(const a of accounts) {
     const section=document.createElement('section');section.className='account-record';
     const heading=document.createElement('h3');
-    heading.textContent=labelFor(a.personaUid)+' — '+(statuses[a.state]||'Unknown/held');
-    section.append(heading);
-    const detail=document.createElement('p');
-    detail.textContent='Revision '+a.revision+'; identity '+a.identity+
-      '; provider writes OFF.'+(a.override?' Exception: '+a.override+'.':'');
-    section.append(detail);
-    if(a.state!=='ARCHIVED'){
-      const controls=document.createElement('div');controls.className='account-controls';
-      controls.append(button('Open Perchance for manual login',async()=>{
-        report('Opening through guarded Persona…');
-        try{
-          const out=await command('OPEN_LOGIN',{accountId:a.accountId,expectedRevision:a.revision});
-          report(out?.ok?'Human login tab requested. Login is not proof of account ownership.':
-            'Tab not confirmed: '+(out?.code||'UNKNOWN')+'. Inspect existing tabs before retry.');
-        }catch{report('Tab open acknowledgement lost. Inspect tabs before retry.');}
+    heading.textContent='Account '+a.accountId.slice(-6)+' — '+(statuses[a.state]||'Held');
+    const detail=document.createElement('p');detail.textContent=describe(a);
+    section.append(heading,detail);
+    const controls=document.createElement('div');controls.className='account-controls';
+    const pinned=a.protectedRoute==='PCMS_PINNED';
+    if(a.state==='PREPARING'){
+      if(a.setup?.phase==='HELD'&&!a.working)
+        controls.append(button('Try setup again',()=>act('RESUME_SETUP',a,()=>'Setup restarted.')));
+    }else if(a.state!=='ARCHIVED'){
+      if(pinned&&a.state!=='VERIFIED')
+        controls.append(button('Confirm login',()=>act('CONFIRM_LOGIN',a,
+          r=>'Logged-in account verified'+(r.inventory==='SYNCHRONIZED'?' and generators loaded.':'. Generator list will refresh later.'))));
+      if(pinned)controls.append(
+        button('Open Perchance tab',()=>act('OPEN_LOGIN',a,()=>'Perchance opened in this account’s Persona.')),
+        button('Check route',()=>act('VERIFY_ROUTE',a,()=>'Route check started.')),
+        button('Change route',async()=>{
+          if(!window.confirm('Move this account to a different unique Mullvad exit? Its current exit stays reserved to it.'))return;
+          await act('CHANGE_ROUTE',a,()=>'Route change started.');
+        }));
+      if(!pinned&&a.state!=='VERIFIED'){
+        const reason=document.createElement('select');
+        reason.setAttribute('aria-label','Reason for manual exception');
+        for(const [value,label] of [['IDENTITY_UNOBSERVABLE','Identity cannot be observed'],
+          ['CHALLENGE','Provider challenge'],['SESSION_UNAVAILABLE','Session unavailable']])reason.append(option(value,label));
+        const ack=document.createElement('input');ack.type='checkbox';
+        const consent=document.createElement('label');
+        consent.append(ack,document.createTextNode(' Exception grants no provider write authority'));
+        controls.append(reason,consent,button('Record limited exception',()=>act('MANUAL_OVERRIDE',a,
+          ()=>'Local exception recorded; ownership remains unverified.',{reason:reason.value,acknowledgeLimitedAuthority:ack.checked})));
+      }
+    }
+    if(a.state==='ARCHIVED'){
+      controls.append(button('Reactivate',async()=>{
+        if(!window.confirm('Reactivate this account? PCMS re-verifies its route and login first.'))return;
+        await act('REACTIVATE',a,()=>'Reactivation started.',{explicitReactivation:true});
       }));
-      if(['WAITING_LOGIN','REBIND_PENDING'].includes(a.state))
-        controls.append(button('I completed login',()=>mutation('ACK_LOGIN',{
-          accountId:a.accountId,expectedRevision:a.revision
-        },'Login acknowledged; identity still unverified.')));
-      if(a.state!=='VERIFIED')
-        controls.append(button('Check identity evidence',()=>mutation('CHECK_IDENTITY',{
-          accountId:a.accountId,expectedRevision:a.revision
-        },'Independent identity evidence received.')));
-      const reason=document.createElement('select');
-      reason.setAttribute('aria-label','Reason for manual enrollment exception');
-      for(const [value,label] of [
-        ['IDENTITY_UNOBSERVABLE','Identity cannot be observed'],
-        ['CHALLENGE','Provider challenge'],
-        ['SESSION_UNAVAILABLE','Session unavailable']])reason.append(option(value,label));
-      const acknowledge=document.createElement('input');
-      acknowledge.type='checkbox';
-      const consent=document.createElement('label');
-      consent.append(acknowledge,document.createTextNode(' Exception grants no provider write authority'));
-      controls.append(reason,consent,button('Record limited exception',()=>mutation('MANUAL_OVERRIDE',{
-        accountId:a.accountId,expectedRevision:a.revision,reason:reason.value,
-        acknowledgeLimitedAuthority:acknowledge.checked
-      },'Local exception recorded; ownership remains unverified.'),a.state==='VERIFIED'));
-      const replacements=document.createElement('select');
-      replacements.setAttribute('aria-label','Replacement Persona');
-      replacements.append(option('','Choose replacement Persona'));
-      for(const p of personas.filter(p=>!p.archived&&!occupied.has(p.personaUid)))
-        replacements.append(option(p.personaUid,p.name));
-      controls.append(replacements,button('Repair / rebind',async()=>{
-        if(!replacements.value)return report('Select an unbound replacement Persona.');
-        if(!window.confirm('Replace the account Persona? Previous identity evidence is invalidated.'))return;
-        await mutation('REBIND',{accountId:a.accountId,expectedRevision:a.revision,
-          personaUid:replacements.value,explicitRepair:true},'Rebound locally; new login and verification required.');
-      }));
-      controls.append(button('Archive account',async()=>{
-        if(!window.confirm('Archive this PCMS account? No Persona or Perchance data will be deleted.'))return;
-        await mutation('ARCHIVE',{accountId:a.accountId,
-          expectedRevision:a.revision},'PCMS account archived; donor Persona preserved.');
-      }));
-      section.append(controls);
-    } else {
-      section.append(button('Reactivate with the same Persona',async()=>{
-        if(!window.confirm('Reactivate this archived account? Identity evidence will be reset and a new login required.'))return;
-        await mutation('REACTIVATE',{accountId:a.accountId,expectedRevision:a.revision,
-          explicitReactivation:true},'Account reactivated locally; login and verification required.');
+    }else if(!a.working){
+      controls.append(button('Archive',async()=>{
+        if(!window.confirm('Archive this account? Its Persona, history and reserved exits are kept; nothing on Perchance changes.'))return;
+        await act('ARCHIVE',a,()=>'Account archived.');
       }));
     }
+    section.append(controls);
     accountsArea.append(section);
   }
 }
 async function read() {
   const mine=++generation;
-  const [a,p,r]=await Promise.all([
-    command('LIST_ACCOUNTS'),command('LIST_PERSONAS'),command('LIST_ROUTES')]);
+  const a=await command('LIST_ACCOUNTS');
   if(mine!==generation)return;
-  if(a?.ok!==true||p?.ok!==true||r?.ok!==true)throw Error('ACCOUNT_READ_UNAVAILABLE');
+  if(a?.ok!==true)throw Error('ACCOUNT_READ_UNAVAILABLE');
   if(a.truncated)throw Error('ACCOUNT_LIST_TRUNCATED');
   held=a.held===true;
-  routeGateHeld=a.routeGateHeld!==false;
+  available=a.enrollment==='AVAILABLE';
   accounts=a.accounts;
-  personas=p.personas;
-  routes=r.routes;
   draw();
+  // While any setup/route work runs in the background, keep the view live.
+  const busy=accounts.some(x=>x.working||(x.state==='PREPARING'&&x.setup?.phase!=='HELD'));
+  clearTimeout(poll);
+  if(busy||!available)poll=setTimeout(()=>{void read().catch(()=>{});},2000);
 }
+add.addEventListener('click',async()=>{
+  add.disabled=true;
+  report('Preparing a dedicated Persona and a unique protected exit. This can take a minute…');
+  try{
+    const out=await command('ADD_ACCOUNT');
+    if(out?.ok!==true)report(explain(out));
+  }catch{report('No answer yet; the list shows whether setup started.');}
+  await read().catch(()=>{});
+});
 document.getElementById('pcms-check-native-witness')?.addEventListener('click',async()=>{
   report('Requesting one read-only native clock sample…');
   try {
     const sampled=await command('WITNESS_STATUS');
     if(sampled?.ok===true)
-      report('Native clock sample received (sequence '+sampled.sequence+'). Qualified uptime and protected exit remain unproved.');
-    else report('Native witness unavailable: '+(sampled?.code||'UNVERIFIED')+'. Enrollment remains held.');
+      report('Native clock sample received (sequence '+sampled.sequence+'). This alone is not qualified uptime.');
+    else report('Native witness unavailable: '+(sampled?.code||'UNVERIFIED')+'.');
   } catch {
-    report('Native witness response unknown. No route or account operation attempted.');
+    report('Native witness response unknown.');
   }
 });
 refresh.addEventListener('click',async()=>{
-  report('Refreshing authoritative account and Persona state…');
-  try{await read();report('Fresh local state loaded; provider identity may remain unknown.');}
-  catch{held=true;draw();report('Account read unavailable. Changes held.');}
+  report('Refreshing account state…');
+  try{await read();report('Account state refreshed.');}
+  catch{report('Account read unavailable. Actions remain disabled.');held=true;draw();}
 });
-personaPicker.addEventListener('change',draw);
-routePicker.addEventListener('change',draw);
-createName.addEventListener('input',()=>{create.disabled=held||routeGateHeld||!routePicker.value||!createName.value.trim();});
-enroll.addEventListener('click',()=> {
-  if(!personaPicker.value)return;
-  return mutation('ENROLL',{accountId:'acct_'+crypto.randomUUID().replaceAll('-',''),
-    personaUid:personaPicker.value,expectedRevision:0},
-    'Persona bound locally. Use human login, then verify identity.');
-});
-create.addEventListener('click',()=>mutation('CREATE_PERSONA',{
-  name:createName.value.trim(),routeId:routePicker.value
-},'Persona creation requested. Refresh the list to enroll.'));
-try{await read();report(routeGateHeld?'Route admission E-01/E-04 held. No new login or provisioning authorized.':'Local account state loaded. No Perchance login inferred.');}
+try{await read();report('Account state loaded.');}
 catch{held=true;draw();report('Account read unavailable. No actions enabled.');}
