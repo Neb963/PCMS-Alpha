@@ -306,6 +306,30 @@ class TestHost(unittest.TestCase):
                         expectedPlaintextBytes=3,keyRef="portable-recovery")["ok"])
         self.assertEqual((self.root/(RUN+".encrypted")).read_bytes(),b"PCMS")
 
+    def test_f1_after_writer_creation_open_ack_disk_failure_still_unlocks(self):
+        original=self.host._write
+        def lose_open_receipt(record):
+            if record["state"]=="OPEN_OBSERVED":
+                raise OSError("open ACK durability failed")
+            return original(record)
+        self.host._write=lose_open_receipt
+        denied=self.begin(b"ABC")
+        self.assertEqual(denied["code"],"BACKUP_NATIVE_UNAVAILABLE")
+        self.assertIsNone(self.host._export_lock)
+        self.assertIsNone(self.host.current)
+        self.assertIsNone(self.host.writer)
+        self.assertEqual(self.request("archive.inspect",runId=RUN)["state"],
+                         "CREATE_POSSIBLE")
+        # Header bytes may exist. Never unlink or retry the same run.
+        self.assertTrue((self.root/(RUN+".encrypted")).exists())
+        self.host._write=original
+        different="s02_"+"d"*32
+        next_run=self.request("export.begin",runId=different,cutDigest=CUT,
+                              expectedPlaintextBytes=3,keyRef="portable-recovery")
+        self.assertTrue(next_run["ok"],next_run)
+        self.assertEqual(self.request("archive.inspect",runId=RUN)["state"],
+                         "CREATE_POSSIBLE")
+
     def test_f1_file_open_error_keeps_possible_journal_but_releases_lock(self):
         # Actual writer creation/open failure after durable CREATE_POSSIBLE.
         original=self.host
