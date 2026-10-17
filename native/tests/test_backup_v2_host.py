@@ -154,6 +154,14 @@ class TestHost(unittest.TestCase):
             status="INACTIVE_PREPARED_NOT_APPLIED")
         self.assertTrue(qualified["ok"],qualified)
         self.assertEqual(qualified["state"],"RECOVERY_VERIFIED")
+        done=self.request("archive.inspect",runId=RUN)
+        self.assertEqual(done["state"],"RECOVERY_VERIFIED")
+        self.assertEqual(done["ciphertextSha256"],receipt["sha256"])
+        self.assertEqual(done["preparedSha256"],"b"*64)
+        reopened=self.request("backup.verify",runId=RUN,
+                              keyRef="portable-recovery")
+        self.assertEqual(reopened["sha256"],receipt["sha256"])
+        self.assertEqual(reopened["state"],"AUTHENTICATED_INVENTORY_ONLY")
         self.assertEqual(self.request("archive.retention.plan")["qualified"],1)
         self.assertEqual(self.request("archive.retention.prune")["state"],
                          "NO_ELIGIBLE_DELETE")

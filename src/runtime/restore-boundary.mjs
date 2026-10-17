@@ -6,7 +6,7 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {snapshotCanonical,digest,MAX_ARCHIVE_BYTES} from './backup-core.mjs';
 import {createPortableBackupPayload,decodeBackupEnvelope} from '../lib/backup-package.js';
 import {filterOrdinaryAutomationJobs} from '../lib/automation-history.js';
-import {previewRestore,verifyCheckpoint,validateRestoreTransport} from './restore-core.mjs';
+import {previewRestore,verifyCheckpoint,validateRestoreTransport,stableRestoreDonorCut} from './restore-core.mjs';
 import {createRestoreGate} from './restore-gate.mjs';
 import {createRestoreStageEngine} from './restore-stage.mjs';
 import {prepareRestoredCanonical} from './restore-sanitize.mjs';
@@ -52,7 +52,8 @@ async function destination(api,donor){
   const db=await openCanonicalDatabase();
   let pcms;
   try{pcms=await snapshotCanonical(db);}finally{db.close();}
-  return {snap,pcms,portable:await readPortable(api,donor,snap)};
+  return {snap:stableRestoreDonorCut(snap),pcms,
+    portable:await readPortable(api,donor,snap)};
 }
 function mappingFromContainers(payload,requested,containers,epoch,{allowCreate=false}={}){
   const map=Object.create(null),used=new Set();

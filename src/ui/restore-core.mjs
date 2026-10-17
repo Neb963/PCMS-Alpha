@@ -44,6 +44,15 @@ export function inspectRestoreMappings(donor,mappings,containers,{fresh=false,st
   }
   return results;
 }
+// Operational Mullvad/native status is an observation, not persisted
+// Persona identity or a source cut. Keep security and userscript permission
+// facts in the plan; exclude only live native-status telemetry.
+export function stableRestoreDonorCut(snapshot){
+  check(snapshot?.state&&Array.isArray(snapshot.containers),
+    'RESTORE_DESTINATION_UNAVAILABLE');
+  const {mullvadNative,...stable}=snapshot;
+  return stable;
+}
 export async function previewRestore({archiveText,password,mode='merge',fresh=false,
   mappings={},currentPcms,currentDonor,currentPortable,containers=[],decodeDonor}){
   check(RESTORE_MODES.includes(mode),'RESTORE_MODE_INVALID');
@@ -55,7 +64,7 @@ export async function previewRestore({archiveText,password,mode='merge',fresh=fa
   const groups=inspectRestoreMappings(opened.donor,mappings,containers,{fresh,strict:false});
   // The archive itself is encrypted and authenticated. The destination cut is
   // not a lock: it must be re-read immediately before a guarded write.
-  const destinationSha256=await digest(JSON.stringify({pcms:currentPcms,donor:currentDonor,portable:currentPortable}));
+  const destinationSha256=await digest(JSON.stringify({pcms:currentPcms,donor:stableRestoreDonorCut(currentDonor),portable:currentPortable}));
   const sourceSha256=await digest(JSON.stringify(opened.archive.pcms));
   const risk={
     importedPersonas:groups.length,
@@ -92,7 +101,7 @@ export async function verifyCheckpoint({checkpointText,password,currentPcms,
 export async function revalidateRestorePlan({expectedPlanSha256,expectedDestinationSha256,
   currentPcms,currentDonor,currentPortable,plan}){
   check(await digest(JSON.stringify(plan))===expectedPlanSha256,'RESTORE_PLAN_CHANGED');
-  check(await digest(JSON.stringify({pcms:currentPcms,donor:currentDonor,portable:currentPortable}))===
+  check(await digest(JSON.stringify({pcms:currentPcms,donor:stableRestoreDonorCut(currentDonor),portable:currentPortable}))===
     expectedDestinationSha256,'RESTORE_DESTINATION_DRIFT');
   return true;
 }

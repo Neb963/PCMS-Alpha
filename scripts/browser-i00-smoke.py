@@ -2928,19 +2928,57 @@ def main():
                     connectionFactory:native
                   });
                   const after=await ledger.inspect(runId);
+                  // Second fully qualified archive under the same durable
+                  // Firefox DB: a completed first run MUST release active.
+                  const secondRun='s02_'+crypto.randomUUID().replaceAll('-','');
+                  let second=await ledger.claim(secondRun,'d'.repeat(64),raw.length);
+                  for(const [from,to,patch] of [
+                    ['PREPARED','CREATE_POSSIBLE',{}],
+                    ['CREATE_POSSIBLE','OPEN_OBSERVED',{}],
+                    ['OPEN_OBSERVED','APPEND_POSSIBLE',{}],
+                    ['APPEND_POSSIBLE','OPEN_OBSERVED',
+                      {acceptedBytes:raw.length,nextSequence:1}],
+                    ['OPEN_OBSERVED','FINISH_POSSIBLE',{}],
+                    ['FINISH_POSSIBLE','WRITTEN_UNVERIFIED',{}],
+                    ['WRITTEN_UNVERIFIED','AUTHENTICATED_INVENTORY_ONLY',
+                      {ciphertextSha256:cipher,observedBlobs:0}]
+                  ])second=await ledger.advance(secondRun,second.revision,from,to,patch);
+                  const restoredSecond=await checker.verifyV2StoredArchive({
+                    api:browser,db,runId:secondRun,password,
+                    assertNotRestoring:async()=>true,connectionFactory:native
+                  });
+                  const thirdRun='s02_'+crypto.randomUUID().replaceAll('-','');
+                  let third=await ledger.claim(thirdRun,'d'.repeat(64),raw.length);
+                  let staleBlocked=false;
+                  try{await ledger.advance(runId,after.revision,
+                    'RECOVERY_VERIFIED','RECOVERY_VERIFIED',{
+                      preparedSha256:after.preparedSha256,
+                      ciphertextSha256:cipher});}
+                  catch{staleBlocked=true;}
+                  const retired=await ledger.retireUndispatched(thirdRun,third.revision);
+                  const fourthRun='s02_'+crypto.randomUUID().replaceAll('-','');
+                  const fourth=await ledger.claim(fourthRun,'d'.repeat(64),raw.length);
+                  const records=[runId,secondRun,thirdRun].map(id=>ledger.inspect(id));
+                  const history=await Promise.all(records);
                   db.close();
-                  done({ok:restored.ok&&restored.state==='RECOVERY_VERIFIED'&&
+                  done({ok:restored.ok&&restoredSecond.ok&&
+                    restored.state==='RECOVERY_VERIFIED'&&
+                    restoredSecond.state==='RECOVERY_VERIFIED'&&
                     after.state==='RECOVERY_VERIFIED'&&
                     after.preparedSha256===restored.preparedSha256&&
-                    restored.activation==='OFF'&&
-                    restored.sourceRows===0&&
-                    nativeSteps.includes('archive.recovery.complete'),
+                    restored.activation==='OFF'&&restored.sourceRows===0&&
+                    staleBlocked&&retired.state==='RETIRED_PRE_DISPATCH'&&
+                    fourth.state==='PREPARED'&&
+                    history.map(x=>x.state).join('|')===
+                      'RECOVERY_VERIFIED|RECOVERY_VERIFIED|RETIRED_PRE_DISPATCH'&&
+                    nativeSteps.filter(x=>x==='archive.recovery.complete').length===2,
                     actions:nativeSteps.length,status:after.state});
                 })().catch(e=>done({error:String(e)}));"""
                 verified_result=call('POST',f'/session/{after}/execute/async',
                                       {'script':v2_verify,'args':[]},timeout=90)
                 assert verified_result.get('ok') is True,verified_result
                 print('B S02_INSTALLED_READONLY_RESTORABLE_NATIVE_CANDIDATE_LEDGERS_AND_EPHEMERAL_IDB=PASS',flush=True)
+                print('B S02_BACKUP_TERMINAL_SUCCESSION_AND_STALE_REPLAY_FENCE=PASS',flush=True)
 
 
                 # S02 B: real existing daily I15 runner and durable I15 claim

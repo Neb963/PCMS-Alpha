@@ -364,9 +364,13 @@ class V2ArchiveHost:
         if state is None:
             return {"ok":False,"code":"BACKUP_NOT_TRACKED"}
         # Never disclose source, password, exact archive filesystem path or key.
-        return {"ok":True,"state":state["state"],"runId":state["runId"],
+        public={"ok":True,"state":state["state"],"runId":state["runId"],
                 "acceptedBytes":state["acceptedBytes"],
                 "expectedBytes":state["plaintextBytes"]}
+        if state["state"]=="RECOVERY_VERIFIED":
+            public.update({k:state[k] for k in
+              ("ciphertextSha256","preparedSha256","cutDigest")})
+        return public
 
     def _read(self,msg):
         state=self._observe(msg["runId"])
@@ -389,7 +393,8 @@ class V2ArchiveHost:
 
     def _verify(self,msg):
         state=self._observe(msg["runId"])
-        _require(state is not None and state["state"]=="WRITTEN_UNVERIFIED" and
+        _require(state is not None and state["state"] in
+                 ("WRITTEN_UNVERIFIED","RECOVERY_VERIFIED") and
                  msg["keyRef"]=="portable-recovery","BACKUP_NOT_VERIFIABLE")
         _,path=self._paths(msg["runId"])
         secret=self.vault_get()
@@ -398,7 +403,10 @@ class V2ArchiveHost:
             receipt=verify_two_pass(path,secret,dirfd=self._pin_root())
         finally:
             secret=None
-        # Do not promote to COMPLETE: donor/restore is separately required.
+        if state["state"]=="RECOVERY_VERIFIED":
+            _require(receipt["sha256"]==state.get("ciphertextSha256"),
+                     "BACKUP_RECOVERY_FILE_CHANGED")
+        # Independent disk proof is not permission to assert full recovery.
         return {"ok":True,"state":"AUTHENTICATED_INVENTORY_ONLY",**receipt}
 
     def _restore_begin(self,msg):

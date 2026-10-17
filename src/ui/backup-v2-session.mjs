@@ -97,7 +97,8 @@ export function createV2Ledger(db){
         resolve(r?{runId:r.runId,state:r.state,revision:r.revision,
           acceptedBytes:r.acceptedBytes,plaintextBytes:r.plaintextBytes,
           ciphertextSha256:r.ciphertextSha256||null,
-          preparedSha256:r.preparedSha256||null}:null);
+          preparedSha256:r.preparedSha256||null,
+          cutDigest:r.cutDigest}:null);
       };
       tx.onabort=()=>reject(Error('BACKUP_V2_DB_UNAVAILABLE'));
     });

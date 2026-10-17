@@ -18,6 +18,45 @@ function decodeChunk(b64){
   requireCheck(binary.length>0&&binary.length<=49152,'BACKUP_V2_READ_INVALID');
   return Uint8Array.from(binary,s=>s.charCodeAt(0));
 }
+// Read-only lost-ACK recovery: native qualified a full decoded archive and
+// wrote its durable receipt, but the background journal did not observe ACK.
+// Reopen ciphertext independently and compare the exact native qualification
+// before atomically retiring only the matching browser run. Never replay export.
+export async function reconcileV2QualifiedNative({api,db,runId,
+  assertNotRestoring,connectionFactory=createV2NativeConnection}={}){
+  requireCheck(nameOK(runId)&&typeof assertNotRestoring==='function'&&
+    await assertNotRestoring()===true,'BACKUP_V2_RECONCILE_NOT_ADMITTED');
+  const ledger=createV2Ledger(db),found=await ledger.inspect(runId);
+  requireCheck(found?.state==='AUTHENTICATED_INVENTORY_ONLY'&&
+    shaOK(found.ciphertextSha256)&&shaOK(found.cutDigest)&&
+    found.acceptedBytes===found.plaintextBytes,
+    'BACKUP_V2_RECONCILE_BROWSER_INCOMPLETE');
+  const connection=connectionFactory(api);
+  try{
+    const native=await connection.exchange({action:'archive.inspect',runId});
+    requireCheck(native?.ok===true&&native.runId===runId&&
+      native.state==='RECOVERY_VERIFIED'&&
+      native.cutDigest===found.cutDigest&&
+      native.ciphertextSha256===found.ciphertextSha256&&
+      shaOK(native.preparedSha256)&&
+      native.acceptedBytes===found.acceptedBytes,
+      'BACKUP_V2_RECONCILE_NATIVE_UNQUALIFIED');
+    const disk=await connection.exchange({action:'backup.verify',runId,
+      keyRef:'portable-recovery'});
+    requireCheck(disk?.ok===true&&disk.runId===runId&&
+      disk.state==='AUTHENTICATED_INVENTORY_ONLY'&&
+      disk.sha256===native.ciphertextSha256,
+      'BACKUP_V2_RECONCILE_DISK_CHANGED');
+    requireCheck(await assertNotRestoring()===true,
+      'BACKUP_V2_RECONCILE_GUARD_REVOKED');
+    const settled=await ledger.advance(runId,found.revision,
+      'AUTHENTICATED_INVENTORY_ONLY','RECOVERY_VERIFIED',{
+        ciphertextSha256:disk.sha256,preparedSha256:native.preparedSha256});
+    return {ok:true,runId,state:settled.state,activation:'OFF',
+      source:'NATIVE_VERIFIED_ALREADY_COMPLETED_NO_REPLAY'};
+  }finally{try{connection.close()}catch{}}
+}
+
 export async function verifyV2StoredArchive({
   api,db,runId,password,
   assertNotRestoring,connectionFactory=createV2NativeConnection,
