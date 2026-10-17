@@ -112,7 +112,7 @@ class TestBackupV2(unittest.TestCase):
         for flags, expected in (({'missing': True}, 'BACKUP_INCOMPLETE'),
                                 ({'duplicate': True}, 'BACKUP_BLOB_INVALID'),
                                 ({'bad_ref': True}, 'BACKUP_INCOMPLETE'),
-                                ({'donor': False}, 'BACKUP_INCOMPLETE'),
+                                ({'donor': False}, 'BACKUP_FRAME_ORDER'),
                                 ({'extra': True}, 'BACKUP_TRAILING_DATA')):
             self.seal(make_payload(**flags))
             self.denied(expected)
