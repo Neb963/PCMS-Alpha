@@ -37,16 +37,29 @@ function references(row) {
   if (!match) return [];
   const [, owner, fields] = match;
   requireSource(typeof data[owner] === 'object' && data[owner] !== null);
-  return fields.filter(field => data[owner][field] !== undefined &&
-    data[owner][field] !== null).map(field => ({
-      kind: key, name: field, source: data[owner][field]
+  const record = data[owner];
+  // Historical source is not optional after a source-bearing effect.
+  // Newly prepared existing updates and unfinished AI jobs legitimately have
+  // no staged/final source yet; they remain preserved as unresolved records.
+  const required = key.startsWith('adoption:') ||
+    key.startsWith('stage:') || key.startsWith('stage-history:') ||
+    key.startsWith('release:') || key.startsWith('release-history:');
+  for (const field of fields) {
+    if (required || (field === 'finalSource' && record.verifiedFinal) ||
+        (field === 'stageSource' && record.stagedFingerprint)) {
+      requireSource(record[field] !== undefined && record[field] !== null);
+    }
+  }
+  return fields.filter(field => record[field] !== undefined &&
+    record[field] !== null).map(field => ({
+      kind: key, name: field, source: record[field]
     }));
 }
 export async function auditSourceClosure(snapshot) {
   requireSource(snapshot?.schema === 1 && Array.isArray(snapshot?.stores?.meta),
     'BACKUP_SOURCE_SNAPSHOT_INVALID');
   const seen = new Map();
-  let manifests = 0, references = 0, uniqueBytes = 0, referencedBytes = 0;
+  let manifests = 0, referenceCount = 0, uniqueBytes = 0, referencedBytes = 0;
   for (const row of snapshot.stores.meta) {
     for (const {source} of referencesOf(row)) {
       requireSource(source && typeof source === 'object' &&
@@ -59,16 +72,17 @@ export async function auditSourceClosure(snapshot) {
           'BACKUP_SOURCE_PATH_INVALID');
         byPath.set(blob.path.toLowerCase(), blob);
       }
-      const manifest = [];
-      let sourceBytes = 0;
+      const manifest = [], manifestPaths = new Set();
       for (const f of source.files) {
         requireSource(pathOK(f?.path) && Number.isSafeInteger(f?.size) &&
           f.size >= 0 && hex.test(f.sha256) && f.size <= 12 * 1024 * 1024,
           'BACKUP_SOURCE_MANIFEST_INVALID');
+        requireSource(!manifestPaths.has(f.path.toLowerCase()),
+          'BACKUP_SOURCE_MANIFEST_INVALID');
+        manifestPaths.add(f.path.toLowerCase());
         const blob = byPath.get(f.path.toLowerCase());
         requireSource(blob && blob.path === f.path, 'BACKUP_SOURCE_INCOMPLETE');
         const raw = decode(blob.base64);
-        sourceBytes += raw.length;
         requireSource(raw.length === f.size && await hash(raw) === f.sha256,
           'BACKUP_SOURCE_BYTE_MISMATCH');
         if (f.path === 'main.pjs' || f.path === 'index.html') {
@@ -82,7 +96,7 @@ export async function auditSourceClosure(snapshot) {
         if (prior === undefined) {seen.set(f.sha256, raw.length); uniqueBytes += raw.length;}
         else requireSource(prior === raw.length, 'BACKUP_SOURCE_HASH_COLLISION');
         referencedBytes += raw.length;
-        references++;
+        referenceCount++;
         manifest.push([f.path, f.size, f.sha256]);
       }
       requireSource(byPath.size === source.files.length &&
@@ -102,7 +116,7 @@ export async function auditSourceClosure(snapshot) {
       manifests++;
     }
   }
-  return Object.freeze({manifests, references, uniqueBlobs: seen.size,
+  return Object.freeze({manifests, references:referenceCount, uniqueBlobs: seen.size,
     uniqueBytes, referencedBytes, status: 'SOURCE_BYTES_AUDITED_NOT_DISK_VERIFIED'});
 }
 function referencesOf(row) {return references(row);}
