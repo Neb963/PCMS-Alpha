@@ -59,3 +59,16 @@ test('S01 E01 D: possible old effect never lets a new reservation ID replay the 
  assert.equal(transitionExitReservation(state,changed).code,'BINDING_RESERVATION_BUSY');
  assert.equal(transitionExitReservation(state,{...p,accountId:'account_wrong_003'}).code,'RESERVATION_ID_REUSED');
 });
+
+test('S01 GB01: documentation addresses are not public exits; malformed forged family arrays held',async()=>{
+ for(const candidate of ['192.0.2.3','198.51.100.4','203.0.113.5']){
+  assert.equal(normalizeProtectedExitProof(evidence(candidate,'2a01:4f8:1c1c::1'),1200).ok,false);
+ }
+ assert.equal(normalizeProtectedExitProof(evidence('45.66.77.88','2001:db8::2'),1200).ok,false);
+ const p=(await proposeExitReservation(input('one_001','one_001',evidence(),0),
+   {nowMs:()=>1200})).proposal;
+ assert.equal(transitionExitReservation(null,{...p,exits:[p.exits[0],p.exits[0]]}).code,'RESERVATION_EXIT_INVALID');
+ assert.equal(transitionExitReservation(null,{...p,exits:[...p.exits].reverse()}).code,'RESERVATION_EXIT_INVALID');
+ assert.equal(transitionExitReservation(null,{...p,exits:p.exits.slice(0,1),
+   ipv6Disposition:'VERIFIED'}).code,'RESERVATION_EXIT_INVALID');
+});
