@@ -482,7 +482,8 @@ class V2ArchiveHost:
                  self._last_restore["sha256"]==msg["sha256"] and
                  isinstance(msg["preparedSha256"],str) and
                  _DIGEST.fullmatch(msg["preparedSha256"]) and
-                 msg["status"]=="INACTIVE_PREPARED_NOT_APPLIED",
+                 msg["status"] in ("INACTIVE_PREPARED_NOT_APPLIED",
+                                   "READONLY_RECOVERY_VERIFIED"),
                  "BACKUP_RECOVERY_RECEIPT_REQUIRED")
         secret=self.vault_get()
         _require(isinstance(secret,str) and len(secret)>=12,
