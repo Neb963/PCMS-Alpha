@@ -2852,6 +2852,58 @@ def main():
                            {'script':v2_session,'args':[]},timeout=90)
                 assert check.get('ok') is True,check
                 print('B S02_INSTALLED_V2_IDB_EFFECT_JOURNAL_AND_SYNTHETIC_HOST_NO_REPLAY=PASS',flush=True)
+
+                # S02 B: real existing daily I15 runner and durable I15 claim
+                # admit a source-complete v2 candidate only through a trusted
+                # background-only review-injected branch. Mock native ledger
+                # independent of the runner. It MUST remain HELD, not retained.
+                v2_auto="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const auto=await import('./backup-auto-run.mjs');
+                  const state=await import('./backup-auto-store.mjs');
+                  const open=()=>new Promise((resolve,reject)=>{
+                    const req=indexedDB.open('s02-i15-'+crypto.randomUUID(),1);
+                    req.onupgradeneeded=()=>req.result.createObjectStore('meta',{keyPath:'key'});
+                    req.onsuccess=()=>resolve(req.result);
+                    req.onerror=()=>reject(req.error);
+                  });
+                  const db=await open();
+                  const stored=state.createAutoStore(db);
+                  await stored.enabled(true);
+                  const calls=[],run='9'.repeat(32);
+                  const runner=auto.createAutoRunner(browser,{
+                    open:async()=>db,newId:()=>run,
+                    reviewedV2:async()=>true,
+                    native:async()=>({ok:true,passphrase:'safe-test-only-vault-password'}),
+                    captureV2:async()=>({pcms:{schema:1,stores:{
+                      entities:[],operations:[],events:[],meta:[],observations:[]}},
+                      donorEnvelope:'actual-donor-envelope-encoded-in-fixture'}),
+                    dispatchV2:async({runId,checkScope,checkRestoreHold})=>{
+                      calls.push(runId);
+                      if(!await checkScope()||await checkRestoreHold())
+                        throw Error('BACKUP_V2_NOT_ADMITTED');
+                      return {ok:true,state:'AUTHENTICATED_INVENTORY_ONLY',
+                        ciphertextSha256:'a'.repeat(64)};
+                    }
+                  });
+                  const first=await runner.tick(),second=await runner.tick();
+                  const journal=(await stored.read()).state;
+                  done({ok:first.code==='BACKUP_V2_FULL_RECOVERY_PENDING'&&
+                    second.code==='DOWNLOAD_OUTCOME_UNKNOWN'&&
+                    calls.length===1&&calls[0]==='s02_'+run&&
+                    journal.status==='HELD_UNCERTAIN'&&
+                    journal.archives.length===0&&
+                    journal.lastSuccessDay===-1&&
+                    journal.active?.status==='DISPATCH_POSSIBLE',
+                    first:first.code,second:second.code,
+                    count:calls.length,ledgerStatus:journal.status});
+                  db.close();
+                })().catch(e=>done({ok:false,error:String(e)}));"""
+                auto_result=call('POST',f'/session/{after}/execute/async',
+                                  {'script':v2_auto,'args':[]},timeout=90)
+                assert auto_result.get('ok') is True,auto_result
+                print('B S02_EXISTING_I15_DAILY_CANDIDATE_HELD_NO_NATIVE_REPLAY_OR_FALSE_RETENTION=PASS',flush=True)
+
                 # S02 B: actual separate Firefox IndexedDB staging is
                 # strictly inactive until full second-pass native receipt,
                 # and survives DB reopen without promoting partial fragments.
