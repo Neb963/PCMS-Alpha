@@ -72,6 +72,55 @@ class TestHost(unittest.TestCase):
         self.assertEqual(self.request("archive.inspect",runId=RUN)["state"],
                          "WRITTEN_UNVERIFIED")
 
+    def test_second_pass_stream_restore_requires_terminal_receipt(self):
+        payload=make_payload()
+        self.assertTrue(self.begin(payload)["ok"])
+        for seq,start in enumerate(range(0,len(payload),BUFFER)):
+            self.assertTrue(self.append(payload[start:start+BUFFER],seq)["ok"])
+        count=(len(payload)+BUFFER-1)//BUFFER
+        self.assertTrue(self.request("export.finish",runId=RUN,
+                                     sequence=count,cutDigest=CUT)["ok"])
+        self.assertFalse(self.request("restore.begin",runId=RUN,
+                     keyRef="wrong")["ok"])
+        started=self.request("restore.begin",runId=RUN,keyRef="portable-recovery")
+        self.assertEqual(started["state"],"INACTIVE_STAGING_REQUIRED")
+        self.assertFalse(self.request("restore.read",runId=RUN,
+                                     sequence=2)["ok"])
+        output=bytearray()
+        seq=0
+        while True:
+            response=self.request("restore.read",runId=RUN,sequence=seq)
+            self.assertTrue(response["ok"],response)
+            output.extend(base64.b64decode(response["bytes"]))
+            if response["complete"]:
+                self.assertEqual(response["state"],"AUTHENTICATED_SECOND_PASS")
+                self.assertEqual(response["sha256"],started["sha256"])
+                break
+            seq+=1
+        self.assertEqual(output,payload)
+        self.assertEqual(self.request("restore.read",runId=RUN,
+                                     sequence=seq)["ok"],False)
+
+    def test_reader_abort_never_confers_terminal_authority(self):
+        payload=make_payload()
+        self.assertTrue(self.begin(payload)["ok"])
+        for seq,start in enumerate(range(0,len(payload),BUFFER)):
+            self.append(payload[start:start+BUFFER],seq)
+        count=(len(payload)+BUFFER-1)//BUFFER
+        self.request("export.finish",runId=RUN,sequence=count,cutDigest=CUT)
+        start=self.request("restore.begin",runId=RUN,keyRef="portable-recovery")
+        self.assertTrue(start["ok"],start)
+        first=self.request("restore.read",runId=RUN,sequence=0)
+        self.assertTrue(first["ok"],first)
+        self.assertFalse(first["complete"])
+        self.assertEqual(self.request("restore.abort",runId=RUN)["state"],
+                         "RESTORE_READER_ABORTED")
+        self.assertFalse(self.request("restore.read",runId=RUN,
+                                      sequence=1)["ok"])
+        # Read-only reinspection is possible, but no automatic staged commit.
+        self.assertEqual(self.request("archive.inspect",runId=RUN)["state"],
+                         "WRITTEN_UNVERIFIED")
+
     def test_readonly_inspection_does_not_create_root_or_lookup_vault(self):
         out=self.request("archive.inspect",runId=RUN)
         self.assertEqual(out["code"],"BACKUP_NOT_TRACKED")
