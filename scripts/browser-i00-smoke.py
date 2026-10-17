@@ -2902,6 +2902,13 @@ def main():
                           'INACTIVE_STAGING_FRAGMENT',
                         ...(complete?{sha256:cipher}:{})};
                     }
+                    if(req.action==='archive.inspect')return {ok:true,
+                      runId:req.runId,state:'RECOVERY_VERIFIED',
+                      cutDigest:'d'.repeat(64),ciphertextSha256:cipher,
+                      preparedSha256:'b'.repeat(64),acceptedBytes:raw.length};
+                    if(req.action==='backup.verify')return {ok:true,
+                      runId:req.runId,state:'AUTHENTICATED_INVENTORY_ONLY',
+                      sha256:cipher,uniqueBlobs:0,canonicalRows:0};
                     if(req.action==='archive.recovery.complete')return {
                       ok:true,runId:req.runId,state:'RECOVERY_VERIFIED',
                       sha256:cipher,activation:'OFF'};
@@ -2956,6 +2963,43 @@ def main():
                       ciphertextSha256:cipher});}
                   catch{staleBlocked=true;}
                   const retired=await ledger.retireUndispatched(thirdRun,third.revision);
+                  // Lost terminal ACK: native had authenticated complete
+                  // source/donor and journaled qualification, while browser
+                  // retained only its inventory marker. Reconcile read-only
+                  // file/receipt; never replay export fragments or CREATE.
+                  const lostRun='s02_'+crypto.randomUUID().replaceAll('-','');
+                  let lost=await ledger.claim(lostRun,'d'.repeat(64),raw.length);
+                  for(const [from,to,patch] of [
+                    ['PREPARED','CREATE_POSSIBLE',{}],
+                    ['CREATE_POSSIBLE','OPEN_OBSERVED',{}],
+                    ['OPEN_OBSERVED','APPEND_POSSIBLE',{}],
+                    ['APPEND_POSSIBLE','OPEN_OBSERVED',
+                      {acceptedBytes:raw.length,nextSequence:1}],
+                    ['OPEN_OBSERVED','FINISH_POSSIBLE',{}],
+                    ['FINISH_POSSIBLE','WRITTEN_UNVERIFIED',{}],
+                    ['WRITTEN_UNVERIFIED','AUTHENTICATED_INVENTORY_ONLY',
+                      {ciphertextSha256:cipher,observedBlobs:0}]
+                  ])lost=await ledger.advance(lostRun,lost.revision,from,to,patch);
+                  const nativeBefore=nativeSteps.filter(x=>x.startsWith('export.')).length;
+                  let wrongReceiptHeld=false;
+                  const forged=()=>({close(){},async exchange(cmd){
+                    if(cmd.action==='archive.inspect')return {
+                      ok:true,runId:cmd.runId,state:'RECOVERY_VERIFIED',
+                      cutDigest:'e'.repeat(64),ciphertextSha256:cipher,
+                      preparedSha256:'b'.repeat(64),
+                      acceptedBytes:raw.length};
+                    throw Error('UNEXPECTED_RECONCILE_EFFECT');
+                  }});
+                  try{await checker.reconcileV2QualifiedNative({
+                    api:browser,db,runId:lostRun,assertNotRestoring:async()=>true,
+                    connectionFactory:forged});}
+                  catch{wrongReceiptHeld=true;}
+                  const stillInventory=(await ledger.inspect(lostRun)).state===
+                    'AUTHENTICATED_INVENTORY_ONLY';
+                  const reconciled=await checker.reconcileV2QualifiedNative({
+                    api:browser,db,runId:lostRun,assertNotRestoring:async()=>true,
+                    connectionFactory:native});
+                  const nativeAfter=nativeSteps.filter(x=>x.startsWith('export.')).length;
                   const fourthRun='s02_'+crypto.randomUUID().replaceAll('-','');
                   const fourth=await ledger.claim(fourthRun,'d'.repeat(64),raw.length);
                   const records=[runId,secondRun,thirdRun].map(id=>ledger.inspect(id));
@@ -2968,7 +3012,10 @@ def main():
                     after.preparedSha256===restored.preparedSha256&&
                     restored.activation==='OFF'&&restored.sourceRows===0&&
                     staleBlocked&&retired.state==='RETIRED_PRE_DISPATCH'&&
-                    fourth.state==='PREPARED'&&
+                    fourth.state==='PREPARED'&&wrongReceiptHeld&&
+                    stillInventory&&reconciled.ok&&
+                    reconciled.state==='RECOVERY_VERIFIED'&&
+                    nativeBefore===nativeAfter&&
                     history.map(x=>x.state).join('|')===
                       'RECOVERY_VERIFIED|RECOVERY_VERIFIED|RETIRED_PRE_DISPATCH'&&
                     nativeSteps.filter(x=>x==='archive.recovery.complete').length===2,

@@ -44,14 +44,14 @@ export function inspectRestoreMappings(donor,mappings,containers,{fresh=false,st
   }
   return results;
 }
-// Operational Mullvad/native status is an observation, not persisted
-// Persona identity or a source cut. Keep security and userscript permission
-// facts in the plan; exclude only live native-status telemetry.
+// The reviewed restore cut is *durable Persona state plus container
+// identity*, not time-varying native-status, privacy telemetry or temporary
+// permission probes. Those probes are revalidated at later activation; the
+// I16 import remains inactive, with no external/provider/route admission.
 export function stableRestoreDonorCut(snapshot){
   check(snapshot?.state&&Array.isArray(snapshot.containers),
     'RESTORE_DESTINATION_UNAVAILABLE');
-  const {mullvadNative,...stable}=snapshot;
-  return stable;
+  return {state:snapshot.state,containers:snapshot.containers};
 }
 export async function previewRestore({archiveText,password,mode='merge',fresh=false,
   mappings={},currentPcms,currentDonor,currentPortable,containers=[],decodeDonor}){

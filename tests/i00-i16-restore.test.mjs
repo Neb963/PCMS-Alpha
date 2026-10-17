@@ -463,3 +463,25 @@ test('P55-08 X: crash after PREPARED but before DISPATCH cannot resume blindly',
   assert.equal(effects,0);
   assert.equal((await g.inspect()).held,true);
 });
+
+test('I16 source-plan stays pinned to durable Persona and containers, not status probes',async()=>{
+  const {pcms,payload,archive}=await disposable();
+  const stable={state:{profiles:{},routes:{}},containers:[]};
+  const first={...stable,security:{privacySafe:true},
+    userScriptsGranted:true,mullvadNative:{checkedAt:10,available:false}};
+  const second={...stable,security:{privacySafe:false},
+    userScriptsGranted:false,mullvadNative:{checkedAt:10000,available:true}};
+  const call=(currentDonor)=>previewRestore({archiveText:archive.text,password:pw,
+    mode:'merge',fresh:false,mappings:{},currentPcms:pcms,currentDonor,
+    currentPortable:payload,containers:[],decodeDonor:decodeBackupEnvelope});
+  const p=await call(first),q=await call(second);
+  assert.equal(p.planSha256,q.planSha256,
+    'volatile status cannot invalidate unchanged inactive source destination');
+  await revalidateRestorePlan({expectedPlanSha256:p.planSha256,
+    expectedDestinationSha256:p.plan.destinationSha256,
+    currentPcms:pcms,currentDonor:second,currentPortable:payload,plan:p.plan});
+  const altered=await call({...first,state:{
+    profiles:{},routes:{changed:{id:'changed',provider:'mullvad'}}}});
+  assert.notEqual(altered.planSha256,p.planSha256,
+    'real persistent protected-route identity drift still invalidates plan');
+});

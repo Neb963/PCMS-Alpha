@@ -73,3 +73,18 @@ Browser staged source/donor bytes now persist only as **AES-256-GCM ciphertext**
 5. Review remaining ledger/concurrency/retention impacts. Keep last known-good among 14 successful automatic files; current prototype `AUTHENTICATED_INVENTORY_ONLY` is deliberately not a retention success and does not release the active fenced run.
 
 **Completion classification:** S02 **PARTIAL**. Important safe D/B components are implemented; AC-17/E-02/E-06 complete source-heavy product acceptance is **NOT VERIFIED**. Keep PR #24 DRAFT/UNMERGED; do not begin S03. The precise next gate is independently approved E-06 review of the frozen candidate plus full installed/native/fresh-profile recovery evidence after missing production wiring is completed.
+
+## Post-independent-review implementation checkpoint — R1–R6 (2026-10-17)
+
+The independent `COMMENTED` review `5559457184` evaluated `cf8262d7d…` and required six fixes. This new branch-only candidate does **not** self-approve E-06.
+
+- **R1** browser exact-run fenced terminal release, prepared-only explicit retirement, independently disk-authenticated lost-ACK terminal reconciliation. Existing I15 daily runner remains sole admission/scheduler. Native `RECOVERY_VERIFIED` source/donor receipt history and qualified 14-file pool remain durable.
+- **R2** replace the legacy whole-archive 64 MiB validation at the v2 cut with a single-transaction cursor reader, all five stores, second unchanged-source check and preflight SHA/manifest closure. Synthetic >64 MiB pre-dedup repeated source fixture extends heterogeneous 50+/1,000+ fleet. **Not yet established:** strict bounded total JS heap for arbitrarily large fleets and a reviewed over-4 MiB row continuation. Unsupported inputs remain held.
+- **R3** newer reliable destination account removals actually exclude archived accounts in merge and replace. Preserve orphan inventory as held historical evidence; fresh-profile inclusion is an explicit choice, and exit ownership/duplicate UID conflict causes HOLD. No imported activation or publication approval.
+- **R4** pinned trusted root fd, nofollow dirfd-relative file/ledger operations, device+inode identity, quarantine move and uncertain deletion fencing; disposable native failure injection. Full hostile same-UID race guarantee and installed host H remain blocked.
+- **R5** Python strict lexical finite IEEE-754/UTF-16 JSON matching JavaScript canonical decoder; rejection vectors for 1.0/exponent/large integer/surrogates. Published AES-GCM envelope unchanged.
+- **R6** raw source clone reserved-key rejection; true Date/undefined/binary/-0 serialization restoration. Previously pre-serialized synthetic fixtures corrected rather than weakening collision protection.
+- **Compatibility** I16 inactive-restore plan hashes durable Persona state/containers, not live/native status probes; real changed durable authority still invalidates reviewed plans. v1 archive compatibility and donor signed originals remain unchanged.
+- **CI discipline** earlier first corrective branch runs diagnosed actual failed Native FD/quarantine tests, corrected with accurate identity/fd oracles, then diagnosed installed-Firefox I16 plan drift. All changes are coherent commits on **existing** PR #24; no protected CI strategy, developer hosts, real provider or production profile changed.
+
+Exact up-to-date Git SHA/tree, XPI digest, final CI/Firefox outcome and pending re-review must be pinned on PR #24 after the final run and GitHub readback; this ledger makes no unsupported claim about still-pending checks. Status is **PARTIAL / NOT PROMOTED**. A different authorized independent reviewer must re-review the final code/format; privileged host testing separately requires narrow installation authority. Do not start S03.
