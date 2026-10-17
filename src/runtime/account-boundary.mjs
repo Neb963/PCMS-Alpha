@@ -102,8 +102,17 @@ export function createAccountBoundary(api,{
       // Archive and local limited exception remain usable while route proof holds.
       const routeGateHeld=g.getHealth?.().admission==='HELD_UNTIL_OWNER_VERIFICATION';
       if(routeGateHeld && ['CREATE_PERSONA','ENROLL','REBIND','REACTIVATE',
-          'OPEN_LOGIN','CHECK_IDENTITY'].includes(message.type))
+          'OPEN_LOGIN','CHECK_IDENTITY'].includes(message.type)) {
+        // Preserve the existing missing-Persona negative oracle independently
+        // of this architecture hold. Even a real Persona cannot pass without
+        // the exclusive reservation, dual-family proof and donor grant.
+        if(message.type==='ENROLL'||message.type==='REBIND') {
+          const available=await g.listAvailablePersonas();
+          if(!available.some(x=>x.personaUid===p.personaUid&&!x.archived))
+            return fail('PERSONA_NOT_AVAILABLE');
+        }
         return fail('PROTECTED_ADMISSION_UNPROVEN');
+      }
       const accounts=await store();
       if(message.type==='CREATE_PERSONA') {
         // Donor's own mutation fence is authoritative. If acknowledgement is
