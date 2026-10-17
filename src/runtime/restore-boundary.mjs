@@ -125,7 +125,12 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
             sourceSha256:plan.sourceSha256,
             destinationSha256:plan.destinationSha256,
             groupsSha256:await digest(JSON.stringify(plan.groups)),
-            riskSha256:await digest(JSON.stringify(plan.risk))}};
+            riskSha256:await digest(JSON.stringify(plan.risk)),
+            canonicalStoreCounts:Object.fromEntries(Object.entries(baseline.pcms.stores)
+              .map(([name,rows])=>[name,rows.length])),
+            pcmsSha256:await digest(JSON.stringify(baseline.pcms)),
+            donorSha256:await digest(JSON.stringify(baseline.snap)),
+            portableSha256:await digest(JSON.stringify(baseline.portable))}};
         }
         assert(Object.keys(req).length===reviewed.opened.donor.personas.length,
           'RESTORE_MAPPING_INCOMPLETE');
