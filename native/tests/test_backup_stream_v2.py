@@ -3,13 +3,15 @@ import hashlib
 import json
 import os
 import pathlib
+import struct
 import sys
 import tempfile
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from backup_stream_v2 import (BackupError, EncryptedWriter, verify_two_pass,
-                              frame, BLOB, CANONICAL, DONOR, END, BUFFER)
+                              frame, BLOB, CANONICAL, DONOR, END, BUFFER, _Inventory,
+                              MAX_CANONICAL_FRAME, MAX_END_FRAME)
 
 
 def make_payload(*, missing=False, duplicate=False, bad_ref=False, donor=True, extra=False):
@@ -100,6 +102,26 @@ class TestBackupV2(unittest.TestCase):
                                 ({'extra': True}, 'BACKUP_TRAILING_DATA')):
             self.seal(make_payload(**flags))
             self.denied(expected)
+            pathlib.Path(self.path).unlink()
+
+    def test_metadata_frame_limits_are_checked_on_header_before_allocation(self):
+        for tag, limit, code in ((CANONICAL, MAX_CANONICAL_FRAME, "BACKUP_CANONICAL_LIMIT"),
+                                 (END, MAX_END_FRAME, "BACKUP_END_LIMIT")):
+            parser = _Inventory()
+            with self.assertRaisesRegex(BackupError, code):
+                parser.feed(struct.pack(">BQ", tag, limit + 1))
+            self.assertEqual(len(parser.part), 0)
+            parser = _Inventory()
+            with self.assertRaisesRegex(BackupError, code):
+                parser.feed(struct.pack(">BQ", tag, (1 << 64) - 1))
+            self.assertEqual(len(parser.part), 0)
+
+    def test_oversized_decrypted_metadata_is_denied_without_materializing_it(self):
+        for tag, limit, code in ((CANONICAL, MAX_CANONICAL_FRAME, "BACKUP_CANONICAL_LIMIT"),
+                                 (END, MAX_END_FRAME, "BACKUP_END_LIMIT")):
+            data = struct.pack(">BQ", tag, limit + 1)
+            self.seal(data)
+            self.denied(code)
             pathlib.Path(self.path).unlink()
 
     def test_short_finish_never_completes(self):
