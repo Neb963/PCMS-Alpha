@@ -5,6 +5,7 @@ const FIELDS = Object.freeze(['bindingId','assignmentEpoch','personaUid','routeI
   'exitSetDigest','grantRevision','pcmsEpoch']);
 const ID = /^[a-z0-9_-]{8,128}$/i;
 const HEX = /^[0-9a-f]{64}$/;
+export const admissionKeyOf = input => Object.fromEntries(FIELDS.map(k=>[k,input?.[k]]));
 const equal = (a,b) => FIELDS.every(k=>a?.[k] === b?.[k]);
 const safeInt = n => Number.isSafeInteger(n) && n > 0;
 
