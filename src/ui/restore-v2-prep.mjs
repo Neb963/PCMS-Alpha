@@ -12,7 +12,8 @@ const check=(v,code)=>{if(!v)fail(code)};
 const sha=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
 export async function prepareInactiveV2({
   authenticatedPlaintext,readback,expectedCiphertextSha256,
-  password,decodeDonor,currentPcms,uidRemap={},mode='merge'
+  password,decodeDonor,currentPcms,uidRemap={},mode='merge',
+  fresh=false,accountChoices={}
 }={}){
   check(authenticatedPlaintext instanceof Uint8Array &&
     readback?.state==='AUTHENTICATED_SECOND_PASS' &&
@@ -22,12 +23,15 @@ export async function prepareInactiveV2({
   validatePcmsSnapshot(currentPcms);
   const opened=await decodeAuthenticatedV2(authenticatedPlaintext,{password,decodeDonor});
   return finalizeInactive(opened,{currentPcms,uidRemap,mode,
+    fresh,accountChoices,
     archiveSha256:readback.sha256});
 }
-async function finalizeInactive(opened,{currentPcms,uidRemap,mode,archiveSha256}){
+async function finalizeInactive(opened,{currentPcms,uidRemap,mode,
+  fresh,accountChoices,archiveSha256}){
   const sourceAudit=opened.sourceAudit||await preflightSourceRecovery(opened.pcms);
   const prepared=prepareRestoredCanonical({
-    incoming:opened.pcms,current:currentPcms,mode,uidRemap});
+    incoming:opened.pcms,current:currentPcms,mode,uidRemap,
+    fresh,accountChoices});
   // Independently revalidate rehydrated references *after* UID binding
   // sanitization, before any future guarded staged canonical write.
   await preflightSourceRecovery(prepared);
@@ -45,7 +49,7 @@ async function finalizeInactive(opened,{currentPcms,uidRemap,mode,archiveSha256}
 
 export async function prepareInactiveV2FromStage({
   stage,runId,readback,expectedCiphertextSha256,password,decodeDonor,
-  currentPcms,uidRemap={},mode='merge'
+  currentPcms,uidRemap={},mode='merge',fresh=false,accountChoices={}
 }={}){
   check(stage&&typeof stage.frames==='function'&&
     typeof stage.inspect==='function'&&
@@ -64,5 +68,5 @@ export async function prepareInactiveV2FromStage({
   const opened=await decodeV2InactiveFrames(stage.frames(runId),{
     password,decodeDonor});
   return finalizeInactive(opened,{currentPcms,uidRemap,mode,
-    archiveSha256:readback.sha256});
+    fresh,accountChoices,archiveSha256:readback.sha256});
 }

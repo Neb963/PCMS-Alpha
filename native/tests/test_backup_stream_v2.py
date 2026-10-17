@@ -171,6 +171,30 @@ class TestBackupV2(unittest.TestCase):
                 parser.feed(frame(CANONICAL,raw))
             self.assertEqual(parser.canonical,0)
 
+    def test_r5_cross_runtime_js_lexical_json_admission(self):
+        examples=[
+            ('{"a":1}',True),('{"a":1.0}',False),('{"a":1e+0}',False),
+            ('{"a":1e-7}',True),('{"a":0.000001}',True),
+            ('{"a":1e-06}',False),('{"a":1e+21}',True),
+            ('{"a":-0}',False),('{"a":9007199254740992}',True),
+            ('{"a":9007199254740993}',False),
+            ('{"a":-9007199254740992}',True),('{"a":1e309}',False),
+            ('{"a":NaN}',False),('{"z":1,"a":2}',False),
+            ('{"a":1,"a":2}',False),
+            ('{"\\\\ud800":1}',False),
+            ('{"\\\\ud83d\\\\ude00":1}',False),
+            ('{"😀":1}',True),
+            ('{"\\uE000":1,"😀":2}',False),
+            ('{"😀":2,"\\uE000":1}',True)]
+        for value,expected in examples:
+            with self.subTest(value=value):
+                try:
+                    _Inventory._json(value.encode("utf-8"),"BACKUP_JSON_INVALID")
+                    accepted=True
+                except BackupError:
+                    accepted=False
+                self.assertEqual(accepted,expected)
+
     def test_short_finish_never_completes(self):
         w = EncryptedWriter(self.path, self.passphrase, 100)
         w.append(b'partial')

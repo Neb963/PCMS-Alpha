@@ -3,7 +3,7 @@
 import {createPortableBackupPayload,encodeBackupEnvelope,decodeBackupEnvelope} from '../lib/backup-package.js';
 import {filterOrdinaryAutomationJobs} from '../lib/automation-history.js';
 import {snapshotCanonical,consistentOrThrow,encodeIntegrated,decodeIntegrated,
-  preflightSourceRecovery} from './backup-core.mjs';
+  preflightSourceRecovery,snapshotCanonicalV2} from './backup-core.mjs';
 import {waitForPcmsBackupDonor} from './backup-auto-donor.mjs';
 async function donor(api){
   const data=await (await waitForPcmsBackupDonor()).snapshot();
@@ -56,7 +56,7 @@ export async function sealAutomatic(api,db,password,sentinel){
 // never itself writes the disk, source, donor, provider, Git or routing state.
 export async function captureV2SourceCut(api,db,password,sentinel){
   const before=await donor(api),extras=await storage(api);
-  const pcms=await snapshotCanonical(db);
+  const pcms=await snapshotCanonicalV2(db);
   // Strict E-06 source-byte closure: legacy v1 may still preserve incomplete
   // historical state, but candidate v2 must never export incomplete source.
   const sourceAudit=await preflightSourceRecovery(pcms);
@@ -71,7 +71,7 @@ export async function captureV2SourceCut(api,db,password,sentinel){
     appVersion:api.runtime.getManifest().version,
     stateSchemaVersion:before.state.schemaVersion});
   const [after,extrasAfter,pcmsAfter,cookiesAfter]=await Promise.all([
-    donor(api),storage(api),snapshotCanonical(db),cookies(api,initial)]);
+    donor(api),storage(api),snapshotCanonicalV2(db),cookies(api,initial)]);
   consistentOrThrow(pcms,pcmsAfter);
   consistentOrThrow(before,after);
   consistentOrThrow(extras,extrasAfter);

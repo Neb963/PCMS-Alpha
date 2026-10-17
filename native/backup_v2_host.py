@@ -80,38 +80,45 @@ def _fsync_directory(folder):
         os.close(fd)
 
 
-def _atomic_json(path, record):
-    # Files are updated atomically, fail-closed on uncertain fsync/rename.
-    raw = json.dumps(record, sort_keys=True, separators=(",", ":")).encode()
-    fd, tmp = tempfile.mkstemp(prefix=".pcms-intent-", dir=path.parent)
+def _atomic_json(path,record,*,dirfd=None):
+    raw=json.dumps(record,sort_keys=True,separators=(",",":")).encode()
+    if dirfd is None:
+        fd,tmp=tempfile.mkstemp(prefix=".pcms-intent-",dir=path.parent)
+    else:
+        tmp=".pcms-intent-"+os.urandom(16).hex()
+        fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|
+                   getattr(os,"O_NOFOLLOW",0),0o600,dir_fd=dirfd)
     try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(raw)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(tmp, path)
-        _fsync_directory(path.parent)
+        os.fchmod(fd,0o600)
+        with os.fdopen(fd,"wb") as output:
+            output.write(raw);output.flush();os.fsync(output.fileno())
+        if dirfd is None:os.replace(tmp,path)
+        else:os.rename(tmp,path.name,src_dir_fd=dirfd,dst_dir_fd=dirfd)
+        if dirfd is None:_fsync_directory(path.parent)
+        else:os.fsync(dirfd)
     finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-
-
-def _read_json(path):
-    try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    except FileNotFoundError:
-        return None
-    with os.fdopen(fd, "rb") as stream:
-        info = os.fstat(stream.fileno())
-        _require(stat.S_ISREG(info.st_mode) and info.st_size <= 8192 and
-                 not bool(info.st_mode & 0o077), "BACKUP_LEDGER_UNSAFE")
         try:
-            data = json.loads(stream.read().decode())
-        except (ValueError, UnicodeError):
+            if dirfd is None:
+                if os.path.exists(tmp):os.unlink(tmp)
+            else:os.unlink(tmp,dir_fd=dirfd)
+        except FileNotFoundError:pass
+
+
+def _read_json(path,*,dirfd=None):
+    try:
+        fd=os.open(path.name if dirfd is not None else path,
+                   os.O_RDONLY|getattr(os,"O_NOFOLLOW",0),dir_fd=dirfd)
+    except FileNotFoundError:return None
+    with os.fdopen(fd,"rb") as input:
+        info=os.fstat(input.fileno())
+        _require(stat.S_ISREG(info.st_mode) and info.st_nlink==1 and
+                 info.st_uid==os.getuid() and info.st_size<=8192 and
+                 not bool(info.st_mode&0o077),"BACKUP_LEDGER_UNSAFE")
+        try:data=json.loads(input.read().decode())
+        except (ValueError,UnicodeError):
             raise BackupError("BACKUP_LEDGER_CORRUPT")
-    _require(isinstance(data, dict) and data.get("schema") == 1 and
-             isinstance(data.get("state"), str), "BACKUP_LEDGER_CORRUPT")
+    _require(isinstance(data,dict) and data.get("schema")==1 and
+             isinstance(data.get("state"),str),"BACKUP_LEDGER_CORRUPT")
     return data
 
 
@@ -139,13 +146,35 @@ class V2ArchiveHost:
         self.restore = None
         self._export_lock = None
         self._last_restore = None
+        self._root_descriptor = None
+        self._delete_identity = None
+
+    def _pin_root(self,create=False):
+        path=_safe_root(self.root,create=create)
+        if path is None:return None
+        if self._root_descriptor is None:
+            fd=os.open(self.root,os.O_RDONLY|getattr(os,"O_DIRECTORY",0)|
+                       getattr(os,"O_NOFOLLOW",0))
+            try:
+                info=os.fstat(fd)
+                _require(stat.S_ISDIR(info.st_mode) and
+                         info.st_uid==os.getuid() and
+                         not bool(info.st_mode&0o077),"BACKUP_ROOT_UNSAFE")
+                self._root_descriptor=fd
+            except BaseException:os.close(fd);raise
+        live=os.stat(self.root,follow_symlinks=False)
+        pinned=os.fstat(self._root_descriptor)
+        _require((live.st_dev,live.st_ino)==(pinned.st_dev,pinned.st_ino),
+                 "BACKUP_ROOT_CHANGED")
+        return self._root_descriptor
 
     def _acquire_export_lock(self):
         # One OS-owned export context per fixed backup root, even when Firefox
         # opens two native ports/processes concurrently. flock releases on crash.
         _require(self._export_lock is None,"BACKUP_SESSION_BUSY")
-        fd=os.open(self.root / ".export.lock",
-                   os.O_RDWR | os.O_CREAT | getattr(os,"O_NOFOLLOW",0),0o600)
+        fd=os.open(".export.lock",
+            os.O_RDWR|os.O_CREAT|getattr(os,"O_NOFOLLOW",0),0o600,
+            dir_fd=self._pin_root(create=True))
         try:
             info=os.fstat(fd)
             _require(stat.S_ISREG(info.st_mode) and info.st_nlink==1 and
@@ -172,17 +201,17 @@ class V2ArchiveHost:
 
     def _observe(self, run_id):
         ledger, _ = self._paths(run_id)
-        root = _safe_root(self.root, create=False)
+        root = self._pin_root(create=False)
         if root is None:
             return None
-        state = _read_json(ledger)
+        state = _read_json(ledger,dirfd=root)
         if state is not None:
             _require(state["runId"] == run_id, "BACKUP_LEDGER_CORRUPT")
         return state
 
     def _write(self, state):
         ledger, _ = self._paths(state["runId"])
-        _atomic_json(ledger, state)
+        _atomic_json(ledger,state,dirfd=self._pin_root(create=True))
 
     def action(self, message):
         try:
@@ -241,10 +270,11 @@ class V2ArchiveHost:
                  type(msg["expectedPlaintextBytes"]) is int and
                  0 <= msg["expectedPlaintextBytes"] <= (1<<36)-32,
                  "BACKUP_BEGIN_INVALID")
-        _safe_root(self.root,create=True)
+        self._pin_root(create=True)
         self._acquire_export_lock()
         try:
-            _require(_read_json(ledger) is None and not artifact.exists(),
+            _require(_read_json(ledger,dirfd=self._pin_root()) is None and
+                     not artifact.exists(),
                      "BACKUP_RUN_ALREADY_USED")
             # Vault lookup precedes the possible-effect write. The host retains
             # neither the secret nor a lock after an unavailable vault.
@@ -257,7 +287,8 @@ class V2ArchiveHost:
             self._write(state)  # durable possible-effect boundary BEFORE open.
             self.current = state
             try:
-                self.writer=EncryptedWriter(artifact,secret,msg["expectedPlaintextBytes"])
+                self.writer=EncryptedWriter(artifact,secret,msg["expectedPlaintextBytes"],
+                                            _dirfd=self._pin_root())
             finally:
                 secret = None
             state["state"]="OPEN_OBSERVED"
@@ -345,7 +376,8 @@ class V2ArchiveHost:
                  msg["offset"]>=0 and 0<msg["length"]<=_MAX_CIPHERTEXT_READ,
                  "BACKUP_READ_RANGE_INVALID")
         _,path=self._paths(msg["runId"])
-        fd=os.open(path,os.O_RDONLY|getattr(os,"O_NOFOLLOW",0))
+        fd=os.open(path.name,os.O_RDONLY|getattr(os,"O_NOFOLLOW",0),
+                   dir_fd=self._pin_root())
         with os.fdopen(fd,"rb") as file:
             info=os.fstat(file.fileno())
             _require(stat.S_ISREG(info.st_mode) and info.st_nlink==1,
@@ -363,7 +395,7 @@ class V2ArchiveHost:
         secret=self.vault_get()
         _require(isinstance(secret,str) and len(secret)>=12,"BACKUP_VAULT_UNAVAILABLE")
         try:
-            receipt=verify_two_pass(path,secret)
+            receipt=verify_two_pass(path,secret,dirfd=self._pin_root())
         finally:
             secret=None
         # Do not promote to COMPLETE: donor/restore is separately required.
@@ -382,9 +414,9 @@ class V2ArchiveHost:
                  "BACKUP_VAULT_UNAVAILABLE")
         # Independent first pass authenticates and validates complete v2
         # inventory; no source or identity is exposed before that.
-        proof=verify_two_pass(path,password)
+        proof=verify_two_pass(path,password,dirfd=self._pin_root())
         self._last_restore=None
-        file=_fd_read(path)
+        file=_fd_read(path,dirfd=self._pin_root())
         try:
             info=os.fstat(file.fileno())
             header,salt,iv,length=_read_header(file)
@@ -489,7 +521,7 @@ class V2ArchiveHost:
         _require(isinstance(secret,str) and len(secret)>=12,
                  "BACKUP_VAULT_UNAVAILABLE")
         try:
-            proof=verify_two_pass(artifact,secret)
+            proof=verify_two_pass(artifact,secret,dirfd=self._pin_root())
         finally:
             secret=None
         _require(proof["sha256"]==msg["sha256"],"BACKUP_RECOVERY_FILE_CHANGED")
@@ -505,16 +537,16 @@ class V2ArchiveHost:
                 "sha256":msg["sha256"],"activation":"OFF"}
 
     def _retained(self):
-        if _safe_root(self.root,create=False) is None:
-            return []
+        dirfd=self._pin_root(create=False)
+        if dirfd is None:return []
         ledgers=[]
-        for name in os.listdir(self.root):
+        for name in os.listdir(dirfd):
             if not name.endswith(".ledger"):
                 continue
             run=name[:-7]
             _require(_ID.fullmatch(run) is not None,
                      "BACKUP_RETENTION_LEDGER_UNSAFE")
-            row=_read_json(self.root/name)
+            row=_read_json(self.root/name,dirfd=dirfd)
             _require(row is not None and row.get("runId")==run,
                      "BACKUP_RETENTION_LEDGER_UNSAFE")
             if qualified(row):
@@ -522,7 +554,7 @@ class V2ArchiveHost:
                 # towards 14 successes, nor authorize deleting the last good.
                 _,cipher=self._paths(run)
                 try:
-                    info=cipher.lstat()
+                    info=os.stat(cipher.name,dir_fd=dirfd,follow_symlinks=False)
                 except FileNotFoundError as error:
                     raise BackupError("BACKUP_RETENTION_INTEGRITY_HOLD") from error
                 _require(stat.S_ISREG(info.st_mode) and info.st_nlink==1 and
@@ -542,15 +574,31 @@ class V2ArchiveHost:
             v for v in ledger if qualified(v)]),
                 "pruneCandidate":options[0]["runId"] if options else None}
 
-    def _unlink_artifact(self, path):
-        os.unlink(path)
+    def _unlink_artifact(self,path):
+        fd=self._pin_root()
+        expected=self._delete_identity
+        _require(expected is not None,"BACKUP_RETENTION_IDENTITY_MISSING")
+        before=os.stat(path.name,dir_fd=fd,follow_symlinks=False)
+        identity=(before.st_dev,before.st_ino,before.st_size,
+                  before.st_mtime_ns,before.st_ctime_ns)
+        _require(stat.S_ISREG(before.st_mode) and before.st_nlink==1 and
+                 before.st_uid==os.getuid() and identity==expected,
+                 "BACKUP_RETENTION_FILE_CHANGED")
+        quarantine=".pcms-delete-"+os.urandom(16).hex()
+        os.rename(path.name,quarantine,src_dir_fd=fd,dst_dir_fd=fd)
+        moved=os.stat(quarantine,dir_fd=fd,follow_symlinks=False)
+        _require(stat.S_ISREG(moved.st_mode) and moved.st_nlink==1 and
+                 (moved.st_dev,moved.st_ino,moved.st_size,
+                  moved.st_mtime_ns,moved.st_ctime_ns)==expected,
+                 "BACKUP_RETENTION_FILE_CHANGED")
+        os.unlink(quarantine,dir_fd=fd)
 
     def _retention_prune(self):
         # This unregistered candidate is an actual bounded native disk effect;
         # allowed ONLY against isolated disposable test root pre-review.
         _require(self.writer is None and self.restore is None and
                  self._export_lock is None,"BACKUP_SESSION_BUSY")
-        _require(_safe_root(self.root,create=False) is not None,
+        _require(self._pin_root(create=False) is not None,
                  "BACKUP_RETENTION_NO_ROOT")
         self._acquire_export_lock()
         try:
@@ -567,19 +615,24 @@ class V2ArchiveHost:
             _require(isinstance(password,str) and len(password)>=12,
                      "BACKUP_VAULT_UNAVAILABLE")
             try:
-                proof=verify_two_pass(artifact,password)
+                proof=verify_two_pass(artifact,password,dirfd=self._pin_root())
             finally:
                 password=None
             _require(proof["sha256"]==prior["ciphertextSha256"],
                      "BACKUP_RETENTION_FILE_CHANGED")
-            # Journal intent before unlink. A lost-ACK/OS error leaves a
-            # DELETE_POSSIBLE state, never automatically reissues the unlink.
+            fd=self._pin_root()
+            info=os.stat(artifact.name,dir_fd=fd,follow_symlinks=False)
+            _require(stat.S_ISREG(info.st_mode) and info.st_nlink==1 and
+                     info.st_uid==os.getuid(),"BACKUP_RETENTION_FILE_CHANGED")
+            self._delete_identity=(info.st_dev,info.st_ino,info.st_size,
+                                   info.st_mtime_ns,info.st_ctime_ns)
             self._write({**prior,"state":"DELETE_POSSIBLE"})
             self._unlink_artifact(artifact)
-            _fsync_directory(self.root)
+            os.fsync(fd)
             self._write({**prior,"state":"REMOVED"})
             return {"ok":True,"state":"REMOVED","runId":prior["runId"]}
         finally:
+            self._delete_identity=None
             self._release_export_lock()
 
     def close(self):
@@ -591,6 +644,9 @@ class V2ArchiveHost:
             self.writer=None
         self.current=None
         self._release_export_lock()
+        if self._root_descriptor is not None:
+            os.close(self._root_descriptor)
+            self._root_descriptor=None
         # Persisted APPEND_POSSIBLE / FINISH_POSSIBLE is never rolled back.
 
 

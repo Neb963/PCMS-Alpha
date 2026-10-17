@@ -70,7 +70,10 @@ function inertMeta(key,row,remap,existing=null){
   // Other metadata remains preserved under the independent global guard.
   return row;
 }
-export function prepareRestoredCanonical({incoming,current,mode='merge',uidRemap={}}={}){
+// Preserve reliable *destination* removals even for replace mode. The
+// archived account is not authority to undo a later local removal.
+export function prepareRestoredCanonical({incoming,current,mode='merge',
+  uidRemap={},fresh=false,accountChoices={}}={}){
   validatePcmsSnapshot(incoming);validatePcmsSnapshot(current);
   if(!['merge','replace'].includes(mode))deny('RESTORE_MODE_INVALID');
   if(!uidRemap||typeof uidRemap!=='object'||Array.isArray(uidRemap))
@@ -81,12 +84,48 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',uidRemap
       dests.has(newId))deny('RESTORE_UID_MAPPING_COLLISION');
     dests.add(newId);
   }
+  if(!accountChoices||typeof accountChoices!=='object'||
+     Array.isArray(accountChoices))deny('RESTORE_ACCOUNT_CHOICES_INVALID');
+  const historical=new Map();
+  const local=new Map(current.stores.meta.filter(row=>
+    typeof row.key==='string').map(row=>[row.key,deserializeClone(row.value)]));
+  const incomingAccounts=incoming.stores.meta.filter(row=>
+    typeof row.key==='string'&&row.key.startsWith('account:')&&
+    row.value?.account).map(row=>({id:row.value.account.accountId,
+      account:row.value.account}));
+  const excluded=new Set();
+  for(const {id,account} of incomingAccounts){
+    if(typeof id!=='string'||!id||
+       accountChoices[id]&&!['INCLUDE_INACTIVE','EXCLUDE'].includes(accountChoices[id]))
+      deny('RESTORE_ACCOUNT_CHOICES_INVALID');
+    const localRemoval=local.get('removal:'+id);
+    const newer=localRemoval&&
+      localRemoval.state==='REMOVED_ONLY_LOCALLY'&&
+      Number.isSafeInteger(localRemoval.revision)&&
+      localRemoval.revision>(Number.isSafeInteger(account.revision)?account.revision:0);
+    if(localRemoval&&!newer)deny('RESTORE_REMOVAL_HISTORY_AMBIGUOUS');
+    if(newer){
+      if(accountChoices[id]==='INCLUDE_INACTIVE')
+        deny('RESTORE_REMOVED_ACCOUNT_REQUIRES_SEPARATE_REVIEW');
+      excluded.add(id);historical.set(id,localRemoval);continue;
+    }
+    if(accountChoices[id]==='EXCLUDE'){excluded.add(id);continue;}
+    if(fresh&&accountChoices[id]!=='INCLUDE_INACTIVE')
+      deny('RESTORE_FRESH_ACCOUNT_DECISION_REQUIRED');
+  }
+  // Choices for accounts not actually in the archive are not approvals.
+  if(Object.keys(accountChoices).some(id=>!incomingAccounts.some(a=>a.id===id)))
+    deny('RESTORE_ACCOUNT_CHOICES_INVALID');
   const stores={};
   for(const name of DB_STORES){
     const previous=current.stores[name].map(copyRow);
     const priorByKey=new Map(previous.map(row=>[keyOf(row),row.value]));
     const rawByKey=new Map(incoming.stores[name].map(row=>[JSON.stringify(row.key),row.value]));
-    const restored=incoming.stores[name].map(copyRow).map(row=>{
+    const restored=incoming.stores[name].filter(row=>{
+      if(name!=='meta'||typeof row.key!=='string'||
+         !row.key.startsWith('account:'))return true;
+      return !excluded.has(row.value?.account?.accountId);
+    }).map(copyRow).map(row=>{
       const value=row.value;
       if(name==='entities'&&value&&typeof value==='object'){
         value.activeOperationId=null;value.revision=(Number.isSafeInteger(value.revision)?value.revision:0)+1;
@@ -102,10 +141,25 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',uidRemap
       return row;
     });
     const map=new Map((mode==='replace'?[]:previous).map(row=>[keyOf(row),row]));
+    if(name==='meta'){
+      // A replace never erases verified later removals or exit allocations.
+      for(const row of previous){
+        if(typeof row.key==='string'&&
+          (row.key.startsWith('removal:')||
+           row.key==='network:s01:exit-ownership-v1'))
+          map.set(keyOf(row),row);
+      }
+    }
     for(const item of restored){
       const key=keyOf(item);
       // The exact same source/destination row is an idempotent merge even
       // when restore sanitization removes its old live authority.
+      if(name==='meta'&&typeof item.key==='string'&&
+        item.key.startsWith('removal:')&&historical.has(
+          item.key.slice('removal:'.length)))continue;
+      if(name==='meta'&&item.key==='network:s01:exit-ownership-v1'&&
+        map.has(key)&&!exact(map.get(key).value,item.value))
+        deny('RESTORE_EXIT_HISTORY_CONFLICT');
       if(map.has(key)&&!exact(map.get(key).value,item.value)&&
         !exact(serializeClone(map.get(key).value),rawByKey.get(key)))
         deny('RESTORE_MERGE_CONFLICT');
@@ -139,7 +193,16 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',uidRemap
     const g=record.value?.generator;
     if(typeof record.key!=='string'||!record.key.startsWith('inventory:')||!g)continue;
     const account=accounts.get(g.accountId);
-    if(!account)deny('RESTORE_ACCOUNT_REFERENCE_MISSING');
+    if(!account){
+      // A removed account's generator/source evidence remains historical,
+      // not silently dropped or converted into a live account association.
+      if(excluded.has(g.accountId)){
+        g.personaUid=null;g.accountRevision=null;
+        g.ownerState='HISTORICAL_REMOVED_ACCOUNT';
+        g.reviewHeld=true;g.identityHeld=true;continue;
+      }
+      deny('RESTORE_ACCOUNT_REFERENCE_MISSING');
+    }
     g.personaUid=account.personaUid;
     g.bindingVersion=account.bindingVersion;
     g.accountRevision=account.revision;

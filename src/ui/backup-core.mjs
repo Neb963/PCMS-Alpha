@@ -48,13 +48,17 @@ export function serializeClone(value,depth=0){
   if(value===undefined)return {[token]:'Undefined'};
   if(value===null||typeof value==='string'||typeof value==='boolean')return value;
   if(typeof value==='number'){requireValid(Number.isFinite(value),'BACKUP_UNSUPPORTED_VALUE');return value;}
-  if(value instanceof Date){requireValid(Number.isFinite(value.getTime()),'BACKUP_UNSUPPORTED_VALUE');return {[token]:'Date',data:value.toISOString()};}
-  if(value instanceof ArrayBuffer || ArrayBuffer.isView(value)){
-    const bytes=value instanceof ArrayBuffer?new Uint8Array(value):
+  if(value instanceof Date||Object.prototype.toString.call(value)==='[object Date]'){
+    requireValid(Number.isFinite(value.getTime()),'BACKUP_UNSUPPORTED_VALUE');
+    return {[token]:'Date',data:value.toISOString()};
+  }
+  if(value instanceof ArrayBuffer || ArrayBuffer.isView(value)||
+     Object.prototype.toString.call(value)==='[object ArrayBuffer]'){
+    const bytes=Object.prototype.toString.call(value)==='[object ArrayBuffer]'?new Uint8Array(value):
       new Uint8Array(value.buffer,value.byteOffset,value.byteLength);
     requireValid(bytes.byteLength<=MAX_ARCHIVE_BYTES,'BACKUP_TOO_LARGE');
     return {[token]:'Bytes',data:base64(bytes),
-      kind:value instanceof ArrayBuffer?'ArrayBuffer':value.constructor.name};
+      kind:Object.prototype.toString.call(value)==='[object ArrayBuffer]'?'ArrayBuffer':value.constructor.name};
   }
   if(Array.isArray(value))return value.map(v=>serializeClone(v,depth+1));
   if(!plain(value)){
@@ -237,6 +241,41 @@ export function snapshotCanonical(db){
           try{stores[store].push({key:serializeClone(cursor.key),value:serializeClone(cursor.value)});}
           catch(e){stop(e.message);return;}
           cursor.continue();
+        };
+      }
+    }catch{stop('BACKUP_IDB_UNAVAILABLE');}
+  });
+}
+
+// V2 alone: stream IndexedDB cursor rows inside a single readonly transaction
+// without invoking legacy v1's 64 MiB whole-archive formatter. No Javascript
+// await inside the IDB cut, no per-store pagination across inconsistent reads.
+// Consumers retain strict source closure and per-row v2 grammar validation.
+export function snapshotCanonicalV2(db){
+  return new Promise((resolve,reject)=>{
+    if(!db||DB_STORES.some(s=>!db.objectStoreNames.contains(s))){
+      reject(Error('BACKUP_INCOMPLETE'));return;
+    }
+    let tx;
+    try{tx=db.transaction(DB_STORES,'readonly');}
+    catch{reject(Error('BACKUP_IDB_UNAVAILABLE'));return;}
+    const stores=Object.fromEntries(DB_STORES.map(k=>[k,[]]));
+    let stopped=false,seen=0;
+    const stop=code=>{if(stopped)return;stopped=true;
+      try{tx.abort();}catch{}reject(Error(code));};
+    tx.onabort=()=>{if(!stopped)reject(Error('BACKUP_IDB_ABORTED'));};
+    tx.oncomplete=()=>{if(stopped)return;
+      try{resolve(validatePcmsSnapshot({schema:1,stores}));}
+      catch(e){reject(e);}};
+    try{
+      for(const store of DB_STORES){
+        tx.objectStore(store).openCursor().onsuccess=e=>{
+          const cur=e.target.result;if(!cur)return;
+          if(++seen>500000){stop('BACKUP_V2_ROW_LIMIT');return;}
+          try{stores[store].push({key:serializeClone(cur.key),
+            value:structuredClone(cur.value)});}
+          catch(err){stop(err.message||'BACKUP_V2_VALUE_INVALID');return;}
+          cur.continue();
         };
       }
     }catch{stop('BACKUP_IDB_UNAVAILABLE');}

@@ -10,7 +10,8 @@ const ref=x=>'backup:v2:'+x;
 const assert=(v,c)=>{if(!v)fail(c)};
 const states=new Set(['PREPARED','CREATE_POSSIBLE','OPEN_OBSERVED',
   'APPEND_POSSIBLE','FINISH_POSSIBLE','WRITTEN_UNVERIFIED',
-  'AUTHENTICATED_INVENTORY_ONLY','RECOVERY_VERIFIED']);
+  'AUTHENTICATED_INVENTORY_ONLY','RECOVERY_VERIFIED',
+  'RETIRED_PRE_DISPATCH']);
 function transaction(db,mode,handler){
   return new Promise((resolve,reject)=>{
     let tx,result;
@@ -47,10 +48,43 @@ export function createV2Ledger(db){
     return transaction(db,'readwrite',(m,done,abort)=>{
       m.get(ref(runId)).onsuccess=e=>{
         const before=e.target.result;
-        if(!before||before.revision!==revision||before.state!==expected)
-          {abort();return;}
-        const row={...before,...patch,state:next,revision:revision+1};
-        m.put(row);done(row);
+        if(!before||before.revision!==revision||before.state!==expected||
+           before.runId!==runId){abort();return;}
+        m.get('backup:v2:active').onsuccess=active=>{
+          // A stale terminal ACK may never free a newer backup's lease.
+          const lease=active.target.result;
+          if(!lease||lease.runId!==runId){abort();return;}
+          if(next==='RECOVERY_VERIFIED'&&
+             (expected!=='AUTHENTICATED_INVENTORY_ONLY'||
+              !/^[a-f0-9]{64}$/.test(patch.preparedSha256||'')||
+              !/^[a-f0-9]{64}$/.test(patch.ciphertextSha256||'')||
+              patch.ciphertextSha256!==before.ciphertextSha256||
+              before.acceptedBytes!==before.plaintextBytes))
+            {abort();return;}
+          const row={...before,...patch,state:next,revision:revision+1};
+          m.put(row);
+          if(next==='RECOVERY_VERIFIED')m.delete('backup:v2:active');
+          done(row);
+        };
+      };
+    });
+  }
+  // Explicit, audit-preserving retirement: only an intent that never crossed
+  // CREATE_POSSIBLE can be retired without guessing about native effects.
+  async function retireUndispatched(runId,revision){
+    assert(validID(runId)&&Number.isSafeInteger(revision)&&revision>=1,
+      'BACKUP_V2_RETIRE_INVALID');
+    return transaction(db,'readwrite',(m,done,abort)=>{
+      m.get(ref(runId)).onsuccess=e=>{
+        const previous=e.target.result;
+        if(!previous||previous.revision!==revision||
+           previous.state!=='PREPARED'){abort();return;}
+        m.get('backup:v2:active').onsuccess=a=>{
+          if(a.target.result?.runId!==runId){abort();return;}
+          const row={...previous,state:'RETIRED_PRE_DISPATCH',
+            revision:revision+1,retiredReason:'NO_EXTERNAL_DISPATCH_POSSIBLE'};
+          m.put(row);m.delete('backup:v2:active');done(row);
+        };
       };
     });
   }
@@ -68,7 +102,7 @@ export function createV2Ledger(db){
       tx.onabort=()=>reject(Error('BACKUP_V2_DB_UNAVAILABLE'));
     });
   }
-  return Object.freeze({claim,advance,inspect});
+  return Object.freeze({claim,advance,inspect,retireUndispatched});
 }
 const encode64=data=>{
   let text='';

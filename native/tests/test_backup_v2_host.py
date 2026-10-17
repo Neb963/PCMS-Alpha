@@ -207,6 +207,62 @@ class TestHost(unittest.TestCase):
                          "BACKUP_RETENTION_INTEGRITY_HOLD")
         self.assertTrue(encrypted.exists())
 
+    def test_r4_pinned_root_rename_or_replacement_blocks_all_new_effects(self):
+        fd=self.host._pin_root(create=True)
+        self.assertGreater(fd,0)
+        moved=Path(self.tmp.name)/"moved-backups"
+        self.root.rename(moved)
+        self.root.mkdir(mode=0o700)
+        (self.root/"foreign.bin").write_bytes(b"DO NOT DELETE")
+        failed=self.begin(b"ABC")
+        self.assertEqual(failed["code"],"BACKUP_ROOT_CHANGED")
+        self.assertEqual((self.root/"foreign.bin").read_bytes(),b"DO NOT DELETE")
+        self.assertFalse((self.root/(RUN+".encrypted")).exists())
+        self.assertFalse((moved/(RUN+".encrypted")).exists())
+
+    def test_r4_verify_to_delete_symlink_substitution_never_follows_target(self):
+        self.host._pin_root(create=True)
+        target=Path(self.tmp.name)/"protected-test-data"
+        target.write_bytes(b"ORIGINAL-USER-DATA")
+        path=self.root/(RUN+".encrypted")
+        path.write_bytes(b"original-qualified-artifact")
+        before=path.stat()
+        self.host._delete_identity=(before.st_dev,before.st_ino,
+            before.st_size,before.st_mtime_ns,before.st_ctime_ns)
+        path.unlink()
+        path.symlink_to(target)
+        with self.assertRaisesRegex(Exception,"BACKUP_RETENTION_FILE_CHANGED"):
+            self.host._unlink_artifact(path)
+        self.assertEqual(target.read_bytes(),b"ORIGINAL-USER-DATA")
+        self.assertTrue(path.is_symlink())
+
+    def test_r4_hardlink_and_failed_journal_fsync_hold_without_delete(self):
+        self.host._pin_root(create=True)
+        path=self.root/(RUN+".encrypted")
+        path.write_bytes(b"original-qualified-artifact")
+        other=self.root/"linked-test"
+        os.link(path,other)
+        before=path.stat()
+        self.host._delete_identity=(before.st_dev,before.st_ino,
+            before.st_size,before.st_mtime_ns,before.st_ctime_ns)
+        with self.assertRaisesRegex(Exception,"BACKUP_RETENTION_FILE_CHANGED"):
+            self.host._unlink_artifact(path)
+        self.assertTrue(path.exists())
+        self.assertEqual(other.read_bytes(),b"original-qualified-artifact")
+        # No mutation if ledger's durable rename/fsync has an uncertain ACK.
+        import backup_v2_host as module
+        real=os.fsync
+        def fail_directory(fd):
+            if fd==self.host._root_descriptor:raise OSError("lost directory fsync")
+            return real(fd)
+        with patch.object(module.os,"fsync",side_effect=fail_directory):
+            failed=self.request("export.begin",runId="s02_"+"c"*32,
+                cutDigest=CUT,expectedPlaintextBytes=3,keyRef="portable-recovery")
+        self.assertEqual(failed["code"],"BACKUP_NATIVE_UNAVAILABLE")
+        self.assertIsNone(self.host._export_lock)
+        self.assertTrue((self.root/("s02_"+"c"*32+".ledger")).exists())
+        self.assertFalse((self.root/("s02_"+"c"*32+".encrypted")).exists())
+
     def test_readonly_inspection_does_not_create_root_or_lookup_vault(self):
         out=self.request("archive.inspect",runId=RUN)
         self.assertEqual(out["code"],"BACKUP_NOT_TRACKED")

@@ -19,7 +19,26 @@ const stable=value=>{
   return '{'+Object.keys(value).sort().map(key=>
     JSON.stringify(key)+':'+stable(value[key])).join(',')+'}';
 };
+function rejectUnpaired(value,depth=0){
+  check(depth<=45,'BACKUP_V2_DEPTH_INVALID');
+  if(typeof value==='string'){
+    for(let i=0;i<value.length;i++){
+      const c=value.charCodeAt(i);
+      if(c>=0xd800&&c<=0xdbff){
+        check(i+1<value.length,'BACKUP_V2_UNPAIRED_SURROGATE');
+        const low=value.charCodeAt(++i);
+        check(low>=0xdc00&&low<=0xdfff,'BACKUP_V2_UNPAIRED_SURROGATE');
+      }else check(c<0xdc00||c>0xdfff,'BACKUP_V2_UNPAIRED_SURROGATE');
+    }
+  }else if(value&&typeof value==='object'){
+    for(const [key,child] of Object.entries(value)){
+      if(!Array.isArray(value))rejectUnpaired(key,depth+1);
+      rejectUnpaired(child,depth+1);
+    }
+  }
+}
 export function canonicalJSON(value){
+  rejectUnpaired(value);
   const result=stable(value);
   check(typeof result==='string','BACKUP_V2_JSON_INVALID');
   return result;
@@ -55,6 +74,28 @@ export function preserveNegativeZero(value,depth=0){
       [k,preserveNegativeZero(v,depth+1)]));
   }
   return value;
+}
+// Caller supplies the actual raw IndexedDB structured-clone values in v2.
+// A literal discriminator on an ordinary object is ambiguous with v1's
+// marker vocabulary. Fail before any export effect, never reinterpret it.
+export function rejectV2DiscriminatorCollisions(v,depth=0){
+  check(depth<=35,'BACKUP_V2_DEPTH_INVALID');
+  if(Array.isArray(v)){
+    for(const child of v)rejectV2DiscriminatorCollisions(child,depth+1);
+    return;
+  }
+  if(!v||typeof v!=='object')return;
+  const tag=Object.prototype.toString.call(v);
+  if(tag==='[object Date]'||tag==='[object ArrayBuffer]'||
+     ArrayBuffer.isView(v))return;
+  const proto=Object.getPrototypeOf(v);
+  if(proto!==null&&proto!==Object.prototype&&
+     !(tag==='[object Object]'&&Object.getPrototypeOf(proto)===null))
+    return;
+  check(!Object.hasOwn(v,'__pcmsType')&&!Object.hasOwn(v,'__pcmsV2BlobRef'),
+    'BACKUP_V2_RESERVED_DISCRIMINATOR');
+  for(const child of Object.values(v))
+    rejectV2DiscriminatorCollisions(child,depth+1);
 }
 function isSource(v){
   return plain(v)&&typeof v.fingerprint==='string'&&Array.isArray(v.files)&&Array.isArray(v.blobs);
@@ -137,6 +178,7 @@ export async function compileV2(pcms,donorEnvelope){
     counts[store]=0;
     for(const row of [...pcms.stores[store]].sort((a,b)=>canonicalJSON(a.key)<canonicalJSON(b.key)?-1:canonicalJSON(a.key)>canonicalJSON(b.key)?1:0)){
       const refs=new Set();
+      rejectV2DiscriminatorCollisions(row.value);
       const transformed=replaceSource(
         serializeClone(preserveNegativeZero(row.value)),refs,blobs);
       const record={store,key:row.key,value:transformed,refs:[...refs].sort()};

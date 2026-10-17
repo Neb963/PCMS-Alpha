@@ -8,6 +8,7 @@ This unreviewed format is an implementation spike, NOT E-06 acceptance.
 import hashlib
 import json
 import math
+from decimal import Decimal
 import os
 import stat
 import struct
@@ -57,8 +58,9 @@ def frame(tag, data):
     return FRAME.pack(tag, len(data)) + data
 
 
-def _fd_read(path):
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+def _fd_read(path, *, dirfd=None):
+    fd=os.open(path.name if dirfd is not None else path,
+      os.O_RDONLY|getattr(os,"O_NOFOLLOW",0),dir_fd=dirfd)
     try:
         info = os.fstat(fd)
         _check(stat.S_ISREG(info.st_mode) and info.st_nlink == 1,
@@ -79,7 +81,7 @@ def _write_all(fd, data):
 class EncryptedWriter:
     """Single-use, exclusive ciphertext writer; never resumes a lost ACK."""
 
-    def __init__(self, path, password, expected_bytes, *, _test_entropy=None):
+    def __init__(self, path, password, expected_bytes, *, _test_entropy=None, _dirfd=None):
         _check(isinstance(expected_bytes, int) and
                0 <= expected_bytes <= MAX_GCM_PLAINTEXT,
                "BACKUP_CRYPTO_LENGTH_INVALID")
@@ -92,8 +94,9 @@ class EncryptedWriter:
         cipher = Cipher(algorithms.AES(_key(password, salt)), modes.GCM(iv))
         self.encryptor = cipher.encryptor()
         self.encryptor.authenticate_additional_data(self.header)
-        self.fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
-                          getattr(os, "O_NOFOLLOW", 0), 0o600)
+        self.fd=os.open(path.name if _dirfd is not None else path,
+          os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,"O_NOFOLLOW",0),
+          0o600,dir_fd=_dirfd)
         self.written = 0
         self.finished = False
         try:
@@ -200,25 +203,50 @@ class _Inventory:
 
     @staticmethod
     def _json(data, code):
-        # Reject duplicate/non-lexical object keys, nonfinite numeric tokens
-        # and invalid UTF-8. JS canonicalJSON orders keys by UTF-16 units.
+        # Exact JS JSON.stringify lexical form: Python's json.loads alone
+        # accepts 1.0 / 1e+0 / imprecise integers that JS rejects.
         def ordered(pairs):
             keys=[key for key,_ in pairs]
-            sorted_keys=sorted(keys,key=lambda x:x.encode("utf-16-be","surrogatepass"))
-            _check(len(set(keys))==len(keys) and keys==sorted_keys,code)
+            ranked=sorted(keys,key=lambda x:x.encode("utf-16-be","surrogatepass"))
+            _check(keys==ranked and len(set(keys))==len(keys),code)
             return dict(pairs)
-        def finite(value):
-            number=float(value)
-            _check(math.isfinite(number),code)
-            return number
-        def no_constant(_):
+        def number_text(value):
+            n=float(value)
+            _check(math.isfinite(n),code)
+            if n==0:return "0"
+            d=Decimal(repr(n))
+            if 1e-6<=abs(n)<1e21:
+                whole=format(d,"f")
+                return whole.rstrip("0").rstrip(".") if "." in whole else whole
+            mant,ex=format(d.normalize(),"e").split("e")
+            return mant.rstrip("0").rstrip(".")+"e"+("+" if int(ex)>=0 else "")+str(int(ex))
+        def numeric(raw):
+            try: canonical=number_text(raw)
+            except (ValueError,OverflowError) as error:raise BackupError(code) from error
+            _check(raw==canonical,code)
+            return int(raw) if all(v not in raw for v in ".eE") else float(raw)
+        def stable(value):
+            if isinstance(value,dict):
+                return "{"+",".join(stable(k)+":"+stable(v) for k,v in value.items())+"}"
+            if isinstance(value,list):
+                return "["+",".join(stable(v) for v in value)+"]"
+            if isinstance(value,str):
+                _check(not any(0xD800<=ord(c)<=0xDFFF for c in value),code)
+                return json.dumps(value,ensure_ascii=False,separators=(",",":"))
+            if value is None:return "null"
+            if value is True:return "true"
+            if value is False:return "false"
+            if isinstance(value,(float,int)):return number_text(value)
             raise BackupError(code)
+        def no_constant(_):raise BackupError(code)
         try:
             raw=data.decode("utf-8")
             _check(raw and raw==raw.strip(),code)
-            return json.loads(raw,object_pairs_hook=ordered,
-                              parse_constant=no_constant,parse_float=finite)
-        except (ValueError, UnicodeError, TypeError, OverflowError) as error:
+            parsed=json.loads(raw,object_pairs_hook=ordered,
+                parse_float=numeric,parse_int=numeric,parse_constant=no_constant)
+            _check(stable(parsed)==raw,code)
+            return parsed
+        except (ValueError,UnicodeError,TypeError,OverflowError) as error:
             raise BackupError(code) from error
 
     @staticmethod
@@ -363,14 +391,14 @@ class _Inventory:
                 "sourceRefs": len(self.refs), "donorBytes": self.donor_bytes}
 
 
-def verify_two_pass(path, password):
+def verify_two_pass(path, password, *, dirfd=None):
     """Reopen real ciphertext, authenticate twice, validate referenced blobs.
 
     Still needs independent donor decoder, canonical-cut proof, source-path
     materialization, inactive fresh-profile restore and format review.
     """
     try:
-        with _fd_read(path) as f:
+        with _fd_read(path,dirfd=dirfd) as f:
             before = os.fstat(f.fileno())
             digest = hashlib.sha256()
             for part in iter(lambda: f.read(BUFFER), b""):
@@ -384,7 +412,7 @@ def verify_two_pass(path, password):
                    (after.st_dev, after.st_ino, after.st_size,
                     after.st_mtime_ns, after.st_ctime_ns),
                    "BACKUP_FILE_CHANGED")
-        with _fd_read(path) as f:
+        with _fd_read(path,dirfd=dirfd) as f:
             second = os.fstat(f.fileno())
             _check((before.st_dev, before.st_ino, before.st_size,
                     before.st_mtime_ns, before.st_ctime_ns) ==
