@@ -19,7 +19,7 @@ export async function cachedHealthDomain(evidence){
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
-  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, readRuntimeWitness, verifyFixedCandidate }) {
+  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, readRuntimeWitness, verifyFixedCandidate, stageBlockedBinding }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -300,6 +300,20 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     catch{return {ok:false,code:'HANDOFF_UNVERIFIED'};}
   }
 
+  // First stage is intentionally donor BLOCK only. No protected route is
+  // assigned or account tab opened until the verified reservation join is
+  // complete. This method is private background composition, not a port API.
+  async function stageInitialBlockedBinding({bindingId,personaUid,contextId}={}){
+    if(typeof stageBlockedBinding!=='function')
+      return {ok:false,code:'DONOR_BLOCKED_STAGE_UNAVAILABLE'};
+    try{
+      const receipt=await stageBlockedBinding({bindingId,personaUid,contextId});
+      return receipt?.ok===true&&receipt.blocked===true?
+        {ok:true,blocked:true,routeId:'block',bindingId}: 
+        {ok:false,code:receipt?.code||'DONOR_BLOCKED_STAGE_UNCONFIRMED'};
+    }catch{return {ok:false,code:'DONOR_BLOCKED_STAGE_UNCONFIRMED'};}
+  }
+
   // S01 candidate measurement never grants account admission. It only
   // invokes the existing donor-owned native pipe and fixed endpoint command.
   // A positive echo without H-qualified TTL/route ownership is not E01 PASS.
@@ -349,6 +363,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
 
   return Object.freeze({
     verifyProtectedCandidate,
+    stageInitialBlockedBinding,
     sampleNativeWitness,
     observeReadOnly,
     observeMonitoring,
