@@ -839,6 +839,8 @@ def s01_legacy_and_archive(session,uuid,oracle,privacy_safe,added_id):
       await send({type:'UPDATE_PROFILE_ROUTE',profileId:'CTX',routeId:'ci-s01-mv-b'});
       await browser.tabs.create({url:'about:blank',cookieStoreId:added.containerId,active:false});
       return {added:added.containerId};""".replace('CTX',made['contextId']))
+    # The account port trusts only the PCMS page sender: return there first.
+    call('POST',f'/session/{session}/url',{'url':f'moz-extension://{uuid}/pcms/index.html#accounts'})
     rev=lambda i:next(a for a in account_command(session,{'type':'LIST_ACCOUNTS'})['accounts'] if a['accountId']==i)['revision']
     busy=account_command(session,{'type':'ARCHIVE','params':{'accountId':added_id,'expectedRevision':rev(added_id)}})
     assert busy.get('ok') is True and busy.get('release')=='RELEASE_DEFERRED',busy
