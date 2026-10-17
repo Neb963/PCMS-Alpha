@@ -3,6 +3,7 @@
 // Caller MUST separately verify actual native terminal authentication and
 // file identity; this reader does not confer an approval by accepting a receipt.
 import {decodeAuthenticatedV2} from './backup-v2-codec.mjs';
+import {decodeV2InactiveFrames} from './restore-v2-stream-decode.mjs';
 import {preflightSourceRecovery,digest,validatePcmsSnapshot} from './backup-core.mjs';
 import {prepareRestoredCanonical} from './restore-sanitize.mjs';
 
@@ -20,7 +21,11 @@ export async function prepareInactiveV2({
     'RESTORE_V2_AUTHENTICATED_SOURCE_REQUIRED');
   validatePcmsSnapshot(currentPcms);
   const opened=await decodeAuthenticatedV2(authenticatedPlaintext,{password,decodeDonor});
-  const sourceAudit=await preflightSourceRecovery(opened.pcms);
+  return finalizeInactive(opened,{currentPcms,uidRemap,mode,
+    archiveSha256:readback.sha256});
+}
+async function finalizeInactive(opened,{currentPcms,uidRemap,mode,archiveSha256}){
+  const sourceAudit=opened.sourceAudit||await preflightSourceRecovery(opened.pcms);
   const prepared=prepareRestoredCanonical({
     incoming:opened.pcms,current:currentPcms,mode,uidRemap});
   // Independently revalidate rehydrated references *after* UID binding
@@ -31,9 +36,33 @@ export async function prepareInactiveV2({
     donorEnvelope:opened.donorEnvelope,
     sourceAudit,
     preparedSha256:await digest(JSON.stringify(prepared)),
-    archiveSha256:readback.sha256,
+    archiveSha256,
     status:'INACTIVE_PREPARED_NOT_APPLIED',
     controller:'RESTORE_HELD',activation:'OFF',
     providerEffects:'OFF',importedApproval:'HISTORICAL_ONLY'
   });
+}
+
+export async function prepareInactiveV2FromStage({
+  stage,runId,readback,expectedCiphertextSha256,password,decodeDonor,
+  currentPcms,uidRemap={},mode='merge'
+}={}){
+  check(stage&&typeof stage.frames==='function'&&
+    typeof stage.inspect==='function'&&
+    typeof runId==='string'&&/^s02_[a-f0-9]{32}$/.test(runId)&&
+    readback?.state==='AUTHENTICATED_SECOND_PASS'&&
+    readback.complete===true&&
+    sha(expectedCiphertextSha256)&&
+    readback.sha256===expectedCiphertextSha256,
+    'RESTORE_V2_TERMINAL_AUTH_REQUIRED');
+  const observed=await stage.inspect(runId);
+  check(observed?.runId===runId&&
+    observed.state==='READY_FOR_INACTIVE_DECODER'&&
+    observed.acceptedBytes===observed.expectedBytes,
+    'RESTORE_V2_STAGING_UNVERIFIED');
+  validatePcmsSnapshot(currentPcms);
+  const opened=await decodeV2InactiveFrames(stage.frames(runId),{
+    password,decodeDonor});
+  return finalizeInactive(opened,{currentPcms,uidRemap,mode,
+    archiveSha256:readback.sha256});
 }
