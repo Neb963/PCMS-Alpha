@@ -266,6 +266,26 @@ class TestHost(unittest.TestCase):
         self.assertTrue(answer["ok"],answer)
         self.assertFalse((self.root/(RUN+".encrypted")).exists())
 
+    def test_f1_header_write_after_create_preserves_partial_cipher_and_releases_fd(self):
+        def half_header(fd,raw):
+            os.write(fd,raw[:4])
+            raise OSError("disk full after exclusive open")
+        before=len(os.listdir("/proc/self/fd")) if os.path.isdir("/proc/self/fd") else None
+        with patch("backup_stream_v2._write_all",side_effect=half_header):
+            result=self.begin(b"ABC")
+        self.assertEqual(result["code"],"BACKUP_NATIVE_UNAVAILABLE")
+        self.assertIsNone(self.host._export_lock)
+        self.assertIsNone(self.host.current)
+        self.assertEqual(self.request("archive.inspect",runId=RUN)["state"],
+                         "CREATE_POSSIBLE")
+        self.assertEqual((self.root/(RUN+".encrypted")).read_bytes(),b"PCMS")
+        if before is not None:
+            self.assertEqual(len(os.listdir("/proc/self/fd")),before)
+        other="s02_"+"e"*32
+        self.assertTrue(self.request("export.begin",runId=other,cutDigest=CUT,
+                        expectedPlaintextBytes=3,keyRef="portable-recovery")["ok"])
+        self.assertEqual((self.root/(RUN+".encrypted")).read_bytes(),b"PCMS")
+
     def test_f1_file_open_error_keeps_possible_journal_but_releases_lock(self):
         # Actual writer creation/open failure after durable CREATE_POSSIBLE.
         original=self.host
