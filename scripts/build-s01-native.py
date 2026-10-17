@@ -39,6 +39,24 @@ def build():
     target = OUT / "native_host.py"
     target.write_text(host, encoding="utf-8")
     shutil.copyfile(WITNESS, OUT / "pcms_witness.py")
+    # Staged native daemon derivative: the original donor routerd.py remains
+    # byte-identical. The new command cannot accept caller-selected endpoints.
+    daemon_original=ROOT / "donor/personamonkey/native/routerd.py"
+    daemon=daemon_original.read_text(encoding="utf-8")
+    daemon=unique_replace(daemon, "import time\\n",
+       "import time\\nfrom pcms_probe import measure_prepared_exit\\n", "daemon import")
+    daemon=unique_replace(daemon,
+       '        if cmd == "status":\\n            return self.status()',
+       '''        if cmd == "pcms.verify_exit":
+            if set(req) - {"id", "command", "route_id", "context_id"}:
+                raise ValueError("fixed verifier rejects extra fields")
+            return measure_prepared_exit(
+                self, req.get("route_id"), req.get("context_id"),
+                fetch_through_relay)
+        if cmd == "status":
+            return self.status()''', "candidate fixed probe dispatch")
+    (OUT / "routerd.py").write_text(daemon,encoding="utf-8")
+    shutil.copyfile(ROOT / "native/s01-fixed-exit-probe.py",OUT / "pcms_probe.py")
     return {"host": str(target), "sha256": hashlib.sha256(target.read_bytes()).hexdigest()}
 
 
