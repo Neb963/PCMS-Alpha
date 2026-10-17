@@ -6,7 +6,7 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {snapshotCanonical,digest,MAX_ARCHIVE_BYTES} from './backup-core.mjs';
 import {createPortableBackupPayload,decodeBackupEnvelope} from '../lib/backup-package.js';
 import {filterOrdinaryAutomationJobs} from '../lib/automation-history.js';
-import {previewRestore,verifyCheckpoint,validateRestoreTransport} from './restore-core.mjs';
+import {previewRestore,verifyCheckpoint,validateRestoreTransport,stableRestoreDonorCut} from './restore-core.mjs';
 import {createRestoreGate} from './restore-gate.mjs';
 import {createRestoreStageEngine} from './restore-stage.mjs';
 import {prepareRestoredCanonical} from './restore-sanitize.mjs';
@@ -52,7 +52,8 @@ async function destination(api,donor){
   const db=await openCanonicalDatabase();
   let pcms;
   try{pcms=await snapshotCanonical(db);}finally{db.close();}
-  return {snap,pcms,portable:await readPortable(api,donor,snap)};
+  return {snap:stableRestoreDonorCut(snap),pcms,
+    portable:await readPortable(api,donor,snap)};
 }
 function mappingFromContainers(payload,requested,containers,epoch,{allowCreate=false}={}){
   const map=Object.create(null),used=new Set();
@@ -114,7 +115,23 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           decodeDonor:decodeBackupEnvelope,mode:args.mode,fresh:args.fresh===true,
           mappings:req,currentPcms:baseline.pcms,currentDonor:baseline.snap,
           currentPortable:baseline.portable,containers:baseline.snap.containers});
-        assert(reviewed.planSha256===args.reviewedPlanSha256,'RESTORE_PLAN_CHANGED');
+        if(reviewed.planSha256!==args.reviewedPlanSha256){
+          // Trusted same-XPI diagnostic: only irreversible digests, never
+          // source, Persona identifiers, cookies, route data or decrypted bytes.
+          const plan=reviewed.plan;
+          return {ok:false,code:'RESTORE_PLAN_CHANGED',diagnostic:{
+            actualPlanSha256:reviewed.planSha256,
+            archiveSha256:plan.archiveSha256,
+            sourceSha256:plan.sourceSha256,
+            destinationSha256:plan.destinationSha256,
+            groupsSha256:await digest(JSON.stringify(plan.groups)),
+            riskSha256:await digest(JSON.stringify(plan.risk)),
+            canonicalStoreCounts:Object.fromEntries(Object.entries(baseline.pcms.stores)
+              .map(([name,rows])=>[name,rows.length])),
+            pcmsSha256:await digest(JSON.stringify(baseline.pcms)),
+            donorSha256:await digest(JSON.stringify(baseline.snap)),
+            portableSha256:await digest(JSON.stringify(baseline.portable))}};
+        }
         assert(Object.keys(req).length===reviewed.opened.donor.personas.length,
           'RESTORE_MAPPING_INCOMPLETE');
         assert(!reviewed.plan.groups.some(g=>g.status==='DIRECT_REVIEW_REQUIRED'),

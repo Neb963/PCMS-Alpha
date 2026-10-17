@@ -1,14 +1,16 @@
 // I08: explicit local manual backup. No provider/Git writes, restore or key storage.
 // Real donor portable serialization and independent decrypt verification are required.
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
+import {readProtectedDonorSnapshot} from './donor-snapshot.mjs';
 import {createPortableBackupPayload,encodeBackupEnvelope,decodeBackupEnvelope} from '../lib/backup-package.js';
 import {filterOrdinaryAutomationJobs} from '../lib/automation-history.js';
-import {snapshotCanonical,consistentOrThrow,encodeIntegrated,decodeIntegrated,
+import {snapshotCanonical,consistentOrThrow,encodeIntegrated,decodeIntegrated,preflightSourceRecovery,
   observeDownload,MAX_ARCHIVE_BYTES} from './backup-core.mjs';
 
 const $=id=>document.getElementById(id);
 const button=$('pcms-backup-export'),pass=$('pcms-backup-passphrase');
 const result=$('pcms-backup-status'),overview=$('pcms-overview-backup');
+const auditButton=$('pcms-backup-audit'),auditStatus=$('pcms-backup-audit-status');
 const waitMs=10*60*1000;
 const codeOf=e=>{
   const code=e?.message||'BACKUP_FAILED';
@@ -61,11 +63,7 @@ async function currentReceipt(db){
     tx.onabort=()=>reject(Error('BACKUP_IDB_UNAVAILABLE'));
   });
 }
-async function readDonor(){
-  const snapshot=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
-  if(!snapshot?.state||!Array.isArray(snapshot.containers))throw Error('BACKUP_DONOR_UNAVAILABLE');
-  return {state:snapshot.state,containers:snapshot.containers};
-}
+const readDonor=()=>readProtectedDonorSnapshot(browser);
 function relevantStorage(snapshot){
   const out=Object.create(null);
   for(const [k,v] of Object.entries(snapshot||{})){
@@ -156,7 +154,8 @@ async function exportManual(password){
     if(proof.tier===2){
       result.textContent='Browser reported complete (tier 2): '+proof.actualName+
         '. '+archive.bytes.byteLength+' bytes. SHA-256 '+archive.sha256+
-        '. Exact on-disk bytes have NOT been independently re-read. Restore remains disabled.';
+        '. Exact on-disk bytes have NOT been independently re-read. Restore remains disabled. '+
+        'Legacy v1 source completeness is NOT independently proven.';
     }else{
       result.textContent='Encrypted bytes verified in memory (tier 1), but browser download not confirmed: '+
         proof.code+'. No disk-backup success claimed; check Downloads.';
@@ -187,6 +186,31 @@ async function showLast(){
     overview.textContent='Backup receipt unavailable. No verified backup inferred.';
   }finally{try{db?.close();}catch{}}
 }
+// Source-only, snapshot-scoped, independently hashed audit. No mutation,
+ // donor/Git/Perchance authority, vault access or disk-backup proof.
+auditButton?.addEventListener('click',()=>{
+  if(auditButton.disabled)return;
+  auditButton.disabled=true;
+  auditStatus.textContent='Checking retained local source bytes and history…';
+  void (async()=>{
+    let db;
+    try{
+      db=await openCanonicalDatabase();
+      const snap=await snapshotCanonical(db);
+      const proof=await preflightSourceRecovery(snap);
+      auditStatus.textContent='Local source-byte audit passed for '+
+        proof.manifests+' source manifests / '+proof.uniqueBlobs+
+        ' unique blobs ('+proof.uniqueBytes+' unique bytes). '+
+        'This is not a disk-backup or complete restore proof.';
+    }catch(e){
+      auditStatus.textContent='Source-complete recovery HELD: '+codeOf(e)+
+        '. Legacy v1 can retain this historical record, but does not prove the missing source. No external effects.';
+    }finally{
+      try{db?.close();}catch{}
+      auditButton.disabled=false;
+    }
+  })();
+});
 button.addEventListener('click',()=>{
   if(button.disabled)return;
   const value=pass.value;

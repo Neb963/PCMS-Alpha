@@ -276,6 +276,8 @@
           <label for="pcms-backup-passphrase">Portable recovery passphrase (12 characters minimum)</label>
           <input id="pcms-backup-passphrase" type="password" autocomplete="new-password" minlength="12" maxlength="4096">
           <button type="button" id="pcms-backup-export">Create and download encrypted backup</button>
+          <button type="button" id="pcms-backup-audit">Check source completeness (read-only)</button>
+          <p id="pcms-backup-audit-status" role="status" aria-live="polite">Source-complete recovery not checked. A v1 download does not prove recoverability.</p>
           <p id="pcms-backup-status" role="status" aria-live="polite">No new backup attempted. Browser completion and independent disk-byte verification are different evidence tiers.</p>
           <p class="reason">Tier 1: cryptographically verified in memory; tier 2: browser-reported completed download with existence and size; tier 3: independent on-disk file readback. The staged local restore controls are in the next panel; no provider activation follows a backup.</p>
         </section>

@@ -8,6 +8,12 @@ export const DAY=86400000, RETAIN=14, RETRY=3600000;
 const active=new Set(['PREPARING','VERIFIED','DISPATCH_POSSIBLE','DOWNLOAD_STARTED']);
 const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
 const idOK=s=>typeof s==='string'&&/^auto_[a-f0-9]{32}$/.test(s);
+const nativeComplete=a=>a.kind==='AUTO_NATIVE'&&
+  idOK(a.runId)&&a.nativeRunId==='s02_'+a.runId.slice(5)&&
+  a.state==='COMPLETE'&&a.tier===3&&hex(a.sha256)&&
+  hex(a.preparedSha256)&&Number.isSafeInteger(a.bytes)&&a.bytes>0&&
+  Number.isSafeInteger(a.day);
+
 export function emptyAuto(){
   return {revision:0,enabled:false,lastSuccessDay:-1,lastAttemptDay:-1,
     nextAttemptAt:0,active:null,archives:[],status:'DISABLED',code:'AUTO_OFF'};
@@ -17,10 +23,11 @@ export function validAuto(s){
     typeof s.enabled==='boolean'&&Number.isSafeInteger(s.lastSuccessDay)&&
     Number.isSafeInteger(s.lastAttemptDay)&&Number.isFinite(s.nextAttemptAt)&&
     Array.isArray(s.archives)&&s.archives.length<=500&&
-    s.archives.every(a=>a.kind==='AUTO'&&idOK(a.runId)&&Number.isSafeInteger(a.downloadId)&&
+    s.archives.every(a=>nativeComplete(a)||(
+      a.kind==='AUTO'&&idOK(a.runId)&&Number.isSafeInteger(a.downloadId)&&
       a.downloadId>=0&&hex(a.sha256)&&Number.isSafeInteger(a.bytes)&&a.bytes>0&&
       typeof a.filename==='string'&&Number.isSafeInteger(a.day)&&
-      ['COMPLETE','DELETION_POSSIBLE','REMOVED','DELETE_HELD'].includes(a.state))&&
+      ['COMPLETE','DELETION_POSSIBLE','REMOVED','DELETE_HELD'].includes(a.state)))&&
     (!s.active||(idOK(s.active.runId)&&active.has(s.active.status)&&
       Number.isSafeInteger(s.active.day)&&Number.isSafeInteger(s.active.startedAt)));
 }
@@ -94,5 +101,8 @@ export function safeStatus(s){
     retained:s.archives.filter(x=>x.state==='COMPLETE').length,
     deletionHeld:s.archives.filter(x=>x.state==='DELETE_HELD').length,
     lastSuccessDay:s.lastSuccessDay,active:s.active?.status||null,
-    tier:s.archives.some(a=>a.state==='COMPLETE')?2:0,proof:'BROWSER_REPORTED_ONLY'};
+    tier:s.archives.some(a=>nativeComplete(a))?3:
+      s.archives.some(a=>a.state==='COMPLETE')?2:0,
+    proof:s.archives.some(a=>nativeComplete(a))?
+      'NATIVE_READONLY_SOURCE_RECOVERY':'BROWSER_REPORTED_ONLY'};
 }

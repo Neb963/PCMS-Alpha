@@ -1,6 +1,7 @@
 // I16 operator preflight. Preview is read-only and never sets the global restore
 // guard or imports donor/cookie/PCMS state. Mutating stages remain unexposed.
 import {openCanonicalDatabase} from './journal.mjs';
+import {readProtectedDonorSnapshot} from './donor-snapshot.mjs';
 import {snapshotCanonical,MAX_ARCHIVE_BYTES} from './backup-core.mjs';
 import {createPortableBackupPayload,decodeBackupEnvelope} from '../lib/backup-package.js';
 import {filterOrdinaryAutomationJobs} from '../lib/automation-history.js';
@@ -29,9 +30,9 @@ const readFile=async input=>{
   return text;
 };
 async function snapshot(){
-  const response=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
-  if(!response?.state||!Array.isArray(response.containers))
-    throw Error('RESTORE_DONOR_UNAVAILABLE');
+  let response;
+  try{response=await readProtectedDonorSnapshot(browser);}
+  catch{throw Error('RESTORE_DONOR_UNAVAILABLE');}
   const db=await openCanonicalDatabase();let pcms;
   try{pcms=await snapshotCanonical(db);}finally{db.close();}
   return {pcms,donor:response};

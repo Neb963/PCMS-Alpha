@@ -2,6 +2,7 @@
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {AUTO_ALARM,AUTO_PORT} from './backup-auto-core.mjs';
 import {createAutoRunner} from './backup-auto-run.mjs';
+import {createDonorSnapshotPortHandler} from './backup-donor-port.mjs';
 const fail=code=>({ok:false,code});
 export function createAutoBoundary(api,options={}){
   const runner=createAutoRunner(api,options);
@@ -19,11 +20,12 @@ export function createAutoBoundary(api,options={}){
     }
     if(message.action==='STORE_VAULT')return runner.setVault(message.passphrase);
     if(message.action==='RUN_NOW')return runner.tick();
+    if(message.action==='RUN_V2_MANUAL')return runner.manualV2Candidate();
     return fail('INVALID_COMMAND');
   }
   function validate(message){
     if(!message||typeof message!=='object'||Array.isArray(message)||
-      !['STATUS','ENABLE','STORE_VAULT','RUN_NOW'].includes(message.action))
+      !['STATUS','ENABLE','STORE_VAULT','RUN_NOW','RUN_V2_MANUAL'].includes(message.action))
       return false;
     const keys=Object.keys(message).sort().join(',');
     return message.action==='ENABLE'?keys==='action,enabled'&&typeof message.enabled==='boolean':
@@ -33,6 +35,7 @@ export function createAutoBoundary(api,options={}){
   }
   function register(){
     if(registered)return;registered=true;
+    api.runtime.onConnect.addListener(createDonorSnapshotPortHandler(api));
     api.runtime.onConnect.addListener(port=>{
       if(port?.name!==AUTO_PORT)return;
       if(!trustedExtensionPage(api,port.sender)){

@@ -2694,6 +2694,647 @@ def main():
                 call('POST',f'/session/{after}/url',{'url':url+'#settings'})
                 settings=execute(after,"return {button:!!document.getElementById('pcms-backup-export'),password:!!document.getElementById('pcms-backup-passphrase'),status:!!document.getElementById('pcms-backup-status')}")
                 assert settings=={'button':True,'password':True,'status':True},settings
+                # S02 B: new source-completeness action runs in the same installed
+                # XPI, reads the real synthetic historical IDB, and truthfully
+                # holds a source-incomplete legacy publication. v1 codec stays
+                # usable to preserve that historical record, not to bless it.
+                audit_button=execute(after,"const b=document.getElementById('pcms-backup-audit');if(b)b.click();return !!b")
+                assert audit_button is True,'S02 read-only source audit not packaged'
+                audit_status=''
+                for _ in range(50):
+                    audit_status=execute(after,"return document.getElementById('pcms-backup-audit-status')?.textContent||''")
+                    if 'Source-complete recovery HELD:' in audit_status or (
+                        'Local source-byte audit passed' in audit_status):
+                        break
+                    time.sleep(.1)
+                assert 'Source-complete recovery HELD: BACKUP_SOURCE_INCOMPLETE' in audit_status,audit_status
+                assert 'No external effects' in audit_status,audit_status
+                print('B S02_PACKAGED_READONLY_SOURCE_RECOVERY_HOLD=PASS',flush=True)
+                # S02 B: production packaged v2 codec runs on real Firefox
+                # with complete original/current/history/binary source and
+                # donor portable encoder. This is NOT a native-host or H proof.
+                v2_code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const v2=await import('./backup-v2-codec.mjs');
+                  const scanner=await import('./restore-v2-frame-scanner.mjs');
+                  const cryptoCore=await import('./backup-core.mjs');
+                  const donor=await import('../lib/backup-package.js');
+                  const pass='disposable-s02-browser-password';
+                  const raw=[['main.pjs',new TextEncoder().encode('output = "hello"')],
+                    ['index.html',new TextEncoder().encode('<b>hello</b>')],
+                    ['src/binary.bin',new Uint8Array([0,255,1,0,42])]];
+                  const files=await Promise.all(raw.map(async([path,bytes])=>({
+                    path,size:bytes.length,sha256:await cryptoCore.digest(bytes)})));
+                  files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+                  const blobs=raw.map(([path,bytes])=>({path,base64:
+                    btoa(String.fromCharCode(...bytes))})).sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+                  const fingerprint=await cryptoCore.digest('PCMS_STAGED_SOURCE_V1'+String.fromCharCode(10)+files.map(
+                    f=>JSON.stringify([f.path,f.size,f.sha256])).join(String.fromCharCode(10)));
+                  const source={ok:true,files,blobs,fingerprint};
+                  const pcms={schema:1,stores:{entities:[],operations:[{key:'uncertain',
+                    value:{status:'HELD_UNCERTAIN'}}],events:[],meta:[
+                    {key:'stage:fixture',value:{record:{candidate:source,previous:source}}},
+                    {key:'stage-history:fixture:1',value:{record:{candidate:source,previous:source}}}
+                  ],observations:[]}};
+                  const payload=donor.createPortableBackupPayload({state:{},
+                    containers:[],selection:{kind:'full'}});
+                  const sealed=await donor.encodeBackupEnvelope({payload,password:pass});
+                  const plan=await v2.compileV2(pcms,sealed),chunks=[];
+                  for await(const chunk of v2.streamV2Frames(plan))chunks.push(chunk);
+                  const all=new Uint8Array(plan.plaintextBytes);let o=0;
+                  for(const chunk of chunks){all.set(chunk,o);o+=chunk.length;}
+                  let scannerBlobs=0,scannerDonorBytes=0,scannerEnds=0;
+                  async function* pieces(){
+                    for(let j=0;j<all.length;j+=31)yield all.subarray(j,j+31);
+                  }
+                  for await(const frame of scanner.scanV2AuthenticatedFrames(pieces())){
+                    if(frame.kind==='BLOB')scannerBlobs++;
+                    if(frame.kind==='DONOR_FRAGMENT')scannerDonorBytes+=frame.bytes.length;
+                    if(frame.kind==='END')scannerEnds++;
+                  }
+                  const restored=await v2.decodeAuthenticatedV2(all,{
+                    decodeDonor:donor.decodeBackupEnvelope,password:pass});
+                  // The actual packaged Firefox IDB stores native-like second
+                  // pass bytes, and only a terminal receipt permits decoding.
+                  const staged=await import('./restore-v2-inactive-stage.mjs');
+                  const prepare=await import('./restore-v2-prep.mjs');
+                  const db=await staged.openV2StageDB();
+                  const stage=staged.createV2InactiveStage(db,{assertHeld:async()=>true});
+                  const run='s02_'+crypto.randomUUID().replaceAll('-','');
+                  const proofSha='a'.repeat(64),empty={
+                    schema:1,stores:{entities:[],operations:[],events:[],
+                      meta:[],observations:[]}};
+                  await stage.begin(run,{state:'INACTIVE_STAGING_REQUIRED',
+                    sha256:proofSha,plaintextBytes:all.length});
+                  let seq=0;
+                  for(let j=0;j<all.length;j+=49152)
+                    await stage.append(run,seq++,all.subarray(j,j+49152));
+                  await stage.finish(run,{state:'AUTHENTICATED_SECOND_PASS',
+                    sha256:proofSha,complete:true},seq);
+                  const stagedRestored=await prepare.prepareInactiveV2FromStage({
+                    stage,runId:run,readback:{state:'AUTHENTICATED_SECOND_PASS',
+                      sha256:proofSha,complete:true},
+                    expectedCiphertextSha256:proofSha,currentPcms:empty,
+                    password:pass,decodeDonor:donor.decodeBackupEnvelope,
+                    mode:'replace'});
+                  db.close();
+                  const exact=restored.pcms.stores.meta[0].value.record.candidate;
+                  done({ok:o===all.length&&plan.terminal.uniqueBlobs===3&&
+                    stagedRestored.status==='INACTIVE_PREPARED_NOT_APPLIED'&&
+                    stagedRestored.prepared.stores.meta.length===2&&
+                    stagedRestored.activation==='OFF'&&
+                    scannerBlobs===3&&scannerEnds===1&&
+                    scannerDonorBytes===new TextEncoder().encode(sealed).length&&
+                    restored.pcms.stores.operations[0].value.status==='HELD_UNCERTAIN'&&
+                    exact.blobs.length===3&&
+                    exact.blobs.some(x=>x.path==='src/binary.bin'&&x.base64==='AP8BACo=')&&
+                    restored.donor.personas.length===0});
+                })().catch(e=>done({error:String(e)}));"""
+                result=call('POST',f'/session/{after}/execute/async',
+                            {'script':v2_code,'args':[]},timeout=90)
+                assert result.get('ok') is True,result
+                print('B S02_PACKAGED_V2_SOURCE_FRAME_BINARY_AND_DONOR_ROUNDTRIP=PASS',flush=True)
+                # S02 B: real installed Firefox IndexedDB intent/CAS with an
+                # independently recorded synthetic native-effect ledger.
+                # This is NOT an actual installed privileged native H test.
+                v2_session="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const module=await import('./backup-v2-session.mjs');
+                  const donor=await import('../lib/backup-package.js');
+                  const open=()=>new Promise((resolve,reject)=>{
+                    const req=indexedDB.open('s02-v2-'+crypto.randomUUID(),1);
+                    req.onupgradeneeded=()=>req.result.createObjectStore('meta',{keyPath:'key'});
+                    req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+                  });
+                  const db=await open(),runId='s02_'+('d'.repeat(32));
+                  const pass='disposable-S02-browser-passphrase';
+                  const payload=donor.createPortableBackupPayload({state:{},
+                    containers:[],selection:{kind:'full'}});
+                  const envelope=await donor.encodeBackupEnvelope({payload,password:pass});
+                  const pcms={schema:1,stores:{entities:[],operations:[],events:[],
+                    meta:[],observations:[]}};
+                  const ledger=[],observations={bytes:0,seq:0};
+                  const transport=()=>({close(){},async exchange(cmd){
+                    ledger.push({action:cmd.action,sequence:cmd.sequence});
+                    if(cmd.action==='export.begin')return {ok:true,state:'OPEN_OBSERVED',runId:cmd.runId};
+                    if(cmd.action==='export.append'){
+                      if(cmd.sequence!==observations.seq)throw Error('DOUBLE_APPEND');
+                      observations.seq++;
+                      observations.bytes+=atob(cmd.bytes).length;
+                      return {ok:true,state:'APPEND_OBSERVED',runId:cmd.runId,
+                        sequence:cmd.sequence,acceptedBytes:observations.bytes};
+                    }
+                    if(cmd.action==='export.finish')return {ok:true,state:'WRITTEN_UNVERIFIED',runId:cmd.runId};
+                    if(cmd.action==='backup.verify')return {ok:true,state:'AUTHENTICATED_INVENTORY_ONLY',runId:cmd.runId,
+                      sha256:'a'.repeat(64),uniqueBlobs:0,canonicalRows:0};
+                    throw Error('UNEXPECTED_NATIVE_OPERATION');
+                  }});
+                  const state=await module.exportV2Candidate({db,api:browser,pcms,
+                    donorEnvelope:envelope,checkScope:async()=>true,
+                    checkRestoreHold:async()=>false,connect:transport,runId});
+                  const inspected=await module.createV2Ledger(db).inspect(runId);
+                  let duplicateHeld=false;
+                  try{await module.exportV2Candidate({db,api:browser,pcms,
+                    donorEnvelope:envelope,checkScope:async()=>true,
+                    checkRestoreHold:async()=>false,connect:transport,
+                    runId:'s02_'+('e'.repeat(32))});}
+                  catch{duplicateHeld=true;}
+                  done({ok:state.ok&&duplicateHeld&&
+                    inspected.state==='AUTHENTICATED_INVENTORY_ONLY'&&
+                    inspected.acceptedBytes===inspected.plaintextBytes&&
+                    ledger[0]?.action==='export.begin'&&
+                    ledger.at(-1)?.action==='backup.verify'&&
+                    ledger.filter(e=>e.action==='export.begin').length===1,
+                    status:inspected.state,parts:observations.seq});
+                  db.close();
+                })().catch(e=>done({error:String(e)}));"""
+                check=call('POST',f'/session/{after}/execute/async',
+                           {'script':v2_session,'args':[]},timeout=90)
+                assert check.get('ok') is True,check
+                print('B S02_INSTALLED_V2_IDB_EFFECT_JOURNAL_AND_SYNTHETIC_HOST_NO_REPLAY=PASS',flush=True)
+
+                # S02 B: real packaged candidate self-verifier, actual IDB
+                # encrypted staging and donor/source decoder. The native port
+                # is an independent synthetic byte/effect ledger; NOT host H.
+                v2_verify="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const v2=await import('./backup-v2-codec.mjs');
+                  const session=await import('./backup-v2-session.mjs');
+                  const checker=await import('./backup-v2-verify.mjs');
+                  const donor=await import('../lib/backup-package.js');
+                  const open=()=>new Promise((resolve,reject)=>{
+                    const req=indexedDB.open('s02-v2-verify-'+crypto.randomUUID(),1);
+                    req.onupgradeneeded=()=>req.result.createObjectStore('meta',{keyPath:'key'});
+                    req.onsuccess=()=>resolve(req.result);
+                    req.onerror=()=>reject(req.error);
+                  });
+                  const db=await open(),runId='s02_'+crypto.randomUUID().replaceAll('-','');
+                  const password='S02_disposable_b_verifier_password';
+                  const portable=donor.createPortableBackupPayload({
+                    state:{},containers:[],selection:{kind:'full'}});
+                  const envelope=await donor.encodeBackupEnvelope({payload:portable,password});
+                  const empty={schema:1,stores:{entities:[],operations:[],
+                    events:[],meta:[],observations:[]}};
+                  const plan=await v2.compileV2(empty,envelope);
+                  const raw=new Uint8Array(plan.plaintextBytes),parts=[];
+                  let cursor=0;
+                  for await(const chunk of v2.streamV2Frames(plan)){
+                    raw.set(chunk,cursor);cursor+=chunk.length;
+                  }
+                  const nativeSteps=[],cipher='c'.repeat(64);
+                  const native=()=>({close(){},async exchange(req){
+                    nativeSteps.push(req.action);
+                    if(req.action==='export.begin')return {
+                      ok:true,state:'OPEN_OBSERVED',runId:req.runId};
+                    if(req.action==='export.append')return {
+                      ok:true,state:'APPEND_OBSERVED',runId:req.runId,
+                      sequence:req.sequence,acceptedBytes:0};
+                    if(req.action==='restore.begin')return {
+                      ok:true,runId:req.runId,state:'INACTIVE_STAGING_REQUIRED',
+                      plaintextBytes:raw.length,sha256:cipher};
+                    if(req.action==='restore.read'){
+                      const size=30000,start=req.sequence*size;
+                      const fragment=raw.subarray(start,start+size);
+                      const complete=start+fragment.length===raw.length;
+                      return {ok:true,runId:req.runId,sequence:req.sequence,
+                        bytes:btoa(String.fromCharCode(...fragment)),complete,
+                        state:complete?'AUTHENTICATED_SECOND_PASS':
+                          'INACTIVE_STAGING_FRAGMENT',
+                        ...(complete?{sha256:cipher}:{})};
+                    }
+                    if(req.action==='archive.inspect')return {ok:true,
+                      runId:req.runId,state:'RECOVERY_VERIFIED',
+                      cutDigest:'d'.repeat(64),ciphertextSha256:cipher,
+                      preparedSha256:'b'.repeat(64),acceptedBytes:raw.length};
+                    if(req.action==='backup.verify')return {ok:true,
+                      runId:req.runId,state:'AUTHENTICATED_INVENTORY_ONLY',
+                      sha256:cipher,uniqueBlobs:0,canonicalRows:0};
+                    if(req.action==='archive.recovery.complete')return {
+                      ok:true,runId:req.runId,state:'RECOVERY_VERIFIED',
+                      sha256:cipher,activation:'OFF'};
+                    if(req.action==='restore.abort')return {ok:true,
+                      runId:req.runId,state:'RESTORE_READER_ABORTED'};
+                    throw Error('BAD_TEST_NATIVE');
+                  }});
+                  const ledger=session.createV2Ledger(db);
+                  let row=await ledger.claim(runId,'d'.repeat(64),raw.length);
+                  for(const [from,to,patch] of [
+                    ['PREPARED','CREATE_POSSIBLE',{}],
+                    ['CREATE_POSSIBLE','OPEN_OBSERVED',{}],
+                    ['OPEN_OBSERVED','APPEND_POSSIBLE',{}],
+                    ['APPEND_POSSIBLE','OPEN_OBSERVED',
+                     {acceptedBytes:raw.length,nextSequence:1}],
+                    ['OPEN_OBSERVED','FINISH_POSSIBLE',{}],
+                    ['FINISH_POSSIBLE','WRITTEN_UNVERIFIED',{}],
+                    ['WRITTEN_UNVERIFIED','AUTHENTICATED_INVENTORY_ONLY',
+                     {ciphertextSha256:cipher,observedBlobs:0}]
+                  ])row=await ledger.advance(runId,row.revision,from,to,patch);
+                  const restored=await checker.verifyV2StoredArchive({
+                    api:browser,db,runId,password,
+                    assertNotRestoring:async()=>true,
+                    connectionFactory:native
+                  });
+                  const after=await ledger.inspect(runId);
+                  // Second fully qualified archive under the same durable
+                  // Firefox DB: a completed first run MUST release active.
+                  const secondRun='s02_'+crypto.randomUUID().replaceAll('-','');
+                  let second=await ledger.claim(secondRun,'d'.repeat(64),raw.length);
+                  for(const [from,to,patch] of [
+                    ['PREPARED','CREATE_POSSIBLE',{}],
+                    ['CREATE_POSSIBLE','OPEN_OBSERVED',{}],
+                    ['OPEN_OBSERVED','APPEND_POSSIBLE',{}],
+                    ['APPEND_POSSIBLE','OPEN_OBSERVED',
+                      {acceptedBytes:raw.length,nextSequence:1}],
+                    ['OPEN_OBSERVED','FINISH_POSSIBLE',{}],
+                    ['FINISH_POSSIBLE','WRITTEN_UNVERIFIED',{}],
+                    ['WRITTEN_UNVERIFIED','AUTHENTICATED_INVENTORY_ONLY',
+                      {ciphertextSha256:cipher,observedBlobs:0}]
+                  ])second=await ledger.advance(secondRun,second.revision,from,to,patch);
+                  const restoredSecond=await checker.verifyV2StoredArchive({
+                    api:browser,db,runId:secondRun,password,
+                    assertNotRestoring:async()=>true,connectionFactory:native
+                  });
+                  const thirdRun='s02_'+crypto.randomUUID().replaceAll('-','');
+                  let third=await ledger.claim(thirdRun,'d'.repeat(64),raw.length);
+                  let staleBlocked=false;
+                  try{await ledger.advance(runId,after.revision,
+                    'RECOVERY_VERIFIED','RECOVERY_VERIFIED',{
+                      preparedSha256:after.preparedSha256,
+                      ciphertextSha256:cipher});}
+                  catch{staleBlocked=true;}
+                  const retired=await ledger.retireUndispatched(thirdRun,third.revision);
+                  // Lost terminal ACK: native had authenticated complete
+                  // source/donor and journaled qualification, while browser
+                  // retained only its inventory marker. Reconcile read-only
+                  // file/receipt; never replay export fragments or CREATE.
+                  const lostRun='s02_'+crypto.randomUUID().replaceAll('-','');
+                  let lost=await ledger.claim(lostRun,'d'.repeat(64),raw.length);
+                  for(const [from,to,patch] of [
+                    ['PREPARED','CREATE_POSSIBLE',{}],
+                    ['CREATE_POSSIBLE','OPEN_OBSERVED',{}],
+                    ['OPEN_OBSERVED','APPEND_POSSIBLE',{}],
+                    ['APPEND_POSSIBLE','OPEN_OBSERVED',
+                      {acceptedBytes:raw.length,nextSequence:1}],
+                    ['OPEN_OBSERVED','FINISH_POSSIBLE',{}],
+                    ['FINISH_POSSIBLE','WRITTEN_UNVERIFIED',{}],
+                    ['WRITTEN_UNVERIFIED','AUTHENTICATED_INVENTORY_ONLY',
+                      {ciphertextSha256:cipher,observedBlobs:0}]
+                  ])lost=await ledger.advance(lostRun,lost.revision,from,to,patch);
+                  const nativeBefore=nativeSteps.filter(x=>x.startsWith('export.')).length;
+                  let wrongReceiptHeld=false;
+                  const forged=()=>({close(){},async exchange(cmd){
+                    if(cmd.action==='archive.inspect')return {
+                      ok:true,runId:cmd.runId,state:'RECOVERY_VERIFIED',
+                      cutDigest:'e'.repeat(64),ciphertextSha256:cipher,
+                      preparedSha256:'b'.repeat(64),
+                      acceptedBytes:raw.length};
+                    throw Error('UNEXPECTED_RECONCILE_EFFECT');
+                  }});
+                  try{await checker.reconcileV2QualifiedNative({
+                    api:browser,db,runId:lostRun,assertNotRestoring:async()=>true,
+                    connectionFactory:forged});}
+                  catch{wrongReceiptHeld=true;}
+                  const stillInventory=(await ledger.inspect(lostRun)).state===
+                    'AUTHENTICATED_INVENTORY_ONLY';
+                  const reconciled=await checker.reconcileV2QualifiedNative({
+                    api:browser,db,runId:lostRun,assertNotRestoring:async()=>true,
+                    connectionFactory:native});
+                  const nativeAfter=nativeSteps.filter(x=>x.startsWith('export.')).length;
+                  const fourthRun='s02_'+crypto.randomUUID().replaceAll('-','');
+                  const fourth=await ledger.claim(fourthRun,'d'.repeat(64),raw.length);
+                  const records=[runId,secondRun,thirdRun].map(id=>ledger.inspect(id));
+                  const history=await Promise.all(records);
+                  db.close();
+                  done({ok:restored.ok&&restoredSecond.ok&&
+                    restored.state==='RECOVERY_VERIFIED'&&
+                    restoredSecond.state==='RECOVERY_VERIFIED'&&
+                    after.state==='RECOVERY_VERIFIED'&&
+                    after.preparedSha256===restored.preparedSha256&&
+                    restored.activation==='OFF'&&restored.sourceRows===0&&
+                    staleBlocked&&retired.state==='RETIRED_PRE_DISPATCH'&&
+                    fourth.state==='PREPARED'&&wrongReceiptHeld&&
+                    stillInventory&&reconciled.ok&&
+                    reconciled.state==='RECOVERY_VERIFIED'&&
+                    nativeBefore===nativeAfter&&
+                    history.map(x=>x.state).join('|')===
+                      'RECOVERY_VERIFIED|RECOVERY_VERIFIED|RETIRED_PRE_DISPATCH'&&
+                    nativeSteps.filter(x=>x==='archive.recovery.complete').length===2,
+                    actions:nativeSteps.length,status:after.state});
+                })().catch(e=>done({error:String(e)}));"""
+                verified_result=call('POST',f'/session/{after}/execute/async',
+                                      {'script':v2_verify,'args':[]},timeout=90)
+                assert verified_result.get('ok') is True,verified_result
+                print('B S02_INSTALLED_READONLY_RESTORABLE_NATIVE_CANDIDATE_LEDGERS_AND_EPHEMERAL_IDB=PASS',flush=True)
+                print('B S02_BACKUP_TERMINAL_SUCCESSION_AND_STALE_REPLAY_FENCE=PASS',flush=True)
+
+
+                # S02 B: real existing daily I15 runner and durable I15 claim
+                # admit a source-complete v2 candidate only through a trusted
+                # background-only review-injected branch. Mock native ledger
+                # independent of the runner. It MUST remain HELD, not retained.
+                v2_auto="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const auto=await import('./backup-auto-run.mjs');
+                  const state=await import('./backup-auto-store.mjs');
+                  const open=()=>new Promise((resolve,reject)=>{
+                    const req=indexedDB.open('s02-i15-'+crypto.randomUUID(),1);
+                    req.onupgradeneeded=()=>req.result.createObjectStore('meta',{keyPath:'key'});
+                    req.onsuccess=()=>resolve(req.result);
+                    req.onerror=()=>reject(req.error);
+                  });
+                  const db=await open();
+                  const stored=state.createAutoStore(db);
+                  await stored.enabled(true);
+                  const calls=[],run='9'.repeat(32);
+                  const runner=auto.createAutoRunner(browser,{
+                    open:async()=>db,newId:()=>run,
+                    reviewedV2:async()=>true,
+                    native:async()=>({ok:true,passphrase:'safe-test-only-vault-password'}),
+                    captureV2:async()=>({pcms:{schema:1,stores:{
+                      entities:[],operations:[],events:[],meta:[],observations:[]}},
+                      donorEnvelope:'actual-donor-envelope-encoded-in-fixture'}),
+                    verifyV2:async()=>({ok:false,state:'INVENTORY_ONLY'}),
+                    dispatchV2:async({runId,checkScope,checkRestoreHold})=>{
+                      calls.push(runId);
+                      if(!await checkScope()||await checkRestoreHold())
+                        throw Error('BACKUP_V2_NOT_ADMITTED');
+                      return {ok:true,runId,state:'AUTHENTICATED_INVENTORY_ONLY',
+                        plaintextBytes:100,
+                        ciphertextSha256:'a'.repeat(64)};
+                    }
+                  });
+                  const first=await runner.tick(),second=await runner.tick();
+                  const manual=await runner.manualV2Candidate();
+                  const disallowed=auto.createAutoRunner(browser,{
+                    reviewedV2:async()=>false});
+                  const held=await disallowed.manualV2Candidate();
+                  const journal=(await stored.read()).state;
+                  done({ok:first.code==='V2_NATIVE_OUTCOME_UNKNOWN'&&
+                    second.code==='DOWNLOAD_OUTCOME_UNKNOWN'&&
+                    manual.ok===false&&manual.code==='V2_NATIVE_OUTCOME_UNKNOWN'&&
+                    held.code==='BACKUP_V2_REVIEW_REQUIRED'&&
+                    calls.length===2&&calls[0]==='s02_'+run&&
+                    calls[1]==='s02_'+run&&
+                    journal.status==='HELD_UNCERTAIN'&&
+                    journal.archives.length===0&&
+                    journal.lastSuccessDay===-1&&
+                    journal.active?.status==='DISPATCH_POSSIBLE',
+                    first:first.code,second:second.code,
+                    count:calls.length,manual:manual.code,ledgerStatus:journal.status});
+                  db.close();
+                })().catch(e=>done({ok:false,error:String(e)}));"""
+                auto_result=call('POST',f'/session/{after}/execute/async',
+                                  {'script':v2_auto,'args':[]},timeout=90)
+                assert auto_result.get('ok') is True,auto_result
+                print('B S02_EXISTING_I15_DAILY_CANDIDATE_HELD_NO_NATIVE_REPLAY_OR_FALSE_RETENTION=PASS',flush=True)
+
+                # S02 B: native-tested source/donor recovery can be qualified
+                # as a real I15 tracked successful file; the provider only
+                # supplies synthetic independent-effects observations here.
+                v2_success="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const auto=await import('./backup-auto-run.mjs');
+                  const journal=await import('./backup-auto-store.mjs');
+                  const open=()=>new Promise((resolve,reject)=>{
+                    const req=indexedDB.open('s02-native-success-'+crypto.randomUUID(),1);
+                    req.onupgradeneeded=()=>req.result.createObjectStore('meta',{keyPath:'key'});
+                    req.onsuccess=()=>resolve(req.result);
+                    req.onerror=()=>reject(req.error);
+                  });
+                  const db=await open(),save=journal.createAutoStore(db);
+                  await save.enabled(true);
+                  let nativeExports=0,nativeRestores=0,prunes=0;
+                  const key='7'.repeat(32);
+                  const app=auto.createAutoRunner(browser,{
+                    open:async()=>db,newId:()=>key,
+                    reviewedV2:async()=>true,
+                    native:async()=>({ok:true,passphrase:'long-synthetic-key-not-saved'}),
+                    captureV2:async()=>({pcms:{schema:1,stores:{
+                      entities:[],operations:[],events:[],meta:[],observations:[]}},
+                      donorEnvelope:'long-synthetic-native-envelope'}),
+                    dispatchV2:async({runId})=>{
+                      nativeExports++;
+                      return {ok:true,runId,state:'AUTHENTICATED_INVENTORY_ONLY',
+                        plaintextBytes:1024,ciphertextSha256:'a'.repeat(64)};
+                    },
+                    verifyV2:async({runId,password})=>{
+                      nativeRestores++;
+                      if(password!=='long-synthetic-key-not-saved')
+                        throw Error('MISSING_OS_VAULT');
+                      return {ok:true,runId,state:'RECOVERY_VERIFIED',
+                        sha256:'a'.repeat(64),preparedSha256:'b'.repeat(64)};
+                    },
+                    nativeRetention:async()=>{prunes++;return {ok:true,
+                      state:'NO_ELIGIBLE_DELETE'};}
+                  });
+                  const first=await app.tick(),second=await app.tick();
+                  const inspected=(await save.read()).state,report=await app.status();
+                  db.close();
+                  done({ok:first.ok===true&&
+                    first.code==='NATIVE_READONLY_SOURCE_RECOVERY'&&
+                    second.code==='BACKUP_ALREADY_DONE'&&
+                    nativeExports===1&&nativeRestores===1&&prunes===1&&
+                    inspected.active===null&&inspected.archives.length===1&&
+                    inspected.archives[0].kind==='AUTO_NATIVE'&&
+                    inspected.archives[0].tier===3&&
+                    inspected.lastSuccessDay>=0&&
+                    report.tier===3&&
+                    report.proof==='NATIVE_READONLY_SOURCE_RECOVERY',
+                    first:first.code,second:second.code,retained:report.retained});
+                })().catch(e=>done({error:String(e)}));"""
+                v2_success_result=call('POST',f'/session/{after}/execute/async',
+                                       {'script':v2_success,'args':[]},timeout=90)
+                assert v2_success_result.get('ok') is True,v2_success_result
+                print('B S02_EXISTING_I15_DAILY_NATIVE_SOURCE_RECOVERY_QUALIFIED_ONCE=PASS',flush=True)
+
+
+                # S02 B: actual separate Firefox IndexedDB staging is
+                # strictly inactive until full second-pass native receipt,
+                # and survives DB reopen without promoting partial fragments.
+                v2_stage="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const module=await import('./restore-v2-inactive-stage.mjs');
+                  const digest='a'.repeat(64),id='s02_'+('f'.repeat(32));
+                  let authorized=true;
+                  const guard=()=>Promise.resolve(authorized);
+                  let db=await module.openV2StageDB();
+                  let stage=module.createV2InactiveStage(db,{assertHeld:guard});
+                  await stage.begin(id,{state:'INACTIVE_STAGING_REQUIRED',
+                    plaintextBytes:6,sha256:digest});
+                  const part1=new Uint8Array([0,255,1]);
+                  const part2=new Uint8Array([17,0,42]);
+                  const a=await stage.append(id,0,part1);
+                  const sealedRow=await new Promise(resolve=>{
+                    const t=db.transaction('chunks','readonly');
+                    t.objectStore('chunks').get(id+':000000000000000').onsuccess=e=>
+                      resolve(e.target.result||null);
+                  });
+                  const diskCipherOnly=sealedRow?.data===undefined&&
+                    typeof sealedRow?.ciphertext==='string'&&
+                    typeof sealedRow?.iv==='string'&&
+                    sealedRow.ciphertext!==btoa(String.fromCharCode(...part1));
+                  let early=false;
+                  try{const it=stage.fragments(id);await it.next();}
+                  catch{early=true;}
+                  authorized=false;let guardFailed=false;
+                  try{await stage.append(id,1,part2)}catch{guardFailed=true;}
+                  authorized=true;
+                  let sequenceFailed=false;
+                  try{await stage.append(id,0,part2)}catch{sequenceFailed=true;}
+                  await stage.append(id,1,part2);
+                  let wrongReceipt=false;
+                  try{await stage.finish(id,{state:'AUTHENTICATED_SECOND_PASS',
+                    sha256:'0'.repeat(64),complete:true},2)}
+                  catch{wrongReceipt=true;}
+                  await stage.finish(id,{state:'AUTHENTICATED_SECOND_PASS',
+                    sha256:digest,complete:true},2);
+                  db.close();db=await module.openV2StageDB();
+                  stage=module.createV2InactiveStage(db,{assertHeld:guard});
+                  const out=[];for await(const item of stage.fragments(id))out.push(...item);
+                  const info=await stage.inspect(id);
+                  const frameCodec=await import('./backup-v2-codec.mjs');
+                  const second='s02_'+('1'.repeat(32));
+                  const donorBytes=new TextEncoder().encode('opaque donor fixture');
+                  const endBytes=new TextEncoder().encode('{"schema":2}');
+                  const parts=[
+                    frameCodec.frameHeader(frameCodec.V2_FRAME.DONOR,donorBytes.length),donorBytes,
+                    frameCodec.frameHeader(frameCodec.V2_FRAME.END,endBytes.length),endBytes
+                  ];
+                  const framed=new Uint8Array(parts.reduce((total,v)=>total+v.length,0));
+                  let cursor=0;
+                  for(const part of parts){framed.set(part,cursor);cursor+=part.length;}
+                  await stage.begin(second,{state:'INACTIVE_STAGING_REQUIRED',
+                    sha256:digest,plaintextBytes:framed.length});
+                  await stage.append(second,0,framed);
+                  await stage.finish(second,{state:'AUTHENTICATED_SECOND_PASS',
+                    sha256:digest,complete:true},1);
+                  const frames=[];
+                  for await(const frame of stage.frames(second))frames.push(frame.kind);
+                  db.close();
+                  done({ok:early&&guardFailed&&sequenceFailed&&wrongReceipt&&
+                    diskCipherOnly&&
+                    JSON.stringify(frames)==='["DONOR_FRAGMENT","DONOR_END","END"]'&&
+                    a.acceptedBytes===3&&info.state==='READY_FOR_INACTIVE_DECODER'&&
+                    JSON.stringify(out)==='[0,255,1,17,0,42]'&&
+                    info.acceptedBytes===6,info});
+                })().catch(e=>done({error:String(e)}));"""
+                stage_result=call('POST',f'/session/{after}/execute/async',
+                                  {'script':v2_stage,'args':[]},timeout=90)
+                assert stage_result.get('ok') is True,stage_result
+                print('B S02_INACTIVE_STAGE_BLOCKS_PARTIAL_AUTH_AND_REOPENS_EXACT_BYTES=PASS',flush=True)
+
+                # CI diagnosis: never print donor values, identities or secrets.
+                donor_probe_script="""const done=arguments[arguments.length-1];
+                const port=browser.runtime.connect({name:'pcms-s02-backup-donor-readonly'});
+                let once=false;
+                const finish=data=>{if(once)return;once=true;
+                  done(data);try{port.disconnect()}catch{}};
+                port.onMessage.addListener(v=>finish({
+                  ok:v?.ok===true&&!!v?.state&&Array.isArray(v?.containers),
+                  response:!!v,hasState:!!v?.state,
+                  hasContainers:Array.isArray(v?.containers),
+                  keys:v&&typeof v==='object'?Object.keys(v).sort():[]}));
+                port.onDisconnect.addListener(()=>finish({ok:false,disconnected:true}));
+                port.postMessage({action:'SNAPSHOT'});"""
+                def donor_probe(stage):
+                    result=call('POST',f'/session/{after}/execute/async',
+                      {'script':donor_probe_script,'args':[]},timeout=45)
+                    print('B S02_DONOR_WITNESS_'+stage+'=',result,flush=True)
+                    return result
+                assert donor_probe('BEFORE_STRESS').get('ok') is True
+
+                # S02 B F3: unique source assets and revisions, actual Firefox
+                # IndexedDB second-pass restore. No native privilege/source
+                # provider effect, and the native terminal is synthetic.
+                v2_fleet="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const codec=await import('./backup-v2-codec.mjs');
+                  const store=await import('./restore-v2-inactive-stage.mjs');
+                  const restore=await import('./restore-v2-prep.mjs');
+                  const core=await import('./backup-core.mjs');
+                  const donor=await import('../lib/backup-package.js');
+                  const timer=performance.now();
+                  const before=await navigator.storage.estimate();
+                  const text=new TextEncoder();
+                  const pcms={schema:1,stores:{entities:[],operations:[],
+                    events:[],meta:[],observations:[]}};
+                  for(let i=0;i<50;i++)
+                    pcms.stores.meta.push({key:'account:stress-'+i,
+                      value:{account:{state:'ARCHIVED',accountId:'stress-'+i}}});
+                  for(let i=0;i<1024;i++){
+                    const raw=[
+                      ['main.pjs',text.encode('output="source-'+i+'";')],
+                      ['index.html',text.encode('<b>source</b>')],
+                      ['src/asset.bin',Uint8Array.from({length:80+i%512},
+                        (_,n)=>n===0?(i&255):n===1?((i>>8)&255):
+                          (i*37+n*19+(n>>3))&255)]
+                    ];
+                    const files=await Promise.all(raw.map(async([path,bytes])=>({
+                      path,size:bytes.length,sha256:await core.digest(bytes)})));
+                    files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+                    const fingerprint=await core.digest('PCMS_STAGED_SOURCE_V1'+
+                      String.fromCharCode(10)+files.map(f=>
+                        JSON.stringify([f.path,f.size,f.sha256])).join(String.fromCharCode(10)));
+                    const source={ok:true,fingerprint,files,
+                      blobs:files.map(f=>({path:f.path,base64:btoa(
+                        String.fromCharCode(...raw.find(x=>x[0]===f.path)[1]))}))};
+                    pcms.stores.meta.push({key:'stage-history:stress-'+i,
+                      value:{record:{candidate:source,previous:source}}});
+                  }
+                  const password='s02-test-only-bounded-fleet';
+                  const sealed=await donor.encodeBackupEnvelope({payload:
+                    donor.createPortableBackupPayload({state:{},containers:[],
+                      selection:{kind:'full'}}),password});
+                  const plan=await codec.compileV2(pcms,sealed);
+                  const chunks=[],size=plan.plaintextBytes;
+                  for await(const frag of codec.streamV2Frames(plan))chunks.push(frag);
+                  const assembled=new Uint8Array(size);let offset=0;
+                  for(const chunk of chunks){assembled.set(chunk,offset);offset+=chunk.length;}
+                  const db=await store.openV2StageDB();
+                  const staged=store.createV2InactiveStage(db,{assertHeld:async()=>true});
+                  const runId='s02_'+crypto.randomUUID().replaceAll('-','');
+                  const proof='f'.repeat(64);
+                  await staged.begin(runId,{state:'INACTIVE_STAGING_REQUIRED',
+                    plaintextBytes:size,sha256:proof});
+                  let seq=0;
+                  for(let i=0;i<assembled.length;i+=49152)
+                    await staged.append(runId,seq++,assembled.subarray(i,i+49152));
+                  await staged.finish(runId,{state:'AUTHENTICATED_SECOND_PASS',
+                    sha256:proof,complete:true},seq);
+                  db.close();
+                  const reopened=await store.openV2StageDB(),hold=store.createV2InactiveStage(
+                    reopened,{assertHeld:async()=>true});
+                  const empty={schema:1,stores:{entities:[],operations:[],
+                    events:[],meta:[],observations:[]}};
+                  const qualified=await restore.prepareInactiveV2FromStage({
+                    stage:hold,runId,readback:{state:'AUTHENTICATED_SECOND_PASS',
+                      sha256:proof,complete:true},
+                    expectedCiphertextSha256:proof,
+                    currentPcms:empty,mode:'replace',password,
+                    decodeDonor:donor.decodeBackupEnvelope});
+                  const last=qualified.prepared.stores.meta.find(x=>
+                    x.key==='stage-history:stress-1023');
+                  const after=await navigator.storage.estimate();
+                  reopened.close();
+                  done({ok:qualified.status==='INACTIVE_PREPARED_NOT_APPLIED'&&
+                    qualified.activation==='OFF'&&
+                    qualified.prepared.stores.meta.length===1074&&
+                    plan.terminal.uniqueBlobs>1800&&
+                    last?.value.record.candidate.files.length===3&&
+                    last.value.record.candidate.blobs.length===3,
+                    accounts:50,records:1024,uniqueBlobs:plan.terminal.uniqueBlobs,
+                    plaintextBytes:size,idbFragments:seq,
+                    idbUsageDelta:(after.usage||0)-(before.usage||0),
+                    elapsedMs:Math.round(performance.now()-timer)});
+                })().then(done).catch(e=>done({error:String(e)}));"""
+                fleet_result=call('POST',f'/session/{after}/execute/async',
+                                   {'script':v2_fleet,'args':[]},timeout=120)
+                assert fleet_result.get('ok') is True,fleet_result
+                print('B S02_HETEROGENEOUS_50_1024_SOURCE_IDB_INACTIVE_RECOVERY=PASS',
+                      fleet_result,flush=True)
+
+                assert donor_probe('AFTER_STRESS').get('ok') is True
+
                 code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const core=await import('./backup-core.mjs');
@@ -2746,6 +3387,8 @@ def main():
                         'browser download not confirmed:' in backup_status):
                         break
                     time.sleep(.25)
+                if 'Browser reported complete (tier 2)' not in backup_status:
+                    donor_probe('MANUAL_FAILURE')
                 assert 'Browser reported complete (tier 2)' in backup_status,backup_status
                 assert 'Exact on-disk bytes have NOT been independently re-read' in backup_status,backup_status
                 receipt=execute(after,"return document.getElementById('pcms-overview-backup')?.textContent||''")
@@ -2774,6 +3417,14 @@ def main():
                     });
                   }
                   const actual=await portStatus();
+                  const v2Denied=await new Promise((resolve,reject)=>{
+                    const port=browser.runtime.connect({name:core.AUTO_PORT});
+                    port.onMessage.addListener(value=>{try{port.disconnect()}catch{}resolve(value)});
+                    port.onDisconnect.addListener(()=>reject(Error('V2_MANUAL_PORT_DISCONNECTED')));
+                    port.postMessage({action:'RUN_V2_MANUAL'});
+                  });
+                  if(v2Denied?.ok!==false||v2Denied.code!=='BACKUP_V2_REVIEW_REQUIRED')
+                    throw Error('S02_PRODUCTION_MANUAL_NATIVE_NOT_FENCED');
                   if(!actual.ok||actual.enabled!==false||actual.tier!==0)
                     throw Error('CANONICAL_AUTO_BACKUP_NOT_OFF');
                   async function makeDb(){
@@ -2824,8 +3475,61 @@ def main():
                   if(held.code!=='SUSPENDED_KEY_UNAVAILABLE'||blockedDownloads!==0||
                     heldState.state.archives.length!==0||heldState.state.status!=='SUSPENDED')
                     throw Error('LOCKED_VAULT_FALLBACK_FAILED');
+                  // B-tier: the real packaged production runner, guarded
+                  // by an explicit privileged construction-only test grant.
+                  // No actual native file or provider effect in this case;
+                  // the separate H witness exercises the installed OS host.
+                  let manualNative=0,manualVerified=0;
+                  const makeReviewed=({bad=false,delayed=null,onDispatch=null,token='4'}={})=>
+                    runnerModule.createAutoRunner(api,{
+                      open:async()=>db,reviewedV2:async()=>true,
+                      newId:()=>token.repeat(32),
+                      native:async()=>({ok:true,passphrase:'synthetic-b-v2-portable-vault'}),
+                      captureV2:async()=>({pcms:{schema:1,stores:{}},
+                        donorEnvelope:'synthetic-b-donor-only'}),
+                      dispatchV2:async({runId})=>{
+                        manualNative++;
+                        onDispatch?.();
+                        if(delayed)await delayed;
+                        return {ok:true,runId,state:'AUTHENTICATED_INVENTORY_ONLY',
+                          ciphertextSha256:'a'.repeat(64)};
+                      },
+                      verifyV2:async({runId})=>{
+                        manualVerified++;
+                        return {ok:true,runId:bad?'s02_'+('9'.repeat(32)):runId,
+                          state:'RECOVERY_VERIFIED',sha256:'a'.repeat(64),
+                          preparedSha256:'b'.repeat(64),sourceRows:30};
+                      }
+                    });
+                  const manual=await makeReviewed().manualV2Candidate();
+                  if(!manual.ok||manual.state!=='RECOVERY_VERIFIED'||
+                     manual.sourceRows!==30||manual.retentionSuccess!==false||
+                     manual.activation!=='OFF'||manualNative!==1||manualVerified!==1)
+                    throw Error('S02_PACKAGED_MANUAL_NATIVE_RECOVERY_UNQUALIFIED');
+                  const bad=await makeReviewed({bad:true,token:'5'}).manualV2Candidate();
+                  if(bad.ok!==false||bad.code!=='V2_NATIVE_OUTCOME_UNKNOWN')
+                    throw Error('S02_PACKAGED_WRONG_MANUAL_NATIVE_RECEIPT_ACCEPTED');
+                  let resolveDispatch,signalDispatch;
+                  const delayed=new Promise(resolve=>resolveDispatch=resolve);
+                  const arrived=new Promise(resolve=>signalDispatch=resolve);
+                  const concurrent=makeReviewed({delayed,token:'6',
+                    onDispatch:signalDispatch});
+                  const pending=concurrent.manualV2Candidate();
+                  await Promise.race([arrived,new Promise((_,reject)=>
+                    setTimeout(()=>reject(Error('S02_MANUAL_DISPATCH_NOT_REACHED')),5000))]);
+                  if(manualNative!==3)throw Error('S02_MANUAL_DISPATCH_WRONG_COUNT');
+                  const competing=await concurrent.manualV2Candidate();
+                  const competingDaily=await concurrent.tick();
+                  if(competing.code!=='BACKUP_INFLIGHT'||
+                     competingDaily.code!=='BACKUP_INFLIGHT')
+                    throw Error('S02_MANUAL_DAILY_CONCURRENT_DISPATCH');
+                  resolveDispatch();
+                  if((await pending).state!=='RECOVERY_VERIFIED'||
+                     manualNative!==3||manualVerified!==3)
+                    throw Error('S02_MANUAL_RECEIPT_AFTER_SERIALIZATION_MISSING');
                   db.close();secondDb.close();
-                  return {ok:true,actual,downloads,held:held.code};
+                  return {ok:true,actual,downloads,held:held.code,
+                    nativeManual:'EXACT_SOURCE_RECOVERY_AND_SINGLE_FLIGHT_VERIFIED'};
                 })().then(done).catch(e=>done({ok:false,code:String(e)}));"""
                 i15=call('POST',f'/session/{after}/execute/async',{'script':i15_code,'args':[]},timeout=90)
                 assert i15.get('ok') is True,i15
@@ -2848,7 +3552,7 @@ def main():
                   const hist=await import('../lib/automation-history.js');
                   const db=await journal.openCanonicalDatabase();
                   const pcms=await core.snapshotCanonical(db);db.close();
-                  const donor=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  const donor=await (await import('./donor-snapshot.mjs')).readProtectedDonorSnapshot(browser);
                   const local=await browser.storage.local.get(null),userscriptData={};
                   for(const [key,value] of Object.entries(local))
                     if(key==='automationJobs'||key.startsWith('gm-values:'))
@@ -3050,8 +3754,8 @@ def main():
                   const pkg=await import('../lib/backup-package.js');
                   const automation=await import('../lib/automation-history.js');
                   const db=await journal.openCanonicalDatabase();
-                  const current=await core.snapshotCanonical(db);db.close();
-                  const donor=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  let current=await core.snapshotCanonical(db);db.close();
+                  const donor=await (await import('./donor-snapshot.mjs')).readProtectedDonorSnapshot(browser);
                   if(!donor?.state||!Array.isArray(donor.containers))
                     throw Error('DONOR_SNAPSHOT_UNAVAILABLE');
                   const stored=await browser.storage.local.get(null);
@@ -3075,7 +3779,7 @@ def main():
                   const password='synthetic-i16-installed-local-restore-passphrase';
                   const donorFile=await pkg.encodeBackupEnvelope({
                     payload:portable,password,scope:{kind:'full'}});
-                  const checkpoint=await core.encodeIntegrated({
+                  let checkpoint=await core.encodeIntegrated({
                     pcms:current,donorEnvelope:donorFile,passphrase:password});
                   const incoming=structuredClone(current);
                   incoming.stores.meta.push({key:'release:i16-new-historical',
@@ -3083,12 +3787,12 @@ def main():
                       release:{state:'APPROVED',approval:{old:true},dispatchPossible:false}})});
                   const source=await core.encodeIntegrated({
                     pcms:incoming,donorEnvelope:donorFile,passphrase:password});
-                  const reviewed=await restore.previewRestore({
+                  let reviewed=await restore.previewRestore({
                     archiveText:source.text,password,mode:'merge',mappings,
                     currentPcms:current,currentDonor:donor,currentPortable:portable,
                     containers:donor.containers,decodeDonor:pkg.decodeBackupEnvelope
                   });
-                  const answer=await new Promise(resolve=>{
+                  const submit=async(checkpointText,reviewedPlanSha256)=>new Promise(resolve=>{
                     const port=browser.runtime.connect({name:'pcms-i16-restore'});
                     let complete=false;
                     const done=result=>{
@@ -3099,10 +3803,40 @@ def main():
                     port.onMessage.addListener(done);
                     port.onDisconnect.addListener(()=>done({ok:false,code:'RESTORE_PORT_CLOSED'}));
                     port.postMessage({action:'APPLY',params:{
-                      archiveText:source.text,checkpointText:checkpoint.text,
+                      archiveText:source.text,checkpointText,
                       password,mode:'merge',fresh:false,mappings,
-                      reviewedPlanSha256:reviewed.planSha256}});
+                      reviewedPlanSha256}});
                   });
+                  let staleRejected=0,answer=await submit(checkpoint.text,reviewed.planSha256);
+                  for(let attempt=0;attempt<3&&!answer.ok&&
+                    answer.code==='RESTORE_PLAN_CHANGED';attempt++){
+                    // A real concurrent canonical mutation invalidates operator
+                    // review. Inspect the absence of any effect before manually
+                    // approving a newly observed destination cut.
+                    const guard=(await browser.storage.local.get('pcmsRestoreInProgress'))
+                      .pcmsRestoreInProgress;
+                    if(guard?.active)throw Error('I16_STALE_PLAN_CAUSED_EFFECT');
+                    const latestDb=await journal.openCanonicalDatabase();
+                    const updated=await core.snapshotCanonical(latestDb);latestDb.close();
+                    if(JSON.stringify(updated)===JSON.stringify(current))
+                      throw Error('I16_REVIEW_DRIFT_UNEXPLAINED');
+                    const oldKeys=new Set(current.stores.meta.map(r=>r.key));
+                    const categories=updated.stores.meta.filter(r=>!oldKeys.has(r.key))
+                      .map(r=>typeof r.key==='string'?
+                        (r.key.startsWith('backup:')?'backup:':
+                        r.key.startsWith('release:')?'release:':
+                        r.key.startsWith('account:')?'account:':'other'):'other');
+                    if(categories.length>3)throw Error('I16_UNBOUNDED_BACKGROUND_DRIFT');
+                    staleRejected++;
+                    current=updated;
+                    checkpoint=await core.encodeIntegrated({
+                      pcms:current,donorEnvelope:donorFile,passphrase:password});
+                    reviewed=await restore.previewRestore({
+                      archiveText:source.text,password,mode:'merge',mappings,
+                      currentPcms:current,currentDonor:donor,currentPortable:portable,
+                      containers:donor.containers,decodeDonor:pkg.decodeBackupEnvelope});
+                    answer=await submit(checkpoint.text,reviewed.planSha256);
+                  }
                   const marker=(await browser.storage.local.get('pcmsRestoreInProgress'))
                     .pcmsRestoreInProgress;
                   const checked=await journal.openCanonicalDatabase();
@@ -3112,15 +3846,32 @@ def main():
                     !marker.active||extraRelease?.value?.release?.state!=='RESTORE_REVIEW_REQUIRED'||
                     extraRelease.value.release.approval!==null)
                     throw Error('RESTORE_COMPLETE_OR_AUTHORITY_INCORRECT:'+JSON.stringify({
-                      code:answer.code,marker:marker?.status,release:extraRelease?.value?.release?.state
+                      code:answer.code,marker:marker?.status,release:extraRelease?.value?.release?.state,
+                      observed:answer.diagnostic||null,
+                      expected:answer.code==='RESTORE_PLAN_CHANGED'?{
+                        planSha256:reviewed.planSha256,
+                        archiveSha256:reviewed.plan.archiveSha256,
+                        sourceSha256:reviewed.plan.sourceSha256,
+                        destinationSha256:reviewed.plan.destinationSha256,
+                        groupsSha256:await core.digest(JSON.stringify(reviewed.plan.groups)),
+                        riskSha256:await core.digest(JSON.stringify(reviewed.plan.risk)),
+                        canonicalStoreCounts:Object.fromEntries(Object.entries(current.stores)
+                          .map(([name,rows])=>[name,rows.length])),
+                        pcmsSha256:await core.digest(JSON.stringify(current)),
+                        donorSha256:await core.digest(JSON.stringify(restore.stableRestoreDonorCut(donor))),
+                        portableSha256:await core.digest(JSON.stringify(portable))
+                      }:null
                     }));
                   return {ok:true,groups:Object.keys(marker.groups).length,
-                    status:marker.status,source:source.sha256};
+                    status:marker.status,source:source.sha256,staleRejected};
                 })().then(done).catch(e=>done({ok:false,error:String(e)}));"""
                 i16_full=call('POST',f'/session/{after}/execute/async',
                               {'script':i16_end_to_end,'args':[]},timeout=120)
                 assert i16_full.get('ok') is True,i16_full
                 assert i16_full.get('groups')==4,i16_full
+                if i16_full.get('staleRejected',0):
+                    print('B I16_DESTINATION_DRIFT_HELD_BEFORE_EFFECT_AND_FRESH_OPERATOR_REVIEW=PASS',
+                          i16_full['staleRejected'],flush=True)
                 print('B I16_REAL_GUARDED_DONOR_AND_CANONICAL_STAGED_RESTORE_INACTIVE=PASS',flush=True)
 
                 # Full Firefox process restart, not just UI navigation.
@@ -3174,7 +3925,7 @@ def main():
                   const sourceId=holder?.container?.cookieStoreId;
                   if(!sourceId||holder?.profile?.personaUid!==previousUid)
                     throw Error('DONOR_HOLDER_NOT_CREATED');
-                  const donor=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  const donor=await (await import('./donor-snapshot.mjs')).readProtectedDonorSnapshot(browser);
                   const db=await journal.openCanonicalDatabase();
                   const canonical=await core.snapshotCanonical(db);db.close();
                   const stored=await browser.storage.local.get(null);
@@ -3253,7 +4004,7 @@ def main():
                     archiveText:archive.text,checkpointText:checkpoint.text,
                     password,mode:'merge',fresh:true,mappings,
                     reviewedPlanSha256:inspected.planSha256});
-                  const after=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  const after=await (await import('./donor-snapshot.mjs')).readProtectedDonorSnapshot(browser);
                   const marker=(await browser.storage.local.get('pcmsRestoreInProgress'))
                     .pcmsRestoreInProgress;
                   const imported=Object.entries(after.state.profiles||{})
@@ -3299,6 +4050,151 @@ def main():
                 fresh_restored=execute(after,"return browser.storage.local.get('pcmsRestoreInProgress').then(s=>({active:s.pcmsRestoreInProgress?.active,fresh:s.pcmsRestoreInProgress?.fresh,status:s.pcmsRestoreInProgress?.status}))")
                 assert fresh_restored=={'active':True,'fresh':True,'status':'COMPLETE_INACTIVE'},fresh_restored
                 print('B I16_FRESH_PROFILE_UID_COLLISION_BLOCK_ROUTE_INACTIVE_RESTART=PASS',flush=True)
+                # S02 B: the same persistently installed production XPI,
+                # in the disposable *fresh* Firefox profile, reconstructs
+                # complete v2 source and applies inactive canonical records
+                # through actual I16 guarded IDB production module. This uses
+                # a fixture native terminal receipt, NOT H disk/native proof.
+                fresh_v2="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const v2=await import('./backup-v2-codec.mjs');
+                  const prepare=await import('./restore-v2-prep.mjs');
+                  const restore=await import('./restore-idb.mjs');
+                  const core=await import('./backup-core.mjs');
+                  const donor=await import('../lib/backup-package.js');
+                  const password='s02-disposable-fresh-restore-passphrase';
+                  const text=new TextEncoder();
+                  const names=[['main.pjs',text.encode('output = "V2 fresh"')],
+                    ['index.html',text.encode('<b>V2 fresh</b>')],
+                    ['src/asset.bin',new Uint8Array([0,255,7,0,12])]];
+                  const files=await Promise.all(names.map(async([path,bytes])=>({
+                    path,size:bytes.length,sha256:await core.digest(bytes)})));
+                  files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+                  const blobs=names.map(([path,bytes])=>({path,base64:
+                    btoa(String.fromCharCode(...bytes))})).sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+                  const fingerprint=await core.digest('PCMS_STAGED_SOURCE_V1'+String.fromCharCode(10)+files.map(
+                    f=>JSON.stringify([f.path,f.size,f.sha256])).join(String.fromCharCode(10)));
+                  const src={ok:true,fingerprint,files,blobs};
+                  const empty={schema:1,stores:Object.fromEntries(
+                    core.DB_STORES.map(k=>[k,[]]))};
+                  const incoming=structuredClone(empty);
+                  incoming.stores.meta.push({key:'stage:v2-fresh',
+                    value:{key:'stage:v2-fresh',record:{candidate:src,previous:src}}});
+                  const sealed=await donor.encodeBackupEnvelope({payload:
+                    donor.createPortableBackupPayload({state:{},containers:[],selection:{kind:'full'}}),
+                    password});
+                  const plan=await v2.compileV2(incoming,sealed);
+                  const chunks=[];for await(const part of v2.streamV2Frames(plan))chunks.push(part);
+                  const plain=new Uint8Array(plan.plaintextBytes);let i=0;
+                  for(const part of chunks){plain.set(part,i);i+=part.length;}
+                  const digest='a'.repeat(64);
+                  const restored=await prepare.prepareInactiveV2({
+                    authenticatedPlaintext:plain,
+                    readback:{state:'AUTHENTICATED_SECOND_PASS',sha256:digest},
+                    expectedCiphertextSha256:digest,password,
+                    decodeDonor:donor.decodeBackupEnvelope,
+                    currentPcms:empty,mode:'replace'});
+                  const dbName='s02-fresh-'+crypto.randomUUID();
+                  const open=()=>new Promise((resolve,reject)=>{
+                    const req=indexedDB.open(dbName,1);
+                    req.onupgradeneeded=()=>{
+                      for(const [name,keyPath] of Object.entries({
+                        entities:'id',operations:'operationId',meta:'key',observations:'id'}))
+                        req.result.createObjectStore(name,{keyPath});
+                      req.result.createObjectStore('events',{autoIncrement:true});
+                    };
+                    req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+                  });
+                  let db=await open();
+                  const held=async()=>{
+                    const state=(await browser.storage.local.get('pcmsRestoreInProgress'))
+                      .pcmsRestoreInProgress;
+                    return state?.active===true&&state.status==='COMPLETE_INACTIVE';
+                  };
+                  const applied=await restore.applyCanonicalSnapshot(db,restored.prepared,{
+                    assertHeld:held,expectedBefore:empty});
+                  db.close();db=await open();
+                  const after=await core.snapshotCanonical(db);
+                  db.close();
+                  // F2: even a receipt-shaped UI object cannot authorize
+                  // restore without a matching previously committed v2
+                  // source/cut/run ledger AND the actual one-port terminal ACK.
+                  const protectedRestore=await import('./restore-v2-candidate.mjs');
+                  const v2Ledger=await import('./backup-v2-session.mjs');
+                  const traceDb=await open();
+                  const runId='s02_'+crypto.randomUUID().replaceAll('-','');
+                  const ledger=v2Ledger.createV2Ledger(traceDb);
+                  let active=await ledger.claim(runId,'c'.repeat(64),plain.length);
+                  for(const [prior,next,patch] of [
+                    ['PREPARED','CREATE_POSSIBLE',{}],
+                    ['CREATE_POSSIBLE','OPEN_OBSERVED',{}],
+                    ['OPEN_OBSERVED','APPEND_POSSIBLE',{}],
+                    ['APPEND_POSSIBLE','OPEN_OBSERVED',
+                      {acceptedBytes:plain.length,nextSequence:1}],
+                    ['OPEN_OBSERVED','FINISH_POSSIBLE',{}],
+                    ['FINISH_POSSIBLE','WRITTEN_UNVERIFIED',{}],
+                    ['WRITTEN_UNVERIFIED','AUTHENTICATED_INVENTORY_ONLY',
+                      {ciphertextSha256:digest,observedBlobs:3}]
+                  ])active=await ledger.advance(runId,active.revision,prior,next,patch);
+                  const nativeCalls=[],nativeBytes=[];
+                  for(let j=0;j<plain.length;j+=30000)
+                    nativeBytes.push(plain.subarray(j,j+30000));
+                  const conn=()=>({close(){},
+                    async exchange(cmd){
+                      nativeCalls.push(cmd.action);
+                      if(cmd.action==='restore.begin')return {ok:true,runId:cmd.runId,
+                        state:'INACTIVE_STAGING_REQUIRED',
+                        plaintextBytes:plain.length,sha256:digest};
+                      if(cmd.action==='archive.recovery.complete')return {
+                        ok:true,state:'RECOVERY_VERIFIED',runId,
+                        sha256:digest,activation:'OFF'};
+                      if(cmd.action==='restore.read'){
+                        const bytes=nativeBytes[cmd.sequence];
+                        if(!bytes)throw Error('NO_MORE_NATIVE_BYTES');
+                        const complete=cmd.sequence===nativeBytes.length-1;
+                        return {ok:true,sequence:cmd.sequence,runId:cmd.runId,complete,
+                          bytes:btoa(String.fromCharCode(...bytes)),
+                          state:complete?'AUTHENTICATED_SECOND_PASS':
+                            'INACTIVE_STAGING_FRAGMENT',
+                          ...(complete?{sha256:digest}:{})};
+                      }
+                      return {ok:false,code:'UNEXPECTED_NATIVE'};
+                    }});
+                  let falseReceiptDenied=false;
+                  try{await protectedRestore.prepareTrackedV2Restore({
+                    api:browser,canonicalDb:traceDb,
+                    runId:'s02_'+crypto.randomUUID().replaceAll('-',''),
+                    currentPcms:empty,connectionFactory:conn,
+                    guard:{inspect:async()=>({held:true,activation:'OFF'})}
+                  });}catch{falseReceiptDenied=true;}
+                  const nativeStaged=await protectedRestore.prepareTrackedV2Restore({
+                    api:browser,canonicalDb:traceDb,runId,currentPcms:empty,
+                    uidRemap:{},mode:'replace',
+                    vaultRead:async()=>({ok:true,passphrase:password}),
+                    connectionFactory:conn,
+                    guard:{inspect:async()=>({held:true,activation:'OFF'})}
+                  });
+                  traceDb.close();
+                  const provenanceOkay=falseReceiptDenied&&
+                    nativeStaged.status==='INACTIVE_PREPARED_NOT_APPLIED'&&
+                    nativeStaged.nativeReceipt==='RECOVERY_VERIFIED'&&
+                    nativeStaged.prepared.prepared.stores.meta[0].value.record.candidate
+                      .blobs.some(x=>x.path==='src/asset.bin'&&x.base64==='AP8HAAw=')&&
+                    nativeCalls[0]==='restore.begin'&&
+                    nativeCalls.filter(x=>x==='restore.read').length===nativeBytes.length;
+                  done({ok:applied.source==='INDEPENDENT_READBACK'&&
+                    provenanceOkay&&
+                    restored.activation==='OFF'&&restored.controller==='RESTORE_HELD'&&
+                    after.stores.meta.length===1&&
+                    after.stores.meta[0].value.record.candidate.blobs.find(x=>
+                      x.path==='src/asset.bin')?.base64==='AP8HAAw='&&
+                    (await held())===true,
+                    sourceStatus:restored.status,rows:after.stores.meta.length});
+                })().then(done).catch(e=>done({error:String(e)}));"""
+                fresh_v2_result=call('POST',f'/session/{after}/execute/async',
+                                     {'script':fresh_v2,'args':[]},timeout=120)
+                assert fresh_v2_result.get('ok') is True,fresh_v2_result
+                print('B S02_FRESH_FIREFOX_PROFILE_INACTIVE_V2_SOURCE_CANONICAL_RESTORE=PASS',flush=True)
 
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
                 close(after)

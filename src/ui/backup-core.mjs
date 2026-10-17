@@ -1,3 +1,5 @@
+// S02 source recovery: strict recovery preflight, separate from legacy v1 archive compatibility.
+import {auditSourceClosure} from './backup-source-closure.mjs';
 // I08: offline-verifiable, always-encrypted integrated PCMS + donor portable archive.
 // No persistence, provider calls, filesystem reads, imports or activation authority.
 export const FORMAT='pcms-alpha-integrated-backup';
@@ -29,7 +31,15 @@ function unbase64(value,max){
   return data;
 }
 export async function digest(bytes){
-  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes instanceof Uint8Array?bytes:codec.encode(bytes)))).map(v=>v.toString(16).padStart(2,'0')).join('');
+  // WebDriver/Firefox extensions may supply a typed-array from another JS
+  // compartment; instanceof Uint8Array then fails even though bytes are real.
+  // Never hash Uint8Array.toString() instead of the original source bytes.
+  const raw=ArrayBuffer.isView(bytes)?
+    new Uint8Array(bytes.buffer,bytes.byteOffset,bytes.byteLength):
+    Object.prototype.toString.call(bytes)==='[object ArrayBuffer]'?
+      new Uint8Array(bytes):codec.encode(bytes);
+  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',raw)))
+    .map(v=>v.toString(16).padStart(2,'0')).join('');
 }
 export function serializeClone(value,depth=0){
   requireValid(depth<=35,'BACKUP_DEPTH_LIMIT');
@@ -38,13 +48,17 @@ export function serializeClone(value,depth=0){
   if(value===undefined)return {[token]:'Undefined'};
   if(value===null||typeof value==='string'||typeof value==='boolean')return value;
   if(typeof value==='number'){requireValid(Number.isFinite(value),'BACKUP_UNSUPPORTED_VALUE');return value;}
-  if(value instanceof Date){requireValid(Number.isFinite(value.getTime()),'BACKUP_UNSUPPORTED_VALUE');return {[token]:'Date',data:value.toISOString()};}
-  if(value instanceof ArrayBuffer || ArrayBuffer.isView(value)){
-    const bytes=value instanceof ArrayBuffer?new Uint8Array(value):
+  if(value instanceof Date||Object.prototype.toString.call(value)==='[object Date]'){
+    requireValid(Number.isFinite(value.getTime()),'BACKUP_UNSUPPORTED_VALUE');
+    return {[token]:'Date',data:value.toISOString()};
+  }
+  if(value instanceof ArrayBuffer || ArrayBuffer.isView(value)||
+     Object.prototype.toString.call(value)==='[object ArrayBuffer]'){
+    const bytes=Object.prototype.toString.call(value)==='[object ArrayBuffer]'?new Uint8Array(value):
       new Uint8Array(value.buffer,value.byteOffset,value.byteLength);
     requireValid(bytes.byteLength<=MAX_ARCHIVE_BYTES,'BACKUP_TOO_LARGE');
     return {[token]:'Bytes',data:base64(bytes),
-      kind:value instanceof ArrayBuffer?'ArrayBuffer':value.constructor.name};
+      kind:Object.prototype.toString.call(value)==='[object ArrayBuffer]'?'ArrayBuffer':value.constructor.name};
   }
   if(Array.isArray(value))return value.map(v=>serializeClone(v,depth+1));
   if(!plain(value)){
@@ -76,6 +90,12 @@ export function deserializeClone(value,depth=0){
     if(value[token]==='Date'){
       requireValid(typeof value.data==='string'&&Number.isFinite(Date.parse(value.data)),'BACKUP_INVALID_SCHEMA');
       return new Date(value.data);
+    }
+    // Source-complete v2 may encode negative zero explicitly because JSON
+    // renders -0 as 0. Legacy v1 never emits this tag and remains unchanged.
+    if(value[token]==='NumberNegativeZero'){
+      requireValid(Object.keys(value).length===1,'BACKUP_INVALID_SCHEMA');
+      return -0;
     }
     requireValid(value[token]==='Bytes'&&typeof value.kind==='string','BACKUP_INVALID_SCHEMA');
     const bytes=unbase64(value.data,MAX_ARCHIVE_BYTES);
@@ -128,6 +148,13 @@ async function keyFor(passphrase,salt,usage){
     iterations:250000,salt},key,{name:'AES-GCM',length:256},false,[usage]);
 }
 const outerKeys=['format','version','encryption','sealedPayload'];
+// v2 authoring must call this strict check before any encryption or download.
+ // Legacy v1 archives may contain historical but incomplete source evidence:
+ // preserving those records is not a source-complete recovery claim.
+export async function preflightSourceRecovery(pcms) {
+  validatePcmsSnapshot(pcms);
+  return auditSourceClosure(pcms);
+}
 export async function encodeIntegrated({pcms,donorEnvelope,passphrase,createdAt=new Date().toISOString(),appVersion=''}={}){
   requireValid(typeof passphrase==='string'&&passphrase.length>=12&&codec.encode(passphrase).length<=4096,'BACKUP_PASSPHRASE_REQUIRED');
   validatePcmsSnapshot(pcms);
@@ -148,7 +175,9 @@ export async function encodeIntegrated({pcms,donorEnvelope,passphrase,createdAt=
     encryption:{scheme:'PBKDF2-SHA256/AES-256-GCM',iterations:250000,salt:base64(salt),iv:base64(iv)},
     sealedPayload:base64(encrypted)});
   return {text:envelope,bytes:codec.encode(envelope),sha256:await digest(envelope),
-    inventory:{pcmsRows:DB_STORES.reduce((n,store)=>n+pcms.stores[store].length,0)}};
+    inventory:{pcmsRows:DB_STORES.reduce((n,store)=>n+pcms.stores[store].length,0),
+      sourceCompleteness:'NOT_PROVEN_LEGACY_V1',
+      recoveryTier:'IN_MEMORY_ONLY'}};
 }
 export async function decodeIntegrated(text,passphrase,{decodeDonor}={}){
   requireValid(typeof text==='string'&&codec.encode(text).length<=MAX_ARCHIVE_BYTES,'BACKUP_TOO_LARGE');
@@ -212,6 +241,41 @@ export function snapshotCanonical(db){
           try{stores[store].push({key:serializeClone(cursor.key),value:serializeClone(cursor.value)});}
           catch(e){stop(e.message);return;}
           cursor.continue();
+        };
+      }
+    }catch{stop('BACKUP_IDB_UNAVAILABLE');}
+  });
+}
+
+// V2 alone: stream IndexedDB cursor rows inside a single readonly transaction
+// without invoking legacy v1's 64 MiB whole-archive formatter. No Javascript
+// await inside the IDB cut, no per-store pagination across inconsistent reads.
+// Consumers retain strict source closure and per-row v2 grammar validation.
+export function snapshotCanonicalV2(db){
+  return new Promise((resolve,reject)=>{
+    if(!db||DB_STORES.some(s=>!db.objectStoreNames.contains(s))){
+      reject(Error('BACKUP_INCOMPLETE'));return;
+    }
+    let tx;
+    try{tx=db.transaction(DB_STORES,'readonly');}
+    catch{reject(Error('BACKUP_IDB_UNAVAILABLE'));return;}
+    const stores=Object.fromEntries(DB_STORES.map(k=>[k,[]]));
+    let stopped=false,seen=0;
+    const stop=code=>{if(stopped)return;stopped=true;
+      try{tx.abort();}catch{}reject(Error(code));};
+    tx.onabort=()=>{if(!stopped)reject(Error('BACKUP_IDB_ABORTED'));};
+    tx.oncomplete=()=>{if(stopped)return;
+      try{resolve(validatePcmsSnapshot({schema:1,stores}));}
+      catch(e){reject(e);}};
+    try{
+      for(const store of DB_STORES){
+        tx.objectStore(store).openCursor().onsuccess=e=>{
+          const cur=e.target.result;if(!cur)return;
+          if(++seen>500000){stop('BACKUP_V2_ROW_LIMIT');return;}
+          try{stores[store].push({key:serializeClone(cur.key),
+            value:structuredClone(cur.value)});}
+          catch(err){stop(err.message||'BACKUP_V2_VALUE_INVALID');return;}
+          cur.continue();
         };
       }
     }catch{stop('BACKUP_IDB_UNAVAILABLE');}
