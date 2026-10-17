@@ -28,7 +28,7 @@ test('P53-08 F/X: AES-GCM encrypted P has authenticated full binary manifest, wr
   assert.equal(unlocked.source.fingerprint,old.fingerprint);
   assert.equal((await unlockPrevious(sealed,'bad-password-goes-here')).ok,false);
   assert.equal((await unlockPrevious({...sealed,fingerprint:H},'correct-horse-battery-recovery')).ok,false);
-  assert.equal((await unlockPrevious({...sealed,ciphertext:sealed.ciphertext.replace(/^./,'A')},
+  assert.equal((await unlockPrevious({...sealed,ciphertext:(sealed.ciphertext[0]==='A'?'B':'A')+sealed.ciphertext.slice(1)},
     'correct-horse-battery-recovery')).ok,false);
   assert.equal((await sealPrevious({...old,fingerprint:H},'correct-horse-battery-recovery')).ok,false);
 });

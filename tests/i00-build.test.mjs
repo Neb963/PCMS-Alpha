@@ -26,7 +26,8 @@ test('combined XPI preserves guarded donor bytes, manifest permissions and brows
   // I10 module graph MUST be present in the packaged XPI, not only in Node's
   // repository import graph (a missing file kills the Firefox event page).
   for(const name of ['ai-boundary.mjs','ai-supervisor.mjs','ai-store.mjs',
-    'perchance-ai-native.mjs','perchance-ai-oracle.mjs','ai-testing.mjs','perchance-ai-opfs.mjs','perchance-ai-history.mjs'])
+    'perchance-ai-native.mjs','perchance-ai-oracle.mjs','ai-testing.mjs','perchance-ai-opfs.mjs','perchance-ai-history.mjs',
+    'qualified-clock.mjs','pcms-donor-fence.mjs','route-pin.mjs','enrollment.mjs','network-ledger.mjs'])
     assert.equal((await readdir(path.join(stage,'pcms'))).includes(name),true,
       'Missing runtime module: '+name);
   await assert.rejects(()=>stat(path.join(stage,'tests')), {code:'ENOENT'});

@@ -15,7 +15,7 @@ function donorFixture() {
   let id = 0, forbiddenEffects = 0;
   const securityState={ready:true,privacySafe:true,proxyControl:'controlled_by_this_extension'};
   const shared={
-    async resolve(uid) { if(!all[uid])throw Error('not found'); return {...all[uid]}; },
+    async resolve(uid) { if(!all[uid])throw Error('not found'); return {pcmsBindingId:'binding_'+uid,...all[uid]}; },
     async acquire(uid) {
       if(active.has(uid))throw Error('busy');
       const lease={leaseId:'lease-'+(++id),cookieStoreId:all[uid].cookieStoreId,expiresAt:'future'};
@@ -36,7 +36,9 @@ function donorFixture() {
     initialize:async()=>{},
     securityState,
     shared,
-    getRouteTest:async()=>({ok:true,checkedAt:'fake-current'})
+    getRouteTest:async()=>({ok:true,checkedAt:'fake-current'}),
+    // S01 route pin modelled as committed for these fixtures.
+    pinGate:()=>({allow:true})
   });
   return {guard,all,active,shared,securityState, forbiddenEffects:()=>forbiddenEffects,
     dispatch:()=>{forbiddenEffects++;}};

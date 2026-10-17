@@ -212,16 +212,19 @@
         </section>
       </section>
       <section class="workspace" id="view-accounts" data-view="accounts" aria-labelledby="heading-accounts" hidden>
-        <header class="workspace-head"><div><p class="eyebrow">Workspace / 04</p><h1 id="heading-accounts" tabindex="-1">Accounts</h1><p>Dedicated Persona bindings, human login and provenance-aware verification.</p></div><button type="button" id="pcms-refresh-accounts">Refresh local state</button></header>
-        <div class="notice" role="status"><strong>Human login only — no provider writes</strong><p>PersonaMonkey owns routing, container identity, protected browser navigation and route selection. A local account binding or manual override is not proof of Perchance ownership.</p></div>
-        <section class="panel" aria-labelledby="accounts-enrollment-title"><div class="panel-head"><h2 id="accounts-enrollment-title">Enroll an account</h2><span class="unknown">Guarded local binding</span></div>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 04</p><h1 id="heading-accounts" tabindex="-1">Accounts</h1><p>One dedicated Persona and one unique protected exit per account; you only log in and confirm.</p></div><button type="button" id="pcms-refresh-accounts">Refresh local state</button></header>
+        <div class="notice" role="status"><strong>Human login only — no provider writes</strong><p>PersonaMonkey owns routing, container identity and protected navigation. A managed account never falls back to Direct; if no unique protected exit can be verified, only that account waits.</p></div>
+        <section class="panel" aria-labelledby="accounts-enrollment-title"><div class="panel-head"><h2 id="accounts-enrollment-title">Add a Perchance account</h2><span class="unknown">Protected route prepared automatically</span></div>
           <p id="pcms-account-guard" class="reason">Checking donor guard status.</p>
-          <div class="account-controls"><label for="pcms-persona-picker">Unbound Persona</label><select id="pcms-persona-picker"><option value="">Loading Personas</option></select><button type="button" id="pcms-enroll" disabled>Bind account</button></div>
-          <details><summary>Create a protected Persona with PersonaMonkey</summary>
-            <div class="account-controls"><label for="pcms-new-persona-name">Persona name</label><input id="pcms-new-persona-name" maxlength="64" autocomplete="off" placeholder="New Persona">
-              <label for="pcms-protected-route">Protected route</label><select id="pcms-protected-route"><option value="">Loading routes</option></select>
-              <button type="button" id="pcms-create-persona" disabled>Create Persona</button>
-            </div><p class="reason">Direct and Block routes cannot be selected. If creation acknowledgement is uncertain, refresh Persona inventory before retrying.</p>
+          <ol class="reason">
+            <li>Click <strong>Add Account</strong>. PCMS asks PersonaMonkey for a dedicated Persona and a Mullvad exit that no other managed account has used.</li>
+            <li>A Perchance tab opens in that Persona. Log in there.</li>
+            <li>Return here and click <strong>Confirm login</strong>. PCMS checks the real logged-in account and loads its generators.</li>
+          </ol>
+          <div class="account-controls"><button type="button" id="pcms-add-account" disabled>Add Account</button></div>
+          <details><summary>Diagnostics</summary>
+            <div class="account-controls"><button type="button" id="pcms-check-native-witness">Check read-only native clock witness</button></div>
+            <p class="reason">Checks the existing PersonaMonkey native pipe, if a compatible host is installed. One sample is not route verification or qualified uptime.</p>
           </details>
           <p id="pcms-accounts-feedback" role="status" aria-live="polite">Account status not yet loaded.</p>
         </section>

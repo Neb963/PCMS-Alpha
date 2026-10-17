@@ -1,4 +1,6 @@
 import {admissionForI17Supply} from './legacy-quarantine.mjs';
+import {validateNativeWitness} from './qualified-clock.mjs';
+import {inspectRoutePin} from './route-pin.mjs';
 // This facade shares donor Management Integration's actual control-lease
 // registry. Nothing here can execute a browser/native/provider mutation at I01.
 let installed = null;
@@ -18,7 +20,7 @@ export async function cachedHealthDomain(evidence){
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
-  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep, releaseIsolatedTab, existingIsolatedTab }) {
+  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, readRuntimeWitness, enrollmentDonor, pinGate = inspectRoutePin }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -37,6 +39,13 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
       if (current.routeId === 'direct') return HOLD('DIRECT_FORBIDDEN');
       if (!current.route || current.routeId === 'block' || current.route.enabled === false)
         return HOLD('PROTECTED_ROUTE_UNAVAILABLE');
+      // Every PCMS effect requires the S01 route pin: an exit reserved in
+      // the historical ledger for THIS binding on THIS route. Personas
+      // without a PCMS binding tag are never PCMS-operable.
+      if (typeof current.pcmsBindingId !== 'string') return HOLD('ROUTE_RESERVATION_REQUIRED');
+      const pin = pinGate({ pcmsBindingId: current.pcmsBindingId, personaUid: current.personaUid,
+        containerId: current.cookieStoreId, routeId: current.routeId, managed: true, killSwitch: true });
+      if (!pin.allow) return HOLD('PROTECTED_ROUTE_NOT_PINNED');
       // A configured proxy is not evidence of a working protected route.
       // This is the donor's context-fenced cached test, never a new network probe.
       const evidence = await getRouteTest(current.cookieStoreId);
@@ -299,7 +308,17 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     catch{return {ok:false,code:'HANDOFF_UNVERIFIED'};}
   }
 
+  async function sampleNativeWitness() {
+    if(typeof readRuntimeWitness!=='function')return {ok:false,code:'NATIVE_WITNESS_UNAVAILABLE'};
+    try {
+      const native=await readRuntimeWitness();
+      return validateNativeWitness(native);
+    } catch { return {ok:false,code:'NATIVE_WITNESS_UNAVAILABLE'}; }
+  }
+
   return Object.freeze({
+    sampleNativeWitness,
+    enrollmentDonor: enrollmentDonor || null,
     observeReadOnly,
     observeMonitoring,
     runSupplyStep,
@@ -327,7 +346,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
       donorReady: securityState.ready === true,
       privacySafe: securityState.privacySafe === true,
       providerEffects: 'OFF',
-      admission: 'HELD_UNTIL_OWNER_VERIFICATION'
+      admission: 'PER_ACCOUNT_ROUTE_PIN'
     })
   });
 }

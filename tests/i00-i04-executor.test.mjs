@@ -82,14 +82,14 @@ test('I04 F: guard lease, route change, and observer rejection are scoped',async
   let routeId='protected-1', revoked=false, call=0,release=0;
   const shared={
     resolve:async()=>({personaUid:'persona-1234',cookieStoreId:'firefox-container-1',
-      routeId,route:{enabled:true}}),
+      routeId,route:{enabled:true},pcmsBindingId:'binding_fixture_01'}),
     acquire:async()=>({leaseId:'lease-1',expiresAt:'soon'}),
     validate:async()=>{if(revoked)throw Error('revoked');return {cookieStoreId:'firefox-container-1'};},
     release:async()=>{release++;}
   };
   const g=createPersonaGuard({initialize:async()=>{},securityState:{
     ready:true,privacySafe:true,proxyControl:'ok'
-  },shared,getRouteTest:async()=>({ok:true}),
+  },shared,getRouteTest:async()=>({ok:true}),pinGate:()=>({allow:true}),
   readIsolatedTab:async()=>{call++;return {ok:true,principalFingerprint:'a'.repeat(64)};}});
   const ok=await g.observeReadOnly('persona-1234',true);
   assert.equal(ok.ok,true);assert.equal(call,1);
