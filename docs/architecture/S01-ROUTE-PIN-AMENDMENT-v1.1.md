@@ -58,7 +58,8 @@ A second independent review agent audited this correction. It found no route-pin
 - **Release intent:** the `ARCHIVE` transition itself records `RELEASE_DEFERRED / RELEASE_PENDING`. Upkeep completes the release for every archived account not yet `RELEASED`, including accounts archived under v1.0 and an interrupted Archive. The release always re-reads the account and acts only while it is still archived.
 - **Lease check:** `inspectRouteUse` sees donor control leases (`listControlLeases`), tabs and jobs **before** the pin is withdrawn.
 - **Deferred accounts still in use:** while a release is deferred because a human tab is open, the exit is still observed without rotation; drift onto another account's exit holds it, as in v1.0.
-- **Automatic upgrade:** it never starts tagging while the legacy Persona has a tab, job or lease. Transient holds (helper unavailable, unconfirmed acknowledgement) are retried automatically.
+- **Automatic upgrade:** it starts tagging only on POSITIVE idle evidence (`inspectRouteUse` ok and `inUse:false`). A tab, job, lease, or an unavailable or failing inspection means retry later with no mutation. Transient holds (helper unavailable, unconfirmed acknowledgement) are retried automatically. An explicit operator upgrade asks for confirmation that open tabs pause until the route is verified.
+- **Pin-table recovery:** a failed first load of the committed pin table is retried by the next request-ready check; tagged Personas stay denied until it succeeds.
 - **Persona checks:** a Persona mid-rotation is `PERSONA_NOT_ACTIVE`, never "missing", so no duplicate replacement is offered. A donor-tagged Persona that the account record does not name (a replacement whose commit was interrupted) is `BINDING_PERSONA_CONFLICT` until the explicit replacement action adopts it.
 - **Confirm:** confirm accepts a record held under a pre-S01 manual exception (`OVERRIDDEN`).
 

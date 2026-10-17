@@ -41,7 +41,10 @@ export function reloadRoutePins(){
       replace(out.pins);return true;
     }catch{if(mine===generation)closeRoutePins();return false;}
   })();
-  loading=run.finally(()=>{if(loading===run)loading=null;});
+  // Clear the in-flight marker once settled (compare against the tracked
+  // promise itself), so a failed load is retried by the next ready check.
+  const tracked=run.finally(()=>{if(loading===tracked)loading=null;});
+  loading=tracked;
   return run;
 }
 // Bounded wait used by the donor handlers for tagged Personas only.

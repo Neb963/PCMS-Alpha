@@ -775,3 +775,37 @@ test('S01 review2 D: reactivating a pre-S01 record with a principal conflict ret
   assert.equal((await h.flow.reactivate(account.accountId,raw.revision)).code,'IDENTITY_ALREADY_BOUND');
   assert.equal(stored(h,account.accountId).state,'ARCHIVED');
 });
+
+// ---- Owner source audit at 403ac53 ----
+test('S01 audit D: a failed first pin load is retried by the request-ready path (deny until loaded)',async()=>{
+  const {routePinsReady}=await import('../src/runtime/route-pin.mjs');
+  const profile={pcmsBindingId:'binding_retry_01',personaUid:'persona-retry-0001',containerId:'firefox-container-r1',
+    routeId:'mullvad-r1',managed:true,killSwitch:true};
+  let calls=0;
+  closeRoutePins();
+  configureRoutePinSource(async()=>{calls++;
+    if(calls===1)throw Error('canonical DB temporarily unavailable');
+    return {ok:true,pins:[{bindingId:profile.pcmsBindingId,personaUid:profile.personaUid,
+      contextId:profile.containerId,routeId:profile.routeId}]};});
+  assert.equal(await routePinsReady(500),false);
+  assert.equal(inspectRoutePin(profile).allow,false,'default deny while not loaded');
+  assert.equal(await routePinsReady(500),true,'second request-ready call retries the load');
+  assert.equal(calls,2);
+  assert.equal(inspectRoutePin(profile).allow,true);
+});
+test('S01 audit D: unknown or failing idle inspection never starts automatic legacy tagging',async()=>{
+  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
+  const {persona,account}=await legacyAccount(h,'10.124.0.1',fp('a'));
+  h.tabs.add(persona.contextId);
+  const real=h.donor.inspectRouteUse;
+  for(const broken of [async()=>({ok:false,code:'NATIVE_UNAVAILABLE'}),async()=>{throw Error('donor not ready');},
+      async()=>({ok:true,releasable:false,reason:'NO_ROUTE_RESOURCE'})]){
+    h.donor.inspectRouteUse=broken;
+    await h.flow.upkeep();
+  }
+  assert.equal(h.effects.filter(e=>e.kind==='TAG').length,0,'no tagging on unverified idle state');
+  assert.equal(stored(h,account.accountId).bindingId,undefined,'no mutation of the record either');
+  h.donor.inspectRouteUse=real;h.tabs.clear();h.sessions.set(persona.personaUid,fp('a'));
+  await h.flow.upkeep();
+  assert.equal(stored(h,account.accountId).upgrade.phase,'COMPLETE','retried later once positively idle');
+});

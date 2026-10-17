@@ -113,7 +113,10 @@ function draw() {
         controls.append(button('Try setup again',()=>act('RESUME_SETUP',a,()=>'Setup restarted.')));
     }else if(a.state!=='ARCHIVED'&&!pinned){
       if(!a.working&&!personaGone&&(a.protectedRoute==='LEGACY_UNPINNED'||a.upgrade?.phase==='HELD'))
-        controls.append(button('Retry upgrade',()=>act('UPGRADE_ACCOUNT',a,()=>'Upgrade started.')));
+        controls.append(button('Upgrade now',async()=>{
+          if(!window.confirm('Upgrade this account to a reserved protected exit? Its Persona, login and generators are kept, but its open tabs have no network until the new route is verified.'))return;
+          await act('UPGRADE_ACCOUNT',a,()=>'Upgrade started.');
+        }));
     }else if(a.state!=='ARCHIVED'){
       if(pinned&&a.state!=='VERIFIED')
         controls.append(button('Confirm login',()=>act('CONFIRM_LOGIN',a,

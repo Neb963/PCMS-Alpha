@@ -406,9 +406,12 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
             (a.upgrade.phase!=='HELD'||TRANSIENT.has(a.upgrade.code)))){
           // Never start tagging (which blocks the Persona until pinned) while
           // a human tab or running work uses it; the operator can still start it.
+          // Unsolicited tagging needs POSITIVE idle evidence; unknown or
+          // failed inspection retries later without any mutation.
           if(!a.upgrade){
-            const use=await donor.inspectRouteUse({personaUid:a.personaUid});
-            if(use.ok&&use.inUse)continue;
+            let use=null;
+            try{use=await donor.inspectRouteUse({personaUid:a.personaUid});}catch{}
+            if(use?.ok!==true||use.inUse!==false)continue;
           }
           results.push(await exclusive(id,()=>upgrade(id)));
         }else if(!a.upgrade||a.upgrade.phase==='COMPLETE')
