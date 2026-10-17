@@ -485,3 +485,46 @@ test('I16 source-plan stays pinned to durable Persona and containers, not status
   assert.notEqual(altered.planSha256,p.planSha256,
     'real persistent protected-route identity drift still invalidates plan');
 });
+
+test('S02 restore replace preserves local last-known-good and native lease; foreign receipts remain inert',async()=>{
+  const {prepareRestoredCanonical}=await import('../src/ui/restore-sanitize.mjs');
+  const existing=empty(),incoming=empty();
+  const localAuto={key:'backup:auto-state',state:{enabled:true,
+    archives:[{runId:'auto_local',state:'COMPLETE',kind:'AUTO',
+      sha256:'a'.repeat(64)}],active:null,status:'COMPLETE'}};
+  const localManual={key:'backup:manual-active',status:'BROWSER_REPORTED_COMPLETE',
+    tier:2,downloadId:31,expectedSha256:'b'.repeat(64)};
+  const nativeId='s02_'+('1'.repeat(32));
+  const importedId='s02_'+('2'.repeat(32));
+  const localLease={key:'backup:v2:active',runId:nativeId};
+  const localRun={key:'backup:v2:'+nativeId,runId:nativeId,
+    state:'APPEND_POSSIBLE',acceptedBytes:17};
+  for(const row of [localAuto,localManual,localLease,localRun])
+    existing.stores.meta.push({key:row.key,value:serializeClone(row)});
+  const foreign=[
+    {key:'backup:auto-state',state:{enabled:true,active:{runId:'auto_foreign'},
+      archives:[{kind:'AUTO',state:'COMPLETE',runId:'auto_foreign'}]}},
+    {key:'backup:manual-active',status:'DOWNLOAD_STARTED',downloadId:91,tier:2},
+    {key:'backup:v2:active',runId:importedId},
+    {key:'backup:v2:'+importedId,runId:importedId,
+      state:'RECOVERY_VERIFIED',acceptedBytes:999,
+      preparedSha256:'c'.repeat(64),ciphertextSha256:'d'.repeat(64)}
+  ];
+  for(const row of foreign)
+    incoming.stores.meta.push({key:row.key,value:serializeClone(row)});
+  const restored=prepareRestoredCanonical({incoming,current:existing,mode:'replace'});
+  const byKey=new Map(restored.stores.meta.map(r=>[r.key,r.value]));
+  for(const row of [localAuto,localManual,localLease,localRun])
+    assert.deepEqual(byKey.get(row.key),row,'replace must retain local-only backup truth');
+  assert.equal(byKey.get('backup:v2:'+importedId).state,'RESTORED_HISTORY_ONLY');
+  assert.equal(byKey.get('backup:v2:'+importedId).acceptedBytes,0);
+  assert.equal(byKey.get('backup:v2:'+importedId).preparedSha256,null);
+  const fresh=prepareRestoredCanonical({incoming,current:empty(),mode:'replace'});
+  const freshMap=new Map(fresh.stores.meta.map(r=>[r.key,r.value]));
+  assert.equal(freshMap.has('backup:v2:active'),false,
+    'a foreign possible-effect lease never activates');
+  assert.equal(freshMap.get('backup:auto-state').state.enabled,false);
+  assert.equal(freshMap.get('backup:auto-state').state.active,null);
+  assert.equal(freshMap.get('backup:manual-active').status,'RESTORED_HISTORY_ONLY');
+  assert.equal(freshMap.get('backup:manual-active').downloadId,null);
+});
