@@ -162,6 +162,17 @@ class TestHost(unittest.TestCase):
                           "bytes":"QUI=",
                           "sha256":hashlib.sha256(b"AB").hexdigest()})["ok"])
 
+    def test_intermediate_symlink_is_rejected_before_creating_child(self):
+        source=Path(self.tmp.name)/"actual-parent"
+        source.mkdir()
+        alias=Path(self.tmp.name)/"alias"
+        os.symlink(source,alias)
+        self.host=V2ArchiveHost(alias/"backup-root",lambda:PASS)
+        result=self.begin(b"source")
+        self.assertEqual(result["code"],"BACKUP_ROOT_UNSAFE")
+        self.assertFalse((source/"backup-root").exists(),
+                         "no side effects may occur via an ancestor symlink")
+
     def test_symlink_root_and_injected_command_fail_closed(self):
         other=Path(self.tmp.name)/"real"
         other.mkdir()
