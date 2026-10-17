@@ -7,6 +7,7 @@ import {makeRetention} from './backup-auto-retention.mjs';
 import {inspectAuto,awaitAuto} from './backup-auto-download.mjs';
 import {sealAutomatic,captureV2SourceCut} from './backup-auto-export.mjs';
 import {exportV2Candidate} from './backup-v2-session.mjs';
+import {digest} from './backup-core.mjs';
 const fail=code=>({ok:false,code});
 const sanitize=e=>/^[A-Z_]{4,60}$/.test(e?.message||'')?e.message:'BACKUP_FAILED';
 export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
@@ -71,7 +72,9 @@ export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
             }
             const cut=await captureV2(api,await database(),key.passphrase,sentinel);
             const prepared=await s.move(runId,'PREPARING','VERIFIED',{
-              sha256:'0'.repeat(64),bytes:0});
+              // A real donor-envelope byte digest, not an invented disk proof.
+              sha256:await digest(cut.donorEnvelope),
+              bytes:new TextEncoder().encode(cut.donorEnvelope).byteLength});
             if(!prepared.ok)return prepared;
             if((await sentinel.inspect()).held){
               await s.move(runId,'VERIFIED','FAILED',{code:'BACKUP_RESTORE_HOLD'});
@@ -83,6 +86,7 @@ export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
             const v2=await dispatchV2({
               db:await database(),api,pcms:cut.pcms,
               donorEnvelope:cut.donorEnvelope,
+              runId:'s02_'+runId.slice(5),
               checkScope:async()=>!(await sentinel.inspect()).held &&
                 (await s.read()).state?.active?.runId===runId,
               checkRestoreHold:async()=>(await sentinel.inspect()).held
