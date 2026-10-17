@@ -7,6 +7,7 @@ import {openV2StageDB,createV2InactiveStage} from './restore-v2-inactive-stage.m
 import {prepareInactiveV2FromStage} from './restore-v2-prep.mjs';
 import {decodeBackupEnvelope} from '../lib/backup-package.js';
 import {createRestoreGate} from './restore-gate.mjs';
+import {vaultResponse,VAULT_HOST} from './backup-auto-core.mjs';
 const bad=code=>{throw Error(code)};
 const check=(v,code)=>{if(!v)bad(code)};
 const idOK=v=>typeof v==='string'&&/^s02_[a-f0-9]{32}$/.test(v);
@@ -23,6 +24,7 @@ function rawBytes64(value){
 export async function prepareTrackedV2Restore({
   api,canonicalDb,runId,currentPcms,uidRemap={},mode='merge',
   decodedDonor=decodeBackupEnvelope,
+  vaultRead=()=>api.runtime.sendNativeMessage(VAULT_HOST,{action:'get'}),
   connectionFactory=createV2NativeConnection,openStage=openV2StageDB,
   guard=createRestoreGate(api.storage.local)
 }={}){
@@ -83,15 +85,20 @@ export async function prepareTrackedV2Restore({
     }
     await held();
     await stage.finish(runId,terminal,sequence);
-    const prepared=await prepareInactiveV2FromStage({
-      stage,runId,readback:terminal,
-      expectedCiphertextSha256:previous.ciphertextSha256,
-      password:null,decodeDonor:decodedDonor,
-      currentPcms,uidRemap,mode
-    });
-    // The inner donor currently uses the OS vault passphrase as well.
-    // Callers must provide a *protected transient* donor decoder with
-    // native-vault-controlled key access; never place that key in IDB/receipt.
+    // Existing I15 vault authority supplies a transient key only AFTER
+    // native terminal receipt. It is not accepted from the renderer/UI or
+    // persisted in the stage/ledger.
+    const key=vaultResponse(await vaultRead());
+    check(key.ok===true,'RESTORE_V2_VAULT_UNAVAILABLE');
+    let prepared;
+    try{
+      prepared=await prepareInactiveV2FromStage({
+        stage,runId,readback:terminal,
+        expectedCiphertextSha256:previous.ciphertextSha256,
+        password:key.passphrase,decodeDonor:decodedDonor,
+        currentPcms,uidRemap,mode
+      });
+    }finally{key.passphrase=null;}
     await held();
     completed=true;
     return {ok:true,runId,prepared,
