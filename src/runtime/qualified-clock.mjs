@@ -2,7 +2,7 @@
 // Samples must be attributable to one continuous observed native connection.
 // No fallback from a fresh endpoint, wall time, native uptime or unknown gaps.
 const positive=n=>Number.isSafeInteger(n)&&n>=0;
-const ns=v=>typeof v==='string'&&/^\\d+$/.test(v)?BigInt(v):null;
+const ns=v=>typeof v==='string'&&/^\d+$/.test(v)?BigInt(v):null;
 const id=v=>typeof v==='string'&&/^[a-z0-9_-]{8,128}$/i.test(v);
 export function closeQualifiedWindow(previous,next,{maxGapMs,uncertaintyMs=0,
   coverage=[]}={}) {
