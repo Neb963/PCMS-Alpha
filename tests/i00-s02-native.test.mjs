@@ -18,6 +18,6 @@ test('S02 native AES-GCM candidate independently tests actual checked-in module'
     'or failed independent disk/inventory checks is NOT a PASS.',
     result.stderr?.slice(-1500), result.stdout?.slice(-500)
   ].join('\n'));
-  assert.match(result.stderr, /Ran 7 tests in /);
+  assert.match(result.stderr, /Ran 9 tests in /);
   assert.match(result.stderr, /\nOK\n/);
 });
