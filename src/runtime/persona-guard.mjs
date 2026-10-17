@@ -19,7 +19,7 @@ export async function cachedHealthDomain(evidence){
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
-  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, readRuntimeWitness }) {
+  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, readRuntimeWitness, verifyFixedCandidate }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -300,6 +300,45 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     catch{return {ok:false,code:'HANDOFF_UNVERIFIED'};}
   }
 
+  // S01 candidate measurement never grants account admission. It only
+  // invokes the existing donor-owned native pipe and fixed endpoint command.
+  // A positive echo without H-qualified TTL/route ownership is not E01 PASS.
+  async function verifyProtectedCandidate({personaUid,contextId,routeId}={}) {
+    if(typeof verifyFixedCandidate!=='function')
+      return {ok:false,code:'NATIVE_FAMILY_VERIFIER_UNAVAILABLE'};
+    if(!/^[a-z0-9_-]{8,128}$/i.test(personaUid||'')||
+       !/^[a-z0-9_-]{8,128}$/i.test(contextId||'')||
+       !/^[a-z0-9_-]{8,128}$/i.test(routeId||''))
+      return {ok:false,code:'NATIVE_CANDIDATE_INVALID'};
+    try {
+      await initialize();
+      if(securityState.ready!==true||securityState.privacySafe!==true||
+         BAD_PROXY.has(securityState.proxyControl))
+        return {ok:false,code:'DONOR_SECURITY_UNAVAILABLE'};
+      const before=await shared.resolve(personaUid);
+      if(before.cookieStoreId!==contextId||before.routeId!==routeId||
+         !before.route||before.route.enabled===false||
+         routeId==='direct'||routeId==='block'||before.archived||before.rotating)
+        return {ok:false,code:'NATIVE_CANDIDATE_CONTEXT_CHANGED'};
+      const proof=await verifyFixedCandidate({routeId,contextId});
+      const after=await shared.resolve(personaUid);
+      if(after.cookieStoreId!==before.cookieStoreId||
+         after.routeId!==before.routeId||after.archived||after.rotating)
+        return {ok:false,code:'NATIVE_CANDIDATE_CONTEXT_CHANGED'};
+      if(proof?.source!=='DONOR_FIXED_PROBE'||
+         proof.routeId!==routeId||proof.contextId!==contextId||
+         proof.ipv4?.state!=='VERIFIED'||proof.ipv6?.state!=='VERIFIED'||
+         proof.dns!=='VERIFIED_PROTECTED'||proof.protection!=='READY'||
+         proof.disposition!=='HOLD_TTL_UNQUALIFIED')
+        return {ok:false,code:'NATIVE_FAMILY_PROOF_INCOMPLETE'};
+      // The original probe receipt is intentionally NOT returned to a page.
+      return {ok:true,familiesObserved:true,admission:'HELD_TTL_UNQUALIFIED',
+        providerEffects:'OFF'};
+    } catch {
+      return {ok:false,code:'NATIVE_FAMILY_VERIFIER_UNAVAILABLE'};
+    }
+  }
+
   async function sampleNativeWitness() {
     if(typeof readRuntimeWitness!=='function')return {ok:false,code:'NATIVE_WITNESS_UNAVAILABLE'};
     try {
@@ -309,6 +348,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
   }
 
   return Object.freeze({
+    verifyProtectedCandidate,
     sampleNativeWitness,
     observeReadOnly,
     observeMonitoring,
