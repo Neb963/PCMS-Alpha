@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import os
+import shutil
 from pathlib import Path
 import sys
 import tempfile
@@ -121,6 +122,70 @@ class TestHost(unittest.TestCase):
         # Read-only reinspection is possible, but no automatic staged commit.
         self.assertEqual(self.request("archive.inspect",runId=RUN)["state"],
                          "WRITTEN_UNVERIFIED")
+
+    def test_native_recovery_qualification_and_fourteen_successful_file_retention(self):
+        raw=make_payload()
+        self.assertTrue(self.begin(raw)["ok"])
+        for seq,start in enumerate(range(0,len(raw),BUFFER)):
+            self.assertTrue(self.append(raw[start:start+BUFFER],seq)["ok"])
+        count=(len(raw)+BUFFER-1)//BUFFER
+        self.assertTrue(self.request("export.finish",runId=RUN,
+                                     sequence=count,cutDigest=CUT)["ok"])
+        denied=self.request("archive.recovery.complete",runId=RUN,
+                            sha256="a"*64,preparedSha256="b"*64,
+                            status="INACTIVE_PREPARED_NOT_APPLIED")
+        self.assertEqual(denied["code"],"BACKUP_RECOVERY_RECEIPT_REQUIRED")
+        receipt=self.request("restore.begin",runId=RUN,keyRef="portable-recovery")
+        self.assertTrue(receipt["ok"],receipt)
+        seq=0
+        while True:
+            piece=self.request("restore.read",runId=RUN,sequence=seq)
+            self.assertTrue(piece["ok"],piece)
+            if piece["complete"]:
+                self.assertEqual(piece["sha256"],receipt["sha256"])
+                break
+            seq+=1
+        self.assertEqual(self.request("archive.recovery.complete",
+            runId=RUN,sha256="a"*64,preparedSha256="b"*64,
+            status="INACTIVE_PREPARED_NOT_APPLIED")["code"],
+            "BACKUP_RECOVERY_RECEIPT_REQUIRED")
+        qualified=self.request("archive.recovery.complete",runId=RUN,
+            sha256=receipt["sha256"],preparedSha256="b"*64,
+            status="INACTIVE_PREPARED_NOT_APPLIED")
+        self.assertTrue(qualified["ok"],qualified)
+        self.assertEqual(qualified["state"],"RECOVERY_VERIFIED")
+        self.assertEqual(self.request("archive.retention.plan")["qualified"],1)
+        self.assertEqual(self.request("archive.retention.prune")["state"],
+                         "NO_ELIGIBLE_DELETE")
+        encrypted=self.root/(RUN+".encrypted")
+        # A deterministic disposable 16-copy file fleet, every file present,
+        # is acceptable *only* as a synthetic retention oracle. All original
+        # qualification still used real native verification and source frames.
+        for n in range(16):
+            target="s02_"+format(n+1,"032x")
+            shutil.copyfile(encrypted,self.root/(target+".encrypted"))
+            self.host._write({"schema":1,"runId":target,
+                "state":"RECOVERY_VERIFIED","ciphertextSha256":receipt["sha256"],
+                "preparedSha256":"c"*64,"verifiedAtNs":n+1,
+                "cutDigest":CUT,"nextSequence":0,"last":None,
+                "plaintextBytes":len(raw),"acceptedBytes":len(raw)})
+        plan=self.request("archive.retention.plan")
+        self.assertTrue(plan["ok"],plan)
+        self.assertEqual(plan["qualified"],17)
+        self.assertEqual(plan["pruneCandidate"],"s02_"+format(1,"032x"))
+        old=[self.request("archive.retention.prune") for _ in range(3)]
+        self.assertTrue(all(x.get("state")=="REMOVED" for x in old),old)
+        self.assertTrue(all(not (self.root/("s02_"+format(n,"032x")+
+                        ".encrypted")).exists() for n in range(1,4)))
+        self.assertEqual(self.request("archive.retention.plan")["qualified"],14)
+        self.assertEqual(self.request("archive.retention.prune")["state"],
+                         "NO_ELIGIBLE_DELETE")
+        self.assertTrue(encrypted.exists(),"last known-good protected")
+        # A missing protected success must never authorize further deletion.
+        self.root.joinpath("s02_"+format(4,"032x")+".encrypted").unlink()
+        self.assertEqual(self.request("archive.retention.prune")["code"],
+                         "BACKUP_RETENTION_INTEGRITY_HOLD")
+        self.assertTrue(encrypted.exists())
 
     def test_readonly_inspection_does_not_create_root_or_lookup_vault(self):
         out=self.request("archive.inspect",runId=RUN)
