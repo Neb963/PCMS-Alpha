@@ -160,7 +160,14 @@ def _decrypt_chunks(f, password, consumer):
 
 
 class _Inventory:
-    """Second-pass streaming frame parser; retains one canonical row."""
+    """Bounded second-pass parser for S02 source-bearing v2 frame grammar.
+
+    No CANONICAL/END accumulation beyond published frame limits. BLOB and DONOR
+    contents are hashed incrementally. First-pass AEAD authenticates the entire
+    file before any metadata is considered, second pass authenticates again.
+    """
+
+    STORES = ("entities", "operations", "events", "meta", "observations")
 
     def __init__(self):
         self.pending = bytearray()
@@ -172,10 +179,41 @@ class _Inventory:
         self.blobs = set()
         self.refs = set()
         self.canonical = 0
+        self.canonical_hashes = []
+        self.store_counts = {k: 0 for k in self.STORES}
+        self.row_keys = set()
+        self.last_row = None
         self.donor = 0
+        self.donor_hash = hashlib.sha256()
         self.donor_bytes = 0
+        self.phase = 0
         self.done = False
         self.terminal = None
+
+    @staticmethod
+    def _json(data, code):
+        try:
+            return json.loads(data.decode("utf-8"))
+        except (ValueError, UnicodeError, TypeError, OverflowError) as error:
+            raise BackupError(code) from error
+
+    @staticmethod
+    def _paths(obj, depth=0):
+        _check(depth <= 40, "BACKUP_CANONICAL_DEPTH")
+        if isinstance(obj, list):
+            for item in obj:
+                yield from _Inventory._paths(item, depth + 1)
+        elif isinstance(obj, dict):
+            if "__pcmsV2BlobRef" in obj:
+                _check(len(obj) == 1 and
+                       isinstance(obj["__pcmsV2BlobRef"], str) and
+                       len(obj["__pcmsV2BlobRef"]) == 64 and
+                       all(c in "0123456789abcdef" for c in obj["__pcmsV2BlobRef"]),
+                       "BACKUP_BLOB_REFERENCE_INVALID")
+                yield obj["__pcmsV2BlobRef"]
+            else:
+                for entry in obj.values():
+                    yield from _Inventory._paths(entry, depth + 1)
 
     def feed(self, data):
         view = memoryview(data)
@@ -184,7 +222,7 @@ class _Inventory:
             _check(not self.done, "BACKUP_TRAILING_DATA")
             if self.kind is None:
                 n = min(FRAME.size - len(self.pending), len(view) - pos)
-                self.pending.extend(view[pos:pos + n])
+                self.pending.extend(view[pos:pos+n])
                 pos += n
                 if len(self.pending) < FRAME.size:
                     continue
@@ -192,15 +230,21 @@ class _Inventory:
                 self.pending.clear()
                 _check(self.kind in (BLOB, CANONICAL, DONOR, END),
                        "BACKUP_FRAME_INVALID")
-                _check(self.kind != BLOB or 32 <= self.remaining <= MAX_BLOB_FRAME,
+                maxima = {BLOB: MAX_BLOB_FRAME, CANONICAL: MAX_CANONICAL_FRAME,
+                          DONOR: MAX_DONOR_FRAME, END: MAX_END_FRAME}
+                _check(1 <= self.remaining <= maxima[self.kind],
+                       {BLOB:"BACKUP_BLOB_INVALID", CANONICAL:"BACKUP_CANONICAL_LIMIT",
+                        DONOR:"BACKUP_DONOR_LIMIT",END:"BACKUP_END_LIMIT"}[self.kind])
+                _check(self.kind != BLOB or self.remaining >= 32,
                        "BACKUP_BLOB_INVALID")
-                _check(self.kind != CANONICAL or
-                       1 <= self.remaining <= MAX_CANONICAL_FRAME,
-                       "BACKUP_CANONICAL_LIMIT")
-                _check(self.kind != END or 1 <= self.remaining <= MAX_END_FRAME,
-                       "BACKUP_END_LIMIT")
-                _check(self.kind != DONOR or 1 <= self.remaining <= MAX_DONOR_FRAME,
-                       "BACKUP_DONOR_LIMIT")
+                _check(self.kind != BLOB or self.phase == 0,
+                       "BACKUP_FRAME_ORDER")
+                _check(self.kind != CANONICAL or self.phase <= 1,
+                       "BACKUP_FRAME_ORDER")
+                _check(self.kind != DONOR or self.phase <= 1,
+                       "BACKUP_FRAME_ORDER")
+                _check(self.kind != END or self.phase == 2,
+                       "BACKUP_FRAME_ORDER")
                 _check(self.kind != CANONICAL or self.canonical < MAX_RECORDS,
                        "BACKUP_RECORD_LIMIT")
                 _check(self.kind != BLOB or len(self.blobs) < MAX_BLOBS,
@@ -208,23 +252,28 @@ class _Inventory:
                 if self.kind == BLOB:
                     self.blob_hash = hashlib.sha256()
                     self.blob_id.clear()
+                elif self.kind == CANONICAL:
+                    self.phase = 1
+                elif self.kind == DONOR:
+                    self.phase = 2
                 self.part.clear()
-            n = min(self.remaining, len(view) - pos)
-            frag = view[pos:pos + n]
+            n = min(self.remaining, len(view)-pos)
+            frag = view[pos:pos+n]
             pos += n
             self.remaining -= n
             if self.kind == BLOB:
                 if len(self.blob_id) < 32:
-                    m = min(32 - len(self.blob_id), len(frag))
+                    m = min(32-len(self.blob_id), len(frag))
                     self.blob_id.extend(frag[:m])
                     frag = frag[m:]
                 self.blob_hash.update(frag)
             elif self.kind == DONOR:
+                self.donor_hash.update(frag)
                 self.donor_bytes += len(frag)
             else:
-                _check(len(self.part) + len(frag) <=
+                _check(len(self.part)+len(frag) <=
                        (MAX_CANONICAL_FRAME if self.kind == CANONICAL else MAX_END_FRAME),
-                       'BACKUP_FRAME_MEMORY_LIMIT')
+                       "BACKUP_FRAME_MEMORY_LIMIT")
                 self.part.extend(frag)
             if self.remaining == 0:
                 self._finish_frame()
@@ -241,44 +290,53 @@ class _Inventory:
             self.donor += 1
             _check(self.donor == 1 and self.donor_bytes > 0,
                    "BACKUP_DONOR_INVALID")
-            # Opaque donor is independently decoded by restore adapter.
         elif self.kind == CANONICAL:
+            row = self._json(self.part, "BACKUP_CANONICAL_INVALID")
+            _check(isinstance(row, dict) and set(row) ==
+                   {"store","key","value","refs"} and
+                   row["store"] in self.STORES and isinstance(row["refs"], list) and
+                   len(set(row["refs"])) == len(row["refs"]) and
+                   all(isinstance(name, str) and len(name) == 64 and
+                       all(c in "0123456789abcdef" for c in name)
+                       for name in row["refs"]),
+                   "BACKUP_CANONICAL_INVALID")
+            found = set(self._paths(row["value"]))
+            _check(found == set(row["refs"]), "BACKUP_BLOB_REFERENCE_INVALID")
+            self.refs.update(found)
+            # Keys are structured-clone serialized identities; never merge
+            # another record with the same store/key.
+            key = json.dumps(row["key"],sort_keys=True,separators=(",",":"),ensure_ascii=False)
+            identifier = (row["store"],key)
+            _check(identifier not in self.row_keys, "BACKUP_DUPLICATE_ROW")
+            self.row_keys.add(identifier)
             self.canonical += 1
-            try:
-                row = json.loads(self.part)
-                _check(isinstance(row, dict) and
-                       isinstance(row.get("store"), str) and
-                       isinstance(row.get("refs"), list),
-                       "BACKUP_CANONICAL_INVALID")
-                for name in row["refs"]:
-                    _check(isinstance(name, str) and len(name) == 64 and
-                           all(c in "0123456789abcdef" for c in name),
-                           "BACKUP_CANONICAL_INVALID")
-                    self.refs.add(name)
-            except (UnicodeError, ValueError, TypeError) as error:
-                raise BackupError("BACKUP_CANONICAL_INVALID") from error
+            self.store_counts[row["store"]] += 1
+            self.canonical_hashes.append(hashlib.sha256(self.part).hexdigest())
         else:
             _check(self.terminal is None, "BACKUP_DUPLICATE_END")
-            try:
-                self.terminal = json.loads(self.part)
-            except (UnicodeError, ValueError) as error:
-                raise BackupError("BACKUP_END_INVALID") from error
+            self.terminal = self._json(self.part, "BACKUP_END_INVALID")
             self.done = True
+            self.phase = 3
 
     def result(self):
         _check(self.done and self.kind is None and not self.pending,
                "BACKUP_INCOMPLETE")
         inv = self.terminal
-        _check(isinstance(inv, dict) and inv.get("schema") == 2 and
-               inv.get("canonicalRows") == self.canonical and
-               inv.get("uniqueBlobs") == len(self.blobs) and
-               inv.get("donorSections") == self.donor == 1 and
-               isinstance(inv.get("sourceRefs"), list) and
-               len(set(inv["sourceRefs"])) == len(inv["sourceRefs"]) and
-               set(inv["sourceRefs"]) == self.refs and self.refs <= self.blobs,
+        sha = lambda content: hashlib.sha256(content.encode("utf-8")).hexdigest()
+        _check(isinstance(inv, dict) and set(inv) ==
+               {"schema","canonicalRows","storeCounts","uniqueBlobs","donorSections",
+                "sourceRefsSha256","rowDigestsSha256","donorSha256"} and
+               inv["schema"] == 2 and inv["canonicalRows"] == self.canonical and
+               inv["uniqueBlobs"] == len(self.blobs) and
+               inv["donorSections"] == self.donor == 1 and
+               inv["storeCounts"] == self.store_counts and
+               self.refs == self.blobs and
+               inv["sourceRefsSha256"] == sha("\n".join(sorted(self.refs))) and
+               inv["rowDigestsSha256"] == sha("\n".join(self.canonical_hashes)) and
+               inv["donorSha256"] == self.donor_hash.hexdigest(),
                "BACKUP_INCOMPLETE")
-        return {"canonicalRows": self.canonical,
-                "uniqueBlobs": len(self.blobs), "sourceRefs": len(self.refs)}
+        return {"canonicalRows": self.canonical, "uniqueBlobs": len(self.blobs),
+                "sourceRefs": len(self.refs), "donorBytes": self.donor_bytes}
 
 
 def verify_two_pass(path, password):
