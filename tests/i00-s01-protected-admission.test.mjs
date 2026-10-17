@@ -54,3 +54,24 @@ test('restart loses grants, clock rollback closes grants, forged grant revision 
  assert.equal(a.gate.isClockValid(),false);
  assert.equal(validAdmissionKey({...a.key,grantRevision:0}),false);
 });
+
+test('S01 E01: live grant closes immediately on committed-ledger loss, remains closed after recovery',()=>{
+ const f=fixture();f.ledger(f.committed);
+ assert.equal(f.gate.publishCommitted(f.key,f.committed).ok,true);
+ assert.equal(f.gate.admit(f.key,{evidenceValidUntil:1800,routeRevision:1,expectedSafetyGeneration:0}).ok,true);
+ assert.equal(f.gate.inspect(f.profile).allow,true);
+ f.ledger(null);
+ assert.equal(f.gate.inspect(f.profile).reason,'PCMS_LEDGER_UNAVAILABLE');
+ f.ledger(f.committed);
+ assert.equal(f.gate.inspect(f.profile).allow,false);
+ assert.equal(f.gate.publishCommitted(f.key,f.committed).ok,false);
+ assert.equal(f.gate.admit(f.key,{evidenceValidUntil:1800,routeRevision:1,expectedSafetyGeneration:1}).ok,false);
+});
+test('S01 E01: committed callback cannot silently retag a revoked grant',()=>{
+ const f=fixture();f.ledger(f.committed);
+ assert.equal(f.gate.publishCommitted(f.key,f.committed).ok,true);
+ assert.equal(f.gate.admit(f.key,{evidenceValidUntil:1800,routeRevision:1,expectedSafetyGeneration:0}).ok,true);
+ f.ledger({...f.committed,pcmsEpoch:'other_epoch_001'});
+ assert.equal(f.gate.inspect(f.profile).allow,false);
+ assert.equal(f.gate.inspect(f.profile).allow,false);
+});
