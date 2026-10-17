@@ -11,7 +11,14 @@ const state=()=>({global:{unmanagedPolicy:'block'},routes:{
 test('S01 donor fence mutation selector preserves unconnected ordinary Persona edits',()=>{
  const old=state(),updated=structuredClone(old);
  updated.profiles['firefox-container-002'].routeId='block';
+ updated.global.profileNamePrefix='New name';
  assert.deepEqual(bindingTagChanges(old,updated),{ok:true,held:[]});
+ const security=structuredClone(old);
+ security.global.webRTCMode='unchanged';
+ assert.deepEqual(bindingTagChanges(old,security),{ok:true,held:['binding_001']});
+ const policy=structuredClone(old);
+ policy.profiles['firefox-container-001'].domainMode='allowlist';
+ assert.deepEqual(bindingTagChanges(old,policy),{ok:true,held:['binding_001']});
 });
 test('S01 donor fence prevents tag removal, untrusted insertion or context substitution',()=>{
  const old=state();
