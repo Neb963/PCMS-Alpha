@@ -345,12 +345,12 @@ class V2ArchiveHost:
                  msg["sequence"]==current["sequence"],
                  "BACKUP_RESTORE_SEQUENCE_INVALID")
         file=current["file"]
-        data=file.read(min(_MAX_CIPHERTEXT_READ,
-                           current["length"]-current["offset"]))
-        if not data and current["offset"]<current["length"]:
-            raise BackupError("BACKUP_RESTORE_TRUNCATED")
-        current["offset"]+=len(data)
         try:
+            data=file.read(min(_MAX_CIPHERTEXT_READ,
+                               current["length"]-current["offset"]))
+            if not data and current["offset"]<current["length"]:
+                raise BackupError("BACKUP_RESTORE_TRUNCATED")
+            current["offset"]+=len(data)
             decoded=current["decryptor"].update(data)
             complete=current["offset"]==current["length"]
             if complete:
@@ -377,10 +377,16 @@ class V2ArchiveHost:
                 file.close()
                 self.restore=None
             return response
-        except InvalidTag:
+        except InvalidTag as error:
             file.close()
             self.restore=None
-            raise BackupError("BACKUP_RESTORE_AUTH_FAILED")
+            raise BackupError("BACKUP_RESTORE_AUTH_FAILED") from error
+        except BaseException:
+            # A changed/truncated disk file or interrupted second pass must
+            # discard this reader; never continue from an ambiguous offset.
+            file.close()
+            self.restore=None
+            raise
 
     def _restore_abort(self,msg):
         current=self.restore
