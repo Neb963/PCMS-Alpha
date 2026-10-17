@@ -227,23 +227,36 @@ class V2ArchiveHost:
                  "BACKUP_BEGIN_INVALID")
         _safe_root(self.root,create=True)
         self._acquire_export_lock()
-        _require(_read_json(ledger) is None and not artifact.exists(),
-                 "BACKUP_RUN_ALREADY_USED")
-        # This lookup uses the existing Secret Service helper in a native process.
-        secret = self.vault_get()
-        _require(isinstance(secret,str) and len(secret)>=12,"BACKUP_VAULT_UNAVAILABLE")
-        state={"schema":1,"runId":run,"cutDigest":msg["cutDigest"],
-               "state":"CREATE_POSSIBLE","nextSequence":0,"last":None,
-               "plaintextBytes":msg["expectedPlaintextBytes"],"acceptedBytes":0}
-        self._write(state)  # durable possible-effect boundary BEFORE open.
-        self.current = state
         try:
-            self.writer=EncryptedWriter(artifact,secret,msg["expectedPlaintextBytes"])
-        finally:
-            secret = None
-        state["state"]="OPEN_OBSERVED"
-        self._write(state)
-        return {"ok":True,"state":"OPEN_OBSERVED","runId":run}
+            _require(_read_json(ledger) is None and not artifact.exists(),
+                     "BACKUP_RUN_ALREADY_USED")
+            # Vault lookup precedes the possible-effect write. The host retains
+            # neither the secret nor a lock after an unavailable vault.
+            secret = self.vault_get()
+            _require(isinstance(secret,str) and len(secret)>=12,
+                     "BACKUP_VAULT_UNAVAILABLE")
+            state={"schema":1,"runId":run,"cutDigest":msg["cutDigest"],
+                   "state":"CREATE_POSSIBLE","nextSequence":0,"last":None,
+                   "plaintextBytes":msg["expectedPlaintextBytes"],"acceptedBytes":0}
+            self._write(state)  # durable possible-effect boundary BEFORE open.
+            self.current = state
+            try:
+                self.writer=EncryptedWriter(artifact,secret,msg["expectedPlaintextBytes"])
+            finally:
+                secret = None
+            state["state"]="OPEN_OBSERVED"
+            self._write(state)
+            return {"ok":True,"state":"OPEN_OBSERVED","runId":run}
+        except BaseException:
+            # F1: only a *never-opened* attempt may release the OS lock
+            # synchronously. Its POSSIBLE ledger and any partially created
+            # ciphertext remain untouched. If a writer was opened and the
+            # open ACK/ledger failed, keep it fenced until explicit close,
+            # never silently grant a second writer.
+            if self.writer is None:
+                self.current = None
+                self._release_export_lock()
+            raise
 
     def _append(self,msg):
         run=msg["runId"];self._paths(run)
