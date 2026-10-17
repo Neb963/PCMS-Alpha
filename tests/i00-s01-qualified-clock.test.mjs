@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {closeQualifiedWindow} from '../src/runtime/qualified-clock.mjs';
+import {closeQualifiedWindow,validateNativeWitness} from '../src/runtime/qualified-clock.mjs';
 const sample=(sequence=1,awake=1000000000,boot=1000000000,at=1000)=>({
  observerEpoch:'observer_001',nativeLifetimeId:'native_001',
  observerConnectionId:'connection_001',systemBootId:'system_001',
@@ -33,4 +33,20 @@ test('S01 E04 D: fresh endpoint cannot backdate eligibility; zero unknown covera
  assert.equal(closeQualifiedWindow(a,b,{...conf,coverage:[{...coverage[0],held:true}]}).creditedMs,0);
  assert.equal(closeQualifiedWindow(a,b,{...conf,coverage:[{...coverage[0],generationValid:false}]}).creditedMs,0);
  assert.equal(closeQualifiedWindow(b,b,conf).creditedMs,0);
+});
+
+test('S01 E04: reject malformed live native witnesses and never infer qualification from one sample',()=>{
+ const good={
+  ok:true,schema:1,
+  clockSemantics:'LINUX_MONOTONIC_EXCLUDES_SUSPEND_BOOTTIME_INCLUDES_SUSPEND',
+  observerConnectionId:'connection_001',nativeLifetimeId:'native_001',
+  systemBootId:'system_001',observerEpoch:'observer_001',
+  sequence:1,hostAwakeNs:'1000000000',hostBootNs:'1000000001'
+ };
+ assert.equal(validateNativeWitness(good).ok,true);
+ for(const modification of [
+  {schema:2},{sequence:0},{nativeLifetimeId:'invalid!'},{hostAwakeNs:'-5'},
+  {hostAwakeNs:'2000000000'},{clockSemantics:'WALL_CLOCK'},
+  {observerConnectionId:''},{ok:false}
+ ])assert.equal(validateNativeWitness({...good,...modification}).ok,false);
 });
