@@ -3668,6 +3668,9 @@ def main():
                       if(cmd.action==='restore.begin')return {ok:true,
                         state:'INACTIVE_STAGING_REQUIRED',
                         plaintextBytes:plain.length,sha256:digest};
+                      if(cmd.action==='archive.recovery.complete')return {
+                        ok:true,state:'RECOVERY_VERIFIED',runId,
+                        sha256:digest,activation:'OFF'};
                       if(cmd.action==='restore.read'){
                         const bytes=nativeBytes[cmd.sequence];
                         if(!bytes)throw Error('NO_MORE_NATIVE_BYTES');
@@ -3697,6 +3700,7 @@ def main():
                   traceDb.close();
                   const provenanceOkay=falseReceiptDenied&&
                     nativeStaged.status==='INACTIVE_PREPARED_NOT_APPLIED'&&
+                    nativeStaged.nativeReceipt==='RECOVERY_VERIFIED'&&
                     nativeStaged.prepared.prepared.stores.meta[0].value.record.candidate
                       .blobs.some(x=>x.path==='src/asset.bin'&&x.base64==='AP8HAAw=')&&
                     nativeCalls[0]==='restore.begin'&&
