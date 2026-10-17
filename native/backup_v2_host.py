@@ -532,11 +532,16 @@ class V2ArchiveHost:
 
     def _retention_plan(self):
         ledger=self._retained()
+        _require(not any(r.get("state")=="DELETE_POSSIBLE" for r in ledger),
+                 "BACKUP_RETENTION_UNCERTAIN_DELETE")
         options=eligible_for_prune(ledger)
         # No delete, unlock, vault lookup, recovery state change or path leak.
         return {"ok":True,"state":"PLAN_ONLY","qualified":len([
             v for v in ledger if qualified(v)]),
                 "pruneCandidate":options[0]["runId"] if options else None}
+
+    def _unlink_artifact(self, path):
+        os.unlink(path)
 
     def _retention_prune(self):
         # This unregistered candidate is an actual bounded native disk effect;
@@ -547,7 +552,11 @@ class V2ArchiveHost:
                  "BACKUP_RETENTION_NO_ROOT")
         self._acquire_export_lock()
         try:
-            options=eligible_for_prune(self._retained())
+            catalogue=self._retained()
+            _require(not any(r.get("state")=="DELETE_POSSIBLE"
+                             for r in catalogue),
+                     "BACKUP_RETENTION_UNCERTAIN_DELETE")
+            options=eligible_for_prune(catalogue)
             if not options:
                 return {"ok":True,"state":"NO_ELIGIBLE_DELETE"}
             prior=options[0]
@@ -564,7 +573,7 @@ class V2ArchiveHost:
             # Journal intent before unlink. A lost-ACK/OS error leaves a
             # DELETE_POSSIBLE state, never automatically reissues the unlink.
             self._write({**prior,"state":"DELETE_POSSIBLE"})
-            os.unlink(artifact)
+            self._unlink_artifact(artifact)
             _fsync_directory(self.root)
             self._write({**prior,"state":"REMOVED"})
             return {"ok":True,"state":"REMOVED","runId":prior["runId"]}
