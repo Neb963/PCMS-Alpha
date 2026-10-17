@@ -80,7 +80,11 @@ export function createV2NativeConnection(api,{host=HOST}={}){
   const port=api.runtime.connectNative(HOST);
   let current=null,dead=false;
   port.onMessage.addListener(value=>{
-    const p=current;current=null;if(p)p.resolve(value);
+    const p=current;current=null;
+    if(!p)return;
+    if(p.runId&&value?.ok===true&&value.runId!==p.runId)
+      p.reject(Error('BACKUP_V2_NATIVE_ACK_UNBOUND'));
+    else p.resolve(value);
   });
   port.onDisconnect.addListener(()=>{
     dead=true;const p=current;current=null;
@@ -90,7 +94,7 @@ export function createV2NativeConnection(api,{host=HOST}={}){
     async exchange(message){
       assert(!dead&&!current,'BACKUP_V2_PORT_UNAVAILABLE');
       return new Promise((resolve,reject)=>{
-        current={resolve,reject};
+        current={resolve,reject,runId:message?.runId||null};
         try{port.postMessage(message)}
         catch{dead=true;current=null;reject(Error('BACKUP_V2_NATIVE_ACK_UNKNOWN'));}
       });
@@ -120,7 +124,8 @@ export async function exportV2Candidate({
     current=await ledger.advance(runId,current.revision,expected,next,patch);
   };
   const answer=(value,state)=>{
-    assert(value?.ok===true&&value.state===state,'BACKUP_V2_ACK_UNVERIFIED');
+    assert(value?.ok===true&&value.state===state&&value.runId===runId,
+      'BACKUP_V2_ACK_UNVERIFIED');
   };
   try{
     await move('PREPARED','CREATE_POSSIBLE');
@@ -153,7 +158,8 @@ export async function exportV2Candidate({
     await move('FINISH_POSSIBLE','WRITTEN_UNVERIFIED');
     const proof=await connection.exchange({action:'backup.verify',runId,
       keyRef:'portable-recovery'});
-    assert(proof?.ok===true&&proof.state==='AUTHENTICATED_INVENTORY_ONLY'&&
+    assert(proof?.ok===true&&proof.runId===runId&&
+      proof.state==='AUTHENTICATED_INVENTORY_ONLY'&&
       proof.uniqueBlobs===plan.terminal.uniqueBlobs&&
       proof.canonicalRows===plan.terminal.canonicalRows,
       'BACKUP_V2_DISK_INVENTORY_UNVERIFIED');
