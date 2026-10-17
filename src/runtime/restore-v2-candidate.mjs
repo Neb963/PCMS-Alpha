@@ -112,6 +112,10 @@ export async function prepareTrackedV2Restore({
       qualified.sha256===previous.ciphertextSha256&&
       qualified.activation==='OFF',
       'RESTORE_V2_RECOVERY_ACK_UNKNOWN');
+    // After qualified source/donor rehydration, remove the transient sealed
+    // ciphertext stage and nonextractable in-memory key; no plaintext stage
+    // survives profile restart or persists in IndexedDB.
+    await stage.drop(runId);
     completed=true;
     return {ok:true,runId,prepared,
       status:'INACTIVE_PREPARED_NOT_APPLIED',
