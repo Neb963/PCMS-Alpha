@@ -8,7 +8,7 @@ const feedback=document.getElementById('pcms-accounts-feedback');
 const enroll=document.getElementById('pcms-enroll');
 const create=document.getElementById('pcms-create-persona');
 const refresh=document.getElementById('pcms-refresh-accounts');
-let generation=0, personas=[], routes=[], accounts=[], held=true;
+let generation=0, personas=[], routes=[], accounts=[], held=true, routeGateHeld=true;
 const statuses={
   WAITING_LOGIN:'Awaiting manual login',VERIFICATION_PENDING:'Identity not verified',
   VERIFIED:'Independent identity observed',OVERRIDDEN:'Manual enrollment exception — not verified',
@@ -66,16 +66,22 @@ function draw() {
   routePicker.replaceChildren(option('','Select protected route'));
   for(const r of routes)routePicker.append(option(r.routeId,r.name));
   if([...routePicker.options].some(o=>o.value===selectedRoute))routePicker.value=selectedRoute;
-  enroll.disabled=held||!personaPicker.value;
-  create.disabled=held||!routePicker.value||!createName.value.trim();
+  enroll.disabled=held||routeGateHeld||!personaPicker.value;
+  create.disabled=held||routeGateHeld||!routePicker.value||!createName.value.trim();
   accountsArea.replaceChildren();
   if(held) {
     accountsArea.textContent='Canonical storage/restore safety hold. All account changes disabled.';
     return;
   }
+  if(routeGateHeld) {
+    const status=document.createElement('p');
+    status.textContent='Protected-route admission not yet proven (E-01/E-04). New enrollment, login and rebind are held; existing Personas and their tabs are unchanged.';
+    accountsArea.append(status);
+  }
   if(!accounts.length) {
-    accountsArea.textContent='No PCMS account bindings recorded. This is not a Perchance account census.';
-    return;
+    const empty=document.createElement('p');
+    empty.textContent='No PCMS account bindings recorded. This is not a Perchance account census.';
+    accountsArea.append(empty);return;
   }
   for(const a of accounts) {
     const section=document.createElement('section');section.className='account-record';
@@ -153,6 +159,7 @@ async function read() {
   if(a?.ok!==true||p?.ok!==true||r?.ok!==true)throw Error('ACCOUNT_READ_UNAVAILABLE');
   if(a.truncated)throw Error('ACCOUNT_LIST_TRUNCATED');
   held=a.held===true;
+  routeGateHeld=a.routeGateHeld!==false;
   accounts=a.accounts;
   personas=p.personas;
   routes=r.routes;
@@ -165,7 +172,7 @@ refresh.addEventListener('click',async()=>{
 });
 personaPicker.addEventListener('change',draw);
 routePicker.addEventListener('change',draw);
-createName.addEventListener('input',()=>{create.disabled=held||!routePicker.value||!createName.value.trim();});
+createName.addEventListener('input',()=>{create.disabled=held||routeGateHeld||!routePicker.value||!createName.value.trim();});
 enroll.addEventListener('click',()=> {
   if(!personaPicker.value)return;
   return mutation('ENROLL',{accountId:'acct_'+crypto.randomUUID().replaceAll('-',''),
@@ -175,5 +182,5 @@ enroll.addEventListener('click',()=> {
 create.addEventListener('click',()=>mutation('CREATE_PERSONA',{
   name:createName.value.trim(),routeId:routePicker.value
 },'Persona creation requested. Refresh the list to enroll.'));
-try{await read();report('Local account state loaded. No Perchance login inferred.');}
+try{await read();report(routeGateHeld?'Route admission E-01/E-04 held. No new login or provisioning authorized.':'Local account state loaded. No Perchance login inferred.');}
 catch{held=true;draw();report('Account read unavailable. No actions enabled.');}
