@@ -129,7 +129,7 @@ test('S01 GB01: prepare intent before native effect, then exclusive reserve/stag
  assert.equal(f.gate.inspect(profile).allow,false); // canonical commit is not automatic grant
  const admit=f.join.admit({key,joined,evidenceValidUntil:5000,
   expectedSafetyGeneration:0,routeRevision:1});
- assert.equal(admit.ok,true);
+ assert.equal(admit.ok,true,JSON.stringify({admit,committed:f.observer.readCommitted(key),joined}));
  assert.equal(f.gate.inspect(profile).allow,true);
  await f.join.holdBinding(key.bindingId,'ARCHIVE');
  assert.equal(f.gate.inspect(profile).allow,false);
