@@ -3071,8 +3071,7 @@ def main():
                   const journal=(await stored.read()).state;
                   done({ok:first.code==='V2_NATIVE_OUTCOME_UNKNOWN'&&
                     second.code==='DOWNLOAD_OUTCOME_UNKNOWN'&&
-                    manual.ok===true&&manual.state==='AUTHENTICATED_INVENTORY_ONLY'&&
-                    manual.retentionSuccess===false&&
+                    manual.ok===false&&manual.code==='V2_NATIVE_OUTCOME_UNKNOWN'&&
                     held.code==='BACKUP_V2_REVIEW_REQUIRED'&&
                     calls.length===2&&calls[0]==='s02_'+run&&
                     calls[1]==='s02_'+run&&
@@ -3081,7 +3080,7 @@ def main():
                     journal.lastSuccessDay===-1&&
                     journal.active?.status==='DISPATCH_POSSIBLE',
                     first:first.code,second:second.code,
-                    count:calls.length,manual:manual.state,ledgerStatus:journal.status});
+                    count:calls.length,manual:manual.code,ledgerStatus:journal.status});
                   db.close();
                 })().catch(e=>done({ok:false,error:String(e)}));"""
                 auto_result=call('POST',f'/session/{after}/execute/async',
