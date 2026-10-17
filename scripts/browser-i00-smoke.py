@@ -708,6 +708,16 @@ def main():
                 assert network.get('reservations')==0,network
                 assert network.get('admission')=='HELD_E01_E04',network
                 print('B S01_INSTALLED_CANONICAL_EXIT_LEDGER_READONLY_AND_ROUTE_HOLD=PASS',flush=True)
+                assert execute(after,"return !!document.getElementById('pcms-check-native-witness')") is True
+                witness=account_command(after,{'type':'WITNESS_STATUS'})
+                assert witness.get('ok') in (False,True),witness
+                if witness.get('ok'):
+                    assert witness.get('qualifiedTime') is False,witness
+                    assert witness.get('capability')=='READ_ONLY_NATIVE_PAIR',witness
+                else:
+                    assert witness.get('code') in (
+                        'NATIVE_WITNESS_UNAVAILABLE','NATIVE_WITNESS_UNQUALIFIED'),witness
+                print('B S01_EXPLICIT_SAME_XPI_NATIVE_WITNESS_DIAGNOSTIC_NO_CREDIT=PASS',flush=True)
                 denied_enroll=account_command(after,{'type':'ENROLL','params':{
                     'accountId':'fixture_forbidden_a01','personaUid':'persona-aaaa-0001','expectedRevision':0}})
                 assert denied_enroll.get('code')=='PERSONA_NOT_AVAILABLE',denied_enroll
