@@ -46,7 +46,8 @@ function fakeDonor(relays){
       const existing=[...routes.keys()].filter(id=>!used.has(id)&&!excludeRouteIds.includes(id))
         .map(routeId=>({kind:'ROUTE',routeId}));
       const hosts=new Set([...routes.values()].map(r=>r.host));
-      return {ok:true,candidates:[...existing,...relays.filter(r=>!hosts.has(r.host))
+      const taggedBindings=[...profiles.values()].map(p=>p.pcmsBindingId).filter(id=>id!==bindingId);
+      return {ok:true,taggedBindings,candidates:[...existing,...relays.filter(r=>!hosts.has(r.host))
         .map(r=>({kind:'RELAY',relay:{ipv4_address:r.host,port:1080}}))]};
     },
     async ensureRoute(c){
@@ -288,4 +289,87 @@ test('S01 restart D: pins start empty each boot and come back only from the comm
   configureRoutePinSource(async()=>({ok:false,code:'EXIT_LEDGER_CORRUPT'}));
   assert.equal(await reloadRoutePins(),false);
   assert.equal(inspectRoutePin(h.profileOf(a)).allow,false,'corrupt/unavailable store closes pins');
+});
+
+test('S01 review D: unattended upkeep never rotates on one failed check; a second consecutive failure repairs',async()=>{
+  const relays=[relay('10.124.0.1','45.83.1.1','BLOCKED'),relay('10.124.0.2','45.83.2.2','BLOCKED')];
+  const h=setup({relays});
+  const a=await enroll(h);
+  const assigns=()=>h.effects.filter(e=>e.kind==='ASSIGN').length;
+  relays[0].down=true;
+  await h.flow.upkeep();
+  let stored=h.db.read('meta','account:'+a.accountId).account;
+  assert.equal(stored.route.status,'CHECKING');assert.equal(stored.route.code,'ROUTE_CHECK_FAILED');
+  assert.equal(assigns(),1,'no rotation after a single failed unattended check');
+  assert.equal(h.db.read('meta',LEDGER_KEY).owners['IPv4:45.83.2.2'],undefined,'no new exit consumed');
+  relays[0].down=false;
+  await h.flow.upkeep();
+  stored=h.db.read('meta','account:'+a.accountId).account;
+  assert.equal(stored.route.status,'PINNED','recovered route clears the failure');
+  relays[0].down=true;
+  await h.flow.upkeep();await h.flow.upkeep();
+  assert.equal(assigns(),2,'second consecutive failure repairs to a new exit');
+  assert.equal(inspectRoutePin(h.profileOf(a)).allow,true);
+});
+
+test('S01 review D: pin is withdrawn before an observation that commits a drift hold',async()=>{
+  const relays=[relay('10.124.0.1','45.83.1.1','BLOCKED'),relay('10.124.0.2','45.83.2.2','BLOCKED')];
+  const h=setup({relays});
+  const a=await enroll(h),b=await enroll(h);
+  relays[1].v4='45.83.1.1';
+  const seen=[];
+  const ledger={...h.ledger,observe:async x=>{seen.push(inspectRoutePin(h.profileOf(b)).allow);return h.ledger.observe(x);}};
+  const flow=createEnrollment({accounts:h.accounts,ledger,donor:h.donor,
+    pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},
+    openLogin:async()=>({ok:true}),identify:async()=>({ok:false,code:'NO_PAGE_SESSION'})});
+  assert.equal((await flow.verifyRoute(b.accountId)).code,'EXIT_DRIFT_CONFLICT');
+  assert.deepEqual(seen,[false]);
+  assert.equal(inspectRoutePin(h.profileOf(b)).allow,false);
+  assert.equal(inspectRoutePin(h.profileOf(a)).allow,true);
+});
+
+test('S01 review D: a missing exit ledger with surviving tagged Personas holds instead of forgetting history',async()=>{
+  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED'),relay('10.124.0.2','45.83.2.2','BLOCKED')]});
+  await enroll(h);
+  // Simulate PCMS IndexedDB loss: a fresh ledger/accounts store, donor state kept.
+  const db=fakeDatabase();
+  const flow=createEnrollment({accounts:createAccountStore(db),ledger:createExitLedger(db),donor:h.donor,
+    pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},
+    openLogin:async()=>({ok:true}),identify:async()=>({ok:false,code:'NO_PAGE_SESSION'})});
+  const begun=await flow.begin();
+  await flow.prepare(begun.accountId);
+  assert.equal(db.read('meta','account:'+begun.accountId).account.setup.code,'EXIT_LEDGER_MISSING');
+});
+
+test('S01 review D: archived accounts are observed for drift but never moved',async()=>{
+  const relays=[relay('10.124.0.1','45.83.1.1','BLOCKED'),relay('10.124.0.2','45.83.2.2','BLOCKED'),
+    relay('10.124.0.3','45.83.3.3','BLOCKED')];
+  const h=setup({relays});
+  const a=await enroll(h),b=await enroll(h);
+  const cur=(await h.accounts.get(b.accountId)).account;
+  await h.accounts.apply({type:'ARCHIVE',accountId:b.accountId,expectedRevision:cur.revision});
+  const assigns=h.effects.filter(e=>e.kind==='ASSIGN').length;
+  relays[1].down=true;
+  await h.flow.upkeep();await h.flow.upkeep();
+  assert.equal(h.effects.filter(e=>e.kind==='ASSIGN').length,assigns,'archived account never rotated');
+  relays[1].down=false;relays[1].v4='45.83.1.1';
+  await h.flow.upkeep();
+  assert.equal(inspectRoutePin(h.profileOf(b)).allow,false,'drift on archived route holds');
+  assert.equal(inspectRoutePin(h.profileOf(a)).allow,true);
+});
+
+test('S01 review D: principals of archived or pre-S01 accounts are never reused by another account',async()=>{
+  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
+  const legacy=await h.accounts.apply({type:'ENROLL',accountId:'legacy_account_01',personaUid:'persona-legacy-0001',expectedRevision:0});
+  const proof=(personaUid)=>({source:'GUARDED_SESSION_READBACK',verified:true,personaUid,
+    principalFingerprint:fp('d'),observationId:'identity_legacy_0001'});
+  const v=await h.accounts.apply({type:'VERIFY',accountId:'legacy_account_01',expectedRevision:legacy.account.revision,
+    proof:proof('persona-legacy-0001')});
+  await h.accounts.apply({type:'ARCHIVE',accountId:'legacy_account_01',expectedRevision:v.account.revision});
+  // Pre-S01 record shape: no boundPrincipal field, identity only in history.
+  const raw=h.db.read('meta','account:legacy_account_01');delete raw.account.boundPrincipal;
+  await new Promise(r=>{const tx=h.db.transaction(['meta'],'readwrite');tx.objectStore('meta').put(raw);tx.oncomplete=r;});
+  const a=await enroll(h);
+  h.sessions.set(a.personaUid,fp('d'));
+  assert.equal((await h.flow.confirm(a.accountId)).code,'IDENTITY_ALREADY_BOUND');
 });

@@ -15,6 +15,8 @@ export const SETUP_MESSAGES=Object.freeze({
   NO_UNIQUE_EXIT_AVAILABLE:'No available Mullvad exit was found that has not already been used by another managed account.',
   NO_ROUTE_CANDIDATES:'No Mullvad relay list or unused Mullvad route is available right now.',
   IPV6_EVIDENCE_UNVERIFIED:'The route\'s IPv6 behaviour could not be verified, so it was not used.',
+  ROUTE_CHECK_FAILED:'The last route check failed. PCMS checks again shortly and moves to another unique exit only if it fails again.',
+  EXIT_LEDGER_MISSING:'PCMS\'s record of used exits is missing while PersonaMonkey still has managed Personas. New routes are held so no exit is reused.',
   EXIT_DRIFT_CONFLICT:'This account\'s route now exits from an address recorded for another account. Its traffic is held.',
   ROUTE_CHANGED_OUTSIDE_PCMS:'The Persona\'s route was changed outside PCMS. Its traffic is held until PCMS verifies a route.',
   PERSONA_CREATE_UNCONFIRMED:'PersonaMonkey did not confirm the new Persona. Retry continues safely.',
@@ -42,9 +44,14 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
   const routeStatus=(accountId,status,code=null)=>
     accounts.applyCurrent({type:'ROUTE_STATUS',accountId,status,code,at:now()});
 
+  // The pin is withdrawn BEFORE an observation that may hold it, and only
+  // restored after the ACTIVE record is committed. HELD->ACTIVE on the SAME
+  // pinned route is allowed after a clean assigned probe (e.g. a manual route
+  // edit undone); an exit owned by another account can never re-activate.
   async function activate(bindingId,evidence,routeId){
     const n=normalizeRouteEvidence(evidence);
     if(!n.ok||n.routeId!==routeId)return n.ok?fail('ROUTE_CHANGED_DURING_PROBE'):n;
+    pins.hold(bindingId);
     const out=await ledger.observe({bindingId,routeId,exits:n.exits,
       exitSetDigest:await exitSetDigest(n.exits),observedAtMs:n.observedAtMs,activate:true});
     if(!out.ok)return out;
@@ -52,10 +59,12 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     await pins.reload();
     return {ok:true,routeId,changed:true};
   }
-  // Verify the currently assigned route; on genuine route failure (never a
-  // Perchance/Cloudflare response: probes only reach the fixed Mullvad echo)
-  // or on operator request, pin a different unique exit.
-  async function ensurePinnedRoute(account,{change=false}={}){
+  // Verify the currently assigned route. Rotation to a different unique exit
+  // happens only on operator request, or for unattended checks after a
+  // SECOND consecutive failed check of the same route (never on a single
+  // timeout, and never from a Perchance/Cloudflare response: probes only
+  // reach the fixed Mullvad echo). rotate:false (archived) only observes.
+  async function ensurePinnedRoute(account,{change=false,automatic=false,rotate=true}={}){
     const bindingId=account.bindingId;
     const persona=await donor.boundPersona({bindingId});
     if(!persona.ok)return persona;
@@ -66,21 +75,37 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       if(ev.ok){
         const out=await activate(bindingId,ev,persona.routeId);
         if(out.ok)return {ok:true,routeId:persona.routeId,changed:false};
-        if(out.code==='EXIT_DRIFT_CONFLICT'){pins.hold(bindingId);return out;}
+        if(out.code==='EXIT_DRIFT_CONFLICT')return out;
+        pins.release(bindingId);
+        if(!rotate)return out;
+        if(automatic&&account.route?.code!=='ROUTE_CHECK_FAILED')return fail('ROUTE_CHECK_FAILED');
         failed.push(persona.routeId);
       }else if(ev.failure==='HOST')return ev;
-      else failed.push(persona.routeId);
+      else{
+        if(!rotate)return ev;
+        if(automatic&&account.route?.code!=='ROUTE_CHECK_FAILED')return fail('ROUTE_CHECK_FAILED');
+        failed.push(persona.routeId);
+      }
     }else if(prior.ok&&prior.binding.routeId!==persona.routeId&&prior.binding.pin==='ACTIVE'&&!change){
       // Route edited outside PCMS: the donor pin already blocks this Persona.
       pins.hold(bindingId);
       await ledger.hold(bindingId,'ROUTE_CHANGED_OUTSIDE_PCMS');
-    }
+      if(!rotate)return fail('ROUTE_CHANGED_OUTSIDE_PCMS');
+    }else if(!rotate)return fail(prior.ok?'ROUTE_HELD':'BINDING_RESERVATION_ABSENT');
     if(change&&prior.ok)failed.push(prior.binding.routeId);
     // Withdraw first: synchronous donor hold BEFORE any ledger or route change.
     pins.hold(bindingId);
     if(prior.ok&&prior.binding.pin!=='HELD')await ledger.hold(bindingId,change?'OPERATOR_ROUTE_CHANGE':'ROUTE_REPAIR');
     const prefer=prior.ok?(prior.binding.history||[]).map(h=>h.routeId):[];
     const listed=await donor.candidateRoutes({bindingId,excludeRouteIds:failed,preferRouteIds:prefer});
+    // A lost/replaced PCMS store is not an empty exit history: donor
+    // Personas tagged for bindings PCMS has no record of hold allocation.
+    if(listed.ok&&Array.isArray(listed.taggedBindings)&&listed.taggedBindings.length){
+      const known=await accounts.list();
+      if(!known.ok)return known;
+      const ids=new Set(known.accounts.map(a=>a.bindingId).filter(Boolean));
+      if(listed.taggedBindings.some(id=>!ids.has(id)))return fail('EXIT_LEDGER_MISSING');
+    }
     const candidates=listed.ok?listed.candidates.slice(0,MAX_CANDIDATES):[];
     let last=candidates.length?'NO_UNIQUE_EXIT_AVAILABLE':'NO_ROUTE_CANDIDATES';
     for(const candidate of candidates){
@@ -158,14 +183,19 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
   }
 
   // Background/periodic or operator route check for one active account.
-  async function verifyRoute(accountId,{change=false}={}){
+  async function verifyRoute(accountId,{change=false,automatic=false}={}){
     const got=await accounts.get(accountId);
     if(!got.ok)return got;
     const account=got.account;
-    if(account.state==='ARCHIVED'||account.state==='PREPARING'||typeof account.bindingId!=='string')
+    if(account.state==='PREPARING'||typeof account.bindingId!=='string'||
+       (account.state==='ARCHIVED'&&(change||!automatic)))
       return fail('INVALID_ACCOUNT_STATE');
-    const route=await ensurePinnedRoute(account,{change});
-    if(!route.ok){await routeStatus(accountId,'HELD',route.code);return route;}
+    // Archived accounts are observed for drift only, never moved.
+    const route=await ensurePinnedRoute(account,{change,automatic,rotate:account.state!=='ARCHIVED'});
+    if(!route.ok){
+      await routeStatus(accountId,route.code==='ROUTE_CHECK_FAILED'?'CHECKING':'HELD',route.code);
+      return route;
+    }
     await routeStatus(accountId,'PINNED');
     if(route.changed&&account.state==='VERIFIED'){
       // Revalidate the same principal on the new exit; no silent rebind.
@@ -200,17 +230,17 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     confirm:accountId=>exclusive(accountId,()=>confirm(accountId)),
     verifyRoute:(accountId,options)=>exclusive(accountId,()=>verifyRoute(accountId,options)),
     reactivate:(accountId,rev)=>exclusive(accountId,()=>reactivate(accountId,rev)),
-    // Startup/alarm upkeep: unfinished operator-started setups resume; active
-    // pinned accounts re-verify their route. Archived accounts are untouched.
+    // Startup/alarm upkeep: unfinished operator-started setups resume; pinned
+    // accounts re-verify their route (archived ones observe only).
     async upkeep(){
       const listed=await accounts.list();
       if(!listed.ok)return listed;
       const results=[];
       for(const a of listed.accounts){
-        if(typeof a.bindingId!=='string'||a.state==='ARCHIVED')continue;
+        if(typeof a.bindingId!=='string')continue;
         if(a.state==='PREPARING'){
           if(a.setup?.phase!=='HELD')results.push(await exclusive(a.accountId,()=>prepare(a.accountId)));
-        }else results.push(await exclusive(a.accountId,()=>verifyRoute(a.accountId)));
+        }else results.push(await exclusive(a.accountId,()=>verifyRoute(a.accountId,{automatic:true})));
       }
       return {ok:true,checked:results.length};
     },

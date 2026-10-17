@@ -36,6 +36,8 @@ Prior donor evidence (Phase 08 record, `docs/history/planning/phase-08-...md`): 
 
 All PCMS effects additionally pass `persona-guard.inspect`, which now requires the pin (untagged → `ROUTE_RESERVATION_REQUIRED`).
 
+Tagged containers never take the donor's extension-origin Direct exemption (any host). Unattended route checks never rotate on one failure: the first failed check marks the account `ROUTE_CHECK_FAILED`; only a second consecutive failure (or an operator **Change route**) moves it to another unique exit. Archived accounts are re-checked for drift but never moved. If PersonaMonkey holds tagged Personas whose bindings PCMS has no record of (lost/replaced PCMS store), new allocation holds (`EXIT_LEDGER_MISSING`) rather than treating exit history as empty. A principal recorded for any other account (including archived or pre-S01 records) is never reused.
+
 ## 5. Safety equivalence and tests
 
 | Gate B intent | Now enforced by | D test |
@@ -58,6 +60,10 @@ Mutation checks (removing the exit-history check, pin route comparison, boot-emp
 - Archive keeps the pin (human protected browsing may continue; automation stops by account state) and never releases exit history. Idle forwarder release is left to the donor's existing auto-stop.
 - Removed: `protected-admission.mjs`, `network-join.mjs`, `native/s01-fixed-exit-probe.py`, the routerd derivative in `build-s01-native.py`. Kept: native runtime witness and `qualified-clock.mjs` (E-04).
 
-## 7. What this does not prove
+## 7. Independent review
+
+An independent review agent audited the full diff against invariants 1–8 (request gating, pin lifecycle, exit exclusivity, tag protection, route creation, identity, lost ACK, extension exemption). No critical violation. Findings fixed with regression tests: tagged-container extension-Direct exemption (reproduced, medium-high), single-failure unattended rotation, drift hold ordering, missing-ledger history loss, archived drift, legacy principal reuse, existing-route relay range. This is agent review; protected human/trusted review per repository rules is separate.
+
+## 8. What this does not prove
 
 D and staged-background tests use fake donor primitives with independent effect ledgers. B proves the installed XPI runs Add Account to an honest hold without a native host and that an unpinned tagged Persona's request never reaches a local proxy oracle. Real Mullvad exit observation, IPv6 behavior of Mullvad SOCKS relays, repair on a real outage and live login remain **L/H holds**.

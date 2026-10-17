@@ -84,6 +84,13 @@ test('S01 D: pinned managed Persona can never go Direct; untagged ordinary Perso
   assert.equal((await ordinary.proxy(ordinary.details)).port,4444);
   assert.deepEqual(plain(await ordinary.before(ordinary.details)),{});
 });
+test('S01 review D: a pinned tagged Persona never takes the donor extension-Direct exemption for any host',async()=>{
+  const h=handlers(await background());
+  await pinned([pinOf(tagged)]);
+  const ext={...h.details,extension:true,url:'https://user.uploads.dev/file/x'};
+  assert.equal((await h.proxy(ext))[0].port,9);
+  assert.deepEqual(plain(await h.before(ext)),{cancel:true});
+});
 test('S01 D: extension-origin Perchance requests never inherit the donor extension-Direct exemption',async()=>{
   const h=handlers(await background(),{profile:{...tagged,pcmsBindingId:null}});
   const provider={...h.details,extension:true,cookieStoreId:'firefox-default'};

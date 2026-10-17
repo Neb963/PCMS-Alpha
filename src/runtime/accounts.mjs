@@ -125,8 +125,13 @@ export function transitionAccount(previous, action, all = []) {
       // different login (changed credentials, wrong account) never rebinds.
       if (previous.boundPrincipal && previous.boundPrincipal !== proof.principalFingerprint)
         return fail('IDENTITY_CHANGED');
+      // Any other account's principal (including archived and pre-S01
+      // records, and identities preserved in history) is never reused.
       if (all.some(a => a && a.accountId !== action.accountId &&
-          a.boundPrincipal === proof.principalFingerprint))
+          (a.boundPrincipal === proof.principalFingerprint ||
+           a.identity?.principalFingerprint === proof.principalFingerprint ||
+           (Array.isArray(a.history) && a.history.some(h =>
+             h?.priorIdentity?.principalFingerprint === proof.principalFingerprint)))))
         return fail('IDENTITY_ALREADY_BOUND');
       identity={principalFingerprint:proof.principalFingerprint,observationId:proof.observationId,
         source:'GUARDED_SESSION_READBACK',bindingVersion};
