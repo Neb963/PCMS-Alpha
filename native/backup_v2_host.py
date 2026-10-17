@@ -6,6 +6,7 @@ The Python host process lives for one connectNative port, owns exactly one
 incremental GCM context, and journals possible effects before dispatch.
 """
 import base64
+import fcntl
 import hashlib
 import json
 import os
@@ -129,6 +130,31 @@ class V2ArchiveHost:
         self.writer = None
         self.current = None
         self.restore = None
+        self._export_lock = None
+
+    def _acquire_export_lock(self):
+        # One OS-owned export context per fixed backup root, even when Firefox
+        # opens two native ports/processes concurrently. flock releases on crash.
+        _require(self._export_lock is None,"BACKUP_SESSION_BUSY")
+        fd=os.open(self.root / ".export.lock",
+                   os.O_RDWR | os.O_CREAT | getattr(os,"O_NOFOLLOW",0),0o600)
+        try:
+            info=os.fstat(fd)
+            _require(stat.S_ISREG(info.st_mode) and info.st_nlink==1 and
+                     not bool(info.st_mode & 0o077),"BACKUP_LOCK_UNSAFE")
+            try:
+                fcntl.flock(fd,fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise BackupError("BACKUP_SESSION_BUSY") from error
+            self._export_lock=fd
+        except BaseException:
+            os.close(fd)
+            raise
+
+    def _release_export_lock(self):
+        if self._export_lock is not None:
+            os.close(self._export_lock)
+            self._export_lock=None
 
     def _paths(self, run_id):
         _require(isinstance(run_id, str) and _ID.fullmatch(run_id),
@@ -200,6 +226,7 @@ class V2ArchiveHost:
                  0 <= msg["expectedPlaintextBytes"] <= (1<<36)-32,
                  "BACKUP_BEGIN_INVALID")
         _safe_root(self.root,create=True)
+        self._acquire_export_lock()
         _require(_read_json(ledger) is None and not artifact.exists(),
                  "BACKUP_RUN_ALREADY_USED")
         # This lookup uses the existing Secret Service helper in a native process.
@@ -267,6 +294,7 @@ class V2ArchiveHost:
         state["state"]="WRITTEN_UNVERIFIED"
         self._write(state)
         self.current=None
+        self._release_export_lock()
         return {"ok":True,"state":state["state"],"bytes":receipt["bytes"]}
 
     def _inspect(self,msg):
@@ -412,6 +440,7 @@ class V2ArchiveHost:
             self.writer.abandon()
             self.writer=None
         self.current=None
+        self._release_export_lock()
         # Persisted APPEND_POSSIBLE / FINISH_POSSIBLE is never rolled back.
 
 
