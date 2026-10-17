@@ -561,7 +561,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   let donorStorage = await readFile(donorStoragePath,'utf8');
   donorStorage = substituteOnce(donorStorage,
     '    managed: profile.managed !== false,',
-    "    managed: profile.managed !== false,\\n    pcmsBindingId: typeof profile.pcmsBindingId === 'string' &&\\n      /^[a-z0-9_-]{8,128}$/i.test(profile.pcmsBindingId) ? profile.pcmsBindingId : null,",
+    "    managed: profile.managed !== false,\n    pcmsBindingId: typeof profile.pcmsBindingId === 'string' &&\n      /^[a-z0-9_-]{8,128}$/i.test(profile.pcmsBindingId) ? profile.pcmsBindingId : null,",
     'S01 durable donor binding');
   await writeFile(donorStoragePath,donorStorage);
 
