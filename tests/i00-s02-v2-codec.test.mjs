@@ -1,3 +1,5 @@
+import {decodeV2InactiveFrames} from '../src/ui/restore-v2-stream-decode.mjs';
+import {scanV2AuthenticatedFrames} from '../src/ui/restore-v2-frame-scanner.mjs';
 import {prepareInactiveV2} from '../src/ui/restore-v2-prep.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -136,4 +138,28 @@ test('S02 inactive v2 source recovery preserves history, remaps persona and reje
     expectedCiphertextSha256:receipt,currentPcms:destination,
     decodeDonor:decodeBackupEnvelope,password,mode:'replace',uidRemap:{}}),
     /RESTORE_UID_MAPPING_MISSING/);
+});
+
+test('S02 bounded frame-stream decoder fully restores source and encrypted donor across 1-byte cuts',async()=>{
+  const {pcms,donor,password}=await fixture();
+  const plan=await compileV2(pcms,donor),chunks=[];
+  for await(const bytes of streamV2Frames(plan))chunks.push(bytes);
+  const encoded=concat(chunks);
+  async function* split(data){
+    for(let i=0;i<data.length;i+=1)yield data.subarray(i,i+1);
+  }
+  const observed=await decodeV2InactiveFrames(
+    scanV2AuthenticatedFrames(split(encoded)),{
+      password,decodeDonor:decodeBackupEnvelope});
+  assert.equal(observed.status,'AUTHENTICATED_INACTIVE_DECODED_NOT_APPLIED');
+  assert.equal(observed.inventory.uniqueBlobs,3);
+  assert.equal(observed.sourceAudit.uniqueBlobs,3);
+  const previous=await decodeAuthenticatedV2(encoded,{
+    password,decodeDonor:decodeBackupEnvelope});
+  assert.deepEqual(observed.pcms,previous.pcms);
+  assert.deepEqual(observed.donor,previous.donor);
+  await assert.rejects(decodeV2InactiveFrames(
+    scanV2AuthenticatedFrames(split(encoded)),{
+      password:'wrong-but-valid-secret',decodeDonor:decodeBackupEnvelope}),
+      /RESTORE_V2_DONOR_AUTH_FAILED/);
 });
