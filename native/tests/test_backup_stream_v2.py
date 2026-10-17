@@ -18,21 +18,35 @@ def make_payload(*, missing=False, duplicate=False, bad_ref=False, donor=True, e
     data = bytes(range(256)) * 360
     digest = hashlib.sha256(data).digest()
     refs = [hashlib.sha256(b'unknown').hexdigest()] if bad_ref else [digest.hex()]
-    row = {"store": "meta", "key": "stage:a", "refs": refs}
+    row = {"store": "meta", "key": "stage:a", "refs": refs,
+           "value": {"candidate": {"blobs": [
+               {"path": "src/example.bin",
+                "base64": {"__pcmsV2BlobRef": refs[0]}}]}}}
+    encoded = json.dumps(row, sort_keys=True, separators=(',', ':')).encode('utf8')
+    donor_bytes = b'{"sealedPayload":"test-only-opaque"}'
+    ids = set() if missing else {digest.hex()}
     end = {"schema": 2, "canonicalRows": 1,
-           "uniqueBlobs": 2 if duplicate else (0 if missing else 1),
-           "donorSections": 1 if donor else 0, "sourceRefs": refs}
+           "storeCounts": {"entities": 0, "operations": 0, "events": 0,
+                           "meta": 1, "observations": 0},
+           "uniqueBlobs": 2 if duplicate else len(ids),
+           "donorSections": 1 if donor else 0,
+           "sourceRefsSha256": hashlib.sha256(
+               '\n'.join(sorted(refs)).encode()).hexdigest(),
+           "rowDigestsSha256": hashlib.sha256(
+               hashlib.sha256(encoded).hexdigest().encode()).hexdigest(),
+           "donorSha256": hashlib.sha256(donor_bytes if donor else b'').hexdigest()}
     items = []
     if not missing:
         items.append(frame(BLOB, digest + data))
         if duplicate:
             items.append(frame(BLOB, digest + data))
-    items.append(frame(CANONICAL, json.dumps(row).encode()))
+    items.append(frame(CANONICAL, encoded))
     if donor:
-        items.append(frame(DONOR, b'{"sealedPayload":"test-only-opaque"}'))
-    items.append(frame(END, json.dumps(end).encode()))
+        items.append(frame(DONOR, donor_bytes))
+    items.append(frame(END, json.dumps(end, sort_keys=True,
+                                      separators=(',', ':')).encode()))
     if extra:
-        items.append(frame(CANONICAL, json.dumps(row).encode()))
+        items.append(frame(CANONICAL, encoded))
     return b''.join(items)
 
 
