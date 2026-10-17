@@ -29,7 +29,14 @@ export function createDonorSnapshotPortHandler(api,{wait=waitForPcmsBackupDonor}
           if(!snapshot?.state||typeof snapshot.state!=='object'||
              !Array.isArray(snapshot.containers))
             throw Error('BACKUP_DONOR_UNAVAILABLE');
-          return {ok:true,state:snapshot.state,containers:snapshot.containers};
+          // Preserve the full donor-projected snapshot contract for I16's
+          // exact destination hash, rather than silently narrowing its cut.
+          // Source is the pinned donor getSnapshot(), not a browser flag.
+          const extras=Object.fromEntries(['security','mullvadNative',
+            'userScriptsGranted'].filter(k=>Object.hasOwn(snapshot,k))
+              .map(k=>[k,snapshot[k]]));
+          return {ok:true,state:snapshot.state,containers:snapshot.containers,
+            ...extras};
         }).catch(()=>fail('BACKUP_DONOR_UNAVAILABLE'))
         .then(answer=>{try{port.postMessage(answer);}catch{}});
     });

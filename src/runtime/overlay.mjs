@@ -777,8 +777,8 @@ attachPcmsGuard({
 function localMutationFence(profileIds, operation, mode = "block", options = {}) {`,
     'donor guard host');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
-    `\nattachPcmsBackupDonor({ snapshot: async () => { await initialize(); return {state:await getState(),containers:await personaManager.listContainers()}; }, cookies: id => cookieService.list(id) });\nattachPcmsRestoreDonor({
-  snapshot:async()=>{await initialize();return {state:await getState(),containers:await personaManager.listContainers()};},
+    `\nattachPcmsBackupDonor({ snapshot: () => getSnapshot(), cookies: id => cookieService.list(id) });\nattachPcmsRestoreDonor({
+  snapshot:()=>getSnapshot(),
   cookies:id=>cookieService.list(id),
   containers:()=>personaManager.listContainers(),
   createContainer:async ({name,color,icon})=>localMutationFence([],async()=>{

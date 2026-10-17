@@ -62,6 +62,11 @@ test('S02 real options/restore donor reader accepts only exact protected snapsho
   const good={ok:true,state:{schemaVersion:3,profiles:{}},containers:[]};
   assert.deepEqual(await readProtectedDonorSnapshot(makeApi(good)),
     {state:good.state,containers:[]});
+  const full={...good,security:{ready:true},
+    mullvadNative:{state:'inactive'},userScriptsGranted:false};
+  assert.deepEqual(await readProtectedDonorSnapshot(makeApi(full)),{
+    state:full.state,containers:[],security:full.security,
+    mullvadNative:full.mullvadNative,userScriptsGranted:false});
   for(const invalid of [null,{}, {ok:true,state:{},containers:'bad'},
     {...good,extra:'untrusted'}]){
     await assert.rejects(readProtectedDonorSnapshot(makeApi(invalid)),

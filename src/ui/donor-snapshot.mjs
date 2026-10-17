@@ -17,10 +17,15 @@ export async function readProtectedDonorSnapshot(api){
       port.onMessage.addListener(snapshot=>{
         if(snapshot?.ok!==true||!snapshot.state||
            !Array.isArray(snapshot.containers)||
-           Object.keys(snapshot).sort().join(',')!=='containers,ok,state'){
+           Object.keys(snapshot).some(k=>!['ok','state','containers',
+             'security','mullvadNative','userScriptsGranted'].includes(k))){
           finish(null,true);return;
         }
-        finish({state:snapshot.state,containers:snapshot.containers},false);
+        const extras=Object.fromEntries(['security','mullvadNative',
+          'userScriptsGranted'].filter(k=>Object.hasOwn(snapshot,k))
+            .map(k=>[k,snapshot[k]]));
+        finish({state:snapshot.state,containers:snapshot.containers,
+          ...extras},false);
       });
       port.onDisconnect.addListener(()=>finish(null,true));
       port.postMessage({action:'SNAPSHOT'});
