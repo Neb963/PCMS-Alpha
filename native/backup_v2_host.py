@@ -13,6 +13,8 @@ from pathlib import Path
 import re
 import stat
 import tempfile
+import struct
+import sys
 
 from backup_stream_v2 import BackupError, EncryptedWriter, verify_two_pass, BUFFER
 
@@ -287,3 +289,61 @@ class V2ArchiveHost:
             self.writer=None
         self.current=None
         # Persisted APPEND_POSSIBLE / FINISH_POSSIBLE is never rolled back.
+
+
+# Bound stdio messages for this dedicated, persistently connected native port.
+# This is NOT installed or registered by the S02 draft PR.
+MAX_MESSAGE = 100000
+
+
+def _recv(stream):
+    header = stream.read(4)
+    if not header:
+        return None
+    if len(header) != 4:
+        return {"action": "invalid"}
+    length = struct.unpack("<I", header)[0]
+    if not (0 < length <= MAX_MESSAGE):
+        # Fail closed; never attempt to consume an unbounded attacker length.
+        return {"action": "invalid"}
+    packet = stream.read(length)
+    if len(packet) != length:
+        return {"action": "invalid"}
+    try:
+        return json.loads(packet.decode("utf-8"))
+    except (ValueError, UnicodeError):
+        return {"action": "invalid"}
+
+
+def _send(stream, response):
+    raw = json.dumps(response, separators=(",", ":")).encode("utf-8")
+    _require(len(raw) <= MAX_MESSAGE, "BACKUP_RESPONSE_TOO_LARGE")
+    stream.write(struct.pack("<I", len(raw)) + raw)
+    stream.flush()
+
+
+def main():
+    # Only the native-host installer chooses executable identity and data root;
+    # browser messages cannot choose a filesystem directory or keyring scope.
+    # No root created for read-only inspect. Never touch a personal profile.
+    from backup_vault_host import action as vault_action
+    root = Path.home() / ".local" / "share" / "pcms-alpha" / "backups"
+    def vault():
+        result = vault_action({"action": "get"})
+        return result.get("passphrase") if result.get("ok") is True else None
+    host = V2ArchiveHost(root, vault)
+    try:
+        while True:
+            command = _recv(sys.stdin.buffer)
+            if command is None:
+                break
+            response = host.action(command)
+            _send(sys.stdout.buffer, response)
+            if command == {"action": "invalid"}:
+                break
+    finally:
+        host.close()
+
+
+if __name__ == "__main__":
+    main()
