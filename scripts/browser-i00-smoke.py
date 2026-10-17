@@ -3463,6 +3463,84 @@ def main():
                 fresh_restored=execute(after,"return browser.storage.local.get('pcmsRestoreInProgress').then(s=>({active:s.pcmsRestoreInProgress?.active,fresh:s.pcmsRestoreInProgress?.fresh,status:s.pcmsRestoreInProgress?.status}))")
                 assert fresh_restored=={'active':True,'fresh':True,'status':'COMPLETE_INACTIVE'},fresh_restored
                 print('B I16_FRESH_PROFILE_UID_COLLISION_BLOCK_ROUTE_INACTIVE_RESTART=PASS',flush=True)
+                # S02 B: the same persistently installed production XPI,
+                # in the disposable *fresh* Firefox profile, reconstructs
+                # complete v2 source and applies inactive canonical records
+                # through actual I16 guarded IDB production module. This uses
+                # a fixture native terminal receipt, NOT H disk/native proof.
+                fresh_v2="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const v2=await import('./backup-v2-codec.mjs');
+                  const prepare=await import('./restore-v2-prep.mjs');
+                  const restore=await import('./restore-idb.mjs');
+                  const core=await import('./backup-core.mjs');
+                  const donor=await import('../lib/backup-package.js');
+                  const password='s02-disposable-fresh-restore-passphrase';
+                  const text=new TextEncoder();
+                  const names=[['main.pjs',text.encode('output = "V2 fresh"')],
+                    ['index.html',text.encode('<b>V2 fresh</b>')],
+                    ['src/asset.bin',new Uint8Array([0,255,7,0,12])]];
+                  const files=await Promise.all(names.map(async([path,bytes])=>({
+                    path,size:bytes.length,sha256:await core.digest(bytes)})));
+                  files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+                  const blobs=names.map(([path,bytes])=>({path,base64:
+                    btoa(String.fromCharCode(...bytes))})).sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+                  const fingerprint=await core.digest('PCMS_STAGED_SOURCE_V1'+String.fromCharCode(10)+files.map(
+                    f=>JSON.stringify([f.path,f.size,f.sha256])).join(String.fromCharCode(10)));
+                  const src={ok:true,fingerprint,files,blobs};
+                  const empty={schema:1,stores:Object.fromEntries(
+                    core.DB_STORES.map(k=>[k,[]]))};
+                  const incoming=structuredClone(empty);
+                  incoming.stores.meta.push({key:'stage:v2-fresh',
+                    value:{key:'stage:v2-fresh',record:{candidate:src,previous:src}}});
+                  const sealed=await donor.encodeBackupEnvelope({payload:
+                    donor.createPortableBackupPayload({state:{},containers:[],selection:{kind:'full'}}),
+                    password});
+                  const plan=await v2.compileV2(incoming,sealed);
+                  const chunks=[];for await(const part of v2.streamV2Frames(plan))chunks.push(part);
+                  const plain=new Uint8Array(plan.plaintextBytes);let i=0;
+                  for(const part of chunks){plain.set(part,i);i+=part.length;}
+                  const digest='a'.repeat(64);
+                  const restored=await prepare.prepareInactiveV2({
+                    authenticatedPlaintext:plain,
+                    readback:{state:'AUTHENTICATED_SECOND_PASS',sha256:digest},
+                    expectedCiphertextSha256:digest,password,
+                    decodeDonor:donor.decodeBackupEnvelope,
+                    currentPcms:empty,mode:'replace'});
+                  const dbName='s02-fresh-'+crypto.randomUUID();
+                  const open=()=>new Promise((resolve,reject)=>{
+                    const req=indexedDB.open(dbName,1);
+                    req.onupgradeneeded=()=>{
+                      for(const [name,keyPath] of Object.entries({
+                        entities:'id',operations:'operationId',meta:'key',observations:'id'}))
+                        req.result.createObjectStore(name,{keyPath});
+                      req.result.createObjectStore('events',{autoIncrement:true});
+                    };
+                    req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+                  });
+                  let db=await open();
+                  const held=async()=>{
+                    const state=(await browser.storage.local.get('pcmsRestoreInProgress'))
+                      .pcmsRestoreInProgress;
+                    return state?.active===true&&state.status==='COMPLETE_INACTIVE';
+                  };
+                  const applied=await restore.applyCanonicalSnapshot(db,restored.prepared,{
+                    assertHeld:held,expectedBefore:empty});
+                  db.close();db=await open();
+                  const after=await core.snapshotCanonical(db);
+                  db.close();
+                  done({ok:applied.source==='INDEPENDENT_READBACK'&&
+                    restored.activation==='OFF'&&restored.controller==='RESTORE_HELD'&&
+                    after.stores.meta.length===1&&
+                    after.stores.meta[0].value.record.candidate.blobs.find(x=>
+                      x.path==='src/asset.bin')?.base64==='AP8HAAw='&&
+                    (await held())===true,
+                    sourceStatus:restored.status,rows:after.stores.meta.length});
+                })().then(done).catch(e=>done({error:String(e)}));"""
+                fresh_v2_result=call('POST',f'/session/{after}/execute/async',
+                                     {'script':fresh_v2,'args':[]},timeout=120)
+                assert fresh_v2_result.get('ok') is True,fresh_v2_result
+                print('B S02_FRESH_FIREFOX_PROFILE_INACTIVE_V2_SOURCE_CANONICAL_RESTORE=PASS',flush=True)
 
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
                 close(after)
