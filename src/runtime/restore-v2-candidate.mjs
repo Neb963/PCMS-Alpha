@@ -100,10 +100,20 @@ export async function prepareTrackedV2Restore({
       });
     }finally{key.passphrase=null;}
     await held();
+    const qualified=await connection.exchange({
+      action:'archive.recovery.complete',runId,
+      sha256:previous.ciphertextSha256,
+      preparedSha256:prepared.preparedSha256,
+      status:'INACTIVE_PREPARED_NOT_APPLIED'});
+    check(qualified?.ok===true&&qualified.state==='RECOVERY_VERIFIED'&&
+      qualified.runId===runId&&
+      qualified.sha256===previous.ciphertextSha256&&
+      qualified.activation==='OFF',
+      'RESTORE_V2_RECOVERY_ACK_UNKNOWN');
     completed=true;
     return {ok:true,runId,prepared,
       status:'INACTIVE_PREPARED_NOT_APPLIED',
-      nativeReceipt:'AUTHENTICATED_SECOND_PASS',
+      nativeReceipt:'RECOVERY_VERIFIED',
       controller:'RESTORE_HELD',providerEffects:'OFF'};
   }finally{
     if(restoreBegan&&!completed){
