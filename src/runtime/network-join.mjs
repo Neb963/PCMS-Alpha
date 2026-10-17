@@ -29,7 +29,10 @@ function transact(db,mode,handler){
 export function createCommittedNetworkObserver({onInvalidate}={}){
  const committed=new Map();
  let failed=false;
- function readCommitted(key){
+ function readCommitted(candidate){
+  // Donor inspects both a bare admission key and the volatile runtime grant.
+  // Runtime-only grantId/expiry/boot/generation fields are never ledger fields.
+  const key=admissionKeyOf(candidate);
   if(failed || !validAdmissionKey(key))return {allow:false,reason:'OBSERVER_UNAVAILABLE'};
   const record=committed.get(key.bindingId);
   return record&&Object.keys(key).every(f=>record[f]===key[f])?
