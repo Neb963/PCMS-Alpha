@@ -28,7 +28,7 @@ function harness(bg,{managed=true,admitted=false,mode='proxy',interrupt=false}={
    assert.equal(grant.admit(key,{expectedSafetyGeneration:0,routeRevision:1,
     evidenceValidUntil:4000}).ok,true);}
  const requests=[];
- const state={profiles:{'firefox-container-001':managed?profile:{...profile,pcmsBindingId:null}}};
+ const state={global:{blockSpeculative:false,enforcePrivacyControls:false,strictProxyVerification:false},profiles:{'firefox-container-001':managed?profile:{...profile,pcmsBindingId:null}}};
  const ctx={pcmsAdmission:grant,BLACKHOLE_PROXY:{type:'http',host:'127.0.0.1',port:9},
   initialize:async()=>{},getState:async()=>state,extensionBaseUrl:'moz-extension://test/',
   isExtensionOrigin:()=>false,getRouteTestRequestOverride:()=>null,
