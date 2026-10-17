@@ -2754,8 +2754,35 @@ def main():
                   }
                   const restored=await v2.decodeAuthenticatedV2(all,{
                     decodeDonor:donor.decodeBackupEnvelope,password:pass});
+                  // The actual packaged Firefox IDB stores native-like second
+                  // pass bytes, and only a terminal receipt permits decoding.
+                  const staged=await import('./restore-v2-inactive-stage.mjs');
+                  const prepare=await import('./restore-v2-prep.mjs');
+                  const db=await staged.openV2StageDB();
+                  const stage=staged.createV2InactiveStage(db,{assertHeld:async()=>true});
+                  const run='s02_'+crypto.randomUUID().replaceAll('-','');
+                  const proofSha='a'.repeat(64),empty={
+                    schema:1,stores:{entities:[],operations:[],events:[],
+                      meta:[],observations:[]}};
+                  await stage.begin(run,{state:'INACTIVE_STAGING_REQUIRED',
+                    sha256:proofSha,plaintextBytes:all.length});
+                  let seq=0;
+                  for(let j=0;j<all.length;j+=49152)
+                    await stage.append(run,seq++,all.subarray(j,j+49152));
+                  await stage.finish(run,{state:'AUTHENTICATED_SECOND_PASS',
+                    sha256:proofSha,complete:true},seq);
+                  const stagedRestored=await prepare.prepareInactiveV2FromStage({
+                    stage,runId:run,readback:{state:'AUTHENTICATED_SECOND_PASS',
+                      sha256:proofSha,complete:true},
+                    expectedCiphertextSha256:proofSha,currentPcms:empty,
+                    password:pass,decodeDonor:donor.decodeBackupEnvelope,
+                    mode:'replace'});
+                  db.close();
                   const exact=restored.pcms.stores.meta[0].value.record.candidate;
                   done({ok:o===all.length&&plan.terminal.uniqueBlobs===3&&
+                    stagedRestored.status==='INACTIVE_PREPARED_NOT_APPLIED'&&
+                    stagedRestored.prepared.stores.meta.length===2&&
+                    stagedRestored.activation==='OFF'&&
                     scannerBlobs===3&&scannerEnds===1&&
                     scannerDonorBytes===new TextEncoder().encode(sealed).length&&
                     restored.pcms.stores.operations[0].value.status==='HELD_UNCERTAIN'&&
