@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
 import {auditSourceClosure} from '../src/ui/backup-source-closure.mjs';
-import {encodeIntegrated} from '../src/ui/backup-core.mjs';
+import {encodeIntegrated,preflightSourceRecovery} from '../src/ui/backup-core.mjs';
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 const text = new TextEncoder();
 const hash = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
@@ -75,19 +75,21 @@ test('S02 refuses a missing, changed, misnamed or hidden source byte', async () 
     ])), new RegExp(code));
   }
 });
-test('S02 blocks v1 encryption before any cipher work for incomplete source', async () => {
-  const sourceSnapshot = await source();
-  sourceSnapshot.blobs = [];
-  let gotRandom = 0;
-  const before = crypto.getRandomValues;
-  try {
-    crypto.getRandomValues = (...args) => {gotRandom++; return before(...args);};
-    await assert.rejects(encodeIntegrated({
-      pcms: snapshot([meta('adoption:a', 'adoption', 'original', sourceSnapshot)]),
-      donorEnvelope: '{}', passphrase: 'correct portable password'
-    }), /BACKUP_SOURCE_INCOMPLETE/);
-    assert.equal(gotRandom, 0, 'must reject before generating an archive key or download');
-  } finally {crypto.getRandomValues = before;}
+test('S02 strict v2 source preflight holds incomplete legacy source without rewriting v1', async () => {
+  const src = await source();
+  src.blobs = [];
+  const incomplete = snapshot([meta('adoption:a', 'adoption', 'original', src)]);
+  await assert.rejects(preflightSourceRecovery(incomplete),
+    /BACKUP_SOURCE_INCOMPLETE/);
+  // v1 is a legacy preservation format, not a verified source-complete
+  // checkpoint. It still advances to the independently checked donor guard.
+  await assert.rejects(encodeIntegrated({
+    pcms: incomplete, donorEnvelope: '{}',
+    passphrase: 'correct portable password'
+  }), /BACKUP_DONOR_NOT_ENCRYPTED/);
+  const fresh = snapshot([meta('stage:a', 'record', 'candidate', await source())]);
+  await assert.rejects(preflightSourceRecovery(fresh),
+    /BACKUP_SOURCE_INCOMPLETE_STAGE/);
 });
 test('S02 rejects missing mandatory old revisions and duplicated path references', async () => {
   const good = await source();
