@@ -756,9 +756,17 @@ def _wait_account(session,account_id,done,limit=240):
 def s01_legacy_and_archive(session,uuid,oracle,privacy_safe,added_id):
     """C-56..C-59 in place upgrade of a pre-S01 record and C-58 Archive release, real XPI paths."""
     made=_options(session,uuid,"""
-      const ordinary=await send({type:'CREATE_PERSONA',input:{name:'CI legacy account',routeId:'ci-s01-http',
+      await send({type:'CREATE_PERSONA',input:{name:'CI legacy account',routeId:'ci-s01-http',
         profile:{killSwitch:true,blockLocalNetwork:false}}});
-      const ctx=ordinary.container.cookieStoreId;
+      // Resolve from authoritative donor state, not the message reply.
+      let found=[];
+      for(let i=0;i<40&&found.length!==1;i++){
+        const snap=await send({type:'GET_SNAPSHOT'});
+        found=Object.values(snap.state.profiles).filter(p=>p.name==='CI legacy account'&&!p.pcmsBindingId);
+        if(found.length!==1)await new Promise(r=>setTimeout(r,250));
+      }
+      if(found.length!==1)return {error:'LEGACY_PERSONA_COUNT_'+found.length};
+      const ordinary={profile:found[0]},ctx=found[0].containerId;
       await browser.tabs.create({url:'http://s01-oracle.example/legacy-before',cookieStoreId:ctx,active:false});
       await new Promise(r=>setTimeout(r,3000));
       return {personaUid:ordinary.profile.personaUid,contextId:ctx};""")
