@@ -115,7 +115,18 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           decodeDonor:decodeBackupEnvelope,mode:args.mode,fresh:args.fresh===true,
           mappings:req,currentPcms:baseline.pcms,currentDonor:baseline.snap,
           currentPortable:baseline.portable,containers:baseline.snap.containers});
-        assert(reviewed.planSha256===args.reviewedPlanSha256,'RESTORE_PLAN_CHANGED');
+        if(reviewed.planSha256!==args.reviewedPlanSha256){
+          // Trusted same-XPI diagnostic: only irreversible digests, never
+          // source, Persona identifiers, cookies, route data or decrypted bytes.
+          const plan=reviewed.plan;
+          return {ok:false,code:'RESTORE_PLAN_CHANGED',diagnostic:{
+            actualPlanSha256:reviewed.planSha256,
+            archiveSha256:plan.archiveSha256,
+            sourceSha256:plan.sourceSha256,
+            destinationSha256:plan.destinationSha256,
+            groupsSha256:await digest(JSON.stringify(plan.groups)),
+            riskSha256:await digest(JSON.stringify(plan.risk))}};
+        }
         assert(Object.keys(req).length===reviewed.opened.donor.personas.length,
           'RESTORE_MAPPING_INCOMPLETE');
         assert(!reviewed.plan.groups.some(g=>g.status==='DIRECT_REVIEW_REQUIRED'),
