@@ -1,3 +1,5 @@
+import {scanV2AuthenticatedFrames} from '../src/ui/restore-v2-frame-scanner.mjs';
+import {decodeV2InactiveFrames} from '../src/ui/restore-v2-stream-decode.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
@@ -6,7 +8,7 @@ import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {compileV2,streamV2Frames,decodeAuthenticatedV2} from '../src/ui/backup-v2-codec.mjs';
+import {compileV2,streamV2Frames} from '../src/ui/backup-v2-codec.mjs';
 import {digest,DB_STORES} from '../src/ui/backup-core.mjs';
 import {createPortableBackupPayload,encodeBackupEnvelope,decodeBackupEnvelope} from
   '../donor/personamonkey/extension/lib/backup-package.js';
@@ -97,8 +99,13 @@ test('S02 synthetic 50 account / 1000 source-bearing row fleet: no missing histo
       iv:header.subarray(30,42),additionalData:header,tagLength:128},
       key,ciphertext.subarray(50)));
     assert.deepEqual(opened,concat(plaintextFragments));
-    const restored=await decodeAuthenticatedV2(opened,{
-      password:passphrase,decodeDonor:decodeBackupEnvelope});
+    async function* bounded(){
+      for(let i=0;i<opened.byteLength;i+=49152)
+        yield opened.subarray(i,i+49152);
+    }
+    const restored=await decodeV2InactiveFrames(
+      scanV2AuthenticatedFrames(bounded()),{
+        password:passphrase,decodeDonor:decodeBackupEnvelope});
     restoredRows=restored.pcms.stores.meta.length;
     assert.equal(restoredRows,1050);
     assert.equal(restored.pcms.stores.meta.filter(row=>
