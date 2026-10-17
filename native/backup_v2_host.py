@@ -28,9 +28,9 @@ except ImportError:
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.exceptions import InvalidTag
 try:
-    from .backup_v2_retention import eligible_for_prune
+    from .backup_v2_retention import eligible_for_prune, qualified
 except ImportError:
-    from backup_v2_retention import eligible_for_prune
+    from backup_v2_retention import eligible_for_prune, qualified
 
 _ID = re.compile(r"^s02_[a-f0-9]{32}$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
@@ -517,15 +517,27 @@ class V2ArchiveHost:
             row=_read_json(self.root/name)
             _require(row is not None and row.get("runId")==run,
                      "BACKUP_RETENTION_LEDGER_UNSAFE")
+            if qualified(row):
+                # An absent/moved/substituted successful file cannot count
+                # towards 14 successes, nor authorize deleting the last good.
+                _,cipher=self._paths(run)
+                try:
+                    info=cipher.lstat()
+                except FileNotFoundError as error:
+                    raise BackupError("BACKUP_RETENTION_INTEGRITY_HOLD") from error
+                _require(stat.S_ISREG(info.st_mode) and info.st_nlink==1 and
+                         info.st_uid==os.getuid() and info.st_size>66,
+                         "BACKUP_RETENTION_INTEGRITY_HOLD")
             ledgers.append(row)
             _require(len(ledgers)<=100000,"BACKUP_RETENTION_CATALOG_LIMIT")
         return ledgers
 
     def _retention_plan(self):
-        options=eligible_for_prune(self._retained())
+        ledger=self._retained()
+        options=eligible_for_prune(ledger)
         # No delete, unlock, vault lookup, recovery state change or path leak.
         return {"ok":True,"state":"PLAN_ONLY","qualified":len([
-            v for v in self._retained() if v.get("state")=="RECOVERY_VERIFIED"]),
+            v for v in ledger if qualified(v)]),
                 "pruneCandidate":options[0]["runId"] if options else None}
 
     def _retention_prune(self):
