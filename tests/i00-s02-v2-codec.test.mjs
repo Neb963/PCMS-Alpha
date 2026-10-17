@@ -227,10 +227,12 @@ test('S02 archive and inactive apply preserve original exit exclusions/removal/u
     expectedCiphertextSha256:receipt,password,
     decodeDonor:decodeBackupEnvelope,currentPcms:empty(),mode:'replace'});
   const meta=new Map(result.prepared.stores.meta.map(row=>[row.key,row.value]));
-  assert.deepEqual(meta.get(exit.key),exit);
-  assert.deepEqual(meta.get(removal.key),removal);
+  // IndexedDB structured clone can produce null-prototype objects; source
+  // equality is exact data/bytes, not an assumed JavaScript object prototype.
+  assert.deepEqual(JSON.parse(JSON.stringify(meta.get(exit.key))),exit);
+  assert.deepEqual(JSON.parse(JSON.stringify(meta.get(removal.key))),removal);
   const oldOp=result.prepared.stores.operations.find(x=>x.key==='op-uncertain').value;
   assert.equal(oldOp.status,'HELD_UNCERTAIN');
-  assert.deepEqual(oldOp.effect,lost.effect);
+  assert.deepEqual(JSON.parse(JSON.stringify(oldOp.effect)),lost.effect);
   assert.equal(result.activation,'OFF');
 });
