@@ -89,6 +89,20 @@ test('S02 blocks v1 encryption before any cipher work for incomplete source', as
     assert.equal(gotRandom, 0, 'must reject before generating an archive key or download');
   } finally {crypto.getRandomValues = before;}
 });
+test('S02 rejects missing mandatory old revisions and duplicated path references', async () => {
+  const good = await source();
+  await assert.rejects(auditSourceClosure(snapshot([
+    {key: 'stage:a', value: {record: {candidate: good}}}
+  ])), /BACKUP_SOURCE_INCOMPLETE/);
+  await assert.rejects(auditSourceClosure(snapshot([
+    {key: 'adoption:a', value: {adoption: {archived: true}}}
+  ])), /BACKUP_SOURCE_INCOMPLETE/);
+  const dup = structuredClone(good);
+  dup.files[2] = structuredClone(dup.files[1]);
+  await assert.rejects(auditSourceClosure(snapshot([
+    meta('ai-history:a:1', 'job', 'finalSource', dup)
+  ])), /BACKUP_SOURCE_MANIFEST_INVALID/);
+});
 test('S02 unrelated historical rows do not invent source or admission authority', async () => {
   const status = await auditSourceClosure(snapshot([
     {key: 'source-link:a', value: {link: {fingerprint: '0'.repeat(64)}}},
