@@ -2816,16 +2816,16 @@ def main():
                   const ledger=[],observations={bytes:0,seq:0};
                   const transport=()=>({close(){},async exchange(cmd){
                     ledger.push({action:cmd.action,sequence:cmd.sequence});
-                    if(cmd.action==='export.begin')return {ok:true,state:'OPEN_OBSERVED'};
+                    if(cmd.action==='export.begin')return {ok:true,state:'OPEN_OBSERVED',runId:cmd.runId};
                     if(cmd.action==='export.append'){
                       if(cmd.sequence!==observations.seq)throw Error('DOUBLE_APPEND');
                       observations.seq++;
                       observations.bytes+=atob(cmd.bytes).length;
-                      return {ok:true,state:'APPEND_OBSERVED',
+                      return {ok:true,state:'APPEND_OBSERVED',runId:cmd.runId,
                         sequence:cmd.sequence,acceptedBytes:observations.bytes};
                     }
-                    if(cmd.action==='export.finish')return {ok:true,state:'WRITTEN_UNVERIFIED'};
-                    if(cmd.action==='backup.verify')return {ok:true,state:'AUTHENTICATED_INVENTORY_ONLY',
+                    if(cmd.action==='export.finish')return {ok:true,state:'WRITTEN_UNVERIFIED',runId:cmd.runId};
+                    if(cmd.action==='backup.verify')return {ok:true,state:'AUTHENTICATED_INVENTORY_ONLY',runId:cmd.runId,
                       sha256:'a'.repeat(64),uniqueBlobs:0,canonicalRows:0};
                     throw Error('UNEXPECTED_NATIVE_OPERATION');
                   }});
@@ -3665,7 +3665,7 @@ def main():
                   const conn=()=>({close(){},
                     async exchange(cmd){
                       nativeCalls.push(cmd.action);
-                      if(cmd.action==='restore.begin')return {ok:true,
+                      if(cmd.action==='restore.begin')return {ok:true,runId:cmd.runId,
                         state:'INACTIVE_STAGING_REQUIRED',
                         plaintextBytes:plain.length,sha256:digest};
                       if(cmd.action==='archive.recovery.complete')return {
@@ -3675,7 +3675,7 @@ def main():
                         const bytes=nativeBytes[cmd.sequence];
                         if(!bytes)throw Error('NO_MORE_NATIVE_BYTES');
                         const complete=cmd.sequence===nativeBytes.length-1;
-                        return {ok:true,sequence:cmd.sequence,complete,
+                        return {ok:true,sequence:cmd.sequence,runId:cmd.runId,complete,
                           bytes:btoa(String.fromCharCode(...bytes)),
                           state:complete?'AUTHENTICATED_SECOND_PASS':
                             'INACTIVE_STAGING_FRAGMENT',
