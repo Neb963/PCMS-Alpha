@@ -181,11 +181,11 @@ class TestBackupV2(unittest.TestCase):
             ('{"a":-9007199254740992}',True),('{"a":1e309}',False),
             ('{"a":NaN}',False),('{"z":1,"a":2}',False),
             ('{"a":1,"a":2}',False),
-            ('{"\\\\ud800":1}',False),
-            ('{"\\\\ud83d\\\\ude00":1}',False),
+            ('{"\\ud800":1}',False),
+            ('{"\\ud83d\\ude00":1}',False),
             ('{"😀":1}',True),
-            ('{"\\uE000":1,"😀":2}',False),
-            ('{"😀":2,"\\uE000":1}',True)]
+            ('{"":1,"😀":2}',False),
+            ('{"😀":2,"":1}',True)]
         for value,expected in examples:
             with self.subTest(value=value):
                 try:

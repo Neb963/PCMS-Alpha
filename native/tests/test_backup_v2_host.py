@@ -346,6 +346,9 @@ class TestHost(unittest.TestCase):
         def half_header(fd,raw):
             os.write(fd,raw[:4])
             raise OSError("disk full after exclusive open")
+        # Root dirfd is a durable per-host capability. Pin it before
+        # measuring leaks; failed begin must not strand cipher/lock descriptors.
+        self.host._pin_root(create=True)
         before=len(os.listdir("/proc/self/fd")) if os.path.isdir("/proc/self/fd") else None
         with patch("backup_stream_v2._write_all",side_effect=half_header):
             result=self.begin(b"ABC")

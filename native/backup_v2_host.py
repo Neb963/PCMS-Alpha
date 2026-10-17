@@ -587,9 +587,11 @@ class V2ArchiveHost:
         quarantine=".pcms-delete-"+os.urandom(16).hex()
         os.rename(path.name,quarantine,src_dir_fd=fd,dst_dir_fd=fd)
         moved=os.stat(quarantine,dir_fd=fd,follow_symlinks=False)
+        # rename(2) legitimately updates ctime. Preserve the pinned
+        # device/inode/size/mtime identity; never follow a symlink after move.
         _require(stat.S_ISREG(moved.st_mode) and moved.st_nlink==1 and
                  (moved.st_dev,moved.st_ino,moved.st_size,
-                  moved.st_mtime_ns,moved.st_ctime_ns)==expected,
+                  moved.st_mtime_ns)==expected[:4],
                  "BACKUP_RETENTION_FILE_CHANGED")
         os.unlink(quarantine,dir_fd=fd)
 

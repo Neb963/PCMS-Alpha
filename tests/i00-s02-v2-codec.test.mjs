@@ -31,11 +31,11 @@ async function fixture(){
   const password='long disposable recovery password';
   const donor=await encodeBackupEnvelope({payload,password});
   const src=await source(),pcms=empty();
-  pcms.stores.meta.push({key:'stage:a',value:serializeClone({record:{
-    candidate:src,previous:src,reason:undefined,exactTime:new Date('2020-01-01T00:00:00Z')}})});
+  pcms.stores.meta.push({key:'stage:a',value:{record:{
+    candidate:src,previous:src,reason:undefined,exactTime:new Date('2020-01-01T00:00:00Z')}}});
   pcms.stores.meta.push({key:'stage-history:a:1',value:{record:{candidate:src,previous:src}}});
-  pcms.stores.operations.push({key:'op:one',value:{status:'HELD_UNCERTAIN',legacyBytes:{__pcmsType:'Bytes',
-    data:Buffer.from([255,0,3]).toString('base64'),kind:'Uint8Array'}}});
+  pcms.stores.operations.push({key:'op:one',value:{status:'HELD_UNCERTAIN',
+    legacyBytes:new Uint8Array([255,0,3])}});
   return {password,donor,pcms};
 }
 test('S02 frames are deterministic, deduplicate binary assets and losslessly restore historical rows',async()=>{
@@ -51,7 +51,8 @@ test('S02 frames are deterministic, deduplicate binary assets and losslessly res
   // Encoded rows use deterministic lexical key order; original IndexedDB
   // fixture insertion order and null prototypes are not wire identity.
   const normal=v=>JSON.parse(JSON.stringify(v));
-  const sorted=normal(pcms);
+  const sorted=normal({...pcms,stores:Object.fromEntries(
+    Object.entries(pcms.stores).map(([k,v])=>[k,v.map(r=>({key:r.key,value:serializeClone(r.value)}))]))});
   for(const store of Object.values(sorted.stores))store.sort((a,b)=>
     JSON.stringify(a.key)<JSON.stringify(b.key)?-1:
     JSON.stringify(a.key)>JSON.stringify(b.key)?1:0);
