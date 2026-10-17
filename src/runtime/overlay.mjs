@@ -41,7 +41,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { createProtectedAdmission } from "./pcms/protected-admission.mjs";\nimport { createCommittedNetworkObserver } from "./pcms/network-join.mjs";\nimport { installDonorAdmissionFence } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain } from "./pcms/perchance-existing.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { createProtectedAdmission } from "./pcms/protected-admission.mjs";\nimport { createCommittedNetworkObserver } from "./pcms/network-join.mjs";\nimport { installDonorAdmissionFence, issueBlockedBindingStagePermit } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain } from "./pcms/perchance-existing.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -51,6 +51,35 @@ attachPcmsGuard({
   // Donor's currentTest validates the route-test context and invalidates
   // stale/rotated/failed route evidence; it does not trigger a network probe.
   getRouteTest: async (containerId) => currentTest(await getState(), containerId),
+  // An initial PCMS binding must be marked while the donor route is BLOCK.
+  // This method grants no proxy, tab, native resource or account authority.
+  stageBlockedBinding: async ({bindingId,personaUid,contextId}) => {
+    await initialize();
+    const prior=await getState(),profile=prior.profiles?.[contextId];
+    if(profile?.personaUid!==personaUid||profile?.routeId!=='block'||
+       profile?.pcmsBindingId||profile?.managed!==true||
+       profile?.killSwitch!==true||profile?.blockLocalNetwork!==true||
+       !Number.isSafeInteger(prior.__stateMeta?.revision)||
+       typeof prior.__stateMeta?.bootId!=='string')
+      return {ok:false,code:'DONOR_NOT_INITIAL_BLOCK'};
+    const permit=issueBlockedBindingStagePermit({bindingId,personaUid,contextId});
+    try {
+      await stateManager.mutate(draft=>{
+        const item=draft.profiles?.[contextId];
+        if(!item||item.pcmsBindingId||item.routeId!=='block'||
+           item.personaUid!==personaUid||
+           item.killSwitch!==true||item.blockLocalNetwork!==true)
+          throw Error('DONOR_BLOCK_STAGE_CHANGED');
+        item.pcmsBindingId=bindingId;
+      },{expectedRevision:prior.__stateMeta.revision,
+          expectedBootId:prior.__stateMeta.bootId,pcmsStagePermit:permit});
+    }catch{return {ok:false,code:'DONOR_BLOCK_STAGE_UNCONFIRMED'};}
+    const after=await getState(),tagged=after.profiles?.[contextId];
+    return tagged?.pcmsBindingId===bindingId&&tagged.routeId==='block'&&
+      tagged.personaUid===personaUid?
+      {ok:true,blocked:true,routeId:'block'}:
+      {ok:false,code:'DONOR_BLOCK_STAGE_UNCONFIRMED'};
+  },
   listPersonas: async () => {
     const state=await getState();
     return Object.values(state.profiles||{})
