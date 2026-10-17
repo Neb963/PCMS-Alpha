@@ -46,7 +46,7 @@ def read_fixed_exit(fetch, relay_ip, relay_port, url, expected_family):
     return ip.compressed.lower()
 
 
-def measure_prepared_exit(router,route_id,context_id,fetch):
+def measure_prepared_exit(router,route_id,context_id,fetch,route_bound):
     if (not isinstance(route_id,str) or not 1<=len(route_id)<=128 or
         not isinstance(context_id,str) or not 8<=len(context_id)<=128):
         return {"ok":False,"code":"CANDIDATE_ID_INVALID"}
@@ -63,6 +63,8 @@ def measure_prepared_exit(router,route_id,context_id,fetch):
             relay_ip=forwarder.relay_ip
             relay_port=forwarder.relay_port
             router._validate_relay_target(relay_ip,relay_port)
+            if route_bound(relay_ip) is not True:
+                return {"ok":False,"code":"RELAY_WIREGUARD_ROUTE_UNVERIFIED"}
         v4=read_fixed_exit(fetch,relay_ip,relay_port,V4_URL,4)
         v6=read_fixed_exit(fetch,relay_ip,relay_port,V6_URL,6)
         with router.lock:
@@ -71,7 +73,8 @@ def measure_prepared_exit(router,route_id,context_id,fetch):
                forwarder.relay_ip!=relay_ip or forwarder.relay_port!=relay_port or
                not final.get("ready") or not final.get("base_route_bound") or
                not final.get("base_proxy_reachable") or
-               final.get("selected_entry")!=initial.get("selected_entry")):
+               final.get("selected_entry")!=initial.get("selected_entry") or
+               route_bound(relay_ip) is not True):
                 return {"ok":False,"code":"CANDIDATE_CHANGED_DURING_PROBE"}
         return {"ok":True,"source":"DONOR_FIXED_PROBE",
            "routeId":route_id,"contextId":context_id,
