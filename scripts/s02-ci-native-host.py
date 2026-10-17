@@ -120,7 +120,7 @@ def main():
     secret_check()
     browser=Path(os.environ["FIREFOX_BINARY"])
     driver=Path(os.environ["GECKODRIVER_BINARY"])
-    gecko=subprocess.Popen([str(driver),"--port",str(PORT)],
+    gecko=subprocess.Popen([str(driver),"--port",str(PORT),"--allow-system-access"],
                             stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     session=None
     try:
