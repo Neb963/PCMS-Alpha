@@ -45,10 +45,10 @@ function base64(bytes){
   return btoa(raw);
 }
 function unbase64(value){
-  insist(typeof value==='string'&&value.length<=Math.ceil(MAX_CHUNK/3)*4+4,
+  insist(typeof value==='string'&&value.length<=Math.ceil((MAX_CHUNK+16)/3)*4+4,
     'RESTORE_V2_FRAGMENT_INVALID');
   const b=atob(value);
-  insist(b.length<=MAX_CHUNK,'RESTORE_V2_FRAGMENT_INVALID');
+  insist(b.length<=MAX_CHUNK+16,'RESTORE_V2_FRAGMENT_INVALID');
   return Uint8Array.from(b,ch=>ch.charCodeAt(0));
 }
 export function openV2StageDB({indexed=indexedDB}={}){
