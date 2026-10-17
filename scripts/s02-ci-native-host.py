@@ -142,7 +142,7 @@ def main():
         session=harness.open_session(browser,profile)
         uuid=harness.addons_uuid(profile)
         harness.call("POST",f"/session/{session}/url",
-             {"url":f"moz-extension://{uuid}/pcms/index.html#settings"})
+             {"url":f"moz-extension://{uuid}/pcms/index.html"})
         result=harness.call("POST",f"/session/{session}/execute/async",
              {"script":native_script(),"args":[]},timeout=180)
         assert result.get("ok") is True,result
