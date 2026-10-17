@@ -150,8 +150,10 @@ test('S01 GB01: no stale committed callback after observer failure, and boot nev
  assert.equal(f.observer.readCommitted({bindingId:'invalid'}).allow,false);
  f.observer.close();
  assert.equal(f.observer.publish({bindingId:'binding_001'}),false);
- assert.equal((await f.join.prepare(input)).ok,true); // native candidate may prepare while runtime joined observer held
- const status=await f.join.inspect(input.bindingId);
- assert.equal(status.state,'RESERVED');
+ const attempt=await f.join.prepare(input);
+ assert.equal(attempt.ok,false);
+ assert.equal(attempt.code,'E01_NATIVE_FAMILY_PROOF_UNAVAILABLE');
+ assert.deepEqual(f.effects,[]);
+ assert.equal(f.db.commits.length,0);
  assert.equal(f.observer.isClosed(),true);
 });
