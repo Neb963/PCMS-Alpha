@@ -2,12 +2,13 @@
 // local account state; browser navigation is delegated to the donor guard.
 import { openCanonicalDatabase, createRestoreSentinel, fail, isSafeId } from './journal.mjs';
 import { createAccountStore, publicAccount } from './accounts.mjs';
+import { createExitLedger } from './network-ledger.mjs';
 import { internalPcmsGuard } from './persona-guard.mjs';
 import { trustedExtensionPage } from './command-boundary.mjs';
 
 export const ACCOUNT_PORT='pcms-i03-accounts';
 const names=new Set(['LIST_ACCOUNTS','LIST_PERSONAS','LIST_ROUTES','ENROLL','ACK_LOGIN',
-  'MANUAL_OVERRIDE','ARCHIVE','REACTIVATE','REBIND','OPEN_LOGIN','CREATE_PERSONA','CHECK_IDENTITY']);
+  'MANUAL_OVERRIDE','ARCHIVE','REACTIVATE','REBIND','OPEN_LOGIN','CREATE_PERSONA','CHECK_IDENTITY','NETWORK_STATUS']);
 const uid = value => typeof value==='string' && /^[a-z0-9-]{8,128}$/i.test(value);
 export function validateAccountMessage(api,sender,m) {
   if(!trustedExtensionPage(api,sender)) return fail('UNTRUSTED_SENDER');
@@ -19,7 +20,7 @@ export function validateAccountMessage(api,sender,m) {
       Object.keys(m.params).length>5))return fail('INVALID_PARAMS');
   const p=m.params||{};
   const permitted={
-    LIST_ACCOUNTS:[],LIST_PERSONAS:[],LIST_ROUTES:[],
+    LIST_ACCOUNTS:[],LIST_PERSONAS:[],LIST_ROUTES:[],NETWORK_STATUS:[],
     CREATE_PERSONA:['name','routeId'],ENROLL:['accountId','personaUid','expectedRevision'],
     ACK_LOGIN:['accountId','expectedRevision'],OPEN_LOGIN:['accountId','expectedRevision'],
     CHECK_IDENTITY:['accountId','expectedRevision'],ARCHIVE:['accountId','expectedRevision'],
@@ -28,7 +29,7 @@ export function validateAccountMessage(api,sender,m) {
     REBIND:['accountId','expectedRevision','personaUid','explicitRepair']
   };
   if(Object.keys(p).some(k=>!permitted[m.type].includes(k)))return fail('INVALID_PARAMS');
-  if(!['LIST_ACCOUNTS','LIST_PERSONAS','LIST_ROUTES'].includes(m.type)) {
+  if(!['LIST_ACCOUNTS','LIST_PERSONAS','LIST_ROUTES','NETWORK_STATUS'].includes(m.type)) {
     if(m.type==='CREATE_PERSONA') {
       if(typeof p.name!=='string'||p.name.length<1||p.name.length>64||
           !/^[a-z0-9_-]{1,128}$/i.test(p.routeId))return fail('INVALID_PARAMS');
@@ -76,7 +77,9 @@ export function createAccountBoundary(api,{
 }={}) {
   let dbPromise;
   const sentinel=createRestoreSentinel(api.storage.local);
-  const store=()=>dbPromise ||= open().then(db=>createAccountStore(db));
+  const connection=()=>dbPromise ||= open();
+  const store=async()=>createAccountStore(await connection());
+  const exitLedger=async()=>createExitLedger(await connection());
   async function run(message,sender) {
     const auth=validateAccountMessage(api,sender,message);
     if(!auth.ok)return auth;
@@ -88,6 +91,11 @@ export function createAccountBoundary(api,{
       // explicit hold so UI cannot treat their values as operational authority.
       if(message.type==='LIST_PERSONAS')return {ok:true,personas:await g.listAvailablePersonas()};
       if(message.type==='LIST_ROUTES')return {ok:true,routes:await g.listProtectedRoutes()};
+      if(message.type==='NETWORK_STATUS'){
+        // Read-only, redacted count. No IPs, native endpoints or assertions of readiness.
+        const out=await (await exitLedger()).inspect();
+        return out.ok?{...out,admission:'HELD_E01_E04',providerEffects:'OFF'}:out;
+      }
       if(message.type==='LIST_ACCOUNTS') {
         const restore=await sentinel.inspect();
         const routeGateHeld=g.getHealth?.().admission==='HELD_UNTIL_OWNER_VERIFICATION';
