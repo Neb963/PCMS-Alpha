@@ -591,7 +591,7 @@ def owned_firefox_pids(profile):
         if not item.name.isdigit():
             continue
         try:
-            argv=[os.fsdecode(a) for a in (item/'cmdline').read_bytes().split(b'\\0') if a]
+            argv=[os.fsdecode(a) for a in (item/'cmdline').read_bytes().split(b'\0') if a]
             for idx,arg in enumerate(argv[:-1]):
                 if (arg in ('-profile','--profile') and
                     pathlib.Path(argv[idx+1]).resolve()==pathlib.Path(target)):
