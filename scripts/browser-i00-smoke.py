@@ -3407,7 +3407,7 @@ def main():
                   const hist=await import('../lib/automation-history.js');
                   const db=await journal.openCanonicalDatabase();
                   const pcms=await core.snapshotCanonical(db);db.close();
-                  const donor=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  const donor=await (await import('./donor-snapshot.mjs')).readProtectedDonorSnapshot(browser);
                   const local=await browser.storage.local.get(null),userscriptData={};
                   for(const [key,value] of Object.entries(local))
                     if(key==='automationJobs'||key.startsWith('gm-values:'))
@@ -3610,7 +3610,7 @@ def main():
                   const automation=await import('../lib/automation-history.js');
                   const db=await journal.openCanonicalDatabase();
                   const current=await core.snapshotCanonical(db);db.close();
-                  const donor=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  const donor=await (await import('./donor-snapshot.mjs')).readProtectedDonorSnapshot(browser);
                   if(!donor?.state||!Array.isArray(donor.containers))
                     throw Error('DONOR_SNAPSHOT_UNAVAILABLE');
                   const stored=await browser.storage.local.get(null);
@@ -3733,7 +3733,7 @@ def main():
                   const sourceId=holder?.container?.cookieStoreId;
                   if(!sourceId||holder?.profile?.personaUid!==previousUid)
                     throw Error('DONOR_HOLDER_NOT_CREATED');
-                  const donor=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  const donor=await (await import('./donor-snapshot.mjs')).readProtectedDonorSnapshot(browser);
                   const db=await journal.openCanonicalDatabase();
                   const canonical=await core.snapshotCanonical(db);db.close();
                   const stored=await browser.storage.local.get(null);
@@ -3812,7 +3812,7 @@ def main():
                     archiveText:archive.text,checkpointText:checkpoint.text,
                     password,mode:'merge',fresh:true,mappings,
                     reviewedPlanSha256:inspected.planSha256});
-                  const after=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+                  const after=await (await import('./donor-snapshot.mjs')).readProtectedDonorSnapshot(browser);
                   const marker=(await browser.storage.local.get('pcmsRestoreInProgress'))
                     .pcmsRestoreInProgress;
                   const imported=Object.entries(after.state.profiles||{})

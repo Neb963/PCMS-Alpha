@@ -1,3 +1,4 @@
+import {readProtectedDonorSnapshot} from '../src/ui/donor-snapshot.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {attachPcmsBackupDonor,waitForPcmsBackupDonor} from '../src/runtime/backup-auto-donor.mjs';
@@ -44,4 +45,26 @@ test('S02 donor port does not promote absent or malformed adapter into recovered
     wait:async()=>{throw Error('PRIVATE_SECRET_IN_ERROR')}});
   denied(other.value);other.send({action:'SNAPSHOT'});
   assert.deepEqual(await other.reply,{ok:false,code:'BACKUP_DONOR_UNAVAILABLE'});
+});
+
+test('S02 real options/restore donor reader accepts only exact protected snapshot response',async()=>{
+  const makeApi=response=>({runtime:{connect({name}){
+    assert.equal(name,BACKUP_DONOR_PORT);
+    let receiver;
+    return {onMessage:{addListener(fn){receiver=fn}},
+      onDisconnect:{addListener(){}},
+      postMessage(value){
+        assert.deepEqual(value,{action:'SNAPSHOT'});
+        queueMicrotask(()=>receiver(response));
+      },
+      disconnect(){}};
+  }}});
+  const good={ok:true,state:{schemaVersion:3,profiles:{}},containers:[]};
+  assert.deepEqual(await readProtectedDonorSnapshot(makeApi(good)),
+    {state:good.state,containers:[]});
+  for(const invalid of [null,{}, {ok:true,state:{},containers:'bad'},
+    {...good,extra:'untrusted'}]){
+    await assert.rejects(readProtectedDonorSnapshot(makeApi(invalid)),
+      /BACKUP_DONOR_UNAVAILABLE/);
+  }
 });
