@@ -64,7 +64,7 @@ async function digest(exits){
  // GB-01 v1: explicit version and length framing, never an ambiguous
  // concatenation of variable-length family/address strings.
  const encoder=new TextEncoder(),items=exits.map(e=>e.family+':'+e.address).sort();
- const parts=[encoder.encode('PCMS-EXIT-SET-V1\\0')];
+ const parts=[encoder.encode('PCMS-EXIT-SET-V1'+String.fromCharCode(0))];
  for(const item of items){
    const bytes=encoder.encode(item),size=new Uint8Array(4);
    new DataView(size.buffer).setUint32(0,bytes.length,false);
