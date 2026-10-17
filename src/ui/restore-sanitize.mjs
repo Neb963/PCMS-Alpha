@@ -116,6 +116,11 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
   // Choices for accounts not actually in the archive are not approvals.
   if(Object.keys(accountChoices).some(id=>!incomingAccounts.some(a=>a.id===id)))
     deny('RESTORE_ACCOUNT_CHOICES_INVALID');
+  // A restored archive cannot overwrite the destination's automatic or
+  // manual backup evidence. These local-only records track disk outcomes and
+  // last-known-good files; importing a different profile's receipts as live
+  // controller state would either lose the local good copy or invent one.
+  const LOCAL_BACKUP_EVIDENCE=new Set(['backup:auto-state','backup:manual-active']);
   const stores={};
   for(const name of DB_STORES){
     const previous=current.stores[name].map(copyRow);
@@ -146,12 +151,16 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
       for(const row of previous){
         if(typeof row.key==='string'&&
           (row.key.startsWith('removal:')||
-           row.key==='network:s01:exit-ownership-v1'))
+           row.key==='network:s01:exit-ownership-v1'||
+           LOCAL_BACKUP_EVIDENCE.has(row.key)))
           map.set(keyOf(row),row);
       }
     }
     for(const item of restored){
       const key=keyOf(item);
+      if(name==='meta'&&typeof item.key==='string'&&
+         LOCAL_BACKUP_EVIDENCE.has(item.key)&&map.has(key))
+        continue; // The observed destination disk/retention truth wins.
       // The exact same source/destination row is an idempotent merge even
       // when restore sanitization removes its old live authority.
       if(name==='meta'&&typeof item.key==='string'&&
