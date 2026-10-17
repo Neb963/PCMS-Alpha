@@ -45,13 +45,13 @@ test('S02 detects deduplicated original/stage/AI/release/history sources with ex
     meta('ai-job:a', 'job', 'finalSource', {...staged, ok: undefined}),
     meta('ai-history:a:3', 'job', 'finalSource', staged),
     {key: 'release:a', value: {release: {sealedSource: staged, previousSource: original}}},
-    meta('release-history:a:x', 'release', 'previousSource', original),
+    {key: 'release-history:a:x', value: {release: {sealedSource: staged, previousSource: original}}},
     meta('existing-update:a', 'record', 'stageSource', staged),
     {key: 'network-ledger', value: {state: 'KEEP'}}
   ];
   const result = await auditSourceClosure(snapshot(rows));
-  assert.equal(result.manifests, 11);
-  assert.equal(result.references, 33);
+  assert.equal(result.manifests, 12);
+  assert.equal(result.references, 36);
   assert.equal(result.uniqueBlobs, 3);
   assert.ok(result.uniqueBytes < result.referencedBytes);
   assert.equal(result.status, 'SOURCE_BYTES_AUDITED_NOT_DISK_VERIFIED');
