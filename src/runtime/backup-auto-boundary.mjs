@@ -20,11 +20,12 @@ export function createAutoBoundary(api,options={}){
     }
     if(message.action==='STORE_VAULT')return runner.setVault(message.passphrase);
     if(message.action==='RUN_NOW')return runner.tick();
+    if(message.action==='RUN_V2_MANUAL')return runner.manualV2Candidate();
     return fail('INVALID_COMMAND');
   }
   function validate(message){
     if(!message||typeof message!=='object'||Array.isArray(message)||
-      !['STATUS','ENABLE','STORE_VAULT','RUN_NOW'].includes(message.action))
+      !['STATUS','ENABLE','STORE_VAULT','RUN_NOW','RUN_V2_MANUAL'].includes(message.action))
       return false;
     const keys=Object.keys(message).sort().join(',');
     return message.action==='ENABLE'?keys==='action,enabled'&&typeof message.enabled==='boolean':
