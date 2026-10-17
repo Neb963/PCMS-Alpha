@@ -2707,7 +2707,7 @@ def main():
                         'Local source-byte audit passed' in audit_status):
                         break
                     time.sleep(.1)
-                assert 'Source-complete recovery HELD: BACKUP_SOURCE_INCOMPLETE_' in audit_status,audit_status
+                assert 'Source-complete recovery HELD: BACKUP_SOURCE_INCOMPLETE' in audit_status,audit_status
                 assert 'No external effects' in audit_status,audit_status
                 print('B S02_PACKAGED_READONLY_SOURCE_RECOVERY_HOLD=PASS',flush=True)
                 code="""const done=arguments[arguments.length-1];
