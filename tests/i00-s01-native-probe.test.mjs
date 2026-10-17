@@ -34,25 +34,26 @@ def fixed(relay,port,request):
   ip='45.66.77.88' if request['url']==V4_URL else '2a01:4f8:1c1c::1'
   return dict(ok=True,status=200,final_url=request['url'],
     body_base64=base64.b64encode(json.dumps({'ip':ip}).encode()).decode())
-ok=measure_prepared_exit(router,'route_001','context_001',fixed)
+ok=measure_prepared_exit(router,'route_001','context_001',fixed,lambda ip: True)
 assert ok['ok'] and ok['ipv4']['state']=='VERIFIED' and ok['ipv6']['state']=='VERIFIED',ok
 assert ok['disposition']=='HOLD_TTL_UNQUALIFIED'
 assert 'validUntilMs' not in ok
 assert len(calls)==2
-assert not measure_prepared_exit(router,'unknown_001','context_001',fixed)['ok']
+assert not measure_prepared_exit(router,'unknown_001','context_001',fixed,lambda ip: True)['ok']
 assert len(calls)==2
 def missing_v6(relay,port,request):
   if request['url']==V6_URL:
     return {'ok':False,'status':503,'final_url':request['url']}
   return fixed(relay,port,request)
-assert not measure_prepared_exit(router,'route_001','context_001',missing_v6)['ok']
+assert not measure_prepared_exit(router,'route_001','context_001',missing_v6,lambda ip: True)['ok']
 def drift(relay,port,request):
   val=fixed(relay,port,request)
   router.forwarders['route_001']=SimpleNamespace(relay_ip='10.124.1.2',relay_port=1080)
   return val
-assert measure_prepared_exit(router,'route_001','context_001',drift)['code']=='CANDIDATE_CHANGED_DURING_PROBE'
+assert measure_prepared_exit(router,'route_001','context_001',drift,lambda ip: True)['code']=='CANDIDATE_CHANGED_DURING_PROBE'
+assert measure_prepared_exit(router,'route_001','context_001',fixed,lambda ip: False)['code']=='RELAY_WIREGUARD_ROUTE_UNVERIFIED'
 router.healthy=False
-assert measure_prepared_exit(router,'route_001','context_001',fixed)['code']=='PROTECTION_UNVERIFIED'
+assert measure_prepared_exit(router,'route_001','context_001',fixed,lambda ip: True)['code']=='PROTECTION_UNVERIFIED'
 assert not any('perchance.org' in call['url'] for call in calls)
 print('S01_NATIVE_FIXED_PROBE_D=PASS')
 `;
