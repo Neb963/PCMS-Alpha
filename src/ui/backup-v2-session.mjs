@@ -10,7 +10,7 @@ const ref=x=>'backup:v2:'+x;
 const assert=(v,c)=>{if(!v)fail(c)};
 const states=new Set(['PREPARED','CREATE_POSSIBLE','OPEN_OBSERVED',
   'APPEND_POSSIBLE','FINISH_POSSIBLE','WRITTEN_UNVERIFIED',
-  'AUTHENTICATED_INVENTORY_ONLY']);
+  'AUTHENTICATED_INVENTORY_ONLY','RECOVERY_VERIFIED']);
 function transaction(db,mode,handler){
   return new Promise((resolve,reject)=>{
     let tx,result;
@@ -42,7 +42,7 @@ export function createV2Ledger(db){
       Number.isSafeInteger(revision)&&revision>=1,
       'BACKUP_V2_TRANSITION_INVALID');
     assert(Object.keys(patch).every(k=>['acceptedBytes','nextSequence',
-      'lastDigest','ciphertextSha256','observedBlobs'].includes(k)),
+      'lastDigest','ciphertextSha256','observedBlobs','preparedSha256'].includes(k)),
       'BACKUP_V2_PATCH_DENIED');
     return transaction(db,'readwrite',(m,done,abort)=>{
       m.get(ref(runId)).onsuccess=e=>{
@@ -62,7 +62,8 @@ export function createV2Ledger(db){
         const r=e.target.result;
         resolve(r?{runId:r.runId,state:r.state,revision:r.revision,
           acceptedBytes:r.acceptedBytes,plaintextBytes:r.plaintextBytes,
-          ciphertextSha256:r.ciphertextSha256||null}:null);
+          ciphertextSha256:r.ciphertextSha256||null,
+          preparedSha256:r.preparedSha256||null}:null);
       };
       tx.onabort=()=>reject(Error('BACKUP_V2_DB_UNAVAILABLE'));
     });
