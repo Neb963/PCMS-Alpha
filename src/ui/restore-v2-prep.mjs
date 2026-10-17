@@ -2,7 +2,7 @@
 // No import, donor write, source activation, provider or route authority.
 // Caller MUST separately verify actual native terminal authentication and
 // file identity; this reader does not confer an approval by accepting a receipt.
-import {decodeAuthenticatedV2} from './backup-v2-codec.mjs';
+import {decodeAuthenticatedV2,preserveNegativeZero,canonicalJSON} from './backup-v2-codec.mjs';
 import {decodeV2InactiveFrames} from './restore-v2-stream-decode.mjs';
 import {preflightSourceRecovery,digest,validatePcmsSnapshot} from './backup-core.mjs';
 import {prepareRestoredCanonical} from './restore-sanitize.mjs';
@@ -35,7 +35,7 @@ async function finalizeInactive(opened,{currentPcms,uidRemap,mode,archiveSha256}
     prepared,donor:opened.donor,
     donorEnvelope:opened.donorEnvelope,
     sourceAudit,
-    preparedSha256:await digest(JSON.stringify(prepared)),
+    preparedSha256:await digest(canonicalJSON(preserveNegativeZero(prepared))),
     archiveSha256,
     status:'INACTIVE_PREPARED_NOT_APPLIED',
     controller:'RESTORE_HELD',activation:'OFF',
