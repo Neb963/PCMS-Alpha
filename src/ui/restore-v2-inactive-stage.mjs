@@ -4,6 +4,35 @@ import {scanV2AuthenticatedFrames} from './restore-v2-frame-scanner.mjs';
 // second-pass authentication and exact immutable ciphertext digest agree.
 // Does not mutate the canonical database, donor, routes, provider or Git.
 const NAME='pcms-alpha-v2-restore-stage',MAX_CHUNK=49152;
+// Never persist plaintext source, cookies or donor in browser IndexedDB.
+// Stage keys are nonextractable and transient to this live extension context;
+// an event-page cold restart deliberately makes old stages unreadable/HELD.
+const volatileKeys=new Map();
+async function freshKey(){
+  return crypto.subtle.generateKey({name:'AES-GCM',length:256},false,
+    ['encrypt','decrypt']);
+}
+async function sealChunk(runId,bytes){
+  const key=volatileKeys.get(runId);
+  insist(key,'RESTORE_V2_VOLATILE_KEY_UNAVAILABLE');
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const sealed=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,bytes);
+  return {ciphertext:base64(new Uint8Array(sealed)),iv:base64(iv)};
+}
+async function openChunk(runId,row){
+  const key=volatileKeys.get(runId);
+  insist(key,'RESTORE_V2_VOLATILE_KEY_UNAVAILABLE');
+  insist(row&&typeof row.ciphertext==='string'&&typeof row.iv==='string',
+    'RESTORE_V2_STAGE_UNSEALED');
+  const iv=unbase64(row.iv);
+  insist(iv.length===12,'RESTORE_V2_STAGE_IV_INVALID');
+  let raw;
+  try{
+    raw=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,
+      unbase64(row.ciphertext));
+  }catch{throw Error('RESTORE_V2_STAGE_AUTH_FAILED')}
+  return new Uint8Array(raw);
+}
 const runOK=s=>typeof s==='string'&&/^s02_[a-f0-9]{32}$/.test(s);
 const digestOK=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
 const insist=(v,code)=>{if(!v)throw Error(code)};
@@ -64,7 +93,8 @@ export function createV2InactiveStage(db,{assertHeld}={}){
   async function begin(runId,evidence){
     insist(runOK(runId)&&validEvidence(evidence),'RESTORE_V2_INITIAL_PROOF_INVALID');
     await held();
-    return transact(db,(runs,chunks,done,abort)=>{
+    const key=await freshKey();
+    const outcome=await transact(db,(runs,chunks,done,abort)=>{
       runs.get(runId).onsuccess=e=>{
         if(e.target.result){abort('RESTORE_V2_RUN_ALREADY_USED');return;}
         const row={runId,state:'INACTIVE_STAGING',ciphertextSha256:evidence.sha256,
@@ -72,6 +102,8 @@ export function createV2InactiveStage(db,{assertHeld}={}){
         runs.add(row);done({state:row.state,runId});
       };
     });
+    volatileKeys.set(runId,key);
+    return outcome;
   }
   async function append(runId,sequence,bytes){
     insist(runOK(runId)&&Number.isSafeInteger(sequence)&&sequence>=0&&
@@ -79,6 +111,7 @@ export function createV2InactiveStage(db,{assertHeld}={}){
       'RESTORE_V2_FRAGMENT_INVALID');
     await held();
     const dataBytes=new Uint8Array(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+    const sealed=await sealChunk(runId,dataBytes);
     return transact(db,(runs,chunks,done,abort)=>{
       runs.get(runId).onsuccess=e=>{
         const row=e.target.result;
@@ -86,7 +119,7 @@ export function createV2InactiveStage(db,{assertHeld}={}){
           {abort('RESTORE_V2_FRAGMENT_SEQUENCE_INVALID');return;}
         if(row.acceptedBytes+bytes.length>row.expectedBytes)
           {abort('RESTORE_V2_FRAGMENT_OVERRUN');return;}
-        chunks.add({key:fragmentKey(runId,sequence),data:base64(dataBytes)});
+        chunks.add({key:fragmentKey(runId,sequence),...sealed});
         const next={...row,acceptedBytes:row.acceptedBytes+bytes.length,
           nextSequence:sequence+1};
         runs.put(next);done({state:next.state,nextSequence:next.nextSequence,
@@ -129,11 +162,11 @@ export function createV2InactiveStage(db,{assertHeld}={}){
       const data=await new Promise((resolve,reject)=>{
         const tx=db.transaction('chunks','readonly');
         tx.objectStore('chunks').get(fragmentKey(runId,i)).onsuccess=e=>
-          resolve(e.target.result?.data||null);
+          resolve(e.target.result||null);
         tx.onabort=()=>reject(Error('RESTORE_V2_STAGE_READ_FAILED'));
       });
       insist(data!==null,'RESTORE_V2_FRAGMENT_MISSING');
-      yield unbase64(data);
+      yield await openChunk(runId,data);
     }
   }
   async function inspect(runId){
@@ -148,5 +181,22 @@ export function createV2InactiveStage(db,{assertHeld}={}){
     for await(const frame of scanV2AuthenticatedFrames(fragments(runId)))
       yield frame;
   }
-  return Object.freeze({begin,append,finish,fragments,frames,inspect});
+  // Decommission only after source/donor readback or an explicit abandoned
+  // candidate. A crash still leaves only ciphertext and a HELD run.
+  async function drop(runId){
+    insist(runOK(runId),'RESTORE_V2_RUN_INVALID');
+    await held();
+    await transact(db,(runs,chunks,done,abort)=>{
+      runs.get(runId).onsuccess=e=>{
+        const row=e.target.result;
+        if(!row){abort('RESTORE_V2_RUN_UNAVAILABLE');return;}
+        for(let i=0;i<row.nextSequence;i++)
+          chunks.delete(fragmentKey(runId,i));
+        runs.delete(runId);done({dropped:true});
+      };
+    });
+    volatileKeys.delete(runId);
+    return {ok:true,runId};
+  }
+  return Object.freeze({begin,append,finish,fragments,frames,inspect,drop});
 }
