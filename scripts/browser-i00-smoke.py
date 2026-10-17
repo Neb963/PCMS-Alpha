@@ -3764,7 +3764,12 @@ def main():
                         sourceSha256:reviewed.plan.sourceSha256,
                         destinationSha256:reviewed.plan.destinationSha256,
                         groupsSha256:await core.digest(JSON.stringify(reviewed.plan.groups)),
-                        riskSha256:await core.digest(JSON.stringify(reviewed.plan.risk))
+                        riskSha256:await core.digest(JSON.stringify(reviewed.plan.risk)),
+                        canonicalStoreCounts:Object.fromEntries(Object.entries(current.stores)
+                          .map(([name,rows])=>[name,rows.length])),
+                        pcmsSha256:await core.digest(JSON.stringify(current)),
+                        donorSha256:await core.digest(JSON.stringify(restore.stableRestoreDonorCut(donor))),
+                        portableSha256:await core.digest(JSON.stringify(portable))
                       }:null
                     }));
                   return {ok:true,groups:Object.keys(marker.groups).length,
