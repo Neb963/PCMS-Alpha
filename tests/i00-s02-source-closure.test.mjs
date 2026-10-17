@@ -41,7 +41,7 @@ test('S02 detects deduplicated original/stage/AI/release/history sources with ex
   const rows = [
     meta('adoption:a', 'adoption', 'original', original),
     {key: 'stage:a', value: {record: {candidate: staged, previous: original}}},
-    meta('stage-history:a:1', 'record', 'candidate', staged),
+    {key: 'stage-history:a:1', value: {record: {candidate: staged, previous: original}}},
     meta('ai-job:a', 'job', 'finalSource', {...staged, ok: undefined}),
     meta('ai-history:a:3', 'job', 'finalSource', staged),
     {key: 'release:a', value: {release: {sealedSource: staged, previousSource: original}}},
@@ -50,8 +50,8 @@ test('S02 detects deduplicated original/stage/AI/release/history sources with ex
     {key: 'network-ledger', value: {state: 'KEEP'}}
   ];
   const result = await auditSourceClosure(snapshot(rows));
-  assert.equal(result.manifests, 10);
-  assert.equal(result.references, 30);
+  assert.equal(result.manifests, 11);
+  assert.equal(result.references, 33);
   assert.equal(result.uniqueBlobs, 3);
   assert.ok(result.uniqueBytes < result.referencedBytes);
   assert.equal(result.status, 'SOURCE_BYTES_AUDITED_NOT_DISK_VERIFIED');
@@ -71,7 +71,7 @@ test('S02 refuses a missing, changed, misnamed or hidden source byte', async () 
     const changed = structuredClone(base);
     mutate(changed);
     await assert.rejects(auditSourceClosure(snapshot([
-      meta('stage:a', 'record', 'candidate', changed)
+      meta('ai-history:a:corrupt', 'job', 'finalSource', changed)
     ])), new RegExp(code));
   }
 });
