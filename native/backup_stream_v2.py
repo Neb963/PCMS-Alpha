@@ -24,6 +24,13 @@ ALGORITHM = 1
 MAX_GCM_PLAINTEXT = (1 << 36) - 32
 BUFFER = 65536
 BLOB, CANONICAL, DONOR, END = 1, 2, 3, 255
+# Limits apply before allocating or buffering untrusted decrypted metadata.
+MAX_CANONICAL_FRAME = 4 * 1024 * 1024
+MAX_END_FRAME = 1024 * 1024
+MAX_BLOB_FRAME = 12 * 1024 * 1024 + 32
+MAX_DONOR_FRAME = 2 * 1024 * 1024 * 1024
+MAX_RECORDS = 100000
+MAX_BLOBS = 100000
 
 
 class BackupError(ValueError):
@@ -185,8 +192,19 @@ class _Inventory:
                 self.pending.clear()
                 _check(self.kind in (BLOB, CANONICAL, DONOR, END),
                        "BACKUP_FRAME_INVALID")
-                _check(self.kind != BLOB or self.remaining >= 32,
+                _check(self.kind != BLOB or 32 <= self.remaining <= MAX_BLOB_FRAME,
                        "BACKUP_BLOB_INVALID")
+                _check(self.kind != CANONICAL or
+                       1 <= self.remaining <= MAX_CANONICAL_FRAME,
+                       "BACKUP_CANONICAL_LIMIT")
+                _check(self.kind != END or 1 <= self.remaining <= MAX_END_FRAME,
+                       "BACKUP_END_LIMIT")
+                _check(self.kind != DONOR or 1 <= self.remaining <= MAX_DONOR_FRAME,
+                       "BACKUP_DONOR_LIMIT")
+                _check(self.kind != CANONICAL or self.canonical < MAX_RECORDS,
+                       "BACKUP_RECORD_LIMIT")
+                _check(self.kind != BLOB or len(self.blobs) < MAX_BLOBS,
+                       "BACKUP_BLOB_LIMIT")
                 if self.kind == BLOB:
                     self.blob_hash = hashlib.sha256()
                     self.blob_id.clear()
@@ -204,6 +222,9 @@ class _Inventory:
             elif self.kind == DONOR:
                 self.donor_bytes += len(frag)
             else:
+                _check(len(self.part) + len(frag) <=
+                       (MAX_CANONICAL_FRAME if self.kind == CANONICAL else MAX_END_FRAME),
+                       'BACKUP_FRAME_MEMORY_LIMIT')
                 self.part.extend(frag)
             if self.remaining == 0:
                 self._finish_frame()
