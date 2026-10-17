@@ -78,6 +78,18 @@ function restoreSource(node,blobs,depth=0){
   return Object.fromEntries(Object.entries(node).map(([k,v])=>
     [k,restoreSource(v,blobs,depth+1)]));
 }
+function collectReferences(node,refs=new Set(),depth=0){
+  check(depth<=40,'BACKUP_V2_DEPTH_INVALID');
+  if(Array.isArray(node)){for(const value of node)collectReferences(value,refs,depth+1);return refs;}
+  if(!plain(node))return refs;
+  if(Object.hasOwn(node,'__pcmsV2BlobRef')){
+    check(Object.keys(node).length===1&&HEX.test(node.__pcmsV2BlobRef),
+      'BACKUP_V2_BLOB_REFERENCE_INVALID');
+    refs.add(node.__pcmsV2BlobRef);return refs;
+  }
+  for(const value of Object.values(node))collectReferences(value,refs,depth+1);
+  return refs;
+}
 export function frameHeader(tag,length){
   check(Object.values(V2_FRAME).includes(tag)&&Number.isSafeInteger(length)&&length>=0,
     'BACKUP_V2_FRAME_INVALID');
@@ -173,6 +185,10 @@ export async function decodeAuthenticatedV2(plaintext,{decodeDonor,password}={})
       check(plain(row)&&Object.keys(row).sort().join(',')==='key,refs,store,value'&&
         DB_STORES.includes(row.store)&&Array.isArray(row.refs)&&
         row.refs.every(x=>HEX.test(x)),'BACKUP_V2_CANONICAL_INVALID');
+      check(row.refs.length===new Set(row.refs).size&&
+        row.refs.every((ref,i)=>i===0||row.refs[i-1]<ref)&&
+        canonicalJSON([...collectReferences(row.value)].sort())===canonicalJSON(row.refs),
+        'BACKUP_V2_BLOB_REFERENCE_INVALID');
       rowHashes.push(await digest(payload));
       check(canonicalJSON(row)===readText.decode(payload),'BACKUP_V2_NONCANONICAL');
       for(const ref of row.refs)refs.add(ref);
@@ -183,7 +199,9 @@ export async function decodeAuthenticatedV2(plaintext,{decodeDonor,password}={})
     }else{
       check(phase===2&&end===null&&offset===plaintext.length,'BACKUP_V2_ORDER_INVALID');
       try{end=JSON.parse(readText.decode(payload))}catch{fail('BACKUP_V2_END_INVALID');}
-      check(canonicalJSON(end)===readText.decode(payload),'BACKUP_V2_NONCANONICAL');
+      check(plain(end)&&Object.keys(end).sort().join(',')===
+        'canonicalRows,donorSections,donorSha256,rowDigestsSha256,schema,sourceRefsSha256,storeCounts,uniqueBlobs'&&
+        canonicalJSON(end)===readText.decode(payload),'BACKUP_V2_NONCANONICAL');
       phase=3;
     }
   }
