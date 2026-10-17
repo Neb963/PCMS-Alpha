@@ -5,13 +5,18 @@ import {vaultResponse,VAULT_HOST,safeStatus} from './backup-auto-core.mjs';
 import {createAutoStore} from './backup-auto-store.mjs';
 import {makeRetention} from './backup-auto-retention.mjs';
 import {inspectAuto,awaitAuto} from './backup-auto-download.mjs';
-import {sealAutomatic} from './backup-auto-export.mjs';
+import {sealAutomatic,captureV2SourceCut} from './backup-auto-export.mjs';
+import {exportV2Candidate} from './backup-v2-session.mjs';
 const fail=code=>({ok:false,code});
 const sanitize=e=>/^[A-Z_]{4,60}$/.test(e?.message||'')?e.message:'BACKUP_FAILED';
 export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
   newId=()=>crypto.randomUUID().replaceAll('-',''),
   native=msg=>api.runtime.sendNativeMessage(VAULT_HOST,msg),
-  seal=sealAutomatic}={}){
+  seal=sealAutomatic,
+  // Not supplied by production until independent E-06 review. This is a
+  // protected coordinator injection, never a UI message or stored toggle.
+  reviewedV2=()=>false,captureV2=captureV2SourceCut,
+  dispatchV2=exportV2Candidate}={}){
   let dbPromise=null,task=null;
   const sentinel=createRestoreSentinel(api.storage.local);
   const database=()=>dbPromise ||= open().catch(e=>{dbPromise=null;throw e;});
@@ -49,6 +54,54 @@ export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
         const runId='auto_'+newId(),now=clock();
         const claimed=await s.claim(runId,now);
         if(!claimed.ok)return claimed;
+        // S02 uses the EXISTING daily admission/claim, vault and restart
+        // policy. Only a separately reviewed background authority can switch
+        // format; the installed boundary intentionally supplies no such token.
+        // Native AUTHENTICATED_INVENTORY_ONLY never advances lastSuccessDay,
+        // never enters v1 Downloads retention, and remains HELD pending full
+        // donor + fresh-profile recovery and independent E-06 approval.
+        if(await reviewedV2()===true){
+          let attemptedNative=false;
+          try{
+            const key=vaultResponse(await native({action:'get'}));
+            if(!key.ok){
+              await s.move(runId,'PREPARING','SUSPENDED',{
+                code:'SUSPENDED_KEY_UNAVAILABLE'});
+              return fail('SUSPENDED_KEY_UNAVAILABLE');
+            }
+            const cut=await captureV2(api,await database(),key.passphrase,sentinel);
+            const prepared=await s.move(runId,'PREPARING','VERIFIED',{
+              sha256:'0'.repeat(64),bytes:0});
+            if(!prepared.ok)return prepared;
+            if((await sentinel.inspect()).held){
+              await s.move(runId,'VERIFIED','FAILED',{code:'BACKUP_RESTORE_HOLD'});
+              return fail('BACKUP_RESTORE_HOLD');
+            }
+            const marked=await s.move(runId,'VERIFIED','DISPATCH_POSSIBLE');
+            if(!marked.ok)return marked;
+            attemptedNative=true;
+            const v2=await dispatchV2({
+              db:await database(),api,pcms:cut.pcms,
+              donorEnvelope:cut.donorEnvelope,
+              checkScope:async()=>!(await sentinel.inspect()).held &&
+                (await s.read()).state?.active?.runId===runId,
+              checkRestoreHold:async()=>(await sentinel.inspect()).held
+            });
+            // Even a valid full-disk GCM receipt is NOT a source-complete,
+            // independently applied, successfully restorable daily archive.
+            const held=await s.move(runId,'DISPATCH_POSSIBLE','HELD',{
+              code:v2?.state==='AUTHENTICATED_INVENTORY_ONLY'?
+                'V2_NATIVE_INVENTORY_ONLY':'V2_NATIVE_RESULT_UNKNOWN'});
+            if(!held.ok)return held;
+            return fail('BACKUP_V2_FULL_RECOVERY_PENDING');
+          }catch(e){
+            const code=attemptedNative?'V2_NATIVE_OUTCOME_UNKNOWN':
+              sanitize(e);
+            if(attemptedNative)await s.move(runId,'DISPATCH_POSSIBLE','HELD',{code});
+            else await s.move(runId,'PREPARING','FAILED',{code});
+            return fail(code);
+          }
+        }
         let passphrase;
         try{
           let response;try{response=await native({action:'get'});}
