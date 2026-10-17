@@ -67,6 +67,11 @@ export function createProtectedJoin({db,observer,gate,donor,now=Date.now,
  // dual-family fixed-probe verification and the age bound has H validation.
  const operational=nativeCompatible===true&&positive(measuredMaximumAgeMs);
  const ledger=createExitLedger(db);
+ // A replaced/closed/corrupt canonical DB must not leave remembered allow
+ // snapshots available to the donor. Add listeners; never replace other owners.
+ const storageFailure=()=>observer.close();
+ db.addEventListener?.('versionchange',storageFailure);
+ db.addEventListener?.('close',storageFailure);
  const hold=(code='E01_NATIVE_FAMILY_PROOF_UNAVAILABLE')=>fail(code);
  async function writeIntent({operationId,bindingId,accountId,personaUid,contextId,routeId,
    requestFingerprint}={}){
@@ -149,7 +154,7 @@ export function createProtectedJoin({db,observer,gate,donor,now=Date.now,
   if(!proposal.ok)return proposal;
   let reserved;
   try{reserved=await ledger.reserve(proposal.proposal);}
-  catch{return cleanError();}
+  catch{observer.close();return cleanError();}
   return reserved.ok?{ok:true,reservation:reserved.reservation,proposal:proposal.proposal}:reserved;
  }
  async function commitJoined({intent,reservation,evidence,donorReceipt,key,
@@ -212,7 +217,7 @@ export function createProtectedJoin({db,observer,gate,donor,now=Date.now,
        };
      };
    });
-  }catch{observer.invalidate(key.bindingId);return cleanError();}
+  }catch{observer.close();return cleanError();}
   if(!result.ok)return result;
   // The DB commit ACK has occurred. Any intervening donor invalidation or
   // observer closure cannot be repaired by publishing a stale receipt.
