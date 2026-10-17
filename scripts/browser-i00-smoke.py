@@ -128,6 +128,17 @@ def supply_command(session, command):
 
 
 
+def coordinator_command(session, command):
+    # The installed S00 fixed-intent port; synthetic data, no external effects.
+    script = '''const done=arguments[arguments.length-1];
+    const port=browser.runtime.connect({name:'pcms-s00-coordinator'});
+    port.onMessage.addListener(value=>{try{port.disconnect()}catch(e){}done(value)});
+    port.onDisconnect.addListener(()=>done({error:'coordinator-disconnected'}));
+    port.postMessage(COMMAND);'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script.replace('COMMAND',json.dumps(command)),'args':[]},timeout=30)
+
+
 def adoption_command(session,command):
     # Actual installed same-XPI trusted I07 port; no live provider calls.
     script = '''const done=arguments[arguments.length-1];
@@ -607,6 +618,23 @@ def main():
                 canonical=canonical_command(after,{'type':'SUMMARY'})
                 assert canonical.get('ok') is True and canonical.get('storage')=='READY',canonical
                 assert canonical.get('providerEffects')=='OFF',canonical
+                s00_intent={'intentId':'intent_s00_browser_001',
+                    'slug':'s00-local-fixture','origin':'OPERATOR'}
+                s00_first=coordinator_command(after,{'type':'ACCEPT_CREATE_INTENT',
+                    'params':s00_intent})
+                assert s00_first.get('ok') is True and s00_first.get('record',{}).get('state')=='WAITING_CAPABILITY',s00_first
+                s00_repeat=coordinator_command(after,{'type':'ACCEPT_CREATE_INTENT',
+                    'params':s00_intent})
+                assert s00_repeat.get('duplicate') is True,s00_repeat
+                s00_hold=coordinator_command(after,{'type':'ADVANCE_CREATE_INTENT',
+                    'params':{'intentId':s00_intent['intentId'],'expectedRevision':1}})
+                assert s00_hold.get('ok') is True and s00_hold.get('admitted') is False,s00_hold
+                assert s00_hold.get('providerEffects')=='OFF',s00_hold
+                s00_denied=coordinator_command(after,{'type':'ACCEPT_CREATE_INTENT',
+                    'params':{'intentId':'intent_s00_forbidden_001',
+                    'slug':'pcms-test-esr-chain-20261015-a01','origin':'OPERATOR'}})
+                assert s00_denied.get('code')=='I17_ORIGINAL_EFFECT_QUARANTINED',s00_denied
+                print('B S00_INSTALLED_CANONICAL_INTENT_AND_QUARANTINE=PASS',flush=True)
                 personas=account_command(after,{'type':'LIST_PERSONAS'})
                 assert personas.get('ok') is True and isinstance(personas.get('personas'),list),personas
                 records=account_command(after,{'type':'LIST_ACCOUNTS'})
@@ -844,6 +872,12 @@ def main():
                 print('B I02_REAL_IDB_CRASH_REHYDRATE_UNCERTAIN=PASS',flush=True)
                 print('B I01_EVENT_PAGE_COLD_WAKE=PASS before=',boot_before,
                       'after=',guard_after['bootId'],flush=True)
+                s00_after_wake=coordinator_command(after,{'type':'GET_CREATE_INTENT',
+                    'params':{'intentId':'intent_s00_browser_001'}})
+                assert s00_after_wake.get('ok') is True,s00_after_wake
+                assert s00_after_wake.get('record',{}).get('state')=='WAITING_CAPABILITY',s00_after_wake
+                assert s00_after_wake.get('record',{}).get('revision')==1,s00_after_wake
+                print('B S00_INSTALLED_COLD_WAKE_PERSISTED_HELD_INTENT=PASS',flush=True)
                 call('POST',f'/session/{after}/url',{'url':url+'#accounts'})
                 view=execute(after,"return {selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view),active:document.querySelector('[aria-current=page]')?.dataset.workspace,blocked:document.querySelector('#pcms-enroll')?.disabled,refresh:document.querySelector('#pcms-refresh-accounts')?.disabled}")
                 assert view=={'selected':['accounts'],'active':'accounts','blocked':True,'refresh':False},view
