@@ -113,7 +113,7 @@ export function createProtectedJoin({db,observer,gate,donor,now=Date.now,
  // probe and may return a signed/attributed evidence receipt only after
  // actual selected-route/protection/family observations.
  async function prepare(input){
-  if(!operational)return hold();
+  if(!operational||observer.isClosed())return hold('E01_NATIVE_FAMILY_PROOF_UNAVAILABLE');
   const initial=await writeIntent(input);
   if(!initial.ok)return initial;
   if(initial.existing)return {ok:false,code:'OBSERVE_EXISTING_OPERATION',
@@ -140,7 +140,7 @@ export function createProtectedJoin({db,observer,gate,donor,now=Date.now,
  // One canonical exclusive-history reservation, independently committed BEFORE
  // any donor state is staged. Missing/unknown family never gets an exclusion.
  async function reserve(input,evidence,expectedLedgerRevision){
-  if(!operational)return hold();
+  if(!operational||observer.isClosed())return hold();
   const prior=await inspect(input.bindingId);
   if(!prior.ok||prior.state!=='RESERVED'||prior.operationId!==input.operationId)
     return fail('NETWORK_RESERVATION_PHASE_INVALID');
@@ -154,7 +154,7 @@ export function createProtectedJoin({db,observer,gate,donor,now=Date.now,
  }
  async function commitJoined({intent,reservation,evidence,donorReceipt,key,
    expectedSafetyGeneration}={}){
-  if(!operational)return hold();
+  if(!operational||observer.isClosed())return hold();
   if(!validAdmissionKey(key)||!intent||!reservation||!donorReceipt||
      !Number.isSafeInteger(expectedSafetyGeneration)||expectedSafetyGeneration<0||
      key.pcmsEpoch!==pcmsEpoch||
@@ -223,7 +223,7 @@ export function createProtectedJoin({db,observer,gate,donor,now=Date.now,
   return {ok:true,record:grantRecord};
  }
  async function stage({intent,evidence,reservation,candidateId,key}={}){
-  if(!operational)return hold();
+  if(!operational||observer.isClosed())return hold();
   const statusRow=await inspect(intent?.bindingId);
   if(!statusRow.ok||statusRow.state!=='RESERVED'||statusRow.operationId!==intent.operationId)
     return fail('NETWORK_PHASE_CHANGED');
@@ -244,7 +244,7 @@ export function createProtectedJoin({db,observer,gate,donor,now=Date.now,
  // canonical join permits only the final synchronous local grant install.
  function admit({key,joined,evidenceValidUntil,expectedSafetyGeneration,
     routeRevision}={}){
-  if(!operational)return hold();
+  if(!operational||observer.isClosed())return hold();
   if(!joined?.ok||!validAdmissionKey(key)||
      joined.record?.pcmsEpoch!==pcmsEpoch||
      observer.readCommitted(key).allow!==true)return fail('JOIN_NOT_PUBLISHED');
