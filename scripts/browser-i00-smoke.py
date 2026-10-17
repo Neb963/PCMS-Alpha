@@ -719,9 +719,128 @@ def s01_add_account_profile(browser, archive, folder):
             print('B S01_ORDINARY_PERSONA_SAME_ROUTE_UNAFFECTED=PASS',flush=True)
         else:
             print('B S01_ORDINARY_PERSONA_SAME_ROUTE_UNAFFECTED=NOT_TESTED (donor privacy not safe in this runner)',flush=True)
+        s01_legacy_and_archive(session,uuid,oracle,out['privacySafe'],started['accountId'])
     finally:
         oracle.close()
         close(session)
+
+
+def _options(session,uuid,body,timeout=60):
+    """Run a script as the PersonaMonkey settings page (the donor security-review sender)."""
+    call('POST',f'/session/{session}/url',{'url':f'moz-extension://{uuid}/options/options.html'})
+    script="const done=arguments[arguments.length-1];(async()=>{const send=m=>browser.runtime.sendMessage(m);"+body+\
+        "})().then(done).catch(e=>done({error:String(e)}));"
+    out=call('POST',f'/session/{session}/execute/async',{'script':script,'args':[]},timeout=timeout)
+    assert 'error' not in out,out
+    return out
+
+
+def _pcms(session,uuid,body,timeout=60):
+    call('POST',f'/session/{session}/url',{'url':f'moz-extension://{uuid}/pcms/index.html#accounts'})
+    script="const done=arguments[arguments.length-1];(async()=>{"+body+\
+        "})().then(done).catch(e=>done({error:String(e)}));"
+    out=call('POST',f'/session/{session}/execute/async',{'script':script,'args':[]},timeout=timeout)
+    assert 'error' not in out,out
+    return out
+
+
+def _wait_account(session,account_id,done,limit=240):
+    for _ in range(limit):
+        listed=account_command(session,{'type':'LIST_ACCOUNTS'})
+        account=next((a for a in listed.get('accounts',[]) if a['accountId']==account_id),None)
+        if account and not account.get('working') and done(account): return account
+        time.sleep(.5)
+    raise AssertionError(('S01_ACCOUNT_WAIT_TIMEOUT',account_id,listed))
+
+
+def s01_legacy_and_archive(session,uuid,oracle,privacy_safe,added_id):
+    """C-56..C-59 in place upgrade of a pre-S01 record and C-58 Archive release, real XPI paths."""
+    made=_options(session,uuid,"""
+      const ordinary=await send({type:'CREATE_PERSONA',input:{name:'CI legacy account',routeId:'ci-s01-http',
+        profile:{killSwitch:true,blockLocalNetwork:false}}});
+      const ctx=ordinary.container.cookieStoreId;
+      await browser.tabs.create({url:'http://s01-oracle.example/legacy-before',cookieStoreId:ctx,active:false});
+      await new Promise(r=>setTimeout(r,3000));
+      return {personaUid:ordinary.profile.personaUid,contextId:ctx};""")
+    if privacy_safe:
+        assert any(p.endswith('/legacy-before') for p in oracle.seen),oracle.seen
+    # A pre-S01 record exactly as the old build stored it: verified identity,
+    # no binding tag, no boundPrincipal.
+    seeded=_pcms(session,uuid,"""
+      const {openCanonicalDatabase}=await import('./journal.mjs');
+      const db=await openCanonicalDatabase();
+      const record={accountId:'legacy_account_ci01',personaUid:'PERSONA',state:'VERIFIED',revision:2,bindingVersion:1,
+        identity:{principalFingerprint:'c'.repeat(64),observationId:'identity_legacy_ci01',
+          source:'GUARDED_SESSION_READBACK',bindingVersion:1},override:null,history:[]};
+      await new Promise((ok,bad)=>{const tx=db.transaction(['meta'],'readwrite');
+        tx.objectStore('meta').put({key:'account:legacy_account_ci01',account:record});tx.oncomplete=ok;tx.onabort=bad;});
+      db.close();return {ok:true};""".replace('PERSONA',made['personaUid']))
+    assert seeded.get('ok') is True,seeded
+    listed=account_command(session,{'type':'LIST_ACCOUNTS'})
+    legacy=next(a for a in listed['accounts'] if a['accountId']=='legacy_account_ci01')
+    assert legacy['protectedRoute']=='LEGACY_UNPINNED',legacy
+    started=account_command(session,{'type':'UPGRADE_ACCOUNT','params':{'accountId':'legacy_account_ci01','expectedRevision':2}})
+    assert started.get('ok') is True,started
+    legacy=_wait_account(session,'legacy_account_ci01',lambda a:a.get('upgrade',{}) and a['upgrade'].get('phase') in ('HELD','COMPLETE'))
+    # No native Mullvad helper in CI: the route step holds, but identity is intact.
+    assert legacy['upgrade']['phase']=='HELD',legacy
+    assert legacy['upgrade']['code'] in ('MULLVAD_LOCAL_SERVICE_UNAVAILABLE','NO_ROUTE_CANDIDATES','NO_UNIQUE_EXIT_AVAILABLE'),legacy
+    assert legacy['state']=='VERIFIED' and legacy['revision']==2 and legacy['identity']=='VERIFIED',legacy
+    assert legacy['personaUid']==made['personaUid'],legacy
+    stored=_pcms(session,uuid,"""
+      const {openCanonicalDatabase}=await import('./journal.mjs');
+      const db=await openCanonicalDatabase();
+      const row=await new Promise(ok=>{const r=db.transaction(['meta'],'readonly').objectStore('meta')
+        .get('account:legacy_account_ci01');r.onsuccess=()=>ok(r.result);});
+      const all=await new Promise(ok=>{const keys=[];const c=db.transaction(['meta'],'readonly').objectStore('meta').openCursor();
+        c.onsuccess=e=>{const x=e.target.result;if(!x)return ok(keys);if(String(x.key).startsWith('account:'))keys.push(x.key);x.continue();};});
+      db.close();
+      const snap=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'});
+      const p=snap.state.profiles['CTX'];
+      return {bound:row.account.boundPrincipal,binding:row.account.bindingId,prior:row.account.upgrade.priorExitHistory,
+        accounts:all.length,tag:p.pcmsBindingId,route:p.routeId,personas:Object.values(snap.state.profiles)
+          .filter(x=>x.personaUid==='UID').length};""".replace('CTX',made['contextId']).replace('UID',made['personaUid']))
+    assert stored['bound']=='c'*64 and stored['tag']==stored['binding'],stored
+    assert stored['prior']=='UNOBSERVED' and stored['route']=='ci-s01-http' and stored['personas']==1,stored
+    print('B S01_LEGACY_ACCOUNT_UPGRADED_IN_PLACE_SAME_ID_PERSONA_PRINCIPAL_REVISION=PASS',flush=True)
+    seen=len(oracle.seen)
+    _options(session,uuid,"""
+      await browser.tabs.create({url:'http://s01-oracle.example/legacy-after',cookieStoreId:'CTX',active:false});
+      await new Promise(r=>setTimeout(r,4000));return {ok:true};""".replace('CTX',made['contextId']))
+    assert not any(p.endswith('/legacy-after') for p in oracle.seen[seen:]),oracle.seen
+    print('B S01_UPGRADING_LEGACY_PERSONA_BLOCKED_UNTIL_PINNED=PASS',flush=True)
+    # C-58 Archive: give both Personas their own Mullvad route resource (no
+    # native host in CI), keep a human tab in one, then archive both.
+    prepared=_options(session,uuid,"""
+      let snap=await send({type:'GET_SNAPSHOT'});
+      const state=structuredClone(snap.state);
+      for(const [id,host] of [['ci-s01-mv-a','10.124.0.91'],['ci-s01-mv-b','10.124.0.92']])
+        state.routes[id]={id,name:id,provider:'mullvad',type:'socks',host,port:1080,proxyDNS:true,enabled:true};
+      const preview=await send({type:'PREVIEW_STATE_CHANGE',state});
+      await send({type:'AUTHORIZE_SECURITY_PREVIEW',previewId:preview.previewId,approvedDelta:preview.delta});
+      await send({type:'COMMIT_STATE_PREVIEW',authorizationId:preview.previewId});
+      snap=await send({type:'GET_SNAPSHOT'});
+      const added=Object.values(snap.state.profiles).find(p=>p.pcmsBindingId&&p.containerId!=='CTX');
+      for(const t of await browser.tabs.query({cookieStoreId:'CTX'}))await browser.tabs.remove(t.id);
+      await send({type:'UPDATE_PROFILE_ROUTE',profileId:added.containerId,routeId:'ci-s01-mv-a'});
+      await send({type:'UPDATE_PROFILE_ROUTE',profileId:'CTX',routeId:'ci-s01-mv-b'});
+      await browser.tabs.create({url:'about:blank',cookieStoreId:added.containerId,active:false});
+      return {added:added.containerId};""".replace('CTX',made['contextId']))
+    rev=lambda i:next(a for a in account_command(session,{'type':'LIST_ACCOUNTS'})['accounts'] if a['accountId']==i)['revision']
+    busy=account_command(session,{'type':'ARCHIVE','params':{'accountId':added_id,'expectedRevision':rev(added_id)}})
+    assert busy.get('ok') is True and busy.get('release')=='RELEASE_DEFERRED',busy
+    idle=account_command(session,{'type':'ARCHIVE','params':{'accountId':'legacy_account_ci01','expectedRevision':rev('legacy_account_ci01')}})
+    assert idle.get('ok') is True and idle.get('release') in ('RELEASE_UNCONFIRMED','RELEASED'),idle
+    after=account_command(session,{'type':'LIST_ACCOUNTS'})['accounts']
+    states={a['accountId']:(a['state'],a.get('route',{}).get('status'),a.get('route',{}).get('code')) for a in after}
+    assert states[added_id]==('ARCHIVED','RELEASE_DEFERRED','RESOURCE_IN_USE'),states
+    assert states['legacy_account_ci01'][0]=='ARCHIVED',states
+    kept=_options(session,uuid,"""
+      const snap=await send({type:'GET_SNAPSHOT'});
+      return {tagged:Object.values(snap.state.profiles).filter(p=>p.pcmsBindingId).length,
+        routes:['ci-s01-mv-a','ci-s01-mv-b'].filter(id=>snap.state.routes[id]).length};""")
+    assert kept=={'tagged':2,'routes':2},kept
+    print('B S01_ARCHIVE_DEFERS_IN_USE_RELEASE_AND_RELEASES_IDLE_VIA_DONOR=',states['legacy_account_ci01'][1],flush=True)
 
 
 def main():

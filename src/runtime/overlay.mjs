@@ -132,7 +132,8 @@ function createPcmsEnrollmentDonor(){
       // mistaken for an empty exit history while they exist.
       const taggedBindings=Object.values(state.profiles||{})
         .map(p=>p?.pcmsBindingId).filter(id=>id&&id!==bindingId).slice(0,1000);
-      const rank=r=>preferRouteIds.includes(r.id)?0:1;
+      const own=Object.values(state.profiles||{}).find(p=>p?.pcmsBindingId===bindingId)?.routeId;
+      const rank=r=>r.id===own?0:preferRouteIds.includes(r.id)?1:2;
       usable.sort((a,b)=>rank(a)-rank(b));
       let relays=[],relayList='AVAILABLE';
       try{relays=await fetchMullvadRelays();}catch{relayList='UNAVAILABLE';}
@@ -194,8 +195,88 @@ function createPcmsEnrollmentDonor(){
       const after=(await getState()).profiles?.[contextId];
       return after?.routeId===routeId&&after.pcmsBindingId===bindingId?{ok:true}:{ok:false,code:'ROUTE_ASSIGN_UNCONFIRMED'};
     },
+    // Legacy account upgrade: tag the account's EXISTING Persona in place.
+    // Its route, container, cookies and session are untouched; tagging only
+    // makes its traffic depend on a PCMS pin (fail closed until pinned).
+    async tagExistingPersona({bindingId,personaUid}){
+      await initialize();
+      const state=await getState();
+      const prior=pcmsBoundProfile(state,bindingId);
+      if(prior===false)return {ok:false,code:'BINDING_PERSONA_AMBIGUOUS'};
+      if(prior)return String(prior.personaUid).toLowerCase()===String(personaUid).toLowerCase()?
+        {ok:true,personaUid:prior.personaUid,contextId:prior.containerId,routeId:prior.routeId,existing:true}:
+        {ok:false,code:'BINDING_PERSONA_CONFLICT'};
+      const found=pcmsProfileByUid(state,personaUid);
+      if(found.code)return {ok:false,code:found.code};
+      const p=found.profile;
+      if(p.pcmsBindingId)return {ok:false,code:'PERSONA_BOUND_TO_OTHER_ACCOUNT'};
+      if(p.status==='archived'||p.rotationRole||p.rotationOperationId)return {ok:false,code:'PERSONA_NOT_ACTIVE'};
+      const permit=issueExistingPersonaTagPermit({bindingId,contextId:p.containerId,personaUid:p.personaUid});
+      try{
+        await localMutationFence(p.containerId,()=>stateManager.mutate(draft=>{
+          const item=draft.profiles?.[p.containerId];
+          if(!item||item.pcmsBindingId||item.personaUid!==p.personaUid)throw Error('PERSONA_CHANGED');
+          item.pcmsBindingId=bindingId;
+        },{pcmsStagePermit:permit}));
+      }catch{}
+      const made=pcmsBoundProfile(await getState(),bindingId);
+      return made?{ok:true,personaUid:made.personaUid,contextId:made.containerId,routeId:made.routeId}:
+        {ok:false,code:made===false?'BINDING_PERSONA_AMBIGUOUS':'PERSONA_TAG_UNCONFIRMED'};
+    },
+    // Observation only: is this account's own route resource in use?
+    async inspectRouteUse({personaUid}){
+      await initialize();
+      const state=await getState(),found=pcmsProfileByUid(state,personaUid);
+      if(found.code)return {ok:false,code:found.code};
+      const p=found.profile,route=state.routes?.[p.routeId];
+      if(!route||route.provider!=='mullvad')return {ok:true,releasable:false,reason:'NO_ROUTE_RESOURCE',routeId:p.routeId};
+      if(Object.values(state.profiles||{}).some(o=>o!==p&&o?.routeId===p.routeId))
+        return {ok:true,releasable:false,reason:'RESOURCE_SHARED',routeId:p.routeId};
+      const tabs=await browser.tabs.query({cookieStoreId:p.containerId});
+      const jobs=await listActiveProfileIds();
+      if(tabs.length||jobs.includes(p.containerId))
+        return {ok:true,releasable:false,reason:'RESOURCE_IN_USE',routeId:p.routeId};
+      return {ok:true,releasable:true,routeId:p.routeId,contextId:p.containerId};
+    },
+    // Release ONLY this Persona's own idle Mullvad forwarder. The donor
+    // mutation fence refuses while any control lease exists; tabs, jobs and
+    // sharing are re-checked inside it. The global tunnel is never stopped.
+    async releaseIdleRoute({personaUid,routeId}){
+      await initialize();
+      const state=await getState(),found=pcmsProfileByUid(state,personaUid);
+      if(found.code)return {ok:false,code:found.code};
+      const p=found.profile;
+      if(p.routeId!==routeId)return {ok:false,code:'ROUTE_CHANGED'};
+      try{
+        return await localMutationFence(p.containerId,async()=>{
+          const now=await getState();
+          if(now.profiles?.[p.containerId]?.routeId!==routeId)return {ok:false,code:'ROUTE_CHANGED'};
+          if(Object.values(now.profiles||{}).some(o=>o?.containerId!==p.containerId&&o?.routeId===routeId))
+            return {ok:false,code:'RESOURCE_SHARED'};
+          if((await browser.tabs.query({cookieStoreId:p.containerId})).length||
+             (await listActiveProfileIds()).includes(p.containerId))return {ok:false,code:'RESOURCE_IN_USE'};
+          mullvadRuntime.drop(routeId);
+          try{const out=await releaseExit(routeId);
+            return {ok:true,released:out?.released===true};}
+          catch{return {ok:false,code:'RELEASE_UNCONFIRMED'};}
+        });
+      }catch{return {ok:false,code:'RESOURCE_IN_USE'};}
+    },
+    // Read-only native inventory: is a forwarder for this route still live?
+    async observeRouteReleased({routeId}){
+      const status=await getNativeStatus();
+      if(status?.installed!==true||!Array.isArray(status.active_exits))return {ok:false,code:'NATIVE_UNAVAILABLE'};
+      return {ok:true,released:!status.active_exits.some(e=>e?.route_id===routeId)};
+    },
     reloadPins:()=>reloadRoutePins()
   });
+}
+function pcmsProfileByUid(state,personaUid){
+  const uid=String(personaUid||'').toLowerCase();
+  const found=Object.values(state.profiles||{}).filter(p=>p?.managed&&!p.rotationRole&&
+    String(p.personaUid||'').toLowerCase()===uid);
+  if(found.length!==1)return {code:found.length?'PERSONA_AMBIGUOUS':'PERSONA_NOT_FOUND'};
+  return {profile:found[0]};
 }
 `;
 
@@ -239,7 +320,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { inspectRoutePin, routePinsReady, reloadRoutePins } from "./pcms/route-pin.mjs";\nimport { issueBoundPersonaCreatePermit } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest, fetchViaExit as pcmsFetchViaExit } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain } from "./pcms/perchance-existing.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { inspectRoutePin, routePinsReady, reloadRoutePins } from "./pcms/route-pin.mjs";\nimport { issueBoundPersonaCreatePermit, issueExistingPersonaTagPermit } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest, fetchViaExit as pcmsFetchViaExit } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain } from "./pcms/perchance-existing.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `

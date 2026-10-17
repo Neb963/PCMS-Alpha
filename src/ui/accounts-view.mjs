@@ -21,7 +21,7 @@ const fallback={
   NO_PERCHANCE_TAB:'Open the account’s Perchance tab and log in first.',
   IDENTITY_CHANGED:'A different Perchance account is logged in than the one bound here. Log in with the original account.',
   IDENTITY_ALREADY_BOUND:'That Perchance account is already managed by another PCMS account.',
-  ROUTE_RESERVATION_REQUIRED:'This record was created by an earlier build without a reserved exit. Archive it and use Add Account.',
+  UPGRADE_IN_PROGRESS:'This account is being upgraded in place to a reserved protected exit; try again shortly.',
   RESTORE_HOLD:'A restore safety hold is active; account changes are paused.',
   STALE_REVISION:'The account changed meanwhile. The list was refreshed; try again.'
 };
@@ -41,10 +41,6 @@ function command(type,params,timeoutMs=type==='CONFIRM_LOGIN'||type==='CHECK_IDE
     port.onDisconnect.addListener(()=>finish(null,Error('DISCONNECTED')));
     try{port.postMessage(params?{type,params}:{type});}catch{finish(null,Error('DISCONNECTED'));}
   });
-}
-function option(value,label) {
-  const el=document.createElement('option');
-  el.value=value;el.textContent=label;return el;
 }
 function button(label,onClick,disabled=false) {
   const el=document.createElement('button');
@@ -68,7 +64,15 @@ function describe(a){
     const phase=phases[a.setup?.phase]||'Preparing…';
     return a.setup?.phase==='HELD'?'Setup is waiting: '+(a.message||'the protected route could not be prepared yet.'):phase;
   }
-  if(a.protectedRoute==='LEGACY_UNPINNED')return fallback.ROUTE_RESERVATION_REQUIRED;
+  if(a.state==='ARCHIVED'){
+    const r=a.route?.status;
+    return r==='RELEASED'?'Archived. Its route resources are released; Persona, login, generators and exit history are kept.':
+      r==='RELEASE_DEFERRED'||r==='RELEASE_UNCONFIRMED'?'Archived. '+(a.message||'Its route will be released once idle.'):
+      'Archived. Persona, login, generators and exit history are kept.';
+  }
+  if(a.protectedRoute==='LEGACY_UNPINNED'||a.protectedRoute==='UPGRADING')
+    return a.upgrade?.phase==='HELD'?'Upgrade waiting: '+(a.message||'the protected route could not be prepared yet.'):
+      'Upgrading to a reserved protected exit. This account keeps its Persona, login and generators.';
   if(a.route?.status==='HELD')return 'Traffic held: '+(a.message||'the protected route needs attention.');
   return a.working?'Checking route…':'Protected exit reserved for this account only.';
 }
@@ -97,9 +101,19 @@ function draw() {
     section.append(heading,detail);
     const controls=document.createElement('div');controls.className='account-controls';
     const pinned=a.protectedRoute==='PCMS_PINNED';
+    const code=a.setup?.code||a.upgrade?.code||a.route?.code;
+    const personaGone=['PERSONA_NOT_FOUND','BINDING_PERSONA_ABSENT'].includes(code);
+    if(a.state!=='ARCHIVED'&&personaGone&&!a.working)
+      controls.append(button('Create replacement Persona',async()=>{
+        if(!window.confirm('Create a new dedicated Persona for this SAME account? Its generators and history are kept; you will log in again with the same Perchance account.'))return;
+        await act('REPLACE_PERSONA',a,()=>'Replacement Persona prepared. Log in with the original account, then Confirm login.',{explicitReplacement:true});
+      }));
     if(a.state==='PREPARING'){
-      if(a.setup?.phase==='HELD'&&!a.working)
+      if(a.setup?.phase==='HELD'&&!a.working&&!personaGone)
         controls.append(button('Try setup again',()=>act('RESUME_SETUP',a,()=>'Setup restarted.')));
+    }else if(a.state!=='ARCHIVED'&&!pinned){
+      if(!a.working&&!personaGone&&(a.protectedRoute==='LEGACY_UNPINNED'||a.upgrade?.phase==='HELD'))
+        controls.append(button('Retry upgrade',()=>act('UPGRADE_ACCOUNT',a,()=>'Upgrade started.')));
     }else if(a.state!=='ARCHIVED'){
       if(pinned&&a.state!=='VERIFIED')
         controls.append(button('Confirm login',()=>act('CONFIRM_LOGIN',a,
@@ -111,17 +125,6 @@ function draw() {
           if(!window.confirm('Move this account to a different unique Mullvad exit? Its current exit stays reserved to it.'))return;
           await act('CHANGE_ROUTE',a,()=>'Route change started.');
         }));
-      if(!pinned&&a.state!=='VERIFIED'){
-        const reason=document.createElement('select');
-        reason.setAttribute('aria-label','Reason for manual exception');
-        for(const [value,label] of [['IDENTITY_UNOBSERVABLE','Identity cannot be observed'],
-          ['CHALLENGE','Provider challenge'],['SESSION_UNAVAILABLE','Session unavailable']])reason.append(option(value,label));
-        const ack=document.createElement('input');ack.type='checkbox';
-        const consent=document.createElement('label');
-        consent.append(ack,document.createTextNode(' Exception grants no provider write authority'));
-        controls.append(reason,consent,button('Record limited exception',()=>act('MANUAL_OVERRIDE',a,
-          ()=>'Local exception recorded; ownership remains unverified.',{reason:reason.value,acknowledgeLimitedAuthority:ack.checked})));
-      }
     }
     if(a.state==='ARCHIVED'){
       controls.append(button('Reactivate',async()=>{

@@ -22,7 +22,17 @@ export const SETUP_MESSAGES=Object.freeze({
   PERSONA_CREATE_UNCONFIRMED:'PersonaMonkey did not confirm the new Persona. Retry continues safely.',
   ROUTE_ASSIGN_UNCONFIRMED:'PersonaMonkey did not confirm the route assignment. Retry continues safely.',
   BINDING_PERSONA_AMBIGUOUS:'More than one Persona claims this account. Nothing was changed.',
-  BINDING_PERSONA_ABSENT:'The dedicated Persona for this account is missing in PersonaMonkey.'
+  BINDING_PERSONA_ABSENT:'The dedicated Persona for this account is missing in PersonaMonkey. Use Create replacement Persona.',
+  PERSONA_NOT_FOUND:'This account\'s Persona no longer exists in PersonaMonkey. Use Create replacement Persona; the account, its generators and history are kept.',
+  PERSONA_AMBIGUOUS:'More than one PersonaMonkey Persona matches this account. Nothing was changed.',
+  PERSONA_NOT_ACTIVE:'This account\'s Persona is archived or being rotated in PersonaMonkey. Restore it there, then retry the upgrade.',
+  PERSONA_BOUND_TO_OTHER_ACCOUNT:'This account\'s Persona is already bound to another managed account. Nothing was changed.',
+  PERSONA_TAG_UNCONFIRMED:'PersonaMonkey did not confirm the protection marker for this Persona. The upgrade retries safely.',
+  IDENTITY_ALREADY_BOUND:'This account\'s Perchance login is already recorded for another managed account. Nothing was changed.',
+  UPGRADE_IN_PROGRESS:'This account is being upgraded to a reserved protected exit; it keeps its Persona, login and generators.',
+  RESOURCE_IN_USE:'The account\'s route is still in use (open tab or running work); it will be released once idle.',
+  RESOURCE_SHARED:'The account\'s route is shared with another Persona, so it is not released.',
+  RELEASE_UNCONFIRMED:'PersonaMonkey did not confirm releasing the route; PCMS will check and retry safely.'
 });
 
 export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,syncInventory,
@@ -118,7 +128,8 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       const reserved=await ledger.reserve({accountId:account.accountId,bindingId,
         personaUid:persona.personaUid,contextId:persona.contextId,routeId:route.routeId,
         exits:n.exits,exitSetDigest:await exitSetDigest(n.exits),evidenceId:n.evidenceId,
-        observedAtMs:n.observedAtMs,ipv6Disposition:n.ipv6Disposition});
+        observedAtMs:n.observedAtMs,ipv6Disposition:n.ipv6Disposition,
+        replacesPersona:prior.ok&&prior.binding.personaUid!==persona.personaUid});
       if(!reserved.ok){last=reserved.code==='EXIT_HISTORICALLY_OWNED'?'NO_UNIQUE_EXIT_AVAILABLE':reserved.code;continue;}
       const assigned=await donor.assignRoute({bindingId,personaUid:persona.personaUid,
         contextId:persona.contextId,routeId:route.routeId});
@@ -176,7 +187,12 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     }
     const observed=await identify(account.personaUid);
     if(!observed.ok)return silent?{ok:false,code:observed.code,needsLogin:true}:observed;
-    const verified=await accounts.applyCurrent({type:'VERIFY',accountId,proof:observed.proof});
+    // Same principal on an already verified record: nothing to rewrite, so
+    // revision-bound generator/source associations stay valid.
+    const verified=account.state==='VERIFIED'&&account.identity&&
+      observed.proof.principalFingerprint===account.boundPrincipal&&
+      account.identity.principalFingerprint===account.boundPrincipal?{ok:true,account}:
+      await accounts.applyCurrent({type:'VERIFY',accountId,proof:observed.proof});
     if(!verified.ok)return verified;
     const inventory=typeof syncInventory==='function'?await syncInventory(accountId,verified.account.revision):null;
     return {ok:true,state:'VERIFIED',inventory:inventory?.ok===true?'SYNCHRONIZED':(inventory?.code||'NOT_RUN')};
@@ -187,29 +203,136 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     const got=await accounts.get(accountId);
     if(!got.ok)return got;
     const account=got.account;
-    if(account.state==='PREPARING'||typeof account.bindingId!=='string'||
-       (account.state==='ARCHIVED'&&(change||!automatic)))
+    if(['PREPARING','ARCHIVED'].includes(account.state)||typeof account.bindingId!=='string')
       return fail('INVALID_ACCOUNT_STATE');
-    // Archived accounts are observed for drift only, never moved.
-    const route=await ensurePinnedRoute(account,{change,automatic,rotate:account.state!=='ARCHIVED'});
+    const route=await ensurePinnedRoute(account,{change,automatic});
     if(!route.ok){
       await routeStatus(accountId,route.code==='ROUTE_CHECK_FAILED'?'CHECKING':'HELD',route.code);
       return route;
     }
     await routeStatus(accountId,'PINNED');
     if(route.changed&&account.state==='VERIFIED'){
-      // Revalidate the same principal on the new exit; no silent rebind.
-      await accounts.applyCurrent({type:'REVERIFY',accountId});
-      const again=await confirm(accountId,{silent:true});
-      return {ok:true,changed:true,identity:again.ok?'VERIFIED':'LOGIN_REQUIRED'};
+      const identity=await revalidate(account);
+      return {ok:true,changed:true,identity};
     }
     return {ok:true,changed:route.changed===true};
+  }
+  // Revalidate a VERIFIED account's ORIGINAL principal on its current Persona.
+  // Same principal: no state change. Missing session or a different login:
+  // the account waits for login and is never rebound.
+  async function revalidate(account){
+    const observed=await identify(account.personaUid);
+    if(observed.ok&&observed.proof.principalFingerprint===account.boundPrincipal)return 'VERIFIED';
+    await accounts.applyCurrent({type:'REVERIFY',accountId:account.accountId});
+    return observed.ok?'IDENTITY_CHANGED':'LOGIN_REQUIRED';
+  }
+
+  // C-56-C-59 in-place upgrade of an account bound before S01: keep its ID,
+  // Persona, session, principal, history, revision and associations; tag the
+  // existing Persona, pin a permissible unique exit, revalidate the principal.
+  async function upgrade(accountId){
+    let got=await accounts.get(accountId);
+    if(!got.ok)return got;
+    let account=got.account;
+    if(account.state==='ARCHIVED'||account.state==='PREPARING')return fail('INVALID_ACCOUNT_STATE');
+    if(account.upgrade?.phase==='COMPLETE')return {ok:true,state:account.state,already:true};
+    if(typeof account.bindingId!=='string'){
+      const begun=await accounts.applyCurrent({type:'BEGIN_UPGRADE',accountId,bindingId:rid('bind_')});
+      if(!begun.ok)return begun;
+      account=begun.account;
+    }else if(!account.upgrade)return {ok:true,state:account.state,already:true};
+    const step=(phase,code=null)=>accounts.applyCurrent({type:'UPGRADE_PROGRESS',accountId,phase,code});
+    await step('PERSONA');
+    const tagged=await donor.tagExistingPersona({bindingId:account.bindingId,personaUid:account.personaUid});
+    if(!tagged.ok){await step('HELD',tagged.code);return tagged;}
+    await step('ROUTE');
+    const route=await ensurePinnedRoute(account);
+    if(!route.ok){await step('HELD',route.code);await routeStatus(accountId,'HELD',route.code);return route;}
+    await routeStatus(accountId,'PINNED');
+    await step('IDENTITY');
+    got=await accounts.get(accountId);
+    account=got.account;
+    const identity=account.state==='VERIFIED'?await revalidate(account):'NOT_VERIFIED_BEFORE';
+    await step('COMPLETE',identity==='VERIFIED'||identity==='NOT_VERIFIED_BEFORE'?null:identity);
+    return {ok:true,upgraded:true,identity};
+  }
+  // Explicit operator recovery for a missing dedicated Persona.
+  async function replacePersona(accountId,expectedRevision){
+    const got=await accounts.get(accountId);
+    if(!got.ok)return got;
+    const account=got.account;
+    if(account.revision!==expectedRevision)return fail('STALE_REVISION');
+    if(account.state==='ARCHIVED'||typeof account.bindingId!=='string')return fail('INVALID_ACCOUNT_STATE');
+    const present=await donor.boundPersona({bindingId:account.bindingId});
+    if(present.ok&&present.personaUid===account.personaUid)return fail('PERSONA_STILL_PRESENT');
+    if(!present.ok&&present.code!=='BINDING_PERSONA_ABSENT')return present;
+    if(!present.ok){
+      const legacy=await donor.inspectRouteUse({personaUid:account.personaUid});
+      if(legacy.ok||legacy.code!=='PERSONA_NOT_FOUND')return fail('PERSONA_STILL_PRESENT');
+    }
+    pins.hold(account.bindingId);
+    const made=present.ok?present:await donor.createBoundPersona({bindingId:account.bindingId,
+      name:'PCMS account '+account.accountId.slice(-6)});
+    if(!made.ok)return made;
+    const moved=await accounts.applyCurrent({type:'REPLACE_PERSONA',accountId,personaUid:made.personaUid});
+    if(!moved.ok)return moved;
+    if(moved.account.upgrade)await accounts.applyCurrent({type:'UPGRADE_PROGRESS',accountId,phase:'COMPLETE',code:null});
+    const route=await ensurePinnedRoute(moved.account);
+    if(!route.ok){await routeStatus(accountId,'HELD',route.code);return route;}
+    await routeStatus(accountId,'PINNED');
+    await openLogin(made.personaUid);
+    return {ok:true,state:'REBIND_PENDING'};
+  }
+
+  // C-56/C-58 Archive: durable state first (stops every new automation
+  // effect), then release only this account's OWN idle forwarder when the
+  // donor proves it unused. Uncertain dispatched work keeps its journal;
+  // Persona, cookies, principal and exit history are untouched.
+  async function archive(accountId,expectedRevision){
+    const out=await accounts.apply({type:'ARCHIVE',accountId,expectedRevision});
+    if(!out.ok)return out;
+    const release=await releaseIdle(out.account);
+    return {ok:true,state:'ARCHIVED',release:release.status};
+  }
+  async function releaseIdle(account){
+    const accountId=account.accountId;
+    const set=(status,code=null)=>routeStatus(accountId,status,code).then(()=>({status,code}));
+    if(!account.personaUid)return set('RELEASED','NO_PERSONA');
+    // Reconcile an earlier unconfirmed release by observation first.
+    if(account.route?.status==='RELEASE_UNCONFIRMED'&&account.route.routeId){
+      const seen=await donor.observeRouteReleased({routeId:account.route.routeId});
+      if(seen.ok&&seen.released)return set('RELEASED');
+    }
+    const use=await donor.inspectRouteUse({personaUid:account.personaUid});
+    if(!use.ok)return set('RELEASE_DEFERRED',use.code);
+    if(!use.releasable)return use.reason==='NO_ROUTE_RESOURCE'?set('RELEASED','NO_ROUTE_RESOURCE'):
+      set('RELEASE_DEFERRED',use.reason);
+    // Withdraw network authority before touching the resource; reactivation
+    // re-verifies the exit before any traffic resumes.
+    if(typeof account.bindingId==='string'){
+      pins.hold(account.bindingId);
+      const held=await ledger.hold(account.bindingId,'ARCHIVED_RELEASED');
+      if(!held.ok&&held.code!=='BINDING_RESERVATION_ABSENT')return set('RELEASE_DEFERRED',held.code);
+    }
+    const released=await donor.releaseIdleRoute({personaUid:account.personaUid,routeId:use.routeId});
+    if(released.ok)return set('RELEASED');
+    if(released.code==='RELEASE_UNCONFIRMED'){
+      await accounts.applyCurrent({type:'ROUTE_STATUS',accountId,status:'RELEASE_UNCONFIRMED',
+        code:'RELEASE_UNCONFIRMED',at:now(),routeId:use.routeId});
+      return {status:'RELEASE_UNCONFIRMED',code:released.code};
+    }
+    return set('RELEASE_DEFERRED',released.code);
   }
 
   async function reactivate(accountId,expectedRevision){
     const out=await accounts.apply({type:'REACTIVATE',accountId,expectedRevision,explicitReactivation:true});
     if(!out.ok)return out;
     if(out.account.state==='PREPARING')return prepare(accountId);
+    // A pre-S01 record is upgraded in place through the SAME account.
+    if(typeof out.account.bindingId!=='string'){
+      const up=await upgrade(accountId);
+      if(!up.ok)return up;
+    }
     const again=await confirm(accountId,{silent:true});
     if(again.ok)return again;
     if(again.needsLogin)await openLogin(out.account.personaUid);
@@ -230,17 +353,31 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     confirm:accountId=>exclusive(accountId,()=>confirm(accountId)),
     verifyRoute:(accountId,options)=>exclusive(accountId,()=>verifyRoute(accountId,options)),
     reactivate:(accountId,rev)=>exclusive(accountId,()=>reactivate(accountId,rev)),
-    // Startup/alarm upkeep: unfinished operator-started setups resume; pinned
-    // accounts re-verify their route (archived ones observe only).
+    upgrade:accountId=>exclusive(accountId,()=>upgrade(accountId)),
+    replacePersona:(accountId,rev)=>exclusive(accountId,()=>replacePersona(accountId,rev)),
+    archive:(accountId,rev)=>exclusive(accountId,()=>archive(accountId,rev)),
+    // Startup/alarm upkeep: resume operator-started setups and unfinished
+    // upgrades, upgrade pre-S01 records in place, re-verify pinned routes.
+    // Archived accounts are never probed (that would recreate a released
+    // forwarder); only an incomplete release is retried.
     async upkeep(){
       const listed=await accounts.list();
       if(!listed.ok)return listed;
       const results=[];
       for(const a of listed.accounts){
-        if(typeof a.bindingId!=='string')continue;
+        const id=a.accountId;
+        if(a.state==='ARCHIVED'){
+          if(['RELEASE_DEFERRED','RELEASE_UNCONFIRMED'].includes(a.route?.status))
+            results.push(await exclusive(id,()=>releaseIdle(a)));
+          continue;
+        }
         if(a.state==='PREPARING'){
-          if(a.setup?.phase!=='HELD')results.push(await exclusive(a.accountId,()=>prepare(a.accountId)));
-        }else results.push(await exclusive(a.accountId,()=>verifyRoute(a.accountId,{automatic:true})));
+          if(typeof a.bindingId==='string'&&a.setup?.phase!=='HELD')
+            results.push(await exclusive(id,()=>prepare(id)));
+        }else if(typeof a.bindingId!=='string'||(a.upgrade&&!['COMPLETE','HELD'].includes(a.upgrade.phase)))
+          results.push(await exclusive(id,()=>upgrade(id)));
+        else if(!a.upgrade||a.upgrade.phase==='COMPLETE')
+          results.push(await exclusive(id,()=>verifyRoute(id,{automatic:true})));
       }
       return {ok:true,checked:results.length};
     },

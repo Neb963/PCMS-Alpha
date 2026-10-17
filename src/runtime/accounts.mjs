@@ -8,10 +8,23 @@ const active = a => a && a.state !== 'ARCHIVED';
 const key = id => 'account:' + id;
 const reasons = new Set(['IDENTITY_UNOBSERVABLE','CHALLENGE','SESSION_UNAVAILABLE']);
 const allowed = new Set(['ENROLL','ACK_LOGIN','VERIFY','MANUAL_OVERRIDE','ARCHIVE','REACTIVATE','REBIND',
-  'BEGIN_SETUP','SETUP_PROGRESS','SETUP_COMPLETE','ROUTE_STATUS','REVERIFY']);
+  'BEGIN_SETUP','SETUP_PROGRESS','SETUP_COMPLETE','ROUTE_STATUS','REVERIFY',
+  'BEGIN_UPGRADE','UPGRADE_PROGRESS','REPLACE_PERSONA']);
 const code = v => v===null || (typeof v==='string' && /^[A-Z0-9_]{3,64}$/.test(v));
 const phases = new Set(['START','PERSONA','ROUTE','LOGIN','HELD']);
-const routeStatuses = new Set(['PINNED','HELD','CHECKING']);
+const routeStatuses = new Set(['PINNED','HELD','CHECKING','RELEASED','RELEASE_DEFERRED','RELEASE_UNCONFIRMED']);
+const upgradePhases = new Set(['START','PERSONA','ROUTE','IDENTITY','COMPLETE','HELD']);
+// The account's original verified principal: explicit, else its current
+// verified identity, else the identity preserved by its latest archive entry.
+function originalPrincipal(a) {
+  if (a.boundPrincipal) return a.boundPrincipal;
+  if (a.identity?.source === 'GUARDED_SESSION_READBACK' && digest(a.identity.principalFingerprint))
+    return a.identity.principalFingerprint;
+  const archived = [...(Array.isArray(a.history) ? a.history : [])].reverse()
+    .find(h => h?.priorIdentity?.source === 'GUARDED_SESSION_READBACK' &&
+      digest(h.priorIdentity.principalFingerprint));
+  return archived ? archived.priorIdentity.principalFingerprint : null;
+}
 function withHistory(previous,entry) {
   return [...(Array.isArray(previous.history)?previous.history:[]),entry].slice(-32);
 }
@@ -64,10 +77,18 @@ export function transitionAccount(previous, action, all = []) {
       event:'REACTIVATE'};
   }
   if (action.type === 'ROUTE_STATUS') {
-    // Internal route-pin projection; never identity or provider authority.
+    // Internal route projection: metadata only. It never changes the account
+    // revision, so generator/source associations bound to it stay valid.
     if (!routeStatuses.has(action.status) || !code(action.code ?? null)) return fail('INVALID_ROUTE_STATUS');
+    if (action.routeId !== undefined && !isSafeId(action.routeId)) return fail('INVALID_ROUTE_STATUS');
     return {ok:true,account:{...previous,route:{status:action.status,code:action.code ?? null,
-      at:Number.isSafeInteger(action.at)?action.at:null},revision:previous.revision+1},event:'ROUTE_STATUS'};
+      at:Number.isSafeInteger(action.at)?action.at:null,routeId:action.routeId ?? null}},event:'ROUTE_STATUS'};
+  }
+  if (action.type === 'UPGRADE_PROGRESS') {
+    if (!previous.upgrade || !upgradePhases.has(action.phase) || !code(action.code ?? null))
+      return fail('INVALID_UPGRADE_PHASE');
+    return {ok:true,account:{...previous,upgrade:{...previous.upgrade,phase:action.phase,
+      code:action.code ?? null}},event:'UPGRADE_PROGRESS'};
   }
   if (!active(previous)) return fail('ACCOUNT_ARCHIVED');
   if (action.type === 'SETUP_PROGRESS' || action.type === 'SETUP_COMPLETE') {
@@ -88,6 +109,35 @@ export function transitionAccount(previous, action, all = []) {
     if (!phases.has(action.phase) || !code(action.code ?? null)) return fail('INVALID_SETUP_PHASE');
     return {ok:true,account:{...previous,personaUid,setup:{phase:action.phase,code:action.code ?? null},
       revision:previous.revision+1},event:'SETUP_PROGRESS'};
+  }
+  if (action.type === 'BEGIN_UPGRADE') {
+    // In-place upgrade of a pre-S01 record: same account ID, Persona, state,
+    // identity, history and revision. Only a binding ID is added; earlier
+    // exits were never observed and are recorded as unknown, not unused.
+    if (previous.bindingId) return {ok:true,account:previous,event:'UPGRADE_ALREADY_STARTED'};
+    if (!uid(previous.personaUid) || !isSafeId(action.bindingId) ||
+        all.some(a => a?.bindingId === action.bindingId)) return fail('INVALID_BINDING');
+    const principal = originalPrincipal(previous);
+    if (principal && all.some(a => a && a.accountId !== previous.accountId &&
+        (a.boundPrincipal === principal || a.identity?.principalFingerprint === principal)))
+      return fail('IDENTITY_ALREADY_BOUND');
+    return {ok:true,account:{...previous,bindingId:action.bindingId,boundPrincipal:principal,
+      upgrade:{phase:'START',code:null,priorExitHistory:'UNOBSERVED'}},event:'UPGRADE_STARTED'};
+  }
+  if (action.type === 'REPLACE_PERSONA') {
+    // Explicit recovery when the dedicated Persona is gone: the SAME account
+    // and principal move to a new tagged Persona; a fresh login must prove
+    // the original principal before anything resumes.
+    if (!previous.bindingId || !uid(action.personaUid) || action.personaUid === previous.personaUid)
+      return fail('REPLACEMENT_NOT_AUTHORIZED');
+    if (all.some(a => active(a) && a.accountId !== previous.accountId &&
+        a.personaUid?.toLowerCase() === action.personaUid.toLowerCase()))
+      return fail('PERSONA_ALREADY_BOUND');
+    return {ok:true,account:{...previous,personaUid:action.personaUid,state:'REBIND_PENDING',
+      bindingVersion:previous.bindingVersion+1,identity:null,override:null,
+      boundPrincipal:originalPrincipal(previous),revision:previous.revision+1,
+      history:withHistory(previous,{event:'PERSONA_REPLACED',revision:previous.revision+1,
+        priorPersonaUid:previous.personaUid,priorIdentity:previous.identity})},event:'PERSONA_REPLACED'};
   }
   if (action.type === 'REVERIFY') {
     // A route change keeps the binding but requires fresh session evidence.
@@ -253,6 +303,7 @@ export function publicAccount(account) {
     revision:account.revision,bindingVersion:account.bindingVersion,
     identity:account.identity?'VERIFIED':'UNVERIFIED',
     override:account.override?.reason||null,providerWrites:'OFF',
-    setup:account.setup||null,route:account.route||null,
-    protectedRoute:typeof account.bindingId==='string'?'PCMS_PINNED':'LEGACY_UNPINNED'};
+    setup:account.setup||null,route:account.route||null,upgrade:account.upgrade||null,
+    protectedRoute:typeof account.bindingId!=='string'?'LEGACY_UNPINNED':
+      account.upgrade&&account.upgrade.phase!=='COMPLETE'?'UPGRADING':'PCMS_PINNED'};
 }

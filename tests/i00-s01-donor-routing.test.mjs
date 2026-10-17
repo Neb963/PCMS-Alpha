@@ -6,7 +6,7 @@ import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {buildI00} from '../scripts/build-i00.mjs';
 import * as pins from '../src/runtime/route-pin.mjs';
-import {beforeDonorStateCommit,issueBoundPersonaCreatePermit} from '../src/runtime/pcms-donor-fence.mjs';
+import {beforeDonorStateCommit,issueBoundPersonaCreatePermit,issueExistingPersonaTagPermit} from '../src/runtime/pcms-donor-fence.mjs';
 globalThis.crypto??=webcrypto;
 
 const route={id:'mullvad-0001',provider:'mullvad',host:'10.124.0.1',port:1080,type:'socks',enabled:true};
@@ -100,7 +100,8 @@ test('S01 D: extension-origin Perchance requests never inherit the donor extensi
 });
 
 // Production enrollment adapter from the staged background, over fake donor primitives.
-function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=false}={}){
+function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=false,tabs=new Map(),leased=new Set(),
+  jobs=[],activeExits=['mullvad-7'],releaseFails=false}={}){
   const effects=[];
   let state={global:{},routes:{},profiles:{}};
   const securityState={ready:true,privacySafe:true};
@@ -108,11 +109,18 @@ function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=fal
   const echo=url=>url.includes('ipv6')?(v6==='OBSERVED'?{ip:'2a03:1b20::1',mullvad_exit_ip:true}:null):
     url.includes('dnsleak')?[{ip:'10.64.0.1',mullvad_dns:true}]:{ip:'45.83.1.1',mullvad_exit_ip:true};
   const ctx={URL,crypto,setTimeout,Uint32Array,JSON,Object,Array,Number,String,Promise,Set,Map,
-    ...pins,issueBoundPersonaCreatePermit,BLOCK_ROUTE_ID:'__block__',
+    ...pins,issueBoundPersonaCreatePermit,issueExistingPersonaTagPermit,BLOCK_ROUTE_ID:'__block__',
+    browser:{tabs:{query:async({cookieStoreId})=>tabs.get(cookieStoreId)||[]}},
+    listActiveProfileIds:async()=>jobs,
+    async releaseExit(routeId){effects.push('RELEASE_EXIT:'+routeId);if(releaseFails)throw Error('native host disconnected');
+      const had=activeExits.includes(routeId);activeExits.splice(activeExits.indexOf(routeId)>>>0,had?1:0);return {ok:true,released:had};},
+    getNativeStatus:async()=>nativeError==='HOST'?{installed:false}:{installed:true,active_exits:activeExits.map(route_id=>({route_id}))},
     MULLVAD_IPV4_CHECK_URL:'https://ipv4.am.i.mullvad.net/json',
     PCMS_IPV6_CHECK_URL:'https://ipv6.am.i.mullvad.net/json',routeTestRequests:new Map(),
     securityState,initialize:async()=>{},getState:async()=>structuredClone(state),
-    allPersonaUids:()=>[],localMutationFence:async(_ids,op)=>op(),
+    allPersonaUids:()=>[],localMutationFence:async(ids,op)=>{
+      // Donor fence semantics: an active control lease on a target refuses.
+      if([].concat(ids).some(id=>leased.has(id)))throw Error('PERSONA_CONTROL_BUSY');return op();},
     personaPlatform:{
       async create(input,options){
         const next=structuredClone(state),id='firefox-container-'+(Object.keys(next.profiles).length+1);
@@ -123,7 +131,9 @@ function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=fal
       async assignRoute(id,routeId){const next=structuredClone(state);next.profiles[id].routeId=routeId;
         effects.push('ASSIGN');commit(next);}
     },
-    stateManager:{async authorizePreview(id,delta){effects.push('AUTHORIZE:'+delta.length);}},
+    stateManager:{async authorizePreview(id,delta){effects.push('AUTHORIZE:'+delta.length);},
+      async mutate(fn,options){const next=structuredClone(state);await fn(next);effects.push('MUTATE');
+        commit(next,options?.pcmsStagePermit??null);}},
     async createMullvadRoute(relay,authorizationId){
       if(!authorizationId)return {previewId:'preview_0001',delta:[{kind:'proxy-destination-added',
         after:{scheme:'socks',host:relay.ipv4_address,port:1080}}]};
@@ -132,7 +142,7 @@ function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=fal
       effects.push('ROUTE_CREATE');commit(next);
     },
     fetchMullvadRelays:async()=>relays,
-    mullvadRuntime:{resolve:async r=>nativeError==='HOST'?null:r},
+    mullvadRuntime:{resolve:async r=>nativeError==='HOST'?null:r,drop:id=>effects.push('DROP:'+id)},
     async fetchJsonThroughRouteTest(_iso,_route,url){
       effects.push('PROBE:'+new URL(url).hostname.split('.')[0]);
       if(routeTestFails)throw Error('Route check timed out');
@@ -146,7 +156,7 @@ function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=fal
   const code=slice(bg,'function isPcmsProviderUrl(raw) {','\nasync function handleProxyRequest(details) {')
     .replace('void reloadRoutePins();','');
   const donor=vm.runInNewContext(code+'\ncreatePcmsEnrollmentDonor();',ctx);
-  return {donor,effects,state:()=>state};
+  return {donor,effects,state:()=>state,set:next=>{state=next;}};
 }
 const relayList=[{hostname:'se-sto-wg-socks5-001',ipv4_address:'10.124.0.7',port:1080},
   {hostname:'bad',ipv4_address:'192.168.1.1',port:1080},{hostname:'bad-port',ipv4_address:'10.124.0.8',port:9050}];
@@ -198,4 +208,57 @@ test('S01 adapter D: native loss is HOST scope (no rotation); a failing route te
   const probed=await down.donor.probeAssigned({bindingId:'binding_0001',contextId:persona.contextId,routeId:r2.routeId});
   assert.equal(probed.failure,'ROUTE');assert.equal(probed.code,'ROUTE_CONNECTION_FAILED');
   assert.ok(down.effects.includes('TEST_PROFILE'),'assigned check uses donor testProfile');
+});
+
+const legacyState=()=>({global:{},routes:{'mullvad-7':{id:'mullvad-7',provider:'mullvad',host:'10.124.0.7',port:1080,type:'socks',enabled:true}},
+  profiles:{'firefox-container-7':{containerId:'firefox-container-7',personaUid:'persona-legacy-0007',managed:true,
+    status:'active',routeId:'mullvad-7',killSwitch:true,blockLocalNetwork:true,pcmsBindingId:null}}});
+
+test('S01 upgrade adapter D: production adapter tags the EXISTING Persona in place (route/session untouched), idempotently',async()=>{
+  const a=adapter(await background());a.set(legacyState());
+  const out=await a.donor.tagExistingPersona({bindingId:'binding_0007',personaUid:'persona-legacy-0007'});
+  assert.equal(out.ok,true,JSON.stringify(out));
+  assert.equal(out.contextId,'firefox-container-7');assert.equal(out.routeId,'mullvad-7');
+  const p=a.state().profiles['firefox-container-7'];
+  assert.equal(p.pcmsBindingId,'binding_0007');assert.equal(p.routeId,'mullvad-7');
+  assert.equal((await a.donor.tagExistingPersona({bindingId:'binding_0007',personaUid:'persona-legacy-0007'})).ok,true);
+  assert.deepEqual(plain(a.effects),['MUTATE'],'second call reconciles by state, no second mutation');
+  assert.equal((await a.donor.tagExistingPersona({bindingId:'binding_other',personaUid:'persona-legacy-0007'})).code,
+    'PERSONA_BOUND_TO_OTHER_ACCOUNT');
+  assert.equal((await a.donor.tagExistingPersona({bindingId:'binding_0008',personaUid:'persona-missing-0001'})).code,
+    'PERSONA_NOT_FOUND');
+  const leased=adapter(await background(),{leased:new Set(['firefox-container-7'])});leased.set(legacyState());
+  assert.equal((await leased.donor.tagExistingPersona({bindingId:'binding_0007',personaUid:'persona-legacy-0007'})).code,
+    'PERSONA_TAG_UNCONFIRMED','donor lease blocks the tag; reported, not assumed');
+});
+
+test('S01 release adapter D: only an idle, unshared, unleased forwarder is released; global tunnel untouched',async()=>{
+  const bg=await background();
+  const idle=adapter(bg);idle.set(legacyState());
+  assert.equal((await idle.donor.inspectRouteUse({personaUid:'persona-legacy-0007'})).releasable,true);
+  const out=await idle.donor.releaseIdleRoute({personaUid:'persona-legacy-0007',routeId:'mullvad-7'});
+  assert.deepEqual(plain(out),{ok:true,released:true});
+  assert.deepEqual(plain(idle.effects),['DROP:mullvad-7','RELEASE_EXIT:mullvad-7']);
+  assert.deepEqual(plain(await idle.donor.observeRouteReleased({routeId:'mullvad-7'})),{ok:true,released:true});
+  assert.deepEqual(plain(await idle.donor.releaseIdleRoute({personaUid:'persona-legacy-0007',routeId:'mullvad-7'})),
+    {ok:true,released:false},'already released is reported, not re-invented');
+  const tab=adapter(bg,{tabs:new Map([['firefox-container-7',[{id:1}]]])});tab.set(legacyState());
+  assert.equal((await tab.donor.inspectRouteUse({personaUid:'persona-legacy-0007'})).reason,'RESOURCE_IN_USE');
+  assert.equal((await tab.donor.releaseIdleRoute({personaUid:'persona-legacy-0007',routeId:'mullvad-7'})).code,'RESOURCE_IN_USE');
+  const job=adapter(bg,{jobs:['firefox-container-7']});job.set(legacyState());
+  assert.equal((await job.donor.releaseIdleRoute({personaUid:'persona-legacy-0007',routeId:'mullvad-7'})).code,'RESOURCE_IN_USE');
+  const lease=adapter(bg,{leased:new Set(['firefox-container-7'])});lease.set(legacyState());
+  assert.equal((await lease.donor.releaseIdleRoute({personaUid:'persona-legacy-0007',routeId:'mullvad-7'})).code,'RESOURCE_IN_USE');
+  const shared=adapter(bg);const st=legacyState();
+  st.profiles['firefox-container-8']={...st.profiles['firefox-container-7'],containerId:'firefox-container-8',personaUid:'persona-other-0008'};
+  shared.set(st);
+  assert.equal((await shared.donor.inspectRouteUse({personaUid:'persona-legacy-0007'})).reason,'RESOURCE_SHARED');
+  assert.equal((await shared.donor.releaseIdleRoute({personaUid:'persona-legacy-0007',routeId:'mullvad-7'})).code,'RESOURCE_SHARED');
+  for(const h of [tab,job,lease,shared])assert.equal(h.effects.some(e=>String(e).startsWith('RELEASE_EXIT')),false);
+  const lost=adapter(bg,{releaseFails:true});lost.set(legacyState());
+  assert.equal((await lost.donor.releaseIdleRoute({personaUid:'persona-legacy-0007',routeId:'mullvad-7'})).code,'RELEASE_UNCONFIRMED');
+  const gone=adapter(bg,{nativeError:'HOST'});gone.set(legacyState());
+  assert.equal((await gone.donor.observeRouteReleased({routeId:'mullvad-7'})).code,'NATIVE_UNAVAILABLE');
+  assert.equal(bg.includes('stopTunnel()')&&slice(bg,'function createPcmsEnrollmentDonor(){','function pcmsProfileByUid').includes('stopTunnel'),false,
+    'the adapter never stops the shared tunnel');
 });

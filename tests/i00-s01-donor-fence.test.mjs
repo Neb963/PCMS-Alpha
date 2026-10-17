@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {bindingTagChanges,beforeDonorStateCommit,issueBoundPersonaCreatePermit} from '../src/runtime/pcms-donor-fence.mjs';
+import {bindingTagChanges,beforeDonorStateCommit,issueBoundPersonaCreatePermit,issueExistingPersonaTagPermit} from '../src/runtime/pcms-donor-fence.mjs';
 
 const state=()=>({global:{unmanagedPolicy:'block'},routes:{
  'route_001':{id:'route_001',enabled:true,host:'10.124.0.2'}},
@@ -55,4 +55,26 @@ test('S01 donor fence: one-shot permit creates exactly one NEW Block-routed tagg
  }
  assert.throws(()=>beforeDonorStateCommit(old,created(old),{bindingId:'binding_new_003'}),
    {code:'PCMS_BINDING_CREATE_UNAUTHORIZED'},'forged permit object');
+});
+
+test('S01 donor fence: in-place TAG permit adds one tag to one existing untagged Persona and changes nothing else',()=>{
+ const old=state();old.profiles['firefox-container-002'].managed=true;
+ const unmanaged=state();
+ assert.throws(()=>beforeDonorStateCommit(unmanaged,(()=>{const n=structuredClone(unmanaged);
+   n.profiles['firefox-container-002'].pcmsBindingId='binding_legacy_002';return n;})(),
+   issueExistingPersonaTagPermit({bindingId:'binding_legacy_002',contextId:'firefox-container-002',personaUid:'persona_002'})),
+   {code:'PCMS_BINDING_CREATE_UNAUTHORIZED'},'unmanaged Persona is never tagged');
+ const tag=s=>{const n=structuredClone(s);n.profiles['firefox-container-002'].pcmsBindingId='binding_legacy_002';return n;};
+ const permit=()=>issueExistingPersonaTagPermit({bindingId:'binding_legacy_002',contextId:'firefox-container-002',personaUid:'persona_002'});
+ const p=permit();
+ assert.deepEqual(beforeDonorStateCommit(old,tag(old),p),{ok:true,created:true});
+ assert.throws(()=>beforeDonorStateCommit(old,tag(old),p),{code:'PCMS_BINDING_CREATE_UNAUTHORIZED'},'single use');
+ for(const bad of [
+   s=>{const n=tag(s);n.profiles['firefox-container-002'].routeId='route_001';return n;},
+   s=>{const n=tag(s);n.global.unmanagedPolicy='direct';return n;},
+   s=>{const n=structuredClone(s);n.profiles['firefox-container-001'].pcmsBindingId='binding_legacy_002';return n;},
+   s=>{const n=tag(s);n.profiles['firefox-container-002'].personaUid='persona_x';return n;}
+ ])assert.throws(()=>beforeDonorStateCommit(old,bad(old),permit()),{code:'PCMS_BINDING_CREATE_UNAUTHORIZED'});
+ const wrongPersona=issueExistingPersonaTagPermit({bindingId:'binding_legacy_002',contextId:'firefox-container-002',personaUid:'persona_999'});
+ assert.throws(()=>beforeDonorStateCommit(old,tag(old),wrongPersona),{code:'PCMS_BINDING_CREATE_UNAUTHORIZED'});
 });

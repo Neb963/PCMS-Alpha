@@ -125,7 +125,10 @@ export function reserveCandidate(raw,p){
    if(b.routeId===p.routeId)return fail('ROUTE_ASSIGNED_TO_OTHER_ACCOUNT');
  }
  const prior=ledger.bindings[p.bindingId];
- if(prior&&(prior.accountId!==p.accountId||prior.personaUid!==p.personaUid))
+ // A binding moves to a different Persona only as an explicit replacement of
+ // a missing Persona, never while its pin is live.
+ if(prior&&(prior.accountId!==p.accountId||(prior.personaUid!==p.personaUid&&
+    (p.replacesPersona!==true||prior.pin==='ACTIVE'))))
    return fail('BINDING_IDENTITY_CONFLICT');
  if(conflict(ledger,p.accountId,p.exits))return fail('EXIT_HISTORICALLY_OWNED');
  const history=prior?[...(prior.history||[]),

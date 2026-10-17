@@ -18,7 +18,8 @@ const permitted={
   LIST_ACCOUNTS:[],LIST_PERSONAS:[],LIST_ROUTES:[],NETWORK_STATUS:[],WITNESS_STATUS:[],ADD_ACCOUNT:[],
   RESUME_SETUP:['accountId','expectedRevision'],CONFIRM_LOGIN:['accountId','expectedRevision'],
   CHECK_IDENTITY:['accountId','expectedRevision'],VERIFY_ROUTE:['accountId','expectedRevision'],
-  CHANGE_ROUTE:['accountId','expectedRevision'],
+  CHANGE_ROUTE:['accountId','expectedRevision'],UPGRADE_ACCOUNT:['accountId','expectedRevision'],
+  REPLACE_PERSONA:['accountId','expectedRevision','explicitReplacement'],
   ACK_LOGIN:['accountId','expectedRevision'],OPEN_LOGIN:['accountId','expectedRevision'],
   ARCHIVE:['accountId','expectedRevision'],
   MANUAL_OVERRIDE:['accountId','expectedRevision','reason','acknowledgeLimitedAuthority'],
@@ -38,6 +39,7 @@ export function validateAccountMessage(api,sender,m) {
     if(!isSafeId(p.accountId)||!Number.isSafeInteger(p.expectedRevision)||
       p.expectedRevision<1) return fail('INVALID_PARAMS');
     if(m.type==='REACTIVATE'&&p.explicitReactivation!==true)return fail('INVALID_PARAMS');
+    if(m.type==='REPLACE_PERSONA'&&p.explicitReplacement!==true)return fail('INVALID_PARAMS');
     if(m.type==='MANUAL_OVERRIDE'&&(
       p.acknowledgeLimitedAuthority!==true||typeof p.reason!=='string'))
       return fail('INVALID_PARAMS');
@@ -128,7 +130,7 @@ export function createAccountBoundary(api,{
         const f=await flow();
         return out.ok?{ok:true,accounts:out.accounts.map(a=>({...publicAccount(a),
           working:f?.running(a.accountId)===true,
-          message:explain(a.setup?.code)||explain(a.route?.code)})),
+          message:explain(a.setup?.code)||explain(a.upgrade?.code)||explain(a.route?.code)})),
           truncated:out.truncated,held:restore.held,holdCode:restore.code,
           enrollment:f?'AVAILABLE':'DONOR_UNAVAILABLE'}:out;
       }
@@ -143,11 +145,25 @@ export function createAccountBoundary(api,{
       if(!old.ok)return old;
       const f=await flow();
       const pinned=typeof old.account.bindingId==='string';
-      if(['RESUME_SETUP','CONFIRM_LOGIN','CHECK_IDENTITY','VERIFY_ROUTE','CHANGE_ROUTE','OPEN_LOGIN'].includes(message.type)){
+      const upgraded=pinned&&(!old.account.upgrade||old.account.upgrade.phase==='COMPLETE');
+      if(['RESUME_SETUP','CONFIRM_LOGIN','CHECK_IDENTITY','VERIFY_ROUTE','CHANGE_ROUTE','OPEN_LOGIN',
+          'UPGRADE_ACCOUNT','REPLACE_PERSONA'].includes(message.type)){
         if(old.account.state==='ARCHIVED')return fail('ACCOUNT_ARCHIVED');
-        // Accounts bound by the pre-S01 manual flow have no reserved exit.
-        if(!pinned)return fail('ROUTE_RESERVATION_REQUIRED');
         if(!f)return fail('ENROLLMENT_UNAVAILABLE');
+      }
+      if(message.type==='UPGRADE_ACCOUNT'){
+        if(upgraded)return fail('ALREADY_UPGRADED');
+        void f.upgrade(p.accountId);
+        return {ok:true,started:true};
+      }
+      if(message.type==='REPLACE_PERSONA'){
+        const out=await f.replacePersona(p.accountId,p.expectedRevision);
+        return out.ok?out:{...out,message:explain(out.code)};
+      }
+      if(['CONFIRM_LOGIN','CHECK_IDENTITY','VERIFY_ROUTE','CHANGE_ROUTE','OPEN_LOGIN'].includes(message.type)&&!upgraded){
+        // A pre-S01 record is upgraded in place (same account), never recreated.
+        void f.upgrade(p.accountId);
+        return fail('UPGRADE_IN_PROGRESS');
       }
       if(message.type==='RESUME_SETUP'){
         if(old.account.state!=='PREPARING')return fail('INVALID_ACCOUNT_STATE');
@@ -165,15 +181,23 @@ export function createAccountBoundary(api,{
       }
       if(message.type==='OPEN_LOGIN')return await g.openHumanLogin(old.account.personaUid);
       if(message.type==='REACTIVATE'){
-        if(pinned&&f){void f.reactivate(p.accountId,p.expectedRevision);return {ok:true,started:true};}
-        if(old.account.personaUid){
-          const available=await g.listAvailablePersonas();
-          if(!available.some(x=>x.personaUid===old.account.personaUid&&!x.archived))
-            return fail('PERSONA_NOT_AVAILABLE');
-        }
+        if(!f)return fail('ENROLLMENT_UNAVAILABLE');
+        void f.reactivate(p.accountId,p.expectedRevision);
+        return {ok:true,started:true};
       }
-      const map={ACK_LOGIN:'ACK_LOGIN',MANUAL_OVERRIDE:'MANUAL_OVERRIDE',
-        ARCHIVE:'ARCHIVE',REACTIVATE:'REACTIVATE'};
+      if(message.type==='ARCHIVE'){
+        if(f){
+          const out=await f.archive(p.accountId,p.expectedRevision);
+          return out.ok?out:{...out,message:explain(out.code)};
+        }
+        // Donor not ready: archive now; the idle release is retried by upkeep.
+        const out=await accounts.apply({...p,type:'ARCHIVE'});
+        if(!out.ok)return out;
+        await accounts.applyCurrent({type:'ROUTE_STATUS',accountId:p.accountId,
+          status:'RELEASE_DEFERRED',code:'DONOR_UNAVAILABLE',at:Date.now()});
+        return {ok:true,state:'ARCHIVED',release:'RELEASE_DEFERRED'};
+      }
+      const map={ACK_LOGIN:'ACK_LOGIN',MANUAL_OVERRIDE:'MANUAL_OVERRIDE'};
       const out=await accounts.apply({...p,type:map[message.type],
         ...(message.type==='MANUAL_OVERRIDE'?{reportedAt:new Date().toISOString()}:{} )});
       return out.ok?{ok:true,account:publicAccount(out.account)}:out;
