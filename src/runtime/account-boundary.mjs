@@ -90,12 +90,20 @@ export function createAccountBoundary(api,{
       if(message.type==='LIST_ROUTES')return {ok:true,routes:await g.listProtectedRoutes()};
       if(message.type==='LIST_ACCOUNTS') {
         const restore=await sentinel.inspect();
+        const routeGateHeld=g.getHealth?.().admission==='HELD_UNTIL_OWNER_VERIFICATION';
         const out=await (await store()).list();
         return out.ok?{ok:true,accounts:out.accounts.map(publicAccount),
-          truncated:out.truncated,held:restore.held,holdCode:restore.code}:out;
+          truncated:out.truncated,held:restore.held,holdCode:restore.code,routeGateHeld}:out;
       }
       const restore=await sentinel.inspect();
       if(restore.held)return fail('RESTORE_HOLD');
+      // S01: legacy cached route test + lease is not an exclusive reservation.
+      // Do not let PCMS initiate login/rebind through an unjoined donor gate.
+      // Archive and local limited exception remain usable while route proof holds.
+      const routeGateHeld=g.getHealth?.().admission==='HELD_UNTIL_OWNER_VERIFICATION';
+      if(routeGateHeld && ['CREATE_PERSONA','ENROLL','REBIND','REACTIVATE',
+          'OPEN_LOGIN','CHECK_IDENTITY'].includes(message.type))
+        return fail('PROTECTED_ADMISSION_UNPROVEN');
       const accounts=await store();
       if(message.type==='CREATE_PERSONA') {
         // Donor's own mutation fence is authoritative. If acknowledgement is
