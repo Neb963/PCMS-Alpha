@@ -6,6 +6,37 @@ const networkGlobals = g => Object.fromEntries([
   'blockSpeculative','webRTCMode','mullvadNative'
 ].map(k=>[k,g?.[k]]));
 let admission = null;
+const stagePermits=new WeakSet();
+// Only a same-XPI trusted donor caller can receive this opaque one-commit
+// capability. It is not serializable or valid across browser restarts.
+export function issueBlockedBindingStagePermit({bindingId,personaUid,contextId}={}){
+  if(!ids(bindingId)||!ids(personaUid)||!ids(contextId))
+    throw new TypeError('Invalid protected binding stage');
+  const permit=Object.freeze({bindingId,personaUid,contextId});
+  stagePermits.add(permit);
+  return permit;
+}
+function validateStagePermit(before,after,permit){
+  if(!permit||!stagePermits.delete(permit))
+    return false;
+  const prior=before?.profiles?.[permit.contextId];
+  const staged=after?.profiles?.[permit.contextId];
+  if(!prior||!staged||prior.pcmsBindingId ||
+     prior.personaUid!==permit.personaUid ||
+     prior.routeId!=='block'||staged.routeId!=='block' ||
+     staged.pcmsBindingId!==permit.bindingId ||
+     staged.personaUid!==permit.personaUid ||
+     staged.status!=='active'||staged.managed!==true ||
+     staged.killSwitch!==true||staged.blockLocalNetwork!==true)
+    return false;
+  if(Object.values(before?.profiles||{}).some(
+       p=>p.pcmsBindingId===permit.bindingId))return false;
+  // The single field change is the only permitted write. No concurrent
+  // route changes, profile transplant, security downgrade or unknown edits.
+  const candidate=structuredClone(after);
+  candidate.profiles[permit.contextId].pcmsBindingId=prior.pcmsBindingId??null;
+  return JSON.stringify(candidate)===JSON.stringify(before);
+}
 export function installDonorAdmissionFence(gate) {
   if (admission || !gate || typeof gate.invalidateNow !== 'function')
     throw new TypeError('S01 admission fence unavailable or already installed');
@@ -42,7 +73,15 @@ export function bindingTagChanges(before, after) {
   }
   return {ok:true,held:[...held]};
 }
-export function beforeDonorStateCommit(before,after) {
+export function beforeDonorStateCommit(before,after,stagePermit=null) {
+  if(stagePermit!==null){
+    if(!validateStagePermit(before,after,stagePermit))
+      throw Object.assign(new Error('Protected binding stage rejected'),
+        {code:'PCMS_BINDING_STAGE_UNAUTHORIZED'});
+    // This is an initial donor BLOCK marker, not a route admission or
+    // permission to modify an existing managed binding.
+    return {ok:true,held:[],staged:true};
+  }
   const change=bindingTagChanges(before,after);
   if(!change.ok)throw Object.assign(new Error('Protected Persona binding change blocked'),{code:change.code});
   if(change.held.length && !admission)
