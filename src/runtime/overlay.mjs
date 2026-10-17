@@ -553,9 +553,25 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   // managed Personas remain BLOCKED, never implicitly Direct.
   bg = substituteOnce(bg, "\nasync function handleProxyRequest(details) {", "\nconst pcmsAdmission = createProtectedAdmission({\n  donorBootId: 'boot_' + crypto.randomUUID().replaceAll('-', ''),\n  readCommitted: () => ({allow:false})\n});\nasync function handleProxyRequest(details) {", "S01 private donor admission");
   bg = substituteOnce(bg, "async function handleProxyRequest(details) {\n  await initialize();\n  const state = await getState();", "async function handleProxyRequest(details) {\n  await initialize();\n  const state = await getState();\n  const pcmsContext = pcmsAdmission.inspect(state.profiles?.[details.cookieStoreId]);\n  if(pcmsContext.managed && !pcmsContext.allow)\n    return [{...BLACKHOLE_PROXY,connectionIsolationKey:details.cookieStoreId||'pcms-held'},null];", "S01 proxy initial admission");
-  bg = substituteOnce(bg, "    return buildProxyInfo(effectiveRoute, details.cookieStoreId || `tab-${details.tabId}`);", "    if(pcmsContext.managed &&\n        (!pcmsAdmission.inspect(state.profiles?.[details.cookieStoreId]).allow ||\n         decision.route?.id !== state.profiles?.[details.cookieStoreId]?.routeId))\n      return [{...BLACKHOLE_PROXY,connectionIsolationKey:details.cookieStoreId||'pcms-stale'},null];\n    return buildProxyInfo(effectiveRoute, details.cookieStoreId || `tab-${details.tabId}`);", "S01 proxy final admission");
+  bg = substituteOnce(bg, "    return buildProxyInfo(effectiveRoute, details.cookieStoreId || `tab-${details.tabId}`);", "    const latestPcmsState = pcmsContext.managed ? await getState() : state;\n    if(pcmsContext.managed &&\n        (!pcmsAdmission.inspect(latestPcmsState.profiles?.[details.cookieStoreId]).allow ||\n         decision.route?.id !== latestPcmsState.profiles?.[details.cookieStoreId]?.routeId))\n      return [{...BLACKHOLE_PROXY,connectionIsolationKey:details.cookieStoreId||'pcms-stale'},null];\n    return buildProxyInfo(effectiveRoute, details.cookieStoreId || `tab-${details.tabId}`);", "S01 proxy final admission");
   bg = substituteOnce(bg, "async function handleBeforeRequest(details) {\n  await initialize();\n  const state = await getState();", "async function handleBeforeRequest(details) {\n  await initialize();\n  const state = await getState();\n  const pcmsContext = pcmsAdmission.inspect(state.profiles?.[details.cookieStoreId]);\n  if(pcmsContext.managed && !pcmsContext.allow) {\n    recordBlock(details,'pcms-admission-held');return {cancel:true};\n  }", "S01 blocking initial admission");
-  bg = substituteOnce(bg, "  return {};\n}\n\nasync function fetchMullvadRelays()", "  if(pcmsContext.managed &&\n     (decision.mode!=='proxy' ||\n      !pcmsAdmission.inspect(state.profiles?.[details.cookieStoreId]).allow ||\n      decision.route?.id !== state.profiles?.[details.cookieStoreId]?.routeId)) {\n    recordBlock(details,'pcms-admission-revoked');return {cancel:true};\n  }\n  return {};\n}\n\nasync function fetchMullvadRelays()", "S01 blocking final admission");
+  bg = substituteOnce(bg, "  return {};\n}\n\nasync function fetchMullvadRelays()", "  const latestPcmsState = pcmsContext.managed ? await getState() : state;\n  if(pcmsContext.managed &&\n     (decision.mode!=='proxy' ||\n      !pcmsAdmission.inspect(latestPcmsState.profiles?.[details.cookieStoreId]).allow ||\n      decision.route?.id !== latestPcmsState.profiles?.[details.cookieStoreId]?.routeId)) {\n    recordBlock(details,'pcms-admission-revoked');return {cancel:true};\n  }\n  return {};\n}\n\nasync function fetchMullvadRelays()", "S01 blocking final admission");
+  bg = substituteOnce(bg,
+    "  const decision = routeDecision(state, details);\n  if (decision.mode === \"block\") {\n    return [{ ...BLACKHOLE_PROXY",
+    `  const decision = routeDecision(state, details);
+  if(pcmsContext.managed && decision.mode!=='proxy')
+    return [{...BLACKHOLE_PROXY,connectionIsolationKey:details.cookieStoreId||'pcms-nonproxy'},null];
+  if (decision.mode === "block") {
+    return [{ ...BLACKHOLE_PROXY`,
+    'S01 proxy Direct denial');
+  bg = substituteOnce(bg, "  const decision = routeDecision(state, details);\n  if (decision.mode === \"block\") {\n    recordBlock(details, decision.reason);",
+    `  const decision = routeDecision(state, details);
+  if(pcmsContext.managed && decision.mode!=='proxy'){
+    recordBlock(details,'pcms-nonproxy');return {cancel:true};
+  }
+  if (decision.mode === "block") {
+    recordBlock(details, decision.reason);`,
+    'S01 blocking Direct denial');
   // Preserve donor's normalized durable binding tag in the BUILD COPY only.
   const donorStoragePath = path.join(stage, 'lib/storage.js');
   let donorStorage = await readFile(donorStoragePath,'utf8');
