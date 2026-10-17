@@ -3756,7 +3756,16 @@ def main():
                     !marker.active||extraRelease?.value?.release?.state!=='RESTORE_REVIEW_REQUIRED'||
                     extraRelease.value.release.approval!==null)
                     throw Error('RESTORE_COMPLETE_OR_AUTHORITY_INCORRECT:'+JSON.stringify({
-                      code:answer.code,marker:marker?.status,release:extraRelease?.value?.release?.state
+                      code:answer.code,marker:marker?.status,release:extraRelease?.value?.release?.state,
+                      observed:answer.diagnostic||null,
+                      expected:answer.code==='RESTORE_PLAN_CHANGED'?{
+                        planSha256:reviewed.planSha256,
+                        archiveSha256:reviewed.plan.archiveSha256,
+                        sourceSha256:reviewed.plan.sourceSha256,
+                        destinationSha256:reviewed.plan.destinationSha256,
+                        groupsSha256:await core.digest(JSON.stringify(reviewed.plan.groups)),
+                        riskSha256:await core.digest(JSON.stringify(reviewed.plan.risk))
+                      }:null
                     }));
                   return {ok:true,groups:Object.keys(marker.groups).length,
                     status:marker.status,source:source.sha256};
