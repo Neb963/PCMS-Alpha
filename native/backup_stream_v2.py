@@ -7,6 +7,7 @@ This unreviewed format is an implementation spike, NOT E-06 acceptance.
 """
 import hashlib
 import json
+import math
 import os
 import stat
 import struct
@@ -192,8 +193,24 @@ class _Inventory:
 
     @staticmethod
     def _json(data, code):
+        # Reject duplicate/non-lexical object keys, nonfinite numeric tokens
+        # and invalid UTF-8. JS canonicalJSON orders keys by UTF-16 units.
+        def ordered(pairs):
+            keys=[key for key,_ in pairs]
+            sorted_keys=sorted(keys,key=lambda x:x.encode("utf-16-be","surrogatepass"))
+            _check(len(set(keys))==len(keys) and keys==sorted_keys,code)
+            return dict(pairs)
+        def finite(value):
+            number=float(value)
+            _check(math.isfinite(number),code)
+            return number
+        def no_constant(_):
+            raise BackupError(code)
         try:
-            return json.loads(data.decode("utf-8"))
+            raw=data.decode("utf-8")
+            _check(raw and raw==raw.strip(),code)
+            return json.loads(raw,object_pairs_hook=ordered,
+                              parse_constant=no_constant,parse_float=finite)
         except (ValueError, UnicodeError, TypeError, OverflowError) as error:
             raise BackupError(code) from error
 
