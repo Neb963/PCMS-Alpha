@@ -18,6 +18,14 @@ GB-04 migration contract is resolved as design. GB-01/02/03/05 remain architectu
 
 Preserve exact source bytes and hash provenance for installed authority documents. Do not change original Stage 7 signed files or historic implementation logs as a shortcut to reconciliation.
 
+## Signed Stage 7 compatibility and active instruction paths
+
+The installed Stage 7 integrity verifier (`scripts/check-stage7.py`) checks the exact signed blobs of `docs/engineering/AGENT-PROTOCOL.md` and `docs/engineering/CI-ENGINEER.md` against `SHA256SUMS.txt`. **Do not replace either file or update the signed hash manifest to install new instructions.**
+
+The **active** replacements live at `docs/engineering/active/AGENT-PROTOCOL.md` and `docs/engineering/active/CI-ENGINEER.md`, linked from root `AGENTS.md`. Their historical signed counterparts remain untouched and continue to pass `scripts/check-stage7.py` as genuine source provenance; the active instructions supersede their future agent workflow prescriptions.
+
+The accepted Gate B workflow blueprint originally proposed replacing the historical paths directly. The actual pinned Stage 7 verifier makes that structurally incompatible. This explicit, operator-authorized bootstrap compatibility adjustment preserves both signed integrity and the approved product-level behavior; the policy-root PR still requires independent review.
+
 ## Explicit supersessions
 
 - Obsolete `I00–I17 next READY phase` / `resume I17 only` instructions are superseded for **future authorized work** by bounded S00–S08 product slices and actual checked dependencies. This does not invalidate genuine historical evidence.
