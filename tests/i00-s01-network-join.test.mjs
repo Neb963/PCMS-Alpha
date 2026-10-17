@@ -121,7 +121,7 @@ test('S01 GB01: prepare intent before native effect, then exclusive reserve/stag
  const joined=await f.join.commitJoined({intent:staged.intent,
   reservation:reserved.reservation,evidence,donorReceipt:staged.receipt,
   key,expectedSafetyGeneration:0});
- assert.equal(joined.ok,true);
+ assert.equal(joined.ok,true,JSON.stringify(joined));
  assert.equal(f.db.data.get('network:s01:join:binding_001').phase,'LEDGER_COMMITTED');
  const profile={pcmsBindingId:key.bindingId,personaUid:key.personaUid,
   containerId:key.contextId,routeId:key.routeId,managed:true,
