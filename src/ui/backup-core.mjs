@@ -1,4 +1,4 @@
-// S02 source recovery: audit all retained exact source bytes before a backup export.
+// S02 source recovery: strict recovery preflight, separate from legacy v1 archive compatibility.
 import {auditSourceClosure} from './backup-source-closure.mjs';
 // I08: offline-verifiable, always-encrypted integrated PCMS + donor portable archive.
 // No persistence, provider calls, filesystem reads, imports or activation authority.
@@ -130,10 +130,16 @@ async function keyFor(passphrase,salt,usage){
     iterations:250000,salt},key,{name:'AES-GCM',length:256},false,[usage]);
 }
 const outerKeys=['format','version','encryption','sealedPayload'];
+// v2 authoring must call this strict check before any encryption or download.
+ // Legacy v1 archives may contain historical but incomplete source evidence:
+ // preserving those records is not a source-complete recovery claim.
+export async function preflightSourceRecovery(pcms) {
+  validatePcmsSnapshot(pcms);
+  return auditSourceClosure(pcms);
+}
 export async function encodeIntegrated({pcms,donorEnvelope,passphrase,createdAt=new Date().toISOString(),appVersion=''}={}){
   requireValid(typeof passphrase==='string'&&passphrase.length>=12&&codec.encode(passphrase).length<=4096,'BACKUP_PASSPHRASE_REQUIRED');
   validatePcmsSnapshot(pcms);
-  const sourceAudit=await auditSourceClosure(pcms);
   requireValid(typeof donorEnvelope==='string'&&donorEnvelope.length<=MAX_ARCHIVE_BYTES,'BACKUP_DONOR_REQUIRED');
   let donor;try{donor=JSON.parse(donorEnvelope)}catch{throw Error('BACKUP_DONOR_INVALID');}
   requireValid(donor.format==='personamonkey-backup'&&donor.formatVersion===1&&
@@ -152,8 +158,7 @@ export async function encodeIntegrated({pcms,donorEnvelope,passphrase,createdAt=
     sealedPayload:base64(encrypted)});
   return {text:envelope,bytes:codec.encode(envelope),sha256:await digest(envelope),
     inventory:{pcmsRows:DB_STORES.reduce((n,store)=>n+pcms.stores[store].length,0),
-      auditedSourceManifests:sourceAudit.manifests,
-      auditedUniqueSourceBytes:sourceAudit.uniqueBytes,
+      sourceCompleteness:'NOT_PROVEN_LEGACY_V1',
       recoveryTier:'IN_MEMORY_ONLY'}};
 }
 export async function decodeIntegrated(text,passphrase,{decodeDonor}={}){
