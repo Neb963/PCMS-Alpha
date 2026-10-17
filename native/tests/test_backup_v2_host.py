@@ -181,6 +181,26 @@ class TestHost(unittest.TestCase):
         self.assertEqual(self.request("archive.retention.prune")["state"],
                          "NO_ELIGIBLE_DELETE")
         self.assertTrue(encrypted.exists(),"last known-good protected")
+        # Simulate a deletion that reached disk but whose ACK was lost.
+        extra="s02_"+format(90,"032x")
+        shutil.copyfile(encrypted,self.root/(extra+".encrypted"))
+        self.host._write({"schema":1,"runId":extra,
+            "state":"RECOVERY_VERIFIED","ciphertextSha256":receipt["sha256"],
+            "preparedSha256":"c"*64,"verifiedAtNs":1,
+            "cutDigest":CUT,"nextSequence":0,"last":None,
+            "plaintextBytes":len(raw),"acceptedBytes":len(raw)})
+        def deleted_but_ack_lost(path):
+            os.unlink(path)
+            raise OSError("lost unlink ACK")
+        with patch.object(self.host,"_unlink_artifact",
+                          side_effect=deleted_but_ack_lost):
+            unsure=self.request("archive.retention.prune")
+        self.assertEqual(unsure["code"],"BACKUP_NATIVE_UNAVAILABLE")
+        self.assertEqual(self.request("archive.inspect",runId=extra)["state"],
+                         "DELETE_POSSIBLE")
+        self.assertEqual(self.request("archive.retention.prune")["code"],
+                         "BACKUP_RETENTION_UNCERTAIN_DELETE")
+        self.assertTrue(encrypted.exists())
         # A missing protected success must never authorize further deletion.
         self.root.joinpath("s02_"+format(4,"032x")+".encrypted").unlink()
         self.assertEqual(self.request("archive.retention.prune")["code"],
