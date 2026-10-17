@@ -2968,6 +2968,96 @@ def main():
                                   {'script':v2_stage,'args':[]},timeout=90)
                 assert stage_result.get('ok') is True,stage_result
                 print('B S02_INACTIVE_STAGE_BLOCKS_PARTIAL_AUTH_AND_REOPENS_EXACT_BYTES=PASS',flush=True)
+
+                # S02 B F3: unique source assets and revisions, actual Firefox
+                # IndexedDB second-pass restore. No native privilege/source
+                # provider effect, and the native terminal is synthetic.
+                v2_fleet="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const codec=await import('./backup-v2-codec.mjs');
+                  const store=await import('./restore-v2-inactive-stage.mjs');
+                  const restore=await import('./restore-v2-prep.mjs');
+                  const core=await import('./backup-core.mjs');
+                  const donor=await import('../lib/backup-package.js');
+                  const timer=performance.now();
+                  const before=await navigator.storage.estimate();
+                  const text=new TextEncoder();
+                  const pcms={schema:1,stores:{entities:[],operations:[],
+                    events:[],meta:[],observations:[]}};
+                  for(let i=0;i<50;i++)
+                    pcms.stores.meta.push({key:'account:stress-'+i,
+                      value:{account:{state:'ARCHIVED',accountId:'stress-'+i}}});
+                  for(let i=0;i<1024;i++){
+                    const raw=[
+                      ['main.pjs',text.encode('output="source-'+i+'";')],
+                      ['index.html',text.encode('<b>source</b>')],
+                      ['src/asset.bin',Uint8Array.from({length:80+i%512},
+                        (_,n)=>(i*37+n*19+(n>>3))&255)]
+                    ];
+                    const files=await Promise.all(raw.map(async([path,bytes])=>({
+                      path,size:bytes.length,sha256:await core.digest(bytes)})));
+                    files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
+                    const fingerprint=await core.digest('PCMS_STAGED_SOURCE_V1'+
+                      String.fromCharCode(10)+files.map(f=>
+                        JSON.stringify([f.path,f.size,f.sha256])).join(String.fromCharCode(10)));
+                    const source={ok:true,fingerprint,files,
+                      blobs:files.map(f=>({path:f.path,base64:btoa(
+                        String.fromCharCode(...raw.find(x=>x[0]===f.path)[1]))}))};
+                    pcms.stores.meta.push({key:'stage-history:stress-'+i,
+                      value:{record:{candidate:source,previous:source}}});
+                  }
+                  const password='s02-test-only-bounded-fleet';
+                  const sealed=await donor.encodeBackupEnvelope({payload:
+                    donor.createPortableBackupPayload({state:{},containers:[],
+                      selection:{kind:'full'}}),password});
+                  const plan=await codec.compileV2(pcms,sealed);
+                  const chunks=[],size=plan.plaintextBytes;
+                  for await(const frag of codec.streamV2Frames(plan))chunks.push(frag);
+                  const assembled=new Uint8Array(size);let offset=0;
+                  for(const chunk of chunks){assembled.set(chunk,offset);offset+=chunk.length;}
+                  const db=await store.openV2StageDB();
+                  const staged=store.createV2InactiveStage(db,{assertHeld:async()=>true});
+                  const runId='s02_'+crypto.randomUUID().replaceAll('-','');
+                  const proof='f'.repeat(64);
+                  await staged.begin(runId,{state:'INACTIVE_STAGING_REQUIRED',
+                    plaintextBytes:size,sha256:proof});
+                  let seq=0;
+                  for(let i=0;i<assembled.length;i+=49152)
+                    await staged.append(runId,seq++,assembled.subarray(i,i+49152));
+                  await staged.finish(runId,{state:'AUTHENTICATED_SECOND_PASS',
+                    sha256:proof,complete:true},seq);
+                  db.close();
+                  const reopened=await store.openV2StageDB(),hold=store.createV2InactiveStage(
+                    reopened,{assertHeld:async()=>true});
+                  const empty={schema:1,stores:{entities:[],operations:[],
+                    events:[],meta:[],observations:[]}};
+                  const qualified=await restore.prepareInactiveV2FromStage({
+                    stage:hold,runId,readback:{state:'AUTHENTICATED_SECOND_PASS',
+                      sha256:proof,complete:true},
+                    expectedCiphertextSha256:proof,
+                    currentPcms:empty,mode:'replace',password,
+                    decodeDonor:donor.decodeBackupEnvelope});
+                  const last=qualified.prepared.stores.meta.find(x=>
+                    x.key==='stage-history:stress-1023');
+                  const after=await navigator.storage.estimate();
+                  reopened.close();
+                  done({ok:qualified.status==='INACTIVE_PREPARED_NOT_APPLIED'&&
+                    qualified.activation==='OFF'&&
+                    qualified.prepared.stores.meta.length===1074&&
+                    plan.terminal.uniqueBlobs>1800&&
+                    last?.value.record.candidate.files.length===3&&
+                    last.value.record.candidate.blobs.length===3,
+                    accounts:50,records:1024,uniqueBlobs:plan.terminal.uniqueBlobs,
+                    plaintextBytes:size,idbFragments:seq,
+                    idbUsageDelta:(after.usage||0)-(before.usage||0),
+                    elapsedMs:Math.round(performance.now()-timer)});
+                })().then(done).catch(e=>done({error:String(e)}));"""
+                fleet_result=call('POST',f'/session/{after}/execute/async',
+                                   {'script':v2_fleet,'args':[]},timeout=120)
+                assert fleet_result.get('ok') is True,fleet_result
+                print('B S02_HETEROGENEOUS_50_1024_SOURCE_IDB_INACTIVE_RECOVERY=PASS',
+                      fleet_result,flush=True)
+
                 code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const core=await import('./backup-core.mjs');
