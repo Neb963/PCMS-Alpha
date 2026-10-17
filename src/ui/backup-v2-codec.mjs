@@ -42,7 +42,7 @@ function to64(raw) {
 // Structured-clone Number(-0) needs an explicit v2-only wire discriminator:
 // JSON.stringify(-0) is 0 and cannot preserve Object.is(value,-0).
 // Other unsupported nonfinite types fail in the original strict serializer.
-function preserveNegativeZero(value,depth=0){
+export function preserveNegativeZero(value,depth=0){
   check(depth<=35,'BACKUP_V2_DEPTH_INVALID');
   if(typeof value==='number'&&Object.is(value,-0))
     return {__pcmsType:'NumberNegativeZero'};
