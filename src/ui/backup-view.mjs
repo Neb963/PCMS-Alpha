@@ -156,7 +156,8 @@ async function exportManual(password){
     if(proof.tier===2){
       result.textContent='Browser reported complete (tier 2): '+proof.actualName+
         '. '+archive.bytes.byteLength+' bytes. SHA-256 '+archive.sha256+
-        '. Exact on-disk bytes have NOT been independently re-read. Restore remains disabled.';
+        '. Exact on-disk bytes have NOT been independently re-read. Restore remains disabled. '+
+        'Legacy v1 source completeness is NOT independently proven.';
     }else{
       result.textContent='Encrypted bytes verified in memory (tier 1), but browser download not confirmed: '+
         proof.code+'. No disk-backup success claimed; check Downloads.';
