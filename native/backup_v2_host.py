@@ -16,12 +16,16 @@ import tempfile
 import struct
 import sys
 
-from backup_stream_v2 import BackupError, EncryptedWriter, verify_two_pass, BUFFER
+from backup_stream_v2 import (BackupError, EncryptedWriter, verify_two_pass, BUFFER,
+                              _fd_read, _read_header, _key, TAG_BYTES, HEADER)
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.exceptions import InvalidTag
 
 _ID = re.compile(r"^s02_[a-f0-9]{32}$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
 _ALLOWED = ("export.begin", "export.append", "export.finish",
-            "archive.inspect", "archive.read", "backup.verify")
+            "archive.inspect", "archive.read", "backup.verify",
+            "restore.begin", "restore.read", "restore.abort")
 _MAX_CIPHERTEXT_READ = 49152
 
 
@@ -111,6 +115,7 @@ class V2ArchiveHost:
         self.vault_get = vault_get
         self.writer = None
         self.current = None
+        self.restore = None
 
     def _paths(self, run_id):
         _require(isinstance(run_id, str) and _ID.fullmatch(run_id),
@@ -144,7 +149,10 @@ class V2ArchiveHost:
                 "export.finish": {"action","runId","sequence","cutDigest"},
                 "archive.inspect": {"action","runId"},
                 "archive.read": {"action","runId","offset","length"},
-                "backup.verify": {"action","runId","keyRef"}
+                "backup.verify": {"action","runId","keyRef"},
+                "restore.begin": {"action","runId","keyRef"},
+                "restore.read": {"action","runId","sequence"},
+                "restore.abort": {"action","runId"}
             }
             _require(set(message) == schemas[action], "BACKUP_COMMAND_SCHEMA")
             if action == "export.begin":
@@ -157,6 +165,12 @@ class V2ArchiveHost:
                 return self._inspect(message)
             if action == "archive.read":
                 return self._read(message)
+            if action == "restore.begin":
+                return self._restore_begin(message)
+            if action == "restore.read":
+                return self._restore_read(message)
+            if action == "restore.abort":
+                return self._restore_abort(message)
             return self._verify(message)
         except (BackupError, OSError, ValueError, TypeError) as exc:
             code = str(exc)
@@ -283,7 +297,98 @@ class V2ArchiveHost:
         # Do not promote to COMPLETE: donor/restore is separately required.
         return {"ok":True,"state":"AUTHENTICATED_INVENTORY_ONLY",**receipt}
 
+    def _restore_begin(self,msg):
+        _require(self.restore is None and self.writer is None,
+                 "BACKUP_RESTORE_BUSY")
+        state=self._observe(msg["runId"])
+        _require(state is not None and state["state"]=="WRITTEN_UNVERIFIED" and
+                 msg["keyRef"]=="portable-recovery","BACKUP_RESTORE_HELD")
+        _,path=self._paths(msg["runId"])
+        password=self.vault_get()
+        _require(isinstance(password,str) and len(password)>=12,
+                 "BACKUP_VAULT_UNAVAILABLE")
+        # Independent first pass authenticates and validates complete v2
+        # inventory; no source or identity is exposed before that.
+        proof=verify_two_pass(path,password)
+        file=_fd_read(path)
+        try:
+            info=os.fstat(file.fileno())
+            header,salt,iv,length=_read_header(file)
+            file.seek(HEADER.size+length)
+            tag=file.read(TAG_BYTES)
+            dec=Cipher(algorithms.AES(_key(password,salt)),
+                       modes.GCM(iv,tag)).decryptor()
+            dec.authenticate_additional_data(header)
+            file.seek(HEADER.size)
+            self.restore={"runId":msg["runId"],"file":file,
+                          "identity":(info.st_dev,info.st_ino,info.st_size,
+                                      info.st_mtime_ns,info.st_ctime_ns),
+                          "sha256":proof["sha256"],"length":length,"offset":0,
+                          "sequence":0,"decryptor":dec}
+            return {"ok":True,"state":"INACTIVE_STAGING_REQUIRED",
+                    "plaintextBytes":length,"sha256":proof["sha256"]}
+        except BaseException:
+            file.close()
+            raise
+        finally:
+            password=None
+
+    def _restore_read(self,msg):
+        current=self.restore
+        _require(current is not None and current["runId"]==msg["runId"] and
+                 type(msg["sequence"]) is int and
+                 msg["sequence"]==current["sequence"],
+                 "BACKUP_RESTORE_SEQUENCE_INVALID")
+        file=current["file"]
+        data=file.read(min(_MAX_CIPHERTEXT_READ,
+                           current["length"]-current["offset"]))
+        if not data and current["offset"]<current["length"]:
+            raise BackupError("BACKUP_RESTORE_TRUNCATED")
+        current["offset"]+=len(data)
+        try:
+            decoded=current["decryptor"].update(data)
+            complete=current["offset"]==current["length"]
+            if complete:
+                decoded+=current["decryptor"].finalize()
+                before=current["identity"]
+                now=os.fstat(file.fileno())
+                _require(before==(now.st_dev,now.st_ino,now.st_size,
+                                  now.st_mtime_ns,now.st_ctime_ns),
+                         "BACKUP_RESTORE_FILE_CHANGED")
+                file.seek(0)
+                digest=hashlib.sha256()
+                for part in iter(lambda:file.read(BUFFER),b""):
+                    digest.update(part)
+                _require(digest.hexdigest()==current["sha256"],
+                         "BACKUP_RESTORE_FILE_CHANGED")
+            current["sequence"]+=1
+            response={"ok":True,"state":"AUTHENTICATED_SECOND_PASS" if complete
+                      else "INACTIVE_STAGING_FRAGMENT",
+                      "sequence":msg["sequence"],
+                      "bytes":base64.b64encode(decoded).decode(),
+                      "complete":complete}
+            if complete:
+                response["sha256"]=current["sha256"]
+                file.close()
+                self.restore=None
+            return response
+        except InvalidTag:
+            file.close()
+            self.restore=None
+            raise BackupError("BACKUP_RESTORE_AUTH_FAILED")
+
+    def _restore_abort(self,msg):
+        current=self.restore
+        _require(current is not None and current["runId"]==msg["runId"],
+                 "BACKUP_RESTORE_NOT_OWNED")
+        current["file"].close()
+        self.restore=None
+        return {"ok":True,"state":"RESTORE_READER_ABORTED"}
+
     def close(self):
+        if self.restore is not None:
+            self.restore["file"].close()
+            self.restore=None
         if self.writer is not None:
             self.writer.abandon()
             self.writer=None
