@@ -52,7 +52,7 @@ def build():
                 raise ValueError("fixed verifier rejects extra fields")
             return measure_prepared_exit(
                 self, req.get("route_id"), req.get("context_id"),
-                fetch_through_relay)
+                fetch_through_relay, route_bound_to_wg)
         if cmd == "status":
             return self.status()''', "candidate fixed probe dispatch")
     (OUT / "routerd.py").write_text(daemon,encoding="utf-8")
