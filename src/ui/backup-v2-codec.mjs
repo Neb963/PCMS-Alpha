@@ -39,6 +39,23 @@ function to64(raw) {
   for(let i=0;i<raw.length;i+=32768)encoded+=String.fromCharCode(...raw.subarray(i,i+32768));
   return btoa(encoded);
 }
+// Structured-clone Number(-0) needs an explicit v2-only wire discriminator:
+// JSON.stringify(-0) is 0 and cannot preserve Object.is(value,-0).
+// Other unsupported nonfinite types fail in the original strict serializer.
+function preserveNegativeZero(value,depth=0){
+  check(depth<=35,'BACKUP_V2_DEPTH_INVALID');
+  if(typeof value==='number'&&Object.is(value,-0))
+    return {__pcmsType:'NumberNegativeZero'};
+  if(Array.isArray(value))
+    return value.map(v=>preserveNegativeZero(v,depth+1));
+  if(value&&typeof value==='object'&&
+     (Object.getPrototypeOf(value)===null||
+      Object.getPrototypeOf(value)===Object.prototype)){
+    return Object.fromEntries(Object.entries(value).map(([k,v])=>
+      [k,preserveNegativeZero(v,depth+1)]));
+  }
+  return value;
+}
 function isSource(v){
   return plain(v)&&typeof v.fingerprint==='string'&&Array.isArray(v.files)&&Array.isArray(v.blobs);
 }
@@ -120,7 +137,8 @@ export async function compileV2(pcms,donorEnvelope){
     counts[store]=0;
     for(const row of [...pcms.stores[store]].sort((a,b)=>canonicalJSON(a.key)<canonicalJSON(b.key)?-1:canonicalJSON(a.key)>canonicalJSON(b.key)?1:0)){
       const refs=new Set();
-      const transformed=replaceSource(serializeClone(row.value),refs,blobs);
+      const transformed=replaceSource(
+        serializeClone(preserveNegativeZero(row.value)),refs,blobs);
       const record={store,key:row.key,value:transformed,refs:[...refs].sort()};
       const payload=bytes(canonicalJSON(record));
       check(payload.length>0&&payload.length<=V2_LIMITS.canonical,'BACKUP_V2_CANONICAL_LIMIT');
