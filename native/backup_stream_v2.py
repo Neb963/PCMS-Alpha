@@ -96,7 +96,14 @@ class EncryptedWriter:
                           getattr(os, "O_NOFOLLOW", 0), 0o600)
         self.written = 0
         self.finished = False
-        _write_all(self.fd, self.header)
+        try:
+            _write_all(self.fd, self.header)
+        except BaseException:
+            # Constructor can fail after exclusive CREATE but before returning
+            # an object. Release the FD without deleting uncertain ciphertext.
+            os.close(self.fd)
+            self.fd = None
+            raise
 
     def append(self, plaintext):
         _check(not self.finished and self.fd is not None, "BACKUP_CONTEXT_SPENT")
