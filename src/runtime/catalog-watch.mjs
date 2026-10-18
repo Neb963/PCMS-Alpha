@@ -2,7 +2,9 @@
 // This deliberately does NOT send generator intents or provider/Git writes.
 import {scanMainCatalog} from './git-catalog.mjs';
 import {createRestoreSentinel} from './journal.mjs';
+import {createGitResumeTransport} from './catalog-resume.mjs';
 export const CATALOG_ALARM='pcms-s03-main-observe';
+export const CATALOG_RESUME_ALARM='pcms-s03-main-resume';
 const CONFIG='pcmsS03Git',RECEIPT='pcmsS03CatalogReceipt',LAST='pcmsS03CatalogLastComplete';
 const SHA=/^[0-9a-f]{40}$/;
 const identifier=c=>c&&typeof c.repository==='string'&&
@@ -11,7 +13,7 @@ const safe=code=>({ok:false,code});
 const MINUTES=15;
 export function createCatalogWatcher(api,{scan=scanMainCatalog,
   native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
-  clock=Date.now}={}){
+  network=fetch,clock=Date.now}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
   let running=null,registered=false;
   async function persistStatus(code){
@@ -26,7 +28,14 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       const value=await native({action:'git.get',repositoryId:cfg.repositoryId});
       if(!value?.ok||typeof value.credential!=='string')
         return persistStatus('GIT_VAULT_UNAVAILABLE');
-      const result=await scan({repository:cfg.repository,token:value.credential});
+      const resumed=createGitResumeTransport(api.storage.local,{
+        repositoryId:cfg.repositoryId,repository:cfg.repository,network});
+      const result=await scan({repository:cfg.repository,token:value.credential},resumed.transport);
+      if(resumed.status().paused){
+        // One-time retry is a separate alarm; do not change the periodic alarm.
+        try{await api.alarms.create(CATALOG_RESUME_ALARM,{when:clock()+60000});}catch{}
+        return persistStatus('CATALOG_SCAN_CHECKPOINTED');
+      }
       if(!result?.ok||!result.complete || result.repositoryId!==cfg.repositoryId)
         return persistStatus(result?.code||'CATALOG_INCOMPLETE');
       if((await sentinel.inspect()).held)return persistStatus('RESTORE_HOLD');
@@ -66,7 +75,7 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
   function register(){
     if(registered)return;registered=true;
     api.alarms.onAlarm.addListener(event=>{
-      if(event?.name===CATALOG_ALARM)void tick();
+      if(event?.name===CATALOG_ALARM||event?.name===CATALOG_RESUME_ALARM)void tick();
     });
     api.runtime.onStartup.addListener(()=>{schedule();void tick();});
     api.runtime.onInstalled.addListener(()=>{schedule();void tick();});
