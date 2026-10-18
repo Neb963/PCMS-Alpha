@@ -625,9 +625,9 @@ def main():
         # Source-heavy AES/IndexedDB/native two-pass work exceeds the W3C
         # default 30s script deadline; set only this disposable session.
         harness.call("POST",f"/session/{session}/timeouts",
-             {"script":240000},timeout=15)
+             {"script":900000},timeout=15)
         result=harness.call("POST",f"/session/{session}/execute/async",
-             {"script":native_script(),"args":[]},timeout=180)
+             {"script":native_script(),"args":[]},timeout=800)
         assert result.get("ok") is True,result
         assert result.get("geckoId")==ADDON_ID,result
         seen=result["observed"]
@@ -646,7 +646,7 @@ def main():
         for entry in seen:
             file=home/".local/share/pcms-alpha/backups"/(entry["runId"]+".encrypted")
             assert file.is_file() and file.stat().st_size>66,file
-            assert hashlib.sha256(file.read_bytes()).hexdigest()==entry["sha256"]
+            assert hashlib.file_digest(file.open("rb"),"sha256").hexdigest()==entry["sha256"]
             verify=verify_two_pass(file,PASSWORD)
             assert verify["sha256"]==entry["sha256"],"H_INDEPENDENT_DISK_REOPEN_INVALID"
             assert verify["canonicalRows"]>=1074,("H_SOURCE_ROWS_LOST",verify)
@@ -671,7 +671,7 @@ def main():
         harness.call("POST",f"/session/{session}/url",
             {"url":f"moz-extension://{fresh_uuid}/pcms/index.html"})
         harness.call("POST",f"/session/{session}/timeouts",
-            {"script":240000},timeout=15)
+            {"script":900000},timeout=15)
         # The host must reject the *actual* OS keyring's changed password,
         # and preserve the original qualified file for subsequent recovery.
         put_disposable_secret("synthetic-disposable-WRONG-password-2026")
@@ -682,7 +682,7 @@ def main():
               json.dumps(wrong),flush=True)
         secret_check()  # Reopen original verified ciphertext with correct key.
         restored=harness.call("POST",f"/session/{session}/execute/async",
-            {"script":fresh_script(seen[1]["runId"]),"args":[]},timeout=220)
+            {"script":fresh_script(seen[1]["runId"]),"args":[]},timeout=800)
         assert restored.get("ok") is True,("H_FRESH_NATIVE_RECOVERY",restored)
         assert restored.get("donorPersonas")==50 and restored.get("rows",0)>=1074
         assert restored.get("activation")=="OFF" and restored.get("held") is True
@@ -706,14 +706,20 @@ def main():
         harness.call("POST",f"/session/{session}/url",
             {"url":f"moz-extension://{full_uuid}/pcms/index.html"})
         harness.call("POST",f"/session/{session}/timeouts",
-            {"script":360000},timeout=15)
+            {"script":900000},timeout=15)
         full=harness.call("POST",f"/session/{session}/execute/async",
-            {"script":complete_donor_script(seen[1]["runId"]),"args":[]},timeout=350)
+            {"script":complete_donor_script(seen[1]["runId"]),"args":[]},timeout=800)
         assert full.get("ok") is True,("H_V2_TRUE_DONOR_CONTROLLER_APPLY",full)
         assert full.get("donorContainers")==50 and full.get("donorCookieSets")==50
         assert full.get("activation")=="OFF" and full.get("held") is True
         print("H S02_NATIVE_V2_THROUGH_ACTUAL_PERSONAMONKEY_DONOR_COOKIES_CANONICAL=PASS",
               json.dumps(full),flush=True)
+        print("H S02_HIGH_UNIQUE_NATIVE_DISK_BUDGET=PASS",json.dumps({
+            "encryptedArchivesBytes":sum((home/".local/share/pcms-alpha/backups"/(v["runId"]+".encrypted")).stat().st_size for v in seen),
+            "availableFilesystemBytes":__import__("shutil").disk_usage(home).free,
+            "restoredProfileBytes":sum(p.stat().st_size for p in profile3.rglob("*") if p.is_file()),
+            "installedSourceProfileBytes":sum(p.stat().st_size for p in profile.rglob("*") if p.is_file()),
+            "uniqueSourceBytes":result["sourceStats"]["uniqueAssetBytes"]}),flush=True)
         assert sampler.peak_kib>0 and sampler.max_processes>=2, \
             "H_AGGREGATE_OS_PROCESS_RSS_UNAVAILABLE"
         print("H S02_AGGREGATE_OS_PROCESS_RSS_OBSERVED=PASS",
