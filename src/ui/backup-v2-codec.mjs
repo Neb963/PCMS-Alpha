@@ -164,6 +164,22 @@ function* fragments(tag,payload){
   for(let i=0;i<payload.length;i+=V2_LIMITS.fragment)
     yield payload.subarray(i,i+V2_LIMITS.fragment);
 }
+// B1 incremental preparation: preserve only row descriptors and source-blob
+// references, not a second fleet of encoded CANONICAL frame buffers. This is
+// an allocation reduction, NOT a substitute for an immutable streaming cut:
+// the legacy caller still owns the aggregate pcms snapshot (B1 remains HELD).
+function encodeRow(row,store,blobIndex){
+  const refs=new Set();
+  rejectV2DiscriminatorCollisions(row.value);
+  const transformed=replaceSource(
+    serializeClone(preserveNegativeZero(row.value)),refs,blobIndex);
+  const payload=bytes(canonicalJSON({
+    store,key:row.key,value:transformed,refs:[...refs].sort()
+  }));
+  check(payload.length>0&&payload.length<=V2_LIMITS.canonical,
+    'BACKUP_V2_CANONICAL_LIMIT');
+  return payload;
+}
 export async function compileV2(pcms,donorEnvelope){
   validatePcmsSnapshot(pcms);
   const totalRows=DB_STORES.reduce((count,store)=>count+pcms.stores[store].length,0);
@@ -173,7 +189,6 @@ export async function compileV2(pcms,donorEnvelope){
   check(typeof donorEnvelope==='string'&&donorEnvelope.length>0,'BACKUP_V2_DONOR_MISSING');
   const donor=bytes(donorEnvelope);
   check(donor.length<=V2_LIMITS.donor,'BACKUP_V2_DONOR_LIMIT');
-  // A donor envelope is encrypted, not a plaintext export or an assertion.
   let parsed;try{parsed=JSON.parse(donorEnvelope)}catch{fail('BACKUP_V2_DONOR_INVALID');}
   check(parsed?.format==='personamonkey-backup'&&parsed?.formatVersion===1&&
     parsed?.encryption?.scheme==='PBKDF2-SHA256/AES-256-GCM'&&
@@ -182,22 +197,24 @@ export async function compileV2(pcms,donorEnvelope){
   const blobs=new Map(),rows=[],rowHashes=[],counts=Object.create(null);
   for(const store of DB_STORES){
     counts[store]=0;
-    for(const row of [...pcms.stores[store]].sort((a,b)=>canonicalJSON(a.key)<canonicalJSON(b.key)?-1:canonicalJSON(a.key)>canonicalJSON(b.key)?1:0)){
-      const refs=new Set();
-      rejectV2DiscriminatorCollisions(row.value);
-      const transformed=replaceSource(
-        serializeClone(preserveNegativeZero(row.value)),refs,blobs);
-      const record={store,key:row.key,value:transformed,refs:[...refs].sort()};
-      const payload=bytes(canonicalJSON(record));
-      check(payload.length>0&&payload.length<=V2_LIMITS.canonical,'BACKUP_V2_CANONICAL_LIMIT');
-      rows.push(payload);rowHashes.push(await digest(payload));counts[store]++;
+    const sourceRows=pcms.stores[store];
+    // Sorting indices avoids cloning the source-heavy row array.
+    const indices=Array.from({length:sourceRows.length},(_,i)=>i).sort((a,b)=>{
+      const x=canonicalJSON(sourceRows[a].key),y=canonicalJSON(sourceRows[b].key);
+      return x<y?-1:x>y?1:0;
+    });
+    for(const index of indices){
+      const payload=encodeRow(sourceRows[index],store,blobs);
+      const sha256=await digest(payload);
+      rows.push({store,index,length:payload.length,sha256});
+      rowHashes.push(sha256);counts[store]++;
     }
   }
   const refs=[...blobs.keys()].sort();
   const terminal={schema:2,canonicalRows:rows.length,storeCounts:counts,
     uniqueBlobs:refs.length,donorSections:1,
-    sourceRefsSha256:await digest(refs.join('\n')),
-    rowDigestsSha256:await digest(rowHashes.join('\n')),
+    sourceRefsSha256:await digest(refs.join('\\n')),
+    rowDigestsSha256:await digest(rowHashes.join('\\n')),
     donorSha256:await digest(donor)};
   const ending=bytes(canonicalJSON(terminal));
   check(ending.length<=V2_LIMITS.end,'BACKUP_V2_END_LIMIT');
@@ -207,19 +224,28 @@ export async function compileV2(pcms,donorEnvelope){
   plaintextBytes+=9+donor.length+9+ending.length;
   check(Number.isSafeInteger(plaintextBytes)&&plaintextBytes<=(2**36-32),
     'BACKUP_V2_LENGTH_INVALID');
-  return Object.freeze({blobs,rows,donor,ending,refs,terminal,plaintextBytes});
+  return Object.freeze({pcms,blobs,rows,donor,ending,refs,terminal,plaintextBytes});
 }
 export async function* streamV2Frames(plan){
   for(const sha of plan.refs){
-    const data=from64(plan.blobs.get(sha).base64);
-    check(data.length===plan.blobs.get(sha).size&&await digest(data)===sha,
+    const blob=plan.blobs.get(sha);
+    check(blob&&Number.isSafeInteger(blob.size),'BACKUP_V2_BLOB_CHANGED');
+    const data=from64(blob.base64);
+    check(data.length===blob.size&&await digest(data)===sha,
       'BACKUP_V2_BLOB_CHANGED');
     yield frameHeader(V2_FRAME.BLOB,32+data.length);
     yield fromHex(sha);
     for(let i=0;i<data.length;i+=V2_LIMITS.fragment)
       yield data.subarray(i,i+V2_LIMITS.fragment);
   }
-  for(const row of plan.rows)yield* fragments(V2_FRAME.CANONICAL,row);
+  for(const row of plan.rows){
+    const source=plan.pcms?.stores?.[row.store]?.[row.index];
+    check(source,'BACKUP_V2_SOURCE_CUT_CHANGED');
+    const data=encodeRow(source,row.store,new Map());
+    check(data.length===row.length&&await digest(data)===row.sha256,
+      'BACKUP_V2_SOURCE_CUT_CHANGED');
+    yield* fragments(V2_FRAME.CANONICAL,data);
+  }
   yield* fragments(V2_FRAME.DONOR,plan.donor);
   yield* fragments(V2_FRAME.END,plan.ending);
 }
