@@ -4223,7 +4223,7 @@ def main():
                     const unavailable=await readOnly.run({type:'GIT_STATUS'},sender);
                     const watcher=await import('./catalog-watch.mjs');
                     done({ok:visible&&valid&&hostile==='UNTRUSTED_SENDER'&&
-                      unavailable.code==='GIT_RECONNECT_REQUIRED'&&
+                      ['GIT_RECONNECT_REQUIRED','RESTORE_HOLD'].includes(unavailable.code)&&
                       watcher.CATALOG_ALARM==='pcms-s03-main-observe',
                       visible,valid,hostile,unavailable:unavailable.code});
                   })().catch(e=>done({ok:false,error:String(e)}));"""
