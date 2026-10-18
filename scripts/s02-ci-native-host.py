@@ -401,13 +401,23 @@ def complete_donor_script(run_id):
           const donorView=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'})
             .catch(()=>null);
           const contexts=await browser.contextualIdentities.query({}).catch(()=>[]);
+          const cookieAudit=await Promise.all(contexts.map(async identity=>{
+            const rows=await browser.cookies.getAll({storeId:identity.cookieStoreId})
+              .catch(()=>[]);
+            return rows.filter(c=>c.name?.startsWith('ci-')).map(c=>({
+              domain:c.domain,hostOnly:c.hostOnly,secure:c.secure,
+              httpOnly:c.httpOnly,sameSite:c.sameSite
+            }));
+          }));
           // Synthetic disposable CI only; preserve no identities or secrets.
           throw Error('H_V2_NATIVE_DONOR_APPLICATION_FAILED:'+JSON.stringify({
             code:applied?.code,step:held.step,status:held.status,
             groups:held.groups,createdContainers:held.createdContainers,
             observedContexts:contexts.length,
             observedProfiles:Object.keys(donorView?.state?.profiles||{}).length,
-            observedScripts:Object.keys(donorView?.state?.scripts||{}).length
+            observedScripts:Object.keys(donorView?.state?.scripts||{}).length,
+            observedCookieSets:cookieAudit.filter(x=>x.length).length,
+            observedCookieAttributes:cookieAudit.flat().slice(0,2)
           }));
         }
         const groups=Object.fromEntries((applied.groups||[])
