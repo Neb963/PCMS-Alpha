@@ -101,9 +101,9 @@ export async function observeGitPromptWrite({
   const get=http(token,repository,transport);
   let sha=current.head,depth=0;
   try{
-    while(SHA.test(sha||'')&&depth++<maxAncestors){
+    while(OID.test(sha||'')&&depth++<maxAncestors){
       const commit=await get('GET','/git/commits/'+sha);
-      if(!SHA.test(commit?.tree?.sha||'')||!Array.isArray(commit.parents))
+      if(!OID.test(commit?.tree?.sha||'')||!Array.isArray(commit.parents))
         return err('PROMPT_OBSERVATION_UNVERIFIED');
       const trailer='PCMS-OP: '+operationId;
       if(commit.message?.split(/\r?\n/).at(-1)===trailer){
@@ -120,7 +120,7 @@ export async function observeGitPromptWrite({
           head:current.head,promptOid:target,source:'REMOTE_PROMPT_OBSERVATION'};
       }
       if(commit.parents.length===0)return err('PROMPT_OPERATION_NOT_FOUND_IN_HISTORY');
-      if(commit.parents.length!==1||!SHA.test(commit.parents[0]?.sha||''))
+      if(commit.parents.length!==1||!OID.test(commit.parents[0]?.sha||''))
         return err('PROMPT_OBSERVATION_UNVERIFIED');
       sha=commit.parents[0].sha;
     }
