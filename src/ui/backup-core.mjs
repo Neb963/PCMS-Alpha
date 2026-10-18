@@ -287,6 +287,15 @@ export function snapshotCanonicalV2(db){
 // preserves identicalCut's existing JSON equality semantics and detects
 // changes/deletes/additions without treating a partial traversal as success.
 // It is a reduction in copies, NOT a full bounded-unique-source solution.
+function comparableV2CutValue(value){
+  // JSON.stringify(raw IDB values loses ArrayBuffer bytes, undefined fields
+  // and negative-zero identity. The accepted v2 structured-clone taxonomy
+  // must also govern drift detection, including nested binary values.
+  const typed=serializeClone(value);
+  return JSON.stringify(typed,(_key,entry)=>
+    typeof entry==='number'&&Object.is(entry,-0)?
+      {__pcmsType:'NumberNegativeZero'}:entry);
+}
 export function verifyCanonicalV2Unchanged(db,before){
   validatePcmsSnapshot(before);
   return new Promise((resolve,reject)=>{
@@ -319,7 +328,9 @@ export function verifyCanonicalV2Unchanged(db,before){
             // IDB cursor values are already structured-cloned by IndexedDB;
             // do not structuredClone their source bytes a second time.
             const current={key:serializeClone(cur.key),value:cur.value};
-            if(JSON.stringify(current)!==JSON.stringify(previous[index])){
+            const earlier=previous[index];
+            if(comparableV2CutValue(current.key)!==comparableV2CutValue(earlier.key)||
+               comparableV2CutValue(current.value)!==comparableV2CutValue(earlier.value)){
               stop('BACKUP_SOURCE_CUT_CHANGED');return;
             }
           }catch{stop('BACKUP_SOURCE_CUT_CHANGED');return}
