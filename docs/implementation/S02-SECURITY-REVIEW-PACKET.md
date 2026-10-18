@@ -1,5 +1,20 @@
 # S02 E-06 independent security review packet — NOT APPROVED
 
+## 2026-10-18 — tested B1 findings and exact-candidate E-06 boundary (supersedes earlier rewrite mandate)
+
+**Status and authority:** PR #24 remains DRAFT / UNMERGED. Production `reviewedV2` remains OFF; no operator host/profile change, no live Perchance E-02, no private `per-gens` mutation, no S03 and no replay of I17 quarantined batch `batch_e2c328e54f9c4a6ab89f1084134fde52` or slug `pcms-test-esr-chain-20261015-a01`. This entry supersedes earlier *engineering assertions* that content-addressed persistent storage was already shown mandatory. It does **not** amend the accepted Gate B v1.1 §9.1/§9.3 source-streaming requirement. A different authorized identity must approve exact-candidate E-06.
+
+At code HEAD `eedd7707e1d1ee2defc2928537fd9216edb04b4c` [run 39155789741](https://github.com/Neb963/PCMS-Alpha/actions/runs/39155789741) passed fast **405/405**, baseline, installed Firefox H-CI and pcms-required. Same-run packaged inner XPI SHA-256: `c799d6ce245bba4fdbc5b11ad449e00ff24f85f398136c5cc680bd4f488d1d19`. The H-CI fixture wrote 64 MiB of genuinely distinct generated binary assets (128 MiB candidate/previous references) to real Firefox IDB, captured via actual `snapshotCanonicalV2` and drift check, sent genuine v2 native fragments to a registered Secret Service/host, reverified both native ciphertext files, and restored into fresh Firefox profiles. Final guarded PersonaMonkey donor/cookies/portable/canonical stages were all independently `OBSERVED`; **50** real Firefox containers, **50** cookie sets and **6,144** exact original/history file-byte checks passed. Final status remained `COMPLETE_INACTIVE`, activation `OFF`, with UID-remap and removed-account decisions enforced. Actual production background `captureV2SourceCut` donor coordinator was not invoked; synthetic donor input in the H harness is disclosed.
+
+**Measured:** IDB usage 283,065,760 B (Firefox reported quota 10 GiB), 69,391,375 B per native encrypted archive, 502,946,668 B fresh recovered profile, 971,479,250 B 14-file projection, summed RSS peak 4,380,380 KiB across up to 14 processes with shared pages double-counted. Firefox JS heap unavailable. This is finite capacity evidence, **not** §9's O(U)-independent memory proof.
+
+**Confirmed fixed defects:** prior v1 64 MiB limit in `restore-idb.mjs` was improperly used by v2; a second v1-size readback in the shared guarded `pcms-canonical` stage returned `RESTORE_PARTIAL_HELD`; non-persistent Firefox background lost `APPLY_V2` at 28–34 seconds. V2-only serialized readbacks and a read-only, exact-archive-pinned native port held for the guarded operation repaired these measured failures. Native salt/IV known-artifact reuse fence, R1–R6 history/identity/path/tag/format controls, authenticated two-pass inventory, lost-ACK holds, v1 compatibility, retained last known good and complete source remain unchanged.
+
+**Retention D:** 15 separately encrypted/reopened/qualified native files, 14 retained, pruning oldest after qualification; injected `ENOSPC` failed with uncertain state, no false success/no last-good deletion. File sizes were ~2 MiB, not 14 full-size high-U archives. Genuine disk/IDB quota boundaries, near-2 GiB donor, peak JS heap and operator Fedora remain unmeasured.
+
+**Technical amendment proposed, NOT APPROVED:** Gate B v1.1 §9.1/§9.3 alone could permit aggregate transactional IDB cut + inactive rehydration for an initially defined envelope of **50 Personas, 1,024 source histories, 65 MiB total U, 130 MiB referenced source and 1,075 rows**, subject to explicit admission/quota/disk headroom limits, conservative fail-closed tests and independent review. See S02-WIP for the single quantified proposal; it must not be treated as a security waiver. No signed approval by a different qualified identity exists; do not request a formal exact-final E-06 signoff until the resource boundary/amendment is settled. Provider E-02 L is independently NOT TESTED.
+
+
 
 ## 2026-10-18 — incremental pinned-cut writer and installed native H-CI proof (B1 still OPEN)
 
