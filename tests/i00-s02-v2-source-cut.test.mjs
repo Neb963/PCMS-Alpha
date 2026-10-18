@@ -24,7 +24,7 @@ function disposableDB(rows){
           function next(){
             const row=part[i++];
             if(row){
-              const cursor={key:row.key,value:row.value,
+              const cursor={key:structuredClone(row.key),value:structuredClone(row.value),
                 continue(){queueMicrotask(next)}};
               request.onsuccess({target:{result:cursor}});
             }else{
@@ -42,7 +42,6 @@ function disposableDB(rows){
   };
 }
 test('R2 production v2 cursor cut exceeds 64MiB before dedup; no history omission',async()=>{
-  const initial=process.memoryUsage().heapUsed;
   const raw=new Uint8Array(420000).fill(77);
   const sha256=await digest(raw);
   const files=[{path:'index.html',size:raw.length,sha256},
@@ -56,8 +55,12 @@ test('R2 production v2 cursor cut exceeds 64MiB before dedup; no history omissio
     key:'stage-history:review-'+String(i).padStart(4,'0'),
     value:{record:{candidate:source,previous:source}}
   });
+  const initial=process.memoryUsage();
   const cut=await snapshotCanonicalV2(disposableDB(rows));
-  const size=Buffer.byteLength(JSON.stringify(cut));
+  // Incremental raw-row byte count: do not allocate a second 170 MiB
+  // whole-snapshot JSON merely to measure the pre-dedup corpus.
+  const size=cut.stores.meta.reduce((sum,row)=>
+    sum+Buffer.byteLength(JSON.stringify(row)),0);
   assert.ok(size>MAX_ARCHIVE_BYTES,{preDedupBytes:size,legacyCap:MAX_ARCHIVE_BYTES});
   assert.equal(cut.stores.meta.length,76);
   const pass='review-only-disposable-v2-password';
@@ -81,9 +84,10 @@ test('R2 production v2 cursor cut exceeds 64MiB before dedup; no history omissio
   await assert.rejects(
     verifyCanonicalV2Unchanged(disposableDB({...rows,meta:rows.meta.slice(0,-1)}),cut),
     /BACKUP_SOURCE_CUT_CHANGED/);
-  const peak=process.memoryUsage().heapUsed;
+  const peak=process.memoryUsage();
   console.log('S02_R2_64M_SOURCE_MEASURE='+JSON.stringify({
     preDedupBytes:size,uniqueBlobs:plan.terminal.uniqueBlobs,
     afterDedupBytes:plan.plaintextBytes,
-    heapDeltaBytes:peak-initial,rows:76}));
+    heapDeltaBytes:peak.heapUsed-initial.heapUsed,
+    rssDeltaBytes:peak.rss-initial.rss,rows:76}));
 });
