@@ -287,14 +287,45 @@ export function snapshotCanonicalV2(db){
 // preserves identicalCut's existing JSON equality semantics and detects
 // changes/deletes/additions without treating a partial traversal as success.
 // It is a reduction in copies, NOT a full bounded-unique-source solution.
-function comparableV2CutValue(value){
-  // JSON.stringify(raw IDB values loses ArrayBuffer bytes, undefined fields
-  // and negative-zero identity. The accepted v2 structured-clone taxonomy
-  // must also govern drift detection, including nested binary values.
-  const typed=serializeClone(value);
-  return JSON.stringify(typed,(_key,entry)=>
-    typeof entry==='number'&&Object.is(entry,-0)?
-      {__pcmsType:'NumberNegativeZero'}:entry);
+function equalV2StructuredClone(left,right,depth=0){
+  // Exact typed cut comparison, including binary bytes, negative-zero,
+  // undefined versus absent properties and Date; no JSON/base64 copies.
+  // The initial indexed source fleet remains materialized elsewhere (B1 hold).
+  if(Object.is(left,right))return true;
+  if(depth>35||left===null||right===null||typeof left!==typeof right||
+     typeof left!=='object')return false;
+  const kind=Object.prototype.toString.call(left);
+  if(kind!==Object.prototype.toString.call(right))return false;
+  if(kind==='[object Date]')return left.getTime()===right.getTime();
+  const view=ArrayBuffer.isView(left),otherView=ArrayBuffer.isView(right);
+  if(view!==otherView)return false;
+  if(view||kind==='[object ArrayBuffer]'){
+    const a=view?new Uint8Array(left.buffer,left.byteOffset,left.byteLength):
+      new Uint8Array(left);
+    const b=otherView?new Uint8Array(right.buffer,right.byteOffset,right.byteLength):
+      new Uint8Array(right);
+    if(a.length!==b.length)return false;
+    for(let i=0;i<a.length;i++)if(a[i]!==b[i])return false;
+    return true;
+  }
+  if(Array.isArray(left)){
+    if(!Array.isArray(right)||left.length!==right.length)return false;
+    for(let i=0;i<left.length;i++){
+      if((i in left)!==(i in right))return false;
+      if(i in left&&!equalV2StructuredClone(left[i],right[i],depth+1))
+        return false;
+    }
+    return true;
+  }
+  if(!plain(left)||!plain(right))return false;
+  const ka=Object.keys(left),kb=Object.keys(right);
+  if(ka.length!==kb.length)return false;
+  for(let i=0;i<ka.length;i++){
+    if(ka[i]!==kb[i]||
+       !equalV2StructuredClone(left[ka[i]],right[kb[i]],depth+1))
+      return false;
+  }
+  return true;
 }
 export function verifyCanonicalV2Unchanged(db,before){
   validatePcmsSnapshot(before);
@@ -329,8 +360,8 @@ export function verifyCanonicalV2Unchanged(db,before){
             // do not structuredClone their source bytes a second time.
             const current={key:serializeClone(cur.key),value:cur.value};
             const earlier=previous[index];
-            if(comparableV2CutValue(current.key)!==comparableV2CutValue(earlier.key)||
-               comparableV2CutValue(current.value)!==comparableV2CutValue(earlier.value)){
+            if(!equalV2StructuredClone(current.key,earlier.key)||
+               !equalV2StructuredClone(current.value,earlier.value)){
               stop('BACKUP_SOURCE_CUT_CHANGED');return;
             }
           }catch{stop('BACKUP_SOURCE_CUT_CHANGED');return}
