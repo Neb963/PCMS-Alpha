@@ -11,6 +11,8 @@ test('S02 host effects and lost ACK are observable independent of its in-memory 
     timeout:60000,maxBuffer:2*1024*1024});
   assert.equal(run.error,undefined);
   assert.equal(run.status,0,run.stderr?.slice(-3000));
-  assert.match(run.stderr,/Ran 18 tests in /);
+  assert.match(run.stderr,/Ran 26 tests in /);
+  assert.match(run.stderr,/test_durable_entropy_pair_fence_after_success_and_host_restart .* \.\.\. ok/);
+  assert.match(run.stderr,/test_abandoned_context_and_retained_reservation_deny_reuse .* \.\.\. ok/);
   assert.match(run.stderr,/\nOK\n/);
 });
