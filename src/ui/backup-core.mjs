@@ -273,12 +273,61 @@ export function snapshotCanonicalV2(db){
           const cur=e.target.result;if(!cur)return;
           if(++seen>500000){stop('BACKUP_V2_ROW_LIMIT');return;}
           try{stores[store].push({key:serializeClone(cur.key),
-            value:structuredClone(cur.value)});}
+            value:cur.value});}
           catch(err){stop(err.message||'BACKUP_V2_VALUE_INVALID');return;}
           cur.continue();
         };
       }
     }catch{stop('BACKUP_IDB_UNAVAILABLE');}
+  });
+}
+// V2 cut verification: independently re-read the same five stores as one
+// consistent readonly transaction. Compare one cursor row at a time instead
+// of retaining a second complete (often source-heavy) JS snapshot. This
+// preserves identicalCut's existing JSON equality semantics and detects
+// changes/deletes/additions without treating a partial traversal as success.
+// It is a reduction in copies, NOT a full bounded-unique-source solution.
+export function verifyCanonicalV2Unchanged(db,before){
+  validatePcmsSnapshot(before);
+  return new Promise((resolve,reject)=>{
+    if(!db||DB_STORES.some(s=>!db.objectStoreNames.contains(s))){
+      reject(Error('BACKUP_INCOMPLETE'));return;
+    }
+    let tx;
+    try{tx=db.transaction(DB_STORES,'readonly')}
+    catch{reject(Error('BACKUP_IDB_UNAVAILABLE'));return}
+    const offsets=Object.fromEntries(DB_STORES.map(s=>[s,0]));
+    let stopped=false;
+    const stop=code=>{if(stopped)return;stopped=true;
+      try{tx.abort()}catch{}reject(Error(code))};
+    tx.onabort=()=>{if(!stopped)reject(Error('BACKUP_IDB_ABORTED'))};
+    tx.onerror=()=>{};
+    tx.oncomplete=()=>{if(!stopped)resolve({ok:true,storeCounts:offsets})};
+    try{
+      for(const store of DB_STORES){
+        tx.objectStore(store).openCursor().onsuccess=e=>{
+          if(stopped)return;
+          const cur=e.target.result;
+          const index=offsets[store];
+          const previous=before.stores[store];
+          if(!cur){
+            if(index!==previous.length)stop('BACKUP_SOURCE_CUT_CHANGED');
+            return;
+          }
+          if(index>=previous.length){stop('BACKUP_SOURCE_CUT_CHANGED');return}
+          try{
+            // IDB cursor values are already structured-cloned by IndexedDB;
+            // do not structuredClone their source bytes a second time.
+            const current={key:serializeClone(cur.key),value:cur.value};
+            if(JSON.stringify(current)!==JSON.stringify(previous[index])){
+              stop('BACKUP_SOURCE_CUT_CHANGED');return;
+            }
+          }catch{stop('BACKUP_SOURCE_CUT_CHANGED');return}
+          offsets[store]=index+1;
+          cur.continue();
+        };
+      }
+    }catch{stop('BACKUP_IDB_UNAVAILABLE')}
   });
 }
 function downloadPathSafe(value){
