@@ -4196,6 +4196,42 @@ def main():
                 assert fresh_v2_result.get('ok') is True,fresh_v2_result
                 print('B S02_FRESH_FIREFOX_PROFILE_INACTIVE_V2_SOURCE_CANONICAL_RESTORE=PASS',flush=True)
 
+                # S03 B: exact installed combined XPI module and real
+                # dashboard controls, no remote Git, vault or Perchance traffic.
+                call('POST',f'/session/{after}/url',
+                     {'url':f'moz-extension://{uuid}/pcms/index.html#generators'})
+                s03_browser="""const done=arguments[arguments.length-1];
+                  (async()=>{
+                    const required=['pcms-catalog-scan','pcms-catalog-connect',
+                      'pcms-catalog-approve','pcms-catalog-prompt-draft',
+                      'pcms-catalog-prompt-save','pcms-catalog-prompt-reconcile',
+                      'pcms-catalog-ready-inspect'];
+                    const visible=required.every(id=>!!document.getElementById(id));
+                    const boundary=await import('./catalog-boundary.mjs');
+                    const repo='Neb963/per-gens';
+                    const sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')};
+                    const valid=boundary.validateCatalogMessage(browser,sender,{
+                      type:'SCAN_CATALOG',params:{repository:repo,token:'local-fixture-no-effect'}}).ok;
+                    const hostile=boundary.validateCatalogMessage(browser,{
+                      id:'external',url:'https://perchance.org'},{
+                      type:'COMMIT_PROMPT',params:{
+                        repositoryId:'42',expectedRevision:1,expectedHead:'a'.repeat(40)}}).code;
+                    const readOnly=boundary.createCatalogBoundary(browser,{
+                      scan:async()=>{throw Error('network forbidden')},
+                      native:async()=>{throw Error('native forbidden')}
+                    });
+                    const unavailable=await readOnly.run({type:'GIT_STATUS'},sender);
+                    const watcher=await import('./catalog-watch.mjs');
+                    done({ok:visible&&valid&&hostile==='UNTRUSTED_SENDER'&&
+                      unavailable.code==='GIT_RECONNECT_REQUIRED'&&
+                      watcher.CATALOG_ALARM==='pcms-s03-main-observe',
+                      visible,valid,hostile,unavailable:unavailable.code});
+                  })().catch(e=>done({ok:false,error:String(e)}));"""
+                s03_result=call('POST',f'/session/{after}/execute/async',
+                                {'script':s03_browser,'args':[]},timeout=60)
+                assert s03_result.get('ok') is True,s03_result
+                print('B S03_INSTALLED_GIT_CATALOG_PROMPT_PORT_AND_UI_NO_EFFECT=PASS',flush=True)
+
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
                 close(after)
                 after=None
