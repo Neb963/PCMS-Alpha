@@ -136,7 +136,7 @@ test('S03: scope preview may retain unrelated head movement, not changed declara
 
 test('S03: extension sender and operation allowlist, no token storage or mutation port',async()=>{
   const api={runtime:{id:'combined-id',getURL:x=>'moz-extension://test/'+x},
-    storage:{local:{set:()=>{throw Error('secret persisted')}}}};
+    storage:{local:{get:async()=>({}),set:()=>{throw Error('secret persisted')}}}};
   const sender={id:'combined-id',url:'moz-extension://test/pcms/index.html'};
   const message={type:'SCAN_CATALOG',params:{repository:repo,token:TOKEN}};
   assert.equal(validateCatalogMessage(api,sender,message).ok,true);
