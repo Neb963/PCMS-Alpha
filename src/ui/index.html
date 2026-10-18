@@ -116,6 +116,13 @@
           <div id="pcms-catalog-list" class="table-wrap" role="region" tabindex="0" aria-label="Complete pinned main catalog"></div>
           <label for="pcms-catalog-prompt">Authoritative default Chat 1 prompt at pinned revision</label>
           <textarea id="pcms-catalog-prompt" rows="5" readonly spellcheck="false" placeholder="Inspect catalog to read existing Git prompt"></textarea>
+          <label for="pcms-catalog-prompt-draft">Chat 1 Git prompt draft</label>
+          <textarea id="pcms-catalog-prompt-draft" rows="6" maxlength="131072" spellcheck="false" disabled placeholder="Connect and inspect the Git-owned prompt to edit"></textarea>
+          <div class="account-controls">
+            <button id="pcms-catalog-prompt-save" type="button" disabled>Save draft locally</button>
+            <button id="pcms-catalog-prompt-commit" type="button" disabled>Commit tested prompt to GitHub</button>
+          </div>
+          <p id="pcms-catalog-prompt-status" role="status" aria-live="polite">Git prompt editing is available after a verified connection and full scan. Remote writes remain held until their separate activation proof.</p>
         </section>
         <section class="panel" aria-labelledby="pcms-source-heading">
           <div class="panel-head"><h2 id="pcms-source-heading">Private Git source — read only</h2><span class="unknown">Operator-triggered</span></div>
