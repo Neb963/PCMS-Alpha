@@ -145,3 +145,44 @@ CREATE/RENAME on batch `batch_e2c328e54f9c4a6ab89f1084134fde52`
 or slug `pcms-test-esr-chain-20261015-a01`; no `per-gens` writeback or
 live Perchance effect. PR remains draft; an independently qualified E-06
 reviewer must decide the actual final head/tree and outstanding holds.
+
+
+### S02 acceptance ledger entry — 2026-10-18, real installed-H negatives
+
+Reference: code checkpoint `1e8b6993bb6c54c5fe2eaf11748a8ce40f777c52`,
+tree `8f817a510adcefee141445e3dfb77af332e7319f`,
+[CI #39126836197](https://github.com/Neb963/PCMS-Alpha/actions/runs/39126836197).
+All four required jobs PASS at this code checkpoint; the exact post-ledger
+documentation HEAD must have its own checks verified. XPI SHA-256
+`5675cdfd281b4fe9778ad1f0530e3a15da70b7236d6c44ec7e6f386336fc92fd`.
+
+- **H-CI verified:** actual installed Firefox/native messaging and D-Bus
+  Secret Service; two genuinely encrypted and independently reopened native
+  filesystem archives, each 1,075 canonical rows, 50 synthetic Personas,
+  1,024 source histories / 2,048 source manifests, exact source bytes.
+  Fresh-profile decoded donor + canonical restore under I16 durable hold:
+  controller `INACTIVE`, activation `OFF`; explicit UID remap produced
+  `VERIFICATION_PENDING` with no imported identity; newer local reliable
+  removal excluded a historical account in replace mode while preserving
+  its tombstone. Actual interrupted host port left an unqualified file;
+  wrong OS Secret Service key returned `BACKUP_AUTH_FAILED` with qualified
+  original file unchanged and subsequent correct-key reopen successful.
+- **Resource observation (H, not a guarantee):** max sampled aggregate process
+  RSS **1,444,396 KiB** across 14 observed processes; RSS may double-count
+  shared shared library pages and does not establish a fleet ceiling.
+  D-tier 170 MiB pre-dedup workload observed a large JS heap transient and
+  remains a capacity risk.
+- **Fail-closed rejected fixture:** incomplete historical release information
+  returned `BACKUP_SOURCE_INCOMPLETE_RELEASE` prior to native export on
+  [CI #39126672939](https://github.com/Neb963/PCMS-Alpha/actions/runs/39126672939).
+  This is a valid negative, not a relaxed success or reviewed approval.
+- **Other tier boundaries:** packaged B installed I16 donor/guarded restore,
+  v1 compatibility and synthetic v2 negative policy remain distinct from
+  H-CI; true operator Fedora and Perchance L not tested/authorized.
+
+**Final E-06 hold:** no full fresh-profile v2 *donor-state/cookie controller
+application* proved from the native file, only authenticated donor decoding
+and real canonical restoration plus separate I16 donor application. Formal
+independent E-06 security/format approval is still missing; no production
+host registration/activation, remote effects, restored approval or controller
+activation, merge or S03. Original I17 uncertainty quarantine retained.

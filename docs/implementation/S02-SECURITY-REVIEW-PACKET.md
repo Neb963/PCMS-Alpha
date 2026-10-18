@@ -150,3 +150,66 @@ batch `batch_e2c328e54f9c4a6ab89f1084134fde52` and slug
 `pcms-test-esr-chain-20261015-a01` no-auto-CREATE/RENAME quarantine, no
 private `per-gens` writeback, no provider effects, no production v2 host
 activation, no S03 and no merge without new independent E-06 approval.
+
+
+### E-06 exact-candidate test update — October 18, 2026
+
+**Latest code checkpoint independently verifiable in GitHub:** commit
+`1e8b6993bb6c54c5fe2eaf11748a8ce40f777c52`, tree
+`8f817a510adcefee141445e3dfb77af332e7319f`,
+[required CI 39126836197](https://github.com/Neb963/PCMS-Alpha/actions/runs/39126836197):
+`fast` PASS, `baseline` PASS, installed `firefox` PASS,
+`pcms-required` PASS. This is the verified *code-before-review-packet-update*
+checkpoint; the PR HEAD/tree must be rechecked after this documentation
+commit and all exact-candidate checks must still pass.
+
+The disposable, real native-messaging H witness used the actual extension ID
+`persona-route-manager@local`, the `local.pcms.backup_v2` host in a
+registered Firefox Developer Edition profile, a real D-Bus Secret Service
+keyring and the isolated fixed-purpose OS backup directory. It authenticated
+and independently reopened two ciphertext files containing 50 synthetic
+Personas, 1,024 complete history records, 2,048 source manifests and
+1,075 canonical rows per native archive. In a genuinely distinct Firefox
+profile, decoded donor records and guarded canonical restoration preserved
+all source files while keeping the controller inactive. It additionally
+verified that an active account UID is remapped into
+`VERIFICATION_PENDING` without an imported identity, a newer reliable
+destination removal excludes its historical archived account, and the
+local removal tombstone survives replace.
+
+**Real failure-boundary evidence in the same H run:** explicitly closing
+the native process port after a durable `export.begin` left the incomplete
+file unqualified and excluded from native retention; replacing the actual
+Secret Service key caused `BACKUP_AUTH_FAILED`, left the good native
+archive at `RECOVERY_VERIFIED`, and recovery with the restored correct
+key succeeded. These are genuine OS host / keyring tests, not JS mock claims.
+The 50/1024 workload showed a maximum sampled process RSS sum of
+**1,444,396 KiB** across up to 14 observed processes (process RSS
+double-counts shared pages; not PSS, VRAM or a 50+ fleet guarantee).
+The packaged XPI digest was
+`5675cdfd281b4fe9778ad1f0530e3a15da70b7236d6c44ec7e6f386336fc92fd`.
+
+A deliberately malformed synthetic historical approval with no mandatory
+release/source closure was rejected as `BACKUP_SOURCE_INCOMPLETE_RELEASE`
+in run [39126672939](https://github.com/Neb963/PCMS-Alpha/actions/runs/39126672939).
+The valid source fixture was restored; **the source validator was not relaxed**.
+Separate established I16 B and R3/R5/R6 regression evidence covers approval
+quarantine, source completeness, historical exclusions and numeric/clone
+negative cases. Do not interpret the rejected fixture as a valid approval
+import.
+
+**Open acceptance boundary (do not misstate as PASS):** the fresh v2 H
+witness decrypts/decodes the actual donor archive and restores the canonical
+IndexedDB under I16 hold, but does not commit the decoded donor data through
+PersonaMonkey's real donor-state/cookie importer in that fresh v2 session.
+The older I16 B flow exercises actual guarded donor application independently,
+not as a connected v2 host-to-donor pass. Also incomplete: independent formal
+E-06 R1–R6 re-review of the new head/format, operator Fedora H, live Perchance
+L (not authorized), stronger crash/concurrent-writer/terminal uncertainty H
+beyond tested cases, and a supportable all-workload capacity ceiling. These
+must remain visible to the final independent reviewer; **no production
+activation, publication, network routes, private per-gens effects, merge or S03**.
+The I17 quarantine remains unchanged.
+
+**Verdict:** exact code test workflow PASS at the cited checkpoint;
+**S02 FINAL ACCEPTANCE / E-06 SECURITY SIGNOFF: NOT GRANTED**.
