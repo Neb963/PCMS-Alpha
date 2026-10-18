@@ -438,15 +438,27 @@ export async function observeDownload(api,id,expectedBytes,{timeoutMs=120000}={}
 // available JS heap. deviceMemory, where present, is a coarse bucket only.
 // Cap measured serialized UTF-16 source volume; no account/history ceilings.
 const MiB=1048576;
-export function v2CaptureResourcePolicy(environment=globalThis.navigator){
+export function v2CaptureResourcePolicy(environment=globalThis.navigator,
+  osAvailableMemoryBytes=null){
   const bucket=Number(environment?.deviceMemory);
   const memoryBucketGiB=Number.isFinite(bucket)&&bucket>=1&&bucket<=128?
     bucket:null;
-  const maxAggregateUtf16Bytes=memoryBucketGiB===null?512*MiB:
-    Math.min(2048*MiB,Math.max(512*MiB,
-      Math.floor(memoryBucketGiB*1024*MiB/8)));
+  // OS MemAvailable/cgroup budget is advisory, not process-allocatable heap.
+  // Use no more than one sixth of a trustworthy positive OS headroom hint.
+  // Firefox frequently lacks deviceMemory; avoid making that absence a fixed
+  // 50-Persona/65MiB product ceiling on a well-provisioned machine.
+  const osHint=Number.isSafeInteger(osAvailableMemoryBytes)&&
+    osAvailableMemoryBytes>0?osAvailableMemoryBytes:null;
+  const deviceHint=memoryBucketGiB===null?null:
+    Math.floor(memoryBucketGiB*1024*MiB/8);
+  const boundedHint=osHint===null?deviceHint:
+    deviceHint===null?Math.floor(osHint/6):
+      Math.min(Math.floor(osHint/6),deviceHint);
+  const maxAggregateUtf16Bytes=boundedHint===null?512*MiB:
+    Math.min(4096*MiB,Math.max(128*MiB,boundedHint));
   return {maxAggregateUtf16Bytes,memoryBucketGiB,
-    browserHeapBytes:null,measurement:'SERIALIZED_UTF16_PROXY_NOT_JS_HEAP'};
+    osAvailableMemoryBytes:osHint,browserHeapBytes:null,
+    measurement:'SERIALIZED_UTF16_PROXY_NOT_JS_HEAP'};
 }
 export async function checkV2BrowserStorage(environment,estimatedStageBytes=0){
   if(!Number.isSafeInteger(estimatedStageBytes)||estimatedStageBytes<0)
