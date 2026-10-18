@@ -204,10 +204,37 @@ def native_script():
           observed.push({runId,sha256:verified.sha256,
             rows:verified.sourceRows});
         }
+        // Real OS process-loss boundary: persistent host opens a new run,
+        // durably journals OPEN_OBSERVED, then its native port is closed
+        // without append/finish. Another native process may inspect it,
+        // but cannot validate, recover, retain or promote the partial file.
+        const interruptedRun='s02_'+crypto.randomUUID().replaceAll('-','');
+        const crashPort=native.createV2NativeConnection(browser);
+        const opened=await crashPort.exchange({action:'export.begin',
+          runId:interruptedRun,cutDigest:'a'.repeat(64),
+          expectedPlaintextBytes:128,keyRef:'portable-recovery'});
+        if(opened?.ok!==true||opened.runId!==interruptedRun||
+           opened.state!=='OPEN_OBSERVED')throw Error('H_NATIVE_OPEN_NOT_DURABLE');
+        crashPort.close();
+        const newProcess=native.createV2NativeConnection(browser);
+        let held,unqualified,retention;
+        try{
+          held=await newProcess.exchange({action:'archive.inspect',
+            runId:interruptedRun});
+          unqualified=await newProcess.exchange({action:'backup.verify',
+            runId:interruptedRun,keyRef:'portable-recovery'});
+          retention=await newProcess.exchange({action:'archive.retention.plan'});
+        }finally{newProcess.close();}
+        if(held?.ok!==true||held.state!=='OPEN_OBSERVED'||
+           held.acceptedBytes!==0||unqualified?.ok!==false||
+           retention?.ok!==true||retention.qualified!==2||
+           retention.pruneCandidate!==null)
+          throw Error('H_NATIVE_INTERRUPTED_FILE_PROMOTED');
         const before=await browser.storage.local.get('pcmsRestoreInProgress');
         if(before.pcmsRestoreInProgress?.active===true)
           throw Error('H_UNAUTHORIZED_RESTORE_ACTIVATION');
         return {ok:true,observed,denied:denied.code,
+          interruptedRun,interruptedState:held.state,
           geckoId:browser.runtime.id};
       }finally{db.close();}
     })().then(done).catch(e=>done({ok:false,error:String(e)}));"""
@@ -290,6 +317,32 @@ def fresh_script(run_id):
       }finally{db.close();}
     })().then(done).catch(e=>done({ok:false,error:String(e)}));""".replace("RUN_ID",json.dumps(run_id))
 
+def wrong_key_script(run_id):
+    return r"""const done=arguments[arguments.length-1];
+    (async()=>{
+      const p=browser.runtime.connectNative('local.pcms.backup_v2');
+      const result=await new Promise((resolve,reject)=>{
+        p.onMessage.addListener(resolve);
+        p.onDisconnect.addListener(()=>reject(Error('H_WRONG_KEY_PORT_DIED')));
+        p.postMessage({action:'backup.verify',runId:RUN,keyRef:'portable-recovery'});
+      });
+      p.disconnect();
+      if(result?.ok!==false)return {ok:false,code:'H_WRONG_KEY_ACCEPTED'};
+      const inspected=await browser.runtime.sendNativeMessage(
+        'local.pcms.backup_v2',{action:'archive.inspect',runId:RUN});
+      return {ok:inspected?.ok===true&&inspected.state==='RECOVERY_VERIFIED',
+        denied:result.code,unaltered:inspected?.state};
+    })().then(done).catch(e=>done({ok:false,error:String(e)}));""".replace("RUN",json.dumps(run_id))
+
+
+def put_disposable_secret(value):
+    attrs=["application","pcms-alpha","purpose","unattended-encrypted-backup"]
+    out=subprocess.run(["/usr/bin/secret-tool","store",
+        "--label=PCMS-S02-disposable-test",*attrs],input=value+"\n",
+        text=True,capture_output=True,timeout=20)
+    assert out.returncode==0,"H_SECRET_SERVICE_STORE_UNAVAILABLE"
+
+
 def main():
     assert len(sys.argv)==2,"usage: s02-ci-native-host.py build/pcms-alpha-i00.xpi"
     archive=(ROOT/sys.argv[1]).resolve()
@@ -339,6 +392,9 @@ def main():
         assert result.get("ok") is True,result
         assert result.get("geckoId")==ADDON_ID,result
         seen=result["observed"]
+        assert result.get("interruptedState")=="OPEN_OBSERVED",result
+        print("H S02_NATIVE_HOST_PORT_TERMINATION_UNCERTAIN_FILE_NOT_PROMOTED=PASS",
+              json.dumps({"runId":result["interruptedRun"]}),flush=True)
         assert len(seen)==2 and seen[0]["runId"]!=seen[1]["runId"],seen
         assert min(v["rows"] for v in seen)>=1074,("H_SOURCE_HISTORY_ROW_LOSS",seen)
         from importlib.machinery import SourceFileLoader
@@ -373,6 +429,15 @@ def main():
             {"url":f"moz-extension://{fresh_uuid}/pcms/index.html"})
         harness.call("POST",f"/session/{session}/timeouts",
             {"script":240000},timeout=15)
+        # The host must reject the *actual* OS keyring's changed password,
+        # and preserve the original qualified file for subsequent recovery.
+        put_disposable_secret("synthetic-disposable-WRONG-password-2026")
+        wrong=harness.call("POST",f"/session/{session}/execute/async",
+            {"script":wrong_key_script(seen[0]["runId"]),"args":[]},timeout=35)
+        assert wrong.get("ok") is True,("H_REAL_WRONG_SECRET_SERVICE_KEY_ACCEPTED",wrong)
+        print("H S02_WRONG_OS_SECRET_SERVICE_KEY_DENIED_WITHOUT_FILE_PROMOTION=PASS",
+              json.dumps(wrong),flush=True)
+        secret_check()  # Reopen original verified ciphertext with correct key.
         restored=harness.call("POST",f"/session/{session}/execute/async",
             {"script":fresh_script(seen[0]["runId"]),"args":[]},timeout=220)
         assert restored.get("ok") is True,("H_FRESH_NATIVE_RECOVERY",restored)
