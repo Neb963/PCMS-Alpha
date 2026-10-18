@@ -148,7 +148,7 @@ test('S02 aggregate capture budget holds exact source before possible export',as
 });
 
 import {v2CaptureResourcePolicy,checkV2BrowserStorage}
-  from '../src/runtime/backup-auto-export.mjs';
+  from '../src/ui/backup-core.mjs';
 test('S02 resource admission scales by byte pressure rather than fixture counts',async()=>{
   const fallback=v2CaptureResourcePolicy({});
   const ample=v2CaptureResourcePolicy({deviceMemory:16});
