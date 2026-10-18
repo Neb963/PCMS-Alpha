@@ -99,6 +99,23 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
   database=openCanonicalDatabase}={}){
   const gate=createRestoreGate(api.storage.local);
   let running=null,registered=false;
+  // Static PCMS listeners can become ready before PersonaMonkey's guarded
+  // recovery-bootstrap dynamic background import. Wake that pinned read-only
+  // donor service, then await its actual adapter attachment. Never construct a
+  // donor surrogate, create an identity or bypass the donor bootstrap.
+  async function donorReady(){
+    try{return getDonor()}catch(e){
+      if(e?.message!=='RESTORE_DONOR_UNAVAILABLE')throw e;
+    }
+    try{await api.runtime.sendMessage({type:'GET_SNAPSHOT'})}catch{}
+    for(let attempt=0;attempt<30;attempt++){
+      try{return getDonor()}catch(e){
+        if(e?.message!=='RESTORE_DONOR_UNAVAILABLE')throw e;
+      }
+      await new Promise(resolve=>setTimeout(resolve,150));
+    }
+    throw Error('RESTORE_DONOR_UNAVAILABLE');
+  }
   async function status(){
     const result=await gate.inspect();
     return {ok:true,...result,providerEffects:'OFF',remoteActivation:'OFF'};
@@ -222,7 +239,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
         const admitted=validateRestoreTransport(args);
         assert(admitted.ok,admitted.code);
         assert(await gate.read()===null,'RESTORE_ALREADY_HELD');
-        const donor=getDonor(),baseline=await destination(api,donor);
+        const donor=await donorReady(),baseline=await destination(api,donor);
         const req=args.mappings||{};
         const reviewed=await previewRestore({archiveText:args.archiveText,password:args.password,
           decodeDonor:decodeBackupEnvelope,mode:args.mode,fresh:args.fresh===true,
@@ -321,7 +338,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
   async function previewV2(args){
     try{
       assert(await gate.read()===null,'RESTORE_ALREADY_HELD');
-      const baseline=await destination(api,getDonor());
+      const baseline=await destination(api,await donorReady());
       const reviewed=await v2ReviewedCut(args,baseline);
       return {ok:true,code:'RESTORE_V2_NATIVE_PLAN_REVIEW_REQUIRED',
         runId:args.runId,reviewedPlanSha256:reviewed.planSha256,
@@ -354,7 +371,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           same(intent.recovery.accountChoices,args.accountChoices)&&
           intent.planSha256===args.reviewedPlanSha256,
           'RESTORE_V2_OPERATOR_PLAN_CHANGED');
-        const donor=getDonor();
+        const donor=await donorReady();
         const baseline=await destination(api,donor);
         const review=await v2ReviewedCut(args,baseline);
         assert(intent.planSha256===review.planSha256&&
@@ -418,7 +435,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
       let db;
       try{
         db=await database();
-        return await reconcileRestore({gate,api,donor:getDonor(),db,
+        return await reconcileRestore({gate,api,donor:await donorReady(),db,
           archiveText:message.params?.archiveText,
           checkpointText:message.params?.checkpointText,
           password:message.params?.password});
