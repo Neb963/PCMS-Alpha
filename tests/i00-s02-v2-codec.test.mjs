@@ -237,3 +237,19 @@ test('S02 archive and inactive apply preserve original exit exclusions/removal/u
   assert.deepEqual(JSON.parse(JSON.stringify(oldOp.effect)),lost.effect);
   assert.equal(result.activation,'OFF');
 });
+
+
+test('S02 descriptor-based streaming does not retain canonical frame buffers and detects post-plan drift',async()=>{
+  const {pcms,donor}=await fixture();
+  const plan=await compileV2(pcms,donor);
+  assert.equal(plan.rows.length,3);
+  assert.ok(plan.rows.every(row=>
+    typeof row.sha256==='string'&&row.sha256.length===64&&
+    Number.isSafeInteger(row.length)&&!ArrayBuffer.isView(row)));
+  const valid=[];for await(const piece of streamV2Frames(plan))valid.push(piece);
+  assert.equal(concat(valid).length,plan.plaintextBytes);
+  pcms.stores.operations[0].value.status='MUTATED_AFTER_PREPARATION';
+  await assert.rejects((async()=>{
+    for await(const piece of streamV2Frames(plan))void piece;
+  })(),/BACKUP_V2_SOURCE_CUT_CHANGED/);
+});
