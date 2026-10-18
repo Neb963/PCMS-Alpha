@@ -34,7 +34,7 @@ function fixture({drift=false,tamper=false,truncated=false,legacy=false}={}){
  async function transport(url,init){
    assert.equal(init.method,'GET');assert.equal(init.redirect,'error');
    assert.equal(init.headers.Authorization,'Bearer '+token);effects++;
-   const u=new URL(url),path=u.pathname.replace('/repos/'+repository,'');
+   const u=new URL(url),path=u.pathname.replace('/repos/'+repository,'')+u.search;
    if(path==='')return as(200,{full_name:repository,private:true,id:42});
    if(path==='/git/ref/heads/main')return as(200,{ref:'refs/heads/main',object:{sha:HEAD,type:'commit'}});
    if(path==='/git/commits/'+HEAD)return as(200,{tree:{sha:CURRENT}});
