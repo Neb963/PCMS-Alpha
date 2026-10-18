@@ -385,6 +385,11 @@ def complete_donor_script(run_id):
            preview.archiveSha256!==preview.checkpointSha256||
            preview.review?.activation!=='OFF')
           throw Error('H_NATIVE_V2_REVIEW_NOT_AUTHENTICATED:'+preview?.code);
+        // No native-file restore may apply merely because the file is valid.
+        const preGuard=await action('APPLY_V2',{
+          ...params,reviewedPlanSha256:preview.reviewedPlanSha256});
+        if(preGuard?.ok!==false||preGuard.code!=='RESTORE_V2_FRESH_GUARD_REQUIRED')
+          throw Error('H_V2_NO_GUARD_ADMITTED_DONOR_EFFECT');
         const gate=gateModule.createRestoreGate(browser.storage.local);
         await gate.begin({
           planSha256:preview.reviewedPlanSha256,
@@ -395,6 +400,13 @@ def complete_donor_script(run_id):
           checkpointTier:3,fresh:true,
           recovery:{mode:'replace',nativeRunId:runId,mappings,accountChoices}
         });
+        const wrongReview=await action('APPLY_V2',{
+          ...params,reviewedPlanSha256:'0'.repeat(64)});
+        const before=await gate.inspect();
+        if(wrongReview?.ok!==false||
+           wrongReview.code!=='RESTORE_V2_OPERATOR_PLAN_CHANGED'||
+           before.groups.length!==0||before.createdContainers!==0)
+          throw Error('H_V2_WRONG_REVIEW_CREATED_DONOR_EFFECT');
         const applied=await action('APPLY_V2',{
           ...params,reviewedPlanSha256:preview.reviewedPlanSha256});
         if(!applied?.ok||applied.code!=='RESTORED_V2_DONOR_CANONICAL_INACTIVE'){
@@ -459,8 +471,9 @@ def complete_donor_script(run_id):
         if(observed.held!==true||observed.activation!=='OFF'||
            observed.status!=='COMPLETE_INACTIVE')
           throw Error('H_V2_CONTROLLER_ACTIVATED');
-        return {ok:true,donorStages:groups,donorContainers:imported.length,
-          donorCookieSets:cookieSets,canonicalRows:inventory.stores.meta.length,
+        return {ok:true,reviewAndHoldNegatives:true,donorStages:groups,
+          donorContainers:imported.length,donorCookieSets:cookieSets,
+          canonicalRows:inventory.stores.meta.length,
           sourceHistoryExact:true,historicalExclusion:true,
           uidRemappedInactive:true,held:observed.held,
           activation:observed.activation};
