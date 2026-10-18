@@ -1,7 +1,8 @@
 // S03 fixed-purpose GitHub connection and main-only catalog boundary.
 // Native Secret Service owns tokens; neither canonical state nor UI receives them.
 import {trustedExtensionPage} from './command-boundary.mjs';
-import {createRestoreSentinel,fail} from './journal.mjs';
+import {createRestoreSentinel,openCanonicalDatabase,fail} from './journal.mjs';
+import {createImportApprovalStore,getImportScopeDigest} from './catalog-import.mjs';
 import {scanMainCatalog,validRepository,makeInitialImportPreview} from './git-catalog.mjs';
 export const CATALOG_PORT='pcms-s03-catalog';
 const STATE_KEY='pcmsS03Git';
@@ -14,7 +15,7 @@ export function validateCatalogMessage(api,sender,message){
   if(!message||typeof message!=='object'||Array.isArray(message)||
       Object.keys(message).some(k=>!['type','params'].includes(k)))
     return fail('CAPABILITY_OFF');
-  const types=['SCAN_CATALOG','CONNECT_GIT','SCAN_CONNECTED','GIT_STATUS','DISCONNECT_GIT'];
+  const types=['SCAN_CATALOG','CONNECT_GIT','SCAN_CONNECTED','GIT_STATUS','DISCONNECT_GIT','APPROVE_IMPORT'];
   if(!types.includes(message.type))return fail('CAPABILITY_OFF');
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
@@ -22,11 +23,19 @@ export function validateCatalogMessage(api,sender,message){
     if(Object.keys(p).some(k=>!['repository','token'].includes(k))||
       !validRepository(p.repository)||!TOKEN.test(p.token||''))
       return fail('INVALID_PARAMS');
+  } else if(message.type==='APPROVE_IMPORT'){
+    if(Object.keys(p).some(k=>!['repositoryId','scopeDigest'].includes(k))||
+      typeof p.repositoryId!=='string'||!/^[1-9][0-9]{0,19}$/.test(p.repositoryId)||
+      typeof p.scopeDigest!=='string'||!/^[0-9a-f]{64}$/.test(p.scopeDigest))
+      return fail('INVALID_PARAMS');
   } else if(Object.keys(p).length)return fail('INVALID_PARAMS');
   return {ok:true};
 }
 export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
+  open=openCanonicalDatabase,
   native=(packet)=>api.runtime.sendNativeMessage(VAULT_HOST,packet)}={}){
+  let importDb;
+  const approvalStore=async()=>createImportApprovalStore(await (importDb ||= open().catch(e=>{importDb=null;throw e;})));
   const sentinel=createRestoreSentinel(api.storage.local);
   const readConfig=async()=>{
     const c=(await api.storage.local.get(STATE_KEY))?.[STATE_KEY];
@@ -42,7 +51,15 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
     if(!result?.ok||!result.complete)return result?.code?
       {ok:false,complete:false,code:result.code}:fail('CATALOG_INCOMPLETE');
     if(expectedId&&result.repositoryId!==expectedId)return fail('GIT_IDENTITY_CHANGED');
-    return {...result,preview:makeInitialImportPreview(result)};
+    const scopeDigest=await getImportScopeDigest(result);
+    const preview={...makeInitialImportPreview(result),scopeDigest};
+    if(!expectedId)return {...result,preview};
+    let approved=null;
+    try{approved=await (await approvalStore()).get(expectedId);}catch{}
+    const importStatus=approved?.ok?
+      approved.approval.scopeDigest===scopeDigest?'IMPORT_SCOPE_APPROVED':'IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED':
+      'IMPORT_SCOPE_UNAPPROVED';
+    return {...result,preview,importStatus};
   }
   async function run(message,sender){
     const auth=validateCatalogMessage(api,sender,message);
@@ -86,10 +103,25 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
         await api.storage.local.remove(STATE_KEY);
         return {ok:true,code:'GIT_DISCONNECTED'};
       }
-      if(message.type==='SCAN_CONNECTED'){
+      if(message.type==='SCAN_CONNECTED'||message.type==='APPROVE_IMPORT'){
+        if(message.type==='APPROVE_IMPORT'&&p.repositoryId!==config.repositoryId)
+          return fail('GIT_IDENTITY_CHANGED');
         const secret=await getSecret(config);
         if(!secret.ok)return secret;
-        return await scanAndPreview(config.repository,secret.token,config.repositoryId);
+        const current=await scanAndPreview(config.repository,secret.token,config.repositoryId);
+        if(!current?.ok)return current;
+        if(message.type==='SCAN_CONNECTED')return current;
+        if(current.preview.scopeDigest!==p.scopeDigest)
+          return fail('IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED');
+        if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+        const still=await readConfig();
+        if(still?.repositoryId!==config.repositoryId||still.repository!==config.repository)
+          return fail('GIT_CONNECTION_CHANGED');
+        return await (await approvalStore()).approve({
+          repository:current.repository,repositoryId:current.repositoryId,
+          head:current.head,scopeDigest:p.scopeDigest,
+          recognizedSlugs:current.generators.map(g=>g.slug),approvalAt:Date.now()
+        });
       }
       return fail('CAPABILITY_OFF');
     }catch{return fail('GIT_CONNECTION_UNAVAILABLE');}
