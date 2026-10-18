@@ -98,6 +98,22 @@
           <p id="pcms-stage-status" role="status" aria-live="polite">No I09 candidate pinned. Provider staging is held until independently qualified activation; no direct or public fallback.</p>
           <div id="pcms-stage-diff" class="table-wrap" tabindex="0" role="region" aria-label="Source add, change and delete summary">No candidate diff.</div>
         </section>
+        <section class="panel" aria-labelledby="pcms-catalog-heading">
+          <div class="panel-head"><h2 id="pcms-catalog-heading">GitHub main catalog</h2><span class="unknown">Complete read-only snapshot</span></div>
+          <p class="reason">Inspect recognized <code>generators/&lt;slug&gt;/</code> folders and the Git-owned default Chat 1 prompt. The result is a pinned complete main snapshot; unknown ownership is not treated as absence. The initial import requires separate verified account allocations and scope approval before any creation. Credentials are used for this inspection only and are not stored.</p>
+          <div class="account-controls">
+            <label for="pcms-catalog-repo">GitHub repository</label>
+            <input id="pcms-catalog-repo" value="Neb963/per-gens" maxlength="200" autocomplete="off" spellcheck="false">
+            <label for="pcms-catalog-token">Contents read credential</label>
+            <input id="pcms-catalog-token" type="password" autocomplete="off" spellcheck="false">
+            <button id="pcms-catalog-clear" type="button">Clear credential</button>
+            <button id="pcms-catalog-scan" type="button">Inspect main catalog</button>
+          </div>
+          <p id="pcms-catalog-status" role="status" aria-live="polite">Not connected. No remote changes will be made.</p>
+          <div id="pcms-catalog-list" class="table-wrap" role="region" tabindex="0" aria-label="Complete pinned main catalog"></div>
+          <label for="pcms-catalog-prompt">Authoritative default Chat 1 prompt at pinned revision</label>
+          <textarea id="pcms-catalog-prompt" rows="5" readonly spellcheck="false" placeholder="Inspect catalog to read existing Git prompt"></textarea>
+        </section>
         <section class="panel" aria-labelledby="pcms-source-heading">
           <div class="panel-head"><h2 id="pcms-source-heading">Private Git source — read only</h2><span class="unknown">Operator-triggered</span></div>
           <p class="reason">Inspect only <code>Neb963/per-gens</code> <code>main</code>. Requires a fine-grained GitHub token with Contents: Read-only, entered for this operation; token is never saved. No remote Git initialization, commit, asset rewrite or publication is available.</p>
