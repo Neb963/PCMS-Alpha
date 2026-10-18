@@ -1,5 +1,12 @@
 # S02 E-06 independent security review packet — NOT APPROVED
 
+## Exact-head integrated D/B/H-CI after B2 implementation — 2026-10-18
+
+The new same-run [required workflow 39138515377](https://github.com/Neb963/PCMS-Alpha/actions/runs/39138515377) verified source/host-code checkpoint `3ccfa0a282116e6d3fab5a5743ef93080ed8a856` and doc-inclusive HEAD `56dcf1317bb7503d0005805a0108c82adc064f82`: **fast 395/395 PASS, baseline PASS, packaged Firefox PASS and pcms-required PASS**. Inner installed XPI SHA-256 `d0dd791ff0e6662d310dc0fc8fbbe53f319bfb03c308dc82d0333286bb7d5d94` is identical in native H-CI, packaged B and fast packaging. The installed native host was **actually registered** in a disposable GitHub runner with D-Bus/Secret Service. On the changed host code, native death, wrong-secret rejection, ciphertext independent disk reopen, 50 PersonaMonkey Persona creations, 50 cookie imports, portable donor and 1,075 canonical records including 1,024 histories passed fresh-profile readback with restored controller **INACTIVE**. These observations supersede the earlier dated statement that current-host H-CI had not been rerun. Peak sampled summed process RSS was 1,460,744 KiB/14 processes, not unique resident memory and not a capacity SLO.
+
+**No approval implied:** even all-green integrated CI with real privileged disposable H-CI does **not** resolve B1's whole-source JS allocations or imply successful high-unique, near-limit donor, filesystem quota and 14 retained archives, or independently authorized E-06 approval. B2 is implemented and exercised in synthetic collision/failure tests, but still needs independent design/security assessment of its journal+nonce-history lifecycle. B1 remains blocking. No operator Fedora H, no live Perchance E-02 L. The changed security-sensitive candidate must be independently reviewed by a different authorized reviewer **after B1 is implemented and verified**, and the exact candidate checks rerun. All earlier reviewed and historical findings remain recorded below; keep draft/unmerged and production v2 OFF.
+
+
 ## October 18 re-review remediation checkpoint — B1 unresolved, B2 candidate pending exact-head proof
 
 The controlling [final review #5563400179](https://github.com/Neb963/PCMS-Alpha/pull/24#pullrequestreview-5563400179) requested B1/B2 remediation. This is a **new implementation-author checkpoint**, never independent E-06 approval. Keep PR #24 draft/unmerged, `reviewedV2` production OFF, original I17 no-auto-CREATE/RENAME quarantine and v1 compatibility.
