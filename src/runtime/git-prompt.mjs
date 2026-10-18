@@ -88,9 +88,9 @@ export async function writeExistingGitPrompt({
 // Independent observation after uncertain PATCH/HTTP acknowledgment. This
 // function NEVER writes; an unlocated or unattributed effect remains UNKNOWN.
 export async function observeGitPromptWrite({
-  token,repository,operationId,draft,repositoryId,maxAncestors=128
+  token,repository,operationId,expectedParent,draft,repositoryId,maxAncestors=128
 },transport=fetch,scan=scanMainCatalog){
-  if(!OP.test(operationId||'')||typeof draft!=='string'||
+  if(!OP.test(operationId||'')||!OID.test(expectedParent||'')||typeof draft!=='string'||
      !/^[1-9][0-9]{0,19}$/.test(repositoryId||'')||
      !Number.isSafeInteger(maxAncestors)||maxAncestors<1||maxAncestors>2048)
     return err('PROMPT_OBSERVATION_INVALID');
@@ -107,6 +107,8 @@ export async function observeGitPromptWrite({
         return err('PROMPT_OBSERVATION_UNVERIFIED');
       const trailer='PCMS-OP: '+operationId;
       if(commit.message?.split(/\r?\n/).at(-1)===trailer){
+        if(commit.parents.length!==1||commit.parents[0]?.sha!==expectedParent)
+          return err('PROMPT_ATTRIBUTION_UNVERIFIED');
         const tree=await get('GET','/git/trees/'+commit.tree.sha+'?recursive=1');
         if(tree?.truncated!==false||!Array.isArray(tree.tree))
           return err('PROMPT_OBSERVATION_INCOMPLETE');
