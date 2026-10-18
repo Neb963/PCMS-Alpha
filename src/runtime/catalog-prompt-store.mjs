@@ -32,7 +32,7 @@ export function createGitPromptStore(db){
     return tx(db,true,(m,t,done)=>m.get(key(repositoryId)).onsuccess=e=>{
       const prior=e.target.result?.record;
       if((prior?.revision||0)!==expectedRevision){done(fail('PROMPT_DRAFT_STALE'));return;}
-      if(prior?.effect&&prior.effect.state==='DISPATCH_POSSIBLE'){
+      if(prior?.effect&&['DISPATCH_POSSIBLE','UNCERTAIN'].includes(prior.effect.state)){
         done(fail('PROMPT_WRITE_UNCERTAIN'));return;
       }
       const record={repositoryId,revision:expectedRevision+1,text,
@@ -72,10 +72,17 @@ export function createGitPromptStore(db){
         done(fail('PROMPT_EFFECT_NOT_FOUND'));return;
       }
       const prior=record.effect;
-      if(prior.state==='VERIFIED'||prior.state==='UNCERTAIN'||prior.state==='CONFLICT'){
-        done(prior.state===state&&prior.possibleCommit===possibleCommit?
-          {ok:true,code:'PROMPT_RECEIPT_DUPLICATE',effect:prior}:
-          fail('PROMPT_EFFECT_ALREADY_TERMINAL'));return;
+      if(['VERIFIED','UNCERTAIN','CONFLICT'].includes(prior.state)){
+        if(prior.state===state&&prior.possibleCommit===possibleCommit){
+          done({ok:true,code:'PROMPT_RECEIPT_DUPLICATE',effect:prior});return;
+        }
+        // A previous uncertain remote effect may only be promoted after a
+        // new, independently verified Git ancestry + exact-byte observation.
+        if(!(prior.state==='UNCERTAIN'&&state==='VERIFIED'&&
+             receipt?.source==='REMOTE_PROMPT_OBSERVATION'&&
+             receipt.commit===possibleCommit&&oid(possibleCommit))){
+          done(fail('PROMPT_EFFECT_ALREADY_TERMINAL'));return;
+        }
       }
       const effect={...prior,state,possibleCommit,terminal:receipt?.code||state};
       m.put({key:key(repositoryId),record:{...record,effect}});
