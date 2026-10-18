@@ -17,6 +17,12 @@ function bytes(base64){
   return Uint8Array.from(atob(base64.replace(/\s/g,'')),x=>x.charCodeAt(0));
 }
 const fingerprint=async text=>hex(await crypto.subtle.digest('SHA-256',encoder.encode(text)));
+function base64Of(raw){
+  let str='';
+  for(let i=0;i<raw.length;i+=8192)
+    str+=String.fromCharCode(...raw.subarray(i,i+8192));
+  return btoa(str);
+}
 async function verify(raw,sha){
   const pre=encoder.encode('blob '+raw.length+'\0'),combined=new Uint8Array(pre.length+raw.length);
   combined.set(pre);combined.set(raw,pre.length);
@@ -164,7 +170,7 @@ export async function inspectReadyCandidate({
       const raw=await readBlob(c.entry);
       const sha256=hex(await crypto.subtle.digest('SHA-256',raw));
       files.push({path:c.path,size:c.size,sha256,oid:c.sha,
-        ...(includeSourceBytes?{base64:btoa(String.fromCharCode(...raw))}:{})});
+        ...(includeSourceBytes?{base64:base64Of(raw)}:{})});
     }
     const inputFingerprint=await fingerprint('PCMS_SOURCE_V1\n'+files.map(f=>
       JSON.stringify([f.path,f.size,f.sha256])).join('\n'));
