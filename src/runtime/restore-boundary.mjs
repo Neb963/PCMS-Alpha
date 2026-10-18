@@ -282,10 +282,130 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
     })().finally(()=>{running=null;});
     return running;
   }
+
+  async function nativeV2Evidence(runId){
+    assert(typeof runId==='string'&&/^s02_[a-f0-9]{32}$/.test(runId),
+      'RESTORE_V2_RUN_INVALID');
+    const connection=createV2NativeConnection(api);
+    try{
+      const receipt=await connection.exchange({action:'archive.inspect',runId});
+      assert(receipt?.ok===true&&receipt.runId===runId&&
+        receipt.state==='RECOVERY_VERIFIED'&&hex(receipt.ciphertextSha256)&&
+        hex(receipt.cutDigest)&&hex(receipt.preparedSha256)&&
+        receipt.expectedBytes===receipt.acceptedBytes&&receipt.acceptedBytes>0,
+        'RESTORE_V2_NATIVE_RECEIPT_REQUIRED');
+      const disk=await connection.exchange({action:'backup.verify',runId,
+        keyRef:'portable-recovery'});
+      assert(disk?.ok===true&&disk.runId===runId&&
+        disk.state==='AUTHENTICATED_INVENTORY_ONLY'&&
+        disk.sha256===receipt.ciphertextSha256,
+        'RESTORE_V2_INDEPENDENT_DISK_REQUIRED');
+      return {receipt,disk};
+    }finally{try{connection.close()}catch{}}
+  }
+  async function v2ReviewedCut(args,baseline){
+    const {receipt,disk}=await nativeV2Evidence(args?.runId);
+    const destinationSha256=await digest(JSON.stringify({
+      pcms:baseline.pcms,donor:baseline.snap,portable:baseline.portable
+    }));
+    const reviewed=await reviewV2NativePlan({
+      runId:args.runId,ciphertextSha256:receipt.ciphertextSha256,
+      preparedSha256:receipt.preparedSha256,cutDigest:receipt.cutDigest,
+      destinationSha256,checkpointSha256:disk.sha256,
+      mappings:args.mappings,accountChoices:args.accountChoices
+    });
+    return {receipt,disk,destinationSha256,...reviewed};
+  }
+  // Operator-facing read-only preview. Authentication and disk identity are
+  // obtained from the installed OS host, never from a UI-supplied receipt.
+  async function previewV2(args){
+    try{
+      assert(await gate.read()===null,'RESTORE_ALREADY_HELD');
+      const baseline=await destination(api,getDonor());
+      const reviewed=await v2ReviewedCut(args,baseline);
+      return {ok:true,code:'RESTORE_V2_NATIVE_PLAN_REVIEW_REQUIRED',
+        runId:args.runId,reviewedPlanSha256:reviewed.planSha256,
+        archiveSha256:reviewed.receipt.ciphertextSha256,
+        checkpointSha256:reviewed.disk.sha256,
+        destinationSha256:reviewed.destinationSha256,
+        nativeCutDigest:reviewed.receipt.cutDigest,
+        verifiedSourceOnly:true,activation:'OFF',providerEffects:'OFF',
+        review:reviewed.plan};
+    }catch(e){return fail(redacted(e))}
+  }
+  // This is never a background alarm or startup action. Like I16 APPLY, it
+  // requires an actual trusted extension-page invocation, an already durable
+  // human-reviewed plan, a separate disk checkpoint and a held restore marker.
+  async function applyV2(args){
+    if(running)return fail('RESTORE_BUSY');
+    running=(async()=>{
+      let db=null;
+      try{
+        assert(args&&typeof args==='object'&&!Array.isArray(args),
+          'RESTORE_V2_INPUT_INVALID');
+        const intent=await gate.read();
+        assert(intent?.active===true&&intent.fresh===true&&
+          intent.status==='GUARD_INSTALLED'&&
+          Object.keys(intent.groups||{}).length===0,
+          'RESTORE_V2_FRESH_GUARD_REQUIRED');
+        assert(intent.recovery?.mode==='replace'&&
+          intent.recovery.nativeRunId===args.runId&&
+          same(intent.recovery.mappings,args.mappings)&&
+          same(intent.recovery.accountChoices,args.accountChoices)&&
+          intent.planSha256===args.reviewedPlanSha256,
+          'RESTORE_V2_OPERATOR_PLAN_CHANGED');
+        const donor=getDonor();
+        const baseline=await destination(api,donor);
+        const review=await v2ReviewedCut(args,baseline);
+        assert(intent.planSha256===review.planSha256&&
+          intent.archiveSha256===review.receipt.ciphertextSha256&&
+          intent.checkpointSha256===review.disk.sha256&&
+          intent.destinationSha256===review.destinationSha256,
+          'RESTORE_V2_REVIEWED_FILE_OR_DESTINATION_CHANGED');
+        const recovered=await prepareQualifiedV2FreshProfile({
+          api,runId:args.runId,currentPcms:baseline.pcms,
+          mode:'replace',accountChoices:args.accountChoices,
+          guard:gate,deferCanonical:true
+        });
+        assert(recovered.status==='INACTIVE_SOURCE_VERIFIED_NOT_APPLIED'&&
+          recovered.nativeReceipt==='RECOVERY_VERIFIED'&&
+          recovered.ciphertextSha256===review.receipt.ciphertextSha256,
+          'RESTORE_V2_SOURCE_NOT_QUALIFIED');
+        const source=recovered.prepared.sourcePcms;
+        const payload=recovered.prepared.donor;
+        assert(source&&Array.isArray(payload?.personas)&&
+          Object.keys(args.mappings).length===payload.personas.length&&
+          payload.personas.every(p=>p?.profile?.routeMode!=='direct'&&
+            Object.hasOwn(args.mappings,p.key))&&
+          payload.personas.every(p=>args.mappings[p.key]==='__create__'||
+            baseline.snap.containers.some(c=>c.cookieStoreId===args.mappings[p.key])),
+          'RESTORE_V2_PERSONA_MAPPING_UNREVIEWED');
+        const latest=await destination(api,donor);
+        assert(same(latest,baseline),'RESTORE_V2_DESTINATION_DRIFT');
+        const held=await gate.read();
+        assert(same(held,intent),'RESTORE_V2_GUARD_CHANGED');
+        db=await database();
+        await applyGuardedGroups({db,donor,baseline,intent,req:args.mappings,
+          payload,incomingPcms:source,mode:'replace',fresh:true,
+          accountChoices:args.accountChoices});
+        const final=await gate.inspect();
+        assert(final.held===true&&final.activation==='OFF'&&
+          final.status==='COMPLETE_INACTIVE','RESTORE_V2_FINAL_HOLD_REQUIRED');
+        return {ok:true,code:'RESTORED_V2_DONOR_CANONICAL_INACTIVE',
+          runId:args.runId,sourceAudit:recovered.prepared.sourceAudit,
+          ...(await status()),dataRecovered:true,ownerSessionsVerified:false,
+          protectedRoutesVerified:false,predecessorProvenOff:false};
+      }catch(e){return fail(redacted(e));}
+      finally{try{db?.close()}catch{}}
+    })().finally(()=>{running=null;});
+    return running;
+  }
   async function run(message,sender){
     if(!trustedRestoreSender(api,sender))return fail('UNTRUSTED_SENDER');
     if(!message||typeof message!=='object'||Array.isArray(message))return fail('RESTORE_INPUT_INVALID');
     if(message.action==='STATUS')return status();
+    if(message.action==='PREVIEW_V2')return previewV2(message.params);
+    if(message.action==='APPLY_V2')return applyV2(message.params);
     if(message.action==='RECONCILE'){
       if(running)return fail('RESTORE_BUSY');
       if(typeof message.params?.archiveText!=='string'||
