@@ -160,3 +160,65 @@ test('S03: extension sender and operation allowlist, no token storage or mutatio
     'pcms-catalog-list','pcms-catalog-prompt'])assert.match(files[2],new RegExp('id="'+id+'"'));
   assert.doesNotMatch(files[3],/storage\.local\.set|storage\.sync\.set/);
 });
+
+test('S03: one-time native-vault connect, read-only reconnection scan and explicit disconnect',async()=>{
+  const state=new Map(),secrets=new Map(),observations=[];
+  const api={runtime:{id:'combined-id',getURL:x=>'moz-extension://test/'+x},storage:{local:{
+    get:async key=>Object.fromEntries([...state].filter(([k])=>k===key)),
+    set:async values=>{for(const [k,v] of Object.entries(values)){
+      assert.ok(!JSON.stringify(v).includes(TOKEN),'token must never enter local storage');
+      state.set(k,v);
+    }},
+    remove:async key=>state.delete(key)
+  }}};
+  const sender={id:'combined-id',url:'moz-extension://test/pcms/index.html'};
+  async function native(message){
+    observations.push({...message});
+    const id=message.repositoryId;
+    if(message.action==='git.store'){
+      secrets.set(id,message.credential);return {ok:true};
+    }
+    if(message.action==='git.get')return {ok:secrets.has(id),credential:secrets.get(id)};
+    if(message.action==='git.status')return {ok:secrets.has(id),present:secrets.has(id)};
+    if(message.action==='git.remove'){secrets.delete(id);return {ok:true};}
+    throw Error('unexpected native action');
+  }
+  const fx=fake();
+  const boundary=createCatalogBoundary(api,{native,
+    transport:fx.transport,
+    scan:async({repository,token})=>{
+      assert.equal(repository,repo);assert.equal(token,TOKEN);
+      return await run(fx);
+    }});
+  const connect=await boundary.run({type:'CONNECT_GIT',params:{repository:repo,token:TOKEN}},sender);
+  assert.equal(connect.code,'GIT_CONNECTED',JSON.stringify(connect));
+  assert.equal(connect.repositoryId,'42');
+  assert.equal(state.get('pcmsS03Git').repository,repo);
+  assert.equal(state.get('pcmsS03Git').repositoryId,'42');
+  assert.equal((await boundary.run({type:'GIT_STATUS'},sender)).code,'GIT_CREDENTIAL_PRESENT');
+  const scan=await boundary.run({type:'SCAN_CONNECTED'},sender);
+  assert.equal(scan.code,'CATALOG_COMPLETE');
+  assert.equal(scan.preview.approved,false);
+  assert.equal(JSON.stringify(scan).includes(TOKEN),false);
+  const disconnect=await boundary.run({type:'DISCONNECT_GIT'},sender);
+  assert.equal(disconnect.code,'GIT_DISCONNECTED');
+  assert.equal((await boundary.run({type:'SCAN_CONNECTED'},sender)).code,'GIT_RECONNECT_REQUIRED');
+  assert.ok(observations.some(x=>x.action==='git.get'));
+  assert.ok(observations.some(x=>x.action==='git.remove'));
+  assert.equal(fx.metrics().writes,0);
+});
+test('S03: vault unavailable does not persist configuration or claim Git success',async()=>{
+  const state={};
+  const api={runtime:{id:'combined-id',getURL:x=>'moz-extension://test/'+x},storage:{local:{
+    get:async key=>key in state?{[key]:state[key]}:{},
+    set:async values=>Object.assign(state,values),
+    remove:async key=>delete state[key]
+  }}};
+  const sender={id:'combined-id',url:'moz-extension://test/pcms/index.html'},fx=fake();
+  const boundary=createCatalogBoundary(api,{native:async()=>({ok:false,code:'LOCKED'}),
+    transport:fx.transport,scan:async()=>{throw Error('should not scan')}});
+  assert.equal((await boundary.run({type:'CONNECT_GIT',
+    params:{repository:repo,token:TOKEN}},sender)).code,'GIT_VAULT_UNAVAILABLE');
+  assert.equal(state.pcmsS03Git,undefined);
+  assert.equal((await boundary.run({type:'SCAN_CONNECTED'},sender)).code,'GIT_RECONNECT_REQUIRED');
+});
