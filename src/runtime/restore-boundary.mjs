@@ -18,24 +18,6 @@ import {createV2NativeConnection} from './backup-v2-session.mjs';
 import {prepareQualifiedV2FreshProfile} from './restore-v2-qualified.mjs';
 import {reviewV2NativePlan} from './restore-v2-review.mjs';
 export const RESTORE_PORT='pcms-i16-restore';
-// Firefox MV3 event pages may suspend an async port handler after about 30s
-// without extension API activity. Only while a trusted operator's explicit
-// APPLY_V2 is in flight, use a harmless browser API to keep this same
-// context alive. Never retry a possible effect or lift the I16 restore hold.
-// Stop upon terminal response and after at most ten minutes.
-function holdScopedV2EventPage(api){
-  if(typeof api.runtime?.getPlatformInfo!=='function')return ()=>{};
-  const started=Date.now();
-  let active=true;
-  let timer;
-  const stop=()=>{active=false;clearInterval(timer);};
-  timer=setInterval(()=>{
-    if(!active||Date.now()-started>=600000)return stop();
-    try{void Promise.resolve(api.runtime.getPlatformInfo()).catch(()=>{});}
-    catch{}
-  },8000);
-  return stop;
-}
 const fail=code=>({ok:false,code});
 const redacted=e=>/^(RESTORE_|BACKUP_)[A-Z0-9_]{3,70}$/.test(e?.message||'')?e.message:'RESTORE_HELD_UNKNOWN';
 const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
@@ -374,7 +356,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
   async function applyV2(args){
     if(running)return fail('RESTORE_BUSY');
     running=(async()=>{
-      let db=null;
+      let db=null,nativeLifetime=null;
       try{
         assert(args&&typeof args==='object'&&!Array.isArray(args),
           'RESTORE_V2_INPUT_INVALID');
@@ -397,6 +379,22 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           intent.checkpointSha256===review.disk.sha256&&
           intent.destinationSha256===review.destinationSha256,
           'RESTORE_V2_REVIEWED_FILE_OR_DESTINATION_CHANGED');
+        // Firefox MV3 can suspend an event page after an async port callback.
+        // Unlike a timer, an open native-messaging port is an explicit Gecko
+        // event-page lifetime blocker. The host is already mandatory for this
+        // approved archive; this second port is READ-ONLY and pinned to its
+        // verified run/disk identity. It carries no write/retry authority.
+        // If any connection dies, recovery remains held and cannot be
+        // automatically replayed or promoted.
+        nativeLifetime=createV2NativeConnection(api);
+        const pinned=await nativeLifetime.exchange({
+          action:'archive.inspect',runId:args.runId});
+        assert(pinned?.ok===true&&pinned.state==='RECOVERY_VERIFIED'&&
+          pinned.runId===args.runId&&
+          pinned.ciphertextSha256===review.receipt.ciphertextSha256&&
+          pinned.cutDigest===review.receipt.cutDigest&&
+          pinned.preparedSha256===review.receipt.preparedSha256,
+          'RESTORE_V2_LIFETIME_FILE_CHANGED');
         const recovered=await prepareQualifiedV2FreshProfile({
           api,runId:args.runId,currentPcms:baseline.pcms,
           mode:'replace',accountChoices:args.accountChoices,
@@ -431,7 +429,8 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           dataRecovered:true,ownerSessionsVerified:false,
           protectedRoutesVerified:false,predecessorProvenOff:false};
       }catch(e){return fail(redacted(e));}
-      finally{try{db?.close()}catch{}}
+      finally{try{nativeLifetime?.close()}catch{}
+        try{db?.close()}catch{}}
     })().finally(()=>{running=null;});
     return running;
   }
@@ -471,12 +470,9 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
       port.onMessage.addListener(msg=>{
         if(busy){try{port.postMessage(fail('RESTORE_PORT_BUSY'));}catch{}return;}
         busy=true;
-        const stopLifetime=msg?.action==='APPLY_V2' &&
-          trustedRestoreSender(api,port.sender)?
-          holdScopedV2EventPage(api):()=>{};
         void run(msg,port.sender).then(v=>{try{port.postMessage(v);}catch{}})
           .catch(()=>{try{port.postMessage(fail('RESTORE_HELD_UNKNOWN'));}catch{}})
-          .finally(()=>{stopLifetime();busy=false;});
+          .finally(()=>{busy=false;});
       });
     });
     // Startup reads status only. Never execute, retry or release guard on wake.
