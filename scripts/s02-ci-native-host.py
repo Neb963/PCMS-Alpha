@@ -192,11 +192,53 @@ def native_script():
            Object.keys(payload.cookies).length!==50)
           throw Error('H_DONOR_SYNTHETIC_FLEET_INCOMPLETE');
         const envelope=await donor.encodeBackupEnvelope({payload,password});
+        // CI-only fixture built from the already captured synthetic snapshot.
+        // This proves installed native-stream integration, NOT an immutable
+        // production IndexedDB cut or a bounded browser capture.
+        const wire=await import('./backup-v2-codec.mjs');
+        const blobIndex=new Map();
+        for(const row of pcms.stores.meta){
+          for(const source of [row.value?.record?.candidate,
+                               row.value?.record?.previous]){
+            if(!source?.files||!source?.blobs)continue;
+            const byPath=new Map(source.files.map(f=>[f.path,f]));
+            for(const blob of source.blobs){
+              const proof=byPath.get(blob.path);
+              if(!proof)throw Error('H_PINNED_SOURCE_MANIFEST_INVALID');
+              if(!blobIndex.has(proof.sha256))
+                blobIndex.set(proof.sha256,blob.base64);
+            }
+          }
+        }
+        const sorted=Object.fromEntries(core.DB_STORES.map(store=>[
+          store,[...pcms.stores[store]].sort((a,b)=>{
+            const x=wire.canonicalJSON(a.key),y=wire.canonicalJSON(b.key);
+            return x<y?-1:x>y?1:0;
+          })
+        ]));
+        const fixtureCut={
+          async assertPinned(){return true;},
+          async counts(){return Object.fromEntries(core.DB_STORES.map(
+            store=>[store,sorted[store].length]));},
+          async *rows(){
+            for(const store of core.DB_STORES)
+              for(const row of sorted[store])yield {store,row};
+          },
+          async blob(sha){
+            const value=blobIndex.get(sha);
+            if(typeof value!=='string')throw Error('H_PINNED_BLOB_MISSING');
+            return Uint8Array.from(atob(value),c=>c.charCodeAt(0));
+          }
+        };
+        if((await core.verifyCanonicalV2Unchanged(db,pcms)).ok!==true)
+          throw Error('H_PINNED_CUT_BEFORE_DRIFT');
         const observed=[];
         for(let i=0;i<2;i++){
           const runId='s02_'+crypto.randomUUID().replaceAll('-','');
           const outcome=await native.exportV2Candidate({
-            db,api:browser,pcms,donorEnvelope:envelope,runId,
+            db,api:browser,
+            ...(i===0?{pinnedCut:fixtureCut}:{pcms}),
+            donorEnvelope:envelope,runId,
             checkScope:async()=>true,checkRestoreHold:async()=>false
           });
           if(outcome?.state!=='AUTHENTICATED_INVENTORY_ONLY'||
@@ -209,7 +251,8 @@ def native_script():
           if(verified.state!=='RECOVERY_VERIFIED'||verified.runId!==runId||
              verified.activation!=='OFF')throw Error('H_NATIVE_REOPEN_FAILED');
           observed.push({runId,sha256:verified.sha256,
-            rows:verified.sourceRows});
+            rows:verified.sourceRows,
+            encoder:i===0?'PINNED_STREAM':'AGGREGATE_LEGACY'});
         }
         // Real OS process-loss boundary: persistent host opens a new run,
         // durably journals OPEN_OBSERVED, then its native port is closed
