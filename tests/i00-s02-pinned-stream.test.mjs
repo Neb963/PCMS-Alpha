@@ -7,7 +7,8 @@ import {webcrypto} from 'node:crypto';
 import {digest,DB_STORES} from '../src/ui/backup-core.mjs';
 import {compilePinnedV2,streamPinnedV2Frames}
   from '../src/ui/backup-v2-pinned-stream.mjs';
-import {decodeAuthenticatedV2} from '../src/ui/backup-v2-codec.mjs';
+import {compileV2,streamV2Frames,decodeAuthenticatedV2}
+  from '../src/ui/backup-v2-codec.mjs';
 import {createPortableBackupPayload,encodeBackupEnvelope,decodeBackupEnvelope}
   from '../donor/personamonkey/extension/lib/backup-package.js';
 
@@ -129,4 +130,19 @@ test('S02 pinned-cut enforces record ordering, missing source and bounded limits
   await assert.rejects(compilePinnedV2(fake,donor),
     /BACKUP_V2_PINNED_CUT_CHANGED/);
   assert.ok(DB_STORES.includes('meta'));
+});
+
+test('S02 bounded pinned source framing is byte-for-byte compatible with frozen legacy v2',async()=>{
+  const {cut,donor}=await fixture(6);
+  const stores=Object.fromEntries(DB_STORES.map(store=>[store,[]]));
+  for await(const {store,row} of cut.rows())stores[store].push(row);
+  // Test oracle may materialize six rows; the real pinned-plan API must not.
+  const legacy=await compileV2({schema:1,stores},donor);
+  const incremental=await compilePinnedV2(cut,donor);
+  const oldFrames=[],newFrames=[];
+  for await(const part of streamV2Frames(legacy))oldFrames.push(part);
+  for await(const part of streamPinnedV2Frames(incremental))newFrames.push(part);
+  assert.deepEqual(whole(newFrames),whole(oldFrames));
+  assert.equal(incremental.plaintextBytes,legacy.plaintextBytes);
+  assert.deepEqual(incremental.terminal,legacy.terminal);
 });
