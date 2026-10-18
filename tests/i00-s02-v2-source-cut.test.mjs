@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
-import {DB_STORES,MAX_ARCHIVE_BYTES,snapshotCanonicalV2,consistentOrThrow,digest}
+import {DB_STORES,MAX_ARCHIVE_BYTES,snapshotCanonicalV2,verifyCanonicalV2Unchanged,digest}
   from '../src/ui/backup-core.mjs';
 import {compileV2} from '../src/ui/backup-v2-codec.mjs';
 import {createPortableBackupPayload,encodeBackupEnvelope}
@@ -69,10 +69,18 @@ test('R2 production v2 cursor cut exceeds 64MiB before dedup; no history omissio
   assert.ok(plan.plaintextBytes<size/16,{
     preDedupBytes:size,archivePlaintextBytes:plan.plaintextBytes});
   assert.equal(cut.stores.meta.at(-1).key,'stage-history:review-0075');
-  const reread=await snapshotCanonicalV2(disposableDB(rows));
-  consistentOrThrow(cut,reread);
-  reread.stores.meta.at(-1).value.record.candidate.files[0].size++;
-  assert.throws(()=>consistentOrThrow(cut,reread),/BACKUP_LOCAL_DRIFT/);
+  const checked=await verifyCanonicalV2Unchanged(disposableDB(rows),cut);
+  assert.equal(checked.ok,true);
+  assert.equal(checked.storeCounts.meta,76);
+  const altered={...rows,meta:rows.meta.map(row=>row)};
+  altered.meta[altered.meta.length-1]={...rows.meta.at(-1),
+    key:'stage-history:changed-during-capture'};
+  await assert.rejects(
+    verifyCanonicalV2Unchanged(disposableDB(altered),cut),
+    /BACKUP_SOURCE_CUT_CHANGED/);
+  await assert.rejects(
+    verifyCanonicalV2Unchanged(disposableDB({...rows,meta:rows.meta.slice(0,-1)}),cut),
+    /BACKUP_SOURCE_CUT_CHANGED/);
   const peak=process.memoryUsage().heapUsed;
   console.log('S02_R2_64M_SOURCE_MEASURE='+JSON.stringify({
     preDedupBytes:size,uniqueBlobs:plan.terminal.uniqueBlobs,
