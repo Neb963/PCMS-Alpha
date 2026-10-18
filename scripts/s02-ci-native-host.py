@@ -151,7 +151,8 @@ def native_script():
           containers.push({cookieStoreId:cid,name:'CI archived Persona '+i,
             color:'blue',icon:'fingerprint'});
           cookiesByProfile[cid]=[{name:'ci-'+i,value:'disposable-only-'+i,
-            domain:'example.invalid',path:'/',secure:true,httpOnly:true}];
+            domain:'example.com',hostOnly:true,session:true,
+            path:'/',secure:true,httpOnly:true}];
         }
         for(let i=0;i<1024;i++){
           const raw=[
@@ -450,7 +451,7 @@ def complete_donor_script(run_id):
         for(const identity of imported){
           const cookies=await browser.cookies.getAll({storeId:identity.cookieStoreId});
           if(cookies.some(c=>c.name?.startsWith('ci-')&&
-                            c.domain?.includes('example.invalid')))cookieSets++;
+                            c.domain?.includes('example.com')))cookieSets++;
         }
         if(cookieSets!==50)
           throw Error('H_V2_REAL_DONOR_COOKIES_INCOMPLETE:'+cookieSets);
