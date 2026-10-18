@@ -396,8 +396,20 @@ def complete_donor_script(run_id):
         });
         const applied=await action('APPLY_V2',{
           ...params,reviewedPlanSha256:preview.reviewedPlanSha256});
-        if(!applied?.ok||applied.code!=='RESTORED_V2_DONOR_CANONICAL_INACTIVE')
-          throw Error('H_V2_NATIVE_DONOR_APPLICATION_FAILED:'+applied?.code);
+        if(!applied?.ok||applied.code!=='RESTORED_V2_DONOR_CANONICAL_INACTIVE'){
+          const held=await gate.inspect();
+          const donorView=await browser.runtime.sendMessage({type:'GET_SNAPSHOT'})
+            .catch(()=>null);
+          const contexts=await browser.contextualIdentities.query({}).catch(()=>[]);
+          // Synthetic disposable CI only; preserve no identities or secrets.
+          throw Error('H_V2_NATIVE_DONOR_APPLICATION_FAILED:'+JSON.stringify({
+            code:applied?.code,step:held.step,status:held.status,
+            groups:held.groups,createdContainers:held.createdContainers,
+            observedContexts:contexts.length,
+            observedProfiles:Object.keys(donorView?.state?.profiles||{}).length,
+            observedScripts:Object.keys(donorView?.state?.scripts||{}).length
+          }));
+        }
         const groups=Object.fromEntries((applied.groups||[])
           .map(g=>[g.key,g.status]));
         for(const name of ['donor-personas','donor-cookies','donor-portable',
