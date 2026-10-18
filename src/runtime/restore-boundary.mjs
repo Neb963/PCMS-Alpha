@@ -291,8 +291,8 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
         await applyGuardedGroups({db,donor,baseline,intent,req,
           payload:incoming.donor,incomingPcms:incoming.archive.pcms,
           mode:args.mode});
-        return {ok:true,code:'RESTORED_INACTIVE_REVIEW_REQUIRED',
-          ...(await status()),dataRecovered:true,ownerSessionsVerified:false,
+        return {...(await status()),ok:true,code:'RESTORED_INACTIVE_REVIEW_REQUIRED',
+          dataRecovered:true,ownerSessionsVerified:false,
           protectedRoutesVerified:false,predecessorProvenOff:false};
       }catch(e){return fail(redacted(e));}
       finally{try{db?.close();}catch{}}
@@ -408,9 +408,9 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
         const final=await gate.inspect();
         assert(final.held===true&&final.activation==='OFF'&&
           final.status==='COMPLETE_INACTIVE','RESTORE_V2_FINAL_HOLD_REQUIRED');
-        return {ok:true,code:'RESTORED_V2_DONOR_CANONICAL_INACTIVE',
+        return {...(await status()),ok:true,code:'RESTORED_V2_DONOR_CANONICAL_INACTIVE',
           runId:args.runId,sourceAudit:recovered.prepared.sourceAudit,
-          ...(await status()),dataRecovered:true,ownerSessionsVerified:false,
+          dataRecovered:true,ownerSessionsVerified:false,
           protectedRoutesVerified:false,predecessorProvenOff:false};
       }catch(e){return fail(redacted(e));}
       finally{try{db?.close()}catch{}}
