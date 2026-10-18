@@ -135,8 +135,13 @@ def native_script():
           containers=[],cookiesByProfile={};
         for(let i=0;i<50;i++){
           const cid='firefox-container-'+(200+i),sid='script-'+i;
-          records.push({key:'account:s02-ci-'+i,account:{
-            accountId:'s02-ci-'+i,state:'ARCHIVED',revision:1}});
+          const account={accountId:'s02-ci-'+i,
+            state:i===0?'VERIFIED':'ARCHIVED',revision:1};
+          if(i===0){
+            account.personaUid='11111111-1111-4111-8111-111111111111';
+            account.identity={principalFingerprint:'e'.repeat(64)};
+          }
+          records.push({key:'account:s02-ci-'+i,account});
           profiles[cid]={containerId:cid,managed:true,routeId:'__block__',
             name:'CI archived Persona '+i,scriptIds:[sid],
             killSwitch:true,blockLocalNetwork:true};
@@ -147,6 +152,11 @@ def native_script():
           cookiesByProfile[cid]=[{name:'ci-'+i,value:'disposable-only-'+i,
             domain:'example.invalid',path:'/',secure:true,httpOnly:true}];
         }
+        // Imported release approval is an archival fact, not a new
+        // permission to execute, publish or activate restored data.
+        records.push({key:'release:s02-old',release:{
+          state:'APPROVED',approval:{canPublish:true},
+          dispatchPossible:false}});
         for(let i=0;i<1024;i++){
           const raw=[
             ['main.pjs',enc.encode('output="h-source-'+i+'";')],
@@ -253,6 +263,16 @@ def fresh_script(run_id):
       const idb=await import('./restore-idb.mjs');
       const db=await journal.openCanonicalDatabase();
       try{
+        // A reliable, later local removal excludes an archived account
+        // even in a synthetic fresh-profile replace operation.
+        const tombstone=db.transaction('meta','readwrite');
+        tombstone.objectStore('meta').put({
+          key:'removal:s02-ci-1',state:'REMOVED_ONLY_LOCALLY',revision:5});
+        await new Promise((resolve,reject)=>{
+          tombstone.oncomplete=resolve;
+          tombstone.onerror=()=>reject(Error('H_REMOVAL_TOMBSTONE_WRITE_FAILED'));
+          tombstone.onabort=()=>reject(Error('H_REMOVAL_TOMBSTONE_ABORTED'));
+        });
         const current=await core.snapshotCanonical(db);
         if(current.stores.meta.some(r=>r.key==='backup:v2:'+runId))
           throw Error('H_FRESH_BROWSER_LEDGER_NOT_EMPTY');
@@ -275,16 +295,30 @@ def fresh_script(run_id):
           archiveSha256:receipt.ciphertextSha256,
           checkpointSha256:disk.sha256,checkpointTier:3,fresh:true});
         const accountChoices=Object.fromEntries(Array.from({length:50},
-          (_,i)=>['s02-ci-'+i,'INCLUDE_INACTIVE']));
+          (_,i)=>['s02-ci-'+i,i===1?'EXCLUDE':'INCLUDE_INACTIVE']));
         const restored=await qualified.prepareQualifiedV2FreshProfile({
           api:browser,runId,currentPcms:current,mode:'replace',
-          accountChoices,guard});
+          accountChoices,guard,uidRemap:{
+            '11111111-1111-4111-8111-111111111111':
+              '22222222-2222-4222-8222-222222222222'
+          }});
         const payload=restored.prepared.donor;
         const candidate=restored.prepared.prepared;
         const last=candidate.stores.meta.find(r=>
           r.key==='stage-history:s02-ci-1023');
         const exact=last?.value?.record?.candidate;
         const raw=exact?.blobs.find(f=>f.path==='main.pjs');
+        const get=row=>candidate.stores.meta.find(v=>v.key===row)?.value;
+        const survivor=get('account:s02-ci-0')?.account;
+        const importedApproval=get('release:s02-old')?.release;
+        if(!survivor||survivor.state!=='VERIFICATION_PENDING'||
+           survivor.personaUid!=='22222222-2222-4222-8222-222222222222'||
+           survivor.identity!==null||
+           get('account:s02-ci-1')!==undefined||
+           get('removal:s02-ci-1')?.state!=='REMOVED_ONLY_LOCALLY'||
+           importedApproval?.state!=='RESTORE_REVIEW_REQUIRED'||
+           importedApproval?.approval!==null)
+          throw Error('H_UID_REMOVAL_OR_APPROVAL_HISTORY_ACTIVATED');
         if(restored.activation!=='OFF'||restored.providerEffects!=='OFF'||
            restored.donorApply!=='NOT_AUTHORIZED'||
            payload.personas?.length!==50||
@@ -310,7 +344,8 @@ def fresh_script(run_id):
            repeated.ciphertextSha256!==receipt.ciphertextSha256)
           throw Error('H_NATIVE_AFTER_FRESH_RESTORE_CHANGED');
         return {ok:true,rows:independent.stores.meta.length,
-          donorPersonas:payload.personas.length,
+          historicalAccountExcluded:true,uidRemappedInactive:true,
+          importedApprovalInactive:true,donorPersonas:payload.personas.length,
           sourceManifests:restored.prepared.sourceAudit?.manifests,
           held:held.held,controller:held.controller,activation:held.activation,
           nativeRunId:runId};
@@ -443,6 +478,9 @@ def main():
         assert restored.get("ok") is True,("H_FRESH_NATIVE_RECOVERY",restored)
         assert restored.get("donorPersonas")==50 and restored.get("rows",0)>=1074
         assert restored.get("activation")=="OFF" and restored.get("held") is True
+        assert restored.get("historicalAccountExcluded") is True
+        assert restored.get("uidRemappedInactive") is True
+        assert restored.get("importedApprovalInactive") is True
         print("H S02_ACTUAL_NATIVE_DISK_TO_FRESH_PROFILE_CANONICAL_INACTIVE_RESTORE=PASS",
               json.dumps(restored),flush=True)
         assert sampler.peak_kib>0 and sampler.max_processes>=2, \
