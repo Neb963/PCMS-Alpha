@@ -113,6 +113,43 @@ class TestHost(unittest.TestCase):
         self.assertFalse((self.root/(other+".encrypted")).exists())
         next_host.close()
 
+    def test_competing_native_hosts_cannot_reserve_same_pair(self):
+        raw=make_payload()
+        pair=(bytes(range(16)),bytes(range(12)))
+        self.host._new_entropy=lambda:pair
+        self.assertTrue(self.begin(raw)["ok"])
+        other="s02_"+"a"*32
+        competitor=V2ArchiveHost(self.root,lambda:PASS)
+        competitor._new_entropy=lambda:pair
+        busy=competitor.action({"action":"export.begin","runId":other,
+                "cutDigest":CUT,"expectedPlaintextBytes":len(raw),
+                "keyRef":"portable-recovery"})
+        self.assertEqual(busy["code"],"BACKUP_SESSION_BUSY")
+        self.host.close()
+        after=competitor.action({"action":"export.begin","runId":other,
+                "cutDigest":CUT,"expectedPlaintextBytes":len(raw),
+                "keyRef":"portable-recovery"})
+        self.assertEqual(after["code"],"BACKUP_ENTROPY_PAIR_REUSED")
+        competitor.close()
+
+    def test_reserved_pair_survives_missing_ciphertext_and_missing_journal(self):
+        raw=make_payload()
+        pair=(bytes(range(16)),bytes(range(12)))
+        self.host._new_entropy=lambda:pair
+        self.assertTrue(self.begin(raw)["ok"])
+        self.host.close()
+        # Manual deletion of an incomplete file/ledger cannot reset entropy.
+        (self.root/(RUN+".encrypted")).unlink()
+        (self.root/(RUN+".ledger")).unlink()
+        other="s02_"+"f"*32
+        restarted=V2ArchiveHost(self.root,lambda:PASS)
+        restarted._new_entropy=lambda:pair
+        result=restarted.action({"action":"export.begin","runId":other,
+                 "cutDigest":CUT,"expectedPlaintextBytes":len(raw),
+                 "keyRef":"portable-recovery"})
+        self.assertEqual(result["code"],"BACKUP_ENTROPY_PAIR_REUSED")
+        restarted.close()
+
     def test_corrupt_collision_evidence_fail_closed(self):
         raw=make_payload()
         self.root.mkdir(mode=0o700)
