@@ -8,6 +8,7 @@ import {prepareInactiveV2FromStage} from './restore-v2-prep.mjs';
 import {decodeBackupEnvelope} from '../lib/backup-package.js';
 import {createRestoreGate} from './restore-gate.mjs';
 import {vaultResponse,VAULT_HOST} from './backup-auto-core.mjs';
+import {checkV2BrowserStorage} from './backup-core.mjs';
 const bad=code=>{throw Error(code)};
 const check=(v,code)=>{if(!v)bad(code)};
 const idOK=v=>typeof v==='string'&&/^s02_[a-f0-9]{32}$/.test(v);
@@ -57,6 +58,8 @@ export async function prepareTrackedV2Restore({
       'RESTORE_V2_NATIVE_BEGIN_MISMATCH');
     restoreBegan=true;
     await held();
+    // Preserve the I16 inactive guard if browser quota is inadequate.
+    await checkV2BrowserStorage(globalThis.navigator,opened.plaintextBytes);
     stageDb=await openStage();
     const stage=createV2InactiveStage(stageDb,{assertHeld:held});
     // The run may have existed from an interrupted attempt. Never accept a
