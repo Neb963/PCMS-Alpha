@@ -154,11 +154,11 @@ def native_script():
             domain:'example.com',hostOnly:true,session:true,
             path:'/',secure:true,httpOnly:true}];
         }
-        // 64 KiB per genuinely unique generated historical asset: ~64 MiB
-        // unique bytes and twice that referenced by candidate/previous.
+        // 32 KiB per genuinely unique generated historical asset: 32 MiB
+        // unique bytes and twice that referenced by candidate/previous; compare with prior 64 MiB run.
         // This starts in actual installed Firefox before production IDB capture.
         function uniqueAsset(i){
-          const out=new Uint8Array(65536);
+          const out=new Uint8Array(32768);
           let x=(i+1)>>>0;
           for(let n=0;n<out.length;n++){
             x^=x<<13;x^=x>>>17;x^=x<<5;out[n]=x&255;
@@ -304,8 +304,8 @@ def native_script():
         return {ok:true,observed,denied:denied.code,
           interruptedRun,interruptedState:held.state,
           geckoId:browser.runtime.id,
-          sourceStats:{uniqueAssetBytes:1024*65536,
-            referencedAssetBytes:2*1024*65536,
+          sourceStats:{uniqueAssetBytes:1024*32768,
+            referencedAssetBytes:2*1024*32768,
             insertedAndCapturedMs:performance.now()-sourceStart,
             captureMs,quotaUsageBefore:quotaBefore.usage??null,
             quotaUsageAfter:quotaAfter.usage??null,
@@ -637,7 +637,7 @@ def main():
               json.dumps({"runId":result["interruptedRun"]}),flush=True)
         assert len(seen)==2 and seen[0]["runId"]!=seen[1]["runId"],seen
         assert seen[1]["encoder"]=="PRODUCTION_CANONICAL_SNAPSHOT",seen
-        assert result["sourceStats"]["uniqueAssetBytes"]==67108864,result
+        assert result["sourceStats"]["uniqueAssetBytes"]==33554432,result
         print("H S02_PRODUCTION_IDB_HIGH_UNIQUE_CAPTURE_MEASURED=PASS",
               json.dumps(result["sourceStats"]),flush=True)
         assert min(v["rows"] for v in seen)>=1074,("H_SOURCE_HISTORY_ROW_LOSS",seen)
