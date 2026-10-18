@@ -253,7 +253,12 @@ export function snapshotCanonical(db){
 // Consumers retain strict source closure and per-row v2 grammar validation.
 // Serialized readback is for v2 inactive transactional restore verification;
 // it preserves v1 structured-clone semantics without applying v1's size cap.
-export function snapshotCanonicalV2(db,{serializedValues=false}={}){
+export function snapshotCanonicalV2(db,{serializedValues=false,
+  maxAggregateUtf16Bytes=Infinity,resourceStats=null}={}){
+  // Estimate aggregate source pressure, not browser JS heap (unmeasurable).
+  requireValid(maxAggregateUtf16Bytes===Infinity||
+    (Number.isSafeInteger(maxAggregateUtf16Bytes)&&maxAggregateUtf16Bytes>0),
+    'BACKUP_V2_RESOURCE_POLICY_INVALID');
   return new Promise((resolve,reject)=>{
     if(!db||DB_STORES.some(s=>!db.objectStoreNames.contains(s))){
       reject(Error('BACKUP_INCOMPLETE'));return;
@@ -262,20 +267,40 @@ export function snapshotCanonicalV2(db,{serializedValues=false}={}){
     try{tx=db.transaction(DB_STORES,'readonly');}
     catch{reject(Error('BACKUP_IDB_UNAVAILABLE'));return;}
     const stores=Object.fromEntries(DB_STORES.map(k=>[k,[]]));
-    let stopped=false,seen=0;
+    let stopped=false,seen=0,estimatedUtf16Bytes=0;
     const stop=code=>{if(stopped)return;stopped=true;
       try{tx.abort();}catch{}reject(Error(code));};
     tx.onabort=()=>{if(!stopped)reject(Error('BACKUP_IDB_ABORTED'));};
     tx.oncomplete=()=>{if(stopped)return;
-      try{resolve(validatePcmsSnapshot({schema:1,stores}));}
+      try{
+        const output=validatePcmsSnapshot({schema:1,stores});
+        if(resourceStats&&typeof resourceStats==='object'){
+          resourceStats.aggregateUtf16Bytes=estimatedUtf16Bytes;
+          resourceStats.canonicalRows=seen;
+        }
+        resolve(output);
+      }
       catch(e){reject(e);}};
     try{
       for(const store of DB_STORES){
         tx.objectStore(store).openCursor().onsuccess=e=>{
           const cur=e.target.result;if(!cur)return;
           if(++seen>500000){stop('BACKUP_V2_ROW_LIMIT');return;}
-          try{stores[store].push({key:serializeClone(cur.key),
-            value:serializedValues?serializeClone(cur.value):cur.value});}
+          try{
+            const row={key:serializeClone(cur.key),
+              value:serializedValues?serializeClone(cur.value):cur.value};
+            if(maxAggregateUtf16Bytes!==Infinity){
+              // Per-row only: never materialize a second whole-fleet JSON.
+              const json=JSON.stringify(row);
+              requireValid(typeof json==='string','BACKUP_V2_VALUE_INVALID');
+              estimatedUtf16Bytes+=json.length*2;
+              if(!Number.isSafeInteger(estimatedUtf16Bytes)||
+                  estimatedUtf16Bytes>maxAggregateUtf16Bytes){
+                stop('BACKUP_V2_AGGREGATE_BUDGET_EXCEEDED');return;
+              }
+            }
+            stores[store].push(row);
+          }
           catch(err){stop(err.message||'BACKUP_V2_VALUE_INVALID');return;}
           cur.continue();
         };
