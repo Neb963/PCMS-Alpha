@@ -6,7 +6,7 @@ import {scanMainCatalog,makeInitialImportPreview,compareCatalogScopes,
   catalogScopeFingerprint} from '../src/runtime/git-catalog.mjs';
 import {createCatalogBoundary,validateCatalogMessage} from '../src/runtime/catalog-boundary.mjs';
 globalThis.crypto??=webcrypto;
-const A='a'.repeat(40),B='b'.repeat(40),C='c'.repeat(40),D='d'.repeat(40),E='e'.repeat(40);
+const A='a'.repeat(40),B='b'.repeat(40),C='c'.repeat(40),D='d'.repeat(40),E='e'.repeat(40),F='f'.repeat(40);
 const repo='Neb963/per-gens', TOKEN='test-token-not-a-real-secret';
 function blob(value){
   const raw=Buffer.from(value);
@@ -20,7 +20,7 @@ function fake({count=1,truncated=false,omitPrompt=false,corrupt=false,
     const entry=blob(value);
     db.set(entry.sha,entry);items.push({path,sha:entry.sha,size:entry.size,mode:entry.mode,type:'blob'});
   }
-  items.push({path:'generators',sha:B,type:'tree',mode:'040000'});
+  items.push({path:'generators',sha:F,type:'tree',mode:'040000'});
   items.push({path:'pcms',sha:C,type:'tree',mode:'040000'});
   items.push({path:'pcms/prompts',sha:D,type:'tree',mode:'040000'});
   if(!omitPrompt)add('pcms/prompts/default-chat1.md','Git-authoritative existing prompt\n');
@@ -50,8 +50,11 @@ function fake({count=1,truncated=false,omitPrompt=false,corrupt=false,
     if(path==='/git/trees/'+B&&u.searchParams.get('recursive')==='1')
       return resp(200,{truncated,tree:truncated?items.slice(0,5):items});
     if(path==='/git/trees/'+B)return resp(200,{truncated:nonrecursiveTruncated,
-      tree:[{path:'generators',type:'tree',mode:'040000',sha:B},
+      tree:[{path:'generators',type:'tree',mode:'040000',sha:F},
         {path:'pcms',type:'tree',mode:'040000',sha:C}]});
+    if(path==='/git/trees/'+F)return resp(200,{truncated:false,tree:
+      items.filter(x=>x.path.startsWith('generators/')&&x.path.split('/').length===2)
+      .map(x=>({...x,path:x.path.split('/').at(-1)}))});
     if(path==='/git/trees/'+C)return resp(200,{truncated:false,
       tree:[{path:'prompts',type:'tree',mode:'040000',sha:D}]});
     if(path==='/git/trees/'+D)return resp(200,{truncated:false,tree:
