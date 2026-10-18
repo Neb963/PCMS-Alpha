@@ -6,6 +6,7 @@ import {createImportApprovalStore,getImportScopeDigest} from './catalog-import.m
 import {createGitPromptStore} from './catalog-prompt-store.mjs';
 import {writeExistingGitPrompt} from './git-prompt.mjs';
 import {inspectReadyCandidate} from './catalog-declaration.mjs';
+import {createDeclarationStore} from './catalog-ready-store.mjs';
 import {scanMainCatalog,validRepository,makeInitialImportPreview} from './git-catalog.mjs';
 export const CATALOG_PORT='pcms-s03-catalog';
 const STATE_KEY='pcmsS03Git';
@@ -61,6 +62,7 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
   let importDb;
   const approvalStore=async()=>createImportApprovalStore(await (importDb ||= open().catch(e=>{importDb=null;throw e;})));
   const promptStore=async()=>createGitPromptStore(await (importDb ||= open().catch(e=>{importDb=null;throw e;})));
+  const declarationStore=async()=>createDeclarationStore(await (importDb ||= open().catch(e=>{importDb=null;throw e;})));
   const sentinel=createRestoreSentinel(api.storage.local);
   const readConfig=async()=>{
     const c=(await api.storage.local.get(STATE_KEY))?.[STATE_KEY];
@@ -128,6 +130,10 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
           pinnedHead:current.head,includeSourceBytes:false
         },transport);
         if(!witnessed.ok)return witnessed;
+        if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+        const recorded=await (await declarationStore()).witness({
+          repositoryId:config.repositoryId,slug:p.slug,coherent:witnessed});
+        if(!recorded.ok)return recorded;
         // Never return Git token or full private source bytes to a UI port.
         return {ok:true,code:witnessed.code,declarationCommit:witnessed.declarationCommit,
           declarationIdentity:witnessed.declarationIdentity,
