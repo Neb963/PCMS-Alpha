@@ -38,7 +38,7 @@ _ALLOWED = ("export.begin", "export.append", "export.finish",
             "archive.inspect", "archive.read", "backup.verify",
             "restore.begin", "restore.read", "restore.abort",
             "archive.recovery.complete", "archive.retention.plan",
-            "archive.retention.prune")
+            "archive.retention.prune", "resource.inspect")
 _MAX_CIPHERTEXT_READ = 49152
 
 
@@ -339,7 +339,8 @@ class V2ArchiveHost:
                 "archive.recovery.complete": {"action","runId","sha256",
                                                "preparedSha256","status"},
                 "archive.retention.plan": {"action"},
-                "archive.retention.prune": {"action"}
+                "archive.retention.prune": {"action"},
+                "resource.inspect": {"action"}
             }
             _require(set(message) == schemas[action], "BACKUP_COMMAND_SCHEMA")
             dispatch={
@@ -354,7 +355,8 @@ class V2ArchiveHost:
                 "restore.abort":self._restore_abort,
                 "archive.recovery.complete":self._qualify_recovery,
                 "archive.retention.plan":self._retention_plan,
-                "archive.retention.prune":self._retention_prune
+                "archive.retention.prune":self._retention_prune,
+                "resource.inspect":self._resource_inspect
             }
             result=dispatch[action](message) if "runId" in message else dispatch[action]()
             if result.get("ok") is True and "runId" in message:
@@ -367,6 +369,37 @@ class V2ArchiveHost:
             code = str(exc)
             return {"ok":False,"code":code if re.fullmatch(r"BACKUP_[A-Z0-9_]{3,70}",code)
                     else "BACKUP_NATIVE_UNAVAILABLE"}
+
+    def _resource_inspect(self):
+        """Read-only system/cgroup memory hint, never a JS heap measurement.
+
+        Unsupported procfs environments return null; no root, vault, ledger,
+        native data or route state is read/mutated. Memory may change at once.
+        """
+        available=None
+        basis="OS_MEMORY_UNAVAILABLE"
+        try:
+            for line in Path("/proc/meminfo").read_text().splitlines():
+                if line.startswith("MemAvailable:"):
+                    fields=line.split()
+                    available=int(fields[1])*1024
+                    basis="LINUX_MEMAVAILABLE_ADVISORY"
+                    break
+        except (OSError,ValueError,IndexError):
+            pass
+        try:
+            root=Path("/sys/fs/cgroup")
+            limit=(root/"memory.max").read_text().strip()
+            current=int((root/"memory.current").read_text().strip())
+            if limit!="max":
+                headroom=max(0,int(limit)-current)
+                available=headroom if available is None else min(available,headroom)
+                basis="LINUX_MEMAVAILABLE_AND_CGROUP_ADVISORY"
+        except (OSError,ValueError):
+            pass
+        return {"ok":True,"state":"ADVISORY_ONLY",
+                "osAvailableMemoryBytes":available,"basis":basis,
+                "jsHeapBytes":None,"notReserved":True}
 
     def _begin(self, msg):
         run = msg["runId"]
