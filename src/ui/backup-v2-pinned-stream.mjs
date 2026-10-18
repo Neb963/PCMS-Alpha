@@ -57,7 +57,9 @@ export async function compilePinnedV2(cut,donorEnvelope){
   const donor=donorBytes(donorEnvelope);
   const seenKeys=Object.fromEntries(DB_STORES.map(store=>[store,new Set()]));
   const blobs=new Map(),rows=[],rowHashes=[];
-  const counts=Object.fromEntries(DB_STORES.map(store=>[store,0]));
+  // Match the frozen compiler's null-prototype inventory dictionary.
+  const counts=Object.create(null);
+  for(const store of DB_STORES)counts[store]=0;
   let priorStore=-1,priorKey=null,plaintextBytes=0;
   for await(const {store,row} of cut.rows()){
     const storeIndex=DB_STORES.indexOf(store);
