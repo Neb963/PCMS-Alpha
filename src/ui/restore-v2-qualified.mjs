@@ -7,7 +7,7 @@ import {createV2NativeConnection} from './backup-v2-session.mjs';
 import {openV2StageDB,createV2InactiveStage} from './restore-v2-inactive-stage.mjs';
 import {prepareInactiveV2FromStage} from './restore-v2-prep.mjs';
 import {createRestoreGate} from './restore-gate.mjs';
-import {validatePcmsSnapshot} from './backup-core.mjs';
+import {validatePcmsSnapshot,checkV2BrowserStorage} from './backup-core.mjs';
 
 const VAULT_HOST='local.pcms.backup_vault';
 const decodeBackupEnvelope=async(...args)=>{
@@ -37,7 +37,8 @@ export async function prepareQualifiedV2FreshProfile({
   connectionFactory=createV2NativeConnection,
   openStage=openV2StageDB,
   vaultRead=()=>api.runtime.sendNativeMessage(VAULT_HOST,{action:'get'}),
-  decodeDonor=decodeBackupEnvelope,deferCanonical=false
+  decodeDonor=decodeBackupEnvelope,deferCanonical=false,
+  resourceEnvironment=globalThis.navigator
 }={}){
   check(api&&validId(runId)&&mode==='replace',
     'RESTORE_V2_FRESH_ARGUMENT_INVALID');
@@ -70,6 +71,9 @@ export async function prepareQualifiedV2FreshProfile({
       Number.isSafeInteger(disk.canonicalRows)&&disk.canonicalRows>=0,
       'RESTORE_V2_INDEPENDENT_DISK_PROOF_REQUIRED');
     await held();
+    // The stage is encrypted but occupies real IndexedDB quota; admission
+    // must precede any local staging write. Quota can still change later.
+    await checkV2BrowserStorage(resourceEnvironment,proof.acceptedBytes);
     const began=await connection.exchange({action:'restore.begin',runId,
       keyRef:'portable-recovery'});
     check(began?.ok===true&&began.runId===runId&&
