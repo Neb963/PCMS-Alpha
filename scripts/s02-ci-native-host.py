@@ -154,12 +154,24 @@ def native_script():
             domain:'example.com',hostOnly:true,session:true,
             path:'/',secure:true,httpOnly:true}];
         }
+        // 64 KiB per genuinely unique generated historical asset: ~64 MiB
+        // unique bytes and twice that referenced by candidate/previous.
+        // This starts in actual installed Firefox before production IDB capture.
+        function uniqueAsset(i){
+          const out=new Uint8Array(65536);
+          let x=(i+1)>>>0;
+          for(let n=0;n<out.length;n++){
+            x^=x<<13;x^=x>>>17;x^=x<<5;out[n]=x&255;
+          }
+          return out;
+        }
+        const quotaBefore=await navigator.storage.estimate();
+        const sourceStart=performance.now();
         for(let i=0;i<1024;i++){
           const raw=[
             ['main.pjs',enc.encode('output="h-source-'+i+'";')],
             ['index.html',enc.encode('<div data-history="'+i+'">CI</div>')],
-            ['src/asset.bin',Uint8Array.from({length:160+i%256},
-              (_,n)=>(i*67+n*31+(n>>3))&255)]
+            ['src/asset.bin',uniqueAsset(i)]
           ];
           const files=await Promise.all(raw.map(async([path,bytes])=>({
             path,size:bytes.length,sha256:await core.digest(bytes)})));
@@ -181,7 +193,12 @@ def native_script():
           tx.onabort=()=>reject(Error('H_SOURCE_FLEET_IDB_ABORT'));
           tx.onerror=()=>reject(Error('H_SOURCE_FLEET_IDB_FAILURE'));
         });
+        const quotaAfter=await navigator.storage.estimate();
+        const captureStart=performance.now();
         const pcms=await core.snapshotCanonicalV2(db);
+        const captureMs=performance.now()-captureStart;
+        const verifiedCut=await core.verifyCanonicalV2Unchanged(db,pcms);
+        if(verifiedCut?.ok!==true)throw Error('H_PRODUCTION_CANONICAL_CUT_DRIFT');
         if(pcms.stores.meta.length<1074)
           throw Error('H_SOURCE_FLEET_INCOMPLETE');
         const password=vault.passphrase;
@@ -252,7 +269,8 @@ def native_script():
              verified.activation!=='OFF')throw Error('H_NATIVE_REOPEN_FAILED');
           observed.push({runId,sha256:verified.sha256,
             rows:verified.sourceRows,
-            encoder:i===0?'PINNED_STREAM':'AGGREGATE_LEGACY'});
+            encoder:i===0?'PINNED_STREAM':'PRODUCTION_CANONICAL_SNAPSHOT',
+            elapsedMs:performance.now()-captureStart});
         }
         // Real OS process-loss boundary: persistent host opens a new run,
         // durably journals OPEN_OBSERVED, then its native port is closed
@@ -285,7 +303,14 @@ def native_script():
           throw Error('H_UNAUTHORIZED_RESTORE_ACTIVATION');
         return {ok:true,observed,denied:denied.code,
           interruptedRun,interruptedState:held.state,
-          geckoId:browser.runtime.id};
+          geckoId:browser.runtime.id,
+          sourceStats:{uniqueAssetBytes:1024*65536,
+            referencedAssetBytes:2*1024*65536,
+            insertedAndCapturedMs:performance.now()-sourceStart,
+            captureMs,quotaUsageBefore:quotaBefore.usage??null,
+            quotaUsageAfter:quotaAfter.usage??null,
+            quotaLimit:quotaAfter.quota??null,
+            jsHeapBytes:performance.memory?.usedJSHeapSize??null}};
       }finally{db.close();}
     })().then(done).catch(e=>done({ok:false,error:String(e)}));"""
 
@@ -610,6 +635,10 @@ def main():
         print("H S02_NATIVE_HOST_PORT_TERMINATION_UNCERTAIN_FILE_NOT_PROMOTED=PASS",
               json.dumps({"runId":result["interruptedRun"]}),flush=True)
         assert len(seen)==2 and seen[0]["runId"]!=seen[1]["runId"],seen
+        assert seen[1]["encoder"]=="PRODUCTION_CANONICAL_SNAPSHOT",seen
+        assert result["sourceStats"]["uniqueAssetBytes"]==67108864,result
+        print("H S02_PRODUCTION_IDB_HIGH_UNIQUE_CAPTURE_MEASURED=PASS",
+              json.dumps(result["sourceStats"]),flush=True)
         assert min(v["rows"] for v in seen)>=1074,("H_SOURCE_HISTORY_ROW_LOSS",seen)
         from importlib.machinery import SourceFileLoader
         sys.path.insert(0,str(ROOT/"native"))
@@ -647,13 +676,13 @@ def main():
         # and preserve the original qualified file for subsequent recovery.
         put_disposable_secret("synthetic-disposable-WRONG-password-2026")
         wrong=harness.call("POST",f"/session/{session}/execute/async",
-            {"script":wrong_key_script(seen[0]["runId"]),"args":[]},timeout=35)
+            {"script":wrong_key_script(seen[1]["runId"]),"args":[]},timeout=35)
         assert wrong.get("ok") is True,("H_REAL_WRONG_SECRET_SERVICE_KEY_ACCEPTED",wrong)
         print("H S02_WRONG_OS_SECRET_SERVICE_KEY_DENIED_WITHOUT_FILE_PROMOTION=PASS",
               json.dumps(wrong),flush=True)
         secret_check()  # Reopen original verified ciphertext with correct key.
         restored=harness.call("POST",f"/session/{session}/execute/async",
-            {"script":fresh_script(seen[0]["runId"]),"args":[]},timeout=220)
+            {"script":fresh_script(seen[1]["runId"]),"args":[]},timeout=220)
         assert restored.get("ok") is True,("H_FRESH_NATIVE_RECOVERY",restored)
         assert restored.get("donorPersonas")==50 and restored.get("rows",0)>=1074
         assert restored.get("activation")=="OFF" and restored.get("held") is True
@@ -679,7 +708,7 @@ def main():
         harness.call("POST",f"/session/{session}/timeouts",
             {"script":360000},timeout=15)
         full=harness.call("POST",f"/session/{session}/execute/async",
-            {"script":complete_donor_script(seen[0]["runId"]),"args":[]},timeout=350)
+            {"script":complete_donor_script(seen[1]["runId"]),"args":[]},timeout=350)
         assert full.get("ok") is True,("H_V2_TRUE_DONOR_CONTROLLER_APPLY",full)
         assert full.get("donorContainers")==50 and full.get("donorCookieSets")==50
         assert full.get("activation")=="OFF" and full.get("held") is True
