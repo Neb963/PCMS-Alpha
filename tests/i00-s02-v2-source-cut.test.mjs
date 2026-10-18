@@ -91,3 +91,29 @@ test('R2 production v2 cursor cut exceeds 64MiB before dedup; no history omissio
     heapDeltaBytes:peak.heapUsed-initial.heapUsed,
     rssDeltaBytes:peak.rss-initial.rss,rows:76}));
 });
+
+
+test('S02 v2 canonical cut detects byte-level structured-clone drift',async()=>{
+  const rows=Object.fromEntries(DB_STORES.map(store=>[store,[]]));
+  rows.meta.push({key:'typed-cut',
+    value:{binary:new Uint8Array([0,1,255]).buffer,notDefined:undefined,
+      negativeZero:-0,when:new Date('2026-10-18T00:00:00.000Z')}});
+  const original=await snapshotCanonicalV2(disposableDB(rows));
+  assert.equal((await verifyCanonicalV2Unchanged(disposableDB(rows),original)).ok,true);
+  const mutated=structuredClone(rows);
+  mutated.meta[0].value.binary=new Uint8Array([0,1,254]).buffer;
+  await assert.rejects(verifyCanonicalV2Unchanged(disposableDB(mutated),original),
+    /BACKUP_SOURCE_CUT_CHANGED/);
+  const withoutUndefined=structuredClone(rows);
+  delete withoutUndefined.meta[0].value.notDefined;
+  await assert.rejects(verifyCanonicalV2Unchanged(disposableDB(withoutUndefined),original),
+    /BACKUP_SOURCE_CUT_CHANGED/);
+  const negativeZero=structuredClone(rows);
+  negativeZero.meta[0].value.negativeZero=0;
+  await assert.rejects(verifyCanonicalV2Unchanged(disposableDB(negativeZero),original),
+    /BACKUP_SOURCE_CUT_CHANGED/);
+  const changedDate=structuredClone(rows);
+  changedDate.meta[0].value.when=new Date('2026-10-19T00:00:00.000Z');
+  await assert.rejects(verifyCanonicalV2Unchanged(disposableDB(changedDate),original),
+    /BACKUP_SOURCE_CUT_CHANGED/);
+});
