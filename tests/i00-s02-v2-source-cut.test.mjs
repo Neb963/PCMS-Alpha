@@ -146,3 +146,23 @@ test('S02 aggregate capture budget holds exact source before possible export',as
   assert.ok(stats.aggregateUtf16Bytes>600);
   assert.equal(stats.canonicalRows,1);
 });
+
+import {v2CaptureResourcePolicy,checkV2BrowserStorage}
+  from '../src/runtime/backup-auto-export.mjs';
+test('S02 resource admission scales by byte pressure rather than fixture counts',async()=>{
+  const fallback=v2CaptureResourcePolicy({});
+  const ample=v2CaptureResourcePolicy({deviceMemory:16});
+  assert.equal(fallback.browserHeapBytes,null);
+  assert.equal(fallback.maxAggregateUtf16Bytes,512*1048576);
+  assert.ok(ample.maxAggregateUtf16Bytes>fallback.maxAggregateUtf16Bytes);
+  const unknown=await checkV2BrowserStorage({});
+  assert.equal(unknown.known,false);
+  await assert.rejects(checkV2BrowserStorage({storage:{
+    estimate:async()=>({usage:980*1048576,quota:1024*1048576})
+  }}),/BACKUP_V2_BROWSER_QUOTA_INSUFFICIENT/);
+  const observed=await checkV2BrowserStorage({storage:{
+    estimate:async()=>({usage:320*1048576,quota:3072*1048576})
+  }},90*1048576);
+  assert.equal(observed.known,true);
+  assert.ok(observed.freeEstimateBytes>observed.reserveBytes);
+});
