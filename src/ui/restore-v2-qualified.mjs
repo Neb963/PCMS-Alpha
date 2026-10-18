@@ -37,7 +37,7 @@ export async function prepareQualifiedV2FreshProfile({
   connectionFactory=createV2NativeConnection,
   openStage=openV2StageDB,
   vaultRead=()=>api.runtime.sendNativeMessage(VAULT_HOST,{action:'get'}),
-  decodeDonor=decodeBackupEnvelope
+  decodeDonor=decodeBackupEnvelope,deferCanonical=false
 }={}){
   check(api&&validId(runId)&&mode==='replace',
     'RESTORE_V2_FRESH_ARGUMENT_INVALID');
@@ -107,10 +107,11 @@ export async function prepareQualifiedV2FreshProfile({
         stage,runId,readback:terminal,
         expectedCiphertextSha256:proof.ciphertextSha256,
         password:vault.passphrase,decodeDonor,
-        currentPcms,uidRemap,mode,fresh:true,accountChoices
+        currentPcms,uidRemap,mode,fresh:true,accountChoices,deferCanonical
       });
     }finally{vault.passphrase=null;}
-    check(prepared.status==='INACTIVE_PREPARED_NOT_APPLIED'&&
+    check(prepared.status===(deferCanonical?'INACTIVE_SOURCE_VERIFIED_NOT_APPLIED':
+      'INACTIVE_PREPARED_NOT_APPLIED')&&
       prepared.activation==='OFF'&&prepared.providerEffects==='OFF'&&
       prepared.archiveSha256===proof.ciphertextSha256,
       'RESTORE_V2_SOURCE_OR_AUTHORITY_INVALID');
@@ -125,7 +126,7 @@ export async function prepareQualifiedV2FreshProfile({
     await stage.drop(runId);
     completed=true;
     return Object.freeze({
-      ok:true,runId,status:'INACTIVE_PREPARED_NOT_APPLIED',
+      ok:true,runId,status:prepared.status,
       nativeReceipt:'RECOVERY_VERIFIED',ciphertextSha256:proof.ciphertextSha256,
       prepared,controller:'RESTORE_HELD',providerEffects:'OFF',
       activation:'OFF',donorApply:'NOT_AUTHORIZED',
