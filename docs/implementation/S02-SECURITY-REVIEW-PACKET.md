@@ -1,3 +1,13 @@
+## 2026-10-18 — Independent E-06 packet: approved narrow Gate B §9 amendment
+
+The operator **approved only** replacing browser O(U)-independent memory capture/restoration with transactionally consistent, measured and proportionally admitted aggregate IndexedDB capture and inactive rehydration. Read the old-vs-new comparison inserted in `docs/architecture/GATE-B-TECHNICAL-DESIGN-v1.1.md` §9.1. A new persistent source store is NOT a prerequisite absent actual failure evidence. The initial 50 Persona / 1,024 history / 65 MiB unique / 130 MiB referenced / 1,075 row / 512 MiB IDB figures are benchmarks, not product ceilings.
+
+**Changed-candidate security review scope:** review the aggregate cut's row accounting, source/donor/cookie consistency against writes or provider changes, advisory Linux MemAvailable and cgroup v2 hints, unsupported Firefox heap, browser usage/quota preflight, fstatvfs early refusal, stage/guard loss and ENOSPC after preflight, lost native ACK, nonce reservations, two-pass authenticated readback, v2-only removal of both legacy 64MiB readback caps, and native-port hold across long guarded restore. Confirm all R1–R6 and B2 holds remain real and that the new fixed-purpose read-only `resource.inspect` command cannot read routes, vault, arbitrary paths or mutate any file. Examine 14 eligible authenticated successes, 15th pruning, last-good and abort-before-prune. Inspect production coordinator H evidence **with synthetic donor adapter qualification**; do not silently promote it to actual live donor/providor E-02.
+
+**Strict review outcome:** E-06 may be approved only by a different authorized qualified reviewer, after exact-head CI and code/format assessment. GitHub submissions using `Neb963` (the PR author account) are engineering feedback, **not genuinely independent sign-off**. Correct demonstrated security defects; treat pure future optimization separately from approved S02 security requirements. Draft PR, no privileged installation or production-v2 admission, no merge until the actual protected gates are met. E-02 live Perchance is unavailable/unexecuted, not a fictional PASS.
+
+---
+
 # S02 E-06 independent security review packet — NOT APPROVED
 
 ## 2026-10-18 — tested B1 findings and exact-candidate E-06 boundary (supersedes earlier rewrite mandate)
