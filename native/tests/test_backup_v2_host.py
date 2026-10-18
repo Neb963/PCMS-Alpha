@@ -371,6 +371,11 @@ class TestHost(unittest.TestCase):
             self.host._unlink_artifact(path)
         self.assertTrue(path.exists())
         self.assertEqual(other.read_bytes(),b"original-qualified-artifact")
+        # A foreign untracked .encrypted file now blocks export under the B2
+        # collision-history fence. Remove this disposable adversarial fixture
+        # before testing the separate durable fsync failure boundary.
+        path.unlink()
+        other.unlink()
         # No mutation if ledger's durable rename/fsync has an uncertain ACK.
         import backup_v2_host as module
         real=os.fsync
