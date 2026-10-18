@@ -426,9 +426,10 @@ def complete_donor_script(run_id):
       const db=await journal.openCanonicalDatabase();
       const action=(name,params)=>new Promise((resolve,reject)=>{
         const p=browser.runtime.connect({name:'pcms-i16-restore'});
+        const start=performance.now();
         let received=false;
         p.onMessage.addListener(value=>{received=true;try{p.disconnect()}catch{}resolve(value)});
-        p.onDisconnect.addListener(()=>{if(!received)reject(Error('H_V2_GUARDED_PORT_LOST_ACK'))});
+        p.onDisconnect.addListener(()=>{if(!received)reject(Error('H_V2_GUARDED_PORT_LOST_ACK:'+name+':elapsedMs='+Math.round(performance.now()-start)))});
         p.postMessage({action:name,params});
       });
       try{
@@ -735,6 +736,15 @@ def main():
                           "firefox":str(browser),"host":HOST_NAME}),flush=True)
     finally:
         sampler.stop()
+        try:
+            print("H S02_FINAL_RESOURCE_DIAGNOSTICS",json.dumps({
+                "peakSumRssKiB":sampler.peak_kib,
+                "maxObservedProcesses":sampler.max_processes,
+                "nativeHostProcessSeen":sampler.native_observed,
+                "availableFilesystemBytes":__import__("shutil").disk_usage(home).free,
+                "basis":"sampled procfs RSS sum; shared pages double-counted"}),flush=True)
+        except OSError as diagnostic:
+            print("H S02_RESOURCE_DIAGNOSTICS_UNAVAILABLE",str(diagnostic),flush=True)
         if session:harness.close(session)
         gecko.terminate()
         try:gecko.wait(timeout=5)
