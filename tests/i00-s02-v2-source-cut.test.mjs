@@ -131,3 +131,18 @@ test('S02 v2 oversized canonical count is explicitly unsupported before native d
   await assert.rejects(compileV2({schema:1,stores},'not-a-donor-envelope'),
     /BACKUP_V2_UNSUPPORTED_RECORD_COUNT/);
 });
+
+// §9 approved aggregate admission is byte/resource-based, not capped to the
+// observed 50/1024 fixture. A tiny budget rejects before returning a cut.
+test('S02 aggregate capture budget holds exact source before possible export',async()=>{
+  const rows=Object.fromEntries(DB_STORES.map(store=>[store,[]]));
+  rows.meta.push({key:'source-history',value:{bytes:'abc'.repeat(100)}});
+  await assert.rejects(snapshotCanonicalV2(disposableDB(rows),{
+    maxAggregateUtf16Bytes:64}),/BACKUP_V2_AGGREGATE_BUDGET_EXCEEDED/);
+  const stats={};
+  const observed=await snapshotCanonicalV2(disposableDB(rows),{
+    maxAggregateUtf16Bytes:1024*1024,resourceStats:stats});
+  assert.equal(observed.stores.meta.length,1);
+  assert.ok(stats.aggregateUtf16Bytes>600);
+  assert.equal(stats.canonicalRows,1);
+});
