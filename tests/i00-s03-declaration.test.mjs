@@ -17,11 +17,12 @@ const source={
  'src/nested/style.css':'body{display:block}',
  'TESTING.md':'Check preview'
 };
-function fixture({drift=false,tamper=false,truncated=false,legacy=false}={}){
+function fixture({drift=false,tamper=false,truncated=false,legacy=false,omitTesting=false}={}){
  const blobs=new Map();
  const rows=[{path:'generators',sha:'e'.repeat(40),type:'tree',mode:'040000'},
    {path:'generators/'+slug,sha:'f'.repeat(40),type:'tree',mode:'040000'}];
  const all={...source};
+ if(omitTesting)delete all['TESTING.md'];
  if(legacy)all['DEPLOYMENT.md']='Status: READY\n';
  for(const [path,contents] of Object.entries(all)){
    const b=Buffer.from(contents),oid=gitSha(contents);
@@ -87,4 +88,10 @@ test('S03 drift after declaration and corrupted blob fail closed without deployi
  assert.equal((await inspect(fixture({drift:true}))).code,'READY_SOURCE_DRIFT_AFTER_DECLARATION');
  assert.equal((await inspect(fixture({tamper:true}))).code,'READY_BLOB_UNVERIFIED');
  assert.equal((await inspect(fixture(),{pinnedHead:INTRO})).code,'READY_MAIN_MOVED');
+});
+
+test('S03 optional TESTING absent remains an explicit, verifiable pin',async()=>{
+  const r=await inspect(fixture({omitTesting:true}));
+  assert.equal(r.ok,true,JSON.stringify(r));
+  assert.deepEqual(r.optionalTesting,{state:'ABSENT',oid:null,sha256:null});
 });
