@@ -2,6 +2,7 @@
 // independent format/security review and privileged host installation are
 // mandatory before the owning background coordinator may admit it.
 import {compileV2,streamV2Frames} from './backup-v2-codec.mjs';
+import {compilePinnedV2,streamPinnedV2Frames} from './backup-v2-pinned-stream.mjs';
 import {digest} from './backup-core.mjs';
 
 const HOST='local.pcms.backup_v2',fail=c=>{throw Error(c)};
@@ -139,7 +140,7 @@ export function createV2NativeConnection(api,{host=HOST}={}){
   });
 }
 export async function exportV2Candidate({
-  db,api,pcms,donorEnvelope,checkScope,checkRestoreHold,connect=createV2NativeConnection,
+  db,api,pcms,pinnedCut=null,donorEnvelope,checkScope,checkRestoreHold,connect=createV2NativeConnection,
   runId='s02_'+crypto.randomUUID().replaceAll('-','')
 }={}){
   // Caller must be the protected background authority; never pass untrusted
@@ -148,7 +149,12 @@ export async function exportV2Candidate({
     'BACKUP_V2_NOT_ADMITTED');
   assert(typeof checkRestoreHold==='function'&&await checkRestoreHold()===false,
     'BACKUP_V2_RESTORE_HOLD');
-  const plan=await compileV2(pcms,donorEnvelope);
+  // An actual immutable-cut provider may use bounded digest-only planning.
+  // Legacy aggregate snapshots remain supported until canonical source-migration
+  // authority and the entire inactive restore path are independently proven.
+  assert(pinnedCut===null||pcms===undefined,'BACKUP_V2_AMBIGUOUS_SOURCE_CUT');
+  const plan=pinnedCut===null?await compileV2(pcms,donorEnvelope):
+    await compilePinnedV2(pinnedCut,donorEnvelope);
   const cutDigest=await digest(JSON.stringify({storeCounts:plan.terminal.storeCounts,
     donorSha256:plan.terminal.donorSha256,
     rowDigestsSha256:plan.terminal.rowDigestsSha256,
@@ -170,7 +176,8 @@ export async function exportV2Candidate({
       cutDigest,expectedPlaintextBytes:plan.plaintextBytes,
       keyRef:'portable-recovery'}),'OPEN_OBSERVED');
     await move('CREATE_POSSIBLE','OPEN_OBSERVED');
-    for await(const bytes of streamV2Frames(plan)){
+    const frames=pinnedCut===null?streamV2Frames(plan):streamPinnedV2Frames(plan);
+    for await(const bytes of frames){
       assert(bytes.length<=65536,'BACKUP_V2_FRAGMENT_INVALID');
       const sequence=current.nextSequence;
       const sha256=await digest(bytes);
