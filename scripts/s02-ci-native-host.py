@@ -443,16 +443,23 @@ def complete_donor_script(run_id):
         const rows=new Map(inventory.stores.meta.map(r=>[r.key,r.value]));
         const recovered=rows.get('account:s02-ci-0')?.account;
         const last=rows.get('stage-history:s02-ci-1023')?.record?.candidate;
-        if(rows.get('account:s02-ci-1')!==undefined||
-           rows.get('removal:s02-ci-1')?.state!=='REMOVED_ONLY_LOCALLY'||
-           recovered?.state!=='VERIFICATION_PENDING'||
-           recovered.identity!==null||
-           typeof recovered.personaUid!=='string'||
-           recovered.personaUid==='11111111-1111-4111-8111-111111111111'||
-           last?.blobs?.length!==3||
-           atob(last.blobs.find(x=>x.path==='main.pjs')?.base64||'')!==
-             'output="h-source-1023";')
-          throw Error('H_V2_FULL_DONOR_CANONICAL_SOURCE_OR_UID_INVALID');
+        const policyAudit={
+          excluded:rows.get('account:s02-ci-1')===undefined,
+          removalPreserved:rows.get('removal:s02-ci-1')?.state==='REMOVED_ONLY_LOCALLY',
+          activeAccountPresent:!!recovered,
+          verificationPending:recovered?.state==='VERIFICATION_PENDING',
+          identityCleared:recovered?.identity===null,
+          uidRebound:typeof recovered?.personaUid==='string'&&
+            recovered.personaUid!=='11111111-1111-4111-8111-111111111111',
+          lastSourcePresent:!!last,
+          sourceBlobCount:last?.blobs?.length||0,
+          lastSourceExact:atob(last?.blobs?.find(x=>x.path==='main.pjs')?.base64||'')===
+            'output="h-source-1023";'
+        };
+        if(Object.values(policyAudit).some(v=>v===false)||
+           policyAudit.sourceBlobCount!==3)
+          throw Error('H_V2_FULL_DONOR_CANONICAL_SOURCE_OR_UID_INVALID:'+
+            JSON.stringify(policyAudit));
         // Firefox's actual container and cookie APIs, not an in-memory
         // replacement for the donor-controlled Persona/cookie service.
         const identities=await browser.contextualIdentities.query({});
