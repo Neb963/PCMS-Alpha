@@ -122,3 +122,12 @@ test('S02 v2 canonical cut detects byte-level structured-clone drift',async()=>{
   await assert.rejects(verifyCanonicalV2Unchanged(disposableDB(changedDate),original),
     /BACKUP_SOURCE_CUT_CHANGED/);
 });
+
+
+test('S02 v2 oversized canonical count is explicitly unsupported before native dispatch',async()=>{
+  const stores=Object.fromEntries(DB_STORES.map(store=>[store,[]]));
+  for(let i=0;i<50001;i++)stores.meta.push({key:'meta-count:'+i,value:{v:i}});
+  for(let i=0;i<50000;i++)stores.events.push({key:'event-count:'+i,value:{v:i}});
+  await assert.rejects(compileV2({schema:1,stores},'not-a-donor-envelope'),
+    /BACKUP_V2_UNSUPPORTED_RECORD_COUNT/);
+});
