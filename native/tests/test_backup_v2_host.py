@@ -707,5 +707,23 @@ class TestHost(unittest.TestCase):
             self.assertFalse(self.host.action(forged)["ok"])
 
 
+    def test_disk_headroom_preflight_rejects_before_ledger_and_vault(self):
+        # A reported free-space shortage is a rejection, never authority to
+        # remove a known-good file or to start a partly written archive.
+        import types
+        with patch("backup_v2_host.os.fstatvfs",return_value=
+                   types.SimpleNamespace(f_bavail=256,f_frsize=4096)):
+            denied=self.begin(b"small encrypted payload")
+        self.assertEqual(denied["code"],"BACKUP_DISK_HEADROOM_INSUFFICIENT")
+        self.assertEqual(self.lookups,0)
+        self.assertFalse((self.root/(RUN+".ledger")).exists())
+        self.assertFalse((self.root/(RUN+".encrypted")).exists())
+        self.assertIsNone(self.host._export_lock)
+        with patch("backup_v2_host.os.fstatvfs",side_effect=OSError(5,"disk")):
+            unknown=self.begin(b"unknown filesystem availability")
+        self.assertEqual(unknown["code"],"BACKUP_DISK_CAPACITY_UNKNOWN")
+        self.assertFalse((self.root/(RUN+".ledger")).exists())
+        self.assertEqual(self.lookups,0)
+
 if __name__=="__main__":
     unittest.main()
