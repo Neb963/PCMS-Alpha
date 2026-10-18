@@ -45,6 +45,120 @@ class TestHost(unittest.TestCase):
                             bytes=base64.b64encode(bytes_).decode(),
                             sha256=hashlib.sha256(bytes_).hexdigest())
 
+
+    def test_durable_entropy_pair_fence_after_success_and_host_restart(self):
+        raw=make_payload()
+        pair=(bytes(range(16)),bytes(range(12)))
+        self.host._new_entropy=lambda:pair
+        assert self.begin(raw)["ok"]
+        for seq,pos in enumerate(range(0,len(raw),BUFFER)):
+            assert self.append(raw[pos:pos+BUFFER],seq)["ok"]
+        assert self.request("export.finish",runId=RUN,
+                sequence=(len(raw)+BUFFER-1)//BUFFER,cutDigest=CUT)["ok"]
+        header=(self.root/(RUN+".encrypted")).read_bytes()
+        journal=(self.root/(RUN+".ledger")).read_bytes()
+        marker=self.root/(".nonce-"+(pair[0]+pair[1]).hex())
+        self.assertTrue(marker.exists())
+        self.host.close()
+        restarted=V2ArchiveHost(self.root,lambda:PASS)
+        restarted._new_entropy=lambda:pair
+        other="s02_"+"a"*32
+        denied=restarted.action({"action":"export.begin","runId":other,
+               "cutDigest":CUT,"expectedPlaintextBytes":len(raw),
+               "keyRef":"portable-recovery"})
+        self.assertEqual(denied["code"],"BACKUP_ENTROPY_PAIR_REUSED")
+        self.assertFalse((self.root/(other+".encrypted")).exists())
+        self.assertEqual((self.root/(RUN+".encrypted")).read_bytes(),header)
+        self.assertEqual((self.root/(RUN+".ledger")).read_bytes(),journal)
+        restarted.close()
+
+    def test_abandoned_context_and_retained_reservation_deny_reuse(self):
+        raw=make_payload()
+        pair=(bytes(range(16)),bytes(range(12)))
+        self.host._new_entropy=lambda:pair
+        self.assertTrue(self.begin(raw)["ok"])
+        self.assertTrue(self.append(raw[:min(BUFFER,len(raw))],0)["ok"])
+        self.host.close()  # abandon without finalize or erasing possible effect
+        preserved=(self.root/(RUN+".encrypted")).read_bytes()
+        alternate="s02_"+"c"*32
+        restarted=V2ArchiveHost(self.root,lambda:PASS)
+        restarted._new_entropy=lambda:pair
+        denied=restarted.action({"action":"export.begin","runId":alternate,
+             "cutDigest":CUT,"expectedPlaintextBytes":len(raw),
+             "keyRef":"portable-recovery"})
+        self.assertEqual(denied["code"],"BACKUP_ENTROPY_PAIR_REUSED")
+        self.assertEqual((self.root/(RUN+".encrypted")).read_bytes(),preserved)
+        restarted.close()
+
+    def test_durable_reservation_failure_keeps_uncertain_pair(self):
+        raw=make_payload()
+        pair=(bytes(range(16)),bytes(range(12)))
+        self.host._new_entropy=lambda:pair
+        original=self.host._reserve_entropy_pair
+        def failed_after_reservation(run,nonce):
+            original(run,nonce)
+            raise OSError("injected durable reservation acknowledgment loss")
+        self.host._reserve_entropy_pair=failed_after_reservation
+        failed=self.begin(raw)
+        self.assertFalse(failed["ok"])
+        self.assertTrue((self.root/(RUN+".ledger")).exists())
+        self.assertTrue((self.root/(".nonce-"+(pair[0]+pair[1]).hex())).exists())
+        other="s02_"+"d"*32
+        next_host=V2ArchiveHost(self.root,lambda:PASS)
+        next_host._new_entropy=lambda:pair
+        denied=next_host.action({"action":"export.begin","runId":other,
+                    "cutDigest":CUT,"expectedPlaintextBytes":len(raw),
+                    "keyRef":"portable-recovery"})
+        self.assertEqual(denied["code"],"BACKUP_ENTROPY_PAIR_REUSED")
+        self.assertFalse((self.root/(other+".encrypted")).exists())
+        next_host.close()
+
+    def test_corrupt_collision_evidence_fail_closed(self):
+        raw=make_payload()
+        self.root.mkdir()
+        broken=self.root/(".nonce-"+"f"*56)
+        broken.write_bytes(b"malformed")
+        broken.chmod(0o600)
+        failed=self.begin(raw)
+        self.assertEqual(failed["code"],"BACKUP_COLLISION_HISTORY_CORRUPT")
+        self.assertFalse((self.root/(RUN+".encrypted")).exists())
+
+    def test_legacy_header_collision_without_new_reservation(self):
+        raw=make_payload()
+        pair=(bytes(range(16)),bytes(range(12)))
+        self.host._new_entropy=lambda:pair
+        self.assertTrue(self.begin(raw)["ok"])
+        self.host.close()
+        # Simulate a pre-reservation legacy file with a valid header and
+        # minimal ledger; the encrypted header must still fence its pair.
+        original=(self.root/(RUN+".ledger"))
+        import json
+        contents=json.loads(original.read_text())
+        del contents["entropyPair"]
+        original.write_text(json.dumps(contents))
+        original.chmod(0o600)
+        (self.root/(".nonce-"+(pair[0]+pair[1]).hex())).unlink()
+        other="s02_"+"e"*32
+        host=V2ArchiveHost(self.root,lambda:PASS)
+        host._new_entropy=lambda:pair
+        denied=host.action({"action":"export.begin","runId":other,
+                  "cutDigest":CUT,"expectedPlaintextBytes":len(raw),
+                  "keyRef":"portable-recovery"})
+        self.assertEqual(denied["code"],"BACKUP_ENTROPY_PAIR_REUSED")
+        host.close()
+
+    def test_missing_legacy_header_is_unresolvable_history_hold(self):
+        raw=make_payload()
+        self.root.mkdir()
+        import json
+        (self.root/(RUN+".ledger")).write_text(json.dumps({
+          "schema":1,"runId":RUN,"state":"CREATE_POSSIBLE"}))
+        next_id="s02_"+"e"*32
+        denied=self.request("export.begin",runId=next_id,cutDigest=CUT,
+                    expectedPlaintextBytes=len(raw),keyRef="portable-recovery")
+        self.assertEqual(denied["code"],"BACKUP_COLLISION_HISTORY_UNCERTAIN")
+        self.assertFalse((self.root/(next_id+".encrypted")).exists())
+
     def test_complete_readback_and_no_automatic_promotion(self):
         raw=make_payload()
         self.assertEqual(self.begin(raw)["state"],"OPEN_OBSERVED")
