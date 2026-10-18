@@ -383,6 +383,22 @@ class V2ArchiveHost:
             _require(_read_json(ledger,dirfd=self._pin_root()) is None and
                      not artifact.exists(),
                      "BACKUP_RUN_ALREADY_USED")
+            # Prior to any run ledger/entropy/ciphertext effect, check the
+            # actual destination filesystem's available blocks. This is an
+            # advisory instant sample: per-user quota, concurrent writers and
+            # future ENOSPC remain possible. An interrupted append stays HELD.
+            # Existing 14 retained archives already occupy disk; do not
+            # require duplicating them or delete good files to create space.
+            try:
+                fs=os.fstatvfs(self._pin_root())
+                free=fs.f_bavail*fs.f_frsize
+            except OSError as error:
+                raise BackupError("BACKUP_DISK_CAPACITY_UNKNOWN") from error
+            expected=msg["expectedPlaintextBytes"]
+            # New encrypted file + protected staged recovery growth + fixed
+            # 64MiB filesystem safety margin, without a fixture-sized limit.
+            required=expected*2+64*1024*1024
+            _require(free>=required,"BACKUP_DISK_HEADROOM_INSUFFICIENT")
             # Vault lookup precedes the possible-effect write. The host retains
             # neither the secret nor a lock after an unavailable vault.
             secret = self.vault_get()
