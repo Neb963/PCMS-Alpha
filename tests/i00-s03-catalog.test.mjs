@@ -154,7 +154,10 @@ test('S03: extension sender and operation allowlist, no token storage or mutatio
     'src/runtime/entry.mjs','src/runtime/overlay.mjs','src/ui/index.html','src/ui/catalog-view.mjs'
   ].map(p=>readFile(new URL('../'+p,import.meta.url),'utf8')));
   assert.match(files[0],/import '.\/catalog-boundary\.mjs'/);
-  assert.match(files[1],/'git-catalog.mjs', 'catalog-import.mjs', 'catalog-boundary.mjs', 'catalog-watch.mjs'/);
+  for(const name of ['git-catalog.mjs','git-prompt.mjs','catalog-import.mjs',
+    'catalog-prompt-store.mjs','catalog-resume.mjs','catalog-declaration.mjs',
+    'catalog-ready-store.mjs','catalog-boundary.mjs','catalog-watch.mjs'])
+    assert.ok(files[1].includes("'"+name+"'"),name);
   assert.match(files[2],/src="catalog-view\.mjs"/);
   for(const id of ['pcms-catalog-scan','pcms-catalog-repo','pcms-catalog-token',
     'pcms-catalog-list','pcms-catalog-prompt'])assert.match(files[2],new RegExp('id="'+id+'"'));
