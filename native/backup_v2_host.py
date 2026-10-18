@@ -193,6 +193,113 @@ class V2ArchiveHost:
             os.close(self._export_lock)
             self._export_lock=None
 
+    def _new_entropy(self):
+        """OS entropy per attempt. Test injection patches this internal hook only."""
+        return os.urandom(16), os.urandom(12)
+
+    def _known_entropy_pairs(self):
+        """Fail closed over all known attempts, not just retained success files.
+
+        This is called under the root's exclusive OS writer lock. Reservation
+        evidence persists after success, interruption, retention, and restarts.
+        Legacy archive headers are checked even if they predate reservations.
+        """
+        fd=self._pin_root(create=True)
+        names=os.listdir(fd)
+        _require(len(names)<=200000,"BACKUP_COLLISION_HISTORY_LIMIT")
+        ledger_names={n for n in names if n.endswith(".ledger")}
+        artifacts={n for n in names if n.endswith(".encrypted")}
+        reserved={}
+        for name in names:
+            if not name.startswith(".nonce-"):
+                continue
+            pair=name[7:]
+            _require(re.fullmatch(r"[0-9a-f]{56}",pair) is not None,
+                     "BACKUP_COLLISION_HISTORY_CORRUPT")
+            file=os.open(name,os.O_RDONLY|getattr(os,"O_NOFOLLOW",0),dir_fd=fd)
+            with os.fdopen(file,"rb") as reader:
+                st=os.fstat(reader.fileno())
+                _require(stat.S_ISREG(st.st_mode) and st.st_nlink==1 and
+                         st.st_uid==os.getuid() and st.st_size<=256 and
+                         not (st.st_mode&0o077),
+                         "BACKUP_COLLISION_HISTORY_CORRUPT")
+                try:
+                    data=json.loads(reader.read().decode("utf-8"))
+                except (UnicodeError,ValueError):
+                    raise BackupError("BACKUP_COLLISION_HISTORY_CORRUPT")
+            _require(type(data) is dict and set(data)==
+                     {"schema","runId","pair"} and data["schema"]==1 and
+                     isinstance(data["runId"],str) and
+                     _ID.fullmatch(data["runId"]) and data["pair"]==pair,
+                     "BACKUP_COLLISION_HISTORY_CORRUPT")
+            reserved[pair]=data["runId"]
+        seen={}
+        for name in sorted(ledger_names):
+            run=name[:-7]
+            _require(_ID.fullmatch(run) is not None,
+                     "BACKUP_COLLISION_HISTORY_CORRUPT")
+            state=_read_json(self.root/name,dirfd=fd)
+            _require(state is not None and state.get("runId")==run,
+                     "BACKUP_COLLISION_HISTORY_CORRUPT")
+            pair=state.get("entropyPair")
+            artifact=run+".encrypted"
+            if artifact in artifacts:
+                # Incomplete ciphertext may have only a prefix of its header.
+                # Such cases are safe only when a durable ledger has the pair.
+                with _fd_read(self.root/artifact,dirfd=fd) as reader:
+                    raw=reader.read(HEADER.size)
+                if len(raw)==HEADER.size:
+                    magic,ver,alg,iterations,salt,iv,_=HEADER.unpack(raw)
+                    _require(magic==b"PCMSBK2\x00" and ver==2 and
+                             alg==1 and iterations==250000,
+                             "BACKUP_COLLISION_HISTORY_CORRUPT")
+                    header_pair=(salt+iv).hex()
+                    _require(pair is None or pair==header_pair,
+                             "BACKUP_COLLISION_HISTORY_CORRUPT")
+                    pair=header_pair
+                else:
+                    _require(pair is not None,
+                             "BACKUP_COLLISION_HISTORY_UNCERTAIN")
+            _require(pair is not None and isinstance(pair,str) and
+                     re.fullmatch(r"[0-9a-f]{56}",pair) is not None,
+                     "BACKUP_COLLISION_HISTORY_UNCERTAIN")
+            _require(pair not in seen or seen[pair]==run,
+                     "BACKUP_COLLISION_HISTORY_CORRUPT")
+            seen[pair]=run
+            _require(pair not in reserved or reserved[pair]==run,
+                     "BACKUP_COLLISION_HISTORY_CORRUPT")
+        for name in artifacts:
+            _require(_ID.fullmatch(name[:-10]) is not None and
+                     name[:-10]+".ledger" in ledger_names,
+                     "BACKUP_COLLISION_HISTORY_UNCERTAIN")
+        # A stranded reservation is retained, even if its ledger was lost.
+        # It cannot confer success or be reused; no automatic cleanup.
+        return set(seen)|set(reserved)
+
+    def _reserve_entropy_pair(self,run,pair):
+        """Durably reserve before constructing a cipher or writing a header."""
+        _require(re.fullmatch(r"[0-9a-f]{56}",pair) is not None,
+                 "BACKUP_ENTROPY_INVALID")
+        fd=self._pin_root(create=True)
+        name=".nonce-"+pair
+        try:
+            marker=os.open(name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|
+                           getattr(os,"O_NOFOLLOW",0),0o600,dir_fd=fd)
+        except FileExistsError as error:
+            raise BackupError("BACKUP_ENTROPY_PAIR_REUSED") from error
+        try:
+            payload=json.dumps({"schema":1,"runId":run,"pair":pair},
+                               sort_keys=True,separators=(",",":")).encode()
+            with os.fdopen(marker,"wb") as output:
+                output.write(payload)
+                output.flush()
+                os.fsync(output.fileno())
+            os.fsync(fd)
+        except BaseException:
+            # Leave any uncertain/partially durable marker in place.
+            # Never erase a pair that might already have been spent.
+            raise
+
     def _paths(self, run_id):
         _require(isinstance(run_id, str) and _ID.fullmatch(run_id),
                  "BACKUP_RUN_ID_INVALID")
@@ -281,13 +388,24 @@ class V2ArchiveHost:
             secret = self.vault_get()
             _require(isinstance(secret,str) and len(secret)>=12,
                      "BACKUP_VAULT_UNAVAILABLE")
+            salt,iv=self._new_entropy()
+            _require(type(salt) is bytes and len(salt)==16 and
+                     type(iv) is bytes and len(iv)==12,"BACKUP_ENTROPY_INVALID")
+            pair=(salt+iv).hex()
+            known=self._known_entropy_pairs()
+            _require(pair not in known,"BACKUP_ENTROPY_PAIR_REUSED")
             state={"schema":1,"runId":run,"cutDigest":msg["cutDigest"],
                    "state":"CREATE_POSSIBLE","nextSequence":0,"last":None,
-                   "plaintextBytes":msg["expectedPlaintextBytes"],"acceptedBytes":0}
-            self._write(state)  # durable possible-effect boundary BEFORE open.
+                   "plaintextBytes":msg["expectedPlaintextBytes"],"acceptedBytes":0,
+                   "entropyPair":pair}
+            # Ledger and reservation are separate durable, fail-closed fences.
+            # Crash between them leaves an uncertain ledger, never a reusable pair.
+            self._write(state)
+            self._reserve_entropy_pair(run,pair)
             self.current = state
             try:
                 self.writer=EncryptedWriter(artifact,secret,msg["expectedPlaintextBytes"],
+                                            _test_entropy=(salt,iv),
                                             _dirfd=self._pin_root())
             finally:
                 secret = None
