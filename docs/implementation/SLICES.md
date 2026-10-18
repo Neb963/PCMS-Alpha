@@ -14,8 +14,6 @@
 | **S07** — Refresher/background | Source admission, complete recent-feed snapshots, 24h/72h eligible-time rotation, conservative clocks and bounded fleet queue. | **Engineering:** S01/S02/S06 interfaces; independent safe D/B components may proceed dormant. **Dependent active scheduler/activation:** passed early E-01/E-04 viability and proven actual source/route admission. | AC-14/15, E-04/E-07, T-02/07/08; no-dashboard operating-time and live source-save/feed observation remain required, unknown intervals never credited. |
 | **S08** — end-to-end recovery & acceptance | Close diagnostics, restore/removal, real disposable Firefox one-button restart, fleet/UX and combined proof; recovery built throughout. | **Engineering:** earlier affected interfaces. **Activation/full acceptance:** actual early E-08 restart and applicable required external evidence. | AC-16–18, E-06/E-08/E-09; real source-heavy recovery, installed XPI, 50+/1,000+ performance and authorized live acceptance. |
 
-### Selection and truthful promotion
-
 **Boundary distinction:** *Implementation dependencies* control safe engineering; *activation dependencies* gate remote/native effects; *external acceptance observations* determine live completion. `D/B PASS; L/H/GIT NOT_TESTED` can describe merged, safely **inactive** code, never production acceptance. Failed required CI/unsafe effects block affected merge; absent unrelated access does not.
 ### Selection and truthful promotion
 
