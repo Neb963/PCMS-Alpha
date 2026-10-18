@@ -50,7 +50,6 @@ The accepted Gate B workflow blueprint originally proposed replacing the histori
 7. **Merge readiness:** ordinary verified safe implementation can squash merge under existing CI/protection and delegation; exceptional protected reviews remain.
 8. **S02 continuity:** merged production-v2 code is inactive/not live accepted; release-specific H/L proof does not automatically block independent S03.
 
-
 ## Protected legacy state
 
 - `Neb963/PCMS-Alpha` main and I17 draft PR #20 are distinct and neither is assumed accepted under Gate B. The former must be inspected before bootstrap; the latter must not be automatically merged, rewritten, or discarded.
