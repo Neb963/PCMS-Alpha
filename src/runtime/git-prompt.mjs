@@ -83,3 +83,47 @@ export async function writeExistingGitPrompt({
       operationId:intent.operationId,...(newCommit?{possibleCommit:newCommit}:{})};
   }
 }
+
+
+// Independent observation after uncertain PATCH/HTTP acknowledgment. This
+// function NEVER writes; an unlocated or unattributed effect remains UNKNOWN.
+export async function observeGitPromptWrite({
+  token,repository,operationId,draft,repositoryId,maxAncestors=128
+},transport=fetch,scan=scanMainCatalog){
+  if(!OP.test(operationId||'')||typeof draft!=='string'||
+     !/^[1-9][0-9]{0,19}$/.test(repositoryId||'')||
+     !Number.isSafeInteger(maxAncestors)||maxAncestors<1||maxAncestors>2048)
+    return err('PROMPT_OBSERVATION_INVALID');
+  const current=await scan({token,repository},transport);
+  if(!current?.ok||!current.complete||current.repositoryId!==repositoryId)
+    return err('PROMPT_OBSERVATION_UNAVAILABLE');
+  const target=await blobSha(bytes(draft));
+  const get=http(token,repository,transport);
+  let sha=current.head,depth=0;
+  try{
+    while(SHA.test(sha||'')&&depth++<maxAncestors){
+      const commit=await get('GET','/git/commits/'+sha);
+      if(!SHA.test(commit?.tree?.sha||'')||!Array.isArray(commit.parents))
+        return err('PROMPT_OBSERVATION_UNVERIFIED');
+      const trailer='PCMS-OP: '+operationId;
+      if(commit.message?.split(/\r?\n/).at(-1)===trailer){
+        const tree=await get('GET','/git/trees/'+commit.tree.sha+'?recursive=1');
+        if(tree?.truncated!==false||!Array.isArray(tree.tree))
+          return err('PROMPT_OBSERVATION_INCOMPLETE');
+        const entry=tree.tree.filter(x=>x.path==='pcms/prompts/default-chat1.md');
+        if(entry.length!==1||entry[0].sha!==target||
+          entry[0].type!=='blob'||entry[0].mode!=='100644')
+          return err('PROMPT_ATTRIBUTION_UNVERIFIED');
+        if(current.prompt?.oid!==target||current.prompt.text!==draft)
+          return {ok:false,code:'PROMPT_COMMITTED_BUT_SUPERSEDED',commit:sha};
+        return {ok:true,code:'PROMPT_COMMITTED_VERIFIED',commit:sha,
+          head:current.head,promptOid:target,source:'REMOTE_PROMPT_OBSERVATION'};
+      }
+      if(commit.parents.length===0)return err('PROMPT_OPERATION_NOT_FOUND_IN_HISTORY');
+      if(commit.parents.length!==1||!SHA.test(commit.parents[0]?.sha||''))
+        return err('PROMPT_OBSERVATION_UNVERIFIED');
+      sha=commit.parents[0].sha;
+    }
+    return err('PROMPT_OBSERVATION_BOUNDED_HOLD');
+  }catch{return err('PROMPT_OBSERVATION_UNAVAILABLE');}
+}
