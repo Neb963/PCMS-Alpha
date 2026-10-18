@@ -3,7 +3,7 @@
 // exist only in the caller's live extension port and this invocation.
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
-import {snapshotCanonical,digest,MAX_ARCHIVE_BYTES} from './backup-core.mjs';
+import {snapshotCanonical,snapshotCanonicalV2,digest,MAX_ARCHIVE_BYTES} from './backup-core.mjs';
 import {createPortableBackupPayload,decodeBackupEnvelope} from '../lib/backup-package.js';
 import {filterOrdinaryAutomationJobs} from '../lib/automation-history.js';
 import {previewRestore,verifyCheckpoint,validateRestoreTransport,stableRestoreDonorCut} from './restore-core.mjs';
@@ -123,7 +123,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
   // Shared durable I16 stage engine for both authenticated v1 and native v2.
   // Possible donor/cookie/canonical effects are never automatically replayed.
   async function applyGuardedGroups({db,donor,baseline,intent,req,payload,
-    incomingPcms,mode,fresh=false,accountChoices={}}){
+    incomingPcms,mode,fresh=false,accountChoices={},v2=false}){
         let mappings=null,preparedDonor=null,remaps=null,preparedCanonical=null;
         const session={epoch:intent.epoch,revision:intent.revision};
         async function step(group,operation,dispatch,readback){
@@ -223,7 +223,10 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
             assertHeld:async()=>(await gate.inspect()).held===true,
             expectedBefore:baseline.pcms}),
           async fp=>{
-            const got=await snapshotCanonical(db);
+            // V2 may exceed the v1 64 MiB archive cap. Verify the entire
+            // committed canonical source without reimposing the v1 limit.
+            const got=v2?await snapshotCanonicalV2(db,{serializedValues:true}):
+              await snapshotCanonical(db);
             return {source:'INDEPENDENT_READBACK',
               digest:same(got,preparedCanonical)?fp:'0'.repeat(64)};
           });
@@ -420,7 +423,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
         db=await database();
         await applyGuardedGroups({db,donor,baseline,intent,req:args.mappings,
           payload,incomingPcms:source,mode:'replace',fresh:true,
-          accountChoices:args.accountChoices});
+          accountChoices:args.accountChoices,v2:true});
         const final=await gate.inspect();
         assert(final.held===true&&final.activation==='OFF'&&
           final.status==='COMPLETE_INACTIVE','RESTORE_V2_FINAL_HOLD_REQUIRED');
