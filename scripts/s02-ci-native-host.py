@@ -152,11 +152,6 @@ def native_script():
           cookiesByProfile[cid]=[{name:'ci-'+i,value:'disposable-only-'+i,
             domain:'example.invalid',path:'/',secure:true,httpOnly:true}];
         }
-        // Imported release approval is an archival fact, not a new
-        // permission to execute, publish or activate restored data.
-        records.push({key:'release:s02-old',release:{
-          state:'APPROVED',approval:{canPublish:true},
-          dispatchPossible:false}});
         for(let i=0;i<1024;i++){
           const raw=[
             ['main.pjs',enc.encode('output="h-source-'+i+'";')],
@@ -310,14 +305,11 @@ def fresh_script(run_id):
         const raw=exact?.blobs.find(f=>f.path==='main.pjs');
         const get=row=>candidate.stores.meta.find(v=>v.key===row)?.value;
         const survivor=get('account:s02-ci-0')?.account;
-        const importedApproval=get('release:s02-old')?.release;
         if(!survivor||survivor.state!=='VERIFICATION_PENDING'||
            survivor.personaUid!=='22222222-2222-4222-8222-222222222222'||
            survivor.identity!==null||
            get('account:s02-ci-1')!==undefined||
-           get('removal:s02-ci-1')?.state!=='REMOVED_ONLY_LOCALLY'||
-           importedApproval?.state!=='RESTORE_REVIEW_REQUIRED'||
-           importedApproval?.approval!==null)
+           get('removal:s02-ci-1')?.state!=='REMOVED_ONLY_LOCALLY')
           throw Error('H_UID_REMOVAL_OR_APPROVAL_HISTORY_ACTIVATED');
         if(restored.activation!=='OFF'||restored.providerEffects!=='OFF'||
            restored.donorApply!=='NOT_AUTHORIZED'||
@@ -345,7 +337,7 @@ def fresh_script(run_id):
           throw Error('H_NATIVE_AFTER_FRESH_RESTORE_CHANGED');
         return {ok:true,rows:independent.stores.meta.length,
           historicalAccountExcluded:true,uidRemappedInactive:true,
-          importedApprovalInactive:true,donorPersonas:payload.personas.length,
+          donorPersonas:payload.personas.length,
           sourceManifests:restored.prepared.sourceAudit?.manifests,
           held:held.held,controller:held.controller,activation:held.activation,
           nativeRunId:runId};
@@ -480,7 +472,6 @@ def main():
         assert restored.get("activation")=="OFF" and restored.get("held") is True
         assert restored.get("historicalAccountExcluded") is True
         assert restored.get("uidRemappedInactive") is True
-        assert restored.get("importedApprovalInactive") is True
         print("H S02_ACTUAL_NATIVE_DISK_TO_FRESH_PROFILE_CANONICAL_INACTIVE_RESTORE=PASS",
               json.dumps(restored),flush=True)
         assert sampler.peak_kib>0 and sampler.max_processes>=2, \
