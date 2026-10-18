@@ -53,17 +53,20 @@ export function coalesceCreation(existing,source){
        s.repositoryId!==nextSource.repositoryId))return fail('GIT_REPOSITORY_COLLISION');
   if(!git&&prior.some(s=>s.type==='OPERATOR'&&s.intentId===source.intentId&&
        s.accountId!==(source.accountId||null)))return fail('INTENT_ID_CONFLICT');
-  if(!git&&source.accountId&&existing?.accountId&&
-      source.accountId!==existing.accountId)return fail('ACCOUNT_PIN_CONFLICT');
+  const pinConflict=!git&&source.accountId&&existing?.accountId&&
+    source.accountId!==existing.accountId;
+  if(idx>=0&&git&&prior[idx].markerOid===nextSource.markerOid)
+    return {ok:true,duplicate:true,changed:false,record:existing};
   if(idx>=0&&JSON.stringify(prior[idx])===JSON.stringify(nextSource))
     return {ok:true,duplicate:true,changed:false,record:existing};
   const sources=prior.slice();
   if(idx>=0)sources[idx]=nextSource;else sources.push(nextSource);
-  const record=existing?{...existing,sources,revision:existing.revision+1}:
+  const record=existing?{...existing,sources,revision:existing.revision+1,
+    ...(pinConflict?{hold:'ACCOUNT_PIN_CONFLICT',pinConflict:true}:{} )}:
     {intentId:source.intentId,slug:requestedSlug,origin:git?'GITHUB_MAIN':'OPERATOR',
       accountId:git?null:source.accountId||null,revision:1,
       sources,state:'WAITING_CAPABILITY',hold:'S04_ADMISSION_NOT_VERIFIED'};
   // New origin/readback never clears uncertain provider state, source locks or
   // previous decision. A change of Git HEAD alone is not permission to deploy.
-  return {ok:true,duplicate:false,changed:true,record};
+  return {ok:true,duplicate:false,changed:true,conflict:!!pinConflict,record};
 }
