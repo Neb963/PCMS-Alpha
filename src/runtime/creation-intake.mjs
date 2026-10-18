@@ -31,6 +31,7 @@ export function coalesceCreation(existing,source){
   if(!source||typeof source!=='object'||Array.isArray(source))return fail('INVALID_SOURCE');
   const git=source.type==='GITHUB_MAIN';
   if(git){
+    if(!safeId.test(source.intentId||''))return fail('INVALID_SOURCE');
     const valid=validateGitCreationWitness(source.witness);
     if(!valid.ok)return valid;
   }else if(source.type!=='OPERATOR'||!safeId.test(source.intentId||'')||
@@ -59,8 +60,7 @@ export function coalesceCreation(existing,source){
   const sources=prior.slice();
   if(idx>=0)sources[idx]=nextSource;else sources.push(nextSource);
   const record=existing?{...existing,sources,revision:existing.revision+1}:
-    {intentId:git?'git_'+source.witness.repositoryId+'_'+requestedSlug:
-       source.intentId,slug:requestedSlug,origin:git?'GITHUB_MAIN':'OPERATOR',
+    {intentId:source.intentId,slug:requestedSlug,origin:git?'GITHUB_MAIN':'OPERATOR',
       accountId:git?null:source.accountId||null,revision:1,
       sources,state:'WAITING_CAPABILITY',hold:'S04_ADMISSION_NOT_VERIFIED'};
   // New origin/readback never clears uncertain provider state, source locks or
