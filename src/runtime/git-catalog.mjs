@@ -20,7 +20,7 @@ export function recognizedSlug(slug){return SLUG.test(slug || '');}
 export function catalogScopeFingerprint(rows) {
   // This is a stable *scope* identity, not cryptographic authorization.
   // Comparison also checks every exact material item separately.
-  return rows.map(x=>JSON.stringify([x.slug,x.markerOid,x.ready,x.sourceState]))
+  return rows.map(x=>JSON.stringify([x.slug,x.markerOid,x.ready,x.sourceState,x.folderTreeOid||null,x.testingOid||null]))
     .sort().join('\n');
 }
 export function compareCatalogScopes(pinned, current) {
