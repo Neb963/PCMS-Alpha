@@ -113,7 +113,10 @@ function replaceSource(node,refs,blobs,depth=0){
         'BACKUP_V2_SOURCE_MISSING');
       const previous=blobs.get(proof.sha256);
       if(previous)check(previous.size===proof.size,'BACKUP_V2_BLOB_COLLISION');
-      else blobs.set(proof.sha256,{base64:b.base64,size:proof.size});
+      else {
+        check(blobs.size<100000,'BACKUP_V2_UNSUPPORTED_BLOB_COUNT');
+        blobs.set(proof.sha256,{base64:b.base64,size:proof.size});
+      }
       refs.add(proof.sha256);
       return {...b,base64:{__pcmsV2BlobRef:proof.sha256}};
     })};
@@ -163,6 +166,9 @@ function* fragments(tag,payload){
 }
 export async function compileV2(pcms,donorEnvelope){
   validatePcmsSnapshot(pcms);
+  const totalRows=DB_STORES.reduce((count,store)=>count+pcms.stores[store].length,0);
+  check(Number.isSafeInteger(totalRows)&&totalRows<=100000,
+    'BACKUP_V2_UNSUPPORTED_RECORD_COUNT');
   await preflightSourceRecovery(pcms);
   check(typeof donorEnvelope==='string'&&donorEnvelope.length>0,'BACKUP_V2_DONOR_MISSING');
   const donor=bytes(donorEnvelope);
