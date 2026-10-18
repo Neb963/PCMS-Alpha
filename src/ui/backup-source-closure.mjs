@@ -62,9 +62,17 @@ function references(row) {
 export async function auditSourceClosure(snapshot) {
   requireSource(snapshot?.schema === 1 && Array.isArray(snapshot?.stores?.meta),
     'BACKUP_SOURCE_SNAPSHOT_INVALID');
+  return auditSourceClosureRows(snapshot.stores.meta);
+}
+// Bounded source audit entrypoint for a future pinned, immutable cut iterator.
+// Each source is validated and discarded before reading the next. Retain only
+// digest/size metadata; never cache historical source buffers or base64 strings.
+export async function auditSourceClosureRows(rows) {
+  requireSource(rows && (typeof rows[Symbol.asyncIterator] === 'function' ||
+    typeof rows[Symbol.iterator] === 'function'), 'BACKUP_SOURCE_SNAPSHOT_INVALID');
   const seen = new Map();
   let manifests = 0, referenceCount = 0, uniqueBytes = 0, referencedBytes = 0;
-  for (const row of snapshot.stores.meta) {
+  for await (const row of rows) {
     for (const {source} of referencesOf(row)) {
       requireSource(source && typeof source === 'object' &&
         hex.test(source.fingerprint || '') && Array.isArray(source.files) &&
