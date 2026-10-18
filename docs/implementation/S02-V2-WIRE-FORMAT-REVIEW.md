@@ -1,3 +1,9 @@
+## 2026-10-18 — §9 operator amendment / no v2 wire or cryptographic change
+
+The operator-approved change permits proportional, resource-admitted aggregate browser canonical-IDB capture and inactive restore instead of source-U-independent streaming. It alters **only implementation-memory strategy**; it does **not** change the existing single-message AES-256-GCM framed v2 wire grammar, salt/IV rules, authentication/AAD, PBKDF2, independent disk two-pass readback, source closure, donor payload, END/inventory, replay/lost ACK handling, historical identity, inactive apply, retention or v1 isolation. Source-heap estimates and filesystem/quota samples are advisory and deliberately not encoded as untrusted archive authority. The former 50/1,024/65-MiB figures are initial benchmark measurements rather than normative payload ceilings. The original accepted format/size parser limits still apply unless separately amended; no legitimate row is truncated on overflow. The `resource.inspect` native host message is read-only resource diagnostic and not a new archive record type or cryptographic operation. Independent E-06 exact-head format/security sign-off remains PENDING; operator design approval alone is not E-06.
+
+---
+
 # S02 v2 candidate A — frozen review proposal (NOT APPROVED)
 
 ## 2026-10-18 — evidence-led B1 resolution proposal, wire grammar unchanged (NOT APPROVED)
