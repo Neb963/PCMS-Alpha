@@ -3,7 +3,7 @@
 import {createPortableBackupPayload,encodeBackupEnvelope,decodeBackupEnvelope} from '../lib/backup-package.js';
 import {filterOrdinaryAutomationJobs} from '../lib/automation-history.js';
 import {snapshotCanonical,consistentOrThrow,encodeIntegrated,decodeIntegrated,
-  preflightSourceRecovery,snapshotCanonicalV2} from './backup-core.mjs';
+  preflightSourceRecovery,snapshotCanonicalV2,verifyCanonicalV2Unchanged} from './backup-core.mjs';
 import {waitForPcmsBackupDonor} from './backup-auto-donor.mjs';
 async function donor(api){
   const data=await (await waitForPcmsBackupDonor()).snapshot();
@@ -70,9 +70,10 @@ export async function captureV2SourceCut(api,db,password,sentinel){
     payload:portable,password,scope:{kind:'full'},
     appVersion:api.runtime.getManifest().version,
     stateSchemaVersion:before.state.schemaVersion});
-  const [after,extrasAfter,pcmsAfter,cookiesAfter]=await Promise.all([
-    donor(api),storage(api),snapshotCanonicalV2(db),cookies(api,initial)]);
-  consistentOrThrow(pcms,pcmsAfter);
+  const [after,extrasAfter,sourceCutCheck,cookiesAfter]=await Promise.all([
+    donor(api),storage(api),verifyCanonicalV2Unchanged(db,pcms),
+    cookies(api,initial)]);
+  if(sourceCutCheck?.ok!==true)throw Error('BACKUP_SOURCE_CUT_CHANGED');
   consistentOrThrow(before,after);
   consistentOrThrow(extras,extrasAfter);
   consistentOrThrow(cookieData,cookiesAfter);
