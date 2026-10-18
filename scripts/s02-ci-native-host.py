@@ -154,11 +154,11 @@ def native_script():
             domain:'example.com',hostOnly:true,session:true,
             path:'/',secure:true,httpOnly:true}];
         }
-        // 32 KiB per genuinely unique generated historical asset: 32 MiB
+        // 64 KiB per genuinely unique generated historical asset: 64 MiB
         // unique bytes and twice that referenced by candidate/previous; compare with prior 64 MiB run.
         // This starts in actual installed Firefox before production IDB capture.
         function uniqueAsset(i){
-          const out=new Uint8Array(32768);
+          const out=new Uint8Array(65536);
           let x=(i+1)>>>0;
           for(let n=0;n<out.length;n++){
             x^=x<<13;x^=x>>>17;x^=x<<5;out[n]=x&255;
@@ -304,8 +304,8 @@ def native_script():
         return {ok:true,observed,denied:denied.code,
           interruptedRun,interruptedState:held.state,
           geckoId:browser.runtime.id,
-          sourceStats:{uniqueAssetBytes:1024*32768,
-            referencedAssetBytes:2*1024*32768,
+          sourceStats:{uniqueAssetBytes:1024*65536,
+            referencedAssetBytes:2*1024*65536,
             insertedAndCapturedMs:performance.now()-sourceStart,
             captureMs,quotaUsageBefore:quotaBefore.usage??null,
             quotaUsageAfter:quotaAfter.usage??null,
@@ -529,6 +529,46 @@ def complete_donor_script(run_id):
            policyAudit.sourceBlobCount!==3)
           throw Error('H_V2_FULL_DONOR_CANONICAL_SOURCE_OR_UID_INVALID:'+
             JSON.stringify(policyAudit));
+        // Independent plaintext oracle for EVERY historical candidate and
+        // predecessor, not just the last row or the authenticated inventory.
+        function expectedAsset(i){
+          const data=new Uint8Array(65536);
+          let x=(i+1)>>>0;
+          for(let n=0;n<data.length;n++){
+            x^=x<<13;x^=x>>>17;x^=x<<5;data[n]=x&255;
+          }
+          return data;
+        }
+        let sourceFileProofs=0;
+        for(let i=0;i<1024;i++){
+          const rec=rows.get('stage-history:s02-ci-'+i)?.record;
+          if(!rec)throw Error('H_V2_HISTORY_MISSING:'+i);
+          const expectedSha=await core.digest(expectedAsset(i));
+          for(const source of [rec.candidate,rec.previous]){
+            const manifests=new Map(source?.files?.map(f=>[f.path,f])||[]);
+            const blobs=new Map(source?.blobs?.map(b=>[b.path,b.base64])||[]);
+            if(manifests.size!==3||blobs.size!==3)
+              throw Error('H_V2_FULL_SOURCE_COUNT_CHANGED:'+i);
+            for(const [path,expected] of [
+              ['main.pjs','output="h-source-'+i+'";'],
+              ['index.html','<div data-history="'+i+'">CI</div>']]){
+              const plain=atob(blobs.get(path)||'');
+              const bytes=new TextEncoder().encode(plain);
+              if(plain!==expected||bytes.length!==manifests.get(path)?.size||
+                 await core.digest(bytes)!==manifests.get(path)?.sha256)
+                throw Error('H_V2_SOURCE_BYTE_MISMATCH:'+i+':'+path);
+              sourceFileProofs++;
+            }
+            const base64=blobs.get('src/asset.bin')||'';
+            const binary=Uint8Array.from(atob(base64),c=>c.charCodeAt(0));
+            if(binary.length!==65536||
+               manifests.get('src/asset.bin')?.sha256!==expectedSha||
+               await core.digest(binary)!==expectedSha)
+              throw Error('H_V2_ASSET_BYTE_MISMATCH:'+i);
+            sourceFileProofs++;
+          }
+        }
+        if(sourceFileProofs!==6144)throw Error('H_V2_SOURCE_FIDELITY_INCOMPLETE');
         // Firefox's actual container and cookie APIs, not an in-memory
         // replacement for the donor-controlled Persona/cookie service.
         const identities=await browser.contextualIdentities.query({});
@@ -550,7 +590,8 @@ def complete_donor_script(run_id):
         return {ok:true,reviewAndHoldNegatives:true,donorStages:groups,
           donorContainers:imported.length,donorCookieSets:cookieSets,
           canonicalRows:inventory.stores.meta.length,
-          sourceHistoryExact:true,historicalExclusion:true,
+          sourceHistoryExact:true,sourceFileProofs,
+          historicalExclusion:true,
           uidRemappedInactive:true,held:observed.held,
           activation:observed.activation};
       }finally{db.close();}
@@ -637,7 +678,7 @@ def main():
               json.dumps({"runId":result["interruptedRun"]}),flush=True)
         assert len(seen)==2 and seen[0]["runId"]!=seen[1]["runId"],seen
         assert seen[1]["encoder"]=="PRODUCTION_CANONICAL_SNAPSHOT",seen
-        assert result["sourceStats"]["uniqueAssetBytes"]==33554432,result
+        assert result["sourceStats"]["uniqueAssetBytes"]==67108864,result
         print("H S02_PRODUCTION_IDB_HIGH_UNIQUE_CAPTURE_MEASURED=PASS",
               json.dumps(result["sourceStats"]),flush=True)
         assert min(v["rows"] for v in seen)>=1074,("H_SOURCE_HISTORY_ROW_LOSS",seen)
@@ -719,6 +760,7 @@ def main():
             "encryptedArchivesBytes":sum((home/".local/share/pcms-alpha/backups"/(v["runId"]+".encrypted")).stat().st_size for v in seen),
             "availableFilesystemBytes":__import__("shutil").disk_usage(home).free,
             "restoredProfileBytes":sum(p.stat().st_size for p in profile3.rglob("*") if p.is_file()),
+            "qualifiedRetained14DiskProjectionBytes":14*(home/".local/share/pcms-alpha/backups"/(seen[1]["runId"]+".encrypted")).stat().st_size,
             "installedSourceProfileBytes":sum(p.stat().st_size for p in profile.rglob("*") if p.is_file()),
             "uniqueSourceBytes":result["sourceStats"]["uniqueAssetBytes"]}),flush=True)
         assert sampler.peak_kib>0 and sampler.max_processes>=2, \

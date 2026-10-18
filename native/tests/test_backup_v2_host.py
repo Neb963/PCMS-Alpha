@@ -282,7 +282,7 @@ class TestHost(unittest.TestCase):
         The quota case is deterministic ENOSPC fault injection, not a real
         full filesystem or an operator capacity measurement.
         """
-        raw=make_payload()
+        raw=make_payload(source_blocks=8192)
         good=[]
         for index in range(15):
             run="s02_"+format(110+index,"032x")
@@ -330,6 +330,9 @@ class TestHost(unittest.TestCase):
         self.assertEqual(pruned["state"],"REMOVED")
         self.assertFalse((self.root/(good[0][0]+".encrypted")).exists())
         self.assertEqual(self.request("archive.retention.plan")["qualified"],14)
+        retainedBytes=sum((self.root/(run+".encrypted")).stat().st_size
+                          for run,_ in good[1:])
+        self.assertGreaterEqual(retainedBytes,14*2*1024*1024)
         for run,sha in good[1:]:
             self.assertTrue((self.root/(run+".encrypted")).is_file())
             proof=self.request("backup.verify",runId=run,

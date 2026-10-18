@@ -14,8 +14,8 @@ from backup_stream_v2 import (BackupError, EncryptedWriter, verify_two_pass,
                               MAX_CANONICAL_FRAME, MAX_END_FRAME)
 
 
-def make_payload(*, missing=False, duplicate=False, bad_ref=False, donor=True, extra=False):
-    data = bytes(range(256)) * 360
+def make_payload(*, missing=False, duplicate=False, bad_ref=False, donor=True, extra=False, source_blocks=360):
+    data = bytes(range(256)) * source_blocks
     digest = hashlib.sha256(data).digest()
     refs = [hashlib.sha256(b'unknown').hexdigest()] if bad_ref else [digest.hex()]
     row = {"store": "meta", "key": "stage:a", "refs": refs,

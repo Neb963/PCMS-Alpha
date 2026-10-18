@@ -8,7 +8,7 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 test('S02 host effects and lost ACK are observable independent of its in-memory context',()=>{
   const run=spawnSync('python3',['-m','unittest','discover','-s','native/tests',
     '-p','test_backup_v2_host.py','-v'],{cwd:root,encoding:'utf8',
-    timeout:120000,maxBuffer:2*1024*1024});
+    timeout:240000,maxBuffer:2*1024*1024});
   assert.equal(run.error,undefined);
   assert.equal(run.status,0,run.stderr?.slice(-3000));
   assert.match(run.stderr,/Ran 27 tests in /);
