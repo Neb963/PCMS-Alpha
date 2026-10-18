@@ -157,7 +157,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
               revision:snapshot.revision,personaKey:p.key,cookieStoreId:made.cookieStoreId});
           }
           mappings=mappingFromContainers(payload,req,containers,intent.epoch);
-          preparedDonor=await donor.prepare({payload,mappings,mode:mode});
+          preparedDonor=await donor.prepare({payload,mappings,mode,regeneratePersonaUids:fresh});
           remaps=uidMap(preparedDonor.sourcePersonas);
           await donor.commit(preparedDonor.candidate);
         },async fp=>{
