@@ -114,6 +114,12 @@
           </div>
           <p id="pcms-catalog-status" role="status" aria-live="polite">Not connected. No remote changes will be made.</p>
           <div id="pcms-catalog-list" class="table-wrap" role="region" tabindex="0" aria-label="Complete pinned main catalog"></div>
+          <div class="account-controls">
+            <label for="pcms-catalog-ready-slug">Verify exact READY declaration</label>
+            <input id="pcms-catalog-ready-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="generator-slug">
+            <button id="pcms-catalog-ready-inspect" type="button" disabled>Inspect source lineage</button>
+          </div>
+          <p id="pcms-catalog-ready-status" role="status" aria-live="polite">Select a recognized READY generator to inspect declaration ancestry and exact source hashes. Read-only.</p>
           <label for="pcms-catalog-prompt">Authoritative default Chat 1 prompt at pinned revision</label>
           <textarea id="pcms-catalog-prompt" rows="5" readonly spellcheck="false" placeholder="Inspect catalog to read existing Git prompt"></textarea>
           <label for="pcms-catalog-prompt-draft">Chat 1 Git prompt draft</label>
