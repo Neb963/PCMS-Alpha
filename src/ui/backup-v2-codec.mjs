@@ -213,8 +213,8 @@ export async function compileV2(pcms,donorEnvelope){
   const refs=[...blobs.keys()].sort();
   const terminal={schema:2,canonicalRows:rows.length,storeCounts:counts,
     uniqueBlobs:refs.length,donorSections:1,
-    sourceRefsSha256:await digest(refs.join('\\n')),
-    rowDigestsSha256:await digest(rowHashes.join('\\n')),
+    sourceRefsSha256:await digest(refs.join('\n')),
+    rowDigestsSha256:await digest(rowHashes.join('\n')),
     donorSha256:await digest(donor)};
   const ending=bytes(canonicalJSON(terminal));
   check(ending.length<=V2_LIMITS.end,'BACKUP_V2_END_LIMIT');
