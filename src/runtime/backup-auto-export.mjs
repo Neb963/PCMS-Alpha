@@ -55,10 +55,32 @@ export async function sealAutomatic(api,db,password,sentinel){
 // Firefox/IndexedDB consistency authorities. No second backup scheduler.
 // The caller is the guarded background coordinator; successful cut preparation
 // never itself writes the disk, source, donor, provider, Git or routing state.
+async function advisoryNativeMemory(api){
+  // The registered fixed-purpose S02 host reports a Linux OS/cgroup hint.
+  // No untrusted message, path, vault secret or operational authority is sent.
+  // Failure is recorded as unsupported measurement, not a false heap value.
+  let port;
+  try{
+    port=api.runtime.connectNative('local.pcms.backup_v2');
+    const answer=await new Promise((resolve,reject)=>{
+      let settled=false;
+      port.onMessage.addListener(value=>{if(!settled){settled=true;resolve(value);}});
+      port.onDisconnect.addListener(()=>{if(!settled){settled=true;
+        reject(Error('BACKUP_V2_OS_MEMORY_UNAVAILABLE'));}});
+      port.postMessage({action:'resource.inspect'});
+    });
+    return answer?.ok===true&&answer.state==='ADVISORY_ONLY'&&
+      Number.isSafeInteger(answer.osAvailableMemoryBytes)&&
+      answer.osAvailableMemoryBytes>0?answer.osAvailableMemoryBytes:null;
+  }catch{return null;}
+  finally{try{port?.disconnect()}catch{}}
+}
 export async function captureV2SourceCut(api,db,password,sentinel,{
-  donorReader=waitForPcmsBackupDonor,resourceEnvironment=globalThis.navigator
+  donorReader=waitForPcmsBackupDonor,resourceEnvironment=globalThis.navigator,
+  osMemoryProbe=advisoryNativeMemory
 }={}){
-  const policy=v2CaptureResourcePolicy(resourceEnvironment);
+  const available=await osMemoryProbe(api);
+  const policy=v2CaptureResourcePolicy(resourceEnvironment,available);
   const initialQuota=await checkV2BrowserStorage(resourceEnvironment);
   const before=await donor(api,donorReader),extras=await storage(api);
   const resourceStats={};
@@ -91,6 +113,7 @@ export async function captureV2SourceCut(api,db,password,sentinel,{
     resourceEstimate:Object.freeze({aggregateUtf16Bytes:resourceStats.aggregateUtf16Bytes,
       canonicalRows:resourceStats.canonicalRows,
       memoryBucketGiB:policy.memoryBucketGiB,
+      osAvailableMemoryBytes:policy.osAvailableMemoryBytes,
       maxAggregateUtf16Bytes:policy.maxAggregateUtf16Bytes,
       browserHeapBytes:null,initialQuota,finalQuota}),
     cut:'CONSISTENT_SOURCE_CUT'});
