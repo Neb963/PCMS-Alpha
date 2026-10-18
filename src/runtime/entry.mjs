@@ -12,6 +12,10 @@ import './account-boundary.mjs';
 import './inventory-boundary.mjs';
 // Operator-triggered read-only private Git inspection and canonical mapping.
 import './source-boundary.mjs';
+// S03 complete main-only catalog and Git-owned prompt (read-only admission).
+import './catalog-boundary.mjs';
+// S03 main observer wakes from alarms without an open dashboard.
+import './catalog-watch.mjs';
 
 // I06 frozen allocation and held guarded two-stage provider dispatcher.
 import './supply-boundary.mjs';

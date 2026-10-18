@@ -262,9 +262,35 @@ def native_script():
         let actualCoordinator=null;
         for(let i=0;i<2;i++){
           if(i===1){
-            actualCoordinator=await coordinator.captureV2SourceCut(
-              browser,db,vault.passphrase,{inspect:async()=>({held:false})},{
-                donorReader:fixtureDonorReader,resourceEnvironment:navigator});
+            try{
+              actualCoordinator=await coordinator.captureV2SourceCut(
+                browser,db,vault.passphrase,{inspect:async()=>({held:false})},{
+                  donorReader:fixtureDonorReader,resourceEnvironment:navigator});
+            }catch(e){
+              // Diagnostic only: preserve the source-cut failure and identify
+              // whether a different background producer altered real IDB keys.
+              const unexpected={};
+              for(const store of core.DB_STORES){
+                const expected=new Set(pcms.stores[store].map(r=>String(r.key)));
+                const actual=new Set();
+                const tx=db.transaction([store],'readonly');
+                await new Promise((resolve,reject)=>{
+                  const cur=tx.objectStore(store).openKeyCursor();
+                  cur.onsuccess=v=>{
+                    const item=v.target.result;
+                    if(item){actual.add(String(item.key));item.continue();}
+                  };
+                  tx.oncomplete=resolve;
+                  tx.onabort=()=>reject(Error('H_DIAGNOSTIC_IDB_ABORT'));
+                });
+                const added=[...actual].filter(k=>!expected.has(k)).slice(0,8);
+                const removed=[...expected].filter(k=>!actual.has(k)).slice(0,8);
+                if(added.length||removed.length||actual.size!==expected.size)
+                  unexpected[store]={added,removed,observed:actual.size,expected:expected.size};
+              }
+              throw Error('H_SOURCE_CUT_CHANGED_DIAGNOSTIC:'+String(e)+
+                ':KEY_DELTA='+JSON.stringify(unexpected));
+            }
             if(actualCoordinator.cut!=='CONSISTENT_SOURCE_CUT'||
                actualCoordinator.resourceEstimate.canonicalRows<1074)
               throw Error('H_PRODUCTION_COORDINATOR_CUT_MISSING');
