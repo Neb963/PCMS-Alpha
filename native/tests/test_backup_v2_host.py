@@ -151,8 +151,10 @@ class TestHost(unittest.TestCase):
         raw=make_payload()
         self.root.mkdir(mode=0o700)
         import json
-        (self.root/(RUN+".ledger")).write_text(json.dumps({
+        legacy=(self.root/(RUN+".ledger"))
+        legacy.write_text(json.dumps({
           "schema":1,"runId":RUN,"state":"CREATE_POSSIBLE"}))
+        legacy.chmod(0o600)
         next_id="s02_"+"e"*32
         denied=self.request("export.begin",runId=next_id,cutDigest=CUT,
                     expectedPlaintextBytes=len(raw),keyRef="portable-recovery")
