@@ -115,7 +115,7 @@ class TestHost(unittest.TestCase):
 
     def test_corrupt_collision_evidence_fail_closed(self):
         raw=make_payload()
-        self.root.mkdir()
+        self.root.mkdir(mode=0o700)
         broken=self.root/(".nonce-"+"f"*56)
         broken.write_bytes(b"malformed")
         broken.chmod(0o600)
@@ -149,7 +149,7 @@ class TestHost(unittest.TestCase):
 
     def test_missing_legacy_header_is_unresolvable_history_hold(self):
         raw=make_payload()
-        self.root.mkdir()
+        self.root.mkdir(mode=0o700)
         import json
         (self.root/(RUN+".ledger")).write_text(json.dumps({
           "schema":1,"runId":RUN,"state":"CREATE_POSSIBLE"}))
