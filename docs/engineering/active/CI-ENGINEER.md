@@ -4,7 +4,7 @@
 
 ## 1. What a PASS means
 
-Acceptance authority is Client Contract v1.0.0 and AC-01–AC-18 / T-01–T-10 / E-01–E-09. A passing check proves only the assertion, code revision, environment, scope and evidence tier actually exercised. Distinguish **implementation present**, **D PASS**, **B PASS**, **H PASS**, **GIT PASS**, **L PASS** and **operator acceptance**. A fixture cannot establish an actual provider effect; a packaged Firefox test cannot establish host process death; a successful writer tag cannot establish restorable backup bytes.
+Acceptance authority is Client Contract v1.0.0 and AC-01–AC-18 / T-01–T-10 / E-01–E-09. Evidence proves only its exact assertion/revision/environment/tier. Distinguish incomplete implementation, verified engineering, safely merged **inactive** implementation, full live acceptance and real failure; continue reporting D/B/H/GIT/L separately. A fixture does not prove a real provider effect; B does not establish real host death; an exported tag does not prove restored backup bytes. Missing H/L/GIT is **not PASS** but need not block safe dormant code/ordinary authorized merge. Actual required-test failure remains blocking.
 
 | Tier | Minimum independent observation |
 |---|---|
@@ -20,7 +20,7 @@ Maintain one small **machine-readable evidence ledger** and generate any readabl
 
 Keep the current stable required aggregator, `pcms-required`, on **every PR** (including docs-only) with a selector trusted independently of PR code. It must reject selected child jobs that are missing, skipped, canceled, stale, wrong-SHA, failed, or lack required artifacts. Non-selected jobs are `NOT_REQUIRED`, not PASS. Do not hide the aggregate behind whole-workflow `paths` filters. Validate the selector itself with negative fixtures and an observable red→green case.
 
-Fast lane: build/static checks and affected D tests including donor security, exact source, source conflict, Git conditional-update, record migration and issue-specific negative cases. Browser lane: packed real XPI for changes to background, native bridge, lease/protected route, owner tab, UI and recovery. Milestone lane: adversarial end-to-end, complete source, crypto/restore and 50+ account / 1,000+ generator workload evidence. Privileged L/GIT/host tests run only under explicit narrow authority and **not** in unattended public CI.
+Fast lane: build/static and affected D tests including donor security, source/conflict, conditional Git writeback, migration and issue-specific adverse cases. Browser lane: actual installed full-capability XPI for background, native bridge, protected routes, tabs, UI and recovery changes. Milestone lane: relevant adversarial end-to-end, source/crypto/restore and intended 50+ account/1,000+ generator workloads. Run required current checks and affected tests; reuse proven unchanged evidence, not entire historic suites automatically. Privileged L/GIT/host actions need exact authorization and never run unattended in public CI.
 
 Before trusting a fix, show the test can fail for the original defect. Inject stale heads, wrong principal, route revocation/expiry, interrupted source writes, missing optional `TESTING.md`, new READY supersession, dirty human editor, process death and incomplete feed/list enumeration as applicable. An effect ledger must survive independent of the extension's in-memory state, so duplicate external writes are visible. No `continue-on-error`, blanket retries, blind timeout enlargement or deleting failing donor assertions.
 
@@ -31,7 +31,7 @@ Before trusting a fix, show the test can fail for the original defect. Inject st
 - **E-06, S02 (early spike permitted):** independently reviewed streaming AES-GCM *single-message* format and actual end-to-end encrypted, reopened, authenticated, fully decrypted source-heavy restore into a fresh profile. No custom crypto claims from local writer success.
 - **E-08, S01 (early):** finite scoped restart supervisor survives real exit and relaunches the **same persistently installed** enabled XPI in a disposable Firefox profile; no personal-session interference.
 
-A failed proof is a promotion hold for dependent work. Do not delay a viability contradiction until S07/S08, substitute a daemon or relax product behavior silently. Independent unrelated work can proceed within authority.
+A **failed** architecture-critical proof holds the dependent risky implementation/activation until repaired or explicitly amended; do not defer actual viability contradictions to S07/S08, substitute a daemon, or weaken guarantees. **Unavailable** external access is separately marked `BLOCKED`/`NOT_TESTED`, not reclassified as PASS or intrinsic product failure. It cannot automatically immobilize independent S03 catalog work or otherwise safe, dormant merging.
 
 ## 4. Trust roots, security and efficiency
 
@@ -39,4 +39,4 @@ CI/workflow/required-check policy, coverage mapping, protected agent instruction
 
 For a browser claim log Firefox build, XPI digest/Gecko ID, donor SHA, host version, installation mode and measured lifecycle event. `web-ext run` temporary installs cannot prove persistent cold reboot. A new JS `bootId` is not an OS-observed browser restart. Real process tests require external receipts and isolated profiles/process trees.
 
-Classify first failure as product, oracle/test, packaging/toolchain, environment or flaky race. Reproduce narrowly, preserve redacted failing artifacts and rerun only impacted tests first; expand on shared security surfaces. Measure real feedback time and remove duplicate setup rather than arbitrary safety gates. A finished CI report lists exact proofs, deliberately unrun tiers, holds and next test; never substitute a green badge for the complete operator outcome.
+Classify first failure as product, oracle/test, packaging/toolchain, environment or flaky race. Fix actual required CI/B failures rather than weaken the assertion or redefine failure. Reproduce narrowly, retain redacted evidence, rerun impacted tests first and expand on shared security surfaces. Require measured evidence before major storage/scheduler redesign; preserve accepted scale with practical resource bounds and safe diagnostics. Report exactly what was proved, omitted tiers, dependent activation holds and next evidence; a green badge is not a live product.

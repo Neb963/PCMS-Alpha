@@ -34,6 +34,23 @@ The accepted Gate B workflow blueprint originally proposed replacing the histori
 - PCMS runtime may conditionally write tested source directly to authorized `per-gens/main`, with independent readback. Coding agents must still use reviewed implementation/source-authoring PRs. There is no cross-repository blanket write grant.
 - Accepted reversible Archive controls; account-capacity advisory covers all **non-archived** managed accounts including temporarily unavailable ones. Updating existing public generators requires approved unlisting/human publication semantics, with bounded holds and no silent previous-good re-publication.
 
+## 2026-10-18 — One-time autonomous-slice execution clarification
+
+**Why and authority.** The operator authorized one scoped documentation/governance correction, not S03 implementation, source/runtime/CI alterations or new external effects. Previous wording confused routine engineering decisions with exceptional approval; unavailable external evidence with failed correctness proof; and code merge with live activation. This caused repeated reviews and unnecessary stoppages. This clarification concerns **execution only**, subordinate to the unchanged Client Contract v1.0.0, AC/T/E, accepted Gate B security constraints, historical signed Stage 7 artifacts and existing protection rules.
+
+**Exact change.** A single standing “Implement the next eligible authorized slice” instruction permits independent selection, compatible technical replacement/cross-module repairs, affected D/B/recovery testing, remote PR checkpoints and ordinary authorized squash merges with postmerge checks. Never invent PASS, bypass required CI, weaken source/identity/route/publication protections or self-approve modified policy trust roots. Missing L/H/GIT proof restricts the dependent remote/native effect, not unrelated safe code merging; actual failed CI, installed-Firefox, correctness or security behavior blocks affected completion. Significant redesign demands demonstrated defects, not imagined ideal-scale requirements. Retain accepted 50+/1,000+ support, exact candidate human publication, original uncertain I17 no-CREATE/RENAME quarantine and durable lost-ACK reconciliation.
+
+**Eight policy-consistency scenarios (instruction review, not runtime proof):**
+1. **S03 without live Perchance:** eligible merged S00/S02 allow D/B pinned-main catalog/prompt implementation; dependent GIT/L proof remains separately pending.
+2. **Compatible redesign:** fix measured defect with tested equivalent engineering method; no routine operator vote.
+3. **External acceptance unavailable:** record actual missing tier, keep affected runtime action dormant, complete independent safe code; no invented PASS.
+4. **Required CI/B regression:** fix first actual failure before merging affected code; assertions remain intact.
+5. **Protected authority:** changing route isolation, source/release guards or CI policy requires independent trusted final-diff review; agent cannot self-approve.
+6. **Uncertain remote ACK:** journal and reconcile by observation before another effect; original quarantine stays.
+7. **Merge readiness:** ordinary verified safe implementation can squash merge under existing CI/protection and delegation; exceptional protected reviews remain.
+8. **S02 continuity:** merged production-v2 code is inactive/not live accepted; release-specific H/L proof does not automatically block independent S03.
+
+
 ## Protected legacy state
 
 - `Neb963/PCMS-Alpha` main and I17 draft PR #20 are distinct and neither is assumed accepted under Gate B. The former must be inspected before bootstrap; the latter must not be automatically merged, rewritten, or discarded.
