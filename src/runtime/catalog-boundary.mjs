@@ -4,7 +4,7 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {createRestoreSentinel,openCanonicalDatabase,fail} from './journal.mjs';
 import {createImportApprovalStore,getImportScopeDigest} from './catalog-import.mjs';
 import {createGitPromptStore} from './catalog-prompt-store.mjs';
-import {writeExistingGitPrompt} from './git-prompt.mjs';
+import {writeExistingGitPrompt,observeGitPromptWrite} from './git-prompt.mjs';
 import {inspectReadyCandidate} from './catalog-declaration.mjs';
 import {createDeclarationStore} from './catalog-ready-store.mjs';
 import {scanMainCatalog,validRepository,makeInitialImportPreview} from './git-catalog.mjs';
@@ -19,7 +19,7 @@ export function validateCatalogMessage(api,sender,message){
   if(!message||typeof message!=='object'||Array.isArray(message)||
       Object.keys(message).some(k=>!['type','params'].includes(k)))
     return fail('CAPABILITY_OFF');
-  const types=['SCAN_CATALOG','CONNECT_GIT','SCAN_CONNECTED','GIT_STATUS','DISCONNECT_GIT','APPROVE_IMPORT','GET_PROMPT_DRAFT','SAVE_PROMPT_DRAFT','COMMIT_PROMPT','INSPECT_DECLARATION'];
+  const types=['SCAN_CATALOG','CONNECT_GIT','SCAN_CONNECTED','GIT_STATUS','DISCONNECT_GIT','APPROVE_IMPORT','GET_PROMPT_DRAFT','SAVE_PROMPT_DRAFT','COMMIT_PROMPT','RECONCILE_PROMPT','INSPECT_DECLARATION'];
   if(!types.includes(message.type))return fail('CAPABILITY_OFF');
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
@@ -48,6 +48,10 @@ export function validateCatalogMessage(api,sender,message){
       typeof p.repositoryId!=='string'||!/^[1-9][0-9]{0,19}$/.test(p.repositoryId)||
       typeof p.scopeDigest!=='string'||!/^[0-9a-f]{64}$/.test(p.scopeDigest))
       return fail('INVALID_PARAMS');
+  } else if(message.type==='RECONCILE_PROMPT'){
+    if(Object.keys(p).some(k=>k!=='repositoryId')||
+      typeof p.repositoryId!=='string'||!/^[1-9][0-9]{0,19}$/.test(p.repositoryId))
+      return fail('INVALID_PARAMS');
   } else if(message.type==='GET_PROMPT_DRAFT'){
     if(Object.keys(p).length)return fail('INVALID_PARAMS');
   } else if(Object.keys(p).length)return fail('INVALID_PARAMS');
@@ -55,6 +59,7 @@ export function validateCatalogMessage(api,sender,message){
 }
 export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
   open=openCanonicalDatabase,writePrompt=writeExistingGitPrompt,
+  observePrompt=observeGitPromptWrite,
   inspectDeclaration=inspectReadyCandidate,
   // Product gate stays inactive until independently authorized Git H/GIT proof.
   promptWriteGate=()=>false,
@@ -152,6 +157,28 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
         return await (await promptStore()).save({repositoryId:config.repositoryId,
           expectedRevision:p.expectedRevision,baseOid:p.baseOid,
           text:p.text,updatedAt:Date.now()});
+      }
+      if(message.type==='RECONCILE_PROMPT'){
+        if(p.repositoryId!==config.repositoryId)return fail('GIT_IDENTITY_CHANGED');
+        const prior=await (await promptStore()).read(config.repositoryId);
+        if(!prior.ok||!['UNCERTAIN','DISPATCH_POSSIBLE'].includes(
+           prior.record.effect?.state))return fail('PROMPT_NO_UNCERTAIN_EFFECT');
+        const secret=await getSecret(config);if(!secret.ok)return secret;
+        const observation=await observePrompt({
+          token:secret.token,repository:config.repository,
+          operationId:prior.record.effect.operationId,
+          draft:prior.record.text,repositoryId:config.repositoryId
+        },transport,scan);
+        if(!observation.ok)return {ok:false,code:observation.code,
+          retainsDraft:true};
+        if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+        const stamped=await (await promptStore()).reconcile({
+          repositoryId:config.repositoryId,
+          operationId:prior.record.effect.operationId,
+          state:'VERIFIED',possibleCommit:observation.commit,receipt:observation
+        });
+        return stamped.ok?{ok:true,code:'PROMPT_RECONCILED_VERIFIED',
+          commit:observation.commit}:stamped;
       }
       if(message.type==='COMMIT_PROMPT'){
         if(p.repositoryId!==config.repositoryId)return fail('GIT_IDENTITY_CHANGED');
