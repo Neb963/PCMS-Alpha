@@ -168,7 +168,7 @@ function* fragments(tag,payload){
 // references, not a second fleet of encoded CANONICAL frame buffers. This is
 // an allocation reduction, NOT a substitute for an immutable streaming cut:
 // the legacy caller still owns the aggregate pcms snapshot (B1 remains HELD).
-function encodeRow(row,store,blobIndex){
+export function encodeV2Row(row,store,blobIndex){
   const refs=new Set();
   rejectV2DiscriminatorCollisions(row.value);
   const transformed=replaceSource(
@@ -204,7 +204,7 @@ export async function compileV2(pcms,donorEnvelope){
       return x<y?-1:x>y?1:0;
     });
     for(const index of indices){
-      const payload=encodeRow(sourceRows[index],store,blobs);
+      const payload=encodeV2Row(sourceRows[index],store,blobs);
       const sha256=await digest(payload);
       rows.push({store,index,length:payload.length,sha256});
       rowHashes.push(sha256);counts[store]++;
@@ -241,7 +241,7 @@ export async function* streamV2Frames(plan){
   for(const row of plan.rows){
     const source=plan.pcms?.stores?.[row.store]?.[row.index];
     check(source,'BACKUP_V2_SOURCE_CUT_CHANGED');
-    const data=encodeRow(source,row.store,new Map());
+    const data=encodeV2Row(source,row.store,new Map());
     check(data.length===row.length&&await digest(data)===row.sha256,
       'BACKUP_V2_SOURCE_CUT_CHANGED');
     yield* fragments(V2_FRAME.CANONICAL,data);
