@@ -116,6 +116,7 @@ def native_script():
         throw Error('H_NATIVE_VAULT_READ_FAILED');
       const native=await import('./backup-v2-session.mjs');
       const verify=await import('./backup-v2-verify.mjs');
+      const coordinator=await import('./backup-auto-export.mjs');
       const core=await import('./backup-core.mjs');
       const journal=await import('./journal.mjs');
       const donor=await import('../lib/backup-package.js');
@@ -250,12 +251,29 @@ def native_script():
         if((await core.verifyCanonicalV2Unchanged(db,pcms)).ok!==true)
           throw Error('H_PINNED_CUT_BEFORE_DRIFT');
         const observed=[];
+        // Actual S02/I15 cut coordinator executes against installed Firefox
+        // IDB; only its donor read adapter is an isolated synthetic fixture.
+        // No live accounts/routes/provider effects are authorized.
+        const fixtureDonorReader=async()=>({
+          snapshot:async()=>({state:{profiles,scripts,routes:{},
+            workflows:{},global:{}},containers}),
+          cookies:async id=>cookiesByProfile[id]
+        });
+        let actualCoordinator=null;
         for(let i=0;i<2;i++){
+          if(i===1){
+            actualCoordinator=await coordinator.captureV2SourceCut(
+              browser,db,vault.passphrase,{inspect:async()=>({held:false})},{
+                donorReader:fixtureDonorReader,resourceEnvironment:navigator});
+            if(actualCoordinator.cut!=='CONSISTENT_SOURCE_CUT'||
+               actualCoordinator.resourceEstimate.canonicalRows<1074)
+              throw Error('H_PRODUCTION_COORDINATOR_CUT_MISSING');
+          }
           const runId='s02_'+crypto.randomUUID().replaceAll('-','');
           const outcome=await native.exportV2Candidate({
             db,api:browser,
-            ...(i===0?{pinnedCut:fixtureCut}:{pcms}),
-            donorEnvelope:envelope,runId,
+            ...(i===0?{pinnedCut:fixtureCut}:{pcms:actualCoordinator.pcms}),
+            donorEnvelope:i===0?envelope:actualCoordinator.donorEnvelope,runId,
             checkScope:async()=>true,checkRestoreHold:async()=>false
           });
           if(outcome?.state!=='AUTHENTICATED_INVENTORY_ONLY'||
@@ -269,7 +287,7 @@ def native_script():
              verified.activation!=='OFF')throw Error('H_NATIVE_REOPEN_FAILED');
           observed.push({runId,sha256:verified.sha256,
             rows:verified.sourceRows,
-            encoder:i===0?'PINNED_STREAM':'PRODUCTION_CANONICAL_SNAPSHOT',
+            encoder:i===0?'PINNED_STREAM':'PRODUCTION_COORDINATOR_AGGREGATE',
             elapsedMs:performance.now()-captureStart});
         }
         // Real OS process-loss boundary: persistent host opens a new run,
@@ -304,6 +322,7 @@ def native_script():
         return {ok:true,observed,denied:denied.code,
           interruptedRun,interruptedState:held.state,
           geckoId:browser.runtime.id,
+          coordinatorEvidence:actualCoordinator?.resourceEstimate,
           sourceStats:{uniqueAssetBytes:1024*65536,
             referencedAssetBytes:2*1024*65536,
             insertedAndCapturedMs:performance.now()-sourceStart,
@@ -677,7 +696,8 @@ def main():
         print("H S02_NATIVE_HOST_PORT_TERMINATION_UNCERTAIN_FILE_NOT_PROMOTED=PASS",
               json.dumps({"runId":result["interruptedRun"]}),flush=True)
         assert len(seen)==2 and seen[0]["runId"]!=seen[1]["runId"],seen
-        assert seen[1]["encoder"]=="PRODUCTION_CANONICAL_SNAPSHOT",seen
+        assert seen[1]["encoder"]=="PRODUCTION_COORDINATOR_AGGREGATE",seen
+        assert result["coordinatorEvidence"]["canonicalRows"]>=1074,result
         assert result["sourceStats"]["uniqueAssetBytes"]==67108864,result
         print("H S02_PRODUCTION_IDB_HIGH_UNIQUE_CAPTURE_MEASURED=PASS",
               json.dumps(result["sourceStats"]),flush=True)
