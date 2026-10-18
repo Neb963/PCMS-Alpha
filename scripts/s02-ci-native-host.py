@@ -144,6 +144,7 @@ def native_script():
           records.push({key:'account:s02-ci-'+i,account});
           profiles[cid]={containerId:cid,managed:true,routeId:'__block__',
             name:'CI archived Persona '+i,scriptIds:[sid],
+            ...(i===0?{personaUid:'11111111-1111-4111-8111-111111111111'}:{}),
             killSwitch:true,blockLocalNetwork:true};
           scripts[sid]={id:sid,name:'CI source '+i,
             code:'// synthetic donor '+i,enabled:false};
@@ -344,6 +345,106 @@ def fresh_script(run_id):
       }finally{db.close();}
     })().then(done).catch(e=>done({ok:false,error:String(e)}));""".replace("RUN_ID",json.dumps(run_id))
 
+def complete_donor_script(run_id):
+    # H: actual production background I16 donor/cookies/portable/canonical
+    # stages, not a page-side fake donor adapter or JS-only restore.
+    return r"""const done=arguments[arguments.length-1];
+    (async()=>{
+      const runId=RUN;
+      const core=await import('./backup-core.mjs');
+      const gateModule=await import('./restore-gate.mjs');
+      const journal=await import('./journal.mjs');
+      const db=await journal.openCanonicalDatabase();
+      const action=(name,params)=>new Promise((resolve,reject)=>{
+        const p=browser.runtime.connect({name:'pcms-i16-restore'});
+        let received=false;
+        p.onMessage.addListener(value=>{received=true;try{p.disconnect()}catch{}resolve(value)});
+        p.onDisconnect.addListener(()=>{if(!received)reject(Error('H_V2_GUARDED_PORT_LOST_ACK'))});
+        p.postMessage({action:name,params});
+      });
+      try{
+        const removal=db.transaction('meta','readwrite');
+        removal.objectStore('meta').put({
+          key:'removal:s02-ci-1',state:'REMOVED_ONLY_LOCALLY',revision:5});
+        await new Promise((resolve,reject)=>{
+          removal.oncomplete=resolve;
+          removal.onerror=()=>reject(Error('H_V2_FRESH_REMOVAL_SETUP_FAILED'));
+          removal.onabort=()=>reject(Error('H_V2_FRESH_REMOVAL_SETUP_ABORTED'));
+        });
+        // Exactly the 50 archived donor Persona keys, independently reviewed
+        // as new BLOCK-route contexts; no existing Persona is implicitly rebound.
+        const mappings=Object.fromEntries(
+          Array.from({length:50},(_,i)=>['persona-'+(i+1),'__create__']));
+        const accountChoices=Object.fromEntries(
+          Array.from({length:50},(_,i)=>['s02-ci-'+i,
+            i===1?'EXCLUDE':'INCLUDE_INACTIVE']));
+        const params={runId,mappings,accountChoices};
+        const preview=await action('PREVIEW_V2',params);
+        if(!preview?.ok||preview.code!=='RESTORE_V2_NATIVE_PLAN_REVIEW_REQUIRED'||
+           preview.archiveSha256!==preview.checkpointSha256||
+           preview.review?.activation!=='OFF')
+          throw Error('H_NATIVE_V2_REVIEW_NOT_AUTHENTICATED:'+preview?.code);
+        const gate=gateModule.createRestoreGate(browser.storage.local);
+        await gate.begin({
+          planSha256:preview.reviewedPlanSha256,
+          reviewedPlanSha256:preview.reviewedPlanSha256,
+          destinationSha256:preview.destinationSha256,
+          archiveSha256:preview.archiveSha256,
+          checkpointSha256:preview.checkpointSha256,
+          checkpointTier:3,fresh:true,
+          recovery:{mode:'replace',nativeRunId:runId,mappings,accountChoices}
+        });
+        const applied=await action('APPLY_V2',{
+          ...params,reviewedPlanSha256:preview.reviewedPlanSha256});
+        if(!applied?.ok||applied.code!=='RESTORED_V2_DONOR_CANONICAL_INACTIVE')
+          throw Error('H_V2_NATIVE_DONOR_APPLICATION_FAILED:'+applied?.code);
+        const groups=Object.fromEntries((applied.groups||[])
+          .map(g=>[g.key,g.status]));
+        for(const name of ['donor-personas','donor-cookies','donor-portable',
+                           'pcms-canonical'])
+          if(groups[name]!=='OBSERVED')
+            throw Error('H_V2_DONOR_I16_STAGE_NOT_OBSERVED:'+name);
+        const inventory=await core.snapshotCanonical(db);
+        const rows=new Map(inventory.stores.meta.map(r=>[r.key,r.value]));
+        const recovered=rows.get('account:s02-ci-0')?.account;
+        const last=rows.get('stage-history:s02-ci-1023')?.record?.candidate;
+        if(rows.get('account:s02-ci-1')!==undefined||
+           rows.get('removal:s02-ci-1')?.state!=='REMOVED_ONLY_LOCALLY'||
+           recovered?.state!=='VERIFICATION_PENDING'||
+           recovered.identity!==null||
+           typeof recovered.personaUid!=='string'||
+           recovered.personaUid==='11111111-1111-4111-8111-111111111111'||
+           last?.blobs?.length!==3||
+           atob(last.blobs.find(x=>x.path==='main.pjs')?.base64||'')!==
+             'output="h-source-1023";')
+          throw Error('H_V2_FULL_DONOR_CANONICAL_SOURCE_OR_UID_INVALID');
+        // Firefox's actual container and cookie APIs, not an in-memory
+        // replacement for the donor-controlled Persona/cookie service.
+        const identities=await browser.contextualIdentities.query({});
+        const imported=identities.filter(x=>x.name?.startsWith('PCMS Restore '));
+        if(imported.length!==50)
+          throw Error('H_V2_REAL_DONOR_CONTAINERS_MISSING:'+imported.length);
+        let cookieSets=0;
+        for(const identity of imported){
+          const cookies=await browser.cookies.getAll({storeId:identity.cookieStoreId});
+          if(cookies.some(c=>c.name?.startsWith('ci-')&&
+                            c.domain?.includes('example.invalid')))cookieSets++;
+        }
+        if(cookieSets!==50)
+          throw Error('H_V2_REAL_DONOR_COOKIES_INCOMPLETE:'+cookieSets);
+        const observed=await gate.inspect();
+        if(observed.held!==true||observed.activation!=='OFF'||
+           observed.status!=='COMPLETE_INACTIVE')
+          throw Error('H_V2_CONTROLLER_ACTIVATED');
+        return {ok:true,donorStages:groups,donorContainers:imported.length,
+          donorCookieSets:cookieSets,canonicalRows:inventory.stores.meta.length,
+          sourceHistoryExact:true,historicalExclusion:true,
+          uidRemappedInactive:true,held:observed.held,
+          activation:observed.activation};
+      }finally{db.close();}
+    })().then(done).catch(e=>done({ok:false,error:String(e)}));""".replace("RUN",json.dumps(run_id))
+
+
 def wrong_key_script(run_id):
     return r"""const done=arguments[arguments.length-1];
     (async()=>{
@@ -474,6 +575,30 @@ def main():
         assert restored.get("uidRemappedInactive") is True
         print("H S02_ACTUAL_NATIVE_DISK_TO_FRESH_PROFILE_CANONICAL_INACTIVE_RESTORE=PASS",
               json.dumps(restored),flush=True)
+        # Third brand-new installed Firefox profile: true native-v2-to-I16
+        # PersonaMonkey donor state, real Firefox cookies and full canonical
+        # application in ONE guarded chain. No origin browser ledger copied.
+        harness.close(session);session=None
+        profile3=home/"firefox-full-donor-fresh"
+        profile3.mkdir()
+        (profile3/"user.js").write_text('user_pref("xpinstall.signatures.required", false);\n')
+        session=harness.open_session(browser,profile3)
+        assert harness.call("POST",f"/session/{session}/moz/addon/install",
+            {"path":str(archive),"temporary":False},timeout=45)==ADDON_ID
+        harness.close(session);session=None
+        session=harness.open_session(browser,profile3)
+        full_uuid=harness.addons_uuid(profile3)
+        harness.call("POST",f"/session/{session}/url",
+            {"url":f"moz-extension://{full_uuid}/pcms/index.html"})
+        harness.call("POST",f"/session/{session}/timeouts",
+            {"script":360000},timeout=15)
+        full=harness.call("POST",f"/session/{session}/execute/async",
+            {"script":complete_donor_script(seen[0]["runId"]),"args":[]},timeout=350)
+        assert full.get("ok") is True,("H_V2_TRUE_DONOR_CONTROLLER_APPLY",full)
+        assert full.get("donorContainers")==50 and full.get("donorCookieSets")==50
+        assert full.get("activation")=="OFF" and full.get("held") is True
+        print("H S02_NATIVE_V2_THROUGH_ACTUAL_PERSONAMONKEY_DONOR_COOKIES_CANONICAL=PASS",
+              json.dumps(full),flush=True)
         assert sampler.peak_kib>0 and sampler.max_processes>=2, \
             "H_AGGREGATE_OS_PROCESS_RSS_UNAVAILABLE"
         print("H S02_AGGREGATE_OS_PROCESS_RSS_OBSERVED=PASS",
