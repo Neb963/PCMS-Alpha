@@ -18,7 +18,8 @@ const chunks=function*(payload){
 };
 function requireCut(cut){
   requireValue(cut&&typeof cut.rows==='function'&&
-    typeof cut.blob==='function'&&typeof cut.assertPinned==='function',
+    typeof cut.blob==='function'&&typeof cut.assertPinned==='function'&&
+    typeof cut.counts==='function',
     'BACKUP_V2_PINNED_CUT_REQUIRED');
 }
 async function pinned(cut){
@@ -54,6 +55,14 @@ export async function compilePinnedV2(cut,donorEnvelope){
   await pinned(cut);
   const sourceAudit=await auditSourceClosureRows(meta(cut));
   await pinned(cut);
+  // These counts must come from the SAME immutable source transaction as
+  // the rows. A filtered/truncated iterator cannot qualify as complete.
+  const expectedCounts=await cut.counts();
+  requireValue(expectedCounts&&typeof expectedCounts==='object'&&
+    Object.keys(expectedCounts).sort().join(',')===DB_STORES.slice().sort().join(',')&&
+    DB_STORES.every(s=>Number.isSafeInteger(expectedCounts[s])&&
+      expectedCounts[s]>=0&&expectedCounts[s]<=100000),
+    'BACKUP_V2_PINNED_COUNT_EVIDENCE_REQUIRED');
   const donor=donorBytes(donorEnvelope);
   const blobs=new Map(),rows=[],rowHashes=[];
   // Match the frozen compiler's null-prototype inventory dictionary.
@@ -92,6 +101,8 @@ export async function compilePinnedV2(cut,donorEnvelope){
     counts[store]++;
     plaintextBytes+=9+payload.length;
   }
+  requireValue(DB_STORES.every(s=>counts[s]===expectedCounts[s]),
+    'BACKUP_V2_PINNED_ROW_COUNT_MISMATCH');
   await pinned(cut);
   const refs=[...blobs.keys()].sort();
   const terminal={schema:2,canonicalRows:rows.length,
