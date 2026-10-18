@@ -1,5 +1,57 @@
 # S02 E-06 independent security review packet — NOT APPROVED
 
+## S02 native-v2 complete donor application — superseding E-06 engineering evidence (2026-10-18)
+
+**Verified code checkpoint:** `b2eb1357e6125e13a960f64fea3c274a948c9c69`;
+[required CI run 39133529860](https://github.com/Neb963/PCMS-Alpha/actions/runs/39133529860):
+fast PASS; baseline PASS; installed Firefox PASS; pcms-required PASS.
+Packaged XPI SHA-256 `2256f216613060144eda5e594796be4aa9e6271f28016bb11ff373cd8ed212b5`.
+**This section supersedes the earlier dated assertion below that a native-v2-file
+to actual PersonaMonkey donor/cookie application had not been demonstrated.**
+Those older records are retained as historical development/review evidence.
+
+The now **demonstrated full H-CI chain** is: real registered Firefox v2
+native-messaging host and actual OS Secret Service -> two actual filesystem
+encrypted source/donor archives independently reopened -> a **third newly
+installed Firefox Developer Edition profile** with no copied origin native
+ledger -> native `archive.inspect` + separate authenticated disk verification
+and full second-pass source/donor decoding -> exact operator-review-hash and
+durable I16 restore-hold checks -> existing donor-controlled Persona creation,
+state-manager preview/commit, Firefox cookie importer, portable state, atomic
+canonical IndexedDB write and independent post-write reads. All four
+`donor-personas`, `donor-cookies`, `donor-portable` and `pcms-canonical`
+receipt groups were independently **OBSERVED**. The installed witness verified
+**50 actual created Firefox Persona containers, 50 separate cookie sets,
+1,075 canonical rows, 1,024 source histories and exact retained source bytes**.
+The source-to-destination Persona UID mapping generated fresh destination
+identities rather than inheriting source UID authority. An imported active
+account was `VERIFICATION_PENDING` with identity cleared; a newer locally
+removed account was excluded and its tombstone survived. The terminal was
+`COMPLETE_INACTIVE`, guard held, activation `OFF`; no restored account,
+route, session, publisher, approval or provider effect was authorized.
+
+Negative controls in that **same genuine installed-host** witness denied
+`APPLY_V2` without its durable hold and denied a wrong reviewed plan without
+creating donor effects. An incomplete native file never promoted after port
+termination; a substituted actual OS Secret Service key failed
+`BACKUP_AUTH_FAILED` and correct-key reopen subsequently succeeded.
+The combined browser+Python process sampling observed peak summed RSS of
+**1,486,684 KiB** across up to 14 processes (double-counts shared pages,
+not a unique-memory measurement or fleet guarantee). This is H-CI synthetic
+data evidence, not actual operator Fedora or live Perchance/provider L.
+
+**Production/review boundaries remain unchanged:** `reviewedV2` remains
+OFF in production; no operator system/Firefox installation, real credential,
+remote Perchance effect, Mullvad change, private `per-gens` writeback,
+automatic restored-controller activation, merge or S03. V1 archive support
+and the original I17 quarantine remain intact. The independent E-06
+security/format approval remains **CHANGES REQUIRED** pending final
+independent review of the exact current HEAD/tree, remaining R1–R6 risk
+interpretation, memory/capacity limits, collision/adversarial coverage and
+production admission policy. A complete working CI path does not replace
+independent signoff or operator-native H evidence.
+
+
 This packet is the controlling handoff for **candidate**, not production format authority. Review [the exact proposed byte grammar](S02-V2-WIRE-FORMAT-REVIEW.md), the actual S02 PR #24 diff, its negative tests and the Client Contract v1.0.0 / Gate B §9 / AC-17 / E-06 oracle. An implementation author cannot self-certify a trust root or qualify E-06.
 
 ## Current candidate code and boundaries
