@@ -14,6 +14,9 @@ import {applyCanonicalSnapshot} from './restore-idb.mjs';
 import {getPcmsRestoreDonor} from './restore-donor.mjs';
 import {BLOCK_ROUTE_ID} from '../lib/constants.js';
 import {reconcileRestore} from './restore-reconcile.mjs';
+import {createV2NativeConnection} from './backup-v2-session.mjs';
+import {prepareQualifiedV2FreshProfile} from './restore-v2-qualified.mjs';
+import {reviewV2NativePlan} from './restore-v2-review.mjs';
 export const RESTORE_PORT='pcms-i16-restore';
 const fail=code=>({ok:false,code});
 const redacted=e=>/^(RESTORE_|BACKUP_)[A-Z0-9_]{3,70}$/.test(e?.message||'')?e.message:'RESTORE_HELD_UNKNOWN';
@@ -100,65 +103,11 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
     const result=await gate.inspect();
     return {ok:true,...result,providerEffects:'OFF',remoteActivation:'OFF'};
   }
-  async function apply(args){
-    if(running)return fail('RESTORE_BUSY');
-    // All effects remain disabled until human plan review and actual file proof.
-    running=(async()=>{
-      let db=null;
-      try{
-        const admitted=validateRestoreTransport(args);
-        assert(admitted.ok,admitted.code);
-        assert(await gate.read()===null,'RESTORE_ALREADY_HELD');
-        const donor=getDonor(),baseline=await destination(api,donor);
-        const req=args.mappings||{};
-        const reviewed=await previewRestore({archiveText:args.archiveText,password:args.password,
-          decodeDonor:decodeBackupEnvelope,mode:args.mode,fresh:args.fresh===true,
-          mappings:req,currentPcms:baseline.pcms,currentDonor:baseline.snap,
-          currentPortable:baseline.portable,containers:baseline.snap.containers});
-        if(reviewed.planSha256!==args.reviewedPlanSha256){
-          // Trusted same-XPI diagnostic: only irreversible digests, never
-          // source, Persona identifiers, cookies, route data or decrypted bytes.
-          const plan=reviewed.plan;
-          return {ok:false,code:'RESTORE_PLAN_CHANGED',diagnostic:{
-            actualPlanSha256:reviewed.planSha256,
-            archiveSha256:plan.archiveSha256,
-            sourceSha256:plan.sourceSha256,
-            destinationSha256:plan.destinationSha256,
-            groupsSha256:await digest(JSON.stringify(plan.groups)),
-            riskSha256:await digest(JSON.stringify(plan.risk)),
-            canonicalStoreCounts:Object.fromEntries(Object.entries(baseline.pcms.stores)
-              .map(([name,rows])=>[name,rows.length])),
-            pcmsSha256:await digest(JSON.stringify(baseline.pcms)),
-            donorSha256:await digest(JSON.stringify(baseline.snap)),
-            portableSha256:await digest(JSON.stringify(baseline.portable))}};
-        }
-        assert(Object.keys(req).length===reviewed.opened.donor.personas.length,
-          'RESTORE_MAPPING_INCOMPLETE');
-        assert(!reviewed.plan.groups.some(g=>g.status==='DIRECT_REVIEW_REQUIRED'),
-          'RESTORE_DIRECT_REVIEW_REQUIRED');
-        assert(reviewed.plan.groups.every(g=>g.status==='MAPPING_ONLY_UNVERIFIED'||
-          g.status==='CREATE_REQUESTED'),'RESTORE_MAPPING_UNVERIFIED');
-        const checkpoint=await verifyCheckpoint({checkpointText:args.checkpointText,
-          password:args.password,decodeDonor:decodeBackupEnvelope,
-          currentPcms:baseline.pcms,currentPortable:baseline.portable,
-          archivedAtLeastTier:3});
-        // Re-read destination before the external independent hold. Neither
-        // snapshot nor browser file selection alone grants a mutation token.
-        const latest=await destination(api,donor);
-        assert(same(latest,baseline),'RESTORE_DESTINATION_DRIFT');
-        const intent=await gate.begin({planSha256:reviewed.planSha256,
-          archiveSha256:reviewed.plan.archiveSha256,
-          destinationSha256:reviewed.plan.destinationSha256,
-          checkpointSha256:checkpoint.sha256,reviewedPlanSha256:args.reviewedPlanSha256,
-          checkpointTier:checkpoint.tier,fresh:args.fresh===true,
-          recovery:{mode:args.mode,mappings:req}});
-        // Once guard is written/read back, any crash or failed adapter leaves
-        // the controller inactive. No automatic retry or rollback.
-        const afterGuard=await destination(api,donor);
-        assert(same(afterGuard,baseline),'RESTORE_DESTINATION_CHANGED_AFTER_GUARD');
-        const incoming=reviewed.opened, payload=incoming.donor;
+  // Shared durable I16 stage engine for both authenticated v1 and native v2.
+  // Possible donor/cookie/canonical effects are never automatically replayed.
+  async function applyGuardedGroups({db,donor,baseline,intent,req,payload,
+    incomingPcms,mode,fresh=false,accountChoices={}}){
         let mappings=null,preparedDonor=null,remaps=null,preparedCanonical=null;
-        db=await database();
         const session={epoch:intent.epoch,revision:intent.revision};
         async function step(group,operation,dispatch,readback){
           const fingerprint=await digest(JSON.stringify(operation));
@@ -174,7 +123,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           return outcome;
         }
         await step('donor-personas',{payload:await digest(JSON.stringify(payload)),
-          mappings:req,mode:args.mode},async()=>{
+          mappings:req,mode:mode},async()=>{
           let containers=await donor.containers();
           for(const [i,p] of (payload.personas||[]).entries()){
             if(req[p.key]!=='__create__')continue;
@@ -191,7 +140,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
               revision:snapshot.revision,personaKey:p.key,cookieStoreId:made.cookieStoreId});
           }
           mappings=mappingFromContainers(payload,req,containers,intent.epoch);
-          preparedDonor=await donor.prepare({payload,mappings,mode:args.mode});
+          preparedDonor=await donor.prepare({payload,mappings,mode:mode});
           remaps=uidMap(preparedDonor.sourcePersonas);
           await donor.commit(preparedDonor.candidate);
         },async fp=>{
@@ -250,8 +199,8 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
             return {source:'INDEPENDENT_READBACK',
               digest:Object.keys(gm).every(k=>same(got[k],gm[k]))?fp:'0'.repeat(64)};
           });
-        preparedCanonical=prepareRestoredCanonical({incoming:incoming.archive.pcms,
-          current:baseline.pcms,mode:args.mode,uidRemap:remaps});
+        preparedCanonical=prepareRestoredCanonical({incoming:incomingPcms,
+          current:baseline.pcms,mode,uidRemap:remaps,fresh,accountChoices});
         await step('pcms-canonical',{pcms:await digest(JSON.stringify(preparedCanonical))},
           async()=>applyCanonicalSnapshot(db,preparedCanonical,{
             assertHeld:async()=>(await gate.inspect()).held===true,
@@ -261,6 +210,70 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
             return {source:'INDEPENDENT_READBACK',
               digest:same(got,preparedCanonical)?fp:'0'.repeat(64)};
           });
+    return {ok:true};
+  }
+
+  async function apply(args){
+    if(running)return fail('RESTORE_BUSY');
+    // All effects remain disabled until human plan review and actual file proof.
+    running=(async()=>{
+      let db=null;
+      try{
+        const admitted=validateRestoreTransport(args);
+        assert(admitted.ok,admitted.code);
+        assert(await gate.read()===null,'RESTORE_ALREADY_HELD');
+        const donor=getDonor(),baseline=await destination(api,donor);
+        const req=args.mappings||{};
+        const reviewed=await previewRestore({archiveText:args.archiveText,password:args.password,
+          decodeDonor:decodeBackupEnvelope,mode:args.mode,fresh:args.fresh===true,
+          mappings:req,currentPcms:baseline.pcms,currentDonor:baseline.snap,
+          currentPortable:baseline.portable,containers:baseline.snap.containers});
+        if(reviewed.planSha256!==args.reviewedPlanSha256){
+          // Trusted same-XPI diagnostic: only irreversible digests, never
+          // source, Persona identifiers, cookies, route data or decrypted bytes.
+          const plan=reviewed.plan;
+          return {ok:false,code:'RESTORE_PLAN_CHANGED',diagnostic:{
+            actualPlanSha256:reviewed.planSha256,
+            archiveSha256:plan.archiveSha256,
+            sourceSha256:plan.sourceSha256,
+            destinationSha256:plan.destinationSha256,
+            groupsSha256:await digest(JSON.stringify(plan.groups)),
+            riskSha256:await digest(JSON.stringify(plan.risk)),
+            canonicalStoreCounts:Object.fromEntries(Object.entries(baseline.pcms.stores)
+              .map(([name,rows])=>[name,rows.length])),
+            pcmsSha256:await digest(JSON.stringify(baseline.pcms)),
+            donorSha256:await digest(JSON.stringify(baseline.snap)),
+            portableSha256:await digest(JSON.stringify(baseline.portable))}};
+        }
+        assert(Object.keys(req).length===reviewed.opened.donor.personas.length,
+          'RESTORE_MAPPING_INCOMPLETE');
+        assert(!reviewed.plan.groups.some(g=>g.status==='DIRECT_REVIEW_REQUIRED'),
+          'RESTORE_DIRECT_REVIEW_REQUIRED');
+        assert(reviewed.plan.groups.every(g=>g.status==='MAPPING_ONLY_UNVERIFIED'||
+          g.status==='CREATE_REQUESTED'),'RESTORE_MAPPING_UNVERIFIED');
+        const checkpoint=await verifyCheckpoint({checkpointText:args.checkpointText,
+          password:args.password,decodeDonor:decodeBackupEnvelope,
+          currentPcms:baseline.pcms,currentPortable:baseline.portable,
+          archivedAtLeastTier:3});
+        // Re-read destination before the external independent hold. Neither
+        // snapshot nor browser file selection alone grants a mutation token.
+        const latest=await destination(api,donor);
+        assert(same(latest,baseline),'RESTORE_DESTINATION_DRIFT');
+        const intent=await gate.begin({planSha256:reviewed.planSha256,
+          archiveSha256:reviewed.plan.archiveSha256,
+          destinationSha256:reviewed.plan.destinationSha256,
+          checkpointSha256:checkpoint.sha256,reviewedPlanSha256:args.reviewedPlanSha256,
+          checkpointTier:checkpoint.tier,fresh:args.fresh===true,
+          recovery:{mode:args.mode,mappings:req}});
+        // Once guard is written/read back, any crash or failed adapter leaves
+        // the controller inactive. No automatic retry or rollback.
+        const afterGuard=await destination(api,donor);
+        assert(same(afterGuard,baseline),'RESTORE_DESTINATION_CHANGED_AFTER_GUARD');
+        const incoming=reviewed.opened, payload=incoming.donor;
+        db=await database();
+        await applyGuardedGroups({db,donor,baseline,intent,req,
+          payload:incoming.donor,incomingPcms:incoming.archive.pcms,
+          mode:args.mode});
         return {ok:true,code:'RESTORED_INACTIVE_REVIEW_REQUIRED',
           ...(await status()),dataRecovered:true,ownerSessionsVerified:false,
           protectedRoutesVerified:false,predecessorProvenOff:false};
