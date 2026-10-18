@@ -51,6 +51,8 @@ async function fixture(historyCount=12){
   }
   const cut={
     async assertPinned(){return revision===1;},
+    async counts(){return {entities:0,operations:0,events:0,
+      meta:historyCount,observations:0};},
     async *rows(){
       for(let i=0;i<historyCount;i++){
         const s=source(i);
@@ -126,7 +128,7 @@ test('S02 pinned-cut enforces record ordering, missing source and bounded limits
   }};
   await assert.rejects(compilePinnedV2(missing,donor),
     /BACKUP_SOURCE_INCOMPLETE_STAGE/);
-  const fake={rows:cut.rows,blob:cut.blob,assertPinned:async()=>false};
+  const fake={...cut,assertPinned:async()=>false};
   await assert.rejects(compilePinnedV2(fake,donor),
     /BACKUP_V2_PINNED_CUT_CHANGED/);
   assert.ok(DB_STORES.includes('meta'));
@@ -145,4 +147,18 @@ test('S02 bounded pinned source framing is byte-for-byte compatible with frozen 
   assert.deepEqual(whole(newFrames),whole(oldFrames));
   assert.equal(incremental.plaintextBytes,legacy.plaintextBytes);
   assert.deepEqual(incremental.terminal,legacy.terminal);
+});
+
+test('S02 pinned count witness rejects filtered or truncated source enumeration',async()=>{
+  const {cut,donor}=await fixture(9);
+  const shortened={...cut,async *rows(){
+    let count=0;for await(const entry of cut.rows()){
+      if(++count===9)break;yield entry;
+    }
+  }};
+  await assert.rejects(compilePinnedV2(shortened,donor),
+    /BACKUP_V2_PINNED_ROW_COUNT_MISMATCH/);
+  const noWitness={...cut};delete noWitness.counts;
+  await assert.rejects(compilePinnedV2(noWitness,donor),
+    /BACKUP_V2_PINNED_CUT_REQUIRED/);
 });
