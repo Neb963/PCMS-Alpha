@@ -1,5 +1,29 @@
 # S02 E-06 independent security review packet — NOT APPROVED
 
+## October 18 re-review remediation checkpoint — B1 unresolved, B2 candidate pending exact-head proof
+
+The controlling [final review #5563400179](https://github.com/Neb963/PCMS-Alpha/pull/24#pullrequestreview-5563400179) requested B1/B2 remediation. This is a **new implementation-author checkpoint**, never independent E-06 approval. Keep PR #24 draft/unmerged, `reviewedV2` production OFF, original I17 no-auto-CREATE/RENAME quarantine and v1 compatibility.
+
+| Finding | Present engineering classification | Exact evidence / remaining obligation |
+|---|---|---|
+| R1 | Previous reviewed closure retained | Browser active claim releases only after protected terminal qualification; uncertain effects stay fenced. Must rerun current-candidate regressions. |
+| R2 | Prior legacy-cap bypass retained; B1 not solved | Source-complete v2 does not inherit v1's 64 MiB archive cap. Whole-fleet snapshot/transformation still allocates proportional to source volume. |
+| R3 | Previous reviewed closure retained | Reliable removal exclusions, explicit fresh inclusion, UID and IPv4/IPv6 exit decisions; no activation of imported identities. |
+| R4 | Previous reviewed closure retained | Pinned root dirfd, no-follow/open identity and quarantine unlink; arbitrary malicious same-UID root interference remains an installation threat boundary. |
+| R5 | Previous reviewed closure retained | Native/JS exact numeric/Unicode canonical lexical tests; no premature inventory qualification. |
+| R6 | Previous reviewed closure retained | V2 reserved-key collisions reject incompatible inputs, v1 stays unchanged. |
+| B1 | **BLOCKED** | No bounded-`U` source capture or restoration. No 50+/1,000+ high-unique, large-donor, interrupted and retained-14 measured full path on changed candidate. Implementation and possible approved format-continuation design are required. |
+| B2 | Implemented as candidate; **exact-head full proof outstanding** | Owner-only permanent salt/IV reservation under writer lock, existing ledger/header scan, fsync-before-cipher, abandoned/lost-ACK history hold; synthetic injected duplicate after success/restart/abandon/competing writers/corrupt history. No claim of actual CSPRNG collision. |
+| E-06 independent authority | **BLOCKED** | A different qualified authorized reviewer must assess final changed security-sensitive HEAD/tree. |
+| Operator-H and E-02 L | **BLOCKED** | Historical isolated H-CI proof cannot be used as exact changed-candidate H; no operator Fedora host install or real Perchance L. |
+
+**B2 threat/review questions:** collisions against retained and deleted-artifact reservation evidence; durable fsync/ledger ordering; orphan and partially written header handling; lock and dirfd confinement; owner-only registry permissions; permanently growing reservation inventory/corruption response. No browser-selected nonce, host path, key reference or command was added. Fail-closed unresolved history deliberately prevents fresh encryption when old pair evidence is ambiguous. Retention never deletes the reservation.
+
+**B1 architecture/security requirements:** immutable source cut, all original/current/previous-good/candidate/unresolved-effect source and binary data, same actual donor adapters, bounded export/import heap and IDB quota, one intact single-message AES-GCM, no plaintext disk spill, atomic held recovery and independently compared post-write bytes. Existing format limits remain **explicit unsupported holds** and need a narrow authorized continuation proposal for legitimate excess, not silent policy relaxation. Historic 170 MB fixture was a repeated-source sample, not a high-unique bound; changed synthetic measurement in run 39138094974 is not a controlled before/after benchmark.
+
+Prior H-CI contained actual registered host/Secret Service and fresh-profile donor+cookies+canonical readback, but the host bytes changed afterwards. Keep historical proof as history, not proof of this exact candidate. Do not treat a successful fast check, a synthetic native receipt or an implementation-author report as E-06 approval.
+
+
 ## S02 native-v2 complete donor application — superseding E-06 engineering evidence (2026-10-18)
 
 **Verified code checkpoint:** `b2eb1357e6125e13a960f64fea3c274a948c9c69`;
