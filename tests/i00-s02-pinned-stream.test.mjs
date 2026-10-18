@@ -25,18 +25,21 @@ function rawFile(i,name,length=4096){
   if(name==='index.html')return te.encode('<main>source '+i+'</main>');
   const bytes=new Uint8Array(length);
   // Unique binary byte sequences, including zero, 0xff, and a non-text region.
-  for(let k=0;k<length;k++)bytes[k]=(i*41+k*73+(k>>>3))&255;
-  bytes[0]=i&255;bytes[1]=i>>>8;bytes[2]=255;bytes[3]=0;
+  const variant=name.includes('asset-b-')?7:0;
+  for(let k=0;k<length;k++)bytes[k]=(i*41+variant*13+k*73+(k>>>3))&255;
+  bytes[0]=i&255;bytes[1]=i>>>8;bytes[2]=255;bytes[3]=variant;
   return bytes;
 }
-async function fixture(historyCount=12){
+async function fixture(historyCount=12,{assetBytes=4096,assetCount=1,accounts=0}={}){
   let revision=1;
   const byHash=new Map(),data=[];
   for(let i=0;i<historyCount;i++){
-    const names=['index.html','main.pjs','src/asset-'+i+'.bin'];
+    const names=['index.html','main.pjs',
+      ...(assetCount===1?['src/asset-'+i+'.bin']:
+        ['src/asset-a-'+i+'.bin','src/asset-b-'+i+'.bin'])];
     const files=[];
     for(const name of names){
-      const raw=rawFile(i,name),sha256=await digest(raw);
+      const raw=rawFile(i,name,assetBytes),sha256=await digest(raw);
       files.push({path:name,size:raw.length,sha256});
       byHash.set(sha256,[i,name]);
     }
@@ -47,13 +50,18 @@ async function fixture(historyCount=12){
   function source(i){
     const {files,fingerprint}=data[i];
     return {ok:true,fingerprint,files,blobs:files.map(f=>
-      ({path:f.path,base64:Buffer.from(rawFile(i,f.path)).toString('base64')}))};
+      ({path:f.path,base64:Buffer.from(rawFile(i,f.path,assetBytes)).toString('base64')}))};
   }
   const cut={
     async assertPinned(){return revision===1;},
     async counts(){return {entities:0,operations:0,events:0,
-      meta:historyCount,observations:0};},
+      meta:historyCount+accounts,observations:0};},
     async *rows(){
+      for(let i=0;i<accounts;i++)
+        yield {store:'meta',row:{
+          key:'account:'+String(i).padStart(5,'0'),
+          value:{account:{accountId:'account-'+i,state:'ARCHIVED'}}
+        }};
       for(let i=0;i<historyCount;i++){
         const s=source(i);
         yield {store:'meta',row:{
@@ -64,7 +72,7 @@ async function fixture(historyCount=12){
     },
     async blob(sha){
       const origin=byHash.get(sha);
-      return origin?rawFile(...origin):null;
+      return origin?rawFile(origin[0],origin[1],assetBytes):null;
     },
     // Test-only mutation hook. Production caller must be a frozen IDB cut.
     expire(){revision++;}
@@ -161,4 +169,44 @@ test('S02 pinned count witness rejects filtered or truncated source enumeration'
   const noWitness={...cut};delete noWitness.counts;
   await assert.rejects(compilePinnedV2(noWitness,donor),
     /BACKUP_V2_PINNED_CUT_REQUIRED/);
+});
+
+test('S02 50 accounts/1024 histories/2048 genuinely distinct binary assets exceed 64MiB unique',async()=>{
+  const fixtureData=await fixture(1024,{accounts:50,assetCount:2,assetBytes:40960});
+  const start=process.memoryUsage();
+  let peakHeap=start.heapUsed,peakRss=start.rss,bytesEmitted=0,fragments=0;
+  const sample=()=>{
+    const m=process.memoryUsage();
+    peakHeap=Math.max(peakHeap,m.heapUsed);
+    peakRss=Math.max(peakRss,m.rss);
+  };
+  const started=Date.now();
+  const plan=await compilePinnedV2(fixtureData.cut,fixtureData.donor);
+  sample();
+  assert.equal(plan.terminal.canonicalRows,1074);
+  assert.equal(plan.sourceAudit.manifests,2048);
+  assert.equal(plan.sourceAudit.references,8192);
+  assert.ok(plan.sourceAudit.uniqueBytes>64*1024*1024,
+    {uniqueBytes:plan.sourceAudit.uniqueBytes});
+  assert.equal(plan.terminal.uniqueBlobs,fixtureData.byHash.size);
+  assert.ok(plan.terminal.uniqueBlobs>=4096,
+    {uniqueBlobs:plan.terminal.uniqueBlobs});
+  for await(const part of streamPinnedV2Frames(plan)){
+    bytesEmitted+=part.byteLength;fragments++;sample();
+  }
+  assert.equal(bytesEmitted,plan.plaintextBytes);
+  const result={
+    accounts:50,histories:1024,sourceReferences:plan.sourceAudit.references,
+    uniqueBlobs:plan.terminal.uniqueBlobs,uniqueBytes:plan.sourceAudit.uniqueBytes,
+    sourceBytesBeforeDedup:plan.sourceAudit.referencedBytes,
+    plaintextBytes:plan.plaintextBytes,fragments,
+    heapDeltaPeak:peakHeap-start.heapUsed,rssDeltaPeak:peakRss-start.rss,
+    elapsedMs:Date.now()-started,
+    process:process.version,arch:process.arch,platform:process.platform
+  };
+  console.log('S02_PINNED_HIGH_UNIQUE_MEASURE='+JSON.stringify(result));
+  // This is a representative Node-only bounded-encoder budget, not the
+  // cross-library/browser/donor/IDB/native cumulative resource guarantee.
+  assert.ok(result.heapDeltaPeak<256*1024*1024,result);
+  assert.ok(result.rssDeltaPeak<512*1024*1024,result);
 });
