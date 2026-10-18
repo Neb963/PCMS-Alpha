@@ -5,6 +5,9 @@ const scan=el('pcms-catalog-scan'),clear=el('pcms-catalog-clear');
 const connect=el('pcms-catalog-connect'),disconnect=el('pcms-catalog-disconnect');
 const approve=el('pcms-catalog-approve');
 const status=el('pcms-catalog-status'),list=el('pcms-catalog-list');
+const readySlug=el('pcms-catalog-ready-slug');
+const inspectReady=el('pcms-catalog-ready-inspect');
+const readyStatus=el('pcms-catalog-ready-status');
 const prompt=el('pcms-catalog-prompt');
 const draft=el('pcms-catalog-prompt-draft');
 const saveDraft=el('pcms-catalog-prompt-save');
@@ -76,6 +79,7 @@ function controls(){
   scan.disabled=busy;repo.disabled=busy;connect.disabled=busy||connected;
   disconnect.disabled=busy||!connected;
   approve.disabled=busy||!selectedScope||!connected;
+  inspectReady.disabled=busy||!connected||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(readySlug.value.trim());
   draft.disabled=busy||!promptBase||!connected;
   saveDraft.disabled=busy||!promptBase||!connected;
   commitDraft.disabled=busy||!promptBase||!connected||promptRevision<1||promptDirty;
@@ -214,5 +218,24 @@ commitDraft.addEventListener('click',async()=>{
       'Prompt commit held: '+(result?.code||'UNAVAILABLE')+
       '. Local draft retained; no retry after an ambiguous acknowledgment.';
   }catch{promptStatus.textContent='Commit acknowledgment unknown. Keep this draft; do not repeat the effect.';}
+  finally{busy=false;controls();}
+});
+
+readySlug.addEventListener('input',controls);
+inspectReady.addEventListener('click',async()=>{
+  const slug=readySlug.value.trim();
+  if(busy||!connected||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug))return;
+  busy=true;controls();
+  readyStatus.textContent='Verifying pinned main ancestry, source bytes and optional TESTING evidence…';
+  try{
+    const r=await request('INSPECT_DECLARATION',{slug});
+    if(r?.ok)readyStatus.textContent='Coherent '+(r.legacy?'legacy READY':'READY '+r.token)+
+      ' · declared '+r.declarationCommit.slice(0,12)+
+      ' · exact '+r.files.length+' deployable files · source fingerprint '+
+      r.inputFingerprint.slice(0,16)+
+      ' · TESTING '+r.optionalTesting.state+'. Provider effects remain off.';
+    else readyStatus.textContent='READY held: '+(r?.code||'UNVERIFIED')+
+      '. No publication or source write authorized.';
+  }catch{readyStatus.textContent='READY proof unavailable; no authorization inferred.';}
   finally{busy=false;controls();}
 });
