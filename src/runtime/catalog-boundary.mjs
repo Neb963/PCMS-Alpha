@@ -5,6 +5,7 @@ import {createRestoreSentinel,openCanonicalDatabase,fail} from './journal.mjs';
 import {createImportApprovalStore,getImportScopeDigest} from './catalog-import.mjs';
 import {createGitPromptStore} from './catalog-prompt-store.mjs';
 import {writeExistingGitPrompt} from './git-prompt.mjs';
+import {inspectReadyCandidate} from './catalog-declaration.mjs';
 import {scanMainCatalog,validRepository,makeInitialImportPreview} from './git-catalog.mjs';
 export const CATALOG_PORT='pcms-s03-catalog';
 const STATE_KEY='pcmsS03Git';
@@ -17,7 +18,7 @@ export function validateCatalogMessage(api,sender,message){
   if(!message||typeof message!=='object'||Array.isArray(message)||
       Object.keys(message).some(k=>!['type','params'].includes(k)))
     return fail('CAPABILITY_OFF');
-  const types=['SCAN_CATALOG','CONNECT_GIT','SCAN_CONNECTED','GIT_STATUS','DISCONNECT_GIT','APPROVE_IMPORT','GET_PROMPT_DRAFT','SAVE_PROMPT_DRAFT','COMMIT_PROMPT'];
+  const types=['SCAN_CATALOG','CONNECT_GIT','SCAN_CONNECTED','GIT_STATUS','DISCONNECT_GIT','APPROVE_IMPORT','GET_PROMPT_DRAFT','SAVE_PROMPT_DRAFT','COMMIT_PROMPT','INSPECT_DECLARATION'];
   if(!types.includes(message.type))return fail('CAPABILITY_OFF');
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
@@ -32,6 +33,9 @@ export function validateCatalogMessage(api,sender,message){
       typeof p.baseOid!=='string'||!/^[0-9a-f]{40}$/.test(p.baseOid)||
       typeof p.text!=='string'||p.text.length===0||p.text.length>131072)
       return fail('INVALID_PARAMS');
+  } else if(message.type==='INSPECT_DECLARATION'){
+    if(Object.keys(p).some(k=>k!=='slug')||typeof p.slug!=='string'||
+      !/^[a-z0-9][a-z0-9-]{0,99}$/.test(p.slug))return fail('INVALID_PARAMS');
   } else if(message.type==='COMMIT_PROMPT'){
     if(Object.keys(p).some(k=>!['repositoryId','expectedRevision','expectedHead'].includes(k))||
       typeof p.repositoryId!=='string'||!/^[1-9][0-9]{0,19}$/.test(p.repositoryId)||
@@ -50,6 +54,7 @@ export function validateCatalogMessage(api,sender,message){
 }
 export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
   open=openCanonicalDatabase,writePrompt=writeExistingGitPrompt,
+  inspectDeclaration=inspectReadyCandidate,
   // Product gate stays inactive until independently authorized Git H/GIT proof.
   promptWriteGate=()=>false,
   native=(packet)=>api.runtime.sendNativeMessage(VAULT_HOST,packet)}={}){
@@ -112,6 +117,25 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
       }
       const config=await readConfig();
       if(!config)return fail('GIT_RECONNECT_REQUIRED');
+      if(message.type==='INSPECT_DECLARATION'){
+        const secret=await getSecret(config);if(!secret.ok)return secret;
+        const current=await scanAndPreview(config.repository,secret.token,config.repositoryId);
+        if(!current.ok)return current;
+        if(!current.generators.some(g=>g.slug===p.slug&&g.ready))
+          return fail('READY_DECLARATION_NOT_PRESENT');
+        const witnessed=await inspectDeclaration({
+          repository:config.repository,token:secret.token,slug:p.slug,
+          pinnedHead:current.head,includeSourceBytes:false
+        },transport);
+        if(!witnessed.ok)return witnessed;
+        // Never return Git token or full private source bytes to a UI port.
+        return {ok:true,code:witnessed.code,declarationCommit:witnessed.declarationCommit,
+          declarationIdentity:witnessed.declarationIdentity,
+          legacy:witnessed.legacy,token:witnessed.token,inputFingerprint:witnessed.inputFingerprint,
+          files:witnessed.files.map(f=>({path:f.path,size:f.size,sha256:f.sha256})),
+          optionalTesting:witnessed.optionalTesting,pinnedHead:current.head,
+          slug:p.slug,providerEffects:'OFF'};
+      }
       if(message.type==='GET_PROMPT_DRAFT'){
         const value=await (await promptStore()).read(config.repositoryId);
         // Canonical draft only, no credentials and no effect authority.
