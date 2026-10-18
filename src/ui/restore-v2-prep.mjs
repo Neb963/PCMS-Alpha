@@ -13,7 +13,7 @@ const sha=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
 export async function prepareInactiveV2({
   authenticatedPlaintext,readback,expectedCiphertextSha256,
   password,decodeDonor,currentPcms,uidRemap={},mode='merge',
-  fresh=false,accountChoices={}
+  fresh=false,accountChoices={},deferCanonical=false
 }={}){
   check(authenticatedPlaintext instanceof Uint8Array &&
     readback?.state==='AUTHENTICATED_SECOND_PASS' &&
@@ -23,12 +23,24 @@ export async function prepareInactiveV2({
   validatePcmsSnapshot(currentPcms);
   const opened=await decodeAuthenticatedV2(authenticatedPlaintext,{password,decodeDonor});
   return finalizeInactive(opened,{currentPcms,uidRemap,mode,
-    fresh,accountChoices,
+    fresh,accountChoices,deferCanonical,
     archiveSha256:readback.sha256});
 }
 async function finalizeInactive(opened,{currentPcms,uidRemap,mode,
-  fresh,accountChoices,archiveSha256}){
+  fresh,accountChoices,archiveSha256,deferCanonical=false}){
   const sourceAudit=opened.sourceAudit||await preflightSourceRecovery(opened.pcms);
+  // Only the protected background caller may consume these still-unaltered
+  // canonical rows. Final UID mapping comes from the real donor commit.
+  // No source, donor, cookie or canonical mutation occurs in this stage.
+  if(deferCanonical===true){
+    return Object.freeze({
+      sourcePcms:opened.pcms,donor:opened.donor,
+      donorEnvelope:opened.donorEnvelope,sourceAudit,archiveSha256,
+      preparedSha256:await digest(canonicalJSON(preserveNegativeZero(opened.pcms))),
+      status:'INACTIVE_SOURCE_VERIFIED_NOT_APPLIED',controller:'RESTORE_HELD',
+      activation:'OFF',providerEffects:'OFF',importedApproval:'HISTORICAL_ONLY'
+    });
+  }
   const prepared=prepareRestoredCanonical({
     incoming:opened.pcms,current:currentPcms,mode,uidRemap,
     fresh,accountChoices});
@@ -49,7 +61,8 @@ async function finalizeInactive(opened,{currentPcms,uidRemap,mode,
 
 export async function prepareInactiveV2FromStage({
   stage,runId,readback,expectedCiphertextSha256,password,decodeDonor,
-  currentPcms,uidRemap={},mode='merge',fresh=false,accountChoices={}
+  currentPcms,uidRemap={},mode='merge',fresh=false,accountChoices={},
+  deferCanonical=false
 }={}){
   check(stage&&typeof stage.frames==='function'&&
     typeof stage.inspect==='function'&&
@@ -68,5 +81,5 @@ export async function prepareInactiveV2FromStage({
   const opened=await decodeV2InactiveFrames(stage.frames(runId),{
     password,decodeDonor});
   return finalizeInactive(opened,{currentPcms,uidRemap,mode,
-    fresh,accountChoices,archiveSha256:readback.sha256});
+    fresh,accountChoices,deferCanonical,archiveSha256:readback.sha256});
 }
