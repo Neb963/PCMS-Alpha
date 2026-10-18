@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
-import {auditSourceClosure} from '../src/ui/backup-source-closure.mjs';
+import {auditSourceClosure,auditSourceClosureRows} from '../src/ui/backup-source-closure.mjs';
 import {encodeIntegrated,preflightSourceRecovery} from '../src/ui/backup-core.mjs';
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 const text = new TextEncoder();
@@ -112,4 +112,21 @@ test('S02 unrelated historical rows do not invent source or admission authority'
   ]));
   assert.equal(status.manifests, 0);
   assert.equal(status.uniqueBlobs, 0);
+});
+
+
+test('S02 streaming source auditor preserves exact counts without retaining source rows', async()=>{
+  const src=await source(),rows=Array.from({length:32},(_,i)=>
+    meta('ai-history:stream:'+i,'job','finalSource',src));
+  let consumed=0;
+  async function* feed(){for(const row of rows){consumed++;yield row;}}
+  const expected=await auditSourceClosure(snapshot(rows));
+  const observed=await auditSourceClosureRows(feed());
+  assert.equal(consumed,rows.length);
+  assert.deepEqual(observed,expected);
+  const broken=structuredClone(rows);
+  broken[31].value.job.finalSource.blobs[0].base64='AAAA';
+  await assert.rejects(auditSourceClosureRows((async function*(){
+    for(const row of broken)yield row;
+  })()),/BACKUP_SOURCE_BYTE_MISMATCH/);
 });
