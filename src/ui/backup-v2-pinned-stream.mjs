@@ -55,7 +55,6 @@ export async function compilePinnedV2(cut,donorEnvelope){
   const sourceAudit=await auditSourceClosureRows(meta(cut));
   await pinned(cut);
   const donor=donorBytes(donorEnvelope);
-  const seenKeys=Object.fromEntries(DB_STORES.map(store=>[store,new Set()]));
   const blobs=new Map(),rows=[],rowHashes=[];
   // Match the frozen compiler's null-prototype inventory dictionary.
   const counts=Object.create(null);
@@ -70,8 +69,6 @@ export async function compilePinnedV2(cut,donorEnvelope){
     requireValue(storeIndex>=priorStore&&
       (storeIndex!==priorStore||priorKey<key),
       'BACKUP_V2_PINNED_ROW_ORDER');
-    requireValue(!seenKeys[store].has(key),'BACKUP_V2_DUPLICATE_ROW');
-    seenKeys[store].add(key);
     priorStore=storeIndex;priorKey=key;
     requireValue(rows.length<100000,'BACKUP_V2_UNSUPPORTED_RECORD_COUNT');
     const local=new Map(),payload=encodeV2Row(row,store,local);
@@ -89,7 +86,8 @@ export async function compilePinnedV2(cut,donorEnvelope){
         plaintextBytes+=9+32+info.size;
       }
     }
-    rows.push({store,key,length:payload.length,sha256});
+    // Retain a fixed-size key commitment, never cumulative multi-MiB IDB keys.
+    rows.push({store,keySha256:await digest(key),length:payload.length,sha256});
     rowHashes.push(sha256);
     counts[store]++;
     plaintextBytes+=9+payload.length;
@@ -133,7 +131,8 @@ export async function* streamPinnedV2Frames(plan){
     const key=canonicalJSON(entry.row?.key);
     const si=DB_STORES.indexOf(entry.store);
     requireValue(si>=priorStore&&
-      (si!==priorStore||priorKey<key)&&key===descriptor.key,
+      (si!==priorStore||priorKey<key)&&
+      await digest(key)===descriptor.keySha256,
       'BACKUP_V2_PINNED_ROW_CHANGED');
     priorStore=si;priorKey=key;
     const payload=encodeV2Row(entry.row,entry.store,new Map());
