@@ -42,17 +42,28 @@ export function createAutoStore(db,clock=Date.now){
       const allowed={
         PREPARING:['VERIFIED','FAILED','SUSPENDED'],
         VERIFIED:['DISPATCH_POSSIBLE','FAILED'],
-        DISPATCH_POSSIBLE:['DOWNLOAD_STARTED','HELD'],
+        DISPATCH_POSSIBLE:['DOWNLOAD_STARTED','HELD','COMPLETE'],
         DOWNLOAD_STARTED:['COMPLETE','HELD']
       };
       if(!allowed[from]?.includes(to))return {response:fail('BACKUP_TRANSITION_DENIED')};
       if(to==='COMPLETE'){
-        if(!details.archive||details.archive.runId!==runId||
-          details.archive.state!=='COMPLETE'||details.archive.tier!==2)
+        const archive=details.archive;
+        const qualifiedNative=from==='DISPATCH_POSSIBLE'&&
+          archive?.kind==='AUTO_NATIVE'&&
+          archive.runId===runId&&archive.nativeRunId==='s02_'+runId.slice(5)&&
+          archive.state==='COMPLETE'&&archive.tier===3&&
+          /^[a-f0-9]{64}$/.test(archive.sha256||'')&&
+          /^[a-f0-9]{64}$/.test(archive.preparedSha256||'')&&
+          Number.isSafeInteger(archive.bytes)&&archive.bytes>0&&
+          archive.day===s.active.day;
+        const qualifiedLegacy=from==='DOWNLOAD_STARTED'&&
+          archive?.runId===runId&&archive.state==='COMPLETE'&&archive.tier===2;
+        if(!qualifiedNative&&!qualifiedLegacy)
           return {response:fail('BACKUP_DOWNLOAD_UNVERIFIED')};
         s.archives.push(details.archive);
         s.lastSuccessDay=Math.max(s.lastSuccessDay,s.active.day);
-        s.active=null;s.nextAttemptAt=0;s.status='COMPLETE';s.code='BROWSER_REPORTED_COMPLETE';
+        s.active=null;s.nextAttemptAt=0;s.status='COMPLETE';s.code=qualifiedNative?
+          'NATIVE_READONLY_SOURCE_RECOVERY':'BROWSER_REPORTED_COMPLETE';
       }else if(to==='FAILED'||to==='SUSPENDED'){
         s.active=null;s.nextAttemptAt=clock()+RETRY;
         s.status=to;s.code=details.code||'BACKUP_INCOMPLETE';

@@ -3,10 +3,10 @@
 // exist only in the caller's live extension port and this invocation.
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
-import {snapshotCanonical,digest,MAX_ARCHIVE_BYTES} from './backup-core.mjs';
+import {snapshotCanonical,snapshotCanonicalV2,digest,MAX_ARCHIVE_BYTES} from './backup-core.mjs';
 import {createPortableBackupPayload,decodeBackupEnvelope} from '../lib/backup-package.js';
 import {filterOrdinaryAutomationJobs} from '../lib/automation-history.js';
-import {previewRestore,verifyCheckpoint,validateRestoreTransport} from './restore-core.mjs';
+import {previewRestore,verifyCheckpoint,validateRestoreTransport,stableRestoreDonorCut} from './restore-core.mjs';
 import {createRestoreGate} from './restore-gate.mjs';
 import {createRestoreStageEngine} from './restore-stage.mjs';
 import {prepareRestoredCanonical} from './restore-sanitize.mjs';
@@ -14,6 +14,9 @@ import {applyCanonicalSnapshot} from './restore-idb.mjs';
 import {getPcmsRestoreDonor} from './restore-donor.mjs';
 import {BLOCK_ROUTE_ID} from '../lib/constants.js';
 import {reconcileRestore} from './restore-reconcile.mjs';
+import {createV2NativeConnection} from './backup-v2-session.mjs';
+import {prepareQualifiedV2FreshProfile} from './restore-v2-qualified.mjs';
+import {reviewV2NativePlan} from './restore-v2-review.mjs';
 export const RESTORE_PORT='pcms-i16-restore';
 const fail=code=>({ok:false,code});
 const redacted=e=>/^(RESTORE_|BACKUP_)[A-Z0-9_]{3,70}$/.test(e?.message||'')?e.message:'RESTORE_HELD_UNKNOWN';
@@ -52,7 +55,8 @@ async function destination(api,donor){
   const db=await openCanonicalDatabase();
   let pcms;
   try{pcms=await snapshotCanonical(db);}finally{db.close();}
-  return {snap,pcms,portable:await readPortable(api,donor,snap)};
+  return {snap:stableRestoreDonorCut(snap),pcms,
+    portable:await readPortable(api,donor,snap)};
 }
 function mappingFromContainers(payload,requested,containers,epoch,{allowCreate=false}={}){
   const map=Object.create(null),used=new Set();
@@ -95,53 +99,32 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
   database=openCanonicalDatabase}={}){
   const gate=createRestoreGate(api.storage.local);
   let running=null,registered=false;
+  // Static PCMS listeners can become ready before PersonaMonkey's guarded
+  // recovery-bootstrap dynamic background import. Wake that pinned read-only
+  // donor service, then await its actual adapter attachment. Never construct a
+  // donor surrogate, create an identity or bypass the donor bootstrap.
+  async function donorReady(){
+    try{return getDonor()}catch(e){
+      if(e?.message!=='RESTORE_DONOR_UNAVAILABLE')throw e;
+    }
+    try{await api.runtime.sendMessage({type:'GET_SNAPSHOT'})}catch{}
+    for(let attempt=0;attempt<30;attempt++){
+      try{return getDonor()}catch(e){
+        if(e?.message!=='RESTORE_DONOR_UNAVAILABLE')throw e;
+      }
+      await new Promise(resolve=>setTimeout(resolve,150));
+    }
+    throw Error('RESTORE_DONOR_UNAVAILABLE');
+  }
   async function status(){
     const result=await gate.inspect();
     return {ok:true,...result,providerEffects:'OFF',remoteActivation:'OFF'};
   }
-  async function apply(args){
-    if(running)return fail('RESTORE_BUSY');
-    // All effects remain disabled until human plan review and actual file proof.
-    running=(async()=>{
-      let db=null;
-      try{
-        const admitted=validateRestoreTransport(args);
-        assert(admitted.ok,admitted.code);
-        assert(await gate.read()===null,'RESTORE_ALREADY_HELD');
-        const donor=getDonor(),baseline=await destination(api,donor);
-        const req=args.mappings||{};
-        const reviewed=await previewRestore({archiveText:args.archiveText,password:args.password,
-          decodeDonor:decodeBackupEnvelope,mode:args.mode,fresh:args.fresh===true,
-          mappings:req,currentPcms:baseline.pcms,currentDonor:baseline.snap,
-          currentPortable:baseline.portable,containers:baseline.snap.containers});
-        assert(reviewed.planSha256===args.reviewedPlanSha256,'RESTORE_PLAN_CHANGED');
-        assert(Object.keys(req).length===reviewed.opened.donor.personas.length,
-          'RESTORE_MAPPING_INCOMPLETE');
-        assert(!reviewed.plan.groups.some(g=>g.status==='DIRECT_REVIEW_REQUIRED'),
-          'RESTORE_DIRECT_REVIEW_REQUIRED');
-        assert(reviewed.plan.groups.every(g=>g.status==='MAPPING_ONLY_UNVERIFIED'||
-          g.status==='CREATE_REQUESTED'),'RESTORE_MAPPING_UNVERIFIED');
-        const checkpoint=await verifyCheckpoint({checkpointText:args.checkpointText,
-          password:args.password,decodeDonor:decodeBackupEnvelope,
-          currentPcms:baseline.pcms,currentPortable:baseline.portable,
-          archivedAtLeastTier:3});
-        // Re-read destination before the external independent hold. Neither
-        // snapshot nor browser file selection alone grants a mutation token.
-        const latest=await destination(api,donor);
-        assert(same(latest,baseline),'RESTORE_DESTINATION_DRIFT');
-        const intent=await gate.begin({planSha256:reviewed.planSha256,
-          archiveSha256:reviewed.plan.archiveSha256,
-          destinationSha256:reviewed.plan.destinationSha256,
-          checkpointSha256:checkpoint.sha256,reviewedPlanSha256:args.reviewedPlanSha256,
-          checkpointTier:checkpoint.tier,fresh:args.fresh===true,
-          recovery:{mode:args.mode,mappings:req}});
-        // Once guard is written/read back, any crash or failed adapter leaves
-        // the controller inactive. No automatic retry or rollback.
-        const afterGuard=await destination(api,donor);
-        assert(same(afterGuard,baseline),'RESTORE_DESTINATION_CHANGED_AFTER_GUARD');
-        const incoming=reviewed.opened, payload=incoming.donor;
+  // Shared durable I16 stage engine for both authenticated v1 and native v2.
+  // Possible donor/cookie/canonical effects are never automatically replayed.
+  async function applyGuardedGroups({db,donor,baseline,intent,req,payload,
+    incomingPcms,mode,fresh=false,accountChoices={},v2=false}){
         let mappings=null,preparedDonor=null,remaps=null,preparedCanonical=null;
-        db=await database();
         const session={epoch:intent.epoch,revision:intent.revision};
         async function step(group,operation,dispatch,readback){
           const fingerprint=await digest(JSON.stringify(operation));
@@ -157,7 +140,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           return outcome;
         }
         await step('donor-personas',{payload:await digest(JSON.stringify(payload)),
-          mappings:req,mode:args.mode},async()=>{
+          mappings:req,mode:mode},async()=>{
           let containers=await donor.containers();
           for(const [i,p] of (payload.personas||[]).entries()){
             if(req[p.key]!=='__create__')continue;
@@ -174,7 +157,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
               revision:snapshot.revision,personaKey:p.key,cookieStoreId:made.cookieStoreId});
           }
           mappings=mappingFromContainers(payload,req,containers,intent.epoch);
-          preparedDonor=await donor.prepare({payload,mappings,mode:args.mode});
+          preparedDonor=await donor.prepare({payload,mappings,mode,regeneratePersonaUids:fresh});
           remaps=uidMap(preparedDonor.sourcePersonas);
           await donor.commit(preparedDonor.candidate);
         },async fp=>{
@@ -233,22 +216,224 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
             return {source:'INDEPENDENT_READBACK',
               digest:Object.keys(gm).every(k=>same(got[k],gm[k]))?fp:'0'.repeat(64)};
           });
-        preparedCanonical=prepareRestoredCanonical({incoming:incoming.archive.pcms,
-          current:baseline.pcms,mode:args.mode,uidRemap:remaps});
+        preparedCanonical=prepareRestoredCanonical({incoming:incomingPcms,
+          current:baseline.pcms,mode,uidRemap:remaps,fresh,accountChoices});
         await step('pcms-canonical',{pcms:await digest(JSON.stringify(preparedCanonical))},
           async()=>applyCanonicalSnapshot(db,preparedCanonical,{
             assertHeld:async()=>(await gate.inspect()).held===true,
             expectedBefore:baseline.pcms}),
           async fp=>{
-            const got=await snapshotCanonical(db);
+            // V2 may exceed the v1 64 MiB archive cap. Verify the entire
+            // committed canonical source without reimposing the v1 limit.
+            const got=v2?await snapshotCanonicalV2(db,{serializedValues:true}):
+              await snapshotCanonical(db);
             return {source:'INDEPENDENT_READBACK',
               digest:same(got,preparedCanonical)?fp:'0'.repeat(64)};
           });
-        return {ok:true,code:'RESTORED_INACTIVE_REVIEW_REQUIRED',
-          ...(await status()),dataRecovered:true,ownerSessionsVerified:false,
+    return {ok:true};
+  }
+
+  async function apply(args){
+    if(running)return fail('RESTORE_BUSY');
+    // All effects remain disabled until human plan review and actual file proof.
+    running=(async()=>{
+      let db=null;
+      try{
+        const admitted=validateRestoreTransport(args);
+        assert(admitted.ok,admitted.code);
+        assert(await gate.read()===null,'RESTORE_ALREADY_HELD');
+        const donor=await donorReady(),baseline=await destination(api,donor);
+        const req=args.mappings||{};
+        const reviewed=await previewRestore({archiveText:args.archiveText,password:args.password,
+          decodeDonor:decodeBackupEnvelope,mode:args.mode,fresh:args.fresh===true,
+          mappings:req,currentPcms:baseline.pcms,currentDonor:baseline.snap,
+          currentPortable:baseline.portable,containers:baseline.snap.containers});
+        if(reviewed.planSha256!==args.reviewedPlanSha256){
+          // Trusted same-XPI diagnostic: only irreversible digests, never
+          // source, Persona identifiers, cookies, route data or decrypted bytes.
+          const plan=reviewed.plan;
+          return {ok:false,code:'RESTORE_PLAN_CHANGED',diagnostic:{
+            actualPlanSha256:reviewed.planSha256,
+            archiveSha256:plan.archiveSha256,
+            sourceSha256:plan.sourceSha256,
+            destinationSha256:plan.destinationSha256,
+            groupsSha256:await digest(JSON.stringify(plan.groups)),
+            riskSha256:await digest(JSON.stringify(plan.risk)),
+            canonicalStoreCounts:Object.fromEntries(Object.entries(baseline.pcms.stores)
+              .map(([name,rows])=>[name,rows.length])),
+            pcmsSha256:await digest(JSON.stringify(baseline.pcms)),
+            donorSha256:await digest(JSON.stringify(baseline.snap)),
+            portableSha256:await digest(JSON.stringify(baseline.portable))}};
+        }
+        assert(Object.keys(req).length===reviewed.opened.donor.personas.length,
+          'RESTORE_MAPPING_INCOMPLETE');
+        assert(!reviewed.plan.groups.some(g=>g.status==='DIRECT_REVIEW_REQUIRED'),
+          'RESTORE_DIRECT_REVIEW_REQUIRED');
+        assert(reviewed.plan.groups.every(g=>g.status==='MAPPING_ONLY_UNVERIFIED'||
+          g.status==='CREATE_REQUESTED'),'RESTORE_MAPPING_UNVERIFIED');
+        const checkpoint=await verifyCheckpoint({checkpointText:args.checkpointText,
+          password:args.password,decodeDonor:decodeBackupEnvelope,
+          currentPcms:baseline.pcms,currentPortable:baseline.portable,
+          archivedAtLeastTier:3});
+        // Re-read destination before the external independent hold. Neither
+        // snapshot nor browser file selection alone grants a mutation token.
+        const latest=await destination(api,donor);
+        assert(same(latest,baseline),'RESTORE_DESTINATION_DRIFT');
+        const intent=await gate.begin({planSha256:reviewed.planSha256,
+          archiveSha256:reviewed.plan.archiveSha256,
+          destinationSha256:reviewed.plan.destinationSha256,
+          checkpointSha256:checkpoint.sha256,reviewedPlanSha256:args.reviewedPlanSha256,
+          checkpointTier:checkpoint.tier,fresh:args.fresh===true,
+          recovery:{mode:args.mode,mappings:req}});
+        // Once guard is written/read back, any crash or failed adapter leaves
+        // the controller inactive. No automatic retry or rollback.
+        const afterGuard=await destination(api,donor);
+        assert(same(afterGuard,baseline),'RESTORE_DESTINATION_CHANGED_AFTER_GUARD');
+        const incoming=reviewed.opened, payload=incoming.donor;
+        db=await database();
+        await applyGuardedGroups({db,donor,baseline,intent,req,
+          payload:incoming.donor,incomingPcms:incoming.archive.pcms,
+          mode:args.mode});
+        return {...(await status()),ok:true,code:'RESTORED_INACTIVE_REVIEW_REQUIRED',
+          dataRecovered:true,ownerSessionsVerified:false,
           protectedRoutesVerified:false,predecessorProvenOff:false};
       }catch(e){return fail(redacted(e));}
       finally{try{db?.close();}catch{}}
+    })().finally(()=>{running=null;});
+    return running;
+  }
+
+  async function nativeV2Evidence(runId){
+    assert(typeof runId==='string'&&/^s02_[a-f0-9]{32}$/.test(runId),
+      'RESTORE_V2_RUN_INVALID');
+    const connection=createV2NativeConnection(api);
+    try{
+      const receipt=await connection.exchange({action:'archive.inspect',runId});
+      assert(receipt?.ok===true&&receipt.runId===runId&&
+        receipt.state==='RECOVERY_VERIFIED'&&hex(receipt.ciphertextSha256)&&
+        hex(receipt.cutDigest)&&hex(receipt.preparedSha256)&&
+        receipt.expectedBytes===receipt.acceptedBytes&&receipt.acceptedBytes>0,
+        'RESTORE_V2_NATIVE_RECEIPT_REQUIRED');
+      const disk=await connection.exchange({action:'backup.verify',runId,
+        keyRef:'portable-recovery'});
+      assert(disk?.ok===true&&disk.runId===runId&&
+        disk.state==='AUTHENTICATED_INVENTORY_ONLY'&&
+        disk.sha256===receipt.ciphertextSha256,
+        'RESTORE_V2_INDEPENDENT_DISK_REQUIRED');
+      return {receipt,disk};
+    }finally{try{connection.close()}catch{}}
+  }
+  async function v2ReviewedCut(args,baseline){
+    const {receipt,disk}=await nativeV2Evidence(args?.runId);
+    const destinationSha256=await digest(JSON.stringify({
+      pcms:baseline.pcms,donor:baseline.snap,portable:baseline.portable
+    }));
+    const reviewed=await reviewV2NativePlan({
+      runId:args.runId,ciphertextSha256:receipt.ciphertextSha256,
+      preparedSha256:receipt.preparedSha256,cutDigest:receipt.cutDigest,
+      destinationSha256,checkpointSha256:disk.sha256,
+      mappings:args.mappings,accountChoices:args.accountChoices
+    });
+    return {receipt,disk,destinationSha256,...reviewed};
+  }
+  // Operator-facing read-only preview. Authentication and disk identity are
+  // obtained from the installed OS host, never from a UI-supplied receipt.
+  async function previewV2(args){
+    try{
+      assert(await gate.read()===null,'RESTORE_ALREADY_HELD');
+      const baseline=await destination(api,await donorReady());
+      const reviewed=await v2ReviewedCut(args,baseline);
+      return {ok:true,code:'RESTORE_V2_NATIVE_PLAN_REVIEW_REQUIRED',
+        runId:args.runId,reviewedPlanSha256:reviewed.planSha256,
+        archiveSha256:reviewed.receipt.ciphertextSha256,
+        checkpointSha256:reviewed.disk.sha256,
+        destinationSha256:reviewed.destinationSha256,
+        nativeCutDigest:reviewed.receipt.cutDigest,
+        verifiedSourceOnly:true,activation:'OFF',providerEffects:'OFF',
+        review:reviewed.plan};
+    }catch(e){return fail(redacted(e))}
+  }
+  // This is never a background alarm or startup action. Like I16 APPLY, it
+  // requires an actual trusted extension-page invocation, an already durable
+  // human-reviewed plan, a separate disk checkpoint and a held restore marker.
+  async function applyV2(args){
+    if(running)return fail('RESTORE_BUSY');
+    running=(async()=>{
+      let db=null,nativeLifetime=null;
+      try{
+        assert(args&&typeof args==='object'&&!Array.isArray(args),
+          'RESTORE_V2_INPUT_INVALID');
+        const intent=await gate.read();
+        assert(intent?.active===true&&intent.fresh===true&&
+          intent.status==='GUARD_INSTALLED'&&
+          Object.keys(intent.groups||{}).length===0,
+          'RESTORE_V2_FRESH_GUARD_REQUIRED');
+        assert(intent.recovery?.mode==='replace'&&
+          intent.recovery.nativeRunId===args.runId&&
+          same(intent.recovery.mappings,args.mappings)&&
+          same(intent.recovery.accountChoices,args.accountChoices)&&
+          intent.planSha256===args.reviewedPlanSha256,
+          'RESTORE_V2_OPERATOR_PLAN_CHANGED');
+        const donor=await donorReady();
+        const baseline=await destination(api,donor);
+        const review=await v2ReviewedCut(args,baseline);
+        assert(intent.planSha256===review.planSha256&&
+          intent.archiveSha256===review.receipt.ciphertextSha256&&
+          intent.checkpointSha256===review.disk.sha256&&
+          intent.destinationSha256===review.destinationSha256,
+          'RESTORE_V2_REVIEWED_FILE_OR_DESTINATION_CHANGED');
+        // Firefox MV3 can suspend an event page after an async port callback.
+        // Unlike a timer, an open native-messaging port is an explicit Gecko
+        // event-page lifetime blocker. The host is already mandatory for this
+        // approved archive; this second port is READ-ONLY and pinned to its
+        // verified run/disk identity. It carries no write/retry authority.
+        // If any connection dies, recovery remains held and cannot be
+        // automatically replayed or promoted.
+        nativeLifetime=createV2NativeConnection(api);
+        const pinned=await nativeLifetime.exchange({
+          action:'archive.inspect',runId:args.runId});
+        assert(pinned?.ok===true&&pinned.state==='RECOVERY_VERIFIED'&&
+          pinned.runId===args.runId&&
+          pinned.ciphertextSha256===review.receipt.ciphertextSha256&&
+          pinned.cutDigest===review.receipt.cutDigest&&
+          pinned.preparedSha256===review.receipt.preparedSha256,
+          'RESTORE_V2_LIFETIME_FILE_CHANGED');
+        const recovered=await prepareQualifiedV2FreshProfile({
+          api,runId:args.runId,currentPcms:baseline.pcms,
+          mode:'replace',accountChoices:args.accountChoices,
+          guard:gate,deferCanonical:true
+        });
+        assert(recovered.status==='INACTIVE_SOURCE_VERIFIED_NOT_APPLIED'&&
+          recovered.nativeReceipt==='RECOVERY_VERIFIED'&&
+          recovered.ciphertextSha256===review.receipt.ciphertextSha256,
+          'RESTORE_V2_SOURCE_NOT_QUALIFIED');
+        const source=recovered.prepared.sourcePcms;
+        const payload=recovered.prepared.donor;
+        assert(source&&Array.isArray(payload?.personas)&&
+          Object.keys(args.mappings).length===payload.personas.length&&
+          payload.personas.every(p=>p?.profile?.routeMode!=='direct'&&
+            Object.hasOwn(args.mappings,p.key))&&
+          payload.personas.every(p=>args.mappings[p.key]==='__create__'||
+            baseline.snap.containers.some(c=>c.cookieStoreId===args.mappings[p.key])),
+          'RESTORE_V2_PERSONA_MAPPING_UNREVIEWED');
+        const latest=await destination(api,donor);
+        assert(same(latest,baseline),'RESTORE_V2_DESTINATION_DRIFT');
+        const held=await gate.read();
+        assert(same(held,intent),'RESTORE_V2_GUARD_CHANGED');
+        db=await database();
+        await applyGuardedGroups({db,donor,baseline,intent,req:args.mappings,
+          payload,incomingPcms:source,mode:'replace',fresh:true,
+          accountChoices:args.accountChoices,v2:true});
+        const final=await gate.inspect();
+        assert(final.held===true&&final.activation==='OFF'&&
+          final.status==='COMPLETE_INACTIVE','RESTORE_V2_FINAL_HOLD_REQUIRED');
+        return {...(await status()),ok:true,code:'RESTORED_V2_DONOR_CANONICAL_INACTIVE',
+          runId:args.runId,sourceAudit:recovered.prepared.sourceAudit,
+          dataRecovered:true,ownerSessionsVerified:false,
+          protectedRoutesVerified:false,predecessorProvenOff:false};
+      }catch(e){return fail(redacted(e));}
+      finally{try{nativeLifetime?.close()}catch{}
+        try{db?.close()}catch{}}
     })().finally(()=>{running=null;});
     return running;
   }
@@ -256,6 +441,8 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
     if(!trustedRestoreSender(api,sender))return fail('UNTRUSTED_SENDER');
     if(!message||typeof message!=='object'||Array.isArray(message))return fail('RESTORE_INPUT_INVALID');
     if(message.action==='STATUS')return status();
+    if(message.action==='PREVIEW_V2')return previewV2(message.params);
+    if(message.action==='APPLY_V2')return applyV2(message.params);
     if(message.action==='RECONCILE'){
       if(running)return fail('RESTORE_BUSY');
       if(typeof message.params?.archiveText!=='string'||
@@ -268,7 +455,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
       let db;
       try{
         db=await database();
-        return await reconcileRestore({gate,api,donor:getDonor(),db,
+        return await reconcileRestore({gate,api,donor:await donorReady(),db,
           archiveText:message.params?.archiveText,
           checkpointText:message.params?.checkpointText,
           password:message.params?.password});

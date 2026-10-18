@@ -463,3 +463,69 @@ test('P55-08 X: crash after PREPARED but before DISPATCH cannot resume blindly',
   assert.equal(effects,0);
   assert.equal((await g.inspect()).held,true);
 });
+
+test('I16 source-plan stays pinned to durable Persona and containers, not status probes',async()=>{
+  const {pcms,payload,archive}=await disposable();
+  const stable={state:{profiles:{},routes:{}},containers:[]};
+  const first={...stable,security:{privacySafe:true},
+    userScriptsGranted:true,mullvadNative:{checkedAt:10,available:false}};
+  const second={...stable,security:{privacySafe:false},
+    userScriptsGranted:false,mullvadNative:{checkedAt:10000,available:true}};
+  const call=(currentDonor)=>previewRestore({archiveText:archive.text,password:pw,
+    mode:'merge',fresh:false,mappings:{},currentPcms:pcms,currentDonor,
+    currentPortable:payload,containers:[],decodeDonor:decodeBackupEnvelope});
+  const p=await call(first),q=await call(second);
+  assert.equal(p.planSha256,q.planSha256,
+    'volatile status cannot invalidate unchanged inactive source destination');
+  await revalidateRestorePlan({expectedPlanSha256:p.planSha256,
+    expectedDestinationSha256:p.plan.destinationSha256,
+    currentPcms:pcms,currentDonor:second,currentPortable:payload,plan:p.plan});
+  const altered=await call({...first,state:{
+    profiles:{},routes:{changed:{id:'changed',provider:'mullvad'}}}});
+  assert.notEqual(altered.planSha256,p.planSha256,
+    'real persistent protected-route identity drift still invalidates plan');
+});
+
+test('S02 restore replace preserves local last-known-good and native lease; foreign receipts remain inert',async()=>{
+  const {prepareRestoredCanonical}=await import('../src/ui/restore-sanitize.mjs');
+  const existing=empty(),incoming=empty();
+  const localAuto={key:'backup:auto-state',state:{enabled:true,
+    archives:[{runId:'auto_local',state:'COMPLETE',kind:'AUTO',
+      sha256:'a'.repeat(64)}],active:null,status:'COMPLETE'}};
+  const localManual={key:'backup:manual-active',status:'BROWSER_REPORTED_COMPLETE',
+    tier:2,downloadId:31,expectedSha256:'b'.repeat(64)};
+  const nativeId='s02_'+('1'.repeat(32));
+  const importedId='s02_'+('2'.repeat(32));
+  const localLease={key:'backup:v2:active',runId:nativeId};
+  const localRun={key:'backup:v2:'+nativeId,runId:nativeId,
+    state:'APPEND_POSSIBLE',acceptedBytes:17};
+  for(const row of [localAuto,localManual,localLease,localRun])
+    existing.stores.meta.push({key:row.key,value:serializeClone(row)});
+  const foreign=[
+    {key:'backup:auto-state',state:{enabled:true,active:{runId:'auto_foreign'},
+      archives:[{kind:'AUTO',state:'COMPLETE',runId:'auto_foreign'}]}},
+    {key:'backup:manual-active',status:'DOWNLOAD_STARTED',downloadId:91,tier:2},
+    {key:'backup:v2:active',runId:importedId},
+    {key:'backup:v2:'+importedId,runId:importedId,
+      state:'RECOVERY_VERIFIED',acceptedBytes:999,
+      preparedSha256:'c'.repeat(64),ciphertextSha256:'d'.repeat(64)}
+  ];
+  for(const row of foreign)
+    incoming.stores.meta.push({key:row.key,value:serializeClone(row)});
+  const restored=prepareRestoredCanonical({incoming,current:existing,mode:'replace'});
+  const byKey=new Map(restored.stores.meta.map(r=>[r.key,r.value]));
+  for(const row of [localAuto,localManual,localLease,localRun])
+    assert.deepEqual(JSON.parse(JSON.stringify(byKey.get(row.key))),row,
+      'replace must retain local-only backup truth');
+  assert.equal(byKey.get('backup:v2:'+importedId).state,'RESTORED_HISTORY_ONLY');
+  assert.equal(byKey.get('backup:v2:'+importedId).acceptedBytes,0);
+  assert.equal(byKey.get('backup:v2:'+importedId).preparedSha256,null);
+  const fresh=prepareRestoredCanonical({incoming,current:empty(),mode:'replace'});
+  const freshMap=new Map(fresh.stores.meta.map(r=>[r.key,r.value]));
+  assert.equal(freshMap.has('backup:v2:active'),false,
+    'a foreign possible-effect lease never activates');
+  assert.equal(freshMap.get('backup:auto-state').state.enabled,false);
+  assert.equal(freshMap.get('backup:auto-state').state.active,null);
+  assert.equal(freshMap.get('backup:manual-active').status,'RESTORED_HISTORY_ONLY');
+  assert.equal(freshMap.get('backup:manual-active').downloadId,null);
+});

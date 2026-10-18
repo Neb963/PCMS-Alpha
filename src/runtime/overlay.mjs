@@ -787,10 +787,28 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
     return {cookieStoreId:made?.container?.cookieStoreId,
       personaUid:made?.profile?.personaUid};
   }),
-  prepare:async ({payload,mappings,mode})=>{
+  prepare:async ({payload,mappings,mode,regeneratePersonaUids=false})=>{
     const snap=await getSnapshot(), bindings=new Map(Object.entries(mappings));
-    const imported=await buildImportedState({payload,currentState:snap.state,
+    // The pinned donor's ordinary importer intentionally preserves a valid
+    // source UID. Fresh v2 recovery must NOT make an imported UID current
+    // authority: give each created Persona a new UID, while retaining the
+    // authenticated source UID solely for canonical historical remapping.
+    const portable=regeneratePersonaUids?
+      {...payload,personas:(payload.personas||[]).map(p=>({
+        ...p,profile:{...p.profile,personaUid:null}
+      }))}:payload;
+    const imported=await buildImportedState({payload:portable,currentState:snap.state,
       profileBindings:bindings,mode});
+    if(regeneratePersonaUids){
+      const seen=new Set();
+      for(const p of payload.personas||[]){
+        const target=imported.maps.personaUid.get(p.key);
+        if(typeof target!=='string'||!target||
+           target===p.profile?.personaUid||seen.has(target))
+          throw Error('RESTORE_FRESH_PERSONA_UID_NOT_REGENERATED');
+        seen.add(target);
+      }
+    }
     // Restored bytes are archived facts; imported network execution, new proxy
     // endpoints, global privileges and formerly approved jobs have NO authority.
     imported.state.global=structuredClone(snap.state.global);
@@ -896,8 +914,8 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
     'git-writeback.mjs','writeback-store.mjs','writeback-boundary.mjs',
     'release-core.mjs','release-store.mjs','release-boundary.mjs','perchance-release.mjs',
     'existing-update-core.mjs','existing-update-store.mjs','existing-update-boundary.mjs','perchance-existing.mjs',
-    'backup-auto-donor.mjs','restore-donor.mjs','restore-boundary.mjs','restore-reconcile.mjs','backup-auto-core.mjs','backup-auto-store.mjs','backup-auto-download.mjs',
-    'backup-auto-retention.mjs','backup-auto-export.mjs','backup-auto-run.mjs','backup-auto-boundary.mjs',
+    'backup-auto-donor.mjs','backup-donor-port.mjs','restore-donor.mjs','restore-boundary.mjs','restore-reconcile.mjs','backup-auto-core.mjs','backup-auto-store.mjs','backup-auto-download.mjs',
+    'backup-auto-retention.mjs','backup-auto-export.mjs','backup-v2-verify.mjs','backup-auto-run.mjs','backup-auto-boundary.mjs','restore-v2-candidate.mjs',
     'refresher-effect-core.mjs','refresher-core.mjs','refresher-store.mjs','refresher-boundary.mjs','perchance-monitor.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }

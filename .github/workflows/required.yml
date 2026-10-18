@@ -68,7 +68,7 @@ jobs:
     name: firefox
     needs: fast
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - name: Checkout browser harness
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -81,6 +81,26 @@ jobs:
           path: build
       - name: Install exact Firefox Developer Edition and driver
         run: bash scripts/setup-firefox.sh
+      # Test-only host registration and Secret Service use in a disposable
+      # GitHub runner HOME. No user machine, real account or provider effects.
+      - name: S02 isolated installed native host and Secret Service H witness
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            dbus-user-session gnome-keyring libsecret-tools
+          disposable_home="$(mktemp -d "${RUNNER_TEMP}/pcms-s02-host-XXXXXXXX")"
+          trap 'rm -rf "$disposable_home"' EXIT
+          chmod 0700 "$disposable_home"
+          mkdir -m 0700 "$disposable_home/runtime"
+          HOME="$disposable_home" XDG_RUNTIME_DIR="$disposable_home/runtime" \
+            PCMS_S02_CI_ISOLATED=1 dbus-run-session -- bash -c '
+              set -euo pipefail
+              eval "$(printf "pcms-s02-disposable-keyring\\n" | gnome-keyring-daemon \
+                --unlock --components=secrets)"
+              python3 scripts/s02-ci-native-host.py build/pcms-alpha-i00.xpi
+            '
       - name: Persistent installed-XPI Firefox B smoke
         run: python3 scripts/browser-i00-smoke.py build/pcms-alpha-i00.xpi
   pcms-required:

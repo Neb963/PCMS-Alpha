@@ -1,7 +1,7 @@
 // I16: atomic, destination-fenced local recovery. Every initial cursor and
 // replacing write executes in one IndexedDB readwrite transaction, so a
 // concurrent Core writer cannot slip between revision check and deletion.
-import {DB_STORES,snapshotCanonical,digest,deserializeClone,
+import {DB_STORES,snapshotCanonicalV2,digest,deserializeClone,
   serializeClone,validatePcmsSnapshot} from './backup-core.mjs';
 const refuse=c=>{throw Error(c);};
 const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
@@ -52,14 +52,16 @@ export async function applyCanonicalSnapshot(db,prepared,{assertHeld,expectedBef
       }
     }catch{abort('RESTORE_CANONICAL_READ_FAILED');}
   });
-  const observed=await snapshotCanonical(db);
+  // V2 can exceed v1's 64 MiB export cap; keep an exact serialized
+  // independent postcommit readback rather than rejecting valid restored data.
+  const observed=await snapshotCanonicalV2(db,{serializedValues:true});
   if(!equal(observed,prepared))refuse('RESTORE_CANONICAL_READBACK_MISMATCH');
   return {source:'INDEPENDENT_READBACK',
     digest:await digest(JSON.stringify(prepared)),
     rows:DB_STORES.reduce((n,k)=>n+prepared.stores[k].length,0)};
 }
 export async function observeCanonicalSnapshot(db,prepared){
-  const actual=await snapshotCanonical(db);
+  const actual=await snapshotCanonicalV2(db,{serializedValues:true});
   if(!equal(actual,prepared))return {ok:false,code:'RESTORE_CANONICAL_DIFFERENT'};
   return {ok:true,source:'INDEPENDENT_READBACK',
     digest:await digest(JSON.stringify(prepared))};

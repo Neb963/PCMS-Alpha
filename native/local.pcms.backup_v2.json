@@ -1,0 +1,7 @@
+{
+  "name": "local.pcms.backup_v2",
+  "description": "PCMS Alpha reviewed source-complete archive host (not installed by this PR)",
+  "path": "/INSTALL/ABSOLUTE/PATH/backup_v2_host.py",
+  "type": "stdio",
+  "allowed_extensions": ["persona-route-manager@local"]
+}
