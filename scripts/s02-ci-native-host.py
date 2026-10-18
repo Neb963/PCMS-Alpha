@@ -392,7 +392,7 @@ def fresh_script(run_id):
         const saved=await idb.applyCanonicalSnapshot(db,candidate,{
           assertHeld:async()=>(await guard.inspect()).held,
           expectedBefore:current});
-        const independent=await core.snapshotCanonical(db);
+        const independent=await core.snapshotCanonicalV2(db,{serializedValues:true});
         const final=independent.stores.meta.find(r=>
           r.key==='stage-history:s02-ci-1023');
         const held=await guard.inspect();
@@ -507,7 +507,7 @@ def complete_donor_script(run_id):
                            'pcms-canonical'])
           if(groups[name]!=='OBSERVED')
             throw Error('H_V2_DONOR_I16_STAGE_NOT_OBSERVED:'+name);
-        const inventory=await core.snapshotCanonical(db);
+        const inventory=await core.snapshotCanonicalV2(db,{serializedValues:true});
         const rows=new Map(inventory.stores.meta.map(r=>[r.key,r.value]));
         const recovered=rows.get('account:s02-ci-0')?.account;
         const last=rows.get('stage-history:s02-ci-1023')?.record?.candidate;

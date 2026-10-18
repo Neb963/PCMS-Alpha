@@ -251,7 +251,9 @@ export function snapshotCanonical(db){
 // without invoking legacy v1's 64 MiB whole-archive formatter. No Javascript
 // await inside the IDB cut, no per-store pagination across inconsistent reads.
 // Consumers retain strict source closure and per-row v2 grammar validation.
-export function snapshotCanonicalV2(db){
+// Serialized readback is for v2 inactive transactional restore verification;
+// it preserves v1 structured-clone semantics without applying v1's size cap.
+export function snapshotCanonicalV2(db,{serializedValues=false}={}){
   return new Promise((resolve,reject)=>{
     if(!db||DB_STORES.some(s=>!db.objectStoreNames.contains(s))){
       reject(Error('BACKUP_INCOMPLETE'));return;
@@ -273,7 +275,7 @@ export function snapshotCanonicalV2(db){
           const cur=e.target.result;if(!cur)return;
           if(++seen>500000){stop('BACKUP_V2_ROW_LIMIT');return;}
           try{stores[store].push({key:serializeClone(cur.key),
-            value:cur.value});}
+            value:serializedValues?serializeClone(cur.value):cur.value});}
           catch(err){stop(err.message||'BACKUP_V2_VALUE_INVALID');return;}
           cur.continue();
         };

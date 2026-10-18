@@ -276,6 +276,93 @@ class TestHost(unittest.TestCase):
         self.assertEqual(self.request("archive.inspect",runId=RUN)["state"],
                          "WRITTEN_UNVERIFIED")
 
+    def test_fourteen_genuinely_qualified_cryptographic_archives_and_quota_abort(self):
+        """Real, individually encrypted/reopened/restored archives, not copied
+        ciphertexts or fabricated RECOVERY_VERIFIED ledger rows. D tier only.
+        The quota case is deterministic ENOSPC fault injection, not a real
+        full filesystem or an operator capacity measurement.
+        """
+        raw=make_payload()
+        good=[]
+        for index in range(15):
+            run="s02_"+format(110+index,"032x")
+            started=self.request("export.begin",runId=run,cutDigest=CUT,
+                expectedPlaintextBytes=len(raw),keyRef="portable-recovery")
+            self.assertTrue(started["ok"],(index,started))
+            for sequence,at in enumerate(range(0,len(raw),BUFFER)):
+                piece=raw[at:at+BUFFER]
+                accepted=self.request("export.append",runId=run,
+                    sequence=sequence,bytes=base64.b64encode(piece).decode(),
+                    sha256=hashlib.sha256(piece).hexdigest())
+                self.assertTrue(accepted["ok"],(index,accepted))
+            finished=self.request("export.finish",runId=run,
+                sequence=(len(raw)+BUFFER-1)//BUFFER,cutDigest=CUT)
+            self.assertTrue(finished["ok"],(index,finished))
+            reopened=self.request("backup.verify",runId=run,
+                                 keyRef="portable-recovery")
+            self.assertTrue(reopened["ok"],(index,reopened))
+            receipt=self.request("restore.begin",runId=run,
+                                 keyRef="portable-recovery")
+            self.assertTrue(receipt["ok"],(index,receipt))
+            recovered=bytearray()
+            seq=0
+            while True:
+                part=self.request("restore.read",runId=run,sequence=seq)
+                self.assertTrue(part["ok"],(index,part))
+                recovered.extend(base64.b64decode(part["bytes"]))
+                if part["complete"]:break
+                seq+=1
+            self.assertEqual(recovered,raw)
+            self.assertEqual(part["sha256"],receipt["sha256"])
+            terminal=self.request("archive.recovery.complete",runId=run,
+                sha256=part["sha256"],preparedSha256=hashlib.sha256(raw).hexdigest(),
+                status="INACTIVE_PREPARED_NOT_APPLIED")
+            self.assertEqual(terminal["state"],"RECOVERY_VERIFIED")
+            good.append((run,part["sha256"]))
+            if index==13:
+                fourteen=self.request("archive.retention.plan")
+                self.assertEqual(fourteen["qualified"],14)
+                self.assertIsNone(fourteen["pruneCandidate"])
+        plan=self.request("archive.retention.plan")
+        self.assertEqual(plan["qualified"],15)
+        self.assertEqual(plan["pruneCandidate"],good[0][0])
+        pruned=self.request("archive.retention.prune")
+        self.assertEqual(pruned["state"],"REMOVED")
+        self.assertFalse((self.root/(good[0][0]+".encrypted")).exists())
+        self.assertEqual(self.request("archive.retention.plan")["qualified"],14)
+        for run,sha in good[1:]:
+            self.assertTrue((self.root/(run+".encrypted")).is_file())
+            proof=self.request("backup.verify",runId=run,
+                               keyRef="portable-recovery")
+            self.assertTrue(proof["ok"],proof)
+            self.assertEqual(proof["sha256"],sha)
+        # Failure after run intent and before any append acknowledgment:
+        # never advertise a successful backup or delete any qualified file.
+        failed_run="s02_"+format(200,"032x")
+        began=self.request("export.begin",runId=failed_run,
+            cutDigest=CUT,expectedPlaintextBytes=len(raw),
+            keyRef="portable-recovery")
+        self.assertTrue(began["ok"],began)
+        with patch.object(self.host.writer,"append",
+                          side_effect=OSError(28,"injected ENOSPC quota")):
+            failed=self.request("export.append",runId=failed_run,sequence=0,
+                bytes=base64.b64encode(raw[:BUFFER]).decode(),
+                sha256=hashlib.sha256(raw[:BUFFER]).hexdigest())
+        self.assertFalse(failed["ok"])
+        self.assertEqual(self.request("archive.inspect",runId=failed_run)["state"],
+                         "APPEND_POSSIBLE")
+        self.host.close()
+        restarted=V2ArchiveHost(self.root,lambda:PASS)
+        try:
+            state=restarted.action({"action":"archive.retention.plan"})
+            self.assertEqual(state["qualified"],14)
+            self.assertIsNone(state["pruneCandidate"])
+            self.assertNotEqual(restarted.action({"action":"archive.inspect",
+                "runId":failed_run})["state"],"RECOVERY_VERIFIED")
+            self.assertTrue((self.root/(good[-1][0]+".encrypted")).exists())
+        finally:
+            restarted.close()
+
     def test_native_recovery_qualification_and_fourteen_successful_file_retention(self):
         raw=make_payload()
         self.assertTrue(self.begin(raw)["ok"])
