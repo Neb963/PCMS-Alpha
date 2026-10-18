@@ -12,9 +12,10 @@ const prompt=el('pcms-catalog-prompt');
 const draft=el('pcms-catalog-prompt-draft');
 const saveDraft=el('pcms-catalog-prompt-save');
 const commitDraft=el('pcms-catalog-prompt-commit');
+const reconcileDraft=el('pcms-catalog-prompt-reconcile');
 const promptStatus=el('pcms-catalog-prompt-status');
 let busy=false,generation=0,connected=false,selectedScope=null;
-let promptBase=null,promptRevision=0,promptDirty=false;
+let promptBase=null,promptRevision=0,promptDirty=false,promptEffectState=null;
 function message(text){status.textContent=text;}
 function render(data){
   list.replaceChildren();prompt.value='';
@@ -53,7 +54,7 @@ function render(data){
     return;
   }
   promptBase={repositoryId:data.repositoryId,oid:data.prompt.oid,head:data.head};
-  promptRevision=0;draft.value=data.prompt.text;promptDirty=false;
+  promptRevision=0;draft.value=data.prompt.text;promptDirty=false;promptEffectState=null;
   draft.disabled=false;
   promptStatus.textContent='Git prompt pinned at '+data.prompt.oid.slice(0,12)+
     '. Load saved draft or edit and save a new local revision.';
@@ -82,7 +83,10 @@ function controls(){
   inspectReady.disabled=busy||!connected||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(readySlug.value.trim());
   draft.disabled=busy||!promptBase||!connected;
   saveDraft.disabled=busy||!promptBase||!connected;
-  commitDraft.disabled=busy||!promptBase||!connected||promptRevision<1||promptDirty;
+  commitDraft.disabled=busy||!promptBase||!connected||promptRevision<1||
+    promptDirty||['DISPATCH_POSSIBLE','UNCERTAIN','VERIFIED'].includes(promptEffectState);
+  reconcileDraft.disabled=busy||!promptBase||!connected||
+    !['DISPATCH_POSSIBLE','UNCERTAIN'].includes(promptEffectState);
 }
 repo.addEventListener('input',()=>{generation++;selectedScope=null;promptBase=null;
   list.replaceChildren();prompt.value='';controls();});
@@ -175,6 +179,7 @@ async function loadSavedDraft(repositoryId,oid){
       if(promptDirty)return;
       draft.value=result.record.text;
       promptRevision=result.record.revision;
+      promptEffectState=result.record.effect?.state||null;
       if(result.record.baseOid!==oid)
         promptStatus.textContent='Saved draft preserved against a different Git base. Reconcile before writing; do not overwrite the draft.';
       else if(result.record.effect)
@@ -198,7 +203,7 @@ saveDraft.addEventListener('click',async()=>{
     });
     if(promptBase!==pinned)return;
     if(result?.ok){
-      promptRevision=result.revision;promptDirty=false;
+      promptRevision=result.revision;promptDirty=false;promptEffectState=null;
       promptStatus.textContent='Draft revision '+promptRevision+' saved locally. Git remains unchanged.';
     }else promptStatus.textContent='Draft held: '+(result?.code||'UNAVAILABLE')+
       '. Copy unsaved changes or reconcile stale revision before retrying.';
@@ -214,6 +219,8 @@ commitDraft.addEventListener('click',async()=>{
     const result=await request('COMMIT_PROMPT',{
       repositoryId:pinned.repositoryId,expectedRevision:promptRevision,expectedHead:pinned.head
     });
+    promptEffectState=result?.ok?'VERIFIED':
+      result?.code==='PROMPT_GIT_UNCERTAIN_RECONCILE_REQUIRED'?'UNCERTAIN':promptEffectState;
     promptStatus.textContent=result?.ok?'Exact Git prompt update verified. Re-scan the catalog.':
       'Prompt commit held: '+(result?.code||'UNAVAILABLE')+
       '. Local draft retained; no retry after an ambiguous acknowledgment.';
@@ -237,5 +244,22 @@ inspectReady.addEventListener('click',async()=>{
     else readyStatus.textContent='READY held: '+(r?.code||'UNVERIFIED')+
       '. No publication or source write authorized.';
   }catch{readyStatus.textContent='READY proof unavailable; no authorization inferred.';}
+  finally{busy=false;controls();}
+});
+
+reconcileDraft.addEventListener('click',async()=>{
+  if(busy||!promptBase||!connected||!['UNCERTAIN','DISPATCH_POSSIBLE'].includes(promptEffectState))return;
+  const pinned=promptBase;
+  busy=true;controls();
+  promptStatus.textContent='Observing Git commit history and exact prompt bytes; no remote writes…';
+  try{
+    const r=await request('RECONCILE_PROMPT',{repositoryId:pinned.repositoryId});
+    if(r?.ok){
+      promptEffectState='VERIFIED';
+      promptStatus.textContent='Previous Git commit independently verified at '+
+        r.commit.slice(0,12)+'. Refresh the main catalog before editing.';
+    }else promptStatus.textContent='Prompt write still held: '+(r?.code||'UNKNOWN')+
+      '. Draft and possible-effect record retained; no automatic retry.';
+  }catch{promptStatus.textContent='Git observation unavailable. Previous effect remains uncertain.';}
   finally{busy=false;controls();}
 });
