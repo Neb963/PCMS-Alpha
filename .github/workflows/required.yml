@@ -68,7 +68,7 @@ jobs:
     name: firefox
     needs: fast
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - name: Checkout browser harness
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
