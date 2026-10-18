@@ -167,6 +167,7 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
         const observation=await observePrompt({
           token:secret.token,repository:config.repository,
           operationId:prior.record.effect.operationId,
+          expectedParent:prior.record.effect.baseHead,
           draft:prior.record.text,repositoryId:config.repositoryId
         },transport,scan);
         if(!observation.ok)return {ok:false,code:observation.code,
@@ -199,7 +200,7 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
           draft:currentDraft.record.text,intent:{
             phase:'DISPATCH_POSSIBLE',operationId,repositoryId:config.repositoryId,
             expectedHead:current.head,expectedOid:current.prompt.oid,
-            source:'PINNED_MAIN_PROMPT_EDITOR'
+            requireExactHead:true,source:'PINNED_MAIN_PROMPT_EDITOR'
           }},transport,scan);
         // Uncertain or missing ACK must not be blindly replayed.
         const state=result?.ok&&result.code==='PROMPT_COMMITTED_VERIFIED'?'VERIFIED':'UNCERTAIN';
