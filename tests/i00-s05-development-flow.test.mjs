@@ -125,3 +125,21 @@ test('S05 missing activation stops before UNLIST even with complete prepared sou
  assert.equal(called,0);
  assert.equal(db.read('meta','existing-update:'+s).record.state,'PREPARED');
 });
+
+test('S05 READY B reconciles possible old native dispatch then requests one guarded Stop',()=>{
+ const active={identifier:'rev-old',inputFingerprint:H};
+ const desired={identifier:witness.identifier,inputFingerprint:H};
+ const ready={ok:true,record:{active,desired,hold:'WAIT_FOR_SAFE_SOURCE_HANDOFF'}};
+ const stage={ok:true,record:{revision:4,readyIdentifier:'rev-old'}};
+ const old={stageRevision:4,state:'KNOWN_FAILURE',
+  native:{state:'DISPATCH_POSSIBLE'}};
+ const plan=native=>planReadyDevelopment({
+   ready,stage,job:{ok:true,job:{...old,native}},effects:true,visibility:'UNLISTED'});
+ assert.equal(plan({state:'DISPATCH_POSSIBLE'}).type,'PROBE_OLDER_NATIVE');
+ assert.equal(plan({state:'RUNNING_OBSERVED'}).type,'STOP_OLDER_NATIVE');
+ const held=planReadyDevelopment({ready,stage,
+  job:{ok:true,job:{...old,native:{state:'RUNNING_OBSERVED'}}},
+  effects:false,visibility:'UNLISTED'});
+ assert.equal(held.type,'HOLD');
+ assert.equal(held.code,'S05_OLDER_NATIVE_STOP_ACTIVATION_HELD');
+});
