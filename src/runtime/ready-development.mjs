@@ -12,6 +12,7 @@ import {createReadyOperator} from './ready-operator.mjs';
 import {createStagingBoundary} from './staging-boundary.mjs';
 import {createExistingBoundary} from './existing-update-boundary.mjs';
 import {createAiBoundary} from './ai-boundary.mjs';
+import {exactSource} from './staging-core.mjs';
 import {planAiStep} from './ai-supervisor.mjs';
 import {AI_BROWSER_ASSERTIONS} from './perchance-ai-oracle.mjs';
 const fail=code=>({ok:false,code});
@@ -56,6 +57,11 @@ export function planReadyDevelopment({ready,stage,existing,job,visibility,effect
      return {ok:true,type:'RECHECK_STAGE'};
    if(s==='STAGE_CONFIRMED'&&stage?.record?.state!=='SOURCE_VERIFIED')
      return fail('S05_SOURCE_VERIFICATION_REQUIRED');
+   if(s==='STAGE_CONFIRMED'&&job?.ok&&job.job.state==='TESTS_VERIFIED'&&
+      job.job.stageRevision===stage.record.revision&&
+      job.job.verifiedFinal&&
+      job.job.verifiedFinal!==existing.record.stagedFingerprint)
+     return {ok:true,type:'PIN_FINAL_F'};
    if(s==='STAGE_CONFIRMED'&&r.desired&&stage?.record?.state==='SOURCE_VERIFIED'&&
       stage.record.readyIdentifier!==r.desired.identifier)
      return {ok:true,type:'PIN_STAGE'};
@@ -192,6 +198,12 @@ export function createReadyDevelopment(api,{
      }else if(chosen.type==='PREPARE_JOB'){
        outcome=await b.ai.runTrusted({type:'PREPARE_JOB',params:{
          ...params,expectedStageRevision:stage.record.revision}});
+     }else if(chosen.type==='PIN_FINAL_F'){
+       const final=await exactSource(job.job.finalSource?.blobs);
+       if(!final.ok||final.fingerprint!==job.job.verifiedFinal)
+         outcome=fail('S05_FINAL_F_BYTES_UNVERIFIED');
+       else outcome=await createExistingStore(database).setFinal(
+         slug,existing.record.revision,final);
      }else if(['ADVANCE_JOB','PROBE_NATIVE','PROBE_OLDER_NATIVE',
         'STOP_OLDER_NATIVE'].includes(chosen.type)){
        const type=chosen.type==='PROBE_OLDER_NATIVE'?'PROBE_NATIVE':
