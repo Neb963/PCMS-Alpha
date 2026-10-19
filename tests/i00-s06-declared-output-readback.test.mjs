@@ -8,13 +8,13 @@ const REPO='Neb963/per-gens',SLUG='output-witness',FOLDER='generators/'+SLUG,
   I='a'.repeat(40),H='b'.repeat(40),TREE_I='c'.repeat(40),TREE_H='d'.repeat(40),
   ID='rev-source20261019',OP='writeback_'+'2'.repeat(32),TOKEN='test-private-git-credential';
 const raw=s=>Buffer.from(s),b64=x=>Buffer.from(x).toString('base64');
-const hash=x=>createHash('sha1').update('blob '+Buffer.from(x).length+'\\0')
+const hash=x=>createHash('sha1').update('blob '+Buffer.from(x).length+'\0')
   .update(Buffer.from(x)).digest('hex');
 function fixture({alterAfterCommit=false,stripTrailer=false,unrelatedHead=false}={}){
  const blobs=new Map();
  const put=(path,content)=>{const x=raw(content),sha=hash(x);blobs.set(sha,x);
    return {path,sha,size:x.length,type:'blob',mode:'100644'};};
- const baseFiles=[put(FOLDER+'/DEPLOYMENT.md','Status: READY\\nReady-Revision: source20261019\\n'),
+ const baseFiles=[put(FOLDER+'/DEPLOYMENT.md','Status: READY\nReady-Revision: source20261019\n'),
    put(FOLDER+'/main.pjs','old test source'),
    put(FOLDER+'/index.html','<main>old</main>')];
  const finalFiles=[baseFiles[0],put(FOLDER+'/main.pjs','new verified F'),
@@ -28,7 +28,7 @@ function fixture({alterAfterCommit=false,stripTrailer=false,unrelatedHead=false}
  const trees=new Map([[TREE_I,outer(baseFiles)],[TREE_H,outer(drift)]]);
  const commits=new Map([[I,{tree:TREE_I,message:'original READY',parents:[]}],
    [H,{tree:TREE_H,message:stripTrailer?'unattributed':
-     'PCMS verified source\\n\\nPCMS-Writeback-Operation: '+OP,parents:[I]}]]);
+     'PCMS verified source\n\nPCMS-Writeback-Operation: '+OP,parents:[I]}]]);
  const send=(status,data)=>({status,json:async()=>data});
  const transport=async(url,request)=>{
    const u=new URL(url),p=u.pathname.replace('/repos/'+REPO,'');
