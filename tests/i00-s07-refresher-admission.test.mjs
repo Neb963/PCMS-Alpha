@@ -57,3 +57,13 @@ test('S07 AC-14: occupancy represents full-feed observations, not scheduled slot
   assert.equal(countObservedOccupancy(rows,[{slug:'a'},{slug:'a'}],now).ok,false);
   assert.equal(countObservedOccupancy(rows,[{slug:'a'}],0).ok,false);
 });
+
+test('S07 T-07: same-id RESERVED intent may dispatch only while feed absence is still current',()=>{
+  const reserved={...row,refresh:{...row.refresh,state:'ATTEMPT_PENDING',
+    intent:{id:'reserved_01',state:'RESERVED',at:now-200}}};
+  assert.equal(qualifyRecentAbsence({row:reserved,recent,policy,now}).ok,false);
+  assert.equal(qualifyRecentAbsence({row:reserved,recent,policy,now,reservedId:'reserved_01'}).ok,true);
+  assert.equal(qualifyRecentAbsence({row:reserved,recent,policy,now,reservedId:'wrong'}).ok,false);
+  assert.equal(qualifyRecentAbsence({row:{...reserved,presence:{...row.presence,present:true}},
+    recent,policy,now,reservedId:'reserved_01'}).ok,false);
+});
