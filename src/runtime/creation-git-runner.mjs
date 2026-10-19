@@ -84,6 +84,9 @@ export function createS04GitContinuation(api,{open=openCanonicalDatabase,
             repositoryId:cfg.repositoryId}});
       }
       if(item.state==='GIT_PREPARED'){
+        if(observed.head!==item.gitBaseHead ||
+           item.gitExpectedMarkerOid!==await markerSha())
+          return fail('GIT_PREPARED_PARENT_CHANGED');
         if(!gate({intent:item,repositoryId:cfg.repositoryId}))
           return fail('GIT_WRITE_ACTIVATION_HELD');
         if(observed.generators.some(g=>g.slug===item.slug))
@@ -99,7 +102,7 @@ export function createS04GitContinuation(api,{open=openCanonicalDatabase,
         let proof;
         try{proof=await write({token,repository:cfg.repository,
           repositoryId:cfg.repositoryId,slug:item.slug,
-          folder:'generators/'+item.slug,expectedHead:observed.head},transport);}
+          folder:'generators/'+item.slug,expectedHead:item.gitBaseHead},transport);}
         catch{proof=fail('GIT_EFFECT_UNCERTAIN');}
         if(proof?.ok!==true){
           await s.stageGit({intentId,expectedRevision:now.revision,event:'UNCERTAIN'});
