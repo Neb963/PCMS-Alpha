@@ -6,6 +6,7 @@ import {exactSource} from '../src/runtime/staging-core.mjs';
 import {createS06ExceptionStore} from '../src/runtime/s06-exception-review.mjs';
 import {createWritebackStore} from '../src/runtime/writeback-store.mjs';
 import {planS06Writeback} from '../src/runtime/s06-writeback-progress.mjs';
+import {planReadyDevelopment} from '../src/runtime/ready-development.mjs';
 import {releaseCandidateTestContext,approvalTuple} from '../src/runtime/release-core.mjs';
 import {createReleaseStore} from '../src/runtime/release-store.mjs';
 globalThis.crypto??=webcrypto;
@@ -73,6 +74,13 @@ test('C-49 exception prepares source-only Git intent with explicit provenance, n
  assert.equal(plan.mode,'S06_EXCEPTION');
  assert.equal(plan.sourceFingerprint,x.F.fingerprint);
  assert.equal(x.job.verifiedFinal,null);
+ const paused=planReadyDevelopment({
+   ready:{ok:true,record:x.ready},stage:{ok:true,record:x.stage},
+   job:{ok:true,job:x.job},
+   exception:{ok:true,record:x.db.read('meta','s06-exception:'+N).record},
+   visibility:'UNLISTED',effects:true});
+ assert.equal(paused.type,'HOLD');
+ assert.equal(paused.code,'S06_EXCEPTION_REVIEW_SOURCE_FROZEN');
  const store=createWritebackStore(x.db);
  const first=await store.prepare({name:N,stage:x.stage,job:x.job,
    probe:{ok:true,head:HEAD,baseHead:BASE,folder:'generators/'+N},
