@@ -7,6 +7,9 @@ import {createDeclarationStore} from './catalog-ready-store.mjs';
 import {createImportApprovalStore,getImportScopeDigest} from './catalog-import.mjs';
 import {isI17Quarantined,I17_QUARANTINE_CODE} from './legacy-quarantine.mjs';
 import {createReadyStore} from './ready-store.mjs';
+import {createStagingStore} from './staging-store.mjs';
+import {createWritebackStore} from './writeback-store.mjs';
+import {sealedS06OutputProof} from './s06-output-proof.mjs';
 const KEY='pcmsS05ReadyScanCursor';
 const SHA=/^[a-f0-9]{40}$/;
 const RID=/^[1-9][0-9]{0,19}$/;
@@ -72,8 +75,15 @@ export function createReadyIntake(api,{open=openCanonicalDatabase,
      continue;
    }
    let evidence;
+   // Current READY inputs remain frozen after a PCMS-authored Git output.
+   // Only a sealed confirmed S06 operation can open that narrow exception.
+   const [ready,stage,writeback]=await Promise.all([
+     queue.get(slug),createStagingStore(db).getFull(slug),
+     createWritebackStore(db).getFull(slug)]);
+   const proof=sealedS06OutputProof({ready,stage,writeback});
    try{evidence=await inspect({repository,token,slug,
-      pinnedHead:catalog.head,includeSourceBytes:false},transport);}
+      pinnedHead:catalog.head,includeSourceBytes:false,
+      ...(proof.ok?{outputProof:proof.outputProof}:{})},transport);}
    catch{evidence=fail('READY_INSPECTION_UNAVAILABLE');}
    if(!evidence?.ok||evidence.code!=='READY_COHERENT_INPUT_PINNED'){
     held.push({slug,code:evidence?.code||'READY_INSPECTION_UNAVAILABLE'});continue;
