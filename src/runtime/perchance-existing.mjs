@@ -119,8 +119,8 @@ export async function perchanceExistingMain(request){
         return fail('REFRESH_SCOPE_CHANGED');
       const original=textValue(prior.get('index.html').bytes);
       const changed=textValue(target.get('index.html').bytes);
-      const pattern=/\\n<!-- pcms-alpha-refresher:([A-Za-z0-9_-]{16,64}) -->$/;
-      const suffix='\\n<!-- pcms-alpha-refresher:'+request.markerId+' -->';
+      const pattern=/\n<!-- pcms-alpha-refresher:([A-Za-z0-9_-]{16,64}) -->$/;
+      const suffix='\n<!-- pcms-alpha-refresher:'+request.markerId+' -->';
       const before=pattern.exec(original);
       const base=before?original.slice(0,-before[0].length):original;
       if((original.match(/<!-- pcms-alpha-refresher:/g)||[]).length>(before?1:0)||
