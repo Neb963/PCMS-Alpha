@@ -14,6 +14,7 @@ import {authorizeReadyAiAdvance} from './ready-ai-gate.mjs';
 import {verifyReadback,exactSource} from './staging-core.mjs';
 import {planAiStep} from './ai-supervisor.mjs';
 import {AI_BROWSER_ASSERTIONS} from './perchance-ai-oracle.mjs';
+import {supportedDeclarativeAssertion} from './ai-declarative-assertion.mjs';
 import {pinTestingAssertions} from './ai-testing.mjs';
 export const AI_PORT='pcms-i10-ai';
 export const AI_PROGRESS_ALARM='pcms-i10-progress';
@@ -261,7 +262,8 @@ export function createAiBoundary(api,{
             (chat===1?job.chat1:job.chat2).tests?.[name]?.sourceFingerprint!==job.sourceFingerprint);
           // Unknown tests remain unverified; never silently count a smoke
           // result as a different named or natural-language requirement.
-          const assertion=pending.find(name=>AI_BROWSER_ASSERTIONS.includes(name));
+          const assertion=pending.find(name=>AI_BROWSER_ASSERTIONS.includes(name)||
+            supportedDeclarativeAssertion(name));
           if(!assertion)return fail('UNSUPPORTED_INDEPENDENT_ASSERTION');
           const before=await g.runNativeAiStep(r.personaUid,{
             slug:r.slug,nonce:r.nonce,action:'OBSERVE'
