@@ -24,7 +24,12 @@ export function s06ReviewStatus({decision,release,change,human,exception,sourceF
     return {state:'IN_DEVELOPMENT',code:'ADOPTED_HUMAN_SOURCE_RETEST_REQUIRED'};
   if(exception?.state==='RECORDED'&&exception.stageRevision===stageRevision&&
      exception.sourceFingerprint===sourceFingerprint)
-    return {state:'EXCEPTION_HELD',code:'HUMAN_CHECKS_RECORDED_NOT_AI_VERIFIED_OR_GIT_CONFIRMED'};
+    return decision?.ok&&decision.type==='REVIEW'&&
+      decision.mode==='S06_EXCEPTION'?
+      {state:'EXCEPTION_READY_FOR_REVIEW',
+        code:'EXACT_EXCEPTIONAL_GIT_F_INDIVIDUAL_APPROVAL_REQUIRED'}:
+      {state:'EXCEPTION_HELD',
+        code:'HUMAN_CHECKS_RECORDED_NOT_AI_VERIFIED_OR_GIT_CONFIRMED'};
   if(change?.state==='REQUESTED')
     return {state:'CHANGES_REQUESTED',code:'AWAITING_GUARDED_CHILD_ADMISSION'};
   // Child admission is not a permanent queue status. Once tests and the
@@ -84,6 +89,8 @@ export function createS06ReviewQueue(db){
         sourceFingerprint:decision.ok&&decision.type==='REVIEW'?
           decision.sourceFingerprint:null,
         sourceVerified:decision.ok&&decision.type==='REVIEW',
+        aiVerified:decision.ok&&decision.type==='REVIEW'&&
+          decision.mode!=='S06_EXCEPTION',
         releaseRevision:release.ok?release.record.revision:null,
         releaseId:release.ok?release.record.releaseId:null});
     }
