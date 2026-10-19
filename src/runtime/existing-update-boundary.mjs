@@ -9,6 +9,10 @@ import {authorizeSleepingUpdate,sealPrevious,unlockPrevious} from './existing-up
 import {createStagingStore} from './staging-store.mjs';
 import {exactSource,verifyReadback} from './staging-core.mjs';
 import {inspectGitSource} from './git-source.mjs';
+import {scanMainCatalog} from './git-catalog.mjs';
+import {inspectReadyCandidate} from './catalog-declaration.mjs';
+import {createReadyStore} from './ready-store.mjs';
+import {stageReadyGitSource} from './ready-git-source.mjs';
 import {REFRESHER_KEY} from './refresher-core.mjs';
 
 export const EXISTING_PORT='pcms-i13-existing';
@@ -101,11 +105,37 @@ async function observe(g,record) {
 export function createExistingBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,
   existingFactory=createExistingStore,stageFactory=createStagingStore,
-  inspect=inspectGitSource,effectGate=()=>false
+  inspect=inspectGitSource,inspectReady=inspectReadyCandidate,
+  scanCatalog=scanMainCatalog,
+  native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
+  effectGate=()=>false
 }={}){
   let promise;
   const db=()=>promise ||=open().catch(e=>{promise=null;throw e;});
   const sentinel=createRestoreSentinel(api.storage.local);
+  async function readySource(database,name){
+    const queued=await createReadyStore(database).get(name);
+    if(!queued.ok||!queued.record.active||queued.record.desired)
+      return fail('S05_READY_NOT_ADMITTED_OR_SUPERSEDED');
+    const config=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
+    if(config?.repository!=='Neb963/per-gens'||
+       config.repositoryId!==queued.record.repositoryId)
+      return fail('S05_REPOSITORY_CHANGED');
+    const secret=await native({action:'git.get',repositoryId:config.repositoryId});
+    if(!secret?.ok||typeof secret.credential!=='string'||
+       secret.credential.length<12||secret.credential.length>512)
+      return fail('S05_GIT_VAULT_UNAVAILABLE');
+    const catalog=await scanCatalog({repository:config.repository,
+       token:secret.credential});
+    if(!catalog?.ok||!catalog.complete||
+       catalog.repositoryId!==config.repositoryId)
+      return fail('S05_GIT_MAIN_UNVERIFIED');
+    const coherent=await inspectReady({repository:config.repository,
+       token:secret.credential,slug:name,pinnedHead:catalog.head,
+       includeSourceBytes:true});
+    return stageReadyGitSource({catalog,coherent,ready:queued.record,
+       slug:name,repositoryId:config.repositoryId});
+  }
   async function safeGuard(personaUid) {
     const g=guard();
     if(!g?.runExistingStep||!g?.observeReadOnly||!g?.getSafeRouteReadiness)
@@ -244,11 +274,17 @@ export function createExistingBoundary(api,{
       if(!remote.ok||remote.visibility!=='UNLISTED'||
          remote.source.fingerprint!==r.previousFingerprint)
         return fail('EXISTING_PREVIOUS_SOURCE_CHANGED');
-      const git=await inspect({folder:f.link.folder,token:p.token,
-        includeSourceBytes:true});
+      const queued=await createReadyStore(database).get(p.slug);
+      const pinned=queued.ok?
+        await readySource(database,p.slug):null;
+      if(pinned&&!pinned.ok)return pinned;
+      const git=pinned?pinned.source:
+        await inspect({folder:f.link.folder,token:p.token,
+          includeSourceBytes:true});
       if(!git?.ok||!git.ready||git.folder!==f.link.folder)
         return fail('EXISTING_GIT_READY_UNVERIFIED');
-      const candidate=await exactSource(git.sourceBytes);
+      const candidate=pinned?pinned.candidate:
+        await exactSource(git.sourceBytes);
       if(!candidate.ok)return candidate;
       if(!(await recheck(g,r.personaUid,before)).ok)return fail('EXISTING_GUARD_CHANGED');
       const stage=stageFactory(database);
@@ -311,6 +347,14 @@ export function createExistingBoundary(api,{
         if(!stage.ok||stage.record.state!=='PINNED'||
            stage.record.candidate.fingerprint!==r.stagedFingerprint||
            stage.record.nonce!==r.nonce)return fail('EXISTING_STAGE_CHANGED');
+        if(stage.record.readyIdentifier){
+          const current=await readySource(database,p.slug);
+          if(!current.ok||
+             current.source.gitReadyIdentifier!==stage.record.readyIdentifier||
+             current.source.gitReadyInputFingerprint!==stage.record.readyInputFingerprint||
+             current.candidate.fingerprint!==stage.record.candidate.fingerprint)
+            return fail('S05_READY_CHANGED_BEFORE_UPDATE_SAVE');
+        }
       }
       if(effectGate({phase:'I13',action:m.type,record:r})!==true)
         return fail('PROVIDER_ACTIVATION_HELD');
