@@ -24,6 +24,19 @@ export function planReadyDevelopment({ready,stage,existing,job,visibility,effect
  const r=ready.record,candidate=r.desired||r.active;
  if(!candidate||['OPERATOR_PAUSED','READY_REVOKED_NOT_READY'].includes(r.hold))
    return fail(r.hold||'S05_READY_NO_CURRENT_CANDIDATE');
+ // A newer candidate never steals an in-flight old writer. First reconcile
+ // any possible dispatch. Once the old helper is observed running, request
+ // exactly one guarded STOP, then wait for independent saved-F idle proof.
+ if(r.desired&&r.active&&stage?.ok&&job?.ok&&
+    stage.record.readyIdentifier===r.active.identifier&&
+    job.job.stageRevision===stage.record.revision&&
+    job.job.state!=='HUMAN_OWNED'){
+   if(job.job.native?.state==='DISPATCH_POSSIBLE')
+     return {ok:true,type:'PROBE_OLDER_NATIVE'};
+   if(job.job.native?.state==='RUNNING_OBSERVED')
+     return {ok:true,type:effects?'STOP_OLDER_NATIVE':'HOLD',
+       code:'S05_OLDER_NATIVE_STOP_ACTIVATION_HELD'};
+ }
  if(existing?.ok){
    const s=existing.record?.state;
    if(s==='PREPARED')
@@ -163,14 +176,18 @@ export function createReadyDevelopment(api,{
      }else if(chosen.type==='PREPARE_JOB'){
        outcome=await b.ai.runTrusted({type:'PREPARE_JOB',params:{
          ...params,expectedStageRevision:stage.record.revision}});
-     }else if(chosen.type==='ADVANCE_JOB'||chosen.type==='PROBE_NATIVE'){
-       outcome=await b.ai.runTrusted({type:chosen.type,params:{
-         ...params,expectedRevision:job.job.revision}});
+     }else if(['ADVANCE_JOB','PROBE_NATIVE','PROBE_OLDER_NATIVE',
+        'STOP_OLDER_NATIVE'].includes(chosen.type)){
+       const type=chosen.type==='PROBE_OLDER_NATIVE'?'PROBE_NATIVE':
+         chosen.type==='STOP_OLDER_NATIVE'?'BEGIN_NATIVE':chosen.type;
+       outcome=await b.ai.runTrusted({type,params:{
+         ...params,expectedRevision:job.job.revision,
+         ...(chosen.type==='STOP_OLDER_NATIVE'?{step:'STOP'}:{})}});
      }
      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
      return {ok:outcome?.ok===true,code:outcome?.code||'S05_STEP_UNVERIFIED',
        slug,step:chosen.type,canonical:outcome,providerEffects:
-       ['UNLIST','STAGE','STAGE_PRIVATE','ADVANCE_JOB'].includes(chosen.type)?
+       ['UNLIST','STAGE','STAGE_PRIVATE','ADVANCE_JOB','STOP_OLDER_NATIVE'].includes(chosen.type)?
           'MAY_HAVE_DISPATCHED':'NONE'};
     }
     if(!listing.more)break;
