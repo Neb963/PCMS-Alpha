@@ -33,7 +33,7 @@ test('S05 installed journal composition advances public READY through I13 and AI
  await save(db,{key:'inventory:'+s,generator:{slug:s,visibility:'PUBLIC'}});
  const passphrase='fixture-recovery-secret';
  const mutate=async(key,record)=>save(db,{key,record});
- const result=(type,state)=>({ok:true,code:type,state,revision:state});
+ const receipt=(type,state)=>({ok:true,code:type,state,revision:state});
  const existing=()=>({runTrusted:async ({type,params})=>{
   actions.push(type);
   const row=db.read('meta','existing-update:'+s)?.record;
@@ -70,7 +70,7 @@ test('S05 installed journal composition advances public READY through I13 and AI
    assert.equal(params.passphrase,undefined);
   if(['UNLIST','PIN_STAGE','STAGE','PREPARE'].includes(type))
    assert.equal(params.passphrase,passphrase);
-  return result(type,state);
+  return receipt(type,state);
  }});
  const candidate={slug:s,revision:3,stageRevision:3,
    sourceFingerprint:F,state:'PENDING_NATIVE_SESSION',
