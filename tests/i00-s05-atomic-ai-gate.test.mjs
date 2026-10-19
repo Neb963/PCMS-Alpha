@@ -8,9 +8,9 @@ const candidate='rev-candidate-20261019';
 const baseJob=()=>({schema:1,slug,revision:7,stageRevision:4,
   accountId:'account-fixture',sourceFingerprint:F,
   readyIdentifier:candidate,readyInputFingerprint:H,
-  state:'TESTS_UNVERIFIED',native:{step:'CHAT1_SEND',state:'CHAT1_OBSERVED_IDLE',
+  state:'KNOWN_FAILURE',native:{step:'CHAT1_SEND',state:'CHAT1_OBSERVED_IDLE',
     sessionDigest:D},finalSource:{fingerprint:F},verifiedFinal:null,
-  chat1:{state:'RUNNING',sessionDigest:D,tests:{}},chat2:null,
+  chat1:{state:'RUNNING',sessionDigest:D,tests:{default_generator_smoke:{result:'FAIL',sourceFingerprint:F,observedAt:1}}},chat2:null,
   prompt:{revision:1,text:'Test the source',tests:['default_generator_smoke']},
   optionalTesting:null,turns:0,changes:[],hold:'INDEPENDENT_BROWSER_TESTS_REQUIRED'});
 async function setup(ready,job=baseJob()){
@@ -49,8 +49,8 @@ test('S05 atomic test evidence cannot mint PASS for superseded source, but live 
   const {db,store}=await setup(c.ready);
   const result=await store.record(slug,7,entry);
   assert.equal(result.code,'AI_READY_CANDIDATE_CHANGED',c.name+': '+JSON.stringify(result));
-  assert.equal(db.read('meta','ai-job:'+slug).job.chat1.tests.default_generator_smoke,
-    undefined);
+  assert.equal(db.read('meta','ai-job:'+slug).job.chat1.tests.default_generator_smoke.result,
+    'FAIL');
   assert.equal(db.keys('events').length,0);
  }
  const good=await setup(active());
