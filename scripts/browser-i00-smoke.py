@@ -1209,11 +1209,61 @@ def main():
                     child?.state==='PENDING_NATIVE_SESSION'&&
                     child?.verifiedFinal===null&&
                     child?.sourceFingerprint===savedH.fingerprint;
+                  // C-49 positive installed-XPI port with true unverified
+                  // optional Chat 2 status, immutable current source and
+                  // no provider/Git write. A manual record does not mint PASS.
+                  const exceptionSlug='fixture-s06-optional-b';
+                  await new Promise((resolve,reject)=>{
+                    const tx=db.transaction('meta','readwrite');
+                    tx.oncomplete=resolve;tx.onabort=()=>reject(Error('EXCEPTION_FIXTURE_ABORT'));
+                    const m=tx.objectStore('meta');
+                    m.put({key:'s05-ready:'+exceptionSlug,record:{
+                      slug:exceptionSlug,revision:1,desired:null,hold:null,
+                      active:{identifier:'rev-fixture-ex',inputFingerprint:input}}});
+                    m.put({key:'stage:'+exceptionSlug,record:{
+                      slug:exceptionSlug,revision:4,state:'SOURCE_VERIFIED',verifiedAt:1,
+                      candidate:humanF,previous:humanF,
+                      sourceFolder:'generators/'+exceptionSlug,
+                      readyIdentifier:'rev-fixture-ex',readyInputFingerprint:input}});
+                    m.put({key:'ai-job:'+exceptionSlug,accountId:'fixture-account',job:{
+                      slug:exceptionSlug,revision:7,stageRevision:4,
+                      state:'TESTS_UNVERIFIED',sourceFingerprint:humanF.fingerprint,
+                      verifiedFinal:null,finalSource:humanF,
+                      readyIdentifier:'rev-fixture-ex',readyInputFingerprint:input,
+                      executionSlotReleased:true,
+                      native:{state:'CHAT1_OBSERVED_IDLE',sessionDigest:session},
+                      prompt:{revision:2,text:'Test actual source.',
+                        tests:['default_generator_smoke']},
+                      optionalTesting:{sha256:input,tests:['optional_smoke'],
+                        text:'Test isolated optional Chat 2'},
+                      chat1:{state:'RUNNING',sessionDigest:session,tests:{
+                        default_generator_smoke:{result:'PASS',
+                          sourceFingerprint:humanF.fingerprint}}},
+                      chat2:{state:'PENDING',sessionDigest:null,tests:{}},
+                      hold:'AI_CHAT2_ISOLATION_UNVERIFIED'}});
+                  });
+                  const exceptionBefore=await call('EXCEPTION_CONTEXT',{slug:exceptionSlug});
+                  const exceptionRecorded=await call('RECORD_EXCEPTION',{
+                    slug:exceptionSlug,mode:'OPTIONAL_CHAT2_INCOMPLETE',
+                    checks:[],consent:'I PERFORMED THE RECORDED MANUAL CHECKS',
+                    expectedStageRevision:4,expectedJobRevision:7,
+                    sourceFingerprint:humanF.fingerprint});
+                  const exceptionSaved=await call('GET_EXCEPTION',{slug:exceptionSlug});
+                  const exceptionCycle=exceptionBefore?.ok===true&&
+                    exceptionBefore.evidenceState==='TESTS_UNVERIFIED'&&
+                    exceptionBefore.chat1Verified===true&&
+                    exceptionBefore.chat2Verified===false&&
+                    exceptionRecorded?.state==='RECORDED'&&
+                    exceptionSaved?.state==='RECORDED'&&
+                    exceptionSaved?.chat2Verified===false&&
+                    exceptionSaved?.publication==='NOT_AUTHORIZED';
                   const ui=['pcms-s06-review-queue','pcms-s06-review-refresh',
                     'pcms-s06-review-next','pcms-s06-request-changes',
                     'pcms-s06-change-instructions','pcms-s06-authority-enable',
                     'pcms-s06-authority-revoke','pcms-s06-human-inspect',
-                    'pcms-s06-human-defer','pcms-s06-human-adopt'].every(id=>
+                    'pcms-s06-human-defer','pcms-s06-human-adopt',
+                    'pcms-s06-exception-inspect','pcms-s06-exception-mode',
+                    'pcms-s06-exception-record','pcms-s06-exception-checks'].every(id=>
                       document.getElementById(id)!==null);
                   done({ok:list?.ok===true&&Array.isArray(list.items)&&
                     blocked?.code==='INVALID_PARAMS'&&
@@ -1226,7 +1276,7 @@ def main():
                     standing.record?.grants?.development===false&&
                     standing.record?.grants?.publication===false&&
                     forgedGrant?.code==='STANDING_CONSENT_INVALID'&&
-                    standingCycle&&humanCycle&&ui,
+                    standingCycle&&humanCycle&&exceptionCycle&&ui,
                     listCode:list?.code||null,blockedCode:blocked?.code||null,
                     unknownCode:unknown?.code||null,
                     humanCode:humanMissing?.code||null,
@@ -1234,6 +1284,7 @@ def main():
                     standingCode:standing?.reason,
                     forgedGrantCode:forgedGrant?.code,standingCycle,humanCycle,
                     humanAdoptedState:humanAdopted?.state,
+                    exceptionCycle,exceptionMode:exceptionSaved?.mode,
                     positiveCode:entitled?.code||'GRANTED',
                     pauseCode:paused?.code||null,ui});
                 })().catch(e=>done({ok:false,error:String(e).slice(0,200)}));"""
