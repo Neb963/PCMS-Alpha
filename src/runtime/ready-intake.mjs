@@ -39,20 +39,37 @@ export function createReadyIntake(api,{open=openCanonicalDatabase,
     s04.initialImportCompleted===true;
   if(!completed&&digest!==approval.approval.scopeDigest)
     return fail('INITIAL_IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED');
-  const scope=catalog.generators.filter(x=>x.ready===true)
-   .map(x=>x.slug).sort();
+  const names=new Set();
+  for(const item of catalog.generators){
+    if(typeof item?.slug!=='string'||
+       !/^[a-z0-9][a-z0-9-]{0,99}$/.test(item.slug)||
+       typeof item.ready!=='boolean'||names.has(item.slug))
+      return fail('READY_CATALOG_UNVERIFIED');
+    names.add(item.slug);
+  }
+  // Process explicit NOT_READY changes too; a previous active admission must
+  // not remain executable merely because its folder is now filtered out.
+  const scope=catalog.generators.map(x=>({slug:x.slug,ready:x.ready}))
+    .sort((a,b)=>a.slug.localeCompare(b.slug,'en'));
   const before=(await api.storage.local.get(KEY))?.[KEY];
   const start=before?.repositoryId===catalog.repositoryId&&
     before.head===catalog.head&&Number.isSafeInteger(before.nextIndex)&&
     before.nextIndex>=0&&before.nextIndex<=scope.length?before.nextIndex:0;
   const end=Math.min(scope.length,start+maxPerWake);
   const declarations=createDeclarationStore(db),queue=createReadyStore(db);
-  let observed=0;const held=[];
+  let observed=0,revoked=0;const held=[];
   for(let i=start;i<end;i++){
    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
-   const slug=scope[i];
+   const {slug,ready}=scope[i];
    if(isI17Quarantined({slug})){
      held.push({slug,code:I17_QUARANTINE_CODE});continue;
+   }
+   if(!ready){
+     const hold=await queue.holdNotReady({slug,
+       repositoryId:catalog.repositoryId,head:catalog.head});
+     if(!hold.ok){held.push({slug,code:hold.code});continue;}
+     if(hold.changed)revoked++;
+     continue;
    }
    let evidence;
    try{evidence=await inspect({repository,token,slug,
@@ -81,7 +98,7 @@ export function createReadyIntake(api,{open=openCanonicalDatabase,
   await api.storage.local.set({[KEY]:{
     repositoryId:catalog.repositoryId,head:catalog.head,
     nextIndex:end===scope.length?0:end}});
-  return {ok:true,code:'READY_LOCAL_OBSERVATION_ONLY',observed,
+  return {ok:true,code:'READY_LOCAL_OBSERVATION_ONLY',observed,revoked,
     examined:end-start,more:end<scope.length,held:held.slice(0,16),
     providerEffects:'OFF'};
  }
