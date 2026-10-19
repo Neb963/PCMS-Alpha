@@ -26,6 +26,7 @@ export function qualifyRecentAbsence({row,recent,policy,now,reservedId=null}={})
     row.refresh.intent?.id===reservedId&&row.refresh.intent?.state==='RESERVED'&&
     row.refresh.intent.at<=now;
   if((!initial&&!reserved)||row.refresh?.suspended===true||
+      row.refresh?.awaitingVisibility===true||
       !Number.isSafeInteger(row.refresh.misses)||row.refresh.misses<1||
       row.refresh.nextAttemptAt>now)
     return {ok:false,code:'REFRESH_EFFECT_HELD'};
