@@ -91,8 +91,12 @@ export function createAiBoundary(api,{
       // A fresh coherent READY successor revokes advancement authority for
       // the older AI candidate. Read-only PROBE_NATIVE remains available for
       // uncertain-session reconciliation; it never starts a new mutation.
+      // STOP is a safety-quiescence action on the *already armed* old
+      // native session, not a new repair or candidate development turn.
+      // Its canonical native state and donor owner/route checks still apply.
+      const safeStop=message.type==='BEGIN_NATIVE'&&p.step==='STOP';
       if(['ADVANCE_JOB','BEGIN_NATIVE','RUN_TESTS',
-          'VERIFY_FRESH_CHAT2'].includes(message.type)&&
+          'VERIFY_FRESH_CHAT2'].includes(message.type)&&!safeStop&&
           typeof store.getJobFull==='function'){
         const sealed=await store.getJobFull(p.slug);
         // Legacy tests and existing jobs are not S05 candidates. They must
