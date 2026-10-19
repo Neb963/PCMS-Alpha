@@ -7,7 +7,7 @@ const time=t=>Number.isSafeInteger(t)&&t>0;
 export function emptyRefreshEvidence(){
   return {version:REFRESH_PROOF_VERSION,state:'UNOBSERVED',misses:0,lastMissAt:0,
     lastSeenAt:0,lastRank:null,suspended:false,attempts:0,probes:0,nextAttemptAt:0,
-    intent:null,history:[],savedSourceFingerprint:null,savedMarkerId:null};
+    intent:null,history:[],savedSourceFingerprint:null,savedMarkerId:null,savedNonce:null};
 }
 export function validRefreshEvidence(e){
   return e?.version===1&&['UNOBSERVED','PRESENT','ABSENT_ONCE',
@@ -19,6 +19,7 @@ export function validRefreshEvidence(e){
     Array.isArray(e.history)&&e.history.length<=8&&
     (e.savedSourceFingerprint==null||hex(e.savedSourceFingerprint))&&
     (e.savedMarkerId==null||safeId(e.savedMarkerId))&&
+    (e.savedNonce==null||/^[a-f0-9]{32}$/.test(e.savedNonce))&&
     (e.intent===null||safeId(e.intent.id));
 }
 // Only an independently sourced, complete, fresh recent-list sample counts.
@@ -62,14 +63,15 @@ export function qualifyRefreshCandidate(candidate){
   const marker=candidate?.method==='CONTROLLED_SOURCE_MARKER'&&
     hex(candidate.targetFingerprint)&&
     candidate.targetFingerprint!==candidate.sourceFingerprint&&
-    safeId(candidate.markerId);
+    safeId(candidate.markerId)&&/^[a-f0-9]{32}$/.test(candidate.nonce||'');
   if(candidate?.status!=='SUPPORTED_AND_VERIFIED'||(!legacy&&!marker)||
     candidate.allowedByProvider!==true||!safeId(candidate.version)||
     !hex(candidate.sourceFingerprint)||!safeId(candidate.evidenceId)||
     candidate.meaningfulEffectVerified!==true)return {ok:false,code:'REFRESH_UNSUPPORTED'};
   return {ok:true,version:candidate.version,sourceFingerprint:candidate.sourceFingerprint,
     evidenceId:candidate.evidenceId,method:candidate.method,
-    ...(marker?{targetFingerprint:candidate.targetFingerprint,markerId:candidate.markerId}:{})};
+    ...(marker?{targetFingerprint:candidate.targetFingerprint,markerId:candidate.markerId,
+      nonce:candidate.nonce}:{})};
 }
 export function reserveRefreshAttempt(evidence,{id,at,slug,sourceFingerprint,
   candidate,eligible,liveAuthorized}={}){
@@ -86,7 +88,7 @@ export function reserveRefreshAttempt(evidence,{id,at,slug,sourceFingerprint,
   e.intent={id,slug,at,sourceFingerprint,version:q.version,
     evidenceId:q.evidenceId,method:q.method,
     ...(q.method==='CONTROLLED_SOURCE_MARKER'?{
-      targetFingerprint:q.targetFingerprint,markerId:q.markerId}:{}),
+      targetFingerprint:q.targetFingerprint,markerId:q.markerId,nonce:q.nonce}:{}),
     state:'RESERVED',dispatchAt:0};
   e.state='ATTEMPT_PENDING';
   return {ok:true,evidence:e};
@@ -146,6 +148,7 @@ export function reconcileRefreshAttempt(evidence,id,{at,kind,sourceFingerprint,
   if(verified&&prior.method==='CONTROLLED_SOURCE_MARKER'){
     e.savedSourceFingerprint=prior.targetFingerprint;
     e.savedMarkerId=prior.markerId;
+    e.savedNonce=prior.nonce;
   }
   e.intent=verified||noEffect?null:prior;
   if(!verified)e.suspended=true;
