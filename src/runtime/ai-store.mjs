@@ -36,6 +36,8 @@ function withCurrentReady(m,job,done,commit){
 }
 const publicJob=j=>j?{ok:true,slug:j.slug,revision:j.revision,state:j.state,
   sourceFingerprint:j.sourceFingerprint,promptRevision:j.prompt.revision,
+  promptSource:j.prompt.source==='GIT_MAIN_CHAT1_PINNED'?
+    'GIT_MAIN_CHAT1_PINNED':'LOCAL_SETTINGS',
   optionalTestingSha:j.optionalTesting?.sha256||null,
   evidence:evaluation(j),changes:j.changes,hold:j.hold,
   nativeState:j.native?.state||'NOT_STARTED',
