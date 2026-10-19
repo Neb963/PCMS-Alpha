@@ -61,6 +61,13 @@ export function coalesceCreation(existing,source){
   const selectedPin=!pinConflict&&pins.size===1?[...pins][0]:null;
   if(idx>=0&&git&&prior[idx].markerOid===nextSource.markerOid)
     return {ok:true,duplicate:true,changed:false,record:existing};
+  if(idx>=0&&git&&existing?.state!=='WAITING_CAPABILITY'){
+    // A new Git source fingerprint after any downstream admission must
+    // not replace the evidence to which the possible effect was bound.
+    return {ok:true,changed:true,conflict:true,
+      record:{...existing,revision:existing.revision+1,
+        hold:'GIT_SOURCE_CHANGED_WITH_ACTIVE_OPERATION',sourceDrift:true}};
+  }
   if(idx>=0&&JSON.stringify(prior[idx])===JSON.stringify(nextSource))
     return {ok:true,duplicate:true,changed:false,record:existing};
   const sources=prior.slice();
