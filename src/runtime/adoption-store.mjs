@@ -230,7 +230,9 @@ export function createAdoptionStore(db){
        proof.verified!==true||typeof proof.receiptId!=='string'||
        !/^[A-Za-z0-9_-]{8,100}$/.test(proof.receiptId)||
        !/^[a-f0-9]{64}$/.test(proof.originalFingerprint||'')||
-       !/^[a-f0-9]{64}$/.test(proof.archiveDigest||''))
+       !/^[a-f0-9]{64}$/.test(proof.archiveDigest||'')||
+       !/^[a-f0-9]{40}$/.test(proof.archiveCommit||'')||
+       typeof proof.archiveRef!=='string')
       return Promise.resolve(fail('INDEPENDENT_RECOVERY_PROOF_REQUIRED'));
     return tx(db,'readwrite',(t,done)=>{
       const m=t.objectStore('meta');
@@ -240,7 +242,9 @@ export function createAdoptionStore(db){
           done(fail('STALE_REVISION'));return;
         }
         if(prior.archived||prior.archiveState!=='ARCHIVED_GIT_CONFIRMED'||
-           prior.original?.fingerprint!==proof.originalFingerprint){
+           prior.original?.fingerprint!==proof.originalFingerprint||
+           prior.archiveCommit!==proof.archiveCommit||
+           prior.archiveRef!==proof.archiveRef){
           done(fail('ORIGINAL_RECOVERY_NOT_ELIGIBLE'));return;
         }
         m.get('account:'+prior.accountId).onsuccess=a=>{
