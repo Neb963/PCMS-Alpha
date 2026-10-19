@@ -368,6 +368,31 @@ export function createAiBoundary(api,{
           // Do not admit new AI work over human-owned or dirty source.
           const clean=await g.inspectStageEditor?.(r.personaUid,r.slug,r.nonce);
           if(clean?.ok!==true||clean.clean!==true)return fail('EDITOR_UNKNOWN');
+          if(job.childRequestId&&p.step==='CHAT1_SEND'){
+            // Request Changes reuses the guarded generator; it does not
+            // restage. Check exact inherited saved F before the first new
+            // native effect, not merely the editor's clean indicator.
+            const raw=await g.observeReadOnly?.(r.personaUid,false,r.slug);
+            const inherited=await exactSource(r.candidate?.blobs);
+            const packet={ok:raw?.ok===true,
+              source:'DONOR_GUARDED_ORIGINAL_READBACK',
+              slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,
+              principalFingerprint:raw?.principalFingerprint,
+              remotePublicId:raw?.original?.remotePublicId,
+              ownerResult:raw?.original?.ownerResult,
+              visibility:raw?.original?.visibility,pjs:raw?.original?.pjs,
+              html:raw?.original?.html,assets:raw?.original?.assets};
+            const verified=inherited.ok&&inherited.fingerprint===job.sourceFingerprint?
+              await verifyReadback(inherited,packet,{slug:r.slug,
+                accountId:r.accountId,personaUid:r.personaUid,
+                principalFingerprint:r.principalFingerprint,
+                remotePublicId:r.remotePublicId}):fail('S06_CHILD_SOURCE_CORRUPT');
+            const again=await g.getSafeRouteReadiness(r.personaUid);
+            if(!verified.ok||raw?.original?.visibility!=='UNLISTED'||
+               !again?.ready||again.cookieStoreId!==route.cookieStoreId||
+               again.routeId!==route.routeId)
+              return fail('S06_CHILD_SAVED_F_OR_ROUTE_CHANGED');
+          }
           const isRepair=p.step==='CHAT1_REPAIR'||p.step==='CHAT2_REPAIR';
           const text=p.step==='CHAT1_SEND'?job.prompt.text:
             p.step==='CHAT2_SEND'?job.optionalTesting?.text:isRepair?
