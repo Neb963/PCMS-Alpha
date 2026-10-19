@@ -88,7 +88,7 @@ export function createReadyDevelopment(api,{
  makeStage=()=>createStagingBoundary(api,{effectGate}),
  makeAi=()=>createAiBoundary(api,{effectGate}),
  native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
- maxCandidates=12
+ maxCandidates=1200
 }={}){
  const sentinel=createRestoreSentinel(api.storage.local);
  let busy=null,connection=null,ports=null;
