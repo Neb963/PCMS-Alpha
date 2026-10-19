@@ -13,7 +13,7 @@ const unsafeUpdate=new Set(['UNLIST_DISPATCH_POSSIBLE','UNLIST_UNCERTAIN',
 export function evaluateStageSuccessor({prior,previous,job,release,existing,ready,source}){
  // No earlier S05 stage does NOT mean the generator has no other writer.
  // I13/release uncertainty must fence even the very first local stage.
- if(!ready?.active||ready.desired||
+ if(!ready?.active||ready.desired||ready.hold==='READY_REVOKED_NOT_READY'||
     ready.active.identifier!==source?.gitReadyIdentifier||
     ready.active.inputFingerprint!==source?.gitReadyInputFingerprint)
    return fail('READY_CANDIDATE_NOT_ADMITTED');
