@@ -503,6 +503,40 @@ attachPcmsGuard({
   },
   // A current native editor clean/owner observation must accompany the
   // independent saved-byte readback before staged source is accepted.
+  // S05 local preflight: read-only source/editor conflict check, guarded by
+  // the donor's lease and protected-route generation. It is NOT a native
+  // collaboration or provider-source snapshot and cannot authorize a save.
+  inspectNoEditorTabs: async ({personaUid,cookieStoreId,routeId},{slug}) => {
+    if(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug))
+      return {ok:false,code:'S05_INVALID_EDITOR_TARGET'};
+    const profile=async()=>{
+      const state=await getState(),p=state.profiles?.[cookieStoreId];
+      return p?.personaUid===personaUid&&p.routeId===routeId&&
+        routeId!=='direct'&&routeId!=='block'&&state.routes?.[routeId]?.enabled!==false;
+    };
+    try{
+      if(!(await profile()))return {ok:false,code:'S05_ROUTE_CHANGED'};
+      async function sample(){
+        const tabs=await browser.tabs.query({});
+        if(!Array.isArray(tabs))return {ok:false,code:'S05_TAB_LIST_UNVERIFIED'};
+        for(const t of tabs){
+          if(typeof t?.url!=='string')continue;
+          let u;try{u=new URL(t.url);}catch{continue;}
+          if(u.protocol==='https:'&&u.hostname==='perchance.org'&&
+             u.pathname==='/'+slug&&u.hash==='#edit')
+            return {ok:false,code:'S05_EDITOR_TAB_PRESENT'};
+        }
+        return {ok:true};
+      }
+      const one=await sample();
+      if(!one.ok)return one;
+      if(!(await profile()))return {ok:false,code:'S05_ROUTE_CHANGED'};
+      const two=await sample();
+      if(!two.ok||!(await profile()))
+        return {ok:false,code:two.code||'S05_POST_INSPECTION_ROUTE_CHANGED'};
+      return {ok:true,noEditors:true,source:'LOCAL_BROWSER_TAB_OBSERVATION'};
+    }catch{return {ok:false,code:'S05_TAB_INSPECTION_UNAVAILABLE'};}
+  },
   inspectStageTab: async ({personaUid,cookieStoreId,routeId},{slug,nonce}) => {
     if(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)||
        typeof nonce!=='string'||!/^[a-f0-9]{32}$/.test(nonce))
