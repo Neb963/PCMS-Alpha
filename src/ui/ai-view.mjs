@@ -138,7 +138,8 @@ async function refreshJobs(){
         ' · scheduler held until '+new Date(j.schedulerDeferredUntil).toLocaleString()+
         ' ('+(j.schedulerHold||'AI_WAKE_HELD')+')':'';
       label.textContent=j.slug+' · '+j.state+' · '+
-        (j.promptSource==='GIT_MAIN_CHAT1_PINNED'?'Git Chat 1':'Settings P')+
+        (j.promptSource==='GIT_MAIN_CHAT1_PINNED'?
+          'Git Chat 1 · prompt revision ':'Settings P')+
         j.promptRevision+
         ' · source '+j.sourceFingerprint.slice(0,12)+
         ' · '+(j.evidence?.state||'TESTS_UNVERIFIED')+
