@@ -10,14 +10,15 @@ const stage=()=>({slug:name,revision:4,state:'SOURCE_VERIFIED',verifiedAt:1,
   candidate:{fingerprint:P},sourceHead:S,sourceFolder:'generators/'+name,
   accountId:'account-1',personaUid:'persona-1',
   principalFingerprint:F,remotePublicId:'remote-1',
-  readyIdentifier:ID,readyInputFingerprint:H});
+  readyIdentifier:ID,readyInputFingerprint:H,testingSha:null});
 const job=()=>({slug:name,revision:7,stageRevision:4,verifiedFinal:F,
+  readyIdentifier:ID,readyInputFingerprint:H,
   sourceFingerprint:F,finalSource:{fingerprint:F,files:[],blobs:[]},
   state:'TESTS_VERIFIED',executionSlotReleased:true,
   native:{state:'CHAT1_OBSERVED_IDLE'},prompt:{revision:1,tests:[]},
   chat1:{state:'RUNNING',tests:{}},chat2:null});
-const ready=()=>({slug:name,revision:3,desired:{
-  identifier:ID,inputFingerprint:H},active:null,hold:null});
+const ready=()=>({slug:name,revision:3,active:{
+  identifier:ID,inputFingerprint:H},desired:null,hold:null});
 const writeback=(state,overrides={})=>({
   state,revision:2,slug:name,mode:'S06',operationId:'writeback_'+'1'.repeat(32),
   stageRevision:4,jobRevision:7,sourceFingerprint:F,accountId:'account-1',
