@@ -1899,8 +1899,9 @@ def main():
                                  {'script':code,'args':[]},timeout=90)
                 assert ai_recovery.get('ok') is True,ai_recovery
                 print('B I10_PACKAGED_NATIVE_DISPATCH_JOURNAL_FULL_SOURCE_CRASH_HOLD=PASS',flush=True)
-                # I10 B: synthetic independent-failure receipt feeding the
-                # canonical no-progress state; never a fake live-provider PASS.
+                # C-46 B: repeated observed same-source failures remain real
+                # required FAIL and may request another guarded repair. No
+                # subjective fixed-iteration stagnation cutoff is accepted.
                 code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const persistence=await import('./ai-store.mjs');
@@ -1934,16 +1935,18 @@ def main():
                   const noThird=await store.armNative(slug,twice.revision,'CHAT1_REPAIR');
                   done({ok:failed.ok&&failed.state==='KNOWN_FAILURE'&&
                     armed.ok&&seen.ok&&once.state==='KNOWN_FAILURE'&&
-                    again.ok&&seenAgain.ok&&twice.state==='HELD_NO_PROGRESS'&&
-                    twice.hold==='REPEATED_SAME_SOURCE_FAILED_REPAIR'&&
-                    noThird.code==='AI_VERIFIED_FAILURE_AND_SESSION_REQUIRED',
+                    again.ok&&seenAgain.ok&&twice.state==='KNOWN_FAILURE'&&
+                    twice.hold==='KNOWN_FAILURE_RETEST_REQUIRED'&&
+                    twice.evidence?.state==='KNOWN_FAILURE'&&
+                    noThird.ok===true&&noThird.state==='HELD_RECONCILE'&&
+                    noThird.nativeState==='DISPATCH_POSSIBLE',
                     failed,armed,once,again,twice,noThird});
                   db.close();
                 })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
                 ai_loop=call('POST',f'/session/{after}/execute/async',
                              {'script':code,'args':[]},timeout=90)
                 assert ai_loop.get('ok') is True,ai_loop
-                print('B I10_PACKAGED_KNOWN_FAILURE_NOT_DOWNGRADED_AND_REPAIR_NO_PROGRESS_HOLD=PASS',flush=True)
+                print('B S06_C46_REQUIRED_FAILURE_PRESERVED_REPAIR_ALLOWED_WITHOUT_STAGNATION_HEURISTIC=PASS',flush=True)
                 # I10 B: synthetic *real canonical IDB* one-repair convergence
                 # with independent F1 FAIL / F2 PASS; no Perchance request.
                 code="""const done=arguments[arguments.length-1];
