@@ -227,7 +227,7 @@
           <p class="reason">Prepare a job only for an independently verified private stage. For S05 READY, preparation pins Git main Chat 1 and optional TESTING.md; legacy jobs retain Settings prompt. No helper message is dispatched; no AI test is declared passed until separately observed.</p>
           <div class="account-controls">
             <label for="pcms-ai-slug">Exact private stage slug</label><input id="pcms-ai-slug" maxlength="100" spellcheck="false">
-            <label for="pcms-ai-git-token">Private Git read token (ephemeral)</label><input id="pcms-ai-git-token" type="password" autocomplete="off" spellcheck="false">
+            <label for="pcms-ai-git-token">Legacy Git read token (optional for S05; never stored)</label><input id="pcms-ai-git-token" type="password" autocomplete="off" spellcheck="false">
             <button id="pcms-ai-prepare" type="button">Prepare source-bound test job</button>
             <button id="pcms-ai-refresh" type="button">Refresh AI receipts</button>
             <button id="pcms-ai-run" type="button" disabled>Attempt guarded Chat 1</button>
