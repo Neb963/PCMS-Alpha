@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fakeDatabase} from './fake-idb.mjs';
 import {createCoordinatorStore} from '../src/runtime/coordinator-store.mjs';
+import {createS04GitContinuation} from '../src/runtime/creation-git-runner.mjs';
 const slug='s04-not-ready',intentId='intent_s04_gitstage',accountId='account_s04_gitstage';
 const account={accountId,personaUid:'persona_s04_123',state:'VERIFIED',
   revision:4,bindingVersion:2,identity:{source:'GUARDED_SESSION_READBACK',
@@ -66,5 +67,25 @@ test('S04 Git D: account rebind and wrong source association hold before mutatio
     event:'PREPARE',proof:{repositoryId:'42',operationId,
       fingerprint:'a'.repeat(64),baseHead:head,markerOid:marker}})).code,
     'ACCOUNT_CONTEXT_CHANGED');
+  assert.equal(db.keys('operations').length,0);
+});
+
+test('S04 Git D: existing valid human NOT_READY text keeps its OID and no write',async()=>{
+  const {db,store}=await make();
+  const config={repository:'Neb963/per-gens',repositoryId:'42'};
+  const api={storage:{local:{get:async key=>
+    key==='pcmsS03Git'?{pcmsS03Git:config}:{}}}};
+  let writes=0;
+  const runner=createS04GitContinuation(api,{open:async()=>db,
+    vault:async()=>({ok:true,credential:'mock-native-secret-123456'}),
+    scan:async()=>({ok:true,complete:true,repositoryId:'42',
+      head:'c'.repeat(40),generators:[{slug,sourceState:'NOT_READY',
+        folder:'generators/'+slug,markerOid:'f'.repeat(40)}]}),
+    write:async()=>{writes++;throw Error('Must preserve existing Git tree');}});
+  const result=await runner.step(intentId,10);
+  assert.equal(result.ok,true,result.code);
+  assert.equal(result.record.gitMarkerOid,'f'.repeat(40));
+  assert.equal(result.record.state,'ASSOCIATED_NOT_READY');
+  assert.equal(writes,0);
   assert.equal(db.keys('operations').length,0);
 });
