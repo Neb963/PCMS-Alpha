@@ -4,7 +4,7 @@
 import {fail,openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
-import {createStagingStore,findEligibleSupply} from './staging-store.mjs';
+import {createStagingStore,findEligibleManagedSource} from './staging-store.mjs';
 import {exactSource,verifyReadback} from './staging-core.mjs';
 import {inspectGitSource} from './git-source.mjs';
 
@@ -71,7 +71,7 @@ export function createStagingBoundary(api,{
   // Packaged provider capability remains locked until current guarded editor
   // contract is independently proven and operator activation is authorized.
   effectGate=()=>false,storeFactory=createStagingStore,
-  supplyLookup=findEligibleSupply
+  supplyLookup=findEligibleManagedSource
 }={}){
   let databasePromise;
   const database=()=>databasePromise ||=open();
