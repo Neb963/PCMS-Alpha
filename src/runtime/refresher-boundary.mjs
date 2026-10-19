@@ -197,7 +197,8 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       const claim={id:intent.id,slug:uncertain.slug,stableId:uncertain.stableId,
         accountId:uncertain.accountId,personaUid:uncertain.personaUid,
         bindingVersion:uncertain.bindingVersion,
-        principalFingerprint:a.principalFingerprint,
+        principalFingerprint:a.principalFingerprint,remoteId:uncertain.remoteId,
+        markerId:intent.markerId||null,
         releaseFingerprint:uncertain.releaseFingerprint,
         sourceFingerprint:intent.sourceFingerprint,
         targetFingerprint:intent.targetFingerprint||null};
@@ -226,7 +227,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       qualifyRecentAbsence({row:r,recent:snapshot.state.recent,
         policy:snapshot.state.policy,now:clock()}).ok);
     if(!row)return 'NO_REFRESH_DUE';
-    const candidate=await qualificationFor(row);
+    const candidate=await qualificationFor(row,snapshot.state.accounts[row.accountId]);
     // A candidate from a fixture, code comment or stale source is not enough.
     const first=await g.getSafeRouteReadiness(row.personaUid);
     if(!first?.ready)return 'PROTECTED_ROUTE_UNAVAILABLE';
