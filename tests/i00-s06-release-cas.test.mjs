@@ -91,3 +91,17 @@ test('S06 approval never dispenses publication authority from a Git commit',asyn
  assert.equal(approved.publication,'HELD_OR_UNVERIFIED');
  assert.equal(db.keys('operations').length,0);
 });
+
+test('C-53 deferred human work atomically denies any old-F approval even when Git and tests pass',async()=>{
+ const {db,store,params}=await fixture();
+ await new Promise((resolve,reject)=>{
+  const tx=db.transaction('meta','readwrite');tx.oncomplete=resolve;tx.onabort=reject;
+  tx.objectStore('meta').put({key:'s06-human:'+slug,record:{
+    slug,state:'DEFERRED',revision:1,parentStageRevision:params.stage.revision,
+    parentJobRevision:params.job.revision,parentFingerprint:params.source.fingerprint}});
+ });
+ const blocked=await store.approve(params);
+ assert.equal(blocked.code,'S06_HUMAN_REVIEW_DEFERRED',JSON.stringify(blocked));
+ assert.equal(db.read('meta','release:'+slug),undefined);
+ assert.equal(db.keys('operations').length,0);
+});
