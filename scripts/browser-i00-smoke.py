@@ -1085,6 +1085,30 @@ def main():
                   const forgedGrant=await authority('SET',{expectedRevision:1,
                     repositoryId:'1411034835',grants:{development:true,gitWrite:true,
                     publication:true},consent:'unsolicited'});
+                  // Positive B: same installed privileged port and real
+                  // storage, but a DISPOSABLE repository connection, no Git
+                  // credential, no provider account, and NO dispatch calls.
+                  const cfgBefore=(await browser.storage.local.get('pcmsS03Git')).pcmsS03Git;
+                  const fixtureCfg={repository:'Neb963/per-gens',repositoryId:'1411034835'};
+                  if(cfgBefore===undefined)
+                    await browser.storage.local.set({pcmsS03Git:fixtureCfg});
+                  const initial=await authority('GET');
+                  const localRepository=cfgBefore||fixtureCfg;
+                  const entitled=await authority('SET',{
+                    expectedRevision:initial.record?.revision,
+                    repositoryId:localRepository.repositoryId,
+                    grants:{development:false,gitWrite:false,publication:true},
+                    consent:'I AUTHORIZE PROTECTED PCMS OPERATIONS'});
+                  const granted=await authority('GET');
+                  const paused=await authority('REVOKE');
+                  const cleared=await authority('GET');
+                  if(cfgBefore===undefined)
+                    await browser.storage.local.remove('pcmsS03Git');
+                  const standingCycle=initial?.ok===true&&entitled?.ok===true&&
+                    granted?.record?.grants?.publication===true&&
+                    granted?.record?.grants?.development===false&&
+                    granted?.record?.grants?.gitWrite===false&&
+                    paused?.ok===true&&cleared?.record?.grants?.publication===false;
                   const ui=['pcms-s06-review-queue','pcms-s06-review-refresh',
                     'pcms-s06-review-next','pcms-s06-request-changes',
                     'pcms-s06-change-instructions','pcms-s06-authority-enable',
@@ -1097,10 +1121,13 @@ def main():
                     standing.record?.grants?.gitWrite===false&&
                     standing.record?.grants?.development===false&&
                     standing.record?.grants?.publication===false&&
-                    forgedGrant?.code==='STANDING_CONSENT_INVALID'&&ui,
+                    forgedGrant?.code==='STANDING_CONSENT_INVALID'&&
+                    standingCycle&&ui,
                     listCode:list?.code||null,blockedCode:blocked?.code||null,
                     unknownCode:unknown?.code||null,standingCode:standing?.reason,
-                    forgedGrantCode:forgedGrant?.code,ui});
+                    forgedGrantCode:forgedGrant?.code,standingCycle,
+                    positiveCode:entitled?.code||'GRANTED',
+                    pauseCode:paused?.code||null,ui});
                 })().catch(e=>done({ok:false,error:String(e).slice(0,200)}));"""
                 s06_result=call('POST',f'/session/{after}/execute/async',
                     {'script':s06_script,'args':[]},timeout=30)
