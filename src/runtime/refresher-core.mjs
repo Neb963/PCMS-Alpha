@@ -83,8 +83,12 @@ export function reconcileShadow(s,inputs){
     // Never transplant an old allocation/approval to a reincarnated target.
     const identityChanged=r.remoteId!==input.remoteId||r.accountId!==input.accountId||
       r.personaUid!==input.personaUid||r.bindingVersion!==input.bindingVersion;
+    const releaseChanged=r.releaseFingerprint!=null&&
+      r.releaseFingerprint!==input.releaseFingerprint;
     r.identityHeld=identityChanged;
-    if(identityChanged||!r.refresh)r.refresh=emptyRefreshEvidence();
+    // A new independently confirmed release F supersedes any prior marker
+    // lineage; never reuse a saved marker as authority for the next source.
+    if(identityChanged||releaseChanged||!r.refresh)r.refresh=emptyRefreshEvidence();
     r.ownerVerified=input.ownerVerified===true&&!identityChanged;
     r.releaseVerified=input.releaseVerified===true&&hex(input.releaseFingerprint)&&!identityChanged;
     r.releaseFingerprint=r.releaseVerified?input.releaseFingerprint:null;
