@@ -104,7 +104,7 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
     return fail('S05_GIT_MAIN_UNVERIFIED');
    const coherent=await inspect({repository:cfg.repository,
      token:secret.credential,pinnedHead:tree.head,
-     slug:name,includeSourceBytes:message.type==='PREPARE_LOCAL'}
+     slug:name,includeSourceBytes:message.type==='PREPARE_LOCAL'});
    const id=coherent?.legacy?
       'legacy-'+coherent.declarationCommit+'-'+coherent.markerOid:
       'rev-'+coherent?.token;
