@@ -14,7 +14,14 @@ function withoutPendingChild(m,stage,done,commit){
        request.parentStageRevision===stage.revision){
       done(fail('S06_UNRESOLVED_REQUEST_CHANGES'));return;
     }
-    commit();
+    m.get('s06-human:'+stage.slug).onsuccess=h=>{
+      const human=h.target.result?.record;
+      if(human?.state==='DEFERRED'&&
+         human.parentStageRevision===stage.revision){
+        done(fail('S06_HUMAN_REVIEW_DEFERRED'));return;
+      }
+      commit();
+    };
   };
 }
 function withS06Candidate(m,stage,job,done,commit){
