@@ -132,7 +132,7 @@ export function createReleaseBoundary(api,{
     const reply=await native({action:'git.get',repositoryId:cfg.repositoryId});
     return reply?.ok&&typeof reply.credential==='string'&&
       reply.credential.length>=12&&reply.credential.length<=512&&
-      /^[\\x21-\\x7e]+$/.test(reply.credential)?reply.credential:null;
+      /^[\x21-\x7e]+$/.test(reply.credential)?reply.credential:null;
   }
   async function reviewPassphrase(explicit){
     if(typeof explicit==='string'&&explicit.length>=12)return explicit;
