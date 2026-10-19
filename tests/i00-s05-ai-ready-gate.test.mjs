@@ -14,6 +14,9 @@ test('S05 older native session stays reconcilable but cannot advance after newer
  assert.equal(authorizeReadyAiAdvance(job,{...ready,record:{
   active:{identifier:'rev-other',inputFingerprint:sha},desired:null}}).ok,false);
  assert.equal(authorizeReadyAiAdvance(job,{ok:false}).ok,false);
+ assert.equal(authorizeReadyAiAdvance(job,{...ready,record:{
+   ...ready.record,hold:'READY_REVOKED_NOT_READY'}}).code,
+   'S05_READY_SUPERSEDED_RECONCILE_OLDER_SESSION');
  assert.equal(authorizeReadyAiAdvance({slug}, {ok:false}).ok,true,
   'legacy job retains its separate admission contract');
 });
