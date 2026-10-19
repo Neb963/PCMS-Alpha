@@ -1049,6 +1049,43 @@ def main():
                 canonical=canonical_command(after,{'type':'SUMMARY'})
                 assert canonical.get('ok') is True and canonical.get('storage')=='READY',canonical
                 assert canonical.get('providerEffects')=='OFF',canonical
+                # S06 installed-package B: actually use the trusted release
+                # port with a new S06 list, reject forged Request Changes,
+                # and check the real rendered review controls are connected.
+                s06_script="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const call=(type,params={})=>new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-i13-release'});
+                    let finished=false;
+                    const timer=setTimeout(()=>finish({ok:false,code:'PORT_TIMEOUT'}),8000);
+                    function finish(value){
+                      if(finished)return;finished=true;clearTimeout(timer);
+                      try{port.disconnect()}catch{}resolve(value);
+                    }
+                    port.onMessage.addListener(finish);
+                    port.onDisconnect.addListener(()=>finish({ok:false,code:'PORT_DISCONNECTED'}));
+                    port.postMessage({type,params});
+                  });
+                  const list=await call('LIST_REVIEW',{after:'',limit:20});
+                  const blocked=await call('REQUEST_CHANGES',{slug:'fixture-s06',
+                    expectedStageRevision:1,expectedJobRevision:1,
+                    sourceFingerprint:'b'.repeat(64),instructions:'',source:{forged:true}});
+                  const unknown=await call('GET_CHANGE',{slug:'fixture-s06'});
+                  const ui=['pcms-s06-review-queue','pcms-s06-review-refresh',
+                    'pcms-s06-review-next','pcms-s06-request-changes',
+                    'pcms-s06-change-instructions'].every(id=>
+                      document.getElementById(id)!==null);
+                  done({ok:list?.ok===true&&Array.isArray(list.items)&&
+                    blocked?.code==='INVALID_PARAMS'&&
+                    unknown?.code==='S06_REQUEST_NOT_FOUND'&&ui,
+                    listCode:list?.code||null,blockedCode:blocked?.code||null,
+                    unknownCode:unknown?.code||null,ui});
+                })().catch(e=>done({ok:false,error:String(e).slice(0,200)}));"""
+                s06_result=call('POST',f'/session/{after}/execute/async',
+                    {'script':s06_script,'args':[]},timeout=30)
+                assert s06_result.get('ok') is True,s06_result
+                print('B S06_INSTALLED_REVIEW_QUEUE_PORT_REQUEST_CHANGES_DENIAL_AND_UI=PASS',flush=True)
+
                 s00_intent={'intentId':'intent_s00_browser_001',
                     'slug':'s00-local-fixture','origin':'OPERATOR'}
                 s00_first=coordinator_command(after,{'type':'ACCEPT_CREATE_INTENT',
