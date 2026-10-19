@@ -457,6 +457,7 @@ export function createAiBoundary(api,{
         const config=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
         const queued=await createReadyStore(db).get(r.slug);
         if(!queued.ok||queued.record?.desired||
+           queued.record?.hold==='READY_REVOKED_NOT_READY'||
            queued.record?.active?.identifier!==r.readyIdentifier||
            queued.record?.active?.inputFingerprint!==r.readyInputFingerprint||
            queued.record?.repositoryId!==config?.repositoryId||
