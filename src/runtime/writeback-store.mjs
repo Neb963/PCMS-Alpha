@@ -143,7 +143,7 @@ export function createWritebackStore(db){
                 // this snapshot, never whatever F happens to be current.
                 sealedSource:structuredClone(currentJob.finalSource),
                 commitSha:null,reason:null,attribution:'UNVERIFIED',changedAt:Date.now()};
-              if(old)m.add({key:historyKey(name,old.operationId),
+              if(old)m.put({key:historyKey(name,old.operationId),
                  record:structuredClone(old)});
 
               m.put({key:key(name),record:r});
