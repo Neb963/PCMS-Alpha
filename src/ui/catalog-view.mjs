@@ -102,6 +102,22 @@ async function renderReadyQueue(scanGeneration){
         check.setAttribute('aria-label','Assess '+item.slug+' read-only READY admission');
         const result=document.createElement('span');
         result.setAttribute('role','status');
+        const publicUpdate=document.createElement('button');
+        publicUpdate.type='button';
+        publicUpdate.textContent='Open guarded UPDATE';
+        publicUpdate.hidden=true;
+        publicUpdate.setAttribute('aria-label','Open guarded existing source update for '+item.slug);
+        publicUpdate.addEventListener('click',()=>{
+          // Navigation only; never unlist or stage from this shortcut.
+          // I13 independently reloads the canonical record and requires
+          // operator passphrase plus its own effect/reconciliation gates.
+          const target=document.getElementById('pcms-existing-slug');
+          if(target){
+            target.value=item.slug;
+            target.dispatchEvent(new Event('input',{bubbles:true}));
+          }
+          location.hash='#work-queue';
+        });
         check.addEventListener('click',async()=>{
           if(check.disabled)return;
           check.disabled=true;result.textContent=' Checking current evidence…';
@@ -110,6 +126,7 @@ async function renderReadyQueue(scanGeneration){
               slug:item.slug,expectedRevision:item.revision
             },'pcms-s05-ready-operator');
             result.textContent=' '+(observed?.code||'ASSESSMENT_UNAVAILABLE');
+            publicUpdate.hidden=observed?.code!=='S05_PUBLIC_SLEEP_AND_UNLIST_REQUIRED';
             if(observed?.ok&&observed.savedFingerprint)
               result.title='Observed saved-source SHA-256 '+observed.savedFingerprint;
           }catch{result.textContent=' Assessment unavailable; no action performed.';}
@@ -163,7 +180,7 @@ async function renderReadyQueue(scanGeneration){
         resume.addEventListener('click',()=>{void changeHold('RESUME_READY');});
         cell.append(check,document.createTextNode(' '),prepare,
           document.createTextNode(' '),pause,document.createTextNode(' '),
-          resume,result);tr.append(cell);
+          resume,document.createTextNode(' '),publicUpdate,result);tr.append(cell);
         tbody.append(tr);
       }
       after=r.nextCursor||'';
