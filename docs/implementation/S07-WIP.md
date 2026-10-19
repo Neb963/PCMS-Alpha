@@ -9,6 +9,7 @@ Enable Refresher; while a generator is eligible and active, obtain a **fresh com
 ## Engineering implemented on this draft branch
 
 - Pure source-marker planner allows only one bounded owned trailing HTML comment; preserves all preexisting HTML text and refuses foreign/multiple/malformed owned markers and replay.
+- The pure `planRefresherSourceCandidate` builds complete canonical previous/target source manifests from verified source bytes, confirms the starting fingerprint, and checks that exactly `index.html` changes. This is source preparation only, not a guarded provider save.
 - `qualifyRecentAbsence` denies stale, partial, mismatched, present, unpublished, dirty-review and conflicting READY cases. The existing I14 dispatcher uses it to choose targets, and canonical IndexedDB reserve and dispatch transitions independently revalidate the feed. Dispatch admits **only the matching current RESERVED ID**, not a fresh arbitrary effect.
 - The fixed isolated-world public feed reader refuses explicitly indicated continuations/pagination rather than treating a first page as complete.
 - Canonical complete-feed observations derive bounded `recent.samples` and `latestOccupancy` (owned listed/public, visible and active-visible), separate from scheduler slot count. Dashboard displays the independent occupancy sample rather than describing slots as public occupancy.
