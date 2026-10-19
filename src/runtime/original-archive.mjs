@@ -142,3 +142,51 @@ export async function writeOriginalArchive(request,transport=fetch){
       repositoryId:request.repositoryId};
   }catch{return uncertain();}
 }
+
+export async function inspectOriginalArchive(request,transport=fetch){
+  if(!validRepository(request?.repository)||!id.test(request.repositoryId||'')||
+     typeof request.token!=='string'||request.token.length<12||
+     request.token.length>512)return fail('GIT_ARCHIVE_AUTHORITY_INVALID');
+  const planned=await prepareOriginalArchive(request);
+  if(!planned.ok)return planned;
+  const root='https://api.github.com/repos/'+request.repository;
+  const read=async path=>{
+    const response=await transport(root+path,{
+      method:'GET',redirect:'error',credentials:'omit',cache:'no-store',
+      headers:{Accept:'application/vnd.github+json',
+        'X-GitHub-Api-Version':'2022-11-28',
+        Authorization:'Bearer '+request.token}});
+    if(response?.status!==200)throw Error('ARCHIVE_READ_UNAVAILABLE');
+    return response.json();
+  };
+  try{
+    const repo=await read('');
+    if(repo.private!==true||repo.full_name!==request.repository||
+       String(repo.id)!==request.repositoryId)
+      return fail('GIT_REPOSITORY_IDENTITY_MISMATCH');
+    const ref=await read('/git/ref/'+planned.ref.slice(5));
+    if(ref.ref!==planned.ref||!sha.test(ref.object?.sha||''))
+      return fail('ARCHIVE_REF_UNVERIFIED');
+    const commit=await read('/git/commits/'+ref.object.sha);
+    if(!sha.test(commit.tree?.sha||''))return fail('ARCHIVE_TREE_UNVERIFIED');
+    const tree=await read('/git/trees/'+commit.tree.sha+'?recursive=1');
+    if(tree.truncated!==false||!Array.isArray(tree.tree))
+      return fail('ARCHIVE_TREE_INCOMPLETE');
+    const found=new Map(tree.tree.filter(x=>x.type==='blob').map(x=>[x.path,x]));
+    if(found.size!==planned.files.length)return fail('ARCHIVE_TREE_DIVERGENT');
+    for(const f of planned.files){
+      const e=found.get(f.path);
+      if(!e||e.sha!==f.oid||e.mode!=='100644')
+        return fail('ARCHIVE_TREE_DIVERGENT');
+      const blob=await read('/git/blobs/'+f.oid);
+      if(blob.sha!==f.oid||blob.encoding!=='base64'||
+         blob.content?.replace(/\\s/g,'')!==base64(f.bytes))
+        return fail('ARCHIVE_BYTES_DIVERGENT');
+    }
+    return {ok:true,source:'INDEPENDENT_GIT_BYTE_READBACK',
+      archiveRef:planned.ref,prefix:'generators/'+planned.slug,
+      fingerprint:planned.fingerprint,commit:ref.object.sha,
+      head:commit.parents?.[0]?.sha||null,
+      repositoryId:request.repositoryId};
+  }catch{return fail('ARCHIVE_READBACK_UNAVAILABLE');}
+}
