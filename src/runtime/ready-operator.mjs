@@ -88,6 +88,10 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
       link.personaUid!==account?.personaUid||
       link.bindingVersion!==account?.bindingVersion||
       link.remoteId!==inventory?.remoteId||
+      inventory.slug!==name||
+      inventory.accountId!==account.accountId||
+      inventory.personaUid!==account.personaUid||
+      inventory.bindingVersion!==account.bindingVersion||
       inventory.ownerState!=='OBSERVED_OWNER'||
       account.state!=='VERIFIED'||
       account.identity?.source!=='GUARDED_SESSION_READBACK')
@@ -108,7 +112,8 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
    const id=coherent?.legacy?
       'legacy-'+coherent.declarationCommit+'-'+coherent.markerOid:
       'rev-'+coherent?.token;
-   if(!coherent?.ok||id!==expected.identifier||
+   if(!coherent?.ok||coherent.code!=='READY_COHERENT_INPUT_PINNED'||
+      id!==expected.identifier||
       coherent.inputFingerprint!==expected.inputFingerprint)
     return fail('S05_READY_REVISED_OR_REVOKED');
    const g=guard();
