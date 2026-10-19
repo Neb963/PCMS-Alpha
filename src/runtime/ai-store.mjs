@@ -26,7 +26,7 @@ function withCurrentReady(m,job,done,commit){
   if(!job.readyIdentifier){commit();return;}
   m.get('s05-ready:'+job.slug).onsuccess=e=>{
     const r=e.target.result?.record;
-    if(!r?.active||r.desired||r.hold==='READY_REVOKED_NOT_READY'||
+    if(!r?.active||r.desired||['READY_REVOKED_NOT_READY','OPERATOR_PAUSED'].includes(r.hold)||
        r.active.identifier!==job.readyIdentifier||
        r.active.inputFingerprint!==job.readyInputFingerprint){
       done(fail('AI_READY_CANDIDATE_CHANGED'));return;
@@ -221,7 +221,7 @@ export function createAiStore(db){
                 if(stage.readyIdentifier){
                   m.get('s05-ready:'+stage.slug).onsuccess=rr=>{
                     const ready=rr.target.result?.record;
-                    if(!ready?.active||ready.desired||ready.hold==='READY_REVOKED_NOT_READY'||
+                    if(!ready?.active||ready.desired||['READY_REVOKED_NOT_READY','OPERATOR_PAUSED'].includes(ready.hold)||
                        ready.active.identifier!==stage.readyIdentifier||
                        ready.active.inputFingerprint!==stage.readyInputFingerprint){
                       done(fail('AI_READY_CANDIDATE_CHANGED'));return;
@@ -237,7 +237,7 @@ export function createAiStore(db){
               if(stage.readyIdentifier){
                 m.get('s05-ready:'+stage.slug).onsuccess=rr=>{
                   const ready=rr.target.result?.record;
-                  if(!ready?.active||ready.desired||ready.hold==='READY_REVOKED_NOT_READY'||
+                  if(!ready?.active||ready.desired||['READY_REVOKED_NOT_READY','OPERATOR_PAUSED'].includes(ready.hold)||
                      ready.active.identifier!==stage.readyIdentifier||
                      ready.active.inputFingerprint!==stage.readyInputFingerprint){
                     done(fail('AI_READY_CANDIDATE_CHANGED'));return;
