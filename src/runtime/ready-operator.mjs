@@ -179,11 +179,23 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
        ready:{active:expected,desired:null},slug:name,
        repositoryId:cfg.repositoryId});
      if(!compiled.ok)return compiled;
-     // If already pinned, no new source claim or duplicate mutable state.
-     if(!r.desired&&stage?.readyIdentifier===expected.identifier)
+     // An interrupted retry is idempotent only for the exact same source,
+     // owner and still-unmodified stage. In particular, HELD_UNCERTAIN is
+     // never a successful local pin even when the READY token is unchanged.
+     if(!r.desired&&stage?.readyIdentifier===expected.identifier){
+       if(!['PINNED','SOURCE_VERIFIED'].includes(stage.state)||
+          stage.readyInputFingerprint!==expected.inputFingerprint||
+          stage.candidate?.fingerprint!==compiled.candidate.fingerprint||
+          stage.previous?.fingerprint!==baseline.fingerprint||
+          stage.accountId!==account.accountId||
+          stage.personaUid!==account.personaUid||
+          stage.remotePublicId!==inventory.remoteId||
+          stage.bindingVersion!==account.bindingVersion)
+         return fail('S05_PINNED_STAGE_RECONCILIATION_REQUIRED');
        return {ok:true,code:'S05_ALREADY_PINNED_LOCAL',
          revision:r.revision,stageRevision:stage.revision,
          providerEffects:'NONE'};
+     }
      const permitted=evaluateStageSuccessor({prior:stage,previous:baseline,
        job:ai,existing,release,
        ready:{active:expected,desired:null},
