@@ -9,18 +9,20 @@ import {createAiStore} from './ai-store.mjs';
 import {createWritebackStore} from './writeback-store.mjs';
 import {createWritebackBoundary} from './writeback-boundary.mjs';
 import {evaluation} from './ai-evidence.mjs';
+import {createS06ExceptionStore,authorizeS06Exception} from './s06-exception-review.mjs';
 import {isI17Quarantined} from './legacy-quarantine.mjs';
 const fail=code=>({ok:false,code});
 const ID=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const RID=/^[1-9][0-9]{0,19}$/;
 const HEX=/^[0-9a-f]{64}$/;
-export function planS06Writeback({ready,stage,job,writeback}={}){
+export function planS06Writeback({ready,stage,job,writeback,exception}={}){
   const record=ready?.record||ready,st=stage?.record||stage,j=job?.job||job;
   const previous=writeback?.record||writeback;
+  const exceptional=exception?.record||exception;
   // Historical possibly-dispatched Git effects must be reconciled even
   // after READY supersession, revoked admission or an AI stage transition.
   // This path can ONLY observe the sealed prior intent, never arm new work.
-  if(previous?.mode==='S06'&&
+  if(['S06','S06_EXCEPTION'].includes(previous?.mode)&&
      ['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(previous.state)&&
      ID.test(previous.slug||'')&&
      Number.isSafeInteger(previous.revision)&&previous.revision>0&&
@@ -30,7 +32,7 @@ export function planS06Writeback({ready,stage,job,writeback}={}){
   // An unarmed S06 intent has no possible Git effect. If its exact job
   // has been superseded, discard only that PREPARED intent locally first.
   // Never apply this shortcut to DISPATCH_POSSIBLE or HELD_UNCERTAIN.
-  if(previous?.mode==='S06'&&previous.state==='PREPARED'&&
+  if(['S06','S06_EXCEPTION'].includes(previous?.mode)&&previous.state==='PREPARED'&&
      ID.test(previous.slug||'')&&record?.slug===previous.slug&&
      (!record.active||record.desired||record.hold||
       previous.readyIdentifier!==record.active.identifier||
@@ -51,23 +53,30 @@ export function planS06Writeback({ready,stage,job,writeback}={}){
      st.readyInputFingerprint!==wanted.inputFingerprint||
      j.readyIdentifier!==wanted.identifier||
      j.readyInputFingerprint!==wanted.inputFingerprint||
-     !HEX.test(j.verifiedFinal||'')||
-     j.stageRevision!==st.revision||j.state!=='TESTS_VERIFIED'||
-     j.executionSlotReleased!==true||j.verifiedFinal!==j.sourceFingerprint||
-     j.finalSource?.fingerprint!==j.verifiedFinal||
-     evaluation(j).state!=='TESTS_VERIFIED')
+     j.stageRevision!==st.revision||
+     j.executionSlotReleased!==true||!HEX.test(j.sourceFingerprint||'')||
+     j.finalSource?.fingerprint!==j.sourceFingerprint)
     return fail('S06_CANDIDATE_OR_TEST_EVIDENCE_UNVERIFIED');
+  const normal=j.state==='TESTS_VERIFIED'&&
+    j.verifiedFinal===j.sourceFingerprint&&
+    evaluation(j).state==='TESTS_VERIFIED';
+  const special=!normal?authorizeS06Exception({
+    ready:record,stage:st,job:j,record:exceptional}):null;
+  if(!normal&&!special?.ok)
+    return fail('S06_CANDIDATE_OR_TEST_EVIDENCE_UNVERIFIED');
+  const writeMode=normal?'S06':'S06_EXCEPTION',
+    finalFingerprint=normal?j.verifiedFinal:j.sourceFingerprint;
   if(previous){
     // A completely confirmed predecessor is history, not the source
     // authority for a newly admitted stage. Its immutable receipt is
     // archived by writeback-store's stage-revision CAS on next PREPARE.
     if(previous.state==='CONFIRMED'&&previous.stageRevision!==st.revision)
-      return {ok:true,type:'PREPARE',slug:st.slug,
-        jobRevision:j.revision,sourceFingerprint:j.verifiedFinal};
+      return {ok:true,type:'PREPARE',slug:st.slug,mode:writeMode,
+        jobRevision:j.revision,sourceFingerprint:finalFingerprint};
     if(previous.state==='CANCELED')
-      return {ok:true,type:'PREPARE',slug:st.slug,
-        jobRevision:j.revision,sourceFingerprint:j.verifiedFinal};
-    if(previous.mode!=='S06'||
+      return {ok:true,type:'PREPARE',slug:st.slug,mode:writeMode,
+        jobRevision:j.revision,sourceFingerprint:finalFingerprint};
+    if(previous.mode!==writeMode||
        previous.readyIdentifier!==wanted.identifier||
        previous.readyInputFingerprint!==wanted.inputFingerprint||
        (previous.testingSha??null)!==(st.testingSha??null))
@@ -75,13 +84,14 @@ export function planS06Writeback({ready,stage,job,writeback}={}){
     if(previous.state==='CONFIRMED'&&
        previous.stageRevision===st.revision&&
        previous.jobRevision===j.revision&&
-       previous.sourceFingerprint===j.verifiedFinal)
+       previous.sourceFingerprint===finalFingerprint)
       return {ok:true,type:'REVIEW',slug:st.slug,
-        sourceFingerprint:j.verifiedFinal,commitSha:previous.commitSha};
+        sourceFingerprint:finalFingerprint,commitSha:previous.commitSha,
+        mode:writeMode,exceptional:!normal};
     if(previous.state==='PREPARED'){
       if(previous.stageRevision!==st.revision||
          previous.jobRevision!==j.revision||
-         previous.sourceFingerprint!==j.verifiedFinal)
+         previous.sourceFingerprint!==finalFingerprint)
         return fail('S06_OLDER_PREPARED_INTENT_REQUIRES_CANCELLATION');
       return {ok:true,type:'COMMIT',slug:st.slug,revision:previous.revision};
     }
@@ -91,8 +101,8 @@ export function planS06Writeback({ready,stage,job,writeback}={}){
     if(previous.state!=='CONFIRMED'&&previous.state!=='CANCELED')
       return fail('S06_UNRESOLVED_GIT_OPERATION');
   }
-  return {ok:true,type:'PREPARE',slug:st.slug,
-    jobRevision:j.revision,sourceFingerprint:j.verifiedFinal};
+  return {ok:true,type:'PREPARE',slug:st.slug,mode:writeMode,
+    jobRevision:j.revision,sourceFingerprint:finalFingerprint};
 }
 export function createS06WritebackProgress(api,{
   open=openCanonicalDatabase,effectGate=()=>false,
