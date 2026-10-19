@@ -50,7 +50,7 @@ export function createS04GitContinuation(api,{open=openCanonicalDatabase,
       const row=observed.generators.find(g=>g.slug===item.slug);
       if(item.state==='GIT_INIT_PENDING'){
         if(row){
-          if(row.sourceState!=='NOT_READY'||row.markerOid!==await markerSha())
+          if(row.sourceState!=='NOT_READY'||!/^[a-f0-9]{40}$/.test(row.markerOid||''))
             return fail('GIT_FOLDER_DIVERGENT_OR_READY');
           // Explicit verified main folder requires no Git write.
           return await s.stageGit({intentId,expectedRevision,event:'EXISTING',proof:{
