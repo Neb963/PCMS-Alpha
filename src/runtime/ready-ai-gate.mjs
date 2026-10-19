@@ -11,3 +11,21 @@ export function authorizeReadyAiAdvance(job,ready){
    return fail('S05_READY_SUPERSEDED_RECONCILE_OLDER_SESSION');
  return {ok:true,code:'S05_CURRENT_READY'};
 }
+
+export function authorizeGitReadyAiAdvance(job,catalog,coherent,{repositoryId,slug}={}){
+ if(!job?.readyIdentifier)return {ok:true,code:'LEGACY_JOB'};
+ if(!catalog?.ok||catalog.complete!==true||
+    catalog.source!=='PINNED_MAIN_READ_ONLY'||
+    catalog.repositoryId!==repositoryId||
+    !/^[a-f0-9]{40}$/.test(catalog.head||'')||
+    !coherent?.ok||coherent.code!=='READY_COHERENT_INPUT_PINNED'||
+    coherent.pinnedHead!==catalog.head||coherent.slug!==slug)
+   return fail('S05_AI_MAIN_READY_UNVERIFIED');
+ const identifier=coherent.legacy?
+   'legacy-'+coherent.declarationCommit+'-'+coherent.markerOid:
+   'rev-'+coherent.token;
+ if(identifier!==job.readyIdentifier||
+    coherent.inputFingerprint!==job.readyInputFingerprint)
+   return fail('S05_AI_MAIN_READY_SUPERSEDED');
+ return {ok:true,code:'S05_MAIN_READY_STILL_CURRENT',head:catalog.head};
+}
