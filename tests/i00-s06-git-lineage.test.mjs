@@ -64,6 +64,29 @@ test('S06 planned writeback respects final F and immutable current READY',()=>{
     JSON.stringify(changed));
  }
 });
+test('S06 historical uncertain Git intent is read-only reconciled despite a newer READY or paused account',()=>{
+ const original={ready:ready(),stage:stage(),job:job()};
+ const newer={...ready(),desired:{identifier:'rev-successor',inputFingerprint:H}};
+ const stale={...stage(),readyIdentifier:'rev-obsolete'};
+ for(const state of ['DISPATCH_POSSIBLE','HELD_UNCERTAIN']){
+   const uncertain=writeback(state);
+   for(const context of [
+      {ready:newer,stage:stale,job:null},
+      {ready:{...ready(),hold:'OPERATOR_PAUSED'},stage:null,job:null},
+      {ready:{...ready(),active:null,desired:newer.desired},stage:null,job:null}
+   ]){
+     const plan=planS06Writeback({...original,...context,writeback:uncertain});
+     assert.equal(plan.type,'RECONCILE',JSON.stringify(plan));
+     assert.equal(plan.readOnly,true);
+     assert.equal(plan.revision,uncertain.revision);
+   }
+   assert.equal(planS06Writeback({...original,ready:newer,
+     writeback:{...uncertain,mode:'MANUAL'}}).ok,false);
+ }
+ assert.equal(planS06Writeback({...original,ready:newer,
+   writeback:writeback('PREPARED')}).ok,false,
+   'An unsent preparation must NOT be committed after newer READY');
+});
 test('S06 Git dispatch CAS refuses superseded, paused and revoked READY',async()=>{
  const variations=[
   null,{...ready(),hold:'READY_REVOKED_NOT_READY'},
