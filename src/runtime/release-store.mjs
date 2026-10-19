@@ -1,7 +1,8 @@
 // I13 canonical release journal. No provider effect may occur in an IDB
 // transaction. A lost dispatch reply is always uncertain, never retried.
 import {fail} from './journal.mjs';
-import {matchesApproval,releaseContext,releaseTestContext} from './release-core.mjs';
+import {matchesApproval,releaseContext,releaseTestContext,
+  releaseCandidateTestContext} from './release-core.mjs';
 import {REFRESHER_KEY,validShadow} from './refresher-core.mjs';
 const slug=x=>typeof x==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(x);
 const key=s=>'release:'+s;
@@ -24,7 +25,7 @@ function withoutPendingChild(m,stage,done,commit){
     };
   };
 }
-function withS06Candidate(m,stage,job,done,commit){
+function withS06Candidate(m,stage,job,done,commit,approval=null){
   if(!stage?.readyIdentifier){commit();return;}
   m.get('s05-ready:'+stage.slug).onsuccess=rr=>{
     const ready=rr.target.result?.record;
@@ -34,18 +35,29 @@ function withS06Candidate(m,stage,job,done,commit){
       done(fail('S06_REVIEW_READY_SUPERSEDED'));return;
     }
     m.get('writeback:'+stage.slug).onsuccess=wb=>{
-      const git=wb.target.result?.record;
-      if(git?.state!=='CONFIRMED'||git.mode!=='S06'||
+     m.get('s06-exception:'+stage.slug).onsuccess=ex=>{
+      const git=wb.target.result?.record,exception=ex.target.result?.record;
+      const admitted=releaseCandidateTestContext(stage,job,{ready,exception});
+      const special=admitted.mode==='EXCEPTION_MANUAL_REVIEW',
+        sourceFingerprint=special?job?.sourceFingerprint:job?.verifiedFinal;
+      if(!admitted.ok||
+         git?.state!=='CONFIRMED'||git.mode!==(special?'S06_EXCEPTION':'S06')||
+         (special&&(git.exceptionRevision!==admitted.revision||
+           approval?.exceptionRevision!==admitted.revision||
+           approval?.testEvidenceMode!==admitted.evidenceMode||
+           approval?.aiVerified!==false))||
+         (!special&&approval&&approval.aiVerified!==true)||
          git.readyIdentifier!==ready.active.identifier||
          git.readyInputFingerprint!==ready.active.inputFingerprint||
          (git.testingSha??null)!==(stage.testingSha??null)||
          !/^[a-f0-9]{40}$/.test(git.commitSha||'')||
          git.stageRevision!==stage.revision||
          git.jobRevision!==job?.revision||
-         git.sourceFingerprint!==job?.verifiedFinal){
+         git.sourceFingerprint!==sourceFingerprint){
         done(fail('S06_REVIEW_GIT_PROOF_CHANGED'));return;
       }
       commit();
+     };
     };
   };
 }
@@ -127,18 +139,23 @@ export function createReleaseStore(db){
                   liveAccount=a.target.result?.account,liveInventory=i.target.result?.generator;
                 if(liveStage?.revision!==stage.revision||
                    liveStage.state!=='SOURCE_VERIFIED'||
-                   liveJob?.revision!==job.revision||liveJob.state!=='TESTS_VERIFIED'||
+                   liveJob?.revision!==job.revision||
+                   !(liveJob.state==='TESTS_VERIFIED'||
+                     (approval.tuple.aiVerified===false&&
+                      liveJob.finalSource?.fingerprint===liveJob.sourceFingerprint))||
                    liveAccount?.revision!==account.revision||
                    liveAccount?.bindingVersion!==stage.bindingVersion||
                    liveInventory?.revision!==inventory.revision||
                    liveInventory?.remoteId!==stage.remotePublicId||
                    liveInventory?.ownerState!=='OBSERVED_OWNER'||
                    !releaseContext(liveStage,liveAccount,liveInventory).ok||
-                   !releaseTestContext(liveStage,liveJob).ok||
+                   !(releaseTestContext(liveStage,liveJob).ok||
+                     approval.tuple.aiVerified===false)||
                    !matchesApproval(approval.tuple,{
                      ...approval.tuple,stageRevision:liveStage.revision,
                      jobRevision:liveJob.revision,
-                     sourceFingerprint:liveJob.verifiedFinal,
+                     sourceFingerprint:approval.tuple.aiVerified===false?
+                       liveJob.sourceFingerprint:liveJob.verifiedFinal,
                      accountRevision:liveAccount.revision,
                      remotePublicId:liveInventory.remoteId
                    }).ok){
@@ -161,7 +178,7 @@ export function createReleaseStore(db){
                 done(display(record));
                 };
                 withS06Candidate(meta,liveStage,liveJob,done,()=>
-                  withoutPendingChild(meta,liveStage,done,commit));
+                  withoutPendingChild(meta,liveStage,done,commit),approval.tuple);
               };
             };
           };
@@ -212,10 +229,14 @@ export function createReleaseStore(db){
                 if(stage?.revision!==r.approval.stageRevision||
                    stage.state!=='SOURCE_VERIFIED'||
                    job?.revision!==r.approval.jobRevision||
-                   job.state!=='TESTS_VERIFIED'||
-                   !releaseTestContext(stage,job).ok||
+                   !(job.state==='TESTS_VERIFIED'||
+                     (r.approval.aiVerified===false&&
+                      job.finalSource?.fingerprint===job.sourceFingerprint))||
+                   !(releaseTestContext(stage,job).ok||
+                     r.approval.aiVerified===false)||
                    !releaseContext(stage,account,inventory).ok||
-                   job.verifiedFinal!==r.approval.sourceFingerprint||
+                   (r.approval.aiVerified===false?job.sourceFingerprint:
+                     job.verifiedFinal)!==r.approval.sourceFingerprint||
                    account?.revision!==r.approval.accountRevision||
                    account.bindingVersion!==r.approval.bindingVersion||
                    account.identity?.principalFingerprint!==r.approval.principalFingerprint||
@@ -236,7 +257,7 @@ export function createReleaseStore(db){
                   done(display(next));
                 }
                 const guardedMark=()=>withS06Candidate(m,stage,job,done,()=>
-                  withoutPendingChild(m,stage,done,mark));
+                  withoutPendingChild(m,stage,done,mark),r.approval);
                 if(r.kind==='EXISTING_UPDATE'){
                   m.get('existing-update:'+name).onsuccess=ex=>{
                     const update=ex.target.result?.record;
