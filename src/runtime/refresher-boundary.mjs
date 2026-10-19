@@ -189,14 +189,18 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       const intent=uncertain.refresh.intent,a=snapshot.state.accounts[uncertain.accountId];
       if(!uncertain.ownerVerified||!uncertain.releaseVerified||uncertain.identityHeld||
         uncertain.reviewHeld||uncertain.listing!=='PUBLIC'||!a?.verifiedIdentity||
-        uncertain.releaseFingerprint!==intent.sourceFingerprint)
+        (uncertain.refresh?.savedSourceFingerprint||uncertain.releaseFingerprint)!==
+          intent.sourceFingerprint)
         return 'REFRESH_RECONCILIATION_HELD';
       const first=await g.getSafeRouteReadiness(uncertain.personaUid);
       if(!first?.ready)return 'REFRESH_RECONCILIATION_ROUTE_HELD';
       const claim={id:intent.id,slug:uncertain.slug,stableId:uncertain.stableId,
         accountId:uncertain.accountId,personaUid:uncertain.personaUid,
         bindingVersion:uncertain.bindingVersion,
-        principalFingerprint:a.principalFingerprint,releaseFingerprint:intent.sourceFingerprint};
+        principalFingerprint:a.principalFingerprint,
+        releaseFingerprint:uncertain.releaseFingerprint,
+        sourceFingerprint:intent.sourceFingerprint,
+        targetFingerprint:intent.targetFingerprint||null};
       let receipt={at:clock(),kind:'UNKNOWN',sourceFingerprint:null,
         targetMatched:false,principalMatched:false};
       try{
@@ -222,7 +226,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       qualifyRecentAbsence({row:r,recent:snapshot.state.recent,
         policy:snapshot.state.policy,now:clock()}).ok);
     if(!row)return 'NO_REFRESH_DUE';
-    const candidate=qualificationFor(row);
+    const candidate=await qualificationFor(row);
     // A candidate from a fixture, code comment or stale source is not enough.
     const first=await g.getSafeRouteReadiness(row.personaUid);
     if(!first?.ready)return 'PROTECTED_ROUTE_UNAVAILABLE';
