@@ -10,6 +10,8 @@ import {inspectReadyCandidate} from './catalog-declaration.mjs';
 import {scanMainCatalog} from './git-catalog.mjs';
 import {pinGitChatPrompt} from './ready-git-prompt.mjs';
 import {createReadyStore} from './ready-store.mjs';
+import {createWritebackStore} from './writeback-store.mjs';
+import {sealedS06OutputProof} from './s06-output-proof.mjs';
 import {authorizeReadyAiAdvance,authorizeGitReadyAiAdvance} from './ready-ai-gate.mjs';
 import {verifyReadback,exactSource} from './staging-core.mjs';
 import {planAiStep} from './ai-supervisor.mjs';
@@ -76,6 +78,13 @@ export function createAiBoundary(api,{
   let databasePromise,tickBusy=false;
   const database=()=>databasePromise ||=open();
   const sentinel=createRestoreSentinel(api.storage.local);
+  async function outputProof(db,slug,ready,stage){
+    const [s,w]=await Promise.all([
+      stage?Promise.resolve(stage):stageFactory(db).getFull(slug),
+      createWritebackStore(db).getFull(slug)]);
+    const proof=sealedS06OutputProof({ready,stage:s,writeback:w});
+    return proof.ok?{outputProof:proof.outputProof}:{};
+  }
   async function executeTrusted(message){
     try{
       const db=await database(),store=storeFactory(db),p=message.params||{};
@@ -126,7 +135,8 @@ export function createAiBoundary(api,{
               return fail('S05_AI_GIT_MAIN_UNAVAILABLE');
             const coherent=await inspectReady({repository:settings.repository,
               token:credential,slug:p.slug,pinnedHead:catalog.head,
-              includeSourceBytes:false});
+              includeSourceBytes:false,
+              ...await outputProof(db,p.slug,current)});
             const fresh=authorizeGitReadyAiAdvance(sealed.job,catalog,coherent,{
               repositoryId:settings.repositoryId,slug:p.slug});
             if(!fresh.ok)return fresh;
@@ -507,7 +517,8 @@ export function createAiBoundary(api,{
           return fail('S05_MAIN_CATALOG_UNVERIFIED');
         const coherent=await inspectReady({
           repository:config.repository,token:credential,slug:r.slug,
-          pinnedHead:catalog.head,includeTestingText:true});
+          pinnedHead:catalog.head,includeTestingText:true,
+          ...await outputProof(db,r.slug,queued,stage)});
         const identity=coherent?.legacy?
           'legacy-'+coherent.declarationCommit+'-'+coherent.markerOid:
           'rev-'+coherent?.token;
