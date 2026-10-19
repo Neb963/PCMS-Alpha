@@ -446,7 +446,10 @@ attachPcmsGuard({
     const valid=typeof request?.slug==='string'&&
       /^[a-z0-9][a-z0-9-]{0,99}$/.test(request.slug)&&
       /^[a-f0-9]{32}$/.test(request.nonce)&&
-      Array.isArray(request.candidate)&&request.candidate.length<=502;
+      Array.isArray(request.candidate)&&request.candidate.length>=2&&
+      request.candidate.length<=502&&
+      Array.isArray(request.previousFiles)&&request.previousFiles.length>=2&&
+      request.previousFiles.length<=502;
     if(!valid)return {ok:false,code:'INVALID_STAGING_REQUEST'};
     const tagKey='pcmsI09Owned';
     const before=await getState(),profile=before.profiles?.[cookieStoreId];
@@ -481,12 +484,27 @@ attachPcmsGuard({
         accountId:'Verified account',personaUid
       }]
     });
-    // Same-XPI fixed function; payload was byte-pinned in canonical IDB.
-    // MAIN editor API is untrusted and must affirmatively prove safe/clean.
-    const results=await browser.scripting.executeScript({
-      target:{tabId:tab.id,frameIds:[0]},world:'MAIN',
+    // Both fixed adapters are already packaged inside the same verified
+    // donor extension. PRIVATE_INITIAL stays in the strict empty-only
+    // adapter; PRIVATE_SUCCESSOR uses I13's exact old-P comparison and
+    // complete replace/delete semantics, not a weaker ad-hoc write.
+    const emptyPrevious=request.previousFiles.length===2&&
+      request.previousFiles.every(f=>typeof f?.base64==='string'&&
+        f.base64.length===0)&&
+      new Set(request.previousFiles.map(f=>f.path)).size===2&&
+      request.previousFiles.some(f=>f.path==='main.pjs')&&
+      request.previousFiles.some(f=>f.path==='index.html');
+    const native=emptyPrevious?{
       func:perchanceStageMain,
       args:[{slug:request.slug,files:request.candidate}]
+    }:{
+      func:perchanceExistingMain,
+      args:[{action:'STAGE',slug:request.slug,nonce:request.nonce,
+        previousFiles:request.previousFiles,targetFiles:request.candidate}]
+    };
+    const results=await browser.scripting.executeScript({
+      target:{tabId:tab.id,frameIds:[0]},world:'MAIN',
+      func:native.func,args:native.args
     });
     const post=await browser.tabs.get(tab.id),receipt=await browser.sessions.getTabValue(tab.id,tagKey);
     const after=await getState();
