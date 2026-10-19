@@ -19,6 +19,21 @@ function tx(db,mode,fn){
     try{fn(t,x=>{result=x;});}catch{try{t.abort();}catch{}}
   });
 }
+// S05 cross-writer CAS: the READY ledger and AI write share one IDB
+// transaction. A boundary read performed earlier can never authorize a
+// native dispatch or test PASS after a later candidate has been queued.
+function withCurrentReady(m,job,done,commit){
+  if(!job.readyIdentifier){commit();return;}
+  m.get('s05-ready:'+job.slug).onsuccess=e=>{
+    const r=e.target.result?.record;
+    if(!r?.active||r.desired||r.hold==='READY_REVOKED_NOT_READY'||
+       r.active.identifier!==job.readyIdentifier||
+       r.active.inputFingerprint!==job.readyInputFingerprint){
+      done(fail('AI_READY_CANDIDATE_CHANGED'));return;
+    }
+    commit();
+  };
+}
 const publicJob=j=>j?{ok:true,slug:j.slug,revision:j.revision,state:j.state,
   sourceFingerprint:j.sourceFingerprint,promptRevision:j.prompt.revision,
   optionalTestingSha:j.optionalTesting?.sha256||null,
@@ -206,7 +221,7 @@ export function createAiStore(db){
                 if(stage.readyIdentifier){
                   m.get('s05-ready:'+stage.slug).onsuccess=rr=>{
                     const ready=rr.target.result?.record;
-                    if(!ready?.active||ready.desired||
+                    if(!ready?.active||ready.desired||ready.hold==='READY_REVOKED_NOT_READY'||
                        ready.active.identifier!==stage.readyIdentifier||
                        ready.active.inputFingerprint!==stage.readyInputFingerprint){
                       done(fail('AI_READY_CANDIDATE_CHANGED'));return;
@@ -222,7 +237,7 @@ export function createAiStore(db){
               if(stage.readyIdentifier){
                 m.get('s05-ready:'+stage.slug).onsuccess=rr=>{
                   const ready=rr.target.result?.record;
-                  if(!ready?.active||ready.desired||
+                  if(!ready?.active||ready.desired||ready.hold==='READY_REVOKED_NOT_READY'||
                      ready.active.identifier!==stage.readyIdentifier||
                      ready.active.inputFingerprint!==stage.readyInputFingerprint){
                     done(fail('AI_READY_CANDIDATE_CHANGED'));return;
@@ -292,11 +307,15 @@ export function createAiStore(db){
           result.job.state==='TESTS_VERIFIED'&&
           result.job.finalSource?.fingerprint===result.job.verifiedFinal&&
           ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(result.job.native?.state));
-        m.put({...prior,job:result.job});
-        t.objectStore('events').add({stage:'AI_EVIDENCE_RECORDED',slug:slugName,
-          revision:result.job.revision,kind:evidence.type,
-          state:result.job.state});
-        done(publicJob(result.job));
+        const write=()=>{
+          m.put({...prior,job:result.job});
+          t.objectStore('events').add({stage:'AI_EVIDENCE_RECORDED',slug:slugName,
+            revision:result.job.revision,kind:evidence.type,
+            state:result.job.state});
+          done(publicJob(result.job));
+        };
+        if(evidence.type==='INTERRUPT')write();
+        else withCurrentReady(m,prior.job,done,write);
       };
     });
   }
@@ -336,13 +355,15 @@ export function createAiStore(db){
           state:known?'KNOWN_FAILURE':'TESTS_UNVERIFIED',
           hold:known?'KNOWN_FAILURE':'INDEPENDENT_BROWSER_TESTS_REQUIRED',
           executionSlotReleased:false};
-        m.put({...row,job:next});
-        t.objectStore('events').add({
-          stage:'AI_CHAT2_FRESHNESS_OBSERVED',slug:slugName,revision:next.revision,
-          sessionDigest:next.chat2.sessionDigest,
-          sourceFingerprint:next.sourceFingerprint
+        withCurrentReady(m,j,done,()=>{
+          m.put({...row,job:next});
+          t.objectStore('events').add({
+            stage:'AI_CHAT2_FRESHNESS_OBSERVED',slug:slugName,revision:next.revision,
+            sessionDigest:next.chat2.sessionDigest,
+            sourceFingerprint:next.sourceFingerprint
+          });
+          done(publicJob(next));
         });
-        done(publicJob(next));
       };
     });
   }
@@ -387,10 +408,12 @@ export function createAiStore(db){
             previousSessionDigest:j.native?.sessionDigest||j.chat1.sessionDigest||null,
             armedAt:Date.now()},state:'HELD_RECONCILE',
           hold:'NATIVE_EFFECT_MAY_HAVE_OCCURRED'};
-        m.put({...row,job:next});
-        t.objectStore('events').add({stage:'AI_DISPATCH_POSSIBLE',
-          slug:slugName,revision:next.revision,step});
-        done(publicJob(next));
+        withCurrentReady(m,j,done,()=>{
+          m.put({...row,job:next});
+          t.objectStore('events').add({stage:'AI_DISPATCH_POSSIBLE',
+            slug:slugName,revision:next.revision,step});
+          done(publicJob(next));
+        });
       };
     });
   }
