@@ -353,7 +353,10 @@ def s05_ready_idb_probe(session):
       ];
       const settings={pcmsS03Git:{repository:'Neb963/per-gens',repositoryId}};
       const api={runtime:browser.runtime,
-        storage:{local:{get:async name=>({[name]:settings[name]})}}};
+        storage:{local:{
+          get:async name=>({[name]:settings[name]}),
+          set:async rows=>Object.assign(settings,rows)
+        }}};
       const guard={
         getSafeRouteReadiness:async()=>({ready:true,personaUid,
           cookieStoreId:'fixture-protected',routeId:'fixture-route'}),
