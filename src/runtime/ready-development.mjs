@@ -43,6 +43,9 @@ export function planReadyDevelopment({ready,stage,existing,job,visibility,effect
      return {ok:true,type:'RECHECK_STAGE'};
    if(s==='STAGE_CONFIRMED'&&stage?.record?.state!=='SOURCE_VERIFIED')
      return fail('S05_SOURCE_VERIFICATION_REQUIRED');
+   if(s==='STAGE_CONFIRMED'&&r.desired&&stage?.record?.state==='SOURCE_VERIFIED'&&
+      stage.record.readyIdentifier!==r.desired.identifier)
+     return {ok:true,type:'PIN_STAGE'};
    if(['RESTORE_DISPATCH_POSSIBLE','RESTORE_UNCERTAIN',
         'RECOVERY_UNLIST_DISPATCH_POSSIBLE','RECOVERY_UNLIST_UNCERTAIN',
         'RECOVERY_UNLIST_CONFIRMED','RESTORE_CONFIRMED'].includes(s))
