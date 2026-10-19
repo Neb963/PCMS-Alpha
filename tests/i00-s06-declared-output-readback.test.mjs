@@ -36,7 +36,7 @@ function fixture({alterAfterCommit=false,stripTrailer=false,unrelatedHead=false}
    if(p==='')return send(200,{full_name:REPO,private:true});
    if(p==='/git/ref/heads/main')return send(200,{ref:'refs/heads/main',
      object:{sha:H,type:'commit'}});
-   if(p.startsWith('/commits?'))return send(200,[{sha:I}]);
+   if(p==='/commits'&&u.searchParams.has('path'))return send(200,[{sha:I}]);
    if(p.startsWith('/git/commits/')){
      const v=commits.get(p.split('/').at(-1));
      return v?send(200,{tree:{sha:v.tree},message:v.message,
