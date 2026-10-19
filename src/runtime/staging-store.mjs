@@ -145,10 +145,10 @@ export function createStagingStore(db){
                   readyIdentifier:source.gitReadyIdentifier,
                   readyInputFingerprint:source.gitReadyInputFingerprint}: {})};
               if(old){
-                m.add({key:'stage-history:'+slugName+':'+old.revision,
+                m.put({key:'stage-history:'+slugName+':'+old.revision,
                   record:structuredClone(old)});
                 m.put({key:key(slugName),record:r});
-              }else m.add({key:key(slugName),record:r});
+              }else m.put({key:key(slugName),record:r});
               tx.objectStore('events').add({stage:'CANDIDATE_PINNED',slug:slugName,
                 candidateFingerprint:candidate.fingerprint,sourceHead:source.head,
                 previousFingerprint:previous.fingerprint});
