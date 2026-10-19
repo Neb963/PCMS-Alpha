@@ -8,6 +8,7 @@ import {createReadyIntake} from './ready-intake.mjs';
 import {createReadyDevelopment} from './ready-development.mjs';
 import {createS06WritebackProgress} from './s06-writeback-progress.mjs';
 import {createS06ChangeProgress} from './s06-request-changes.mjs';
+import {standingS06} from './s06-standing-authority.mjs';
 export const CATALOG_ALARM='pcms-s03-main-observe';
 export const CATALOG_RESUME_ALARM='pcms-s03-main-resume';
 export const READY_PROGRESS_ALARM='pcms-s05-ready-progress';
@@ -138,7 +139,9 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
 if(typeof browser!=='undefined')createCatalogWatcher(browser,{
   ingestComplete:createCreationCatalogIntake(browser).run,
   ingestReady:createReadyIntake(browser).run,
-  progressReady:createReadyDevelopment(browser).tick,
+  progressReady:createReadyDevelopment(browser,{
+    effectGate:()=>standingS06?.gate('development')===true}).tick,
   progressChanges:createS06ChangeProgress(browser).tick,
-  progressWriteback:createS06WritebackProgress(browser).tick
+  progressWriteback:createS06WritebackProgress(browser,{
+    effectGate:()=>standingS06?.gate('gitWrite')===true}).tick
 }).register();
