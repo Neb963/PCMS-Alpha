@@ -87,6 +87,43 @@ test('S06 historical uncertain Git intent is read-only reconciled despite a newe
    writeback:writeback('PREPARED')}).ok,false,
    'An unsent preparation must NOT be committed after newer READY');
 });
+test('S06 confirmed old candidate is archived and does not block a newly admitted READY',()=>{
+ const nextId='rev-s06-02',nextInput='f'.repeat(64);
+ const nextStage={...stage(),revision:5,
+   readyIdentifier:nextId,readyInputFingerprint:nextInput,
+   sourceHead:HEAD};
+ const nextJob={...job(),revision:8,stageRevision:5,
+   readyIdentifier:nextId,readyInputFingerprint:nextInput};
+ const nextReady={...ready(),revision:4,active:{
+   identifier:nextId,inputFingerprint:nextInput}};
+ const previous=writeback('CONFIRMED');
+ const outcome=planS06Writeback({ready:nextReady,stage:nextStage,
+   job:nextJob,writeback:previous});
+ assert.equal(outcome.type,'PREPARE',JSON.stringify(outcome));
+ assert.equal(outcome.jobRevision,8);
+ assert.equal(outcome.sourceFingerprint,F);
+ assert.notEqual(nextReady.active.identifier,previous.readyIdentifier);
+});
+test('S06 stale PREPARED intent is canceled locally without Git authority before the successor proceeds',()=>{
+ const prepared=writeback('PREPARED');
+ const newer={...ready(),desired:{identifier:'rev-successor',inputFingerprint:P}};
+ const canceled=planS06Writeback({ready:newer,stage:stage(),job:job(),
+   writeback:prepared});
+ assert.equal(canceled.type,'CANCEL_PREPARED',JSON.stringify(canceled));
+ assert.equal(canceled.localOnly,true);
+ assert.equal(canceled.revision,prepared.revision);
+ const same=planS06Writeback({ready:ready(),stage:stage(),job:job(),
+   writeback:prepared});
+ assert.equal(same.type,'COMMIT');
+ const manual=planS06Writeback({ready:newer,stage:stage(),job:job(),
+   writeback:{...prepared,mode:'MANUAL'}});
+ assert.equal(manual.ok,false);
+ for(const state of ['DISPATCH_POSSIBLE','HELD_UNCERTAIN']){
+   assert.equal(planS06Writeback({ready:newer,stage:stage(),job:job(),
+      writeback:{...prepared,state}}).type,'RECONCILE',
+     'Possibly dispatched operations must NEVER be canceled as PREPARED');
+ }
+});
 test('S06 Git dispatch CAS refuses superseded, paused and revoked READY',async()=>{
  const variations=[
   null,{...ready(),hold:'READY_REVOKED_NOT_READY'},
