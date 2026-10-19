@@ -98,7 +98,11 @@ test('I12 packaging F: static graph/guarded fixed executor/view available; no di
   assert.match(overlay,/func:perchanceMonitorIsolated,args:\[monitoringRequest\]/);
   assert.match(overlay,/MONITOR_SESSION_CHANGED/);
   assert.match(await readFile('src/runtime/entry.mjs','utf8'),/import \{createRefresherBoundary\} from '\.\/refresher-boundary\.mjs'/);
-  assert.match(await readFile('src/runtime/entry.mjs','utf8'),/createRefresherBoundary\(browser\).register\(\)/);
+  const entry=await readFile('src/runtime/entry.mjs','utf8');
+  assert.match(entry,/createRefresherBoundary\(browser,\{qualificationFor:/);
+  assert.match(entry,/refreshAdapter:native\}\).register\(\)/);
+  assert.match(entry,/createRefresherNativeAdapter\(\)/);
+  assert.equal((entry.match(/createRefresherBoundary\(browser/g)||[]).length,1);
   assert.match(await readFile('src/ui/index.html','utf8'),/refresher-view\.mjs/);
 });
 test('P54-08 X: current donor egress hashes, never route names, determine witness independence',async()=>{
