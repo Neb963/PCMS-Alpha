@@ -328,7 +328,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { inspectRoutePin, routePinsReady, reloadRoutePins } from "./pcms/route-pin.mjs";\nimport { issueBoundPersonaCreatePermit, issueExistingPersonaTagPermit } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest, fetchViaExit as pcmsFetchViaExit } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain } from "./pcms/perchance-existing.mjs";\nimport { choosePrivateStageAdapter } from "./pcms/ready-native-source.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { inspectRoutePin, routePinsReady, reloadRoutePins } from "./pcms/route-pin.mjs";\nimport { issueBoundPersonaCreatePermit, issueExistingPersonaTagPermit } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest, fetchViaExit as pcmsFetchViaExit } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain, perchanceRefresherCleanMain } from "./pcms/perchance-existing.mjs";\nimport { choosePrivateStageAdapter } from "./pcms/ready-native-source.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -745,6 +745,47 @@ attachPcmsGuard({
     if(result?.length!==1||result[0].frameId!==0||result[0].error)
       return {ok:false,code:'EXISTING_NATIVE_OUTCOME_UNKNOWN'};
     return result[0].result;
+  },
+  // S07 releases ONLY a verified, clean, PCMS_S07-created editor tab.
+  // This is local tab cleanup, not provider unlisting or source mutation.
+  refresherCleanupTab: async ({personaUid,cookieStoreId,routeId},{slug,nonce})=>{
+    if(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)||
+       !/^[a-f0-9]{32}$/.test(nonce||''))
+      return {ok:false,code:'REFRESH_CLEANUP_INVALID'};
+    const before=await getState(),profile=before.profiles?.[cookieStoreId];
+    if(!profile||profile.personaUid!==personaUid||profile.routeId!==routeId||
+       routeId==='direct'||routeId==='block'||!before.routes?.[routeId]||
+       before.routes[routeId].enabled===false)
+      return {ok:false,code:'REFRESH_CLEANUP_ROUTE_CHANGED'};
+    const url='https://perchance.org/'+slug+'#edit';
+    const tabs=await browser.tabs.query({}),matches=[];
+    for(const tab of tabs)if(tab.cookieStoreId===cookieStoreId&&tab.url===url){
+      const tag=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned');
+      if(tag?.createdBy==='PCMS_S07'&&tag.slug===slug&&
+         tag.nonce===nonce&&tag.personaUid===personaUid&&
+         tag.cookieStoreId===cookieStoreId&&tag.humanIntent!==true)matches.push(tab);
+    }
+    if(matches.length!==1)return {ok:false,code:'REFRESH_CLEANUP_TAB_NOT_UNIQUE'};
+    const tab=matches[0];
+    const check=await browser.scripting.executeScript({
+      target:{tabId:tab.id,frameIds:[0]},world:'MAIN',
+      func:perchanceRefresherCleanMain,args:[slug]
+    });
+    if(check?.length!==1||check[0].frameId!==0||check[0].error||
+       check[0].result?.ok!==true)
+      return {ok:false,code:'REFRESH_CLEANUP_EDITOR_UNVERIFIED'};
+    const again=await browser.tabs.get(tab.id),
+      tag=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned'),
+      latest=await getState();
+    if(again.cookieStoreId!==cookieStoreId||again.url!==url||
+       tag?.createdBy!=='PCMS_S07'||tag.nonce!==nonce||
+       tag.humanIntent===true||
+       latest.profiles?.[cookieStoreId]?.personaUid!==personaUid||
+       latest.profiles?.[cookieStoreId]?.routeId!==routeId||
+       latest.routes?.[routeId]?.enabled===false)
+      return {ok:false,code:'REFRESH_CLEANUP_CONTEXT_CHANGED'};
+    await browser.tabs.remove(tab.id);
+    return {ok:true,closed:true,source:'OWN_S07_TAB_CLOSED'};
   },
   // I13 fixed publication path, never a generic script or tab dispatcher.
   releaseIsolatedTab: async ({personaUid,cookieStoreId,routeId},request) => {
