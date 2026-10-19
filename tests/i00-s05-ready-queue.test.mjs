@@ -93,3 +93,41 @@ test('S05 explicit NOT_READY makes prior local handoff inadmissible and preserve
  assert.equal((await s.observe(w('rev00002'))).changed,true);
  assert.equal((await s.get(a.slug)).record.hold,null);
 });
+
+test('S05 operator pause persists, fences stage admission, and resumes exact newer Git witness',async()=>{
+ const db=fakeDatabase(),queue=createReadyStore(db);
+ const first=w('rev00001'),second=w('rev00002','safe-slug','c'.repeat(64));
+ assert.equal((await queue.observe(first)).revision,undefined);
+ const pause=await queue.pause(first.slug,1);
+ assert.equal(pause.code,'READY_OPERATOR_PAUSED',JSON.stringify(pause));
+ assert.equal(pause.record.revision,2);
+ assert.equal((await queue.handoff(first.slug,2,admissible)).code,
+   'READY_OPERATOR_PAUSED');
+ const observed=await queue.observe(second);
+ assert.equal(observed.ok,true);
+ assert.equal(observed.record.hold,'OPERATOR_PAUSED',
+   'new main declaration cannot silently lift manual pause');
+ assert.equal((await queue.resume(first.slug,2,{
+   identifier:second.identifier,inputFingerprint:second.inputFingerprint})).code,
+   'STALE_REVISION');
+ assert.equal((await queue.resume(first.slug,3,{
+   identifier:first.identifier,inputFingerprint:first.inputFingerprint})).code,
+   'READY_RESUME_CANDIDATE_CHANGED');
+ const resumed=await queue.resume(first.slug,3,{
+   identifier:second.identifier,inputFingerprint:second.inputFingerprint});
+ assert.equal(resumed.code,'READY_OPERATOR_RESUMED',JSON.stringify(resumed));
+ assert.equal(resumed.record.hold,null);
+ assert.equal((await queue.handoff(first.slug,4,admissible)).ok,true);
+ assert.equal((await queue.get(first.slug)).record.active.identifier,
+   second.identifier);
+ assert.equal(db.keys('events').length,5);
+});
+test('S05 an already running READY may be locally paused without declaring native Stop',async()=>{
+ const db=fakeDatabase(),q=createReadyStore(db),first=w('rev00001');
+ await q.observe(first);await q.handoff(first.slug,1,admissible);
+ const paused=await q.pause(first.slug,2);
+ assert.equal(paused.record.active.identifier,first.identifier);
+ assert.equal(paused.record.hold,'OPERATOR_PAUSED');
+ assert.equal((await q.handoff(first.slug,3,admissible)).code,'READY_NOT_QUEUED');
+ assert.equal((await q.pause(first.slug,3)).changed,false);
+});
