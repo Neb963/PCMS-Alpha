@@ -134,61 +134,110 @@ export function createAiStore(db){
       };
     });
   };
-  function start(stage,optionalTesting=null){
+  function start(stage,optionalTesting=null,promptOverride=null){
     if(!stage?.slug||!slug(stage.slug))return Promise.resolve(fail('INVALID_STAGE'));
     return tx(db,'readwrite',(t,done)=>{
       const m=t.objectStore('meta');
       m.get('ai-prompts').onsuccess=p=>{
-        const prompt=(p.target.result?.history||initialPrompt()).at(-1);
+        // S05's Git-owned Chat 1 prompt is supplied only through a trusted
+        // pinned-main native-vault boundary; the UI cannot inject it here.
+        const prompt=promptOverride||((p.target.result?.history||initialPrompt()).at(-1));
         const started=beginAiJob({stage,prompt,optionalTesting});
         if(!started.ok){done(started);return;}
-        // Settings affect new admissions only; default one active job/account.
         const account=stage.accountId;
         m.get('ai-concurrency').onsuccess=settingRequest=>{
           const limit=settingRequest.target.result?.setting?.perAccount||1;
-          let active=0;
+          let otherActive=0;
           m.openCursor().onsuccess=e=>{
-          const c=e.target.result;
-          if(c){
-            if(typeof c.key==='string'&&c.key.startsWith('ai-job:')&&
-              c.value?.accountId===account&&!slotReleased(c.value.job))
-              active++;
-            c.continue();return;
-          }
-          if(active>=limit){done(fail('AI_ACCOUNT_CONCURRENCY_HELD'));return;}
-          m.get(key(stage.slug)).onsuccess=old=>{
-            const previous=old.target.result?.job;
-            const commit=()=>{
-              // Fresh jobs pin current settings, never mutable earlier tests.
-              const job={...started.job,revision:previous?previous.revision+1:1,
-                createdAt:Date.now()};
-              if(previous){
-                m.add({key:'ai-history:'+stage.slug+':'+previous.revision,
-                  accountId:account,job:structuredClone(previous)});
-                m.put({key:key(stage.slug),accountId:account,job});
-              }else m.add({key:key(stage.slug),accountId:account,job});
-              t.objectStore('events').add({stage:'AI_JOB_CREATED',slug:stage.slug,
-                sourceFingerprint:job.sourceFingerprint,promptRevision:prompt.revision});
-              done(publicJob(job));
-            };
-            if(!previous){commit();return;}
-            if(!slotReleased(previous)||previous.state!=='TESTS_VERIFIED'||
-               previous.stageRevision===stage.revision){
-              done(fail('AI_EXISTING_JOB_RECONCILE'));return;
+            const cursor=e.target.result;
+            if(cursor){
+              if(typeof cursor.key==='string'&&cursor.key.startsWith('ai-job:')&&
+                 cursor.key!==key(stage.slug)&&
+                 cursor.value?.accountId===account&&!slotReleased(cursor.value.job))
+                otherActive++;
+              cursor.continue();return;
             }
-            m.get('release:'+stage.slug).onsuccess=re=>{
-              const release=re.target.result?.release;
-              if(release?.state!=='CONFIRMED_PUBLIC'||
-                 release.source!=='INDEPENDENT_PUBLICATION_READBACK'||
-                 release.approval?.jobRevision!==previous.revision||
-                 release.approval?.sourceFingerprint!==previous.verifiedFinal||
-                 release.approval?.accountId!==stage.accountId||
-                 release.approval?.remotePublicId!==stage.remotePublicId){
-                done(fail('AI_PREVIOUS_RELEASE_NOT_CONFIRMED'));return;
+            if(otherActive>=limit){done(fail('AI_ACCOUNT_CONCURRENCY_HELD'));return;}
+            m.get(key(stage.slug)).onsuccess=old=>{
+              const previous=old.target.result?.job;
+              const commit=()=>{
+                const job={...started.job,revision:previous?previous.revision+1:1,
+                  createdAt:Date.now(),
+                  ...(stage.readyIdentifier?{
+                    readyIdentifier:stage.readyIdentifier,
+                    readyInputFingerprint:stage.readyInputFingerprint}:{})};
+                if(previous){
+                  m.put({key:'ai-history:'+stage.slug+':'+previous.revision,
+                    accountId:account,job:structuredClone(previous)});
+                  m.put({key:key(stage.slug),accountId:account,job});
+                }else m.add({key:key(stage.slug),accountId:account,job});
+                t.objectStore('events').add({stage:'AI_JOB_CREATED',slug:stage.slug,
+                  sourceFingerprint:job.sourceFingerprint,promptRevision:prompt.revision,
+                  ...(job.readyIdentifier?{readyIdentifier:job.readyIdentifier}:{})});
+                done(publicJob(job));
+              };
+              if(!previous){
+                if(stage.readyIdentifier){
+                  m.get('s05-ready:'+stage.slug).onsuccess=rr=>{
+                    const ready=rr.target.result?.record;
+                    if(!ready?.active||ready.desired||
+                       ready.active.identifier!==stage.readyIdentifier||
+                       ready.active.inputFingerprint!==stage.readyInputFingerprint){
+                      done(fail('AI_READY_CANDIDATE_CHANGED'));return;
+                    }
+                    commit();
+                  };
+                }else commit();
+                return;
               }
-              commit();
+              if(previous.stageRevision===stage.revision){
+                done(fail('AI_EXISTING_JOB_RECONCILE'));return;
+              }
+              if(stage.readyIdentifier){
+                m.get('s05-ready:'+stage.slug).onsuccess=rr=>{
+                  const ready=rr.target.result?.record;
+                  if(!ready?.active||ready.desired||
+                     ready.active.identifier!==stage.readyIdentifier||
+                     ready.active.inputFingerprint!==stage.readyInputFingerprint){
+                    done(fail('AI_READY_CANDIDATE_CHANGED'));return;
+                  }
+                  const native=previous.native?.state;
+                  const provenIdle=previous.state==='PENDING_NATIVE_SESSION'&&!previous.native||
+                    ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(native);
+                  const saved=previous.finalSource?.fingerprint||
+                    (previous.state==='PENDING_NATIVE_SESSION'?previous.sourceFingerprint:null);
+                  if(!provenIdle||!stage.previous?.ok||
+                     saved!==stage.previous.fingerprint||
+                     ['HELD_RECONCILE','HUMAN_OWNED','HELD_NO_PROGRESS'].includes(previous.state)){
+                    done(fail('AI_PREVIOUS_NATIVE_OR_SOURCE_NOT_QUIESCENT'));return;
+                  }
+                  m.get('release:'+stage.slug).onsuccess=re=>{
+                    const state=re.target.result?.release?.state;
+                    if(['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN',
+                      'RECOVERY_HOLD','PUBLISHING'].includes(state)){
+                      done(fail('AI_PREVIOUS_PUBLICATION_UNCERTAIN'));return;
+                    }
+                    commit();
+                  };
+                };
+              }else{
+                if(!slotReleased(previous)||previous.state!=='TESTS_VERIFIED'){
+                  done(fail('AI_EXISTING_JOB_RECONCILE'));return;
+                }
+                m.get('release:'+stage.slug).onsuccess=re=>{
+                  const release=re.target.result?.release;
+                  if(release?.state!=='CONFIRMED_PUBLIC'||
+                     release.source!=='INDEPENDENT_PUBLICATION_READBACK'||
+                     release.approval?.jobRevision!==previous.revision||
+                     release.approval?.sourceFingerprint!==previous.verifiedFinal||
+                     release.approval?.accountId!==stage.accountId||
+                     release.approval?.remotePublicId!==stage.remotePublicId){
+                    done(fail('AI_PREVIOUS_RELEASE_NOT_CONFIRMED'));return;
+                  }
+                  commit();
+                };
+              }
             };
-          };
           };
         };
       };
