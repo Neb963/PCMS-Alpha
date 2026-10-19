@@ -10,7 +10,7 @@ import {inspectReadyCandidate} from './catalog-declaration.mjs';
 import {scanMainCatalog} from './git-catalog.mjs';
 import {pinGitChatPrompt} from './ready-git-prompt.mjs';
 import {createReadyStore} from './ready-store.mjs';
-import {authorizeReadyAiAdvance} from './ready-ai-gate.mjs';
+import {authorizeReadyAiAdvance,authorizeGitReadyAiAdvance} from './ready-ai-gate.mjs';
 import {verifyReadback,exactSource} from './staging-core.mjs';
 import {planAiStep} from './ai-supervisor.mjs';
 import {AI_BROWSER_ASSERTIONS} from './perchance-ai-oracle.mjs';
@@ -106,6 +106,31 @@ export function createAiBoundary(api,{
           const current=await createReadyStore(db).get(p.slug);
           const authorized=authorizeReadyAiAdvance(sealed.job,current);
           if(!authorized.ok)return authorized;
+          // An earlier local READY observation is not permanent Git authority.
+          // For every effectful new AI action, independently re-read coherent
+          // current main through S03's protected persistent Git vault. No
+          // model text, UI token, or cached candidate can self-certify this.
+          if(['BEGIN_NATIVE','RUN_TESTS','VERIFY_FRESH_CHAT2'].includes(message.type)){
+            const settings=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
+            if(settings?.repository!=='Neb963/per-gens'||
+               settings.repositoryId!==current.record.repositoryId)
+              return fail('S05_AI_GIT_ASSOCIATION_CHANGED');
+            const credential=(await api.runtime.sendNativeMessage(
+              'local.pcms.backup_vault',{action:'git.get',
+                repositoryId:settings.repositoryId}))?.credential;
+            if(typeof credential!=='string'||credential.length<12||
+               credential.length>512||/[^\x21-\x7e]/.test(credential))
+              return fail('S05_AI_GIT_VAULT_UNAVAILABLE');
+            const catalog=await scanCatalog({repository:settings.repository,token:credential});
+            if(!catalog?.ok||!catalog.complete)
+              return fail('S05_AI_GIT_MAIN_UNAVAILABLE');
+            const coherent=await inspectReady({repository:settings.repository,
+              token:credential,slug:p.slug,pinnedHead:catalog.head,
+              includeSourceBytes:false});
+            const fresh=authorizeGitReadyAiAdvance(sealed.job,catalog,coherent,{
+              repositoryId:settings.repositoryId,slug:p.slug});
+            if(!fresh.ok)return fresh;
+          }
         }
       }
       if(message.type==='SET_CONCURRENCY')
