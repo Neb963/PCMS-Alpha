@@ -11,15 +11,21 @@ const unsafeUpdate=new Set(['UNLIST_DISPATCH_POSSIBLE','UNLIST_UNCERTAIN',
   'RESTORE_DISPATCH_POSSIBLE','RESTORE_UNCERTAIN',
   'RECOVERY_UNLIST_DISPATCH_POSSIBLE','RECOVERY_UNLIST_UNCERTAIN']);
 export function evaluateStageSuccessor({prior,previous,job,release,existing,ready,source}){
- if(!prior)return {ok:true,reason:'FIRST_CANDIDATE'};
- if(!previous?.ok||typeof previous.fingerprint!=='string')
-   return fail('PREVIOUS_SOURCE_UNVERIFIED');
+ // No earlier S05 stage does NOT mean the generator has no other writer.
+ // I13/release uncertainty must fence even the very first local stage.
  if(!ready?.active||ready.desired||
     ready.active.identifier!==source?.gitReadyIdentifier||
     ready.active.inputFingerprint!==source?.gitReadyInputFingerprint)
    return fail('READY_CANDIDATE_NOT_ADMITTED');
  if(unsafeRelease.has(release?.state)||unsafeUpdate.has(existing?.state))
    return fail('POSSIBLE_REMOTE_EFFECT_RECONCILIATION_REQUIRED');
+ if(!previous?.ok||typeof previous.fingerprint!=='string')
+   return fail('PREVIOUS_SOURCE_UNVERIFIED');
+ if(!prior){
+   if(job&&!['PENDING_NATIVE_SESSION','TESTS_VERIFIED'].includes(job.state))
+     return fail('UNRELATED_NATIVE_JOB_NOT_QUIESCENT');
+   return {ok:true,reason:'FIRST_CANDIDATE'};
+ }
  if(prior.state==='HUMAN_OWNED'||prior.state==='HANDOFF_REQUESTED')
    return fail('HUMAN_SOURCE_OWNER');
  if(!['PINNED','SOURCE_VERIFIED'].includes(prior.state))
