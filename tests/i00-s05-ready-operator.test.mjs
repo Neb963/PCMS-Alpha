@@ -226,3 +226,43 @@ test('S05 private nonempty saved F safely supersedes idle old helper without pub
  assert.equal((await queue.get(id)).record.active.identifier,newer.identifier);
  assert.equal(result.providerEffects,'NONE');
 });
+
+test('S05 operator pause/resume are revision-fenced; resume rechecks Git main first',async()=>{
+ const h=setup(),q=createReadyStore(h.db);
+ await q.observe(witness);
+ const paused=await h.operator.run({type:'PAUSE_READY',
+   params:{slug:id,expectedRevision:1}},h.sender);
+ assert.equal(paused.code,'READY_OPERATOR_PAUSED',JSON.stringify(paused));
+ assert.equal(h.effects.length,0,'pause does not fetch credentials or touch provider');
+ const denied=await h.operator.run({type:'PREPARE_LOCAL',
+   params:{slug:id,expectedRevision:2}},h.sender);
+ assert.equal(denied.code,'READY_OPERATOR_PAUSED');
+ await seed(h.db,[
+  {key:'account:'+account.accountId,account},
+  {key:'source-link:'+id,link},
+  {key:'inventory:'+id,generator:inventory}
+ ]);
+ const wrong=await h.operator.run({type:'RESUME_READY',
+   params:{slug:id,expectedRevision:1}},h.sender);
+ assert.equal(wrong.code,'STALE_REVISION');
+ const resumed=await h.operator.run({type:'RESUME_READY',
+   params:{slug:id,expectedRevision:2}},h.sender);
+ assert.equal(resumed.code,'READY_OPERATOR_RESUMED',JSON.stringify(resumed));
+ assert.equal((await q.get(id)).record.hold,null);
+ assert.deepEqual(h.effects,['vault:git.get']);
+});
+test('S05 operator cannot resume a paused token after current Git main changes',async()=>{
+ const h=setup({currentToken:'different-new-main'});
+ const q=createReadyStore(h.db);
+ await q.observe(witness);
+ await q.pause(id,1);
+ await seed(h.db,[
+  {key:'account:'+account.accountId,account},
+  {key:'source-link:'+id,link},
+  {key:'inventory:'+id,generator:inventory}
+ ]);
+ const result=await h.operator.run({type:'RESUME_READY',
+   params:{slug:id,expectedRevision:2}},h.sender);
+ assert.equal(result.code,'S05_READY_REVISED_OR_REVOKED');
+ assert.equal((await q.get(id)).record.hold,'OPERATOR_PAUSED');
+});
