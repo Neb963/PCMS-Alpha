@@ -57,8 +57,9 @@ function controls(){
     selectedJob.evidence?.chat1Pass!==true;
   chat2Native.disabled=busy||!selected||
     selectedJob.optionalTestingSha===null;
-  prepare.disabled=busy||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug.value)||
-    token.value.length<10;
+  // S05 uses the OS vault; legacy Git staging still validates its own
+  // explicit token if one is supplied. A UI token is never required authority.
+  prepare.disabled=busy||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug.value);
 }
 function renderPrompt(data){
   current=data;
@@ -136,7 +137,9 @@ async function refreshJobs(){
         j.schedulerDeferredUntil>Date.now()?
         ' · scheduler held until '+new Date(j.schedulerDeferredUntil).toLocaleString()+
         ' ('+(j.schedulerHold||'AI_WAKE_HELD')+')':'';
-      label.textContent=j.slug+' · '+j.state+' · Settings P'+j.promptRevision+
+      label.textContent=j.slug+' · '+j.state+' · '+
+        (j.promptSource==='GIT_MAIN_CHAT1_PINNED'?'Git Chat 1':'Settings P')+
+        j.promptRevision+
         ' · source '+j.sourceFingerprint.slice(0,12)+
         ' · '+(j.evidence?.state||'TESTS_UNVERIFIED')+
         ' · '+(j.hold||'No external PASS claimed')+retry;
@@ -162,7 +165,8 @@ async function prepareJob(){
     const prior=await request('pcms-i09-staging','GET_STAGE',{slug:name});
     if(!prior?.ok){jobStatus.textContent=prior?.code||'STAGE_UNAVAILABLE';return;}
     const result=await ai('PREPARE_JOB',{
-      slug:name,expectedStageRevision:prior.revision,token:readToken
+      slug:name,expectedStageRevision:prior.revision,
+      ...(readToken?{token:readToken}:{})
     });
     if(!result?.ok){jobStatus.textContent=(result?.code||'AI_JOB_UNVERIFIED')+
       ' · held; no AI provider action';return;}
