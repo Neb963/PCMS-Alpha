@@ -282,6 +282,62 @@ export function createCoordinatorStore(db){
       };
     });
   }
+  function confirmAdoption(intentId,expectedRevision,adoption){
+    if(!isSafeId(intentId)||!Number.isSafeInteger(expectedRevision)||
+       expectedRevision<1||!adoption||
+       adoption.archiveState!=='ARCHIVED_GIT_CONFIRMED'||
+       adoption.originalCheckpoint?.qualified!==true||
+       adoption.originalCheckpoint.source!=='INDEPENDENT_AUTHENTICATED_RECOVERY'||
+       adoption.originalCheckpoint.fingerprint!==adoption.original?.fingerprint||
+       !/^[a-f0-9]{64}$/.test(adoption.original.fingerprint||''))
+      return Promise.resolve(fail('ADOPTION_CHECKPOINT_UNVERIFIED'));
+    return transact(db,'readwrite',(tx,finish)=>{
+      const m=tx.objectStore('meta');
+      m.get(key(intentId)).onsuccess=e=>{
+        const current=e.target.result?.record;
+        if(!current||current.revision!==expectedRevision){
+          finish(fail('STALE_REVISION'));return;
+        }
+        if(current.state!=='ADOPTION_ORIGINAL_PENDING'||
+           current.accountId!==adoption.accountId||
+           current.personaUid!==adoption.personaUid||
+           current.bindingVersion!==adoption.bindingVersion||
+           current.remoteId!==adoption.remotePublicId||
+           current.visibility!==adoption.visibility){
+          finish(fail('ADOPTION_OWNERSHIP_CHANGED'));return;
+        }
+        m.get('adoption:'+current.slug).onsuccess=a=>{
+          const saved=a.target.result?.adoption;
+          if(!saved||saved.revision!==adoption.revision||
+             saved.archiveCommit!==adoption.archiveCommit||
+             saved.original?.fingerprint!==adoption.original.fingerprint||
+             saved.originalCheckpoint?.receiptId!==
+               adoption.originalCheckpoint.receiptId){
+            finish(fail('ADOPTION_RECEIPT_STALE'));return;
+          }
+          m.get('account:'+current.accountId).onsuccess=accountValue=>{
+            const account=accountValue.target.result?.account;
+            if(account?.state!=='VERIFIED'||
+               account.revision!==current.accountRevision||
+               account.bindingVersion!==current.bindingVersion||
+               account.identity?.principalFingerprint!==adoption.principalFingerprint){
+              finish(fail('ACCOUNT_CONTEXT_CHANGED'));return;
+            }
+            const next={...current,revision:current.revision+1,
+              state:'GIT_INIT_PENDING',hold:'GIT_ASSOCIATION_PENDING',
+              originalFingerprint:adoption.original.fingerprint,
+              originalArchiveRef:adoption.archiveRef,
+              originalCheckpointId:adoption.originalCheckpoint.receiptId};
+            m.put({key:key(intentId),record:next});
+            tx.objectStore('events').add({stage:'S04_ADOPTION_ORIGINAL_PROTECTED',
+              intentId,slug:current.slug,originalFingerprint:next.originalFingerprint,
+              originalArchiveRef:next.originalArchiveRef});
+            finish({ok:true,record:next,providerEffects:'OFF'});
+          };
+        };
+      };
+    });
+  }
   function stageGit({intentId,expectedRevision,event,proof={}}){
     if(!isSafeId(intentId)||!Number.isSafeInteger(expectedRevision)||
        expectedRevision<1)return Promise.resolve(fail('INVALID_GIT_STAGE'));
@@ -451,5 +507,5 @@ export function createCoordinatorStore(db){
     return decision.ok?{...decision,providerEffects:'OFF',
       code:'S04_CREATION_ACTIVATION_HELD'}:decision;
   }
-  return Object.freeze({acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,stageEffect,stageGit,advanceCreate});
+  return Object.freeze({acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,stageEffect,stageGit,confirmAdoption,advanceCreate});
 }
