@@ -8,6 +8,13 @@ const REPO='Neb963/per-gens',SLUG='output-witness',FOLDER='generators/'+SLUG,
   I='a'.repeat(40),H='b'.repeat(40),TREE_I='c'.repeat(40),TREE_H='d'.repeat(40),
   ID='rev-source20261019',OP='writeback_'+'2'.repeat(32),TOKEN='test-private-git-credential';
 const raw=s=>Buffer.from(s),b64=x=>Buffer.from(x).toString('base64');
+const sourceInputFingerprint=files=>{
+  const manifest=files.map(f=>{const raw=Buffer.from(f.base64,'base64');
+    return [f.path,raw.length,createHash('sha256').update(raw).digest('hex')];
+  }).sort((a,b)=>a[0].localeCompare(b[0],'en'));
+  return createHash('sha256').update('PCMS_SOURCE_V1\n'+
+    manifest.map(x=>JSON.stringify(x)).join('\n')).digest('hex');
+};
 const hash=x=>createHash('sha1').update('blob '+Buffer.from(x).length+'\0')
   .update(Buffer.from(x)).digest('hex');
 function fixture({alterAfterCommit=false,stripTrailer=false,unrelatedHead=false}={}){
@@ -59,7 +66,8 @@ function fixture({alterAfterCommit=false,stripTrailer=false,unrelatedHead=false}
  return {transport,input,final};
 }
 test('S06 independently attributed Git F permits same frozen READY identity after authored main writeback',async()=>{
- const f=fixture(),input=await exactSource(f.input),final=await exactSource(f.final);
+ const f=fixture(),input={fingerprint:sourceInputFingerprint(f.input)},
+   final=await exactSource(f.final);
  const initial=await inspectReadyCandidate({repository:REPO,token:TOKEN,
    slug:SLUG,pinnedHead:H},f.transport);
  assert.equal(initial.code,'READY_SOURCE_DRIFT_AFTER_DECLARATION',JSON.stringify(initial));
@@ -74,7 +82,8 @@ test('S06 independently attributed Git F permits same frozen READY identity afte
  assert.notEqual(accepted.inputFingerprint,final.fingerprint);
 });
 test('S06 same-source third-party drift, missing operation trailer and counterfeit output are never READY',async()=>{
- const input=await exactSource(fixture().input),final=await exactSource(fixture().final);
+ const input={fingerprint:sourceInputFingerprint(fixture().input)},
+   final=await exactSource(fixture().final);
  const proof={readyIdentifier:ID,readyInputFingerprint:input.fingerprint,
    testingSha:null,folder:FOLDER,operationId:OP,baseHead:I,expectedHead:I,
    commitSha:H,sealedSource:final};
