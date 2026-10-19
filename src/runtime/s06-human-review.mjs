@@ -114,10 +114,17 @@ export function createS06HumanStore(db){
    };
   });
  }
- function adopt({name,expectedRevision,source}){
+ async function adopt({name,expectedRevision,source}){
   if(!slug(name)||!Number.isSafeInteger(expectedRevision)||expectedRevision<1||
     !source?.ok||!fp(source.fingerprint))
-    return Promise.resolve(fail('S06_HUMAN_ADOPTION_INVALID'));
+    return fail('S06_HUMAN_ADOPTION_INVALID');
+  // The canonical store does not take caller-supplied "ok" or fingerprints
+  // as an oracle. Reseal the full allowed file set before the local CAS.
+  const sealed=await exactSource(source.blobs);
+  if(!sealed.ok||sealed.fingerprint!==source.fingerprint||
+     JSON.stringify(sealed.files)!==JSON.stringify(source.files)||
+     JSON.stringify(sealed.blobs)!==JSON.stringify(source.blobs))
+    return fail('S06_HUMAN_SOURCE_PROOF_INVALID');
   return transact(db,true,(m,t,done)=>m.get(KEY(name)).onsuccess=e=>{
    const prior=e.target.result?.record;
    if(!prior||prior.revision!==expectedRevision||prior.state!=='DEFERRED'){
