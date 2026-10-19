@@ -20,7 +20,7 @@ export function planS06Writeback({ready,stage,job,writeback}={}){
   const wanted=record?.active;
   // A queued desired READY has no admission/writer authority. Only
   // current active READY without a successor may write back tested F.
-  if(!record||!wanted||record.hold||record.desired
+  if(!record||!wanted||record.hold||record.desired)
     return fail('S06_CURRENT_READY_UNAVAILABLE');
   if(!st||!j||st.state!=='SOURCE_VERIFIED'||!st.verifiedAt||
      st.slug!==record.slug||!ID.test(st.slug||'')||
