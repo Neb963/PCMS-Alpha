@@ -129,7 +129,7 @@ test('C-53 boundary adopts only stable guarded saved source, never unsaved draft
  const x=await fixture({releaseState:null}),held=await x.defer();
  const settings={};
  const api={storage:{local:{get:async key=>({[key]:settings[key]})}}};
- let dirty=false,changed=false,observations=0;
+ let dirty=false,changed=false,observations=0,raceSecondSave=false;
  const native=()=>({ok:true,busy:false,editorClean:!dirty,sourceSaved:!dirty,
   sessionDigest:digest,hasQueue:false,inputOccupied:false,
   attachmentsPending:false});
@@ -141,8 +141,10 @@ test('C-53 boundary adopts only stable guarded saved source, never unsaved draft
    observations++;
    return {ok:true,principalFingerprint:principal,original:{
     remotePublicId:'remote-1',ownerResult:'IS_OWNER',visibility:'UNLISTED',
-    pjs:changed?'tested F':'human updated source',
-    html:changed?'<main>tested F</main>':'<main>human saved</main>',
+    pjs:changed||(raceSecondSave&&observations%2===1)?
+      'tested F':'human updated source',
+    html:changed||(raceSecondSave&&observations%2===1)?
+      '<main>tested F</main>':'<main>human saved</main>',
     assets:[]}};
   }
  };
@@ -157,6 +159,12 @@ test('C-53 boundary adopts only stable guarded saved source, never unsaved draft
   params:{slug:name,expectedRevision:held.revision}})).code,
   'S06_HUMAN_NO_CHANGED_SAVED_SOURCE');
  changed=false;
+ raceSecondSave=true;
+ assert.equal((await b.runTrusted({type:'ADOPT_HUMAN',
+  params:{slug:name,expectedRevision:held.revision}})).code,
+  'S06_HUMAN_SAVED_SOURCE_CHANGED_DURING_ADOPTION');
+ assert.equal(x.db.read('meta','s06-human:'+name).record.state,'DEFERRED');
+ raceSecondSave=false;
  const adopted=await b.runTrusted({type:'ADOPT_HUMAN',
   params:{slug:name,expectedRevision:held.revision}});
  assert.equal(adopted.state,'ADOPTED_UNTESTED',JSON.stringify(adopted));
