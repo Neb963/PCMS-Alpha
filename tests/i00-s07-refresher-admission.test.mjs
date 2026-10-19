@@ -125,3 +125,41 @@ test('S07 T-07: a different human/source edit cannot be accepted as the exact pl
     sourceFingerprint:start,candidate:{...candidate,targetFingerprint:start},
     eligible:true,liveAuthorized:true}).ok,false);
 });
+
+test('S07 C-54: verified first marker and actual return to feed admit the next marker, not after ineffective write',async()=>{
+  const {emptyRefreshEvidence,reserveRefreshAttempt,dispatchPossible,
+    reconcileRefreshAttempt,observeRefreshPresence}=await import('../src/runtime/refresher-effect-core.mjs');
+  const initial='a'.repeat(64),first='b'.repeat(64),second='c'.repeat(64);
+  const q=(sourceFingerprint,targetFingerprint,markerId)=>({
+    status:'SUPPORTED_AND_VERIFIED',method:'CONTROLLED_SOURCE_MARKER',allowedByProvider:true,
+    version:'marker_v1',sourceFingerprint,targetFingerprint,markerId,
+    evidenceId:'evidence_12345',meaningfulEffectVerified:true});
+  const begin={...emptyRefreshEvidence(),state:'ABSENT_ONCE',misses:1,lastMissAt:now-600000};
+  const one=reserveRefreshAttempt(begin,{id:'first_intent',at:now,slug:'owned-generator',
+    sourceFingerprint:initial,candidate:q(initial,first,'marker_0000000001'),
+    eligible:true,liveAuthorized:true});
+  assert.equal(one.ok,true);
+  const sent=dispatchPossible(one.evidence,'first_intent',now+1);
+  assert.equal(sent.ok,true);
+  const saved=reconcileRefreshAttempt(sent.evidence,'first_intent',{
+    at:now+2,kind:'EFFECT_CHANGED',sourceFingerprint:first,
+    targetMatched:true,principalMatched:true});
+  assert.equal(saved.effectVerified,true);
+  assert.equal(saved.evidence.savedSourceFingerprint,first);
+  assert.equal(saved.evidence.savedMarkerId,'marker_0000000001');
+  const visible=observeRefreshPresence(saved.evidence,{at:now+600000,
+    present:true,rank:7,complete:true,healthy:true});
+  assert.equal(visible.ok,true);
+  assert.equal(visible.evidence.attempts,0);
+  const missing=observeRefreshPresence(visible.evidence,{at:now+1200000,
+    present:false,complete:true,healthy:true});
+  assert.equal(missing.ok,true);
+  const two=reserveRefreshAttempt(missing.evidence,{id:'second_intent',at:now+1200001,
+    slug:'owned-generator',sourceFingerprint:first,
+    candidate:q(first,second,'marker_0000000002'),eligible:true,liveAuthorized:true});
+  assert.equal(two.ok,true,JSON.stringify(two));
+  const mistaken=reserveRefreshAttempt(missing.evidence,{id:'wrong_intent',at:now+1200001,
+    slug:'owned-generator',sourceFingerprint:initial,
+    candidate:q(initial,second,'marker_0000000002'),eligible:true,liveAuthorized:true});
+  assert.equal(mistaken.ok,false);
+});
