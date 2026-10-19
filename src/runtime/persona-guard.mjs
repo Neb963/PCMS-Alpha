@@ -20,7 +20,7 @@ export async function cachedHealthDomain(evidence){
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
-  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, inspectNoEditorTabs, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, readRuntimeWitness, enrollmentDonor, pinGate = inspectRoutePin }) {
+  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, inspectNoEditorTabs, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, refresherCleanupTab, readRuntimeWitness, enrollmentDonor, pinGate = inspectRoutePin }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -316,6 +316,27 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     return runExistingStep(personaUid,request);
   }
 
+  // A completed marker readback may close only the exact clean S07-owned
+  // editor under the SAME donor lease. Never close human-owned/dirty tabs.
+  async function closeRefresherTab(personaUid,request){
+    if(typeof refresherCleanupTab!=='function'||!request||
+       !/^[a-z0-9][a-z0-9-]{0,99}$/.test(request.slug||'')||
+       !/^[a-f0-9]{32}$/.test(request.nonce||''))
+      return {ok:false,code:'REFRESH_CLEANUP_NOT_AVAILABLE'};
+    const lease=await acquireConflictGuard(personaUid);
+    if(!lease?.ready||!lease.leaseId)
+      return {ok:false,code:lease?.code||'REFRESH_CLEANUP_LEASE_HELD'};
+    try{
+      if(!(await inspectOwnedAction(lease)).ready)
+        return {ok:false,code:'REFRESH_CLEANUP_LEASE_CHANGED'};
+      const reply=await refresherCleanupTab(lease,request);
+      if(!(await inspectOwnedAction(lease)).ready)
+        return {ok:false,code:'REFRESH_CLEANUP_ROUTE_CHANGED'};
+      return reply?.ok===true?reply:{ok:false,code:reply?.code||'REFRESH_CLEANUP_UNKNOWN'};
+    }catch{return {ok:false,code:'REFRESH_CLEANUP_UNKNOWN'};}
+    finally{await releaseConflictGuard(lease);}
+  }
+
   // I13 effectful listing flip is a fixed donor-leased path. The caller must
   // commit DISPATCH_POSSIBLE before admission; protected route loss is held.
   async function runReleaseStep(personaUid,request){
@@ -363,6 +384,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     runReleaseStep,
     runExistingStep,
     runRefresherStep,
+    closeRefresherTab,
     inspectStageEditor,
     inspectSourceEditorIdle,
     releaseStagingTab,
