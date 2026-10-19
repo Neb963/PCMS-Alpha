@@ -5,6 +5,7 @@ import {fail,isSafeId} from './journal.mjs';
 import {transitionCreateIntent} from './coordinator-core.mjs';
 import {coalesceCreation,validateGitCreationWitness} from './creation-intake.mjs';
 import {selectS04Account} from './creation-allocation.mjs';
+import {advanceS04Effect} from './creation-effects.mjs';
 const key=id=>'s00-create-intent:'+id;
 const slugKey=slug=>'s00-create-slug:'+slug;
 function transact(db,mode,schedule){
@@ -180,6 +181,82 @@ export function createCoordinatorStore(db){
       };
     });
   }
+  function stageEffect({intentId,expectedRevision,event,proof={}}){
+    if(!isSafeId(intentId)||!Number.isSafeInteger(expectedRevision)||
+       expectedRevision<1)return Promise.resolve(fail('INVALID_STAGE_REQUEST'));
+    return new Promise((resolve,reject)=>{
+      let tx,result=fail('STAGE_UNCONFIRMED');
+      try{tx=db.transaction(['meta','events','operations'],'readwrite');}
+      catch{return reject(Error('S04_JOURNAL_UNAVAILABLE'));}
+      tx.oncomplete=()=>resolve(result);tx.onabort=()=>reject(Error('S04_JOURNAL_ABORTED'));
+      tx.onerror=()=>{};
+      const m=tx.objectStore('meta'),ops=tx.objectStore('operations');
+      m.get(key(intentId)).onsuccess=e=>{
+        const previous=e.target.result?.record;
+        if(!previous){result=fail('INTENT_NOT_FOUND');return;}
+        if(previous.revision!==expectedRevision){result=fail('STALE_REVISION');return;}
+        m.get('account:'+previous.accountId).onsuccess=a=>{
+          const account=a.target.result?.account;
+          if(!account||account.accountId!==previous.accountId||
+             account.state!=='VERIFIED'||
+             account.revision!==previous.accountRevision||
+             account.personaUid!==previous.personaUid||
+             account.bindingVersion!==previous.bindingVersion||
+             account.identity?.source!=='GUARDED_SESSION_READBACK'||
+             account.identity?.bindingVersion!==previous.bindingVersion){
+            result=fail('ACCOUNT_CONTEXT_CHANGED');return;
+          }
+          const moved=advanceS04Effect(previous,event,proof);
+          if(!moved.ok){result=moved;return;}
+          const creating=['CREATE_PREPARE','RENAME_PREPARE'].includes(event);
+          const create=event.startsWith('CREATE_')||
+            (event==='PREPARED_ABORT'&&previous.state==='CREATE_PREPARED');
+          const opId=creating?proof.operationId:
+            create?previous.createOperationId:previous.renameOperationId;
+          const needsOperation=event!=='TARGET_OBSERVED';
+          if(needsOperation&&!isSafeId(opId)){
+            result=fail('OPERATION_IDENTITY_MISSING');return;
+          }
+          const complete=(old)=>{
+            if(creating&&old){result=fail('OPERATION_ID_REUSED');return;}
+            if(!creating&&needsOperation&&
+               (!old||old.targetId!==intentId||
+                old.effectType!==(create?'s04_create':'s04_rename'))){
+              result=fail('OPERATION_CONTEXT_CHANGED');return;
+            }
+            const required=creating?null:event==='PREPARED_ABORT'?'PREPARED':
+              event.endsWith('_DISPATCH')?'PREPARED':
+              event.endsWith('_CONFIRMED')?'OBSERVING':
+              event.endsWith('_OBSERVING')?['DISPATCH_POSSIBLE','HELD_UNCERTAIN']:
+              event.endsWith('_UNCERTAIN')?['DISPATCH_POSSIBLE','OBSERVING','HELD_UNCERTAIN']:null;
+            if(needsOperation&&!creating&&required&&
+              !(Array.isArray(required)?required.includes(old.status):old.status===required)){
+              result=fail('OPERATION_STATUS_CHANGED');return;
+            }
+            if(needsOperation){
+              const status=creating?'PREPARED':
+                event==='PREPARED_ABORT'?'ABORTED':
+                event.endsWith('_DISPATCH')?'DISPATCH_POSSIBLE':
+                event.endsWith('_OBSERVING')?'OBSERVING':
+                event.endsWith('_UNCERTAIN')?'HELD_UNCERTAIN':'CONFIRMED';
+              ops.put(creating?{operationId:opId,targetId:intentId,
+                effectType:create?'s04_create':'s04_rename',
+                fingerprint:proof.fingerprint,status,revision:1}:
+                {...old,status,revision:old.revision+1});
+            }
+            m.put({key:key(intentId),record:moved.record});
+            tx.objectStore('events').add({stage:'S04_'+event,intentId,
+              slug:previous.slug,operationId:needsOperation?opId:null,
+              state:moved.record.state,revision:moved.record.revision});
+            result={ok:true,record:moved.record,providerEffects:'NOT_EXECUTED_BY_STORE'};
+          };
+          if(needsOperation)
+            ops.get(opId).onsuccess=o=>complete(o.target.result);
+          else complete(null);
+        };
+      };
+    });
+  }
   function listCreate({after=null,limit=50}={}){
     if(after!==null&&!isSafeId(after))return Promise.resolve(fail('INVALID_CURSOR'));
     if(!Number.isSafeInteger(limit)||limit<1||limit>100)
@@ -221,5 +298,5 @@ export function createCoordinatorStore(db){
     return decision.ok?{...decision,providerEffects:'OFF',
       code:'S04_CREATION_ACTIVATION_HELD'}:decision;
   }
-  return Object.freeze({acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,advanceCreate});
+  return Object.freeze({acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,stageEffect,advanceCreate});
 }
