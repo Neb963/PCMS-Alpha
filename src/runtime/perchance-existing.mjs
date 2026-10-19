@@ -1,4 +1,4 @@
-// I13 fixed three actions on one EXCLUSIVE PCMS-owned tagged Firefox tab.
+// I13 guarded source writer; S07 adds PUBLIC REFRESH without unlisting.
 // No generic source/page command, and no mutable source is accepted from UI.
 // Before each possible native mutation, canonical DISPATCH_POSSIBLE is durable.
 export async function perchanceExistingMain(request){
@@ -6,7 +6,7 @@ export async function perchanceExistingMain(request){
   const pathOK=p=>typeof p==='string'&&p.startsWith('src/')&&p.length<=240&&
     p===p.normalize('NFC')&&p.split('/').every(x=>
       /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(x)&&x!=='.'&&x!=='..'&&!x.endsWith('.'));
-  if(!request||!['UNLIST','STAGE','RESTORE'].includes(request.action)||
+  if(!request||!['UNLIST','STAGE','RESTORE','REFRESH'].includes(request.action)||
      typeof request.slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(request.slug)||
      location.origin!=='https://perchance.org'||location.pathname!=='/'+request.slug||
      location.hash!=='#edit')return fail('EXISTING_TARGET_UNVERIFIED');
@@ -50,7 +50,7 @@ export async function perchanceExistingMain(request){
       src.conflictPaths().length===0&&src.hasPending()===false&&
       (await src.isDirty())===false&&model.isClean()===true&&
       html.isClean()===true&&menu.saveState==='saved';
-    const expectedPrivacy=request.action==='UNLIST'?false:true;
+    const expectedPrivacy=['UNLIST','REFRESH'].includes(request.action)?false:true;
     if(!(await clean(expectedPrivacy)))return fail('EXISTING_EDITOR_DIRTY_OR_UNVERIFIED');
     const decode=f=>{
       if(!f||!(f.path==='main.pjs'||f.path==='index.html'||pathOK(f.path))||
@@ -108,6 +108,26 @@ export async function perchanceExistingMain(request){
       return {ok:true,code:'UNLIST_ACK_ONLY'};
     }
     const target=manifest(request.targetFiles);
+    if(request.action==='REFRESH'){
+      // An S07 source refresh is *only* a controlled nonfunctional trailing
+      // HTML marker. It cannot change PJS, assets, delete files or relist.
+      if(typeof request.markerId!=='string'||
+         !/^[A-Za-z0-9_-]{16,64}$/.test(request.markerId)||
+         target.size!==prior.size||
+         [...prior].some(([name,file])=>!target.has(name)||
+           (name!=='index.html'&&!matching(file.bytes,target.get(name).bytes))))
+        return fail('REFRESH_SCOPE_CHANGED');
+      const original=textValue(prior.get('index.html').bytes);
+      const changed=textValue(target.get('index.html').bytes);
+      const pattern=/\\n<!-- pcms-alpha-refresher:([A-Za-z0-9_-]{16,64}) -->$/;
+      const suffix='\\n<!-- pcms-alpha-refresher:'+request.markerId+' -->';
+      const before=pattern.exec(original);
+      const base=before?original.slice(0,-before[0].length):original;
+      if((original.match(/<!-- pcms-alpha-refresher:/g)||[]).length>(before?1:0)||
+         changed!==base+suffix||
+         changed===original)
+        return fail('REFRESH_MARKER_MISMATCH');
+    }
     // Deletions are not optional; an old src file must never survive a
     // replacement merely because it is absent from the new manifest.
     try{
@@ -128,7 +148,7 @@ export async function perchanceExistingMain(request){
     }catch{return fail('EXISTING_SOURCE_MUTATION_UNCERTAIN');}
     if(!solo()||window.__saveInFlight!==false||
        app.data.generator.name!==request.slug||
-       app.data.generator.isPrivate!==true||
+       app.data.generator.isPrivate!==expectedPrivacy||
        document.getElementById('pcms-alpha-editor-context')
          ?.dataset?.pcmsHumanIntent==='true'||
        window.saveCheckpointManager.isDivergenceBlocked()!==false)
@@ -136,7 +156,7 @@ export async function perchanceExistingMain(request){
     let saved;
     try{saved=await app.saveGenerator();}
     catch{return fail('EXISTING_SAVE_POSSIBLY_DISPATCHED');}
-    if(saved===false||app.data.generator.isPrivate!==true||
+    if(saved===false||app.data.generator.isPrivate!==expectedPrivacy||
        menu.saveState!=='saved'||window.__saveInFlight!==false)
       return fail('EXISTING_SAVE_ACK_UNVERIFIED');
     return {ok:true,code:request.action+'_ACK_ONLY'};
