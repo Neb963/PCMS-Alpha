@@ -132,9 +132,11 @@ export function createS06WritebackProgress(api,{
           const ready=await queue.get(summary.slug),
             stage=await createStagingStore(database).getFull(summary.slug),
             job=await createAiStore(database).getJobFull(summary.slug),
-            wb=await createWritebackStore(database).getFull(summary.slug);
+            wb=await createWritebackStore(database).getFull(summary.slug),
+            exception=await createS06ExceptionStore(database).getFull(summary.slug);
           if(!ready.ok||ready.record.revision!==summary.revision)continue;
-          const chosen=planS06Writeback({ready,stage,job,writeback:wb.ok?wb:null});
+          const chosen=planS06Writeback({ready,stage,job,writeback:wb.ok?wb:null,
+             exception:exception.ok?exception:null});
           if(!chosen.ok||chosen.type==='REVIEW')continue;
           const next=i+1<listing.items.length||listing.more?summary.slug:'';
           if(chosen.type==='CANCEL_PREPARED'){
@@ -178,8 +180,10 @@ export function createS06WritebackProgress(api,{
           try{
             if(chosen.type==='PREPARE')
               outcome=await boundary.runTrusted({type:'PREPARE',params:{
-                slug:chosen.slug,mode:'S06',
-                message:'PCMS verified '+chosen.slug+' candidate',
+                slug:chosen.slug,mode:chosen.mode||'S06',
+                message:chosen.mode==='S06_EXCEPTION'?
+                  'PCMS exceptional '+chosen.slug+' candidate':
+                  'PCMS verified '+chosen.slug+' candidate',
                 token:credential.credential,
                 expectedJobRevision:chosen.jobRevision,
                 fingerprint:chosen.sourceFingerprint}});
