@@ -306,6 +306,7 @@ export function createRefresherStore(db){
     return {ok:true,state:out,claim:{id,stableId,slug:r.slug,accountId:r.accountId,
       personaUid:r.personaUid,bindingVersion:r.bindingVersion,
       principalFingerprint:s.accounts[r.accountId]?.principalFingerprint,
+      remoteId:r.remoteId,markerId:attempt.evidence.intent?.markerId||null,
       releaseFingerprint:r.releaseFingerprint,sourceFingerprint:currentSource,
       targetFingerprint:attempt.evidence.intent?.targetFingerprint||null},
       changes:[{code:'REFRESH_RESERVED',scopeId:stableId}]};
@@ -322,11 +323,13 @@ export function createRefresherStore(db){
   },{sync:true});
   const markDispatch=(claim,now)=>mutate(null,s=>{
     const r=s.rows.find(x=>x.stableId===claim?.stableId);
-    if(!r||r.accountId!==claim.accountId||r.personaUid!==claim.personaUid||
+    if(!r||r.remoteId!==claim.remoteId||r.accountId!==claim.accountId||
+      r.personaUid!==claim.personaUid||
       r.bindingVersion!==claim.bindingVersion||r.releaseFingerprint!==claim.releaseFingerprint||
       (r.refresh?.savedSourceFingerprint||r.releaseFingerprint)!==claim.sourceFingerprint||
       r.refresh?.intent?.targetFingerprint!==(
         claim.targetFingerprint||undefined)||
+      (r.refresh?.intent?.markerId||null)!==(claim.markerId||null)||
       !r.ownerVerified||!r.releaseVerified||r.identityHeld||r.reviewHeld||
       r.listing!=='PUBLIC'||s.accounts[r.accountId]?.principalFingerprint!==claim.principalFingerprint||
       !r.slot||r.phase!=='ACTIVE'||rowBlocks(s,r).length)
