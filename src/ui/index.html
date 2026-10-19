@@ -239,6 +239,22 @@
           </div>
           <p class="reason">When someone edits the generator during review, Defer locally revokes unsent approval and blocks publication without touching or clearing the editor. Unsaved changes are preserved in place; save them yourself before selecting Adopt. Adoption independently reads the complete saved source under the protected Persona, archives the original reviewed F/P and starts a new, untested candidate. It never publishes or commits the changes automatically.</p>
           <p id="pcms-s06-human-status" role="status" aria-live="polite">Select a generator and inspect the review state before Defer or Adopt.</p>
+          <div class="account-controls">
+            <label for="pcms-s06-exception-mode">Exceptional review (only if actual test/helper infrastructure or optional Chat 2 is unavailable)</label>
+            <select id="pcms-s06-exception-mode">
+              <option value="OPTIONAL_CHAT2_INCOMPLETE">Optional Chat 2 incomplete — verified Chat 1 only</option>
+              <option value="MANUAL_INFRASTRUCTURE">Required testing infrastructure unavailable — manual checks</option>
+            </select>
+            <button id="pcms-s06-exception-inspect" type="button">Inspect exceptional evidence</button>
+          </div>
+          <div class="account-controls">
+            <label for="pcms-s06-exception-checks">Actual manual checks — one per line: required test name, then tab, then a description of the check performed and observed result</label>
+            <textarea id="pcms-s06-exception-checks" rows="4" maxlength="125000" spellcheck="false" placeholder="default_generator_smoke&#9;Opened the saved unlisted generator and confirmed ..."></textarea>
+            <label for="pcms-s06-exception-consent"><input id="pcms-s06-exception-consent" type="checkbox"> I personally performed the listed checks (not AI-verified)</label>
+            <button id="pcms-s06-exception-record" type="button" disabled>Record exceptional review evidence</button>
+          </div>
+          <p class="reason">An exceptional record is not an AI test PASS, a Git commit, publication approval or permission to bypass a known failing required test. Its exact saved-source revision and real test observations must still be independently rechecked before any subsequent write or publication.</p>
+          <p id="pcms-s06-exception-status" role="status" aria-live="polite">No exceptional source reviewed.</p>
           <p id="pcms-release-status" role="status" aria-live="polite">No release selected; publication remains disabled.</p>
           <div id="pcms-release-diff" class="table-wrap" role="region" tabindex="0" aria-label="Exact F and previous byte manifest"></div>
         </section>
