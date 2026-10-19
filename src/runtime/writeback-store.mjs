@@ -128,7 +128,9 @@ export function createWritebackStore(db){
                  currentStage.sourceFolder!==stage.sourceFolder||
                  (mode==='S06'&&(currentStage.readyIdentifier!==stage.readyIdentifier||
                    currentStage.readyInputFingerprint!==stage.readyInputFingerprint||
-                   currentStage.testingSha!==stage.testingSha))||
+                   currentStage.testingSha!==stage.testingSha||
+                   currentJob.readyIdentifier!==currentStage.readyIdentifier||
+                   currentJob.readyInputFingerprint!==currentStage.readyInputFingerprint))||
                  (mode==='AUTO'&&!currentSettings.autoEnabled)){
                 done(fail('WRITEBACK_CONTEXT_CHANGED'));return;
               }
@@ -206,6 +208,8 @@ export function createWritebackStore(db){
                  stage.principalFingerprint!==r.principalFingerprint||
                  stage.remotePublicId!==r.remotePublicId||
                  stage.sourceHead!==r.baseHead||stage.sourceFolder!==r.folder||
+                 (r.mode==='S06'&&(job.readyIdentifier!==stage.readyIdentifier||
+                   job.readyInputFingerprint!==stage.readyInputFingerprint))||
                  (r.mode==='AUTO'&&(!mode.autoEnabled||
                    r.settingRevision!==mode.revision))){
                 done(fail('WRITEBACK_ADMISSION_REVOKED'));return;
