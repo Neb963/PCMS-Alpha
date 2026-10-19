@@ -66,6 +66,23 @@ export function assessS06Exception({ready,stage,job,mode,checks}={}){
       'INDEPENDENT_CHAT1_PASS_OPTIONAL_CHAT2_UNVERIFIED',
     publication:'REQUIRES_SEPARATE_SOURCE_BOUND_APPROVAL'};
 }
+// An exceptional record is review evidence, not fabricated test success.
+// Every consumer must re-read the current READY/stage/job under its OWN CAS.
+export function authorizeS06Exception({ready,stage,job,record}={}){
+ if(record?.state!=='RECORDED'||record.slug!==stage?.slug||
+    record.stageRevision!==stage?.revision||
+    record.jobRevision!==job?.revision||
+    record.sourceFingerprint!==job?.sourceFingerprint||
+    record.readyIdentifier!==ready?.active?.identifier||
+    record.readyInputFingerprint!==ready?.active?.inputFingerprint)
+  return fail('S06_EXCEPTION_REVISION_OR_SOURCE_STALE');
+ const recheck=assessS06Exception({
+   ready,stage,job,mode:record.mode,checks:record.manualChecks});
+ if(!recheck.ok)return recheck;
+ return {ok:true,mode:record.mode,revision:record.revision,
+   sourceFingerprint:record.sourceFingerprint,
+   evidenceMode:record.evidenceMode};
+}
 const visible=r=>r?{ok:true,slug:r.slug,revision:r.revision,
  mode:r.mode,state:r.state,sourceFingerprint:r.sourceFingerprint,
  stageRevision:r.stageRevision,jobRevision:r.jobRevision,
@@ -85,6 +102,11 @@ function transact(db,write,fn){
  });
 }
 export function createS06ExceptionStore(db){
+ const getFull=name=>!slug(name)?Promise.resolve(fail('S06_EXCEPTION_SLUG_INVALID')):
+  transact(db,false,(m,t,done)=>m.get(key(name)).onsuccess=e=>{
+    const record=e.target.result?.record;
+    done(record?{ok:true,record}:fail('S06_EXCEPTION_NOT_FOUND'));
+  });
  const get=name=>!slug(name)?Promise.resolve(fail('S06_EXCEPTION_SLUG_INVALID')):
   transact(db,false,(m,t,done)=>m.get(key(name)).onsuccess=e=>
     done(visible(e.target.result?.record)));
@@ -146,7 +168,7 @@ export function createS06ExceptionStore(db){
    };
   });
  }
- return Object.freeze({get,record});
+ return Object.freeze({get,getFull,record});
 }
 export function createS06ExceptionBoundary(api,{open=openCanonicalDatabase}={}){
  const sentinel=createRestoreSentinel(api.storage.local);
