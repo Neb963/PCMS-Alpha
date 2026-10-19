@@ -77,6 +77,52 @@ export function findEligibleSupply(db,slugName){
     };
   });
 }
+// S05/S04 bridge: supply batches are not the sole source of newly created
+// generators. S04 persists an independently confirmed private inventory row
+// and a non-READY Git source link. This is a read-only eligibility lookup;
+// the donor must still prove the current private-empty source and owner.
+export async function findEligibleManagedSource(db,slugName){
+  if(!slug(slugName))return fail('INVALID_SLUG');
+  const legacy=await findEligibleSupply(db,slugName);
+  if(legacy.ok||legacy.code!=='PRIVATE_NEW_SUPPLY_REQUIRED')return legacy;
+  return txn(db,'readonly',(tx,done)=>{
+    const m=tx.objectStore('meta');
+    m.get('source-link:'+slugName).onsuccess=ls=>{
+      const link=ls.target.result?.link;
+      if(link?.source!=='S04_INDEPENDENT_NOT_READY_ASSOCIATION'||
+         link.folder!=='generators/'+slugName||link.slug!==slugName){
+        done(fail('S04_INDEPENDENT_ASSOCIATION_REQUIRED'));return;
+      }
+      m.get('inventory:'+slugName).onsuccess=iv=>{
+        const item=iv.target.result?.generator;
+        if(!item||item.slug!==slugName||
+           item.ownerState!=='OBSERVED_OWNER'||
+           item.visibility!=='UNLISTED'||
+           item.management!=='MANAGED_CREATED'||
+           item.source!=='SOURCE_PENDING'||
+           !item.remoteId||item.remoteId!==link.remoteId||
+           item.accountId!==link.accountId||
+           item.personaUid!==link.personaUid||
+           item.bindingVersion!==link.bindingVersion){
+          done(fail('S04_PRIVATE_CREATED_OWNER_UNVERIFIED'));return;
+        }
+        m.get('account:'+link.accountId).onsuccess=ar=>{
+          const account=ar.target.result?.account;
+          if(!account||account.state!=='VERIFIED'||
+             account.accountId!==link.accountId||
+             account.personaUid!==link.personaUid||
+             account.bindingVersion!==link.bindingVersion||
+             account.identity?.source!=='GUARDED_SESSION_READBACK'||
+             account.identity?.bindingVersion!==link.bindingVersion||
+             !/^[a-f0-9]{64}$/.test(account.identity?.principalFingerprint||'')){
+            done(fail('S04_ACCOUNT_CONTEXT_CHANGED'));return;
+          }
+          done({ok:true,account,item,link,origin:'S04_CONFIRMED_CREATED'});
+        };
+      };
+    };
+  });
+}
 export function createStagingStore(db){
   const getFull=slugName=>!slug(slugName)?Promise.resolve(fail('INVALID_SLUG')):
     txn(db,'readonly',(tx,done)=>{
