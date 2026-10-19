@@ -383,7 +383,14 @@ attachPcmsGuard({
     let disposableNonce=null;
     try{
       if(!tab){
-        if(!monitoringRequest)return {ok:false,code:'NO_PERCHANCE_TAB'};
+        // Source preparation and lost-ACK readback also need unattended
+        // read-only access to one exact owned slug. Never open for arbitrary
+        // identity-only browsing or mutation/page command.
+        const fixedSource=!identityOnly&&originalSlug!==null&&
+          typeof originalSlug==='string'&&
+          /^[a-z0-9][a-z0-9-]{0,99}$/.test(originalSlug);
+        if(!monitoringRequest&&!fixedSource)
+          return {ok:false,code:'NO_PERCHANCE_TAB'};
         disposableNonce=crypto.randomUUID().replaceAll('-','');
         tab=await browser.tabs.create({
           url:'https://perchance.org/',cookieStoreId,active:false
