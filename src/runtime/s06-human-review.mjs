@@ -79,6 +79,10 @@ export function createS06HumanStore(db){
   return transact(db,true,(m,t,done)=>m.get(KEY(name)).onsuccess=oldHuman=>{
    const prior=oldHuman.target.result?.record;
    if(prior?.state==='DEFERRED'){done(fail('S06_HUMAN_ALREADY_DEFERRED'));return;}
+   m.get('s06-change:'+name).onsuccess=ch=>{
+    if(ch.target.result?.record?.state==='REQUESTED'){
+      done(fail('S06_PENDING_REQUEST_CHANGES'));return;
+    }
    readCurrent(m,name,done,({ready,s,j,w,release})=>{
     if(!candidate(ready,s,j,w)||
        s.revision!==expectedStageRevision||
@@ -107,6 +111,7 @@ export function createS06HumanStore(db){
       providerEffects:'NONE',savedHumanBytes:'NOT_TOUCHED'});
     done(show(row));
    });
+   };
   });
  }
  function adopt({name,expectedRevision,source}){
