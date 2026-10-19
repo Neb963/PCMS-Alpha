@@ -84,11 +84,14 @@ function fixture({gate=true,failDispatch=false,lostAck=false,wrongOwner=false,
   };
   const boundary=createSupplyBoundary(api,{open:async()=>({}),
     makeStores:()=>stores,guard:()=>guard,effectGate:()=>gateOn,
-    gitGate:()=>gate,gitWrite:async ({folder,slug,token})=>{
+    gitGate:()=>gate,
+    getGitConnection:async()=>({repository:'Neb963/per-gens',repositoryId:'42'}),
+    getGitCredential:async()=>({ok:true,credential:'offline-git-token-01'}),
+    gitWrite:async ({folder,slug,token})=>{
       assert.equal(trace.at(-1),'GIT_DISPATCH_POSSIBLE');
-      assert.equal(folder,'gens/'+slug);
+      assert.equal(folder,'generators/'+slug);
       assert.equal(token,'offline-git-token-01');
-      gitLedger.push({path:folder+'/DEPLOYMENT.md',content:'Status: SOURCE_PENDING\\n'});
+      gitLedger.push({path:folder+'/DEPLOYMENT.md',content:'Status: NOT_READY\\n'});
       return {ok:true,source:'GIT_READBACK',ready:false,emptyFolder:true,folder};
     }});
   const run=(type,params={})=>boundary.run({type,params},sender);
@@ -127,12 +130,12 @@ test('P56-06 F: Git marker uses its own journal, no premature READY or duplicate
   assert.equal((await f.dispatch()).state,'CREATE_CONFIRMED');
   assert.equal((await f.dispatch()).state,'SOURCE_PENDING');
   const request=()=>f.run('FINISH_SOURCE_FOLDER',{batchId:batch.batchId,
-    itemId:f.item().itemId,expectedRevision:f.item().revision,token:'offline-git-token-01'});
+    itemId:f.item().itemId,expectedRevision:f.item().revision});
   const result=await request();
   assert.equal(result.ok,true,result.code);
   assert.equal(result.state,'CONFIRMED');
   assert.equal(f.gitLedger.length,1);
-  assert.equal(f.gitLedger[0].path,'gens/requested-slug/DEPLOYMENT.md');
+  assert.equal(f.gitLedger[0].path,'generators/requested-slug/DEPLOYMENT.md');
   assert.deepEqual(f.trace.slice(-4),[
     'GIT_PREPARED','GIT_DISPATCH_POSSIBLE','GIT_OBSERVING','SOURCE_CONFIRMED'
   ]);
@@ -194,6 +197,9 @@ test('P56-06 F: sender, owner/cookie proof, raw transport, and oversized list de
       expectedRevision:1,providerApproved:true}}).code,'INVALID_PARAMS');
   assert.equal(validateSupplyMessage(api,sender,{type:'GIT_WRITE',params:{}})
     .code,'CAPABILITY_OFF');
+  assert.equal(validateSupplyMessage(api,sender,{type:'FINISH_SOURCE_FOLDER',params:{
+    batchId:batch.batchId,itemId:batch.items[0].itemId,expectedRevision:1,
+    token:'UI_MUST_NEVER_CONTROL_GIT_CREDENTIAL'}}).code,'INVALID_PARAMS');
   assert.equal(validateSupplyMessage(api,sender,{type:'FREEZE',params:{
     accountId:account.accountId,expectedAccountRevision:2,
     batchId:'batch_fake_01',slugs:Array(101).fill('slug-a')}}).code,'INVALID_PARAMS');
