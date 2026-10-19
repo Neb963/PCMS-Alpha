@@ -27,6 +27,8 @@ const verified=(ready,stage,job,wb)=>{
     stage.readyIdentifier===active.identifier&&
     stage.readyInputFingerprint===active.inputFingerprint&&
     job.stageRevision===stage.revision&&job.state==='TESTS_VERIFIED'&&
+    job.readyIdentifier===active.identifier&&
+    job.readyInputFingerprint===active.inputFingerprint&&
     job.executionSlotReleased===true&&
     ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(job.native?.state)&&
     fp(job.verifiedFinal)&&job.verifiedFinal===job.sourceFingerprint&&
