@@ -4,6 +4,7 @@
 import {openCanonicalDatabase,createRestoreSentinel,fail} from './journal.mjs';
 import {createCoordinatorStore} from './coordinator-store.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
+import {createS04GitContinuation} from './creation-git-runner.mjs';
 import {isI17Quarantined,I17_QUARANTINE_CODE} from './legacy-quarantine.mjs';
 const fingerprint=async data=>[...new Uint8Array(await crypto.subtle.digest(
   'SHA-256',new TextEncoder().encode(JSON.stringify(data))))]
@@ -14,8 +15,9 @@ const routeSame=(before,after)=>before?.ready===true&&after?.ready===true&&
   before.routeId===after.routeId;
 export function createCreationRunner(api,{open=openCanonicalDatabase,
   makeStore=createCoordinatorStore,guard=internalPcmsGuard,
-  effectGate=()=>false,now=Date.now}={}){
+  effectGate=()=>false,createGit=createS04GitContinuation,now=Date.now}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
+  const git=createGit(api,{open});
   let dbPromise;
   const store=async()=>makeStore(await (dbPromise||=open().catch(e=>{
     dbPromise=null;throw e;})));
@@ -33,6 +35,8 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         return await s.allocateCreate(item.intentId,item.revision);
       if(item.state==='ADOPTION_ORIGINAL_PENDING')
         return fail('ADOPTION_SOURCE_CHECKPOINT_REQUIRED');
+      if(item.state.startsWith('GIT_'))
+        return await git.step(item.intentId,item.revision);
       const g=guard();
       if(!g?.getSafeRouteReadiness||!g?.runSupplyStep)
         return fail('DONOR_GUARD_UNAVAILABLE');
