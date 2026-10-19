@@ -4,8 +4,10 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {openCanonicalDatabase,createRestoreSentinel,fail} from './journal.mjs';
 import {createReadyStore} from './ready-store.mjs';
 import {createWritebackStore} from './writeback-store.mjs';
+import {createS06ExceptionStore} from './s06-exception-review.mjs';
 import {sealedS06OutputProof} from './s06-output-proof.mjs';
 import {createStagingStore} from './staging-store.mjs';
+import {createAiStore} from './ai-store.mjs';
 import {stageReadyGitSource} from './ready-git-source.mjs';
 import {evaluateStageSuccessor} from './ready-source-safety.mjs';
 import {scanMainCatalog} from './git-catalog.mjs';
@@ -113,8 +115,12 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
    const tree=await scan({repository:cfg.repository,token:secret.credential});
    if(!tree?.ok||!tree.complete||tree.repositoryId!==cfg.repositoryId)
     return fail('S05_GIT_MAIN_UNVERIFIED');
-   const confirmed=await createWritebackStore(db).getFull(name);
-   const output=sealedS06OutputProof({ready:initial,stage,writeback:confirmed});
+   const [confirmed,job,exception]=await Promise.all([
+     createWritebackStore(db).getFull(name),
+     createAiStore(db).getJobFull(name),
+     createS06ExceptionStore(db).getFull(name)]);
+   const output=sealedS06OutputProof({ready:initial,stage,
+     writeback:confirmed,job,exception});
    const coherent=await inspect({repository:cfg.repository,
      token:secret.credential,pinnedHead:tree.head,
      slug:name,includeSourceBytes:message.type==='PREPARE_LOCAL',
