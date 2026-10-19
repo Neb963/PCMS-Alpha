@@ -669,12 +669,13 @@ attachPcmsGuard({
   // requires that exact tagged tab; missing or ambiguous state never opens
   // another or acquires human-owned editor authority.
   existingIsolatedTab: async ({personaUid,cookieStoreId,routeId},request)=>{
-    if(!['UNLIST','STAGE','RESTORE'].includes(request?.action)||
+    if(!['UNLIST','STAGE','RESTORE','REFRESH'].includes(request?.action)||
        typeof request.slug!=='string'||
        !/^[a-z0-9][a-z0-9-]{0,99}$/.test(request.slug)||
        typeof request.nonce!=='string'||!/^[a-f0-9]{32}$/.test(request.nonce)||
        !Array.isArray(request.previousFiles)||request.previousFiles.length<2||
        request.previousFiles.length>502||
+       (request.action==='REFRESH'&&!/^[A-Za-z0-9_-]{16,64}$/.test(request.markerId||''))||
        (request.action!=='UNLIST'&&(!Array.isArray(request.targetFiles)||
          request.targetFiles.length<2||request.targetFiles.length>502)))
       return {ok:false,code:'INVALID_EXISTING_REQUEST'};
@@ -685,7 +686,7 @@ attachPcmsGuard({
       return {ok:false,code:'EXISTING_PROTECTED_ROUTE_CHANGED'};
     const url='https://perchance.org/'+request.slug+'#edit',tabs=await browser.tabs.query({});
     let tab;
-    if(request.action==='UNLIST'){
+    if(request.action==='UNLIST'||request.action==='REFRESH'){
       if(tabs.some(t=>t?.url?.startsWith('https://perchance.org/'+request.slug)&&
         (t.cookieStoreId===cookieStoreId||t.url?.includes('#edit'))))
         return {ok:false,code:'HUMAN_OR_AMBIGUOUS_EDITOR'};
@@ -694,7 +695,8 @@ attachPcmsGuard({
       // Crash before session tag is ambiguous; tab is preserved for human.
       await browser.sessions.setTabValue(tab.id,'pcmsI09Owned',{
         slug:request.slug,nonce:request.nonce,personaUid,cookieStoreId,
-        createdBy:'PCMS_I13',humanIntent:false
+        createdBy:request.action==='REFRESH'?'PCMS_S07':'PCMS_I13',
+        humanIntent:false
       });
       const matched=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned');
       if(matched?.nonce!==request.nonce)
@@ -723,7 +725,8 @@ attachPcmsGuard({
     const selected=await browser.tabs.get(tab.id);
     const tagged=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned');
     if(selected.url!==url||selected.cookieStoreId!==cookieStoreId||
-       tagged?.nonce!==request.nonce||tagged?.createdBy!=='PCMS_I13'||
+       tagged?.nonce!==request.nonce||
+       tagged?.createdBy!==(request.action==='REFRESH'?'PCMS_S07':'PCMS_I13')||
        tagged?.humanIntent===true)
       return {ok:false,code:'EXISTING_TAB_CONTEXT_CHANGED'};
     const result=await browser.scripting.executeScript({
