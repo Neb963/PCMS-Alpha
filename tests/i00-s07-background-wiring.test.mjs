@@ -12,7 +12,7 @@ test('S07 B packaging input: sole Refresher wake includes dormant guarded native
     'perchance-existing.mjs','perchance-observer.mjs','perchance-monitor.mjs'])
     assert.ok(overlay.includes("'"+required+"'"),required);
   assert.match(overlay,/refresherCleanupTab: async/);
-  assert.match(overlay,/createdBy:'PCMS_S07'/);
+  assert.match(overlay,/createdBy:request\.action==='REFRESH'\?'PCMS_S07':'PCMS_I13'/);
   assert.match(overlay,/func:perchanceExistingMain,args:\[request\]/);
   assert.match(overlay,/func:perchanceRefresherCleanMain,args:\[slug\]/);
 });
