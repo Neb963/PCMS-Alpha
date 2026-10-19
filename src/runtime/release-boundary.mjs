@@ -200,7 +200,8 @@ export function createReleaseBoundary(api,{
     // old I13 candidate seems locally tested. The *same* S05 revision must
     // have an independently attributed, byte-confirmed Git main commit.
     const ready=await createReadyStore(database).get(name);
-    if(ready.ok){
+    if(r.readyIdentifier){
+      if(!ready.ok)return fail('S06_CURRENT_READY_RECORD_REQUIRED');
       const wb=await createWritebackStore(database).getFull(name);
       const check=planS06Writeback({ready,stage,job,writeback:wb.ok?wb:null});
       if(!check.ok||check.type!=='REVIEW'||
