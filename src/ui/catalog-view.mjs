@@ -178,14 +178,26 @@ async function renderReadyQueue(scanGeneration){
         }
         pause.addEventListener('click',()=>{void changeHold('PAUSE_READY');});
         resume.addEventListener('click',()=>{void changeHold('RESUME_READY');});
-        cell.append(check,document.createTextNode(' '),prepare,
-          document.createTextNode(' '),pause,document.createTextNode(' '),
-          resume,document.createTextNode(' '),publicUpdate,result);tr.append(cell);
+        const diagnostics=document.createElement('details');
+        const summary=document.createElement('summary');
+        summary.textContent='Diagnostics and manual recovery';
+        diagnostics.append(summary,check,document.createTextNode(' '),
+          prepare,document.createTextNode(' '),publicUpdate);
+        // Ordinary READY work advances through the background coordinator.
+        // The normal row exposes only pause/resume and an actionable status.
+        cell.append(pause,document.createTextNode(' '),resume,
+          result,diagnostics);tr.append(cell);
         tbody.append(tr);
       }
       after=r.nextCursor||'';
       next.hidden=!r.more;
-      progress.textContent=tbody.children.length+' observed local candidates; no provider or Git effects implied.';
+      let last=null;
+      try{last=(await browser.storage.local.get('pcmsS05DevelopmentReceipt'))
+        ?.pcmsS05DevelopmentReceipt||null;}catch{}
+      progress.textContent=tbody.children.length+' READY candidate(s). '+
+        (last?.slug&&last?.code?
+          'Latest development: '+last.slug+' — '+last.code+'.':
+          'Waiting for the next eligible background development step.');
     }catch{if(list.contains(section))progress.textContent='Read-only READY queue unavailable.';}
     finally{busyPage=false;next.disabled=false;}
   }
