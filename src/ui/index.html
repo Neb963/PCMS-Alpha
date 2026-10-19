@@ -232,6 +232,13 @@
             <label for="pcms-s06-change-instructions">Requested changes (a new tested child revision; no publication)</label>
             <textarea id="pcms-s06-change-instructions" rows="3" maxlength="4000" spellcheck="true" placeholder="Describe the changes to the reviewed source."></textarea>
           </div>
+          <div class="account-controls">
+            <button id="pcms-s06-human-inspect" type="button">Inspect human-review state</button>
+            <button id="pcms-s06-human-defer" type="button" disabled>Defer — preserve human work</button>
+            <button id="pcms-s06-human-adopt" type="button" disabled>Adopt saved changes and retest</button>
+          </div>
+          <p class="reason">When someone edits the generator during review, Defer locally revokes unsent approval and blocks publication without touching or clearing the editor. Unsaved changes are preserved in place; save them yourself before selecting Adopt. Adoption independently reads the complete saved source under the protected Persona, archives the original reviewed F/P and starts a new, untested candidate. It never publishes or commits the changes automatically.</p>
+          <p id="pcms-s06-human-status" role="status" aria-live="polite">Select a generator and inspect the review state before Defer or Adopt.</p>
           <p id="pcms-release-status" role="status" aria-live="polite">No release selected; publication remains disabled.</p>
           <div id="pcms-release-diff" class="table-wrap" role="region" tabindex="0" aria-label="Exact F and previous byte manifest"></div>
         </section>
