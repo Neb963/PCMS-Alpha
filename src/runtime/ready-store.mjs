@@ -90,6 +90,35 @@ export function createReadyStore(db){
    };
   });
  }
+ // A coherent complete main scan says this recognized folder is NOT_READY.
+ // Retain lineage and source history; revoke advancement, never infer remote
+ // deletion or free a possible in-flight provider/native writer.
+ function holdNotReady({slug,repositoryId,head}){
+  if(!ID.test(slug||'')||!/^[1-9][0-9]{0,19}$/.test(repositoryId||'')||
+     !/^[a-f0-9]{40}$/.test(head||''))
+   return Promise.resolve(fail('READY_HOLD_PROOF_INVALID'));
+  return tx(db,'readwrite',(t,done)=>{
+   const m=t.objectStore('meta');
+   m.get(key(slug)).onsuccess=e=>{
+     const old=e.target.result?.record;
+     if(!old){done({ok:true,changed:false,code:'READY_NEVER_ADMITTED'});return;}
+     if(old.repositoryId!==repositoryId){
+       done(fail('READY_REPOSITORY_ASSOCIATION_CHANGED'));return;
+     }
+     if(old.hold==='READY_REVOKED_NOT_READY'){
+       done({ok:true,changed:false,code:'READY_ALREADY_HELD',
+         record:view(old)});return;
+     }
+     const next={...old,revision:old.revision+1,
+       hold:'READY_REVOKED_NOT_READY',revokedAtHead:head};
+     m.put({key:key(slug),record:next});
+     t.objectStore('events').add({stage:'S05_READY_REVOKED_NOT_READY',
+       slug,repositoryId,head,revision:next.revision,providerEffects:'NONE'});
+     done({ok:true,changed:true,code:'READY_REVOKED_NOT_READY',
+       record:view(next)});
+   };
+  });
+ }
  function list({after='',limit=100}={}){
   if(typeof after!=='string'||after.length>100||
      !Number.isInteger(limit)||limit<1||limit>200)
@@ -108,5 +137,5 @@ export function createReadyStore(db){
    };
   });
  }
- return Object.freeze({get,observe,handoff,list});
+ return Object.freeze({get,observe,handoff,holdNotReady,list});
 }
