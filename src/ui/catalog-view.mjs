@@ -115,7 +115,26 @@ async function renderReadyQueue(scanGeneration){
           }catch{result.textContent=' Assessment unavailable; no action performed.';}
           finally{check.disabled=false;}
         });
-        cell.append(check,result);tr.append(cell);
+        const prepare=document.createElement('button');
+        prepare.type='button';
+        prepare.textContent='Prepare source locally';
+        prepare.disabled=!connected||(!item.desired&&!item.active);
+        prepare.setAttribute('aria-label','Prepare local READY source for '+item.slug);
+        prepare.addEventListener('click',async()=>{
+          if(prepare.disabled)return;
+          prepare.disabled=true;check.disabled=true;
+          result.textContent=' Rechecking owner, editor and full source…';
+          try{
+            const out=await request('PREPARE_LOCAL',{
+              slug:item.slug,expectedRevision:item.revision
+            },'pcms-s05-ready-operator');
+            result.textContent=' '+(out?.code||'PREPARATION_UNAVAILABLE');
+            if(out?.code==='S05_LOCAL_STAGE_PINNED')
+              progress.textContent='Local stage pinned without provider effects. Re-scan the catalog to refresh revision; native editing remains separately guarded.';
+          }catch{result.textContent=' Local preparation unavailable; recheck canonical state.';}
+          finally{prepare.disabled=false;check.disabled=false;}
+        });
+        cell.append(check,document.createTextNode(' '),prepare,result);tr.append(cell);
         tbody.append(tr);
       }
       after=r.nextCursor||'';
