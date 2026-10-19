@@ -99,7 +99,7 @@ export async function findEligibleManagedSource(db,slugName){
            item.ownerState!=='OBSERVED_OWNER'||
            item.visibility!=='UNLISTED'||
            item.management!=='MANAGED_CREATED'||
-           item.source!=='SOURCE_PENDING'||
+           !['SOURCE_PENDING','SOURCE_VERIFIED'].includes(item.source)||
            !item.remoteId||item.remoteId!==link.remoteId||
            item.accountId!==link.accountId||
            item.personaUid!==link.personaUid||
