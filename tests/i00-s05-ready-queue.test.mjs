@@ -65,3 +65,17 @@ test('S05 queue enumerates >200 independently committed generators in pages',asy
  assert.equal(c.items.length,25);assert.equal(c.more,false);
  assert.equal(new Set([...a.items,...b.items,...c.items].map(x=>x.slug)).size,225);
 });
+test('S05 previously consumed READY cannot be resurrected by Git main rollback',async()=>{
+ const db=fakeDatabase(),s=createReadyStore(db),a=w('rev00001'),b=w('rev00002');
+ assert.equal((await s.observe(a)).code,'READY_QUEUED');
+ assert.equal((await s.observe(b)).code,'READY_QUEUED');
+ const before=db.keys('events').length;
+ const rollback=await s.observe(a);
+ assert.equal(rollback.code,'READY_PREVIOUSLY_CONSUMED');
+ assert.equal(rollback.changed,false);
+ assert.equal((await s.get('safe-slug')).record.desired.identifier,'rev-rev00002');
+ assert.equal(db.keys('events').length,before);
+ const abuse=await s.observe({...a,inputFingerprint:'b'.repeat(64)});
+ assert.equal(abuse.code,'READY_REVISION_REUSED_WITH_DIFFERENT_SOURCE');
+ assert.equal(db.keys('events').length,before);
+});
