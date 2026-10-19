@@ -17,6 +17,16 @@ const HEX=/^[0-9a-f]{64}$/;
 export function planS06Writeback({ready,stage,job,writeback}={}){
   const record=ready?.record||ready,st=stage?.record||stage,j=job?.job||job;
   const previous=writeback?.record||writeback;
+  // Historical possibly-dispatched Git effects must be reconciled even
+  // after READY supersession, revoked admission or an AI stage transition.
+  // This path can ONLY observe the sealed prior intent, never arm new work.
+  if(previous?.mode==='S06'&&
+     ['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(previous.state)&&
+     ID.test(previous.slug||'')&&
+     Number.isSafeInteger(previous.revision)&&previous.revision>0&&
+     record?.slug===previous.slug)
+    return {ok:true,type:'RECONCILE',slug:previous.slug,
+      revision:previous.revision,readOnly:true};
   const wanted=record?.active;
   // A queued desired READY has no admission/writer authority. Only
   // current active READY without a successor may write back tested F.
@@ -47,8 +57,6 @@ export function planS06Writeback({ready,stage,job,writeback}={}){
        previous.sourceFingerprint===j.verifiedFinal)
       return {ok:true,type:'REVIEW',slug:st.slug,
         sourceFingerprint:j.verifiedFinal,commitSha:previous.commitSha};
-    if(['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(previous.state))
-      return {ok:true,type:'RECONCILE',slug:st.slug,revision:previous.revision};
     if(previous.state==='PREPARED'){
       if(previous.stageRevision!==st.revision||
          previous.jobRevision!==j.revision||
