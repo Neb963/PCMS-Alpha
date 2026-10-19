@@ -53,8 +53,12 @@ export function coalesceCreation(existing,source){
        s.repositoryId!==nextSource.repositoryId))return fail('GIT_REPOSITORY_COLLISION');
   if(!git&&prior.some(s=>s.type==='OPERATOR'&&s.intentId===source.intentId&&
        s.accountId!==(source.accountId||null)))return fail('INTENT_ID_CONFLICT');
-  const pinConflict=!git&&source.accountId&&existing?.accountId&&
-    source.accountId!==existing.accountId;
+  const pins=new Set(prior.filter(s=>s.type==='OPERATOR'&&s.accountId)
+    .map(s=>s.accountId));
+  if(!git&&source.accountId)pins.add(source.accountId);
+  const pinConflict=pins.size>1||
+    (!!existing?.accountId&&[...pins].some(p=>p!==existing.accountId));
+  const selectedPin=!pinConflict&&pins.size===1?[...pins][0]:null;
   if(idx>=0&&git&&prior[idx].markerOid===nextSource.markerOid)
     return {ok:true,duplicate:true,changed:false,record:existing};
   if(idx>=0&&JSON.stringify(prior[idx])===JSON.stringify(nextSource))
@@ -62,6 +66,8 @@ export function coalesceCreation(existing,source){
   const sources=prior.slice();
   if(idx>=0)sources[idx]=nextSource;else sources.push(nextSource);
   const record=existing?{...existing,sources,revision:existing.revision+1,
+    accountId:existing.accountId||
+      (existing.state==='WAITING_CAPABILITY'?selectedPin:null),
     ...(pinConflict?{hold:'ACCOUNT_PIN_CONFLICT',pinConflict:true}:{} )}:
     {intentId:source.intentId,slug:requestedSlug,origin:git?'GITHUB_MAIN':'OPERATOR',
       accountId:git?null:source.accountId||null,revision:1,
