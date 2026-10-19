@@ -265,7 +265,8 @@ export function createExistingBoundary(api,{
       return unlocked;
     };
     if(m.type==='PIN_STAGE'){
-      if(r.state!=='UNLIST_CONFIRMED')return fail('UNLIST_FIRST');
+      if(!['UNLIST_CONFIRMED','STAGE_CONFIRMED'].includes(r.state))
+        return fail('UNLIST_FIRST');
       const opened=await unlock();
       if(!opened.ok)return opened;
       const f=await canonical(database,p.slug);
@@ -277,7 +278,8 @@ export function createExistingBoundary(api,{
         return fail('EXISTING_SOURCE_LINK_CHANGED');
       const remote=await observe(g,r);
       if(!remote.ok||remote.visibility!=='UNLISTED'||
-         remote.source.fingerprint!==r.previousFingerprint)
+         remote.source.fingerprint!==(r.state==='STAGE_CONFIRMED'?
+           r.stagedFingerprint:r.previousFingerprint))
         return fail('EXISTING_PREVIOUS_SOURCE_CHANGED');
       const queued=await createReadyStore(database).get(p.slug);
       const readyPin=queued.ok?
@@ -291,6 +293,12 @@ export function createExistingBoundary(api,{
       const candidate=readyPin?readyPin.candidate:
         await exactSource(git.sourceBytes);
       if(!candidate.ok)return candidate;
+      const replacingSavedF=r.state==='STAGE_CONFIRMED';
+      const previousForWrite=replacingSavedF?
+        await exactSource(r.stageSource?.blobs):opened.source;
+      if(!previousForWrite.ok||
+         (replacingSavedF&&previousForWrite.fingerprint!==r.stagedFingerprint))
+        return fail('S05_SAVED_F_DRIFT_OR_MISSING');
       if(queued.ok&&queued.record.desired){
         // The I13 source writer has already unlisted and independently
         // re-read authenticated, encrypted-recoverable previous P.
@@ -299,7 +307,7 @@ export function createExistingBoundary(api,{
            editor.source!=='GUARDED_EDITOR_CLEAN')
           return fail('S05_UPDATE_EDITOR_NOT_CLEAN');
         const previousStage=await stageFactory(database).getFull(p.slug);
-        if(previousStage.ok)
+        if(previousStage.ok&&previousStage.record.state!=='SOURCE_VERIFIED')
           return fail('S05_PREVIOUS_STAGE_NEEDS_NATIVE_HANDOFF');
         const previousJob=await new Promise((resolve,reject)=>{
           const t=database.transaction('meta','readonly');
@@ -307,7 +315,9 @@ export function createExistingBoundary(api,{
           req.onsuccess=()=>resolve(req.result?.job||null);
           req.onerror=()=>reject(Error('AI_JOB_READ_FAILED'));
         });
-        if(previousJob)return fail('S05_PREVIOUS_NATIVE_JOB_NEEDS_HANDOFF');
+        // An old native session is admissible only after its actual idle
+        // and saved-F proof matches the provider. evaluateStageSuccessor
+        // performs those checks, not a mere absence test.
         const release=await new Promise((resolve,reject)=>{
           const t=database.transaction('meta','readonly');
           const req=t.objectStore('meta').get('release:'+p.slug);
@@ -315,7 +325,8 @@ export function createExistingBoundary(api,{
           req.onerror=()=>reject(Error('RELEASE_READ_FAILED'));
         });
         const safety=evaluateStageSuccessor({
-          prior:null,previous:opened.source,job:null,release,existing:r,
+          prior:previousStage.ok?previousStage.record:null,
+          previous:previousForWrite,job:previousJob,release,existing:r,
           ready:{active:queued.record.desired,desired:null},
           source:{...git,accountId:r.accountId,personaUid:r.personaUid,
             bindingVersion:r.bindingVersion,remotePublicId:r.remotePublicId}
@@ -351,12 +362,13 @@ export function createExistingBoundary(api,{
         result={ok:true,revision:earlier.record.revision};
       }else{
         result=await stage.pin({slug:p.slug,candidate,
-          previous:opened.source,source:git,
+          previous:previousForWrite,source:git,
           eligibility:{ok:true,account:f.account,item:{
             remoteId:r.remotePublicId}},nonce:r.nonce});
       }
       if(!result.ok)return result;
-      const pinned=await store.pinStage(p.slug,r.revision,{candidate,source:git});
+      const pinned=await store.pinStage(p.slug,r.revision,{candidate,source:git,
+        ...(replacingSavedF?{previousForWrite}:{})});
       return pinned.ok?{...pinned,stageRevision:result.revision,
         stage:'PINNED',sourceFingerprint:candidate.fingerprint}:pinned;
     }
@@ -373,7 +385,9 @@ export function createExistingBoundary(api,{
       const remote=await observe(g,r);
       if(!remote.ok)return remote;
       const mustBePublic=['UNLIST','RECOVERY_UNLIST'].includes(m.type);
-      const fingerprint=m.type==='UNLIST'?r.previousFingerprint:r.stagedFingerprint;
+      const fingerprint=m.type==='UNLIST'?r.previousFingerprint:
+        m.type==='STAGE'?(r.stagePreviousFingerprint||r.previousFingerprint):
+        r.stagedFingerprint;
       if(remote.visibility!==(mustBePublic?'PUBLIC':'UNLISTED')||
          remote.source.fingerprint!==fingerprint)
         return fail('EXISTING_REMOTE_SOURCE_OR_LISTING_DRIFT');
@@ -433,7 +447,9 @@ export function createExistingBoundary(api,{
       }
       const request={slug:p.slug,nonce:r.nonce,
         action:m.type==='RECOVERY_UNLIST'?'UNLIST':m.type,
-        previousFiles:['UNLIST','STAGE'].includes(m.type)?prior.source.blobs:r.stageSource.blobs,
+        previousFiles:m.type==='STAGE'&&r.stagePreviousSource?.blobs?
+          r.stagePreviousSource.blobs:
+          ['UNLIST','STAGE'].includes(m.type)?prior.source.blobs:r.stageSource.blobs,
         ...(m.type==='STAGE'?{targetFiles:r.stageSource.blobs}:
           m.type==='RESTORE'?{targetFiles:prior.source.blobs}:{})};
       let attempt;
