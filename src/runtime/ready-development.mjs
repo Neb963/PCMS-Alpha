@@ -154,6 +154,16 @@ export function createReadyDevelopment(api,{
      // never causes a fleet-wide unlist or series of native sends.
      let outcome;
      const slug=row.slug,params={slug};
+     const nextCursor=(i+1<listing.items.length||listing.more)?slug:'';
+     const held=async(code,kind='NONE')=>{
+       await api.storage.local.set({
+         [cursorKey]:nextCursor,
+         [statusKey]:{ok:false,code,slug,step:chosen.type,
+           providerEffects:kind,observedAt:Date.now()}
+       });
+       return {ok:false,code,slug,step:chosen.type,providerEffects:kind};
+     };
+     try{
      if(chosen.type==='PREPARE_LOCAL')outcome=await b.ready.runTrusted({
        type:'PREPARE_LOCAL',params:{...params,expectedRevision:row.revision}});
      else if(chosen.type==='PREPARE_UPDATE'||chosen.type==='UNLIST'||
@@ -161,12 +171,12 @@ export function createReadyDevelopment(api,{
        const vault=await native({action:'get'});
        if(!vault?.ok||typeof vault.passphrase!=='string'||
           vault.passphrase.length<12||vault.passphrase.length>256)
-         return fail('S05_RECOVERY_SECRET_SERVICE_UNAVAILABLE');
+         return held('S05_RECOVERY_SECRET_SERVICE_UNAVAILABLE');
        if(chosen.type==='UNLIST'){
          const current=await b.ready.runTrusted({type:'ASSESS_READY',
            params:{...params,expectedRevision:row.revision}});
          if(!current?.ok||current.code!=='S05_PUBLIC_SLEEP_AND_UNLIST_REQUIRED')
-           return fail(current?.code||'S05_MAIN_OR_OWNER_REVALIDATION_REQUIRED');
+           return held(current?.code||'S05_MAIN_OR_OWNER_REVALIDATION_REQUIRED');
        }
        const step=chosen.type==='PREPARE_UPDATE'?'PREPARE':chosen.type;
        outcome=await b.existing.runTrusted({type:step,params:{
@@ -190,6 +200,11 @@ export function createReadyDevelopment(api,{
          ...params,expectedRevision:job.job.revision,
          ...(chosen.type==='STOP_OLDER_NATIVE'?{step:'STOP'}:{})}});
      }
+     }catch{
+       // An exception after a possible provider effect is never permission
+       // to resend. Canonical I09/I13/I10 journals retain dispatch markers.
+       return held('S05_STEP_INTERRUPTED_RECONCILE','UNKNOWN');
+     }
      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
      const receipt={ok:outcome?.ok===true,code:outcome?.code||'S05_STEP_UNVERIFIED',
        slug,step:chosen.type,providerEffects:
@@ -197,8 +212,7 @@ export function createReadyDevelopment(api,{
           'MAY_HAVE_DISPATCHED':'NONE'};
      // This cursor schedules fairness only. It never means a remote save
      // completed, nor authorizes replay of a failed or ambiguous effect.
-     const next=(i+1<listing.items.length||listing.more)?slug:'';
-     await api.storage.local.set({[cursorKey]:next,
+     await api.storage.local.set({[cursorKey]:nextCursor,
        [statusKey]:{...receipt,observedAt:Date.now()}});
      return {...receipt,canonical:outcome};
     }
