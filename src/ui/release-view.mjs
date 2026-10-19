@@ -91,8 +91,11 @@ function renderPreview(v){
     'No changes relative to sealed previous bytes.';
   details.append(diff);
   const warning=document.createElement('p');
-  warning.textContent='Approve only this exact generator and F. Any test, owner, READY, '+
-    'editor or byte drift must block dispatch. Approval is not publication.';
+  warning.textContent=v.aiVerified===false?
+    'EXCEPTIONAL MANUAL/INCOMPLETE TESTS: AI verification is NOT PASS. '+
+      'Only approve this exact F after reviewing actual manual checks and the incomplete Chat 2 limitation; separate guarded publication authorization is still required.':
+    'Approve only this exact generator and F. Any test, owner, READY, '+
+      'editor or byte drift must block dispatch. Approval is not publication.';
   details.append(warning);
   const tests=document.createElement('p');
   tests.textContent='Actual test attribution: '+v.tests?.state+
@@ -220,6 +223,8 @@ requestChangesBtn.addEventListener('click',()=>{
 approveBtn.addEventListener('click',()=>{
   const f=snapshot;
   if(!f||f.slug!==slug.value)return;
+  if(f.aiVerified===false&&!window.confirm(
+    'Exceptional review: AI tests are NOT fully verified. Approve only the exact saved F after manually inspecting all evidence and known incomplete checks?'))return;
   act('APPROVE',{slug:f.slug,token:token.value,
     expectedStageRevision:f.stageRevision,expectedJobRevision:f.jobRevision,
     fingerprint:f.sourceFingerprint,explicitApproval:true,passphrase:passphrase.value},
