@@ -274,7 +274,7 @@ def adoption_idb_probe(session):
           if(preserved.fingerprint!==onDisk.record.original.fingerprint)
             throw Error('Source bytes changed before fake Git dispatcher');
           trace.push('FAKE_GIT_AFTER_DURABLE_MARKER');
-          return {ok:true,source:'INDEPENDENT_GIT_BYTE_READBACK',
+          return {ok:true,source:'INDEPENDENT_GIT_BYTE_READBACK',ready:false,
             archiveRef:'refs/tags/pcms-originals/'+preserved.remotePublicId+'/'+preserved.fingerprint,
             prefix:'generators/'+slug,fingerprint:preserved.fingerprint,
             commit:'e'.repeat(40),head:'f'.repeat(40),repositoryId:'42'};
