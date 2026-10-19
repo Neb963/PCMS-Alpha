@@ -85,7 +85,7 @@ test('S05 installed journal composition advances public READY through I13 and AI
   }else throw Error('UNEXPECTED_AI_STEP '+type);
   return {ok:true,code:type};
  }});
- const runner=createReadyDevelopment({storage:{local:{get:async()=>({})}}},{
+ const runner=createReadyDevelopment({storage:{local:{get:async()=>({}),set:async()=>{}}}},{
   open:async()=>db,
   effectGate:()=>true,
   native:async p=>{vault.push(p.action);return {ok:true,passphrase};},
@@ -114,7 +114,7 @@ test('S05 missing activation stops before UNLIST even with complete prepared sou
  await save(db,{key:'inventory:'+s,generator:{slug:s,visibility:'PUBLIC'}});
  await save(db,{key:'existing-update:'+s,record:{slug:s,revision:1,state:'PREPARED'}});
  let called=0;
- const result=await createReadyDevelopment({storage:{local:{get:async()=>({})}}},{
+ const result=await createReadyDevelopment({storage:{local:{get:async()=>({}),set:async()=>{}}}},{
   open:async()=>db,effectGate:()=>false,
   makeReady:()=>({runTrusted:async()=>{called++;return {ok:true};}}),
   makeExisting:()=>({runTrusted:async()=>{called++;return {ok:true};}}),
