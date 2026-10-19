@@ -44,7 +44,9 @@ async function fixture({readyChanged=false,gitChanged=false}={}){
   m.put({key:'s05-ready:'+slug,record:{slug,active:{
     identifier:readyChanged?'rev-next':stage.readyIdentifier,
     inputFingerprint:D},desired:null,hold:null}});
-  m.put({key:'writeback:'+slug,record:{state:'CONFIRMED',
+  m.put({key:'writeback:'+slug,record:{state:'CONFIRMED',mode:'S06',
+    readyIdentifier:stage.readyIdentifier,
+    readyInputFingerprint:stage.readyInputFingerprint,testingSha:null,
     sourceFingerprint:gitChanged?P:source.fingerprint,
     stageRevision:4,jobRevision:7,commitSha:'e'.repeat(40)}});
  });
