@@ -43,6 +43,7 @@ async function fixture({proof=approved,sourceChange=false,wrongOwner=false,
     releaseFingerprint:row.releaseFingerprint,
     sourceFingerprint:candidate.sourceFingerprint,
     targetFingerprint:candidate.targetFingerprint,markerId:candidate.markerId,
+    nonce:candidate.nonce,
     method:candidate.method});
   if(sourceChange)html='<p>unexpected</p>';
   return {adapter,row,account,g,claimFor,calls,original,
