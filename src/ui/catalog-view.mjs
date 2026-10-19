@@ -71,7 +71,7 @@ async function renderReadyQueue(scanGeneration){
   description.textContent='Only coherent main declarations are queued. Native development, source mutation and publication still require independent admission.';
   const table=document.createElement('table'),tbody=document.createElement('tbody');
   const header=document.createElement('tr');
-  for(const title of ['Generator','Desired READY','Active candidate','Hold']){
+  for(const title of ['Generator','Desired READY','Active candidate','Hold','Assessment']){
     const th=document.createElement('th');th.textContent=title;header.append(th);
   }
   const thead=document.createElement('thead');thead.append(header);
@@ -96,6 +96,26 @@ async function renderReadyQueue(scanGeneration){
           item.active?.identifier||'—',item.hold||'—']){
           const td=document.createElement('td');td.textContent=value;tr.append(td);
         }
+        const cell=document.createElement('td');
+        const check=document.createElement('button');
+        check.type='button';check.textContent='Assess';check.disabled=!connected;
+        check.setAttribute('aria-label','Assess '+item.slug+' read-only READY admission');
+        const result=document.createElement('span');
+        result.setAttribute('role','status');
+        check.addEventListener('click',async()=>{
+          if(check.disabled)return;
+          check.disabled=true;result.textContent=' Checking current evidence…';
+          try{
+            const observed=await request('ASSESS_READY',{
+              slug:item.slug,expectedRevision:item.revision
+            },'pcms-s05-ready-operator');
+            result.textContent=' '+(observed?.code||'ASSESSMENT_UNAVAILABLE');
+            if(observed?.ok&&observed.savedFingerprint)
+              result.title='Observed saved-source SHA-256 '+observed.savedFingerprint;
+          }catch{result.textContent=' Assessment unavailable; no action performed.';}
+          finally{check.disabled=false;}
+        });
+        cell.append(check,result);tr.append(cell);
         tbody.append(tr);
       }
       after=r.nextCursor||'';
@@ -107,9 +127,9 @@ async function renderReadyQueue(scanGeneration){
   next.addEventListener('click',()=>{void load();});
   await load();
 }
-function request(type,params={}){
+function request(type,params={},portName='pcms-s03-catalog'){ 
   return new Promise((resolve,reject)=>{
-    const port=browser.runtime.connect({name:'pcms-s03-catalog'});
+    const port=browser.runtime.connect({name:portName});
     let done=false;
     const timeout=setTimeout(()=>finish(null,Error('TIMEOUT')),90000);
     function finish(value,error){
