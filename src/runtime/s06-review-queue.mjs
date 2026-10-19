@@ -76,7 +76,8 @@ export function createS06ReviewQueue(db){
       if(!ready.ok||ready.record.revision!==item.revision)
         return fail('S06_QUEUE_CHANGED_DURING_READ');
       const decision=planS06Writeback({
-        ready,stage,job,writeback:writeback.ok?writeback:null});
+        ready,stage,job,writeback:writeback.ok?writeback:null,
+        exception:exception.ok?exception:null});
       const sourceFingerprint=job.ok?
         (job.job.verifiedFinal||job.job.sourceFingerprint):null;
       const status=s06ReviewStatus({decision,
