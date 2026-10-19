@@ -79,3 +79,24 @@ test('S04 canonical IDB: aborted transaction cannot falsely reserve any slug or 
   assert.equal((await s.acceptCreate(op('operator_12345678'))).ok,true);
   assert.equal(db.keys('events').length,1);
 });
+
+test('S04 canonical IDB: paged redacted queue includes only primary records',async()=>{
+  const db=fakeDatabase(),s=createCoordinatorStore(db);
+  for(const [i,slug] of ['alpha','bravo','charlie','delta','echo'].entries()){
+    await s.acceptCreate(op('operator_'+String(i).padStart(9,'0'),slug));
+  }
+  await s.acceptCreate(op('operator_12345678','alpha'));
+  const first=await s.listCreate({limit:2});
+  assert.equal(first.ok,true);assert.equal(first.items.length,2);
+  assert.equal(first.truncated,true);
+  assert.ok(first.next);
+  const second=await s.listCreate({after:first.next,limit:2});
+  assert.equal(second.items.length,2);
+  const third=await s.listCreate({after:second.next,limit:2});
+  assert.equal(third.items.length,1);
+  assert.equal(third.truncated,false);
+  assert.deepEqual([...first.items,...second.items,...third.items]
+    .map(x=>x.slug).sort(),['alpha','bravo','charlie','delta','echo']);
+  assert.equal(first.items.every(x=>x.providerToken===undefined),true);
+  assert.equal((await s.listCreate({limit:101})).code,'INVALID_LIMIT');
+});
