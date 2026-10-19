@@ -209,7 +209,7 @@ export function createStagingStore(db){
                 remotePublicId:eligibility.item.remoteId,
                 personaUid:eligibility.account.personaUid,
                 bindingVersion:eligibility.account.bindingVersion};
-              if(!ready?.active||ready.desired||
+              if(!ready?.active||ready.desired||ready.hold==='READY_REVOKED_NOT_READY'||
                  ready.active.identifier!==source.gitReadyIdentifier||
                  ready.active.inputFingerprint!==source.gitReadyInputFingerprint){
                 done(fail('READY_CANDIDATE_NOT_ADMITTED'));return;
