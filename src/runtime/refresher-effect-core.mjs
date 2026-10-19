@@ -48,12 +48,18 @@ export function observeRefreshPresence(current,{at,present,rank,complete,healthy
 // Provider support must be established outside the UI and separately activated.
 // Neither HTTP success, an ordinary save nor a no-op is a qualifying method.
 export function qualifyRefreshCandidate(candidate){
-  if(candidate?.status!=='SUPPORTED_AND_VERIFIED'||candidate.method!=='EXPLICIT_PROVIDER_REFRESH'||
+  const legacy=candidate?.method==='EXPLICIT_PROVIDER_REFRESH';
+  const marker=candidate?.method==='CONTROLLED_SOURCE_MARKER'&&
+    hex(candidate.targetFingerprint)&&
+    candidate.targetFingerprint!==candidate.sourceFingerprint&&
+    safeId(candidate.markerId);
+  if(candidate?.status!=='SUPPORTED_AND_VERIFIED'||(!legacy&&!marker)||
     candidate.allowedByProvider!==true||!safeId(candidate.version)||
     !hex(candidate.sourceFingerprint)||!safeId(candidate.evidenceId)||
     candidate.meaningfulEffectVerified!==true)return {ok:false,code:'REFRESH_UNSUPPORTED'};
   return {ok:true,version:candidate.version,sourceFingerprint:candidate.sourceFingerprint,
-    evidenceId:candidate.evidenceId,method:candidate.method};
+    evidenceId:candidate.evidenceId,method:candidate.method,
+    ...(marker?{targetFingerprint:candidate.targetFingerprint,markerId:candidate.markerId}:{})};
 }
 export function reserveRefreshAttempt(evidence,{id,at,slug,sourceFingerprint,
   candidate,eligible,liveAuthorized}={}){
@@ -66,7 +72,10 @@ export function reserveRefreshAttempt(evidence,{id,at,slug,sourceFingerprint,
     e.intent||e.attempts>=RETRY_LIMIT||e.nextAttemptAt>at||e.suspended)
     return {ok:false,code:'REFRESH_ADMISSION_HELD'};
   e.intent={id,slug,at,sourceFingerprint,version:q.version,
-    evidenceId:q.evidenceId,state:'RESERVED',dispatchAt:0};
+    evidenceId:q.evidenceId,method:q.method,
+    ...(q.method==='CONTROLLED_SOURCE_MARKER'?{
+      targetFingerprint:q.targetFingerprint,markerId:q.markerId}:{}),
+    state:'RESERVED',dispatchAt:0};
   e.state='ATTEMPT_PENDING';
   return {ok:true,evidence:e};
 }
@@ -94,7 +103,11 @@ export function reconcileRefreshAttempt(evidence,id,{at,kind,sourceFingerprint,
     return {ok:false,code:'REFRESH_READBACK_INVALID'};
   const verified=targetMatched===true&&principalMatched===true&&
     hex(sourceFingerprint)&&kind==='EFFECT_CHANGED'&&
-    sourceFingerprint!==e.intent.sourceFingerprint;
+    sourceFingerprint!==e.intent.sourceFingerprint&&
+    // For controlled source-marker writes, *any* changed source is NOT enough.
+    // Only the planned complete source fingerprint proves a safe saved effect.
+    (e.intent.method!=='CONTROLLED_SOURCE_MARKER'||
+      sourceFingerprint===e.intent.targetFingerprint);
   const noEffect=targetMatched===true&&principalMatched===true&&
     kind==='NO_EFFECT'&&sourceFingerprint===e.intent.sourceFingerprint;
   const prior=e.intent;
