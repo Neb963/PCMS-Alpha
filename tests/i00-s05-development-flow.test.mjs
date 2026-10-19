@@ -143,3 +143,37 @@ test('S05 READY B reconciles possible old native dispatch then requests one guar
  assert.equal(held.type,'HOLD');
  assert.equal(held.code,'S05_OLDER_NATIVE_STOP_ACTIVATION_HELD');
 });
+
+test('S05 unavailable recovery vault defers only one target, fair cursor reaches healthy next slug',async()=>{
+ const db=fakeDatabase(),q=createReadyStore(db);
+ const second='s05-second-public-flow';
+ await q.observe(witness);
+ await q.observe({...witness,slug:second});
+ await save(db,{key:'inventory:'+s,generator:{slug:s,visibility:'PUBLIC'}});
+ await save(db,{key:'inventory:'+second,generator:{slug:second,visibility:'PUBLIC'}});
+ const storage={},steps=[];
+ const api={storage:{local:{
+  get:async key=>({[key]:storage[key]}),
+  set:async values=>Object.assign(storage,values)
+ }}};
+ let n=0;
+ const runner=createReadyDevelopment(api,{open:async()=>db,effectGate:()=>true,
+  native:async()=>++n===1?{ok:false,code:'VAULT_LOCKED'}:
+    {ok:true,passphrase:'twelve-plus-characters'},
+  makeReady:()=>({runTrusted:async()=>({ok:true,
+    code:'S05_PUBLIC_SLEEP_AND_UNLIST_REQUIRED'})}),
+  makeExisting:()=>({runTrusted:async m=>{
+    steps.push(m.params.slug);return {ok:true,code:'PREPARED'};
+  }}),
+  makeStage:()=>({runTrusted:async()=>{throw Error('NO_PRIVATE_SOURCE')}}),
+  makeAi:()=>({runTrusted:async()=>{throw Error('NO_AI_SOURCE')}})
+ });
+ const first=await runner.tick();
+ assert.equal(first.code,'S05_RECOVERY_SECRET_SERVICE_UNAVAILABLE');
+ assert.equal(first.slug,s);
+ const secondResult=await runner.tick();
+ assert.equal(secondResult.ok,true,JSON.stringify(secondResult));
+ assert.equal(secondResult.slug,second);
+ assert.deepEqual(steps,[second]);
+ assert.equal(storage.pcmsS05DevelopmentReceipt.providerEffects,'NONE');
+});
