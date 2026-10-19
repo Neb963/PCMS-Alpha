@@ -162,3 +162,47 @@ export async function perchanceExistingMain(request){
     return {ok:true,code:request.action+'_ACK_ONLY'};
   }catch{return fail('EXISTING_NATIVE_OUTCOME_UNVERIFIED');}
 }
+
+
+// S07 read-only cleanup probe. The donor may close only an exact S07-tagged
+// editor after independently observing saved remote source. Unknown collab,
+// human handoff, dirty/unsaved editor or different target must retain the tab.
+export async function perchanceRefresherCleanMain(slug){
+  const no=code=>({ok:false,code});
+  try{
+    if(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)||
+       location.origin!=='https://perchance.org'||
+       location.pathname!=='/'+slug||location.hash!=='#edit')
+      return no('REFRESH_CLEAN_TARGET_UNKNOWN');
+    const app=window.app,src=window.srcState,model=window.modelTextEditor,
+      html=window.outputTemplateEditor,menu=window.menuBar;
+    if(window.__editorReady!==true||window.__saveInFlight!==false||
+       window.userOwnsThisGenerator!==true||
+       app?.data?.generator?.name!==slug||
+       app.data.generator.isPrivate!==false||
+       document.getElementById('pcms-alpha-editor-context')
+         ?.dataset?.pcmsHumanIntent==='true'||
+       menu?.saveState!=='saved'||model?.isClean?.()!==true||
+       html?.isClean?.()!==true||
+       src?.hasPending?.()!==false||
+       src?.conflictPaths?.()?.length!==0||
+       await src.isDirty()!==false||
+       window.saveCheckpointManager?.isDivergenceBlocked?.()!==false)
+      return no('REFRESH_EDITOR_NOT_CLEAN');
+    if(window.editorCollabInitialSyncIsPending!==false||
+       window.__collabRoomFailed===true||
+       window.collabEditKeyIsIncorrect===true)
+      return no('REFRESH_COLLABORATION_UNKNOWN');
+    const room=window.yjsProvider,doc=window.yDoc;
+    if(room){
+      const states=window.yjsAwareness?.getStates?.();
+      if(room.wsconnected!==true||room.synced!==true||
+         room.roomname!==window.yjsProviderRoomName||
+         !Number.isSafeInteger(doc?.clientID)||
+         !(states instanceof Map)||states.size!==1||
+         !states.has(doc.clientID))
+        return no('REFRESH_COLLABORATOR_PRESENT');
+    }else if(window.yjsProviderRoomName)return no('REFRESH_COLLABORATION_UNKNOWN');
+    return {ok:true,source:'CLEAN_S07_EDITOR'};
+  }catch{return no('REFRESH_CLEAN_PROBE_UNAVAILABLE');}
+}
