@@ -765,6 +765,7 @@ attachPcmsGuard({
          tag.nonce===nonce&&tag.personaUid===personaUid&&
          tag.cookieStoreId===cookieStoreId&&tag.humanIntent!==true)matches.push(tab);
     }
+    if(matches.length===0)return {ok:true,closed:false,source:'S07_TAB_ALREADY_ABSENT'};
     if(matches.length!==1)return {ok:false,code:'REFRESH_CLEANUP_TAB_NOT_UNIQUE'};
     const tab=matches[0];
     const check=await browser.scripting.executeScript({
