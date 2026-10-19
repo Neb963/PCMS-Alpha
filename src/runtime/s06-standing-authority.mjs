@@ -35,6 +35,10 @@ export function createS06StandingAuthority(api){
    if(restore.held||!configured(cfg)||!valid(record)||
       record.repositoryId!==cfg.repositoryId){
      disable();
+     // Restored standing grants may never reactivate when the restore marker
+     // is eventually cleared. Persistently revoke on a cold restart, too.
+     if(restore.held&&valid(record)&&Object.values(record.grants).some(Boolean))
+       await revoke();
      return {ok:true,record:{revision:valid(record)?record.revision:1,
        repository:configured(cfg)?cfg.repository:null,
        repositoryId:configured(cfg)?cfg.repositoryId:null,
