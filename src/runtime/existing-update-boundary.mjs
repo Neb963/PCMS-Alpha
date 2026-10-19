@@ -275,15 +275,15 @@ export function createExistingBoundary(api,{
          remote.source.fingerprint!==r.previousFingerprint)
         return fail('EXISTING_PREVIOUS_SOURCE_CHANGED');
       const queued=await createReadyStore(database).get(p.slug);
-      const pinned=queued.ok?
+      const readyPin=queued.ok?
         await readySource(database,p.slug):null;
-      if(pinned&&!pinned.ok)return pinned;
-      const git=pinned?pinned.source:
+      if(readyPin&&!readyPin.ok)return readyPin;
+      const git=readyPin?readyPin.source:
         await inspect({folder:f.link.folder,token:p.token,
           includeSourceBytes:true});
       if(!git?.ok||!git.ready||git.folder!==f.link.folder)
         return fail('EXISTING_GIT_READY_UNVERIFIED');
-      const candidate=pinned?pinned.candidate:
+      const candidate=readyPin?readyPin.candidate:
         await exactSource(git.sourceBytes);
       if(!candidate.ok)return candidate;
       if(!(await recheck(g,r.personaUid,before)).ok)return fail('EXISTING_GUARD_CHANGED');
