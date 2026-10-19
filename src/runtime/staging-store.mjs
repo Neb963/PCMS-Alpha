@@ -2,6 +2,7 @@
 // Never write a remote effect inside an IDB transaction.
 import {fail} from './journal.mjs';
 import {diffSource} from './staging-core.mjs';
+import {evaluateStageSuccessor} from './ready-source-safety.mjs';
 const key=s=>'stage:'+s;
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const changes={
@@ -111,7 +112,7 @@ export function createStagingStore(db){
         const old=prior.target.result?.record;
         m.get('release:'+slugName).onsuccess=rv=>{
           const release=rv.target.result?.release;
-          if(old&&!(
+          const legacy=(!old||(
             old.state==='SOURCE_VERIFIED'&&
             release?.state==='CONFIRMED_PUBLIC'&&
             release.source==='INDEPENDENT_PUBLICATION_READBACK'&&
@@ -120,10 +121,8 @@ export function createStagingStore(db){
             release.approval?.accountId===old.accountId&&
             release.approval?.remotePublicId===old.remotePublicId&&
             release.approval?.personaUid===old.personaUid&&
-            release.approval?.bindingVersion===old.bindingVersion
-          )){
-            done(fail('EXISTING_STAGE_REQUIRES_REVIEW'));return;
-          }
+            release.approval?.bindingVersion===old.bindingVersion));
+          const proceed=()=>{
           m.get('source-link:'+slugName).onsuccess=l=>{
             const link=l.target.result?.link;
             m.get('account:'+eligibility.account.accountId).onsuccess=a=>{
@@ -141,7 +140,10 @@ export function createStagingStore(db){
                 remotePublicId:eligibility.item.remoteId,
                 sourceFolder:source.folder,sourceHead:source.head,
                 gitFingerprint:source.fingerprint,testingSha:source.testingSha,
-                candidate,previous,nonce,tab:null,reason:null};
+                candidate,previous,nonce,tab:null,reason:null,
+                ...(source.gitReadyIdentifier?{
+                  readyIdentifier:source.gitReadyIdentifier,
+                  readyInputFingerprint:source.gitReadyInputFingerprint}: {})};
               if(old){
                 m.add({key:'stage-history:'+slugName+':'+old.revision,
                   record:structuredClone(old)});
@@ -153,6 +155,31 @@ export function createStagingStore(db){
               done(publicView(r));
             };
           };
+          };
+          if(source.gitReadyIdentifier){
+            m.get('s05-ready:'+slugName).onsuccess=rr=>{
+              const ready=rr.target.result?.record;
+              const src={...source,accountId:eligibility.account.accountId,
+                remotePublicId:eligibility.item.remoteId,
+                personaUid:eligibility.account.personaUid,
+                bindingVersion:eligibility.account.bindingVersion};
+              if(!ready?.active||ready.desired||
+                 ready.active.identifier!==source.gitReadyIdentifier||
+                 ready.active.inputFingerprint!==source.gitReadyInputFingerprint){
+                done(fail('READY_CANDIDATE_NOT_ADMITTED'));return;
+              }
+              m.get('ai-job:'+slugName).onsuccess=ar=>{
+                m.get('existing-update:'+slugName).onsuccess=er=>{
+                  const permitted=evaluateStageSuccessor({prior:old,previous,
+                    job:ar.target.result?.job,existing:er.target.result?.record,
+                    release,ready,source:src});
+                  if(!permitted.ok){done(permitted);return;}
+                  proceed();
+                };
+              };
+            };
+          }else if(legacy)proceed();
+          else done(fail('EXISTING_STAGE_REQUIRES_REVIEW'));
         };
       };
     });
