@@ -1,4 +1,5 @@
 // S07: pure, fail-closed admission and byte-preserving HTML marker planning.
+import {exactSource,diffSource} from './staging-core.mjs';
 // No provider, route, Git or browser side effects are performed here.
 const ID=/^[A-Za-z0-9_-]{16,64}$/;
 const MARKER='<!-- pcms-alpha-refresher:';
@@ -69,4 +70,39 @@ export function countObservedOccupancy(rows,items,at){
     }
   }
   return {ok:true,sample:{at,feedSize:items.length,ownedPublic,ownedVisible,activeVisible}};
+}
+
+function encodeB64(bytes){
+  let binary='';
+  for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+  return btoa(binary);
+}
+// Produces a complete immutable source candidate for the ONE canonical writer.
+// No file except index.html may change. Does not confer remote write authority.
+export async function planRefresherSourceCandidate({files,expectedFingerprint,markerId}={}){
+  if(typeof expectedFingerprint!=='string'||!/^[a-f0-9]{64}$/.test(expectedFingerprint))
+    return {ok:false,code:'REFRESH_SOURCE_UNVERIFIED'};
+  const prior=await exactSource(files);
+  if(!prior.ok||prior.fingerprint!==expectedFingerprint)
+    return {ok:false,code:'REFRESH_SOURCE_DRIFT'};
+  const existing=prior.blobs.find(f=>f.path==='index.html');
+  let html;
+  try{
+    html=new TextDecoder('utf-8',{fatal:true})
+      .decode(Uint8Array.from(atob(existing.base64),ch=>ch.charCodeAt(0)));
+  }catch{return {ok:false,code:'REFRESH_HTML_UNVERIFIED'};}
+  const change=planOwnedSourceMarker(html,markerId);
+  if(!change.ok)return change;
+  const updated=prior.blobs.map(f=>f.path==='index.html'?
+    {path:'index.html',base64:encodeB64(new TextEncoder().encode(change.html))}:f);
+  const target=await exactSource(updated);
+  if(!target.ok)return {ok:false,code:'REFRESH_TARGET_UNVERIFIED'};
+  const diff=diffSource(prior,target);
+  if(!diff.ok||diff.changes.length!==1||diff.changes[0].path!=='index.html'||
+      diff.changes[0].kind!=='CHANGED'||target.fingerprint===prior.fingerprint)
+    return {ok:false,code:'REFRESH_SCOPE_CONFLICT'};
+  return {ok:true,source:'PCMS_CONTROLLED_MARKER_PLAN',markerId,
+    fromFingerprint:prior.fingerprint,toFingerprint:target.fingerprint,
+    previousFiles:prior.blobs,targetFiles:target.blobs,
+    changedPaths:['index.html'],previousMarker:change.previousMarker};
 }
