@@ -467,6 +467,6 @@ export function createExistingBoundary(api,{
       });
     });
   }
-  return Object.freeze({run,register});
+  return Object.freeze({run,runTrusted,register});
 }
 if(typeof browser!=='undefined')createExistingBoundary(browser).register();
