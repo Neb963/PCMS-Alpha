@@ -41,7 +41,7 @@ export function fakeDatabase(){
           req.onsuccess?.({target:req});finish();});
         return req;
       },
-      put(value){stage(s,value.key??value.id,value);},
+      put(value){stage(s,value.key??value.id??value.operationId,value);},
       add(value){stage(s,'auto'+String(++autoKey).padStart(8,'0'),value);},
       openCursor(){
         requests++;const req={onsuccess:null};
