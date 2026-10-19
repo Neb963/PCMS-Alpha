@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fakeDatabase} from './fake-idb.mjs';
 import {createWritebackStore} from '../src/runtime/writeback-store.mjs';
-import {planS06Writeback} from '../src/runtime/s06-writeback-progress.mjs';
+import {planS06Writeback,createS06WritebackProgress} from '../src/runtime/s06-writeback-progress.mjs';
 
 const name='s06-generator',F='a'.repeat(64),H='b'.repeat(64),
   P='c'.repeat(64),S='d'.repeat(40),HEAD='e'.repeat(40),ID='rev-s06-01';
@@ -84,8 +84,8 @@ test('S06 historical uncertain Git intent is read-only reconciled despite a newe
      writeback:{...uncertain,mode:'MANUAL'}}).ok,false);
  }
  assert.equal(planS06Writeback({...original,ready:newer,
-   writeback:writeback('PREPARED')}).ok,false,
-   'An unsent preparation must NOT be committed after newer READY');
+   writeback:writeback('PREPARED')}).type,'CANCEL_PREPARED',
+   'An unsent preparation must be canceled locally, never committed after newer READY');
 });
 test('S06 confirmed old candidate is archived and does not block a newly admitted READY',()=>{
  const nextId='rev-s06-02',nextInput='f'.repeat(64);
@@ -123,6 +123,30 @@ test('S06 stale PREPARED intent is canceled locally without Git authority before
       writeback:{...prepared,state}}).type,'RECONCILE',
      'Possibly dispatched operations must NEVER be canceled as PREPARED');
  }
+});
+test('S06 real background tick cancels only the stale unarmed intent with no credential or remote dispatch',async()=>{
+ const next={...ready(),revision:4,desired:{
+   identifier:'rev-successor',inputFingerprint:P}};
+ const {db,store}=await dbSeed(next,writeback('PREPARED'));
+ const storage={get:async key=>({[key]:undefined}),set:async()=>{}};
+ let credentials=0,gitCalls=0,actions=[];
+ const runner=createS06WritebackProgress({storage:{local:storage}},{
+   open:async()=>db,effectGate:()=>false,
+   native:async()=>{credentials++;throw Error('PRIVATE_TOKEN_MUST_NOT_BE_FETCHED');},
+   makeBoundary:()=>({runTrusted:async msg=>{
+     actions.push(msg.type);
+     if(msg.type!=='CANCEL_PREPARED')throw Error('UNEXPECTED_WRITEBACK_MUTATION');
+     gitCalls++;
+     return store.cancelPrepared(msg.params.slug,msg.params.expectedRevision);
+   }})
+ });
+ const done=await runner.tick();
+ assert.equal(done.state,'CANCELED',JSON.stringify(done));
+ assert.equal(credentials,0);
+ assert.equal(gitCalls,1);
+ assert.deepEqual(actions,['CANCEL_PREPARED']);
+ assert.equal(db.read('meta','writeback:'+name).record.state,'CANCELED');
+ assert.equal(db.keys('operations').length,0);
 });
 test('S06 Git dispatch CAS refuses superseded, paused and revoked READY',async()=>{
  const variations=[
