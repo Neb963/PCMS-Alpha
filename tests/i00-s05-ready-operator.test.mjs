@@ -29,7 +29,8 @@ async function seed(db,rows){
 }
 const blobs=[{path:'main.pjs',base64:Buffer.from('ready-source').toString('base64')},
  {path:'index.html',base64:Buffer.from('<main>ready-source</main>').toString('base64')}];
-function setup({publicSource=false,dirtyEditor=false}={}){
+function setup({publicSource=false,dirtyEditor=false,priorText='',
+ currentToken='s05revtoken',currentHash=H}={}){
  const db=fakeDatabase(),effects=[];
  const state={pcmsS03Git:{repository:'Neb963/per-gens',repositoryId}};
  const api={runtime:{id:'fixture-extension',
@@ -43,7 +44,7 @@ function setup({publicSource=false,dirtyEditor=false}={}){
   scan:async()=>({ok:true,complete:true,repository:'Neb963/per-gens',
    repositoryId,head:'9'.repeat(40),source:'PINNED_MAIN_READ_ONLY'}),
   inspect:async()=>({ok:true,code:'READY_COHERENT_INPUT_PINNED',
-    legacy:false,token:'s05revtoken',inputFingerprint:H,
+    legacy:false,token:currentToken,inputFingerprint:currentHash,
     pinnedHead:'9'.repeat(40),slug:id,files:blobs,
     optionalTesting:{state:'ABSENT',sha256:null}}),
   guard:()=>({
@@ -54,7 +55,8 @@ function setup({publicSource=false,dirtyEditor=false}={}){
      {ok:true,source:'GUARDED_NO_LOCAL_EDITOR',clean:true},
    observeReadOnly:async()=>({ok:true,principalFingerprint:H,
     original:{remotePublicId:link.remoteId,ownerResult:'IS_OWNER',
-     visibility:publicSource?'PUBLIC':'UNLISTED',pjs:'',html:'',assets:[]}})
+     visibility:publicSource?'PUBLIC':'UNLISTED',pjs:priorText,
+     html:priorText?'<div>'+priorText+'</div>':'',assets:[]}})
   })
  };
  return {db,api,sender,effects,opts,operator:createReadyOperator(api,opts)};
@@ -175,4 +177,52 @@ test('S05 retry never converts uncertain or changed stage to a successful pin re
     JSON.stringify(replay));
   assert.equal(h.db.keys('events').length,3,'no false replay success event');
  }
+});
+
+test('S05 private nonempty saved F safely supersedes idle old helper without publishing',async()=>{
+ const token='second-token-2026',hash='f'.repeat(64),oldText='saved old';
+ const h=setup({priorText:oldText,currentToken:token,currentHash:hash});
+ const queue=createReadyStore(h.db);
+ const old=await (async()=>{
+  const {exactSource}=await import('../src/runtime/staging-core.mjs');
+  return exactSource([{path:'main.pjs',base64:Buffer.from(oldText).toString('base64')},
+   {path:'index.html',base64:Buffer.from('<div>'+oldText+'</div>').toString('base64')}]);
+ })();
+ assert.equal(old.ok,true);
+ const previousStage={slug:id,revision:8,state:'SOURCE_VERIFIED',
+  accountId:account.accountId,personaUid:account.personaUid,
+  bindingVersion:account.bindingVersion,remotePublicId:link.remoteId,
+  nonce:'a'.repeat(32),verifiedAt:100,
+  candidate:old,previous:old};
+ const priorJob={stageRevision:8,state:'KNOWN_FAILURE',
+   native:{state:'CHAT1_OBSERVED_IDLE'},
+   finalSource:{fingerprint:old.fingerprint}};
+ await seed(h.db,[
+  {key:'account:'+account.accountId,account},
+  {key:'source-link:'+id,link},
+  {key:'inventory:'+id,generator:inventory},
+  {key:'stage:'+id,record:previousStage},
+  {key:'ai-job:'+id,job:priorJob}
+ ]);
+ await queue.observe(witness);
+ const proof={source:'TRUSTED_S05_ADMISSION_BOUNDARY',
+  accountOwnerVerified:true,protectedRouteReady:true,
+  completeRecoverableBaseline:true,humanEditorClean:true,
+  noUncertainWriter:true,writerIdle:true,nativeIdle:true,
+  providerEffectResolved:true,approvalEffectResolved:true};
+ assert.equal((await queue.handoff(id,1,proof)).ok,true);
+ const newer={...witness,identifier:'rev-'+token,inputFingerprint:hash,
+  declarationCommit:'3'.repeat(40),markerOid:'4'.repeat(40)};
+ assert.equal((await queue.observe(newer)).changed,true);
+ const result=await h.operator.run({type:'PREPARE_LOCAL',
+  params:{slug:id,expectedRevision:3}},h.sender);
+ assert.equal(result.code,'S05_LOCAL_STAGE_PINNED',JSON.stringify(result));
+ const stage=h.db.read('meta','stage:'+id).record;
+ assert.equal(stage.revision,9);
+ assert.equal(stage.previous.fingerprint,old.fingerprint);
+ assert.equal(stage.readyIdentifier,newer.identifier);
+ assert.equal(h.db.read('meta','stage-history:'+id+':8').record.state,
+  'SOURCE_VERIFIED');
+ assert.equal((await queue.get(id)).record.active.identifier,newer.identifier);
+ assert.equal(result.providerEffects,'NONE');
 });
