@@ -243,6 +243,7 @@ export function createS06ChangeProgress(api,{
         route.cookieStoreId!==afterRoute.cookieStoreId||route.routeId!==afterRoute.routeId||
         editor?.ok!==true||editor.clean!==true||
         native?.ok!==true||native.busy!==false||native.editorClean!==true||
+        native.sessionDigest!==j.native?.sessionDigest||
         native.sourceSaved!==true||native.hasQueue!==false||
         native.inputOccupied!==false||native.attachmentsPending!==false||
         !source.ok||seen.original?.visibility!=='UNLISTED')
