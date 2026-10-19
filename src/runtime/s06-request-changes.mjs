@@ -78,6 +78,10 @@ export function createS06ChangeStore(db){
    if(old&&old.state==='REQUESTED'){
      done(fail('S06_REQUEST_ALREADY_PENDING'));return;
    }
+   m.get('s06-human:'+name).onsuccess=human=>{
+    if(human.target.result?.record?.state==='DEFERRED'){
+     done(fail('S06_HUMAN_REVIEW_DEFERRED'));return;
+    }
    m.get('s05-ready:'+name).onsuccess=rd=>{
     m.get('stage:'+name).onsuccess=st=>{
      m.get('ai-job:'+name).onsuccess=ai=>{
@@ -122,6 +126,7 @@ export function createS06ChangeStore(db){
       };
      };
     };
+   };
    };
   });
  }
