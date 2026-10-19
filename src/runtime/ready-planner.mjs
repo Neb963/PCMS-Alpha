@@ -49,9 +49,19 @@ export function planReadyObservation(previous,witness){
 export function planReadyHandoff(previous,expectedRevision,proof){
   if(!previous?.desired)return fail('READY_NOT_QUEUED');
   if(previous.revision!==expectedRevision)return fail('STALE_REVISION');
-  if(previous.active&&(proof?.writerIdle!==true||proof?.nativeIdle!==true||
-    proof?.providerEffectResolved!==true||proof?.humanEditorClean!==true||
-    proof?.approvalEffectResolved!==true))return fail('SOURCE_HANDOFF_UNVERIFIED');
+  // Initial admission needs source/route/owner/baseline evidence just as much
+  // as a successor. The local queue cannot mint these facts by itself.
+  if(proof?.source!=='TRUSTED_S05_ADMISSION_BOUNDARY'||
+     proof?.accountOwnerVerified!==true||
+     proof?.protectedRouteReady!==true||
+     proof?.completeRecoverableBaseline!==true||
+     proof?.humanEditorClean!==true||
+     proof?.noUncertainWriter!==true)
+    return fail('READY_ADMISSION_UNVERIFIED');
+  if(previous.active&&(proof.writerIdle!==true||proof.nativeIdle!==true||
+    proof.providerEffectResolved!==true||
+    proof.approvalEffectResolved!==true))
+    return fail('SOURCE_HANDOFF_UNVERIFIED');
   const active={...previous.desired,state:'ACTIVE'};
   return {ok:true,changed:true,code:'READY_ADMITTED_LOCAL_ONLY',
     next:{...previous,revision:previous.revision+1,
