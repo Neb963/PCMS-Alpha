@@ -6,6 +6,7 @@ import {evaluation} from '../src/runtime/ai-evidence.mjs';
 import {createS06ExceptionStore,assessS06Exception}
   from '../src/runtime/s06-exception-review.mjs';
 import {s06ReviewStatus} from '../src/runtime/s06-review-queue.mjs';
+import {planS06Writeback} from '../src/runtime/s06-writeback-progress.mjs';
 const S='s06-exception-scope',H='a'.repeat(64),I='rev-a',
   SESSION='b'.repeat(64);
 const b64=s=>Buffer.from(s).toString('base64');
@@ -18,7 +19,8 @@ async function fixture({optional=true,infrastructure=false,failed=false,verified
  const ready={slug:S,revision:1,active:{identifier:I,inputFingerprint:H},
    desired:null,hold:null};
  const stage={slug:S,revision:4,state:'SOURCE_VERIFIED',verifiedAt:1,
-   readyIdentifier:I,readyInputFingerprint:H,candidate:F,previous:F};
+   readyIdentifier:I,readyInputFingerprint:H,candidate:F,previous:F,
+   sourceFolder:'generators/'+S,sourceHead:'e'.repeat(40),testingSha:optional?H:null};
  const job={slug:S,revision:7,stageRevision:4,sourceFingerprint:F.fingerprint,
    verifiedFinal:null,finalSource:F,readyIdentifier:I,readyInputFingerprint:H,
    executionSlotReleased:true,native:{state:'CHAT1_OBSERVED_IDLE',sessionDigest:SESSION},
@@ -56,6 +58,11 @@ test('C-49 verified Chat1 with optional Chat2 unavailable is exceptional, never 
  assert.equal(receipt.state,'RECORDED',JSON.stringify(receipt));
  assert.equal(receipt.chat1Verified,true);
  assert.equal(receipt.chat2Verified,false);
+ const planned=planS06Writeback({ready:x.ready,stage:x.stage,job:x.job,
+   exception:x.db.read('meta','s06-exception:'+S).record});
+ assert.equal(planned.type,'PREPARE',JSON.stringify(planned));
+ assert.equal(planned.mode,'S06_EXCEPTION');
+ assert.equal(planned.sourceFingerprint,x.F.fingerprint);
  assert.equal(x.db.read('meta','ai-job:'+S).job.verifiedFinal,null);
  assert.equal(s06ReviewStatus({decision:{ok:false,code:'TESTS_UNVERIFIED'},
    exception:receipt,sourceFingerprint:x.F.fingerprint,stageRevision:4}).state,
