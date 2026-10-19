@@ -408,12 +408,14 @@ export function createAiStore(db){
             previousSessionDigest:j.native?.sessionDigest||j.chat1.sessionDigest||null,
             armedAt:Date.now()},state:'HELD_RECONCILE',
           hold:'NATIVE_EFFECT_MAY_HAVE_OCCURRED'};
-        withCurrentReady(m,j,done,()=>{
+        const commit=()=>{
           m.put({...row,job:next});
           t.objectStore('events').add({stage:'AI_DISPATCH_POSSIBLE',
             slug:slugName,revision:next.revision,step});
           done(publicJob(next));
-        });
+        };
+        if(step==='STOP')commit();
+        else withCurrentReady(m,j,done,commit);
       };
     });
   }
