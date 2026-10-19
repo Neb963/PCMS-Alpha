@@ -11,9 +11,8 @@ const historyKey=(name,id)=>'writeback-history:'+name+':'+id;
 // Atomic current-candidate admission, evaluated inside the same IDB
 // transaction as DISPATCH_POSSIBLE (not solely in the background planner).
 function s06ReadyMatches(stage,job,ready){
-  const candidate=ready?.desired||ready?.active;
-  return !!(ready&&candidate&&!ready.hold&&
-    !(ready.desired&&ready.active)&&
+  const candidate=ready?.active;
+  return !!(ready&&candidate&&!ready.hold&&!ready.desired&&
     stage?.readyIdentifier===candidate.identifier&&
     stage?.readyInputFingerprint===candidate.inputFingerprint&&
     job?.stageRevision===stage?.revision&&
