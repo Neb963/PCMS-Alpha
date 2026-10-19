@@ -98,6 +98,32 @@ test('S06 Request Changes child retains P and parent tested F, creates new AI se
  assert.equal(planS06Writeback({ready:x.ready,stage,job,writeback:x.wb}).ok,false);
  assert.equal(x.db.keys('operations').length,0);
 });
+test('S06 child returns to Git PREPARE only after fresh independently tested F',async()=>{
+ const x=await setup({releaseState:null});
+ const requested=await x.request();
+ assert.equal((await x.store.admit(name,requested.revision)).state,'ADMITTED');
+ const childStage=x.db.read('meta','stage:'+name).record,
+   childJob=x.db.read('meta','ai-job:'+name).job;
+ assert.equal(planS06Writeback({ready:x.ready,stage:childStage,
+   job:childJob,writeback:x.wb}).ok,false);
+ const verifiedJob={...childJob,revision:childJob.revision+1,
+   state:'TESTS_VERIFIED',executionSlotReleased:true,
+   finalSource:x.F,sourceFingerprint:x.F.fingerprint,verifiedFinal:x.F.fingerprint,
+   native:{step:'CHAT1_SEND',state:'CHAT1_OBSERVED_IDLE',sessionDigest:session},
+   chat1:{state:'RUNNING',sessionDigest:session,tests:{default_generator_smoke:{
+     result:'PASS',sourceFingerprint:x.F.fingerprint}}},
+   chat2:null};
+ await new Promise((resolve,reject)=>{
+  const t=x.db.transaction('meta','readwrite');t.oncomplete=resolve;t.onabort=reject;
+  t.objectStore('meta').put({key:'ai-job:'+name,job:verifiedJob,accountId:'account-1'});
+ });
+ const next=planS06Writeback({ready:x.ready,stage:childStage,
+   job:verifiedJob,writeback:x.wb});
+ assert.equal(next.type,'PREPARE',JSON.stringify(next));
+ assert.equal(next.sourceFingerprint,x.F.fingerprint);
+ assert.equal(x.db.read('meta','s05-ready:'+name).record.active.identifier,READY);
+ assert.equal(x.db.read('meta','release:'+name),undefined);
+});
 test('S06 newer READY supersession prevents request admission and preserves old stage',async()=>{
  const x=await setup({releaseState:null});const requested=await x.request();
  await new Promise((resolve,reject)=>{
