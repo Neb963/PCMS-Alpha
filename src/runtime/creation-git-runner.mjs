@@ -35,6 +35,11 @@ export function createS04GitContinuation(api,{open=openCanonicalDatabase,
       if(!['GIT_INIT_PENDING','GIT_PREPARED','GIT_DISPATCH_POSSIBLE',
         'GIT_UNCERTAIN','GIT_OBSERVING'].includes(item.state))
         return fail('GIT_STATE_NOT_ADMISSIBLE');
+      const cfg=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
+      if(!cfg||!cfg.repository||!cfg.repositoryId)
+        return fail('GIT_RECONNECT_REQUIRED');
+      if(item.gitRepositoryId&&item.gitRepositoryId!==cfg.repositoryId)
+        return fail('GIT_REPOSITORY_CHANGED');
       // A historic provider success/owner row never authorizes today's Git
       // link or ref mutation. Recheck exact current remote identity under
       // the bound donor route, including during uncertain reconciliation.
@@ -42,11 +47,6 @@ export function createS04GitContinuation(api,{open=openCanonicalDatabase,
         db:await (dbPromise||=open()),item,guard:guard(),
         restoreHeld:async()=>(await sentinel.inspect()).held});
       if(!owner.ok)return owner;
-      const cfg=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
-      if(!cfg||!cfg.repository||!cfg.repositoryId)
-        return fail('GIT_RECONNECT_REQUIRED');
-      if(item.gitRepositoryId&&item.gitRepositoryId!==cfg.repositoryId)
-        return fail('GIT_REPOSITORY_CHANGED');
       const privateCredential=await vault({
         action:'git.get',repositoryId:cfg.repositoryId});
       if(privateCredential?.ok!==true||typeof privateCredential.credential!=='string')
