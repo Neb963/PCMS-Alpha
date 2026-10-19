@@ -82,7 +82,7 @@ const runner=async ({dirty=false,sourceChanged=false}={})=>{
    effectGate:()=>{seen.effects++;return false}
  });
  const result=await boundary.run({type:'PIN_STAGE',params:{
-   slug,expectedRevision:3,passphrase,token:'fixture-token-12345'
+   slug,expectedRevision:3,passphrase
  }},sender);
  return {db,ready,record,result,previous,candidate,seen};
 };
