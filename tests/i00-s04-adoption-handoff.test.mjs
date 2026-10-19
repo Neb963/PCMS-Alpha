@@ -30,7 +30,8 @@ async function seed(){
 }
 const proof={source:'INDEPENDENT_AUTHENTICATED_RECOVERY',
   verified:true,receiptId:'qualified_12345678',
-  originalFingerprint:original.fingerprint,archiveDigest:'d'.repeat(64)};
+  originalFingerprint:original.fingerprint,archiveDigest:'d'.repeat(64),
+  archiveCommit:base.archiveCommit,archiveRef:base.archiveRef};
 test('S04 adoption D: Git-only original may not become write-eligible',async()=>{
   const db=await seed(),creation=createCoordinatorStore(db);
   const prior=db.read('meta','adoption:'+slug).adoption;
