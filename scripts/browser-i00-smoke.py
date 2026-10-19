@@ -309,6 +309,7 @@ def s05_ready_idb_probe(session):
       const {createReadyStore}=await import('./ready-store.mjs');
       const {createStagingStore}=await import('./staging-store.mjs');
       const {createReadyOperator}=await import('./ready-operator.mjs');
+      const {createReadyDevelopment}=await import('./ready-development.mjs');
       const slug='s05-installed-private-1',accountId='fixture-s05-account',
         personaUid='fixture-s05-persona',remoteId='fixture-s05-remote',
         repositoryId='1411034835',head='c'.repeat(40),H='a'.repeat(64);
@@ -375,7 +376,19 @@ def s05_ready_idb_probe(session):
       const cmd=(type,revision)=>boundary.run({
         type,params:{slug,expectedRevision:revision}},sender);
       const assessed=await cmd('ASSESS_READY',1);
-      const prepared=await cmd('PREPARE_LOCAL',1);
+      const driver=createReadyDevelopment(api,{
+        open:async()=>db,effectGate:()=>false,
+        makeReady:()=>({runTrusted:async packet=>boundary.run(packet,sender)}),
+        makeExisting:()=>({runTrusted:async()=>({ok:false,code:'I13_UNEXPECTED'})}),
+        makeStage:()=>({runTrusted:async()=>({ok:false,code:'I09_EFFECT_UNEXPECTED'})}),
+        makeAi:()=>({runTrusted:async()=>({ok:false,code:'I10_EFFECT_UNEXPECTED'})})
+      });
+      // This is the installed production driver, not an operator-created
+      // PREPARE_LOCAL command. It should admit the verified private source
+      // and hold at the separately gated provider-effect boundary.
+      const automatic=await driver.tick();
+      const prepared=automatic.canonical;
+      const inactive=await driver.tick();
       const stale=await cmd('PREPARE_LOCAL',1);
       const current=await queue.get(slug);
       const pinned=await createStagingStore(db).getFull(slug);
@@ -388,7 +401,7 @@ def s05_ready_idb_probe(session):
         const request=indexedDB.deleteDatabase(dbName);
         request.onsuccess=resolve;request.onerror=()=>reject(request.error);
       });
-      done({observed,assessed,prepared,stale,
+      done({observed,assessed,automatic,inactive,prepared,stale,
         current:current.record?.active?.identifier,
         fingerprint:pinned.record?.candidate?.fingerprint,
         persisted:persisted.record?.candidate?.fingerprint,
@@ -1295,7 +1308,10 @@ def main():
                 s05=s05_ready_idb_probe(after)
                 assert s05.get('observed',{}).get('ok') is True,s05
                 assert s05.get('assessed',{}).get('ok') is True,s05
+                assert s05.get('automatic',{}).get('step')=='PREPARE_LOCAL',s05
+                assert s05.get('automatic',{}).get('providerEffects')=='NONE',s05
                 assert s05.get('prepared',{}).get('code')=='S05_LOCAL_STAGE_PINNED',s05
+                assert s05.get('inactive',{}).get('code')=='S05_NO_ELIGIBLE_ACTION',s05
                 assert s05.get('stale',{}).get('code')=='STALE_REVISION',s05
                 assert s05.get('current')=='rev-installed-ready',s05
                 assert s05.get('persistedReady')=='rev-installed-ready',s05
