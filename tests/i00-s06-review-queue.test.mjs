@@ -9,6 +9,15 @@ test('S06 independently projected publication labels never turn unverified Git i
  const denied=s06ReviewStatus({decision:{ok:false,code:'SOURCE_DRIFT'}});
  assert.deepEqual(denied,{state:'BLOCKED',code:'SOURCE_DRIFT'});
  assert.equal(s06ReviewStatus({decision:{ok:true,type:'PREPARE'}}).state,'WAITING_FOR_GIT');
+ assert.equal(s06ReviewStatus({decision:{ok:true,type:'PREPARE',
+   mode:'S06_EXCEPTION'},exception:{state:'RECORDED',stageRevision:4,
+     sourceFingerprint:F},sourceFingerprint:F,stageRevision:4}).state,
+   'EXCEPTION_HELD');
+ assert.equal(s06ReviewStatus({decision:{ok:true,type:'REVIEW',
+   mode:'S06_EXCEPTION',sourceFingerprint:F},
+   exception:{state:'RECORDED',stageRevision:4,sourceFingerprint:F},
+   sourceFingerprint:F,stageRevision:4}).state,
+   'EXCEPTION_READY_FOR_REVIEW');
  assert.equal(s06ReviewStatus({decision:{ok:true,type:'REVIEW'},
   human:{state:'DEFERRED',parentStageRevision:4},stageRevision:4}).state,'HUMAN_DEFERRED');
  assert.equal(s06ReviewStatus({decision:{ok:false,code:'S06_CANDIDATE_OR_TEST_EVIDENCE_UNVERIFIED'},
