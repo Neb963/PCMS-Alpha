@@ -306,14 +306,25 @@ def s05_ready_idb_probe(session):
     # inputs ONLY. The packaged privileged module performs zero effects.
     script = '''const done=arguments[arguments.length-1];
     (async()=>{
-      const {openCanonicalDatabase}=await import('./journal.mjs');
       const {createReadyStore}=await import('./ready-store.mjs');
       const {createStagingStore}=await import('./staging-store.mjs');
       const {createReadyOperator}=await import('./ready-operator.mjs');
       const slug='s05-installed-private-1',accountId='fixture-s05-account',
         personaUid='fixture-s05-persona',remoteId='fixture-s05-remote',
         repositoryId='1411034835',head='c'.repeat(40),H='a'.repeat(64);
-      let db=await openCanonicalDatabase();
+      // Isolated real Firefox IDB avoids contaminating the persistent
+      // operational account/inventory fixtures used by later B scenarios.
+      const dbName='pcms-s05-browser-'+crypto.randomUUID();
+      const open=()=>new Promise((resolve,reject)=>{
+        const req=indexedDB.open(dbName,1);
+        req.onupgradeneeded=()=>{
+          req.result.createObjectStore('meta',{keyPath:'key'});
+          req.result.createObjectStore('events',{autoIncrement:true});
+        };
+        req.onsuccess=()=>resolve(req.result);
+        req.onerror=()=>reject(req.error);
+      });
+      let db=await open();
       const account={accountId,personaUid,revision:2,state:'VERIFIED',
         bindingVersion:1,identity:{source:'GUARDED_SESSION_READBACK',
           bindingVersion:1,principalFingerprint:H}};
@@ -369,10 +380,14 @@ def s05_ready_idb_probe(session):
       const current=await queue.get(slug);
       const pinned=await createStagingStore(db).getFull(slug);
       db.close();
-      db=await openCanonicalDatabase();
+      db=await open();
       const persisted=await createStagingStore(db).getFull(slug);
       const persistQueue=await createReadyStore(db).get(slug);
       db.close();
+      await new Promise((resolve,reject)=>{
+        const request=indexedDB.deleteDatabase(dbName);
+        request.onsuccess=resolve;request.onerror=()=>reject(request.error);
+      });
       done({observed,assessed,prepared,stale,
         current:current.record?.active?.identifier,
         fingerprint:pinned.record?.candidate?.fingerprint,
