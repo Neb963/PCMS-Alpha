@@ -2,8 +2,9 @@
 import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {createCoordinatorStore} from './coordinator-store.mjs';
+import {createCreationRunner} from './creation-runner.mjs';
 export const COORDINATOR_PORT='pcms-s00-coordinator';
-const types=new Set(['ACCEPT_CREATE_INTENT','GET_CREATE_INTENT','LIST_CREATE_INTENTS','ADVANCE_CREATE_INTENT']);
+const types=new Set(['ACCEPT_CREATE_INTENT','GET_CREATE_INTENT','LIST_CREATE_INTENTS','ALLOCATE_CREATE_INTENT','RUN_CREATE_STEP','ADVANCE_CREATE_INTENT']);
 export function validateCoordinatorMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let encoded;
@@ -30,8 +31,9 @@ export function validateCoordinatorMessage(api,sender,message){
   return {ok:true};
 }
 export function createCoordinatorBoundary(api,{open=openCanonicalDatabase,
-  factory=createCoordinatorStore}={}){
+  factory=createCoordinatorStore,makeRunner=createCreationRunner}={}){
   let dbPromise;
+  const runner=makeRunner(api,{open,factory:undefined});
   const sentinel=createRestoreSentinel(api.storage.local);
   const store=async()=>factory(await (dbPromise||=open().catch(e=>{dbPromise=null;throw e;})));
   async function run(message,sender){
@@ -44,6 +46,10 @@ export function createCoordinatorBoundary(api,{open=openCanonicalDatabase,
       if(message.type==='ACCEPT_CREATE_INTENT')return await s.acceptCreate(p);
       if(message.type==='GET_CREATE_INTENT')return await s.getCreate(p.intentId);
       if(message.type==='LIST_CREATE_INTENTS')return await s.listCreate(p);
+      if(message.type==='ALLOCATE_CREATE_INTENT')
+        return await s.allocateCreate(p.intentId,p.expectedRevision);
+      if(message.type==='RUN_CREATE_STEP')
+        return await runner.step(p.intentId,p.expectedRevision);
       return await s.advanceCreate(p.intentId,p.expectedRevision);
     }catch{return fail('COORDINATOR_UNAVAILABLE');}
   }
