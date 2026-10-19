@@ -27,7 +27,7 @@ import {releaseContext,releaseTestContext,candidateManifest,releaseGitContext,
 export const RELEASE_PORT='pcms-i13-release';
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const fp=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
-const TYPES=new Set(['LIST','LIST_REVIEW','GET','GET_CHANGE','REQUEST_CHANGES','HUMAN_CONTEXT','GET_HUMAN','DEFER_HUMAN','ADOPT_HUMAN','GET_EXCEPTION','RECORD_EXCEPTION','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
+const TYPES=new Set(['LIST','LIST_REVIEW','GET','GET_CHANGE','REQUEST_CHANGES','HUMAN_CONTEXT','GET_HUMAN','DEFER_HUMAN','ADOPT_HUMAN','GET_EXCEPTION','EXCEPTION_CONTEXT','RECORD_EXCEPTION','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
 export function validateReleaseMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
@@ -41,7 +41,7 @@ export function validateReleaseMessage(api,sender,msg){
      HUMAN_CONTEXT:['slug'],GET_HUMAN:['slug'],
      DEFER_HUMAN:['slug','expectedStageRevision','expectedJobRevision','expectedFingerprint'],
      ADOPT_HUMAN:['slug','expectedRevision'],
-     GET_EXCEPTION:['slug'],RECORD_EXCEPTION:['slug','mode','checks','consent',
+     GET_EXCEPTION:['slug'],EXCEPTION_CONTEXT:['slug'],RECORD_EXCEPTION:['slug','mode','checks','consent',
        'expectedStageRevision','expectedJobRevision','sourceFingerprint'],
     REQUEST_CHANGES:['slug','token','passphrase','expectedStageRevision',
       'expectedJobRevision','sourceFingerprint','instructions','releaseRevision'],
@@ -279,6 +279,27 @@ export function createReleaseBoundary(api,{
     if(msg.type==='GET_CHANGE')return createS06ChangeStore(database).get(p.slug);
     if(msg.type==='GET_HUMAN')return createS06HumanStore(database).get(p.slug);
     if(msg.type==='GET_EXCEPTION')return createS06ExceptionStore(database).get(p.slug);
+    if(msg.type==='EXCEPTION_CONTEXT'){
+      const [stage,job,ready]=await Promise.all([
+        stageFactory(database).getFull(p.slug),aiFactory(database).getJobFull(p.slug),
+        createReadyStore(database).get(p.slug)]);
+      if(!stage.ok||!job.ok||!ready.ok||
+        job.job.stageRevision!==stage.record.revision||
+        ready.record.active?.identifier!==stage.record.readyIdentifier||
+        ready.record.active?.inputFingerprint!==stage.record.readyInputFingerprint||
+        !job.job.finalSource||job.job.finalSource.fingerprint!==job.job.sourceFingerprint)
+        return fail('S06_EXCEPTION_CONTEXT_UNAVAILABLE');
+      const verdict=evaluation(job.job);
+      return {ok:true,slug:p.slug,stageRevision:stage.record.revision,
+        jobRevision:job.job.revision,sourceFingerprint:job.job.sourceFingerprint,
+        evidenceState:verdict.state,chat1Verified:verdict.chat1Pass===true,
+        chat2Verified:verdict.chat2Pass===true,
+        nativeHold:job.job.hold||null,schedulerHold:job.job.schedulerHold||null,
+        requiredChecks:[...new Set([...(job.job.prompt?.tests||[]),
+          ...(job.job.optionalTesting?.tests||[])])],
+        optionalConfigured:!!job.job.optionalTesting,
+        publication:'NOT_AUTHORIZED'};
+    }
     if(msg.type==='RECORD_EXCEPTION')return createS06ExceptionBoundary(api,{
       open:async()=>database}).runTrusted(msg);
     if(msg.type==='HUMAN_CONTEXT'){
