@@ -24,7 +24,7 @@ test('S05 pure READY planner refuses recycled tokens and retains active writer',
  assert.equal(active.ok,true);
  const second=planReadyObservation(active.next,w('rev00002'));
  assert.equal(second.code,'READY_SUCCESSOR_PENDING');
- assert.equal(planReadyHandoff(second.next,second.next.revision,{writerIdle:true}).code,
+ assert.equal(planReadyHandoff(second.next,second.next.revision,{...admissible,nativeIdle:false}).code,
    'SOURCE_HANDOFF_UNVERIFIED');
  const proof={...admissible};
  const admitted=planReadyHandoff(second.next,second.next.revision,proof);
@@ -45,7 +45,7 @@ test('S05 canonical persistence deduplicates and cannot bypass conflicting READY
  assert.equal(a.code,'READY_ADMITTED_LOCAL_ONLY');
  const b=await s.observe(w('rev00002'));
  assert.equal(b.code,'READY_SUCCESSOR_PENDING');
- assert.equal((await createReadyStore(db).handoff('safe-slug',b.record.revision,{writerIdle:true})).code,
+ assert.equal((await createReadyStore(db).handoff('safe-slug',b.record.revision,{...admissible,nativeIdle:false})).code,
    'SOURCE_HANDOFF_UNVERIFIED');
  assert.equal((await s.get('safe-slug')).record.active.identifier,'rev-rev00001');
 });
