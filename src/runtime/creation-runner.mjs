@@ -5,6 +5,7 @@ import {openCanonicalDatabase,createRestoreSentinel,fail} from './journal.mjs';
 import {createCoordinatorStore} from './coordinator-store.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 import {createS04GitContinuation} from './creation-git-runner.mjs';
+import {createAdoptionStore} from './adoption-store.mjs';
 import {isI17Quarantined,I17_QUARANTINE_CODE} from './legacy-quarantine.mjs';
 const fingerprint=async data=>[...new Uint8Array(await crypto.subtle.digest(
   'SHA-256',new TextEncoder().encode(JSON.stringify(data))))]
@@ -33,8 +34,14 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
       if(item.pinConflict||item.sourceDrift)return fail(item.hold||'SOURCE_CONFLICT');
       if(item.state==='WAITING_CAPABILITY')
         return await s.allocateCreate(item.intentId,item.revision);
-      if(item.state==='ADOPTION_ORIGINAL_PENDING')
-        return fail('ADOPTION_SOURCE_CHECKPOINT_REQUIRED');
+      if(item.state==='ADOPTION_ORIGINAL_PENDING'){
+        const db=await (dbPromise||=open());
+        const adopted=await createAdoptionStore(db).getFull(item.slug);
+        if(!adopted.ok||adopted.record.archiveState!=='ARCHIVED_GIT_CONFIRMED'||
+           adopted.record.originalCheckpoint?.qualified!==true)
+          return fail('ADOPTION_SOURCE_CHECKPOINT_REQUIRED');
+        return await s.confirmAdoption(item.intentId,item.revision,adopted.record);
+      }
       if(item.state.startsWith('GIT_'))
         return await git.step(item.intentId,item.revision);
       const g=guard();
