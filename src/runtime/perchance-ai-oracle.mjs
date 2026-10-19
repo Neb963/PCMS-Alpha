@@ -10,10 +10,15 @@ export const AI_BROWSER_ASSERTIONS=Object.freeze([
 ]);
 export function perchanceAiPreviewCheck(slug,name){
   const unknown=code=>({ok:false,code});
+  const fixed=['default_generator_smoke','preview_heading_visible',
+    'preview_image_loaded','preview_button_visible','preview_link_visible'];
+  const declared=typeof name==='string'&&
+    /^([A-Za-z_]+):([A-Za-z][A-Za-z0-9_-]{0,47})$/.exec(name);
+  const allowed=declared&&
+    ['preview_element_visible','preview_button_enabled',
+      'preview_input_editable','preview_select_usable'].includes(declared[1]);
   if(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)||
-     !['default_generator_smoke','preview_heading_visible',
-       'preview_image_loaded','preview_button_visible',
-       'preview_link_visible'].includes(name))
+     (!fixed.includes(name)&&!allowed))
     return unknown('PREVIEW_ASSERTION_NOT_SUPPORTED');
   if(location.origin!=='https://perchance.org'||
      location.pathname!=='/'+slug||location.hash!=='#edit')
@@ -73,6 +78,20 @@ export function perchanceAiPreviewCheck(slug,name){
         el=>el.disabled!==true);
     }else if(name==='preview_link_visible'){
       passed=any('a[href]',el=>Boolean(el.getAttribute('href')?.trim()));
+    }else if(allowed){
+      // No user-controlled CSS selectors, code evaluation, clicks or network
+      // operations: only a safe exact DOM id in this preview document.
+      const el=page.getElementById(declared[2]);
+      if(declared[1]==='preview_element_visible')
+        passed=visible(el);
+      else if(declared[1]==='preview_button_enabled')
+        passed=el?.tagName==='BUTTON'&&el.disabled!==true&&visible(el);
+      else if(declared[1]==='preview_input_editable')
+        passed=['INPUT','TEXTAREA'].includes(el?.tagName)&&
+          el.disabled!==true&&el.readOnly!==true&&visible(el);
+      else if(declared[1]==='preview_select_usable')
+        passed=el?.tagName==='SELECT'&&el.disabled!==true&&
+          el.options?.length>=2&&visible(el);
     }
     return observed(passed?'PASS':'FAIL',passed?
       'BROWSER_OBSERVED_ASSERTION':'BROWSER_OBSERVED_ASSERTION_FALSE');

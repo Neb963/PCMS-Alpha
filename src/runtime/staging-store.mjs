@@ -2,6 +2,7 @@
 // Never write a remote effect inside an IDB transaction.
 import {fail} from './journal.mjs';
 import {diffSource} from './staging-core.mjs';
+import {evaluateStageSuccessor} from './ready-source-safety.mjs';
 const key=s=>'stage:'+s;
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const changes={
@@ -76,6 +77,52 @@ export function findEligibleSupply(db,slugName){
     };
   });
 }
+// S05/S04 bridge: supply batches are not the sole source of newly created
+// generators. S04 persists an independently confirmed private inventory row
+// and a non-READY Git source link. This is a read-only eligibility lookup;
+// the donor must still prove the current private-empty source and owner.
+export async function findEligibleManagedSource(db,slugName){
+  if(!slug(slugName))return fail('INVALID_SLUG');
+  const legacy=await findEligibleSupply(db,slugName);
+  if(legacy.ok||legacy.code!=='PRIVATE_NEW_SUPPLY_REQUIRED')return legacy;
+  return txn(db,'readonly',(tx,done)=>{
+    const m=tx.objectStore('meta');
+    m.get('source-link:'+slugName).onsuccess=ls=>{
+      const link=ls.target.result?.link;
+      if(link?.source!=='S04_INDEPENDENT_NOT_READY_ASSOCIATION'||
+         link.folder!=='generators/'+slugName||link.slug!==slugName){
+        done(fail('S04_INDEPENDENT_ASSOCIATION_REQUIRED'));return;
+      }
+      m.get('inventory:'+slugName).onsuccess=iv=>{
+        const item=iv.target.result?.generator;
+        if(!item||item.slug!==slugName||
+           item.ownerState!=='OBSERVED_OWNER'||
+           item.visibility!=='UNLISTED'||
+           item.management!=='MANAGED_CREATED'||
+           !['SOURCE_PENDING','SOURCE_VERIFIED'].includes(item.source)||
+           !item.remoteId||item.remoteId!==link.remoteId||
+           item.accountId!==link.accountId||
+           item.personaUid!==link.personaUid||
+           item.bindingVersion!==link.bindingVersion){
+          done(fail('S04_PRIVATE_CREATED_OWNER_UNVERIFIED'));return;
+        }
+        m.get('account:'+link.accountId).onsuccess=ar=>{
+          const account=ar.target.result?.account;
+          if(!account||account.state!=='VERIFIED'||
+             account.accountId!==link.accountId||
+             account.personaUid!==link.personaUid||
+             account.bindingVersion!==link.bindingVersion||
+             account.identity?.source!=='GUARDED_SESSION_READBACK'||
+             account.identity?.bindingVersion!==link.bindingVersion||
+             !/^[a-f0-9]{64}$/.test(account.identity?.principalFingerprint||'')){
+            done(fail('S04_ACCOUNT_CONTEXT_CHANGED'));return;
+          }
+          done({ok:true,account,item,link,origin:'S04_CONFIRMED_CREATED'});
+        };
+      };
+    };
+  });
+}
 export function createStagingStore(db){
   const getFull=slugName=>!slug(slugName)?Promise.resolve(fail('INVALID_SLUG')):
     txn(db,'readonly',(tx,done)=>{
@@ -111,7 +158,7 @@ export function createStagingStore(db){
         const old=prior.target.result?.record;
         m.get('release:'+slugName).onsuccess=rv=>{
           const release=rv.target.result?.release;
-          if(old&&!(
+          const legacy=(!old||(
             old.state==='SOURCE_VERIFIED'&&
             release?.state==='CONFIRMED_PUBLIC'&&
             release.source==='INDEPENDENT_PUBLICATION_READBACK'&&
@@ -120,10 +167,8 @@ export function createStagingStore(db){
             release.approval?.accountId===old.accountId&&
             release.approval?.remotePublicId===old.remotePublicId&&
             release.approval?.personaUid===old.personaUid&&
-            release.approval?.bindingVersion===old.bindingVersion
-          )){
-            done(fail('EXISTING_STAGE_REQUIRES_REVIEW'));return;
-          }
+            release.approval?.bindingVersion===old.bindingVersion));
+          const proceed=()=>{
           m.get('source-link:'+slugName).onsuccess=l=>{
             const link=l.target.result?.link;
             m.get('account:'+eligibility.account.accountId).onsuccess=a=>{
@@ -141,18 +186,46 @@ export function createStagingStore(db){
                 remotePublicId:eligibility.item.remoteId,
                 sourceFolder:source.folder,sourceHead:source.head,
                 gitFingerprint:source.fingerprint,testingSha:source.testingSha,
-                candidate,previous,nonce,tab:null,reason:null};
+                candidate,previous,nonce,tab:null,reason:null,
+                ...(source.gitReadyIdentifier?{
+                  readyIdentifier:source.gitReadyIdentifier,
+                  readyInputFingerprint:source.gitReadyInputFingerprint}: {})};
               if(old){
-                m.add({key:'stage-history:'+slugName+':'+old.revision,
+                m.put({key:'stage-history:'+slugName+':'+old.revision,
                   record:structuredClone(old)});
                 m.put({key:key(slugName),record:r});
-              }else m.add({key:key(slugName),record:r});
+              }else m.put({key:key(slugName),record:r});
               tx.objectStore('events').add({stage:'CANDIDATE_PINNED',slug:slugName,
                 candidateFingerprint:candidate.fingerprint,sourceHead:source.head,
                 previousFingerprint:previous.fingerprint});
               done(publicView(r));
             };
           };
+          };
+          if(source.gitReadyIdentifier){
+            m.get('s05-ready:'+slugName).onsuccess=rr=>{
+              const ready=rr.target.result?.record;
+              const src={...source,accountId:eligibility.account.accountId,
+                remotePublicId:eligibility.item.remoteId,
+                personaUid:eligibility.account.personaUid,
+                bindingVersion:eligibility.account.bindingVersion};
+              if(!ready?.active||ready.desired||['READY_REVOKED_NOT_READY','OPERATOR_PAUSED'].includes(ready.hold)||
+                 ready.active.identifier!==source.gitReadyIdentifier||
+                 ready.active.inputFingerprint!==source.gitReadyInputFingerprint){
+                done(fail('READY_CANDIDATE_NOT_ADMITTED'));return;
+              }
+              m.get('ai-job:'+slugName).onsuccess=ar=>{
+                m.get('existing-update:'+slugName).onsuccess=er=>{
+                  const permitted=evaluateStageSuccessor({prior:old,previous,
+                    job:ar.target.result?.job,existing:er.target.result?.record,
+                    release,ready,source:src});
+                  if(!permitted.ok){done(permitted);return;}
+                  proceed();
+                };
+              };
+            };
+          }else if(legacy)proceed();
+          else done(fail('EXISTING_STAGE_REQUIRES_REVIEW'));
         };
       };
     });

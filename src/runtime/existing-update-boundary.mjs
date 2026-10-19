@@ -9,6 +9,11 @@ import {authorizeSleepingUpdate,sealPrevious,unlockPrevious} from './existing-up
 import {createStagingStore} from './staging-store.mjs';
 import {exactSource,verifyReadback} from './staging-core.mjs';
 import {inspectGitSource} from './git-source.mjs';
+import {scanMainCatalog} from './git-catalog.mjs';
+import {inspectReadyCandidate} from './catalog-declaration.mjs';
+import {createReadyStore} from './ready-store.mjs';
+import {stageReadyGitSource} from './ready-git-source.mjs';
+import {evaluateStageSuccessor} from './ready-source-safety.mjs';
 import {REFRESHER_KEY} from './refresher-core.mjs';
 
 export const EXISTING_PORT='pcms-i13-existing';
@@ -41,8 +46,7 @@ export function validateExistingMessage(api,sender,m){
      ('token'in p&&(typeof p.token!=='string'||p.token.length<12||
        p.token.length>512||!/^[\x21-\x7e]+$/.test(p.token)))||
      (allowed[m.type].includes('expectedRevision')&&!Number.isSafeInteger(p.expectedRevision))||
-     (allowed[m.type].includes('passphrase')&&!('passphrase'in p))||
-     (allowed[m.type].includes('token')&&!('token'in p)))
+     (allowed[m.type].includes('passphrase')&&!('passphrase'in p)))
     return fail('INVALID_PARAMS');
   return {ok:true};
 }
@@ -101,11 +105,42 @@ async function observe(g,record) {
 export function createExistingBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,
   existingFactory=createExistingStore,stageFactory=createStagingStore,
-  inspect=inspectGitSource,effectGate=()=>false
+  inspect=inspectGitSource,inspectReady=inspectReadyCandidate,
+  scanCatalog=scanMainCatalog,
+  native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
+  effectGate=()=>false
 }={}){
   let promise;
   const db=()=>promise ||=open().catch(e=>{promise=null;throw e;});
   const sentinel=createRestoreSentinel(api.storage.local);
+  async function readySource(database,name,{allowDesired=false}={}){
+    const queued=await createReadyStore(database).get(name);
+    if(!queued.ok||queued.record.hold==='READY_REVOKED_NOT_READY'||
+       (!queued.record.active&&!queued.record.desired)||
+       (!allowDesired&&queued.record.desired))
+      return fail('S05_READY_NOT_ADMITTED_OR_SUPERSEDED');
+    const config=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
+    if(config?.repository!=='Neb963/per-gens'||
+       config.repositoryId!==queued.record.repositoryId)
+      return fail('S05_REPOSITORY_CHANGED');
+    const secret=await native({action:'git.get',repositoryId:config.repositoryId});
+    if(!secret?.ok||typeof secret.credential!=='string'||
+       secret.credential.length<12||secret.credential.length>512)
+      return fail('S05_GIT_VAULT_UNAVAILABLE');
+    const catalog=await scanCatalog({repository:config.repository,
+       token:secret.credential});
+    if(!catalog?.ok||!catalog.complete||
+       catalog.repositoryId!==config.repositoryId)
+      return fail('S05_GIT_MAIN_UNVERIFIED');
+    const coherent=await inspectReady({repository:config.repository,
+       token:secret.credential,slug:name,pinnedHead:catalog.head,
+       includeSourceBytes:true});
+    const requested=allowDesired&&queued.record.desired?
+      {...queued.record,active:queued.record.desired,desired:null}:
+      queued.record;
+    return stageReadyGitSource({catalog,coherent,ready:requested,
+       slug:name,repositoryId:config.repositoryId});
+  }
   async function safeGuard(personaUid) {
     const g=guard();
     if(!g?.runExistingStep||!g?.observeReadOnly||!g?.getSafeRouteReadiness)
@@ -230,7 +265,8 @@ export function createExistingBoundary(api,{
       return unlocked;
     };
     if(m.type==='PIN_STAGE'){
-      if(r.state!=='UNLIST_CONFIRMED')return fail('UNLIST_FIRST');
+      if(!['UNLIST_CONFIRMED','STAGE_CONFIRMED'].includes(r.state))
+        return fail('UNLIST_FIRST');
       const opened=await unlock();
       if(!opened.ok)return opened;
       const f=await canonical(database,p.slug);
@@ -242,14 +278,72 @@ export function createExistingBoundary(api,{
         return fail('EXISTING_SOURCE_LINK_CHANGED');
       const remote=await observe(g,r);
       if(!remote.ok||remote.visibility!=='UNLISTED'||
-         remote.source.fingerprint!==r.previousFingerprint)
+         remote.source.fingerprint!==(r.state==='STAGE_CONFIRMED'?
+           r.stagedFingerprint:r.previousFingerprint))
         return fail('EXISTING_PREVIOUS_SOURCE_CHANGED');
-      const git=await inspect({folder:f.link.folder,token:p.token,
-        includeSourceBytes:true});
+      const queued=await createReadyStore(database).get(p.slug);
+      const readyPin=queued.ok?
+        await readySource(database,p.slug,{allowDesired:true}):null;
+      if(readyPin&&!readyPin.ok)return readyPin;
+      const git=readyPin?readyPin.source:
+        await inspect({folder:f.link.folder,token:p.token,
+          includeSourceBytes:true});
       if(!git?.ok||!git.ready||git.folder!==f.link.folder)
         return fail('EXISTING_GIT_READY_UNVERIFIED');
-      const candidate=await exactSource(git.sourceBytes);
+      const candidate=readyPin?readyPin.candidate:
+        await exactSource(git.sourceBytes);
       if(!candidate.ok)return candidate;
+      const replacingSavedF=r.state==='STAGE_CONFIRMED';
+      const previousForWrite=replacingSavedF?
+        await exactSource(r.stageSource?.blobs):opened.source;
+      if(!previousForWrite.ok||
+         (replacingSavedF&&previousForWrite.fingerprint!==r.stagedFingerprint))
+        return fail('S05_SAVED_F_DRIFT_OR_MISSING');
+      if(queued.ok&&queued.record.desired){
+        // The I13 source writer has already unlisted and independently
+        // re-read authenticated, encrypted-recoverable previous P.
+        const editor=await g.inspectStageEditor?.(r.personaUid,p.slug,r.nonce);
+        if(editor?.ok!==true||editor.clean!==true||
+           editor.source!=='GUARDED_EDITOR_CLEAN')
+          return fail('S05_UPDATE_EDITOR_NOT_CLEAN');
+        const previousStage=await stageFactory(database).getFull(p.slug);
+        if(previousStage.ok&&previousStage.record.state!=='SOURCE_VERIFIED')
+          return fail('S05_PREVIOUS_STAGE_NEEDS_NATIVE_HANDOFF');
+        const previousJob=await new Promise((resolve,reject)=>{
+          const t=database.transaction('meta','readonly');
+          const req=t.objectStore('meta').get('ai-job:'+p.slug);
+          req.onsuccess=()=>resolve(req.result?.job||null);
+          req.onerror=()=>reject(Error('AI_JOB_READ_FAILED'));
+        });
+        // An old native session is admissible only after its actual idle
+        // and saved-F proof matches the provider. evaluateStageSuccessor
+        // performs those checks, not a mere absence test.
+        const release=await new Promise((resolve,reject)=>{
+          const t=database.transaction('meta','readonly');
+          const req=t.objectStore('meta').get('release:'+p.slug);
+          req.onsuccess=()=>resolve(req.result?.release||null);
+          req.onerror=()=>reject(Error('RELEASE_READ_FAILED'));
+        });
+        const safety=evaluateStageSuccessor({
+          prior:previousStage.ok?previousStage.record:null,
+          previous:previousForWrite,job:previousJob,release,existing:r,
+          ready:{active:queued.record.desired,desired:null},
+          source:{...git,accountId:r.accountId,personaUid:r.personaUid,
+            bindingVersion:r.bindingVersion,remotePublicId:r.remotePublicId}
+        });
+        if(!safety.ok)return safety;
+        if(!(await recheck(g,r.personaUid,before)).ok)
+          return fail('S05_UPDATE_GUARD_CHANGED');
+        const admitted=await createReadyStore(database).handoff(
+          p.slug,queued.record.revision,{
+            source:'TRUSTED_S05_ADMISSION_BOUNDARY',
+            accountOwnerVerified:true,protectedRouteReady:true,
+            completeRecoverableBaseline:true,humanEditorClean:true,
+            noUncertainWriter:true,writerIdle:true,nativeIdle:true,
+            providerEffectResolved:true,approvalEffectResolved:true
+          });
+        if(!admitted.ok)return admitted;
+      }
       if(!(await recheck(g,r.personaUid,before)).ok)return fail('EXISTING_GUARD_CHANGED');
       const stage=stageFactory(database);
       const earlier=await stage.getFull(p.slug);
@@ -268,12 +362,13 @@ export function createExistingBoundary(api,{
         result={ok:true,revision:earlier.record.revision};
       }else{
         result=await stage.pin({slug:p.slug,candidate,
-          previous:opened.source,source:git,
+          previous:previousForWrite,source:git,
           eligibility:{ok:true,account:f.account,item:{
             remoteId:r.remotePublicId}},nonce:r.nonce});
       }
       if(!result.ok)return result;
-      const pinned=await store.pinStage(p.slug,r.revision,{candidate,source:git});
+      const pinned=await store.pinStage(p.slug,r.revision,{candidate,source:git,
+        ...(replacingSavedF?{previousForWrite}:{})});
       return pinned.ok?{...pinned,stageRevision:result.revision,
         stage:'PINNED',sourceFingerprint:candidate.fingerprint}:pinned;
     }
@@ -290,7 +385,9 @@ export function createExistingBoundary(api,{
       const remote=await observe(g,r);
       if(!remote.ok)return remote;
       const mustBePublic=['UNLIST','RECOVERY_UNLIST'].includes(m.type);
-      const fingerprint=m.type==='UNLIST'?r.previousFingerprint:r.stagedFingerprint;
+      const fingerprint=m.type==='UNLIST'?r.previousFingerprint:
+        m.type==='STAGE'?(r.stagePreviousFingerprint||r.previousFingerprint):
+        r.stagedFingerprint;
       if(remote.visibility!==(mustBePublic?'PUBLIC':'UNLISTED')||
          remote.source.fingerprint!==fingerprint)
         return fail('EXISTING_REMOTE_SOURCE_OR_LISTING_DRIFT');
@@ -311,6 +408,14 @@ export function createExistingBoundary(api,{
         if(!stage.ok||stage.record.state!=='PINNED'||
            stage.record.candidate.fingerprint!==r.stagedFingerprint||
            stage.record.nonce!==r.nonce)return fail('EXISTING_STAGE_CHANGED');
+        if(stage.record.readyIdentifier){
+          const current=await readySource(database,p.slug);
+          if(!current.ok||
+             current.source.gitReadyIdentifier!==stage.record.readyIdentifier||
+             current.source.gitReadyInputFingerprint!==stage.record.readyInputFingerprint||
+             current.candidate.fingerprint!==stage.record.candidate.fingerprint)
+            return fail('S05_READY_CHANGED_BEFORE_UPDATE_SAVE');
+        }
       }
       if(effectGate({phase:'I13',action:m.type,record:r})!==true)
         return fail('PROVIDER_ACTIVATION_HELD');
@@ -342,7 +447,9 @@ export function createExistingBoundary(api,{
       }
       const request={slug:p.slug,nonce:r.nonce,
         action:m.type==='RECOVERY_UNLIST'?'UNLIST':m.type,
-        previousFiles:['UNLIST','STAGE'].includes(m.type)?prior.source.blobs:r.stageSource.blobs,
+        previousFiles:m.type==='STAGE'&&r.stagePreviousSource?.blobs?
+          r.stagePreviousSource.blobs:
+          ['UNLIST','STAGE'].includes(m.type)?prior.source.blobs:r.stageSource.blobs,
         ...(m.type==='STAGE'?{targetFiles:r.stageSource.blobs}:
           m.type==='RESTORE'?{targetFiles:prior.source.blobs}:{})};
       let attempt;
@@ -376,6 +483,6 @@ export function createExistingBoundary(api,{
       });
     });
   }
-  return Object.freeze({run,register});
+  return Object.freeze({run,runTrusted,register});
 }
 if(typeof browser!=='undefined')createExistingBoundary(browser).register();

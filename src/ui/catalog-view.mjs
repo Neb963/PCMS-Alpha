@@ -61,9 +61,152 @@ function render(data){
   void loadSavedDraft(data.repositoryId,data.prompt.oid);
 
 }
-function request(type,params={}){
+// S05 queued READY state is advisory local intent, not a deployed candidate.
+async function renderReadyQueue(scanGeneration){
+  const section=document.createElement('section');
+  section.setAttribute('aria-label','Local READY intent queue');
+  const heading=document.createElement('h3');
+  heading.textContent='Observed READY work (local, not deployed)';
+  const description=document.createElement('p');
+  description.textContent='Only coherent main declarations are queued. Native development, source mutation and publication still require independent admission.';
+  const table=document.createElement('table'),tbody=document.createElement('tbody');
+  const header=document.createElement('tr');
+  for(const title of ['Generator','Desired READY','Active candidate','Hold','Assessment']){
+    const th=document.createElement('th');th.textContent=title;header.append(th);
+  }
+  const thead=document.createElement('thead');thead.append(header);
+  table.append(thead,tbody);
+  const next=document.createElement('button');next.type='button';
+  next.textContent='Load more observed READY jobs';
+  const progress=document.createElement('p');
+  progress.setAttribute('role','status');
+  section.append(heading,description,table,next,progress);
+  list.append(section);
+  let after='',busyPage=false;
+  async function load(){
+    if(busyPage||!list.contains(section)||scanGeneration!==generation)return;
+    busyPage=true;next.disabled=true;progress.textContent='Loading canonical queue…';
+    try{
+      const r=await request('LIST_READY',{after,limit:100});
+      if(!list.contains(section)||scanGeneration!==generation)return;
+      if(!r?.ok){progress.textContent='Read-only queue unavailable: '+(r?.code||'UNAVAILABLE');return;}
+      for(const item of r.items){
+        const tr=document.createElement('tr');
+        for(const value of [item.slug,item.desired?.identifier||'—',
+          item.active?.identifier||'—',item.hold||'—']){
+          const td=document.createElement('td');td.textContent=value;tr.append(td);
+        }
+        const cell=document.createElement('td');
+        const check=document.createElement('button');
+        check.type='button';check.textContent='Assess';check.disabled=!connected;
+        check.setAttribute('aria-label','Assess '+item.slug+' read-only READY admission');
+        const result=document.createElement('span');
+        result.setAttribute('role','status');
+        const publicUpdate=document.createElement('button');
+        publicUpdate.type='button';
+        publicUpdate.textContent='Open guarded UPDATE';
+        publicUpdate.hidden=true;
+        publicUpdate.setAttribute('aria-label','Open guarded existing source update for '+item.slug);
+        publicUpdate.addEventListener('click',()=>{
+          // Navigation only; never unlist or stage from this shortcut.
+          // I13 independently reloads the canonical record and requires
+          // operator passphrase plus its own effect/reconciliation gates.
+          const target=document.getElementById('pcms-existing-slug');
+          if(target){
+            target.value=item.slug;
+            target.dispatchEvent(new Event('input',{bubbles:true}));
+          }
+          location.hash='#work-queue';
+        });
+        check.addEventListener('click',async()=>{
+          if(check.disabled)return;
+          check.disabled=true;result.textContent=' Checking current evidence…';
+          try{
+            const observed=await request('ASSESS_READY',{
+              slug:item.slug,expectedRevision:item.revision
+            },'pcms-s05-ready-operator');
+            result.textContent=' '+(observed?.code||'ASSESSMENT_UNAVAILABLE');
+            publicUpdate.hidden=observed?.code!=='S05_PUBLIC_SLEEP_AND_UNLIST_REQUIRED';
+            if(observed?.ok&&observed.savedFingerprint)
+              result.title='Observed saved-source SHA-256 '+observed.savedFingerprint;
+          }catch{result.textContent=' Assessment unavailable; no action performed.';}
+          finally{check.disabled=false;}
+        });
+        const prepare=document.createElement('button');
+        prepare.type='button';
+        prepare.textContent='Prepare source locally';
+        prepare.disabled=!connected||(!item.desired&&!item.active);
+        prepare.setAttribute('aria-label','Prepare local READY source for '+item.slug);
+        prepare.addEventListener('click',async()=>{
+          if(prepare.disabled)return;
+          prepare.disabled=true;check.disabled=true;
+          result.textContent=' Rechecking owner, editor and full source…';
+          try{
+            const out=await request('PREPARE_LOCAL',{
+              slug:item.slug,expectedRevision:item.revision
+            },'pcms-s05-ready-operator');
+            result.textContent=' '+(out?.code||'PREPARATION_UNAVAILABLE');
+            if(out?.code==='S05_LOCAL_STAGE_PINNED')
+              progress.textContent='Local stage pinned without provider effects. Re-scan the catalog to refresh revision; native editing remains separately guarded.';
+          }catch{result.textContent=' Local preparation unavailable; recheck canonical state.';}
+          finally{prepare.disabled=false;check.disabled=false;}
+        });
+        const pause=document.createElement('button'),resume=document.createElement('button');
+        pause.type='button';resume.type='button';
+        pause.textContent='Pause READY';resume.textContent='Resume READY';
+        pause.disabled=!connected||item.hold==='OPERATOR_PAUSED'||
+          item.hold==='READY_REVOKED_NOT_READY';
+        resume.disabled=!connected||item.hold!=='OPERATOR_PAUSED';
+        pause.setAttribute('aria-label','Pause local READY for '+item.slug);
+        resume.setAttribute('aria-label','Recheck Git and resume READY for '+item.slug);
+        async function changeHold(type){
+          if(type==='PAUSE_READY'?pause.disabled:resume.disabled)return;
+          pause.disabled=true;resume.disabled=true;
+          check.disabled=true;prepare.disabled=true;
+          result.textContent=type==='PAUSE_READY'?
+            ' Recording local pause…':' Rechecking exact Git main before resume…';
+          try{
+            const out=await request(type,{slug:item.slug,
+              expectedRevision:item.revision},'pcms-s05-ready-operator');
+            result.textContent=' '+(out?.code||'READY_COMMAND_UNVERIFIED');
+            if(out?.ok){
+              progress.textContent='READY state committed locally. Re-scan catalog to load the new revision; no native or provider effect was executed.';
+              return;
+            }
+          }catch{result.textContent=' READY state uncertain. Re-scan before further action.';}
+          finally{check.disabled=false;prepare.disabled=false;}
+        }
+        pause.addEventListener('click',()=>{void changeHold('PAUSE_READY');});
+        resume.addEventListener('click',()=>{void changeHold('RESUME_READY');});
+        const diagnostics=document.createElement('details');
+        const summary=document.createElement('summary');
+        summary.textContent='Diagnostics and manual recovery';
+        diagnostics.append(summary,check,document.createTextNode(' '),
+          prepare,document.createTextNode(' '),publicUpdate);
+        // Ordinary READY work advances through the background coordinator.
+        // The normal row exposes only pause/resume and an actionable status.
+        cell.append(pause,document.createTextNode(' '),resume,
+          result,diagnostics);tr.append(cell);
+        tbody.append(tr);
+      }
+      after=r.nextCursor||'';
+      next.hidden=!r.more;
+      let last=null;
+      try{last=(await browser.storage.local.get('pcmsS05DevelopmentReceipt'))
+        ?.pcmsS05DevelopmentReceipt||null;}catch{}
+      progress.textContent=tbody.children.length+' READY candidate(s). '+
+        (last?.slug&&last?.code?
+          'Latest development: '+last.slug+' — '+last.code+'.':
+          'Waiting for the next eligible background development step.');
+    }catch{if(list.contains(section))progress.textContent='Read-only READY queue unavailable.';}
+    finally{busyPage=false;next.disabled=false;}
+  }
+  next.addEventListener('click',()=>{void load();});
+  await load();
+}
+function request(type,params={},portName='pcms-s03-catalog'){ 
   return new Promise((resolve,reject)=>{
-    const port=browser.runtime.connect({name:'pcms-s03-catalog'});
+    const port=browser.runtime.connect({name:portName});
     let done=false;
     const timeout=setTimeout(()=>finish(null,Error('TIMEOUT')),90000);
     function finish(value,error){
@@ -144,6 +287,7 @@ scan.addEventListener('click',async()=>{
         '. No missing item or remote deletion inferred.');return;
     }
     render(r);
+    void renderReadyQueue(n);
     message('Complete read-only snapshot. '+r.recognizedCount+
       ' recognized entries. Scope: '+(r.importStatus||'NOT_CONNECTED')+
       '. Owner facts and allocations remain unverified; approval does not create remote generators.');

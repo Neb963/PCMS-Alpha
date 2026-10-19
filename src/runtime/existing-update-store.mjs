@@ -207,18 +207,32 @@ export function createExistingStore(db){
       };
     });
   }
-  function pinStage(s,revision,{candidate,source}){
+  function pinStage(s,revision,{candidate,source,previousForWrite=null}){
     if(!candidate?.ok||!source?.ok||source.ready!==true||
-       source.sourceBytes?.length<2)
+       source.sourceBytes?.length<2||
+       (previousForWrite&&(!previousForWrite.ok||
+         !Array.isArray(previousForWrite.blobs))))
       return Promise.resolve(fail('EXISTING_STAGE_SOURCE_UNVERIFIED'));
     return tx(db,'readwrite',(t,done)=>{
       const m=t.objectStore('meta');
       m.get(key(s)).onsuccess=e=>{
         const old=e.target.result?.record;
-        if(!old||old.revision!==revision||old.state!=='UNLIST_CONFIRMED'){
+        if(!old||old.revision!==revision||
+           !['UNLIST_CONFIRMED','STAGE_CONFIRMED'].includes(old.state)){
           done(fail('EXISTING_STAGE_NOT_ADMISSIBLE'));return;
         }
+        const successor=old.state==='STAGE_CONFIRMED';
+        if(successor&&(!previousForWrite||
+           previousForWrite.fingerprint!==old.stagedFingerprint||
+           !old.stageSource||old.stageSource.fingerprint!==old.stagedFingerprint)){
+          done(fail('EXISTING_SAVED_F_REQUIRED_FOR_SUCCESSOR'));return;
+        }
         const next={...old,revision:old.revision+1,
+          state:'UNLIST_CONFIRMED',
+          // Original encrypted P and previousFingerprint are deliberately
+          // unchanged. A successor stages over the saved prior F, not over P.
+          stagePreviousSource:successor?structuredClone(previousForWrite):null,
+          stagePreviousFingerprint:successor?previousForWrite.fingerprint:null,
           stagedFingerprint:candidate.fingerprint,stageSource:structuredClone(candidate),
           gitHead:source.head,gitTestingSha:source.testingSha,
           sourceFolder:source.folder};

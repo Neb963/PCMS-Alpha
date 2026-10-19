@@ -2,6 +2,7 @@
 // external attempt still goes through canonical armNative, the donor lease,
 // and the separately authorized effect gate. A decision is not an effect or a
 // test oracle. Unknown test semantics and uncertain AI dispatch always hold.
+import {supportedDeclarativeAssertion} from './ai-declarative-assertion.mjs';
 const idle = new Set(['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE']);
 const actionable = new Set(['PENDING_NATIVE_SESSION','TESTS_UNVERIFIED','KNOWN_FAILURE']);
 const sameF=(test,source)=>test?.result==='PASS'&&test.sourceFingerprint===source;
@@ -50,7 +51,8 @@ export function planAiStep(job,{oracleNames=['default_generator_smoke']}={}){
     if(job.state==='KNOWN_FAILURE')return hold('AI_CHAT2_ISOLATION_UNVERIFIED');
     const pending=job.prompt.tests.filter(name=>
       !sameF(job.chat1.tests?.[name],job.sourceFingerprint));
-    if(pending.some(name=>!oracleNames.includes(name)))
+    if(pending.some(name=>!oracleNames.includes(name)&&
+      !supportedDeclarativeAssertion(name)))
       return hold('UNSUPPORTED_REQUIRED_ASSERTIONS');
     if(pending.length)return {ok:true,type:'RUN_TESTS',revision:job.revision,
       chat:1,effect:'BROWSER_OBSERVATION_ONLY'};
@@ -71,7 +73,8 @@ export function planAiStep(job,{oracleNames=['default_generator_smoke']}={}){
     // First chat can be retested under Chat2 after a source-changing
     // repair. The independent browser assertion runs against final F.
     if(chat===1&&!chatReady(job,1))return hold('AI_CHAT1_SESSION_MISSING');
-    if(pending.some(name=>!oracleNames.includes(name)))
+    if(pending.some(name=>!oracleNames.includes(name)&&
+      !supportedDeclarativeAssertion(name)))
       return hold('UNSUPPORTED_REQUIRED_ASSERTIONS');
     return {ok:true,type:'RUN_TESTS',revision:job.revision,
       chat, effect:'BROWSER_OBSERVATION_ONLY'};

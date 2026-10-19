@@ -19,8 +19,25 @@ function tx(db,mode,fn){
     try{fn(t,x=>{result=x;});}catch{try{t.abort();}catch{}}
   });
 }
+// S05 cross-writer CAS: the READY ledger and AI write share one IDB
+// transaction. A boundary read performed earlier can never authorize a
+// native dispatch or test PASS after a later candidate has been queued.
+function withCurrentReady(m,job,done,commit){
+  if(!job.readyIdentifier){commit();return;}
+  m.get('s05-ready:'+job.slug).onsuccess=e=>{
+    const r=e.target.result?.record;
+    if(!r?.active||r.desired||['READY_REVOKED_NOT_READY','OPERATOR_PAUSED'].includes(r.hold)||
+       r.active.identifier!==job.readyIdentifier||
+       r.active.inputFingerprint!==job.readyInputFingerprint){
+      done(fail('AI_READY_CANDIDATE_CHANGED'));return;
+    }
+    commit();
+  };
+}
 const publicJob=j=>j?{ok:true,slug:j.slug,revision:j.revision,state:j.state,
   sourceFingerprint:j.sourceFingerprint,promptRevision:j.prompt.revision,
+  promptSource:j.prompt.source==='GIT_MAIN_CHAT1_PINNED'?
+    'GIT_MAIN_CHAT1_PINNED':'LOCAL_SETTINGS',
   optionalTestingSha:j.optionalTesting?.sha256||null,
   evidence:evaluation(j),changes:j.changes,hold:j.hold,
   nativeState:j.native?.state||'NOT_STARTED',
@@ -110,72 +127,160 @@ export function createAiStore(db){
         done(job?{ok:true,job}:fail('AI_JOB_NOT_FOUND'));
       };
     });
-  const list=()=>tx(db,'readonly',(t,done)=>{
-    const jobs=[];let truncated=false;
-    t.objectStore('meta').openCursor().onsuccess=e=>{
-      const c=e.target.result;
-      if(!c){done({ok:true,jobs,truncated});return;}
-      if(typeof c.key==='string'&&c.key.startsWith('ai-job:')&&c.value?.job){
-        if(jobs.length<200)jobs.push(publicJob(c.value.job));else truncated=true;
-      }
-      c.continue();
-    };
-  });
-  function start(stage,optionalTesting=null){
+  // S05 paginated listing; prior 200-job truncation silently hid eligible
+  // work. Cursor is an ordinary ordered slug, not an effect/claim token.
+  const list=({after='',limit=200}={})=>{
+    if(typeof after!=='string'||after.length>100||
+       !Number.isInteger(limit)||limit<1||limit>200)
+      return Promise.resolve(fail('AI_PAGE_INVALID'));
+    return tx(db,'readonly',(t,done)=>{
+      const jobs=[];let truncated=false;
+      t.objectStore('meta').openCursor().onsuccess=e=>{
+        const cursor=e.target.result;
+        if(!cursor){done({ok:true,jobs,truncated,more:truncated,
+          nextCursor:truncated?jobs.at(-1)?.slug||null:null});return;}
+        if(typeof cursor.key==='string'&&cursor.key.startsWith('ai-job:')&&
+           cursor.value?.job){
+          const slugName=cursor.key.slice('ai-job:'.length);
+          if(slugName>after){
+            if(jobs.length<limit)jobs.push(publicJob(cursor.value.job));
+            else truncated=true;
+          }
+        }
+        cursor.continue();
+      };
+    });
+  };
+  function start(stage,optionalTesting=null,promptOverride=null){
     if(!stage?.slug||!slug(stage.slug))return Promise.resolve(fail('INVALID_STAGE'));
     return tx(db,'readwrite',(t,done)=>{
       const m=t.objectStore('meta');
       m.get('ai-prompts').onsuccess=p=>{
-        const prompt=(p.target.result?.history||initialPrompt()).at(-1);
+        // S05's Git-owned Chat 1 prompt is supplied only through a trusted
+        // pinned-main native-vault boundary; the UI cannot inject it here.
+        const prompt=promptOverride||((p.target.result?.history||initialPrompt()).at(-1));
         const started=beginAiJob({stage,prompt,optionalTesting});
         if(!started.ok){done(started);return;}
-        // Settings affect new admissions only; default one active job/account.
         const account=stage.accountId;
         m.get('ai-concurrency').onsuccess=settingRequest=>{
           const limit=settingRequest.target.result?.setting?.perAccount||1;
-          let active=0;
+          let otherActive=0;
           m.openCursor().onsuccess=e=>{
-          const c=e.target.result;
-          if(c){
-            if(typeof c.key==='string'&&c.key.startsWith('ai-job:')&&
-              c.value?.accountId===account&&!slotReleased(c.value.job))
-              active++;
-            c.continue();return;
-          }
-          if(active>=limit){done(fail('AI_ACCOUNT_CONCURRENCY_HELD'));return;}
-          m.get(key(stage.slug)).onsuccess=old=>{
-            const previous=old.target.result?.job;
-            const commit=()=>{
-              // Fresh jobs pin current settings, never mutable earlier tests.
-              const job={...started.job,revision:previous?previous.revision+1:1,
-                createdAt:Date.now()};
-              if(previous){
-                m.add({key:'ai-history:'+stage.slug+':'+previous.revision,
-                  accountId:account,job:structuredClone(previous)});
-                m.put({key:key(stage.slug),accountId:account,job});
-              }else m.add({key:key(stage.slug),accountId:account,job});
-              t.objectStore('events').add({stage:'AI_JOB_CREATED',slug:stage.slug,
-                sourceFingerprint:job.sourceFingerprint,promptRevision:prompt.revision});
-              done(publicJob(job));
-            };
-            if(!previous){commit();return;}
-            if(!slotReleased(previous)||previous.state!=='TESTS_VERIFIED'||
-               previous.stageRevision===stage.revision){
-              done(fail('AI_EXISTING_JOB_RECONCILE'));return;
+            const cursor=e.target.result;
+            if(cursor){
+              if(typeof cursor.key==='string'&&cursor.key.startsWith('ai-job:')&&
+                 cursor.key!==key(stage.slug)&&
+                 cursor.value?.accountId===account&&!slotReleased(cursor.value.job))
+                otherActive++;
+              cursor.continue();return;
             }
-            m.get('release:'+stage.slug).onsuccess=re=>{
-              const release=re.target.result?.release;
-              if(release?.state!=='CONFIRMED_PUBLIC'||
-                 release.source!=='INDEPENDENT_PUBLICATION_READBACK'||
-                 release.approval?.jobRevision!==previous.revision||
-                 release.approval?.sourceFingerprint!==previous.verifiedFinal||
-                 release.approval?.accountId!==stage.accountId||
-                 release.approval?.remotePublicId!==stage.remotePublicId){
-                done(fail('AI_PREVIOUS_RELEASE_NOT_CONFIRMED'));return;
+            if(otherActive>=limit){done(fail('AI_ACCOUNT_CONCURRENCY_HELD'));return;}
+            m.get(key(stage.slug)).onsuccess=old=>{
+              const previous=old.target.result?.job;
+              const commit=()=>{
+                const write=()=>{
+                  const job={...started.job,revision:previous?previous.revision+1:1,
+                    createdAt:Date.now(),
+                    ...(stage.readyIdentifier?{
+                      readyIdentifier:stage.readyIdentifier,
+                      readyInputFingerprint:stage.readyInputFingerprint}:{})};
+                  if(previous){
+                    m.put({key:'ai-history:'+stage.slug+':'+previous.revision,
+                      accountId:account,job:structuredClone(previous)});
+                    m.put({key:key(stage.slug),accountId:account,job});
+                  }else m.add({key:key(stage.slug),accountId:account,job});
+                  t.objectStore('events').add({stage:'AI_JOB_CREATED',slug:stage.slug,
+                    sourceFingerprint:job.sourceFingerprint,promptRevision:prompt.revision,
+                    ...(job.readyIdentifier?{readyIdentifier:job.readyIdentifier}:{})});
+                  done(publicJob(job));
+                };
+                if(!stage.readyIdentifier){write();return;}
+                // The external donor check happened before this transaction.
+                // Re-read the canonical SOURCE_VERIFIED stage *inside* the
+                // committing IDB transaction, or stale caller snapshots could
+                // create jobs after a newer READY or source-writer takeover.
+                m.get('stage:'+stage.slug).onsuccess=sr=>{
+                  const current=sr.target.result?.record;
+                  if(!current||current.state!=='SOURCE_VERIFIED'||
+                     current.revision!==stage.revision||
+                     current.accountId!==stage.accountId||
+                     current.personaUid!==stage.personaUid||
+                     current.remotePublicId!==stage.remotePublicId||
+                     current.bindingVersion!==stage.bindingVersion||
+                     current.readyIdentifier!==stage.readyIdentifier||
+                     current.readyInputFingerprint!==stage.readyInputFingerprint||
+                     current.nonce!==stage.nonce||
+                     current.candidate?.fingerprint!==stage.candidate?.fingerprint||
+                     current.previous?.fingerprint!==stage.previous?.fingerprint||
+                     !Number.isSafeInteger(current.verifiedAt)||
+                     current.verifiedAt<1){
+                    done(fail('AI_CANONICAL_STAGE_CHANGED'));return;
+                  }
+                  write();
+                };
+              };
+              if(!previous){
+                if(stage.readyIdentifier){
+                  m.get('s05-ready:'+stage.slug).onsuccess=rr=>{
+                    const ready=rr.target.result?.record;
+                    if(!ready?.active||ready.desired||['READY_REVOKED_NOT_READY','OPERATOR_PAUSED'].includes(ready.hold)||
+                       ready.active.identifier!==stage.readyIdentifier||
+                       ready.active.inputFingerprint!==stage.readyInputFingerprint){
+                      done(fail('AI_READY_CANDIDATE_CHANGED'));return;
+                    }
+                    commit();
+                  };
+                }else commit();
+                return;
               }
-              commit();
+              if(previous.stageRevision===stage.revision){
+                done(fail('AI_EXISTING_JOB_RECONCILE'));return;
+              }
+              if(stage.readyIdentifier){
+                m.get('s05-ready:'+stage.slug).onsuccess=rr=>{
+                  const ready=rr.target.result?.record;
+                  if(!ready?.active||ready.desired||['READY_REVOKED_NOT_READY','OPERATOR_PAUSED'].includes(ready.hold)||
+                     ready.active.identifier!==stage.readyIdentifier||
+                     ready.active.inputFingerprint!==stage.readyInputFingerprint){
+                    done(fail('AI_READY_CANDIDATE_CHANGED'));return;
+                  }
+                  const native=previous.native?.state;
+                  const provenIdle=previous.state==='PENDING_NATIVE_SESSION'&&!previous.native||
+                    ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(native);
+                  const saved=previous.finalSource?.fingerprint||
+                    (previous.state==='PENDING_NATIVE_SESSION'?previous.sourceFingerprint:null);
+                  if(!provenIdle||!stage.previous?.ok||
+                     saved!==stage.previous.fingerprint||
+                     ['HELD_RECONCILE','HUMAN_OWNED','HELD_NO_PROGRESS'].includes(previous.state)){
+                    done(fail('AI_PREVIOUS_NATIVE_OR_SOURCE_NOT_QUIESCENT'));return;
+                  }
+                  m.get('release:'+stage.slug).onsuccess=re=>{
+                    const state=re.target.result?.release?.state;
+                    if(['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN',
+                      'RECOVERY_HOLD','PUBLISHING'].includes(state)){
+                      done(fail('AI_PREVIOUS_PUBLICATION_UNCERTAIN'));return;
+                    }
+                    commit();
+                  };
+                };
+              }else{
+                if(!slotReleased(previous)||previous.state!=='TESTS_VERIFIED'){
+                  done(fail('AI_EXISTING_JOB_RECONCILE'));return;
+                }
+                m.get('release:'+stage.slug).onsuccess=re=>{
+                  const release=re.target.result?.release;
+                  if(release?.state!=='CONFIRMED_PUBLIC'||
+                     release.source!=='INDEPENDENT_PUBLICATION_READBACK'||
+                     release.approval?.jobRevision!==previous.revision||
+                     release.approval?.sourceFingerprint!==previous.verifiedFinal||
+                     release.approval?.accountId!==stage.accountId||
+                     release.approval?.remotePublicId!==stage.remotePublicId){
+                    done(fail('AI_PREVIOUS_RELEASE_NOT_CONFIRMED'));return;
+                  }
+                  commit();
+                };
+              }
             };
-          };
           };
         };
       };
@@ -204,11 +309,15 @@ export function createAiStore(db){
           result.job.state==='TESTS_VERIFIED'&&
           result.job.finalSource?.fingerprint===result.job.verifiedFinal&&
           ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(result.job.native?.state));
-        m.put({...prior,job:result.job});
-        t.objectStore('events').add({stage:'AI_EVIDENCE_RECORDED',slug:slugName,
-          revision:result.job.revision,kind:evidence.type,
-          state:result.job.state});
-        done(publicJob(result.job));
+        const write=()=>{
+          m.put({...prior,job:result.job});
+          t.objectStore('events').add({stage:'AI_EVIDENCE_RECORDED',slug:slugName,
+            revision:result.job.revision,kind:evidence.type,
+            state:result.job.state});
+          done(publicJob(result.job));
+        };
+        if(evidence.type==='INTERRUPT')write();
+        else withCurrentReady(m,prior.job,done,write);
       };
     });
   }
@@ -248,13 +357,15 @@ export function createAiStore(db){
           state:known?'KNOWN_FAILURE':'TESTS_UNVERIFIED',
           hold:known?'KNOWN_FAILURE':'INDEPENDENT_BROWSER_TESTS_REQUIRED',
           executionSlotReleased:false};
-        m.put({...row,job:next});
-        t.objectStore('events').add({
-          stage:'AI_CHAT2_FRESHNESS_OBSERVED',slug:slugName,revision:next.revision,
-          sessionDigest:next.chat2.sessionDigest,
-          sourceFingerprint:next.sourceFingerprint
+        withCurrentReady(m,j,done,()=>{
+          m.put({...row,job:next});
+          t.objectStore('events').add({
+            stage:'AI_CHAT2_FRESHNESS_OBSERVED',slug:slugName,revision:next.revision,
+            sessionDigest:next.chat2.sessionDigest,
+            sourceFingerprint:next.sourceFingerprint
+          });
+          done(publicJob(next));
         });
-        done(publicJob(next));
       };
     });
   }
@@ -299,10 +410,14 @@ export function createAiStore(db){
             previousSessionDigest:j.native?.sessionDigest||j.chat1.sessionDigest||null,
             armedAt:Date.now()},state:'HELD_RECONCILE',
           hold:'NATIVE_EFFECT_MAY_HAVE_OCCURRED'};
-        m.put({...row,job:next});
-        t.objectStore('events').add({stage:'AI_DISPATCH_POSSIBLE',
-          slug:slugName,revision:next.revision,step});
-        done(publicJob(next));
+        const commit=()=>{
+          m.put({...row,job:next});
+          t.objectStore('events').add({stage:'AI_DISPATCH_POSSIBLE',
+            slug:slugName,revision:next.revision,step});
+          done(publicJob(next));
+        };
+        if(step==='STOP')commit();
+        else withCurrentReady(m,j,done,commit);
       };
     });
   }

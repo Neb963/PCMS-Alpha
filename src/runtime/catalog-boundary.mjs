@@ -7,6 +7,7 @@ import {createGitPromptStore} from './catalog-prompt-store.mjs';
 import {writeExistingGitPrompt,observeGitPromptWrite} from './git-prompt.mjs';
 import {inspectReadyCandidate} from './catalog-declaration.mjs';
 import {createDeclarationStore} from './catalog-ready-store.mjs';
+import {createReadyStore} from './ready-store.mjs';
 import {scanMainCatalog,validRepository,makeInitialImportPreview} from './git-catalog.mjs';
 export const CATALOG_PORT='pcms-s03-catalog';
 const STATE_KEY='pcmsS03Git';
@@ -19,7 +20,7 @@ export function validateCatalogMessage(api,sender,message){
   if(!message||typeof message!=='object'||Array.isArray(message)||
       Object.keys(message).some(k=>!['type','params'].includes(k)))
     return fail('CAPABILITY_OFF');
-  const types=['SCAN_CATALOG','CONNECT_GIT','SCAN_CONNECTED','GIT_STATUS','DISCONNECT_GIT','APPROVE_IMPORT','GET_PROMPT_DRAFT','SAVE_PROMPT_DRAFT','COMMIT_PROMPT','RECONCILE_PROMPT','INSPECT_DECLARATION'];
+  const types=['SCAN_CATALOG','CONNECT_GIT','SCAN_CONNECTED','GIT_STATUS','DISCONNECT_GIT','APPROVE_IMPORT','GET_PROMPT_DRAFT','SAVE_PROMPT_DRAFT','COMMIT_PROMPT','RECONCILE_PROMPT','INSPECT_DECLARATION','LIST_READY'];
   if(!types.includes(message.type))return fail('CAPABILITY_OFF');
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
@@ -52,7 +53,12 @@ export function validateCatalogMessage(api,sender,message){
     if(Object.keys(p).some(k=>k!=='repositoryId')||
       typeof p.repositoryId!=='string'||!/^[1-9][0-9]{0,19}$/.test(p.repositoryId))
       return fail('INVALID_PARAMS');
-  } else if(message.type==='GET_PROMPT_DRAFT'){
+  } else if(message.type==='LIST_READY'){
+    if(Object.keys(p).some(k=>!['after','limit'].includes(k))||
+      (p.after!==undefined&&(typeof p.after!=='string'||p.after.length>100))||
+      (p.limit!==undefined&&(!Number.isInteger(p.limit)||p.limit<1||p.limit>200)))
+      return fail('INVALID_PARAMS');
+  } else if(message.type==='GET_PROMPT_DRAFT'){ 
     if(Object.keys(p).length)return fail('INVALID_PARAMS');
   } else if(Object.keys(p).length)return fail('INVALID_PARAMS');
   return {ok:true};
@@ -99,6 +105,8 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
     const p=message.params||{};
     try{
+      if(message.type==='LIST_READY')
+        return createReadyStore(await (importDb ||= open())).list(p);
       if(message.type==='SCAN_CATALOG')
         return await scanAndPreview(p.repository,p.token,null);
       if(message.type==='CONNECT_GIT'){

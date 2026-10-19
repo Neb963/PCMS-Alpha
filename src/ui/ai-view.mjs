@@ -8,7 +8,8 @@ const perAccount=id('pcms-ai-per-account'),saveConcurrency=id('pcms-ai-save-conc
   concurrencyStatus=id('pcms-ai-concurrency-status');
 const slug=id('pcms-ai-slug'),token=id('pcms-ai-git-token'),prepare=id('pcms-ai-prepare');
 const refresh=id('pcms-ai-refresh'),jobStatus=id('pcms-ai-jobs-status'),jobList=id('pcms-ai-job-list');
-const runNative=id('pcms-ai-run'),observeNative=id('pcms-ai-observe'),
+const runNative=id('pcms-ai-run'),stopNative=id('pcms-ai-stop'),
+  observeNative=id('pcms-ai-observe'),
   advanceNative=id('pcms-ai-advance'),opfsNative=id('pcms-ai-opfs'),
   freshNative=id('pcms-ai-fresh'),
   testNative=id('pcms-ai-test'),repairNative=id('pcms-ai-repair'),
@@ -37,6 +38,7 @@ function controls(){
   refresh.disabled=busy;
   const selected=selectedJob?.ok===true;
   runNative.disabled=busy||!selected||selectedJob.state!=='PENDING_NATIVE_SESSION';
+  stopNative.disabled=busy||!selected||selectedJob.nativeState!=='RUNNING_OBSERVED';
   opfsNative.disabled=busy||!selected||selectedJob.nativeState!=='CHAT2_OBSERVED_IDLE'||
     selectedJob.chat2IsolationVerified===true;
   freshNative.disabled=busy||!selected||
@@ -55,8 +57,9 @@ function controls(){
     selectedJob.evidence?.chat1Pass!==true;
   chat2Native.disabled=busy||!selected||
     selectedJob.optionalTestingSha===null;
-  prepare.disabled=busy||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug.value)||
-    token.value.length<10;
+  // S05 uses the OS vault; legacy Git staging still validates its own
+  // explicit token if one is supplied. A UI token is never required authority.
+  prepare.disabled=busy||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug.value);
 }
 function renderPrompt(data){
   current=data;
@@ -110,14 +113,16 @@ importButton.addEventListener('click',()=>{
 });
 async function refreshJobs(){
   const own=++queueSeq;
+  jobList.replaceChildren();
+  const ul=document.createElement('ul');
+  jobList.append(ul);
+  let after='',loaded=0;
   try{
-    const data=await ai('LIST_JOBS');
-    if(own!==queueSeq)return;
-    jobList.replaceChildren();
-    if(!data?.ok){jobStatus.textContent=data?.code||'AI_JOBS_UNAVAILABLE';return;}
-    if(!data.jobs.length){jobStatus.textContent='No jobs prepared. Native AI execution remains held.';return;}
-    const ul=document.createElement('ul');
-    for(const j of data.jobs){
+    while(true){
+      const data=await ai('LIST_JOBS',{after,limit:200});
+      if(own!==queueSeq)return;
+      if(!data?.ok){jobStatus.textContent=data?.code||'AI_JOBS_UNAVAILABLE';return;}
+      for(const j of data.jobs){
       const li=document.createElement('li');
       const choose=document.createElement('button');
       choose.type='button';choose.textContent='Select '+j.slug;
@@ -132,16 +137,25 @@ async function refreshJobs(){
         j.schedulerDeferredUntil>Date.now()?
         ' · scheduler held until '+new Date(j.schedulerDeferredUntil).toLocaleString()+
         ' ('+(j.schedulerHold||'AI_WAKE_HELD')+')':'';
-      label.textContent=j.slug+' · '+j.state+' · Settings P'+j.promptRevision+
+      label.textContent=j.slug+' · '+j.state+' · '+
+        (j.promptSource==='GIT_MAIN_CHAT1_PINNED'?
+          'Git Chat 1 · prompt revision ':'Settings P')+
+        j.promptRevision+
         ' · source '+j.sourceFingerprint.slice(0,12)+
         ' · '+(j.evidence?.state||'TESTS_UNVERIFIED')+
         ' · '+(j.hold||'No external PASS claimed')+retry;
       li.append(label);ul.append(li);
+      }
+      loaded+=data.jobs.length;
+      jobStatus.textContent='Loaded '+loaded+' canonical AI job receipts; no source bodies disclosed.';
+      if(!data.more)break;
+      if(!data.nextCursor||data.nextCursor<=after)
+        throw Error('PAGINATION_STALLED');
+      after=data.nextCursor;
     }
-    jobList.append(ul);
-    if(data.truncated)jobList.append(document.createTextNode(' Additional jobs omitted.'));
-    jobStatus.textContent='Canonical job receipts · no helper session or source body disclosed.';
-  }catch{if(own===queueSeq)jobStatus.textContent='AI receipts unavailable; do not infer completion.';}
+    if(!loaded)jobStatus.textContent='No jobs prepared. Native AI execution remains held.';
+  }catch{if(own===queueSeq)
+    jobStatus.textContent='AI listing incomplete; no missing job or completion inferred.';}
 }
 async function prepareJob(){
   if(busy)return;
@@ -152,7 +166,8 @@ async function prepareJob(){
     const prior=await request('pcms-i09-staging','GET_STAGE',{slug:name});
     if(!prior?.ok){jobStatus.textContent=prior?.code||'STAGE_UNAVAILABLE';return;}
     const result=await ai('PREPARE_JOB',{
-      slug:name,expectedStageRevision:prior.revision,token:readToken
+      slug:name,expectedStageRevision:prior.revision,
+      ...(readToken?{token:readToken}:{})
     });
     if(!result?.ok){jobStatus.textContent=(result?.code||'AI_JOB_UNVERIFIED')+
       ' · held; no AI provider action';return;}
@@ -198,6 +213,7 @@ async function nativeCommand(type,step){
 }
 advanceNative.addEventListener('click',()=>nativeCommand('ADVANCE_JOB'));
 runNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT1_SEND'));
+stopNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','STOP'));
 observeNative.addEventListener('click',()=>nativeCommand('PROBE_NATIVE'));
 opfsNative.addEventListener('click',()=>nativeCommand('INSPECT_WORKSPACE'));
 freshNative.addEventListener('click',()=>nativeCommand('VERIFY_FRESH_CHAT2'));

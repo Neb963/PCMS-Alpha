@@ -43,7 +43,8 @@ export function parseReadyDeclaration(text){
   return match?{ok:true,ready:true,token:match[1],legacy:false}:FAIL('READY_REVISION_INVALID');
 }
 export async function inspectReadyCandidate({
-  repository,token,slug,pinnedHead,includeSourceBytes=false,maxRequests=4096
+  repository,token,slug,pinnedHead,includeSourceBytes=false,
+  includeTestingText=false,maxRequests=4096
 },transport=fetch){
   if(!validRepository(repository)||!recognizedSlug(slug)||!SHA.test(pinnedHead||'')||
      typeof token!=='string'||token.length<12||token.length>512||
@@ -175,8 +176,12 @@ export async function inspectReadyCandidate({
     const inputFingerprint=await fingerprint('PCMS_SOURCE_V1\n'+files.map(f=>
       JSON.stringify([f.path,f.size,f.sha256])).join('\n'));
     const testing=current.get((folder+'/TESTING.md').toLowerCase());
+    const testingBytes=testing?await readBlob(testing):null;
+    if(includeTestingText&&testingBytes&&testingBytes.length>16000)
+      return FAIL('READY_TESTING_TOO_LARGE');
     const optionalTesting=testing?{state:'PRESENT',oid:testing.sha,
-      sha256:hex(await crypto.subtle.digest('SHA-256',await readBlob(testing)))}:
+      sha256:hex(await crypto.subtle.digest('SHA-256',testingBytes)),
+      ...(includeTestingText?{text:utf8.decode(testingBytes)}:{})}:
       {state:'ABSENT',oid:null,sha256:null};
     return {ok:true,code:'READY_COHERENT_INPUT_PINNED',
       repository,slug,pinnedHead,declarationCommit:introduced,markerOid:marker.sha,

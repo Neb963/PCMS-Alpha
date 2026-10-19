@@ -17,6 +17,8 @@ import './source-boundary.mjs';
 import './catalog-boundary.mjs';
 // S03 main observer wakes from alarms without an open dashboard.
 import './catalog-watch.mjs';
+// S05 read-only main/owner/byte readiness diagnostics without effect admission.
+import './ready-operator.mjs';
 
 // I06 frozen allocation and held guarded two-stage provider dispatcher.
 import './supply-boundary.mjs';

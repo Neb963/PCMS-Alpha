@@ -147,6 +147,12 @@ test('I13 X: forged ports, untyped passphrases, target confusion and caller sour
     storage:{local:{get:async()=>({})}}};
   const good={type:'PREPARE',params:{slug,passphrase:'password-long-enough'}};
   assert.equal(validateExistingMessage(api,sender,good).ok,true);
+  // S05 READY is authorized through the protected Git vault. Legacy
+  // source inspection still refuses the absent credential internally.
+  assert.equal(validateExistingMessage(api,sender,{type:'PIN_STAGE',params:{
+    slug,expectedRevision:3,passphrase:'password-long-enough'}}).ok,true);
+  assert.equal(validateExistingMessage(api,sender,{type:'PIN_STAGE',params:{
+    slug,expectedRevision:3,passphrase:'password-long-enough',token:'short'}}).ok,false);
   assert.equal(validateExistingMessage(api,{...sender,url:'https://perchance.org'},good).code,'UNTRUSTED_SENDER');
   for(const invalid of [
     {type:'PUBLISH',params:{slug}},

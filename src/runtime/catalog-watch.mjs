@@ -4,8 +4,11 @@ import {scanMainCatalog} from './git-catalog.mjs';
 import {createRestoreSentinel} from './journal.mjs';
 import {createGitResumeTransport} from './catalog-resume.mjs';
 import {createCreationCatalogIntake} from './creation-catalog.mjs';
+import {createReadyIntake} from './ready-intake.mjs';
+import {createReadyDevelopment} from './ready-development.mjs';
 export const CATALOG_ALARM='pcms-s03-main-observe';
 export const CATALOG_RESUME_ALARM='pcms-s03-main-resume';
+export const READY_PROGRESS_ALARM='pcms-s05-ready-progress';
 const CONFIG='pcmsS03Git',RECEIPT='pcmsS03CatalogReceipt',LAST='pcmsS03CatalogLastComplete';
 const SHA=/^[0-9a-f]{40}$/;
 const identifier=c=>c&&typeof c.repository==='string'&&
@@ -14,7 +17,8 @@ const safe=code=>({ok:false,code});
 const MINUTES=15;
 export function createCatalogWatcher(api,{scan=scanMainCatalog,
   native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
-  network=fetch,clock=Date.now,ingestComplete=null}={}){
+  network=fetch,clock=Date.now,ingestComplete=null,ingestReady=null,
+  progressReady=null}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
   let running=null,registered=false;
   async function persistStatus(code){
@@ -77,6 +81,23 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
             code:intake.code||'S04_INTAKE_HELD',repositoryId:cfg.repositoryId,
             head:result.head,observedAt:clock(),providerEffects:'OFF'}});}catch{}
       }
+      // S05 consumes only complete, pinned-main READY observations. Its queue
+      // is local and effect-free; incomplete witnesses never become candidates.
+      if(ingestReady){
+        let ready;
+        try{ready=await ingestReady({catalog:result,repository:cfg.repository,
+          token:value.credential,transport:resumed.transport});}
+        catch{ready={ok:false,code:'S05_READY_INTAKE_UNAVAILABLE'};}
+        if(ready?.more===true)
+          try{await api.alarms.create(CATALOG_RESUME_ALARM,{when:clock()+60000});}catch{}
+        if(ready?.ok===false||ready?.held?.length)
+          try{await api.storage.local.set({pcmsS05ReadyIntakeReceipt:{
+            code:ready?.code||'READY_INTAKE_HELD',held:ready?.held||[],
+            observedAt:clock(),providerEffects:'OFF'}});}catch{}
+      }
+      // The same existing observer owns bounded S05 progression. This
+      // never promotes a partial Git scan into READY authority.
+      if(progressReady)try{await progressReady();}catch{}
       return {ok:true,code:'CATALOG_OBSERVED_READ_ONLY',head:result.head,
         newFolders:added,missingFolderObservations:missing};
     }catch{return persistStatus('CATALOG_OBSERVATION_UNAVAILABLE');}
@@ -85,11 +106,17 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
   function schedule(){
     try{void Promise.resolve(api.alarms.create(CATALOG_ALARM,{periodInMinutes:MINUTES})).catch(()=>{});}
     catch{}
+    // Native/READY transitions may resume without another large Git scan.
+    // Each step revalidates canonical source and, where applicable, main.
+    if(progressReady)try{void Promise.resolve(api.alarms.create(READY_PROGRESS_ALARM,{periodInMinutes:1})).catch(()=>{});}
+    catch{}
   }
   function register(){
     if(registered)return;registered=true;
     api.alarms.onAlarm.addListener(event=>{
       if(event?.name===CATALOG_ALARM||event?.name===CATALOG_RESUME_ALARM)void tick();
+      if(event?.name===READY_PROGRESS_ALARM&&progressReady)
+        void Promise.resolve(progressReady()).catch(()=>{});
     });
     api.runtime.onStartup.addListener(()=>{schedule();void tick();});
     api.runtime.onInstalled.addListener(()=>{schedule();void tick();});
@@ -101,5 +128,7 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
   return Object.freeze({register,tick});
 }
 if(typeof browser!=='undefined')createCatalogWatcher(browser,{
-  ingestComplete:createCreationCatalogIntake(browser).run
+  ingestComplete:createCreationCatalogIntake(browser).run,
+  ingestReady:createReadyIntake(browser).run,
+  progressReady:createReadyDevelopment(browser).tick
 }).register();

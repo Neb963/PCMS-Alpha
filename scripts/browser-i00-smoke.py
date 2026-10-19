@@ -299,6 +299,123 @@ def adoption_idb_probe(session):
     return call('POST',f'/session/{session}/execute/async',
                 {'script':script,'args':[]},timeout=70)
 
+
+def s05_ready_idb_probe(session):
+    # S05 B: real installed Firefox source/READY/stage IDB, closed and
+    # reopened from disk. Git, account, and Perchance are synthetic guard
+    # inputs ONLY. The packaged privileged module performs zero effects.
+    script = '''const done=arguments[arguments.length-1];
+    (async()=>{
+      const {createReadyStore}=await import('./ready-store.mjs');
+      const {createStagingStore}=await import('./staging-store.mjs');
+      const {createReadyOperator}=await import('./ready-operator.mjs');
+      const {createReadyDevelopment}=await import('./ready-development.mjs');
+      const slug='s05-installed-private-1',accountId='fixture-s05-account',
+        personaUid='fixture-s05-persona',remoteId='fixture-s05-remote',
+        repositoryId='1411034835',head='c'.repeat(40),H='a'.repeat(64);
+      // Isolated real Firefox IDB avoids contaminating the persistent
+      // operational account/inventory fixtures used by later B scenarios.
+      const dbName='pcms-s05-browser-'+crypto.randomUUID();
+      const open=()=>new Promise((resolve,reject)=>{
+        const req=indexedDB.open(dbName,1);
+        req.onupgradeneeded=()=>{
+          req.result.createObjectStore('meta',{keyPath:'key'});
+          req.result.createObjectStore('events',{autoIncrement:true});
+        };
+        req.onsuccess=()=>resolve(req.result);
+        req.onerror=()=>reject(req.error);
+      });
+      let db=await open();
+      const account={accountId,personaUid,revision:2,state:'VERIFIED',
+        bindingVersion:1,identity:{source:'GUARDED_SESSION_READBACK',
+          bindingVersion:1,principalFingerprint:H}};
+      const link={slug,accountId,personaUid,remoteId,bindingVersion:1,
+        folder:'generators/'+slug,source:'S04_INDEPENDENT_NOT_READY_ASSOCIATION'};
+      const generator={slug,accountId,personaUid,remoteId,bindingVersion:1,
+        ownerState:'OBSERVED_OWNER',source:'SOURCE_PENDING',
+        management:'MANAGED_CREATED',visibility:'UNLISTED'};
+      await new Promise((resolve,reject)=>{
+        const t=db.transaction('meta','readwrite');
+        t.oncomplete=resolve;t.onabort=()=>reject(Error('S05_SEED_ABORT'));
+        const m=t.objectStore('meta');
+        m.put({key:'account:'+accountId,account});
+        m.put({key:'inventory:'+slug,generator});
+        m.put({key:'source-link:'+slug,link});
+      });
+      const queue=createReadyStore(db);
+      const witness={repositoryId,slug,identifier:'rev-installed-ready',
+        declarationCommit:'d'.repeat(40),markerOid:'e'.repeat(40),
+        inputFingerprint:H};
+      const observed=await queue.observe(witness);
+      const files=[
+        {path:'main.pjs',base64:btoa('output = "s05 fixture"')},
+        {path:'index.html',base64:btoa('<main>S05 fixture</main>')}
+      ];
+      const settings={pcmsS03Git:{repository:'Neb963/per-gens',repositoryId}};
+      const api={runtime:browser.runtime,
+        storage:{local:{
+          get:async name=>({[name]:settings[name]}),
+          set:async rows=>Object.assign(settings,rows)
+        }}};
+      const guard={
+        getSafeRouteReadiness:async()=>({ready:true,personaUid,
+          cookieStoreId:'fixture-protected',routeId:'fixture-route'}),
+        observeReadOnly:async()=>({ok:true,principalFingerprint:H,
+          original:{remotePublicId:remoteId,ownerResult:'IS_OWNER',
+            visibility:'UNLISTED',pjs:'',html:'',assets:[]}}),
+        inspectSourceEditorIdle:async()=>({ok:true,clean:true,
+          source:'GUARDED_NO_LOCAL_EDITOR'})
+      };
+      const boundary=createReadyOperator(api,{
+        open:async()=>db,guard:()=>guard,
+        scan:async()=>({ok:true,complete:true,
+          source:'PINNED_MAIN_READ_ONLY',repositoryId,head}),
+        inspect:async()=>({ok:true,code:'READY_COHERENT_INPUT_PINNED',
+          slug,pinnedHead:head,legacy:false,token:'installed-ready',
+          inputFingerprint:H,files}),
+        native:async()=>({ok:true,credential:'fixture-vault-token'})
+      });
+      const sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')};
+      const cmd=(type,revision)=>boundary.run({
+        type,params:{slug,expectedRevision:revision}},sender);
+      const assessed=await cmd('ASSESS_READY',1);
+      const driver=createReadyDevelopment(api,{
+        open:async()=>db,effectGate:()=>false,
+        makeReady:()=>({runTrusted:async packet=>boundary.run(packet,sender)}),
+        makeExisting:()=>({runTrusted:async()=>({ok:false,code:'I13_UNEXPECTED'})}),
+        makeStage:()=>({runTrusted:async()=>({ok:false,code:'I09_EFFECT_UNEXPECTED'})}),
+        makeAi:()=>({runTrusted:async()=>({ok:false,code:'I10_EFFECT_UNEXPECTED'})})
+      });
+      // This is the installed production driver, not an operator-created
+      // PREPARE_LOCAL command. It should admit the verified private source
+      // and hold at the separately gated provider-effect boundary.
+      const automatic=await driver.tick();
+      const prepared=automatic.canonical;
+      const inactive=await driver.tick();
+      const stale=await cmd('PREPARE_LOCAL',1);
+      const current=await queue.get(slug);
+      const pinned=await createStagingStore(db).getFull(slug);
+      db.close();
+      db=await open();
+      const persisted=await createStagingStore(db).getFull(slug);
+      const persistQueue=await createReadyStore(db).get(slug);
+      db.close();
+      await new Promise((resolve,reject)=>{
+        const request=indexedDB.deleteDatabase(dbName);
+        request.onsuccess=resolve;request.onerror=()=>reject(request.error);
+      });
+      done({observed,assessed,automatic,inactive,prepared,stale,
+        current:current.record?.active?.identifier,
+        fingerprint:pinned.record?.candidate?.fingerprint,
+        persisted:persisted.record?.candidate?.fingerprint,
+        persistedReady:persistQueue.record?.active?.identifier,
+        noProviderEffects:prepared.providerEffects==='NONE'});
+    })().catch(e=>done({error:'S05_BROWSER_IDB_PROBE_FAILED',
+      detail:String(e).slice(0,280)}));'''
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=60)
+
+
 def source_idb_probe(session):
     # A real packaged Firefox IDB transaction with an injected synthetic Git
     # snapshot. No live GitHub/per-gens request. F tests own Git byte semantics.
@@ -1191,6 +1308,19 @@ def main():
                     "saved:document.getElementById('pcms-source-token')?.value}")
                 assert view=={'present':True,'button':True,'saved':''},view
                 print('B I05_REAL_IDB_ASSOCIATION_COLLISION_DRIFT_ZERO_GIT_EFFECTS=PASS',flush=True)
+                s05=s05_ready_idb_probe(after)
+                assert s05.get('observed',{}).get('ok') is True,s05
+                assert s05.get('assessed',{}).get('ok') is True,s05
+                assert s05.get('automatic',{}).get('step')=='PREPARE_LOCAL',s05
+                assert s05.get('automatic',{}).get('providerEffects')=='NONE',s05
+                assert s05.get('prepared',{}).get('code')=='S05_LOCAL_STAGE_PINNED',s05
+                assert s05.get('inactive',{}).get('code')=='S05_NO_ELIGIBLE_ACTION',s05
+                assert s05.get('stale',{}).get('code')=='STALE_REVISION',s05
+                assert s05.get('current')=='rev-installed-ready',s05
+                assert s05.get('persistedReady')=='rev-installed-ready',s05
+                assert s05.get('fingerprint')==s05.get('persisted'),s05
+                assert s05.get('noProviderEffects') is True,s05
+                print('B S05_PACKAGED_READY_OWNER_IDB_STAGE_DISK_REOPEN_NO_PROVIDER_EFFECT=PASS',flush=True)
 
                 synthetic=canonical_probe(after)
                 assert synthetic.get('created',{}).get('ok') is True,synthetic

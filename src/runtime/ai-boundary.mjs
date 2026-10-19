@@ -6,9 +6,15 @@ import {internalPcmsGuard} from './persona-guard.mjs';
 import {createStagingStore} from './staging-store.mjs';
 import {createAiStore} from './ai-store.mjs';
 import {inspectGitSource} from './git-source.mjs';
+import {inspectReadyCandidate} from './catalog-declaration.mjs';
+import {scanMainCatalog} from './git-catalog.mjs';
+import {pinGitChatPrompt} from './ready-git-prompt.mjs';
+import {createReadyStore} from './ready-store.mjs';
+import {authorizeReadyAiAdvance,authorizeGitReadyAiAdvance} from './ready-ai-gate.mjs';
 import {verifyReadback,exactSource} from './staging-core.mjs';
 import {planAiStep} from './ai-supervisor.mjs';
 import {AI_BROWSER_ASSERTIONS} from './perchance-ai-oracle.mjs';
+import {supportedDeclarativeAssertion} from './ai-declarative-assertion.mjs';
 import {pinTestingAssertions} from './ai-testing.mjs';
 export const AI_PORT='pcms-i10-ai';
 export const AI_PROGRESS_ALARM='pcms-i10-progress';
@@ -31,7 +37,8 @@ export function validateAiMessage(api,sender,message){
      !ACT.has(message.type)||!json||json.length>38000)return fail('INVALID_MESSAGE');
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
-  const allowed=message.type==='GET_JOB'?['slug']:
+  const allowed=message.type==='LIST_JOBS'?['after','limit']:
+     message.type==='GET_JOB'?['slug']:
     message.type==='PREPARE_JOB'?['slug','expectedStageRevision','token']:
     message.type==='BEGIN_NATIVE'?['slug','expectedRevision','step']:
     ['PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)?['slug','expectedRevision']:
@@ -43,12 +50,17 @@ export function validateAiMessage(api,sender,message){
     return fail('INVALID_SLUG');
   if(message.type==='PREPARE_JOB'&&
      (!Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
-      typeof p.token!=='string'||p.token.length<10||p.token.length>512))
+      (p.token!==undefined&&
+     (typeof p.token!=='string'||p.token.length<10||p.token.length>512))))
     return fail('INVALID_PARAMS');
   if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
       (message.type==='BEGIN_NATIVE'&&
        !['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','STOP'].includes(p.step))))
+    return fail('INVALID_PARAMS');
+  if(message.type==='LIST_JOBS'&&
+      ((p.after!==undefined&&(typeof p.after!=='string'||p.after.length>100))||
+       (p.limit!==undefined&&(!Number.isInteger(p.limit)||p.limit<1||p.limit>200))))
     return fail('INVALID_PARAMS');
   if(['SET_PROMPT','IMPORT_PROMPT','SET_CONCURRENCY'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
@@ -58,7 +70,8 @@ export function validateAiMessage(api,sender,message){
 export function createAiBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,
   storeFactory=createAiStore,stageFactory=createStagingStore,
-  inspect=inspectGitSource,effectGate=()=>false,clock=Date.now
+  inspect=inspectGitSource,inspectReady=inspectReadyCandidate,
+  scanCatalog=scanMainCatalog,effectGate=()=>false,clock=Date.now
 }={}){
   let databasePromise,tickBusy=false;
   const database=()=>databasePromise ||=open();
@@ -72,9 +85,54 @@ export function createAiBoundary(api,{
         const history=await store.getPrompt();
         return history.ok?store.exportPrompt(history.history):history;
       }
-      if(message.type==='LIST_JOBS')return store.list();
+      if(message.type==='LIST_JOBS')return store.list(p);
       if(message.type==='GET_JOB')return store.getJob(p.slug);
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      // A fresh coherent READY successor revokes advancement authority for
+      // the older AI candidate. Read-only PROBE_NATIVE remains available for
+      // uncertain-session reconciliation; it never starts a new mutation.
+      // STOP is a safety-quiescence action on the *already armed* old
+      // native session, not a new repair or candidate development turn.
+      // Its canonical native state and donor owner/route checks still apply.
+      const safeStop=message.type==='BEGIN_NATIVE'&&p.step==='STOP';
+      if(['ADVANCE_JOB','BEGIN_NATIVE','RUN_TESTS',
+          'VERIFY_FRESH_CHAT2'].includes(message.type)&&!safeStop&&
+          typeof store.getJobFull==='function'){
+        const sealed=await store.getJobFull(p.slug);
+        // Legacy tests and existing jobs are not S05 candidates. They must
+        // not depend on the new READY IndexedDB ledger, nor gain authority
+        // from its absence. The S05 path always has canonical getJobFull.
+        if(sealed?.ok&&sealed.job?.readyIdentifier){
+          const current=await createReadyStore(db).get(p.slug);
+          const authorized=authorizeReadyAiAdvance(sealed.job,current);
+          if(!authorized.ok)return authorized;
+          // An earlier local READY observation is not permanent Git authority.
+          // For every effectful new AI action, independently re-read coherent
+          // current main through S03's protected persistent Git vault. No
+          // model text, UI token, or cached candidate can self-certify this.
+          if(['BEGIN_NATIVE','RUN_TESTS','VERIFY_FRESH_CHAT2'].includes(message.type)){
+            const settings=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
+            if(settings?.repository!=='Neb963/per-gens'||
+               settings.repositoryId!==current.record.repositoryId)
+              return fail('S05_AI_GIT_ASSOCIATION_CHANGED');
+            const credential=(await api.runtime.sendNativeMessage(
+              'local.pcms.backup_vault',{action:'git.get',
+                repositoryId:settings.repositoryId}))?.credential;
+            if(typeof credential!=='string'||credential.length<12||
+               credential.length>512||/[^\x21-\x7e]/.test(credential))
+              return fail('S05_AI_GIT_VAULT_UNAVAILABLE');
+            const catalog=await scanCatalog({repository:settings.repository,token:credential});
+            if(!catalog?.ok||!catalog.complete)
+              return fail('S05_AI_GIT_MAIN_UNAVAILABLE');
+            const coherent=await inspectReady({repository:settings.repository,
+              token:credential,slug:p.slug,pinnedHead:catalog.head,
+              includeSourceBytes:false});
+            const fresh=authorizeGitReadyAiAdvance(sealed.job,catalog,coherent,{
+              repositoryId:settings.repositoryId,slug:p.slug});
+            if(!fresh.ok)return fresh;
+          }
+        }
+      }
       if(message.type==='SET_CONCURRENCY')
         return store.changeConcurrency(p.expectedRevision,p.perAccount);
       if(message.type==='SET_PROMPT')
@@ -233,7 +291,8 @@ export function createAiBoundary(api,{
             (chat===1?job.chat1:job.chat2).tests?.[name]?.sourceFingerprint!==job.sourceFingerprint);
           // Unknown tests remain unverified; never silently count a smoke
           // result as a different named or natural-language requirement.
-          const assertion=pending.find(name=>AI_BROWSER_ASSERTIONS.includes(name));
+          const assertion=pending.find(name=>AI_BROWSER_ASSERTIONS.includes(name)||
+            supportedDeclarativeAssertion(name));
           if(!assertion)return fail('UNSUPPORTED_INDEPENDENT_ASSERTION');
           const before=await g.runNativeAiStep(r.personaUid,{
             slug:r.slug,nonce:r.nonce,action:'OBSERVE'
@@ -421,7 +480,53 @@ export function createAiBoundary(api,{
       if(!before?.ready)return fail(before?.code||'PROTECTED_ROUTE_UNVERIFIED');
       const editor=await g.inspectStageEditor(r.personaUid,r.slug,r.nonce);
       if(editor?.ok!==true||editor.clean!==true)return fail('EDITOR_UNKNOWN');
-      const fresh=await inspect({folder:r.sourceFolder,token:p.token,includeTestingBytes:true});
+      let fresh,promptOverride=null;
+      if(r.readyIdentifier){
+        // S05 is Git-owned, not the inherited local Settings Chat 1 prompt.
+        // The connected repository identity and OS-native vault control reads;
+        // a UI token or source payload is never authority for this candidate.
+        const config=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
+        const queued=await createReadyStore(db).get(r.slug);
+        if(!queued.ok||queued.record?.desired||
+           ['READY_REVOKED_NOT_READY','OPERATOR_PAUSED'].includes(queued.record?.hold)||
+           queued.record?.active?.identifier!==r.readyIdentifier||
+           queued.record?.active?.inputFingerprint!==r.readyInputFingerprint||
+           queued.record?.repositoryId!==config?.repositoryId||
+           r.sourceFolder!=='generators/'+r.slug)
+          return fail('S05_READY_ASSOCIATION_CHANGED');
+        const vault=await api.runtime.sendNativeMessage(
+          'local.pcms.backup_vault',{action:'git.get',repositoryId:config.repositoryId});
+        const credential=vault?.credential;
+        if(vault?.ok!==true||typeof credential!=='string'||
+           credential.length<12||credential.length>512||
+           /[^\x21-\x7e]/.test(credential))
+          return fail('GIT_VAULT_UNAVAILABLE');
+        const catalog=await scanCatalog({repository:config.repository,token:credential});
+        if(!catalog?.ok||!catalog.complete||
+           catalog.repositoryId!==config.repositoryId)
+          return fail('S05_MAIN_CATALOG_UNVERIFIED');
+        const coherent=await inspectReady({
+          repository:config.repository,token:credential,slug:r.slug,
+          pinnedHead:catalog.head,includeTestingText:true});
+        const identity=coherent?.legacy?
+          'legacy-'+coherent.declarationCommit+'-'+coherent.markerOid:
+          'rev-'+coherent?.token;
+        if(!coherent?.ok||coherent.code!=='READY_COHERENT_INPUT_PINNED'||
+           identity!==r.readyIdentifier||
+           coherent.inputFingerprint!==r.readyInputFingerprint)
+          return fail('S05_READY_REVISED_OR_REVOKED');
+        const local=await store.getPrompt();
+        if(!local.ok)return local;
+        const git=pinGitChatPrompt(catalog,local.current,{
+          repository:config.repository,repositoryId:config.repositoryId});
+        if(!git.ok)return git;
+        promptOverride=git.prompt;
+        fresh={ok:true,ready:true,fingerprint:r.gitFingerprint,
+          testingSha:coherent.optionalTesting?.sha256||null,
+          testingText:coherent.optionalTesting?.text||null};
+      }else{
+        fresh=await inspect({folder:r.sourceFolder,token:p.token,includeTestingBytes:true});
+      }
       if(!fresh?.ok||!fresh.ready||fresh.fingerprint!==r.gitFingerprint||
          fresh.testingSha!==r.testingSha)return fail('READY_OR_TESTING_CHANGED');
       if(fresh.testingSha && (typeof fresh.testingText!=='string'||!fresh.testingText.trim()))
@@ -461,9 +566,11 @@ export function createAiBoundary(api,{
       const testing=fresh.testingSha?{
         sha256:fresh.testingSha,text:fresh.testingText,tests:testPlan.tests
       }:null;
-      const result=await store.start(r,testing);
+      const result=await store.start(r,testing,promptOverride);
       if(!result.ok)return result;
-      return {...result,help:'Job prepared with pinned Settings prompt and TESTING.md; native AI dispatch and independent test evidence remain held.'};
+      return {...result,help:r.readyIdentifier?
+        'S05 job prepared with Git-main Chat 1 and pinned optional tests; live effects separately gated.':
+        'Legacy job prepared with pinned Settings prompt and optional tests; live effects separately gated.'};
     }catch{return fail('AI_CANONICAL_HOLD');}
   }
   async function run(message,sender){
@@ -482,14 +589,29 @@ export function createAiBoundary(api,{
     try{
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       const store=storeFactory(await database());
-      const listing=await store.list();
-      if(!listing.ok||listing.truncated)return fail('AI_SCHEDULER_LIST_UNVERIFIED');
-      const all=[];
-      for(const row of listing.jobs){
-        const exact=await store.getJobFull(row.slug);
-        if(!exact.ok)return fail('AI_SCHEDULER_JOB_UNKNOWN');
-        all.push(exact.job);
+      // Read every canonical job page before choosing global oldest eligible.
+      // An omitted 201st job is not an empty queue or permission to starve it.
+      const all=[],seen=new Set();
+      let after='',finished=false;
+      for(let page=0;page<64;page++){
+        const listing=await store.list({after,limit:200});
+        if(!listing?.ok||!Array.isArray(listing.jobs))
+          return fail('AI_SCHEDULER_LIST_UNVERIFIED');
+        for(const row of listing.jobs){
+          if(typeof row.slug!=='string'||seen.has(row.slug)||row.slug<=after)
+            return fail('AI_SCHEDULER_CURSOR_UNVERIFIED');
+          seen.add(row.slug);
+          const exact=await store.getJobFull(row.slug);
+          if(!exact.ok)return fail('AI_SCHEDULER_JOB_UNKNOWN');
+          all.push(exact.job);
+        }
+        if(!listing.more&&!listing.truncated){finished=true;break;}
+        if(!listing.nextCursor||listing.nextCursor<=after||
+           !seen.has(listing.nextCursor))
+          return fail('AI_SCHEDULER_CURSOR_UNVERIFIED');
+        after=listing.nextCursor;
       }
+      if(!finished)return fail('AI_SCHEDULER_FLEET_BOUND_UNVERIFIED');
       const now=clock();
       if(!Number.isSafeInteger(now)||now<1)
         return fail('AI_SCHEDULER_CLOCK_UNVERIFIED');
@@ -559,6 +681,6 @@ export function createAiBoundary(api,{
       });
     });
   }
-  return Object.freeze({register,run,tick});
+  return Object.freeze({register,run,tick,runTrusted:executeTrusted});
 }
 if(typeof browser!=='undefined')createAiBoundary(browser).register();
