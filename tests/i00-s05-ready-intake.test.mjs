@@ -71,3 +71,27 @@ test('S05 bad individual READY cannot contaminate other coherent witnesses',asyn
  assert.equal((await createReadyStore(h.db).get('safe-0000')).ok,false);
  assert.equal((await createReadyStore(h.db).get('safe-0001')).ok,true);
 });
+
+test('S05 coherent main NOT_READY revokes earlier READY without deletion or provider effect',async()=>{
+ const h=harness({maxPerWake:8}),first=h.catalog(1);
+ await h.approve(first);
+ assert.equal((await h.invoke(first)).observed,1);
+ const store=createReadyStore(h.db);
+ assert.equal((await store.get('safe-0000')).record.revision,1);
+ const scope=await getImportScopeDigest(first);
+ await h.storage.set({pcmsS04CatalogIntakeProgress:{
+   repositoryId:first.repositoryId,initialScopeDigest:scope,
+   initialImportCompleted:true
+ }});
+ const notReady=h.catalog(1,'c'.repeat(40));
+ notReady.generators[0].ready=false;
+ const r=await h.invoke(notReady);
+ assert.equal(r.ok,true,JSON.stringify(r));
+ assert.equal(r.revoked,1);
+ assert.equal((await store.get('safe-0000')).record.hold,'READY_REVOKED_NOT_READY');
+ const again=await h.invoke(notReady);
+ assert.equal(again.revoked,0);
+ assert.equal((await store.get('safe-0000')).record.revision,2);
+ assert.equal(h.db.keys('events').filter(k=>
+   h.db.read('events',k)?.stage==='S05_READY_REVOKED_NOT_READY').length,1);
+});
