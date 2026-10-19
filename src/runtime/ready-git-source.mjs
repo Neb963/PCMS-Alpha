@@ -17,7 +17,7 @@ export async function stageReadyGitSource({catalog,coherent,ready,slug,repositor
   const identifier=coherent.legacy?
     'legacy-'+coherent.declarationCommit+'-'+coherent.markerOid:
     'rev-'+coherent.token;
-  if(!ready?.active||ready.desired||
+  if(!ready?.active||ready.desired||ready.hold==='READY_REVOKED_NOT_READY'||
      ready.active.identifier!==identifier||
      ready.active.inputFingerprint!==coherent.inputFingerprint)
     return fail('S05_NEWER_READY_OR_NO_ADMISSION');
