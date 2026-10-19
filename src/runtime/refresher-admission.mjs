@@ -45,3 +45,23 @@ export function planOwnedSourceMarker(html,markerId){
   return {ok:true,html:next,previousMarker:previous?.[1]||null,
     changed:true};
 }
+
+export function countObservedOccupancy(rows,items,at){
+  const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
+  if(!Array.isArray(rows)||rows.length>5000||!Array.isArray(items)||items.length>5000||
+      !Number.isSafeInteger(at)||at<=0||
+      items.some(x=>!slug(x?.slug))||new Set(items.map(x=>x.slug)).size!==items.length)
+    return {ok:false,code:'REFRESH_OCCUPANCY_UNVERIFIED'};
+  const feed=new Set(items.map(x=>x.slug));
+  let ownedPublic=0,ownedVisible=0,activeVisible=0;
+  for(const r of rows){
+    if(!slug(r?.slug)||r.ownerVerified!==true||r.releaseVerified!==true||
+        r.listing!=='PUBLIC'||r.identityHeld===true)continue;
+    ownedPublic++;
+    if(feed.has(r.slug)){
+      ownedVisible++;
+      if(r.slot===true&&r.phase==='ACTIVE')activeVisible++;
+    }
+  }
+  return {ok:true,sample:{at,feedSize:items.length,ownedPublic,ownedVisible,activeVisible}};
+}
