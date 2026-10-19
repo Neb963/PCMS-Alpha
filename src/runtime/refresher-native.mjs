@@ -72,7 +72,7 @@ export function createRefresherNativeAdapter({
     return {status:'SUPPORTED_AND_VERIFIED',method:'CONTROLLED_SOURCE_MARKER',
       allowedByProvider:true,meaningfulEffectVerified:true,
       sourceFingerprint,targetFingerprint:entry.targetFingerprint,
-      markerId,evidenceId:proof.evidenceId,version:proof.version};
+      markerId,nonce,evidenceId:proof.evidenceId,version:proof.version};
   }
   async function execute(claim){
     const entry=pending.get(claim?.stableId);
@@ -83,7 +83,8 @@ export function createRefresherNativeAdapter({
        entry.principalFingerprint!==claim.principalFingerprint||
        entry.sourceFingerprint!==claim.sourceFingerprint||
        entry.targetFingerprint!==claim.targetFingerprint||
-       entry.markerId!==claim.markerId)return denied('REFRESH_PREPARED_CANDIDATE_CHANGED');
+       entry.markerId!==claim.markerId||
+       entry.nonce!==claim.nonce)return denied('REFRESH_PREPARED_CANDIDATE_CHANGED');
     pending.delete(claim.stableId);
     const g=guard();
     if(!g?.runRefresherStep)return denied('REFRESH_WRITER_UNAVAILABLE');
@@ -106,6 +107,13 @@ export function createRefresherNativeAdapter({
     }catch{return {kind:'UNKNOWN',targetMatched:false,principalMatched:false};}
     if(!checked?.ok)return {kind:'UNKNOWN',targetMatched:false,principalMatched:false};
     const fingerprint=checked.source.fingerprint;
+    // The original network readback has already independently verified the
+    // full provider source. Only now attempt local cleanup of our own editor;
+    // an unavailable cleanup is not a fabricated provider success.
+    if((fingerprint===claim.targetFingerprint||fingerprint===claim.sourceFingerprint)&&
+       /^[a-f0-9]{32}$/.test(claim.nonce||''))
+      try{await g.closeRefresherTab?.(claim.personaUid,{
+        slug:claim.slug,nonce:claim.nonce});}catch{}
     return {
       kind:fingerprint===claim.targetFingerprint?'EFFECT_CHANGED':
         fingerprint===claim.sourceFingerprint?'NO_EFFECT':'UNKNOWN',
