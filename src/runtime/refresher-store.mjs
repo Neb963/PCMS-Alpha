@@ -1,7 +1,7 @@
 // One revision-fenced canonical scheduler snapshot, with a durable sorted due
 // index, in the existing PCMS DB. All async IO occurs outside transactions.
 import {fail,isSafeId} from './journal.mjs';
-import {qualifyRecentAbsence} from './refresher-admission.mjs';
+import {qualifyRecentAbsence,countObservedOccupancy} from './refresher-admission.mjs';
 import {emptyRefreshEvidence,observeRefreshPresence,reserveRefreshAttempt,
   dispatchPossible,reconcileRefreshAttempt} from './refresher-effect-core.mjs';
 import {REFRESHER_KEY,emptyShadow,validShadow,reconcileShadow,advanceShadow,
@@ -89,6 +89,7 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
     accounts:Object.entries(s.accounts).map(([id,a])=>({accountId:id,paused:a.paused,
       health:a.health,graceUsed:a.graceUsed})),policy:s.policy,
     recent:{observedAt:s.recent.observedAt,total:s.recent.total,complete:s.recent.complete,
+      latestOccupancy:s.recent.latestOccupancy||null,observedSampleCount:(s.recent.samples||[]).length,
       suspended:s.recent.suspended===true,
       stale:!s.recent.observedAt||s.recent.observedAt>now||now-s.recent.observedAt>2*s.policy.recentMs},
     nextWakeAt:s.nextWakeAt,diagnostics:{...s.diagnostics},
@@ -191,6 +192,10 @@ export function createRefresherStore(db){
       c.startedAt>out.recent.observedAt){
       out.recent={...out.recent,observedAt:c.startedAt,total:packet.items.length,complete:true,
         nextDueAt:now+out.policy.recentMs,failures:0};
+      const occupancy=countObservedOccupancy(out.rows,packet.items,c.startedAt);
+      if(!occupancy.ok)return fail(occupancy.code);
+      out.recent.samples=[...(out.recent.samples||[]),occupancy.sample].slice(-144);
+      out.recent.latestOccupancy=occupancy.sample;
       const ranks=new Map(packet.items.map((item,i)=>[item.slug,{...item,position:i+1}]));
       for(const r of out.rows){
         const item=ranks.get(r.slug);
