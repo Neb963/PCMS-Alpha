@@ -22,14 +22,6 @@ export function s06ReviewStatus({decision,release,change,human,exception,sourceF
   if(human?.state==='ADOPTED_UNTESTED'&&
      human.childStageRevision===stageRevision&&!decision?.ok)
     return {state:'IN_DEVELOPMENT',code:'ADOPTED_HUMAN_SOURCE_RETEST_REQUIRED'};
-  if(exception?.state==='RECORDED'&&exception.stageRevision===stageRevision&&
-     exception.sourceFingerprint===sourceFingerprint)
-    return decision?.ok&&decision.type==='REVIEW'&&
-      decision.mode==='S06_EXCEPTION'?
-      {state:'EXCEPTION_READY_FOR_REVIEW',
-        code:'EXACT_EXCEPTIONAL_GIT_F_INDIVIDUAL_APPROVAL_REQUIRED'}:
-      {state:'EXCEPTION_HELD',
-        code:'HUMAN_CHECKS_RECORDED_NOT_AI_VERIFIED_OR_GIT_CONFIRMED'};
   if(change?.state==='REQUESTED')
     return {state:'CHANGES_REQUESTED',code:'AWAITING_GUARDED_CHILD_ADMISSION'};
   // Child admission is not a permanent queue status. Once tests and the
@@ -44,6 +36,14 @@ export function s06ReviewStatus({decision,release,change,human,exception,sourceF
       {state:'BLOCKED',code:'PRIOR_APPROVAL_SOURCE_CHANGED'};
   if(r?.state==='CONFIRMED_PUBLIC'&&r.approval?.sourceFingerprint===sourceFingerprint)
     return {state:'CONFIRMED_PUBLIC',code:'INDEPENDENT_PUBLIC_READBACK'};
+  if(exception?.state==='RECORDED'&&exception.stageRevision===stageRevision&&
+     exception.sourceFingerprint===sourceFingerprint)
+    return decision?.ok&&decision.type==='REVIEW'&&
+      decision.mode==='S06_EXCEPTION'?
+      {state:'EXCEPTION_READY_FOR_REVIEW',
+        code:'EXACT_EXCEPTIONAL_GIT_F_INDIVIDUAL_APPROVAL_REQUIRED'}:
+      {state:'EXCEPTION_HELD',
+        code:'HUMAN_CHECKS_RECORDED_NOT_AI_VERIFIED_OR_GIT_CONFIRMED'};
   if(!decision?.ok)return {state:'BLOCKED',code:decision?.code||'CANDIDATE_UNVERIFIED'};
   if(decision.type==='REVIEW')
     return {state:'READY_FOR_REVIEW',code:'EXACT_TESTED_GIT_F_VERIFIED'};
