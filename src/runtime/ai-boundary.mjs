@@ -11,6 +11,7 @@ import {scanMainCatalog} from './git-catalog.mjs';
 import {pinGitChatPrompt} from './ready-git-prompt.mjs';
 import {createReadyStore} from './ready-store.mjs';
 import {createWritebackStore} from './writeback-store.mjs';
+import {createS06ExceptionStore} from './s06-exception-review.mjs';
 import {sealedS06OutputProof} from './s06-output-proof.mjs';
 import {authorizeReadyAiAdvance,authorizeGitReadyAiAdvance} from './ready-ai-gate.mjs';
 import {verifyReadback,exactSource} from './staging-core.mjs';
@@ -79,10 +80,12 @@ export function createAiBoundary(api,{
   const database=()=>databasePromise ||=open();
   const sentinel=createRestoreSentinel(api.storage.local);
   async function outputProof(db,slug,ready,stage){
-    const [s,w]=await Promise.all([
+    const [s,w,j,e]=await Promise.all([
       stage?Promise.resolve(stage):stageFactory(db).getFull(slug),
-      createWritebackStore(db).getFull(slug)]);
-    const proof=sealedS06OutputProof({ready,stage:s,writeback:w});
+      createWritebackStore(db).getFull(slug),
+      storeFactory(db).getJobFull(slug),
+      createS06ExceptionStore(db).getFull(slug)]);
+    const proof=sealedS06OutputProof({ready,stage:s,writeback:w,job:j,exception:e});
     return proof.ok?{outputProof:proof.outputProof}:{};
   }
   async function executeTrusted(message){
