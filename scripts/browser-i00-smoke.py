@@ -949,6 +949,18 @@ def main():
                     'slug':'pcms-test-esr-chain-20261015-a01','origin':'OPERATOR'}})
                 assert s00_denied.get('code')=='I17_ORIGINAL_EFFECT_QUARANTINED',s00_denied
                 print('B S00_INSTALLED_CANONICAL_INTENT_AND_QUARANTINE=PASS',flush=True)
+                # S04 packaged trusted queue: unbound canonical intent may
+                # not obtain a provider operation or synthesize a free
+                # account while initial inventory has no managed accounts.
+                s04_unbound=coordinator_command(after,{'type':'RUN_CREATE_STEP',
+                    'params':{'intentId':s00_intent['intentId'],'expectedRevision':1}})
+                assert s04_unbound.get('code')=='NO_MANAGED_ACCOUNTS',s04_unbound
+                s04_current=coordinator_command(after,{'type':'GET_CREATE_INTENT',
+                    'params':{'intentId':s00_intent['intentId']}})
+                assert s04_current.get('record',{}).get('revision')==1,s04_current
+                assert s04_current.get('record',{}).get('state')=='WAITING_CAPABILITY',s04_current
+                print('B S04_INSTALLED_GUARDED_QUEUE_NO_ACCOUNT_ZERO_PROVIDER_EFFECT=PASS',flush=True)
+
                 personas=account_command(after,{'type':'LIST_PERSONAS'})
                 assert personas.get('ok') is True and isinstance(personas.get('personas'),list),personas
                 records=account_command(after,{'type':'LIST_ACCOUNTS'})
