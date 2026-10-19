@@ -5,6 +5,7 @@ import {createCoordinatorStore} from './coordinator-store.mjs';
 import {scanMainCatalog} from './git-catalog.mjs';
 import {writeS04Marker,S04_NOT_READY} from './creation-git.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
+import {requireS04FreshOwner} from './creation-git-owner.mjs';
 const digest=async parts=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',
   new TextEncoder().encode(JSON.stringify(parts))))]
   .map(x=>x.toString(16).padStart(2,'0')).join('');
@@ -18,7 +19,7 @@ const markerSha=async()=>{
 };
 export function createS04GitContinuation(api,{open=openCanonicalDatabase,
   scan=scanMainCatalog,write=writeS04Marker,
-  transport=fetch,gate=()=>false,
+  transport=fetch,gate=()=>false,guard=internalPcmsGuard,
   vault=req=>api.runtime.sendNativeMessage('local.pcms.backup_vault',req)}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
   let dbPromise;
@@ -34,6 +35,13 @@ export function createS04GitContinuation(api,{open=openCanonicalDatabase,
       if(!['GIT_INIT_PENDING','GIT_PREPARED','GIT_DISPATCH_POSSIBLE',
         'GIT_UNCERTAIN','GIT_OBSERVING'].includes(item.state))
         return fail('GIT_STATE_NOT_ADMISSIBLE');
+      // A historic provider success/owner row never authorizes today's Git
+      // link or ref mutation. Recheck exact current remote identity under
+      // the bound donor route, including during uncertain reconciliation.
+      const owner=await requireS04FreshOwner({
+        db:await (dbPromise||=open()),item,guard:guard(),
+        restoreHeld:async()=>(await sentinel.inspect()).held});
+      if(!owner.ok)return owner;
       const cfg=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
       if(!cfg||!cfg.repository||!cfg.repositoryId)
         return fail('GIT_RECONNECT_REQUIRED');
