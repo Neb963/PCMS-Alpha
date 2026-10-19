@@ -28,7 +28,8 @@ const TYPES=new Set(['LIST','LIST_REVIEW','GET','GET_CHANGE','REQUEST_CHANGES','
 export function validateReleaseMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
-  if(!msg||typeof msg!=='object'||Array.isArray(msg)||!json||json.length>1800||
+  if(!msg||typeof msg!=='object'||Array.isArray(msg)||!json||
+     json.length>(msg.type==='REQUEST_CHANGES'?5500:1800)||
      Object.keys(msg).some(k=>!['type','params'].includes(k))||!TYPES.has(msg.type))
     return fail('INVALID_MESSAGE');
   const p=msg.params||{},allowed={
@@ -313,6 +314,9 @@ export function createReleaseBoundary(api,{
     const checked=await checkCurrent(database,p.slug,token,{
       passphrase:await reviewPassphrase(p.passphrase)});
     if(!checked.ok)return checked;
+    const change=await createS06ChangeStore(database).get(p.slug);
+    if(change.ok&&change.state==='REQUESTED')
+      return fail('S06_PENDING_REQUEST_BLOCKS_APPROVAL');
     if(msg.type==='PREVIEW'){
       return {ok:true,slug:p.slug,stageRevision:checked.r.revision,
         jobRevision:checked.j.revision,sourceFingerprint:checked.source.fingerprint,
