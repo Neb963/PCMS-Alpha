@@ -91,12 +91,17 @@ export function createAiBoundary(api,{
       // the older AI candidate. Read-only PROBE_NATIVE remains available for
       // uncertain-session reconciliation; it never starts a new mutation.
       if(['ADVANCE_JOB','BEGIN_NATIVE','RUN_TESTS',
-          'VERIFY_FRESH_CHAT2'].includes(message.type)){
+          'VERIFY_FRESH_CHAT2'].includes(message.type)&&
+          typeof store.getJobFull==='function'){
         const sealed=await store.getJobFull(p.slug);
-        if(!sealed.ok)return sealed;
-        const current=await createReadyStore(db).get(p.slug);
-        const authorized=authorizeReadyAiAdvance(sealed.job,current);
-        if(!authorized.ok)return authorized;
+        // Legacy tests and existing jobs are not S05 candidates. They must
+        // not depend on the new READY IndexedDB ledger, nor gain authority
+        // from its absence. The S05 path always has canonical getJobFull.
+        if(sealed?.ok&&sealed.job?.readyIdentifier){
+          const current=await createReadyStore(db).get(p.slug);
+          const authorized=authorizeReadyAiAdvance(sealed.job,current);
+          if(!authorized.ok)return authorized;
+        }
       }
       if(message.type==='SET_CONCURRENCY')
         return store.changeConcurrency(p.expectedRevision,p.perAccount);
