@@ -20,6 +20,9 @@ const show=r=>r?{ok:true,slug:r.slug,state:r.state,revision:r.revision,
   childStageRevision:r.childStageRevision||null,changedAt:r.changedAt}:
   fail('S06_HUMAN_REVIEW_NOT_FOUND');
 const candidate=(ready,s,j,w)=>!!(ready?.active&&!ready.desired&&!ready.hold&&
+  slug(ready?.slug)&&ready.slug===s?.slug&&s.slug===j?.slug&&
+  s.slug===w?.slug&&w.folder==='generators/'+s.slug&&
+  s.sourceFolder===w.folder&&
   s?.state==='SOURCE_VERIFIED'&&s.verifiedAt&&
   s.readyIdentifier===ready.active.identifier&&
   s.readyInputFingerprint===ready.active.inputFingerprint&&
