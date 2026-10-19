@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {qualifyRecentAbsence,planOwnedSourceMarker} from '../src/runtime/refresher-admission.mjs';
+import {qualifyRecentAbsence,planOwnedSourceMarker,countObservedOccupancy} from '../src/runtime/refresher-admission.mjs';
 const now=1800000000000;
 const recent={complete:true,observedAt:now-1000,suspended:false};
 const policy={recentMs:600000};
@@ -43,4 +43,17 @@ test('S07 C-54: PCMS-owned trailing comment preserves all preexisting HTML bytes
   assert.equal(planOwnedSourceMarker(src+'\n<!-- pcms-alpha-refresher:malformed -->','C1234567890abcdef').ok,false);
   assert.equal(planOwnedSourceMarker('<!-- pcms-alpha-refresher:A1234567890abcdef -->\n<!-- pcms-alpha-refresher:B1234567890abcdef -->','C1234567890abcdef').ok,false);
   assert.equal(planOwnedSourceMarker(src,'not-valid').ok,false);
+});
+
+test('S07 AC-14: occupancy represents full-feed observations, not scheduled slots',()=>{
+  const rows=[
+    {slug:'a',ownerVerified:true,releaseVerified:true,listing:'PUBLIC',phase:'ACTIVE',slot:true},
+    {slug:'b',ownerVerified:true,releaseVerified:true,listing:'PUBLIC',phase:'SLEEPING',slot:false},
+    {slug:'c',ownerVerified:true,releaseVerified:true,listing:'PUBLIC',phase:'ACTIVE',slot:true},
+    {slug:'unlisted',ownerVerified:true,releaseVerified:true,listing:'UNLISTED'},
+    {slug:'other',ownerVerified:false,releaseVerified:false,listing:'PUBLIC'}];
+  const observed=countObservedOccupancy(rows,[{slug:'a'},{slug:'b'},{slug:'other'}],now);
+  assert.deepEqual(observed,{ok:true,sample:{at:now,feedSize:3,ownedPublic:3,ownedVisible:2,activeVisible:1}});
+  assert.equal(countObservedOccupancy(rows,[{slug:'a'},{slug:'a'}],now).ok,false);
+  assert.equal(countObservedOccupancy(rows,[{slug:'a'}],0).ok,false);
 });
