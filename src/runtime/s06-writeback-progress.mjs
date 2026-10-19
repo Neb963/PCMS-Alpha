@@ -27,6 +27,18 @@ export function planS06Writeback({ready,stage,job,writeback}={}){
      record?.slug===previous.slug)
     return {ok:true,type:'RECONCILE',slug:previous.slug,
       revision:previous.revision,readOnly:true};
+  // An unarmed S06 intent has no possible Git effect. If its exact job
+  // has been superseded, discard only that PREPARED intent locally first.
+  // Never apply this shortcut to DISPATCH_POSSIBLE or HELD_UNCERTAIN.
+  if(previous?.mode==='S06'&&previous.state==='PREPARED'&&
+     ID.test(previous.slug||'')&&record?.slug===previous.slug&&
+     (!record.active||record.desired||record.hold||
+      previous.readyIdentifier!==record.active.identifier||
+      previous.readyInputFingerprint!==record.active.inputFingerprint||
+      previous.stageRevision!==st?.revision||
+      previous.jobRevision!==j?.revision))
+    return {ok:true,type:'CANCEL_PREPARED',slug:previous.slug,
+      revision:previous.revision,localOnly:true};
   const wanted=record?.active;
   // A queued desired READY has no admission/writer authority. Only
   // current active READY without a successor may write back tested F.
@@ -46,6 +58,15 @@ export function planS06Writeback({ready,stage,job,writeback}={}){
      evaluation(j).state!=='TESTS_VERIFIED')
     return fail('S06_CANDIDATE_OR_TEST_EVIDENCE_UNVERIFIED');
   if(previous){
+    // A completely confirmed predecessor is history, not the source
+    // authority for a newly admitted stage. Its immutable receipt is
+    // archived by writeback-store's stage-revision CAS on next PREPARE.
+    if(previous.state==='CONFIRMED'&&previous.stageRevision!==st.revision)
+      return {ok:true,type:'PREPARE',slug:st.slug,
+        jobRevision:j.revision,sourceFingerprint:j.verifiedFinal};
+    if(previous.state==='CANCELED')
+      return {ok:true,type:'PREPARE',slug:st.slug,
+        jobRevision:j.revision,sourceFingerprint:j.verifiedFinal};
     if(previous.mode!=='S06'||
        previous.readyIdentifier!==wanted.identifier||
        previous.readyInputFingerprint!==wanted.inputFingerprint||
@@ -106,6 +127,19 @@ export function createS06WritebackProgress(api,{
           const chosen=planS06Writeback({ready,stage,job,writeback:wb.ok?wb:null});
           if(!chosen.ok||chosen.type==='REVIEW')continue;
           const next=i+1<listing.items.length||listing.more?summary.slug:'';
+          if(chosen.type==='CANCEL_PREPARED'){
+            // Purely local and independently fenced, never requires Git
+            // credentials or re-enables remote effects.
+            const result=await makeBoundary(database).runTrusted({
+              type:'CANCEL_PREPARED',params:{
+                slug:chosen.slug,expectedRevision:chosen.revision}});
+            await api.storage.local.set({[cursorKey]:next,
+              [statusKey]:{slug:chosen.slug,step:'CANCEL_PREPARED',
+                code:result?.code||'S06_CANCELLATION_RECHECK_REQUIRED',
+                ok:result?.ok===true,remoteEffect:'NONE',
+                observedAt:Date.now()}});
+            return result;
+          }
           // No operator-configured repository or vault: do not touch a
           // private account, Git branch, source editor or remote publisher.
           const cfg=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
