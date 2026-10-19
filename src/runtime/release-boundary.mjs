@@ -9,6 +9,7 @@ import {createReadyStore} from './ready-store.mjs';
 import {createWritebackStore} from './writeback-store.mjs';
 import {planS06Writeback} from './s06-writeback-progress.mjs';
 import {createS06ReviewQueue} from './s06-review-queue.mjs';
+import {createS06ChangeStore} from './s06-request-changes.mjs';
 import {createExistingStore} from './existing-update-store.mjs';
 import {unlockPrevious} from './existing-update-core.mjs';
 import {REFRESHER_KEY} from './refresher-core.mjs';
@@ -23,7 +24,7 @@ import {releaseContext,releaseTestContext,candidateManifest,releaseGitContext,
 export const RELEASE_PORT='pcms-i13-release';
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const fp=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
-const TYPES=new Set(['LIST','LIST_REVIEW','GET','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
+const TYPES=new Set(['LIST','LIST_REVIEW','GET','GET_CHANGE','REQUEST_CHANGES','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
 export function validateReleaseMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
@@ -31,7 +32,10 @@ export function validateReleaseMessage(api,sender,msg){
      Object.keys(msg).some(k=>!['type','params'].includes(k))||!TYPES.has(msg.type))
     return fail('INVALID_MESSAGE');
   const p=msg.params||{},allowed={
-    LIST:[],LIST_REVIEW:['after','limit'],GET:['slug'],PREVIEW:['slug','token','passphrase'],
+    LIST:[],LIST_REVIEW:['after','limit'],GET:['slug'],GET_CHANGE:['slug'],
+    REQUEST_CHANGES:['slug','token','passphrase','expectedStageRevision',
+      'expectedJobRevision','sourceFingerprint','instructions','releaseRevision'],
+    PREVIEW:['slug','token','passphrase'],
     GET_REVIEW_CHUNK:['slug','stageRevision','fingerprint','origin','path','offset'],
     APPROVE:['slug','token','expectedStageRevision','expectedJobRevision','fingerprint','explicitApproval','passphrase'],
     CANCEL_APPROVED:['slug','expectedRevision'],
@@ -45,7 +49,7 @@ export function validateReleaseMessage(api,sender,msg){
        (p.after!==undefined&&(typeof p.after!=='string'||p.after.length>100||
          !/^(?:[a-z0-9][a-z0-9-]{0,99})?$/.test(p.after)))||
        (p.limit!==undefined&&(!Number.isSafeInteger(p.limit)||p.limit<1||p.limit>100))))||
-     (['PREVIEW','APPROVE','DISPATCH','RECONCILE'].includes(msg.type)&&
+     (['PREVIEW','APPROVE','DISPATCH','RECONCILE','REQUEST_CHANGES'].includes(msg.type)&&
        (p.token!==undefined&&(typeof p.token!=='string'||p.token.length<12||
         p.token.length>512||!/^[\x21-\x7e]+$/.test(p.token))))||
      (p.passphrase!==undefined&&(typeof p.passphrase!=='string'||p.passphrase.length<12||p.passphrase.length>256))||
@@ -58,6 +62,13 @@ export function validateReleaseMessage(api,sender,msg){
        p.offset%8192!==0))||
      (['DISPATCH','RECONCILE','CANCEL_APPROVED'].includes(msg.type)&&
        (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
+     (msg.type==='REQUEST_CHANGES'&&(
+       !Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
+       !Number.isSafeInteger(p.expectedJobRevision)||p.expectedJobRevision<1||
+       !fp(p.sourceFingerprint)||typeof p.instructions!=='string'||
+       p.instructions.length<3||p.instructions.length>4000||
+       (p.releaseRevision!==undefined&&(!Number.isSafeInteger(p.releaseRevision)||
+         p.releaseRevision<1))))||
      (msg.type==='APPROVE'&&(
        !Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
        !Number.isSafeInteger(p.expectedJobRevision)||p.expectedJobRevision<1||
@@ -237,6 +248,7 @@ export function createReleaseBoundary(api,{
     const p=msg.params||{},database=await db(),store=releaseFactory(database);
     if(msg.type==='GET')return store.get(p.slug);
     if(msg.type==='LIST')return store.list();
+    if(msg.type==='GET_CHANGE')return createS06ChangeStore(database).get(p.slug);
     if(msg.type==='LIST_REVIEW')return createS06ReviewQueue(database).list({
       after:p.after||'',limit:p.limit||50});
     if(msg.type==='GET_REVIEW_CHUNK'){
@@ -314,8 +326,26 @@ export function createReleaseBoundary(api,{
             result:checked.j.chat2?.tests[name]?.result||'UNVERIFIED'}))||[],
           state:evaluation(checked.j).state},
         diff:diffSource(checked.previous,checked.source).changes,
-        gitHead:checked.git.head,mode:'INDIVIDUAL_HUMAN_APPROVAL',
+        gitHead:checked.git.head,
+        releaseRevision:(await store.get(p.slug))?.revision||null,
+        mode:'INDIVIDUAL_HUMAN_APPROVAL',
         warning:'Approval alone cannot publish; remote effects held until proven'};
+    }
+    if(msg.type==='REQUEST_CHANGES'){
+      if(p.expectedStageRevision!==checked.r.revision||
+         p.expectedJobRevision!==checked.j.revision||
+         p.sourceFingerprint!==checked.source.fingerprint)
+        return fail('S06_REQUEST_PREVIEW_STALE');
+      const existing=await store.get(p.slug);
+      if(p.releaseRevision!==(existing.ok?existing.revision:undefined))
+        return fail('S06_REQUEST_RELEASE_REVISION_STALE');
+      return createS06ChangeStore(database).request({
+        name:p.slug,stage:checked.r,job:checked.j,
+        expectedStageRevision:p.expectedStageRevision,
+        expectedJobRevision:p.expectedJobRevision,
+        sourceFingerprint:p.sourceFingerprint,instructions:p.instructions,
+        releaseRevision:existing.ok?existing.revision:null,
+        requestId:'change_'+crypto.randomUUID().replaceAll('-','')});
     }
     if(msg.type==='APPROVE'){
       if(p.expectedStageRevision!==checked.r.revision||
