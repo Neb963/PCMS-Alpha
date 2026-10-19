@@ -51,7 +51,7 @@ test('S04 allocation D: canonical IDB atomic pending counts and existing ownersh
   assert.equal(planned.record.state,'OWNER_READBACK_PENDING');
   assert.equal(planned.record.accountId,'account_001');
   assert.equal(db.keys('operations').length,0);
-  const next=await store.acceptCreate({...intent(),intentId:'intent_s04_more'});
+  const next=await store.acceptCreate({...intent('second-allocation'),intentId:'intent_s04_more'});
   const p2=await store.allocateCreate(next.record.intentId,next.record.revision);
   assert.equal(p2.ok,true);
   assert.equal(p2.record.accountId,'account_002');
