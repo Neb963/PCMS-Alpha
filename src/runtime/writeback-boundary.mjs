@@ -217,7 +217,12 @@ export function createWritebackBoundary(api,{
       if(!local.ok)return local;
       let message;
       if(p.mode==='MANUAL')message=commitMessage(p.message);
-      else {
+      else if(p.mode==='S06'){
+        // Only trusted background S06 calls this mode; UI admission never can.
+        if(p.message!=='PCMS verified '+p.slug+' candidate')
+          return fail('S06_INTERNAL_WRITEBACK_INTENT_REQUIRED');
+        message=commitMessage(p.message);
+      }else {
         // No untrusted UI-provided terminal text is accepted. Query only the
         // leased native assistant session; missing evidence holds AUTO.
         const g=guard(),session=j.native?.sessionDigest;
@@ -376,6 +381,6 @@ export function createWritebackBoundary(api,{
       });
     });
   }
-  return Object.freeze({register,run,autoTick});
+  return Object.freeze({register,run,autoTick,runTrusted});
 }
 if(typeof browser!=='undefined')createWritebackBoundary(browser).register();
