@@ -10,6 +10,7 @@ import {createWritebackStore} from './writeback-store.mjs';
 import {planS06Writeback} from './s06-writeback-progress.mjs';
 import {createS06ReviewQueue} from './s06-review-queue.mjs';
 import {createS06ChangeStore} from './s06-request-changes.mjs';
+import {standingS06} from './s06-standing-authority.mjs';
 import {createExistingStore} from './existing-update-store.mjs';
 import {unlockPrevious} from './existing-update-core.mjs';
 import {REFRESHER_KEY} from './refresher-core.mjs';
@@ -418,4 +419,5 @@ export function createReleaseBoundary(api,{
   }
   return Object.freeze({register,run});
 }
-if(typeof browser!=='undefined')createReleaseBoundary(browser).register();
+if(typeof browser!=='undefined')createReleaseBoundary(browser,{
+  effectGate:()=>standingS06?.gate('publication')===true}).register();
