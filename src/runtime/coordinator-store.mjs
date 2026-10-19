@@ -144,16 +144,20 @@ export function createCoordinatorStore(db){
               }
             c.continue();return;
           }
-          const candidates=accounts.map(a=>({...a,inventoryComplete:complete.has(a.accountId)}));
-          const plan=selectS04Account({intent:item,accounts:candidates,inventory,pending});
-          if(!plan.ok){finish(plan);return;}
-          // Positively observed already-owned targets must go to guarded
-          // adoption, never to an empty-generator CREATE.
+          // Positive existing ownership fixes the account before general
+          // balancing. An explicit incompatible account pin is a scoped hold.
           const owned=inventory.find(row=>row.slug===item.slug&&
             row.ownerState==='OBSERVED_OWNER');
           const collision=inventory.find(row=>row.slug===item.slug&&
             row.ownerState!=='OBSERVED_OWNER');
           if(collision){finish(fail('TARGET_OWNERSHIP_AMBIGUOUS'));return;}
+          if(owned&&item.accountId&&owned.accountId!==item.accountId){
+            finish(fail('OWNED_TARGET_ACCOUNT_MISMATCH'));return;
+          }
+          const candidates=accounts.map(a=>({...a,inventoryComplete:complete.has(a.accountId)}));
+          const plan=selectS04Account({intent:owned?{...item,accountId:owned.accountId}:item,
+            accounts:candidates,inventory,pending});
+          if(!plan.ok){finish(plan);return;}
           const target=owned?'ADOPTION_ORIGINAL_PENDING':'OWNER_READBACK_PENDING';
           const next={...item,state:target,
             hold:owned?'ADOPTION_REQUIRES_ORIGINAL_SOURCE_PROOF':
