@@ -1,6 +1,7 @@
 // One revision-fenced canonical scheduler snapshot, with a durable sorted due
 // index, in the existing PCMS DB. All async IO occurs outside transactions.
 import {fail,isSafeId} from './journal.mjs';
+import {qualifyRecentAbsence} from './refresher-admission.mjs';
 import {emptyRefreshEvidence,observeRefreshPresence,reserveRefreshAttempt,
   dispatchPossible,reconcileRefreshAttempt} from './refresher-effect-core.mjs';
 import {REFRESHER_KEY,emptyShadow,validShadow,reconcileShadow,advanceShadow,
@@ -289,6 +290,8 @@ export function createRefresherStore(db){
     const r=s.rows.find(x=>x.stableId===stableId);
     if(!r||r.phase!=='ACTIVE'||!r.slot||rowBlocks(s,r).length)
       return fail('REFRESH_ADMISSION_HELD');
+    const absence=qualifyRecentAbsence({row:r,recent:s.recent,policy:s.policy,now});
+    if(!absence.ok)return fail(absence.code);
     const attempt=reserveRefreshAttempt(r.refresh,{id,at:now,slug:r.slug,
       sourceFingerprint:r.releaseFingerprint,candidate,eligible:true,liveAuthorized});
     if(!attempt.ok)return attempt;
@@ -318,6 +321,8 @@ export function createRefresherStore(db){
       r.listing!=='PUBLIC'||s.accounts[r.accountId]?.principalFingerprint!==claim.principalFingerprint||
       !r.slot||r.phase!=='ACTIVE'||rowBlocks(s,r).length)
       return fail('REFRESH_CONTEXT_CHANGED');
+    const absence=qualifyRecentAbsence({row:r,recent:s.recent,policy:s.policy,now});
+    if(!absence.ok)return fail(absence.code);
     const packet=dispatchPossible(r.refresh,claim.id,now);
     if(!packet.ok)return packet;
     const out=structuredClone(s);out.rows.find(x=>x.stableId===claim.stableId).refresh=packet.evidence;
