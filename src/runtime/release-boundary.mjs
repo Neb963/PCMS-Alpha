@@ -10,6 +10,7 @@ import {createWritebackStore} from './writeback-store.mjs';
 import {planS06Writeback} from './s06-writeback-progress.mjs';
 import {createS06ReviewQueue} from './s06-review-queue.mjs';
 import {createS06ChangeStore} from './s06-request-changes.mjs';
+import {createS06HumanStore,createS06HumanBoundary} from './s06-human-review.mjs';
 import {standingS06} from './s06-standing-authority.mjs';
 import {createExistingStore} from './existing-update-store.mjs';
 import {unlockPrevious} from './existing-update-core.mjs';
@@ -25,7 +26,7 @@ import {releaseContext,releaseTestContext,candidateManifest,releaseGitContext,
 export const RELEASE_PORT='pcms-i13-release';
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const fp=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
-const TYPES=new Set(['LIST','LIST_REVIEW','GET','GET_CHANGE','REQUEST_CHANGES','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
+const TYPES=new Set(['LIST','LIST_REVIEW','GET','GET_CHANGE','REQUEST_CHANGES','HUMAN_CONTEXT','GET_HUMAN','DEFER_HUMAN','ADOPT_HUMAN','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
 export function validateReleaseMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
@@ -35,6 +36,9 @@ export function validateReleaseMessage(api,sender,msg){
     return fail('INVALID_MESSAGE');
   const p=msg.params||{},allowed={
     LIST:[],LIST_REVIEW:['after','limit'],GET:['slug'],GET_CHANGE:['slug'],
+     HUMAN_CONTEXT:['slug'],GET_HUMAN:['slug'],
+     DEFER_HUMAN:['slug','expectedStageRevision','expectedJobRevision','expectedFingerprint'],
+     ADOPT_HUMAN:['slug','expectedRevision'],
     REQUEST_CHANGES:['slug','token','passphrase','expectedStageRevision',
       'expectedJobRevision','sourceFingerprint','instructions','releaseRevision'],
     PREVIEW:['slug','token','passphrase'],
@@ -64,6 +68,12 @@ export function validateReleaseMessage(api,sender,msg){
        p.offset%8192!==0))||
      (['DISPATCH','RECONCILE','CANCEL_APPROVED'].includes(msg.type)&&
        (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
+     (msg.type==='DEFER_HUMAN'&&(
+       !Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
+       !Number.isSafeInteger(p.expectedJobRevision)||p.expectedJobRevision<1||
+       !fp(p.expectedFingerprint)))||
+     (msg.type==='ADOPT_HUMAN'&&(
+       !Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
      (msg.type==='REQUEST_CHANGES'&&(
        !Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
        !Number.isSafeInteger(p.expectedJobRevision)||p.expectedJobRevision<1||
@@ -252,6 +262,24 @@ export function createReleaseBoundary(api,{
     if(msg.type==='GET')return store.get(p.slug);
     if(msg.type==='LIST')return store.list();
     if(msg.type==='GET_CHANGE')return createS06ChangeStore(database).get(p.slug);
+    if(msg.type==='GET_HUMAN')return createS06HumanStore(database).get(p.slug);
+    if(msg.type==='HUMAN_CONTEXT'){
+      const [stage,job,human]=await Promise.all([
+        stageFactory(database).getFull(p.slug),
+        aiFactory(database).getJobFull(p.slug),
+        createS06HumanStore(database).get(p.slug)]);
+      if(!stage.ok||!job.ok||job.job.stageRevision!==stage.record.revision)
+        return fail('S06_HUMAN_CONTEXT_UNAVAILABLE');
+      return {ok:true,slug:p.slug,stageRevision:stage.record.revision,
+        jobRevision:job.job.revision,sourceFingerprint:job.job.verifiedFinal,
+        human:human.ok?human:null,publication:'NO_ACTION'};
+    }
+    if(msg.type==='DEFER_HUMAN')return createS06HumanStore(database).defer({
+      name:p.slug,expectedStageRevision:p.expectedStageRevision,
+      expectedJobRevision:p.expectedJobRevision,
+      expectedFingerprint:p.expectedFingerprint});
+    if(msg.type==='ADOPT_HUMAN')return createS06HumanBoundary(api,{
+      open:async()=>database,guard}).runTrusted(msg);
     if(msg.type==='LIST_REVIEW')return createS06ReviewQueue(database).list({
       after:p.after||'',limit:p.limit||50});
     if(msg.type==='GET_REVIEW_CHUNK'){
