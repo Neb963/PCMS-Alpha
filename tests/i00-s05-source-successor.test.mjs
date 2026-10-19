@@ -84,3 +84,21 @@ test('S05 competing native, uncertain existing effect and mismatched F cannot re
   native:{state:'CHAT1_OBSERVED_IDLE'}},ready:{...context.ready,
     desired:{identifier:'rev-newer'}}}).code,'READY_CANDIDATE_NOT_ADMITTED');
 });
+
+test('S05 first stage cannot bypass pre-existing I13 or publication uncertainty',async()=>{
+ const previous=await exactSource(files('baseline'));
+ const candidate=await exactSource(files('new'));
+ const input={prior:null,previous,source:{...source(candidate),
+  accountId:account.accountId,personaUid:account.personaUid,
+  remotePublicId:link.remoteId,bindingVersion:account.bindingVersion},
+  ready:{active:{identifier:'rev-candidateB',inputFingerprint:H},desired:null}};
+ assert.equal(evaluateStageSuccessor({...input,existing:{state:'UNLIST_UNCERTAIN'}}).code,
+   'POSSIBLE_REMOTE_EFFECT_RECONCILIATION_REQUIRED');
+ assert.equal(evaluateStageSuccessor({...input,release:{state:'PUBLICATION_UNCERTAIN'}}).code,
+   'POSSIBLE_REMOTE_EFFECT_RECONCILIATION_REQUIRED');
+ assert.equal(evaluateStageSuccessor({...input,job:{state:'HELD_RECONCILE'}}).code,
+   'UNRELATED_NATIVE_JOB_NOT_QUIESCENT');
+ assert.equal(evaluateStageSuccessor({...input,ready:{...input.ready,
+   desired:{identifier:'rev-newer'}}}).code,'READY_CANDIDATE_NOT_ADMITTED');
+ assert.equal(evaluateStageSuccessor(input).ok,true);
+});
