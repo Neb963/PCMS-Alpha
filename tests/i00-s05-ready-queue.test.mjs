@@ -79,3 +79,17 @@ test('S05 previously consumed READY cannot be resurrected by Git main rollback',
  assert.equal(abuse.code,'READY_REVISION_REUSED_WITH_DIFFERENT_SOURCE');
  assert.equal(db.keys('events').length,before);
 });
+
+test('S05 explicit NOT_READY makes prior local handoff inadmissible and preserves history',async()=>{
+ const db=fakeDatabase(),s=createReadyStore(db),a=w('rev00001');
+ assert.equal((await s.observe(a)).ok,true);
+ const revoked=await s.holdNotReady({slug:a.slug,repositoryId:a.repositoryId,
+   head:'c'.repeat(40)});
+ assert.equal(revoked.code,'READY_REVOKED_NOT_READY');
+ assert.equal(revoked.record.revision,2);
+ assert.equal((await s.handoff(a.slug,2,admissible)).code,'READY_REVOKED_NOT_READY');
+ assert.equal((await s.observe(a)).changed,false);
+ assert.equal((await s.get(a.slug)).record.hold,'READY_REVOKED_NOT_READY');
+ assert.equal((await s.observe(w('rev00002'))).changed,true);
+ assert.equal((await s.get(a.slug)).record.hold,null);
+});
