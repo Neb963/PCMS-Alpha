@@ -681,6 +681,6 @@ export function createAiBoundary(api,{
       });
     });
   }
-  return Object.freeze({register,run,tick});
+  return Object.freeze({register,run,tick,runTrusted:executeTrusted});
 }
 if(typeof browser!=='undefined')createAiBoundary(browser).register();
