@@ -78,7 +78,9 @@ export function reserveRefreshAttempt(evidence,{id,at,slug,sourceFingerprint,
   if(!q.ok)return q;
   if(liveAuthorized!==true)return {ok:false,code:'REFRESH_ACTIVATION_HELD'};
   if(!validRefreshEvidence(e)||!safeId(id)||!safeId(slug)||!time(at)||!hex(sourceFingerprint)||
-    q.sourceFingerprint!==sourceFingerprint||eligible!==true||
+    q.sourceFingerprint!==sourceFingerprint||
+    (e.savedSourceFingerprint!=null&&e.savedSourceFingerprint!==sourceFingerprint)||
+    eligible!==true||
     e.intent||e.attempts>=RETRY_LIMIT||e.nextAttemptAt>at||e.suspended)
     return {ok:false,code:'REFRESH_ADMISSION_HELD'};
   e.intent={id,slug,at,sourceFingerprint,version:q.version,
