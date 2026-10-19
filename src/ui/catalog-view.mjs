@@ -134,7 +134,36 @@ async function renderReadyQueue(scanGeneration){
           }catch{result.textContent=' Local preparation unavailable; recheck canonical state.';}
           finally{prepare.disabled=false;check.disabled=false;}
         });
-        cell.append(check,document.createTextNode(' '),prepare,result);tr.append(cell);
+        const pause=document.createElement('button'),resume=document.createElement('button');
+        pause.type='button';resume.type='button';
+        pause.textContent='Pause READY';resume.textContent='Resume READY';
+        pause.disabled=!connected||item.hold==='OPERATOR_PAUSED'||
+          item.hold==='READY_REVOKED_NOT_READY';
+        resume.disabled=!connected||item.hold!=='OPERATOR_PAUSED';
+        pause.setAttribute('aria-label','Pause local READY for '+item.slug);
+        resume.setAttribute('aria-label','Recheck Git and resume READY for '+item.slug);
+        async function changeHold(type){
+          if(type==='PAUSE_READY'?pause.disabled:resume.disabled)return;
+          pause.disabled=true;resume.disabled=true;
+          check.disabled=true;prepare.disabled=true;
+          result.textContent=type==='PAUSE_READY'?
+            ' Recording local pause…':' Rechecking exact Git main before resume…';
+          try{
+            const out=await request(type,{slug:item.slug,
+              expectedRevision:item.revision},'pcms-s05-ready-operator');
+            result.textContent=' '+(out?.code||'READY_COMMAND_UNVERIFIED');
+            if(out?.ok){
+              progress.textContent='READY state committed locally. Re-scan catalog to load the new revision; no native or provider effect was executed.';
+              return;
+            }
+          }catch{result.textContent=' READY state uncertain. Re-scan before further action.';}
+          finally{check.disabled=false;prepare.disabled=false;}
+        }
+        pause.addEventListener('click',()=>{void changeHold('PAUSE_READY');});
+        resume.addEventListener('click',()=>{void changeHold('RESUME_READY');});
+        cell.append(check,document.createTextNode(' '),prepare,
+          document.createTextNode(' '),pause,document.createTextNode(' '),
+          resume,result);tr.append(cell);
         tbody.append(tr);
       }
       after=r.nextCursor||'';
