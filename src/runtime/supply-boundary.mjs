@@ -25,7 +25,7 @@ export function validateSupplyMessage(api,sender,message){
     ?['accountId','expectedAccountRevision','slugs','batchId']:
     message.type==='GET_BATCH'?['batchId']:
     message.type==='LIST_BATCHES'?[]:
-    message.type==='FINISH_SOURCE_FOLDER'?['batchId','itemId','expectedRevision','token']:
+    message.type==='FINISH_SOURCE_FOLDER'?['batchId','itemId','expectedRevision']:
     ['batchId','itemId','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
   if(message.type==='PREVIEW'||message.type==='FREEZE'){
@@ -40,8 +40,6 @@ export function validateSupplyMessage(api,sender,message){
     (!isSafeId(p.batchId)||!isSafeId(p.itemId)||
      !Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
     return fail('INVALID_PARAMS');
-  if(message.type==='FINISH_SOURCE_FOLDER'&&
-    (typeof p.token!=='string'||p.token.length>512))return fail('INVALID_PARAMS');
   return {ok:true};
 }
 async function fingerprint(parts){
@@ -60,6 +58,9 @@ export function createSupplyBoundary(api,{
   // Deliberately OFF in packaged extension. Tests must explicitly supply
   // an independently controlled synthetic gate and fake isolated executor.
   effectGate=()=>false,gitGate=()=>false,gitWrite=writeNonReadyFolder,
+  getGitConnection=async()=>{const r=await api.storage.local.get('pcmsS03Git');return r?.pcmsS03Git;},
+  getGitCredential=async repositoryId=>api.runtime.sendNativeMessage(
+    'local.pcms.backup_vault',{action:'git.get',repositoryId}),
   makeStores=db=>({supply:createSupplyStore(db),accounts:createAccountStore(db)})
 }={}){
   let dbPromise;
@@ -265,11 +266,26 @@ export function createSupplyBoundary(api,{
     const foundAccount=await s.accounts.get(b.accountId);
     if(!foundAccount.ok||!validateOwnerContext(b,foundAccount.account).ok)
       return fail('ACCOUNT_STALE');
-    const params={token:p.token,slug:item.requestedSlug,folder:'generators/'+item.requestedSlug};
-    if(!markerRequestAllowed(params).ok)return fail('GITHUB_WRITE_TOKEN_REQUIRED');
     if(gitGate({account:foundAccount.account,batch:b,item})!==true)
       return fail('GIT_WRITE_ACTIVATION_HELD');
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+    // S04 never accepts a credential from a dashboard/port message.
+    // This inherited writer remains restricted to the configured private
+    // repository it actually verifies, until its dynamic repo identity
+    // adapter is independently proven. A different connected repo is held.
+    let config,secret;
+    try{
+      config=await getGitConnection();
+      if(config?.repository!=='Neb963/per-gens'||
+         !/^[1-9][0-9]{0,19}$/.test(config.repositoryId||''))
+        return fail('GIT_REPOSITORY_ADAPTER_UNSUPPORTED');
+      secret=await getGitCredential(config.repositoryId);
+    }catch{return fail('GIT_VAULT_UNAVAILABLE');}
+    if(secret?.ok!==true||typeof secret.credential!=='string')
+      return fail('GIT_VAULT_UNAVAILABLE');
+    const params={token:secret.credential,slug:item.requestedSlug,
+      folder:'generators/'+item.requestedSlug};
+    if(!markerRequestAllowed(params).ok)return fail('GIT_VAULT_UNAVAILABLE');
     const id='source_'+crypto.randomUUID().replaceAll('-','');
     const fp=await fingerprint({kind:'GIT_MARKER',batchId:b.batchId,
       itemId:item.itemId,slug:item.requestedSlug,remoteId:item.remoteId,
