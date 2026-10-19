@@ -304,6 +304,10 @@ export function createStagingBoundary(api,{
         await storeFactory(await database()).recover();
     }).catch(()=>{});
   }
-  return Object.freeze({register,run});
+  return Object.freeze({register,run,runTrusted:async message=>{
+    if(!['GET_STAGE','STAGE_PRIVATE','RECONCILE_STAGE'].includes(message?.type))
+      return fail('INVALID_INTERNAL_STAGE_ACTION');
+    return statusFor(message,storeFactory(await database()));
+  }});
 }
 if(typeof browser!=='undefined')createStagingBoundary(browser).register();
