@@ -5,6 +5,30 @@ import {matchesApproval,releaseContext,releaseTestContext} from './release-core.
 import {REFRESHER_KEY,validShadow} from './refresher-core.mjs';
 const slug=x=>typeof x==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(x);
 const key=s=>'release:'+s;
+// The same IndexedDB transaction must pin READY and independently attributed
+// Git F when approving or marking a possible provider publication.
+function withS06Candidate(m,stage,job,done,commit){
+  if(!stage?.readyIdentifier){commit();return;}
+  m.get('s05-ready:'+stage.slug).onsuccess=rr=>{
+    const ready=rr.target.result?.record;
+    if(!ready?.active||ready.desired||ready.hold||
+       ready.active.identifier!==stage.readyIdentifier||
+       ready.active.inputFingerprint!==stage.readyInputFingerprint){
+      done(fail('S06_REVIEW_READY_SUPERSEDED'));return;
+    }
+    m.get('writeback:'+stage.slug).onsuccess=wb=>{
+      const git=wb.target.result?.record;
+      if(git?.state!=='CONFIRMED'||
+         !/^[a-f0-9]{40}$/.test(git.commitSha||'')||
+         git.stageRevision!==stage.revision||
+         git.jobRevision!==job?.revision||
+         git.sourceFingerprint!==job?.verifiedFinal){
+        done(fail('S06_REVIEW_GIT_PROOF_CHANGED'));return;
+      }
+      commit();
+    };
+  };
+}
 const display=r=>r?{
   ok:true,slug:r.slug,revision:r.revision,state:r.state,
   releaseId:r.releaseId,kind:r.kind,sourceFingerprint:r.approval.sourceFingerprint,
@@ -100,6 +124,7 @@ export function createReleaseStore(db){
                    }).ok){
                   done(fail('RELEASE_CONTEXT_CHANGED'));return;
                 }
+                const commit=()=>{
                 const record={slug:stage.slug,kind,revision:old?old.revision+1:1,releaseId,
                   state:'APPROVED',approval:structuredClone(approval.tuple),
                   sealedSource:structuredClone(source),previousSource:structuredClone(previous),
@@ -114,6 +139,8 @@ export function createReleaseStore(db){
                   slug:stage.slug,releaseId,sourceFingerprint:source.fingerprint,
                   kind,accountId:stage.accountId});
                 done(display(record));
+                };
+                withS06Candidate(meta,liveStage,liveJob,done,commit);
               };
             };
           };
@@ -187,6 +214,7 @@ export function createReleaseStore(db){
                     slug:name,releaseId:r.releaseId,sourceFingerprint:r.approval.sourceFingerprint});
                   done(display(next));
                 }
+                const guardedMark=()=>withS06Candidate(m,stage,job,done,mark);
                 if(r.kind==='EXISTING_UPDATE'){
                   m.get('existing-update:'+name).onsuccess=ex=>{
                     const update=ex.target.result?.record;
@@ -210,10 +238,10 @@ export function createReleaseStore(db){
                          state.accounts?.[r.approval.accountId]?.paused===true){
                         done(fail('EXISTING_SLEEP_REVOKED'));return;
                       }
-                      mark();
+                      guardedMark();
                     };
                   };
-                }else if(r.kind==='PRIVATE_NEW')mark();
+                }else if(r.kind==='PRIVATE_NEW')guardedMark();
                 else done(fail('RELEASE_KIND_INVALID'));
               };
             };
