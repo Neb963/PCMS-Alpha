@@ -4,7 +4,8 @@ import {readFile} from 'node:fs/promises';
 import {spawnSync} from 'node:child_process';
 import {validateReleaseMessage} from '../src/runtime/release-boundary.mjs';
 const paths=['s06-output-proof.mjs','s06-review-queue.mjs',
-  's06-writeback-progress.mjs','s06-request-changes.mjs','s06-human-review.mjs'];
+  's06-writeback-progress.mjs','s06-request-changes.mjs','s06-human-review.mjs',
+  's06-exception-review.mjs'];
 test('S06 combined-XPI production copy includes each new runtime module and one shared alarm',async()=>{
  const overlay=await readFile('src/runtime/overlay.mjs','utf8');
  const watcher=await readFile('src/runtime/catalog-watch.mjs','utf8');
@@ -25,6 +26,10 @@ test('S06 combined-XPI production copy includes each new runtime module and one 
  assert.match(html,/pcms-s06-human-inspect/);
  assert.match(html,/pcms-s06-human-defer/);
  assert.match(html,/pcms-s06-human-adopt/);
+ assert.match(html,/pcms-s06-exception-record/);
+ assert.match(html,/pcms-s06-exception-mode/);
+ assert.match(html,/pcms-s06-exception-checks/);
+ assert.match(release,/createS06ExceptionBoundary/);
  assert.match(release,/createS06HumanBoundary/);
  assert.match(html,/Protected workflow activation/);
  assert.doesNotMatch(html,/Account and provider mutations<\/dt><dd>Off — not implemented/);
