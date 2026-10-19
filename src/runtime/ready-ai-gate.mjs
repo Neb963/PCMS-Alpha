@@ -7,7 +7,7 @@ export function authorizeReadyAiAdvance(job,ready){
  if(!ready?.ok||!ready.record?.active||
     ready.record.active.identifier!==job.readyIdentifier||
     ready.record.active.inputFingerprint!==job.readyInputFingerprint||
-    ready.record.desired)
+    ready.record.desired||ready.record.hold==='READY_REVOKED_NOT_READY')
    return fail('S05_READY_SUPERSEDED_RECONCILE_OLDER_SESSION');
  return {ok:true,code:'S05_CURRENT_READY'};
 }
