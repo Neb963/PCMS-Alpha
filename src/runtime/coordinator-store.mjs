@@ -112,6 +112,38 @@ export function createCoordinatorStore(db){
       };
     });
   }
+  function listCreate({after=null,limit=50}={}){
+    if(after!==null&&!isSafeId(after))return Promise.resolve(fail('INVALID_CURSOR'));
+    if(!Number.isSafeInteger(limit)||limit<1||limit>100)
+      return Promise.resolve(fail('INVALID_LIMIT'));
+    return transact(db,'readonly',(tx,finish)=>{
+      const items=[];let truncated=false,tail=null;
+      tx.objectStore('meta').openCursor().onsuccess=e=>{
+        const cursor=e.target.result;
+        if(!cursor){
+          finish({ok:true,items,truncated,next:truncated?tail:null,
+            providerEffects:'OFF'});return;
+        }
+        const keyName=cursor.key;
+        const record=cursor.value?.record;
+        if(typeof keyName==='string'&&keyName.startsWith('s00-create-intent:')&&
+           record&&(!after||keyName>'s00-create-intent:'+after)){
+          if(items.length>=limit){
+            truncated=true;
+            finish({ok:true,items,truncated,next:tail,providerEffects:'OFF'});
+            return;
+          }
+          items.push({intentId:record.intentId,slug:record.slug,
+            accountId:record.accountId||null,state:record.state,
+            hold:record.hold,revision:record.revision,
+            conflict:record.pinConflict===true,
+            origins:(record.sources||[]).map(s=>s.type)});
+          tail=record.intentId;
+        }
+        cursor.continue();
+      };
+    });
+  }
   async function advanceCreate(intentId,expectedRevision){
     const got=await getCreate(intentId);
     if(!got.ok)return got;
@@ -123,5 +155,5 @@ export function createCoordinatorStore(db){
     return decision.ok?{...decision,providerEffects:'OFF',
       code:'S04_CREATION_ACTIVATION_HELD'}:decision;
   }
-  return Object.freeze({acceptCreate,ingestVerifiedMain,getCreate,advanceCreate});
+  return Object.freeze({acceptCreate,ingestVerifiedMain,getCreate,listCreate,advanceCreate});
 }
