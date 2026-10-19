@@ -6,14 +6,19 @@ import {createStagingStore} from './staging-store.mjs';
 import {createAiStore} from './ai-store.mjs';
 import {createWritebackStore} from './writeback-store.mjs';
 import {createReleaseStore} from './release-store.mjs';
+import {createS06ChangeStore} from './s06-request-changes.mjs';
 import {planS06Writeback} from './s06-writeback-progress.mjs';
 const fail=code=>({ok:false,code});
-export function s06ReviewStatus({decision,release,sourceFingerprint}={}){
+export function s06ReviewStatus({decision,release,change,sourceFingerprint,stageRevision}={}){
   const r=release?.record||release;
   // An uncertain release cannot be reapproved from a new queue projection.
   if(r&&['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN',
       'RECOVERY_HOLD'].includes(r.state))
     return {state:'PUBLICATION_UNCERTAIN',code:'RECONCILE_ONLY'};
+  if(change?.state==='REQUESTED')
+    return {state:'CHANGES_REQUESTED',code:'AWAITING_GUARDED_CHILD_ADMISSION'};
+  if(change?.state==='ADMITTED'&&change.childStageRevision===stageRevision)
+    return {state:'IN_DEVELOPMENT',code:'REQUEST_CHILD_RETESTING'};
   if(r?.state==='APPROVED')
     return r.approval?.sourceFingerprint===sourceFingerprint?
       {state:'APPROVED',code:'HUMAN_APPROVAL_HELD_FOR_DISPATCH'}:
@@ -32,7 +37,7 @@ export function s06ReviewStatus({decision,release,sourceFingerprint}={}){
 export function createS06ReviewQueue(db){
   const readyStore=createReadyStore(db),stageStore=createStagingStore(db),
     aiStore=createAiStore(db),writebackStore=createWritebackStore(db),
-    releaseStore=createReleaseStore(db);
+    releaseStore=createReleaseStore(db),changeStore=createS06ChangeStore(db);
   async function list({after='',limit=50}={}){
     if(typeof after!=='string'||after.length>100||
        !Number.isSafeInteger(limit)||limit<1||limit>100)
@@ -41,10 +46,10 @@ export function createS06ReviewQueue(db){
     if(!snapshot.ok)return snapshot;
     const items=[];
     for(const item of snapshot.items){
-      const [ready,stage,job,writeback,release]=await Promise.all([
+      const [ready,stage,job,writeback,release,change]=await Promise.all([
         readyStore.get(item.slug),stageStore.getFull(item.slug),
         aiStore.getJobFull(item.slug),writebackStore.getFull(item.slug),
-        releaseStore.getFull(item.slug)
+        releaseStore.getFull(item.slug),changeStore.get(item.slug)
       ]);
       if(!ready.ok||ready.record.revision!==item.revision)
         return fail('S06_QUEUE_CHANGED_DURING_READ');
@@ -52,7 +57,9 @@ export function createS06ReviewQueue(db){
         ready,stage,job,writeback:writeback.ok?writeback:null});
       const sourceFingerprint=job.ok?job.job.verifiedFinal:null;
       const status=s06ReviewStatus({decision,
-        release:release.ok?release:null,sourceFingerprint});
+        release:release.ok?release:null,sourceFingerprint,
+        change:change.ok?change:null,
+        stageRevision:stage.ok?stage.record.revision:null});
       items.push({slug:item.slug,revision:item.revision,
         state:status.state,code:status.code,
         sourceFingerprint:decision.ok&&decision.type==='REVIEW'?
