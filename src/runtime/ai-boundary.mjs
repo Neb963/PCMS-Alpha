@@ -6,6 +6,10 @@ import {internalPcmsGuard} from './persona-guard.mjs';
 import {createStagingStore} from './staging-store.mjs';
 import {createAiStore} from './ai-store.mjs';
 import {inspectGitSource} from './git-source.mjs';
+import {inspectReadyCandidate} from './catalog-declaration.mjs';
+import {scanMainCatalog} from './git-catalog.mjs';
+import {pinGitChatPrompt} from './ready-git-prompt.mjs';
+import {createReadyStore} from './ready-store.mjs';
 import {verifyReadback,exactSource} from './staging-core.mjs';
 import {planAiStep} from './ai-supervisor.mjs';
 import {AI_BROWSER_ASSERTIONS} from './perchance-ai-oracle.mjs';
@@ -44,7 +48,8 @@ export function validateAiMessage(api,sender,message){
     return fail('INVALID_SLUG');
   if(message.type==='PREPARE_JOB'&&
      (!Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
-      typeof p.token!=='string'||p.token.length<10||p.token.length>512))
+      (p.token!==undefined&&
+     (typeof p.token!=='string'||p.token.length<10||p.token.length>512))))
     return fail('INVALID_PARAMS');
   if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
@@ -63,7 +68,8 @@ export function validateAiMessage(api,sender,message){
 export function createAiBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,
   storeFactory=createAiStore,stageFactory=createStagingStore,
-  inspect=inspectGitSource,effectGate=()=>false,clock=Date.now
+  inspect=inspectGitSource,inspectReady=inspectReadyCandidate,
+  scanCatalog=scanMainCatalog,effectGate=()=>false,clock=Date.now
 }={}){
   let databasePromise,tickBusy=false;
   const database=()=>databasePromise ||=open();
