@@ -147,10 +147,19 @@ test('S07 C-54: verified first marker and actual return to feed admit the next m
   assert.equal(saved.effectVerified,true);
   assert.equal(saved.evidence.savedSourceFingerprint,first);
   assert.equal(saved.evidence.savedMarkerId,'marker_0000000001');
+  assert.equal(saved.evidence.awaitingVisibility,true);
+  const absentAgain=observeRefreshPresence(saved.evidence,{at:now+600000,
+    present:false,complete:true,healthy:true});
+  assert.equal(absentAgain.ok,true);
+  assert.equal(absentAgain.evidence.awaitingVisibility,true);
+  assert.equal(qualifyRecentAbsence({row:{...row,refresh:absentAgain.evidence,
+    presence:{...row.presence,observedAt:now+600000}},
+    recent:{...recent,observedAt:now+600000},policy,now:now+600001}).ok,false);
   const visible=observeRefreshPresence(saved.evidence,{at:now+600000,
     present:true,rank:7,complete:true,healthy:true});
   assert.equal(visible.ok,true);
   assert.equal(visible.evidence.attempts,0);
+  assert.equal(visible.evidence.awaitingVisibility,false);
   const missing=observeRefreshPresence(visible.evidence,{at:now+1200000,
     present:false,complete:true,healthy:true});
   assert.equal(missing.ok,true);
