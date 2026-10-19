@@ -8,7 +8,8 @@ import {approvalTuple} from '../src/runtime/release-core.mjs';
 globalThis.crypto??=webcrypto;
 const slug='s06-cas-target',D='d'.repeat(64),P='c'.repeat(64);
 const data=s=>Buffer.from(s).toString('base64');
-async function fixture({readyChanged=false,gitChanged=false}={}){
+async function fixture({readyChanged=false,readyMissing=false,gitChanged=false,
+  gitModeChanged=false,gitIdentityChanged=false,gitTestingChanged=false}={}){
  const source=await exactSource([{path:'main.pjs',base64:data('S06 F')},
    {path:'index.html',base64:data('<main>F</main>')}]);
  const previous=await exactSource([{path:'main.pjs',base64:data('')},
@@ -41,12 +42,14 @@ async function fixture({readyChanged=false,gitChanged=false}={}){
   m.put({key:'ai-job:'+slug,job});
   m.put({key:'account:acct',account});
   m.put({key:'inventory:'+slug,generator:inventory});
-  m.put({key:'s05-ready:'+slug,record:{slug,active:{
+  if(!readyMissing)m.put({key:'s05-ready:'+slug,record:{slug,active:{
     identifier:readyChanged?'rev-next':stage.readyIdentifier,
     inputFingerprint:D},desired:null,hold:null}});
-  m.put({key:'writeback:'+slug,record:{state:'CONFIRMED',mode:'S06',
-    readyIdentifier:stage.readyIdentifier,
-    readyInputFingerprint:stage.readyInputFingerprint,testingSha:null,
+  m.put({key:'writeback:'+slug,record:{state:'CONFIRMED',
+    mode:gitModeChanged?'MANUAL':'S06',
+    readyIdentifier:gitIdentityChanged?'rev-foreign':stage.readyIdentifier,
+    readyInputFingerprint:stage.readyInputFingerprint,
+    testingSha:gitTestingChanged?D:null,
     sourceFingerprint:gitChanged?P:source.fingerprint,
     stageRevision:4,jobRevision:7,commitSha:'e'.repeat(40)}});
  });
@@ -56,7 +59,9 @@ async function fixture({readyChanged=false,gitChanged=false}={}){
  return {db,store,params};
 }
 test('S06 reviewer admission blocks superseded READY and unrelated Git proof atomically',async()=>{
- for(const type of [{readyChanged:true},{gitChanged:true}]){
+ for(const type of [{readyChanged:true},{readyMissing:true},
+    {gitChanged:true},{gitModeChanged:true},
+    {gitIdentityChanged:true},{gitTestingChanged:true}]){
   const {db,store,params}=await fixture(type);
   const out=await store.approve(params);
   assert.equal(out.ok,false,JSON.stringify(out));
