@@ -9,6 +9,10 @@ test('S06 independently projected publication labels never turn unverified Git i
  const denied=s06ReviewStatus({decision:{ok:false,code:'SOURCE_DRIFT'}});
  assert.deepEqual(denied,{state:'BLOCKED',code:'SOURCE_DRIFT'});
  assert.equal(s06ReviewStatus({decision:{ok:true,type:'PREPARE'}}).state,'WAITING_FOR_GIT');
+ assert.equal(s06ReviewStatus({decision:{ok:true,type:'REVIEW'},
+  human:{state:'DEFERRED',parentStageRevision:4},stageRevision:4}).state,'HUMAN_DEFERRED');
+ assert.equal(s06ReviewStatus({decision:{ok:false,code:'S06_CANDIDATE_OR_TEST_EVIDENCE_UNVERIFIED'},
+  human:{state:'ADOPTED_UNTESTED',childStageRevision:5},stageRevision:5}).state,'IN_DEVELOPMENT');
  assert.equal(s06ReviewStatus({decision:{ok:true,type:'RECONCILE'}}).state,'BLOCKED');
  assert.equal(s06ReviewStatus({decision:{ok:true,type:'REVIEW'},
    change:{state:'REQUESTED'},stageRevision:4}).state,'CHANGES_REQUESTED');
@@ -38,6 +42,11 @@ test('S06 queue accepts read-only paged request but rejects UI effect or oversiz
   {source:F},{limit:2,token:'stolen-token-value'}
  ])assert.equal(check({type:'LIST_REVIEW',params}).ok,false);
  assert.equal(check({type:'APPROVE',params:{slug:name}}).ok,false);
+ assert.equal(check({type:'HUMAN_CONTEXT',params:{slug:name}}).ok,true);
+ assert.equal(check({type:'GET_HUMAN',params:{slug:name}}).ok,true);
+ assert.equal(check({type:'ADOPT_HUMAN',params:{slug:name,expectedRevision:0}}).ok,false);
+ assert.equal(check({type:'DEFER_HUMAN',params:{slug:name,expectedStageRevision:1,
+  expectedJobRevision:1,expectedFingerprint:F,source:{forged:true}}}).ok,false);
 });
 test('S06 canonical queue retains blocked candidates and paginates without effects',async()=>{
  const db=fakeDatabase();
