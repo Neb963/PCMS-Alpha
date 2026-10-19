@@ -161,20 +161,46 @@ export function createAiStore(db){
             m.get(key(stage.slug)).onsuccess=old=>{
               const previous=old.target.result?.job;
               const commit=()=>{
-                const job={...started.job,revision:previous?previous.revision+1:1,
-                  createdAt:Date.now(),
-                  ...(stage.readyIdentifier?{
-                    readyIdentifier:stage.readyIdentifier,
-                    readyInputFingerprint:stage.readyInputFingerprint}:{})};
-                if(previous){
-                  m.put({key:'ai-history:'+stage.slug+':'+previous.revision,
-                    accountId:account,job:structuredClone(previous)});
-                  m.put({key:key(stage.slug),accountId:account,job});
-                }else m.add({key:key(stage.slug),accountId:account,job});
-                t.objectStore('events').add({stage:'AI_JOB_CREATED',slug:stage.slug,
-                  sourceFingerprint:job.sourceFingerprint,promptRevision:prompt.revision,
-                  ...(job.readyIdentifier?{readyIdentifier:job.readyIdentifier}:{})});
-                done(publicJob(job));
+                const write=()=>{
+                  const job={...started.job,revision:previous?previous.revision+1:1,
+                    createdAt:Date.now(),
+                    ...(stage.readyIdentifier?{
+                      readyIdentifier:stage.readyIdentifier,
+                      readyInputFingerprint:stage.readyInputFingerprint}:{})};
+                  if(previous){
+                    m.put({key:'ai-history:'+stage.slug+':'+previous.revision,
+                      accountId:account,job:structuredClone(previous)});
+                    m.put({key:key(stage.slug),accountId:account,job});
+                  }else m.add({key:key(stage.slug),accountId:account,job});
+                  t.objectStore('events').add({stage:'AI_JOB_CREATED',slug:stage.slug,
+                    sourceFingerprint:job.sourceFingerprint,promptRevision:prompt.revision,
+                    ...(job.readyIdentifier?{readyIdentifier:job.readyIdentifier}:{})});
+                  done(publicJob(job));
+                };
+                if(!stage.readyIdentifier){write();return;}
+                // The external donor check happened before this transaction.
+                // Re-read the canonical SOURCE_VERIFIED stage *inside* the
+                // committing IDB transaction, or stale caller snapshots could
+                // create jobs after a newer READY or source-writer takeover.
+                m.get('stage:'+stage.slug).onsuccess=sr=>{
+                  const current=sr.target.result?.record;
+                  if(!current||current.state!=='SOURCE_VERIFIED'||
+                     current.revision!==stage.revision||
+                     current.accountId!==stage.accountId||
+                     current.personaUid!==stage.personaUid||
+                     current.remotePublicId!==stage.remotePublicId||
+                     current.bindingVersion!==stage.bindingVersion||
+                     current.readyIdentifier!==stage.readyIdentifier||
+                     current.readyInputFingerprint!==stage.readyInputFingerprint||
+                     current.nonce!==stage.nonce||
+                     current.candidate?.fingerprint!==stage.candidate?.fingerprint||
+                     current.previous?.fingerprint!==stage.previous?.fingerprint||
+                     !Number.isSafeInteger(current.verifiedAt)||
+                     current.verifiedAt<1){
+                    done(fail('AI_CANONICAL_STAGE_CHANGED'));return;
+                  }
+                  write();
+                };
               };
               if(!previous){
                 if(stage.readyIdentifier){
