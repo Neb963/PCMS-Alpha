@@ -56,10 +56,10 @@ export function createReadyStore(db){
       const planned=planReadyObservation(old,witness);
       if(!planned.ok){done(planned);return;}
       if(!planned.changed){done({...planned,record:view(old)});return;}
-      if(!prior)m.add({key:seen(witness.slug,checked.identity),
+      if(!prior)m.put({key:seen(witness.slug,checked.identity),
         witness:checked,firstSeenAt:Date.now()});
       if(old?.desired&&old.desired.identity!==planned.next.desired?.identity)
-       m.add({key:history(witness.slug)+old.revision,
+       m.put({key:history(witness.slug)+old.revision,
         previous:structuredClone(old.desired),reason:'SUPERSEDED_BEFORE_ADMISSION'});
       m.put({key:k,record:planned.next});
       t.objectStore('events').add({stage:'S05_READY_QUEUED',slug:witness.slug,
@@ -80,7 +80,7 @@ export function createReadyStore(db){
     const old=e.target.result?.record;
     const planned=planReadyHandoff(old,expectedRevision,proof);
     if(!planned.ok){done(planned);return;}
-    if(planned.retired)m.add({key:history(slug)+old.revision,
+    if(planned.retired)m.put({key:history(slug)+old.revision,
       previous:structuredClone(planned.retired),reason:'SAFE_HANDOFF'});
     m.put({key:key(slug),record:planned.next});
     t.objectStore('events').add({stage:'S05_READY_LOCAL_HANDOFF',slug,
