@@ -119,6 +119,59 @@ export function createReadyStore(db){
    };
   });
  }
+ // Local operator pause is not a cancellation or native Stop. It preserves
+ // any possible prior effect, READY history and source bytes without granting
+ // permission for new provider/native development.
+ function pause(slug,expectedRevision){
+  if(!ID.test(slug||'')||!Number.isSafeInteger(expectedRevision)||expectedRevision<1)
+   return Promise.resolve(fail('READY_COMMAND_INVALID'));
+  return tx(db,'readwrite',(t,done)=>{
+   const m=t.objectStore('meta');
+   m.get(key(slug)).onsuccess=e=>{
+     const old=e.target.result?.record;
+     if(!old){done(fail('READY_NOT_OBSERVED'));return;}
+     if(old.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
+     if(old.hold==='READY_REVOKED_NOT_READY')
+       {done(fail('READY_REVOKED_NOT_READY'));return;}
+     if(old.hold==='OPERATOR_PAUSED')
+       {done({ok:true,changed:false,code:'READY_ALREADY_PAUSED',record:view(old)});return;}
+     const next={...old,revision:old.revision+1,hold:'OPERATOR_PAUSED',
+       pausedAt:Date.now()};
+     m.put({key:key(slug),record:next});
+     t.objectStore('events').add({stage:'S05_READY_OPERATOR_PAUSED',
+       slug,revision:next.revision,providerEffects:'NONE'});
+     done({ok:true,changed:true,code:'READY_OPERATOR_PAUSED',record:view(next)});
+   };
+  });
+ }
+ // Resume only after the privileged caller has independently re-pinned Git
+ // main to the exact candidate. A stale UI revision never clears the hold.
+ function resume(slug,expectedRevision,{identifier,inputFingerprint}={}){
+  if(!ID.test(slug||'')||!Number.isSafeInteger(expectedRevision)||expectedRevision<1||
+     typeof identifier!=='string'||!/^[a-f0-9]{64}$/.test(inputFingerprint||''))
+   return Promise.resolve(fail('READY_COMMAND_INVALID'));
+  return tx(db,'readwrite',(t,done)=>{
+   const m=t.objectStore('meta');
+   m.get(key(slug)).onsuccess=e=>{
+     const old=e.target.result?.record;
+     if(!old){done(fail('READY_NOT_OBSERVED'));return;}
+     if(old.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
+     if(old.hold!=='OPERATOR_PAUSED')
+       {done(fail('READY_RESUME_NOT_PAUSED'));return;}
+     const current=old.desired||old.active;
+     if(!current||current.identifier!==identifier||
+        current.inputFingerprint!==inputFingerprint)
+       {done(fail('READY_RESUME_CANDIDATE_CHANGED'));return;}
+     const next={...old,revision:old.revision+1,hold:
+       old.active&&old.desired?'WAIT_FOR_SAFE_SOURCE_HANDOFF':null,
+       pausedAt:null};
+     m.put({key:key(slug),record:next});
+     t.objectStore('events').add({stage:'S05_READY_OPERATOR_RESUMED',
+       slug,revision:next.revision,providerEffects:'NONE'});
+     done({ok:true,changed:true,code:'READY_OPERATOR_RESUMED',record:view(next)});
+   };
+  });
+ }
  function list({after='',limit=100}={}){
   if(typeof after!=='string'||after.length>100||
      !Number.isInteger(limit)||limit<1||limit>200)
@@ -137,5 +190,5 @@ export function createReadyStore(db){
    };
   });
  }
- return Object.freeze({get,observe,handoff,holdNotReady,list});
+ return Object.freeze({get,observe,handoff,holdNotReady,pause,resume,list});
 }
