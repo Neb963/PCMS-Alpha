@@ -261,34 +261,38 @@ def adoption_idb_probe(session):
       };
       const db=await openCanonicalDatabase();
       const store=createAdoptionStore(db);
+      const commonGit={
+        getGitConnection:async()=>({repository:'Neb963/per-gens',repositoryId:'42'}),
+        getGitCredential:async()=>({ok:true,credential:'synthetic-git-token-01'})
+      };
       const boundary=createAdoptionBoundary(api,{guard:()=>guard,
-        gitGate:()=>true,
-        gitWrite:async ({folder,original:preserved})=>{
+        ...commonGit,gitGate:()=>true,
+        gitWrite:async ({original:preserved})=>{
           const onDisk=await store.getFull(slug);
           if(onDisk.record?.archiveState!=='DISPATCH_POSSIBLE')
             throw Error('Missing durable Git dispatch marker');
           if(preserved.fingerprint!==onDisk.record.original.fingerprint)
             throw Error('Source bytes changed before fake Git dispatcher');
           trace.push('FAKE_GIT_AFTER_DURABLE_MARKER');
-          return {ok:true,source:'INDEPENDENT_GIT_BYTE_READBACK',ready:false,
-            prefix:'originals/'+slug+'/'+preserved.fingerprint,folder,
-            head:'f'.repeat(40)};
+          return {ok:true,source:'INDEPENDENT_GIT_BYTE_READBACK',
+            archiveRef:'refs/tags/pcms-originals/'+preserved.remotePublicId+'/'+preserved.fingerprint,
+            prefix:'generators/'+slug,fingerprint:preserved.fingerprint,
+            commit:'e'.repeat(40),head:'f'.repeat(40),repositoryId:'42'};
         }});
       const cmd=(type,params)=>boundary.run({type,params},sender);
       const adopted=await cmd('CAPTURE_ADOPTION',{
         slug,expectedRevision:1,explicitPublicConsent:false});
       const listing=await cmd('GET_ADOPTION',{slug});
-      const held=await createAdoptionBoundary(api,{guard:()=>guard}).run({
-        type:'ARCHIVE_GIT',params:{slug,expectedRevision:adopted.revision,
-          token:'synthetic-git-token-01'}},sender);
+      const held=await createAdoptionBoundary(api,{guard:()=>guard,...commonGit}).run({
+        type:'ARCHIVE_GIT',params:{slug,expectedRevision:adopted.revision}},sender);
       const git=await cmd('ARCHIVE_GIT',{slug,
-        expectedRevision:adopted.revision,token:'synthetic-git-token-01'});
+        expectedRevision:adopted.revision});
       const protectedResult=await cmd('GET_ADOPTION',{slug});
       const tombstone=await cmd('ARCHIVE_LOCAL',{slug,
         expectedRevision:protectedResult.revision});
       const after=await cmd('GET_ADOPTION',{slug});
       const rejected=await cmd('ARCHIVE_GIT',{slug,
-        expectedRevision:after.revision,token:'synthetic-git-token-01'});
+        expectedRevision:after.revision});
       db.close();
       done({adopted,listing,held,git,protectedResult,tombstone,after,rejected,trace});
     })().catch(e=>done({error:'I07_IDB_PROBE_FAILED',detail:String(e).slice(0,200)}));'''
