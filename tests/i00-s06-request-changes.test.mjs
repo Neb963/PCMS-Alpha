@@ -131,3 +131,22 @@ test('S06 stale child cannot override operator-paused ledger and cannot skip par
  assert.equal((await x.store.admit(name,r.revision)).ok,false);
  assert.equal(x.db.read('meta','stage:'+name).record.revision,4);
 });
+
+test('S06 interrupted Request Changes transaction neither revokes approval nor records intent',async()=>{
+ const x=await setup();x.db.failNextCommit();
+ await assert.rejects(x.request());
+ assert.equal(x.db.read('meta','release:'+name).release.state,'APPROVED');
+ assert.equal(x.db.read('meta','s06-change:'+name),undefined);
+ assert.equal(x.db.read('meta','ai-job:'+name).job.revision,7);
+});
+test('S06 interrupted child admission retains all parent lineage atomically',async()=>{
+ const x=await setup({releaseState:null});
+ const req=await x.request();assert.equal(req.ok,true);
+ x.db.failNextCommit();
+ await assert.rejects(x.store.admit(name,req.revision));
+ assert.equal(x.db.read('meta','s06-change:'+name).record.state,'REQUESTED');
+ assert.equal(x.db.read('meta','stage:'+name).record.revision,4);
+ assert.equal(x.db.read('meta','ai-job:'+name).job.revision,7);
+ assert.equal(x.db.read('meta','stage-history:'+name+':4'),undefined);
+ assert.equal(x.db.read('meta','ai-history:'+name+':7'),undefined);
+});
