@@ -7,7 +7,7 @@ const time=t=>Number.isSafeInteger(t)&&t>0;
 export function emptyRefreshEvidence(){
   return {version:REFRESH_PROOF_VERSION,state:'UNOBSERVED',misses:0,lastMissAt:0,
     lastSeenAt:0,lastRank:null,suspended:false,attempts:0,probes:0,nextAttemptAt:0,
-    intent:null,history:[]};
+    intent:null,history:[],savedSourceFingerprint:null,savedMarkerId:null};
 }
 export function validRefreshEvidence(e){
   return e?.version===1&&['UNOBSERVED','PRESENT','ABSENT_ONCE',
@@ -17,6 +17,8 @@ export function validRefreshEvidence(e){
     Number.isSafeInteger(e.attempts)&&e.attempts>=0&&e.attempts<=RETRY_LIMIT&&
     Number.isSafeInteger(e.probes)&&e.probes>=0&&e.probes<=3&&
     Array.isArray(e.history)&&e.history.length<=8&&
+    (e.savedSourceFingerprint==null||hex(e.savedSourceFingerprint))&&
+    (e.savedMarkerId==null||safeId(e.savedMarkerId))&&
     (e.intent===null||safeId(e.intent.id));
 }
 // Only an independently sourced, complete, fresh recent-list sample counts.
@@ -34,7 +36,15 @@ export function observeRefreshPresence(current,{at,present,rank,complete,healthy
     const uncertain=e.state==='EFFECT_UNVERIFIED'||e.intent?.state==='DISPATCH_POSSIBLE';
     e.misses=0;e.lastSeenAt=at;e.lastRank=rank;
     // Seeing a feed item cannot reconcile a possibly-dispatched mutation.
-    if(!uncertain){e.suspended=false;if(!e.intent)e.state='PRESENT';}
+    if(!uncertain){
+      // An actual return to the complete recent feed after a proven marker
+      // restarts the bounded failure budget. Ineffective/unknown saves never do.
+      if(e.state==='EFFECT_CONFIRMED'&&
+          e.history.at(-1)?.effect==='EFFECT_CONFIRMED'){
+        e.attempts=0;e.probes=0;e.nextAttemptAt=0;
+      }
+      e.suspended=false;if(!e.intent)e.state='PRESENT';
+    }
     return {ok:true,evidence:e,resumed:wasSuspended&&!uncertain,releaseSlot:false};
   }
   e.lastRank=null;
@@ -131,6 +141,10 @@ export function reconcileRefreshAttempt(evidence,id,{at,kind,sourceFingerprint,
   // automatic retry after an ineffective attempt without a fresh verified method.
   // Retain the dispatch receipt until independent saved-state readback
   // resolves it; a later guarded read can settle this SAME id without execute.
+  if(verified&&prior.method==='CONTROLLED_SOURCE_MARKER'){
+    e.savedSourceFingerprint=prior.targetFingerprint;
+    e.savedMarkerId=prior.markerId;
+  }
   e.intent=verified||noEffect?null:prior;
   if(!verified)e.suspended=true;
   return {ok:true,evidence:e,effectVerified:verified,
