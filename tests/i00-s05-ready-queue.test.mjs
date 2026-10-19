@@ -3,6 +3,11 @@ import assert from 'node:assert/strict';
 import {normalizeReadyWitness,planReadyObservation,planReadyHandoff} from '../src/runtime/ready-planner.mjs';
 import {createReadyStore} from '../src/runtime/ready-store.mjs';
 import {fakeDatabase} from './fake-idb.mjs';
+const admissible={source:'TRUSTED_S05_ADMISSION_BOUNDARY',
+ accountOwnerVerified:true,protectedRouteReady:true,
+ completeRecoverableBaseline:true,humanEditorClean:true,noUncertainWriter:true,
+ writerIdle:true,nativeIdle:true,providerEffectResolved:true,
+ approvalEffectResolved:true};
 const w=(id,slug='safe-slug',fingerprint='a'.repeat(64))=>({
  repositoryId:'1411034835',slug,identifier:'rev-'+id,
  declarationCommit:'1'.repeat(40),markerOid:'2'.repeat(40),
@@ -14,14 +19,14 @@ test('S05 pure READY planner refuses recycled tokens and retains active writer',
  assert.equal(planReadyObservation(first.next,w('rev00001')).changed,false);
  assert.equal(planReadyObservation(first.next,w('rev00001','safe-slug','b'.repeat(64))).code,
    'READY_REVISION_REUSED_WITH_DIFFERENT_SOURCE');
- const active=planReadyHandoff(first.next,1,null);
+ assert.equal(planReadyHandoff(first.next,1,null).code,'READY_ADMISSION_UNVERIFIED');
+ const active=planReadyHandoff(first.next,1,admissible);
  assert.equal(active.ok,true);
  const second=planReadyObservation(active.next,w('rev00002'));
  assert.equal(second.code,'READY_SUCCESSOR_PENDING');
  assert.equal(planReadyHandoff(second.next,second.next.revision,{writerIdle:true}).code,
    'SOURCE_HANDOFF_UNVERIFIED');
- const proof={writerIdle:true,nativeIdle:true,providerEffectResolved:true,
-   humanEditorClean:true,approvalEffectResolved:true};
+ const proof={...admissible};
  const admitted=planReadyHandoff(second.next,second.next.revision,proof);
  assert.equal(admitted.next.active.identifier,'rev-rev00002');
  assert.equal(admitted.retired.identifier,'rev-rev00001');
@@ -35,7 +40,8 @@ test('S05 canonical persistence deduplicates and cannot bypass conflicting READY
  assert.equal((await s.observe(w('rev00001','safe-slug','b'.repeat(64)))).code,
    'READY_REVISION_REUSED_WITH_DIFFERENT_SOURCE');
  assert.equal(db.keys('events').length,1);
- const a=await s.handoff('safe-slug',1,null);
+ assert.equal((await s.handoff('safe-slug',1,null)).code,'READY_ADMISSION_UNVERIFIED');
+ const a=await s.handoff('safe-slug',1,admissible);
  assert.equal(a.code,'READY_ADMITTED_LOCAL_ONLY');
  const b=await s.observe(w('rev00002'));
  assert.equal(b.code,'READY_SUCCESSOR_PENDING');
