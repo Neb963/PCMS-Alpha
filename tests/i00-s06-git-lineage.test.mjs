@@ -21,7 +21,9 @@ const ready=()=>({slug:name,revision:3,active:{
   identifier:ID,inputFingerprint:H},desired:null,hold:null});
 const writeback=(state,overrides={})=>({
   state,revision:2,slug:name,mode:'S06',operationId:'writeback_'+'1'.repeat(32),
-  stageRevision:4,jobRevision:7,sourceFingerprint:F,accountId:'account-1',
+  stageRevision:4,jobRevision:7,sourceFingerprint:F,
+  readyIdentifier:ID,readyInputFingerprint:H,testingSha:null,
+  accountId:'account-1',
   personaUid:'persona-1',principalFingerprint:F,remotePublicId:'remote-1',
   folder:'generators/'+name,baseHead:S,expectedHead:HEAD,
   settingRevision:1,commitSha:HEAD,...overrides});
