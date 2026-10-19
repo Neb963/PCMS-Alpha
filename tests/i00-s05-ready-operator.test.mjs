@@ -149,3 +149,30 @@ test('S05 stage transaction abort after READY handoff does not pretend source pi
  assert.equal((await s.get(id)).record.active,null);
  assert.equal(h.db.read('meta','stage:'+id),undefined);
 });
+
+test('S05 retry never converts uncertain or changed stage to a successful pin receipt',async()=>{
+ for(const mutate of [
+  old=>({...old,state:'HELD_UNCERTAIN'}),
+  old=>({...old,remotePublicId:'different-owner'}),
+  old=>({...old,readyInputFingerprint:'b'.repeat(64)}),
+  old=>({...old,previous:{...old.previous,fingerprint:'c'.repeat(64)}})
+ ]){
+  const h=setup(),store=createReadyStore(h.db);
+  await store.observe(witness);
+  await seed(h.db,[
+    {key:'account:'+account.accountId,account},
+    {key:'source-link:'+id,link},
+    {key:'inventory:'+id,generator:inventory}
+  ]);
+  const command={type:'PREPARE_LOCAL',params:{slug:id,expectedRevision:1}};
+  const first=await h.operator.run(command,h.sender);
+  assert.equal(first.code,'S05_LOCAL_STAGE_PINNED',JSON.stringify(first));
+  const row=h.db.read('meta','stage:'+id);
+  await seed(h.db,[{...row,record:mutate(row.record)}]);
+  const replay=await h.operator.run({
+    type:'PREPARE_LOCAL',params:{slug:id,expectedRevision:2}},h.sender);
+  assert.equal(replay.code,'S05_PINNED_STAGE_RECONCILIATION_REQUIRED',
+    JSON.stringify(replay));
+  assert.equal(h.db.keys('events').length,3,'no false replay success event');
+ }
+});
