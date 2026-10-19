@@ -26,7 +26,19 @@ async function storeState(db,s){
   await new Promise((resolve,reject)=>{
     const tx=db.transaction(['meta'],'readwrite');
     tx.oncomplete=resolve;tx.onabort=()=>reject(Error('transaction aborted'));
-    tx.objectStore('meta').put({key:REFRESHER_KEY,state:s});
+    const m=tx.objectStore('meta');
+    m.put({key:REFRESHER_KEY,state:s});
+    const account={accountId:'account_01',personaUid:'persona_01',bindingVersion:1,
+      state:'VERIFIED',identity:{source:'GUARDED_SESSION_READBACK',bindingVersion:1,principalFingerprint:H}};
+    const generator={slug:'owned-generator',accountId:'account_01',personaUid:'persona_01',
+      bindingVersion:1,remoteId:'slug-owned-generator',ownerState:'OBSERVED_OWNER',visibility:'PUBLIC'};
+    const release={slug:'owned-generator',accountId:'account_01',personaUid:'persona_01',
+      bindingVersion:1,remoteId:'slug-owned-generator',state:'CONFIRMED_PUBLIC',
+      source:'INDEPENDENT_PUBLICATION_READBACK',sourceFingerprint:H,
+      principalFingerprint:H,observedAt:now-200,observationId:'observation_01'};
+    m.put({key:'account:account_01',account});
+    m.put({key:'inventory:owned-generator',generator});
+    m.put({key:'release:owned-generator',release});
   });
 }
 test('S07 AC-14: actual IDB reserve rejects stale/partial/present and preserves receipt-free state',async()=>{
@@ -35,8 +47,7 @@ test('S07 AC-14: actual IDB reserve rejects stale/partial/present and preserves 
     s=>s.recent.observedAt=1,
     s=>s.rows[0].presence.present=true,
     s=>s.rows[0].presence.observedAt=now-200,
-    s=>s.rows[0].reviewHeld=true,
-    s=>s.rows[0].readyUpdate=true
+    s=>s.rows[0].paused=true
   ]){
     const db=fakeDatabase(),s=initial();changed(s);await storeState(db,s);
     const store=createRefresherStore(db),before=db.read('meta',REFRESHER_KEY);
