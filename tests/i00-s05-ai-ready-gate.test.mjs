@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fakeDatabase} from './fake-idb.mjs';
-import {authorizeReadyAiAdvance} from '../src/runtime/ready-ai-gate.mjs';
+import {authorizeReadyAiAdvance,authorizeGitReadyAiAdvance} from '../src/runtime/ready-ai-gate.mjs';
 import {createAiBoundary} from '../src/runtime/ai-boundary.mjs';
 const slug='s05-old-job',sha='a'.repeat(64),id='rev-s05candidate1';
 const job={slug,revision:7,readyIdentifier:id,readyInputFingerprint:sha};
@@ -46,4 +46,55 @@ test('S05 port rejects stale READY for all effect-capable AI advancement command
     JSON.stringify({type,r}));
  }
  assert.equal(native,0);
+});
+
+test('S05 independent current-main READY must match job candidate before native work',()=>{
+ const repositoryId='1411034835',head='d'.repeat(40);
+ const catalog={ok:true,complete:true,source:'PINNED_MAIN_READ_ONLY',
+   repositoryId,head};
+ const coherent={ok:true,code:'READY_COHERENT_INPUT_PINNED',
+   slug,pinnedHead:head,legacy:false,token:'s05candidate1',
+   inputFingerprint:sha};
+ const same=authorizeGitReadyAiAdvance(job,catalog,coherent,{repositoryId,slug});
+ assert.equal(same.ok,true,JSON.stringify(same));
+ for(const change of [
+  {coherent:{...coherent,token:'a-new-ready'}},
+  {coherent:{...coherent,inputFingerprint:'d'.repeat(64)}},
+  {coherent:{...coherent,pinnedHead:'f'.repeat(40)}},
+  {coherent:{...coherent,code:'READY_REVOKED'}},
+  {catalog:{...catalog,complete:false}},
+  {catalog:{...catalog,repositoryId:'another-repo'}}
+ ]){
+  const checked=authorizeGitReadyAiAdvance(job,change.catalog||catalog,
+    change.coherent||coherent,{repositoryId,slug});
+  assert.equal(checked.ok,false,JSON.stringify(change));
+ }
+});
+test('S05 native send cannot use stale main even when cached local READY is active',async()=>{
+ const db=fakeDatabase(),repositoryId='1411034835';
+ await new Promise((resolve,reject)=>{
+  const t=db.transaction('meta','readwrite');
+  t.oncomplete=resolve;t.onabort=()=>reject(Error('ABORT'));
+  t.objectStore('meta').put({key:'s05-ready:'+slug,record:{
+    revision:3,repositoryId,active:{identifier:id,inputFingerprint:sha},desired:null}});
+ });
+ let guarded=0;
+ const api={runtime:{id:'fixture-extension',
+   getURL:s=>'moz-extension://fixture/'+s,
+   sendNativeMessage:async()=>({ok:true,credential:'fixture-read-token'})},
+   storage:{local:{get:async key=>key==='pcmsS03Git'?
+      {pcmsS03Git:{repository:'Neb963/per-gens',repositoryId}}:{}}}};
+ const boundary=createAiBoundary(api,{open:async()=>db,
+  storeFactory:()=>({getJobFull:async()=>({ok:true,job})}),
+  guard:()=>{guarded++;return null;},
+  scanCatalog:async()=>({ok:true,complete:true,source:'PINNED_MAIN_READ_ONLY',
+    repositoryId,head:'a'.repeat(40)}),
+  inspectReady:async()=>({ok:true,code:'READY_COHERENT_INPUT_PINNED',
+    slug,pinnedHead:'a'.repeat(40),token:'revoked-previous',
+    inputFingerprint:sha})});
+ const sender={id:api.runtime.id,url:api.runtime.getURL('pcms/index.html')};
+ const result=await boundary.run({type:'BEGIN_NATIVE',params:{
+   slug,expectedRevision:job.revision,step:'CHAT1_SEND'}},sender);
+ assert.equal(result.code,'S05_AI_MAIN_READY_SUPERSEDED',JSON.stringify(result));
+ assert.equal(guarded,0,'no donor-native provider effects');
 });
