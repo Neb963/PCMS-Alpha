@@ -274,10 +274,13 @@ export function createReleaseBoundary(api,{
         jobRevision:job.job.revision,sourceFingerprint:job.job.verifiedFinal,
         human:human.ok?human:null,publication:'NO_ACTION'};
     }
-    if(msg.type==='DEFER_HUMAN')return createS06HumanStore(database).defer({
-      name:p.slug,expectedStageRevision:p.expectedStageRevision,
-      expectedJobRevision:p.expectedJobRevision,
-      expectedFingerprint:p.expectedFingerprint});
+    if(msg.type==='DEFER_HUMAN'){
+      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      return createS06HumanStore(database).defer({
+        name:p.slug,expectedStageRevision:p.expectedStageRevision,
+        expectedJobRevision:p.expectedJobRevision,
+        expectedFingerprint:p.expectedFingerprint});
+    }
     if(msg.type==='ADOPT_HUMAN')return createS06HumanBoundary(api,{
       open:async()=>database,guard}).runTrusted(msg);
     if(msg.type==='LIST_REVIEW')return createS06ReviewQueue(database).list({
