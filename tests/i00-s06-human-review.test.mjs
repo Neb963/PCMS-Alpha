@@ -103,6 +103,10 @@ test('C-53 stale/ambiguous attempts cannot erase human work or alter approval',a
  const held=await x.defer();
  assert.equal((await x.store.adopt({name,expectedRevision:held.revision,
    source:x.F})).code,'S06_HUMAN_SAVED_SOURCE_OR_RELEASE_CHANGED');
+ assert.equal((await x.store.adopt({name,expectedRevision:held.revision,
+   source:{...x.H,blobs:x.F.blobs}})).code,'S06_HUMAN_SOURCE_PROOF_INVALID');
+ assert.equal((await x.store.adopt({name,expectedRevision:held.revision,
+   source:{...x.H,files:x.F.files}})).code,'S06_HUMAN_SOURCE_PROOF_INVALID');
  const d=x.db.read('meta','s06-human:'+name).record;
  assert.equal(d.state,'DEFERRED');
  assert.equal(x.db.read('meta','stage:'+name).record.revision,4);
