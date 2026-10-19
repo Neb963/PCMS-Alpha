@@ -7,6 +7,10 @@ import {internalPcmsGuard} from './persona-guard.mjs';
 import {createStagingStore,findEligibleManagedSource} from './staging-store.mjs';
 import {exactSource,verifyReadback} from './staging-core.mjs';
 import {inspectGitSource} from './git-source.mjs';
+import {scanMainCatalog} from './git-catalog.mjs';
+import {inspectReadyCandidate} from './catalog-declaration.mjs';
+import {createReadyStore} from './ready-store.mjs';
+import {stageReadyGitSource} from './ready-git-source.mjs';
 
 export const STAGING_PORT='pcms-i09-staging';
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
@@ -68,6 +72,8 @@ const recordContext=r=>({slug:r.slug,accountId:r.accountId,personaUid:r.personaU
 
 export function createStagingBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,inspect=inspectGitSource,
+  scanCatalog=scanMainCatalog,inspectReady=inspectReadyCandidate,
+  native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
   // Packaged provider capability remains locked until current guarded editor
   // contract is independently proven and operator activation is authorized.
   effectGate=()=>false,storeFactory=createStagingStore,
@@ -76,6 +82,29 @@ export function createStagingBoundary(api,{
   let databasePromise;
   const database=()=>databasePromise ||=open();
   const sentinel=createRestoreSentinel(api.storage.local);
+  async function loadReadyMain(db,slugName){
+    const config=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
+    const pending=await createReadyStore(db).get(slugName);
+    if(!pending?.ok||!pending.record?.active||pending.record.desired)
+      return fail('S05_READY_NOT_ADMITTED_OR_SUPERSEDED');
+    if(config?.repository!=='Neb963/per-gens'||
+       config.repositoryId!==pending.record.repositoryId)
+      return fail('S05_REPOSITORY_CHANGED');
+    const value=await native({action:'git.get',repositoryId:config.repositoryId});
+    if(!value?.ok||typeof value.credential!=='string'||
+       value.credential.length<12||value.credential.length>512||
+       /[^\\x21-\\x7e]/.test(value.credential))
+      return fail('S05_GIT_VAULT_UNAVAILABLE');
+    const catalog=await scanCatalog({repository:config.repository,token:value.credential});
+    if(!catalog?.ok||!catalog.complete||
+       catalog.repositoryId!==config.repositoryId)
+      return fail('S05_GIT_MAIN_UNVERIFIED');
+    const coherent=await inspectReady({repository:config.repository,
+       token:value.credential,pinnedHead:catalog.head,slug:slugName,
+       includeSourceBytes:true});
+    return stageReadyGitSource({catalog,coherent,ready:pending.record,
+       slug:slugName,repositoryId:config.repositoryId});
+  }
   async function statusFor(msg,s){
     const p=msg.params||{};
     if(msg.type==='LIST_STAGES')return s.list();
@@ -90,9 +119,14 @@ export function createStagingBoundary(api,{
       const {item,account,link}=eligible;
       const route=await g.getSafeRouteReadiness(account.personaUid);
       if(!route?.ready)return fail(route?.code||'ROUTE_UNVERIFIED');
-      const fresh=await inspect({folder:link.folder,token:p.token,includeSourceBytes:true});
+      const source=eligible.origin==='S04_CONFIRMED_CREATED'?
+        await loadReadyMain(await database(),p.slug):
+        null;
+      if(source&&!source.ok)return source;
+      const fresh=source?source.source:
+        await inspect({folder:link.folder,token:p.token,includeSourceBytes:true});
       if(!fresh.ok||!fresh.ready)return fail('READY_REVOKED_OR_CHANGED');
-      const candidate=await exactSource(fresh.sourceBytes);
+      const candidate=source?source.candidate:await exactSource(fresh.sourceBytes);
       if(!candidate.ok)return candidate;
       const owner={slug:p.slug,accountId:account.accountId,personaUid:account.personaUid,
         remotePublicId:item.remoteId,principalFingerprint:account.identity.principalFingerprint};
@@ -131,10 +165,15 @@ export function createStagingBoundary(api,{
         return fail('PROVIDER_ACTIVATION_HELD');
       // READY is current effect admission, not an eternal property of an
       // earlier SOURCE_PENDING association. Compare only the pinned bytes.
-      const current=await inspect({folder:r.sourceFolder,token:p.token});
+      const qualified=r.readyIdentifier?
+        await loadReadyMain(await database(),r.slug):null;
+      if(qualified&&!qualified.ok)return qualified;
+      const current=qualified?qualified.source:
+        await inspect({folder:r.sourceFolder,token:p.token});
       if(!current.ok||!current.ready||
          current.fingerprint!==r.gitFingerprint||
-         current.testingSha!==r.testingSha)
+         current.testingSha!==r.testingSha||
+         (qualified&&qualified.candidate.fingerprint!==r.candidate.fingerprint))
         return fail('READY_REVOKED_OR_CHANGED');
       const pinnedBytes=await exactSource(r.candidate.blobs);
       if(!pinnedBytes.ok||pinnedBytes.fingerprint!==r.candidate.fingerprint)
