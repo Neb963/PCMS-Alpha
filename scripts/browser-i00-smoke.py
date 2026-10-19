@@ -212,6 +212,8 @@ def supply_effect_idb_probe(session):
       };
       const boundary=createSupplyBoundary(api,{guard:()=>guard,
         effectGate:()=>true,gitGate:()=>true,
+        getGitConnection:async()=>({repository:'Neb963/per-gens',repositoryId:'42'}),
+        getGitCredential:async()=>({ok:true,credential:'offline-git-write-token'}),
         gitWrite:async ({folder,slug,token})=>{
           if(token!=='offline-git-write-token')throw Error('Wrong fixture token');
           effects.push('GIT_MARKER');
@@ -225,8 +227,7 @@ def supply_effect_idb_probe(session):
       const created=await effect(1);
       const renamed=await effect(created.revision);
       const linked=await boundary.run({type:'FINISH_SOURCE_FOLDER',params:{
-        batchId,itemId,expectedRevision:renamed.revision,
-        token:'offline-git-write-token'}},sender);
+        batchId,itemId,expectedRevision:renamed.revision}},sender);
       const fromPort=await boundary.run({type:'GET_BATCH',params:{batchId}},sender);
       done({created,renamed,linked,effects,
         final:fromPort?.batch?.items?.find(x=>x.itemId===itemId)});
