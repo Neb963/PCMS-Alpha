@@ -7,6 +7,16 @@ const slug=x=>typeof x==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(x);
 const key=s=>'release:'+s;
 // The same IndexedDB transaction must pin READY and independently attributed
 // Git F when approving or marking a possible provider publication.
+function withoutPendingChild(m,stage,done,commit){
+  m.get('s06-change:'+stage.slug).onsuccess=e=>{
+    const request=e.target.result?.record;
+    if(request?.state==='REQUESTED'&&
+       request.parentStageRevision===stage.revision){
+      done(fail('S06_UNRESOLVED_REQUEST_CHANGES'));return;
+    }
+    commit();
+  };
+}
 function withS06Candidate(m,stage,job,done,commit){
   if(!stage?.readyIdentifier){commit();return;}
   m.get('s05-ready:'+stage.slug).onsuccess=rr=>{
@@ -140,7 +150,8 @@ export function createReleaseStore(db){
                   kind,accountId:stage.accountId});
                 done(display(record));
                 };
-                withS06Candidate(meta,liveStage,liveJob,done,commit);
+                withS06Candidate(meta,liveStage,liveJob,done,()=>
+                  withoutPendingChild(meta,liveStage,done,commit));
               };
             };
           };
@@ -214,7 +225,8 @@ export function createReleaseStore(db){
                     slug:name,releaseId:r.releaseId,sourceFingerprint:r.approval.sourceFingerprint});
                   done(display(next));
                 }
-                const guardedMark=()=>withS06Candidate(m,stage,job,done,mark);
+                const guardedMark=()=>withS06Candidate(m,stage,job,done,()=>
+                  withoutPendingChild(m,stage,done,mark));
                 if(r.kind==='EXISTING_UPDATE'){
                   m.get('existing-update:'+name).onsuccess=ex=>{
                     const update=ex.target.result?.record;
