@@ -25,7 +25,7 @@ function fake(options={}){
   };
   const ready=put(FOLDER+'/DEPLOYMENT.md','Status: READY\n');
   const old=[
-    ready,put(FOLDER+'/TESTING.md','assert old'),
+    ready,...(options.noTesting?[]:[put(FOLDER+'/TESTING.md','assert old')]),
     put(FOLDER+'/main.pjs','old code'),put(FOLDER+'/index.html','<main>old</main>'),
     put(FOLDER+'/src/obsolete.css','obsolete'),
     put('.github/workflows/ci.yml','name: unrelated'),
@@ -120,6 +120,13 @@ test('P53-04 all add/change/delete bytes in one nonforced update; policy files a
   assert.ok(!keys.includes(FOLDER+'/src/obsolete.css'));
   assert.deepEqual(f.metrics().patches,1);
   assert.equal(f.metrics().force,false);
+});
+test('S06 optional TESTING.md stays absent across complete nonforced commit and independent readback',async()=>{
+  const f=fake({noTesting:true});
+  const r=await write(f);
+  assert.equal(r.code,'GIT_COMMITTED_VERIFIED',JSON.stringify(r));
+  assert.equal(f.inspect().includes(FOLDER+'/TESTING.md'),false);
+  assert.equal(f.metrics().patches,1);
 });
 test('P53-04 reject relevant divergence before upload and admit unrelated parent only on revalidation',async()=>{
   const conflicting=fake({relevantDrift:true});
