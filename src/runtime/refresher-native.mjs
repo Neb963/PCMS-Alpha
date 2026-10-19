@@ -49,6 +49,14 @@ export function createRefresherNativeAdapter({
        proof.meaningfulEffectVerified!==true||
        !/^[A-Za-z0-9_-]{1,100}$/.test(proof.version||'')||
        !/^[A-Za-z0-9_-]{1,100}$/.test(proof.evidenceId||''))return {status:'UNVERIFIED'};
+    // A previous source save can be independently verified while local
+    // tab cleanup failed. Safely retry only that exact S07-owned clean tab.
+    if(row.refresh?.savedNonce){
+      let released;
+      try{released=await g.closeRefresherTab?.(row.personaUid,{
+        slug:row.slug,nonce:row.refresh.savedNonce});}catch{}
+      if(released?.ok!==true)return {status:'UNVERIFIED'};
+    }
     const original=await readOwnedPublic(g,{
       slug:row.slug,personaUid:row.personaUid,remoteId:row.remoteId,
       principalFingerprint:account.principalFingerprint});
