@@ -22,7 +22,8 @@ import {createAiStore} from './ai-store.mjs';
 import {inspectGitSource} from './git-source.mjs';
 import {exactSource,diffSource} from './staging-core.mjs';
 import {releaseContext,releaseTestContext,candidateManifest,releaseGitContext,
-  releaseEditorContext,approvalTuple,matchesApproval,publicationReadback}
+  releaseEditorContext,approvalTuple,matchesApproval,publicationReadback,
+  releaseCandidateTestContext}
   from './release-core.mjs';
 export const RELEASE_PORT='pcms-i13-release';
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
@@ -185,7 +186,13 @@ export function createReleaseBoundary(api,{
       facts=await ownerFacts(database,name);
     if(!stage.ok||!job.ok||!facts.ok)return fail('RELEASE_CANONICAL_EVIDENCE_MISSING');
     const r=stage.record,j=job.job,{account,inventory}=facts;
-    const owner=releaseContext(r,account,inventory),tests=releaseTestContext(r,j);
+    const [ready,exception]=await Promise.all([
+      createReadyStore(database).get(name),
+      createS06ExceptionStore(database).getFull(name)]);
+    const reviewContext={ready:ready.ok?ready.record:null,
+      exception:exception.ok?exception.record:null};
+    const owner=releaseContext(r,account,inventory),
+      tests=releaseCandidateTestContext(r,j,reviewContext);
     if(!owner.ok)return owner;
     if(!tests.ok)return tests;
     const privateNew=r.previous?.files?.length===2&&
@@ -219,16 +226,16 @@ export function createReleaseBoundary(api,{
     }
     if(inventory.visibility!=='UNLISTED')
       return fail('UNLISTED_LISTING_OBSERVATION_REQUIRED');
-    const source=await candidateManifest(r,j);
+    const source=await candidateManifest(r,j,reviewContext);
     if(!source.ok)return source;
     // The accepted READY workflow cannot be released merely because the
     // old I13 candidate seems locally tested. The *same* S05 revision must
     // have an independently attributed, byte-confirmed Git main commit.
-    const ready=await createReadyStore(database).get(name);
     if(r.readyIdentifier){
       if(!ready.ok)return fail('S06_CURRENT_READY_RECORD_REQUIRED');
       const wb=await createWritebackStore(database).getFull(name);
-      const check=planS06Writeback({ready,stage,job,writeback:wb.ok?wb:null});
+      const check=planS06Writeback({ready,stage,job,writeback:wb.ok?wb:null,
+        exception:exception.ok?exception:null});
       if(!check.ok||check.type!=='REVIEW'||
          !/^[0-9a-f]{40}$/.test(check.commitSha||''))
         return fail('S06_CURRENT_CANDIDATE_GIT_PROOF_REQUIRED');
@@ -266,11 +273,11 @@ export function createReleaseBoundary(api,{
     if(!previous.ok||previous.fingerprint!==r.previous.fingerprint)
       return fail('PREVIOUS_SOURCE_CORRUPT');
     const approved=approvalTuple({slug:name,stage:r,job:j,source,git,
-      previous,kind:privateNew?'PRIVATE_NEW':'EXISTING_UPDATE'});
+      previous,kind:privateNew?'PRIVATE_NEW':'EXISTING_UPDATE',testContext:tests});
     if(!approved.ok)return approved;
     return {ok:true,r,j,source,previous,approval:approved.tuple,
       kind:privateNew?'PRIVATE_NEW':'EXISTING_UPDATE',existing:existingRow?.record,
-      editor,route:after,remote,git};
+      editor,route:after,remote,git,testContext:tests};
   }
   async function runTrusted(msg){
     const p=msg.params||{},database=await db(),store=releaseFactory(database);
@@ -404,7 +411,10 @@ export function createReleaseBoundary(api,{
         diff:diffSource(checked.previous,checked.source).changes,
         gitHead:checked.git.head,
         releaseRevision:(await store.get(p.slug))?.revision||null,
-        mode:'INDIVIDUAL_HUMAN_APPROVAL',
+        mode:checked.testContext.mode==='EXCEPTION_MANUAL_REVIEW'?
+          'INDIVIDUAL_EXCEPTIONAL_MANUAL_REVIEW':'INDIVIDUAL_HUMAN_APPROVAL',
+        aiVerified:checked.testContext.mode==='VERIFIED_AI',
+        exceptionEvidenceMode:checked.testContext.evidenceMode||null,
         warning:'Approval alone cannot publish; remote effects held until proven'};
     }
     if(msg.type==='REQUEST_CHANGES'){
