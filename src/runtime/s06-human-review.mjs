@@ -88,7 +88,9 @@ export function createS06HumanStore(db){
        s.revision!==expectedStageRevision||
        j.revision!==expectedJobRevision||
        j.verifiedFinal!==expectedFingerprint||
-       (release&&!['APPROVED','CANCELED'].includes(release.state))){
+       (release&&!['APPROVED','CANCELED'].includes(release.state)&&
+        !(release.state==='CONFIRMED_PUBLIC'&&
+          release.approval?.sourceFingerprint===s.previous?.fingerprint))){
       done(fail('S06_HUMAN_CONTEXT_CHANGED'));return;
     }
     const row={slug:name,revision:(prior?.revision||0)+1,state:'DEFERRED',
@@ -139,7 +141,9 @@ export function createS06HumanStore(db){
        prior.readyIdentifier!==ready.active.identifier||
        prior.readyInputFingerprint!==ready.active.inputFingerprint||
        source.fingerprint===j.verifiedFinal||
-       (release&&release.state!=='CANCELED')){
+       (release&&release.state!=='CANCELED'&&
+        !(release.state==='CONFIRMED_PUBLIC'&&
+          release.approval?.sourceFingerprint===s.previous?.fingerprint))){
       done(fail('S06_HUMAN_SAVED_SOURCE_OR_RELEASE_CHANGED'));return;
     }
     const stage={...s,revision:s.revision+1,
