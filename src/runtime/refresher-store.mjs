@@ -297,15 +297,17 @@ export function createRefresherStore(db){
       return fail('REFRESH_ADMISSION_HELD');
     const absence=qualifyRecentAbsence({row:r,recent:s.recent,policy:s.policy,now});
     if(!absence.ok)return fail(absence.code);
+    const currentSource=r.refresh?.savedSourceFingerprint||r.releaseFingerprint;
     const attempt=reserveRefreshAttempt(r.refresh,{id,at:now,slug:r.slug,
-      sourceFingerprint:r.releaseFingerprint,candidate,eligible:true,liveAuthorized});
+      sourceFingerprint:currentSource,candidate,eligible:true,liveAuthorized});
     if(!attempt.ok)return attempt;
     const out=structuredClone(s);
     out.rows.find(x=>x.stableId===stableId).refresh=attempt.evidence;
     return {ok:true,state:out,claim:{id,stableId,slug:r.slug,accountId:r.accountId,
       personaUid:r.personaUid,bindingVersion:r.bindingVersion,
       principalFingerprint:s.accounts[r.accountId]?.principalFingerprint,
-      releaseFingerprint:r.releaseFingerprint},
+      releaseFingerprint:r.releaseFingerprint,sourceFingerprint:currentSource,
+      targetFingerprint:attempt.evidence.intent?.targetFingerprint||null},
       changes:[{code:'REFRESH_RESERVED',scopeId:stableId}]};
   },{sync:true});
   const cancelReserved=(stableId,id,now)=>mutate(null,s=>{
@@ -322,6 +324,9 @@ export function createRefresherStore(db){
     const r=s.rows.find(x=>x.stableId===claim?.stableId);
     if(!r||r.accountId!==claim.accountId||r.personaUid!==claim.personaUid||
       r.bindingVersion!==claim.bindingVersion||r.releaseFingerprint!==claim.releaseFingerprint||
+      (r.refresh?.savedSourceFingerprint||r.releaseFingerprint)!==claim.sourceFingerprint||
+      r.refresh?.intent?.targetFingerprint!==(
+        claim.targetFingerprint||undefined)||
       !r.ownerVerified||!r.releaseVerified||r.identityHeld||r.reviewHeld||
       r.listing!=='PUBLIC'||s.accounts[r.accountId]?.principalFingerprint!==claim.principalFingerprint||
       !r.slot||r.phase!=='ACTIVE'||rowBlocks(s,r).length)
