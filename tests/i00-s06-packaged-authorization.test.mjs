@@ -57,3 +57,24 @@ test('S06 Request Changes command denies forged authorization, source data and u
    {...p,releaseRevision:-1}
  ])assert.equal(check(extra).ok,false,JSON.stringify(extra).slice(0,150));
 });
+
+test('C-48/49 exceptional source-bound operator evidence port cannot accept forged result, source or untrusted sender',()=>{
+ const api={runtime:{id:'fixture',getURL:p=>'moz-extension://fixture/'+p}};
+ const sender={id:'fixture',url:'moz-extension://fixture/pcms/index.html'};
+ const good={slug:'demo',mode:'OPTIONAL_CHAT2_INCOMPLETE',
+  checks:[],consent:'I PERFORMED THE RECORDED MANUAL CHECKS',
+  expectedStageRevision:4,expectedJobRevision:7,
+  sourceFingerprint:'a'.repeat(64)};
+ const check=(params,from=sender)=>validateReleaseMessage(api,from,{
+  type:'RECORD_EXCEPTION',params});
+ assert.equal(check(good).ok,true);
+ assert.equal(check(good,{id:'forged',url:'https://perchance.org/'}).ok,false);
+ for(const candidate of [
+  {...good,verifiedFinal:true},{...good,passed:true},
+  {...good,source:{main:'forged'}},{...good,sourceFingerprint:'x'.repeat(64)},
+  {...good,consent:'auto confirmed'}, {...good,expectedJobRevision:0},
+  {...good,checks:[{name:'smoke',result:'FAIL',observation:'Known failure'}]},
+  {...good,checks:[{name:'smoke',result:'PASS',observation:'read source',
+    providerAccess:true}]}
+ ])assert.equal(check(candidate).ok,false,JSON.stringify(candidate).slice(0,180));
+});
