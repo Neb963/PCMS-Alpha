@@ -164,6 +164,11 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
      if(pending||['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN',
          'RECOVERY_HOLD','PUBLISHING','PUBLISH_UNCERTAIN'].includes(release?.state))
        return fail('S05_UNCERTAIN_WRITER_HELD');
+     // INITIAL private-empty admission cannot overtake a separate I13 source
+     // actor or a release even if that actor has not armed a remote effect.
+     // The later unified UPDATE flow will reconcile these explicitly.
+     if(existing||release||(!stage&&ai))
+       return fail('S05_COMPETING_SOURCE_ACTOR_RECONCILE');
      if(link.source!=='S04_INDEPENDENT_NOT_READY_ASSOCIATION'||
         inventory.management!=='MANAGED_CREATED'||
         inventory.source!=='SOURCE_PENDING'||
