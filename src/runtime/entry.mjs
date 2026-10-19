@@ -42,4 +42,11 @@ import './backup-auto-boundary.mjs';
 import './restore-boundary.mjs';
 // I12 one durable shadow queue/alarm; provider observations gated OFF.
 import {createRefresherBoundary} from './refresher-boundary.mjs';
-if(typeof browser!=='undefined')createRefresherBoundary(browser).register();
+import {createRefresherNativeAdapter} from './refresher-native.mjs';
+// Guarded source-only adapter is packaged, but L/route/clock/consent activation
+// remains OFF until independently proven. Never infer it from an installed XPI.
+if(typeof browser!=='undefined'){
+  const native=createRefresherNativeAdapter();
+  createRefresherBoundary(browser,{qualificationFor:(row,account)=>native.prepare(row,account),
+    refreshAdapter:native}).register();
+}
