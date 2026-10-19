@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+import {webcrypto} from 'node:crypto';
+import {getImportScopeDigest} from '../src/runtime/catalog-import.mjs';
+globalThis.crypto??=webcrypto;
 import {createCreationCatalogIntake,validateCreationCatalog}
   from '../src/runtime/creation-catalog.mjs';
 import {createCatalogWatcher} from '../src/runtime/catalog-watch.mjs';
@@ -29,10 +32,11 @@ function maker(v,{approval=approved,maxItems=2,ingest=async()=>({ok:true,changed
 }
 test('S04 D: approved 1000+ catalog processing bounded, checkpointed, resumes without skipping',async()=>{
   const v=env(),seen=[];
-  const intake=maker(v,{maxItems:2,ingest:async w=>{
+  const c=catalog(['first','second','third','fourth','fifth']);
+  const scopeDigest=await getImportScopeDigest(c);
+  const intake=maker(v,{approval:{...approved,approval:{...approved.approval,scopeDigest}},maxItems:2,ingest:async w=>{
     seen.push(w.slug);return {ok:true,changed:true};
   }});
-  const c=catalog(['first','second','third','fourth','fifth']);
   const first=await intake.run(c);
   assert.deepEqual([first.more,first.next,first.added],[true,2,2]);
   const second=await intake.run(c);
@@ -59,19 +63,34 @@ test('S04 D: no approval, corrupted catalog and incomplete observations admit ze
 test('S04 D: failed canonical admission retains cursor for read-only retry, I17 held only locally',async()=>{
   const v=env(),seen=[];
   let failSecond=true;
-  const intake=maker(v,{maxItems:9,ingest:async w=>{
+  const c=catalog(['first','second',I17_QUARANTINED_SLUG,'fourth']);
+  const scopeDigest=await getImportScopeDigest(c);
+  const intake=maker(v,{approval:{...approved,approval:{...approved.approval,scopeDigest}},maxItems:9,ingest:async w=>{
     seen.push(w.slug);
     if(w.slug==='second'&&failSecond)return {ok:false,code:'DB_ABORT'};
     if(w.slug===I17_QUARANTINED_SLUG)return {ok:false,code:'I17_ORIGINAL_EFFECT_QUARANTINED'};
     return {ok:true,changed:true};
   }});
-  const c=catalog(['first','second',I17_QUARANTINED_SLUG,'fourth']);
   assert.equal((await intake.run(c)).code,'DB_ABORT');
   assert.equal(v.rows.get('pcmsS04CatalogIntakeProgress'),undefined);
   failSecond=false;
   const done=await intake.run(c);
   assert.equal(done.ok,true);assert.equal(done.held,1);
   assert.deepEqual(seen,['first','second','first','second',I17_QUARANTINED_SLUG,'fourth']);
+});
+test('S04 D: a changed initial main scope cannot silently authorize extra Git folders',async()=>{
+  const v=env(),seen=[];
+  const accepted=catalog(['original','second']);
+  const scopeDigest=await getImportScopeDigest(accepted);
+  const intake=maker(v,{approval:{...approved,approval:{...approved.approval,scopeDigest}},
+    maxItems:1,ingest:async w=>{seen.push(w.slug);return {ok:true,changed:true};}});
+  assert.equal((await intake.run(accepted)).next,1);
+  const changed=catalog(['original','second','unreviewed']);
+  assert.equal((await intake.run(changed)).code,'INITIAL_IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED');
+  assert.deepEqual(seen,['original']);
+  await intake.run(accepted);
+  assert.equal((await intake.run(changed)).ok,true,
+    'subsequent recognized main folders are automatic after first scope is fully consumed');
 });
 test('S04 D: watcher offers only full pinned result to scoped no-effect ingest callback',async()=>{
   const v=env(),call=[];
