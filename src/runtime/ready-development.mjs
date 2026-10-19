@@ -33,9 +33,9 @@ export function planReadyDevelopment({ready,stage,existing,job,visibility,effect
    if(s==='UNLIST_CONFIRMED'){
      if(!existing.record.stagedFingerprint)
        return {ok:true,type:'PIN_STAGE'};
-     if(stage?.record?.state==='SOURCE_VERIFIED'&&
-        stage.record.candidate?.fingerprint===existing.record.stagedFingerprint)
-       return {ok:true,type:'HOLD',code:'S05_I13_STAGE_RECEIPT_RECONCILE'};
+     // I13 must perform the guarded source replacement even if an I09
+     // retained stage is SOURCE_VERIFIED from the preceding candidate.
+     // Its own STAGE canonical marker decides when replacement happened.
      return {ok:true,type:effects?'STAGE':'HOLD',
        code:'S05_STAGE_ACTIVATION_HELD'};
    }
