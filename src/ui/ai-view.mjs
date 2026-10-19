@@ -8,7 +8,8 @@ const perAccount=id('pcms-ai-per-account'),saveConcurrency=id('pcms-ai-save-conc
   concurrencyStatus=id('pcms-ai-concurrency-status');
 const slug=id('pcms-ai-slug'),token=id('pcms-ai-git-token'),prepare=id('pcms-ai-prepare');
 const refresh=id('pcms-ai-refresh'),jobStatus=id('pcms-ai-jobs-status'),jobList=id('pcms-ai-job-list');
-const runNative=id('pcms-ai-run'),observeNative=id('pcms-ai-observe'),
+const runNative=id('pcms-ai-run'),stopNative=id('pcms-ai-stop'),
+  observeNative=id('pcms-ai-observe'),
   advanceNative=id('pcms-ai-advance'),opfsNative=id('pcms-ai-opfs'),
   freshNative=id('pcms-ai-fresh'),
   testNative=id('pcms-ai-test'),repairNative=id('pcms-ai-repair'),
@@ -37,6 +38,7 @@ function controls(){
   refresh.disabled=busy;
   const selected=selectedJob?.ok===true;
   runNative.disabled=busy||!selected||selectedJob.state!=='PENDING_NATIVE_SESSION';
+  stopNative.disabled=busy||!selected||selectedJob.nativeState!=='RUNNING_OBSERVED';
   opfsNative.disabled=busy||!selected||selectedJob.nativeState!=='CHAT2_OBSERVED_IDLE'||
     selectedJob.chat2IsolationVerified===true;
   freshNative.disabled=busy||!selected||
@@ -206,6 +208,7 @@ async function nativeCommand(type,step){
 }
 advanceNative.addEventListener('click',()=>nativeCommand('ADVANCE_JOB'));
 runNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','CHAT1_SEND'));
+stopNative.addEventListener('click',()=>nativeCommand('BEGIN_NATIVE','STOP'));
 observeNative.addEventListener('click',()=>nativeCommand('PROBE_NATIVE'));
 opfsNative.addEventListener('click',()=>nativeCommand('INSPECT_WORKSPACE'));
 freshNative.addEventListener('click',()=>nativeCommand('VERIFY_FRESH_CHAT2'));
