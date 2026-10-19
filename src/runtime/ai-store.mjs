@@ -110,17 +110,30 @@ export function createAiStore(db){
         done(job?{ok:true,job}:fail('AI_JOB_NOT_FOUND'));
       };
     });
-  const list=()=>tx(db,'readonly',(t,done)=>{
-    const jobs=[];let truncated=false;
-    t.objectStore('meta').openCursor().onsuccess=e=>{
-      const c=e.target.result;
-      if(!c){done({ok:true,jobs,truncated});return;}
-      if(typeof c.key==='string'&&c.key.startsWith('ai-job:')&&c.value?.job){
-        if(jobs.length<200)jobs.push(publicJob(c.value.job));else truncated=true;
-      }
-      c.continue();
-    };
-  });
+  // S05 paginated listing; prior 200-job truncation silently hid eligible
+  // work. Cursor is an ordinary ordered slug, not an effect/claim token.
+  const list=({after='',limit=200}={})=>{
+    if(typeof after!=='string'||after.length>100||
+       !Number.isInteger(limit)||limit<1||limit>200)
+      return Promise.resolve(fail('AI_PAGE_INVALID'));
+    return tx(db,'readonly',(t,done)=>{
+      const jobs=[];let truncated=false;
+      t.objectStore('meta').openCursor().onsuccess=e=>{
+        const cursor=e.target.result;
+        if(!cursor){done({ok:true,jobs,truncated,more:truncated,
+          nextCursor:truncated?jobs.at(-1)?.slug||null:null});return;}
+        if(typeof cursor.key==='string'&&cursor.key.startsWith('ai-job:')&&
+           cursor.value?.job){
+          const slugName=cursor.key.slice('ai-job:'.length);
+          if(slugName>after){
+            if(jobs.length<limit)jobs.push(publicJob(cursor.value.job));
+            else truncated=true;
+          }
+        }
+        cursor.continue();
+      };
+    });
+  };
   function start(stage,optionalTesting=null){
     if(!stage?.slug||!slug(stage.slug))return Promise.resolve(fail('INVALID_STAGE'));
     return tx(db,'readwrite',(t,done)=>{
