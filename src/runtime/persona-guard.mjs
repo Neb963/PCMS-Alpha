@@ -303,6 +303,19 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     finally{await releaseConflictGuard(lease);}
   }
 
+  // S07 is a fixed PUBLIC HTML-marker action. Reuse the existing I13
+  // single-source-writer native adapter and the SAME donor conflict lease.
+  // Never expose this as an arbitrary page/effect command.
+  async function runRefresherStep(personaUid,request){
+    if(request?.action!=='REFRESH'||typeof request.slug!=='string'||
+       !/^[a-z0-9][a-z0-9-]{0,99}$/.test(request.slug)||
+       !/^[a-f0-9]{32}$/.test(request.nonce||'')||
+       !/^[A-Za-z0-9_-]{16,64}$/.test(request.markerId||'')||
+       !Array.isArray(request.previousFiles)||!Array.isArray(request.targetFiles))
+      return {ok:false,code:'REFRESH_INVALID_FIXED_REQUEST'};
+    return runExistingStep(personaUid,request);
+  }
+
   // I13 effectful listing flip is a fixed donor-leased path. The caller must
   // commit DISPATCH_POSSIBLE before admission; protected route loss is held.
   async function runReleaseStep(personaUid,request){
@@ -349,6 +362,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     runNativeAiStep,
     runReleaseStep,
     runExistingStep,
+    runRefresherStep,
     inspectStageEditor,
     inspectSourceEditorIdle,
     releaseStagingTab,
