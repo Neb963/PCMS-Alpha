@@ -56,6 +56,9 @@ test('S06 planned writeback respects final F and immutable current READY',()=>{
   {stage:{...stage(),sourceFolder:'gens/'+name}},
   {job:{...job(),state:'KNOWN_FAILURE'}},
   {job:{...job(),verifiedFinal:P}},
+  {writeback:writeback('CONFIRMED',{mode:'MANUAL'})},
+  {writeback:writeback('CONFIRMED',{readyIdentifier:'rev-forged'})},
+  {writeback:writeback('PREPARED',{testingSha:F})},
  ]){
   assert.equal(planS06Writeback({...canonical,...changed}).ok,false,
     JSON.stringify(changed));
