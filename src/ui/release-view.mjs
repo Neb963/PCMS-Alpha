@@ -12,6 +12,10 @@ const loadBtn=document.getElementById('pcms-release-load');
 const clearBtn=document.getElementById('pcms-release-clear');
 const status=document.getElementById('pcms-release-status');
 const details=document.getElementById('pcms-release-diff');
+const reviewQueue=document.getElementById('pcms-s06-review-queue');
+const refreshQueue=document.getElementById('pcms-s06-review-refresh');
+const nextQueue=document.getElementById('pcms-s06-review-next');
+let queueCursor='',queueBusy=false;
 let snapshot=null,receipt=null,active=false,sequence=0;
 const valid=s=>/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 function command(type,params={}){
@@ -31,16 +35,16 @@ function command(type,params={}){
 }
 function note(s){status.textContent=s;}
 function controls(){
-  const target=valid(slug.value),hasToken=token.value.length>=12;
-  previewBtn.disabled=active||!target||!hasToken;
+  const target=valid(slug.value);
+  previewBtn.disabled=active||!target;
   loadBtn.disabled=active||!target;
   clearBtn.disabled=active;
-  approveBtn.disabled=active||!snapshot||snapshot.slug!==slug.value||!hasToken;
+  approveBtn.disabled=active||!snapshot||snapshot.slug!==slug.value;
   cancelBtn.disabled=active||!receipt||receipt.slug!==slug.value||
     receipt.state!=='APPROVED';
   dispatchBtn.disabled=active||!receipt||receipt.slug!==slug.value||
-    receipt.state!=='APPROVED'||!hasToken;
-  reconcileBtn.disabled=active||!receipt||receipt.slug!==slug.value||!hasToken||
+    receipt.state!=='APPROVED';
+  reconcileBtn.disabled=active||!receipt||receipt.slug!==slug.value||
     !['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN','RECOVERY_HOLD'].includes(receipt.state);
 }
 function renderPreview(v){
@@ -213,3 +217,38 @@ slug.addEventListener('input',()=>{
 token.addEventListener('input',controls);
 passphrase?.addEventListener('input',controls);
 controls();
+
+// S06 canonical release candidate queue: read-only, bounded and fully keyboard
+// accessible. Selection only changes the view; it never approves/publishes.
+async function fetchReviewPage(cursor=''){
+  if(queueBusy||active)return;
+  queueBusy=true;refreshQueue.disabled=true;nextQueue.disabled=true;
+  reviewQueue.textContent='Reading the persisted publication queue…';
+  try{
+    const response=await command('LIST_REVIEW',{after:cursor,limit:40});
+    if(!response?.ok){
+      reviewQueue.textContent='Queue unavailable: '+(response?.code||'UNKNOWN');return;
+    }
+    reviewQueue.replaceChildren();
+    if(!response.items?.length)reviewQueue.textContent='No candidates on this page.';
+    for(const item of response.items||[]){
+      const line=document.createElement('div');line.className='account-controls';
+      const pick=document.createElement('button');pick.type='button';
+      pick.textContent=item.slug;
+      pick.setAttribute('aria-label','Review generator '+item.slug);
+      pick.addEventListener('click',()=>{
+        slug.value=item.slug;slug.dispatchEvent(new Event('input'));
+        note('Selected '+item.slug+'. Review exact source and tests before approval.');
+      });
+      const status=document.createElement('span');
+      status.textContent=item.state+' · '+item.code;
+      line.append(pick,status);reviewQueue.append(line);
+    }
+    queueCursor=response.more?response.nextCursor||'':'';
+    nextQueue.disabled=!response.more||!queueCursor;
+  }catch{reviewQueue.textContent='Queue connection interrupted; no approval or publication occurred.';}
+  finally{queueBusy=false;refreshQueue.disabled=false;}
+}
+refreshQueue.addEventListener('click',()=>fetchReviewPage(''));
+nextQueue.addEventListener('click',()=>fetchReviewPage(queueCursor));
+void fetchReviewPage();
