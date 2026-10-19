@@ -265,7 +265,7 @@ export function createSupplyBoundary(api,{
     const foundAccount=await s.accounts.get(b.accountId);
     if(!foundAccount.ok||!validateOwnerContext(b,foundAccount.account).ok)
       return fail('ACCOUNT_STALE');
-    const params={token:p.token,slug:item.requestedSlug,folder:'gens/'+item.requestedSlug};
+    const params={token:p.token,slug:item.requestedSlug,folder:'generators/'+item.requestedSlug};
     if(!markerRequestAllowed(params).ok)return fail('GITHUB_WRITE_TOKEN_REQUIRED');
     if(gitGate({account:foundAccount.account,batch:b,item})!==true)
       return fail('GIT_WRITE_ACTIVATION_HELD');
