@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {perchanceExistingMain} from '../src/runtime/perchance-existing.mjs';
+import {perchanceExistingMain,perchanceRefresherCleanMain} from '../src/runtime/perchance-existing.mjs';
 const slug='owned-generator',markerId='marker_abcdefghijklmnop';
 const b64=s=>btoa(s);
 function fixture({publicListing=true,human=false,dirty=false}={}){
@@ -60,4 +60,25 @@ test('S07 MAIN page X: private, human dirty and malformed source are refused bef
     assert.equal(reply.ok,false,JSON.stringify({config,reply}));
     assert.equal(f.saveCount(),0,JSON.stringify({config,reply}));
   }
+});
+
+test('S07 native public editor cleanup probe refuses uncertain ownership, dirty source and collaborators',async()=>{
+  const clean=fixture();
+  assert.deepEqual(await perchanceRefresherCleanMain(slug),
+    {ok:true,source:'CLEAN_S07_EDITOR'});
+  fixture({publicListing:false});
+  assert.equal((await perchanceRefresherCleanMain(slug)).ok,false);
+  fixture({human:true});
+  assert.equal((await perchanceRefresherCleanMain(slug)).ok,false);
+  fixture({dirty:true});
+  assert.equal((await perchanceRefresherCleanMain(slug)).ok,false);
+  fixture();
+  globalThis.window.yjsProviderRoomName='room_unknown';
+  assert.equal((await perchanceRefresherCleanMain(slug)).ok,false);
+  fixture();
+  globalThis.window.yjsProvider={wsconnected:true,synced:true,roomname:'room'};
+  globalThis.window.yDoc={clientID:123};
+  globalThis.window.yjsProviderRoomName='room';
+  globalThis.window.yjsAwareness={getStates:()=>new Map([[123,{}],[456,{}]])};
+  assert.equal((await perchanceRefresherCleanMain(slug)).ok,false);
 });
