@@ -365,17 +365,50 @@ attachPcmsGuard({
     }));
   },
   readIsolatedTab: async ({personaUid,cookieStoreId,routeId},{identityOnly=false,originalSlug=null,monitoringRequest=null}={}) => {
-    // Donor-owned tab and protected-container selection. This is the SAME
-    // combined-XPI browser authority, not a separate automation controller.
-    const tabs=await browser.tabs.query({cookieStoreId});
-    const matching=tabs.filter(tab=>tab.cookieStoreId===cookieStoreId &&
-      typeof tab.url==='string' && (()=>{try{return new URL(tab.url).origin==='https://perchance.org';}catch{return false;}})());
-    if(!matching.length)return {ok:false,code:'NO_PERCHANCE_TAB'};
-    const tab=matching.find(item=>item.active)||matching[0];
+    // Donor-owned exact protected-container admission. When no provider tab
+    // exists, ONLY the fixed read-only monitor may create a tagged transient
+    // Perchance tab; no editor/AI/source operation inherits this permission.
     const current=await getState(),profile=current.profiles?.[cookieStoreId];
     if(!profile||profile.personaUid!==personaUid||profile.routeId!==routeId||
-       routeId==='direct'||routeId==='block'||!current.routes?.[routeId]||current.routes[routeId].enabled===false)
+       routeId==='direct'||routeId==='block'||!current.routes?.[routeId]||
+       current.routes[routeId].enabled===false)
       return {ok:false,code:'PERSONA_ROUTE_CHANGED'};
+    const tabs=await browser.tabs.query({cookieStoreId});
+    const matching=tabs.filter(tab=>tab.cookieStoreId===cookieStoreId &&
+      typeof tab.url==='string'&&(()=>{
+        try{return new URL(tab.url).origin==='https://perchance.org';}
+        catch{return false;}
+      })());
+    let tab=matching.find(item=>item.active)||matching[0]||null;
+    let disposableNonce=null;
+    try{
+      if(!tab){
+        if(!monitoringRequest)return {ok:false,code:'NO_PERCHANCE_TAB'};
+        disposableNonce=crypto.randomUUID().replaceAll('-','');
+        tab=await browser.tabs.create({
+          url:'https://perchance.org/',cookieStoreId,active:false
+        });
+        if(!Number.isSafeInteger(tab?.id))
+          return {ok:false,code:'MONITOR_TAB_NOT_CREATED'};
+        await browser.sessions.setTabValue(tab.id,'pcmsS07Monitor',{
+          createdBy:'PCMS_S07_MONITOR',nonce:disposableNonce,
+          personaUid,cookieStoreId,routeId
+        });
+        let loaded=false;
+        for(let attempt=0;attempt<24;attempt++){
+          const check=await browser.tabs.get(tab.id);
+          if(check.cookieStoreId!==cookieStoreId||
+             (check.url&&!check.url.startsWith('https://perchance.org/')&&
+              check.url!=='about:blank'))
+            return {ok:false,code:'MONITOR_TAB_ROUTE_CHANGED'};
+          if(check.status==='complete'&&check.url?.startsWith('https://perchance.org/')){
+            loaded=true;break;
+          }
+          await new Promise(done=>setTimeout(done,250));
+        }
+        if(!loaded)return {ok:false,code:'MONITOR_TAB_NOT_READY'};
+      }
+
     let results;
     if(monitoringRequest){
       const identity=await browser.scripting.executeScript({
@@ -409,6 +442,20 @@ attachPcmsGuard({
     if(results?.length!==1||results[0].frameId!==0||results[0].error)
       return {ok:false,code:'ISOLATED_OBSERVER_FAILED'};
     return results[0].result;
+    }finally{
+      if(disposableNonce&&tab?.id){
+        try{
+          const latest=await browser.tabs.get(tab.id),
+            tag=await browser.sessions.getTabValue(tab.id,'pcmsS07Monitor');
+          // A tab taken over/activated by a human is retained, never closed.
+          if(latest.cookieStoreId===cookieStoreId&&latest.active===false&&
+             latest.url?.startsWith('https://perchance.org/')&&
+             tag?.createdBy==='PCMS_S07_MONITOR'&&tag.nonce===disposableNonce&&
+             tag.personaUid===personaUid&&tag.cookieStoreId===cookieStoreId)
+            await browser.tabs.remove(tab.id);
+        }catch{/* uncertain transient tab is held; never close an untagged tab */}
+      }
+    }
   },
   supplyIsolatedTab: async ({personaUid,cookieStoreId,routeId},request) => {
     // Donor owns which Persona tab may perform this ONE fixed request.
