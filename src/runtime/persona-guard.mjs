@@ -20,7 +20,7 @@ export async function cachedHealthDomain(evidence){
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
-  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, readRuntimeWitness, enrollmentDonor, pinGate = inspectRoutePin }) {
+  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, inspectNoEditorTabs, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, readRuntimeWitness, enrollmentDonor, pinGate = inspectRoutePin }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -225,6 +225,29 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     finally{await releaseConflictGuard(leased);}
   }
 
+  // S05 has no PCMS-tagged stage tab before its first local candidate pin.
+  // Under the same donor conflict lease, positively observe that the target
+  // has no browser editor tab. This is only a local-browser preflight, never
+  // authority about remote devices or later native collaboration state.
+  async function inspectSourceEditorIdle(personaUid,slug) {
+    if(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)||
+       typeof inspectNoEditorTabs!=='function')
+      return {ok:false,code:'S05_EDITOR_INSPECTOR_UNAVAILABLE'};
+    const leased=await acquireConflictGuard(personaUid);
+    if(!leased?.ready||!leased.leaseId)
+      return {ok:false,code:leased?.code||'GUARD_UNAVAILABLE'};
+    try{
+      if(!(await inspectOwnedAction(leased)).ready)
+        return {ok:false,code:'S05_ROUTE_CHANGED'};
+      const check=await inspectNoEditorTabs(leased,{slug});
+      if(!(await inspectOwnedAction(leased)).ready)
+        return {ok:false,code:'S05_POST_INSPECTION_ROUTE_CHANGED'};
+      return check?.ok===true&&check.noEditors===true?
+        {ok:true,source:'GUARDED_NO_LOCAL_EDITOR',clean:true}:
+        {ok:false,code:check?.code||'S05_EDITOR_CONFLICT_UNKNOWN'};
+    }catch{return {ok:false,code:'S05_EDITOR_INSPECTION_UNAVAILABLE'};}
+    finally{await releaseConflictGuard(leased);}
+  }
   async function inspectStageEditor(personaUid,slug,nonce) {
     if(typeof inspectStageTab!=='function')return {ok:false,code:'EDITOR_PROBE_UNAVAILABLE'};
     const leased=await acquireConflictGuard(personaUid);
@@ -327,6 +350,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     runReleaseStep,
     runExistingStep,
     inspectStageEditor,
+    inspectSourceEditorIdle,
     releaseStagingTab,
     listAvailablePersonas,
     listProtectedRoutes: availableRoutes,
