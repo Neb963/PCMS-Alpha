@@ -139,7 +139,6 @@ async function refreshJobs(){
         ' · '+(j.evidence?.state||'TESTS_UNVERIFIED')+
         ' · '+(j.hold||'No external PASS claimed')+retry;
       li.append(label);ul.append(li);
-    }
       }
       loaded+=data.jobs.length;
       jobStatus.textContent='Loaded '+loaded+' canonical AI job receipts; no source bodies disclosed.';
