@@ -4,6 +4,8 @@
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {inspectReadyCandidate} from './catalog-declaration.mjs';
 import {createDeclarationStore} from './catalog-ready-store.mjs';
+import {createImportApprovalStore,getImportScopeDigest} from './catalog-import.mjs';
+import {isI17Quarantined,I17_QUARANTINE_CODE} from './legacy-quarantine.mjs';
 import {createReadyStore} from './ready-store.mjs';
 const KEY='pcmsS05ReadyScanCursor';
 const SHA=/^[a-f0-9]{40}$/;
@@ -15,11 +17,28 @@ export function createReadyIntake(api,{open=openCanonicalDatabase,
  let dbPromise;
  async function run({catalog,repository,token,transport=fetch}={}){
   if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
-  if(!catalog?.ok||catalog.complete!==true||!SHA.test(catalog.head||'')||
+  if(!catalog?.ok||catalog.complete!==true||
+     catalog.source!=='PINNED_MAIN_READ_ONLY'||
+     catalog.recognizedCount!==catalog.generators?.length||
+     !SHA.test(catalog.head||'')||
      !RID.test(catalog.repositoryId||'')||catalog.repository!==repository||
      !Array.isArray(catalog.generators)||typeof token!=='string'||token.length<12||
      !Number.isSafeInteger(maxPerWake)||maxPerWake<1||maxPerWake>64)
     return fail('READY_CATALOG_UNVERIFIED');
+  const db=await (dbPromise||=open().catch(e=>{dbPromise=null;throw e;}));
+  const approval=await createImportApprovalStore(db).get(catalog.repositoryId);
+  if(!approval.ok||approval.approval.repository!==repository||
+     approval.approval.source!=='HUMAN_INITIAL_IMPORT_SCOPE')
+    return fail('INITIAL_IMPORT_SCOPE_UNAPPROVED');
+  const digest=await getImportScopeDigest(catalog);
+  if(!digest)return fail('READY_CATALOG_UNVERIFIED');
+  const s04=(await api.storage.local.get('pcmsS04CatalogIntakeProgress'))
+    ?.pcmsS04CatalogIntakeProgress;
+  const completed=s04?.repositoryId===catalog.repositoryId&&
+    s04.initialScopeDigest===approval.approval.scopeDigest&&
+    s04.initialImportCompleted===true;
+  if(!completed&&digest!==approval.approval.scopeDigest)
+    return fail('INITIAL_IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED');
   const scope=catalog.generators.filter(x=>x.ready===true)
    .map(x=>x.slug).sort();
   const before=(await api.storage.local.get(KEY))?.[KEY];
@@ -27,12 +46,14 @@ export function createReadyIntake(api,{open=openCanonicalDatabase,
     before.head===catalog.head&&Number.isSafeInteger(before.nextIndex)&&
     before.nextIndex>=0&&before.nextIndex<=scope.length?before.nextIndex:0;
   const end=Math.min(scope.length,start+maxPerWake);
-  const db=await (dbPromise||=open().catch(e=>{dbPromise=null;throw e;}));
   const declarations=createDeclarationStore(db),queue=createReadyStore(db);
   let observed=0;const held=[];
   for(let i=start;i<end;i++){
    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
    const slug=scope[i];
+   if(isI17Quarantined({slug})){
+     held.push({slug,code:I17_QUARANTINE_CODE});continue;
+   }
    let evidence;
    try{evidence=await inspect({repository,token,slug,
       pinnedHead:catalog.head,includeSourceBytes:false},transport);}
