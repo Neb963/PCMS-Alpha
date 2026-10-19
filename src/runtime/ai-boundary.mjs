@@ -432,7 +432,52 @@ export function createAiBoundary(api,{
       if(!before?.ready)return fail(before?.code||'PROTECTED_ROUTE_UNVERIFIED');
       const editor=await g.inspectStageEditor(r.personaUid,r.slug,r.nonce);
       if(editor?.ok!==true||editor.clean!==true)return fail('EDITOR_UNKNOWN');
-      const fresh=await inspect({folder:r.sourceFolder,token:p.token,includeTestingBytes:true});
+      let fresh,promptOverride=null;
+      if(r.readyIdentifier){
+        // S05 is Git-owned, not the inherited local Settings Chat 1 prompt.
+        // The connected repository identity and OS-native vault control reads;
+        // a UI token or source payload is never authority for this candidate.
+        const config=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
+        const queued=await createReadyStore(db).get(r.slug);
+        if(!queued.ok||queued.record?.desired||
+           queued.record?.active?.identifier!==r.readyIdentifier||
+           queued.record?.active?.inputFingerprint!==r.readyInputFingerprint||
+           queued.record?.repositoryId!==config?.repositoryId||
+           r.sourceFolder!=='generators/'+r.slug)
+          return fail('S05_READY_ASSOCIATION_CHANGED');
+        const vault=await api.runtime.sendNativeMessage(
+          'local.pcms.backup_vault',{action:'git.get',repositoryId:config.repositoryId});
+        const credential=vault?.credential;
+        if(vault?.ok!==true||typeof credential!=='string'||
+           credential.length<12||credential.length>512||
+           /[^\x21-\x7e]/.test(credential))
+          return fail('GIT_VAULT_UNAVAILABLE');
+        const catalog=await scanCatalog({repository:config.repository,token:credential});
+        if(!catalog?.ok||!catalog.complete||
+           catalog.repositoryId!==config.repositoryId)
+          return fail('S05_MAIN_CATALOG_UNVERIFIED');
+        const coherent=await inspectReady({
+          repository:config.repository,token:credential,slug:r.slug,
+          pinnedHead:catalog.head,includeTestingText:true});
+        const identity=coherent?.legacy?
+          'legacy-'+coherent.declarationCommit+'-'+coherent.markerOid:
+          'rev-'+coherent?.token;
+        if(!coherent?.ok||coherent.code!=='READY_COHERENT_INPUT_PINNED'||
+           identity!==r.readyIdentifier||
+           coherent.inputFingerprint!==r.readyInputFingerprint)
+          return fail('S05_READY_REVISED_OR_REVOKED');
+        const local=await store.getPrompt();
+        if(!local.ok)return local;
+        const git=pinGitChatPrompt(catalog,local.current,{
+          repository:config.repository,repositoryId:config.repositoryId});
+        if(!git.ok)return git;
+        promptOverride=git.prompt;
+        fresh={ok:true,ready:true,fingerprint:r.gitFingerprint,
+          testingSha:coherent.optionalTesting?.sha256||null,
+          testingText:coherent.optionalTesting?.text||null};
+      }else{
+        fresh=await inspect({folder:r.sourceFolder,token:p.token,includeTestingBytes:true});
+      }
       if(!fresh?.ok||!fresh.ready||fresh.fingerprint!==r.gitFingerprint||
          fresh.testingSha!==r.testingSha)return fail('READY_OR_TESTING_CHANGED');
       if(fresh.testingSha && (typeof fresh.testingText!=='string'||!fresh.testingText.trim()))
@@ -472,9 +517,11 @@ export function createAiBoundary(api,{
       const testing=fresh.testingSha?{
         sha256:fresh.testingSha,text:fresh.testingText,tests:testPlan.tests
       }:null;
-      const result=await store.start(r,testing);
+      const result=await store.start(r,testing,promptOverride);
       if(!result.ok)return result;
-      return {...result,help:'Job prepared with pinned Settings prompt and TESTING.md; native AI dispatch and independent test evidence remain held.'};
+      return {...result,help:r.readyIdentifier?
+        'S05 job prepared with Git-main Chat 1 and pinned optional tests; live effects separately gated.':
+        'Legacy job prepared with pinned Settings prompt and optional tests; live effects separately gated.'};
     }catch{return fail('AI_CANONICAL_HOLD');}
   }
   async function run(message,sender){
