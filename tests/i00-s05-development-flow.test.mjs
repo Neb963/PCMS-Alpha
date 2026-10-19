@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {fakeDatabase} from './fake-idb.mjs';
 import {createReadyStore} from '../src/runtime/ready-store.mjs';
 import {createReadyDevelopment,planReadyDevelopment} from '../src/runtime/ready-development.mjs';
+import {exactSource} from '../src/runtime/staging-core.mjs';
 const s='s05-public-flow',repoId='1411034835',H='a'.repeat(64),F='b'.repeat(64);
 const witness={slug:s,repositoryId:repoId,identifier:'rev-fixture-ready-01',
  declarationCommit:'c'.repeat(40),markerOid:'d'.repeat(40),inputFingerprint:H};
@@ -176,4 +177,56 @@ test('S05 unavailable recovery vault defers only one target, fair cursor reaches
  assert.equal(secondResult.slug,second);
  assert.deepEqual(steps,[second]);
  assert.equal(storage.pcmsS05DevelopmentReceipt.providerEffects,'NONE');
+});
+
+test('S05 reconciles I13 staged A to independently checked tested F without changing recovery P',async()=>{
+ const db=fakeDatabase(),queue=createReadyStore(db);
+ await queue.observe(witness);
+ await queue.handoff(s,1,{source:'TRUSTED_S05_ADMISSION_BOUNDARY',
+  accountOwnerVerified:true,protectedRouteReady:true,
+  completeRecoverableBaseline:true,humanEditorClean:true,noUncertainWriter:true});
+ const original=await exactSource([
+  {path:'main.pjs',base64:Buffer.from('old P').toString('base64')},
+  {path:'index.html',base64:Buffer.from('<p>P</p>').toString('base64')}]);
+ const staged=await exactSource([
+  {path:'main.pjs',base64:Buffer.from('initial A').toString('base64')},
+  {path:'index.html',base64:Buffer.from('<p>A</p>').toString('base64')}]);
+ const final=await exactSource([
+  {path:'main.pjs',base64:Buffer.from('repaired F').toString('base64')},
+  {path:'index.html',base64:Buffer.from('<p>F</p>').toString('base64')}]);
+ const recovery={ciphertext:'held encrypted P opaque'};
+ await save(db,{key:'inventory:'+s,generator:{slug:s,visibility:'UNLISTED'}});
+ await save(db,{key:'existing-update:'+s,record:{
+  slug:s,state:'STAGE_CONFIRMED',revision:6,nonce:'12345678',
+  accountId:'account1',remotePublicId:'remote1',
+  previousFingerprint:original.fingerprint,recovery,
+  stagedFingerprint:staged.fingerprint,stageSource:staged}});
+ await save(db,{key:'stage:'+s,record:{
+  slug:s,state:'SOURCE_VERIFIED',revision:4,nonce:'12345678',
+  accountId:'account1',candidate:staged,
+  readyIdentifier:witness.identifier,readyInputFingerprint:H}});
+ await save(db,{key:'ai-job:'+s,accountId:'account1',job:{
+  slug:s,revision:9,stageRevision:4,state:'TESTS_VERIFIED',
+  sourceFingerprint:final.fingerprint,verifiedFinal:final.fingerprint,
+  finalSource:{fingerprint:final.fingerprint,blobs:final.blobs},
+  executionSlotReleased:true}});
+ const api={storage:{local:{
+  get:async()=>({}),set:async()=>{}
+ }}};
+ const runner=createReadyDevelopment(api,{
+  open:async()=>db,
+  makeReady:()=>({runTrusted:async()=>{throw Error('NO_READY_CHANGE')}}),
+  makeExisting:()=>({runTrusted:async()=>{throw Error('NO_REMOTE_UPDATE')}}),
+  makeStage:()=>({runTrusted:async()=>{throw Error('NO_REMOTE_STAGE')}}),
+  makeAi:()=>({runTrusted:async()=>{throw Error('NO_NATIVE_ACTION')}})
+ });
+ const done=await runner.tick();
+ assert.equal(done.ok,true,JSON.stringify(done));
+ assert.equal(done.step,'PIN_FINAL_F');
+ const updated=db.read('meta','existing-update:'+s).record;
+ assert.equal(updated.previousFingerprint,original.fingerprint);
+ assert.deepEqual(updated.recovery,recovery);
+ assert.equal(updated.stagedFingerprint,final.fingerprint);
+ assert.equal(updated.stageSource.fingerprint,final.fingerprint);
+ assert.equal((await runner.tick()).code,'S05_NO_ELIGIBLE_ACTION');
 });
