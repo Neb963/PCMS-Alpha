@@ -12,8 +12,15 @@ test('S06 independently projected publication labels never turn unverified Git i
  assert.equal(s06ReviewStatus({decision:{ok:true,type:'RECONCILE'}}).state,'BLOCKED');
  assert.equal(s06ReviewStatus({decision:{ok:true,type:'REVIEW'},
    change:{state:'REQUESTED'},stageRevision:4}).state,'CHANGES_REQUESTED');
- assert.equal(s06ReviewStatus({decision:{ok:false,code:'TESTS_PENDING'},
+ assert.equal(s06ReviewStatus({decision:{
+   ok:false,code:'S06_CANDIDATE_OR_TEST_EVIDENCE_UNVERIFIED'},
    change:{state:'ADMITTED',childStageRevision:5},stageRevision:5}).state,'IN_DEVELOPMENT');
+ assert.equal(s06ReviewStatus({decision:{ok:true,type:'PREPARE'},
+   change:{state:'ADMITTED',childStageRevision:5},stageRevision:5}).state,'WAITING_FOR_GIT');
+ assert.equal(s06ReviewStatus({decision:{ok:true,type:'REVIEW'},
+   change:{state:'ADMITTED',childStageRevision:5},stageRevision:5}).state,'READY_FOR_REVIEW');
+ assert.equal(s06ReviewStatus({decision:{ok:false,code:'S06_CURRENT_READY_UNAVAILABLE'},
+   change:{state:'ADMITTED',childStageRevision:5},stageRevision:5}).state,'BLOCKED');
  assert.equal(s06ReviewStatus({decision:{ok:true,type:'REVIEW'},release:{
    state:'APPROVED',approval:{sourceFingerprint:H}},sourceFingerprint:F}).state,'BLOCKED');
  assert.equal(s06ReviewStatus({decision:{ok:true,type:'REVIEW'},release:{
