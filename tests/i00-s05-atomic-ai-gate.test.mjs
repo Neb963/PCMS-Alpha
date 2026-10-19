@@ -67,3 +67,16 @@ test('S05 native arm accepts exact current READY but preserves dispatch marker s
  assert.equal(x.db.read('meta','ai-job:'+slug).job.native.state,'DISPATCH_POSSIBLE');
  assert.equal(x.db.keys('events').length,1);
 });
+
+test('S05 supersession permits STOP of the already-running old helper, never a new repair',async()=>{
+ const newer={...active(),desired:{identifier:'rev-successor',
+   inputFingerprint:'d'.repeat(64)}};
+ const job=baseJob();
+ job.native={...job.native,state:'RUNNING_OBSERVED'};
+ const {db,store}=await setup(newer,job);
+ const stop=await store.armNative(slug,7,'STOP');
+ assert.equal(stop.ok,true,JSON.stringify(stop));
+ assert.equal(db.read('meta','ai-job:'+slug).job.native.state,'DISPATCH_POSSIBLE');
+ assert.equal(db.read('meta','ai-job:'+slug).job.native.step,'STOP');
+ assert.equal(db.keys('events').length,1);
+});
