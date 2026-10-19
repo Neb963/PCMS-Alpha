@@ -13,6 +13,7 @@ import {scanMainCatalog} from './git-catalog.mjs';
 import {inspectReadyCandidate} from './catalog-declaration.mjs';
 import {createReadyStore} from './ready-store.mjs';
 import {stageReadyGitSource} from './ready-git-source.mjs';
+import {evaluateStageSuccessor} from './ready-source-safety.mjs';
 import {REFRESHER_KEY} from './refresher-core.mjs';
 
 export const EXISTING_PORT='pcms-i13-existing';
@@ -113,9 +114,11 @@ export function createExistingBoundary(api,{
   let promise;
   const db=()=>promise ||=open().catch(e=>{promise=null;throw e;});
   const sentinel=createRestoreSentinel(api.storage.local);
-  async function readySource(database,name){
+  async function readySource(database,name,{allowDesired=false}={}){
     const queued=await createReadyStore(database).get(name);
-    if(!queued.ok||!queued.record.active||queued.record.desired)
+    if(!queued.ok||queued.record.hold==='READY_REVOKED_NOT_READY'||
+       (!queued.record.active&&!queued.record.desired)||
+       (!allowDesired&&queued.record.desired))
       return fail('S05_READY_NOT_ADMITTED_OR_SUPERSEDED');
     const config=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
     if(config?.repository!=='Neb963/per-gens'||
@@ -133,7 +136,10 @@ export function createExistingBoundary(api,{
     const coherent=await inspectReady({repository:config.repository,
        token:secret.credential,slug:name,pinnedHead:catalog.head,
        includeSourceBytes:true});
-    return stageReadyGitSource({catalog,coherent,ready:queued.record,
+    const requested=allowDesired&&queued.record.desired?
+      {...queued.record,active:queued.record.desired,desired:null}:
+      queued.record;
+    return stageReadyGitSource({catalog,coherent,ready:requested,
        slug:name,repositoryId:config.repositoryId});
   }
   async function safeGuard(personaUid) {
@@ -276,7 +282,7 @@ export function createExistingBoundary(api,{
         return fail('EXISTING_PREVIOUS_SOURCE_CHANGED');
       const queued=await createReadyStore(database).get(p.slug);
       const readyPin=queued.ok?
-        await readySource(database,p.slug):null;
+        await readySource(database,p.slug,{allowDesired:true}):null;
       if(readyPin&&!readyPin.ok)return readyPin;
       const git=readyPin?readyPin.source:
         await inspect({folder:f.link.folder,token:p.token,
@@ -286,6 +292,48 @@ export function createExistingBoundary(api,{
       const candidate=readyPin?readyPin.candidate:
         await exactSource(git.sourceBytes);
       if(!candidate.ok)return candidate;
+      if(queued.ok&&queued.record.desired){
+        // The I13 source writer has already unlisted and independently
+        // re-read authenticated, encrypted-recoverable previous P.
+        const editor=await g.inspectStageEditor?.(r.personaUid,p.slug,r.nonce);
+        if(editor?.ok!==true||editor.clean!==true||
+           editor.source!=='GUARDED_EDITOR_CLEAN')
+          return fail('S05_UPDATE_EDITOR_NOT_CLEAN');
+        const previousStage=await stageFactory(database).getFull(p.slug);
+        if(previousStage.ok)
+          return fail('S05_PREVIOUS_STAGE_NEEDS_NATIVE_HANDOFF');
+        const previousJob=await new Promise((resolve,reject)=>{
+          const t=database.transaction('meta','readonly');
+          const req=t.objectStore('meta').get('ai-job:'+p.slug);
+          req.onsuccess=()=>resolve(req.result?.job||null);
+          req.onerror=()=>reject(Error('AI_JOB_READ_FAILED'));
+        });
+        if(previousJob)return fail('S05_PREVIOUS_NATIVE_JOB_NEEDS_HANDOFF');
+        const release=await new Promise((resolve,reject)=>{
+          const t=database.transaction('meta','readonly');
+          const req=t.objectStore('meta').get('release:'+p.slug);
+          req.onsuccess=()=>resolve(req.result?.release||null);
+          req.onerror=()=>reject(Error('RELEASE_READ_FAILED'));
+        });
+        const safety=evaluateStageSuccessor({
+          prior:null,previous:opened.source,job:null,release,existing:r,
+          ready:{active:queued.record.desired,desired:null},
+          source:{...git,accountId:r.accountId,personaUid:r.personaUid,
+            bindingVersion:r.bindingVersion,remotePublicId:r.remotePublicId}
+        });
+        if(!safety.ok)return safety;
+        if(!(await recheck(g,r.personaUid,before)).ok)
+          return fail('S05_UPDATE_GUARD_CHANGED');
+        const admitted=await createReadyStore(database).handoff(
+          p.slug,queued.record.revision,{
+            source:'TRUSTED_S05_ADMISSION_BOUNDARY',
+            accountOwnerVerified:true,protectedRouteReady:true,
+            completeRecoverableBaseline:true,humanEditorClean:true,
+            noUncertainWriter:true,writerIdle:true,nativeIdle:true,
+            providerEffectResolved:true,approvalEffectResolved:true
+          });
+        if(!admitted.ok)return admitted;
+      }
       if(!(await recheck(g,r.personaUid,before)).ok)return fail('EXISTING_GUARD_CHANGED');
       const stage=stageFactory(database);
       const earlier=await stage.getFull(p.slug);
