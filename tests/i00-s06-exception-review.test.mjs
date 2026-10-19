@@ -24,7 +24,8 @@ async function fixture({optional=true,infrastructure=false,failed=false,verified
    executionSlotReleased:true,native:{state:'CHAT1_OBSERVED_IDLE',sessionDigest:SESSION},
    prompt:{revision:2,tests:['smoke'],text:'Test actual source.'},
    optionalTesting:optional?{sha256:H,tests:['optional'],text:'Test optional'}:null,
-   chat1:{state:'RUNNING',sessionDigest:SESSION,tests:{
+   chat1:{state:'RUNNING',sessionDigest:SESSION,
+     tests:infrastructure&&!failed?{}:{
       smoke:{result:failed?'FAIL':'PASS',sourceFingerprint:F.fingerprint}}},
    chat2:optional?{state:'PENDING',sessionDigest:null,tests:{}}:null,
    hold:infrastructure?'AI_TEST_INFRASTRUCTURE_UNAVAILABLE':
