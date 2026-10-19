@@ -306,7 +306,9 @@ export function createCoordinatorStore(db){
         }
         if(create&&(!isSafeId(proof.operationId)||
             !validId.test(proof.repositoryId||'')||
-            !digest.test(proof.fingerprint||''))){
+            !digest.test(proof.fingerprint||'')||
+            !marker.test(proof.baseHead||'')||
+            !marker.test(proof.markerOid||''))){
           out=fail('GIT_OPERATION_INVALID');return;
         }
         if(existing&&!(proof.source==='PINNED_MAIN_READ_ONLY'&&
@@ -352,7 +354,8 @@ export function createCoordinatorStore(db){
               'GIT_EFFECT_OUTCOME_UNKNOWN':state==='ASSOCIATED_NOT_READY'?null:
               'GIT_ASSOCIATION_PENDING',
             ...(create?{gitRepositoryId:proof.repositoryId,
-              gitOperationId:proof.operationId}:{}),
+              gitOperationId:proof.operationId,gitBaseHead:proof.baseHead,
+              gitExpectedMarkerOid:proof.markerOid}:{}),
             ...(state==='ASSOCIATED_NOT_READY'?{gitHead:proof.head,
               gitMarkerOid:proof.markerOid,sourceFolder:proof.folder}:{})};
           const finish=(link)=>{
