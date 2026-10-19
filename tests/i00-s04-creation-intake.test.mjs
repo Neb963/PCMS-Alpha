@@ -54,6 +54,12 @@ test('S04 D: contradictory operator account pins retain existing source and hold
   const c=coalesceCreation(uncertain,git());
   assert.equal(c.record.state,'CREATE_UNCERTAIN');
   assert.equal(c.record.createOperationId,'create_123');
+  const drift=coalesceCreation({...c.record},git('git_abcdef0123456789abcdef0123456789',
+    witness('s04-test-one','f'.repeat(40))));
+  assert.equal(drift.conflict,true);
+  assert.equal(drift.record.state,'CREATE_UNCERTAIN');
+  assert.equal(drift.record.hold,'GIT_SOURCE_CHANGED_WITH_ACTIVE_OPERATION');
+  assert.equal(drift.record.sources.at(-1).markerOid,'a'.repeat(40));
 });
 test('S04 D: untrusted/incomplete Git witness, foreign repo and quarantined target rejected',()=>{
   for(const broken of [
