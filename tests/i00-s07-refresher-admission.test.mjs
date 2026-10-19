@@ -101,7 +101,7 @@ test('S07 T-07: a different human/source edit cannot be accepted as the exact pl
   const start='a'.repeat(64),target='b'.repeat(64),other='c'.repeat(64);
   const candidate={status:'SUPPORTED_AND_VERIFIED',method:'CONTROLLED_SOURCE_MARKER',
     allowedByProvider:true,version:'marker_v1',sourceFingerprint:start,
-    targetFingerprint:target,markerId:'marker_1234567890',
+    targetFingerprint:target,markerId:'marker_1234567890',nonce:'a'.repeat(32),
     evidenceId:'evidence_1234',meaningfulEffectVerified:true};
   const reserve=reserveRefreshAttempt(emptyRefreshEvidence(),{
     id:'mutation_1234567',at:now,slug:'owned-generator',
@@ -132,7 +132,7 @@ test('S07 C-54: verified first marker and actual return to feed admit the next m
   const initial='a'.repeat(64),first='b'.repeat(64),second='c'.repeat(64);
   const q=(sourceFingerprint,targetFingerprint,markerId)=>({
     status:'SUPPORTED_AND_VERIFIED',method:'CONTROLLED_SOURCE_MARKER',allowedByProvider:true,
-    version:'marker_v1',sourceFingerprint,targetFingerprint,markerId,
+    version:'marker_v1',sourceFingerprint,targetFingerprint,markerId,nonce:'b'.repeat(32),
     evidenceId:'evidence_12345',meaningfulEffectVerified:true});
   const begin={...emptyRefreshEvidence(),state:'ABSENT_ONCE',misses:1,lastMissAt:now-600000};
   const one=reserveRefreshAttempt(begin,{id:'first_intent',at:now,slug:'owned-generator',
