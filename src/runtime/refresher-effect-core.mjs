@@ -7,7 +7,8 @@ const time=t=>Number.isSafeInteger(t)&&t>0;
 export function emptyRefreshEvidence(){
   return {version:REFRESH_PROOF_VERSION,state:'UNOBSERVED',misses:0,lastMissAt:0,
     lastSeenAt:0,lastRank:null,suspended:false,attempts:0,probes:0,nextAttemptAt:0,
-    intent:null,history:[],savedSourceFingerprint:null,savedMarkerId:null,savedNonce:null};
+    intent:null,history:[],savedSourceFingerprint:null,savedMarkerId:null,savedNonce:null,
+    awaitingVisibility:false};
 }
 export function validRefreshEvidence(e){
   return e?.version===1&&['UNOBSERVED','PRESENT','ABSENT_ONCE',
@@ -16,6 +17,7 @@ export function validRefreshEvidence(e){
     Number.isSafeInteger(e.misses)&&e.misses>=0&&e.misses<=3&&
     Number.isSafeInteger(e.attempts)&&e.attempts>=0&&e.attempts<=RETRY_LIMIT&&
     Number.isSafeInteger(e.probes)&&e.probes>=0&&e.probes<=3&&
+    typeof e.awaitingVisibility!=='boolean'?false:
     Array.isArray(e.history)&&e.history.length<=8&&
     (e.savedSourceFingerprint==null||hex(e.savedSourceFingerprint))&&
     (e.savedMarkerId==null||safeId(e.savedMarkerId))&&
@@ -35,7 +37,7 @@ export function observeRefreshPresence(current,{at,present,rank,complete,healthy
   if(present){
     const wasSuspended=e.suspended;
     const uncertain=e.state==='EFFECT_UNVERIFIED'||e.intent?.state==='DISPATCH_POSSIBLE';
-    e.misses=0;e.lastSeenAt=at;e.lastRank=rank;
+    e.misses=0;e.lastSeenAt=at;e.lastRank=rank;e.awaitingVisibility=false;
     // Seeing a feed item cannot reconcile a possibly-dispatched mutation.
     if(!uncertain){
       // An actual return to the complete recent feed after a proven marker
@@ -149,6 +151,9 @@ export function reconcileRefreshAttempt(evidence,id,{at,kind,sourceFingerprint,
     e.savedSourceFingerprint=prior.targetFingerprint;
     e.savedMarkerId=prior.markerId;
     e.savedNonce=prior.nonce;
+    // A source-byte save alone cannot establish recent-page placement.
+    // No new mutation until independently observed reappearance.
+    e.awaitingVisibility=e.history.at(-1).feed.state!=='PRESENT';
   }
   e.intent=verified||noEffect?null:prior;
   if(!verified)e.suspended=true;
