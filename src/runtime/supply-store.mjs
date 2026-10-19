@@ -37,6 +37,9 @@ export function createSupplyStore(db){
             if(cursor){
               if(typeof cursor.key==='string'){
                 if(cursor.key.startsWith('supply-slug:'))taken.add(cursor.key.slice(12));
+                // S04's canonical coalescer owns the same slug namespace.
+                // Legacy I06 may inspect it, never start a second CREATE.
+                if(cursor.key.startsWith('s00-create-slug:'))taken.add(cursor.key.slice(16));
                 if(cursor.key.startsWith('inventory:'))previousSlugs.add(cursor.key.slice(10));
               }
               cursor.continue();return;
