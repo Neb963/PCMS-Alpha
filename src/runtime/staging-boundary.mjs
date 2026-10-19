@@ -93,7 +93,7 @@ export function createStagingBoundary(api,{
     const value=await native({action:'git.get',repositoryId:config.repositoryId});
     if(!value?.ok||typeof value.credential!=='string'||
        value.credential.length<12||value.credential.length>512||
-       /[^\\x21-\\x7e]/.test(value.credential))
+       /[^\x21-\x7e]/.test(value.credential))
       return fail('S05_GIT_VAULT_UNAVAILABLE');
     const catalog=await scanCatalog({repository:config.repository,token:value.credential});
     if(!catalog?.ok||!catalog.complete||
