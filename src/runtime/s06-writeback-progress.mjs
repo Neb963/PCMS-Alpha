@@ -36,6 +36,11 @@ export function planS06Writeback({ready,stage,job,writeback}={}){
      evaluation(j).state!=='TESTS_VERIFIED')
     return fail('S06_CANDIDATE_OR_TEST_EVIDENCE_UNVERIFIED');
   if(previous){
+    if(previous.mode!=='S06'||
+       previous.readyIdentifier!==wanted.identifier||
+       previous.readyInputFingerprint!==wanted.inputFingerprint||
+       (previous.testingSha??null)!==(st.testingSha??null))
+      return fail('S06_WRITEBACK_READY_PROVENANCE_CHANGED');
     if(previous.state==='CONFIRMED'&&
        previous.stageRevision===st.revision&&
        previous.jobRevision===j.revision&&
