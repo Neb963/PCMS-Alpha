@@ -72,3 +72,20 @@ test('S04 allocation D: initial unknown or conflicting account never coerced to 
   await put(db,[{key:'inventory-batch:account_000',observationId:'obs000',observedAt:1}]);
   assert.equal((await s.allocateCreate(first.record.intentId,1)).ok,true);
 });
+
+test('S04 D: offline account counts remain but only verified identities receive new allocations',()=>{
+  const accounts=[{...account('000','WAITING_LOGIN'),inventoryComplete:true},
+    {...account('001'),inventoryComplete:true}];
+  const inventory=[{slug:'already-owned',accountId:'account_001',
+    ownerState:'OBSERVED_OWNER'}];
+  const request={...intent(),state:'WAITING_CAPABILITY'};
+  const selected=selectS04Account({intent:request,accounts,inventory,pending:[]});
+  assert.equal(selected.ok,true);
+  assert.equal(selected.accountId,'account_001');
+  const pinned=selectS04Account({intent:{...request,accountId:'account_000'},
+    accounts,inventory,pending:[]});
+  assert.equal(pinned.code,'PINNED_ACCOUNT_UNAVAILABLE');
+  const none=selectS04Account({intent:request,
+    accounts:[accounts[0]],inventory:[],pending:[]});
+  assert.equal(none.code,'NO_VERIFIED_ACCOUNTS');
+});
