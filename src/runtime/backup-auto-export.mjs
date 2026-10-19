@@ -75,7 +75,7 @@ async function advisoryNativeMemory(api){
   }catch{return null;}
   finally{try{port?.disconnect()}catch{}}
 }
-export async function captureV2SourceCut(api,db,password,sentinel,{
+async function captureV2SourceCutOnce(api,db,password,sentinel,{
   donorReader=waitForPcmsBackupDonor,resourceEnvironment=globalThis.navigator,
   osMemoryProbe=advisoryNativeMemory
 }={}){
@@ -117,4 +117,26 @@ export async function captureV2SourceCut(api,db,password,sentinel,{
       maxAggregateUtf16Bytes:policy.maxAggregateUtf16Bytes,
       browserHeapBytes:null,initialQuota,finalQuota}),
     cut:'CONSISTENT_SOURCE_CUT'});
+}
+
+// The five-store cut must stay unchanged through donor/cookie materialization.
+// A concurrent background journal write invalidates that candidate, never
+// permits a partial export. Retry read-only capture at most three times;
+// unrelated errors and persistent churn remain hard failures. No external
+// native export or provider effect is dispatched by this function.
+export async function retryS02ConsistentCut(readOnce,{maxAttempts=3}={}){
+  if(typeof readOnce!=='function'||!Number.isSafeInteger(maxAttempts)||
+     maxAttempts<1||maxAttempts>3)throw Error('BACKUP_V2_RETRY_INVALID');
+  for(let attempt=1;attempt<=maxAttempts;attempt++){
+    try{return await readOnce();}
+    catch(error){
+      if(error?.message!=='BACKUP_SOURCE_CUT_CHANGED'||attempt===maxAttempts)
+        throw error;
+    }
+  }
+  throw Error('BACKUP_SOURCE_CUT_CHANGED');
+}
+export function captureV2SourceCut(api,db,password,sentinel,options={}){
+  return retryS02ConsistentCut(()=>
+    captureV2SourceCutOnce(api,db,password,sentinel,options));
 }
