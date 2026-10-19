@@ -36,7 +36,7 @@ async function fixture({proof=approved,sourceChange=false,wrongOwner=false,
     }};
   const adapter=createRefresherNativeAdapter({guard:()=>g,
     methodProofFor:()=>proof,
-    newId:()=>++counter%2?'marker_abcdefghijklmnop':'a'.repeat(32)});
+    newId:()=>++counter%2?'marker_'+String(counter).padStart(20,'a'):'a'.repeat(32)});
   const claimFor=candidate=>({
     stableId:row.stableId,slug:row.slug,accountId:row.accountId,personaUid:row.personaUid,
     bindingVersion:row.bindingVersion,remoteId,principalFingerprint:H,
@@ -93,4 +93,39 @@ test('S07 native D/X: forged source/target/marker identities cannot spend prepar
     assert.equal((await f.adapter.execute(variant)).ok,false);
   assert.equal(f.calls.includes('execute'),false);
   assert.equal((await f.adapter.execute(claim)).ok,true);
+});
+
+test('S07 native D: second eligible marker uses observed first source and cleans prior PCMS-owned tab',async()=>{
+  const f=await fixture();
+  f.g.closeRefresherTab=async(persona,request)=>{
+    f.calls.push('close');
+    assert.equal(persona,'persona_01');
+    assert.equal(request.slug,'owned-generator');
+    assert.match(request.nonce,/^[a-f0-9]{32}$/);
+    return {ok:true,closed:true};
+  };
+  const first=await f.adapter.prepare(f.row,f.account);
+  assert.equal((await f.adapter.execute(f.claimFor(first))).ok,true);
+  assert.equal((await f.adapter.readback(f.claimFor(first))).kind,'EFFECT_CHANGED');
+  assert.equal(f.calls.filter(x=>x==='close').length,1);
+  const nextRow={...f.row,refresh:{savedSourceFingerprint:first.targetFingerprint,
+    savedNonce:first.nonce}};
+  const next=await f.adapter.prepare(nextRow,f.account);
+  assert.equal(next.method,'CONTROLLED_SOURCE_MARKER');
+  assert.equal(next.sourceFingerprint,first.targetFingerprint);
+  assert.notEqual(next.targetFingerprint,first.targetFingerprint);
+  assert.equal(f.calls.filter(x=>x==='close').length,2);
+  assert.equal((await f.adapter.execute(f.claimFor(next))).ok,true);
+  assert.equal((await f.adapter.readback(f.claimFor(next))).kind,'EFFECT_CHANGED');
+});
+test('S07 native D/X: failed cleanup holds subsequent marker without another provider save',async()=>{
+  const f=await fixture();
+  const first=await f.adapter.prepare(f.row,f.account);
+  assert.equal((await f.adapter.execute(f.claimFor(first))).ok,true);
+  assert.equal((await f.adapter.readback(f.claimFor(first))).kind,'EFFECT_CHANGED');
+  f.g.closeRefresherTab=async()=>({ok:false,code:'HUMAN_EDITOR'});
+  const next=await f.adapter.prepare({...f.row,refresh:{
+    savedSourceFingerprint:first.targetFingerprint,savedNonce:first.nonce}},f.account);
+  assert.equal(next.status,'UNVERIFIED');
+  assert.equal(f.calls.filter(x=>x==='execute').length,1);
 });
