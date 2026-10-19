@@ -4,6 +4,7 @@
 import {fail,isSafeId} from './journal.mjs';
 import {transitionCreateIntent} from './coordinator-core.mjs';
 import {coalesceCreation,validateGitCreationWitness} from './creation-intake.mjs';
+import {selectS04Account} from './creation-allocation.mjs';
 const key=id=>'s00-create-intent:'+id;
 const slugKey=slug=>'s00-create-slug:'+slug;
 function transact(db,mode,schedule){
@@ -112,6 +113,69 @@ export function createCoordinatorStore(db){
       };
     });
   }
+  // Every count and chosen binding is read and committed in one canonical
+  // transaction. No remote operation is implied by allocation.
+  function allocateCreate(intentId,expectedRevision){
+    if(!isSafeId(intentId)||!Number.isSafeInteger(expectedRevision)||expectedRevision<1)
+      return Promise.resolve(fail('INVALID_ALLOCATION'));
+    return transact(db,'readwrite',(tx,finish)=>{
+      const meta=tx.objectStore('meta');
+      meta.get(key(intentId)).onsuccess=e=>{
+        const item=e.target.result?.record;
+        if(!item){finish(fail('INTENT_NOT_FOUND'));return;}
+        if(item.revision!==expectedRevision){finish(fail('STALE_REVISION'));return;}
+        const accounts=[],inventory=[],pending=[],complete=new Set();
+        meta.openCursor().onsuccess=ev=>{
+          const c=ev.target.result;
+          if(c){
+            const k=String(c.key),v=c.value;
+            if(k.startsWith('account:')&&v?.account)accounts.push(v.account);
+            else if(k.startsWith('inventory:')&&v?.generator)inventory.push(v.generator);
+            else if(k.startsWith('inventory-batch:')&&v?.observationId)
+              complete.add(k.slice('inventory-batch:'.length));
+            else if(k.startsWith('s00-create-intent:')&&v?.record&&
+                v.record.intentId!==intentId&&
+                v.record.accountId&&v.record.state!=='REJECTED')
+              pending.push({state:v.record.state,accountId:v.record.accountId});
+            else if(k.startsWith('supply-batch:')&&v?.batch)
+              for(const legacy of v.batch.items||[]){
+                if(legacy.state!=='REJECTED')
+                  pending.push({state:legacy.state,accountId:v.batch.accountId});
+              }
+            c.continue();return;
+          }
+          const candidates=accounts.map(a=>({...a,inventoryComplete:complete.has(a.accountId)}));
+          const plan=selectS04Account({intent:item,accounts:candidates,inventory,pending});
+          if(!plan.ok){finish(plan);return;}
+          // Positively observed already-owned targets must go to guarded
+          // adoption, never to an empty-generator CREATE.
+          const owned=inventory.find(row=>row.slug===item.slug&&
+            row.ownerState==='OBSERVED_OWNER');
+          const collision=inventory.find(row=>row.slug===item.slug&&
+            row.ownerState!=='OBSERVED_OWNER');
+          if(collision){finish(fail('TARGET_OWNERSHIP_AMBIGUOUS'));return;}
+          const target=owned?'ADOPTION_ORIGINAL_PENDING':'OWNER_READBACK_PENDING';
+          const next={...item,state:target,
+            hold:owned?'ADOPTION_REQUIRES_ORIGINAL_SOURCE_PROOF':
+              'TARGET_MISSING_MUST_BE_INDEPENDENTLY_VERIFIED',
+            accountId:owned?owned.accountId:plan.accountId,
+            accountRevision:plan.accountRevision,
+            personaUid:plan.personaUid,bindingVersion:plan.bindingVersion,
+            allocation:{owned:plan.owned,pending:plan.pending,
+              revision:item.revision+1},
+            revision:item.revision+1};
+          if(owned&&owned.accountId!==plan.accountId){
+            finish(fail('OWNED_TARGET_ACCOUNT_MISMATCH'));return;
+          }
+          meta.put({key:key(intentId),record:next});
+          tx.objectStore('events').add({stage:'S04_ALLOCATION_COMMITTED',
+            intentId,slug:item.slug,state:next.state,accountId:next.accountId,
+            revision:next.revision,providerEffects:'OFF'});
+          finish({ok:true,record:next,providerEffects:'OFF'});
+        };
+      };
+    });
+  }
   function listCreate({after=null,limit=50}={}){
     if(after!==null&&!isSafeId(after))return Promise.resolve(fail('INVALID_CURSOR'));
     if(!Number.isSafeInteger(limit)||limit<1||limit>100)
@@ -153,5 +217,5 @@ export function createCoordinatorStore(db){
     return decision.ok?{...decision,providerEffects:'OFF',
       code:'S04_CREATION_ACTIVATION_HELD'}:decision;
   }
-  return Object.freeze({acceptCreate,ingestVerifiedMain,getCreate,listCreate,advanceCreate});
+  return Object.freeze({acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,advanceCreate});
 }
