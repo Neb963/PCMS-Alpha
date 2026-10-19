@@ -316,7 +316,7 @@
         </section>
       </section>
       <section class="workspace" id="view-settings" data-view="settings" aria-labelledby="heading-settings" hidden>
-        <header class="workspace-head"><div><p class="eyebrow">Workspace / 06</p><h1 id="heading-settings" tabindex="-1">Settings</h1><p>Configuration and safe diagnostics. Provider capabilities remain disabled.</p></div></header>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 06</p><h1 id="heading-settings" tabindex="-1">Settings</h1><p>Configuration, diagnostics and explicit protected workflow permissions. Remote effects default OFF.</p></div></header>
         <section class="panel" aria-labelledby="pcms-backup-title">
           <div class="panel-head"><h2 id="pcms-backup-title">Manual integrated encrypted backup</h2><span class="unknown">Local export · no restore</span></div>
           <p class="reason">One encrypted file includes a consistent PCMS record/source snapshot and PersonaMonkey's separately encrypted supported portable data. Native WireGuard private configuration, external provider state and unsaved browser editors are excluded. No passwords are stored.</p>
@@ -374,6 +374,22 @@
           <p class="reason">Up to 14 confirmed automatic archives are retained. Only positively tracked matching excess downloads may be deleted. Manual, untracked, uncertain and missing files are preserved. No independent on-disk byte proof is claimed.</p>
         </section>
         <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">Remote effects off · local backup available</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Canonical shadow scheduler available; provider observations gated, mutations OFF</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup / restore and AI tests</dt><dd>Manual encrypted backup available; scheduled backup requires OS vault; restore OFF</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No provider settings or operation commands can be changed here. PersonaMonkey retains advanced security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
+        <section class="panel" aria-labelledby="pcms-s06-authority-heading">
+          <div class="panel-head"><h2 id="pcms-s06-authority-heading">Protected workflow activation</h2><span class="unknown">All remote effects OFF by default</span></div>
+          <p>These are three independent standing permissions, not test or provider-success evidence. Turn them on only after reviewing the connected private repository, the protected Persona route, and the proposed operations. Actual writes remain fenced by owner, source, test, claim and publication approvals. Disabling a permission does not undo an already possible external effect.</p>
+          <p id="pcms-s06-authority-repository">Repository scope: not verified</p>
+          <div class="account-controls">
+            <label for="pcms-s06-grant-development">Allow protected generator development, AI testing and eligible existing-source unlisting</label><input id="pcms-s06-grant-development" type="checkbox">
+            <label for="pcms-s06-grant-git">Allow conditional Git main writeback of independently tested final source</label><input id="pcms-s06-grant-git" type="checkbox">
+            <label for="pcms-s06-grant-publication">Allow only separately approved exact-F publication dispatch</label><input id="pcms-s06-grant-publication" type="checkbox">
+            <label for="pcms-s06-authority-consent">To activate, enter: I AUTHORIZE PROTECTED PCMS OPERATIONS</label>
+            <input id="pcms-s06-authority-consent" autocomplete="off" spellcheck="false" maxlength="64">
+            <button id="pcms-s06-authority-enable" type="button" disabled>Apply scoped authorization</button>
+            <button id="pcms-s06-authority-revoke" type="button">Pause all external effects</button>
+            <button id="pcms-s06-authority-refresh" type="button">Refresh permission status</button>
+          </div>
+          <p id="pcms-s06-authority-status" role="status" aria-live="polite">Loading permission status. All effects remain disabled unless independently authorized.</p>
+        </section>
         <section class="panel" aria-labelledby="pcms-writeback-auto-heading">
           <div class="panel-head"><h2 id="pcms-writeback-auto-heading">I11 · Git-only automatic writeback</h2><span class="unknown">Opt-in, revision-fenced · effects HELD</span></div>
           <div class="account-controls"><label for="pcms-writeback-auto">Allow opt-in automatic Git writeback after verified final AI result</label><input id="pcms-writeback-auto" type="checkbox"><button id="pcms-writeback-save-auto" type="button" disabled>Save writeback preference</button></div>
@@ -423,6 +439,7 @@
   <script type="module" src="ai-view.mjs"></script>
   <script type="module" src="writeback-view.mjs"></script>
   <script type="module" src="release-view.mjs"></script>
+  <script type="module" src="standing-authority-view.mjs"></script>
   <script type="module" src="existing-update-view.mjs"></script>
   <script type="module" src="refresher-view.mjs"></script>
 </body>
