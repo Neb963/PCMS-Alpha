@@ -22,6 +22,8 @@ test('S06 combined-XPI production copy includes each new runtime module and one 
  assert.match(html,/pcms-s06-change-instructions/);
  assert.match(html,/pcms-s06-review-queue/);
  assert.match(html,/pcms-s06-request-changes/);
+ assert.equal(html.includes(String.raw`</script>\n  <script`),false,
+   'HTML module imports must not leak escaped newline text into UI');
 });
 test('S06 Request Changes command denies forged authorization, source data and untrusted pages',()=>{
  const api={runtime:{id:'fixture',getURL:p=>'moz-extension://fixture/'+p}},
