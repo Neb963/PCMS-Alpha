@@ -296,6 +296,15 @@ export function createCoordinatorStore(db){
         const prior=e.target.result?.record;
         if(!prior){out=fail('INTENT_NOT_FOUND');return;}
         if(prior.revision!==expectedRevision){out=fail('STALE_REVISION');return;}
+        m.get('account:'+prior.accountId).onsuccess=accountReply=>{
+          const a=accountReply.target.result?.account;
+          if(!a||a.state!=='VERIFIED'||a.revision!==prior.accountRevision||
+             a.bindingVersion!==prior.bindingVersion||
+             a.personaUid!==prior.personaUid||
+             a.identity?.source!=='GUARDED_SESSION_READBACK'||
+             a.identity?.bindingVersion!==prior.bindingVersion){
+            out=fail('ACCOUNT_CONTEXT_CHANGED');return;
+          }
         const validId=/^[1-9][0-9]{0,19}$/;
         const marker=/^[a-f0-9]{40}$/;
         const digest=/^[a-f0-9]{64}$/;
@@ -397,6 +406,7 @@ export function createCoordinatorStore(db){
         };
         if(create||existing)finishStage(null);
         else ops.get(operationId).onsuccess=e=>finishStage(e.target.result);
+        };
       };
     });
   }
