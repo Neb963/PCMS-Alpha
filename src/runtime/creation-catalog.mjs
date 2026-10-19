@@ -3,7 +3,7 @@
 // ownership allocation. The human-approved initial import is a prerequisite.
 // Each recognized folder becomes one held canonical slug intent.
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
-import {createImportApprovalStore} from './catalog-import.mjs';
+import {createImportApprovalStore,getImportScopeDigest} from './catalog-import.mjs';
 import {createCoordinatorStore} from './coordinator-store.mjs';
 import {validateGitCreationWitness} from './creation-intake.mjs';
 
@@ -55,8 +55,17 @@ export function createCreationCatalogIntake(api,{open=openCanonicalDatabase,
          approved.approval.source!=='HUMAN_INITIAL_IMPORT_SCOPE')
         return fail('INITIAL_IMPORT_SCOPE_UNAPPROVED');
       const earlier=(await api.storage.local.get(PROGRESS))?.[PROGRESS];
+      const scopeDigest=await getImportScopeDigest(catalog);
+      if(!scopeDigest)return fail('S04_CATALOG_UNVERIFIED');
+      const firstImportCompleted=earlier?.repositoryId===catalog.repositoryId&&
+        earlier?.initialScopeDigest===approved.approval.scopeDigest&&
+        earlier?.initialImportCompleted===true;
+      // A different initial folder set cannot become an automatic source of
+      // effects before the exactly approved first scope was durably consumed.
+      if(!firstImportCompleted&&scopeDigest!==approved.approval.scopeDigest)
+        return fail('INITIAL_IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED');
       const continued=earlier?.repositoryId===catalog.repositoryId&&
-        earlier?.head===catalog.head&&
+        earlier?.scopeDigest===scopeDigest&&
         Number.isSafeInteger(earlier.next)&&earlier.next>=0&&
         earlier.next<=catalog.generators.length;
       const from=continued?earlier.next:0;
@@ -83,9 +92,11 @@ export function createCreationCatalogIntake(api,{open=openCanonicalDatabase,
         if(out.changed)added++;else duplicates++;
       }
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
-      const progress={repositoryId:catalog.repositoryId,head:catalog.head,
-        next,total:catalog.generators.length,observedAt:now()};
       const more=next<catalog.generators.length;
+      const progress={repositoryId:catalog.repositoryId,head:catalog.head,
+        scopeDigest,initialScopeDigest:approved.approval.scopeDigest,
+        initialImportCompleted:firstImportCompleted||!more,
+        next,total:catalog.generators.length,observedAt:now()};
       await api.storage.local.set({[PROGRESS]:progress,[RECEIPT]:{
         code:more?'S04_LOCAL_INTAKE_CHECKPOINTED':'S04_LOCAL_INTAKE_COMPLETE',
         ...progress,added,duplicates,held,providerEffects:'OFF',gitEffects:'OFF'}});
