@@ -8,7 +8,9 @@ import {createImportApprovalStore,getImportScopeDigest} from './catalog-import.m
 import {isI17Quarantined,I17_QUARANTINE_CODE} from './legacy-quarantine.mjs';
 import {createReadyStore} from './ready-store.mjs';
 import {createStagingStore} from './staging-store.mjs';
+import {createAiStore} from './ai-store.mjs';
 import {createWritebackStore} from './writeback-store.mjs';
+import {createS06ExceptionStore} from './s06-exception-review.mjs';
 import {sealedS06OutputProof} from './s06-output-proof.mjs';
 const KEY='pcmsS05ReadyScanCursor';
 const SHA=/^[a-f0-9]{40}$/;
@@ -77,10 +79,13 @@ export function createReadyIntake(api,{open=openCanonicalDatabase,
    let evidence;
    // Current READY inputs remain frozen after a PCMS-authored Git output.
    // Only a sealed confirmed S06 operation can open that narrow exception.
-   const [readyRow,stage,writeback]=await Promise.all([
+   const [readyRow,stage,writeback,job,exception]=await Promise.all([
      queue.get(slug),createStagingStore(db).getFull(slug),
-     createWritebackStore(db).getFull(slug)]);
-   const proof=sealedS06OutputProof({ready:readyRow,stage,writeback});
+     createWritebackStore(db).getFull(slug),
+     createAiStore(db).getJobFull(slug),
+     createS06ExceptionStore(db).getFull(slug)]);
+   const proof=sealedS06OutputProof({ready:readyRow,stage,writeback,
+     job,exception});
    try{evidence=await inspect({repository,token,slug,
       pinnedHead:catalog.head,includeSourceBytes:false,
       ...(proof.ok?{outputProof:proof.outputProof}:{})},transport);}
