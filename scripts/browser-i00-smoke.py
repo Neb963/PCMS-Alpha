@@ -1071,6 +1071,12 @@ def main():
                     expectedStageRevision:1,expectedJobRevision:1,
                     sourceFingerprint:'b'.repeat(64),instructions:'',source:{forged:true}});
                   const unknown=await call('GET_CHANGE',{slug:'fixture-s06'});
+                  const humanMissing=await call('GET_HUMAN',{slug:'fixture-s06'});
+                  const humanUnknown=await call('HUMAN_CONTEXT',{slug:'fixture-s06'});
+                  const humanForged=await call('DEFER_HUMAN',{
+                    slug:'fixture-s06',expectedStageRevision:1,
+                    expectedJobRevision:1,expectedFingerprint:'b'.repeat(64),
+                    source:{pjs:'forged'}});
                   const authority=(type,params={})=>new Promise(resolve=>{
                     const port=browser.runtime.connect({name:'pcms-s06-authority'});
                     let finished=false;
@@ -1112,11 +1118,15 @@ def main():
                   const ui=['pcms-s06-review-queue','pcms-s06-review-refresh',
                     'pcms-s06-review-next','pcms-s06-request-changes',
                     'pcms-s06-change-instructions','pcms-s06-authority-enable',
-                    'pcms-s06-authority-revoke'].every(id=>
+                    'pcms-s06-authority-revoke','pcms-s06-human-inspect',
+                    'pcms-s06-human-defer','pcms-s06-human-adopt'].every(id=>
                       document.getElementById(id)!==null);
                   done({ok:list?.ok===true&&Array.isArray(list.items)&&
                     blocked?.code==='INVALID_PARAMS'&&
                     unknown?.code==='S06_REQUEST_NOT_FOUND'&&
+                    humanMissing?.code==='S06_HUMAN_REVIEW_NOT_FOUND'&&
+                    humanUnknown?.code==='S06_HUMAN_CONTEXT_UNAVAILABLE'&&
+                    humanForged?.code==='INVALID_PARAMS'&&
                     standing?.ok===true&&
                     standing.record?.grants?.gitWrite===false&&
                     standing.record?.grants?.development===false&&
@@ -1124,7 +1134,10 @@ def main():
                     forgedGrant?.code==='STANDING_CONSENT_INVALID'&&
                     standingCycle&&ui,
                     listCode:list?.code||null,blockedCode:blocked?.code||null,
-                    unknownCode:unknown?.code||null,standingCode:standing?.reason,
+                    unknownCode:unknown?.code||null,
+                    humanCode:humanMissing?.code||null,
+                    humanForgedCode:humanForged?.code||null,
+                    standingCode:standing?.reason,
                     forgedGrantCode:forgedGrant?.code,standingCycle,
                     positiveCode:entitled?.code||'GRANTED',
                     pauseCode:paused?.code||null,ui});
