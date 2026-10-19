@@ -122,7 +122,7 @@ function archiveFake({lostTag=false,corruptRead=false}={}){
       data={ref:archiveRef,object:{sha:tag}};status=201;
     }else if(p==='/git/commits/'+C)
       data={tree:{sha:T},parents:[{sha:H}]};
-    else if(p==='/git/trees/'+T+'?recursive=1')
+    else if(p==='/git/trees/'+T&&new URL(url).search==='?recursive=1')
       data={truncated:false,tree:paths};
     else if(p.startsWith('/git/refs/heads/')&&method==='PATCH'){
       patch++;throw Error('main must never move');
