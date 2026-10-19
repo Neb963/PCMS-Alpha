@@ -10,7 +10,8 @@ function request(portName,type,params){
   return new Promise((resolve,reject)=>{
     const port=browser.runtime.connect({name:portName});
     let completed=false;
-    const timeout=setTimeout(()=>finish(null,Error('TIMEOUT')),6500);
+    const timeout=setTimeout(()=>finish(null,Error('TIMEOUT')),
+      type==='RUN_CREATE_STEP'?65000:6500);
     function finish(out,err){
       if(completed)return;completed=true;clearTimeout(timeout);
       try{port.disconnect();}catch{}
@@ -186,6 +187,39 @@ async function appendCanonicalQueue(mine,after=null){
       (item.hold?' ('+item.hold+')':'')+
       ' · '+item.origins.join(' + ')+
       (item.accountId?' · '+item.accountId:' · unallocated');
+    if(!['ASSOCIATED_NOT_READY','TARGET_COLLISION_HELD'].includes(item.state)&&
+       !item.conflict){
+      const action=document.createElement('button');
+      const uncertain=['CREATE_DISPATCH_POSSIBLE','CREATE_UNCERTAIN',
+        'CREATE_OBSERVING','RENAME_DISPATCH_POSSIBLE','RENAME_UNCERTAIN',
+        'RENAME_OBSERVING','GIT_DISPATCH_POSSIBLE','GIT_UNCERTAIN',
+        'GIT_OBSERVING'].includes(item.state);
+      action.type='button';
+      action.textContent=uncertain?'Reconcile (no repeat write)':'Advance safely';
+      action.setAttribute('aria-label',action.textContent+' for '+item.slug);
+      action.addEventListener('click',async()=>{
+        action.disabled=true;
+        const before=action.textContent;action.textContent='Checking…';
+        try{
+          const result=await creation('RUN_CREATE_STEP',{
+            intentId:item.intentId,expectedRevision:item.revision});
+          if(mine!==seq)return;
+          const status=document.createElement('span');
+          status.textContent=result?.ok?
+            ' · Recorded '+(result.record?.state||'new canonical revision'):
+            ' · Held: '+(result?.code||'UNKNOWN')+'; no success inferred';
+          line.append(status);
+          await fetchBatches();
+        }catch{
+          if(mine===seq){
+            const status=document.createElement('span');
+            status.textContent=' · Acknowledgment uncertain. Refresh canonical queue before any further step.';
+            line.append(status);
+          }
+        }finally{action.disabled=false;action.textContent=before;}
+      });
+      line.append(document.createTextNode(' '),action);
+    }
     list.append(line);
   }
   if(res.truncated&&res.next){
