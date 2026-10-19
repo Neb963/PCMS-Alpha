@@ -1071,15 +1071,36 @@ def main():
                     expectedStageRevision:1,expectedJobRevision:1,
                     sourceFingerprint:'b'.repeat(64),instructions:'',source:{forged:true}});
                   const unknown=await call('GET_CHANGE',{slug:'fixture-s06'});
+                  const authority=(type,params={})=>new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-s06-authority'});
+                    let finished=false;
+                    const timer=setTimeout(()=>finish({ok:false,code:'AUTHORITY_TIMEOUT'}),8000);
+                    function finish(value){if(finished)return;finished=true;
+                      clearTimeout(timer);try{port.disconnect()}catch{}resolve(value);}
+                    port.onMessage.addListener(finish);
+                    port.onDisconnect.addListener(()=>finish({ok:false,code:'AUTHORITY_DISCONNECTED'}));
+                    port.postMessage({type,params});
+                  });
+                  const standing=await authority('GET');
+                  const forgedGrant=await authority('SET',{expectedRevision:1,
+                    repositoryId:'1411034835',grants:{development:true,gitWrite:true,
+                    publication:true},consent:'unsolicited'});
                   const ui=['pcms-s06-review-queue','pcms-s06-review-refresh',
                     'pcms-s06-review-next','pcms-s06-request-changes',
-                    'pcms-s06-change-instructions'].every(id=>
+                    'pcms-s06-change-instructions','pcms-s06-authority-enable',
+                    'pcms-s06-authority-revoke'].every(id=>
                       document.getElementById(id)!==null);
                   done({ok:list?.ok===true&&Array.isArray(list.items)&&
                     blocked?.code==='INVALID_PARAMS'&&
-                    unknown?.code==='S06_REQUEST_NOT_FOUND'&&ui,
+                    unknown?.code==='S06_REQUEST_NOT_FOUND'&&
+                    standing?.ok===true&&
+                    standing.record?.grants?.gitWrite===false&&
+                    standing.record?.grants?.development===false&&
+                    standing.record?.grants?.publication===false&&
+                    forgedGrant?.code==='STANDING_CONSENT_INVALID'&&ui,
                     listCode:list?.code||null,blockedCode:blocked?.code||null,
-                    unknownCode:unknown?.code||null,ui});
+                    unknownCode:unknown?.code||null,standingCode:standing?.reason,
+                    forgedGrantCode:forgedGrant?.code,ui});
                 })().catch(e=>done({ok:false,error:String(e).slice(0,200)}));"""
                 s06_result=call('POST',f'/session/{after}/execute/async',
                     {'script':s06_script,'args':[]},timeout=30)
