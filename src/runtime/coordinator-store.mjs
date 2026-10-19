@@ -129,9 +129,7 @@ export function createCoordinatorStore(db){
         if(typeof keyName==='string'&&keyName.startsWith('s00-create-intent:')&&
            record&&(!after||keyName>'s00-create-intent:'+after)){
           if(items.length>=limit){
-            truncated=true;
-            finish({ok:true,items,truncated,next:tail,providerEffects:'OFF'});
-            return;
+            truncated=true;cursor.continue();return;
           }
           items.push({intentId:record.intentId,slug:record.slug,
             accountId:record.accountId||null,state:record.state,
