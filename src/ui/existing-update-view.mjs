@@ -30,7 +30,7 @@ function paint(){
       receipt&&receipt.slug===slug.value&&allowed[action]?.includes(receipt.state);
     buttons[action].disabled=busy||!eligible||
       (withPass.has(action)&&password.value.length<12)||
-      (withToken.has(action)&&token.value.length<12);
+      (withToken.has(action)&&token.value.length>0&&token.value.length<12);
   }
 }
 function explain(x){
@@ -72,7 +72,7 @@ async function act(type){
   const p={slug:slug.value};
   if(accepted)p.expectedRevision=receipt.revision;
   if(withPass.has(type))p.passphrase=password.value;
-  if(withToken.has(type))p.token=token.value;
+  if(withToken.has(type)&&token.value)p.token=token.value;
   try{
     const v=await call(type,p);
     if(serial!==epoch)return;
