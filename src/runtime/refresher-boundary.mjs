@@ -198,7 +198,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         accountId:uncertain.accountId,personaUid:uncertain.personaUid,
         bindingVersion:uncertain.bindingVersion,
         principalFingerprint:a.principalFingerprint,remoteId:uncertain.remoteId,
-        markerId:intent.markerId||null,
+        markerId:intent.markerId||null,nonce:intent.nonce||null,
         releaseFingerprint:uncertain.releaseFingerprint,
         sourceFingerprint:intent.sourceFingerprint,
         targetFingerprint:intent.targetFingerprint||null};
