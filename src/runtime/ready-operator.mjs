@@ -3,6 +3,9 @@
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {openCanonicalDatabase,createRestoreSentinel,fail} from './journal.mjs';
 import {createReadyStore} from './ready-store.mjs';
+import {createStagingStore} from './staging-store.mjs';
+import {stageReadyGitSource} from './ready-git-source.mjs';
+import {evaluateStageSuccessor} from './ready-source-safety.mjs';
 import {scanMainCatalog} from './git-catalog.mjs';
 import {inspectReadyCandidate} from './catalog-declaration.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
@@ -18,7 +21,7 @@ const b64=text=>{
 };
 export function validateReadyOperator(api,sender,packet){
  if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
- if(packet?.type!=='ASSESS_READY'||!packet.params||
+ if(!['ASSESS_READY','PREPARE_LOCAL'].includes(packet?.type)||!packet.params||
     typeof packet.params!=='object'||Array.isArray(packet.params)||
     Object.keys(packet).some(k=>!['type','params'].includes(k))||
     Object.keys(packet.params).some(k=>!['slug','expectedRevision'].includes(k))||
@@ -41,10 +44,13 @@ function facts(db,name){
       m.get('stage:'+name).onsuccess=st=>{
        m.get('ai-job:'+name).onsuccess=ai=>{
         m.get('existing-update:'+name).onsuccess=ex=>{
-         out={ok:true,link,account:a.target.result?.account,
-          inventory:i.target.result?.generator,
-          adoption:ad.target.result?.adoption,stage:st.target.result?.record,
-          ai:ai.target.result?.job,existing:ex.target.result?.record};
+         m.get('release:'+name).onsuccess=re=>{
+          out={ok:true,link,account:a.target.result?.account,
+           inventory:i.target.result?.generator,
+           adoption:ad.target.result?.adoption,stage:st.target.result?.record,
+           ai:ai.target.result?.job,existing:ex.target.result?.record,
+           release:re.target.result?.release};
+         };
         };
        };
       };
@@ -56,6 +62,7 @@ function facts(db,name){
 }
 export function createReadyOperator(api,{open=openCanonicalDatabase,
  guard=internalPcmsGuard,scan=scanMainCatalog,inspect=inspectReadyCandidate,
+ stagingFactory=createStagingStore,
  native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p)}={}){
  const sentinel=createRestoreSentinel(api.storage.local);
  let dbPromise;
@@ -75,7 +82,7 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
    if(!expected)return fail('READY_NOT_QUEUED');
    const current=await facts(db,name);
    if(!current.ok)return current;
-   const {link,account,inventory,adoption,stage,ai,existing}=current;
+   const {link,account,inventory,adoption,stage,ai,existing,release}=current;
    if(link.folder!=='generators/'+name||link.slug!==name||
       link.accountId!==account?.accountId||
       link.personaUid!==account?.personaUid||
@@ -97,7 +104,7 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
     return fail('S05_GIT_MAIN_UNVERIFIED');
    const coherent=await inspect({repository:cfg.repository,
      token:secret.credential,pinnedHead:tree.head,
-     slug:name,includeSourceBytes:false});
+     slug:name,includeSourceBytes:message.type==='PREPARE_LOCAL'}
    const id=coherent?.legacy?
       'legacy-'+coherent.declarationCommit+'-'+coherent.markerOid:
       'rev-'+coherent?.token;
