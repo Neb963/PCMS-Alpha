@@ -46,8 +46,7 @@ export function validateExistingMessage(api,sender,m){
      ('token'in p&&(typeof p.token!=='string'||p.token.length<12||
        p.token.length>512||!/^[\x21-\x7e]+$/.test(p.token)))||
      (allowed[m.type].includes('expectedRevision')&&!Number.isSafeInteger(p.expectedRevision))||
-     (allowed[m.type].includes('passphrase')&&!('passphrase'in p))||
-     (allowed[m.type].includes('token')&&!('token'in p)))
+     (allowed[m.type].includes('passphrase')&&!('passphrase'in p)))
     return fail('INVALID_PARAMS');
   return {ok:true};
 }
