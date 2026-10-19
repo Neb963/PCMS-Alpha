@@ -22,6 +22,9 @@ test('S06 combined-XPI production copy includes each new runtime module and one 
  assert.match(html,/pcms-s06-change-instructions/);
  assert.match(html,/pcms-s06-review-queue/);
  assert.match(html,/pcms-s06-request-changes/);
+ assert.match(html,/Protected workflow activation/);
+ assert.doesNotMatch(html,/Account and provider mutations<\/dt><dd>Off — not implemented/);
+ assert.doesNotMatch(html,/UI navigation available · PCMS side effects disabled/);
  assert.equal(html.includes(String.raw`</script>\n  <script`),false,
    'HTML module imports must not leak escaped newline text into UI');
 });
