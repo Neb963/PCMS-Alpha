@@ -5,6 +5,10 @@ import {fail,openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 import {createReleaseStore} from './release-store.mjs';
+import {createReadyStore} from './ready-store.mjs';
+import {createWritebackStore} from './writeback-store.mjs';
+import {planS06Writeback} from './s06-writeback-progress.mjs';
+import {createS06ReviewQueue} from './s06-review-queue.mjs';
 import {createExistingStore} from './existing-update-store.mjs';
 import {unlockPrevious} from './existing-update-core.mjs';
 import {REFRESHER_KEY} from './refresher-core.mjs';
@@ -19,7 +23,7 @@ import {releaseContext,releaseTestContext,candidateManifest,releaseGitContext,
 export const RELEASE_PORT='pcms-i13-release';
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const fp=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
-const TYPES=new Set(['LIST','GET','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
+const TYPES=new Set(['LIST','LIST_REVIEW','GET','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
 export function validateReleaseMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
@@ -27,7 +31,7 @@ export function validateReleaseMessage(api,sender,msg){
      Object.keys(msg).some(k=>!['type','params'].includes(k))||!TYPES.has(msg.type))
     return fail('INVALID_MESSAGE');
   const p=msg.params||{},allowed={
-    LIST:[],GET:['slug'],PREVIEW:['slug','token','passphrase'],
+    LIST:[],LIST_REVIEW:['after','limit'],GET:['slug'],PREVIEW:['slug','token','passphrase'],
     GET_REVIEW_CHUNK:['slug','stageRevision','fingerprint','origin','path','offset'],
     APPROVE:['slug','token','expectedStageRevision','expectedJobRevision','fingerprint','explicitApproval','passphrase'],
     CANCEL_APPROVED:['slug','expectedRevision'],
@@ -36,10 +40,14 @@ export function validateReleaseMessage(api,sender,msg){
   };
   if(!p||typeof p!=='object'||Array.isArray(p)||
      Object.keys(p).some(k=>!allowed[msg.type].includes(k))||
-     (msg.type!=='LIST'&&!slug(p.slug))||
+     (!['LIST','LIST_REVIEW'].includes(msg.type)&&!slug(p.slug))||
+     (msg.type==='LIST_REVIEW'&&(
+       (p.after!==undefined&&(typeof p.after!=='string'||p.after.length>100||
+         !/^(?:[a-z0-9][a-z0-9-]{0,99})?$/.test(p.after)))||
+       (p.limit!==undefined&&(!Number.isSafeInteger(p.limit)||p.limit<1||p.limit>100))))||
      (['PREVIEW','APPROVE','DISPATCH','RECONCILE'].includes(msg.type)&&
-       (typeof p.token!=='string'||p.token.length<12||p.token.length>512||
-        !/^[\x21-\x7e]+$/.test(p.token)))||
+       (p.token!==undefined&&(typeof p.token!=='string'||p.token.length<12||
+        p.token.length>512||!/^[\x21-\x7e]+$/.test(p.token))))||
      (p.passphrase!==undefined&&(typeof p.passphrase!=='string'||p.passphrase.length<12||p.passphrase.length>256))||
      (msg.type==='GET_REVIEW_CHUNK'&&(
        !Number.isSafeInteger(p.stageRevision)||p.stageRevision<1||
@@ -108,6 +116,7 @@ export function createReleaseBoundary(api,{
   // Only an independently activated fixed native publish adapter may
   // change listing. Default packaged capability is held.
   effectGate=()=>false,
+  native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
   dispatch=async(g,r)=>g.runReleaseStep?.(r.personaUid,{
     slug:r.slug,nonce:r.nonce,action:'PUBLISH',remotePublicId:r.remotePublicId,
     principalFingerprint:r.principalFingerprint,files:r.releaseFiles})
@@ -115,6 +124,23 @@ export function createReleaseBoundary(api,{
   let dbPromise;
   const db=()=>dbPromise ||=open().catch(e=>{dbPromise=null;throw e;});
   const sentinel=createRestoreSentinel(api.storage.local);
+  async function vaultToken(explicit){
+    if(typeof explicit==='string'&&explicit.length>=12)return explicit;
+    const cfg=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
+    if(cfg?.repository!=='Neb963/per-gens'||
+       !/^[1-9][0-9]{0,19}$/.test(cfg.repositoryId||''))return null;
+    const reply=await native({action:'git.get',repositoryId:cfg.repositoryId});
+    return reply?.ok&&typeof reply.credential==='string'&&
+      reply.credential.length>=12&&reply.credential.length<=512&&
+      /^[\\x21-\\x7e]+$/.test(reply.credential)?reply.credential:null;
+  }
+  async function reviewPassphrase(explicit){
+    if(typeof explicit==='string'&&explicit.length>=12)return explicit;
+    const reply=await native({action:'get'});
+    return reply?.ok&&typeof reply.passphrase==='string'&&
+      reply.passphrase.length>=12&&reply.passphrase.length<=256?
+      reply.passphrase:null;
+  }
   async function checkCurrent(database,name,token,{requireEditor=true,passphrase=null}={}){
     const stage=await stageFactory(database).getFull(name),
       job=await aiFactory(database).getJobFull(name),
@@ -157,6 +183,18 @@ export function createReleaseBoundary(api,{
       return fail('UNLISTED_LISTING_OBSERVATION_REQUIRED');
     const source=await candidateManifest(r,j);
     if(!source.ok)return source;
+    // The accepted READY workflow cannot be released merely because the
+    // old I13 candidate seems locally tested. The *same* S05 revision must
+    // have an independently attributed, byte-confirmed Git main commit.
+    const ready=await createReadyStore(database).get(name);
+    if(ready.ok){
+      const wb=await createWritebackStore(database).getFull(name);
+      const check=planS06Writeback({ready,stage,job,writeback:wb.ok?wb:null});
+      if(!check.ok||check.type!=='REVIEW'||
+         !/^[0-9a-f]{40}$/.test(check.commitSha||''))
+        return fail('S06_CURRENT_CANDIDATE_GIT_PROOF_REQUIRED');
+    }
+
     const fresh=await inspect({token,folder:r.sourceFolder,includeSourceBytes:true});
     const git=releaseGitContext(r,fresh);
     if(!git.ok)return git;
@@ -199,6 +237,8 @@ export function createReleaseBoundary(api,{
     const p=msg.params||{},database=await db(),store=releaseFactory(database);
     if(msg.type==='GET')return store.get(p.slug);
     if(msg.type==='LIST')return store.list();
+    if(msg.type==='LIST_REVIEW')return createS06ReviewQueue(database).list({
+      after:p.after||'',limit:p.limit||50});
     if(msg.type==='GET_REVIEW_CHUNK'){
       // Source is taken only from sealed canonical stage/job. Read-only,
       // revision-fenced review never grants publisher or Git authority.
@@ -227,6 +267,8 @@ export function createReleaseBoundary(api,{
     }
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
     if(msg.type==='CANCEL_APPROVED')return store.cancelApproved(p.slug,p.expectedRevision);
+    const token=await vaultToken(p.token);
+    if(!token)return fail('S06_GIT_VAULT_UNAVAILABLE');
     if(msg.type==='RECONCILE'){
       const row=await store.getFull(p.slug);
       if(!row.ok||row.record.revision!==p.expectedRevision)return fail('STALE_RELEASE');
@@ -236,7 +278,7 @@ export function createReleaseBoundary(api,{
         return fail('RECONCILIATION_NOT_REQUIRED');
       const g=guard(),route=await g.getSafeRouteReadiness(r.approval.personaUid);
       if(!route?.ready)return fail('PROTECTED_ROUTE_UNVERIFIED');
-      const fresh=await inspect({token:p.token,folder:r.approval.gitFolder,includeSourceBytes:true});
+      const fresh=await inspect({token,folder:r.approval.gitFolder,includeSourceBytes:true});
       if(!releaseGitContext({sourceFolder:r.approval.gitFolder,
         testingSha:r.approval.gitTestingSha},fresh).ok)
         return fail('READY_REVOKED');
@@ -256,7 +298,8 @@ export function createReleaseBoundary(api,{
         proof:evidence.ok?evidence:null,reason:evidence.code||'PUBLICATION_UNCERTAIN'
       });
     }
-    const checked=await checkCurrent(database,p.slug,p.token,{passphrase:p.passphrase});
+    const checked=await checkCurrent(database,p.slug,token,{
+      passphrase:await reviewPassphrase(p.passphrase)});
     if(!checked.ok)return checked;
     if(msg.type==='PREVIEW'){
       return {ok:true,slug:p.slug,stageRevision:checked.r.revision,
