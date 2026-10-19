@@ -68,7 +68,7 @@ test('S04 effect D: guarded two provider writes after committed possible-effect 
   out=await next();assert.equal(out.record.state,'RENAME_OBSERVING');
   assert.deepEqual(r.ledger,['CREATE','RENAME']);
   out=await next();assert.equal(out.record.state,'GIT_INIT_PENDING');
-  assert.equal((await next()).code,'GIT_CONDITIONAL_ASSOCIATION_PENDING');
+  assert.equal((await next()).code,'GIT_RECONNECT_REQUIRED');
   assert.equal(ctx.db.keys('operations').length,2);
 });
 test('S04 effect D: no effects in packaged default gate and no repeat after lost CREATE ACK',async()=>{
