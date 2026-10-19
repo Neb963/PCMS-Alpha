@@ -205,6 +205,7 @@ export function createStagingBoundary(api,{
       try{result=await g.runStageStep(r.personaUid,{
         slug:r.slug,nonce:r.nonce,remotePublicId:r.remotePublicId,
         previousFingerprint:r.previous.fingerprint,
+        previousFiles:r.previous.blobs,
         candidate:r.candidate.blobs
       });}catch{}
       const after=await s.getFull(r.slug);
