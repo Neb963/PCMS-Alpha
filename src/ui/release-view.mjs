@@ -5,6 +5,8 @@ const token=document.getElementById('pcms-release-token');
 const passphrase=document.getElementById('pcms-existing-passphrase');
 const previewBtn=document.getElementById('pcms-release-preview');
 const approveBtn=document.getElementById('pcms-release-approve');
+const requestChangesBtn=document.getElementById('pcms-s06-request-changes');
+const changeInstructions=document.getElementById('pcms-s06-change-instructions');
 const dispatchBtn=document.getElementById('pcms-release-dispatch');
 const cancelBtn=document.getElementById('pcms-release-cancel');
 const reconcileBtn=document.getElementById('pcms-release-reconcile');
@@ -40,6 +42,8 @@ function controls(){
   loadBtn.disabled=active||!target;
   clearBtn.disabled=active;
   approveBtn.disabled=active||!snapshot||snapshot.slug!==slug.value;
+  requestChangesBtn.disabled=active||!snapshot||snapshot.slug!==slug.value||
+    changeInstructions.value.trim().length<3;
   cancelBtn.disabled=active||!receipt||receipt.slug!==slug.value||
     receipt.state!=='APPROVED';
   dispatchBtn.disabled=active||!receipt||receipt.slug!==slug.value||
@@ -155,6 +159,12 @@ async function act(type,params,message){
     if(result?.ok){
       if(type==='PREVIEW'){snapshot=result;receipt=null;renderPreview(result);
         note('Exact saved F, current READY and editor checked. Individual approval available.');}
+      else if(type==='REQUEST_CHANGES'){
+        snapshot=null;receipt=null;details.replaceChildren();
+        changeInstructions.value='';
+        note('Saved source-bound Request Changes '+result.requestId+
+          ' · pending safe child admission. Old approval is revoked; nothing published.');
+      }
       else if(type==='APPROVE'){receipt=result;note('Durable source-bound approval '+result.releaseId+
         '. No provider effect performed.');}
       else if(type==='CANCEL_APPROVED'){receipt=result;snapshot=null;
@@ -179,6 +189,16 @@ async function act(type,params,message){
 }
 previewBtn.addEventListener('click',()=>act('PREVIEW',{
   slug:slug.value,token:token.value,passphrase:passphrase.value},'Checking current owner, route, clean editor, Git READY and full saved F…'));
+requestChangesBtn.addEventListener('click',()=>{
+  const f=snapshot;
+  if(!f||f.slug!==slug.value)return;
+  act('REQUEST_CHANGES',{slug:f.slug,token:token.value,
+    passphrase:passphrase.value,expectedStageRevision:f.stageRevision,
+    expectedJobRevision:f.jobRevision,sourceFingerprint:f.sourceFingerprint,
+    instructions:changeInstructions.value.trim(),
+    ...(f.releaseRevision!==null?{releaseRevision:f.releaseRevision}:{})},
+    'Revalidating current Git F, guarded saved source and approval before recording the child request…');
+});
 approveBtn.addEventListener('click',()=>{
   const f=snapshot;
   if(!f||f.slug!==slug.value)return;
@@ -216,6 +236,7 @@ slug.addEventListener('input',()=>{
 });
 token.addEventListener('input',controls);
 passphrase?.addEventListener('input',controls);
+changeInstructions.addEventListener('input',controls);
 controls();
 
 // S06 canonical release candidate queue: read-only, bounded and fully keyboard
