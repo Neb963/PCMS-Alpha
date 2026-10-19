@@ -23,6 +23,7 @@ function request(portName,type,params){
   });
 }
 const supply=(type,params)=>request('pcms-i06-supply',type,params);
+const creation=(type,params)=>request('pcms-s00-coordinator',type,params);
 const parsed=()=>input.value.replace(/\r\n/g,'\n').split('\n').filter(x=>x.length>0);
 function setBusy(value){
   busy=value;preview.disabled=value;freeze.disabled=value||!latest||!latest.items.some(i=>i.state==='FROZEN');
@@ -52,7 +53,7 @@ function drawQueue(result){
     return;
   }
   if(!result.batches.length){
-    queue.textContent='No frozen slug batches. No provider effects attempted.';
+    queue.textContent='No legacy slug batches. No provider effects attempted.';
     return;
   }
   for(const batch of result.batches){
@@ -141,11 +142,61 @@ async function loadAccounts(){
       select.append(option);
     }
     if(accounts.some(a=>a.accountId===value))select.value=value;
-    notice('Local draft only. Freeze records immutable requested slugs, not a remote reservation. Provider activation is held.');
+    notice('Preview requested slugs, then record them in the unified creation queue. Provider and Git writes remain held.');
   }catch{
     if(mine===seq){accounts=[];select.replaceChildren();
       notice('Account authority unavailable. Cannot freeze a batch.');}
   }finally{if(mine===seq)setBusy(false);}
+}
+async function appendCanonicalQueue(mine,after=null){
+  let res;
+  try{res=await creation('LIST_CREATE_INTENTS',{after,limit:100});}
+  catch{res={ok:false,code:'QUEUE_UNAVAILABLE'};}
+  if(mine!==seq)return;
+  let section=queue.querySelector('[data-pcms-creation-queue]');
+  if(after===null){
+    section=document.createElement('section');
+    section.dataset.pcmsCreationQueue='true';
+    const heading=document.createElement('h3');
+    heading.textContent='Unified creation requests';
+    const explanation=document.createElement('p');
+    explanation.textContent='Operator and approved Git origins share one durable slug. Remote creation/adoption is held pending protected admission.';
+    const list=document.createElement('ul');
+    list.dataset.pcmsCreationList='true';
+    section.append(heading,explanation,list);
+    queue.prepend(section);
+  }
+  if(!section)return;
+  const list=section.querySelector('[data-pcms-creation-list]');
+  const oldMore=section.querySelector('[data-pcms-creation-more]');
+  oldMore?.remove();
+  if(res?.ok!==true){
+    const line=document.createElement('p');
+    line.textContent='Unified queue unavailable ('+(res?.code||'UNKNOWN')+'). No provider action inferred.';
+    section.append(line);return;
+  }
+  if(res.items.length===0&&after===null){
+    const line=document.createElement('li');
+    line.textContent='No unified creation requests.';
+    list.append(line);
+  }
+  for(const item of res.items){
+    const line=document.createElement('li');
+    line.textContent=item.slug+' — '+item.state+
+      (item.hold?' ('+item.hold+')':'')+
+      ' · '+item.origins.join(' + ')+
+      (item.accountId?' · '+item.accountId:' · unallocated');
+    list.append(line);
+  }
+  if(res.truncated&&res.next){
+    const more=document.createElement('button');more.type='button';
+    more.dataset.pcmsCreationMore='true';
+    more.textContent='Show more creation requests';
+    more.addEventListener('click',()=>{
+      more.disabled=true;void appendCanonicalQueue(mine,res.next);
+    });
+    section.append(more);
+  }
 }
 async function fetchBatches(){
   const mine=seq;
@@ -154,6 +205,7 @@ async function fetchBatches(){
     if(mine!==seq)return;
     drawQueue(res);
   }catch{if(mine===seq)drawQueue(null);}
+  if(mine===seq)await appendCanonicalQueue(mine);
 }
 function payload(){
   const account=accounts.find(a=>a.accountId===select.value);
@@ -189,19 +241,30 @@ freeze.addEventListener('click',async()=>{
   if(JSON.stringify(p.slugs)!==JSON.stringify(list)){
     latest=null;setBusy(false);notice('Input changed; preview again before freezing.');return;
   }
-  p.batchId='batch_'+crypto.randomUUID().replaceAll('-','');
-  const mine=++seq;setBusy(true);notice('Committing exact batch to canonical IndexedDB…');
+  const mine=++seq;setBusy(true);
+  const outcomes=[];
+  notice('Recording exact admissible slugs in the unified canonical queue…');
   try{
-    const res=await supply('FREEZE',p);
-    if(mine!==seq)return;
-    if(!res?.ok)throw Error(res?.code||'NOT_COMMITTED');
-    latest=null;paint(res.batch.items,true);
-    notice('Batch '+res.batch.batchId+' committed locally. Each item retains its requested slug. '+
-      'Provider create/rename and Git folder writes remain held; no external effect claimed.');
+    for(const item of latest.items){
+      if(item.state!=='FROZEN'){
+        outcomes.push({...item});continue;
+      }
+      const intentId='intent_'+crypto.randomUUID().replaceAll('-','');
+      let result;
+      try{result=await creation('ACCEPT_CREATE_INTENT',{
+        intentId,slug:item.slug,origin:'OPERATOR',accountId:p.accountId
+      });}catch{result={ok:false,code:'ACK_UNKNOWN'};}
+      if(mine!==seq)return;
+      outcomes.push({...item,state:result?.ok?'WAITING_CAPABILITY':'HELD',
+        reason:result?.ok?'S04_CREATION_ACTIVATION_HELD':result?.code||'ACK_UNKNOWN'});
+    }
+    latest=null;paint(outcomes,true);
+    const stored=outcomes.filter(x=>x.state==='WAITING_CAPABILITY').length;
+    notice(stored+' slug intents acknowledged in the canonical creation queue; '+
+      (outcomes.length-stored)+' rejected or unconfirmed. A lost ACK requires queue inspection, not blind remote retry. No provider/Git effect.');
     await fetchBatches();
-  }catch(e){
-    if(mine===seq)notice('Freeze not confirmed ('+(e.message||'UNKNOWN')+
-      '). Refresh local Work Queue before retrying; no remote effect is implied.');
+  }catch{
+    if(mine===seq)notice('Canonical local intake interrupted. Inspect Work Queue before retrying. No remote effect was authorized.');
   }finally{if(mine===seq)setBusy(false);}
 });
 refresh.addEventListener('click',()=>{void loadAccounts();void fetchBatches();});
