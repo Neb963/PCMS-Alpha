@@ -41,7 +41,12 @@ function inspector(){
 function draw(s){
   const focusId=document.activeElement?.dataset?.stableId;
   snapshot=s;
-  const summary=s.occupied+' occupied shadow slots / '+s.capacity.cap+
+  const occupancy=s.recent.latestOccupancy;
+  const observed=occupancy?
+    occupancy.ownedVisible+' owned visible of '+occupancy.feedSize+
+      ' returned recent items ('+occupancy.activeVisible+' active)':
+    'owned recent-page occupancy not yet observed';
+  const summary=observed+' · '+s.occupied+' scheduled slots / '+s.capacity.cap+
     ' admission cap · '+s.eligible+' eligible · planning '+s.capacity.demand.toFixed(2)+
     ' · '+(s.capacity.warning||'multi-window observation')+' · '+
     age(s.recent.observedAt)+(s.recent.stale?' (stale)':'')+
