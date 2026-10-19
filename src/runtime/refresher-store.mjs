@@ -307,6 +307,7 @@ export function createRefresherStore(db){
       personaUid:r.personaUid,bindingVersion:r.bindingVersion,
       principalFingerprint:s.accounts[r.accountId]?.principalFingerprint,
       remoteId:r.remoteId,markerId:attempt.evidence.intent?.markerId||null,
+      nonce:attempt.evidence.intent?.nonce||null,
       releaseFingerprint:r.releaseFingerprint,sourceFingerprint:currentSource,
       targetFingerprint:attempt.evidence.intent?.targetFingerprint||null},
       changes:[{code:'REFRESH_RESERVED',scopeId:stableId}]};
@@ -330,6 +331,7 @@ export function createRefresherStore(db){
       r.refresh?.intent?.targetFingerprint!==(
         claim.targetFingerprint||undefined)||
       (r.refresh?.intent?.markerId||null)!==(claim.markerId||null)||
+      (r.refresh?.intent?.nonce||null)!==(claim.nonce||null)||
       !r.ownerVerified||!r.releaseVerified||r.identityHeld||r.reviewHeld||
       r.listing!=='PUBLIC'||s.accounts[r.accountId]?.principalFingerprint!==claim.principalFingerprint||
       !r.slot||r.phase!=='ACTIVE'||rowBlocks(s,r).length)
