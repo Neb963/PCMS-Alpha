@@ -77,10 +77,10 @@ export function createReadyIntake(api,{open=openCanonicalDatabase,
    let evidence;
    // Current READY inputs remain frozen after a PCMS-authored Git output.
    // Only a sealed confirmed S06 operation can open that narrow exception.
-   const [ready,stage,writeback]=await Promise.all([
+   const [readyRow,stage,writeback]=await Promise.all([
      queue.get(slug),createStagingStore(db).getFull(slug),
      createWritebackStore(db).getFull(slug)]);
-   const proof=sealedS06OutputProof({ready,stage,writeback});
+   const proof=sealedS06OutputProof({ready:readyRow,stage,writeback});
    try{evidence=await inspect({repository,token,slug,
       pinnedHead:catalog.head,includeSourceBytes:false,
       ...(proof.ok?{outputProof:proof.outputProof}:{})},transport);}
