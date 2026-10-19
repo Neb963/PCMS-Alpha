@@ -19,6 +19,7 @@ export function validateCreationCatalog(catalog){
      catalog.recognizedCount!==catalog.generators.length)return fail('S04_CATALOG_UNVERIFIED');
   const seen=new Set();
   for(const g of catalog.generators){
+    if(!g||typeof g!=='object'||Array.isArray(g))return fail('S04_CATALOG_UNVERIFIED');
     if(seen.has(g.slug))return fail('S04_CATALOG_DUPLICATE_SLUG');
     seen.add(g.slug);
     const w={repository:catalog.repository,repositoryId:catalog.repositoryId,
@@ -26,8 +27,8 @@ export function validateCreationCatalog(catalog){
       complete:true,verifiedMain:true};
     // Quarantine is a per-slug hold, not a reason to suppress all healthy
     // slugs in the independently verified catalog.
-    if(!validateGitCreationWitness(w).ok&&
-       g.slug!=='pcms-test-esr-chain-20261015-a01')
+    const verified=validateGitCreationWitness(w);
+    if(!verified.ok&&verified.code!=='I17_ORIGINAL_EFFECT_QUARANTINED')
       return fail('S04_CATALOG_UNVERIFIED');
   }
   return {ok:true};
