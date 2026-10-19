@@ -3,16 +3,21 @@ import assert from 'node:assert/strict';
 import {createRefresherBoundary,validateRefresherMessage} from '../src/runtime/refresher-boundary.mjs';
 
 const H='a'.repeat(64),events=[];
-function fixture({gate=false,changeRoute=false,lostReadback=false,uncertain=false,reserved=false}={}){
+function fixture({gate=false,changeRoute=false,lostReadback=false,uncertain=false,reserved=false,
+  present=false,complete=true,stale=false}={}){
   const history=[],row={stableId:'target_01',slug:'fixture-generator',accountId:'account_01',
     personaUid:'persona_01',bindingVersion:1,remoteId:'remote_01',slot:true,
     phase:'ACTIVE',ownerVerified:true,releaseVerified:true,releaseFingerprint:H,
     listing:'PUBLIC',identityHeld:false,reviewHeld:false,
     refresh:{intent:uncertain?{state:'DISPATCH_POSSIBLE',id:'attempt_01',sourceFingerprint:H}:
       reserved?{state:'RESERVED',id:'attempt_01',at:1000,sourceFingerprint:H}:null,
-      suspended:uncertain,nextAttemptAt:0,probes:uncertain?1:0},metrics:{nextDueAt:999999999}};
+      state:uncertain?'DISPATCH_POSSIBLE':reserved?'ATTEMPT_PENDING':'ABSENT_ONCE',
+      misses:1,suspended:uncertain,nextAttemptAt:0,probes:uncertain?1:0},
+    presence:{source:'GUARDED_RECENT_LIST',present,observedAt:stale?1:99000,
+      absence:'NOT_A_DELETION'},metrics:{nextDueAt:999999999}};
   const state={rows:[row],accounts:{account_01:{verifiedIdentity:true,principalFingerprint:H}},
-    recent:{nextDueAt:999999999,suspended:false}};
+    recent:{nextDueAt:999999999,suspended:false,complete,observedAt:stale?1:99000},
+    policy:{recentMs:600000}};
   const store={
     turn:async()=>({ok:true,revision:2,state:{nextWakeAt:180000,diagnostics:{turns:1}}}),
     read:async()=>({ok:true,state}),
@@ -94,4 +99,12 @@ test('P54-05 X: stale un-dispatched reservation can be canceled without any remo
   const result=await f.boundary.tick();
   assert.equal(result.refresh,'STALE_RESERVATION_ABORTED');
   assert.deepEqual(f.history,['cancel']);
+});
+
+test('S07 AC-14: dispatcher never saves while visible, incomplete or stale',async()=>{
+  for(const variant of [{present:true},{complete:false},{stale:true}]){
+    const f=fixture({gate:true,...variant});const result=await f.boundary.tick();
+    assert.equal(result.refresh,'NO_REFRESH_DUE',JSON.stringify(variant));
+    assert.deepEqual(f.history,[],JSON.stringify(variant));
+  }
 });
