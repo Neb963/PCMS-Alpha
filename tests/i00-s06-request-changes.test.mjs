@@ -176,3 +176,16 @@ test('S06 interrupted child admission retains all parent lineage atomically',asy
  assert.equal(x.db.read('meta','stage-history:'+name+':4'),undefined);
  assert.equal(x.db.read('meta','ai-history:'+name+':7'),undefined);
 });
+
+test('S06 Request Changes cannot bypass an existing human-editor hold',async()=>{
+ const x=await setup({releaseState:null});
+ await new Promise((resolve,reject)=>{
+  const t=x.db.transaction('meta','readwrite');t.oncomplete=resolve;t.onabort=reject;
+  t.objectStore('meta').put({key:'s06-human:'+name,
+   record:{slug:name,state:'DEFERRED',revision:1,parentStageRevision:4}});
+ });
+ const result=await x.request();
+ assert.equal(result.code,'S06_HUMAN_REVIEW_DEFERRED');
+ assert.equal(x.db.read('meta','s06-change:'+name),undefined);
+ assert.equal(x.db.keys('operations').length,0);
+});
