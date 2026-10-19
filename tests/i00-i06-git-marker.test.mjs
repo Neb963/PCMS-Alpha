@@ -4,7 +4,7 @@ import {NON_READY_MARKER,markerRequestAllowed,writeNonReadyFolder}
   from '../src/runtime/supply-git.mjs';
 const H='a'.repeat(40),T='b'.repeat(40),B='c'.repeat(40),
   N='d'.repeat(40),C='e'.repeat(40);
-const folder='gens/example-private',slug='example-private',token='offline-test-token-0001';
+const folder='generators/example-private',slug='example-private',token='offline-test-token-0001';
 function fixture({privateRepo=true,existing=false,drift=false,lostPatch=false,
   missingMain=false,wrongBlob=false}={}){
   let head=H,refReads=0;
@@ -69,9 +69,9 @@ test('S6-I06-GIT-MARKER-SAFETY F: only non-READY marker and nonforced CAS with b
   assert.equal(out.ready,false);assert.equal(out.emptyFolder,true);
   assert.equal(out.head,C);
   assert.equal(f.ledger.filter(x=>x.effect==='REF').length,1);
-  assert.equal(f.ledger.find(x=>x.effect==='BLOB').value,'Status: SOURCE_PENDING\n');
+  assert.equal(f.ledger.find(x=>x.effect==='BLOB').value,'Status: NOT_READY\n');
   assert.equal(f.ledger.every(x=>JSON.stringify(x).includes('READY')===false||
-    JSON.stringify(x).includes('SOURCE_PENDING')),true);
+    JSON.stringify(x).includes('NOT_READY')),true);
 });
 test('S6-I06-GIT-MARKER-SAFETY F: known occupied path, uninitialized main and public repo never write',async()=>{
   for(const flags of [{existing:true},{missingMain:true},{privateRepo:false}]){
@@ -80,9 +80,9 @@ test('S6-I06-GIT-MARKER-SAFETY F: known occupied path, uninitialized main and pu
     assert.equal(f.ledger.length,0,JSON.stringify(flags));
   }
   const f=fixture();
-  for(const bad of [{folder:'gens/../escape',slug},{folder:'gens/other',slug},
-    {folder:'gens/EXAMPLE-private',slug},{folder,slug,token:'short'},
-    {folder:'gens/other/private',slug}]){
+  for(const bad of [{folder:'generators/../escape',slug},{folder:'generators/other',slug},
+    {folder:'generators/EXAMPLE-private',slug},{folder,slug,token:'short'},
+    {folder:'generators/other/private',slug}]){
     const res=await writeNonReadyFolder({token,...bad},f.transport);
     assert.equal(res.ok,false);
   }
@@ -104,5 +104,5 @@ test('S6-I06-GIT-MARKER-SAFETY F: lost PATCH reply or bad readback cannot claim 
 test('S6-I06-GIT-MARKER-SAFETY F: marker policy excludes READY and path traversal',()=>{
   assert.equal(NON_READY_MARKER.includes('Status: READY\n'),false);
   assert.equal(markerRequestAllowed({folder,slug,token}).ok,true);
-  assert.equal(markerRequestAllowed({folder:'../gens/foo',slug,token}).ok,false);
+  assert.equal(markerRequestAllowed({folder:'../generators/foo',slug,token}).ok,false);
 });
