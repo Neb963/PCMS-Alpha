@@ -1049,6 +1049,250 @@ def main():
                 canonical=canonical_command(after,{'type':'SUMMARY'})
                 assert canonical.get('ok') is True and canonical.get('storage')=='READY',canonical
                 assert canonical.get('providerEffects')=='OFF',canonical
+                # S06 installed-package B: actually use the trusted release
+                # port with a new S06 list, reject forged Request Changes,
+                # and check the real rendered review controls are connected.
+                s06_script="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const call=(type,params={})=>new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-i13-release'});
+                    let finished=false;
+                    const timer=setTimeout(()=>finish({ok:false,code:'PORT_TIMEOUT'}),8000);
+                    function finish(value){
+                      if(finished)return;finished=true;clearTimeout(timer);
+                      try{port.disconnect()}catch{}resolve(value);
+                    }
+                    port.onMessage.addListener(finish);
+                    port.onDisconnect.addListener(()=>finish({ok:false,code:'PORT_DISCONNECTED'}));
+                    port.postMessage({type,params});
+                  });
+                  const list=await call('LIST_REVIEW',{after:'',limit:20});
+                  const blocked=await call('REQUEST_CHANGES',{slug:'fixture-s06',
+                    expectedStageRevision:1,expectedJobRevision:1,
+                    sourceFingerprint:'b'.repeat(64),instructions:'',source:{forged:true}});
+                  const unknown=await call('GET_CHANGE',{slug:'fixture-s06'});
+                  const humanMissing=await call('GET_HUMAN',{slug:'fixture-s06'});
+                  const humanUnknown=await call('HUMAN_CONTEXT',{slug:'fixture-s06'});
+                  const humanForged=await call('DEFER_HUMAN',{
+                    slug:'fixture-s06',expectedStageRevision:1,
+                    expectedJobRevision:1,expectedFingerprint:'b'.repeat(64),
+                    source:{pjs:'forged'}});
+                  const authority=(type,params={})=>new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-s06-authority'});
+                    let finished=false;
+                    const timer=setTimeout(()=>finish({ok:false,code:'AUTHORITY_TIMEOUT'}),8000);
+                    function finish(value){if(finished)return;finished=true;
+                      clearTimeout(timer);try{port.disconnect()}catch{}resolve(value);}
+                    port.onMessage.addListener(finish);
+                    port.onDisconnect.addListener(()=>finish({ok:false,code:'AUTHORITY_DISCONNECTED'}));
+                    port.postMessage({type,params});
+                  });
+                  const standing=await authority('GET');
+                  const forgedGrant=await authority('SET',{expectedRevision:1,
+                    repositoryId:'1411034835',grants:{development:true,gitWrite:true,
+                    publication:true},consent:'unsolicited'});
+                  // Positive B: same installed privileged port and real
+                  // storage, but a DISPOSABLE repository connection, no Git
+                  // credential, no provider account, and NO dispatch calls.
+                  const cfgBefore=(await browser.storage.local.get('pcmsS03Git')).pcmsS03Git;
+                  const fixtureCfg={repository:'Neb963/per-gens',repositoryId:'1411034835'};
+                  if(cfgBefore===undefined)
+                    await browser.storage.local.set({pcmsS03Git:fixtureCfg});
+                  const initial=await authority('GET');
+                  const localRepository=cfgBefore||fixtureCfg;
+                  const entitled=await authority('SET',{
+                    expectedRevision:initial.record?.revision,
+                    repositoryId:localRepository.repositoryId,
+                    grants:{development:false,gitWrite:false,publication:true},
+                    consent:'I AUTHORIZE PROTECTED PCMS OPERATIONS'});
+                  const granted=await authority('GET');
+                  const paused=await authority('REVOKE');
+                  const cleared=await authority('GET');
+                  if(cfgBefore===undefined)
+                    await browser.storage.local.remove('pcmsS03Git');
+                  const standingCycle=initial?.ok===true&&entitled?.ok===true&&
+                    granted?.record?.grants?.publication===true&&
+                    granted?.record?.grants?.development===false&&
+                    granted?.record?.grants?.gitWrite===false&&
+                    paused?.ok===true&&cleared?.record?.grants?.publication===false;
+                  // Positive installed B: actual extension IndexedDB and
+                  // release port Defer, plus installed C-53 adoption module
+                  // with an injected disposable guarded-source witness. Never
+                  // use a live Perchance account, provider tab, Git token or
+                  // private source in this synthetic browser fixture.
+                  const humanSlug='fixture-s06-human-b';
+                  const journal=await import(browser.runtime.getURL('pcms/journal.mjs'));
+                  const core=await import(browser.runtime.getURL('pcms/staging-core.mjs'));
+                  const humanModule=await import(browser.runtime.getURL('pcms/s06-human-review.mjs'));
+                  const db=await journal.openCanonicalDatabase();
+                  const humanF=await core.exactSource([
+                    {path:'main.pjs',base64:btoa('tested F fixture')},
+                    {path:'index.html',base64:btoa('<main>tested F</main>')}]);
+                  const savedH=await core.exactSource([
+                    {path:'main.pjs',base64:btoa('human saved fixture')},
+                    {path:'index.html',base64:btoa('<main>human saved</main>')}]);
+                  const principal='c'.repeat(64),input='b'.repeat(64),
+                    session='f'.repeat(64),commit='d'.repeat(40),
+                    identifier='rev-fixture-b';
+                  await new Promise((resolve,reject)=>{
+                    const t=db.transaction('meta','readwrite');
+                    t.oncomplete=resolve;t.onabort=()=>reject(Error('FIXTURE_IDB_ABORT'));
+                    const m=t.objectStore('meta');
+                    m.put({key:'s05-ready:'+humanSlug,record:{
+                      slug:humanSlug,revision:2,desired:null,hold:null,
+                      active:{identifier,inputFingerprint:input}}});
+                    m.put({key:'stage:'+humanSlug,record:{
+                      slug:humanSlug,revision:4,state:'SOURCE_VERIFIED',verifiedAt:1,
+                      candidate:humanF,previous:humanF,sourceHead:'a'.repeat(40),
+                      sourceFolder:'generators/'+humanSlug,readyIdentifier:identifier,
+                      readyInputFingerprint:input,testingSha:null,
+                      accountId:'fixture-account',personaUid:'fixture-persona',
+                      principalFingerprint:principal,remotePublicId:'fixture-remote',
+                      nonce:'fixture-nonce',bindingVersion:1}});
+                    m.put({key:'ai-job:'+humanSlug,accountId:'fixture-account',job:{
+                      slug:humanSlug,revision:7,stageRevision:4,
+                      state:'TESTS_VERIFIED',sourceFingerprint:humanF.fingerprint,
+                      verifiedFinal:humanF.fingerprint,finalSource:humanF,
+                      readyIdentifier:identifier,readyInputFingerprint:input,
+                      executionSlotReleased:true,
+                      native:{state:'CHAT1_OBSERVED_IDLE',sessionDigest:session},
+                      prompt:{revision:2,text:'Retest saved source.',
+                        tests:['default_generator_smoke']},optionalTesting:null,
+                      chat1:{state:'RUNNING',sessionDigest:session,tests:{
+                        default_generator_smoke:{result:'PASS',
+                          sourceFingerprint:humanF.fingerprint}}},chat2:null}});
+                    m.put({key:'writeback:'+humanSlug,record:{
+                      slug:humanSlug,revision:3,state:'CONFIRMED',mode:'S06',
+                      folder:'generators/'+humanSlug,stageRevision:4,jobRevision:7,
+                      readyIdentifier:identifier,readyInputFingerprint:input,
+                      sourceFingerprint:humanF.fingerprint,commitSha:commit}});
+                    m.put({key:'release:'+humanSlug,release:{
+                      slug:humanSlug,revision:2,state:'APPROVED',
+                      releaseId:'release_'+'a'.repeat(32),
+                      approval:{sourceFingerprint:humanF.fingerprint}}});
+                  });
+                  const humanBefore=await call('HUMAN_CONTEXT',{slug:humanSlug});
+                  const humanDeferred=await call('DEFER_HUMAN',{
+                    slug:humanSlug,expectedStageRevision:4,expectedJobRevision:7,
+                    expectedFingerprint:humanF.fingerprint});
+                  const humanReleaseState=await new Promise(resolve=>{
+                    const t=db.transaction('meta','readonly');
+                    const g=t.objectStore('meta').get('release:'+humanSlug);
+                    g.onsuccess=()=>resolve(g.result?.release?.state||null);
+                  });
+                  const synthetic={
+                    getSafeRouteReadiness:async()=>({ready:true,
+                      cookieStoreId:'fixture-ctx',routeId:'fixture-route'}),
+                    inspectStageEditor:async()=>({ok:true,clean:true}),
+                    runNativeAiStep:async()=>({ok:true,busy:false,editorClean:true,
+                      sourceSaved:true,sessionDigest:session,hasQueue:false,
+                      inputOccupied:false,attachmentsPending:false}),
+                    observeReadOnly:async()=>({ok:true,principalFingerprint:principal,
+                      original:{remotePublicId:'fixture-remote',ownerResult:'IS_OWNER',
+                        visibility:'UNLISTED',pjs:'human saved fixture',
+                        html:'<main>human saved</main>',assets:[]}})
+                  };
+                  const humanBoundary=humanModule.createS06HumanBoundary(browser,{
+                    open:async()=>db,guard:()=>synthetic});
+                  const humanAdopted=await humanBoundary.runTrusted({
+                    type:'ADOPT_HUMAN',params:{
+                      slug:humanSlug,expectedRevision:humanDeferred.revision}});
+                  const child=await new Promise(resolve=>{
+                    const t=db.transaction('meta','readonly');
+                    const req=t.objectStore('meta').get('ai-job:'+humanSlug);
+                    req.onsuccess=()=>resolve(req.result?.job||null);
+                  });
+                  const humanCycle=humanBefore?.ok===true&&
+                    humanDeferred?.state==='DEFERRED'&&
+                    humanReleaseState==='CANCELED'&&
+                    humanAdopted?.state==='ADOPTED_UNTESTED'&&
+                    child?.state==='PENDING_NATIVE_SESSION'&&
+                    child?.verifiedFinal===null&&
+                    child?.sourceFingerprint===savedH.fingerprint;
+                  // C-49 positive installed-XPI port with true unverified
+                  // optional Chat 2 status, immutable current source and
+                  // no provider/Git write. A manual record does not mint PASS.
+                  const exceptionSlug='fixture-s06-optional-b';
+                  await new Promise((resolve,reject)=>{
+                    const tx=db.transaction('meta','readwrite');
+                    tx.oncomplete=resolve;tx.onabort=()=>reject(Error('EXCEPTION_FIXTURE_ABORT'));
+                    const m=tx.objectStore('meta');
+                    m.put({key:'s05-ready:'+exceptionSlug,record:{
+                      slug:exceptionSlug,revision:1,desired:null,hold:null,
+                      active:{identifier:'rev-fixture-ex',inputFingerprint:input}}});
+                    m.put({key:'stage:'+exceptionSlug,record:{
+                      slug:exceptionSlug,revision:4,state:'SOURCE_VERIFIED',verifiedAt:1,
+                      candidate:humanF,previous:humanF,
+                      sourceFolder:'generators/'+exceptionSlug,
+                      readyIdentifier:'rev-fixture-ex',readyInputFingerprint:input}});
+                    m.put({key:'ai-job:'+exceptionSlug,accountId:'fixture-account',job:{
+                      slug:exceptionSlug,revision:7,stageRevision:4,
+                      state:'TESTS_UNVERIFIED',sourceFingerprint:humanF.fingerprint,
+                      verifiedFinal:null,finalSource:humanF,
+                      readyIdentifier:'rev-fixture-ex',readyInputFingerprint:input,
+                      executionSlotReleased:true,
+                      native:{state:'CHAT1_OBSERVED_IDLE',sessionDigest:session},
+                      prompt:{revision:2,text:'Test actual source.',
+                        tests:['default_generator_smoke']},
+                      optionalTesting:{sha256:input,tests:['optional_smoke'],
+                        text:'Test isolated optional Chat 2'},
+                      chat1:{state:'RUNNING',sessionDigest:session,tests:{
+                        default_generator_smoke:{result:'PASS',
+                          sourceFingerprint:humanF.fingerprint}}},
+                      chat2:{state:'PENDING',sessionDigest:null,tests:{}},
+                      hold:'AI_CHAT2_ISOLATION_UNVERIFIED'}});
+                  });
+                  const exceptionBefore=await call('EXCEPTION_CONTEXT',{slug:exceptionSlug});
+                  const exceptionRecorded=await call('RECORD_EXCEPTION',{
+                    slug:exceptionSlug,mode:'OPTIONAL_CHAT2_INCOMPLETE',
+                    checks:[],consent:'I PERFORMED THE RECORDED MANUAL CHECKS',
+                    expectedStageRevision:4,expectedJobRevision:7,
+                    sourceFingerprint:humanF.fingerprint});
+                  const exceptionSaved=await call('GET_EXCEPTION',{slug:exceptionSlug});
+                  const exceptionCycle=exceptionBefore?.ok===true&&
+                    exceptionBefore.evidenceState==='TESTS_UNVERIFIED'&&
+                    exceptionBefore.chat1Verified===true&&
+                    exceptionBefore.chat2Verified===false&&
+                    exceptionRecorded?.state==='RECORDED'&&
+                    exceptionSaved?.state==='RECORDED'&&
+                    exceptionSaved?.chat2Verified===false&&
+                    exceptionSaved?.publication==='NOT_AUTHORIZED';
+                  const ui=['pcms-s06-review-queue','pcms-s06-review-refresh',
+                    'pcms-s06-review-next','pcms-s06-request-changes',
+                    'pcms-s06-change-instructions','pcms-s06-authority-enable',
+                    'pcms-s06-authority-revoke','pcms-s06-human-inspect',
+                    'pcms-s06-human-defer','pcms-s06-human-adopt',
+                    'pcms-s06-exception-inspect','pcms-s06-exception-mode',
+                    'pcms-s06-exception-record','pcms-s06-exception-checks'].every(id=>
+                      document.getElementById(id)!==null);
+                  done({ok:list?.ok===true&&Array.isArray(list.items)&&
+                    blocked?.code==='INVALID_PARAMS'&&
+                    unknown?.code==='S06_REQUEST_NOT_FOUND'&&
+                    humanMissing?.code==='S06_HUMAN_REVIEW_NOT_FOUND'&&
+                    humanUnknown?.code==='S06_HUMAN_CONTEXT_UNAVAILABLE'&&
+                    humanForged?.code==='INVALID_PARAMS'&&
+                    standing?.ok===true&&
+                    standing.record?.grants?.gitWrite===false&&
+                    standing.record?.grants?.development===false&&
+                    standing.record?.grants?.publication===false&&
+                    forgedGrant?.code==='STANDING_CONSENT_INVALID'&&
+                    standingCycle&&humanCycle&&exceptionCycle&&ui,
+                    listCode:list?.code||null,blockedCode:blocked?.code||null,
+                    unknownCode:unknown?.code||null,
+                    humanCode:humanMissing?.code||null,
+                    humanForgedCode:humanForged?.code||null,
+                    standingCode:standing?.reason,
+                    forgedGrantCode:forgedGrant?.code,standingCycle,humanCycle,
+                    humanAdoptedState:humanAdopted?.state,
+                    exceptionCycle,exceptionMode:exceptionSaved?.mode,
+                    positiveCode:entitled?.code||'GRANTED',
+                    pauseCode:paused?.code||null,ui});
+                })().catch(e=>done({ok:false,error:String(e).slice(0,200)}));"""
+                s06_result=call('POST',f'/session/{after}/execute/async',
+                    {'script':s06_script,'args':[]},timeout=30)
+                assert s06_result.get('ok') is True,s06_result
+                print('B S06_INSTALLED_REVIEW_QUEUE_PORT_REQUEST_CHANGES_DENIAL_AND_UI=PASS',flush=True)
+
                 s00_intent={'intentId':'intent_s00_browser_001',
                     'slug':'s00-local-fixture','origin':'OPERATOR'}
                 s00_first=coordinator_command(after,{'type':'ACCEPT_CREATE_INTENT',
@@ -1655,8 +1899,9 @@ def main():
                                  {'script':code,'args':[]},timeout=90)
                 assert ai_recovery.get('ok') is True,ai_recovery
                 print('B I10_PACKAGED_NATIVE_DISPATCH_JOURNAL_FULL_SOURCE_CRASH_HOLD=PASS',flush=True)
-                # I10 B: synthetic independent-failure receipt feeding the
-                # canonical no-progress state; never a fake live-provider PASS.
+                # C-46 B: repeated observed same-source failures remain real
+                # required FAIL and may request another guarded repair. No
+                # subjective fixed-iteration stagnation cutoff is accepted.
                 code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const persistence=await import('./ai-store.mjs');
@@ -1690,16 +1935,18 @@ def main():
                   const noThird=await store.armNative(slug,twice.revision,'CHAT1_REPAIR');
                   done({ok:failed.ok&&failed.state==='KNOWN_FAILURE'&&
                     armed.ok&&seen.ok&&once.state==='KNOWN_FAILURE'&&
-                    again.ok&&seenAgain.ok&&twice.state==='HELD_NO_PROGRESS'&&
-                    twice.hold==='REPEATED_SAME_SOURCE_FAILED_REPAIR'&&
-                    noThird.code==='AI_VERIFIED_FAILURE_AND_SESSION_REQUIRED',
+                    again.ok&&seenAgain.ok&&twice.state==='KNOWN_FAILURE'&&
+                    twice.hold==='KNOWN_FAILURE_RETEST_REQUIRED'&&
+                    twice.evidence?.state==='KNOWN_FAILURE'&&
+                    noThird.ok===true&&noThird.state==='HELD_RECONCILE'&&
+                    noThird.nativeState==='DISPATCH_POSSIBLE',
                     failed,armed,once,again,twice,noThird});
                   db.close();
                 })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
                 ai_loop=call('POST',f'/session/{after}/execute/async',
                              {'script':code,'args':[]},timeout=90)
                 assert ai_loop.get('ok') is True,ai_loop
-                print('B I10_PACKAGED_KNOWN_FAILURE_NOT_DOWNGRADED_AND_REPAIR_NO_PROGRESS_HOLD=PASS',flush=True)
+                print('B S06_C46_REQUIRED_FAILURE_PRESERVED_REPAIR_ALLOWED_WITHOUT_STAGNATION_HEURISTIC=PASS',flush=True)
                 # I10 B: synthetic *real canonical IDB* one-repair convergence
                 # with independent F1 FAIL / F2 PASS; no Perchance request.
                 code="""const done=arguments[arguments.length-1];

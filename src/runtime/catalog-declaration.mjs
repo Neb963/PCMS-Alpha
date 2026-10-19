@@ -2,6 +2,7 @@
 // input inspection API, not authority to stage, publish or create a generator.
 // A READY line by itself is NEVER sufficient to dispatch source mutation.
 import {validRepository,recognizedSlug} from './git-catalog.mjs';
+import {observeGitCandidate} from './git-writeback.mjs';
 const SHA=/^[a-f0-9]{40}$/;
 const MAX_FILE=12*1024*1024;
 const FAIL=code=>({ok:false,code});
@@ -44,7 +45,7 @@ export function parseReadyDeclaration(text){
 }
 export async function inspectReadyCandidate({
   repository,token,slug,pinnedHead,includeSourceBytes=false,
-  includeTestingText=false,maxRequests=4096
+  includeTestingText=false,outputProof=null,maxRequests=4096
 },transport=fetch){
   if(!validRepository(repository)||!recognizedSlug(slug)||!SHA.test(pinnedHead||'')||
      typeof token!=='string'||token.length<12||token.length>512||
@@ -155,17 +156,19 @@ export async function inspectReadyCandidate({
     if(!candidates.some(e=>e.path==='main.pjs'&&e.size>0)||
        !candidates.some(e=>e.path==='index.html'&&e.size>0))
       return FAIL('READY_SOURCE_INCOMPLETE');
+    // Frozen declaration inputs stay immutable. A verified PCMS output
+    // may differ at current main without minting a fresh READY revision.
+    let sourceDrift=false;
     for(const c of candidates){
       const latest=current.get((folder+'/'+c.path).toLowerCase());
-      if(latest?.sha!==c.sha||latest.size!==c.size)
-        return FAIL('READY_SOURCE_DRIFT_AFTER_DECLARATION');
+      if(latest?.sha!==c.sha||latest.size!==c.size)sourceDrift=true;
     }
     const newestPaths=[...current.values()].filter(e=>e.type==='blob'&&
       (e.path===folder+'/main.pjs'||e.path===folder+'/index.html'||
        e.path.startsWith(folder+'/src/'))).map(e=>e.path.slice(folder.length+1));
     if(newestPaths.length!==candidates.length||
        newestPaths.some(p=>!candidates.some(c=>c.path===p)))
-      return FAIL('READY_SOURCE_DRIFT_AFTER_DECLARATION');
+      sourceDrift=true;
     const files=[];
     for(const c of candidates.sort((a,b)=>a.path.localeCompare(b.path,'en'))){
       const raw=await readBlob(c.entry);
@@ -183,7 +186,32 @@ export async function inspectReadyCandidate({
       sha256:hex(await crypto.subtle.digest('SHA-256',testingBytes)),
       ...(includeTestingText?{text:utf8.decode(testingBytes)}:{})}:
       {state:'ABSENT',oid:null,sha256:null};
+    let outputAttested=false;
+    if(sourceDrift){
+      const proof=outputProof;
+      const declaredId=parsed.legacy?
+        'legacy-'+introduced+'-'+marker.sha:'rev-'+parsed.token;
+      if(!proof||proof.readyIdentifier!==declaredId||
+         proof.readyInputFingerprint!==inputFingerprint||
+         proof.testingSha!==optionalTesting.sha256||
+         proof.folder!==folder||
+         !/^[0-9a-f]{40}$/.test(proof.commitSha||''))
+        return FAIL('READY_SOURCE_DRIFT_AFTER_DECLARATION');
+      // Matching content alone cannot certify authorship. Require original
+      // PCMS operation trailer, parent DAG and exact current Git blob bytes.
+      const git=await observeGitCandidate({
+        token,folder,baseHead:proof.baseHead,
+        expectedHead:proof.expectedHead,operationId:proof.operationId,
+        commitSha:proof.commitSha,source:proof.sealedSource
+      },transport);
+      if(!git.ok||git.code!=='GIT_COMMITTED_VERIFIED'||
+         git.head!==pinnedHead||git.commitSha!==proof.commitSha||
+         git.sourceFingerprint!==proof.sealedSource?.fingerprint)
+        return FAIL('READY_PCMS_OUTPUT_NOT_INDEPENDENTLY_ATTRIBUTED');
+      outputAttested=true;
+    }
     return {ok:true,code:'READY_COHERENT_INPUT_PINNED',
+      outputAttested,
       repository,slug,pinnedHead,declarationCommit:introduced,markerOid:marker.sha,
       token:parsed.token,legacy:parsed.legacy,inputFingerprint,files,optionalTesting,
       declarationIdentity:parsed.legacy?

@@ -1,10 +1,66 @@
 // I13 canonical release journal. No provider effect may occur in an IDB
 // transaction. A lost dispatch reply is always uncertain, never retried.
 import {fail} from './journal.mjs';
-import {matchesApproval,releaseContext,releaseTestContext} from './release-core.mjs';
+import {matchesApproval,releaseContext,releaseTestContext,
+  releaseCandidateTestContext} from './release-core.mjs';
 import {REFRESHER_KEY,validShadow} from './refresher-core.mjs';
 const slug=x=>typeof x==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(x);
 const key=s=>'release:'+s;
+// The same IndexedDB transaction must pin READY and independently attributed
+// Git F when approving or marking a possible provider publication.
+function withoutPendingChild(m,stage,done,commit){
+  m.get('s06-change:'+stage.slug).onsuccess=e=>{
+    const request=e.target.result?.record;
+    if(request?.state==='REQUESTED'&&
+       request.parentStageRevision===stage.revision){
+      done(fail('S06_UNRESOLVED_REQUEST_CHANGES'));return;
+    }
+    m.get('s06-human:'+stage.slug).onsuccess=h=>{
+      const human=h.target.result?.record;
+      if(human?.state==='DEFERRED'&&
+         human.parentStageRevision===stage.revision){
+        done(fail('S06_HUMAN_REVIEW_DEFERRED'));return;
+      }
+      commit();
+    };
+  };
+}
+function withS06Candidate(m,stage,job,done,commit,approval=null){
+  if(!stage?.readyIdentifier){commit();return;}
+  m.get('s05-ready:'+stage.slug).onsuccess=rr=>{
+    const ready=rr.target.result?.record;
+    if(!ready?.active||ready.desired||ready.hold||
+       ready.active.identifier!==stage.readyIdentifier||
+       ready.active.inputFingerprint!==stage.readyInputFingerprint){
+      done(fail('S06_REVIEW_READY_SUPERSEDED'));return;
+    }
+    m.get('writeback:'+stage.slug).onsuccess=wb=>{
+     m.get('s06-exception:'+stage.slug).onsuccess=ex=>{
+      const git=wb.target.result?.record,exception=ex.target.result?.record;
+      const admitted=releaseCandidateTestContext(stage,job,{ready,exception});
+      const special=admitted.mode==='EXCEPTION_MANUAL_REVIEW',
+        sourceFingerprint=special?job?.sourceFingerprint:job?.verifiedFinal;
+      if(!admitted.ok||
+         git?.state!=='CONFIRMED'||git.mode!==(special?'S06_EXCEPTION':'S06')||
+         (special&&(git.exceptionRevision!==admitted.revision||
+           approval?.exceptionRevision!==admitted.revision||
+           approval?.testEvidenceMode!==admitted.evidenceMode||
+           approval?.aiVerified!==false))||
+         (!special&&approval&&approval.aiVerified!==true)||
+         git.readyIdentifier!==ready.active.identifier||
+         git.readyInputFingerprint!==ready.active.inputFingerprint||
+         (git.testingSha??null)!==(stage.testingSha??null)||
+         !/^[a-f0-9]{40}$/.test(git.commitSha||'')||
+         git.stageRevision!==stage.revision||
+         git.jobRevision!==job?.revision||
+         git.sourceFingerprint!==sourceFingerprint){
+        done(fail('S06_REVIEW_GIT_PROOF_CHANGED'));return;
+      }
+      commit();
+     };
+    };
+  };
+}
 const display=r=>r?{
   ok:true,slug:r.slug,revision:r.revision,state:r.state,
   releaseId:r.releaseId,kind:r.kind,sourceFingerprint:r.approval.sourceFingerprint,
@@ -83,37 +139,46 @@ export function createReleaseStore(db){
                   liveAccount=a.target.result?.account,liveInventory=i.target.result?.generator;
                 if(liveStage?.revision!==stage.revision||
                    liveStage.state!=='SOURCE_VERIFIED'||
-                   liveJob?.revision!==job.revision||liveJob.state!=='TESTS_VERIFIED'||
+                   liveJob?.revision!==job.revision||
+                   !(liveJob.state==='TESTS_VERIFIED'||
+                     (approval.tuple.aiVerified===false&&
+                      liveJob.finalSource?.fingerprint===liveJob.sourceFingerprint))||
                    liveAccount?.revision!==account.revision||
                    liveAccount?.bindingVersion!==stage.bindingVersion||
                    liveInventory?.revision!==inventory.revision||
                    liveInventory?.remoteId!==stage.remotePublicId||
                    liveInventory?.ownerState!=='OBSERVED_OWNER'||
                    !releaseContext(liveStage,liveAccount,liveInventory).ok||
-                   !releaseTestContext(liveStage,liveJob).ok||
+                   !(releaseTestContext(liveStage,liveJob).ok||
+                     approval.tuple.aiVerified===false)||
                    !matchesApproval(approval.tuple,{
                      ...approval.tuple,stageRevision:liveStage.revision,
                      jobRevision:liveJob.revision,
-                     sourceFingerprint:liveJob.verifiedFinal,
+                     sourceFingerprint:approval.tuple.aiVerified===false?
+                       liveJob.sourceFingerprint:liveJob.verifiedFinal,
                      accountRevision:liveAccount.revision,
                      remotePublicId:liveInventory.remoteId
                    }).ok){
                   done(fail('RELEASE_CONTEXT_CHANGED'));return;
                 }
+                const commit=()=>{
                 const record={slug:stage.slug,kind,revision:old?old.revision+1:1,releaseId,
                   state:'APPROVED',approval:structuredClone(approval.tuple),
                   sealedSource:structuredClone(source),previousSource:structuredClone(previous),
                   approvedAt:Date.now(),changedAt:Date.now(),
                   dispatchPossible:false,reason:null};
                 if(old){
-                  meta.add({key:'release-history:'+stage.slug+':'+old.releaseId,
+                  meta.put({key:'release-history:'+stage.slug+':'+old.releaseId,
                     release:structuredClone(old)});
                   meta.put({key:key(stage.slug),release:record});
-                }else meta.add({key:key(stage.slug),release:record});
+                }else meta.put({key:key(stage.slug),release:record});
                 t.objectStore('events').add({stage:'RELEASE_APPROVED',
                   slug:stage.slug,releaseId,sourceFingerprint:source.fingerprint,
                   kind,accountId:stage.accountId});
                 done(display(record));
+                };
+                withS06Candidate(meta,liveStage,liveJob,done,()=>
+                  withoutPendingChild(meta,liveStage,done,commit),approval.tuple);
               };
             };
           };
@@ -164,10 +229,14 @@ export function createReleaseStore(db){
                 if(stage?.revision!==r.approval.stageRevision||
                    stage.state!=='SOURCE_VERIFIED'||
                    job?.revision!==r.approval.jobRevision||
-                   job.state!=='TESTS_VERIFIED'||
-                   !releaseTestContext(stage,job).ok||
+                   !(job.state==='TESTS_VERIFIED'||
+                     (r.approval.aiVerified===false&&
+                      job.finalSource?.fingerprint===job.sourceFingerprint))||
+                   !(releaseTestContext(stage,job).ok||
+                     r.approval.aiVerified===false)||
                    !releaseContext(stage,account,inventory).ok||
-                   job.verifiedFinal!==r.approval.sourceFingerprint||
+                   (r.approval.aiVerified===false?job.sourceFingerprint:
+                     job.verifiedFinal)!==r.approval.sourceFingerprint||
                    account?.revision!==r.approval.accountRevision||
                    account.bindingVersion!==r.approval.bindingVersion||
                    account.identity?.principalFingerprint!==r.approval.principalFingerprint||
@@ -187,6 +256,8 @@ export function createReleaseStore(db){
                     slug:name,releaseId:r.releaseId,sourceFingerprint:r.approval.sourceFingerprint});
                   done(display(next));
                 }
+                const guardedMark=()=>withS06Candidate(m,stage,job,done,()=>
+                  withoutPendingChild(m,stage,done,mark),r.approval);
                 if(r.kind==='EXISTING_UPDATE'){
                   m.get('existing-update:'+name).onsuccess=ex=>{
                     const update=ex.target.result?.record;
@@ -210,10 +281,10 @@ export function createReleaseStore(db){
                          state.accounts?.[r.approval.accountId]?.paused===true){
                         done(fail('EXISTING_SLEEP_REVOKED'));return;
                       }
-                      mark();
+                      guardedMark();
                     };
                   };
-                }else if(r.kind==='PRIVATE_NEW')mark();
+                }else if(r.kind==='PRIVATE_NEW')guardedMark();
                 else done(fail('RELEASE_KIND_INVALID'));
               };
             };

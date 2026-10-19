@@ -272,6 +272,10 @@ export async function observeGitCandidate(request,transport=fetch){
     const path=request.folder+'/'+name;
     const src=baseline.entries.get(path),a=applied.entries.get(path),
       b=now.entries.get(path);
+    // A missing optional TESTING.md is legitimate; it must remain absent.
+    // A newly added or removed TESTING.md, like a changed declaration, is
+    // a relevant input change and cannot be silently included in a write.
+    if(name==='TESTING.md'&&!src&&!a&&!b)continue;
     if(!src||!a||!b||src.sha!==a.sha||src.sha!==b.sha||
        src.type!=='blob'||a.type!=='blob'||b.type!=='blob')
       return fail('GIT_POLICY_OR_TESTING_CHANGED');

@@ -3,6 +3,7 @@
 import {fail,isSafeId} from './journal.mjs';
 import {exactSource,diffSource} from './staging-core.mjs';
 import {evaluation} from './ai-evidence.mjs';
+import {authorizeS06Exception} from './s06-exception-review.mjs';
 
 export const RELEASE_STATES=Object.freeze([
   'APPROVED','DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN',
@@ -39,10 +40,20 @@ export function releaseTestContext(stage,job) {
     return fail('RELEASE_TESTS_STALE_OR_UNVERIFIED');
   return {ok:true};
 }
-export async function candidateManifest(stage,job) {
-  if(!releaseTestContext(stage,job).ok)return fail('RELEASE_TESTS_STALE_OR_UNVERIFIED');
+export function releaseCandidateTestContext(stage,job,{ready=null,exception=null}={}){
+  const normal=releaseTestContext(stage,job);
+  if(normal.ok)return {ok:true,mode:'VERIFIED_AI'};
+  const reviewed=authorizeS06Exception({ready,stage,job,record:exception});
+  if(!reviewed.ok)return fail('RELEASE_EXCEPTION_NOT_SOURCE_BOUND');
+  return {ok:true,mode:'EXCEPTION_MANUAL_REVIEW',revision:reviewed.revision,
+    evidenceMode:reviewed.evidenceMode};
+}
+export async function candidateManifest(stage,job,context={}) {
+  const admitted=releaseCandidateTestContext(stage,job,context);
+  if(!admitted.ok)return fail('RELEASE_TESTS_STALE_OR_UNVERIFIED');
   const source=await exactSource(job.finalSource.blobs);
-  if(!source.ok||source.fingerprint!==job.verifiedFinal)
+  if(!source.ok||source.fingerprint!==(admitted.mode==='VERIFIED_AI'?
+    job.verifiedFinal:job.sourceFingerprint))
     return fail('FINAL_F_BYTES_CHANGED');
   return source;
 }
@@ -87,9 +98,11 @@ export function existingUpdateAdmission({adoption,inventory,shadow,previous,arch
     return fail('SLEEP_OR_UNLIST_UNVERIFIED');
   return {ok:true};
 }
-export function approvalTuple({slug:target,stage,job,source,git,kind='PRIVATE_NEW',previous}) {
+export function approvalTuple({slug:target,stage,job,source,git,kind='PRIVATE_NEW',previous,
+  testContext=null}) {
   if(!slug(target)||target!==stage?.slug||!source?.ok||
-     source.fingerprint!==job?.verifiedFinal||!fp(source.fingerprint)||
+     source.fingerprint!==(testContext?.mode==='EXCEPTION_MANUAL_REVIEW'?
+       job?.sourceFingerprint:job?.verifiedFinal)||!fp(source.fingerprint)||
      !git?.ok||!previous?.ok||!fp(previous.fingerprint))
     return fail('APPROVAL_INPUTS_UNVERIFIED');
   return {ok:true,tuple:{
@@ -100,6 +113,10 @@ export function approvalTuple({slug:target,stage,job,source,git,kind='PRIVATE_NE
     sourceFingerprint:source.fingerprint,files:source.files,
     previousFingerprint:previous.fingerprint,kind,
     gitFolder:stage.sourceFolder,gitTestingSha:git.testingSha,
+    ...(testContext?.mode==='EXCEPTION_MANUAL_REVIEW'?{
+      exceptionRevision:testContext.revision,
+      testEvidenceMode:testContext.evidenceMode,
+      aiVerified:false}:{aiVerified:true}),
     testPromptRevision:job.prompt?.revision??null,
     testingFingerprint:job.optionalTesting?.sha256??null
   }};
@@ -111,7 +128,8 @@ export function matchesApproval(approved,candidate) {
     'accountRevision','remotePublicId','principalFingerprint',
     'stageRevision','jobRevision','sourceFingerprint',
     'previousFingerprint','kind','gitFolder','gitTestingSha',
-    'testPromptRevision','testingFingerprint'];
+    'testPromptRevision','testingFingerprint','exceptionRevision',
+    'testEvidenceMode','aiVerified'];
   if(keys.some(k=>approved[k]!==candidate[k])||
      JSON.stringify(approved.files)!==JSON.stringify(candidate.files))
     return fail('APPROVAL_STALE');

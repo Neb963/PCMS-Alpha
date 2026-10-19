@@ -5,6 +5,14 @@ import {fail,openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 import {createReleaseStore} from './release-store.mjs';
+import {createReadyStore} from './ready-store.mjs';
+import {createWritebackStore} from './writeback-store.mjs';
+import {planS06Writeback} from './s06-writeback-progress.mjs';
+import {createS06ReviewQueue} from './s06-review-queue.mjs';
+import {createS06ChangeStore} from './s06-request-changes.mjs';
+import {createS06HumanStore,createS06HumanBoundary} from './s06-human-review.mjs';
+import {createS06ExceptionStore,createS06ExceptionBoundary} from './s06-exception-review.mjs';
+import {standingS06} from './s06-standing-authority.mjs';
 import {createExistingStore} from './existing-update-store.mjs';
 import {unlockPrevious} from './existing-update-core.mjs';
 import {REFRESHER_KEY} from './refresher-core.mjs';
@@ -14,20 +22,31 @@ import {createAiStore} from './ai-store.mjs';
 import {inspectGitSource} from './git-source.mjs';
 import {exactSource,diffSource} from './staging-core.mjs';
 import {releaseContext,releaseTestContext,candidateManifest,releaseGitContext,
-  releaseEditorContext,approvalTuple,matchesApproval,publicationReadback}
+  releaseEditorContext,approvalTuple,matchesApproval,publicationReadback,
+  releaseCandidateTestContext}
   from './release-core.mjs';
 export const RELEASE_PORT='pcms-i13-release';
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const fp=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
-const TYPES=new Set(['LIST','GET','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
+const TYPES=new Set(['LIST','LIST_REVIEW','GET','GET_CHANGE','REQUEST_CHANGES','HUMAN_CONTEXT','GET_HUMAN','DEFER_HUMAN','ADOPT_HUMAN','GET_EXCEPTION','EXCEPTION_CONTEXT','RECORD_EXCEPTION','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
 export function validateReleaseMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
-  if(!msg||typeof msg!=='object'||Array.isArray(msg)||!json||json.length>1800||
+  if(!msg||typeof msg!=='object'||Array.isArray(msg)||!json||
+     json.length>(msg.type==='REQUEST_CHANGES'?5500:
+       msg.type==='RECORD_EXCEPTION'?130000:1800)||
      Object.keys(msg).some(k=>!['type','params'].includes(k))||!TYPES.has(msg.type))
     return fail('INVALID_MESSAGE');
   const p=msg.params||{},allowed={
-    LIST:[],GET:['slug'],PREVIEW:['slug','token','passphrase'],
+    LIST:[],LIST_REVIEW:['after','limit'],GET:['slug'],GET_CHANGE:['slug'],
+     HUMAN_CONTEXT:['slug'],GET_HUMAN:['slug'],
+     DEFER_HUMAN:['slug','expectedStageRevision','expectedJobRevision','expectedFingerprint'],
+     ADOPT_HUMAN:['slug','expectedRevision'],
+     GET_EXCEPTION:['slug'],EXCEPTION_CONTEXT:['slug'],RECORD_EXCEPTION:['slug','mode','checks','consent',
+       'expectedStageRevision','expectedJobRevision','sourceFingerprint'],
+    REQUEST_CHANGES:['slug','token','passphrase','expectedStageRevision',
+      'expectedJobRevision','sourceFingerprint','instructions','releaseRevision'],
+    PREVIEW:['slug','token','passphrase'],
     GET_REVIEW_CHUNK:['slug','stageRevision','fingerprint','origin','path','offset'],
     APPROVE:['slug','token','expectedStageRevision','expectedJobRevision','fingerprint','explicitApproval','passphrase'],
     CANCEL_APPROVED:['slug','expectedRevision'],
@@ -36,10 +55,14 @@ export function validateReleaseMessage(api,sender,msg){
   };
   if(!p||typeof p!=='object'||Array.isArray(p)||
      Object.keys(p).some(k=>!allowed[msg.type].includes(k))||
-     (msg.type!=='LIST'&&!slug(p.slug))||
-     (['PREVIEW','APPROVE','DISPATCH','RECONCILE'].includes(msg.type)&&
-       (typeof p.token!=='string'||p.token.length<12||p.token.length>512||
-        !/^[\x21-\x7e]+$/.test(p.token)))||
+     (!['LIST','LIST_REVIEW'].includes(msg.type)&&!slug(p.slug))||
+     (msg.type==='LIST_REVIEW'&&(
+       (p.after!==undefined&&(typeof p.after!=='string'||p.after.length>100||
+         !/^(?:[a-z0-9][a-z0-9-]{0,99})?$/.test(p.after)))||
+       (p.limit!==undefined&&(!Number.isSafeInteger(p.limit)||p.limit<1||p.limit>100))))||
+     (['PREVIEW','APPROVE','DISPATCH','RECONCILE','REQUEST_CHANGES'].includes(msg.type)&&
+       (p.token!==undefined&&(typeof p.token!=='string'||p.token.length<12||
+        p.token.length>512||!/^[\x21-\x7e]+$/.test(p.token))))||
      (p.passphrase!==undefined&&(typeof p.passphrase!=='string'||p.passphrase.length<12||p.passphrase.length>256))||
      (msg.type==='GET_REVIEW_CHUNK'&&(
        !Number.isSafeInteger(p.stageRevision)||p.stageRevision<1||
@@ -50,6 +73,30 @@ export function validateReleaseMessage(api,sender,msg){
        p.offset%8192!==0))||
      (['DISPATCH','RECONCILE','CANCEL_APPROVED'].includes(msg.type)&&
        (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
+     (msg.type==='RECORD_EXCEPTION'&&(
+       !['MANUAL_INFRASTRUCTURE','OPTIONAL_CHAT2_INCOMPLETE'].includes(p.mode)||
+       !Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
+       !Number.isSafeInteger(p.expectedJobRevision)||p.expectedJobRevision<1||
+       !fp(p.sourceFingerprint)||p.consent!=='I PERFORMED THE RECORDED MANUAL CHECKS'||
+       !Array.isArray(p.checks)||p.checks.length>128||
+       p.checks.some(x=>!x||typeof x!=='object'||Array.isArray(x)||
+          Object.keys(x).some(k=>!['name','result','observation'].includes(k))||
+          typeof x.name!=='string'||x.name.length>80||
+          x.result!=='PASS'||typeof x.observation!=='string'||
+          x.observation.length>2000)))||
+     (msg.type==='DEFER_HUMAN'&&(
+       !Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
+       !Number.isSafeInteger(p.expectedJobRevision)||p.expectedJobRevision<1||
+       !fp(p.expectedFingerprint)))||
+     (msg.type==='ADOPT_HUMAN'&&(
+       !Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
+     (msg.type==='REQUEST_CHANGES'&&(
+       !Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
+       !Number.isSafeInteger(p.expectedJobRevision)||p.expectedJobRevision<1||
+       !fp(p.sourceFingerprint)||typeof p.instructions!=='string'||
+       p.instructions.length<3||p.instructions.length>4000||
+       (p.releaseRevision!==undefined&&(!Number.isSafeInteger(p.releaseRevision)||
+         p.releaseRevision<1))))||
      (msg.type==='APPROVE'&&(
        !Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
        !Number.isSafeInteger(p.expectedJobRevision)||p.expectedJobRevision<1||
@@ -108,6 +155,7 @@ export function createReleaseBoundary(api,{
   // Only an independently activated fixed native publish adapter may
   // change listing. Default packaged capability is held.
   effectGate=()=>false,
+  native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
   dispatch=async(g,r)=>g.runReleaseStep?.(r.personaUid,{
     slug:r.slug,nonce:r.nonce,action:'PUBLISH',remotePublicId:r.remotePublicId,
     principalFingerprint:r.principalFingerprint,files:r.releaseFiles})
@@ -115,13 +163,36 @@ export function createReleaseBoundary(api,{
   let dbPromise;
   const db=()=>dbPromise ||=open().catch(e=>{dbPromise=null;throw e;});
   const sentinel=createRestoreSentinel(api.storage.local);
+  async function vaultToken(explicit){
+    if(typeof explicit==='string'&&explicit.length>=12)return explicit;
+    const cfg=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
+    if(cfg?.repository!=='Neb963/per-gens'||
+       !/^[1-9][0-9]{0,19}$/.test(cfg.repositoryId||''))return null;
+    const reply=await native({action:'git.get',repositoryId:cfg.repositoryId});
+    return reply?.ok&&typeof reply.credential==='string'&&
+      reply.credential.length>=12&&reply.credential.length<=512&&
+      /^[\x21-\x7e]+$/.test(reply.credential)?reply.credential:null;
+  }
+  async function reviewPassphrase(explicit){
+    if(typeof explicit==='string'&&explicit.length>=12)return explicit;
+    const reply=await native({action:'get'});
+    return reply?.ok&&typeof reply.passphrase==='string'&&
+      reply.passphrase.length>=12&&reply.passphrase.length<=256?
+      reply.passphrase:null;
+  }
   async function checkCurrent(database,name,token,{requireEditor=true,passphrase=null}={}){
     const stage=await stageFactory(database).getFull(name),
       job=await aiFactory(database).getJobFull(name),
       facts=await ownerFacts(database,name);
     if(!stage.ok||!job.ok||!facts.ok)return fail('RELEASE_CANONICAL_EVIDENCE_MISSING');
     const r=stage.record,j=job.job,{account,inventory}=facts;
-    const owner=releaseContext(r,account,inventory),tests=releaseTestContext(r,j);
+    const [ready,exception]=await Promise.all([
+      createReadyStore(database).get(name),
+      createS06ExceptionStore(database).getFull(name)]);
+    const reviewContext={ready:ready.ok?ready.record:null,
+      exception:exception.ok?exception.record:null};
+    const owner=releaseContext(r,account,inventory),
+      tests=releaseCandidateTestContext(r,j,reviewContext);
     if(!owner.ok)return owner;
     if(!tests.ok)return tests;
     const privateNew=r.previous?.files?.length===2&&
@@ -155,8 +226,21 @@ export function createReleaseBoundary(api,{
     }
     if(inventory.visibility!=='UNLISTED')
       return fail('UNLISTED_LISTING_OBSERVATION_REQUIRED');
-    const source=await candidateManifest(r,j);
+    const source=await candidateManifest(r,j,reviewContext);
     if(!source.ok)return source;
+    // The accepted READY workflow cannot be released merely because the
+    // old I13 candidate seems locally tested. The *same* S05 revision must
+    // have an independently attributed, byte-confirmed Git main commit.
+    if(r.readyIdentifier){
+      if(!ready.ok)return fail('S06_CURRENT_READY_RECORD_REQUIRED');
+      const wb=await createWritebackStore(database).getFull(name);
+      const check=planS06Writeback({ready,stage,job,writeback:wb.ok?wb:null,
+        exception:exception.ok?exception:null});
+      if(!check.ok||check.type!=='REVIEW'||
+         !/^[0-9a-f]{40}$/.test(check.commitSha||''))
+        return fail('S06_CURRENT_CANDIDATE_GIT_PROOF_REQUIRED');
+    }
+
     const fresh=await inspect({token,folder:r.sourceFolder,includeSourceBytes:true});
     const git=releaseGitContext(r,fresh);
     if(!git.ok)return git;
@@ -189,25 +273,78 @@ export function createReleaseBoundary(api,{
     if(!previous.ok||previous.fingerprint!==r.previous.fingerprint)
       return fail('PREVIOUS_SOURCE_CORRUPT');
     const approved=approvalTuple({slug:name,stage:r,job:j,source,git,
-      previous,kind:privateNew?'PRIVATE_NEW':'EXISTING_UPDATE'});
+      previous,kind:privateNew?'PRIVATE_NEW':'EXISTING_UPDATE',testContext:tests});
     if(!approved.ok)return approved;
     return {ok:true,r,j,source,previous,approval:approved.tuple,
       kind:privateNew?'PRIVATE_NEW':'EXISTING_UPDATE',existing:existingRow?.record,
-      editor,route:after,remote,git};
+      editor,route:after,remote,git,testContext:tests};
   }
   async function runTrusted(msg){
     const p=msg.params||{},database=await db(),store=releaseFactory(database);
     if(msg.type==='GET')return store.get(p.slug);
     if(msg.type==='LIST')return store.list();
+    if(msg.type==='GET_CHANGE')return createS06ChangeStore(database).get(p.slug);
+    if(msg.type==='GET_HUMAN')return createS06HumanStore(database).get(p.slug);
+    if(msg.type==='GET_EXCEPTION')return createS06ExceptionStore(database).get(p.slug);
+    if(msg.type==='EXCEPTION_CONTEXT'){
+      const [stage,job,ready]=await Promise.all([
+        stageFactory(database).getFull(p.slug),aiFactory(database).getJobFull(p.slug),
+        createReadyStore(database).get(p.slug)]);
+      if(!stage.ok||!job.ok||!ready.ok||
+        job.job.stageRevision!==stage.record.revision||
+        ready.record.active?.identifier!==stage.record.readyIdentifier||
+        ready.record.active?.inputFingerprint!==stage.record.readyInputFingerprint||
+        !job.job.finalSource||job.job.finalSource.fingerprint!==job.job.sourceFingerprint)
+        return fail('S06_EXCEPTION_CONTEXT_UNAVAILABLE');
+      const verdict=evaluation(job.job);
+      return {ok:true,slug:p.slug,stageRevision:stage.record.revision,
+        jobRevision:job.job.revision,sourceFingerprint:job.job.sourceFingerprint,
+        evidenceState:verdict.state,chat1Verified:verdict.chat1Pass===true,
+        chat2Verified:verdict.chat2Pass===true,
+        nativeHold:job.job.hold||null,schedulerHold:job.job.schedulerHold||null,
+        requiredChecks:[...new Set([...(job.job.prompt?.tests||[]),
+          ...(job.job.optionalTesting?.tests||[])])],
+        optionalConfigured:!!job.job.optionalTesting,
+        publication:'NOT_AUTHORIZED'};
+    }
+    if(msg.type==='RECORD_EXCEPTION')return createS06ExceptionBoundary(api,{
+      open:async()=>database}).runTrusted(msg);
+    if(msg.type==='HUMAN_CONTEXT'){
+      const [stage,job,human]=await Promise.all([
+        stageFactory(database).getFull(p.slug),
+        aiFactory(database).getJobFull(p.slug),
+        createS06HumanStore(database).get(p.slug)]);
+      if(!stage.ok||!job.ok||job.job.stageRevision!==stage.record.revision)
+        return fail('S06_HUMAN_CONTEXT_UNAVAILABLE');
+      return {ok:true,slug:p.slug,stageRevision:stage.record.revision,
+        jobRevision:job.job.revision,sourceFingerprint:job.job.verifiedFinal,
+        human:human.ok?human:null,publication:'NO_ACTION'};
+    }
+    if(msg.type==='DEFER_HUMAN'){
+      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      return createS06HumanStore(database).defer({
+        name:p.slug,expectedStageRevision:p.expectedStageRevision,
+        expectedJobRevision:p.expectedJobRevision,
+        expectedFingerprint:p.expectedFingerprint});
+    }
+    if(msg.type==='ADOPT_HUMAN')return createS06HumanBoundary(api,{
+      open:async()=>database,guard}).runTrusted(msg);
+    if(msg.type==='LIST_REVIEW')return createS06ReviewQueue(database).list({
+      after:p.after||'',limit:p.limit||50});
     if(msg.type==='GET_REVIEW_CHUNK'){
       // Source is taken only from sealed canonical stage/job. Read-only,
       // revision-fenced review never grants publisher or Git authority.
-      const stage=await stageFactory(database).getFull(p.slug),
-        job=await aiFactory(database).getJobFull(p.slug);
+      const [stage,job,ready,exception]=await Promise.all([
+        stageFactory(database).getFull(p.slug),aiFactory(database).getJobFull(p.slug),
+        createReadyStore(database).get(p.slug),
+        createS06ExceptionStore(database).getFull(p.slug)]);
+      const evidence={ready:ready.ok?ready.record:null,
+        exception:exception.ok?exception.record:null};
       if(!stage.ok||!job.ok||stage.record.revision!==p.stageRevision||
-         stage.record.slug!==p.slug||!releaseTestContext(stage.record,job.job).ok)
+         stage.record.slug!==p.slug||
+         !releaseCandidateTestContext(stage.record,job.job,evidence).ok)
         return fail('REVIEW_OUTDATED');
-      const f=await candidateManifest(stage.record,job.job);
+      const f=await candidateManifest(stage.record,job.job,evidence);
       if(!f.ok||f.fingerprint!==p.fingerprint)return fail('REVIEW_FINAL_F_STALE');
       const selected=p.origin==='F'?f:await exactSource(stage.record.previous.blobs);
       if(!selected.ok||selected.fingerprint!==stage.record.previous?.fingerprint&&p.origin==='P')
@@ -227,6 +364,8 @@ export function createReleaseBoundary(api,{
     }
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
     if(msg.type==='CANCEL_APPROVED')return store.cancelApproved(p.slug,p.expectedRevision);
+    const token=await vaultToken(p.token);
+    if(!token)return fail('S06_GIT_VAULT_UNAVAILABLE');
     if(msg.type==='RECONCILE'){
       const row=await store.getFull(p.slug);
       if(!row.ok||row.record.revision!==p.expectedRevision)return fail('STALE_RELEASE');
@@ -236,7 +375,7 @@ export function createReleaseBoundary(api,{
         return fail('RECONCILIATION_NOT_REQUIRED');
       const g=guard(),route=await g.getSafeRouteReadiness(r.approval.personaUid);
       if(!route?.ready)return fail('PROTECTED_ROUTE_UNVERIFIED');
-      const fresh=await inspect({token:p.token,folder:r.approval.gitFolder,includeSourceBytes:true});
+      const fresh=await inspect({token,folder:r.approval.gitFolder,includeSourceBytes:true});
       if(!releaseGitContext({sourceFolder:r.approval.gitFolder,
         testingSha:r.approval.gitTestingSha},fresh).ok)
         return fail('READY_REVOKED');
@@ -256,8 +395,12 @@ export function createReleaseBoundary(api,{
         proof:evidence.ok?evidence:null,reason:evidence.code||'PUBLICATION_UNCERTAIN'
       });
     }
-    const checked=await checkCurrent(database,p.slug,p.token,{passphrase:p.passphrase});
+    const checked=await checkCurrent(database,p.slug,token,{
+      passphrase:await reviewPassphrase(p.passphrase)});
     if(!checked.ok)return checked;
+    const change=await createS06ChangeStore(database).get(p.slug);
+    if(change.ok&&change.state==='REQUESTED')
+      return fail('S06_PENDING_REQUEST_BLOCKS_APPROVAL');
     if(msg.type==='PREVIEW'){
       return {ok:true,slug:p.slug,stageRevision:checked.r.revision,
         jobRevision:checked.j.revision,sourceFingerprint:checked.source.fingerprint,
@@ -271,8 +414,31 @@ export function createReleaseBoundary(api,{
             result:checked.j.chat2?.tests[name]?.result||'UNVERIFIED'}))||[],
           state:evaluation(checked.j).state},
         diff:diffSource(checked.previous,checked.source).changes,
-        gitHead:checked.git.head,mode:'INDIVIDUAL_HUMAN_APPROVAL',
-        warning:'Approval alone cannot publish; remote effects held until proven'};
+        gitHead:checked.git.head,
+        releaseRevision:(await store.get(p.slug))?.revision||null,
+        mode:checked.testContext.mode==='EXCEPTION_MANUAL_REVIEW'?
+          'INDIVIDUAL_EXCEPTIONAL_MANUAL_REVIEW':'INDIVIDUAL_HUMAN_APPROVAL',
+        aiVerified:checked.testContext.mode==='VERIFIED_AI',
+        exceptionEvidenceMode:checked.testContext.evidenceMode||null,
+        warning:checked.testContext.mode==='EXCEPTION_MANUAL_REVIEW'?
+          'EXCEPTIONAL MANUAL/INCOMPLETE TESTING: AI verified tests remain UNVERIFIED. Confirm the exact manual checks, incomplete Chat 2 warning and F before individual approval; a green review is NOT a test PASS.':
+          'Approval alone cannot publish; remote effects held until proven'};
+    }
+    if(msg.type==='REQUEST_CHANGES'){
+      if(p.expectedStageRevision!==checked.r.revision||
+         p.expectedJobRevision!==checked.j.revision||
+         p.sourceFingerprint!==checked.source.fingerprint)
+        return fail('S06_REQUEST_PREVIEW_STALE');
+      const existing=await store.get(p.slug);
+      if(p.releaseRevision!==(existing.ok?existing.revision:undefined))
+        return fail('S06_REQUEST_RELEASE_REVISION_STALE');
+      return createS06ChangeStore(database).request({
+        name:p.slug,stage:checked.r,job:checked.j,
+        expectedStageRevision:p.expectedStageRevision,
+        expectedJobRevision:p.expectedJobRevision,
+        sourceFingerprint:p.sourceFingerprint,instructions:p.instructions,
+        releaseRevision:existing.ok?existing.revision:null,
+        requestId:'change_'+crypto.randomUUID().replaceAll('-','')});
     }
     if(msg.type==='APPROVE'){
       if(p.expectedStageRevision!==checked.r.revision||
@@ -341,4 +507,5 @@ export function createReleaseBoundary(api,{
   }
   return Object.freeze({register,run});
 }
-if(typeof browser!=='undefined')createReleaseBoundary(browser).register();
+if(typeof browser!=='undefined')createReleaseBoundary(browser,{
+  effectGate:()=>standingS06?.gate('publication')===true}).register();

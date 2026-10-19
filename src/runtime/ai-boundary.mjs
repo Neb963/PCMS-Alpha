@@ -10,6 +10,9 @@ import {inspectReadyCandidate} from './catalog-declaration.mjs';
 import {scanMainCatalog} from './git-catalog.mjs';
 import {pinGitChatPrompt} from './ready-git-prompt.mjs';
 import {createReadyStore} from './ready-store.mjs';
+import {createWritebackStore} from './writeback-store.mjs';
+import {createS06ExceptionStore} from './s06-exception-review.mjs';
+import {sealedS06OutputProof} from './s06-output-proof.mjs';
 import {authorizeReadyAiAdvance,authorizeGitReadyAiAdvance} from './ready-ai-gate.mjs';
 import {verifyReadback,exactSource} from './staging-core.mjs';
 import {planAiStep} from './ai-supervisor.mjs';
@@ -76,6 +79,15 @@ export function createAiBoundary(api,{
   let databasePromise,tickBusy=false;
   const database=()=>databasePromise ||=open();
   const sentinel=createRestoreSentinel(api.storage.local);
+  async function outputProof(db,slug,ready,stage){
+    const [s,w,j,e]=await Promise.all([
+      stage?Promise.resolve(stage):stageFactory(db).getFull(slug),
+      createWritebackStore(db).getFull(slug),
+      storeFactory(db).getJobFull(slug),
+      createS06ExceptionStore(db).getFull(slug)]);
+    const proof=sealedS06OutputProof({ready,stage:s,writeback:w,job:j,exception:e});
+    return proof.ok?{outputProof:proof.outputProof}:{};
+  }
   async function executeTrusted(message){
     try{
       const db=await database(),store=storeFactory(db),p=message.params||{};
@@ -126,7 +138,8 @@ export function createAiBoundary(api,{
               return fail('S05_AI_GIT_MAIN_UNAVAILABLE');
             const coherent=await inspectReady({repository:settings.repository,
               token:credential,slug:p.slug,pinnedHead:catalog.head,
-              includeSourceBytes:false});
+              includeSourceBytes:false,
+              ...await outputProof(db,p.slug,current)});
             const fresh=authorizeGitReadyAiAdvance(sealed.job,catalog,coherent,{
               repositoryId:settings.repositoryId,slug:p.slug});
             if(!fresh.ok)return fresh;
@@ -358,6 +371,31 @@ export function createAiBoundary(api,{
           // Do not admit new AI work over human-owned or dirty source.
           const clean=await g.inspectStageEditor?.(r.personaUid,r.slug,r.nonce);
           if(clean?.ok!==true||clean.clean!==true)return fail('EDITOR_UNKNOWN');
+          if(job.childRequestId&&p.step==='CHAT1_SEND'){
+            // Request Changes reuses the guarded generator; it does not
+            // restage. Check exact inherited saved F before the first new
+            // native effect, not merely the editor's clean indicator.
+            const raw=await g.observeReadOnly?.(r.personaUid,false,r.slug);
+            const inherited=await exactSource(r.candidate?.blobs);
+            const packet={ok:raw?.ok===true,
+              source:'DONOR_GUARDED_ORIGINAL_READBACK',
+              slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,
+              principalFingerprint:raw?.principalFingerprint,
+              remotePublicId:raw?.original?.remotePublicId,
+              ownerResult:raw?.original?.ownerResult,
+              visibility:raw?.original?.visibility,pjs:raw?.original?.pjs,
+              html:raw?.original?.html,assets:raw?.original?.assets};
+            const verified=inherited.ok&&inherited.fingerprint===job.sourceFingerprint?
+              await verifyReadback(inherited,packet,{slug:r.slug,
+                accountId:r.accountId,personaUid:r.personaUid,
+                principalFingerprint:r.principalFingerprint,
+                remotePublicId:r.remotePublicId}):fail('S06_CHILD_SOURCE_CORRUPT');
+            const again=await g.getSafeRouteReadiness(r.personaUid);
+            if(!verified.ok||raw?.original?.visibility!=='UNLISTED'||
+               !again?.ready||again.cookieStoreId!==route.cookieStoreId||
+               again.routeId!==route.routeId)
+              return fail('S06_CHILD_SAVED_F_OR_ROUTE_CHANGED');
+          }
           const isRepair=p.step==='CHAT1_REPAIR'||p.step==='CHAT2_REPAIR';
           const text=p.step==='CHAT1_SEND'?job.prompt.text:
             p.step==='CHAT2_SEND'?job.optionalTesting?.text:isRepair?
@@ -507,7 +545,8 @@ export function createAiBoundary(api,{
           return fail('S05_MAIN_CATALOG_UNVERIFIED');
         const coherent=await inspectReady({
           repository:config.repository,token:credential,slug:r.slug,
-          pinnedHead:catalog.head,includeTestingText:true});
+          pinnedHead:catalog.head,includeTestingText:true,
+          ...await outputProof(db,r.slug,queued,stage)});
         const identity=coherent?.legacy?
           'legacy-'+coherent.declarationCommit+'-'+coherent.markerOid:
           'rev-'+coherent?.token;

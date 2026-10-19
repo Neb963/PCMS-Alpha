@@ -6,6 +6,9 @@ import {createGitResumeTransport} from './catalog-resume.mjs';
 import {createCreationCatalogIntake} from './creation-catalog.mjs';
 import {createReadyIntake} from './ready-intake.mjs';
 import {createReadyDevelopment} from './ready-development.mjs';
+import {createS06WritebackProgress} from './s06-writeback-progress.mjs';
+import {createS06ChangeProgress} from './s06-request-changes.mjs';
+import {standingS06} from './s06-standing-authority.mjs';
 export const CATALOG_ALARM='pcms-s03-main-observe';
 export const CATALOG_RESUME_ALARM='pcms-s03-main-resume';
 export const READY_PROGRESS_ALARM='pcms-s05-ready-progress';
@@ -18,7 +21,7 @@ const MINUTES=15;
 export function createCatalogWatcher(api,{scan=scanMainCatalog,
   native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
   network=fetch,clock=Date.now,ingestComplete=null,ingestReady=null,
-  progressReady=null}={}){
+  progressReady=null,progressChanges=null,progressWriteback=null}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
   let running=null,registered=false;
   async function persistStatus(code){
@@ -98,6 +101,8 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       // The same existing observer owns bounded S05 progression. This
       // never promotes a partial Git scan into READY authority.
       if(progressReady)try{await progressReady();}catch{}
+      if(progressChanges)try{await progressChanges();}catch{}
+      if(progressWriteback)try{await progressWriteback();}catch{}
       return {ok:true,code:'CATALOG_OBSERVED_READ_ONLY',head:result.head,
         newFolders:added,missingFolderObservations:missing};
     }catch{return persistStatus('CATALOG_OBSERVATION_UNAVAILABLE');}
@@ -108,15 +113,19 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
     catch{}
     // Native/READY transitions may resume without another large Git scan.
     // Each step revalidates canonical source and, where applicable, main.
-    if(progressReady)try{void Promise.resolve(api.alarms.create(READY_PROGRESS_ALARM,{periodInMinutes:1})).catch(()=>{});}
+    if(progressReady||progressChanges||progressWriteback)try{void Promise.resolve(api.alarms.create(READY_PROGRESS_ALARM,{periodInMinutes:1})).catch(()=>{});}
     catch{}
   }
   function register(){
     if(registered)return;registered=true;
     api.alarms.onAlarm.addListener(event=>{
       if(event?.name===CATALOG_ALARM||event?.name===CATALOG_RESUME_ALARM)void tick();
-      if(event?.name===READY_PROGRESS_ALARM&&progressReady)
-        void Promise.resolve(progressReady()).catch(()=>{});
+      if(event?.name===READY_PROGRESS_ALARM&&(progressReady||progressChanges||progressWriteback))
+        void Promise.resolve().then(async()=>{
+          if(progressReady)await progressReady();
+          if(progressChanges)await progressChanges();
+          if(progressWriteback)await progressWriteback();
+        }).catch(()=>{});
     });
     api.runtime.onStartup.addListener(()=>{schedule();void tick();});
     api.runtime.onInstalled.addListener(()=>{schedule();void tick();});
@@ -130,5 +139,9 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
 if(typeof browser!=='undefined')createCatalogWatcher(browser,{
   ingestComplete:createCreationCatalogIntake(browser).run,
   ingestReady:createReadyIntake(browser).run,
-  progressReady:createReadyDevelopment(browser).tick
+  progressReady:createReadyDevelopment(browser,{
+    effectGate:()=>standingS06?.gate('development')===true}).tick,
+  progressChanges:createS06ChangeProgress(browser).tick,
+  progressWriteback:createS06WritebackProgress(browser,{
+    effectGate:()=>standingS06?.gate('gitWrite')===true}).tick
 }).register();

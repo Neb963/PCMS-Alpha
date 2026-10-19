@@ -210,18 +210,51 @@
           <div class="panel-head"><h2 id="pcms-release-heading">I13 · Exact-source human publication approval</h2><span class="unknown">Production publishing OFF · Individual review</span></div>
           <p class="reason">Approval pins tested PJS, HTML and every binary src file, account/Persona binding, test inputs and prior source. Current protected route, owner, READY Git F, clean editor and actual remote unlisted F must all match. Git commit alone does not confer approval. Existing generator updates are held until independent sleep, unlisting, original archive and recovery proof. A lost publication reply cannot be retried.</p>
           <div class="account-controls">
-            <label for="pcms-release-slug">Exact private staged slug</label><input id="pcms-release-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="generator">
-            <label for="pcms-release-token">Private Git read token (ephemeral, never stored)</label><input id="pcms-release-token" type="password" autocomplete="off" spellcheck="false">
+            <button id="pcms-s06-review-refresh" type="button">Refresh publication queue</button>
+            <button id="pcms-s06-review-next" type="button" disabled>Next review page</button>
+          </div>
+          <div id="pcms-s06-review-queue" role="region" aria-label="Pending, blocked and ready publication candidates" aria-live="polite"></div>
+          <div class="account-controls">
+            <label for="pcms-release-slug">Generator to review</label><input id="pcms-release-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="generator">
+            <label for="pcms-release-token">Optional Git credential override (normally from protected vault)</label><input id="pcms-release-token" type="password" autocomplete="off" spellcheck="false">
           </div>
           <div class="account-controls">
             <button id="pcms-release-preview" type="button">Review full F and tests</button>
             <button id="pcms-release-approve" type="button" disabled>Approve this exact F</button>
+            <button id="pcms-s06-request-changes" type="button" disabled>Request changes to F</button>
             <button id="pcms-release-cancel" type="button" disabled>Cancel unsent approval</button>
-            <button id="pcms-release-dispatch" type="button" disabled>Attempt guarded publication (activation held)</button>
+            <button id="pcms-release-dispatch" type="button" disabled>Publish approved source (requires live authorization)</button>
             <button id="pcms-release-reconcile" type="button" disabled>Independently reconcile public listing</button>
             <button id="pcms-release-load" type="button">Load canonical release</button>
             <button id="pcms-release-clear" type="button">Clear credential</button>
           </div>
+          <div class="account-controls">
+            <label for="pcms-s06-change-instructions">Requested changes (a new tested child revision; no publication)</label>
+            <textarea id="pcms-s06-change-instructions" rows="3" maxlength="4000" spellcheck="true" placeholder="Describe the changes to the reviewed source."></textarea>
+          </div>
+          <div class="account-controls">
+            <button id="pcms-s06-human-inspect" type="button">Inspect human-review state</button>
+            <button id="pcms-s06-human-defer" type="button" disabled>Defer — preserve human work</button>
+            <button id="pcms-s06-human-adopt" type="button" disabled>Adopt saved changes and retest</button>
+          </div>
+          <p class="reason">When someone edits the generator during review, Defer locally revokes unsent approval and blocks publication without touching or clearing the editor. Unsaved changes are preserved in place; save them yourself before selecting Adopt. Adoption independently reads the complete saved source under the protected Persona, archives the original reviewed F/P and starts a new, untested candidate. It never publishes or commits the changes automatically.</p>
+          <p id="pcms-s06-human-status" role="status" aria-live="polite">Select a generator and inspect the review state before Defer or Adopt.</p>
+          <div class="account-controls">
+            <label for="pcms-s06-exception-mode">Exceptional review (only if actual test/helper infrastructure or optional Chat 2 is unavailable)</label>
+            <select id="pcms-s06-exception-mode">
+              <option value="OPTIONAL_CHAT2_INCOMPLETE">Optional Chat 2 incomplete — verified Chat 1 only</option>
+              <option value="MANUAL_INFRASTRUCTURE">Required testing infrastructure unavailable — manual checks</option>
+            </select>
+            <button id="pcms-s06-exception-inspect" type="button">Inspect exceptional evidence</button>
+          </div>
+          <div class="account-controls">
+            <label for="pcms-s06-exception-checks">Actual manual checks — one per line: required test name, then tab, then a description of the check performed and observed result</label>
+            <textarea id="pcms-s06-exception-checks" rows="4" maxlength="125000" spellcheck="false" placeholder="default_generator_smoke&#9;Opened the saved unlisted generator and confirmed ..."></textarea>
+            <label for="pcms-s06-exception-consent"><input id="pcms-s06-exception-consent" type="checkbox"> I personally performed the listed checks (not AI-verified)</label>
+            <button id="pcms-s06-exception-record" type="button" disabled>Record exceptional review evidence</button>
+          </div>
+          <p class="reason">An exceptional record is not an AI test PASS, a Git commit, publication approval or permission to bypass a known failing required test. Its exact saved-source revision and real test observations must still be independently rechecked before any subsequent write or publication.</p>
+          <p id="pcms-s06-exception-status" role="status" aria-live="polite">No exceptional source reviewed.</p>
           <p id="pcms-release-status" role="status" aria-live="polite">No release selected; publication remains disabled.</p>
           <div id="pcms-release-diff" class="table-wrap" role="region" tabindex="0" aria-label="Exact F and previous byte manifest"></div>
         </section>
@@ -306,7 +339,7 @@
         </section>
       </section>
       <section class="workspace" id="view-settings" data-view="settings" aria-labelledby="heading-settings" hidden>
-        <header class="workspace-head"><div><p class="eyebrow">Workspace / 06</p><h1 id="heading-settings" tabindex="-1">Settings</h1><p>Configuration and safe diagnostics. Provider capabilities remain disabled.</p></div></header>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 06</p><h1 id="heading-settings" tabindex="-1">Settings</h1><p>Configuration, diagnostics and explicit protected workflow permissions. Remote effects default OFF.</p></div></header>
         <section class="panel" aria-labelledby="pcms-backup-title">
           <div class="panel-head"><h2 id="pcms-backup-title">Manual integrated encrypted backup</h2><span class="unknown">Local export · no restore</span></div>
           <p class="reason">One encrypted file includes a consistent PCMS record/source snapshot and PersonaMonkey's separately encrypted supported portable data. Native WireGuard private configuration, external provider state and unsaved browser editors are excluded. No passwords are stored.</p>
@@ -363,9 +396,25 @@
           <p role="status" aria-live="polite" id="pcms-auto-backup-status">Checking canonical backup state.</p>
           <p class="reason">Up to 14 confirmed automatic archives are retained. Only positively tracked matching excess downloads may be deleted. Manual, untracked, uncertain and missing files are preserved. No independent on-disk byte proof is claimed.</p>
         </section>
-        <section class="panel"><div class="panel-head"><h2>PCMS capabilities</h2><span class="unknown">Remote effects off · local backup available</span></div><dl class="settings-list"><div><dt>Account and provider mutations</dt><dd>Off — not implemented</dd></div><div><dt>Automated source operations</dt><dd>Off — not implemented</dd></div><div><dt>Scheduling and Refresher</dt><dd>Canonical shadow scheduler available; provider observations gated, mutations OFF</dd></div><div><dt>Private generator-source Git writes</dt><dd>Off — not configured</dd></div><div><dt>Backup / restore and AI tests</dt><dd>Manual encrypted backup available; scheduled backup requires OS vault; restore OFF</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Maintained by pinned donor; status not queried by this shell</dd></div></dl><p class="reason">No provider settings or operation commands can be changed here. PersonaMonkey retains advanced security controls.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
+        <section class="panel"><div class="panel-head"><h2>PCMS capability boundaries</h2><span class="unknown">Protected actions require scoped permission and independent evidence</span></div><dl class="settings-list"><div><dt>Account and provider operations</dt><dd>Supported guarded workflows; account ownership, protected Persona route and operation-specific admission remain mandatory</dd></div><div><dt>Automated source development</dt><dd>Bounded READY and AI progression requires the explicit development grant and native editor/source safety checks</dd></div><div><dt>Scheduling and Refresher</dt><dd>Background scheduler and shadow state available; Refresher provider effects are independently gated and are not activated by S06 grants</dd></div><div><dt>Private generator-source Git writes</dt><dd>Conditional source-only writeback requires tested F, active READY, the Git grant and a native OS-vault credential</dd></div><div><dt>Publication and recovery</dt><dd>Each exact F needs a separate human approval, eligible public hold and guarded readback; restored controllers remain inactive pending independent activation</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Owned by the pinned PersonaMonkey donor; S06 permissions cannot bypass route or source guards</dd></div></dl><p class="reason">Granting S06 permission is not evidence that an external operation succeeded. Advanced PersonaMonkey route controls remain separate.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
+        <section class="panel" aria-labelledby="pcms-s06-authority-heading">
+          <div class="panel-head"><h2 id="pcms-s06-authority-heading">Protected workflow activation</h2><span class="unknown">All remote effects OFF by default</span></div>
+          <p>These are three independent standing permissions, not test or provider-success evidence. Turn them on only after reviewing the connected private repository, the protected Persona route, and the proposed operations. Actual writes remain fenced by owner, source, test, claim and publication approvals. Disabling a permission does not undo an already possible external effect.</p>
+          <p id="pcms-s06-authority-repository">Repository scope: not verified</p>
+          <div class="account-controls">
+            <label for="pcms-s06-grant-development">Allow protected generator development, AI testing and eligible existing-source unlisting</label><input id="pcms-s06-grant-development" type="checkbox">
+            <label for="pcms-s06-grant-git">Allow conditional Git main writeback of independently tested final source</label><input id="pcms-s06-grant-git" type="checkbox">
+            <label for="pcms-s06-grant-publication">Allow only separately approved exact-F publication dispatch</label><input id="pcms-s06-grant-publication" type="checkbox">
+            <label for="pcms-s06-authority-consent">To activate, enter: I AUTHORIZE PROTECTED PCMS OPERATIONS</label>
+            <input id="pcms-s06-authority-consent" autocomplete="off" spellcheck="false" maxlength="64">
+            <button id="pcms-s06-authority-enable" type="button" disabled>Apply scoped authorization</button>
+            <button id="pcms-s06-authority-revoke" type="button">Pause all external effects</button>
+            <button id="pcms-s06-authority-refresh" type="button">Refresh permission status</button>
+          </div>
+          <p id="pcms-s06-authority-status" role="status" aria-live="polite">Loading permission status. All effects remain disabled unless independently authorized.</p>
+        </section>
         <section class="panel" aria-labelledby="pcms-writeback-auto-heading">
-          <div class="panel-head"><h2 id="pcms-writeback-auto-heading">I11 · Git-only automatic writeback</h2><span class="unknown">Opt-in, revision-fenced · effects HELD</span></div>
+          <div class="panel-head"><h2 id="pcms-writeback-auto-heading">I11 · Git-only automatic writeback</h2><span class="unknown">Opt-in, revision-fenced · requires scoped Git permission</span></div>
           <div class="account-controls"><label for="pcms-writeback-auto">Allow opt-in automatic Git writeback after verified final AI result</label><input id="pcms-writeback-auto" type="checkbox"><button id="pcms-writeback-save-auto" type="button" disabled>Save writeback preference</button></div>
           <p id="pcms-writeback-auto-status" role="status" aria-live="polite">Automatic writeback defaults OFF. This preference never activates remote Git capabilities or approves publication.</p>
         </section>
@@ -395,7 +444,7 @@
         </section>
       </section>
     </main>
-    <footer class="footer"><span>PCMS Alpha · Stage I09</span><span>UI navigation available · PCMS side effects disabled</span></footer>
+    <footer class="footer"><span>PCMS Alpha · S06 engineering candidate</span><span>Remote effects require scoped grants and independent safety checks</span></footer>
   </div>
   <script type="module" src="shell.mjs"></script>
   <script type="module" src="health.mjs"></script>
@@ -411,7 +460,9 @@
   <script type="module" src="restore-view.mjs"></script>
   <script type="module" src="staging-view.mjs"></script>
   <script type="module" src="ai-view.mjs"></script>
-  <script type="module" src="writeback-view.mjs"></script>\n  <script type="module" src="release-view.mjs"></script>
+  <script type="module" src="writeback-view.mjs"></script>
+  <script type="module" src="release-view.mjs"></script>
+  <script type="module" src="standing-authority-view.mjs"></script>
   <script type="module" src="existing-update-view.mjs"></script>
   <script type="module" src="refresher-view.mjs"></script>
 </body>

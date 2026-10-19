@@ -7,6 +7,8 @@ import {internalPcmsGuard} from './persona-guard.mjs';
 import {createAiStore} from './ai-store.mjs';
 import {createStagingStore} from './staging-store.mjs';
 import {createWritebackStore} from './writeback-store.mjs';
+import {createReadyStore} from './ready-store.mjs';
+import {createS06ExceptionStore,authorizeS06Exception} from './s06-exception-review.mjs';
 import {exactSource,diffSource,verifyReadback} from './staging-core.mjs';
 import {inspectWriteback,writeGitCandidate,observeGitCandidate,
   commitMessage,parseTerminalSuggestion} from './git-writeback.mjs';
@@ -62,7 +64,7 @@ function context(r){
   return {slug:r.slug,accountId:r.accountId,personaUid:r.personaUid,
     principalFingerprint:r.principalFingerprint,remotePublicId:r.remotePublicId};
 }
-async function guardedReadback(g,stage,job){
+async function guardedReadback(g,stage,job,sourceFingerprint=job?.job?.verifiedFinal){
   const r=stage.record;
   if(!g?.observeReadOnly||!g?.getSafeRouteReadiness||
      !g?.inspectStageEditor||!g?.runNativeAiStep)
@@ -91,7 +93,7 @@ async function guardedReadback(g,stage,job){
     visibility:observed.original.visibility,pjs:observed.original.pjs,
     html:observed.original.html,assets:observed.original.assets};
   const exact=await exactSource(job.job.finalSource.blobs);
-  if(!exact.ok||exact.fingerprint!==job.job.verifiedFinal)
+  if(!exact.ok||exact.fingerprint!==sourceFingerprint)
     return fail('FINAL_BYTES_CHANGED');
   const verified=await verifyReadback(exact,packet,context(r));
   if(!verified.ok)return verified;
@@ -190,8 +192,27 @@ export function createWritebackBoundary(api,{
       return {ok:false,state:'HELD_UNCERTAIN',code:found?.code||
         'GIT_RECONCILIATION_UNKNOWN',canRetry:false};
     }
-    const scope=scopeMatches(stage,job);
-    if(!scope.ok)return scope;
+    const priorWrite=msg.type==='COMMIT'?await store.getFull(p.slug):null;
+    const exceptional=(msg.type==='PREPARE'&&p.mode==='S06_EXCEPTION')||
+      (msg.type==='COMMIT'&&priorWrite?.ok&&
+       priorWrite.record.mode==='S06_EXCEPTION');
+    let exceptionProof=null;
+    if(exceptional){
+      const [ready,rec]=await Promise.all([
+        createReadyStore(db).get(p.slug),
+        createS06ExceptionStore(db).getFull(p.slug)]);
+      exceptionProof=ready.ok&&rec.ok&&stage.ok&&job.ok?
+        authorizeS06Exception({ready:ready.record,stage:stage.record,
+          job:job.job,record:rec.record}):
+        fail('S06_EXCEPTION_CANONICAL_EVIDENCE_MISSING');
+      if(!exceptionProof.ok)return exceptionProof;
+      if(msg.type==='COMMIT'&&
+         priorWrite.record.exceptionRevision!==exceptionProof.revision)
+        return fail('S06_EXCEPTION_WRITEBACK_REVISION_CHANGED');
+    }else{
+      const scope=scopeMatches(stage,job);
+      if(!scope.ok)return scope;
+    }
     const r=stage.record,j=job.job;
     if(msg.type==='PREVIEW'){
       const previous=await exactSource(r.candidate.blobs);
@@ -212,12 +233,23 @@ export function createWritebackBoundary(api,{
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
     if(msg.type==='PREPARE'){
       if(p.expectedJobRevision!==j.revision||
-         p.fingerprint!==j.verifiedFinal)return fail('STALE_PREVIEW');
-      const local=await guardedReadback(guard(),stage,job);
+         p.fingerprint!==(exceptional?exceptionProof.sourceFingerprint:j.verifiedFinal))
+        return fail('STALE_PREVIEW');
+      const local=await guardedReadback(guard(),stage,job,
+        exceptional?exceptionProof.sourceFingerprint:j.verifiedFinal);
       if(!local.ok)return local;
       let message;
       if(p.mode==='MANUAL')message=commitMessage(p.message);
-      else {
+      else if(p.mode==='S06'){
+        // Only trusted background S06 calls this mode; UI admission never can.
+        if(p.message!=='PCMS verified '+p.slug+' candidate')
+          return fail('S06_INTERNAL_WRITEBACK_INTENT_REQUIRED');
+        message=commitMessage(p.message);
+      }else if(p.mode==='S06_EXCEPTION'){
+        if(!exceptional||p.message!=='PCMS exceptional '+p.slug+' candidate')
+          return fail('S06_EXCEPTION_INTERNAL_WRITEBACK_REQUIRED');
+        message=commitMessage(p.message);
+      }else {
         // No untrusted UI-provided terminal text is accepted. Query only the
         // leased native assistant session; missing evidence holds AUTO.
         const g=guard(),session=j.native?.sessionDigest;
@@ -268,7 +300,8 @@ export function createWritebackBoundary(api,{
       if(!autoAuthorized())return fail('GIT_AUTO_DISARMED');
       if(effectGate({phase:'I11',record})!==true)
         return fail('GITHUB_WRITE_ACTIVATION_HELD');
-      const read=await guardedReadback(guard(),stage,job);
+      const read=await guardedReadback(guard(),stage,job,
+        exceptional?exceptionProof.sourceFingerprint:j.verifiedFinal);
       if(!read.ok)return read;
       // durable marker has all current AI/stage/settings CAS; duplicate
       // requests from different Firefox wakes cannot arm twice.
@@ -376,6 +409,6 @@ export function createWritebackBoundary(api,{
       });
     });
   }
-  return Object.freeze({register,run,autoTick});
+  return Object.freeze({register,run,autoTick,runTrusted});
 }
 if(typeof browser!=='undefined')createWritebackBoundary(browser).register();

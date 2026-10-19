@@ -3,7 +3,11 @@
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {openCanonicalDatabase,createRestoreSentinel,fail} from './journal.mjs';
 import {createReadyStore} from './ready-store.mjs';
+import {createWritebackStore} from './writeback-store.mjs';
+import {createS06ExceptionStore} from './s06-exception-review.mjs';
+import {sealedS06OutputProof} from './s06-output-proof.mjs';
 import {createStagingStore} from './staging-store.mjs';
+import {createAiStore} from './ai-store.mjs';
 import {stageReadyGitSource} from './ready-git-source.mjs';
 import {evaluateStageSuccessor} from './ready-source-safety.mjs';
 import {scanMainCatalog} from './git-catalog.mjs';
@@ -111,9 +115,16 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
    const tree=await scan({repository:cfg.repository,token:secret.credential});
    if(!tree?.ok||!tree.complete||tree.repositoryId!==cfg.repositoryId)
     return fail('S05_GIT_MAIN_UNVERIFIED');
+   const [confirmed,job,exception]=await Promise.all([
+     createWritebackStore(db).getFull(name),
+     createAiStore(db).getJobFull(name),
+     createS06ExceptionStore(db).getFull(name)]);
+   const output=sealedS06OutputProof({ready:initial,stage,
+     writeback:confirmed,job,exception});
    const coherent=await inspect({repository:cfg.repository,
      token:secret.credential,pinnedHead:tree.head,
-     slug:name,includeSourceBytes:message.type==='PREPARE_LOCAL'});
+     slug:name,includeSourceBytes:message.type==='PREPARE_LOCAL',
+     ...(output.ok?{outputProof:output.outputProof}:{})});
    const id=coherent?.legacy?
       'legacy-'+coherent.declarationCommit+'-'+coherent.markerOid:
       'rev-'+coherent?.token;
@@ -121,6 +132,8 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
       id!==expected.identifier||
       coherent.inputFingerprint!==expected.inputFingerprint)
     return fail('S05_READY_REVISED_OR_REVOKED');
+   if(coherent.outputAttested&&message.type==='PREPARE_LOCAL')
+     return fail('S06_ATTRIBUTED_OUTPUT_CANNOT_RESTAGE_OLD_READY_INPUT');
    if(message.type==='RESUME_READY')
      return createReadyStore(db).resume(name,r.revision,{
        identifier:id,inputFingerprint:coherent.inputFingerprint});
