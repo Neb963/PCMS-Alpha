@@ -78,6 +78,7 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
    if(!initial.ok)return initial;
    const r=initial.record;
    if(r.revision!==expectedRevision)return fail('STALE_REVISION');
+   if(r.hold==='READY_REVOKED_NOT_READY')return fail('READY_REVOKED_NOT_READY');
    const expected=r.desired||r.active;
    if(!expected)return fail('READY_NOT_QUEUED');
    const current=await facts(db,name);
