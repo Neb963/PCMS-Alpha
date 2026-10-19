@@ -70,8 +70,8 @@ export function createCoordinatorStore(db){
             }
             const first=coalesceCreation(null,source);
             if(!first.ok){finish(first);return;}
-            meta.add({key:key(first.record.intentId),record:first.record});
-            meta.add({key:slugKey(slug),intentId:first.record.intentId});
+            meta.put({key:key(first.record.intentId),record:first.record});
+            meta.put({key:slugKey(slug),intentId:first.record.intentId});
             tx.objectStore('events').add({
               stage:'S04_CREATE_INTENT_ACCEPTED',intentId:first.record.intentId,
               slug,origin:source.type,revision:1,providerEffects:'OFF',gitEffects:'OFF'});
