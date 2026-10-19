@@ -334,12 +334,17 @@ export function createReleaseBoundary(api,{
     if(msg.type==='GET_REVIEW_CHUNK'){
       // Source is taken only from sealed canonical stage/job. Read-only,
       // revision-fenced review never grants publisher or Git authority.
-      const stage=await stageFactory(database).getFull(p.slug),
-        job=await aiFactory(database).getJobFull(p.slug);
+      const [stage,job,ready,exception]=await Promise.all([
+        stageFactory(database).getFull(p.slug),aiFactory(database).getJobFull(p.slug),
+        createReadyStore(database).get(p.slug),
+        createS06ExceptionStore(database).getFull(p.slug)]);
+      const evidence={ready:ready.ok?ready.record:null,
+        exception:exception.ok?exception.record:null};
       if(!stage.ok||!job.ok||stage.record.revision!==p.stageRevision||
-         stage.record.slug!==p.slug||!releaseTestContext(stage.record,job.job).ok)
+         stage.record.slug!==p.slug||
+         !releaseCandidateTestContext(stage.record,job.job,evidence).ok)
         return fail('REVIEW_OUTDATED');
-      const f=await candidateManifest(stage.record,job.job);
+      const f=await candidateManifest(stage.record,job.job,evidence);
       if(!f.ok||f.fingerprint!==p.fingerprint)return fail('REVIEW_FINAL_F_STALE');
       const selected=p.origin==='F'?f:await exactSource(stage.record.previous.blobs);
       if(!selected.ok||selected.fingerprint!==stage.record.previous?.fingerprint&&p.origin==='P')
@@ -415,7 +420,9 @@ export function createReleaseBoundary(api,{
           'INDIVIDUAL_EXCEPTIONAL_MANUAL_REVIEW':'INDIVIDUAL_HUMAN_APPROVAL',
         aiVerified:checked.testContext.mode==='VERIFIED_AI',
         exceptionEvidenceMode:checked.testContext.evidenceMode||null,
-        warning:'Approval alone cannot publish; remote effects held until proven'};
+        warning:checked.testContext.mode==='EXCEPTION_MANUAL_REVIEW'?
+          'EXCEPTIONAL MANUAL/INCOMPLETE TESTING: AI verified tests remain UNVERIFIED. Confirm the exact manual checks, incomplete Chat 2 warning and F before individual approval; a green review is NOT a test PASS.':
+          'Approval alone cannot publish; remote effects held until proven'};
     }
     if(msg.type==='REQUEST_CHANGES'){
       if(p.expectedStageRevision!==checked.r.revision||
