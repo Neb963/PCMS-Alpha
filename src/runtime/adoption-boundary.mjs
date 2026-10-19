@@ -4,7 +4,7 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {createAdoptionStore} from './adoption-store.mjs';
 import {validateAdoptionIntent,verifyOriginal} from './adoption.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
-import {writeArchive,inspectArchive} from './adoption-git.mjs';
+import {writeOriginalArchive,inspectOriginalArchive} from './original-archive.mjs';
 export const ADOPTION_PORT='pcms-i07-adoption';
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 export function validateAdoptionMessage(api,sender,msg){
@@ -20,16 +20,13 @@ export function validateAdoptionMessage(api,sender,msg){
   const allowed=msg.type==='LIST_ADOPTIONS'?[]:
     msg.type==='CAPTURE_ADOPTION'?['slug','expectedRevision','explicitPublicConsent']:
     msg.type==='GET_ADOPTION'?['slug']:
-    ['ARCHIVE_GIT','RECHECK_GIT'].includes(msg.type)?['slug','expectedRevision','token']:
+    ['ARCHIVE_GIT','RECHECK_GIT'].includes(msg.type)?['slug','expectedRevision']:
     ['slug','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k))||
      (msg.type!=='LIST_ADOPTIONS'&&!slug(p.slug)))return fail('INVALID_PARAMS');
   if(['ARCHIVE_LOCAL','CAPTURE_ADOPTION','ARCHIVE_GIT','RECHECK_GIT','ABORT_GIT_PREPARED'].includes(msg.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
     return fail('INVALID_PARAMS');
-  if(['ARCHIVE_GIT','RECHECK_GIT'].includes(msg.type)&&
-     (typeof p.token!=='string'||p.token.length<12||p.token.length>512||
-      !/^[\x21-\x7e]+$/.test(p.token)))return fail('INVALID_PARAMS');
   if(msg.type==='CAPTURE_ADOPTION'&&typeof p.explicitPublicConsent!=='boolean')
     return fail('INVALID_PARAMS');
   return {ok:true};
@@ -52,9 +49,13 @@ function readRow(db,slug){
 }
 export function createAdoptionBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,storeFactory=createAdoptionStore,
-  gitWrite=writeArchive,gitRead=inspectArchive,
+  gitWrite=writeOriginalArchive,gitRead=inspectOriginalArchive,
   // Packaged Git mutation activation remains HELD pending separate operator proof.
-  gitGate=()=>false
+  gitGate=()=>false,
+  getGitConnection=async()=>{const out=await api.storage.local.get('pcmsS03Git');
+    return out?.pcmsS03Git;},
+  getGitCredential=async repositoryId=>api.runtime.sendNativeMessage(
+    'local.pcms.backup_vault',{action:'git.get',repositoryId})
 }={}){
   let dbPromise;
   const db=()=>dbPromise ||=open();
@@ -85,8 +86,15 @@ export function createAdoptionBoundary(api,{
         if(!g?.getSafeRouteReadiness)return fail('DONOR_GUARD_UNAVAILABLE');
         const route=await g.getSafeRouteReadiness(rec.personaUid);
         if(!route?.ready)return fail(route?.code||'PROTECTED_ROUTE_UNVERIFIED');
+        const cfg=await getGitConnection();
+        if(!cfg?.repository||!/^[1-9][0-9]{0,19}$/.test(cfg.repositoryId||''))
+          return fail('GIT_RECONNECT_REQUIRED');
+        const secret=await getGitCredential(cfg.repositoryId);
+        if(!secret?.ok||typeof secret.credential!=='string')
+          return fail('GIT_VAULT_UNAVAILABLE');
         const params={slug:rec.slug,original:rec.original,
-          folder:rec.archiveFolder||'gens/'+rec.slug,token:p.token};
+          repository:cfg.repository,repositoryId:cfg.repositoryId,
+          token:secret.credential};
         if(msg.type==='RECHECK_GIT'){
           if(!['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(rec.archiveState))
             return fail('ARCHIVE_RECONCILIATION_NOT_REQUIRED');
@@ -123,7 +131,7 @@ export function createAdoptionBoundary(api,{
           return fail('GIT_DISPATCH_HELD_UNCERTAIN');
         }
         let result;
-        try{result=await gitWrite({...params,folder:at.record.archiveFolder});}
+        try{result=await gitWrite(params);}
         catch{result=fail('GIT_WRITE_UNCERTAIN');}
         if(!result?.ok){
           await store.archiveStage(p.slug,at.record.revision,'HELD_UNCERTAIN');

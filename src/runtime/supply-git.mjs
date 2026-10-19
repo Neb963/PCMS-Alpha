@@ -5,16 +5,16 @@ import {safeFolder} from './git-source.mjs';
 import {fail} from './journal.mjs';
 const ROOT='https://api.github.com/repos/Neb963/per-gens';
 const SHA=/^[a-f0-9]{40}$/;
-const marker='Status: SOURCE_PENDING\n';  // Strictly NOT READY.
+const marker='Status: NOT_READY\n';  // Exact approved deployment declaration.
 const b64=bytes=>btoa(String.fromCharCode(...bytes));
 const utf8=s=>new TextEncoder().encode(s);
 const own=o=>o&&typeof o==='object'&&!Array.isArray(o);
-const rootFolder=folder=>safeFolder(folder)&&folder.startsWith('gens/')&&
-  folder.split('/').length===2&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(folder.slice(5));
+const rootFolder=folder=>safeFolder(folder)&&folder.startsWith('generators/')&&
+  folder.split('/').length===2&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(folder.slice(11));
 export const NON_READY_MARKER=marker;
 export function markerRequestAllowed({folder,slug,token}){
   if(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)||
-     folder!=='gens/'+slug||!rootFolder(folder))return fail('UNSAFE_SOURCE_PATH');
+     folder!=='generators/'+slug||!rootFolder(folder))return fail('UNSAFE_SOURCE_PATH');
   if(typeof token!=='string'||token.length<12||token.length>512||
      /[\s\r\n]/.test(token))return fail('GITHUB_WRITE_TOKEN_REQUIRED');
   return {ok:true};

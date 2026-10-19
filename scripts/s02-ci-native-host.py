@@ -262,6 +262,24 @@ def native_script():
         let actualCoordinator=null;
         for(let i=0;i<2;i++){
           if(i===1){
+            // Diagnostic key baseline must be taken AFTER the completed
+            // first archive's expected v2 ledger was committed, not from
+            // the old 50/1024 fixture snapshot. Key-only, no source copies.
+            const preCoordinatorKeys={};
+            for(const store of core.DB_STORES){
+              const keys=[];
+              const tx=db.transaction([store],'readonly');
+              await new Promise((resolve,reject)=>{
+                const cur=tx.objectStore(store).openKeyCursor();
+                cur.onsuccess=e=>{
+                  const item=e.target.result;
+                  if(item){keys.push(String(item.key));item.continue();}
+                };
+                tx.oncomplete=resolve;
+                tx.onabort=()=>reject(Error('H_BEFORE_CUT_KEY_AUDIT_ABORT'));
+              });
+              preCoordinatorKeys[store]=keys;
+            }
             try{
               actualCoordinator=await coordinator.captureV2SourceCut(
                 browser,db,vault.passphrase,{inspect:async()=>({held:false})},{
@@ -271,7 +289,7 @@ def native_script():
               // whether a different background producer altered real IDB keys.
               const unexpected={};
               for(const store of core.DB_STORES){
-                const expected=new Set(pcms.stores[store].map(r=>String(r.key)));
+                const expected=new Set(preCoordinatorKeys[store]);
                 const actual=new Set();
                 const tx=db.transaction([store],'readonly');
                 await new Promise((resolve,reject)=>{

@@ -159,7 +159,7 @@ export function createAdoptionStore(db){
                  link.bindingVersion!==a.bindingVersion)){
                 result=fail('SOURCE_ASSOCIATION_CONFLICT');return;
               }
-              const folder=link?.folder||'gens/'+slug;
+              const folder=link?.folder||'generators/'+slug;
               if(event==='PREPARE'){
                 const opId='archive_'+crypto.randomUUID().replaceAll('-','');
                 const next={...a,archiveState:'GIT_PREPARED',revision:a.revision+1,
@@ -188,8 +188,11 @@ export function createAdoptionStore(db){
                 if(event==='CONFIRM'&&
                    (proof?.source!=='INDEPENDENT_GIT_BYTE_READBACK'||
                     proof?.ready!==false||
-                    proof?.prefix!=='originals/'+slug+'/'+a.original.fingerprint||
-                    proof?.folder!==a.archiveFolder)){
+                    proof?.archiveRef!=='refs/tags/pcms-originals/'+
+                      a.original.remotePublicId+'/'+a.original.fingerprint||
+                    proof?.prefix!=='generators/'+slug||
+                    proof?.fingerprint!==a.original.fingerprint||
+                    !/^[a-f0-9]{40}$/.test(proof?.commit||''))){
                   result=fail('INDEPENDENT_GIT_PROOF_REQUIRED');return;
                 }
                 const state=event==='ABORT_PREPARED'?'ARCHIVE_PENDING':
@@ -201,9 +204,11 @@ export function createAdoptionStore(db){
                 const next={...a,archiveState:state,revision:a.revision+1,
                   ...(event==='ABORT_PREPARED'?{archiveOperationId:null,archiveFolder:null}:{}),
                   ...(event==='CONFIRM'?{
-                    archiveHead:proof.head,
-                    management:a.visibility==='PUBLIC'?
-                      'CONSENTED_ORIGINAL_PROTECTED':'DISCOVERED_ORIGINAL_PROTECTED'
+                    archiveHead:proof.head,archiveCommit:proof.commit,
+                    archiveRef:proof.archiveRef,
+                    // A detached Git archive does NOT independently prove
+                    // an authenticated, source-complete encrypted recovery.
+                    management:'ORIGINAL_GIT_ARCHIVED_CHECKPOINT_PENDING'
                   }: {})};
                 ops.put({...operation,status:opStatus,revision:operation.revision+1});
                 m.put({key:key(slug),adoption:next});
@@ -217,5 +222,53 @@ export function createAdoptionStore(db){
       };
     });
   }
-  return Object.freeze({get,list,adopt,archiveLocal,getFull,archiveStage});
+  // S04/S02 internal handoff only: an independently recovered encrypted
+  // source-bearing archive must be qualified before adopted original source
+  // can become write-eligible. The Git archive alone is insufficient.
+  function confirmCheckpoint({slug,expectedRevision,proof}){
+    if(!proof||proof.source!=='INDEPENDENT_AUTHENTICATED_RECOVERY'||
+       proof.verified!==true||typeof proof.receiptId!=='string'||
+       !/^[A-Za-z0-9_-]{8,100}$/.test(proof.receiptId)||
+       !/^[a-f0-9]{64}$/.test(proof.originalFingerprint||'')||
+       !/^[a-f0-9]{64}$/.test(proof.archiveDigest||'')||
+       !/^[a-f0-9]{40}$/.test(proof.archiveCommit||'')||
+       typeof proof.archiveRef!=='string')
+      return Promise.resolve(fail('INDEPENDENT_RECOVERY_PROOF_REQUIRED'));
+    return tx(db,'readwrite',(t,done)=>{
+      const m=t.objectStore('meta');
+      m.get(key(slug)).onsuccess=e=>{
+        const prior=e.target.result?.adoption;
+        if(!prior||prior.revision!==expectedRevision){
+          done(fail('STALE_REVISION'));return;
+        }
+        if(prior.archived||prior.archiveState!=='ARCHIVED_GIT_CONFIRMED'||
+           prior.original?.fingerprint!==proof.originalFingerprint||
+           prior.archiveCommit!==proof.archiveCommit||
+           prior.archiveRef!==proof.archiveRef){
+          done(fail('ORIGINAL_RECOVERY_NOT_ELIGIBLE'));return;
+        }
+        m.get('account:'+prior.accountId).onsuccess=a=>{
+          const account=a.target.result?.account;
+          if(account?.state!=='VERIFIED'||
+             account.revision!==prior.accountRevision||
+             account.bindingVersion!==prior.bindingVersion||
+             account.identity?.principalFingerprint!==prior.principalFingerprint){
+            done(fail('ACCOUNT_CONTEXT_CHANGED'));return;
+          }
+          const next={...prior,revision:prior.revision+1,
+            originalCheckpoint:{receiptId:proof.receiptId,
+              archiveDigest:proof.archiveDigest,
+              fingerprint:proof.originalFingerprint,
+              source:proof.source,qualified:true},
+            management:'ORIGINAL_PROTECTED_CHECKPOINT_CONFIRMED'};
+          m.put({key:key(slug),adoption:next});
+          t.objectStore('events').add({stage:'S04_ORIGINAL_RECOVERY_QUALIFIED',
+            slug,revision:next.revision,receiptId:proof.receiptId,
+            fingerprint:proof.originalFingerprint});
+          done(publicAdoption(next));
+        };
+      };
+    });
+  }
+  return Object.freeze({get,list,adopt,archiveLocal,getFull,archiveStage,confirmCheckpoint});
 }

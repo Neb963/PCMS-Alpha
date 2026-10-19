@@ -3,6 +3,7 @@
 import {scanMainCatalog} from './git-catalog.mjs';
 import {createRestoreSentinel} from './journal.mjs';
 import {createGitResumeTransport} from './catalog-resume.mjs';
+import {createCreationCatalogIntake} from './creation-catalog.mjs';
 export const CATALOG_ALARM='pcms-s03-main-observe';
 export const CATALOG_RESUME_ALARM='pcms-s03-main-resume';
 const CONFIG='pcmsS03Git',RECEIPT='pcmsS03CatalogReceipt',LAST='pcmsS03CatalogLastComplete';
@@ -13,7 +14,7 @@ const safe=code=>({ok:false,code});
 const MINUTES=15;
 export function createCatalogWatcher(api,{scan=scanMainCatalog,
   native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
-  network=fetch,clock=Date.now}={}){
+  network=fetch,clock=Date.now,ingestComplete=null}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
   let running=null,registered=false;
   async function persistStatus(code){
@@ -63,6 +64,19 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
         newFolders:added,missingFolderObservations:missing,
         firstImportNeedsApproval:prior?.repositoryId!==cfg.repositoryId
       }});
+      // S04 receives only the independently complete pinned-main scan. Its
+      // own approval check and canonical DB handle decide local intent intake.
+      // The S03 observer never invents provider ownership or performs writes.
+      if(ingestComplete){
+        let intake;
+        try{intake=await ingestComplete(result);}catch{intake={ok:false,code:'S04_INTAKE_UNAVAILABLE'};}
+        if(intake?.more===true)
+          try{await api.alarms.create(CATALOG_RESUME_ALARM,{when:clock()+60000});}catch{}
+        if(intake?.ok===false)
+          try{await api.storage.local.set({pcmsS04CatalogIntakeReceipt:{
+            code:intake.code||'S04_INTAKE_HELD',repositoryId:cfg.repositoryId,
+            head:result.head,observedAt:clock(),providerEffects:'OFF'}});}catch{}
+      }
       return {ok:true,code:'CATALOG_OBSERVED_READ_ONLY',head:result.head,
         newFolders:added,missingFolderObservations:missing};
     }catch{return persistStatus('CATALOG_OBSERVATION_UNAVAILABLE');}
@@ -86,4 +100,6 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
   }
   return Object.freeze({register,tick});
 }
-if(typeof browser!=='undefined')createCatalogWatcher(browser).register();
+if(typeof browser!=='undefined')createCatalogWatcher(browser,{
+  ingestComplete:createCreationCatalogIntake(browser).run
+}).register();

@@ -30,10 +30,10 @@ function controls(){
   archive.disabled=busy||!last?.ok||last.archived===true;
   consent.disabled=busy||!chosen||chosen.visibility!=='PUBLIC';
   const pending=last?.ok&&!last.archived;
-  gitWrite.disabled=busy||!pending||last.archive!=='ARCHIVE_PENDING'||gitToken.value.length<12;
+  gitWrite.disabled=busy||!pending||last.archive!=='ARCHIVE_PENDING';
   gitRecheck.disabled=busy||!pending||
-    !['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(last.archive)||gitToken.value.length<12;
-  gitClear.disabled=busy;
+    !['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(last.archive);
+  gitClear.disabled=true;
   gitCancel.disabled=busy||!pending||last.archive!=='GIT_PREPARED';
 }
 function announce(v){feedback.textContent=v;}
@@ -81,20 +81,21 @@ window.addEventListener('pcms-adoption-target',async event=>{
   finally{controls();}
 });
 consent.addEventListener('change',controls);
-gitToken.addEventListener('input',controls);
+gitToken.disabled=true;
+gitToken.placeholder='Credential retrieved from connected Git vault';
 gitClear.addEventListener('click',()=>{
   gitToken.value='';controls();
-  announce('Git token cleared from input; no stored credentials.');
+  announce('Git credential is managed by the connected operating-system vault.');
 });
 async function githubArchive(type){
   if(busy||!chosen||!last?.ok)return;
   busy=true;controls();const seq=generation;
-  const token=gitToken.value;gitToken.value='';
+  gitToken.value='';
   announce(type==='ARCHIVE_GIT'?
     'Journaling before Git commit; response may be uncertain.':'Independent remote Git archive byte readback…');
   try{
     const result=await port(type,{slug:chosen.slug,
-      expectedRevision:last.revision,token});
+      expectedRevision:last.revision});
     if(seq!==generation)return;
     if(!result?.ok)announce('Git archive held ('+(result?.code||'UNVERIFIED')+
       '). Never blindly retry after possible ref movement; use Reconcile after refreshing canonical receipt.');

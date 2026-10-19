@@ -212,6 +212,8 @@ def supply_effect_idb_probe(session):
       };
       const boundary=createSupplyBoundary(api,{guard:()=>guard,
         effectGate:()=>true,gitGate:()=>true,
+        getGitConnection:async()=>({repository:'Neb963/per-gens',repositoryId:'42'}),
+        getGitCredential:async()=>({ok:true,credential:'offline-git-write-token'}),
         gitWrite:async ({folder,slug,token})=>{
           if(token!=='offline-git-write-token')throw Error('Wrong fixture token');
           effects.push('GIT_MARKER');
@@ -225,8 +227,7 @@ def supply_effect_idb_probe(session):
       const created=await effect(1);
       const renamed=await effect(created.revision);
       const linked=await boundary.run({type:'FINISH_SOURCE_FOLDER',params:{
-        batchId,itemId,expectedRevision:renamed.revision,
-        token:'offline-git-write-token'}},sender);
+        batchId,itemId,expectedRevision:renamed.revision}},sender);
       const fromPort=await boundary.run({type:'GET_BATCH',params:{batchId}},sender);
       done({created,renamed,linked,effects,
         final:fromPort?.batch?.items?.find(x=>x.itemId===itemId)});
@@ -260,9 +261,13 @@ def adoption_idb_probe(session):
       };
       const db=await openCanonicalDatabase();
       const store=createAdoptionStore(db);
+      const commonGit={
+        getGitConnection:async()=>({repository:'Neb963/per-gens',repositoryId:'42'}),
+        getGitCredential:async()=>({ok:true,credential:'synthetic-git-token-01'})
+      };
       const boundary=createAdoptionBoundary(api,{guard:()=>guard,
-        gitGate:()=>true,
-        gitWrite:async ({folder,original:preserved})=>{
+        ...commonGit,gitGate:()=>true,
+        gitWrite:async ({original:preserved})=>{
           const onDisk=await store.getFull(slug);
           if(onDisk.record?.archiveState!=='DISPATCH_POSSIBLE')
             throw Error('Missing durable Git dispatch marker');
@@ -270,24 +275,24 @@ def adoption_idb_probe(session):
             throw Error('Source bytes changed before fake Git dispatcher');
           trace.push('FAKE_GIT_AFTER_DURABLE_MARKER');
           return {ok:true,source:'INDEPENDENT_GIT_BYTE_READBACK',ready:false,
-            prefix:'originals/'+slug+'/'+preserved.fingerprint,folder,
-            head:'f'.repeat(40)};
+            archiveRef:'refs/tags/pcms-originals/'+preserved.remotePublicId+'/'+preserved.fingerprint,
+            prefix:'generators/'+slug,fingerprint:preserved.fingerprint,
+            commit:'e'.repeat(40),head:'f'.repeat(40),repositoryId:'42'};
         }});
       const cmd=(type,params)=>boundary.run({type,params},sender);
       const adopted=await cmd('CAPTURE_ADOPTION',{
         slug,expectedRevision:1,explicitPublicConsent:false});
       const listing=await cmd('GET_ADOPTION',{slug});
-      const held=await createAdoptionBoundary(api,{guard:()=>guard}).run({
-        type:'ARCHIVE_GIT',params:{slug,expectedRevision:adopted.revision,
-          token:'synthetic-git-token-01'}},sender);
+      const held=await createAdoptionBoundary(api,{guard:()=>guard,...commonGit}).run({
+        type:'ARCHIVE_GIT',params:{slug,expectedRevision:adopted.revision}},sender);
       const git=await cmd('ARCHIVE_GIT',{slug,
-        expectedRevision:adopted.revision,token:'synthetic-git-token-01'});
+        expectedRevision:adopted.revision});
       const protectedResult=await cmd('GET_ADOPTION',{slug});
       const tombstone=await cmd('ARCHIVE_LOCAL',{slug,
         expectedRevision:protectedResult.revision});
       const after=await cmd('GET_ADOPTION',{slug});
       const rejected=await cmd('ARCHIVE_GIT',{slug,
-        expectedRevision:after.revision,token:'synthetic-git-token-01'});
+        expectedRevision:after.revision});
       db.close();
       done({adopted,listing,held,git,protectedResult,tombstone,after,rejected,trace});
     })().catch(e=>done({error:'I07_IDB_PROBE_FAILED',detail:String(e).slice(0,200)}));'''
@@ -944,6 +949,18 @@ def main():
                     'slug':'pcms-test-esr-chain-20261015-a01','origin':'OPERATOR'}})
                 assert s00_denied.get('code')=='I17_ORIGINAL_EFFECT_QUARANTINED',s00_denied
                 print('B S00_INSTALLED_CANONICAL_INTENT_AND_QUARANTINE=PASS',flush=True)
+                # S04 packaged trusted queue: unbound canonical intent may
+                # not obtain a provider operation or synthesize a free
+                # account while initial inventory has no managed accounts.
+                s04_unbound=coordinator_command(after,{'type':'RUN_CREATE_STEP',
+                    'params':{'intentId':s00_intent['intentId'],'expectedRevision':1}})
+                assert s04_unbound.get('code')=='NO_MANAGED_ACCOUNTS',s04_unbound
+                s04_current=coordinator_command(after,{'type':'GET_CREATE_INTENT',
+                    'params':{'intentId':s00_intent['intentId']}})
+                assert s04_current.get('record',{}).get('revision')==1,s04_current
+                assert s04_current.get('record',{}).get('state')=='WAITING_CAPABILITY',s04_current
+                print('B S04_INSTALLED_GUARDED_QUEUE_NO_ACCOUNT_ZERO_PROVIDER_EFFECT=PASS',flush=True)
+
                 personas=account_command(after,{'type':'LIST_PERSONAS'})
                 assert personas.get('ok') is True and isinstance(personas.get('personas'),list),personas
                 records=account_command(after,{'type':'LIST_ACCOUNTS'})

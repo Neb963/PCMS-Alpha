@@ -6,6 +6,7 @@ import {snapshotCanonical,consistentOrThrow,encodeIntegrated,decodeIntegrated,
   preflightSourceRecovery,snapshotCanonicalV2,verifyCanonicalV2Unchanged,
   v2CaptureResourcePolicy,checkV2BrowserStorage} from './backup-core.mjs';
 import {waitForPcmsBackupDonor} from './backup-auto-donor.mjs';
+import {retryS02ConsistentCut} from './source-cut-retry.mjs';
 async function donor(api,readDonor=waitForPcmsBackupDonor){
   const data=await (await readDonor()).snapshot();
   if(!data?.state||!Array.isArray(data.containers))throw Error('BACKUP_DONOR_UNAVAILABLE');
@@ -75,7 +76,7 @@ async function advisoryNativeMemory(api){
   }catch{return null;}
   finally{try{port?.disconnect()}catch{}}
 }
-export async function captureV2SourceCut(api,db,password,sentinel,{
+async function captureV2SourceCutOnce(api,db,password,sentinel,{
   donorReader=waitForPcmsBackupDonor,resourceEnvironment=globalThis.navigator,
   osMemoryProbe=advisoryNativeMemory
 }={}){
@@ -117,4 +118,14 @@ export async function captureV2SourceCut(api,db,password,sentinel,{
       maxAggregateUtf16Bytes:policy.maxAggregateUtf16Bytes,
       browserHeapBytes:null,initialQuota,finalQuota}),
     cut:'CONSISTENT_SOURCE_CUT'});
+}
+
+// The five-store cut must stay unchanged through donor/cookie materialization.
+// A concurrent background journal write invalidates that candidate, never
+// permits a partial export. Retry read-only capture at most three times;
+// unrelated errors and persistent churn remain hard failures. No external
+// native export or provider effect is dispatched by this function.
+export function captureV2SourceCut(api,db,password,sentinel,options={}){
+  return retryS02ConsistentCut(()=>
+    captureV2SourceCutOnce(api,db,password,sentinel,options));
 }

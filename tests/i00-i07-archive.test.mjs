@@ -126,9 +126,11 @@ test('I07 trusted port rejects forged caller, arbitrary Git writes and payload',
     getURL:path=>'moz-extension://fixture/'+path}};
   const sender={id:api.runtime.id,url:'moz-extension://fixture/pcms/index.html#generators'};
   assert.equal(validateAdoptionMessage(api,sender,{type:'ARCHIVE_GIT',
-    params:{slug:'example',expectedRevision:1,token}}).ok,true);
+    params:{slug:'example',expectedRevision:1}}).ok,true);
+  assert.equal(validateAdoptionMessage(api,sender,{type:'ARCHIVE_GIT',
+    params:{slug:'example',expectedRevision:1,token}}).code,'INVALID_PARAMS');
   assert.equal(validateAdoptionMessage(api,{id:'elsewhere',url:sender.url},
-    {type:'ARCHIVE_GIT',params:{slug,expectedRevision:1,token}}).code,'UNTRUSTED_SENDER');
+    {type:'ARCHIVE_GIT',params:{slug,expectedRevision:1}}).code,'UNTRUSTED_SENDER');
   assert.equal(validateAdoptionMessage(api,sender,{type:'WRITE_PROVIDER'}).code,'CAPABILITY_OFF');
   assert.equal(validateAdoptionMessage(api,sender,{type:'ARCHIVE_GIT',
     params:{slug,expectedRevision:1,token,force:true}}).code,'INVALID_PARAMS');

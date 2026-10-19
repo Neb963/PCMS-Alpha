@@ -9,10 +9,10 @@ export async function perchanceSupplyIsolated(request) {
   const safeId=x=>typeof x==='string'&&/^[a-zA-Z0-9_-]{8,100}$/.test(x);
   const hex=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
   if(location.origin!=='https://perchance.org')return hold('WRONG_ORIGIN');
-  if(!request||!['CREATE','RENAME','READ_CREATE','READ_RENAME'].includes(request.kind)||
+  if(!request||!['CREATE','RENAME','READ_CREATE','READ_RENAME','READ_TARGET'].includes(request.kind)||
      !slug(request.slug)||!hex(request.principalFingerprint))
     return hold('INVALID_SUPPLY_REQUEST');
-  if(request.kind!=='CREATE'&&!slug(request.temporarySlug))
+  if(!['CREATE','READ_TARGET'].includes(request.kind)&&!slug(request.temporarySlug))
     return hold('INVALID_SUPPLY_REQUEST');
   if(['RENAME','READ_RENAME'].includes(request.kind)&&!safeId(request.remoteId))
     return hold('INVALID_SUPPLY_REQUEST');
@@ -75,6 +75,31 @@ export async function perchanceSupplyIsolated(request) {
         return hold('REMOTE_ID_UNVERIFIED');
       return {ok:true,remoteId:'public_'+publicId};
     };
+    if(request.kind==='READ_TARGET'){
+      // Two different provider observations; no census-absence shortcut.
+      // A valid current owner may be adopted, never treated as a new CREATE.
+      const owner=await call('checkGeneratorOwnership',{generatorName:request.slug});
+      const page=await call('getGeneratorPageData',{
+        generatorName:request.slug},{unauthenticated:true});
+      if(!sameSession())return hold('SESSION_CHANGED');
+      if(owner.status==='is-owner'&&page.status==='success'&&
+         page.generator?.name===request.slug&&
+         typeof page.generator.isPrivate==='boolean'&&
+         typeof page.generator.publicId==='string'&&
+         safeId('public_'+page.generator.publicId))
+        return {ok:true,source:'INDEPENDENT_TARGET_READBACK',
+          state:'OWNED_VERIFIED',ownerMatches:true,slug:request.slug,
+          remoteId:'public_'+page.generator.publicId,
+          visibility:page.generator.isPrivate?'UNLISTED':'PUBLIC'};
+      if(owner.status==='is-not-owner'&&page.status==='success')
+        return {ok:true,source:'INDEPENDENT_TARGET_READBACK',
+          state:'COLLISION',ownerMatches:false,slug:request.slug};
+      if(owner.status==='is-not-owner'&&
+         ['generator-does-not-exist','not-found'].includes(page.status))
+        return {ok:true,source:'INDEPENDENT_TARGET_READBACK',
+          state:'MISSING_VERIFIED',ownerMatches:false,slug:request.slug};
+      return hold('TARGET_OWNER_OR_ABSENCE_UNVERIFIED');
+    }
     if(request.kind==='READ_CREATE') {
       const checked=await read(request.temporarySlug);
       if(!checked.ok)return hold('CREATE_READBACK_UNVERIFIED');
