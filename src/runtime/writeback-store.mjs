@@ -126,6 +126,9 @@ export function createWritebackStore(db){
                  currentStage.accountId!==stage.accountId||
                  currentStage.sourceHead!==stage.sourceHead||
                  currentStage.sourceFolder!==stage.sourceFolder||
+                 (mode==='S06'&&(currentStage.readyIdentifier!==stage.readyIdentifier||
+                   currentStage.readyInputFingerprint!==stage.readyInputFingerprint||
+                   currentStage.testingSha!==stage.testingSha))||
                  (mode==='AUTO'&&!currentSettings.autoEnabled)){
                 done(fail('WRITEBACK_CONTEXT_CHANGED'));return;
               }
@@ -133,6 +136,9 @@ export function createWritebackStore(db){
                 operationId,mode,message,state:'PREPARED',folder:stage.sourceFolder,baseHead:stage.sourceHead,
                 expectedHead:probe.head,sourceFingerprint:job.sourceFingerprint,
                 stageRevision:stage.revision,jobRevision:job.revision,
+                ...(mode==='S06'?{readyIdentifier:stage.readyIdentifier,
+                  readyInputFingerprint:stage.readyInputFingerprint,
+                  testingSha:stage.testingSha??null}:{}),
                 settingRevision:currentSettings.revision,
                 accountId:stage.accountId,personaUid:stage.personaUid,
                 principalFingerprint:stage.principalFingerprint,
