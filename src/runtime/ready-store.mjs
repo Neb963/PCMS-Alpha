@@ -4,6 +4,7 @@ const fail=code=>({ok:false,code});
 const ID=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const key=s=>'s05-ready:'+s;
 const history=s=>'s05-ready-history:'+s+':';
+const seen=(s,identity)=>'s05-ready-seen:'+s+':'+identity;
 const view=r=>({slug:r.slug,repositoryId:r.repositoryId,revision:r.revision,
  active:r.active&&{identifier:r.active.identifier,state:r.active.state,
   inputFingerprint:r.active.inputFingerprint},
@@ -35,16 +36,36 @@ export function createReadyStore(db){
   return tx(db,'readwrite',(t,done)=>{
    const m=t.objectStore('meta'),k=key(witness.slug);
    m.get(k).onsuccess=e=>{
-    const old=e.target.result?.record,planned=planReadyObservation(old,witness);
-    if(!planned.ok){done(planned);return;}
-    if(!planned.changed){done({...planned,record:view(old)});return;}
-    if(old?.desired&&old.desired.identity!==planned.next.desired?.identity)
-     m.add({key:history(witness.slug)+old.revision,
-      previous:structuredClone(old.desired),reason:'SUPERSEDED_BEFORE_ADMISSION'});
-    m.put({key:k,record:planned.next});
-    t.objectStore('events').add({stage:'S05_READY_QUEUED',slug:witness.slug,
-      identifier:witness.identifier,revision:planned.next.revision,providerEffects:'NONE'});
-    done({ok:true,changed:true,code:planned.code,record:view(planned.next)});
+    const old=e.target.result?.record;
+    const checked=normalizeReadyWitness(witness);
+    m.get(seen(witness.slug,checked.identity)).onsuccess=priorRequest=>{
+      const prior=priorRequest.target.result?.witness;
+      // A committed READY token can never gain new bytes or become a newly
+      // eligible candidate by reverting main to an earlier observed token.
+      if(prior&&(prior.inputFingerprint!==checked.inputFingerprint||
+         prior.markerOid!==checked.markerOid||
+         prior.declarationCommit!==checked.declarationCommit)){
+        done(fail('READY_REVISION_REUSED_WITH_DIFFERENT_SOURCE'));return;
+      }
+      const current=old?.desired?.identity===checked.identity||
+        old?.active?.identity===checked.identity;
+      if(prior&&!current){
+        done({ok:true,changed:false,code:'READY_PREVIOUSLY_CONSUMED',
+          record:view(old)});return;
+      }
+      const planned=planReadyObservation(old,witness);
+      if(!planned.ok){done(planned);return;}
+      if(!planned.changed){done({...planned,record:view(old)});return;}
+      if(!prior)m.add({key:seen(witness.slug,checked.identity),
+        witness:checked,firstSeenAt:Date.now()});
+      if(old?.desired&&old.desired.identity!==planned.next.desired?.identity)
+       m.add({key:history(witness.slug)+old.revision,
+        previous:structuredClone(old.desired),reason:'SUPERSEDED_BEFORE_ADMISSION'});
+      m.put({key:k,record:planned.next});
+      t.objectStore('events').add({stage:'S05_READY_QUEUED',slug:witness.slug,
+        identifier:witness.identifier,revision:planned.next.revision,providerEffects:'NONE'});
+      done({ok:true,changed:true,code:planned.code,record:view(planned.next)});
+    };
    };
   });
  }
