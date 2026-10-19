@@ -159,7 +159,7 @@ export function createAdoptionStore(db){
                  link.bindingVersion!==a.bindingVersion)){
                 result=fail('SOURCE_ASSOCIATION_CONFLICT');return;
               }
-              const folder=link?.folder||'gens/'+slug;
+              const folder=link?.folder||'generators/'+slug;
               if(event==='PREPARE'){
                 const opId='archive_'+crypto.randomUUID().replaceAll('-','');
                 const next={...a,archiveState:'GIT_PREPARED',revision:a.revision+1,
@@ -188,8 +188,11 @@ export function createAdoptionStore(db){
                 if(event==='CONFIRM'&&
                    (proof?.source!=='INDEPENDENT_GIT_BYTE_READBACK'||
                     proof?.ready!==false||
-                    proof?.prefix!=='originals/'+slug+'/'+a.original.fingerprint||
-                    proof?.folder!==a.archiveFolder)){
+                    proof?.archiveRef!=='refs/tags/pcms-originals/'+
+                      a.original.remotePublicId+'/'+a.original.fingerprint||
+                    proof?.prefix!=='generators/'+slug||
+                    proof?.fingerprint!==a.original.fingerprint||
+                    !/^[a-f0-9]{40}$/.test(proof?.commit||''))){
                   result=fail('INDEPENDENT_GIT_PROOF_REQUIRED');return;
                 }
                 const state=event==='ABORT_PREPARED'?'ARCHIVE_PENDING':
@@ -201,9 +204,11 @@ export function createAdoptionStore(db){
                 const next={...a,archiveState:state,revision:a.revision+1,
                   ...(event==='ABORT_PREPARED'?{archiveOperationId:null,archiveFolder:null}:{}),
                   ...(event==='CONFIRM'?{
-                    archiveHead:proof.head,
-                    management:a.visibility==='PUBLIC'?
-                      'CONSENTED_ORIGINAL_PROTECTED':'DISCOVERED_ORIGINAL_PROTECTED'
+                    archiveHead:proof.head,archiveCommit:proof.commit,
+                    archiveRef:proof.archiveRef,
+                    // A detached Git archive does NOT independently prove
+                    // an authenticated, source-complete encrypted recovery.
+                    management:'ORIGINAL_GIT_ARCHIVED_CHECKPOINT_PENDING'
                   }: {})};
                 ops.put({...operation,status:opStatus,revision:operation.revision+1});
                 m.put({key:key(slug),adoption:next});
