@@ -77,7 +77,8 @@ async function fixture({dirty=false,running=false,changed=false}={}){
  const settings={pcmsS03Git:{repository:'Neb963/per-gens',repositoryId:repoId}};
  const api={runtime:{id:'fixture',getURL:p=>'moz-extension://fixture/'+p},
   storage:{local:{get:async k=>({[k]:settings[k]})}}};
- const guard={getSafeRouteReadiness:async()=>({
+ const guard={runExistingStep:async()=>{throw Error('NO_PROVIDER_EFFECT_ALLOWED');},
+  getSafeRouteReadiness:async()=>({
     ready:true,routeId:'protected',cookieStoreId:'container-1'}),
   inspectStageEditor:async()=>dirty?{ok:false,code:'DIRTY'}:
     {ok:true,clean:true,source:'GUARDED_EDITOR_CLEAN'},
