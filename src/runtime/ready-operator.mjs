@@ -21,7 +21,7 @@ const b64=text=>{
 };
 export function validateReadyOperator(api,sender,packet){
  if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
- if(!['ASSESS_READY','PREPARE_LOCAL'].includes(packet?.type)||!packet.params||
+ if(!['ASSESS_READY','PREPARE_LOCAL','PAUSE_READY','RESUME_READY'].includes(packet?.type)||!packet.params||
     typeof packet.params!=='object'||Array.isArray(packet.params)||
     Object.keys(packet).some(k=>!['type','params'].includes(k))||
     Object.keys(packet.params).some(k=>!['slug','expectedRevision'].includes(k))||
@@ -79,6 +79,10 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
    const r=initial.record;
    if(r.revision!==expectedRevision)return fail('STALE_REVISION');
    if(r.hold==='READY_REVOKED_NOT_READY')return fail('READY_REVOKED_NOT_READY');
+   if(message.type==='PAUSE_READY')
+     return createReadyStore(db).pause(name,r.revision);
+   if(r.hold==='OPERATOR_PAUSED'&&message.type!=='RESUME_READY')
+     return fail('READY_OPERATOR_PAUSED');
    const expected=r.desired||r.active;
    if(!expected)return fail('READY_NOT_QUEUED');
    const current=await facts(db,name);
@@ -117,6 +121,9 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
       id!==expected.identifier||
       coherent.inputFingerprint!==expected.inputFingerprint)
     return fail('S05_READY_REVISED_OR_REVOKED');
+   if(message.type==='RESUME_READY')
+     return createReadyStore(db).resume(name,r.revision,{
+       identifier:id,inputFingerprint:coherent.inputFingerprint});
    const g=guard();
    if(!g?.getSafeRouteReadiness||!g?.observeReadOnly)
     return fail('S05_PROTECTED_GUARD_UNAVAILABLE');
