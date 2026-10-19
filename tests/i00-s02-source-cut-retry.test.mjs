@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {retryS02ConsistentCut} from '../src/runtime/backup-auto-export.mjs';
+import {retryS02ConsistentCut} from '../src/runtime/source-cut-retry.mjs';
 test('S02/S04 D: transient concurrent journal write discards entire first cut and recaptures',async()=>{
   let calls=0;
   const result=await retryS02ConsistentCut(async()=>{
