@@ -48,6 +48,7 @@ export function planReadyObservation(previous,witness){
 // editor and approval observations. A route expiry is not proof of helper idle.
 export function planReadyHandoff(previous,expectedRevision,proof){
   if(!previous?.desired)return fail('READY_NOT_QUEUED');
+  if(previous.hold==='READY_REVOKED_NOT_READY')return fail('READY_REVOKED_NOT_READY');
   if(previous.revision!==expectedRevision)return fail('STALE_REVISION');
   // Initial admission needs source/route/owner/baseline evidence just as much
   // as a successor. The local queue cannot mint these facts by itself.
