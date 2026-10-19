@@ -25,6 +25,8 @@ export function planS06Writeback({ready,stage,job,writeback}={}){
      st.sourceFolder!=='generators/'+st.slug||
      st.readyIdentifier!==wanted.identifier||
      st.readyInputFingerprint!==wanted.inputFingerprint||
+     j.readyIdentifier!==wanted.identifier||
+     j.readyInputFingerprint!==wanted.inputFingerprint||
      !HEX.test(j.verifiedFinal||'')||
      j.stageRevision!==st.revision||j.state!=='TESTS_VERIFIED'||
      j.executionSlotReleased!==true||j.verifiedFinal!==j.sourceFingerprint||
