@@ -61,6 +61,52 @@ function render(data){
   void loadSavedDraft(data.repositoryId,data.prompt.oid);
 
 }
+// S05 queued READY state is advisory local intent, not a deployed candidate.
+async function renderReadyQueue(scanGeneration){
+  const section=document.createElement('section');
+  section.setAttribute('aria-label','Local READY intent queue');
+  const heading=document.createElement('h3');
+  heading.textContent='Observed READY work (local, not deployed)';
+  const description=document.createElement('p');
+  description.textContent='Only coherent main declarations are queued. Native development, source mutation and publication still require independent admission.';
+  const table=document.createElement('table'),tbody=document.createElement('tbody');
+  const header=document.createElement('tr');
+  for(const title of ['Generator','Desired READY','Active candidate','Hold']){
+    const th=document.createElement('th');th.textContent=title;header.append(th);
+  }
+  const thead=document.createElement('thead');thead.append(header);
+  table.append(thead,tbody);
+  const next=document.createElement('button');next.type='button';
+  next.textContent='Load more observed READY jobs';
+  const progress=document.createElement('p');
+  progress.setAttribute('role','status');
+  section.append(heading,description,table,next,progress);
+  list.append(section);
+  let after='',busyPage=false;
+  async function load(){
+    if(busyPage||!list.contains(section)||scanGeneration!==generation)return;
+    busyPage=true;next.disabled=true;progress.textContent='Loading canonical queue…';
+    try{
+      const r=await request('LIST_READY',{after,limit:100});
+      if(!list.contains(section)||scanGeneration!==generation)return;
+      if(!r?.ok){progress.textContent='Read-only queue unavailable: '+(r?.code||'UNAVAILABLE');return;}
+      for(const item of r.items){
+        const tr=document.createElement('tr');
+        for(const value of [item.slug,item.desired?.identifier||'—',
+          item.active?.identifier||'—',item.hold||'—']){
+          const td=document.createElement('td');td.textContent=value;tr.append(td);
+        }
+        tbody.append(tr);
+      }
+      after=r.nextCursor||'';
+      next.hidden=!r.more;
+      progress.textContent=tbody.children.length+' observed local candidates; no provider or Git effects implied.';
+    }catch{if(list.contains(section))progress.textContent='Read-only READY queue unavailable.';}
+    finally{busyPage=false;next.disabled=false;}
+  }
+  next.addEventListener('click',()=>{void load();});
+  await load();
+}
 function request(type,params={}){
   return new Promise((resolve,reject)=>{
     const port=browser.runtime.connect({name:'pcms-s03-catalog'});
@@ -144,6 +190,7 @@ scan.addEventListener('click',async()=>{
         '. No missing item or remote deletion inferred.');return;
     }
     render(r);
+    void renderReadyQueue(n);
     message('Complete read-only snapshot. '+r.recognizedCount+
       ' recognized entries. Scope: '+(r.importStatus||'NOT_CONNECTED')+
       '. Owner facts and allocations remain unverified; approval does not create remote generators.');
