@@ -102,3 +102,28 @@ test('S05 first stage cannot bypass pre-existing I13 or publication uncertainty'
    desired:{identifier:'rev-newer'}}}).code,'READY_CANDIDATE_NOT_ADMITTED');
  assert.equal(evaluateStageSuccessor(input).ok,true);
 });
+
+test('S05 canonical stage commit refuses READY revoked after caller inspected main',async()=>{
+ const db=fakeDatabase(),previous=await exactSource(files('candidate A'));
+ const candidate=await exactSource(files('candidate B'));
+ const ready={active:{identifier:'rev-candidateB',inputFingerprint:H},
+   desired:null,hold:'READY_REVOKED_NOT_READY'};
+ await seed(db,[
+  {key:'account:'+account.accountId,account},
+  {key:'source-link:'+link.slug,link},
+  {key:'s05-ready:'+link.slug,record:ready}
+ ]);
+ const command={slug:link.slug,candidate,previous,source:source(candidate),
+   nonce:'0123456789abcdef0123456789abcdef',
+   eligibility:{ok:true,account,item:{remoteId:link.remoteId}}};
+ const held=await createStagingStore(db).pin(command);
+ assert.equal(held.code,'READY_CANDIDATE_NOT_ADMITTED');
+ assert.equal(db.read('meta','stage:'+link.slug),undefined);
+ assert.equal(db.keys('events').length,0);
+ const checked=evaluateStageSuccessor({
+   prior:null,previous,ready,job:null,release:null,existing:null,
+   source:{...source(candidate),accountId:account.accountId,
+     remotePublicId:link.remoteId,personaUid:account.personaUid,
+     bindingVersion:account.bindingVersion}});
+ assert.equal(checked.code,'READY_CANDIDATE_NOT_ADMITTED');
+});
