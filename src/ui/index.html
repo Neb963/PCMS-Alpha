@@ -210,14 +210,19 @@
           <div class="panel-head"><h2 id="pcms-release-heading">I13 · Exact-source human publication approval</h2><span class="unknown">Production publishing OFF · Individual review</span></div>
           <p class="reason">Approval pins tested PJS, HTML and every binary src file, account/Persona binding, test inputs and prior source. Current protected route, owner, READY Git F, clean editor and actual remote unlisted F must all match. Git commit alone does not confer approval. Existing generator updates are held until independent sleep, unlisting, original archive and recovery proof. A lost publication reply cannot be retried.</p>
           <div class="account-controls">
-            <label for="pcms-release-slug">Exact private staged slug</label><input id="pcms-release-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="generator">
-            <label for="pcms-release-token">Private Git read token (ephemeral, never stored)</label><input id="pcms-release-token" type="password" autocomplete="off" spellcheck="false">
+            <button id="pcms-s06-review-refresh" type="button">Refresh publication queue</button>
+            <button id="pcms-s06-review-next" type="button" disabled>Next review page</button>
+          </div>
+          <div id="pcms-s06-review-queue" role="region" aria-label="Pending, blocked and ready publication candidates" aria-live="polite"></div>
+          <div class="account-controls">
+            <label for="pcms-release-slug">Generator to review</label><input id="pcms-release-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="generator">
+            <label for="pcms-release-token">Optional Git credential override (normally from protected vault)</label><input id="pcms-release-token" type="password" autocomplete="off" spellcheck="false">
           </div>
           <div class="account-controls">
             <button id="pcms-release-preview" type="button">Review full F and tests</button>
             <button id="pcms-release-approve" type="button" disabled>Approve this exact F</button>
             <button id="pcms-release-cancel" type="button" disabled>Cancel unsent approval</button>
-            <button id="pcms-release-dispatch" type="button" disabled>Attempt guarded publication (activation held)</button>
+            <button id="pcms-release-dispatch" type="button" disabled>Publish approved source (requires live authorization)</button>
             <button id="pcms-release-reconcile" type="button" disabled>Independently reconcile public listing</button>
             <button id="pcms-release-load" type="button">Load canonical release</button>
             <button id="pcms-release-clear" type="button">Clear credential</button>
