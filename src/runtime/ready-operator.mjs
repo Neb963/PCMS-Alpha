@@ -147,6 +147,88 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
      baseline.files.length===2&&baseline.files.every(f=>f.size===0);
    const protectedOriginal=adoption?.originalCheckpoint?.qualified===true&&
      adoption.archiveState==='ARCHIVED_GIT_CONFIRMED';
+   if(message.type==='PREPARE_LOCAL'){
+     // This effect-free initial development path is limited to a newly
+     // confirmed private-empty target. Nonempty or public updates must go
+     // through I13 sleeping/unlisting/recoverable-source admission, never
+     // the I09 private-empty editor adapter.
+     if(origin.visibility==='PUBLIC')
+       return fail('S05_PUBLIC_SLEEP_AND_UNLIST_REQUIRED');
+     if(!privateEmpty)
+       return fail('S05_NONEMPTY_TARGET_REQUIRES_GUARDED_UPDATE_WRITER');
+     if(pending||['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN',
+         'RECOVERY_HOLD','PUBLISHING','PUBLISH_UNCERTAIN'].includes(release?.state))
+       return fail('S05_UNCERTAIN_WRITER_HELD');
+     if(link.source!=='S04_INDEPENDENT_NOT_READY_ASSOCIATION'||
+        inventory.management!=='MANAGED_CREATED'||
+        inventory.source!=='SOURCE_PENDING'||
+        inventory.visibility!=='UNLISTED')
+       return fail('S05_S04_PRIVATE_OWNER_REQUIRED');
+     const compiled=await stageReadyGitSource({catalog:tree,coherent,
+       ready:{active:expected,desired:null},slug:name,
+       repositoryId:cfg.repositoryId});
+     if(!compiled.ok)return compiled;
+     // If already pinned, no new source claim or duplicate mutable state.
+     if(!r.desired&&stage?.readyIdentifier===expected.identifier)
+       return {ok:true,code:'S05_ALREADY_PINNED_LOCAL',
+         revision:r.revision,stageRevision:stage.revision,
+         providerEffects:'NONE'};
+     const permitted=evaluateStageSuccessor({prior:stage,previous:baseline,
+       job:ai,existing,release,
+       ready:{active:expected,desired:null},
+       source:{...compiled.source,accountId:account.accountId,
+         remotePublicId:inventory.remoteId,personaUid:account.personaUid,
+         bindingVersion:account.bindingVersion}});
+     if(!permitted.ok)return permitted;
+     // Browser-local no-editor proof is independently guarded by donor lease;
+     // no remote/collaboration claim is made. The I09 native script repeats
+     // source, saved-state, Yjs peer and human-editor guards at dispatch.
+     if(typeof g.inspectSourceEditorIdle!=='function')
+       return fail('S05_EDITOR_IDLE_PROOF_UNAVAILABLE');
+     const editor=await g.inspectSourceEditorIdle(account.personaUid,name);
+     if(!editor?.ok||editor.clean!==true||
+        editor.source!=='GUARDED_NO_LOCAL_EDITOR')
+       return fail(editor?.code||'S05_EDITOR_CONFLICT');
+     const verifiedAgain=await g.getSafeRouteReadiness(account.personaUid);
+     const stable=await createReadyStore(db).get(name);
+     if(!verifiedAgain?.ready||
+        verifiedAgain.cookieStoreId!==before.cookieStoreId||
+        verifiedAgain.routeId!==before.routeId||
+        !stable.ok||stable.record.revision!==r.revision||
+        (await sentinel.inspect()).held)
+       return fail('S05_ADMISSION_CONTEXT_CHANGED');
+     const isNativeIdle=!ai||(
+       ai.native?.state==='CHAT1_OBSERVED_IDLE'||
+       ai.native?.state==='CHAT2_OBSERVED_IDLE'||
+       (ai.state==='PENDING_NATIVE_SESSION'&&!ai.native));
+     if(!isNativeIdle)return fail('S05_NATIVE_NOT_IDLE');
+     const readyStore=createReadyStore(db);
+     let admitted={ok:true,record:stable.record};
+     if(r.desired){
+       admitted=await readyStore.handoff(name,r.revision,{
+         source:'TRUSTED_S05_ADMISSION_BOUNDARY',
+         accountOwnerVerified:true,protectedRouteReady:true,
+         completeRecoverableBaseline:true,humanEditorClean:true,
+         noUncertainWriter:true,writerIdle:true,nativeIdle:true,
+         providerEffectResolved:true,approvalEffectResolved:true
+       });
+       if(!admitted.ok)return admitted;
+     }
+     const actual=await readyStore.get(name);
+     if(!actual.ok||actual.record.desired||
+        actual.record.active?.identifier!==expected.identifier||
+        actual.record.active?.inputFingerprint!==expected.inputFingerprint)
+       return fail('S05_READY_CHANGED_AFTER_HANDOFF');
+     const pinned=await stagingFactory(db).pin({slug:name,
+       candidate:compiled.candidate,previous:baseline,source:compiled.source,
+       eligibility:{ok:true,account,item:inventory,link},
+       nonce:crypto.randomUUID().replaceAll('-','')});
+     if(!pinned.ok)return pinned;
+     return {ok:true,code:'S05_LOCAL_STAGE_PINNED',
+       revision:actual.record.revision,stageRevision:pinned.revision,
+       readyIdentifier:expected.identifier,providerEffects:'NONE',
+       next:'PROVIDER_STAGE_REMAINS_SEPARATELY_GATED'};
+   }
    const code=pending?'S05_UNCERTAIN_WRITER_HELD':
       origin.visibility==='PUBLIC'?'S05_PUBLIC_SLEEP_AND_UNLIST_REQUIRED':
       stage&&!savedKnown?'S05_SAVED_SOURCE_DRIFT':
