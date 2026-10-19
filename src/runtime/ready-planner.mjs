@@ -42,13 +42,15 @@ export function planReadyObservation(previous,witness){
   const blocked=previous.active&&previous.active.state!=='RETIRED';
   return {ok:true,changed:true,code:blocked?'READY_SUCCESSOR_PENDING':'READY_QUEUED',
     next:{...previous,revision:previous.revision+1,desired:current,
-      hold:blocked?'WAIT_FOR_SAFE_SOURCE_HANDOFF':null}};
+      hold:previous.hold==='OPERATOR_PAUSED'?'OPERATOR_PAUSED':
+        blocked?'WAIT_FOR_SAFE_SOURCE_HANDOFF':null}};
 }
 // Handoff needs actual independently established writer, native, provider,
 // editor and approval observations. A route expiry is not proof of helper idle.
 export function planReadyHandoff(previous,expectedRevision,proof){
   if(!previous?.desired)return fail('READY_NOT_QUEUED');
   if(previous.hold==='READY_REVOKED_NOT_READY')return fail('READY_REVOKED_NOT_READY');
+  if(previous.hold==='OPERATOR_PAUSED')return fail('READY_OPERATOR_PAUSED');
   if(previous.revision!==expectedRevision)return fail('STALE_REVISION');
   // Initial admission needs source/route/owner/baseline evidence just as much
   // as a successor. The local queue cannot mint these facts by itself.
