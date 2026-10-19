@@ -285,6 +285,10 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
    });
   });
  }
- return Object.freeze({run,register});
+ return Object.freeze({run,runTrusted:async message=>{
+   if(!['ASSESS_READY','PREPARE_LOCAL','PAUSE_READY','RESUME_READY'].includes(message?.type))
+     return fail('INVALID_INTERNAL_READY_ACTION');
+   return run(message,{id:api.runtime.id,url:api.runtime.getURL('pcms/index.html')});
+ },register});
 }
 if(typeof browser!=='undefined')createReadyOperator(browser).register();
