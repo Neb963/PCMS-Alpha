@@ -92,15 +92,21 @@ export function createS06WritebackProgress(api,{
           // No operator-configured repository or vault: do not touch a
           // private account, Git branch, source editor or remote publisher.
           const cfg=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
-          if(cfg?.repository!=='Neb963/per-gens'||!RID.test(cfg.repositoryId||''))
+          if(cfg?.repository!=='Neb963/per-gens'||!RID.test(cfg.repositoryId||'')){
+            await api.storage.local.set({[cursorKey]:next});
             return fail('S06_REPOSITORY_NOT_CONNECTED');
+          }
           if(chosen.type!=='RECONCILE'&&
-             effectGate({phase:'S06',step:'GIT_WRITE',slug:chosen.slug})!==true)
+             effectGate({phase:'S06',step:'GIT_WRITE',slug:chosen.slug})!==true){
+            await api.storage.local.set({[cursorKey]:next});
             return fail('S06_PRIVATE_GIT_ACTIVATION_HELD');
+          }
           const credential=await native({action:'git.get',repositoryId:cfg.repositoryId});
           if(!credential?.ok||typeof credential.credential!=='string'||
-             credential.credential.length<12||credential.credential.length>512)
+             credential.credential.length<12||credential.credential.length>512){
+            await api.storage.local.set({[cursorKey]:next});
             return fail('S06_GIT_VAULT_UNAVAILABLE');
+          }
           // Recheck revision after waiting for native host and before any
           // effect. CAS in writeback-store.arm is the final dispatch fence.
           const latest=await queue.get(summary.slug);
