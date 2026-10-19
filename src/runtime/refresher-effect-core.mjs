@@ -17,7 +17,7 @@ export function validRefreshEvidence(e){
     Number.isSafeInteger(e.misses)&&e.misses>=0&&e.misses<=3&&
     Number.isSafeInteger(e.attempts)&&e.attempts>=0&&e.attempts<=RETRY_LIMIT&&
     Number.isSafeInteger(e.probes)&&e.probes>=0&&e.probes<=3&&
-    typeof e.awaitingVisibility!=='boolean'?false:
+    (e.awaitingVisibility===undefined||typeof e.awaitingVisibility==='boolean')&&
     Array.isArray(e.history)&&e.history.length<=8&&
     (e.savedSourceFingerprint==null||hex(e.savedSourceFingerprint))&&
     (e.savedMarkerId==null||safeId(e.savedMarkerId))&&
