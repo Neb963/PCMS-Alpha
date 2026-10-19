@@ -104,7 +104,7 @@ export function createReadyDevelopment(api,{
  makeStage=()=>createStagingBoundary(api,{effectGate}),
  makeAi=()=>createAiBoundary(api,{effectGate}),
  native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
- maxCandidates=1200
+ maxCandidates=120
 }={}){
  const sentinel=createRestoreSentinel(api.storage.local);
  let busy=null,connection=null,ports=null;
@@ -121,12 +121,18 @@ export function createReadyDevelopment(api,{
   try{
    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
    const database=await db(),queue=createReadyStore(database),b=boundaries();
-   let after='',examined=0;
+   const cursorKey='pcmsS05DevelopmentCursor';
+   const statusKey='pcmsS05DevelopmentReceipt';
+   const before=(await api.storage.local.get(cursorKey))?.[cursorKey];
+   let after=typeof before==='string'&&
+     /^[a-z0-9][a-z0-9-]{0,99}$/.test(before)?before:'',
+     examined=0,lastSeen=after;
    for(let page=0;page<64&&examined<maxCandidates;page++){
     const listing=await queue.list({after,limit:Math.min(200,maxCandidates-examined)});
     if(!listing.ok)return listing;
-    for(const row of listing.items){
-     examined++;
+    for(let i=0;i<listing.items.length;i++){
+     const row=listing.items[i];
+     examined++;lastSeen=row.slug;
      if(!row.desired&&!row.active||
         ['OPERATOR_PAUSED','READY_REVOKED_NOT_READY'].includes(row.hold))continue;
      const full=await queue.get(row.slug);
@@ -185,16 +191,24 @@ export function createReadyDevelopment(api,{
          ...(chosen.type==='STOP_OLDER_NATIVE'?{step:'STOP'}:{})}});
      }
      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
-     return {ok:outcome?.ok===true,code:outcome?.code||'S05_STEP_UNVERIFIED',
-       slug,step:chosen.type,canonical:outcome,providerEffects:
+     const receipt={ok:outcome?.ok===true,code:outcome?.code||'S05_STEP_UNVERIFIED',
+       slug,step:chosen.type,providerEffects:
        ['UNLIST','STAGE','STAGE_PRIVATE','ADVANCE_JOB','STOP_OLDER_NATIVE'].includes(chosen.type)?
           'MAY_HAVE_DISPATCHED':'NONE'};
+     // This cursor schedules fairness only. It never means a remote save
+     // completed, nor authorizes replay of a failed or ambiguous effect.
+     const next=(i+1<listing.items.length||listing.more)?slug:'';
+     await api.storage.local.set({[cursorKey]:next,
+       [statusKey]:{...receipt,observedAt:Date.now()}});
+     return {...receipt,canonical:outcome};
     }
     if(!listing.more)break;
     if(!listing.nextCursor||listing.nextCursor<=after)
       return fail('S05_CURSOR_UNVERIFIED');
     after=listing.nextCursor;
    }
+   await api.storage.local.set({[cursorKey]:
+     examined>=maxCandidates?lastSeen:''});
    return {ok:true,code:'S05_NO_ELIGIBLE_ACTION',examined};
   }catch{return fail('S05_PROGRESS_UNAVAILABLE');}
  }
