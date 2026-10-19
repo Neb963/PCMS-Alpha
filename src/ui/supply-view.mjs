@@ -131,11 +131,11 @@ async function loadAccounts(){
   try{
     const res=await request('pcms-i03-accounts','LIST_ACCOUNTS');
     if(mine!==seq)return;
-    if(res?.ok!==true||res.truncated)throw Error('ACCOUNT_LIST_UNAVAILABLE');
+    if(res?.ok!==true)throw Error('ACCOUNT_LIST_UNAVAILABLE');
     accounts=res.accounts.filter(a=>a.state==='VERIFIED'&&a.identity==='VERIFIED');
     const value=select.value;select.replaceChildren();
     const empty=document.createElement('option');
-    empty.value='';empty.textContent='Choose verified account';select.append(empty);
+    empty.value='';empty.textContent='Auto-allocate an eligible account';select.append(empty);
     for(const a of accounts){
       const option=document.createElement('option');
       option.value=a.accountId;option.textContent=a.accountId+' · binding '+a.bindingVersion;
@@ -145,7 +145,7 @@ async function loadAccounts(){
     notice('Preview requested slugs, then record them in the unified creation queue. Provider and Git writes remain held.');
   }catch{
     if(mine===seq){accounts=[];select.replaceChildren();
-      notice('Account authority unavailable. Cannot freeze a batch.');}
+      notice('Account list unavailable. Unpinned slug intake remains possible; allocation waits for verified inventory.');}
   }finally{if(mine===seq)setBusy(false);}
 }
 async function appendCanonicalQueue(mine,after=null){
@@ -209,23 +209,29 @@ async function fetchBatches(){
 }
 function payload(){
   const account=accounts.find(a=>a.accountId===select.value);
-  return account?{accountId:account.accountId,
-    expectedAccountRevision:account.revision,slugs:parsed()}:null;
+  return {accountId:account?.accountId||null,slugs:parsed()};
 }
 async function handlePreview(){
   if(busy)return;
   const p=payload();
-  if(!p){notice('Select a currently verified account.');return;}
   setBusy(true);latest=null;paint([],false);
   const mine=++seq;
   try{
-    const r=await supply('PREVIEW',p);
+    const names=p.slugs;
+    const seen=new Set();
+    latest={items:names.map((slug,index)=>{
+      const invalid=!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug);
+      const duplicate=seen.has(slug);
+      seen.add(slug);
+      return {index,slug,state:invalid||duplicate?'REJECTED':'FROZEN',
+        reason:invalid?'INVALID_SLUG':duplicate?'DUPLICATE_SLUG':null};
+    })};
     if(mine!==seq)return;
-    if(!r?.ok)throw Error(r?.code||'PLAN_UNAVAILABLE');
-    latest=r.batch;paint(latest.items,false);
+    paint(latest.items,false);
     const rejected=latest.items.filter(i=>i.state==='REJECTED').length;
-    notice(latest.items.length+' exact requested slugs; '+rejected+
-      ' locally rejected. Preview is not a global remote-availability check.');
+    notice(latest.items.length+' exact slugs; '+rejected+' locally invalid/duplicate. '+
+      (p.accountId?'Explicit account pin selected.':'Eligible account will be allocated automatically.')+
+      ' Provider ownership and absence are independently checked later.');
   }catch(e){
     if(mine===seq)notice('Cannot preview: '+(e.message||'PLAN_UNAVAILABLE')+
       '. No batch committed and no provider effect attempted.');
@@ -235,7 +241,6 @@ preview.addEventListener('click',()=>{void handlePreview();});
 freeze.addEventListener('click',async()=>{
   if(busy||!latest)return;
   const p=payload();
-  if(!p){notice('Account no longer selected; re-preview.');return;}
   // Never freeze an altered input under an old operator preview.
   const list=latest.items.map(i=>i.slug);
   if(JSON.stringify(p.slugs)!==JSON.stringify(list)){
@@ -252,7 +257,8 @@ freeze.addEventListener('click',async()=>{
       const intentId='intent_'+crypto.randomUUID().replaceAll('-','');
       let result;
       try{result=await creation('ACCEPT_CREATE_INTENT',{
-        intentId,slug:item.slug,origin:'OPERATOR',accountId:p.accountId
+        intentId,slug:item.slug,origin:'OPERATOR',
+      ...(p.accountId?{accountId:p.accountId}:{})
       });}catch{result={ok:false,code:'ACK_UNKNOWN'};}
       if(mine!==seq)return;
       outcomes.push({...item,state:result?.ok?'WAITING_CAPABILITY':'HELD',
