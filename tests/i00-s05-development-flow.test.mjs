@@ -65,7 +65,8 @@ test('S05 installed journal composition advances public READY through I13 and AI
   }
   await mutate('existing-update:'+s,{slug:s,revision:(row?.revision||0)+1,
     state,stagedFingerprint});
-  assert.equal(params.passphrase,undefined,['RECHECK_UNLIST','RECHECK_STAGE'].includes(type));
+  if(['RECHECK_UNLIST','RECHECK_STAGE'].includes(type))
+   assert.equal(params.passphrase,undefined);
   if(['UNLIST','PIN_STAGE','STAGE','PREPARE'].includes(type))
    assert.equal(params.passphrase,passphrase);
   return result(type,state);
