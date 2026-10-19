@@ -282,6 +282,121 @@ export function createCoordinatorStore(db){
       };
     });
   }
+  function stageGit({intentId,expectedRevision,event,proof={}}){
+    if(!isSafeId(intentId)||!Number.isSafeInteger(expectedRevision)||
+       expectedRevision<1)return Promise.resolve(fail('INVALID_GIT_STAGE'));
+    return new Promise((resolve,reject)=>{
+      let tx,out=fail('GIT_STAGE_UNCONFIRMED');
+      try{tx=db.transaction(['meta','events','operations'],'readwrite');}
+      catch{return reject(Error('GIT_STAGE_DB_UNAVAILABLE'));}
+      tx.oncomplete=()=>resolve(out);tx.onabort=()=>reject(Error('GIT_STAGE_ABORTED'));
+      tx.onerror=()=>{};
+      const m=tx.objectStore('meta'),ops=tx.objectStore('operations');
+      m.get(key(intentId)).onsuccess=e=>{
+        const prior=e.target.result?.record;
+        if(!prior){out=fail('INTENT_NOT_FOUND');return;}
+        if(prior.revision!==expectedRevision){out=fail('STALE_REVISION');return;}
+        const validId=/^[1-9][0-9]{0,19}$/;
+        const marker=/^[a-f0-9]{40}$/;
+        const digest=/^[a-f0-9]{64}$/;
+        const create=event==='PREPARE';
+        const existing=event==='EXISTING';
+        if((create||existing)&&prior.state!=='GIT_INIT_PENDING'){
+          out=fail('GIT_NOT_ADMISSIBLE');return;
+        }
+        if(create&&(!isSafeId(proof.operationId)||
+            !validId.test(proof.repositoryId||'')||
+            !digest.test(proof.fingerprint||''))){
+          out=fail('GIT_OPERATION_INVALID');return;
+        }
+        if(existing&&!(proof.source==='PINNED_MAIN_READ_ONLY'&&
+            proof.folder==='generators/'+prior.slug&&marker.test(proof.markerOid||'')&&
+            marker.test(proof.head||'')&&validId.test(proof.repositoryId||''))){
+          out=fail('GIT_EXISTING_PROOF_REQUIRED');return;
+        }
+        if(!create&&!existing&&
+           !['DISPATCH','OBSERVING','UNCERTAIN','CONFIRM','ABORT_PREPARED'].includes(event)){
+          out=fail('GIT_NOT_ADMISSIBLE');return;
+        }
+        const before=prior.state;
+        const allowed={
+          DISPATCH:['GIT_PREPARED'],
+          OBSERVING:['GIT_DISPATCH_POSSIBLE','GIT_UNCERTAIN'],
+          UNCERTAIN:['GIT_DISPATCH_POSSIBLE','GIT_OBSERVING','GIT_UNCERTAIN'],
+          CONFIRM:['GIT_OBSERVING'],
+          ABORT_PREPARED:['GIT_PREPARED']
+        };
+        if(!create&&!existing&&!allowed[event]?.includes(before)){
+          out=fail('GIT_NOT_ADMISSIBLE');return;
+        }
+        if(event==='CONFIRM'&&!(proof.source==='INDEPENDENT_GIT_BYTE_READBACK'&&
+          proof.folder==='generators/'+prior.slug&&
+          proof.repositoryId===prior.gitRepositoryId&&
+          marker.test(proof.head||'')&&marker.test(proof.markerOid||'')&&
+          proof.ready===false)){
+          out=fail('INDEPENDENT_GIT_MARKER_REQUIRED');return;
+        }
+        const operationId=create?proof.operationId:prior.gitOperationId;
+        const finishStage=operation=>{
+          if(create&&operation){out=fail('GIT_OPERATION_ID_REUSED');return;}
+          if(!create&&!existing&&(!operation||operation.targetId!==intentId||
+            operation.effectType!=='s04_git_marker')){
+            out=fail('GIT_OPERATION_MISSING');return;
+          }
+          const state=create?'GIT_PREPARED':existing||event==='CONFIRM'?
+            'ASSOCIATED_NOT_READY':event==='DISPATCH'?'GIT_DISPATCH_POSSIBLE':
+            event==='OBSERVING'?'GIT_OBSERVING':
+            event==='UNCERTAIN'?'GIT_UNCERTAIN':'GIT_INIT_PENDING';
+          const next={...prior,state,revision:prior.revision+1,
+            hold:['GIT_UNCERTAIN','GIT_DISPATCH_POSSIBLE'].includes(state)?
+              'GIT_EFFECT_OUTCOME_UNKNOWN':state==='ASSOCIATED_NOT_READY'?null:
+              'GIT_ASSOCIATION_PENDING',
+            ...(create?{gitRepositoryId:proof.repositoryId,
+              gitOperationId:proof.operationId}:{}),
+            ...(state==='ASSOCIATED_NOT_READY'?{gitHead:proof.head,
+              gitMarkerOid:proof.markerOid,sourceFolder:proof.folder}:{})};
+          const finish=(link)=>{
+            if(state==='ASSOCIATED_NOT_READY'){
+              if(link&&(link.accountId!==prior.accountId||
+                  link.remoteId!==prior.remoteId||
+                  link.folder!=='generators/'+prior.slug)){
+                out=fail('SOURCE_ASSOCIATION_CONFLICT');return;
+              }
+              if(!link){
+                const sourceLink={slug:prior.slug,folder:'generators/'+prior.slug,
+                  remoteId:prior.remoteId,accountId:prior.accountId,
+                  personaUid:prior.personaUid,bindingVersion:prior.bindingVersion,
+                  mainHead:proof.head,readyAtInspection:false,
+                  fingerprint:proof.sourceFingerprint||null,testingSha:null,
+                  revision:1,source:'S04_INDEPENDENT_NOT_READY_ASSOCIATION'};
+                m.put({key:'source-link:'+prior.slug,link:sourceLink});
+              }
+            }
+            if(!existing){
+              const status=create?'PREPARED':event==='DISPATCH'?'DISPATCH_POSSIBLE':
+                event==='OBSERVING'?'OBSERVING':event==='UNCERTAIN'?
+                'HELD_UNCERTAIN':event==='CONFIRM'?'CONFIRMED':'ABORTED';
+              ops.put(create?{operationId,targetId:intentId,
+                effectType:'s04_git_marker',fingerprint:proof.fingerprint,
+                status,revision:1}:
+                {...operation,status,revision:operation.revision+1});
+            }
+            m.put({key:key(intentId),record:next});
+            tx.objectStore('events').add({stage:'S04_GIT_'+event,
+              intentId,slug:prior.slug,revision:next.revision,
+              operationId:existing?null:operationId,gitEffects:'JOURNALED'});
+            out={ok:true,record:next};
+          };
+          if(state==='ASSOCIATED_NOT_READY')
+            m.get('source-link:'+prior.slug).onsuccess=e=>
+              finish(e.target.result?.link);
+          else finish(null);
+        };
+        if(create||existing)finishStage(null);
+        else ops.get(operationId).onsuccess=e=>finishStage(e.target.result);
+      };
+    });
+  }
   function listCreate({after=null,limit=50}={}){
     if(after!==null&&!isSafeId(after))return Promise.resolve(fail('INVALID_CURSOR'));
     if(!Number.isSafeInteger(limit)||limit<1||limit>100)
@@ -323,5 +438,5 @@ export function createCoordinatorStore(db){
     return decision.ok?{...decision,providerEffects:'OFF',
       code:'S04_CREATION_ACTIVATION_HELD'}:decision;
   }
-  return Object.freeze({acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,stageEffect,advanceCreate});
+  return Object.freeze({acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,stageEffect,stageGit,advanceCreate});
 }
