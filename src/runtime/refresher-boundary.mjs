@@ -5,6 +5,7 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 import {createRefresherStore} from './refresher-store.mjs';
 import {MINUTE} from './refresher-core.mjs';
+import {qualifyRecentAbsence} from './refresher-admission.mjs';
 import {createNoticeDispatcher} from './notices.mjs';
 export const REFRESHER_PORT='pcms-i12-refresher',REFRESHER_ALARM='pcms-refresher-turn';
 const types=new Set(['GET_REFRESHER','SET_POLICY','SET_PAUSE','SET_GENERATOR_POLICY','DEMAND_STATISTIC','OBSERVE_NOW','RESET_RECENT_BACKOFF']);
@@ -217,7 +218,9 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       r.ownerVerified&&r.releaseVerified&&!r.identityHeld&&!r.reviewHeld&&
       !r.refresh?.intent&&!r.refresh?.suspended&&
       (r.refresh?.nextAttemptAt||0)<=clock()&&
-      snapshot.state.accounts[r.accountId]?.verifiedIdentity===true);
+      snapshot.state.accounts[r.accountId]?.verifiedIdentity===true&&
+      qualifyRecentAbsence({row:r,recent:snapshot.state.recent,
+        policy:snapshot.state.policy,now:clock()}).ok);
     if(!row)return 'NO_REFRESH_DUE';
     const candidate=qualificationFor(row);
     // A candidate from a fixture, code comment or stale source is not enough.
