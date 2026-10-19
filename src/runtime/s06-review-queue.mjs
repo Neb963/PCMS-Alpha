@@ -17,7 +17,11 @@ export function s06ReviewStatus({decision,release,change,sourceFingerprint,stage
     return {state:'PUBLICATION_UNCERTAIN',code:'RECONCILE_ONLY'};
   if(change?.state==='REQUESTED')
     return {state:'CHANGES_REQUESTED',code:'AWAITING_GUARDED_CHILD_ADMISSION'};
-  if(change?.state==='ADMITTED'&&change.childStageRevision===stageRevision)
+  // Child admission is not a permanent queue status. Once tests and the
+  // independently attributed Git F are verified, the new F must become
+  // reviewable under a NEW exact-source human approval, never the parent one.
+  if(change?.state==='ADMITTED'&&change.childStageRevision===stageRevision&&
+     !decision?.ok&&decision?.code==='S06_CANDIDATE_OR_TEST_EVIDENCE_UNVERIFIED')
     return {state:'IN_DEVELOPMENT',code:'REQUEST_CHILD_RETESTING'};
   if(r?.state==='APPROVED')
     return r.approval?.sourceFingerprint===sourceFingerprint?
