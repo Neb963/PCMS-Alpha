@@ -11,6 +11,7 @@ import {planS06Writeback} from './s06-writeback-progress.mjs';
 import {createS06ReviewQueue} from './s06-review-queue.mjs';
 import {createS06ChangeStore} from './s06-request-changes.mjs';
 import {createS06HumanStore,createS06HumanBoundary} from './s06-human-review.mjs';
+import {createS06ExceptionStore,createS06ExceptionBoundary} from './s06-exception-review.mjs';
 import {standingS06} from './s06-standing-authority.mjs';
 import {createExistingStore} from './existing-update-store.mjs';
 import {unlockPrevious} from './existing-update-core.mjs';
@@ -26,12 +27,13 @@ import {releaseContext,releaseTestContext,candidateManifest,releaseGitContext,
 export const RELEASE_PORT='pcms-i13-release';
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const fp=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
-const TYPES=new Set(['LIST','LIST_REVIEW','GET','GET_CHANGE','REQUEST_CHANGES','HUMAN_CONTEXT','GET_HUMAN','DEFER_HUMAN','ADOPT_HUMAN','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
+const TYPES=new Set(['LIST','LIST_REVIEW','GET','GET_CHANGE','REQUEST_CHANGES','HUMAN_CONTEXT','GET_HUMAN','DEFER_HUMAN','ADOPT_HUMAN','GET_EXCEPTION','RECORD_EXCEPTION','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
 export function validateReleaseMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
   if(!msg||typeof msg!=='object'||Array.isArray(msg)||!json||
-     json.length>(msg.type==='REQUEST_CHANGES'?5500:1800)||
+     json.length>(msg.type==='REQUEST_CHANGES'?5500:
+       msg.type==='RECORD_EXCEPTION'?130000:1800)||
      Object.keys(msg).some(k=>!['type','params'].includes(k))||!TYPES.has(msg.type))
     return fail('INVALID_MESSAGE');
   const p=msg.params||{},allowed={
@@ -39,6 +41,8 @@ export function validateReleaseMessage(api,sender,msg){
      HUMAN_CONTEXT:['slug'],GET_HUMAN:['slug'],
      DEFER_HUMAN:['slug','expectedStageRevision','expectedJobRevision','expectedFingerprint'],
      ADOPT_HUMAN:['slug','expectedRevision'],
+     GET_EXCEPTION:['slug'],RECORD_EXCEPTION:['slug','mode','checks','consent',
+       'expectedStageRevision','expectedJobRevision','sourceFingerprint'],
     REQUEST_CHANGES:['slug','token','passphrase','expectedStageRevision',
       'expectedJobRevision','sourceFingerprint','instructions','releaseRevision'],
     PREVIEW:['slug','token','passphrase'],
@@ -68,6 +72,17 @@ export function validateReleaseMessage(api,sender,msg){
        p.offset%8192!==0))||
      (['DISPATCH','RECONCILE','CANCEL_APPROVED'].includes(msg.type)&&
        (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
+     (msg.type==='RECORD_EXCEPTION'&&(
+       !['MANUAL_INFRASTRUCTURE','OPTIONAL_CHAT2_INCOMPLETE'].includes(p.mode)||
+       !Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
+       !Number.isSafeInteger(p.expectedJobRevision)||p.expectedJobRevision<1||
+       !fp(p.sourceFingerprint)||p.consent!=='I PERFORMED THE RECORDED MANUAL CHECKS'||
+       !Array.isArray(p.checks)||p.checks.length>128||
+       p.checks.some(x=>!x||typeof x!=='object'||Array.isArray(x)||
+          Object.keys(x).some(k=>!['name','result','observation'].includes(k))||
+          typeof x.name!=='string'||x.name.length>80||
+          x.result!=='PASS'||typeof x.observation!=='string'||
+          x.observation.length>2000)))||
      (msg.type==='DEFER_HUMAN'&&(
        !Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
        !Number.isSafeInteger(p.expectedJobRevision)||p.expectedJobRevision<1||
@@ -263,6 +278,9 @@ export function createReleaseBoundary(api,{
     if(msg.type==='LIST')return store.list();
     if(msg.type==='GET_CHANGE')return createS06ChangeStore(database).get(p.slug);
     if(msg.type==='GET_HUMAN')return createS06HumanStore(database).get(p.slug);
+    if(msg.type==='GET_EXCEPTION')return createS06ExceptionStore(database).get(p.slug);
+    if(msg.type==='RECORD_EXCEPTION')return createS06ExceptionBoundary(api,{
+      open:async()=>database}).runTrusted(msg);
     if(msg.type==='HUMAN_CONTEXT'){
       const [stage,job,human]=await Promise.all([
         stageFactory(database).getFull(p.slug),
