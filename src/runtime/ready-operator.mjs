@@ -154,14 +154,15 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
    const protectedOriginal=adoption?.originalCheckpoint?.qualified===true&&
      adoption.archiveState==='ARCHIVED_GIT_CONFIRMED';
    if(message.type==='PREPARE_LOCAL'){
-     // This effect-free initial development path is limited to a newly
-     // confirmed private-empty target. Nonempty or public updates must go
-     // through I13 sleeping/unlisting/recoverable-source admission, never
-     // the I09 private-empty editor adapter.
+     // A nonempty, still-private source can be a later S05 development F.
+     // It must have a retained SOURCE_VERIFIED predecessor and its exact
+     // independently read saved F; unlike a PUBLIC target it needs no
+     // additional unlist. The I09 actor delegates its nonempty replacement
+     // to the fixed I13 native source adapter under the same donor lease.
      if(origin.visibility==='PUBLIC')
        return fail('S05_PUBLIC_SLEEP_AND_UNLIST_REQUIRED');
-     if(!privateEmpty)
-       return fail('S05_NONEMPTY_TARGET_REQUIRES_GUARDED_UPDATE_WRITER');
+     if(!privateEmpty&&!(savedKnown&&stage?.state==='SOURCE_VERIFIED'))
+       return fail('S05_NONEMPTY_TARGET_REQUIRES_RECOVERABLE_PREDECESSOR');
      if(pending||['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN',
          'RECOVERY_HOLD','PUBLISHING','PUBLISH_UNCERTAIN'].includes(release?.state))
        return fail('S05_UNCERTAIN_WRITER_HELD');
@@ -172,7 +173,7 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
        return fail('S05_COMPETING_SOURCE_ACTOR_RECONCILE');
      if(link.source!=='S04_INDEPENDENT_NOT_READY_ASSOCIATION'||
         inventory.management!=='MANAGED_CREATED'||
-        inventory.source!=='SOURCE_PENDING'||
+        !['SOURCE_PENDING','SOURCE_VERIFIED'].includes(inventory.source)||
         inventory.visibility!=='UNLISTED')
        return fail('S05_S04_PRIVATE_OWNER_REQUIRED');
      const compiled=await stageReadyGitSource({catalog:tree,coherent,
