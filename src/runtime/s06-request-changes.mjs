@@ -205,16 +205,22 @@ export function createS06ChangeProgress(api,{
      const req=await store.get(item.slug);
      if(!req.ok||req.state!=='REQUESTED')continue;
      const next=i+1<list.items.length||list.more?item.slug:'';
+     const held=async code=>{
+       await api.storage.local.set({[cursorKey]:next,
+         pcmsS06ChangeReceipt:{slug:item.slug,code,ok:false,
+           observedAt:Date.now()}});
+       return fail(code);
+     };
      const [stage,job,writeback,ready]=await Promise.all([
       createStagingStore(d).getFull(item.slug),createAiStore(d).getJobFull(item.slug),
       createWritebackStore(d).getFull(item.slug),queue.get(item.slug)]);
      if(!stage.ok||!job.ok||!writeback.ok||!ready.ok||
         !verified(ready.record,stage.record,job.job,writeback.record))
-       return fail('S06_CHANGE_CURRENT_EVIDENCE_UNVERIFIED');
+       return held('S06_CHANGE_CURRENT_EVIDENCE_UNVERIFIED');
      const g=guard(),s=stage.record,j=job.job;
      if(!g?.getSafeRouteReadiness||!g?.inspectStageEditor||
         !g?.runNativeAiStep||!g?.observeReadOnly)
-       return fail('S06_CHILD_DONOR_GUARD_UNAVAILABLE');
+       return held('S06_CHILD_DONOR_GUARD_UNAVAILABLE');
      const route=await g.getSafeRouteReadiness(s.personaUid);
      const editor=await g.inspectStageEditor(s.personaUid,s.slug,s.nonce);
      const native=await g.runNativeAiStep(s.personaUid,{slug:s.slug,
@@ -240,7 +246,7 @@ export function createS06ChangeProgress(api,{
         native.sourceSaved!==true||native.hasQueue!==false||
         native.inputOccupied!==false||native.attachmentsPending!==false||
         !source.ok||seen.original?.visibility!=='UNLISTED')
-       return fail('S06_CHILD_EDITOR_ROUTE_OR_SAVED_F_UNVERIFIED');
+       return held('S06_CHILD_EDITOR_ROUTE_OR_SAVED_F_UNVERIFIED');
      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
      const result=await store.admit(item.slug,req.revision);
      await api.storage.local.set({[cursorKey]:next,
