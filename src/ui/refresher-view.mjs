@@ -32,7 +32,8 @@ function inspector(){
   el('selected').textContent+=' · visibility '+(proof?.state||'UNOBSERVED')+
     ' · misses '+(proof?.misses||0)+' · attempts '+(proof?.attempts||0)+
     ' · independent effect '+(proof?.proof?.effect||'UNVERIFIED')+
-    ' · recent feed '+(proof?.proof?.feed?.state||'UNKNOWN');
+    ' · recent feed '+(proof?.proof?.feed?.state||'UNKNOWN')+
+    (proof?.awaitingVisibility?' · waiting for observed feed return':'');
   el('metric').textContent=r.metric?
     r.metric.views+' observed views · '+age(r.metric.observedAt)+
     (r.metric.correction?' · correction/reset; interval delta unknown':'')+
