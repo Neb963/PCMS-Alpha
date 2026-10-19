@@ -233,6 +233,7 @@ export function createCoordinatorStore(db){
               !(Array.isArray(required)?required.includes(old.status):old.status===required)){
               result=fail('OPERATION_STATUS_CHANGED');return;
             }
+            const apply=()=>{
             if(needsOperation){
               const status=creating?'PREPARED':
                 event==='PREPARED_ABORT'?'ABORTED':
@@ -249,6 +250,30 @@ export function createCoordinatorStore(db){
               slug:previous.slug,operationId:needsOperation?opId:null,
               state:moved.record.state,revision:moved.record.revision});
             result={ok:true,record:moved.record,providerEffects:'NOT_EXECUTED_BY_STORE'};
+            };
+            if(event==='RENAME_CONFIRMED'){
+              // A new provider identity becomes a canonical owned inventory
+              // record only after independent owner/private/source readback.
+              // Do not overwrite a previously observed different generator.
+              m.get('inventory:'+previous.slug).onsuccess=inventory=>{
+                const prior=inventory.target.result?.generator;
+                if(prior&&(prior.remoteId!==moved.record.remoteId||
+                  prior.accountId!==previous.accountId)){
+                  result=fail('INVENTORY_IDENTITY_COLLISION');return;
+                }
+                const row={slug:previous.slug,remoteId:moved.record.remoteId,
+                  accountId:previous.accountId,personaUid:previous.personaUid,
+                  bindingVersion:previous.bindingVersion,
+                  accountRevision:previous.accountRevision,
+                  ownerState:'OBSERVED_OWNER',visibility:'UNLISTED',
+                  management:'MANAGED_CREATED',source:'SOURCE_PENDING',
+                  lastObservationId:proof.observationId||'s04_confirmed_'+
+                    previous.renameOperationId,
+                  lastObservedAt:Date.now(),revision:(prior?.revision||0)+1};
+                m.put({key:'inventory:'+previous.slug,generator:row});
+                apply();
+              };
+            }else apply();
           };
           if(needsOperation)
             ops.get(opId).onsuccess=o=>complete(o.target.result);
