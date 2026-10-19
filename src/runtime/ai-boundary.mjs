@@ -31,7 +31,8 @@ export function validateAiMessage(api,sender,message){
      !ACT.has(message.type)||!json||json.length>38000)return fail('INVALID_MESSAGE');
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
-  const allowed=message.type==='GET_JOB'?['slug']:
+  const allowed=message.type==='LIST_JOBS'?['after','limit']:
+     message.type==='GET_JOB'?['slug']:
     message.type==='PREPARE_JOB'?['slug','expectedStageRevision','token']:
     message.type==='BEGIN_NATIVE'?['slug','expectedRevision','step']:
     ['PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)?['slug','expectedRevision']:
@@ -49,6 +50,10 @@ export function validateAiMessage(api,sender,message){
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
       (message.type==='BEGIN_NATIVE'&&
        !['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','STOP'].includes(p.step))))
+    return fail('INVALID_PARAMS');
+  if(message.type==='LIST_JOBS'&&
+      ((p.after!==undefined&&(typeof p.after!=='string'||p.after.length>100))||
+       (p.limit!==undefined&&(!Number.isInteger(p.limit)||p.limit<1||p.limit>200))))
     return fail('INVALID_PARAMS');
   if(['SET_PROMPT','IMPORT_PROMPT','SET_CONCURRENCY'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
@@ -72,7 +77,7 @@ export function createAiBoundary(api,{
         const history=await store.getPrompt();
         return history.ok?store.exportPrompt(history.history):history;
       }
-      if(message.type==='LIST_JOBS')return store.list();
+      if(message.type==='LIST_JOBS')return store.list(p);
       if(message.type==='GET_JOB')return store.getJob(p.slug);
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(message.type==='SET_CONCURRENCY')
