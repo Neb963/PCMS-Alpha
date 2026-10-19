@@ -9,6 +9,7 @@ import {decodeV2InactiveFrames} from './restore-v2-stream-decode.mjs';
 import {decodeBackupEnvelope} from '../lib/backup-package.js';
 import {canonicalJSON,preserveNegativeZero} from './backup-v2-codec.mjs';
 import {digest} from './backup-core.mjs';
+import {qualifyRecoveredOriginals} from './adoption-recovery-bridge.mjs';
 const requireCheck=(ok,code)=>{if(!ok)throw Error(code)};
 const nameOK=v=>typeof v==='string'&&/^s02_[0-9a-f]{32}$/.test(v);
 const shaOK=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
@@ -124,11 +125,22 @@ export async function verifyV2StoredArchive({
         preparedSha256,ciphertextSha256:qualified.sha256});
     requireCheck(advanced.state==='RECOVERY_VERIFIED',
       'BACKUP_V2_QUALIFICATION_JOURNAL_FAILED');
+    // Qualify only matching originals in the *current* canonical database
+    // using the authenticated disk-reopened inactive recovery, never a
+    // browser snapshot or Git archive alone. Failed S04 admission is scoped
+    // to adoption; S02's already-qualified backup remains recoverable.
+    let adoptionRecovery={ok:false,code:'S04_RECOVERY_UNAVAILABLE'};
+    try{
+      adoptionRecovery={ok:true,...await qualifyRecoveredOriginals({
+        db,recoveredPcms:exact.pcms,runId,
+        ciphertextSha256:qualified.sha256,preparedSha256,
+        sourceAudit:exact.sourceAudit})};
+    }catch{}
     await stage.drop(runId);
     return {ok:true,state:'RECOVERY_VERIFIED',runId,
       sha256:qualified.sha256,preparedSha256,
       sourceAudit:exact.sourceAudit,sourceRows:exact.inventory.canonicalRows,
-      activation:'OFF'};
+      adoptionRecovery,activation:'OFF'};
   }finally{
     if(opened){
       try{await connection.exchange({action:'restore.abort',runId})}catch{}
