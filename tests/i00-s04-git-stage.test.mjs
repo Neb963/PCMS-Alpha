@@ -77,6 +77,11 @@ test('S04 Git D: existing valid human NOT_READY text keeps its OID and no write'
     key==='pcmsS03Git'?{pcmsS03Git:config}:{}}}};
   let writes=0;
   const runner=createS04GitContinuation(api,{open:async()=>db,
+    guard:()=>({getSafeRouteReadiness:async()=>({
+      ready:true,personaUid:account.personaUid,cookieStoreId:'fixture',routeId:'fixed'}),
+      runSupplyStep:async()=>({ok:true,source:'INDEPENDENT_TARGET_READBACK',
+        state:'OWNED_VERIFIED',ownerMatches:true,slug,remoteId:intent.remoteId,
+        visibility:'UNLISTED'})}),
     vault:async()=>({ok:true,credential:'mock-native-secret-123456'}),
     scan:async()=>({ok:true,complete:true,repositoryId:'42',
       head:'c'.repeat(40),generators:[{slug,sourceState:'NOT_READY',
