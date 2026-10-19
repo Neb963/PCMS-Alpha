@@ -131,10 +131,10 @@ export function createReleaseStore(db){
                   approvedAt:Date.now(),changedAt:Date.now(),
                   dispatchPossible:false,reason:null};
                 if(old){
-                  meta.add({key:'release-history:'+stage.slug+':'+old.releaseId,
+                  meta.put({key:'release-history:'+stage.slug+':'+old.releaseId,
                     release:structuredClone(old)});
                   meta.put({key:key(stage.slug),release:record});
-                }else meta.add({key:key(stage.slug),release:record});
+                }else meta.put({key:key(stage.slug),release:record});
                 t.objectStore('events').add({stage:'RELEASE_APPROVED',
                   slug:stage.slug,releaseId,sourceFingerprint:source.fingerprint,
                   kind,accountId:stage.accountId});
