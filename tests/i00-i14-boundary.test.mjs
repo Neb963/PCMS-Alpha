@@ -4,15 +4,17 @@ import {createRefresherBoundary,validateRefresherMessage} from '../src/runtime/r
 
 const H='a'.repeat(64),events=[];
 function fixture({gate=false,changeRoute=false,lostReadback=false,uncertain=false,reserved=false,
-  present=false,complete=true,stale=false}={}){
+  present=false,complete=true,stale=false,savedMarker=false}={}){
   const history=[],row={stableId:'target_01',slug:'fixture-generator',accountId:'account_01',
     personaUid:'persona_01',bindingVersion:1,remoteId:'remote_01',slot:true,
     phase:'ACTIVE',ownerVerified:true,releaseVerified:true,releaseFingerprint:H,
     listing:'PUBLIC',identityHeld:false,reviewHeld:false,
-    refresh:{intent:uncertain?{state:'DISPATCH_POSSIBLE',id:'attempt_01',sourceFingerprint:H}:
+    refresh:{intent:uncertain?{state:'DISPATCH_POSSIBLE',id:'attempt_01',
+      sourceFingerprint:savedMarker?'b'.repeat(64):H}:
       reserved?{state:'RESERVED',id:'attempt_01',at:1000,sourceFingerprint:H}:null,
       state:uncertain?'DISPATCH_POSSIBLE':reserved?'ATTEMPT_PENDING':'ABSENT_ONCE',
-      misses:1,suspended:uncertain,nextAttemptAt:0,probes:uncertain?1:0},
+      misses:1,suspended:uncertain,nextAttemptAt:0,probes:uncertain?1:0,
+      ...(savedMarker?{savedSourceFingerprint:'b'.repeat(64)}:{})},
     presence:{source:'GUARDED_RECENT_LIST',present,observedAt:stale?1:1999000,
       absence:'NOT_A_DELETION'},metrics:{nextDueAt:999999999}};
   const state={rows:[row],accounts:{account_01:{verifiedIdentity:true,principalFingerprint:H}},
@@ -41,7 +43,7 @@ function fixture({gate=false,changeRoute=false,lostReadback=false,uncertain=fals
   const adapter={execute:async()=>{history.push('execute');},
     readback:async()=>{history.push('readback');
       if(lostReadback)throw Error('lost ACK');
-      return {kind:'EFFECT_CHANGED',sourceFingerprint:'b'.repeat(64),
+      return {kind:'EFFECT_CHANGED',sourceFingerprint:(savedMarker?'c':'b').repeat(64),
         targetMatched:true,principalMatched:true};}};
   const boundary=createRefresherBoundary(api,{open:async()=>({}),storeFactory:()=>store,
     clock:()=>2000000,newId:()=> 'attempt_01',observationGate:()=>true,
@@ -107,4 +109,11 @@ test('S07 AC-14: dispatcher never saves while visible, incomplete or stale',asyn
     assert.equal(result.refresh,'NO_REFRESH_DUE',JSON.stringify(variant));
     assert.deepEqual(f.history,[],JSON.stringify(variant));
   }
+});
+
+test('S07 T-07: ambiguous second marker readback after restart uses last saved source, never re-executes',async()=>{
+  const f=fixture({gate:true,uncertain:true,savedMarker:true});
+  const result=await f.boundary.tick();
+  assert.equal(result.refresh,'REFRESH_READBACK_EFFECT_PROVEN');
+  assert.deepEqual(f.history,['readback','settle']);
 });
