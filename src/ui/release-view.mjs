@@ -7,6 +7,10 @@ const previewBtn=document.getElementById('pcms-release-preview');
 const approveBtn=document.getElementById('pcms-release-approve');
 const requestChangesBtn=document.getElementById('pcms-s06-request-changes');
 const changeInstructions=document.getElementById('pcms-s06-change-instructions');
+const humanInspect=document.getElementById('pcms-s06-human-inspect');
+const humanDefer=document.getElementById('pcms-s06-human-defer');
+const humanAdopt=document.getElementById('pcms-s06-human-adopt');
+const humanStatus=document.getElementById('pcms-s06-human-status');
 const dispatchBtn=document.getElementById('pcms-release-dispatch');
 const cancelBtn=document.getElementById('pcms-release-cancel');
 const reconcileBtn=document.getElementById('pcms-release-reconcile');
@@ -18,7 +22,7 @@ const reviewQueue=document.getElementById('pcms-s06-review-queue');
 const refreshQueue=document.getElementById('pcms-s06-review-refresh');
 const nextQueue=document.getElementById('pcms-s06-review-next');
 let queueCursor='',queueBusy=false;
-let snapshot=null,receipt=null,active=false,sequence=0;
+let snapshot=null,receipt=null,active=false,sequence=0,humanContext=null;
 const valid=s=>/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 function command(type,params={}){
   return new Promise((resolve,reject)=>{
@@ -38,6 +42,11 @@ function command(type,params={}){
 function note(s){status.textContent=s;}
 function controls(){
   const target=valid(slug.value);
+  humanInspect.disabled=active||!target;
+  humanDefer.disabled=active||!humanContext||humanContext.slug!==slug.value||
+    !humanContext.sourceFingerprint||humanContext.human?.state==='DEFERRED';
+  humanAdopt.disabled=active||humanContext?.slug!==slug.value||
+    humanContext?.human?.state!=='DEFERRED';
   previewBtn.disabled=active||!target;
   loadBtn.disabled=active||!target;
   clearBtn.disabled=active;
@@ -229,7 +238,8 @@ loadBtn.addEventListener('click',()=>act('GET',{slug:slug.value},
 clearBtn.addEventListener('click',()=>{token.value='';controls();});
 slug.addEventListener('input',()=>{
   if(active)return;
-  sequence++;snapshot=null;receipt=null;
+  sequence++;snapshot=null;receipt=null;humanContext=null;
+  humanStatus.textContent='Review target changed. Inspect its current human-edit state.';
   details.textContent='Target changed. Previous preview and approval controls invalidated.';
   note('Selection changed; review new target before any approval.');
   controls();
@@ -238,6 +248,54 @@ token.addEventListener('input',controls);
 passphrase?.addEventListener('input',controls);
 changeInstructions.addEventListener('input',controls);
 controls();
+
+// C-53 human review uses its own source- and stage-bound local control.
+// Defer never reads/writes user drafts. Adoption is allowed only after
+// independently proved saved-source and idle-editor observations.
+async function humanAct(type,params={}){
+ if(active||!valid(slug.value))return;
+ active=true;const serial=++sequence;controls();
+ humanStatus.textContent='Checking canonical human-edit hold and saved source…';
+ try{
+  const response=await command(type,{slug:slug.value,...params});
+  if(serial!==sequence)return;
+  if(!response?.ok){
+    humanStatus.textContent='Held: '+(response?.code||'S06_HUMAN_REVIEW_UNVERIFIED')+
+      '. No editor save, test PASS, Git write or publication was attempted.';
+    if(type!=='HUMAN_CONTEXT')humanContext=null;
+  }else if(type==='HUMAN_CONTEXT'){
+    humanContext=response;
+    humanStatus.textContent=response.human?.state==='DEFERRED'?
+      'Human work DEFERRED. Save all changes in Perchance before adopting; old approval is revoked.':
+      response.human?.state==='ADOPTED_UNTESTED'?
+      'Human saved source was adopted. New independent tests and Git writeback are required.':
+      'No human-edit hold recorded. Defer now if human work may conflict with review or publication.';
+  }else{
+    humanContext=null;snapshot=null;receipt=null;details.replaceChildren();
+    humanStatus.textContent=type==='DEFER_HUMAN'?
+      'Human work preserved; unsent approval revoked, publication blocked. Save unsaved work before adoption.':
+      'Human saved source admitted as a NEW untested candidate; previous F/P archived. Review again after tests and Git writeback.';
+    // Refresh only the local record, never invoke an external effect.
+    const current=await command('HUMAN_CONTEXT',{slug:slug.value});
+    if(serial===sequence&&current?.ok)humanContext=current;
+  }
+ }catch{
+  if(serial===sequence){humanContext=null;
+    humanStatus.textContent='Human-review connection interrupted. No source was touched here; reload canonical state.';}
+ }finally{if(serial===sequence){active=false;controls();}}
+}
+humanInspect.addEventListener('click',()=>humanAct('HUMAN_CONTEXT'));
+humanDefer.addEventListener('click',()=>{
+ const c=humanContext;
+ if(!c||c.slug!==slug.value)return;
+ humanAct('DEFER_HUMAN',{expectedStageRevision:c.stageRevision,
+   expectedJobRevision:c.jobRevision,expectedFingerprint:c.sourceFingerprint});
+});
+humanAdopt.addEventListener('click',()=>{
+ const c=humanContext;
+ if(!c||c.slug!==slug.value||c.human?.state!=='DEFERRED')return;
+ humanAct('ADOPT_HUMAN',{expectedRevision:c.human.revision});
+});
 
 // S06 canonical release candidate queue: read-only, bounded and fully keyboard
 // accessible. Selection only changes the view; it never approves/publishes.
