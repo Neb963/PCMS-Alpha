@@ -61,6 +61,8 @@ export function coalesceCreation(existing,source){
   const selectedPin=!pinConflict&&pins.size===1?[...pins][0]:null;
   if(idx>=0&&git&&prior[idx].markerOid===nextSource.markerOid)
     return {ok:true,duplicate:true,changed:false,record:existing};
+  if(idx>=0&&git&&existing?.sourceDrift===true)
+    return {ok:true,duplicate:true,changed:false,record:existing};
   if(idx>=0&&git&&existing?.state!=='WAITING_CAPABILITY'){
     // A new Git source fingerprint after any downstream admission must
     // not replace the evidence to which the possible effect was bound.
