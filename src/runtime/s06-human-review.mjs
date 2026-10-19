@@ -257,6 +257,26 @@ export function createS06HumanBoundary(api,{
      editorAfter?.ok!==true||editorAfter.clean!==true||
      (await sentinel.inspect()).held)
     return fail('S06_HUMAN_EDITOR_CHANGED_DURING_ADOPTION');
+  // An intervening human save can leave the native session idle and clean
+  // again. A fresh, independently observed full provider source is required
+  // immediately before admitting this exact fingerprint into local testing.
+  const second=await g.observeReadOnly(s.personaUid,false,s.slug);
+  if(second?.ok!==true||
+     second.principalFingerprint!==s.principalFingerprint||
+     second.original?.ownerResult!=='IS_OWNER'||
+     second.original?.remotePublicId!==s.remotePublicId||
+     second.original?.visibility!=='UNLISTED'||
+     typeof second.original.pjs!=='string'||
+     typeof second.original.html!=='string'||
+     !Array.isArray(second.original.assets))
+    return fail('S06_HUMAN_SECOND_OWNER_UNVERIFIED');
+  const repeated=await exactSource([
+    {path:'main.pjs',base64:encode(second.original.pjs)},
+    {path:'index.html',base64:encode(second.original.html)},
+    ...second.original.assets]);
+  if(!repeated.ok||repeated.fingerprint!==fresh.fingerprint||
+     (await sentinel.inspect()).held)
+    return fail('S06_HUMAN_SAVED_SOURCE_CHANGED_DURING_ADOPTION');
   return store.adopt({name:p.slug,expectedRevision:p.expectedRevision,
     source:fresh});
  }
