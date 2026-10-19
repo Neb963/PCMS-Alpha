@@ -110,14 +110,16 @@ importButton.addEventListener('click',()=>{
 });
 async function refreshJobs(){
   const own=++queueSeq;
+  jobList.replaceChildren();
+  const ul=document.createElement('ul');
+  jobList.append(ul);
+  let after='',loaded=0;
   try{
-    const data=await ai('LIST_JOBS');
-    if(own!==queueSeq)return;
-    jobList.replaceChildren();
-    if(!data?.ok){jobStatus.textContent=data?.code||'AI_JOBS_UNAVAILABLE';return;}
-    if(!data.jobs.length){jobStatus.textContent='No jobs prepared. Native AI execution remains held.';return;}
-    const ul=document.createElement('ul');
-    for(const j of data.jobs){
+    while(true){
+      const data=await ai('LIST_JOBS',{after,limit:200});
+      if(own!==queueSeq)return;
+      if(!data?.ok){jobStatus.textContent=data?.code||'AI_JOBS_UNAVAILABLE';return;}
+      for(const j of data.jobs){
       const li=document.createElement('li');
       const choose=document.createElement('button');
       choose.type='button';choose.textContent='Select '+j.slug;
@@ -138,10 +140,17 @@ async function refreshJobs(){
         ' · '+(j.hold||'No external PASS claimed')+retry;
       li.append(label);ul.append(li);
     }
-    jobList.append(ul);
-    if(data.truncated)jobList.append(document.createTextNode(' Additional jobs omitted.'));
-    jobStatus.textContent='Canonical job receipts · no helper session or source body disclosed.';
-  }catch{if(own===queueSeq)jobStatus.textContent='AI receipts unavailable; do not infer completion.';}
+      }
+      loaded+=data.jobs.length;
+      jobStatus.textContent='Loaded '+loaded+' canonical AI job receipts; no source bodies disclosed.';
+      if(!data.more)break;
+      if(!data.nextCursor||data.nextCursor<=after)
+        throw Error('PAGINATION_STALLED');
+      after=data.nextCursor;
+    }
+    if(!loaded)jobStatus.textContent='No jobs prepared. Native AI execution remains held.';
+  }catch{if(own===queueSeq)
+    jobStatus.textContent='AI listing incomplete; no missing job or completion inferred.';}
 }
 async function prepareJob(){
   if(busy)return;
