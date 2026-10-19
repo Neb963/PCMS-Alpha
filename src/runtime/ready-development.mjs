@@ -7,6 +7,7 @@ import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {createReadyStore} from './ready-store.mjs';
 import {createStagingStore} from './staging-store.mjs';
 import {createAiStore} from './ai-store.mjs';
+import {createS06ExceptionStore} from './s06-exception-review.mjs';
 import {createExistingStore} from './existing-update-store.mjs';
 import {createReadyOperator} from './ready-operator.mjs';
 import {createStagingBoundary} from './staging-boundary.mjs';
@@ -20,7 +21,8 @@ const possible=new Set(['UNLIST_DISPATCH_POSSIBLE','UNLIST_UNCERTAIN',
   'STAGE_DISPATCH_POSSIBLE','STAGE_UNCERTAIN']);
 const stagePossible=new Set(['DISPATCH_POSSIBLE','HELD_UNCERTAIN','SAVED_UNVERIFIED']);
 const stillRunning=new Set(['DISPATCH_POSSIBLE','RUNNING_OBSERVED']);
-export function planReadyDevelopment({ready,stage,existing,job,visibility,effects=false}){
+export function planReadyDevelopment({ready,stage,existing,job,exception,
+ visibility,effects=false}){
  if(!ready?.ok)return fail('S05_READY_NOT_OBSERVED');
  const r=ready.record,candidate=r.desired||r.active;
  if(!candidate||['OPERATOR_PAUSED','READY_REVOKED_NOT_READY'].includes(r.hold))
@@ -38,6 +40,16 @@ export function planReadyDevelopment({ready,stage,existing,job,visibility,effect
      return {ok:true,type:effects?'STOP_OLDER_NATIVE':'HOLD',
        code:'S05_OLDER_NATIVE_STOP_ACTIVATION_HELD'};
  }
+ // An explicit exceptional reviewer decision pauses ONLY the exact
+ // original settled source, never a newer READY successor or uncertain
+ // native action that must be reconciled first.
+ const ex=exception?.record||exception;
+ if(!r.desired&&ex?.state==='RECORDED'&&
+    ex.stageRevision===stage?.record?.revision&&
+    ex.jobRevision===job?.job?.revision&&
+    ex.sourceFingerprint===job?.job?.sourceFingerprint&&
+    ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(job?.job?.native?.state))
+   return {ok:true,type:'HOLD',code:'S06_EXCEPTION_REVIEW_SOURCE_FROZEN'};
  if(existing?.ok){
    const s=existing.record?.state;
    if(s==='PREPARED')
@@ -146,6 +158,7 @@ export function createReadyDevelopment(api,{
      const stage=await createStagingStore(database).getFull(row.slug);
      const existing=await createExistingStore(database).getFull(row.slug);
      const job=await createAiStore(database).getJobFull(row.slug);
+     const exception=await createS06ExceptionStore(database).getFull(row.slug);
      const inventory=await new Promise((resolve,reject)=>{
       const t=database.transaction('meta','readonly');
       const q=t.objectStore('meta').get('inventory:'+row.slug);
@@ -153,6 +166,7 @@ export function createReadyDevelopment(api,{
       q.onerror=()=>reject(Error('S05_INVENTORY_READ_FAILED'));
      });
      const chosen=planReadyDevelopment({ready:full,stage,existing,job,
+       exception:exception.ok?exception:null,
        visibility:inventory?.visibility,
        effects:effectGate({phase:'S05',step:'AUTO_PROGRESS',slug:row.slug})===true});
      if(!chosen.ok||chosen.type==='HOLD')continue;
