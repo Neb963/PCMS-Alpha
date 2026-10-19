@@ -28,7 +28,10 @@ function withS06Candidate(m,stage,job,done,commit){
     }
     m.get('writeback:'+stage.slug).onsuccess=wb=>{
       const git=wb.target.result?.record;
-      if(git?.state!=='CONFIRMED'||
+      if(git?.state!=='CONFIRMED'||git.mode!=='S06'||
+         git.readyIdentifier!==ready.active.identifier||
+         git.readyInputFingerprint!==ready.active.inputFingerprint||
+         (git.testingSha??null)!==(stage.testingSha??null)||
          !/^[a-f0-9]{40}$/.test(git.commitSha||'')||
          git.stageRevision!==stage.revision||
          git.jobRevision!==job?.revision||
