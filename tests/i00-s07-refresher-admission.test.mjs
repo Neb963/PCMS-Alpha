@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {qualifyRecentAbsence,planOwnedSourceMarker,countObservedOccupancy} from '../src/runtime/refresher-admission.mjs';
+import {qualifyRecentAbsence,planOwnedSourceMarker,countObservedOccupancy,planRefresherSourceCandidate} from '../src/runtime/refresher-admission.mjs';
 const now=1800000000000;
 const recent={complete:true,observedAt:now-1000,suspended:false};
 const policy={recentMs:600000};
@@ -66,4 +66,31 @@ test('S07 T-07: same-id RESERVED intent may dispatch only while feed absence is 
   assert.equal(qualifyRecentAbsence({row:reserved,recent,policy,now,reservedId:'wrong'}).ok,false);
   assert.equal(qualifyRecentAbsence({row:{...reserved,presence:{...row.presence,present:true}},
     recent,policy,now,reservedId:'reserved_01'}).ok,false);
+});
+
+test('S07 C-54: sealed original source produces exactly one HTML-only full-manifest candidate',async()=>{
+  const {exactSource,diffSource}=await import('../src/runtime/staging-core.mjs');
+  const files=[
+    {path:'main.pjs',base64:btoa('generator\nsource')},
+    {path:'index.html',base64:btoa('<main>Hi</main>')},
+    {path:'src/style.css',base64:btoa('h1 { color: black; }')}
+  ];
+  const original=await exactSource(files);
+  assert.equal(original.ok,true);
+  const markerId='ABCDEFGH123456789';
+  const planned=await planRefresherSourceCandidate({files,expectedFingerprint:original.fingerprint,markerId});
+  assert.equal(planned.ok,true,JSON.stringify(planned));
+  assert.equal(planned.fromFingerprint,original.fingerprint);
+  assert.notEqual(planned.toFingerprint,original.fingerprint);
+  assert.deepEqual(planned.changedPaths,['index.html']);
+  const next=await exactSource(planned.targetFiles);
+  assert.equal(next.fingerprint,planned.toFingerprint);
+  assert.deepEqual(diffSource(original,next).changes,[{path:'index.html',kind:'CHANGED'}]);
+  assert.deepEqual(planned.previousFiles.find(f=>f.path==='main.pjs'),planned.targetFiles.find(f=>f.path==='main.pjs'));
+  assert.deepEqual(planned.previousFiles.find(f=>f.path==='src/style.css'),planned.targetFiles.find(f=>f.path==='src/style.css'));
+  const savedHtml=atob(next.blobs.find(f=>f.path==='index.html').base64);
+  assert.equal(savedHtml,'<main>Hi</main>\n<!-- pcms-alpha-refresher:'+markerId+' -->');
+  assert.equal((await planRefresherSourceCandidate({files,expectedFingerprint:'f'.repeat(64),markerId})).ok,false);
+  assert.equal((await planRefresherSourceCandidate({files:planned.targetFiles,
+    expectedFingerprint:next.fingerprint,markerId})).code,'REFRESH_MARKER_REPLAY');
 });
