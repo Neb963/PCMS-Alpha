@@ -41,7 +41,8 @@ async function fixture({releaseState='APPROVED',readyHold=null,wbState='CONFIRME
   folder:'generators/'+name};
  const release=releaseState?{slug:name,revision:2,state:releaseState,
   releaseId:'release_'+'1'.repeat(32),
-  approval:{sourceFingerprint:F.fingerprint}}:null;
+  approval:{sourceFingerprint:releaseState==='CONFIRMED_PUBLIC'?
+    P.fingerprint:F.fingerprint}}:null;
  const db=fakeDatabase();
  await new Promise((resolve,reject)=>{
   const t=db.transaction('meta','readwrite');
@@ -172,4 +173,29 @@ test('C-53 pending Request Changes and human Defer cannot seize the same candida
  assert.equal((await x.defer()).code,'S06_PENDING_REQUEST_CHANGES');
  assert.equal(x.db.read('meta','s06-human:'+name),undefined);
  assert.equal(x.db.read('meta','release:'+name).release.state,'APPROVED');
+});
+
+test('C-53 existing public P receipt remains immutable when newer unlisted human update is deferred and adopted',async()=>{
+ const x=await fixture({releaseState:'CONFIRMED_PUBLIC'});
+ const confirmed=x.db.read('meta','release:'+name).release;
+ assert.equal(confirmed.approval.sourceFingerprint,x.P.fingerprint);
+ const held=await x.defer();
+ assert.equal(held.state,'DEFERRED',JSON.stringify(held));
+ assert.deepEqual(x.db.read('meta','release:'+name).release,confirmed,
+   'No historical public approval may be revoked to create the new child');
+ const adopted=await x.store.adopt({name,expectedRevision:held.revision,source:x.H});
+ assert.equal(adopted.state,'ADOPTED_UNTESTED',JSON.stringify(adopted));
+ assert.deepEqual(x.db.read('meta','release:'+name).release,confirmed);
+ assert.equal(x.db.read('meta','stage:'+name).record.previous.fingerprint,x.P.fingerprint);
+});
+test('C-53 unrelated public receipt cannot authorize adoption of another prior-good source',async()=>{
+ const x=await fixture({releaseState:'CONFIRMED_PUBLIC'});
+ const old=x.db.read('meta','release:'+name).release;
+ await new Promise((resolve,reject)=>{
+  const t=x.db.transaction('meta','readwrite');t.oncomplete=resolve;t.onabort=reject;
+  t.objectStore('meta').put({key:'release:'+name,release:{
+   ...old,approval:{...old.approval,sourceFingerprint:x.F.fingerprint}}});
+ });
+ assert.equal((await x.defer()).code,'S06_HUMAN_CONTEXT_CHANGED');
+ assert.equal(x.db.read('meta','s06-human:'+name),undefined);
 });
