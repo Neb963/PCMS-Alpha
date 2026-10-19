@@ -157,3 +157,15 @@ test('C-53 boundary adopts only stable guarded saved source, never unsaved draft
  assert.equal(adopted.state,'ADOPTED_UNTESTED',JSON.stringify(adopted));
  assert.equal(x.db.read('meta','stage:'+name).record.candidate.fingerprint,x.H.fingerprint);
 });
+
+test('C-53 pending Request Changes and human Defer cannot seize the same candidate',async()=>{
+ const x=await fixture();
+ await new Promise((resolve,reject)=>{
+  const t=x.db.transaction('meta','readwrite');t.oncomplete=resolve;t.onabort=reject;
+  t.objectStore('meta').put({key:'s06-change:'+name,
+    record:{slug:name,state:'REQUESTED',revision:1,parentStageRevision:4}});
+ });
+ assert.equal((await x.defer()).code,'S06_PENDING_REQUEST_CHANGES');
+ assert.equal(x.db.read('meta','s06-human:'+name),undefined);
+ assert.equal(x.db.read('meta','release:'+name).release.state,'APPROVED');
+});
