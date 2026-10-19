@@ -94,3 +94,34 @@ test('S07 C-54: sealed original source produces exactly one HTML-only full-manif
   assert.equal((await planRefresherSourceCandidate({files:planned.targetFiles,
     expectedFingerprint:next.fingerprint,markerId})).code,'REFRESH_MARKER_REPLAY');
 });
+
+test('S07 T-07: a different human/source edit cannot be accepted as the exact planned marker',async()=>{
+  const {emptyRefreshEvidence,reserveRefreshAttempt,dispatchPossible,reconcileRefreshAttempt}=
+    await import('../src/runtime/refresher-effect-core.mjs');
+  const start='a'.repeat(64),target='b'.repeat(64),other='c'.repeat(64);
+  const candidate={status:'SUPPORTED_AND_VERIFIED',method:'CONTROLLED_SOURCE_MARKER',
+    allowedByProvider:true,version:'marker_v1',sourceFingerprint:start,
+    targetFingerprint:target,markerId:'marker_1234567890',
+    evidenceId:'evidence_1234',meaningfulEffectVerified:true};
+  const reserve=reserveRefreshAttempt(emptyRefreshEvidence(),{
+    id:'mutation_1234567',at:now,slug:'owned-generator',
+    sourceFingerprint:start,candidate,eligible:true,liveAuthorized:true});
+  assert.equal(reserve.ok,true,JSON.stringify(reserve));
+  const dispatch=dispatchPossible(reserve.evidence,'mutation_1234567',now+1);
+  assert.equal(dispatch.ok,true);
+  const wrong=reconcileRefreshAttempt(dispatch.evidence,'mutation_1234567',
+    {at:now+2,kind:'EFFECT_CHANGED',sourceFingerprint:other,
+      targetMatched:true,principalMatched:true});
+  assert.equal(wrong.effectVerified,false);
+  assert.equal(wrong.evidence.state,'EFFECT_UNVERIFIED');
+  assert.equal(wrong.evidence.intent.state,'DISPATCH_POSSIBLE');
+  const correct=reconcileRefreshAttempt(dispatch.evidence,'mutation_1234567',
+    {at:now+2,kind:'EFFECT_CHANGED',sourceFingerprint:target,
+      targetMatched:true,principalMatched:true});
+  assert.equal(correct.effectVerified,true);
+  assert.equal(correct.evidence.intent,null);
+  assert.equal(reserveRefreshAttempt(emptyRefreshEvidence(),{
+    id:'mutation_1234567',at:now,slug:'owned-generator',
+    sourceFingerprint:start,candidate:{...candidate,targetFingerprint:start},
+    eligible:true,liveAuthorized:true}).ok,false);
+});
