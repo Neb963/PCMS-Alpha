@@ -487,14 +487,29 @@ export function createAiBoundary(api,{
     try{
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       const store=storeFactory(await database());
-      const listing=await store.list();
-      if(!listing.ok||listing.truncated)return fail('AI_SCHEDULER_LIST_UNVERIFIED');
-      const all=[];
-      for(const row of listing.jobs){
-        const exact=await store.getJobFull(row.slug);
-        if(!exact.ok)return fail('AI_SCHEDULER_JOB_UNKNOWN');
-        all.push(exact.job);
+      // Read every canonical job page before choosing global oldest eligible.
+      // An omitted 201st job is not an empty queue or permission to starve it.
+      const all=[],seen=new Set();
+      let after='',finished=false;
+      for(let page=0;page<64;page++){
+        const listing=await store.list({after,limit:200});
+        if(!listing?.ok||!Array.isArray(listing.jobs))
+          return fail('AI_SCHEDULER_LIST_UNVERIFIED');
+        for(const row of listing.jobs){
+          if(typeof row.slug!=='string'||seen.has(row.slug)||row.slug<=after)
+            return fail('AI_SCHEDULER_CURSOR_UNVERIFIED');
+          seen.add(row.slug);
+          const exact=await store.getJobFull(row.slug);
+          if(!exact.ok)return fail('AI_SCHEDULER_JOB_UNKNOWN');
+          all.push(exact.job);
+        }
+        if(!listing.more&&!listing.truncated){finished=true;break;}
+        if(!listing.nextCursor||listing.nextCursor<=after||
+           !seen.has(listing.nextCursor))
+          return fail('AI_SCHEDULER_CURSOR_UNVERIFIED');
+        after=listing.nextCursor;
       }
+      if(!finished)return fail('AI_SCHEDULER_FLEET_BOUND_UNVERIFIED');
       const now=clock();
       if(!Number.isSafeInteger(now)||now<1)
         return fail('AI_SCHEDULER_CLOCK_UNVERIFIED');
