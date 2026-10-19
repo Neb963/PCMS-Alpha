@@ -326,7 +326,8 @@ export function createRefresherStore(db){
       r.listing!=='PUBLIC'||s.accounts[r.accountId]?.principalFingerprint!==claim.principalFingerprint||
       !r.slot||r.phase!=='ACTIVE'||rowBlocks(s,r).length)
       return fail('REFRESH_CONTEXT_CHANGED');
-    const absence=qualifyRecentAbsence({row:r,recent:s.recent,policy:s.policy,now});
+    const absence=qualifyRecentAbsence({row:r,recent:s.recent,policy:s.policy,now,
+      reservedId:claim.id});
     if(!absence.ok)return fail(absence.code);
     const packet=dispatchPossible(r.refresh,claim.id,now);
     if(!packet.ok)return packet;
