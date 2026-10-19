@@ -4,7 +4,7 @@ const ID=/^[A-Za-z0-9_-]{16,64}$/;
 const MARKER='<!-- pcms-alpha-refresher:';
 const TRAILER=/\n<!-- pcms-alpha-refresher:([A-Za-z0-9_-]{16,64}) -->$/;
 
-export function qualifyRecentAbsence({row,recent,policy,now}={}){
+export function qualifyRecentAbsence({row,recent,policy,now,reservedId=null}={}){
   if(!Number.isSafeInteger(now)||now<=0||!Number.isSafeInteger(policy?.recentMs)||
       policy.recentMs<60000)return {ok:false,code:'REFRESH_CLOCK_UNVERIFIED'};
   if(!row||row.phase!=='ACTIVE'||row.slot!==true||row.paused===true||
@@ -19,9 +19,14 @@ export function qualifyRecentAbsence({row,recent,policy,now}={}){
       row.presence.observedAt!==recent.observedAt||
       row.presence.present!==false||row.presence.absence!=='NOT_A_DELETION')
     return {ok:false,code:'REFRESH_DISAPPEARANCE_UNPROVEN'};
-  if(row.refresh?.state!=='ABSENT_ONCE'||row.refresh?.suspended===true||
+  const initial=reservedId===null&&row.refresh?.state==='ABSENT_ONCE'&&
+    row.refresh.intent===null;
+  const reserved=reservedId!==null&&row.refresh?.state==='ATTEMPT_PENDING'&&
+    row.refresh.intent?.id===reservedId&&row.refresh.intent?.state==='RESERVED'&&
+    row.refresh.intent.at<=now;
+  if((!initial&&!reserved)||row.refresh?.suspended===true||
       !Number.isSafeInteger(row.refresh.misses)||row.refresh.misses<1||
-      row.refresh.intent!=null||row.refresh.nextAttemptAt>now)
+      row.refresh.nextAttemptAt>now)
     return {ok:false,code:'REFRESH_EFFECT_HELD'};
   return {ok:true,feedAt:recent.observedAt,stableId:row.stableId};
 }
