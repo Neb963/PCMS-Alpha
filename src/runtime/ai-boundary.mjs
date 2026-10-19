@@ -10,6 +10,7 @@ import {inspectReadyCandidate} from './catalog-declaration.mjs';
 import {scanMainCatalog} from './git-catalog.mjs';
 import {pinGitChatPrompt} from './ready-git-prompt.mjs';
 import {createReadyStore} from './ready-store.mjs';
+import {authorizeReadyAiAdvance} from './ready-ai-gate.mjs';
 import {verifyReadback,exactSource} from './staging-core.mjs';
 import {planAiStep} from './ai-supervisor.mjs';
 import {AI_BROWSER_ASSERTIONS} from './perchance-ai-oracle.mjs';
@@ -86,6 +87,17 @@ export function createAiBoundary(api,{
       if(message.type==='LIST_JOBS')return store.list(p);
       if(message.type==='GET_JOB')return store.getJob(p.slug);
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      // A fresh coherent READY successor revokes advancement authority for
+      // the older AI candidate. Read-only PROBE_NATIVE remains available for
+      // uncertain-session reconciliation; it never starts a new mutation.
+      if(['ADVANCE_JOB','BEGIN_NATIVE','RUN_TESTS',
+          'VERIFY_FRESH_CHAT2'].includes(message.type)){
+        const sealed=await store.getJobFull(p.slug);
+        if(!sealed.ok)return sealed;
+        const current=await createReadyStore(db).get(p.slug);
+        const authorized=authorizeReadyAiAdvance(sealed.job,current);
+        if(!authorized.ok)return authorized;
+      }
       if(message.type==='SET_CONCURRENCY')
         return store.changeConcurrency(p.expectedRevision,p.perAccount);
       if(message.type==='SET_PROMPT')
