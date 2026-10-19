@@ -13,10 +13,10 @@ function fixture({gate=false,changeRoute=false,lostReadback=false,uncertain=fals
       reserved?{state:'RESERVED',id:'attempt_01',at:1000,sourceFingerprint:H}:null,
       state:uncertain?'DISPATCH_POSSIBLE':reserved?'ATTEMPT_PENDING':'ABSENT_ONCE',
       misses:1,suspended:uncertain,nextAttemptAt:0,probes:uncertain?1:0},
-    presence:{source:'GUARDED_RECENT_LIST',present,observedAt:stale?1:99000,
+    presence:{source:'GUARDED_RECENT_LIST',present,observedAt:stale?1:1999000,
       absence:'NOT_A_DELETION'},metrics:{nextDueAt:999999999}};
   const state={rows:[row],accounts:{account_01:{verifiedIdentity:true,principalFingerprint:H}},
-    recent:{nextDueAt:999999999,suspended:false,complete,observedAt:stale?1:99000},
+    recent:{nextDueAt:999999999,suspended:false,complete,observedAt:stale?1:1999000},
     policy:{recentMs:600000}};
   const store={
     turn:async()=>({ok:true,revision:2,state:{nextWakeAt:180000,diagnostics:{turns:1}}}),
@@ -44,7 +44,7 @@ function fixture({gate=false,changeRoute=false,lostReadback=false,uncertain=fals
       return {kind:'EFFECT_CHANGED',sourceFingerprint:'b'.repeat(64),
         targetMatched:true,principalMatched:true};}};
   const boundary=createRefresherBoundary(api,{open:async()=>({}),storeFactory:()=>store,
-    clock:()=>100000,newId:()=> 'attempt_01',observationGate:()=>true,
+    clock:()=>2000000,newId:()=> 'attempt_01',observationGate:()=>true,
     refreshGate:()=>gate,qualificationFor:()=>({status:'SUPPORTED_AND_VERIFIED',
       method:'EXPLICIT_PROVIDER_REFRESH',allowedByProvider:true,
       version:'synthetic_v1',sourceFingerprint:H,evidenceId:'fixture',
