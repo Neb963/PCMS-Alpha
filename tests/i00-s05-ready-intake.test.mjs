@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createReadyIntake} from '../src/runtime/ready-intake.mjs';
 import {createReadyStore} from '../src/runtime/ready-store.mjs';
 import {fakeDatabase} from './fake-idb.mjs';
+import {createImportApprovalStore,getImportScopeDigest} from '../src/runtime/catalog-import.mjs';
 function harness({maxPerWake=16,inspect}={}){
   const db=fakeDatabase();
   const state={pcmsS03Git:{repository:'Neb963/per-gens',repositoryId:'1411034835'}};
@@ -19,15 +20,23 @@ function harness({maxPerWake=16,inspect}={}){
         optionalTesting:{state:'ABSENT',oid:null}};
     })}).run;
   const catalog=(n,head='b'.repeat(40))=>({ok:true,complete:true,
+    source:'PINNED_MAIN_READ_ONLY',recognizedCount:n,
     repository:'Neb963/per-gens',repositoryId:'1411034835',head,
     generators:Array.from({length:n},(_,i)=>({
       slug:'safe-'+String(i).padStart(4,'0'),ready:true}))});
   const invoke=c=>run({catalog:c,repository:'Neb963/per-gens',
     token:'fixture-token-12345',transport:()=>{throw Error('unwanted network');}});
-  return {db,state,saw,storage,run,invoke,catalog};
+  async function approve(input){
+    const scopeDigest=await getImportScopeDigest(input);
+    return createImportApprovalStore(db).approve({repository:input.repository,
+      repositoryId:input.repositoryId,head:input.head,scopeDigest,
+      recognizedSlugs:input.generators.map(g=>g.slug),approvalAt:Date.now()});
+  }
+  return {db,state,saw,storage,run,invoke,catalog,approve};
 }
 test('S05 background intake resumes bounded complete pinned-main scans without effect',async()=>{
  const h=harness({maxPerWake:16}),input=h.catalog(35);
+ assert.equal((await h.approve(input)).ok,true);
  const a=await h.invoke(input),b=await h.invoke(input),c=await h.invoke(input);
  assert.equal(a.observed,16);assert.equal(a.more,true);
  assert.equal(b.observed,16);assert.equal(b.more,true);
@@ -54,7 +63,8 @@ test('S05 bad individual READY cannot contaminate other coherent witnesses',asyn
     inputFingerprint:'a'.repeat(64),token:'rev00001',legacy:false,
     optionalTesting:{state:'ABSENT',oid:null}
    }});
- const result=await h.invoke(h.catalog(2));
+ const input=h.catalog(2);await h.approve(input);
+ const result=await h.invoke(input);
  assert.equal(result.ok,true);
  assert.equal(result.held[0].code,'READY_SOURCE_DRIFT_AFTER_DECLARATION');
  assert.equal(result.observed,1);
