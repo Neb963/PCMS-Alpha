@@ -46,6 +46,7 @@ test('S06 planned writeback respects final F and immutable current READY',()=>{
  assert.equal(planS06Writeback({...canonical,writeback:writeback('HELD_UNCERTAIN')}).type,'RECONCILE');
  assert.equal(planS06Writeback({...canonical,writeback:writeback('CONFIRMED')}).type,'REVIEW');
  for(const changed of [
+  {ready:{...ready(),active:null,desired:{identifier:ID,inputFingerprint:H}}},
   {ready:{...ready(),hold:'READY_REVOKED_NOT_READY'}},
   {ready:{...ready(),active:{identifier:'older',inputFingerprint:P}}},
   {ready:{...ready(),desired:{identifier:'another',inputFingerprint:H}}},
@@ -61,6 +62,7 @@ test('S06 planned writeback respects final F and immutable current READY',()=>{
 test('S06 Git dispatch CAS refuses superseded, paused and revoked READY',async()=>{
  const variations=[
   null,{...ready(),hold:'READY_REVOKED_NOT_READY'},
+  {...ready(),active:null,desired:{identifier:ID,inputFingerprint:H}},
   {...ready(),hold:'OPERATOR_PAUSED'},
   {...ready(),desired:{identifier:'newer',inputFingerprint:H}},
   {...ready(),active:{identifier:'older',inputFingerprint:P}},
