@@ -222,5 +222,49 @@ export function createAdoptionStore(db){
       };
     });
   }
-  return Object.freeze({get,list,adopt,archiveLocal,getFull,archiveStage});
+  // S04/S02 internal handoff only: an independently recovered encrypted
+  // source-bearing archive must be qualified before adopted original source
+  // can become write-eligible. The Git archive alone is insufficient.
+  function confirmCheckpoint({slug,expectedRevision,proof}){
+    if(!proof||proof.source!=='INDEPENDENT_AUTHENTICATED_RECOVERY'||
+       proof.verified!==true||typeof proof.receiptId!=='string'||
+       !/^[A-Za-z0-9_-]{8,100}$/.test(proof.receiptId)||
+       !/^[a-f0-9]{64}$/.test(proof.originalFingerprint||'')||
+       !/^[a-f0-9]{64}$/.test(proof.archiveDigest||''))
+      return Promise.resolve(fail('INDEPENDENT_RECOVERY_PROOF_REQUIRED'));
+    return tx(db,'readwrite',(t,done)=>{
+      const m=t.objectStore('meta');
+      m.get(key(slug)).onsuccess=e=>{
+        const prior=e.target.result?.adoption;
+        if(!prior||prior.revision!==expectedRevision){
+          done(fail('STALE_REVISION'));return;
+        }
+        if(prior.archived||prior.archiveState!=='ARCHIVED_GIT_CONFIRMED'||
+           prior.original?.fingerprint!==proof.originalFingerprint){
+          done(fail('ORIGINAL_RECOVERY_NOT_ELIGIBLE'));return;
+        }
+        m.get('account:'+prior.accountId).onsuccess=a=>{
+          const account=a.target.result?.account;
+          if(account?.state!=='VERIFIED'||
+             account.revision!==prior.accountRevision||
+             account.bindingVersion!==prior.bindingVersion||
+             account.identity?.principalFingerprint!==prior.principalFingerprint){
+            done(fail('ACCOUNT_CONTEXT_CHANGED'));return;
+          }
+          const next={...prior,revision:prior.revision+1,
+            originalCheckpoint:{receiptId:proof.receiptId,
+              archiveDigest:proof.archiveDigest,
+              fingerprint:proof.originalFingerprint,
+              source:proof.source,qualified:true},
+            management:'ORIGINAL_PROTECTED_CHECKPOINT_CONFIRMED'};
+          m.put({key:key(slug),adoption:next});
+          t.objectStore('events').add({stage:'S04_ORIGINAL_RECOVERY_QUALIFIED',
+            slug,revision:next.revision,receiptId:proof.receiptId,
+            fingerprint:proof.originalFingerprint});
+          done(publicAdoption(next));
+        };
+      };
+    });
+  }
+  return Object.freeze({get,list,adopt,archiveLocal,getFull,archiveStage,confirmCheckpoint});
 }
