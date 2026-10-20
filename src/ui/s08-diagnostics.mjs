@@ -185,9 +185,16 @@ async function refresher(){
  const r=await request('refresher','GET_REFRESHER',{
   query:run.slug,accountId:run.config.accountId,limit:50,offset:0});
  if(!r?.ok)pause(r?.code||'REFRESHER_STATE_UNAVAILABLE');
- // Global OBSERVE_NOW can refresh unrelated accounts/generators. This port
- // intentionally has no test-only target selector; cannot fake scoped proof.
- pause('TEST_ONLY_REFRESHER_WRITER_NOT_AVAILABLE');
+ if(r.policy?.refreshEnabled!==true)pause('ENABLE_GUARDED_REFRESHER_POLICY');
+ if(r.items?.filter(x=>x.slug===run.slug&&
+      x.accountId===run.config.accountId)?.length!==1)
+   pause('DESIGNATED_TEST_NOT_IN_REFRESHER');
+ const result=await request('refresher','DIAGNOSTIC_TARGET_REFRESH',{
+   slug:run.slug,accountId:run.config.accountId,runId:run.runId});
+ if(!result?.ok)pause(result?.code||'TEST_REFRESH_UNAVAILABLE');
+ if(result.effectVerified!==true)
+   pause(result.code||'TEST_REFRESH_NOT_VERIFIED');
+ return 'REFRESHER_MARKER_SOURCE_READBACK_VERIFIED';
 }
 async function isolatedRestart(){
  const sha=run.config.xpiSha256;
