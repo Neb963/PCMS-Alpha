@@ -99,9 +99,16 @@ test('S07 E04 X: missing eligibility, lost pipe and resumed boot all freeze time
   const stale=advanceShadow(first,{now:start+span,bootId,nativeClock:next,
     qualifiedCoverages:{...coverage,source:'CACHED_ROUTE_TEST'}}).state;
   assert.equal(stale.rows[0].activeRemaining,HOUR);
+  // A Firefox event-page suspension is NOT native host death if the
+  // original authenticated native pipe and eligibility coverage survived.
   const changedBoot=advanceShadow(first,{now:start+span,bootId:'browser_boot_02',
     nativeClock:next,qualifiedCoverages:coverage}).state;
-  assert.equal(changedBoot.rows[0].activeRemaining,HOUR);
+  assert.equal(changedBoot.rows[0].activeRemaining,HOUR-span+25);
+  // Actual native lifetime replacement is still an unknown interval.
+  const pipeDied=advanceShadow(first,{now:start+span,bootId:'browser_boot_02',
+    nativeClock:{...next,observerConnectionId:'new_connection_001'},
+    qualifiedCoverages:coverage}).state;
+  assert.equal(pipeDied.rows[0].activeRemaining,HOUR);
   const lost=advanceShadow(first,{now:start+span,bootId,
     nativeClock:{...next,sequence:8},qualifiedCoverages:coverage}).state;
   assert.equal(lost.rows[0].activeRemaining,HOUR);
