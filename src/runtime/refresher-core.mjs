@@ -2,6 +2,7 @@
 // Milliseconds are operational evidence budgets, never wall-clock deadlines.
 import {fail, isSafeId} from './journal.mjs';
 import {emptyRefreshEvidence,validRefreshEvidence} from './refresher-effect-core.mjs';
+import {qualifyNativeOperatingInterval} from './refresher-qualified-clock.mjs';
 export const HOUR=3600000, MINUTE=60000;
 export const REFRESHER_KEY='refresher:shadow:v1';
 export const DEFAULT_POLICY=Object.freeze({activeMs:24*HOUR,sleepMs:72*HOUR,
@@ -34,6 +35,7 @@ export function emptyShadow(){
     capacity:{defensible:null,samples:[],observedAt:0},
     provider:{state:'UNKNOWN',witnesses:0,observedAt:0},
     bootId:null,lastTurnAt:0,nextWakeAt:0,nextAdmissionAt:0,dueIndex:[],
+    nativeClock:null,
     recent:{observedAt:0,total:null,complete:false,nextDueAt:0,failures:0},
     inflight:[],readWindow:{start:0,used:0},timeline:[],healthIntervals:[],
     diagnostics:{turns:0,unknownIntervals:0,replayedIntervals:0,
@@ -176,7 +178,7 @@ function receiptValid(e,bootId){
       typeof a.personaUid==='string'&&['HEALTHY','UNAVAILABLE','UNKNOWN'].includes(a.health)&&
       (a.health!=='HEALTHY'||(a.protected===true&&a.sessionVerified===true)));
 }
-export function advanceShadow(s,{now,bootId,receipt=null}={}){
+export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=null,qualifiedCoverages=null}={}){
   if(!validShadow(s)||!stamp(now)||!isSafeId(bootId))return fail('REFRESHER_STATE_UNAVAILABLE');
   const out=structuredClone(s),changes=[];
   const restarted=out.bootId!==bootId;
@@ -192,16 +194,46 @@ export function advanceShadow(s,{now,bootId,receipt=null}={}){
     out.inflight=[];
     for(const a of Object.values(out.accounts))a.health='UNKNOWN';
   }
+  // A guarded native witness alone never grants provider/account time.
+  // It only seeds a prospective host-awake window for the NEXT turn. The
+  // next turn requires the original uninterrupted native pipe *and* explicit
+  // independent provider+account continuous coverage before any credit.
+  let operationalReceipt=receipt;
+  const nativeOK=n=>n&&Number.isSafeInteger(n.observedAtMs)&&
+    n.observedAtMs>0&&n.observedAtMs<=now&&
+    ['observerEpoch','systemBootId','nativeLifetimeId','observerConnectionId']
+      .every(k=>isSafeId(n[k]))&&Number.isSafeInteger(n.sequence)&&n.sequence>0&&
+    ['hostAwakeNs','hostBootNs'].every(k=>
+      typeof n[k]==='string'&&/^\\d{1,24}$/.test(n[k]));
+  if(nativeOK(nativeClock)){
+    const previous=out.nativeClock;
+    // Never credit two windows in one reducer transition.
+    if(!operationalReceipt&&previous?.bootId===bootId&&
+       previous.witness&&nativeClock.observedAtMs>previous.witness.observedAtMs&&
+       qualifiedCoverages?.source==='DONOR_CONTINUOUS_COVERAGE'){
+      const result=qualifyNativeOperatingInterval({
+        previous:previous.witness,next:nativeClock,
+        bootId,id:'qualified_'+String(out.revision).padStart(8,'0'),
+        providerCoverages:qualifiedCoverages.providers,
+        accountCoverages:qualifiedCoverages.accounts});
+      if(result.ok)operationalReceipt=result.receipt;
+    }
+    // Keep only the last bounded sample in the canonical journal. A crash,
+    // browser boot change, suspended interval or missing coverage cannot
+    // retroactively be repaired by two later endpoint observations.
+    out.nativeClock={bootId,witness:nativeClock};
+  }
   let credited=0,reason='CLOCK_EVIDENCE_INCOMPLETE';
-  if(receiptValid(receipt,bootId)&&receipt.to<=now&&
+  if(receiptValid(operationalReceipt,bootId)&&operationalReceipt.to<=now&&
     (!out.lastTurnAt||now>=out.lastTurnAt)){
-    const e=receipt,provider=classifyProvider(e.witnesses,e.to);
+    const e=operationalReceipt,provider=classifyProvider(e.witnesses,e.to);
     if(provider.observedAt>=out.provider.observedAt&&
       (['HEALTHY','OUTAGE'].includes(provider.state)||
         (out.provider.state!=='OUTAGE'&&
           (out.provider.state!=='HEALTHY'||provider.observedAt-out.provider.observedAt>MINUTE))))
       out.provider=provider;
-    reason=provider.state==='OUTAGE'?'PROVIDER_OUTAGE':'EVIDENCED_INTERVAL';
+    reason=provider.state==='OUTAGE'?'PROVIDER_OUTAGE':
+      e.origin==='S07_NATIVE_CAUSAL_WINDOW'?'NATIVE_ELIGIBILITY_CONFIRMED':'EVIDENCED_INTERVAL';
     const health=new Map(e.accounts.map(a=>[a.accountId,a]));
     for(const [id,a] of Object.entries(out.accounts)){
       const h=health.get(id),matched=h?.bindingVersion===a.bindingVersion&&h.personaUid===a.personaUid;
