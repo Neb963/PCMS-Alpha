@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {exactSource} from '../src/runtime/staging-core.mjs';
 import {planRefresherSourceCandidate,resolveRefreshedPrevious}
   from '../src/runtime/refresher-admission.mjs';
-import {authorizeSleepingUpdate} from '../src/runtime/existing-update-core.mjs';
+import {authorizeSleepingUpdate,sealPrevious,unlockPrevious} from '../src/runtime/existing-update-core.mjs';
 
 const H='a'.repeat(64),nonce='b'.repeat(32),markerId='owned_marker_000001';
 const raw=[
@@ -45,6 +45,14 @@ test('S07/S06 D: independently verified harmless marker becomes accurate encrypt
     ownerResult:'IS_OWNER',visibility:'PUBLIC',source:remote}});
  assert.equal(eligible.ok,true,JSON.stringify(eligible));
  assert.equal(eligible.previousFingerprint,remote.fingerprint);
+ const passphrase='synthetic test passphrase 1234567890';
+ const sealed=await sealPrevious(result.source,passphrase);
+ assert.equal(sealed.ok,true);
+ assert.equal(sealed.fingerprint,remote.fingerprint);
+ const recovered=await unlockPrevious(sealed,passphrase);
+ assert.equal(recovered.ok,true);
+ assert.deepEqual(recovered.source.blobs,remote.blobs);
+ assert.equal((await unlockPrevious(sealed,'wrong passphrase 1234')).ok,false);
 });
 test('S07/S06 X: stale publication, unproven placement and source drift are not repairable previous P',async()=>{
  const {published,remote,row}=await fixture();
