@@ -228,6 +228,11 @@ export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=null,qualif
     // browser boot change, suspended interval or missing coverage cannot
     // retroactively be repaired by two later endpoint observations.
     out.nativeClock={bootId,witness:structuredClone(nativeClock)};
+  }else{
+    // An unavailable or malformed native sample breaks the observer chain.
+    // Do not retain the last good sample and later backfill this missing
+    // interval, even if someone subsequently supplies healthy endpoints.
+    out.nativeClock=null;
   }
   let credited=0,reason='CLOCK_EVIDENCE_INCOMPLETE';
   if(receiptValid(operationalReceipt,bootId)&&operationalReceipt.to<=now&&

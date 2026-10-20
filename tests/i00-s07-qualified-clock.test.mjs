@@ -185,3 +185,21 @@ test('S07 E04 X: caller-owned native sample cannot mutate a committed shadow wit
   assert.equal(first.state.nativeClock.witness.hostAwakeNs,previous.hostAwakeNs);
   assert.notEqual(first.state.nativeClock.witness.hostAwakeNs,original.hostAwakeNs);
 });
+
+test('S07 E04 X: missing native witness severs continuity; next valid sample cannot backfill',()=>{
+  const seeded=advanceShadow(fleet(),{now:start,bootId,nativeClock:previous});
+  assert.equal(seeded.ok,true);
+  const missing=advanceShadow(seeded.state,{now:start+1000,bootId,
+    nativeClock:null,qualifiedCoverages:coverage});
+  assert.equal(missing.ok,true);
+  assert.equal(missing.state.nativeClock,null);
+  const resumed=advanceShadow(missing.state,{now:start+span,bootId,
+    nativeClock:next,qualifiedCoverages:coverage});
+  assert.equal(resumed.ok,true);
+  assert.equal(resumed.state.rows[0].activeRemaining,HOUR);
+  assert.equal(resumed.state.nativeClock.witness.sequence,2);
+  const malformed=advanceShadow(seeded.state,{now:start+1000,bootId,
+    nativeClock:{...next,hostBootNs:'invalid'}});
+  assert.equal(malformed.ok,true);
+  assert.equal(malformed.state.nativeClock,null);
+});
