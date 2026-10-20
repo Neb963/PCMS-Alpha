@@ -4,6 +4,7 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {createAdoptionStore} from './adoption-store.mjs';
 import {validateAdoptionIntent,verifyOriginal} from './adoption.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
+import {standingS06} from './s06-standing-authority.mjs';
 import {writeOriginalArchive,inspectOriginalArchive} from './original-archive.mjs';
 export const ADOPTION_PORT='pcms-i07-adoption';
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
@@ -195,4 +196,6 @@ export function createAdoptionBoundary(api,{
   }
   return Object.freeze({run,register});
 }
-if(typeof browser!=='undefined')createAdoptionBoundary(browser).register();
+if(typeof browser!=='undefined')createAdoptionBoundary(browser,{
+  gitGate:()=>standingS06?.gate('gitWrite')===true
+}).register();

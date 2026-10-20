@@ -218,7 +218,7 @@ export function createCanonicalStore(db) {
             : fail('STALE_REVISION'));
           return;
         }
-        meta.put({ key, scopeId, code, severity, revision, ignored:false });
+        meta.put({ key, scopeId, code, severity, revision, ignored:false, reviewed:false });
         finish(ok({ changed:true, ignored:false }));
       };
     });
@@ -235,6 +235,23 @@ export function createCanonicalStore(db) {
         if (note.revision !== expectedRevision) {finish(fail('STALE_REVISION'));return;}
         if (!note.ignored) meta.put({ ...note, ignored:true });
         finish(ok({ changed:!note.ignored, holdReleased:false }));
+      };
+    });
+  }
+  function acknowledgeNotice({ scopeId, code, expectedRevision }) {
+    if (!isSafeId(scopeId) || !NOTICE_CODES.has(code) ||
+        !Number.isSafeInteger(expectedRevision))
+      return Promise.resolve(fail('INVALID_NOTICE'));
+    const key='attention:' + scopeId + ':' + code;
+    return transact(db,['meta'],'readwrite',(tx,finish)=>{
+      const meta=tx.objectStore('meta');
+      meta.get(key).onsuccess=event=>{
+        const note=event.target.result;
+        if(!note || note.ignored===true){finish(fail('NOTICE_NOT_FOUND'));return;}
+        if(note.revision!==expectedRevision){finish(fail('STALE_REVISION'));return;}
+        if(note.reviewed!==true)meta.put({...note,reviewed:true});
+        finish(ok({changed:note.reviewed!==true,holdReleased:false,
+          stillActionable:true,reviewed:true}));
       };
     });
   }
@@ -270,14 +287,15 @@ export function createCanonicalStore(db) {
             n.ignored!==true) {
           if (notices.length>=limit) truncated=true;
           else notices.push({scopeId:n.scopeId,code:n.code,
-            severity:n.severity,revision:n.revision});
+            severity:n.severity,revision:n.revision,reviewed:n.reviewed===true});
         }
         row.continue();
       };
     });
   }
   return Object.freeze({ provisionTarget, apply, getOperation, summary, recover,
-    recordNotice, ignoreNotice, noticeSummary, listNotices, close: () => db.close() });
+    recordNotice, ignoreNotice, acknowledgeNotice, noticeSummary,
+    listNotices, close: () => db.close() });
 }
 
 // Restore sentinel lives OUTSIDE replaceable IDB. It must not be cleared by

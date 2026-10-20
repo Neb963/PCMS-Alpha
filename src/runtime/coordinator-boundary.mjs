@@ -3,6 +3,7 @@ import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId} from './journ
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {createCoordinatorStore} from './coordinator-store.mjs';
 import {createCreationRunner} from './creation-runner.mjs';
+import {standingS06} from './s06-standing-authority.mjs';
 export const COORDINATOR_PORT='pcms-s00-coordinator';
 const types=new Set(['ACCEPT_CREATE_INTENT','GET_CREATE_INTENT','LIST_CREATE_INTENTS','ALLOCATE_CREATE_INTENT','RUN_CREATE_STEP','ADVANCE_CREATE_INTENT']);
 export function validateCoordinatorMessage(api,sender,message){
@@ -33,7 +34,9 @@ export function validateCoordinatorMessage(api,sender,message){
 export function createCoordinatorBoundary(api,{open=openCanonicalDatabase,
   factory=createCoordinatorStore,makeRunner=createCreationRunner}={}){
   let dbPromise;
-  const runner=makeRunner(api,{open,factory:undefined});
+  const runner=makeRunner(api,{open,factory:undefined,
+    effectGate:()=>standingS06?.gate('development')===true,
+    gitGate:()=>standingS06?.gate('gitWrite')===true});
   const sentinel=createRestoreSentinel(api.storage.local);
   const store=async()=>factory(await (dbPromise||=open().catch(e=>{dbPromise=null;throw e;})));
   async function run(message,sender){

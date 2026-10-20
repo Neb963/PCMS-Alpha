@@ -810,12 +810,34 @@ def s01_add_account_profile(browser, archive, folder):
           if(tagged.length!==1)return {error:'TAGGED_COUNT_'+tagged.length};
           const t=tagged[0];
           const initial={routeId:t.routeId,killSwitch:t.killSwitch,blockLocal:t.blockLocalNetwork};
-          const state=structuredClone(snap.state);
-          state.routes['ci-s01-http']={id:'ci-s01-http',name:'CI proxy oracle',type:'http',
-            host:'127.0.0.1',port:PORT,enabled:true};
-          const preview=await send({type:'PREVIEW_STATE_CHANGE',state});
-          await send({type:'AUTHORIZE_SECURITY_PREVIEW',previewId:preview.previewId,approvedDelta:preview.delta});
-          await send({type:'COMMIT_STATE_PREVIEW',authorizationId:preview.previewId});
+          // Donor state changes can race with S01 enrollment settlement.
+          // A revision-conflicted preview was never committed. Only that
+          // explicit rejection may be re-previewed against fresh state;
+          // an ambiguous dispatch is never retried.
+          let committed=false;
+          for(let attempt=0;attempt<6;attempt++){
+            const fresh=await send({type:'GET_SNAPSHOT'});
+            const currentTag=fresh.state.profiles[t.containerId];
+            if(currentTag?.pcmsBindingId!==t.pcmsBindingId)
+              throw Error('S01_TAGGED_PERSONA_CHANGED_DURING_PREVIEW');
+            const state=structuredClone(fresh.state);
+            state.routes['ci-s01-http']={id:'ci-s01-http',name:'CI proxy oracle',type:'http',
+              host:'127.0.0.1',port:PORT,enabled:true};
+            const preview=await send({type:'PREVIEW_STATE_CHANGE',state});
+            if(!preview?.previewId)throw Error('S01_SECURITY_PREVIEW_UNAVAILABLE');
+            try{
+              await send({type:'AUTHORIZE_SECURITY_PREVIEW',previewId:preview.previewId,approvedDelta:preview.delta});
+              await send({type:'COMMIT_STATE_PREVIEW',authorizationId:preview.previewId});
+              committed=true;break;
+            }catch(e){
+              if(!String(e).includes('State revision conflict'))throw e;
+              await new Promise(r=>setTimeout(r,150+attempt*100));
+            }
+          }
+          if(!committed)throw Error('S01_PREVIEW_REVISION_CONFLICT_NOT_RECOVERED');
+          const committedSnapshot=await send({type:'GET_SNAPSHOT'});
+          if(!committedSnapshot.state.routes['ci-s01-http'])
+            throw Error('S01_PROXY_ROUTE_NOT_PRESENT_AFTER_COMMIT');
           await send({type:'UPDATE_PROFILE_ROUTE',profileId:t.containerId,routeId:'ci-s01-http'});
           const ordinary=await send({type:'CREATE_PERSONA',input:{name:'CI ordinary',routeId:'ci-s01-http',
             profile:{killSwitch:true,blockLocalNetwork:false}}});
@@ -1034,6 +1056,19 @@ def main():
                 assert view['selected']==['overview'],view
                 assert view['links']==['#overview','#generators','#work-queue','#accounts','#refresher','#settings'],view
                 assert view['unsafe']==0,view
+                # S08 B: browser-accepted action definition and live full UI
+                # after a genuine OS Firefox restart, not Node manifest inspection.
+                toolbar=call('POST',f'/session/{after}/execute/async',{
+                    'script':"""const done=arguments[arguments.length-1];
+                    Promise.all([browser.action.getPopup({}),
+                      browser.action.getTitle({})])
+                      .then(([popup,title])=>done({popup,title}))
+                      .catch(error=>done({error:String(error)}));""",
+                    'args':[]},timeout=30)
+                assert toolbar=={'popup':'','title':'Open PCMS dashboard'},toolbar
+                diagnostic=execute(after,"return {present:!!document.getElementById('pcms-diagnostic-run'),configured:!!document.getElementById('pcms-diagnostic-designate'),stages:!!document.getElementById('pcms-diagnostic-stages'),ready:!!document.getElementById('pcms-s06-grant-development')}")
+                assert all(diagnostic.values()),diagnostic
+                print('B S08_INSTALLED_FULL_DASHBOARD_ACTION_AND_DIAGNOSTIC_CONTROLS=PASS',flush=True)
                 # The exact installed XPI must expose a read-only guarded
                 # background status; no valid status enables PCMS effects.
                 isolated=observer_isolation_probe(after)
@@ -1666,7 +1701,7 @@ def main():
                         "return {button:document.querySelector('#pcms-attention-list button')?.textContent||'',text:document.querySelector('#pcms-attention-list')?.textContent||''}")
                     if notice_ui.get('button'):break
                     time.sleep(.15)
-                if notice_ui.get('button')!='Ignore notice':
+                if notice_ui.get('button')!='Mark reviewed':
                     direct_notices=canonical_command(after,{'type':'GET_NOTICES'})
                     direct_summary=canonical_command(after,{'type':'SUMMARY'})
                     ui_state=execute(after,
@@ -1677,13 +1712,29 @@ def main():
                 execute(after,"document.querySelector('#pcms-attention-list button').click();return true")
                 for _ in range(40):
                     residual=canonical_command(after,{'type':'GET_NOTICES'})
-                    if residual.get('ok') is True and residual.get('notices')==[]:break
+                    if (residual.get('ok') is True and
+                        any(n.get('code')=='SOURCE_HELD' and n.get('reviewed') is True
+                            for n in residual.get('notices',[]))):break
                     time.sleep(.15)
-                assert residual.get('ok') is True and residual.get('notices')==[],residual
+                assert residual.get('ok') is True,residual
+                assert len(residual.get('notices',[]))==1,residual
+                assert residual['notices'][0]['code']=='SOURCE_HELD',residual
+                assert residual['notices'][0]['reviewed'] is True,residual
+                # Canonical review persistence and UI confirmation are
+                # separate asynchronous receipts. Wait for the actual
+                # rendered completion; a perpetual Saving… remains failure.
+                for _ in range(60):
+                    acknowledgement=execute(after,
+                        "return {text:document.querySelector('#pcms-attention-list')?.textContent||'',"
+                        "disabled:document.querySelector('#pcms-attention-list button')?.disabled}")
+                    if ('Reviewed' in acknowledgement['text'] and
+                        acknowledgement['disabled'] is True):break
+                    time.sleep(.15)
+                assert 'Reviewed' in acknowledgement['text'] and acknowledgement['disabled'] is True,acknowledgement
                 uncertain=canonical_command(after,{'type':'GET_OPERATION',
                     'operationId':'fixture_operation_01'})
                 assert uncertain.get('state')=='HELD_UNCERTAIN',uncertain
-                print('B I02_UI_IGNORE_DOES_NOT_RELEASE_OPERATION=PASS',flush=True)
+                print('B S08_UI_REVIEW_PERSISTS_INCIDENT_AND_DOES_NOT_RELEASE_OPERATION=PASS',flush=True)
                 # I09 B: exact installed Firefox Developer Edition XPI,
                 # actual IndexedDB transactions, full source SHA-256, runtime
                 # sender port, fail-closed staging and synthetic editor strip.
@@ -2648,12 +2699,18 @@ def main():
                 alarm_code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const prior=(await browser.storage.local.get('pcmsI12AlarmCount')).pcmsI12AlarmCount||0;
-                  await browser.alarms.create('pcms-refresher-turn',{when:Date.now()+6000});
-                  done({prior});
+                  // Firefox may clamp short alarm delays to its documented
+                  // minimum. Use a supported interval; the installed
+                  // background listener must actually receive this alarm.
+                  const when=Date.now()+65000;
+                  await browser.alarms.create('pcms-refresher-turn',{when});
+                  const scheduled=await browser.alarms.get('pcms-refresher-turn');
+                  done({prior,scheduled:scheduled?.scheduledTime||null});
                 })().catch(e=>done({error:String(e)}));"""
                 alarm_prior=call('POST',f'/session/{after}/execute/async',{'script':alarm_code,'args':[]})
                 call('POST',f'/session/{after}/url',{'url':'about:blank'})
-                time.sleep(9)
+                assert alarm_prior.get('scheduled'),alarm_prior
+                time.sleep(72)
                 call('POST',f'/session/{after}/url',{'url':url+'#refresher'})
                 alarm_after=call('POST',f'/session/{after}/execute/async',{'script':"const done=arguments[arguments.length-1];browser.storage.local.get('pcmsI12AlarmCount').then(v=>done(v.pcmsI12AlarmCount||0));",'args':[]})
                 assert alarm_after>alarm_prior['prior'],(alarm_prior,alarm_after)

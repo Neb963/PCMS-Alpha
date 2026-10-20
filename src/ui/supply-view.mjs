@@ -54,7 +54,7 @@ function drawQueue(result){
     return;
   }
   if(!result.batches.length){
-    queue.textContent='No legacy slug batches. No provider effects attempted.';
+    queue.textContent='No legacy slug batches. Unified creation requests are displayed below.';
     return;
   }
   for(const batch of result.batches){
@@ -65,7 +65,9 @@ function drawQueue(result){
     const counts=Object.create(null);
     for(const item of batch.items)counts[item.state]=(counts[item.state]||0)+1;
     summary.textContent=Object.entries(counts).map(([k,v])=>k+': '+v).join(' · ')+
-      ' · Provider effects not activated';
+      ' · '+(result.authorization==='OPERATOR_GRANTED_GUARDED'?
+        'Scoped authorization enabled; effects remain individually guarded':
+        'External effects require scoped authorization');
     const list=document.createElement('ul');
     for(const item of batch.items){
       const li=document.createElement('li');

@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, rm, writeFile, stat } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile, stat, readdir } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { verifyDonor } from './verify-donor.mjs';
 import { applyI01Overlay } from '../src/runtime/overlay.mjs';
@@ -12,6 +12,35 @@ const stage = path.join(root, 'build/xpi-root');
 const output = path.join(root, 'build/pcms-alpha-i00.xpi');
 const PIN = '9995f6eadfa54be6cc0001f4e04f2a2d9b9401bf';
 const ID = 'persona-route-manager@local';
+
+
+export async function verifyPackagedModuleGraph(root){
+  // Build copies an explicit runtime allowlist. A missing static import
+  // otherwise leaves the entire installed Firefox background nonfunctional
+  // while source-level tests remain green.
+  const paths=[];
+  async function collect(dir){
+    for(const ent of await readdir(dir,{withFileTypes:true})){
+      const full=path.join(dir,ent.name);
+      if(ent.isDirectory())await collect(full);
+      else if(ent.isFile()&&/\.(?:mjs|js)$/.test(ent.name))paths.push(full);
+    }
+  }
+  await collect(root);
+  const missing=[];
+  const pattern=/(?:\bimport\s*(?:[^;]*?\s+from\s*)?|\bexport\s+[^;]*?\s+from\s*|\bimport\s*\(\s*)['"](\.{1,2}\/[^'"]+)['"]/g;
+  for(const file of paths){
+    const code=await readFile(file,'utf8');
+    for(const hit of code.matchAll(pattern)){
+      const target=path.resolve(path.dirname(file),hit[1]);
+      if(!target.startsWith(path.resolve(root)+path.sep))continue;
+      try{if(!(await stat(target)).isFile())missing.push(path.relative(root,target));}
+      catch{missing.push(path.relative(root,target));}
+    }
+  }
+  if(missing.length)throw Error('PACKAGED_MODULE_GRAPH_INCOMPLETE: '+[...new Set(missing)].sort().join(','));
+  return {modules:paths.length,missing:0};
+}
 
 export async function buildI00({ packageArchive = true } = {}) {
   // Verify all original donor bytes, modes and canonical pinned Git tree.
@@ -31,9 +60,14 @@ export async function buildI00({ packageArchive = true } = {}) {
   await rm(path.join(stage,'pcms'),{recursive:true,force:true});
   await cp(path.join(root,'src/ui'),path.join(stage,'pcms'),{recursive:true});
   await applyI01Overlay(root,stage);
+  await verifyPackagedModuleGraph(stage);
   const combined = structuredClone(original);
   combined.name = 'PCMS Alpha + PersonaMonkey';
-  combined.description = 'PCMS-first interface with inherited PersonaMonkey protected routing and guarded background wake; provider effects OFF.';
+  combined.description = 'PCMS dashboard with PersonaMonkey protected routing and operator-authorized generator management.';
+  // An action popup suppresses Firefox's action.onClicked listener.
+  // The full dashboard is the sole everyday operator interface.
+  combined.action = {...original.action,default_title:'Open PCMS dashboard'};
+  delete combined.action.default_popup;
   // Static entry imports the donor routing gate first; background guard uses
   // the existing donor lease registry, never an independent routing controller.
   combined.background = { scripts: ['pcms/entry.mjs'], type: 'module' };

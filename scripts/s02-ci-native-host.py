@@ -492,7 +492,7 @@ def complete_donor_script(run_id):
         const start=performance.now();
         let received=false;
         p.onMessage.addListener(value=>{received=true;try{p.disconnect()}catch{}resolve(value)});
-        p.onDisconnect.addListener(()=>{if(!received)reject(Error('H_V2_GUARDED_PORT_LOST_ACK:'+name+':elapsedMs='+Math.round(performance.now()-start)))});
+        p.onDisconnect.addListener(()=>{if(!received)reject(Error('H_V2_GUARDED_PORT_LOST_ACK:'+name+':elapsedMs='+Math.round(performance.now()-start)+':'+(browser.runtime.lastError?.message||'NO_LAST_ERROR')))});
         p.postMessage({action:name,params});
       });
       try{
@@ -813,6 +813,60 @@ def main():
             {"url":f"moz-extension://{full_uuid}/pcms/index.html"})
         harness.call("POST",f"/session/{session}/timeouts",
             {"script":900000},timeout=15)
+        # Cold MV3 event-page startup is asynchronous. Require the actual
+        # installed I16 listener to answer read-only STATUS before the
+        # ONE-SHOT PREVIEW_V2/APPLY_V2 recovery sequence. Probe retries are
+        # read-only; a guarded restore attempt is never blindly replayed.
+        status_script="""const done=arguments[arguments.length-1];
+        let answered=false;
+        const p=browser.runtime.connect({name:'pcms-i16-restore'});
+        p.onMessage.addListener(v=>{if(answered)return;answered=true;
+          try{p.disconnect()}catch{}done(v)});
+        p.onDisconnect.addListener(()=>{if(!answered){answered=true;
+          done({ok:false,code:'RESTORE_LISTENER_NOT_READY'})}});
+        p.postMessage({action:'STATUS'});"""
+        listener=None
+        for _ in range(60):
+            listener=harness.call("POST",f"/session/{session}/execute/async",
+                {"script":status_script,"args":[]},timeout=20)
+            if listener.get("ok") is True:
+                break
+            time.sleep(.25)
+        else:
+            # Independent read-only ports separate a cold background failure
+            # from a restore-specific listener failure. Never infer provider
+            # effects, retry restore, or expose account/source/session data.
+            diagnose_script="""const done=arguments[arguments.length-1];
+            (async()=>{
+              const ping=(name,payload)=>new Promise(resolve=>{
+                let port,finished=false;
+                const timeout=setTimeout(()=>finish('TIMEOUT'),2200);
+                function finish(status){if(finished)return;finished=true;
+                  clearTimeout(timeout);try{port?.disconnect()}catch{}
+                  resolve(status);}
+                try{
+                  port=browser.runtime.connect({name});
+                  port.onMessage.addListener(v=>finish(v?.ok===true?'ACK_OK':
+                    'ACK_'+String(v?.code||'OTHER').slice(0,60)));
+                  port.onDisconnect.addListener(()=>finish('DISCONNECTED'));
+                  port.postMessage(payload);
+                }catch{finish('PORT_EXCEPTION')}
+              });
+              const status={
+                page:document.readyState,
+                idMatches:browser.runtime.id==='persona-route-manager@local',
+                actionPresent:typeof browser.action?.getTitle==='function',
+                health:await ping('pcms-i01-health-readonly',{type:'HEALTH'}),
+                account:await ping('pcms-i03-accounts',{type:'LIST_ACCOUNTS'}),
+                canonical:await ping('pcms-i02-canonical-readonly',{type:'HEALTH'}),
+                restore:await ping('pcms-i16-restore',{action:'STATUS'})};
+              return status;
+            })().then(done).catch(()=>done({code:'DIAGNOSTIC_UNAVAILABLE'}));"""
+            cold=harness.call("POST",f"/session/{session}/execute/async",
+                {"script":diagnose_script,"args":[]},timeout=30)
+            print("H S08_COLD_LISTENER_DIAGNOSTIC",json.dumps(cold),flush=True)
+            raise AssertionError(("H_S08_COLD_RESTORE_LISTENER_UNAVAILABLE",listener,cold))
+        print("H S08_COLD_RESTORE_PORT_READONLY_READY=PASS",flush=True)
         full=harness.call("POST",f"/session/{session}/execute/async",
             {"script":complete_donor_script(seen[1]["runId"]),"args":[]},timeout=800)
         assert full.get("ok") is True,("H_V2_TRUE_DONOR_CONTROLLER_APPLY",full)

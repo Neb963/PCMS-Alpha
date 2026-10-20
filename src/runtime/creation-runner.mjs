@@ -16,9 +16,10 @@ const routeSame=(before,after)=>before?.ready===true&&after?.ready===true&&
   before.routeId===after.routeId;
 export function createCreationRunner(api,{open=openCanonicalDatabase,
   makeStore=createCoordinatorStore,guard=internalPcmsGuard,
-  effectGate=()=>false,createGit=createS04GitContinuation,now=Date.now}={}){
+  effectGate=()=>false,gitGate=()=>false,
+  createGit=createS04GitContinuation,now=Date.now}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
-  const git=createGit(api,{open});
+  const git=createGit(api,{open,gate:gitGate});
   let dbPromise;
   const store=async()=>makeStore(await (dbPromise||=open().catch(e=>{
     dbPromise=null;throw e;})));

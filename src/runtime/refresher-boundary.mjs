@@ -7,8 +7,21 @@ import {createRefresherStore} from './refresher-store.mjs';
 import {MINUTE} from './refresher-core.mjs';
 import {qualifyRecentAbsence} from './refresher-admission.mjs';
 import {createNoticeDispatcher} from './notices.mjs';
+// A saved source marker is not an observation that the target returned to
+// Perchance's independently read recent-generator feed.
+export function verifiedRefreshFeed(row){
+ const evidence=row?.refresh,last=evidence?.history?.at(-1);
+ const feed=row?.presence;
+ return last?.effect==='EFFECT_CONFIRMED'&&
+   evidence.savedSourceFingerprint!=null&&
+   evidence.awaitingVisibility===false&&
+   !evidence.intent&&
+   feed?.source==='GUARDED_RECENT_LIST'&&feed.present===true&&
+   Number.isSafeInteger(feed.position)&&feed.position>=1&&
+   Number.isSafeInteger(feed.observedAt)&&feed.observedAt>last.at;
+}
 export const REFRESHER_PORT='pcms-i12-refresher',REFRESHER_ALARM='pcms-refresher-turn';
-const types=new Set(['GET_REFRESHER','SET_POLICY','SET_PAUSE','SET_GENERATOR_POLICY','DEMAND_STATISTIC','OBSERVE_NOW','RESET_RECENT_BACKOFF']);
+const types=new Set(['GET_REFRESHER','SET_POLICY','SET_PAUSE','SET_GENERATOR_POLICY','DEMAND_STATISTIC','OBSERVE_NOW','RESET_RECENT_BACKOFF','DIAGNOSTIC_TARGET_REFRESH']);
 export function validateRefresherMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let encoded;try{encoded=JSON.stringify(message);}catch{return fail('INVALID_MESSAGE');}
@@ -22,7 +35,8 @@ export function validateRefresherMessage(api,sender,message){
     message.type==='SET_PAUSE'?['expectedRevision','scope','target','paused']:
     message.type==='SET_GENERATOR_POLICY'?['expectedRevision','stableId','activeMs','sleepMs']:
     message.type==='DEMAND_STATISTIC'?['expectedRevision','stableId']:
-    message.type==='RESET_RECENT_BACKOFF'?['expectedRevision']:[];
+    message.type==='RESET_RECENT_BACKOFF'?['expectedRevision']:
+    message.type==='DIAGNOSTIC_TARGET_REFRESH'?['slug','accountId','runId']:[];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
   if(message.type==='GET_REFRESHER'){
     if((p.query!=null&&(typeof p.query!=='string'||p.query.length>80))||
@@ -30,6 +44,10 @@ export function validateRefresherMessage(api,sender,message){
       (p.phase!=null&&!['ALL','WAITING','ACTIVE','SLEEPING'].includes(p.phase))||
       (p.offset!=null&&(!Number.isSafeInteger(p.offset)||p.offset<0||p.offset>5000))||
       (p.limit!=null&&(!Number.isSafeInteger(p.limit)||p.limit<1||p.limit>50)))return fail('INVALID_PARAMS');
+  }else if(message.type==='DIAGNOSTIC_TARGET_REFRESH'){
+    if(typeof p.slug!=='string'||!/^pcms-test-[a-z0-9-]{1,86}$/.test(p.slug)||
+      !isSafeId(p.accountId)||typeof p.runId!=='string'||
+      !/^s08_[a-f0-9]{12,32}$/.test(p.runId))return fail('INVALID_PARAMS');
   }else if(message.type!=='OBSERVE_NOW'){
     if(!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1)return fail('INVALID_PARAMS');
     if(['DEMAND_STATISTIC','SET_GENERATOR_POLICY'].includes(message.type)&&!isSafeId(p.stableId))
@@ -177,7 +195,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       changes:completed.flatMap(r=>r.changes||[])};
   }
 
-  async function maybeRefresh(s){
+  async function maybeRefresh(s,target=null){
     // No UI message can enable this gate or supply provider qualifications.
     // Production has no verified method/adapter and is unconditionally OFF.
     if(!refreshGate()||!refreshAdapter||!observationGate())return 'REFRESH_ACTIVATION_HELD';
@@ -188,7 +206,9 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     const snapshot=await s.read();if(!snapshot.ok)return 'CANONICAL_UNAVAILABLE';
     // Reconcile a possibly-dispatched effect by independent READBACK ONLY.
     // A cold wake or lost response must never invoke execute a second time.
-    const stranded=snapshot.state.rows.find(r=>r.refresh?.intent?.state==='RESERVED'&&
+    const stranded=snapshot.state.rows.find(r=>(!target||
+      (r.slug===target.slug&&r.accountId===target.accountId))&&
+      r.refresh?.intent?.state==='RESERVED'&&
       clock()-r.refresh.intent.at>=MINUTE);
     if(stranded){
       // A RESERVED transaction has not crossed DISPATCH_POSSIBLE. A fresh
@@ -196,7 +216,9 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       const done=await s.cancelReserved(stranded.stableId,stranded.refresh.intent.id,clock());
       return done.ok?'STALE_RESERVATION_ABORTED':done.code;
     }
-    const uncertain=snapshot.state.rows.find(r=>r.refresh?.intent?.state==='DISPATCH_POSSIBLE'&&
+    const uncertain=snapshot.state.rows.find(r=>(!target||
+      (r.slug===target.slug&&r.accountId===target.accountId))&&
+      r.refresh?.intent?.state==='DISPATCH_POSSIBLE'&&
       (r.refresh.probes||0)<3&&(r.refresh.nextAttemptAt||0)<=clock());
     if(uncertain){
       const intent=uncertain.refresh.intent,a=snapshot.state.accounts[uncertain.accountId];
@@ -232,7 +254,9 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       return settled.ok?(settled.proof.effectVerified?
         'REFRESH_READBACK_EFFECT_PROVEN':'REFRESH_READBACK_HELD'):settled.code;
     }
-    const row=snapshot.state.rows.find(r=>r.slot&&r.phase==='ACTIVE'&&
+    const row=snapshot.state.rows.find(r=>(!target||
+      (r.slug===target.slug&&r.accountId===target.accountId))&&
+      r.slot&&r.phase==='ACTIVE'&&
       r.ownerVerified&&r.releaseVerified&&!r.identityHeld&&!r.reviewHeld&&
       !r.refresh?.intent&&!r.refresh?.suspended&&
       (r.refresh?.nextAttemptAt||0)<=clock()&&
@@ -359,6 +383,41 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
             'CONTINUOUS_ELIGIBILITY_NOT_ESTABLISHED'};
       }
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      if(message.type==='DIAGNOSTIC_TARGET_REFRESH'){
+        const saved=await api.storage.local.get([
+          'pcmsS08DisposableScope','pcmsS08DiagnosticRun']);
+        const scope=saved.pcmsS08DisposableScope,run=saved.pcmsS08DiagnosticRun;
+        if(!scope||!run||run.runId!==p.runId||run.slug!==p.slug||
+          run.config?.accountId!==p.accountId||
+          scope.accountId!==p.accountId||
+          scope.namespace!==run.config.namespace||
+          !p.slug.startsWith(scope.namespace+'-')||
+          run.config.personaUid!==scope.personaUid)
+          return fail('DIAGNOSTIC_SCOPE_NOT_CONFIRMED');
+        const before=await s.read();
+        const targets=before?.state?.rows?.filter(row=>
+          row.slug===p.slug&&row.accountId===p.accountId&&
+          row.personaUid===scope.personaUid);
+        if(!before?.ok||targets?.length!==1)
+          return fail('DIAGNOSTIC_TEST_OWNERSHIP_UNVERIFIED');
+        // If source was already read back, do not attempt a second save.
+        // The one remaining proof is independent recent-feed placement.
+        const prior=targets[0],sourceAlreadySaved=
+          prior.refresh?.history?.at(-1)?.effect==='EFFECT_CONFIRMED';
+        const code=verifiedRefreshFeed(prior)?'RECENT_FEED_VERIFIED':
+          sourceAlreadySaved?'AWAITING_RECENT_FEED':
+            await maybeRefresh(s,{slug:p.slug,accountId:p.accountId});
+        if(!verifiedRefreshFeed(prior)&&observationGate())
+          await observe(s); // real read-only feed claim; never calls maybeRefresh
+        const after=await s.read();
+        const latest=after?.state?.rows?.find(row=>row.slug===p.slug&&
+          row.accountId===p.accountId&&row.personaUid===scope.personaUid);
+        const feedVerified=after?.ok===true&&verifiedRefreshFeed(latest);
+        return {ok:true,code:feedVerified?'RECENT_FEED_VERIFIED':code,
+          scope:'DESIGNATED_TEST_ONLY',
+          sourceVerified:latest?.refresh?.history?.at(-1)?.effect==='EFFECT_CONFIRMED',
+          feedVerified, effectVerified:feedVerified};
+      }
       if(message.type==='OBSERVE_NOW'){
         if(!observationGate())return fail('MONITOR_ACTIVATION_HELD');
         return tick();

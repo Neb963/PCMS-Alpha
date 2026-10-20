@@ -9,15 +9,19 @@ import { buildI00 } from '../scripts/build-i00.mjs';
 const pin='9995f6eadfa54be6cc0001f4e04f2a2d9b9401bf';
 const critical=['lib/recovery-bootstrap.js','lib/routing-gate.js','lib/mullvad-native.js','content/userscript-trigger.js'];
 const sha=async p=>createHash('sha256').update(await readFile(p)).digest('hex');
-test('combined XPI preserves guarded donor bytes, manifest permissions and browser action',async()=>{
+test('combined XPI preserves guarded donor bytes and opens the full dashboard rather than donor popup',async()=>{
   const {original,combined,stage}=await buildI00({packageArchive:false});
-  for(const key of ['permissions','optional_permissions','host_permissions','content_scripts','browser_specific_settings','action'])
+  for(const key of ['permissions','optional_permissions','host_permissions','content_scripts','browser_specific_settings'])
     assert.deepEqual(combined[key],original[key],`donor ${key} was modified`);
+  assert.deepEqual(combined.action.default_icon,original.action.default_icon);
+  assert.equal(combined.action.default_title,'Open PCMS dashboard');
+  assert.equal(Object.hasOwn(combined.action,'default_popup'),false);
   assert.equal(combined.browser_specific_settings.gecko.id,'persona-route-manager@local');
   assert.deepEqual(combined.background,{scripts:['pcms/entry.mjs'],type:'module'});
   const entry=await readFile(path.join(stage,'pcms/entry.mjs'),'utf8');
   assert.match(entry,/import '\.\.\/lib\/recovery-bootstrap\.js'/);
   assert.match(entry,/import '\.\/wake\.mjs'/);
+  assert.match(entry,/import '\.\/dashboard-action\.mjs'/);
   assert.match(await readFile(path.join(stage,'background.js'),'utf8'),/attachPcmsGuard/);
   assert.match(await readFile(path.join(stage,'lib/management-integration.js'),'utf8'),/pcmsGuard: Object\.freeze/);
   assert.equal(combined.options_ui.page,'pcms/index.html');
