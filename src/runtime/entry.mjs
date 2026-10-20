@@ -1,6 +1,8 @@
 // Statically evaluate the unmodified donor fail-closed gate before registering
 // PCMS wake sources. Neither module awaits during listener registration.
 import '../lib/recovery-bootstrap.js';
+// Restore STATUS must register before optional dashboard and lengthy startup work.
+import './restore-boundary.mjs';
 import './wake.mjs';
 import './dashboard-action.mjs';
 // Independent PCMS journal/command listener; it never controls donor recovery.
@@ -40,7 +42,7 @@ import './existing-update-boundary.mjs';
 // I15 local scheduled backup must wake without a PCMS tab.
 import './backup-auto-boundary.mjs';
 // I16 staged restore, with permanent inactive controller under review.
-import './restore-boundary.mjs';
+
 // I12 one durable scheduler; protected read-only feed observations enabled.
 import {createRefresherBoundary} from './refresher-boundary.mjs';
 import {createRefresherNativeAdapter} from './refresher-native.mjs';
