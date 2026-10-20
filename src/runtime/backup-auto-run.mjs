@@ -51,7 +51,9 @@ export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
   const store=async()=>createAutoStore(await database(),clock);
   const status=async()=>{const current=await (await store()).read();
     if(!current.ok)return current;
-    const format=await reviewedV2()===true?'V2':'V1';
+    let stored=null;
+    try{stored=(await api.storage.local.get(BACKUP_FORMAT_KEY))?.[BACKUP_FORMAT_KEY];}catch{}
+    const format=await reviewedV2()===true||(stored?.schema===1&&stored.format==='V2')?'V2':'V1';
     return {...safeStatus(current.state),format,guarantee:FORMAT_GUARANTEE[format]};};
   async function setFormat(format){
     if(!['V1','V2'].includes(format))return fail('INVALID_FORMAT');

@@ -55,13 +55,15 @@ test('C-10: without account management nothing is adopted; changing source holds
   const off=fixture([gen('alpha')],{management:false});await off.ready;
   assert.equal((await off.boundary.autoTick()).code,'ACCOUNT_MANAGEMENT_NOT_GRANTED');
   assert.equal(off.reads.length,0);
-  const f=fixture([gen('alpha'),gen('beta'),gen('delta',undefined,{ownerState:'OWNER_DISPUTED'})],{changing:new Set(['alpha'])});
+  const f=fixture([gen('alpha'),gen('beta'),gen('delta',undefined,{ownerState:'OWNER_DISPUTED'}),
+    gen('made-by-pcms','UNLISTED',{management:'MANAGED_CREATED'})],{changing:new Set(['alpha'])});
   await f.ready;
   const out=await f.boundary.autoTick({maxSteps:10});
   assert.deepEqual(out.results.map(r=>[r.slug,r.ok,r.code]),
     [['alpha',false,'ORIGINAL_SOURCE_DRIFT'],['beta',true,null]]);
   assert.equal(adoptionOf(f.db,'alpha'),undefined);
   assert.equal(f.reads.includes('delta'),false,'disputed ownership is never adopted');
+  assert.equal(f.reads.includes('made-by-pcms'),false,'PCMS-created generators are not re-adopted');
   // Held item is backed off, not retried on every wake.
   assert.equal((await f.boundary.autoTick({maxSteps:10})).results.length,0);
 });

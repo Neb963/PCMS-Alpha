@@ -225,7 +225,10 @@ export function createAdoptionBoundary(api,{
       const now=clock(),work=[];
       for(const row of inventory){
         const a=accounts.get(row.accountId);
+        // Only generators discovered on the account; PCMS-created private
+        // generators (MANAGED_CREATED) have no human original to adopt.
         if(!slug(row.slug)||row.ownerState!=='OBSERVED_OWNER'||
+           (row.management!==undefined&&row.management!=='OBSERVED_ONLY')||
            !['PUBLIC','UNLISTED'].includes(row.visibility)||a?.state!=='VERIFIED')continue;
         if((backoff.get(row.slug)||0)>now)continue;
         const rec=adoptions.get(row.slug);

@@ -37,3 +37,27 @@ test('one-time Git: writeback commands no longer require a per-operation token',
   assert.equal(validateWritebackMessage(api,sender,{type:'ARM_AUTO',params:{slug:'a-b'}}).ok,true);
   assert.equal(validateWritebackMessage(api,sender,{type:'COMMIT',params:{slug:'a-b',expectedRevision:2,token:'short'}}).ok,false);
 });
+test('cross-feature: vault loss holds queued work with one incident; reconnect resumes the same queue',async()=>{
+  const {createCatalogWatcher}=await import('../src/runtime/catalog-watch.mjs');
+  const saved=new Map([['pcmsS03Git',{repository:'Neb963/per-gens',repositoryId:'42'}]]);
+  const api={storage:{local:{get:async k=>saved.has(k)?{[k]:saved.get(k)}:{},
+    set:async o=>{for(const [k,v] of Object.entries(o))saved.set(k,v);}}},
+    alarms:{create:()=>{},onAlarm:{addListener(){}}},
+    runtime:{onStartup:{addListener(){}},onInstalled:{addListener(){}}}};
+  let vault=false;const incidents=[],ingested=[],progressed=[];
+  const watcher=createCatalogWatcher(api,{
+    native:async()=>vault?{ok:true,credential:token}:{ok:false,code:'UNAVAILABLE'},
+    scan:async()=>({ok:true,complete:true,repository:'Neb963/per-gens',repositoryId:'42',
+      head:'a'.repeat(40),rootTreeOid:'b'.repeat(40),prompt:null,recognizedCount:0,generators:[]}),
+    ingestComplete:async r=>{ingested.push(r.head);return {ok:true};},
+    progressReady:async()=>{progressed.push(1);},
+    incidents:async kind=>{incidents.push(kind);},clock:()=>1000});
+  const lost=await watcher.tick();
+  assert.equal(lost.code,'GIT_VAULT_UNAVAILABLE');
+  assert.deepEqual(incidents,['OPEN']);assert.equal(ingested.length,0);assert.equal(progressed.length,0);
+  vault=true; // operator reconnects once (Settings → Connect GitHub)
+  const resumed=await watcher.tick();
+  assert.equal(resumed.ok,true);
+  assert.deepEqual(incidents,['OPEN','RESOLVE']);
+  assert.deepEqual(ingested,['a'.repeat(40)]);assert.equal(progressed.length,1);
+});
