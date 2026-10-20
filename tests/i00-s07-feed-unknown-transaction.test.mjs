@@ -107,8 +107,8 @@ test('S07 T-08: rate limit makes newer recent feed UNKNOWN, preserves history an
   const persisted=f.db.read('meta',REFRESHER_KEY).state;
   assert.equal(persisted.recent.complete,false);
   assert.equal(persisted.recent.failures,0);
-  assert.equal(persisted.recent.nextDueAt,now+20+60000);
-  assert.ok(persisted.recent.accountBackoff.account_01>=now+20+120000);
+  assert.equal(persisted.recent.nextDueAt,now+20+120000);
+  assert.equal(persisted.recent.endpointBackoffUntil,now+20+120000);
   const denied=await f.store.markDispatch(candidateClaim.claim,now+21);
   assert.equal(denied.ok,false);
   assert.equal(f.db.read('meta',REFRESHER_KEY).state.rows[0].refresh.intent.state,'RESERVED');
@@ -149,27 +149,23 @@ test('S07 T-08: later full feed restores completeness without fabricating placem
   assert.equal((await tryReserve(f,second.startedAt+11)).ok,false);
 });
 
-test('S07 T-08: a protected account 429 blocks only that Persona and leaves another available for fresh observations',async()=>{
+test('S07 T-08: unknown-scope 429 pauses the shared recent endpoint without switching Personas',async()=>{
   const f=await fixture({otherAccount:true});
   const first=await recentClaim(f,now+10);
   const rate=await f.store.complete(first.claimId,{ok:false,code:'RATE_LIMITED',
     principalFingerprint:H,retryAfterMs:300000},now+20);
   assert.equal(rate.ok,true);
-  const blocked=await f.store.claim({kind:'RECENT',preferredAccountId:'account_01',
-    now:now+20+MINUTE,bootId,claimId:'recent_429_again'});
-  assert.equal(blocked.ok,false);
-  assert.equal(blocked.code,'RECENT_ACCOUNT_RATE_LIMITED');
-  const other=await f.store.claim({kind:'RECENT',preferredAccountId:'account_02',
-    now:now+20+MINUTE,bootId,claimId:'recent_other_account'});
-  assert.equal(other.ok,true,JSON.stringify(other));
-  assert.equal(other.claim.accountId,'account_02');
-  const reply=await f.store.complete(other.claim.claimId,{ok:true,complete:true,
-    observedAt:other.claim.startedAt,principalFingerprint:'b'.repeat(64),
-    items:[{slug:'owned-generator'}]},other.claim.startedAt+10);
-  assert.equal(reply.ok,true);
-  assert.equal(reply.accepted,true);
-  const s=f.db.read('meta',REFRESHER_KEY).state;
-  assert.equal(s.recent.complete,true);
-  assert.equal(s.recent.accountBackoff.account_01>other.claim.startedAt,true);
-  assert.equal(s.recent.failures,0);
+  const frozen=f.db.read('meta',REFRESHER_KEY).state;
+  assert.equal(frozen.recent.complete,false);
+  assert.equal(frozen.recent.endpointBackoffUntil,now+20+300000);
+  for(const accountId of ['account_01','account_02']){
+    const blocked=await f.store.claim({kind:'RECENT',preferredAccountId:accountId,
+      now:now+20+MINUTE,bootId,claimId:'recent_'+accountId});
+    assert.equal(blocked.ok,false);
+    assert.equal(blocked.code,'RECENT_ENDPOINT_RATE_LIMITED');
+  }
+  const eligible=await f.store.claim({kind:'RECENT',preferredAccountId:'account_02',
+    now:now+20+300000,bootId,claimId:'recent_after_cooldown'});
+  assert.equal(eligible.ok,true,JSON.stringify(eligible));
+  assert.equal(eligible.claim.accountId,'account_02');
 });

@@ -102,8 +102,8 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         a.metrics.nextDueAt-b.metrics.nextDueAt||a.ordinal-b.ordinal);
     const claims=[];
     if(!state.recent.suspended&&state.recent.nextDueAt<=now){
-      const accountId=scopes.find(([id])=>before.get(id)?.ready&&
-        (state.recent.accountBackoff?.[id]||0)<=now)?.[0];
+      const accountId=(state.recent.endpointBackoffUntil||0)>now?null:
+        scopes.find(([id])=>before.get(id)?.ready)?.[0];
       if(accountId){const out=await s.claim({kind:'RECENT',preferredAccountId:accountId,
         now,bootId,claimId:newId()});if(out.ok)claims.push(out.claim);}
     }

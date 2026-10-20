@@ -37,7 +37,7 @@ export function emptyShadow(){
     bootId:null,lastTurnAt:0,nextWakeAt:0,nextAdmissionAt:0,dueIndex:[],
     nativeClock:null,
     recent:{observedAt:0,total:null,complete:false,nextDueAt:0,failures:0,
-      accountBackoff:{}},
+      accountBackoff:{},endpointBackoffUntil:0},
     inflight:[],readWindow:{start:0,used:0},timeline:[],healthIntervals:[],
     diagnostics:{turns:0,unknownIntervals:0,replayedIntervals:0,
       admissions:0,graceReleases:0,reads:0,dropped:0,readPeak:0,queuePeak:0}};
@@ -358,16 +358,15 @@ export function claimObservation(s,{kind,stableId=null,now,bootId,claimId,prefer
   if(out.readWindow.used>=out.policy.readBudget)return fail('SHARED_READ_BUDGET');
   const r=kind==='STATISTIC'?out.rows.find(x=>x.stableId===stableId):null;
   if(kind==='RECENT'&&out.recent.suspended)return fail('OBSERVATIONS_SUSPENDED');
+  if(kind==='RECENT'&&(out.recent.endpointBackoffUntil||0)>now)
+    return fail('RECENT_ENDPOINT_RATE_LIMITED');
   if(kind==='RECENT'&&(out.recent.nextDueAt>now||out.inflight.some(c=>c.kind==='RECENT')))
     return fail('OBSERVATION_COALESCED');
   if(kind==='STATISTIC'&&(!r||r.identityHeld||!r.ownerVerified||r.metrics.suspended||r.metrics.nextDueAt>now||
     out.inflight.some(c=>c.stableId===stableId||c.accountId===r.accountId)))
     return fail('STATISTIC_NOT_DUE');
   const accountId=r?.accountId||preferredAccountId||Object.entries(out.accounts).find(([id,a])=>
-    a.verifiedIdentity&&!out.inflight.some(c=>c.accountId===id)&&
-    (kind!=='RECENT'||(out.recent.accountBackoff?.[id]||0)<=now))?.[0];
-  if(kind==='RECENT'&&(out.recent.accountBackoff?.[accountId]||0)>now)
-    return fail('RECENT_ACCOUNT_RATE_LIMITED');
+    a.verifiedIdentity&&!out.inflight.some(c=>c.accountId===id))?.[0];
   const a=out.accounts[accountId];
   if(!a||!a.verifiedIdentity)return fail('ACCOUNT_UNAVAILABLE');
   const claim={claimId,kind,bootId,startedAt:now,accountId,personaUid:a.personaUid,

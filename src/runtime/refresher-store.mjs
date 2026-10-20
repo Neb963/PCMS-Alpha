@@ -95,7 +95,7 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
       coverage:s.recent.complete===true?'COMPLETE':'UNKNOWN',
       lastUnknownAt:s.recent.lastUnknownAt||0,
       suspended:s.recent.suspended===true,
-      rateLimitedAccountCount:Object.values(s.recent.accountBackoff||{}).filter(until=>until>now).length,
+      endpointBackoffUntil:s.recent.endpointBackoffUntil||0,
       stale:!s.recent.observedAt||s.recent.observedAt>now||now-s.recent.observedAt>2*s.policy.recentMs},
     nextWakeAt:s.nextWakeAt,diagnostics:{...s.diagnostics},
     timeline:s.timeline.slice(-8),clock:'EVIDENCED_ONLY',monitoring:'GATED_READ_ONLY'};
@@ -296,17 +296,17 @@ export function createRefresherStore(db){
         out.recent.lastUnknownAt=now;
         clockChanges.push({code:'RECENT_COVERAGE_UNKNOWN',scopeId:c.accountId});
       }
-      // HTTP 429 applies only to the protected account that made the read.
-      // Let a different eligible Persona attempt the global public feed on
-      // the next bounded wake. Never exhaust the entire fleet's retry budget
-      // because one account received a scoped provider rate limit.
-      const scopedRateLimit=c.kind==='RECENT'&&packet?.code==='RATE_LIMITED';
-      if(scopedRateLimit){
+      // The public RECENT endpoint is shared. Unknown-scope 429 is an
+      // endpoint-wide cooldown: never switch identity/route to evade it.
+      // Other request classes continue under their existing budgets.
+      const endpointRateLimit=c.kind==='RECENT'&&packet?.code==='RATE_LIMITED';
+      if(endpointRateLimit){
         const requested=Number.isSafeInteger(packet.retryAfterMs)&&packet.retryAfterMs>0?
           packet.retryAfterMs:out.policy.recentMs;
-        out.recent.accountBackoff={...(out.recent.accountBackoff||{}),
-          [c.accountId]:now+Math.min(24*60*MINUTE,Math.max(MINUTE,requested))};
-        out.recent.nextDueAt=now+MINUTE;
+        const until=now+Math.min(24*60*MINUTE,Math.max(MINUTE,requested));
+        out.recent.endpointBackoffUntil=Math.max(
+          out.recent.endpointBackoffUntil||0,until);
+        out.recent.nextDueAt=Math.max(out.recent.nextDueAt,until);
       }else{
         const obj=c.kind==='RECENT'?out.recent:out.rows.find(r=>r.stableId===c.stableId)?.metrics;
         if(obj){obj.failures=Math.min(8,obj.failures+1);obj.suspended=obj.failures>=8;
