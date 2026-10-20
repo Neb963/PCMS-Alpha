@@ -14,3 +14,12 @@ test('S08 packaged creation entrypoints require explicit standing grants',async(
  const release=await readFile('src/runtime/release-boundary.mjs','utf8');
  assert.match(release,/standingS06\?\.gate\('publication'\)===true/);
 });
+
+test('S08 cold recovery listener is registered once, immediately after donor bootstrap',async()=>{
+ const entry=await readFile('src/runtime/entry.mjs','utf8');
+ const donor=entry.indexOf("import '../lib/recovery-bootstrap.js';");
+ const restore=entry.indexOf("import './restore-boundary.mjs';");
+ const wake=entry.indexOf("import './wake.mjs';");
+ assert.ok(donor>=0&&restore>donor&&wake>restore);
+ assert.equal(entry.split("import './restore-boundary.mjs';").length-1,1);
+});
