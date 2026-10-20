@@ -44,6 +44,7 @@ export function validateRefresherMessage(api,sender,message){
 export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFactory=createRefresherStore,
   guard=internalPcmsGuard,observationGate=()=>false,
   refreshGate=()=>false,qualificationFor=()=>null,refreshAdapter=null,clock=Date.now,
+  nativeClockGate=()=>false,continuousCoverageFor=()=>null,
   newId=()=>crypto.randomUUID().replaceAll('-','')}={}){
   let dbPromise,turnPromise=null,registered=false,alarmHeld=false,alarmTail=Promise.resolve();
   const bootId=newId(),sentinel=createRestoreSentinel(api.storage.local);
@@ -272,7 +273,23 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     turnPromise=(async()=>{
       try{
         if((await sentinel.inspect()).held){await safeBreadcrumb(null,'RESTORE_HOLD');return fail('RESTORE_HOLD');}
-        const s=await store(),now=clock(),result=await s.turn({now,bootId});
+        const s=await store();
+        let nativeClock=null,qualifiedCoverages=null;
+        if(nativeClockGate()){
+          // Original native-connection counters only. No fallback from wall
+          // time or two HTTP requests. A sampling exception is UNKNOWN.
+          try{
+            const native=await guard()?.sampleNativeWitness?.();
+            if(native?.ok===true&&native.witness){
+              nativeClock={...native.witness,observedAtMs:clock()};
+              // Independent continuous coverage must be supplied by a real
+              // donor/host monitor. This callback has no production provider.
+              qualifiedCoverages=await continuousCoverageFor({
+                at:nativeClock.observedAtMs,bootId,nativeClock});
+            }
+          }catch{/* no fake time credited on native/coverage failure */}
+        }
+        const now=clock(),result=await s.turn({now,bootId,nativeClock,qualifiedCoverages});
         if(!result.ok){await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return result;}
         await schedule(result.state.nextWakeAt);
         // At most two protected reads per turn. Persistent quota/coalescing spans
