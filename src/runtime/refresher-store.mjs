@@ -209,8 +209,10 @@ export function createRefresherStore(db){
         const owner=out.accounts[r.accountId];
         const healthy=r.ownerVerified&&r.releaseVerified&&r.listing==='PUBLIC'&&
           !r.reviewHeld&&!r.identityHeld&&owner?.verifiedIdentity===true&&
-          owner.health==='HEALTHY'&&Number.isSafeInteger(owner.healthAt)&&
-          c.startedAt-owner.healthAt<=out.policy.recentMs&&
+          // A validated full public-feed read is itself positive provider
+          // evidence. Do not require an unrelated two-exit outage quorum or
+          // an already-qualified clock before recording the observed rank.
+          // Effects still require the target's own protected route later.
           out.provider.state!=='OUTAGE';
         const evidence=observeRefreshPresence(r.refresh||emptyRefreshEvidence(),{
           at:c.startedAt,present:!!item,rank:item?.position,complete:true,

@@ -59,16 +59,18 @@ function draw(s){
     const target=document.getElementById(id);if(target)target.textContent='Shadow Refresher: '+summary;
   }
   el('provider').textContent='Provider '+s.provider.state+
-    ' · refresh mutation OFF · operating time: '+
-    (s.clockCapability==='CONTINUOUS_ELIGIBILITY_NOT_ESTABLISHED'?
-      'continuous eligibility not verified':
-      'native clock requires independently verified eligibility')+
+    (s.policy.refreshEnabled?' · guarded marker saves ENABLED':' · refresh mutation OFF')+
+    ' · operating time: '+
+    (s.clockCapability==='BOUNDED_NATIVE_ROUTE_FEED_ELIGIBILITY'?
+      'bounded native awake time with current protected route/feed evidence; unknown frozen':
+      'continuous eligibility not verified')+
     ' · observations: '+s.monitoring+'.';
   el('diagnostics').textContent=s.diagnostics.turns+' durable turns · '+s.diagnostics.unknownIntervals+
     ' unknown intervals frozen · read peak '+s.diagnostics.readPeak+' · queue peak '+s.diagnostics.queuePeak+
     ' · next wake '+(s.nextWakeAt?new Date(s.nextWakeAt).toLocaleTimeString():'not verified')+
     (s.alarmHeld?' · alarm unverified':'');
   el('global-pause').textContent=s.globalPause?'Resume globally':'Pause globally';
+  el('enable').checked=s.policy.refreshEnabled===true;
   el('active').value=s.policy.activeMs/3600000;el('sleep').value=s.policy.sleepMs/3600000;
   el('grace').value=s.policy.graceMs/60000;el('cap').value=s.policy.manualCap??'';
   const oldAccount=el('account').value;el('account').replaceChildren();
@@ -117,7 +119,9 @@ async function load(){
     if(mine!==epoch)return;
     if(!s?.ok)throw Error(s?.code||'READ_UNAVAILABLE');
     draw(s);status.textContent=s.restoreHeld?'Restore hold; local changes held.':
-      'Shadow projection only. Unknown operational intervals freeze. Ordinary sleep remains public; no refresh or unlisting is sent.';
+      (s.policy.refreshEnabled?
+        'Protected automatic marker saves enabled. Recent placement is independently observed; ambiguous/ineffective writes held.':
+        'Monitoring read-only. Marker saves disabled until explicitly enabled. Unknown operational intervals freeze.');
   }catch(error){if(mine!==epoch)return;snapshot=null;
     status.textContent='Shadow state unavailable. No healthy fleet or empty remote queue inferred.';
     for(const id of ['save','global-pause','account-pause','generator-pause','generator-save','demand','retry-recent'])el(id).disabled=true;
@@ -132,7 +136,7 @@ async function change(type,params){
       status.textContent=result?.code==='STALE_REVISION'?
       'State changed; review the refreshed values before trying again.':
       'Change held: '+(result?.code||'UNKNOWN');return;}
-    await load();status.textContent='Local change committed. Provider refresh mutations remain OFF.';
+    await load();status.textContent='Local settings committed. Refresh source writes follow the explicit enabled state shown above.';
   }catch{status.textContent='Acknowledgment unavailable. Reload canonical state before trying again.';snapshot=null;}
 }
 el('reload').addEventListener('click',load);
@@ -148,7 +152,8 @@ el('account-pause').addEventListener('click',()=>{
 });
 el('save').addEventListener('click',()=>change('SET_POLICY',{policy:{
   activeMs:Number(el('active').value)*3600000,sleepMs:Number(el('sleep').value)*3600000,
-  graceMs:Number(el('grace').value)*60000,manualCap:el('cap').value===''?null:Number(el('cap').value)}}));
+  graceMs:Number(el('grace').value)*60000,manualCap:el('cap').value===''?null:Number(el('cap').value),
+  refreshEnabled:el('enable').checked===true}}));
 el('generator-pause').addEventListener('click',()=>selected&&change('SET_PAUSE',{
   scope:'GENERATOR',target:selected.stableId,paused:!selected.paused}));
 el('generator-save').addEventListener('click',()=>selected&&change('SET_GENERATOR_POLICY',{
