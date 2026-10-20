@@ -1,6 +1,6 @@
 // S08 diagnostic identity and evidence model. No provider capability in this module.
 const ID=/^[A-Za-z0-9_-]{8,100}$/;
-const NS=/^pcms-test-[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/;
+const NS=/^pcms-test-[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
 const RID=/^[1-9][0-9]{0,19}$/;
 const HEX=/^[a-f0-9]{12,32}$/;
 export const DIAGNOSTIC_CONFIG='pcmsS08DisposableScope';
