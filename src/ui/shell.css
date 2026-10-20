@@ -21,3 +21,43 @@ main{grid-column:2;grid-row:2;min-width:0;padding:22px 26px 36px;max-width:1400p
 .attention-group h3{font-size:1rem;margin:.1rem 0 .5rem}
 .attention-item{display:flex;gap:.75rem;justify-content:space-between;align-items:center;flex-wrap:wrap;margin:.4rem 0}
 .attention-item button{min-height:2.5rem}
+
+
+/* S08: align type scale, controls, spacing and navigation with accepted v3.1 UI.
+   All states remain native, accessible inputs; no faux/disabled controls. */
+:root{--sidebar:#f8f9fa;--hover:#f1f4f7;--pressed:#e9eff5;--line:#dce1e6;
+  --line-strong:#c8d0d9;--quiet:#f1f4f7;--focus:#2770d0}
+body{font-size:13px;line-height:1.45}
+.app{grid-template-columns:210px minmax(0,1fr);grid-template-rows:61px minmax(0,1fr) 32px}
+.topbar{min-height:61px;padding:0 25px}
+.sidebar{background:var(--sidebar);padding:17px 10px}
+.sidebar nav a{min-height:36px;display:flex;align-items:center;padding:7px 10px;font-weight:560}
+.sidebar nav a:hover{background:var(--hover)}
+main{padding:28px 30px 34px}
+.workspace-head h1{font-size:23px;font-weight:740}
+.workspace-head{align-items:flex-start}
+button,input,select,textarea{font:inherit;color:inherit}
+button{min-height:34px;max-width:100%;padding:6px 11px;border:1px solid var(--line-strong);
+  border-radius:6px;background:var(--paper);cursor:pointer;line-height:1.35}
+button:hover:not(:disabled){background:var(--hover);border-color:var(--accent)}
+button:disabled{cursor:not-allowed;opacity:.52}
+input:not([type="checkbox"]):not([type="radio"]),select,textarea{
+  background:var(--paper);border:1px solid var(--line-strong);border-radius:6px;
+  padding:7px 9px;max-width:100%;min-height:34px}
+input[type="checkbox"]{width:16px;height:16px;accent-color:var(--accent)}
+textarea{width:100%;resize:vertical}
+.account-controls{gap:9px;row-gap:11px}
+.account-controls label{line-height:1.35}
+.panel-head{flex-wrap:wrap}
+:focus-visible{outline:2px solid var(--focus)!important;outline-offset:2px}
+@media(max-width:750px){
+ .app{grid-template-columns:minmax(0,1fr);grid-template-rows:61px minmax(0,1fr) 44px}
+ .sidebar{top:61px}
+ main{padding:20px 14px 24px}
+ .topbar{padding:0 12px}
+ .account-controls{align-items:flex-start}
+}
+@media(prefers-color-scheme:dark){
+ :root{--sidebar:#171c22;--hover:#26313a;--pressed:#2b3b4a;
+   --line:#343d46;--line-strong:#505b65;--quiet:#26313a}
+}

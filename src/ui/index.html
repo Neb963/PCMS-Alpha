@@ -405,6 +405,8 @@
             <select id="pcms-diagnostic-account" aria-describedby="pcms-diagnostic-scope"></select>
             <label for="pcms-diagnostic-namespace">Dedicated test namespace (pcms-test-…)</label>
             <input id="pcms-diagnostic-namespace" autocomplete="off" spellcheck="false" maxlength="42" placeholder="pcms-test-alpha">
+                        <label for="pcms-diagnostic-consent">I confirm that the selected account, Persona and test namespace are disposable resources authorized for live PCMS testing</label>
+            <input id="pcms-diagnostic-consent" type="checkbox">
             <button type="button" id="pcms-diagnostic-designate">Save disposable scope</button>
             <button type="button" id="pcms-diagnostic-run" disabled>Run full diagnostic</button>
             <button type="button" id="pcms-diagnostic-resume" disabled>Resume failed stage</button>

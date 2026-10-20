@@ -4,10 +4,11 @@ import {DIAGNOSTIC_CONFIG,DIAGNOSTIC_RUN,STAGES,
   validateDisposable,evaluateDisposable,createDiagnosticRun,
   addDiagnosticEvent,diagnosticReport} from './s08-diagnostic-core.mjs';
 const by=id=>document.getElementById('pcms-diagnostic-'+id);
+const consent=by('consent');
 const account=by('account'),namespace=by('namespace'),save=by('designate'),
  start=by('run'),resume=by('resume'),rerun=by('rerun'),exporter=by('export'),
  status=by('status'),stages=by('stages'),scope=by('scope');
-let busy=false,configuration=null,run=null;
+let busy=false,configuration=null,run=null,designationError=null;
 const PORT={accounts:'pcms-i03-accounts',git:'pcms-s03-catalog',
  auth:'pcms-s06-authority',creation:'pcms-s00-coordinator',
  ai:'pcms-i10-ai',writeback:'pcms-i11-writeback',
@@ -37,7 +38,8 @@ function controls(){
  account.disabled=busy;namespace.disabled=busy;
 }
 function show(){
- if(configuration)scope.textContent='Test namespace '+configuration.namespace+
+ if(designationError)scope.textContent=designationError;
+ else if(configuration)scope.textContent='Test namespace '+configuration.namespace+
   ' · Selected account '+configuration.accountId+
   ' · Repo ID '+configuration.repositoryId+'. Other resources cannot be substituted.';
  else scope.textContent='Designate one disposable, verified PCMS account and test namespace.';
@@ -242,12 +244,14 @@ save.addEventListener('click',async()=>{
   const auth=await request('auth','GET');
   const test={accountId:selected,personaUid:item?.personaUid,
    repositoryId:git?.repositoryId,namespace:namespace.value.trim()};
+  if(consent.checked!==true)throw Error('DISPOSABLE_SCOPE_CONSENT_REQUIRED');
   const valid=evaluateDisposable(test,current,git,auth);
   if(!valid.ok)throw Error(valid.code);
   configuration=test;
+  designationError=null;
   await browser.storage.local.set({[DIAGNOSTIC_CONFIG]:test});
   scope.textContent='Disposable scope saved. No remote write attempted.';
- }catch(e){scope.textContent='Designation not saved: '+e.message;}
+ }catch(e){designationError='Designation not saved: '+e.message;}
  finally{busy=false;show();}
 });
 function nextRun(){
