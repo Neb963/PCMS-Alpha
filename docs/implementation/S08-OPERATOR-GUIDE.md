@@ -24,7 +24,7 @@ Keep the original PersonaMonkey Mullvad bridge; see `donor/personamonkey/docs/ge
 bash scripts/install-s08-local-hosts.sh
 ```
 
-This only installs user-scoped native wrappers/manifests for `local.pcms.backup_vault` and `local.pcms.backup_v2` in `~/.mozilla/native-messaging-hosts/`. It does not install the PersonaMonkey router, modify route configuration or store credentials. Keep the checkout location stable and restart the **test** Firefox profile. A registered native host does not itself prove working backups or restore.
+This only installs user-scoped native wrappers/manifests for `local.pcms.backup_vault`, `local.pcms.backup_v2` and the isolated Firefox diagnostic host `local.pcms.diagnostic_browser` in `~/.mozilla/native-messaging-hosts/`. It does not install the PersonaMonkey router, modify route configuration or store credentials. Keep the checkout location stable and restart the **test** Firefox profile. A registered native host does not itself prove working backups or restore.
 
 ## Initial configuration and guarded features
 
@@ -34,11 +34,11 @@ In **Settings → Protected workflow activation**, review the scoped account/rou
 
 ## One-button diagnostic
 
-In **Settings → Full diagnostic**, select a disposable verified account and its already bound Persona, enter a dedicated `pcms-test-` namespace, and save the designation. Choose **Run full diagnostic**. A unique slug and immutable create intent are reserved for that run. Its stages use real production ports and original effect journals, not fake handlers.
+In **Settings → Full diagnostic**, select a disposable verified account and its already bound Persona, enter a dedicated `pcms-test-` namespace and the SHA-256 of the local full XPI, check the disposable-resource designation and save. Choose **Run full diagnostic**. A unique slug and immutable create intent are reserved for that run. Its stages use real production ports and original effect journals, not fake handlers.
 
 When it stops on `TEST_READY_DECLARATION_REQUIRED`, create a coherent source on a Git development branch for **this exact test slug** and merge the reviewed `DEPLOYMENT.md` READY declaration to the selected test repo's `main`; then press **Resume failed stage**. Other stages should progress through normal READY development, native AI, test evidence and Git writeback. When the report requests human publication approval, review the **exact candidate** in Publication, approve it there, then resume. The diagnostic never publishes automatically.
 
-**Unfinished integration:** isolated test-only Refresher mutation/recent-feed proof, backup/restore and real process restart are currently reported as HELD/NOT_TESTED. Those stages must still be implemented before AC-16 can PASS. Ordinary corresponding guarded product controls are present, subject to their actual per-resource prerequisites. Do not interpret a diagnostic stop or a green synthetic test as live provider success.
+The diagnostic attempts a bounded isolated Firefox process restart using the exact locally built candidate XPI and an installed `geckodriver`; this checks the candidate in a disposable profile, not the identity of an already installed user-profile XPI. It returns NOT_TESTED/HELD unless independently completed. **Unfinished integration:** isolated test-only Refresher mutation/recent-feed proof and backup/restore remain HELD/NOT_TESTED. Those stages must still be implemented before AC-16 can PASS. Ordinary corresponding guarded product controls are present, subject to their actual per-resource prerequisites. Do not interpret a diagnostic stop or a green synthetic test as live provider success.
 
 ## Debug and export
 

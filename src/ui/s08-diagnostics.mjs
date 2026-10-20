@@ -4,7 +4,7 @@ import {DIAGNOSTIC_CONFIG,DIAGNOSTIC_RUN,STAGES,
   validateDisposable,evaluateDisposable,createDiagnosticRun,
   addDiagnosticEvent,diagnosticReport} from './s08-diagnostic-core.mjs';
 const by=id=>document.getElementById('pcms-diagnostic-'+id);
-const consent=by('consent');
+const consent=by('consent'),xpiSha=by('xpi-sha');
 const account=by('account'),namespace=by('namespace'),save=by('designate'),
  start=by('run'),resume=by('resume'),rerun=by('rerun'),exporter=by('export'),
  status=by('status'),stages=by('stages'),scope=by('scope');
@@ -35,7 +35,7 @@ function controls(){
  save.disabled=busy;start.disabled=busy||!configuration;
  resume.disabled=busy||!run||!run.firstFailure;
  rerun.disabled=busy||!configuration;exporter.disabled=busy||!run;
- account.disabled=busy;namespace.disabled=busy;
+ account.disabled=busy;namespace.disabled=busy;xpiSha.disabled=busy;
 }
 function show(){
  if(designationError)scope.textContent=designationError;
@@ -189,6 +189,30 @@ async function refresher(){
  // intentionally has no test-only target selector; cannot fake scoped proof.
  pause('TEST_ONLY_REFRESHER_WRITER_NOT_AVAILABLE');
 }
+async function isolatedRestart(){
+ const sha=run.config.xpiSha256;
+ if(!/^[a-f0-9]{64}$/.test(sha||''))pause('XPI_SHA256_REQUIRED');
+ const response=await new Promise(resolve=>{
+  let port,done=false;
+  try{port=browser.runtime.connectNative('local.pcms.diagnostic_browser');}
+  catch{return resolve({ok:false,code:'ISOLATED_HOST_NOT_INSTALLED'});}
+  const timeout=setTimeout(()=>finish({ok:false,code:'ISOLATED_RESTART_TIMEOUT'}),930000);
+  function finish(value){
+   if(done)return;done=true;clearTimeout(timeout);
+   try{port.disconnect();}catch{}
+   resolve(value);
+  }
+  port.onMessage.addListener(finish);
+  port.onDisconnect.addListener(()=>finish({ok:false,code:'ISOLATED_HOST_DISCONNECTED'}));
+  try{port.postMessage({action:'RUN_ISOLATED_BROWSER',expectedSha256:sha});}
+  catch{finish({ok:false,code:'ISOLATED_HOST_WRITE_FAILED'});}
+ });
+ if(!response?.ok||response.code!=='ISOLATED_CANDIDATE_FIREFOX_RESTART_VERIFIED'||
+    response.xpiSha256!==sha||response.firefoxRestart!=='OS_OBSERVED'||
+    response.persistentXpi!=='VERIFIED_IN_TEST_PROFILE')
+   pause(response?.code||'ISOLATED_RESTART_NOT_VERIFIED');
+ return 'ISOLATED_CANDIDATE_FIREFOX_RESTART_VERIFIED';
+}
 const ACTION={
  SCOPE:async()=>{await prerequisite();return 'SCOPED_RESOURCES_VERIFIED';},
  CREATE:creation,GIT_SOURCE:catalog,READY:ready,AI_TEST:ai,
@@ -197,7 +221,7 @@ const ACTION={
    if(!r?.ok)pause(r?.code||'BACKUP_STATUS_UNAVAILABLE');
    pause('TEST_ONLY_BACKUP_RESTORE_ISOLATION_REQUIRED');},
  RESTORE:async()=>pause('ISOLATED_RESTORE_PROFILE_REQUIRED'),
- PROCESS_RESTART:async()=>pause('ISOLATED_RESTART_SUPERVISOR_REQUIRED')
+ PROCESS_RESTART:isolatedRestart
 };
 async function drive(){
  if(busy||!run)return;busy=true;controls();
@@ -243,8 +267,10 @@ save.addEventListener('click',async()=>{
   const git=await request('git','GIT_STATUS');
   const auth=await request('auth','GET');
   const test={accountId:selected,personaUid:item?.personaUid,
-   repositoryId:git?.repositoryId,namespace:namespace.value.trim()};
+   repositoryId:git?.repositoryId,namespace:namespace.value.trim(),
+    xpiSha256:xpiSha.value.trim().toLowerCase()};
   if(consent.checked!==true)throw Error('DISPOSABLE_SCOPE_CONSENT_REQUIRED');
+  if(!/^[a-f0-9]{64}$/.test(test.xpiSha256))throw Error('XPI_SHA256_REQUIRED');
   const valid=evaluateDisposable(test,current,git,auth);
   if(!valid.ok)throw Error(valid.code);
   configuration=test;
@@ -286,7 +312,8 @@ exporter.addEventListener('click',()=>{
   if(validateDisposable(saved[DIAGNOSTIC_CONFIG]).ok)
    configuration=saved[DIAGNOSTIC_CONFIG];
   run=saved[DIAGNOSTIC_RUN]?.version===1?saved[DIAGNOSTIC_RUN]:null;
-  if(configuration)namespace.value=configuration.namespace;
+  if(configuration){namespace.value=configuration.namespace;
+    xpiSha.value=configuration.xpiSha256||'';}
   await populateAccounts();
   show();
  }catch{scope.textContent='Diagnostic storage or account provider unavailable. No test started.';}

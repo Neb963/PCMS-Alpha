@@ -12,7 +12,8 @@ ROOT="$ROOT" DEST="$DEST" python3 - <<'PYS'
 import os, pathlib, json, shlex
 root=pathlib.Path(os.environ['ROOT']); dest=pathlib.Path(os.environ['DEST'])
 for name,file in [('local.pcms.backup_vault','backup_vault_host.py'),
-                  ('local.pcms.backup_v2','backup_v2_host.py')]:
+                  ('local.pcms.backup_v2','backup_v2_host.py'),
+                  ('local.pcms.diagnostic_browser','s08_isolated_browser_host.py')]:
     source=root/'native'/file
     if not source.is_file(): raise SystemExit('Missing host '+str(source))
     wrapper=dest/(name+'.sh')
