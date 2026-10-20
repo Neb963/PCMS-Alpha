@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {qualifyBoundedObservedInterval} from '../src/runtime/refresher-qualified-clock.mjs';
-import {emptyShadow,reconcileShadow,advanceShadow,HOUR,MINUTE}
+import {emptyShadow,reconcileShadow,advanceShadow,validShadow,HOUR,MINUTE}
  from '../src/runtime/refresher-core.mjs';
 
 const H='a'.repeat(64),T=2000000,boot='browser_boot_001';
@@ -67,4 +67,14 @@ test('S07 E04: stale feed, route change, changed principal, pipe death, suspend 
    const result=credit(before,after,change);
    assert.equal(result.creditedMs,0,JSON.stringify(change));
  }
+});
+
+test('S07 state migration: pre-S07 saved scheduler policy has no implicit source mutation opt-in',()=>{
+ const old=emptyShadow();
+ delete old.policy.refreshEnabled;
+ assert.equal(validShadow(old),true);
+ assert.notEqual(old.policy.refreshEnabled,true);
+ const turned=advanceShadow(old,{now:T,bootId:boot});
+ assert.equal(turned.ok,true);
+ assert.notEqual(turned.state.policy.refreshEnabled,true);
 });
