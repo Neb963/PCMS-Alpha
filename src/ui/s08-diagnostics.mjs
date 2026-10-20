@@ -220,14 +220,47 @@ async function isolatedRestart(){
    pause(response?.code||'ISOLATED_RESTART_NOT_VERIFIED');
  return 'ISOLATED_CANDIDATE_FIREFOX_RESTART_VERIFIED';
 }
+async function isolatedBackup(){
+ const sha=run.config.xpiSha256;
+ if(!/^[a-f0-9]{64}$/.test(sha||''))pause('XPI_SHA256_REQUIRED');
+ const reply=await new Promise(resolve=>{
+   let port,done=false;
+   try{port=browser.runtime.connectNative('local.pcms.diagnostic_browser');}
+   catch{return resolve({ok:false,code:'ISOLATED_HOST_NOT_INSTALLED'});}
+   const timeout=setTimeout(()=>finish({ok:false,code:'ISOLATED_BACKUP_TIMEOUT'}),1260000);
+   function finish(value){
+     if(done)return;done=true;clearTimeout(timeout);
+     try{port.disconnect();}catch{}
+     resolve(value);
+   }
+   port.onMessage.addListener(finish);
+   port.onDisconnect.addListener(()=>finish({ok:false,code:'ISOLATED_HOST_DISCONNECTED'}));
+   try{port.postMessage({action:'RUN_ISOLATED_BACKUP_RESTORE',expectedSha256:sha});}
+   catch{finish({ok:false,code:'ISOLATED_HOST_WRITE_FAILED'});}
+ });
+ if(!reply?.ok||reply.code!=='ISOLATED_PRODUCTION_BACKUP_RESTORE_VERIFIED'||
+    reply.xpiSha256!==sha||reply.nativeArchive!=='REOPENED_AUTHENTICATED'||
+    reply.restore!=='FRESH_PROFILE_INACTIVE_VERIFIED'||reply.testOnly!==true)
+   pause(reply?.code||'ISOLATED_BACKUP_RESTORE_NOT_VERIFIED');
+ run.isolatedRecoveryProof={version:1,xpiSha256:sha,
+   archive:'REOPENED_AUTHENTICATED',restore:'FRESH_PROFILE_INACTIVE_VERIFIED'};
+ await persist();
+ return 'ISOLATED_PRODUCTION_BACKUP_ARCHIVE_VERIFIED';
+}
+async function isolatedRestore(){
+ const receipt=run.isolatedRecoveryProof;
+ if(receipt?.version!==1||receipt.xpiSha256!==run.config.xpiSha256||
+    receipt.archive!=='REOPENED_AUTHENTICATED'||
+    receipt.restore!=='FRESH_PROFILE_INACTIVE_VERIFIED')
+   pause('ISOLATED_RESTORE_READBACK_REQUIRED');
+ return 'ISOLATED_FRESH_PROFILE_DONOR_AND_CANONICAL_RESTORE_VERIFIED';
+}
 const ACTION={
  SCOPE:async()=>{await prerequisite();return 'SCOPED_RESOURCES_VERIFIED';},
  CREATE:creation,GIT_SOURCE:catalog,READY:ready,AI_TEST:ai,
  GIT_WRITEBACK:writeback,PUBLICATION:publication,REFRESHER:refresher,
- BACKUP:async()=>{const r=await request('backup','STATUS');
-   if(!r?.ok)pause(r?.code||'BACKUP_STATUS_UNAVAILABLE');
-   pause('TEST_ONLY_BACKUP_RESTORE_ISOLATION_REQUIRED');},
- RESTORE:async()=>pause('ISOLATED_RESTORE_PROFILE_REQUIRED'),
+ BACKUP:isolatedBackup,
+ RESTORE:isolatedRestore,
  PROCESS_RESTART:isolatedRestart
 };
 async function drive(){
