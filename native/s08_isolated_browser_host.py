@@ -79,8 +79,48 @@ def observe(archive,firefox,driver):
                 try:os.killpg(server.pid,signal.SIGKILL)
                 except ProcessLookupError:pass
 
+
+def verify_isolated_archive(archive,firefox,driver):
+    """Run the installed production backup-v2 and I16 restore H witness
+    inside a new HOME and private D-Bus/Secret Service, never operator state.
+    """
+    if any(shutil.which(name) is None for name in
+           ('dbus-run-session','gnome-keyring-daemon','secret-tool','bash')):
+        return 'ISOLATED_SECRET_SERVICE_DEPENDENCIES_REQUIRED'
+    script_path=ROOT/'scripts'/'s02-ci-native-host.py'
+    if not script_path.is_file():return 'ISOLATED_PRODUCTION_HARNESS_REQUIRED'
+    with tempfile.TemporaryDirectory(prefix='pcms-s08-recovery-') as d:
+        root=pathlib.Path(d);home=root/'home';home.mkdir(mode=0o700)
+        runtime=home/'runtime';runtime.mkdir(mode=0o700)
+        env=os.environ.copy()
+        env.update({'HOME':str(home),'XDG_RUNTIME_DIR':str(runtime),
+           'RUNNER_TEMP':str(root),'PCMS_S02_CI_ISOLATED':'1',
+           'FIREFOX_BINARY':firefox,'GECKODRIVER_BINARY':driver,
+           'PCMS_S08_PYTHON':sys.executable,'PCMS_S08_RUNNER':str(script_path)})
+        program='set -euo pipefail\n' \
+          'eval "$(printf "pcms-s02-disposable-keyring\\n" | gnome-keyring-daemon --unlock --components=secrets)"\n' \
+          'exec "$PCMS_S08_PYTHON" "$PCMS_S08_RUNNER" build/pcms-alpha-i00.xpi\n'
+        process=subprocess.Popen(['dbus-run-session','--','bash','-c',program],
+          cwd=str(ROOT),env=env,stdout=subprocess.PIPE,
+          stderr=subprocess.PIPE,text=True,start_new_session=True)
+        try:
+            stdout,stderr=process.communicate(timeout=1100)
+        except subprocess.TimeoutExpired:
+            try:os.killpg(process.pid,signal.SIGKILL)
+            except ProcessLookupError:pass
+            process.communicate()
+            return 'ISOLATED_ARCHIVE_TIME_BUDGET_EXCEEDED'
+        if process.returncode!=0:return 'ISOLATED_ARCHIVE_H_WITNESS_FAILED'
+        required=('S02_NATIVE_50_PERSONAS_1024_SOURCE_ARCHIVE_ON_DISK=PASS',
+          'S02_ACTUAL_NATIVE_DISK_TO_FRESH_PROFILE_CANONICAL_INACTIVE_RESTORE=PASS',
+          'S02_NATIVE_V2_THROUGH_ACTUAL_PERSONAMONKEY_DONOR_COOKIES_CANONICAL=PASS',
+          'S02_AGGREGATE_OS_PROCESS_RSS_OBSERVED=PASS')
+        if any(token not in stdout for token in required):
+            return 'ISOLATED_ARCHIVE_H_RECEIPTS_INCOMPLETE'
+        return None
+
 def run(request):
-    if not isinstance(request,dict) or set(request)!={'action','expectedSha256'} or request.get('action')!='RUN_ISOLATED_BROWSER' or not isinstance(request.get('expectedSha256'),str) or not SHA.fullmatch(request['expectedSha256']):
+    if not isinstance(request,dict) or set(request)!={'action','expectedSha256'} or request.get('action') not in ('RUN_ISOLATED_BROWSER','RUN_ISOLATED_BACKUP_RESTORE') or not isinstance(request.get('expectedSha256'),str) or not SHA.fullmatch(request['expectedSha256']):
         return {'ok':False,'code':'DIAGNOSTIC_REQUEST_DENIED'}
     archive=ROOT/'build'/'pcms-alpha-i00.xpi'
     if not archive.is_file():return {'ok':False,'code':'ISOLATED_XPI_BUILD_REQUIRED'}
@@ -97,8 +137,13 @@ def run(request):
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:
             return {'ok':False,'code':'ISOLATED_BROWSER_ALREADY_RUNNING'}
-        error=observe(archive,firefox,driver)
+        error=verify_isolated_archive(archive,firefox,driver) if request['action']=='RUN_ISOLATED_BACKUP_RESTORE' else observe(archive,firefox,driver)
     if error:return {'ok':False,'code':error}
+    if request['action']=='RUN_ISOLATED_BACKUP_RESTORE':
+        return {'ok':True,'code':'ISOLATED_PRODUCTION_BACKUP_RESTORE_VERIFIED',
+          'xpiSha256':actual,'nativeArchive':'REOPENED_AUTHENTICATED',
+          'restore':'FRESH_PROFILE_INACTIVE_VERIFIED',
+          'testOnly':True,'liveProvider':'NOT_TESTED'}
     return {'ok':True,'code':'ISOLATED_CANDIDATE_FIREFOX_RESTART_VERIFIED',
        'xpiSha256':actual,'firefoxRestart':'OS_OBSERVED',
        'persistentXpi':'VERIFIED_IN_TEST_PROFILE','liveProvider':'NOT_TESTED'}
