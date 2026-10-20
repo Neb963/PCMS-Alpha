@@ -56,7 +56,7 @@ test('S07 E04 X: route TTL, two endpoint checks, absent healthy session, lone ex
     {...args,next:{...next,nativeLifetimeId:'different_lifetime'}},
     {...args,next:{...next,sequence:4}},
     {...args,next:{...next,hostBootNs:String(BigInt(next.hostBootNs)+20000000000n)}},
-    {...args,next:sample(2,start+200000,200000)},
+    {...args,next:sample(2,start+13*3600000,13*3600000)},
   ];
   for(const item of probes){
     const receipt=qualifyNativeOperatingInterval(item);
@@ -109,4 +109,25 @@ test('S07 E04 X: missing eligibility, lost pipe and resumed boot all freeze time
   const another=advanceShadow(unknown,{now:start+span+1000,bootId,
     nativeClock:sample(3,start+span+1000,span+1000),qualifiedCoverages:coverage}).state;
   assert.equal(another.rows[0].activeRemaining,HOUR-975);
+});
+
+
+test('S07 E04 D: ten-minute wake gap accrues with genuinely continuous prospective coverage, partial coverage clips',()=>{
+ const gap=10*60000;
+ const extend=c=>({...c,validUntilMs:start+gap+1000});
+ const longProviders=providerCoverages.map(extend);
+ const longAccounts=accountCoverages.map(a=>({...a,
+   route:extend(a.route),session:extend(a.session)}));
+ const result=qualifyNativeOperatingInterval({
+   previous,next:sample(2,start+gap,gap),bootId,id,
+   providerCoverages:longProviders,accountCoverages:longAccounts});
+ assert.equal(result.ok,true,JSON.stringify(result));
+ assert.equal(result.creditedMs,gap-25);
+ // A misleading observed endpoint 10m later cannot extend an expiring
+ // continuous eligibility window; only the certified prefix can count.
+ const clipped=qualifyNativeOperatingInterval({
+   previous,next:sample(2,start+gap,gap),bootId,id,
+   providerCoverages,accountCoverages});
+ assert.equal(clipped.ok,true,JSON.stringify(clipped));
+ assert.equal(clipped.creditedMs,span+975);
 });
