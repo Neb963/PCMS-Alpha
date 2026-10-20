@@ -2,7 +2,7 @@
 // ports and canonical production receipts. Never invents a provider success.
 import {DIAGNOSTIC_CONFIG,DIAGNOSTIC_RUN,STAGES,
   validateDisposable,evaluateDisposable,createDiagnosticRun,
-  addDiagnosticEvent,diagnosticReport} from './s08-diagnostic-core.mjs';
+  addDiagnosticEvent,diagnosticReport,recoverInterruptedDiagnostic} from './s08-diagnostic-core.mjs';
 const by=id=>document.getElementById('pcms-diagnostic-'+id);
 const consent=by('consent'),xpiSha=by('xpi-sha');
 const account=by('account'),namespace=by('namespace'),save=by('designate'),
@@ -33,7 +33,8 @@ function request(which,type,params={}){
  });
 }
 function controls(){
- save.disabled=busy;start.disabled=busy||!configuration;
+ save.disabled=busy;start.disabled=busy||!configuration||
+   (run!==null&&run.status!=='NOT_TESTED');
  resume.disabled=busy||!run||!run.firstFailure;
  rerun.disabled=busy||!configuration;exporter.disabled=busy||!run;
  cleanup.disabled=busy||!run||run.cleanup==='VERIFIED_REMOTE_AND_GIT_ABSENT';
@@ -338,12 +339,11 @@ function nextRun(){
  return created.run;
 }
 start.addEventListener('click',async()=>{
- if(busy||!configuration)return;
- if(run&&run.firstFailure){status.textContent='Use Resume for the existing test or Full rerun for a new test slug.';return;}
+ if(busy||!configuration||run&&run.status!=='NOT_TESTED')return;
  if(!run){run=nextRun();await persist();}
  void drive();
 });
-resume.addEventListener('click',()=>{if(!busy&&run)void drive();});
+resume.addEventListener('click',()=>{if(!busy&&run?.firstFailure)void drive();});
 rerun.addEventListener('click',async()=>{
  if(busy||!configuration)return;
  if(run&&!confirm('Start a new test slug? Existing remote test artifacts are preserved; export the previous report first if needed.'))return;
@@ -391,7 +391,10 @@ exporter.addEventListener('click',()=>{
   const saved=await browser.storage.local.get([DIAGNOSTIC_CONFIG,DIAGNOSTIC_RUN]);
   if(validateDisposable(saved[DIAGNOSTIC_CONFIG]).ok)
    configuration=saved[DIAGNOSTIC_CONFIG];
-  run=saved[DIAGNOSTIC_RUN]?.version===1?saved[DIAGNOSTIC_RUN]:null;
+  run=saved[DIAGNOSTIC_RUN]?.version===1?
+    recoverInterruptedDiagnostic(saved[DIAGNOSTIC_RUN]):null;
+  if(run&&run!==saved[DIAGNOSTIC_RUN])
+    await browser.storage.local.set({[DIAGNOSTIC_RUN]:run});
   if(configuration){namespace.value=configuration.namespace;
     xpiSha.value=configuration.xpiSha256||'';}
   await populateAccounts();

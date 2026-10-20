@@ -68,3 +68,15 @@ export function diagnosticReport(run){
   livePerchance:run.events.some(e=>e.stage==='CREATE'&&e.outcome==='PASS')?
     'CREATE_VERIFIED_OTHER_OPERATIONS_INDEPENDENT':'NOT_TESTED'};
 }
+
+// Browser shutdown while a stage was executing is not a PASS or permission to
+// silently rerun a possibly dispatched provider effect. Preserve run identity.
+export function recoverInterruptedDiagnostic(run){
+ if(run?.version!==1||run.status!=='RUNNING')return run;
+ if(run.stage==='COMPLETED'&&STAGES.every(stage=>run.events?.some(e=>e.stage===stage&&e.outcome==='PASS')))
+   return {...run,status:'PASS',firstFailure:null};
+ if(!STAGES.includes(run.stage))return {...run,status:'HELD',
+   firstFailure:{stage:run.stage,code:'INTERRUPTED_STAGE_UNKNOWN'}};
+ return {...run,status:'HELD',
+   firstFailure:{stage:run.stage,code:'BROWSER_INTERRUPTED_RECONCILE_BEFORE_RESUME'}};
+}
