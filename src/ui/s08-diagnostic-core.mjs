@@ -5,8 +5,8 @@ const RID=/^[1-9][0-9]{0,19}$/;
 const HEX=/^[a-f0-9]{12,32}$/;
 export const DIAGNOSTIC_CONFIG='pcmsS08DisposableScope';
 export const DIAGNOSTIC_RUN='pcmsS08DiagnosticRun';
-export const STAGES=Object.freeze(['SCOPE','PROCESS_RESTART','CREATE','GIT_SOURCE','READY','AI_TEST',
-  'GIT_WRITEBACK','PUBLICATION','REFRESHER','BACKUP','RESTORE']);
+export const STAGES=Object.freeze(['SCOPE','CREATE','GIT_SOURCE','READY','AI_TEST',
+  'GIT_WRITEBACK','PUBLICATION','REFRESHER','BACKUP','RESTORE','PROCESS_RESTART']);
 export function validateDisposable(config){
  if(!config||!ID.test(config.accountId||'')||
    !ID.test(config.personaUid||'')||!RID.test(config.repositoryId||'')||

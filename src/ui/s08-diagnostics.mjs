@@ -310,9 +310,17 @@ save.addEventListener('click',async()=>{
    repositoryId:git?.repositoryId,namespace:namespace.value.trim(),
     xpiSha256:xpiSha.value.trim().toLowerCase()};
   if(consent.checked!==true)throw Error('DISPOSABLE_SCOPE_CONSENT_REQUIRED');
-  if(!/^[a-f0-9]{64}$/.test(test.xpiSha256))throw Error('XPI_SHA256_REQUIRED');
+  if(test.xpiSha256&& !/^[a-f0-9]{64}$/.test(test.xpiSha256))throw Error('XPI_SHA256_INVALID');
   const valid=evaluateDisposable(test,current,git,auth);
   if(!valid.ok)throw Error(valid.code);
+  // Once a test has begun, the account, Persona, repo and namespace are
+  // immutable. The local XPI hash may be provided later for restart tests.
+  if(run){
+    for(const key of ['accountId','personaUid','repositoryId','namespace'])
+      if(run.config[key]!==test[key])throw Error('RUN_SCOPE_IMMUTABLE');
+    run.config.xpiSha256=test.xpiSha256;
+    await persist();
+  }
   configuration=test;
   designationError=null;
   await browser.storage.local.set({[DIAGNOSTIC_CONFIG]:test});
