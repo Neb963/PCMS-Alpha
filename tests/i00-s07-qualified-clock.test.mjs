@@ -92,7 +92,7 @@ test('S07 E04 D: durable scheduler accrues healthy awake minutes across wake gap
     nativeClock:next,qualifiedCoverages:coverage});
   assert.equal(replay.state.rows[0].activeRemaining,HOUR-span+25);
 });
-test('S07 E04 X: missing eligibility, lost pipe and resumed boot all freeze time; never backfill unknown gaps',()=>{
+test('S07 E04 X: no eligibility or real pipe death freezes, event-page wake with original pipe remains creditable',()=>{
   const first=advanceShadow(fleet(),{now:start,bootId,nativeClock:previous}).state;
   const unknown=advanceShadow(first,{now:start+span,bootId,nativeClock:next}).state;
   assert.equal(unknown.rows[0].activeRemaining,HOUR);
