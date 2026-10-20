@@ -34,7 +34,7 @@ test('cross-workspace links and accessible route changes are present', () => {
 
 test('new PCMS actions remain disabled, without network or browser mutation APIs', () => {
   assert.ok((html.match(/<button\b[^>]*\bdisabled\b/g) || []).length >= 3);
-  for(const [id, reason] of [['generators','blocked-generators'],['work-queue','blocked-work-queue'],['refresher','blocked-refresher']]){
+  for(const [id, reason] of [['generators','blocked-generators'],['work-queue','blocked-work-queue']]){
     assert.match(html, new RegExp(`aria-describedby="${reason}"`));
     assert.match(html, new RegExp(`id="${reason}"`));
   }
@@ -47,7 +47,10 @@ test('new PCMS actions remain disabled, without network or browser mutation APIs
   assert.match(html, /id="pcms-accounts-list"/);
   assert.match(html, /accounts-view\.mjs/);
   assert.match(html, /inventory-view\.mjs/);
-  for (const name of ['Reserve generator','Start action','Start refresh'])
+  assert.match(html,/id="blocked-refresher"/);
+  assert.match(html,/id="pcms-refresher-enable" type="checkbox"/);
+  assert.match(html,/Source saves are OFF until explicitly enabled|source saves are OFF until explicitly enabled/i);
+  for (const name of ['Reserve generator','Start action'])
     assert.match(html, new RegExp('<button[^>]*disabled[^>]*>'+name+'</button>'));
 
 });
