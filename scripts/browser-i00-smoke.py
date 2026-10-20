@@ -810,12 +810,34 @@ def s01_add_account_profile(browser, archive, folder):
           if(tagged.length!==1)return {error:'TAGGED_COUNT_'+tagged.length};
           const t=tagged[0];
           const initial={routeId:t.routeId,killSwitch:t.killSwitch,blockLocal:t.blockLocalNetwork};
-          const state=structuredClone(snap.state);
-          state.routes['ci-s01-http']={id:'ci-s01-http',name:'CI proxy oracle',type:'http',
-            host:'127.0.0.1',port:PORT,enabled:true};
-          const preview=await send({type:'PREVIEW_STATE_CHANGE',state});
-          await send({type:'AUTHORIZE_SECURITY_PREVIEW',previewId:preview.previewId,approvedDelta:preview.delta});
-          await send({type:'COMMIT_STATE_PREVIEW',authorizationId:preview.previewId});
+          // Donor state changes can race with S01 enrollment settlement.
+          // A revision-conflicted preview was never committed. Only that
+          // explicit rejection may be re-previewed against fresh state;
+          // an ambiguous dispatch is never retried.
+          let committed=false;
+          for(let attempt=0;attempt<6;attempt++){
+            const fresh=await send({type:'GET_SNAPSHOT'});
+            const currentTag=fresh.state.profiles[t.containerId];
+            if(currentTag?.pcmsBindingId!==t.pcmsBindingId)
+              throw Error('S01_TAGGED_PERSONA_CHANGED_DURING_PREVIEW');
+            const state=structuredClone(fresh.state);
+            state.routes['ci-s01-http']={id:'ci-s01-http',name:'CI proxy oracle',type:'http',
+              host:'127.0.0.1',port:PORT,enabled:true};
+            const preview=await send({type:'PREVIEW_STATE_CHANGE',state});
+            if(!preview?.previewId)throw Error('S01_SECURITY_PREVIEW_UNAVAILABLE');
+            try{
+              await send({type:'AUTHORIZE_SECURITY_PREVIEW',previewId:preview.previewId,approvedDelta:preview.delta});
+              await send({type:'COMMIT_STATE_PREVIEW',authorizationId:preview.previewId});
+              committed=true;break;
+            }catch(e){
+              if(!String(e).includes('State revision conflict'))throw e;
+              await new Promise(r=>setTimeout(r,150+attempt*100));
+            }
+          }
+          if(!committed)throw Error('S01_PREVIEW_REVISION_CONFLICT_NOT_RECOVERED');
+          const committedSnapshot=await send({type:'GET_SNAPSHOT'});
+          if(!committedSnapshot.state.routes['ci-s01-http'])
+            throw Error('S01_PROXY_ROUTE_NOT_PRESENT_AFTER_COMMIT');
           await send({type:'UPDATE_PROFILE_ROUTE',profileId:t.containerId,routeId:'ci-s01-http'});
           const ordinary=await send({type:'CREATE_PERSONA',input:{name:'CI ordinary',routeId:'ci-s01-http',
             profile:{killSwitch:true,blockLocalNetwork:false}}});
