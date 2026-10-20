@@ -16,3 +16,8 @@ main{grid-column:2;grid-row:2;min-width:0;padding:22px 26px 36px;max-width:1400p
 .account-controls label{display:inline-flex;gap:.35rem;align-items:center}
 .account-controls button{max-width:100%}
 #pcms-accounts-feedback{min-height:1.5rem}
+
+.attention-group{padding:.75rem 0;border-bottom:1px solid var(--line, #9995)}
+.attention-group h3{font-size:1rem;margin:.1rem 0 .5rem}
+.attention-item{display:flex;gap:.75rem;justify-content:space-between;align-items:center;flex-wrap:wrap;margin:.4rem 0}
+.attention-item button{min-height:2.5rem}

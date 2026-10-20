@@ -2,7 +2,7 @@
 import { createCanonicalStore, createRestoreSentinel, openCanonicalDatabase, fail } from './journal.mjs';
 
 export const COMMAND_PORT = 'pcms-i02-canonical-readonly';
-const SAFE_NAMES = new Set(['HEALTH','SUMMARY','GET_OPERATION','GET_NOTICES','IGNORE_NOTICE','PREVIEW']);
+const SAFE_NAMES = new Set(['HEALTH','SUMMARY','GET_OPERATION','GET_NOTICES','IGNORE_NOTICE','ACK_NOTICE','PREVIEW']);
 export function trustedExtensionPage(api, sender) {
   if (sender?.id !== api.runtime.id || typeof sender.url !== 'string') return false;
   const base = api.runtime.getURL('pcms/');
@@ -25,7 +25,7 @@ export function validateCommand(api, sender, message) {
   if (!bytes || bytes.length > 2048 || Object.keys(message).length > 3)
     return fail('MESSAGE_TOO_LARGE');
   if (!SAFE_NAMES.has(message.type)) return fail('CAPABILITY_OFF');
-  if (message.type === 'IGNORE_NOTICE' &&
+  if (['IGNORE_NOTICE','ACK_NOTICE'].includes(message.type) &&
     (typeof message.notice !== 'object' || !message.notice ||
       !/^[a-zA-Z0-9_-]{8,100}$/.test(message.notice.scopeId || '') ||
       typeof message.notice.code !== 'string' ||
@@ -64,6 +64,10 @@ export function createCommandBoundary(api, { open = openCanonicalDatabase } = {}
     const state = await status();
     if (message.type === 'HEALTH' || message.type === 'SUMMARY') return state;
     if (state.storage !== 'READY' || state.held) return fail('CANONICAL_HOLD');
+    if (message.type === 'ACK_NOTICE') {
+      try { return await (await canonical()).acknowledgeNotice(message.notice); }
+      catch { return fail('CANONICAL_HOLD'); }
+    }
     if (message.type === 'IGNORE_NOTICE') {
       try { return await (await canonical()).ignoreNotice(message.notice); }
       catch { return fail('CANONICAL_HOLD'); }

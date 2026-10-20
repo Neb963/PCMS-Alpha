@@ -64,7 +64,7 @@ function draw(s){
     ' · '+s.visibilitySuspended+' visibility-held (slot released; active budget preserved).';
   el('summary').textContent=summary;
   for(const id of ['pcms-overview-refresher','pcms-queue-refresher']){
-    const target=document.getElementById(id);if(target)target.textContent='Shadow Refresher: '+summary;
+    const target=document.getElementById(id);if(target)target.textContent='Refresher: '+summary;
   }
   el('provider').textContent='Provider '+s.provider.state+
     (s.policy.refreshEnabled?' · guarded marker saves ENABLED':' · refresh mutation OFF')+
@@ -106,7 +106,7 @@ function draw(s){
   }
   if(!s.items.length){
     const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=5;
-    td.textContent='No matching canonical shadow records. Remote population is not inferred.';tr.append(td);rows.append(tr);
+    td.textContent='No matching managed records. Remote population is not inferred.';tr.append(td);rows.append(tr);
   }
   el('page').textContent=(s.total?offset+1:0)+'–'+Math.min(s.total,offset+25)+' of '+s.total;
   el('prev').disabled=offset===0;el('next').disabled=offset+25>=s.total;
@@ -121,7 +121,7 @@ function accountButton(){
   el('account-pause').textContent=a?.paused?'Resume account':'Pause account';
 }
 async function load(){
-  const mine=++epoch;status.textContent='Reading canonical shadow state…';
+  const mine=++epoch;status.textContent='Reading managed Refresher state…';
   try{
     const s=await command('GET_REFRESHER',{query:query.value,phase:phase.value,offset,limit:25});
     if(mine!==epoch)return;
@@ -131,7 +131,7 @@ async function load(){
         'Protected automatic marker saves enabled. Recent placement is independently observed; ambiguous/ineffective writes held.':
         'Monitoring read-only. Marker saves disabled until explicitly enabled. Unknown operational intervals freeze.');
   }catch(error){if(mine!==epoch)return;snapshot=null;
-    status.textContent='Shadow state unavailable. No healthy fleet or empty remote queue inferred.';
+    status.textContent='Refresher state unavailable. No healthy fleet or empty remote queue inferred.';
     for(const id of ['save','global-pause','account-pause','generator-pause','generator-save','demand','retry-recent'])el(id).disabled=true;
   }
 }

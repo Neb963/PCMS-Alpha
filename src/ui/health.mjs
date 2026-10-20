@@ -5,10 +5,10 @@ const badge = document.getElementById('pcms-guard-badge');
 const account = document.getElementById('pcms-account-guard');
 
 function project(code, donorReady = false) {
-  const label = donorReady ? 'Guarded · effects off' : 'Held · not ready';
+  const label = donorReady ? 'Protected route ready' : 'Route unavailable';
   badge.textContent = label;
-  status.textContent = code + '. PCMS provider writes remain disabled.';
-  account.textContent = 'Background: ' + label + '. Routes and Personas are prepared by PersonaMonkey; provider writes remain disabled.';
+  status.textContent = code + '. Operations require scoped permissions and fresh route/source checks.';
+  account.textContent = 'Background: ' + label + '. PersonaMonkey manages protected routes; PCMS applies individual operation guards.';
 }
 
 // Dedicated health port avoids competing with the donor's legacy onMessage

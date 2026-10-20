@@ -13,7 +13,7 @@
     <header class="topbar">
       <button class="menu" type="button" id="menu" aria-expanded="false" aria-controls="navigation">Menu</button>
       <div class="identity"><strong>PCMS</strong><span>Alpha</span></div>
-      <span class="phase">I09 · Private staging · Provider writes HELD</span>
+      <span class="phase">Operator dashboard · protected workflows</span>
       <a class="advanced" href="../options/options.html" id="advanced">PersonaMonkey advanced controls <span aria-hidden="true">↗</span></a>
     </header>
     <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
@@ -25,24 +25,24 @@
         <a href="#refresher" data-workspace="refresher">Refresher</a>
         <a href="#settings" data-workspace="settings">Settings</a>
       </nav>
-      <p class="sidebar-note">Provider, Git source and scheduler effects remain disabled.</p>
+      <p class="sidebar-note">Protected operations are available through scoped authorization and current safety checks.</p>
     </aside>
     <main id="main" tabindex="-1" aria-label="Current PCMS workspace">
-      <div class="system-status" role="status" aria-live="polite" id="navigation-status">I06 · Local supply receipts · Provider writes HELD</div>
+      <div class="system-status" role="status" aria-live="polite" id="navigation-status">Checking protected operation status</div>
       <div id="unknown-route" class="notice" role="status" hidden>Unknown workspace. Showing Overview without changing any data.</div>
       <section class="workspace" id="view-overview" data-view="overview" aria-labelledby="heading-overview">
-        <header class="workspace-head"><div><p class="eyebrow">Workspace / 01</p><h1 id="heading-overview" tabindex="-1">Overview</h1><p>Local inventory and guarded read-only account state. Provider writes remain disabled.</p></div></header>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 01</p><h1 id="heading-overview" tabindex="-1">Overview</h1><p>Manage accounts, generators, source and scheduled operations.</p></div></header>
         <p id="pcms-overview-inventory" role="status" aria-live="polite">Inventory counts pending. No live owner status inferred.</p>
-        <p id="pcms-overview-refresher" role="status">Shadow timing pending; mutations OFF.</p>
+        <p id="pcms-overview-refresher" role="status">Refresher status pending.</p>
         <p id="pcms-overview-backup" role="status" aria-live="polite">Manual backup receipt not yet inspected.</p>
         <p id="pcms-overview-restore" role="status" aria-live="polite">Restore guard not yet inspected; controller activation unverified.</p>
-        <div class="notice" role="status"><strong>Provider effects disabled</strong><p>Local operation journaling and a fail-closed command boundary are installed. Account binding and manual login are enabled, but remote identity verification and provider mutation remain unavailable. Missing observations do not imply no incidents.</p></div>
-        <section class="panel" aria-labelledby="runtime-health-title"><div class="panel-head"><h2 id="runtime-health-title">Background guard</h2><span class="unknown" id="pcms-guard-badge">Checking</span></div><p id="pcms-guard-health" role="status">Runtime evidence unavailable until checked. Provider actions remain off.</p></section>
-        <section class="panel" aria-labelledby="journal-title"><div class="panel-head"><h2 id="journal-title">Canonical journal</h2><span class="unknown">Effects OFF</span></div><p id="pcms-journal-health" role="status">Checking isolated canonical storage.</p><a href="emergency.html">Open emergency diagnostics</a></section>
-        <section class="panel" aria-labelledby="attention-title"><div class="panel-head"><h2 id="attention-title">Attention</h2><span class="unknown">Local receipts</span></div><div id="pcms-attention-list" role="status" tabindex="-1">Reading local notice receipts. Missing data is not healthy.</div></section>
+        <div class="notice" role="status"><strong>Before external operations</strong><p>Connect the intended GitHub repository, enroll protected accounts and verify routes. In Settings, authorize the specific guarded workflows. Publication still requires individual exact-source approval.</p></div>
+        <section class="panel" aria-labelledby="runtime-health-title"><div class="panel-head"><h2 id="runtime-health-title">Background guard</h2><span class="unknown" id="pcms-guard-badge">Checking</span></div><p id="pcms-guard-health" role="status">Checking background route and privacy health.</p></section>
+        <section class="panel" aria-labelledby="journal-title"><div class="panel-head"><h2 id="journal-title">Canonical journal</h2><span class="unknown">Durable local receipts</span></div><p id="pcms-journal-health" role="status">Checking isolated canonical storage.</p><a href="emergency.html">Open emergency diagnostics</a></section>
+        <section class="panel" aria-labelledby="attention-title"><div class="panel-head"><h2 id="attention-title">Attention</h2><button type="button" id="pcms-attention-refresh">Refresh</button></div><div id="pcms-attention-list" role="status" tabindex="-1">Reading local notice receipts. Missing data is not healthy.</div></section>
       </section>
       <section class="workspace" id="view-generators" data-view="generators" aria-labelledby="heading-generators" hidden>
-        <header class="workspace-head"><div><p class="eyebrow">Workspace / 02</p><h1 id="heading-generators" tabindex="-1">Generators</h1><p>Generator inventory and source lineage.</p></div><button disabled type="button" aria-describedby="blocked-generators">Reserve generator</button></header>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 02</p><h1 id="heading-generators" tabindex="-1">Generators</h1><p>Generator inventory and source lineage.</p></div></header>
         <section class="panel" aria-labelledby="generators-table-title"><div class="panel-head"><h2 id="generators-table-title">Owned inventory observations</h2><span class="unknown">Historical local evidence · Read only</span></div>
           <div class="account-controls"><label for="pcms-generator-query">Search slug or account</label><input id="pcms-generator-query" type="search" maxlength="80" autocomplete="off" placeholder="Search inventory">
           <label for="pcms-generator-owner-filter">Owner evidence</label><select id="pcms-generator-owner-filter"><option value="ALL">All</option><option value="OBSERVED_OWNER">Previously verified</option><option value="OWNER_UNVERIFIED">Unknown</option><option value="OWNER_DISPUTED">Disputed</option><option value="UNOBSERVED">Unobserved</option><option value="IDENTITY_CONFLICT">Identity conflict</option><option value="OWNER_CONFLICT">Account conflict</option></select><button type="button" id="pcms-generator-refresh">Refresh local data</button></div>
@@ -50,9 +50,9 @@
           <p id="pcms-inventory-feedback" role="status" aria-live="polite">Loading local observations. No current ownership inferred.</p>
           <div class="table-wrap" role="region" aria-label="Generator inventory results" tabindex="0"><table><thead><tr><th scope="col">Generator</th><th scope="col">Account binding</th><th scope="col">Owner evidence</th><th scope="col">Visibility / source</th></tr></thead><tbody id="pcms-generators-rows"><tr><td colspan="4" class="empty">Loading canonical inventory.</td></tr></tbody></table></div>
           <div class="account-controls"><span id="pcms-generator-count" role="status">No verified rows</span><button type="button" id="pcms-generator-prev" disabled>Previous page</button><button type="button" id="pcms-generator-next" disabled>Next page</button></div>
-          <p id="blocked-generators" class="reason">Reservation and provider writes remain held; existing-generator original-source adoption is available with guarded readback. Read-only Sync uses the existing donor-guarded isolated browser observer and can hold on an unavailable or changed session. Edit keys and collaboration cannot prove ownership; historical observations never authorize writes. Missing generator observations never mean deletion.</p></section>
+          <p id="blocked-generators" class="reason">To create a generator, select a verified account and use Slug supply below. Protected creation requires the development grant and a fresh route check. Existing-generator source adoption is also available. Read-only Sync uses the existing donor-guarded isolated browser observer and can hold on an unavailable or changed session. Edit keys and collaboration cannot prove ownership; historical observations never authorize writes. Missing generator observations never mean deletion.</p></section>
         <section class="panel" aria-labelledby="pcms-supply-heading">
-          <div class="panel-head"><h2 id="pcms-supply-heading">Slug supply — canonical plan</h2><span class="unknown">Local freeze only · Provider held</span></div>
+          <div class="panel-head"><h2 id="pcms-supply-heading">Slug supply — canonical plan</h2><span class="unknown">Preview, freeze and guarded execution</span></div>
           <p class="reason">Paste one exact generator slug per line (up to 100). Preview preserves order and spelling. Freezing records the requests for a verified Persona-bound account in IndexedDB; it does not create, rename, reserve remotely, or write to private Git. Existing and conflicting local slugs are rejected per item.</p>
           <div class="account-controls"><label for="pcms-supply-account">Account</label>
             <select id="pcms-supply-account"><option value="">Loading verified accounts</option></select>
@@ -60,7 +60,7 @@
           <label for="pcms-supply-slugs">Requested slugs, one per line</label>
           <textarea id="pcms-supply-slugs" rows="4" maxlength="12100" spellcheck="false" autocomplete="off" aria-describedby="pcms-supply-feedback" placeholder="my-private-gen-001"></textarea>
           <div class="account-controls"><button type="button" id="pcms-supply-preview">Preview exact batch</button><button type="button" id="pcms-supply-freeze" disabled>Freeze locally</button></div>
-          <p id="pcms-supply-feedback" role="status" aria-live="polite">Provider create/rename and Git folder writes are held until separately proven capability activation.</p>
+          <p id="pcms-supply-feedback" role="status" aria-live="polite">Freeze first, then execute through an authorized, protected account. Git writes need the separate Git grant and credential.</p>
           <div class="table-wrap" role="region" aria-label="Supply preview and item receipts" tabindex="0"><table><thead><tr><th scope="col">Item</th><th scope="col">Requested slug</th><th scope="col">Canonical state</th><th scope="col">Reason</th></tr></thead><tbody id="pcms-supply-items"><tr><td colspan="4">No batch preview.</td></tr></tbody></table></div>
         </section>
         <section class="panel" aria-labelledby="pcms-adopt-heading">
@@ -95,7 +95,7 @@
             <button id="pcms-stage-handoff" type="button" disabled>Offer human handoff</button>
             <button id="pcms-stage-refresh" type="button">Refresh receipts</button>
           </div>
-          <p id="pcms-stage-status" role="status" aria-live="polite">No I09 candidate pinned. Provider staging is held until independently qualified activation; no direct or public fallback.</p>
+          <p id="pcms-stage-status" role="status" aria-live="polite">No candidate pinned. Staging requires protected development permission; no direct or public fallback.</p>
           <div id="pcms-stage-diff" class="table-wrap" tabindex="0" role="region" aria-label="Source add, change and delete summary">No candidate diff.</div>
         </section>
         <section class="panel" aria-labelledby="pcms-catalog-heading">
@@ -150,13 +150,13 @@
       </section>
       <section class="workspace" id="view-work-queue" data-view="work-queue" aria-labelledby="heading-work-queue" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 03</p><h1 id="heading-work-queue" tabindex="-1">Work Queue</h1><p>Evidence-backed operator decisions and task receipts.</p></div><button type="button" disabled aria-describedby="blocked-work-queue">Start action</button></header>
-        <p id="pcms-queue-refresher" role="status">Shadow scheduler state pending.</p><p><a href="#refresher">Inspect the global Refresher queue</a></p>
+        <p id="pcms-queue-refresher" role="status">Scheduler status pending.</p><p><a href="#refresher">Inspect the global Refresher queue</a></p>
         <section class="panel"><div class="panel-head"><h2>Operations</h2><span class="unknown">Read-only</span></div><p id="pcms-work-queue-summary" role="status">Loading canonical journal status. Unknown outcomes must be reconciled, not repeated.</p><p id="blocked-work-queue" class="reason">Provider effects are held. Frozen local supply receipts may be inspected; this screen cannot dispatch, approve or replay an uncertain remote operation.</p></section>
         <section class="panel" aria-labelledby="pcms-stage-queue-title"><div class="panel-head"><h2 id="pcms-stage-queue-title">I09 private stage receipts</h2><span class="unknown">Canonical · no auto-retry</span></div><div id="pcms-stage-queue" role="status" aria-live="polite">Reading local stage journal.</div></section>
         <section class="panel" aria-labelledby="pcms-adoption-queue-title"><div class="panel-head"><h2 id="pcms-adoption-queue-title">Existing-source adoption receipts</h2><span class="unknown">Local originals · Git archive pending</span></div><div id="pcms-adopt-receipts" role="status" aria-live="polite">Loading adoption history.</div></section>
         <section class="panel" aria-labelledby="pcms-supply-queue-title"><div class="panel-head"><h2 id="pcms-supply-queue-title">Frozen supply batches</h2><span class="unknown">Canonical local receipts</span></div><div id="pcms-supply-queue" role="status" aria-live="polite">Loading local batches.</div></section>
         <section class="panel" aria-labelledby="pcms-writeback-heading">
-          <div class="panel-head"><h2 id="pcms-writeback-heading">I11 · Git-only writeback of verified final F</h2><span class="unknown">Git mutation HELD until activated · Publication OFF</span></div>
+          <div class="panel-head"><h2 id="pcms-writeback-heading">Conditional Git writeback</h2><span class="unknown">Git permission required · Publication OFF</span></div>
           <p class="reason">Manual or opt-in automatic source commit. An automatic job must be explicitly armed with an ephemeral credential; credentials disappear on Firefox restart. A verified final generator source and independent tests are required. Preview paths, additions, changes and deletions before preparing a conditional Git commit. All Git credentials are ephemeral; a lost effect acknowledgment requires read-only reconciliation, never a blind second commit.</p>
           <div class="account-controls">
             <label for="pcms-writeback-slug">Exact staged slug</label><input id="pcms-writeback-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="private-generator">
@@ -207,7 +207,7 @@
           </details>
         </section>
         <section class="panel" aria-labelledby="pcms-release-heading">
-          <div class="panel-head"><h2 id="pcms-release-heading">I13 · Exact-source human publication approval</h2><span class="unknown">Production publishing OFF · Individual review</span></div>
+          <div class="panel-head"><h2 id="pcms-release-heading">Exact-source publication review</h2><span class="unknown">Production publishing OFF · Individual review</span></div>
           <p class="reason">Approval pins tested PJS, HTML and every binary src file, account/Persona binding, test inputs and prior source. Current protected route, owner, READY Git F, clean editor and actual remote unlisted F must all match. Git commit alone does not confer approval. Existing generator updates are held until independent sleep, unlisting, original archive and recovery proof. A lost publication reply cannot be retried.</p>
           <div class="account-controls">
             <button id="pcms-s06-review-refresh" type="button">Refresh publication queue</button>
@@ -380,7 +380,7 @@
           <p class="reason">Restored approvals, authentication, routes and native secrets cannot be activated by a backup. Fresh-controller activation requires explicit predecessor shutdown proof and later H-06. If a partial restore guard exists, opening this view never clears it.</p>
         </section>
         <section class="panel" aria-labelledby="pcms-auto-backup-title">
-          <div class="panel-head"><h2 id="pcms-auto-backup-title">I15 · Scheduled encrypted backup</h2><span class="unknown">OS vault gated</span></div>
+          <div class="panel-head"><h2 id="pcms-auto-backup-title">Scheduled encrypted backup</h2><span class="unknown">OS vault gated</span></div>
           <p>Automatic backup runs in the Firefox background, independently of Refresher Pause. It requires a separately installed, unlocked Secret Service OS vault. Keep the portable recovery passphrase independently; an inaccessible vault suspends unattended exports without plaintext fallback.</p>
           <label for="pcms-auto-backup-pass">Portable recovery passphrase (at least 12 characters)</label>
           <input type="password" id="pcms-auto-backup-pass" maxlength="4096" autocomplete="new-password">
@@ -397,14 +397,14 @@
           <p role="status" aria-live="polite" id="pcms-auto-backup-status">Checking canonical backup state.</p>
           <p class="reason">Up to 14 confirmed automatic archives are retained. Only positively tracked matching excess downloads may be deleted. Manual, untracked, uncertain and missing files are preserved. No independent on-disk byte proof is claimed.</p>
         </section>
-        <section class="panel"><div class="panel-head"><h2>PCMS capability boundaries</h2><span class="unknown">Protected actions require scoped permission and independent evidence</span></div><dl class="settings-list"><div><dt>Account and provider operations</dt><dd>Supported guarded workflows; account ownership, protected Persona route and operation-specific admission remain mandatory</dd></div><div><dt>Automated source development</dt><dd>Bounded READY and AI progression requires the explicit development grant and native editor/source safety checks</dd></div><div><dt>Scheduling and Refresher</dt><dd>Background scheduler and shadow state available; Refresher provider effects are independently gated and are not activated by S06 grants</dd></div><div><dt>Private generator-source Git writes</dt><dd>Conditional source-only writeback requires tested F, active READY, the Git grant and a native OS-vault credential</dd></div><div><dt>Publication and recovery</dt><dd>Each exact F needs a separate human approval, eligible public hold and guarded readback; restored controllers remain inactive pending independent activation</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Owned by the pinned PersonaMonkey donor; S06 permissions cannot bypass route or source guards</dd></div></dl><p class="reason">Granting S06 permission is not evidence that an external operation succeeded. Advanced PersonaMonkey route controls remain separate.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
+        <section class="panel"><div class="panel-head"><h2>PCMS capability boundaries</h2><span class="unknown">Protected actions require scoped permission and independent evidence</span></div><dl class="settings-list"><div><dt>Account and provider operations</dt><dd>Supported guarded workflows; account ownership, protected Persona route and operation-specific admission remain mandatory</dd></div><div><dt>Automated source development</dt><dd>Bounded READY and AI progression requires the explicit development grant and native editor/source safety checks</dd></div><div><dt>Scheduling and Refresher</dt><dd>Background scheduler and observed fleet state are available; guarded Refresher marker saves use their own explicit enable control</dd></div><div><dt>Private generator-source Git writes</dt><dd>Conditional source-only writeback requires tested F, active READY, the Git grant and a native OS-vault credential</dd></div><div><dt>Publication and recovery</dt><dd>Each exact F needs a separate human approval, eligible public hold and guarded readback; restored controllers remain inactive pending independent activation</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Owned by the pinned PersonaMonkey donor; S06 permissions cannot bypass route or source guards</dd></div></dl><p class="reason">Granting S06 permission is not evidence that an external operation succeeded. Advanced PersonaMonkey route controls remain separate.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
         <section class="panel" aria-labelledby="pcms-s06-authority-heading">
           <div class="panel-head"><h2 id="pcms-s06-authority-heading">Protected workflow activation</h2><span class="unknown">All remote effects OFF by default</span></div>
           <p>These are three independent standing permissions, not test or provider-success evidence. Turn them on only after reviewing the connected private repository, the protected Persona route, and the proposed operations. Actual writes remain fenced by owner, source, test, claim and publication approvals. Disabling a permission does not undo an already possible external effect.</p>
           <p id="pcms-s06-authority-repository">Repository scope: not verified</p>
           <div class="account-controls">
-            <label for="pcms-s06-grant-development">Allow protected generator development, AI testing and eligible existing-source unlisting</label><input id="pcms-s06-grant-development" type="checkbox">
-            <label for="pcms-s06-grant-git">Allow conditional Git main writeback of independently tested final source</label><input id="pcms-s06-grant-git" type="checkbox">
+            <label for="pcms-s06-grant-development">Allow protected generator creation, staging, AI testing and eligible existing-source unlisting</label><input id="pcms-s06-grant-development" type="checkbox">
+            <label for="pcms-s06-grant-git">Allow guarded Git folder, original archive, prompt and tested-source writeback</label><input id="pcms-s06-grant-git" type="checkbox">
             <label for="pcms-s06-grant-publication">Allow only separately approved exact-F publication dispatch</label><input id="pcms-s06-grant-publication" type="checkbox">
             <label for="pcms-s06-authority-consent">To activate, enter: I AUTHORIZE PROTECTED PCMS OPERATIONS</label>
             <input id="pcms-s06-authority-consent" autocomplete="off" spellcheck="false" maxlength="64">
@@ -415,12 +415,12 @@
           <p id="pcms-s06-authority-status" role="status" aria-live="polite">Loading permission status. All effects remain disabled unless independently authorized.</p>
         </section>
         <section class="panel" aria-labelledby="pcms-writeback-auto-heading">
-          <div class="panel-head"><h2 id="pcms-writeback-auto-heading">I11 · Git-only automatic writeback</h2><span class="unknown">Opt-in, revision-fenced · requires scoped Git permission</span></div>
+          <div class="panel-head"><h2 id="pcms-writeback-auto-heading">Automatic Git writeback</h2><span class="unknown">Opt-in, revision-fenced · requires scoped Git permission</span></div>
           <div class="account-controls"><label for="pcms-writeback-auto">Allow opt-in automatic Git writeback after verified final AI result</label><input id="pcms-writeback-auto" type="checkbox"><button id="pcms-writeback-save-auto" type="button" disabled>Save writeback preference</button></div>
           <p id="pcms-writeback-auto-status" role="status" aria-live="polite">Automatic writeback defaults OFF. This preference never activates remote Git capabilities or approves publication.</p>
         </section>
         <section class="panel" aria-labelledby="pcms-ai-config-heading">
-          <div class="panel-head"><h2 id="pcms-ai-config-heading">Native AI testing · versioned default prompt</h2><span class="unknown">Native provider activation held</span></div>
+          <div class="panel-head"><h2 id="pcms-ai-config-heading">Native AI testing · versioned default prompt</h2><span class="unknown">Requires development authorization</span></div>
           <p class="reason">New jobs, including updates to existing generators, pin the latest saved Settings revision. Existing jobs retain their original prompt and TESTING.md snapshot. Helper prose is never test evidence.</p>
           <div class="account-controls">
             <label for="pcms-ai-prompt">Default testing instructions</label>
@@ -445,7 +445,7 @@
         </section>
       </section>
     </main>
-    <footer class="footer"><span>PCMS Alpha · S06 engineering candidate</span><span>Remote effects require scoped grants and independent safety checks</span></footer>
+    <footer class="footer"><span>PCMS Alpha · Operator dashboard</span><span>Remote effects require scoped grants and independent safety checks</span></footer>
   </div>
   <script type="module" src="shell.mjs"></script>
   <script type="module" src="health.mjs"></script>

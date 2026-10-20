@@ -23,7 +23,7 @@ function render({ focusHeading = false } = {}) {
   }
   const heading = document.getElementById(`heading-${selected}`);
   document.title = `PCMS Alpha — ${heading.textContent}`;
-  currentStatus.textContent = `${heading.textContent} · I12 shadow Refresher · Provider writes HELD`;
+  currentStatus.textContent = `${heading.textContent} · Protected actions require operator authorization and current safety checks`;
   invalidNotice.hidden = !invalidDestination(location.hash);
   closeMenu();
   if (focusHeading) heading.focus({ preventScroll: true });
