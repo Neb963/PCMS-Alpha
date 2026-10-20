@@ -380,7 +380,7 @@ attachPcmsGuard({
         catch{return false;}
       })());
     let tab=matching.find(item=>item.active)||matching[0]||null;
-    let disposableNonce=null;
+    let disposableNonce=null,humanTouched=false,activationListener=null;
     try{
       if(!tab){
         // Source preparation and lost-ACK readback also need unattended
@@ -397,6 +397,8 @@ attachPcmsGuard({
         });
         if(!Number.isSafeInteger(tab?.id))
           return {ok:false,code:'MONITOR_TAB_NOT_CREATED'};
+        activationListener=info=>{if(info?.tabId===tab.id)humanTouched=true;};
+        browser.tabs.onActivated.addListener(activationListener);
         await browser.sessions.setTabValue(tab.id,'pcmsS07Monitor',{
           createdBy:'PCMS_S07_MONITOR',nonce:disposableNonce,
           personaUid,cookieStoreId,routeId
@@ -450,15 +452,18 @@ attachPcmsGuard({
       return {ok:false,code:'ISOLATED_OBSERVER_FAILED'};
     return results[0].result;
     }finally{
-      if(disposableNonce&&tab?.id){
+      if(activationListener)
+        try{browser.tabs.onActivated.removeListener(activationListener);}catch{}
+      if(disposableNonce&&tab?.id&&!humanTouched){
         try{
           const latest=await browser.tabs.get(tab.id),
             tag=await browser.sessions.getTabValue(tab.id,'pcmsS07Monitor');
           // A tab taken over/activated by a human is retained, never closed.
           if(latest.cookieStoreId===cookieStoreId&&latest.active===false&&
-             latest.url?.startsWith('https://perchance.org/')&&
+             latest.url==='https://perchance.org/'&&
              tag?.createdBy==='PCMS_S07_MONITOR'&&tag.nonce===disposableNonce&&
-             tag.personaUid===personaUid&&tag.cookieStoreId===cookieStoreId)
+             tag.personaUid===personaUid&&tag.cookieStoreId===cookieStoreId&&
+             tag.humanIntent!==true)
             await browser.tabs.remove(tab.id);
         }catch{/* uncertain transient tab is held; never close an untagged tab */}
       }
