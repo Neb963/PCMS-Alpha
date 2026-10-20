@@ -83,7 +83,9 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
       proof:r.refresh?.history?.at(-1)||null},
     metric:r.metrics.latest?{...r.metrics.latest,stale:r.metrics.latest.observedAt>now||now-r.metrics.latest.observedAt>
       s.policy.statsMaxMs}:null,nextStatisticAt:r.metrics.nextDueAt}));
-  return {ok:true,revision:s.revision,mode:'SHADOW_ONLY',providerEffects:'OFF',items,
+  return {ok:true,revision:s.revision,
+    mode:s.policy.refreshEnabled===true?'GUARDED_REFRESH_ENABLED':'SHADOW_ONLY',
+    providerEffects:s.policy.refreshEnabled===true?'OPERATOR_OPT_IN_GATED':'OFF',items,
     total:match.length,occupied:s.rows.filter(r=>r.slot).length,
     eligible:s.rows.filter(r=>r.phase==='WAITING'&&!rowBlocks(s,r).length&&!r.readyUpdate).length,
     visibilitySuspended:s.rows.filter(r=>r.refresh?.suspended).length,

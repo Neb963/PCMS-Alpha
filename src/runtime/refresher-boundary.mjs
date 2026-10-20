@@ -319,8 +319,13 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         await notifyChanges(result);await notifyChanges(observed);
         await safeBreadcrumb(result,alarmHeld?'ALARM_UNVERIFIED':
           observed.code==='MONITOR_ACTIVATION_HELD'?'MONITOR_ACTIVATION_HELD':'SHADOW_READY');
-        return {ok:true,revision:result.revision,mode:'SHADOW_ONLY',providerEffects:'OFF',
-          alarmHeld,observation:observed.code||'OBSERVED',refresh};
+        const mutationPossible=['EFFECT_INDEPENDENTLY_PROVEN','REFRESH_EFFECT_HELD',
+          'REFRESH_EFFECT_UNCERTAIN'].includes(refresh);
+        return {ok:true,revision:result.revision,
+          mode:result.state.policy?.refreshEnabled===true?
+            'GUARDED_REFRESH_ENABLED':'SHADOW_ONLY',
+          providerEffects:mutationPossible?'POSSIBLE_SOURCE_WRITE':
+            'OFF',alarmHeld,observation:observed.code||'OBSERVED',refresh};
       }catch{await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return fail('REFRESHER_AUTHORITY_UNAVAILABLE');}
       finally{turnPromise=null;}
     })();
