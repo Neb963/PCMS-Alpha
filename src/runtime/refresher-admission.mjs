@@ -107,3 +107,36 @@ export async function planRefresherSourceCandidate({files,expectedFingerprint,ma
     previousFiles:prior.blobs,targetFiles:target.blobs,
     changedPaths:['index.html'],previousMarker:change.previousMarker};
 }
+
+
+// S07 -> S06/I13 bridge: select exact LIVE previous-source P for an upcoming
+// sleeping READY update. A harmless marker is not a new reviewed F, but the
+// recovery snapshot must contain its real saved bytes. Never reinterpret an
+// unverified remote edit as PCMS source, or silently restore the stale F.
+export async function resolveRefreshedPrevious({published,remote,row}={}){
+  if(published?.ok!==true||remote?.ok!==true||
+     !/^[a-f0-9]{64}$/.test(published.fingerprint||'')||
+     !/^[a-f0-9]{64}$/.test(remote.fingerprint||'')||
+     row?.releaseVerified!==true||row.releaseFingerprint!==published.fingerprint)
+    return {ok:false,code:'REFRESH_PREVIOUS_AUTHORITY_UNKNOWN'};
+  const marker=row.refresh;
+  if(marker?.savedSourceFingerprint==null){
+    return remote.fingerprint===published.fingerprint?
+      {ok:true,source:remote,kind:'UNMODIFIED_PUBLISHED_F'}:
+      {ok:false,code:'REMOTE_EDIT_NOT_REFRESHER'};
+  }
+  if(marker.intent!==null||marker.suspended===true||
+     marker.awaitingVisibility!==false||
+     marker.savedSourceFingerprint!==remote.fingerprint||
+     !/^[A-Za-z0-9_-]{16,64}$/.test(marker.savedMarkerId||'')||
+     !/^[a-f0-9]{32}$/.test(marker.savedNonce||''))
+    return {ok:false,code:'REFRESH_PREVIOUS_UNRECONCILED'};
+  const expected=await planRefresherSourceCandidate({
+    files:published.blobs,expectedFingerprint:published.fingerprint,
+    markerId:marker.savedMarkerId});
+  if(expected.ok!==true||expected.toFingerprint!==remote.fingerprint)
+    return {ok:false,code:'REFRESH_PREVIOUS_SOURCE_DRIFT'};
+  return {ok:true,source:remote,kind:'VERIFIED_PC_M_S07_MARKER_P',
+    publishedFingerprint:published.fingerprint,
+    savedFingerprint:remote.fingerprint};
+}
