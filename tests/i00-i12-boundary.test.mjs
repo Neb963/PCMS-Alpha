@@ -117,3 +117,30 @@ test('P54-08 X: current donor egress hashes, never route names, determine witnes
   assert.equal(await cachedHealthDomain({ok:true,data:{ip:'203.00.113.9'}}),null);
   assert.equal(await cachedHealthDomain({ok:true,data:{ip:'::1'}}),null);
 });
+test('S08 postmerge F/X: repeated event-page wakes never postpone a pending Refresher alarm',async()=>{
+  // Regression for installed-Firefox starvation: 1-minute periodic alarms
+  // restart the event page; each restart ran a turn that recreated the
+  // Refresher alarm at now+1min, so it never fired while the dashboard was closed.
+  let now=100000;const alarms=new Map(),creates=[];
+  const event=()=>({addListener(){}});
+  const api={runtime:{id:'fixture',getURL:p=>'moz-extension://fixture/'+p,
+    onStartup:event(),onInstalled:event(),onConnect:event()},
+    alarms:{onAlarm:event(),create:async(name,p)=>{creates.push(p.when);
+      alarms.set(name,{name,scheduledTime:p.when});},get:async name=>alarms.get(name)},
+    storage:{local:{get:async()=>({}),set:async()=>{}}}};
+  const store={turn:async({now})=>({ok:true,revision:2,state:{nextWakeAt:now+60000,diagnostics:{}}}),
+    read:async()=>({ok:true,state:{rows:[],recent:{nextDueAt:Infinity},accounts:{}}})};
+  const make=()=>createRefresherBoundary(api,{open:async()=>({}),storeFactory:()=>store,
+    clock:()=>now,newId:()=> 'synthetic_boot_01'});
+  await make().tick();
+  const first=alarms.get(REFRESHER_ALARM).scheduledTime;assert.equal(first,160000);
+  for(let i=0;i<5;i++){now+=20000;await make().tick();}
+  assert.equal(alarms.get(REFRESHER_ALARM).scheduledTime,first,'pending alarm was postponed');
+  assert.equal(creates.length,1);
+  // An earlier requested wake still advances the alarm; an absent alarm is recreated.
+  alarms.delete(REFRESHER_ALARM);await make().tick();
+  assert.equal(alarms.get(REFRESHER_ALARM).scheduledTime,now+60000);
+  // Overdue but still pending alarm is kept: Firefox delivers it imminently.
+  alarms.set(REFRESHER_ALARM,{name:REFRESHER_ALARM,scheduledTime:now-5000});
+  await make().tick();assert.equal(alarms.get(REFRESHER_ALARM).scheduledTime,now-5000);
+});

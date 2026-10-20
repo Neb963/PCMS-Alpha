@@ -76,7 +76,15 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
   }
   async function schedule(when){
     try{
-      await api.alarms.create(REFRESHER_ALARM,{when:Math.max(clock()+MINUTE,when||0)});
+      const desired=Math.max(clock()+MINUTE,when||0);
+      // Every event-page wake (any 1-minute periodic alarm, port or startup)
+      // runs a turn. Recreating the alarm at now+1min on each wake postponed
+      // it forever, so the Refresher never woke on its own. Never move an
+      // earlier pending (including overdue) alarm later; only advance it.
+      let pending=null;try{pending=await api.alarms.get(REFRESHER_ALARM);}catch{}
+      if(pending?.name===REFRESHER_ALARM&&Number.isFinite(pending.scheduledTime)&&
+        pending.scheduledTime<=desired){alarmHeld=false;return;}
+      await api.alarms.create(REFRESHER_ALARM,{when:desired});
       const actual=await api.alarms.get(REFRESHER_ALARM);
       if(!actual||actual.name!==REFRESHER_ALARM)alarmHeld=true;else alarmHeld=false;
     }catch{
