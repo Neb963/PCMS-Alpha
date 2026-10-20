@@ -13,6 +13,7 @@ const PORT={accounts:'pcms-i03-accounts',git:'pcms-s03-catalog',
  auth:'pcms-s06-authority',creation:'pcms-s00-coordinator',
  ai:'pcms-i10-ai',writeback:'pcms-i11-writeback',
  release:'pcms-i13-release',refresher:'pcms-i12-refresher',
+ cleanup:'pcms-s08-cleanup',
  backup:'pcms-i15-backup'};
 const pause=(code)=>{const err=new Error(code);err.code=code;throw err;};
 function request(which,type,params={}){
@@ -355,7 +356,7 @@ cleanup.addEventListener('click',async()=>{
  try{
   const config=run.config;
   const scopeNow=await prerequisite();
-  const remote=await request('creation','VERIFY_TEST_REMOTE_ABSENCE',{
+  const remote=await request('cleanup','VERIFY_TEST_REMOTE_ABSENCE',{
     intentId:run.intentId,runId:run.runId});
   if(remote?.ok!==true||remote.code!=='TEST_REMOTE_ABSENCE_INDEPENDENTLY_VERIFIED'||
      remote.slug!==run.slug||remote.accountId!==config.accountId)
@@ -365,7 +366,7 @@ cleanup.addEventListener('click',async()=>{
     throw Error(latest?.code||'TEST_GIT_SCAN_NOT_VERIFIED');
   if(latest.generators?.some(item=>item.slug===run.slug))
     throw Error('TEST_GIT_FOLDER_STILL_PRESENT');
-  const second=await request('creation','VERIFY_TEST_REMOTE_ABSENCE',{
+  const second=await request('cleanup','VERIFY_TEST_REMOTE_ABSENCE',{
     intentId:run.intentId,runId:run.runId});
   if(second?.ok!==true||second.slug!==run.slug)
     throw Error('TEST_REMOTE_RECHECK_NOT_VERIFIED');
