@@ -1698,9 +1698,16 @@ def main():
                 assert len(residual.get('notices',[]))==1,residual
                 assert residual['notices'][0]['code']=='SOURCE_HELD',residual
                 assert residual['notices'][0]['reviewed'] is True,residual
-                acknowledgement=execute(after,
-                    "return {text:document.querySelector('#pcms-attention-list')?.textContent||'',"
-                    "disabled:document.querySelector('#pcms-attention-list button')?.disabled}")
+                # Canonical review persistence and UI confirmation are
+                # separate asynchronous receipts. Wait for the actual
+                # rendered completion; a perpetual Saving… remains failure.
+                for _ in range(60):
+                    acknowledgement=execute(after,
+                        "return {text:document.querySelector('#pcms-attention-list')?.textContent||'',"
+                        "disabled:document.querySelector('#pcms-attention-list button')?.disabled}")
+                    if ('Reviewed' in acknowledgement['text'] and
+                        acknowledgement['disabled'] is True):break
+                    time.sleep(.15)
                 assert 'Reviewed' in acknowledgement['text'] and acknowledgement['disabled'] is True,acknowledgement
                 uncertain=canonical_command(after,{'type':'GET_OPERATION',
                     'operationId':'fixture_operation_01'})
