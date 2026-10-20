@@ -227,7 +227,7 @@ export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=null,qualif
     // Keep only the last bounded sample in the canonical journal. A crash,
     // browser boot change, suspended interval or missing coverage cannot
     // retroactively be repaired by two later endpoint observations.
-    out.nativeClock={bootId,witness:nativeClock};
+    out.nativeClock={bootId,witness:structuredClone(nativeClock)};
   }
   let credited=0,reason='CLOCK_EVIDENCE_INCOMPLETE';
   if(receiptValid(operationalReceipt,bootId)&&operationalReceipt.to<=now&&

@@ -176,3 +176,12 @@ test('S07 E04 X: stale authenticated principal from a previous login cannot cred
   assert.equal(result.state.rows[0].activeRemaining,HOUR);
   assert.equal(result.state.accounts.account_01.health,'UNKNOWN');
 });
+
+test('S07 E04 X: caller-owned native sample cannot mutate a committed shadow witness by reference',()=>{
+  const original={...previous},first=advanceShadow(fleet(),{now:start,bootId,
+    nativeClock:original});
+  assert.equal(first.ok,true);
+  original.hostAwakeNs='9'.repeat(5000);
+  assert.equal(first.state.nativeClock.witness.hostAwakeNs,previous.hostAwakeNs);
+  assert.notEqual(first.state.nativeClock.witness.hostAwakeNs,original.hostAwakeNs);
+});
