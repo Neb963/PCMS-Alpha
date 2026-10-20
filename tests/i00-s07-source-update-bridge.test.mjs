@@ -66,5 +66,11 @@ test('S07/S06 X: stale publication, unproven placement and source drift are not 
  // A previously public F without a managed marker must match exactly.
  const noMarker={...row,refresh:{...row.refresh,savedSourceFingerprint:null}};
  assert.equal((await resolveRefreshedPrevious({published,remote:published,row:noMarker})).ok,true);
+ const possible={...noMarker,refresh:{...noMarker.refresh,state:'DISPATCH_POSSIBLE',
+   intent:{id:'intent_still_possible'}}};
+ assert.equal((await resolveRefreshedPrevious({published,remote:published,row:possible})).ok,false);
+ const unknown={...noMarker,refresh:{...noMarker.refresh,state:'EFFECT_UNVERIFIED',
+   suspended:true}};
+ assert.equal((await resolveRefreshedPrevious({published,remote:published,row:unknown})).ok,false);
  assert.equal((await resolveRefreshedPrevious({published,remote,row:noMarker})).ok,false);
 });
