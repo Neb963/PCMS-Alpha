@@ -44,6 +44,7 @@ function draw(s){
   snapshot=s;
   const occupancy=s.recent.latestOccupancy;
   const observed=occupancy?
+    (s.recent.complete===true?'':'Last confirmed sample; current feed UNKNOWN · ')+
     occupancy.ownedVisible+' owned visible of '+occupancy.feedSize+
       ' returned recent items ('+occupancy.activeVisible+' active)':
     'owned recent-page occupancy not yet observed';
@@ -85,8 +86,9 @@ function draw(s){
     const button=document.createElement('button');button.type='button';button.textContent=r.slug;
     button.dataset.stableId=r.stableId;button.setAttribute('aria-label','Inspect Refresher for '+r.slug);
     button.addEventListener('click',()=>{selected=r;inspector();});td.append(button);tr.append(td);
-    const present=r.presence?(r.presence.present?'present at '+r.presence.position:'absent; not deleted')+
-      ' · '+age(r.presence.observedAt)+(r.presence.stale?' · stale':''):'unobserved';
+    const present=r.presence?((s.recent.complete===true?'':'historical only; current feed UNKNOWN · ')+
+      (r.presence.present?'present at '+r.presence.position:'absent; not deleted')+
+      ' · '+age(r.presence.observedAt)+(r.presence.stale?' · stale':'')):'unobserved';
     for(const text of [r.accountId,rowText(r),String(r.ordinal),present]){
       const c=document.createElement('td');c.textContent=text;tr.append(c);
     }
