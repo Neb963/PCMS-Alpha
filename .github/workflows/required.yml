@@ -93,8 +93,8 @@ jobs:
           # retain signed Ubuntu sources, normal APT verification and fail
           # closed if the runner unexpectedly mixes both origins in a file.
           for source_file in /etc/apt/sources.list.d/*; do
-            if [[ -f "$source_file" ]] && grep -Eq 'packages\\.microsoft\\.com/' "$source_file"; then
-              if grep -Eq '(archive|security)\\.ubuntu\\.com|ubuntu\\.sources' "$source_file"; then
+            if [[ -f "$source_file" ]] && grep -Fq 'packages.microsoft.com/' "$source_file"; then
+              if grep -Eq '(archive|security)[.]ubuntu[.]com|ubuntu[.]sources' "$source_file"; then
                 echo "Mixed Ubuntu/Microsoft apt source: fail closed" >&2
                 exit 1
               fi
