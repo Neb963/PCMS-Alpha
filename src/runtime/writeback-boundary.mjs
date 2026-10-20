@@ -4,6 +4,7 @@
 import {fail,openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
+import {standingS06} from './s06-standing-authority.mjs';
 import {createAiStore} from './ai-store.mjs';
 import {createStagingStore} from './staging-store.mjs';
 import {createWritebackStore} from './writeback-store.mjs';
@@ -411,4 +412,8 @@ export function createWritebackBoundary(api,{
   }
   return Object.freeze({register,run,autoTick,runTrusted});
 }
-if(typeof browser!=='undefined')createWritebackBoundary(browser).register();
+if(typeof browser!=='undefined')createWritebackBoundary(browser,{
+  effectGate:({step})=>step==='READ_ONLY_AI_TERMINAL'
+    ? standingS06?.gate('development')===true
+    : standingS06?.gate('gitWrite')===true
+}).register();

@@ -33,7 +33,11 @@ export async function buildI00({ packageArchive = true } = {}) {
   await applyI01Overlay(root,stage);
   const combined = structuredClone(original);
   combined.name = 'PCMS Alpha + PersonaMonkey';
-  combined.description = 'PCMS-first interface with inherited PersonaMonkey protected routing and guarded background wake; provider effects OFF.';
+  combined.description = 'PCMS dashboard with PersonaMonkey protected routing and operator-authorized generator management.';
+  // An action popup suppresses Firefox's action.onClicked listener.
+  // The full dashboard is the sole everyday operator interface.
+  combined.action = {...original.action,default_title:'Open PCMS dashboard'};
+  delete combined.action.default_popup;
   // Static entry imports the donor routing gate first; background guard uses
   // the existing donor lease registry, never an independent routing controller.
   combined.background = { scripts: ['pcms/entry.mjs'], type: 'module' };

@@ -3,6 +3,7 @@
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {createCoordinatorStore} from './coordinator-store.mjs';
 import {createCreationRunner} from './creation-runner.mjs';
+import {standingS06} from './s06-standing-authority.mjs';
 export const CREATION_ALARM='pcms-s04-creation-due';
 const PERIOD=10;
 const NEXT='pcmsS04WakeReceipt';
@@ -14,7 +15,9 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
     throw Error('INVALID_WAKE_BUDGET');
   let pending=null,registered=false,dbPromise;
   const sentinel=createRestoreSentinel(api.storage.local);
-  const runner=createRunner(api,{open});
+  const runner=createRunner(api,{open,
+    effectGate:()=>standingS06?.gate('development')===true,
+    gitGate:()=>standingS06?.gate('gitWrite')===true});
   async function tick(){
     if(pending)return pending;
     pending=(async()=>{

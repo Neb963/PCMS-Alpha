@@ -4,6 +4,7 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {createRestoreSentinel,openCanonicalDatabase,fail} from './journal.mjs';
 import {createImportApprovalStore,getImportScopeDigest} from './catalog-import.mjs';
 import {createGitPromptStore} from './catalog-prompt-store.mjs';
+import {standingS06} from './s06-standing-authority.mjs';
 import {writeExistingGitPrompt,observeGitPromptWrite} from './git-prompt.mjs';
 import {inspectReadyCandidate} from './catalog-declaration.mjs';
 import {createDeclarationStore} from './catalog-ready-store.mjs';
@@ -269,4 +270,6 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
   }
   return Object.freeze({run,register});
 }
-if(typeof browser!=='undefined')createCatalogBoundary(browser).register();
+if(typeof browser!=='undefined')createCatalogBoundary(browser,{
+  promptWriteGate:()=>standingS06?.gate('gitWrite')===true
+}).register();

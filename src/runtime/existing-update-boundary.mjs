@@ -4,6 +4,7 @@
 import {fail,openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
+import {standingS06} from './s06-standing-authority.mjs';
 import {createExistingStore} from './existing-update-store.mjs';
 import {authorizeSleepingUpdate,sealPrevious,unlockPrevious} from './existing-update-core.mjs';
 import {createStagingStore} from './staging-store.mjs';
@@ -494,4 +495,6 @@ export function createExistingBoundary(api,{
   }
   return Object.freeze({run,runTrusted,register});
 }
-if(typeof browser!=='undefined')createExistingBoundary(browser).register();
+if(typeof browser!=='undefined')createExistingBoundary(browser,{
+  effectGate:()=>standingS06?.gate('development')===true
+}).register();

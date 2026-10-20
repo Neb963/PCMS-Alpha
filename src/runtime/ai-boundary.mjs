@@ -3,6 +3,7 @@
 import {fail,openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
+import {standingS06} from './s06-standing-authority.mjs';
 import {createStagingStore} from './staging-store.mjs';
 import {createAiStore} from './ai-store.mjs';
 import {inspectGitSource} from './git-source.mjs';
@@ -722,4 +723,6 @@ export function createAiBoundary(api,{
   }
   return Object.freeze({register,run,tick,runTrusted:executeTrusted});
 }
-if(typeof browser!=='undefined')createAiBoundary(browser).register();
+if(typeof browser!=='undefined')createAiBoundary(browser,{
+  effectGate:()=>standingS06?.gate('development')===true
+}).register();

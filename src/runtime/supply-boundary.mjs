@@ -8,6 +8,7 @@ import {freezeSupply,validateOwnerContext,publicSupply} from './supply-plan.mjs'
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {writeNonReadyFolder,markerRequestAllowed} from './supply-git.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
+import {standingS06} from './s06-standing-authority.mjs';
 import {isI17Quarantined,I17_QUARANTINE_CODE} from './legacy-quarantine.mjs';
 export const SUPPLY_PORT='pcms-i06-supply';
 const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED']);
@@ -368,4 +369,7 @@ export function createSupplyBoundary(api,{
   }
   return Object.freeze({register,run});
 }
-if(typeof browser!=='undefined')createSupplyBoundary(browser).register();
+if(typeof browser!=='undefined')createSupplyBoundary(browser,{
+  effectGate:()=>standingS06?.gate('development')===true,
+  gitGate:()=>standingS06?.gate('gitWrite')===true
+}).register();

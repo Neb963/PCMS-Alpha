@@ -4,6 +4,7 @@
 import {fail,openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
+import {standingS06} from './s06-standing-authority.mjs';
 import {createStagingStore,findEligibleManagedSource} from './staging-store.mjs';
 import {exactSource,verifyReadback} from './staging-core.mjs';
 import {inspectGitSource} from './git-source.mjs';
@@ -310,4 +311,6 @@ export function createStagingBoundary(api,{
     return statusFor(message,storeFactory(await database()));
   }});
 }
-if(typeof browser!=='undefined')createStagingBoundary(browser).register();
+if(typeof browser!=='undefined')createStagingBoundary(browser,{
+  effectGate:()=>standingS06?.gate('development')===true
+}).register();

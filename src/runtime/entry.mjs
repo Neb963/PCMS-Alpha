@@ -2,6 +2,7 @@
 // PCMS wake sources. Neither module awaits during listener registration.
 import '../lib/recovery-bootstrap.js';
 import './wake.mjs';
+import './dashboard-action.mjs';
 // Independent PCMS journal/command listener; it never controls donor recovery.
 import './command-boundary.mjs';
 // S00 effect-free coordinator intake; no remote operations or migration.
