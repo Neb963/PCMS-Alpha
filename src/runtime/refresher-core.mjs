@@ -9,7 +9,7 @@ export const DEFAULT_POLICY=Object.freeze({activeMs:24*HOUR,sleepMs:72*HOUR,
   graceMs:HOUR,safetyCap:200,initialCap:10,manualCap:null,
   decreaseWindows:2,increaseWindows:3,maxAdmissions:4,staggerMs:1000,
   recentMs:10*MINUTE,statsMinMs:15*MINUTE,statsMaxMs:24*HOUR,
-  readBudget:6,rawSamples:12});
+  readBudget:6,rawSamples:12,refreshEnabled:false});
 const slugOK=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const number=(v,min,max)=>Number.isSafeInteger(v)&&v>=min&&v<=max;
 const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
@@ -26,7 +26,8 @@ export function validatePolicy(p){
     !number(p.maxAdmissions,1,20)||!number(p.staggerMs,1000,MINUTE)||
     !number(p.recentMs,10*MINUTE,HOUR)||!number(p.statsMinMs,15*MINUTE,24*HOUR)||
     !number(p.statsMaxMs,p.statsMinMs,7*24*HOUR)||!number(p.readBudget,1,20)||
-    !number(p.rawSamples,2,48))return fail('INVALID_REFRESHER_POLICY');
+    !number(p.rawSamples,2,48)||typeof p.refreshEnabled!=='boolean')
+    return fail('INVALID_REFRESHER_POLICY');
   return {ok:true};
 }
 export function emptyShadow(){

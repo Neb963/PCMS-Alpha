@@ -173,6 +173,9 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     // No UI message can enable this gate or supply provider qualifications.
     // Production has no verified method/adapter and is unconditionally OFF.
     if(!refreshGate()||!refreshAdapter||!observationGate())return 'REFRESH_ACTIVATION_HELD';
+    const enabled=await s.read();
+    if(!enabled.ok||enabled.state.policy.refreshEnabled!==true)
+      return 'REFRESH_OPERATOR_DISABLED';
     const g=guard();if(!g?.getSafeRouteReadiness)return 'GUARDED_REFRESH_UNAVAILABLE';
     const snapshot=await s.read();if(!snapshot.ok)return 'CANONICAL_UNAVAILABLE';
     // Reconcile a possibly-dispatched effect by independent READBACK ONLY.
@@ -277,18 +280,32 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         const s=await store();
         let nativeClock=null,qualifiedCoverages=null;
         if(nativeClockGate()){
-          // Original native-connection counters only. No fallback from wall
-          // time or two HTTP requests. A sampling exception is UNKNOWN.
+          // Existing donor pin + native witness; no new observer or synthetic
+          // future certificates. A route failure at either endpoint freezes
+          // that account's bounded native awake interval.
           try{
-            const native=await guard()?.sampleNativeWitness?.();
+            const g=guard(),native=await g?.sampleNativeWitness?.();
             if(native?.ok===true&&native.witness){
-              nativeClock={...native.witness,observedAtMs:clock()};
-              // Independent continuous coverage must be supplied by a real
-              // donor/host monitor. This callback has no production provider.
+              const previous=await s.read(),routes=[];
+              const accounts=Object.entries(previous?.state?.accounts||{})
+                .filter(([,a])=>a.verifiedIdentity===true)
+                .slice(0,100);
+              for(const [accountId,a] of accounts){
+                let ready;
+                try{ready=await g.getSafeRouteReadiness(a.personaUid);}catch{}
+                if(ready?.ready===true&&ready.personaUid===a.personaUid)
+                  routes.push({ready:true,accountId,personaUid:a.personaUid,
+                    bindingVersion:a.bindingVersion,
+                    principalFingerprint:a.principalFingerprint,
+                    routeId:ready.routeId,cookieStoreId:ready.cookieStoreId,
+                    healthDomain:ready.healthDomain});
+              }
+              nativeClock={...native.witness,observedAtMs:clock(),routes};
+              // Synthetic injection is retained for deterministic tests only.
               qualifiedCoverages=await continuousCoverageFor({
                 at:nativeClock.observedAtMs,bootId,nativeClock});
             }
-          }catch{/* no fake time credited on native/coverage failure */}
+          }catch{/* no fake time credited on native/route failure */}
         }
         const now=clock(),result=await s.turn({now,bootId,nativeClock,qualifiedCoverages});
         if(!result.ok){await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return result;}
@@ -318,11 +335,13 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         return {...view,restoreHeld:restore.held,alarmHeld,monitoring:
           observationGate()?'GUARDED_READ_ONLY':'OFF_PENDING_ACTIVATION',
           refreshCapability:refreshGate()&&refreshAdapter?
-            'TEST_OR_AUTHORIZED_CAPABILITY_GATED':'LIVE_REFRESH_OFF_UNTIL_PROVEN',
+            (view.policy?.refreshEnabled===true?
+              'OPERATOR_ENABLED_GUARDED_WRITER':'OPERATOR_MUTATION_DISABLED'):
+            'LIVE_REFRESH_OFF_UNTIL_PROVEN',
           // This reports the actual production gate, never assumes that
           // monotonic host time is eligible provider/account operating time.
           clockCapability:nativeClockGate()?
-            'AWAKE_CLOCK_ON_COVERAGE_INDEPENDENTLY_REQUIRED':
+            'BOUNDED_NATIVE_ROUTE_FEED_ELIGIBILITY':
             'CONTINUOUS_ELIGIBILITY_NOT_ESTABLISHED'};
       }
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');

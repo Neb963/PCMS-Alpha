@@ -30,8 +30,8 @@ async function readOwnedPublic(g,{slug,personaUid,remoteId,principalFingerprint}
 }
 export function createRefresherNativeAdapter({
   guard=internalPcmsGuard,
-  // An optional capability check is an externally independently proven L
-  // receipt, never a boolean derived from the UI or an HTTP save ACK.
+  // Fixed guarded I13 writer availability is an engineering capability.
+  // It does NOT assert that a source edit causes recent-page placement.
   methodProofFor=()=>null,
   newId=()=>crypto.randomUUID().replaceAll('-','')
 }={}){
@@ -44,7 +44,8 @@ export function createRefresherNativeAdapter({
        account?.verifiedIdentity!==true)
       return {status:'UNVERIFIED'};
     const proof=methodProofFor({row,account});
-    if(proof?.source!=='INDEPENDENT_LIVE_SOURCE_MARKER_PROOF'||
+    if(!['GUARDED_FIXED_EDITOR_METHOD','INDEPENDENT_LIVE_SOURCE_MARKER_PROOF']
+      .includes(proof?.source)||
        proof.allowedByProvider!==true||
        proof.meaningfulEffectVerified!==true||
        !/^[A-Za-z0-9_-]{1,100}$/.test(proof.version||'')||
