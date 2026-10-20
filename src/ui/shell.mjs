@@ -23,6 +23,8 @@ function render({ focusHeading = false } = {}) {
   }
   const heading = document.getElementById(`heading-${selected}`);
   document.title = `PCMS Alpha — ${heading.textContent}`;
+  const breadcrumb=document.getElementById('current-page-label');
+  if(breadcrumb)breadcrumb.textContent=heading.textContent;
   currentStatus.textContent = `${heading.textContent} · Protected actions require operator authorization and current safety checks`;
   invalidNotice.hidden = !invalidDestination(location.hash);
   closeMenu();

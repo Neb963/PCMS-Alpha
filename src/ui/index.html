@@ -12,34 +12,62 @@
   <div class="app">
     <header class="topbar">
       <button class="menu" type="button" id="menu" aria-expanded="false" aria-controls="navigation">Menu</button>
-      <div class="identity"><strong>PCMS</strong><span>Alpha</span></div>
+      <div class="breadcrumbs"><span>Workspace</span><span aria-hidden="true">›</span><strong id="current-page-label">Overview</strong></div>
       <span class="phase">Operator dashboard · protected workflows</span>
       <a class="advanced" href="../options/options.html" id="advanced">PersonaMonkey advanced controls <span aria-hidden="true">↗</span></a>
     </header>
     <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+      <div class="sidebar-brand" aria-label="PCMS Alpha Fleet Control"><span class="brand-mark" aria-hidden="true">P/</span><span class="brand-label">PCMS Alpha<small>Fleet control</small></span></div>
       <nav aria-label="PCMS workspaces" id="navigation">
+        <span class="nav-group-label">Workspace</span>
         <a href="#overview" data-workspace="overview" aria-current="page">Overview</a>
         <a href="#generators" data-workspace="generators">Generators</a>
         <a href="#work-queue" data-workspace="work-queue">Work Queue</a>
         <a href="#accounts" data-workspace="accounts">Accounts</a>
         <a href="#refresher" data-workspace="refresher">Refresher</a>
+        <span class="nav-group-label nav-system">System</span>
         <a href="#settings" data-workspace="settings">Settings</a>
       </nav>
-      <p class="sidebar-note">Protected operations are available through scoped authorization and current safety checks.</p>
+      <div class="sidebar-foot"><span class="operator-mark" aria-hidden="true">OP</span><span><strong>Local operator</strong><small>Protected, single-machine control</small></span></div>
     </aside>
     <main id="main" tabindex="-1" aria-label="Current PCMS workspace">
       <div class="system-status" role="status" aria-live="polite" id="navigation-status">Checking protected operation status</div>
       <div id="unknown-route" class="notice" role="status" hidden>Unknown workspace. Showing Overview without changing any data.</div>
       <section class="workspace" id="view-overview" data-view="overview" aria-labelledby="heading-overview">
-        <header class="workspace-head"><div><p class="eyebrow">Workspace / 01</p><h1 id="heading-overview" tabindex="-1">Overview</h1><p>Manage accounts, generators, source and scheduled operations.</p></div></header>
-        <p id="pcms-overview-inventory" role="status" aria-live="polite">Inventory counts pending. No live owner status inferred.</p>
-        <p id="pcms-overview-refresher" role="status">Refresher status pending.</p>
-        <p id="pcms-overview-backup" role="status" aria-live="polite">Manual backup receipt not yet inspected.</p>
-        <p id="pcms-overview-restore" role="status" aria-live="polite">Restore guard not yet inspected; controller activation unverified.</p>
-        <div class="notice" role="status"><strong>Before external operations</strong><p>Connect the intended GitHub repository, enroll protected accounts and verify routes. In Settings, authorize the specific guarded workflows. Publication still requires individual exact-source approval.</p></div>
-        <section class="panel" aria-labelledby="runtime-health-title"><div class="panel-head"><h2 id="runtime-health-title">Background guard</h2><span class="unknown" id="pcms-guard-badge">Checking</span></div><p id="pcms-guard-health" role="status">Checking background route and privacy health.</p></section>
-        <section class="panel" aria-labelledby="journal-title"><div class="panel-head"><h2 id="journal-title">Canonical journal</h2><span class="unknown">Durable local receipts</span></div><p id="pcms-journal-health" role="status">Checking isolated canonical storage.</p><a href="emergency.html">Open emergency diagnostics</a></section>
-        <section class="panel" aria-labelledby="attention-title"><div class="panel-head"><h2 id="attention-title">Attention</h2><button type="button" id="pcms-attention-refresh">Refresh</button></div><div id="pcms-attention-list" role="status" tabindex="-1">Reading local notice receipts. Missing data is not healthy.</div></section>
+        <header class="workspace-head">
+          <div><p class="eyebrow">Live controller / Source-aware operations</p><h1 id="heading-overview" tabindex="-1">Fleet overview</h1><p>Decisions, exceptions and verified outcomes. Unobserved status remains unknown.</p></div>
+          <div class="overview-links"><a href="#work-queue">Activity log</a><a href="#generators">View generators</a></div>
+        </header>
+        <section class="stat-band" aria-label="Current PCMS snapshot">
+          <div class="stat"><h2>Managed inventory</h2><p id="pcms-overview-inventory" role="status" aria-live="polite">Loading canonical inventory.</p></div>
+          <div class="stat"><h2>Refresher</h2><p id="pcms-overview-refresher" role="status">Awaiting protected feed observation.</p></div>
+          <div class="stat"><h2>Backup</h2><p id="pcms-overview-backup" role="status" aria-live="polite">No current verified backup observation.</p></div>
+          <div class="stat"><h2>Recovery</h2><p id="pcms-overview-restore" role="status" aria-live="polite">Reviewing restore guard.</p></div>
+        </section>
+        <div class="overview-split">
+          <div class="overview-stack">
+            <section class="panel" aria-labelledby="attention-title">
+              <div class="panel-head"><div><h2 id="attention-title">Needs your attention</h2><p class="panel-subtitle">Unresolved problems grouped by affected scope</p></div><div class="overview-links"><a href="#work-queue">Work queue</a><button type="button" id="pcms-attention-refresh">Refresh</button></div></div>
+              <div id="pcms-attention-list" role="status" tabindex="-1">Reading local incident receipts. Missing data is not healthy.</div>
+            </section>
+            <section class="panel" aria-labelledby="review-title"><div class="panel-head"><div><h2 id="review-title">Ready for your decision</h2><p class="panel-subtitle">Exact-source human review is separate from successful testing</p></div><a href="#work-queue">Review queue</a></div>
+              <p class="empty">Inspect pending releases and recovery decisions in the Work Queue. No approval is inferred from a completed task.</p>
+            </section>
+          </div>
+          <div class="overview-stack">
+            <section class="panel" aria-labelledby="runtime-health-title">
+              <div class="panel-head"><h2 id="runtime-health-title">Operational snapshot</h2><span class="unknown" id="pcms-guard-badge">Checking</span></div>
+              <p id="pcms-guard-health" role="status">Checking protected routing and background health.</p>
+              <div class="notice info"><strong>Source-aware, not optimistic</strong><p>Source-save confirmation and recent-feed placement require independent observations.</p></div>
+            </section>
+            <section class="panel" aria-labelledby="journal-title">
+              <div class="panel-head"><h2 id="journal-title">Recent durable outcomes</h2><a href="#work-queue">View all</a></div>
+              <p id="pcms-journal-health" role="status">Checking durable operation journal.</p>
+              <p class="reason"><a href="emergency.html">Emergency redacted diagnostics</a></p>
+            </section>
+            <div class="notice overview-setup" role="status"><strong>Initial protected setup</strong><p>Connect private Git source, enroll dedicated Personas, verify routes, and authorize guarded workflows in <a href="#settings">Settings</a>. Publication always requires individual exact-source approval.</p></div>
+          </div>
+        </div>
       </section>
       <section class="workspace" id="view-generators" data-view="generators" aria-labelledby="heading-generators" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 02</p><h1 id="heading-generators" tabindex="-1">Generators</h1><p>Generator inventory and source lineage.</p></div></header>
