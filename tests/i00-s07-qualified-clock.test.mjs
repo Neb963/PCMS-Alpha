@@ -138,3 +138,18 @@ test('S07 E04 D: ten-minute wake gap accrues with genuinely continuous prospecti
  assert.equal(clipped.ok,true,JSON.stringify(clipped));
  assert.equal(clipped.creditedMs,span+975);
 });
+
+
+test('S07 E04 X: corrupt persisted original-pipe counters cannot create CPU-heavy BigInt credit',()=>{
+ const first=advanceShadow(fleet(),{now:start,bootId,nativeClock:previous}).state;
+ first.nativeClock.witness.hostAwakeNs='9'.repeat(10000);
+ const nextTurn=advanceShadow(first,{now:start+span,bootId,nativeClock:next,
+   qualifiedCoverages:coverage});
+ assert.equal(nextTurn.ok,true);
+ assert.equal(nextTurn.state.rows[0].activeRemaining,HOUR);
+ const response=qualifyNativeOperatingInterval({previous:{...previous,
+   hostBootNs:'9'.repeat(10000)},next,bootId,id,
+   providerCoverages,accountCoverages});
+ assert.equal(response.ok,false);
+ assert.equal(response.reason,'NATIVE_INTERVAL_INVALID');
+});
