@@ -123,11 +123,13 @@ test('S07 T-07: ambiguous second marker readback after restart uses last saved s
 test('S07 E-04: default GET reports continuous eligibility as unproven, not healthy time',async()=>{
   const f=fixture();
   // Minimal canonical read projection preserves the production boundary.
+  f.api.runtime.getURL=path=>'moz-extension://pcms-fixture/'+path;
   const response=await createRefresherBoundary(f.api,{
     open:async()=>({}),storeFactory:()=>({
       list:async()=>({ok:true,clock:'EVIDENCED_ONLY',items:[],policy:{},recent:{}}),
     }),clock:()=>2000000
-  }).run({type:'GET_REFRESHER',params:{}},{id:f.api.runtime.id});
+  }).run({type:'GET_REFRESHER',params:{}},{id:f.api.runtime.id,
+    url:f.api.runtime.getURL('pcms/index.html')+'#refresher'});
   assert.equal(response.ok,true);
   assert.equal(response.clockCapability,'CONTINUOUS_ELIGIBILITY_NOT_ESTABLISHED');
   assert.equal(response.refreshCapability,'LIVE_REFRESH_OFF_UNTIL_PROVEN');
