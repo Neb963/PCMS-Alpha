@@ -136,7 +136,7 @@ export async function resolveRefreshedPrevious({published,remote,row}={}){
     markerId:marker.savedMarkerId});
   if(expected.ok!==true||expected.toFingerprint!==remote.fingerprint)
     return {ok:false,code:'REFRESH_PREVIOUS_SOURCE_DRIFT'};
-  return {ok:true,source:remote,kind:'VERIFIED_PC_M_S07_MARKER_P',
+  return {ok:true,source:remote,kind:'VERIFIED_PCMS_S07_MARKER_P',
     publishedFingerprint:published.fingerprint,
     savedFingerprint:remote.fingerprint};
 }
