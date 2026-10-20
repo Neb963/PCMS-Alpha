@@ -8,7 +8,7 @@ import {closeQualifiedWindow} from './qualified-clock.mjs';
 const ID=x=>typeof x==='string'&&/^[a-z0-9_-]{8,128}$/i.test(x);
 const FP=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
 const INT=x=>Number.isSafeInteger(x)&&x>0;
-const MAX_NATIVE_GAP=2*60000;
+const MAX_NATIVE_GAP=12*3600000;
 
 function certified(c,source){
   return c?.source===source&&ID(c.id)&&INT(c.validFromMs)&&INT(c.validUntilMs)&&
