@@ -1034,6 +1034,19 @@ def main():
                 assert view['selected']==['overview'],view
                 assert view['links']==['#overview','#generators','#work-queue','#accounts','#refresher','#settings'],view
                 assert view['unsafe']==0,view
+                # S08 B: browser-accepted action definition and live full UI
+                # after a genuine OS Firefox restart, not Node manifest inspection.
+                toolbar=call('POST',f'/session/{after}/execute/async',{
+                    'script':"""const done=arguments[arguments.length-1];
+                    Promise.all([browser.action.getPopup({}),
+                      browser.action.getTitle({})])
+                      .then(([popup,title])=>done({popup,title}))
+                      .catch(error=>done({error:String(error)}));""",
+                    'args':[]},timeout=30)
+                assert toolbar=={'popup':'','title':'Open PCMS dashboard'},toolbar
+                diagnostic=execute(after,"return {present:!!document.getElementById('pcms-diagnostic-run'),configured:!!document.getElementById('pcms-diagnostic-designate'),stages:!!document.getElementById('pcms-diagnostic-stages'),ready:!!document.getElementById('pcms-s06-grant-development')}")
+                assert all(diagnostic.values()),diagnostic
+                print('B S08_INSTALLED_FULL_DASHBOARD_ACTION_AND_DIAGNOSTIC_CONTROLS=PASS',flush=True)
                 # The exact installed XPI must expose a read-only guarded
                 # background status; no valid status enables PCMS effects.
                 isolated=observer_isolation_probe(after)
