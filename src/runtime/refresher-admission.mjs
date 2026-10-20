@@ -120,6 +120,14 @@ export async function resolveRefreshedPrevious({published,remote,row}={}){
      row?.releaseVerified!==true||row.releaseFingerprint!==published.fingerprint)
     return {ok:false,code:'REFRESH_PREVIOUS_AUTHORITY_UNKNOWN'};
   const marker=row.refresh;
+  // A possibly dispatched or unreconciled REFRESH may still be mutating
+  // provider source; no sleeping update may claim P even if a single early
+  // read still matches published F.
+  if(marker?.intent!=null||marker?.suspended===true||
+     marker?.awaitingVisibility===true||
+     ['ATTEMPT_PENDING','DISPATCH_POSSIBLE','EFFECT_UNVERIFIED']
+       .includes(marker?.state))
+    return {ok:false,code:'REFRESH_PREVIOUS_UNRECONCILED'};
   if(marker?.savedSourceFingerprint==null){
     return remote.fingerprint===published.fingerprint?
       {ok:true,source:remote,kind:'UNMODIFIED_PUBLISHED_F'}:
