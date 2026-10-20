@@ -1,0 +1,112 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {qualifyNativeOperatingInterval} from '../src/runtime/refresher-qualified-clock.mjs';
+import {emptyShadow,reconcileShadow,advanceShadow,HOUR} from '../src/runtime/refresher-core.mjs';
+
+const bootId='browser_boot_01',id='native_window_01',start=1000000,span=60000,H='a'.repeat(64);
+const sample=(n,at,awake=at-start)=>({
+  observerEpoch:'observer_001',systemBootId:'system_001',
+  nativeLifetimeId:'native_001',observerConnectionId:'connection_001',
+  sequence:n,observedAtMs:at,
+  hostAwakeNs:String(2000000000+awake*1000000),
+  hostBootNs:String(2000000000+awake*1000000)});
+const certificate=(source,id,extra={})=>({
+  source,id,validFromMs:start-100,validUntilMs:start+span+1000,
+  generationValid:true,held:false,...extra});
+const providerCoverages=[
+  certificate('DONOR_CONTINUOUS_PROVIDER','provider_one_01',{
+    accountId:'witness_account_01',domain:'exit_one_001',result:'HEALTHY',routeVerified:true}),
+  certificate('DONOR_CONTINUOUS_PROVIDER','provider_two_01',{
+    accountId:'witness_account_02',domain:'exit_two_001',result:'HEALTHY',routeVerified:true})];
+const route=certificate('DONOR_CONTINUOUS_ROUTE','route_valid_001',{
+  accountId:'account_01',personaUid:'persona_01',bindingVersion:1,protected:true});
+const session=certificate('DONOR_CONTINUOUS_SESSION','session_valid_01',{
+  accountId:'account_01',personaUid:'persona_01',bindingVersion:1,
+  principalFingerprint:H,verified:true});
+const accountCoverages=[{accountId:'account_01',personaUid:'persona_01',
+  bindingVersion:1,principalFingerprint:H,route,session}];
+const coverage={source:'DONOR_CONTINUOUS_COVERAGE',
+  providers:providerCoverages,accounts:accountCoverages};
+const previous=sample(1,start),next=sample(2,start+span);
+
+test('S07 E04 D: native awake host and independent full-interval coverage produce bounded operational time',()=>{
+  const proof=qualifyNativeOperatingInterval({previous,next,bootId,id,
+    providerCoverages,accountCoverages});
+  assert.equal(proof.ok,true,JSON.stringify(proof));
+  assert.equal(proof.creditedMs,span-25);
+  assert.equal(proof.receipt.from,start);
+  assert.equal(proof.receipt.to,start+span-25);
+  assert.equal(proof.receipt.accounts.length,1);
+  assert.equal(proof.receipt.witnesses.length,2);
+  assert.equal(proof.receipt.origin,'S07_NATIVE_CAUSAL_WINDOW');
+});
+
+test('S07 E04 X: route TTL, two endpoint checks, absent healthy session, lone exit, pause and gap never mint time',()=>{
+  const args={previous,next,bootId,id,providerCoverages,accountCoverages};
+  const probes=[
+    {...args,providerCoverages:[]},
+    {...args,providerCoverages:[providerCoverages[0]]},
+    {...args,providerCoverages:[providerCoverages[0],{...providerCoverages[1],domain:'exit_one_001'}]},
+    {...args,providerCoverages:[providerCoverages[0],{...providerCoverages[1],validFromMs:start+1}]},
+    {...args,accountCoverages:[]},
+    {...args,accountCoverages:[{...accountCoverages[0],route:{...route,source:'CACHED_ROUTE_TEST'}}]},
+    {...args,accountCoverages:[{...accountCoverages[0],session:{...session,verified:false}}]},
+    {...args,accountCoverages:[{...accountCoverages[0],session:{...session,held:true}}]},
+    {...args,accountCoverages:[{...accountCoverages[0],session:{...session,validFromMs:start+1}}]},
+    {...args,next:{...next,nativeLifetimeId:'different_lifetime'}},
+    {...args,next:{...next,sequence:4}},
+    {...args,next:{...next,hostBootNs:String(BigInt(next.hostBootNs)+20000000000n)}},
+    {...args,next:sample(2,start+200000,200000)},
+  ];
+  for(const item of probes){
+    const receipt=qualifyNativeOperatingInterval(item);
+    assert.equal(receipt.ok,false,JSON.stringify(item));
+    assert.equal(receipt.creditedMs,0);
+  }
+});
+
+function fleet(){
+  const s=reconcileShadow(emptyShadow(),[{
+    slug:'generator-a',accountId:'account_01',personaUid:'persona_01',
+    bindingVersion:1,remoteId:'public_example',
+    ownerVerified:true,accountVerified:true,principalFingerprint:H,
+    releaseVerified:true,releaseFingerprint:H,listing:'PUBLIC'}]).state;
+  const r=s.rows[0];r.phase='ACTIVE';r.slot=true;r.admittedAt=start;
+  r.activeRemaining=HOUR;r.sleepRemaining=0;
+  return s;
+}
+test('S07 E04 D: durable scheduler accrues healthy awake minutes across wake gaps, no extra reads',()=>{
+  const before=fleet();
+  const first=advanceShadow(before,{now:start,bootId,nativeClock:previous});
+  assert.equal(first.ok,true);
+  assert.equal(first.state.rows[0].activeRemaining,HOUR);
+  assert.equal(first.state.nativeClock.witness.sequence,1);
+  const second=advanceShadow(first.state,{now:start+span,bootId,nativeClock:next,
+    qualifiedCoverages:coverage});
+  assert.equal(second.ok,true);
+  assert.equal(second.state.rows[0].activeRemaining,HOUR-span+25);
+  assert.equal(second.state.timeline.at(-1).reason,'NATIVE_ELIGIBILITY_CONFIRMED');
+  assert.equal(second.state.nativeClock.witness.sequence,2);
+  // A replayed packet, even with the same account lease, cannot grant time.
+  const replay=advanceShadow(second.state,{now:start+span+1000,bootId,
+    nativeClock:next,qualifiedCoverages:coverage});
+  assert.equal(replay.state.rows[0].activeRemaining,HOUR-span+25);
+});
+test('S07 E04 X: missing eligibility, lost pipe and resumed boot all freeze time; never backfill unknown gaps',()=>{
+  const first=advanceShadow(fleet(),{now:start,bootId,nativeClock:previous}).state;
+  const unknown=advanceShadow(first,{now:start+span,bootId,nativeClock:next}).state;
+  assert.equal(unknown.rows[0].activeRemaining,HOUR);
+  const stale=advanceShadow(first,{now:start+span,bootId,nativeClock:next,
+    qualifiedCoverages:{source:'CACHED_ROUTE_TEST',...coverage}}).state;
+  assert.equal(stale.rows[0].activeRemaining,HOUR);
+  const changedBoot=advanceShadow(first,{now:start+span,bootId:'browser_boot_02',
+    nativeClock:next,qualifiedCoverages:coverage}).state;
+  assert.equal(changedBoot.rows[0].activeRemaining,HOUR);
+  const lost=advanceShadow(first,{now:start+span,bootId,
+    nativeClock:{...next,sequence:8},qualifiedCoverages:coverage}).state;
+  assert.equal(lost.rows[0].activeRemaining,HOUR);
+  // A subsequent valid pair cannot retro-credit the missed previous minute.
+  const another=advanceShadow(unknown,{now:start+span+1000,bootId,
+    nativeClock:sample(3,start+span+1000,span+1000),qualifiedCoverages:coverage}).state;
+  assert.equal(another.rows[0].activeRemaining,HOUR-975);
+});
