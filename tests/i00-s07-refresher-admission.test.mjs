@@ -202,6 +202,8 @@ test('S07 AC-14 X: effect layer refuses a second mutation while visibility is un
   assert.equal(denied.ok,false);
   assert.equal(denied.code,'REFRESH_ADMISSION_HELD');
   const uncertain={...holding,state:'EFFECT_UNVERIFIED',suspended:true,
+    history:[{id:'older_verified_marker',at:now-1000,effect:'EFFECT_CONFIRMED',
+      feed:{state:'UNKNOWN',at:0,rank:null}}],
     intent:{id:'attempt_123456',state:'DISPATCH_POSSIBLE'}};
   const observed=observeRefreshPresence(uncertain,{at:now,present:true,
     rank:1,complete:true,healthy:true});
