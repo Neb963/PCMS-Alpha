@@ -92,6 +92,8 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
       health:a.health,graceUsed:a.graceUsed})),policy:s.policy,
     recent:{observedAt:s.recent.observedAt,total:s.recent.total,complete:s.recent.complete,
       latestOccupancy:s.recent.latestOccupancy||null,observedSampleCount:(s.recent.samples||[]).length,
+      coverage:s.recent.complete===true?'COMPLETE':'UNKNOWN',
+      lastUnknownAt:s.recent.lastUnknownAt||0,
       suspended:s.recent.suspended===true,
       stale:!s.recent.observedAt||s.recent.observedAt>now||now-s.recent.observedAt>2*s.policy.recentMs},
     nextWakeAt:s.nextWakeAt,diagnostics:{...s.diagnostics},
@@ -283,6 +285,16 @@ export function createRefresherStore(db){
     }
     if(!accepted){
       out.diagnostics.dropped++;
+      // A later failed, partial, malformed, or rate-limited recent-list
+      // observation supersedes the *authority* of the last full feed. Keep
+      // its historical occupancy sample for diagnostics, but never dispatch
+      // a marker from the previous absence while the current feed is UNKNOWN.
+      // An older delayed failure cannot supersede a newer complete snapshot.
+      if(c.kind==='RECENT'&&c.startedAt>out.recent.observedAt){
+        out.recent.complete=false;
+        out.recent.lastUnknownAt=now;
+        clockChanges.push({code:'RECENT_COVERAGE_UNKNOWN',scopeId:c.accountId});
+      }
       const obj=c.kind==='RECENT'?out.recent:out.rows.find(r=>r.stableId===c.stableId)?.metrics;
       if(obj){obj.failures=Math.min(8,obj.failures+1);obj.suspended=obj.failures>=8;
         const floor=c.kind==='RECENT'?out.policy.recentMs:out.policy.statsMinMs;
