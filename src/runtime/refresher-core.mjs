@@ -2,7 +2,7 @@
 // Milliseconds are operational evidence budgets, never wall-clock deadlines.
 import {fail, isSafeId} from './journal.mjs';
 import {emptyRefreshEvidence,validRefreshEvidence} from './refresher-effect-core.mjs';
-import {qualifyNativeOperatingInterval} from './refresher-qualified-clock.mjs';
+import {qualifyNativeOperatingInterval,qualifyBoundedObservedInterval} from './refresher-qualified-clock.mjs';
 export const HOUR=3600000, MINUTE=60000;
 export const REFRESHER_KEY='refresher:shadow:v1';
 export const DEFAULT_POLICY=Object.freeze({activeMs:24*HOUR,sleepMs:72*HOUR,
@@ -225,6 +225,20 @@ export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=null,qualif
         accountCoverages:qualifiedCoverages.accounts});
       if(result.ok)operationalReceipt=result.receipt;
     }
+    // Production: use actual guarded feed and protected-route observations
+    // at two consecutive original-native-pipe samples, not imaginary 24h
+    // future-valid certificates. At most two minutes; unknown gaps freeze.
+    if(!operationalReceipt&&nativeOK(previous?.witness)&&
+       nativeClock.observedAtMs>previous.witness.observedAtMs&&
+       Array.isArray(previous.witness.routes)&&Array.isArray(nativeClock.routes)){
+      const bounded=qualifyBoundedObservedInterval({
+        previous:previous.witness,next:nativeClock,recent:out.recent,
+        accounts:Object.entries(out.accounts).map(([accountId,a])=>({
+          accountId,...a})),bootId,
+        id:'observed_'+String(out.revision).padStart(8,'0'),
+        recentMs:out.policy.recentMs});
+      if(bounded.ok)operationalReceipt=bounded.receipt;
+    }
     // Keep only the last bounded sample in the canonical journal. A crash,
     // browser boot change, suspended interval or missing coverage cannot
     // retroactively be repaired by two later endpoint observations.
@@ -245,7 +259,8 @@ export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=null,qualif
           (out.provider.state!=='HEALTHY'||provider.observedAt-out.provider.observedAt>MINUTE))))
       out.provider=provider;
     reason=provider.state==='OUTAGE'?'PROVIDER_OUTAGE':
-      e.origin==='S07_NATIVE_CAUSAL_WINDOW'?'NATIVE_ELIGIBILITY_CONFIRMED':'EVIDENCED_INTERVAL';
+      e.origin==='S07_NATIVE_CAUSAL_WINDOW'?'NATIVE_ELIGIBILITY_CONFIRMED':
+      e.origin==='S07_BOUNDED_OBSERVED'?'BOUNDED_GUARDED_ELIGIBILITY':'EVIDENCED_INTERVAL';
     const health=new Map(e.accounts.map(a=>[a.accountId,a]));
     for(const [id,a] of Object.entries(out.accounts)){
       const h=health.get(id),matched=h?.bindingVersion===a.bindingVersion&&
