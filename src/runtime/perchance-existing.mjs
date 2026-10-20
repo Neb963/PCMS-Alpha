@@ -133,17 +133,24 @@ export async function perchanceExistingMain(request){
     try{
       const newNames=new Set([...target.values()].filter(x=>x.path.startsWith('src/'))
         .map(x=>x.path.slice(4)));
-      model.setValue(textValue(target.get('main.pjs').bytes));
-      html.setValue(textValue(target.get('index.html').bytes));
-      for(const name of previousNames){
-        if(!newNames.has(name)){
-          if(!solo())return fail('COLLABORATION_CHANGED_DURING_UPDATE');
-          await src.deleteFile(name);
+      // Refresher is intentionally narrower than normal I13 restore:
+      // only the HTML editor value changes. Do not rewrite identical PJS or
+      // assets, which could trigger collaboration edits or dirty revisions.
+      if(request.action==='REFRESH'){
+        html.setValue(textValue(target.get('index.html').bytes));
+      }else{
+        model.setValue(textValue(target.get('main.pjs').bytes));
+        html.setValue(textValue(target.get('index.html').bytes));
+        for(const name of previousNames){
+          if(!newNames.has(name)){
+            if(!solo())return fail('COLLABORATION_CHANGED_DURING_UPDATE');
+            await src.deleteFile(name);
+          }
         }
-      }
-      for(const file of target.values())if(file.path.startsWith('src/')){
-        if(!solo())return fail('COLLABORATION_CHANGED_DURING_UPDATE');
-        await src.writeFile(file.path.slice(4),file.bytes);
+        for(const file of target.values())if(file.path.startsWith('src/')){
+          if(!solo())return fail('COLLABORATION_CHANGED_DURING_UPDATE');
+          await src.writeFile(file.path.slice(4),file.bytes);
+        }
       }
     }catch{return fail('EXISTING_SOURCE_MUTATION_UNCERTAIN');}
     if(!solo()||window.__saveInFlight!==false||
