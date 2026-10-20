@@ -7,7 +7,7 @@ const by=id=>document.getElementById('pcms-diagnostic-'+id);
 const consent=by('consent'),xpiSha=by('xpi-sha');
 const account=by('account'),namespace=by('namespace'),save=by('designate'),
  start=by('run'),resume=by('resume'),rerun=by('rerun'),exporter=by('export'),
- status=by('status'),stages=by('stages'),scope=by('scope');
+ status=by('status'),stages=by('stages'),scope=by('scope'),cleanup=by('cleanup');
 let busy=false,configuration=null,run=null,designationError=null;
 const PORT={accounts:'pcms-i03-accounts',git:'pcms-s03-catalog',
  auth:'pcms-s06-authority',creation:'pcms-s00-coordinator',
@@ -35,6 +35,7 @@ function controls(){
  save.disabled=busy;start.disabled=busy||!configuration;
  resume.disabled=busy||!run||!run.firstFailure;
  rerun.disabled=busy||!configuration;exporter.disabled=busy||!run;
+ cleanup.disabled=busy||!run||run.cleanup==='VERIFIED_REMOTE_AND_GIT_ABSENT';
  account.disabled=busy;namespace.disabled=busy;xpiSha.disabled=busy;
 }
 function show(){
@@ -346,6 +347,36 @@ rerun.addEventListener('click',async()=>{
  if(busy||!configuration)return;
  if(run&&!confirm('Start a new test slug? Existing remote test artifacts are preserved; export the previous report first if needed.'))return;
  run=nextRun();await persist();void drive();
+});
+cleanup.addEventListener('click',async()=>{
+ if(busy||!run)return;
+ if(!confirm('This only verifies absence. First manually remove the exact test slug from Perchance and Git main. No other resources are touched. Continue?'))return;
+ busy=true;controls();
+ try{
+  const config=run.config;
+  const scopeNow=await prerequisite();
+  const remote=await request('creation','VERIFY_TEST_REMOTE_ABSENCE',{
+    intentId:run.intentId,runId:run.runId});
+  if(remote?.ok!==true||remote.code!=='TEST_REMOTE_ABSENCE_INDEPENDENTLY_VERIFIED'||
+     remote.slug!==run.slug||remote.accountId!==config.accountId)
+    throw Error(remote?.code||'TEST_REMOTE_CLEANUP_NOT_VERIFIED');
+  const latest=await request('git','SCAN_CONNECTED');
+  if(!latest?.ok||latest.complete!==true||latest.repositoryId!==config.repositoryId)
+    throw Error(latest?.code||'TEST_GIT_SCAN_NOT_VERIFIED');
+  if(latest.generators?.some(item=>item.slug===run.slug))
+    throw Error('TEST_GIT_FOLDER_STILL_PRESENT');
+  const second=await request('creation','VERIFY_TEST_REMOTE_ABSENCE',{
+    intentId:run.intentId,runId:run.runId});
+  if(second?.ok!==true||second.slug!==run.slug)
+    throw Error('TEST_REMOTE_RECHECK_NOT_VERIFIED');
+  run.cleanup='VERIFIED_REMOTE_AND_GIT_ABSENT';
+  await persist();
+  status.textContent='Test-only cleanup independently verified. No deletion was performed by the diagnostic.';
+ }catch(error){
+   run.cleanup='NOT_VERIFIED';
+   await persist();
+   status.textContent='Cleanup remains unverified: '+String(error?.message||'UNKNOWN').replace(/[^A-Za-z0-9_]/g,'_').slice(0,90);
+ }finally{busy=false;controls();}
 });
 exporter.addEventListener('click',()=>{
  if(!run)return;
