@@ -255,11 +255,18 @@ export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=undefined,q
   if(receiptValid(operationalReceipt,bootId)&&operationalReceipt.to<=now&&
     (!out.lastTurnAt||now>=out.lastTurnAt)){
     const e=operationalReceipt,provider=classifyProvider(e.witnesses,e.to);
+    const priorProvider=out.provider.state;
     if(provider.observedAt>=out.provider.observedAt&&
       (['HEALTHY','OUTAGE'].includes(provider.state)||
         (out.provider.state!=='OUTAGE'&&
           (out.provider.state!=='HEALTHY'||provider.observedAt-out.provider.observedAt>MINUTE))))
       out.provider=provider;
+    // C-68/C-69: one fleet-wide provider incident, resolved only by an
+    // independently witnessed healthy provider observation.
+    if(out.provider.state==='OUTAGE'&&priorProvider!=='OUTAGE')
+      changes.push({code:'PROVIDER_OUTAGE',scopeId:'provider_perchance'});
+    if(out.provider.state==='HEALTHY'&&priorProvider==='OUTAGE')
+      changes.push({code:'PROVIDER_RECOVERED',scopeId:'provider_perchance'});
     reason=provider.state==='OUTAGE'?'PROVIDER_OUTAGE':
       e.origin==='S07_NATIVE_CAUSAL_WINDOW'?'NATIVE_ELIGIBILITY_CONFIRMED':
       e.origin==='S07_BOUNDED_OBSERVED'?'BOUNDED_GUARDED_ELIGIBILITY':'EVIDENCED_INTERVAL';
@@ -272,15 +279,19 @@ export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=undefined,q
       const interval=Math.max(0,e.to-Math.max(e.from,a.checkpoint));
       if(!interval)continue;
       a.checkpoint=e.to;
+      const wasExpired=a.graceExpired===true;
       a.health=matched?h.health:'UNKNOWN';a.healthAt=e.to;
-      if(a.health==='HEALTHY')a.graceUsed=0;
+      if(a.health==='HEALTHY'){a.graceUsed=0;
+        if(wasExpired){a.graceExpired=false;
+          changes.push({code:'ACCOUNT_ROUTE_RECOVERED',scopeId:id});}}
       if(a.health==='UNAVAILABLE'&&provider.state==='HEALTHY')a.graceUsed+=interval;
       if(a.health==='UNAVAILABLE'&&a.graceUsed>=out.policy.graceMs){
         let released=0;
         for(const r of out.rows)if(r.accountId===id&&r.slot){
           r.slot=false;r.phase='WAITING';released++;out.diagnostics.graceReleases++;
         }
-        if(released)changes.push({code:'ACCOUNT_GRACE_EXPIRED',scopeId:id,count:released});
+        if(released){a.graceExpired=true;
+          changes.push({code:'ACCOUNT_GRACE_EXPIRED',scopeId:id,count:released});}
       }
     }
     for(const r of out.rows){

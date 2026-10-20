@@ -20,16 +20,15 @@ function command(type,params={}){
     }
     port.onMessage.addListener(result=>finish(result));
     port.onDisconnect.addListener(()=>finish(null,Error('DISCONNECTED')));
-    try{port.postMessage({type,params});}catch{finish(null,Error('DISCONNECTED'));}
+    try{port.postMessage({type,params:Object.fromEntries(Object.entries(params||{}).filter(([k,v])=>!(['token','passphrase'].includes(k)&&v==='')))});}catch{finish(null,Error('DISCONNECTED'));}
   });
 }
 function controls(){
   const found=selected?.ok===true&&selected.slug===slug.value;
-  pin.disabled=busy||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug.value)||
-    token.value.length<10;
+  pin.disabled=busy||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug.value);
   clear.disabled=busy;
   refresh.disabled=busy;
-  start.disabled=busy||!found||selected.state!=='PINNED'||token.value.length<10;
+  start.disabled=busy||!found||selected.state!=='PINNED';
   reconcile.disabled=busy||!found||
     !['DISPATCH_POSSIBLE','HELD_UNCERTAIN','SAVED_UNVERIFIED'].includes(selected.state);
   handoff.disabled=busy||!found||selected.state==='HUMAN_OWNED'||

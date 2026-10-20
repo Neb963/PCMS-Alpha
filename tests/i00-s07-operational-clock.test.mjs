@@ -57,8 +57,9 @@ test('S07 E04: stale feed, route change, changed principal, pipe death, suspend 
   {next:sample(2,T+MINUTE,{observerConnectionId:'native_pipe_changed'})},
   {next:sample(4,T+MINUTE)},
   {next:sample(2,T+MINUTE,{hostBootNs:String(3000000000+MINUTE*2000000)})},
-  {next:sample(2,T+5*MINUTE,{hostAwakeNs:String(3000000000+5*MINUTE*1000000),
-    hostBootNs:String(3000000000+5*MINUTE*1000000)})},
+  // Beyond the 5-minute bound an unsuspended gap is still unknown time.
+  {next:sample(2,T+6*MINUTE,{hostAwakeNs:String(3000000000+6*MINUTE*1000000),
+    hostBootNs:String(3000000000+6*MINUTE*1000000)})},
   {recent:{...recent,observedAt:T+100}},
   {recent:{...recent,complete:false}},
   {recent:{...recent,observedAt:T-20*MINUTE}},
@@ -68,6 +69,18 @@ test('S07 E04: stale feed, route change, changed principal, pipe death, suspend 
    const result=credit(before,after,change);
    assert.equal(result.creditedMs,0,JSON.stringify(change));
  }
+});
+
+test('Remediation: a delayed 4-minute turn on the same unsuspended native pipe keeps its healthy credit',()=>{
+ const before=sample(1,T);
+ const late=sample(2,T+4*MINUTE,{hostAwakeNs:String(3000000000+4*MINUTE*1000000),
+   hostBootNs:String(3000000000+4*MINUTE*1000000)});
+ const result=credit(before,late,{});
+ assert.ok(result.creditedMs>4*MINUTE-1000,JSON.stringify(result));
+ // The same delay with any suspension is still excluded.
+ const slept=sample(2,T+4*MINUTE,{hostAwakeNs:String(3000000000+3*MINUTE*1000000),
+   hostBootNs:String(3000000000+4*MINUTE*1000000)});
+ assert.equal(credit(before,slept,{}).creditedMs,0);
 });
 
 test('S07 state migration: pre-S07 saved scheduler policy has no implicit source mutation opt-in',()=>{

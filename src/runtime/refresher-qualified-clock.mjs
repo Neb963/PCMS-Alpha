@@ -110,7 +110,10 @@ const goodRoute=r=>r?.ready===true&&ID(r.accountId)&&ID(r.personaUid)&&
   ID(r.cookieStoreId)&&ID(r.routeId)&&r.routeId!=='direct'&&
   r.routeId!=='block'&&ID(r.healthDomain);
 export function qualifyBoundedObservedInterval({previous,next,recent,
-  accounts=[],bootId,id,recentMs=600000,maxGapMs=120000,
+  // 5 min: a delayed alarm or heavy background turn on the SAME original
+  // native pipe is still creditable; suspension is detected independently by
+  // the awake/boot clock comparison, and the feed must be current (recentMs).
+  accounts=[],bootId,id,recentMs=600000,maxGapMs=300000,
   uncertaintyMs=25}={}){
   const held=reason=>({ok:false,reason,creditedMs:0});
   if(!ID(bootId)||!ID(id)||!boundedNative(previous)||

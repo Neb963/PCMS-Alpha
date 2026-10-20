@@ -23,9 +23,14 @@ const fallback={
   IDENTITY_ALREADY_BOUND:'That Perchance account is already managed by another PCMS account.',
   UPGRADE_IN_PROGRESS:'This account is being upgraded in place to a reserved protected exit; try again shortly.',
   RESTORE_HOLD:'A restore safety hold is active; account changes are paused.',
-  STALE_REVISION:'The account changed meanwhile. The list was refreshed; try again.'
+  STALE_REVISION:'The account changed meanwhile. The list was refreshed; try again.',
+  ARCHIVE_BEFORE_REMOVAL:'Archive the account first; permanent removal is a separate later step.',
+  ROUTE_RELEASE_PENDING:'Its route is still being released. Close its tabs, wait a moment, or also delete its Persona.',
+  PERSONA_IN_USE:'Its Persona still has open tabs or running work. Close them and try again.',
+  PERSONA_REMOVAL_UNCONFIRMED:'PersonaMonkey did not confirm deleting the Persona. Nothing was removed; check PersonaMonkey and try again.'
 };
 function command(type,params,timeoutMs=type==='CONFIRM_LOGIN'||type==='CHECK_IDENTITY'?90000:
+    type==='REMOVE_ACCOUNT'?30000:
     type==='WITNESS_STATUS'?8000:5000) {
   return new Promise((resolve,reject)=>{
     const port=browser.runtime.connect({name:'pcms-i03-accounts'});
@@ -64,6 +69,9 @@ function describe(a){
     const phase=phases[a.setup?.phase]||'Preparing…';
     return a.setup?.phase==='HELD'?'Setup is waiting: '+(a.message||'the protected route could not be prepared yet.'):phase;
   }
+  if(a.removed)return 'Permanently removed from this PCMS profile'+
+    (a.removed.personaDeleted?' together with its dedicated Persona and login session':'')+
+    '. Its generators, original sources, Git history, backups and exit reservations are kept.';
   if(a.state==='ARCHIVED'){
     const r=a.route?.status;
     return r==='RELEASED'?'Archived. Its route resources are released; Persona, login, generators and exit history are kept.':
@@ -96,7 +104,8 @@ function draw() {
   for(const a of accounts) {
     const section=document.createElement('section');section.className='account-record';
     const heading=document.createElement('h3');
-    heading.textContent='Account '+a.accountId.slice(-6)+' — '+(statuses[a.state]||'Held');
+    heading.textContent='Account '+a.accountId.slice(-6)+' — '+
+      (a.removed?'Removed':statuses[a.state]||'Held');
     const detail=document.createElement('p');detail.textContent=describe(a);
     section.append(heading,detail);
     const controls=document.createElement('div');controls.className='account-controls';
@@ -129,7 +138,11 @@ function draw() {
           await act('CHANGE_ROUTE',a,()=>'Route change started.');
         }));
     }
-    if(a.state==='ARCHIVED'){
+    if(a.removed){/* tombstone: no actions */}
+    else if(a.state==='ARCHIVED'){
+      controls.append(button('Remove permanently…',()=>{
+        removalBox(section,a);
+      }));
       controls.append(button('Reactivate',async()=>{
         if(!window.confirm('Reactivate this account? PCMS re-verifies its route and login first.'))return;
         await act('REACTIVATE',a,()=>'Reactivation started.',{explicitReactivation:true});
@@ -143,6 +156,34 @@ function draw() {
     section.append(controls);
     accountsArea.append(section);
   }
+}
+// C-60/C-72–C-75: explicit two-step permanent local removal with a clear
+// deleted-versus-kept scope. Archive is the reversible alternative.
+function removalBox(section,a){
+  section.querySelector('.removal-confirm')?.remove();
+  const box=document.createElement('div');box.className='notice removal-confirm';
+  const title=document.createElement('strong');title.textContent='Permanently remove this account from PCMS?';
+  const del=document.createElement('p');
+  del.textContent='Deleted: the local account record, its verified login identity and history'+
+    (a.personaUid?', and (if selected) its dedicated Persona with its Perchance login cookies.':'.');
+  const kept=document.createElement('p');
+  kept.textContent='Kept: generators on Perchance (nothing remote is deleted, unpublished or transferred), '+
+    'original and Git sources, existing backups, and the minimal exit-IP reservation history. '+
+    'Older backups and manual exports may still contain this account; a later inspected restore excludes it unless you explicitly re-include it. '+
+    'A new protected backup is attempted right after removal.';
+  const label=document.createElement('label');const persona=document.createElement('input');
+  persona.type='checkbox';persona.checked=!!a.personaUid;persona.disabled=!a.personaUid;
+  label.append(persona,' Also delete the dedicated Persona and its login session');
+  const row=document.createElement('div');row.className='account-controls';
+  row.append(button('Confirm permanent removal',async el=>{
+    el.disabled=true;
+    await act('REMOVE_ACCOUNT',a,r=>'Account removed.'+(r.backup==='FRESH_BACKUP_REQUESTED'?
+      ' A fresh protected backup has started; see Settings → Scheduled backup.':
+      ' The removal is complete, but no fresh backup was started ('+
+      String(r.backup||'unknown').toLowerCase().replaceAll('_',' ')+'). Enable or check scheduled backup in Settings.'),
+      {explicitRemoval:true,deletePersona:persona.checked});
+  }),button('Cancel',()=>box.remove()));
+  box.append(title,del,kept,label,row);section.append(box);
 }
 async function read() {
   const mine=++generation;

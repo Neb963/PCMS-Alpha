@@ -26,7 +26,7 @@ function request(portName,type,params={}){
     }
     port.onMessage.addListener(data=>finish(data));
     port.onDisconnect.addListener(()=>finish(null,Error('DISCONNECTED')));
-    try{port.postMessage({type,params});}catch{finish(null,Error('DISCONNECTED'));}
+    try{port.postMessage({type,params:Object.fromEntries(Object.entries(params||{}).filter(([k,v])=>!(['token','passphrase'].includes(k)&&v==='')))});}catch{finish(null,Error('DISCONNECTED'));}
   });
 }
 const ai=(type,params)=>request('pcms-i10-ai',type,params);

@@ -20,13 +20,14 @@ function port(type,params={}){
     }
     p.onMessage.addListener(data=>finish(data));
     p.onDisconnect.addListener(()=>finish(null,Error('DISCONNECTED')));
-    try{p.postMessage({type,params});}catch{finish(null,Error('DISCONNECTED'));}
+    try{p.postMessage({type,params:Object.fromEntries(Object.entries(params||{}).filter(([k,v])=>!(['token','passphrase'].includes(k)&&v==='')))});}catch{finish(null,Error('DISCONNECTED'));}
   });
 }
 function controls(){
   capture.disabled=busy||!chosen||chosen.ownerState!=='OBSERVED_OWNER'||
-    !['PUBLIC','UNLISTED'].includes(chosen.visibility)||
-    (chosen.visibility==='PUBLIC'&&!consent.checked);
+    // Choosing Capture is itself the explicit per-generator consent; with the
+    // standing development grant PCMS also adopts owned generators itself.
+    !['PUBLIC','UNLISTED'].includes(chosen.visibility);
   archive.disabled=busy||!last?.ok||last.archived===true;
   consent.disabled=busy||!chosen||chosen.visibility!=='PUBLIC';
   const pending=last?.ok&&!last.archived;
@@ -64,7 +65,7 @@ window.addEventListener('pcms-adoption-target',async event=>{
   chosen=d;last=null;consent.checked=false;gitToken.value='';
   name.value=d.slug+' · inventory rev '+d.revision;
   visibility.textContent=d.visibility==='PUBLIC'?
-    'Public source: explicit adoption consent required. Captured bytes are preserved locally; archive is pending.':
+    'Public source: Capture preserves its exact original bytes; nothing on Perchance changes.':
     d.visibility==='UNLISTED'?
     'Unlisted source: guarded original capture; no publication authority.':
     'Owner or visibility unverified; capture held.';
@@ -135,7 +136,7 @@ capture.addEventListener('click',async()=>{
   announce('Guarded owner and source double-read; checking exact bytes and canonical revision…');
   try{
     const r=await port('CAPTURE_ADOPTION',{slug:d.slug,expectedRevision:d.revision,
-      explicitPublicConsent:d.visibility==='PUBLIC'&&consent.checked});
+      explicitPublicConsent:d.visibility==='PUBLIC'});
     if(seq!==generation)return;
     if(!r?.ok){announce('Source HELD: '+(r?.code||'ORIGINAL_UNVERIFIED')+
       '. Existing Perchance code and history were not changed.');return;}

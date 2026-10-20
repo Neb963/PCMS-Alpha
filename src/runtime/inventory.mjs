@@ -70,7 +70,12 @@ export function reconcileInventory(existing, account, observation) {
       slug:item.slug,remoteId:item.remoteId,accountId:account.accountId,
       personaUid:account.personaUid,bindingVersion:account.bindingVersion,
       accountRevision:account.revision,ownerState,visibility:item.visibility,
-      management:'OBSERVED_ONLY',source:'SOURCE_PENDING',
+      // A later read-only sync never erases that PCMS created this generator
+      // (same account and remote ID, checked above) or its source state;
+      // staging eligibility depends on MANAGED_CREATED.
+      management:prior?.management==='MANAGED_CREATED'?'MANAGED_CREATED':'OBSERVED_ONLY',
+      source:prior?.management==='MANAGED_CREATED'&&typeof prior.source==='string'?
+        prior.source:'SOURCE_PENDING',
       lastObservationId:observation.observationId,
       lastObservedAt:observation.observedAt,
       revision:unchanged?prior.revision:(prior?.revision || 0)+1

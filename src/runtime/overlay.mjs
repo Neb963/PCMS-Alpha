@@ -273,6 +273,25 @@ function createPcmsEnrollmentDonor(){
       if(status?.installed!==true||!Array.isArray(status.active_exits))return {ok:false,code:'NATIVE_UNAVAILABLE'};
       return {ok:true,released:!status.active_exits.some(e=>e?.route_id===routeId)};
     },
+    // C-60 permanent local removal of an archived account's dedicated Persona
+    // (container + its session cookies) through the donor's own DELETE_PERSONA
+    // path. Refused while any tab, donor job or control lease uses it.
+    async removeAccountPersona({personaUid}){
+      await initialize();
+      const state=await getState(),found=pcmsProfileByUid(state,personaUid);
+      if(found.code==='PERSONA_NOT_FOUND')return {ok:true,removed:false,absent:true};
+      if(found.code)return {ok:false,code:found.code};
+      const p=found.profile;
+      const leases=await managementIntegration.listControlLeases();
+      if((await browser.tabs.query({cookieStoreId:p.containerId})).length||
+         (await listActiveProfileIds()).includes(p.containerId)||
+         leases.some(l=>String(l?.personaUid||'').toLowerCase()===String(p.personaUid).toLowerCase()))
+        return {ok:false,code:'PERSONA_IN_USE'};
+      try{
+        return await localMutationFence(p.containerId,async()=>
+          ({ok:true,removed:await personaPlatform.remove(p.containerId)===true}));
+      }catch{return {ok:false,code:'PERSONA_REMOVAL_UNCONFIRMED'};}
+    },
     reloadPins:()=>reloadRoutePins()
   });
 }
@@ -1063,7 +1082,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   for (const name of ['legacy-quarantine.mjs','creation-intake.mjs','creation-allocation.mjs','creation-effects.mjs','creation-git.mjs','creation-git-owner.mjs','creation-git-runner.mjs','creation-runner.mjs','creation-watch.mjs','coordinator-core.mjs','coordinator-store.mjs','coordinator-boundary.mjs','s08-cleanup-boundary.mjs','pcms-donor-fence.mjs','network-ledger.mjs','route-pin.mjs','enrollment.mjs','qualified-clock.mjs','entry.mjs', 'wake.mjs', 'dashboard-action.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'git-catalog.mjs', 'git-prompt.mjs', 'catalog-bootstrap.mjs', 'catalog-import.mjs', 'catalog-prompt-store.mjs', 'catalog-resume.mjs', 'catalog-declaration.mjs', 'catalog-ready-store.mjs', 'ready-planner.mjs', 'ready-git-prompt.mjs', 'ready-git-source.mjs', 'ready-native-source.mjs', 'ai-declarative-assertion.mjs', 'ready-ai-gate.mjs', 'ready-source-safety.mjs', 'ready-store.mjs', 'ready-intake.mjs', 'ready-operator.mjs', 'ready-development.mjs', 's06-output-proof.mjs', 's06-writeback-progress.mjs', 's06-review-queue.mjs', 's06-request-changes.mjs', 's06-human-review.mjs', 's06-exception-review.mjs', 's06-standing-authority.mjs', 'catalog-boundary.mjs', 'creation-catalog.mjs', 'catalog-watch.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'original-archive.mjs','adoption-recovery.mjs','adoption-recovery-bridge.mjs', 'adoption-boundary.mjs',
     'staging-core.mjs','staging-store.mjs','staging-boundary.mjs',
     'perchance-stage.mjs','editor-strip.mjs','perchance-editor-probe.mjs','perchance-ai-native.mjs','perchance-ai-oracle.mjs','perchance-ai-opfs.mjs','perchance-ai-history.mjs','ai-supervisor.mjs','ai-testing.mjs','ai-evidence.mjs','ai-store.mjs','ai-boundary.mjs',
-    'git-writeback.mjs','writeback-store.mjs','writeback-boundary.mjs',
+    'git-credential.mjs','diagnostic-ready-git.mjs','git-writeback.mjs','writeback-store.mjs','writeback-boundary.mjs',
     'release-core.mjs','release-store.mjs','release-boundary.mjs','perchance-release.mjs',
     'existing-update-core.mjs','existing-update-store.mjs','existing-update-boundary.mjs','perchance-existing.mjs',
     'backup-auto-donor.mjs','backup-donor-port.mjs','restore-donor.mjs','restore-boundary.mjs','restore-reconcile.mjs','backup-auto-core.mjs','backup-auto-store.mjs','backup-auto-download.mjs',

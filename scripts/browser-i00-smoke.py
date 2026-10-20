@@ -2712,8 +2712,15 @@ def main():
                 assert alarm_prior.get('scheduled'),alarm_prior
                 time.sleep(72)
                 call('POST',f'/session/{after}/url',{'url':url+'#refresher'})
-                alarm_after=call('POST',f'/session/{after}/execute/async',{'script':"const done=arguments[arguments.length-1];browser.storage.local.get('pcmsI12AlarmCount').then(v=>done(v.pcmsI12AlarmCount||0));",'args':[]})
-                assert alarm_after>alarm_prior['prior'],(alarm_prior,alarm_after)
+                alarm_state=call('POST',f'/session/{after}/execute/async',{'script':"""const done=arguments[arguments.length-1];
+                (async()=>{const v=await browser.storage.local.get(['pcmsI12AlarmCount','pcmsI12Status']);
+                  const a=await browser.alarms.get('pcms-refresher-turn');
+                  done({count:v.pcmsI12AlarmCount||0,status:v.pcmsI12Status||null,
+                    pending:a?.scheduledTime||null,now:Date.now()});})().catch(e=>done({error:String(e)}));""",'args':[]})
+                alarm_after=alarm_state.get('count',0)
+                # A turn after the test's create must never postpone the
+                # pending earlier alarm (event-page wake starvation regression).
+                assert alarm_after>alarm_prior['prior'],(alarm_prior,alarm_state)
                 print('B I12_REAL_ALARM_WITHOUT_DASHBOARD=PASS',flush=True)
                 # Full relaunch of the same persistent installation; no reinstall.
                 close(after)

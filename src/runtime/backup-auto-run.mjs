@@ -1,6 +1,7 @@
 // I15: unattended encryption via operator's OS vault, never default/local
 // key material. Background-only. No Perchance, Mullvad or Git effects.
-import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
+import {openCanonicalDatabase,createRestoreSentinel,createCanonicalStore} from './journal.mjs';
+import {createNoticeDispatcher} from './notices.mjs';
 import {vaultResponse,VAULT_HOST,safeStatus} from './backup-auto-core.mjs';
 import {createAutoStore} from './backup-auto-store.mjs';
 import {makeRetention} from './backup-auto-retention.mjs';
@@ -10,14 +11,35 @@ import {exportV2Candidate,createV2NativeConnection} from './backup-v2-session.mj
 import {verifyV2StoredArchive} from './backup-v2-verify.mjs';
 import {digest} from './backup-core.mjs';
 const fail=code=>({ok:false,code});
+// Operator-selected archive format. V2 is the source-complete native archive
+// (full source bytes, native encryption, authenticated full readback and
+// native 14-success retention). V1 is the legacy encrypted browser download,
+// which does NOT guarantee source completeness. Selecting V2 is an explicit
+// local setup step, never inferred, and is revoked by a restore hold.
+export const BACKUP_FORMAT_KEY='pcmsBackupFormat';
+export const FORMAT_GUARANTEE=Object.freeze({
+  V1:'LEGACY_ENCRYPTED_DOWNLOAD_NOT_SOURCE_COMPLETE',
+  V2:'SOURCE_COMPLETE_NATIVE_AUTHENTICATED_READBACK'});
+export function operatorSelectedV2(api){
+  return async()=>{
+    try{
+      const v=(await api.storage.local.get(BACKUP_FORMAT_KEY))?.[BACKUP_FORMAT_KEY];
+      const held=(await api.storage.local.get('pcmsRestoreInProgress'))?.pcmsRestoreInProgress;
+      return v?.schema===1&&v.format==='V2'&&!held;
+    }catch{return false;}
+  };
+}
 const sanitize=e=>/^[A-Z_]{4,60}$/.test(e?.message||'')?e.message:'BACKUP_FAILED';
 export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
   newId=()=>crypto.randomUUID().replaceAll('-',''),
   native=msg=>api.runtime.sendNativeMessage(VAULT_HOST,msg),
   seal=sealAutomatic,
-  // Not supplied by production until independent E-06 review. This is a
-  // protected coordinator injection, never a UI message or stored toggle.
+  // Production passes operatorSelectedV2(api): explicit local operator setup
+  // after a native-host health check (setFormat). Tests inject directly.
   reviewedV2=()=>false,captureV2=captureV2SourceCut,
+  probeV2=async()=>{const port=createV2NativeConnection(api);
+    try{return await port.exchange({action:'resource.inspect'});}
+    finally{port.close();}},
   dispatchV2=exportV2Candidate,verifyV2=verifyV2StoredArchive,
   nativeRetention=async()=>{const port=createV2NativeConnection(api);
     try{return await port.exchange({action:'archive.retention.prune'});}
@@ -28,7 +50,26 @@ export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
   const database=()=>dbPromise ||= open().catch(e=>{dbPromise=null;throw e;});
   const store=async()=>createAutoStore(await database(),clock);
   const status=async()=>{const current=await (await store()).read();
-    return current.ok?safeStatus(current.state):current;};
+    if(!current.ok)return current;
+    let stored=null;
+    try{stored=(await api.storage.local.get(BACKUP_FORMAT_KEY))?.[BACKUP_FORMAT_KEY];}catch{}
+    const format=await reviewedV2()===true||(stored?.schema===1&&stored.format==='V2')?'V2':'V1';
+    return {...safeStatus(current.state),format,guarantee:FORMAT_GUARANTEE[format]};};
+  async function setFormat(format){
+    if(!['V1','V2'].includes(format))return fail('INVALID_FORMAT');
+    if((await sentinel.inspect()).held)return fail('BACKUP_RESTORE_HOLD');
+    if(task||manualTask)return fail('BACKUP_INFLIGHT');
+    if(format==='V2'){
+      // Prove the installed native v2 host and the OS vault respond before
+      // switching. Missing setup is reported, never silently downgraded.
+      let probe;try{probe=await probeV2();}catch{probe=null;}
+      if(probe?.ok!==true)return fail('BACKUP_V2_HOST_UNAVAILABLE');
+      let key;try{key=vaultResponse(await native({action:'get'}));}catch{key=null;}
+      if(!key?.ok)return fail('SUSPENDED_KEY_UNAVAILABLE');
+    }
+    await api.storage.local.set({[BACKUP_FORMAT_KEY]:{schema:1,format,changedAt:clock()}});
+    return status();
+  }
   async function reconcile(s){
     const read=await s.read();if(!read.ok)return read;
     const a=read.state.active;
@@ -198,8 +239,23 @@ export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
         await retention.prune();
         return {ok:true,code:'BROWSER_REPORTED_COMPLETE'};
       }catch{return fail('BACKUP_INTERNAL_ERROR');}
-    })().finally(()=>{task=null;});
+    })().then(async result=>{await reportIncident(result);return result;})
+      .finally(()=>{task=null;});
     return task;
+  }
+  // C-68/C-69: one backup incident; resolved only by a verified successful
+  // archive. Not-due/disabled/in-flight outcomes are not failures.
+  const NOT_FAILURE=new Set(['AUTO_OFF','BACKUP_ALREADY_DONE','BACKUP_COOLDOWN',
+    'BACKUP_INFLIGHT','BACKUP_INFLIGHT_OR_UNCERTAIN','BACKUP_RESTORE_HOLD']);
+  async function reportIncident(result){
+    try{
+      const d=createNoticeDispatcher(api,createCanonicalStore(await database()));
+      if(result?.ok&&['NATIVE_READONLY_SOURCE_RECOVERY','BROWSER_REPORTED_COMPLETE'].includes(result.code))
+        await d.resolve({scopeId:'backup_automatic',code:'BACKUP_FAILED',evidence:'BACKUP_VERIFIED_COMPLETE'});
+      else if(result&&!result.ok&&!NOT_FAILURE.has(result.code))
+        await d.emit({scopeId:'backup_automatic',code:'BACKUP_FAILED',severity:'ACTION_REQUIRED',
+          revision:Math.max(1,clock())});
+    }catch{/* dashboard status still shows the outcome */}
   }
   // Manual source-complete v2 export shares I15's source cut, OS-vault
   // lookup, restore sentinel and same native ledger; no second scheduler.
@@ -263,7 +319,18 @@ export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
     return {ok:true,code:'VAULT_STORED_OPERATOR_RECOVERY_REQUIRED'};
   }
   return Object.freeze({
-    tick,status,setVault,manualV2Candidate,
+    tick,status,setVault,manualV2Candidate,setFormat,
+    // C-75: called after a completed permanent account removal. The removal
+    // stays in force whatever this backup's outcome; the request persists
+    // until a backup started after it completes.
+    async requestFreshAfterRemoval(){
+      const s=await store();
+      const req=await s.requestFresh('ACCOUNT_REMOVED',clock());
+      if(!req.ok)return req;
+      if(!req.enabled)return fail('AUTO_BACKUP_NOT_ENABLED');
+      void tick();
+      return {ok:true,code:'FRESH_BACKUP_REQUESTED'};
+    },
     enable:async enabled=>{
       const s=await store(),result=await s.enabled(enabled);
       if(result.ok&&enabled)void tick();return result;

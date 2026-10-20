@@ -5,6 +5,7 @@ import {createCoordinatorStore} from './coordinator-store.mjs';
 import {createCreationRunner} from './creation-runner.mjs';
 import {standingS06} from './s06-standing-authority.mjs';
 export const CREATION_ALARM='pcms-s04-creation-due';
+export const CREATION_FOLLOWUP_ALARM='pcms-s04-creation-followup';
 const PERIOD=10;
 const NEXT='pcmsS04WakeReceipt';
 const CURSOR='pcmsS04QueueCursor';
@@ -68,6 +69,12 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
         observedAt:clock(),providerActivation:'HELD_UNLESS_SCOPED_GATE'};
       await api.storage.local.set({[NEXT]:result,
         [CURSOR]:selected.at(-1)?.intentId||tail||null});
+      // Large batches keep moving: one bounded follow-up wake while queued
+      // work remains and this wake made progress (held-only queues wait for
+      // the periodic wake instead of spinning).
+      if(result.more&&progressed>0)
+        try{void Promise.resolve(api.alarms.create(CREATION_FOLLOWUP_ALARM,
+          {when:clock()+60000})).catch(()=>{});}catch{}
       return result;
     })().catch(()=>({ok:false,code:'S04_WAKE_UNAVAILABLE'}))
       .finally(()=>{pending=null;});
@@ -76,7 +83,7 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
   function register(){
     if(registered)return;registered=true;
     api.alarms.onAlarm.addListener(evt=>{
-      if(evt?.name===CREATION_ALARM)void tick();
+      if(evt?.name===CREATION_ALARM||evt?.name===CREATION_FOLLOWUP_ALARM)void tick();
     });
     api.runtime.onStartup.addListener(()=>{schedule();void tick();});
     api.runtime.onInstalled.addListener(()=>{schedule();void tick();});

@@ -1,7 +1,8 @@
 // S03 read-only background observer. Git credentials stay in native Secret Service.
 // This deliberately does NOT send generator intents or provider/Git writes.
 import {scanMainCatalog} from './git-catalog.mjs';
-import {createRestoreSentinel} from './journal.mjs';
+import {createRestoreSentinel,openCanonicalDatabase,createCanonicalStore} from './journal.mjs';
+import {createNoticeDispatcher} from './notices.mjs';
 import {createGitResumeTransport} from './catalog-resume.mjs';
 import {createCreationCatalogIntake} from './creation-catalog.mjs';
 import {createReadyIntake} from './ready-intake.mjs';
@@ -21,7 +22,16 @@ const MINUTES=15;
 export function createCatalogWatcher(api,{scan=scanMainCatalog,
   native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
   network=fetch,clock=Date.now,ingestComplete=null,ingestReady=null,
-  progressReady=null,progressChanges=null,progressWriteback=null}={}){
+  progressReady=null,progressChanges=null,progressWriteback=null,
+  // C-68/C-69: one GitHub-connection incident (queued work stays queued);
+  // resolved only by the next successful vault credential read.
+  incidents=async(kind)=>{
+    const d=createNoticeDispatcher(api,createCanonicalStore(await openCanonicalDatabase()));
+    return kind==='RESOLVE'?d.resolve({scopeId:'git_connection',code:'GIT_RECONNECT_REQUIRED',
+      evidence:'GIT_VAULT_CREDENTIAL_READ'}):
+      d.emit({scopeId:'git_connection',code:'GIT_RECONNECT_REQUIRED',severity:'ACTION_REQUIRED',
+        revision:Math.max(1,clock())});
+  }}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
   let running=null,registered=false;
   async function persistStatus(code){
@@ -34,8 +44,11 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       const cfg=(await api.storage.local.get(CONFIG))?.[CONFIG];
       if(!identifier(cfg))return safe('GIT_RECONNECT_REQUIRED');
       const value=await native({action:'git.get',repositoryId:cfg.repositoryId});
-      if(!value?.ok||typeof value.credential!=='string')
+      if(!value?.ok||typeof value.credential!=='string'){
+        try{await incidents('OPEN');}catch{}
         return persistStatus('GIT_VAULT_UNAVAILABLE');
+      }
+      try{await incidents('RESOLVE');}catch{}
       const resumed=createGitResumeTransport(api.storage.local,{
         repositoryId:cfg.repositoryId,repository:cfg.repository,network});
       const result=await scan({repository:cfg.repository,token:value.credential},resumed.transport);

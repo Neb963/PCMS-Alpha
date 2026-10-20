@@ -11,6 +11,7 @@ import {createWritebackStore} from './writeback-store.mjs';
 import {createReadyStore} from './ready-store.mjs';
 import {createS06ExceptionStore,authorizeS06Exception} from './s06-exception-review.mjs';
 import {exactSource,diffSource,verifyReadback} from './staging-core.mjs';
+import {createGitCredentialResolver} from './git-credential.mjs';
 import {inspectWriteback,writeGitCandidate,observeGitCandidate,
   commitMessage,parseTerminalSuggestion} from './git-writeback.mjs';
 
@@ -45,7 +46,8 @@ export function validateWritebackMessage(api,sender,msg){
         !['MANUAL','AUTO'].includes(p.mode)))||
      (['COMMIT','RECONCILE','CANCEL_PREPARED'].includes(msg.type)&&
         (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
-     (['PREPARE','COMMIT','RECONCILE','ARM_AUTO'].includes(msg.type)&&
+     // Token optional: the one-time OS-vault Git connection is the default.
+     (['PREPARE','COMMIT','RECONCILE','ARM_AUTO'].includes(msg.type)&&p.token!==undefined&&
         (typeof p.token!=='string'||p.token.length<12||p.token.length>512)))
     return fail('INVALID_PARAMS');
   return {ok:true};
@@ -112,7 +114,7 @@ export function createWritebackBoundary(api,{
   storeFactory=createWritebackStore,aiFactory=createAiStore,
   stageFactory=createStagingStore,inspect=inspectWriteback,
   write=writeGitCandidate,observe=observeGitCandidate,
-  effectGate=()=>false
+  effectGate=()=>false,credential=createGitCredentialResolver(api)
 }={}){
   let dbPromise;
   const database=()=>dbPromise ||=open();
@@ -122,7 +124,13 @@ export function createWritebackBoundary(api,{
   const autoCredentials=new Map();
   let autoBusy=false;
   async function runTrusted(msg){
-    const p=msg.params||{},db=await database(),store=storeFactory(db);
+    let p=msg.params||{};
+    if(['PREPARE','COMMIT','RECONCILE','ARM_AUTO'].includes(msg.type)){
+      const cred=await credential(p.token);
+      if(!cred.ok)return cred;
+      p={...p,token:cred.token};
+    }
+    const db=await database(),store=storeFactory(db);
     if(msg.type==='GET_SETTINGS')return store.settings();
     if(msg.type==='LIST')return store.list();
     if(msg.type==='GET')return store.get(p.slug);

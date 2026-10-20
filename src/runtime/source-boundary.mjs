@@ -1,6 +1,7 @@
 // I05: explicit read-only Git inspection and canonical one-to-one association.
 // Credentials are used only for an operator-triggered call, never persisted.
 import {openCanonicalDatabase, createRestoreSentinel, fail} from './journal.mjs';
+import {createGitCredentialResolver} from './git-credential.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {inspectGitSource, compareGitSource, safeFolder} from './git-source.mjs';
 export const SOURCE_PORT='pcms-i05-source';
@@ -26,7 +27,7 @@ export function validateSourceMessage(api,sender,message){
   if(message.type!=='INSPECT_SOURCE'&&!slugOK(p.slug))return fail('INVALID_PARAMS');
   if(['ASSOCIATE_SOURCE','INSPECT_SOURCE'].includes(message.type)&&!safeFolder(p.folder))
     return fail('UNSAFE_SOURCE_PATH');
-  if(message.type!=='GET_ASSOCIATION'&&(typeof p.token!=='string'||p.token.length>512))
+  if(message.type!=='GET_ASSOCIATION'&&p.token!==undefined&&(typeof p.token!=='string'||p.token.length>512))
     return fail('INVALID_PARAMS');
   if(message.type==='ASSOCIATE_SOURCE'&&
     (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
@@ -121,7 +122,8 @@ function txAssociate(db,slug,expectedRevision,snapshot){
   });
 }
 export function createSourceBoundary(api,{
-  open=openCanonicalDatabase,inspect=inspectGitSource
+  open=openCanonicalDatabase,inspect=inspectGitSource,
+  credential=createGitCredentialResolver(api)
 }={}){
   let dbPromise;
   const db=()=>dbPromise ||=open();
@@ -129,9 +131,13 @@ export function createSourceBoundary(api,{
   async function run(message,sender){
     const auth=validateSourceMessage(api,sender,message);
     if(!auth.ok)return auth;
-    const p=message.params||{};
+    let p=message.params||{};
     try{
       if(message.type==='GET_ASSOCIATION')return await txRead(await db(),p.slug);
+      if(!p.token){
+        const cred=await credential();if(!cred.ok)return cred;
+        p={...p,token:cred.token};
+      }
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(message.type==='INSPECT_SOURCE')return await inspect({token:p.token,folder:p.folder});
       if(message.type==='ASSOCIATE_SOURCE'){

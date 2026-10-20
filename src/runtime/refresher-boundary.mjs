@@ -68,15 +68,32 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
   const bootId=newId(),sentinel=createRestoreSentinel(api.storage.local);
   const store=async()=>storeFactory(await (dbPromise ||=open().catch(e=>{dbPromise=null;throw e;})));
   async function notifyChanges(result){
-    for(const change of result?.changes||[])if(change.code==='ACCOUNT_GRACE_EXPIRED'){
-      try{await createNoticeDispatcher(api,createCanonicalStore(await dbPromise)).emit({
-        scopeId:change.scopeId,code:'ROUTE_UNAVAILABLE',severity:'ACTION_REQUIRED',
-        revision:result.revision});}catch{}
+    for(const change of result?.changes||[]){
+      let d;try{d=createNoticeDispatcher(api,createCanonicalStore(await dbPromise));}catch{continue;}
+      try{
+        if(change.code==='ACCOUNT_GRACE_EXPIRED')await d.emit({scopeId:change.scopeId,
+          code:'ROUTE_UNAVAILABLE',severity:'ACTION_REQUIRED',revision:result.revision,
+          cause:'ACCOUNT_ROUTE_UNAVAILABLE'});
+        else if(change.code==='ACCOUNT_ROUTE_RECOVERED')await d.resolve({scopeId:change.scopeId,
+          code:'ROUTE_UNAVAILABLE',evidence:'ROUTE_HEALTH_OBSERVED'});
+        else if(change.code==='PROVIDER_OUTAGE')await d.emit({scopeId:change.scopeId,
+          code:'PROVIDER_OUTAGE',severity:'SERIOUS',revision:result.revision});
+        else if(change.code==='PROVIDER_RECOVERED')await d.resolve({scopeId:change.scopeId,
+          code:'PROVIDER_OUTAGE',evidence:'PROVIDER_HEALTH_WITNESSED'});
+      }catch{}
     }
   }
   async function schedule(when){
     try{
-      await api.alarms.create(REFRESHER_ALARM,{when:Math.max(clock()+MINUTE,when||0)});
+      const desired=Math.max(clock()+MINUTE,when||0);
+      // Every event-page wake (any 1-minute periodic alarm, port or startup)
+      // runs a turn. Recreating the alarm at now+1min on each wake postponed
+      // it forever, so the Refresher never woke on its own. Never move an
+      // earlier pending (including overdue) alarm later; only advance it.
+      let pending=null;try{pending=await api.alarms.get(REFRESHER_ALARM);}catch{}
+      if(pending?.name===REFRESHER_ALARM&&Number.isFinite(pending.scheduledTime)&&
+        pending.scheduledTime<=desired){alarmHeld=false;return;}
+      await api.alarms.create(REFRESHER_ALARM,{when:desired});
       const actual=await api.alarms.get(REFRESHER_ALARM);
       if(!actual||actual.name!==REFRESHER_ALARM)alarmHeld=true;else alarmHeld=false;
     }catch{
@@ -111,25 +128,39 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     }).catch(()=>{});
     return alarmTail;
   }
-  async function observe(s){
+  // Fleet fairness: every verified account (up to the 1,000-account state
+  // bound) is covered each turn, never only the first 100. Cached donor
+  // readiness only (no network probe), computed once per turn and shared by
+  // the clock sample and the observer.
+  const FLEET_BOUND=1000;
+  let recentCursor=null;
+  const verifiedScopes=state=>Object.entries(state.accounts)
+    .filter(([,a])=>a.verifiedIdentity===true)
+    .sort(([x],[y])=>x<y?-1:x>y?1:0).slice(0,FLEET_BOUND);
+  async function readinessFor(g,scopes){
+    return new Map(await Promise.all(scopes.map(async([id,a])=>{
+      try{return [id,await g.getSafeRouteReadiness(a.personaUid)];}catch{return [id,{ready:false}];}
+    })));
+  }
+  async function observe(s,cached=null){
     if(!observationGate())return fail('MONITOR_ACTIVATION_HELD');
     const g=guard();if(!g?.observeMonitoring)return fail('GUARDED_MONITOR_UNAVAILABLE');
     const snapshot=await s.read();if(!snapshot.ok)return snapshot;
     const now=clock(),state=snapshot.state;
-    // Cached donor readiness only; no new route/native probe. The explicit
-    // bound limits liveness classification cost; unobserved scopes stay unknown.
-    const scopes=Object.entries(state.accounts).filter(([,a])=>a.verifiedIdentity).slice(0,100);
-    const before=new Map(await Promise.all(scopes.map(async([id,a])=>{
-      try{return [id,await g.getSafeRouteReadiness(a.personaUid)];}catch{return [id,{ready:false}];}
-    })));
+    const scopes=verifiedScopes(state);
+    const before=cached&&scopes.every(([id])=>cached.has(id))?cached:await readinessFor(g,scopes);
     const due=state.rows.filter(r=>!r.identityHeld&&r.ownerVerified&&!r.metrics.suspended&&
       r.metrics.nextDueAt<=now&&before.get(r.accountId)?.ready)
       .sort((a,b)=>(b.metrics.demandUntil>now?1:0)-(a.metrics.demandUntil>now?1:0)||
         a.metrics.nextDueAt-b.metrics.nextDueAt||a.ordinal-b.ordinal);
     const claims=[];
     if(!state.recent.suspended&&state.recent.nextDueAt<=now){
+      // Rotate the shared recent-feed read across ready accounts. A shared
+      // endpoint backoff (429) applies to ALL accounts: rotation never evades it.
+      const ready=scopes.filter(([id])=>before.get(id)?.ready).map(([id])=>id);
       const accountId=(state.recent.endpointBackoffUntil||0)>now?null:
-        scopes.find(([id])=>before.get(id)?.ready)?.[0];
+        ready.find(id=>recentCursor===null||id>recentCursor)||ready[0];
+      if(accountId)recentCursor=accountId;
       if(accountId){const out=await s.claim({kind:'RECENT',preferredAccountId:accountId,
         now,bootId,claimId:newId()});if(out.ok)claims.push(out.claim);}
     }
@@ -310,7 +341,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       try{
         if((await sentinel.inspect()).held){await safeBreadcrumb(null,'RESTORE_HOLD');return fail('RESTORE_HOLD');}
         const s=await store();
-        let nativeClock=null,qualifiedCoverages=null;
+        let nativeClock=null,qualifiedCoverages=null,turnReadiness=null;
         if(nativeClockGate()){
           // Existing donor pin + native witness; no new observer or synthetic
           // future certificates. A route failure at either endpoint freezes
@@ -319,12 +350,10 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
             const g=guard(),native=await g?.sampleNativeWitness?.();
             if(native?.ok===true&&native.witness){
               const previous=await s.read(),routes=[];
-              const accounts=Object.entries(previous?.state?.accounts||{})
-                .filter(([,a])=>a.verifiedIdentity===true)
-                .slice(0,100);
+              const accounts=verifiedScopes(previous?.state||{accounts:{}});
+              turnReadiness=await readinessFor(g,accounts);
               for(const [accountId,a] of accounts){
-                let ready;
-                try{ready=await g.getSafeRouteReadiness(a.personaUid);}catch{}
+                const ready=turnReadiness.get(accountId);
                 if(ready?.ready===true&&ready.personaUid===a.personaUid)
                   routes.push({ready:true,accountId,personaUid:a.personaUid,
                     bindingVersion:a.bindingVersion,
@@ -344,7 +373,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         await schedule(result.state.nextWakeAt);
         // At most two protected reads per turn. Persistent quota/coalescing spans
         // all wake sources and both recent-list/statistics request classes.
-        const observed=await observe(s);
+        const observed=await observe(s,turnReadiness);
         // Mutation failure cannot block the healthy shadow monitor.
         let refresh='REFRESH_ACTIVATION_HELD';
         try{refresh=await maybeRefresh(s);}catch{refresh='REFRESH_EFFECT_UNCERTAIN';}

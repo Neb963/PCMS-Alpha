@@ -62,6 +62,7 @@ export function createAutoStore(db,clock=Date.now){
           return {response:fail('BACKUP_DOWNLOAD_UNVERIFIED')};
         s.archives.push(details.archive);
         s.lastSuccessDay=Math.max(s.lastSuccessDay,s.active.day);
+        if(s.freshRequest&&s.freshRequest.at<=s.active.startedAt)s.freshRequest=null;
         s.active=null;s.nextAttemptAt=0;s.status='COMPLETE';s.code=qualifiedNative?
           'NATIVE_READONLY_SOURCE_RECOVERY':'BROWSER_REPORTED_COMPLETE';
       }else if(to==='FAILED'||to==='SUSPENDED'){
@@ -91,5 +92,13 @@ export function createAutoStore(db,clock=Date.now){
       return {state:s,response:{ok:true,enabled:value}};
     });
   }
-  return Object.freeze({edit,read,claim,move,enabled});
+  function requestFresh(reason,now){
+    return edit(s=>{
+      if(reason!=='ACCOUNT_REMOVED'||!Number.isSafeInteger(now))
+        return {response:fail('INVALID_BACKUP_REQUEST')};
+      s.freshRequest={reason,at:now};
+      return {state:s,response:{ok:true,enabled:s.enabled}};
+    });
+  }
+  return Object.freeze({edit,read,claim,move,enabled,requestFresh});
 }

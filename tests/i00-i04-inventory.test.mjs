@@ -149,3 +149,14 @@ test('I04 F: packaged entry points include read-only worker and UI, no unsafe ob
   assert.match(html,/current safety checks/);
   assert.match(html,/id="pcms-s06-authority-enable" type="button" disabled/);
 });
+test('Cross-feature: a later inventory sync keeps the PCMS-created marker that staging requires',()=>{
+  const created={slug:'made-by-pcms',remoteId:'remote-aaaa-0001',accountId:account.accountId,personaUid:p,
+    bindingVersion:1,accountRevision:3,ownerState:'OBSERVED_OWNER',visibility:'UNLISTED',
+    management:'MANAGED_CREATED',source:'SOURCE_VERIFIED',revision:4};
+  const synced=reconcileInventory([created],account,batch([item('made-by-pcms')]));
+  assert.equal(synced.rows[0].management,'MANAGED_CREATED');
+  assert.equal(synced.rows[0].source,'SOURCE_VERIFIED');
+  // A different remote under the same slug is still an identity conflict, never inherited.
+  const swapped=reconcileInventory([created],account,batch([item('made-by-pcms','remote-bbbb-0002')]));
+  assert.equal(swapped.rows[0].ownerState,'IDENTITY_CONFLICT');
+});

@@ -28,6 +28,9 @@ export function validAuto(s){
       a.downloadId>=0&&hex(a.sha256)&&Number.isSafeInteger(a.bytes)&&a.bytes>0&&
       typeof a.filename==='string'&&Number.isSafeInteger(a.day)&&
       ['COMPLETE','DELETION_POSSIBLE','REMOVED','DELETE_HELD'].includes(a.state)))&&
+    (s.freshRequest==null||(typeof s.freshRequest==='object'&&
+      ['ACCOUNT_REMOVED'].includes(s.freshRequest.reason)&&
+      Number.isSafeInteger(s.freshRequest.at)))&&
     (!s.active||(idOK(s.active.runId)&&active.has(s.active.status)&&
       Number.isSafeInteger(s.active.day)&&Number.isSafeInteger(s.active.startedAt)));
 }
@@ -37,7 +40,9 @@ export function admission(s,now){
   if(!s.enabled)return {ok:false,code:'AUTO_OFF'};
   const day=dayAt(now);
   // A backward clock shift cannot replay yesterday's successful attempt.
-  if(s.lastSuccessDay>=day)return {ok:false,code:'BACKUP_ALREADY_DONE'};
+  // C-75: a completed local account removal requests one fresh backup even
+  // if today's daily backup already succeeded. Cooldown/inflight still apply.
+  if(s.lastSuccessDay>=day&&!s.freshRequest)return {ok:false,code:'BACKUP_ALREADY_DONE'};
   if(s.active)return {ok:false,code:'BACKUP_INFLIGHT_OR_UNCERTAIN'};
   if(now<s.nextAttemptAt)return {ok:false,code:'BACKUP_COOLDOWN'};
   // A missing period is one catch-up, never a burst proportional to downtime.
@@ -101,6 +106,7 @@ export function safeStatus(s){
     retained:s.archives.filter(x=>x.state==='COMPLETE').length,
     deletionHeld:s.archives.filter(x=>x.state==='DELETE_HELD').length,
     lastSuccessDay:s.lastSuccessDay,active:s.active?.status||null,
+    freshRequest:s.freshRequest?.reason||null,
     tier:s.archives.some(a=>nativeComplete(a))?3:
       s.archives.some(a=>a.state==='COMPLETE')?2:0,
     proof:s.archives.some(a=>nativeComplete(a))?

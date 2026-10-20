@@ -1,5 +1,6 @@
 // I13 Work Queue inspector: fingerprints and test provenance, never source
 // bytes or credentials. Pending and disconnected outcomes never claim publish.
+import {diffLines,unifiedHunks,splitLines,isText,imageType} from './source-diff.mjs';
 const slug=document.getElementById('pcms-release-slug');
 const token=document.getElementById('pcms-release-token');
 const passphrase=document.getElementById('pcms-existing-passphrase');
@@ -28,7 +29,7 @@ const reviewQueue=document.getElementById('pcms-s06-review-queue');
 const refreshQueue=document.getElementById('pcms-s06-review-refresh');
 const nextQueue=document.getElementById('pcms-s06-review-next');
 let queueCursor='',queueBusy=false;
-let snapshot=null,receipt=null,active=false,sequence=0,humanContext=null,exceptionContext=null;
+let snapshot=null,receipt=null,active=false,sequence=0,humanContext=null,exceptionContext=null,chainPublish=null;
 const valid=s=>/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 function command(type,params={}){
   return new Promise((resolve,reject)=>{
@@ -42,7 +43,8 @@ function command(type,params={}){
     }
     port.onMessage.addListener(v=>finish(v));
     port.onDisconnect.addListener(()=>finish(null,Error('DISCONNECTED')));
-    try{port.postMessage({type,params});}catch{finish(null,Error('DISCONNECTED'));}
+    // Empty credential fields mean: use the connected OS-vault Git credential.
+    try{port.postMessage({type,params:Object.fromEntries(Object.entries(params||{}).filter(([k,v])=>!(['token','passphrase'].includes(k)&&v==='')))});}catch{finish(null,Error('DISCONNECTED'));}
   });
 }
 function note(s){status.textContent=s;}
@@ -69,6 +71,96 @@ function controls(){
   reconcileBtn.disabled=active||!receipt||receipt.slug!==slug.value||
     !['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN','RECOVERY_HOLD'].includes(receipt.state);
 }
+// Meaningful source review: per changed file, a bounded line diff of the
+// exact canonical P→F bytes (text), image previews (binary images) or exact
+// size/hash metadata (other binary). Reads only the canonical review chunks.
+const MAX_REVIEW_BYTES=4*1024*1024;
+async function fetchWhole(v,origin,path){
+  const parts=[];let offset=0,total=0;
+  for(let i=0;i<MAX_REVIEW_BYTES/8192;i++){
+    const out=await command('GET_REVIEW_CHUNK',{slug:v.slug,stageRevision:v.stageRevision,
+      fingerprint:v.sourceFingerprint,origin,path,offset});
+    if(!out?.ok)return {ok:false,code:out?.code||'SOURCE_REVIEW_HELD'};
+    parts.push(Uint8Array.from(atob(out.base64),c=>c.charCodeAt(0)));total=out.total;
+    if(out.nextOffset===null)break;
+    offset=out.nextOffset;
+  }
+  if(parts.reduce((n,p)=>n+p.length,0)!==total)return {ok:false,code:'REVIEW_FILE_TOO_LARGE_USE_BYTE_VIEW'};
+  const bytes=new Uint8Array(total);let at=0;for(const p of parts){bytes.set(p,at);at+=p.length;}
+  return {ok:true,bytes};
+}
+function renderChanges(v){
+  const box=document.createElement('section');
+  const title=document.createElement('h3');
+  const changes=v.diff||[];
+  title.textContent=changes.length?'Changes from the previous source ('+changes.length+' files)':
+    'No changes relative to the previous source.';
+  box.append(title);
+  const sizes=new Map([...(v.priorFiles||[]).map(f=>['P:'+f.path,f]),...(v.files||[]).map(f=>['F:'+f.path,f])]);
+  for(const c of changes){
+    const row=document.createElement('div');row.className='review-change';
+    const label=document.createElement('p');
+    const before=sizes.get('P:'+c.path),after=sizes.get('F:'+c.path);
+    label.textContent=({ADDED:'Added',CHANGED:'Changed',DELETED:'Deleted'}[c.kind]||c.kind)+
+      ' · '+c.path+(before?' · before '+before.size+' B':'')+(after?' · after '+after.size+' B':'');
+    const show=document.createElement('button');show.type='button';show.textContent='Show changes';
+    const out=document.createElement('div');
+    show.addEventListener('click',async()=>{
+      if(!snapshot||snapshot!==v)return;
+      show.disabled=true;out.textContent='Reading exact bytes…';
+      try{
+        const [pv,fv]=await Promise.all([c.kind==='ADDED'?{ok:true,bytes:new Uint8Array()}:fetchWhole(v,'P',c.path),
+          c.kind==='DELETED'?{ok:true,bytes:new Uint8Array()}:fetchWhole(v,'F',c.path)]);
+        if(snapshot!==v)return;
+        if(!pv.ok||!fv.ok){out.textContent=(pv.code||fv.code)+' — use the byte view below.';return;}
+        out.replaceChildren(renderFileDiff(c.path,pv.bytes,fv.bytes,before,after));
+      }catch{out.textContent='Review unavailable; canonical source may be stale.';}
+      finally{show.disabled=false;}
+    });
+    row.append(label,show,out);box.append(row);
+  }
+  return box;
+}
+function renderFileDiff(path,pBytes,fBytes,before,after){
+  const wrap=document.createElement('div');
+  const mime=imageType(path);
+  if(mime&&(!pBytes.length||!isText(pBytes))&&(!fBytes.length||!isText(fBytes))){
+    for(const [label,bytes,meta] of [['Previous',pBytes,before],['New',fBytes,after]]){
+      const fig=document.createElement('figure');const cap=document.createElement('figcaption');
+      cap.textContent=label+(meta?' · '+meta.size+' B · SHA-256 '+meta.sha256:' · absent');
+      if(bytes.length){const img=document.createElement('img');img.alt=label+' '+path;
+        img.style.maxWidth='280px';img.style.maxHeight='200px';
+        img.src=URL.createObjectURL(new Blob([bytes],{type:mime}));fig.append(img);}
+      fig.append(cap);wrap.append(fig);
+    }
+    return wrap;
+  }
+  if((pBytes.length&&!isText(pBytes))||(fBytes.length&&!isText(fBytes))){
+    wrap.textContent='Binary file. Previous: '+(before?before.size+' B, SHA-256 '+before.sha256:'absent')+
+      ' · New: '+(after?after.size+' B, SHA-256 '+after.sha256:'absent')+'. Use the byte view below.';
+    return wrap;
+  }
+  const dec=b=>new TextDecoder('utf-8').decode(b);
+  const a=splitLines(dec(pBytes)),b=splitLines(dec(fBytes));
+  const script=diffLines(a,b);
+  const pre=document.createElement('pre');pre.setAttribute('tabindex','0');
+  pre.style.overflow='auto';pre.style.maxHeight='420px';
+  if(!script){pre.textContent='Too many changes for a line diff ('+a.length+' → '+b.length+
+    ' lines). Review the full new source in the byte view below.';wrap.append(pre);return wrap;}
+  const {hunks,truncated}=unifiedHunks(a,b,script);
+  for(const h of hunks){
+    const head=document.createElement('span');head.className='diff-hunk';
+    head.textContent='@@ previous line '+h.aStart+' · new line '+h.bStart+' @@\n';pre.append(head);
+    for(const line of h.lines){
+      const span=document.createElement('span');
+      span.className=line[0]==='+'?'diff-add':line[0]==='-'?'diff-del':'diff-ctx';
+      span.textContent=line+'\n';pre.append(span);
+    }
+  }
+  if(!hunks.length)pre.textContent='Only line endings or encoding differ.';
+  if(truncated)pre.append(document.createTextNode('… output truncated; use the byte view for the rest.\n'));
+  wrap.append(pre);return wrap;
+}
 function renderPreview(v){
   details.replaceChildren();
   if(!v?.ok)return;
@@ -86,10 +178,7 @@ function renderPreview(v){
     list.append(item);
   }
   details.append(list);
-  const diff=document.createElement('p');
-  diff.textContent=(v.diff||[]).map(f=>f.kind+' '+f.path).join(' · ')||
-    'No changes relative to sealed previous bytes.';
-  details.append(diff);
+  details.append(renderChanges(v));
   const warning=document.createElement('p');
   warning.textContent=v.aiVerified===false?
     'EXCEPTIONAL MANUAL/INCOMPLETE TESTS: AI verification is NOT PASS. '+
@@ -149,7 +238,7 @@ function renderPreview(v){
         offset=out.offset;
         const bytes=Uint8Array.from(atob(out.base64),c=>c.charCodeAt(0));
         let view;
-        if(out.path==='main.pjs'||out.path==='index.html'){
+        if(isText(bytes)){
           try{view=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}
           catch{view=[...bytes].map(x=>x.toString(16).padStart(2,'0')).join(' ');}
         }else view=[...bytes].map(x=>x.toString(16).padStart(2,'0')).join(' ');
@@ -187,7 +276,8 @@ async function act(type,params,message){
           ' · pending safe child admission. Old approval is revoked; nothing published.');
       }
       else if(type==='APPROVE'){receipt=result;note('Durable source-bound approval '+result.releaseId+
-        '. No provider effect performed.');}
+        '. Publishing this exact approved source now…');
+        chainPublish=result;}
       else if(type==='CANCEL_APPROVED'){receipt=result;snapshot=null;
         note('Unsent source approval canceled; publication not attempted. Review fresh F before reapproving.');}
       else if(type==='DISPATCH'){receipt=result;note('Dispatch may have occurred: '+
@@ -207,6 +297,20 @@ async function act(type,params,message){
     if(serial===sequence){snapshot=null;receipt=null;
       note('Connection lost or timed out. Possible effect is UNKNOWN. Load the canonical receipt and reconcile before any further action.');}
   }finally{if(serial===sequence){active=false;controls();}}
+  // One human decision: a fresh exact-source approval is followed by the
+  // single fenced publication attempt (which re-validates F, READY, owner and
+  // route) and an independent read-only confirmation. Never retried.
+  if(chainPublish&&type==='APPROVE'){
+    const approved=chainPublish;chainPublish=null;
+    await act('DISPATCH',{slug:approved.slug,token:token.value,
+      expectedRevision:approved.revision,passphrase:passphrase.value},
+      'Publishing the exact approved source (single fenced attempt)…');
+    if(receipt&&receipt.slug===approved.slug&&
+       ['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN'].includes(receipt.state))
+      await act('RECONCILE',{slug:receipt.slug,token:token.value,
+        expectedRevision:receipt.revision},
+        'Independently confirming public listing and every source byte…');
+  }
 }
 previewBtn.addEventListener('click',()=>act('PREVIEW',{
   slug:slug.value,token:token.value,passphrase:passphrase.value},'Checking current owner, route, clean editor, Git READY and full saved F…'));

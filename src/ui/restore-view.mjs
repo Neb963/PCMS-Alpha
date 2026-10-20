@@ -234,3 +234,28 @@ $('pcms-restore-reconcile').addEventListener('click',async event=>{
     status.textContent='Reconciliation held: '+fault(e)+'. No retry performed.';
   }finally{pass.value='';button.disabled=false;void health();}
 });
+
+// Explicit fresh-controller reactivation after a COMPLETE_INACTIVE restore.
+const reactivateBox=$('pcms-restore-reactivate-box'),reactivateBtn=$('pcms-restore-reactivate'),
+  predecessor=$('pcms-restore-predecessor'),phrase=$('pcms-restore-reactivate-phrase');
+const PHRASE='THE PREVIOUS PCMS INSTALLATION IS STOPPED';
+let reactivationGuard=null;
+async function refreshReactivation(){
+  const g=await portCommand({action:'STATUS'});
+  reactivationGuard=g?.held&&g.status==='COMPLETE_INACTIVE'?g:null;
+  reactivateBox.hidden=!reactivationGuard;
+  reactivateBtn.disabled=!reactivationGuard||!predecessor.checked||phrase.value.trim()!==PHRASE;
+}
+predecessor.addEventListener('change',()=>void refreshReactivation());
+phrase.addEventListener('input',()=>{reactivateBtn.disabled=!reactivationGuard||
+  !predecessor.checked||phrase.value.trim()!==PHRASE;});
+reactivateBtn.addEventListener('click',async()=>{
+  if(!reactivationGuard)return;reactivateBtn.disabled=true;
+  const out=await portCommand({action:'REACTIVATE',params:{epoch:reactivationGuard.epoch,
+    revision:reactivationGuard.revision,predecessorStopped:predecessor.checked===true,
+    consent:phrase.value.trim()}});
+  status.textContent=out?.ok?'PCMS reactivated. Next: reconnect GitHub (Settings), confirm each account login (Accounts), '+
+    'then re-apply Protected workflow activation.':'Reactivation held: '+(out?.code||'UNKNOWN')+'.';
+  phrase.value='';predecessor.checked=false;void refreshReactivation();
+});
+void refreshReactivation();

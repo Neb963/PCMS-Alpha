@@ -34,10 +34,10 @@ test('cross-workspace links and accessible route changes are present', () => {
 
 test('operator workspaces expose guarded production actions without UI-origin network/route bypass', () => {
   assert.ok((html.match(/<button\b[^>]*\bdisabled\b/g) || []).length >= 3);
-  for(const [id, reason] of [['work-queue','blocked-work-queue']]){
-    assert.match(html, new RegExp(`aria-describedby="${reason}"`));
-    assert.match(html, new RegExp(`id="${reason}"`));
-  }
+  // The Work Queue explains its read-only receipts; the former permanently
+  // disabled "Start action" button was a dead control and stays removed.
+  assert.match(html, /id="blocked-work-queue"/);
+  assert.doesNotMatch(html, />Start action</);
   assert.doesNotMatch(shell, /\b(?:browser|chrome|fetch|XMLHttpRequest|WebSocket|navigator\.sendBeacon)\s*\./);
   assert.match(html, /PersonaMonkey advanced controls/);
   assert.match(html, /Operator dashboard · protected workflows/);
