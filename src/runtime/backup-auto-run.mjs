@@ -1,6 +1,7 @@
 // I15: unattended encryption via operator's OS vault, never default/local
 // key material. Background-only. No Perchance, Mullvad or Git effects.
-import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
+import {openCanonicalDatabase,createRestoreSentinel,createCanonicalStore} from './journal.mjs';
+import {createNoticeDispatcher} from './notices.mjs';
 import {vaultResponse,VAULT_HOST,safeStatus} from './backup-auto-core.mjs';
 import {createAutoStore} from './backup-auto-store.mjs';
 import {makeRetention} from './backup-auto-retention.mjs';
@@ -236,8 +237,23 @@ export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
         await retention.prune();
         return {ok:true,code:'BROWSER_REPORTED_COMPLETE'};
       }catch{return fail('BACKUP_INTERNAL_ERROR');}
-    })().finally(()=>{task=null;});
+    })().then(async result=>{await reportIncident(result);return result;})
+      .finally(()=>{task=null;});
     return task;
+  }
+  // C-68/C-69: one backup incident; resolved only by a verified successful
+  // archive. Not-due/disabled/in-flight outcomes are not failures.
+  const NOT_FAILURE=new Set(['AUTO_OFF','BACKUP_ALREADY_DONE','BACKUP_COOLDOWN',
+    'BACKUP_INFLIGHT','BACKUP_INFLIGHT_OR_UNCERTAIN','BACKUP_RESTORE_HOLD']);
+  async function reportIncident(result){
+    try{
+      const d=createNoticeDispatcher(api,createCanonicalStore(await database()));
+      if(result?.ok&&['NATIVE_READONLY_SOURCE_RECOVERY','BROWSER_REPORTED_COMPLETE'].includes(result.code))
+        await d.resolve({scopeId:'backup_automatic',code:'BACKUP_FAILED',evidence:'BACKUP_VERIFIED_COMPLETE'});
+      else if(result&&!result.ok&&!NOT_FAILURE.has(result.code))
+        await d.emit({scopeId:'backup_automatic',code:'BACKUP_FAILED',severity:'ACTION_REQUIRED',
+          revision:Math.max(1,clock())});
+    }catch{/* dashboard status still shows the outcome */}
   }
   // Manual source-complete v2 export shares I15's source cut, OS-vault
   // lookup, restore sentinel and same native ledger; no second scheduler.

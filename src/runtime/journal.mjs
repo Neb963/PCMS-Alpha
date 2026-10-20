@@ -200,45 +200,90 @@ export function createCanonicalStore(db) {
 
   // Incidents are canonical, revision-fenced metadata; they never contain
   // arbitrary provider text or override an operation/route hold.
+  // C-68: grouped by causal key (cause); a repeat of the same severity only
+  //   counts, never renotifies; escalation, reopening or a new cause does.
+  // C-69: only a trusted verified-recovery observation resolves; history is
+  //   retained and a recurrence reopens the same incident as actionable.
+  // C-70: review acknowledges without hiding. Legacy `ignored` records are
+  //   projected as reviewed-and-still-active, never hidden.
   const NOTICE_CODES = new Set(['ROUTE_UNAVAILABLE','ACCOUNT_UNVERIFIED',
-    'SOURCE_HELD','RESTORE_IN_PROGRESS','CANONICAL_UNAVAILABLE','OPERATION_UNCERTAIN']);
-  function recordNotice({ scopeId, code, severity, revision }) {
+    'SOURCE_HELD','RESTORE_IN_PROGRESS','CANONICAL_UNAVAILABLE','OPERATION_UNCERTAIN',
+    'PROVIDER_OUTAGE','BACKUP_FAILED','GIT_RECONNECT_REQUIRED']);
+  const RANK = { INFORMATIONAL:1, ACTION_REQUIRED:2, SERIOUS:3 };
+  const RENOTIFY_MS = 30 * 60000;
+  const causeOk = c => typeof c === 'string' && /^[A-Za-z0-9_:.-]{3,120}$/.test(c);
+  const active = n => n && n.state !== 'RESOLVED';
+  const pushHistory = (n, entry) => [...(Array.isArray(n?.history) ? n.history : []), entry].slice(-20);
+  function recordNotice({ scopeId, code, severity, revision, cause, at = Date.now() }) {
     if (!isSafeId(scopeId) || !NOTICE_CODES.has(code) ||
         !['SERIOUS','ACTION_REQUIRED','INFORMATIONAL'].includes(severity) ||
-        !Number.isSafeInteger(revision) || revision < 1)
+        !Number.isSafeInteger(revision) || revision < 1 ||
+        (cause !== undefined && !causeOk(cause)) || !Number.isSafeInteger(at))
       return Promise.resolve(fail('INVALID_NOTICE'));
-    const key = 'attention:' + scopeId + ':' + code;
+    const key = 'attention:' + scopeId + ':' + code, causeKey = cause || code;
     return transact(db, ['meta'], 'readwrite', (tx, finish) => {
       const meta = tx.objectStore('meta');
       meta.get(key).onsuccess = event => {
         const prior = event.target.result;
         if (prior && revision <= prior.revision) {
           finish(revision === prior.revision
-            ? ok({ changed:false, ignored:prior.ignored === true })
+            ? ok({ changed:false, notify:false, reviewed:prior.reviewed === true || prior.ignored === true })
             : fail('STALE_REVISION'));
           return;
         }
-        meta.put({ key, scopeId, code, severity, revision, ignored:false, reviewed:false });
-        finish(ok({ changed:true, ignored:false }));
+        let next, changed, event2;
+        if (!prior || !active(prior)) {
+          event2 = prior ? 'REOPENED' : 'OPENED';
+          next = { key, scopeId, code, cause:causeKey, severity, revision, state:'ACTIVE',
+            reviewed:false, ignored:false, count:(prior?.count || 0) + 1,
+            firstAt:prior?.firstAt ?? at, lastAt:at, resolvedAt:null,
+            history:pushHistory(prior, { event:event2, at, severity, revision }) };
+          changed = true;
+        } else {
+          const escalated = (RANK[severity] || 0) > (RANK[prior.severity] || 0);
+          event2 = escalated ? 'ESCALATED' : 'REPEATED';
+          next = { ...prior, cause:prior.cause || causeKey, severity:escalated ? severity : prior.severity,
+            revision, state:'ACTIVE', count:(prior.count || 1) + 1, lastAt:at,
+            reviewed:escalated ? false : (prior.reviewed === true || prior.ignored === true),
+            ignored:false, history:escalated ? pushHistory(prior, { event:event2, at, severity, revision }) :
+              (Array.isArray(prior.history) ? prior.history : []) };
+          changed = escalated;
+        }
+        meta.put(next);
+        if (!changed) { finish(ok({ changed:false, notify:false, reviewed:next.reviewed, event:event2 })); return; }
+        // One desktop notification per cause per window: a provider outage
+        // across many accounts/generators is one alert, unless it escalates.
+        meta.get('attention-cause:' + next.cause).onsuccess = ce => {
+          const last = ce.target.result;
+          const notify = !last || at - last.notifiedAt >= RENOTIFY_MS ||
+            (RANK[next.severity] || 0) > (RANK[last.severity] || 0);
+          if (notify) meta.put({ key:'attention-cause:' + next.cause, cause:next.cause,
+            notifiedAt:at, severity:next.severity });
+          finish(ok({ changed:true, notify, ignored:false, event:event2 }));
+        };
       };
     });
   }
-  function ignoreNotice({ scopeId, code, expectedRevision }) {
-    if (!isSafeId(scopeId) || !NOTICE_CODES.has(code) || !Number.isSafeInteger(expectedRevision))
+  function resolveNotice({ scopeId, code, evidence, at = Date.now() }) {
+    // Trusted background callers only; evidence names the independent
+    // observation (for example ROUTE_HEALTH_OBSERVED), never elapsed time.
+    if (!isSafeId(scopeId) || !NOTICE_CODES.has(code) ||
+        typeof evidence !== 'string' || !/^[A-Z0-9_]{6,64}$/.test(evidence) ||
+        !Number.isSafeInteger(at))
       return Promise.resolve(fail('INVALID_NOTICE'));
-    const key='attention:' + scopeId + ':' + code;
-    return transact(db,['meta'],'readwrite',(tx,finish)=>{
-      const meta=tx.objectStore('meta');
+    const key = 'attention:' + scopeId + ':' + code;
+    return transact(db, ['meta'], 'readwrite', (tx, finish) => {
+      const meta = tx.objectStore('meta');
       meta.get(key).onsuccess = event => {
-        const note=event.target.result;
-        if (!note) {finish(fail('NOTICE_NOT_FOUND'));return;}
-        if (note.revision !== expectedRevision) {finish(fail('STALE_REVISION'));return;}
-        if (!note.ignored) meta.put({ ...note, ignored:true });
-        finish(ok({ changed:!note.ignored, holdReleased:false }));
+        const note = event.target.result;
+        if (!note || !active(note)) { finish(ok({ changed:false })); return; }
+        meta.put({ ...note, state:'RESOLVED', resolvedAt:at, ignored:false,
+          history:pushHistory(note, { event:'RESOLVED', at, evidence }) });
+        finish(ok({ changed:true, resolved:true }));
       };
     });
   }
-  function acknowledgeNotice({ scopeId, code, expectedRevision }) {
+  function acknowledge({ scopeId, code, expectedRevision }) {
     if (!isSafeId(scopeId) || !NOTICE_CODES.has(code) ||
         !Number.isSafeInteger(expectedRevision))
       return Promise.resolve(fail('INVALID_NOTICE'));
@@ -247,54 +292,64 @@ export function createCanonicalStore(db) {
       const meta=tx.objectStore('meta');
       meta.get(key).onsuccess=event=>{
         const note=event.target.result;
-        if(!note || note.ignored===true){finish(fail('NOTICE_NOT_FOUND'));return;}
+        if(!note || !active(note)){finish(fail('NOTICE_NOT_FOUND'));return;}
         if(note.revision!==expectedRevision){finish(fail('STALE_REVISION'));return;}
-        if(note.reviewed!==true)meta.put({...note,reviewed:true});
-        finish(ok({changed:note.reviewed!==true,holdReleased:false,
-          stillActionable:true,reviewed:true}));
+        const changed=note.reviewed!==true||note.ignored===true;
+        if(changed)meta.put({...note,reviewed:true,ignored:false});
+        finish(ok({changed,holdReleased:false,stillActionable:true,reviewed:true}));
       };
     });
   }
+  // Legacy "Ignore" is an acknowledgement: it never hides an active incident.
+  const ignoreNotice = acknowledge, acknowledgeNotice = acknowledge;
   function noticeSummary() {
     return transact(db,['meta'],'readonly',(tx,finish)=>{
-      const counts={ serious:0, actionRequired:0, informational:0, ignored:0 };
+      const counts={ serious:0, actionRequired:0, informational:0, reviewed:0, resolved:0, ignored:0 };
       const cursor=tx.objectStore('meta').openCursor();
       cursor.onsuccess = event => {
         const row=event.target.result;
         if (!row) {finish(ok({counts}));return;}
         const n=row.value;
         if (typeof n?.key==='string' && n.key.startsWith('attention:')) {
-          if (n.ignored === true) counts.ignored++;
-          else if (n.severity==='SERIOUS') counts.serious++;
-          else if (n.severity==='ACTION_REQUIRED') counts.actionRequired++;
-          else if (n.severity==='INFORMATIONAL') counts.informational++;
+          if (!active(n)) counts.resolved++;
+          else {
+            if (n.severity==='SERIOUS') counts.serious++;
+            else if (n.severity==='ACTION_REQUIRED') counts.actionRequired++;
+            else if (n.severity==='INFORMATIONAL') counts.informational++;
+            if (n.reviewed===true||n.ignored===true) counts.reviewed++;
+          }
         }
         row.continue();
       };
     });
   }
 
-  function listNotices(limit=50) {
+  function listNotices(limit=50,{ includeResolved=false }={}) {
     return transact(db,['meta'],'readonly',(tx,finish)=>{
       const notices=[];
-      let truncated=false;
+      let truncated=false,resolved=0;
       const cursor=tx.objectStore('meta').openCursor();
       cursor.onsuccess = event => {
         const row=event.target.result;
-        if (!row) {finish(ok({notices,truncated}));return;}
+        if (!row) {finish(ok({notices,truncated,resolved}));return;}
         const n=row.value;
-        if (typeof n?.key==='string' && n.key.startsWith('attention:') &&
-            n.ignored!==true) {
-          if (notices.length>=limit) truncated=true;
-          else notices.push({scopeId:n.scopeId,code:n.code,
-            severity:n.severity,revision:n.revision,reviewed:n.reviewed===true});
+        if (typeof n?.key==='string' && n.key.startsWith('attention:')) {
+          if (!active(n)) resolved++;
+          if (active(n) || includeResolved) {
+            if (notices.length>=limit) truncated=true;
+            else notices.push({scopeId:n.scopeId,code:n.code,cause:n.cause||n.code,
+              severity:n.severity,revision:n.revision,
+              reviewed:n.reviewed===true||n.ignored===true,state:active(n)?'ACTIVE':'RESOLVED',
+              count:Number.isSafeInteger(n.count)?n.count:1,
+              firstAt:n.firstAt??null,lastAt:n.lastAt??null,resolvedAt:n.resolvedAt??null});
+          }
         }
         row.continue();
       };
     });
   }
   return Object.freeze({ provisionTarget, apply, getOperation, summary, recover,
-    recordNotice, ignoreNotice, acknowledgeNotice, noticeSummary,
+    recordNotice, resolveNotice, ignoreNotice, acknowledgeNotice, noticeSummary,
     listNotices, close: () => db.close() });
 }
 

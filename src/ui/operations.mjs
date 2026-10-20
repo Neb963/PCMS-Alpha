@@ -6,6 +6,18 @@ const queue=document.getElementById('pcms-work-queue-summary');
 const attention=document.getElementById('pcms-attention-list');
 const refresh=document.getElementById('pcms-attention-refresh');
 let generation=0;
+const SEVERITY={SERIOUS:'Serious',ACTION_REQUIRED:'Action required',INFORMATIONAL:'Information'};
+const LABEL={ROUTE_UNAVAILABLE:'Protected route unavailable',ACCOUNT_UNVERIFIED:'Account login not verified',
+  SOURCE_HELD:'Generator source held',RESTORE_IN_PROGRESS:'Restore in progress',
+  CANONICAL_UNAVAILABLE:'Local storage unavailable',OPERATION_UNCERTAIN:'External write outcome uncertain',
+  PROVIDER_OUTAGE:'Perchance unavailable',BACKUP_FAILED:'Backup failed',
+  GIT_RECONNECT_REQUIRED:'GitHub connection needs attention'};
+const ACTION={ROUTE_UNAVAILABLE:'Check the account in Accounts → Check route. Clears itself once a healthy route is observed again.',
+  ACCOUNT_UNVERIFIED:'Open the account’s Perchance tab, log in, then Confirm login.',
+  OPERATION_UNCERTAIN:'PCMS reconciles by read-only checks; do not repeat the action manually.',
+  PROVIDER_OUTAGE:'Waiting for Perchance to recover. Generator timers are frozen meanwhile; no action needed unless it persists.',
+  BACKUP_FAILED:'Check Settings → Scheduled backup (native host and unlocked keyring). Clears after the next successful backup.',
+  GIT_RECONNECT_REQUIRED:'Unlock your keyring or reconnect GitHub in Settings. Queued work is kept and resumes afterwards.'};
 function command(message){
   return new Promise((resolve,reject)=>{
     const port=browser.runtime.connect({name:'pcms-i02-canonical-readonly'});
@@ -47,12 +59,16 @@ async function read(){
   for(const group of groupNotices(list.notices)){
     const section=document.createElement('section');section.className='attention-group';
     const heading=document.createElement('h3');
-    heading.textContent=group.severity+' · '+group.scopeId;
-    section.append(heading);
+    heading.textContent=(SEVERITY[group.severity]||group.severity)+' · '+
+      (LABEL[group.code]||group.code)+(group.scopes.length>1?' · '+group.scopes.length+' affected':'');
+    const help=document.createElement('p');help.className='reason';
+    help.textContent=(ACTION[group.code]||'Open the affected area for details.')+
+      (group.count>group.notices.length?' Seen '+group.count+' times.':'');
+    section.append(heading,help);
     for(const n of group.notices){
       const line=document.createElement('div');line.className='attention-item';
       const label=document.createElement('span');
-      label.textContent=n.code+' · '+(n.reviewed?'Reviewed — still active':'Action required');
+      label.textContent=n.code+' · '+n.scopeId+' · '+(n.reviewed?'Reviewed — still active':'Action required');
       const button=document.createElement('button');
       button.type='button';button.textContent=n.reviewed?'Reviewed':'Mark reviewed';
       button.disabled=n.reviewed===true;

@@ -5,6 +5,8 @@ export function createNoticeDispatcher(api, store) {
     async emit(incident) {
       const receipt=await store.recordNotice(incident);
       if (!receipt.ok || !receipt.changed) return receipt;
+      // The canonical store decides per cause (C-68); a repeat never alerts.
+      if (receipt.notify === false) return { ...receipt, desktop:'GROUPED_WITH_ACTIVE_INCIDENT' };
       if (incident.severity==='INFORMATIONAL') return receipt;
       try {
         await api.notifications.create({
@@ -16,6 +18,8 @@ export function createNoticeDispatcher(api, store) {
       } catch {
         return { ...receipt, desktop:'UNAVAILABLE_DASHBOARD_ONLY' };
       }
-    }
+    },
+    // C-69: only a trusted, independently observed recovery resolves.
+    resolve(incident) { return store.resolveNotice(incident); }
   });
 }
