@@ -148,6 +148,16 @@ test('S07 C-54: verified first marker and actual return to feed admit the next m
   assert.equal(saved.evidence.savedSourceFingerprint,first);
   assert.equal(saved.evidence.savedMarkerId,'marker_0000000001');
   assert.equal(saved.evidence.awaitingVisibility,true);
+  const tooEarly=observeRefreshPresence(saved.evidence,{at:now+1,
+    present:true,rank:3,complete:true,healthy:true});
+  assert.equal(tooEarly.ok,false);
+  assert.equal(tooEarly.code,'REFRESH_FEED_PREDATES_SAVED_SOURCE');
+  const preSaveFeed=reconcileRefreshAttempt(sent.evidence,'first_intent',{
+    at:now+2,kind:'EFFECT_CHANGED',sourceFingerprint:first,
+    targetMatched:true,principalMatched:true,
+    feed:{independent:true,complete:true,observedAt:now+1,present:true,rank:3}});
+  assert.equal(preSaveFeed.effectVerified,true);
+  assert.equal(preSaveFeed.evidence.awaitingVisibility,true);
   const absentAgain=observeRefreshPresence(saved.evidence,{at:now+600000,
     present:false,complete:true,healthy:true});
   assert.equal(absentAgain.ok,true);

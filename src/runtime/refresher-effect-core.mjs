@@ -35,6 +35,12 @@ export function observeRefreshPresence(current,{at,present,rank,complete,healthy
       windowMs<60000)return {ok:false,code:'VISIBILITY_UNVERIFIED'};
   if(at<=Math.max(e.lastSeenAt,e.lastMissAt))return {ok:false,code:'STALE_VISIBILITY'};
   if(present){
+    // A feed GET whose observation began before the independent saved-source
+    // readback is NOT evidence that the new marker returned to the recent page.
+    // Late delivery of an old HTTP response must never authorize another save.
+    if(e.awaitingVisibility===true&&
+       (!time(e.history.at(-1)?.at)||at<=e.history.at(-1).at))
+      return {ok:false,code:'REFRESH_FEED_PREDATES_SAVED_SOURCE'};
     const wasSuspended=e.suspended;
     const uncertain=e.state==='EFFECT_UNVERIFIED'||e.intent?.state==='DISPATCH_POSSIBLE';
     e.misses=0;e.lastSeenAt=at;e.lastRank=rank;e.awaitingVisibility=false;
@@ -137,7 +143,7 @@ export function reconcileRefreshAttempt(evidence,id,{at,kind,sourceFingerprint,
     dispatchAt:prior.dispatchAt,effect:e.state,
     // A feed result must carry its own complete timestamped independent proof.
     feed:feed?.independent===true&&feed.complete===true&&time(feed.observedAt)&&
-      feed.observedAt>=prior.dispatchAt&&
+      feed.observedAt>at&&feed.observedAt>=prior.dispatchAt&&
       (feed.present===false||(feed.present===true&&
         Number.isSafeInteger(feed.rank)&&feed.rank>0&&feed.rank<=5000))?
         {state:feed.present?'PRESENT':'ABSENT',at:feed.observedAt,
