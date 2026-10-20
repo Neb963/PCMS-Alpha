@@ -78,3 +78,20 @@ test('S07 state migration: pre-S07 saved scheduler policy has no implicit source
  assert.equal(turned.ok,true);
  assert.notEqual(turned.state.policy.refreshEnabled,true);
 });
+
+test('S07 E04: canonical feed receipts do not break native chain; explicit failed native observation does',()=>{
+  const before=sample(1,T),after=sample(2,T+MINUTE);
+  const s=emptyShadow();
+  s.recent={...s.recent,complete:true,observedAt:T+10};
+  const first=advanceShadow(s,{now:T,bootId:boot,nativeClock:before});
+  assert.equal(first.ok,true);
+  const unrelated=advanceShadow(first.state,{now:T+100,bootId:boot});
+  assert.equal(unrelated.ok,true);
+  assert.equal(unrelated.state.nativeClock.witness.sequence,1);
+  const resumed=advanceShadow(unrelated.state,{now:T+MINUTE,
+    bootId:boot,nativeClock:after});
+  assert.equal(resumed.ok,true);
+  assert.equal(resumed.state.nativeClock.witness.sequence,2);
+  const lost=advanceShadow(first.state,{now:T+100,bootId:boot,nativeClock:null});
+  assert.equal(lost.state.nativeClock,null);
+});
