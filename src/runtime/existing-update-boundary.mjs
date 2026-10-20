@@ -15,6 +15,7 @@ import {createReadyStore} from './ready-store.mjs';
 import {stageReadyGitSource} from './ready-git-source.mjs';
 import {evaluateStageSuccessor} from './ready-source-safety.mjs';
 import {REFRESHER_KEY} from './refresher-core.mjs';
+import {resolveRefreshedPrevious} from './refresher-admission.mjs';
 
 export const EXISTING_PORT='pcms-i13-existing';
 const valid=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
@@ -189,6 +190,14 @@ export function createExistingBoundary(api,{
         original=await exactSource(prior.sealedSource?.blobs);
         if(!original.ok||original.fingerprint!==prior.sourceFingerprint)
           return fail('PRIOR_RELEASE_P_BYTES_UNVERIFIED');
+        // The published Git/release F remains immutable; an independently
+        // confirmed S07 marker changes the actual provider P. Seal the real
+        // P for rollback only after reconstructing its one permitted HTML
+        // comment from frozen published F and matching full remote bytes.
+        const current=await resolveRefreshedPrevious({
+          published:original,remote:remote.source,row:f.row});
+        if(!current.ok)return current;
+        original=current.source;
       }
       if(!authorizeSleepingUpdate({account:f.account,inventory:f.inventory,
         adoption:f.adoption,shadow:f.row,original,remote:{

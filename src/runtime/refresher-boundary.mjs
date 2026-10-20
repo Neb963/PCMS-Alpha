@@ -5,6 +5,7 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 import {createRefresherStore} from './refresher-store.mjs';
 import {MINUTE} from './refresher-core.mjs';
+import {qualifyRecentAbsence} from './refresher-admission.mjs';
 import {createNoticeDispatcher} from './notices.mjs';
 export const REFRESHER_PORT='pcms-i12-refresher',REFRESHER_ALARM='pcms-refresher-turn';
 const types=new Set(['GET_REFRESHER','SET_POLICY','SET_PAUSE','SET_GENERATOR_POLICY','DEMAND_STATISTIC','OBSERVE_NOW','RESET_RECENT_BACKOFF']);
@@ -43,6 +44,7 @@ export function validateRefresherMessage(api,sender,message){
 export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFactory=createRefresherStore,
   guard=internalPcmsGuard,observationGate=()=>false,
   refreshGate=()=>false,qualificationFor=()=>null,refreshAdapter=null,clock=Date.now,
+  nativeClockGate=()=>false,continuousCoverageFor=()=>null,
   newId=()=>crypto.randomUUID().replaceAll('-','')}={}){
   let dbPromise,turnPromise=null,registered=false,alarmHeld=false,alarmTail=Promise.resolve();
   const bootId=newId(),sentinel=createRestoreSentinel(api.storage.local);
@@ -64,13 +66,21 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       try{alarmHeld=!(await api.alarms.get(REFRESHER_ALARM));}catch{alarmHeld=true;}
     }
   }
-  async function safeBreadcrumb(result,code){
+  async function safeBreadcrumb(result,code,sourceWritePossible=false){
     try{
       const d=result?.state?.diagnostics||{};
-      await api.storage.local.set({pcmsI12Status:{mode:'SHADOW_ONLY',
+      const previous=(await api.storage.local.get('pcmsI12Status'))?.pcmsI12Status;
+      const prior=Number.isSafeInteger(previous?.mutations)&&previous.mutations>=0?
+        previous.mutations:0;
+      // Redacted durable count of possibly dispatched guarded source writes.
+      // Never report permanent zero after the operator enabled mutations.
+      const mutations=Math.min(999999,prior+(sourceWritePossible?1:0));
+      await api.storage.local.set({pcmsI12Status:{
+        mode:result?.state?.policy?.refreshEnabled===true?
+          'GUARDED_REFRESH_ENABLED':'SHADOW_ONLY',
         code:code||'SHADOW_READY',turns:d.turns||0,reads:d.reads||0,
         queuePeak:d.queuePeak||0,readPeak:d.readPeak||0,unknownIntervals:d.unknownIntervals||0,
-        alarmHeld,mutations:0}});
+        alarmHeld,mutations}});
     }catch{}
   }
   function alarmReceipt(){
@@ -100,7 +110,8 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         a.metrics.nextDueAt-b.metrics.nextDueAt||a.ordinal-b.ordinal);
     const claims=[];
     if(!state.recent.suspended&&state.recent.nextDueAt<=now){
-      const accountId=scopes.find(([id])=>before.get(id)?.ready)?.[0];
+      const accountId=(state.recent.endpointBackoffUntil||0)>now?null:
+        scopes.find(([id])=>before.get(id)?.ready)?.[0];
       if(accountId){const out=await s.claim({kind:'RECENT',preferredAccountId:accountId,
         now,bootId,claimId:newId()});if(out.ok)claims.push(out.claim);}
     }
@@ -170,6 +181,9 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     // No UI message can enable this gate or supply provider qualifications.
     // Production has no verified method/adapter and is unconditionally OFF.
     if(!refreshGate()||!refreshAdapter||!observationGate())return 'REFRESH_ACTIVATION_HELD';
+    const enabled=await s.read();
+    if(!enabled.ok||enabled.state.policy.refreshEnabled!==true)
+      return 'REFRESH_OPERATOR_DISABLED';
     const g=guard();if(!g?.getSafeRouteReadiness)return 'GUARDED_REFRESH_UNAVAILABLE';
     const snapshot=await s.read();if(!snapshot.ok)return 'CANONICAL_UNAVAILABLE';
     // Reconcile a possibly-dispatched effect by independent READBACK ONLY.
@@ -188,14 +202,19 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       const intent=uncertain.refresh.intent,a=snapshot.state.accounts[uncertain.accountId];
       if(!uncertain.ownerVerified||!uncertain.releaseVerified||uncertain.identityHeld||
         uncertain.reviewHeld||uncertain.listing!=='PUBLIC'||!a?.verifiedIdentity||
-        uncertain.releaseFingerprint!==intent.sourceFingerprint)
+        (uncertain.refresh?.savedSourceFingerprint||uncertain.releaseFingerprint)!==
+          intent.sourceFingerprint)
         return 'REFRESH_RECONCILIATION_HELD';
       const first=await g.getSafeRouteReadiness(uncertain.personaUid);
       if(!first?.ready)return 'REFRESH_RECONCILIATION_ROUTE_HELD';
       const claim={id:intent.id,slug:uncertain.slug,stableId:uncertain.stableId,
         accountId:uncertain.accountId,personaUid:uncertain.personaUid,
         bindingVersion:uncertain.bindingVersion,
-        principalFingerprint:a.principalFingerprint,releaseFingerprint:intent.sourceFingerprint};
+        principalFingerprint:a.principalFingerprint,remoteId:uncertain.remoteId,
+        markerId:intent.markerId||null,nonce:intent.nonce||null,
+        releaseFingerprint:uncertain.releaseFingerprint,
+        sourceFingerprint:intent.sourceFingerprint,
+        targetFingerprint:intent.targetFingerprint||null};
       let receipt={at:clock(),kind:'UNKNOWN',sourceFingerprint:null,
         targetMatched:false,principalMatched:false};
       try{
@@ -217,9 +236,11 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       r.ownerVerified&&r.releaseVerified&&!r.identityHeld&&!r.reviewHeld&&
       !r.refresh?.intent&&!r.refresh?.suspended&&
       (r.refresh?.nextAttemptAt||0)<=clock()&&
-      snapshot.state.accounts[r.accountId]?.verifiedIdentity===true);
+      snapshot.state.accounts[r.accountId]?.verifiedIdentity===true&&
+      qualifyRecentAbsence({row:r,recent:snapshot.state.recent,
+        policy:snapshot.state.policy,now:clock()}).ok);
     if(!row)return 'NO_REFRESH_DUE';
-    const candidate=qualificationFor(row);
+    const candidate=await qualificationFor(row,snapshot.state.accounts[row.accountId]);
     // A candidate from a fixture, code comment or stale source is not enough.
     const first=await g.getSafeRouteReadiness(row.personaUid);
     if(!first?.ready)return 'PROTECTED_ROUTE_UNAVAILABLE';
@@ -242,8 +263,8 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     let receipt={at:clock(),kind:'UNKNOWN',sourceFingerprint:null,
       targetMatched:false,principalMatched:false};
     try{
-      // The installed application has no provider-specific implementation or
-      // authorization. Tests inject an isolated deterministic effect ledger.
+      // The fixed installed I13 editor is the only guarded writer, and an
+      // ACK remains insufficient: this separate readback validates full source.
       await refreshAdapter.execute({...claim,method:candidate.method,methodVersion:candidate.version});
       const check=await refreshAdapter.readback(claim);
       const final=await g.getSafeRouteReadiness(row.personaUid);
@@ -264,7 +285,37 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     turnPromise=(async()=>{
       try{
         if((await sentinel.inspect()).held){await safeBreadcrumb(null,'RESTORE_HOLD');return fail('RESTORE_HOLD');}
-        const s=await store(),now=clock(),result=await s.turn({now,bootId});
+        const s=await store();
+        let nativeClock=null,qualifiedCoverages=null;
+        if(nativeClockGate()){
+          // Existing donor pin + native witness; no new observer or synthetic
+          // future certificates. A route failure at either endpoint freezes
+          // that account's bounded native awake interval.
+          try{
+            const g=guard(),native=await g?.sampleNativeWitness?.();
+            if(native?.ok===true&&native.witness){
+              const previous=await s.read(),routes=[];
+              const accounts=Object.entries(previous?.state?.accounts||{})
+                .filter(([,a])=>a.verifiedIdentity===true)
+                .slice(0,100);
+              for(const [accountId,a] of accounts){
+                let ready;
+                try{ready=await g.getSafeRouteReadiness(a.personaUid);}catch{}
+                if(ready?.ready===true&&ready.personaUid===a.personaUid)
+                  routes.push({ready:true,accountId,personaUid:a.personaUid,
+                    bindingVersion:a.bindingVersion,
+                    principalFingerprint:a.principalFingerprint,
+                    routeId:ready.routeId,cookieStoreId:ready.cookieStoreId,
+                    healthDomain:ready.healthDomain});
+              }
+              nativeClock={...native.witness,observedAtMs:clock(),routes};
+              // Synthetic injection is retained for deterministic tests only.
+              qualifiedCoverages=await continuousCoverageFor({
+                at:nativeClock.observedAtMs,bootId,nativeClock});
+            }
+          }catch{/* no fake time credited on native/route failure */}
+        }
+        const now=clock(),result=await s.turn({now,bootId,nativeClock,qualifiedCoverages});
         if(!result.ok){await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return result;}
         await schedule(result.state.nextWakeAt);
         // At most two protected reads per turn. Persistent quota/coalescing spans
@@ -274,10 +325,16 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         let refresh='REFRESH_ACTIVATION_HELD';
         try{refresh=await maybeRefresh(s);}catch{refresh='REFRESH_EFFECT_UNCERTAIN';}
         await notifyChanges(result);await notifyChanges(observed);
+        const mutationPossible=['EFFECT_INDEPENDENTLY_PROVEN','REFRESH_EFFECT_HELD',
+          'REFRESH_EFFECT_UNCERTAIN'].includes(refresh);
         await safeBreadcrumb(result,alarmHeld?'ALARM_UNVERIFIED':
-          observed.code==='MONITOR_ACTIVATION_HELD'?'MONITOR_ACTIVATION_HELD':'SHADOW_READY');
-        return {ok:true,revision:result.revision,mode:'SHADOW_ONLY',providerEffects:'OFF',
-          alarmHeld,observation:observed.code||'OBSERVED',refresh};
+          observed.code==='MONITOR_ACTIVATION_HELD'?'MONITOR_ACTIVATION_HELD':'SHADOW_READY',
+          mutationPossible);
+        return {ok:true,revision:result.revision,
+          mode:result.state.policy?.refreshEnabled===true?
+            'GUARDED_REFRESH_ENABLED':'SHADOW_ONLY',
+          providerEffects:mutationPossible?'POSSIBLE_SOURCE_WRITE':
+            'OFF',alarmHeld,observation:observed.code||'OBSERVED',refresh};
       }catch{await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return fail('REFRESHER_AUTHORITY_UNAVAILABLE');}
       finally{turnPromise=null;}
     })();
@@ -292,7 +349,14 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         return {...view,restoreHeld:restore.held,alarmHeld,monitoring:
           observationGate()?'GUARDED_READ_ONLY':'OFF_PENDING_ACTIVATION',
           refreshCapability:refreshGate()&&refreshAdapter?
-            'TEST_OR_AUTHORIZED_CAPABILITY_GATED':'LIVE_REFRESH_OFF_UNTIL_PROVEN'};
+            (view.policy?.refreshEnabled===true?
+              'OPERATOR_ENABLED_GUARDED_WRITER':'OPERATOR_MUTATION_DISABLED'):
+            'LIVE_REFRESH_OFF_UNTIL_PROVEN',
+          // This reports the actual production gate, never assumes that
+          // monotonic host time is eligible provider/account operating time.
+          clockCapability:nativeClockGate()?
+            'BOUNDED_NATIVE_ROUTE_FEED_ELIGIBILITY':
+            'CONTINUOUS_ELIGIBILITY_NOT_ESTABLISHED'};
       }
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(message.type==='OBSERVE_NOW'){

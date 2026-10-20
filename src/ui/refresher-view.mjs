@@ -29,10 +29,19 @@ function inspector(){
   el('generator-active').value=r.activeMs/3600000;el('generator-sleep').value=r.sleepMs/3600000;
   el('generator-pause').textContent=r.paused?'Resume generator':'Pause generator';
   const proof=r.refresh;
+  const effectStatus=proof?.state==='INEFFECTIVE'?
+    ' · Ineffective save: source unchanged, automatic retries held':
+    proof?.state==='EFFECT_UNVERIFIED'||proof?.state==='DISPATCH_POSSIBLE'?
+    ' · Possible save: independently verify source; never replay':
+    proof?.awaitingVisibility?
+    ' · Source save verified; waiting for new recent-page return':
+    proof?.proof?.effect==='EFFECT_CONFIRMED'?
+    ' · Source save verified; recent-page effectiveness separate':'';
   el('selected').textContent+=' · visibility '+(proof?.state||'UNOBSERVED')+
     ' · misses '+(proof?.misses||0)+' · attempts '+(proof?.attempts||0)+
-    ' · independent effect '+(proof?.proof?.effect||'UNVERIFIED')+
-    ' · recent feed '+(proof?.proof?.feed?.state||'UNKNOWN');
+    ' · independent source effect '+(proof?.proof?.effect||'UNVERIFIED')+
+    ' · current recent feed '+(snapshot.recent.complete?'verified':'UNKNOWN')+
+    effectStatus;
   el('metric').textContent=r.metric?
     r.metric.views+' observed views · '+age(r.metric.observedAt)+
     (r.metric.correction?' · correction/reset; interval delta unknown':'')+
@@ -41,7 +50,13 @@ function inspector(){
 function draw(s){
   const focusId=document.activeElement?.dataset?.stableId;
   snapshot=s;
-  const summary=s.occupied+' occupied shadow slots / '+s.capacity.cap+
+  const occupancy=s.recent.latestOccupancy;
+  const observed=occupancy?
+    (s.recent.complete===true?'':'Last confirmed sample; current feed UNKNOWN · ')+
+    occupancy.ownedVisible+' owned visible of '+occupancy.feedSize+
+      ' returned recent items ('+occupancy.activeVisible+' active)':
+    'owned recent-page occupancy not yet observed';
+  const summary=observed+' · '+s.occupied+' scheduled slots / '+s.capacity.cap+
     ' admission cap · '+s.eligible+' eligible · planning '+s.capacity.demand.toFixed(2)+
     ' · '+(s.capacity.warning||'multi-window observation')+' · '+
     age(s.recent.observedAt)+(s.recent.stale?' (stale)':'')+
@@ -52,13 +67,18 @@ function draw(s){
     const target=document.getElementById(id);if(target)target.textContent='Shadow Refresher: '+summary;
   }
   el('provider').textContent='Provider '+s.provider.state+
-    ' · effective refresh method unverified (mutation disabled) · clocks: '+s.clock+
-    ' · observations: '+s.monitoring+' · refresh mutations OFF.';
+    (s.policy.refreshEnabled?' · guarded marker saves ENABLED':' · refresh mutation OFF')+
+    ' · operating time: '+
+    (s.clockCapability==='BOUNDED_NATIVE_ROUTE_FEED_ELIGIBILITY'?
+      'bounded native awake time with current protected route/feed evidence; unknown frozen':
+      'continuous eligibility not verified')+
+    ' · observations: '+s.monitoring+'.';
   el('diagnostics').textContent=s.diagnostics.turns+' durable turns · '+s.diagnostics.unknownIntervals+
     ' unknown intervals frozen · read peak '+s.diagnostics.readPeak+' · queue peak '+s.diagnostics.queuePeak+
     ' · next wake '+(s.nextWakeAt?new Date(s.nextWakeAt).toLocaleTimeString():'not verified')+
     (s.alarmHeld?' · alarm unverified':'');
   el('global-pause').textContent=s.globalPause?'Resume globally':'Pause globally';
+  el('enable').checked=s.policy.refreshEnabled===true;
   el('active').value=s.policy.activeMs/3600000;el('sleep').value=s.policy.sleepMs/3600000;
   el('grace').value=s.policy.graceMs/60000;el('cap').value=s.policy.manualCap??'';
   const oldAccount=el('account').value;el('account').replaceChildren();
@@ -76,8 +96,9 @@ function draw(s){
     const button=document.createElement('button');button.type='button';button.textContent=r.slug;
     button.dataset.stableId=r.stableId;button.setAttribute('aria-label','Inspect Refresher for '+r.slug);
     button.addEventListener('click',()=>{selected=r;inspector();});td.append(button);tr.append(td);
-    const present=r.presence?(r.presence.present?'present at '+r.presence.position:'absent; not deleted')+
-      ' · '+age(r.presence.observedAt)+(r.presence.stale?' · stale':''):'unobserved';
+    const present=r.presence?((s.recent.complete===true?'':'historical only; current feed UNKNOWN · ')+
+      (r.presence.present?'present at '+r.presence.position:'absent; not deleted')+
+      ' · '+age(r.presence.observedAt)+(r.presence.stale?' · stale':'')):'unobserved';
     for(const text of [r.accountId,rowText(r),String(r.ordinal),present]){
       const c=document.createElement('td');c.textContent=text;tr.append(c);
     }
@@ -106,7 +127,9 @@ async function load(){
     if(mine!==epoch)return;
     if(!s?.ok)throw Error(s?.code||'READ_UNAVAILABLE');
     draw(s);status.textContent=s.restoreHeld?'Restore hold; local changes held.':
-      'Shadow projection only. Unknown operational intervals freeze. Ordinary sleep remains public; no refresh or unlisting is sent.';
+      (s.policy.refreshEnabled?
+        'Protected automatic marker saves enabled. Recent placement is independently observed; ambiguous/ineffective writes held.':
+        'Monitoring read-only. Marker saves disabled until explicitly enabled. Unknown operational intervals freeze.');
   }catch(error){if(mine!==epoch)return;snapshot=null;
     status.textContent='Shadow state unavailable. No healthy fleet or empty remote queue inferred.';
     for(const id of ['save','global-pause','account-pause','generator-pause','generator-save','demand','retry-recent'])el(id).disabled=true;
@@ -121,7 +144,7 @@ async function change(type,params){
       status.textContent=result?.code==='STALE_REVISION'?
       'State changed; review the refreshed values before trying again.':
       'Change held: '+(result?.code||'UNKNOWN');return;}
-    await load();status.textContent='Local change committed. Provider refresh mutations remain OFF.';
+    await load();status.textContent='Local settings committed. Refresh source writes follow the explicit enabled state shown above.';
   }catch{status.textContent='Acknowledgment unavailable. Reload canonical state before trying again.';snapshot=null;}
 }
 el('reload').addEventListener('click',load);
@@ -137,7 +160,8 @@ el('account-pause').addEventListener('click',()=>{
 });
 el('save').addEventListener('click',()=>change('SET_POLICY',{policy:{
   activeMs:Number(el('active').value)*3600000,sleepMs:Number(el('sleep').value)*3600000,
-  graceMs:Number(el('grace').value)*60000,manualCap:el('cap').value===''?null:Number(el('cap').value)}}));
+  graceMs:Number(el('grace').value)*60000,manualCap:el('cap').value===''?null:Number(el('cap').value),
+  refreshEnabled:el('enable').checked===true}}));
 el('generator-pause').addEventListener('click',()=>selected&&change('SET_PAUSE',{
   scope:'GENERATOR',target:selected.stableId,paused:!selected.paused}));
 el('generator-save').addEventListener('click',()=>selected&&change('SET_GENERATOR_POLICY',{

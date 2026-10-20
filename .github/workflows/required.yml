@@ -87,6 +87,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # ubuntu-24.04 runners sometimes inherit an unrelated Microsoft
+          # package feed that returns 403. These H tests install only Ubuntu
+          # dbus/keyring tools. Disable ONLY a standalone Microsoft feed;
+          # retain signed Ubuntu sources, normal APT verification and fail
+          # closed if the runner unexpectedly mixes both origins in a file.
+          for source_file in /etc/apt/sources.list.d/*; do
+            if [[ -f "$source_file" ]] && grep -Fq 'packages.microsoft.com/' "$source_file"; then
+              if grep -Eq '(archive|security)[.]ubuntu[.]com|ubuntu[.]sources' "$source_file"; then
+                echo "Mixed Ubuntu/Microsoft apt source: fail closed" >&2
+                exit 1
+              fi
+              sudo mv -- "$source_file" "${source_file}.pcms-disabled"
+            fi
+          done
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
             dbus-user-session gnome-keyring libsecret-tools

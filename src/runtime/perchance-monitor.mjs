@@ -43,6 +43,13 @@ export async function perchanceMonitorIsolated(request){
         return no('STATISTIC_SCHEMA_UNVERIFIED');
       return {ok:true,views:payload.views,unit:'VIEWS',source:'GUARDED_READ_ONLY'};
     }
+    // A valid partial JSON page cannot establish that absent generators
+    // are off the complete current recent page. Fail closed on any advertised
+    // continuation; page-size alone is never completion evidence.
+    if(payload.hasMore===true||payload.has_more===true||
+       payload.nextCursor!=null||payload.nextPage!=null||
+       payload.pagination?.hasNext===true||payload.pagination?.hasMore===true)
+      return no('RECENT_INCOMPLETE');
     if(!Array.isArray(payload.generators)||payload.generators.length>5000)
       return no('RECENT_SCHEMA_UNVERIFIED');
     const seen=new Set(),items=[];

@@ -328,7 +328,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { inspectRoutePin, routePinsReady, reloadRoutePins } from "./pcms/route-pin.mjs";\nimport { issueBoundPersonaCreatePermit, issueExistingPersonaTagPermit } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest, fetchViaExit as pcmsFetchViaExit } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain } from "./pcms/perchance-existing.mjs";\nimport { choosePrivateStageAdapter } from "./pcms/ready-native-source.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { inspectRoutePin, routePinsReady, reloadRoutePins } from "./pcms/route-pin.mjs";\nimport { issueBoundPersonaCreatePermit, issueExistingPersonaTagPermit } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest, fetchViaExit as pcmsFetchViaExit } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain, perchanceRefresherCleanMain } from "./pcms/perchance-existing.mjs";\nimport { choosePrivateStageAdapter } from "./pcms/ready-native-source.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -365,17 +365,59 @@ attachPcmsGuard({
     }));
   },
   readIsolatedTab: async ({personaUid,cookieStoreId,routeId},{identityOnly=false,originalSlug=null,monitoringRequest=null}={}) => {
-    // Donor-owned tab and protected-container selection. This is the SAME
-    // combined-XPI browser authority, not a separate automation controller.
-    const tabs=await browser.tabs.query({cookieStoreId});
-    const matching=tabs.filter(tab=>tab.cookieStoreId===cookieStoreId &&
-      typeof tab.url==='string' && (()=>{try{return new URL(tab.url).origin==='https://perchance.org';}catch{return false;}})());
-    if(!matching.length)return {ok:false,code:'NO_PERCHANCE_TAB'};
-    const tab=matching.find(item=>item.active)||matching[0];
+    // Donor-owned exact protected-container admission. When no provider tab
+    // exists, ONLY the fixed read-only monitor may create a tagged transient
+    // Perchance tab; no editor/AI/source operation inherits this permission.
     const current=await getState(),profile=current.profiles?.[cookieStoreId];
     if(!profile||profile.personaUid!==personaUid||profile.routeId!==routeId||
-       routeId==='direct'||routeId==='block'||!current.routes?.[routeId]||current.routes[routeId].enabled===false)
+       routeId==='direct'||routeId==='block'||!current.routes?.[routeId]||
+       current.routes[routeId].enabled===false)
       return {ok:false,code:'PERSONA_ROUTE_CHANGED'};
+    const tabs=await browser.tabs.query({cookieStoreId});
+    const matching=tabs.filter(tab=>tab.cookieStoreId===cookieStoreId &&
+      typeof tab.url==='string'&&(()=>{
+        try{return new URL(tab.url).origin==='https://perchance.org';}
+        catch{return false;}
+      })());
+    let tab=matching.find(item=>item.active)||matching[0]||null;
+    let disposableNonce=null,humanTouched=false,activationListener=null;
+    try{
+      if(!tab){
+        // Source preparation and lost-ACK readback also need unattended
+        // read-only access to one exact owned slug. Never open for arbitrary
+        // identity-only browsing or mutation/page command.
+        const fixedSource=!identityOnly&&originalSlug!==null&&
+          typeof originalSlug==='string'&&
+          /^[a-z0-9][a-z0-9-]{0,99}$/.test(originalSlug);
+        if(!monitoringRequest&&!fixedSource)
+          return {ok:false,code:'NO_PERCHANCE_TAB'};
+        disposableNonce=crypto.randomUUID().replaceAll('-','');
+        tab=await browser.tabs.create({
+          url:'https://perchance.org/',cookieStoreId,active:false
+        });
+        if(!Number.isSafeInteger(tab?.id))
+          return {ok:false,code:'MONITOR_TAB_NOT_CREATED'};
+        activationListener=info=>{if(info?.tabId===tab.id)humanTouched=true;};
+        browser.tabs.onActivated.addListener(activationListener);
+        await browser.sessions.setTabValue(tab.id,'pcmsS07Monitor',{
+          createdBy:'PCMS_S07_MONITOR',nonce:disposableNonce,
+          personaUid,cookieStoreId,routeId
+        });
+        let loaded=false;
+        for(let attempt=0;attempt<24;attempt++){
+          const check=await browser.tabs.get(tab.id);
+          if(check.cookieStoreId!==cookieStoreId||
+             (check.url&&!check.url.startsWith('https://perchance.org/')&&
+              check.url!=='about:blank'))
+            return {ok:false,code:'MONITOR_TAB_ROUTE_CHANGED'};
+          if(check.status==='complete'&&check.url?.startsWith('https://perchance.org/')){
+            loaded=true;break;
+          }
+          await new Promise(done=>setTimeout(done,250));
+        }
+        if(!loaded)return {ok:false,code:'MONITOR_TAB_NOT_READY'};
+      }
+
     let results;
     if(monitoringRequest){
       const identity=await browser.scripting.executeScript({
@@ -409,6 +451,23 @@ attachPcmsGuard({
     if(results?.length!==1||results[0].frameId!==0||results[0].error)
       return {ok:false,code:'ISOLATED_OBSERVER_FAILED'};
     return results[0].result;
+    }finally{
+      if(activationListener)
+        try{browser.tabs.onActivated.removeListener(activationListener);}catch{}
+      if(disposableNonce&&tab?.id&&!humanTouched){
+        try{
+          const latest=await browser.tabs.get(tab.id),
+            tag=await browser.sessions.getTabValue(tab.id,'pcmsS07Monitor');
+          // A tab taken over/activated by a human is retained, never closed.
+          if(latest.cookieStoreId===cookieStoreId&&latest.active===false&&
+             latest.url==='https://perchance.org/'&&
+             tag?.createdBy==='PCMS_S07_MONITOR'&&tag.nonce===disposableNonce&&
+             tag.personaUid===personaUid&&tag.cookieStoreId===cookieStoreId&&
+             tag.humanIntent!==true)
+            await browser.tabs.remove(tab.id);
+        }catch{/* uncertain transient tab is held; never close an untagged tab */}
+      }
+    }
   },
   supplyIsolatedTab: async ({personaUid,cookieStoreId,routeId},request) => {
     // Donor owns which Persona tab may perform this ONE fixed request.
@@ -669,12 +728,13 @@ attachPcmsGuard({
   // requires that exact tagged tab; missing or ambiguous state never opens
   // another or acquires human-owned editor authority.
   existingIsolatedTab: async ({personaUid,cookieStoreId,routeId},request)=>{
-    if(!['UNLIST','STAGE','RESTORE'].includes(request?.action)||
+    if(!['UNLIST','STAGE','RESTORE','REFRESH'].includes(request?.action)||
        typeof request.slug!=='string'||
        !/^[a-z0-9][a-z0-9-]{0,99}$/.test(request.slug)||
        typeof request.nonce!=='string'||!/^[a-f0-9]{32}$/.test(request.nonce)||
        !Array.isArray(request.previousFiles)||request.previousFiles.length<2||
        request.previousFiles.length>502||
+       (request.action==='REFRESH'&&!/^[A-Za-z0-9_-]{16,64}$/.test(request.markerId||''))||
        (request.action!=='UNLIST'&&(!Array.isArray(request.targetFiles)||
          request.targetFiles.length<2||request.targetFiles.length>502)))
       return {ok:false,code:'INVALID_EXISTING_REQUEST'};
@@ -685,7 +745,7 @@ attachPcmsGuard({
       return {ok:false,code:'EXISTING_PROTECTED_ROUTE_CHANGED'};
     const url='https://perchance.org/'+request.slug+'#edit',tabs=await browser.tabs.query({});
     let tab;
-    if(request.action==='UNLIST'){
+    if(request.action==='UNLIST'||request.action==='REFRESH'){
       if(tabs.some(t=>t?.url?.startsWith('https://perchance.org/'+request.slug)&&
         (t.cookieStoreId===cookieStoreId||t.url?.includes('#edit'))))
         return {ok:false,code:'HUMAN_OR_AMBIGUOUS_EDITOR'};
@@ -694,7 +754,8 @@ attachPcmsGuard({
       // Crash before session tag is ambiguous; tab is preserved for human.
       await browser.sessions.setTabValue(tab.id,'pcmsI09Owned',{
         slug:request.slug,nonce:request.nonce,personaUid,cookieStoreId,
-        createdBy:'PCMS_I13',humanIntent:false
+        createdBy:request.action==='REFRESH'?'PCMS_S07':'PCMS_I13',
+        humanIntent:false
       });
       const matched=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned');
       if(matched?.nonce!==request.nonce)
@@ -723,7 +784,8 @@ attachPcmsGuard({
     const selected=await browser.tabs.get(tab.id);
     const tagged=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned');
     if(selected.url!==url||selected.cookieStoreId!==cookieStoreId||
-       tagged?.nonce!==request.nonce||tagged?.createdBy!=='PCMS_I13'||
+       tagged?.nonce!==request.nonce||
+       tagged?.createdBy!==(request.action==='REFRESH'?'PCMS_S07':'PCMS_I13')||
        tagged?.humanIntent===true)
       return {ok:false,code:'EXISTING_TAB_CONTEXT_CHANGED'};
     const result=await browser.scripting.executeScript({
@@ -742,6 +804,48 @@ attachPcmsGuard({
     if(result?.length!==1||result[0].frameId!==0||result[0].error)
       return {ok:false,code:'EXISTING_NATIVE_OUTCOME_UNKNOWN'};
     return result[0].result;
+  },
+  // S07 releases ONLY a verified, clean, PCMS_S07-created editor tab.
+  // This is local tab cleanup, not provider unlisting or source mutation.
+  refresherCleanupTab: async ({personaUid,cookieStoreId,routeId},{slug,nonce})=>{
+    if(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)||
+       !/^[a-f0-9]{32}$/.test(nonce||''))
+      return {ok:false,code:'REFRESH_CLEANUP_INVALID'};
+    const before=await getState(),profile=before.profiles?.[cookieStoreId];
+    if(!profile||profile.personaUid!==personaUid||profile.routeId!==routeId||
+       routeId==='direct'||routeId==='block'||!before.routes?.[routeId]||
+       before.routes[routeId].enabled===false)
+      return {ok:false,code:'REFRESH_CLEANUP_ROUTE_CHANGED'};
+    const url='https://perchance.org/'+slug+'#edit';
+    const tabs=await browser.tabs.query({}),matches=[];
+    for(const tab of tabs)if(tab.cookieStoreId===cookieStoreId&&tab.url===url){
+      const tag=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned');
+      if(tag?.createdBy==='PCMS_S07'&&tag.slug===slug&&
+         tag.nonce===nonce&&tag.personaUid===personaUid&&
+         tag.cookieStoreId===cookieStoreId&&tag.humanIntent!==true)matches.push(tab);
+    }
+    if(matches.length===0)return {ok:true,closed:false,source:'S07_TAB_ALREADY_ABSENT'};
+    if(matches.length!==1)return {ok:false,code:'REFRESH_CLEANUP_TAB_NOT_UNIQUE'};
+    const tab=matches[0];
+    const check=await browser.scripting.executeScript({
+      target:{tabId:tab.id,frameIds:[0]},world:'MAIN',
+      func:perchanceRefresherCleanMain,args:[slug]
+    });
+    if(check?.length!==1||check[0].frameId!==0||check[0].error||
+       check[0].result?.ok!==true)
+      return {ok:false,code:'REFRESH_CLEANUP_EDITOR_UNVERIFIED'};
+    const again=await browser.tabs.get(tab.id),
+      tag=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned'),
+      latest=await getState();
+    if(again.cookieStoreId!==cookieStoreId||again.url!==url||
+       tag?.createdBy!=='PCMS_S07'||tag.nonce!==nonce||
+       tag.humanIntent===true||
+       latest.profiles?.[cookieStoreId]?.personaUid!==personaUid||
+       latest.profiles?.[cookieStoreId]?.routeId!==routeId||
+       latest.routes?.[routeId]?.enabled===false)
+      return {ok:false,code:'REFRESH_CLEANUP_CONTEXT_CHANGED'};
+    await browser.tabs.remove(tab.id);
+    return {ok:true,closed:true,source:'OWN_S07_TAB_CLOSED'};
   },
   // I13 fixed publication path, never a generic script or tab dispatcher.
   releaseIsolatedTab: async ({personaUid,cookieStoreId,routeId},request) => {
@@ -964,7 +1068,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
     'existing-update-core.mjs','existing-update-store.mjs','existing-update-boundary.mjs','perchance-existing.mjs',
     'backup-auto-donor.mjs','backup-donor-port.mjs','restore-donor.mjs','restore-boundary.mjs','restore-reconcile.mjs','backup-auto-core.mjs','backup-auto-store.mjs','backup-auto-download.mjs',
     'backup-auto-retention.mjs','backup-auto-export.mjs','source-cut-retry.mjs','backup-v2-verify.mjs','backup-auto-run.mjs','backup-auto-boundary.mjs','restore-v2-candidate.mjs',
-    'refresher-effect-core.mjs','refresher-core.mjs','refresher-store.mjs','refresher-boundary.mjs','perchance-monitor.mjs']) {
+    'refresher-native.mjs','refresher-qualified-clock.mjs','refresher-admission.mjs','refresher-effect-core.mjs','refresher-core.mjs','refresher-store.mjs','refresher-boundary.mjs','perchance-monitor.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }
 }

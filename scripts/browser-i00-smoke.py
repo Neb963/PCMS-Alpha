@@ -2549,7 +2549,9 @@ def main():
                   const receipt={source:'GUARDED_OPERATIONAL_INTERVAL',id:'i12_interval_observed',
                     bootId:boot,browserRunning:true,complete:true,from:now-8*core.HOUR,to:now,
                     accounts:Object.entries(state.accounts).map(([accountId,a])=>({accountId,
-                      personaUid:a.personaUid,bindingVersion:a.bindingVersion,health:'HEALTHY',protected:true,sessionVerified:true})),
+                      personaUid:a.personaUid,bindingVersion:a.bindingVersion,
+                      principalFingerprint:a.principalFingerprint,
+                      health:'HEALTHY',protected:true,sessionVerified:true})),
                     witnesses:[0,1].map(i=>({accountId:'witness_'+i,domain:'independent_'+i,
                       routeVerified:true,observedAt:now,result:'HEALTHY'}))};
                   turn=await store.turn({now,bootId:boot,receipt});
@@ -2615,7 +2617,9 @@ def main():
                     observed.accepted&&absent.present===false&&absent.absence==='NOT_A_DELETION'&&metric.views===1200&&
                     runtimeProof.ok&&runtimeProof.observation==='OBSERVED'&&requests===2&&
                     runtimeState.healthIntervals.length>0&&runtimeState.diagnostics.readPeak<=2&&
-                    isolated.code==='WRONG_ORIGIN'&&injection.ok===false&&activation.code==='MONITOR_ACTIVATION_HELD'&&
+                    isolated.code==='WRONG_ORIGIN'&&injection.ok===false&&
+                    activation.ok===true&&activation.refresh==='REFRESH_OPERATOR_DISABLED'&&
+                    activation.providerEffects==='OFF'&&
                     globalPause.ok&&invalid.code==='STALE_REVISION',
                     exact16,exact64,occupied,replayOccupied:replay.occupied,winners,abort,unchanged,
                     observation:observed.code,runtimeProof,requests,activation,injection,globalPause,invalid,
@@ -2632,10 +2636,10 @@ def main():
                 execute(after,"location.hash='#refresher';document.getElementById('pcms-refresher-query').value='i12-b-';document.getElementById('pcms-refresher-reload').click();return true")
                 ui={}
                 for _ in range(60):
-                    ui=execute(after,"return {rows:document.querySelectorAll('#pcms-refresher-rows tr').length,summary:document.getElementById('pcms-refresher-summary').textContent,page:document.getElementById('pcms-refresher-page').textContent,pause:document.getElementById('pcms-refresher-global-pause').textContent,unsafe:document.querySelector('#view-refresher > .workspace-head > button').disabled}")
+                    ui=execute(after,"return {rows:document.querySelectorAll('#pcms-refresher-rows tr').length,summary:document.getElementById('pcms-refresher-summary').textContent,page:document.getElementById('pcms-refresher-page').textContent,pause:document.getElementById('pcms-refresher-global-pause').textContent,optIn:document.getElementById('pcms-refresher-enable').checked}")
                     if '1250' in ui.get('page','') and ui.get('pause')=='Resume globally': break
                     time.sleep(.1)
-                assert ui['rows']==25 and '1250' in ui['page'] and ui['unsafe'] is True,ui
+                assert ui['rows']==25 and '1250' in ui['page'] and ui['optIn'] is False,ui
                 assert ui['pause']=='Resume globally',ui
                 execute(after,"document.querySelector('#pcms-refresher-rows button').click();return true")
                 inspector=execute(after,"return {visible:!document.getElementById('pcms-refresher-inspector').hidden,selected:document.getElementById('pcms-refresher-selected').textContent}")
@@ -2693,7 +2697,8 @@ def main():
                     done({ok:before.ok&&after.ok&&!denied.ok&&
                       before.revision===after.revision&&
                       before.state.revision===after.state.revision&&
-                      result.ok&&result.refreshCapability==='LIVE_REFRESH_OFF_UNTIL_PROVEN'&&
+                      result.ok&&result.refreshCapability==='OPERATOR_MUTATION_DISABLED'&&
+                      result.clockCapability==='BOUNDED_NATIVE_ROUTE_FEED_ELIGIBILITY'&&
                       core.qualifyRefreshCandidate(null).ok===false,
                       beforeRows:before.state.rows.length,
                       denied:denied.code,capability:result.refreshCapability,
@@ -2705,8 +2710,11 @@ def main():
                 i14=call('POST',f'/session/{after}/execute/async',
                          {'script':i14_code,'args':[]},timeout=90)
                 assert i14.get('ok') is True,i14
-                ui=execute(after,"return {provider:document.getElementById('pcms-refresher-provider')?.textContent||'',summary:document.getElementById('pcms-refresher-summary')?.textContent||''}")
-                assert 'mutation disabled' in ui['provider'] and 'visibility-held' in ui['summary'],ui
+                ui=execute(after,"return {provider:document.getElementById('pcms-refresher-provider')?.textContent||'',summary:document.getElementById('pcms-refresher-summary')?.textContent||'',optIn:document.getElementById('pcms-refresher-enable')?.checked}")
+                assert ('refresh mutation OFF' in ui['provider'] and
+                        'bounded native awake time' in ui['provider'] and
+                        ui['optIn'] is False and
+                        'visibility-held' in ui['summary']),ui
                 print('B I14_PACKAGED_PERSISTENT_IDB_GATED_EFFECTS_AND_REFERSHER_PROOF_UI=PASS',flush=True)
 
                 # I13 B: exact packaged XPI, real IndexedDB atomic approval

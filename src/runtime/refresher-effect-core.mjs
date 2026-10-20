@@ -7,7 +7,8 @@ const time=t=>Number.isSafeInteger(t)&&t>0;
 export function emptyRefreshEvidence(){
   return {version:REFRESH_PROOF_VERSION,state:'UNOBSERVED',misses:0,lastMissAt:0,
     lastSeenAt:0,lastRank:null,suspended:false,attempts:0,probes:0,nextAttemptAt:0,
-    intent:null,history:[]};
+    intent:null,history:[],savedSourceFingerprint:null,savedMarkerId:null,savedNonce:null,
+    awaitingVisibility:false};
 }
 export function validRefreshEvidence(e){
   return e?.version===1&&['UNOBSERVED','PRESENT','ABSENT_ONCE',
@@ -16,7 +17,11 @@ export function validRefreshEvidence(e){
     Number.isSafeInteger(e.misses)&&e.misses>=0&&e.misses<=3&&
     Number.isSafeInteger(e.attempts)&&e.attempts>=0&&e.attempts<=RETRY_LIMIT&&
     Number.isSafeInteger(e.probes)&&e.probes>=0&&e.probes<=3&&
+    (e.awaitingVisibility===undefined||typeof e.awaitingVisibility==='boolean')&&
     Array.isArray(e.history)&&e.history.length<=8&&
+    (e.savedSourceFingerprint==null||hex(e.savedSourceFingerprint))&&
+    (e.savedMarkerId==null||safeId(e.savedMarkerId))&&
+    (e.savedNonce==null||/^[a-f0-9]{32}$/.test(e.savedNonce))&&
     (e.intent===null||safeId(e.intent.id));
 }
 // Only an independently sourced, complete, fresh recent-list sample counts.
@@ -30,11 +35,29 @@ export function observeRefreshPresence(current,{at,present,rank,complete,healthy
       windowMs<60000)return {ok:false,code:'VISIBILITY_UNVERIFIED'};
   if(at<=Math.max(e.lastSeenAt,e.lastMissAt))return {ok:false,code:'STALE_VISIBILITY'};
   if(present){
+    // A feed GET whose observation began before the independent saved-source
+    // readback is NOT evidence that the new marker returned to the recent page.
+    // Late delivery of an old HTTP response must never authorize another save.
+    if(e.awaitingVisibility===true&&
+       (!time(e.history.at(-1)?.at)||at<=e.history.at(-1).at))
+      return {ok:false,code:'REFRESH_FEED_PREDATES_SAVED_SOURCE'};
     const wasSuspended=e.suspended;
     const uncertain=e.state==='EFFECT_UNVERIFIED'||e.intent?.state==='DISPATCH_POSSIBLE';
     e.misses=0;e.lastSeenAt=at;e.lastRank=rank;
+    // While a provider write is still DISPATCH_POSSIBLE or its readback is
+    // ambiguous, a feed rank cannot confirm the changed source. Retain the
+    // pending-placement hold until independent source readback settles it.
+    if(!uncertain)e.awaitingVisibility=false;
     // Seeing a feed item cannot reconcile a possibly-dispatched mutation.
-    if(!uncertain){e.suspended=false;if(!e.intent)e.state='PRESENT';}
+    if(!uncertain){
+      // An actual return to the complete recent feed after a proven marker
+      // restarts the bounded failure budget. Ineffective/unknown saves never do.
+      if(e.state==='EFFECT_CONFIRMED'&&
+          e.history.at(-1)?.effect==='EFFECT_CONFIRMED'){
+        e.attempts=0;e.probes=0;e.nextAttemptAt=0;
+      }
+      e.suspended=false;if(!e.intent)e.state='PRESENT';
+    }
     return {ok:true,evidence:e,resumed:wasSuspended&&!uncertain,releaseSlot:false};
   }
   e.lastRank=null;
@@ -48,12 +71,19 @@ export function observeRefreshPresence(current,{at,present,rank,complete,healthy
 // Provider support must be established outside the UI and separately activated.
 // Neither HTTP success, an ordinary save nor a no-op is a qualifying method.
 export function qualifyRefreshCandidate(candidate){
-  if(candidate?.status!=='SUPPORTED_AND_VERIFIED'||candidate.method!=='EXPLICIT_PROVIDER_REFRESH'||
+  const legacy=candidate?.method==='EXPLICIT_PROVIDER_REFRESH';
+  const marker=candidate?.method==='CONTROLLED_SOURCE_MARKER'&&
+    hex(candidate.targetFingerprint)&&
+    candidate.targetFingerprint!==candidate.sourceFingerprint&&
+    safeId(candidate.markerId)&&/^[a-f0-9]{32}$/.test(candidate.nonce||'');
+  if(candidate?.status!=='SUPPORTED_AND_VERIFIED'||(!legacy&&!marker)||
     candidate.allowedByProvider!==true||!safeId(candidate.version)||
     !hex(candidate.sourceFingerprint)||!safeId(candidate.evidenceId)||
     candidate.meaningfulEffectVerified!==true)return {ok:false,code:'REFRESH_UNSUPPORTED'};
   return {ok:true,version:candidate.version,sourceFingerprint:candidate.sourceFingerprint,
-    evidenceId:candidate.evidenceId,method:candidate.method};
+    evidenceId:candidate.evidenceId,method:candidate.method,
+    ...(marker?{targetFingerprint:candidate.targetFingerprint,markerId:candidate.markerId,
+      nonce:candidate.nonce}:{})};
 }
 export function reserveRefreshAttempt(evidence,{id,at,slug,sourceFingerprint,
   candidate,eligible,liveAuthorized}={}){
@@ -62,11 +92,16 @@ export function reserveRefreshAttempt(evidence,{id,at,slug,sourceFingerprint,
   if(!q.ok)return q;
   if(liveAuthorized!==true)return {ok:false,code:'REFRESH_ACTIVATION_HELD'};
   if(!validRefreshEvidence(e)||!safeId(id)||!safeId(slug)||!time(at)||!hex(sourceFingerprint)||
-    q.sourceFingerprint!==sourceFingerprint||eligible!==true||
+    q.sourceFingerprint!==sourceFingerprint||
+    (e.savedSourceFingerprint!=null&&e.savedSourceFingerprint!==sourceFingerprint)||
+    eligible!==true||e.awaitingVisibility===true||
     e.intent||e.attempts>=RETRY_LIMIT||e.nextAttemptAt>at||e.suspended)
     return {ok:false,code:'REFRESH_ADMISSION_HELD'};
   e.intent={id,slug,at,sourceFingerprint,version:q.version,
-    evidenceId:q.evidenceId,state:'RESERVED',dispatchAt:0};
+    evidenceId:q.evidenceId,method:q.method,
+    ...(q.method==='CONTROLLED_SOURCE_MARKER'?{
+      targetFingerprint:q.targetFingerprint,markerId:q.markerId,nonce:q.nonce}:{}),
+    state:'RESERVED',dispatchAt:0};
   e.state='ATTEMPT_PENDING';
   return {ok:true,evidence:e};
 }
@@ -94,7 +129,11 @@ export function reconcileRefreshAttempt(evidence,id,{at,kind,sourceFingerprint,
     return {ok:false,code:'REFRESH_READBACK_INVALID'};
   const verified=targetMatched===true&&principalMatched===true&&
     hex(sourceFingerprint)&&kind==='EFFECT_CHANGED'&&
-    sourceFingerprint!==e.intent.sourceFingerprint;
+    sourceFingerprint!==e.intent.sourceFingerprint&&
+    // For controlled source-marker writes, *any* changed source is NOT enough.
+    // Only the planned complete source fingerprint proves a safe saved effect.
+    (e.intent.method!=='CONTROLLED_SOURCE_MARKER'||
+      sourceFingerprint===e.intent.targetFingerprint);
   const noEffect=targetMatched===true&&principalMatched===true&&
     kind==='NO_EFFECT'&&sourceFingerprint===e.intent.sourceFingerprint;
   const prior=e.intent;
@@ -108,7 +147,7 @@ export function reconcileRefreshAttempt(evidence,id,{at,kind,sourceFingerprint,
     dispatchAt:prior.dispatchAt,effect:e.state,
     // A feed result must carry its own complete timestamped independent proof.
     feed:feed?.independent===true&&feed.complete===true&&time(feed.observedAt)&&
-      feed.observedAt>=prior.dispatchAt&&
+      feed.observedAt>at&&feed.observedAt>=prior.dispatchAt&&
       (feed.present===false||(feed.present===true&&
         Number.isSafeInteger(feed.rank)&&feed.rank>0&&feed.rank<=5000))?
         {state:feed.present?'PRESENT':'ABSENT',at:feed.observedAt,
@@ -118,6 +157,14 @@ export function reconcileRefreshAttempt(evidence,id,{at,kind,sourceFingerprint,
   // automatic retry after an ineffective attempt without a fresh verified method.
   // Retain the dispatch receipt until independent saved-state readback
   // resolves it; a later guarded read can settle this SAME id without execute.
+  if(verified&&prior.method==='CONTROLLED_SOURCE_MARKER'){
+    e.savedSourceFingerprint=prior.targetFingerprint;
+    e.savedMarkerId=prior.markerId;
+    e.savedNonce=prior.nonce;
+    // A source-byte save alone cannot establish recent-page placement.
+    // No new mutation until independently observed reappearance.
+    e.awaitingVisibility=e.history.at(-1).feed.state!=='PRESENT';
+  }
   e.intent=verified||noEffect?null:prior;
   if(!verified)e.suspended=true;
   return {ok:true,evidence:e,effectVerified:verified,

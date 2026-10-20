@@ -1,6 +1,7 @@
 // One revision-fenced canonical scheduler snapshot, with a durable sorted due
 // index, in the existing PCMS DB. All async IO occurs outside transactions.
 import {fail,isSafeId} from './journal.mjs';
+import {qualifyRecentAbsence,countObservedOccupancy} from './refresher-admission.mjs';
 import {emptyRefreshEvidence,observeRefreshPresence,reserveRefreshAttempt,
   dispatchPossible,reconcileRefreshAttempt} from './refresher-effect-core.mjs';
 import {REFRESHER_KEY,emptyShadow,validShadow,reconcileShadow,advanceShadow,
@@ -74,13 +75,17 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
     blockers:[...rowBlocks(s,r),r.readyUpdate&&'READY_UPDATE_FIRST'].filter(Boolean),
     presence:r.presence?{...r.presence,stale:r.presence.observedAt>now||now-r.presence.observedAt>2*s.policy.recentMs}:null,
     statisticSuspended:r.metrics.suspended===true,
-    refresh:{state:r.refresh?.state||'UNOBSERVED',misses:r.refresh?.misses||0,
+    refresh:{state:r.refresh?.state||'UNOBSERVED',
+      awaitingVisibility:r.refresh?.awaitingVisibility===true,
+      misses:r.refresh?.misses||0,
       attempts:r.refresh?.attempts||0,suspended:r.refresh?.suspended===true,
       nextAttemptAt:r.refresh?.nextAttemptAt||0,
       proof:r.refresh?.history?.at(-1)||null},
     metric:r.metrics.latest?{...r.metrics.latest,stale:r.metrics.latest.observedAt>now||now-r.metrics.latest.observedAt>
       s.policy.statsMaxMs}:null,nextStatisticAt:r.metrics.nextDueAt}));
-  return {ok:true,revision:s.revision,mode:'SHADOW_ONLY',providerEffects:'OFF',items,
+  return {ok:true,revision:s.revision,
+    mode:s.policy.refreshEnabled===true?'GUARDED_REFRESH_ENABLED':'SHADOW_ONLY',
+    providerEffects:s.policy.refreshEnabled===true?'OPERATOR_OPT_IN_GATED':'OFF',items,
     total:match.length,occupied:s.rows.filter(r=>r.slot).length,
     eligible:s.rows.filter(r=>r.phase==='WAITING'&&!rowBlocks(s,r).length&&!r.readyUpdate).length,
     visibilitySuspended:s.rows.filter(r=>r.refresh?.suspended).length,
@@ -88,7 +93,11 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
     accounts:Object.entries(s.accounts).map(([id,a])=>({accountId:id,paused:a.paused,
       health:a.health,graceUsed:a.graceUsed})),policy:s.policy,
     recent:{observedAt:s.recent.observedAt,total:s.recent.total,complete:s.recent.complete,
+      latestOccupancy:s.recent.latestOccupancy||null,observedSampleCount:(s.recent.samples||[]).length,
+      coverage:s.recent.complete===true?'COMPLETE':'UNKNOWN',
+      lastUnknownAt:s.recent.lastUnknownAt||0,
       suspended:s.recent.suspended===true,
+      endpointBackoffUntil:s.recent.endpointBackoffUntil||0,
       stale:!s.recent.observedAt||s.recent.observedAt>now||now-s.recent.observedAt>2*s.policy.recentMs},
     nextWakeAt:s.nextWakeAt,diagnostics:{...s.diagnostics},
     timeline:s.timeline.slice(-8),clock:'EVIDENCED_ONLY',monitoring:'GATED_READ_ONLY'};
@@ -190,6 +199,10 @@ export function createRefresherStore(db){
       c.startedAt>out.recent.observedAt){
       out.recent={...out.recent,observedAt:c.startedAt,total:packet.items.length,complete:true,
         nextDueAt:now+out.policy.recentMs,failures:0};
+      const occupancy=countObservedOccupancy(out.rows,packet.items,c.startedAt);
+      if(!occupancy.ok)return fail(occupancy.code);
+      out.recent.samples=[...(out.recent.samples||[]),occupancy.sample].slice(-144);
+      out.recent.latestOccupancy=occupancy.sample;
       const ranks=new Map(packet.items.map((item,i)=>[item.slug,{...item,position:i+1}]));
       for(const r of out.rows){
         const item=ranks.get(r.slug);
@@ -198,8 +211,10 @@ export function createRefresherStore(db){
         const owner=out.accounts[r.accountId];
         const healthy=r.ownerVerified&&r.releaseVerified&&r.listing==='PUBLIC'&&
           !r.reviewHeld&&!r.identityHeld&&owner?.verifiedIdentity===true&&
-          owner.health==='HEALTHY'&&Number.isSafeInteger(owner.healthAt)&&
-          c.startedAt-owner.healthAt<=out.policy.recentMs&&
+          // A validated full public-feed read is itself positive provider
+          // evidence. Do not require an unrelated two-exit outage quorum or
+          // an already-qualified clock before recording the observed rank.
+          // Effects still require the target's own protected route later.
           out.provider.state!=='OUTAGE';
         const evidence=observeRefreshPresence(r.refresh||emptyRefreshEvidence(),{
           at:c.startedAt,present:!!item,rank:item?.position,complete:true,
@@ -258,6 +273,7 @@ export function createRefresherStore(db){
       packet.principalFingerprint===c.principalFingerprint){
       const interval={from:c.startedAt,to:packet.interval.to,accountId:c.accountId,
         bindingVersion:c.bindingVersion,personaUid:c.personaUid,
+        principalFingerprint:c.principalFingerprint,
         health:accepted&&packet.ok?'HEALTHY':'UNKNOWN',protected:true,sessionVerified:accepted&&packet.ok===true,
         domain:isSafeId(packet.interval.domain)?packet.interval.domain:null,
         providerResult:accepted&&packet.ok?'HEALTHY':packet.code==='PROVIDER_UNAVAILABLE'?
@@ -274,11 +290,34 @@ export function createRefresherStore(db){
     }
     if(!accepted){
       out.diagnostics.dropped++;
-      const obj=c.kind==='RECENT'?out.recent:out.rows.find(r=>r.stableId===c.stableId)?.metrics;
-      if(obj){obj.failures=Math.min(8,obj.failures+1);obj.suspended=obj.failures>=8;
-        const floor=c.kind==='RECENT'?out.policy.recentMs:out.policy.statsMinMs;
-        obj.nextDueAt=now+Math.max(Math.min(24*60*MINUTE,floor*2**obj.failures),
-          Math.min(24*60*MINUTE,Math.max(0,packet?.retryAfterMs||0)));
+      // A later failed, partial, malformed, or rate-limited recent-list
+      // observation supersedes the *authority* of the last full feed. Keep
+      // its historical occupancy sample for diagnostics, but never dispatch
+      // a marker from the previous absence while the current feed is UNKNOWN.
+      // An older delayed failure cannot supersede a newer complete snapshot.
+      if(c.kind==='RECENT'&&c.startedAt>out.recent.observedAt){
+        out.recent.complete=false;
+        out.recent.lastUnknownAt=now;
+        clockChanges.push({code:'RECENT_COVERAGE_UNKNOWN',scopeId:c.accountId});
+      }
+      // The public RECENT endpoint is shared. Unknown-scope 429 is an
+      // endpoint-wide cooldown: never switch identity/route to evade it.
+      // Other request classes continue under their existing budgets.
+      const endpointRateLimit=c.kind==='RECENT'&&packet?.code==='RATE_LIMITED';
+      if(endpointRateLimit){
+        const requested=Number.isSafeInteger(packet.retryAfterMs)&&packet.retryAfterMs>0?
+          packet.retryAfterMs:out.policy.recentMs;
+        const until=now+Math.min(24*60*MINUTE,Math.max(MINUTE,requested));
+        out.recent.endpointBackoffUntil=Math.max(
+          out.recent.endpointBackoffUntil||0,until);
+        out.recent.nextDueAt=Math.max(out.recent.nextDueAt,until);
+      }else{
+        const obj=c.kind==='RECENT'?out.recent:out.rows.find(r=>r.stableId===c.stableId)?.metrics;
+        if(obj){obj.failures=Math.min(8,obj.failures+1);obj.suspended=obj.failures>=8;
+          const floor=c.kind==='RECENT'?out.policy.recentMs:out.policy.statsMinMs;
+          obj.nextDueAt=now+Math.max(Math.min(24*60*MINUTE,floor*2**obj.failures),
+            Math.min(24*60*MINUTE,Math.max(0,packet?.retryAfterMs||0)));
+        }
       }
     }
     return {ok:true,state:out,accepted,changes:clockChanges,code:accepted?'OBSERVED':'OBSERVATION_HELD'};
@@ -289,15 +328,21 @@ export function createRefresherStore(db){
     const r=s.rows.find(x=>x.stableId===stableId);
     if(!r||r.phase!=='ACTIVE'||!r.slot||rowBlocks(s,r).length)
       return fail('REFRESH_ADMISSION_HELD');
+    const absence=qualifyRecentAbsence({row:r,recent:s.recent,policy:s.policy,now});
+    if(!absence.ok)return fail(absence.code);
+    const currentSource=r.refresh?.savedSourceFingerprint||r.releaseFingerprint;
     const attempt=reserveRefreshAttempt(r.refresh,{id,at:now,slug:r.slug,
-      sourceFingerprint:r.releaseFingerprint,candidate,eligible:true,liveAuthorized});
+      sourceFingerprint:currentSource,candidate,eligible:true,liveAuthorized});
     if(!attempt.ok)return attempt;
     const out=structuredClone(s);
     out.rows.find(x=>x.stableId===stableId).refresh=attempt.evidence;
     return {ok:true,state:out,claim:{id,stableId,slug:r.slug,accountId:r.accountId,
       personaUid:r.personaUid,bindingVersion:r.bindingVersion,
       principalFingerprint:s.accounts[r.accountId]?.principalFingerprint,
-      releaseFingerprint:r.releaseFingerprint},
+      remoteId:r.remoteId,markerId:attempt.evidence.intent?.markerId||null,
+      nonce:attempt.evidence.intent?.nonce||null,
+      releaseFingerprint:r.releaseFingerprint,sourceFingerprint:currentSource,
+      targetFingerprint:attempt.evidence.intent?.targetFingerprint||null},
       changes:[{code:'REFRESH_RESERVED',scopeId:stableId}]};
   },{sync:true});
   const cancelReserved=(stableId,id,now)=>mutate(null,s=>{
@@ -312,12 +357,24 @@ export function createRefresherStore(db){
   },{sync:true});
   const markDispatch=(claim,now)=>mutate(null,s=>{
     const r=s.rows.find(x=>x.stableId===claim?.stableId);
-    if(!r||r.accountId!==claim.accountId||r.personaUid!==claim.personaUid||
+    if(!r||r.remoteId!==claim.remoteId||r.accountId!==claim.accountId||
+      r.personaUid!==claim.personaUid||
       r.bindingVersion!==claim.bindingVersion||r.releaseFingerprint!==claim.releaseFingerprint||
+      (r.refresh?.savedSourceFingerprint||r.releaseFingerprint)!==claim.sourceFingerprint||
+      r.refresh?.intent?.targetFingerprint!==(
+        claim.targetFingerprint||undefined)||
+      (r.refresh?.intent?.markerId||null)!==(claim.markerId||null)||
+      (r.refresh?.intent?.nonce||null)!==(claim.nonce||null)||
       !r.ownerVerified||!r.releaseVerified||r.identityHeld||r.reviewHeld||
       r.listing!=='PUBLIC'||s.accounts[r.accountId]?.principalFingerprint!==claim.principalFingerprint||
-      !r.slot||r.phase!=='ACTIVE'||rowBlocks(s,r).length)
+      !r.slot||r.phase!=='ACTIVE'||rowBlocks(s,r).length||
+      // The durable operator setting is authoritative *at the final effect
+      // boundary*. An earlier optimistic read cannot survive a concurrent OFF.
+      s.policy.refreshEnabled!==true)
       return fail('REFRESH_CONTEXT_CHANGED');
+    const absence=qualifyRecentAbsence({row:r,recent:s.recent,policy:s.policy,now,
+      reservedId:claim.id});
+    if(!absence.ok)return fail(absence.code);
     const packet=dispatchPossible(r.refresh,claim.id,now);
     if(!packet.ok)return packet;
     const out=structuredClone(s);out.rows.find(x=>x.stableId===claim.stableId).refresh=packet.evidence;

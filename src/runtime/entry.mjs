@@ -40,6 +40,25 @@ import './existing-update-boundary.mjs';
 import './backup-auto-boundary.mjs';
 // I16 staged restore, with permanent inactive controller under review.
 import './restore-boundary.mjs';
-// I12 one durable shadow queue/alarm; provider observations gated OFF.
+// I12 one durable scheduler; protected read-only feed observations enabled.
 import {createRefresherBoundary} from './refresher-boundary.mjs';
-if(typeof browser!=='undefined')createRefresherBoundary(browser).register();
+import {createRefresherNativeAdapter} from './refresher-native.mjs';
+// Guarded source-only adapter is packaged, but L/route/clock/consent activation
+// remains OFF until independently proven. Never infer it from an installed XPI.
+if(typeof browser!=='undefined'){
+  const native=createRefresherNativeAdapter({
+    // A fixed, source-integrity-constrained I13 editor save is an installed
+    // engineering capability, not proof of subsequent recent-feed placement.
+    methodProofFor:()=>({
+      source:'GUARDED_FIXED_EDITOR_METHOD',allowedByProvider:true,
+      meaningfulEffectVerified:true,version:'source_marker_v1',
+      evidenceId:'i13_verified_source_writer'
+    })
+  });
+  createRefresherBoundary(browser,{
+    observationGate:()=>true,nativeClockGate:()=>true,
+    refreshGate:()=>true, // canonical policy defaults OFF; operator opts in
+    qualificationFor:(row,account)=>native.prepare(row,account),
+    refreshAdapter:native
+  }).register();
+}

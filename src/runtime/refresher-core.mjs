@@ -2,13 +2,14 @@
 // Milliseconds are operational evidence budgets, never wall-clock deadlines.
 import {fail, isSafeId} from './journal.mjs';
 import {emptyRefreshEvidence,validRefreshEvidence} from './refresher-effect-core.mjs';
+import {qualifyNativeOperatingInterval,qualifyBoundedObservedInterval} from './refresher-qualified-clock.mjs';
 export const HOUR=3600000, MINUTE=60000;
 export const REFRESHER_KEY='refresher:shadow:v1';
 export const DEFAULT_POLICY=Object.freeze({activeMs:24*HOUR,sleepMs:72*HOUR,
   graceMs:HOUR,safetyCap:200,initialCap:10,manualCap:null,
   decreaseWindows:2,increaseWindows:3,maxAdmissions:4,staggerMs:1000,
   recentMs:10*MINUTE,statsMinMs:15*MINUTE,statsMaxMs:24*HOUR,
-  readBudget:6,rawSamples:12});
+  readBudget:6,rawSamples:12,refreshEnabled:false});
 const slugOK=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const number=(v,min,max)=>Number.isSafeInteger(v)&&v>=min&&v<=max;
 const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
@@ -25,7 +26,9 @@ export function validatePolicy(p){
     !number(p.maxAdmissions,1,20)||!number(p.staggerMs,1000,MINUTE)||
     !number(p.recentMs,10*MINUTE,HOUR)||!number(p.statsMinMs,15*MINUTE,24*HOUR)||
     !number(p.statsMaxMs,p.statsMinMs,7*24*HOUR)||!number(p.readBudget,1,20)||
-    !number(p.rawSamples,2,48))return fail('INVALID_REFRESHER_POLICY');
+    !number(p.rawSamples,2,48)||
+    (p.refreshEnabled!==undefined&&typeof p.refreshEnabled!=='boolean'))
+    return fail('INVALID_REFRESHER_POLICY');
   return {ok:true};
 }
 export function emptyShadow(){
@@ -34,7 +37,9 @@ export function emptyShadow(){
     capacity:{defensible:null,samples:[],observedAt:0},
     provider:{state:'UNKNOWN',witnesses:0,observedAt:0},
     bootId:null,lastTurnAt:0,nextWakeAt:0,nextAdmissionAt:0,dueIndex:[],
-    recent:{observedAt:0,total:null,complete:false,nextDueAt:0,failures:0},
+    nativeClock:null,
+    recent:{observedAt:0,total:null,complete:false,nextDueAt:0,failures:0,
+      accountBackoff:{},endpointBackoffUntil:0},
     inflight:[],readWindow:{start:0,used:0},timeline:[],healthIntervals:[],
     diagnostics:{turns:0,unknownIntervals:0,replayedIntervals:0,
       admissions:0,graceReleases:0,reads:0,dropped:0,readPeak:0,queuePeak:0}};
@@ -83,8 +88,12 @@ export function reconcileShadow(s,inputs){
     // Never transplant an old allocation/approval to a reincarnated target.
     const identityChanged=r.remoteId!==input.remoteId||r.accountId!==input.accountId||
       r.personaUid!==input.personaUid||r.bindingVersion!==input.bindingVersion;
+    const releaseChanged=r.releaseFingerprint!=null&&
+      r.releaseFingerprint!==input.releaseFingerprint;
     r.identityHeld=identityChanged;
-    if(identityChanged||!r.refresh)r.refresh=emptyRefreshEvidence();
+    // A new independently confirmed release F supersedes any prior marker
+    // lineage; never reuse a saved marker as authority for the next source.
+    if(identityChanged||releaseChanged||!r.refresh)r.refresh=emptyRefreshEvidence();
     r.ownerVerified=input.ownerVerified===true&&!identityChanged;
     r.releaseVerified=input.releaseVerified===true&&hex(input.releaseFingerprint)&&!identityChanged;
     r.releaseFingerprint=r.releaseVerified?input.releaseFingerprint:null;
@@ -169,10 +178,12 @@ function receiptValid(e,bootId){
     Array.isArray(e.accounts)&&e.accounts.length<=1000&&
     new Set(e.accounts.map(a=>a.accountId)).size===e.accounts.length&&
     e.accounts.every(a=>isSafeId(a.accountId)&&number(a.bindingVersion,1,Number.MAX_SAFE_INTEGER)&&
-      typeof a.personaUid==='string'&&['HEALTHY','UNAVAILABLE','UNKNOWN'].includes(a.health)&&
+      typeof a.personaUid==='string'&&
+      (a.health!=='HEALTHY'||hex(a.principalFingerprint))&&
+      ['HEALTHY','UNAVAILABLE','UNKNOWN'].includes(a.health)&&
       (a.health!=='HEALTHY'||(a.protected===true&&a.sessionVerified===true)));
 }
-export function advanceShadow(s,{now,bootId,receipt=null}={}){
+export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=undefined,qualifiedCoverages=null}={}){
   if(!validShadow(s)||!stamp(now)||!isSafeId(bootId))return fail('REFRESHER_STATE_UNAVAILABLE');
   const out=structuredClone(s),changes=[];
   const restarted=out.bootId!==bootId;
@@ -188,19 +199,75 @@ export function advanceShadow(s,{now,bootId,receipt=null}={}){
     out.inflight=[];
     for(const a of Object.values(out.accounts))a.health='UNKNOWN';
   }
+  // A guarded native witness alone never grants provider/account time.
+  // It only seeds a prospective host-awake window for the NEXT turn. The
+  // next turn requires the original uninterrupted native pipe *and* explicit
+  // independent provider+account continuous coverage before any credit.
+  let operationalReceipt=receipt;
+  const nativeOK=n=>n&&Number.isSafeInteger(n.observedAtMs)&&
+    n.observedAtMs>0&&n.observedAtMs<=now&&
+    ['observerEpoch','systemBootId','nativeLifetimeId','observerConnectionId']
+      .every(k=>isSafeId(n[k]))&&Number.isSafeInteger(n.sequence)&&n.sequence>0&&
+    ['hostAwakeNs','hostBootNs'].every(k=>
+      typeof n[k]==='string'&&/^\d{1,24}$/.test(n[k]));
+  if(nativeOK(nativeClock)){
+    const previous=out.nativeClock;
+    // Never credit two windows in one reducer transition.
+    // An event-page wake changes bootId but does not necessarily close the
+    // ORIGINAL native connection. The OS boot/pipe/lifetime/sequence counters
+    // and continuous provider/session coverage decide this, not a JS module
+    // instance ID. Actual Firefox/native death changes those witnesses.
+    if(!operationalReceipt&&nativeOK(previous?.witness)&&
+       nativeClock.observedAtMs>previous.witness.observedAtMs&&
+       qualifiedCoverages?.source==='DONOR_CONTINUOUS_COVERAGE'){
+      const result=qualifyNativeOperatingInterval({
+        previous:previous.witness,next:nativeClock,
+        bootId,id:'qualified_'+String(out.revision).padStart(8,'0'),
+        providerCoverages:qualifiedCoverages.providers,
+        accountCoverages:qualifiedCoverages.accounts});
+      if(result.ok)operationalReceipt=result.receipt;
+    }
+    // Production: use actual guarded feed and protected-route observations
+    // at two consecutive original-native-pipe samples, not imaginary 24h
+    // future-valid certificates. At most two minutes; unknown gaps freeze.
+    if(!operationalReceipt&&nativeOK(previous?.witness)&&
+       nativeClock.observedAtMs>previous.witness.observedAtMs&&
+       Array.isArray(previous.witness.routes)&&Array.isArray(nativeClock.routes)){
+      const bounded=qualifyBoundedObservedInterval({
+        previous:previous.witness,next:nativeClock,recent:out.recent,
+        accounts:Object.entries(out.accounts).map(([accountId,a])=>({
+          accountId,...a})),bootId,
+        id:'observed_'+String(out.revision).padStart(8,'0'),
+        recentMs:out.policy.recentMs});
+      if(bounded.ok)operationalReceipt=bounded.receipt;
+    }
+    // Keep only the last bounded sample in the canonical journal. A crash,
+    // browser boot change, suspended interval or missing coverage cannot
+    // retroactively be repaired by two later endpoint observations.
+    out.nativeClock={bootId,witness:structuredClone(nativeClock)};
+  }else if(nativeClock!==undefined){
+    // A deliberate native sample failure severs continuity. An unrelated
+    // canonical feed/statistic receipt does not sample the native host at
+    // all and must not erase the original continuous pipe witness.
+    out.nativeClock=null;
+  }
   let credited=0,reason='CLOCK_EVIDENCE_INCOMPLETE';
-  if(receiptValid(receipt,bootId)&&receipt.to<=now&&
+  if(receiptValid(operationalReceipt,bootId)&&operationalReceipt.to<=now&&
     (!out.lastTurnAt||now>=out.lastTurnAt)){
-    const e=receipt,provider=classifyProvider(e.witnesses,e.to);
+    const e=operationalReceipt,provider=classifyProvider(e.witnesses,e.to);
     if(provider.observedAt>=out.provider.observedAt&&
       (['HEALTHY','OUTAGE'].includes(provider.state)||
         (out.provider.state!=='OUTAGE'&&
           (out.provider.state!=='HEALTHY'||provider.observedAt-out.provider.observedAt>MINUTE))))
       out.provider=provider;
-    reason=provider.state==='OUTAGE'?'PROVIDER_OUTAGE':'EVIDENCED_INTERVAL';
+    reason=provider.state==='OUTAGE'?'PROVIDER_OUTAGE':
+      e.origin==='S07_NATIVE_CAUSAL_WINDOW'?'NATIVE_ELIGIBILITY_CONFIRMED':
+      e.origin==='S07_BOUNDED_OBSERVED'?'BOUNDED_GUARDED_ELIGIBILITY':'EVIDENCED_INTERVAL';
     const health=new Map(e.accounts.map(a=>[a.accountId,a]));
     for(const [id,a] of Object.entries(out.accounts)){
-      const h=health.get(id),matched=h?.bindingVersion===a.bindingVersion&&h.personaUid===a.personaUid;
+      const h=health.get(id),matched=h?.bindingVersion===a.bindingVersion&&
+        h.personaUid===a.personaUid&&
+        h.principalFingerprint===a.principalFingerprint;
       if(!h)continue;
       const interval=Math.max(0,e.to-Math.max(e.from,a.checkpoint));
       if(!interval)continue;
@@ -220,7 +287,9 @@ export function advanceShadow(s,{now,bootId,receipt=null}={}){
       const delta=Math.max(0,e.to-Math.max(e.from,r.checkpoint,r.admittedAt||0));
       if(!delta){out.diagnostics.replayedIntervals++;continue;}
       const h=health.get(r.accountId);
-      if(h?.health!=='HEALTHY'||h.bindingVersion!==r.bindingVersion||h.personaUid!==r.personaUid)continue;
+      if(h?.health!=='HEALTHY'||h.bindingVersion!==r.bindingVersion||
+         h.personaUid!==r.personaUid||
+         h.principalFingerprint!==out.accounts[r.accountId]?.principalFingerprint)continue;
       r.checkpoint=e.to;
       if(rowBlocks(out,r).length||r.phase==='WAITING')continue;
       let remaining=delta;
@@ -306,6 +375,8 @@ export function claimObservation(s,{kind,stableId=null,now,bootId,claimId,prefer
   if(out.readWindow.used>=out.policy.readBudget)return fail('SHARED_READ_BUDGET');
   const r=kind==='STATISTIC'?out.rows.find(x=>x.stableId===stableId):null;
   if(kind==='RECENT'&&out.recent.suspended)return fail('OBSERVATIONS_SUSPENDED');
+  if(kind==='RECENT'&&(out.recent.endpointBackoffUntil||0)>now)
+    return fail('RECENT_ENDPOINT_RATE_LIMITED');
   if(kind==='RECENT'&&(out.recent.nextDueAt>now||out.inflight.some(c=>c.kind==='RECENT')))
     return fail('OBSERVATION_COALESCED');
   if(kind==='STATISTIC'&&(!r||r.identityHeld||!r.ownerVerified||r.metrics.suspended||r.metrics.nextDueAt>now||

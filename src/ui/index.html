@@ -305,10 +305,10 @@
         </section>
       </section>
       <section class="workspace" id="view-refresher" data-view="refresher" aria-labelledby="heading-refresher" hidden>
-        <header class="workspace-head"><div><p class="eyebrow">Workspace / 05</p><h1 id="heading-refresher" tabindex="-1">Refresher</h1><p>Operational capacity, scheduling and observed visibility.</p></div><button type="button" disabled aria-describedby="blocked-refresher">Start refresh</button></header>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 05</p><h1 id="heading-refresher" tabindex="-1">Refresher</h1><p>Operational capacity, scheduling and observed visibility.</p></div></header>
         <section class="panel">
-          <div class="panel-head"><h2>Global oldest-eligible queue</h2><span class="unknown">Shadow only · mutations off</span></div>
-          <p id="blocked-refresher" class="reason">Refresh activation requires independently proven permissible provider behavior. Shadow allocations never send saves, create tabs, unlist or publish.</p>
+          <div class="panel-head"><h2>Global oldest-eligible queue</h2><span class="unknown">Observed, bounded operational time</span></div>
+          <p id="blocked-refresher" class="reason">Guarded feed checks are read-only. Refresher source saves are OFF until explicitly enabled below. When enabled, PCMS may change only its owned HTML marker on eligible public generators, using the protected Persona/I13 editor. A verified save is not proof of recent-page placement; ineffective or uncertain saves are held.</p>
           <p id="pcms-refresher-summary" role="status">Canonical capacity pending; no remote visibility promised.</p>
           <p id="pcms-refresher-provider"></p><p id="pcms-refresher-diagnostics"></p>
           <button type="button" id="pcms-refresher-reload">Reload local shadow</button>
@@ -322,7 +322,8 @@
             <label for="pcms-refresher-sleep">Minimum sleep hours</label><input id="pcms-refresher-sleep" type="number" min="1" max="8760" value="72">
             <label for="pcms-refresher-grace">Account grace minutes</label><input id="pcms-refresher-grace" type="number" min="1" max="1440" value="60">
             <label for="pcms-refresher-cap">Admission override (blank = automatic)</label><input id="pcms-refresher-cap" type="number" min="1" max="200">
-            <button type="button" id="pcms-refresher-save" disabled>Save shadow policy</button>
+            <label for="pcms-refresher-enable"><input id="pcms-refresher-enable" type="checkbox"> Enable guarded automatic marker saves (explicit operator opt-in; default OFF)</label>
+            <button type="button" id="pcms-refresher-save" disabled>Save Refresher settings</button>
           </div>
           <p class="reason">New duration settings apply to subsequent full periods. Remaining time and queue priority are preserved. Cap reductions stop admissions without evicting active allocations. Sleep remains public unless a separate release/review requires unlisting.</p>
           <label for="pcms-refresher-query">Search generator or account</label><input id="pcms-refresher-query" type="search" maxlength="80">
