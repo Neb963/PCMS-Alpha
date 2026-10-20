@@ -77,6 +77,11 @@ export function createRefresherNativeAdapter({
       previousFiles:planned.previousFiles,targetFiles:planned.targetFiles};
     // A newer prepared candidate replaces only volatile, *undispatched* data;
     // the canonical RESERVED/DISPATCH_POSSIBLE claim is the actual authority.
+    // A single Refresher turn prepares at most one source candidate.
+    // Bound volatile full-source manifests to ONE candidate even if a
+    // transaction later rejects admission; never accumulate fleet-sized
+    // 16 MB objects across 1,000+ generators.
+    pending.clear();
     pending.set(row.stableId,entry);
     return {status:'SUPPORTED_AND_VERIFIED',method:'CONTROLLED_SOURCE_MARKER',
       allowedByProvider:true,meaningfulEffectVerified:true,
