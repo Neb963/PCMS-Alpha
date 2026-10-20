@@ -2708,7 +2708,9 @@ def main():
                          {'script':i14_code,'args':[]},timeout=90)
                 assert i14.get('ok') is True,i14
                 ui=execute(after,"return {provider:document.getElementById('pcms-refresher-provider')?.textContent||'',summary:document.getElementById('pcms-refresher-summary')?.textContent||''}")
-                assert 'mutation disabled' in ui['provider'] and 'visibility-held' in ui['summary'],ui
+                assert ('refresh mutation OFF' in ui['provider'] and
+                        'continuous eligibility not verified' in ui['provider'] and
+                        'visibility-held' in ui['summary']),ui
                 print('B I14_PACKAGED_PERSISTENT_IDB_GATED_EFFECTS_AND_REFERSHER_PROOF_UI=PASS',flush=True)
 
                 # I13 B: exact packaged XPI, real IndexedDB atomic approval
