@@ -228,7 +228,10 @@ export function createAccountBoundary(api,{
           .finally(()=>{busy=false;});
       });
     });
-    try{api.alarms?.create(ROUTE_UPKEEP_ALARM,{periodInMinutes:30});}catch{}
+    // Donor route-test evidence expires after 15 minutes. Reuse the
+    // existing bounded S01 upkeep, with its protected Mullvad echo probes,
+    // before cache expiry; do not add a second Refresher route supervisor.
+    try{api.alarms?.create(ROUTE_UPKEEP_ALARM,{periodInMinutes:10});}catch{}
     api.alarms?.onAlarm?.addListener(alarm=>{if(alarm?.name===ROUTE_UPKEEP_ALARM)void upkeep();});
   }
   return Object.freeze({register,run,upkeep});
