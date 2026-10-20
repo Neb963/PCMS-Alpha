@@ -36,7 +36,7 @@ test('S07/S06 D: independently verified harmless marker becomes accurate encrypt
  const account={state:'VERIFIED',revision:2,bindingVersion:1,personaUid:'persona_01',
   identity:{source:'GUARDED_SESSION_READBACK',principalFingerprint:H}};
  const inventory={slug:'fixture',remoteId:'public_fixture_01',ownerState:'OBSERVED_OWNER',
-  accountId:'account_01',bindingVersion:1};
+  accountId:'account_01',personaUid:'persona_01',bindingVersion:1};
  const adoption={slug:'fixture',accountRevision:2,principalFingerprint:H,
   bindingVersion:1,personaUid:'persona_01',remotePublicId:'public_fixture_01',
   archiveState:'ARCHIVED_GIT_CONFIRMED',archived:false,accountId:'account_01'};
