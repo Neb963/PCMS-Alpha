@@ -1679,7 +1679,7 @@ def main():
                         "return {button:document.querySelector('#pcms-attention-list button')?.textContent||'',text:document.querySelector('#pcms-attention-list')?.textContent||''}")
                     if notice_ui.get('button'):break
                     time.sleep(.15)
-                if notice_ui.get('button')!='Ignore notice':
+                if notice_ui.get('button')!='Mark reviewed':
                     direct_notices=canonical_command(after,{'type':'GET_NOTICES'})
                     direct_summary=canonical_command(after,{'type':'SUMMARY'})
                     ui_state=execute(after,
@@ -1690,13 +1690,22 @@ def main():
                 execute(after,"document.querySelector('#pcms-attention-list button').click();return true")
                 for _ in range(40):
                     residual=canonical_command(after,{'type':'GET_NOTICES'})
-                    if residual.get('ok') is True and residual.get('notices')==[]:break
+                    if (residual.get('ok') is True and
+                        any(n.get('code')=='SOURCE_HELD' and n.get('reviewed') is True
+                            for n in residual.get('notices',[]))):break
                     time.sleep(.15)
-                assert residual.get('ok') is True and residual.get('notices')==[],residual
+                assert residual.get('ok') is True,residual
+                assert len(residual.get('notices',[]))==1,residual
+                assert residual['notices'][0]['code']=='SOURCE_HELD',residual
+                assert residual['notices'][0]['reviewed'] is True,residual
+                acknowledgement=execute(after,
+                    "return {text:document.querySelector('#pcms-attention-list')?.textContent||'',"
+                    "disabled:document.querySelector('#pcms-attention-list button')?.disabled}")
+                assert 'Reviewed' in acknowledgement['text'] and acknowledgement['disabled'] is True,acknowledgement
                 uncertain=canonical_command(after,{'type':'GET_OPERATION',
                     'operationId':'fixture_operation_01'})
                 assert uncertain.get('state')=='HELD_UNCERTAIN',uncertain
-                print('B I02_UI_IGNORE_DOES_NOT_RELEASE_OPERATION=PASS',flush=True)
+                print('B S08_UI_REVIEW_PERSISTS_INCIDENT_AND_DOES_NOT_RELEASE_OPERATION=PASS',flush=True)
                 # I09 B: exact installed Firefox Developer Edition XPI,
                 # actual IndexedDB transactions, full source SHA-256, runtime
                 # sender port, fail-closed staging and synthetic editor strip.
