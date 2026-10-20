@@ -397,6 +397,25 @@
           <p role="status" aria-live="polite" id="pcms-auto-backup-status">Checking canonical backup state.</p>
           <p class="reason">Up to 14 confirmed automatic archives are retained. Only positively tracked matching excess downloads may be deleted. Manual, untracked, uncertain and missing files are preserved. No independent on-disk byte proof is claimed.</p>
         </section>
+        <section class="panel" aria-labelledby="pcms-diagnostic-heading">
+          <div class="panel-head"><h2 id="pcms-diagnostic-heading">Full diagnostic</h2><span class="unknown">Designated disposable scope only</span></div>
+          <p>Designate a test account, its protected Persona and a separate namespace once. The diagnostic follows the actual guarded production handlers and stops at the first unverified action. It preserves remote test artifacts; it never approves publication, retries an uncertain write, or substitutes production resources.</p>
+          <div class="account-controls">
+            <label for="pcms-diagnostic-account">Verified disposable account</label>
+            <select id="pcms-diagnostic-account" aria-describedby="pcms-diagnostic-scope"></select>
+            <label for="pcms-diagnostic-namespace">Dedicated test namespace (pcms-test-…)</label>
+            <input id="pcms-diagnostic-namespace" autocomplete="off" spellcheck="false" maxlength="42" placeholder="pcms-test-alpha">
+            <button type="button" id="pcms-diagnostic-designate">Save disposable scope</button>
+            <button type="button" id="pcms-diagnostic-run" disabled>Run full diagnostic</button>
+            <button type="button" id="pcms-diagnostic-resume" disabled>Resume failed stage</button>
+            <button type="button" id="pcms-diagnostic-rerun" disabled>Full rerun with new slug</button>
+            <button type="button" id="pcms-diagnostic-export" disabled>Export sanitized report</button>
+          </div>
+          <p id="pcms-diagnostic-scope" role="status" aria-live="polite">Select disposable resources.</p>
+          <p id="pcms-diagnostic-status" role="status" aria-live="polite">No diagnostic run.</p>
+          <div id="pcms-diagnostic-stages" class="table-wrap" tabindex="0" aria-label="Diagnostic stage results"></div>
+          <p class="reason">A missing independent live observation remains NOT_TESTED or HELD, never PASS. Human source acceptance and exact-F publication still require real operator review. No test-only cleanup is issued without verified ownership.</p>
+        </section>
         <section class="panel"><div class="panel-head"><h2>PCMS capability boundaries</h2><span class="unknown">Protected actions require scoped permission and independent evidence</span></div><dl class="settings-list"><div><dt>Account and provider operations</dt><dd>Supported guarded workflows; account ownership, protected Persona route and operation-specific admission remain mandatory</dd></div><div><dt>Automated source development</dt><dd>Bounded READY and AI progression requires the explicit development grant and native editor/source safety checks</dd></div><div><dt>Scheduling and Refresher</dt><dd>Background scheduler and observed fleet state are available; guarded Refresher marker saves use their own explicit enable control</dd></div><div><dt>Private generator-source Git writes</dt><dd>Conditional source-only writeback requires tested F, active READY, the Git grant and a native OS-vault credential</dd></div><div><dt>Publication and recovery</dt><dd>Each exact F needs a separate human approval, eligible public hold and guarded readback; restored controllers remain inactive pending independent activation</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Owned by the pinned PersonaMonkey donor; S06 permissions cannot bypass route or source guards</dd></div></dl><p class="reason">Granting S06 permission is not evidence that an external operation succeeded. Advanced PersonaMonkey route controls remain separate.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
         <section class="panel" aria-labelledby="pcms-s06-authority-heading">
           <div class="panel-head"><h2 id="pcms-s06-authority-heading">Protected workflow activation</h2><span class="unknown">All remote effects OFF by default</span></div>
@@ -466,5 +485,6 @@
   <script type="module" src="standing-authority-view.mjs"></script>
   <script type="module" src="existing-update-view.mjs"></script>
   <script type="module" src="refresher-view.mjs"></script>
+  <script type="module" src="s08-diagnostics.mjs"></script>
 </body>
 </html>
