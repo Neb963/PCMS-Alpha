@@ -30,5 +30,9 @@ test('S07 background monitor: temporary tab is fixed same-origin, protected cont
   assert.match(route,/world:'ISOLATED'/);
   assert.match(route,/finally\{/);
   assert.match(route,/latest\.active===false/);
+  assert.match(route,/onActivated\.addListener\(activationListener\)/);
+  assert.match(route,/onActivated\.removeListener\(activationListener\)/);
+  assert.match(route,/!humanTouched/);
+  assert.match(route,/latest\.url==='https:\/\/perchance.org\/'/);
   assert.doesNotMatch(route,/world:'MAIN'|saveGenerator|isPrivate\s*=|runExistingStep/);
 });
