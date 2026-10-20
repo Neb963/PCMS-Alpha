@@ -204,7 +204,7 @@ export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=null,qualif
     ['observerEpoch','systemBootId','nativeLifetimeId','observerConnectionId']
       .every(k=>isSafeId(n[k]))&&Number.isSafeInteger(n.sequence)&&n.sequence>0&&
     ['hostAwakeNs','hostBootNs'].every(k=>
-      typeof n[k]==='string'&&/^\\d{1,24}$/.test(n[k]));
+      typeof n[k]==='string'&&/^\d{1,24}$/.test(n[k]));
   if(nativeOK(nativeClock)){
     const previous=out.nativeClock;
     // Never credit two windows in one reducer transition.
