@@ -9,6 +9,11 @@ const ID=x=>typeof x==='string'&&/^[a-z0-9_-]{8,128}$/i.test(x);
 const FP=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
 const INT=x=>Number.isSafeInteger(x)&&x>0;
 const MAX_NATIVE_GAP=12*3600000;
+const boundedNative=n=>n&&
+  ['observerEpoch','systemBootId','nativeLifetimeId','observerConnectionId']
+    .every(k=>ID(n[k]))&&INT(n.sequence)&&
+  ['hostAwakeNs','hostBootNs'].every(k=>
+    typeof n[k]==='string'&&/^\d{1,24}$/.test(n[k]));
 
 function certified(c,source){
   return c?.source===source&&ID(c.id)&&INT(c.validFromMs)&&INT(c.validUntilMs)&&
@@ -25,8 +30,9 @@ const held=reason=>({ok:false,reason,creditedMs:0});
 export function qualifyNativeOperatingInterval({previous,next,bootId,id,
   providerCoverages=[],accountCoverages=[],maxGapMs=MAX_NATIVE_GAP,
   uncertaintyMs=25}={}){
-  if(!ID(bootId)||!ID(id)||!previous||!next||
-     !INT(previous.observedAtMs)||!INT(next.observedAtMs)||
+  if(!ID(bootId)||!ID(id)||!boundedNative(previous)||
+     !boundedNative(next)||!INT(previous.observedAtMs)||
+     !INT(next.observedAtMs)||
      !Array.isArray(providerCoverages)||providerCoverages.length>16||
      !Array.isArray(accountCoverages)||accountCoverages.length>1000||
      !INT(maxGapMs)||maxGapMs>MAX_NATIVE_GAP||
