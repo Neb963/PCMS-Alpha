@@ -317,7 +317,12 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         return {...view,restoreHeld:restore.held,alarmHeld,monitoring:
           observationGate()?'GUARDED_READ_ONLY':'OFF_PENDING_ACTIVATION',
           refreshCapability:refreshGate()&&refreshAdapter?
-            'TEST_OR_AUTHORIZED_CAPABILITY_GATED':'LIVE_REFRESH_OFF_UNTIL_PROVEN'};
+            'TEST_OR_AUTHORIZED_CAPABILITY_GATED':'LIVE_REFRESH_OFF_UNTIL_PROVEN',
+          // This reports the actual production gate, never assumes that
+          // monotonic host time is eligible provider/account operating time.
+          clockCapability:nativeClockGate()?
+            'AWAKE_CLOCK_ON_COVERAGE_INDEPENDENTLY_REQUIRED':
+            'CONTINUOUS_ELIGIBILITY_NOT_ESTABLISHED'};
       }
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(message.type==='OBSERVE_NOW'){

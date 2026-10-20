@@ -6,7 +6,10 @@ import {emptyShadow,reconcileShadow,advanceShadow,HOUR,MINUTE}
 const base=1000000,H='e'.repeat(64),boot='browser_boot_01';
 const certificate=(source,id,rest={})=>({
  source,id,validFromMs:base-1,validUntilMs:base+6*24*HOUR,
- held:false,generationValid:true,...rest});
+ held:false,generationValid:true,
+ observerEpoch:'observer_epoch_01',nativeLifetimeId:'native_lifetime_01',
+ systemBootId:'system_boot_01',observerConnectionId:'connection_01',
+ ...rest});
 const coverage={
  source:'DONOR_CONTINUOUS_COVERAGE',
  providers:[
@@ -17,10 +20,12 @@ const coverage={
  accounts:[{accountId:'account_01',personaUid:'persona_01',
   bindingVersion:1,principalFingerprint:H,
   route:certificate('DONOR_CONTINUOUS_ROUTE','route_interval_01',{
-    accountId:'account_01',personaUid:'persona_01',bindingVersion:1,protected:true}),
+    accountId:'account_01',personaUid:'persona_01',bindingVersion:1,protected:true,
+    routeId:'protected_route_01',cookieStoreId:'firefox_container_01'}),
   session:certificate('DONOR_CONTINUOUS_SESSION','session_interval_01',{
     accountId:'account_01',personaUid:'persona_01',bindingVersion:1,
-    principalFingerprint:H,verified:true})}]
+    principalFingerprint:H,verified:true,
+    routeId:'protected_route_01',cookieStoreId:'firefox_container_01'})}]
 };
 const witness=i=>{
  const ns=BigInt(i)*BigInt(MINUTE)*1000000n+3000000000n;

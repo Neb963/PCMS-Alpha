@@ -12,17 +12,22 @@ const sample=(n,at,awake=at-start)=>({
   hostBootNs:String(2000000000+awake*1000000)});
 const certificate=(source,id,extra={})=>({
   source,id,validFromMs:start-100,validUntilMs:start+span+1000,
-  generationValid:true,held:false,...extra});
+  generationValid:true,held:false,
+  observerEpoch:'observer_001',systemBootId:'system_001',
+  nativeLifetimeId:'native_001',observerConnectionId:'connection_001',
+  ...extra});
 const providerCoverages=[
   certificate('DONOR_CONTINUOUS_PROVIDER','provider_one_01',{
     accountId:'witness_account_01',domain:'exit_one_001',result:'HEALTHY',routeVerified:true}),
   certificate('DONOR_CONTINUOUS_PROVIDER','provider_two_01',{
     accountId:'witness_account_02',domain:'exit_two_001',result:'HEALTHY',routeVerified:true})];
 const route=certificate('DONOR_CONTINUOUS_ROUTE','route_valid_001',{
-  accountId:'account_01',personaUid:'persona_01',bindingVersion:1,protected:true});
+  accountId:'account_01',personaUid:'persona_01',bindingVersion:1,protected:true,
+  routeId:'protected_route_01',cookieStoreId:'firefox_container_01'});
 const session=certificate('DONOR_CONTINUOUS_SESSION','session_valid_01',{
   accountId:'account_01',personaUid:'persona_01',bindingVersion:1,
-  principalFingerprint:H,verified:true});
+  principalFingerprint:H,verified:true,
+  routeId:'protected_route_01',cookieStoreId:'firefox_container_01'});
 const accountCoverages=[{accountId:'account_01',personaUid:'persona_01',
   bindingVersion:1,principalFingerprint:H,route,session}];
 const coverage={source:'DONOR_CONTINUOUS_COVERAGE',
@@ -47,6 +52,11 @@ test('S07 E04 X: route TTL, two endpoint checks, absent healthy session, lone ex
     {...args,providerCoverages:[]},
     {...args,providerCoverages:[providerCoverages[0]]},
     {...args,providerCoverages:[providerCoverages[0],{...providerCoverages[1],domain:'exit_one_001'}]},
+    {...args,providerCoverages:[providerCoverages[0],{...providerCoverages[1],accountId:'witness_account_01'}]},
+    {...args,providerCoverages:[providerCoverages[0],{...providerCoverages[1],nativeLifetimeId:'previous_native_01'}]},
+    {...args,accountCoverages:[{...accountCoverages[0],route:{...route,observerConnectionId:'previous_connection_01'}}]},
+    {...args,accountCoverages:[{...accountCoverages[0],route:{...route,cookieStoreId:'other_container_01'}}]},
+    {...args,accountCoverages:[{...accountCoverages[0],session:{...session,routeId:'direct'}}]},
     {...args,providerCoverages:[providerCoverages[0],{...providerCoverages[1],validFromMs:start+1}]},
     {...args,accountCoverages:[]},
     {...args,accountCoverages:[{...accountCoverages[0],route:{...route,source:'CACHED_ROUTE_TEST'}}]},

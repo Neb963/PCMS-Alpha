@@ -15,9 +15,14 @@ const boundedNative=n=>n&&
   ['hostAwakeNs','hostBootNs'].every(k=>
     typeof n[k]==='string'&&/^\d{1,24}$/.test(n[k]));
 
-function certified(c,source){
+// A prospective eligibility attestation is scoped to the very same native
+// observer incarnation that supplied both monotonic samples. A cached donor
+// health record from an older host/session cannot be promoted into an interval.
+const GENERATION=['observerEpoch','systemBootId','nativeLifetimeId','observerConnectionId'];
+function certified(c,source,native){
   return c?.source===source&&ID(c.id)&&INT(c.validFromMs)&&INT(c.validUntilMs)&&
-    c.validUntilMs>c.validFromMs&&c.held===false&&c.generationValid===true;
+    c.validUntilMs>c.validFromMs&&c.held===false&&c.generationValid===true&&
+    GENERATION.every(field=>ID(c[field])&&c[field]===native[field]);
 }
 function window(previous,next,coverage,maxGapMs,uncertaintyMs){
   return closeQualifiedWindow(previous,next,{coverage,maxGapMs,uncertaintyMs});
@@ -40,11 +45,12 @@ export function qualifyNativeOperatingInterval({previous,next,bootId,id,
     return held('NATIVE_INTERVAL_INVALID');
   const start=previous.observedAtMs;
   if(providerCoverages.length<2||providerCoverages.some(c=>
-      !certified(c,'DONOR_CONTINUOUS_PROVIDER')||!ID(c.domain)||
+      !certified(c,'DONOR_CONTINUOUS_PROVIDER',previous)||!ID(c.domain)||
       !ID(c.accountId)||c.routeVerified!==true||
       c.result!=='HEALTHY'))
     return held('PROVIDER_COVERAGE_NOT_PROVEN');
-  if(new Set(providerCoverages.map(c=>c.domain)).size<2)
+  if(new Set(providerCoverages.map(c=>c.domain)).size<2||
+     new Set(providerCoverages.map(c=>c.accountId)).size<2)
     return held('PROVIDER_DOMAINS_NOT_INDEPENDENT');
   const general=window(previous,next,providerCoverages,maxGapMs,uncertaintyMs);
   if(!general.creditedMs)return held(general.reason);
@@ -56,8 +62,13 @@ export function qualifyNativeOperatingInterval({previous,next,bootId,id,
   for(const a of accountCoverages){
     if(!ID(a?.accountId)||seen.has(a.accountId)||!ID(a.personaUid)||
        !INT(a.bindingVersion)||!FP(a.principalFingerprint)||
-       !certified(a.route,'DONOR_CONTINUOUS_ROUTE')||
-       !certified(a.session,'DONOR_CONTINUOUS_SESSION')||
+       !certified(a.route,'DONOR_CONTINUOUS_ROUTE',previous)||
+       !certified(a.session,'DONOR_CONTINUOUS_SESSION',previous)||
+       !ID(a.route.routeId)||!ID(a.session.routeId)||
+       !ID(a.route.cookieStoreId)||!ID(a.session.cookieStoreId)||
+       a.route.routeId==='direct'||a.route.routeId==='block'||
+       a.route.routeId!==a.session.routeId||
+       a.route.cookieStoreId!==a.session.cookieStoreId||
        a.route.accountId!==a.accountId||a.session.accountId!==a.accountId||
        a.route.personaUid!==a.personaUid||a.session.personaUid!==a.personaUid||
        a.route.bindingVersion!==a.bindingVersion||

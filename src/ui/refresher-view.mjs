@@ -58,8 +58,11 @@ function draw(s){
     const target=document.getElementById(id);if(target)target.textContent='Shadow Refresher: '+summary;
   }
   el('provider').textContent='Provider '+s.provider.state+
-    ' · effective refresh method unverified (mutation disabled) · clocks: '+s.clock+
-    ' · observations: '+s.monitoring+' · refresh mutations OFF.';
+    ' · refresh mutation OFF · operating time: '+
+    (s.clockCapability==='CONTINUOUS_ELIGIBILITY_NOT_ESTABLISHED'?
+      'continuous eligibility not verified':
+      'native clock requires independently verified eligibility')+
+    ' · observations: '+s.monitoring+'.';
   el('diagnostics').textContent=s.diagnostics.turns+' durable turns · '+s.diagnostics.unknownIntervals+
     ' unknown intervals frozen · read peak '+s.diagnostics.readPeak+' · queue peak '+s.diagnostics.queuePeak+
     ' · next wake '+(s.nextWakeAt?new Date(s.nextWakeAt).toLocaleTimeString():'not verified')+
