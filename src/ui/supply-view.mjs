@@ -27,7 +27,8 @@ const supply=(type,params)=>request('pcms-i06-supply',type,params);
 const creation=(type,params)=>request('pcms-s00-coordinator',type,params);
 const parsed=()=>input.value.replace(/\r\n/g,'\n').split('\n').filter(x=>x.length>0);
 function setBusy(value){
-  busy=value;preview.disabled=value;freeze.disabled=value||!latest||!latest.items.some(i=>i.state==='FROZEN');
+  // One action: Create validates and submits; Check list is optional.
+  busy=value;preview.disabled=value;freeze.disabled=value||parsed().length===0;
   refresh.disabled=value;
 }
 function notice(text){feedback.textContent=text;}
@@ -247,6 +248,16 @@ function payload(){
   const account=accounts.find(a=>a.accountId===select.value);
   return {accountId:account?.accountId||null,slugs:parsed()};
 }
+function validateList(names){
+  const seen=new Set();
+  return {items:names.map((slug,index)=>{
+      const invalid=!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug);
+      const duplicate=seen.has(slug);
+      seen.add(slug);
+      return {index,slug,state:invalid||duplicate?'REJECTED':'FROZEN',
+        reason:invalid?'INVALID_SLUG':duplicate?'DUPLICATE_SLUG':null};
+    })};
+}
 async function handlePreview(){
   if(busy)return;
   const p=payload();
@@ -275,18 +286,21 @@ async function handlePreview(){
 }
 preview.addEventListener('click',()=>{void handlePreview();});
 freeze.addEventListener('click',async()=>{
-  if(busy||!latest)return;
+  if(busy)return;
   const p=payload();
-  // Never freeze an altered input under an old operator preview.
-  const list=latest.items.map(i=>i.slug);
-  if(JSON.stringify(p.slugs)!==JSON.stringify(list)){
-    latest=null;setBusy(false);notice('Input changed; preview again before freezing.');return;
-  }
+  if(!p.slugs.length)return;
+  // Validation is part of Create; any batch size is submitted in bounded
+  // sequential chunks. Each slug coalesces with an existing intent (same
+  // slug from Git or an earlier batch), so a repeated click or lost ACK never
+  // creates a second operation; failed items do not stop the others.
+  latest=validateList(p.slugs);
   const mine=++seq;setBusy(true);
   const outcomes=[];
-  notice('Recording exact admissible slugs in the unified canonical queue…');
+  notice('Submitting '+latest.items.length+' slugs to the creation queue…');
   try{
+    let done=0;
     for(const item of latest.items){
+      if(++done%25===0&&mine===seq)notice('Submitting… '+done+' of '+latest.items.length);
       if(item.state!=='FROZEN'){
         outcomes.push({...item});continue;
       }
@@ -297,21 +311,24 @@ freeze.addEventListener('click',async()=>{
       ...(p.accountId?{accountId:p.accountId}:{})
       });}catch{result={ok:false,code:'ACK_UNKNOWN'};}
       if(mine!==seq)return;
-      outcomes.push({...item,state:result?.ok?'WAITING_CAPABILITY':'HELD',
-        reason:result?.ok?'S04_CREATION_ACTIVATION_HELD':result?.code||'ACK_UNKNOWN'});
+      outcomes.push({...item,state:result?.ok?'QUEUED':'HELD',
+        reason:result?.ok?(result.changed===false?'ALREADY_QUEUED':'QUEUED_FOR_CREATION'):result?.code||'ACK_UNKNOWN'});
     }
-    latest=null;paint(outcomes,true);
-    const stored=outcomes.filter(x=>x.state==='WAITING_CAPABILITY').length;
-    notice(stored+' slug intents acknowledged in the canonical creation queue; '+
-      (outcomes.length-stored)+' rejected or unconfirmed. A lost ACK requires queue inspection, not blind remote retry. No provider/Git effect.');
+    latest=null;paint(outcomes.slice(0,500),true);
+    const stored=outcomes.filter(x=>x.state==='QUEUED').length;
+    notice(stored+' slugs queued for protected creation; '+(outcomes.length-stored)+
+      ' rejected or unconfirmed'+(outcomes.length>500?' (first 500 shown)':'')+
+      '. PCMS creates each private generator in the background on an eligible verified account '+
+      '(development grant required). Progress is in the Work Queue.');
     await fetchBatches();
   }catch{
     if(mine===seq)notice('Canonical local intake interrupted. Inspect Work Queue before retrying. No remote effect was authorized.');
   }finally{if(mine===seq)setBusy(false);}
 });
 refresh.addEventListener('click',()=>{void loadAccounts();void fetchBatches();});
-select.addEventListener('change',()=>{latest=null;paint([],false);notice('Account changed; new preview required.');});
-input.addEventListener('input',()=>{latest=null;paint([],false);notice('Input changed; preview required before freezing.');});
+select.addEventListener('change',()=>{latest=null;paint([],false);setBusy(busy);});
+input.addEventListener('input',()=>{latest=null;paint([],false);setBusy(busy);
+  notice(parsed().length+' slug lines. Choose Create generators to queue them.');});
 window.addEventListener('hashchange',()=>{
   if(location.hash==='#generators')void loadAccounts();
   if(location.hash==='#work-queue')void fetchBatches();

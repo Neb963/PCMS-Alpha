@@ -149,3 +149,9 @@ main{grid-column:2;grid-row:2;overflow-y:auto;min-height:0;max-width:none;paddin
  .sidebar nav a[aria-current=page]{background:#23364f;color:#95c1ff}
  .brand-mark{background:#e8edf2;color:#1a2026}
 }
+/* Exact-source review diff */
+.review-change{border-top:1px solid var(--line, #8884);padding:.4rem 0}
+.diff-add{display:block;background:color-mix(in srgb, #2da44e 18%, transparent)}
+.diff-del{display:block;background:color-mix(in srgb, #cf222e 18%, transparent)}
+.diff-ctx{display:block;opacity:.8}
+.diff-hunk{display:block;font-weight:600;opacity:.75}
