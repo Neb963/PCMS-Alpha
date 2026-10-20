@@ -20,6 +20,7 @@ function fixture({throwWitness=false,clockGate=true}={}){
     runtime:{id:'pcms-test',onConnect:{addListener(){}},onStartup:{addListener(){}},
       onInstalled:{addListener(){}},getURL:path=>'moz-extension://pcms-test/'+path}};
   const store={
+    read:async()=>({ok:true,state:emptyShadow()}),
     turn:async args=>{
       turns.push(args);
       const next=advanceShadow(emptyShadow(),args);

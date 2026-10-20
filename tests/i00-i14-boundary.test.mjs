@@ -19,7 +19,7 @@ function fixture({gate=false,changeRoute=false,lostReadback=false,uncertain=fals
       absence:'NOT_A_DELETION'},metrics:{nextDueAt:999999999}};
   const state={rows:[row],accounts:{account_01:{verifiedIdentity:true,principalFingerprint:H}},
     recent:{nextDueAt:999999999,suspended:false,complete,observedAt:stale?1:1999000},
-    policy:{recentMs:600000}};
+    policy:{recentMs:600000,refreshEnabled:gate}};
   const store={
     turn:async()=>({ok:true,revision:2,state:{nextWakeAt:180000,diagnostics:{turns:1}}}),
     read:async()=>({ok:true,state}),
