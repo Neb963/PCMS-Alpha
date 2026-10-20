@@ -36,7 +36,8 @@ export function emptyShadow(){
     provider:{state:'UNKNOWN',witnesses:0,observedAt:0},
     bootId:null,lastTurnAt:0,nextWakeAt:0,nextAdmissionAt:0,dueIndex:[],
     nativeClock:null,
-    recent:{observedAt:0,total:null,complete:false,nextDueAt:0,failures:0},
+    recent:{observedAt:0,total:null,complete:false,nextDueAt:0,failures:0,
+      accountBackoff:{}},
     inflight:[],readWindow:{start:0,used:0},timeline:[],healthIntervals:[],
     diagnostics:{turns:0,unknownIntervals:0,replayedIntervals:0,
       admissions:0,graceReleases:0,reads:0,dropped:0,readPeak:0,queuePeak:0}};
@@ -363,7 +364,10 @@ export function claimObservation(s,{kind,stableId=null,now,bootId,claimId,prefer
     out.inflight.some(c=>c.stableId===stableId||c.accountId===r.accountId)))
     return fail('STATISTIC_NOT_DUE');
   const accountId=r?.accountId||preferredAccountId||Object.entries(out.accounts).find(([id,a])=>
-    a.verifiedIdentity&&!out.inflight.some(c=>c.accountId===id))?.[0];
+    a.verifiedIdentity&&!out.inflight.some(c=>c.accountId===id)&&
+    (kind!=='RECENT'||(out.recent.accountBackoff?.[id]||0)<=now))?.[0];
+  if(kind==='RECENT'&&(out.recent.accountBackoff?.[accountId]||0)>now)
+    return fail('RECENT_ACCOUNT_RATE_LIMITED');
   const a=out.accounts[accountId];
   if(!a||!a.verifiedIdentity)return fail('ACCOUNT_UNAVAILABLE');
   const claim={claimId,kind,bootId,startedAt:now,accountId,personaUid:a.personaUid,

@@ -95,6 +95,7 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
       coverage:s.recent.complete===true?'COMPLETE':'UNKNOWN',
       lastUnknownAt:s.recent.lastUnknownAt||0,
       suspended:s.recent.suspended===true,
+      rateLimitedAccountCount:Object.values(s.recent.accountBackoff||{}).filter(until=>until>now).length,
       stale:!s.recent.observedAt||s.recent.observedAt>now||now-s.recent.observedAt>2*s.policy.recentMs},
     nextWakeAt:s.nextWakeAt,diagnostics:{...s.diagnostics},
     timeline:s.timeline.slice(-8),clock:'EVIDENCED_ONLY',monitoring:'GATED_READ_ONLY'};
@@ -295,11 +296,24 @@ export function createRefresherStore(db){
         out.recent.lastUnknownAt=now;
         clockChanges.push({code:'RECENT_COVERAGE_UNKNOWN',scopeId:c.accountId});
       }
-      const obj=c.kind==='RECENT'?out.recent:out.rows.find(r=>r.stableId===c.stableId)?.metrics;
-      if(obj){obj.failures=Math.min(8,obj.failures+1);obj.suspended=obj.failures>=8;
-        const floor=c.kind==='RECENT'?out.policy.recentMs:out.policy.statsMinMs;
-        obj.nextDueAt=now+Math.max(Math.min(24*60*MINUTE,floor*2**obj.failures),
-          Math.min(24*60*MINUTE,Math.max(0,packet?.retryAfterMs||0)));
+      // HTTP 429 applies only to the protected account that made the read.
+      // Let a different eligible Persona attempt the global public feed on
+      // the next bounded wake. Never exhaust the entire fleet's retry budget
+      // because one account received a scoped provider rate limit.
+      const scopedRateLimit=c.kind==='RECENT'&&packet?.code==='RATE_LIMITED';
+      if(scopedRateLimit){
+        const requested=Number.isSafeInteger(packet.retryAfterMs)&&packet.retryAfterMs>0?
+          packet.retryAfterMs:out.policy.recentMs;
+        out.recent.accountBackoff={...(out.recent.accountBackoff||{}),
+          [c.accountId]:now+Math.min(24*60*MINUTE,Math.max(MINUTE,requested))};
+        out.recent.nextDueAt=now+MINUTE;
+      }else{
+        const obj=c.kind==='RECENT'?out.recent:out.rows.find(r=>r.stableId===c.stableId)?.metrics;
+        if(obj){obj.failures=Math.min(8,obj.failures+1);obj.suspended=obj.failures>=8;
+          const floor=c.kind==='RECENT'?out.policy.recentMs:out.policy.statsMinMs;
+          obj.nextDueAt=now+Math.max(Math.min(24*60*MINUTE,floor*2**obj.failures),
+            Math.min(24*60*MINUTE,Math.max(0,packet?.retryAfterMs||0)));
+        }
       }
     }
     return {ok:true,state:out,accepted,changes:clockChanges,code:accepted?'OBSERVED':'OBSERVATION_HELD'};

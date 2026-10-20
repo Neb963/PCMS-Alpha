@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fakeDatabase} from './fake-idb.mjs';
 import {createRefresherStore} from '../src/runtime/refresher-store.mjs';
-import {emptyShadow,reconcileShadow,REFRESHER_KEY} from '../src/runtime/refresher-core.mjs';
+import {emptyShadow,reconcileShadow,REFRESHER_KEY,MINUTE} from '../src/runtime/refresher-core.mjs';
 import {emptyRefreshEvidence} from '../src/runtime/refresher-effect-core.mjs';
 
 const H='a'.repeat(64),now=2000000,bootId='browser_boot_001';
@@ -17,13 +17,17 @@ async function put(db,records){
     for(const record of records)m.put(record);
   });
 }
-async function fixture(){
+async function fixture({otherAccount=false}={}){
   const db=fakeDatabase();
   const built=reconcileShadow(emptyShadow(),[{
     slug:'owned-generator',accountId:'account_01',personaUid:'persona_01',
     bindingVersion:1,remoteId:'remote_owned_01',ownerVerified:true,
     accountVerified:true,principalFingerprint:H,releaseVerified:true,
-    releaseFingerprint:H,listing:'PUBLIC'}]);
+    releaseFingerprint:H,listing:'PUBLIC'},
+    ...(otherAccount?[{slug:'other-generator',accountId:'account_02',
+      personaUid:'persona_02',bindingVersion:1,remoteId:'remote_other_01',
+      ownerVerified:true,accountVerified:true,principalFingerprint:'b'.repeat(64),
+      releaseVerified:false,releaseFingerprint:null,listing:'PUBLIC'}]:[])]);
   assert.equal(built.ok,true);
   const state=built.state,r=state.rows[0];
   state.bootId=bootId;
@@ -37,6 +41,14 @@ async function fixture(){
       ownedVisible:0,activeVisible:0}};
   state.accounts.account_01.health='HEALTHY';
   await put(db,[{key:REFRESHER_KEY,state},
+    ...(otherAccount?[{key:'account:account_02',account:{
+      accountId:'account_02',personaUid:'persona_02',bindingVersion:1,
+      state:'VERIFIED',identity:{source:'GUARDED_SESSION_READBACK',
+        bindingVersion:1,principalFingerprint:'b'.repeat(64)}}},
+      {key:'inventory:other-generator',generator:{
+        slug:'other-generator',accountId:'account_02',personaUid:'persona_02',
+        bindingVersion:1,remoteId:'remote_other_01',
+        ownerState:'OBSERVED_OWNER',visibility:'PUBLIC'}}]:[]),
     {key:'account:account_01',account:{accountId:'account_01',
       personaUid:'persona_01',bindingVersion:1,state:'VERIFIED',
       identity:{source:'GUARDED_SESSION_READBACK',bindingVersion:1,
@@ -88,14 +100,15 @@ test('S07 T-08: rate limit makes newer recent feed UNKNOWN, preserves history an
   assert.equal(candidateClaim.ok,true);
   const recent=await recentClaim(f,now+10);
   const failed=await f.store.complete(recent.claimId,{
-    ok:false,code:'PROVIDER_RATE_LIMITED',principalFingerprint:H,
+    ok:false,code:'RATE_LIMITED',principalFingerprint:H,
     retryAfterMs:120000},now+20);
   assert.equal(failed.ok,true);
   assert.equal(failed.accepted,false);
   const persisted=f.db.read('meta',REFRESHER_KEY).state;
   assert.equal(persisted.recent.complete,false);
-  assert.equal(persisted.recent.failures,1);
-  assert.ok(persisted.recent.nextDueAt>=now+20+120000);
+  assert.equal(persisted.recent.failures,0);
+  assert.equal(persisted.recent.nextDueAt,now+20+60000);
+  assert.ok(persisted.recent.accountBackoff.account_01>=now+20+120000);
   const denied=await f.store.markDispatch(candidateClaim.claim,now+21);
   assert.equal(denied.ok,false);
   assert.equal(f.db.read('meta',REFRESHER_KEY).state.rows[0].refresh.intent.state,'RESERVED');
@@ -134,4 +147,29 @@ test('S07 T-08: later full feed restores completeness without fabricating placem
   assert.equal(latest.recent.observedAt,second.startedAt);
   assert.equal(latest.rows[0].presence.present,true);
   assert.equal((await tryReserve(f,second.startedAt+11)).ok,false);
+});
+
+test('S07 T-08: a protected account 429 blocks only that Persona and leaves another available for fresh observations',async()=>{
+  const f=await fixture({otherAccount:true});
+  const first=await recentClaim(f,now+10);
+  const rate=await f.store.complete(first.claimId,{ok:false,code:'RATE_LIMITED',
+    principalFingerprint:H,retryAfterMs:300000},now+20);
+  assert.equal(rate.ok,true);
+  const blocked=await f.store.claim({kind:'RECENT',preferredAccountId:'account_01',
+    now:now+20+MINUTE,bootId,claimId:'recent_429_again'});
+  assert.equal(blocked.ok,false);
+  assert.equal(blocked.code,'RECENT_ACCOUNT_RATE_LIMITED');
+  const other=await f.store.claim({kind:'RECENT',preferredAccountId:'account_02',
+    now:now+20+MINUTE,bootId,claimId:'recent_other_account'});
+  assert.equal(other.ok,true,JSON.stringify(other));
+  assert.equal(other.claim.accountId,'account_02');
+  const reply=await f.store.complete(other.claim.claimId,{ok:true,complete:true,
+    observedAt:other.claim.startedAt,principalFingerprint:'b'.repeat(64),
+    items:[{slug:'owned-generator'}]},other.claim.startedAt+10);
+  assert.equal(reply.ok,true);
+  assert.equal(reply.accepted,true);
+  const s=f.db.read('meta',REFRESHER_KEY).state;
+  assert.equal(s.recent.complete,true);
+  assert.equal(s.recent.accountBackoff.account_01>other.claim.startedAt,true);
+  assert.equal(s.recent.failures,0);
 });
