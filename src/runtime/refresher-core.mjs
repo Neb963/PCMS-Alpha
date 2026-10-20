@@ -212,7 +212,7 @@ export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=null,qualif
     // ORIGINAL native connection. The OS boot/pipe/lifetime/sequence counters
     // and continuous provider/session coverage decide this, not a JS module
     // instance ID. Actual Firefox/native death changes those witnesses.
-    if(!operationalReceipt&&previous?.witness&&
+    if(!operationalReceipt&&nativeOK(previous?.witness)&&
        nativeClock.observedAtMs>previous.witness.observedAtMs&&
        qualifiedCoverages?.source==='DONOR_CONTINUOUS_COVERAGE'){
       const result=qualifyNativeOperatingInterval({
