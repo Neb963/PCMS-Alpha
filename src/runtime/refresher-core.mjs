@@ -26,7 +26,8 @@ export function validatePolicy(p){
     !number(p.maxAdmissions,1,20)||!number(p.staggerMs,1000,MINUTE)||
     !number(p.recentMs,10*MINUTE,HOUR)||!number(p.statsMinMs,15*MINUTE,24*HOUR)||
     !number(p.statsMaxMs,p.statsMinMs,7*24*HOUR)||!number(p.readBudget,1,20)||
-    !number(p.rawSamples,2,48)||typeof p.refreshEnabled!=='boolean')
+    !number(p.rawSamples,2,48)||
+    (p.refreshEnabled!==undefined&&typeof p.refreshEnabled!=='boolean'))
     return fail('INVALID_REFRESHER_POLICY');
   return {ok:true};
 }
