@@ -1,12 +1,13 @@
 // I16 restore intent is outside replaceable canonical IndexedDB.
-// Never clear the guard from a page, alarm, imported archive or failure handler.
+// Never clear the guard from a page, alarm, imported archive or failure handler;
+// only an explicit operator reactivation of a COMPLETE_INACTIVE restore.
 export const RESTORE_GUARD_KEY='pcmsRestoreInProgress';
 const digest64=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
 const token=s=>typeof s==='string'&&/^restore_[a-f0-9]{32}$/.test(s);
 const fail=c=>{throw Error(c);};
 export function safeRestoreReceipt(s){
   if(!s||s.active!==true)return {held:false,code:'NO_RESTORE_MARKER'};
-  return {held:true,code:'RESTORE_IN_PROGRESS',epoch:s.epoch||null,
+  return {held:true,code:'RESTORE_IN_PROGRESS',epoch:s.epoch||null,revision:s.revision,
     status:s.status||'UNKNOWN',step:s.step||'NONE',createdContainers:Object.keys(s.createdContainers||{}).length,groups:Object.entries(s.groups||{})
       .map(([key,v])=>({key,status:v.status})),controller:'INACTIVE',activation:'OFF'};
 }
@@ -95,6 +96,26 @@ export function createRestoreGate(storage,{now=()=>Date.now(),
     return persist({...prior,revision:prior.revision+1,
       createdContainers:{...entries,[personaKey]:cookieStoreId}});
   }
-  return Object.freeze({read,begin,advance,recordContainer,
+  // The ONLY guard release: an explicit operator reactivation of a fully
+  // observed (COMPLETE_INACTIVE) restore. A partial/uncertain restore stays
+  // held. The receipt moves to bounded history; grants remain revoked.
+  async function reactivate({epoch,revision,at=now()}){
+    const prior=await read();
+    if(!prior||prior.epoch!==epoch||prior.revision!==revision)fail('RESTORE_STALE_GUARD');
+    const done=['donor-personas','donor-cookies','donor-portable','pcms-canonical']
+      .every(k=>prior.groups?.[k]?.status==='OBSERVED');
+    if(prior.status!=='COMPLETE_INACTIVE'||!done)fail('RESTORE_NOT_COMPLETE_INACTIVE');
+    let history=[];
+    try{history=(await storage.get('pcmsRestoreHistory'))?.pcmsRestoreHistory||[];}catch{}
+    if(!Array.isArray(history))history=[];
+    try{await storage.set({pcmsRestoreHistory:[...history,{epoch:prior.epoch,
+      planSha256:prior.planSha256,archiveSha256:prior.archiveSha256,
+      startedAt:prior.startedAt,reactivatedAt:at,fresh:prior.fresh===true}].slice(-20)});}
+    catch{fail('RESTORE_HISTORY_WRITE_FAILED');}
+    try{await storage.remove(RESTORE_GUARD_KEY);}catch{fail('RESTORE_GUARD_WRITE_FAILED');}
+    if(await read())fail('RESTORE_GUARD_READBACK_FAILED');
+    return {ok:true,code:'CONTROLLER_REACTIVATED',epoch:prior.epoch};
+  }
+  return Object.freeze({read,begin,advance,recordContainer,reactivate,
     inspect:async()=>safeRestoreReceipt(await read())});
 }

@@ -177,9 +177,9 @@
         </section>
       </section>
       <section class="workspace" id="view-work-queue" data-view="work-queue" aria-labelledby="heading-work-queue" hidden>
-        <header class="workspace-head"><div><p class="eyebrow">Workspace / 03</p><h1 id="heading-work-queue" tabindex="-1">Work Queue</h1><p>Evidence-backed operator decisions and task receipts.</p></div><button type="button" disabled aria-describedby="blocked-work-queue">Start action</button></header>
+        <header class="workspace-head"><div><p class="eyebrow">Workspace / 03</p><h1 id="heading-work-queue" tabindex="-1">Work Queue</h1><p>Evidence-backed operator decisions and task receipts.</p></div></header>
         <p id="pcms-queue-refresher" role="status">Scheduler status pending.</p><p><a href="#refresher">Inspect the global Refresher queue</a></p>
-        <section class="panel"><div class="panel-head"><h2>Operations</h2><span class="unknown">Read-only</span></div><p id="pcms-work-queue-summary" role="status">Loading canonical journal status. Unknown outcomes must be reconciled, not repeated.</p><p id="blocked-work-queue" class="reason">Provider effects are held. Frozen local supply receipts may be inspected; this screen cannot dispatch, approve or replay an uncertain remote operation.</p></section>
+        <section class="panel"><div class="panel-head"><h2>Operations</h2><span class="unknown">Read-only</span></div><p id="pcms-work-queue-summary" role="status">Loading canonical journal status. Unknown outcomes must be reconciled, not repeated.</p><p id="blocked-work-queue" class="reason">Background work runs automatically under the permissions granted in Settings. This screen shows receipts; it never repeats an uncertain remote operation.</p></section>
         <section class="panel" aria-labelledby="pcms-stage-queue-title"><div class="panel-head"><h2 id="pcms-stage-queue-title">Private staging receipts</h2><span class="unknown">Canonical · no auto-retry</span></div><div id="pcms-stage-queue" role="status" aria-live="polite">Reading local stage journal.</div></section>
         <section class="panel" aria-labelledby="pcms-adoption-queue-title"><div class="panel-head"><h2 id="pcms-adoption-queue-title">Existing-source adoption receipts</h2><span class="unknown">Local originals · Git archive pending</span></div><div id="pcms-adopt-receipts" role="status" aria-live="polite">Loading adoption history.</div></section>
         <section class="panel" aria-labelledby="pcms-supply-queue-title"><div class="panel-head"><h2 id="pcms-supply-queue-title">Frozen supply batches</h2><span class="unknown">Canonical local receipts</span></div><div id="pcms-supply-queue" role="status" aria-live="polite">Loading local batches.</div></section>
@@ -197,7 +197,7 @@
           <div class="account-controls">
             <button id="pcms-writeback-preview" type="button">Review source diff</button>
             <button id="pcms-writeback-prepare" type="button" disabled>Prepare conditional commit</button>
-            <button id="pcms-writeback-commit" type="button" disabled>Commit verified F to Git</button>
+            <button id="pcms-writeback-commit" type="button" disabled>Commit tested source to Git</button>
             <button id="pcms-writeback-cancel" type="button" disabled>Cancel unsent preparation</button>
             <button id="pcms-writeback-reconcile" type="button" disabled>Read-only Git reconciliation</button>
             <button id="pcms-writeback-refresh" type="button">Refresh canonical receipt</button>
@@ -211,7 +211,7 @@
           <div class="panel-head"><h2 id="pcms-existing-heading">Existing generator updates</h2><span class="unknown">READY advances automatically when eligible</span></div>
           <p class="reason">PCMS advances current READY through source preparation, safe unlisting and native development in the background. When route, source, editor, recovery or effect authority is unverified, only that generator is held; no blind remote retry.</p>
           <details><summary>Advanced source recovery and diagnostics</summary>
-          <p class="reason">Each generator must have archived original bytes, verified ownership, a sleeping I12 slot and an independent source baseline. The operator passphrase encrypts and verifies the previous-good full P locally; only a separately confirmed unlisting permits source staging. Never overwrite a human editor, repeat an ambiguous remote effect or republish a restored P.</p>
+          <p class="reason">Each generator must have archived original bytes, verified ownership, a sleeping Refresher slot and an independent source baseline. The operator passphrase encrypts and verifies the previous-good full source locally; only a separately confirmed unlisting permits source staging. Never overwrite a human editor, repeat an ambiguous remote effect or republish a restored previous source.</p>
           <div class="account-controls">
             <label for="pcms-existing-slug">Existing generator slug</label><input id="pcms-existing-slug" maxlength="100" autocomplete="off" spellcheck="false" placeholder="generator">
             <label for="pcms-existing-passphrase">Local recovery passphrase (not retained)</label><input id="pcms-existing-passphrase" type="password" autocomplete="off">
@@ -219,16 +219,16 @@
           </div>
           <div class="account-controls">
             <button id="pcms-existing-get" type="button" disabled>Load canonical state</button>
-            <button id="pcms-existing-prepare" type="button" disabled>Prepare encrypted previous P</button>
-            <button id="pcms-existing-unlist" type="button" disabled>Unlist public P (guarded)</button>
-            <button id="pcms-existing-recheck-unlist" type="button" disabled>Verify P unlisted (read-only)</button>
+            <button id="pcms-existing-prepare" type="button" disabled>Prepare encrypted previous source</button>
+            <button id="pcms-existing-unlist" type="button" disabled>Unlist current public version</button>
+            <button id="pcms-existing-recheck-unlist" type="button" disabled>Check it is unlisted</button>
             <button id="pcms-existing-pin-stage" type="button" disabled>Pin current READY source</button>
-            <button id="pcms-existing-stage" type="button" disabled>Stage full F (guarded)</button>
-            <button id="pcms-existing-recheck-stage" type="button" disabled>Verify saved F (read-only)</button>
-            <button id="pcms-existing-recovery-unlist" type="button" disabled>Unlist public F for recovery</button>
-            <button id="pcms-existing-recheck-recovery-unlist" type="button" disabled>Verify F unlisted (read-only)</button>
-            <button id="pcms-existing-restore" type="button" disabled>Restore encrypted P unlisted</button>
-            <button id="pcms-existing-recheck-restore" type="button" disabled>Verify restored P unlisted (read-only)</button>
+            <button id="pcms-existing-stage" type="button" disabled>Stage new source</button>
+            <button id="pcms-existing-recheck-stage" type="button" disabled>Check saved source</button>
+            <button id="pcms-existing-recovery-unlist" type="button" disabled>Unlist new version for recovery</button>
+            <button id="pcms-existing-recheck-recovery-unlist" type="button" disabled>Check new version is unlisted</button>
+            <button id="pcms-existing-restore" type="button" disabled>Restore previous source (unlisted)</button>
+            <button id="pcms-existing-recheck-restore" type="button" disabled>Check restored source is unlisted</button>
           </div>
           <p id="pcms-existing-status" role="status" aria-live="polite">Load a generator before any operation.</p>
           <div id="pcms-existing-details" role="region" tabindex="0" aria-label="Canonical prior and uncertain-effect evidence"></div>
@@ -247,9 +247,9 @@
             <label for="pcms-release-token">Optional Git credential override (normally from protected vault)</label><input id="pcms-release-token" type="password" autocomplete="off" spellcheck="false">
           </div>
           <div class="account-controls">
-            <button id="pcms-release-preview" type="button">Review full F and tests</button>
+            <button id="pcms-release-preview" type="button">Review source changes and tests</button>
             <button id="pcms-release-approve" type="button" disabled>Approve and publish this exact source</button>
-            <button id="pcms-s06-request-changes" type="button" disabled>Request changes to F</button>
+            <button id="pcms-s06-request-changes" type="button" disabled>Request changes</button>
             <button id="pcms-release-cancel" type="button" disabled>Cancel unsent approval</button>
             <button id="pcms-release-dispatch" type="button" disabled>Publish approved source</button>
             <button id="pcms-release-reconcile" type="button" disabled>Independently reconcile public listing</button>
@@ -288,7 +288,7 @@
         </section>
         <section class="panel" aria-labelledby="pcms-ai-jobs-heading">
           <div class="panel-head"><h2 id="pcms-ai-jobs-heading">Native AI development and tests</h2><span class="unknown">Source-bound · guarded native execution</span></div>
-          <p class="reason">Prepare a job only for an independently verified private stage. For S05 READY, preparation pins Git main Chat 1 and optional TESTING.md; legacy jobs retain Settings prompt. No helper message is dispatched; no AI test is declared passed until separately observed.</p>
+          <p class="reason">Prepare a job only for an independently verified private stage. For READY generators, preparation pins the Git main Chat 1 prompt and optional TESTING.md; older jobs keep the Settings prompt. No helper message is dispatched; no AI test is declared passed until separately observed.</p>
           <div class="account-controls">
             <label for="pcms-ai-slug">Exact private stage slug</label><input id="pcms-ai-slug" maxlength="100" spellcheck="false">
             <label for="pcms-ai-git-token">Git token override (optional — uses connected GitHub)</label><input id="pcms-ai-git-token" type="password" autocomplete="off" spellcheck="false">
@@ -336,7 +336,7 @@
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 05</p><h1 id="heading-refresher" tabindex="-1">Refresher</h1><p>Operational capacity, scheduling and observed visibility.</p></div></header>
         <section class="panel">
           <div class="panel-head"><h2>Global oldest-eligible queue</h2><span class="unknown">Observed, bounded operational time</span></div>
-          <p id="blocked-refresher" class="reason">Guarded feed checks are read-only. Refresher source saves are OFF until explicitly enabled below. When enabled, PCMS may change only its owned HTML marker on eligible public generators, using the protected Persona/I13 editor. A verified save is not proof of recent-page placement; ineffective or uncertain saves are held.</p>
+          <p id="blocked-refresher" class="reason">Guarded feed checks are read-only. Refresher source saves are OFF until explicitly enabled below. When enabled, PCMS may change only its owned HTML marker on eligible public generators, using the protected Persona and the guarded editor. A verified save is not proof of recent-page placement; ineffective or uncertain saves are held.</p>
           <p id="pcms-refresher-summary" role="status">Canonical capacity pending; no remote visibility promised.</p>
           <p id="pcms-refresher-provider"></p><p id="pcms-refresher-diagnostics"></p>
           <button type="button" id="pcms-refresher-reload">Reload local shadow</button>
@@ -381,7 +381,7 @@
           <p class="reason">Tier 1: cryptographically verified in memory; tier 2: browser-reported completed download with existence and size; tier 3: independent on-disk file readback. The staged local restore controls are in the next panel; no provider activation follows a backup.</p>
         </section>
         <section class="panel" aria-labelledby="pcms-restore-title">
-          <div class="panel-head"><h2 id="pcms-restore-title">I16 · Authenticated staged restore</h2><span class="unknown">Local guarded apply · provider effects OFF</span></div>
+          <div class="panel-head"><h2 id="pcms-restore-title">Restore from an encrypted backup</h2><span class="unknown">Local guarded apply · provider effects OFF</span></div>
           <p>Choose the integrated encrypted archive and recovery passphrase. Preview authenticates both layers and inventories exact Persona mappings, exclusions and collision risks. A separate pre-restore checkpoint must be selected and independently re-read before local application. Applying changes donor/cookie/PCMS local state under a durable guard; no cross-store atomicity, provider effects or fresh-controller activation is implied. An uncertain group requires read-only reconciliation, never automatic retry.</p>
           <label for="pcms-restore-archive">Incoming encrypted archive</label>
           <input id="pcms-restore-archive" type="file" accept=".encrypted,.json">
@@ -405,6 +405,14 @@
           <button type="button" id="pcms-restore-reconcile">Read back uncertain restore (never retry)</button>
           <pre id="pcms-restore-details" class="table-wrap" style="white-space:pre-wrap" tabindex="0">No authenticated restore plan. Existing state remains unchanged.</pre>
           <p id="pcms-restore-status" role="status" aria-live="polite">Checking independent restoration guard.</p>
+          <div id="pcms-restore-reactivate-box" class="notice" hidden>
+            <strong>Reactivate PCMS after a completed restore</strong>
+            <p>Every restore stage was independently observed. PCMS stays paused until you reactivate it here. Only reactivate once the previous PCMS installation (old profile or machine) is stopped, because two controllers must never run at the same time. Afterwards, reconnect GitHub, confirm each account's login and re-apply the protected workflow grants.</p>
+            <label><input type="checkbox" id="pcms-restore-predecessor"> The previous PCMS installation is stopped</label>
+            <label for="pcms-restore-reactivate-phrase">Type: THE PREVIOUS PCMS INSTALLATION IS STOPPED</label>
+            <input id="pcms-restore-reactivate-phrase" autocomplete="off" spellcheck="false" maxlength="64">
+            <button type="button" id="pcms-restore-reactivate" disabled>Reactivate PCMS</button>
+          </div>
           <p class="reason">Restored approvals, authentication, routes and native secrets cannot be activated by a backup. Fresh-controller activation requires explicit predecessor shutdown proof and later H-06. If a partial restore guard exists, opening this view never clears it.</p>
         </section>
         <section class="panel" aria-labelledby="pcms-auto-backup-title">
@@ -458,7 +466,7 @@
           <div id="pcms-diagnostic-stages" class="table-wrap" tabindex="0" aria-label="Diagnostic stage results"></div>
           <p class="reason">A missing independent live observation remains NOT_TESTED or HELD, never PASS. Human source acceptance and exact-F publication still require real operator review. No test-only cleanup is issued without verified ownership.</p>
         </section>
-        <section class="panel"><div class="panel-head"><h2>PCMS capability boundaries</h2><span class="unknown">Protected actions require scoped permission and independent evidence</span></div><dl class="settings-list"><div><dt>Account and provider operations</dt><dd>Supported guarded workflows; account ownership, protected Persona route and operation-specific admission remain mandatory</dd></div><div><dt>Automated source development</dt><dd>Bounded READY and AI progression requires the explicit development grant and native editor/source safety checks</dd></div><div><dt>Scheduling and Refresher</dt><dd>Background scheduler and observed fleet state are available; guarded Refresher marker saves use their own explicit enable control</dd></div><div><dt>Private generator-source Git writes</dt><dd>Conditional source-only writeback requires tested F, active READY, the Git grant and a native OS-vault credential</dd></div><div><dt>Publication and recovery</dt><dd>Each exact F needs a separate human approval, eligible public hold and guarded readback; restored controllers remain inactive pending independent activation</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Owned by the pinned PersonaMonkey donor; S06 permissions cannot bypass route or source guards</dd></div></dl><p class="reason">Granting S06 permission is not evidence that an external operation succeeded. Advanced PersonaMonkey route controls remain separate.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
+        <section class="panel"><div class="panel-head"><h2>PCMS capability boundaries</h2><span class="unknown">Protected actions require scoped permission and independent evidence</span></div><dl class="settings-list"><div><dt>Account and provider operations</dt><dd>Supported guarded workflows; account ownership, protected Persona route and operation-specific admission remain mandatory</dd></div><div><dt>Automated source development</dt><dd>Bounded READY and AI progression requires the explicit development grant and native editor/source safety checks</dd></div><div><dt>Scheduling and Refresher</dt><dd>Background scheduler and observed fleet state are available; guarded Refresher marker saves use their own explicit enable control</dd></div><div><dt>Private generator-source Git writes</dt><dd>Conditional source-only writeback requires tested F, active READY, the Git grant and a native OS-vault credential</dd></div><div><dt>Publication and recovery</dt><dd>Each exact F needs a separate human approval, eligible public hold and guarded readback; restored controllers remain inactive pending independent activation</dd></div><div><dt>PersonaMonkey routing security</dt><dd>Owned by the pinned PersonaMonkey donor; these permissions cannot bypass route or source guards</dd></div></dl><p class="reason">Granting permission is not evidence that an external operation succeeded. Advanced PersonaMonkey route controls remain separate.</p><a href="../options/options.html">Open PersonaMonkey advanced controls</a> <p><a href="emergency.html">Emergency redacted diagnostics (independent of PCMS Core)</a></p></section>
         <section class="panel" aria-labelledby="pcms-s06-authority-heading">
           <div class="panel-head"><h2 id="pcms-s06-authority-heading">Protected workflow activation</h2><span class="unknown">All remote effects OFF by default</span></div>
           <p>These are three independent standing permissions, not test or provider-success evidence. Turn them on only after reviewing the connected private repository, the protected Persona route, and the proposed operations. Actual writes remain fenced by owner, source, test, claim and publication approvals. Disabling a permission does not undo an already possible external effect.</p>
@@ -466,7 +474,7 @@
           <div class="account-controls">
             <label for="pcms-s06-grant-development">Allow protected generator creation, staging, AI testing and eligible existing-source unlisting</label><input id="pcms-s06-grant-development" type="checkbox">
             <label for="pcms-s06-grant-git">Allow guarded Git folder, original archive, prompt and tested-source writeback</label><input id="pcms-s06-grant-git" type="checkbox">
-            <label for="pcms-s06-grant-publication">Allow only separately approved exact-F publication dispatch</label><input id="pcms-s06-grant-publication" type="checkbox">
+            <label for="pcms-s06-grant-publication">Allow publishing sources you individually approve</label><input id="pcms-s06-grant-publication" type="checkbox">
             <label for="pcms-s06-authority-consent">To activate, enter: I AUTHORIZE PROTECTED PCMS OPERATIONS</label>
             <input id="pcms-s06-authority-consent" autocomplete="off" spellcheck="false" maxlength="64">
             <button id="pcms-s06-authority-enable" type="button" disabled>Apply scoped authorization</button>

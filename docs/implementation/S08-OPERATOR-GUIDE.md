@@ -1,4 +1,6 @@
-# S08 — PCMS operator guide
+# S08 — PCMS operator guide (superseded)
+
+> **Superseded by [the operator guide](../operator/OPERATOR-GUIDE.md)** and the operator package built with `node scripts/build-operator-package.mjs`. This file is kept as historical S08 evidence.
 
 **Engineering status:** S08 is a full-capability integration *candidate*, not yet an accepted release. The [S08 PR](https://github.com/Neb963/PCMS-Alpha/pull/31) and required current-head CI determine packaged engineering status. Live Perchance effectiveness must be reported independently.
 

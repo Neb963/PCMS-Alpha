@@ -18,6 +18,7 @@ import {createV2NativeConnection} from './backup-v2-session.mjs';
 import {prepareQualifiedV2FreshProfile} from './restore-v2-qualified.mjs';
 import {reviewV2NativePlan} from './restore-v2-review.mjs';
 export const RESTORE_PORT='pcms-i16-restore';
+export const REACTIVATE_CONSENT='THE PREVIOUS PCMS INSTALLATION IS STOPPED';
 const fail=code=>({ok:false,code});
 const redacted=e=>/^(RESTORE_|BACKUP_)[A-Z0-9_]{3,70}$/.test(e?.message||'')?e.message:'RESTORE_HELD_UNKNOWN';
 const hex=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
@@ -463,6 +464,21 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
       finally{try{db?.close();}catch{}}
     }
     if(message.action==='APPLY')return apply(message.params);
+    if(message.action==='REACTIVATE'){
+      // Explicit fresh-controller activation after a fully observed restore.
+      // The operator attests the predecessor PCMS controller is stopped
+      // (single-machine product: two live controllers must never coexist).
+      const p=message.params||{};
+      if(running)return fail('RESTORE_BUSY');
+      if(p.consent!==REACTIVATE_CONSENT||p.predecessorStopped!==true||
+         typeof p.epoch!=='string'||!Number.isSafeInteger(p.revision))
+        return fail('RESTORE_REACTIVATION_CONSENT_REQUIRED');
+      try{
+        const out=await gate.reactivate({epoch:p.epoch,revision:p.revision});
+        return {...out,next:['RECONNECT_GITHUB','CONFIRM_ACCOUNT_LOGINS','REGRANT_PROTECTED_WORKFLOWS'],
+          grants:'REVOKED_UNTIL_REAPPLIED'};
+      }catch(e){return fail(redacted(e));}
+    }
     return fail('RESTORE_COMMAND_NOT_ALLOWED');
   }
   function register(){
