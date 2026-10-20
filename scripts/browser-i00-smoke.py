@@ -2695,7 +2695,8 @@ def main():
                     done({ok:before.ok&&after.ok&&!denied.ok&&
                       before.revision===after.revision&&
                       before.state.revision===after.state.revision&&
-                      result.ok&&result.refreshCapability==='LIVE_REFRESH_OFF_UNTIL_PROVEN'&&
+                      result.ok&&result.refreshCapability==='OPERATOR_MUTATION_DISABLED'&&
+                      result.clockCapability==='BOUNDED_NATIVE_ROUTE_FEED_ELIGIBILITY'&&
                       core.qualifyRefreshCandidate(null).ok===false,
                       beforeRows:before.state.rows.length,
                       denied:denied.code,capability:result.refreshCapability,
@@ -2707,9 +2708,10 @@ def main():
                 i14=call('POST',f'/session/{after}/execute/async',
                          {'script':i14_code,'args':[]},timeout=90)
                 assert i14.get('ok') is True,i14
-                ui=execute(after,"return {provider:document.getElementById('pcms-refresher-provider')?.textContent||'',summary:document.getElementById('pcms-refresher-summary')?.textContent||''}")
+                ui=execute(after,"return {provider:document.getElementById('pcms-refresher-provider')?.textContent||'',summary:document.getElementById('pcms-refresher-summary')?.textContent||'',optIn:document.getElementById('pcms-refresher-enable')?.checked}")
                 assert ('refresh mutation OFF' in ui['provider'] and
-                        'continuous eligibility not verified' in ui['provider'] and
+                        'bounded native awake time' in ui['provider'] and
+                        ui['optIn'] is False and
                         'visibility-held' in ui['summary']),ui
                 print('B I14_PACKAGED_PERSISTENT_IDB_GATED_EFFECTS_AND_REFERSHER_PROOF_UI=PASS',flush=True)
 
