@@ -97,7 +97,7 @@ test('S07 E04 X: missing eligibility, lost pipe and resumed boot all freeze time
   const unknown=advanceShadow(first,{now:start+span,bootId,nativeClock:next}).state;
   assert.equal(unknown.rows[0].activeRemaining,HOUR);
   const stale=advanceShadow(first,{now:start+span,bootId,nativeClock:next,
-    qualifiedCoverages:{source:'CACHED_ROUTE_TEST',...coverage}}).state;
+    qualifiedCoverages:{...coverage,source:'CACHED_ROUTE_TEST'}}).state;
   assert.equal(stale.rows[0].activeRemaining,HOUR);
   const changedBoot=advanceShadow(first,{now:start+span,bootId:'browser_boot_02',
     nativeClock:next,qualifiedCoverages:coverage}).state;
