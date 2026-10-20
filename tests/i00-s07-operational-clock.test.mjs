@@ -18,7 +18,7 @@ const sample=(sequence,now,options={})=>({
  hostBootNs:String(3000000000+(now-T)*1000000),
  routes:[{...route}],...options
 });
-const recent={complete:true,suspended:false,observedAt:T+100};
+const recent={complete:true,suspended:false,observedAt:T};
 const accounts=[{accountId:'account_01',personaUid:'persona_01',
  bindingVersion:1,principalFingerprint:H,verifiedIdentity:true,paused:false}];
 const credit=(previous,next,changes={})=>qualifyBoundedObservedInterval({
@@ -59,6 +59,7 @@ test('S07 E04: stale feed, route change, changed principal, pipe death, suspend 
   {next:sample(2,T+MINUTE,{hostBootNs:String(3000000000+MINUTE*2000000)})},
   {next:sample(2,T+5*MINUTE,{hostAwakeNs:String(3000000000+5*MINUTE*1000000),
     hostBootNs:String(3000000000+5*MINUTE*1000000)})},
+  {recent:{...recent,observedAt:T+100}},
   {recent:{...recent,complete:false}},
   {recent:{...recent,observedAt:T-20*MINUTE}},
   {accounts:[{...accounts[0],paused:true}]}
@@ -82,7 +83,7 @@ test('S07 state migration: pre-S07 saved scheduler policy has no implicit source
 test('S07 E04: canonical feed receipts do not break native chain; explicit failed native observation does',()=>{
   const before=sample(1,T),after=sample(2,T+MINUTE);
   const s=emptyShadow();
-  s.recent={...s.recent,complete:true,observedAt:T+10};
+  s.recent={...s.recent,complete:true,observedAt:T};
   const first=advanceShadow(s,{now:T,bootId:boot,nativeClock:before});
   assert.equal(first.ok,true);
   const unrelated=advanceShadow(first.state,{now:T+100,bootId:boot});

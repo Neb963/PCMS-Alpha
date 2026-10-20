@@ -122,7 +122,10 @@ export function qualifyBoundedObservedInterval({previous,next,recent,
     return held('OBSERVED_CLOCK_INVALID');
   // No unknown/partial/rate-limited feed is ever operational evidence.
   if(recent?.complete!==true||recent.suspended===true||
-     !INT(recent.observedAt)||recent.observedAt>next.observedAtMs||
+     // A feed read first performed after the interval BEGAN cannot justify
+     // crediting time before that observation. The next short native window
+     // can still accrue normally; no later endpoint can backfill this gap.
+     !INT(recent.observedAt)||recent.observedAt>previous.observedAtMs||
      next.observedAtMs-recent.observedAt>recentMs)
     return held('PUBLIC_FEED_CURRENTLY_UNVERIFIED');
   for(const field of ['observerEpoch','systemBootId','nativeLifetimeId','observerConnectionId'])
