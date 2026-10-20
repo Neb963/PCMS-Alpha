@@ -10,8 +10,11 @@ function fixture({publicListing=true,human=false,dirty=false}={}){
   const targetFiles=previousFiles.map(f=>f.path==='index.html'?
     {path:f.path,base64:b64('<div>Hello</div>\n<!-- pcms-alpha-refresher:'+markerId+' -->')}:f);
   let source='source',html='<div>Hello</div>',saveCount=0;
-  const model={getValue:()=>source,setValue:s=>{source=s;},isClean:()=>!dirty};
-  const output={getValue:()=>html,setValue:s=>{html=s;},isClean:()=>!dirty};
+  const writes=[];
+  const model={getValue:()=>source,setValue:s=>{writes.push('main.pjs');source=s;},
+    isClean:()=>!dirty};
+  const output={getValue:()=>html,setValue:s=>{writes.push('index.html');html=s;},
+    isClean:()=>!dirty};
   const assets=new Map([['style.css',new TextEncoder().encode('div {color: blue;}')]]);
   const globalFields={
     __editorReady:true,__saveInFlight:false,userOwnsThisGenerator:true,
@@ -23,7 +26,8 @@ function fixture({publicListing=true,human=false,dirty=false}={}){
     modelTextEditor:model,outputTemplateEditor:output,
     menuBar:{saveState:'saved'},
     srcState:{list:()=>[...assets.keys()],readFile:async key=>assets.get(key),
-      writeFile:async(key,v)=>assets.set(key,v),deleteFile:async key=>assets.delete(key),
+      writeFile:async(key,v)=>{writes.push('src/'+key);assets.set(key,v);},
+      deleteFile:async key=>{writes.push('delete src/'+key);assets.delete(key);},
       isDirty:async()=>dirty,hasPending:()=>false,conflictPaths:()=>[]}
   };
   globalThis.window=globalFields;
@@ -31,7 +35,8 @@ function fixture({publicListing=true,human=false,dirty=false}={}){
   globalThis.document={getElementById:()=>human?{dataset:{pcmsHumanIntent:'true'}}:null};
   const request={action:'REFRESH',slug,nonce:'a'.repeat(32),markerId,
     previousFiles,targetFiles};
-  return {request,previousFiles,targetFiles,saveCount:()=>saveCount,html:()=>html,
+  return {request,previousFiles,targetFiles,writes:()=>writes,
+    saveCount:()=>saveCount,html:()=>html,
     privacy:()=>globalFields.app.data.generator.isPrivate};
 }
 test('S07 MAIN page D: PUBLIC marker save changes only intended source with no listing flip',async()=>{
@@ -39,6 +44,7 @@ test('S07 MAIN page D: PUBLIC marker save changes only intended source with no l
   const reply=await perchanceExistingMain(f.request);
   assert.deepEqual(reply,{ok:true,code:'REFRESH_ACK_ONLY'});
   assert.equal(f.saveCount(),1);
+  assert.deepEqual(f.writes(),['index.html']);
   assert.equal(f.privacy(),false);
   assert.equal(f.html(),'<div>Hello</div>\n<!-- pcms-alpha-refresher:'+markerId+' -->');
 });
