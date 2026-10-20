@@ -2677,12 +2677,18 @@ def main():
                 alarm_code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const prior=(await browser.storage.local.get('pcmsI12AlarmCount')).pcmsI12AlarmCount||0;
-                  await browser.alarms.create('pcms-refresher-turn',{when:Date.now()+6000});
-                  done({prior});
+                  // Firefox may clamp short alarm delays to its documented
+                  // minimum. Use a supported interval; the installed
+                  // background listener must actually receive this alarm.
+                  const when=Date.now()+65000;
+                  await browser.alarms.create('pcms-refresher-turn',{when});
+                  const scheduled=await browser.alarms.get('pcms-refresher-turn');
+                  done({prior,scheduled:scheduled?.scheduledTime||null});
                 })().catch(e=>done({error:String(e)}));"""
                 alarm_prior=call('POST',f'/session/{after}/execute/async',{'script':alarm_code,'args':[]})
                 call('POST',f'/session/{after}/url',{'url':'about:blank'})
-                time.sleep(9)
+                assert alarm_prior.get('scheduled'),alarm_prior
+                time.sleep(72)
                 call('POST',f'/session/{after}/url',{'url':url+'#refresher'})
                 alarm_after=call('POST',f'/session/{after}/execute/async',{'script':"const done=arguments[arguments.length-1];browser.storage.local.get('pcmsI12AlarmCount').then(v=>done(v.pcmsI12AlarmCount||0));",'args':[]})
                 assert alarm_after>alarm_prior['prior'],(alarm_prior,alarm_after)
