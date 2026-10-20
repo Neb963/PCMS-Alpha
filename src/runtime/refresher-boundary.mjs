@@ -7,6 +7,19 @@ import {createRefresherStore} from './refresher-store.mjs';
 import {MINUTE} from './refresher-core.mjs';
 import {qualifyRecentAbsence} from './refresher-admission.mjs';
 import {createNoticeDispatcher} from './notices.mjs';
+// A saved source marker is not an observation that the target returned to
+// Perchance's independently read recent-generator feed.
+export function verifiedRefreshFeed(row){
+ const evidence=row?.refresh,last=evidence?.history?.at(-1);
+ const feed=row?.presence;
+ return last?.effect==='EFFECT_CONFIRMED'&&
+   evidence.savedSourceFingerprint!=null&&
+   evidence.awaitingVisibility===false&&
+   !evidence.intent&&
+   feed?.source==='GUARDED_RECENT_LIST'&&feed.present===true&&
+   Number.isSafeInteger(feed.position)&&feed.position>=1&&
+   Number.isSafeInteger(feed.observedAt)&&feed.observedAt>last.at;
+}
 export const REFRESHER_PORT='pcms-i12-refresher',REFRESHER_ALARM='pcms-refresher-turn';
 const types=new Set(['GET_REFRESHER','SET_POLICY','SET_PAUSE','SET_GENERATOR_POLICY','DEMAND_STATISTIC','OBSERVE_NOW','RESET_RECENT_BACKOFF','DIAGNOSTIC_TARGET_REFRESH']);
 export function validateRefresherMessage(api,sender,message){
@@ -387,10 +400,23 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
           row.personaUid===scope.personaUid);
         if(!before?.ok||targets?.length!==1)
           return fail('DIAGNOSTIC_TEST_OWNERSHIP_UNVERIFIED');
-        const code=await maybeRefresh(s,{slug:p.slug,accountId:p.accountId});
-        return {ok:true,code,scope:'DESIGNATED_TEST_ONLY',
-          effectVerified:['EFFECT_INDEPENDENTLY_PROVEN',
-            'REFRESH_READBACK_EFFECT_PROVEN'].includes(code)};
+        // If source was already read back, do not attempt a second save.
+        // The one remaining proof is independent recent-feed placement.
+        const prior=targets[0],sourceAlreadySaved=
+          prior.refresh?.history?.at(-1)?.effect==='EFFECT_CONFIRMED';
+        const code=verifiedRefreshFeed(prior)?'RECENT_FEED_VERIFIED':
+          sourceAlreadySaved?'AWAITING_RECENT_FEED':
+            await maybeRefresh(s,{slug:p.slug,accountId:p.accountId});
+        if(!verifiedRefreshFeed(prior)&&observationGate())
+          await observe(s); // real read-only feed claim; never calls maybeRefresh
+        const after=await s.read();
+        const latest=after?.state?.rows?.find(row=>row.slug===p.slug&&
+          row.accountId===p.accountId&&row.personaUid===scope.personaUid);
+        const feedVerified=after?.ok===true&&verifiedRefreshFeed(latest);
+        return {ok:true,code:feedVerified?'RECENT_FEED_VERIFIED':code,
+          scope:'DESIGNATED_TEST_ONLY',
+          sourceVerified:latest?.refresh?.history?.at(-1)?.effect==='EFFECT_CONFIRMED',
+          feedVerified, effectVerified:feedVerified};
       }
       if(message.type==='OBSERVE_NOW'){
         if(!observationGate())return fail('MONITOR_ACTIVATION_HELD');
