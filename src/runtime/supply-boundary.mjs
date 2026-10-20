@@ -334,12 +334,14 @@ export function createSupplyBoundary(api,{
       const s=await stores();
       if(message.type==='LIST_BATCHES'){
         const out=await s.supply.list();
-        return out.ok?{...out,providerEffects:'OFF',activation:'HELD'}:out;
+        return out.ok?{...out,authorization:standingS06?.gate('development')===true?
+          'OPERATOR_GRANTED_GUARDED':'OPERATOR_GRANT_REQUIRED'}:out;
       }
       if(message.type==='GET_BATCH'){
         const out=await s.supply.get(p.batchId);
         return out.ok?{ok:true,batch:publicSupply(out.batch),
-          providerEffects:'OFF',activation:'HELD'}:out;
+          authorization:standingS06?.gate('development')===true?
+            'OPERATOR_GRANTED_GUARDED':'OPERATOR_GRANT_REQUIRED'}:out;
       }
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(message.type==='PREVIEW'||message.type==='FREEZE')

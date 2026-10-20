@@ -311,7 +311,7 @@ export function publicAccount(account) {
   return {accountId:account.accountId,personaUid:account.personaUid,state:account.state,
     revision:account.revision,bindingVersion:account.bindingVersion,
     identity:account.identity?'VERIFIED':'UNVERIFIED',
-    override:account.override?.reason||null,providerWrites:'OFF',
+    override:account.override?.reason||null,providerWrites:'OPERATION_GUARDED',
     setup:account.setup||null,route:account.route||null,upgrade:account.upgrade||null,
     protectedRoute:typeof account.bindingId!=='string'?'LEGACY_UNPINNED':
       account.upgrade&&account.upgrade.phase!=='COMPLETE'?'UPGRADING':'PCMS_PINNED'};

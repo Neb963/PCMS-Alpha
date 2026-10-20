@@ -43,7 +43,11 @@ function show(){
  else scope.textContent='Designate one disposable, verified PCMS account and test namespace.';
  status.textContent=run?
   'Test generator '+run.slug+' · '+run.status+' · next '+run.stage+
-  (run.firstFailure?' · '+run.firstFailure.code:''):
+  (run.firstFailure?' · '+run.firstFailure.code+(
+    run.firstFailure.code==='TEST_READY_DECLARATION_REQUIRED'?
+      ' — Merge reviewed READY source on main for this test slug, then Resume.':
+    run.firstFailure.code==='EXACT_CANDIDATE_HUMAN_APPROVAL_REQUIRED'?
+      ' — Approve exact source in Publication, then Resume.':''):''):
   'No diagnostic run. No external operations attempted.';
  stages.replaceChildren();
  const list=document.createElement('ol');
@@ -100,12 +104,8 @@ async function creation(){
     pause('TEST_CREATE_SCOPE_MISMATCH');
   const state=got.record.state;
   if(state==='ASSOCIATED_NOT_READY')return 'CREATE_AND_GIT_ASSOCIATION_VERIFIED';
-  // A possible dispatch must be reconciled by its production effect journal
-  // before any operator-driven reentry; never spam CREATE/RENAME.
-  if(['CREATE_DISPATCH_POSSIBLE','CREATE_UNCERTAIN','CREATE_OBSERVING',
-       'RENAME_DISPATCH_POSSIBLE','RENAME_UNCERTAIN','RENAME_OBSERVING',
-       'GIT_DISPATCH_POSSIBLE','GIT_UNCERTAIN','GIT_OBSERVING'].includes(state))
-    pause('CREATION_EFFECT_RECONCILE_REQUIRED');
+  // Possible external dispatch is reconciled ONLY by the existing production
+  // runner, which retains the same canonical operation identity and readback fences.
   if(state==='TARGET_COLLISION_HELD')pause('TEST_SLUG_COLLISION');
   const outcome=await request('creation','RUN_CREATE_STEP',{
    intentId:run.intentId,expectedRevision:got.record.revision});
@@ -124,10 +124,17 @@ async function catalog(){
   pause(observed?.code||'TEST_CATALOG_UNVERIFIED');
  const match=observed.generators?.find(x=>x.slug===run.slug);
  if(!match)pause('TEST_GIT_FOLDER_NOT_OBSERVED');
- if(!match.ready)pause('TEST_READY_SOURCE_DECLARATION_REQUIRED');
- return 'TEST_READY_MAIN_SOURCE_PRESENT';
+ return match.ready?'TEST_READY_MAIN_SOURCE_PRESENT':
+   'TEST_GIT_FOLDER_CONFIRMED_NOT_READY';
 }
 async function ready(){
+ const catalog=await request('git','SCAN_CONNECTED');
+ if(!catalog?.ok||catalog.complete!==true||
+    catalog.repositoryId!==run.config.repositoryId)
+  pause(catalog?.code||'TEST_CATALOG_UNVERIFIED');
+ const match=catalog.generators?.find(x=>x.slug===run.slug);
+ if(!match)pause('TEST_GIT_FOLDER_NOT_OBSERVED');
+ if(!match.ready)pause('TEST_READY_DECLARATION_REQUIRED');
  let after='';
  for(let page=0;page<80;page++){
   const r=await request('git','LIST_READY',{after,limit:200});

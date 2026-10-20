@@ -492,7 +492,7 @@ def complete_donor_script(run_id):
         const start=performance.now();
         let received=false;
         p.onMessage.addListener(value=>{received=true;try{p.disconnect()}catch{}resolve(value)});
-        p.onDisconnect.addListener(()=>{if(!received)reject(Error('H_V2_GUARDED_PORT_LOST_ACK:'+name+':elapsedMs='+Math.round(performance.now()-start)))});
+        p.onDisconnect.addListener(()=>{if(!received)reject(Error('H_V2_GUARDED_PORT_LOST_ACK:'+name+':elapsedMs='+Math.round(performance.now()-start)+':'+(browser.runtime.lastError?.message||'NO_RUNTIME_LAST_ERROR')))});
         p.postMessage({action:name,params});
       });
       try{
