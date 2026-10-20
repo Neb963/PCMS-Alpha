@@ -2,6 +2,7 @@
 // source bytes, route or operation proof. There is NO automatic retry of a
 // possible provider write, including after a Firefox restart.
 import {fail,openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
+import {createGitCredentialResolver} from './git-credential.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 import {standingS06} from './s06-standing-authority.mjs';
@@ -31,7 +32,8 @@ export function validateStagingMessage(api,sender,message){
     message.type==='GET_STAGE'?['slug']:['slug','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k))||
      (message.type!=='LIST_STAGES'&&!SLUG.test(p.slug||''))||
-     (['PIN_STAGE','STAGE_PRIVATE'].includes(message.type)&&
+     // Optional override; the one-time OS-vault Git connection is default.
+     (['PIN_STAGE','STAGE_PRIVATE'].includes(message.type)&&p.token!==undefined&&
        (typeof p.token!=='string'||p.token.length<10||p.token.length>512))||
      (['STAGE_PRIVATE','RECONCILE_STAGE','HANDOFF_STAGE'].includes(message.type)&&
        (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1)))
@@ -78,7 +80,7 @@ export function createStagingBoundary(api,{
   // Packaged provider capability remains locked until current guarded editor
   // contract is independently proven and operator activation is authorized.
   effectGate=()=>false,storeFactory=createStagingStore,
-  supplyLookup=findEligibleManagedSource
+  supplyLookup=findEligibleManagedSource,credential=createGitCredentialResolver(api,{native})
 }={}){
   let databasePromise;
   const database=()=>databasePromise ||=open();
@@ -107,8 +109,14 @@ export function createStagingBoundary(api,{
        slug:slugName,repositoryId:config.repositoryId});
   }
   async function statusFor(msg,s){
-    const p=msg.params||{};
+    let p=msg.params||{};
     if(msg.type==='LIST_STAGES')return s.list();
+    if(['PIN_STAGE','STAGE_PRIVATE'].includes(msg.type)&&p.token===undefined){
+      // S04-created READY sources read the vault themselves; a legacy
+      // associated folder uses the same one-time connection on demand.
+      const cred=await credential();
+      if(cred.ok)p={...p,token:cred.token};
+    }
     if(msg.type==='GET_STAGE')return s.get(p.slug);
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
     const g=guard();

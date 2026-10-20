@@ -19,7 +19,7 @@ function port(type,params) {
     }
     channel.onMessage.addListener(data=>finish(data));
     channel.onDisconnect.addListener(()=>finish(null,Error('DISCONNECTED')));
-    try{channel.postMessage({type,params});}catch{finish(null,Error('DISCONNECTED'));}
+    try{channel.postMessage({type,params:Object.fromEntries(Object.entries(params||{}).filter(([k,v])=>!(['token','passphrase'].includes(k)&&v==='')))});}catch{finish(null,Error('DISCONNECTED'));}
   });
 }
 function controls(){

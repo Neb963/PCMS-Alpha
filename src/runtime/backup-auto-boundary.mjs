@@ -1,7 +1,7 @@
 // I15 synchronous event listeners. Background scheduling never needs a PCMS tab.
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {AUTO_ALARM,AUTO_PORT} from './backup-auto-core.mjs';
-import {createAutoRunner} from './backup-auto-run.mjs';
+import {createAutoRunner,operatorSelectedV2} from './backup-auto-run.mjs';
 import {createDonorSnapshotPortHandler} from './backup-donor-port.mjs';
 const fail=code=>({ok:false,code});
 export function createAutoBoundary(api,options={}){
@@ -21,13 +21,15 @@ export function createAutoBoundary(api,options={}){
     if(message.action==='STORE_VAULT')return runner.setVault(message.passphrase);
     if(message.action==='RUN_NOW')return runner.tick();
     if(message.action==='RUN_V2_MANUAL')return runner.manualV2Candidate();
+    if(message.action==='SET_FORMAT')return runner.setFormat(message.format);
     return fail('INVALID_COMMAND');
   }
   function validate(message){
     if(!message||typeof message!=='object'||Array.isArray(message)||
-      !['STATUS','ENABLE','STORE_VAULT','RUN_NOW','RUN_V2_MANUAL'].includes(message.action))
+      !['STATUS','ENABLE','STORE_VAULT','RUN_NOW','RUN_V2_MANUAL','SET_FORMAT'].includes(message.action))
       return false;
     const keys=Object.keys(message).sort().join(',');
+    if(message.action==='SET_FORMAT')return keys==='action,format'&&['V1','V2'].includes(message.format);
     return message.action==='ENABLE'?keys==='action,enabled'&&typeof message.enabled==='boolean':
       message.action==='STORE_VAULT'?keys==='action,passphrase'&&
         typeof message.passphrase==='string'&&message.passphrase.length<=4096:
@@ -59,4 +61,5 @@ export function createAutoBoundary(api,options={}){
   }
   return Object.freeze({register,runner});
 }
-if(typeof browser!=='undefined')createAutoBoundary(browser).register();
+if(typeof browser!=='undefined')createAutoBoundary(browser,{
+  reviewedV2:operatorSelectedV2(browser)}).register();

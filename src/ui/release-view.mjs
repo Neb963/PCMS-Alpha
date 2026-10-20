@@ -42,7 +42,8 @@ function command(type,params={}){
     }
     port.onMessage.addListener(v=>finish(v));
     port.onDisconnect.addListener(()=>finish(null,Error('DISCONNECTED')));
-    try{port.postMessage({type,params});}catch{finish(null,Error('DISCONNECTED'));}
+    // Empty credential fields mean: use the connected OS-vault Git credential.
+    try{port.postMessage({type,params:Object.fromEntries(Object.entries(params||{}).filter(([k,v])=>!(['token','passphrase'].includes(k)&&v==='')))});}catch{finish(null,Error('DISCONNECTED'));}
   });
 }
 function note(s){status.textContent=s;}

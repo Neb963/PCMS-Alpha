@@ -22,7 +22,7 @@ function request(type,params={}){
     const timer=setTimeout(()=>finish(null,Error('DISCONNECTED')),45000);
     port.onMessage.addListener(data=>finish(data));
     port.onDisconnect.addListener(()=>finish(null,Error('DISCONNECTED')));
-    try{port.postMessage({type,params});}
+    try{port.postMessage({type,params:Object.fromEntries(Object.entries(params||{}).filter(([k,v])=>!(['token','passphrase'].includes(k)&&v==='')))});}
     catch{finish(null,Error('DISCONNECTED'));}
   });
 }
@@ -30,16 +30,16 @@ function announce(note){status.textContent=note;}
 function controls(){
   const selected=/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug.value.trim());
   preview.disabled=busy||!selected;
-  prepare.disabled=busy||!inspected?.ok||!token.value||
+  prepare.disabled=busy||!inspected?.ok||
     inspected.slug!==slug.value.trim()||!!receipt;
   commit.disabled=busy||!receipt?.ok||receipt.mode!=='MANUAL'||
-    receipt.state!=='PREPARED'||!token.value;
+    receipt.state!=='PREPARED';
   cancel.disabled=busy||!receipt?.ok||receipt.state!=='PREPARED';
   reconcile.disabled=busy||!receipt?.ok||
-    !['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(receipt.state)||!token.value;
+    !['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(receipt.state);
   refresh.disabled=busy||!selected;
   save.disabled=busy||!setting?.ok;
-  armAuto.disabled=busy||!setting?.setting?.autoEnabled||!selected||!token.value;
+  armAuto.disabled=busy||!setting?.setting?.autoEnabled||!selected;
   disarmAuto.disabled=busy||!selected;
 }
 function showReceipt(r){
