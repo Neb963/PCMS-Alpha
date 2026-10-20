@@ -29,11 +29,19 @@ function inspector(){
   el('generator-active').value=r.activeMs/3600000;el('generator-sleep').value=r.sleepMs/3600000;
   el('generator-pause').textContent=r.paused?'Resume generator':'Pause generator';
   const proof=r.refresh;
+  const effectStatus=proof?.state==='INEFFECTIVE'?
+    ' · Ineffective save: source unchanged, automatic retries held':
+    proof?.state==='EFFECT_UNVERIFIED'||proof?.state==='DISPATCH_POSSIBLE'?
+    ' · Possible save: independently verify source; never replay':
+    proof?.awaitingVisibility?
+    ' · Source save verified; waiting for new recent-page return':
+    proof?.proof?.effect==='EFFECT_CONFIRMED'?
+    ' · Source save verified; recent-page effectiveness separate':'';
   el('selected').textContent+=' · visibility '+(proof?.state||'UNOBSERVED')+
     ' · misses '+(proof?.misses||0)+' · attempts '+(proof?.attempts||0)+
-    ' · independent effect '+(proof?.proof?.effect||'UNVERIFIED')+
-    ' · recent feed '+(proof?.proof?.feed?.state||'UNKNOWN')+
-    (proof?.awaitingVisibility?' · waiting for observed feed return':'');
+    ' · independent source effect '+(proof?.proof?.effect||'UNVERIFIED')+
+    ' · current recent feed '+(snapshot.recent.complete?'verified':'UNKNOWN')+
+    effectStatus;
   el('metric').textContent=r.metric?
     r.metric.views+' observed views · '+age(r.metric.observedAt)+
     (r.metric.correction?' · correction/reset; interval delta unknown':'')+
