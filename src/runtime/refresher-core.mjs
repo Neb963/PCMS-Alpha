@@ -208,8 +208,12 @@ export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=null,qualif
   if(nativeOK(nativeClock)){
     const previous=out.nativeClock;
     // Never credit two windows in one reducer transition.
-    if(!operationalReceipt&&previous?.bootId===bootId&&
-       previous.witness&&nativeClock.observedAtMs>previous.witness.observedAtMs&&
+    // An event-page wake changes bootId but does not necessarily close the
+    // ORIGINAL native connection. The OS boot/pipe/lifetime/sequence counters
+    // and continuous provider/session coverage decide this, not a JS module
+    // instance ID. Actual Firefox/native death changes those witnesses.
+    if(!operationalReceipt&&previous?.witness&&
+       nativeClock.observedAtMs>previous.witness.observedAtMs&&
        qualifiedCoverages?.source==='DONOR_CONTINUOUS_COVERAGE'){
       const result=qualifyNativeOperatingInterval({
         previous:previous.witness,next:nativeClock,
