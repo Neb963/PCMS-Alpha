@@ -182,3 +182,30 @@ test('S07 C-54: verified first marker and actual return to feed admit the next m
     candidate:q(initial,second,'marker_0000000002'),eligible:true,liveAuthorized:true});
   assert.equal(mistaken.ok,false);
 });
+
+// A lower-level admission cannot bypass canonical coverage after a saved
+// source change, even if an external caller fabricates "eligible".
+test('S07 AC-14 X: effect layer refuses a second mutation while visibility is unproven',async()=>{
+  const {emptyRefreshEvidence,reserveRefreshAttempt,observeRefreshPresence}=
+    await import('../src/runtime/refresher-effect-core.mjs');
+  const source='a'.repeat(64),target='b'.repeat(64);
+  const candidate={status:'SUPPORTED_AND_VERIFIED',method:'CONTROLLED_SOURCE_MARKER',
+    allowedByProvider:true,meaningfulEffectVerified:true,
+    version:'marker_v1',evidenceId:'independent_01',
+    sourceFingerprint:source,targetFingerprint:target,
+    markerId:'marker_123456789000',nonce:'c'.repeat(32)};
+  const holding={...emptyRefreshEvidence(),state:'ABSENT_ONCE',misses:1,
+    awaitingVisibility:true,savedSourceFingerprint:source};
+  const denied=reserveRefreshAttempt(holding,{id:'attempt_123456',at:now,
+    slug:'generator-abc',sourceFingerprint:source,candidate,
+    eligible:true,liveAuthorized:true});
+  assert.equal(denied.ok,false);
+  assert.equal(denied.code,'REFRESH_ADMISSION_HELD');
+  const uncertain={...holding,state:'EFFECT_UNVERIFIED',suspended:true,
+    intent:{id:'attempt_123456',state:'DISPATCH_POSSIBLE'}};
+  const observed=observeRefreshPresence(uncertain,{at:now,present:true,
+    rank:1,complete:true,healthy:true});
+  assert.equal(observed.ok,true);
+  assert.equal(observed.evidence.awaitingVisibility,true);
+  assert.equal(observed.evidence.suspended,true);
+});

@@ -43,7 +43,11 @@ export function observeRefreshPresence(current,{at,present,rank,complete,healthy
       return {ok:false,code:'REFRESH_FEED_PREDATES_SAVED_SOURCE'};
     const wasSuspended=e.suspended;
     const uncertain=e.state==='EFFECT_UNVERIFIED'||e.intent?.state==='DISPATCH_POSSIBLE';
-    e.misses=0;e.lastSeenAt=at;e.lastRank=rank;e.awaitingVisibility=false;
+    e.misses=0;e.lastSeenAt=at;e.lastRank=rank;
+    // While a provider write is still DISPATCH_POSSIBLE or its readback is
+    // ambiguous, a feed rank cannot confirm the changed source. Retain the
+    // pending-placement hold until independent source readback settles it.
+    if(!uncertain)e.awaitingVisibility=false;
     // Seeing a feed item cannot reconcile a possibly-dispatched mutation.
     if(!uncertain){
       // An actual return to the complete recent feed after a proven marker
@@ -90,7 +94,7 @@ export function reserveRefreshAttempt(evidence,{id,at,slug,sourceFingerprint,
   if(!validRefreshEvidence(e)||!safeId(id)||!safeId(slug)||!time(at)||!hex(sourceFingerprint)||
     q.sourceFingerprint!==sourceFingerprint||
     (e.savedSourceFingerprint!=null&&e.savedSourceFingerprint!==sourceFingerprint)||
-    eligible!==true||
+    eligible!==true||e.awaitingVisibility===true||
     e.intent||e.attempts>=RETRY_LIMIT||e.nextAttemptAt>at||e.suspended)
     return {ok:false,code:'REFRESH_ADMISSION_HELD'};
   e.intent={id,slug,at,sourceFingerprint,version:q.version,
