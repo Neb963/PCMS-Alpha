@@ -93,10 +93,10 @@
         </section>
         <section class="panel" aria-labelledby="pcms-adopt-heading">
           <div class="panel-head"><h2 id="pcms-adopt-heading">Adopt an existing owned generator</h2><span class="unknown">Original source · Local immutable baseline</span></div>
-          <p class="reason">Choose “Adopt” in the inventory. A public generator requires explicit one-time consent. The donor-guarded read-only observer obtains two matching original-source byte readbacks. No live code, listing, source association or release is changed. Nonempty assets without independently verified bytes are held.</p>
+          <p class="reason">With the development grant (Settings → Protected workflow activation), PCMS adopts your verified owned generators automatically in the background, public ones included, and archives each exact original to private Git. You can also choose “Adopt” in the inventory to capture one now. Adoption reads only: no live code, listing or release changes. Generators with changing or incomplete source are held individually.</p>
           <div class="account-controls"><label for="pcms-adopt-name">Selected generator</label><input id="pcms-adopt-name" readonly placeholder="Choose from owned inventory"></div>
           <p id="pcms-adopt-visibility" class="reason">No source target selected.</p>
-          <label><input type="checkbox" id="pcms-adopt-consent" disabled> I authorize enrollment of this existing public generator for future guarded management (not publication or overwrite).</label>
+          <label hidden><input type="checkbox" id="pcms-adopt-consent" disabled> Per-generator consent (superseded by account-level management)</label>
           <div class="account-controls"><button type="button" id="pcms-adopt-capture" disabled>Capture and preserve original</button><button type="button" id="pcms-adopt-local-archive" disabled>Archive local adoption · retain original</button></div>
           <div class="account-controls">
             <label for="pcms-adopt-git-token">Git credential</label>

@@ -41,7 +41,10 @@ export function validateAdoptionIntent(row,account,request) {
     return fail('OWNER_CONTEXT_UNVERIFIED');
   if(!Number.isSafeInteger(request.expectedRevision)||
      row.revision!==request.expectedRevision)return fail('STALE_REVISION');
-  if(row.visibility==='PUBLIC'&&request.explicitPublicConsent!==true)
+  // C-10: the standing account-level management grant covers verified owned
+  // public generators; no per-generator approval. Adoption is read-only.
+  if(row.visibility==='PUBLIC'&&request.explicitPublicConsent!==true&&
+     request.standingManagement!==true)
     return fail('PUBLIC_ADOPTION_CONSENT_REQUIRED');
   if(row.visibility==='UNLISTED'&&request.explicitPublicConsent===true)
     return fail('VISIBILITY_CHANGED');

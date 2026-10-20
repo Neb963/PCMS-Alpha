@@ -302,6 +302,17 @@ export function createAutoRunner(api,{open=openCanonicalDatabase,clock=Date.now,
   }
   return Object.freeze({
     tick,status,setVault,manualV2Candidate,setFormat,
+    // C-75: called after a completed permanent account removal. The removal
+    // stays in force whatever this backup's outcome; the request persists
+    // until a backup started after it completes.
+    async requestFreshAfterRemoval(){
+      const s=await store();
+      const req=await s.requestFresh('ACCOUNT_REMOVED',clock());
+      if(!req.ok)return req;
+      if(!req.enabled)return fail('AUTO_BACKUP_NOT_ENABLED');
+      void tick();
+      return {ok:true,code:'FRESH_BACKUP_REQUESTED'};
+    },
     enable:async enabled=>{
       const s=await store(),result=await s.enabled(enabled);
       if(result.ok&&enabled)void tick();return result;

@@ -7,7 +7,7 @@ const digest = v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
 const active = a => a && a.state !== 'ARCHIVED';
 const key = id => 'account:' + id;
 const reasons = new Set(['IDENTITY_UNOBSERVABLE','CHALLENGE','SESSION_UNAVAILABLE']);
-const allowed = new Set(['ENROLL','ACK_LOGIN','VERIFY','MANUAL_OVERRIDE','ARCHIVE','REACTIVATE','REBIND',
+const allowed = new Set(['ENROLL','ACK_LOGIN','VERIFY','MANUAL_OVERRIDE','ARCHIVE','REACTIVATE','REBIND','REMOVE',
   'BEGIN_SETUP','SETUP_PROGRESS','SETUP_COMPLETE','ROUTE_STATUS','REVERIFY',
   'BEGIN_UPGRADE','UPGRADE_PROGRESS','REPLACE_PERSONA']);
 const code = v => v===null || (typeof v==='string' && /^[A-Z0-9_]{3,64}$/.test(v));
@@ -74,7 +74,29 @@ export function transitionAccount(previous, action, all = []) {
         priorPersonaUid:previous.personaUid,priorIdentity:previous.identity,
         priorOverride:previous.override})},event:'ARCHIVED'};
   }
+  if (action.type === 'REMOVE') {
+    // C-60: permanent LOCAL removal, separate from (and only after) Archive.
+    // The record becomes a minimal tombstone: the account and binding IDs stay
+    // so historical exit reservations (C-06) and generator provenance remain
+    // attributable and an inspected restore can exclude it (C-74). Persona,
+    // session identity, history and overrides are deleted. Remote generators,
+    // originals, Git and backups are untouched.
+    if (previous.state!=='ARCHIVED' || previous.removed) return fail('ARCHIVE_BEFORE_REMOVAL');
+    if (action.explicitRemoval!==true) return fail('REMOVAL_NOT_CONFIRMED');
+    if (previous.personaUid && previous.route?.status!=='RELEASED' &&
+        action.personaDeleted!==true) return fail('ROUTE_RELEASE_PENDING');
+    const revision=previous.revision+1;
+    return {ok:true,account:{accountId:previous.accountId,
+      bindingId:typeof previous.bindingId==='string'?previous.bindingId:null,
+      state:'ARCHIVED',revision,bindingVersion:previous.bindingVersion,
+      personaUid:null,identity:null,override:null,boundPrincipal:null,setup:null,
+      route:{status:'RELEASED',code:'ACCOUNT_REMOVED',at:action.at ?? null,routeId:null},
+      removed:{at:Number.isSafeInteger(action.at)?action.at:null,revision,
+        personaDeleted:action.personaDeleted===true},
+      history:[{event:'REMOVED',revision}]},event:'REMOVED'};
+  }
   if (action.type === 'REACTIVATE') {
+    if (previous.removed) return fail('ACCOUNT_REMOVED');
     if (previous.state!=='ARCHIVED'||action.explicitReactivation!==true)
       return fail('REACTIVATION_NOT_AUTHORIZED');
     if (previous.personaUid && all.some(a=>a && active(a) && a.accountId!==previous.accountId &&
@@ -249,6 +271,12 @@ export function createAccountStore(db) {
         const result=transitionAccount(previous,action,all);
         if (result.ok) {
           meta.put({key:key(action.accountId),account:result.account});
+          // C-74 removal history, read by inspected restore: an archive holding
+          // an older revision of this account is excluded unless re-reviewed.
+          if (result.event==='REMOVED')
+            meta.put({key:'removal:'+action.accountId,state:'REMOVED_ONLY_LOCALLY',
+              accountId:action.accountId,revision:result.account.revision,
+              removedAt:result.account.removed.at});
           tx.objectStore('events').add({stage:'ACCOUNT_'+result.event,
             accountId:action.accountId,revision:result.account.revision});
         }
@@ -317,6 +345,7 @@ export function publicAccount(account) {
       (!account.upgrade||account.upgrade.phase==='COMPLETE')?
         'OPERATION_GUARDED':'OFF',
     setup:account.setup||null,route:account.route||null,upgrade:account.upgrade||null,
+    removed:account.removed?{at:account.removed.at,personaDeleted:account.removed.personaDeleted===true}:null,
     protectedRoute:typeof account.bindingId!=='string'?'LEGACY_UNPINNED':
       account.upgrade&&account.upgrade.phase!=='COMPLETE'?'UPGRADING':'PCMS_PINNED'};
 }

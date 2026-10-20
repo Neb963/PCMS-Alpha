@@ -34,7 +34,7 @@ export function createAdoptionStore(db){
       };
     });
   }
-  function adopt({slug,expectedRevision,explicitPublicConsent},original){
+  function adopt({slug,expectedRevision,explicitPublicConsent,standingManagement},original){
     if(!original?.ok||original.source!=='INDEPENDENT_FULL_BYTE_READBACK')
       return Promise.resolve(fail('ORIGINAL_SOURCE_UNVERIFIED'));
     return tx(db,'readwrite',(t,done)=>{
@@ -44,7 +44,8 @@ export function createAdoptionStore(db){
         if(!row){done(fail('TARGET_NOT_OBSERVED'));return;}
         m.get('account:'+row.accountId).onsuccess=av=>{
           const account=av.target.result?.account;
-          const eligible=validateAdoptionIntent(row,account,{slug,expectedRevision,explicitPublicConsent});
+          const eligible=validateAdoptionIntent(row,account,{slug,expectedRevision,
+            explicitPublicConsent,standingManagement});
           if(!eligible.ok){done(eligible);return;}
           m.get('source-link:'+slug).onsuccess=lv=>{
             const link=lv.target.result?.link;
@@ -62,8 +63,8 @@ export function createAdoptionStore(db){
               if(!cont.ok){done(cont);return;}
               if(prior){done({...publicAdoption(prior),duplicate:true});return;}
               const rec={...candidate,revision:1,archived:false,
-                visibility:row.visibility,consent:row.visibility==='PUBLIC'?
-                  'OPERATOR_EXPLICIT_PUBLIC':'AUTO_UNLISTED',
+                visibility:row.visibility,consent:row.visibility!=='PUBLIC'?'AUTO_UNLISTED':
+                  explicitPublicConsent===true?'OPERATOR_EXPLICIT_PUBLIC':'STANDING_ACCOUNT_MANAGEMENT',
                 management:row.visibility==='PUBLIC'?
                   'CONSENTED_ARCHIVE_PENDING':'DISCOVERED_ARCHIVE_PENDING',
                 original,archiveState:'ARCHIVE_PENDING',createdAt:original.observedAt};

@@ -366,7 +366,27 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     return {ok:true,state:'WAITING_LOGIN',code:again.code};
   }
 
+  // C-60: permanent local removal of an ARCHIVED account. Optional deletion
+  // of its dedicated Persona/session goes through the donor's own removal.
+  async function remove(accountId,expectedRevision,{deletePersona=false}={}){
+    const fresh=await accounts.get(accountId);
+    if(!fresh.ok)return fresh;
+    const a=fresh.account;
+    if(a.revision!==expectedRevision)return fail('STALE_REVISION');
+    if(a.state!=='ARCHIVED'||a.removed)return fail('ARCHIVE_BEFORE_REMOVAL');
+    let personaDeleted=false;
+    if(deletePersona&&a.personaUid){
+      if(typeof donor.removeAccountPersona!=='function')return fail('PERSONA_REMOVAL_UNAVAILABLE');
+      const out=await donor.removeAccountPersona({personaUid:a.personaUid});
+      if(!out?.ok)return fail(out?.code||'PERSONA_REMOVAL_UNCONFIRMED');
+      personaDeleted=true;
+    }
+    return accounts.apply({type:'REMOVE',accountId,expectedRevision,
+      explicitRemoval:true,personaDeleted,at:now()});
+  }
   return Object.freeze({
+    remove:(accountId,expectedRevision,options)=>exclusive(accountId,
+      ()=>remove(accountId,expectedRevision,options)),
     async begin(){
       const accountId=rid('acct_'),bindingId=rid('bind_');
       const out=await accounts.applyCurrent({type:'BEGIN_SETUP',accountId,bindingId});

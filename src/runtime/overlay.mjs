@@ -273,6 +273,25 @@ function createPcmsEnrollmentDonor(){
       if(status?.installed!==true||!Array.isArray(status.active_exits))return {ok:false,code:'NATIVE_UNAVAILABLE'};
       return {ok:true,released:!status.active_exits.some(e=>e?.route_id===routeId)};
     },
+    // C-60 permanent local removal of an archived account's dedicated Persona
+    // (container + its session cookies) through the donor's own DELETE_PERSONA
+    // path. Refused while any tab, donor job or control lease uses it.
+    async removeAccountPersona({personaUid}){
+      await initialize();
+      const state=await getState(),found=pcmsProfileByUid(state,personaUid);
+      if(found.code==='PERSONA_NOT_FOUND')return {ok:true,removed:false,absent:true};
+      if(found.code)return {ok:false,code:found.code};
+      const p=found.profile;
+      const leases=await managementIntegration.listControlLeases();
+      if((await browser.tabs.query({cookieStoreId:p.containerId})).length||
+         (await listActiveProfileIds()).includes(p.containerId)||
+         leases.some(l=>String(l?.personaUid||'').toLowerCase()===String(p.personaUid).toLowerCase()))
+        return {ok:false,code:'PERSONA_IN_USE'};
+      try{
+        return await localMutationFence(p.containerId,async()=>
+          ({ok:true,removed:await personaPlatform.remove(p.containerId)===true}));
+      }catch{return {ok:false,code:'PERSONA_REMOVAL_UNCONFIRMED'};}
+    },
     reloadPins:()=>reloadRoutePins()
   });
 }

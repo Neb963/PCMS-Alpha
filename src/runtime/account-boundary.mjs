@@ -22,6 +22,7 @@ const permitted={
   REPLACE_PERSONA:['accountId','expectedRevision','explicitReplacement'],
   ACK_LOGIN:['accountId','expectedRevision'],OPEN_LOGIN:['accountId','expectedRevision'],
   ARCHIVE:['accountId','expectedRevision'],
+  REMOVE_ACCOUNT:['accountId','expectedRevision','explicitRemoval','deletePersona'],
   MANUAL_OVERRIDE:['accountId','expectedRevision','reason','acknowledgeLimitedAuthority'],
   REACTIVATE:['accountId','expectedRevision','explicitReactivation']
 };
@@ -39,6 +40,8 @@ export function validateAccountMessage(api,sender,m) {
     if(!isSafeId(p.accountId)||!Number.isSafeInteger(p.expectedRevision)||
       p.expectedRevision<1) return fail('INVALID_PARAMS');
     if(m.type==='REACTIVATE'&&p.explicitReactivation!==true)return fail('INVALID_PARAMS');
+    if(m.type==='REMOVE_ACCOUNT'&&(p.explicitRemoval!==true||typeof p.deletePersona!=='boolean'))
+      return fail('INVALID_PARAMS');
     if(m.type==='REPLACE_PERSONA'&&p.explicitReplacement!==true)return fail('INVALID_PARAMS');
     if(m.type==='MANUAL_OVERRIDE'&&(
       p.acknowledgeLimitedAuthority!==true||typeof p.reason!=='string'))
@@ -75,7 +78,8 @@ export function createAccountBoundary(api,{
   },
   pins={hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},
   syncInventory=(accountId,revision)=>inventoryBoundary?inventoryBoundary.syncAccount(accountId,revision):
-    Promise.resolve(fail('INVENTORY_UNAVAILABLE'))
+    Promise.resolve(fail('INVENTORY_UNAVAILABLE')),
+  backupRequester=null
 }={}) {
   let dbPromise,enrollment;
   const sentinel=createRestoreSentinel(api.storage.local);
@@ -184,6 +188,24 @@ export function createAccountBoundary(api,{
         if(!f)return fail('ENROLLMENT_UNAVAILABLE');
         void f.reactivate(p.accountId,p.expectedRevision);
         return {ok:true,started:true};
+      }
+      if(message.type==='REMOVE_ACCOUNT'){
+        if(!f)return fail('ENROLLMENT_UNAVAILABLE');
+        const out=await f.remove(p.accountId,p.expectedRevision,{deletePersona:p.deletePersona});
+        if(!out.ok)return {...out,message:explain(out.code)};
+        // C-75: the removal is complete and stays in force whatever happens
+        // to the follow-up protected backup attempt.
+        let backup;
+        try{
+          // Same single registered backup coordinator (module instance shared
+          // with entry.mjs); lazily loaded to keep this port's graph small.
+          const requester=backupRequester||
+            (await import('./backup-auto-boundary.mjs')).autoBackup?.runner;
+          backup=await requester?.requestFreshAfterRemoval?.();
+        }
+        catch{backup=null;}
+        return {ok:true,state:'REMOVED',account:publicAccount(out.account),
+          backup:backup?.ok?'FRESH_BACKUP_REQUESTED':(backup?.code||'BACKUP_UNAVAILABLE')};
       }
       if(message.type==='ARCHIVE'){
         if(f){

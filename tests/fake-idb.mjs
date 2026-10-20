@@ -42,7 +42,8 @@ export function fakeDatabase(){
         return req;
       },
       put(value){stage(s,value.key??value.id??value.operationId,value);},
-      add(value){stage(s,'auto'+String(++autoKey).padStart(8,'0'),value);},
+      // Like real IDB keyPath 'key' stores: an explicit key is honoured.
+      add(value){stage(s,typeof value?.key==='string'?value.key:'auto'+String(++autoKey).padStart(8,'0'),value);},
       openCursor(){
         requests++;const req={onsuccess:null};
         let rows=null,i=0;

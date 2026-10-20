@@ -61,5 +61,8 @@ export function createAutoBoundary(api,options={}){
   }
   return Object.freeze({register,runner});
 }
-if(typeof browser!=='undefined')createAutoBoundary(browser,{
-  reviewedV2:operatorSelectedV2(browser)}).register();
+// Single registration; exported so a completed account removal can request
+// the C-75 follow-up backup through the same coordinator (no second runner).
+export const autoBackup=typeof browser!=='undefined'?createAutoBoundary(browser,{
+  reviewedV2:operatorSelectedV2(browser)}):null;
+autoBackup?.register();
