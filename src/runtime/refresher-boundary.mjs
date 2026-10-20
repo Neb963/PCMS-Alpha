@@ -66,13 +66,21 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       try{alarmHeld=!(await api.alarms.get(REFRESHER_ALARM));}catch{alarmHeld=true;}
     }
   }
-  async function safeBreadcrumb(result,code){
+  async function safeBreadcrumb(result,code,sourceWritePossible=false){
     try{
       const d=result?.state?.diagnostics||{};
-      await api.storage.local.set({pcmsI12Status:{mode:'SHADOW_ONLY',
+      const previous=(await api.storage.local.get('pcmsI12Status'))?.pcmsI12Status;
+      const prior=Number.isSafeInteger(previous?.mutations)&&previous.mutations>=0?
+        previous.mutations:0;
+      // Redacted durable count of possibly dispatched guarded source writes.
+      // Never report permanent zero after the operator enabled mutations.
+      const mutations=Math.min(999999,prior+(sourceWritePossible?1:0));
+      await api.storage.local.set({pcmsI12Status:{
+        mode:result?.state?.policy?.refreshEnabled===true?
+          'GUARDED_REFRESH_ENABLED':'SHADOW_ONLY',
         code:code||'SHADOW_READY',turns:d.turns||0,reads:d.reads||0,
         queuePeak:d.queuePeak||0,readPeak:d.readPeak||0,unknownIntervals:d.unknownIntervals||0,
-        alarmHeld,mutations:0}});
+        alarmHeld,mutations}});
     }catch{}
   }
   function alarmReceipt(){
@@ -255,8 +263,8 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     let receipt={at:clock(),kind:'UNKNOWN',sourceFingerprint:null,
       targetMatched:false,principalMatched:false};
     try{
-      // The installed application has no provider-specific implementation or
-      // authorization. Tests inject an isolated deterministic effect ledger.
+      // The fixed installed I13 editor is the only guarded writer, and an
+      // ACK remains insufficient: this separate readback validates full source.
       await refreshAdapter.execute({...claim,method:candidate.method,methodVersion:candidate.version});
       const check=await refreshAdapter.readback(claim);
       const final=await g.getSafeRouteReadiness(row.personaUid);
@@ -317,10 +325,11 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         let refresh='REFRESH_ACTIVATION_HELD';
         try{refresh=await maybeRefresh(s);}catch{refresh='REFRESH_EFFECT_UNCERTAIN';}
         await notifyChanges(result);await notifyChanges(observed);
-        await safeBreadcrumb(result,alarmHeld?'ALARM_UNVERIFIED':
-          observed.code==='MONITOR_ACTIVATION_HELD'?'MONITOR_ACTIVATION_HELD':'SHADOW_READY');
         const mutationPossible=['EFFECT_INDEPENDENTLY_PROVEN','REFRESH_EFFECT_HELD',
           'REFRESH_EFFECT_UNCERTAIN'].includes(refresh);
+        await safeBreadcrumb(result,alarmHeld?'ALARM_UNVERIFIED':
+          observed.code==='MONITOR_ACTIVATION_HELD'?'MONITOR_ACTIVATION_HELD':'SHADOW_READY',
+          mutationPossible);
         return {ok:true,revision:result.revision,
           mode:result.state.policy?.refreshEnabled===true?
             'GUARDED_REFRESH_ENABLED':'SHADOW_ONLY',

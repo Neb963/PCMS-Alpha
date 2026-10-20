@@ -367,7 +367,10 @@ export function createRefresherStore(db){
       (r.refresh?.intent?.nonce||null)!==(claim.nonce||null)||
       !r.ownerVerified||!r.releaseVerified||r.identityHeld||r.reviewHeld||
       r.listing!=='PUBLIC'||s.accounts[r.accountId]?.principalFingerprint!==claim.principalFingerprint||
-      !r.slot||r.phase!=='ACTIVE'||rowBlocks(s,r).length)
+      !r.slot||r.phase!=='ACTIVE'||rowBlocks(s,r).length||
+      // The durable operator setting is authoritative *at the final effect
+      // boundary*. An earlier optimistic read cannot survive a concurrent OFF.
+      s.policy.refreshEnabled!==true)
       return fail('REFRESH_CONTEXT_CHANGED');
     const absence=qualifyRecentAbsence({row:r,recent:s.recent,policy:s.policy,now,
       reservedId:claim.id});

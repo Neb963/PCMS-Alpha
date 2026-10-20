@@ -73,3 +73,22 @@ test('S07 T-08: current absence can reserve, but a later visible feed bars dispa
   assert.equal(rejected.ok,false);
   assert.equal(db.read('meta',REFRESHER_KEY).state.rows[0].refresh.intent.state,'RESERVED');
 });
+
+test('S07 X: operator disabling guarded marker writes after reserve revokes canonical dispatch',async()=>{
+  const db=fakeDatabase(),s=initial();
+  s.policy.refreshEnabled=true;
+  await storeState(db,s);
+  const store=createRefresherStore(db);
+  const claim=await store.reserveAttempt({stableId:s.rows[0].stableId,
+    id:'intent_off_during_prepare',now,candidate,liveAuthorized:true});
+  assert.equal(claim.ok,true,JSON.stringify(claim));
+  const snapshot=(await store.read()).state;
+  const disabled=await store.changePolicy(snapshot.revision,{refreshEnabled:false});
+  assert.equal(disabled.ok,true,JSON.stringify(disabled));
+  const denied=await store.markDispatch(claim.claim,now+1);
+  assert.equal(denied.ok,false);
+  assert.equal(denied.code,'REFRESH_CONTEXT_CHANGED');
+  const persisted=(await store.read()).state;
+  assert.equal(persisted.policy.refreshEnabled,false);
+  assert.equal(persisted.rows[0].refresh.intent.state,'RESERVED');
+});
