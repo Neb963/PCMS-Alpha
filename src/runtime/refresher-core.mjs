@@ -175,7 +175,9 @@ function receiptValid(e,bootId){
     Array.isArray(e.accounts)&&e.accounts.length<=1000&&
     new Set(e.accounts.map(a=>a.accountId)).size===e.accounts.length&&
     e.accounts.every(a=>isSafeId(a.accountId)&&number(a.bindingVersion,1,Number.MAX_SAFE_INTEGER)&&
-      typeof a.personaUid==='string'&&['HEALTHY','UNAVAILABLE','UNKNOWN'].includes(a.health)&&
+      typeof a.personaUid==='string'&&
+      (a.health!=='HEALTHY'||hex(a.principalFingerprint))&&
+      ['HEALTHY','UNAVAILABLE','UNKNOWN'].includes(a.health)&&
       (a.health!=='HEALTHY'||(a.protected===true&&a.sessionVerified===true)));
 }
 export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=null,qualifiedCoverages=null}={}){
@@ -240,7 +242,9 @@ export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=null,qualif
       e.origin==='S07_NATIVE_CAUSAL_WINDOW'?'NATIVE_ELIGIBILITY_CONFIRMED':'EVIDENCED_INTERVAL';
     const health=new Map(e.accounts.map(a=>[a.accountId,a]));
     for(const [id,a] of Object.entries(out.accounts)){
-      const h=health.get(id),matched=h?.bindingVersion===a.bindingVersion&&h.personaUid===a.personaUid;
+      const h=health.get(id),matched=h?.bindingVersion===a.bindingVersion&&
+        h.personaUid===a.personaUid&&
+        h.principalFingerprint===a.principalFingerprint;
       if(!h)continue;
       const interval=Math.max(0,e.to-Math.max(e.from,a.checkpoint));
       if(!interval)continue;
@@ -260,7 +264,9 @@ export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=null,qualif
       const delta=Math.max(0,e.to-Math.max(e.from,r.checkpoint,r.admittedAt||0));
       if(!delta){out.diagnostics.replayedIntervals++;continue;}
       const h=health.get(r.accountId);
-      if(h?.health!=='HEALTHY'||h.bindingVersion!==r.bindingVersion||h.personaUid!==r.personaUid)continue;
+      if(h?.health!=='HEALTHY'||h.bindingVersion!==r.bindingVersion||
+         h.personaUid!==r.personaUid||
+         h.principalFingerprint!==out.accounts[r.accountId]?.principalFingerprint)continue;
       r.checkpoint=e.to;
       if(rowBlocks(out,r).length||r.phase==='WAITING')continue;
       let remaining=delta;

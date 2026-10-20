@@ -163,3 +163,16 @@ test('S07 E04 X: corrupt persisted original-pipe counters cannot create CPU-heav
  assert.equal(response.ok,false);
  assert.equal(response.reason,'NATIVE_INTERVAL_INVALID');
 });
+
+test('S07 E04 X: stale authenticated principal from a previous login cannot credit a rebound Persona',()=>{
+  const first=advanceShadow(fleet(),{now:start,bootId,nativeClock:previous}).state;
+  const proven=qualifyNativeOperatingInterval({previous,next,bootId,id,
+    providerCoverages,accountCoverages});
+  assert.equal(proven.ok,true);
+  const forged=structuredClone(proven.receipt);
+  forged.accounts[0].principalFingerprint='f'.repeat(64);
+  const result=advanceShadow(first,{now:start+span,bootId,receipt:forged});
+  assert.equal(result.ok,true);
+  assert.equal(result.state.rows[0].activeRemaining,HOUR);
+  assert.equal(result.state.accounts.account_01.health,'UNKNOWN');
+});

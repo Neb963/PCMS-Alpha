@@ -17,6 +17,7 @@ function receipt(s,from,to,{bad=[],provider='HEALTHY',id='receipt_interval_01',b
   return {source:'GUARDED_OPERATIONAL_INTERVAL',browserRunning:true,complete:true,
     id,bootId,from,to,accounts:Object.entries(s.accounts).map(([accountId,a])=>({
       accountId,personaUid:a.personaUid,bindingVersion:a.bindingVersion,
+      principalFingerprint:a.principalFingerprint,
       health:bad.includes(accountId)?'UNAVAILABLE':'HEALTHY',protected:true,sessionVerified:true})),
     witnesses:[0,1].map(i=>({accountId:'witness_'+i,domain:'independent_'+i,
       routeVerified:true,observedAt:to,result:provider==='HEALTHY'?'HEALTHY':

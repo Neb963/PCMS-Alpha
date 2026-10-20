@@ -266,6 +266,7 @@ export function createRefresherStore(db){
       packet.principalFingerprint===c.principalFingerprint){
       const interval={from:c.startedAt,to:packet.interval.to,accountId:c.accountId,
         bindingVersion:c.bindingVersion,personaUid:c.personaUid,
+        principalFingerprint:c.principalFingerprint,
         health:accepted&&packet.ok?'HEALTHY':'UNKNOWN',protected:true,sessionVerified:accepted&&packet.ok===true,
         domain:isSafeId(packet.interval.domain)?packet.interval.domain:null,
         providerResult:accepted&&packet.ok?'HEALTHY':packet.code==='PROVIDER_UNAVAILABLE'?

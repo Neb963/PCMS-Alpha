@@ -2549,7 +2549,9 @@ def main():
                   const receipt={source:'GUARDED_OPERATIONAL_INTERVAL',id:'i12_interval_observed',
                     bootId:boot,browserRunning:true,complete:true,from:now-8*core.HOUR,to:now,
                     accounts:Object.entries(state.accounts).map(([accountId,a])=>({accountId,
-                      personaUid:a.personaUid,bindingVersion:a.bindingVersion,health:'HEALTHY',protected:true,sessionVerified:true})),
+                      personaUid:a.personaUid,bindingVersion:a.bindingVersion,
+                      principalFingerprint:a.principalFingerprint,
+                      health:'HEALTHY',protected:true,sessionVerified:true})),
                     witnesses:[0,1].map(i=>({accountId:'witness_'+i,domain:'independent_'+i,
                       routeVerified:true,observedAt:now,result:'HEALTHY'}))};
                   turn=await store.turn({now,bootId:boot,receipt});
