@@ -4,11 +4,15 @@ import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId} from './journ
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {createCoordinatorStore} from './coordinator-store.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
+import {standingS06} from './s06-standing-authority.mjs';
+import {createGitCredentialResolver} from './git-credential.mjs';
+import {writeDiagnosticReady,observeDiagnosticReady} from './diagnostic-ready-git.mjs';
+const READY_JOURNAL='pcmsS08ReadyDeclaration';
 export const S08_CLEANUP_PORT='pcms-s08-cleanup';
 export function validateCleanupMessage(api,sender,message){
  if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
  const p=message?.params;
- if(message?.type!=='VERIFY_TEST_REMOTE_ABSENCE'||!p||
+ if(!['VERIFY_TEST_REMOTE_ABSENCE','DECLARE_TEST_READY'].includes(message?.type)||!p||
     typeof p!=='object'||Array.isArray(p)||
     Object.keys(message).some(k=>!['type','params'].includes(k))||
     Object.keys(p).some(k=>!['intentId','runId'].includes(k))||
@@ -17,7 +21,9 @@ export function validateCleanupMessage(api,sender,message){
  return {ok:true};
 }
 export function createS08CleanupBoundary(api,{open=openCanonicalDatabase,
- guard=internalPcmsGuard}={}){
+ guard=internalPcmsGuard,gitGate=()=>false,credential=createGitCredentialResolver(api),
+ write=writeDiagnosticReady,observe=observeDiagnosticReady,
+ storeFactory=createCoordinatorStore}={}){
  let dbPromise;
  const sentinel=createRestoreSentinel(api.storage.local);
  const database=()=>dbPromise||=open().catch(e=>{dbPromise=null;throw e;});
@@ -77,13 +83,73 @@ export function createS08CleanupBoundary(api,{open=openCanonicalDatabase,
       slug:r.slug,accountId:cfg.accountId,source:'PROTECTED_TARGET_READBACK'};
   }
 
+ // The one-button diagnostic declares READY for its OWN disposable test
+ // generator so the ordinary READY → native AI → writeback pipeline runs
+ // without a hand-assembled Git folder. Only the designated namespace/run,
+ // only the PCMS-created NOT_READY folder, only with the Git grant. A
+ // possible effect is journaled first and reconciled by readback only.
+ async function declareTestReady(p,s){
+   const saved=await api.storage.local.get(['pcmsS08DisposableScope','pcmsS08DiagnosticRun',
+     READY_JOURNAL,'pcmsS03Git']);
+   const cfg=saved.pcmsS08DisposableScope,r=saved.pcmsS08DiagnosticRun,git=saved.pcmsS03Git;
+   if(!cfg||!r||r.runId!==p.runId||r.intentId!==p.intentId||
+      r.config?.accountId!==cfg.accountId||r.config?.namespace!==cfg.namespace||
+      r.config?.repositoryId!==cfg.repositoryId||git?.repositoryId!==cfg.repositoryId||
+      typeof r.slug!=='string'||!r.slug.startsWith(cfg.namespace+'-')||
+      !/^s08_[a-f0-9]{12,32}$/.test(r.runId))
+     return fail('TEST_READY_SCOPE_UNVERIFIED');
+   const intent=await s.getCreate(p.intentId);
+   if(!intent.ok||intent.record.slug!==r.slug||intent.record.accountId!==cfg.accountId)
+     return fail('TEST_CREATION_INTENT_MISMATCH');
+   if(intent.record.state!=='ASSOCIATED_NOT_READY')return fail('TEST_FOLDER_NOT_YET_ASSOCIATED');
+   const cred=await credential();if(!cred.ok)return cred;
+   const request={repository:git.repository,repositoryId:git.repositoryId,slug:r.slug,
+     readyRevision:'diag-'+r.runId.slice(4),token:cred.token};
+   const journal=saved[READY_JOURNAL];
+   const record=async state=>api.storage.local.set({[READY_JOURNAL]:state});
+   if(journal?.runId===r.runId){
+     if(journal.state==='CONFIRMED')return {ok:true,code:'TEST_READY_DECLARED',head:journal.head};
+     const seen=await observe({...request,expectedHead:journal.expectedHead});
+     if(seen.ok&&seen.present){
+       await record({...journal,state:'CONFIRMED',head:seen.head});
+       return {ok:true,code:'TEST_READY_DECLARED',head:seen.head};
+     }
+     // Never replay a possibly dispatched Git write.
+     return fail('TEST_READY_WRITE_UNCERTAIN_RECONCILE');
+   }
+   if(gitGate()!==true)return fail('GIT_WRITE_GRANT_REQUIRED');
+   const before=await observe({...request,expectedHead:'0'.repeat(40)});
+   if(!before.ok)return before;
+   if(before.present){
+     await record({runId:r.runId,slug:r.slug,state:'CONFIRMED',head:before.head});
+     return {ok:true,code:'TEST_READY_DECLARED',head:before.head};
+   }
+   if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+   await record({runId:r.runId,slug:r.slug,state:'DISPATCH_POSSIBLE',expectedHead:before.head,at:Date.now()});
+   const out=await write({...request,expectedHead:before.head});
+   if(out.ok){
+     await record({runId:r.runId,slug:r.slug,state:'CONFIRMED',head:out.head,expectedHead:before.head});
+     // Let the ordinary main observer ingest READY now, not in 15 minutes.
+     try{await api.alarms?.create('pcms-s03-main-resume',{when:Date.now()+2000});}catch{}
+     return {ok:true,code:'TEST_READY_DECLARED',head:out.head};
+   }
+   if(out.code!=='GIT_EFFECT_UNCERTAIN'){
+     // Fully verified pre-dispatch refusal: nothing was written.
+     await api.storage.local.remove?.(READY_JOURNAL);
+     return out;
+   }
+   await record({runId:r.runId,slug:r.slug,state:'UNCERTAIN',expectedHead:before.head,at:Date.now()});
+   return fail('TEST_READY_WRITE_UNCERTAIN_RECONCILE');
+ }
  async function run(message,sender){
   const validation=validateCleanupMessage(api,sender,message);
   if(!validation.ok)return validation;
   try{
    const h=await sentinel.inspect();if(h.held)return fail(h.code);
    const db=await database();
-   return await verifyTestRemote(message.params,createCoordinatorStore(db));
+   const s=storeFactory(db);
+   if(message.type==='DECLARE_TEST_READY')return await declareTestReady(message.params,s);
+   return await verifyTestRemote(message.params,s);
   }catch{return fail('TEST_CLEANUP_OBSERVATION_UNAVAILABLE');}
  }
  function register(){
@@ -105,4 +171,5 @@ export function createS08CleanupBoundary(api,{open=openCanonicalDatabase,
  }
  return Object.freeze({run,register});
 }
-if(typeof browser!=='undefined')createS08CleanupBoundary(browser).register();
+if(typeof browser!=='undefined')createS08CleanupBoundary(browser,{
+  gitGate:()=>standingS06?.gate('gitWrite')===true}).register();

@@ -49,8 +49,10 @@ function show(){
  status.textContent=run?
   'Test generator '+run.slug+' · '+run.status+' · next '+run.stage+
   (run.firstFailure?' · '+run.firstFailure.code+(
-    run.firstFailure.code==='TEST_READY_DECLARATION_REQUIRED'?
-      ' — Merge reviewed READY source on main for this test slug, then Resume.':
+    run.firstFailure.code==='GIT_WRITE_GRANT_REQUIRED'?
+      ' — Grant Git in Settings → Protected workflow activation, then Resume.':
+    run.firstFailure.code==='ENABLE_GUARDED_REFRESHER_POLICY'?
+      ' — Enable guarded marker saves in Refresher settings, then Resume.':
     run.firstFailure.code==='EXACT_CANDIDATE_HUMAN_APPROVAL_REQUIRED'?
       ' — Approve exact source in Publication, then Resume.':''):''):
   'No diagnostic run. No external operations attempted.';
@@ -132,14 +134,44 @@ async function catalog(){
  return match.ready?'TEST_READY_MAIN_SOURCE_PRESENT':
    'TEST_GIT_FOLDER_CONFIRMED_NOT_READY';
 }
+// Background automation (READY intake, native AI, tests, writeback) is the
+// ordinary production progression; the diagnostic waits for it with a
+// bounded, resumable poll instead of asking the operator to drive steps.
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function waitFor(label,probe,{minutes=45,every=20000}={}){
+ const until=Date.now()+minutes*60000;let last=null;
+ while(Date.now()<until){
+  last=await probe();
+  if(last?.done)return last.value;
+  status.textContent='Test generator '+run.slug+' · waiting for '+label+
+   (last?.code?' ('+last.code+')':'')+' · background automation continues if this page closes.';
+  await sleep(every);
+ }
+ pause(last?.code||label.toUpperCase().replace(/[^A-Z]/g,'_')+'_TIMEOUT');
+}
 async function ready(){
- const catalog=await request('git','SCAN_CONNECTED');
+ let catalog=await request('git','SCAN_CONNECTED');
  if(!catalog?.ok||catalog.complete!==true||
     catalog.repositoryId!==run.config.repositoryId)
   pause(catalog?.code||'TEST_CATALOG_UNVERIFIED');
- const match=catalog.generators?.find(x=>x.slug===run.slug);
+ let match=catalog.generators?.find(x=>x.slug===run.slug);
  if(!match)pause('TEST_GIT_FOLDER_NOT_OBSERVED');
- if(!match.ready)pause('TEST_READY_DECLARATION_REQUIRED');
+ if(!match.ready){
+  // Disposable test only: PCMS declares READY for its own test generator
+  // through the conditional Git writer (Git grant required, no replay).
+  const declared=await request('cleanup','DECLARE_TEST_READY',
+    {intentId:run.intentId,runId:run.runId});
+  if(!declared?.ok)pause(declared?.code||'TEST_READY_DECLARATION_NOT_VERIFIED');
+  catalog=await request('git','SCAN_CONNECTED');
+  match=catalog?.generators?.find(x=>x.slug===run.slug);
+  if(!match?.ready)pause('TEST_READY_NOT_OBSERVED_ON_MAIN');
+ }
+ return waitFor('READY intake',async()=>{
+  try{return {done:true,value:await readyRecorded()};}
+  catch(e){if(['TEST_READY_NOT_DISCOVERED'].includes(e.code))return {done:false,code:e.code};throw e;}
+ },{minutes:20,every:15000});
+}
+async function readyRecorded(){
  let after='';
  for(let page=0;page<80;page++){
   const r=await request('git','LIST_READY',{after,limit:200});
@@ -159,20 +191,23 @@ async function ready(){
  pause('READY_QUEUE_PAGE_BUDGET_EXCEEDED');
 }
 async function ai(){
- const r=await request('ai','GET_JOB',{slug:run.slug});
- if(!r?.ok)pause(r?.code||'TEST_AI_JOB_NOT_ADMITTED');
- if(r.state==='TESTS_VERIFIED')return 'NATIVE_AI_TESTS_VERIFIED';
- if(r.state==='KNOWN_FAILURE'||r.state==='HELD_RECONCILE')
-   pause('TEST_AI_RECONCILIATION_REQUIRED');
- pause('TEST_AI_NOT_YET_VERIFIED');
+ return waitFor('native AI development and tests',async()=>{
+  const r=await request('ai','GET_JOB',{slug:run.slug});
+  if(!r?.ok)return {done:false,code:r?.code||'TEST_AI_JOB_NOT_ADMITTED'};
+  if(r.state==='TESTS_VERIFIED')return {done:true,value:'NATIVE_AI_TESTS_VERIFIED'};
+  if(r.state==='HELD_RECONCILE')pause('TEST_AI_RECONCILIATION_REQUIRED');
+  if(r.state==='HELD_NO_PROGRESS')pause('TEST_AI_HELD_NO_PROGRESS');
+  return {done:false,code:r.state};
+ },{minutes:60});
 }
 async function writeback(){
- const r=await request('writeback','GET',{slug:run.slug});
- if(!r?.ok)pause(r?.code||'TEST_WRITEBACK_UNAVAILABLE');
- if(r.state==='CONFIRMED')return 'TESTED_SOURCE_GIT_WRITEBACK_VERIFIED';
- if(['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(r.state))
+ return waitFor('conditional Git writeback',async()=>{
+  const r=await request('writeback','GET',{slug:run.slug});
+  if(r?.ok&&r.state==='CONFIRMED')return {done:true,value:'TESTED_SOURCE_GIT_WRITEBACK_VERIFIED'};
+  if(r?.ok&&['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(r.state))
    pause('GIT_EFFECT_RECONCILIATION_REQUIRED');
- pause('TESTED_GIT_WRITEBACK_NOT_YET_CONFIRMED');
+  return {done:false,code:r?.code||r?.state||'TESTED_GIT_WRITEBACK_NOT_YET_CONFIRMED'};
+ },{minutes:20});
 }
 async function publication(){
  const r=await request('release','GET',{slug:run.slug});

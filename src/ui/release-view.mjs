@@ -28,7 +28,7 @@ const reviewQueue=document.getElementById('pcms-s06-review-queue');
 const refreshQueue=document.getElementById('pcms-s06-review-refresh');
 const nextQueue=document.getElementById('pcms-s06-review-next');
 let queueCursor='',queueBusy=false;
-let snapshot=null,receipt=null,active=false,sequence=0,humanContext=null,exceptionContext=null;
+let snapshot=null,receipt=null,active=false,sequence=0,humanContext=null,exceptionContext=null,chainPublish=null;
 const valid=s=>/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 function command(type,params={}){
   return new Promise((resolve,reject)=>{
@@ -188,7 +188,8 @@ async function act(type,params,message){
           ' · pending safe child admission. Old approval is revoked; nothing published.');
       }
       else if(type==='APPROVE'){receipt=result;note('Durable source-bound approval '+result.releaseId+
-        '. No provider effect performed.');}
+        '. Publishing this exact approved source now…');
+        chainPublish=result;}
       else if(type==='CANCEL_APPROVED'){receipt=result;snapshot=null;
         note('Unsent source approval canceled; publication not attempted. Review fresh F before reapproving.');}
       else if(type==='DISPATCH'){receipt=result;note('Dispatch may have occurred: '+
@@ -208,6 +209,20 @@ async function act(type,params,message){
     if(serial===sequence){snapshot=null;receipt=null;
       note('Connection lost or timed out. Possible effect is UNKNOWN. Load the canonical receipt and reconcile before any further action.');}
   }finally{if(serial===sequence){active=false;controls();}}
+  // One human decision: a fresh exact-source approval is followed by the
+  // single fenced publication attempt (which re-validates F, READY, owner and
+  // route) and an independent read-only confirmation. Never retried.
+  if(chainPublish&&type==='APPROVE'){
+    const approved=chainPublish;chainPublish=null;
+    await act('DISPATCH',{slug:approved.slug,token:token.value,
+      expectedRevision:approved.revision,passphrase:passphrase.value},
+      'Publishing the exact approved source (single fenced attempt)…');
+    if(receipt&&receipt.slug===approved.slug&&
+       ['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN'].includes(receipt.state))
+      await act('RECONCILE',{slug:receipt.slug,token:token.value,
+        expectedRevision:receipt.revision},
+        'Independently confirming public listing and every source byte…');
+  }
 }
 previewBtn.addEventListener('click',()=>act('PREVIEW',{
   slug:slug.value,token:token.value,passphrase:passphrase.value},'Checking current owner, route, clean editor, Git READY and full saved F…'));
