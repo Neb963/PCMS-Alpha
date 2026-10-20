@@ -211,7 +211,7 @@ test('I03 F: packaged entry includes accounted new modules but donor remains imm
   assert.doesNotMatch(boundary,/sendNativeMessage|fetch\s*\(|XMLHttpRequest/);
   for(const id of ['pcms-add-account','pcms-accounts-list'])
     assert.match(html,new RegExp('id="'+id+'"'));
-  assert.match(html,/Provider writes HELD/);
+  assert.match(html,/Operator dashboard · protected workflows/);
 });
 
 test('S01 F: every guarded PCMS effect requires a committed route pin; untagged Personas are never operable',async()=>{
