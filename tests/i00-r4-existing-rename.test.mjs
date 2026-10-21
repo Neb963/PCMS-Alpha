@@ -75,11 +75,11 @@ test('R4 AC-09 verified existing rename is separately gated, staged, and never b
  const prepare=await x.service.run({type:'PREPARE',newSlug:'new-generator',expectedRevision:2});
  assert.equal(prepare.code,'EXACT_EXISTING_RENAME_PREPARED',JSON.stringify(prepare));
  assert.equal(x.renames(),0);
- const execute=await x.service.run({type:'EXECUTE',newSlug:'new-generator',expectedRevision:1});
+ const execute=await x.service.run({type:'EXECUTE',consent:'I APPROVE THE EXACT EXISTING GENERATOR RENAME',newSlug:'new-generator',expectedRevision:1});
  assert.equal(execute.code,'RENAME_OUTCOME_REQUIRES_READBACK',JSON.stringify(execute));
  assert.equal(x.renames(),1);
  assert.equal(x.saved['pcmsR4ExistingRenameAttempt:new-generator'].state,'OUTCOME_UNCERTAIN');
- assert.equal((await x.service.run({type:'EXECUTE',newSlug:'new-generator',expectedRevision:3})).code,
+ assert.equal((await x.service.run({type:'EXECUTE',consent:'I APPROVE THE EXACT EXISTING GENERATOR RENAME',newSlug:'new-generator',expectedRevision:3})).code,
    'RENAME_STAGE_NOT_ADMISSIBLE');
  assert.equal(x.renames(),1,'possible provider effect never retried');
  x.removeOldInventory();
@@ -100,14 +100,14 @@ test('R4 AC-09 no grant, bad original source or target collision rejects before 
  const drift=setup();
  assert.equal((await drift.service.run({type:'PREPARE',newSlug:'new-generator',expectedRevision:2})).ok,true);
  drift.changeSource();
- assert.equal((await drift.service.run({type:'EXECUTE',newSlug:'new-generator',expectedRevision:1})).code,
+ assert.equal((await drift.service.run({type:'EXECUTE',consent:'I APPROVE THE EXACT EXISTING GENERATOR RENAME',newSlug:'new-generator',expectedRevision:1})).code,
    'ORIGINAL_SOURCE_CHANGED');
  assert.equal(drift.renames(),0);
 });
 test('R4 AC-09 already-possible rename is readback-only after standing grant revocation',async()=>{
  const x=setup();
  assert.equal((await x.service.run({type:'PREPARE',newSlug:'new-generator',expectedRevision:2})).ok,true);
- assert.equal((await x.service.run({type:'EXECUTE',newSlug:'new-generator',expectedRevision:1})).ok,true);
+ assert.equal((await x.service.run({type:'EXECUTE',consent:'I APPROVE THE EXACT EXISTING GENERATOR RENAME',newSlug:'new-generator',expectedRevision:1})).ok,true);
  x.setGrant(false);
  const r=await x.service.run({type:'RECONCILE',newSlug:'new-generator',expectedRevision:3});
  assert.equal(r.ok,true);
@@ -122,6 +122,11 @@ test('R4 identity port rejects foreign pages, unversioned or malformed existing-
    type:'EXECUTE_RENAME',params:{newSlug:'new-generator'}}).code,'INVALID_PARAMS');
  assert.equal(validateIdentityMessage(api,sender,{
    type:'EXECUTE_RENAME',params:{newSlug:'new-generator',expectedRevision:1,remoteId:'chosen'}}).code,'INVALID_PARAMS');
+ assert.equal(validateIdentityMessage(api,sender,{
+   type:'EXECUTE_RENAME',params:{newSlug:'new-generator',expectedRevision:1}}).code,'INVALID_PARAMS');
+ assert.equal(validateIdentityMessage(api,sender,{
+   type:'EXECUTE_RENAME',params:{newSlug:'new-generator',expectedRevision:1,
+    consent:'I APPROVE THE EXACT EXISTING GENERATOR RENAME'}}).ok,true);
  assert.equal(validateIdentityMessage(api,sender,{
    type:'PREPARE_RENAME',params:{newSlug:'new-generator',expectedRevision:2}}).ok,true);
 });
