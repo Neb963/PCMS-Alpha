@@ -38,7 +38,7 @@ export function planMainFolderChanges(prior,current,records=[]){
     created.push({repositoryId:current.repositoryId,oldSlug,newSlug:slug,
       oldTreeOid:oldSlug?old.get(oldSlug).folderTreeOid:null,
       newTreeOid:candidate.folderTreeOid,markerOid:candidate.markerOid,
-      evidenceHead:current.head,state:'REVIEW_REQUIRED',
+      evidenceHead:current.head,state:'REVIEW_REQUIRED',revision:1,
       reason:exact.length===1?'EXACT_FOLDER_TREE_MATCH':'IDENTITY_AMBIGUOUS'});
    }
   }
