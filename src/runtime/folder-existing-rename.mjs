@@ -63,6 +63,28 @@ function readAttemptFacts(db,attempt){
   };
  });
 }
+function readLinkedIdentity(db,slug){
+ return new Promise((resolve,reject)=>{
+  let tx,result=rejectState('RENAMED_SOURCE_LINK_NOT_VERIFIED');
+  function rejectState(code){return {ok:false,code}}
+  try{tx=db.transaction(['meta'],'readonly')}
+  catch{return reject(Error('RENAME_DB_UNAVAILABLE'))}
+  tx.oncomplete=()=>resolve(result);tx.onabort=()=>reject(Error('RENAME_DB_ABORT'));
+  const m=tx.objectStore('meta');
+  m.get('inventory:'+slug).onsuccess=e=>{
+   const row=e.target.result?.generator;
+   if(!row)return;
+   m.get('source-link:'+slug).onsuccess=l=>{
+    const link=l.target.result?.link;
+    if(!link)return;
+    m.get('account:'+row.accountId).onsuccess=a=>{
+     const account=a.target.result?.account;
+     result={ok:true,row,link,account};
+    };
+   };
+  };
+ });
+}
 function validFacts(data,oldSlug){
  const {row:r,account:a}=data||{};
  return data?.ok===true&&r?.slug===oldSlug&&r.ownerState==='OBSERVED_OWNER'&&
@@ -136,13 +158,67 @@ export function createExistingRenameService(api,{
    const allowed=type==='PREPARE'?review.state==='RENAME_EXISTING_REQUESTED'&&!attempt:
      type==='EXECUTE'?attempt?.state==='RENAME_PREPARED':
      type==='RECONCILE'?['DISPATCH_POSSIBLE','OUTCOME_UNCERTAIN',
-       'REMOTE_RENAME_VERIFIED_LINK_PENDING'].includes(attempt?.state):false;
+       'REMOTE_RENAME_VERIFIED_LINK_PENDING'].includes(attempt?.state):
+     type==='FINALIZE'?['REMOTE_RENAME_VERIFIED_LINK_PENDING',
+       'RENAME_COMPLETED'].includes(attempt?.state):false;
    if(!allowed)return reject('RENAME_STAGE_NOT_ADMISSIBLE');
    const currentRevision=type==='PREPARE'?review.revision:attempt.revision;
    if(currentRevision!==expectedRevision)return reject('RENAME_STALE_REVISION');
    if(type==='RECONCILE'&&attempt.state==='REMOTE_RENAME_VERIFIED_LINK_PENDING')
     return {ok:true,code:'REMOTE_RENAME_VERIFIED_SOURCE_RELINK_PENDING',
       state:attempt.state,revision:attempt.revision,providerEffects:'NO_NEW_EFFECT'};
+   if(type==='FINALIZE'){
+    if(attempt.state==='RENAME_COMPLETED'&&review.state==='RENAME_EXISTING_COMPLETED')
+     return {ok:true,code:'VERIFIED_EXISTING_RENAME_COMPLETED',
+       state:attempt.state,revision:attempt.revision,providerEffects:'NO_NEW_EFFECT'};
+    const linked=await readLinkedIdentity(await db(),newSlug);
+    if(!linked.ok)return linked;
+    const {row:newRow,link,account}=linked;
+    if(account?.state!=='VERIFIED'||newRow.ownerState!=='OBSERVED_OWNER'||
+       newRow.slug!==newSlug||newRow.remoteId!==attempt.remoteId||
+       newRow.accountId!==attempt.accountId||
+       newRow.personaUid!==attempt.personaUid||
+       newRow.bindingVersion!==attempt.bindingVersion||
+       newRow.accountRevision!==account.revision||
+       account.personaUid!==attempt.personaUid||
+       account.bindingVersion!==attempt.bindingVersion||
+       account.identity?.principalFingerprint!==attempt.principalFingerprint||
+       account.identity.source!=='GUARDED_SESSION_READBACK'||
+       link.slug!==newSlug||link.folder!=='generators/'+newSlug||
+       link.remoteId!==attempt.remoteId||link.accountId!==attempt.accountId||
+       link.personaUid!==attempt.personaUid||
+       link.bindingVersion!==attempt.bindingVersion||
+       !FP.test(link.fingerprint||''))
+      return reject('RENAMED_ASSOCIATION_OR_OWNER_UNVERIFIED');
+    const done=attempt.state==='RENAME_COMPLETED'?attempt:{
+      ...attempt,state:'RENAME_COMPLETED',revision:attempt.revision+1,
+      associationFingerprint:link.fingerprint,finalizedAt:clock()};
+    await api.storage.local.set({[key(newSlug)]:done});
+    const savedAttempt=(await api.storage.local.get(key(newSlug)))?.[key(newSlug)];
+    if(savedAttempt?.state!=='RENAME_COMPLETED'||savedAttempt?.revision!==done.revision)
+     return reject('RENAME_FINALIZATION_UNCERTAIN');
+    // Link verification is a READ ONLY canonical ledger fact. Source and old
+    // original history are preserved; no provider, file, or Git writes here.
+    const latest=await api.storage.local.get(REVIEW_KEY);
+    const rows=latest?.[REVIEW_KEY];
+    const idx=rows?.findIndex(x=>x.repositoryId===state.cfg.repositoryId&&
+      x.newSlug===newSlug);
+    if(!Array.isArray(rows)||idx<0||rows[idx].oldSlug!==attempt.oldSlug||
+       rows[idx].newTreeOid!==attempt.folderTreeOid||
+       !['RENAME_EXISTING_REQUESTED','RENAME_EXISTING_COMPLETED'].includes(rows[idx].state))
+     return reject('RENAME_REVIEW_CHANGED');
+    const completed=rows.map((r,i)=>i===idx?{...r,
+      state:'RENAME_EXISTING_COMPLETED',revision:(r.revision||1)+1}:r);
+    await api.storage.local.set({[REVIEW_KEY]:completed});
+    const confirmed=(await api.storage.local.get(REVIEW_KEY))?.[REVIEW_KEY]
+      ?.find(r=>r.repositoryId===state.cfg.repositoryId&&r.newSlug===newSlug);
+    if(confirmed?.state!=='RENAME_EXISTING_COMPLETED')
+     return reject('RENAME_REVIEW_COMMIT_UNCERTAIN');
+    return {ok:true,code:'VERIFIED_EXISTING_RENAME_COMPLETED',
+      state:'RENAME_COMPLETED',revision:done.revision,
+      providerEffects:'NO_NEW_EFFECT',sourceRelink:'VERIFIED'};
+   }
+
    let facts=await readFacts(await db(),review.oldSlug);
    if(type==='RECONCILE'&&!validFacts(facts,review.oldSlug)&&attempt)
     facts=await readAttemptFacts(await db(),attempt);
