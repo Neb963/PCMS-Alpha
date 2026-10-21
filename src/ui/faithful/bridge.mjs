@@ -221,7 +221,7 @@ function routeHandlers(){
    state.queue.noticeCursor=state.queue.nextNotices===null?null:state.queue.nextNotices;
    void loadQueue();return;
  }
- if(action==='add-account'){nativeAction('accounts',null,'pcms-add-account');return}
+ if(action==='add-account'){void startAccountEnrollment();return}
  if(action==='feed-check'){guardedClick('pcms-refresher-reload');void loadRefresher();return}
  if(action==='edit-timing'){nativeAction('refresher',null,'pcms-refresher-active');return}
  if(action==='pause-refresher'){if(!guardedClick('pcms-refresher-global-pause'))return;notify('Pause request sent through the existing guarded controller; reload to verify.');void loadRefresher();return}
@@ -306,15 +306,90 @@ function displayAccounts(){if(state.route!=='accounts')return;
   data.append(h,details);
   const right=el('div','account-right');const status=String(item.state||'UNKNOWN');const label=status==='VERIFIED'?'Ready':status==='ARCHIVED'?'Archived':status.replaceAll('_',' ').toLowerCase();
   right.append(statusPill(label,status==='VERIFIED'?'green':status==='ARCHIVED'?'':'amber'));
-  right.append(b('Manage',()=>{
-    state.nativeOpen=true;
-    nativeRoute('accounts');
-    const rowNode=[...native.querySelectorAll('[data-pcms-v014-account-id]')].find(e=>e.dataset.pcmsV014AccountId===item.accountId);
-    rowNode?.scrollIntoView({block:'center'});rowNode?.querySelector('summary')?.click();
-  }));row.append(mark,data,right);list.append(row);
+  right.append(b('Manage',()=>openAccountManager(item)));row.append(mark,data,right);list.append(row);
  }
  const pagination=shadow('.pagination span');if(pagination)pagination.textContent=state.errors.accounts?'Account read unavailable':`${displayed.length?offset+1:0}–${Math.min(offset+state.acct.perPage,displayed.length)} of ${displayed.length} matching local accounts`;
  const prev=shadow('[data-action="account-prev"]'),next=shadow('[data-action="account-next"]');if(prev)prev.disabled=state.acct.page===0;if(next)next.disabled=offset+state.acct.perPage>=displayed.length;
+}
+// The primary account interface issues only the same typed, revision-fenced
+// commands as the original account controller. No route/Persona authority lives
+// in the UI and status ACKs are never mistaken for finished remote effects.
+async function startAccountEnrollment(){
+ if(!window.confirm('Add a new managed account? PCMS will prepare a protected Persona and open the Perchance login tab when the route is ready.'))return;
+ notify('Starting protected account setup…');
+ try{
+  const out=await readPort('pcms-i03-accounts','ADD_ACCOUNT',{},90000);
+  notify(out?.ok?'Account setup started. Complete the login when prompted, then confirm it in Accounts.':
+    'Account setup could not start. Review the account and protected route status.');
+ }catch{notify('Account setup could not be confirmed. Check the Accounts list before retrying.');}
+ await loadAccounts();
+}
+function openAccountManager(item){
+ const previous=root.activeElement;
+ const overlay=el('div','drawer-overlay'),dialog=el('div','drawer');
+ dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');
+ dialog.setAttribute('aria-label','Manage protected account');
+ const header=el('div','drawer-head'),title=el('h2','drawer-title','Account management'),actions=el('div','form-foot');
+ const status=el('p','setting-note','Operations use the existing protected Persona and current account revision.');
+ function close(){overlay.remove();if(previous?.isConnected)previous.focus({preventScroll:true})}
+ header.append(title,b('Close',close));
+ const body=el('div','drawer-body'),meta=el('dl');
+ for(const [label,value] of [['Account',item.accountId],['State',item.state||'Unknown'],
+   ['Persona',item.personaUid||'Not observed'],['Route',item.protectedRoute||'Not verified']]){
+  const row=el('div','kv');row.append(el('dt','',label),el('dd','',value));meta.append(row);
+ }
+ body.append(meta,status);
+ const allowed={
+  'Open login':'OPEN_LOGIN','Confirm login':'CONFIRM_LOGIN',
+  'Check protected route':'VERIFY_ROUTE','Sync generator inventory':'SYNC_ACCOUNT',
+  'Resume setup':'RESUME_SETUP','Reactivate':'REACTIVATE',
+  'Archive':'ARCHIVE'};
+ async function execute(kind){
+  if(kind==='ARCHIVE'&&!window.confirm('Archive this account? PCMS preserves its Persona, source history and remote generators. Unfinished external effects must still be reconciled.'))return;
+  if(kind==='REACTIVATE'&&!window.confirm('Reactivate this archived account? PCMS will reverify its protected route and owner before resuming affected work.'))return;
+  const buttonList=[...actions.querySelectorAll('button')];buttonList.forEach(b=>b.disabled=true);
+  status.textContent=kind==='OPEN_LOGIN'?'Opening the protected login tab…':
+    'Checking the current account and applying the requested action…';
+  try{
+   const params={accountId:item.accountId,expectedRevision:item.revision};
+   if(kind==='REACTIVATE')params.explicitReactivation=true;
+   const out=await readPort(kind==='SYNC_ACCOUNT'?'pcms-i04-inventory':'pcms-i03-accounts',
+     kind,params,kind==='CONFIRM_LOGIN'||kind==='SYNC_ACCOUNT'?100000:45000);
+   if(out?.ok){
+    status.textContent=kind==='CONFIRM_LOGIN'&&out.state==='VERIFIED'?
+      'Login identity confirmed and saved. Refresh Accounts for current inventory.':
+      kind==='OPEN_LOGIN'?'Protected login tab requested. Return here after logging in.':
+      kind==='SYNC_ACCOUNT'?'Inventory read finished under the account’s protected route.':
+      'Request recorded. Its completion is tracked separately from this acknowledgment.';
+    notify(status.textContent);
+   }else{
+    status.textContent='The action was not confirmed. '+(
+      typeof out?.message==='string'?out.message:
+      'Check account status and prerequisites before retrying.');
+   }
+  }catch{status.textContent='The outcome is uncertain. Refresh Accounts before another action.';}
+  finally{await loadAccounts();buttonList.forEach(b=>b.disabled=false);}
+ }
+ const menu=item.state==='ARCHIVED'?
+   ['Reactivate']:item.state==='PREPARING'?
+   ['Resume setup','Check protected route']:
+   ['Open login','Confirm login','Check protected route','Sync generator inventory','Archive'];
+ for(const label of menu){
+  const button=b(label,()=>void execute(allowed[label]),'btn small');
+  if(label==='Sync generator inventory'&&item.state!=='VERIFIED')button.disabled=true;
+  actions.append(button);
+ }
+ body.append(actions);dialog.append(header,body);overlay.append(dialog);root.append(overlay);
+ overlay.addEventListener('keydown',event=>{
+  if(event.key==='Escape'){event.preventDefault();close();}
+  if(event.key==='Tab'){
+   const controls=[...dialog.querySelectorAll('button:not(:disabled)')],index=controls.indexOf(root.activeElement);
+   if(event.shiftKey&&index===0){event.preventDefault();controls.at(-1)?.focus();}
+   else if(!event.shiftKey&&index===controls.length-1){event.preventDefault();controls[0]?.focus();}
+  }
+ });
+ overlay.addEventListener('click',event=>{if(event.target===overlay)close()});
+ header.querySelector('button')?.focus({preventScroll:true});
 }
 async function loadGenerators(){if(state.route!=='generators')return;
  const epoch=++state.renderEpoch,body=shadow('.workspace-surface table tbody');if(!body)return;
