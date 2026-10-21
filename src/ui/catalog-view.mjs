@@ -17,6 +17,24 @@ const promptStatus=el('pcms-catalog-prompt-status');
 let busy=false,generation=0,connected=false,selectedScope=null;
 let promptBase=null,promptRevision=0,promptDirty=false,promptEffectState=null;
 function message(text){status.textContent=text;}
+const GIT_HELP={
+ GIT_VAULT_STORE_OUTCOME_UNCERTAIN:'PCMS could not confirm that the GitHub credential was saved. Do not retry yet; check Settings → Diagnostics to reconcile the interrupted connection.',
+ GIT_SECRET_SERVICE_UNAVAILABLE:'The secure credential store is not available. Check the PCMS native helper in Settings → Diagnostics.',
+ GIT_SECRET_SERVICE_TIMEOUT:'The secure credential store did not respond. Check Settings → Diagnostics before retrying.',
+ GIT_VAULT_OPERATION_DENIED:'The credential helper refused the request. Check its installation and extension permissions.',
+ GIT_PENDING_CONNECTION_RECONCILIATION_REQUIRED:'A previous connection did not finish. Check Settings → Diagnostics and reconcile before connecting again.',
+ GIT_CONFIG_COMMIT_OUTCOME_UNCERTAIN:'PCMS could not confirm that the connection settings were saved. Check Settings → Diagnostics before retrying.',
+ GITHUB_AUTH_REJECTED:'GitHub rejected the credential. Check that it is valid and authorized for this repository.',
+ GITHUB_ACCESS_FORBIDDEN:'GitHub denied access to this repository. Check the credential permissions.',
+ GITHUB_REPOSITORY_INACCESSIBLE:'GitHub could not access this private repository. Check its name and your permissions.',
+ GITHUB_TRANSPORT_UNAVAILABLE:'GitHub could not be reached. Check your connection and try again.',
+ GITHUB_SERVICE_UNAVAILABLE:'GitHub is temporarily unavailable. No connection changes were made.',
+ GIT_RECONNECT_REQUIRED:'GitHub has not been connected securely yet. The file preview can work without enabling automation.',
+ GIT_CREDENTIAL_MISSING_OR_INVALID:'No usable GitHub credential was found. Check the native helper and reconnect.',
+ GIT_VAULT_STATUS_UNCERTAIN:'PCMS could not read the credential status. Check Settings → Diagnostics.'
+};
+function gitHelp(code){return GIT_HELP[code]||'GitHub could not complete this operation. Check Settings → Diagnostics for details.';}
+
 function render(data){
   list.replaceChildren();prompt.value='';
   selectedScope=connected&&data.preview?.scopeDigest&&data.importStatus!== 'IMPORT_SCOPE_APPROVED' ?
@@ -246,8 +264,7 @@ async function refreshStatus(){
     if(connected){
       repo.value=r.repository;
       message('OS credential present for '+r.repository+'. Remote GitHub authentication and complete main tree have not been checked. Run read-only verification in Settings.');
-    }else message('Git vault not connected ('+(r?.code||'UNAVAILABLE')+
-      '). Enter a credential and connect, or perform one read-only scan.');
+    }else message(gitHelp(r?.code));
   }catch{message('Git credential status unavailable; no connection assumed.');}
   controls();
 }
@@ -260,7 +277,7 @@ connect.addEventListener('click',async()=>{
     if(r?.ok){
       connected=true;selectedScope=null;promptBase=null;token.value='';
       message('Git configuration and OS vault readback verified. Remote main tree not yet scanned; no Git/provider write performed.');
-    }else message('Connection held: '+(r?.code||'UNAVAILABLE')+'. Credential persistence may be uncertain: use Settings preflight before retrying.');
+    }else message(gitHelp(r?.code));
   }catch{if(n===generation)message('Git vault unavailable; no connection assumed.');}
   finally{busy=false;controls();}
 });
@@ -290,9 +307,9 @@ scan.addEventListener('click',async()=>{
     }
     render(r);
     void renderReadyQueue(n);
-    message('Complete read-only snapshot. '+r.recognizedCount+
-      ' recognized entries. Scope: '+(r.importStatus||'NOT_CONNECTED')+
-      '. Owner facts and allocations remain unverified; approval does not create remote generators.');
+    message('GitHub files read successfully: '+r.recognizedCount+' generator folder(s) found on main. '+
+      (connected?'Connection is configured, but account ownership and deployment still need verification.':
+      'This was a one-time preview, not a saved GitHub connection. Finish secure setup in Settings before enabling automation.'));
   }catch{
     if(n===generation)message('Unable to complete scan. Previous state is not deletion evidence.');
   }finally{busy=false;controls();}
