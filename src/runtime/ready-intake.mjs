@@ -21,7 +21,7 @@ export function createReadyIntake(api,{open=openCanonicalDatabase,
  const sentinel=createRestoreSentinel(api.storage.local);
  let dbPromise;
  async function run({catalog,repository,token,transport=fetch,heldSlugs=[]}={}){
-  if(!Array.isArray(heldSlugs)||heldSlugs.length>512||heldSlugs.some(s=>typeof s!=='string'||s.length>100))
+  if(!Array.isArray(heldSlugs)||heldSlugs.length>20000||heldSlugs.some(s=>typeof s!=='string'||s.length>100))
     return fail('S05_IDENTITY_HOLD_INVALID');
   const identityHeld=new Set(heldSlugs);
   if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
