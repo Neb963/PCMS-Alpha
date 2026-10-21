@@ -1261,10 +1261,20 @@ def main():
                   const primaryDiagnostic=details?.textContent.includes('Full disposable diagnostic')&&
                     !!details?.querySelector('input[placeholder="pcms-test-alpha"]')&&
                     [...details.querySelectorAll('button')].some(x=>x.textContent.includes('Save disposable scope'));
+                  sh.querySelector('[data-settings="connections"]').click();
+                  const connected=sh.querySelector('.settings-main');
+                  const connectionRows=[...connected?.querySelectorAll('.settings-row')||[]];
+                  const restoredConnections=connectionRows.length>=3&&
+                    connectionRows.some(x=>x.textContent.includes('PersonaMonkey'))&&
+                    connectionRows.some(x=>x.textContent.includes('Native vault'))&&
+                    !!connected.querySelector('input[type="password"]');
+                  const readableConnections=connectionRows.every(x=>
+                    !/GIT_[A-Z_]+|NATIVE_[A-Z_]+|local[.]pcms[.]/.test(
+                      x.querySelector('.setting-description')?.textContent||''));
                   return {primaryCreate,legacyOpened,primaryPermission,primaryDiagnostic,
-                    primaryAi,protectedRestore,restoreHeld,
+                    primaryAi,protectedRestore,restoreHeld,restoredConnections,readableConnections,
                     drawerClosed:!sh.querySelector('[aria-label="Create generators"]')};""")
-                assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['primaryAi'] and r4_primary['protectedRestore'] and r4_primary['restoreHeld'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
+                assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['primaryAi'] and r4_primary['protectedRestore'] and r4_primary['restoreHeld'] and r4_primary['restoredConnections'] and r4_primary['readableConnections'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
                 print('B R4_PRIMARY_CREATION_AND_PROTECTED_SETTINGS_WITHOUT_LEGACY=PASS',flush=True)
                 execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=overview]').click();return true")
 
