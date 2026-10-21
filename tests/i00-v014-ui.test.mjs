@@ -61,6 +61,22 @@ test('canonical lookup projection rejects injection and hostile identity shapes'
  assert.equal(stableResults([{kind:'generator',id:'a'},{kind:'generator',id:'a'},{kind:'account',id:'a'}]).length,2);
  assert.equal(stableResults(Array.from({length:10000},(_,i)=>({kind:'generator',id:String(i)}))).length,10);
 });
+test('Refresher queue precedes collapsed policy and no guarded controls are removed',()=>{
+ const from=html.indexOf('id="view-refresher"');
+ const until=html.indexOf('id="view-settings"',from);
+ const section=html.slice(from,until);
+ assert.ok(section.indexOf('id="pcms-refresher-rows"') <
+   section.indexOf('id="pcms-v014-refresher-policy"'),
+   'table must remain the dominant Refresher workspace surface');
+ assert.match(section,/<details class="pcms-v014-refresher-policy"/);
+ assert.match(section,/<summary>Scheduling policy/);
+ for(const id of ['pcms-refresher-active','pcms-refresher-sleep',
+  'pcms-refresher-grace','pcms-refresher-cap','pcms-refresher-enable',
+  'pcms-refresher-save','pcms-refresher-account-pause'])
+  assert.ok(section.includes('id="'+id+'"'),'protected policy control must be retained: '+id);
+ assert.ok(section.indexOf('id="pcms-refresher-query"')<
+   section.indexOf('id="pcms-refresher-rows"'),'search immediately accessible');
+});
 test('presentation does not hide the Refresher list or disable production controls',()=>{
  assert.match(css,/#view-refresher \.table-scroll/);
  assert.match(css,/overflow:auto/);
