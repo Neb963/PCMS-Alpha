@@ -111,6 +111,7 @@ function mountGeneratorInventory(){
   if(pill)pill.textContent='Local observations · not live ownership';
   // Group actual interactive inputs and filters without destroying their listeners.
   const controls=panel.querySelector('.account-controls');
+  controls?.classList.add('v015-original-search-controls');
   const search=$('pcms-generator-query'),filter=$('pcms-generator-owner-filter');
   if(search&&filter&&controls){
     const toolbar=node('div','v015-inventory-tools');
@@ -158,7 +159,8 @@ function mountGeneratorInventory(){
   const info=$('pcms-inventory-feedback');
   info?.classList.add('v015-quiet-feedback');
   const counter=$('pcms-generator-count');counter?.classList.add('v015-count');
-  panel.querySelector('.pcms-v014-workflow-nav')?.classList.add('v015-secondary');
+  const workflows=h.root.querySelector(':scope > .pcms-v014-workflow-nav');
+  if(workflows){panel.after(workflows);workflows.classList.add('v015-more-workflows');}
 }
 function mountQueue(){
   const h=heading('work-queue','Everything PCMS is working on, in one place.',[
@@ -183,7 +185,7 @@ function mountQueue(){
   board.append(tabs,content);content.append(list);
   const page=root.querySelector(':scope > header.workspace-head');
   const nav=root.querySelector(':scope > .pcms-v014-workflow-nav');
-  if(nav)nav.after(board);else page?.after(board);
+  if(nav)nav.before(board);else page?.after(board);
   const originals=[
     {id:'pcms-stage-queue',label:'Private staging',group:'activity'},
     {id:'pcms-adopt-receipts',label:'Adoption',group:'activity'},
@@ -367,12 +369,16 @@ function mountRefresher(){
     try{
       const result=await listenRead('pcms-i12-refresher','GET_REFRESHER',{query:'',phase:'ALL',offset:0,limit:1});
       if(result?.ok!==true)throw Error('Unavailable');
-      const all=Number(result.total)||0;
-      const active=Number(result.occupied)||0;
-      const sleeping=Number(result.sleeping)||0;
-      metrics.get('Active').textContent=Number.isFinite(active)?active:'—';
-      metrics.get('Sleeping').textContent=Number.isFinite(sleeping)?sleeping:'—';
-      metrics.get('Waiting / held').textContent=Number.isFinite(all)?Math.max(0,all-active-sleeping):'—';
+      // Query actual phase-specific canonical counts; occupied slots are not
+      // equivalent to the number of ACTIVE generators. Do not invent totals.
+      const keys=[['Active','ACTIVE'],['Sleeping','SLEEPING'],['Waiting / held','WAITING']];
+      const observed=await Promise.allSettled(keys.map(([,phase])=>
+        listenRead('pcms-i12-refresher','GET_REFRESHER',{query:'',phase,offset:0,limit:1})));
+      observed.forEach((entry,i)=>{
+        const count=entry.status==='fulfilled'&&entry.value?.ok===true&&
+          Number.isInteger(entry.value.total)?entry.value.total:null;
+        metrics.get(keys[i][0]).textContent=count===null?'—':String(count);
+      });
     }catch{
       for(const value of metrics.values())value.textContent='—';
     }
