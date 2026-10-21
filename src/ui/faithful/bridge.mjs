@@ -950,7 +950,8 @@ function displayQueue(){
         stateNote.textContent='Checking protected account, source and current Git identity…';
         try{
          const result=await readPort('pcms-r4-folder-identity',type,{
-          newSlug:review.newSlug,expectedRevision:revision},
+          newSlug:review.newSlug,expectedRevision:revision,
+          ...(type==='EXECUTE_RENAME'?{consent:'I APPROVE THE EXACT EXISTING GENERATOR RENAME'}:{})},
           type==='EXECUTE_RENAME'?120000:95000);
          stateNote.textContent=result?.ok?
           type==='EXECUTE_RENAME'?'One rename attempt may have occurred. Reconcile the remote result; do not retry.':
