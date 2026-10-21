@@ -31,10 +31,14 @@ function readFacts(db,slug){
    m.get('account:'+row.accountId).onsuccess=a=>{
     const account=a.target.result?.account;
     if(!account){out=rejectState('EXISTING_ACCOUNT_NOT_FOUND');return}
-    m.get('inventory:'+row.slug).onsuccess=again=>{
-     if(again.target.result?.generator?.revision!==row.revision){
-      out=rejectState('INVENTORY_CHANGED');return}
-     out={ok:true,row,account};
+    m.get('source-link:'+slug).onsuccess=linked=>{
+     const link=linked.target.result?.link;
+     if(!link){out=rejectState('EXISTING_SOURCE_ASSOCIATION_REQUIRED');return}
+     m.get('inventory:'+row.slug).onsuccess=again=>{
+      if(again.target.result?.generator?.revision!==row.revision){
+       out=rejectState('INVENTORY_CHANGED');return}
+      out={ok:true,row,account,link};
+     };
     };
    };
   };
@@ -50,16 +54,21 @@ function readAttemptFacts(db,attempt){
   try{tx=db.transaction(['meta'],'readonly')}
   catch{return reject(Error('RENAME_DB_UNAVAILABLE'))}
   tx.oncomplete=()=>resolve(result);tx.onabort=()=>reject(Error('RENAME_DB_ABORT'));
-  tx.objectStore('meta').get('account:'+attempt.accountId).onsuccess=e=>{
+  const m=tx.objectStore('meta');
+  m.get('account:'+attempt.accountId).onsuccess=e=>{
    const account=e.target.result?.account;
    if(account?.state!=='VERIFIED'||account.personaUid!==attempt.personaUid||
       account.bindingVersion!==attempt.bindingVersion||
       account.identity?.source!=='GUARDED_SESSION_READBACK'||
       account.identity.principalFingerprint!==attempt.principalFingerprint)return;
-   result={ok:true,account,row:{slug:attempt.oldSlug,accountId:attempt.accountId,
-     remoteId:attempt.remoteId,personaUid:attempt.personaUid,
-     bindingVersion:attempt.bindingVersion,accountRevision:account.revision,
-     ownerState:'OBSERVED_OWNER'}};
+   m.get('source-link:'+attempt.oldSlug).onsuccess=s=>{
+    const link=s.target.result?.link;
+    if(!link)return;
+    result={ok:true,account,link,row:{slug:attempt.oldSlug,
+     accountId:attempt.accountId,remoteId:attempt.remoteId,
+     personaUid:attempt.personaUid,bindingVersion:attempt.bindingVersion,
+     accountRevision:account.revision,ownerState:'OBSERVED_OWNER'}};
+   };
   };
  });
 }
@@ -86,8 +95,12 @@ function readLinkedIdentity(db,slug){
  });
 }
 function validFacts(data,oldSlug){
- const {row:r,account:a}=data||{};
+ const {row:r,account:a,link:l}=data||{};
  return data?.ok===true&&r?.slug===oldSlug&&r.ownerState==='OBSERVED_OWNER'&&
+  l?.slug===oldSlug&&l.folder==='generators/'+oldSlug&&
+  l.remoteId===r.remoteId&&l.accountId===r.accountId&&
+  l.personaUid===r.personaUid&&l.bindingVersion===r.bindingVersion&&
+  FP.test(l.fingerprint||'')&&
   a?.state==='VERIFIED'&&a.accountId===r.accountId&&
   a.personaUid===r.personaUid&&r.bindingVersion===a.bindingVersion&&
   a.revision===r.accountRevision&&
