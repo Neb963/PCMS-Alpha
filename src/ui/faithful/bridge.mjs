@@ -1608,6 +1608,79 @@ function primaryAiSettings(container){
  const form=el('div','form-stack');
  form.append(el('label','','Local AI guidance'),editor,testLabel,countLabel,actions,feedback);
  section.append(form);
+ const jobsSection=el('section','settings-section');
+ jobsSection.append(el('h3','h3','Managed AI development'));
+ const jobsInfo=el('p','setting-note',
+  'Recorded AI jobs are source- and account-bound. A visible status is not evidence of a finished provider response.');
+ jobsSection.append(jobsInfo);
+ const jobs=el('div','queue-list'),pager=el('div','form-foot');
+ let cursor='',history=[],nextCursor=null,loading=false;
+ function jobLabel(state){
+  return ({READY:'Ready for guarded progression',WAITING:'Waiting',
+   HELD:'Paused for verification',COMPLETE:'Completed locally',
+   SOURCE_VERIFIED:'Source verification recorded',FAILED:'Needs operator review',
+   RUNNING:'Development in progress'})[state]||
+    'Recorded AI state — inspect evidence';
+ }
+ async function showJobs(){
+  if(loading)return;loading=true;jobs.replaceChildren();
+  const msg=el('p','setting-note','Reading canonical development jobs…');
+  jobs.append(msg);pager.replaceChildren();
+  try{
+   const r=await readPort('pcms-i10-ai','LIST_JOBS',{after:cursor,limit:15},20000);
+   if(!jobsSection.isConnected)return;
+   jobs.replaceChildren();
+   if(!r?.ok){jobs.append(el('p','setting-note',
+     'AI development records are unavailable. No provider activity was inferred.'));return}
+   nextCursor=r.more?r.nextCursor:null;
+   if(!r.jobs?.length)jobs.append(el('p','setting-note','No recorded AI jobs on this page.'));
+   for(const job of r.jobs||[]){
+    const row=el('div','queue-item'),body=el('div','row-body');
+    body.append(el('strong','',job.slug),el('p','setting-note',jobLabel(job.state)+
+      ' · source and test evidence must be verified separately.'));
+    const action=b('Inspect',()=>void (async()=>{
+     action.disabled=true;
+     try{
+      const current=await readPort('pcms-i10-ai','GET_JOB',{slug:job.slug},25000);
+      if(!current?.ok){jobsInfo.textContent='The current AI record was not verified.';return}
+      const j=current;
+      jobsInfo.textContent=j.slug+' — '+jobLabel(j.state)+
+       '; native session: '+(j.nativeState==='NOT_STARTED'?'not started':
+        j.nativeState==='RUNNING'?'in progress':'needs verification')+
+       '; required test evidence: '+(j.evidence?.status||'not independently verified')+
+       '. Current source is revision '+j.revision+'.';
+     }catch{jobsInfo.textContent='AI job could not be inspected. No remote state was inferred.'}
+     finally{action.disabled=false}
+    })(),'btn small');
+    const advance=b('Advance guarded step',()=>void (async()=>{
+     if(!window.confirm('Run one explicitly guarded AI development step for '+job.slug+'? This may contact Perchance or change its private editor. It will not publish or automatically retry a possibly completed effect.'))return;
+     advance.disabled=true;
+     try{
+      const result=await readPort('pcms-i10-ai','ADVANCE_JOB',{
+       slug:job.slug,expectedRevision:job.revision},110000);
+      jobsInfo.textContent=result?.ok?
+       'One protected development step was recorded for '+job.slug+
+       '. Re-read the job before taking another action.':
+       'The next development step was held or not confirmed. Read current job state before retrying.';
+     }catch{jobsInfo.textContent='Development-step outcome uncertain. Do not retry without independent reconciliation.'}
+     finally{advance.disabled=false;await showJobs()}
+    })(),'btn small');
+    if(['COMPLETE','HELD','FAILED'].includes(job.state))advance.disabled=true;
+    row.append(body,action,advance);jobs.append(row);
+   }
+   const back=b('Previous jobs',()=>{const prev=history.pop();if(prev===undefined)return;
+    cursor=prev;void showJobs()},'btn small');
+   back.disabled=history.length===0;
+   const next=b('More jobs',()=>{if(!nextCursor)return;
+    history.push(cursor);cursor=nextCursor;void showJobs()},'btn small');
+   next.disabled=!nextCursor;
+   pager.append(back,next);
+  }catch{jobs.replaceChildren(el('p','setting-note',
+    'The local AI job journal did not respond. No work has been initiated.'))}
+  finally{loading=false}
+ }
+ jobsSection.append(jobs,pager);section.append(jobsSection);
+ void showJobs();
  async function refresh(){
   const result=await Promise.allSettled([
    readPort('pcms-i10-ai','GET_PROMPTS',{},20000),
