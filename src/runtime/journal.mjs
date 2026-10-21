@@ -243,7 +243,8 @@ export function createCanonicalStore(db) {
   //   projected as reviewed-and-still-active, never hidden.
   const NOTICE_CODES = new Set(['ROUTE_UNAVAILABLE','ACCOUNT_UNVERIFIED',
     'SOURCE_HELD','RESTORE_IN_PROGRESS','CANONICAL_UNAVAILABLE','OPERATION_UNCERTAIN',
-    'PROVIDER_OUTAGE','BACKUP_FAILED','GIT_RECONNECT_REQUIRED']);
+    'PROVIDER_OUTAGE','BACKUP_FAILED','GIT_RECONNECT_REQUIRED',
+    'GIT_FOLDER_MISSING','GIT_FOLDER_RENAME_REVIEW']);
   const RANK = { INFORMATIONAL:1, ACTION_REQUIRED:2, SERIOUS:3 };
   const RENOTIFY_MS = 30 * 60000;
   const causeOk = c => typeof c === 'string' && /^[A-Za-z0-9_:.-]{3,120}$/.test(c);
