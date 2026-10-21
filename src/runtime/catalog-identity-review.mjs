@@ -51,7 +51,7 @@ export function planMainFolderChanges(prior,current,records=[]){
   // Material change in candidate bytes revokes a previously approved choice.
   const stable=target&&target.folderTreeOid===rec.newTreeOid&&
     target.markerOid===rec.markerOid;
-  if(!stable){stale.push(rec.newSlug);continue;}
+  if(!stable){stale.push(rec.newSlug);held.push(rec.newSlug);continue;}
   if(rec.state!=='CREATE_SEPARATE_APPROVED')held.push(rec.newSlug);
  }
  return {ok:true,added,missing,created,review,held:[...new Set(held)],
