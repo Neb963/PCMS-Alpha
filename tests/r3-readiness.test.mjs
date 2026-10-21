@@ -19,6 +19,8 @@ function mock(opts={}){
  const native=async(host,p)=>{events.push(host+':'+p.action);
   if(opts.nativeUnavailable)throw Error('host');
   if(host!=='local.pcms.backup_vault')return {ok:true};
+  if(p.action==='diagnostic.environment')return opts.legacyHost?{ok:false,code:'DENIED'}:
+    {ok:true,protocol:2,dbusSession:opts.noDBus!==true,secretTool:opts.noSecretTool!==true,runtimeDir:true};
   if(p.action==='git.status')return opts.vaultCode?{ok:false,code:opts.vaultCode}:
     credential?{ok:true,present:true}:{ok:false,code:'MISSING_OR_INVALID'};
   if(p.action==='git.get')return credential?{ok:true,credential:TOKEN}:{ok:false,code:'MISSING_OR_INVALID'};
@@ -188,4 +190,21 @@ test('native host rejecting inspection is not claimed as a supported capability'
   return {ok:false,code:'DENIED'};}});
  const out=await r(m);assert.equal(row(out,'BACKUP_HOST').state,'MISSING_CAPABILITY');
  assert.equal(row(out,'DIAGNOSTIC_HOST').state,'MISSING_CAPABILITY');
+});
+
+test('healthy host environment prerequisites do not claim vault authentication',async()=>{
+ const m=mock();const out=await r(m);
+ assert.equal(row(out,'SECRET_SERVICE_ENVIRONMENT').state,'VERIFIED');
+ assert.equal(row(out,'SECRET_SERVICE').state,'OUTCOME_UNCERTAIN');
+});
+test('missing KDE DBus session is named without leaking its environment contents',async()=>{
+ const m=mock({noDBus:true});const out=await r(m);
+ assert.equal(row(out,'SECRET_SERVICE_ENVIRONMENT').code,'DBUS_SESSION_UNAVAILABLE');
+ assert.equal(row(out,'SECRET_SERVICE_ENVIRONMENT').state,'OUTCOME_UNCERTAIN');
+ assert.doesNotMatch(JSON.stringify(out),/DBUS_SESSION_BUS_ADDRESS=/);
+});
+test('old host missing nonsecret diagnostic method is MISSING_CAPABILITY, not fatal to other probes',async()=>{
+ const m=mock({legacyHost:true,vaultPresent:true,state:{pcmsS03Git:config}});
+ const out=await r(m);assert.equal(row(out,'SECRET_SERVICE_ENVIRONMENT').state,'MISSING_CAPABILITY');
+ assert.equal(row(out,'SECRET_SERVICE').state,'VERIFIED');
 });
