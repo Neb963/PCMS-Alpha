@@ -57,7 +57,10 @@ if(typeof browser!=='undefined'){
   const native=createRefresherNativeAdapter({
     // A fixed, source-integrity-constrained I13 editor save is an installed
     // engineering capability, not proof of subsequent recent-feed placement.
-    methodProofFor:({source,planned,guard})=>{
+    methodProofFor:({source,planned,guard,phase})=>{
+      if(phase==='PRECHECK')
+        return guard?.runRefresherStep&&guard?.observeReadOnly?
+          {source:'GUARDED_FIXED_EDITOR_METHOD',allowedByProvider:true}:null;
       if(!guard?.runRefresherStep||!guard?.observeReadOnly||
          !/^[a-f0-9]{64}$/.test(source?.fingerprint||'')||
          !/^[a-f0-9]{64}$/.test(planned?.toFingerprint||'')||
