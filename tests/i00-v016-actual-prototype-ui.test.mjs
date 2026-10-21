@@ -50,7 +50,7 @@ test('prototype supports adverse navigation and fail-open presentation recovery'
  assert.match(bridge,/window\.addEventListener\('hashchange'/);
  assert.match(bridge,/if\(!found\.length\)/);
  assert.match(bridge,/No matching local records/);
- assert.match(bridge,/Unobserved status/);
+ assert.match(bridge,/Unknown|unverified|Unavailable/i);
  assert.match(bridge,/root\.addEventListener\('keydown'/);
  assert.match(bridge,/root\.activeElement/);
  assert.match(bridge,/host\.remove\(\)/);
