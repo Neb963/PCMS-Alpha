@@ -1377,34 +1377,82 @@ function backupAction(action,extra={}){
  });
 }
 function primaryBackups(container){
- const section=primarySettingCard(container,'Encrypted backups',
-  'Automatic source-complete backups require the matching OS-native helper. No backup counts as recoverable without independent verification.');
- const status=el('p','setting-note','Reading current backup status…');
- const actions=el('div','form-foot');section.append(actions,status);
- void (async()=>{
+ const section=primarySettingCard(container,'Encrypted source-complete backups',
+  'The recoverable format requires the matching OS helper, a vault-held recovery key, full archive verification and a separate restore proof. Older browser downloads are not source-complete.');
+ const status=el('p','setting-note','Reading the actual backup state…');status.setAttribute('role','status');
+ const actions=el('div','form-foot'),setup=el('div','form-stack');
+ section.append(setup,actions,status);
+ const secretLabel=el('label','','Recovery passphrase (stored in the OS vault, not PCMS settings)');
+ const secret=el('input','form-input');secret.type='password';secret.autocomplete='new-password';
+ secret.placeholder='Enter recovery passphrase';secretLabel.append(secret);setup.append(secretLabel);
+ const saveKey=b('Store recovery key securely',()=>void(async()=>{
+  const key=secret.value;secret.value='';
+  if(new TextEncoder().encode(key).length<12||new TextEncoder().encode(key).length>4096){
+   status.textContent='Enter a valid recovery passphrase of at least 12 bytes.';return}
+  saveKey.disabled=true;
   try{
-   const s=await backupAction('STATUS');
-   if(!s?.ok){status.textContent='Backup service unavailable. Check local helper installation.';return;}
-   status.textContent='Automatic backup: '+(s.enabled?'enabled':'off')+
-     '. Last independently verified backup: '+(s.lastVerifiedAt?
-       new Date(s.lastVerifiedAt).toLocaleString():'not verified');
-   actions.append(b(s.enabled?'Turn automatic backup off':'Enable automatic backup',()=>void (async()=>{
-     if(!window.confirm(s.enabled?
-       'Disable future automatic backups? Existing encrypted backups are retained.':
-       'Enable scheduled encrypted backup using the configured secure key and native helper?'))return;
-     try{const result=await backupAction('ENABLE',{enabled:!s.enabled});
-      status.textContent=result?.ok?'Backup setting saved. Verification remains separate.':
-       'Backup setting could not be confirmed.'}
-     catch{status.textContent='Backup change not confirmed; check current status.'}
-   })(),'btn small'));
-   actions.append(b('Verify backup capability',()=>void (async()=>{
-    try{const result=await backupAction('STATUS');
-     status.textContent=result?.ok?'Backup service responded. Encrypted file and fresh-profile restore still need independent proof.':
-       'Backup service unavailable.'}
-    catch{status.textContent='Backup helper did not respond. Reinstall the matching native-host package.'}
-   })(),'btn small'));
-  }catch{status.textContent='Local backup service is not responding. The XPI alone does not install native helpers.'}
- })();
+   const out=await backupAction('STORE_VAULT',{passphrase:key});
+   status.textContent=out?.ok?
+     'Passphrase stored in the OS keyring. Preserve your separate recovery copy; this is not a verified backup.':
+     'Could not confirm secure key storage. Check the installed native helper and OS keyring.';
+  }catch{status.textContent='Key storage result uncertain. Check the OS helper before retrying.'}
+  finally{saveKey.disabled=false}
+ })(),'btn small');
+ setup.append(saveKey);
+ const selectFormat=b('Select source-complete archive',()=>void(async()=>{
+  selectFormat.disabled=true;
+  try{
+   const out=await backupAction('SET_FORMAT',{format:'V2'});
+   status.textContent=out?.ok&&out.format==='V2'?
+    'Source-complete format selected. A successful archive and a verified restore are still required.':
+    'The source-complete format could not be enabled. Verify the V2 helper and saved recovery key.';
+  }catch{status.textContent='Native backup format could not be confirmed. No downgrade was attempted.'}
+  finally{selectFormat.disabled=false;void refresh()}
+ })(),'btn small');
+ actions.append(selectFormat);
+ async function refresh(){
+  let s;try{s=await backupAction('STATUS')}catch{}
+  if(!section.isConnected)return;
+  if(!s?.ok){
+   status.textContent='Backup service unavailable. Install the matching native helpers from the operator package.';
+   return;
+  }
+  const genuine=s.format==='V2'&&s.tier===3&&s.proof==='NATIVE_READONLY_SOURCE_RECOVERY';
+  status.textContent='Scheduled backup: '+(s.enabled?'on':'off')+
+   '. Format: '+(s.format==='V2'?'source-complete':'legacy download — not source-complete')+
+   '. Independent archive recovery: '+(genuine?'verified archive exists':'not verified')+'.';
+  actions.querySelector('[data-backup-toggle]')?.remove();
+  actions.querySelector('[data-backup-manual]')?.remove();
+  const toggle=b(s.enabled?'Disable scheduled backups':'Enable scheduled backups',()=>void(async()=>{
+   if(!s.enabled&&s.format!=='V2'){
+    status.textContent='Select and verify the source-complete format before enabling the schedule.';return;}
+   if(!window.confirm(s.enabled?
+     'Disable future backups? Existing encrypted archives will be retained.':
+     'Enable scheduled source-complete encrypted backups? The native helper and OS recovery key are required.'))return;
+   toggle.disabled=true;
+   try{
+    const out=await backupAction('ENABLE',{enabled:!s.enabled});
+    status.textContent=out?.ok?'Scheduled backup policy updated. Independent archive verification remains separate.':
+     'The backup setting was not confirmed. Read its current state before retrying.';
+   }catch{status.textContent='Backup policy outcome uncertain; check state before retrying.'}
+   finally{toggle.disabled=false;void refresh()}
+  })(),'btn small');toggle.dataset.backupToggle='1';toggle.disabled=!s.enabled&&s.format!=='V2';
+  const manual=b('Run source-complete backup',()=>void(async()=>{
+   if(s.format!=='V2')return;
+   if(!window.confirm('Create one encrypted source-complete backup now? This can read protected account/source data but does not change remote generators.'))return;
+   manual.disabled=true;status.textContent='Running source-complete backup and independent encrypted archive verification…';
+   try{
+    const out=await backupAction('RUN_V2_MANUAL');
+    status.textContent=out?.ok&&out.state==='RECOVERY_VERIFIED'?
+     'Encrypted archive created and independently recovered in the native host. Fresh-profile restore still needs separate proof.':
+     'The backup could not be independently recovered. Treat the last attempt as held until investigated.';
+   }catch{status.textContent='Backup outcome uncertain. Do not repeat a possibly completed write before reconciliation.'}
+   finally{manual.disabled=false;void refresh()}
+  })(),'btn small');
+  manual.dataset.backupManual='1';manual.disabled=s.format!=='V2';
+  actions.append(toggle,manual);
+ }
+ void refresh();
 }
 // The full diagnostic engine stays the original, guarded production stage
 // runner. This accepted UI mirrors its typed input controls and actual stage
