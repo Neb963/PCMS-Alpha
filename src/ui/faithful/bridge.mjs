@@ -146,7 +146,7 @@ function routeHandlers(){
  if(action==='queue-help'||action==='account-info'){notify('Detailed operational guidance is available in Advanced protected controls.');return}
  if(action.startsWith('check-service:')){const service=action.split(':')[1];nativeAction(service==='github'?'generators':service==='persona'?'accounts':'settings',service==='github'?'catalog':service==='native'?'backup':undefined);return}
  });
- root.addEventListener('click',event=>{const tab=event.target.closest('[data-filter]');if(tab){event.preventDefault();const [r,value]=tab.dataset.filter.split(':');if(r==='generators'){state.gen.filter=value;state.gen.offset=0;void loadGenerators()}if(r==='refresher'){state.ref.phase=value;state.ref.offset=0;void loadRefresher()}if(r==='queue'){state.queue.filter=value;displayQueue()}return}
+ root.addEventListener('click',event=>{const tab=event.target.closest('[data-filter]');if(tab){event.preventDefault();const [r,value]=tab.dataset.filter.split(':');if(r==='generators'){state.gen.filter=value;state.gen.offset=0;void loadGenerators()}if(r==='refresher'){state.ref.phase=['All','Active','Sleeping','Waiting'].includes(value)?value.toUpperCase():value;state.ref.offset=0;void loadRefresher()}if(r==='queue'){state.queue.filter=value;displayQueue()}return}
  const row=event.target.closest('tr[data-item-index]');if(row){const i=Number(row.dataset.itemIndex);if(state.route==='refresher'&&state.ref.visibleItems?.[i])openDetails('ref',state.ref.visibleItems[i]);else if(state.route==='generators'&&state.gen.visibleItems?.[i])openDetails('gen',state.gen.visibleItems[i]);}
  });
  root.addEventListener('keydown',event=>{
@@ -236,7 +236,7 @@ async function loadGenerators(){if(state.route!=='generators')return;
  const epoch=++state.renderEpoch,body=shadow('.workspace-surface table tbody');if(!body)return;
  renderEmpty(body,'Reading observed local generator inventory…');
  try{
-  const [res,accountsResult]=await Promise.all([inventory({query:state.gen.query,offset:state.gen.offset,limit:state.gen.limit,ownerState:state.gen.filter==='ALL'?'ALL':state.gen.filter}),accounts().catch(()=>null)]);
+  const [res,accountsResult]=await Promise.all([inventory({query:state.gen.query,offset:state.gen.offset,limit:state.gen.limit,ownerState:state.gen.filter==='ALL'?'ALL':state.gen.filter,accountId:state.gen.account==='ALL'?'':state.gen.account}),accounts().catch(()=>null)]);
   if(epoch!==state.renderEpoch||state.route!=='generators')return;
   state.lastAccountList=accountsResult?.ok&&Array.isArray(accountsResult.accounts)?accountsResult.accounts:state.lastAccountList;
   state.gen.items=Array.isArray(res.items)?res.items:[];state.gen.total=safeCount(res.total)=== '—'?0:res.total;
@@ -265,14 +265,15 @@ function displayGenerators(){if(state.route!=='generators')return;
  `${state.gen.total?state.gen.offset+1:0}–${Math.min(state.gen.offset+state.gen.limit,state.gen.total)} of ${state.gen.total} historical local records${state.gen.account!=='ALL'?' · filtered account':''}`);
  // No unsupported fake Published/Developing counts: replace tabs with real owner-state facets.
  const labels={'All':'All','Published':'Owner observed','Developing':'Owner unknown','Needs review':'Disputed','Held':'Unobserved'};
- const map={'All':'ALL','Published':'OBSERVED_OWNER','Developing':'OWNER_UNVERIFIED','Needs review':'OWNER_DISPUTED','Held':'UNOBSERVED'};
+ const map={'All':'ALL','Published':'OBSERVED_OWNER','Developing':'OWNER_UNVERIFIED','Needs review':'OWNER_DISPUTED','Held':'UNOBSERVED',ALL:'ALL',OBSERVED_OWNER:'OBSERVED_OWNER',OWNER_UNVERIFIED:'OWNER_UNVERIFIED',OWNER_DISPUTED:'OWNER_DISPUTED',UNOBSERVED:'UNOBSERVED'};
+ const canonicalLabels={ALL:'All',OBSERVED_OWNER:'Owner observed',OWNER_UNVERIFIED:'Owner unknown',OWNER_DISPUTED:'Disputed',UNOBSERVED:'Unobserved'};
  for(const tab of shadow('#page')?.querySelectorAll('[data-filter^="generators:"]')||[]){
-  const key=tab.dataset.filter.split(':')[1];const value=map[key];tab.dataset.filter='generators:'+value;
+  const key=tab.dataset.filter.split(':')[1];const value=map[key];if(!value)continue;tab.dataset.filter='generators:'+value;
   // These are real owner-evidence facets, not simulated publication states.
-  tab.replaceChildren(document.createTextNode(labels[key]));tab.setAttribute('aria-selected',String(state.gen.filter===value));tab.tabIndex=state.gen.filter===value?0:-1;
+  tab.replaceChildren(document.createTextNode(canonicalLabels[value]));tab.setAttribute('aria-selected',String(state.gen.filter===value));tab.tabIndex=state.gen.filter===value?0:-1;
  }
  const accountSelect=shadow('#generator-account');if(accountSelect){const prior=accountSelect.value;accountSelect.replaceChildren();const first=el('option','', 'All accounts');first.value='ALL';accountSelect.append(first);
-  for(const a of state.lastAccountList){const option=el('option','',a.alias||a.accountId);option.value=a.accountId;accountSelect.append(option)}accountSelect.value=prior||'ALL';}
+  for(const a of state.lastAccountList){const option=el('option','',a.alias||a.accountId);option.value=a.accountId;accountSelect.append(option)}accountSelect.value=[...accountSelect.options].some(x=>x.value===state.gen.account)?state.gen.account:'ALL';}
 }
 async function loadRefresher(){if(state.route!=='refresher')return;
  const epoch=++state.renderEpoch;const holder=shadow('.ref-table-scroll tbody');if(holder)renderEmpty(holder,'Reading canonical Refresher state…');
@@ -311,7 +312,7 @@ function displayRefresher(){if(state.route!=='refresher')return;
  text('.ref-table-heading .muted',safeCount(res.total)+' matching');
  const s=shadow('.ref-pagination span');if(s)s.textContent=`${res.total?state.ref.offset+1:0}–${Math.min(state.ref.offset+state.ref.limit,res.total)} of ${res.total} · canonical local records${unsupported?' · filtered on this page':''}`;
  const prev=shadow('[data-action="ref-prev"]'),next=shadow('[data-action="ref-next"]');if(prev)prev.disabled=state.ref.offset===0;if(next)next.disabled=state.ref.offset+state.ref.limit>=res.total;
- for(const b of shadow('.ref-tabs')?.querySelectorAll('[data-filter]')||[]){const value=b.dataset.filter.split(':')[1];b.setAttribute('aria-selected',String(value.toUpperCase()===state.ref.phase||value==='All'&&state.ref.phase==='ALL'));b.tabIndex=b.getAttribute('aria-selected')==='true'?0:-1}
+ for(const b of shadow('.ref-tabs')?.querySelectorAll('[data-filter]')||[]){const value=b.dataset.filter.split(':')[1];b.setAttribute('aria-selected',String(value.toUpperCase()===state.ref.phase.toUpperCase()));b.tabIndex=b.getAttribute('aria-selected')==='true'?0:-1}
  const side=shadow('.ref-side');if(side){
   const badge=side.querySelector('.ref-side-title .pill');if(badge){const enabled=res.policy?.refreshEnabled===true;badge.textContent=res.restoreHeld?'Held':enabled?'Enabled':'Off';badge.className='pill '+(enabled?'green':'')}
   const descr=side.querySelector('.ref-setting-row .setting-description');if(descr)descr.textContent=res.policy?.refreshEnabled?'Guarded marker saves enabled':'Explicit opt-in required';
