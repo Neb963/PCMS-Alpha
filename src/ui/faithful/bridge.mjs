@@ -147,9 +147,132 @@ function openGlobalSearch(){
 }
 function nativeSelection(type,item){
  if(type==='timing'){openRefresherTiming(item);}
- else if(type==='source'){window.dispatchEvent(new CustomEvent('pcms-source-target',{detail:{slug:item.slug,revision:item.revision}}));nativeRoute('generators','source')}
- else if(type==='adopt'){window.dispatchEvent(new CustomEvent('pcms-adoption-target',{detail:{slug:item.slug,revision:item.revision,ownerState:item.ownerState,visibility:item.visibility}}));nativeRoute('generators','adopt')}
+ else if(type==='source'){openSourceManager(item);}
+ else if(type==='adopt'){openAdoptionManager(item);}
  else{const field=nativeControl('pcms-generator-query');if(field){field.value=item.slug;field.dispatchEvent(new Event('input',{bubbles:true}))}nativeRoute('generators','inventory')}
+}
+// Primary source association is a read-only pinned-main inspection followed
+// by a local, revision-fenced link. It performs no Git/provider modification.
+function openSourceManager(item){
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
+ panel.setAttribute('aria-label','GitHub source for '+item.slug);
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const head=el('div','drawer-head');head.append(el('h2','drawer-title','Source · '+item.slug),b('Close',close));
+ const body=el('div','drawer-body'),status=el('p','setting-note',
+  'Reading the locally verified source association…');status.setAttribute('role','status');
+ const folder=el('input','form-input');folder.value='generators/'+item.slug;folder.maxLength=240;
+ const label=el('label','','GitHub folder on committed main');label.append(folder);
+ const actions=el('div','form-foot'),manifest=el('div','queue-list');
+ body.append(label,actions,status,manifest);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ async function association(){
+  try{
+   const reply=await readPort('pcms-i05-source','GET_ASSOCIATION',{slug:item.slug},12000);
+   if(!overlay.isConnected)return;
+   if(reply?.ok){folder.value=reply.link.folder;
+    status.textContent='Previously associated GitHub main folder. This is historical evidence, not a fresh source or owner verification.';
+   }else status.textContent='No verified source association is recorded for this generator.';
+  }catch{status.textContent='Source association could not be read. No change has been made.';}
+ }
+ const inspect=b('Read source from main',()=>void(async()=>{
+  inspect.disabled=true;manifest.replaceChildren();
+  status.textContent='Checking the complete source manifest from GitHub main…';
+  try{
+   const data=await readPort('pcms-i05-source','INSPECT_SOURCE',{folder:folder.value.trim()},95000);
+   if(!data?.ok){status.textContent='Source could not be verified on GitHub main. No association has been changed.';return}
+   status.textContent='Read-only GitHub source verified at '+data.head.slice(0,12)+
+    '. Deployment status: '+(data.ready?'READY':'NOT_READY')+'.';
+   for(const file of (data.paths||[]).slice(0,100)){
+    const row=el('p','setting-note',file.path+' · '+file.size+' bytes · SHA-256 '+file.sha256);
+    manifest.append(row);
+   }
+   if(item.ownerState!=='OBSERVED_OWNER'||!Number.isSafeInteger(item.revision)){
+    manifest.append(el('p','setting-note',
+      'Local association requires a separately verified owner and current inventory revision.'));
+    return;
+   }
+   const assign=b('Associate verified source',()=>void(async()=>{
+    if(!window.confirm('Associate this exact verified main source with the currently observed owned generator? This changes only the local PCMS association.'))return;
+    assign.disabled=true;
+    try{
+     const out=await readPort('pcms-i05-source','ASSOCIATE_SOURCE',{
+      slug:item.slug,folder:data.folder,expectedRevision:item.revision,
+      pinnedFingerprint:data.fingerprint,pinnedHead:data.head,
+      pinnedTestingSha:data.testingSha},95000);
+     status.textContent=out?.ok?
+       'Source association saved. PCMS still requires fresh owner and source readbacks for each protected effect.':
+       'Source association was not confirmed. Refresh the generator inventory before retrying.';
+    }catch{status.textContent='Association outcome uncertain; check the current source link before retrying.'}
+    finally{assign.disabled=false;}
+   })(),'btn primary');
+   manifest.append(assign);
+  }catch{status.textContent='GitHub verification did not complete. No source link was changed.'}
+  finally{inspect.disabled=false}
+ })(),'btn small');
+ const recheck=b('Verify existing source link',()=>void(async()=>{
+  recheck.disabled=true;
+  try{
+   const result=await readPort('pcms-i05-source','RECHECK_SOURCE',{slug:item.slug},95000);
+   status.textContent=result?.ok?
+    'Existing source link was checked against current main. Review differences before any write.':
+    'Existing source could not be verified; protected writes remain held.';
+  }catch{status.textContent='The current source link could not be checked.'}
+  finally{recheck.disabled=false}
+ })(),'btn small');
+ actions.append(inspect,recheck);void association();folder.focus();
+}
+// Adoption is guarded by the protected account and owned-source readbacks.
+// The visible button never creates a new generator, writes source or publishes.
+function openAdoptionManager(item){
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
+ panel.setAttribute('aria-label','Adopt existing generator '+item.slug);
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const head=el('div','drawer-head');
+ head.append(el('h2','drawer-title','Adopt · '+item.slug),b('Close',close));
+ const body=el('div','drawer-body'),status=el('p','setting-note',
+   'Checking the existing generator and its protected account binding…');
+ status.setAttribute('role','status');body.append(status);
+ const meta=el('dl');
+ for(const [label,value] of [['Generator',item.slug],
+   ['Owner evidence',item.ownerState||'Unverified'],
+   ['Account',item.accountId||'Unknown'],['Visibility',item.visibility||'Unknown']]){
+  const row=el('div','kv');row.append(el('dt','',label),el('dd','',value));meta.append(row);
+ }body.append(meta);
+ const actions=el('div','form-foot');
+ const adopt=b('Adopt verified owned generator',()=>void(async()=>{
+  if(item.ownerState!=='OBSERVED_OWNER'||!Number.isSafeInteger(item.revision)){
+   status.textContent='Ownership and revision must be verified before adoption.';return}
+  const publicItem=item.visibility==='PUBLIC';
+  if(!window.confirm(publicItem?
+    'Capture the exact original source of this publicly visible owned generator? Existing content and publication remain untouched, and Git archival needs its own guarded checks.':
+    'Capture this owned generator and its exact original source? Remote contents remain unchanged.'))return;
+  adopt.disabled=true;status.textContent='Checking two independent original-source readbacks…';
+  try{
+   const out=await readPort('pcms-i07-adoption','CAPTURE_ADOPTION',{
+    slug:item.slug,expectedRevision:item.revision,explicitPublicConsent:publicItem},95000);
+   status.textContent=out?.ok?
+    'Original-source capture recorded. Source archival and any future editing require separate independent checks.':
+    'Original-source capture was not verified. Nothing was published or overwritten.';
+  }catch{status.textContent='Adoption outcome uncertain. Refresh the account and adoption state before retrying.'}
+  finally{adopt.disabled=false;}
+ })(),'btn primary');
+ if(item.ownerState!=='OBSERVED_OWNER')adopt.disabled=true;
+ const check=b('View adoption status',()=>void(async()=>{
+  try{
+   const out=await readPort('pcms-i07-adoption','GET_ADOPTION',{slug:item.slug},15000);
+   status.textContent=out?.ok?
+    'Existing original capture: '+(out.record?.state||'recorded')+
+    '. This is a local record, not proof of a Git archive.':
+    'No previously verified original capture is available.';
+  }catch{status.textContent='Adoption state could not be read.'}
+ })(),'btn small');
+ actions.append(adopt,check);body.append(actions);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ check.focus();
 }
 function openDetails(kind,item){
  const priorFocus=root.activeElement;
