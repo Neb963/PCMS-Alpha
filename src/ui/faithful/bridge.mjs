@@ -18,7 +18,8 @@ function operatorReadinessGuidance(row){
      row.state==='VERIFIED'?'The local helper responded. Its complete workflow is not yet verified.':
      'The local helper needs attention before this service can be used.';
  if(row.component==='GIT_CONFIG'||row.component==='GIT_PARTIAL_CONNECTION')
-   return row.state==='OUTCOME_UNCERTAIN'?'A previous GitHub setup did not finish. Use the recovery control before connecting again.':
+   return row.component==='GIT_PARTIAL_CONNECTION'&&row.state==='NOT_TESTED'?'No interrupted connection was confirmed by this check.':
+     row.state==='OUTCOME_UNCERTAIN'?'A previous GitHub setup did not finish. Use the recovery control before connecting again.':
      row.state==='VERIFIED'?'Connection settings are saved. Check GitHub access separately.':
      'GitHub needs to be connected before dependent operations can run.';
  if(row.component==='SECRET_SERVICE_ENVIRONMENT'||row.component==='SECRET_SERVICE')
