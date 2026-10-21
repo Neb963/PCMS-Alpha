@@ -9,12 +9,12 @@ export async function perchanceSupplyIsolated(request) {
   const safeId=x=>typeof x==='string'&&/^[a-zA-Z0-9_-]{8,100}$/.test(x);
   const hex=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
   if(location.origin!=='https://perchance.org')return hold('WRONG_ORIGIN');
-  if(!request||!['CREATE','RENAME','READ_CREATE','READ_RENAME','READ_TARGET'].includes(request.kind)||
+  if(!request||!['CREATE','RENAME','READ_CREATE','READ_RENAME','READ_TARGET','RENAME_EXISTING','READ_EXISTING_RENAME'].includes(request.kind)||
      !slug(request.slug)||!hex(request.principalFingerprint))
     return hold('INVALID_SUPPLY_REQUEST');
   if(!['CREATE','READ_TARGET'].includes(request.kind)&&!slug(request.temporarySlug))
     return hold('INVALID_SUPPLY_REQUEST');
-  if(['RENAME','READ_RENAME'].includes(request.kind)&&!safeId(request.remoteId))
+  if(['RENAME','READ_RENAME','RENAME_EXISTING','READ_EXISTING_RENAME'].includes(request.kind)&&!safeId(request.remoteId))
     return hold('INVALID_SUPPLY_REQUEST');
   try {
     const raw=localStorage.getItem('app-storage'),change=localStorage.getItem('sessionTokenLastChangeTime');
@@ -140,6 +140,52 @@ export async function perchanceSupplyIsolated(request) {
       if(result.status!=='created'||!slug(result.name))
         return hold('CREATE_ACK_UNCERTAIN');
       return {ok:true,ack:'CREATED',temporarySlug:result.name};
+    }
+    // AC-09 existing owned identity rename is DISTINCT from the private/empty
+    // temporary-slug rename during CREATE. Only the trusted background may
+    // dispatch this after a durable DISPATCH_POSSIBLE intent and exact owner,
+    // source and route proof. This isolated adapter never deletes or saves
+    // generator source and never retries a remote write.
+    if(request.kind==='RENAME_EXISTING'||request.kind==='READ_EXISTING_RENAME'){
+      if(request.temporarySlug===request.slug)return hold('SAME_IDENTITY');
+      const existing=await call('checkGeneratorOwnership',{
+        generatorName:request.temporarySlug});
+      const oldPage=await call('getGeneratorPageData',{
+        generatorName:request.temporarySlug},{unauthenticated:true});
+      const original=oldPage.generator;
+      const oldId=original?.publicId;
+      const matchesOld=existing.status==='is-owner'&&oldPage.status==='success'&&
+        original?.name===request.temporarySlug&&typeof oldId==='string'&&
+        'public_'+oldId===request.remoteId;
+      const newOwner=await call('checkGeneratorOwnership',{generatorName:request.slug});
+      const newPage=await call('getGeneratorPageData',{
+        generatorName:request.slug},{unauthenticated:true});
+      if(!sameSession())return hold('SESSION_CHANGED');
+      if(request.kind==='READ_EXISTING_RENAME'){
+        if(matchesOld)return hold('OLD_IDENTITY_STILL_PRESENT');
+        if(newOwner.status!=='is-owner'||newPage.status!=='success'||
+           newPage.generator?.name!==request.slug||
+           'public_'+newPage.generator?.publicId!==request.remoteId)
+          return hold('RENAMED_OWNER_OR_ID_UNVERIFIED');
+        return {ok:true,source:'INDEPENDENT_TARGET_READBACK',
+          state:'RENAMED_SAME_REMOTE_ID',remoteId:request.remoteId,
+          oldSlug:request.temporarySlug,newSlug:request.slug,
+          ownerMatches:true,sourceUnchanged:'NOT_INFERRED'};
+      }
+      if(!matchesOld||!currentNames.has(request.temporarySlug))
+        return hold('EXISTING_OWNER_OR_REMOTE_ID_UNVERIFIED');
+      if(currentNames.has(request.slug)||newPage.status==='success')
+        return hold('TARGET_ALREADY_OCCUPIED');
+      if(newOwner.status==='is-owner'||
+         !['generator-does-not-exist','not-found'].includes(newPage.status))
+        return hold('TARGET_ABSENCE_UNVERIFIED');
+      if(!sameSession())return hold('SESSION_CHANGED');
+      const renamed=await call('changeGeneratorName',{
+        currentName:request.temporarySlug,newName:request.slug});
+      if(!sameSession())return hold('SESSION_CHANGED_AFTER_EFFECT');
+      return renamed.status==='success'?
+        {ok:true,ack:'RENAME_EXISTING_ACK_ONLY'}:
+        hold('RENAME_EXISTING_OUTCOME_UNCERTAIN');
     }
     if(request.kind==='RENAME'){
       if(request.temporarySlug===request.slug||currentNames.has(request.slug))
