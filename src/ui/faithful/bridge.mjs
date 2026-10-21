@@ -65,7 +65,7 @@ function friendlyConnectionIssue(code){
 }
 const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',total:0,items:[]},
  ref:{offset:0,limit:25,query:'',phase:'ALL',snapshot:null,items:[],total:0},
- acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:''},
+ acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,epoch:0},
  settings:'connections',lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},nativeOpen:false,
  renderEpoch:0,version:'0.1.6',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
@@ -433,31 +433,127 @@ function observedReceipts(){
  }
  return out;
 }
-function displayQueue(){if(state.route!=='work-queue')return;const receipts=observedReceipts();const filtered=receipts.filter(x=>{
- const f=state.queue.filter;const pass=f==='All'||f==='Needs action'&&x.needs||f==='Running'&&x.running||f==='Waiting'&&x.waiting||f==='Completed'&&/complete|success|verified/i.test(x.text);
- const q=state.queue.query.toLowerCase();return pass&&(!q||(x.text+' '+x.label).toLowerCase().includes(q));
- });
- const body=shadow('.queue-list');if(!body)return;body.replaceChildren();
- if(!filtered.length)renderEmpty(body,'No matching local operation receipts currently observed. This does not establish remote health.');
- for(const item of filtered.slice(0,30)){
-  const row=el('div','queue-item');const mark=el('span','row-mark'+(item.needs?' warn':''));mark.append(icon(item.needs?'alert':'activity'));
-  const inner=el('div','row-body');const hd=el('div','queue-head');hd.append(el('strong','',item.label));
-  hd.append(statusPill(item.needs?'Needs attention':item.running?'Running':item.waiting?'Waiting':'Observed',item.needs?'amber':''));
-  inner.append(hd,el('div','row-meta',item.text));
-  const btn=b('Inspect',()=>nativeAction(item.route,item.group));row.append(mark,inner,btn);body.append(row);
+// Canonical queue only: no status derived from native view text.
+const queueState={
+ PREPARED:['Waiting',''],DISPATCH_POSSIBLE:['Outcome not confirmed','amber'],
+ OBSERVING:['Verifying result',''],HELD_UNCERTAIN:['Needs reconciliation','amber'],
+ CONFIRMED:['Confirmed','green'],ABORTED:['Cancelled',''],
+ REJECTED:['Rejected','amber']};
+function queueGroup(filter){
+ return ({'Needs action':'NEEDS_ACTION',Running:'RUNNING',Waiting:'WAITING',
+   Completed:'COMPLETED',All:'ALL'})[filter]||'NEEDS_ACTION';
+}
+async function loadQueue(reset=false){
+ if(state.route!=='work-queue')return;
+ const q=state.queue;
+ if(reset){q.opCursor='';q.noticeCursor='';q.history=[];q.nextOps=null;q.nextNotices=null;}
+ const epoch=++q.epoch;
+ q.loading=true;q.error=null;displayQueue();
+ const includeNotices=q.filter==='Needs action'||q.filter==='All';
+ const requested=[
+   guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{
+     after:q.opCursor,limit:20,status:queueGroup(q.filter),query:q.query}),
+   includeNotices&&q.noticeCursor!==null?
+     guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_PAGE',{
+       after:q.noticeCursor,limit:20,query:q.query}):Promise.resolve({ok:true,items:[],more:false,next:null}),
+   guardedRead('pcms-i02-canonical-readonly','SUMMARY')
+ ];
+ try{
+  const [ops,notices,summary]=await Promise.all(requested);
+  if(state.route!=='work-queue'||q.epoch!==epoch)return;
+  q.operations=ops.items||[];q.incidents=notices.items||[];
+  q.nextOps=ops.more?ops.next:null;q.nextNotices=notices.more?notices.next:null;
+  q.more=Boolean(ops.more||notices.more);q.summary=summary;q.error=null;
+ }catch(err){
+  if(q.epoch!==epoch)return;
+  q.operations=[];q.incidents=[];q.more=false;q.error=err.message||'LOCAL_QUEUE_UNAVAILABLE';
+ }finally{if(q.epoch===epoch){q.loading=false;displayQueue();}}
+}
+function displayQueue(){
+ if(state.route!=='work-queue')return;
+ const q=state.queue;const holder=shadow('.queue-list');
+ if(!holder)return;holder.replaceChildren();
+ if(q.loading)renderEmpty(holder,'Reading recorded operations and incidents…');
+ else if(q.error)renderEmpty(holder,'The local work queue is unavailable. No operation result has been assumed.');
+ else{
+  for(const n of q.incidents){
+   const row=el('div','queue-item');
+   const marker=el('span','row-mark warn');marker.append(icon('alert'));
+   const detail=el('div','row-body');
+   const header=el('div','queue-head');
+   header.append(el('strong','',n.code.replaceAll('_',' ').toLowerCase()),
+     statusPill(n.reviewed?'Reviewed — still active':'Needs attention','amber'));
+   detail.append(header,el('div','row-meta',
+     'Incident · '+n.scopeId+' · '+(Number.isFinite(n.lastAt)?new Date(n.lastAt).toLocaleString():'time unavailable')));
+   const action=b(n.reviewed?'Reviewed':'Mark reviewed',()=>{
+    void (async()=>{
+     try{
+      const result=await guardedRead('pcms-i02-canonical-readonly','ACK_NOTICE',{
+       // This specific port takes notice at the top-level (not params).
+       scopeId:n.scopeId,code:n.code,expectedRevision:n.revision});
+      if(result?.stillActionable===true)await loadQueue(true);
+     }catch{notify('Incident review was not confirmed; refresh the queue.');}
+    })();
+   });
+   // The canonical ACK_NOTICE shape is intentionally not projected through
+   // the generic params helper; use an explicit typed request below.
+   action.onclick=null;
+   action.addEventListener('click',async()=>{action.disabled=true;
+    try{
+     const out=await readQueueNoticeAck(n);
+     if(out?.ok&&out.stillActionable===true)await loadQueue(true);
+     else notify('Review not confirmed. Incident remains active.');
+    }catch{notify('Review not confirmed. Incident remains active.');}
+    finally{action.disabled=n.reviewed;}
+   },{once:true});
+   action.disabled=n.reviewed;row.append(marker,detail,action);holder.append(row);
+  }
+  for(const op of q.operations){
+   const row=el('div','queue-item');const info=queueState[op.status]||['Not verified',''];
+   const marker=el('span','row-mark'+(info[1]==='amber'?' warn':''));marker.append(icon(info[1]==='amber'?'alert':'activity'));
+   const detail=el('div','row-body'),header=el('div','queue-head');
+   header.append(el('strong','',op.effectType?.replaceAll('_',' ')||'Recorded operation'),statusPill(info[0],info[1]));
+   detail.append(header,el('div','row-meta',
+     'Target '+op.targetId+' · revision '+op.revision+' · '+op.operationId+
+     (Number.isFinite(op.updatedAt)?' · '+new Date(op.updatedAt).toLocaleString():' · time not recorded')));
+   const action=b('Inspect',()=>{notify('This record is maintained by the protected operation controller. No retry has been dispatched.');});
+   row.append(marker,detail,action);holder.append(row);
+  }
+  if(!q.operations.length&&!q.incidents.length)
+    renderEmpty(holder,'No matching recorded operations or active incidents. This is not proof of remote health.');
  }
+ const counts=q.summary?.states||{},attention=q.summary?.attention||{};
+ const needs=(counts.HELD_UNCERTAIN||0)+(counts.REJECTED||0)+(counts.DISPATCH_POSSIBLE||0)+
+   (attention.actionRequired||0)+(attention.serious||0);
+ const running=counts.OBSERVING||0,waiting=counts.PREPARED||0,completed=(counts.CONFIRMED||0)+(counts.ABORTED||0);
  const counters=shadow('.queue-stats');if(counters){counters.replaceChildren();
- for(const [label,num] of [['need action',receipts.filter(x=>x.needs).length],['running',receipts.filter(x=>x.running).length],['waiting',receipts.filter(x=>x.waiting).length]]){
-  const tag=el('span');tag.append(el('strong','',num),document.createTextNode(' '+label));counters.append(tag)}
+  for(const [label,num] of [['need action',needs],['verifying',running],['waiting',waiting]]){
+   const tag=el('span');tag.append(el('strong','',q.summary?.ok?num:'—'),document.createTextNode(' '+label));counters.append(tag)}
  }
  for(const tab of shadow('.tabs[aria-label="Work queue status"]')?.querySelectorAll('[data-filter]')||[]){
-  const filter=tab.dataset.filter.split(':')[1];const count=tab.querySelector('.count');const n=filter==='Needs action'?receipts.filter(x=>x.needs).length:filter==='Running'?receipts.filter(x=>x.running).length:
-    filter==='Waiting'?receipts.filter(x=>x.waiting).length:filter==='Completed'?receipts.filter(x=>/complete|success|verified/i.test(x.text)).length:receipts.length;
-  if(count)count.textContent=n;
-  tab.setAttribute('aria-selected',String(filter===state.queue.filter));
+  const f=tab.dataset.filter.split(':')[1],badge=tab.querySelector('.count');
+  const count=f==='Needs action'?needs:f==='Running'?running:f==='Waiting'?waiting:f==='Completed'?completed:
+    needs+running+waiting+completed;
+  if(badge)badge.textContent=q.summary?.ok&&!q.query?count:'—';
+  tab.setAttribute('aria-selected',String(f===q.filter));
  }
- const foot=shadow('.pagination span');if(foot)foot.textContent=receipts.length+' observed native receipts · local only';
- for(const b of shadow('.pagination')?.querySelectorAll('button[data-action^="queue-"]')||[])b.disabled=true;
+ const foot=shadow('.pagination span');if(foot)foot.textContent=q.loading?'Loading recorded work…':
+  q.error?'Local journal unavailable':q.operations.length+q.incidents.length+' records on this page · read-only';
+ const prev=shadow('[data-action="queue-prev"]'),next=shadow('[data-action="queue-next"]');
+ if(prev)prev.disabled=q.loading||q.history.length===0;
+ if(next)next.disabled=q.loading||!q.more;
+}
+function readQueueNoticeAck(n){
+ return new Promise((resolve,reject)=>{
+  const port=browser.runtime.connect({name:'pcms-i02-canonical-readonly'});
+  let done=false;const timer=setTimeout(()=>finish(null,new Error('TIMEOUT')),12000);
+  function finish(reply,error){if(done)return;done=true;clearTimeout(timer);try{port.disconnect()}catch{}
+   error?reject(error):resolve(reply)}
+  port.onMessage.addListener(reply=>finish(reply));
+  port.onDisconnect.addListener(()=>finish(null,new Error('DISCONNECTED')));
+  try{port.postMessage({type:'ACK_NOTICE',notice:{
+   scopeId:n.scopeId,code:n.code,expectedRevision:n.revision}})}catch{finish(null,new Error('DISCONNECTED'))}
+ });
 }
 function displayOverview(){if(state.route!=='overview')return;
  const cards=[...page().querySelectorAll('.stat-grid .stat-card')];
