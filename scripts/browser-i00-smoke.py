@@ -1161,9 +1161,10 @@ def main():
                 assert actual['sidebar'] and actual['primary']=='overview' and actual['styles'] and actual['canonicalNative'],actual
                 assert 'v0.1.6' in (actual['badge'] or ''),actual
                 for workspace in ['generators','work-queue','accounts','refresher','settings','overview']:
-                    execute(after,"""const h=document.getElementById('pcms-faithful-host');
-                        h.shadowRoot.querySelector('[data-nav="'+arguments[0]+'"]').click();
-                        return true""",[workspace])
+                    execute(after,"""const route=%s;
+                        const h=document.getElementById('pcms-faithful-host');
+                        h.shadowRoot.querySelector('[data-nav="'+route+'"]').click();
+                        return true"""%json.dumps(workspace))
                     ready=False
                     for _ in range(30):
                         on=execute(after,"return document.getElementById('pcms-faithful-host')?.shadowRoot?.querySelector('#page')?.dataset.view")
