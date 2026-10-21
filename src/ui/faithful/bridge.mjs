@@ -297,6 +297,46 @@ function openDetails(kind,item){
 }
 // Primary per-generator timing and activity controls reuse exact canonical
 // Refresher revisions; they never claim a successful provider source save.
+function openGlobalRefresherPolicy(){
+ const snap=state.ref.snapshot;
+ if(!snap?.ok||!Number.isSafeInteger(snap.revision)){
+  notify('Current Refresher policy is not verified. Refresh before changing its timing.');return}
+ const original=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
+ panel.setAttribute('aria-label','Refresher default timing policy');
+ const close=()=>{overlay.remove();original?.isConnected&&original.focus({preventScroll:true})};
+ const header=el('div','drawer-head');header.append(
+  el('h2','drawer-title','Refresher default timing'),b('Close',close));
+ const body=el('div','drawer-body');
+ body.append(el('p','setting-note',
+  'Default periods apply to subsequently scheduled work; per-generator overrides remain separate. The source-save policy is controlled independently.'));
+ const fields=[];
+ for(const [name,value] of [['Active period',snap.policy.activeMs],['Rest period',snap.policy.sleepMs]]){
+  const label=el('label','',name+' (minutes)'),input=el('input','form-input');
+  input.type='number';input.min='1';input.max='525600';input.step='1';
+  input.value=String(Math.round(value/60000));label.append(input);body.append(label);fields.push(input);
+ }
+ const status=el('p','setting-note','No change submitted.');
+ const save=b('Save default timing',()=>void(async()=>{
+  const nums=fields.map(x=>Number(x.value));
+  if(nums.some(x=>!Number.isSafeInteger(x)||x<1||x>525600)){
+   status.textContent='Use 1 to 525,600 minutes for each period.';return}
+  if(!window.confirm('Save the default active and rest periods? Existing target overrides and verified provider receipts remain unchanged.'))return;
+  save.disabled=true;
+  try{
+   const r=await readPort('pcms-i12-refresher','SET_POLICY',{
+    expectedRevision:snap.revision,
+    policy:{activeMs:nums[0]*60000,sleepMs:nums[1]*60000}},16000);
+   status.textContent=r?.ok?'Default scheduling periods saved.':
+    'Timing could not be saved. Refresh current policy before retrying.';
+  }catch{status.textContent='Timing outcome uncertain. Reload policy before retrying.'}
+  finally{save.disabled=false;await loadRefresher()}
+ })(),'btn primary');
+ body.append(save,status);panel.append(header,body);overlay.append(panel);root.append(overlay);
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ fields[0].focus();
+}
 function openRefresherTiming(item){
  const snap=state.ref.snapshot;
  if(!snap?.ok||!Number.isSafeInteger(snap.revision)||!item?.stableId){
@@ -395,11 +435,11 @@ function routeHandlers(){
  if(action==='search'){openGlobalSearch();return}
  if(action==='create'){openGeneratorCreator();return}
  if(action==='sync-inventory'){void syncManagedInventories();return}
- if(action==='queue'||action==='activity'){nativeAction('work-queue','activity');return}
- if(action==='diagnostics'||action==='health'){nativeAction('settings','diagnostics');return}
+ if(action==='queue'||action==='activity'){routeTo('work-queue');return}
+ if(action==='diagnostics'||action==='health'){state.settings='diagnostics';routeTo('settings');return}
  if(action==='notifications'){routeTo('overview');return}
  if(action==='system-health'){routeTo('settings');return}
- if(action==='generator-filters'){nativeAction('generators','inventory','pcms-generator-owner-filter');return}
+ if(action==='generator-filters'){shadow('#generator-account')?.focus();return}
  if(action==='gen-prev'){state.gen.offset=Math.max(0,state.gen.offset-state.gen.limit);void loadGenerators();return}
  if(action==='gen-next'){state.gen.offset+=state.gen.limit;void loadGenerators();return}
  if(action==='ref-prev'){state.ref.offset=Math.max(0,state.ref.offset-state.ref.limit);void loadRefresher();return}
@@ -418,9 +458,29 @@ function routeHandlers(){
    void loadQueue();return;
  }
  if(action==='add-account'){void startAccountEnrollment();return}
- if(action==='feed-check'){guardedClick('pcms-refresher-reload');void loadRefresher();return}
- if(action==='edit-timing'){nativeAction('refresher',null,'pcms-refresher-active');return}
- if(action==='pause-refresher'){if(!guardedClick('pcms-refresher-global-pause'))return;notify('Pause request sent through the existing guarded controller; reload to verify.');void loadRefresher();return}
+ if(action==='feed-check'){void (async()=>{
+  try{
+   const r=await readPort('pcms-i12-refresher','OBSERVE_NOW',{},90000);
+   notify(r?.ok?'Read-only observation requested. Its provider evidence will be displayed separately.':
+     'The latest protected observation could not be verified.');
+  }catch{notify('Read-only observation unavailable. Provider state remains unknown.')}
+  await loadRefresher();
+ })();return}
+ if(action==='edit-timing'){openGlobalRefresherPolicy();return}
+ if(action==='pause-refresher'){void (async()=>{
+  const s=state.ref.snapshot;
+  if(!s?.ok||!Number.isSafeInteger(s.revision)){notify('Current Refresher revision is not verified.');return}
+  const paused=!s.globalPause;
+  if(!window.confirm(paused?'Pause scheduling across every managed generator?':
+   'Resume the scheduler, subject to every account, route, source, visibility and policy hold?'))return;
+  try{
+   const r=await readPort('pcms-i12-refresher','SET_PAUSE',{
+    expectedRevision:s.revision,scope:'GLOBAL',paused},16000);
+   notify(r?.ok?'Global Refresher pause setting saved. Remote source effects are not inferred.':
+     'Pause change could not be confirmed. Reload state before retrying.');
+  }catch{notify('Global pause outcome uncertain. Reload before another change.')}
+  await loadRefresher();
+ })();return}
  if(action==='go-accounts'){routeTo('accounts');return}
  if(action==='queue-help'||action==='account-info'){notify('Detailed operational guidance is available in Advanced protected controls.');return}
  if(action.startsWith('check-service:')){state.settings='connections';void runReadiness(false);return}
