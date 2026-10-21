@@ -210,7 +210,17 @@ function routeHandlers(){
  if(action==='ref-next'){state.ref.offset+=state.ref.limit;void loadRefresher();return}
  if(action==='account-prev'){state.acct.page=Math.max(0,state.acct.page-1);displayAccounts();return}
  if(action==='account-next'){state.acct.page++;displayAccounts();return}
- if(action==='queue-prev'||action==='queue-next'){notify('Queue receipts are bounded to the currently observed local records.');return}
+ if(action==='queue-prev'){
+   const prior=state.queue.history.pop();if(!prior)return;
+   state.queue.opCursor=prior.op;state.queue.noticeCursor=prior.notice;void loadQueue();return;
+ }
+ if(action==='queue-next'){
+   if(!state.queue.more)return;
+   state.queue.history.push({op:state.queue.opCursor,notice:state.queue.noticeCursor});
+   state.queue.opCursor=state.queue.nextOps===null?null:state.queue.nextOps;
+   state.queue.noticeCursor=state.queue.nextNotices===null?null:state.queue.nextNotices;
+   void loadQueue();return;
+ }
  if(action==='add-account'){nativeAction('accounts',null,'pcms-add-account');return}
  if(action==='feed-check'){guardedClick('pcms-refresher-reload');void loadRefresher();return}
  if(action==='edit-timing'){nativeAction('refresher',null,'pcms-refresher-active');return}
@@ -219,7 +229,7 @@ function routeHandlers(){
  if(action==='queue-help'||action==='account-info'){notify('Detailed operational guidance is available in Advanced protected controls.');return}
  if(action.startsWith('check-service:')){state.settings='connections';void runReadiness(false);return}
  });
- root.addEventListener('click',event=>{const tab=event.target.closest('[data-filter]');if(tab){event.preventDefault();const [r,value]=tab.dataset.filter.split(':');if(r==='generators'){state.gen.filter=value;state.gen.offset=0;void loadGenerators()}if(r==='refresher'){state.ref.phase=['All','Active','Sleeping','Waiting'].includes(value)?value.toUpperCase():value;state.ref.offset=0;void loadRefresher()}if(r==='queue'){state.queue.filter=value;displayQueue()}return}
+ root.addEventListener('click',event=>{const tab=event.target.closest('[data-filter]');if(tab){event.preventDefault();const [r,value]=tab.dataset.filter.split(':');if(r==='generators'){state.gen.filter=value;state.gen.offset=0;void loadGenerators()}if(r==='refresher'){state.ref.phase=['All','Active','Sleeping','Waiting'].includes(value)?value.toUpperCase():value;state.ref.offset=0;void loadRefresher()}if(r==='queue'){state.queue.filter=value;void loadQueue(true)}return}
  const row=event.target.closest('tr[data-item-index]');if(row){const i=Number(row.dataset.itemIndex);if(state.route==='refresher'&&state.ref.visibleItems?.[i])openDetails('ref',state.ref.visibleItems[i]);else if(state.route==='generators'&&state.gen.visibleItems?.[i])openDetails('gen',state.gen.visibleItems[i]);}
  });
  root.addEventListener('keydown',event=>{
@@ -249,7 +259,7 @@ function routeHandlers(){
   if(id==='generator-search'){state.gen.query=value;state.gen.offset=0;void loadGenerators()}
   if(id==='refresher-search'){state.ref.query=value;state.ref.offset=0;void loadRefresher()}
   if(id==='account-search'){state.acct.query=value;state.acct.page=0;displayAccounts()}
-  if(id==='queue-search'){state.queue.query=value;displayQueue()}
+  if(id==='queue-search'){state.queue.query=value;void loadQueue(true)}
  },200)});
 }
 // Native controller remains the sole authorizer. The shadow switch itself is
@@ -485,19 +495,8 @@ function displayQueue(){
      statusPill(n.reviewed?'Reviewed — still active':'Needs attention','amber'));
    detail.append(header,el('div','row-meta',
      'Incident · '+n.scopeId+' · '+(Number.isFinite(n.lastAt)?new Date(n.lastAt).toLocaleString():'time unavailable')));
-   const action=b(n.reviewed?'Reviewed':'Mark reviewed',()=>{
-    void (async()=>{
-     try{
-      const result=await guardedRead('pcms-i02-canonical-readonly','ACK_NOTICE',{
-       // This specific port takes notice at the top-level (not params).
-       scopeId:n.scopeId,code:n.code,expectedRevision:n.revision});
-      if(result?.stillActionable===true)await loadQueue(true);
-     }catch{notify('Incident review was not confirmed; refresh the queue.');}
-    })();
-   });
-   // The canonical ACK_NOTICE shape is intentionally not projected through
-   // the generic params helper; use an explicit typed request below.
-   action.onclick=null;
+   const action=el('button','btn small',n.reviewed?'Reviewed':'Mark reviewed');
+   action.type='button';
    action.addEventListener('click',async()=>{action.disabled=true;
     try{
      const out=await readQueueNoticeAck(n);
