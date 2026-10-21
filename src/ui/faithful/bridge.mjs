@@ -1411,6 +1411,79 @@ function backupAction(action,extra={}){
   try{port.postMessage({action,...extra})}catch{finish(null,new Error('DISCONNECTED'))}
  });
 }
+// Native AI progression is governed by the same revisioned prompt and
+// per-account concurrency limits used by the protected job controller.
+// This is local guidance; the repository's default Chat 1 prompt stays
+// independently authoritative and is never overwritten here.
+function primaryAiSettings(container){
+ const section=primarySettingCard(container,'AI development settings',
+  'Configure local development guidance and per-account concurrency. These settings do not modify the GitHub default Chat 1 prompt, enable a provider effect or certify a test PASS.');
+ const feedback=el('p','setting-note','Loading the current AI settings…');
+ feedback.setAttribute('role','status');
+ const editor=el('textarea','form-input');editor.rows=8;editor.maxLength=16000;
+ editor.setAttribute('aria-label','AI development guidance');
+ const testLabel=el('label','','Required test names (one per line)');
+ const tests=el('textarea','form-input');tests.rows=4;
+ tests.setAttribute('aria-label','Required test names');testLabel.append(tests);
+ const countLabel=el('label','','Maximum concurrent AI tasks per verified account');
+ const count=el('input','form-input');count.type='number';count.min='1';count.max='4';count.step='1';
+ countLabel.append(count);
+ const actions=el('div','form-foot'),save=b('Save guidance and tests',()=>void(async()=>{
+  const names=tests.value.split(/[\n,]+/).map(x=>x.trim()).filter(Boolean);
+  if(!names.length||names.length>64||new Set(names).size!==names.length||
+   names.some(x=>!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$/.test(x))||
+   !editor.value.trim()||editor.value.length>16000){
+   feedback.textContent='Enter guidance and 1–64 distinct valid required test names.';return}
+  const current=state.aiCurrentPrompt;if(!current){feedback.textContent='Prompt revision unavailable. Reload current settings.';return}
+  if(!window.confirm('Replace local AI guidance for future jobs? Existing job candidates and the GitHub prompt remain unchanged.'))return;
+  save.disabled=true;
+  try{
+   const out=await readPort('pcms-i10-ai','SET_PROMPT',{
+    text:editor.value,tests:names,expectedRevision:current.revision},16000);
+   feedback.textContent=out?.ok?'Local guidance saved for new jobs; recorded tests still require independent execution.':
+      'Guidance could not be saved. Reload the current revision before retrying.';
+  }catch{feedback.textContent='Guidance update outcome uncertain. Read current revision before retrying.'}
+  finally{save.disabled=false;void refresh()}
+ })(),'btn primary');
+ const saveLimit=b('Save concurrency',()=>void(async()=>{
+  const n=Number(count.value),existing=state.aiConcurrency;
+  if(!existing||!Number.isSafeInteger(n)||n<1||n>4){
+   feedback.textContent='Choose 1–4 tasks per account and reload current settings.';return}
+  if(!window.confirm('Change the protected per-account AI concurrency limit? Current owner, route and source safety controls still apply.'))return;
+  saveLimit.disabled=true;
+  try{
+   const out=await readPort('pcms-i10-ai','SET_CONCURRENCY',{
+    perAccount:n,expectedRevision:existing.revision},16000);
+   feedback.textContent=out?.ok?'Concurrency limit saved. Existing running effects remain independently fenced.':
+    'Concurrency change could not be confirmed; reload the current revision.';
+  }catch{feedback.textContent='Concurrency update outcome uncertain. Reload before retrying.'}
+  finally{saveLimit.disabled=false;void refresh()}
+ })(),'btn small');
+ actions.append(save,saveLimit);
+ const form=el('div','form-stack');
+ form.append(el('label','','Local AI guidance'),editor,testLabel,countLabel,actions,feedback);
+ section.append(form);
+ async function refresh(){
+  const result=await Promise.allSettled([
+   readPort('pcms-i10-ai','GET_PROMPTS',{},20000),
+   readPort('pcms-i10-ai','GET_CONCURRENCY',{},20000)
+  ]);
+  if(!section.isConnected)return;
+  const prompt=result[0].status==='fulfilled'&&result[0].value?.ok?result[0].value:null;
+  const concurrency=result[1].status==='fulfilled'&&result[1].value?.ok?result[1].value:null;
+  state.aiCurrentPrompt=prompt?.current||null;state.aiConcurrency=concurrency?.setting||null;
+  if(prompt?.current){
+   editor.value=prompt.current.text;tests.value=(prompt.current.tests||[]).join('\n');
+  }
+  if(concurrency?.setting)count.value=String(concurrency.setting.perAccount);
+  save.disabled=!prompt?.current;saveLimit.disabled=!concurrency?.setting;
+  feedback.textContent=prompt?.current&&concurrency?.setting?
+   'Current local guidance revision '+prompt.current.revision+
+   '; maximum '+concurrency.setting.perAccount+' parallel job(s) per account. No test outcome inferred.':
+   'AI settings could not be read. Changes remain unavailable until the canonical runtime responds.';
+ }
+ void refresh();
+}
 function primaryBackups(container){
  const section=primarySettingCard(container,'Encrypted source-complete backups',
   'The recoverable format requires the matching OS helper, a vault-held recovery key, full archive verification and a separate restore proof. Older browser downloads are not source-complete.');
@@ -1599,7 +1672,7 @@ function primaryDiagnostics(container){
  refresh();
 }
 function renderSettingsSection(){if(state.route!=='settings')return;
- const names=['connections','automation','backups','diagnostics','advanced'];
+ const names=['connections','automation','ai','backups','diagnostics','advanced'];
  const select=names.includes(state.settings)?state.settings:'connections';
  for(const b of page().querySelectorAll('[data-settings]')){b.classList.toggle('active',b.dataset.settings===select);b.setAttribute('aria-current',b.dataset.settings===select?'page':'false')}
  const container=shadow('.settings-main');if(!container)return;
@@ -1620,9 +1693,10 @@ function renderSettingsSection(){if(state.route!=='settings')return;
   primaryConnections(container);
  } else {
   container.replaceChildren();
-  const section=el('section','card settings-group');const head=el('div','settings-section-head');const titles={automation:'Automation',backups:'Backup & Restore',diagnostics:'Diagnostics',advanced:'Advanced'};
+  const section=el('section','card settings-group');const head=el('div','settings-section-head');const titles={automation:'Automation',ai:'AI development',backups:'Backup & Restore',diagnostics:'Diagnostics',advanced:'Advanced'};
   head.append(el('h2','h2',titles[select]));section.append(head);
   if(select==='automation'){primaryAutomation(container);}
+  else if(select==='ai'){primaryAiSettings(container);}
   else if(select==='backups'){primaryBackups(container);}
   else if(select==='diagnostics')primaryDiagnostics(container);
   else{
