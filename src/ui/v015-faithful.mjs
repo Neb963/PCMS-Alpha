@@ -14,6 +14,8 @@ const action=(label,run,cls='')=>{
 };
 function navigate(route,group){
   if(group){
+    const more=document.querySelector('#view-'+route+' .v015-queue-workflows');
+    if(more)more.open=true;
     const button=document.querySelector('#view-'+route+' .pcms-v014-workflow-button[data-ui-group="'+group+'"]');
     button?.click();
   }
@@ -224,8 +226,20 @@ function mountQueue(){
   search.addEventListener('input',update);
   window.addEventListener('hashchange',()=>{if(location.hash==='#work-queue')update();});
   update();
-  const first=root.querySelector(':scope > section.panel:not(.v015-queue-board)');
-  first?.classList.add('v015-original-queue');
+  // Genuine advanced panels remain in the DOM, with their original input
+  // nodes and listeners. They become a deliberate drill-down rather than the
+  // default wall of unrelated large forms.
+  const advanced=node('details','v015-queue-workflows');
+  advanced.append(node('summary','','More workflows and advanced operations'));
+  const body=node('div','v015-queue-workflows-body');
+  advanced.append(body);
+  if(nav)body.append(nav);
+  const panels=[...root.children].filter(p=>p.matches?.('section.panel')&&p!==board);
+  for(const panel of panels)body.append(panel);
+  board.after(advanced);
+  // Uncontrolled standalone read-only status is available in the compact
+  // queue card and this disclosure, never silently removed.
+
 }
 function mountAccounts(){
   const h=heading('accounts','Protected Personas and their managed accounts.',[
@@ -301,7 +315,7 @@ function mountRefresher(){
   if(title)title.textContent='Generators';
   const statusBand=node('section','v015-refresher-stats');
   const metrics=new Map();
-  for(const key of ['Active','Sleeping','Waiting / held']){
+  for(const key of ['Active','Sleeping','Waiting']){
     const item=node('div','v015-ref-stat');item.append(node('small','',key));const figure=node('strong','v015-number','—');
     item.append(figure);metrics.set(key,figure);statusBand.append(item);
   }
@@ -371,7 +385,7 @@ function mountRefresher(){
       if(result?.ok!==true)throw Error('Unavailable');
       // Query actual phase-specific canonical counts; occupied slots are not
       // equivalent to the number of ACTIVE generators. Do not invent totals.
-      const keys=[['Active','ACTIVE'],['Sleeping','SLEEPING'],['Waiting / held','WAITING']];
+      const keys=[['Active','ACTIVE'],['Sleeping','SLEEPING'],['Waiting','WAITING']];
       const observed=await Promise.allSettled(keys.map(([,phase])=>
         listenRead('pcms-i12-refresher','GET_REFRESHER',{query:'',phase,offset:0,limit:1})));
       observed.forEach((entry,i)=>{
