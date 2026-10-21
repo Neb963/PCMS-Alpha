@@ -12,14 +12,14 @@ const fail=code=>({ok:false,code});
 export function validateIdentityMessage(api,sender,message){
  if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
  if(!message||typeof message!=='object'||Array.isArray(message)||
-   !['LIST','CHOOSE','GET_RENAME_ATTEMPT','PREPARE_RENAME','EXECUTE_RENAME','RECONCILE_RENAME'].includes(message.type)||
+   !['LIST','CHOOSE','GET_RENAME_ATTEMPT','PREPARE_RENAME','EXECUTE_RENAME','RECONCILE_RENAME','FINALIZE_RENAME'].includes(message.type)||
    Object.keys(message).some(k=>!['type','params'].includes(k)))return fail('INVALID_MESSAGE');
  const p=message.params||{};
  if(message.type==='GET_RENAME_ATTEMPT'){
   return typeof p==='object'&&!Array.isArray(p)&&
     Object.keys(p).length===1&&SLUG.test(p.newSlug||'')?{ok:true}:fail('INVALID_PARAMS');
  }
- if(['PREPARE_RENAME','EXECUTE_RENAME','RECONCILE_RENAME'].includes(message.type)){
+ if(['PREPARE_RENAME','EXECUTE_RENAME','RECONCILE_RENAME','FINALIZE_RENAME'].includes(message.type)){
   const effect=message.type==='EXECUTE_RENAME';
   return typeof p==='object'&&!Array.isArray(p)&&
     Object.keys(p).length===(effect?3:2)&&
@@ -57,10 +57,11 @@ export function createFolderIdentityBoundary(api,{clock=Date.now}={}){
           record?.state==='OUTCOME_UNCERTAIN'?'POSSIBLE':'OFF'};
     }catch{return fail('RENAME_ATTEMPT_UNAVAILABLE')}
   }
-  if(['PREPARE_RENAME','EXECUTE_RENAME','RECONCILE_RENAME'].includes(message.type))
+  if(['PREPARE_RENAME','EXECUTE_RENAME','RECONCILE_RENAME','FINALIZE_RENAME'].includes(message.type))
    return existingRename.run({
      type:message.type==='PREPARE_RENAME'?'PREPARE':
-       message.type==='EXECUTE_RENAME'?'EXECUTE':'RECONCILE',
+       message.type==='EXECUTE_RENAME'?'EXECUTE':
+       message.type==='FINALIZE_RENAME'?'FINALIZE':'RECONCILE',
      ...message.params},sender);
   let observed,records,cfg;
   try{
