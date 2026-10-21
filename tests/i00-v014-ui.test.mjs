@@ -61,6 +61,14 @@ test('canonical lookup projection rejects injection and hostile identity shapes'
  assert.equal(stableResults([{kind:'generator',id:'a'},{kind:'generator',id:'a'},{kind:'account',id:'a'}]).length,2);
  assert.equal(stableResults(Array.from({length:10000},(_,i)=>({kind:'generator',id:String(i)}))).length,10);
 });
+test('global account lookup transfers focus after canonical async row construction',async()=>{
+ const accounts=await readFile('src/ui/accounts-view.mjs','utf8');
+ assert.match(ui,/new CustomEvent\('pcms-v014-account-target'/);
+ assert.match(accounts,/addEventListener\('pcms-v014-account-target'/);
+ assert.match(accounts,/section\.dataset\.pcmsV014AccountId=a\.accountId/);
+ assert.match(accounts,/locateRequestedAccount\(\)/);
+ assert.doesNotMatch(accounts,/querySelector\('\[data-pcms-v014-account-id="/);
+});
 test('catalog public-update shortcut selects the real Work Queue update panel',async()=>{
  const catalog=await readFile('src/ui/catalog-view.mjs','utf8');
  assert.match(catalog,/new CustomEvent\('pcms-v014-workflow-request'/);
