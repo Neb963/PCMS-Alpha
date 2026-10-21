@@ -1182,6 +1182,42 @@ def main():
                     if execute(after,"return location.hash")=='#overview':break
                     time.sleep(.07)
                 print('B V016_ACCEPTED_PROTOTYPE_PRIMARY_ALL_SIX_ROUTED_BACKEND_CONTROLS=PASS',flush=True)
+                # R3 acceptance: exercise the real packaged primary Settings
+                # preflight, not a fixture view or a token/network write path.
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-nav="settings"]').click();return true""")
+                r3_panel=None
+                for _ in range(45):
+                    r3_panel=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      const panel=sh.querySelector('[aria-label="Operational readiness preflight"]');
+                      const buttons=[...panel?.querySelectorAll('button')||[]].map(b=>b.textContent.trim());
+                      return {mounted:!!panel,local:buttons.includes('Run local preflight'),
+                        remote:buttons.includes('Verify private GitHub read-only'),
+                        export:buttons.includes('Export sanitized report')};""")
+                    if r3_panel['mounted'] and r3_panel['local']:break
+                    time.sleep(.1)
+                assert r3_panel and all(r3_panel.values()),('R3_PANEL_MISSING',r3_panel)
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  const panel=sh.querySelector('[aria-label="Operational readiness preflight"]');
+                  const local=[...panel.querySelectorAll('button')].find(b=>b.textContent.trim()==='Run local preflight');
+                  if(!local)throw Error('R3_LOCAL_CONTROL_MISSING');local.click();return true;""")
+                r3_result=None
+                for _ in range(150):
+                    r3_result=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      const panel=sh.querySelector('[aria-label="Operational readiness preflight"]');
+                      const status=panel?.querySelector('[role="status"]')?.textContent||'';
+                      const rows=[...panel?.querySelectorAll('.queue-item')||[]];
+                      return {status,count:rows.length,
+                        hasGit:rows.some(r=>r.textContent.includes('GITHUB AUTH')&&
+                          r.textContent.includes('NOT_TESTED')),
+                        hasHost:rows.some(r=>r.textContent.includes('NATIVE VAULT HOST')),
+                        exportEnabled:[...panel?.querySelectorAll('button')||[]].some(
+                          b=>b.textContent.trim()==='Export sanitized report'&&!b.disabled)};""")
+                    if r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost']:break
+                    time.sleep(.12)
+                assert r3_result and r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['exportEnabled'],('R3_PREFLIGHT_FAILED',r3_result)
+                print('B R3_REAL_PRIMARY_SETTINGS_LOCAL_PREFLIGHT_NO_REMOTE=PASS',flush=True)
+                execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=overview]').click();return true")
 
                 navigation=execute(after,"""const by=id=>document.getElementById(id);
                   const original=by('pcms-backup-export');
