@@ -1242,9 +1242,14 @@ def main():
                   sh.querySelector('[data-settings="automation"]').click();
                   const primaryPermission=sh.querySelector('.settings-main')?.textContent.includes('Standing permissions')&&
                     !sh.querySelector('.settings-main')?.textContent.includes('Open automation tools (original view)');
-                  return {primaryCreate,legacyOpened,primaryPermission,
+                  sh.querySelector('[data-settings="diagnostics"]').click();
+                  const details=sh.querySelector('.settings-main');
+                  const primaryDiagnostic=details?.textContent.includes('Full disposable diagnostic')&&
+                    !!details?.querySelector('input[placeholder="pcms-test-alpha"]')&&
+                    [...details.querySelectorAll('button')].some(x=>x.textContent.includes('Save disposable scope'));
+                  return {primaryCreate,legacyOpened,primaryPermission,primaryDiagnostic,
                     drawerClosed:!sh.querySelector('[aria-label="Create generators"]')};""")
-                assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
+                assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
                 print('B R4_PRIMARY_CREATION_AND_PROTECTED_SETTINGS_WITHOUT_LEGACY=PASS',flush=True)
                 execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=overview]').click();return true")
 
