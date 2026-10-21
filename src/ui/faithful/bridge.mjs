@@ -146,7 +146,7 @@ function openGlobalSearch(){
  });overlay.addEventListener('click',e=>{if(e.target===overlay)closeSearch()});input.focus();
 }
 function nativeSelection(type,item){
- if(type==='timing'){window.dispatchEvent(new CustomEvent('pcms-refresher-target',{detail:{slug:item.slug}}));nativeRoute('refresher')}
+ if(type==='timing'){openRefresherTiming(item);}
  else if(type==='source'){window.dispatchEvent(new CustomEvent('pcms-source-target',{detail:{slug:item.slug,revision:item.revision}}));nativeRoute('generators','source')}
  else if(type==='adopt'){window.dispatchEvent(new CustomEvent('pcms-adoption-target',{detail:{slug:item.slug,revision:item.revision,ownerState:item.ownerState,visibility:item.visibility}}));nativeRoute('generators','adopt')}
  else{const field=nativeControl('pcms-generator-query');if(field){field.value=item.slug;field.dispatchEvent(new Event('input',{bubbles:true}))}nativeRoute('generators','inventory')}
@@ -171,6 +171,74 @@ function openDetails(kind,item){
  const focusable=()=>[...drawer.querySelectorAll('button:not(:disabled),[href],input:not(:disabled)')];
  backdrop.addEventListener('keydown',event=>{if(event.key==='Escape'){backdrop.remove();if(priorFocus?.isConnected)priorFocus.focus({preventScroll:true});return}if(event.key==='Tab'){let all=focusable();let index=all.indexOf(root.activeElement);if(event.shiftKey&&index<=0){event.preventDefault();all.at(-1)?.focus()}if(!event.shiftKey&&index===all.length-1){event.preventDefault();all[0]?.focus()}}});
  backdrop.addEventListener('click',e=>{if(e.target===backdrop)backdrop.remove()});close.focus();
+}
+// Primary per-generator timing and activity controls reuse exact canonical
+// Refresher revisions; they never claim a successful provider source save.
+function openRefresherTiming(item){
+ const snap=state.ref.snapshot;
+ if(!snap?.ok||!Number.isSafeInteger(snap.revision)||!item?.stableId){
+  notify('Current Refresher state is unavailable. No policy was changed.');return}
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),drawer=el('div','drawer');
+ drawer.setAttribute('role','dialog');drawer.setAttribute('aria-modal','true');
+ drawer.setAttribute('aria-label','Manage Refresher timing for '+item.slug);
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const header=el('div','drawer-head');header.append(el('h2','drawer-title','Refresher · '+item.slug),b('Close',close));
+ const body=el('div','drawer-body');
+ body.append(el('p','setting-note',
+  'These timings affect subsequent scheduling periods. Already accrued activity and source-save evidence are preserved.'));
+ const active=el('input','form-input'),sleep=el('input','form-input');
+ for(const [control,value] of [[active,item.activeMs],[sleep,item.sleepMs]]){
+  control.type='number';control.min='1';control.max=String(365*24*60);control.step='1';
+  control.value=Number.isFinite(value)?String(Math.round(value/60000)):'';
+ }
+ const aLabel=el('label','','Active period (minutes)'),sLabel=el('label','','Rest period (minutes)');
+ aLabel.append(active);sLabel.append(sleep);body.append(aLabel,sLabel);
+ const status=el('p','setting-note','No change submitted.');status.setAttribute('role','status');
+ const save=b('Save generator timing',()=>void(async()=>{
+  const m=Number(active.value),n=Number(sleep.value);
+  if(!Number.isSafeInteger(m)||!Number.isSafeInteger(n)||m<1||n<1||
+     m>525600||n>525600){
+    status.textContent='Enter active and rest periods of 1 minute to 365 days.';return;}
+  if(!window.confirm('Save this generator’s timing policy for subsequent Refresher periods?'))return;
+  save.disabled=true;
+  try{
+   const result=await readPort('pcms-i12-refresher','SET_GENERATOR_POLICY',{
+    expectedRevision:snap.revision,stableId:item.stableId,
+    activeMs:m*60000,sleepMs:n*60000},16000);
+   status.textContent=result?.ok?'Generator timing saved. Current period and remote evidence remain unchanged.':
+     'Generator timing could not be saved; state may have changed. Reload before retrying.';
+  }catch{status.textContent='Timing save outcome unconfirmed. Do not retry before refreshing state.'}
+  await loadRefresher();save.disabled=false;
+ })(),'btn primary');
+ const pause=b(item.paused?'Resume this generator':'Pause this generator',()=>void(async()=>{
+  const desired=!item.paused;
+  if(!window.confirm(desired?'Pause scheduling for this generator?':'Resume guarded scheduling for this generator?'))return;
+  pause.disabled=true;
+  try{
+   const result=await readPort('pcms-i12-refresher','SET_PAUSE',{
+    expectedRevision:snap.revision,scope:'GENERATOR',target:item.stableId,paused:desired},16000);
+   status.textContent=result?.ok?'Generator scheduling policy updated.':
+      'Change not confirmed. Refresh state before retrying.';
+  }catch{status.textContent='Change outcome uncertain; refresh before retrying.'}
+  await loadRefresher();pause.disabled=false;
+ })(),'btn small');
+ const statistic=b('Request a new statistic',()=>void(async()=>{
+  statistic.disabled=true;
+  try{
+   const result=await readPort('pcms-i12-refresher','DEMAND_STATISTIC',{
+    expectedRevision:snap.revision,stableId:item.stableId},16000);
+   status.textContent=result?.ok?
+     'A read-only statistic observation was requested; a fresh provider result is not yet confirmed.':
+     'Statistic request was not confirmed.';
+  }catch{status.textContent='Statistic request status unknown; check again.'}
+  await loadRefresher();statistic.disabled=false;
+ })(),'btn small');
+ const actions=el('div','form-foot');actions.append(save,pause,statistic);
+ body.append(actions,status);
+ drawer.append(header,body);overlay.append(drawer);root.append(overlay);
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ active.focus();
 }
 function formatTime(ms){if(!Number.isFinite(ms)||ms<0)return '—';const m=Math.round(ms/60000),hours=Math.floor(m/60);return hours+'h '+String(m%60).padStart(2,'0')+'m'}
 function setTab(group,value){for(const b of page()?.querySelectorAll(group+' [role=tab]')||[]){const active=b.dataset.filter?.split(':')[1]===value;b.setAttribute('aria-selected',String(active));b.tabIndex=active?0:-1}}
@@ -274,11 +342,21 @@ async function proposeRefresherEnable(switchEl){
  // pending edits in its other fields could otherwise be sent accidentally.
  const before=state.lastRef?.policy?.refreshEnabled===true;
  switchEl.checked=before;
- if(!nativeControl('pcms-refresher-enable')){
-  notify('Protected Refresher policy is unavailable. No change was submitted.');return;
+ const snapshot=state.ref.snapshot;
+ if(!snapshot?.ok||!Number.isSafeInteger(snapshot.revision)){
+  notify('Current Refresher policy was not verified. No change was submitted.');return;
  }
- nativeAction('refresher',null,'pcms-refresher-enable');
- notify('Review the complete guarded policy before changing marker saves. Nothing was submitted.');
+ const next=!before;
+ if(!window.confirm(next?
+  'Enable guarded Refresher source saves? Each target still requires independently verified owner, protected route, source, qualified time and safety checks. Visibility is not guaranteed.':
+  'Disable further scheduled Refresher source saves? In-flight uncertain effects remain held for reconciliation.'))return;
+ try{
+  const result=await readPort('pcms-i12-refresher','SET_POLICY',{
+   expectedRevision:snapshot.revision,policy:{refreshEnabled:next}},15000);
+  notify(result?.ok?'Refresher policy recorded; source saves and recent-list visibility require separate proof.':
+    'Refresher setting was not confirmed. Reload the actual policy before retrying.');
+ }catch{notify('Refresher outcome unconfirmed. Reload current state before retrying.')}
+ await loadRefresher();
 }
 
 function statusPill(label,kind=''){const p=el('span','pill'+(kind?' '+kind:''),label);return p}
