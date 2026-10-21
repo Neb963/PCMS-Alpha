@@ -51,6 +51,7 @@ test('default passive check never accesses git.get or network and returns schema
  const m=mock();const out=await r(m);assert.equal(out.ok,true);
  assert.equal(row(out,'GIT_CONFIG').state,'NOT_CONFIGURED');
  assert.equal(row(out,'GITHUB_AUTH').state,'NOT_TESTED');
+ assert.equal(row(out,'INSTALLED_XPI_IDENTITY').state,'NOT_TESTED');
  assert.equal(m.events.includes('fetch'),false);
  assert.equal(m.events.some(e=>e.endsWith(':git.get')),false);
  assert.doesNotMatch(JSON.stringify(out),/fixture-token|private-generator/);
@@ -188,8 +189,9 @@ test('native host rejecting inspection is not claimed as a supported capability'
  const m=mock();m.readiness=createReadinessBoundary(m.api,{native:async(host,p)=>{
   if(host==='local.pcms.backup_vault')return {ok:false,code:'MISSING_OR_INVALID'};
   return {ok:false,code:'DENIED'};}});
- const out=await r(m);assert.equal(row(out,'BACKUP_HOST').state,'MISSING_CAPABILITY');
- assert.equal(row(out,'DIAGNOSTIC_HOST').state,'MISSING_CAPABILITY');
+ const out=await r(m);assert.equal(row(out,'BACKUP_HOST').state,'VERIFIED');
+ assert.equal(row(out,'DIAGNOSTIC_HOST').state,'VERIFIED');
+ assert.equal(row(out,'DIAGNOSTIC_HOST').code,'READ_ONLY_PROBE_DENIED_HOST_RESPONDED');
 });
 
 test('healthy host environment prerequisites do not claim vault authentication',async()=>{
