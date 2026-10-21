@@ -1131,6 +1131,10 @@ def main():
                      'nativeRefresherInBoard','nativePolicyInRail','settings']),faithful
                 assert faithful['inventoryTabs']>=4 and faithful['sourceWriters']==1,faithful
                 print('B V015_TRUE_DESKTOP_PRIMARY_WORKSPACES_AND_REAL_HANDLERS=PASS',flush=True)
+                release_version=execute(after,"return {manifest:browser.runtime.getManifest().version,ui:document.documentElement.dataset.pcmsUiVersion,badge:document.querySelector('.v015-top-status')?.textContent};")
+                assert release_version.get('manifest')=='1.2.1',release_version
+                assert release_version.get('ui')=='0.1.5' and '0.1.5' in release_version.get('badge',''),release_version
+                print('B V015_REAL_FIREFOX_UPDATE_VERSION_AND_VISIBLE_UI_MARKER=PASS',flush=True)
 
                 navigation=execute(after,"""const by=id=>document.getElementById(id);
                   const original=by('pcms-backup-export');
