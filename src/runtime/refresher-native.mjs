@@ -43,6 +43,13 @@ export function createRefresherNativeAdapter({
        !SLUG.test(row?.slug||'')||!HEX.test(row?.releaseFingerprint||'')||
        account?.verifiedIdentity!==true)
       return {status:'UNVERIFIED'};
+    // An unapproved/unavailable writer is rejected before even inspecting
+    // live source. Concrete source-specific proof is checked again after
+    // independent readback and byte-different marker planning.
+    const advertised=methodProofFor({row,account,guard:g,phase:'PRECHECK'});
+    if(!['GUARDED_FIXED_EDITOR_METHOD','INDEPENDENT_LIVE_SOURCE_MARKER_PROOF']
+        .includes(advertised?.source)||advertised.allowedByProvider!==true)
+      return {status:'UNVERIFIED'};
     // A previous source save can be independently verified while local
     // tab cleanup failed. Safely retry only that exact S07-owned clean tab.
     if(row.refresh?.savedNonce){
