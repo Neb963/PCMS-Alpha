@@ -46,12 +46,16 @@ export function createReadinessBoundary(api,{native=(host,p)=>api.runtime.sendNa
     const identity=manifest?.browser_specific_settings?.gecko?.id===EXPECTED_ID&&
       typeof api.runtime.id==='string';
     add('EXTENSION_RUNTIME',identity?'VERIFIED':'MISSING_CAPABILITY','MANIFEST',identity?'RUNTIME_LISTENER_RESPONSIVE':'MANIFEST_IDENTITY_UNVERIFIED',
-      'Firefox extension','Verify installed XPI and Gecko ID in about:addons','B','ACTIVE_EXTENSION_MANIFEST');
+      'Firefox extension','Confirm this runtime in about:addons; exact installed XPI bytes need independent verification','RUNTIME','ACTIVE_EXTENSION_MANIFEST');
+    add('INSTALLED_XPI_IDENTITY','NOT_TESTED','INDEPENDENT_PACKAGE_PROOF',
+      'XPI_SHA256_NOT_INDEPENDENTLY_WITNESSED','EXTENSION_RUNTIME',
+      'Use installed-Firefox package verification with exact XPI SHA-256; a manifest string alone is not installed-artifact proof',
+      'B','NOT_OBSERVED');
     let settings=null,storageError=false;
     try{settings=await api.storage.local.get([GIT_CONFIG,PENDING,'pcmsS06StandingAuthority',
       'pcmsI12Status','pcmsRestoreInProgress','pcmsS08DisposableScope']);}catch{storageError=true;settings={};}
     add('LOCAL_CONFIGURATION',storageError?'UNREACHABLE':'VERIFIED','STORAGE_READ',storageError?'LOCAL_STORAGE_READ_FAILED':'LOCAL_STORAGE_READ_OK',
-      'Firefox storage','Inspect browser profile storage availability','B','EXTENSION_LOCAL_STORAGE');
+      'Firefox storage','Inspect browser profile storage availability','RUNTIME','EXTENSION_LOCAL_STORAGE');
     const config=settings[GIT_CONFIG],valid=config&&validRepository(config.repository)&&RID.test(config.repositoryId||'');
     const malformed=Boolean(config)&&!valid;
     const pending=settings[PENDING];
@@ -69,7 +73,7 @@ export function createReadinessBoundary(api,{native=(host,p)=>api.runtime.sendNa
     let envReply=null,envError=false;
     try{envReply=await native(VAULT,{action:'diagnostic.environment'});}catch{envError=true;}
     const environmentOK=envReply?.ok===true&&envReply.protocol===2&&
-      envReply.dbusSession===true&&envReply.secretTool===true;
+      envReply.dbusSession===true&&envReply.secretTool===true&&envReply.runtimeDir===true;
     add('SECRET_SERVICE_ENVIRONMENT',environmentOK?'VERIFIED':
       envError?'UNREACHABLE':envReply?.code==='DENIED'?'MISSING_CAPABILITY':
       'OUTCOME_UNCERTAIN','HOST_ENVIRONMENT',
@@ -77,7 +81,8 @@ export function createReadinessBoundary(api,{native=(host,p)=>api.runtime.sendNa
       envError?'NATIVE_ENVIRONMENT_PROBE_UNREACHABLE':
       envReply?.code==='DENIED'?'HOST_DIAGNOSTIC_METHOD_NOT_INSTALLED':
       envReply?.secretTool===false?'SECRET_TOOL_UNAVAILABLE':
-      envReply?.dbusSession===false?'DBUS_SESSION_UNAVAILABLE':'ENVIRONMENT_UNVERIFIED',
+      envReply?.dbusSession===false?'DBUS_SESSION_UNAVAILABLE':
+      envReply?.runtimeDir===false?'XDG_RUNTIME_DIR_UNAVAILABLE':'ENVIRONMENT_UNVERIFIED',
       'NATIVE_VAULT_HOST',
       'Check DBus session, libsecret and native host version. Environment availability is not proof the keyring is unlocked.',
       'H','NONSECRET_NATIVE_ENVIRONMENT');
@@ -126,9 +131,8 @@ export function createReadinessBoundary(api,{native=(host,p)=>api.runtime.sendNa
       ['BACKUP_HOST',BACKUP,{action:'resource.inspect'}],
       ['DIAGNOSTIC_HOST',DIAGNOSTIC,{action:'resource.inspect'}]]){
       try{const response=await native(host,action);
-        add(component,response?.code==='DENIED'?'MISSING_CAPABILITY':
-          response&&typeof response==='object'?'VERIFIED':'OUTCOME_UNCERTAIN','NATIVE_MESSAGE',
-          response?.code==='DENIED'?'HOST_METHOD_NOT_SUPPORTED':
+        add(component,response&&typeof response==='object'?'VERIFIED':'OUTCOME_UNCERTAIN','NATIVE_MESSAGE',
+          response?.code==='DENIED'?'READ_ONLY_PROBE_DENIED_HOST_RESPONDED':
           response&&typeof response==='object'?'NATIVE_HOST_RESPONDED':'NATIVE_PROTOCOL_UNRECOGNIZED',
           'Firefox nativeMessaging',`Verify ${host} host registration; response does not prove backup/diagnostic success`,
           'H','NATIVE_REPLY');
