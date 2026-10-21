@@ -1242,14 +1242,23 @@ def main():
                   sh.querySelector('[data-settings="automation"]').click();
                   const primaryPermission=sh.querySelector('.settings-main')?.textContent.includes('Standing permissions')&&
                     !sh.querySelector('.settings-main')?.textContent.includes('Open automation tools (original view)');
+                  sh.querySelector('[data-settings="backups"]').click();
+                  const backupPanel=sh.querySelector('.settings-main');
+                  const protectedRestore=!!backupPanel?.querySelector('input[type="file"]')&&
+                    backupPanel.querySelectorAll('input[type="file"]').length===2&&
+                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Verify independent checkpoint'))&&
+                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Read back uncertain restore'))&&
+                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Apply reviewed restore'));
+                  const restoreHeld=[...backupPanel.querySelectorAll('button')].find(x=>x.textContent.includes('Apply reviewed restore'))?.disabled===true;
                   sh.querySelector('[data-settings="diagnostics"]').click();
                   const details=sh.querySelector('.settings-main');
                   const primaryDiagnostic=details?.textContent.includes('Full disposable diagnostic')&&
                     !!details?.querySelector('input[placeholder="pcms-test-alpha"]')&&
                     [...details.querySelectorAll('button')].some(x=>x.textContent.includes('Save disposable scope'));
                   return {primaryCreate,legacyOpened,primaryPermission,primaryDiagnostic,
+                    protectedRestore,restoreHeld,
                     drawerClosed:!sh.querySelector('[aria-label="Create generators"]')};""")
-                assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
+                assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['protectedRestore'] and r4_primary['restoreHeld'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
                 print('B R4_PRIMARY_CREATION_AND_PROTECTED_SETTINGS_WITHOUT_LEGACY=PASS',flush=True)
                 execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=overview]').click();return true")
 
