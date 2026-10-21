@@ -73,6 +73,11 @@ function initGroups(route){
 for(const route of ['generators','work-queue','settings'])initGroups(route);
 // Source/adoption selection from actual inventory opens the existing inspector,
 // rather than leaving its real update hidden behind a different panel.
+window.addEventListener('pcms-v014-workflow-request',event=>{
+ const route=event.detail?.route,key=event.detail?.group;
+ if(typeof route!=='string'||typeof key!=='string')return;
+ if(selectGroup(route,key)&&location.hash!=='#'+route)location.hash='#'+route;
+});
 window.addEventListener('pcms-source-target',()=>selectGroup('generators','source'));
 window.addEventListener('pcms-adoption-target',()=>selectGroup('generators','adopt'));
 const jumps=[...document.querySelectorAll('[data-pcms-v014-open]')];
