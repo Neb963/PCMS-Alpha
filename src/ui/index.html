@@ -351,15 +351,22 @@
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 05</p><h1 id="heading-refresher" tabindex="-1">Refresher</h1><p>Operational capacity, scheduling and observed visibility.</p></div></header>
         <section class="panel">
           <div class="panel-head"><h2>Global oldest-eligible queue</h2><span class="unknown">Observed, bounded operational time</span></div>
-          <p id="blocked-refresher" class="reason">Guarded feed checks are read-only. Refresher source saves are OFF until explicitly enabled below. When enabled, PCMS may change only its owned HTML marker on eligible public generators, using the protected Persona and the guarded editor. A verified save is not proof of recent-page placement; ineffective or uncertain saves are held.</p>
           <p id="pcms-refresher-summary" role="status">Canonical capacity pending; no remote visibility promised.</p>
           <p id="pcms-refresher-provider"></p><p id="pcms-refresher-diagnostics"></p>
+          <p id="pcms-refresher-status" role="status" aria-live="polite">Reading canonical state…</p>
           <button type="button" id="pcms-refresher-reload">Reload local shadow</button>
           <button type="button" id="pcms-refresher-retry-recent" disabled>Reset recent observation backoff</button>
           <button type="button" id="pcms-refresher-global-pause" disabled>Pause globally</button>
-          <label for="pcms-refresher-account">Account Pause</label><select id="pcms-refresher-account"></select>
+          <label for="pcms-refresher-query">Search generator or account</label><input id="pcms-refresher-query" type="search" maxlength="80">
+          <label for="pcms-refresher-phase">Phase</label><select id="pcms-refresher-phase"><option value="ALL">All</option><option value="WAITING">Waiting</option><option value="ACTIVE">Active</option><option value="SLEEPING">Sleeping</option></select>
+          <div class="table-scroll"><table><caption>Canonical shadow timing and historical observations</caption><thead><tr><th scope="col">Generator</th><th scope="col">Account</th><th scope="col">Budget / hold</th><th scope="col">Queue ordinal</th><th scope="col">Recent-list observation</th></tr></thead><tbody id="pcms-refresher-rows"></tbody></table></div>
+          <button type="button" id="pcms-refresher-prev" disabled>Previous</button><span id="pcms-refresher-page"></span><button type="button" id="pcms-refresher-next" disabled>Next</button>
+          <details class="pcms-v014-refresher-policy" id="pcms-v014-refresher-policy">
+            <summary>Scheduling policy, account controls and safety details</summary>
+            <p id="blocked-refresher" class="reason">Guarded feed checks are read-only. Refresher source saves are OFF until explicitly enabled below. When enabled, PCMS may change only its owned HTML marker on eligible public generators, using the protected Persona and the guarded editor. A verified save is not proof of recent-page placement; ineffective or uncertain saves are held.</p>
+            <label for="pcms-refresher-account">Account Pause</label><select id="pcms-refresher-account"></select>
           <button type="button" id="pcms-refresher-account-pause" disabled>Pause account</button>
-          <p id="pcms-refresher-status" role="status" aria-live="polite">Reading canonical state…</p>
+          
           <div class="account-controls">
             <label for="pcms-refresher-active">Default active hours</label><input id="pcms-refresher-active" type="number" min="1" max="8760" value="24">
             <label for="pcms-refresher-sleep">Minimum sleep hours</label><input id="pcms-refresher-sleep" type="number" min="1" max="8760" value="72">
@@ -369,10 +376,7 @@
             <button type="button" id="pcms-refresher-save" disabled>Save Refresher settings</button>
           </div>
           <p class="reason">New duration settings apply to subsequent full periods. Remaining time and queue priority are preserved. Cap reductions stop admissions without evicting active allocations. Sleep remains public unless a separate release/review requires unlisting.</p>
-          <label for="pcms-refresher-query">Search generator or account</label><input id="pcms-refresher-query" type="search" maxlength="80">
-          <label for="pcms-refresher-phase">Phase</label><select id="pcms-refresher-phase"><option value="ALL">All</option><option value="WAITING">Waiting</option><option value="ACTIVE">Active</option><option value="SLEEPING">Sleeping</option></select>
-          <div class="table-scroll"><table><caption>Canonical shadow timing and historical observations</caption><thead><tr><th scope="col">Generator</th><th scope="col">Account</th><th scope="col">Budget / hold</th><th scope="col">Queue ordinal</th><th scope="col">Recent-list observation</th></tr></thead><tbody id="pcms-refresher-rows"></tbody></table></div>
-          <button type="button" id="pcms-refresher-prev" disabled>Previous</button><span id="pcms-refresher-page"></span><button type="button" id="pcms-refresher-next" disabled>Next</button>
+          </details>
         </section>
         <section class="panel" id="pcms-refresher-inspector" hidden>
           <h2>Generator timing policy</h2><p id="pcms-refresher-selected"></p><p id="pcms-refresher-metric"></p>
