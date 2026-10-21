@@ -4,6 +4,7 @@
 // A lost ACK is never permission to execute again.
 import {openCanonicalDatabase,createRestoreSentinel,fail} from './journal.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
+import {standingS06} from './s06-standing-authority.mjs';
 import {exactSource} from './staging-core.mjs';
 import {REVIEW_KEY,planMainFolderChanges} from './catalog-identity-review.mjs';
 const REVIEW='pcmsR4ExistingRenameAttempt:',CATALOG='pcmsS03CatalogLastComplete',CONFIG='pcmsS03Git';
@@ -36,6 +37,29 @@ function readFacts(db,slug){
      out={ok:true,row,account};
     };
    };
+  };
+ });
+}
+// Reconciliation must remain possible after inventory synchronization removes
+// the old slug. Only a previously verified durable attempt may supply old
+// remote identity; the current account and protected route are still rechecked.
+function readAttemptFacts(db,attempt){
+ return new Promise((resolve,reject)=>{
+  let tx,result=rejectState('RENAME_ACCOUNT_NOT_VERIFIED');
+  function rejectState(code){return {ok:false,code}}
+  try{tx=db.transaction(['meta'],'readonly')}
+  catch{return reject(Error('RENAME_DB_UNAVAILABLE'))}
+  tx.oncomplete=()=>resolve(result);tx.onabort=()=>reject(Error('RENAME_DB_ABORT'));
+  tx.objectStore('meta').get('account:'+attempt.accountId).onsuccess=e=>{
+   const account=e.target.result?.account;
+   if(account?.state!=='VERIFIED'||account.personaUid!==attempt.personaUid||
+      account.bindingVersion!==attempt.bindingVersion||
+      account.identity?.source!=='GUARDED_SESSION_READBACK'||
+      account.identity.principalFingerprint!==attempt.principalFingerprint)return;
+   result={ok:true,account,row:{slug:attempt.oldSlug,accountId:attempt.accountId,
+     remoteId:attempt.remoteId,personaUid:attempt.personaUid,
+     bindingVersion:attempt.bindingVersion,accountRevision:account.revision,
+     ownerState:'OBSERVED_OWNER'}};
   };
  });
 }
@@ -103,6 +127,8 @@ export function createExistingRenameService(api,{
   busy=true;
   try{
    if((await sentinel.inspect()).held)return reject('RESTORE_HOLD');
+   if(type!=='RECONCILE'&&standingS06?.gate('development')!==true)
+    return reject('DEVELOPMENT_AUTHORITY_REQUIRED');
    const state=await current(newSlug);if(!state.ok)return state;
    const {review,attempt}=state;
    const allowed=type==='PREPARE'?review.state==='RENAME_EXISTING_REQUESTED'&&!attempt:
@@ -115,7 +141,9 @@ export function createExistingRenameService(api,{
    if(type==='RECONCILE'&&attempt.state==='REMOTE_RENAME_VERIFIED_LINK_PENDING')
     return {ok:true,code:'REMOTE_RENAME_VERIFIED_SOURCE_RELINK_PENDING',
       state:attempt.state,revision:attempt.revision,providerEffects:'NO_NEW_EFFECT'};
-   const facts=await readFacts(await db(),review.oldSlug);
+   let facts=await readFacts(await db(),review.oldSlug);
+   if(type==='RECONCILE'&&!validFacts(facts,review.oldSlug)&&attempt)
+    facts=await readAttemptFacts(await db(),attempt);
    if(!validFacts(facts,review.oldSlug))return reject('RENAMED_OWNER_CONTEXT_UNVERIFIED');
    if(attempt&&(facts.row.remoteId!==attempt.remoteId||
       facts.row.personaUid!==attempt.personaUid||
@@ -186,7 +214,8 @@ export function createExistingRenameService(api,{
    const saved=(await api.storage.local.get(key(newSlug)))?.[key(newSlug)];
    if(saved?.state!=='DISPATCH_POSSIBLE'||saved?.revision!==marked.revision)
     return reject('RENAME_DISPATCH_OUTCOME_UNCERTAIN');
-   if((await sentinel.inspect()).held)return reject('RENAME_DISPATCH_OUTCOME_UNCERTAIN');
+   if((await sentinel.inspect()).held||standingS06?.gate('development')!==true)
+    return reject('RENAME_DISPATCH_OUTCOME_UNCERTAIN');
    let result;
    try{result=await g.runSupplyStep(facts.row.personaUid,{
      kind:'RENAME_EXISTING',temporarySlug:review.oldSlug,slug:newSlug,
