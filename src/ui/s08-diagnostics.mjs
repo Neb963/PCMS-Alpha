@@ -9,6 +9,20 @@ const account=by('account'),namespace=by('namespace'),save=by('designate'),
  start=by('run'),resume=by('resume'),rerun=by('rerun'),exporter=by('export'),
  status=by('status'),stages=by('stages'),scope=by('scope'),cleanup=by('cleanup');
 let busy=false,configuration=null,run=null,designationError=null;
+const SCOPE_HELP={
+ TEST_ACCOUNT_SELECTION_INVALID:'Select a verified test account from the list.',
+ TEST_PERSONA_BINDING_INVALID:'The selected test account has no valid Persona binding. Check Accounts.',
+ TEST_GITHUB_CONNECTION_REQUIRED:'GitHub files were readable, but the secure connection is not finished. Check Settings → Diagnostics, repair the native helper, then reconcile the interrupted Git connection.',
+ TEST_NAMESPACE_INVALID:'Use a test name starting with pcms-test-, followed by lowercase letters, numbers or hyphens.',
+ TEST_ACCOUNT_LIST_UNAVAILABLE:'Account details are unavailable. Open Accounts and check the selected account.',
+ TEST_ACCOUNT_NOT_PROTECTED_VERIFIED:'This account has not passed protected route and ownership verification. Check Accounts.',
+ TEST_GIT_SCOPE_CHANGED:'The connected GitHub repository has changed. Review the test scope.',
+ TEST_AUTHORITY_SCOPE_CHANGED:'The selected repository is not covered by the current permissions. Review permissions in Settings.',
+ ENABLE_SCOPED_DEVELOPMENT_AND_GIT:'Development and Git write permissions are not enabled for this repository. Review Settings permissions.',
+ RESTORE_HOLD:'A restore is awaiting review. Finish it before starting live tests.'
+};
+function scopeIssue(code){return SCOPE_HELP[code]||'The test setup could not be verified. Open Settings → Diagnostics for details.';}
+
 const PORT={accounts:'pcms-i03-accounts',git:'pcms-s03-catalog',
  auth:'pcms-s06-authority',creation:'pcms-s00-coordinator',
  ai:'pcms-i10-ai',writeback:'pcms-i11-writeback',
@@ -45,7 +59,7 @@ function show(){
  else if(configuration)scope.textContent='Test namespace '+configuration.namespace+
   ' · Selected account '+configuration.accountId+
   ' · Repo ID '+configuration.repositoryId+'. Other resources cannot be substituted.';
- else scope.textContent='Designate one disposable, verified PCMS account and test namespace.';
+ else scope.textContent='Choose your dedicated test account and a test name. PCMS will verify the connection and permissions before running anything.';
  status.textContent=run?
   'Test generator '+run.slug+' · '+run.status+' · next '+run.stage+
   (run.firstFailure?' · '+run.firstFailure.code+(
@@ -363,7 +377,7 @@ save.addEventListener('click',async()=>{
   designationError=null;
   await browser.storage.local.set({[DIAGNOSTIC_CONFIG]:test});
   scope.textContent='Disposable scope saved. No remote write attempted.';
- }catch(e){designationError='Designation not saved: '+e.message;}
+ }catch(e){designationError='Test setup not saved. '+scopeIssue(e.message);}
  finally{busy=false;show();}
 });
 function nextRun(){
