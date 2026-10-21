@@ -1586,6 +1586,21 @@ def main():
                     time.sleep(.15)
                 assert '51–100' in pagination,pagination
                 print('B I04_REAL_IDB_1250_FILTER_PAGINATION_OWNER_HOLD=PASS',flush=True)
+                # V016 must ALSO show 1,250 canonical readback in the visible
+                # prototype, not only in the hidden legacy inventory controller.
+                execute(after,"""const h=document.getElementById('pcms-faithful-host');
+                  h.shadowRoot.querySelector('[data-nav="generators"]').click();return true""")
+                for _ in range(50):
+                    shadow_inventory=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                      const view=sh?.querySelector('#page');
+                      return {route:view?.dataset.view,
+                        rows:sh?.querySelectorAll('.workspace-surface table tbody tr[data-item-index]').length,
+                        text:sh?.querySelector('.pagination')?.textContent?.slice(0,120)||''};""")
+                    if shadow_inventory.get('rows')==24 and '1250' in shadow_inventory.get('text',''):break
+                    time.sleep(.15)
+                assert shadow_inventory['rows']==24 and '1250' in shadow_inventory['text'],shadow_inventory
+                execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=overview]').click();return true")
+                print('B V016_VISIBLE_PROTOTYPE_REAL_IDB_1250_PAGINATED=PASS',flush=True)
 
                 # S03 B: exact installed combined XPI module and real
                 # dashboard controls, no remote Git, vault or Perchance traffic.
