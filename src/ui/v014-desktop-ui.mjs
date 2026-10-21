@@ -124,8 +124,9 @@ function choose(item){
   location.hash='#generators';
   target?.focus({preventScroll:true});
  }else if(item.kind==='account'){
+  window.dispatchEvent(new CustomEvent('pcms-v014-account-target',{
+   detail:{accountId:item.id}}));
   location.hash='#accounts';
-  q('heading-accounts')?.focus({preventScroll:true});
  }
  hideResults();
 }
