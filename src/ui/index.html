@@ -14,8 +14,18 @@
     <header class="topbar">
       <button class="menu" type="button" id="menu" aria-expanded="false" aria-controls="navigation">Menu</button>
       <div class="breadcrumbs"><span>Workspace</span><span aria-hidden="true">›</span><strong id="current-page-label">Overview</strong></div>
-      <span class="phase">Operator dashboard · protected workflows</span>
-      <a class="advanced" href="../options/options.html" id="advanced">PersonaMonkey advanced controls <span aria-hidden="true">↗</span></a>
+      <div class="pcms-v014-global-search">
+        <label for="pcms-v014-search" class="sr-only">Find a local generator or account</label>
+        <input type="search" id="pcms-v014-search" maxlength="80" autocomplete="off"
+          role="combobox" aria-autocomplete="list" aria-expanded="false"
+          aria-controls="pcms-v014-search-results" placeholder="Search PCMS…"
+          aria-label="Search local generators and accounts. Ctrl K to focus">
+        <kbd class="pcms-v014-key-hint" aria-hidden="true">Ctrl K</kbd>
+        <div id="pcms-v014-search-results" class="pcms-v014-search-results"
+          role="listbox" aria-label="Local search suggestions" hidden></div>
+      </div>
+      <span class="phase">Protected workflows</span>
+      <a class="advanced" href="../options/options.html" id="advanced">PersonaMonkey controls ↗</a>
     </header>
     <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
       <div class="sidebar-brand" aria-label="PCMS Alpha Fleet Control"><span class="brand-mark" aria-hidden="true">P/</span><span class="brand-label">PCMS Alpha<small>Fleet control</small></span></div>
@@ -36,11 +46,15 @@
       <div id="unknown-route" class="notice" role="status" hidden>Unknown workspace. Showing Overview without changing any data.</div>
       <section class="workspace" id="view-overview" data-view="overview" aria-labelledby="heading-overview">
         <header class="workspace-head">
-          <div><p class="eyebrow">Live controller / Source-aware operations</p><h1 id="heading-overview" tabindex="-1">Fleet overview</h1><p>Decisions, exceptions and verified outcomes. Unobserved status remains unknown.</p></div>
-          <div class="overview-links"><a href="#work-queue">Activity log</a><a href="#generators">View generators</a></div>
+          <div><p class="eyebrow">Live controller / Source-aware operations</p><h1 id="heading-overview" tabindex="-1">Overview</h1><p>Your fleet at a glance. Unobserved status remains unknown.</p></div>
+          <div class="overview-links pcms-v014-overview-actions">
+            <button type="button" data-pcms-v014-open="generators:create">Create generators</button>
+            <button type="button" data-pcms-v014-open="settings:diagnostics">Diagnostics</button>
+            <a href="#work-queue">Work queue</a>
+          </div>
         </header>
         <section class="stat-band" aria-label="Current PCMS snapshot">
-          <div class="stat"><h2>Managed inventory</h2><p id="pcms-overview-inventory" role="status" aria-live="polite">Loading canonical inventory.</p></div>
+          <div class="stat"><h2>Managed generators</h2><p id="pcms-overview-inventory" role="status" aria-live="polite">Loading canonical inventory.</p></div>
           <div class="stat"><h2>Refresher</h2><p id="pcms-overview-refresher" role="status">Awaiting protected feed observation.</p></div>
           <div class="stat"><h2>Backup</h2><p id="pcms-overview-backup" role="status" aria-live="polite">No current verified backup observation.</p></div>
           <div class="stat"><h2>Recovery</h2><p id="pcms-overview-restore" role="status" aria-live="polite">Reviewing restore guard.</p></div>
@@ -537,5 +551,6 @@
   <script type="module" src="existing-update-view.mjs"></script>
   <script type="module" src="refresher-view.mjs"></script>
   <script type="module" src="s08-diagnostics.mjs"></script>
+  <script type="module" src="v014-desktop-ui.mjs"></script>
 </body>
 </html>
