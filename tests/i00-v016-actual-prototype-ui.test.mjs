@@ -32,7 +32,7 @@ test('all six accepted prototype-derived templates are actual packaged assets',a
  assert.match(stylesheet,/\.settings-main/);
  assert.match(shell,/PCMS local · Not verified/);
 });
-test('canonical read-only ports feed prototype views; original guarded mutating controls survive',()=>{
+test('canonical primary controls call protected typed runtime with exact revisions; original safety gates survive',()=>{
  for(const s of ['pcms-i04-inventory','pcms-i03-accounts','pcms-i12-refresher','LIST_INVENTORY','LIST_ACCOUNTS','GET_REFRESHER'])assert.ok(bridge.includes(s));
  assert.match(bridge,/const native=document\.querySelector\('body > \.app'\)/);
  assert.match(bridge,/document\.getElementById\(id\)/);
@@ -40,7 +40,11 @@ test('canonical read-only ports feed prototype views; original guarded mutating 
  assert.match(bridge,/function nativeAction\(/);
  assert.match(bridge,/function guardedClick\(/);
  assert.doesNotMatch(bridge,/guardedClick\('pcms-refresher-save'\)/);
- assert.match(bridge,/nativeAction\('refresher',null,'pcms-refresher-enable'\)/);
+ assert.match(bridge,/readPort\('pcms-i12-refresher','SET_POLICY'/);
+ assert.match(bridge,/expectedRevision:snapshot\.revision,policy:\{refreshEnabled:next\}/);
+ assert.match(bridge,/readPort\('pcms-i12-refresher','SET_GENERATOR_POLICY'/);
+ assert.match(bridge,/readPort\('pcms-i05-source','INSPECT_SOURCE'/);
+ assert.match(bridge,/readPort\('pcms-i07-adoption','CAPTURE_ADOPTION'/);
  assert.match(bridge,/mount\(\)\.catch/);
  assert.equal((bridge.match(/\binnerHTML\s*=/g)||[]).length,2,'only static bundled shell and selected local template may be parsed as HTML');
  assert.match(bridge,/template\.innerHTML=html/);
