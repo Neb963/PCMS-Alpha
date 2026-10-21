@@ -380,3 +380,19 @@ main>.system-status{display:none}
 .v015-service-detail strong{font-size:12px;color:#273646}
 .v015-service-detail small{font-size:11px;color:#688093;line-height:1.45;
  max-width:75ch;overflow-wrap:anywhere}
+
+/* Final visually inspected desktop corrections: retain semantic focus and
+   contextual safety text without letting either dominate the normal canvas. */
+.workspace-head.v015-page-head h1:focus-visible{outline:2px solid #b4d0f2!important;
+ outline-offset:2px!important;border-radius:3px}
+#view-overview .v015-overview-actions{justify-content:flex-end;margin-left:auto}
+#view-accounts .v015-heading-actions{margin-left:auto}
+#view-generators .v015-generator-help{background:#fff;border:1px solid #dde5ed;
+ border-radius:6px;margin:7px 0;padding:0}
+#view-generators .v015-generator-help summary{cursor:pointer;color:#59728b;
+ font-size:11px;font-weight:630;padding:8px 13px}
+#view-generators .v015-generator-help .reason{margin:0 9px 10px;padding:10px;
+ font-size:11px;line-height:1.5;background:#f6f9fc}
+#view-refresher .v015-refresher-panel table>caption{position:absolute;
+ width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;
+ clip:rect(0,0,0,0);white-space:nowrap;border:0}
