@@ -162,7 +162,8 @@ export async function perchanceSupplyIsolated(request) {
         generatorName:request.slug},{unauthenticated:true});
       if(!sameSession())return hold('SESSION_CHANGED');
       if(request.kind==='READ_EXISTING_RENAME'){
-        if(matchesOld)return hold('OLD_IDENTITY_STILL_PRESENT');
+        if(matchesOld||oldPage.status==='success'||existing.status==='is-owner')
+          return hold('OLD_IDENTITY_STILL_PRESENT');
         if(newOwner.status!=='is-owner'||newPage.status!=='success'||
            newPage.generator?.name!==request.slug||
            'public_'+newPage.generator?.publicId!==request.remoteId)
