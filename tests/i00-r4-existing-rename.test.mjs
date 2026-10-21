@@ -20,7 +20,7 @@ function setup({grant=true,collision=false,ack=false}={}){
    identity:{source:'GUARDED_SESSION_READBACK',bindingVersion,principalFingerprint:FP('d')}};
  const row={slug:'old-generator',accountId,accountRevision:5,personaUid,bindingVersion,
    remoteId,revision:3,ownerState:'OBSERVED_OWNER'};
- const records={'account:'+accountId:{account},'inventory:old-generator':{generator:row}};
+ const records={['account:'+accountId]:{account},'inventory:old-generator':{generator:row}};
  function db(){
   return {transaction:(stores,mode)=>{
    assert.equal(mode,'readonly');
