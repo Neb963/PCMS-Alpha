@@ -66,11 +66,13 @@ export function canonicalRefresherInputs(records){
   });
 }
 function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={}){
-  const phaseMatch=r=>phase==='ALL'||phase==='HELD'?
-    (phase==='HELD'?r.paused===true||rowBlocks(s,r).length>0:r.phase==='ALL'||true):
-    phase==='INELIGIBLE'?
-      r.phase==='WAITING'&&(rowBlocks(s,r).length>0||r.readyUpdate===true):
-      r.phase===phase;
+  const phaseMatch=r=>{
+    if(phase==='ALL')return true;
+    if(phase==='HELD')return r.paused===true||rowBlocks(s,r).length>0;
+    if(phase==='INELIGIBLE')
+      return r.phase==='WAITING'&&(rowBlocks(s,r).length>0||r.readyUpdate===true);
+    return r.phase===phase;
+  };
   const match=s.rows.filter(r=>(!query||r.slug.includes(query.toLowerCase())||
     r.accountId.includes(query.toLowerCase())||r.stableId.includes(query))&&
     (!accountId||r.accountId===accountId)&&phaseMatch(r)).sort(queueOrder);
