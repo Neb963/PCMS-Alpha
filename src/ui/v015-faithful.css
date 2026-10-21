@@ -409,3 +409,9 @@ main>.system-status{display:none}
   display:flex;flex-direction:column}
  #view-refresher #pcms-refresher-inspector{grid-column:1/-1;grid-row:4}
 }
+
+/* The accepted desktop skin is intentionally light. Firefox/OS dark-preference
+   must not inherit pale text tokens from the OLD dark shell onto white cards. */
+:root{color-scheme:light;--canvas:#f6f7f8;--paper:#fff;--ink:#202831;
+ --muted:#607083;--faint:#8795a2;--line:#dde3e8;--line-strong:#cbd5df;
+ --accent:#175bb5;--hover:#f3f6f9;--quiet:#f3f6f9}
