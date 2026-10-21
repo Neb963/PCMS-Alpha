@@ -56,7 +56,8 @@ export function planMainFolderChanges(prior,current,records=[]){
   // "create separate" approval must not silently resume creation.
   const originalReturned=Boolean(rec.oldSlug&&now.has(rec.oldSlug));
   if(!stable||originalReturned){stale.push(rec.newSlug);held.push(rec.newSlug);continue;}
-  if(rec.state!=='CREATE_SEPARATE_APPROVED')held.push(rec.newSlug);
+  if(!['CREATE_SEPARATE_APPROVED','RENAME_EXISTING_COMPLETED'].includes(rec.state))
+    held.push(rec.newSlug);
  }
  return {ok:true,added,missing,created,review,held:[...new Set(held)],
    stale:[...new Set(stale)],source:'COMPLETE_MAIN_DIFF',providerEffects:'OFF'};
