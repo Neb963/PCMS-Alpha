@@ -1252,7 +1252,7 @@ def main():
                   const escapeRestoresFocus=!shadow.querySelector('.overlay')&&
                     shadow.activeElement===searchButton;
                   const advanced=[...shadow.querySelectorAll('#page button')]
-                    .find(x=>x.textContent.trim()==='Advanced controls');
+                    .find(x=>x.textContent.trim()==='More controls (original view)');
                   advanced?.click();
                   const nativeOpen=document.body.classList.contains('pcms-native-open');
                   document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}));
