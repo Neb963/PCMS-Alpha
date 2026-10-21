@@ -2,7 +2,7 @@
 import { createCanonicalStore, createRestoreSentinel, openCanonicalDatabase, fail } from './journal.mjs';
 
 export const COMMAND_PORT = 'pcms-i02-canonical-readonly';
-const SAFE_NAMES = new Set(['HEALTH','SUMMARY','GET_OPERATION','GET_NOTICES','IGNORE_NOTICE','ACK_NOTICE','PREVIEW']);
+const SAFE_NAMES = new Set(['HEALTH','SUMMARY','GET_OPERATION','GET_NOTICES','LIST_OPERATION_PAGE','LIST_NOTICE_PAGE','IGNORE_NOTICE','ACK_NOTICE','PREVIEW']);
 export function trustedExtensionPage(api, sender) {
   if (sender?.id !== api.runtime.id || typeof sender.url !== 'string') return false;
   const base = api.runtime.getURL('pcms/');
@@ -31,6 +31,16 @@ export function validateCommand(api, sender, message) {
       typeof message.notice.code !== 'string' ||
       !Number.isSafeInteger(message.notice.expectedRevision)))
     return fail('INVALID_NOTICE');
+  if(['LIST_OPERATION_PAGE','LIST_NOTICE_PAGE'].includes(message.type)){
+    if(Object.keys(message).some(k=>!['type','params'].includes(k))||
+       !message.params||typeof message.params!=='object'||Array.isArray(message.params)||
+       Object.keys(message.params).some(k=>
+         !['after','limit',...(message.type==='LIST_OPERATION_PAGE'?['status']:[])].includes(k))||
+       (message.params.after!==undefined&&(typeof message.params.after!=='string'||message.params.after.length>240))||
+       (message.params.limit!==undefined&&(!Number.isInteger(message.params.limit)||
+           message.params.limit<1||message.params.limit>100)))
+      return fail('INVALID_QUEUE_PAGE');
+  }
   if (message.type === 'GET_OPERATION' &&
       (typeof message.operationId !== 'string' || !/^[a-zA-Z0-9_-]{8,100}$/.test(message.operationId)))
     return fail('INVALID_TARGET');
@@ -71,6 +81,14 @@ export function createCommandBoundary(api, { open = openCanonicalDatabase } = {}
     if (message.type === 'IGNORE_NOTICE') {
       try { return await (await canonical()).ignoreNotice(message.notice); }
       catch { return fail('CANONICAL_HOLD'); }
+    }
+    if(message.type==='LIST_OPERATION_PAGE'||message.type==='LIST_NOTICE_PAGE'){
+      try{
+        const store=await canonical();
+        return message.type==='LIST_OPERATION_PAGE'?
+          await store.listOperationPage(message.params):
+          await store.pageNotices(message.params);
+      }catch{return fail('CANONICAL_HOLD');}
     }
     if (message.type === 'GET_NOTICES') {
       try { return await (await canonical()).listNotices(); }
