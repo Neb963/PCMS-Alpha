@@ -15,7 +15,7 @@ test('desktop UI preserves every production ID uniquely and all six canonical ro
  }
  for(const key of ['pcms-generator-query','pcms-refresher-rows','pcms-refresher-enable',
   'pcms-restore-apply','pcms-backup-export','pcms-s06-grant-development','pcms-diagnostic-run',
-  'pcms-accounts-list','pcms-ai-jobs','pcms-release-heading','pcms-catalog-heading']){
+  'pcms-accounts-list','pcms-ai-jobs-heading','pcms-release-heading','pcms-catalog-heading']){
   assert.ok(idSet.has(key),'production control missing '+key);
  }
 });
@@ -67,5 +67,5 @@ test('presentation does not hide the Refresher list or disable production contro
  assert.doesNotMatch(css,/#pcms-refresher-rows\s*\{[^}]*display:\s*none/);
  assert.doesNotMatch(css,/pointer-events:\s*none[^}]*#view-refresher/);
  assert.match(html,/id="pcms-refresher-reload"/);
- assert.match(html,/id="pcms-refresher-source/);
+ assert.match(html,/id="pcms-refresher-query"/);
 });
