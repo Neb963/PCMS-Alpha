@@ -461,8 +461,9 @@ async function loadQueue(reset=false){
  q.loading=true;q.error=null;displayQueue();
  const includeNotices=q.filter==='Needs action'||q.filter==='All';
  const requested=[
-   guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{
-     after:q.opCursor,limit:20,status:queueGroup(q.filter),query:q.query}),
+   q.opCursor!==null?guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{
+     after:q.opCursor,limit:20,status:queueGroup(q.filter),query:q.query}):
+     Promise.resolve({ok:true,items:[],more:false,next:null}),
    includeNotices&&q.noticeCursor!==null?
      guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_PAGE',{
        after:q.noticeCursor,limit:20,query:q.query}):Promise.resolve({ok:true,items:[],more:false,next:null}),
@@ -747,7 +748,7 @@ function renderSettingsSection(){if(state.route!=='settings')return;
 }
 function displayRouteScaffold(){
  if(state.route==='overview')displayOverview();
- if(state.route==='work-queue')displayQueue();
+ if(state.route==='work-queue'){displayQueue();void loadQueue(true);}
  if(state.route==='generators'){
   const select=shadow('#generator-account');if(select)select.value=state.gen.account;
   const q=shadow('#generator-search');if(q)q.value=state.gen.query;
