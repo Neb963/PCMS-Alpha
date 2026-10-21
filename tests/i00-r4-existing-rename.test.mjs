@@ -68,6 +68,12 @@ function setup({grant=true,collision=false,ack=false}={}){
    clock:()=>200,developmentGate:()=>grantActive});
  return {service,saved,records,review,reads:()=>reads,renames:()=>renames,
    changeSource:()=>changedSource=true,removeOldInventory:()=>delete records['inventory:old-generator'],
+   installVerifiedNewLink:()=>{
+    records['inventory:new-generator']={generator:{...row,slug:'new-generator',revision:4}};
+    records['source-link:new-generator']={link:{
+      slug:'new-generator',folder:'generators/new-generator',
+      remoteId,accountId,personaUid,bindingVersion,fingerprint:FP('e')}};
+   },
    setGrant:v=>grantActive=v};
 }
 test('R4 AC-09 verified existing rename is separately gated, staged, and never blind-retried',async()=>{
@@ -87,6 +93,14 @@ test('R4 AC-09 verified existing rename is separately gated, staged, and never b
  assert.equal(readback.code,'REMOTE_RENAME_VERIFIED_SOURCE_RELINK_PENDING',JSON.stringify(readback));
  assert.equal(readback.providerEffects,'NO_NEW_EFFECT');
  assert.equal(x.renames(),1);
+ const unlinked=await x.service.run({type:'FINALIZE',newSlug:'new-generator',expectedRevision:4});
+ assert.equal(unlinked.code,'RENAMED_SOURCE_LINK_NOT_VERIFIED');
+ assert.equal(x.renames(),1);
+ x.installVerifiedNewLink();
+ const final=await x.service.run({type:'FINALIZE',newSlug:'new-generator',expectedRevision:4});
+ assert.equal(final.code,'VERIFIED_EXISTING_RENAME_COMPLETED',JSON.stringify(final));
+ assert.equal(x.saved.pcmsR4FolderIdentityReviews[0].state,'RENAME_EXISTING_COMPLETED');
+ assert.equal(x.renames(),1,'finalize never runs provider rename again');
 });
 test('R4 AC-09 no grant, bad original source or target collision rejects before any rename',async()=>{
  const without=setup({grant:false});
