@@ -107,6 +107,7 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       // Each missing folder remains a distinct actionable incident. A full
       // successful reappearance, not a failed scan, is the only resolution.
       // Notification payloads contain no source paths or credentials.
+      if(missing.length||planned.created.length||reappeared.length)try{
       const dispatcher=createNoticeDispatcher(api,createCanonicalStore(await openCanonicalDatabase()));
       async function scopeFor(slug){
         const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(slug));
@@ -127,6 +128,13 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       for(const slug of reappeared.slice(0,64)){
         try{await dispatcher.resolve({scopeId:await scopeFor(slug),
           code:'GIT_FOLDER_MISSING',evidence:'COMPLETE_MAIN_FOLDER_READBACK'});}catch{}
+      }
+      }catch{
+        // A notice-store outage is recorded separately and does not rewrite
+        // the completed Git snapshot or infer a provider-side deletion.
+        try{await api.storage.local.set({pcmsR4NoticeReceipt:{
+          code:'GIT_NOTICE_DELIVERY_HELD',observedAt:clock(),
+          repositoryId:cfg.repositoryId,head:result.head}});}catch{}
       }
       // S04 receives only the independently complete pinned-main scan. Its
       // own approval check and canonical DB handle decide local intent intake.
