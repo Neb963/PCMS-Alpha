@@ -116,9 +116,24 @@ function setPagination(countSel,prev, next,offset,total,limit,label){const holde
  const p=shadow(prev),n=shadow(next);if(p)p.disabled=offset<=0;if(n)n.disabled=offset+limit>=total}
 function routeHandlers(){
  for(const btn of root.querySelectorAll('[data-nav]'))btn.addEventListener('click',()=>routeTo(btn.dataset.nav));
- root.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){
-  event.preventDefault();openGlobalSearch()
- } else if(event.key==='Escape'){const overlay=shadow('.drawer-overlay');if(overlay){overlay.remove();event.preventDefault()}}});
+ // Capture the shortcut on the DOCUMENT so it works even when focus is
+ // outside the Shadow DOM. When Advanced native UI is open, preserve its
+ // existing shortcut and let the legacy module own the event.
+ document.addEventListener('keydown',event=>{
+  if(event.defaultPrevented||event.isComposing||event.repeat||
+    !document.body.classList.contains('pcms-faithful-ready')||
+    document.body.classList.contains('pcms-native-open'))return;
+  if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){
+   event.preventDefault();event.stopImmediatePropagation();
+   if(!shadow('.overlay'))openGlobalSearch();
+  }
+ },true);
+ root.addEventListener('keydown',event=>{
+  if(event.key==='Escape'){
+   const overlay=shadow('.drawer-overlay');
+   if(overlay){overlay.remove();event.preventDefault()}
+  }
+ });
  root.addEventListener('click',event=>{const link=event.target.closest('button[data-action],button[data-settings]');if(!link)return;const action=link.dataset.action;const setting=link.dataset.settings;
  if(setting){state.settings=setting;void renderSettingsSection();return}
  if(!action)return;
