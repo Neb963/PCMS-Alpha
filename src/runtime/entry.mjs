@@ -23,6 +23,8 @@ import './catalog-boundary.mjs';
 import './readiness-boundary.mjs';
 // S03 main observer wakes from alarms without an open dashboard.
 import './catalog-watch.mjs';
+// R4 audited Git identity review operates only on complete pinned main snapshots.
+import './folder-identity-boundary.mjs';
 // S05 read-only main/owner/byte readiness diagnostics without effect admission.
 import './ready-operator.mjs';
 
