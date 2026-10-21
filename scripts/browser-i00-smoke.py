@@ -1199,11 +1199,16 @@ def main():
                   document.querySelector('#view-generators [data-ui-group="inventory"]').click();
                   const search=document.getElementById('pcms-v014-search');
                   const shadow=document.getElementById('pcms-faithful-host').shadowRoot;
+                  const searchButton=shadow.querySelector('.top-search');
+                  searchButton?.focus();
                   document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}));
                   const overlay=shadow.querySelector('.overlay');
                   const visibleSearchFocused=!!overlay&&
                     shadow.activeElement===overlay.querySelector('input[type=search]');
-                  overlay?.remove();
+                  overlay?.querySelector('input[type=search]')?.dispatchEvent(
+                    new KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true}));
+                  const escapeRestoresFocus=!shadow.querySelector('.overlay')&&
+                    shadow.activeElement===searchButton;
                   const advanced=[...shadow.querySelectorAll('#page button')]
                     .find(x=>x.textContent.trim()==='Advanced controls');
                   advanced?.click();
@@ -1213,7 +1218,7 @@ def main():
                   document.getElementById('pcms-legacy-return')?.click();
                   return {createShown,diagnosticsShown,backupPreserved,releaseShown,
                     inventoryRestored:!by('generators-table-title').closest('section.panel').hidden,
-                    visibleSearchFocused,nativeOpen,nativeSearchFocused,
+                    visibleSearchFocused,escapeRestoresFocus,nativeOpen,nativeSearchFocused,
                     returnedToPrototype:!document.body.classList.contains('pcms-native-open')};""")
                 assert all(navigation.values()),navigation
                 print('B V014_INSTALLED_DESKTOP_NAVIGATION_AND_DOM_PRESERVATION=PASS',flush=True)
