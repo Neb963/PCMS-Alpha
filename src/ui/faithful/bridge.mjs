@@ -229,7 +229,7 @@ function routeHandlers(){
  if(action==='queue-help'||action==='account-info'){notify('Detailed operational guidance is available in Advanced protected controls.');return}
  if(action.startsWith('check-service:')){state.settings='connections';void runReadiness(false);return}
  });
- root.addEventListener('click',event=>{const tab=event.target.closest('[data-filter]');if(tab){event.preventDefault();const [r,value]=tab.dataset.filter.split(':');if(r==='generators'){state.gen.filter=value;state.gen.offset=0;void loadGenerators()}if(r==='refresher'){state.ref.phase=['All','Active','Sleeping','Waiting'].includes(value)?value.toUpperCase():value;state.ref.offset=0;void loadRefresher()}if(r==='queue'){state.queue.filter=value;void loadQueue(true)}return}
+ root.addEventListener('click',event=>{const tab=event.target.closest('[data-filter]');if(tab){event.preventDefault();const [r,value]=tab.dataset.filter.split(':');if(r==='generators'){state.gen.filter=value;state.gen.offset=0;void loadGenerators()}if(r==='refresher'){state.ref.phase=value.toUpperCase();state.ref.offset=0;void loadRefresher()}if(r==='queue'){state.queue.filter=value;void loadQueue(true)}return}
  const row=event.target.closest('tr[data-item-index]');if(row){const i=Number(row.dataset.itemIndex);if(state.route==='refresher'&&state.ref.visibleItems?.[i])openDetails('ref',state.ref.visibleItems[i]);else if(state.route==='generators'&&state.gen.visibleItems?.[i])openDetails('gen',state.gen.visibleItems[i]);}
  });
  root.addEventListener('keydown',event=>{
@@ -439,7 +439,7 @@ async function loadRefresher(){if(state.route!=='refresher')return;
  try{
   const phase=state.ref.phase;
   // Backend supports phases ALL/ACTIVE/SLEEPING/WAITING. No invented HELD phase.
-  const serverPhase=['ALL','ACTIVE','SLEEPING','WAITING'].includes(phase)?phase:'ALL';
+  const serverPhase=['ALL','ACTIVE','SLEEPING','WAITING','HELD','INELIGIBLE'].includes(phase)?phase:'ALL';
   const result=await refresher({query:state.ref.query,phase:serverPhase,offset:state.ref.offset,limit:state.ref.limit});
   if(epoch!==state.renderEpoch||state.route!=='refresher')return;
   state.ref.snapshot=result;state.lastRef=result;state.ref.items=Array.isArray(result.items)?result.items:[];
@@ -452,9 +452,7 @@ async function loadRefresher(){if(state.route!=='refresher')return;
 function displayRefresher(){if(state.route!=='refresher')return;
  const res=state.ref.snapshot;if(!res)return;
  const table=shadow('.ref-table-scroll tbody');if(!table)return;table.replaceChildren();
- const unsupported=['Held','Ineligible'].includes(state.ref.phase);
- const items=unsupported?state.ref.items.filter(x=>state.ref.phase==='Held'?x.paused||x.blockers?.length:
-  (x.blockers?.length||x.phase==='WAITING')):state.ref.items;
+ const items=state.ref.items;
  state.ref.visibleItems=items;
  for(const [i,row] of items.entries()){
   const tr=tableRow([row.slug],i);
@@ -467,9 +465,9 @@ function displayRefresher(){if(state.route!=='refresher')return;
   const remaining=el('td','muted-cell tabnums',remain);const cue=el('td','open-col');cue.append(icon('chevron'));
   tr.append(first,st,remaining,cue);table.append(tr);
  }
- if(!items.length)rowsError('.ref-table-scroll tbody',unsupported?'No matching records in this server page; full-fleet filter unavailable.':'No matching locally managed generators. Remote status unknown.',4);
+ if(!items.length)rowsError('.ref-table-scroll tbody','No matching locally managed generators in this fleet-wide filter. Remote status unknown.',4);
  text('.ref-table-heading .muted',safeCount(res.total)+' matching');
- const s=shadow('.ref-pagination span');if(s)s.textContent=`${res.total?state.ref.offset+1:0}–${Math.min(state.ref.offset+state.ref.limit,res.total)} of ${res.total} · canonical local records${unsupported?' · filtered on this page':''}`;
+ const s=shadow('.ref-pagination span');if(s)s.textContent=`${res.total?state.ref.offset+1:0}–${Math.min(state.ref.offset+state.ref.limit,res.total)} of ${res.total} · canonical fleet-filtered local records`;
  const prev=shadow('[data-action="ref-prev"]'),next=shadow('[data-action="ref-next"]');if(prev)prev.disabled=state.ref.offset===0;if(next)next.disabled=state.ref.offset+state.ref.limit>=res.total;
  for(const b of shadow('.ref-tabs')?.querySelectorAll('[data-filter]')||[]){const value=b.dataset.filter.split(':')[1];b.setAttribute('aria-selected',String(value.toUpperCase()===state.ref.phase.toUpperCase()));b.tabIndex=b.getAttribute('aria-selected')==='true'?0:-1}
  const side=shadow('.ref-side');if(side){
