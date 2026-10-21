@@ -8,9 +8,10 @@ export const DIAGNOSTIC_RUN='pcmsS08DiagnosticRun';
 export const STAGES=Object.freeze(['SCOPE','CREATE','GIT_SOURCE','READY','AI_TEST',
   'GIT_WRITEBACK','PUBLICATION','REFRESHER','BACKUP','RESTORE','PROCESS_RESTART']);
 export function validateDisposable(config){
- if(!config||!ID.test(config.accountId||'')||
-   !ID.test(config.personaUid||'')||!RID.test(config.repositoryId||'')||
-   !NS.test(config.namespace||''))return {ok:false,code:'TEST_SCOPE_INVALID'};
+ if(!config||!ID.test(config.accountId||''))return {ok:false,code:'TEST_ACCOUNT_SELECTION_INVALID'};
+ if(!ID.test(config.personaUid||''))return {ok:false,code:'TEST_PERSONA_BINDING_INVALID'};
+ if(!RID.test(config.repositoryId||''))return {ok:false,code:'TEST_GITHUB_CONNECTION_REQUIRED'};
+ if(!NS.test(config.namespace||''))return {ok:false,code:'TEST_NAMESPACE_INVALID'};
  return {ok:true};
 }
 export function evaluateDisposable(config,accounts,git,authority){
