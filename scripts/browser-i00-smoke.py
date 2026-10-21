@@ -1266,7 +1266,7 @@ def main():
                   const connectionRows=[...connected?.querySelectorAll('.settings-row')||[]];
                   const restoredConnections=connectionRows.length>=3&&
                     connectionRows.some(x=>x.textContent.includes('PersonaMonkey'))&&
-                    connectionRows.some(x=>x.textContent.includes('Native vault'))&&
+                    connectionRows.some(x=>x.textContent.includes('Native services'))&&
                     !!connected.querySelector('input[type="password"]');
                   const readableConnections=connectionRows.every(x=>
                     !/GIT_[A-Z_]+|NATIVE_[A-Z_]+|local[.]pcms[.]/.test(
