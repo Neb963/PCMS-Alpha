@@ -949,6 +949,135 @@ async function runReadiness(remote){
  }catch{state.readiness={ok:false,code:'READINESS_TRANSPORT_UNAVAILABLE'};}
  finally{state.readinessBusy=false;if(state.route==='settings')renderSettingsSection();}
 }
+function primarySettingCard(container,title,intro){
+ const section=el('section','card settings-group'),header=el('h2','h2',title);
+ section.append(header,el('p','setting-note',intro));container.append(section);
+ return section;
+}
+function primaryConnections(container){
+ const section=primarySettingCard(container,'GitHub connection',
+  'PCMS reads generator folders from the committed main branch only. A repository preview is not a saved connection.');
+ const repo=el('input','form-input');repo.value='Neb963/per-gens';repo.readOnly=true;
+ repo.setAttribute('aria-label','Managed GitHub repository');
+ const credential=el('input','form-input');credential.type='password';
+ credential.autocomplete='off';credential.placeholder='GitHub access credential';
+ credential.setAttribute('aria-label','GitHub access credential');
+ const status=el('p','setting-note','No authenticated read-only verification has run in this session.');
+ status.setAttribute('role','status');
+ const actions=el('div','form-foot');
+ const begin= b('Connect securely',()=>void (async()=>{
+  if(!credential.value){status.textContent='Enter your GitHub credential first.';return}
+  const token=credential.value;credential.value='';begin.disabled=true;
+  try{
+   const out=await readPort('pcms-s03-catalog','CONNECT_GIT',
+      {repository:repo.value,token},30000);
+   status.textContent=out?.ok?'Secure GitHub connection saved. Check files from main before any import.':
+     out?.code==='GIT_PENDING_CONNECTION_RECONCILIATION_REQUIRED'?
+     'A previous setup did not finish. Check the recovery section below before entering a new credential.':
+     'The secure connection could not be confirmed. Check local PCMS services in the readiness section.';
+  }catch{status.textContent='Connection result uncertain. Check readiness before attempting another connection.'}
+  finally{begin.disabled=false}
+ })(),'btn primary');
+ const inspect=b('Read main safely',()=>void (async()=>{
+  inspect.disabled=true;status.textContent='Reading the committed main inventory…';
+  try{
+   const out=await readPort('pcms-s03-catalog','SCAN_CONNECTED',{},95000);
+   status.textContent=out?.ok&&out.complete?
+     out.recognizedCount+' recognized generator folder(s) on main. Account ownership, publication and deployment remain separate checks.':
+     'The committed main inventory could not be verified. No deletion or missing folder has been inferred.';
+  }catch{status.textContent='GitHub read-only scan unavailable. No remote changes were made.'}
+  finally{inspect.disabled=false}
+ })(),'btn small');
+ actions.append(begin,inspect);section.append(repo,credential,actions,status);
+}
+function primaryAutomation(container){
+ const section=primarySettingCard(container,'Standing permissions',
+  'You control whether protected development and tested-source writeback are permitted. Publication always requires approval of the exact candidate.');
+ const feedback=el('p','setting-note','Checking the current repository permissions…');
+ const fields=el('div','');
+ const actions=el('div','form-foot');section.append(fields,actions,feedback);
+ const controls={};
+ async function load(){
+  fields.replaceChildren();actions.replaceChildren();
+  let state;
+  try{state=await readPort('pcms-s06-authority','GET',{},18000)}
+  catch{feedback.textContent='Permissions could not be read. Nothing has been enabled.';return}
+  if(!state?.ok){feedback.textContent='Permissions are not available. No changes made.';return}
+  const rec=state.record;
+  feedback.textContent=rec.repositoryId?
+   'Permissions apply only to the verified connected GitHub repository.':
+   'Connect and verify GitHub before enabling any protected workflow.';
+  for(const [key,title] of [['development','Protected development'],['gitWrite','Verified source writeback'],['publication','Approved publication only']]){
+   const label=el('label','setting-option');const input=el('input');
+   input.type='checkbox';input.checked=rec.grants?.[key]===true;
+   input.disabled=!rec.repositoryId;
+   label.append(input,document.createTextNode(' '+title));fields.append(label);controls[key]=input;
+  }
+  const save=b('Save permissions',()=>void (async()=>{
+   if(!rec.repositoryId)return;
+   const grants=Object.fromEntries(Object.keys(controls).map(k=>[k,controls[k].checked]));
+   if(!window.confirm('Apply these repository-scoped permissions? Protected route, source and publication checks still apply independently.'))return;
+   save.disabled=true;feedback.textContent='Saving permissions…';
+   try{
+    const out=await readPort('pcms-s06-authority','SET',{
+      repositoryId:rec.repositoryId,expectedRevision:rec.revision,
+      grants,consent:'I AUTHORIZE PROTECTED PCMS OPERATIONS'},18000);
+    feedback.textContent=out?.ok?'Permissions updated. Protected checks still apply.':
+      'Permissions were not updated. Recheck the current configuration before retrying.';
+   }catch{feedback.textContent='Update not confirmed. Review current permissions before another change.'}
+   finally{save.disabled=false;await load()}
+  })(),'btn primary');
+  save.disabled=!rec.repositoryId;
+  actions.append(save,b('Pause all managed effects',()=>void (async()=>{
+   if(!window.confirm('Immediately revoke all standing permissions? In-flight uncertain writes remain held for reconciliation.'))return;
+   try{const out=await readPort('pcms-s06-authority','REVOKE',{},18000);
+    feedback.textContent=out?.ok?'Permissions revoked.':'Revocation result unconfirmed; check status.'}
+   catch{feedback.textContent='Revocation status uncertain; check permissions.'}
+   await load();
+  })(),'btn small'));
+ }
+ void load();
+}
+function backupAction(action,extra={}){
+ return new Promise((resolve,reject)=>{
+  const port=browser.runtime.connect({name:'pcms-i15-backup'});
+  let done=false;const timer=setTimeout(()=>finish(null,new Error('TIMEOUT')),40000);
+  function finish(value,error){if(done)return;done=true;clearTimeout(timer);try{port.disconnect()}catch{}error?reject(error):resolve(value)}
+  port.onMessage.addListener(value=>finish(value));
+  port.onDisconnect.addListener(()=>finish(null,new Error('DISCONNECTED')));
+  try{port.postMessage({action,...extra})}catch{finish(null,new Error('DISCONNECTED'))}
+ });
+}
+function primaryBackups(container){
+ const section=primarySettingCard(container,'Encrypted backups',
+  'Automatic source-complete backups require the matching OS-native helper. No backup counts as recoverable without independent verification.');
+ const status=el('p','setting-note','Reading current backup status…');
+ const actions=el('div','form-foot');section.append(actions,status);
+ void (async()=>{
+  try{
+   const s=await backupAction('STATUS');
+   if(!s?.ok){status.textContent='Backup service unavailable. Check local helper installation.';return;}
+   status.textContent='Automatic backup: '+(s.enabled?'enabled':'off')+
+     '. Last independently verified backup: '+(s.lastVerifiedAt?
+       new Date(s.lastVerifiedAt).toLocaleString():'not verified');
+   actions.append(b(s.enabled?'Turn automatic backup off':'Enable automatic backup',()=>void (async()=>{
+     if(!window.confirm(s.enabled?
+       'Disable future automatic backups? Existing encrypted backups are retained.':
+       'Enable scheduled encrypted backup using the configured secure key and native helper?'))return;
+     try{const result=await backupAction('ENABLE',{enabled:!s.enabled});
+      status.textContent=result?.ok?'Backup setting saved. Verification remains separate.':
+       'Backup setting could not be confirmed.'}
+     catch{status.textContent='Backup change not confirmed; check current status.'}
+   })(),'btn small'));
+   actions.append(b('Verify backup capability',()=>void (async()=>{
+    try{const result=await backupAction('STATUS');
+     status.textContent=result?.ok?'Backup service responded. Encrypted file and fresh-profile restore still need independent proof.':
+       'Backup service unavailable.'}
+    catch{status.textContent='Backup helper did not respond. Reinstall the matching native-host package.'}
+   })(),'btn small'));
+  }catch{status.textContent='Local backup service is not responding. The XPI alone does not install native helpers.'}
+ })();
+}
 function renderSettingsSection(){if(state.route!=='settings')return;
  const names=['connections','automation','backups','diagnostics','advanced'];
  const select=names.includes(state.settings)?state.settings:'connections';
@@ -968,14 +1097,20 @@ function renderSettingsSection(){if(state.route!=='settings')return;
    const button=row.querySelector('button[data-action]');if(button)button.dataset.action='check-service:'+(['github','persona','native'][i]);
   });
   container.querySelectorAll('.settings-row').forEach(row=>{if(row.querySelector('.pill')?.textContent==='Healthy')row.querySelector('.pill').textContent='Unknown'});
+  primaryConnections(container);
  } else {
   container.replaceChildren();
   const section=el('section','card settings-group');const head=el('div','settings-section-head');const titles={automation:'Automation',backups:'Backup & Restore',diagnostics:'Diagnostics',advanced:'Advanced'};
   head.append(el('h2','h2',titles[select]));section.append(head);
-  section.append(el('p','setting-note','Some controls are still in the original PCMS view. They use the same protected data and permissions; the unified settings interface is not yet complete.'));
-  const group=select==='backups'?'backup':select==='diagnostics'?'diagnostics':select==='automation'?'automation':'permissions';
-  section.append(b('Open '+titles[select].toLowerCase()+' tools (original view)',()=>nativeAction('settings',group),'btn primary'));
-  container.append(section);
+  if(select==='automation'){primaryAutomation(container);}
+  else if(select==='backups'){primaryBackups(container);}
+  else{
+   section.append(el('p','setting-note',
+     select==='diagnostics'?
+      'Use the readiness preflight below to identify unmet prerequisites. Live tests remain held until secure GitHub and native helpers are verified.':
+      'Advanced permissions are enforced by the protected runtime. Routine setup is in Connections and Automation.'));
+   container.append(section);
+  }
  }
  renderReadinessPanel(container);
 }
