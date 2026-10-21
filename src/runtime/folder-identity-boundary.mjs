@@ -20,9 +20,12 @@ export function validateIdentityMessage(api,sender,message){
     Object.keys(p).length===1&&SLUG.test(p.newSlug||'')?{ok:true}:fail('INVALID_PARAMS');
  }
  if(['PREPARE_RENAME','EXECUTE_RENAME','RECONCILE_RENAME'].includes(message.type)){
+  const effect=message.type==='EXECUTE_RENAME';
   return typeof p==='object'&&!Array.isArray(p)&&
-    Object.keys(p).length===2&&SLUG.test(p.newSlug||'')&&
-    Number.isSafeInteger(p.expectedRevision)&&p.expectedRevision>0?
+    Object.keys(p).length===(effect?3:2)&&
+    Object.keys(p).every(k=>['newSlug','expectedRevision',...(effect?['consent']:[])].includes(k))&&
+    (!effect||p.consent==='I APPROVE THE EXACT EXISTING GENERATOR RENAME')&&
+    SLUG.test(p.newSlug||'')&&Number.isSafeInteger(p.expectedRevision)&&p.expectedRevision>0?
       {ok:true}:fail('INVALID_PARAMS');
  }
 
