@@ -1474,6 +1474,25 @@ def main():
                         "sync:document.getElementById('pcms-generator-sync')?.disabled}")
                     if '1250' in view.get('count',''):break
                     time.sleep(.15)
+                if view.get('rows')!=50 or '1250' not in view.get('count',''):
+                    # Non-mutating failure diagnostic: independent port result
+                    # versus DOM/filter state after installed-page navigation.
+                    debug_ui=execute(after,"""const by=id=>document.getElementById(id);
+                      return {href:location.href,ready:document.readyState,
+                        query:by('pcms-generator-query')?.value,
+                        ownerFilter:by('pcms-generator-owner-filter')?.value,
+                        feedback:by('pcms-inventory-feedback')?.textContent,
+                        visiblePanel:by('generators-table-title')?.closest('section.panel')?.hidden,
+                        results:by('pcms-generator-count')?.textContent,
+                        loadedModules:!!document.querySelector('script[src="v014-desktop-ui.mjs"]'),
+                        selected:document.querySelector('#view-generators .pcms-v014-workflow-button[aria-pressed=true]')?.textContent};""")
+                    debug_port=inventory_command(after,{'type':'LIST_INVENTORY',
+                       'params':{'query':'','ownerState':'ALL','offset':0,'limit':50}})
+                    print('B V014_INVENTORY_FAILURE_DIAGNOSTICS=',json.dumps({
+                      'ui':debug_ui,
+                      'port':{'ok':debug_port.get('ok'), 'total':debug_port.get('total'),
+                        'count':len(debug_port.get('items',[])),
+                        'code':debug_port.get('code')}},default=str),flush=True)
                 assert view.get('rows')==50 and '1250' in view.get('count',''),view
                 execute(after,"document.getElementById('pcms-generator-next').click();return true")
                 for _ in range(40):
