@@ -40,7 +40,9 @@ test('canonical read-only ports feed prototype views; original guarded mutating 
  assert.match(bridge,/function nativeAction\(/);
  assert.match(bridge,/function guardedClick\(/);
  assert.match(bridge,/mount\(\)\.catch/);
- assert.equal((bridge.match(/\binnerHTML\s*=/g)||[]).length,1,'only static bundled templates may be rendered as HTML');
+ assert.equal((bridge.match(/\binnerHTML\s*=/g)||[]).length,2,'only static bundled shell and selected local template may be parsed as HTML');
+ assert.match(bridge,/template\.innerHTML=html/);
+ assert.match(bridge,/const route=state\.route,html=templates\.get\(route\)/);
  assert.match(bridge,/root\.innerHTML=assets\['symbols\.html'\]\+assets\['shell\.html'\]/);
  assert.doesNotMatch(bridge,/postMessage\(\{type:'(?:SET_POLICY|EXECUTE_ITEM|DISPATCH|REMOVE_ACCOUNT|RESTORE)/);
  for(const id of ['pcms-generator-query','pcms-refresher-enable','pcms-refresher-rows','pcms-release-approve','pcms-backup-export']){
