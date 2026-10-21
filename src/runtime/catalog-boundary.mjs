@@ -22,13 +22,14 @@ export function validateCatalogMessage(api,sender,message){
   if(!message||typeof message!=='object'||Array.isArray(message)||
       Object.keys(message).some(k=>!['type','params'].includes(k)))
     return fail('CAPABILITY_OFF');
-  const types=['SCAN_CATALOG','CONNECT_GIT','SCAN_CONNECTED','GIT_STATUS','DISCONNECT_GIT','RECONCILE_GIT','APPROVE_IMPORT','GET_PROMPT_DRAFT','SAVE_PROMPT_DRAFT','COMMIT_PROMPT','RECONCILE_PROMPT','INSPECT_DECLARATION','LIST_READY'];
+  const types=['SCAN_CATALOG','CONNECT_GIT','SCAN_CONNECTED','GIT_STATUS','DISCONNECT_GIT','RECONCILE_GIT','RECOVER_GIT_CONNECTION','APPROVE_IMPORT','GET_PROMPT_DRAFT','SAVE_PROMPT_DRAFT','COMMIT_PROMPT','RECONCILE_PROMPT','INSPECT_DECLARATION','LIST_READY'];
   if(!types.includes(message.type))return fail('CAPABILITY_OFF');
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
-  if(['SCAN_CATALOG','CONNECT_GIT'].includes(message.type)){
-    if(Object.keys(p).some(k=>!['repository','token'].includes(k))||
-      !validRepository(p.repository)||!TOKEN.test(p.token||''))
+  if(['SCAN_CATALOG','CONNECT_GIT','RECOVER_GIT_CONNECTION'].includes(message.type)){
+    if(Object.keys(p).some(k=>!['repository','token',...(message.type==='RECOVER_GIT_CONNECTION'?['acknowledgeCredentialReplacement']:[])].includes(k))||
+      !validRepository(p.repository)||!TOKEN.test(p.token||'')||
+      (message.type==='RECOVER_GIT_CONNECTION'&&p.acknowledgeCredentialReplacement!==true))
       return fail('INVALID_PARAMS');
   } else if(message.type==='SAVE_PROMPT_DRAFT'){
     if(Object.keys(p).some(k=>!['repositoryId','expectedRevision','baseOid','text'].includes(k))||
@@ -112,7 +113,8 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
         return createReadyStore(await (importDb ||= open())).list(p);
       if(message.type==='SCAN_CATALOG')
         return await scanAndPreview(p.repository,p.token,null);
-      if(message.type==='CONNECT_GIT'){
+      if(message.type==='CONNECT_GIT'||message.type==='RECOVER_GIT_CONNECTION'){
+        const recovery=message.type==='RECOVER_GIT_CONNECTION';
         // Repository identity first. No native/Secret Service write on an
         // unauthenticated, transient or wrong-repository response.
         let response;
@@ -140,14 +142,20 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
         stage='CONFIG_READ';
         const current=await readConfig();
         const previousPending=(await api.storage.local.get(PENDING_KEY))?.[PENDING_KEY];
-        if(previousPending)return fail('GIT_PENDING_CONNECTION_RECONCILIATION_REQUIRED');
+        if(recovery){
+          if(!previousPending||!validConfig(previousPending))
+            return fail('GIT_RECOVERY_REQUIRES_PENDING');
+          if(previousPending.repository!==p.repository||previousPending.repositoryId!==id)
+            return fail('GIT_RECOVERY_SCOPE_MISMATCH');
+        }else if(previousPending)return fail('GIT_PENDING_CONNECTION_RECONCILIATION_REQUIRED');
         if(current&&(current.repositoryId!==id||current.repository!==p.repository))
           return fail('GIT_CONNECTION_REPLACE_REQUIRES_DISCONNECT');
         // Nonsecret intent survives the exact vault-before-config interruption.
         // Never assume native write failure proves absence of the credential.
         stage='PENDING_INTENT';
         await api.storage.local.set({[PENDING_KEY]:{
-          repository:p.repository,repositoryId:id,startedAt:Date.now()}});
+          repository:p.repository,repositoryId:id,startedAt:Date.now(),
+          ...(recovery?{explicitCredentialReplacement:true}:{})}});
         stage='VAULT_STORE';
         let saved;
         try{saved=await native({action:'git.store',repositoryId:id,credential:p.token});}
