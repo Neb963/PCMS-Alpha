@@ -11,6 +11,47 @@ const host=document.createElement('div');host.id='pcms-faithful-host';
 document.body.append(host);const root=host.attachShadow({mode:'open'});
 const READINESS_NAMES={NATIVE_VAULT_HOST:'GitHub credential helper',SECRET_SERVICE_ENVIRONMENT:'Secure credential storage',BACKUP_HOST:'Backup helper',DIAGNOSTIC_HOST:'Diagnostic helper',GIT_CONFIG:'GitHub connection',GIT_PARTIAL_CONNECTION:'Interrupted GitHub setup',GITHUB_AUTH:'GitHub access',GITHUB_MAIN_TREE:'GitHub file scan',GRANT_DEVELOPMENT:'Development permission',GRANT_GITWRITE:'Git write permission',GRANT_PUBLICATION:'Publication permission',PERSONA_AND_SESSION:'Account and secure route',REFRESHER_LIVE_EFFECT:'Refresher operation',INSTALLED_XPI_IDENTITY:'Installed extension verification'};
 const READINESS_STATES={VERIFIED:'Checked',NOT_TESTED:'Not checked',OUTCOME_UNCERTAIN:'Needs review',UNREACHABLE:'Not responding',STALE:'Needs updating',SECURITY_HELD:'Waiting on setup',OFF_BY_POLICY:'Disabled',NOT_CONFIGURED:'Not connected',MISSING_CAPABILITY:'Needs an update'};
+function operatorReadinessGuidance(row){
+ const code=row.code||'';
+ if(row.component==='NATIVE_VAULT_HOST'||row.component==='BACKUP_HOST'||row.component==='DIAGNOSTIC_HOST')
+   return row.state==='UNREACHABLE'?'The PCMS helper is not responding. Check the local PCMS installation.':
+     row.state==='VERIFIED'?'The local helper responded. Its complete workflow is not yet verified.':
+     'The local helper needs attention before this service can be used.';
+ if(row.component==='GIT_CONFIG'||row.component==='GIT_PARTIAL_CONNECTION')
+   return row.state==='OUTCOME_UNCERTAIN'?'A previous GitHub setup did not finish. Use the recovery control before connecting again.':
+     row.state==='VERIFIED'?'Connection settings are saved. Check GitHub access separately.':
+     'GitHub needs to be connected before dependent operations can run.';
+ if(row.component==='SECRET_SERVICE_ENVIRONMENT'||row.component==='SECRET_SERVICE')
+   return row.state==='VERIFIED'?'Secure credential storage responded. GitHub access is checked separately.':
+     'Secure credential storage needs attention. Check the local PCMS helper before retrying.';
+ if(row.component==='GITHUB_AUTH'||row.component==='GITHUB_MAIN_TREE')
+   return row.state==='VERIFIED'?'The requested read-only GitHub check passed.':
+     row.state==='NOT_TESTED'?'Use the separate GitHub verification action when you need to check access.':
+     'GitHub access cannot be confirmed until secure connection setup is complete.';
+ if(row.component.startsWith('GRANT_'))
+   return row.state==='VERIFIED'?'Permission is recorded for the current GitHub setup.':
+     row.state==='STALE'?'This permission needs review after GitHub connection is repaired.':
+     'This permission is not enabled. Review it only when needed.';
+ if(row.component==='PERSONA_AND_SESSION')
+   return 'Use Accounts to check the selected account and its protected connection before live work.';
+ if(row.component==='REFRESHER_LIVE_EFFECT')
+   return 'A live source save and recent-list appearance have not been verified.';
+ if(row.component==='REFRESHER_POLICY'||row.component==='REFRESHER_CURRENT_POLICY')
+   return 'Open Refresher to inspect the current policy. Live effectiveness is checked separately.';
+ if(row.component==='BACKUP_RESTORE')
+   return 'A successful backup and restore still need independent verification.';
+ if(row.component==='INSTALLED_XPI_IDENTITY')
+   return 'An independent installed-extension check is needed to confirm the exact build.';
+ if(row.state==='VERIFIED')return 'This local check passed. It does not establish full live readiness.';
+ if(row.state==='OFF_BY_POLICY')return 'This capability is not enabled in the current settings.';
+ if(row.state==='NOT_TESTED')return 'This check has not been performed yet.';
+ if(row.state==='STALE')return 'This saved setting needs to be checked again.';
+ if(row.state==='SECURITY_HELD')return 'A required setup step must be completed first.';
+ if(row.state==='UNREACHABLE')return 'This service is not responding. Check its connection or installation.';
+ if(row.state==='OUTCOME_UNCERTAIN')return 'The last operation did not finish with a confirmed result.';
+ return code==='LOCAL_STORAGE_READ_FAILED'?'Saved settings could not be read. Check the Firefox profile.':
+   'Check this item before relying on the corresponding capability.';
+}
 function friendlyConnectionIssue(code){
  const messages={
  GIT_RECONCILED_LOCALLY_VERIFIED:'GitHub connection repaired. Run a read-only check to verify the files.',
@@ -514,10 +555,11 @@ function renderReadinessPanel(container){
   const item=el('div','queue-item');item.style.display='block';
   item.append(el('strong','',READINESS_NAMES[r.component]||r.component.replaceAll('_',' ')),
     document.createTextNode(' — '+(READINESS_STATES[r.state]||'Needs review')));
-  item.append(el('p','setting-note',r.safeRecovery));
+  item.append(el('p','setting-note',operatorReadinessGuidance(r)));
   const technical=el('details','muted small');
   const summary=el('summary','','Technical details');technical.append(summary);
   technical.append(el('p','',r.code+' · '+r.stage+' · '+r.evidenceKind+' · '+new Date(r.observedAt).toLocaleString()));
+  technical.append(el('p','',r.safeRecovery));
   item.append(technical);results.append(item);
  }
  section.append(results);container.append(section);
