@@ -1674,9 +1674,19 @@ function primaryRestore(container){
  const controls=new Map();
  function setValue(id,value,evt){
   const target=nativeControl(id);if(!target)return false;
-  if(value instanceof FileList){target.files=value;}
-  else if(target.type==='checkbox')target.checked=Boolean(value);
-  else target.value=value;
+  if(target.type==='file'){
+   const prior=target.files||[],next=value||[];
+   if(prior.length===next.length&&[...prior].every((file,i)=>{
+    const other=next[i];return other&&file.name===other.name&&
+     file.size===other.size&&file.lastModified===other.lastModified}))return true;
+   target.files=value;
+  }else if(target.type==='checkbox'){
+   if(target.checked===Boolean(value))return true;
+   target.checked=Boolean(value);
+  }else{
+   if(target.value===String(value))return true;
+   target.value=value;
+  }
   target.dispatchEvent(new Event(evt||'change',{bubbles:true}));
   if(evt==='input')target.dispatchEvent(new Event('change',{bubbles:true}));
   return true;
@@ -1725,7 +1735,10 @@ function primaryRestore(container){
    if(original.disabled){refresh();return;}
    button.disabled=true;feedback.textContent='Protected restore stage running; never repeat a possible restore write.';
    original.click();
-   pass.value='';phrase.value='';refresh();
+   if(['pcms-restore-apply','pcms-restore-reconcile',
+       'pcms-restore-reactivate'].includes(id))pass.value='';
+   if(id==='pcms-restore-reactivate')phrase.value='';
+   refresh();
   })(),'btn small');
   button.dataset.restoreStep=id;
   button.disabled=true;controls.set(id,button);actions.append(button);
