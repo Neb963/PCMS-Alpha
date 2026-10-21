@@ -15,6 +15,7 @@ export const CATALOG_ALARM='pcms-s03-main-observe';
 export const CATALOG_RESUME_ALARM='pcms-s03-main-resume';
 export const READY_PROGRESS_ALARM='pcms-s05-ready-progress';
 const CONFIG='pcmsS03Git',RECEIPT='pcmsS03CatalogReceipt',LAST='pcmsS03CatalogLastComplete';
+const MISSING='pcmsR4MissingGitFolders';
 const SHA=/^[0-9a-f]{40}$/;
 const identifier=c=>c&&typeof c.repository==='string'&&
   typeof c.repositoryId==='string'&&/^[1-9][0-9]{0,19}$/.test(c.repositoryId);
@@ -86,8 +87,17 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
         prior?.repositoryId===cfg.repositoryId&&prior.complete?prior:null,snapshot,stored);
       if(!planned.ok)return persistStatus(planned.code);
       const reviews=[...planned.review].slice(-512);
+      const older=(await api.storage.local.get(MISSING))?.[MISSING];
+      const formerlyMissing=older?.repositoryId===cfg.repositoryId&&
+        Array.isArray(older.slugs)?older.slugs:[];
+      const stillMissing=[...new Set([...formerlyMissing,...missing])].
+        filter(slug=>!snapshot.generators.some(g=>g.slug===slug)).slice(0,100000);
+      const reappeared=formerlyMissing.filter(slug=>
+        snapshot.generators.some(g=>g.slug===slug));
       // "Missing" is a reported Git path observation, NEVER deletion authority.
-      await api.storage.local.set({[LAST]:snapshot,[REVIEW_KEY]:reviews,[RECEIPT]:{
+      await api.storage.local.set({[LAST]:snapshot,[REVIEW_KEY]:reviews,
+        [MISSING]:{repositoryId:cfg.repositoryId,slugs:stillMissing},
+        [RECEIPT]:{
         code:'CATALOG_OBSERVED_READ_ONLY',observedAt:clock(),
         repositoryId:cfg.repositoryId,head:result.head,recognizedCount:result.recognizedCount,
         newFolders:added,missingFolderObservations:missing,
@@ -114,12 +124,10 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
           revision:Math.max(1,clock())});}catch{}
       }
       // Incident resolution is independent of owner/source write authority.
-      if(prior?.repositoryId===cfg.repositoryId&&prior.complete)
-        for(const g of snapshot.generators.slice(0,64)){
-          if(!prior.generators?.some(x=>x.slug===g.slug))continue;
-          try{await dispatcher.resolve({scopeId:await scopeFor(g.slug),
-            code:'GIT_FOLDER_MISSING',evidence:'COMPLETE_MAIN_FOLDER_READBACK'});}catch{}
-        }
+      for(const slug of reappeared.slice(0,64)){
+        try{await dispatcher.resolve({scopeId:await scopeFor(slug),
+          code:'GIT_FOLDER_MISSING',evidence:'COMPLETE_MAIN_FOLDER_READBACK'});}catch{}
+      }
       // S04 receives only the independently complete pinned-main scan. Its
       // own approval check and canonical DB handle decide local intent intake.
       // The S03 observer never invents provider ownership or performs writes.
