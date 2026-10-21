@@ -9,7 +9,7 @@ const routes=['overview','generators','work-queue','accounts','refresher','setti
 const native=document.querySelector('body > .app');
 const host=document.createElement('div');host.id='pcms-faithful-host';
 document.body.append(host);const root=host.attachShadow({mode:'open'});
-const READINESS_NAMES={NATIVE_VAULT_HOST:'GitHub credential helper',SECRET_SERVICE_ENVIRONMENT:'Secure credential storage',BACKUP_HOST:'Backup helper',DIAGNOSTIC_HOST:'Diagnostic helper',GIT_CONFIG:'GitHub connection',GIT_PARTIAL_CONNECTION:'Interrupted GitHub setup',GITHUB_AUTH:'GitHub access',GITHUB_MAIN_TREE:'GitHub file scan',GRANT_DEVELOPMENT:'Development permission',GRANT_GITWRITE:'Git write permission',GRANT_PUBLICATION:'Publication permission',PERSONA_AND_SESSION:'Account and secure route',REFRESHER_LIVE_EFFECT:'Refresher operation',INSTALLED_XPI_IDENTITY:'Installed extension verification'};
+const READINESS_NAMES={EXTENSION_RUNTIME:'PCMS extension',LOCAL_CONFIGURATION:'Local settings',RESTORE_HOLD:'Restore safety',REFRESHER_POLICY:'Refresher configuration',BACKUP_RESTORE:'Backup recovery',ACCOUNT_INVENTORY_READ:'Account inventory',REFRESHER_CURRENT_POLICY:'Current Refresher policy',NATIVE_VAULT_HOST:'GitHub credential helper',SECRET_SERVICE_ENVIRONMENT:'Secure credential storage',BACKUP_HOST:'Backup helper',DIAGNOSTIC_HOST:'Diagnostic helper',GIT_CONFIG:'GitHub connection',GIT_PARTIAL_CONNECTION:'Interrupted GitHub setup',GITHUB_AUTH:'GitHub access',GITHUB_MAIN_TREE:'GitHub file scan',GRANT_DEVELOPMENT:'Development permission',GRANT_GITWRITE:'Git write permission',GRANT_PUBLICATION:'Publication permission',PERSONA_AND_SESSION:'Account and secure route',REFRESHER_LIVE_EFFECT:'Refresher operation',INSTALLED_XPI_IDENTITY:'Installed extension verification'};
 const READINESS_STATES={VERIFIED:'Checked',NOT_TESTED:'Not checked',OUTCOME_UNCERTAIN:'Needs review',UNREACHABLE:'Not responding',STALE:'Needs updating',SECURITY_HELD:'Waiting on setup',OFF_BY_POLICY:'Disabled',NOT_CONFIGURED:'Not connected',MISSING_CAPABILITY:'Needs an update'};
 function operatorReadinessGuidance(row){
  const code=row.code||'';
@@ -795,13 +795,20 @@ function renderReadinessPanel(container){
     ['NATIVE_VAULT_HOST','BACKUP_HOST','DIAGNOSTIC_HOST'].includes(row.component)&&row.state==='UNREACHABLE');
   const pending=state.readiness.rows.some(row=>row.component==='GIT_PARTIAL_CONNECTION'&&row.state==='OUTCOME_UNCERTAIN');
   summary.textContent=hostUnavailable?
-    'The local PCMS helper is not responding. GitHub connection, backup and full diagnostic tests cannot finish until it is repaired.':
+    'PCMS local services are not responding. Install the native helpers from the matching PCMS release bundle, restart Firefox, then check again. Read-only inventory may still work.':
     pending?'A previous GitHub connection did not finish. Review and reconcile it before running full diagnostics.':
     'Readiness checked. Review any items that need attention; a local check does not prove live service operations.';
  }
  section.append(summary);
+ const details=el('details','settings-section');
+ const rows=state.readiness?.rows||[];
+ const problematic=rows.filter(row=>
+   ['UNREACHABLE','OUTCOME_UNCERTAIN','SECURITY_HELD','STALE','MISSING_CAPABILITY'].includes(row.state));
+ const heading=el('summary','',
+   'Detailed checks · '+rows.length+' inspected · '+problematic.length+' need attention');
+ details.append(heading);
  const results=el('div','queue-list');
- for(const r of state.readiness?.rows||[]){
+ for(const r of rows){
   const item=el('div','queue-item');item.style.display='block';
   item.append(el('strong','',READINESS_NAMES[r.component]||r.component.replaceAll('_',' ')),
     document.createTextNode(' — '+(READINESS_STATES[r.state]||'Needs review')));
@@ -812,7 +819,7 @@ function renderReadinessPanel(container){
   technical.append(el('p','',r.safeRecovery));
   item.append(technical);results.append(item);
  }
- section.append(results);container.append(section);
+ details.append(results);section.append(details);container.append(section);
 }
 async function runReadiness(remote){
  if(state.readinessBusy)return;
@@ -892,7 +899,7 @@ function displayRouteScaffold(){
  if(state.route==='settings')renderSettingsSection();
  const top=page()?.querySelector('.page-head .head-actions');
  if(top){top.append(b('More controls (original view)',()=>nativeAction(state.route),'btn quiet small'))}
- else page()?.querySelector('.page-head')?.append(b('Advanced controls',()=>nativeAction(state.route),'btn quiet small'));
+ else page()?.querySelector('.page-head')?.append(b('More controls (original view)',()=>nativeAction(state.route),'btn quiet small'));
 }
 const templates=new Map();
 async function render(){
