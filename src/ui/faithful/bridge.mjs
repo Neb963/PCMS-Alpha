@@ -1775,7 +1775,8 @@ function renderSettingsSection(){if(state.route!=='settings')return;
   else if(select==='diagnostics')primaryDiagnostics(container);
   else{
    section.append(el('p','setting-note',
-     'Advanced permissions are enforced by the protected runtime. Routine setup is in Connections and Automation.'));
+     'The original protected controller remains available for exceptional recovery workflows not yet migrated into the primary workspace. Routine actions are available directly in the main interface.'));
+   section.append(b('Open protected recovery controls',()=>nativeAction('settings'),'btn small'));
    container.append(section);
   }
  }
@@ -1799,9 +1800,8 @@ function displayRouteScaffold(){
   void loadRefresher();
  }
  if(state.route==='settings')renderSettingsSection();
- const top=page()?.querySelector('.page-head .head-actions');
- if(top){top.append(b('More controls (original view)',()=>nativeAction(state.route),'btn quiet small'))}
- else page()?.querySelector('.page-head')?.append(b('More controls (original view)',()=>nativeAction(state.route),'btn quiet small'));
+ // The original controls are deliberately accessed from Settings -> Advanced,
+ // not displayed as a second competing dashboard on every primary view.
 }
 const templates=new Map();
 async function render(){
