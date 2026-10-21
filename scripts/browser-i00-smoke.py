@@ -1132,9 +1132,56 @@ def main():
                 assert faithful['inventoryTabs']>=4 and faithful['sourceWriters']==1,faithful
                 print('B V015_TRUE_DESKTOP_PRIMARY_WORKSPACES_AND_REAL_HANDLERS=PASS',flush=True)
                 release_version=execute(after,"return {manifest:browser.runtime.getManifest().version,ui:document.documentElement.dataset.pcmsUiVersion,badge:document.querySelector('.v015-top-status')?.textContent};")
-                assert release_version.get('manifest')=='1.2.1',release_version
+                assert release_version.get('manifest')=='1.2.2',release_version
                 assert release_version.get('ui')=='0.1.5' and '0.1.5' in release_version.get('badge',''),release_version
                 print('B V015_REAL_FIREFOX_UPDATE_VERSION_AND_VISIBLE_UI_MARKER=PASS',flush=True)
+                # V016 acceptance: the PRECISE accepted prototype structure is
+                # the visible full-screen extension UI, not an old markup reskin.
+                for _ in range(70):
+                    mounted=execute(after,"return !!(document.body.classList.contains('pcms-faithful-ready')&&document.getElementById('pcms-faithful-host')?.shadowRoot?.querySelector('#page'))")
+                    if mounted:break
+                    time.sleep(.15)
+                assert mounted,'Packaged prototype failed to mount; native fallback would be visible'
+                actual=execute(after,"""const host=document.getElementById('pcms-faithful-host'),
+                   sh=host?.shadowRoot,app=sh?.querySelector('.app');
+                   const legacy=document.querySelector('body > .app');
+                   return {host:!!host,shadow:!!sh,manifest:browser.runtime.getManifest().version,
+                     badge:sh?.querySelector('.preview-label')?.textContent,
+                     routes:sh?.querySelectorAll('[data-nav]').length,
+                     visible:getComputedStyle(host).display!=='none',
+                     nativeHidden:getComputedStyle(legacy).visibility==='hidden',
+                     sidebar:!!sh?.querySelector('.sidebar'),
+                     primary:sh?.querySelector('#page')?.dataset.view,
+                     styles:[...sh?.querySelectorAll('link[rel=stylesheet]')||[]].some(e=>e.href.includes('prototype.css')),
+                     canonicalNative:!!document.getElementById('pcms-refresher-rows')&&
+                       !!document.getElementById('pcms-release-approve')&&
+                       !!document.getElementById('pcms-restore-apply')};""")
+                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.2',actual
+                assert actual['routes']==6 and actual['visible'] and actual['nativeHidden'],actual
+                assert actual['sidebar'] and actual['primary']=='overview' and actual['styles'] and actual['canonicalNative'],actual
+                assert 'v0.1.6' in (actual['badge'] or ''),actual
+                for workspace in ['generators','work-queue','accounts','refresher','settings','overview']:
+                    execute(after,"""const route=%s;
+                        const h=document.getElementById('pcms-faithful-host');
+                        h.shadowRoot.querySelector('[data-nav="'+route+'"]').click();
+                        return true"""%json.dumps(workspace))
+                    ready=False
+                    for _ in range(30):
+                        on=execute(after,"return document.getElementById('pcms-faithful-host')?.shadowRoot?.querySelector('#page')?.dataset.view")
+                        if on==workspace:ready=True;break
+                        time.sleep(.08)
+                    assert ready,('V016_ROUTE_FAILED',workspace,on)
+                view=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                   sh.querySelector('[data-nav="refresher"]').click();
+                   return {native:!!document.getElementById('pcms-refresher-global-pause'),
+                     advanced:!!document.getElementById('pcms-refresher-save'),
+                     root:!!sh.querySelector('.ref-side'),table:!!sh.querySelector('.ref-table-scroll')};""")
+                assert all(view.values()),view
+                execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=overview]').click();return true")
+                for _ in range(20):
+                    if execute(after,"return location.hash")=='#overview':break
+                    time.sleep(.07)
+                print('B V016_ACCEPTED_PROTOTYPE_PRIMARY_ALL_SIX_ROUTED_BACKEND_CONTROLS=PASS',flush=True)
 
                 navigation=execute(after,"""const by=id=>document.getElementById(id);
                   const original=by('pcms-backup-export');
@@ -1151,11 +1198,28 @@ def main():
                   const releaseShown=!by('pcms-release-heading').closest('section.panel').hidden;
                   document.querySelector('#view-generators [data-ui-group="inventory"]').click();
                   const search=document.getElementById('pcms-v014-search');
-                  search.focus();
+                  const shadow=document.getElementById('pcms-faithful-host').shadowRoot;
+                  const searchButton=shadow.querySelector('.top-search');
+                  searchButton?.focus();
                   document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}));
+                  const overlay=shadow.querySelector('.overlay');
+                  const visibleSearchFocused=!!overlay&&
+                    shadow.activeElement===overlay.querySelector('input[type=search]');
+                  overlay?.querySelector('input[type=search]')?.dispatchEvent(
+                    new KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true}));
+                  const escapeRestoresFocus=!shadow.querySelector('.overlay')&&
+                    shadow.activeElement===searchButton;
+                  const advanced=[...shadow.querySelectorAll('#page button')]
+                    .find(x=>x.textContent.trim()==='Advanced controls');
+                  advanced?.click();
+                  const nativeOpen=document.body.classList.contains('pcms-native-open');
+                  document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}));
+                  const nativeSearchFocused=document.activeElement===search;
+                  document.getElementById('pcms-legacy-return')?.click();
                   return {createShown,diagnosticsShown,backupPreserved,releaseShown,
                     inventoryRestored:!by('generators-table-title').closest('section.panel').hidden,
-                    searchFocus:document.activeElement===search};""")
+                    visibleSearchFocused,escapeRestoresFocus,nativeOpen,nativeSearchFocused,
+                    returnedToPrototype:!document.body.classList.contains('pcms-native-open')};""")
                 assert all(navigation.values()),navigation
                 print('B V014_INSTALLED_DESKTOP_NAVIGATION_AND_DOM_PRESERVATION=PASS',flush=True)
                 assert execute(after,"location.hash='#overview';return location.hash")=='#overview'
@@ -1539,6 +1603,21 @@ def main():
                     time.sleep(.15)
                 assert '51–100' in pagination,pagination
                 print('B I04_REAL_IDB_1250_FILTER_PAGINATION_OWNER_HOLD=PASS',flush=True)
+                # V016 must ALSO show 1,250 canonical readback in the visible
+                # prototype, not only in the hidden legacy inventory controller.
+                execute(after,"""const h=document.getElementById('pcms-faithful-host');
+                  h.shadowRoot.querySelector('[data-nav="generators"]').click();return true""")
+                for _ in range(50):
+                    shadow_inventory=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                      const view=sh?.querySelector('#page');
+                      return {route:view?.dataset.view,
+                        rows:sh?.querySelectorAll('.workspace-surface table tbody tr[data-item-index]').length,
+                        text:sh?.querySelector('.pagination')?.textContent?.slice(0,120)||''};""")
+                    if shadow_inventory.get('rows')==24 and '1250' in shadow_inventory.get('text',''):break
+                    time.sleep(.15)
+                assert shadow_inventory['rows']==24 and '1250' in shadow_inventory['text'],shadow_inventory
+                execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=overview]').click();return true")
+                print('B V016_VISIBLE_PROTOTYPE_REAL_IDB_1250_PAGINATED=PASS',flush=True)
 
                 # S03 B: exact installed combined XPI module and real
                 # dashboard controls, no remote Git, vault or Perchance traffic.
