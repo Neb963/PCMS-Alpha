@@ -366,3 +366,17 @@ main>.system-status{display:none}
  border:0;border-bottom:1px solid #dfe6eb}
 #view-work-queue .v015-queue-workflows-body>.panel{margin:10px 0}
 #view-work-queue .v015-queue-workflows-body>p{font-size:11px;color:#65778a}
+
+#view-accounts .v015-account-help{margin:11px 0;border:1px solid #dce5ec;border-radius:7px;background:#fff}
+#view-accounts .v015-account-help>summary{cursor:pointer;padding:9px 14px;font-size:11px;font-weight:680;color:#4a6681}
+#view-accounts .v015-account-help>.notice{margin:0 9px 9px;border-radius:5px;font-size:11px}
+#view-settings .v015-connections{padding:20px 22px;min-height:215px}
+#view-settings .v015-connections h2{font-size:14px;margin:0 0 5px}
+#view-settings .v015-services-hint{font-size:11px;color:#62758b;margin:0 0 10px}
+.v015-service-row{display:flex;align-items:center;justify-content:space-between;
+ border-bottom:1px solid #e7edf1;padding:11px 0;gap:14px}
+.v015-service-row:last-child{border-bottom:0}
+.v015-service-detail{display:flex;flex-direction:column;min-width:0;gap:4px}
+.v015-service-detail strong{font-size:12px;color:#273646}
+.v015-service-detail small{font-size:11px;color:#688093;line-height:1.45;
+ max-width:75ch;overflow-wrap:anywhere}
