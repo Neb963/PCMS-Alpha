@@ -35,8 +35,9 @@ export function validateCommand(api, sender, message) {
     if(Object.keys(message).some(k=>!['type','params'].includes(k))||
        !message.params||typeof message.params!=='object'||Array.isArray(message.params)||
        Object.keys(message.params).some(k=>
-         !['after','limit',...(message.type==='LIST_OPERATION_PAGE'?['status']:[])].includes(k))||
+         !['after','limit','query',...(message.type==='LIST_OPERATION_PAGE'?['status']:[])].includes(k))||
        (message.params.after!==undefined&&(typeof message.params.after!=='string'||message.params.after.length>240))||
+       (message.params.query!==undefined&&(typeof message.params.query!=='string'||message.params.query.length>80))||
        (message.params.limit!==undefined&&(!Number.isInteger(message.params.limit)||
            message.params.limit<1||message.params.limit>100)))
       return fail('INVALID_QUEUE_PAGE');
