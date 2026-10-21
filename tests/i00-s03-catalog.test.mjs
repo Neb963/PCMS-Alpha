@@ -194,11 +194,11 @@ test('S03: one-time native-vault connect, read-only reconnection scan and explic
       return await run(fx);
     }});
   const connect=await boundary.run({type:'CONNECT_GIT',params:{repository:repo,token:TOKEN}},sender);
-  assert.equal(connect.code,'GIT_CONNECTED',JSON.stringify(connect));
+  assert.equal(connect.code,'GIT_CONNECTED_LOCALLY_VERIFIED',JSON.stringify(connect));
   assert.equal(connect.repositoryId,'42');
   assert.equal(state.get('pcmsS03Git').repository,repo);
   assert.equal(state.get('pcmsS03Git').repositoryId,'42');
-  assert.equal((await boundary.run({type:'GIT_STATUS'},sender)).code,'GIT_CREDENTIAL_PRESENT');
+  assert.equal((await boundary.run({type:'GIT_STATUS'},sender)).code,'GIT_CREDENTIAL_PRESENT_UNAUTHENTICATED');
   const scan=await boundary.run({type:'SCAN_CONNECTED'},sender);
   assert.equal(scan.code,'CATALOG_COMPLETE');
   assert.equal(scan.preview.approved,false);
@@ -221,7 +221,7 @@ test('S03: vault unavailable does not persist configuration or claim Git success
   const boundary=createCatalogBoundary(api,{native:async()=>({ok:false,code:'LOCKED'}),
     transport:fx.transport,scan:async()=>{throw Error('should not scan')}});
   assert.equal((await boundary.run({type:'CONNECT_GIT',
-    params:{repository:repo,token:TOKEN}},sender)).code,'GIT_VAULT_UNAVAILABLE');
+    params:{repository:repo,token:TOKEN}},sender)).code,'GIT_VAULT_STORE_OUTCOME_UNCERTAIN');
   assert.equal(state.pcmsS03Git,undefined);
   assert.equal((await boundary.run({type:'SCAN_CONNECTED'},sender)).code,'GIT_RECONNECT_REQUIRED');
 });
