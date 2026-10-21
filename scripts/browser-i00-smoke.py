@@ -1227,6 +1227,25 @@ def main():
                     time.sleep(.12)
                 assert r3_result and r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['readable'] and r3_result['guidance'] and r3_result['exportEnabled'],('R3_PREFLIGHT_FAILED',r3_result)
                 print('B R3_REAL_PRIMARY_SETTINGS_LOCAL_PREFLIGHT_NO_REMOTE=PASS',flush=True)
+                # R4: actual packaged main UI must expose primary creation and
+                # protected permissions without switching to the old controller.
+                r4_primary=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-nav="generators"]').click();
+                  sh.querySelector('[data-action="create"]')?.click();
+                  const drawer=sh.querySelector('[aria-label="Create generators"]');
+                  const primaryCreate=!!drawer&&
+                    !!drawer.querySelector('textarea')&&
+                    !![...drawer.querySelectorAll('button')].find(x=>x.textContent.includes('Create private generators'));
+                  const legacyOpened=document.body.classList.contains('pcms-native-open');
+                  drawer?.querySelector('button')?.click();
+                  sh.querySelector('[data-nav="settings"]').click();
+                  sh.querySelector('[data-settings="automation"]').click();
+                  const primaryPermission=sh.querySelector('.settings-main')?.textContent.includes('Standing permissions')&&
+                    !sh.querySelector('.settings-main')?.textContent.includes('Open automation tools (original view)');
+                  return {primaryCreate,legacyOpened,primaryPermission,
+                    drawerClosed:!sh.querySelector('[aria-label="Create generators"]')};""")
+                assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
+                print('B R4_PRIMARY_CREATION_AND_PROTECTED_SETTINGS_WITHOUT_LEGACY=PASS',flush=True)
                 execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=overview]').click();return true")
 
                 navigation=execute(after,"""const by=id=>document.getElementById(id);
