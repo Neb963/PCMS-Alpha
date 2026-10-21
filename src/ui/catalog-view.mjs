@@ -116,6 +116,8 @@ async function renderReadyQueue(scanGeneration){
             target.value=item.slug;
             target.dispatchEvent(new Event('input',{bubbles:true}));
           }
+          window.dispatchEvent(new CustomEvent('pcms-v014-workflow-request',{
+            detail:{route:'work-queue',group:'update'}}));
           location.hash='#work-queue';
         });
         check.addEventListener('click',async()=>{
