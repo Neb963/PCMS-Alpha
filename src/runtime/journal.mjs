@@ -181,8 +181,9 @@ export function createCanonicalStore(db) {
   // R4: bounded, stable, read-only queue. Revisions and identities come
   // directly from the canonical transaction; no DOM text or inferred effects.
   // Legacy operation records have no timestamp. Do not invent one.
-  function listOperationPage({after='',limit=30,status='ALL'}={}){
+  function listOperationPage({after='',limit=30,status='ALL',query=''}={}){
     if(typeof after!=='string'||after.length>100||
+       typeof query!=='string'||query.length>80||
        (after!==''&&!isSafeId(after))||
        !Number.isInteger(limit)||limit<1||limit>100||
        !['ALL','NEEDS_ACTION','RUNNING','WAITING','COMPLETED'].includes(status))
@@ -201,7 +202,9 @@ export function createCanonicalStore(db) {
         if(!row){finish(ok({items,more,next:more?items.at(-1)?.operationId||'':null}));return;}
         const op=row.value;
         if(!op||!isSafeId(op.operationId)||!isSafeId(op.targetId)||
-            (subset&&!subset.has(op.status))){row.continue();return;}
+            (subset&&!subset.has(op.status))||
+            (query&&!([op.operationId,op.targetId,op.effectType,op.status].join(' ').toLowerCase().includes(query.toLowerCase())))){
+          row.continue();return;}
         if(items.length>=limit){more=true;finish(ok({items,more,next:items.at(-1)?.operationId||null}));return;}
         items.push({operationId:op.operationId,targetId:op.targetId,
           effectType:op.effectType,status:op.status,revision:op.revision,
@@ -380,8 +383,9 @@ export function createCanonicalStore(db) {
       };
     });
   }
-  function pageNotices({after='',limit=30}={}){
+  function pageNotices({after='',limit=30,query=''}={}){
     if(typeof after!=='string'||after.length>240||
+       typeof query!=='string'||query.length>80||
        (after!==''&&!/^attention:[a-zA-Z0-9_-]{8,100}:[A-Z_]{3,80}$/.test(after))||
        !Number.isInteger(limit)||limit<1||limit>100)
       return Promise.resolve(fail('INVALID_NOTICE_PAGE'));
@@ -395,7 +399,8 @@ export function createCanonicalStore(db) {
         const key=String(row.key);
         if(!key.startsWith('attention:')){finish(ok({items,more:false,next:null}));return;}
         const n=row.value;
-        if(n?.state==='RESOLVED'){row.continue();return;}
+        if(n?.state==='RESOLVED'||(query&&!([n?.scopeId,n?.code,n?.cause].join(' ').toLowerCase().includes(query.toLowerCase())))){
+          row.continue();return;}
         if(items.length>=limit){more=true;finish(ok({items,more,next:items.at(-1)?.cursor||null}));return;}
         if(n?.scopeId&&n?.code)items.push({cursor:key,scopeId:n.scopeId,code:n.code,
           cause:n.cause||n.code,severity:n.severity,revision:n.revision,
