@@ -13,7 +13,7 @@ const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort
  ref:{offset:0,limit:25,query:'',phase:'ALL',snapshot:null,items:[],total:0},
  acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:''},
  settings:'connections',lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},nativeOpen:false,
- renderEpoch:0,version:'0.1.6'};
+ renderEpoch:0,version:'0.1.6',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
 const page=()=>shadow('#page');
 function el(tag,cls='',text){const o=document.createElement(tag);if(cls)o.className=cls;if(text!==undefined)o.textContent=String(text);return o}
@@ -163,7 +163,7 @@ function routeHandlers(){
  if(action==='pause-refresher'){if(!guardedClick('pcms-refresher-global-pause'))return;notify('Pause request sent through the existing guarded controller; reload to verify.');void loadRefresher();return}
  if(action==='go-accounts'){routeTo('accounts');return}
  if(action==='queue-help'||action==='account-info'){notify('Detailed operational guidance is available in Advanced protected controls.');return}
- if(action.startsWith('check-service:')){const service=action.split(':')[1];nativeAction(service==='github'?'generators':service==='persona'?'accounts':'settings',service==='github'?'catalog':service==='native'?'backup':undefined);return}
+ if(action.startsWith('check-service:')){state.settings='connections';void runReadiness(false);return}
  });
  root.addEventListener('click',event=>{const tab=event.target.closest('[data-filter]');if(tab){event.preventDefault();const [r,value]=tab.dataset.filter.split(':');if(r==='generators'){state.gen.filter=value;state.gen.offset=0;void loadGenerators()}if(r==='refresher'){state.ref.phase=['All','Active','Sleeping','Waiting'].includes(value)?value.toUpperCase():value;state.ref.offset=0;void loadRefresher()}if(r==='queue'){state.queue.filter=value;displayQueue()}return}
  const row=event.target.closest('tr[data-item-index]');if(row){const i=Number(row.dataset.itemIndex);if(state.route==='refresher'&&state.ref.visibleItems?.[i])openDetails('ref',state.ref.visibleItems[i]);else if(state.route==='generators'&&state.gen.visibleItems?.[i])openDetails('gen',state.gen.visibleItems[i]);}
@@ -441,6 +441,93 @@ function displayOverview(){if(state.route!=='overview')return;
  });
  const backup=nativeControl('pcms-overview-backup');setStat(3,'—',snippet(backup?.textContent,150)||'No verified backup record available');
 }
+// R3: diagnostic projection from the actual background boundary. This is not
+// an additional source of operational authority and never enables effects.
+function renderReadinessPanel(container){
+ container.querySelector('[aria-label="Operational readiness preflight"]')?.remove();
+ const section=el('section','card settings-group');
+ section.setAttribute('aria-label','Operational readiness preflight');
+ section.append(el('h2','h2','Operational readiness'));
+ section.append(el('p','setting-note',
+  'Checks are observational. A passing local check is not live provider acceptance. Remote Git verification reads private metadata only after explicit consent.'));
+ const controls=el('div','settings-section-head');
+ const local=b(state.readinessBusy?'Checking…':'Run local preflight',()=>{void runReadiness(false)},'btn primary');
+ const remote=b('Verify private GitHub read-only',()=>{
+  if(!window.confirm('Authorize a read-only authenticated GET of the configured private GitHub repository and its complete main tree? No token will be exported and no Git/provider writes will occur.'))return;
+  void runReadiness(true);
+ },'btn small');
+ local.disabled=state.readinessBusy;remote.disabled=state.readinessBusy;
+ const reconcile=b('Reconcile interrupted Git connection',()=>{
+  if(!window.confirm('Read the OS vault credential inside the background process, independently verify this exact private GitHub repository identity, and repair only local connection metadata? No token is exported; no remote write occurs.'))return;
+  void (async()=>{
+   try{const out=await readPort('pcms-s03-catalog','RECONCILE_GIT',{},30000);
+    notify(out?.code||'GIT_RECONCILIATION_UNAVAILABLE');await runReadiness(false);
+   }catch{notify('Reconciliation status unknown; run preflight before another action.');}
+  })();
+ },'btn small');
+ reconcile.disabled=state.readinessBusy||!state.readiness?.rows?.some(row=>
+   row.component==='GIT_PARTIAL_CONNECTION'&&row.state==='OUTCOME_UNCERTAIN');
+ const exportButton=b('Export sanitized report',()=>{
+  const report=state.readiness;if(!report?.ok)return;
+  // Only the strict R3 schema rows are exported, never raw native/network
+  // messages, account details, source, tabs or credentials.
+  const keys=['component','scope','state','stage','code','dependency','observedAt',
+    'evidenceKind','evidenceSource','safeRecovery','retrySafety'];
+  const safe={schema:1,checkedAt:report.checkedAt,
+    remoteRequested:report.remoteRequested,rows:report.rows.map(row=>
+      Object.fromEntries(keys.map(k=>[k,row[k]??null])))};
+  const blob=new Blob([JSON.stringify(safe,null,2)],{type:'application/json'});
+  const uri=URL.createObjectURL(blob);const anchor=document.createElement('a');
+  anchor.href=uri;anchor.download='pcms-readiness-sanitized.json';anchor.click();
+  setTimeout(()=>URL.revokeObjectURL(uri),1000);
+ },'btn small');
+ exportButton.disabled=!state.readiness?.ok||state.readinessBusy;
+ controls.append(local,remote,reconcile,exportButton);section.append(controls);
+ const summary=el('p','setting-note');summary.setAttribute('role','status');
+ if(state.readinessBusy)summary.textContent='Observing current runtime and local dependencies…';
+ else if(!state.readiness)summary.textContent='Not checked in this dashboard session.';
+ else if(!state.readiness.ok)summary.textContent='Preflight unavailable: '+String(state.readiness.code||'UNKNOWN');
+ else summary.textContent='Observed '+state.readiness.rows.length+' separately scoped conditions. '+
+   'Verified means only the named evidence source responded; review each dependency before taking action.';
+ section.append(summary);
+ const results=el('div','queue-list');
+ for(const r of state.readiness?.rows||[]){
+  const item=el('div','queue-item');item.style.display='block';
+  item.append(el('strong','',r.component.replaceAll('_',' ')),document.createTextNode(' — '+r.state));
+  item.append(el('p','muted small',r.code+' · '+r.stage+' · '+r.evidenceKind+' · '+
+    new Date(r.observedAt).toLocaleString()));
+  item.append(el('p','setting-note',r.safeRecovery));results.append(item);
+ }
+ section.append(results);container.append(section);
+}
+async function runReadiness(remote){
+ if(state.readinessBusy)return;
+ state.readinessBusy=true;renderSettingsSection();
+ try{
+  const snapshot=await readPort('pcms-r3-readiness','CHECK',{remote},95000);
+  if(!snapshot?.ok){state.readiness=snapshot;return;}
+  // These existing canonical ports are independent of Git/native diagnosis.
+  // They must not be converted into proof of a protected route or source save.
+  const replies=await Promise.allSettled([accounts(),refresher({phase:'ALL',offset:0,limit:1})]);
+  const at=Date.now();const make=(component,state,code,source,recovery)=>({
+   component,scope:'LOCAL',state,stage:'CANONICAL_PORT_READ',code,
+   dependency:'ACTIVE_BACKGROUND_BOUNDARY',observedAt:at,evidenceKind:'D',
+   evidenceSource:source,safeRecovery:recovery,retrySafety:'READ_ONLY'});
+  const acc=replies[0].status==='fulfilled'?replies[0].value:null;
+  snapshot.rows.push(make('ACCOUNT_INVENTORY_READ',acc?.ok?'VERIFIED':'UNREACHABLE',
+    acc?.ok?'CANONICAL_ACCOUNTS_RESPONDED':'ACCOUNT_READ_UNAVAILABLE',
+    'PCMS_I03_ACCOUNTS','This verifies only local account inventory; actual protected route/login need separate guarded observation.'));
+  const ref=replies[1].status==='fulfilled'?replies[1].value:null;
+  snapshot.rows.push(make('REFRESHER_CURRENT_POLICY',ref?.ok?'VERIFIED':'UNREACHABLE',
+    ref?.ok?(ref.policy?.refreshEnabled?'POLICY_ENABLED':'POLICY_DISABLED'):'CANONICAL_REFRESHER_UNAVAILABLE',
+    'PCMS_I12_REFRESHER','Policy state is not proof of live source-saving, complete recent-feed placement or qualified clock time.'));
+  snapshot.rows.push(make('REFRESHER_LIVE_EFFECT','NOT_TESTED',
+    'SOURCE_SAVE_AND_RECENT_UNVERIFIED','NO_INDEPENDENT_L_RECEIPT',
+    'Use a separately authorized disposable live test to verify saved bytes and recent-feed placement.'));
+  state.readiness=snapshot;
+ }catch{state.readiness={ok:false,code:'READINESS_TRANSPORT_UNAVAILABLE'};}
+ finally{state.readinessBusy=false;if(state.route==='settings')renderSettingsSection();}
+}
 function renderSettingsSection(){if(state.route!=='settings')return;
  const names=['connections','automation','backups','diagnostics','advanced'];
  const select=names.includes(state.settings)?state.settings:'connections';
@@ -469,6 +556,7 @@ function renderSettingsSection(){if(state.route!=='settings')return;
   section.append(b('Open protected '+titles[select].toLowerCase(),()=>nativeAction('settings',group),'btn primary'));
   container.append(section);
  }
+ renderReadinessPanel(container);
 }
 function displayRouteScaffold(){
  if(state.route==='overview')displayOverview();
