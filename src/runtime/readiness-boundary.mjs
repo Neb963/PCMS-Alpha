@@ -64,6 +64,23 @@ export function createReadinessBoundary(api,{native=(host,p)=>api.runtime.sendNa
       'D','LOCAL_CONFIG_METADATA','READ_ONLY','GITHUB');
     let vaultReply=null,vaultError=null;
     try{vaultReply=await native(VAULT,{action:'git.status',repositoryId:repoId});}catch{vaultError=true;}
+    // New hosts expose a nonsecret environment-only protocol; old installed
+    // hosts explicitly report the missing method, never an invented OK.
+    let envReply=null,envError=false;
+    try{envReply=await native(VAULT,{action:'diagnostic.environment'});}catch{envError=true;}
+    const environmentOK=envReply?.ok===true&&envReply.protocol===2&&
+      envReply.dbusSession===true&&envReply.secretTool===true;
+    add('SECRET_SERVICE_ENVIRONMENT',environmentOK?'VERIFIED':
+      envError?'UNREACHABLE':envReply?.code==='DENIED'?'MISSING_CAPABILITY':
+      'OUTCOME_UNCERTAIN','HOST_ENVIRONMENT',
+      environmentOK?'ENVIRONMENT_PREREQUISITES_PRESENT':
+      envError?'NATIVE_ENVIRONMENT_PROBE_UNREACHABLE':
+      envReply?.code==='DENIED'?'HOST_DIAGNOSTIC_METHOD_NOT_INSTALLED':
+      envReply?.secretTool===false?'SECRET_TOOL_UNAVAILABLE':
+      envReply?.dbusSession===false?'DBUS_SESSION_UNAVAILABLE':'ENVIRONMENT_UNVERIFIED',
+      'NATIVE_VAULT_HOST',
+      'Check DBus session, libsecret and native host version. Environment availability is not proof the keyring is unlocked.',
+      'H','NONSECRET_NATIVE_ENVIRONMENT');
     const classified=probeClassification(vaultReply,vaultError);
     add('NATIVE_VAULT_HOST',classified.host,'NATIVE_MESSAGE',classified.code,'Firefox nativeMessaging',
       'Verify local.pcms.backup_vault manifest, executable path and allowed Firefox extension ID','H','NATIVE_REPLY');
