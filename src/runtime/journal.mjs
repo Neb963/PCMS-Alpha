@@ -380,9 +380,34 @@ export function createCanonicalStore(db) {
       };
     });
   }
+  function pageNotices({after='',limit=30}={}){
+    if(typeof after!=='string'||after.length>240||
+       (after!==''&&!/^attention:[a-zA-Z0-9_-]{8,100}:[A-Z_]{3,80}$/.test(after))||
+       !Number.isInteger(limit)||limit<1||limit>100)
+      return Promise.resolve(fail('INVALID_NOTICE_PAGE'));
+    return transact(db,['meta'],'readonly',(tx,finish)=>{
+      const items=[];let more=false;
+      const range=IDBKeyRange.lowerBound(after||'attention:',Boolean(after));
+      const cursor=tx.objectStore('meta').openCursor(range);
+      cursor.onsuccess=event=>{
+        const row=event.target.result;
+        if(!row){finish(ok({items,more,next:more?items.at(-1)?.cursor||null:null}));return;}
+        const key=String(row.key);
+        if(!key.startsWith('attention:')){finish(ok({items,more:false,next:null}));return;}
+        const n=row.value;
+        if(n?.state==='RESOLVED'){row.continue();return;}
+        if(items.length>=limit){more=true;finish(ok({items,more,next:items.at(-1)?.cursor||null}));return;}
+        if(n?.scopeId&&n?.code)items.push({cursor:key,scopeId:n.scopeId,code:n.code,
+          cause:n.cause||n.code,severity:n.severity,revision:n.revision,
+          reviewed:n.reviewed===true||n.ignored===true,firstAt:n.firstAt??null,
+          lastAt:n.lastAt??null});
+        row.continue();
+      };
+    });
+  }
   return Object.freeze({ provisionTarget, apply, getOperation, listOperationPage, summary, recover,
     recordNotice, resolveNotice, ignoreNotice, acknowledgeNotice, noticeSummary,
-    listNotices, close: () => db.close() });
+    listNotices, pageNotices, close: () => db.close() });
 }
 
 // Restore sentinel lives OUTSIDE replaceable IDB. It must not be cleared by
