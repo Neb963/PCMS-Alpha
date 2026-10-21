@@ -178,6 +178,38 @@ export function createCanonicalStore(db) {
       };
     });
   }
+  // R4: bounded, stable, read-only queue. Revisions and identities come
+  // directly from the canonical transaction; no DOM text or inferred effects.
+  // Legacy operation records have no timestamp. Do not invent one.
+  function listOperationPage({after='',limit=30,status='ALL'}={}){
+    if(typeof after!=='string'||after.length>100||
+       (after!==''&&!isSafeId(after))||
+       !Number.isInteger(limit)||limit<1||limit>100||
+       !['ALL','NEEDS_ACTION','RUNNING','WAITING','COMPLETED'].includes(status))
+      return Promise.resolve(fail('INVALID_QUEUE_FILTER'));
+    const groups={
+      ALL:null,NEEDS_ACTION:new Set(['HELD_UNCERTAIN','REJECTED']),
+      RUNNING:new Set(['OBSERVING','DISPATCH_POSSIBLE']),
+      WAITING:new Set(['PREPARED']),
+      COMPLETED:new Set(['CONFIRMED','ABORTED'])};
+    return transact(db,['operations'],'readonly',(tx,finish)=>{
+      const items=[];let more=false;const subset=groups[status];
+      const range=after?IDBKeyRange.lowerBound(after,true):null;
+      const request=tx.objectStore('operations').openCursor(range);
+      request.onsuccess=event=>{
+        const row=event.target.result;
+        if(!row){finish(ok({items,more,next:more?items.at(-1)?.operationId||'':null}));return;}
+        const op=row.value;
+        if(!op||!isSafeId(op.operationId)||!isSafeId(op.targetId)||
+            (subset&&!subset.has(op.status))){row.continue();return;}
+        if(items.length>=limit){more=true;finish(ok({items,more,next:items.at(-1)?.operationId||null}));return;}
+        items.push({operationId:op.operationId,targetId:op.targetId,
+          effectType:op.effectType,status:op.status,revision:op.revision,
+          updatedAt:Number.isSafeInteger(op.updatedAt)?op.updatedAt:null});
+        row.continue();
+      };
+    });
+  }
   // Atomically mark every dispatch-maybe record uncertain on waking from crash.
   // This does not release a target fence or dispatch anything.
   function recover() {
@@ -348,7 +380,7 @@ export function createCanonicalStore(db) {
       };
     });
   }
-  return Object.freeze({ provisionTarget, apply, getOperation, summary, recover,
+  return Object.freeze({ provisionTarget, apply, getOperation, listOperationPage, summary, recover,
     recordNotice, resolveNotice, ignoreNotice, acknowledgeNotice, noticeSummary,
     listNotices, close: () => db.close() });
 }
