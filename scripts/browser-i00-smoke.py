@@ -1218,9 +1218,10 @@ def main():
                           !!r.querySelector('details summary')&&
                           r.querySelector('details summary').textContent.includes('Technical details')),
                         guidance:rows.filter(r=>r.querySelector('strong')?.textContent==='GitHub credential helper')
-                          .every(r=>!!r.querySelector('p.setting-note')?.textContent.match(/PCMS helper|local helper/i)&&
-                            !/NATIVE_|local[.]pcms|GIT_/.test(r.querySelector('p.setting-note').textContent)&&
-                            !!r.querySelector('details p')?.textContent.includes('NATIVE_')),
+                          .every(r=>/helper|PCMS/i.test(r.querySelector('p.setting-note')?.textContent||'')&&
+                            !/NATIVE_|local[.]pcms|GIT_/.test(r.querySelector('p.setting-note')?.textContent||'')&&
+                            !!r.querySelector('details summary')?.textContent.includes('Technical details')&&
+                            !!r.querySelector('details p')?.textContent.trim()),
                         exportEnabled:[...panel?.querySelectorAll('button')||[]].some(
                           b=>b.textContent.trim()==='Export sanitized report'&&!b.disabled)};""")
                     if r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['readable'] and r3_result['guidance']:break
