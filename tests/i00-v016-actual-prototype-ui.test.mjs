@@ -39,6 +39,8 @@ test('canonical read-only ports feed prototype views; original guarded mutating 
  assert.match(bridge,/pcms-native-open/);
  assert.match(bridge,/function nativeAction\(/);
  assert.match(bridge,/function guardedClick\(/);
+ assert.doesNotMatch(bridge,/guardedClick\('pcms-refresher-save'\)/);
+ assert.match(bridge,/nativeAction\('refresher',null,'pcms-refresher-enable'\)/);
  assert.match(bridge,/mount\(\)\.catch/);
  assert.equal((bridge.match(/\binnerHTML\s*=/g)||[]).length,2,'only static bundled shell and selected local template may be parsed as HTML');
  assert.match(bridge,/template\.innerHTML=html/);
