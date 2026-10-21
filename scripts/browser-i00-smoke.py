@@ -1121,6 +1121,7 @@ def main():
                     searchFocus:document.activeElement===search};""")
                 assert all(navigation.values()),navigation
                 print('B V014_INSTALLED_DESKTOP_NAVIGATION_AND_DOM_PRESERVATION=PASS',flush=True)
+                assert execute(after,"location.hash='#overview';return location.hash")=='#overview'
                 # The exact installed XPI must expose a read-only guarded
                 # background status; no valid status enables PCMS effects.
                 isolated=observer_isolation_probe(after)
