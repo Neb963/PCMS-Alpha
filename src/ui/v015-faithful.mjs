@@ -234,6 +234,10 @@ function mountQueue(){
   const body=node('div','v015-queue-workflows-body');
   advanced.append(body);
   if(nav)body.append(nav);
+  const legacyStatus=$('pcms-queue-refresher');
+  const link=legacyStatus?.nextElementSibling;
+  if(legacyStatus)body.append(legacyStatus);
+  if(link?.querySelector('a[href="#refresher"]'))body.append(link);
   const panels=[...root.children].filter(p=>p.matches?.('section.panel')&&p!==board);
   for(const panel of panels)body.append(panel);
   board.after(advanced);
@@ -252,6 +256,13 @@ function mountAccounts(){
   const root=h.root;
   const listPanel=$('accounts-inventory-title')?.closest('section.panel');
   const enrollment=$('accounts-enrollment-title')?.closest('section.panel');
+  const help=root.querySelector(':scope > .notice');
+  if(help&&listPanel){
+    const disclosure=node('details','v015-account-help');
+    disclosure.append(node('summary','','About protected account setup'));
+    disclosure.append(help);
+    listPanel.after(disclosure);
+  }
   enrollment?.classList.add('v015-enrollment');
   // Preserve existing human-login affordances; collapse the optional enrollment form.
   enrollment?.setAttribute('data-v015-optional','true');
@@ -414,8 +425,44 @@ function mountSettings(){
   };
   for(const button of nav?.querySelectorAll('button[data-ui-group]')||[])
     button.textContent=names[button.dataset.uiGroup]||button.textContent;
-  const initial=nav?.querySelector('[data-ui-group="permissions"]');
-  initial?.click();
+  const original=nav?.querySelector('[data-ui-group="permissions"]');
+  // Compact connections summary. Truth comes from the pre-existing native
+  // status controls; the frontend cannot certify any external connection.
+  const panel=node('section','panel v015-connections');
+  panel.append(node('h2','','Connected services'));
+  panel.append(node('p','v015-services-hint',
+    'Check actual protected state in the relevant workspace. Unknown is not connected.'));
+  for(const item of [
+    ['GitHub source','pcms-catalog-status','generators','catalog'],
+    ['PersonaMonkey','pcms-accounts-feedback','accounts',null],
+    ['Native backup service','pcms-backup-status','settings','backup']
+  ]){
+    const row=node('div','v015-service-row');
+    const detail=node('div','v015-service-detail');
+    detail.append(node('strong','',item[0]));
+    const state=node('small','', 'State not yet observed');
+    detail.append(state);
+    const btn=action('Check',()=>navigate(item[2],item[3]),'v015-outline');
+    row.append(detail,btn);panel.append(row);
+    const target=$(item[1]);
+    if(target){
+      const sync=()=>{
+        const text=target.textContent?.trim()||'';
+        state.textContent=text.slice(0,220)||'No current local observation';
+        state.title=text;
+      };
+      const observer=new MutationObserver(sync);
+      observer.observe(target,{characterData:true,childList:true,subtree:true});
+      sync();
+    }
+  }
+  nav?.after(panel);
+  function active(){
+    panel.hidden=original?.getAttribute('aria-pressed')!=='true';
+  }
+  nav?.addEventListener('click',()=>queueMicrotask(active));
+  nav?.addEventListener('keydown',()=>queueMicrotask(active));
+  original?.click();active();
 }
 function boot(){
   mountHeader();mountOverview();mountGeneratorInventory();mountQueue();mountAccounts();mountRefresher();mountSettings();
