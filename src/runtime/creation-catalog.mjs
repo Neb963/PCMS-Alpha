@@ -45,7 +45,7 @@ export function createCreationCatalogIntake(api,{open=openCanonicalDatabase,
     return {approval:makeApproval(db),creation:makeCoordinator(db)};
   };
   async function run(catalog,{heldSlugs=[]}={}){
-    if(!Array.isArray(heldSlugs)||heldSlugs.length>512||heldSlugs.some(s=>typeof s!=='string'||s.length>100))
+    if(!Array.isArray(heldSlugs)||heldSlugs.length>20000||heldSlugs.some(s=>typeof s!=='string'||s.length>100))
       return fail('S04_IDENTITY_HOLD_INVALID');
     const identityHeld=new Set(heldSlugs);
     const valid=validateCreationCatalog(catalog);
