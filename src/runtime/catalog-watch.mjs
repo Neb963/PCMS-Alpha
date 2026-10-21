@@ -86,7 +86,7 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       const planned=planMainFolderChanges(
         prior?.repositoryId===cfg.repositoryId&&prior.complete?prior:null,snapshot,stored);
       if(!planned.ok)return persistStatus(planned.code);
-      const reviews=[...planned.review].slice(-512);
+      const reviews=[...planned.review];
       const older=(await api.storage.local.get(MISSING))?.[MISSING];
       const formerlyMissing=older?.repositoryId===cfg.repositoryId&&
         Array.isArray(older.slugs)?older.slugs:[];
