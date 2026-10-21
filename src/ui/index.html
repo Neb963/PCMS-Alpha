@@ -473,7 +473,7 @@
             <input id="pcms-diagnostic-namespace" autocomplete="off" spellcheck="false" maxlength="42" placeholder="pcms-test-alpha">
                         <label for="pcms-diagnostic-consent">I confirm that the selected account, Persona and test namespace are disposable resources authorized for live PCMS testing</label>
             <input id="pcms-diagnostic-consent" type="checkbox">
-            <label for="pcms-diagnostic-xpi-sha">Optional SHA-256 of the full XPI (needed only for isolated tests)</label>
+            <label for="pcms-diagnostic-xpi-sha">XPI fingerprint for backup/restart verification (the diagnostic can start without it, but cannot complete those stages)</label>
             <input id="pcms-diagnostic-xpi-sha" maxlength="64" spellcheck="false" autocomplete="off" placeholder="64 hexadecimal characters">
             <button type="button" id="pcms-diagnostic-designate">Save disposable scope</button>
             <button type="button" id="pcms-diagnostic-run" disabled>Run full diagnostic</button>
