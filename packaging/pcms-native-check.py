@@ -109,13 +109,13 @@ def main():
 
     data, where = manifest("local.pcms.diagnostic_browser", USER_DIRS)
     if not data:
-        report("WARN", "diagnostic browser host", where + " (only needed for the restart/backup diagnostic)")
+        report("FAIL", "diagnostic browser host", where + " (required for complete installed-XPI restart/backup diagnostics)")
     else:
         browsers = [b for b in ("firefox-developer-edition", "firefox-esr", "firefox") if shutil.which(b)]
         if browsers and shutil.which("geckodriver"):
             report("OK", "diagnostic browser host", f"{where}; uses {browsers[0]} + geckodriver")
         else:
-            report("WARN", "diagnostic browser host", "install geckodriver (and Firefox) for the isolated restart diagnostic")
+            report("FAIL", "diagnostic browser host", "install geckodriver and supported Firefox for full isolated restart/backup diagnostics")
 
     data, where = manifest("com.persona.mullvad_router", SYSTEM_DIRS + USER_DIRS)
     if not data:
@@ -126,7 +126,7 @@ def main():
         if reply and reply.get("ok") is True and reply.get("schema") == 1:
             report("OK", "Refresher clock witness", "PersonaMonkey host provides the PCMS runtime witness")
         else:
-            report("WARN", "Refresher clock witness",
+            report("FAIL", "Refresher clock witness",
                    "PersonaMonkey host lacks the PCMS witness; Refresher timers will not advance. "
                    "Run: ./install.sh --with-runtime-witness")
     print()
