@@ -1629,6 +1629,138 @@ function primaryAiSettings(container){
  }
  void refresh();
 }
+// I16 restore remains implemented by the original protected stage runner.
+// This primary workflow mirrors its encrypted files and explicit review
+// controls; it never reimplements or bypasses the restore gate.
+function primaryRestore(container){
+ const section=primarySettingCard(container,'Restore from encrypted archive',
+  'An authenticated preview is read-only. Applying a restore requires an independently verified pre-restore checkpoint, exact plan fingerprint and explicit authorization. The restored controller stays inactive.');
+ const form=el('div','form-stack'),feedback=el('p','setting-note',
+   'No authenticated restore plan. Nothing has been changed.');
+ feedback.setAttribute('role','status');
+ const archive=el('input','form-input'),checkpoint=el('input','form-input');
+ for(const x of [archive,checkpoint]){x.type='file';x.accept='.encrypted,.json'}
+ const pass=el('input','form-input');pass.type='password';pass.autocomplete='off';
+ const mode=el('select','select');
+ for(const [value,label] of [['merge','Merge into this installation'],['replace','Replace after independent checkpoint review']]){
+  const option=el('option','',label);option.value=value;mode.append(option)}
+ const fresh=el('input');fresh.type='checkbox';
+ const mapping=el('textarea','form-input');mapping.rows=3;mapping.value='{}';
+ mapping.setAttribute('aria-label','Persona-key to destination container-ID mapping in JSON');
+ const hash=el('input','form-input');hash.maxLength=64;
+ hash.placeholder='Exact authenticated plan SHA-256';
+ const approve=el('input');approve.type='checkbox';
+ const consentLabel=el('label','setting-option');consentLabel.append(approve,
+  document.createTextNode(' I approve this exact reviewed restore plan, Persona mappings, safety holds and inactive import.'));
+ function add(label,field){const wrapped=el('label','',label);wrapped.append(field);form.append(wrapped)}
+ add('Incoming encrypted archive',archive);
+ add('Separate independently recoverable pre-restore checkpoint',checkpoint);
+ add('Archive recovery passphrase',pass);
+ add('Destination import policy',mode);
+ const freshLabel=el('label','setting-option');freshLabel.append(fresh,
+  document.createTextNode(' Fresh disposable Firefox profile'));form.append(freshLabel);
+ add('Explicit Persona mapping JSON',mapping);
+ add('Reviewed plan fingerprint',hash);form.append(consentLabel);
+ const actions=el('div','form-foot'),detail=el('details','settings-section');
+ detail.append(el('summary','','Authenticated plan and individual safety holds'));
+ const plan=el('pre','source-preview','No authenticated plan.');detail.append(plan);
+ const originalStatus=()=>nativeControl('pcms-restore-status');
+ const slots=[
+  ['pcms-restore-preview','Authenticate and preview',false],
+  ['pcms-restore-verify','Verify independent checkpoint',false],
+  ['pcms-restore-apply','Apply reviewed restore',true],
+  ['pcms-restore-reconcile','Read back uncertain restore',false],
+  ['pcms-restore-reactivate','Reactivate after independent recovery',true]];
+ const controls=new Map();
+ function setValue(id,value,evt){
+  const target=nativeControl(id);if(!target)return false;
+  if(value instanceof FileList){target.files=value;}
+  else if(target.type==='checkbox')target.checked=Boolean(value);
+  else target.value=value;
+  target.dispatchEvent(new Event(evt||'change',{bubbles:true}));
+  if(evt==='input')target.dispatchEvent(new Event('change',{bubbles:true}));
+  return true;
+ }
+ function transfer(){
+  try{
+   setValue('pcms-restore-archive',archive.files);
+   setValue('pcms-restore-checkpoint',checkpoint.files);
+   setValue('pcms-restore-passphrase',pass.value);
+   setValue('pcms-restore-mode',mode.value);
+   setValue('pcms-restore-fresh',fresh.checked);
+   setValue('pcms-restore-mappings',mapping.value);
+   setValue('pcms-restore-reviewed-hash',hash.value,'input');
+   setValue('pcms-restore-consent',approve.checked);
+   return true;
+  }catch{return false}
+ }
+ function refresh(){
+  if(!section.isConnected)return;
+  const native=originalStatus();
+  const report=nativeControl('pcms-restore-details');
+  if(native?.textContent)feedback.textContent=native.textContent;
+  plan.textContent=report?.textContent||'No authenticated restore plan.';
+  const active=nativeControl('pcms-restore-reactivate-box')?.hidden===false;
+  for(const [id,control] of controls)control.disabled=
+    nativeControl(id)?.disabled!==false||(id==='pcms-restore-reactivate'&&!active);
+ }
+ for(const [id,label,mutating] of slots){
+  const button=b(label,()=>void (async()=>{
+   const original=nativeControl(id);
+   if(!original||original.disabled){
+    feedback.textContent='The protected restore stage is unavailable or its requirements are not met.';
+    return;
+   }
+   if(mutating&&!window.confirm(id==='pcms-restore-apply'?
+     'Apply the EXACT authenticated, checkpoint-verified restore to this local PCMS installation? The controller remains inactive and no provider changes are authorized.':
+     'Reactivate the restored controller only after the previous installation has been stopped and all required evidence reviewed?'))return;
+   if(!transfer()){
+    feedback.textContent='Restore inputs could not be transferred safely to the protected controller. No action was taken.';
+    return;
+   }
+   if(id==='pcms-restore-reactivate'){
+    setValue('pcms-restore-predecessor',predecessor.checked);
+    setValue('pcms-restore-reactivate-phrase',phrase.value,'input');
+   }
+   if(original.disabled){refresh();return;}
+   button.disabled=true;feedback.textContent='Protected restore stage running; never repeat a possible restore write.';
+   original.click();
+   pass.value='';phrase.value='';refresh();
+  })(),'btn small');
+  button.dataset.restoreStep=id;
+  button.disabled=true;controls.set(id,button);actions.append(button);
+ }
+ const reactivation=el('details','settings-section');
+ reactivation.append(el('summary','','Post-restore reactivation (requires COMPLETE_INACTIVE status)'));
+ const predecessor=el('input');predecessor.type='checkbox';
+ const predecessorLabel=el('label','setting-option');
+ predecessorLabel.append(predecessor,document.createTextNode(' The previous PCMS installation is stopped'));
+ const phrase=el('input','form-input');phrase.maxLength=64;
+ phrase.placeholder='THE PREVIOUS PCMS INSTALLATION IS STOPPED';
+ reactivation.append(predecessorLabel,phrase);
+ section.append(form,actions,feedback,detail,reactivation);
+ const changes=[archive,checkpoint,pass,mode,fresh,mapping,hash,approve,predecessor,phrase];
+ for(const control of changes)control.addEventListener('change',()=>{
+  if(control===pass)return;
+  if(control===predecessor||control===phrase){
+   setValue('pcms-restore-predecessor',predecessor.checked);
+   setValue('pcms-restore-reactivate-phrase',phrase.value,'input');
+   refresh();return}
+  if(transfer())refresh();
+ });
+ hash.addEventListener('input',()=>{setValue('pcms-restore-reviewed-hash',hash.value,'input');refresh()});
+ phrase.addEventListener('input',()=>{setValue('pcms-restore-reactivate-phrase',phrase.value,'input');refresh()});
+ approve.addEventListener('change',()=>{setValue('pcms-restore-consent',approve.checked);refresh()});
+ const nativeEls=['pcms-restore-status','pcms-restore-details','pcms-restore-preview',
+  'pcms-restore-verify','pcms-restore-apply','pcms-restore-reconcile',
+  'pcms-restore-reactivate','pcms-restore-reactivate-box'].map(nativeControl).filter(Boolean);
+ const existing=state.restoreObservation;if(existing)existing.disconnect();
+ const observation=new MutationObserver(()=>refresh());
+ for(const item of nativeEls)observation.observe(item,{
+  attributes:true,childList:true,characterData:true,subtree:true});
+ state.restoreObservation=observation;
+ refresh();
+}
 function primaryBackups(container){
  const section=primarySettingCard(container,'Encrypted source-complete backups',
   'The recoverable format requires the matching OS helper, a vault-held recovery key, full archive verification and a separate restore proof. Older browser downloads are not source-complete.');
@@ -1706,6 +1838,7 @@ function primaryBackups(container){
   actions.append(toggle,manual);
  }
  void refresh();
+ primaryRestore(container);
 }
 // The full diagnostic engine stays the original, guarded production stage
 // runner. This accepted UI mirrors its typed input controls and actual stage
