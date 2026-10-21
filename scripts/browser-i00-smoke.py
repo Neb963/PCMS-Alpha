@@ -1069,6 +1069,59 @@ def main():
                 diagnostic=execute(after,"return {present:!!document.getElementById('pcms-diagnostic-run'),configured:!!document.getElementById('pcms-diagnostic-designate'),stages:!!document.getElementById('pcms-diagnostic-stages'),ready:!!document.getElementById('pcms-s06-grant-development')}")
                 assert all(diagnostic.values()),diagnostic
                 print('B S08_INSTALLED_FULL_DASHBOARD_ACTION_AND_DIAGNOSTIC_CONTROLS=PASS',flush=True)
+                # v0.1.4 B evidence: verify the actual installed XPI dashboard.
+                # This tests real packaged assets/DOM and presentation actions
+                # without sending any provider, Git or local mutation command.
+                desktop=execute(after,"""const get=id=>document.getElementById(id);
+                  const routes=['generators','work-queue','settings'];
+                  const groups=routes.map(route=>{
+                    const ws=get('view-'+route);
+                    const bar=ws.querySelector('.pcms-v014-workflow-nav');
+                    const buttons=[...(bar?.querySelectorAll('button[data-ui-group]')||[])];
+                    const current=buttons.filter(b=>b.getAttribute('aria-pressed')==='true');
+                    const controlled=buttons.every(b=>
+                      b.getAttribute('aria-controls')?.split(/\\s+/).every(id=>!!get(id)));
+                    return {route,count:buttons.length,current:current.length,controlled,
+                      visiblePanels:[...ws.children].filter(el=>el.matches?.('section.panel')&&!el.hidden).length};
+                  });
+                  const field=get('pcms-v014-search');
+                  return {groups,search:!!field,role:field?.getAttribute('role'),
+                    expanded:field?.getAttribute('aria-expanded'),
+                    source:!!get('pcms-source-target'),stage:!!get('pcms-stage-slug'),
+                    release:!!get('pcms-release-heading'),
+                    account:!!get('pcms-accounts-list'),
+                    backup:!!get('pcms-backup-export'),
+                    restore:!!get('pcms-restore-apply')};""")
+                assert desktop['search'] and desktop['role']=='combobox',desktop
+                assert desktop['expanded']=='false',desktop
+                assert all(desktop[k] for k in ['source','stage','release','account','backup','restore']),desktop
+                assert len(desktop['groups'])==3,desktop
+                assert all(row['count']>=5 and row['current']==1 and row['controlled']
+                           and row['visiblePanels']>=1 for row in desktop['groups']),desktop
+                print('B V014_PACKAGED_DESKTOP_GROUPS_AND_AUTHORITATIVE_CONTROLS=PASS',flush=True)
+                navigation=execute(after,"""const by=id=>document.getElementById(id);
+                  const original=by('pcms-backup-export');
+                  document.querySelector('[data-pcms-v014-open="generators:create"]').click();
+                  const create=document.querySelector('#view-generators [data-ui-group="create"]');
+                  const createShown=create?.getAttribute('aria-pressed')==='true'&&
+                    !by('pcms-supply-heading').closest('section.panel').hidden;
+                  document.querySelector('#view-settings [data-ui-group="diagnostics"]').click();
+                  const diagnosticsShown=!by('pcms-diagnostic-heading').closest('section.panel').hidden;
+                  document.querySelector('#view-settings [data-ui-group="backup"]').click();
+                  const backupPreserved=original===by('pcms-backup-export')&&
+                    !original.closest('section.panel').hidden;
+                  document.querySelector('#view-work-queue [data-ui-group="release"]').click();
+                  const releaseShown=!by('pcms-release-heading').closest('section.panel').hidden;
+                  document.querySelector('#view-generators [data-ui-group="inventory"]').click();
+                  const search=document.getElementById('pcms-v014-search');
+                  search.focus();
+                  document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}));
+                  return {createShown,diagnosticsShown,backupPreserved,releaseShown,
+                    inventoryRestored:!by('generators-table-title').closest('section.panel').hidden,
+                    searchFocus:document.activeElement===search};""")
+                assert all(navigation.values()),navigation
+                print('B V014_INSTALLED_DESKTOP_NAVIGATION_AND_DOM_PRESERVATION=PASS',flush=True)
+                assert execute(after,"location.hash='#overview';return location.hash")=='#overview'
                 # The exact installed XPI must expose a read-only guarded
                 # background status; no valid status enables PCMS effects.
                 isolated=observer_isolation_probe(after)
@@ -1422,6 +1475,25 @@ def main():
                         "sync:document.getElementById('pcms-generator-sync')?.disabled}")
                     if '1250' in view.get('count',''):break
                     time.sleep(.15)
+                if view.get('rows')!=50 or '1250' not in view.get('count',''):
+                    # Non-mutating failure diagnostic: independent port result
+                    # versus DOM/filter state after installed-page navigation.
+                    debug_ui=execute(after,"""const by=id=>document.getElementById(id);
+                      return {href:location.href,ready:document.readyState,
+                        query:by('pcms-generator-query')?.value,
+                        ownerFilter:by('pcms-generator-owner-filter')?.value,
+                        feedback:by('pcms-inventory-feedback')?.textContent,
+                        visiblePanel:by('generators-table-title')?.closest('section.panel')?.hidden,
+                        results:by('pcms-generator-count')?.textContent,
+                        loadedModules:!!document.querySelector('script[src="v014-desktop-ui.mjs"]'),
+                        selected:document.querySelector('#view-generators .pcms-v014-workflow-button[aria-pressed=true]')?.textContent};""")
+                    debug_port=inventory_command(after,{'type':'LIST_INVENTORY',
+                       'params':{'query':'','ownerState':'ALL','offset':0,'limit':50}})
+                    print('B V014_INVENTORY_FAILURE_DIAGNOSTICS=',json.dumps({
+                      'ui':debug_ui,
+                      'port':{'ok':debug_port.get('ok'), 'total':debug_port.get('total'),
+                        'count':len(debug_port.get('items',[])),
+                        'code':debug_port.get('code')}},default=str),flush=True)
                 assert view.get('rows')==50 and '1250' in view.get('count',''),view
                 execute(after,"document.getElementById('pcms-generator-next').click();return true")
                 for _ in range(40):
