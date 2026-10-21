@@ -2,7 +2,7 @@
 import { createCanonicalStore, createRestoreSentinel, openCanonicalDatabase, fail } from './journal.mjs';
 
 export const COMMAND_PORT = 'pcms-i02-canonical-readonly';
-const SAFE_NAMES = new Set(['HEALTH','SUMMARY','GET_OPERATION','GET_NOTICES','LIST_OPERATION_PAGE','LIST_NOTICE_PAGE','IGNORE_NOTICE','ACK_NOTICE','PREVIEW']);
+const SAFE_NAMES = new Set(['HEALTH','SUMMARY','GET_OPERATION','GET_NOTICES','NOTICE_SUMMARY','LIST_OPERATION_PAGE','LIST_NOTICE_PAGE','IGNORE_NOTICE','ACK_NOTICE','PREVIEW']);
 export function trustedExtensionPage(api, sender) {
   if (sender?.id !== api.runtime.id || typeof sender.url !== 'string') return false;
   const base = api.runtime.getURL('pcms/');
@@ -82,6 +82,10 @@ export function createCommandBoundary(api, { open = openCanonicalDatabase } = {}
     if (message.type === 'IGNORE_NOTICE') {
       try { return await (await canonical()).ignoreNotice(message.notice); }
       catch { return fail('CANONICAL_HOLD'); }
+    }
+    if(message.type==='NOTICE_SUMMARY'){
+      try{return await (await canonical()).noticeSummary();}
+      catch{return fail('CANONICAL_HOLD');}
     }
     if(message.type==='LIST_OPERATION_PAGE'||message.type==='LIST_NOTICE_PAGE'){
       try{
