@@ -571,11 +571,12 @@ function displayQueue(){
    const action=b('Inspect',()=>{notify('This record is maintained by the protected operation controller. No retry has been dispatched.');});
    row.append(marker,detail,action);holder.append(row);
   }
-  if(!q.operations.length&&!q.incidents.length)
+  if(!holder.children.length)
     renderEmpty(holder,'No matching recorded operations or active incidents. This is not proof of remote health.');
  }
  const counts=q.summary?.states||{},attention=q.summary?.attention||{};
  const needs=(counts.HELD_UNCERTAIN||0)+(counts.REJECTED||0)+(counts.DISPATCH_POSSIBLE||0)+
+   (q.reviews||[]).filter(x=>x.state==='REVIEW_REQUIRED').length+
    (attention.actionRequired||0)+(attention.serious||0);
  const running=counts.OBSERVING||0,waiting=counts.PREPARED||0,completed=(counts.CONFIRMED||0)+(counts.ABORTED||0);
  const counters=shadow('.queue-stats');if(counters){counters.replaceChildren();
