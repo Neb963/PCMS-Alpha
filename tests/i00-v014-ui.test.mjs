@@ -61,6 +61,13 @@ test('canonical lookup projection rejects injection and hostile identity shapes'
  assert.equal(stableResults([{kind:'generator',id:'a'},{kind:'generator',id:'a'},{kind:'account',id:'a'}]).length,2);
  assert.equal(stableResults(Array.from({length:10000},(_,i)=>({kind:'generator',id:String(i)}))).length,10);
 });
+test('catalog public-update shortcut selects the real Work Queue update panel',async()=>{
+ const catalog=await readFile('src/ui/catalog-view.mjs','utf8');
+ assert.match(catalog,/new CustomEvent\('pcms-v014-workflow-request'/);
+ assert.match(catalog,/detail:\{route:'work-queue',group:'update'\}/);
+ assert.match(ui,/addEventListener\('pcms-v014-workflow-request'/);
+ assert.equal(panelGroup('work-queue','pcms-existing-heading'),'update');
+});
 test('Refresher queue precedes collapsed policy and no guarded controls are removed',()=>{
  const from=html.indexOf('id="view-refresher"');
  const until=html.indexOf('id="view-settings"',from);
