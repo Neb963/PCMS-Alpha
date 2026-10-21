@@ -10,6 +10,7 @@ import {createReadyDevelopment} from './ready-development.mjs';
 import {createS06WritebackProgress} from './s06-writeback-progress.mjs';
 import {createS06ChangeProgress} from './s06-request-changes.mjs';
 import {standingS06} from './s06-standing-authority.mjs';
+import {planMainFolderChanges,REVIEW_KEY} from './catalog-identity-review.mjs';
 export const CATALOG_ALARM='pcms-s03-main-observe';
 export const CATALOG_RESUME_ALARM='pcms-s03-main-resume';
 export const READY_PROGRESS_ALARM='pcms-s05-ready-progress';
@@ -77,19 +78,54 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
         snapshot.generators.filter(g=>!prior.generators?.some(x=>x.slug===g.slug)).map(x=>x.slug):[];
       const missing=prior?.repositoryId===cfg.repositoryId&&prior.complete?
         prior.generators.filter(g=>!snapshot.generators.some(x=>x.slug===g.slug)).map(x=>x.slug):[];
+      // Missing and new paths from two independently complete main snapshots
+      // do not authorize delete, create or rename. Persist an identity review
+      // before either normal intake or READY progression may observe new paths.
+      const stored=(await api.storage.local.get(REVIEW_KEY))?.[REVIEW_KEY]||[];
+      const planned=planMainFolderChanges(
+        prior?.repositoryId===cfg.repositoryId&&prior.complete?prior:null,snapshot,stored);
+      if(!planned.ok)return persistStatus(planned.code);
+      const reviews=[...planned.review].slice(-512);
       // "Missing" is a reported Git path observation, NEVER deletion authority.
-      await api.storage.local.set({[LAST]:snapshot,[RECEIPT]:{
+      await api.storage.local.set({[LAST]:snapshot,[REVIEW_KEY]:reviews,[RECEIPT]:{
         code:'CATALOG_OBSERVED_READ_ONLY',observedAt:clock(),
         repositoryId:cfg.repositoryId,head:result.head,recognizedCount:result.recognizedCount,
         newFolders:added,missingFolderObservations:missing,
+        ambiguousIdentityHeld:planned.held,identityReviewRequired:planned.created.length,
         firstImportNeedsApproval:prior?.repositoryId!==cfg.repositoryId
       }});
+      // Each missing folder remains a distinct actionable incident. A full
+      // successful reappearance, not a failed scan, is the only resolution.
+      // Notification payloads contain no source paths or credentials.
+      const dispatcher=createNoticeDispatcher(api,createCanonicalStore(await openCanonicalDatabase()));
+      async function scopeFor(slug){
+        const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(slug));
+        return 'gitf_'+Array.from(new Uint8Array(digest)).slice(0,18).
+          map(v=>v.toString(16).padStart(2,'0')).join('');
+      }
+      for(const slug of missing.slice(0,64)){
+        try{await dispatcher.emit({scopeId:await scopeFor(slug),
+          code:'GIT_FOLDER_MISSING',severity:'ACTION_REQUIRED',
+          revision:Math.max(1,clock())});}catch{}
+      }
+      for(const rec of planned.created.slice(0,64)){
+        try{await dispatcher.emit({scopeId:await scopeFor(rec.newSlug),
+          code:'GIT_FOLDER_RENAME_REVIEW',severity:'ACTION_REQUIRED',
+          revision:Math.max(1,clock())});}catch{}
+      }
+      // Incident resolution is independent of owner/source write authority.
+      if(prior?.repositoryId===cfg.repositoryId&&prior.complete)
+        for(const g of snapshot.generators.slice(0,64)){
+          if(!prior.generators?.some(x=>x.slug===g.slug))continue;
+          try{await dispatcher.resolve({scopeId:await scopeFor(g.slug),
+            code:'GIT_FOLDER_MISSING',evidence:'COMPLETE_MAIN_FOLDER_READBACK'});}catch{}
+        }
       // S04 receives only the independently complete pinned-main scan. Its
       // own approval check and canonical DB handle decide local intent intake.
       // The S03 observer never invents provider ownership or performs writes.
       if(ingestComplete){
         let intake;
-        try{intake=await ingestComplete(result);}catch{intake={ok:false,code:'S04_INTAKE_UNAVAILABLE'};}
+        try{intake=await ingestComplete(result,{heldSlugs:planned.held});}catch{intake={ok:false,code:'S04_INTAKE_UNAVAILABLE'};}
         if(intake?.more===true)
           try{await api.alarms.create(CATALOG_RESUME_ALARM,{when:clock()+60000});}catch{}
         if(intake?.ok===false)
@@ -102,7 +138,7 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       if(ingestReady){
         let ready;
         try{ready=await ingestReady({catalog:result,repository:cfg.repository,
-          token:value.credential,transport:resumed.transport});}
+          token:value.credential,transport:resumed.transport,heldSlugs:planned.held});}
         catch{ready={ok:false,code:'S05_READY_INTAKE_UNAVAILABLE'};}
         if(ready?.more===true)
           try{await api.alarms.create(CATALOG_RESUME_ALARM,{when:clock()+60000});}catch{}
