@@ -57,9 +57,13 @@ function updateNav(){for(const a of root.querySelectorAll('[data-nav]'))a.setAtt
 }
 function routeTo(target){if(!routes.includes(target))target='overview';state.route=target;location.hash='#'+target;void render()}
 function openGlobalSearch(){
- const overlay=el('div','overlay');const modal=el('div','modal');modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label','Search local accounts and generators');
+ const existing=shadow('.overlay');if(existing){existing.querySelector('input[type=search]')?.focus();return}
+ const priorFocus=root.activeElement;
+ const overlay=el('div','overlay');const modal=el('div','modal');
+ const closeSearch=()=>{clearTimeout(delay);epoch++;overlay.remove();
+  const restore=priorFocus?.isConnected?priorFocus:shadow('.top-search');restore?.focus({preventScroll:true});};modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label','Search local accounts and generators');
  const head=el('div','modal-head');head.append(el('h2','', 'Search PCMS'));
- const close=b('Close',()=>overlay.remove(),'btn small');head.append(close);modal.append(head);
+ const close=b('Close',closeSearch,'btn small');head.append(close);modal.append(head);
  const body=el('div','modal-body');
  const input=el('input');input.type='search';input.placeholder='Find a local generator or account';input.setAttribute('aria-label','Search local generators and accounts');input.maxLength=80;
  input.style.width='100%';input.style.padding='11px';input.style.border='1px solid #c9d2da';input.style.borderRadius='7px';body.append(input);
@@ -77,10 +81,10 @@ function openGlobalSearch(){
   for(const f of found.slice(0,12)){const row=el('div','queue-item');const strong=el('strong','',f.label);const kind=el('span','muted small',f.kind);row.append(strong,kind,b('Open',f.execute));list.append(row)}
  }
  input.addEventListener('input',()=>{clearTimeout(delay);delay=setTimeout(()=>{void search()},200)});
- overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){overlay.remove();return}if(e.key==='Tab'){
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();closeSearch();return}if(e.key==='Tab'){
  const controls=[...modal.querySelectorAll('button:not(:disabled),input:not(:disabled)')];const index=controls.indexOf(root.activeElement);
  if(e.shiftKey&&index===0){e.preventDefault();controls.at(-1)?.focus()}else if(!e.shiftKey&&index===controls.length-1){e.preventDefault();controls[0]?.focus()}}
- });overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove()});input.focus();
+ });overlay.addEventListener('click',e=>{if(e.target===overlay)closeSearch()});input.focus();
 }
 function nativeSelection(type,item){
  if(type==='timing'){window.dispatchEvent(new CustomEvent('pcms-refresher-target',{detail:{slug:item.slug}}));nativeRoute('refresher')}
