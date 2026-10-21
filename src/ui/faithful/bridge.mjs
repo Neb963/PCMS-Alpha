@@ -915,10 +915,23 @@ function displayQueue(){
    const marker=el('span','row-mark warn');marker.append(icon('alert'));
    const detail=el('div','row-body');
    const header=el('div','queue-head');
-   header.append(el('strong','',n.code.replaceAll('_',' ').toLowerCase()),
+   const issueTitle={
+    GIT_FOLDER_MISSING:'GitHub source folder missing',
+    GIT_FOLDER_RENAME_REVIEW:'Possible source-folder rename',
+    GIT_RECONNECT_REQUIRED:'GitHub connection needs attention',
+    ROUTE_UNAVAILABLE:'Protected account route unavailable',
+    ACCOUNT_UNVERIFIED:'Account identity needs verification',
+    SOURCE_HELD:'Source needs verification',
+    RESTORE_IN_PROGRESS:'Restore awaiting reconciliation',
+    CANONICAL_UNAVAILABLE:'Local records unavailable',
+    OPERATION_UNCERTAIN:'Operation outcome uncertain',
+    PROVIDER_OUTAGE:'Provider connection interrupted',
+    BACKUP_FAILED:'Encrypted backup needs attention'
+   }[n.code]||'An operational issue needs review';
+   header.append(el('strong','',issueTitle),
      statusPill(n.reviewed?'Reviewed — still active':'Needs attention','amber'));
    detail.append(header,el('div','row-meta',
-     'Incident · '+n.scopeId+' · '+(Number.isFinite(n.lastAt)?new Date(n.lastAt).toLocaleString():'time unavailable')));
+     'Recorded local issue · '+(Number.isFinite(n.lastAt)?new Date(n.lastAt).toLocaleString():'time not recorded')));
    const action=el('button','btn small',n.reviewed?'Reviewed':'Mark reviewed');
    action.type='button';
    action.addEventListener('click',async()=>{action.disabled=true;
@@ -937,8 +950,9 @@ function displayQueue(){
    const detail=el('div','row-body'),header=el('div','queue-head');
    header.append(el('strong','',op.effectType?.replaceAll('_',' ')||'Recorded operation'),statusPill(info[0],info[1]));
    detail.append(header,el('div','row-meta',
-     'Target '+op.targetId+' · revision '+op.revision+' · '+op.operationId+
-     (Number.isFinite(op.updatedAt)?' · '+new Date(op.updatedAt).toLocaleString():' · time not recorded')));
+     'Protected operation'+(Number.isFinite(op.updatedAt)?
+      ' · last recorded '+new Date(op.updatedAt).toLocaleString():
+      ' · last update not recorded')));
    const action=b('Inspect',()=>openOperationRecord(op));
    row.append(marker,detail,action);holder.append(row);
   }
