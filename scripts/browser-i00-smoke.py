@@ -1099,6 +1099,43 @@ def main():
                 assert all(row['count']>=5 and row['current']==1 and row['controlled']
                            and row['visiblePanels']>=1 for row in desktop['groups']),desktop
                 print('B V014_PACKAGED_DESKTOP_GROUPS_AND_AUTHORITATIVE_CONTROLS=PASS',flush=True)
+                # v0.1.5 visual-hierarchy test: the prior release kept an
+                # old dashboard with cosmetic CSS. Verify real production
+                # workspace composition in this installed full-capability XPI.
+                faithful=execute(after,"""const get=id=>document.getElementById(id);
+                  const root=document.documentElement;
+                  const inv=get('generators-table-title')?.closest('section.panel');
+                  const qs=document.querySelector('#view-work-queue .v015-queue-board');
+                  const refs=get('pcms-refresher-rows');
+                  const rail=document.querySelector('#view-refresher .v015-refresher-rail');
+                  const stats=document.querySelector('#view-refresher .v015-refresher-stats');
+                  const settings=document.querySelector('#view-settings .v015-settings-nav');
+                  const accountTools=document.querySelector('#view-accounts .v015-account-tools');
+                  const source=get('pcms-generator-query');
+                  return {booted:root.classList.contains('pcms-v015-faithful'),
+                    overview:!!document.querySelector('#view-overview .v015-overview-stats'),
+                    inventory:!!inv?.classList.contains('v015-inventory-panel'),
+                    inventoryTabs:document.querySelectorAll('#view-generators .v015-filter-tab').length,
+                    inputPreserved:!!source&&source.closest('.v015-inventory-tools')!==null,
+                    nativeRowIdentity:!!get('pcms-generators-rows'),
+                    queue:!!qs,queueRows:!!qs?.querySelector('.v015-queue-list'),
+                    accounts:!!accountTools,
+                    refresher:!!refs&&!!rail&&!!stats,
+                    nativeRefresherInBoard:!!refs?.closest('.v015-refresher-panel'),
+                    nativePolicyInRail:!!rail?.querySelector('#pcms-v014-refresher-policy'),
+                    settings:!!settings,
+                    sourceWriters:document.querySelectorAll('script[src="v015-faithful.mjs"]').length};""")
+                assert faithful['booted'] and all(faithful[k] for k in
+                    ['overview','inventory','inputPreserved','nativeRowIdentity',
+                     'queue','queueRows','accounts','refresher',
+                     'nativeRefresherInBoard','nativePolicyInRail','settings']),faithful
+                assert faithful['inventoryTabs']>=4 and faithful['sourceWriters']==1,faithful
+                print('B V015_TRUE_DESKTOP_PRIMARY_WORKSPACES_AND_REAL_HANDLERS=PASS',flush=True)
+                release_version=execute(after,"return {manifest:browser.runtime.getManifest().version,ui:document.documentElement.dataset.pcmsUiVersion,badge:document.querySelector('.v015-top-status')?.textContent};")
+                assert release_version.get('manifest')=='1.2.1',release_version
+                assert release_version.get('ui')=='0.1.5' and '0.1.5' in release_version.get('badge',''),release_version
+                print('B V015_REAL_FIREFOX_UPDATE_VERSION_AND_VISIBLE_UI_MARKER=PASS',flush=True)
+
                 navigation=execute(after,"""const by=id=>document.getElementById(id);
                   const original=by('pcms-backup-export');
                   document.querySelector('[data-pcms-v014-open="generators:create"]').click();

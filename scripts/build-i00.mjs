@@ -62,6 +62,11 @@ export async function buildI00({ packageArchive = true } = {}) {
   await applyI01Overlay(root,stage);
   await verifyPackagedModuleGraph(stage);
   const combined = structuredClone(original);
+  // Combined PCMS XPI is a distributable UPDATE of the same Firefox add-on.
+  // Leaving the donor's 1.2.0 version unchanged allowed an old installed UI
+  // to masquerade as this new package. Donor bytes are untouched.
+  if(original.version!=='1.2.0')throw Error('PINNED_DONOR_VERSION_CHANGED');
+  combined.version='1.2.1';
   combined.name = 'PCMS Alpha + PersonaMonkey';
   combined.description = 'PCMS dashboard with PersonaMonkey protected routing and operator-authorized generator management.';
   // An action popup suppresses Firefox's action.onClicked listener.
