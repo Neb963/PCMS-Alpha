@@ -100,7 +100,8 @@ async function readRoute(g,row){
 function sameRoute(a,b){return a?.routeId===b?.routeId&&
  a?.cookieStoreId===b?.cookieStoreId&&a?.ready===true&&b?.ready===true}
 export function createExistingRenameService(api,{
- guard=internalPcmsGuard,open=openCanonicalDatabase,clock=Date.now}={}){
+ guard=internalPcmsGuard,open=openCanonicalDatabase,clock=Date.now,
+ developmentGate=()=>standingS06?.gate('development')===true}={}){
  const sentinel=createRestoreSentinel(api.storage.local);
  let busy=false,dbPromise=null;
  const db=()=>dbPromise||=open().catch(error=>{dbPromise=null;throw error});
@@ -127,7 +128,7 @@ export function createExistingRenameService(api,{
   busy=true;
   try{
    if((await sentinel.inspect()).held)return reject('RESTORE_HOLD');
-   if(type!=='RECONCILE'&&standingS06?.gate('development')!==true)
+   if(type!=='RECONCILE'&&developmentGate()!==true)
     return reject('DEVELOPMENT_AUTHORITY_REQUIRED');
    const state=await current(newSlug);if(!state.ok)return state;
    const {review,attempt}=state;
@@ -214,7 +215,7 @@ export function createExistingRenameService(api,{
    const saved=(await api.storage.local.get(key(newSlug)))?.[key(newSlug)];
    if(saved?.state!=='DISPATCH_POSSIBLE'||saved?.revision!==marked.revision)
     return reject('RENAME_DISPATCH_OUTCOME_UNCERTAIN');
-   if((await sentinel.inspect()).held||standingS06?.gate('development')!==true)
+   if((await sentinel.inspect()).held||developmentGate()!==true)
     return reject('RENAME_DISPATCH_OUTCOME_UNCERTAIN');
    let result;
    try{result=await g.runSupplyStep(facts.row.personaUid,{
