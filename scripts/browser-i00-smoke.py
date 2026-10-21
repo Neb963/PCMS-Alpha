@@ -1279,8 +1279,10 @@ def main():
                     new KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true}));
                   const escapeRestoresFocus=!shadow.querySelector('.overlay')&&
                     shadow.activeElement===searchButton;
+                  shadow.querySelector('[data-nav="settings"]')?.click();
+                  shadow.querySelector('[data-settings="advanced"]')?.click();
                   const advanced=[...shadow.querySelectorAll('#page button')]
-                    .find(x=>x.textContent.trim()==='More controls (original view)');
+                    .find(x=>x.textContent.trim()==='Open protected recovery controls');
                   advanced?.click();
                   const nativeOpen=document.body.classList.contains('pcms-native-open');
                   document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}));
