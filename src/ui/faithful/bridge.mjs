@@ -617,17 +617,18 @@ async function loadQueue(reset=false){
      guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_PAGE',{
        after:q.noticeCursor,limit:20,query:q.query}):Promise.resolve({ok:true,items:[],more:false,next:null}),
    guardedRead('pcms-i02-canonical-readonly','SUMMARY'),
+   guardedRead('pcms-i02-canonical-readonly','NOTICE_SUMMARY'),
    guardedRead('pcms-i13-release','LIST_REVIEW',{after:'',limit:40})
      .catch(()=>({ok:false,items:[]})),
    guardedRead('pcms-r4-folder-identity','LIST')
      .catch(()=>({ok:false,items:[],missingFolders:[]}))
  ];
  try{
-  const [ops,notices,summary,releases,identities]=await Promise.all(requested);
+  const [ops,notices,summary,noticeTotals,releases,identities]=await Promise.all(requested);
   if(state.route!=='work-queue'||q.epoch!==epoch)return;
   q.operations=ops.items||[];q.incidents=notices.items||[];
   q.nextOps=ops.more?ops.next:null;q.nextNotices=notices.more?notices.next:null;
-  q.more=Boolean(ops.more||notices.more);q.summary=summary;
+  q.more=Boolean(ops.more||notices.more);q.summary={...summary,attention:noticeTotals};
   q.releaseItems=releases?.ok?(releases.items||[]):[];
   q.reviews=identities?.ok?(identities.items||[]):[];
   q.missing=identities?.ok?(identities.missingFolders||[]):[];
@@ -743,7 +744,7 @@ function displayQueue(){
   if(!holder.children.length)
     renderEmpty(holder,'No matching recorded operations or active incidents. This is not proof of remote health.');
  }
- const counts=q.summary?.states||{},attention=q.summary?.attention||{};
+ const counts=q.summary?.states||{},attention=q.summary?.attention?.counts||{};
  const needs=(counts.HELD_UNCERTAIN||0)+(counts.REJECTED||0)+(counts.DISPATCH_POSSIBLE||0)+
    (q.reviews||[]).filter(x=>x.state==='REVIEW_REQUIRED').length+
    (attention.actionRequired||0)+(attention.serious||0);
@@ -901,17 +902,18 @@ function displayOverview(){if(state.route!=='overview')return;
   inventory({offset:0,limit:1}),
   refresher({phase:'ALL',offset:0,limit:1}),
   guardedRead('pcms-i02-canonical-readonly','SUMMARY'),
+  guardedRead('pcms-i02-canonical-readonly','NOTICE_SUMMARY'),
   guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{limit:8,status:'NEEDS_ACTION'}),
   guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_PAGE',{limit:8}),
   guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{limit:8,status:'RUNNING'})
  ]).then(results=>{
   if(!still())return;
   const val=i=>results[i].status==='fulfilled'&&results[i].value?.ok?results[i].value:null;
-  const inv=val(0),ref=val(1),summary=val(2),ops=val(3),inc=val(4),running=val(5);
+  const inv=val(0),ref=val(1),summary=val(2),noticeTotals=val(3),ops=val(4),inc=val(5),running=val(6);
   stat(0,inv?.total===undefined?'—':String(inv.total),'Historical local inventory; not a live provider census');
   stat(1,ref?.ok?String(ref.occupied??'—'):'—',
     ref?.ok?'Currently occupied Refresher slots; provider visibility is separate':'Refresher state unavailable');
-  const counts=summary?.states,attention=summary?.attention?.counts;
+  const counts=summary?.states,attention=noticeTotals?.counts;
   const need=counts?(counts.HELD_UNCERTAIN||0)+(counts.REJECTED||0)+
     (counts.DISPATCH_POSSIBLE||0)+(attention?.actionRequired||0)+(attention?.serious||0):null;
   stat(2,need===null?'—':String(need),
@@ -939,7 +941,7 @@ function displayOverview(){if(state.route!=='overview')return;
   // A native host or downloaded archive being present does not establish
   // an independently verified and recoverable backup.
   stat(3,'—','Independent backup/restore evidence not loaded');
-  state.queue.summary=summary;updateNav();
+  state.queue.summary=summary?.ok?{...summary,attention:noticeTotals}:null;updateNav();
  });
 }
 // R3: diagnostic projection from the actual background boundary. This is not
