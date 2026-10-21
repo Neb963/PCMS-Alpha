@@ -225,3 +225,47 @@ test('S03: vault unavailable does not persist configuration or claim Git success
   assert.equal(state.pcmsS03Git,undefined);
   assert.equal((await boundary.run({type:'SCAN_CONNECTED'},sender)).code,'GIT_RECONNECT_REQUIRED');
 });
+
+test('R3: pending vault outcome recovers only with explicit same-repository replacement consent',async()=>{
+  const state={},fx=fake(),sender={id:'combined-id',url:'moz-extension://test/pcms/index.html'};
+  const api={runtime:{id:'combined-id',getURL:x=>'moz-extension://test/'+x},storage:{local:{
+    get:async key=>key in state?{[key]:state[key]}:{},
+    set:async values=>{assert.ok(!JSON.stringify(values).includes(TOKEN));Object.assign(state,values);},
+    remove:async key=>{delete state[key];}
+  }}};
+  let stores=0;
+  const native=async message=>{
+    if(message.action==='git.store'){
+      stores++;
+      if(stores===1)throw Error('lost vault acknowledgement');
+      assert.equal(message.repositoryId,'42');assert.equal(message.credential,TOKEN);
+      return {ok:true};
+    }
+    if(message.action==='git.status')return {ok:stores>=2,present:stores>=2};
+    return {ok:false,code:'UNAVAILABLE'};
+  };
+  const boundary=createCatalogBoundary(api,{native,transport:fx.transport});
+  assert.equal((await boundary.run({type:'CONNECT_GIT',params:{repository:repo,token:TOKEN}},sender)).code,
+    'GIT_VAULT_STORE_OUTCOME_UNCERTAIN');
+  assert.equal(stores,1);
+  assert.equal(state.pcmsS03Git,undefined);
+  assert.equal(state.pcmsS03GitPending.repositoryId,'42');
+  assert.equal((await boundary.run({type:'CONNECT_GIT',params:{repository:repo,token:TOKEN}},sender)).code,
+    'GIT_PENDING_CONNECTION_RECONCILIATION_REQUIRED');
+  assert.equal((await boundary.run({type:'RECOVER_GIT_CONNECTION',params:{
+    repository:repo,token:TOKEN}},sender)).code,'INVALID_PARAMS');
+  assert.equal(stores,1,'a rejected retry never writes to the vault');
+  state.pcmsS03GitPending.repositoryId='99';
+  assert.equal((await boundary.run({type:'RECOVER_GIT_CONNECTION',params:{
+    repository:repo,token:TOKEN,acknowledgeCredentialReplacement:true}},sender)).code,
+    'GIT_RECOVERY_SCOPE_MISMATCH');
+  assert.equal(stores,1,'wrong scope never dispatches a write');
+  state.pcmsS03GitPending.repositoryId='42';
+  const recovered=await boundary.run({type:'RECOVER_GIT_CONNECTION',params:{
+    repository:repo,token:TOKEN,acknowledgeCredentialReplacement:true}},sender);
+  assert.equal(recovered.code,'GIT_CONNECTED_LOCALLY_VERIFIED',JSON.stringify(recovered));
+  assert.equal(stores,2);
+  assert.equal(state.pcmsS03GitPending,undefined);
+  assert.equal(state.pcmsS03Git.repositoryId,'42');
+  assert.equal(fx.metrics().writes,0,'no private Git writes occur');
+});
