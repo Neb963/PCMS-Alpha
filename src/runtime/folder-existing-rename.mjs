@@ -121,7 +121,8 @@ export function createExistingRenameService(api,{
    return reject('RENAME_FOLDER_IDENTITY_CHANGED');
   return {ok:true,cfg,snap,review,attempt:saved[key(newSlug)]||null};
  }
- async function run({type,newSlug,expectedRevision},sender){
+ async function run({type,newSlug,expectedRevision,consent},sender){
+  if(type==='EXECUTE'&&consent!=='I APPROVE THE EXACT EXISTING GENERATOR RENAME')return reject('EXPLICIT_RENAME_APPROVAL_REQUIRED');
   if(!SLUG.test(newSlug||'')||!Number.isSafeInteger(expectedRevision)||expectedRevision<1)
    return reject('INVALID_RENAME_PARAMS');
   if(busy)return reject('RENAME_OPERATION_BUSY');
