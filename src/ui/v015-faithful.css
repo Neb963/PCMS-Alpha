@@ -343,3 +343,13 @@ main>.system-status{display:none}
 }
 @media(prefers-reduced-motion:reduce){.v015-page-head *, .v015-job-row *{
  transition:none!important;animation:none!important}}
+
+/* The approved screen shows one search/filters toolbar, not duplicate native filters. */
+#view-generators .v015-inventory-panel>.v015-original-search-controls{display:none}
+#view-generators>.v015-more-workflows{margin:11px 0 8px;background:#fff;
+ border:1px solid var(--v15-line);padding:0 7px;border-radius:7px}
+#view-generators>.v015-more-workflows:before{content:"WORKFLOWS";display:flex;
+ align-items:center;font-size:10px;font-weight:730;letter-spacing:.055em;
+ color:#6c7c8c;padding:0 8px}
+#view-work-queue>.pcms-v014-workflow-nav{margin-top:10px;background:#fff;
+ border:1px solid var(--v15-line);border-radius:7px;padding:0 8px}
