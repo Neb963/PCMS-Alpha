@@ -245,7 +245,7 @@ async function refreshStatus(){
     connected=Boolean(r?.ok);
     if(connected){
       repo.value=r.repository;
-      message('Connected to '+r.repository+' using OS Secret Service. Read-only scan available.');
+      message('OS credential present for '+r.repository+'. Remote GitHub authentication and complete main tree have not been checked. Run read-only verification in Settings.');
     }else message('Git vault not connected ('+(r?.code||'UNAVAILABLE')+
       '). Enter a credential and connect, or perform one read-only scan.');
   }catch{message('Git credential status unavailable; no connection assumed.');}
@@ -259,8 +259,8 @@ connect.addEventListener('click',async()=>{
     if(n!==generation)return;
     if(r?.ok){
       connected=true;selectedScope=null;promptBase=null;token.value='';
-      message('GitHub connected. Credential held by OS Secret Service; no Git or provider write performed.');
-    }else message('Connection held: '+(r?.code||'UNAVAILABLE')+'. Input remains unsaved.');
+      message('Git configuration and OS vault readback verified. Remote main tree not yet scanned; no Git/provider write performed.');
+    }else message('Connection held: '+(r?.code||'UNAVAILABLE')+'. Credential persistence may be uncertain: use Settings preflight before retrying.');
   }catch{if(n===generation)message('Git vault unavailable; no connection assumed.');}
   finally{busy=false;controls();}
 });
