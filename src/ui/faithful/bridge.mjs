@@ -968,8 +968,23 @@ function displayQueue(){
          actions.append(b('Execute one verified rename',()=>void next('EXECUTE_RENAME',attempt.revision),'btn primary'));
        if(stage==='DISPATCH_POSSIBLE'||stage==='OUTCOME_UNCERTAIN')
          actions.append(b('Reconcile remote rename',()=>void next('RECONCILE_RENAME',attempt.revision),'btn small'));
-       if(stage==='REMOTE_RENAME_VERIFIED_LINK_PENDING')
-         actions.append(b('Go to generator inventory',()=>routeTo('generators'),'btn small'));
+       if(stage==='REMOTE_RENAME_VERIFIED_LINK_PENDING'){
+         actions.append(b('Verify inventory and finish rename',()=>void (async()=>{
+           if(!window.confirm('Finish reconciliation only if the new generator inventory and Git source association are independently verified? This does not perform another remote rename.'))return;
+           stateNote.textContent='Checking new owner, remote identity and exact Git source association…';
+           try{
+             const result=await readPort('pcms-r4-folder-identity','FINALIZE_RENAME',{
+               newSlug:review.newSlug,expectedRevision:attempt.revision},45000);
+             stateNote.textContent=result?.ok&&result.state==='RENAME_COMPLETED'?
+               'New identity and source association verified. Previous source history retained.':
+               'The new inventory or source association is not yet independently verified. No remote change was attempted.';
+           }catch{stateNote.textContent='Reconciliation could not be confirmed. Remote rename will not be repeated.'}
+           await loadQueue(true);
+         })(),'btn small'));
+         actions.append(b('Open new generator source',()=>{
+           state.gen.query=review.newSlug;state.gen.offset=0;routeTo('generators');
+         },'btn small'));
+       }
       })();
     }else if(review.state==='REMOTE_RENAMED_LINK_PENDING'){
       content.append(el('p','setting-note',
