@@ -2,7 +2,7 @@
 const el=id=>document.getElementById(id);
 const repo=el('pcms-catalog-repo'),token=el('pcms-catalog-token');
 const scan=el('pcms-catalog-scan'),clear=el('pcms-catalog-clear');
-const connect=el('pcms-catalog-connect'),disconnect=el('pcms-catalog-disconnect');
+const connect=el('pcms-catalog-connect'),recover=el('pcms-catalog-recover'),disconnect=el('pcms-catalog-disconnect');
 const approve=el('pcms-catalog-approve');
 const status=el('pcms-catalog-status'),list=el('pcms-catalog-list');
 const readySlug=el('pcms-catalog-ready-slug');
@@ -31,7 +31,9 @@ const GIT_HELP={
  GITHUB_SERVICE_UNAVAILABLE:'GitHub is temporarily unavailable. No connection changes were made.',
  GIT_RECONNECT_REQUIRED:'GitHub has not been connected securely yet. The file preview can work without enabling automation.',
  GIT_CREDENTIAL_MISSING_OR_INVALID:'No usable GitHub credential was found. Check the native helper and reconnect.',
- GIT_VAULT_STATUS_UNCERTAIN:'PCMS could not read the credential status. Check Settings → Diagnostics.'
+ GIT_VAULT_STATUS_UNCERTAIN:'PCMS could not read the credential status. Check Settings → Diagnostics.',
+ GIT_RECOVERY_REQUIRES_PENDING:'There is no interrupted setup to restart. Use normal Connect instead.',
+ GIT_RECOVERY_SCOPE_MISMATCH:'The repository does not match the interrupted setup. Review its identity before any changes.'
 };
 function gitHelp(code){return GIT_HELP[code]||'GitHub could not complete this operation. Check Settings → Diagnostics for details.';}
 
@@ -240,7 +242,7 @@ function request(type,params={},portName='pcms-s03-catalog'){
   });
 }
 function controls(){
-  scan.disabled=busy;repo.disabled=busy;connect.disabled=busy||connected;
+  scan.disabled=busy;repo.disabled=busy;connect.disabled=busy||connected;recover.disabled=busy||connected;
   disconnect.disabled=busy||!connected;
   approve.disabled=busy||!selectedScope||!connected;
   inspectReady.disabled=busy||!connected||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(readySlug.value.trim());
@@ -279,6 +281,23 @@ connect.addEventListener('click',async()=>{
       message('Git configuration and OS vault readback verified. Remote main tree not yet scanned; no Git/provider write performed.');
     }else message(gitHelp(r?.code));
   }catch{if(n===generation)message('Git vault unavailable; no connection assumed.');}
+  finally{busy=false;controls();}
+});
+recover.addEventListener('click',async()=>{
+  if(busy||connected)return;
+  const repository=repo.value.trim();
+  if(!window.confirm('Only for an interrupted GitHub connection: verify this exact repository and replace any previously saved credential for it with the credential entered above. This cannot change GitHub files or generators. If the previous credential is still available, use Reconcile in Settings first. Continue?'))return;
+  const n=++generation;
+  busy=true;controls();message('Verifying the requested GitHub repository before securely restarting setup…');
+  try{
+    const r=await request('RECOVER_GIT_CONNECTION',{
+      repository,token:token.value,acknowledgeCredentialReplacement:true});
+    if(n!==generation)return;
+    if(r?.ok){
+      connected=true;selectedScope=null;promptBase=null;token.value='';
+      message('Secure GitHub setup completed. Check repository files separately before starting automation.');
+    }else message(gitHelp(r?.code));
+  }catch{if(n===generation)message('Secure setup could not be confirmed. Check local PCMS helper status before any retry.');}
   finally{busy=false;controls();}
 });
 disconnect.addEventListener('click',async()=>{
