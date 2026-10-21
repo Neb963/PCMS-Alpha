@@ -107,7 +107,12 @@ let currentToast;
 function notify(message){const e=shadow('#pcms-live-toast');if(!e)return;e.textContent=String(message);e.hidden=false;if(currentToast)clearTimeout(currentToast);currentToast=setTimeout(()=>e.hidden=true,6500)}
 function updateNav(){for(const a of root.querySelectorAll('[data-nav]'))a.setAttribute('aria-current',a.dataset.nav===state.route?'page':'false');
  const label=shadow('#breadcrumb');if(label)label.textContent=({'work-queue':'Work Queue',overview:'Overview',generators:'Generators',accounts:'Accounts',refresher:'Refresher',settings:'Settings'})[state.route];
- const t=shadow('[data-nav="work-queue"] .nav-count');if(t){const count=observedReceipts().filter(x=>x.needs).length;t.textContent=count?String(count):'';t.hidden=count===0;}
+ const t=shadow('[data-nav="work-queue"] .nav-count');if(t){
+  const stats=state.queue.summary?.states,notices=state.queue.summary?.attention?.counts;
+  const count=stats?(stats.HELD_UNCERTAIN||0)+(stats.REJECTED||0)+(stats.DISPATCH_POSSIBLE||0)+
+    (notices?.actionRequired||0)+(notices?.serious||0):0;
+  t.textContent=count?String(count):'';t.hidden=!count;
+ }
 }
 function routeTo(target){if(!routes.includes(target))target='overview';state.route=target;location.hash='#'+target;void render()}
 function openGlobalSearch(){
@@ -753,40 +758,64 @@ function readQueueNoticeAck(n){
  });
 }
 function displayOverview(){if(state.route!=='overview')return;
+ const epoch=state.renderEpoch;
  const cards=[...page().querySelectorAll('.stat-grid .stat-card')];
- for(const [i,label] of ['Managed generators','Refresher','Work requiring attention','Last verified backup'].entries()){
+ for(const [i,label] of ['Managed generators','Refresher','Work requiring attention','Last verified backup'].entries())
   cards[i]?.querySelector('.stat-label')?.replaceChildren(document.createTextNode(label));
+ function stat(index,value,note){
+  const card=cards[index];if(!card)return;
+  const valueNode=card.querySelector('.stat-value');if(valueNode)valueNode.textContent=value;
+  const caption=card.querySelector('.stat-note');if(caption)caption.textContent=note;
  }
- function setStat(index,value,note){const card=cards[index];if(!card)return;
-  const target=card.querySelector('.stat-value');if(target)target.textContent=value;
-  const explain=card.querySelector('.stat-note');if(explain){explain.textContent=note;explain.classList.remove('good')}
- }
- setStat(0,'—','Reading local observations');setStat(1,'—','Unknown');setStat(2,'—','Unknown');setStat(3,'—','Unknown');
- const sections=[...page().querySelectorAll('.overview-grid .overview-card')];
- sections.forEach(section=>{const list=section.querySelector('.panel-scroll');if(list)renderEmpty(list,'No current local receipt has been confirmed.');});
- const sourceQueue=observedReceipts();
- if(sourceQueue.length){const attention=sourceQueue.filter(x=>x.needs);const progress=sourceQueue.filter(x=>x.running||x.waiting);
-  for(const [index,group] of [[0,attention],[1,progress]]){const box=sections[index]?.querySelector('.panel-scroll');if(!box)continue;box.replaceChildren();
-   if(!group.length)renderEmpty(box,'No matching local receipt currently observed.');
-   group.slice(0,8).forEach(item=>{const row=el('div','list-row');const badge=el('span','row-mark'+(item.needs?' warn':''));badge.append(icon(item.needs?'alert':'activity'));
-    const data=el('div','row-body');data.append(el('p','row-title',item.label),el('div','row-meta',item.text));row.append(badge,data,b('Inspect',()=>nativeAction(item.route,item.group)));box.append(row)});
-  }
- }
- setStat(2,String(sourceQueue.filter(x=>x.needs).length),'From observed local operation receipts');
- const other=sections.slice(2);
- for(const block of other){const display=block.querySelector('.panel-scroll');if(!display)continue;display.replaceChildren();
-  const key=block.querySelector('h2')?.textContent?.toLowerCase()||'';
-  const target=key.includes('health')?nativeControl('pcms-guard-health'):nativeControl('pcms-journal-health');
-  display.append(el('p','native-bridge-note',snippet(target?.textContent,400)||'Local observation unavailable.'));
- }
- void Promise.allSettled([inventory({offset:0,limit:1}),refresher({phase:'ALL',offset:0,limit:1})]).then(([inv,ref])=>{
-  if(state.route!=='overview')return;
-  const n=inv.status==='fulfilled'&&Number.isInteger(inv.value.total)?inv.value.total:null;
-  setStat(0,n===null?'—':String(n),n===null?'Inventory read unavailable':'Historical local inventory · not a remote census');
-  const r=ref.status==='fulfilled'?ref.value:null;
-  setStat(1,r?.ok?String(r.occupied??'—'):'—',r?.ok?'Active scheduled slots · feed placement separate':'Refresher read unavailable');
+ for(let i=0;i<4;i++)stat(i,'—','Verification unavailable');
+ const blocks=[...page().querySelectorAll('.overview-grid .overview-card')];
+ blocks.forEach(b=>{const target=b.querySelector('.panel-scroll');
+  if(target)renderEmpty(target,'Reading recorded activity…')});
+ const still=()=>state.route==='overview'&&state.renderEpoch===epoch;
+ void Promise.allSettled([
+  inventory({offset:0,limit:1}),
+  refresher({phase:'ALL',offset:0,limit:1}),
+  guardedRead('pcms-i02-canonical-readonly','SUMMARY'),
+  guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{limit:8,status:'NEEDS_ACTION'}),
+  guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_PAGE',{limit:8}),
+  guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{limit:8,status:'RUNNING'})
+ ]).then(results=>{
+  if(!still())return;
+  const val=i=>results[i].status==='fulfilled'&&results[i].value?.ok?results[i].value:null;
+  const inv=val(0),ref=val(1),summary=val(2),ops=val(3),inc=val(4),running=val(5);
+  stat(0,inv?.total===undefined?'—':String(inv.total),'Historical local inventory; not a live provider census');
+  stat(1,ref?.ok?String(ref.occupied??'—'):'—',
+    ref?.ok?'Currently occupied Refresher slots; provider visibility is separate':'Refresher state unavailable');
+  const counts=summary?.states,attention=summary?.attention?.counts;
+  const need=counts?(counts.HELD_UNCERTAIN||0)+(counts.REJECTED||0)+
+    (counts.DISPATCH_POSSIBLE||0)+(attention?.actionRequired||0)+(attention?.serious||0):null;
+  stat(2,need===null?'—':String(need),
+    need===null?'Incident journal unavailable':'Recorded local holds and incidents');
+  const listRows=(index,items)=>{
+   const panel=blocks[index]?.querySelector('.panel-scroll');if(!panel)return;
+   panel.replaceChildren();
+   if(!items?.length){renderEmpty(panel,'No matching local operation records observed.');return}
+   for(const x of items){
+    const row=el('div','list-row');row.append(
+     el('span','row-mark',x.severity?'!':'•'));
+    const body=el('div','row-body');
+    body.append(el('p','row-title',x.severity?
+      'Incident: '+x.code.replaceAll('_',' ').toLowerCase():
+      (x.effectType||'Recorded operation').replaceAll('_',' ')),
+      el('div','row-meta',x.severity?'Still requires review':
+        'Target '+x.targetId+' · '+(queueState[x.status]?.[0]||'Unknown status')));
+    row.append(body,b('Open Work Queue',()=>routeTo('work-queue')));panel.append(row);
+   }
+  };
+  listRows(0,[...(inc?.items||[]),...(ops?.items||[])].slice(0,8));
+  listRows(1,running?.items||[]);
+  for(const panel of blocks.slice(2)){const holder=panel.querySelector('.panel-scroll');
+   if(holder){holder.replaceChildren();renderEmpty(holder,'No independent local proof has been loaded for this section.')}}
+  // A native host or downloaded archive being present does not establish
+  // an independently verified and recoverable backup.
+  stat(3,'—','Independent backup/restore evidence not loaded');
+  state.queue.summary=summary;updateNav();
  });
- const backup=nativeControl('pcms-overview-backup');setStat(3,'—',snippet(backup?.textContent,150)||'No verified backup record available');
 }
 // R3: diagnostic projection from the actual background boundary. This is not
 // an additional source of operational authority and never enables effects.
