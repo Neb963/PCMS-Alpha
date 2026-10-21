@@ -66,7 +66,7 @@ function friendlyConnectionIssue(code){
 const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',total:0,items:[]},
  ref:{offset:0,limit:25,query:'',phase:'ALL',snapshot:null,items:[],total:0},
  acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],epoch:0},
- settings:'connections',lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},nativeOpen:false,
+ settings:'connections',settingsStatic:null,lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},nativeOpen:false,
  renderEpoch:0,version:'0.1.7',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
 const page=()=>shadow('#page');
@@ -146,7 +146,14 @@ function openGlobalSearch(){
  });overlay.addEventListener('click',e=>{if(e.target===overlay)closeSearch()});input.focus();
 }
 function nativeSelection(type,item){
- if(type==='timing'){openRefresherTiming(item);}
+ if(type==='timing'){
+  if(item?.stableId)openRefresherTiming(item);
+  else if(item?.slug){
+   state.ref.query=item.slug;state.ref.phase='ALL';state.ref.offset=0;
+   routeTo('refresher');
+   notify('Select the matching Refresher row to manage its independently verified timing.');
+  }else notify('No verified Refresher target is available for this generator.');
+ }
  else if(type==='source'){openSourceManager(item);}
  else if(type==='adopt'){openAdoptionManager(item);}
  else{const field=nativeControl('pcms-generator-query');if(field){field.value=item.slug;field.dispatchEvent(new Event('input',{bubbles:true}))}nativeRoute('generators','inventory')}
@@ -1749,9 +1756,11 @@ function primaryRestore(container){
   const target=nativeControl(id);if(!target)return false;
   if(target.type==='file'){
    const prior=target.files||[],next=value||[];
-   if(prior.length===next.length&&[...prior].every((file,i)=>{
-    const other=next[i];return other&&file.name===other.name&&
-     file.size===other.size&&file.lastModified===other.lastModified}))return true;
+   // Metadata equality is insufficient: two distinct encrypted archives
+   // can share name, size and modification time. Only unchanged file objects
+   // may preserve an authenticated preview without revalidation.
+   if(prior.length===next.length&&[...prior].every((file,i)=>file===next[i]))
+    return true;
    target.files=value;
   }else if(target.type==='checkbox'){
    if(target.checked===Boolean(value))return true;
@@ -2040,17 +2049,35 @@ function renderSettingsSection(){if(state.route!=='settings')return;
  const select=names.includes(state.settings)?state.settings:'connections';
  for(const b of page().querySelectorAll('[data-settings]')){b.classList.toggle('active',b.dataset.settings===select);b.setAttribute('aria-current',b.dataset.settings===select?'page':'false')}
  const container=shadow('.settings-main');if(!container)return;
- // Keep exact prototype setting rows; only their data comes from native state.
+ // Preserve pristine static connection rows across category round-trips.
+ // Never reuse the live, mutated view as the source template.
+ if(!state.settingsStatic)state.settingsStatic=container.cloneNode(true);
+ // Display only user-readable connection summaries. Technical receipts
+ // remain in separately collapsible Operational readiness evidence.
  // Other settings expose their original guarded controls without attempting to
  // reproduce authorization or credential editors in a simulated frontend.
  if(select==='connections'){
+  container.replaceChildren(...state.settingsStatic.cloneNode(true).childNodes);
   const rows=[...container.querySelectorAll('.settings-row')];
   const mapping=[['GitHub source','pcms-catalog-status','generators','catalog'],['PersonaMonkey routing','pcms-accounts-feedback','accounts',null],['Native vault and host','pcms-backup-status','settings','backup']];
   mapping.forEach(([label,id,target,group],i)=>{
    const row=rows[i];if(!row)return;const title=row.querySelector('.setting-title'),desc=row.querySelector('.setting-description'),pill=row.querySelector('.pill');
    if(title)title.textContent=label;
-   const source=nativeControl(id);const status=snippet(source?.textContent,110)||'State not observed';
-   if(desc)desc.textContent=status;if(pill){pill.textContent='Unverified';pill.className='pill'}
+   const components=[['GIT_CONFIG','GITHUB_AUTH'],['PERSONA_AND_SESSION'],['NATIVE_VAULT_HOST','BACKUP_HOST','DIAGNOSTIC_HOST']];
+   const observed=state.readiness?.rows?.filter(r=>components[i].includes(r.component))||[];
+   const unavailable=observed.some(r=>['UNREACHABLE','SECURITY_HELD','OUTCOME_UNCERTAIN'].includes(r.state));
+   const checked=observed.length>0&&observed.every(r=>r.state==='VERIFIED');
+   const status=unavailable?
+      i===2?'PCMS local helpers need attention. Use Operational readiness below.':
+      'A connection prerequisite needs attention. Check the detailed readiness report.':
+     checked?(i===0?'Saved access and local verification were checked.':
+       i===1?'The protected account connection was checked.':
+       'The local helper checks passed; live workflows require separate proof.'):
+     i===0?'GitHub access has not been fully verified in this session.':
+      i===1?'Check the protected account and Persona connection in Accounts.':
+      'Verify the matching PCMS native helpers before running full diagnostics.';
+   if(desc)desc.textContent=status;
+   if(pill){pill.textContent=unavailable?'Needs attention':checked?'Checked':'Not checked';pill.className='pill'}
    const button=row.querySelector('button[data-action]');if(button)button.dataset.action='check-service:'+(['github','persona','native'][i]);
   });
   container.querySelectorAll('.settings-row').forEach(row=>{if(row.querySelector('.pill')?.textContent==='Healthy')row.querySelector('.pill').textContent='Unknown'});
