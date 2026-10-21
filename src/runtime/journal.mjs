@@ -189,8 +189,8 @@ export function createCanonicalStore(db) {
        !['ALL','NEEDS_ACTION','RUNNING','WAITING','COMPLETED'].includes(status))
       return Promise.resolve(fail('INVALID_QUEUE_FILTER'));
     const groups={
-      ALL:null,NEEDS_ACTION:new Set(['HELD_UNCERTAIN','REJECTED']),
-      RUNNING:new Set(['OBSERVING','DISPATCH_POSSIBLE']),
+      ALL:null,NEEDS_ACTION:new Set(['HELD_UNCERTAIN','REJECTED','DISPATCH_POSSIBLE']),
+      RUNNING:new Set(['OBSERVING']),
       WAITING:new Set(['PREPARED']),
       COMPLETED:new Set(['CONFIRMED','ABORTED'])};
     return transact(db,['operations'],'readonly',(tx,finish)=>{
