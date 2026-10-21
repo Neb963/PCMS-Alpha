@@ -537,6 +537,33 @@ function renderReadinessPanel(container){
  },'btn small');
  exportButton.disabled=!state.readiness?.ok||state.readinessBusy;
  controls.append(local,remote,reconcile,exportButton);section.append(controls);
+ const pendingGit=state.readiness?.rows?.some(r=>r.component==='GIT_PARTIAL_CONNECTION'&&r.state==='OUTCOME_UNCERTAIN');
+ const vaultReachable=state.readiness?.rows?.some(r=>r.component==='NATIVE_VAULT_HOST'&&r.state==='VERIFIED');
+ if(pendingGit&&vaultReachable){
+  const recovery=el('div','settings-section');
+  recovery.append(el('p','setting-note',
+    'If PCMS cannot recover the previously saved GitHub credential, you can explicitly replace it. Use Reconcile first; replacement is not automatic.'));
+  const replacement=el('input','form-input');
+  replacement.type='password';replacement.autocomplete='off';replacement.spellcheck=false;
+  replacement.placeholder='Replacement GitHub credential';
+  replacement.setAttribute('aria-label','Replacement GitHub credential');
+  const retry=b('Replace credential and finish setup',()=>{
+    const value=replacement.value;replacement.value='';
+    if(!value){notify('Enter the replacement GitHub credential first.');return;}
+    if(!window.confirm('Replace any previous GitHub credential for Neb963/per-gens with the new one? This is an explicit recovery action; it does not change GitHub files or generators.'))return;
+    void (async()=>{
+      try{
+       const out=await readPort('pcms-s03-catalog','RECOVER_GIT_CONNECTION',{
+         repository:'Neb963/per-gens',token:value,acknowledgeCredentialReplacement:true},30000);
+       notify(out?.ok?'Secure GitHub setup completed. Run a read-only verification before using it.':
+         friendlyConnectionIssue(out?.code));
+      }catch{notify('The recovery result could not be confirmed. Run preflight before trying again.');}
+      finally{await runReadiness(false);}
+    })();
+  },'btn small');
+  retry.disabled=state.readinessBusy;
+  recovery.append(replacement,retry);section.append(recovery);
+ }
  const summary=el('p','setting-note');summary.setAttribute('role','status');
  if(state.readinessBusy)summary.textContent='Observing current runtime and local dependencies…';
  else if(!state.readiness)summary.textContent='Not checked in this dashboard session.';
