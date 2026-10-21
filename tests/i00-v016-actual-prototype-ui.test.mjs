@@ -61,9 +61,9 @@ test('prototype supports adverse navigation and fail-open presentation recovery'
  assert.match(bridge,/host\.remove\(\)/);
  assert.match(bridge,/body\.classList\.remove\('pcms-faithful-ready'\)/);
 });
-test('Firefox upgrades v1.2.1 XPI to 1.2.2 with donor manifest unchanged',()=>{
+test('Firefox upgrades v1.2.1 XPI to 1.2.3 with donor manifest unchanged',()=>{
  assert.match(build,/original\.version!=='1\.2\.0'/);
- assert.match(build,/combined\.version='1\.2\.2'/);
+ assert.match(build,/combined\.version='1\.2\.3'/);
  assert.match(html,/v015-faithful\.mjs/);
  assert.match(html,/faithful\/bridge\.mjs/);
 });
