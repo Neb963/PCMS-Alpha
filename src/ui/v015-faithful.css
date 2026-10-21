@@ -353,3 +353,16 @@ main>.system-status{display:none}
  color:#6c7c8c;padding:0 8px}
 #view-work-queue>.pcms-v014-workflow-nav{margin-top:10px;background:#fff;
  border:1px solid var(--v15-line);border-radius:7px;padding:0 8px}
+
+/* Advanced real controls are available deliberately, not dumped into a long
+   legacy default screen. Opening a workflow preserves its native DOM. */
+#view-work-queue .v015-queue-workflows{margin:8px 0 16px;border:1px solid #dfe6eb;
+ border-radius:7px;background:#fff}
+#view-work-queue .v015-queue-workflows>summary{min-height:36px;padding:9px 14px;
+ cursor:pointer;color:#526c83;font-size:11px;font-weight:700}
+#view-work-queue .v015-queue-workflows>summary:hover{background:#f5f8fb}
+#view-work-queue .v015-queue-workflows-body{padding:2px 12px 10px}
+#view-work-queue .v015-queue-workflows-body>.pcms-v014-workflow-nav{margin:4px 0 10px;
+ border:0;border-bottom:1px solid #dfe6eb}
+#view-work-queue .v015-queue-workflows-body>.panel{margin:10px 0}
+#view-work-queue .v015-queue-workflows-body>p{font-size:11px;color:#65778a}
