@@ -16,7 +16,7 @@ export function planMainFolderChanges(prior,current,records=[]){
  if(prior&&!validSnapshot(prior))return {ok:false,code:'PRIOR_SNAPSHOT_UNVERIFIED'};
  if(prior&&prior.repositoryId!==current.repositoryId)
    return {ok:false,code:'REPOSITORY_IDENTITY_CHANGED'};
- if(!Array.isArray(records)||records.length>512)return {ok:false,code:'REVIEW_STATE_INVALID'};
+ if(!Array.isArray(records)||records.length>20000)return {ok:false,code:'REVIEW_STATE_INVALID'};
  const old=new Map((prior?.generators||[]).map(g=>[g.slug,g]));
  const now=new Map(current.generators.map(g=>[g.slug,g]));
  if(old.size!==(prior?.generators?.length||0)||now.size!==current.generators.length)
