@@ -66,9 +66,14 @@ export function canonicalRefresherInputs(records){
   });
 }
 function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={}){
+  const phaseMatch=r=>phase==='ALL'||phase==='HELD'?
+    (phase==='HELD'?r.paused===true||rowBlocks(s,r).length>0:r.phase==='ALL'||true):
+    phase==='INELIGIBLE'?
+      r.phase==='WAITING'&&(rowBlocks(s,r).length>0||r.readyUpdate===true):
+      r.phase===phase;
   const match=s.rows.filter(r=>(!query||r.slug.includes(query.toLowerCase())||
     r.accountId.includes(query.toLowerCase())||r.stableId.includes(query))&&
-    (!accountId||r.accountId===accountId)&&(phase==='ALL'||r.phase===phase)).sort(queueOrder);
+    (!accountId||r.accountId===accountId)&&phaseMatch(r)).sort(queueOrder);
   const items=match.slice(offset,offset+limit).map(r=>({stableId:r.stableId,slug:r.slug,
     accountId:r.accountId,phase:r.phase,activeRemaining:r.activeRemaining,sleepRemaining:r.sleepRemaining,
     activeMs:r.activeMs,sleepMs:r.sleepMs,ordinal:r.ordinal,slot:r.slot,paused:r.paused,
