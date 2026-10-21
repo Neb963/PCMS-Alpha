@@ -1243,6 +1243,11 @@ def main():
                   sh.querySelector('[data-settings="automation"]').click();
                   const primaryPermission=sh.querySelector('.settings-main')?.textContent.includes('Standing permissions')&&
                     !sh.querySelector('.settings-main')?.textContent.includes('Open automation tools (original view)');
+                  sh.querySelector('[data-settings="ai"]').click();
+                  const aiPanel=sh.querySelector('.settings-main');
+                  const primaryAi=aiPanel?.textContent.includes('Managed AI development')&&
+                    !!aiPanel?.querySelector('textarea[aria-label="AI development guidance"]')&&
+                    [...aiPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Save concurrency'));
                   sh.querySelector('[data-settings="backups"]').click();
                   const backupPanel=sh.querySelector('.settings-main');
                   const protectedRestore=!!backupPanel?.querySelector('input[type="file"]')&&
@@ -1257,9 +1262,9 @@ def main():
                     !!details?.querySelector('input[placeholder="pcms-test-alpha"]')&&
                     [...details.querySelectorAll('button')].some(x=>x.textContent.includes('Save disposable scope'));
                   return {primaryCreate,legacyOpened,primaryPermission,primaryDiagnostic,
-                    protectedRestore,restoreHeld,
+                    primaryAi,protectedRestore,restoreHeld,
                     drawerClosed:!sh.querySelector('[aria-label="Create generators"]')};""")
-                assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['protectedRestore'] and r4_primary['restoreHeld'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
+                assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['primaryAi'] and r4_primary['protectedRestore'] and r4_primary['restoreHeld'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
                 print('B R4_PRIMARY_CREATION_AND_PROTECTED_SETTINGS_WITHOUT_LEGACY=PASS',flush=True)
                 execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=overview]').click();return true")
 
