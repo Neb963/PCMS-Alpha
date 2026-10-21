@@ -1208,14 +1208,20 @@ def main():
                       const status=panel?.querySelector('[role="status"]')?.textContent||'';
                       const rows=[...panel?.querySelectorAll('.queue-item')||[]];
                       return {status,count:rows.length,
-                        hasGit:rows.some(r=>r.textContent.includes('GITHUB AUTH')&&
-                          r.textContent.includes('NOT_TESTED')),
-                        hasHost:rows.some(r=>r.textContent.includes('NATIVE VAULT HOST')),
+                        hasGit:rows.some(r=>r.querySelector('strong')?.textContent==='GitHub access'&&
+                          r.textContent.includes('Not checked')&&
+                          r.querySelector('details')?.textContent.includes('AUTH_CHECK_NOT_REQUESTED')),
+                        hasHost:rows.some(r=>r.querySelector('strong')?.textContent==='GitHub credential helper'&&
+                          r.querySelector('details')?.textContent.includes('NATIVE_')),
+                        readable:rows.every(r=>r.querySelector('strong')&&
+                          !r.querySelector('strong').textContent.includes('_')&&
+                          !!r.querySelector('details summary')&&
+                          r.querySelector('details summary').textContent.includes('Technical details')),
                         exportEnabled:[...panel?.querySelectorAll('button')||[]].some(
                           b=>b.textContent.trim()==='Export sanitized report'&&!b.disabled)};""")
-                    if r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost']:break
+                    if r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['readable']:break
                     time.sleep(.12)
-                assert r3_result and r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['exportEnabled'],('R3_PREFLIGHT_FAILED',r3_result)
+                assert r3_result and r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['readable'] and r3_result['exportEnabled'],('R3_PREFLIGHT_FAILED',r3_result)
                 print('B R3_REAL_PRIMARY_SETTINGS_LOCAL_PREFLIGHT_NO_REMOTE=PASS',flush=True)
                 execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=overview]').click();return true")
 
