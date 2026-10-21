@@ -19,6 +19,8 @@ import './inventory-boundary.mjs';
 import './source-boundary.mjs';
 // S03 complete main-only catalog and Git-owned prompt (read-only admission).
 import './catalog-boundary.mjs';
+// R3 evidence-scoped read-only operational diagnostics.
+import './readiness-boundary.mjs';
 // S03 main observer wakes from alarms without an open dashboard.
 import './catalog-watch.mjs';
 // S05 read-only main/owner/byte readiness diagnostics without effect admission.

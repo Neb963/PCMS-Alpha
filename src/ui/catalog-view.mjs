@@ -2,7 +2,7 @@
 const el=id=>document.getElementById(id);
 const repo=el('pcms-catalog-repo'),token=el('pcms-catalog-token');
 const scan=el('pcms-catalog-scan'),clear=el('pcms-catalog-clear');
-const connect=el('pcms-catalog-connect'),disconnect=el('pcms-catalog-disconnect');
+const connect=el('pcms-catalog-connect'),recover=el('pcms-catalog-recover'),disconnect=el('pcms-catalog-disconnect');
 const approve=el('pcms-catalog-approve');
 const status=el('pcms-catalog-status'),list=el('pcms-catalog-list');
 const readySlug=el('pcms-catalog-ready-slug');
@@ -17,6 +17,26 @@ const promptStatus=el('pcms-catalog-prompt-status');
 let busy=false,generation=0,connected=false,selectedScope=null;
 let promptBase=null,promptRevision=0,promptDirty=false,promptEffectState=null;
 function message(text){status.textContent=text;}
+const GIT_HELP={
+ GIT_VAULT_STORE_OUTCOME_UNCERTAIN:'PCMS could not confirm that the GitHub credential was saved. Do not retry yet; check Settings → Diagnostics to reconcile the interrupted connection.',
+ GIT_SECRET_SERVICE_UNAVAILABLE:'The secure credential store is not available. Check the PCMS native helper in Settings → Diagnostics.',
+ GIT_SECRET_SERVICE_TIMEOUT:'The secure credential store did not respond. Check Settings → Diagnostics before retrying.',
+ GIT_VAULT_OPERATION_DENIED:'The credential helper refused the request. Check its installation and extension permissions.',
+ GIT_PENDING_CONNECTION_RECONCILIATION_REQUIRED:'A previous connection did not finish. Check Settings → Diagnostics and reconcile before connecting again.',
+ GIT_CONFIG_COMMIT_OUTCOME_UNCERTAIN:'PCMS could not confirm that the connection settings were saved. Check Settings → Diagnostics before retrying.',
+ GITHUB_AUTH_REJECTED:'GitHub rejected the credential. Check that it is valid and authorized for this repository.',
+ GITHUB_ACCESS_FORBIDDEN:'GitHub denied access to this repository. Check the credential permissions.',
+ GITHUB_REPOSITORY_INACCESSIBLE:'GitHub could not access this private repository. Check its name and your permissions.',
+ GITHUB_TRANSPORT_UNAVAILABLE:'GitHub could not be reached. Check your connection and try again.',
+ GITHUB_SERVICE_UNAVAILABLE:'GitHub is temporarily unavailable. No connection changes were made.',
+ GIT_RECONNECT_REQUIRED:'GitHub has not been connected securely yet. The file preview can work without enabling automation.',
+ GIT_CREDENTIAL_MISSING_OR_INVALID:'No usable GitHub credential was found. Check the native helper and reconnect.',
+ GIT_VAULT_STATUS_UNCERTAIN:'PCMS could not read the credential status. Check Settings → Diagnostics.',
+ GIT_RECOVERY_REQUIRES_PENDING:'There is no interrupted setup to restart. Use normal Connect instead.',
+ GIT_RECOVERY_SCOPE_MISMATCH:'The repository does not match the interrupted setup. Review its identity before any changes.'
+};
+function gitHelp(code){return GIT_HELP[code]||'GitHub could not complete this operation. Check Settings → Diagnostics for details.';}
+
 function render(data){
   list.replaceChildren();prompt.value='';
   selectedScope=connected&&data.preview?.scopeDigest&&data.importStatus!== 'IMPORT_SCOPE_APPROVED' ?
@@ -222,7 +242,7 @@ function request(type,params={},portName='pcms-s03-catalog'){
   });
 }
 function controls(){
-  scan.disabled=busy;repo.disabled=busy;connect.disabled=busy||connected;
+  scan.disabled=busy;repo.disabled=busy;connect.disabled=busy||connected;recover.disabled=busy||connected;
   disconnect.disabled=busy||!connected;
   approve.disabled=busy||!selectedScope||!connected;
   inspectReady.disabled=busy||!connected||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(readySlug.value.trim());
@@ -245,9 +265,8 @@ async function refreshStatus(){
     connected=Boolean(r?.ok);
     if(connected){
       repo.value=r.repository;
-      message('Connected to '+r.repository+' using OS Secret Service. Read-only scan available.');
-    }else message('Git vault not connected ('+(r?.code||'UNAVAILABLE')+
-      '). Enter a credential and connect, or perform one read-only scan.');
+      message('OS credential present for '+r.repository+'. Remote GitHub authentication and complete main tree have not been checked. Run read-only verification in Settings.');
+    }else message(gitHelp(r?.code));
   }catch{message('Git credential status unavailable; no connection assumed.');}
   controls();
 }
@@ -259,9 +278,26 @@ connect.addEventListener('click',async()=>{
     if(n!==generation)return;
     if(r?.ok){
       connected=true;selectedScope=null;promptBase=null;token.value='';
-      message('GitHub connected. Credential held by OS Secret Service; no Git or provider write performed.');
-    }else message('Connection held: '+(r?.code||'UNAVAILABLE')+'. Input remains unsaved.');
+      message('Git configuration and OS vault readback verified. Remote main tree not yet scanned; no Git/provider write performed.');
+    }else message(gitHelp(r?.code));
   }catch{if(n===generation)message('Git vault unavailable; no connection assumed.');}
+  finally{busy=false;controls();}
+});
+recover.addEventListener('click',async()=>{
+  if(busy||connected)return;
+  const repository=repo.value.trim();
+  if(!window.confirm('Only for an interrupted GitHub connection: verify this exact repository and replace any previously saved credential for it with the credential entered above. This cannot change GitHub files or generators. If the previous credential is still available, use Reconcile in Settings first. Continue?'))return;
+  const n=++generation;
+  busy=true;controls();message('Verifying the requested GitHub repository before securely restarting setup…');
+  try{
+    const r=await request('RECOVER_GIT_CONNECTION',{
+      repository,token:token.value,acknowledgeCredentialReplacement:true});
+    if(n!==generation)return;
+    if(r?.ok){
+      connected=true;selectedScope=null;promptBase=null;token.value='';
+      message('Secure GitHub setup completed. Check repository files separately before starting automation.');
+    }else message(gitHelp(r?.code));
+  }catch{if(n===generation)message('Secure setup could not be confirmed. Check local PCMS helper status before any retry.');}
   finally{busy=false;controls();}
 });
 disconnect.addEventListener('click',async()=>{
@@ -290,9 +326,9 @@ scan.addEventListener('click',async()=>{
     }
     render(r);
     void renderReadyQueue(n);
-    message('Complete read-only snapshot. '+r.recognizedCount+
-      ' recognized entries. Scope: '+(r.importStatus||'NOT_CONNECTED')+
-      '. Owner facts and allocations remain unverified; approval does not create remote generators.');
+    message('GitHub files read successfully: '+r.recognizedCount+' generator folder(s) found on main. '+
+      (connected?'Connection is configured, but account ownership and deployment still need verification.':
+      'This was a one-time preview, not a saved GitHub connection. Finish secure setup in Settings before enabling automation.'));
   }catch{
     if(n===generation)message('Unable to complete scan. Previous state is not deletion evidence.');
   }finally{busy=false;controls();}

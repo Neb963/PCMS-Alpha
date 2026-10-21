@@ -27,3 +27,11 @@ test('C-66/C-71 fresh test-owned immutable slug and sanitized resumable evidence
  assert.equal(JSON.stringify(report).includes(cfg.accountId),false);
  assert.equal(report.remoteArtifactsPreserved,true);
 });
+
+test('R3: missing secure Git connection is distinct from valid namespace and account',()=>{
+ const interrupted={...cfg,repositoryId:undefined};
+ assert.equal(validateDisposable(interrupted).code,'TEST_GITHUB_CONNECTION_REQUIRED');
+ assert.equal(validateDisposable({...cfg,namespace:'production'}).code,'TEST_NAMESPACE_INVALID');
+ assert.equal(validateDisposable({...cfg,personaUid:undefined}).code,'TEST_PERSONA_BINDING_INVALID');
+ assert.equal(validateDisposable(cfg).ok,true);
+});

@@ -68,6 +68,13 @@ def git_action(packet, run=subprocess.run):
 
 
 def action(packet, run=subprocess.run):
+    # R3 nonsecret host/environment readiness. Exact no-args action, no
+    # subprocess and no paths, keys or environment values returned.
+    if isinstance(packet, dict) and packet == {"action": "diagnostic.environment"}:
+        return {"ok": True, "protocol": 2,
+                "dbusSession": bool(os.environ.get("DBUS_SESSION_BUS_ADDRESS")),
+                "runtimeDir": bool(os.environ.get("XDG_RUNTIME_DIR")),
+                "secretTool": os.access(TOOL, os.X_OK)}
     if isinstance(packet, dict) and isinstance(packet.get("action"), str) and packet["action"].startswith("git."):
         return git_action(packet, run)
     if not isinstance(packet, dict) or set(packet) - {"action", "passphrase"}:

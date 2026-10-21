@@ -9,11 +9,65 @@ const routes=['overview','generators','work-queue','accounts','refresher','setti
 const native=document.querySelector('body > .app');
 const host=document.createElement('div');host.id='pcms-faithful-host';
 document.body.append(host);const root=host.attachShadow({mode:'open'});
+const READINESS_NAMES={NATIVE_VAULT_HOST:'GitHub credential helper',SECRET_SERVICE_ENVIRONMENT:'Secure credential storage',BACKUP_HOST:'Backup helper',DIAGNOSTIC_HOST:'Diagnostic helper',GIT_CONFIG:'GitHub connection',GIT_PARTIAL_CONNECTION:'Interrupted GitHub setup',GITHUB_AUTH:'GitHub access',GITHUB_MAIN_TREE:'GitHub file scan',GRANT_DEVELOPMENT:'Development permission',GRANT_GITWRITE:'Git write permission',GRANT_PUBLICATION:'Publication permission',PERSONA_AND_SESSION:'Account and secure route',REFRESHER_LIVE_EFFECT:'Refresher operation',INSTALLED_XPI_IDENTITY:'Installed extension verification'};
+const READINESS_STATES={VERIFIED:'Checked',NOT_TESTED:'Not checked',OUTCOME_UNCERTAIN:'Needs review',UNREACHABLE:'Not responding',STALE:'Needs updating',SECURITY_HELD:'Waiting on setup',OFF_BY_POLICY:'Disabled',NOT_CONFIGURED:'Not connected',MISSING_CAPABILITY:'Needs an update'};
+function operatorReadinessGuidance(row){
+ const code=row.code||'';
+ if(row.component==='NATIVE_VAULT_HOST'||row.component==='BACKUP_HOST'||row.component==='DIAGNOSTIC_HOST')
+   return row.state==='UNREACHABLE'?'The PCMS helper is not responding. Check the local PCMS installation.':
+     row.state==='VERIFIED'?'The local helper responded. Its complete workflow is not yet verified.':
+     'The local helper needs attention before this service can be used.';
+ if(row.component==='GIT_CONFIG'||row.component==='GIT_PARTIAL_CONNECTION')
+   return row.component==='GIT_PARTIAL_CONNECTION'&&row.state==='NOT_TESTED'?'No interrupted connection was confirmed by this check.':
+     row.state==='OUTCOME_UNCERTAIN'?'A previous GitHub setup did not finish. Use the recovery control before connecting again.':
+     row.state==='VERIFIED'?'Connection settings are saved. Check GitHub access separately.':
+     'GitHub needs to be connected before dependent operations can run.';
+ if(row.component==='SECRET_SERVICE_ENVIRONMENT'||row.component==='SECRET_SERVICE')
+   return row.state==='VERIFIED'?'Secure credential storage responded. GitHub access is checked separately.':
+     'Secure credential storage needs attention. Check the local PCMS helper before retrying.';
+ if(row.component==='GITHUB_AUTH'||row.component==='GITHUB_MAIN_TREE')
+   return row.state==='VERIFIED'?'The requested read-only GitHub check passed.':
+     row.state==='NOT_TESTED'?'Use the separate GitHub verification action when you need to check access.':
+     'GitHub access cannot be confirmed until secure connection setup is complete.';
+ if(row.component.startsWith('GRANT_'))
+   return row.state==='VERIFIED'?'Permission is recorded for the current GitHub setup.':
+     row.state==='STALE'?'This permission needs review after GitHub connection is repaired.':
+     'This permission is not enabled. Review it only when needed.';
+ if(row.component==='PERSONA_AND_SESSION')
+   return 'Use Accounts to check the selected account and its protected connection before live work.';
+ if(row.component==='REFRESHER_LIVE_EFFECT')
+   return 'A live source save and recent-list appearance have not been verified.';
+ if(row.component==='REFRESHER_POLICY'||row.component==='REFRESHER_CURRENT_POLICY')
+   return 'Open Refresher to inspect the current policy. Live effectiveness is checked separately.';
+ if(row.component==='BACKUP_RESTORE')
+   return 'A successful backup and restore still need independent verification.';
+ if(row.component==='INSTALLED_XPI_IDENTITY')
+   return 'An independent installed-extension check is needed to confirm the exact build.';
+ if(row.state==='VERIFIED')return 'This local check passed. It does not establish full live readiness.';
+ if(row.state==='OFF_BY_POLICY')return 'This capability is not enabled in the current settings.';
+ if(row.state==='NOT_TESTED')return 'This check has not been performed yet.';
+ if(row.state==='STALE')return 'This saved setting needs to be checked again.';
+ if(row.state==='SECURITY_HELD')return 'A required setup step must be completed first.';
+ if(row.state==='UNREACHABLE')return 'This service is not responding. Check its connection or installation.';
+ if(row.state==='OUTCOME_UNCERTAIN')return 'The last operation did not finish with a confirmed result.';
+ return code==='LOCAL_STORAGE_READ_FAILED'?'Saved settings could not be read. Check the Firefox profile.':
+   'Check this item before relying on the corresponding capability.';
+}
+function friendlyConnectionIssue(code){
+ const messages={
+ GIT_RECONCILED_LOCALLY_VERIFIED:'GitHub connection repaired. Run a read-only check to verify the files.',
+ GIT_RECONCILIATION_CREDENTIAL_UNAVAILABLE:'The saved GitHub credential could not be accessed. Check the native helper and secure storage before trying again.',
+ GIT_RECONCILIATION_VAULT_UNAVAILABLE:'The GitHub credential helper is not responding. Check its installation before trying again.',
+ GIT_RECONCILIATION_NETWORK_UNAVAILABLE:'GitHub could not be reached. Check your connection and try again.',
+ GIT_CONFIG_COMMIT_OUTCOME_UNCERTAIN:'Connection settings could not be confirmed. No further changes were attempted.'
+ };
+ return messages[code]||'GitHub connection could not be verified. See the details below before retrying.';
+}
 const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',total:0,items:[]},
  ref:{offset:0,limit:25,query:'',phase:'ALL',snapshot:null,items:[],total:0},
  acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:''},
  settings:'connections',lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},nativeOpen:false,
- renderEpoch:0,version:'0.1.6'};
+ renderEpoch:0,version:'0.1.6',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
 const page=()=>shadow('#page');
 function el(tag,cls='',text){const o=document.createElement(tag);if(cls)o.className=cls;if(text!==undefined)o.textContent=String(text);return o}
@@ -163,7 +217,7 @@ function routeHandlers(){
  if(action==='pause-refresher'){if(!guardedClick('pcms-refresher-global-pause'))return;notify('Pause request sent through the existing guarded controller; reload to verify.');void loadRefresher();return}
  if(action==='go-accounts'){routeTo('accounts');return}
  if(action==='queue-help'||action==='account-info'){notify('Detailed operational guidance is available in Advanced protected controls.');return}
- if(action.startsWith('check-service:')){const service=action.split(':')[1];nativeAction(service==='github'?'generators':service==='persona'?'accounts':'settings',service==='github'?'catalog':service==='native'?'backup':undefined);return}
+ if(action.startsWith('check-service:')){state.settings='connections';void runReadiness(false);return}
  });
  root.addEventListener('click',event=>{const tab=event.target.closest('[data-filter]');if(tab){event.preventDefault();const [r,value]=tab.dataset.filter.split(':');if(r==='generators'){state.gen.filter=value;state.gen.offset=0;void loadGenerators()}if(r==='refresher'){state.ref.phase=['All','Active','Sleeping','Waiting'].includes(value)?value.toUpperCase():value;state.ref.offset=0;void loadRefresher()}if(r==='queue'){state.queue.filter=value;displayQueue()}return}
  const row=event.target.closest('tr[data-item-index]');if(row){const i=Number(row.dataset.itemIndex);if(state.route==='refresher'&&state.ref.visibleItems?.[i])openDetails('ref',state.ref.visibleItems[i]);else if(state.route==='generators'&&state.gen.visibleItems?.[i])openDetails('gen',state.gen.visibleItems[i]);}
@@ -441,6 +495,131 @@ function displayOverview(){if(state.route!=='overview')return;
  });
  const backup=nativeControl('pcms-overview-backup');setStat(3,'—',snippet(backup?.textContent,150)||'No verified backup record available');
 }
+// R3: diagnostic projection from the actual background boundary. This is not
+// an additional source of operational authority and never enables effects.
+function renderReadinessPanel(container){
+ container.querySelector('[aria-label="Operational readiness preflight"]')?.remove();
+ const section=el('section','card settings-group');
+ section.setAttribute('aria-label','Operational readiness preflight');
+ section.append(el('h2','h2','Operational readiness'));
+ section.append(el('p','setting-note',
+  'Checks are observational. A passing local check is not live provider acceptance. Remote Git verification reads private metadata only after explicit consent.'));
+ const controls=el('div','settings-section-head');
+ const local=b(state.readinessBusy?'Checking…':'Run local preflight',()=>{void runReadiness(false)},'btn primary');
+ const remote=b('Verify private GitHub read-only',()=>{
+  if(!window.confirm('Authorize a read-only authenticated GET of the configured private GitHub repository and its complete main tree? No token will be exported and no Git/provider writes will occur.'))return;
+  void runReadiness(true);
+ },'btn small');
+ local.disabled=state.readinessBusy;remote.disabled=state.readinessBusy;
+ const reconcile=b('Reconcile interrupted Git connection',()=>{
+  if(!window.confirm('Read the OS vault credential inside the background process, independently verify this exact private GitHub repository identity, and repair only local connection metadata? No token is exported; no remote write occurs.'))return;
+  void (async()=>{
+   try{const out=await readPort('pcms-s03-catalog','RECONCILE_GIT',{},30000);
+    notify(friendlyConnectionIssue(out?.code));await runReadiness(false);
+   }catch{notify('Reconciliation status unknown; run preflight before another action.');}
+  })();
+ },'btn small');
+ reconcile.disabled=state.readinessBusy||!state.readiness?.rows?.some(row=>
+   row.component==='GIT_PARTIAL_CONNECTION'&&row.state==='OUTCOME_UNCERTAIN');
+ const exportButton=b('Export sanitized report',()=>{
+  const report=state.readiness;if(!report?.ok)return;
+  // Only the strict R3 schema rows are exported, never raw native/network
+  // messages, account details, source, tabs or credentials.
+  const keys=['component','scope','state','stage','code','dependency','observedAt',
+    'evidenceKind','evidenceSource','safeRecovery','retrySafety'];
+  const safe={schema:1,checkedAt:report.checkedAt,
+    remoteRequested:report.remoteRequested,rows:report.rows.map(row=>
+      Object.fromEntries(keys.map(k=>[k,row[k]??null])))};
+  const blob=new Blob([JSON.stringify(safe,null,2)],{type:'application/json'});
+  const uri=URL.createObjectURL(blob);const anchor=document.createElement('a');
+  anchor.href=uri;anchor.download='pcms-readiness-sanitized.json';anchor.click();
+  setTimeout(()=>URL.revokeObjectURL(uri),1000);
+ },'btn small');
+ exportButton.disabled=!state.readiness?.ok||state.readinessBusy;
+ controls.append(local,remote,reconcile,exportButton);section.append(controls);
+ const pendingGit=state.readiness?.rows?.some(r=>r.component==='GIT_PARTIAL_CONNECTION'&&r.state==='OUTCOME_UNCERTAIN');
+ const vaultReachable=state.readiness?.rows?.some(r=>r.component==='NATIVE_VAULT_HOST'&&r.state==='VERIFIED');
+ if(pendingGit&&vaultReachable){
+  const recovery=el('div','settings-section');
+  recovery.append(el('p','setting-note',
+    'If PCMS cannot recover the previously saved GitHub credential, you can explicitly replace it. Use Reconcile first; replacement is not automatic.'));
+  const replacement=el('input','form-input');
+  replacement.type='password';replacement.autocomplete='off';replacement.spellcheck=false;
+  replacement.placeholder='Replacement GitHub credential';
+  replacement.setAttribute('aria-label','Replacement GitHub credential');
+  const retry=b('Replace credential and finish setup',()=>{
+    const value=replacement.value;replacement.value='';
+    if(!value){notify('Enter the replacement GitHub credential first.');return;}
+    if(!window.confirm('Replace any previous GitHub credential for Neb963/per-gens with the new one? This is an explicit recovery action; it does not change GitHub files or generators.'))return;
+    void (async()=>{
+      try{
+       const out=await readPort('pcms-s03-catalog','RECOVER_GIT_CONNECTION',{
+         repository:'Neb963/per-gens',token:value,acknowledgeCredentialReplacement:true},30000);
+       notify(out?.ok?'Secure GitHub setup completed. Run a read-only verification before using it.':
+         friendlyConnectionIssue(out?.code));
+      }catch{notify('The recovery result could not be confirmed. Run preflight before trying again.');}
+      finally{await runReadiness(false);}
+    })();
+  },'btn small');
+  retry.disabled=state.readinessBusy;
+  recovery.append(replacement,retry);section.append(recovery);
+ }
+ const summary=el('p','setting-note');summary.setAttribute('role','status');
+ if(state.readinessBusy)summary.textContent='Observing current runtime and local dependencies…';
+ else if(!state.readiness)summary.textContent='Not checked in this dashboard session.';
+ else if(!state.readiness.ok)summary.textContent='Preflight unavailable: '+String(state.readiness.code||'UNKNOWN');
+ else {
+  const hostUnavailable=state.readiness.rows.some(row=>
+    ['NATIVE_VAULT_HOST','BACKUP_HOST','DIAGNOSTIC_HOST'].includes(row.component)&&row.state==='UNREACHABLE');
+  const pending=state.readiness.rows.some(row=>row.component==='GIT_PARTIAL_CONNECTION'&&row.state==='OUTCOME_UNCERTAIN');
+  summary.textContent=hostUnavailable?
+    'The local PCMS helper is not responding. GitHub connection, backup and full diagnostic tests cannot finish until it is repaired.':
+    pending?'A previous GitHub connection did not finish. Review and reconcile it before running full diagnostics.':
+    'Readiness checked. Review any items that need attention; a local check does not prove live service operations.';
+ }
+ section.append(summary);
+ const results=el('div','queue-list');
+ for(const r of state.readiness?.rows||[]){
+  const item=el('div','queue-item');item.style.display='block';
+  item.append(el('strong','',READINESS_NAMES[r.component]||r.component.replaceAll('_',' ')),
+    document.createTextNode(' — '+(READINESS_STATES[r.state]||'Needs review')));
+  item.append(el('p','setting-note',operatorReadinessGuidance(r)));
+  const technical=el('details','muted small');
+  const summary=el('summary','','Technical details');technical.append(summary);
+  technical.append(el('p','',r.code+' · '+r.stage+' · '+r.evidenceKind+' · '+new Date(r.observedAt).toLocaleString()));
+  technical.append(el('p','',r.safeRecovery));
+  item.append(technical);results.append(item);
+ }
+ section.append(results);container.append(section);
+}
+async function runReadiness(remote){
+ if(state.readinessBusy)return;
+ state.readinessBusy=true;renderSettingsSection();
+ try{
+  const snapshot=await readPort('pcms-r3-readiness','CHECK',{remote},95000);
+  if(!snapshot?.ok){state.readiness=snapshot;return;}
+  // These existing canonical ports are independent of Git/native diagnosis.
+  // They must not be converted into proof of a protected route or source save.
+  const replies=await Promise.allSettled([accounts(),refresher({phase:'ALL',offset:0,limit:1})]);
+  const at=Date.now();const make=(component,state,code,source,recovery)=>({
+   component,scope:'LOCAL',state,stage:'CANONICAL_PORT_READ',code,
+   dependency:'ACTIVE_BACKGROUND_BOUNDARY',observedAt:at,evidenceKind:'D',
+   evidenceSource:source,safeRecovery:recovery,retrySafety:'READ_ONLY'});
+  const acc=replies[0].status==='fulfilled'?replies[0].value:null;
+  snapshot.rows.push(make('ACCOUNT_INVENTORY_READ',acc?.ok?'VERIFIED':'UNREACHABLE',
+    acc?.ok?'CANONICAL_ACCOUNTS_RESPONDED':'ACCOUNT_READ_UNAVAILABLE',
+    'PCMS_I03_ACCOUNTS','This verifies only local account inventory; actual protected route/login need separate guarded observation.'));
+  const ref=replies[1].status==='fulfilled'?replies[1].value:null;
+  snapshot.rows.push(make('REFRESHER_CURRENT_POLICY',ref?.ok?'VERIFIED':'UNREACHABLE',
+    ref?.ok?(ref.policy?.refreshEnabled?'POLICY_ENABLED':'POLICY_DISABLED'):'CANONICAL_REFRESHER_UNAVAILABLE',
+    'PCMS_I12_REFRESHER','Policy state is not proof of live source-saving, complete recent-feed placement or qualified clock time.'));
+  snapshot.rows.push(make('REFRESHER_LIVE_EFFECT','NOT_TESTED',
+    'SOURCE_SAVE_AND_RECENT_UNVERIFIED','NO_INDEPENDENT_L_RECEIPT',
+    'Use a separately authorized disposable live test to verify saved bytes and recent-feed placement.'));
+  state.readiness=snapshot;
+ }catch{state.readiness={ok:false,code:'READINESS_TRANSPORT_UNAVAILABLE'};}
+ finally{state.readinessBusy=false;if(state.route==='settings')renderSettingsSection();}
+}
 function renderSettingsSection(){if(state.route!=='settings')return;
  const names=['connections','automation','backups','diagnostics','advanced'];
  const select=names.includes(state.settings)?state.settings:'connections';
@@ -464,11 +643,12 @@ function renderSettingsSection(){if(state.route!=='settings')return;
   container.replaceChildren();
   const section=el('section','card settings-group');const head=el('div','settings-section-head');const titles={automation:'Automation',backups:'Backup & Restore',diagnostics:'Diagnostics',advanced:'Advanced'};
   head.append(el('h2','h2',titles[select]));section.append(head);
-  section.append(el('p','setting-note','The existing production controller remains authoritative. Open its guarded controls to view live state, review safety holds and make authorized changes.'));
+  section.append(el('p','setting-note','Some controls are still in the original PCMS view. They use the same protected data and permissions; the unified settings interface is not yet complete.'));
   const group=select==='backups'?'backup':select==='diagnostics'?'diagnostics':select==='automation'?'automation':'permissions';
-  section.append(b('Open protected '+titles[select].toLowerCase(),()=>nativeAction('settings',group),'btn primary'));
+  section.append(b('Open '+titles[select].toLowerCase()+' tools (original view)',()=>nativeAction('settings',group),'btn primary'));
   container.append(section);
  }
+ renderReadinessPanel(container);
 }
 function displayRouteScaffold(){
  if(state.route==='overview')displayOverview();
@@ -489,7 +669,7 @@ function displayRouteScaffold(){
  }
  if(state.route==='settings')renderSettingsSection();
  const top=page()?.querySelector('.page-head .head-actions');
- if(top){top.append(b('Advanced controls',()=>nativeAction(state.route),'btn quiet small'))}
+ if(top){top.append(b('More controls (original view)',()=>nativeAction(state.route),'btn quiet small'))}
  else page()?.querySelector('.page-head')?.append(b('Advanced controls',()=>nativeAction(state.route),'btn quiet small'));
 }
 const templates=new Map();

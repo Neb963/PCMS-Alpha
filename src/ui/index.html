@@ -153,6 +153,7 @@
             <input id="pcms-catalog-token" type="password" autocomplete="off" spellcheck="false">
             <button id="pcms-catalog-clear" type="button">Clear input</button>
             <button id="pcms-catalog-connect" type="button">Connect GitHub</button>
+            <button id="pcms-catalog-recover" type="button">Restart incomplete GitHub setup</button>
             <button id="pcms-catalog-disconnect" type="button" disabled>Disconnect</button>
             <button id="pcms-catalog-scan" type="button">Inspect main catalog</button>
             <button id="pcms-catalog-approve" type="button" disabled>Approve initial folder scope</button>
@@ -473,7 +474,7 @@
             <input id="pcms-diagnostic-namespace" autocomplete="off" spellcheck="false" maxlength="42" placeholder="pcms-test-alpha">
                         <label for="pcms-diagnostic-consent">I confirm that the selected account, Persona and test namespace are disposable resources authorized for live PCMS testing</label>
             <input id="pcms-diagnostic-consent" type="checkbox">
-            <label for="pcms-diagnostic-xpi-sha">Optional SHA-256 of the full XPI (needed only for isolated tests)</label>
+            <label for="pcms-diagnostic-xpi-sha">XPI fingerprint for backup/restart verification (the diagnostic can start without it, but cannot complete those stages)</label>
             <input id="pcms-diagnostic-xpi-sha" maxlength="64" spellcheck="false" autocomplete="off" placeholder="64 hexadecimal characters">
             <button type="button" id="pcms-diagnostic-designate">Save disposable scope</button>
             <button type="button" id="pcms-diagnostic-run" disabled>Run full diagnostic</button>
@@ -560,6 +561,6 @@
   <script type="module" src="v014-desktop-ui.mjs"></script>
   <script type="module" src="v015-faithful.mjs"></script>
   <script type="module" src="faithful/bridge.mjs"></script>
-  <button id="pcms-legacy-return" type="button" aria-label="Return to prototype desktop interface">Return to PCMS</button>
+  <button id="pcms-legacy-return" type="button" aria-label="Back to PCMS dashboard">Back to dashboard</button>
 </body>
 </html>
