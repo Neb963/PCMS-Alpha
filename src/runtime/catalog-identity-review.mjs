@@ -9,7 +9,7 @@ function validSnapshot(s){
  return s&&s.complete===true&&RID.test(s.repositoryId||'')&&
    SHA.test(s.head||'')&&Array.isArray(s.generators)&&
    s.generators.length<=100000&&s.generators.every(g=>
-      SLUG.test(g.slug||'')&&SHA.test(g.markerOid||'')&&SHA.test(g.folderTreeOid||''));
+      SLUG.test(g.slug||'')&&SHA.test(g.markerOid||'')&&(!g.folderTreeOid||SHA.test(g.folderTreeOid)));
 }
 export function planMainFolderChanges(prior,current,records=[]){
  if(!validSnapshot(current))return {ok:false,code:'MAIN_SNAPSHOT_INCOMPLETE'};
