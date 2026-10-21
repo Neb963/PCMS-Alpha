@@ -1217,11 +1217,15 @@ def main():
                           !r.querySelector('strong').textContent.includes('_')&&
                           !!r.querySelector('details summary')&&
                           r.querySelector('details summary').textContent.includes('Technical details')),
+                        guidance:rows.filter(r=>r.querySelector('strong')?.textContent==='GitHub credential helper')
+                          .every(r=>!!r.querySelector('p.setting-note')?.textContent.match(/PCMS helper|local helper/i)&&
+                            !/NATIVE_|local\\.pcms|GIT_/.test(r.querySelector('p.setting-note').textContent)&&
+                            !!r.querySelector('details p')?.textContent.includes('NATIVE_')),
                         exportEnabled:[...panel?.querySelectorAll('button')||[]].some(
                           b=>b.textContent.trim()==='Export sanitized report'&&!b.disabled)};""")
-                    if r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['readable']:break
+                    if r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['readable'] and r3_result['guidance']:break
                     time.sleep(.12)
-                assert r3_result and r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['readable'] and r3_result['exportEnabled'],('R3_PREFLIGHT_FAILED',r3_result)
+                assert r3_result and r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['readable'] and r3_result['guidance'] and r3_result['exportEnabled'],('R3_PREFLIGHT_FAILED',r3_result)
                 print('B R3_REAL_PRIMARY_SETTINGS_LOCAL_PREFLIGHT_NO_REMOTE=PASS',flush=True)
                 execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=overview]').click();return true")
 
