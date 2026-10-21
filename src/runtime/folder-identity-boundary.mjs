@@ -3,6 +3,7 @@
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {createRestoreSentinel} from './journal.mjs';
 import {planMainFolderChanges,chooseFolderIdentity,REVIEW_KEY} from './catalog-identity-review.mjs';
+import {createExistingRenameService} from './folder-existing-rename.mjs';
 export const IDENTITY_PORT='pcms-r4-folder-identity';
 const LAST='pcmsS03CatalogLastComplete',CONFIG='pcmsS03Git';
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
@@ -11,9 +12,20 @@ const fail=code=>({ok:false,code});
 export function validateIdentityMessage(api,sender,message){
  if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
  if(!message||typeof message!=='object'||Array.isArray(message)||
-   !['LIST','CHOOSE'].includes(message.type)||
+   !['LIST','CHOOSE','GET_RENAME_ATTEMPT','PREPARE_RENAME','EXECUTE_RENAME','RECONCILE_RENAME'].includes(message.type)||
    Object.keys(message).some(k=>!['type','params'].includes(k)))return fail('INVALID_MESSAGE');
  const p=message.params||{};
+ if(message.type==='GET_RENAME_ATTEMPT'){
+  return typeof p==='object'&&!Array.isArray(p)&&
+    Object.keys(p).length===1&&SLUG.test(p.newSlug||'')?{ok:true}:fail('INVALID_PARAMS');
+ }
+ if(['PREPARE_RENAME','EXECUTE_RENAME','RECONCILE_RENAME'].includes(message.type)){
+  return typeof p==='object'&&!Array.isArray(p)&&
+    Object.keys(p).length===2&&SLUG.test(p.newSlug||'')&&
+    Number.isSafeInteger(p.expectedRevision)&&p.expectedRevision>0?
+      {ok:true}:fail('INVALID_PARAMS');
+ }
+
  if(typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
  if(message.type==='LIST')return Object.keys(p).length?fail('INVALID_PARAMS'):{ok:true};
  if(Object.keys(p).some(k=>!['newSlug','choice','expectedTreeOid','expectedRevision'].includes(k))||
@@ -26,10 +38,27 @@ export function validateIdentityMessage(api,sender,message){
 }
 export function createFolderIdentityBoundary(api,{clock=Date.now}={}){
  const sentinel=createRestoreSentinel(api.storage.local);
+ const existingRename=createExistingRenameService(api,{clock});
  let busy=false;
  async function dispatch(message,sender){
   const a=validateIdentityMessage(api,sender,message);if(!a.ok)return a;
   if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+  if(message.type==='GET_RENAME_ATTEMPT'){
+    try{
+      const key='pcmsR4ExistingRenameAttempt:'+message.params.newSlug;
+      const record=(await api.storage.local.get(key))?.[key];
+      return {ok:true,state:record?.state||'NOT_PREPARED',
+        revision:record?.revision||null,
+        retryAllowed:record?.state==='RENAME_PREPARED',
+        providerEffects:record?.state==='DISPATCH_POSSIBLE'||
+          record?.state==='OUTCOME_UNCERTAIN'?'POSSIBLE':'OFF'};
+    }catch{return fail('RENAME_ATTEMPT_UNAVAILABLE')}
+  }
+  if(['PREPARE_RENAME','EXECUTE_RENAME','RECONCILE_RENAME'].includes(message.type))
+   return existingRename.run({
+     type:message.type==='PREPARE_RENAME'?'PREPARE':
+       message.type==='EXECUTE_RENAME'?'EXECUTE':'RECONCILE',
+     ...message.params},sender);
   let observed,records,cfg;
   try{
    const saved=await api.storage.local.get([LAST,REVIEW_KEY,CONFIG]);
