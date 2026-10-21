@@ -939,7 +939,7 @@ function displayQueue(){
    detail.append(header,el('div','row-meta',
      'Target '+op.targetId+' · revision '+op.revision+' · '+op.operationId+
      (Number.isFinite(op.updatedAt)?' · '+new Date(op.updatedAt).toLocaleString():' · time not recorded')));
-   const action=b('Inspect',()=>{notify('This record is maintained by the protected operation controller. No retry has been dispatched.');});
+   const action=b('Inspect',()=>openOperationRecord(op));
    row.append(marker,detail,action);holder.append(row);
   }
   if(!holder.children.length)
@@ -1071,6 +1071,41 @@ async function openReleaseReview(slug){
   await loadQueue(true);
  })(),'btn primary');
  footer.append(requestChanges,approve);body.append(instructions,checkLabel,footer);
+}
+// An operation inspector is a read-only projection. A possible dispatched
+// effect cannot be retried from this drawer, even after browser restart.
+function openOperationRecord(op){
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),dialog=el('div','drawer');
+ dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');
+ dialog.setAttribute('aria-label','Recorded operation details');
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const header=el('div','drawer-head');
+ header.append(el('h2','drawer-title','Operation · '+(queueState[op.status]?.[0]||'Unverified')),b('Close',close));
+ const body=el('div','drawer-body'),fields=el('dl');
+ for(const [name,value] of [['Target',op.targetId],['Operation',op.operationId],
+  ['Type',op.effectType||'Unknown'],['State',op.status||'Unknown'],
+  ['Revision',String(op.revision??'Unknown')],
+  ['Updated',Number.isSafeInteger(op.updatedAt)?new Date(op.updatedAt).toLocaleString():'Not recorded']]){
+  const row=el('div','kv');row.append(el('dt','',name),el('dd','',value));fields.append(row);
+ }
+ body.append(fields);
+ const help={
+  PREPARED:'This operation is reserved locally. It has not been dispatched. Check account, route, permissions and scheduling before expecting a remote change.',
+  DISPATCH_POSSIBLE:'A remote effect may already have occurred. Do not retry. Reconcile the exact target using an independent provider readback.',
+  OBSERVING:'The runtime is verifying the remote result. An acknowledgment alone does not confirm the effect.',
+  HELD_UNCERTAIN:'The effect outcome is uncertain. It remains fenced; use the matching protected workflow’s reconciliation action, not a retry.',
+  CONFIRMED:'The operation journal records an independently verified equivalent result. Review the exact source or listing separately if needed.',
+  ABORTED:'The operation ended before dispatch. No remote effect was authorized by this record.',
+  REJECTED:'The controller rejected the operation. Check current prerequisites and latest canonical state before creating a new request.'
+ };
+ body.append(el('p','setting-note',help[op.status]||
+  'State is not recognized; keep all remote effects held until the runtime is checked.'));
+ const actions=el('div','form-foot');
+ actions.append(b('View current queue',()=>{close();void loadQueue(true)},'btn small'));
+ body.append(actions);dialog.append(header,body);overlay.append(dialog);root.append(overlay);
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ header.querySelector('button')?.focus();
 }
 function readQueueNoticeAck(n){
  return new Promise((resolve,reject)=>{
