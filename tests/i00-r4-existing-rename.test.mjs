@@ -20,7 +20,10 @@ function setup({grant=true,collision=false,ack=false}={}){
    identity:{source:'GUARDED_SESSION_READBACK',bindingVersion,principalFingerprint:FP('d')}};
  const row={slug:'old-generator',accountId,accountRevision:5,personaUid,bindingVersion,
    remoteId,revision:3,ownerState:'OBSERVED_OWNER'};
- const records={['account:'+accountId]:{account},'inventory:old-generator':{generator:row}};
+ const records={['account:'+accountId]:{account},'inventory:old-generator':{generator:row},
+  'source-link:old-generator':{link:{slug:'old-generator',
+   folder:'generators/old-generator',remoteId,accountId,personaUid,
+   bindingVersion,fingerprint:FP('f')}}};
  function db(){
   return {transaction:(stores,mode)=>{
    assert.equal(mode,'readonly');
@@ -68,6 +71,7 @@ function setup({grant=true,collision=false,ack=false}={}){
    clock:()=>200,developmentGate:()=>grantActive});
  return {service,saved,records,review,reads:()=>reads,renames:()=>renames,
    changeSource:()=>changedSource=true,removeOldInventory:()=>delete records['inventory:old-generator'],
+   removeOldLink:()=>delete records['source-link:old-generator'],
    installVerifiedNewLink:()=>{
     records['inventory:new-generator']={generator:{...row,slug:'new-generator',revision:4}};
     records['source-link:new-generator']={link:{
@@ -107,6 +111,12 @@ test('R4 AC-09 no grant, bad original source or target collision rejects before 
  assert.equal((await without.service.run({type:'PREPARE',newSlug:'new-generator',expectedRevision:2})).code,
   'DEVELOPMENT_AUTHORITY_REQUIRED');
  assert.equal(without.renames(),0);
+ const unrelated=setup();
+ unrelated.removeOldLink();
+ assert.equal((await unrelated.service.run({type:'PREPARE',
+   newSlug:'new-generator',expectedRevision:2})).code,
+   'RENAMED_OWNER_CONTEXT_UNVERIFIED');
+ assert.equal(unrelated.renames(),0,'unassociated original can never be renamed');
  const collision=setup({collision:true});
  assert.equal((await collision.service.run({type:'PREPARE',newSlug:'new-generator',expectedRevision:2})).code,
    'RENAME_TARGET_NOT_CLEAR');
