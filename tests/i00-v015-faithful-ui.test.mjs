@@ -25,9 +25,9 @@ test('faithful UI retains stable extension routes and all native authority surfa
   'pcms-release-approve','pcms-restore-apply','pcms-backup-export']){
    assert.match(html,new RegExp('id="'+id+'"'));
  }
- assert.match(js,/\\.append\\(policy\\)/);
- assert.match(js,/\\.append\\(global\\)/);
- assert.match(js,/\\.append\\(search\\)/);
+ assert.ok(js.includes('auto.append(policy)'));
+ assert.ok(js.includes('auto.append(global)'));
+ assert.ok(js.includes('q.append(search)'));
  assert.doesNotMatch(js,/\binnerHTML\b|\bouterHTML\b|insertAdjacentHTML|\beval\(/);
 });
 test('operator journeys reuse original DOM nodes and observed state, not mock commands',()=>{
