@@ -65,7 +65,7 @@ function friendlyConnectionIssue(code){
 }
 const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',total:0,items:[]},
  ref:{offset:0,limit:25,query:'',phase:'ALL',snapshot:null,items:[],total:0},
- acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],epoch:0},
+ acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],epoch:0},
  settings:'connections',lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},nativeOpen:false,
  renderEpoch:0,version:'0.1.7',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
@@ -617,15 +617,18 @@ async function loadQueue(reset=false){
      guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_PAGE',{
        after:q.noticeCursor,limit:20,query:q.query}):Promise.resolve({ok:true,items:[],more:false,next:null}),
    guardedRead('pcms-i02-canonical-readonly','SUMMARY'),
+   guardedRead('pcms-i13-release','LIST_REVIEW',{after:'',limit:40})
+     .catch(()=>({ok:false,items:[]})),
    guardedRead('pcms-r4-folder-identity','LIST')
      .catch(()=>({ok:false,items:[],missingFolders:[]}))
  ];
  try{
-  const [ops,notices,summary,identities]=await Promise.all(requested);
+  const [ops,notices,summary,releases,identities]=await Promise.all(requested);
   if(state.route!=='work-queue'||q.epoch!==epoch)return;
   q.operations=ops.items||[];q.incidents=notices.items||[];
   q.nextOps=ops.more?ops.next:null;q.nextNotices=notices.more?notices.next:null;
   q.more=Boolean(ops.more||notices.more);q.summary=summary;
+  q.releaseItems=releases?.ok?(releases.items||[]):[];
   q.reviews=identities?.ok?(identities.items||[]):[];
   q.missing=identities?.ok?(identities.missingFolders||[]):[];
   q.error=null;
@@ -688,6 +691,23 @@ function displayQueue(){
        'The folder was absent from a complete main snapshot. The live generator has not been deleted or unlisted.'));
     row.append(mark,data);holder.append(row);
    }
+  if(q.filter==='Needs action'||q.filter==='All'||q.filter==='Waiting')
+   for(const candidate of q.releaseItems.filter(x=>q.filter==='All'||
+      q.filter==='Waiting'?x.state!=='CONFIRMED_PUBLIC':
+        ['READY_FOR_REVIEW','EXCEPTION_READY_FOR_REVIEW','BLOCKED','WAITING_FOR_GIT'].includes(x.state))){
+    if(q.query&&!candidate.slug.includes(q.query.toLowerCase()))continue;
+    const row=el('div','queue-item');const detail=el('div','row-body');
+    detail.append(el('strong','',candidate.slug),
+      el('p','setting-note',candidate.state==='READY_FOR_REVIEW'?
+        'Final tested source is ready for individual publication review.':
+        candidate.state==='EXCEPTION_READY_FOR_REVIEW'?
+        'Exceptional candidate — manual evidence and incomplete tests require individual review.':
+        'Candidate state: '+candidate.state.replaceAll('_',' ').toLowerCase()));
+    const action=b('Review candidate',()=>void openReleaseReview(candidate.slug),'btn small');
+    if(!['READY_FOR_REVIEW','EXCEPTION_READY_FOR_REVIEW'].includes(candidate.state))
+      action.disabled=true;
+    row.append(el('span','row-mark', '•'),detail,action);holder.append(row);
+   }
   for(const n of q.incidents){
    const row=el('div','queue-item');
    const marker=el('span','row-mark warn');marker.append(icon('alert'));
@@ -744,6 +764,111 @@ function displayQueue(){
  const prev=shadow('[data-action="queue-prev"]'),next=shadow('[data-action="queue-next"]');
  if(prev)prev.disabled=q.loading||q.history.length===0;
  if(next)next.disabled=q.loading||!q.more;
+}
+// Human publication review: sealed source evidence and exact candidate
+// fingerprint are provided by the protected release boundary. The UI cannot
+// invent PASS, bypass source/route checks or publish from a review ACK.
+async function openReleaseReview(slug){
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),dialog=el('div','drawer');
+ dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');
+ dialog.setAttribute('aria-label','Review exact candidate for '+slug);
+ const close=()=>{overlay.remove();if(previous?.isConnected)previous.focus({preventScroll:true})};
+ const head=el('div','drawer-head');head.append(el('h2','drawer-title','Review '+slug),b('Close',close));
+ dialog.append(head);
+ const body=el('div','drawer-body'),status=el('p','setting-note','Verifying the exact final candidate and tests…');
+ status.setAttribute('role','status');body.append(status);dialog.append(body);overlay.append(dialog);root.append(overlay);
+ head.querySelector('button')?.focus();
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ let view;
+ try{view=await readPort('pcms-i13-release','PREVIEW',{slug},95000)}
+ catch{status.textContent='Review cannot open until secure GitHub access and source evidence are available.';return}
+ if(!overlay.isConnected)return;
+ if(!view?.ok){status.textContent='The final source is not currently eligible for review. No approval or publication was attempted.';return}
+ status.textContent=view.mode==='INDIVIDUAL_EXCEPTIONAL_MANUAL_REVIEW'?
+  'Exceptional manual review: AI testing is not fully verified.':
+  'Candidate source, test results and Git revision verified for this review snapshot.';
+ const summary=el('dl');
+ for(const [label,value] of [['Candidate source',view.sourceFingerprint],
+   ['Previous source',view.previousFingerprint],['Pinned Git main',view.gitHead],
+   ['Testing result',view.tests?.state||'Unverified'],['Publication', 'Not yet approved']]){
+  const pair=el('div','kv');pair.append(el('dt','',label),el('dd','',value));summary.append(pair);
+ }
+ body.append(summary);
+ const checks=el('div','');
+ checks.append(el('h3','','Required test observations'));
+ for(const t of [...(view.tests?.default||[]),...(view.tests?.optional||[])]){
+  checks.append(el('p','setting-note',t.name+' — '+(t.result||'UNVERIFIED')));
+ }
+ body.append(checks,el('h3','','Full-source change manifest'));
+ const changes=el('div','queue-list'),seen=new Set();
+ const changedPaths=new Set((view.diff||[]).map(x=>x.path).filter(Boolean));
+ for(const file of view.files||[]){
+  const row=el('div','queue-item');
+  const label=el('span','',file.path+' · '+file.size+' bytes'+
+    (changedPaths.has(file.path)?' · changed':' · unchanged'));
+  const inspect=b('Read exact file',()=>void (async()=>{
+   inspect.disabled=true;
+   let bytes=[],next=0,total=0,error=false;
+   do{
+    let r;
+    try{r=await readPort('pcms-i13-release','GET_REVIEW_CHUNK',{
+      slug,stageRevision:view.stageRevision,fingerprint:view.sourceFingerprint,
+      origin:'F',path:file.path,offset:next},30000)}
+    catch{error=true;break}
+    if(!r?.ok||r.fileSha256!==file.sha256){error=true;break}
+    const data=Uint8Array.from(atob(r.base64),x=>x.charCodeAt(0));
+    bytes.push(data);total+=data.length;next=r.nextOffset;
+    if(total>16*1024*1024){error=true;break}
+   }while(next!==null);
+   if(error){notify('Exact file read could not be confirmed. Approval remains a separate decision.');inspect.disabled=false;return}
+   const data=new Uint8Array(total);let offset=0;
+   for(const part of bytes){data.set(part,offset);offset+=part.length}
+   const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data)))
+     .map(x=>x.toString(16).padStart(2,'0')).join('');
+   if(digest!==file.sha256){notify('File bytes did not match verified source fingerprint.');inspect.disabled=false;return}
+   seen.add(file.path);
+   const details=el('pre','source-preview');
+   details.textContent=/\.(?:pjs|html|js|css|md|json|txt)$/i.test(file.path)?
+     new TextDecoder().decode(data):'Binary file verified: SHA-256 '+digest;
+   row.append(details);inspect.textContent='Verified and viewed';inspect.disabled=true;
+  })(),'btn small');
+  row.append(label,inspect);changes.append(row);
+ }
+ body.append(changes);
+ const footer=el('div','form-foot');
+ const instructions=el('textarea','form-input');instructions.rows=3;
+ instructions.placeholder='Optional request: describe changes needed to the tested candidate';
+ instructions.setAttribute('aria-label','Request changes to candidate');
+ const requestChanges=b('Request changes',()=>void (async()=>{
+  if(instructions.value.trim().length<3)return;
+  const message=instructions.value.trim();
+  if(!window.confirm('Request these changes? The current candidate will no longer be eligible for unchanged publication approval.'))return;
+  try{
+   const r=await readPort('pcms-i13-release','REQUEST_CHANGES',{
+    slug,expectedStageRevision:view.stageRevision,expectedJobRevision:view.jobRevision,
+    sourceFingerprint:view.sourceFingerprint,instructions:message,
+    ...(view.releaseRevision?{releaseRevision:view.releaseRevision}:{})},95000);
+   status.textContent=r?.ok?'Changes requested. New tested source needs fresh individual review.':
+      'Request was not confirmed. Keep the candidate held.';
+  }catch{status.textContent='Change request outcome unconfirmed; check the candidate record.'}
+ })(),'btn small');
+ const checkLabel=el('label','setting-option'),ack=el('input');ack.type='checkbox';
+ checkLabel.append(ack,document.createTextNode(' I inspected the exact source changes and required test results for this candidate.'));
+ const approve=b('Approve exact candidate',()=>void (async()=>{
+  if(!ack.checked){status.textContent='Review the exact source and tests, then check the approval box.';return}
+  if(!window.confirm('Approve this exact tested candidate for publication? This does not bypass independent provider checks and does not itself publish.'))return;
+  approve.disabled=true;
+  try{
+   const r=await readPort('pcms-i13-release','APPROVE',{
+    slug,expectedStageRevision:view.stageRevision,expectedJobRevision:view.jobRevision,
+    fingerprint:view.sourceFingerprint,explicitApproval:true},95000);
+   status.textContent=r?.ok?'Exact candidate approval recorded. Publication remains subject to protected final checks.':
+     'Approval was not confirmed. The candidate remains held until independently checked.';
+  }catch{status.textContent='Approval outcome uncertain. Check the current release record before retrying.'}
+  await loadQueue(true);
+ })(),'btn primary');
+ footer.append(requestChanges,approve);body.append(instructions,checkLabel,footer);
 }
 function readQueueNoticeAck(n){
  return new Promise((resolve,reject)=>{
