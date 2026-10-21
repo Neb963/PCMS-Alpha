@@ -85,6 +85,9 @@ test('Refresher queue precedes collapsed policy and no guarded controls are remo
    'table must remain the dominant Refresher workspace surface');
  assert.match(section,/<details class="pcms-v014-refresher-policy"/);
  assert.match(section,/<summary>Scheduling policy/);
+ assert.match(section,/class="pcms-v014-refresher-filters"/);
+ assert.match(section,/<div class="pcms-v014-filter-field"><label for="pcms-refresher-phase">Phase<\/label><select id="pcms-refresher-phase"/);
+ assert.match(section,/class="pcms-v014-refresher-actions"/);
  for(const id of ['pcms-refresher-active','pcms-refresher-sleep',
   'pcms-refresher-grace','pcms-refresher-cap','pcms-refresher-enable',
   'pcms-refresher-save','pcms-refresher-account-pause'])
