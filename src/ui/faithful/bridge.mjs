@@ -182,16 +182,17 @@ function routeHandlers(){
 // Native controller remains the sole authorizer. The shadow switch itself is
 // intentionally never a direct marker-source-write command.
 async function proposeRefresherEnable(switchEl){
- const nativeCheckbox=nativeControl('pcms-refresher-enable'),save=nativeControl('pcms-refresher-save');
- const before=state.lastRef?.policy?.refreshEnabled===true,desired=switchEl.checked;
+ // A shadow switch MUST NOT submit the native multi-field policy form:
+ // pending edits in its other fields could otherwise be sent accidentally.
+ const before=state.lastRef?.policy?.refreshEnabled===true;
  switchEl.checked=before;
- if(!nativeCheckbox||!save||save.disabled){notify('Refresher policy changes are held. Inspect protected controls.');return}
- if(!window.confirm('Change guarded automatic marker saves to '+(desired?'ENABLED':'DISABLED')+'?\n\nThis is a source-writing capability. Your existing backend policy, review and route safeguards still apply.'))return;
- nativeCheckbox.checked=desired;nativeCheckbox.dispatchEvent(new Event('change',{bubbles:true}));
- if(!guardedClick('pcms-refresher-save'))return;
- notify('Policy change requested. The state remains unverified until canonical readback.');
- setTimeout(()=>{if(state.route==='refresher')void loadRefresher()},950);
+ if(!nativeControl('pcms-refresher-enable')){
+  notify('Protected Refresher policy is unavailable. No change was submitted.');return;
+ }
+ nativeAction('refresher',null,'pcms-refresher-enable');
+ notify('Review the complete guarded policy before changing marker saves. Nothing was submitted.');
 }
+
 function statusPill(label,kind=''){const p=el('span','pill'+(kind?' '+kind:''),label);return p}
 function tableRow(cells,itemIndex){const tr=el('tr');tr.tabIndex=itemIndex===0?0:-1;tr.dataset.itemIndex=String(itemIndex);tr.setAttribute('role','button');tr.setAttribute('aria-label','Inspect '+cells[0]);return tr}
 const statusClasses={ACTIVE:'green',SLEEPING:'',WAITING:'',HELD:'red',INELIGIBLE:'',OBSERVED_OWNER:'green',OWNER_UNVERIFIED:'',OWNER_DISPUTED:'red'};
