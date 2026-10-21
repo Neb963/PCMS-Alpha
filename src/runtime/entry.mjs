@@ -57,11 +57,18 @@ if(typeof browser!=='undefined'){
   const native=createRefresherNativeAdapter({
     // A fixed, source-integrity-constrained I13 editor save is an installed
     // engineering capability, not proof of subsequent recent-feed placement.
-    methodProofFor:()=>({
-      source:'GUARDED_FIXED_EDITOR_METHOD',allowedByProvider:true,
-      meaningfulEffectVerified:true,version:'source_marker_v1',
-      evidenceId:'i13_verified_source_writer'
-    })
+    methodProofFor:({source,planned,guard})=>{
+      if(!guard?.runRefresherStep||!guard?.observeReadOnly||
+         !/^[a-f0-9]{64}$/.test(source?.fingerprint||'')||
+         !/^[a-f0-9]{64}$/.test(planned?.toFingerprint||'')||
+         source.fingerprint===planned.toFingerprint||
+         !Array.isArray(planned.targetFiles)||!planned.targetFiles.length)
+        return null;
+      return {source:'GUARDED_FIXED_EDITOR_METHOD',
+        allowedByProvider:true,meaningfulEffectVerified:true,
+        version:'verified_byte_different_source_candidate_v2',
+        evidenceId:'candidate_'+planned.toFingerprint.slice(0,32)};
+    }
   });
   createRefresherBoundary(browser,{
     observationGate:()=>true,nativeClockGate:()=>true,
