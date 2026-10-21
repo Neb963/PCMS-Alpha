@@ -30,7 +30,7 @@ test('all six accepted prototype-derived templates are actual packaged assets',a
  assert.match(stylesheet,/\.ref-table-scroll/);
  assert.match(stylesheet,/\.sidebar/);
  assert.match(stylesheet,/\.settings-main/);
- assert.match(shell,/UI v0\.1\.6/);
+ assert.match(shell,/PCMS local · Not verified/);
 });
 test('canonical read-only ports feed prototype views; original guarded mutating controls survive',()=>{
  for(const s of ['pcms-i04-inventory','pcms-i03-accounts','pcms-i12-refresher','LIST_INVENTORY','LIST_ACCOUNTS','GET_REFRESHER'])assert.ok(bridge.includes(s));
@@ -63,7 +63,7 @@ test('prototype supports adverse navigation and fail-open presentation recovery'
 });
 test('Firefox upgrades v1.2.1 XPI to 1.2.4 with donor manifest unchanged',()=>{
  assert.match(build,/original\.version!=='1\.2\.0'/);
- assert.match(build,/combined\.version='1\.2\.3'/);
+ assert.match(build,/combined\.version='1\.2\.4'/);
  assert.match(html,/v015-faithful\.mjs/);
  assert.match(html,/faithful\/bridge\.mjs/);
 });
