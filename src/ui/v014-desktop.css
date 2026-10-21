@@ -246,3 +246,21 @@
 .sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;
 margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;
 clip-path:inset(50%)!important;white-space:nowrap!important;border:0!important}
+
+/* Refresher keeps its canonical queue first; disclosure retains every real policy field. */
+.pcms-v014-refresher-policy{margin-top:12px;border:1px solid var(--v014-border);
+ border-radius:7px;background:var(--paper);padding:0 13px 12px}
+.pcms-v014-refresher-policy:not([open]){padding-bottom:0}
+.pcms-v014-refresher-policy summary{padding:10px 3px;min-height:36px;cursor:pointer;
+ font-size:12px;font-weight:700;color:var(--ink);list-style-position:inside}
+.pcms-v014-refresher-policy summary:hover{color:var(--v014-blue)}
+.pcms-v014-refresher-policy summary:focus-visible{outline-offset:-2px}
+.pcms-v014-refresher-policy .account-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
+.pcms-v014-refresher-policy>label{display:inline-block;margin:8px 5px 8px 0;font-size:12px}
+.pcms-v014-refresher-policy>select,.pcms-v014-refresher-policy>button{margin:4px 5px 4px 0}
+.pcms-v014-refresher-policy .reason{line-height:1.5;font-size:12px}
+#view-refresher #pcms-refresher-summary{margin:4px 0 6px;font-weight:660;line-height:1.5}
+#view-refresher #pcms-refresher-status{font-size:12px;margin:4px 0;color:var(--muted)}
+#view-refresher #pcms-refresher-query{width:min(280px,100%);margin:6px 9px 6px 5px}
+#view-refresher #pcms-refresher-phase{width:min(180px,100%);margin:6px 8px 6px 5px}
+#view-refresher .table-scroll{max-height:clamp(225px,49dvh,720px)}
