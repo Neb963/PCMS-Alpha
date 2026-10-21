@@ -1,0 +1,100 @@
+/* PCMS v0.1.4 desktop-only presentation overlay.
+ * Targets the installed production DOM. All guarded actions, element IDs,
+ * browser.runtime ports, verification and recovery semantics remain unchanged.
+ * Refresher generator table remains the dominant information surface.
+ * This stylesheet is non-authoritative until packaged Firefox validation.
+ */
+:root{
+  --pcms-v014-tight-line:1.42;
+  --pcms-v014-rail-max:340px;
+}
+.topbar{min-width:0;gap:10px;white-space:nowrap}
+.topbar .breadcrumbs{min-width:0;flex-shrink:1;overflow:hidden;text-overflow:ellipsis}
+.topbar .phase{white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.topbar .advanced{white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.workspace-head{gap:14px;margin-bottom:13px}
+.workspace-head h1{line-height:1.28;letter-spacing:-.55px}
+.workspace-head h1:focus{outline-offset:5px}
+.workspace-head>div{min-width:0}
+.workspace-head p{line-height:1.5}
+.workspace .panel{min-width:0;overflow-wrap:anywhere;border-radius:8px}
+.workspace .panel-head{align-items:center;gap:10px;padding-bottom:9px;margin-bottom:11px}
+.workspace .panel-head h2{line-height:1.35}
+.workspace .panel-subtitle{line-height:1.4}
+.workspace .reason{line-height:1.52}
+.workspace .unknown{line-height:1.35}
+.workspace button,.workspace select,.workspace input{scroll-margin:12px}
+.workspace button:focus-visible,.workspace input:focus-visible,
+.workspace select:focus-visible,.workspace textarea:focus-visible{outline-offset:2px}
+#view-overview .stat-band{gap:0;overflow:hidden}
+#view-overview .stat{min-width:0;overflow:visible}
+#view-overview .stat h2{line-height:1.38}
+#view-overview .stat p{overflow-wrap:anywhere;line-height:1.5}
+#view-overview .overview-split{gap:14px}
+#view-overview .overview-stack{gap:13px}
+#view-overview #pcms-attention-list{max-height:min(36dvh,460px);overflow:auto;overscroll-behavior:contain}
+#view-overview .attention-item{gap:10px}
+#view-generators .table-wrap,#view-refresher .table-scroll,
+#view-work-queue .table-wrap{min-width:0;max-width:100%;overflow:auto}
+#view-generators table,#view-refresher table{table-layout:fixed}
+#view-generators th,#view-generators td,
+#view-refresher th,#view-refresher td{overflow-wrap:anywhere;vertical-align:middle}
+#view-generators #pcms-generator-inspector{min-width:0}
+#view-work-queue>.panel{margin-block:12px}
+#view-work-queue .panel>.reason{margin-top:9px;padding-top:9px}
+#view-accounts .account-record{padding:12px 0}
+#view-accounts .account-controls{align-items:center}
+#view-refresher>.panel{margin-block:12px}
+#view-refresher>.panel .account-controls{gap:8px 10px}
+#view-refresher #pcms-refresher-summary{line-height:1.5}
+#view-refresher #pcms-refresher-provider,
+#view-refresher #pcms-refresher-diagnostics{font-size:12px;line-height:1.48}
+#view-refresher .table-scroll{
+  max-height:min(55dvh,650px);
+  min-height:min(210px,30dvh);
+  overflow:auto;
+  scrollbar-gutter:stable;
+}
+#view-refresher .table-scroll th{position:sticky;top:0;z-index:1}
+#view-refresher #pcms-refresher-page{display:inline-block;min-width:5ch}
+#view-refresher #pcms-refresher-inspector{min-width:0}
+#view-settings>.panel{margin-block:12px}
+#view-settings .account-controls{gap:9px}
+#view-settings input[type=file]{max-width:100%}
+#view-settings .panel>p,#view-settings .panel>.reason{max-width:100%;line-height:1.5}
+@media(max-width:1360px){
+  .topbar .phase{display:none}
+  .workspace-head{flex-wrap:wrap}
+}
+@media(max-width:1050px){
+  main{padding:12px 14px 20px}
+  .workspace .panel{padding:12px 14px}
+  #view-refresher .table-scroll{max-height:min(52dvh,580px)}
+}
+/* 640-750px is a constrained DESKTOP window; never introduce a mobile route. */
+@media(max-width:750px){
+  .app{grid-template-columns:145px minmax(0,1fr);grid-template-rows:61px minmax(0,1fr) 32px}
+  .topbar{grid-column:2;grid-row:1;padding:0 8px;min-width:0}
+  .topbar .advanced{display:none}
+  .sidebar{display:flex;position:static;grid-column:1;grid-row:1/4;box-shadow:none;padding:0}
+  .sidebar nav{display:flex;flex-direction:column;padding:9px 5px}
+  .sidebar nav a{min-height:34px;padding:7px 8px}
+  .sidebar-note{display:none}
+  .menu{display:none}
+  main{grid-column:2;grid-row:2;padding:9px;overflow:auto;min-width:0}
+  .footer{grid-column:1/-1;grid-row:3}
+  .workspace-head{gap:8px}
+  .workspace-head h1{font-size:20px}
+  .workspace .panel{padding:10px}
+  #view-overview .stat-band{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #view-overview .overview-split{grid-template-columns:minmax(0,1fr)}
+  #view-refresher .table-scroll{max-height:310px}
+}
+@media(max-height:700px){
+  .app{min-height:0;height:100dvh}
+  main{overflow-y:auto;overscroll-behavior:contain}
+  #view-refresher .table-scroll{max-height:300px;min-height:155px}
+}
+@media(prefers-reduced-motion:reduce){
+  .workspace *{scroll-behavior:auto!important;transition-duration:.001ms!important}
+}
