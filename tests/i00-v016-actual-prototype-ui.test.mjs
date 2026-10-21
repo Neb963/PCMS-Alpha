@@ -40,8 +40,8 @@ test('canonical read-only ports feed prototype views; original guarded mutating 
  assert.match(bridge,/function nativeAction\(/);
  assert.match(bridge,/function guardedClick\(/);
  assert.match(bridge,/mount\(\)\.catch/);
- assert.equal((bridge.match(/\\binnerHTML\\s*=/g)||[]).length,1,'only static bundled templates may be rendered as HTML');
- assert.match(bridge,/root\\.innerHTML=assets\\['symbols\\.html'\\]\\+assets\\['shell\\.html'\\]/);
+ assert.equal((bridge.match(/\binnerHTML\s*=/g)||[]).length,1,'only static bundled templates may be rendered as HTML');
+ assert.match(bridge,/root\.innerHTML=assets\['symbols\.html'\]\+assets\['shell\.html'\]/);
  assert.doesNotMatch(bridge,/postMessage\(\{type:'(?:SET_POLICY|EXECUTE_ITEM|DISPATCH|REMOVE_ACCOUNT|RESTORE)/);
  for(const id of ['pcms-generator-query','pcms-refresher-enable','pcms-refresher-rows','pcms-release-approve','pcms-backup-export']){
   assert.ok(html.includes('id="'+id+'"'),'native guarded control removed '+id);
