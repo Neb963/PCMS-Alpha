@@ -51,7 +51,11 @@ export function planMainFolderChanges(prior,current,records=[]){
   // Material change in candidate bytes revokes a previously approved choice.
   const stable=target&&target.folderTreeOid===rec.newTreeOid&&
     target.markerOid===rec.markerOid;
-  if(!stable){stale.push(rec.newSlug);held.push(rec.newSlug);continue;}
+  // A disappeared original folder may be restored while a pending choice is
+  // being reviewed. That invalidates any apparent-rename assumption; a prior
+  // "create separate" approval must not silently resume creation.
+  const originalReturned=Boolean(rec.oldSlug&&now.has(rec.oldSlug));
+  if(!stable||originalReturned){stale.push(rec.newSlug);held.push(rec.newSlug);continue;}
   if(rec.state!=='CREATE_SEPARATE_APPROVED')held.push(rec.newSlug);
  }
  return {ok:true,added,missing,created,review,held:[...new Set(held)],
