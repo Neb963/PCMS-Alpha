@@ -65,7 +65,7 @@ function friendlyConnectionIssue(code){
 }
 const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',total:0,items:[]},
  ref:{offset:0,limit:25,query:'',phase:'ALL',snapshot:null,items:[],total:0},
- acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,epoch:0},
+ acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],epoch:0},
  settings:'connections',lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},nativeOpen:false,
  renderEpoch:0,version:'0.1.6',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
@@ -467,14 +467,19 @@ async function loadQueue(reset=false){
    includeNotices&&q.noticeCursor!==null?
      guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_PAGE',{
        after:q.noticeCursor,limit:20,query:q.query}):Promise.resolve({ok:true,items:[],more:false,next:null}),
-   guardedRead('pcms-i02-canonical-readonly','SUMMARY')
+   guardedRead('pcms-i02-canonical-readonly','SUMMARY'),
+   guardedRead('pcms-r4-folder-identity','LIST')
+     .catch(()=>({ok:false,items:[],missingFolders:[]}))
  ];
  try{
-  const [ops,notices,summary]=await Promise.all(requested);
+  const [ops,notices,summary,identities]=await Promise.all(requested);
   if(state.route!=='work-queue'||q.epoch!==epoch)return;
   q.operations=ops.items||[];q.incidents=notices.items||[];
   q.nextOps=ops.more?ops.next:null;q.nextNotices=notices.more?notices.next:null;
-  q.more=Boolean(ops.more||notices.more);q.summary=summary;q.error=null;
+  q.more=Boolean(ops.more||notices.more);q.summary=summary;
+  q.reviews=identities?.ok?(identities.items||[]):[];
+  q.missing=identities?.ok?(identities.missingFolders||[]):[];
+  q.error=null;
  }catch(err){
   if(q.epoch!==epoch)return;
   q.operations=[];q.incidents=[];q.more=false;q.error=err.message||'LOCAL_QUEUE_UNAVAILABLE';
@@ -487,6 +492,53 @@ function displayQueue(){
  if(q.loading)renderEmpty(holder,'Reading recorded operations and incidents…');
  else if(q.error)renderEmpty(holder,'The local work queue is unavailable. No operation result has been assumed.');
  else{
+  if((q.filter==='Needs action'||q.filter==='All')&&!q.query)
+   for(const review of q.reviews.filter(r=>r.state==='REVIEW_REQUIRED'||r.stale)){
+    const row=el('div','queue-item'),mark=el('span','row-mark warn');mark.append(icon('alert'));
+    const content=el('div','row-body');
+    const old=review.oldSlug||'an unresolved existing generator';
+    const title=el('strong','',review.oldSlug?
+      'Review possible source-folder rename':'Review new folder with conflicting identity');
+    content.append(title,el('p','setting-note',
+      'GitHub contains '+review.newSlug+' while '+old+
+      ' is no longer recognized. The live generator is unchanged.'));
+    if(review.stale){
+      content.append(el('p','setting-note',
+        'The Git source changed after this review began. Refresh the catalog before choosing.'));
+    }else{
+      const actions=el('div','form-foot');
+      async function choose(choice){
+       const prompt=choice==='CREATE_SEPARATE'?
+        'Keep the original generator unchanged and authorize a separate new generator from this Git folder? Normal owner, route, source and publication safety checks still apply.':
+        'Request renaming the verified existing generator? PCMS will hold this request until ownership, route and source safety are independently confirmed. No rename occurs now.';
+       if(!window.confirm(prompt))return;
+       try{
+        const answer=await readPort('pcms-r4-folder-identity','CHOOSE',{
+         newSlug:review.newSlug,choice,expectedTreeOid:review.newTreeOid,
+         expectedRevision:review.revision},12000);
+        if(!answer?.ok){notify('The identity choice could not be confirmed. Refresh and review again.');return;}
+        notify(choice==='CREATE_SEPARATE'?
+          'Separate identity recorded. The next complete Git scan will check eligibility.':
+          'Rename request recorded. The existing generator has not been changed.');
+        await loadQueue(true);
+       }catch{notify('The review result is uncertain. Refresh before taking another action.');}
+      }
+      const rename=b('Rename verified existing',()=>void choose('RENAME_EXISTING'),'btn small');
+      rename.disabled=!review.oldSlug;
+      actions.append(rename,b('Create separate generator',()=>void choose('CREATE_SEPARATE'),'btn small'));
+      content.append(actions);
+    }
+    row.append(mark,content);holder.append(row);
+   }
+  if((q.filter==='Needs action'||q.filter==='All')&&!q.query)
+   for(const slug of q.missing.slice(0,30)){
+    const row=el('div','queue-item'),mark=el('span','row-mark warn');mark.append(icon('alert'));
+    const data=el('div','row-body');
+    data.append(el('strong','','Git source missing: '+slug),
+      el('p','setting-note',
+       'The folder was absent from a complete main snapshot. The live generator has not been deleted or unlisted.'));
+    row.append(mark,data);holder.append(row);
+   }
   for(const n of q.incidents){
    const row=el('div','queue-item');
    const marker=el('span','row-mark warn');marker.append(icon('alert'));
