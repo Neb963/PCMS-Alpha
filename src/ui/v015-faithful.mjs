@@ -54,9 +54,10 @@ function note(target,value){
   target.textContent=value;
 }
 function mountHeader(){
+  document.documentElement.dataset.pcmsUiVersion='0.1.5';
   const top=document.querySelector('.topbar');
   if(!top)return;
-  const badge=node('span','v015-top-status','LIVE EXTENSION');
+  const badge=node('span','v015-top-status','UI v0.1.5 · LIVE');
   badge.title='Canonical local state; an unavailable observation is not a healthy state';
   const advanced=$('advanced');
   top.insertBefore(badge,advanced);
@@ -73,6 +74,7 @@ function mountOverview(){
   if(!meta)return;
   const right=meta.head.querySelector('.overview-links');
   right?.classList.add('v015-overview-actions');
+  if(right)meta.controls.append(right);
   const stats=meta.root.querySelector('.stat-band');
   stats?.classList.add('v015-overview-stats');
   const names=['Managed generators','Refresher status','Last backup','Recovery'];
@@ -149,6 +151,13 @@ function mountGeneratorInventory(){
   }
   nativeFilter?.addEventListener('change',refresh);refresh();
   panel.querySelector('.v015-inventory-tools')?.after(tabs);
+  const safety=$('blocked-generators');
+  if(safety){
+    const disclosure=node('details','v015-generator-help');
+    disclosure.append(node('summary','','About generator safeguards'));
+    disclosure.append(safety);
+    panel.after(disclosure);
+  }
   const wrap=panel.querySelector('.table-wrap');
   wrap?.classList.add('v015-inventory-table');
   const table=wrap?.querySelector('table');
@@ -253,6 +262,11 @@ function mountAccounts(){
     },'v015-primary')
   ]);
   if(!h)return;
+  const oldRefresh=$('pcms-refresh-accounts');
+  if(oldRefresh){
+    oldRefresh.textContent='↻ Refresh';
+    h.controls.prepend(oldRefresh);
+  }
   const root=h.root;
   const listPanel=$('accounts-inventory-title')?.closest('section.panel');
   const enrollment=$('accounts-enrollment-title')?.closest('section.panel');
