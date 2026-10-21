@@ -264,3 +264,28 @@ clip-path:inset(50%)!important;white-space:nowrap!important;border:0!important}
 #view-refresher #pcms-refresher-query{width:min(280px,100%);margin:6px 9px 6px 5px}
 #view-refresher #pcms-refresher-phase{width:min(180px,100%);margin:6px 8px 6px 5px}
 #view-refresher .table-scroll{max-height:clamp(225px,49dvh,720px)}
+
+/* v0.1.4 visual verification corrections (packaged static preview). */
+.topbar .phase{display:none!important} /* status is still exposed in main and DOM */
+main{padding-top:14px}
+main>.system-status{font-size:11px;line-height:1.4;margin:0 0 9px;color:var(--muted)}
+.workspace-head h1{width:max-content;max-width:100%;margin-block:2px 4px}
+.workspace-head h1:focus-visible{outline-offset:3px!important}
+.pcms-v014-refresher-actions{display:flex;flex-wrap:wrap;gap:7px;align-items:center;margin:9px 0 8px}
+.pcms-v014-refresher-actions>button{margin:0!important}
+.pcms-v014-refresher-filters{display:flex;align-items:center;flex-wrap:wrap;gap:8px 18px;margin:0 0 9px}
+.pcms-v014-filter-field{display:flex;align-items:center;gap:8px;min-width:0}
+.pcms-v014-filter-field>label{white-space:nowrap;font-size:12px}
+#view-refresher .pcms-v014-filter-field>input,
+#view-refresher .pcms-v014-filter-field>select{margin:0!important;min-height:34px}
+#view-refresher .pcms-v014-filter-field>input{width:min(300px,36vw)}
+#view-refresher .pcms-v014-filter-field>select{width:145px}
+@media(max-width:1050px){
+ .pcms-v014-refresher-filters{gap:8px}
+ #view-refresher .pcms-v014-filter-field>input{width:min(280px,32vw)}
+}
+@media(max-width:750px){
+ main{padding-top:10px}
+ .pcms-v014-filter-field{flex-wrap:wrap;gap:4px}
+ #view-refresher .pcms-v014-filter-field>input{width:min(260px,100%)}
+}
