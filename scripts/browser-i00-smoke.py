@@ -1219,7 +1219,7 @@ def main():
                           r.querySelector('details summary').textContent.includes('Technical details')),
                         guidance:rows.filter(r=>r.querySelector('strong')?.textContent==='GitHub credential helper')
                           .every(r=>!!r.querySelector('p.setting-note')?.textContent.match(/PCMS helper|local helper/i)&&
-                            !/NATIVE_|local\\.pcms|GIT_/.test(r.querySelector('p.setting-note').textContent)&&
+                            !/NATIVE_|local[.]pcms|GIT_/.test(r.querySelector('p.setting-note').textContent)&&
                             !!r.querySelector('details p')?.textContent.includes('NATIVE_')),
                         exportEnabled:[...panel?.querySelectorAll('button')||[]].some(
                           b=>b.textContent.trim()==='Export sanitized report'&&!b.disabled)};""")
