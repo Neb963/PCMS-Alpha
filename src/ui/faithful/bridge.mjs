@@ -907,7 +907,7 @@ function displayQueue(){
  else if(q.error)renderEmpty(holder,'The local work queue is unavailable. No operation result has been assumed.');
  else{
   if((q.filter==='Needs action'||q.filter==='All')&&!q.query)
-   for(const review of q.reviews.filter(r=>r.state==='REVIEW_REQUIRED'||r.stale)){
+   for(const review of q.reviews.filter(r=>['REVIEW_REQUIRED','RENAME_EXISTING_REQUESTED','REMOTE_RENAMED_LINK_PENDING'].includes(r.state)||r.stale)){
     const row=el('div','queue-item'),mark=el('span','row-mark warn');mark.append(icon('alert'));
     const content=el('div','row-body');
     const old=review.oldSlug||'an unresolved existing generator';
@@ -919,6 +919,61 @@ function displayQueue(){
     if(review.stale){
       content.append(el('p','setting-note',
         'The Git source changed after this review began. Refresh the catalog before choosing.'));
+    }else if(review.state==='RENAME_EXISTING_REQUESTED'){
+      const stateNote=el('p','setting-note','Reading the existing-generator rename stage…');
+      const actions=el('div','form-foot');content.append(stateNote,actions);
+      void (async()=>{
+       let attempt;
+       try{attempt=await readPort('pcms-r4-folder-identity','GET_RENAME_ATTEMPT',{
+        newSlug:review.newSlug},15000)}
+       catch{}
+       if(!row.isConnected)return;
+       actions.replaceChildren();
+       if(!attempt?.ok){stateNote.textContent='Rename safety state unavailable. No live operation is permitted.';return;}
+       const stage=attempt.state;
+       const label=stage==='NOT_PREPARED'?'Pending owner/source verification':
+         stage==='RENAME_PREPARED'?'Verified for one guarded rename attempt':
+         stage==='DISPATCH_POSSIBLE'||stage==='OUTCOME_UNCERTAIN'?
+          'Remote outcome uncertain — do not retry':
+         stage==='REMOTE_RENAME_VERIFIED_LINK_PENDING'?
+          'Remote identity verified; source association still pending':
+          'The rename requires additional review';
+       stateNote.textContent=label;
+       async function next(type,revision){
+        const text=type==='PREPARE_RENAME'?
+          'Read the protected owner and entire existing source to prepare an exact one-time rename? No remote change occurs during preparation.':
+          type==='EXECUTE_RENAME'?
+          'Rename the EXISTING owned Perchance generator now? Renaming may break imports, URLs or slug-dependent storage. Its complete original source must remain unchanged. This request may have an uncertain outcome and will never be automatically retried.':
+          'Read back the possibly completed remote rename without executing any new provider write?';
+        if(!window.confirm(text))return;
+        actions.querySelectorAll('button').forEach(x=>x.disabled=true);
+        stateNote.textContent='Checking protected account, source and current Git identity…';
+        try{
+         const result=await readPort('pcms-r4-folder-identity',type,{
+          newSlug:review.newSlug,expectedRevision:revision},
+          type==='EXECUTE_RENAME'?120000:95000);
+         stateNote.textContent=result?.ok?
+          type==='EXECUTE_RENAME'?'One rename attempt may have occurred. Reconcile the remote result; do not retry.':
+          type==='RECONCILE_RENAME'?
+           'Remote name and original source verified. Synchronize the account inventory and associate the new Git folder before any development.':
+           'Existing owner and original source verified. A single rename attempt can now be explicitly authorized.':
+          'The operation was held. Inspect the current scope before taking another action.';
+        }catch{stateNote.textContent='Outcome could not be confirmed. Do not retry a possible rename. Read current stage.'}
+        await loadQueue(true);
+       }
+       if(stage==='NOT_PREPARED')
+         actions.append(b('Verify owner and prepare rename',()=>void next('PREPARE_RENAME',review.revision),'btn small'));
+       if(stage==='RENAME_PREPARED')
+         actions.append(b('Execute one verified rename',()=>void next('EXECUTE_RENAME',attempt.revision),'btn primary'));
+       if(stage==='DISPATCH_POSSIBLE'||stage==='OUTCOME_UNCERTAIN')
+         actions.append(b('Reconcile remote rename',()=>void next('RECONCILE_RENAME',attempt.revision),'btn small'));
+       if(stage==='REMOTE_RENAME_VERIFIED_LINK_PENDING')
+         actions.append(b('Go to generator inventory',()=>routeTo('generators'),'btn small'));
+      })();
+    }else if(review.state==='REMOTE_RENAMED_LINK_PENDING'){
+      content.append(el('p','setting-note',
+        'Remote rename readback was recorded. The inventory and new source link must still be verified.'));
+      content.append(b('Open generators',()=>routeTo('generators'),'btn small'));
     }else{
       const actions=el('div','form-foot');
       async function choose(choice){
