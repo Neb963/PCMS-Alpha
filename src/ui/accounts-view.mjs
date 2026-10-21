@@ -2,6 +2,24 @@
 // Confirm, Change route...). Personas, routes, exits and identity proof are
 // chosen and observed by the background; nothing here can assert them.
 const accountsArea=document.getElementById('pcms-accounts-list');
+// Read-only search focus target. Account rows remain canonical views, not selection authority.
+let requestedAccountId=null;
+function locateRequestedAccount(){
+  if(location.hash!=='#accounts'||!requestedAccountId)return;
+  const row=[...accountsArea.querySelectorAll('[data-pcms-v014-account-id]')]
+    .find(el=>el.dataset.pcmsV014AccountId===requestedAccountId);
+  if(!row)return; // Wait for the next canonical read/draw; never guess a match.
+  requestedAccountId=null;
+  row.tabIndex=-1;
+  row.scrollIntoView({block:'nearest'});
+  row.focus({preventScroll:true});
+}
+window.addEventListener('pcms-v014-account-target',event=>{
+  const id=event.detail?.accountId;
+  if(typeof id!=='string'||id.length<1||id.length>128)return;
+  requestedAccountId=id;
+  locateRequestedAccount();
+});
 const feedback=document.getElementById('pcms-accounts-feedback');
 const add=document.getElementById('pcms-add-account');
 const refresh=document.getElementById('pcms-refresh-accounts');
@@ -103,6 +121,7 @@ function draw() {
   }
   for(const a of accounts) {
     const section=document.createElement('section');section.className='account-record';
+    section.dataset.pcmsV014AccountId=a.accountId;
     const heading=document.createElement('h3');
     heading.textContent='Account '+a.accountId.slice(-6)+' — '+
       (a.removed?'Removed':statuses[a.state]||'Held');
@@ -156,6 +175,7 @@ function draw() {
     section.append(controls);
     accountsArea.append(section);
   }
+  locateRequestedAccount();
 }
 // C-60/C-72–C-75: explicit two-step permanent local removal with a clear
 // deleted-versus-kept scope. Archive is the reversible alternative.
