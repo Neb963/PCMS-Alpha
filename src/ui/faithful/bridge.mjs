@@ -197,8 +197,8 @@ function routeHandlers(){
  if(!action)return;
  event.preventDefault();
  if(action==='search'){openGlobalSearch();return}
- if(action==='create'){nativeAction('generators','create','pcms-supply-slugs');return}
- if(action==='sync-inventory'){nativeAction('generators','inventory','pcms-generator-account');return}
+ if(action==='create'){openGeneratorCreator();return}
+ if(action==='sync-inventory'){void syncManagedInventories();return}
  if(action==='queue'||action==='activity'){nativeAction('work-queue','activity');return}
  if(action==='diagnostics'||action==='health'){nativeAction('settings','diagnostics');return}
  if(action==='notifications'){routeTo('overview');return}
@@ -283,6 +283,77 @@ const ownerLabels={OBSERVED_OWNER:'Owner observed',OWNER_UNVERIFIED:'Owner unkno
 function rowsError(tableSelector,message,colspan){const body=shadow(tableSelector);if(!body)return;body.replaceChildren();const tr=el('tr'),td=el('td','pcms-unknown',message);td.colSpan=colspan;tr.append(td);body.append(tr)}
 function setCounts(tabSelector,map){for(const tab of shadow('#page')?.querySelectorAll(tabSelector)||[]){const x=tab.dataset.filter?.split(':')[1];const num=tab.querySelector('.count');if(num)num.textContent=map[x]??'—'}}
 function fmtObservation(item){if(item.observedAt&&Number.isFinite(item.observedAt)){const mins=Math.max(0,Math.floor((Date.now()-item.observedAt)/60000));return `${mins} min ago · historical`}return 'Not verified'}
+// C-14/C-80: the accepted UI records durable intents through the same
+// slug-coalescing coordinator as main-only Git discovery. Side effects are
+// exclusively run later by the protected account/creation watcher.
+function openGeneratorCreator(){
+ const previous=root.activeElement,backdrop=el('div','drawer-overlay'),drawer=el('div','drawer');
+ drawer.setAttribute('role','dialog');drawer.setAttribute('aria-modal','true');
+ drawer.setAttribute('aria-label','Create generators');
+ const head=el('div','drawer-head');head.append(el('h2','drawer-title','Create generators'));
+ const close=()=>{backdrop.remove();if(previous?.isConnected)previous.focus({preventScroll:true})};
+ head.append(b('Close',close));drawer.append(head);
+ const body=el('div','drawer-body');
+ body.append(el('p','setting-note','Enter one or more generator names. PCMS uses your verified managed accounts and creates private generators only after the usual protected checks.'));
+ const label=el('label','','Generator names (one per line)');
+ const input=el('textarea','form-input');input.rows=6;input.placeholder='my-generator\nsecond-generator';
+ label.append(input);body.append(label);
+ const accountLabel=el('label','','Assign to account (optional)');
+ const choice=el('select','select'),auto=el('option','','Automatic — balanced');auto.value='';
+ choice.append(auto);
+ for(const account of state.lastAccountList.filter(a=>a.state==='VERIFIED')){
+  const option=el('option','',account.alias||account.accountId);
+  option.value=account.accountId;choice.append(option);
+ }
+ accountLabel.append(choice);body.append(accountLabel);
+ const status=el('p','setting-note','No creation request has been submitted.');status.setAttribute('role','status');
+ const submit=b('Create private generators',()=>{
+  const slugs=[...new Set(input.value.split(/[\s,;]+/).map(x=>x.trim()).filter(Boolean))];
+  if(!slugs.length||slugs.length>100||slugs.some(x=>!/^[a-z0-9][a-z0-9-]{0,99}$/.test(x))){
+   status.textContent='Enter 1–100 valid lowercase generator names using letters, numbers and hyphens.';return;
+  }
+  const pinned=choice.value||null;submit.disabled=true;input.disabled=true;choice.disabled=true;
+  status.textContent='Saving the creation requests. No unverified remote effects are being claimed.';
+  void (async()=>{
+   let accepted=0,uncertain=0;const rejected=[];
+   for(const slug of slugs){
+    const intentId='ui_'+crypto.randomUUID().replaceAll('-','');
+    try{
+     const out=await readPort('pcms-s00-coordinator','ACCEPT_CREATE_INTENT',{
+      intentId,slug,origin:'OPERATOR',...(pinned?{accountId:pinned}:{})},20000);
+     if(out?.ok&&out.record?.slug===slug)accepted++;
+     else rejected.push(slug);
+    }catch{uncertain++;}
+   }
+   status.textContent=accepted+' generator request(s) saved'+
+     (uncertain?' · '+uncertain+' have unknown acknowledgment; do not resubmit until checked':'')+
+     (rejected.length?' · '+rejected.length+' held':'')+
+     '. Protected creation and Git association continue through the background queue.';
+   try{await browser.alarms.create('pcms-s04-creation-followup',{when:Date.now()+1000})}catch{}
+   await loadGenerators();submit.disabled=false;input.disabled=false;choice.disabled=false;
+  })();
+ },'btn primary');
+ body.append(submit,status);drawer.append(body);backdrop.append(drawer);root.append(backdrop);
+ backdrop.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ backdrop.addEventListener('click',e=>{if(e.target===backdrop)close()});
+ input.focus();
+}
+async function syncManagedInventories(){
+ const verified=state.lastAccountList.filter(a=>a.state==='VERIFIED');
+ if(!verified.length){notify('No verified account is available for a protected inventory check.');return}
+ notify('Checking owned inventory for '+verified.length+' verified account(s)…');
+ let good=0,held=0;
+ for(const account of verified){
+  try{
+   const out=await readPort('pcms-i04-inventory','SYNC_ACCOUNT',{
+    accountId:account.accountId,expectedRevision:account.revision},100000);
+   if(out?.ok)good++;else held++;
+  }catch{held++;}
+ }
+ notify('Inventory check finished: '+good+' confirmed, '+held+
+   ' unverified. No missing remote generator has been inferred.');
+ await loadGenerators();
+}
 async function loadAccounts(){
  try{const result=await accounts();state.lastAccountList=Array.isArray(result.accounts)?result.accounts:[];state.errors.accounts='';if(state.route==='accounts')displayAccounts();return state.lastAccountList}
  catch(error){state.errors.accounts=error.message;state.lastAccountList=[];if(state.route==='accounts')displayAccounts();return []}
