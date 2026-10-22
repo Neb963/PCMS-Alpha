@@ -2,7 +2,7 @@
 // commit donor state or replace canonical rows after a lost acknowledgement.
 import {decodeBackupEnvelope} from '../lib/backup-package.js';
 import {BLOCK_ROUTE_ID} from '../lib/constants.js';
-import {digest,snapshotCanonical} from './backup-core.mjs';
+import {digest,snapshotCanonical,snapshotCanonicalV2} from './backup-core.mjs';
 import {openRestoreArchive} from './restore-core.mjs';
 import {prepareRestoredCanonical} from './restore-sanitize.mjs';
 const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
@@ -44,16 +44,25 @@ function remaps(payload,bindings,state){
   return uid;
 }
 export async function reconcileRestore({gate,api,donor,db,archiveText,
-  checkpointText,password}){
+  checkpointText,password,portableIncoming=null,portableCheckpoint=null}){
   const row=await gate.read();
   if(!row?.active||!row.recovery)refuse('RESTORE_RECOVERY_NOT_POSSIBLE');
-  if(await digest(archiveText)!==row.archiveSha256||
+  const portable=portableIncoming&&portableCheckpoint;
+  if(portable){
+    if(portableIncoming.sourceVerified!==true||
+       portableCheckpoint.sourceVerified!==true||
+       portableIncoming.receipt?.chain!==row.archiveSha256||
+       portableCheckpoint.receipt?.chain!==row.checkpointSha256)
+      refuse('RESTORE_RECOVERY_SOURCE_CHANGED');
+  }else if(await digest(archiveText)!==row.archiveSha256||
      await digest(checkpointText)!==row.checkpointSha256)
     refuse('RESTORE_RECOVERY_SOURCE_CHANGED');
-  const incoming=await openRestoreArchive(archiveText,password,{
-    decodeDonor:decodeBackupEnvelope});
-  const old=await openRestoreArchive(checkpointText,password,{
-    decodeDonor:decodeBackupEnvelope});
+  const incoming=portable?{donor:portableIncoming.donor,
+    archive:{pcms:portableIncoming.canonical}}:
+    await openRestoreArchive(archiveText,password,{decodeDonor:decodeBackupEnvelope});
+  const old=portable?{donor:portableCheckpoint.donor,
+    archive:{pcms:portableCheckpoint.canonical}}:
+    await openRestoreArchive(checkpointText,password,{decodeDonor:decodeBackupEnvelope});
   const current=await donor.snapshot();
   const containers=await donor.containers();
   const bindings=resolved(incoming.donor,row.recovery.mappings,containers,row.epoch,row.createdContainers);
@@ -87,7 +96,8 @@ export async function reconcileRestore({gate,api,donor,db,archiveText,
     const expected=prepareRestoredCanonical({incoming:incoming.archive.pcms,
       current:old.archive.pcms,mode:row.recovery.mode,uidRemap:map});
     operation={pcms:await digest(JSON.stringify(expected))};
-    outcome=equal(await snapshotCanonical(db),expected);
+    outcome=equal(await (portable?snapshotCanonicalV2(db,{serializedValues:true}):
+      snapshotCanonical(db)),expected);
   }else refuse('RESTORE_UNKNOWN_GROUP');
   const fingerprint=await digest(JSON.stringify(operation));
   if(!record.fingerprint||record.fingerprint!==fingerprint)
