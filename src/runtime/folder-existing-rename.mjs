@@ -5,18 +5,12 @@
 import {openCanonicalDatabase,createRestoreSentinel,fail} from './journal.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 import {standingS06} from './s06-standing-authority.mjs';
-import {exactSource} from './staging-core.mjs';
+import {verifyOriginal} from './adoption.mjs';
 import {REVIEW_KEY,planMainFolderChanges} from './catalog-identity-review.mjs';
 const REVIEW='pcmsR4ExistingRenameAttempt:',CATALOG='pcmsS03CatalogLastComplete',CONFIG='pcmsS03Git';
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/,FP=/^[a-f0-9]{64}$/;
 const reject=code=>({ok:false,code});
 const key=slug=>REVIEW+slug;
-function b64(source){
- const bytes=new TextEncoder().encode(source),parts=[];
- for(let i=0;i<bytes.length;i+=8192)
-  parts.push(String.fromCharCode(...bytes.subarray(i,i+8192)));
- return btoa(parts.join(''));
-}
 function readFacts(db,slug){
  return new Promise((resolve,reject)=>{
   let tx,out=rejectState('EXISTING_IDENTITY_NOT_VERIFIED');
@@ -110,19 +104,19 @@ function validFacts(data,oldSlug){
   typeof r.remoteId==='string'&&/^[A-Za-z0-9_-]{8,100}$/.test(r.remoteId);
 }
 async function readSource(g,{row,account},slug){
- let value;
- try{value=await g.observeReadOnly(row.personaUid,false,slug)}
+ let packet;
+ try{packet=await g.observeReadOnly(row.personaUid,false,slug)}
  catch{return reject('SOURCE_READBACK_UNAVAILABLE')}
- const src=value?.original;
- if(value?.ok!==true||value.principalFingerprint!==account.identity.principalFingerprint||
-   src?.ownerResult!=='IS_OWNER'||src.remotePublicId!==row.remoteId||
-   src.visibility!=='PUBLIC'&&src.visibility!=='UNLISTED'||
-   typeof src.pjs!=='string'||typeof src.html!=='string'||!Array.isArray(src.assets))
+ if(packet?.ok!==true)return reject('SOURCE_READBACK_UNAVAILABLE');
+ // The donor's original-source packet is flat, not nested under `original`.
+ // Reuse the established immutable adoption verifier. A rename may legitimately
+ // change the observed slug but must preserve account, Persona, remote ID,
+ // visibility and every original source/asset byte.
+ const original=await verifyOriginal(packet,{...row,slug,
+   visibility:row.visibility||packet.visibility},account);
+ if(!original?.ok||original.remotePublicId!==row.remoteId)
   return reject('RENAMED_OWNER_OR_SOURCE_UNVERIFIED');
- const source=await exactSource([{path:'main.pjs',base64:b64(src.pjs)},
-  {path:'index.html',base64:b64(src.html)},...src.assets]);
- return source.ok?{ok:true,fingerprint:source.fingerprint,visibility:src.visibility}:
-  reject('EXACT_SOURCE_UNVERIFIED');
+ return {ok:true,fingerprint:original.fingerprint,visibility:original.visibility};
 }
 async function readRoute(g,row){
  try{
