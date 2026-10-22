@@ -13,6 +13,32 @@ const explain=e=>/^(BACKUP|PORTABLE|DOWNLOAD)_[A-Z0-9_]{3,70}$/.test(e?.message|
 const sha=async blob=>Array.from(new Uint8Array(await crypto.subtle.digest(
   'SHA-256',await blob.arrayBuffer())),x=>x.toString(16).padStart(2,'0')).join('');
 const keepAliveMs=10*60000;
+const manualReceipt=async(downloads,id,bytes)=>{
+  let row;
+  try{const found=await downloads.search({id});row=found?.length===1?found[0]:null;}
+  catch{return null;}
+  if(row?.id!==id||row?.state!=='complete'||row.exists!==true||
+     row.fileSize!==bytes||typeof row.filename!=='string'||
+     !/[/\\\\]pcms-backups[/\\\\]pcms-alpha-manual_[a-f0-9]{32}(?: \\(\\d+\\))?\\.pcms\\.jsonl$/i.test(row.filename))return null;
+  return {tier:2,code:'BROWSER_REPORTED_COMPLETE',filename:row.filename};
+};
+const awaitManual=async(downloads,id,bytes,timeoutMs=120000)=>new Promise(resolve=>{
+  let ended=false;
+  const done=value=>{if(ended)return;ended=true;clearTimeout(timer);
+    try{downloads.onChanged.removeListener(changed);}catch{}resolve(value)};
+  const inspect=async()=>{
+    const proof=await manualReceipt(downloads,id,bytes);
+    if(proof)return done(proof);
+    const found=await downloads.search({id}).catch(()=>[]);
+    if(found?.[0]?.state==='interrupted')done(null);
+  };
+  const changed=change=>{if(change?.id!==id)return;
+    if(change.state?.current==='interrupted')done(null);
+    else if(change.state?.current==='complete')void inspect();};
+  const timer=setTimeout(()=>done(null),timeoutMs);
+  try{downloads.onChanged.addListener(changed);}catch{return done(null);}
+  void inspect();
+});
 export function createPortableRunner(api,{
   open=openCanonicalDatabase,clock=Date.now,
   nextId=()=>crypto.randomUUID().replaceAll('-',''),
@@ -132,10 +158,10 @@ export function createPortableRunner(api,{
         const dispatched=await dispatch(api,archive,{runId,manual:true});
         url=dispatched.objectUrl;
         // Downloads metadata is not independent disk-byte recovery proof.
-        const rows=await api.downloads.search({id:dispatched.downloadId});
-        const row=rows?.length===1?rows[0]:null;
-        return {ok:true,code:row?.state==='complete'&&
-          row.fileSize===archive.bytes?'BROWSER_REPORTED_COMPLETE':'DOWNLOAD_STARTED',
+        const proof=await awaitManual(api.downloads,dispatched.downloadId,
+          archive.bytes);
+        if(!proof)return fail('DOWNLOAD_OUTCOME_UNKNOWN');
+        return {ok:true,code:'BROWSER_REPORTED_COMPLETE',tier:2,
           sha256:fileHash,bytes:archive.bytes,runId,
           downloadId:dispatched.downloadId,diskReadback:false};
       }catch(e){return fail(explain(e));}
