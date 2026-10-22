@@ -1697,6 +1697,135 @@ function primarySettingCard(container,title,intro){
  section.append(header,el('p','setting-note',intro));container.append(section);
  return section;
 }
+// The protected catalog boundary returns one independently complete pinned
+// main. Display its actual initial import scope and canonical prompt without
+// inferring remote ownership, deletion, creation or publication.
+function renderConnectedMain(section,snapshot){
+ section.querySelector('[data-main-review]')?.remove();
+ if(!snapshot?.ok||snapshot.complete!==true)return;
+ const panel=el('section','settings-section');panel.dataset.mainReview='1';
+ const summary=el('h3','','GitHub main · '+snapshot.recognizedCount+' recognized folders');
+ const info=el('p','setting-note',
+  'This is a complete read-only GitHub file snapshot. Generator ownership and live publication need separate verification.');
+ panel.append(summary,info);
+ const preview=snapshot.preview||{},items=preview.items||[];
+ const listing=el('details','settings-section');listing.append(el('summary','','Review folder declarations and owner evidence'));
+ const search=el('input','form-input');search.placeholder='Find a generator folder';search.maxLength=100;
+ search.setAttribute('aria-label','Find GitHub generator folder');
+ const list=el('div','queue-list'),pagination=el('div','form-foot');
+ let offset=0;
+ const prev=b('Previous',()=>{offset=Math.max(0,offset-30);draw()},'btn small');
+ const next=b('Next',()=>{offset+=30;draw()},'btn small');
+ const count=el('span','setting-note','');
+ function draw(){
+  list.replaceChildren();const query=search.value.trim().toLowerCase();
+  const filtered=items.filter(x=>x.slug?.toLowerCase().includes(query));
+  if(offset>=filtered.length)offset=Math.max(0,Math.floor(Math.max(0,filtered.length-1)/30)*30);
+  const visible=filtered.slice(offset,offset+30);
+  for(const item of visible){
+   const row=el('div','queue-item'),data=el('div','row-body');
+   data.append(el('strong','',item.slug),
+    el('p','setting-note',
+      (item.sourceState==='READY_UNVERIFIED_COHERENCE'?
+       'READY declaration detected; source verification remains separate.':
+       'Source declaration: '+String(item.sourceState||'not confirmed').replaceAll('_',' ').toLowerCase())+
+      ' · '+(item.observed==='AMBIGUOUS'?'Account or owner not independently verified':
+       'Owner observation: '+String(item.observed||'not confirmed').replaceAll('_',' ').toLowerCase())));
+   row.append(data);list.append(row);
+  }
+  if(!visible.length)list.append(el('p','setting-note','No folder matches this search in the complete GitHub snapshot.'));
+  count.textContent=filtered.length+' recognized folder(s) · '+(filtered.length?offset+1:0)+
+   '–'+Math.min(offset+visible.length,filtered.length)+' shown';
+  prev.disabled=offset===0;next.disabled=offset+30>=filtered.length;
+ }
+ search.addEventListener('input',()=>{offset=0;draw()});
+ pagination.append(prev,next,count);listing.append(search,list,pagination);panel.append(listing);draw();
+ if(preview.scopeDigest&&snapshot.importStatus!=='IMPORT_SCOPE_APPROVED'){
+  const approval=b('Approve inspected inventory scope',()=>void(async()=>{
+   if(!window.confirm('Approve this EXACT GitHub main folder inventory for local recognition? This does not create, rename, publish or allocate remote generators, and owner checks remain mandatory.'))return;
+   approval.disabled=true;
+   try{
+    const r=await readPort('pcms-s03-catalog','APPROVE_IMPORT',{
+     repositoryId:snapshot.repositoryId,scopeDigest:preview.scopeDigest},30000);
+    info.textContent=r?.ok?
+     'Exact initial GitHub folder scope approved. Account ownership and deployment remain separately unverified.':
+     'Folder-scope approval could not be confirmed. Read main again before retrying.';
+   }catch{info.textContent='Import approval result uncertain; re-scan before any further action.'}
+   finally{approval.disabled=false}
+  })(),'btn primary');
+  panel.append(approval);
+ }
+ if(snapshot.prompt?.state==='PRESENT'&&typeof snapshot.prompt.text==='string'){
+  const box=el('details','settings-section');
+  box.append(el('summary','','Canonical Chat 1 prompt · GitHub-controlled'));
+  box.append(el('p','setting-note',
+   'The committed main prompt remains authoritative. Local drafts cannot change it without an explicit conditional Git commit and independent readback.'));
+  const draft=el('textarea','form-input');draft.rows=10;draft.value=snapshot.prompt.text;
+  draft.setAttribute('aria-label','Canonical Chat 1 prompt draft');
+  const notes=el('p','setting-note','GitHub source loaded. No change submitted.');
+  notes.setAttribute('role','status');
+  const controls=el('div','form-foot');
+  let base={repositoryId:snapshot.repositoryId,head:snapshot.head,oid:snapshot.prompt.oid},
+   revision=0,dirty=false,uncertain=false,loading=false;
+  draft.addEventListener('input',()=>{dirty=true;});
+  const save=b('Save local prompt draft',()=>void(async()=>{
+   if(loading||!draft.value.trim()||draft.value.length>131072)return;
+   loading=true;save.disabled=true;notes.textContent='Saving the local draft; GitHub remains unchanged.';
+   try{
+    const r=await readPort('pcms-s03-catalog','SAVE_PROMPT_DRAFT',{
+      repositoryId:base.repositoryId,expectedRevision:revision,
+      baseOid:base.oid,text:draft.value},20000);
+    if(r?.ok){revision=r.revision;dirty=false;uncertain=false;
+     notes.textContent='Local prompt draft saved. GitHub main remains unchanged.'}
+    else notes.textContent='Draft was not confirmed. Preserve your text and reload the current draft before retrying.';
+   }catch{notes.textContent='Draft storage outcome uncertain. Preserve your edits and reload before retrying.'}
+   finally{loading=false;save.disabled=false}
+  })(),'btn small');
+  const commit=b('Commit reviewed prompt to GitHub main',()=>void(async()=>{
+   if(loading||revision<1||dirty||uncertain){notes.textContent='Save and verify the current draft before requesting a GitHub commit.';return}
+   if(!window.confirm('Commit this exact saved Chat 1 prompt to the verified GitHub main? PCMS uses a revision-checked nonforced write, independent readback and no blind retry.'))return;
+   loading=true;commit.disabled=true;notes.textContent='Checking standing Git permission and exact main revision…';
+   try{
+    const r=await readPort('pcms-s03-catalog','COMMIT_PROMPT',{
+      repositoryId:base.repositoryId,expectedRevision:revision,
+      expectedHead:base.head},95000);
+    uncertain=!r?.ok&&r?.code==='PROMPT_GIT_UNCERTAIN_RECONCILE_REQUIRED';
+    notes.textContent=r?.ok?
+      'Committed prompt verified on GitHub main. Re-scan before further source work.':
+      uncertain?'Commit outcome uncertain. Use read-only reconciliation; do not retry the write.':
+      'Commit held; GitHub source has not been independently verified. Preserve this draft.';
+   }catch{uncertain=true;notes.textContent='GitHub commit outcome unknown. Do not resend. Reconcile the exact write first.'}
+   finally{loading=false;commit.disabled=false}
+  })(),'btn primary');
+  const reconcile=b('Reconcile possible Git commit',()=>void(async()=>{
+   if(loading)return;
+   loading=true;reconcile.disabled=true;notes.textContent='Observing current GitHub history and exact prompt bytes without a write…';
+   try{
+    const r=await readPort('pcms-s03-catalog','RECONCILE_PROMPT',{
+      repositoryId:base.repositoryId},60000);
+    if(r?.ok){uncertain=false;notes.textContent='Prior Git prompt commit independently verified. Read main again before editing.'}
+    else notes.textContent='Git prompt outcome remains unverified. No write was repeated.';
+   }catch{notes.textContent='Read-only reconciliation unavailable. Preserve the original draft and uncertainty hold.'}
+   finally{loading=false;reconcile.disabled=false}
+  })(),'btn small');
+  controls.append(save,commit,reconcile);
+  box.append(draft,controls,notes);panel.append(box);
+  void (async()=>{
+   try{
+    const r=await readPort('pcms-s03-catalog','GET_PROMPT_DRAFT',{},20000);
+    if(!panel.isConnected||dirty)return;
+    if(r?.ok){
+     draft.value=r.record.text;revision=r.record.revision;
+     uncertain=['DISPATCH_POSSIBLE','UNCERTAIN'].includes(r.record.effect?.state);
+     if(r.record.baseOid!==base.oid){
+      uncertain=true;notes.textContent='Saved draft is based on a different main revision. Reconcile before any commit.';
+     }else notes.textContent='Existing local draft loaded. GitHub main remains authoritative.';
+    }
+   }catch{}
+  })();
+ }
+ section.append(panel);
+}
 function primaryConnections(container){
  const section=primarySettingCard(container,'GitHub connection',
   'PCMS reads generator folders from the committed main branch only. A repository preview is not a saved connection.');
@@ -1728,6 +1857,7 @@ function primaryConnections(container){
    status.textContent=out?.ok&&out.complete?
      out.recognizedCount+' recognized generator folder(s) on main. Account ownership, publication and deployment remain separate checks.':
      'The committed main inventory could not be verified. No deletion or missing folder has been inferred.';
+   if(out?.ok&&out.complete)renderConnectedMain(section,out);
   }catch{status.textContent='GitHub read-only scan unavailable. No remote changes were made.'}
   finally{inspect.disabled=false}
  })(),'btn small');
