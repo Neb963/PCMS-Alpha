@@ -72,5 +72,9 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
     console.log('XPI SHA-256      '+r.xpiSha256);
     console.log('Package          '+r.tarball);
     console.log('Package SHA-256  '+r.tarballSha256);
+    // A01: read-only inventory of the exact XPI and matching operator tarball.
+    // Baseline legacy hosts are reported, not installed or accepted.
+    execFileSync('python3',[path.join(root,'scripts/a01-package-census.py'),
+      path.join(root,'build/pcms-alpha-i00.xpi'),r.tarball],{stdio:'inherit'});
   }).catch(e=>{console.error(e.message);process.exitCode=1;});
 }
