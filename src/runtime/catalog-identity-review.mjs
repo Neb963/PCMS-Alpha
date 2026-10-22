@@ -26,12 +26,13 @@ export function planMainFolderChanges(prior,current,records=[]){
  // An apparent rename can be one-to-one only with an exact independent
  // source-folder match. Otherwise hold each new identity as ambiguous.
  const relevant=records.filter(r=>r.repositoryId===current.repositoryId&&
-   SLUG.test(r.oldSlug||'')&&SLUG.test(r.newSlug||''));
+   (r.oldSlug===null||SLUG.test(r.oldSlug||''))&&SLUG.test(r.newSlug||''));
  const created=[];
  if(missing.length&&added.length){
   for(const slug of added){
    const candidate=now.get(slug);
-   const exact=missing.filter(s=>old.get(s)?.folderTreeOid===candidate.folderTreeOid);
+   const exact=missing.filter(s=>SHA.test(candidate.folderTreeOid||'')&&
+     old.get(s)?.folderTreeOid===candidate.folderTreeOid);
    const possible=exact.length===1?exact[0]:missing.length===1?missing[0]:null;
    const oldSlug=possible||null;
    if(!relevant.some(r=>r.newSlug===slug)){
