@@ -1,3 +1,9 @@
+# Superseded task-selection notice — 2026-10-22
+
+The operative corrective implementation program is **[RECOVERY-PLAN-2026-10-22.md](RECOVERY-PLAN-2026-10-22.md), A00–A09**. The old S00–S08 table below is preserved for dependency history only; its encrypted-AES backup, OS clock/native-witness and other contrary mechanisms were superseded by [Client Amendment v1.0.1](../authority/PCMS-Alpha-CLIENT-AMENDMENT-v1.0.1.md). Do not select a new S-slice or impose an old encrypted-backup gate. Preserve accepted client *outcomes* and valid historical test evidence. Earlier S/I execution and original I17 quarantine are not erased.
+
+---
+
 # PCMS-Alpha — Outcome slices and dependency map
 
 **Authority:** Accepted conditional Gate B v1.1 dependency map, operative after reviewed installation on `main`. Not a completion list or external-effect grant. The accepted AC matrix remains the independent oracle. A standing request to implement the next eligible authorized slice delegates one engineering slice, **not** live Perchance, private Git, native host or publication effects.
