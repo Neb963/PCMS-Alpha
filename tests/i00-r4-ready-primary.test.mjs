@@ -22,7 +22,7 @@ test('R4 READY primary operations keep exact expected revision and no provider-e
 });
 test('R4 primary READY queue is paginated and assessed by the original protected controller',async()=>{
  const ui=await readFile(new URL('../src/ui/faithful/bridge.mjs',import.meta.url),'utf8');
- assert.match(ui,/readPort\('pcms-s03-catalog','LIST_READY'/);
+ assert.match(ui,/guardedRead\('pcms-s03-catalog','LIST_READY'/);
  assert.match(ui,/q\.readyCursor/);
  assert.match(ui,/state\.queue\.readyCursor=state\.queue\.nextReady/);
  assert.match(ui,/function openReadyCandidate\(candidate\)/);
