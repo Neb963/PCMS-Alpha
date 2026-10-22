@@ -4,6 +4,8 @@
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {snapshotCanonical,snapshotCanonicalV2,digest,MAX_ARCHIVE_BYTES} from './backup-core.mjs';
+import {readPortableStage} from './portable-restore-stage.mjs';
+import {inspectPortableRestore,verifyPortableCheckpoint} from './portable-restore-plan.mjs';
 import {createPortableBackupPayload,decodeBackupEnvelope} from '../lib/backup-package.js';
 import {filterOrdinaryAutomationJobs} from '../lib/automation-history.js';
 import {previewRestore,verifyCheckpoint,validateRestoreTransport,stableRestoreDonorCut} from './restore-core.mjs';
@@ -304,6 +306,104 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
     return running;
   }
 
+  // A02 source-complete portable restore: only trusted PCMS extension pages
+  // may pass disposable stage IDs. No raw archive, token, password or cookie
+  // arrays cross the background port, and no native PCMS host is consulted.
+  async function destinationPortable(donor){
+    const snap=await donor.snapshot();
+    assert(snap?.state&&Array.isArray(snap.containers),'RESTORE_DONOR_UNAVAILABLE');
+    const db=await database();
+    let pcms;try{pcms=await snapshotCanonicalV2(db,{serializedValues:true});}
+    finally{db.close();}
+    return {snap:stableRestoreDonorCut(snap),pcms,
+      portable:await readPortable(api,donor,snap)};
+  }
+  const validScope=s=>typeof s==='string'&&/^portable_[a-f0-9]{32}$/.test(s);
+  const validMappings=m=>m&&typeof m==='object'&&!Array.isArray(m)&&
+    Object.entries(m).length<=10000&&Object.entries(m).every(([k,v])=>
+      k.length>0&&k.length<=256&&typeof v==='string'&&v.length<=256);
+  async function applyPortable(args){
+    if(running)return fail('RESTORE_BUSY');
+    running=(async()=>{
+      let db=null;
+      try{
+        assert(args&&typeof args==='object'&&!Array.isArray(args)&&
+          validScope(args.stageScope)&&validScope(args.checkpointScope)&&
+          args.stageScope!==args.checkpointScope&&
+          ['merge','replace'].includes(args.mode)&&
+          typeof args.fresh==='boolean'&&validMappings(args.mappings)&&
+          hex(args.reviewedPlanSha256),'RESTORE_PORTABLE_INPUT_INVALID');
+        assert(await gate.read()===null,'RESTORE_ALREADY_HELD');
+        const incoming=await readPortableStage(args.stageScope);
+        const checkpoint=await readPortableStage(args.checkpointScope);
+        const donor=await donorReady();
+        const baseline=await destinationPortable(donor);
+        const reviewed=await inspectPortableRestore({
+          incoming,mode:args.mode,fresh:args.fresh,
+          mappings:args.mappings,currentPcms:baseline.pcms,
+          currentDonor:baseline.snap,currentPortable:baseline.portable,
+          containers:baseline.snap.containers});
+        assert(reviewed.planSha256===args.reviewedPlanSha256,
+          'RESTORE_PLAN_CHANGED');
+        assert(Object.keys(args.mappings).length===incoming.donor.personas.length&&
+          !reviewed.plan.groups.some(g=>g.status==='DIRECT_REVIEW_REQUIRED')&&
+          reviewed.plan.groups.every(g=>['MAPPING_ONLY_UNVERIFIED',
+            'CREATE_REQUESTED'].includes(g.status)),
+          'RESTORE_MAPPING_UNVERIFIED');
+        const checked=await verifyPortableCheckpoint({
+          checkpoint,currentPcms:baseline.pcms,currentPortable:baseline.portable});
+        const later=await destinationPortable(donor);
+        assert(same(later,baseline),'RESTORE_DESTINATION_DRIFT');
+        const intent=await gate.begin({
+          planSha256:reviewed.planSha256,
+          archiveSha256:incoming.receipt.chain,
+          destinationSha256:reviewed.plan.destinationSha256,
+          checkpointSha256:checked.sha256,
+          reviewedPlanSha256:args.reviewedPlanSha256,
+          checkpointTier:checked.tier,fresh:args.fresh,
+          recovery:{mode:args.mode,mappings:args.mappings,
+            portableStageScope:args.stageScope,
+            portableCheckpointScope:args.checkpointScope}
+        });
+        const afterGuard=await destinationPortable(donor);
+        assert(same(afterGuard,baseline),'RESTORE_DESTINATION_CHANGED_AFTER_GUARD');
+        db=await database();
+        await applyGuardedGroups({db,donor,baseline,intent,
+          req:args.mappings,payload:incoming.donor,
+          incomingPcms:incoming.canonical,mode:args.mode,
+          fresh:args.fresh,v2:true});
+        const final=await gate.inspect();
+        assert(final.held&&final.activation==='OFF'&&
+          final.status==='COMPLETE_INACTIVE','RESTORE_PORTABLE_FINAL_HOLD_REQUIRED');
+        return {...(await status()),ok:true,code:'RESTORED_PORTABLE_INACTIVE',
+          sourceRows:incoming.receipt.rows,sourceAudit:incoming.receipt.sourceAudit,
+          dataRecovered:true,protectedRoutesVerified:false,
+          ownerSessionsVerified:false,providerEffects:'OFF'};
+      }catch(e){return fail(redacted(e));}
+      finally{try{db?.close()}catch{}}
+    })().finally(()=>{running=null});
+    return running;
+  }
+  async function reconcilePortable(args){
+    if(running)return fail('RESTORE_BUSY');
+    let db=null;
+    try{
+      const intent=await gate.read();
+      assert(intent?.active===true&&
+        validScope(intent.recovery?.portableStageScope)&&
+        validScope(intent.recovery?.portableCheckpointScope)&&
+        args?.stageScope===intent.recovery.portableStageScope&&
+        args?.checkpointScope===intent.recovery.portableCheckpointScope,
+        'RESTORE_PORTABLE_RECONCILE_SCOPE');
+      const incoming=await readPortableStage(args.stageScope);
+      const checkpoint=await readPortableStage(args.checkpointScope);
+      const donor=await donorReady();
+      db=await database();
+      return await reconcileRestore({gate,api,donor,db,
+        portableIncoming:incoming,portableCheckpoint:checkpoint});
+    }catch(e){return fail(redacted(e))}
+    finally{try{db?.close()}catch{}}
+  }
   async function nativeV2Evidence(runId){
     assert(typeof runId==='string'&&/^s02_[a-f0-9]{32}$/.test(runId),
       'RESTORE_V2_RUN_INVALID');
@@ -442,6 +542,8 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
     if(!trustedRestoreSender(api,sender))return fail('UNTRUSTED_SENDER');
     if(!message||typeof message!=='object'||Array.isArray(message))return fail('RESTORE_INPUT_INVALID');
     if(message.action==='STATUS')return status();
+    if(message.action==='APPLY_PORTABLE')return applyPortable(message.params);
+    if(message.action==='RECONCILE_PORTABLE')return reconcilePortable(message.params);
     if(message.action==='PREVIEW_V2')return previewV2(message.params);
     if(message.action==='APPLY_V2')return applyV2(message.params);
     if(message.action==='RECONCILE'){
