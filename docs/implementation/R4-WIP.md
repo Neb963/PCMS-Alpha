@@ -35,3 +35,12 @@ Preservation: R3 production main de2c80434edf1981fff1040437292820271888cc unchan
 - Native host packaging now fails rather than reporting a successful install if the OS credential vault, source-complete backup helper, diagnostic browser, or Refresher clock witness cannot be verified; the installer does NOT repair the user's local OS without operator action. Exact package build and hashes must be matched to the XPI; local H is still unverified.
 - Primary Backup & Restore now mirrors original I16 protected native engine, including encrypted files, independent checkpoint, exact-plan consent and inactive-controller recovery; the old security engine is not replaced, and no restore claim is made without fresh-profile evidence.
 - Exact candidate D fast, packaged installed Firefox B, final package identity, independent reviewer checks and postmerge checks are all required before R4 engineering merge. Existing R3 main stays stable; previous CI success must never be cited for a later R4 candidate.
+
+
+## R4 AC-09 cross-scan identity repair — 2026-10-22
+
+- A missing Git folder and a later new folder need not appear in the **same** complete main snapshot. The catalog watcher now passes repository-scoped durable missing-folder history to the structural review planner before creation or READY intake; an unresolved delayed possible rename remains held.
+- Reviews with no unique candidate original slug (`oldSlug: null`) now persist across repeated scans. Such reviews permit only an explicitly approved **separate** generator, never an inferred existing-generator rename. Absent tree OIDs do not create an exact-tree match.
+- Added deterministic tests for 1,024 mismatching candidates, no source tree, multiple ambiguous originals, stale/reappearing sources and delayed two-scan disappearance/appearance. A regression initially caught an unsafe absent-map dereference; patched at commit `5efa8c198cfccf62258e17b4e0b06dd68423a72b`.
+- Removed unused legacy UI text-heuristic operation parsing and implicit unknown selection redirection. Primary operations remain based on canonical typed records.
+- Current R4 GitHub **draft** remains unmerged. The previous CI pass applies only to `815cf0f66e327b2d4f048ad59317b9dd992856f8`; new HEAD requires fresh packaged-Firefox evidence. No real Perchance operations attempted.
