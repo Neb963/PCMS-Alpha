@@ -65,7 +65,7 @@ function friendlyConnectionIssue(code){
 }
 const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',total:0,items:[]},
  ref:{offset:0,limit:25,query:'',phase:'ALL',snapshot:null,items:[],total:0},
- acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,epoch:0},
+ acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,readyItems:[],readyCursor:'',nextReady:null,readyMore:false,epoch:0},
  settings:'connections',settingsStatic:null,lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},nativeOpen:false,
  renderEpoch:0,version:'0.1.7',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
@@ -457,14 +457,15 @@ function routeHandlers(){
  if(action==='queue-prev'){
    const prior=state.queue.history.pop();if(!prior)return;
    state.queue.opCursor=prior.op;state.queue.noticeCursor=prior.notice;
-   state.queue.aiCursor=prior.ai;void loadQueue();return;
+   state.queue.aiCursor=prior.ai;state.queue.readyCursor=prior.ready;void loadQueue();return;
  }
  if(action==='queue-next'){
    if(!state.queue.more)return;
-   state.queue.history.push({op:state.queue.opCursor,notice:state.queue.noticeCursor,ai:state.queue.aiCursor});
+   state.queue.history.push({op:state.queue.opCursor,notice:state.queue.noticeCursor,ai:state.queue.aiCursor,ready:state.queue.readyCursor});
    state.queue.opCursor=state.queue.nextOps===null?null:state.queue.nextOps;
    state.queue.noticeCursor=state.queue.nextNotices===null?null:state.queue.nextNotices;
    state.queue.aiCursor=state.queue.nextAi===null?null:state.queue.nextAi;
+   state.queue.readyCursor=state.queue.nextReady===null?null:state.queue.nextReady;
    void loadQueue();return;
  }
  if(action==='add-account'){void startAccountEnrollment();return}
@@ -854,7 +855,7 @@ function queueGroup(filter){
 async function loadQueue(reset=false){
  if(state.route!=='work-queue')return;
  const q=state.queue;
- if(reset){q.opCursor='';q.noticeCursor='';q.aiCursor='';q.history=[];q.nextOps=null;q.nextNotices=null;q.nextAi=null;}
+ if(reset){q.opCursor='';q.noticeCursor='';q.aiCursor='';q.readyCursor='';q.history=[];q.nextOps=null;q.nextNotices=null;q.nextAi=null;q.nextReady=null;}
  const epoch=++q.epoch;
  q.loading=true;q.error=null;displayQueue();
  const includeNotices=q.filter==='Needs action'||q.filter==='All';
@@ -873,17 +874,23 @@ async function loadQueue(reset=false){
      after:q.aiCursor,limit:20
    }).catch(()=>({ok:false,jobs:[],more:false,nextCursor:null})):
      Promise.resolve({ok:true,jobs:[],more:false,nextCursor:null}),
+   q.readyCursor!==null?guardedRead('pcms-s03-catalog','LIST_READY',{
+     after:q.readyCursor,limit:20
+   }).catch(()=>({ok:false,items:[],more:false,nextCursor:null})):
+     Promise.resolve({ok:true,items:[],more:false,nextCursor:null}),
    guardedRead('pcms-r4-folder-identity','LIST')
      .catch(()=>({ok:false,items:[],missingFolders:[]}))
  ];
  try{
-  const [ops,notices,summary,noticeTotals,releases,ai,identities]=await Promise.all(requested);
+  const [ops,notices,summary,noticeTotals,releases,ai,ready,identities]=await Promise.all(requested);
   if(state.route!=='work-queue'||q.epoch!==epoch)return;
   q.operations=ops.items||[];q.incidents=notices.items||[];
   q.nextOps=ops.more?ops.next:null;q.nextNotices=notices.more?notices.next:null;
   q.aiJobs=ai?.ok?(ai.jobs||[]):[];q.aiMore=ai?.ok&&ai.more===true;
   q.nextAi=q.aiMore?ai.nextCursor:null;
-  q.more=Boolean(ops.more||notices.more||q.aiMore);q.summary={...summary,attention:noticeTotals};
+  q.readyItems=ready?.ok?(ready.items||[]):[];q.readyMore=ready?.ok&&ready.more===true;
+  q.nextReady=q.readyMore?ready.nextCursor:null;
+  q.more=Boolean(ops.more||notices.more||q.aiMore||q.readyMore);q.summary={...summary,attention:noticeTotals};
   q.releaseItems=releases?.ok?(releases.items||[]):[];
   q.reviews=identities?.ok?(identities.items||[]):[];
   q.missing=identities?.ok?(identities.missingFolders||[]):[];
@@ -1035,6 +1042,25 @@ function displayQueue(){
       action.disabled=true;
     row.append(el('span','row-mark', '•'),detail,action);holder.append(row);
    }
+  for(const candidate of q.readyItems||[]){
+   const active=Boolean(candidate.active),desired=Boolean(candidate.desired);
+   const held=!!candidate.hold&&candidate.hold!=='NONE';
+   const eligible=q.filter==='All'||
+     (q.filter==='Needs action'&&(held||desired))||
+     (q.filter==='Waiting'&&!held&&(active||desired))||
+     (q.filter==='Completed'&&!held&&!active&&!desired);
+   if(!eligible||(q.query&&!candidate.slug.includes(q.query.toLowerCase())))continue;
+   const row=el('div','queue-item'),detail=el('div','row-body');
+   const label=held?'Candidate needs review':desired?'New READY revision pending':
+     active?'READY candidate recorded':'No currently eligible candidate';
+   const heading=el('div','queue-head');
+   heading.append(el('strong','',candidate.slug),statusPill(label,held?'amber':''));
+   detail.append(heading,el('p','setting-note',
+     'Committed main READY declaration · protected source, account, route and editor admission are verified separately.'));
+   row.append(el('span','row-mark'+(held?' warn':'')),detail,
+     b('Review READY',()=>void openReadyCandidate(candidate),'btn small'));
+   holder.append(row);
+  }
   for(const job of q.aiJobs||[]){
    const currentState=job.state||'NOT_VERIFIED';
    const complete=currentState==='TESTS_VERIFIED'||job.slotReleased===true;
@@ -1124,7 +1150,7 @@ function displayQueue(){
   tab.setAttribute('aria-selected',String(f===q.filter));
  }
  const foot=shadow('.pagination span');if(foot)foot.textContent=q.loading?'Loading recorded work…':
-  q.error?'Local journal unavailable':q.operations.length+q.incidents.length+q.aiJobs.length+' journal and AI job records on this page · no remote success inferred';
+  q.error?'Local journal unavailable':q.operations.length+q.incidents.length+q.aiJobs.length+q.readyItems.length+' journal, READY and AI records on this page · no remote success inferred';
  const prev=shadow('[data-action="queue-prev"]'),next=shadow('[data-action="queue-next"]');
  if(prev)prev.disabled=q.loading||q.history.length===0;
  if(next)next.disabled=q.loading||!q.more;
