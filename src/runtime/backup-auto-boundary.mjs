@@ -1,11 +1,11 @@
 // I15 synchronous event listeners. Background scheduling never needs a PCMS tab.
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {AUTO_ALARM,AUTO_PORT} from './backup-auto-core.mjs';
-import {createAutoRunner,operatorSelectedV2} from './backup-auto-run.mjs';
+import {createPortableRunner} from './portable-runner.mjs';
 import {createDonorSnapshotPortHandler} from './backup-donor-port.mjs';
 const fail=code=>({ok:false,code});
 export function createAutoBoundary(api,options={}){
-  const runner=createAutoRunner(api,options);
+  const runner=createPortableRunner(api,options);
   let registered=false;
   function wake(){
     try{Promise.resolve(api.alarms.create(AUTO_ALARM,{periodInMinutes:60})).catch(()=>{});}
@@ -18,22 +18,16 @@ export function createAutoBoundary(api,options={}){
       await runner.enable(message.enabled);
       return runner.status();
     }
-    if(message.action==='STORE_VAULT')return runner.setVault(message.passphrase);
     if(message.action==='RUN_NOW')return runner.tick();
-    if(message.action==='RUN_V2_MANUAL')return runner.manualV2Candidate();
-    if(message.action==='SET_FORMAT')return runner.setFormat(message.format);
+    if(message.action==='MANUAL')return runner.manual();
     return fail('INVALID_COMMAND');
   }
   function validate(message){
-    if(!message||typeof message!=='object'||Array.isArray(message)||
-      !['STATUS','ENABLE','STORE_VAULT','RUN_NOW','RUN_V2_MANUAL','SET_FORMAT'].includes(message.action))
-      return false;
-    const keys=Object.keys(message).sort().join(',');
-    if(message.action==='SET_FORMAT')return keys==='action,format'&&['V1','V2'].includes(message.format);
-    return message.action==='ENABLE'?keys==='action,enabled'&&typeof message.enabled==='boolean':
-      message.action==='STORE_VAULT'?keys==='action,passphrase'&&
-        typeof message.passphrase==='string'&&message.passphrase.length<=4096:
-        keys==='action';
+    return !!message&&typeof message==='object'&&!Array.isArray(message)&&
+      (Object.keys(message).length===1&&
+        ['STATUS','RUN_NOW','MANUAL'].includes(message.action)||
+      Object.keys(message).length===2&&message.action==='ENABLE'&&
+        typeof message.enabled==='boolean');
   }
   function register(){
     if(registered)return;registered=true;
@@ -63,6 +57,5 @@ export function createAutoBoundary(api,options={}){
 }
 // Single registration; exported so a completed account removal can request
 // the C-75 follow-up backup through the same coordinator (no second runner).
-export const autoBackup=typeof browser!=='undefined'?createAutoBoundary(browser,{
-  reviewedV2:operatorSelectedV2(browser)}):null;
+export const autoBackup=typeof browser!=='undefined'?createAutoBoundary(browser):null;
 autoBackup?.register();
