@@ -871,11 +871,11 @@ async function loadQueue(reset=false){
    guardedRead('pcms-i13-release','LIST_REVIEW',{after:'',limit:40})
      .catch(()=>({ok:false,items:[]})),
    q.aiCursor!==null?guardedRead('pcms-i10-ai','LIST_JOBS',{
-     after:q.aiCursor,limit:20
+     after:q.aiCursor,limit:20,query:q.query.slice(0,100),status:queueGroup(q.filter)
    }).catch(()=>({ok:false,jobs:[],more:false,nextCursor:null})):
      Promise.resolve({ok:true,jobs:[],more:false,nextCursor:null}),
    q.readyCursor!==null?guardedRead('pcms-s03-catalog','LIST_READY',{
-     after:q.readyCursor,limit:20
+     after:q.readyCursor,limit:20,query:q.query.slice(0,100),status:queueGroup(q.filter)
    }).catch(()=>({ok:false,items:[],more:false,nextCursor:null})):
      Promise.resolve({ok:true,items:[],more:false,nextCursor:null}),
    guardedRead('pcms-r4-folder-identity','LIST')
