@@ -1239,6 +1239,13 @@ def main():
                     !![...drawer.querySelectorAll('button')].find(x=>x.textContent.includes('Create private generators'));
                   const legacyOpened=document.body.classList.contains('pcms-native-open');
                   drawer?.querySelector('button')?.click();
+                  sh.querySelector('[data-nav="work-queue"]').click();
+                  sh.querySelector('[data-action="prepare-ai"]')?.click();
+                  const aiDrawer=sh.querySelector('[aria-label="Prepare verified AI development job"]');
+                  const primaryAiPreparation=!!aiDrawer&&
+                    !!aiDrawer.querySelector('input[placeholder="generator-slug"]')&&
+                    [...aiDrawer.querySelectorAll('button')].some(x=>x.textContent.includes('Verify stage and prepare'));
+                  aiDrawer?.querySelector('button')?.click();
                   sh.querySelector('[data-nav="settings"]').click();
                   sh.querySelector('[data-settings="automation"]').click();
                   const primaryPermission=sh.querySelector('.settings-main')?.textContent.includes('Standing permissions')&&
@@ -1272,9 +1279,9 @@ def main():
                     !/GIT_[A-Z_]+|NATIVE_[A-Z_]+|local[.]pcms[.]/.test(
                       x.querySelector('.setting-description')?.textContent||''));
                   return {primaryCreate,legacyOpened,primaryPermission,primaryDiagnostic,
-                    primaryAi,protectedRestore,restoreHeld,restoredConnections,readableConnections,
+                    primaryAi,primaryAiPreparation,protectedRestore,restoreHeld,restoredConnections,readableConnections,
                     drawerClosed:!sh.querySelector('[aria-label="Create generators"]')};""")
-                assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['primaryAi'] and r4_primary['protectedRestore'] and r4_primary['restoreHeld'] and r4_primary['restoredConnections'] and r4_primary['readableConnections'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
+                assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['primaryAi'] and r4_primary['primaryAiPreparation'] and r4_primary['protectedRestore'] and r4_primary['restoreHeld'] and r4_primary['restoredConnections'] and r4_primary['readableConnections'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
                 print('B R4_PRIMARY_CREATION_AND_PROTECTED_SETTINGS_WITHOUT_LEGACY=PASS',flush=True)
                 execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=overview]').click();return true")
 
