@@ -65,7 +65,7 @@ function friendlyConnectionIssue(code){
 }
 const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',total:0,items:[]},
  ref:{offset:0,limit:25,query:'',phase:'ALL',snapshot:null,items:[],total:0},
- acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],epoch:0},
+ acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,epoch:0},
  settings:'connections',settingsStatic:null,lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},nativeOpen:false,
  renderEpoch:0,version:'0.1.7',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
@@ -455,13 +455,15 @@ function routeHandlers(){
  if(action==='account-next'){state.acct.page++;displayAccounts();return}
  if(action==='queue-prev'){
    const prior=state.queue.history.pop();if(!prior)return;
-   state.queue.opCursor=prior.op;state.queue.noticeCursor=prior.notice;void loadQueue();return;
+   state.queue.opCursor=prior.op;state.queue.noticeCursor=prior.notice;
+   state.queue.aiCursor=prior.ai;void loadQueue();return;
  }
  if(action==='queue-next'){
    if(!state.queue.more)return;
-   state.queue.history.push({op:state.queue.opCursor,notice:state.queue.noticeCursor});
+   state.queue.history.push({op:state.queue.opCursor,notice:state.queue.noticeCursor,ai:state.queue.aiCursor});
    state.queue.opCursor=state.queue.nextOps===null?null:state.queue.nextOps;
    state.queue.noticeCursor=state.queue.nextNotices===null?null:state.queue.nextNotices;
+   state.queue.aiCursor=state.queue.nextAi===null?null:state.queue.nextAi;
    void loadQueue();return;
  }
  if(action==='add-account'){void startAccountEnrollment();return}
@@ -851,7 +853,7 @@ function queueGroup(filter){
 async function loadQueue(reset=false){
  if(state.route!=='work-queue')return;
  const q=state.queue;
- if(reset){q.opCursor='';q.noticeCursor='';q.history=[];q.nextOps=null;q.nextNotices=null;}
+ if(reset){q.opCursor='';q.noticeCursor='';q.aiCursor='';q.history=[];q.nextOps=null;q.nextNotices=null;q.nextAi=null;}
  const epoch=++q.epoch;
  q.loading=true;q.error=null;displayQueue();
  const includeNotices=q.filter==='Needs action'||q.filter==='All';
@@ -866,15 +868,21 @@ async function loadQueue(reset=false){
    guardedRead('pcms-i02-canonical-readonly','NOTICE_SUMMARY'),
    guardedRead('pcms-i13-release','LIST_REVIEW',{after:'',limit:40})
      .catch(()=>({ok:false,items:[]})),
+   q.aiCursor!==null?guardedRead('pcms-i10-ai','LIST_JOBS',{
+     after:q.aiCursor,limit:20
+   }).catch(()=>({ok:false,jobs:[],more:false,nextCursor:null})):
+     Promise.resolve({ok:true,jobs:[],more:false,nextCursor:null}),
    guardedRead('pcms-r4-folder-identity','LIST')
      .catch(()=>({ok:false,items:[],missingFolders:[]}))
  ];
  try{
-  const [ops,notices,summary,noticeTotals,releases,identities]=await Promise.all(requested);
+  const [ops,notices,summary,noticeTotals,releases,ai,identities]=await Promise.all(requested);
   if(state.route!=='work-queue'||q.epoch!==epoch)return;
   q.operations=ops.items||[];q.incidents=notices.items||[];
   q.nextOps=ops.more?ops.next:null;q.nextNotices=notices.more?notices.next:null;
-  q.more=Boolean(ops.more||notices.more);q.summary={...summary,attention:noticeTotals};
+  q.aiJobs=ai?.ok?(ai.jobs||[]):[];q.aiMore=ai?.ok&&ai.more===true;
+  q.nextAi=q.aiMore?ai.nextCursor:null;
+  q.more=Boolean(ops.more||notices.more||q.aiMore);q.summary={...summary,attention:noticeTotals};
   q.releaseItems=releases?.ok?(releases.items||[]):[];
   q.reviews=identities?.ok?(identities.items||[]):[];
   q.missing=identities?.ok?(identities.missingFolders||[]):[];
