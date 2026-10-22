@@ -61,7 +61,18 @@ test('A02 streaming decoder handles multi-frame records and keeps records staged
     assert.ok(item.kind==='donor'||DB_STORES.includes(item.store));calls++;
   }});
   assert.equal(received.canonical,null);
+  assert.equal(received.integrity,'FRAME_VERIFIED_SOURCE_NOT_AUDITED');
   assert.equal(received.rows,1);
   assert.equal(calls,2);
   assert.equal((await Array.fromAsync(framedLines(built.blob))).length,built.frames+2);
+});
+
+test('A02 streamed staging cannot assert source closure without independent readback',async()=>{
+  const pcms=baseline(),built=await encodePortableArchive({pcms,donor:donor()});
+  await assert.rejects(()=>readPortableArchive(built.blob,{collect:false,
+    auditStaged:async()=>({manifests:99})}),/PORTABLE_SOURCE_CLOSURE/);
+  const verified=await readPortableArchive(built.blob,{collect:false,
+    auditStaged:async()=>built.sourceAudit});
+  assert.equal(verified.integrity,'FRAME_AND_SOURCE_VERIFIED');
+  assert.equal(verified.diskReadback,false);
 });
