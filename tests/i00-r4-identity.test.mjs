@@ -47,6 +47,33 @@ test('R4 AC-09: truncated, wrong repo, changed source and many-folder gaps canno
  const large=planMainFolderChanges(old,fresh);
  assert.equal(large.held.length,1024);
 });
+test('R4 AC-09: multiple missing folders preserve a null-owner review across repeated complete scans',()=>{
+ const before=snapshot(H('1'),[g('old-one',H('a')),g('old-two',H('b'))]);
+ const current=snapshot(H('2'),[g('new-three',H('c'))]);
+ const first=planMainFolderChanges(before,current);
+ assert.equal(first.created.length,1);
+ assert.equal(first.created[0].oldSlug,null);
+ assert.deepEqual(first.held,['new-three']);
+ const again=planMainFolderChanges(current,current,first.review);
+ assert.equal(again.created.length,0,'review must persist without a guessed owner');
+ assert.equal(again.review.length,1);
+ assert.deepEqual(again.held,['new-three']);
+ assert.equal(chooseFolderIdentity(again,{newSlug:'new-three',choice:'RENAME_EXISTING',
+   expectedTreeOid:H('c')}).code,'ORIGINAL_IDENTITY_AMBIGUOUS');
+ const separate=chooseFolderIdentity(again,{newSlug:'new-three',choice:'CREATE_SEPARATE',
+   expectedTreeOid:H('c')});
+ assert.equal(separate.ok,true);
+ assert.equal(separate.record.oldSlug,null);
+ assert.deepEqual(planMainFolderChanges(current,current,[separate.record]).held,[]);
+ const noTree=snapshot(H('3'),[
+  {slug:'new-three',markerOid:H('b'),folderTreeOid:undefined}
+ ]);
+ const unproven=planMainFolderChanges(before,noTree);
+ assert.equal(unproven.created[0].reason,'IDENTITY_AMBIGUOUS');
+ assert.deepEqual(unproven.held,['new-three']);
+ assert.equal(chooseFolderIdentity(unproven,{newSlug:'new-three',
+   choice:'CREATE_SEPARATE',expectedTreeOid:H('c')}).ok,false);
+});
 test('R4 identity port is trusted, revision-fenced, and has zero provider/Git effects',async()=>{
  const records=planMainFolderChanges(a,b).review;
  const state={[REVIEW_KEY]:records,pcmsS03CatalogLastComplete:b,
