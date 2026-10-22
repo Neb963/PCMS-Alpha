@@ -1,12 +1,14 @@
 # Agent execution, recovery and handoff
 
+**2026-10-22 corrective program:** Select **A00–A09** from [RECOVERY-PLAN-2026-10-22.md](../../implementation/RECOVERY-PLAN-2026-10-22.md), not the historical S00–S08 map, for new repair work. The binding browser-only/passwordless amendment overrides contradictory native/crypto requirements; see [verified synthesis](../../audit/2026-10-22-VERIFIED-SYNTHESIS.md). An explicit operator delegation now covers repo code/rules and reviewable merges, **not** the user's real profile, native OS bridge, private generator repo or live Perchance operations. Never self-certify independent review.
+
 **Authority:** Operative only when independently reviewed and merged into `main`. This procedure never grants implementation, host, private Git, or provider authority.
 
 ## 1. Establish reality before acting
 
 1. Check the exact target repository, permissions, `main` SHA/tree, open/draft PRs, checks and dirty local work. Treat branch/PR metadata as current work state; do not create a parallel mutable task-state service.
-2. Read `AGENTS.md`, the accepted client AC/T/E requirements for the intended slice, relevant Gate B v1.1 sections, the slice dependency map and existing evidence. Verify the required documents exist at their installed paths. Historical I00–I17 plan remains archived; never select the next task by its obsolete numeric order.
-3. Under the standing operator instruction **“Implement the next eligible authorized slice”**, resume relevant unfinished/postmerge-unverified work; otherwise select the first slice whose **engineering** dependencies are satisfied. A safely parked external/activation hold does not stop independent work. Only missing implementation authority, actual overlapping mutations or genuine prerequisite failures require a narrow question/hold. Own exactly one bounded slice; do not add a coordinator.
+2. Read `AGENTS.md`, the accepted client AC/T/E requirements for the intended slice, relevant Gate B v1.1 sections, the current A-slice recovery dependency map and existing evidence. Verify the required documents exist at their installed paths. Historical I00–I17 plan remains archived; never select the next task by its obsolete numeric order.
+3. Under the standing operator instruction **“Implement the next eligible authorized slice”**, resume relevant unfinished/postmerge-unverified work; otherwise select the first incomplete A-slice whose **engineering** dependencies are satisfied. A safely parked external/activation hold does not stop independent work. Only missing implementation authority, actual overlapping mutations or genuine prerequisite failures require a narrow question/hold. Own exactly one bounded slice; do not add a coordinator.
 4. Do not mistake a previous model message, uploaded Git object, fixture PASS, or an unmerged PR for current authoritative source.
 
 ## 2. Define the smallest end-to-end outcome
