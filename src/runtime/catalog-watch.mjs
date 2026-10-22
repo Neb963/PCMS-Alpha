@@ -83,13 +83,14 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       // do not authorize delete, create or rename. Persist an identity review
       // before either normal intake or READY progression may observe new paths.
       const stored=(await api.storage.local.get(REVIEW_KEY))?.[REVIEW_KEY]||[];
-      const planned=planMainFolderChanges(
-        prior?.repositoryId===cfg.repositoryId&&prior.complete?prior:null,snapshot,stored);
-      if(!planned.ok)return persistStatus(planned.code);
-      const reviews=[...planned.review];
       const older=(await api.storage.local.get(MISSING))?.[MISSING];
       const formerlyMissing=older?.repositoryId===cfg.repositoryId&&
         Array.isArray(older.slugs)?older.slugs:[];
+      const planned=planMainFolderChanges(
+        prior?.repositoryId===cfg.repositoryId&&prior.complete?prior:null,
+        snapshot,stored,formerlyMissing);
+      if(!planned.ok)return persistStatus(planned.code);
+      const reviews=[...planned.review];
       const stillMissing=[...new Set([...formerlyMissing,...missing])].
         filter(slug=>!snapshot.generators.some(g=>g.slug===slug)).slice(0,100000);
       const reappeared=formerlyMissing.filter(slug=>
