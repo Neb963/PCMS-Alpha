@@ -19,7 +19,7 @@ const manualReceipt=async(downloads,id,bytes)=>{
   catch{return null;}
   if(row?.id!==id||row?.state!=='complete'||row.exists!==true||
      row.fileSize!==bytes||typeof row.filename!=='string'||
-     !/[/\\\\]pcms-backups[/\\\\]pcms-alpha-manual_[a-f0-9]{32}(?: \\(\\d+\\))?\\.pcms\\.jsonl$/i.test(row.filename))return null;
+     !/[/\\]pcms-backups[/\\]pcms-alpha-manual_[a-f0-9]{32}(?: \(\d+\))?\.pcms\.jsonl$/i.test(row.filename))return null;
   return {tier:2,code:'BROWSER_REPORTED_COMPLETE',filename:row.filename};
 };
 const awaitManual=async(downloads,id,bytes,timeoutMs=120000)=>new Promise(resolve=>{
