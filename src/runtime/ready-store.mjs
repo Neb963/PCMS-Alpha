@@ -172,7 +172,10 @@ export function createReadyStore(db){
    };
   });
  }
- function list({after='',limit=100}={}){
+ function list({after='',limit=100,query='',status='ALL'}={}){
+  if(typeof query!=='string'||query.length>100||
+     !['ALL','NEEDS_ACTION','RUNNING','WAITING','COMPLETED'].includes(status))
+    return Promise.resolve(fail('READY_PAGE_INVALID'));
   if(typeof after!=='string'||after.length>100||
      !Number.isInteger(limit)||limit<1||limit>200)
    return Promise.resolve(fail('READY_PAGE_INVALID'));
@@ -183,8 +186,17 @@ export function createReadyStore(db){
     if(!c){done({ok:true,items,nextCursor:more?items.at(-1)?.slug||null:null,more});return;}
     const name=typeof c.key==='string'&&c.key.startsWith('s05-ready:')?
       c.key.slice('s05-ready:'.length):null;
-    if(name&&name>after&&c.value?.record){
-      if(items.length<limit)items.push(view(c.value.record));else more=true;
+    if(name&&name>after&&name.toLowerCase().includes(query.toLowerCase())&&c.value?.record){
+      const item=view(c.value.record);
+      const held=Boolean(item.hold&&item.hold!=='NONE');
+      const active=Boolean(item.active),desired=Boolean(item.desired);
+      const matches=status==='ALL'||status==='NEEDS_ACTION'&&(held||desired)||
+        status==='RUNNING'&&false||
+        status==='WAITING'&&!held&&(active||desired)||
+        status==='COMPLETED'&&!held&&!active&&!desired;
+      if(matches){
+        if(items.length<limit)items.push(item);else more=true;
+      }
     }
     c.continue();
    };
