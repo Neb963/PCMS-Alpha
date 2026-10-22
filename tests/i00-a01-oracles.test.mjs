@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {census} from '../scripts/a01-readonly-census.mjs';
+import {inspectUpgradeFixture} from '../scripts/a01-fixture-preflight.mjs';
 import {createGitCredentialResolver} from '../src/runtime/git-credential.mjs';
 import {coalesceCreation} from '../src/runtime/creation-intake.mjs';
 import {transition} from '../src/runtime/journal.mjs';
@@ -88,4 +89,42 @@ test('A01 journal denies forged ACK and repeat possible effect; recovery remains
   const recovered=transition(entity,operation,{type:'RECOVER',
     targetId:entity.id,operationId:operation.operationId,expectedRevision:2});
   assert.equal(recovered.ok,true);assert.equal(recovered.operation.status,'HELD_UNCERTAIN');
+});
+
+test('A01 upgrade preflight never writes identity/source, reconciles uncertain effects',()=>{
+  const old=structuredClone(fixture.fixtures.find(x=>x.id==='old-public-identity'));
+  const before=JSON.stringify(old);
+  const check=inspectUpgradeFixture(old);
+  assert.equal(check.ok,true);
+  assert.equal(check.migrationPerformed,false);
+  assert.equal(check.dispatchedEffects,0);
+  assert.equal(check.status,'HELD_FOR_INSPECTION');
+  assert.ok(check.holds.includes('POSSIBLE_EFFECT_READBACK_REQUIRED'));
+  assert.ok(check.holds.includes('LEGACY_PUBLIC_ID_RECONCILIATION_REQUIRED'));
+  assert.equal(JSON.stringify(old),before);
+  const good=inspectUpgradeFixture(fixture.fixtures[0]);
+  assert.equal(good.status,'READ_ONLY_CANDIDATE');
+  assert.equal(good.migrationPerformed,false);
+});
+
+test('A01 adverse upgrade fixtures deny corrupt source, duplicate route, token-bearing export',()=>{
+  const state=structuredClone(fixture.fixtures.find(x=>x.id==='restore-interrupted'));
+  const original=JSON.stringify(state);
+  const inspected=inspectUpgradeFixture(state);
+  assert.equal(inspected.sourceDigests.length,1);
+  assert.equal(inspected.sourceDigests[0].size,14);
+  assert.match(inspected.sourceDigests[0].sha256,/^[a-f0-9]{64}$/);
+  state.sourceBlobs[0].contentBase64='%%%';
+  state.accounts=[{accountId:'fixture_account_0001',personaUid:'fixture_persona_0001',
+     routeId:'fixture_route_0001'},
+    {accountId:'fixture_account_0002',personaUid:'fixture_persona_0001',
+     routeId:'fixture_route_0001'}];
+  state.githubToken='fixture-must-never-be-exported';
+  const denied=inspectUpgradeFixture(state);
+  assert.equal(denied.status,'HELD_FOR_INSPECTION');
+  for(const code of ['SOURCE_BLOB_INVALID','PERSONA_NOT_UNIQUE',
+      'PROTECTED_ROUTE_NOT_UNIQUE','BACKUP_CREDENTIAL_INCLUDED'])
+    assert.ok(denied.holds.includes(code),'missing hold '+code);
+  assert.notEqual(JSON.stringify(state),original);
+  assert.equal(denied.migrationPerformed,false);
 });
