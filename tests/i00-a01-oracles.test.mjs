@@ -43,6 +43,10 @@ test('A01 source census is deterministic, readonly; unknown live state not misre
     assert.ok(before.classes[k]>0,'missing migration-critical class '+k);
   const hostPaths=before.entries.filter(x=>x.signals.pcmsNativeHost).map(x=>x.path);
   assert.ok(hostPaths.some(x=>x.includes('git-credential.mjs')));
+  assert.ok(before.entries.some(x=>x.symbols?.nativeHostIds?.includes('local.pcms.backup_v2')),
+    'digit-bearing native IDs must not be truncated in the migration census');
+  assert.ok(!before.entries.some(x=>x.symbols?.nativeHostIds?.includes('local.pcms.backup_v')),
+    'census must not report a truncated false host identity');
   assert.ok(before.unknown.includes('operator Firefox profiles and cookies'));
   assert.ok(before.entries.every(x=>/^[a-f0-9]{64}$/.test(x.sha256)));
   console.log('A01_SOURCE_CENSUS_SUMMARY',JSON.stringify({filesScanned:before.filesScanned,
