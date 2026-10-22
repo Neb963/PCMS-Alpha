@@ -74,6 +74,22 @@ test('R4 AC-09: multiple missing folders preserve a null-owner review across rep
  assert.equal(chooseFolderIdentity(unproven,{newSlug:'new-three',
    choice:'CREATE_SEPARATE',expectedTreeOid:H('c')}).ok,false);
 });
+test('R4 AC-09: delayed new folder is not silently admitted after earlier missing scan',()=>{
+ const first=snapshot(H('1'),[g('old-generator',H('a')),g('unrelated',H('d'))]);
+ const gone=snapshot(H('2'),[g('unrelated',H('d'))]);
+ const later=snapshot(H('3'),[g('unrelated',H('d')),g('new-generator',H('c'))]);
+ assert.deepEqual(planMainFolderChanges(first,gone).missing,['old-generator']);
+ const noHistory=planMainFolderChanges(gone,later);
+ assert.deepEqual(noHistory.held,[],'regression witness: previous snapshot no longer has old slug');
+ const planned=planMainFolderChanges(gone,later,[],['old-generator']);
+ assert.deepEqual(planned.held,['new-generator']);
+ assert.equal(planned.created[0].oldSlug,'old-generator');
+ assert.equal(planned.created[0].reason,'IDENTITY_AMBIGUOUS');
+ assert.equal(planMainFolderChanges(later,later,planned.review,['old-generator']).created.length,0);
+ assert.deepEqual(planMainFolderChanges(later,later,planned.review,['old-generator']).held,['new-generator']);
+ const bad=planMainFolderChanges(gone,later,[],['NOT SAFE']);
+ assert.equal(bad.code,'HISTORICAL_MISSING_INVALID');
+});
 test('R4 identity port is trusted, revision-fenced, and has zero provider/Git effects',async()=>{
  const records=planMainFolderChanges(a,b).review;
  const state={[REVIEW_KEY]:records,pcmsS03CatalogLastComplete:b,
