@@ -76,10 +76,25 @@ def main():
             assert observation.get('manifest')==mod.ID,observation
             assert observation.get('shadow'),('CLEAN_PRIMARY_NOT_MOUNTED',observation)
             assert observation.get('storageReady') and observation.get('alarmsReady'),observation
+            routes={}
+            for route in ('overview','generators','work-queue','accounts','refresher','settings'):
+                mod.execute(session,"""const route=%s;
+                  const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                  const button=sh?.querySelector('[data-nav="'+route+'"]');
+                  if(!button)throw Error('A01_MISSING_PRIMARY_NAV_'+route);
+                  button.click();return true;"""%json.dumps(route))
+                selected=None
+                for _ in range(40):
+                    selected=mod.execute(session,"return document.getElementById('pcms-faithful-host')?.shadowRoot?.querySelector('#page')?.dataset.view")
+                    if selected==route:break
+                    time.sleep(.1)
+                if selected!=route:raise AssertionError(('PRIMARY_ROUTE_NOT_RENDERED',route,selected))
+                routes[route]='SHOWN_READONLY_NO_EFFECT'
             observed={'schema':'pcms.a01.clean-installed-firefox/1',
               'scope':'DISPOSABLE_CLEAN_HOME','xpiInstalledPersistently':True,
               'processExitAndReopenOSObserved':True,'geckoId':mod.ID,
               'primaryShadowMounted':observation['shadow'],
+              'primaryRouteReadOnlyInspections':routes,
               'legacyControllerPresent':observation['legacy'],
               'browserStorageAPI':observation['storageReady'],
               'browserAlarmsAPI':observation['alarmsReady'],
