@@ -26,14 +26,6 @@ const KINDS=Object.freeze({
   externalEffect:/\b(?:sendNativeMessage|downloads\.download|fetch\s*\(|tabs\.create)\b/g
 });
 const hex=b=>createHash('sha256').update(b).digest('hex');
-async function walk(dir,output=[]){
-  for(const e of (await readdir(dir,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))){
-    const rel=path.posix.join(dir,e.name),full=path.join(ROOT,rel);
-    if(e.isDirectory())await walk(rel,output);
-    else if(e.isFile()&&/\.(?:mjs|js|json|py|sh|html)$/.test(e.name))output.push(rel);
-  }
-  return output;
-}
 export async function census({root=ROOT,scope=SCAN}={}){
   // No credential VALUES are read from browser storage; no raw matching lines
   // are exported. Code paths + symbol classes only.
@@ -57,7 +49,18 @@ export async function census({root=ROOT,scope=SCAN}={}){
       }
       if(total)signals[kind]={count:total,lines:lineNumbers};
     }
-    if(Object.keys(signals).length)entries.push({path:rel,sha256:hex(bytes),signals});
+    // Literal schema identifiers only. This is a source-derived migration
+    // index, not a claim that any user profile contains the relevant stores.
+    const namesFor=(regex,group=1)=>[...new Set(
+      [...code.matchAll(regex)].map(x=>x[group]).filter(x=>
+        typeof x==='string'&&/^[A-Za-z0-9_.:-]{1,80}$/.test(x)))].sort();
+    const symbols={
+      objectStores:namesFor(/\.createObjectStore\(\s*['"]([^'"]+)['"]/g),
+      databaseNames:namesFor(/\b(?:DB_NAME|DB_VERSION|SCHEMA)\s*=\s*['"]([^'"]+)['"]/g),
+      staticStorageKeys:namesFor(/\.storage\.(?:local|sync|session)\.(?:get|remove)\s*\(\s*['"]([^'"]+)['"]/g),
+      nativeHostIds:namesFor(/\b(local\.pcms\.[a-z_]+|com\.persona\.mullvad_router)\b/g)
+    };
+    if(Object.keys(signals).length)entries.push({path:rel,sha256:hex(bytes),signals,symbols});
   }
   const classes=Object.fromEntries(Object.keys(KINDS).map(k=>
     [k,entries.filter(e=>e.signals[k]).length]));
