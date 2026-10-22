@@ -1762,7 +1762,7 @@ function renderConnectedMain(section,snapshot){
    'The committed main prompt remains authoritative. Local drafts cannot change it without an explicit conditional Git commit and independent readback.'));
   const draft=el('textarea','form-input');draft.rows=10;draft.value=snapshot.prompt.text;
   draft.setAttribute('aria-label','Canonical Chat 1 prompt draft');
-  const notes=el('p','setting-note','GitHub source loaded. No change submitted.');
+  const notes=el('p','setting-note','GitHub source loaded. No remote write was submitted. Saving a draft only changes local PCMS settings.');
   notes.setAttribute('role','status');
   const controls=el('div','form-foot');
   let base={repositoryId:snapshot.repositoryId,head:snapshot.head,oid:snapshot.prompt.oid},
