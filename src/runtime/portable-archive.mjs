@@ -107,7 +107,7 @@ export async function* framedLines(source){
   requireValid(lineCount>=2,'PORTABLE_TRUNCATED');
 }
 export async function readPortableArchive(source,{onRecord,collect=true,
-  auditSource=preflightSourceRecovery}={}){
+  auditSource=preflightSourceRecovery,auditStaged=null}={}){
   // onRecord MUST only write to a disposable staging area. The footer and
   // source closure are verified at the end; never mutate live state here.
   requireValid(typeof collect==='boolean','PORTABLE_COLLECT_INVALID');
@@ -174,13 +174,21 @@ export async function readPortableArchive(source,{onRecord,collect=true,
     }
   }
   requireValid(footer&&donor,'PORTABLE_FOOTER_MISSING');
+  let sourceVerified=false;
   if(collect){
     validatePcmsSnapshot(canonical);
     const sourceAudit=await auditSource(canonical);
     requireValid(json(sourceAudit)===json(header.sourceAudit),'PORTABLE_SOURCE_CLOSURE');
+    sourceVerified=true;
+  }else if(auditStaged){
+    requireValid(typeof auditStaged==='function','PORTABLE_AUDIT_INVALID');
+    const sourceAudit=await auditStaged();
+    requireValid(json(sourceAudit)===json(header.sourceAudit),'PORTABLE_SOURCE_CLOSURE');
+    sourceVerified=true;
   }
   return {format:PORTABLE_FORMAT,version:PORTABLE_VERSION,
     archiveSourceAudit:header.sourceAudit,canonical,donor,
-    rows,frames,chain,integrity:'FRAME_AND_SOURCE_VERIFIED',
+    rows,frames,chain,integrity:sourceVerified?
+      'FRAME_AND_SOURCE_VERIFIED':'FRAME_VERIFIED_SOURCE_NOT_AUDITED',
     diskReadback:false};
 }
