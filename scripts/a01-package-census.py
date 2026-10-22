@@ -15,7 +15,7 @@ import zipfile
 
 DONOR_HOST='com.persona.mullvad_router'
 GID='persona-route-manager@local'
-FORBIDDEN=re.compile(rb'local[.]pcms[.][a-z_]+')
+FORBIDDEN=re.compile(rb'local[.]pcms[.][a-z0-9_]+')
 def sha(raw):return hashlib.sha256(raw).hexdigest()
 
 def inspect(xpi_bytes,tar_bytes=None):
