@@ -1262,6 +1262,62 @@ async function openReleaseReview(slug){
 }
 // An operation inspector is a read-only projection. A possible dispatched
 // effect cannot be retried from this drawer, even after browser restart.
+function openReadyCandidate(candidate){
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
+ panel.setAttribute('aria-label','READY candidate '+candidate.slug);
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const head=el('div','drawer-head');head.append(el('h2','drawer-title','READY · '+candidate.slug),b('Close',close));
+ const body=el('div','drawer-body'),status=el('p','setting-note',
+   'This is a committed-main declaration, not evidence of a completed generator update.');
+ status.setAttribute('role','status');
+ const facts=el('dl');
+ for(const [label,value] of [['Revision',String(candidate.revision)],
+   ['Current source',candidate.active?.inputFingerprint?.slice(0,16)||'Unverified'],
+   ['Pending source',candidate.desired?.inputFingerprint?.slice(0,16)||'None'],
+   ['Safety hold',candidate.hold||'No local hold recorded']]){
+  const row=el('div','kv');row.append(el('dt','',label),el('dd','',value));facts.append(row);
+ }
+ const actions=el('div','form-foot');
+ async function act(type){
+  if(type!=='ASSESS_READY'&&!window.confirm(
+   type==='PREPARE_LOCAL'?
+    'Prepare a local, revision-bound READY stage after verifying source, protected owner, route and current editor? This does not publish or save the remote generator.':
+    type==='PAUSE_READY'?
+    'Pause automatic development for this READY generator? In-flight uncertain provider writes remain held.':
+    'Resume guarded READY eligibility? No remote effect occurs from this acknowledgment.'))return;
+  [...actions.querySelectorAll('button')].forEach(x=>x.disabled=true);
+  status.textContent=type==='ASSESS_READY'?
+    'Checking current pinned main, owner, source, Persona and editor admission…':
+    'Sending a revision-fenced guarded request. No provider outcome inferred.';
+  try{
+   const out=await readPort('pcms-s05-ready-operator',type,{
+     slug:candidate.slug,expectedRevision:candidate.revision},95000);
+   const friendly={
+    S05_PUBLIC_SLEEP_AND_UNLIST_REQUIRED:'This public generator must first complete its protected sleep/unlisting workflow.',
+    S05_NONEMPTY_TARGET_REQUIRES_RECOVERABLE_PREDECESSOR:'A recoverable previous source is required before this update.',
+    S05_LOCAL_STAGE_PINNED:'A new exact local development stage is prepared. AI execution is separate.',
+    S05_EDITOR_AND_NATIVE_ADMISSION_REQUIRED:'The editor and native AI prerequisites require separate verification.',
+    READY_OPERATOR_PAUSED:'This generator is paused.',
+    READY_REVOKED_NOT_READY:'The latest committed main is no longer READY.',
+    STALE_REVISION:'The candidate changed. Reload the queue before acting again.'
+   };
+   status.textContent=friendly[out?.code]||(out?.ok?
+      'Assessment or local-stage request recorded. Its real provider effects remain separately guarded.':
+      'This operation cannot proceed until the current owner, source and protected editor are verified.');
+  }catch{status.textContent='Outcome unavailable. Refresh the READY candidate before another action.'}
+  await loadQueue(true);
+ }
+ const assess=b('Assess prerequisites',()=>void act('ASSESS_READY'),'btn small');
+ const prepare=b('Prepare local development',()=>void act('PREPARE_LOCAL'),'btn primary');
+ const pause=b(candidate.hold==='OPERATOR_PAUSED'?'Resume READY work':'Pause READY work',
+  ()=>void act(candidate.hold==='OPERATOR_PAUSED'?'RESUME_READY':'PAUSE_READY'),'btn small');
+ actions.append(assess,prepare,pause);body.append(facts,status,actions);panel.append(head,body);
+ overlay.append(panel);root.append(overlay);
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ assess.focus();
+}
 function humanAiStatus(job){
  const names={
   PENDING_NATIVE_SESSION:'Ready for guarded AI execution',
