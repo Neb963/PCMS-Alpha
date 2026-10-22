@@ -1038,7 +1038,7 @@ function displayQueue(){
   for(const job of q.aiJobs||[]){
    const currentState=job.state||'NOT_VERIFIED';
    const complete=currentState==='TESTS_VERIFIED'||job.slotReleased===true;
-   const needs=['HELD_RECONCILE','KNOWN_FAILURE','HELD_NO_PROGRESS','TESTS_UNVERIFIED'].includes(currentState);
+   const needs=['HELD_RECONCILE','KNOWN_FAILURE','HELD_NO_PROGRESS','TESTS_UNVERIFIED','PENDING_NATIVE_SESSION'].includes(currentState);
    const running=job.nativeState==='RUNNING_OBSERVED';
    const match=q.filter==='All'||
      (q.filter==='Needs action'&&needs)||
