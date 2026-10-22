@@ -57,9 +57,12 @@ export function validateCatalogMessage(api,sender,message){
       typeof p.repositoryId!=='string'||!/^[1-9][0-9]{0,19}$/.test(p.repositoryId))
       return fail('INVALID_PARAMS');
   } else if(message.type==='LIST_READY'){
-    if(Object.keys(p).some(k=>!['after','limit'].includes(k))||
+    if(Object.keys(p).some(k=>!['after','limit','query','status'].includes(k))||
       (p.after!==undefined&&(typeof p.after!=='string'||p.after.length>100))||
-      (p.limit!==undefined&&(!Number.isInteger(p.limit)||p.limit<1||p.limit>200)))
+      (p.limit!==undefined&&(!Number.isInteger(p.limit)||p.limit<1||p.limit>200))||
+       (p.query!==undefined&&(typeof p.query!=='string'||p.query.length>100))||
+       (p.status!==undefined&&
+         !['ALL','NEEDS_ACTION','RUNNING','WAITING','COMPLETED'].includes(p.status)))
       return fail('INVALID_PARAMS');
   } else if(message.type==='GET_PROMPT_DRAFT'){ 
     if(Object.keys(p).length)return fail('INVALID_PARAMS');
