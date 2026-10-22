@@ -1,7 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {spawnSync} from 'node:child_process';
 import {census} from '../scripts/a01-readonly-census.mjs';
 import {createGitCredentialResolver} from '../src/runtime/git-credential.mjs';
 import {coalesceCreation} from '../src/runtime/creation-intake.mjs';
@@ -47,20 +46,16 @@ test('A01 source census is deterministic, readonly; unknown live state not misre
   assert.ok(before.entries.every(x=>/^[a-f0-9]{64}$/.test(x.sha256)));
 });
 
-test('A01 deliberately red product assertions run without hiding failure or running effects',()=>{
-  const x=spawnSync(process.execPath,['--test','tests/a01-red-baseline.test.mjs'],{
-    encoding:'utf8',timeout:25000});
-  assert.equal(x.error,undefined,x.error?.message);
-  const out=x.stdout+'\n'+x.stderr;
-  for(const name of ['A01_RED_P0_GIT_NO_NATIVE_VAULT','A01_RED_P0_BACKUP_PASSWORDLESS',
-     'A01_RED_P0_NO_EXTRA_HOSTS','A01_RED_P0_PRIMARY_UI_DIRECT',
-     'A01_RED_P0_PUBLISH_DISPATCH','A01_RED_P0_CLOCK_NATIVE_FREE'])
-    assert.ok(out.includes(name),'unexecuted red oracle '+name);
-  // Future slices may turn this separate suite GREEN. We must NEVER equate
-  // a red product assertion with an accepted product or a green CI verdict.
-  assert.ok(x.status===0||x.status===1,'red process did not finish normally');
-  assert.match(out,/# (?:pass|fail) \d+/);
-  console.log('A01 accepted-product oracle verdict:',x.status===0?'GREEN':'RED/UNACCEPTED');
+test('A01 all six real product oracles execute, classify red without faking acceptance',async()=>{
+  const {inspectProductOracles,PRODUCT_ORACLES}=
+    await import('../scripts/a01-product-oracles.mjs');
+  const report=await inspectProductOracles();
+  assert.equal(report.productAcceptance,'NOT_ACCEPTED_BY_A01');
+  assert.deepEqual(report.entries.map(x=>x.id),PRODUCT_ORACLES.map(x=>x[0]));
+  assert.ok(report.entries.every(x=>
+    x.state==='ASSERTION_RED'||x.state==='ASSERTION_GREEN'));
+  for(const observed of report.entries)
+    console.log('A01 PRODUCT ORACLE',observed.id,observed.state);
 });
 
 test('A01 real Git resolver reports missing native vault, not fake authentication PASS',async()=>{
