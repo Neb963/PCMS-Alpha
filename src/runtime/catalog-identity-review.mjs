@@ -45,7 +45,7 @@ export function planMainFolderChanges(prior,current,records=[],historicalMissing
    const oldSlug=possible||null;
    if(!relevant.some(r=>r.newSlug===slug)){
     created.push({repositoryId:current.repositoryId,oldSlug,newSlug:slug,
-      oldTreeOid:oldSlug?old.get(oldSlug).folderTreeOid:null,
+      oldTreeOid:oldSlug?old.get(oldSlug)?.folderTreeOid||null:null,
       newTreeOid:candidate.folderTreeOid,markerOid:candidate.markerOid,
       evidenceHead:current.head,state:'REVIEW_REQUIRED',revision:1,
       reason:exact.length===1?'EXACT_FOLDER_TREE_MATCH':'IDENTITY_AMBIGUOUS'});
