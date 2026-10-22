@@ -4993,6 +4993,13 @@ def main():
                 close(after)
                 after=None
                 s01_add_account_profile(browser,archive,pathlib.Path(folder))
+                # A01: independent CLEAN-HOME installed-XPI and exact-byte
+                # package census. No extra PCMS host is installed; no real
+                # provider/private Git action or operator profile is touched.
+                subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name(
+                    'a01-package-census.py')),str(archive)],check=True,timeout=45)
+                subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name(
+                    'a01-clean-firefox.py')),str(archive)],check=True,timeout=180)
             finally:
                 if after: close(after)
         finally:
