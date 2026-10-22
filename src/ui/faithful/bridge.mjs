@@ -65,7 +65,7 @@ function friendlyConnectionIssue(code){
 }
 const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',total:0,items:[]},
  ref:{offset:0,limit:25,query:'',phase:'ALL',snapshot:null,items:[],total:0},
- acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,readyItems:[],readyCursor:'',nextReady:null,readyMore:false,epoch:0},
+ acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,readyItems:[],readyCursor:'',nextReady:null,readyMore:false,aiUnavailable:false,readyUnavailable:false,epoch:0},
  settings:'connections',settingsStatic:null,lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},nativeOpen:false,
  renderEpoch:0,version:'0.1.7',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
@@ -886,9 +886,9 @@ async function loadQueue(reset=false){
   if(state.route!=='work-queue'||q.epoch!==epoch)return;
   q.operations=ops.items||[];q.incidents=notices.items||[];
   q.nextOps=ops.more?ops.next:null;q.nextNotices=notices.more?notices.next:null;
-  q.aiJobs=ai?.ok?(ai.jobs||[]):[];q.aiMore=ai?.ok&&ai.more===true;
+  q.aiUnavailable=ai?.ok!==true;q.aiJobs=ai?.ok?(ai.jobs||[]):[];q.aiMore=ai?.ok&&ai.more===true;
   q.nextAi=q.aiMore?ai.nextCursor:null;
-  q.readyItems=ready?.ok?(ready.items||[]):[];q.readyMore=ready?.ok&&ready.more===true;
+  q.readyUnavailable=ready?.ok!==true;q.readyItems=ready?.ok?(ready.items||[]):[];q.readyMore=ready?.ok&&ready.more===true;
   q.nextReady=q.readyMore?ready.nextCursor:null;
   q.more=Boolean(ops.more||notices.more||q.aiMore||q.readyMore);q.summary={...summary,attention:noticeTotals};
   q.releaseItems=releases?.ok?(releases.items||[]):[];
@@ -907,6 +907,10 @@ function displayQueue(){
  if(q.loading)renderEmpty(holder,'Reading recorded operations and incidents…');
  else if(q.error)renderEmpty(holder,'The local work queue is unavailable. No operation result has been assumed.');
  else{
+  if(q.aiUnavailable)
+   holder.append(el('p','setting-note','AI development records could not be read. Their absence here does not mean there is no work.'));
+  if(q.readyUnavailable)
+   holder.append(el('p','setting-note','READY generator records could not be read. Check GitHub connection and local journal availability.'));
   if((q.filter==='Needs action'||q.filter==='All')&&!q.query)
    for(const review of q.reviews.filter(r=>['REVIEW_REQUIRED','RENAME_EXISTING_REQUESTED','REMOTE_RENAMED_LINK_PENDING'].includes(r.state)||r.stale)){
     const row=el('div','queue-item'),mark=el('span','row-mark warn');mark.append(icon('alert'));
@@ -1131,7 +1135,8 @@ function displayQueue(){
    row.append(marker,detail,action);holder.append(row);
   }
   if(!holder.children.length)
-    renderEmpty(holder,'No matching recorded operations or active incidents. This is not proof of remote health.');
+    renderEmpty(holder,q.more?'No matches on this page. More recorded work may be available on subsequent pages.':
+      'No matching verified local work records. This is not proof of remote health.');
  }
  const counts=q.summary?.states||{},attention=q.summary?.attention?.counts||{};
  const needs=(counts.HELD_UNCERTAIN||0)+(counts.REJECTED||0)+(counts.DISPATCH_POSSIBLE||0)+
