@@ -44,9 +44,11 @@ function setup({grant=true,collision=false,ack=false}={}){
     cookieStoreId:'firefox-container'}),
   observeReadOnly:async(uid,edit,slug)=>{
    reads++;
-   return {ok:true,principalFingerprint:FP('d'),original:{
+   return {ok:true,source:'DONOR_GUARDED_ORIGINAL_READBACK',
+    slug,accountId,personaUid,principalFingerprint:FP('d'),
     ownerResult:'IS_OWNER',visibility:'PUBLIC',remotePublicId:remoteId,
-    pjs:changedSource?'changed':'const a = 1',html:'<h1>Original</h1>',assets:[]}};
+    observedAt:100,pjs:changedSource?'changed':'const a = 1',
+    html:'<h1>Original</h1>',assets:[]};
   },
   runSupplyStep:async(uid,request)=>{
    assert.equal(uid,personaUid);
