@@ -6,6 +6,8 @@
 **Authority:** Independent product-behavior acceptance oracle for `PCMS-Alpha-CLIENT-SPEC-v1.0.0.md`  
 **Status:** **ACCEPTED TEST EXPECTATIONS; NO CLAIM OF TEST EXECUTION OR PRODUCT PASS**
 
+**Latest binding client amendment (2026-10-22):** [`PCMS-Alpha-CLIENT-AMENDMENT-v1.0.1.md`](PCMS-Alpha-CLIENT-AMENDMENT-v1.0.1.md) supersedes the contradictory encryption/password/native-host/clock-witness passages below. In particular, AC-17 now requires **strictly passwordless, unencrypted, browser-native source-complete backups**; AC-14/15 use persisted browser-native clock reconstruction with conservative active accounting; Git uses browser-local credentials; geckodriver and PCMS native hosts are not installed product dependencies. The historical rows below are retained for traceability, not authority where contradicted.
+
 This document carries **AC-01–AC-18** as accepted journeys and **T-01–T-10** as derived adversarial test traces. It introduces **no new user policy**. Historical acceptance evidence only counts if its exact product behavior, build and evidence tier match this contract. The actual implementation may be `NOT_RUN`, `BLOCKED`, `FAIL`, or `INCONCLUSIVE` until independently verified. No Perchance website or live operations were used during this consolidation.
 
 ## 1. End-to-end user journeys
