@@ -1,6 +1,6 @@
 // A02 portable plaintext framing. Integrity detects partial/corrupt archives;
 // it is not encryption or an authenticity signature. No OS native dependency.
-import {DB_STORES,validatePcmsSnapshot,preflightSourceRecovery} from './backup-core.mjs';
+import {DB_STORES,serializeClone,validatePcmsSnapshot,preflightSourceRecovery} from './backup-core.mjs';
 import {validateBackupPayload,validateExternalArtifactHashes} from '../lib/backup-package.js';
 
 export const PORTABLE_FORMAT='pcms-alpha-portable';
@@ -53,7 +53,7 @@ export async function encodePortableArchive({pcms,donor,appVersion='',createdAt=
   let total=encoder.encode(body[0]).length,frames=0,chain=await hash(body[0]),rows=0;
   async function append(kind,store,record,serialized){
     // Split serialized source without re-encoding the entire archive.
-    const count=Math.max(1,Math.ceil(serialized.length/MAX_FRAME_CHARS));
+    requireValid(serialized.length<=128*1024*1024,'PORTABLE_RECORD_TOO_LARGE');\n    const count=Math.max(1,Math.ceil(serialized.length/MAX_FRAME_CHARS));
     for(let part=0;part<count;part++){
       const fragment=await encodeFrame(frames++,kind,store,record,part,count,
         serialized.slice(part*MAX_FRAME_CHARS,(part+1)*MAX_FRAME_CHARS),chain);
@@ -65,7 +65,7 @@ export async function encodePortableArchive({pcms,donor,appVersion='',createdAt=
   for(const store of DB_STORES){
     const records=pcms.stores[store];
     for(let i=0;i<records.length;i++){
-      await append('pcms',store,i,json(records[i]));
+      await append('pcms',store,i,json({key:serializeClone(records[i].key),\n        value:serializeClone(records[i].value)}));
       rows++;
     }
   }
@@ -132,12 +132,12 @@ export async function readPortableArchive(source,{onRecord,collect=true,
         'PORTABLE_FOOTER_MISMATCH');
       footer=value;continue;
     }
-    const {i,kind,store,record,piece,pieces,sha256}=value||{};
+    const {i,kind,store,record,piece,pieces,sha256}=value||{};\n    requireValid(donor===null,'PORTABLE_RECORD_ORDER');
     requireValid(i===frames&&['pcms','donor'].includes(kind)&&
       (kind==='donor'?store===null&&record===0:DB_STORES.includes(store))&&
       Number.isSafeInteger(piece)&&piece>=0&&
       Number.isSafeInteger(pieces)&&pieces>0&&pieces<=100000&&
-      piece<pieces&&typeof value.value==='string'&&
+      piece<pieces&&Number.isSafeInteger(record)&&record>=0&&\n      typeof value.value==='string'&&
       value.value.length<=MAX_FRAME_CHARS&&
       /^[a-f0-9]{64}$/.test(sha256||''),'PORTABLE_FRAME_INVALID');
     const body={i,kind,store,record,piece,pieces,value:value.value};
@@ -155,7 +155,7 @@ export async function readPortableArchive(source,{onRecord,collect=true,
     }
     requireValid(pending.kind===kind&&pending.store===store&&pending.record===record&&
       pending.pieces===pieces&&pending.next===piece,'PORTABLE_RECORD_FRAGMENT');
-    pending.parts.push(value.value);pending.next++;
+    pending.parts.push(value.value);pending.next++;\n    requireValid(pending.next*MAX_FRAME_CHARS<=128*1024*1024+MAX_FRAME_CHARS,\n      'PORTABLE_RECORD_TOO_LARGE');
     if(pending.next===pending.pieces){
       let item;
       try{item=JSON.parse(pending.parts.join(''));}catch{throw Error('PORTABLE_RECORD_JSON');}
