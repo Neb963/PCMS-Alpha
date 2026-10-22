@@ -49,11 +49,35 @@ export function createPortableRunner(api,{
   const db=()=>dbPromise ||= open().catch(e=>{dbPromise=null;throw e});
   const sentinel=createRestoreSentinel(api.storage.local);
   const store=async()=>createAutoStore(await db(),clock);
+  async function recordManual(row){
+    const database=await db();
+    return new Promise((resolve,reject)=>{
+      let tx;try{tx=database.transaction(['meta'],'readwrite');}
+      catch{return reject(Error('BACKUP_IDB_UNAVAILABLE'));}
+      const s=tx.objectStore('meta');
+      tx.oncomplete=()=>resolve();
+      tx.onabort=()=>reject(Error('BACKUP_MANUAL_RECEIPT_FAILED'));
+      s.put({key:'backup:manual-active',...row,updatedAt:clock()});
+    });
+  }
+  async function readManual(){
+    const database=await db();
+    return new Promise((resolve,reject)=>{
+      let tx;try{tx=database.transaction(['meta'],'readonly');}
+      catch{return reject(Error('BACKUP_IDB_UNAVAILABLE'));}
+      tx.objectStore('meta').get('backup:manual-active').onsuccess=e=>
+        resolve(e.target.result||null);
+      tx.onabort=()=>reject(Error('BACKUP_IDB_UNAVAILABLE'));
+    });
+  }
   async function status(){
     const s=await (await store()).read();
     if(!s.ok)return s;
+    let manual=null;try{manual=await readManual();}catch{}
     return {...safeStatus(s.state),format:'PORTABLE',passwordRequired:false,
-      guarantee:'SOURCE_COMPLETE_PLAIN_BROWSER_ARCHIVE'};
+      guarantee:'SOURCE_COMPLETE_PLAIN_BROWSER_ARCHIVE',
+      manual:manual?{status:manual.status,code:manual.code||manual.status,
+        tier:manual.tier||0,bytes:manual.bytes||0,runId:manual.runId}:null};
   }
   async function reconcile(s){
     const read=await s.read();
@@ -149,23 +173,42 @@ export function createPortableRunner(api,{
   async function manual(){
     if(manualTask||pending)return fail('BACKUP_INFLIGHT');
     manualTask=(async()=>{
-      let url=null;
+      let url=null,runId=null,possible=false,receipt=null;
       try{
         if((await sentinel.inspect()).held)return fail('BACKUP_RESTORE_HOLD');
+        runId='manual_'+nextId();
+        await recordManual({runId,status:'PREPARING',tier:0,
+          startedAt:clock(),code:'PREPARING'});
         const archive=await capture(api,await db(),sentinel);
         const fileHash=await sha(archive.blob);
-        const runId='manual_'+nextId();
-        const dispatched=await dispatch(api,archive,{runId,manual:true});
-        url=dispatched.objectUrl;
-        // Downloads metadata is not independent disk-byte recovery proof.
-        const proof=await awaitManual(api.downloads,dispatched.downloadId,
-          archive.bytes);
-        if(!proof)return fail('DOWNLOAD_OUTCOME_UNKNOWN');
+        await recordManual({runId,status:'INTERNAL_VERIFIED',tier:1,
+          sha256:fileHash,bytes:archive.bytes,startedAt:clock()});
+        if((await sentinel.inspect()).held)throw Error('BACKUP_RESTORE_HOLD');
+        // Persist possible-download intent before irreversible browser dispatch.
+        await recordManual({runId,status:'DISPATCH_POSSIBLE',tier:1,
+          sha256:fileHash,bytes:archive.bytes,startedAt:clock()});
+        possible=true;
+        receipt=await dispatch(api,archive,{runId,manual:true});
+        url=receipt.objectUrl;
+        await recordManual({runId,status:'DOWNLOAD_STARTED',tier:1,
+          sha256:fileHash,bytes:archive.bytes,downloadId:receipt.downloadId,
+          startedAt:clock()});
+        const proof=await awaitManual(api.downloads,receipt.downloadId,archive.bytes);
+        if(!proof)throw Error('DOWNLOAD_OUTCOME_UNKNOWN');
+        await recordManual({runId,status:'BROWSER_REPORTED_COMPLETE',tier:2,
+          sha256:fileHash,bytes:archive.bytes,downloadId:receipt.downloadId,
+          startedAt:clock(),code:'BROWSER_REPORTED_COMPLETE'});
         return {ok:true,code:'BROWSER_REPORTED_COMPLETE',tier:2,
           sha256:fileHash,bytes:archive.bytes,runId,
-          downloadId:dispatched.downloadId,diskReadback:false};
-      }catch(e){return fail(explain(e));}
-      finally{if(url)URL.revokeObjectURL(url);}
+          downloadId:receipt.downloadId,diskReadback:false};
+      }catch(e){
+        if(runId){
+          const code=possible?'DOWNLOAD_OUTCOME_UNKNOWN':explain(e);
+          try{await recordManual({runId,status:possible?'HELD_UNCERTAIN':'FAILED',
+            tier:0,downloadId:receipt?.downloadId??null,code});}catch{}
+        }
+        return fail(possible?'DOWNLOAD_OUTCOME_UNKNOWN':explain(e));
+      }finally{if(url)URL.revokeObjectURL(url);}
     })();
     try{return await manualTask;}finally{manualTask=null;}
   }
