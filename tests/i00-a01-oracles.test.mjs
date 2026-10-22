@@ -45,6 +45,8 @@ test('A01 source census is deterministic, readonly; unknown live state not misre
   assert.ok(hostPaths.some(x=>x.includes('git-credential.mjs')));
   assert.ok(before.unknown.includes('operator Firefox profiles and cookies'));
   assert.ok(before.entries.every(x=>/^[a-f0-9]{64}$/.test(x.sha256)));
+  console.log('A01_SOURCE_CENSUS_SUMMARY',JSON.stringify({filesScanned:before.filesScanned,
+    filesWithSignals:before.filesWithSignals,classes:before.classes}));
 });
 
 test('A01 all six real product oracles execute, classify red without faking acceptance',async()=>{
