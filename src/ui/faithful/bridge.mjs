@@ -1766,7 +1766,7 @@ function renderConnectedMain(section,snapshot){
   notes.setAttribute('role','status');
   const controls=el('div','form-foot');
   let base={repositoryId:snapshot.repositoryId,head:snapshot.head,oid:snapshot.prompt.oid},
-   revision=0,dirty=false,uncertain=false,loading=false;
+   revision=0,dirty=false,uncertain=false,committed=false,loading=false;
   draft.addEventListener('input',()=>{dirty=true;});
   const save=b('Save local prompt draft',()=>void(async()=>{
    if(loading||!draft.value.trim()||draft.value.length>131072)return;
@@ -1775,14 +1775,14 @@ function renderConnectedMain(section,snapshot){
     const r=await readPort('pcms-s03-catalog','SAVE_PROMPT_DRAFT',{
       repositoryId:base.repositoryId,expectedRevision:revision,
       baseOid:base.oid,text:draft.value},20000);
-    if(r?.ok){revision=r.revision;dirty=false;uncertain=false;
+    if(r?.ok){revision=r.revision;dirty=false;
      notes.textContent='Local prompt draft saved. GitHub main remains unchanged.'}
     else notes.textContent='Draft was not confirmed. Preserve your text and reload the current draft before retrying.';
    }catch{notes.textContent='Draft storage outcome uncertain. Preserve your edits and reload before retrying.'}
    finally{loading=false;save.disabled=false}
   })(),'btn small');
   const commit=b('Commit reviewed prompt to GitHub main',()=>void(async()=>{
-   if(loading||revision<1||dirty||uncertain){notes.textContent='Save and verify the current draft before requesting a GitHub commit.';return}
+   if(loading||revision<1||dirty||uncertain||committed){notes.textContent='Save and verify the current draft, then confirm the latest GitHub main before a new commit.';return}
    if(!window.confirm('Commit this exact saved Chat 1 prompt to the verified GitHub main? PCMS uses a revision-checked nonforced write, independent readback and no blind retry.'))return;
    loading=true;commit.disabled=true;notes.textContent='Checking standing Git permission and exact main revision…';
    try{
@@ -1790,12 +1790,13 @@ function renderConnectedMain(section,snapshot){
       repositoryId:base.repositoryId,expectedRevision:revision,
       expectedHead:base.head},95000);
     uncertain=!r?.ok&&r?.code==='PROMPT_GIT_UNCERTAIN_RECONCILE_REQUIRED';
+    if(r?.ok)committed=true;
     notes.textContent=r?.ok?
       'Committed prompt verified on GitHub main. Re-scan before further source work.':
       uncertain?'Commit outcome uncertain. Use read-only reconciliation; do not retry the write.':
       'Commit held; GitHub source has not been independently verified. Preserve this draft.';
    }catch{uncertain=true;notes.textContent='GitHub commit outcome unknown. Do not resend. Reconcile the exact write first.'}
-   finally{loading=false;commit.disabled=false}
+   finally{loading=false;commit.disabled=committed||uncertain}
   })(),'btn primary');
   const reconcile=b('Reconcile possible Git commit',()=>void(async()=>{
    if(loading)return;
@@ -1803,7 +1804,8 @@ function renderConnectedMain(section,snapshot){
    try{
     const r=await readPort('pcms-s03-catalog','RECONCILE_PROMPT',{
       repositoryId:base.repositoryId},60000);
-    if(r?.ok){uncertain=false;notes.textContent='Prior Git prompt commit independently verified. Read main again before editing.'}
+    if(r?.ok){uncertain=false;committed=true;commit.disabled=true;
+      notes.textContent='Prior Git prompt commit independently verified. Read main again before editing.'}
     else notes.textContent='Git prompt outcome remains unverified. No write was repeated.';
    }catch{notes.textContent='Read-only reconciliation unavailable. Preserve the original draft and uncertainty hold.'}
    finally{loading=false;reconcile.disabled=false}
