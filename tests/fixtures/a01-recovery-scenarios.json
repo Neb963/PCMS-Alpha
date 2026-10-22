@@ -1,0 +1,284 @@
+{
+  "schema": "pcms.a01.scenario-map/1",
+  "authority": "docs/implementation/RECOVERY-PLAN-2026-10-22.md + docs/implementation/RECOVERY-SLICES.json",
+  "caveat": "IDs and owner/AC references are supported by merged recovery plan. Topic labels are working test groupings, NOT original Part 8 scenario descriptions. Original X-01..X-14 prose unavailable in main; no fabricated PASS.",
+  "scenarios": [
+    {
+      "id": "X-01",
+      "owner": [
+        "A03"
+      ],
+      "acceptance": [
+        "AC-06",
+        "AC-07",
+        "AC-08"
+      ],
+      "topic": "Git identity/credential path",
+      "minimumTier": "GIT",
+      "originalPart8Description": "UNAVAILABLE",
+      "status": "NOT_TESTED",
+      "effectAuthority": "NONE_IN_A01"
+    },
+    {
+      "id": "X-02",
+      "owner": [
+        "A04"
+      ],
+      "acceptance": [
+        "AC-01",
+        "AC-03"
+      ],
+      "topic": "Account route and duplicate/uncertain creation",
+      "minimumTier": "L",
+      "originalPart8Description": "UNAVAILABLE",
+      "status": "NOT_TESTED",
+      "effectAuthority": "NONE_IN_A01"
+    },
+    {
+      "id": "X-03",
+      "owner": [
+        "A03"
+      ],
+      "acceptance": [
+        "AC-07",
+        "AC-09"
+      ],
+      "topic": "Complete Git pinned-main inventory",
+      "minimumTier": "GIT",
+      "originalPart8Description": "UNAVAILABLE",
+      "status": "NOT_TESTED",
+      "effectAuthority": "NONE_IN_A01"
+    },
+    {
+      "id": "X-04",
+      "owner": [
+        "A05"
+      ],
+      "acceptance": [
+        "AC-10",
+        "AC-12",
+        "AC-13"
+      ],
+      "topic": "Conditional source approval and publication",
+      "minimumTier": "L",
+      "originalPart8Description": "UNAVAILABLE",
+      "status": "NOT_TESTED",
+      "effectAuthority": "NONE_IN_A01"
+    },
+    {
+      "id": "X-05",
+      "owner": [
+        "A05",
+        "A06"
+      ],
+      "acceptance": [
+        "AC-13",
+        "AC-14"
+      ],
+      "topic": "Source conflict and active Refresher",
+      "minimumTier": "L",
+      "originalPart8Description": "UNAVAILABLE",
+      "status": "NOT_TESTED",
+      "effectAuthority": "NONE_IN_A01"
+    },
+    {
+      "id": "X-06",
+      "owner": [
+        "A06"
+      ],
+      "acceptance": [
+        "AC-14",
+        "AC-15"
+      ],
+      "topic": "Refresher clock and provider observation",
+      "minimumTier": "B",
+      "originalPart8Description": "UNAVAILABLE",
+      "status": "NOT_TESTED",
+      "effectAuthority": "NONE_IN_A01"
+    },
+    {
+      "id": "X-07",
+      "owner": [
+        "A04",
+        "A06"
+      ],
+      "acceptance": [
+        "AC-04",
+        "AC-15"
+      ],
+      "topic": "Background/restart conservative recovery",
+      "minimumTier": "H",
+      "originalPart8Description": "UNAVAILABLE",
+      "status": "NOT_TESTED",
+      "effectAuthority": "NONE_IN_A01"
+    },
+    {
+      "id": "X-08",
+      "owner": [
+        "A02",
+        "A03"
+      ],
+      "acceptance": [
+        "AC-11",
+        "AC-17"
+      ],
+      "topic": "Restore/Git identity and token exclusion",
+      "minimumTier": "B",
+      "originalPart8Description": "UNAVAILABLE",
+      "status": "NOT_TESTED",
+      "effectAuthority": "NONE_IN_A01"
+    },
+    {
+      "id": "X-09",
+      "owner": [
+        "A02"
+      ],
+      "acceptance": [
+        "AC-17"
+      ],
+      "topic": "Source-complete backup and restore",
+      "minimumTier": "H",
+      "originalPart8Description": "UNAVAILABLE",
+      "status": "NOT_TESTED",
+      "effectAuthority": "NONE_IN_A01"
+    },
+    {
+      "id": "X-10",
+      "owner": [
+        "A08"
+      ],
+      "acceptance": [
+        "AC-16",
+        "AC-18"
+      ],
+      "topic": "Host-free packaged distribution",
+      "minimumTier": "B",
+      "originalPart8Description": "UNAVAILABLE",
+      "status": "NOT_TESTED",
+      "effectAuthority": "NONE_IN_A01"
+    },
+    {
+      "id": "X-11",
+      "owner": [
+        "A07",
+        "A08"
+      ],
+      "acceptance": [
+        "AC-16",
+        "AC-18"
+      ],
+      "topic": "Packaged lifecycle and operator controls",
+      "minimumTier": "B",
+      "originalPart8Description": "UNAVAILABLE",
+      "status": "NOT_TESTED",
+      "effectAuthority": "NONE_IN_A01"
+    },
+    {
+      "id": "X-12",
+      "owner": [
+        "A07"
+      ],
+      "acceptance": [
+        "AC-16"
+      ],
+      "topic": "Accessible single primary UI",
+      "minimumTier": "B",
+      "originalPart8Description": "UNAVAILABLE",
+      "status": "NOT_TESTED",
+      "effectAuthority": "NONE_IN_A01"
+    },
+    {
+      "id": "X-13",
+      "owner": [
+        "A02"
+      ],
+      "acceptance": [
+        "AC-17"
+      ],
+      "topic": "Interrupted archive recovery",
+      "minimumTier": "H",
+      "originalPart8Description": "UNAVAILABLE",
+      "status": "NOT_TESTED",
+      "effectAuthority": "NONE_IN_A01"
+    },
+    {
+      "id": "X-14",
+      "owner": [
+        "A07"
+      ],
+      "acceptance": [
+        "AC-18"
+      ],
+      "topic": "Background permissions and wake",
+      "minimumTier": "B",
+      "originalPart8Description": "UNAVAILABLE",
+      "status": "NOT_TESTED",
+      "effectAuthority": "NONE_IN_A01"
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "fresh-empty",
+      "profile": "DISPOSABLE",
+      "schemaVersion": 0,
+      "accounts": [],
+      "sourceBlobs": [],
+      "routes": [],
+      "journals": []
+    },
+    {
+      "id": "old-public-identity",
+      "profile": "DISPOSABLE",
+      "schemaVersion": 1,
+      "accounts": [
+        {
+          "accountId": "fixture_account_0001",
+          "personaUid": "fixture_persona_0001",
+          "routeId": "fixture_route_0001"
+        }
+      ],
+      "generators": [
+        {
+          "id": "public_12345",
+          "slug": "fixture-one",
+          "sourceFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "id": "slug-fixture-two",
+          "slug": "fixture-two",
+          "sourceFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "operations": [
+        {
+          "operationId": "fixture_op_0001",
+          "status": "DISPATCH_POSSIBLE",
+          "slug": "fixture-two"
+        }
+      ]
+    },
+    {
+      "id": "restore-interrupted",
+      "profile": "DISPOSABLE",
+      "schemaVersion": 2,
+      "restore": {
+        "status": "PREPARED",
+        "resumeRequired": true
+      },
+      "sourceBlobs": [
+        {
+          "slug": "fixture-one",
+          "path": "src/main.pjs",
+          "contentBase64": "Zml4dHVyZSBzb3VyY2U="
+        }
+      ],
+      "exitHistory": [
+        {
+          "accountId": "fixture_account_0001",
+          "ip": "198.51.100.8",
+          "observation": "FIXTURE_ONLY"
+        }
+      ]
+    }
+  ]
+}
