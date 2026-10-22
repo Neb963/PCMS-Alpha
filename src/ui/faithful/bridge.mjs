@@ -1034,6 +1034,29 @@ function displayQueue(){
       action.disabled=true;
     row.append(el('span','row-mark', '•'),detail,action);holder.append(row);
    }
+  for(const job of q.aiJobs||[]){
+   const currentState=job.state||'NOT_VERIFIED';
+   const complete=currentState==='TESTS_VERIFIED'||job.slotReleased===true;
+   const needs=['HELD_RECONCILE','KNOWN_FAILURE','HELD_NO_PROGRESS','TESTS_UNVERIFIED'].includes(currentState);
+   const running=job.nativeState==='RUNNING_OBSERVED';
+   const match=q.filter==='All'||
+     (q.filter==='Needs action'&&needs)||
+     (q.filter==='Running'&&running)||
+     (q.filter==='Waiting'&&!needs&&!running&&!complete)||
+     (q.filter==='Completed'&&complete);
+   if(!match||(q.query&&!job.slug.toLowerCase().includes(q.query.toLowerCase())))continue;
+   const row=el('div','queue-item'),info=el('div','row-body');
+   const title=el('div','queue-head');
+   title.append(el('strong','',job.slug),
+     statusPill(humanAiStatus(job),needs?'amber':complete?'green':''));
+   info.append(title,el('p','setting-note',
+    'AI development · '+(job.promptSource==='GIT_MAIN_CHAT1_PINNED'?
+      'GitHub-pinned development instructions':'Local development instructions')+
+    ' · Test evidence: '+(job.evidence?.state==='VERIFIED'?'Verified':
+       'Not independently verified')));
+   const open=b('Manage development',()=>void openAiJob(job.slug),'btn small');
+   row.append(el('span','row-mark'+(needs?' warn':'')),info,open);holder.append(row);
+  }
   for(const n of q.incidents){
    const row=el('div','queue-item');
    const marker=el('span','row-mark warn');marker.append(icon('alert'));
@@ -1100,7 +1123,7 @@ function displayQueue(){
   tab.setAttribute('aria-selected',String(f===q.filter));
  }
  const foot=shadow('.pagination span');if(foot)foot.textContent=q.loading?'Loading recorded work…':
-  q.error?'Local journal unavailable':q.operations.length+q.incidents.length+' records on this page · read-only';
+  q.error?'Local journal unavailable':q.operations.length+q.incidents.length+q.aiJobs.length+' journal and AI job records on this page · no remote success inferred';
  const prev=shadow('[data-action="queue-prev"]'),next=shadow('[data-action="queue-next"]');
  if(prev)prev.disabled=q.loading||q.history.length===0;
  if(next)next.disabled=q.loading||!q.more;
@@ -1212,6 +1235,137 @@ async function openReleaseReview(slug){
 }
 // An operation inspector is a read-only projection. A possible dispatched
 // effect cannot be retried from this drawer, even after browser restart.
+function humanAiStatus(job){
+ const names={
+  PENDING_NATIVE_SESSION:'Ready for guarded AI execution',
+  HELD_RECONCILE:'Session outcome needs reconciliation',
+  TESTS_UNVERIFIED:'Independent tests still required',
+  TESTS_VERIFIED:'Tests independently verified',
+  KNOWN_FAILURE:'Known failure — repair review',
+  HELD_NO_PROGRESS:'Development held',
+  HUMAN_OWNED:'Human-owned work',
+  PREPARED:'Prepared',
+  RUNNING:'In progress'
+ };
+ if(job.nativeState==='RUNNING_OBSERVED')return 'AI session running';
+ return names[job.state]||'Development needs inspection';
+}
+// All progression remains in the original trusted I10 backend: operator inputs
+// are limited to a slug, current revision and named native capability. Neither
+// the UI nor AI text can self-assert tests, Git writes or publication.
+async function openAiJob(slug){
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
+ panel.setAttribute('aria-label','AI development for '+slug);
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const head=el('div','drawer-head');head.append(el('h2','drawer-title','Develop · '+slug),b('Close',close));
+ const body=el('div','drawer-body'),status=el('p','setting-note','Checking the current exact AI job…');
+ status.setAttribute('role','status');body.append(status);
+ const metadata=el('dl'),actions=el('div','form-foot');
+ body.append(metadata,actions);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ head.querySelector('button')?.focus();
+ let pending=false;
+ async function load(){
+  metadata.replaceChildren();actions.replaceChildren();
+  let j;try{j=await readPort('pcms-i10-ai','GET_JOB',{slug},22000)}catch{}
+  if(!overlay.isConnected)return;
+  if(!j?.ok){status.textContent='Canonical AI job unavailable. No action can be authorized.';return;}
+  status.textContent=humanAiStatus(j)+
+    '. Protected owner, clean-editor, session and source-readback checks are applied independently.';
+  for(const [label,value] of [
+   ['Current revision',String(j.revision)],['Saved source',j.sourceFingerprint?.slice(0,16)||'Not verified'],
+   ['Prompt version',String(j.promptRevision??'Unavailable')],
+   ['Native state',(j.nativeState||'Not started').replaceAll('_',' ').toLowerCase()],
+   ['Tests',j.evidence?.state||'Unverified'],
+   ['Provider outcome',j.hold||'No independent effect receipt loaded']]){
+    const row=el('div','kv');row.append(el('dt','',label),el('dd','',value));metadata.append(row);
+  }
+  const opts=[
+   ['Continue development','ADVANCE_JOB',null,
+    !j.slotReleased&&!['TESTS_VERIFIED','HELD_NO_PROGRESS','HUMAN_OWNED'].includes(j.state)],
+   ['Start Chat 1','BEGIN_NATIVE','CHAT1_SEND',j.state==='PENDING_NATIVE_SESSION'],
+   ['Stop running session','BEGIN_NATIVE','STOP',j.nativeState==='RUNNING_OBSERVED'],
+   ['Reconcile session','PROBE_NATIVE',null,
+    ['HELD_RECONCILE','TESTS_UNVERIFIED','KNOWN_FAILURE'].includes(j.state)],
+   ['Run independent tests','RUN_TESTS',null,j.state==='TESTS_UNVERIFIED'],
+   ['Inspect Chat 2 workspace','INSPECT_WORKSPACE',null,
+    j.nativeState==='CHAT2_OBSERVED_IDLE'&&!j.chat2IsolationVerified],
+   ['Verify fresh Chat 2','VERIFY_FRESH_CHAT2',null,
+    j.nativeState==='CHAT2_OBSERVED_IDLE'&&!j.chat2IsolationVerified],
+   ['Repair observed failure','BEGIN_NATIVE',
+    j.nativeState==='CHAT2_OBSERVED_IDLE'?'CHAT2_REPAIR':'CHAT1_REPAIR',
+    j.state==='KNOWN_FAILURE'&&
+    (j.nativeState==='CHAT1_OBSERVED_IDLE'||(j.nativeState==='CHAT2_OBSERVED_IDLE'&&j.chat2IsolationVerified))],
+   ['Reset Chat 2','BEGIN_NATIVE','CHAT2_RESET',j.evidence?.chat1Pass===true],
+   ['Start Chat 2','BEGIN_NATIVE','CHAT2_SEND',j.optionalTestingSha!==null]
+  ];
+  for(const [label,type,step,allowed] of opts){
+   if(!allowed)continue;
+   const button=b(label,()=>void(async()=>{
+    if(pending)return;
+    const mutates=['ADVANCE_JOB','BEGIN_NATIVE','RUN_TESTS','VERIFY_FRESH_CHAT2'].includes(type)&&step!=='STOP';
+    if(mutates&&!window.confirm(
+      'Run the selected guarded '+label.toLowerCase()+' step for '+slug+
+      '? The exact AI job revision, protected account/route, source and native session are revalidated. A lost acknowledgment is never authorization to resend.'))return;
+    pending=true;actions.querySelectorAll('button').forEach(x=>x.disabled=true);
+    status.textContent=type==='PROBE_NATIVE'?
+      'Reading the current session without sending again…':
+      'Checking the exact job and protected runtime. No result is assumed from an acknowledgment.';
+    try{
+     const out=await readPort('pcms-i10-ai',type,{
+      slug,expectedRevision:j.revision,...(step?{step}:{})},95000);
+     status.textContent=out?.ok?
+      type==='RUN_TESTS'?
+       'Test command completed. Review independently observed assertion results and current job state.':
+       'Controller response recorded. Reloading independently verified current job state.':
+      'Action held or result unconfirmed. Read the current job before any further effect.';
+    }catch{
+     status.textContent='The outcome is uncertain. Do not resend a native AI command; reconcile the current session first.';
+    }finally{pending=false;await load();void loadQueue(true);}
+   })(),'btn small');
+   actions.append(button);
+  }
+  if(!actions.children.length)
+   actions.append(el('p','setting-note','No additional native step is currently eligible. Check the protected source or recoverable session.'));
+ }
+ await load();
+}
+function openAiPreparation(){
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
+ panel.setAttribute('aria-label','Prepare verified AI development job');
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const head=el('div','drawer-head');head.append(el('h2','drawer-title','Prepare development'),b('Close',close));
+ const body=el('div','drawer-body'),help=el('p','setting-note',
+  'Use a generator with an independently verified private stage. PCMS reads the pinned GitHub instructions and saved-source revision before preparing the AI job.');
+ const slug=el('input','form-input');slug.placeholder='generator-slug';
+ slug.value=state.queue.query&&/^[a-z0-9-]{1,100}$/.test(state.queue.query)?state.queue.query:'';
+ slug.setAttribute('aria-label','Generator slug for development');
+ const status=el('p','setting-note','No job prepared.');status.setAttribute('role','status');
+ const action=b('Verify stage and prepare',()=>void(async()=>{
+  if(!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug.value)){
+   status.textContent='Enter a valid lowercase generator name.';return;}
+  action.disabled=true;status.textContent='Verifying private saved source and current stage revision…';
+  try{
+   const stage=await readPort('pcms-i09-staging','GET_STAGE',{slug:slug.value},16000);
+   if(!stage?.ok||!Number.isSafeInteger(stage.revision)){
+    status.textContent='Private source stage not independently verified. Finish source staging first.';return;}
+   const out=await readPort('pcms-i10-ai','PREPARE_JOB',{
+    slug:slug.value,expectedStageRevision:stage.revision},95000);
+   status.textContent=out?.ok?
+    'Exact development job prepared. AI execution and tests remain separately guarded.':
+    'Preparation held. Check the stage, account, protected route and GitHub connection.';
+   await loadQueue(true);
+  }catch{status.textContent='Job preparation result uncertain. Check the canonical queue before retrying.'}
+  finally{action.disabled=false}
+ })(),'btn primary');
+ body.append(help,slug,action,status);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ slug.focus();
+}
 function openOperationRecord(op){
  const previous=root.activeElement,overlay=el('div','drawer-overlay'),dialog=el('div','drawer');
  dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');
