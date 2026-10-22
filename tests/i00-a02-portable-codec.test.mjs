@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
-import {DB_STORES,serializeClone} from '../src/ui/backup-core.mjs';
+import {DB_STORES,serializeClone,deserializeClone} from '../src/ui/backup-core.mjs';
 import {encodePortableArchive,readPortableArchive,framedLines,
   isExcludedCredential} from '../src/runtime/portable-archive.mjs';
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
@@ -25,7 +25,10 @@ test('A02 portable roundtrip: no password, exact canonical rows and donor',async
   const restored=await decode(built.blob);
   assert.equal(restored.integrity,'FRAME_AND_SOURCE_VERIFIED');
   assert.equal(restored.diskReadback,false);
-  assert.deepEqual(restored.canonical,pcms);
+  assert.equal(JSON.stringify(restored.canonical),JSON.stringify(pcms));
+  const typed=deserializeClone(restored.canonical.stores.meta[0].value);
+  assert.equal(typed.date.toISOString(),'2026-10-22T10:00:00.000Z');
+  assert.deepEqual([...typed.array],[0,127,255]);
   assert.deepEqual(restored.donor,donor());
 });
 test('A02 corrupt, truncated and reordered frames hold before live mutation',async()=>{
