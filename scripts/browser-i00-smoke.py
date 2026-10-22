@@ -1132,7 +1132,7 @@ def main():
                 assert faithful['inventoryTabs']>=4 and faithful['sourceWriters']==1,faithful
                 print('B V015_TRUE_DESKTOP_PRIMARY_WORKSPACES_AND_REAL_HANDLERS=PASS',flush=True)
                 release_version=execute(after,"return {manifest:browser.runtime.getManifest().version,ui:document.documentElement.dataset.pcmsUiVersion,badge:document.querySelector('.v015-top-status')?.textContent};")
-                assert release_version.get('manifest')=='1.2.3',release_version
+                assert release_version.get('manifest')=='1.2.4',release_version
                 assert release_version.get('ui')=='0.1.5' and '0.1.5' in release_version.get('badge',''),release_version
                 print('B V015_REAL_FIREFOX_UPDATE_VERSION_AND_VISIBLE_UI_MARKER=PASS',flush=True)
                 # V016 acceptance: the PRECISE accepted prototype structure is
@@ -1156,10 +1156,10 @@ def main():
                      canonicalNative:!!document.getElementById('pcms-refresher-rows')&&
                        !!document.getElementById('pcms-release-approve')&&
                        !!document.getElementById('pcms-restore-apply')};""")
-                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.3',actual
+                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.4',actual
                 assert actual['routes']==6 and actual['visible'] and actual['nativeHidden'],actual
                 assert actual['sidebar'] and actual['primary']=='overview' and actual['styles'] and actual['canonicalNative'],actual
-                assert 'v0.1.6' in (actual['badge'] or ''),actual
+                assert actual['badge']=='PCMS local · Not verified',actual
                 for workspace in ['generators','work-queue','accounts','refresher','settings','overview']:
                     execute(after,"""const route=%s;
                         const h=document.getElementById('pcms-faithful-host');
@@ -1218,15 +1218,71 @@ def main():
                           !!r.querySelector('details summary')&&
                           r.querySelector('details summary').textContent.includes('Technical details')),
                         guidance:rows.filter(r=>r.querySelector('strong')?.textContent==='GitHub credential helper')
-                          .every(r=>!!r.querySelector('p.setting-note')?.textContent.match(/PCMS helper|local helper/i)&&
-                            !/NATIVE_|local[.]pcms|GIT_/.test(r.querySelector('p.setting-note').textContent)&&
-                            !!r.querySelector('details p')?.textContent.includes('NATIVE_')),
+                          .every(r=>/helper|PCMS/i.test(r.querySelector('p.setting-note')?.textContent||'')&&
+                            !/NATIVE_|local[.]pcms|GIT_/.test(r.querySelector('p.setting-note')?.textContent||'')&&
+                            !!r.querySelector('details summary')?.textContent.includes('Technical details')&&
+                            !!r.querySelector('details p')?.textContent.trim()),
                         exportEnabled:[...panel?.querySelectorAll('button')||[]].some(
                           b=>b.textContent.trim()==='Export sanitized report'&&!b.disabled)};""")
                     if r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['readable'] and r3_result['guidance']:break
                     time.sleep(.12)
                 assert r3_result and r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['readable'] and r3_result['guidance'] and r3_result['exportEnabled'],('R3_PREFLIGHT_FAILED',r3_result)
                 print('B R3_REAL_PRIMARY_SETTINGS_LOCAL_PREFLIGHT_NO_REMOTE=PASS',flush=True)
+                # R4: actual packaged main UI must expose primary creation and
+                # protected permissions without switching to the old controller.
+                r4_primary=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-nav="generators"]').click();
+                  sh.querySelector('[data-action="create"]')?.click();
+                  const drawer=sh.querySelector('[aria-label="Create generators"]');
+                  const primaryCreate=!!drawer&&
+                    !!drawer.querySelector('textarea')&&
+                    !![...drawer.querySelectorAll('button')].find(x=>x.textContent.includes('Create private generators'));
+                  const legacyOpened=document.body.classList.contains('pcms-native-open');
+                  drawer?.querySelector('button')?.click();
+                  sh.querySelector('[data-nav="work-queue"]').click();
+                  sh.querySelector('[data-action="prepare-ai"]')?.click();
+                  const aiDrawer=sh.querySelector('[aria-label="Prepare verified AI development job"]');
+                  const primaryAiPreparation=!!aiDrawer&&
+                    !!aiDrawer.querySelector('input[placeholder="generator-slug"]')&&
+                    [...aiDrawer.querySelectorAll('button')].some(x=>x.textContent.includes('Verify stage and prepare'));
+                  aiDrawer?.querySelector('button')?.click();
+                  sh.querySelector('[data-nav="settings"]').click();
+                  sh.querySelector('[data-settings="automation"]').click();
+                  const primaryPermission=sh.querySelector('.settings-main')?.textContent.includes('Standing permissions')&&
+                    !sh.querySelector('.settings-main')?.textContent.includes('Open automation tools (original view)');
+                  sh.querySelector('[data-settings="ai"]').click();
+                  const aiPanel=sh.querySelector('.settings-main');
+                  const primaryAi=aiPanel?.textContent.includes('Managed AI development')&&
+                    !!aiPanel?.querySelector('textarea[aria-label="AI development guidance"]')&&
+                    [...aiPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Save concurrency'));
+                  sh.querySelector('[data-settings="backups"]').click();
+                  const backupPanel=sh.querySelector('.settings-main');
+                  const protectedRestore=!!backupPanel?.querySelector('input[type="file"]')&&
+                    backupPanel.querySelectorAll('input[type="file"]').length===2&&
+                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Verify independent checkpoint'))&&
+                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Read back uncertain restore'))&&
+                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Apply reviewed restore'));
+                  const restoreHeld=[...backupPanel.querySelectorAll('button')].find(x=>x.textContent.includes('Apply reviewed restore'))?.disabled===true;
+                  sh.querySelector('[data-settings="diagnostics"]').click();
+                  const details=sh.querySelector('.settings-main');
+                  const primaryDiagnostic=details?.textContent.includes('Full disposable diagnostic')&&
+                    !!details?.querySelector('input[placeholder="pcms-test-alpha"]')&&
+                    [...details.querySelectorAll('button')].some(x=>x.textContent.includes('Save disposable scope'));
+                  sh.querySelector('[data-settings="connections"]').click();
+                  const connected=sh.querySelector('.settings-main');
+                  const connectionRows=[...connected?.querySelectorAll('.settings-row')||[]];
+                  const restoredConnections=connectionRows.length>=3&&
+                    connectionRows.some(x=>x.textContent.includes('PersonaMonkey'))&&
+                    connectionRows.some(x=>x.querySelector('button[data-action="check-service:native"]'))&&
+                    !!connected.querySelector('input[type="password"]');
+                  const readableConnections=connectionRows.every(x=>
+                    !/GIT_[A-Z_]+|NATIVE_[A-Z_]+|local[.]pcms[.]/.test(
+                      x.querySelector('.setting-description')?.textContent||''));
+                  return {primaryCreate,legacyOpened,primaryPermission,primaryDiagnostic,
+                    primaryAi,primaryAiPreparation,protectedRestore,restoreHeld,restoredConnections,readableConnections,
+                    drawerClosed:!sh.querySelector('[aria-label="Create generators"]')};""")
+                assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['primaryAi'] and r4_primary['primaryAiPreparation'] and r4_primary['protectedRestore'] and r4_primary['restoreHeld'] and r4_primary['restoredConnections'] and r4_primary['readableConnections'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
+                print('B R4_PRIMARY_CREATION_AND_PROTECTED_SETTINGS_WITHOUT_LEGACY=PASS',flush=True)
                 execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=overview]').click();return true")
 
                 navigation=execute(after,"""const by=id=>document.getElementById(id);
@@ -1255,8 +1311,10 @@ def main():
                     new KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true}));
                   const escapeRestoresFocus=!shadow.querySelector('.overlay')&&
                     shadow.activeElement===searchButton;
+                  shadow.querySelector('[data-nav="settings"]')?.click();
+                  shadow.querySelector('[data-settings="advanced"]')?.click();
                   const advanced=[...shadow.querySelectorAll('#page button')]
-                    .find(x=>x.textContent.trim()==='More controls (original view)');
+                    .find(x=>x.textContent.trim()==='Open protected recovery controls');
                   advanced?.click();
                   const nativeOpen=document.body.classList.contains('pcms-native-open');
                   document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}));

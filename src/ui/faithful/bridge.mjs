@@ -9,7 +9,7 @@ const routes=['overview','generators','work-queue','accounts','refresher','setti
 const native=document.querySelector('body > .app');
 const host=document.createElement('div');host.id='pcms-faithful-host';
 document.body.append(host);const root=host.attachShadow({mode:'open'});
-const READINESS_NAMES={NATIVE_VAULT_HOST:'GitHub credential helper',SECRET_SERVICE_ENVIRONMENT:'Secure credential storage',BACKUP_HOST:'Backup helper',DIAGNOSTIC_HOST:'Diagnostic helper',GIT_CONFIG:'GitHub connection',GIT_PARTIAL_CONNECTION:'Interrupted GitHub setup',GITHUB_AUTH:'GitHub access',GITHUB_MAIN_TREE:'GitHub file scan',GRANT_DEVELOPMENT:'Development permission',GRANT_GITWRITE:'Git write permission',GRANT_PUBLICATION:'Publication permission',PERSONA_AND_SESSION:'Account and secure route',REFRESHER_LIVE_EFFECT:'Refresher operation',INSTALLED_XPI_IDENTITY:'Installed extension verification'};
+const READINESS_NAMES={EXTENSION_RUNTIME:'PCMS extension',LOCAL_CONFIGURATION:'Local settings',RESTORE_HOLD:'Restore safety',REFRESHER_POLICY:'Refresher configuration',BACKUP_RESTORE:'Backup recovery',ACCOUNT_INVENTORY_READ:'Account inventory',REFRESHER_CURRENT_POLICY:'Current Refresher policy',NATIVE_VAULT_HOST:'GitHub credential helper',SECRET_SERVICE_ENVIRONMENT:'Secure credential storage',BACKUP_HOST:'Backup helper',DIAGNOSTIC_HOST:'Diagnostic helper',GIT_CONFIG:'GitHub connection',GIT_PARTIAL_CONNECTION:'Interrupted GitHub setup',GITHUB_AUTH:'GitHub access',GITHUB_MAIN_TREE:'GitHub file scan',GRANT_DEVELOPMENT:'Development permission',GRANT_GITWRITE:'Git write permission',GRANT_PUBLICATION:'Publication permission',PERSONA_AND_SESSION:'Account and secure route',REFRESHER_LIVE_EFFECT:'Refresher operation',INSTALLED_XPI_IDENTITY:'Installed extension verification'};
 const READINESS_STATES={VERIFIED:'Checked',NOT_TESTED:'Not checked',OUTCOME_UNCERTAIN:'Needs review',UNREACHABLE:'Not responding',STALE:'Needs updating',SECURITY_HELD:'Waiting on setup',OFF_BY_POLICY:'Disabled',NOT_CONFIGURED:'Not connected',MISSING_CAPABILITY:'Needs an update'};
 function operatorReadinessGuidance(row){
  const code=row.code||'';
@@ -65,9 +65,9 @@ function friendlyConnectionIssue(code){
 }
 const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',total:0,items:[]},
  ref:{offset:0,limit:25,query:'',phase:'ALL',snapshot:null,items:[],total:0},
- acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:''},
- settings:'connections',lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},nativeOpen:false,
- renderEpoch:0,version:'0.1.6',readiness:null,readinessBusy:false};
+ acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,readyItems:[],readyCursor:'',nextReady:null,readyMore:false,aiUnavailable:false,readyUnavailable:false,epoch:0},
+ settings:'connections',settingsStatic:null,lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},nativeOpen:false,
+ renderEpoch:0,version:'0.1.7',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
 const page=()=>shadow('#page');
 function el(tag,cls='',text){const o=document.createElement(tag);if(cls)o.className=cls;if(text!==undefined)o.textContent=String(text);return o}
@@ -107,7 +107,12 @@ let currentToast;
 function notify(message){const e=shadow('#pcms-live-toast');if(!e)return;e.textContent=String(message);e.hidden=false;if(currentToast)clearTimeout(currentToast);currentToast=setTimeout(()=>e.hidden=true,6500)}
 function updateNav(){for(const a of root.querySelectorAll('[data-nav]'))a.setAttribute('aria-current',a.dataset.nav===state.route?'page':'false');
  const label=shadow('#breadcrumb');if(label)label.textContent=({'work-queue':'Work Queue',overview:'Overview',generators:'Generators',accounts:'Accounts',refresher:'Refresher',settings:'Settings'})[state.route];
- const t=shadow('[data-nav="work-queue"] .nav-count');if(t){const count=observedReceipts().filter(x=>x.needs).length;t.textContent=count?String(count):'';t.hidden=count===0;}
+ const t=shadow('[data-nav="work-queue"] .nav-count');if(t){
+  const stats=state.queue.summary?.states,notices=state.queue.summary?.attention?.counts;
+  const count=stats?(stats.HELD_UNCERTAIN||0)+(stats.REJECTED||0)+(stats.DISPATCH_POSSIBLE||0)+
+    (notices?.actionRequired||0)+(notices?.serious||0):0;
+  t.textContent=count?String(count):'';t.hidden=!count;
+ }
 }
 function routeTo(target){if(!routes.includes(target))target='overview';state.route=target;location.hash='#'+target;void render()}
 function openGlobalSearch(){
@@ -141,10 +146,140 @@ function openGlobalSearch(){
  });overlay.addEventListener('click',e=>{if(e.target===overlay)closeSearch()});input.focus();
 }
 function nativeSelection(type,item){
- if(type==='timing'){window.dispatchEvent(new CustomEvent('pcms-refresher-target',{detail:{slug:item.slug}}));nativeRoute('refresher')}
- else if(type==='source'){window.dispatchEvent(new CustomEvent('pcms-source-target',{detail:{slug:item.slug,revision:item.revision}}));nativeRoute('generators','source')}
- else if(type==='adopt'){window.dispatchEvent(new CustomEvent('pcms-adoption-target',{detail:{slug:item.slug,revision:item.revision,ownerState:item.ownerState,visibility:item.visibility}}));nativeRoute('generators','adopt')}
- else{const field=nativeControl('pcms-generator-query');if(field){field.value=item.slug;field.dispatchEvent(new Event('input',{bubbles:true}))}nativeRoute('generators','inventory')}
+ if(type==='timing'){
+  if(item?.stableId)openRefresherTiming(item);
+  else if(item?.slug){
+   state.ref.query=item.slug;state.ref.phase='ALL';state.ref.offset=0;
+   routeTo('refresher');
+   notify('Select the matching Refresher row to manage its independently verified timing.');
+  }else notify('No verified Refresher target is available for this generator.');
+ }
+ else if(type==='source'){openSourceManager(item);}
+ else if(type==='adopt'){openAdoptionManager(item);}
+ else notify('This workflow is not available from the current selection. No operation was attempted.');
+}
+// Primary source association is a read-only pinned-main inspection followed
+// by a local, revision-fenced link. It performs no Git/provider modification.
+function openSourceManager(item){
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
+ panel.setAttribute('aria-label','GitHub source for '+item.slug);
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const head=el('div','drawer-head');head.append(el('h2','drawer-title','Source · '+item.slug),b('Close',close));
+ const body=el('div','drawer-body'),status=el('p','setting-note',
+  'Reading the locally verified source association…');status.setAttribute('role','status');
+ const folder=el('input','form-input');folder.value='generators/'+item.slug;folder.maxLength=240;
+ const label=el('label','','GitHub folder on committed main');label.append(folder);
+ const actions=el('div','form-foot'),manifest=el('div','queue-list');
+ body.append(label,actions,status,manifest);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ async function association(){
+  try{
+   const reply=await readPort('pcms-i05-source','GET_ASSOCIATION',{slug:item.slug},12000);
+   if(!overlay.isConnected)return;
+   if(reply?.ok){folder.value=reply.link.folder;
+    status.textContent='Previously associated GitHub main folder. This is historical evidence, not a fresh source or owner verification.';
+   }else status.textContent='No verified source association is recorded for this generator.';
+  }catch{status.textContent='Source association could not be read. No change has been made.';}
+ }
+ const inspect=b('Read source from main',()=>void(async()=>{
+  inspect.disabled=true;manifest.replaceChildren();
+  status.textContent='Checking the complete source manifest from GitHub main…';
+  try{
+   const data=await readPort('pcms-i05-source','INSPECT_SOURCE',{folder:folder.value.trim()},95000);
+   if(!data?.ok){status.textContent='Source could not be verified on GitHub main. No association has been changed.';return}
+   status.textContent='Read-only GitHub source verified at '+data.head.slice(0,12)+
+    '. Deployment status: '+(data.ready?'READY':'NOT_READY')+'.';
+   for(const file of (data.paths||[]).slice(0,100)){
+    const row=el('p','setting-note',file.path+' · '+file.size+' bytes · SHA-256 '+file.sha256);
+    manifest.append(row);
+   }
+   if(item.ownerState!=='OBSERVED_OWNER'||!Number.isSafeInteger(item.revision)){
+    manifest.append(el('p','setting-note',
+      'Local association requires a separately verified owner and current inventory revision.'));
+    return;
+   }
+   const assign=b('Associate verified source',()=>void(async()=>{
+    if(!window.confirm('Associate this exact verified main source with the currently observed owned generator? This changes only the local PCMS association.'))return;
+    assign.disabled=true;
+    try{
+     const out=await readPort('pcms-i05-source','ASSOCIATE_SOURCE',{
+      slug:item.slug,folder:data.folder,expectedRevision:item.revision,
+      pinnedFingerprint:data.fingerprint,pinnedHead:data.head,
+      pinnedTestingSha:data.testingSha},95000);
+     status.textContent=out?.ok?
+       'Source association saved. PCMS still requires fresh owner and source readbacks for each protected effect.':
+       'Source association was not confirmed. Refresh the generator inventory before retrying.';
+    }catch{status.textContent='Association outcome uncertain; check the current source link before retrying.'}
+    finally{assign.disabled=false;}
+   })(),'btn primary');
+   manifest.append(assign);
+  }catch{status.textContent='GitHub verification did not complete. No source link was changed.'}
+  finally{inspect.disabled=false}
+ })(),'btn small');
+ const recheck=b('Verify existing source link',()=>void(async()=>{
+  recheck.disabled=true;
+  try{
+   const result=await readPort('pcms-i05-source','RECHECK_SOURCE',{slug:item.slug},95000);
+   status.textContent=result?.ok?
+    'Existing source link was checked against current main. Review differences before any write.':
+    'Existing source could not be verified; protected writes remain held.';
+  }catch{status.textContent='The current source link could not be checked.'}
+  finally{recheck.disabled=false}
+ })(),'btn small');
+ actions.append(inspect,recheck);void association();folder.focus();
+}
+// Adoption is guarded by the protected account and owned-source readbacks.
+// The visible button never creates a new generator, writes source or publishes.
+function openAdoptionManager(item){
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
+ panel.setAttribute('aria-label','Adopt existing generator '+item.slug);
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const head=el('div','drawer-head');
+ head.append(el('h2','drawer-title','Adopt · '+item.slug),b('Close',close));
+ const body=el('div','drawer-body'),status=el('p','setting-note',
+   'Checking the existing generator and its protected account binding…');
+ status.setAttribute('role','status');body.append(status);
+ const meta=el('dl');
+ for(const [label,value] of [['Generator',item.slug],
+   ['Owner evidence',item.ownerState||'Unverified'],
+   ['Account',item.accountId||'Unknown'],['Visibility',item.visibility||'Unknown']]){
+  const row=el('div','kv');row.append(el('dt','',label),el('dd','',value));meta.append(row);
+ }body.append(meta);
+ const actions=el('div','form-foot');
+ const adopt=b('Adopt verified owned generator',()=>void(async()=>{
+  if(item.ownerState!=='OBSERVED_OWNER'||!Number.isSafeInteger(item.revision)){
+   status.textContent='Ownership and revision must be verified before adoption.';return}
+  const publicItem=item.visibility==='PUBLIC';
+  if(!window.confirm(publicItem?
+    'Capture the exact original source of this publicly visible owned generator? Existing content and publication remain untouched, and Git archival needs its own guarded checks.':
+    'Capture this owned generator and its exact original source? Remote contents remain unchanged.'))return;
+  adopt.disabled=true;status.textContent='Checking two independent original-source readbacks…';
+  try{
+   const out=await readPort('pcms-i07-adoption','CAPTURE_ADOPTION',{
+    slug:item.slug,expectedRevision:item.revision,explicitPublicConsent:publicItem},95000);
+   status.textContent=out?.ok?
+    'Original-source capture recorded. Source archival and any future editing require separate independent checks.':
+    'Original-source capture was not verified. Nothing was published or overwritten.';
+  }catch{status.textContent='Adoption outcome uncertain. Refresh the account and adoption state before retrying.'}
+  finally{adopt.disabled=false;}
+ })(),'btn primary');
+ if(item.ownerState!=='OBSERVED_OWNER')adopt.disabled=true;
+ const check=b('View adoption status',()=>void(async()=>{
+  try{
+   const out=await readPort('pcms-i07-adoption','GET_ADOPTION',{slug:item.slug},15000);
+   status.textContent=out?.ok?
+    'Existing original capture: '+(out.record?.state||'recorded')+
+    '. This is a local record, not proof of a Git archive.':
+    'No previously verified original capture is available.';
+  }catch{status.textContent='Adoption state could not be read.'}
+ })(),'btn small');
+ actions.append(adopt,check);body.append(actions);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ check.focus();
 }
 function openDetails(kind,item){
  const priorFocus=root.activeElement;
@@ -166,6 +301,114 @@ function openDetails(kind,item){
  const focusable=()=>[...drawer.querySelectorAll('button:not(:disabled),[href],input:not(:disabled)')];
  backdrop.addEventListener('keydown',event=>{if(event.key==='Escape'){backdrop.remove();if(priorFocus?.isConnected)priorFocus.focus({preventScroll:true});return}if(event.key==='Tab'){let all=focusable();let index=all.indexOf(root.activeElement);if(event.shiftKey&&index<=0){event.preventDefault();all.at(-1)?.focus()}if(!event.shiftKey&&index===all.length-1){event.preventDefault();all[0]?.focus()}}});
  backdrop.addEventListener('click',e=>{if(e.target===backdrop)backdrop.remove()});close.focus();
+}
+// Primary per-generator timing and activity controls reuse exact canonical
+// Refresher revisions; they never claim a successful provider source save.
+function openGlobalRefresherPolicy(){
+ const snap=state.ref.snapshot;
+ if(!snap?.ok||!Number.isSafeInteger(snap.revision)){
+  notify('Current Refresher policy is not verified. Refresh before changing its timing.');return}
+ const original=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
+ panel.setAttribute('aria-label','Refresher default timing policy');
+ const close=()=>{overlay.remove();original?.isConnected&&original.focus({preventScroll:true})};
+ const header=el('div','drawer-head');header.append(
+  el('h2','drawer-title','Refresher default timing'),b('Close',close));
+ const body=el('div','drawer-body');
+ body.append(el('p','setting-note',
+  'Default periods apply to subsequently scheduled work; per-generator overrides remain separate. The source-save policy is controlled independently.'));
+ const fields=[];
+ for(const [name,value] of [['Active period',snap.policy.activeMs],['Rest period',snap.policy.sleepMs]]){
+  const label=el('label','',name+' (minutes)'),input=el('input','form-input');
+  input.type='number';input.min='1';input.max='525600';input.step='1';
+  input.value=String(Math.round(value/60000));label.append(input);body.append(label);fields.push(input);
+ }
+ const status=el('p','setting-note','No change submitted.');
+ const save=b('Save default timing',()=>void(async()=>{
+  const nums=fields.map(x=>Number(x.value));
+  if(nums.some(x=>!Number.isSafeInteger(x)||x<1||x>525600)){
+   status.textContent='Use 1 to 525,600 minutes for each period.';return}
+  if(!window.confirm('Save the default active and rest periods? Existing target overrides and verified provider receipts remain unchanged.'))return;
+  save.disabled=true;
+  try{
+   const r=await readPort('pcms-i12-refresher','SET_POLICY',{
+    expectedRevision:snap.revision,
+    policy:{activeMs:nums[0]*60000,sleepMs:nums[1]*60000}},16000);
+   status.textContent=r?.ok?'Default scheduling periods saved.':
+    'Timing could not be saved. Refresh current policy before retrying.';
+  }catch{status.textContent='Timing outcome uncertain. Reload policy before retrying.'}
+  finally{save.disabled=false;await loadRefresher()}
+ })(),'btn primary');
+ body.append(save,status);panel.append(header,body);overlay.append(panel);root.append(overlay);
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ fields[0].focus();
+}
+function openRefresherTiming(item){
+ const snap=state.ref.snapshot;
+ if(!snap?.ok||!Number.isSafeInteger(snap.revision)||!item?.stableId){
+  notify('Current Refresher state is unavailable. No policy was changed.');return}
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),drawer=el('div','drawer');
+ drawer.setAttribute('role','dialog');drawer.setAttribute('aria-modal','true');
+ drawer.setAttribute('aria-label','Manage Refresher timing for '+item.slug);
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const header=el('div','drawer-head');header.append(el('h2','drawer-title','Refresher · '+item.slug),b('Close',close));
+ const body=el('div','drawer-body');
+ body.append(el('p','setting-note',
+  'These timings affect subsequent scheduling periods. Already accrued activity and source-save evidence are preserved.'));
+ const active=el('input','form-input'),sleep=el('input','form-input');
+ for(const [control,value] of [[active,item.activeMs],[sleep,item.sleepMs]]){
+  control.type='number';control.min='1';control.max=String(365*24*60);control.step='1';
+  control.value=Number.isFinite(value)?String(Math.round(value/60000)):'';
+ }
+ const aLabel=el('label','','Active period (minutes)'),sLabel=el('label','','Rest period (minutes)');
+ aLabel.append(active);sLabel.append(sleep);body.append(aLabel,sLabel);
+ const status=el('p','setting-note','No change submitted.');status.setAttribute('role','status');
+ const save=b('Save generator timing',()=>void(async()=>{
+  const m=Number(active.value),n=Number(sleep.value);
+  if(!Number.isSafeInteger(m)||!Number.isSafeInteger(n)||m<1||n<1||
+     m>525600||n>525600){
+    status.textContent='Enter active and rest periods of 1 minute to 365 days.';return;}
+  if(!window.confirm('Save this generator’s timing policy for subsequent Refresher periods?'))return;
+  save.disabled=true;
+  try{
+   const result=await readPort('pcms-i12-refresher','SET_GENERATOR_POLICY',{
+    expectedRevision:snap.revision,stableId:item.stableId,
+    activeMs:m*60000,sleepMs:n*60000},16000);
+   status.textContent=result?.ok?'Generator timing saved. Current period and remote evidence remain unchanged.':
+     'Generator timing could not be saved; state may have changed. Reload before retrying.';
+  }catch{status.textContent='Timing save outcome unconfirmed. Do not retry before refreshing state.'}
+  await loadRefresher();save.disabled=false;
+ })(),'btn primary');
+ const pause=b(item.paused?'Resume this generator':'Pause this generator',()=>void(async()=>{
+  const desired=!item.paused;
+  if(!window.confirm(desired?'Pause scheduling for this generator?':'Resume guarded scheduling for this generator?'))return;
+  pause.disabled=true;
+  try{
+   const result=await readPort('pcms-i12-refresher','SET_PAUSE',{
+    expectedRevision:snap.revision,scope:'GENERATOR',target:item.stableId,paused:desired},16000);
+   status.textContent=result?.ok?'Generator scheduling policy updated.':
+      'Change not confirmed. Refresh state before retrying.';
+  }catch{status.textContent='Change outcome uncertain; refresh before retrying.'}
+  await loadRefresher();pause.disabled=false;
+ })(),'btn small');
+ const statistic=b('Request a new statistic',()=>void(async()=>{
+  statistic.disabled=true;
+  try{
+   const result=await readPort('pcms-i12-refresher','DEMAND_STATISTIC',{
+    expectedRevision:snap.revision,stableId:item.stableId},16000);
+   status.textContent=result?.ok?
+     'A read-only statistic observation was requested; a fresh provider result is not yet confirmed.':
+     'Statistic request was not confirmed.';
+  }catch{status.textContent='Statistic request status unknown; check again.'}
+  await loadRefresher();statistic.disabled=false;
+ })(),'btn small');
+ const actions=el('div','form-foot');actions.append(save,pause,statistic);
+ body.append(actions,status);
+ drawer.append(header,body);overlay.append(drawer);root.append(overlay);
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ active.focus();
 }
 function formatTime(ms){if(!Number.isFinite(ms)||ms<0)return '—';const m=Math.round(ms/60000),hours=Math.floor(m/60);return hours+'h '+String(m%60).padStart(2,'0')+'m'}
 function setTab(group,value){for(const b of page()?.querySelectorAll(group+' [role=tab]')||[]){const active=b.dataset.filter?.split(':')[1]===value;b.setAttribute('aria-selected',String(active));b.tabIndex=active?0:-1}}
@@ -197,29 +440,63 @@ function routeHandlers(){
  if(!action)return;
  event.preventDefault();
  if(action==='search'){openGlobalSearch();return}
- if(action==='create'){nativeAction('generators','create','pcms-supply-slugs');return}
- if(action==='sync-inventory'){nativeAction('generators','inventory','pcms-generator-account');return}
- if(action==='queue'||action==='activity'){nativeAction('work-queue','activity');return}
- if(action==='diagnostics'||action==='health'){nativeAction('settings','diagnostics');return}
+ if(action==='create'){openGeneratorCreator();return}
+ if(action==='sync-inventory'){void syncManagedInventories();return}
+ if(action==='queue'||action==='activity'){routeTo('work-queue');return}
+ if(action==='diagnostics'||action==='health'){state.settings='diagnostics';routeTo('settings');return}
  if(action==='notifications'){routeTo('overview');return}
  if(action==='system-health'){routeTo('settings');return}
- if(action==='generator-filters'){nativeAction('generators','inventory','pcms-generator-owner-filter');return}
+ if(action==='generator-filters'){shadow('#generator-account')?.focus();return}
  if(action==='gen-prev'){state.gen.offset=Math.max(0,state.gen.offset-state.gen.limit);void loadGenerators();return}
  if(action==='gen-next'){state.gen.offset+=state.gen.limit;void loadGenerators();return}
  if(action==='ref-prev'){state.ref.offset=Math.max(0,state.ref.offset-state.ref.limit);void loadRefresher();return}
  if(action==='ref-next'){state.ref.offset+=state.ref.limit;void loadRefresher();return}
  if(action==='account-prev'){state.acct.page=Math.max(0,state.acct.page-1);displayAccounts();return}
  if(action==='account-next'){state.acct.page++;displayAccounts();return}
- if(action==='queue-prev'||action==='queue-next'){notify('Queue receipts are bounded to the currently observed local records.');return}
- if(action==='add-account'){nativeAction('accounts',null,'pcms-add-account');return}
- if(action==='feed-check'){guardedClick('pcms-refresher-reload');void loadRefresher();return}
- if(action==='edit-timing'){nativeAction('refresher',null,'pcms-refresher-active');return}
- if(action==='pause-refresher'){if(!guardedClick('pcms-refresher-global-pause'))return;notify('Pause request sent through the existing guarded controller; reload to verify.');void loadRefresher();return}
+ if(action==='prepare-ai'){openAiPreparation();return}
+ if(action==='queue-prev'){
+   const prior=state.queue.history.pop();if(!prior)return;
+   state.queue.opCursor=prior.op;state.queue.noticeCursor=prior.notice;
+   state.queue.aiCursor=prior.ai;state.queue.readyCursor=prior.ready;void loadQueue();return;
+ }
+ if(action==='queue-next'){
+   if(!state.queue.more)return;
+   state.queue.history.push({op:state.queue.opCursor,notice:state.queue.noticeCursor,ai:state.queue.aiCursor,ready:state.queue.readyCursor});
+   state.queue.opCursor=state.queue.nextOps===null?null:state.queue.nextOps;
+   state.queue.noticeCursor=state.queue.nextNotices===null?null:state.queue.nextNotices;
+   state.queue.aiCursor=state.queue.nextAi===null?null:state.queue.nextAi;
+   state.queue.readyCursor=state.queue.nextReady===null?null:state.queue.nextReady;
+   void loadQueue();return;
+ }
+ if(action==='add-account'){void startAccountEnrollment();return}
+ if(action==='feed-check'){void (async()=>{
+  try{
+   const r=await readPort('pcms-i12-refresher','OBSERVE_NOW',{},90000);
+   notify(r?.ok?'Read-only observation requested. Its provider evidence will be displayed separately.':
+     'The latest protected observation could not be verified.');
+  }catch{notify('Read-only observation unavailable. Provider state remains unknown.')}
+  await loadRefresher();
+ })();return}
+ if(action==='edit-timing'){openGlobalRefresherPolicy();return}
+ if(action==='pause-refresher'){void (async()=>{
+  const s=state.ref.snapshot;
+  if(!s?.ok||!Number.isSafeInteger(s.revision)){notify('Current Refresher revision is not verified.');return}
+  const paused=!s.globalPause;
+  if(!window.confirm(paused?'Pause scheduling across every managed generator?':
+   'Resume the scheduler, subject to every account, route, source, visibility and policy hold?'))return;
+  try{
+   const r=await readPort('pcms-i12-refresher','SET_PAUSE',{
+    expectedRevision:s.revision,scope:'GLOBAL',paused},16000);
+   notify(r?.ok?'Global Refresher pause setting saved. Remote source effects are not inferred.':
+     'Pause change could not be confirmed. Reload state before retrying.');
+  }catch{notify('Global pause outcome uncertain. Reload before another change.')}
+  await loadRefresher();
+ })();return}
  if(action==='go-accounts'){routeTo('accounts');return}
  if(action==='queue-help'||action==='account-info'){notify('Detailed operational guidance is available in Advanced protected controls.');return}
  if(action.startsWith('check-service:')){state.settings='connections';void runReadiness(false);return}
  });
- root.addEventListener('click',event=>{const tab=event.target.closest('[data-filter]');if(tab){event.preventDefault();const [r,value]=tab.dataset.filter.split(':');if(r==='generators'){state.gen.filter=value;state.gen.offset=0;void loadGenerators()}if(r==='refresher'){state.ref.phase=['All','Active','Sleeping','Waiting'].includes(value)?value.toUpperCase():value;state.ref.offset=0;void loadRefresher()}if(r==='queue'){state.queue.filter=value;displayQueue()}return}
+ root.addEventListener('click',event=>{const tab=event.target.closest('[data-filter]');if(tab){event.preventDefault();const [r,value]=tab.dataset.filter.split(':');if(r==='generators'){state.gen.filter=value;state.gen.offset=0;void loadGenerators()}if(r==='refresher'){state.ref.phase=value.toUpperCase();state.ref.offset=0;void loadRefresher()}if(r==='queue'){state.queue.filter=value;void loadQueue(true)}return}
  const row=event.target.closest('tr[data-item-index]');if(row){const i=Number(row.dataset.itemIndex);if(state.route==='refresher'&&state.ref.visibleItems?.[i])openDetails('ref',state.ref.visibleItems[i]);else if(state.route==='generators'&&state.gen.visibleItems?.[i])openDetails('gen',state.gen.visibleItems[i]);}
  });
  root.addEventListener('keydown',event=>{
@@ -249,7 +526,7 @@ function routeHandlers(){
   if(id==='generator-search'){state.gen.query=value;state.gen.offset=0;void loadGenerators()}
   if(id==='refresher-search'){state.ref.query=value;state.ref.offset=0;void loadRefresher()}
   if(id==='account-search'){state.acct.query=value;state.acct.page=0;displayAccounts()}
-  if(id==='queue-search'){state.queue.query=value;displayQueue()}
+  if(id==='queue-search'){state.queue.query=value;void loadQueue(true)}
  },200)});
 }
 // Native controller remains the sole authorizer. The shadow switch itself is
@@ -259,11 +536,21 @@ async function proposeRefresherEnable(switchEl){
  // pending edits in its other fields could otherwise be sent accidentally.
  const before=state.lastRef?.policy?.refreshEnabled===true;
  switchEl.checked=before;
- if(!nativeControl('pcms-refresher-enable')){
-  notify('Protected Refresher policy is unavailable. No change was submitted.');return;
+ const snapshot=state.ref.snapshot;
+ if(!snapshot?.ok||!Number.isSafeInteger(snapshot.revision)){
+  notify('Current Refresher policy was not verified. No change was submitted.');return;
  }
- nativeAction('refresher',null,'pcms-refresher-enable');
- notify('Review the complete guarded policy before changing marker saves. Nothing was submitted.');
+ const next=!before;
+ if(!window.confirm(next?
+  'Enable guarded Refresher source saves? Each target still requires independently verified owner, protected route, source, qualified time and safety checks. Visibility is not guaranteed.':
+  'Disable further scheduled Refresher source saves? In-flight uncertain effects remain held for reconciliation.'))return;
+ try{
+  const result=await readPort('pcms-i12-refresher','SET_POLICY',{
+   expectedRevision:snapshot.revision,policy:{refreshEnabled:next}},15000);
+  notify(result?.ok?'Refresher policy recorded; source saves and recent-list visibility require separate proof.':
+    'Refresher setting was not confirmed. Reload the actual policy before retrying.');
+ }catch{notify('Refresher outcome unconfirmed. Reload current state before retrying.')}
+ await loadRefresher();
 }
 
 function statusPill(label,kind=''){const p=el('span','pill'+(kind?' '+kind:''),label);return p}
@@ -273,6 +560,77 @@ const ownerLabels={OBSERVED_OWNER:'Owner observed',OWNER_UNVERIFIED:'Owner unkno
 function rowsError(tableSelector,message,colspan){const body=shadow(tableSelector);if(!body)return;body.replaceChildren();const tr=el('tr'),td=el('td','pcms-unknown',message);td.colSpan=colspan;tr.append(td);body.append(tr)}
 function setCounts(tabSelector,map){for(const tab of shadow('#page')?.querySelectorAll(tabSelector)||[]){const x=tab.dataset.filter?.split(':')[1];const num=tab.querySelector('.count');if(num)num.textContent=map[x]??'—'}}
 function fmtObservation(item){if(item.observedAt&&Number.isFinite(item.observedAt)){const mins=Math.max(0,Math.floor((Date.now()-item.observedAt)/60000));return `${mins} min ago · historical`}return 'Not verified'}
+// C-14/C-80: the accepted UI records durable intents through the same
+// slug-coalescing coordinator as main-only Git discovery. Side effects are
+// exclusively run later by the protected account/creation watcher.
+function openGeneratorCreator(){
+ const previous=root.activeElement,backdrop=el('div','drawer-overlay'),drawer=el('div','drawer');
+ drawer.setAttribute('role','dialog');drawer.setAttribute('aria-modal','true');
+ drawer.setAttribute('aria-label','Create generators');
+ const head=el('div','drawer-head');head.append(el('h2','drawer-title','Create generators'));
+ const close=()=>{backdrop.remove();if(previous?.isConnected)previous.focus({preventScroll:true})};
+ head.append(b('Close',close));drawer.append(head);
+ const body=el('div','drawer-body');
+ body.append(el('p','setting-note','Enter one or more generator names. PCMS uses your verified managed accounts and creates private generators only after the usual protected checks.'));
+ const label=el('label','','Generator names (one per line)');
+ const input=el('textarea','form-input');input.rows=6;input.placeholder='my-generator\nsecond-generator';
+ label.append(input);body.append(label);
+ const accountLabel=el('label','','Assign to account (optional)');
+ const choice=el('select','select'),auto=el('option','','Automatic — balanced');auto.value='';
+ choice.append(auto);
+ for(const account of state.lastAccountList.filter(a=>a.state==='VERIFIED')){
+  const option=el('option','',account.alias||account.accountId);
+  option.value=account.accountId;choice.append(option);
+ }
+ accountLabel.append(choice);body.append(accountLabel);
+ const status=el('p','setting-note','No creation request has been submitted.');status.setAttribute('role','status');
+ const submit=b('Create private generators',()=>{
+  const slugs=[...new Set(input.value.split(/[\s,;]+/).map(x=>x.trim()).filter(Boolean))];
+  if(!slugs.length||slugs.length>100||slugs.some(x=>!/^[a-z0-9][a-z0-9-]{0,99}$/.test(x))){
+   status.textContent='Enter 1–100 valid lowercase generator names using letters, numbers and hyphens.';return;
+  }
+  const pinned=choice.value||null;submit.disabled=true;input.disabled=true;choice.disabled=true;
+  status.textContent='Saving the creation requests. No unverified remote effects are being claimed.';
+  void (async()=>{
+   let accepted=0,uncertain=0;const rejected=[];
+   for(const slug of slugs){
+    const intentId='ui_'+crypto.randomUUID().replaceAll('-','');
+    try{
+     const out=await readPort('pcms-s00-coordinator','ACCEPT_CREATE_INTENT',{
+      intentId,slug,origin:'OPERATOR',...(pinned?{accountId:pinned}:{})},20000);
+     if(out?.ok&&out.record?.slug===slug)accepted++;
+     else rejected.push(slug);
+    }catch{uncertain++;}
+   }
+   status.textContent=accepted+' generator request(s) saved'+
+     (uncertain?' · '+uncertain+' have unknown acknowledgment; do not resubmit until checked':'')+
+     (rejected.length?' · '+rejected.length+' held':'')+
+     '. Protected creation and Git association continue through the background queue.';
+   try{await browser.alarms.create('pcms-s04-creation-followup',{when:Date.now()+1000})}catch{}
+   await loadGenerators();submit.disabled=false;input.disabled=false;choice.disabled=false;
+  })();
+ },'btn primary');
+ body.append(submit,status);drawer.append(body);backdrop.append(drawer);root.append(backdrop);
+ backdrop.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ backdrop.addEventListener('click',e=>{if(e.target===backdrop)close()});
+ input.focus();
+}
+async function syncManagedInventories(){
+ const verified=state.lastAccountList.filter(a=>a.state==='VERIFIED');
+ if(!verified.length){notify('No verified account is available for a protected inventory check.');return}
+ notify('Checking owned inventory for '+verified.length+' verified account(s)…');
+ let good=0,held=0;
+ for(const account of verified){
+  try{
+   const out=await readPort('pcms-i04-inventory','SYNC_ACCOUNT',{
+    accountId:account.accountId,expectedRevision:account.revision},100000);
+   if(out?.ok)good++;else held++;
+  }catch{held++;}
+ }
+ notify('Inventory check finished: '+good+' confirmed, '+held+
+   ' unverified. No missing remote generator has been inferred.');
+ await loadGenerators();
+}
 async function loadAccounts(){
  try{const result=await accounts();state.lastAccountList=Array.isArray(result.accounts)?result.accounts:[];state.errors.accounts='';if(state.route==='accounts')displayAccounts();return state.lastAccountList}
  catch(error){state.errors.accounts=error.message;state.lastAccountList=[];if(state.route==='accounts')displayAccounts();return []}
@@ -296,15 +654,90 @@ function displayAccounts(){if(state.route!=='accounts')return;
   data.append(h,details);
   const right=el('div','account-right');const status=String(item.state||'UNKNOWN');const label=status==='VERIFIED'?'Ready':status==='ARCHIVED'?'Archived':status.replaceAll('_',' ').toLowerCase();
   right.append(statusPill(label,status==='VERIFIED'?'green':status==='ARCHIVED'?'':'amber'));
-  right.append(b('Manage',()=>{
-    state.nativeOpen=true;
-    nativeRoute('accounts');
-    const rowNode=[...native.querySelectorAll('[data-pcms-v014-account-id]')].find(e=>e.dataset.pcmsV014AccountId===item.accountId);
-    rowNode?.scrollIntoView({block:'center'});rowNode?.querySelector('summary')?.click();
-  }));row.append(mark,data,right);list.append(row);
+  right.append(b('Manage',()=>openAccountManager(item)));row.append(mark,data,right);list.append(row);
  }
  const pagination=shadow('.pagination span');if(pagination)pagination.textContent=state.errors.accounts?'Account read unavailable':`${displayed.length?offset+1:0}–${Math.min(offset+state.acct.perPage,displayed.length)} of ${displayed.length} matching local accounts`;
  const prev=shadow('[data-action="account-prev"]'),next=shadow('[data-action="account-next"]');if(prev)prev.disabled=state.acct.page===0;if(next)next.disabled=offset+state.acct.perPage>=displayed.length;
+}
+// The primary account interface issues only the same typed, revision-fenced
+// commands as the original account controller. No route/Persona authority lives
+// in the UI and status ACKs are never mistaken for finished remote effects.
+async function startAccountEnrollment(){
+ if(!window.confirm('Add a new managed account? PCMS will prepare a protected Persona and open the Perchance login tab when the route is ready.'))return;
+ notify('Starting protected account setup…');
+ try{
+  const out=await readPort('pcms-i03-accounts','ADD_ACCOUNT',{},90000);
+  notify(out?.ok?'Account setup started. Complete the login when prompted, then confirm it in Accounts.':
+    'Account setup could not start. Review the account and protected route status.');
+ }catch{notify('Account setup could not be confirmed. Check the Accounts list before retrying.');}
+ await loadAccounts();
+}
+function openAccountManager(item){
+ const previous=root.activeElement;
+ const overlay=el('div','drawer-overlay'),dialog=el('div','drawer');
+ dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');
+ dialog.setAttribute('aria-label','Manage protected account');
+ const header=el('div','drawer-head'),title=el('h2','drawer-title','Account management'),actions=el('div','form-foot');
+ const status=el('p','setting-note','Operations use the existing protected Persona and current account revision.');
+ function close(){overlay.remove();if(previous?.isConnected)previous.focus({preventScroll:true})}
+ header.append(title,b('Close',close));
+ const body=el('div','drawer-body'),meta=el('dl');
+ for(const [label,value] of [['Account',item.accountId],['State',item.state||'Unknown'],
+   ['Persona',item.personaUid||'Not observed'],['Route',item.protectedRoute||'Not verified']]){
+  const row=el('div','kv');row.append(el('dt','',label),el('dd','',value));meta.append(row);
+ }
+ body.append(meta,status);
+ const allowed={
+  'Open login':'OPEN_LOGIN','Confirm login':'CONFIRM_LOGIN',
+  'Check protected route':'VERIFY_ROUTE','Sync generator inventory':'SYNC_ACCOUNT',
+  'Resume setup':'RESUME_SETUP','Reactivate':'REACTIVATE',
+  'Archive':'ARCHIVE'};
+ async function execute(kind){
+  if(kind==='ARCHIVE'&&!window.confirm('Archive this account? PCMS preserves its Persona, source history and remote generators. Unfinished external effects must still be reconciled.'))return;
+  if(kind==='REACTIVATE'&&!window.confirm('Reactivate this archived account? PCMS will reverify its protected route and owner before resuming affected work.'))return;
+  const buttonList=[...actions.querySelectorAll('button')];buttonList.forEach(b=>b.disabled=true);
+  status.textContent=kind==='OPEN_LOGIN'?'Opening the protected login tab…':
+    'Checking the current account and applying the requested action…';
+  try{
+   const params={accountId:item.accountId,expectedRevision:item.revision};
+   if(kind==='REACTIVATE')params.explicitReactivation=true;
+   const out=await readPort(kind==='SYNC_ACCOUNT'?'pcms-i04-inventory':'pcms-i03-accounts',
+     kind,params,kind==='CONFIRM_LOGIN'||kind==='SYNC_ACCOUNT'?100000:45000);
+   if(out?.ok){
+    status.textContent=kind==='CONFIRM_LOGIN'&&out.state==='VERIFIED'?
+      'Login identity confirmed and saved. Refresh Accounts for current inventory.':
+      kind==='OPEN_LOGIN'?'Protected login tab requested. Return here after logging in.':
+      kind==='SYNC_ACCOUNT'?'Inventory read finished under the account’s protected route.':
+      'Request recorded. Its completion is tracked separately from this acknowledgment.';
+    notify(status.textContent);
+   }else{
+    status.textContent='The action was not confirmed. '+(
+      typeof out?.message==='string'?out.message:
+      'Check account status and prerequisites before retrying.');
+   }
+  }catch{status.textContent='The outcome is uncertain. Refresh Accounts before another action.';}
+  finally{await loadAccounts();buttonList.forEach(b=>b.disabled=false);}
+ }
+ const menu=item.state==='ARCHIVED'?
+   ['Reactivate']:item.state==='PREPARING'?
+   ['Resume setup','Check protected route']:
+   ['Open login','Confirm login','Check protected route','Sync generator inventory','Archive'];
+ for(const label of menu){
+  const button=b(label,()=>void execute(allowed[label]),'btn small');
+  if(label==='Sync generator inventory'&&item.state!=='VERIFIED')button.disabled=true;
+  actions.append(button);
+ }
+ body.append(actions);dialog.append(header,body);overlay.append(dialog);root.append(overlay);
+ overlay.addEventListener('keydown',event=>{
+  if(event.key==='Escape'){event.preventDefault();close();}
+  if(event.key==='Tab'){
+   const controls=[...dialog.querySelectorAll('button:not(:disabled)')],index=controls.indexOf(root.activeElement);
+   if(event.shiftKey&&index===0){event.preventDefault();controls.at(-1)?.focus();}
+   else if(!event.shiftKey&&index===controls.length-1){event.preventDefault();controls[0]?.focus();}
+  }
+ });
+ overlay.addEventListener('click',event=>{if(event.target===overlay)close()});
+ header.querySelector('button')?.focus({preventScroll:true});
 }
 async function loadGenerators(){if(state.route!=='generators')return;
  const epoch=++state.renderEpoch,body=shadow('.workspace-surface table tbody');if(!body)return;
@@ -354,7 +787,7 @@ async function loadRefresher(){if(state.route!=='refresher')return;
  try{
   const phase=state.ref.phase;
   // Backend supports phases ALL/ACTIVE/SLEEPING/WAITING. No invented HELD phase.
-  const serverPhase=['ALL','ACTIVE','SLEEPING','WAITING'].includes(phase)?phase:'ALL';
+  const serverPhase=['ALL','ACTIVE','SLEEPING','WAITING','HELD','INELIGIBLE'].includes(phase)?phase:'ALL';
   const result=await refresher({query:state.ref.query,phase:serverPhase,offset:state.ref.offset,limit:state.ref.limit});
   if(epoch!==state.renderEpoch||state.route!=='refresher')return;
   state.ref.snapshot=result;state.lastRef=result;state.ref.items=Array.isArray(result.items)?result.items:[];
@@ -367,9 +800,7 @@ async function loadRefresher(){if(state.route!=='refresher')return;
 function displayRefresher(){if(state.route!=='refresher')return;
  const res=state.ref.snapshot;if(!res)return;
  const table=shadow('.ref-table-scroll tbody');if(!table)return;table.replaceChildren();
- const unsupported=['Held','Ineligible'].includes(state.ref.phase);
- const items=unsupported?state.ref.items.filter(x=>state.ref.phase==='Held'?x.paused||x.blockers?.length:
-  (x.blockers?.length||x.phase==='WAITING')):state.ref.items;
+ const items=state.ref.items;
  state.ref.visibleItems=items;
  for(const [i,row] of items.entries()){
   const tr=tableRow([row.slug],i);
@@ -382,9 +813,9 @@ function displayRefresher(){if(state.route!=='refresher')return;
   const remaining=el('td','muted-cell tabnums',remain);const cue=el('td','open-col');cue.append(icon('chevron'));
   tr.append(first,st,remaining,cue);table.append(tr);
  }
- if(!items.length)rowsError('.ref-table-scroll tbody',unsupported?'No matching records in this server page; full-fleet filter unavailable.':'No matching locally managed generators. Remote status unknown.',4);
+ if(!items.length)rowsError('.ref-table-scroll tbody','No matching locally managed generators in this fleet-wide filter. Remote status unknown.',4);
  text('.ref-table-heading .muted',safeCount(res.total)+' matching');
- const s=shadow('.ref-pagination span');if(s)s.textContent=`${res.total?state.ref.offset+1:0}–${Math.min(state.ref.offset+state.ref.limit,res.total)} of ${res.total} · canonical local records${unsupported?' · filtered on this page':''}`;
+ const s=shadow('.ref-pagination span');if(s)s.textContent=`${res.total?state.ref.offset+1:0}–${Math.min(state.ref.offset+state.ref.limit,res.total)} of ${res.total} · canonical fleet-filtered local records`;
  const prev=shadow('[data-action="ref-prev"]'),next=shadow('[data-action="ref-next"]');if(prev)prev.disabled=state.ref.offset===0;if(next)next.disabled=state.ref.offset+state.ref.limit>=res.total;
  for(const b of shadow('.ref-tabs')?.querySelectorAll('[data-filter]')||[]){const value=b.dataset.filter.split(':')[1];b.setAttribute('aria-selected',String(value.toUpperCase()===state.ref.phase.toUpperCase()));b.tabIndex=b.getAttribute('aria-selected')==='true'?0:-1}
  const side=shadow('.ref-side');if(side){
@@ -411,89 +842,723 @@ async function refreshRefCounts(epoch){
  if(epoch!==state.renderEpoch||state.route!=='refresher')return;
  const vals=shadow('.ref-kpi-strip')?.querySelectorAll('.ref-kpi strong.tabnums');if(vals)reads.forEach((r,i)=>{vals[i].textContent=r.status==='fulfilled'?safeCount(r.value.total):'—'});
 }
-function observedReceipts(){
- const sources=[
-  ['Review queue','pcms-s06-review-queue','work-queue','release'],
-  ['AI development','pcms-ai-jobs','work-queue','ai'],
-  ['Generator supply','pcms-supply-items','generators','create'],
-  ['Private staging','pcms-stage-queue','work-queue','activity'],
-  ['Source updates','pcms-existing-status','work-queue','update'],
-  ['Backup / restore','pcms-restore-status','settings','backup']
- ];
- const out=[];
- for(const [label,id,route,group] of sources){const e=nativeControl(id);if(!e)continue;
-  // These are canonical native view text projections. Never turn a missing or
-  // generic loading string into a synthetic queued/running job.
-  const t=snippet(e.textContent,260);
-  if(!t||/^(checking|loading|no |none|awaiting|ready to |read unavailable|unknown)/i.test(t))continue;
-  const needs=/hold|fail|uncertain|error|approval|review|conflict|reconcile|denied|unavailable/i.test(t);
-  const running=/running|dispatch|in.progress|processing|prepared/i.test(t);
-  const waiting=/waiting|pending|queued|next|sleep/i.test(t);
-  out.push({label,text:t,route,group,needs,running,waiting});
- }
- return out;
+// Canonical queue only: no status derived from native view text.
+const queueState={
+ PREPARED:['Waiting',''],DISPATCH_POSSIBLE:['Outcome not confirmed','amber'],
+ OBSERVING:['Verifying result',''],HELD_UNCERTAIN:['Needs reconciliation','amber'],
+ CONFIRMED:['Confirmed','green'],ABORTED:['Cancelled',''],
+ REJECTED:['Rejected','amber']};
+function queueGroup(filter){
+ return ({'Needs action':'NEEDS_ACTION',Running:'RUNNING',Waiting:'WAITING',
+   Completed:'COMPLETED',All:'ALL'})[filter]||'NEEDS_ACTION';
 }
-function displayQueue(){if(state.route!=='work-queue')return;const receipts=observedReceipts();const filtered=receipts.filter(x=>{
- const f=state.queue.filter;const pass=f==='All'||f==='Needs action'&&x.needs||f==='Running'&&x.running||f==='Waiting'&&x.waiting||f==='Completed'&&/complete|success|verified/i.test(x.text);
- const q=state.queue.query.toLowerCase();return pass&&(!q||(x.text+' '+x.label).toLowerCase().includes(q));
- });
- const body=shadow('.queue-list');if(!body)return;body.replaceChildren();
- if(!filtered.length)renderEmpty(body,'No matching local operation receipts currently observed. This does not establish remote health.');
- for(const item of filtered.slice(0,30)){
-  const row=el('div','queue-item');const mark=el('span','row-mark'+(item.needs?' warn':''));mark.append(icon(item.needs?'alert':'activity'));
-  const inner=el('div','row-body');const hd=el('div','queue-head');hd.append(el('strong','',item.label));
-  hd.append(statusPill(item.needs?'Needs attention':item.running?'Running':item.waiting?'Waiting':'Observed',item.needs?'amber':''));
-  inner.append(hd,el('div','row-meta',item.text));
-  const btn=b('Inspect',()=>nativeAction(item.route,item.group));row.append(mark,inner,btn);body.append(row);
+async function loadQueue(reset=false){
+ if(state.route!=='work-queue')return;
+ const q=state.queue;
+ if(reset){q.opCursor='';q.noticeCursor='';q.aiCursor='';q.readyCursor='';q.history=[];q.nextOps=null;q.nextNotices=null;q.nextAi=null;q.nextReady=null;}
+ const epoch=++q.epoch;
+ q.loading=true;q.error=null;displayQueue();
+ const includeNotices=q.filter==='Needs action'||q.filter==='All';
+ const requested=[
+   q.opCursor!==null?guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{
+     after:q.opCursor,limit:20,status:queueGroup(q.filter),query:q.query}):
+     Promise.resolve({ok:true,items:[],more:false,next:null}),
+   includeNotices&&q.noticeCursor!==null?
+     guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_PAGE',{
+       after:q.noticeCursor,limit:20,query:q.query}):Promise.resolve({ok:true,items:[],more:false,next:null}),
+   guardedRead('pcms-i02-canonical-readonly','SUMMARY'),
+   guardedRead('pcms-i02-canonical-readonly','NOTICE_SUMMARY'),
+   guardedRead('pcms-i13-release','LIST_REVIEW',{after:'',limit:40})
+     .catch(()=>({ok:false,items:[]})),
+   q.aiCursor!==null?guardedRead('pcms-i10-ai','LIST_JOBS',{
+     after:q.aiCursor,limit:20,query:q.query.slice(0,100),status:queueGroup(q.filter)
+   }).catch(()=>({ok:false,jobs:[],more:false,nextCursor:null})):
+     Promise.resolve({ok:true,jobs:[],more:false,nextCursor:null}),
+   q.readyCursor!==null?guardedRead('pcms-s03-catalog','LIST_READY',{
+     after:q.readyCursor,limit:20,query:q.query.slice(0,100),status:queueGroup(q.filter)
+   }).catch(()=>({ok:false,items:[],more:false,nextCursor:null})):
+     Promise.resolve({ok:true,items:[],more:false,nextCursor:null}),
+   guardedRead('pcms-r4-folder-identity','LIST')
+     .catch(()=>({ok:false,items:[],missingFolders:[]}))
+ ];
+ try{
+  const [ops,notices,summary,noticeTotals,releases,ai,ready,identities]=await Promise.all(requested);
+  if(state.route!=='work-queue'||q.epoch!==epoch)return;
+  q.operations=ops.items||[];q.incidents=notices.items||[];
+  q.nextOps=ops.more?ops.next:null;q.nextNotices=notices.more?notices.next:null;
+  q.aiUnavailable=ai?.ok!==true;q.aiJobs=ai?.ok?(ai.jobs||[]):[];q.aiMore=ai?.ok&&ai.more===true;
+  q.nextAi=q.aiMore?ai.nextCursor:null;
+  q.readyUnavailable=ready?.ok!==true;q.readyItems=ready?.ok?(ready.items||[]):[];q.readyMore=ready?.ok&&ready.more===true;
+  q.nextReady=q.readyMore?ready.nextCursor:null;
+  q.more=Boolean(ops.more||notices.more||q.aiMore||q.readyMore);q.summary={...summary,attention:noticeTotals};
+  q.releaseItems=releases?.ok?(releases.items||[]):[];
+  q.reviews=identities?.ok?(identities.items||[]):[];
+  q.missing=identities?.ok?(identities.missingFolders||[]):[];
+  q.error=null;
+ }catch(err){
+  if(q.epoch!==epoch)return;
+  q.operations=[];q.incidents=[];q.more=false;q.error=err.message||'LOCAL_QUEUE_UNAVAILABLE';
+ }finally{if(q.epoch===epoch){q.loading=false;displayQueue();}}
+}
+function displayQueue(){
+ if(state.route!=='work-queue')return;
+ const q=state.queue;const holder=shadow('.queue-list');
+ if(!holder)return;holder.replaceChildren();
+ if(q.loading)renderEmpty(holder,'Reading recorded operations and incidents…');
+ else if(q.error)renderEmpty(holder,'The local work queue is unavailable. No operation result has been assumed.');
+ else{
+  if(q.aiUnavailable)
+   holder.append(el('p','setting-note','AI development records could not be read. Their absence here does not mean there is no work.'));
+  if(q.readyUnavailable)
+   holder.append(el('p','setting-note','READY generator records could not be read. Check GitHub connection and local journal availability.'));
+  if((q.filter==='Needs action'||q.filter==='All')&&!q.query)
+   for(const review of q.reviews.filter(r=>['REVIEW_REQUIRED','RENAME_EXISTING_REQUESTED','REMOTE_RENAMED_LINK_PENDING'].includes(r.state)||r.stale)){
+    const row=el('div','queue-item'),mark=el('span','row-mark warn');mark.append(icon('alert'));
+    const content=el('div','row-body');
+    const old=review.oldSlug||'an unresolved existing generator';
+    const title=el('strong','',review.oldSlug?
+      'Review possible source-folder rename':'Review new folder with conflicting identity');
+    content.append(title,el('p','setting-note',
+      'GitHub contains '+review.newSlug+' while '+old+
+      ' is no longer recognized. The live generator is unchanged.'));
+    if(review.stale){
+      content.append(el('p','setting-note',
+        'The Git source changed after this review began. Refresh the catalog before choosing.'));
+    }else if(review.state==='RENAME_EXISTING_REQUESTED'){
+      const stateNote=el('p','setting-note','Reading the existing-generator rename stage…');
+      const actions=el('div','form-foot');content.append(stateNote,actions);
+      void (async()=>{
+       let attempt;
+       try{attempt=await readPort('pcms-r4-folder-identity','GET_RENAME_ATTEMPT',{
+        newSlug:review.newSlug},15000)}
+       catch{}
+       if(!row.isConnected)return;
+       actions.replaceChildren();
+       if(!attempt?.ok){stateNote.textContent='Rename safety state unavailable. No live operation is permitted.';return;}
+       const stage=attempt.state;
+       const label=stage==='NOT_PREPARED'?'Pending owner/source verification':
+         stage==='RENAME_PREPARED'?'Verified for one guarded rename attempt':
+         stage==='DISPATCH_POSSIBLE'||stage==='OUTCOME_UNCERTAIN'?
+          'Remote outcome uncertain — do not retry':
+         stage==='REMOTE_RENAME_VERIFIED_LINK_PENDING'?
+          'Remote identity verified; source association still pending':
+          'The rename requires additional review';
+       stateNote.textContent=label;
+       async function next(type,revision){
+        const text=type==='PREPARE_RENAME'?
+          'Read the protected owner and entire existing source to prepare an exact one-time rename? No remote change occurs during preparation.':
+          type==='EXECUTE_RENAME'?
+          'Rename the EXISTING owned Perchance generator now? Renaming may break imports, URLs or slug-dependent storage. Its complete original source must remain unchanged. This request may have an uncertain outcome and will never be automatically retried.':
+          'Read back the possibly completed remote rename without executing any new provider write?';
+        if(!window.confirm(text))return;
+        actions.querySelectorAll('button').forEach(x=>x.disabled=true);
+        stateNote.textContent='Checking protected account, source and current Git identity…';
+        try{
+         const result=await readPort('pcms-r4-folder-identity',type,{
+          newSlug:review.newSlug,expectedRevision:revision,
+          ...(type==='EXECUTE_RENAME'?{consent:'I APPROVE THE EXACT EXISTING GENERATOR RENAME'}:{})},
+          type==='EXECUTE_RENAME'?120000:95000);
+         stateNote.textContent=result?.ok?
+          type==='EXECUTE_RENAME'?'One rename attempt may have occurred. Reconcile the remote result; do not retry.':
+          type==='RECONCILE_RENAME'?
+           'Remote name and original source verified. Synchronize the account inventory and associate the new Git folder before any development.':
+           'Existing owner and original source verified. A single rename attempt can now be explicitly authorized.':
+          'The operation was held. Inspect the current scope before taking another action.';
+        }catch{stateNote.textContent='Outcome could not be confirmed. Do not retry a possible rename. Read current stage.'}
+        await loadQueue(true);
+       }
+       if(stage==='NOT_PREPARED')
+         actions.append(b('Verify owner and prepare rename',()=>void next('PREPARE_RENAME',review.revision),'btn small'));
+       if(stage==='RENAME_PREPARED')
+         actions.append(b('Execute one verified rename',()=>void next('EXECUTE_RENAME',attempt.revision),'btn primary'));
+       if(stage==='DISPATCH_POSSIBLE'||stage==='OUTCOME_UNCERTAIN')
+         actions.append(b('Reconcile remote rename',()=>void next('RECONCILE_RENAME',attempt.revision),'btn small'));
+       if(stage==='REMOTE_RENAME_VERIFIED_LINK_PENDING'){
+         actions.append(b('Verify inventory and finish rename',()=>void (async()=>{
+           if(!window.confirm('Finish reconciliation only if the new generator inventory and Git source association are independently verified? This does not perform another remote rename.'))return;
+           stateNote.textContent='Checking new owner, remote identity and exact Git source association…';
+           try{
+             const result=await readPort('pcms-r4-folder-identity','FINALIZE_RENAME',{
+               newSlug:review.newSlug,expectedRevision:attempt.revision},45000);
+             stateNote.textContent=result?.ok&&result.state==='RENAME_COMPLETED'?
+               'New identity and source association verified. Previous source history retained.':
+               'The new inventory or source association is not yet independently verified. No remote change was attempted.';
+           }catch{stateNote.textContent='Reconciliation could not be confirmed. Remote rename will not be repeated.'}
+           await loadQueue(true);
+         })(),'btn small'));
+         actions.append(b('Open new generator source',()=>{
+           state.gen.query=review.newSlug;state.gen.offset=0;routeTo('generators');
+         },'btn small'));
+       }
+      })();
+    }else if(review.state==='REMOTE_RENAMED_LINK_PENDING'){
+      content.append(el('p','setting-note',
+        'Remote rename readback was recorded. The inventory and new source link must still be verified.'));
+      content.append(b('Open generators',()=>routeTo('generators'),'btn small'));
+    }else{
+      const actions=el('div','form-foot');
+      async function choose(choice){
+       const prompt=choice==='CREATE_SEPARATE'?
+        'Keep the original generator unchanged and authorize a separate new generator from this Git folder? Normal owner, route, source and publication safety checks still apply.':
+        'Request renaming the verified existing generator? PCMS will hold this request until ownership, route and source safety are independently confirmed. No rename occurs now.';
+       if(!window.confirm(prompt))return;
+       try{
+        const answer=await readPort('pcms-r4-folder-identity','CHOOSE',{
+         newSlug:review.newSlug,choice,expectedTreeOid:review.newTreeOid,
+         expectedRevision:review.revision},12000);
+        if(!answer?.ok){notify('The identity choice could not be confirmed. Refresh and review again.');return;}
+        notify(choice==='CREATE_SEPARATE'?
+          'Separate identity recorded. The next complete Git scan will check eligibility.':
+          'Rename request recorded. The existing generator has not been changed.');
+        await loadQueue(true);
+       }catch{notify('The review result is uncertain. Refresh before taking another action.');}
+      }
+      const rename=b('Rename verified existing',()=>void choose('RENAME_EXISTING'),'btn small');
+      rename.disabled=!review.oldSlug;
+      actions.append(rename,b('Create separate generator',()=>void choose('CREATE_SEPARATE'),'btn small'));
+      content.append(actions);
+    }
+    row.append(mark,content);holder.append(row);
+   }
+  if((q.filter==='Needs action'||q.filter==='All')&&!q.query)
+   for(const slug of q.missing.slice(0,30)){
+    const row=el('div','queue-item'),mark=el('span','row-mark warn');mark.append(icon('alert'));
+    const data=el('div','row-body');
+    data.append(el('strong','','Git source missing: '+slug),
+      el('p','setting-note',
+       'The folder was absent from a complete main snapshot. The live generator has not been deleted or unlisted.'));
+    row.append(mark,data);holder.append(row);
+   }
+  if(q.filter==='Needs action'||q.filter==='All'||q.filter==='Waiting')
+   for(const candidate of q.releaseItems.filter(x=>q.filter==='All'||
+      q.filter==='Waiting'?x.state!=='CONFIRMED_PUBLIC':
+        ['READY_FOR_REVIEW','EXCEPTION_READY_FOR_REVIEW','BLOCKED','WAITING_FOR_GIT'].includes(x.state))){
+    if(q.query&&!candidate.slug.includes(q.query.toLowerCase()))continue;
+    const row=el('div','queue-item');const detail=el('div','row-body');
+    detail.append(el('strong','',candidate.slug),
+      el('p','setting-note',candidate.state==='READY_FOR_REVIEW'?
+        'Final tested source is ready for individual publication review.':
+        candidate.state==='EXCEPTION_READY_FOR_REVIEW'?
+        'Exceptional candidate — manual evidence and incomplete tests require individual review.':
+        'Candidate state: '+candidate.state.replaceAll('_',' ').toLowerCase()));
+    const action=b('Review candidate',()=>void openReleaseReview(candidate.slug),'btn small');
+    if(!['READY_FOR_REVIEW','EXCEPTION_READY_FOR_REVIEW'].includes(candidate.state))
+      action.disabled=true;
+    row.append(el('span','row-mark', '•'),detail,action);holder.append(row);
+   }
+  for(const candidate of q.readyItems||[]){
+   const active=Boolean(candidate.active),desired=Boolean(candidate.desired);
+   const held=!!candidate.hold&&candidate.hold!=='NONE';
+   const eligible=q.filter==='All'||
+     (q.filter==='Needs action'&&(held||desired))||
+     (q.filter==='Waiting'&&!held&&(active||desired))||
+     (q.filter==='Completed'&&!held&&!active&&!desired);
+   if(!eligible||(q.query&&!candidate.slug.includes(q.query.toLowerCase())))continue;
+   const row=el('div','queue-item'),detail=el('div','row-body');
+   const label=held?'Candidate needs review':desired?'New READY revision pending':
+     active?'READY candidate recorded':'No currently eligible candidate';
+   const heading=el('div','queue-head');
+   heading.append(el('strong','',candidate.slug),statusPill(label,held?'amber':''));
+   detail.append(heading,el('p','setting-note',
+     'Committed main READY declaration · protected source, account, route and editor admission are verified separately.'));
+   row.append(el('span','row-mark'+(held?' warn':'')),detail,
+     b('Review READY',()=>void openReadyCandidate(candidate),'btn small'));
+   holder.append(row);
+  }
+  for(const job of q.aiJobs||[]){
+   const currentState=job.state||'NOT_VERIFIED';
+   const complete=currentState==='TESTS_VERIFIED'||job.slotReleased===true;
+   const needs=['HELD_RECONCILE','KNOWN_FAILURE','HELD_NO_PROGRESS','TESTS_UNVERIFIED','PENDING_NATIVE_SESSION'].includes(currentState);
+   const running=job.nativeState==='RUNNING_OBSERVED';
+   const match=q.filter==='All'||
+     (q.filter==='Needs action'&&needs)||
+     (q.filter==='Running'&&running)||
+     (q.filter==='Waiting'&&!needs&&!running&&!complete)||
+     (q.filter==='Completed'&&complete);
+   if(!match||(q.query&&!job.slug.toLowerCase().includes(q.query.toLowerCase())))continue;
+   const row=el('div','queue-item'),info=el('div','row-body');
+   const title=el('div','queue-head');
+   title.append(el('strong','',job.slug),
+     statusPill(humanAiStatus(job),needs?'amber':complete?'green':''));
+   info.append(title,el('p','setting-note',
+    'AI development · '+(job.promptSource==='GIT_MAIN_CHAT1_PINNED'?
+      'GitHub-pinned development instructions':'Local development instructions')+
+    ' · Test evidence: '+(job.evidence?.state==='VERIFIED'?'Verified':
+       'Not independently verified')));
+   const open=b('Manage development',()=>void openAiJob(job.slug),'btn small');
+   row.append(el('span','row-mark'+(needs?' warn':'')),info,open);holder.append(row);
+  }
+  for(const n of q.incidents){
+   const row=el('div','queue-item');
+   const marker=el('span','row-mark warn');marker.append(icon('alert'));
+   const detail=el('div','row-body');
+   const header=el('div','queue-head');
+   const issueTitle={
+    GIT_FOLDER_MISSING:'GitHub source folder missing',
+    GIT_FOLDER_RENAME_REVIEW:'Possible source-folder rename',
+    GIT_RECONNECT_REQUIRED:'GitHub connection needs attention',
+    ROUTE_UNAVAILABLE:'Protected account route unavailable',
+    ACCOUNT_UNVERIFIED:'Account identity needs verification',
+    SOURCE_HELD:'Source needs verification',
+    RESTORE_IN_PROGRESS:'Restore awaiting reconciliation',
+    CANONICAL_UNAVAILABLE:'Local records unavailable',
+    OPERATION_UNCERTAIN:'Operation outcome uncertain',
+    PROVIDER_OUTAGE:'Provider connection interrupted',
+    BACKUP_FAILED:'Encrypted backup needs attention'
+   }[n.code]||'An operational issue needs review';
+   header.append(el('strong','',issueTitle),
+     statusPill(n.reviewed?'Reviewed — still active':'Needs attention','amber'));
+   detail.append(header,el('div','row-meta',
+     'Recorded local issue · '+(Number.isFinite(n.lastAt)?new Date(n.lastAt).toLocaleString():'time not recorded')));
+   const action=el('button','btn small',n.reviewed?'Reviewed':'Mark reviewed');
+   action.type='button';
+   action.addEventListener('click',async()=>{action.disabled=true;
+    try{
+     const out=await readQueueNoticeAck(n);
+     if(out?.ok&&out.stillActionable===true)await loadQueue(true);
+     else notify('Review not confirmed. Incident remains active.');
+    }catch{notify('Review not confirmed. Incident remains active.');}
+    finally{action.disabled=n.reviewed;}
+   },{once:true});
+   action.disabled=n.reviewed;row.append(marker,detail,action);holder.append(row);
+  }
+  for(const op of q.operations){
+   const row=el('div','queue-item');const info=queueState[op.status]||['Not verified',''];
+   const marker=el('span','row-mark'+(info[1]==='amber'?' warn':''));marker.append(icon(info[1]==='amber'?'alert':'activity'));
+   const detail=el('div','row-body'),header=el('div','queue-head');
+   header.append(el('strong','',op.effectType?.replaceAll('_',' ')||'Recorded operation'),statusPill(info[0],info[1]));
+   detail.append(header,el('div','row-meta',
+     'Protected operation'+(Number.isFinite(op.updatedAt)?
+      ' · last recorded '+new Date(op.updatedAt).toLocaleString():
+      ' · last update not recorded')));
+   const action=b('Inspect',()=>openOperationRecord(op));
+   row.append(marker,detail,action);holder.append(row);
+  }
+  if(!holder.children.length)
+    renderEmpty(holder,q.more?'No matches on this page. More recorded work may be available on subsequent pages.':
+      'No matching verified local work records. This is not proof of remote health.');
  }
+ const counts=q.summary?.states||{},attention=q.summary?.attention?.counts||{};
+ const needs=(counts.HELD_UNCERTAIN||0)+(counts.REJECTED||0)+(counts.DISPATCH_POSSIBLE||0)+
+   (q.reviews||[]).filter(x=>x.state==='REVIEW_REQUIRED').length+
+   (attention.actionRequired||0)+(attention.serious||0);
+ const running=counts.OBSERVING||0,waiting=counts.PREPARED||0,completed=(counts.CONFIRMED||0)+(counts.ABORTED||0);
  const counters=shadow('.queue-stats');if(counters){counters.replaceChildren();
- for(const [label,num] of [['need action',receipts.filter(x=>x.needs).length],['running',receipts.filter(x=>x.running).length],['waiting',receipts.filter(x=>x.waiting).length]]){
-  const tag=el('span');tag.append(el('strong','',num),document.createTextNode(' '+label));counters.append(tag)}
+  for(const [label,num] of [['need action',needs],['verifying',running],['waiting',waiting]]){
+   const tag=el('span');tag.append(el('strong','',q.summary?.ok?num:'—'),document.createTextNode(' '+label));counters.append(tag)}
  }
  for(const tab of shadow('.tabs[aria-label="Work queue status"]')?.querySelectorAll('[data-filter]')||[]){
-  const filter=tab.dataset.filter.split(':')[1];const count=tab.querySelector('.count');const n=filter==='Needs action'?receipts.filter(x=>x.needs).length:filter==='Running'?receipts.filter(x=>x.running).length:
-    filter==='Waiting'?receipts.filter(x=>x.waiting).length:filter==='Completed'?receipts.filter(x=>/complete|success|verified/i.test(x.text)).length:receipts.length;
-  if(count)count.textContent=n;
-  tab.setAttribute('aria-selected',String(filter===state.queue.filter));
+  const f=tab.dataset.filter.split(':')[1],badge=tab.querySelector('.count');
+  const count=f==='Needs action'?needs:f==='Running'?running:f==='Waiting'?waiting:f==='Completed'?completed:
+    needs+running+waiting+completed;
+  if(badge)badge.textContent=q.summary?.ok&&!q.query?count:'—';
+  tab.setAttribute('aria-selected',String(f===q.filter));
  }
- const foot=shadow('.pagination span');if(foot)foot.textContent=receipts.length+' observed native receipts · local only';
- for(const b of shadow('.pagination')?.querySelectorAll('button[data-action^="queue-"]')||[])b.disabled=true;
+ const foot=shadow('.pagination span');if(foot)foot.textContent=q.loading?'Loading recorded work…':
+  q.error?'Local journal unavailable':q.operations.length+q.incidents.length+q.aiJobs.length+q.readyItems.length+' journal, READY and AI records on this page · no remote success inferred';
+ const prev=shadow('[data-action="queue-prev"]'),next=shadow('[data-action="queue-next"]');
+ if(prev)prev.disabled=q.loading||q.history.length===0;
+ if(next)next.disabled=q.loading||!q.more;
+}
+// Human publication review: sealed source evidence and exact candidate
+// fingerprint are provided by the protected release boundary. The UI cannot
+// invent PASS, bypass source/route checks or publish from a review ACK.
+async function openReleaseReview(slug){
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),dialog=el('div','drawer');
+ dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');
+ dialog.setAttribute('aria-label','Review exact candidate for '+slug);
+ const close=()=>{overlay.remove();if(previous?.isConnected)previous.focus({preventScroll:true})};
+ const head=el('div','drawer-head');head.append(el('h2','drawer-title','Review '+slug),b('Close',close));
+ dialog.append(head);
+ const body=el('div','drawer-body'),status=el('p','setting-note','Verifying the exact final candidate and tests…');
+ status.setAttribute('role','status');body.append(status);dialog.append(body);overlay.append(dialog);root.append(overlay);
+ head.querySelector('button')?.focus();
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ let view;
+ try{view=await readPort('pcms-i13-release','PREVIEW',{slug},95000)}
+ catch{status.textContent='Review cannot open until secure GitHub access and source evidence are available.';return}
+ if(!overlay.isConnected)return;
+ if(!view?.ok){status.textContent='The final source is not currently eligible for review. No approval or publication was attempted.';return}
+ status.textContent=view.mode==='INDIVIDUAL_EXCEPTIONAL_MANUAL_REVIEW'?
+  'Exceptional manual review: AI testing is not fully verified.':
+  'Candidate source, test results and Git revision verified for this review snapshot.';
+ const summary=el('dl');
+ for(const [label,value] of [['Candidate source',view.sourceFingerprint],
+   ['Previous source',view.previousFingerprint],['Pinned Git main',view.gitHead],
+   ['Testing result',view.tests?.state||'Unverified'],['Publication', 'Not yet approved']]){
+  const pair=el('div','kv');pair.append(el('dt','',label),el('dd','',value));summary.append(pair);
+ }
+ body.append(summary);
+ const checks=el('div','');
+ checks.append(el('h3','','Required test observations'));
+ for(const t of [...(view.tests?.default||[]),...(view.tests?.optional||[])]){
+  checks.append(el('p','setting-note',t.name+' — '+(t.result||'UNVERIFIED')));
+ }
+ body.append(checks,el('h3','','Full-source change manifest'));
+ const changes=el('div','queue-list'),seen=new Set();
+ const changedPaths=new Set((view.diff||[]).map(x=>x.path).filter(Boolean));
+ for(const file of view.files||[]){
+  const row=el('div','queue-item');
+  const label=el('span','',file.path+' · '+file.size+' bytes'+
+    (changedPaths.has(file.path)?' · changed':' · unchanged'));
+  const inspect=b('Read exact file',()=>void (async()=>{
+   inspect.disabled=true;
+   let bytes=[],next=0,total=0,error=false;
+   do{
+    let r;
+    try{r=await readPort('pcms-i13-release','GET_REVIEW_CHUNK',{
+      slug,stageRevision:view.stageRevision,fingerprint:view.sourceFingerprint,
+      origin:'F',path:file.path,offset:next},30000)}
+    catch{error=true;break}
+    if(!r?.ok||r.fileSha256!==file.sha256){error=true;break}
+    const data=Uint8Array.from(atob(r.base64),x=>x.charCodeAt(0));
+    bytes.push(data);total+=data.length;next=r.nextOffset;
+    if(total>16*1024*1024){error=true;break}
+   }while(next!==null);
+   if(error){notify('Exact file read could not be confirmed. Approval remains a separate decision.');inspect.disabled=false;return}
+   const data=new Uint8Array(total);let offset=0;
+   for(const part of bytes){data.set(part,offset);offset+=part.length}
+   const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data)))
+     .map(x=>x.toString(16).padStart(2,'0')).join('');
+   if(digest!==file.sha256){notify('File bytes did not match verified source fingerprint.');inspect.disabled=false;return}
+   seen.add(file.path);
+   const details=el('pre','source-preview');
+   details.textContent=/\.(?:pjs|html|js|css|md|json|txt)$/i.test(file.path)?
+     new TextDecoder().decode(data):'Binary file verified: SHA-256 '+digest;
+   row.append(details);inspect.textContent='Verified and viewed';inspect.disabled=true;
+  })(),'btn small');
+  row.append(label,inspect);changes.append(row);
+ }
+ body.append(changes);
+ const footer=el('div','form-foot');
+ const instructions=el('textarea','form-input');instructions.rows=3;
+ instructions.placeholder='Optional request: describe changes needed to the tested candidate';
+ instructions.setAttribute('aria-label','Request changes to candidate');
+ const requestChanges=b('Request changes',()=>void (async()=>{
+  if(instructions.value.trim().length<3)return;
+  const message=instructions.value.trim();
+  if(!window.confirm('Request these changes? The current candidate will no longer be eligible for unchanged publication approval.'))return;
+  try{
+   const r=await readPort('pcms-i13-release','REQUEST_CHANGES',{
+    slug,expectedStageRevision:view.stageRevision,expectedJobRevision:view.jobRevision,
+    sourceFingerprint:view.sourceFingerprint,instructions:message,
+    ...(view.releaseRevision?{releaseRevision:view.releaseRevision}:{})},95000);
+   status.textContent=r?.ok?'Changes requested. New tested source needs fresh individual review.':
+      'Request was not confirmed. Keep the candidate held.';
+  }catch{status.textContent='Change request outcome unconfirmed; check the candidate record.'}
+ })(),'btn small');
+ const checkLabel=el('label','setting-option'),ack=el('input');ack.type='checkbox';
+ checkLabel.append(ack,document.createTextNode(' I inspected the exact source changes and required test results for this candidate.'));
+ const approve=b('Approve exact candidate',()=>void (async()=>{
+  if(!ack.checked){status.textContent='Review the exact source and tests, then check the approval box.';return}
+  if(!window.confirm('Approve this exact tested candidate for publication? This does not bypass independent provider checks and does not itself publish.'))return;
+  approve.disabled=true;
+  try{
+   const r=await readPort('pcms-i13-release','APPROVE',{
+    slug,expectedStageRevision:view.stageRevision,expectedJobRevision:view.jobRevision,
+    fingerprint:view.sourceFingerprint,explicitApproval:true},95000);
+   status.textContent=r?.ok?'Exact candidate approval recorded. Publication remains subject to protected final checks.':
+     'Approval was not confirmed. The candidate remains held until independently checked.';
+  }catch{status.textContent='Approval outcome uncertain. Check the current release record before retrying.'}
+  await loadQueue(true);
+ })(),'btn primary');
+ footer.append(requestChanges,approve);body.append(instructions,checkLabel,footer);
+}
+// An operation inspector is a read-only projection. A possible dispatched
+// effect cannot be retried from this drawer, even after browser restart.
+function openReadyCandidate(candidate){
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
+ panel.setAttribute('aria-label','READY candidate '+candidate.slug);
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const head=el('div','drawer-head');head.append(el('h2','drawer-title','READY · '+candidate.slug),b('Close',close));
+ const body=el('div','drawer-body'),status=el('p','setting-note',
+   'This is a committed-main declaration, not evidence of a completed generator update.');
+ status.setAttribute('role','status');
+ const facts=el('dl');
+ for(const [label,value] of [['Revision',String(candidate.revision)],
+   ['Current source',candidate.active?.inputFingerprint?.slice(0,16)||'Unverified'],
+   ['Pending source',candidate.desired?.inputFingerprint?.slice(0,16)||'None'],
+   ['Safety hold',candidate.hold||'No local hold recorded']]){
+  const row=el('div','kv');row.append(el('dt','',label),el('dd','',value));facts.append(row);
+ }
+ const actions=el('div','form-foot');
+ async function act(type){
+  if(type!=='ASSESS_READY'&&!window.confirm(
+   type==='PREPARE_LOCAL'?
+    'Prepare a local, revision-bound READY stage after verifying source, protected owner, route and current editor? This does not publish or save the remote generator.':
+    type==='PAUSE_READY'?
+    'Pause automatic development for this READY generator? In-flight uncertain provider writes remain held.':
+    'Resume guarded READY eligibility? No remote effect occurs from this acknowledgment.'))return;
+  [...actions.querySelectorAll('button')].forEach(x=>x.disabled=true);
+  status.textContent=type==='ASSESS_READY'?
+    'Checking current pinned main, owner, source, Persona and editor admission…':
+    'Sending a revision-fenced guarded request. No provider outcome inferred.';
+  try{
+   const out=await readPort('pcms-s05-ready-operator',type,{
+     slug:candidate.slug,expectedRevision:candidate.revision},95000);
+   const friendly={
+    S05_PUBLIC_SLEEP_AND_UNLIST_REQUIRED:'This public generator must first complete its protected sleep/unlisting workflow.',
+    S05_NONEMPTY_TARGET_REQUIRES_RECOVERABLE_PREDECESSOR:'A recoverable previous source is required before this update.',
+    S05_LOCAL_STAGE_PINNED:'A new exact local development stage is prepared. AI execution is separate.',
+    S05_EDITOR_AND_NATIVE_ADMISSION_REQUIRED:'The editor and native AI prerequisites require separate verification.',
+    READY_OPERATOR_PAUSED:'This generator is paused.',
+    READY_REVOKED_NOT_READY:'The latest committed main is no longer READY.',
+    STALE_REVISION:'The candidate changed. Reload the queue before acting again.'
+   };
+   status.textContent=friendly[out?.code]||(out?.ok?
+      'Assessment or local-stage request recorded. Its real provider effects remain separately guarded.':
+      'This operation cannot proceed until the current owner, source and protected editor are verified.');
+  }catch{status.textContent='Outcome unavailable. Refresh the READY candidate before another action.'}
+  await loadQueue(true);
+ }
+ const assess=b('Assess prerequisites',()=>void act('ASSESS_READY'),'btn small');
+ const prepare=b('Prepare local development',()=>void act('PREPARE_LOCAL'),'btn primary');
+ const pause=b(candidate.hold==='OPERATOR_PAUSED'?'Resume READY work':'Pause READY work',
+  ()=>void act(candidate.hold==='OPERATOR_PAUSED'?'RESUME_READY':'PAUSE_READY'),'btn small');
+ actions.append(assess,prepare,pause);body.append(facts,status,actions);panel.append(head,body);
+ overlay.append(panel);root.append(overlay);
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ assess.focus();
+}
+function humanAiStatus(job){
+ const names={
+  PENDING_NATIVE_SESSION:'Ready for guarded AI execution',
+  HELD_RECONCILE:'Session outcome needs reconciliation',
+  TESTS_UNVERIFIED:'Independent tests still required',
+  TESTS_VERIFIED:'Tests independently verified',
+  KNOWN_FAILURE:'Known failure — repair review',
+  HELD_NO_PROGRESS:'Development held',
+  HUMAN_OWNED:'Human-owned work',
+  PREPARED:'Prepared',
+  RUNNING:'In progress'
+ };
+ if(job.nativeState==='RUNNING_OBSERVED')return 'AI session running';
+ return names[job.state]||'Development needs inspection';
+}
+// All progression remains in the original trusted I10 backend: operator inputs
+// are limited to a slug, current revision and named native capability. Neither
+// the UI nor AI text can self-assert tests, Git writes or publication.
+async function openAiJob(slug){
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
+ panel.setAttribute('aria-label','AI development for '+slug);
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const head=el('div','drawer-head');head.append(el('h2','drawer-title','Develop · '+slug),b('Close',close));
+ const body=el('div','drawer-body'),status=el('p','setting-note','Checking the current exact AI job…');
+ status.setAttribute('role','status');body.append(status);
+ const metadata=el('dl'),actions=el('div','form-foot');
+ body.append(metadata,actions);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ head.querySelector('button')?.focus();
+ let pending=false;
+ async function load(){
+  metadata.replaceChildren();actions.replaceChildren();
+  let j;try{j=await readPort('pcms-i10-ai','GET_JOB',{slug},22000)}catch{}
+  if(!overlay.isConnected)return;
+  if(!j?.ok){status.textContent='Canonical AI job unavailable. No action can be authorized.';return;}
+  status.textContent=humanAiStatus(j)+
+    '. Protected owner, clean-editor, session and source-readback checks are applied independently.';
+  for(const [label,value] of [
+   ['Current revision',String(j.revision)],['Saved source',j.sourceFingerprint?.slice(0,16)||'Not verified'],
+   ['Prompt version',String(j.promptRevision??'Unavailable')],
+   ['Native state',(j.nativeState||'Not started').replaceAll('_',' ').toLowerCase()],
+   ['Tests',j.evidence?.state||'Unverified'],
+   ['Provider outcome',j.hold||'No independent effect receipt loaded']]){
+    const row=el('div','kv');row.append(el('dt','',label),el('dd','',value));metadata.append(row);
+  }
+  const opts=[
+   ['Continue development','ADVANCE_JOB',null,
+    !j.slotReleased&&!['TESTS_VERIFIED','HELD_NO_PROGRESS','HUMAN_OWNED'].includes(j.state)],
+   ['Start Chat 1','BEGIN_NATIVE','CHAT1_SEND',j.state==='PENDING_NATIVE_SESSION'],
+   ['Stop running session','BEGIN_NATIVE','STOP',j.nativeState==='RUNNING_OBSERVED'],
+   ['Reconcile session','PROBE_NATIVE',null,
+    ['HELD_RECONCILE','TESTS_UNVERIFIED','KNOWN_FAILURE'].includes(j.state)],
+   ['Run independent tests','RUN_TESTS',null,j.state==='TESTS_UNVERIFIED'],
+   ['Inspect Chat 2 workspace','INSPECT_WORKSPACE',null,
+    j.nativeState==='CHAT2_OBSERVED_IDLE'&&!j.chat2IsolationVerified],
+   ['Verify fresh Chat 2','VERIFY_FRESH_CHAT2',null,
+    j.nativeState==='CHAT2_OBSERVED_IDLE'&&!j.chat2IsolationVerified],
+   ['Repair observed failure','BEGIN_NATIVE',
+    j.nativeState==='CHAT2_OBSERVED_IDLE'?'CHAT2_REPAIR':'CHAT1_REPAIR',
+    j.state==='KNOWN_FAILURE'&&
+    (j.nativeState==='CHAT1_OBSERVED_IDLE'||(j.nativeState==='CHAT2_OBSERVED_IDLE'&&j.chat2IsolationVerified))],
+   ['Reset Chat 2','BEGIN_NATIVE','CHAT2_RESET',j.evidence?.chat1Pass===true],
+   ['Start Chat 2','BEGIN_NATIVE','CHAT2_SEND',j.optionalTestingSha!==null]
+  ];
+  for(const [label,type,step,allowed] of opts){
+   if(!allowed)continue;
+   const button=b(label,()=>void(async()=>{
+    if(pending)return;
+    const mutates=['ADVANCE_JOB','BEGIN_NATIVE','RUN_TESTS','VERIFY_FRESH_CHAT2'].includes(type)&&step!=='STOP';
+    if(mutates&&!window.confirm(
+      'Run the selected guarded '+label.toLowerCase()+' step for '+slug+
+      '? The exact AI job revision, protected account/route, source and native session are revalidated. A lost acknowledgment is never authorization to resend.'))return;
+    pending=true;actions.querySelectorAll('button').forEach(x=>x.disabled=true);
+    status.textContent=type==='PROBE_NATIVE'?
+      'Reading the current session without sending again…':
+      'Checking the exact job and protected runtime. No result is assumed from an acknowledgment.';
+    try{
+     const out=await readPort('pcms-i10-ai',type,{
+      slug,expectedRevision:j.revision,...(step?{step}:{})},95000);
+     status.textContent=out?.ok?
+      type==='RUN_TESTS'?
+       'Test command completed. Review independently observed assertion results and current job state.':
+       'Controller response recorded. Reloading independently verified current job state.':
+      'Action held or result unconfirmed. Read the current job before any further effect.';
+    }catch{
+     status.textContent='The outcome is uncertain. Do not resend a native AI command; reconcile the current session first.';
+    }finally{pending=false;await load();void loadQueue(true);}
+   })(),'btn small');
+   actions.append(button);
+  }
+  if(!actions.children.length)
+   actions.append(el('p','setting-note','No additional native step is currently eligible. Check the protected source or recoverable session.'));
+ }
+ await load();
+}
+function openAiPreparation(){
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
+ panel.setAttribute('aria-label','Prepare verified AI development job');
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const head=el('div','drawer-head');head.append(el('h2','drawer-title','Prepare development'),b('Close',close));
+ const body=el('div','drawer-body'),help=el('p','setting-note',
+  'Use a generator with an independently verified private stage. PCMS reads the pinned GitHub instructions and saved-source revision before preparing the AI job.');
+ const slug=el('input','form-input');slug.placeholder='generator-slug';
+ slug.value=state.queue.query&&/^[a-z0-9-]{1,100}$/.test(state.queue.query)?state.queue.query:'';
+ slug.setAttribute('aria-label','Generator slug for development');
+ const status=el('p','setting-note','No job prepared.');status.setAttribute('role','status');
+ const action=b('Verify stage and prepare',()=>void(async()=>{
+  if(!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug.value)){
+   status.textContent='Enter a valid lowercase generator name.';return;}
+  action.disabled=true;status.textContent='Verifying private saved source and current stage revision…';
+  try{
+   const stage=await readPort('pcms-i09-staging','GET_STAGE',{slug:slug.value},16000);
+   if(!stage?.ok||!Number.isSafeInteger(stage.revision)){
+    status.textContent='Private source stage not independently verified. Finish source staging first.';return;}
+   const out=await readPort('pcms-i10-ai','PREPARE_JOB',{
+    slug:slug.value,expectedStageRevision:stage.revision},95000);
+   status.textContent=out?.ok?
+    'Exact development job prepared. AI execution and tests remain separately guarded.':
+    'Preparation held. Check the stage, account, protected route and GitHub connection.';
+   await loadQueue(true);
+  }catch{status.textContent='Job preparation result uncertain. Check the canonical queue before retrying.'}
+  finally{action.disabled=false}
+ })(),'btn primary');
+ body.append(help,slug,action,status);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ slug.focus();
+}
+function openOperationRecord(op){
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),dialog=el('div','drawer');
+ dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');
+ dialog.setAttribute('aria-label','Recorded operation details');
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const header=el('div','drawer-head');
+ header.append(el('h2','drawer-title','Operation · '+(queueState[op.status]?.[0]||'Unverified')),b('Close',close));
+ const body=el('div','drawer-body'),fields=el('dl');
+ for(const [name,value] of [['Target',op.targetId],['Operation',op.operationId],
+  ['Type',op.effectType||'Unknown'],['State',op.status||'Unknown'],
+  ['Revision',String(op.revision??'Unknown')],
+  ['Updated',Number.isSafeInteger(op.updatedAt)?new Date(op.updatedAt).toLocaleString():'Not recorded']]){
+  const row=el('div','kv');row.append(el('dt','',name),el('dd','',value));fields.append(row);
+ }
+ body.append(fields);
+ const help={
+  PREPARED:'This operation is reserved locally. It has not been dispatched. Check account, route, permissions and scheduling before expecting a remote change.',
+  DISPATCH_POSSIBLE:'A remote effect may already have occurred. Do not retry. Reconcile the exact target using an independent provider readback.',
+  OBSERVING:'The runtime is verifying the remote result. An acknowledgment alone does not confirm the effect.',
+  HELD_UNCERTAIN:'The effect outcome is uncertain. It remains fenced; use the matching protected workflow’s reconciliation action, not a retry.',
+  CONFIRMED:'The operation journal records an independently verified equivalent result. Review the exact source or listing separately if needed.',
+  ABORTED:'The operation ended before dispatch. No remote effect was authorized by this record.',
+  REJECTED:'The controller rejected the operation. Check current prerequisites and latest canonical state before creating a new request.'
+ };
+ body.append(el('p','setting-note',help[op.status]||
+  'State is not recognized; keep all remote effects held until the runtime is checked.'));
+ const actions=el('div','form-foot');
+ actions.append(b('View current queue',()=>{close();void loadQueue(true)},'btn small'));
+ body.append(actions);dialog.append(header,body);overlay.append(dialog);root.append(overlay);
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ header.querySelector('button')?.focus();
+}
+function readQueueNoticeAck(n){
+ return new Promise((resolve,reject)=>{
+  const port=browser.runtime.connect({name:'pcms-i02-canonical-readonly'});
+  let done=false;const timer=setTimeout(()=>finish(null,new Error('TIMEOUT')),12000);
+  function finish(reply,error){if(done)return;done=true;clearTimeout(timer);try{port.disconnect()}catch{}
+   error?reject(error):resolve(reply)}
+  port.onMessage.addListener(reply=>finish(reply));
+  port.onDisconnect.addListener(()=>finish(null,new Error('DISCONNECTED')));
+  try{port.postMessage({type:'ACK_NOTICE',notice:{
+   scopeId:n.scopeId,code:n.code,expectedRevision:n.revision}})}catch{finish(null,new Error('DISCONNECTED'))}
+ });
 }
 function displayOverview(){if(state.route!=='overview')return;
+ const epoch=state.renderEpoch;
  const cards=[...page().querySelectorAll('.stat-grid .stat-card')];
- for(const [i,label] of ['Managed generators','Refresher','Work requiring attention','Last verified backup'].entries()){
+ for(const [i,label] of ['Managed generators','Refresher','Work requiring attention','Last verified backup'].entries())
   cards[i]?.querySelector('.stat-label')?.replaceChildren(document.createTextNode(label));
+ function stat(index,value,note){
+  const card=cards[index];if(!card)return;
+  const valueNode=card.querySelector('.stat-value');if(valueNode)valueNode.textContent=value;
+  const caption=card.querySelector('.stat-note');if(caption)caption.textContent=note;
  }
- function setStat(index,value,note){const card=cards[index];if(!card)return;
-  const target=card.querySelector('.stat-value');if(target)target.textContent=value;
-  const explain=card.querySelector('.stat-note');if(explain){explain.textContent=note;explain.classList.remove('good')}
- }
- setStat(0,'—','Reading local observations');setStat(1,'—','Unknown');setStat(2,'—','Unknown');setStat(3,'—','Unknown');
- const sections=[...page().querySelectorAll('.overview-grid .overview-card')];
- sections.forEach(section=>{const list=section.querySelector('.panel-scroll');if(list)renderEmpty(list,'No current local receipt has been confirmed.');});
- const sourceQueue=observedReceipts();
- if(sourceQueue.length){const attention=sourceQueue.filter(x=>x.needs);const progress=sourceQueue.filter(x=>x.running||x.waiting);
-  for(const [index,group] of [[0,attention],[1,progress]]){const box=sections[index]?.querySelector('.panel-scroll');if(!box)continue;box.replaceChildren();
-   if(!group.length)renderEmpty(box,'No matching local receipt currently observed.');
-   group.slice(0,8).forEach(item=>{const row=el('div','list-row');const badge=el('span','row-mark'+(item.needs?' warn':''));badge.append(icon(item.needs?'alert':'activity'));
-    const data=el('div','row-body');data.append(el('p','row-title',item.label),el('div','row-meta',item.text));row.append(badge,data,b('Inspect',()=>nativeAction(item.route,item.group)));box.append(row)});
-  }
- }
- setStat(2,String(sourceQueue.filter(x=>x.needs).length),'From observed local operation receipts');
- const other=sections.slice(2);
- for(const block of other){const display=block.querySelector('.panel-scroll');if(!display)continue;display.replaceChildren();
-  const key=block.querySelector('h2')?.textContent?.toLowerCase()||'';
-  const target=key.includes('health')?nativeControl('pcms-guard-health'):nativeControl('pcms-journal-health');
-  display.append(el('p','native-bridge-note',snippet(target?.textContent,400)||'Local observation unavailable.'));
- }
- void Promise.allSettled([inventory({offset:0,limit:1}),refresher({phase:'ALL',offset:0,limit:1})]).then(([inv,ref])=>{
-  if(state.route!=='overview')return;
-  const n=inv.status==='fulfilled'&&Number.isInteger(inv.value.total)?inv.value.total:null;
-  setStat(0,n===null?'—':String(n),n===null?'Inventory read unavailable':'Historical local inventory · not a remote census');
-  const r=ref.status==='fulfilled'?ref.value:null;
-  setStat(1,r?.ok?String(r.occupied??'—'):'—',r?.ok?'Active scheduled slots · feed placement separate':'Refresher read unavailable');
+ for(let i=0;i<4;i++)stat(i,'—','Verification unavailable');
+ const blocks=[...page().querySelectorAll('.overview-grid .overview-card')];
+ blocks.forEach(b=>{const target=b.querySelector('.panel-scroll');
+  if(target)renderEmpty(target,'Reading recorded activity…')});
+ const still=()=>state.route==='overview'&&state.renderEpoch===epoch;
+ void Promise.allSettled([
+  inventory({offset:0,limit:1}),
+  refresher({phase:'ALL',offset:0,limit:1}),
+  guardedRead('pcms-i02-canonical-readonly','SUMMARY'),
+  guardedRead('pcms-i02-canonical-readonly','NOTICE_SUMMARY'),
+  guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{limit:8,status:'NEEDS_ACTION'}),
+  guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_PAGE',{limit:8}),
+  guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{limit:8,status:'RUNNING'})
+ ]).then(results=>{
+  if(!still())return;
+  const val=i=>results[i].status==='fulfilled'&&results[i].value?.ok?results[i].value:null;
+  const inv=val(0),ref=val(1),summary=val(2),noticeTotals=val(3),ops=val(4),inc=val(5),running=val(6);
+  stat(0,inv?.total===undefined?'—':String(inv.total),'Historical local inventory; not a live provider census');
+  stat(1,ref?.ok?String(ref.occupied??'—'):'—',
+    ref?.ok?'Currently occupied Refresher slots; provider visibility is separate':'Refresher state unavailable');
+  const counts=summary?.states,attention=noticeTotals?.counts;
+  const need=counts?(counts.HELD_UNCERTAIN||0)+(counts.REJECTED||0)+
+    (counts.DISPATCH_POSSIBLE||0)+(attention?.actionRequired||0)+(attention?.serious||0):null;
+  stat(2,need===null?'—':String(need),
+    need===null?'Incident journal unavailable':'Recorded local holds and incidents');
+  const listRows=(index,items)=>{
+   const panel=blocks[index]?.querySelector('.panel-scroll');if(!panel)return;
+   panel.replaceChildren();
+   if(!items?.length){renderEmpty(panel,'No matching local operation records observed.');return}
+   for(const x of items){
+    const row=el('div','list-row');row.append(
+     el('span','row-mark',x.severity?'!':'•'));
+    const body=el('div','row-body');
+    body.append(el('p','row-title',x.severity?
+      'Incident: '+x.code.replaceAll('_',' ').toLowerCase():
+      (x.effectType||'Recorded operation').replaceAll('_',' ')),
+      el('div','row-meta',x.severity?'Still requires review':
+        'Target '+x.targetId+' · '+(queueState[x.status]?.[0]||'Unknown status')));
+    row.append(body,b('Open Work Queue',()=>routeTo('work-queue')));panel.append(row);
+   }
+  };
+  listRows(0,[...(inc?.items||[]),...(ops?.items||[])].slice(0,8));
+  listRows(1,running?.items||[]);
+  for(const panel of blocks.slice(2)){const holder=panel.querySelector('.panel-scroll');
+   if(holder){holder.replaceChildren();renderEmpty(holder,'No independent local proof has been loaded for this section.')}}
+  // A native host or downloaded archive being present does not establish
+  // an independently verified and recoverable backup.
+  stat(3,'—','Independent backup/restore evidence not loaded');
+  state.queue.summary=summary?.ok?{...summary,attention:noticeTotals}:null;updateNav();
  });
- const backup=nativeControl('pcms-overview-backup');setStat(3,'—',snippet(backup?.textContent,150)||'No verified backup record available');
 }
 // R3: diagnostic projection from the actual background boundary. This is not
 // an additional source of operational authority and never enables effects.
@@ -573,13 +1638,20 @@ function renderReadinessPanel(container){
     ['NATIVE_VAULT_HOST','BACKUP_HOST','DIAGNOSTIC_HOST'].includes(row.component)&&row.state==='UNREACHABLE');
   const pending=state.readiness.rows.some(row=>row.component==='GIT_PARTIAL_CONNECTION'&&row.state==='OUTCOME_UNCERTAIN');
   summary.textContent=hostUnavailable?
-    'The local PCMS helper is not responding. GitHub connection, backup and full diagnostic tests cannot finish until it is repaired.':
+    'PCMS local services are not responding. Install the native helpers from the matching PCMS release bundle, restart Firefox, then check again. Read-only inventory may still work.':
     pending?'A previous GitHub connection did not finish. Review and reconcile it before running full diagnostics.':
     'Readiness checked. Review any items that need attention; a local check does not prove live service operations.';
  }
  section.append(summary);
+ const details=el('details','settings-section');
+ const rows=state.readiness?.rows||[];
+ const problematic=rows.filter(row=>
+   ['UNREACHABLE','OUTCOME_UNCERTAIN','SECURITY_HELD','STALE','MISSING_CAPABILITY'].includes(row.state));
+ const heading=el('summary','',
+   'Detailed checks · '+rows.length+' inspected · '+problematic.length+' need attention');
+ details.append(heading);
  const results=el('div','queue-list');
- for(const r of state.readiness?.rows||[]){
+ for(const r of rows){
   const item=el('div','queue-item');item.style.display='block';
   item.append(el('strong','',READINESS_NAMES[r.component]||r.component.replaceAll('_',' ')),
     document.createTextNode(' — '+(READINESS_STATES[r.state]||'Needs review')));
@@ -590,7 +1662,7 @@ function renderReadinessPanel(container){
   technical.append(el('p','',r.safeRecovery));
   item.append(technical);results.append(item);
  }
- section.append(results);container.append(section);
+ details.append(results);section.append(details);container.append(section);
 }
 async function runReadiness(remote){
  if(state.readinessBusy)return;
@@ -620,39 +1692,776 @@ async function runReadiness(remote){
  }catch{state.readiness={ok:false,code:'READINESS_TRANSPORT_UNAVAILABLE'};}
  finally{state.readinessBusy=false;if(state.route==='settings')renderSettingsSection();}
 }
+function primarySettingCard(container,title,intro){
+ const section=el('section','card settings-group'),header=el('h2','h2',title);
+ section.append(header,el('p','setting-note',intro));container.append(section);
+ return section;
+}
+// The protected catalog boundary returns one independently complete pinned
+// main. Display its actual initial import scope and canonical prompt without
+// inferring remote ownership, deletion, creation or publication.
+function renderConnectedMain(section,snapshot){
+ section.querySelector('[data-main-review]')?.remove();
+ if(!snapshot?.ok||snapshot.complete!==true)return;
+ const panel=el('section','settings-section');panel.dataset.mainReview='1';
+ const summary=el('h3','','GitHub main · '+snapshot.recognizedCount+' recognized folders');
+ const info=el('p','setting-note',
+  'This is a complete read-only GitHub file snapshot. Generator ownership and live publication need separate verification.');
+ panel.append(summary,info);
+ const preview=snapshot.preview||{},items=preview.items||[];
+ const listing=el('details','settings-section');listing.append(el('summary','','Review folder declarations and owner evidence'));
+ const search=el('input','form-input');search.placeholder='Find a generator folder';search.maxLength=100;
+ search.setAttribute('aria-label','Find GitHub generator folder');
+ const list=el('div','queue-list'),pagination=el('div','form-foot');
+ let offset=0;
+ const prev=b('Previous',()=>{offset=Math.max(0,offset-30);draw()},'btn small');
+ const next=b('Next',()=>{offset+=30;draw()},'btn small');
+ const count=el('span','setting-note','');
+ function draw(){
+  list.replaceChildren();const query=search.value.trim().toLowerCase();
+  const filtered=items.filter(x=>x.slug?.toLowerCase().includes(query));
+  if(offset>=filtered.length)offset=Math.max(0,Math.floor(Math.max(0,filtered.length-1)/30)*30);
+  const visible=filtered.slice(offset,offset+30);
+  for(const item of visible){
+   const row=el('div','queue-item'),data=el('div','row-body');
+   data.append(el('strong','',item.slug),
+    el('p','setting-note',
+      (item.sourceState==='READY_UNVERIFIED_COHERENCE'?
+       'READY declaration detected; source verification remains separate.':
+       'Source declaration: '+String(item.sourceState||'not confirmed').replaceAll('_',' ').toLowerCase())+
+      ' · '+(item.observed==='AMBIGUOUS'?'Account or owner not independently verified':
+       'Owner observation: '+String(item.observed||'not confirmed').replaceAll('_',' ').toLowerCase())));
+   row.append(data);list.append(row);
+  }
+  if(!visible.length)list.append(el('p','setting-note','No folder matches this search in the complete GitHub snapshot.'));
+  count.textContent=filtered.length+' recognized folder(s) · '+(filtered.length?offset+1:0)+
+   '–'+Math.min(offset+visible.length,filtered.length)+' shown';
+  prev.disabled=offset===0;next.disabled=offset+30>=filtered.length;
+ }
+ search.addEventListener('input',()=>{offset=0;draw()});
+ pagination.append(prev,next,count);listing.append(search,list,pagination);panel.append(listing);draw();
+ if(preview.scopeDigest&&snapshot.importStatus!=='IMPORT_SCOPE_APPROVED'){
+  const approval=b('Approve inspected inventory scope',()=>void(async()=>{
+   if(!window.confirm('Approve this EXACT GitHub main folder inventory for local recognition? This does not create, rename, publish or allocate remote generators, and owner checks remain mandatory.'))return;
+   approval.disabled=true;
+   try{
+    const r=await readPort('pcms-s03-catalog','APPROVE_IMPORT',{
+     repositoryId:snapshot.repositoryId,scopeDigest:preview.scopeDigest},30000);
+    info.textContent=r?.ok?
+     'Exact initial GitHub folder scope approved. Account ownership and deployment remain separately unverified.':
+     'Folder-scope approval could not be confirmed. Read main again before retrying.';
+   }catch{info.textContent='Import approval result uncertain; re-scan before any further action.'}
+   finally{approval.disabled=false}
+  })(),'btn primary');
+  panel.append(approval);
+ }
+ if(snapshot.prompt?.state==='PRESENT'&&typeof snapshot.prompt.text==='string'){
+  const box=el('details','settings-section');
+  box.append(el('summary','','Canonical Chat 1 prompt · GitHub-controlled'));
+  box.append(el('p','setting-note',
+   'The committed main prompt remains authoritative. Local drafts cannot change it without an explicit conditional Git commit and independent readback.'));
+  const draft=el('textarea','form-input');draft.rows=10;draft.value=snapshot.prompt.text;
+  draft.setAttribute('aria-label','Canonical Chat 1 prompt draft');
+  const notes=el('p','setting-note','GitHub source loaded. No remote write was submitted. Saving a draft only changes local PCMS settings.');
+  notes.setAttribute('role','status');
+  const controls=el('div','form-foot');
+  let base={repositoryId:snapshot.repositoryId,head:snapshot.head,oid:snapshot.prompt.oid},
+   revision=0,dirty=false,uncertain=false,committed=false,loading=false;
+  draft.addEventListener('input',()=>{dirty=true;});
+  const save=b('Save local prompt draft',()=>void(async()=>{
+   if(loading||!draft.value.trim()||draft.value.length>131072)return;
+   loading=true;save.disabled=true;notes.textContent='Saving the local draft; GitHub remains unchanged.';
+   try{
+    const r=await readPort('pcms-s03-catalog','SAVE_PROMPT_DRAFT',{
+      repositoryId:base.repositoryId,expectedRevision:revision,
+      baseOid:base.oid,text:draft.value},20000);
+    if(r?.ok){revision=r.revision;dirty=false;
+     notes.textContent='Local prompt draft saved. GitHub main remains unchanged.'}
+    else notes.textContent='Draft was not confirmed. Preserve your text and reload the current draft before retrying.';
+   }catch{notes.textContent='Draft storage outcome uncertain. Preserve your edits and reload before retrying.'}
+   finally{loading=false;save.disabled=false}
+  })(),'btn small');
+  const commit=b('Commit reviewed prompt to GitHub main',()=>void(async()=>{
+   if(loading||revision<1||dirty||uncertain||committed){notes.textContent='Save and verify the current draft, then confirm the latest GitHub main before a new commit.';return}
+   if(!window.confirm('Commit this exact saved Chat 1 prompt to the verified GitHub main? PCMS uses a revision-checked nonforced write, independent readback and no blind retry.'))return;
+   loading=true;commit.disabled=true;notes.textContent='Checking standing Git permission and exact main revision…';
+   try{
+    const r=await readPort('pcms-s03-catalog','COMMIT_PROMPT',{
+      repositoryId:base.repositoryId,expectedRevision:revision,
+      expectedHead:base.head},95000);
+    uncertain=!r?.ok&&r?.code==='PROMPT_GIT_UNCERTAIN_RECONCILE_REQUIRED';
+    if(r?.ok)committed=true;
+    notes.textContent=r?.ok?
+      'Committed prompt verified on GitHub main. Re-scan before further source work.':
+      uncertain?'Commit outcome uncertain. Use read-only reconciliation; do not retry the write.':
+      'Commit held; GitHub source has not been independently verified. Preserve this draft.';
+   }catch{uncertain=true;notes.textContent='GitHub commit outcome unknown. Do not resend. Reconcile the exact write first.'}
+   finally{loading=false;commit.disabled=committed||uncertain}
+  })(),'btn primary');
+  const reconcile=b('Reconcile possible Git commit',()=>void(async()=>{
+   if(loading)return;
+   loading=true;reconcile.disabled=true;notes.textContent='Observing current GitHub history and exact prompt bytes without a write…';
+   try{
+    const r=await readPort('pcms-s03-catalog','RECONCILE_PROMPT',{
+      repositoryId:base.repositoryId},60000);
+    if(r?.ok){uncertain=false;committed=true;commit.disabled=true;
+      notes.textContent='Prior Git prompt commit independently verified. Read main again before editing.'}
+    else notes.textContent='Git prompt outcome remains unverified. No write was repeated.';
+   }catch{notes.textContent='Read-only reconciliation unavailable. Preserve the original draft and uncertainty hold.'}
+   finally{loading=false;reconcile.disabled=false}
+  })(),'btn small');
+  controls.append(save,commit,reconcile);
+  box.append(draft,controls,notes);panel.append(box);
+  void (async()=>{
+   try{
+    const r=await readPort('pcms-s03-catalog','GET_PROMPT_DRAFT',{},20000);
+    if(!panel.isConnected||dirty)return;
+    if(r?.ok){
+     draft.value=r.record.text;revision=r.record.revision;
+     uncertain=['DISPATCH_POSSIBLE','UNCERTAIN'].includes(r.record.effect?.state);
+     if(r.record.baseOid!==base.oid){
+      uncertain=true;notes.textContent='Saved draft is based on a different main revision. Reconcile before any commit.';
+     }else notes.textContent='Existing local draft loaded. GitHub main remains authoritative.';
+    }
+   }catch{}
+  })();
+ }
+ section.append(panel);
+}
+function primaryConnections(container){
+ const section=primarySettingCard(container,'GitHub connection',
+  'PCMS reads generator folders from the committed main branch only. A repository preview is not a saved connection.');
+ const repo=el('input','form-input');repo.value='Neb963/per-gens';repo.readOnly=true;
+ repo.setAttribute('aria-label','Managed GitHub repository');
+ const credential=el('input','form-input');credential.type='password';
+ credential.autocomplete='off';credential.placeholder='GitHub access credential';
+ credential.setAttribute('aria-label','GitHub access credential');
+ const status=el('p','setting-note','No authenticated read-only verification has run in this session.');
+ status.setAttribute('role','status');
+ const actions=el('div','form-foot');
+ const begin= b('Connect securely',()=>void (async()=>{
+  if(!credential.value){status.textContent='Enter your GitHub credential first.';return}
+  const token=credential.value;credential.value='';begin.disabled=true;
+  try{
+   const out=await readPort('pcms-s03-catalog','CONNECT_GIT',
+      {repository:repo.value,token},30000);
+   status.textContent=out?.ok?'Secure GitHub connection saved. Check files from main before any import.':
+     out?.code==='GIT_PENDING_CONNECTION_RECONCILIATION_REQUIRED'?
+     'A previous setup did not finish. Check the recovery section below before entering a new credential.':
+     'The secure connection could not be confirmed. Check local PCMS services in the readiness section.';
+  }catch{status.textContent='Connection result uncertain. Check readiness before attempting another connection.'}
+  finally{begin.disabled=false}
+ })(),'btn primary');
+ const inspect=b('Read main safely',()=>void (async()=>{
+  inspect.disabled=true;status.textContent='Reading the committed main inventory…';
+  try{
+   const out=await readPort('pcms-s03-catalog','SCAN_CONNECTED',{},95000);
+   status.textContent=out?.ok&&out.complete?
+     out.recognizedCount+' recognized generator folder(s) on main. Account ownership, publication and deployment remain separate checks.':
+     'The committed main inventory could not be verified. No deletion or missing folder has been inferred.';
+   if(out?.ok&&out.complete)renderConnectedMain(section,out);
+  }catch{status.textContent='GitHub read-only scan unavailable. No remote changes were made.'}
+  finally{inspect.disabled=false}
+ })(),'btn small');
+ actions.append(begin,inspect);section.append(repo,credential,actions,status);
+}
+function primaryAutomation(container){
+ const section=primarySettingCard(container,'Standing permissions',
+  'You control whether protected development and tested-source writeback are permitted. Publication always requires approval of the exact candidate.');
+ const feedback=el('p','setting-note','Checking the current repository permissions…');
+ const fields=el('div','');
+ const actions=el('div','form-foot');section.append(fields,actions,feedback);
+ const controls={};
+ async function load(){
+  fields.replaceChildren();actions.replaceChildren();
+  let state;
+  try{state=await readPort('pcms-s06-authority','GET',{},18000)}
+  catch{feedback.textContent='Permissions could not be read. Nothing has been enabled.';return}
+  if(!state?.ok){feedback.textContent='Permissions are not available. No changes made.';return}
+  const rec=state.record;
+  feedback.textContent=rec.repositoryId?
+   'Permissions apply only to the verified connected GitHub repository.':
+   'Connect and verify GitHub before enabling any protected workflow.';
+  for(const [key,title] of [['development','Protected development'],['gitWrite','Verified source writeback'],['publication','Approved publication only']]){
+   const label=el('label','setting-option');const input=el('input');
+   input.type='checkbox';input.checked=rec.grants?.[key]===true;
+   input.disabled=!rec.repositoryId;
+   label.append(input,document.createTextNode(' '+title));fields.append(label);controls[key]=input;
+  }
+  const save=b('Save permissions',()=>void (async()=>{
+   if(!rec.repositoryId)return;
+   const grants=Object.fromEntries(Object.keys(controls).map(k=>[k,controls[k].checked]));
+   if(!window.confirm('Apply these repository-scoped permissions? Protected route, source and publication checks still apply independently.'))return;
+   save.disabled=true;feedback.textContent='Saving permissions…';
+   try{
+    const out=await readPort('pcms-s06-authority','SET',{
+      repositoryId:rec.repositoryId,expectedRevision:rec.revision,
+      grants,consent:'I AUTHORIZE PROTECTED PCMS OPERATIONS'},18000);
+    feedback.textContent=out?.ok?'Permissions updated. Protected checks still apply.':
+      'Permissions were not updated. Recheck the current configuration before retrying.';
+   }catch{feedback.textContent='Update not confirmed. Review current permissions before another change.'}
+   finally{save.disabled=false;await load()}
+  })(),'btn primary');
+  save.disabled=!rec.repositoryId;
+  actions.append(save,b('Pause all managed effects',()=>void (async()=>{
+   if(!window.confirm('Immediately revoke all standing permissions? In-flight uncertain writes remain held for reconciliation.'))return;
+   try{const out=await readPort('pcms-s06-authority','REVOKE',{},18000);
+    feedback.textContent=out?.ok?'Permissions revoked.':'Revocation result unconfirmed; check status.'}
+   catch{feedback.textContent='Revocation status uncertain; check permissions.'}
+   await load();
+  })(),'btn small'));
+ }
+ void load();
+}
+function backupAction(action,extra={}){
+ return new Promise((resolve,reject)=>{
+  const port=browser.runtime.connect({name:'pcms-i15-backup'});
+  let done=false;const timer=setTimeout(()=>finish(null,new Error('TIMEOUT')),40000);
+  function finish(value,error){if(done)return;done=true;clearTimeout(timer);try{port.disconnect()}catch{}error?reject(error):resolve(value)}
+  port.onMessage.addListener(value=>finish(value));
+  port.onDisconnect.addListener(()=>finish(null,new Error('DISCONNECTED')));
+  try{port.postMessage({action,...extra})}catch{finish(null,new Error('DISCONNECTED'))}
+ });
+}
+// Native AI progression is governed by the same revisioned prompt and
+// per-account concurrency limits used by the protected job controller.
+// This is local guidance; the repository's default Chat 1 prompt stays
+// independently authoritative and is never overwritten here.
+function primaryAiSettings(container){
+ const section=primarySettingCard(container,'AI development settings',
+  'Configure local development guidance and per-account concurrency. These settings do not modify the GitHub default Chat 1 prompt, enable a provider effect or certify a test PASS.');
+ const feedback=el('p','setting-note','Loading the current AI settings…');
+ feedback.setAttribute('role','status');
+ const editor=el('textarea','form-input');editor.rows=8;editor.maxLength=16000;
+ editor.setAttribute('aria-label','AI development guidance');
+ const testLabel=el('label','','Required test names (one per line)');
+ const tests=el('textarea','form-input');tests.rows=4;
+ tests.setAttribute('aria-label','Required test names');testLabel.append(tests);
+ const countLabel=el('label','','Maximum concurrent AI tasks per verified account');
+ const count=el('input','form-input');count.type='number';count.min='1';count.max='4';count.step='1';
+ countLabel.append(count);
+ const actions=el('div','form-foot'),save=b('Save guidance and tests',()=>void(async()=>{
+  const names=tests.value.split(/[\n,]+/).map(x=>x.trim()).filter(Boolean);
+  if(!names.length||names.length>64||new Set(names).size!==names.length||
+   names.some(x=>!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$/.test(x))||
+   !editor.value.trim()||editor.value.length>16000){
+   feedback.textContent='Enter guidance and 1–64 distinct valid required test names.';return}
+  const current=state.aiCurrentPrompt;if(!current){feedback.textContent='Prompt revision unavailable. Reload current settings.';return}
+  if(!window.confirm('Replace local AI guidance for future jobs? Existing job candidates and the GitHub prompt remain unchanged.'))return;
+  save.disabled=true;
+  try{
+   const out=await readPort('pcms-i10-ai','SET_PROMPT',{
+    text:editor.value,tests:names,expectedRevision:current.revision},16000);
+   feedback.textContent=out?.ok?'Local guidance saved for new jobs; recorded tests still require independent execution.':
+      'Guidance could not be saved. Reload the current revision before retrying.';
+  }catch{feedback.textContent='Guidance update outcome uncertain. Read current revision before retrying.'}
+  finally{save.disabled=false;void refresh()}
+ })(),'btn primary');
+ const saveLimit=b('Save concurrency',()=>void(async()=>{
+  const n=Number(count.value),existing=state.aiConcurrency;
+  if(!existing||!Number.isSafeInteger(n)||n<1||n>4){
+   feedback.textContent='Choose 1–4 tasks per account and reload current settings.';return}
+  if(!window.confirm('Change the protected per-account AI concurrency limit? Current owner, route and source safety controls still apply.'))return;
+  saveLimit.disabled=true;
+  try{
+   const out=await readPort('pcms-i10-ai','SET_CONCURRENCY',{
+    perAccount:n,expectedRevision:existing.revision},16000);
+   feedback.textContent=out?.ok?'Concurrency limit saved. Existing running effects remain independently fenced.':
+    'Concurrency change could not be confirmed; reload the current revision.';
+  }catch{feedback.textContent='Concurrency update outcome uncertain. Reload before retrying.'}
+  finally{saveLimit.disabled=false;void refresh()}
+ })(),'btn small');
+ actions.append(save,saveLimit);
+ const form=el('div','form-stack');
+ form.append(el('label','','Local AI guidance'),editor,testLabel,countLabel,actions,feedback);
+ section.append(form);
+ const jobsSection=el('section','settings-section');
+ jobsSection.append(el('h3','h3','Managed AI development'));
+ const jobsInfo=el('p','setting-note',
+  'Recorded AI jobs are source- and account-bound. A visible status is not evidence of a finished provider response.');
+ jobsSection.append(jobsInfo);
+ const jobs=el('div','queue-list'),pager=el('div','form-foot');
+ let cursor='',history=[],nextCursor=null,loading=false;
+ function jobLabel(state){
+  return ({READY:'Ready for guarded progression',WAITING:'Waiting',
+   HELD:'Paused for verification',COMPLETE:'Completed locally',
+   SOURCE_VERIFIED:'Source verification recorded',FAILED:'Needs operator review',
+   RUNNING:'Development in progress'})[state]||
+    'Recorded AI state — inspect evidence';
+ }
+ async function showJobs(){
+  if(loading)return;loading=true;jobs.replaceChildren();
+  const msg=el('p','setting-note','Reading canonical development jobs…');
+  jobs.append(msg);pager.replaceChildren();
+  try{
+   const r=await readPort('pcms-i10-ai','LIST_JOBS',{after:cursor,limit:15},20000);
+   if(!jobsSection.isConnected)return;
+   jobs.replaceChildren();
+   if(!r?.ok){jobs.append(el('p','setting-note',
+     'AI development records are unavailable. No provider activity was inferred.'));return}
+   nextCursor=r.more?r.nextCursor:null;
+   if(!r.jobs?.length)jobs.append(el('p','setting-note','No recorded AI jobs on this page.'));
+   for(const job of r.jobs||[]){
+    const row=el('div','queue-item'),body=el('div','row-body');
+    body.append(el('strong','',job.slug),el('p','setting-note',jobLabel(job.state)+
+      ' · source and test evidence must be verified separately.'));
+    const action=b('Inspect',()=>void (async()=>{
+     action.disabled=true;
+     try{
+      const current=await readPort('pcms-i10-ai','GET_JOB',{slug:job.slug},25000);
+      if(!current?.ok){jobsInfo.textContent='The current AI record was not verified.';return}
+      const j=current;
+      jobsInfo.textContent=j.slug+' — '+jobLabel(j.state)+
+       '; native session: '+(j.nativeState==='NOT_STARTED'?'not started':
+        j.nativeState==='RUNNING'?'in progress':'needs verification')+
+       '; required test evidence: '+(j.evidence?.status||'not independently verified')+
+       '. Current source is revision '+j.revision+'.';
+     }catch{jobsInfo.textContent='AI job could not be inspected. No remote state was inferred.'}
+     finally{action.disabled=false}
+    })(),'btn small');
+    const advance=b('Advance guarded step',()=>void (async()=>{
+     if(!window.confirm('Run one explicitly guarded AI development step for '+job.slug+'? This may contact Perchance or change its private editor. It will not publish or automatically retry a possibly completed effect.'))return;
+     advance.disabled=true;
+     try{
+      const result=await readPort('pcms-i10-ai','ADVANCE_JOB',{
+       slug:job.slug,expectedRevision:job.revision},110000);
+      jobsInfo.textContent=result?.ok?
+       'One protected development step was recorded for '+job.slug+
+       '. Re-read the job before taking another action.':
+       'The next development step was held or not confirmed. Read current job state before retrying.';
+     }catch{jobsInfo.textContent='Development-step outcome uncertain. Do not retry without independent reconciliation.'}
+     finally{advance.disabled=false;await showJobs()}
+    })(),'btn small');
+    if(['COMPLETE','HELD','FAILED'].includes(job.state))advance.disabled=true;
+    row.append(body,action,advance);jobs.append(row);
+   }
+   const back=b('Previous jobs',()=>{const prev=history.pop();if(prev===undefined)return;
+    cursor=prev;void showJobs()},'btn small');
+   back.disabled=history.length===0;
+   const next=b('More jobs',()=>{if(!nextCursor)return;
+    history.push(cursor);cursor=nextCursor;void showJobs()},'btn small');
+   next.disabled=!nextCursor;
+   pager.append(back,next);
+  }catch{jobs.replaceChildren(el('p','setting-note',
+    'The local AI job journal did not respond. No work has been initiated.'))}
+  finally{loading=false}
+ }
+ jobsSection.append(jobs,pager);section.append(jobsSection);
+ void showJobs();
+ async function refresh(){
+  const result=await Promise.allSettled([
+   readPort('pcms-i10-ai','GET_PROMPTS',{},20000),
+   readPort('pcms-i10-ai','GET_CONCURRENCY',{},20000)
+  ]);
+  if(!section.isConnected)return;
+  const prompt=result[0].status==='fulfilled'&&result[0].value?.ok?result[0].value:null;
+  const concurrency=result[1].status==='fulfilled'&&result[1].value?.ok?result[1].value:null;
+  state.aiCurrentPrompt=prompt?.current||null;state.aiConcurrency=concurrency?.setting||null;
+  if(prompt?.current){
+   editor.value=prompt.current.text;tests.value=(prompt.current.tests||[]).join('\n');
+  }
+  if(concurrency?.setting)count.value=String(concurrency.setting.perAccount);
+  save.disabled=!prompt?.current;saveLimit.disabled=!concurrency?.setting;
+  feedback.textContent=prompt?.current&&concurrency?.setting?
+   'Current local guidance revision '+prompt.current.revision+
+   '; maximum '+concurrency.setting.perAccount+' parallel job(s) per account. No test outcome inferred.':
+   'AI settings could not be read. Changes remain unavailable until the canonical runtime responds.';
+ }
+ void refresh();
+}
+// I16 restore remains implemented by the original protected stage runner.
+// This primary workflow mirrors its encrypted files and explicit review
+// controls; it never reimplements or bypasses the restore gate.
+function primaryRestore(container){
+ const section=primarySettingCard(container,'Restore from encrypted archive',
+  'An authenticated preview is read-only. Applying a restore requires an independently verified pre-restore checkpoint, exact plan fingerprint and explicit authorization. The restored controller stays inactive.');
+ const form=el('div','form-stack'),feedback=el('p','setting-note',
+   'No authenticated restore plan. Nothing has been changed.');
+ feedback.setAttribute('role','status');
+ const archive=el('input','form-input'),checkpoint=el('input','form-input');
+ for(const x of [archive,checkpoint]){x.type='file';x.accept='.encrypted,.json'}
+ const pass=el('input','form-input');pass.type='password';pass.autocomplete='off';
+ const mode=el('select','select');
+ for(const [value,label] of [['merge','Merge into this installation'],['replace','Replace after independent checkpoint review']]){
+  const option=el('option','',label);option.value=value;mode.append(option)}
+ const fresh=el('input');fresh.type='checkbox';
+ const mapping=el('textarea','form-input');mapping.rows=3;mapping.value='{}';
+ mapping.setAttribute('aria-label','Persona-key to destination container-ID mapping in JSON');
+ const hash=el('input','form-input');hash.maxLength=64;
+ hash.placeholder='Exact authenticated plan SHA-256';
+ const approve=el('input');approve.type='checkbox';
+ const consentLabel=el('label','setting-option');consentLabel.append(approve,
+  document.createTextNode(' I approve this exact reviewed restore plan, Persona mappings, safety holds and inactive import.'));
+ function add(label,field){const wrapped=el('label','',label);wrapped.append(field);form.append(wrapped)}
+ add('Incoming encrypted archive',archive);
+ add('Separate independently recoverable pre-restore checkpoint',checkpoint);
+ add('Archive recovery passphrase',pass);
+ add('Destination import policy',mode);
+ const freshLabel=el('label','setting-option');freshLabel.append(fresh,
+  document.createTextNode(' Fresh disposable Firefox profile'));form.append(freshLabel);
+ add('Explicit Persona mapping JSON',mapping);
+ add('Reviewed plan fingerprint',hash);form.append(consentLabel);
+ const actions=el('div','form-foot'),detail=el('details','settings-section');
+ detail.append(el('summary','','Authenticated plan and individual safety holds'));
+ const plan=el('pre','source-preview','No authenticated plan.');detail.append(plan);
+ const originalStatus=()=>nativeControl('pcms-restore-status');
+ const slots=[
+  ['pcms-restore-preview','Authenticate and preview',false],
+  ['pcms-restore-verify','Verify independent checkpoint',false],
+  ['pcms-restore-apply','Apply reviewed restore',true],
+  ['pcms-restore-reconcile','Read back uncertain restore',false],
+  ['pcms-restore-reactivate','Reactivate after independent recovery',true]];
+ const controls=new Map();
+ function setValue(id,value,evt){
+  const target=nativeControl(id);if(!target)return false;
+  if(target.type==='file'){
+   const prior=target.files||[],next=value||[];
+   // Metadata equality is insufficient: two distinct encrypted archives
+   // can share name, size and modification time. Only unchanged file objects
+   // may preserve an authenticated preview without revalidation.
+   if(prior.length===next.length&&[...prior].every((file,i)=>file===next[i]))
+    return true;
+   target.files=value;
+  }else if(target.type==='checkbox'){
+   if(target.checked===Boolean(value))return true;
+   target.checked=Boolean(value);
+  }else{
+   if(target.value===String(value))return true;
+   target.value=value;
+  }
+  target.dispatchEvent(new Event(evt||'change',{bubbles:true}));
+  if(evt==='input')target.dispatchEvent(new Event('change',{bubbles:true}));
+  return true;
+ }
+ function transfer(){
+  try{
+   setValue('pcms-restore-archive',archive.files);
+   setValue('pcms-restore-checkpoint',checkpoint.files);
+   setValue('pcms-restore-passphrase',pass.value);
+   setValue('pcms-restore-mode',mode.value);
+   setValue('pcms-restore-fresh',fresh.checked);
+   setValue('pcms-restore-mappings',mapping.value);
+   setValue('pcms-restore-reviewed-hash',hash.value,'input');
+   setValue('pcms-restore-consent',approve.checked);
+   return true;
+  }catch{return false}
+ }
+ function refresh(){
+  if(!section.isConnected)return;
+  const native=originalStatus();
+  const report=nativeControl('pcms-restore-details');
+  if(native?.textContent)feedback.textContent=native.textContent;
+  plan.textContent=report?.textContent||'No authenticated restore plan.';
+  const active=nativeControl('pcms-restore-reactivate-box')?.hidden===false;
+  for(const [id,control] of controls)control.disabled=
+    nativeControl(id)?.disabled!==false||(id==='pcms-restore-reactivate'&&!active);
+ }
+ for(const [id,label,mutating] of slots){
+  const button=b(label,()=>void (async()=>{
+   const original=nativeControl(id);
+   if(!original||original.disabled){
+    feedback.textContent='The protected restore stage is unavailable or its requirements are not met.';
+    return;
+   }
+   if(mutating&&!window.confirm(id==='pcms-restore-apply'?
+     'Apply the EXACT authenticated, checkpoint-verified restore to this local PCMS installation? The controller remains inactive and no provider changes are authorized.':
+     'Reactivate the restored controller only after the previous installation has been stopped and all required evidence reviewed?'))return;
+   if(!transfer()){
+    feedback.textContent='Restore inputs could not be transferred safely to the protected controller. No action was taken.';
+    return;
+   }
+   if(id==='pcms-restore-reactivate'){
+    setValue('pcms-restore-predecessor',predecessor.checked);
+    setValue('pcms-restore-reactivate-phrase',phrase.value,'input');
+   }
+   if(original.disabled){refresh();return;}
+   button.disabled=true;feedback.textContent='Protected restore stage running; never repeat a possible restore write.';
+   original.click();
+   if(['pcms-restore-apply','pcms-restore-reconcile',
+       'pcms-restore-reactivate'].includes(id))pass.value='';
+   if(id==='pcms-restore-reactivate')phrase.value='';
+   refresh();
+  })(),'btn small');
+  button.dataset.restoreStep=id;
+  button.disabled=true;controls.set(id,button);actions.append(button);
+ }
+ const reactivation=el('details','settings-section');
+ reactivation.append(el('summary','','Post-restore reactivation (requires COMPLETE_INACTIVE status)'));
+ const predecessor=el('input');predecessor.type='checkbox';
+ const predecessorLabel=el('label','setting-option');
+ predecessorLabel.append(predecessor,document.createTextNode(' The previous PCMS installation is stopped'));
+ const phrase=el('input','form-input');phrase.maxLength=64;
+ phrase.placeholder='THE PREVIOUS PCMS INSTALLATION IS STOPPED';
+ reactivation.append(predecessorLabel,phrase);
+ section.append(form,actions,feedback,detail,reactivation);
+ const changes=[archive,checkpoint,pass,mode,fresh,mapping,hash,approve,predecessor,phrase];
+ for(const control of changes)control.addEventListener('change',()=>{
+  if(control===pass)return;
+  if(control===predecessor||control===phrase){
+   setValue('pcms-restore-predecessor',predecessor.checked);
+   setValue('pcms-restore-reactivate-phrase',phrase.value,'input');
+   refresh();return}
+  if(transfer())refresh();
+ });
+ hash.addEventListener('input',()=>{setValue('pcms-restore-reviewed-hash',hash.value,'input');refresh()});
+ phrase.addEventListener('input',()=>{setValue('pcms-restore-reactivate-phrase',phrase.value,'input');refresh()});
+ approve.addEventListener('change',()=>{setValue('pcms-restore-consent',approve.checked);refresh()});
+ const nativeEls=['pcms-restore-status','pcms-restore-details','pcms-restore-preview',
+  'pcms-restore-verify','pcms-restore-apply','pcms-restore-reconcile',
+  'pcms-restore-reactivate','pcms-restore-reactivate-box'].map(nativeControl).filter(Boolean);
+ const existing=state.restoreObservation;if(existing)existing.disconnect();
+ const observation=new MutationObserver(()=>refresh());
+ for(const item of nativeEls)observation.observe(item,{
+  attributes:true,childList:true,characterData:true,subtree:true});
+ state.restoreObservation=observation;
+ refresh();
+}
+function primaryBackups(container){
+ const section=primarySettingCard(container,'Encrypted source-complete backups',
+  'The recoverable format requires the matching OS helper, a vault-held recovery key, full archive verification and a separate restore proof. Older browser downloads are not source-complete.');
+ const status=el('p','setting-note','Reading the actual backup state…');status.setAttribute('role','status');
+ const actions=el('div','form-foot'),setup=el('div','form-stack');
+ section.append(setup,actions,status);
+ const secretLabel=el('label','','Recovery passphrase (stored in the OS vault, not PCMS settings)');
+ const secret=el('input','form-input');secret.type='password';secret.autocomplete='new-password';
+ secret.placeholder='Enter recovery passphrase';secretLabel.append(secret);setup.append(secretLabel);
+ const saveKey=b('Store recovery key securely',()=>void(async()=>{
+  const key=secret.value;secret.value='';
+  if(new TextEncoder().encode(key).length<12||new TextEncoder().encode(key).length>4096){
+   status.textContent='Enter a valid recovery passphrase of at least 12 bytes.';return}
+  saveKey.disabled=true;
+  try{
+   const out=await backupAction('STORE_VAULT',{passphrase:key});
+   status.textContent=out?.ok?
+     'Passphrase stored in the OS keyring. Preserve your separate recovery copy; this is not a verified backup.':
+     'Could not confirm secure key storage. Check the installed native helper and OS keyring.';
+  }catch{status.textContent='Key storage result uncertain. Check the OS helper before retrying.'}
+  finally{saveKey.disabled=false}
+ })(),'btn small');
+ setup.append(saveKey);
+ const selectFormat=b('Select source-complete archive',()=>void(async()=>{
+  selectFormat.disabled=true;
+  try{
+   const out=await backupAction('SET_FORMAT',{format:'V2'});
+   status.textContent=out?.ok&&out.format==='V2'?
+    'Source-complete format selected. A successful archive and a verified restore are still required.':
+    'The source-complete format could not be enabled. Verify the V2 helper and saved recovery key.';
+  }catch{status.textContent='Native backup format could not be confirmed. No downgrade was attempted.'}
+  finally{selectFormat.disabled=false;void refresh()}
+ })(),'btn small');
+ actions.append(selectFormat);
+ async function refresh(){
+  let s;try{s=await backupAction('STATUS')}catch{}
+  if(!section.isConnected)return;
+  if(!s?.ok){
+   status.textContent='Backup service unavailable. Install the matching native helpers from the operator package.';
+   return;
+  }
+  const genuine=s.format==='V2'&&s.tier===3&&s.proof==='NATIVE_READONLY_SOURCE_RECOVERY';
+  status.textContent='Scheduled backup: '+(s.enabled?'on':'off')+
+   '. Format: '+(s.format==='V2'?'source-complete':'legacy download — not source-complete')+
+   '. Independent archive recovery: '+(genuine?'verified archive exists':'not verified')+'.';
+  actions.querySelector('[data-backup-toggle]')?.remove();
+  actions.querySelector('[data-backup-manual]')?.remove();
+  const toggle=b(s.enabled?'Disable scheduled backups':'Enable scheduled backups',()=>void(async()=>{
+   if(!s.enabled&&s.format!=='V2'){
+    status.textContent='Select and verify the source-complete format before enabling the schedule.';return;}
+   if(!window.confirm(s.enabled?
+     'Disable future backups? Existing encrypted archives will be retained.':
+     'Enable scheduled source-complete encrypted backups? The native helper and OS recovery key are required.'))return;
+   toggle.disabled=true;
+   try{
+    const out=await backupAction('ENABLE',{enabled:!s.enabled});
+    status.textContent=out?.ok?'Scheduled backup policy updated. Independent archive verification remains separate.':
+     'The backup setting was not confirmed. Read its current state before retrying.';
+   }catch{status.textContent='Backup policy outcome uncertain; check state before retrying.'}
+   finally{toggle.disabled=false;void refresh()}
+  })(),'btn small');toggle.dataset.backupToggle='1';toggle.disabled=!s.enabled&&s.format!=='V2';
+  const manual=b('Run source-complete backup',()=>void(async()=>{
+   if(s.format!=='V2')return;
+   if(!window.confirm('Create one encrypted source-complete backup now? This can read protected account/source data but does not change remote generators.'))return;
+   manual.disabled=true;status.textContent='Running source-complete backup and independent encrypted archive verification…';
+   try{
+    const out=await backupAction('RUN_V2_MANUAL');
+    status.textContent=out?.ok&&out.state==='RECOVERY_VERIFIED'?
+     'Encrypted archive created and independently recovered in the native host. Fresh-profile restore still needs separate proof.':
+     'The backup could not be independently recovered. Treat the last attempt as held until investigated.';
+   }catch{status.textContent='Backup outcome uncertain. Do not repeat a possibly completed write before reconciliation.'}
+   finally{manual.disabled=false;void refresh()}
+  })(),'btn small');
+  manual.dataset.backupManual='1';manual.disabled=s.format!=='V2';
+  actions.append(toggle,manual);
+ }
+ void refresh();
+ primaryRestore(container);
+}
+// The full diagnostic engine stays the original, guarded production stage
+// runner. This accepted UI mirrors its typed input controls and actual stage
+// results; it does not invent PASS or dispatch stages directly from a mock.
+function primaryDiagnostics(container){
+ const section=primarySettingCard(container,'Full disposable diagnostic',
+  'Tests can create and change real disposable resources. Configure the dedicated scope once; normal provider accounts must not be used.');
+ const form=el('div','form-stack');
+ const selected=el('select','select'),placeholder=el('option','','Choose a verified disposable account');placeholder.value='';
+ selected.append(placeholder);
+ for(const acct of state.lastAccountList.filter(a=>a.state==='VERIFIED')){
+  const option=el('option','',acct.alias||acct.accountId);option.value=acct.accountId;
+  selected.append(option);
+ }
+ const stored=nativeControl('pcms-diagnostic-account');
+ if(stored?.value&&[...selected.options].some(o=>o.value===stored.value))
+   selected.value=stored.value;
+ const namespace=el('input','form-input');namespace.placeholder='pcms-test-alpha';namespace.maxLength=42;
+ namespace.value=nativeControl('pcms-diagnostic-namespace')?.value||'pcms-test-alpha';
+ const fingerprint=el('input','form-input');fingerprint.maxLength=64;
+ fingerprint.value=nativeControl('pcms-diagnostic-xpi-sha')?.value||'';
+ fingerprint.placeholder='Optional XPI SHA-256 for restart and backup verification';
+ const confirm=el('label','setting-option'),consent=el('input');consent.type='checkbox';
+ consent.checked=nativeControl('pcms-diagnostic-consent')?.checked===true;
+ confirm.append(consent,document.createTextNode(' I authorize live testing on this specifically designated disposable account, Persona and namespace.'));
+ const addLabel=(title,field)=>{
+  const label=el('label','',title);label.append(field);form.append(label)};
+ addLabel('Disposable managed account',selected);
+ addLabel('Dedicated test namespace',namespace);
+ addLabel('Installed XPI fingerprint (optional for initial stages)',fingerprint);
+ form.append(confirm);section.append(form);
+ const tools=el('div','form-foot'),status=el('p','setting-note');
+ status.setAttribute('role','status');section.append(tools,status);
+ const stages=el('details','settings-section'),heading=el('summary','','Actual diagnostic stage receipts');
+ const stageText=el('pre','source-preview');stages.append(heading,stageText);section.append(stages);
+ const labels={
+  TEST_SCOPE_INVALID:'The test scope is incomplete. Finish secure GitHub connection and choose your verified disposable account.',
+  TEST_GITHUB_CONNECTION_REQUIRED:'GitHub file preview works, but secure connection setup is incomplete. Repair local PCMS helpers first.',
+  TEST_ACCOUNT_SELECTION_INVALID:'Select a verified disposable managed account.',
+  TEST_PERSONA_BINDING_INVALID:'The selected account lacks a verified protected Persona binding.',
+  TEST_NAMESPACE_INVALID:'Use a lowercase name starting with pcms-test-.',
+  ENABLE_SCOPED_DEVELOPMENT_AND_GIT:'Enable development and scoped Git writeback in Automation after the secure Git connection is verified.',
+  TEST_SCOPE_NOT_VERIFIED:'The disposable resources could not be verified. No live test started.'
+ };
+ const say=text=>{
+  const raw=String(text||'').trim();if(!raw)return 'No diagnostic run has been verified.';
+  for(const [code,replacement] of Object.entries(labels))if(raw.includes(code))return replacement;
+  if(raw.includes('NOT_TESTED'))return 'Diagnostic stages have not been executed yet.';
+  return raw.replace(/\b(?:TEST|GIT|DIAGNOSTIC)_[A-Z0-9_]{4,80}\b/g,
+    'an unresolved test prerequisite');
+ };
+ function refresh(){
+  if(!section.isConnected)return;
+  const origin=nativeControl('pcms-diagnostic-status')?.textContent||'';
+  const scope=nativeControl('pcms-diagnostic-scope')?.textContent||'';
+  status.textContent=say(origin)+' '+(scope&&scope!==origin?say(scope):'');
+  const results=nativeControl('pcms-diagnostic-stages');
+  stageText.textContent=results?.innerText||results?.textContent||'No real stage receipts.';
+  for(const [id,label] of [
+   ['pcms-diagnostic-run','Run full diagnostic'],
+   ['pcms-diagnostic-resume','Resume failed stage'],
+   ['pcms-diagnostic-rerun','Run new disposable test'],
+   ['pcms-diagnostic-export','Export sanitized report']]){
+    const x=[...tools.querySelectorAll('button')].find(b=>b.dataset.nativeAction===id);
+    if(x)x.disabled=nativeControl(id)?.disabled!==false;
+  }
+ }
+ const copyToNative=()=>{
+  for(const [id,value] of [['pcms-diagnostic-account',selected.value],
+   ['pcms-diagnostic-namespace',namespace.value],['pcms-diagnostic-xpi-sha',fingerprint.value]]){
+   const target=nativeControl(id);if(target){
+    target.value=value;target.dispatchEvent(new Event('input',{bubbles:true}));
+    target.dispatchEvent(new Event('change',{bubbles:true}));
+   }
+  }
+  const dest=nativeControl('pcms-diagnostic-consent');
+  if(dest){dest.checked=consent.checked;dest.dispatchEvent(new Event('change',{bubbles:true}));}
+ };
+ const save=b('Save disposable scope',()=>{
+  if(!selected.value||!/^pcms-test-[a-z0-9-]{1,31}$/.test(namespace.value)||!consent.checked){
+   status.textContent='Choose a verified account, enter a valid pcms-test- namespace and confirm disposable authorization.';return;
+  }
+  copyToNative();const nativeSave=nativeControl('pcms-diagnostic-designate');
+  if(!nativeSave){status.textContent='The full diagnostic controller is not installed in this build.';return;}
+  nativeSave.click();status.textContent='Checking the selected disposable scope before permitting any live test.';
+ },'btn primary');tools.append(save);
+ for(const [id,label] of [
+  ['pcms-diagnostic-run','Run full diagnostic'],
+  ['pcms-diagnostic-resume','Resume failed stage'],
+  ['pcms-diagnostic-rerun','Run new disposable test'],
+  ['pcms-diagnostic-export','Export sanitized report']]){
+  const button=b(label,()=>{
+   const ctrl=nativeControl(id);
+   if(!ctrl||ctrl.disabled)return;
+   if(id==='pcms-diagnostic-run'&&!window.confirm(
+     'Start the authorized live diagnostic now? Only the designated disposable account and namespace may be used.'))return;
+   ctrl.click();refresh();
+  },'btn small');
+  button.dataset.nativeAction=id;button.disabled=true;tools.append(button);
+ }
+ const oldNodes=['pcms-diagnostic-status','pcms-diagnostic-scope','pcms-diagnostic-stages',
+  'pcms-diagnostic-run','pcms-diagnostic-resume','pcms-diagnostic-rerun'].map(nativeControl).filter(Boolean);
+ const observer=new MutationObserver(()=>refresh());
+ for(const old of oldNodes)observer.observe(old,{subtree:true,childList:true,
+   attributes:true,characterData:true});
+ const previousObserver=state.diagnosticObservation;
+ if(previousObserver)previousObserver.disconnect();
+ state.diagnosticObservation=observer;
+ refresh();
+}
 function renderSettingsSection(){if(state.route!=='settings')return;
- const names=['connections','automation','backups','diagnostics','advanced'];
+ const names=['connections','automation','ai','backups','diagnostics','advanced'];
  const select=names.includes(state.settings)?state.settings:'connections';
  for(const b of page().querySelectorAll('[data-settings]')){b.classList.toggle('active',b.dataset.settings===select);b.setAttribute('aria-current',b.dataset.settings===select?'page':'false')}
  const container=shadow('.settings-main');if(!container)return;
- // Keep exact prototype setting rows; only their data comes from native state.
+ // Preserve pristine static connection rows across category round-trips.
+ // Never reuse the live, mutated view as the source template.
+ if(!state.settingsStatic)state.settingsStatic=container.cloneNode(true);
+ // Display only user-readable connection summaries. Technical receipts
+ // remain in separately collapsible Operational readiness evidence.
  // Other settings expose their original guarded controls without attempting to
  // reproduce authorization or credential editors in a simulated frontend.
  if(select==='connections'){
+  container.replaceChildren(...state.settingsStatic.cloneNode(true).childNodes);
   const rows=[...container.querySelectorAll('.settings-row')];
   const mapping=[['GitHub source','pcms-catalog-status','generators','catalog'],['PersonaMonkey routing','pcms-accounts-feedback','accounts',null],['Native vault and host','pcms-backup-status','settings','backup']];
   mapping.forEach(([label,id,target,group],i)=>{
    const row=rows[i];if(!row)return;const title=row.querySelector('.setting-title'),desc=row.querySelector('.setting-description'),pill=row.querySelector('.pill');
    if(title)title.textContent=label;
-   const source=nativeControl(id);const status=snippet(source?.textContent,110)||'State not observed';
-   if(desc)desc.textContent=status;if(pill){pill.textContent='Unverified';pill.className='pill'}
+   const components=[['GIT_CONFIG','GITHUB_AUTH'],['PERSONA_AND_SESSION'],['NATIVE_VAULT_HOST','BACKUP_HOST','DIAGNOSTIC_HOST']];
+   const observed=state.readiness?.rows?.filter(r=>components[i].includes(r.component))||[];
+   const unavailable=observed.some(r=>['UNREACHABLE','SECURITY_HELD','OUTCOME_UNCERTAIN'].includes(r.state));
+   const checked=observed.length>0&&observed.every(r=>r.state==='VERIFIED');
+   const status=unavailable?
+      i===2?'PCMS local helpers need attention. Use Operational readiness below.':
+      'A connection prerequisite needs attention. Check the detailed readiness report.':
+     checked?(i===0?'Saved access and local verification were checked.':
+       i===1?'The protected account connection was checked.':
+       'The local helper checks passed; live workflows require separate proof.'):
+     i===0?'GitHub access has not been fully verified in this session.':
+      i===1?'Check the protected account and Persona connection in Accounts.':
+      'Verify the matching PCMS native helpers before running full diagnostics.';
+   if(desc)desc.textContent=status;
+   if(pill){pill.textContent=unavailable?'Needs attention':checked?'Checked':'Not checked';pill.className='pill'}
    const button=row.querySelector('button[data-action]');if(button)button.dataset.action='check-service:'+(['github','persona','native'][i]);
   });
   container.querySelectorAll('.settings-row').forEach(row=>{if(row.querySelector('.pill')?.textContent==='Healthy')row.querySelector('.pill').textContent='Unknown'});
+  primaryConnections(container);
  } else {
   container.replaceChildren();
-  const section=el('section','card settings-group');const head=el('div','settings-section-head');const titles={automation:'Automation',backups:'Backup & Restore',diagnostics:'Diagnostics',advanced:'Advanced'};
+  const section=el('section','card settings-group');const head=el('div','settings-section-head');const titles={automation:'Automation',ai:'AI development',backups:'Backup & Restore',diagnostics:'Diagnostics',advanced:'Advanced'};
   head.append(el('h2','h2',titles[select]));section.append(head);
-  section.append(el('p','setting-note','Some controls are still in the original PCMS view. They use the same protected data and permissions; the unified settings interface is not yet complete.'));
-  const group=select==='backups'?'backup':select==='diagnostics'?'diagnostics':select==='automation'?'automation':'permissions';
-  section.append(b('Open '+titles[select].toLowerCase()+' tools (original view)',()=>nativeAction('settings',group),'btn primary'));
-  container.append(section);
+  if(select==='automation'){primaryAutomation(container);}
+  else if(select==='ai'){primaryAiSettings(container);}
+  else if(select==='backups'){primaryBackups(container);}
+  else if(select==='diagnostics')primaryDiagnostics(container);
+  else{
+   section.append(el('p','setting-note',
+     'The original protected controller remains available for exceptional recovery workflows not yet migrated into the primary workspace. Routine actions are available directly in the main interface.'));
+   section.append(b('Open protected recovery controls',()=>nativeAction('settings'),'btn small'));
+   container.append(section);
+  }
  }
  renderReadinessPanel(container);
 }
 function displayRouteScaffold(){
  if(state.route==='overview')displayOverview();
- if(state.route==='work-queue')displayQueue();
+ if(state.route==='work-queue'){displayQueue();void loadQueue(true);}
  if(state.route==='generators'){
   const select=shadow('#generator-account');if(select)select.value=state.gen.account;
   const q=shadow('#generator-search');if(q)q.value=state.gen.query;
@@ -668,9 +2477,8 @@ function displayRouteScaffold(){
   void loadRefresher();
  }
  if(state.route==='settings')renderSettingsSection();
- const top=page()?.querySelector('.page-head .head-actions');
- if(top){top.append(b('More controls (original view)',()=>nativeAction(state.route),'btn quiet small'))}
- else page()?.querySelector('.page-head')?.append(b('Advanced controls',()=>nativeAction(state.route),'btn quiet small'));
+ // The original controls are deliberately accessed from Settings -> Advanced,
+ // not displayed as a second competing dashboard on every primary view.
 }
 const templates=new Map();
 async function render(){

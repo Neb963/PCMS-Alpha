@@ -41,7 +41,7 @@ export function validateRefresherMessage(api,sender,message){
   if(message.type==='GET_REFRESHER'){
     if((p.query!=null&&(typeof p.query!=='string'||p.query.length>80))||
       (p.accountId!=null&&p.accountId!==''&&!isSafeId(p.accountId))||
-      (p.phase!=null&&!['ALL','WAITING','ACTIVE','SLEEPING'].includes(p.phase))||
+      (p.phase!=null&&!['ALL','WAITING','ACTIVE','SLEEPING','HELD','INELIGIBLE'].includes(p.phase))||
       (p.offset!=null&&(!Number.isSafeInteger(p.offset)||p.offset<0||p.offset>5000))||
       (p.limit!=null&&(!Number.isSafeInteger(p.limit)||p.limit<1||p.limit>50)))return fail('INVALID_PARAMS');
   }else if(message.type==='DIAGNOSTIC_TARGET_REFRESH'){

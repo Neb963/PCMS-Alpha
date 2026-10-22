@@ -43,13 +43,13 @@ export function createRefresherNativeAdapter({
        !SLUG.test(row?.slug||'')||!HEX.test(row?.releaseFingerprint||'')||
        account?.verifiedIdentity!==true)
       return {status:'UNVERIFIED'};
-    const proof=methodProofFor({row,account});
+    // An unapproved/unavailable writer is rejected before even inspecting
+    // live source. Concrete source-specific proof is checked again after
+    // independent readback and byte-different marker planning.
+    const advertised=methodProofFor({row,account,guard:g,phase:'PRECHECK'});
     if(!['GUARDED_FIXED_EDITOR_METHOD','INDEPENDENT_LIVE_SOURCE_MARKER_PROOF']
-      .includes(proof?.source)||
-       proof.allowedByProvider!==true||
-       proof.meaningfulEffectVerified!==true||
-       !/^[A-Za-z0-9_-]{1,100}$/.test(proof.version||'')||
-       !/^[A-Za-z0-9_-]{1,100}$/.test(proof.evidenceId||''))return {status:'UNVERIFIED'};
+        .includes(advertised?.source)||advertised.allowedByProvider!==true)
+      return {status:'UNVERIFIED'};
     // A previous source save can be independently verified while local
     // tab cleanup failed. Safely retry only that exact S07-owned clean tab.
     if(row.refresh?.savedNonce){
@@ -69,7 +69,19 @@ export function createRefresherNativeAdapter({
        !/^[A-Za-z0-9_-]{16,64}$/.test(markerId))return {status:'UNVERIFIED'};
     const planned=await planRefresherSourceCandidate({
       files:original.source.blobs,expectedFingerprint:sourceFingerprint,markerId});
-    if(!planned.ok)return {status:'UNVERIFIED'};
+    if(!planned.ok||planned.toFingerprint===sourceFingerprint)return {status:'UNVERIFIED'};
+    // Proof is derived from this independently read owned-public source and
+    // the concrete byte-different planned candidate, not an unconditional
+    // installed-method assertion. Actual saved bytes and recent-feed presence
+    // remain separate later receipts and must NEVER be inferred here.
+    const proof=methodProofFor({row,account,source:original.source,
+      planned,guard:g});
+    if(!['GUARDED_FIXED_EDITOR_METHOD','INDEPENDENT_LIVE_SOURCE_MARKER_PROOF']
+      .includes(proof?.source)||
+       proof.allowedByProvider!==true||
+       proof.meaningfulEffectVerified!==true||
+       !/^[A-Za-z0-9_-]{1,100}$/.test(proof.version||'')||
+       !/^[A-Za-z0-9_-]{1,100}$/.test(proof.evidenceId||''))return {status:'UNVERIFIED'};
     const entry={row:{stableId:row.stableId,slug:row.slug,accountId:row.accountId,
       personaUid:row.personaUid,remoteId:row.remoteId,bindingVersion:row.bindingVersion},
       principalFingerprint:account.principalFingerprint,sourceFingerprint,

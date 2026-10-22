@@ -20,7 +20,7 @@ export function isI17Quarantined(input) {
     input.slugs.some(value => normalize(value) === I17_QUARANTINED_SLUG);
 }
 export function admissionForI17Supply(kind, request) {
-  if (['CREATE', 'RENAME', 'PREFLIGHT_CREATE', 'PREFLIGHT_RENAME'].includes(kind) &&
+  if (['CREATE', 'RENAME', 'RENAME_EXISTING', 'PREFLIGHT_CREATE', 'PREFLIGHT_RENAME'].includes(kind) &&
       isI17Quarantined(request)) {
     return {ok:false,code:I17_QUARANTINE_CODE,effectBoundary:'NOT_DISPATCHED'};
   }

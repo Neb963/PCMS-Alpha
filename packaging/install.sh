@@ -73,6 +73,16 @@ if ((WITH_WITNESS)); then
   fi
 fi
 echo
-python3 "$PKG/pcms-native-check.py" || true
+# Installation cannot report success when native messaging/keyring checks are
+# known to fail. The installer is an explicit opt-in that may perform a
+# disposable local keyring probe; it never touches GitHub or Perchance.
+if ! python3 "$PKG/pcms-native-check.py"; then
+  echo >&2
+  echo 'PCMS helper installation is incomplete. Correct the failed local host/keyring check above, rerun this installer, and then restart Firefox.' >&2
+  echo 'Do not retry GitHub credential storage or a full provider diagnostic while native helpers remain unreachable.' >&2
+  exit 1
+fi
 echo
-echo "Restart Firefox, then install $PKG/pcms-alpha.xpi (see OPERATOR-GUIDE.md)."
+echo "PCMS native helper checks passed for this OS session."
+echo "Completely restart Firefox, then install $PKG/pcms-alpha.xpi from this SAME verified package (see OPERATOR-GUIDE.md)."
+echo "An OS helper check does not establish the installed XPI, GitHub access, or Perchance operation readiness."

@@ -11,7 +11,9 @@ const LABEL={ROUTE_UNAVAILABLE:'Protected route unavailable',ACCOUNT_UNVERIFIED:
   SOURCE_HELD:'Generator source held',RESTORE_IN_PROGRESS:'Restore in progress',
   CANONICAL_UNAVAILABLE:'Local storage unavailable',OPERATION_UNCERTAIN:'External write outcome uncertain',
   PROVIDER_OUTAGE:'Perchance unavailable',BACKUP_FAILED:'Backup failed',
-  GIT_RECONNECT_REQUIRED:'GitHub connection needs attention'};
+  GIT_RECONNECT_REQUIRED:'GitHub connection needs attention',
+  GIT_FOLDER_MISSING:'GitHub source folder missing',
+  GIT_FOLDER_RENAME_REVIEW:'Possible GitHub folder rename needs a decision'};
 const ACTION={ROUTE_UNAVAILABLE:'Check the account in Accounts → Check route. Clears itself once a healthy route is observed again.',
   ACCOUNT_UNVERIFIED:'Open the account’s Perchance tab, log in, then Confirm login.',
   OPERATION_UNCERTAIN:'PCMS reconciles by read-only checks; do not repeat the action manually.',

@@ -2,7 +2,9 @@
 
 PCMS Alpha is one Firefox extension (PCMS + PersonaMonkey, extension ID `persona-route-manager@local`). It manages your Perchance generators through dedicated, Mullvad-protected Personas. This guide covers installation, first setup, the first live diagnostic, backup/restore and debugging.
 
-> **What has and has not been tested.** Every feature was exercised in CI against an installed copy of this exact XPI in Firefox, with real native hosts and a real Secret Service. Perchance itself (login, creating generators, saving source, native AI, publishing, the recent-generators feed) has **not** been tested live; your first diagnostic run is that test. If something fails, export the report (see *Debugging*) and we fix it together.
+> **Release readiness and evidence.** Tests in disposable Firefox and CI verify only the specific functions and revisions that they exercise. They do **not** establish that every visible control works, that this operator profile has the required native hosts, or that Perchance accepted any create/save/publish/refresh action. Distinguish source-level (D), installed Firefox (B), operator-local host (H), private Git remote (GIT) and authorized provider (L) evidence. The release is not live-accepted until all required AC evidence is gathered.
+
+> **Installing the XPI is not enough.** Firefox native messaging hosts are separate operating-system programs registered in the user profile. Reinstalling the XPI does **not** repair missing `local.pcms.backup_vault`, `local.pcms.backup_v2`, or `local.pcms.diagnostic_browser`. Use the **matching, checksum-verified operator package** and its installer before repeating the full diagnostic. Never install a native host from a different release just to make a check pass.
 
 ## 1. Requirements (Fedora)
 

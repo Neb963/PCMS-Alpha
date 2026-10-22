@@ -41,7 +41,7 @@ export function validateAiMessage(api,sender,message){
      !ACT.has(message.type)||!json||json.length>38000)return fail('INVALID_MESSAGE');
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
-  const allowed=message.type==='LIST_JOBS'?['after','limit']:
+  const allowed=message.type==='LIST_JOBS'?['after','limit','query','status']:
      message.type==='GET_JOB'?['slug']:
     message.type==='PREPARE_JOB'?['slug','expectedStageRevision','token']:
     message.type==='BEGIN_NATIVE'?['slug','expectedRevision','step']:
@@ -64,7 +64,10 @@ export function validateAiMessage(api,sender,message){
     return fail('INVALID_PARAMS');
   if(message.type==='LIST_JOBS'&&
       ((p.after!==undefined&&(typeof p.after!=='string'||p.after.length>100))||
-       (p.limit!==undefined&&(!Number.isInteger(p.limit)||p.limit<1||p.limit>200))))
+       (p.limit!==undefined&&(!Number.isInteger(p.limit)||p.limit<1||p.limit>200))||
+       (p.query!==undefined&&(typeof p.query!=='string'||p.query.length>100))||
+       (p.status!==undefined&&
+         !['ALL','NEEDS_ACTION','RUNNING','WAITING','COMPLETED'].includes(p.status))))
     return fail('INVALID_PARAMS');
   if(['SET_PROMPT','IMPORT_PROMPT','SET_CONCURRENCY'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))

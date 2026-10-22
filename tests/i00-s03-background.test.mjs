@@ -94,3 +94,29 @@ test('S03: simultaneous background alarms coalesce and do not multiply network s
   assert.equal((await two).ok,true);
   assert.equal(reads,1);
 });
+
+test('R4 S03: delayed apparent Git folder rename remains held before actual creation/READY intake',async()=>{
+ const v=env();await v.set({pcmsS03Git:{repository:repo,repositoryId:'42'}});
+ let round=0;const captures=[];
+ const batches=[
+   [generator('old-generator')],
+   [],
+   [generator('new-generator')]
+ ];
+ const watcher=createCatalogWatcher(v.api,{
+   native:async()=>({ok:true,credential:TOKEN}),
+   scan:async()=>({...observed(batches[round++]),head:String(round).repeat(40)}),
+   ingestComplete:async(catalog,opts)=>{captures.push({
+     source:catalog.generators.map(x=>x.slug),held:opts.heldSlugs});return {ok:true}},
+   clock:()=>1700000000000
+ });
+ assert.equal((await watcher.tick()).ok,true);
+ assert.equal((await watcher.tick()).ok,true);
+ assert.deepEqual(v.saved.get('pcmsR4MissingGitFolders').slugs,['old-generator']);
+ assert.equal((await watcher.tick()).ok,true);
+ assert.deepEqual(captures[2],{source:['new-generator'],held:['new-generator']});
+ const review=v.saved.get('pcmsR4FolderIdentityReviews');
+ assert.equal(review[0].oldSlug,'old-generator');
+ assert.equal(review[0].state,'REVIEW_REQUIRED');
+ assert.equal(v.saved.get('pcmsS03CatalogReceipt').identityReviewRequired,1);
+});

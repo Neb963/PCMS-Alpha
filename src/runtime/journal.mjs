@@ -178,6 +178,41 @@ export function createCanonicalStore(db) {
       };
     });
   }
+  // R4: bounded, stable, read-only queue. Revisions and identities come
+  // directly from the canonical transaction; no DOM text or inferred effects.
+  // Legacy operation records have no timestamp. Do not invent one.
+  function listOperationPage({after='',limit=30,status='ALL',query=''}={}){
+    if(typeof after!=='string'||after.length>100||
+       typeof query!=='string'||query.length>80||
+       (after!==''&&!isSafeId(after))||
+       !Number.isInteger(limit)||limit<1||limit>100||
+       !['ALL','NEEDS_ACTION','RUNNING','WAITING','COMPLETED'].includes(status))
+      return Promise.resolve(fail('INVALID_QUEUE_FILTER'));
+    const groups={
+      ALL:null,NEEDS_ACTION:new Set(['HELD_UNCERTAIN','REJECTED','DISPATCH_POSSIBLE']),
+      RUNNING:new Set(['OBSERVING']),
+      WAITING:new Set(['PREPARED']),
+      COMPLETED:new Set(['CONFIRMED','ABORTED'])};
+    return transact(db,['operations'],'readonly',(tx,finish)=>{
+      const items=[];let more=false;const subset=groups[status];
+      const range=after?IDBKeyRange.lowerBound(after,true):null;
+      const request=tx.objectStore('operations').openCursor(range);
+      request.onsuccess=event=>{
+        const row=event.target.result;
+        if(!row){finish(ok({items,more,next:more?items.at(-1)?.operationId||'':null}));return;}
+        const op=row.value;
+        if(!op||!isSafeId(op.operationId)||!isSafeId(op.targetId)||
+            (subset&&!subset.has(op.status))||
+            (query&&!([op.operationId,op.targetId,op.effectType,op.status].join(' ').toLowerCase().includes(query.toLowerCase())))){
+          row.continue();return;}
+        if(items.length>=limit){more=true;finish(ok({items,more,next:items.at(-1)?.operationId||null}));return;}
+        items.push({operationId:op.operationId,targetId:op.targetId,
+          effectType:op.effectType,status:op.status,revision:op.revision,
+          updatedAt:Number.isSafeInteger(op.updatedAt)?op.updatedAt:null});
+        row.continue();
+      };
+    });
+  }
   // Atomically mark every dispatch-maybe record uncertain on waking from crash.
   // This does not release a target fence or dispatch anything.
   function recover() {
@@ -208,7 +243,8 @@ export function createCanonicalStore(db) {
   //   projected as reviewed-and-still-active, never hidden.
   const NOTICE_CODES = new Set(['ROUTE_UNAVAILABLE','ACCOUNT_UNVERIFIED',
     'SOURCE_HELD','RESTORE_IN_PROGRESS','CANONICAL_UNAVAILABLE','OPERATION_UNCERTAIN',
-    'PROVIDER_OUTAGE','BACKUP_FAILED','GIT_RECONNECT_REQUIRED']);
+    'PROVIDER_OUTAGE','BACKUP_FAILED','GIT_RECONNECT_REQUIRED',
+    'GIT_FOLDER_MISSING','GIT_FOLDER_RENAME_REVIEW']);
   const RANK = { INFORMATIONAL:1, ACTION_REQUIRED:2, SERIOUS:3 };
   const RENOTIFY_MS = 30 * 60000;
   const causeOk = c => typeof c === 'string' && /^[A-Za-z0-9_:.-]{3,120}$/.test(c);
@@ -348,9 +384,36 @@ export function createCanonicalStore(db) {
       };
     });
   }
-  return Object.freeze({ provisionTarget, apply, getOperation, summary, recover,
+  function pageNotices({after='',limit=30,query=''}={}){
+    if(typeof after!=='string'||after.length>240||
+       typeof query!=='string'||query.length>80||
+       (after!==''&&!/^attention:[a-zA-Z0-9_-]{8,100}:[A-Z_]{3,80}$/.test(after))||
+       !Number.isInteger(limit)||limit<1||limit>100)
+      return Promise.resolve(fail('INVALID_NOTICE_PAGE'));
+    return transact(db,['meta'],'readonly',(tx,finish)=>{
+      const items=[];let more=false;
+      const range=IDBKeyRange.lowerBound(after||'attention:',Boolean(after));
+      const cursor=tx.objectStore('meta').openCursor(range);
+      cursor.onsuccess=event=>{
+        const row=event.target.result;
+        if(!row){finish(ok({items,more,next:more?items.at(-1)?.cursor||null:null}));return;}
+        const key=String(row.key);
+        if(!key.startsWith('attention:')){finish(ok({items,more:false,next:null}));return;}
+        const n=row.value;
+        if(n?.state==='RESOLVED'||(query&&!([n?.scopeId,n?.code,n?.cause].join(' ').toLowerCase().includes(query.toLowerCase())))){
+          row.continue();return;}
+        if(items.length>=limit){more=true;finish(ok({items,more,next:items.at(-1)?.cursor||null}));return;}
+        if(n?.scopeId&&n?.code)items.push({cursor:key,scopeId:n.scopeId,code:n.code,
+          cause:n.cause||n.code,severity:n.severity,revision:n.revision,
+          reviewed:n.reviewed===true||n.ignored===true,firstAt:n.firstAt??null,
+          lastAt:n.lastAt??null});
+        row.continue();
+      };
+    });
+  }
+  return Object.freeze({ provisionTarget, apply, getOperation, listOperationPage, summary, recover,
     recordNotice, resolveNotice, ignoreNotice, acknowledgeNotice, noticeSummary,
-    listNotices, close: () => db.close() });
+    listNotices, pageNotices, close: () => db.close() });
 }
 
 // Restore sentinel lives OUTSIDE replaceable IDB. It must not be cleared by

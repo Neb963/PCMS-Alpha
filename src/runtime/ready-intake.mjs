@@ -20,7 +20,10 @@ export function createReadyIntake(api,{open=openCanonicalDatabase,
  inspect=inspectReadyCandidate,maxPerWake=16}={}){
  const sentinel=createRestoreSentinel(api.storage.local);
  let dbPromise;
- async function run({catalog,repository,token,transport=fetch}={}){
+ async function run({catalog,repository,token,transport=fetch,heldSlugs=[]}={}){
+  if(!Array.isArray(heldSlugs)||heldSlugs.length>20000||heldSlugs.some(s=>typeof s!=='string'||s.length>100))
+    return fail('S05_IDENTITY_HOLD_INVALID');
+  const identityHeld=new Set(heldSlugs);
   if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
   if(!catalog?.ok||catalog.complete!==true||
      catalog.source!=='PINNED_MAIN_READ_ONLY'||
@@ -66,6 +69,10 @@ export function createReadyIntake(api,{open=openCanonicalDatabase,
   for(let i=start;i<end;i++){
    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
    const {slug,ready}=scope[i];
+   if(identityHeld.has(slug)){
+     const hold=await queue.holdNotReady({slug,repositoryId:catalog.repositoryId,head:catalog.head});
+     held.push({slug,code:hold.ok?'GIT_IDENTITY_REVIEW_REQUIRED':hold.code});continue;
+   }
    if(isI17Quarantined({slug})){
      held.push({slug,code:I17_QUARANTINE_CODE});continue;
    }

@@ -30,9 +30,9 @@ test('all six accepted prototype-derived templates are actual packaged assets',a
  assert.match(stylesheet,/\.ref-table-scroll/);
  assert.match(stylesheet,/\.sidebar/);
  assert.match(stylesheet,/\.settings-main/);
- assert.match(shell,/UI v0\.1\.6/);
+ assert.match(shell,/PCMS local · Not verified/);
 });
-test('canonical read-only ports feed prototype views; original guarded mutating controls survive',()=>{
+test('canonical primary controls call protected typed runtime with exact revisions; original safety gates survive',()=>{
  for(const s of ['pcms-i04-inventory','pcms-i03-accounts','pcms-i12-refresher','LIST_INVENTORY','LIST_ACCOUNTS','GET_REFRESHER'])assert.ok(bridge.includes(s));
  assert.match(bridge,/const native=document\.querySelector\('body > \.app'\)/);
  assert.match(bridge,/document\.getElementById\(id\)/);
@@ -40,7 +40,11 @@ test('canonical read-only ports feed prototype views; original guarded mutating 
  assert.match(bridge,/function nativeAction\(/);
  assert.match(bridge,/function guardedClick\(/);
  assert.doesNotMatch(bridge,/guardedClick\('pcms-refresher-save'\)/);
- assert.match(bridge,/nativeAction\('refresher',null,'pcms-refresher-enable'\)/);
+ assert.match(bridge,/readPort\('pcms-i12-refresher','SET_POLICY'/);
+ assert.match(bridge,/expectedRevision:snapshot\.revision,policy:\{refreshEnabled:next\}/);
+ assert.match(bridge,/readPort\('pcms-i12-refresher','SET_GENERATOR_POLICY'/);
+ assert.match(bridge,/readPort\('pcms-i05-source','INSPECT_SOURCE'/);
+ assert.match(bridge,/readPort\('pcms-i07-adoption','CAPTURE_ADOPTION'/);
  assert.match(bridge,/mount\(\)\.catch/);
  assert.equal((bridge.match(/\binnerHTML\s*=/g)||[]).length,2,'only static bundled shell and selected local template may be parsed as HTML');
  assert.match(bridge,/template\.innerHTML=html/);
@@ -61,9 +65,9 @@ test('prototype supports adverse navigation and fail-open presentation recovery'
  assert.match(bridge,/host\.remove\(\)/);
  assert.match(bridge,/body\.classList\.remove\('pcms-faithful-ready'\)/);
 });
-test('Firefox upgrades v1.2.1 XPI to 1.2.3 with donor manifest unchanged',()=>{
+test('Firefox upgrades v1.2.1 XPI to 1.2.4 with donor manifest unchanged',()=>{
  assert.match(build,/original\.version!=='1\.2\.0'/);
- assert.match(build,/combined\.version='1\.2\.3'/);
+ assert.match(build,/combined\.version='1\.2\.4'/);
  assert.match(html,/v015-faithful\.mjs/);
  assert.match(html,/faithful\/bridge\.mjs/);
 });

@@ -44,7 +44,10 @@ export function createCreationCatalogIntake(api,{open=openCanonicalDatabase,
     const db=await (dbPromise||=open().catch(e=>{dbPromise=null;throw e;}));
     return {approval:makeApproval(db),creation:makeCoordinator(db)};
   };
-  async function run(catalog){
+  async function run(catalog,{heldSlugs=[]}={}){
+    if(!Array.isArray(heldSlugs)||heldSlugs.length>20000||heldSlugs.some(s=>typeof s!=='string'||s.length>100))
+      return fail('S04_IDENTITY_HOLD_INVALID');
+    const identityHeld=new Set(heldSlugs);
     const valid=validateCreationCatalog(catalog);
     if(!valid.ok)return valid;
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
@@ -73,6 +76,7 @@ export function createCreationCatalogIntake(api,{open=openCanonicalDatabase,
       for(;next<catalog.generators.length&&next<from+maxItems;next++){
         if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
         const g=catalog.generators[next];
+        if(identityHeld.has(g.slug)){held++;continue;}
         const out=await creation.ingestVerifiedMain({
           repository:catalog.repository,repositoryId:catalog.repositoryId,
           slug:g.slug,head:catalog.head,markerOid:g.markerOid,
