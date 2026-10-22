@@ -64,12 +64,11 @@ export async function downloadPortable(api,archive,{runId,manual=false}){
       conflictAction:'uniquify',saveAs:false});
     requireValid(Number.isSafeInteger(downloadId)&&downloadId>=0,
       'PORTABLE_DOWNLOAD_ID_UNKNOWN');
-    return {downloadId,runId,bytes:archive.bytes,manual,
+    return {downloadId,runId,bytes:archive.bytes,manual,objectUrl:url,
       sourceAudit:archive.sourceAudit,receiptTier:1,code:'DOWNLOAD_STARTED'};
   }finally{
-    // Firefox downloads can still be streaming when API resolves with the ID.
-    // Do not release the object URL until a terminal change/metadata observation
-    // in the coordinator; caller owns it after dispatch in a final implementation.
+    // Firefox may still stream after the returned download ID. Caller owns the
+    // successful URL until a terminal download observation, not this function.
     if(url&&!Number.isSafeInteger(downloadId))URL.revokeObjectURL(url);
   }
 }
