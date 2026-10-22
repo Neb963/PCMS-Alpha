@@ -5,6 +5,9 @@ import {DB_STORES,validatePcmsSnapshot} from './backup-core.mjs';
 import {auditSourceClosureRows} from './backup-source-closure.mjs';
 import {readPortableArchive} from './portable-archive.mjs';
 export const STAGE_DB='pcms-a02-portable-restore-stage';
+const frameDigest=async value=>Array.from(new Uint8Array(await crypto.subtle.digest(
+  'SHA-256',new TextEncoder().encode(JSON.stringify(value)))),v=>
+  v.toString(16).padStart(2,'0')).join('');
 const goodId=x=>typeof x==='string'&&/^portable_[a-f0-9]{32}$/.test(x);
 const requireValid=(value,code)=>{if(!value)throw Error(code)};
 export function openRestoreStage(){
@@ -73,8 +76,12 @@ async function* streamRows(db,scope,group){
       tx.onabort=()=>reject(Error('PORTABLE_STAGE_READ_FAILED'));
     });
     if(!page.length)return;
-    for(const row of page)yield row.value;
-    start=page[page.length-1].position+1;
+    for(const row of page){
+      requireValid(row.position===start,'PORTABLE_STAGE_ROW_GAP');
+      requireValid(row.digest===await frameDigest(row.value),
+        'PORTABLE_STAGE_ROW_DRIFT');
+      yield row.value;start++;
+    }
   }
 }
 export async function preparePortableStage(source,{db=openRestoreStage,
@@ -88,7 +95,7 @@ export async function preparePortableStage(source,{db=openRestoreStage,
     const decoded=await readPortableArchive(source,{collect:false,
       onRecord:async({kind,store,record,value})=>{
         buffer.push({scope,group:kind==='donor'?'donor':store,
-          position:record,value});
+          position:record,value,digest:await frameDigest(value)});
         if(kind==='donor')donorCount++;else rowCount++;
         if(buffer.length>=32)await flush();
       },
