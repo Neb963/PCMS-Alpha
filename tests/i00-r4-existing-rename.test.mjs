@@ -137,7 +137,11 @@ test('R4 AC-09 already-possible rename is readback-only after standing grant rev
  x.setGrant(false);
  const r=await x.service.run({type:'RECONCILE',newSlug:'new-generator',expectedRevision:3});
  assert.equal(r.ok,true);
- assert.equal(x.renames(),1);
+ x.removeOldInventory();
+ x.installVerifiedNewLink();
+ const complete=await x.service.run({type:'FINALIZE',newSlug:'new-generator',expectedRevision:4});
+ assert.equal(complete.code,'VERIFIED_EXISTING_RENAME_COMPLETED');
+ assert.equal(x.renames(),1,'grant revocation permits read-only finalization but not a second rename');
 });
 test('R4 identity port rejects foreign pages, unversioned or malformed existing-rename effect requests',()=>{
  const api={runtime:{id:'pcms-id',getURL:x=>'moz-extension://test/'+x}};
