@@ -156,7 +156,7 @@ function nativeSelection(type,item){
  }
  else if(type==='source'){openSourceManager(item);}
  else if(type==='adopt'){openAdoptionManager(item);}
- else{const field=nativeControl('pcms-generator-query');if(field){field.value=item.slug;field.dispatchEvent(new Event('input',{bubbles:true}))}nativeRoute('generators','inventory')}
+ else notify('This workflow is not available from the current selection. No operation was attempted.');
 }
 // Primary source association is a read-only pinned-main inspection followed
 // by a local, revision-fenced link. It performs no Git/provider modification.
@@ -837,28 +837,6 @@ async function refreshRefCounts(epoch){
  const keys=['ACTIVE','SLEEPING','WAITING'];const reads=await Promise.allSettled(keys.map(p=>refresher({query:'',phase:p,offset:0,limit:1})));
  if(epoch!==state.renderEpoch||state.route!=='refresher')return;
  const vals=shadow('.ref-kpi-strip')?.querySelectorAll('.ref-kpi strong.tabnums');if(vals)reads.forEach((r,i)=>{vals[i].textContent=r.status==='fulfilled'?safeCount(r.value.total):'—'});
-}
-function observedReceipts(){
- const sources=[
-  ['Review queue','pcms-s06-review-queue','work-queue','release'],
-  ['AI development','pcms-ai-jobs','work-queue','ai'],
-  ['Generator supply','pcms-supply-items','generators','create'],
-  ['Private staging','pcms-stage-queue','work-queue','activity'],
-  ['Source updates','pcms-existing-status','work-queue','update'],
-  ['Backup / restore','pcms-restore-status','settings','backup']
- ];
- const out=[];
- for(const [label,id,route,group] of sources){const e=nativeControl(id);if(!e)continue;
-  // These are canonical native view text projections. Never turn a missing or
-  // generic loading string into a synthetic queued/running job.
-  const t=snippet(e.textContent,260);
-  if(!t||/^(checking|loading|no |none|awaiting|ready to |read unavailable|unknown)/i.test(t))continue;
-  const needs=/hold|fail|uncertain|error|approval|review|conflict|reconcile|denied|unavailable/i.test(t);
-  const running=/running|dispatch|in.progress|processing|prepared/i.test(t);
-  const waiting=/waiting|pending|queued|next|sleep/i.test(t);
-  out.push({label,text:t,route,group,needs,running,waiting});
- }
- return out;
 }
 // Canonical queue only: no status derived from native view text.
 const queueState={
