@@ -158,7 +158,7 @@ export function createExistingRenameService(api,{
   busy=true;
   try{
    if((await sentinel.inspect()).held)return reject('RESTORE_HOLD');
-   if(type!=='RECONCILE'&&developmentGate()!==true)
+   if(['PREPARE','EXECUTE'].includes(type)&&developmentGate()!==true)
     return reject('DEVELOPMENT_AUTHORITY_REQUIRED');
    const state=await current(newSlug);if(!state.ok)return state;
    const {review,attempt}=state;
