@@ -1,0 +1,228 @@
+{
+  "schema": "pcms.recovery.slices/1",
+  "authority": "docs/implementation/RECOVERY-PLAN-2026-10-22.md",
+  "clientAmendment": "docs/authority/PCMS-Alpha-CLIENT-AMENDMENT-v1.0.1.md",
+  "observedBaseline": "d9c912d0c2c11233313637e961b96c44d826cbcd",
+  "sequenceRule": "Resume incomplete/postmerge-unverified, else first dependency-eligible incomplete A-slice. Never infer completion from this file.",
+  "statuses": "Derived from merged HEAD, exact-source evidence ledger and required checks, never stored in this static map.",
+  "constraints": {
+    "allowedOSNativeHost": "com.persona.mullvad_router",
+    "forbiddenInstalledNativePrefix": "local.pcms.",
+    "forbiddenInstalledArtifacts": [
+      "PCMS installer",
+      "vault/keyring",
+      "Refresher host patch",
+      "geckodriver"
+    ],
+    "backupFormat": "portable unencrypted passwordless source-complete",
+    "gitCredential": "background-only Firefox extension-origin durable storage, no passphrase, excluded from backup",
+    "protectedLegacyI17": "batch_e2c328e54f9c4a6ab89f1084134fde52 / pcms-test-esr-chain-20261015-a01: NO AUTOMATIC CREATE/RENAME"
+  },
+  "slices": [
+    {
+      "id": "A00",
+      "dependsOn": [],
+      "scope": "Authority, accepted amendment and verified recovery plan",
+      "oracle": [
+        "Contract priority in main",
+        "Existing signed Stage 7 unchanged"
+      ],
+      "tier": [
+        "D"
+      ]
+    },
+    {
+      "id": "A01",
+      "dependsOn": [
+        "A00"
+      ],
+      "scope": "Red defect oracles, migration inventory, evidence harness",
+      "oracle": [
+        "Baseline known faults detected",
+        "X-01..X-14 mapped",
+        "No user data touched"
+      ],
+      "tier": [
+        "D",
+        "B"
+      ]
+    },
+    {
+      "id": "A02",
+      "dependsOn": [
+        "A01"
+      ],
+      "scope": "Browser-native source-complete passwordless backup, portable restore, crash-safe cutover",
+      "oracle": [
+        "AC-17",
+        "X-08",
+        "X-09",
+        "X-13"
+      ],
+      "tier": [
+        "D",
+        "B",
+        "H"
+      ]
+    },
+    {
+      "id": "A03",
+      "dependsOn": [
+        "A01",
+        "A02"
+      ],
+      "scope": "Background-only local Git credential; source Git path completeness; stable remote identity",
+      "oracle": [
+        "AC-06",
+        "AC-07",
+        "AC-08",
+        "AC-09",
+        "AC-11",
+        "X-01",
+        "X-03",
+        "X-08"
+      ],
+      "tier": [
+        "D",
+        "B",
+        "GIT"
+      ]
+    },
+    {
+      "id": "A04",
+      "dependsOn": [
+        "A03"
+      ],
+      "scope": "Durable account/inventory and arbitrary-size background batch operations",
+      "oracle": [
+        "AC-01",
+        "AC-02",
+        "AC-03",
+        "AC-04",
+        "AC-05",
+        "X-02",
+        "X-07"
+      ],
+      "tier": [
+        "D",
+        "B",
+        "L"
+      ]
+    },
+    {
+      "id": "A05",
+      "dependsOn": [
+        "A02",
+        "A03",
+        "A04"
+      ],
+      "scope": "Real source development, Chat2/testing, conditional writeback, guarded publication",
+      "oracle": [
+        "AC-10",
+        "AC-11",
+        "AC-12",
+        "AC-13",
+        "X-04",
+        "X-05"
+      ],
+      "tier": [
+        "D",
+        "B",
+        "GIT",
+        "L"
+      ]
+    },
+    {
+      "id": "A06",
+      "dependsOn": [
+        "A03",
+        "A05"
+      ],
+      "scope": "Refresher native-free active/rest clock, source save, complete recent feed",
+      "oracle": [
+        "AC-14",
+        "AC-15",
+        "X-05",
+        "X-06",
+        "X-07"
+      ],
+      "tier": [
+        "D",
+        "B",
+        "H",
+        "L"
+      ]
+    },
+    {
+      "id": "A07",
+      "dependsOn": [
+        "A04",
+        "A05",
+        "A06"
+      ],
+      "scope": "Single primary UI, native wake lifecycle and userScripts grant",
+      "oracle": [
+        "AC-16",
+        "AC-18",
+        "X-11",
+        "X-12",
+        "X-14"
+      ],
+      "tier": [
+        "D",
+        "B"
+      ]
+    },
+    {
+      "id": "A08",
+      "dependsOn": [
+        "A02",
+        "A03",
+        "A04",
+        "A05",
+        "A06",
+        "A07"
+      ],
+      "scope": "No extra host XPI packaging, clean and upgrade Firefox and artifact parity",
+      "oracle": [
+        "Only com.persona.mullvad_router native",
+        "All visible controls operational",
+        "X-10",
+        "X-11"
+      ],
+      "tier": [
+        "D",
+        "B",
+        "H"
+      ]
+    },
+    {
+      "id": "A09",
+      "dependsOn": [
+        "A08"
+      ],
+      "scope": "Exact candidate complete AC/T/X test evidence, minimum authorized external acceptance, final release",
+      "oracle": [
+        "AC-01..AC-18",
+        "T-01..T-10",
+        "X-01..X-14"
+      ],
+      "tier": [
+        "D",
+        "B",
+        "H",
+        "GIT",
+        "L"
+      ]
+    }
+  ],
+  "evidenceStates": [
+    "PASS",
+    "FAIL",
+    "BLOCKED",
+    "NOT_TESTED",
+    "NOT_APPLICABLE"
+  ],
+  "missingExternalEvidenceRule": "May permit safely dormant merged code; does not permit claiming final accepted fully live operation.",
+  "existingProductReleaseRule": "No partial migrated operator release. Complete and enabled XPI must work without local.pcms. hosts."
+}
