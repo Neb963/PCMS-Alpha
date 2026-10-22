@@ -453,6 +453,7 @@ function routeHandlers(){
  if(action==='ref-next'){state.ref.offset+=state.ref.limit;void loadRefresher();return}
  if(action==='account-prev'){state.acct.page=Math.max(0,state.acct.page-1);displayAccounts();return}
  if(action==='account-next'){state.acct.page++;displayAccounts();return}
+ if(action==='prepare-ai'){openAiPreparation();return}
  if(action==='queue-prev'){
    const prior=state.queue.history.pop();if(!prior)return;
    state.queue.opCursor=prior.op;state.queue.noticeCursor=prior.notice;
