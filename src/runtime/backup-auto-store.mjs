@@ -88,7 +88,7 @@ export function createAutoStore(db,clock=Date.now){
       if(typeof value!=='boolean')return {response:fail('INVALID_ENABLED')};
       s.enabled=value;
       if(!s.active){s.status=value?'SUSPENDED':'DISABLED';
-        s.code=value?'SUSPENDED_KEY_UNAVAILABLE':'AUTO_OFF';}
+        s.code=value?'PORTABLE_DAILY_SCHEDULED':'AUTO_OFF';}
       return {state:s,response:{ok:true,enabled:value}};
     });
   }
