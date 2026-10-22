@@ -16,7 +16,7 @@ const KINDS=Object.freeze({
   idbSchema:/\b(createObjectStore|indexedDB\.open|factory\.open)\s*\(/g,
   browserStorage:/\b(?:browser|api)\.storage\.(?:local|sync|session)\b/g,
   cookiesSession:/\b(?:cookies\.(?:getAll|set|remove)|contextualIdentities|userScripts|GM_[A-Za-z]+)\b/g,
-  pcmsNativeHost:/\blocal\.pcms\.[a-z_]+\b/g,
+  pcmsNativeHost:/\blocal\.pcms\.[a-z0-9_]+\b/g,
   donorBridge:/\bcom\.persona\.mullvad_router\b/g,
   secretVault:/\b(?:Secret Service|secret-tool|vaultRead|backup_vault|git\.get|git\.put)\b/gi,
   cryptoOrPassword:/\b(?:AES-GCM|PBKDF2|passphrase|password)\b/gi,
@@ -58,7 +58,7 @@ export async function census({root=ROOT,scope=SCAN}={}){
       objectStores:namesFor(/\.createObjectStore\(\s*['"]([^'"]+)['"]/g),
       databaseNames:namesFor(/\b(?:DB_NAME|DB_VERSION|SCHEMA)\s*=\s*['"]([^'"]+)['"]/g),
       staticStorageKeys:namesFor(/\.storage\.(?:local|sync|session)\.(?:get|remove)\s*\(\s*['"]([^'"]+)['"]/g),
-      nativeHostIds:namesFor(/\b(local\.pcms\.[a-z_]+|com\.persona\.mullvad_router)\b/g)
+      nativeHostIds:namesFor(/\b(local\.pcms\.[a-z0-9_]+|com\.persona\.mullvad_router)\b/g)
     };
     if(Object.keys(signals).length)entries.push({path:rel,sha256:hex(bytes),signals,symbols});
   }
