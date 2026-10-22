@@ -129,7 +129,10 @@ export function createAiStore(db){
     });
   // S05 paginated listing; prior 200-job truncation silently hid eligible
   // work. Cursor is an ordinary ordered slug, not an effect/claim token.
-  const list=({after='',limit=200}={})=>{
+  const list=({after='',limit=200,query='',status='ALL'}={})=>{
+    if(typeof query!=='string'||query.length>100||
+       !['ALL','NEEDS_ACTION','RUNNING','WAITING','COMPLETED'].includes(status))
+      return Promise.resolve(fail('AI_PAGE_INVALID'));
     if(typeof after!=='string'||after.length>100||
        !Number.isInteger(limit)||limit<1||limit>200)
       return Promise.resolve(fail('AI_PAGE_INVALID'));
@@ -142,9 +145,19 @@ export function createAiStore(db){
         if(typeof cursor.key==='string'&&cursor.key.startsWith('ai-job:')&&
            cursor.value?.job){
           const slugName=cursor.key.slice('ai-job:'.length);
-          if(slugName>after){
-            if(jobs.length<limit)jobs.push(publicJob(cursor.value.job));
-            else truncated=true;
+          if(slugName>after&&slugName.toLowerCase().includes(query.toLowerCase())){
+            const job=publicJob(cursor.value.job);
+            const completed=job.state==='TESTS_VERIFIED'||job.slotReleased===true;
+            const needs=['HELD_RECONCILE','KNOWN_FAILURE','HELD_NO_PROGRESS',
+              'TESTS_UNVERIFIED','PENDING_NATIVE_SESSION'].includes(job.state);
+            const running=job.nativeState==='RUNNING_OBSERVED';
+            const matches=status==='ALL'||status==='NEEDS_ACTION'&&needs||
+              status==='RUNNING'&&running||
+              status==='WAITING'&&!needs&&!running&&!completed||
+              status==='COMPLETED'&&completed;
+            if(matches){
+              if(jobs.length<limit)jobs.push(job);else truncated=true;
+            }
           }
         }
         cursor.continue();
