@@ -55,8 +55,15 @@ export async function verifyPortableCheckpoint({
     'RESTORE_CHECKPOINT_FILE_REQUIRED');
   // A separate file selected by the operator and fully read through the
   // browser's File stream is independent input proof, not a native disk host.
-  requireValid(same(checkpoint.canonical,currentPcms),
-    'RESTORE_CHECKPOINT_PCMS_DRIFT');
+  // A manual archive captures its own PREPARING receipt; completing its
+  // browser download necessarily changes backup:manual-active. That record
+  // cannot serve as self-certifying destination evidence and is not imported
+  // as live disk authority. All other canonical rows remain exact.
+  const withoutSelfReceipt=snapshot=>({...snapshot,stores:{
+    ...snapshot.stores,meta:snapshot.stores.meta.filter(row=>
+      row.key!=='backup:manual-active')}});
+  requireValid(same(withoutSelfReceipt(checkpoint.canonical),
+    withoutSelfReceipt(currentPcms)),'RESTORE_CHECKPOINT_PCMS_DRIFT');
   requireValid(same(checkpoint.donor,currentPortable),
     'RESTORE_CHECKPOINT_DONOR_DRIFT');
   return {verified:true,tier:3,sha256:checkpoint.receipt.chain,
