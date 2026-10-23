@@ -1,3 +1,4 @@
+import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I13 guarded source-bound human release. Same-XPI background authority;
 // UI supplies ONLY slug, expected revisions, explicit approval and ephemeral
 // read-only Git credential. No UI-selected browser tab, source or route.
@@ -156,6 +157,7 @@ export function createReleaseBoundary(api,{
   // change listing. Default packaged capability is held.
   effectGate=()=>false,
   native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
+  gitCredential=browserGitCredentialPacket,
   dispatch=async(g,r)=>g.runReleaseStep?.(r.personaUid,{
     slug:r.slug,nonce:r.nonce,action:'PUBLISH',remotePublicId:r.remotePublicId,
     principalFingerprint:r.principalFingerprint,files:r.releaseFiles})
@@ -168,7 +170,7 @@ export function createReleaseBoundary(api,{
     const cfg=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
     if(cfg?.repository!=='Neb963/per-gens'||
        !/^[1-9][0-9]{0,19}$/.test(cfg.repositoryId||''))return null;
-    const reply=await native({action:'git.get',repositoryId:cfg.repositoryId});
+    const reply=await gitCredential({action:'git.get',repositoryId:cfg.repositoryId});
     return reply?.ok&&typeof reply.credential==='string'&&
       reply.credential.length>=12&&reply.credential.length<=512&&
       /^[\x21-\x7e]+$/.test(reply.credential)?reply.credential:null;
