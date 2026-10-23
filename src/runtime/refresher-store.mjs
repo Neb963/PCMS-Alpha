@@ -24,7 +24,7 @@ function transact(db,mode,fn){
 // independently confirmed exact-source publication; historical PUBLIC alone
 // never satisfies this seam. B/F fixtures exercise the same canonical seam.
 export function canonicalRefresherInputs(records){
-  const accounts=new Map(),stages=new Map(),releases=new Map(),links=new Map(),updates=new Map(),inventory=[];
+  const accounts=new Map(),stages=new Map(),releases=new Map(),links=new Map(),updates=new Map(),adoptions=new Map(),inventory=[];
   for(const record of records){
     const k=record?.key;
     if(typeof k!=='string')continue;
@@ -34,10 +34,11 @@ export function canonicalRefresherInputs(records){
     if(k.startsWith('release:')&&record.release)releases.set(record.release.slug,record.release);
     if(k.startsWith('source-link:')&&record.link)links.set(record.link.slug,record.link);
     if(k.startsWith('existing-update:')&&record.record)updates.set(record.record.slug,record.record);
+    if(k.startsWith('adoption:')&&record.adoption)adoptions.set(record.adoption.slug,record.adoption);
   }
   return inventory.map(row=>{
     const a=accounts.get(row.accountId),release=releases.get(row.slug),stage=stages.get(row.slug),
-      link=links.get(row.slug),update=updates.get(row.slug);
+      link=links.get(row.slug),update=updates.get(row.slug),adopt=adoptions.get(row.slug);
     const accountVerified=a?.state==='VERIFIED'&&a.identity?.source==='GUARDED_SESSION_READBACK'&&
       a.identity.bindingVersion===a.bindingVersion&&hex(a.identity.principalFingerprint);
     const matched=accountVerified&&a.personaUid===row.personaUid&&a.bindingVersion===row.bindingVersion;
@@ -47,11 +48,35 @@ export function canonicalRefresherInputs(records){
       release.remoteId===row.remoteId&&release.principalFingerprint===a.identity.principalFingerprint&&
       hex(release.sourceFingerprint)&&isSafeId(release.observationId)&&
       Number.isSafeInteger(release.observedAt)&&release.observedAt>0;
+    // I07 original's immutable full bytes are sealed using the shared
+    // staging fingerprint (different domain from its original-archive hash).
+    // Never turn an unverified inventory/public label alone into source
+    // admission. The guarded writer independently rereads owner/source
+    // before every actual save and blocks a dirty or changed public source.
+    const original=adopt?.original;
+    const adopted=matched&&row.ownerState==='OBSERVED_OWNER'&&
+      row.visibility==='PUBLIC'&&!adopt.archived&&
+      adopt.accountId===row.accountId&&adopt.personaUid===row.personaUid&&
+      adopt.bindingVersion===row.bindingVersion&&
+      adopt.remotePublicId===row.remoteId&&
+      adopt.principalFingerprint===a.identity.principalFingerprint&&
+      original?.ok===true&&original.source==='INDEPENDENT_FULL_BYTE_READBACK'&&
+      original.remotePublicId===row.remoteId&&original.visibility==='PUBLIC'&&
+      original.sourceStage==='PCMS_STAGED_SOURCE_V1'&&
+      hex(original.stagedFingerprint)&&
+      Array.isArray(original.blobs)&&original.blobs.length>=2&&
+      original.files?.length===original.blobs.length&&
+      adopt.archiveState!=='DISPATCH_POSSIBLE'&&
+      adopt.archiveState!=='HELD_UNCERTAIN';
+    const approvedSource=released||adopted;
     return {slug:row.slug,accountId:row.accountId,remoteId:row.remoteId,
+      sourceAuthority:released?'INDEPENDENT_PUBLICATION_READBACK':
+        adopted?'ADOPTED_FULL_ORIGINAL_READBACK':'UNVERIFIED',
       personaUid:a?.personaUid||row.personaUid,bindingVersion:a?.bindingVersion||row.bindingVersion,
       ownerVerified:matched&&row.ownerState==='OBSERVED_OWNER',accountVerified:!!accountVerified,
       principalFingerprint:a?.identity?.principalFingerprint||null,
-      releaseVerified:!!released,releaseFingerprint:released?release.sourceFingerprint:null,
+      releaseVerified:!!approvedSource,releaseFingerprint:released?release.sourceFingerprint:
+        adopted?original.stagedFingerprint:null,
       listing:row.visibility,observedAt:row.lastObservedAt,
       // A confirmed, byte-exact final F closes the staged B->F review
       // without requiring B to equal F after AI edits. An interrupted
@@ -61,7 +86,7 @@ export function canonicalRefresherInputs(records){
           update.state==='STAGE_CONFIRMED'&&released&&
           update.stagedFingerprint===release.sourceFingerprint
         )))||!!stage&&stage.state!=='HUMAN_OWNED'&&!released,
-      readyUpdate:link?.readyUpdate===true||!!released&&link?.readyAtInspection===true&&
+      readyUpdate:link?.readyUpdate===true||!!approvedSource&&link?.readyAtInspection===true&&
         link.fingerprint!==release.sourceFingerprint};
   });
 }
@@ -138,7 +163,7 @@ export function createRefresherStore(db){
           const c=ev.target.result;
           if(!c){apply(records);return;}
           if(++seen>50000){done(fail('CANONICAL_SCAN_LIMIT'));return;}
-          if(typeof c.key==='string'&&/^(account|inventory|stage|release|source-link|existing-update):/.test(c.key))
+          if(typeof c.key==='string'&&/^(account|inventory|stage|release|adoption|source-link|existing-update):/.test(c.key))
             records.push(c.value);
           c.continue();
         };
