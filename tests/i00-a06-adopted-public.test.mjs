@@ -48,3 +48,15 @@ test('A06 adoption: mismatched owner, principal, remote ID, incomplete bytes, ar
   const noAdoption=base().slice(0,2);
   assert.equal(mapped(noAdoption).releaseVerified,false);
 });
+
+test('A06 adopted public READY source without a publication record keeps independent update precedence',()=>{
+  const records=base();
+  records.push({key:'source-link:'+slug,link:{slug,
+    readyUpdate:false,readyAtInspection:true,fingerprint:'f'.repeat(64)}});
+  const r=mapped(records);
+  assert.equal(r.releaseVerified,true);
+  assert.equal(r.sourceAuthority,'ADOPTED_FULL_ORIGINAL_READBACK');
+  assert.equal(r.readyUpdate,true);
+  records.at(-1).link.fingerprint=SOURCE;
+  assert.equal(mapped(records).readyUpdate,false);
+});
