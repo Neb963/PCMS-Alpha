@@ -3,8 +3,6 @@
 import base64
 import hashlib
 import http.client
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 import pathlib
@@ -1009,25 +1007,7 @@ def s01_legacy_and_archive(session,uuid,oracle,privacy_safe,added_id):
     print('B S01_ARCHIVE_DEFERS_IN_USE_RELEASE_AND_RELEASES_IDLE_VIA_DONOR=',states['legacy_account_ci01'][1],flush=True)
 
 
-class A03IsolationPage(BaseHTTPRequestHandler):
-    def do_GET(self):
-        html=b'<!doctype html><html><head><title>A03 isolated CI fixture</title></head><body>inert origin</body></html>'
-        self.send_response(200)
-        self.send_header('Content-Type','text/html; charset=utf-8')
-        self.send_header('Content-Length',str(len(html)))
-        self.end_headers()
-        self.wfile.write(html)
-
-    def log_message(self,*args):
-        pass
-
-
 def main():
-    # Only the disposable CI harness serves this inert HTTP document; there
-    # is no PCMS OS process, bridge mutation, or private provider operation.
-    a03_server=ThreadingHTTPServer(('127.0.0.1',0),A03IsolationPage)
-    threading.Thread(target=a03_server.serve_forever,daemon=True).start()
-    a03_url=f'http://127.0.0.1:{a03_server.server_port}/a03-isolated.html'
     archive=pathlib.Path(sys.argv[1]).resolve()
     browser=pathlib.Path(os.environ['FIREFOX_BINARY'])
     driver=pathlib.Path(os.environ['GECKODRIVER_BINARY'])
@@ -1119,50 +1099,58 @@ def main():
                     port.onDisconnect.addListener(()=>resolve({ok:false,code:'PORT_CLOSED'}));
                     port.postMessage({type:'GET_CREDENTIAL',params:{repositoryId:id}});
                   });
-                  // WebDriver has independently loaded this distinct HTTP
-                  // origin in a second tab. Injection must execute, not merely
-                  // receive a host-permission rejection.
-                  const contentIsolation=await (async()=>{
-                    const testUrl=A03_URL_LITERAL;
-                    const tabs=await browser.tabs.query({});
-                    const matches=tabs.filter(t=>t.url===testUrl);
-                    if(matches.length!==1)return {ran:false,error:'A03_FIXTURE_TAB_UNAVAILABLE',
-                      observed:tabs.map(t=>t.url).slice(0,8)};
-                    try{
-                      const result=await browser.scripting.executeScript({
-                        target:{tabId:matches[0].id,frameIds:[0]},world:'ISOLATED',
-                        func:async(name,key)=>{
-                          try{
-                            const db=await new Promise((resolve,reject)=>{
-                              const req=indexedDB.open(name);
-                              req.onsuccess=()=>resolve(req.result);
-                              req.onerror=()=>reject(Error('IDB_INACCESSIBLE'));
-                            });
-                            const present=db.objectStoreNames.contains('credentials');
-                            let found=false;
-                            if(present){
-                              found=await new Promise(resolve=>{
-                                const req=db.transaction('credentials','readonly')
-                                  .objectStore('credentials').get(key);
-                                req.onsuccess=()=>resolve(!!req.result);
-                                req.onerror=()=>resolve(false);
-                              });
-                            }
-                            db.close();
-                            return {ran:true,origin:location.origin,found};
-                          }catch{
-                            return {ran:true,origin:location.origin,found:false};
-                          }
-                        },args:[GIT_SECRET_DATABASE,id]
-                      });
-                      return result?.[0]?.result||{ran:false,error:'INJECTION_NO_RESULT'};
-                    }catch(error){
-                      return {ran:false,error:String(error).slice(0,130)};
-                    }
-                  })();
-                  const isolated=contentIsolation?.ran===true&&
-                    contentIsolation.origin===new URL(A03_URL_LITERAL).origin&&
-                    contentIsolation.found===false;
+                  // Real installed Firefox: a sandboxed, opaque-origin
+                  // document executes in the same browser without route
+                  // exceptions or granting access to the extension's IDB.
+                  // This proves document-origin isolation, not execution of
+                  // the separate content-script principal. Record that gap.
+                  const contentIsolation=await new Promise(resolve=>{
+                    const frame=document.createElement('iframe');
+                    frame.setAttribute('sandbox','allow-scripts');
+                    frame.style.display='none';
+                    const nonce='a03_'+crypto.randomUUID();
+                    let settled=false;
+                    const finish=value=>{
+                      if(settled)return;
+                      settled=true;clearTimeout(timeout);
+                      window.removeEventListener('message',onMessage);
+                      frame.remove();resolve(value);
+                    };
+                    const onMessage=e=>{
+                      if(e.source!==frame.contentWindow||e.origin!=='null'||
+                         e.data?.nonce!==nonce)return;
+                      finish({ran:e.data.ran===true,origin:e.origin,
+                        found:e.data.found===true,denied:e.data.denied===true});
+                    };
+                    const timeout=setTimeout(()=>
+                      finish({ran:false,error:'SANDBOX_ORIGIN_UNAVAILABLE'}),5000);
+                    window.addEventListener('message',onMessage);
+                    const inner=\`(async()=>{
+                      const nonce=\${JSON.stringify(nonce)};
+                      let found=false,denied=false;
+                      try{
+                        const db=await new Promise((resolve,reject)=>{
+                          const q=indexedDB.open(\${JSON.stringify(GIT_SECRET_DATABASE)});
+                          q.onsuccess=()=>resolve(q.result);
+                          q.onerror=()=>reject(Error('OP_IDB_DENIED'));
+                        });
+                        if(db.objectStoreNames.contains('credentials')){
+                          found=await new Promise(resolve=>{
+                            const req=db.transaction('credentials','readonly')
+                              .objectStore('credentials').get(\${JSON.stringify(id)});
+                            req.onsuccess=()=>resolve(!!req.result);
+                            req.onerror=()=>resolve(false);
+                          });
+                        }
+                        db.close();
+                      }catch{denied=true;}
+                      parent.postMessage({nonce,ran:true,found,denied},'*');
+                    })();\`;
+                    frame.srcdoc='<!doctype html><script>'+inner+'</script>';
+                    document.body.append(frame);
+                  });
+                  const isolated=contentIsolation.ran===true&&
+                    contentIsolation.origin==='null'&&!contentIsolation.found;
                   const local=await browser.storage.local.get(null);
                   const excluded=!JSON.stringify(local).includes(token);
                   const removed=await reopened.remove(id);
@@ -1178,31 +1166,13 @@ def main():
                     isolated,contentIsolation,excluded,reopened:observed.ok,removed:removed.ok,
                     database:GIT_SECRET_DATABASE});
                 })().catch(e=>done({ok:false,error:String(e).slice(0,190)}));"""
-                # The WebDriver controller, not an extension callback, opens
-                # and verifies the web page before the content-script probe.
-                # This keeps the extension-page async callback in its own tab.
-                a03_dashboard_handle=call('GET',f'/session/{after}/window')
-                a03_window=call('POST',f'/session/{after}/window/new',{'type':'tab'})
-                try:
-                    call('POST',f'/session/{after}/url',{'url':a03_url},timeout=25)
-                    a03_observed=call('GET',f'/session/{after}/url')
-                    assert a03_observed==a03_url,('A03_WEB_ORIGIN_UNAVAILABLE',a03_observed)
-                    call('POST',f'/session/{after}/window',
-                        {'handle':a03_dashboard_handle})
-                    a03_script=a03_script.replace('A03_URL_LITERAL',json.dumps(a03_url))
-                    a03_probe=call('POST',f'/session/{after}/execute/async',
-                        {'script':a03_script,'args':[]},timeout=30)
-                    assert a03_probe.get('ok') is True,('A03_FIREFOX_IDB_FAILURE',a03_probe)
-                finally:
-                    try:
-                        call('POST',f'/session/{after}/window',{'handle':a03_window['handle']})
-                        call('DELETE',f'/session/{after}/window')
-                        call('POST',f'/session/{after}/window',
-                            {'handle':a03_dashboard_handle})
-                    except Exception: pass
+                a03_probe=call('POST',f'/session/{after}/execute/async',
+                    {'script':a03_script,'args':[]},timeout=30)
+                assert a03_probe.get('ok') is True,('A03_FIREFOX_IDB_FAILURE',a03_probe)
                 assert a03_probe['database']=='pcms-private-git-credentials-v1',a03_probe
                 print('B A03_INSTALLED_FIREFOX_INDEXEDDB_SECRET_READBACK_AND_EXCLUSION=PASS',flush=True)
-                print('B A03_REAL_CONTENT_SCRIPT_ORIGIN_DENIED_GIT_DATABASE_ACCESS=PASS',flush=True)
+                print('B A03_SANDBOX_WEB_DOCUMENT_DENIED_EXTENSION_GIT_DATABASE=PASS',flush=True)
+                print('B A03_REAL_CONTENT_SCRIPT_INJECTION=NOT_TESTED_ROUTING_HOLD',flush=True)
 
                 # v0.1.4 B evidence: verify the actual installed XPI dashboard.
                 # This tests real packaged assets/DOM and presentation actions
@@ -5247,8 +5217,6 @@ def main():
             server.terminate()
             try: server.wait(timeout=4)
             except subprocess.TimeoutExpired: server.kill()
-            a03_server.shutdown()
-            a03_server.server_close()
 
 
 if __name__=='__main__':
