@@ -79,7 +79,7 @@ export function createAiBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,
   storeFactory=createAiStore,stageFactory=createStagingStore,
   inspect=inspectGitSource,inspectReady=inspectReadyCandidate,
-  scanCatalog=scanMainCatalog,effectGate=()=>false,clock=Date.now
+  scanCatalog=scanMainCatalog,gitCredential=browserGitCredentialPacket,effectGate=()=>false,clock=Date.now
 }={}){
   let databasePromise,tickBusy=false;
   const database=()=>databasePromise ||=open();
@@ -132,7 +132,7 @@ export function createAiBoundary(api,{
             if(settings?.repository!=='Neb963/per-gens'||
                settings.repositoryId!==current.record.repositoryId)
               return fail('S05_AI_GIT_ASSOCIATION_CHANGED');
-            const credential=(await browserGitCredentialPacket({action:'git.get',repositoryId:settings.repositoryId}))?.credential;
+            const credential=(await gitCredential({action:'git.get',repositoryId:settings.repositoryId}))?.credential;
             if(typeof credential!=='string'||credential.length<12||
                credential.length>512||/[^\x21-\x7e]/.test(credential))
               return fail('S05_AI_GIT_VAULT_UNAVAILABLE');
@@ -535,7 +535,7 @@ export function createAiBoundary(api,{
            queued.record?.repositoryId!==config?.repositoryId||
            r.sourceFolder!=='generators/'+r.slug)
           return fail('S05_READY_ASSOCIATION_CHANGED');
-        const vault=await browserGitCredentialPacket({action:'git.get',repositoryId:config.repositoryId});
+        const vault=await gitCredential({action:'git.get',repositoryId:config.repositoryId});
         const credential=vault?.credential;
         if(vault?.ok!==true||typeof credential!=='string'||
            credential.length<12||credential.length>512||

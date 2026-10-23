@@ -42,7 +42,10 @@ test('A01 source census is deterministic, readonly; unknown live state not misre
       'sourceIntegrity','journalAndRecovery'])
     assert.ok(before.classes[k]>0,'missing migration-critical class '+k);
   const hostPaths=before.entries.filter(x=>x.signals.pcmsNativeHost).map(x=>x.path);
-  assert.ok(hostPaths.some(x=>x.includes('git-credential.mjs')));
+  assert.ok(!hostPaths.some(x=>x==='src/runtime/git-credential.mjs'),
+    'migrated Git resolver must not depend on a native host');
+  assert.ok(before.entries.some(x=>x.path==='src/runtime/git-local-secret.mjs'),
+    'new background credential store must appear in the source census');
   assert.ok(before.entries.some(x=>x.symbols?.nativeHostIds?.includes('local.pcms.backup_v2')),
     'digit-bearing native IDs must not be truncated in the migration census');
   assert.ok(!before.entries.some(x=>x.symbols?.nativeHostIds?.includes('local.pcms.backup_v')),
@@ -71,7 +74,7 @@ test('A01 real Git resolver reports missing native vault, not fake authenticatio
     runtime:{sendNativeMessage:async()=>{effects++;throw Error('missing-native-host');}}};
   const out=await createGitCredentialResolver(api)();
   if(out.ok){assert.equal(effects,0);assert.ok(out.token);}
-  else{assert.equal(out.code,'GIT_VAULT_UNAVAILABLE');assert.equal(effects,1);}
+  else{assert.equal(out.code,'GIT_LOCAL_STORAGE_UNAVAILABLE');assert.equal(effects,0);}
 });
 
 test('A01 legacy I17 quarantine still denies original uncertain CREATE',()=>{
