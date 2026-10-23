@@ -4938,6 +4938,107 @@ def main():
                 print('B PACKAGED_RESTART/NAVIGATION/DISABLED/ADVANCED: PASS',flush=True)
                 close(after)
                 after=None
+                # A02 isolated second Firefox profile: an imported source-only
+                # historical row crosses the true extension port and all four
+                # guarded donor/cookie/portable/canonical stages. The controller
+                # must remain inactive after actual OS process restart.
+                a02_profile=pathlib.Path(folder)/'a02-portable-fresh'
+                a02_profile.mkdir()
+                (a02_profile/'user.js').write_text(
+                    'user_pref("xpinstall.signatures.required", false);\\n')
+                a02_before=open_session(browser,a02_profile)
+                try:
+                    installed=call('POST',f'/session/{a02_before}/moz/addon/install',
+                        {'path':str(archive),'temporary':False},timeout=45)
+                    assert installed==ID,installed
+                finally:close(a02_before)
+                a02_session=open_session(browser,a02_profile)
+                try:
+                    a02_uuid=addons_uuid(a02_profile)
+                    call('POST',f'/session/{a02_session}/url',
+                         {'url':f'moz-extension://{a02_uuid}/pcms/index.html#settings'})
+                    wait_donor_ready(a02_session)
+                    actual_restore="""const done=arguments[arguments.length-1];
+                    (async()=>{
+                      const core=await import('./backup-core.mjs');
+                      const stage=await import('./portable-restore-stage.mjs');
+                      const codec=await import('./portable-archive.mjs');
+                      const plan=await import('./portable-restore-plan.mjs');
+                      const pkg=await import('../lib/backup-package.js');
+                      const journal=await import('./journal.mjs');
+                      const donorModule=await import('./donor-snapshot.mjs');
+                      const history=await import('../lib/automation-history.js');
+                      const donor=await donorModule.readProtectedDonorSnapshot(browser);
+                      const local=await browser.storage.local.get(null);
+                      const extras=Object.fromEntries(Object.entries(local).filter(([key])=>
+                        key==='automationJobs'||key.startsWith('gm-values:')));
+                      const params={state:donor.state,containers:donor.containers,
+                        userscriptData:extras,selection:{kind:'full'},
+                        automationHistory:history.filterOrdinaryAutomationJobs(
+                          Object.values(extras.automationJobs||{}))};
+                      const portable=pkg.createPortableBackupPayload(params);
+                      if(portable.personas.length)throw Error('DISPOSABLE_PERSONAS_NOT_EMPTY');
+                      const db=await journal.openCanonicalDatabase();
+                      const current=await core.snapshotCanonicalV2(db,{serializedValues:true});
+                      db.close();
+                      const added='a02:verified-restored-history';
+                      const source=structuredClone(current);
+                      source.stores.meta.push({key:added,value:{
+                        key:added,source:'A02_CI_LOCAL_FIXTURE',revision:1}});
+                      source.stores.meta.sort((a,b)=>indexedDB.cmp(a.key,b.key));
+                      const checkpoint=await codec.encodePortableArchive({pcms:current,donor:portable});
+                      const incoming=await codec.encodePortableArchive({pcms:source,donor:portable});
+                      const checkpointStage=await stage.preparePortableStage(checkpoint.blob);
+                      const sourceStage=await stage.preparePortableStage(incoming.blob);
+                      const candidate=await stage.readPortableStage(sourceStage.scope);
+                      const inspection=await plan.inspectPortableRestore({
+                        incoming:candidate,currentPcms:current,currentDonor:donor,
+                        currentPortable:portable,containers:donor.containers,
+                        mappings:{},accountChoices:{},mode:'merge',fresh:false});
+                      const checked=await plan.verifyPortableCheckpoint({
+                        checkpoint:await stage.readPortableStage(checkpointStage.scope),
+                        currentPcms:current,currentPortable:portable});
+                      if(!checked.verified||inspection.plan.risk.unmappedPersonas)
+                        throw Error('A02_DISPOSABLE_PREFLIGHT_FAILED');
+                      const result=await new Promise(resolve=>{
+                        const port=browser.runtime.connect({name:'pcms-i16-restore'});
+                        port.onMessage.addListener(v=>{try{port.disconnect()}catch{}resolve(v)});
+                        port.onDisconnect.addListener(()=>resolve({ok:false,code:'PORT_CLOSED'}));
+                        port.postMessage({action:'APPLY_PORTABLE',params:{
+                          stageScope:sourceStage.scope,
+                          checkpointScope:checkpointStage.scope,
+                          reviewedPlanSha256:inspection.planSha256,
+                          mode:'merge',fresh:false,mappings:{},accountChoices:{}}});
+                      });
+                      const marker=(await browser.storage.local.get('pcmsRestoreInProgress'))
+                        .pcmsRestoreInProgress;
+                      const restored=await journal.openCanonicalDatabase();
+                      const observed=await core.snapshotCanonicalV2(restored,{serializedValues:true});
+                      restored.close();
+                      done({ok:result?.ok===true&&
+                        result.code==='RESTORED_PORTABLE_INACTIVE'&&
+                        marker?.status==='COMPLETE_INACTIVE'&&marker?.active===true&&
+                        observed.stores.meta.some(r=>r.key===added&&
+                          r.value.source==='A02_CI_LOCAL_FIXTURE'),
+                        resultCode:result?.code,marker:marker?.status,
+                        restoredRow:observed.stores.meta.some(r=>r.key===added)});
+                    })().catch(error=>done({ok:false,error:String(error),
+                      stack:String(error?.stack||'').slice(0,700)}));"""
+                    restored=call('POST',f'/session/{a02_session}/execute/async',
+                        {'script':actual_restore,'args':[]},timeout=180)
+                    assert restored.get('ok') is True,restored
+                    print('B A02_PORTABLE_GUARDED_LOCAL_RESTORE_SOURCE_AND_DONOR_INACTIVE=PASS',flush=True)
+                finally:close(a02_session)
+                a02_reopened=open_session(browser,a02_profile)
+                try:
+                    a02_uuid=addons_uuid(a02_profile)
+                    call('POST',f'/session/{a02_reopened}/url',
+                         {'url':f'moz-extension://{a02_uuid}/pcms/index.html#settings'})
+                    marker=execute(a02_reopened,
+                      "return browser.storage.local.get('pcmsRestoreInProgress').then(o=>({held:o.pcmsRestoreInProgress?.active,status:o.pcmsRestoreInProgress?.status}))")
+                    assert marker=={'held':True,'status':'COMPLETE_INACTIVE'},marker
+                    print('B/H A02_PROCESS_RESTART_PRESERVES_INACTIVE_RESTORE_GUARD=PASS',flush=True)
+                finally:close(a02_reopened)
                 s01_add_account_profile(browser,archive,pathlib.Path(folder))
                 # A01: independent CLEAN-HOME installed-XPI and exact-byte
                 # package census. No extra PCMS host is installed; no real
