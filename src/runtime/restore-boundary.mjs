@@ -121,7 +121,14 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
   }
   async function status(){
     const result=await gate.inspect();
-    return {ok:true,...result,providerEffects:'OFF',remoteActivation:'OFF'};
+    const held=result.held?await gate.read():null;
+    const recovery=held?.recovery;
+    const portableScopes=typeof recovery?.portableStageScope==='string'&&
+      typeof recovery?.portableCheckpointScope==='string'?
+      {stageScope:recovery.portableStageScope,
+        checkpointScope:recovery.portableCheckpointScope}:null;
+    return {ok:true,...result,portableScopes,
+      providerEffects:'OFF',remoteActivation:'OFF'};
   }
   // Shared durable I16 stage engine for both authenticated v1 and native v2.
   // Possible donor/cookie/canonical effects are never automatically replayed.
