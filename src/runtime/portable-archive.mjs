@@ -35,7 +35,13 @@ function validateInputs(pcms,donor){
   validatePcmsSnapshot(pcms);
   validateBackupPayload(donor);
   for(const store of DB_STORES){
-    for(const row of pcms.stores[store])checkRow(store,row);
+    for(const row of pcms.stores[store]){
+      // Credentials are never archive data. Do not make the entire backup
+      // unusable just because a configured profile contains a secret.
+      requireValid(row&&typeof row==='object'&&Object.hasOwn(row,'key')&&
+        Object.hasOwn(row,'value'),'PORTABLE_ROW_INVALID');
+      if(!isExcludedCredential(store,row.key))checkRow(store,row);
+    }
   }
 }
 // Full canonical snapshot is only a compatible input adapter. A02's bounded
@@ -65,8 +71,11 @@ export async function encodePortableArchive({pcms,donor,appVersion='',createdAt=
   }
   for(const store of DB_STORES){
     const records=pcms.stores[store];
+    let exportedIndex=0;
     for(let i=0;i<records.length;i++){
-      await append('pcms',store,i,json({key:serializeClone(records[i].key),
+      if(isExcludedCredential(store,records[i].key))continue;
+      await append('pcms',store,exportedIndex++,json({
+        key:serializeClone(records[i].key),
         value:serializeClone(records[i].value)}));
       rows++;
     }
