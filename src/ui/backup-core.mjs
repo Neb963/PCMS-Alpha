@@ -354,7 +354,7 @@ function equalV2StructuredClone(left,right,depth=0){
   }
   return true;
 }
-export function verifyCanonicalV2Unchanged(db,before){
+export function verifyCanonicalV2Unchanged(db,before,{serializedValues=false}={}){
   validatePcmsSnapshot(before);
   return new Promise((resolve,reject)=>{
     if(!db||DB_STORES.some(s=>!db.objectStoreNames.contains(s))){
@@ -385,7 +385,8 @@ export function verifyCanonicalV2Unchanged(db,before){
           try{
             // IDB cursor values are already structured-cloned by IndexedDB;
             // do not structuredClone their source bytes a second time.
-            const current={key:serializeClone(cur.key),value:cur.value};
+            const current={key:serializeClone(cur.key),
+              value:serializedValues?serializeClone(cur.value):cur.value};
             const earlier=previous[index];
             if(!equalV2StructuredClone(current.key,earlier.key)||
                !equalV2StructuredClone(current.value,earlier.value)){
