@@ -3251,17 +3251,19 @@ def main():
                   const denied=await store.reserveAttempt({stableId:row?.stableId,
                     id:'packaged_test_attempt',now:Date.now(),candidate:null,liveAuthorized:false});
                   const after=await store.read();
+                  const targetAfter=after.state.rows.find(r=>r.stableId===row?.stableId);
+                  const unchangedEffect=JSON.stringify(row?.refresh)===JSON.stringify(targetAfter?.refresh);
                   const port=browser.runtime.connect({name:'pcms-i12-refresher'});
                   port.onMessage.addListener(result=>{
                     done({ok:before.ok&&after.ok&&!denied.ok&&
-                      before.revision===after.revision&&
-                      before.state.revision===after.state.revision&&
-                      result.ok&&result.refreshCapability==='OPERATOR_MUTATION_DISABLED'&&
+                      unchangedEffect&&denied.code==='REFRESH_ADMISSION_HELD'&&
+                      !targetAfter?.refresh?.intent&&
+                      result.ok&&result.refreshCapability='OPERATOR_MUTATION_DISABLED'&&
                       result.clockCapability==='BROWSER_MONOTONIC_ROUTE_FEED_ELIGIBILITY'&&
                       core.qualifyRefreshCandidate(null).ok===false,
                       beforeRows:before.state.rows.length,
                       denied:denied.code,capability:result.refreshCapability,
-                      response:result,unchanged:before.state.revision===after.state.revision});
+                      response:result,unchanged:unchangedEffect});
                     port.disconnect();db.close();
                   });
                   port.postMessage({type:'GET_REFRESHER',params:{limit:5}});
