@@ -108,7 +108,11 @@ test('A02 manual interrupted download reconciles a later verified completion aft
   const f=fixture({manualInterrupted:true});
   const first=await f.runner.manual();
   assert.equal(first.code,'DOWNLOAD_OUTCOME_UNKNOWN');
-  assert.equal(f.db.read('meta','backup:manual-active').status,'HELD_UNCERTAIN');
+  const receipt=f.db.read('meta','backup:manual-active');
+  assert.equal(receipt.status,'HELD_UNCERTAIN');
+  assert.ok(Number.isSafeInteger(receipt.downloadId));
+  assert.ok(Number.isSafeInteger(receipt.bytes)&&receipt.bytes>0);
+  assert.match(receipt.sha256,/^[a-f0-9]{64}$/);
   const cold=f.cold();
   assert.equal((await cold.manual()).code,'MANUAL_DOWNLOAD_UNCERTAIN');
   assert.equal(f.effects(),1,'no second download while receipt is uncertain');
