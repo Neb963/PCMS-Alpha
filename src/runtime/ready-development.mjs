@@ -121,7 +121,6 @@ export function createReadyDevelopment(api,{
  makeExisting=()=>createExistingBoundary(api,{effectGate}),
  makeStage=()=>createStagingBoundary(api,{effectGate}),
  makeAi=()=>createAiBoundary(api,{effectGate}),
- native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
  maxCandidates=120
 }={}){
  const sentinel=createRestoreSentinel(api.storage.local);
@@ -170,8 +169,8 @@ export function createReadyDevelopment(api,{
        visibility:inventory?.visibility,
        effects:effectGate({phase:'S05',step:'AUTO_PROGRESS',slug:row.slug})===true});
      if(!chosen.ok||chosen.type==='HOLD')continue;
-     // One source-heavy step at most per wake, so wrong-owner/missing vault
-     // never causes a fleet-wide unlist or series of native sends.
+     // One source-heavy step at most per wake, so wrong owner, changed
+     // route or source cannot cause fleet-wide unlisting or repeated effects.
      let outcome;
      const slug=row.slug,params={slug};
      const nextCursor=(i+1<listing.items.length||listing.more)?slug:'';
@@ -188,10 +187,9 @@ export function createReadyDevelopment(api,{
        type:'PREPARE_LOCAL',params:{...params,expectedRevision:row.revision}});
      else if(chosen.type==='PREPARE_UPDATE'||chosen.type==='UNLIST'||
         chosen.type==='PIN_STAGE'||chosen.type==='STAGE'){
-       const vault=await native({action:'get'});
-       if(!vault?.ok||typeof vault.passphrase!=='string'||
-          vault.passphrase.length<12||vault.passphrase.length>256)
-         return held('S05_RECOVERY_SECRET_SERVICE_UNAVAILABLE');
+       // The guarded I13 boundary produces and verifies the browser-local
+       // previous-good source checkpoint. Background activation never depends
+       // on an OS vault or fabricates an operator recovery password.
        if(chosen.type==='UNLIST'){
          const current=await b.ready.runTrusted({type:'ASSESS_READY',
            params:{...params,expectedRevision:row.revision}});
@@ -200,8 +198,7 @@ export function createReadyDevelopment(api,{
        }
        const step=chosen.type==='PREPARE_UPDATE'?'PREPARE':chosen.type;
        outcome=await b.existing.runTrusted({type:step,params:{
-         ...params,...(step!=='PREPARE'?{expectedRevision:existing.record.revision}:{}),
-         passphrase:vault.passphrase
+         ...params,...(step!=='PREPARE'?{expectedRevision:existing.record.revision}:{})
        }});
      }else if(chosen.type==='RECHECK_UNLIST'||chosen.type==='RECHECK_STAGE'){
        outcome=await b.existing.runTrusted({type:chosen.type,params:{
