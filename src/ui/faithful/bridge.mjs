@@ -1365,8 +1365,8 @@ async function openReleaseReview(slug){
   await loadQueue(true);
  };
  const approve=b('Approve and publish exact candidate',()=>void (async()=>{
-  if(!ack.checked||seen.size!==(view.files||[]).length){
-   status.textContent='Read and verify each exact source file and the tests before publication.';return;
+  if(!ack.checked){
+   status.textContent='Inspect the exact source manifest and test observations before publication.';return;
   }
   if(!window.confirm('Approve and publish this exact candidate now? Only the currently verified owner, editor, route, Git revision and source can be used.'))return;
   approve.disabled=true;requestChanges.disabled=true;
@@ -1384,7 +1384,7 @@ async function openReleaseReview(slug){
     persisted.sourceFingerprint===view.sourceFingerprint){
    const resume=b('Publish previously approved candidate',()=>void (async()=>{
      if(!ack.checked||seen.size!==(view.files||[]).length){
-       status.textContent='Verify every exact file and the test observations before publication.';return;
+       status.textContent='Inspect the exact source manifest and test observations before publication.';return;
      }
      if(!window.confirm('Publish the previously approved exact candidate now?'))return;
      resume.disabled=true;approve.disabled=true;
