@@ -118,9 +118,12 @@ export function deserializeClone(value,depth=0){
 export function validatePcmsSnapshot(snapshot){
   requireValid(plain(snapshot)&&snapshot.schema===1&&plain(snapshot.stores),'BACKUP_PCMS_SCHEMA_UNSUPPORTED');
   requireValid(Object.keys(snapshot.stores).length===DB_STORES.length,'BACKUP_INCOMPLETE');
+  let totalRows=0;
   for(const store of DB_STORES){
     const entries=snapshot.stores[store];
-    requireValid(Array.isArray(entries)&&entries.length<=100000,'BACKUP_INCOMPLETE');
+    requireValid(Array.isArray(entries)&&entries.length<=500000,'BACKUP_INCOMPLETE');
+    totalRows+=entries.length;
+    requireValid(totalRows<=500000,'BACKUP_V2_ROW_LIMIT');
     const keys=new Set();
     for(const row of entries){
       requireValid(plain(row)&&Object.keys(row).length===2&&
