@@ -57,9 +57,20 @@ export function reconcileInventory(existing, account, observation) {
     const prior = next.get(item.slug);
     seen.add(item.slug);
     if (prior && (prior.accountId !== account.accountId || prior.remoteId !== item.remoteId)) {
-      const state=prior.accountId !== account.accountId ? 'OWNER_CONFLICT' : 'IDENTITY_CONFLICT';
-      next.set(item.slug,{...prior,ownerState:state,revision:prior.revision+1});
-      incidents.push({slug:item.slug,code:state});
+      const accountConflict=prior.accountId!==account.accountId;
+      const slugOnlyAfterProven= !accountConflict &&
+        prior.identitySchema===2 &&
+        prior.identityBasis==='INDEPENDENT_FULL_BYTE_READBACK' &&
+        prior.identityAliases?.includes(item.remoteId) &&
+        /^public_[A-Za-z0-9_-]{1,90}$/.test(prior.remoteId||'');
+      // A fresh owner-list entry identifies a *slug*, not the immutable
+      // provider resource. Preserve the proven ID and hold mutation until an
+      // independent protected full-source recheck proves it has not changed.
+      const state=accountConflict?'OWNER_CONFLICT':'IDENTITY_CONFLICT';
+      next.set(item.slug,{...prior,ownerState:state,revision:prior.revision+1,
+        ...(slugOnlyAfterProven?{identityHold:'PUBLIC_ID_REVALIDATION_REQUIRED'}:{})});
+      incidents.push({slug:item.slug,code:slugOnlyAfterProven?
+        'PUBLIC_ID_REVALIDATION_REQUIRED':state});
       continue;
     }
     const ownerState = item.ownerResult === 'IS_OWNER' ? 'OBSERVED_OWNER' :
@@ -96,6 +107,7 @@ export function publicGenerator(row) {
   return {slug:row.slug,accountId:row.accountId,ownerState:row.ownerState,
     visibility:row.visibility,management:row.management,source:row.source,
     revision:row.revision,lastObservedAt:row.lastObservedAt,
+    ...(row.identityHold?{identityHold:row.identityHold}:{}) ,
     evidence:'HISTORICAL_READ_ONLY',providerWrites:'OFF'};
 }
 
