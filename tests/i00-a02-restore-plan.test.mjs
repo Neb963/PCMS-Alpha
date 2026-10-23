@@ -46,3 +46,22 @@ test('A02 checkpoint independently matches all state except its own terminal dow
     currentPortable:{...donor(),personas:[{key:'unverified'}]}}),
     /RESTORE_CHECKPOINT_DONOR_DRIFT/);
 });
+
+test('A02 fresh profile requires one explicit decision per imported account, pinned to plan',async()=>{
+  const inc=incoming(),current=destination();
+  inc.canonical.stores.meta.push({key:'account:fixture',value:{
+    account:{accountId:'fixture_account',state:'VERIFICATION_PENDING',revision:1}}});
+  const undecided=await inspectPortableRestore({incoming:inc,fresh:true,...current});
+  assert.equal(undecided.plan.risk.importedAccounts,1);
+  assert.equal(undecided.plan.risk.accountDecisionsMissing,1);
+  const chosen=await inspectPortableRestore({incoming:inc,fresh:true,
+    accountChoices:{fixture_account:'EXCLUDE'},...current});
+  assert.equal(chosen.plan.risk.accountDecisionsMissing,0);
+  assert.notEqual(chosen.planSha256,undecided.planSha256);
+  await assert.rejects(()=>inspectPortableRestore({incoming:inc,fresh:true,
+    accountChoices:{another_account:'INCLUDE_INACTIVE'},...current}),
+    /RESTORE_ACCOUNT_CHOICES_INVALID/);
+  await assert.rejects(()=>inspectPortableRestore({incoming:inc,fresh:true,
+    accountChoices:{fixture_account:'ACTIVATE'},...current}),
+    /RESTORE_ACCOUNT_CHOICES_INVALID/);
+});
