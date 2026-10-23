@@ -623,7 +623,7 @@ function openGeneratorCreator(){
  }
  void showBatches();
  const submit=b('Create private generators',()=>{
-  const slugs=[...new Set(input.value.split(/[\\s,;]+/).map(x=>x.trim()).filter(Boolean))];
+  const slugs=[...new Set(input.value.split(/[\s,;]+/).map(x=>x.trim()).filter(Boolean))];
   if(!slugs.length||slugs.some(x=>!/^[a-z0-9][a-z0-9-]{0,99}$/.test(x))){
    status.textContent='Enter valid lowercase generator names using letters, numbers and hyphens.';return;
   }
