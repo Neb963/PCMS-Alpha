@@ -4484,21 +4484,33 @@ def main():
                 # manager and real IndexedDB, all within isolated Firefox CI.
                 # Clearing the previous fake-test guard is harness-only fixture
                 # cleanup; shipped UI/runtime expose no guard-clear command.
+                # The historical I16 encrypted port is retired by A02. Keep
+                # the same real donor/canonical/persistence oracle using the
+                # passwordless reviewed source and independent staged checkpoint.
                 i16_end_to_end="""const done=arguments[arguments.length-1];
                 (async()=>{
                   await browser.storage.local.remove('pcmsRestoreInProgress');
                   const core=await import('./backup-core.mjs');
-                  const restore=await import('./restore-core.mjs');
+                  const codec=await import('./portable-archive.mjs');
+                  const staged=await import('./portable-restore-stage.mjs');
+                  const reviewModule=await import('./portable-restore-plan.mjs');
                   const journal=await import('./journal.mjs');
                   const pkg=await import('../lib/backup-package.js');
                   const automation=await import('../lib/automation-history.js');
-                  const db=await journal.openCanonicalDatabase();
-                  let current=await core.snapshotCanonical(db);db.close();
-                  const donor=await (await import('./donor-snapshot.mjs')).readProtectedDonorSnapshot(browser);
+                  const getDonor=async()=>{
+                    const module=await import('./donor-snapshot.mjs');
+                    return module.readProtectedDonorSnapshot(browser);
+                  };
+                  const live=async()=>{
+                    const db=await journal.openCanonicalDatabase();
+                    try{return await core.snapshotCanonicalV2(db,{serializedValues:true});}
+                    finally{db.close();}
+                  };
+                  let current=await live();
+                  const donor=await getDonor();
                   if(!donor?.state||!Array.isArray(donor.containers))
                     throw Error('DONOR_SNAPSHOT_UNAVAILABLE');
-                  const stored=await browser.storage.local.get(null);
-                  const extra=Object.create(null);
+                  const stored=await browser.storage.local.get(null),extra=Object.create(null);
                   for(const [k,v] of Object.entries(stored))
                     if(k==='automationJobs'||k.startsWith('gm-values:'))extra[k]=v;
                   const args={state:donor.state,containers:donor.containers,
@@ -4515,95 +4527,69 @@ def main():
                       throw Error('COOKIE_READ_MISSING');
                   }
                   const portable=pkg.createPortableBackupPayload({...args,cookiesByProfile:cookies});
-                  const password='synthetic-i16-installed-local-restore-passphrase';
-                  const donorFile=await pkg.encodeBackupEnvelope({
-                    payload:portable,password,scope:{kind:'full'}});
-                  let checkpoint=await core.encodeIntegrated({
-                    pcms:current,donorEnvelope:donorFile,passphrase:password});
                   const incoming=structuredClone(current);
                   incoming.stores.meta.push({key:'release:i16-new-historical',
                     value:core.serializeClone({key:'release:i16-new-historical',
                       release:{state:'APPROVED',approval:{old:true},dispatchPossible:false}})});
-                  const source=await core.encodeIntegrated({
-                    pcms:incoming,donorEnvelope:donorFile,passphrase:password});
-                  let reviewed=await restore.previewRestore({
-                    archiveText:source.text,password,mode:'merge',mappings,
-                    currentPcms:current,currentDonor:donor,currentPortable:portable,
-                    containers:donor.containers,decodeDonor:pkg.decodeBackupEnvelope
-                  });
-                  const submit=async(checkpointText,reviewedPlanSha256)=>new Promise(resolve=>{
+                  incoming.stores.meta.sort((a,b)=>indexedDB.cmp(a.key,b.key));
+                  const archive=await codec.encodePortableArchive({pcms:incoming,donor:portable});
+                  const source=await staged.preparePortableStage(archive.blob);
+                  const sourceData=await staged.readPortableStage(source.scope);
+                  const buildReview=async ()=>{
+                    const cp=await codec.encodePortableArchive({pcms:current,donor:portable});
+                    const checkpoint=await staged.preparePortableStage(cp.blob);
+                    const inspected=await reviewModule.inspectPortableRestore({
+                      incoming:sourceData,mode:'merge',fresh:false,mappings,
+                      accountChoices:{},currentPcms:current,currentDonor:donor,
+                      currentPortable:portable,containers:donor.containers});
+                    await reviewModule.verifyPortableCheckpoint({
+                      checkpoint:await staged.readPortableStage(checkpoint.scope),
+                      currentPcms:current,currentPortable:portable});
+                    return {scope:checkpoint.scope,plan:inspected};
+                  };
+                  let reviewed=await buildReview();
+                  const submit=async entry=>new Promise(resolve=>{
                     const port=browser.runtime.connect({name:'pcms-i16-restore'});
                     let complete=false;
-                    const done=result=>{
+                    const finished=result=>{
                       if(complete)return;complete=true;
-                      try{port.disconnect();}catch{}
-                      resolve(result);
+                      try{port.disconnect();}catch{}resolve(result);
                     };
-                    port.onMessage.addListener(done);
-                    port.onDisconnect.addListener(()=>done({ok:false,code:'RESTORE_PORT_CLOSED'}));
-                    port.postMessage({action:'APPLY',params:{
-                      archiveText:source.text,checkpointText,
-                      password,mode:'merge',fresh:false,mappings,
-                      reviewedPlanSha256}});
+                    port.onMessage.addListener(finished);
+                    port.onDisconnect.addListener(()=>finished({
+                      ok:false,code:'RESTORE_PORT_CLOSED'}));
+                    port.postMessage({action:'APPLY_PORTABLE',params:{
+                      stageScope:source.scope,checkpointScope:entry.scope,
+                      reviewedPlanSha256:entry.plan.planSha256,mode:'merge',
+                      fresh:false,mappings,accountChoices:{}}});
                   });
-                  let staleRejected=0,answer=await submit(checkpoint.text,reviewed.planSha256);
+                  let staleRejected=0,answer=await submit(reviewed);
                   for(let attempt=0;attempt<3&&!answer.ok&&
                     answer.code==='RESTORE_PLAN_CHANGED';attempt++){
-                    // A real concurrent canonical mutation invalidates operator
-                    // review. Inspect the absence of any effect before manually
-                    // approving a newly observed destination cut.
                     const guard=(await browser.storage.local.get('pcmsRestoreInProgress'))
                       .pcmsRestoreInProgress;
                     if(guard?.active)throw Error('I16_STALE_PLAN_CAUSED_EFFECT');
-                    const latestDb=await journal.openCanonicalDatabase();
-                    const updated=await core.snapshotCanonical(latestDb);latestDb.close();
+                    const updated=await live();
                     if(JSON.stringify(updated)===JSON.stringify(current))
                       throw Error('I16_REVIEW_DRIFT_UNEXPLAINED');
-                    const oldKeys=new Set(current.stores.meta.map(r=>r.key));
-                    const categories=updated.stores.meta.filter(r=>!oldKeys.has(r.key))
-                      .map(r=>typeof r.key==='string'?
-                        (r.key.startsWith('backup:')?'backup:':
-                        r.key.startsWith('release:')?'release:':
-                        r.key.startsWith('account:')?'account:':'other'):'other');
-                    if(categories.length>3)throw Error('I16_UNBOUNDED_BACKGROUND_DRIFT');
-                    staleRejected++;
-                    current=updated;
-                    checkpoint=await core.encodeIntegrated({
-                      pcms:current,donorEnvelope:donorFile,passphrase:password});
-                    reviewed=await restore.previewRestore({
-                      archiveText:source.text,password,mode:'merge',mappings,
-                      currentPcms:current,currentDonor:donor,currentPortable:portable,
-                      containers:donor.containers,decodeDonor:pkg.decodeBackupEnvelope});
-                    answer=await submit(checkpoint.text,reviewed.planSha256);
+                    staleRejected++;current=updated;
+                    reviewed=await buildReview();
+                    answer=await submit(reviewed);
                   }
                   const marker=(await browser.storage.local.get('pcmsRestoreInProgress'))
                     .pcmsRestoreInProgress;
-                  const checked=await journal.openCanonicalDatabase();
-                  const after=await core.snapshotCanonical(checked);checked.close();
+                  const after=await live();
                   const extraRelease=after.stores.meta.find(r=>r.key==='release:i16-new-historical');
                   if(!answer.ok||marker?.status!=='COMPLETE_INACTIVE'||
                     !marker.active||extraRelease?.value?.release?.state!=='RESTORE_REVIEW_REQUIRED'||
                     extraRelease.value.release.approval!==null)
-                    throw Error('RESTORE_COMPLETE_OR_AUTHORITY_INCORRECT:'+JSON.stringify({
-                      code:answer.code,marker:marker?.status,release:extraRelease?.value?.release?.state,
-                      observed:answer.diagnostic||null,
-                      expected:answer.code==='RESTORE_PLAN_CHANGED'?{
-                        planSha256:reviewed.planSha256,
-                        archiveSha256:reviewed.plan.archiveSha256,
-                        sourceSha256:reviewed.plan.sourceSha256,
-                        destinationSha256:reviewed.plan.destinationSha256,
-                        groupsSha256:await core.digest(JSON.stringify(reviewed.plan.groups)),
-                        riskSha256:await core.digest(JSON.stringify(reviewed.plan.risk)),
-                        canonicalStoreCounts:Object.fromEntries(Object.entries(current.stores)
-                          .map(([name,rows])=>[name,rows.length])),
-                        pcmsSha256:await core.digest(JSON.stringify(current)),
-                        donorSha256:await core.digest(JSON.stringify(restore.stableRestoreDonorCut(donor))),
-                        portableSha256:await core.digest(JSON.stringify(portable))
-                      }:null
-                    }));
+                    throw Error('A02_PORTABLE_RESTORE_INACTIVE_OR_APPROVAL_FAILED:'+JSON.stringify({
+                      code:answer.code,marker:marker?.status,
+                      release:extraRelease?.value?.release?.state}));
                   return {ok:true,groups:Object.keys(marker.groups).length,
-                    status:marker.status,source:source.sha256,staleRejected};
-                })().then(done).catch(e=>done({ok:false,error:String(e)}));"""
+                    status:marker.status,source:archive.chain,staleRejected};
+                })().then(done).catch(e=>done({ok:false,error:String(e),
+                  stack:String(e?.stack||'').slice(0,800)}));"""
                 i16_full=call('POST',f'/session/{after}/execute/async',
                               {'script':i16_end_to_end,'args':[]},timeout=120)
                 assert i16_full.get('ok') is True,i16_full
