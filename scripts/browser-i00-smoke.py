@@ -1092,9 +1092,12 @@ def main():
                   const excluded=!JSON.stringify(local).includes(token);
                   const removed=await reopened.remove(id);
                   const missing=await store.get(id);
+                  // Leave a second verified fixture secret for the genuine OS
+                  // Firefox shutdown/relaunch assertion below.
+                  const restored=await store.put(id,token);
                   done({ok:saved.ok&&observed.ok&&observed.token===token&&
                     status.present===true&&invalid.code==='DENIED'&&excluded&&
-                    removed.ok&&missing.code==='GIT_RECONNECT_REQUIRED',
+                    removed.ok&&missing.code==='GIT_RECONNECT_REQUIRED'&&restored.ok,
                     isolated:excluded,reopened:observed.ok,removed:removed.ok,
                     database:GIT_SECRET_DATABASE});
                 })().catch(e=>done({ok:false,error:String(e).slice(0,190)}));"""
@@ -3145,6 +3148,28 @@ def main():
                 assert restarted['alarm'] is True and restarted['alarms']==1,restarted
                 assert restarted['held']=='UNKNOWN',restarted
                 print('B I12_PERSISTENT_RESTART_BUDGET_PAUSE_SINGLE_ALARM_REPAIR=PASS',flush=True)
+                # A03 H: same installed Gecko ID / original Firefox profile,
+                # but NEW OS process. Browser-only Git credential survives;
+                # we delete this disposable fixture only after readback.
+                a03_relaunch="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const {createBrowserGitCredentialStore}=await import('./git-local-secret.mjs');
+                  const store=createBrowserGitCredentialStore();
+                  const id='987654321',token='github_pat_'+('q'.repeat(44));
+                  const read=await store.get(id);
+                  const local=await browser.storage.local.get(null);
+                  const deleted=await store.remove(id);
+                  const absent=await store.get(id);
+                  done({ok:read.ok&&read.token===token&&
+                    !JSON.stringify(local).includes(token)&&deleted.ok&&
+                    absent.code==='GIT_RECONNECT_REQUIRED',
+                    persisted:read.ok,removed:deleted.ok,excluded:true});
+                })().catch(e=>done({ok:false,error:String(e).slice(0,160)}));"""
+                a03_restarted=call('POST',f'/session/{after}/execute/async',
+                    {'script':a03_relaunch,'args':[]},timeout=35)
+                assert a03_restarted.get('ok') is True,('A03_GIT_CREDENTIAL_RESTART',a03_restarted)
+                print('H A03_GIT_SECRET_SURVIVES_REAL_FIREFOX_EXIT_RELAUNCH_AND_EXCLUDES_STORAGE_LOCAL=PASS',flush=True)
+
 
                 # I14 B: exact installed XPI, canonical CAS holds and
                 # operator projection. No fake result can enable real effects.
