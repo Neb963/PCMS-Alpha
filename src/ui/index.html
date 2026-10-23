@@ -229,15 +229,14 @@
           <div class="panel-head"><h2 id="pcms-existing-heading">Existing generator updates</h2><span class="unknown">READY advances automatically when eligible</span></div>
           <p class="reason">PCMS advances current READY through source preparation, safe unlisting and native development in the background. When route, source, editor, recovery or effect authority is unverified, only that generator is held; no blind remote retry.</p>
           <details><summary>Advanced source recovery and diagnostics</summary>
-          <p class="reason">Each generator must have archived original bytes, verified ownership, a sleeping Refresher slot and an independent source baseline. The operator passphrase encrypts and verifies the previous-good full source locally; only a separately confirmed unlisting permits source staging. Never overwrite a human editor, repeat an ambiguous remote effect or republish a restored previous source.</p>
+          <p class="reason">Each generator must have archived original bytes, verified ownership, a sleeping Refresher slot and an independent source baseline. PCMS verifies a passwordless previous-good source checkpoint locally; only a separately confirmed unlisting permits source staging. Never overwrite a human editor, repeat an ambiguous remote effect or republish a restored previous source.</p>
           <div class="account-controls">
             <label for="pcms-existing-slug">Existing generator slug</label><input id="pcms-existing-slug" maxlength="100" autocomplete="off" spellcheck="false" placeholder="generator">
-            <label for="pcms-existing-passphrase">Local recovery passphrase (not retained)</label><input id="pcms-existing-passphrase" type="password" autocomplete="off">
             <label for="pcms-existing-token">Git token override (optional — uses connected GitHub)</label><input id="pcms-existing-token" type="password" autocomplete="off">
           </div>
           <div class="account-controls">
             <button id="pcms-existing-get" type="button" disabled>Load canonical state</button>
-            <button id="pcms-existing-prepare" type="button" disabled>Prepare encrypted previous source</button>
+            <button id="pcms-existing-prepare" type="button" disabled>Prepare verified previous source</button>
             <button id="pcms-existing-unlist" type="button" disabled>Unlist current public version</button>
             <button id="pcms-existing-recheck-unlist" type="button" disabled>Check it is unlisted</button>
             <button id="pcms-existing-pin-stage" type="button" disabled>Pin current READY source</button>
