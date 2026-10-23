@@ -22,15 +22,15 @@ import {resolveRefreshedPrevious} from './refresher-admission.mjs';
 export const EXISTING_PORT='pcms-i13-existing';
 const valid=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const allowed={
-  GET:['slug'],PREPARE:['slug','passphrase'],
-  UNLIST:['slug','expectedRevision','passphrase'],
+  GET:['slug'],PREPARE:['slug'],
+  UNLIST:['slug','expectedRevision'],
   RECHECK_UNLIST:['slug','expectedRevision'],
-  PIN_STAGE:['slug','expectedRevision','passphrase','token'],
-  STAGE:['slug','expectedRevision','passphrase'],
+  PIN_STAGE:['slug','expectedRevision','token'],
+  STAGE:['slug','expectedRevision'],
   RECHECK_STAGE:['slug','expectedRevision'],
   RECOVERY_UNLIST:['slug','expectedRevision'],
   RECHECK_RECOVERY_UNLIST:['slug','expectedRevision'],
-  RESTORE:['slug','expectedRevision','passphrase'],
+  RESTORE:['slug','expectedRevision'],
   RECHECK_RESTORE:['slug','expectedRevision']
 };
 export function validateExistingMessage(api,sender,m){
@@ -44,12 +44,10 @@ export function validateExistingMessage(api,sender,m){
      Object.keys(p).some(k=>!allowed[m.type].includes(k))||
      !valid(p.slug)||('expectedRevision'in p&&
        (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
-     ('passphrase'in p&&(typeof p.passphrase!=='string'||
-       p.passphrase.length<12||p.passphrase.length>256))||
      ('token'in p&&(typeof p.token!=='string'||p.token.length<12||
        p.token.length>512||!/^[\x21-\x7e]+$/.test(p.token)))||
      (allowed[m.type].includes('expectedRevision')&&!Number.isSafeInteger(p.expectedRevision))||
-     (allowed[m.type].includes('passphrase')&&!('passphrase'in p)))
+     false)
     return fail('INVALID_PARAMS');
   return {ok:true};
 }
@@ -206,9 +204,9 @@ export function createExistingBoundary(api,{
           ok:true,remotePublicId:f.inventory.remoteId,ownerResult:'IS_OWNER',
           visibility:remote.visibility,source:remote.source}}).ok)
         return fail('EXISTING_SLEEP_OR_ARCHIVED_ORIGINAL_UNVERIFIED');
-      const sealed=await sealPrevious(original,p.passphrase);
+      const sealed=await sealPrevious(original);
       if(!sealed.ok)return sealed;
-      const unlocked=await unlockPrevious(sealed,p.passphrase);
+      const unlocked=await unlockPrevious(sealed);
       if(!unlocked.ok)return unlocked;
       if(!(await recheck(authority.g,record.personaUid,authority.before)).ok)
         return fail('EXISTING_GUARD_CHANGED');
@@ -270,9 +268,9 @@ export function createExistingBoundary(api,{
       return store.move(p.slug,r.revision,event,{proof:o.proof});
     }
     const unlock=async()=>{
-      const unlocked=await unlockPrevious(r.recovery,p.passphrase);
+      const unlocked=await unlockPrevious(r.recovery);
       if(!unlocked.ok||unlocked.source.fingerprint!==r.previousFingerprint)
-        return fail('RECOVERY_DECRYPTION_REQUIRED');
+        return fail('RECOVERY_CHECKPOINT_UNVERIFIED');
       return unlocked;
     };
     if(m.type==='PIN_STAGE'){
