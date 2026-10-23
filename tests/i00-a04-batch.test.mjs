@@ -228,6 +228,6 @@ test('A04 installed creator delimiter parses actual newline, comma, semicolon an
  const match=source.match(/input\.value\.split\(\/\[([^\n]+?)\]\+\/\)/);
  assert.ok(match,'primary creator must expose explicit lexical delimiter');
  const sep=new RegExp('['+match[1]+']+');
- assert.deepEqual('alpha\\nbeta, gamma;delta'.split(sep),
+ assert.deepEqual('alpha\nbeta, gamma;delta'.split(sep),
   ['alpha','beta','gamma','delta']);
 });
