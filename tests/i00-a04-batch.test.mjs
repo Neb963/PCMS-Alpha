@@ -222,3 +222,12 @@ test('A04: only archived, unpinned, never-dispatched allocations can rebalance',
  await new Promise(resolve=>{t.oncomplete=resolve;});
  assert.equal((await s.requeueArchivedUnattempted('intent_pinned0000',7)).ok,false);
 });
+
+test('A04 installed creator delimiter parses actual newline, comma, semicolon and whitespace',async()=>{
+ const source=await readFile(new URL('../src/ui/faithful/bridge.mjs',import.meta.url),'utf8');
+ const match=source.match(/input\.value\.split\(\/\[([^\n]+?)\]\+\/\)/);
+ assert.ok(match,'primary creator must expose explicit lexical delimiter');
+ const sep=new RegExp('['+match[1]+']+');
+ assert.deepEqual('alpha\\nbeta, gamma;delta'.split(sep),
+  ['alpha','beta','gamma','delta']);
+});
