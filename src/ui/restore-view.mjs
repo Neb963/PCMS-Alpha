@@ -11,7 +11,8 @@ import {inspectPortableRestore,verifyPortableCheckpoint} from './portable-restor
 const el=id=>document.getElementById(id);
 const archive=el('pcms-restore-archive'),checkpoint=el('pcms-restore-checkpoint'),
   mode=el('pcms-restore-mode'),fresh=el('pcms-restore-fresh'),
-  mappings=el('pcms-restore-mappings'),preview=el('pcms-restore-preview'),
+  mappings=el('pcms-restore-mappings'),choices=el('pcms-restore-account-choices'),
+  preview=el('pcms-restore-preview'),
   verify=el('pcms-restore-verify'),apply=el('pcms-restore-apply'),
   details=el('pcms-restore-details'),status=el('pcms-restore-status'),
   checked=el('pcms-restore-consent'),reviewedHash=el('pcms-restore-reviewed-hash');
@@ -23,7 +24,7 @@ function invalidate(){
   verify.disabled=true;apply.disabled=true;
   details.textContent='No reviewed portable restore plan. Existing state is unchanged.';
 }
-for(const control of [archive,mode,fresh,mappings])
+for(const control of [archive,mode,fresh,mappings,choices])
   control.addEventListener('change',invalidate);
 checkpoint.addEventListener('change',()=>{
   proof=null;checkpointScope=null;apply.disabled=true;
@@ -81,6 +82,13 @@ function readMapping(){
     throw Error('RESTORE_MAPPING_INVALID');
   return value;
 }
+function readChoices(){
+  let value;try{value=JSON.parse(choices.value||'{}');}
+  catch{throw Error('RESTORE_ACCOUNT_CHOICES_INVALID');}
+  if(!value||typeof value!=='object'||Array.isArray(value))
+    throw Error('RESTORE_ACCOUNT_CHOICES_INVALID');
+  return value;
+}
 function displayPlan(row,checkpointVerified){
   const plan=row.plan,risks=plan.risk;
   details.textContent=[
@@ -88,6 +96,8 @@ function displayPlan(row,checkpointVerified){
     'Exact reviewed plan SHA-256: '+row.planSha256,
     'Destination: '+plan.mode+(plan.fresh?' · predecessor proof required':''),
     'Imported Personas: '+risks.importedPersonas,
+    'Imported accounts: '+risks.importedAccounts,
+    'Accounts awaiting explicit fresh-profile decision: '+risks.accountDecisionsMissing,
     'Unmapped Personas: '+risks.unmappedPersonas,
     'Direct-route reviews: '+risks.directRouteReviews,
     'Imported cookies: '+risks.importedCookies,
@@ -104,7 +114,8 @@ function displayPlan(row,checkpointVerified){
 function syncApply(){
   const p=review?.plan;
   let n=0;try{n=Object.keys(readMapping()).length}catch{}
-  const complete=!!p&&p.risk.unmappedPersonas===0&&
+  const complete=!!p&&p.risk.accountDecisionsMissing===0&&
+    p.risk.unmappedPersonas===0&&
     p.risk.directRouteReviews===0&&p.groups.every(g=>
       ['MAPPING_ONLY_UNVERIFIED','CREATE_REQUESTED'].includes(g.status));
   apply.disabled=!(complete&&n===p.risk.importedPersonas&&
@@ -125,7 +136,7 @@ preview.addEventListener('click',async()=>{
     const current=await destination(),requested=readMapping();
     review=await inspectPortableRestore({incoming,
       mode:mode.value,fresh:fresh.checked,mappings:requested,
-      currentPcms:current.pcms,currentDonor:current.donor,
+      accountChoices:readChoices(),currentPcms:current.pcms,currentDonor:current.donor,
       currentPortable:current.portable,containers:current.donor.containers});
     sourceScope=staged.scope;checkpointScope=null;
     displayPlan(review,false);verify.disabled=false;
@@ -149,7 +160,7 @@ verify.addEventListener('click',async()=>{
     const p=await inspectPortableRestore({
       incoming:await readPortableStage(sourceScope),
       mode:mode.value,fresh:fresh.checked,mappings:readMapping(),
-      currentPcms:observed.pcms,currentDonor:observed.donor,
+      accountChoices:readChoices(),currentPcms:observed.pcms,currentDonor:observed.donor,
       currentPortable:observed.portable,containers:observed.donor.containers});
     if(p.planSha256!==review.planSha256)throw Error('RESTORE_DESTINATION_DRIFT');
     proof=await verifyPortableCheckpoint({
@@ -170,7 +181,8 @@ apply.addEventListener('click',async()=>{
   try{
     const out=await portCommand({action:'APPLY_PORTABLE',params:{
       stageScope:sourceScope,checkpointScope,reviewedPlanSha256:review.planSha256,
-      mode:mode.value,fresh:fresh.checked,mappings:readMapping()}});
+      mode:mode.value,fresh:fresh.checked,mappings:readMapping(),
+      accountChoices:readChoices()}});
     const held=await portCommand({action:'STATUS'});
     status.textContent=out?.ok?
       'Portable data restored in inactive controller. Routes, owners and sessions require separate verification.':
