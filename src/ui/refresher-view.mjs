@@ -70,7 +70,8 @@ function draw(s){
     (s.policy.refreshEnabled?' · guarded marker saves ENABLED':' · refresh mutation OFF')+
     ' · operating time: '+
     (s.clockCapability==='BROWSER_MONOTONIC_ROUTE_FEED_ELIGIBILITY'?
-      'qualified browser operating time; offline active gaps frozen':\n      s.clockCapability==='BOUNDED_NATIVE_ROUTE_FEED_ELIGIBILITY'?
+      'qualified browser operating time; offline active gaps frozen':
+      s.clockCapability==='BOUNDED_NATIVE_ROUTE_FEED_ELIGIBILITY'?
       'bounded native awake time with current protected route/feed evidence; unknown frozen':
       'continuous eligibility not verified')+
     ' · observations: '+s.monitoring+'.';
