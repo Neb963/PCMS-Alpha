@@ -1382,8 +1382,11 @@ async function openReleaseReview(slug){
  footer.append(requestChanges,approve);
  if(persisted?.ok&&persisted.state==='APPROVED'&&
     persisted.sourceFingerprint===view.sourceFingerprint){
+   // The exact approved record remains immutable; publishing it does not
+   // require a second operator approval or a redundant source manifest crawl.
+   approve.disabled=true;
    const resume=b('Publish previously approved candidate',()=>void (async()=>{
-     if(!ack.checked||seen.size!==(view.files||[]).length){
+     if(!ack.checked){
        status.textContent='Inspect the exact source manifest and test observations before publication.';return;
      }
      if(!window.confirm('Publish the previously approved exact candidate now?'))return;
