@@ -347,7 +347,8 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         // Independent hashing and CAS occur outside scheduler transactions;
         // changed/corrupt snapshots stay held, never promoted by timestamps.
         try{if(!(await sentinel.inspect()).held)
-          await backfillLegacyAdoptions(await dbPromise);}
+          await backfillLegacyAdoptions(await dbPromise,{shouldHold:async()=>
+            (await sentinel.inspect()).held});}
         catch{/* migration failure never disables monitoring or grants a write */}
         let nativeClock=null,qualifiedCoverages=null,turnReadiness=null,browserClock=null;
         if(browserClockGate()){
