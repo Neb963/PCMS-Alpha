@@ -3258,7 +3258,7 @@ def main():
                     done({ok:before.ok&&after.ok&&!denied.ok&&
                       unchangedEffect&&denied.code==='REFRESH_ADMISSION_HELD'&&
                       !targetAfter?.refresh?.intent&&
-                      result.ok&&result.refreshCapability='OPERATOR_MUTATION_DISABLED'&&
+                      result.ok&&result.refreshCapability==='OPERATOR_MUTATION_DISABLED'&&
                       result.clockCapability==='BROWSER_MONOTONIC_ROUTE_FEED_ELIGIBILITY'&&
                       core.qualifyRefreshCandidate(null).ok===false,
                       beforeRows:before.state.rows.length,
