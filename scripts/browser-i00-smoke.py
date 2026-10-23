@@ -1109,10 +1109,23 @@ def main():
                     const testUrl=A03_URL_LITERAL;
                     const tab=await browser.tabs.create({url:testUrl,active:false});
                     try{
-                      for(let i=0;i<50;i++){
-                        if((await browser.tabs.get(tab.id)).status==='complete')break;
+                      // A newly created Firefox tab can transiently report
+                      // about:blank as COMPLETE before its requested URL loads.
+                      // Await an independently observed HTTPS navigation, not
+                      // just a tab status transition; never count a missing
+                      // host permission from about:blank as an isolation PASS.
+                      let page=null,stable=0;
+                      for(let i=0;i<120;i++){
+                        page=await browser.tabs.get(tab.id);
+                        if(page.url===testUrl&&page.status==='complete'){
+                          stable++;
+                          if(stable>=2)break;
+                        }else stable=0;
                         await new Promise(resolve=>setTimeout(resolve,100));
                       }
+                      if(stable<2)return {ran:false,
+                        error:'A03_WEB_ORIGIN_NOT_SETTLED',
+                        url:page?.url,status:page?.status};
                       let result;
                       try{result=await browser.scripting.executeScript({
                         target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
