@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """WebDriver/Marionette packaged-XPI persistent-install I00 smoke, no live provider calls."""
 import base64
+import atexit
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hashlib
 import http.client
 import json
@@ -1007,7 +1010,28 @@ def s01_legacy_and_archive(session,uuid,oracle,privacy_safe,added_id):
     print('B S01_ARCHIVE_DEFERS_IN_USE_RELEASE_AND_RELEASES_IDLE_VIA_DONOR=',states['legacy_account_ci01'][1],flush=True)
 
 
+class A03ContentIsolationFixture(BaseHTTPRequestHandler):
+    def do_GET(self):
+        payload=b'<!doctype html><html><head><title>CI A03 origin isolation</title></head><body>local test page</body></html>'
+        self.send_response(200)
+        self.send_header('Content-Type','text/html; charset=utf-8')
+        self.send_header('Content-Length',str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self,*args):
+        pass
+
+
 def main():
+    # Developer CI ONLY: local fixed HTML origin to test real content-script
+    # principal separation; never a PCMS runtime dependency or operator host.
+    fixture=A03ContentIsolationFixture
+    a03_server=ThreadingHTTPServer(('127.0.0.1',0),fixture)
+    atexit.register(a03_server.server_close)
+    atexit.register(a03_server.shutdown)
+    threading.Thread(target=a03_server.serve_forever,daemon=True).start()
+    a03_url=f'http://127.0.0.1:{a03_server.server_port}/a03-isolation.html'
     archive=pathlib.Path(sys.argv[1]).resolve()
     browser=pathlib.Path(os.environ['FIREFOX_BINARY'])
     driver=pathlib.Path(os.environ['GECKODRIVER_BINARY'])
@@ -1099,6 +1123,49 @@ def main():
                     port.onDisconnect.addListener(()=>resolve({ok:false,code:'PORT_CLOSED'}));
                     port.postMessage({type:'GET_CREDENTIAL',params:{repositoryId:id}});
                   });
+                  // Inject a REAL extension content script into a separate
+                  // local HTML origin. It must execute, but the extension
+                  // origin's credentials store must not exist in that origin.
+                  const contentIsolation=await (async()=>{
+                    const testUrl=A03_URL_LITERAL;
+                    const tab=await browser.tabs.create({url:testUrl,active:false});
+                    try{
+                      for(let i=0;i<50;i++){
+                        if((await browser.tabs.get(tab.id)).status==='complete')break;
+                        await new Promise(resolve=>setTimeout(resolve,100));
+                      }
+                      const result=await browser.scripting.executeScript({
+                        target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
+                        func:async(name,key)=>{
+                          try{
+                            const db=await new Promise((resolve,reject)=>{
+                              const req=indexedDB.open(name);
+                              req.onsuccess=()=>resolve(req.result);
+                              req.onerror=()=>reject(Error('IDB_INACCESSIBLE'));
+                            });
+                            const present=db.objectStoreNames.contains('credentials');
+                            let found=false;
+                            if(present){
+                              found=await new Promise(resolve=>{
+                                const req=db.transaction('credentials','readonly')
+                                  .objectStore('credentials').get(key);
+                                req.onsuccess=()=>resolve(!!req.result);
+                                req.onerror=()=>resolve(false);
+                              });
+                            }
+                            db.close();
+                            return {ran:true,origin:location.origin,found};
+                          }catch{
+                            return {ran:true,origin:location.origin,found:false};
+                          }
+                        },args:[GIT_SECRET_DATABASE,id]
+                      });
+                      return result?.[0]?.result||null;
+                    }finally{await browser.tabs.remove(tab.id);}
+                  })();
+                  const isolated=contentIsolation?.ran===true&&
+                    contentIsolation.origin===new URL(A03_URL_LITERAL).origin&&
+                    contentIsolation.found===false;
                   const local=await browser.storage.local.get(null);
                   const excluded=!JSON.stringify(local).includes(token);
                   const removed=await reopened.remove(id);
@@ -1107,18 +1174,20 @@ def main():
                   // Firefox shutdown/relaunch assertion below.
                   const restored=await store.put(id,token);
                   done({ok:saved.ok&&observed.ok&&observed.token===token&&
-                    status.present===true&&invalid.code==='DENIED'&&
+                    status.present===true&&invalid.code==='DENIED'&&isolated&&
                     deniedPort.ok===false&&
                     !JSON.stringify(deniedPort).includes(token)&&excluded&&
                     removed.ok&&missing.code==='GIT_RECONNECT_REQUIRED'&&restored.ok,
-                    isolated:excluded,reopened:observed.ok,removed:removed.ok,
+                    isolated,excluded,reopened:observed.ok,removed:removed.ok,
                     database:GIT_SECRET_DATABASE});
                 })().catch(e=>done({ok:false,error:String(e).slice(0,190)}));"""
+                a03_script=a03_script.replace('A03_URL_LITERAL',json.dumps(a03_url))
                 a03_probe=call('POST',f'/session/{after}/execute/async',
-                    {'script':a03_script,'args':[]},timeout=35)
+                    {'script':a03_script,'args':[]},timeout=45)
                 assert a03_probe.get('ok') is True,('A03_FIREFOX_IDB_FAILURE',a03_probe)
                 assert a03_probe['database']=='pcms-private-git-credentials-v1',a03_probe
                 print('B A03_INSTALLED_FIREFOX_INDEXEDDB_SECRET_READBACK_AND_EXCLUSION=PASS',flush=True)
+                print('B A03_REAL_CONTENT_SCRIPT_ORIGIN_DENIED_GIT_DATABASE_ACCESS=PASS',flush=True)
 
                 # v0.1.4 B evidence: verify the actual installed XPI dashboard.
                 # This tests real packaged assets/DOM and presentation actions
