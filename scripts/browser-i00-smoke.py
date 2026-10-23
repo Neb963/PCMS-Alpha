@@ -4494,131 +4494,57 @@ def main():
                 # manager and real IndexedDB, all within isolated Firefox CI.
                 # Clearing the previous fake-test guard is harness-only fixture
                 # cleanup; shipped UI/runtime expose no guard-clear command.
-                # The historical I16 encrypted port is retired by A02. Keep
-                # the same real donor/canonical/persistence oracle using the
-                # passwordless reviewed source and independent staged checkpoint.
-                i16_end_to_end="""const done=arguments[arguments.length-1];
+                # A02 negative B: this original long-running profile contains
+                # a deliberately source-incomplete historical publication. The
+                # old encrypted I16 port once accepted it; the new passwordless
+                # source-closure gate MUST hold before guard or any donor effect.
+                historical_hold="""const done=arguments[arguments.length-1];
                 (async()=>{
                   await browser.storage.local.remove('pcmsRestoreInProgress');
                   const core=await import('./backup-core.mjs');
                   const codec=await import('./portable-archive.mjs');
-                  const staged=await import('./portable-restore-stage.mjs');
-                  const reviewModule=await import('./portable-restore-plan.mjs');
                   const journal=await import('./journal.mjs');
                   const pkg=await import('../lib/backup-package.js');
-                  const automation=await import('../lib/automation-history.js');
-                  const getDonor=async()=>{
-                    const module=await import('./donor-snapshot.mjs');
-                    return module.readProtectedDonorSnapshot(browser);
-                  };
-                  const live=async()=>{
-                    const db=await journal.openCanonicalDatabase();
-                    try{return await core.snapshotCanonicalV2(db,{serializedValues:true});}
-                    finally{db.close();}
-                  };
-                  let current=await live();
-                  const donor=await getDonor();
-                  if(!donor?.state||!Array.isArray(donor.containers))
-                    throw Error('DONOR_SNAPSHOT_UNAVAILABLE');
-                  const stored=await browser.storage.local.get(null),extra=Object.create(null);
-                  for(const [k,v] of Object.entries(stored))
-                    if(k==='automationJobs'||k.startsWith('gm-values:'))extra[k]=v;
-                  const args={state:donor.state,containers:donor.containers,
-                    userscriptData:extra,selection:{kind:'full'},
-                    automationHistory:automation.filterOrdinaryAutomationJobs(
-                      Object.values(extra.automationJobs||{}))};
-                  const initial=pkg.createPortableBackupPayload(args),cookies={};
-                  const mappings={};
-                  for(const person of initial.personas){
-                    mappings[person.key]=person.sourceId;
-                    cookies[person.sourceId]=await browser.runtime.sendMessage({
-                      type:'PERSONA_COOKIES_LIST',profileId:person.sourceId});
-                    if(!Array.isArray(cookies[person.sourceId]))
-                      throw Error('COOKIE_READ_MISSING');
-                  }
-                  const portable=pkg.createPortableBackupPayload({...args,cookiesByProfile:cookies});
-                  const incoming=structuredClone(current);
-                  incoming.stores.meta.push({key:'release:i16-new-historical',
-                    value:core.serializeClone({key:'release:i16-new-historical',
-                      release:{state:'APPROVED',approval:{old:true},dispatchPossible:false}})});
-                  incoming.stores.meta.sort((a,b)=>indexedDB.cmp(a.key,b.key));
-                  const archive=await codec.encodePortableArchive({pcms:incoming,donor:portable});
-                  const source=await staged.preparePortableStage(archive.blob);
-                  const sourceData=await staged.readPortableStage(source.scope);
-                  const buildReview=async ()=>{
-                    const cp=await codec.encodePortableArchive({pcms:current,donor:portable});
-                    const checkpoint=await staged.preparePortableStage(cp.blob);
-                    const inspected=await reviewModule.inspectPortableRestore({
-                      incoming:sourceData,mode:'merge',fresh:false,mappings,
-                      accountChoices:{},currentPcms:current,currentDonor:donor,
-                      currentPortable:portable,containers:donor.containers});
-                    await reviewModule.verifyPortableCheckpoint({
-                      checkpoint:await staged.readPortableStage(checkpoint.scope),
-                      currentPcms:current,currentPortable:portable});
-                    return {scope:checkpoint.scope,plan:inspected};
-                  };
-                  let reviewed=await buildReview();
-                  const submit=async entry=>new Promise(resolve=>{
-                    const port=browser.runtime.connect({name:'pcms-i16-restore'});
-                    let complete=false;
-                    const finished=result=>{
-                      if(complete)return;complete=true;
-                      try{port.disconnect();}catch{}resolve(result);
-                    };
-                    port.onMessage.addListener(finished);
-                    port.onDisconnect.addListener(()=>finished({
-                      ok:false,code:'RESTORE_PORT_CLOSED'}));
-                    port.postMessage({action:'APPLY_PORTABLE',params:{
-                      stageScope:source.scope,checkpointScope:entry.scope,
-                      reviewedPlanSha256:entry.plan.planSha256,mode:'merge',
-                      fresh:false,mappings,accountChoices:{}}});
-                  });
-                  let staleRejected=0,answer=await submit(reviewed);
-                  for(let attempt=0;attempt<3&&!answer.ok&&
-                    answer.code==='RESTORE_PLAN_CHANGED';attempt++){
-                    const guard=(await browser.storage.local.get('pcmsRestoreInProgress'))
-                      .pcmsRestoreInProgress;
-                    if(guard?.active)throw Error('I16_STALE_PLAN_CAUSED_EFFECT');
-                    const updated=await live();
-                    if(JSON.stringify(updated)===JSON.stringify(current))
-                      throw Error('I16_REVIEW_DRIFT_UNEXPLAINED');
-                    staleRejected++;current=updated;
-                    reviewed=await buildReview();
-                    answer=await submit(reviewed);
-                  }
-                  const marker=(await browser.storage.local.get('pcmsRestoreInProgress'))
+                  const db=await journal.openCanonicalDatabase();
+                  const current=await core.snapshotCanonicalV2(db,{serializedValues:true});
+                  db.close();
+                  let reason=null;
+                  try{await codec.encodePortableArchive({
+                    pcms:current,donor:pkg.createPortableBackupPayload({
+                      state:{},containers:[],selection:{kind:'full'}})});}
+                  catch(e){reason=e?.message||String(e)}
+                  const guard=(await browser.storage.local.get('pcmsRestoreInProgress'))
                     .pcmsRestoreInProgress;
-                  const after=await live();
-                  const extraRelease=after.stores.meta.find(r=>r.key==='release:i16-new-historical');
-                  if(!answer.ok||marker?.status!=='COMPLETE_INACTIVE'||
-                    !marker.active||extraRelease?.value?.release?.state!=='RESTORE_REVIEW_REQUIRED'||
-                    extraRelease.value.release.approval!==null)
-                    throw Error('A02_PORTABLE_RESTORE_INACTIVE_OR_APPROVAL_FAILED:'+JSON.stringify({
-                      code:answer.code,marker:marker?.status,
-                      release:extraRelease?.value?.release?.state}));
-                  return {ok:true,groups:Object.keys(marker.groups).length,
-                    status:marker.status,source:archive.chain,staleRejected};
-                })().then(done).catch(e=>done({ok:false,error:String(e),
-                  stack:String(e?.stack||'').slice(0,800)}));"""
-                i16_full=call('POST',f'/session/{after}/execute/async',
-                              {'script':i16_end_to_end,'args':[]},timeout=120)
-                assert i16_full.get('ok') is True,i16_full
-                assert i16_full.get('groups')==4,i16_full
-                if i16_full.get('staleRejected',0):
-                    print('B I16_DESTINATION_DRIFT_HELD_BEFORE_EFFECT_AND_FRESH_OPERATOR_REVIEW=PASS',
-                          i16_full['staleRejected'],flush=True)
-                print('B I16_REAL_GUARDED_DONOR_AND_CANONICAL_STAGED_RESTORE_INACTIVE=PASS',flush=True)
-
-                # Full Firefox process restart, not just UI navigation.
+                  const legacy=await new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-i16-restore'});
+                    port.onMessage.addListener(value=>{port.disconnect();resolve(value)});
+                    port.onDisconnect.addListener(()=>resolve({
+                      ok:false,code:'RESTORE_PORT_CLOSED'}));
+                    port.postMessage({action:'APPLY',params:{
+                      password:'legacy-should-be-rejected'}});
+                  });
+                  done({ok:reason==='BACKUP_SOURCE_INCOMPLETE_RELEASE'&&
+                    guard===undefined&&legacy?.ok===false&&
+                    legacy.code==='RESTORE_COMMAND_NOT_ALLOWED',
+                    reason,guardPresent:guard!==undefined,legacyCode:legacy?.code});
+                })().catch(error=>done({ok:false,error:String(error)}));"""
+                i16_hold=call('POST',f'/session/{after}/execute/async',
+                    {'script':historical_hold,'args':[]},timeout=90)
+                assert i16_hold.get('ok') is True,i16_hold
+                print('B A02_INCOMPLETE_HISTORY_AND_RETIRED_RESTORE_DENIED_BEFORE_EFFECT=PASS',
+                      flush=True)
+                # Genuine OS Firefox restart verifies that no guard/effect was
+                # invented on failed source inspection. The independent A02
+                # fresh-profile suite later proves positive guarded restore.
                 close(after)
                 after=open_session(browser,profile)
                 uuid=addons_uuid(profile)
                 call('POST',f'/session/{after}/url',
                      {'url':f'moz-extension://{uuid}/pcms/index.html#settings'})
-                recovery=execute(after,"return Promise.all([browser.storage.local.get('pcmsRestoreInProgress'),import('./journal.mjs').then(j=>j.openCanonicalDatabase()).then(async db=>{try{const r=await new Promise(resolve=>{const q=db.transaction('meta','readonly').objectStore('meta').get('release:restore-b');q.onsuccess=()=>resolve(q.result)});return r?.release?.state;}finally{db.close()}})]).then(([s,r])=>({held:s.pcmsRestoreInProgress?.active===true,release:r}))")
-                assert recovery=={'held':True,'release':'RESTORE_REVIEW_REQUIRED'},recovery
-                print('B I16_PACKAGED_FULL_FIREFOX_RESTART_INACTIVE_RESTORE_PERSISTED=PASS',flush=True)
-
+                recovery=execute(after,
+                    "return browser.storage.local.get('pcmsRestoreInProgress').then(v=>({held:v.pcmsRestoreInProgress?.active===true}))")
+                assert recovery=={'held':False},recovery
+                print('B A02_SOURCE_INCOMPLETE_HAS_NO_GUARD_AFTER_PROCESS_RESTART=PASS',flush=True)
 
                 # I16 fresh disposable Firefox profile, separate from the old
                 # controller. Only synthetic local Persona/IDB writes. A
