@@ -3059,7 +3059,7 @@ def main():
                   const second=state.rows.find(r=>r.slug==='i12-b-0001');
                   first.phase='ACTIVE';first.slot=true;first.activeRemaining=24*core.HOUR;
                   first.admittedAt=now-8*core.HOUR;first.checkpoint=now-8*core.HOUR;
-                  second.phase='SLEEPING';second.sleepRemaining=72*core.HOUR;
+                  second.phase='SLEEPING';second.sleepRemaining=72*core.HOUR;second.restCheckpointAt=now-8*core.HOUR;
                   await new Promise((resolve,reject)=>{
                     const tx=db.transaction('meta','readwrite');tx.objectStore('meta').put({key:core.REFRESHER_KEY,state});
                     tx.oncomplete=resolve;tx.onabort=()=>reject(Error('seed aborted'));
@@ -3265,7 +3265,7 @@ def main():
                 assert i14.get('ok') is True,i14
                 ui=execute(after,"return {provider:document.getElementById('pcms-refresher-provider')?.textContent||'',summary:document.getElementById('pcms-refresher-summary')?.textContent||'',optIn:document.getElementById('pcms-refresher-enable')?.checked}")
                 assert ('refresh mutation OFF' in ui['provider'] and
-                        'bounded native awake time' in ui['provider'] and
+                        'qualified browser operating time' in ui['provider'] and
                         ui['optIn'] is False and
                         'visibility-held' in ui['summary']),ui
                 print('B I14_PACKAGED_PERSISTENT_IDB_GATED_EFFECTS_AND_REFERSHER_PROOF_UI=PASS',flush=True)
