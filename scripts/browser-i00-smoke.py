@@ -4945,7 +4945,7 @@ def main():
                 a02_profile=pathlib.Path(folder)/'a02-portable-fresh'
                 a02_profile.mkdir()
                 (a02_profile/'user.js').write_text(
-                    'user_pref("xpinstall.signatures.required", false);\\n')
+                    'user_pref("xpinstall.signatures.required", false);\n')
                 a02_before=open_session(browser,a02_profile)
                 try:
                     installed=call('POST',f'/session/{a02_before}/moz/addon/install',
