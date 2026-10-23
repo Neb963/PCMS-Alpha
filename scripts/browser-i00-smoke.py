@@ -4270,10 +4270,20 @@ def main():
                     }
                     const status=await issue('STATUS');
                     const retired=await issue('RUN_V2_MANUAL');
+                    const legacyRestore=await Promise.all(
+                      ['APPLY','RECONCILE','PREVIEW_V2','APPLY_V2'].map(action=>
+                        new Promise(resolve=>{
+                          const port=browser.runtime.connect({name:'pcms-i16-restore'});
+                          port.onMessage.addListener(v=>{port.disconnect();resolve(v)});
+                          port.onDisconnect.addListener(()=>resolve({
+                            ok:false,code:'RESTORE_PORT_CLOSED'}));
+                          port.postMessage({action,params:{password:'legacy-credential'}});
+                        })));
                     done({ok:status?.ok===true&&status.format==='PORTABLE'&&
                       status.passwordRequired===false&&retired?.ok===false&&
-                      retired.code==='INVALID_COMMAND',
-                      status,retired});
+                      retired.code==='INVALID_COMMAND'&&legacyRestore.every(v=>
+                        v.ok===false&&v.code==='RESTORE_COMMAND_NOT_ALLOWED'),
+                      status,retired,legacyRestore});
                   })().catch(e=>done({error:String(e)}));""",
                   'args':[]},timeout=60)
                 assert i15_result.get('ok') is True,i15_result
