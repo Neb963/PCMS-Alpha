@@ -1125,19 +1125,19 @@ def main():
                     const timeout=setTimeout(()=>
                       finish({ran:false,error:'SANDBOX_ORIGIN_UNAVAILABLE'}),5000);
                     window.addEventListener('message',onMessage);
-                    const inner=\`(async()=>{
-                      const nonce=\${JSON.stringify(nonce)};
+                    const inner=`(async()=>{
+                      const nonce=${JSON.stringify(nonce)};
                       let found=false,denied=false;
                       try{
                         const db=await new Promise((resolve,reject)=>{
-                          const q=indexedDB.open(\${JSON.stringify(GIT_SECRET_DATABASE)});
+                          const q=indexedDB.open(${JSON.stringify(GIT_SECRET_DATABASE)});
                           q.onsuccess=()=>resolve(q.result);
                           q.onerror=()=>reject(Error('OP_IDB_DENIED'));
                         });
                         if(db.objectStoreNames.contains('credentials')){
                           found=await new Promise(resolve=>{
                             const req=db.transaction('credentials','readonly')
-                              .objectStore('credentials').get(\${JSON.stringify(id)});
+                              .objectStore('credentials').get(${JSON.stringify(id)});
                             req.onsuccess=()=>resolve(!!req.result);
                             req.onerror=()=>resolve(false);
                           });
@@ -1145,7 +1145,7 @@ def main():
                         db.close();
                       }catch{denied=true;}
                       parent.postMessage({nonce,ran:true,found,denied},'*');
-                    })();\`;
+                    })();`;
                     frame.srcdoc='<!doctype html><script>'+inner+'</script>';
                     document.body.append(frame);
                   });
