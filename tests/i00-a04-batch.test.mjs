@@ -180,3 +180,45 @@ test('A04: held intake does not starve healthy batch items; only repaired hold r
  assert.equal(db.keys('meta').filter(k=>k.startsWith('s00-create-slug:')).length,3);
  assert.equal(db.keys('operations').length,0);
 });
+
+test('A04: only archived, unpinned, never-dispatched allocations can rebalance',async()=>{
+ const db=fakeDatabase(),s=createCoordinatorStore(db);
+ const cases=[
+  {id:'auto',state:'OWNER_READBACK_PENDING',pin:null,effect:null,expect:true},
+  {id:'pinned',state:'OWNER_READBACK_PENDING',pin:'account_archive1',effect:null,expect:false},
+  {id:'prepared',state:'CREATE_PREPARED',pin:null,effect:'operation_possible1',expect:false},
+  {id:'uncertain',state:'CREATE_UNCERTAIN',pin:null,effect:'operation_possible2',expect:false},
+  {id:'adoption',state:'ADOPTION_ORIGINAL_PENDING',pin:null,effect:null,expect:false}
+ ];
+ const tx=db.transaction(['meta'],'readwrite');
+ const meta=tx.objectStore('meta');
+ meta.put({key:'account:account_archive1',account:{
+  accountId:'account_archive1',state:'ARCHIVED',revision:4}});
+ for(const x of cases)meta.put({
+  key:'s00-create-intent:intent_'+x.id+'0000',
+  record:{
+   intentId:'intent_'+x.id+'0000',slug:'a04-archive-'+x.id,
+   state:x.state,revision:7,accountId:'account_archive1',
+   accountRevision:4,personaUid:'persona_old',bindingVersion:2,
+   sources:[{type:'OPERATOR',intentId:'intent_'+x.id+'0000',
+     accountId:x.pin}],...(x.effect?{createOperationId:x.effect}:{})
+  }
+ });
+ await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=reject;});
+ for(const x of cases){
+  const id='intent_'+x.id+'0000';
+  const result=await s.requeueArchivedUnattempted(id,7);
+  assert.equal(result.ok,x.expect,x.id+': '+JSON.stringify(result));
+  const saved=db.read('meta','s00-create-intent:'+id).record;
+  assert.equal(saved.state,x.expect?'WAITING_CAPABILITY':x.state);
+  assert.equal(saved.accountId,x.expect?null:'account_archive1');
+  assert.equal(saved.revision,x.expect?8:7);
+ }
+ assert.equal((await s.requeueArchivedUnattempted('intent_auto0000',7)).code,
+   'STALE_REVISION');
+ const t=db.transaction(['meta'],'readwrite');
+ t.objectStore('meta').put({key:'account:account_archive1',
+  account:{accountId:'account_archive1',state:'VERIFIED',revision:5}});
+ await new Promise(resolve=>{t.oncomplete=resolve;});
+ assert.equal((await s.requeueArchivedUnattempted('intent_pinned0000',7)).ok,false);
+});
