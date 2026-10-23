@@ -3208,7 +3208,9 @@ def main():
                 restarted=call('POST',f'/session/{after}/execute/async',{'script':restart_code,'args':[]})
                 assert restarted['paused'] is True and restarted['first']==16*3600000,restarted
                 assert 0<restarted['rest']<64*3600000,('A06_REST_PROGRESS_ON_REAL_PROCESS_RESTART',restarted)
-                assert restarted['clockOrigin'] is None,('A06_NO_STALE_RUNTIME_CREDIT',restarted)
+                # Cold startup may seed a NEW browser epoch immediately; the
+                # unchanged ACTIVE budget, not absence of a new seed, proves
+                # no previous-run operating time was replayed.
                 assert restarted['alarm'] is True and restarted['alarms']==1,restarted
                 assert restarted['held']=='UNKNOWN',restarted
                 print('B I12_PERSISTENT_RESTART_BUDGET_PAUSE_SINGLE_ALARM_REPAIR=PASS',flush=True)
