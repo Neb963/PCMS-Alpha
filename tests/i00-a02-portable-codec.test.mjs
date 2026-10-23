@@ -82,3 +82,30 @@ test('A02 streamed staging cannot assert source closure without independent read
   assert.equal(verified.integrity,'FRAME_AND_SOURCE_VERIFIED');
   assert.equal(verified.diskReadback,false);
 });
+
+test('A02 portable archive retains Persona route/IP history, cookies, scripts, GM data and settings',async()=>{
+  const payload={
+    version:1,
+    settings:{preferredRoute:'mullvad-1',ui:{activeModule:'Refresher'}},
+    routes:[{key:'route-1',sourceId:'mullvad-1',route:{
+      id:'mullvad-1',provider:'mullvad',host:'10.124.18.5',
+      observedExitHistory:[{ip:'198.51.100.42',country:'PL',revision:3}]}}],
+    personas:[{key:'persona-1',sourceId:'firefox-container-1',
+      profile:{personaUid:'11111111-1111-4111-8111-111111111111',
+        routeKey:'route-1',scriptKeys:['script-1'],name:'Portable fixture'}}],
+    scripts:[{key:'script-1',sourceId:'userscript-one',script:{name:'Script One'},
+      code:'// exact fixture source\noutput = 1;'}],
+    workflows:[],
+    cookies:{'persona-1':[{name:'session',
+      value:'synthetic-cookie-only',domain:'.example.invalid',path:'/'}]},
+    gmValues:{'script-1':{configuration:{active:true,sequence:3}}},
+    automationHistory:[{id:'fixture-history',status:'HELD',at:'2026-10-22T09:00:00Z'}]
+  };
+  const archived=await encodePortableArchive({pcms:baseline(),donor:payload});
+  const restored=await readPortableArchive(archived.blob);
+  assert.deepEqual(restored.donor,payload);
+  assert.equal(restored.donor.routes[0].route.observedExitHistory[0].ip,'198.51.100.42');
+  assert.equal(restored.donor.cookies['persona-1'][0].value,'synthetic-cookie-only');
+  assert.equal(restored.donor.scripts[0].code,payload.scripts[0].code);
+  assert.equal(restored.donor.gmValues['script-1'].configuration.sequence,3);
+});
