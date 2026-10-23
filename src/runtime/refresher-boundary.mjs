@@ -4,6 +4,7 @@ import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId,createCanonica
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 import {createRefresherStore} from './refresher-store.mjs';
+import {backfillLegacyAdoptions} from './refresher-adopted.mjs';
 import {MINUTE} from './refresher-core.mjs';
 import {qualifyRecentAbsence} from './refresher-admission.mjs';
 import {createNoticeDispatcher} from './notices.mjs';
@@ -342,6 +343,12 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       try{
         if((await sentinel.inspect()).held){await safeBreadcrumb(null,'RESTORE_HOLD');return fail('RESTORE_HOLD');}
         const s=await store();
+        // Passive additive migration of previously adopted public originals.
+        // Independent hashing and CAS occur outside scheduler transactions;
+        // changed/corrupt snapshots stay held, never promoted by timestamps.
+        try{if(!(await sentinel.inspect()).held)
+          await backfillLegacyAdoptions(await dbPromise);}
+        catch{/* migration failure never disables monitoring or grants a write */}
         let nativeClock=null,qualifiedCoverages=null,turnReadiness=null,browserClock=null;
         if(browserClockGate()){
           // The elapsed monotonic clock is meaningful only inside this one
