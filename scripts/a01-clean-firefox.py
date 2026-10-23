@@ -106,7 +106,7 @@ def main():
                 if opened:break
                 time.sleep(.15)
             assert opened,'A04_PRIMARY_CREATOR_UNAVAILABLE'
-            slugs='\\n'.join('a04-installed-fixture-'+str(i).zfill(4) for i in range(110))
+            slugs='\n'.join('a04-installed-fixture-'+str(i).zfill(4) for i in range(110))
             submitted=mod.execute(session,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
               const input=sh.querySelector('.drawer-overlay textarea');
               const action=sh.querySelector('.drawer-overlay button.btn.primary');
