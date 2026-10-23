@@ -400,5 +400,5 @@ export function createAdoptionStore(db){
       };
     });
   }
-  return Object.freeze({get,list,adopt,archiveLocal,getFull,archiveStage,confirmCheckpoint});
+  return Object.freeze({get,list,adopt,recheckIdentity,archiveLocal,getFull,archiveStage,confirmCheckpoint});
 }
