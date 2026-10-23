@@ -3251,7 +3251,7 @@ def main():
                       before.revision===after.revision&&
                       before.state.revision===after.state.revision&&
                       result.ok&&result.refreshCapability==='OPERATOR_MUTATION_DISABLED'&&
-                      result.clockCapability==='BOUNDED_NATIVE_ROUTE_FEED_ELIGIBILITY'&&
+                      result.clockCapability==='BROWSER_MONOTONIC_ROUTE_FEED_ELIGIBILITY'&&
                       core.qualifyRefreshCandidate(null).ok===false,
                       beforeRows:before.state.rows.length,
                       denied:denied.code,capability:result.refreshCapability,
