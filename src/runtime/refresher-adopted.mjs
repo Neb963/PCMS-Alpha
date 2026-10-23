@@ -94,7 +94,9 @@ function backfillOne(db,entry,verified){
 }
 // Called only by guarded background alarm; a failed candidate does not open
 // source-writing authority. Limit cryptographic and IDB work per wake.
-export async function backfillLegacyAdoptions(db,{limit=2}={}){
+export async function backfillLegacyAdoptions(db,{limit=2,shouldHold=async()=>false}={}){
+  if(typeof shouldHold!=='function')return invalid('MIGRATION_HOLD_CHECK_INVALID');
+  if(await shouldHold())return invalid('RESTORE_HOLD');
   if(!Number.isSafeInteger(limit)||limit<1||limit>2)
     return invalid('MIGRATION_BATCH_INVALID');
   const candidates=await scanLegacy(db,limit);
@@ -104,6 +106,7 @@ export async function backfillLegacyAdoptions(db,{limit=2}={}){
     try{proof=await certifyLegacyAdoptionOriginal(candidate.original);}
     catch{proof=invalid('ORIGINAL_BYTES_INVALID');}
     if(!proof.ok){held++;continue;}
+    if(await shouldHold())return {ok:false,code:'RESTORE_HOLD',migrated,held};
     try{
       const written=await backfillOne(db,candidate,proof);
       written.ok?migrated++:held++;
