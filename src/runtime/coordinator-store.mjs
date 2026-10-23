@@ -182,6 +182,43 @@ export function createCoordinatorStore(db){
       };
     });
   }
+  // A04: archive frees only an unpinned, never-dispatched automatic
+  // allocation. This transaction verifies both canonical revisions; a
+  // possible CREATE/RENAME, explicitly pinned account or owned target must
+  // never be redirected to another Persona.
+  function requeueArchivedUnattempted(intentId,expectedRevision){
+    if(!isSafeId(intentId)||!Number.isSafeInteger(expectedRevision)||
+       expectedRevision<1)return Promise.resolve(fail('INVALID_REALLOCATION'));
+    return transact(db,'readwrite',(tx,finish)=>{
+      const meta=tx.objectStore('meta');
+      meta.get(key(intentId)).onsuccess=e=>{
+        const item=e.target.result?.record;
+        if(!item){finish(fail('INTENT_NOT_FOUND'));return;}
+        if(item.revision!==expectedRevision){finish(fail('STALE_REVISION'));return;}
+        if(item.state!=='OWNER_READBACK_PENDING'||item.pinConflict||
+           item.sourceDrift||!item.accountId||item.createOperationId||
+           item.renameOperationId||item.gitOperationId||item.activeOperationId||
+           item.sources?.some(s=>s.type==='OPERATOR'&&s.accountId)){
+          finish(fail('ALLOCATION_NOT_REDISTRIBUTABLE'));return;
+        }
+        meta.get('account:'+item.accountId).onsuccess=acc=>{
+          const account=acc.target.result?.account;
+          if(!account||account.state!=='ARCHIVED'){
+            finish(fail('ACCOUNT_NOT_ARCHIVED'));return;
+          }
+          const next={...item,revision:item.revision+1,state:'WAITING_CAPABILITY',
+            hold:'ARCHIVED_ACCOUNT_REQUIRES_REBALANCE',
+            accountId:null,accountRevision:null,personaUid:null,
+            bindingVersion:null,allocation:null};
+          meta.put({key:key(intentId),record:next});
+          tx.objectStore('events').add({stage:'A04_ARCHIVED_NEVER_DISPATCHED_REQUEUED',
+            intentId,slug:item.slug,previousAccountId:account.accountId,
+            revision:next.revision,providerEffects:'OFF'});
+          finish({ok:true,record:next,providerEffects:'OFF'});
+        };
+      };
+    });
+  }
   function stageEffect({intentId,expectedRevision,event,proof={}}){
     if(!isSafeId(intentId)||!Number.isSafeInteger(expectedRevision)||
        expectedRevision<1)return Promise.resolve(fail('INVALID_STAGE_REQUEST'));
@@ -508,6 +545,6 @@ export function createCoordinatorStore(db){
     return decision.ok?{...decision,providerEffects:'OFF',
       code:'S04_CREATION_ACTIVATION_HELD'}:decision;
   }
-  return Object.freeze({acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,stageEffect,stageGit,confirmAdoption,advanceCreate,
+  return Object.freeze({acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,stageEffect,stageGit,confirmAdoption,advanceCreate,requeueArchivedUnattempted,
     ...createBatchStore(db,{acceptCreate})});
 }
