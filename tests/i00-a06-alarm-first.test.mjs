@@ -36,7 +36,7 @@ test('A06: packaged Firefox I14 inline test JavaScript is syntactically valid be
   const {readFile}=await import('node:fs/promises');
   const {Script}=await import('node:vm');
   const python=await readFile(new URL('../scripts/browser-i00-smoke.py',import.meta.url),'utf8');
-  const match=python.match(/i14_code="""([\\s\\S]*?)"""/);
+  const match=python.match(/i14_code="""([\s\S]*?)"""/);
   assert.ok(match,'Firefox I14 source-denial test is present');
   assert.doesNotThrow(()=>new Script(match[1],{filename:'I14-packaged-script'}));
 });
