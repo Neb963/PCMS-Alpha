@@ -176,6 +176,23 @@ export function createPortableRunner(api,{
       let url=null,runId=null,possible=false,receipt=null;
       try{
         if((await sentinel.inspect()).held)return fail('BACKUP_RESTORE_HOLD');
+        // A prior possible download must be observed before another local
+        // export. A lost browser ACK is not evidence that nothing happened.
+        const previous=await readManual();
+        if(previous&&['DISPATCH_POSSIBLE','DOWNLOAD_STARTED','HELD_UNCERTAIN']
+          .includes(previous.status)){
+          if(previous.status==='DOWNLOAD_STARTED'&&
+             Number.isSafeInteger(previous.downloadId)){
+            const proof=await manualReceipt(api.downloads,previous.downloadId,
+              previous.bytes);
+            if(!proof)return fail('MANUAL_DOWNLOAD_UNCERTAIN');
+            await recordManual({...previous,status:'BROWSER_REPORTED_COMPLETE',
+              code:'BROWSER_REPORTED_COMPLETE',tier:2});
+          }else return fail('MANUAL_DOWNLOAD_UNCERTAIN');
+        }
+        if(previous&&['PREPARING','INTERNAL_VERIFIED'].includes(previous.status)&&
+          clock()-(previous.updatedAt||previous.startedAt||clock())<keepAliveMs)
+          return fail('BACKUP_INFLIGHT');
         runId='manual_'+nextId();
         await recordManual({runId,status:'PREPARING',tier:0,
           startedAt:clock(),code:'PREPARING'});
