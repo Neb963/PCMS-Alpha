@@ -54,7 +54,7 @@ export function canonicalRefresherInputs(records){
     // admission. The guarded writer independently rereads owner/source
     // before every actual save and blocks a dirty or changed public source.
     const original=adopt?.original;
-    const adopted=matched&&row.ownerState==='OBSERVED_OWNER'&&
+    const adopted=matched&&!!adopt&&row.ownerState==='OBSERVED_OWNER'&&
       row.visibility==='PUBLIC'&&!adopt.archived&&
       adopt.accountId===row.accountId&&adopt.personaUid===row.personaUid&&
       adopt.bindingVersion===row.bindingVersion&&
