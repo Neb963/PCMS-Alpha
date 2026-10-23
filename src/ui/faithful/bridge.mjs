@@ -587,30 +587,78 @@ function openGeneratorCreator(){
  }
  accountLabel.append(choice);body.append(accountLabel);
  const status=el('p','setting-note','No creation request has been submitted.');status.setAttribute('role','status');
- const submit=b('Create private generators',()=>{
-  const slugs=[...new Set(input.value.split(/[\s,;]+/).map(x=>x.trim()).filter(Boolean))];
-  if(!slugs.length||slugs.length>100||slugs.some(x=>!/^[a-z0-9][a-z0-9-]{0,99}$/.test(x))){
-   status.textContent='Enter 1–100 valid lowercase generator names using letters, numbers and hyphens.';return;
-  }
-  const pinned=choice.value||null;submit.disabled=true;input.disabled=true;choice.disabled=true;
-  status.textContent='Saving the creation requests. No unverified remote effects are being claimed.';
-  void (async()=>{
-   let accepted=0,uncertain=0;const rejected=[];
-   for(const slug of slugs){
-    const intentId='ui_'+crypto.randomUUID().replaceAll('-','');
-    try{
-     const out=await readPort('pcms-s00-coordinator','ACCEPT_CREATE_INTENT',{
-      intentId,slug,origin:'OPERATOR',...(pinned?{accountId:pinned}:{})},20000);
-     if(out?.ok&&out.record?.slug===slug)accepted++;
-     else rejected.push(slug);
-    }catch{uncertain++;}
+ const batchStatus=el('div','setting-note');
+ batchStatus.setAttribute('aria-label','Recent background creation requests');
+ body.append(batchStatus);
+ async function showBatches(){
+  try{
+   const out=await readPort('pcms-s00-coordinator','LIST_CREATE_BATCHES',{limit:20},12000);
+   if(!out?.ok){batchStatus.textContent='Batch status unavailable.';return;}
+   batchStatus.replaceChildren(el('strong','','Recent durable requests'));
+   for(const batch of out.items.slice(-10).reverse()){
+    batchStatus.append(el('p','setting-note',
+      batch.batchId.slice(-8)+': '+batch.processed+'/'+batch.total+
+      ' queued in the canonical create queue · '+batch.state+
+      (batch.state==='INGESTING'?' ('+batch.appended+'/'+batch.total+' input persisted; not finalized)':'')));
    }
-   status.textContent=accepted+' generator request(s) saved'+
-     (uncertain?' · '+uncertain+' have unknown acknowledgment; do not resubmit until checked':'')+
-     (rejected.length?' · '+rejected.length+' held':'')+
-     '. Protected creation and Git association continue through the background queue.';
-   try{await browser.alarms.create('pcms-s04-creation-followup',{when:Date.now()+1000})}catch{}
-   await loadGenerators();submit.disabled=false;input.disabled=false;choice.disabled=false;
+  }catch{batchStatus.textContent='Batch status unavailable; canonical receipts remain stored.';}
+ }
+ void showBatches();
+ const submit=b('Create private generators',()=>{
+  const slugs=[...new Set(input.value.split(/[\\s,;]+/).map(x=>x.trim()).filter(Boolean))];
+  if(!slugs.length||slugs.some(x=>!/^[a-z0-9][a-z0-9-]{0,99}$/.test(x))){
+   status.textContent='Enter valid lowercase generator names using letters, numbers and hyphens.';return;
+  }
+  const pinned=choice.value||null;
+  const batchId='batch_'+crypto.randomUUID().replaceAll('-','');
+  submit.disabled=true;input.disabled=true;choice.disabled=true;
+  status.textContent='Submitting '+slugs.length+' requests into persistent storage. Creation has not yet been confirmed.';
+  void (async()=>{
+   let appended=0;
+   try{
+    const begun=await readPort('pcms-s00-coordinator','BEGIN_CREATE_BATCH',{
+      batchId,total:slugs.length,...(pinned?{accountId:pinned}:{})},20000);
+    if(!begun?.ok)throw Error(begun?.code||'BATCH_BEGIN_UNCONFIRMED');
+    for(let offset=0;offset<slugs.length;offset+=32){
+     const chunk=slugs.slice(offset,offset+32);
+     let out;
+     try{out=await readPort('pcms-s00-coordinator','APPEND_CREATE_BATCH',{
+       batchId,offset,slugs:chunk},20000);}catch{
+       // Lost acknowledgement is reconciled by read-only persisted cursor.
+       const check=await readPort('pcms-s00-coordinator','GET_CREATE_BATCH',{batchId},12000);
+       if(check?.ok&&check.batch.appended>=offset+chunk.length)
+        out={ok:true};
+       else throw Error('BATCH_CHUNK_ACK_UNCERTAIN');
+     }
+     if(!out?.ok)throw Error(out?.code||'BATCH_CHUNK_HELD');
+     appended=offset+chunk.length;
+     status.textContent='Persisted '+appended+' of '+slugs.length+
+       ' input requests; not yet finalized.';
+    }
+    let finalized;
+    try{finalized=await readPort('pcms-s00-coordinator','FINALIZE_CREATE_BATCH',
+      {batchId},20000);}catch{
+      const check=await readPort('pcms-s00-coordinator','GET_CREATE_BATCH',{batchId},12000);
+      if(check?.ok&&check.batch.state!=='INGESTING')finalized=check;
+      else throw Error('BATCH_FINALIZATION_ACK_UNCERTAIN');
+    }
+    if(!finalized?.ok||finalized.batch?.state==='INGESTING')
+      throw Error(finalized?.code||'BATCH_NOT_FINALIZED');
+    status.textContent=slugs.length+' generator requests durably queued (batch '+
+      batchId.slice(-8)+'). Background work continues with this page closed; '+
+      'individual creation requires protected readback.';
+    try{await browser.alarms.create('pcms-s04-creation-followup',
+      {when:Date.now()+1000})}catch{}
+    await loadGenerators();
+   }catch(error){
+    status.textContent='Input not confirmed as a complete batch ('+
+      String(error?.message||'BATCH_UNAVAILABLE')+'). '+appended+
+      ' of '+slugs.length+' names were persisted. Batch '+batchId+
+      ' can be inspected; no remote create success is implied.';
+   }finally{
+    submit.disabled=false;input.disabled=false;choice.disabled=false;
+    await showBatches();
+   }
   })();
  },'btn primary');
  body.append(submit,status);drawer.append(body);backdrop.append(drawer);root.append(backdrop);
