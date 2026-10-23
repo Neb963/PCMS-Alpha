@@ -48,8 +48,14 @@ test('A02 credential-bearing canonical meta rows excluded, independent of tokens
   assert.ok(isExcludedCredential('meta','pcmsGitCredential'));
   assert.equal(isExcludedCredential('entities','pcmsGitCredential'),false);
   const pcms=baseline();pcms.stores.meta.push({key:'git:token',value:'fixture-token'});
-  await assert.rejects(()=>encodePortableArchive({pcms,donor:donor()}),
-    /PORTABLE_SECRET_ROW_PRESENT/);
+  pcms.stores.meta.push({key:'public:settings',value:{policy:'preserve'}});
+  const result=await encodePortableArchive({pcms,donor:donor()});
+  const text=await result.blob.text();
+  assert.equal(text.includes('fixture-token'),false);
+  const decoded=await readPortableArchive(result.blob);
+  assert.equal(decoded.canonical.stores.meta.length,1);
+  assert.equal(decoded.canonical.stores.meta[0].key,'public:settings');
+  assert.equal(decoded.integrity,'FRAME_AND_SOURCE_VERIFIED');
 });
 test('A02 streaming decoder handles multi-frame records and keeps records staged until footer',async()=>{
   const pcms=baseline();
