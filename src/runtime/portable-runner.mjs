@@ -176,6 +176,7 @@ export function createPortableRunner(api,{
     if(manualTask||pending)return fail('BACKUP_INFLIGHT');
     manualTask=(async()=>{
       let url=null,runId=null,possible=false,receipt=null;
+      let verifiedBytes=null,verifiedSha256=null;
       try{
         if((await sentinel.inspect()).held)return fail('BACKUP_RESTORE_HOLD');
         // A prior possible download must be observed before another local
@@ -203,6 +204,7 @@ export function createPortableRunner(api,{
           startedAt:clock(),code:'PREPARING'});
         const archive=await capture(api,await db(),sentinel);
         const fileHash=await sha(archive.blob);
+        verifiedBytes=archive.bytes;verifiedSha256=fileHash;
         await recordManual({runId,status:'INTERNAL_VERIFIED',tier:1,
           sha256:fileHash,bytes:archive.bytes,startedAt:clock()});
         if((await sentinel.inspect()).held)throw Error('BACKUP_RESTORE_HOLD');
@@ -226,8 +228,12 @@ export function createPortableRunner(api,{
       }catch(e){
         if(runId){
           const code=possible?'DOWNLOAD_OUTCOME_UNKNOWN':explain(e);
+          // Preserve the independently verified size/digest even when the
+          // Downloads API reports interruption or its ACK is lost. Without
+          // these fields subsequent read-only reconciliation is impossible.
           try{await recordManual({runId,status:possible?'HELD_UNCERTAIN':'FAILED',
-            tier:0,downloadId:receipt?.downloadId??null,code});}catch{}
+            tier:possible?1:0,bytes:verifiedBytes,sha256:verifiedSha256,
+            downloadId:receipt?.downloadId??null,code});}catch{}
         }
         return fail(possible?'DOWNLOAD_OUTCOME_UNKNOWN':explain(e));
       }finally{if(url)URL.revokeObjectURL(url);}
