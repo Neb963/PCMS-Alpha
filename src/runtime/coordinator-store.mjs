@@ -6,6 +6,7 @@ import {transitionCreateIntent} from './coordinator-core.mjs';
 import {coalesceCreation,validateGitCreationWitness} from './creation-intake.mjs';
 import {selectS04Account} from './creation-allocation.mjs';
 import {advanceS04Effect} from './creation-effects.mjs';
+import {createBatchStore} from './creation-batch.mjs';
 const key=id=>'s00-create-intent:'+id;
 const slugKey=slug=>'s00-create-slug:'+slug;
 function transact(db,mode,schedule){
@@ -507,5 +508,6 @@ export function createCoordinatorStore(db){
     return decision.ok?{...decision,providerEffects:'OFF',
       code:'S04_CREATION_ACTIVATION_HELD'}:decision;
   }
-  return Object.freeze({acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,stageEffect,stageGit,confirmAdoption,advanceCreate});
+  return Object.freeze({acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,stageEffect,stageGit,confirmAdoption,advanceCreate,
+    ...createBatchStore(db,{acceptCreate})});
 }
