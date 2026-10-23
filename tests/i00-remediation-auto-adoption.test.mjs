@@ -8,7 +8,7 @@ const fp='a'.repeat(64);
 const account={accountId:'account_0001',personaUid:'persona-01234567',revision:3,
   bindingVersion:2,state:'VERIFIED',identity:{source:'GUARDED_SESSION_READBACK',bindingVersion:2,principalFingerprint:fp}};
 const gen=(slug,visibility='PUBLIC',extra={})=>({slug,accountId:account.accountId,personaUid:account.personaUid,
-  accountRevision:3,bindingVersion:2,revision:4,ownerState:'OBSERVED_OWNER',visibility,remoteId:'r_'+slug,...extra});
+  accountRevision:3,bindingVersion:2,revision:4,ownerState:'OBSERVED_OWNER',visibility,remoteId:'slug-'+slug,...extra});
 // The fake IDB stores add() rows under auto keys; find records by content.
 const adoptionOf=(db,slug)=>db.keys('meta').map(k=>db.read('meta',k)).find(v=>v?.adoption?.slug===slug)?.adoption;
 async function seed(db,rows){

@@ -1,3 +1,4 @@
+import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I09 private-only stage orchestration. UI cannot supply tab ids, page code,
 // source bytes, route or operation proof. There is NO automatic retry of a
 // possible provider write, including after a Firefox restart.
@@ -76,7 +77,7 @@ const recordContext=r=>({slug:r.slug,accountId:r.accountId,personaUid:r.personaU
 export function createStagingBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,inspect=inspectGitSource,
   scanCatalog=scanMainCatalog,inspectReady=inspectReadyCandidate,
-  native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
+  native=p=>browserGitCredentialPacket(p),
   // Packaged provider capability remains locked until current guarded editor
   // contract is independently proven and operator activation is authorized.
   effectGate=()=>false,storeFactory=createStagingStore,

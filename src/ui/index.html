@@ -179,13 +179,13 @@
         </section>
         <section class="panel" aria-labelledby="pcms-source-heading">
           <div class="panel-head"><h2 id="pcms-source-heading">Private Git source — read only</h2><span class="unknown">Operator-triggered</span></div>
-          <p class="reason">Inspect only <code>Neb963/per-gens</code> <code>main</code>. Uses the GitHub connection stored once in Settings (OS Secret Service vault); a typed token is only an optional override and is never saved. No remote Git initialization, commit, asset rewrite or publication is available.</p>
+          <p class="reason">Inspect only <code>Neb963/per-gens</code> <code>main</code>. Uses the GitHub connection stored once in Settings (Firefox extension storage); a typed token is only an optional override and is never saved. No remote Git initialization, commit, asset rewrite or publication is available.</p>
           <div class="account-controls"><label for="pcms-source-target">Generator</label>
             <input id="pcms-source-target" readonly placeholder="Choose a generator from inventory" aria-describedby="pcms-source-status">
             <label for="pcms-source-folder">Source folder</label><input id="pcms-source-folder" placeholder="gens/example or another configured root" maxlength="240" autocomplete="off">
           </div>
           <div class="account-controls"><label for="pcms-source-token">Git token override (optional)</label>
-            <input id="pcms-source-token" type="password" autocomplete="off" spellcheck="false" placeholder="Uses connected GitHub vault">
+            <input id="pcms-source-token" type="password" autocomplete="off" spellcheck="false" placeholder="Uses connected GitHub credential">
             <button type="button" id="pcms-source-clear">Clear token</button>
             <button type="button" id="pcms-source-inspect">Inspect HEAD</button>
             <button type="button" id="pcms-source-associate" disabled>Confirm association</button>
@@ -203,7 +203,7 @@
         <section class="panel" aria-labelledby="pcms-supply-queue-title"><div class="panel-head"><h2 id="pcms-supply-queue-title">Frozen supply batches</h2><span class="unknown">Canonical local receipts</span></div><div id="pcms-supply-queue" role="status" aria-live="polite">Loading local batches.</div></section>
         <section class="panel" aria-labelledby="pcms-writeback-heading">
           <div class="panel-head"><h2 id="pcms-writeback-heading">Conditional Git writeback</h2><span class="unknown">Git permission required · Publication separate</span></div>
-          <p class="reason">Manual or opt-in automatic source commit. Ordinary automatic writeback after tests runs in the background using the connected GitHub vault credential (Settings → Automatic Git writeback). A verified final generator source and independent tests are required. Preview paths, additions, changes and deletions before preparing a conditional Git commit. A lost effect acknowledgment requires read-only reconciliation, never a blind second commit.</p>
+          <p class="reason">Manual or opt-in automatic source commit. Ordinary automatic writeback after tests runs in the background using the connected GitHub credential (Settings → Automatic Git writeback). A verified final generator source and independent tests are required. Preview paths, additions, changes and deletions before preparing a conditional Git commit. A lost effect acknowledgment requires read-only reconciliation, never a blind second commit.</p>
           <div class="account-controls">
             <label for="pcms-writeback-slug">Exact staged slug</label><input id="pcms-writeback-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="private-generator">
             <label for="pcms-writeback-token">Git token override (optional — uses connected GitHub)</label><input id="pcms-writeback-token" type="password" autocomplete="off" spellcheck="false">
@@ -262,7 +262,7 @@
           <div id="pcms-s06-review-queue" role="region" aria-label="Pending, blocked and ready publication candidates" aria-live="polite"></div>
           <div class="account-controls">
             <label for="pcms-release-slug">Generator to review</label><input id="pcms-release-slug" maxlength="100" spellcheck="false" autocomplete="off" placeholder="generator">
-            <label for="pcms-release-token">Optional Git credential override (normally from protected vault)</label><input id="pcms-release-token" type="password" autocomplete="off" spellcheck="false">
+            <label for="pcms-release-token">Optional Git credential override (normally from browser credential storage)</label><input id="pcms-release-token" type="password" autocomplete="off" spellcheck="false">
           </div>
           <div class="account-controls">
             <button id="pcms-release-preview" type="button">Review source changes and tests</button>

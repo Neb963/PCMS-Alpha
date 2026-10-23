@@ -1,3 +1,4 @@
+import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I13 existing-generator guarded orchestration. No credentials in canonical
 // state, no UI-defined payloads, no effect without durable dispatch marker.
 // One local transaction before each remote action; all reconciliation read-only.
@@ -109,7 +110,7 @@ export function createExistingBoundary(api,{
   existingFactory=createExistingStore,stageFactory=createStagingStore,
   inspect=inspectGitSource,inspectReady=inspectReadyCandidate,
   scanCatalog=scanMainCatalog,
-  native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
+  native=p=>browserGitCredentialPacket(p),
   effectGate=()=>false
 }={}){
   let promise;

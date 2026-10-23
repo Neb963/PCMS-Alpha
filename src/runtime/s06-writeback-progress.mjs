@@ -1,3 +1,4 @@
+import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // S06: use the existing S03/S05 background alarm, not a second scheduler.
 // All Git credentials are retrieved on demand from native Secret Service.
 // Only exact S05 TESTS_VERIFIED F is eligible. A lost Git ACK is *observed*;
@@ -106,7 +107,7 @@ export function planS06Writeback({ready,stage,job,writeback,exception}={}){
 }
 export function createS06WritebackProgress(api,{
   open=openCanonicalDatabase,effectGate=()=>false,
-  native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
+  native=p=>browserGitCredentialPacket(p),
   makeBoundary=(db)=>createWritebackBoundary(api,{open:async()=>db,
     effectGate:ctx=>effectGate({phase:'S06',step:ctx.step||'GIT_WRITE',slug:ctx.record?.slug})}),
   maxCandidates=100

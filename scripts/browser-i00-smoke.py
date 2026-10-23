@@ -432,7 +432,10 @@ def source_idb_probe(session):
       const boundary=createSourceBoundary(api,{inspect});
       const get=(slug)=>boundary.run({type:'GET_ASSOCIATION',params:{slug}},sender);
       const bind=(slug)=>boundary.run({type:'ASSOCIATE_SOURCE',params:{
-        slug,folder:'gens/a',token:'offline-fixture-token',expectedRevision:1,
+        slug,folder:'gens/a',token:'offline-fixture-token',
+        // A03 adoption upgraded gen-0999 from a slug locator to an
+        // independently verified public ID in the canonical IDB transaction.
+        expectedRevision:slug==='gen-0999'?2:1,
         pinnedHead:'b'.repeat(40),pinnedFingerprint:'a'.repeat(64),
         pinnedTestingSha:null
       }},sender);
@@ -527,7 +530,9 @@ def inventory_idb_probe(session):
           observationId:'fixture_identity_01'}});
       const items=Array.from({length:1250},(_,i)=>({
         slug:'gen-'+String(i).padStart(4,'0'),
-        remoteId:'remote-'+String(i).padStart(8,'0'),
+        // This generator is a legacy slug-only observation to be independently
+        // upgraded by the later I07 protected full-source public-ID readback.
+        remoteId:i===999?'slug-gen-0999':'remote-'+String(i).padStart(8,'0'),
         ownerResult:'IS_OWNER',ownerObservationId:'owner_proof_01',
         ownerPrincipalFingerprint:fingerprint,visibility:'UNLISTED'
       }));
@@ -1069,6 +1074,99 @@ def main():
                 diagnostic=execute(after,"return {present:!!document.getElementById('pcms-diagnostic-run'),configured:!!document.getElementById('pcms-diagnostic-designate'),stages:!!document.getElementById('pcms-diagnostic-stages'),ready:!!document.getElementById('pcms-s06-grant-development')}")
                 assert all(diagnostic.values()),diagnostic
                 print('B S08_INSTALLED_FULL_DASHBOARD_ACTION_AND_DIAGNOSTIC_CONTROLS=PASS',flush=True)
+                # A03 B: use the actual installed Firefox extension origin,
+                # real IndexedDB, no network/private Git/PCMS native host.
+                a03_script="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const {createBrowserGitCredentialStore,GIT_SECRET_DATABASE,
+                    browserGitCredentialPacket}=await import('./git-local-secret.mjs');
+                  const store=createBrowserGitCredentialStore();
+                  const id='987654321',token='github_pat_'+('q'.repeat(44));
+                  const saved=await store.put(id,token);
+                  const reopened=createBrowserGitCredentialStore();
+                  const observed=await reopened.get(id);
+                  const status=await reopened.status(id);
+                  const invalid=await browserGitCredentialPacket({
+                    action:'git.dump',repositoryId:id},reopened);
+                  // Even the trusted dashboard cannot retrieve Git secrets
+                  // using any public port operation.
+                  const deniedPort=await new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-s03-catalog'});
+                    port.onMessage.addListener(v=>{
+                      try{port.disconnect()}catch{}
+                      resolve(v);
+                    });
+                    port.onDisconnect.addListener(()=>resolve({ok:false,code:'PORT_CLOSED'}));
+                    port.postMessage({type:'GET_CREDENTIAL',params:{repositoryId:id}});
+                  });
+                  const local=await browser.storage.local.get(null);
+                  const excluded=!JSON.stringify(local).includes(token);
+                  const removed=await reopened.remove(id);
+                  const missing=await store.get(id);
+                  // Leave a second verified fixture secret for the genuine OS
+                  // Firefox shutdown/relaunch assertion below.
+                  const restored=await store.put(id,token);
+                  done({ok:saved.ok&&observed.ok&&observed.token===token&&
+                    status.present===true&&invalid.code==='DENIED'&&
+                    deniedPort.ok===false&&
+                    !JSON.stringify(deniedPort).includes(token)&&excluded&&
+                    removed.ok&&missing.code==='GIT_RECONNECT_REQUIRED'&&restored.ok,
+                    excluded,reopened:observed.ok,removed:removed.ok,
+                    database:GIT_SECRET_DATABASE});
+                })().catch(e=>done({ok:false,error:String(e).slice(0,190)}));"""
+                a03_probe=call('POST',f'/session/{after}/execute/async',
+                    {'script':a03_script,'args':[]},timeout=30)
+                assert a03_probe.get('ok') is True,('A03_FIREFOX_IDB_FAILURE',a03_probe)
+                assert a03_probe['database']=='pcms-private-git-credentials-v1',a03_probe
+                # Inspect a REAL distinct web-document principal using the
+                # CI WebDriver controller. The sandbox's inline JS is blocked
+                # by the extension CSP, so execute from Marionette in-frame.
+                # No extension content-script permission or donor-route
+                # exception is granted; this is narrower than content-script B.
+                a03_frame=execute(after,"""const frame=document.createElement('iframe');
+                  frame.id='pcms-a03-opaque-fixture';
+                  frame.setAttribute('sandbox','allow-scripts');
+                  frame.srcdoc='<!doctype html><title>A03 isolated document</title>';
+                  document.body.append(frame);
+                  return {mounted:!!document.getElementById('pcms-a03-opaque-fixture')};""")
+                assert a03_frame['mounted'],a03_frame
+                a03_el=call('POST',f'/session/{after}/element',{
+                    'using':'css selector','value':'#pcms-a03-opaque-fixture'})
+                try:
+                    call('POST',f'/session/{after}/frame',{'id':a03_el})
+                    a03_isolation=call('POST',f'/session/{after}/execute/async',{
+                        'script':"""const done=arguments[arguments.length-1];
+                        (async()=>{
+                          let found=false,denied=false;
+                          try{
+                            const db=await new Promise((resolve,reject)=>{
+                              const req=indexedDB.open('pcms-private-git-credentials-v1');
+                              req.onsuccess=()=>resolve(req.result);
+                              req.onerror=()=>reject(Error('ISOLATED_IDB_DENIED'));
+                            });
+                            if(db.objectStoreNames.contains('credentials')){
+                              found=await new Promise(resolve=>{
+                                const q=db.transaction('credentials','readonly')
+                                  .objectStore('credentials').get('987654321');
+                                q.onsuccess=()=>resolve(!!q.result);
+                                q.onerror=()=>resolve(false);
+                              });
+                            }
+                            db.close();
+                          }catch{denied=true;}
+                          done({ran:true,origin:location.origin,found,denied});
+                        })().catch(e=>done({ran:false,error:String(e)}));""",
+                        'args':[]},timeout=30)
+                finally:
+                    call('POST',f'/session/{after}/frame',{'id':None})
+                    execute(after,"document.getElementById('pcms-a03-opaque-fixture')?.remove();return true")
+                assert a03_isolation=={'ran':True,'origin':'null',
+                    'found':False,'denied':True},('A03_SANDBOX_ISOLATION_FAILURE',a03_isolation)
+
+                print('B A03_INSTALLED_FIREFOX_INDEXEDDB_SECRET_READBACK_AND_EXCLUSION=PASS',flush=True)
+                print('B A03_SANDBOX_WEB_DOCUMENT_DENIED_EXTENSION_GIT_DATABASE=PASS',flush=True)
+                print('B A03_REAL_CONTENT_SCRIPT_INJECTION=NOT_TESTED_ROUTING_HOLD',flush=True)
+
                 # v0.1.4 B evidence: verify the actual installed XPI dashboard.
                 # This tests real packaged assets/DOM and presentation actions
                 # without sending any provider, Git or local mutation command.
@@ -1211,8 +1309,9 @@ def main():
                         hasGit:rows.some(r=>r.querySelector('strong')?.textContent==='GitHub access'&&
                           r.textContent.includes('Not checked')&&
                           r.querySelector('details')?.textContent.includes('AUTH_CHECK_NOT_REQUESTED')),
-                        hasHost:rows.some(r=>r.querySelector('strong')?.textContent==='GitHub credential helper'&&
-                          r.querySelector('details')?.textContent.includes('NATIVE_')),
+                        hasHost:rows.some(r=>r.querySelector('strong')?.textContent==='Firefox Git credential storage'&&
+                          r.querySelector('details')?.textContent.includes('LOCAL_GIT_'))&&
+                          !rows.some(r=>r.querySelector('strong')?.textContent==='GitHub credential helper'),
                         readable:rows.every(r=>r.querySelector('strong')&&
                           !r.querySelector('strong').textContent.includes('_')&&
                           !!r.querySelector('details summary')&&
@@ -3109,6 +3208,28 @@ def main():
                 assert restarted['alarm'] is True and restarted['alarms']==1,restarted
                 assert restarted['held']=='UNKNOWN',restarted
                 print('B I12_PERSISTENT_RESTART_BUDGET_PAUSE_SINGLE_ALARM_REPAIR=PASS',flush=True)
+                # A03 H: same installed Gecko ID / original Firefox profile,
+                # but NEW OS process. Browser-only Git credential survives;
+                # we delete this disposable fixture only after readback.
+                a03_relaunch="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const {createBrowserGitCredentialStore}=await import('./git-local-secret.mjs');
+                  const store=createBrowserGitCredentialStore();
+                  const id='987654321',token='github_pat_'+('q'.repeat(44));
+                  const read=await store.get(id);
+                  const local=await browser.storage.local.get(null);
+                  const deleted=await store.remove(id);
+                  const absent=await store.get(id);
+                  done({ok:read.ok&&read.token===token&&
+                    !JSON.stringify(local).includes(token)&&deleted.ok&&
+                    absent.code==='GIT_RECONNECT_REQUIRED',
+                    persisted:read.ok,removed:deleted.ok,excluded:true});
+                })().catch(e=>done({ok:false,error:String(e).slice(0,160)}));"""
+                a03_restarted=call('POST',f'/session/{after}/execute/async',
+                    {'script':a03_relaunch,'args':[]},timeout=35)
+                assert a03_restarted.get('ok') is True,('A03_GIT_CREDENTIAL_RESTART',a03_restarted)
+                print('H A03_GIT_SECRET_SURVIVES_REAL_FIREFOX_EXIT_RELAUNCH_AND_EXCLUDES_STORAGE_LOCAL=PASS',flush=True)
+
 
                 # I14 B: exact installed XPI, canonical CAS holds and
                 # operator projection. No fake result can enable real effects.

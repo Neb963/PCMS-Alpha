@@ -1,3 +1,4 @@
+import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // S05 independently sourced, read-only admission diagnosis. No browser/native
 // save, publication, Git ref write or unlocked provider capability lives here.
 import {trustedExtensionPage} from './command-boundary.mjs';
@@ -67,7 +68,7 @@ function facts(db,name){
 export function createReadyOperator(api,{open=openCanonicalDatabase,
  guard=internalPcmsGuard,scan=scanMainCatalog,inspect=inspectReadyCandidate,
  stagingFactory=createStagingStore,
- native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p)}={}){
+ native=p=>browserGitCredentialPacket(p)}={}){
  const sentinel=createRestoreSentinel(api.storage.local);
  let dbPromise;
  async function run(message,sender){

@@ -1,3 +1,4 @@
+import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // S04 configured Git continuation. Credential never crosses a dashboard
 // port. No ref movement occurs without a committed DISPATCH_POSSIBLE receipt.
 import {openCanonicalDatabase,createRestoreSentinel,fail} from './journal.mjs';
@@ -20,7 +21,7 @@ const markerSha=async()=>{
 export function createS04GitContinuation(api,{open=openCanonicalDatabase,
   scan=scanMainCatalog,write=writeS04Marker,
   transport=fetch,gate=()=>false,guard=internalPcmsGuard,
-  vault=req=>api.runtime.sendNativeMessage('local.pcms.backup_vault',req)}={}){
+  vault=req=>browserGitCredentialPacket(req)}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
   let dbPromise;
   const store=async()=>createCoordinatorStore(await (dbPromise||=open().catch(e=>{

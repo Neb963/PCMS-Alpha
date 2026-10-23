@@ -9,10 +9,13 @@ const routes=['overview','generators','work-queue','accounts','refresher','setti
 const native=document.querySelector('body > .app');
 const host=document.createElement('div');host.id='pcms-faithful-host';
 document.body.append(host);const root=host.attachShadow({mode:'open'});
-const READINESS_NAMES={EXTENSION_RUNTIME:'PCMS extension',LOCAL_CONFIGURATION:'Local settings',RESTORE_HOLD:'Restore safety',REFRESHER_POLICY:'Refresher configuration',BACKUP_RESTORE:'Backup recovery',ACCOUNT_INVENTORY_READ:'Account inventory',REFRESHER_CURRENT_POLICY:'Current Refresher policy',NATIVE_VAULT_HOST:'GitHub credential helper',SECRET_SERVICE_ENVIRONMENT:'Secure credential storage',BACKUP_HOST:'Backup helper',DIAGNOSTIC_HOST:'Diagnostic helper',GIT_CONFIG:'GitHub connection',GIT_PARTIAL_CONNECTION:'Interrupted GitHub setup',GITHUB_AUTH:'GitHub access',GITHUB_MAIN_TREE:'GitHub file scan',GRANT_DEVELOPMENT:'Development permission',GRANT_GITWRITE:'Git write permission',GRANT_PUBLICATION:'Publication permission',PERSONA_AND_SESSION:'Account and secure route',REFRESHER_LIVE_EFFECT:'Refresher operation',INSTALLED_XPI_IDENTITY:'Installed extension verification'};
+const READINESS_NAMES={EXTENSION_RUNTIME:'PCMS extension',LOCAL_CONFIGURATION:'Local settings',RESTORE_HOLD:'Restore safety',REFRESHER_POLICY:'Refresher configuration',BACKUP_RESTORE:'Backup recovery',ACCOUNT_INVENTORY_READ:'Account inventory',REFRESHER_CURRENT_POLICY:'Current Refresher policy',BROWSER_GIT_STORE:'Firefox Git credential storage',NATIVE_VAULT_HOST:'Legacy Git helper (not required)',SECRET_SERVICE_ENVIRONMENT:'Secure credential storage',BACKUP_HOST:'Backup helper',DIAGNOSTIC_HOST:'Diagnostic helper',GIT_CONFIG:'GitHub connection',GIT_PARTIAL_CONNECTION:'Interrupted GitHub setup',GITHUB_AUTH:'GitHub access',GITHUB_MAIN_TREE:'GitHub file scan',GRANT_DEVELOPMENT:'Development permission',GRANT_GITWRITE:'Git write permission',GRANT_PUBLICATION:'Publication permission',PERSONA_AND_SESSION:'Account and secure route',REFRESHER_LIVE_EFFECT:'Refresher operation',INSTALLED_XPI_IDENTITY:'Installed extension verification'};
 const READINESS_STATES={VERIFIED:'Checked',NOT_TESTED:'Not checked',OUTCOME_UNCERTAIN:'Needs review',UNREACHABLE:'Not responding',STALE:'Needs updating',SECURITY_HELD:'Waiting on setup',OFF_BY_POLICY:'Disabled',NOT_CONFIGURED:'Not connected',MISSING_CAPABILITY:'Needs an update'};
 function operatorReadinessGuidance(row){
  const code=row.code||'';
+ if(row.component==='BROWSER_GIT_STORE')
+   return row.state==='VERIFIED'?'The saved browser credential is present; GitHub authorization is checked separately.':
+     'Reconnect GitHub to use background Git operations. No PCMS helper is required.';
  if(row.component==='NATIVE_VAULT_HOST'||row.component==='BACKUP_HOST'||row.component==='DIAGNOSTIC_HOST')
    return row.state==='UNREACHABLE'?'The PCMS helper is not responding. Check the local PCMS installation.':
      row.state==='VERIFIED'?'The local helper responded. Its complete workflow is not yet verified.':
@@ -56,8 +59,8 @@ function operatorReadinessGuidance(row){
 function friendlyConnectionIssue(code){
  const messages={
  GIT_RECONCILED_LOCALLY_VERIFIED:'GitHub connection repaired. Run a read-only check to verify the files.',
- GIT_RECONCILIATION_CREDENTIAL_UNAVAILABLE:'The saved GitHub credential could not be accessed. Check the native helper and secure storage before trying again.',
- GIT_RECONCILIATION_VAULT_UNAVAILABLE:'The GitHub credential helper is not responding. Check its installation before trying again.',
+ GIT_RECONCILIATION_CREDENTIAL_UNAVAILABLE:'The saved GitHub credential could not be accessed. Check Firefox extension storage and reconnect GitHub before trying again.',
+ GIT_RECONCILIATION_VAULT_UNAVAILABLE:'The browser credential store is unavailable. Check Firefox extension storage and reconnect GitHub.',
  GIT_RECONCILIATION_NETWORK_UNAVAILABLE:'GitHub could not be reached. Check your connection and try again.',
  GIT_CONFIG_COMMIT_OUTCOME_UNCERTAIN:'Connection settings could not be confirmed. No further changes were attempted.'
  };
@@ -1577,7 +1580,7 @@ function renderReadinessPanel(container){
  },'btn small');
  local.disabled=state.readinessBusy;remote.disabled=state.readinessBusy;
  const reconcile=b('Reconcile interrupted Git connection',()=>{
-  if(!window.confirm('Read the OS vault credential inside the background process, independently verify this exact private GitHub repository identity, and repair only local connection metadata? No token is exported; no remote write occurs.'))return;
+  if(!window.confirm('Read the saved browser credential inside the background process, independently verify this exact private GitHub repository identity, and repair only local connection metadata? No token is exported; no remote write occurs.'))return;
   void (async()=>{
    try{const out=await readPort('pcms-s03-catalog','RECONCILE_GIT',{},30000);
     notify(friendlyConnectionIssue(out?.code));await runReadiness(false);
@@ -1603,7 +1606,7 @@ function renderReadinessPanel(container){
  exportButton.disabled=!state.readiness?.ok||state.readinessBusy;
  controls.append(local,remote,reconcile,exportButton);section.append(controls);
  const pendingGit=state.readiness?.rows?.some(r=>r.component==='GIT_PARTIAL_CONNECTION'&&r.state==='OUTCOME_UNCERTAIN');
- const vaultReachable=state.readiness?.rows?.some(r=>r.component==='NATIVE_VAULT_HOST'&&r.state==='VERIFIED');
+ const vaultReachable=state.readiness?.rows?.some(r=>r.component==='BROWSER_GIT_STORE'&&r.state==='VERIFIED');
  if(pendingGit&&vaultReachable){
   const recovery=el('div','settings-section');
   recovery.append(el('p','setting-note',

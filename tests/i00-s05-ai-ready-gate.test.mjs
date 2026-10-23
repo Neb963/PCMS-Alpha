@@ -87,6 +87,7 @@ test('S05 native send cannot use stale main even when cached local READY is acti
  const boundary=createAiBoundary(api,{open:async()=>db,
   storeFactory:()=>({getJobFull:async()=>({ok:true,job})}),
   guard:()=>{guarded++;return null;},
+  gitCredential:async()=>({ok:true,credential:'fixture-read-token'}),
   scanCatalog:async()=>({ok:true,complete:true,source:'PINNED_MAIN_READ_ONLY',
     repositoryId,head:'a'.repeat(40)}),
   inspectReady:async()=>({ok:true,code:'READY_COHERENT_INPUT_PINNED',

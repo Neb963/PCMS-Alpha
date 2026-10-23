@@ -1,3 +1,4 @@
+import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // S03 read-only background observer. Git credentials stay in native Secret Service.
 // This deliberately does NOT send generator intents or provider/Git writes.
 import {scanMainCatalog} from './git-catalog.mjs';
@@ -22,7 +23,7 @@ const identifier=c=>c&&typeof c.repository==='string'&&
 const safe=code=>({ok:false,code});
 const MINUTES=15;
 export function createCatalogWatcher(api,{scan=scanMainCatalog,
-  native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
+  native=p=>browserGitCredentialPacket(p),
   network=fetch,clock=Date.now,ingestComplete=null,ingestReady=null,
   progressReady=null,progressChanges=null,progressWriteback=null,
   // C-68/C-69: one GitHub-connection incident (queued work stays queued);
