@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """WebDriver/Marionette packaged-XPI persistent-install I00 smoke, no live provider calls."""
 import base64
-import atexit
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hashlib
 import http.client
 import json
@@ -1010,28 +1007,10 @@ def s01_legacy_and_archive(session,uuid,oracle,privacy_safe,added_id):
     print('B S01_ARCHIVE_DEFERS_IN_USE_RELEASE_AND_RELEASES_IDLE_VIA_DONOR=',states['legacy_account_ci01'][1],flush=True)
 
 
-class A03ContentIsolationFixture(BaseHTTPRequestHandler):
-    def do_GET(self):
-        payload=b'<!doctype html><html><head><title>CI A03 origin isolation</title></head><body>local test page</body></html>'
-        self.send_response(200)
-        self.send_header('Content-Type','text/html; charset=utf-8')
-        self.send_header('Content-Length',str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def log_message(self,*args):
-        pass
-
-
 def main():
-    # Developer CI ONLY: local fixed HTML origin to test real content-script
-    # principal separation; never a PCMS runtime dependency or operator host.
-    fixture=A03ContentIsolationFixture
-    a03_server=ThreadingHTTPServer(('127.0.0.1',0),fixture)
-    atexit.register(a03_server.server_close)
-    atexit.register(a03_server.shutdown)
-    threading.Thread(target=a03_server.serve_forever,daemon=True).start()
-    a03_url=f'http://127.0.0.1:{a03_server.server_port}/a03-isolation.html'
+    # Public inert HTTPS page is a distinct ordinary web origin. No private
+    # provider/Git account operation, local server or OS extension is involved.
+    a03_url='https://example.com/'
     archive=pathlib.Path(sys.argv[1]).resolve()
     browser=pathlib.Path(os.environ['FIREFOX_BINARY'])
     driver=pathlib.Path(os.environ['GECKODRIVER_BINARY'])
@@ -1124,7 +1103,7 @@ def main():
                     port.postMessage({type:'GET_CREDENTIAL',params:{repositoryId:id}});
                   });
                   // Inject a REAL extension content script into a separate
-                  // local HTML origin. It must execute, but the extension
+                  // ordinary HTTPS web origin. It must execute, but the extension
                   // origin's credentials store must not exist in that origin.
                   const contentIsolation=await (async()=>{
                     const testUrl=A03_URL_LITERAL;
