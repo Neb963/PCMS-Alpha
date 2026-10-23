@@ -1,3 +1,4 @@
+import {advanceApprovedPublication} from './publication-flow.mjs';
 /* PCMS prototype-structure production bridge, version 0.1.6.
  * The accepted single-file prototype supplies the actual shell/CSS/view HTML.
  * This module does not load its demo script or its sample data. Everything
@@ -1244,6 +1245,44 @@ async function openReleaseReview(slug){
  head.querySelector('button')?.focus();
  overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
  overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ const releaseCommand=async(type,params)=>{
+  if(type==='DISPATCH')return readPort('pcms-i13-release','DISPATCH',params,95000);
+  if(type==='GET')return readPort('pcms-i13-release','GET',params,95000);
+  if(type==='RECONCILE')return readPort('pcms-i13-release','RECONCILE',params,95000);
+  throw Error('UNSUPPORTED_RELEASE_ACTION');
+ };
+ const renderPublication=out=>{
+   status.textContent=out?.ok&&out.state==='CONFIRMED_PUBLIC'?
+     'Published: independent owner, listing and exact-source readback verified.':
+     out?.code==='PUBLICATION_ACTIVATION_HELD'?
+     'Approval saved. Enable publication in Settings, then reopen this exact review to publish.':
+     ['PUBLICATION_UNCERTAIN','DISPATCH_POSSIBLE','RECOVERY_HOLD'].includes(out?.state)?
+     'Publication may have occurred. Only protected read-only reconciliation is permitted; no automatic retry.':
+     'Publication not verified: '+(out?.code||'Unknown outcome')+'. Check current guarded state.';
+ };
+ let persisted;
+ try{persisted=await releaseCommand('GET',{slug});}catch{persisted=null;}
+ if(persisted?.ok&&persisted.state==='CONFIRMED_PUBLIC'){
+   status.textContent='Published: independently confirmed for exact candidate '+persisted.sourceFingerprint+'.';
+   return;
+ }
+ if(persisted?.ok&&['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN','RECOVERY_HOLD'].includes(persisted.state)){
+   status.textContent='Publication outcome uncertain. Do not send another publication effect.';
+   const reconcile=b('Reconcile published state',()=>void (async()=>{
+     reconcile.disabled=true;
+     status.textContent='Checking protected source and listing without another write…';
+     try{const row=await releaseCommand('GET',{slug});
+       if(!row?.ok||!['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN','RECOVERY_HOLD'].includes(row.state)){
+         status.textContent='Current release record changed; reopen review.';return;
+       }
+       renderPublication(await releaseCommand('RECONCILE',{
+         slug,expectedRevision:row.revision}));
+     }catch{status.textContent='Independent publication readback unavailable. No write was retried.'}
+     finally{reconcile.disabled=false;void loadQueue(true);}
+   })(),'btn primary');
+   body.append(reconcile);
+   return;
+ }
  let view;
  try{view=await readPort('pcms-i13-release','PREVIEW',{slug},95000)}
  catch{status.textContent='Review cannot open until secure GitHub access and source evidence are available.';return}
@@ -1319,20 +1358,44 @@ async function openReleaseReview(slug){
  })(),'btn small');
  const checkLabel=el('label','setting-option'),ack=el('input');ack.type='checkbox';
  checkLabel.append(ack,document.createTextNode(' I inspected the exact source changes and required test results for this candidate.'));
- const approve=b('Approve exact candidate',()=>void (async()=>{
-  if(!ack.checked){status.textContent='Review the exact source and tests, then check the approval box.';return}
-  if(!window.confirm('Approve this exact tested candidate for publication? This does not bypass independent provider checks and does not itself publish.'))return;
-  approve.disabled=true;
+ const publish=async receipt=>{
+  status.textContent='Revalidating exact candidate, route and Git source before the guarded publication…';
+  const result=await advanceApprovedPublication({slug,approval:receipt,invoke:releaseCommand});
+  renderPublication(result);
+  await loadQueue(true);
+ };
+ const approve=b('Approve and publish exact candidate',()=>void (async()=>{
+  if(!ack.checked){
+   status.textContent='Inspect the exact source manifest and test observations before publication.';return;
+  }
+  if(!window.confirm('Approve and publish this exact candidate now? Only the currently verified owner, editor, route, Git revision and source can be used.'))return;
+  approve.disabled=true;requestChanges.disabled=true;
   try{
    const r=await readPort('pcms-i13-release','APPROVE',{
     slug,expectedStageRevision:view.stageRevision,expectedJobRevision:view.jobRevision,
     fingerprint:view.sourceFingerprint,explicitApproval:true},95000);
-   status.textContent=r?.ok?'Exact candidate approval recorded. Publication remains subject to protected final checks.':
-     'Approval was not confirmed. The candidate remains held until independently checked.';
-  }catch{status.textContent='Approval outcome uncertain. Check the current release record before retrying.'}
-  await loadQueue(true);
+   if(r?.ok&&r.state==='APPROVED')await publish(r);
+   else status.textContent='Approval was not confirmed. No new publication was requested: '+(r?.code||'UNKNOWN')+'.';
+  }catch{status.textContent='Approval outcome uncertain. Read the saved release record before any new request.'}
+  finally{await loadQueue(true);}
  })(),'btn primary');
- footer.append(requestChanges,approve);body.append(instructions,checkLabel,footer);
+ footer.append(requestChanges,approve);
+ if(persisted?.ok&&persisted.state==='APPROVED'&&
+    persisted.sourceFingerprint===view.sourceFingerprint){
+   // The exact approved record remains immutable; publishing it does not
+   // require a second operator approval or a redundant source manifest crawl.
+   approve.disabled=true;
+   const resume=b('Publish previously approved candidate',()=>void (async()=>{
+     if(!ack.checked){
+       status.textContent='Inspect the exact source manifest and test observations before publication.';return;
+     }
+     if(!window.confirm('Publish the previously approved exact candidate now?'))return;
+     resume.disabled=true;approve.disabled=true;
+     await publish(persisted);
+   })(),'btn primary');
+   footer.append(resume);
+ }
+ body.append(instructions,checkLabel,footer);
 }
 // An operation inspector is a read-only projection. A possible dispatched
 // effect cannot be retried from this drawer, even after browser restart.

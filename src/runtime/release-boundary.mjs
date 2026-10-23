@@ -45,13 +45,13 @@ export function validateReleaseMessage(api,sender,msg){
      ADOPT_HUMAN:['slug','expectedRevision'],
      GET_EXCEPTION:['slug'],EXCEPTION_CONTEXT:['slug'],RECORD_EXCEPTION:['slug','mode','checks','consent',
        'expectedStageRevision','expectedJobRevision','sourceFingerprint'],
-    REQUEST_CHANGES:['slug','token','passphrase','expectedStageRevision',
+    REQUEST_CHANGES:['slug','token','expectedStageRevision',
       'expectedJobRevision','sourceFingerprint','instructions','releaseRevision'],
-    PREVIEW:['slug','token','passphrase'],
+    PREVIEW:['slug','token'],
     GET_REVIEW_CHUNK:['slug','stageRevision','fingerprint','origin','path','offset'],
-    APPROVE:['slug','token','expectedStageRevision','expectedJobRevision','fingerprint','explicitApproval','passphrase'],
+    APPROVE:['slug','token','expectedStageRevision','expectedJobRevision','fingerprint','explicitApproval'],
     CANCEL_APPROVED:['slug','expectedRevision'],
-    DISPATCH:['slug','token','expectedRevision','passphrase'],
+    DISPATCH:['slug','token','expectedRevision'],
     RECONCILE:['slug','token','expectedRevision']
   };
   if(!p||typeof p!=='object'||Array.isArray(p)||
@@ -64,7 +64,6 @@ export function validateReleaseMessage(api,sender,msg){
      (['PREVIEW','APPROVE','DISPATCH','RECONCILE','REQUEST_CHANGES'].includes(msg.type)&&
        (p.token!==undefined&&(typeof p.token!=='string'||p.token.length<12||
         p.token.length>512||!/^[\x21-\x7e]+$/.test(p.token))))||
-     (p.passphrase!==undefined&&(typeof p.passphrase!=='string'||p.passphrase.length<12||p.passphrase.length>256))||
      (msg.type==='GET_REVIEW_CHUNK'&&(
        !Number.isSafeInteger(p.stageRevision)||p.stageRevision<1||
        !fp(p.fingerprint)||!['F','P'].includes(p.origin)||
@@ -156,7 +155,6 @@ export function createReleaseBoundary(api,{
   // Only an independently activated fixed native publish adapter may
   // change listing. Default packaged capability is held.
   effectGate=()=>false,
-  native=p=>api.runtime.sendNativeMessage('local.pcms.backup_vault',p),
   gitCredential=browserGitCredentialPacket,
   dispatch=async(g,r)=>g.runReleaseStep?.(r.personaUid,{
     slug:r.slug,nonce:r.nonce,action:'PUBLISH',remotePublicId:r.remotePublicId,
@@ -175,14 +173,7 @@ export function createReleaseBoundary(api,{
       reply.credential.length>=12&&reply.credential.length<=512&&
       /^[\x21-\x7e]+$/.test(reply.credential)?reply.credential:null;
   }
-  async function reviewPassphrase(explicit){
-    if(typeof explicit==='string'&&explicit.length>=12)return explicit;
-    const reply=await native({action:'get'});
-    return reply?.ok&&typeof reply.passphrase==='string'&&
-      reply.passphrase.length>=12&&reply.passphrase.length<=256?
-      reply.passphrase:null;
-  }
-  async function checkCurrent(database,name,token,{requireEditor=true,passphrase=null}={}){
+  async function checkCurrent(database,name,token,{requireEditor=true}={}){
     const stage=await stageFactory(database).getFull(name),
       job=await aiFactory(database).getJobFull(name),
       facts=await ownerFacts(database,name);
@@ -210,9 +201,9 @@ export function createReleaseBoundary(api,{
          existingRow.record.bindingVersion!==r.bindingVersion||
          !existingRow.record.stageSource?.ok)
         return fail('EXISTING_STAGE_OR_FINAL_F_UNVERIFIED');
-      const unlocked=await unlockPrevious(existingRow.record.recovery,passphrase);
+      const unlocked=await unlockPrevious(existingRow.record.recovery);
       if(!unlocked.ok||unlocked.source.fingerprint!==r.previous.fingerprint)
-        return fail('EXISTING_RECOVERY_DECRYPTION_REQUIRED');
+        return fail('EXISTING_RECOVERY_CHECKPOINT_UNVERIFIED');
       const shadow=await new Promise((resolve,reject)=>{
         const tx=database.transaction('meta','readonly');
         const req=tx.objectStore('meta').get(REFRESHER_KEY);
@@ -397,8 +388,7 @@ export function createReleaseBoundary(api,{
         proof:evidence.ok?evidence:null,reason:evidence.code||'PUBLICATION_UNCERTAIN'
       });
     }
-    const checked=await checkCurrent(database,p.slug,token,{
-      passphrase:await reviewPassphrase(p.passphrase)});
+    const checked=await checkCurrent(database,p.slug,token);
     if(!checked.ok)return checked;
     const change=await createS06ChangeStore(database).get(p.slug);
     if(change.ok&&change.state==='REQUESTED')
@@ -468,6 +458,8 @@ export function createReleaseBoundary(api,{
       if(checked.kind==='EXISTING_UPDATE'&&
          checked.existing.stagedFingerprint!==checked.source.fingerprint)
         return fail('EXISTING_FINAL_F_NOT_PINNED');
+      if(typeof guard()?.runReleaseStep!=='function')
+        return fail('RELEASE_EXECUTOR_UNAVAILABLE');
       if(effectGate({phase:'I13',record:stored.record})!==true)
         return fail('PUBLICATION_ACTIVATION_HELD');
       // The dispatch-possible transition commits *before* the only effect.

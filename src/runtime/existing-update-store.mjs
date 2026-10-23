@@ -18,7 +18,8 @@ function tx(db,mode,fn){
 export const publicExisting=r=>r?{
   ok:true,slug:r.slug,revision:r.revision,state:r.state,
   accountId:r.accountId,priorFingerprint:r.previousFingerprint,
-  recovery:'ENCRYPTED_SNAPSHOT',reason:r.reason||null,operationId:r.operationId,
+  recovery:r.recovery?.format==='PCMS_I13_P_PLAIN_V3'?'PLAIN_VERIFIED_SOURCE':'LEGACY_PASSWORD_CHECKPOINT_HELD',
+  reason:r.reason||null,operationId:r.operationId,
   providerEffect:['UNLIST_DISPATCH_POSSIBLE','UNLIST_UNCERTAIN',
     'STAGE_DISPATCH_POSSIBLE','STAGE_UNCERTAIN',
     'RESTORE_DISPATCH_POSSIBLE','RESTORE_UNCERTAIN'].includes(r.state)?

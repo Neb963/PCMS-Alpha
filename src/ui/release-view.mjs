@@ -3,7 +3,6 @@
 import {diffLines,unifiedHunks,splitLines,isText,imageType} from './source-diff.mjs';
 const slug=document.getElementById('pcms-release-slug');
 const token=document.getElementById('pcms-release-token');
-const passphrase=document.getElementById('pcms-existing-passphrase');
 const previewBtn=document.getElementById('pcms-release-preview');
 const approveBtn=document.getElementById('pcms-release-approve');
 const requestChangesBtn=document.getElementById('pcms-s06-request-changes');
@@ -43,8 +42,8 @@ function command(type,params={}){
     }
     port.onMessage.addListener(v=>finish(v));
     port.onDisconnect.addListener(()=>finish(null,Error('DISCONNECTED')));
-    // Empty credential fields mean: use the connected OS-vault Git credential.
-    try{port.postMessage({type,params:Object.fromEntries(Object.entries(params||{}).filter(([k,v])=>!(['token','passphrase'].includes(k)&&v==='')))});}catch{finish(null,Error('DISCONNECTED'));}
+    // Empty token override means use the connected background-owned Git credential.
+    try{port.postMessage({type,params:Object.fromEntries(Object.entries(params||{}).filter(([k,v])=>!(k==='token'&&v==='')))});}catch{finish(null,Error('DISCONNECTED'));}
   });
 }
 function note(s){status.textContent=s;}
@@ -303,7 +302,7 @@ async function act(type,params,message){
   if(chainPublish&&type==='APPROVE'){
     const approved=chainPublish;chainPublish=null;
     await act('DISPATCH',{slug:approved.slug,token:token.value,
-      expectedRevision:approved.revision,passphrase:passphrase.value},
+      expectedRevision:approved.revision},
       'Publishing the exact approved source (single fenced attempt)…');
     if(receipt&&receipt.slug===approved.slug&&
        ['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN'].includes(receipt.state))
@@ -313,12 +312,12 @@ async function act(type,params,message){
   }
 }
 previewBtn.addEventListener('click',()=>act('PREVIEW',{
-  slug:slug.value,token:token.value,passphrase:passphrase.value},'Checking current owner, route, clean editor, Git READY and full saved F…'));
+  slug:slug.value,token:token.value},'Checking current owner, route, clean editor, Git READY and full saved F…'));
 requestChangesBtn.addEventListener('click',()=>{
   const f=snapshot;
   if(!f||f.slug!==slug.value)return;
   act('REQUEST_CHANGES',{slug:f.slug,token:token.value,
-    passphrase:passphrase.value,expectedStageRevision:f.stageRevision,
+    expectedStageRevision:f.stageRevision,
     expectedJobRevision:f.jobRevision,sourceFingerprint:f.sourceFingerprint,
     instructions:changeInstructions.value.trim(),
     ...(f.releaseRevision!==null?{releaseRevision:f.releaseRevision}:{})},
@@ -331,7 +330,7 @@ approveBtn.addEventListener('click',()=>{
     'Exceptional review: AI tests are NOT fully verified. Approve only the exact saved F after manually inspecting all evidence and known incomplete checks?'))return;
   act('APPROVE',{slug:f.slug,token:token.value,
     expectedStageRevision:f.stageRevision,expectedJobRevision:f.jobRevision,
-    fingerprint:f.sourceFingerprint,explicitApproval:true,passphrase:passphrase.value},
+    fingerprint:f.sourceFingerprint,explicitApproval:true},
     'Recording exact-F individual approval in canonical journal…');
 });
 cancelBtn.addEventListener('click',()=>{
@@ -342,7 +341,7 @@ cancelBtn.addEventListener('click',()=>{
 dispatchBtn.addEventListener('click',()=>{
   if(!receipt)return;
   act('DISPATCH',{slug:receipt.slug,token:token.value,
-    expectedRevision:receipt.revision,passphrase:passphrase.value},
+    expectedRevision:receipt.revision},
     'Revalidating exact F, READY and owner before a single fenced publication attempt…');
 });
 reconcileBtn.addEventListener('click',()=>{
@@ -365,7 +364,6 @@ slug.addEventListener('input',()=>{
   controls();
 });
 token.addEventListener('input',controls);
-passphrase?.addEventListener('input',controls);
 changeInstructions.addEventListener('input',controls);
 controls();
 

@@ -4,6 +4,7 @@ import {fakeDatabase} from './fake-idb.mjs';
 import {createReadyStore} from '../src/runtime/ready-store.mjs';
 import {createReadyDevelopment,planReadyDevelopment} from '../src/runtime/ready-development.mjs';
 import {exactSource} from '../src/runtime/staging-core.mjs';
+import {sealPrevious} from '../src/runtime/existing-update-core.mjs';
 const s='s05-public-flow',repoId='1411034835',H='a'.repeat(64),F='b'.repeat(64);
 const witness={slug:s,repositoryId:repoId,identifier:'rev-fixture-ready-01',
  declarationCommit:'c'.repeat(40),markerOid:'d'.repeat(40),inputFingerprint:H};
@@ -28,10 +29,9 @@ test('S05 READY planning selects single canonical action and preserves effect ho
  assert.equal(p({ready:{ok:true,record:{...ready.record,hold:'OPERATOR_PAUSED'}}}).ok,false);
 });
 test('S05 installed journal composition advances public READY through I13 and AI one verified transition per wake',async()=>{
- const db=fakeDatabase(),queue=createReadyStore(db),actions=[],vault=[];
+ const db=fakeDatabase(),queue=createReadyStore(db),actions=[];
  await queue.observe(witness);
  await save(db,{key:'inventory:'+s,generator:{slug:s,visibility:'PUBLIC'}});
- const passphrase='fixture-recovery-secret';
  const mutate=async(key,record)=>save(db,{key,record});
  const receipt=(type,state)=>({ok:true,code:type,state,revision:state});
  const existing=()=>({runTrusted:async ({type,params})=>{
@@ -66,10 +66,8 @@ test('S05 installed journal composition advances public READY through I13 and AI
   }
   await mutate('existing-update:'+s,{slug:s,revision:(row?.revision||0)+1,
     state,stagedFingerprint});
-  if(['RECHECK_UNLIST','RECHECK_STAGE'].includes(type))
-   assert.equal(params.passphrase,undefined);
-  if(['UNLIST','PIN_STAGE','STAGE','PREPARE'].includes(type))
-   assert.equal(params.passphrase,passphrase);
+  assert.equal(params.passphrase,undefined,
+    'background actions cannot request a native/OS recovery secret');
   return receipt(type,state);
  }});
  const candidate={slug:s,revision:3,stageRevision:3,
@@ -89,7 +87,6 @@ test('S05 installed journal composition advances public READY through I13 and AI
  const runner=createReadyDevelopment({storage:{local:{get:async()=>({}),set:async()=>{}}}},{
   open:async()=>db,
   effectGate:()=>true,
-  native:async p=>{vault.push(p.action);return {ok:true,passphrase};},
   makeReady:()=>({runTrusted:async({type})=>{
    assert.equal(type,'ASSESS_READY');actions.push(type);
    return {ok:true,code:'S05_PUBLIC_SLEEP_AND_UNLIST_REQUIRED'};
@@ -104,7 +101,6 @@ test('S05 installed journal composition advances public READY through I13 and AI
  assert.deepEqual(actions,[
   'PREPARE','ASSESS_READY','UNLIST','RECHECK_UNLIST','PIN_STAGE',
   'STAGE','RECHECK_STAGE','PREPARE_JOB','ADVANCE_JOB']);
- assert.equal(vault.length,4);
  const result=await runner.tick();
  assert.equal(result.code,'S05_NO_ELIGIBLE_ACTION');
  assert.equal(db.read('meta','stage:'+s).record.state,'SOURCE_VERIFIED');
@@ -145,7 +141,7 @@ test('S05 READY B reconciles possible old native dispatch then requests one guar
  assert.equal(held.code,'S05_OLDER_NATIVE_STOP_ACTIVATION_HELD');
 });
 
-test('S05 unavailable recovery vault defers only one target, fair cursor reaches healthy next slug',async()=>{
+test('S05 one exact-source preparation hold does not starve a separate eligible READY slug',async()=>{
  const db=fakeDatabase(),q=createReadyStore(db);
  const second='s05-second-public-flow';
  await q.observe(witness);
@@ -157,25 +153,25 @@ test('S05 unavailable recovery vault defers only one target, fair cursor reaches
   get:async key=>({[key]:storage[key]}),
   set:async values=>Object.assign(storage,values)
  }}};
- let n=0;
  const runner=createReadyDevelopment(api,{open:async()=>db,effectGate:()=>true,
-  native:async()=>++n===1?{ok:false,code:'VAULT_LOCKED'}:
-    {ok:true,passphrase:'twelve-plus-characters'},
   makeReady:()=>({runTrusted:async()=>({ok:true,
     code:'S05_PUBLIC_SLEEP_AND_UNLIST_REQUIRED'})}),
   makeExisting:()=>({runTrusted:async m=>{
-    steps.push(m.params.slug);return {ok:true,code:'PREPARED'};
+    steps.push(m.params.slug);
+    assert.equal(m.params.passphrase,undefined);
+    return m.params.slug===s?{ok:false,code:'RECOVERY_CHECKPOINT_UNVERIFIED'}:
+      {ok:true,code:'PREPARED'};
   }}),
   makeStage:()=>({runTrusted:async()=>{throw Error('NO_PRIVATE_SOURCE')}}),
   makeAi:()=>({runTrusted:async()=>{throw Error('NO_AI_SOURCE')}})
  });
  const first=await runner.tick();
- assert.equal(first.code,'S05_RECOVERY_SECRET_SERVICE_UNAVAILABLE');
+ assert.equal(first.code,'RECOVERY_CHECKPOINT_UNVERIFIED');
  assert.equal(first.slug,s);
  const secondResult=await runner.tick();
  assert.equal(secondResult.ok,true,JSON.stringify(secondResult));
  assert.equal(secondResult.slug,second);
- assert.deepEqual(steps,[second]);
+ assert.deepEqual(steps,[s,second]);
  assert.equal(storage.pcmsS05DevelopmentReceipt.providerEffects,'NONE');
 });
 
@@ -194,7 +190,8 @@ test('S05 reconciles I13 staged A to independently checked tested F without chan
  const final=await exactSource([
   {path:'main.pjs',base64:Buffer.from('repaired F').toString('base64')},
   {path:'index.html',base64:Buffer.from('<p>F</p>').toString('base64')}]);
- const recovery={ciphertext:'held encrypted P opaque'};
+ const recovery=await sealPrevious(original);
+ assert.equal(recovery.ok,true);
  await save(db,{key:'inventory:'+s,generator:{slug:s,visibility:'UNLISTED'}});
  await save(db,{key:'existing-update:'+s,record:{
   slug:s,state:'STAGE_CONFIRMED',revision:6,nonce:'12345678',
