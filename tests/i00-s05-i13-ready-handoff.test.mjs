@@ -12,7 +12,6 @@ globalThis.crypto??=webcrypto;
 const slug='existing-s05-safe',rid='remote-owned-1',accountId='account-one',
   personaUid='persona-verified-one',nonce='a'.repeat(32),
   hash='b'.repeat(64),repoId='1411034835',head='c'.repeat(40);
-const passphrase='correct-recoverable-source-password';
 const b64=s=>Buffer.from(s).toString('base64');
 const files=s=>[{path:'main.pjs',base64:b64(s)},
  {path:'index.html',base64:b64('<div>'+s+'</div>')}];
@@ -30,7 +29,7 @@ const runner=async ({dirty=false,sourceChanged=false}={})=>{
  const db=fakeDatabase();
  const previous=await exactSource(files('safe old source'));
  const candidate=await exactSource(files('source v2'));
- const sealed=await sealPrevious(previous,passphrase);
+ const sealed=await sealPrevious(previous);
  assert.equal(sealed.ok,true);
  const record={slug,state:'UNLIST_CONFIRMED',revision:3,nonce,
   accountId,accountRevision:account.revision,personaUid,bindingVersion:1,
@@ -82,7 +81,7 @@ const runner=async ({dirty=false,sourceChanged=false}={})=>{
    effectGate:()=>{seen.effects++;return false}
  });
  const result=await boundary.run({type:'PIN_STAGE',params:{
-   slug,expectedRevision:3,passphrase
+   slug,expectedRevision:3
  }},sender);
  return {db,ready,record,result,previous,candidate,seen};
 };
