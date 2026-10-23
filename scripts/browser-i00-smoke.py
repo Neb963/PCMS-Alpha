@@ -4574,7 +4574,9 @@ def main():
                 fresh_script="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const core=await import('./backup-core.mjs');
-                  const review=await import('./restore-core.mjs');
+                  const review=await import('./portable-restore-plan.mjs');
+                  const codec=await import('./portable-archive.mjs');
+                  const stage=await import('./portable-restore-stage.mjs');
                   const journal=await import('./journal.mjs');
                   const pkg=await import('../lib/backup-package.js');
                   const automation=await import('../lib/automation-history.js');
@@ -4588,7 +4590,7 @@ def main():
                     throw Error('DONOR_HOLDER_NOT_CREATED');
                   const donor=await (await import('./donor-snapshot.mjs')).readProtectedDonorSnapshot(browser);
                   const db=await journal.openCanonicalDatabase();
-                  const canonical=await core.snapshotCanonical(db);db.close();
+                  const canonical=await core.snapshotCanonicalV2(db,{serializedValues:true});db.close();
                   const stored=await browser.storage.local.get(null);
                   const extras=Object.create(null);
                   for(const [k,v] of Object.entries(stored||{}))
@@ -4607,11 +4609,9 @@ def main():
                   }
                   const currentPortable=pkg.createPortableBackupPayload({
                     ...params,cookiesByProfile:cookieData});
-                  const password='synthetic-i16-fresh-profile-backup-passphrase';
-                  const prevEnvelope=await pkg.encodeBackupEnvelope({
-                    payload:currentPortable,password,scope:{kind:'full'}});
-                  const checkpoint=await core.encodeIntegrated({
-                    pcms:canonical,donorEnvelope:prevEnvelope,passphrase:password});
+                  const checkpoint=await codec.encodePortableArchive({
+                    pcms:canonical,donor:currentPortable});
+                  const checkpointStage=await stage.preparePortableStage(checkpoint.blob);
                   const importedProfile=structuredClone(holder.profile);
                   importedProfile.containerId='firefox-container-old';
                   importedProfile.personaUid=previousUid;
@@ -4628,22 +4628,26 @@ def main():
                     cookiesByProfile:{'firefox-container-old':[]}});
                   if(importedPortable.personas.length!==1)
                     throw Error('IMPORT_FIXTURE_PERSONA_MISSING');
-                  const portableEnvelope=await pkg.encodeBackupEnvelope({
-                    payload:importedPortable,password,scope:{kind:'full'}});
+
                   const restoredPcms={schema:1,stores:Object.fromEntries(
                     core.DB_STORES.map(k=>[k,[]]))};
                   restoredPcms.stores.meta.push({key:'account:restored-fresh',
                     value:core.serializeClone({key:'account:restored-fresh',
                       account:{accountId:'restored-fresh',personaUid:previousUid,
                         state:'VERIFIED',revision:1,identity:{session:'old-evidence'}}})});
-                  const archive=await core.encodeIntegrated({
-                    pcms:restoredPcms,donorEnvelope:portableEnvelope,passphrase:password});
+                  const archive=await codec.encodePortableArchive({
+                    pcms:restoredPcms,donor:importedPortable});
+                  const sourceStage=await stage.preparePortableStage(archive.blob);
+                  const stagedInput=await stage.readPortableStage(sourceStage.scope);
                   const mappings={[importedPortable.personas[0].key]:'__create__'};
-                  const inspected=await review.previewRestore({
-                    archiveText:archive.text,password,mode:'merge',fresh:true,
-                    mappings,currentPcms:canonical,currentDonor:donor,
-                    currentPortable,containers:donor.containers,
-                    decodeDonor:pkg.decodeBackupEnvelope});
+                  const accountChoices={'restored-fresh':'INCLUDE_INACTIVE'};
+                  const inspected=await review.inspectPortableRestore({
+                    incoming:stagedInput,mode:'merge',fresh:true,
+                    mappings,accountChoices,currentPcms:canonical,currentDonor:donor,
+                    currentPortable,containers:donor.containers});
+                  await review.verifyPortableCheckpoint({
+                    checkpoint:await stage.readPortableStage(checkpointStage.scope),
+                    currentPcms:canonical,currentPortable});
                   if(inspected.plan.risk.newContainers!==1||
                      inspected.plan.groups[0].status!=='CREATE_REQUESTED')
                     throw Error('FRESH_RESTORE_RISK_NOT_DISCLOSED');
@@ -4661,9 +4665,9 @@ def main():
                       port.postMessage({action,params});
                     });
                   }
-                  const result=await send('APPLY',{
-                    archiveText:archive.text,checkpointText:checkpoint.text,
-                    password,mode:'merge',fresh:true,mappings,
+                  const result=await send('APPLY_PORTABLE',{
+                    stageScope:sourceStage.scope,checkpointScope:checkpointStage.scope,
+                    mode:'merge',fresh:true,mappings,accountChoices,
                     reviewedPlanSha256:inspected.planSha256});
                   const after=await (await import('./donor-snapshot.mjs')).readProtectedDonorSnapshot(browser);
                   const marker=(await browser.storage.local.get('pcmsRestoreInProgress'))
@@ -4678,7 +4682,7 @@ def main():
                     req.onsuccess=()=>resolve(req.result);
                   });
                   saved.close();
-                  const again=await send('APPLY',{});
+                  const again=await send('APPLY_PORTABLE',{});
                   const activate=await send('ACTIVATE',{});
                   if(!result.ok||marker?.status!=='COMPLETE_INACTIVE'||
                     marker.fresh!==true||
@@ -4687,7 +4691,7 @@ def main():
                     receipt?.account?.personaUid!==imported[0][1].personaUid||
                     receipt?.account?.identity!==null||
                     receipt?.account?.state!=='VERIFICATION_PENDING'||
-                    again.code!=='RESTORE_INPUT_INVALID'&&again.code!=='RESTORE_ALREADY_HELD'||
+                    again.code!=='RESTORE_PORTABLE_INPUT_INVALID'&&again.code!=='RESTORE_ALREADY_HELD'||
                     activate.code!=='RESTORE_COMMAND_NOT_ALLOWED')
                     throw Error('FRESH_RESTORE_COLLISION_OR_HOLD:'+JSON.stringify({
                       code:result.code,status:marker?.status,fresh:marker?.fresh,
