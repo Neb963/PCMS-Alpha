@@ -99,6 +99,9 @@ export function reconcileShadow(s,inputs){
     r.ownerVerified=input.ownerVerified===true&&!identityChanged;
     r.releaseVerified=input.releaseVerified===true&&hex(input.releaseFingerprint)&&!identityChanged;
     r.releaseFingerprint=r.releaseVerified?input.releaseFingerprint:null;
+    r.sourceAuthority=r.releaseVerified&&[
+      'INDEPENDENT_PUBLICATION_READBACK','ADOPTED_FULL_ORIGINAL_READBACK'
+    ].includes(input.sourceAuthority)?input.sourceAuthority:'UNVERIFIED';
     r.listing=input.listing==='PUBLIC'?'PUBLIC':input.listing==='UNLISTED'?'UNLISTED':'UNKNOWN';
     r.reviewHeld=input.reviewHeld===true;
     r.readyUpdate=input.readyUpdate===true;
