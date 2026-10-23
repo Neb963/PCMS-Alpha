@@ -1,3 +1,4 @@
+import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I06: guarded, canonical reservation admission. No web page, untrusted UI,
 // or generic public donor API can invoke a provider write. Provider execution
 // remains held until a separately proven, explicit capability gate activates.
@@ -60,8 +61,7 @@ export function createSupplyBoundary(api,{
   // an independently controlled synthetic gate and fake isolated executor.
   effectGate=()=>false,gitGate=()=>false,gitWrite=writeNonReadyFolder,
   getGitConnection=async()=>{const r=await api.storage.local.get('pcmsS03Git');return r?.pcmsS03Git;},
-  getGitCredential=async repositoryId=>api.runtime.sendNativeMessage(
-    'local.pcms.backup_vault',{action:'git.get',repositoryId}),
+  getGitCredential=async repositoryId=>browserGitCredentialPacket({action:'git.get',repositoryId}),
   makeStores=db=>({supply:createSupplyStore(db),accounts:createAccountStore(db)})
 }={}){
   let dbPromise;

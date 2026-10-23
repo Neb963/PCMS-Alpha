@@ -1,3 +1,4 @@
+import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I07 same-XPI adoption port. Explicit consent never authorizes source writes.
 import {fail,openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
@@ -60,8 +61,7 @@ export function createAdoptionBoundary(api,{
   managementGate=()=>false,clock=Date.now,
   getGitConnection=async()=>{const out=await api.storage.local.get('pcmsS03Git');
     return out?.pcmsS03Git;},
-  getGitCredential=async repositoryId=>api.runtime.sendNativeMessage(
-    'local.pcms.backup_vault',{action:'git.get',repositoryId})
+  getGitCredential=async repositoryId=>browserGitCredentialPacket({action:'git.get',repositoryId})
 }={}){
   let dbPromise;
   const db=()=>dbPromise ||=open();
