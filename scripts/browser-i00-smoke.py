@@ -3200,11 +3200,15 @@ def main():
                   const state=(await (await import('./refresher-store.mjs')).createRefresherStore(db).read()).state;
                   const alarm=await browser.alarms.get('pcms-refresher-turn');
                   done({paused:state.globalPause,first:state.rows.find(r=>r.slug==='i12-b-0000').activeRemaining,
+                    rest:state.rows.find(r=>r.slug==='i12-b-0001').sleepRemaining,
+                    clockOrigin:state.browserClock?.witness?.runtimeEpoch||null,
                     alarm:!!alarm,alarms:(await browser.alarms.getAll()).filter(a=>a.name==='pcms-refresher-turn').length,
                     held:state.accounts['i12_account_0000'].health});db.close();
                 })().catch(e=>done({error:String(e)}));"""
                 restarted=call('POST',f'/session/{after}/execute/async',{'script':restart_code,'args':[]})
                 assert restarted['paused'] is True and restarted['first']==16*3600000,restarted
+                assert 0<restarted['rest']<64*3600000,('A06_REST_PROGRESS_ON_REAL_PROCESS_RESTART',restarted)
+                assert restarted['clockOrigin'] is None,('A06_NO_STALE_RUNTIME_CREDIT',restarted)
                 assert restarted['alarm'] is True and restarted['alarms']==1,restarted
                 assert restarted['held']=='UNKNOWN',restarted
                 print('B I12_PERSISTENT_RESTART_BUDGET_PAUSE_SINGLE_ALARM_REPAIR=PASS',flush=True)
