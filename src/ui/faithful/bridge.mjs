@@ -596,10 +596,28 @@ function openGeneratorCreator(){
    if(!out?.ok){batchStatus.textContent='Batch status unavailable.';return;}
    batchStatus.replaceChildren(el('strong','','Recent durable requests'));
    for(const batch of out.items.slice(-10).reverse()){
-    batchStatus.append(el('p','setting-note',
-      batch.batchId.slice(-8)+': '+batch.processed+'/'+batch.total+
-      ' queued in the canonical create queue · '+batch.state+
-      (batch.state==='INGESTING'?' ('+batch.appended+'/'+batch.total+' input persisted; not finalized)':'')));
+    const row=el('div','setting-note');
+    row.append(el('p','',batch.batchId.slice(-8)+': '+batch.processed+'/'+
+      batch.total+' input handled · '+batch.state+
+      (batch.held?' · '+batch.held+' held ('+String(batch.lastHold||'review required')+')':'')+
+      (batch.state==='INGESTING'?' ('+batch.appended+'/'+batch.total+
+       ' input persisted; not finalized)':'')));
+    if(batch.held>0){
+      row.append(b('Retry held intake',async()=>{
+        try{
+          const pending=await readPort('pcms-s00-coordinator','LIST_CREATE_BATCH_HOLDS',
+            {batchId:batch.batchId,limit:1},12000);
+          const held=pending?.items?.[0];
+          if(!held){notify('Held item list unavailable.');return;}
+          const retried=await readPort('pcms-s00-coordinator','RETRY_CREATE_BATCH_HOLD',
+            {batchId:batch.batchId,index:held.index},20000);
+          notify(retried?.ok?'Held local intake was reconciled.':
+            'Intake still held: '+String(retried?.code||'UNVERIFIED'));
+          await showBatches();
+        }catch{notify('Intake reconciliation unknown; inspect the batch again.');}
+      }));
+    }
+    batchStatus.append(row);
    }
   }catch{batchStatus.textContent='Batch status unavailable; canonical receipts remain stored.';}
  }
