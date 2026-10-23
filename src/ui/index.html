@@ -411,6 +411,8 @@
           <input id="pcms-restore-fresh" type="checkbox">
           <label for="pcms-restore-mappings">Explicit Persona-key to current container-ID mapping (JSON)</label>
           <textarea id="pcms-restore-mappings" rows="3" spellcheck="false" placeholder='{"persona-1":"firefox-container-1"}'>{}</textarea>
+          <label for="pcms-restore-account-choices">Restored account decisions (JSON): INCLUDE_INACTIVE or EXCLUDE for each account in a fresh profile</label>
+          <textarea id="pcms-restore-account-choices" rows="3" spellcheck="false" placeholder='{"account-id":"INCLUDE_INACTIVE"}'>{}</textarea>
           <button type="button" id="pcms-restore-preview">Inspect and verify archive</button>
           <label for="pcms-restore-checkpoint">Separate pre-restore portable checkpoint from disk</label>
           <input type="file" id="pcms-restore-checkpoint" accept=".pcms.jsonl,.jsonl,application/x-ndjson">
