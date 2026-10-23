@@ -498,8 +498,12 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     api.alarms.onAlarm.addListener(alarm=>{
       if(alarm?.name===REFRESHER_ALARM){void alarmReceipt();void tick();}
     });
-    api.runtime.onStartup.addListener(()=>void tick());
-    api.runtime.onInstalled.addListener(()=>void tick());
+    // Firefox discards alarms on a full exit. Recreate the one wake alarm
+    // *before* slow IDB migration, route readiness or provider monitoring.
+    // Scheduling is a wake hint only; it confers no operating-time credit.
+    const coldWake=()=>{void schedule(clock()+MINUTE);void tick();};
+    api.runtime.onStartup.addListener(coldWake);
+    api.runtime.onInstalled.addListener(coldWake);
     api.runtime.onConnect.addListener(port=>{
       if(port?.name!==REFRESHER_PORT)return;
       let busy=false;
@@ -511,7 +515,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
           .finally(()=>{busy=false;});
       });
     });
-    registered=true;void tick();
+    registered=true;coldWake();
   }
   return Object.freeze({register,tick,run});
 }
