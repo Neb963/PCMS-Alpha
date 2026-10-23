@@ -1107,7 +1107,10 @@ def main():
                   // origin's credentials store must not exist in that origin.
                   const contentIsolation=await (async()=>{
                     const testUrl=A03_URL_LITERAL;
-                    const tab=await browser.tabs.create({url:testUrl,active:false});
+                    const originalTab=await browser.tabs.getCurrent();
+                    // In disposable headless Firefox, an inactive newly
+                    // created tab may remain at about:blank until selected.
+                    const tab=await browser.tabs.create({url:testUrl,active:true});
                     try{
                       // A newly created Firefox tab can transiently report
                       // about:blank as COMPLETE before its requested URL loads.
@@ -1159,7 +1162,10 @@ def main():
                         originGranted:await browser.permissions.contains({
                           origins:['https://example.com/*']})};}
                       return result?.[0]?.result||null;
-                    }finally{await browser.tabs.remove(tab.id);}
+                    }finally{
+                      await browser.tabs.remove(tab.id);
+                      if(originalTab?.id)try{await browser.tabs.update(originalTab.id,{active:true});}catch{}
+                    }
                   })();
                   const isolated=contentIsolation?.ran===true&&
                     contentIsolation.origin===new URL(A03_URL_LITERAL).origin&&
