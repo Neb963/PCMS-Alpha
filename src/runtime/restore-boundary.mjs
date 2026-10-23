@@ -339,6 +339,12 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           args.stageScope!==args.checkpointScope&&
           ['merge','replace'].includes(args.mode)&&
           typeof args.fresh==='boolean'&&validMappings(args.mappings)&&
+          args.accountChoices&&typeof args.accountChoices==='object'&&
+          !Array.isArray(args.accountChoices)&&
+          Object.entries(args.accountChoices).length<=10000&&
+          Object.entries(args.accountChoices).every(([id,choice])=>
+            typeof id==='string'&&id.length>0&&id.length<=256&&
+            ['INCLUDE_INACTIVE','EXCLUDE'].includes(choice))&&
           hex(args.reviewedPlanSha256),'RESTORE_PORTABLE_INPUT_INVALID');
         assert(await gate.read()===null,'RESTORE_ALREADY_HELD');
         const incoming=await readPortableStage(args.stageScope);
@@ -347,12 +353,14 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
         const baseline=await destinationPortable(donor);
         const reviewed=await inspectPortableRestore({
           incoming,mode:args.mode,fresh:args.fresh,
-          mappings:args.mappings,currentPcms:baseline.pcms,
+          mappings:args.mappings,accountChoices:args.accountChoices,
+          currentPcms:baseline.pcms,
           currentDonor:baseline.snap,currentPortable:baseline.portable,
           containers:baseline.snap.containers});
         assert(reviewed.planSha256===args.reviewedPlanSha256,
           'RESTORE_PLAN_CHANGED');
-        assert(Object.keys(args.mappings).length===incoming.donor.personas.length&&
+        assert(reviewed.plan.risk.accountDecisionsMissing===0&&
+          Object.keys(args.mappings).length===incoming.donor.personas.length&&
           !reviewed.plan.groups.some(g=>g.status==='DIRECT_REVIEW_REQUIRED')&&
           reviewed.plan.groups.every(g=>['MAPPING_ONLY_UNVERIFIED',
             'CREATE_REQUESTED'].includes(g.status)),
@@ -369,6 +377,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           reviewedPlanSha256:args.reviewedPlanSha256,
           checkpointTier:checked.tier,fresh:args.fresh,
           recovery:{mode:args.mode,mappings:args.mappings,
+            accountChoices:args.accountChoices,
             portableStageScope:args.stageScope,
             portableCheckpointScope:args.checkpointScope}
         });
@@ -378,7 +387,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
         await applyGuardedGroups({db,donor,baseline,intent,
           req:args.mappings,payload:incoming.donor,
           incomingPcms:incoming.canonical,mode:args.mode,
-          fresh:args.fresh,v2:true});
+          fresh:args.fresh,accountChoices:args.accountChoices,v2:true});
         const final=await gate.inspect();
         assert(final.held&&final.activation==='OFF'&&
           final.status==='COMPLETE_INACTIVE','RESTORE_PORTABLE_FINAL_HOLD_REQUIRED');
