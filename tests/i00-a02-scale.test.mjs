@@ -10,7 +10,7 @@ if(!globalThis.crypto)globalThis.crypto=webcrypto;
 const empty=()=>({schema:1,stores:Object.fromEntries(DB_STORES.map(s=>[s,[]]))});
 const donor=()=>({version:1,settings:null,routes:[],personas:[],
   scripts:[],workflows:[],cookies:{},gmValues:{},automationHistory:[]});
-test('A02 portable archive exceeds legacy 64 MiB without truncation or host',async()=>{
+test('A02 portable archive exceeds legacy 64 MiB without truncation or host', {timeout:180000},async()=>{
   const pcms=empty();
   const source='X'.repeat(69*1024*1024);
   pcms.stores.entities.push({key:'large-source',value:{source}});
@@ -36,8 +36,8 @@ test('A02 portable archive exceeds legacy 64 MiB without truncation or host',asy
   console.log('A02_64M_RESOURCE',JSON.stringify({bytes:archive.bytes,
     fragments:archive.frames,rssDeltaBytes:rssDelta}));
   assert.ok(rssDelta<2*1024*1024*1024,'fixture exceeded bounded test-memory ceiling');
-},{timeout:180000});
-test('A02 100001 canonical rows survive portable framing and recovery stream',async()=>{
+});
+test('A02 100001 canonical rows survive portable framing and recovery stream', {timeout:180000},async()=>{
   const pcms=empty();
   for(let i=0;i<100001;i++)pcms.stores.entities.push({
     key:'generator_'+String(i).padStart(8,'0'),
