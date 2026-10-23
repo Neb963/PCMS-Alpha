@@ -1069,6 +1069,36 @@ def main():
                 diagnostic=execute(after,"return {present:!!document.getElementById('pcms-diagnostic-run'),configured:!!document.getElementById('pcms-diagnostic-designate'),stages:!!document.getElementById('pcms-diagnostic-stages'),ready:!!document.getElementById('pcms-s06-grant-development')}")
                 assert all(diagnostic.values()),diagnostic
                 print('B S08_INSTALLED_FULL_DASHBOARD_ACTION_AND_DIAGNOSTIC_CONTROLS=PASS',flush=True)
+                # A03 B: use the actual installed Firefox extension origin,
+                # real IndexedDB, no network/private Git/PCMS native host.
+                a03_script="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const {createBrowserGitCredentialStore,GIT_SECRET_DATABASE,
+                    browserGitCredentialPacket}=await import('./git-local-secret.mjs');
+                  const store=createBrowserGitCredentialStore();
+                  const id='987654321',token='github_pat_'+('q'.repeat(44));
+                  const saved=await store.put(id,token);
+                  const reopened=createBrowserGitCredentialStore();
+                  const observed=await reopened.get(id);
+                  const status=await reopened.status(id);
+                  const invalid=await browserGitCredentialPacket({
+                    action:'git.dump',repositoryId:id},reopened);
+                  const local=await browser.storage.local.get(null);
+                  const excluded=!JSON.stringify(local).includes(token);
+                  const removed=await reopened.remove(id);
+                  const missing=await store.get(id);
+                  done({ok:saved.ok&&observed.ok&&observed.token===token&&
+                    status.present===true&&invalid.code==='DENIED'&&excluded&&
+                    removed.ok&&missing.code==='GIT_RECONNECT_REQUIRED',
+                    isolated:excluded,reopened:observed.ok,removed:removed.ok,
+                    database:GIT_SECRET_DATABASE});
+                })().catch(e=>done({ok:false,error:String(e).slice(0,190)}));"""
+                a03_probe=call('POST',f'/session/{after}/execute/async',
+                    {'script':a03_script,'args':[]},timeout=35)
+                assert a03_probe.get('ok') is True,('A03_FIREFOX_IDB_FAILURE',a03_probe)
+                assert a03_probe['database']=='pcms-private-git-credentials-v1',a03_probe
+                print('B A03_INSTALLED_FIREFOX_INDEXEDDB_SECRET_READBACK_AND_EXCLUSION=PASS',flush=True)
+
                 # v0.1.4 B evidence: verify the actual installed XPI dashboard.
                 # This tests real packaged assets/DOM and presentation actions
                 # without sending any provider, Git or local mutation command.
