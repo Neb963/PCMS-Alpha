@@ -1,6 +1,7 @@
 // R3: read-only, evidence-scoped operational preflight. Does not install hosts,
 // persist connection state, read provider content or dispatch an external write.
 import {trustedExtensionPage} from './command-boundary.mjs';
+import {browserGitCredentialPacket} from './git-local-secret.mjs';
 import {scanMainCatalog,validRepository} from './git-catalog.mjs';
 export const READINESS_PORT='pcms-r3-readiness';
 const GIT_CONFIG='pcmsS03Git',PENDING='pcmsS03GitPending';
@@ -36,8 +37,12 @@ const probeClassification=(value,transportError)=>{
   return {host:'VERIFIED',vault:'OUTCOME_UNCERTAIN',code:'VAULT_'+short(value.code)};
 };
 export {probeClassification};
-export function createReadinessBoundary(api,{native=(host,p)=>api.runtime.sendNativeMessage(host,p),
+export function createReadinessBoundary(api,{native=null,
   scan=scanMainCatalog,transport=fetch,clock=Date.now,knownRepositoryId='1411034835'}={}){
+  // Historical injected native probes remain as a legacy test seam. The
+  // packaged extension never sends a PCMS native message for readiness.
+  const nativePacket=native||((host,p)=>host===VAULT?
+    browserGitCredentialPacket(p):Promise.resolve({ok:false,code:'DENIED'}));
   async function check({remote=false}={}){
     const rows=[],add=(component,state,stage,code,dependency,recovery,evidence='D',source='RUNTIME',retry='READ_ONLY',scope='LOCAL')=>
       rows.push(result(component,state,stage,code,dependency,recovery,evidence,source,retry,scope,clock()));
@@ -67,11 +72,11 @@ export function createReadinessBoundary(api,{native=(host,p)=>api.runtime.sendNa
       valid?'Read vault and authenticate repository before relying on Git':'Connect GitHub in Settings; do not assume a previous vault write was rolled back',
       'D','LOCAL_CONFIG_METADATA','READ_ONLY','GITHUB');
     let vaultReply=null,vaultError=null;
-    try{vaultReply=await native(VAULT,{action:'git.status',repositoryId:repoId});}catch{vaultError=true;}
+    try{vaultReply=await nativePacket(VAULT,{action:'git.status',repositoryId:repoId});}catch{vaultError=true;}
     // New hosts expose a nonsecret environment-only protocol; old installed
     // hosts explicitly report the missing method, never an invented OK.
     let envReply=null,envError=false;
-    try{envReply=await native(VAULT,{action:'diagnostic.environment'});}catch{envError=true;}
+    try{envReply=await nativePacket(VAULT,{action:'diagnostic.environment'});}catch{envError=true;}
     const environmentOK=envReply?.ok===true&&envReply.protocol===2&&
       envReply.dbusSession===true&&envReply.secretTool===true&&envReply.runtimeDir===true;
     add('SECRET_SERVICE_ENVIRONMENT',environmentOK?'VERIFIED':
@@ -125,12 +130,12 @@ export function createReadinessBoundary(api,{native=(host,p)=>api.runtime.sendNa
       'PERSONAMONKEY','Use guarded Accounts route and session verification; never fall back to Direct',
       'L','NOT_OBSERVED','CONSENT_REQUIRED','ACCOUNTS');
     add('BACKUP_RESTORE','NOT_TESTED','BACKUP','NO_FRESH_RESTORE_EVIDENCE',
-      'NATIVE_BACKUP_HOST','Run guarded backup/restore verification on a disposable profile',
+      'PORTABLE_BACKUP','Use the source-complete browser portable archive and inspect a disposable-profile restore',
       'H','NOT_OBSERVED','CONSENT_REQUIRED','BACKUP');
     for(const [component,host,action] of [
       ['BACKUP_HOST',BACKUP,{action:'resource.inspect'}],
       ['DIAGNOSTIC_HOST',DIAGNOSTIC,{action:'resource.inspect'}]]){
-      try{const response=await native(host,action);
+      try{const response=await nativePacket(host,action);
         add(component,response&&typeof response==='object'?'VERIFIED':'OUTCOME_UNCERTAIN','NATIVE_MESSAGE',
           response?.code==='DENIED'?'READ_ONLY_PROBE_DENIED_HOST_RESPONDED':
           response&&typeof response==='object'?'NATIVE_HOST_RESPONDED':'NATIVE_PROTOCOL_UNRECOGNIZED',
@@ -155,7 +160,7 @@ export function createReadinessBoundary(api,{native=(host,p)=>api.runtime.sendNa
     }else{
       // Credential never crosses the extension background/UI trust boundary.
       let secret=null;
-      try{secret=await native(VAULT,{action:'git.get',repositoryId:config.repositoryId});}catch{}
+      try{secret=await nativePacket(VAULT,{action:'git.get',repositoryId:config.repositoryId});}catch{}
       if(!secret?.ok||!TOKEN.test(secret.credential||'')){
         for(const component of ['GITHUB_AUTH','GITHUB_MAIN_TREE'])add(component,'OUTCOME_UNCERTAIN',
           'VAULT_GET','GIT_CREDENTIAL_UNAVAILABLE','SECRET_SERVICE',
@@ -196,6 +201,31 @@ export function createReadinessBoundary(api,{native=(host,p)=>api.runtime.sendNa
     }
     // The entire result is a strict nonsecret projection. No raw exception,
     // credential, native response, account inventory or private Git data escapes.
+    if(!native){
+      // These legacy host probes do not represent required product services.
+      // Keep the diagnostic about local credential availability, without
+      // advertising an unavailable PCMS installer, vault or Secret Service.
+      const obsolete=new Set(['SECRET_SERVICE_ENVIRONMENT','NATIVE_VAULT_HOST',
+        'SECRET_SERVICE','BACKUP_HOST','DIAGNOSTIC_HOST']);
+      for(let i=rows.length-1;i>=0;i--)if(obsolete.has(rows[i].component))
+        rows.splice(i,1);
+      add('BROWSER_GIT_STORE',classified.vault==='VERIFIED'?'VERIFIED':
+        classified.vault==='UNREACHABLE'?'UNREACHABLE':
+        valid?'OUTCOME_UNCERTAIN':'NOT_CONFIGURED','INDEXEDDB_READ',
+        classified.vault==='VERIFIED'?'LOCAL_GIT_SECRET_PRESENT':
+        classified.vault==='UNREACHABLE'?'LOCAL_GIT_STORAGE_UNAVAILABLE':
+        'LOCAL_GIT_RECONNECT_REQUIRED','FIREFOX_EXTENSION_ORIGIN',
+        'Reconnect GitHub in Settings if the background credential is absent',
+        'D','EXTENSION_ORIGIN_INDEXEDDB','READ_ONLY','GITHUB');
+      for(const entry of rows){
+        entry.dependency=entry.dependency.replaceAll('SECRET_SERVICE','BROWSER_GIT_STORE')
+          .replaceAll('NATIVE_VAULT_HOST','BROWSER_GIT_STORE');
+        entry.safeRecovery=entry.safeRecovery
+          .replace(/Unlock (KDE )?Secret Service[^;]*/g,'Reconnect GitHub in Settings')
+          .replace(/Check DBus session[^;]*/g,'Inspect Firefox extension storage')
+          .replace(/(keyring|vault|Vault)\b/g,'browser credential store');
+      }
+    }
     return {ok:true,schema:1,checkedAt:clock(),remoteRequested:remote,rows};
   }
   async function run(message,sender){const a=validateReadinessMessage(api,sender,message);
