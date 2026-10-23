@@ -560,28 +560,11 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
     if(message.action==='STATUS')return status();
     if(message.action==='APPLY_PORTABLE')return applyPortable(message.params);
     if(message.action==='RECONCILE_PORTABLE')return reconcilePortable(message.params);
-    if(message.action==='PREVIEW_V2')return previewV2(message.params);
-    if(message.action==='APPLY_V2')return applyV2(message.params);
-    if(message.action==='RECONCILE'){
-      if(running)return fail('RESTORE_BUSY');
-      if(typeof message.params?.archiveText!=='string'||
-         message.params.archiveText.length>MAX_ARCHIVE_BYTES||
-         typeof message.params?.checkpointText!=='string'||
-         message.params.checkpointText.length>MAX_ARCHIVE_BYTES||
-         typeof message.params?.password!=='string'||
-         message.params.password.length<12||message.params.password.length>4096)
-        return fail('RESTORE_INPUT_INVALID');
-      let db;
-      try{
-        db=await database();
-        return await reconcileRestore({gate,api,donor:await donorReady(),db,
-          archiveText:message.params?.archiveText,
-          checkpointText:message.params?.checkpointText,
-          password:message.params?.password});
-      }catch(e){return fail(redacted(e));}
-      finally{try{db?.close();}catch{}}
-    }
-    if(message.action==='APPLY')return apply(message.params);
+    // Client amendment v1.0.1: legacy encrypted/password/native commands
+    // are not production restore capabilities. Preserve old implementation as
+    // historical test code, but deny every superseded port operation.
+    if(['PREVIEW_V2','APPLY_V2','RECONCILE','APPLY'].includes(message.action))
+      return fail('RESTORE_COMMAND_NOT_ALLOWED');
     if(message.action==='REACTIVATE'){
       // Explicit fresh-controller activation after a fully observed restore.
       // The operator attests the predecessor PCMS controller is stopped
