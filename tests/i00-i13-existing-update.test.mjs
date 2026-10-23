@@ -17,20 +17,24 @@ const oldFiles=[
   {path:'index.html',base64:b64('<p>F</p>')},
   {path:'src/added.bin',base64:b64([0,255,11])}
 ];
-test('P53-08 F/X: AES-GCM encrypted P has authenticated full binary manifest, wrong password and tampering held',async()=>{
+test('A05 P53-08 F/X: plaintext passwordless full P is source-complete, immutable and corruption-held',async()=>{
   const old=await exactSource(oldFiles);
-  const sealed=await sealPrevious(old,'correct-horse-battery-recovery');
+  const sealed=await sealPrevious(old);
   assert.equal(sealed.ok,true);
-  assert.equal(sealed.ciphertext.includes('old P'),false);
-  assert.equal(JSON.stringify(sealed).includes('deleted.bin'),false);
-  const unlocked=await unlockPrevious(sealed,'correct-horse-battery-recovery');
+  assert.equal(sealed.format,'PCMS_I13_P_PLAIN_V3');
+  assert.equal(sealed.blobs.length,3);
+  assert.equal(sealed.blobs.some(x=>x.path==='src/deleted.bin'),true);
+  assert.equal(JSON.stringify(sealed).includes('ciphertext'),false);
+  const unlocked=await unlockPrevious(sealed);
   assert.equal(unlocked.ok,true);
   assert.equal(unlocked.source.fingerprint,old.fingerprint);
-  assert.equal((await unlockPrevious(sealed,'bad-password-goes-here')).ok,false);
-  assert.equal((await unlockPrevious({...sealed,fingerprint:H},'correct-horse-battery-recovery')).ok,false);
-  assert.equal((await unlockPrevious({...sealed,ciphertext:(sealed.ciphertext[0]==='A'?'B':'A')+sealed.ciphertext.slice(1)},
-    'correct-horse-battery-recovery')).ok,false);
-  assert.equal((await sealPrevious({...old,fingerprint:H},'correct-horse-battery-recovery')).ok,false);
+  const mutated=structuredClone(sealed);
+  mutated.blobs[2].base64=b64([1,255,10]);
+  assert.equal((await unlockPrevious(mutated)).ok,false);
+  assert.equal((await unlockPrevious({...sealed,fingerprint:H})).ok,false);
+  assert.equal((await unlockPrevious({format:'PCMS_I13_P_V1',fingerprint:old.fingerprint})).code,
+    'RECOVERY_LEGACY_PASSWORD_SEAL_HELD');
+  assert.equal((await sealPrevious({...old,fingerprint:H})).ok,false);
 });
 test('P53-07 F/X: adopted public P requires same owner, archived original and real sleeping slot',async()=>{
   const original=await exactSource(oldFiles);
@@ -141,26 +145,26 @@ test('P53-08 X: lost ack is uncertain and dirty/peer/human/external edits yield 
     assert.equal(lost.state().saves,1);
   }finally{lost.restore();}
 });
-test('I13 X: forged ports, untyped passphrases, target confusion and caller source all denied',async()=>{
+test('A05 X: forged ports, prohibited password input, target confusion and caller source all denied',async()=>{
   const sender={id:'fixture',url:'moz-extension://fixture/pcms/index.html'};
   const api={runtime:{id:'fixture',getURL:p=>'moz-extension://fixture/'+p},
     storage:{local:{get:async()=>({})}}};
-  const good={type:'PREPARE',params:{slug,passphrase:'password-long-enough'}};
+  const good={type:'PREPARE',params:{slug}};
   assert.equal(validateExistingMessage(api,sender,good).ok,true);
   // S05 READY is authorized through the protected Git vault. Legacy
   // source inspection still refuses the absent credential internally.
   assert.equal(validateExistingMessage(api,sender,{type:'PIN_STAGE',params:{
-    slug,expectedRevision:3,passphrase:'password-long-enough'}}).ok,true);
+    slug,expectedRevision:3}}).ok,true);
   assert.equal(validateExistingMessage(api,sender,{type:'PIN_STAGE',params:{
-    slug,expectedRevision:3,passphrase:'password-long-enough',token:'short'}}).ok,false);
+    slug,expectedRevision:3,token:'short'}}).ok,false);
   assert.equal(validateExistingMessage(api,{...sender,url:'https://perchance.org'},good).code,'UNTRUSTED_SENDER');
   for(const invalid of [
     {type:'PUBLISH',params:{slug}},
     {...good,params:{...good.params,sourceBytes:oldFiles}},
     {...good,params:{...good.params,slug:'../wrong'}},
-    {...good,params:{...good.params,passphrase:'short'}},
+    {...good,params:{...good.params,passphrase:'password-unexpected'}},
     {type:'STAGE',params:{slug,expectedRevision:1,source:newFiles}},
-    {type:'RESTORE',params:{slug,expectedRevision:0,passphrase:'password-long-enough'}}
+    {type:'RESTORE',params:{slug,expectedRevision:0}}
   ])assert.equal(validateExistingMessage(api,sender,invalid).ok,false);
   let effects=0;
   const boundary=createExistingBoundary(api,{
