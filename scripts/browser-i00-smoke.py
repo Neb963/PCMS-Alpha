@@ -527,7 +527,9 @@ def inventory_idb_probe(session):
           observationId:'fixture_identity_01'}});
       const items=Array.from({length:1250},(_,i)=>({
         slug:'gen-'+String(i).padStart(4,'0'),
-        remoteId:'remote-'+String(i).padStart(8,'0'),
+        // This generator is a legacy slug-only observation to be independently
+        // upgraded by the later I07 protected full-source public-ID readback.
+        remoteId:i===999?'slug-gen-0999':'remote-'+String(i).padStart(8,'0'),
         ownerResult:'IS_OWNER',ownerObservationId:'owner_proof_01',
         ownerPrincipalFingerprint:fingerprint,visibility:'UNLISTED'
       }));
