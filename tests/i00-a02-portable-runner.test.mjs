@@ -49,6 +49,9 @@ function fixture({failedDispatch=false,manualInterrupted=false}={}){
     effects:()=>effects,captures:()=>captures,
     finishManualDownload:()=>{for(const row of downloaded.values()){
       row.state='complete';row.exists=true;}interrupt=false;},
+    replaceManualRunId:fake=>{for(const row of downloaded.values())
+      row.filename=row.filename.replace(/pcms-alpha-manual_[a-f0-9]{32}/,
+        'pcms-alpha-'+fake);},
     cold:()=>createPortableRunner(api,{open:async()=>db,clock:()=>100000000,
       nextId:()=>String(++next).padStart(32,'0'),capture,dispatch,wait})};
 }
@@ -114,4 +117,15 @@ test('A02 manual interrupted download reconciles a later verified completion aft
   assert.equal(recovered.ok,true,JSON.stringify(recovered));
   assert.equal(recovered.code,'BROWSER_REPORTED_COMPLETE');
   assert.equal(f.effects(),2,'new manual export occurs only after receipt reconciliation');
+});
+
+test('A02 readback rejects a foreign same-sized manual file despite matching download ID',async()=>{
+  const f=fixture({manualInterrupted:true});
+  assert.equal((await f.runner.manual()).code,'DOWNLOAD_OUTCOME_UNKNOWN');
+  const cold=f.cold();
+  f.finishManualDownload();
+  f.replaceManualRunId('manual_'+'f'.repeat(32));
+  assert.equal((await cold.manual()).code,'MANUAL_DOWNLOAD_UNCERTAIN');
+  assert.equal(f.effects(),1,'foreign file cannot authorize another download');
+  assert.equal(f.db.read('meta','backup:manual-active').status,'HELD_UNCERTAIN');
 });
