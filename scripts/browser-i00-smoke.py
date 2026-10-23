@@ -1339,6 +1339,53 @@ def main():
                 guard=wait_donor_ready(after)
                 assert guard and guard.get('phase')=='I01',f'Missing I01 wake status: {guard}'
                 assert guard.get('providerEffects')=='OFF',guard
+                # A02 installed-XPI B: execute the actual packaged portable codec,
+                # durable browser IndexedDB stage and background backup port.
+                # This is fixture proof, NOT an independent disk-reopened H proof.
+                a02_script="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const core=await import('./backup-core.mjs');
+                  const codec=await import('./portable-archive.mjs');
+                  const stage=await import('./portable-restore-stage.mjs');
+                  const plan=await import('./portable-restore-plan.mjs');
+                  const empty={schema:1,stores:Object.fromEntries(core.DB_STORES.map(s=>[s,[]]))};
+                  empty.stores.meta.push({key:'a02-source-typed',value:{
+                    date:core.serializeClone(new Date('2026-10-22T10:00:00.000Z')),
+                    text:'portable-source-ä-漢字'}});
+                  const donor={version:1,settings:null,routes:[],personas:[],
+                    scripts:[],workflows:[],cookies:{},gmValues:{},automationHistory:[]};
+                  const archive=await codec.encodePortableArchive({pcms:empty,donor});
+                  const decoded=await codec.readPortableArchive(archive.blob);
+                  const prepared=await stage.preparePortableStage(archive.blob);
+                  const reopened=await stage.readPortableStage(prepared.scope);
+                  const checkpoint=await plan.verifyPortableCheckpoint({
+                    checkpoint:reopened,currentPcms:empty,currentPortable:donor});
+                  const lines=(await archive.blob.text()).split(String.fromCharCode(10));
+                  let corruptDenied=false;
+                  try{await codec.readPortableArchive(new Blob([
+                    lines.slice(0,-2).join(String.fromCharCode(10))+
+                    String.fromCharCode(10)]));}
+                  catch{corruptDenied=true;}
+                  const portStatus=await new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-i15-backup'});
+                    port.onMessage.addListener(v=>{port.disconnect();resolve(v)});
+                    port.onDisconnect.addListener(()=>resolve({ok:false,code:'DISCONNECTED'}));
+                    port.postMessage({action:'STATUS'});
+                  });
+                  done({ok:decoded.integrity==='FRAME_AND_SOURCE_VERIFIED'&&
+                    reopened.sourceVerified===true&&checkpoint.verified===true&&
+                    corruptDenied&&portStatus?.format==='PORTABLE'&&
+                    portStatus?.passwordRequired===false&&
+                    !document.getElementById('pcms-backup-passphrase')&&
+                    !document.getElementById('pcms-auto-backup-vault')&&
+                    !document.getElementById('pcms-restore-passphrase'),
+                    stageRows:reopened.receipt.rows,format:portStatus?.format,
+                    hasNativeVaultControl:!!document.getElementById('pcms-auto-backup-vault')});
+                })().catch(error=>done({ok:false,error:String(error)}));"""
+                a02_result=call('POST',f'/session/{after}/execute/async',
+                    {'script':a02_script,'args':[]},timeout=90)
+                assert a02_result.get('ok') is True,a02_result
+                print('B A02_INSTALLED_PASSWORDLESS_PORTABLE_CODEC_AND_STAGING=PASS',flush=True)
                 canonical=canonical_command(after,{'type':'SUMMARY'})
                 assert canonical.get('ok') is True and canonical.get('storage')=='READY',canonical
                 assert canonical.get('providerEffects')=='OFF',canonical
