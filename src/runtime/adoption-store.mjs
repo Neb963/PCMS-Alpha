@@ -144,6 +144,70 @@ export function createAdoptionStore(db){
       };
     });
   }
+  // A fresh slug-only account poll cannot invalidate or silently inherit a
+  // proven immutable public ID. A separate protected original readback may
+  // revalidate the exact ID, account and Persona, with CAS in one transaction.
+  function recheckIdentity(slug,expectedRevision,original){
+    if(!original?.ok||original.source!=='INDEPENDENT_FULL_BYTE_READBACK'||
+       typeof original.remotePublicId!=='string')
+      return Promise.resolve(fail('IDENTITY_PROOF_UNVERIFIED'));
+    return tx(db,'readwrite',(t,done)=>{
+      const m=t.objectStore('meta');
+      m.get('inventory:'+slug).onsuccess=i=>{
+        const row=i.target.result?.generator;
+        if(!row||row.revision!==expectedRevision){
+          done(fail(row?'STALE_REVISION':'TARGET_NOT_OBSERVED'));return;
+        }
+        if(row.identityHold!=='PUBLIC_ID_REVALIDATION_REQUIRED'||
+           row.ownerState!=='IDENTITY_CONFLICT'||
+           row.identitySchema!==2||
+           row.identityBasis!=='INDEPENDENT_FULL_BYTE_READBACK'||
+           row.identityAliases?.length!==1||
+           row.identityAliases[0]!=='slug-'+slug)
+          {done(fail('IDENTITY_NOT_RECHECKABLE'));return;}
+        m.get('account:'+row.accountId).onsuccess=a=>{
+          const account=a.target.result?.account;
+          if(!account||account.state!=='VERIFIED'||
+             account.revision!==row.accountRevision||
+             account.personaUid!==row.personaUid||
+             account.bindingVersion!==row.bindingVersion||
+             account.identity?.source!=='GUARDED_SESSION_READBACK'||
+             account.identity?.bindingVersion!==row.bindingVersion||
+             !/^[0-9a-f]{64}$/.test(account.identity?.principalFingerprint||''))
+            {done(fail('ACCOUNT_CONTEXT_CHANGED'));return;}
+          m.get('identity-alias:'+slug).onsuccess=b=>{
+            const alias=b.target.result?.identity;
+            if(!alias||alias.schema!==2||
+               alias.accountId!==row.accountId||
+               alias.personaUid!==row.personaUid||
+               alias.bindingVersion!==row.bindingVersion||
+               alias.publicId!==row.remoteId||
+               alias.publicId!==original.remotePublicId)
+              {done(fail('IDENTITY_IMMUTABLE_ID_CHANGED'));return;}
+            m.get(key(slug)).onsuccess=d=>{
+              const adopted=d.target.result?.adoption;
+              if(!adopted||adopted.remotePublicId!==alias.publicId||
+                 adopted.accountId!==row.accountId||
+                 adopted.personaUid!==row.personaUid||
+                 adopted.principalFingerprint!==account.identity.principalFingerprint)
+                {done(fail('IDENTITY_ADOPTION_MISMATCH'));return;}
+              const updated={...row,ownerState:'OBSERVED_OWNER',
+                identityHold:null,revision:row.revision+1,
+                identityProof:{source:'ORIGINAL_SOURCE_RECHECK',
+                  fingerprint:original.fingerprint,observedAt:original.observedAt}};
+              m.put({key:'inventory:'+slug,generator:updated});
+              t.objectStore('events').add({stage:'INVENTORY_PUBLIC_ID_RECHECKED',
+                slug,accountId:row.accountId,remoteId:alias.publicId,
+                revision:updated.revision});
+              done({ok:true,code:'IDENTITY_PUBLIC_ID_REVALIDATED',
+                revision:updated.revision,providerWrites:'OFF',gitWrites:'OFF'});
+            };
+          };
+        };
+      };
+    });
+  }
+
   function archiveLocal(slug,expectedRevision){
     return tx(db,'readwrite',(t,done)=>{
       const m=t.objectStore('meta');
