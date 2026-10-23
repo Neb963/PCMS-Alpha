@@ -432,7 +432,10 @@ def source_idb_probe(session):
       const boundary=createSourceBoundary(api,{inspect});
       const get=(slug)=>boundary.run({type:'GET_ASSOCIATION',params:{slug}},sender);
       const bind=(slug)=>boundary.run({type:'ASSOCIATE_SOURCE',params:{
-        slug,folder:'gens/a',token:'offline-fixture-token',expectedRevision:1,
+        slug,folder:'gens/a',token:'offline-fixture-token',
+        // A03 adoption upgraded gen-0999 from a slug locator to an
+        // independently verified public ID in the canonical IDB transaction.
+        expectedRevision:slug==='gen-0999'?2:1,
         pinnedHead:'b'.repeat(40),pinnedFingerprint:'a'.repeat(64),
         pinnedTestingSha:null
       }},sender);
