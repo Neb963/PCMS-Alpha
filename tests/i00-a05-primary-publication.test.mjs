@@ -36,3 +36,11 @@ test('A05 approval and publication have no PCMS native credential or password pr
     type:'PREVIEW',params:{slug:'test-generator',passphrase:'unexpected-password'}
   }).ok,false,'a password must not be a live release-port input');
 });
+
+test('A05 autonomous public READY continuation requires no PCMS vault or recovery password',async()=>{
+  const code=await readFile('src/runtime/ready-development.mjs','utf8');
+  assert.doesNotMatch(code,/sendNativeMessage\('local\.pcms\.backup_vault'/);
+  assert.doesNotMatch(code,/vault\.passphrase/);
+  assert.doesNotMatch(code,/S05_RECOVERY_SECRET_SERVICE_UNAVAILABLE/);
+  assert.match(code,/b\.existing\.runTrusted/);
+});
