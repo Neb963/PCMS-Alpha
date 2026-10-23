@@ -1,10 +1,11 @@
 import {fail} from './journal.mjs';
 import {validateAdoptionIntent,continuity,publicAdoption} from './adoption.mjs';
+import {planOriginalIdentityMigration} from './identity-reconciliation.mjs';
 const key=slug=>'adoption:'+slug;
 function tx(db,mode,cb){
   return new Promise((resolve,reject)=>{
     let result=fail('ADOPTION_TRANSACTION_INCOMPLETE'),t;
-    try{t=db.transaction(['meta','events'],mode);}catch{return reject(Error('IDB_UNAVAILABLE'));}
+    try{t=db.transaction(mode==='readonly'?['meta','events']:['meta','events','operations'],mode);}catch{return reject(Error('IDB_UNAVAILABLE'));}
     t.oncomplete=()=>resolve(result);
     t.onabort=()=>reject(Error('IDB_ABORTED'));
     t.onerror=()=>{};
@@ -49,31 +50,87 @@ export function createAdoptionStore(db){
           if(!eligible.ok){done(eligible);return;}
           m.get('source-link:'+slug).onsuccess=lv=>{
             const link=lv.target.result?.link;
-            if(link&&(link.accountId!==row.accountId||link.remoteId!==row.remoteId||
-               link.bindingVersion!==row.bindingVersion)){
-              done(fail('SOURCE_ASSOCIATION_CONFLICT'));return;
-            }
+            const migration=planOriginalIdentityMigration(row,account,original,link);
+            if(!migration.ok){done(fail(migration.code));return;}
             m.get(key(slug)).onsuccess=old=>{
               const prior=old.target.result?.adoption;
               const candidate={slug,accountId:row.accountId,personaUid:row.personaUid,
                 bindingVersion:row.bindingVersion,accountRevision:account.revision,
-                inventoryRevision:row.revision,remotePublicId:original.remotePublicId,
+                inventoryRevision:migration.record.revision,
+                remotePublicId:original.remotePublicId,
                 principalFingerprint:account.identity.principalFingerprint};
               const cont=continuity(prior,candidate);
               if(!cont.ok){done(cont);return;}
               if(prior){done({...publicAdoption(prior),duplicate:true});return;}
-              const rec={...candidate,revision:1,archived:false,
-                visibility:row.visibility,consent:row.visibility!=='PUBLIC'?'AUTO_UNLISTED':
-                  explicitPublicConsent===true?'OPERATOR_EXPLICIT_PUBLIC':'STANDING_ACCOUNT_MANAGEMENT',
-                management:row.visibility==='PUBLIC'?
-                  'CONSENTED_ARCHIVE_PENDING':'DISCOVERED_ARCHIVE_PENDING',
-                original,archiveState:'ARCHIVE_PENDING',createdAt:original.observedAt};
-              m.add({key:key(slug),adoption:rec});
-              t.objectStore('events').add({stage:'ORIGINAL_CAPTURED',slug,
-                accountId:row.accountId,originalFingerprint:original.fingerprint,
-                files:original.files.length,visibility:row.visibility});
-              done({...publicAdoption(rec),duplicate:false});
+              const publish=()=>{
+                const rec={...candidate,revision:1,archived:false,
+                  visibility:row.visibility,consent:row.visibility!=='PUBLIC'?'AUTO_UNLISTED':
+                    explicitPublicConsent===true?'OPERATOR_EXPLICIT_PUBLIC':'STANDING_ACCOUNT_MANAGEMENT',
+                  management:row.visibility==='PUBLIC'?
+                    'CONSENTED_ARCHIVE_PENDING':'DISCOVERED_ARCHIVE_PENDING',
+                  original,archiveState:'ARCHIVE_PENDING',createdAt:original.observedAt};
+                if(migration.changed){
+                  m.put({key:'inventory:'+slug,generator:migration.record});
+                  m.put({key:'identity-alias:'+slug,identity:migration.alias});
+                  t.objectStore('events').add({stage:'INVENTORY_PUBLIC_ID_PROVEN',
+                    slug,accountId:row.accountId,from:row.remoteId,
+                    to:migration.alias.publicId,identitySchema:2,
+                    fingerprint:original.fingerprint});
+                }
+                m.add({key:key(slug),adoption:rec});
+                t.objectStore('events').add({stage:'ORIGINAL_CAPTURED',slug,
+                  accountId:row.accountId,originalFingerprint:original.fingerprint,
+                  files:original.files.length,visibility:row.visibility});
+                done({...publicAdoption(rec),duplicate:false});
+              };
+              if(!migration.changed){publish();return;}
+              // Local alias and remote-id collision checks are transactional.
+              // Neither a second account nor a different slug may inherit
+              // this provider immutable ID, even when source bytes match.
+              const checkCollision=()=>{
+                const cursor=m.openCursor();
+                cursor.onsuccess=e=>{
+                  const c=e.target.result;
+                  if(!c){publish();return;}
+                  const rowOther=c.value?.generator;
+                  const aliasOther=c.value?.identity;
+                  if((c.key.startsWith('inventory:')&&rowOther&&rowOther.slug!==slug&&
+                     (rowOther.remoteId===original.remotePublicId||
+                      rowOther.identityAliases?.includes(original.remotePublicId)))||
+                     (c.key.startsWith('identity-alias:')&&aliasOther&&
+                      aliasOther.slug!==slug&&aliasOther.publicId===original.remotePublicId)){
+                    done(fail('IDENTITY_PUBLIC_ID_ALREADY_BOUND'));return;
+                  }
+                  c.continue();
+                };
+              };
+              const checkOperations=()=>{
+                const cursor=t.objectStore('operations').openCursor();
+                cursor.onsuccess=e=>{
+                  const c=e.target.result;
+                  if(!c){checkCollision();return;}
+                  const operation=c.value||{};
+                  const scope=[operation.slug,operation.targetSlug,
+                    operation.resourceSlug,operation.requestedSlug,
+                    operation.metadata?.slug,operation.targetId];
+                  if(scope.includes(slug)&&
+                     !['CONFIRMED','ABORTED','REJECTED','COMPLETED'].includes(operation.status)){
+                    done(fail('IDENTITY_UNCERTAIN_OPERATION_HELD'));return;
+                  }
+                  c.continue();
+                };
+              };
+              m.get('identity-alias:'+slug).onsuccess=e=>{
+                const oldAlias=e.target.result?.identity;
+                if(oldAlias&&(oldAlias.publicId!==migration.alias.publicId||
+                   oldAlias.previousId!==migration.alias.previousId)){
+                  done(fail('IDENTITY_ALIAS_CONFLICT'));return;
+                }
+                checkOperations();
+              };
             };
+          };
+        };
           };
         };
       };
