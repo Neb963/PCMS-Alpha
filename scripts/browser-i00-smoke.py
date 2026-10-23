@@ -1113,7 +1113,8 @@ def main():
                         if((await browser.tabs.get(tab.id)).status==='complete')break;
                         await new Promise(resolve=>setTimeout(resolve,100));
                       }
-                      const result=await browser.scripting.executeScript({
+                      let result;
+                      try{result=await browser.scripting.executeScript({
                         target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
                         func:async(name,key)=>{
                           try{
@@ -1138,7 +1139,12 @@ def main():
                             return {ran:true,origin:location.origin,found:false};
                           }
                         },args:[GIT_SECRET_DATABASE,id]
-                      });
+                      });}
+                      catch(error){return {ran:false,error:String(error).slice(0,120),
+                        url:(await browser.tabs.get(tab.id)).url,
+                        permissions:await browser.permissions.getAll(),
+                        originGranted:await browser.permissions.contains({
+                          origins:['https://example.com/*']})};}
                       return result?.[0]?.result||null;
                     }finally{await browser.tabs.remove(tab.id);}
                   })();
@@ -1157,7 +1163,7 @@ def main():
                     deniedPort.ok===false&&
                     !JSON.stringify(deniedPort).includes(token)&&excluded&&
                     removed.ok&&missing.code==='GIT_RECONNECT_REQUIRED'&&restored.ok,
-                    isolated,excluded,reopened:observed.ok,removed:removed.ok,
+                    isolated,contentIsolation,excluded,reopened:observed.ok,removed:removed.ok,
                     database:GIT_SECRET_DATABASE});
                 })().catch(e=>done({ok:false,error:String(e).slice(0,190)}));"""
                 a03_script=a03_script.replace('A03_URL_LITERAL',json.dumps(a03_url))
