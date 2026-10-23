@@ -93,8 +93,14 @@ export async function* framedLines(source){
   const decoder=new TextDecoder('utf-8',{fatal:true});
   let buffer='',lineCount=0;
   for await(const value of iterable){
-    requireValid(value instanceof Uint8Array,'PORTABLE_CHUNK_INVALID');
-    buffer+=decoder.decode(value,{stream:true});
+    // Firefox can surface Uint8Array views from another extension/DOM realm;
+    // instanceof Uint8Array is not a reliable byte-class test across realms.
+    const bytes=ArrayBuffer.isView(value)?
+      new Uint8Array(value.buffer,value.byteOffset,value.byteLength):
+      Object.prototype.toString.call(value)==='[object ArrayBuffer]'?
+      new Uint8Array(value):null;
+    requireValid(bytes!==null,'PORTABLE_CHUNK_INVALID');
+    buffer+=decoder.decode(bytes,{stream:true});
     let end;
     while((end=buffer.indexOf('\n'))!==-1){
       const line=buffer.slice(0,end);buffer=buffer.slice(end+1);
