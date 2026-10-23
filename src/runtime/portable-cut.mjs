@@ -40,7 +40,7 @@ export async function capturePortableCut(api,db,sentinel,{readDonor=waitForPcmsB
   const sourceAudit=await preflightSourceRecovery(pcms);
   const built=await encodePortableArchive({pcms,donor:original.portable,
     appVersion:api.runtime.getManifest().version});
-  const verified=await verify(db,pcms);
+  const verified=await verify(db,pcms,{serializedValues:true});
   requireValid(verified?.ok===true,'BACKUP_SOURCE_CUT_CHANGED');
   const afterwards=await snapshotDonor(api,readDonor);
   consistentOrThrow(original.cut,afterwards.cut);
