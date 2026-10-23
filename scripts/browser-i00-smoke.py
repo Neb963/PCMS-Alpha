@@ -1088,6 +1088,17 @@ def main():
                   const status=await reopened.status(id);
                   const invalid=await browserGitCredentialPacket({
                     action:'git.dump',repositoryId:id},reopened);
+                  // Even the trusted dashboard cannot retrieve Git secrets
+                  // using any public port operation.
+                  const deniedPort=await new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-s03-catalog'});
+                    port.onMessage.addListener(v=>{
+                      try{port.disconnect()}catch{}
+                      resolve(v);
+                    });
+                    port.onDisconnect.addListener(()=>resolve({ok:false,code:'PORT_CLOSED'}));
+                    port.postMessage({type:'GET_CREDENTIAL',params:{repositoryId:id}});
+                  });
                   const local=await browser.storage.local.get(null);
                   const excluded=!JSON.stringify(local).includes(token);
                   const removed=await reopened.remove(id);
@@ -1096,7 +1107,9 @@ def main():
                   // Firefox shutdown/relaunch assertion below.
                   const restored=await store.put(id,token);
                   done({ok:saved.ok&&observed.ok&&observed.token===token&&
-                    status.present===true&&invalid.code==='DENIED'&&excluded&&
+                    status.present===true&&invalid.code==='DENIED'&&
+                    deniedPort.ok===false&&
+                    !JSON.stringify(deniedPort).includes(token)&&excluded&&
                     removed.ok&&missing.code==='GIT_RECONNECT_REQUIRED'&&restored.ok,
                     isolated:excluded,reopened:observed.ok,removed:removed.ok,
                     database:GIT_SECRET_DATABASE});
