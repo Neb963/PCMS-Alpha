@@ -131,8 +131,6 @@ export function createAdoptionStore(db){
             };
           };
         };
-          };
-        };
       };
     });
   }
