@@ -1099,58 +1099,6 @@ def main():
                     port.onDisconnect.addListener(()=>resolve({ok:false,code:'PORT_CLOSED'}));
                     port.postMessage({type:'GET_CREDENTIAL',params:{repositoryId:id}});
                   });
-                  // Real installed Firefox: a sandboxed, opaque-origin
-                  // document executes in the same browser without route
-                  // exceptions or granting access to the extension's IDB.
-                  // This proves document-origin isolation, not execution of
-                  // the separate content-script principal. Record that gap.
-                  const contentIsolation=await new Promise(resolve=>{
-                    const frame=document.createElement('iframe');
-                    frame.setAttribute('sandbox','allow-scripts');
-                    frame.style.display='none';
-                    const nonce='a03_'+crypto.randomUUID();
-                    let settled=false;
-                    const finish=value=>{
-                      if(settled)return;
-                      settled=true;clearTimeout(timeout);
-                      window.removeEventListener('message',onMessage);
-                      frame.remove();resolve(value);
-                    };
-                    const onMessage=e=>{
-                      if(e.source!==frame.contentWindow||e.origin!=='null'||
-                         e.data?.nonce!==nonce)return;
-                      finish({ran:e.data.ran===true,origin:e.origin,
-                        found:e.data.found===true,denied:e.data.denied===true});
-                    };
-                    const timeout=setTimeout(()=>
-                      finish({ran:false,error:'SANDBOX_ORIGIN_UNAVAILABLE'}),5000);
-                    window.addEventListener('message',onMessage);
-                    const inner=`(async()=>{
-                      const nonce=${JSON.stringify(nonce)};
-                      let found=false,denied=false;
-                      try{
-                        const db=await new Promise((resolve,reject)=>{
-                          const q=indexedDB.open(${JSON.stringify(GIT_SECRET_DATABASE)});
-                          q.onsuccess=()=>resolve(q.result);
-                          q.onerror=()=>reject(Error('OP_IDB_DENIED'));
-                        });
-                        if(db.objectStoreNames.contains('credentials')){
-                          found=await new Promise(resolve=>{
-                            const req=db.transaction('credentials','readonly')
-                              .objectStore('credentials').get(${JSON.stringify(id)});
-                            req.onsuccess=()=>resolve(!!req.result);
-                            req.onerror=()=>resolve(false);
-                          });
-                        }
-                        db.close();
-                      }catch{denied=true;}
-                      parent.postMessage({nonce,ran:true,found,denied},'*');
-                    })();`;
-                    frame.srcdoc='<!doctype html><script>'+inner+'</script>';
-                    document.body.append(frame);
-                  });
-                  const isolated=contentIsolation.ran===true&&
-                    contentIsolation.origin==='null'&&!contentIsolation.found;
                   const local=await browser.storage.local.get(null);
                   const excluded=!JSON.stringify(local).includes(token);
                   const removed=await reopened.remove(id);
@@ -1159,17 +1107,62 @@ def main():
                   // Firefox shutdown/relaunch assertion below.
                   const restored=await store.put(id,token);
                   done({ok:saved.ok&&observed.ok&&observed.token===token&&
-                    status.present===true&&invalid.code==='DENIED'&&isolated&&
+                    status.present===true&&invalid.code==='DENIED'&&
                     deniedPort.ok===false&&
                     !JSON.stringify(deniedPort).includes(token)&&excluded&&
                     removed.ok&&missing.code==='GIT_RECONNECT_REQUIRED'&&restored.ok,
-                    isolated,contentIsolation,excluded,reopened:observed.ok,removed:removed.ok,
+                    excluded,reopened:observed.ok,removed:removed.ok,
                     database:GIT_SECRET_DATABASE});
                 })().catch(e=>done({ok:false,error:String(e).slice(0,190)}));"""
                 a03_probe=call('POST',f'/session/{after}/execute/async',
                     {'script':a03_script,'args':[]},timeout=30)
                 assert a03_probe.get('ok') is True,('A03_FIREFOX_IDB_FAILURE',a03_probe)
                 assert a03_probe['database']=='pcms-private-git-credentials-v1',a03_probe
+                # Inspect a REAL distinct web-document principal using the
+                # CI WebDriver controller. The sandbox's inline JS is blocked
+                # by the extension CSP, so execute from Marionette in-frame.
+                # No extension content-script permission or donor-route
+                # exception is granted; this is narrower than content-script B.
+                a03_frame=execute(after,"""const frame=document.createElement('iframe');
+                  frame.id='pcms-a03-opaque-fixture';
+                  frame.setAttribute('sandbox','allow-scripts');
+                  frame.srcdoc='<!doctype html><title>A03 isolated document</title>';
+                  document.body.append(frame);
+                  return {mounted:!!document.getElementById('pcms-a03-opaque-fixture')};""")
+                assert a03_frame['mounted'],a03_frame
+                a03_el=call('POST',f'/session/{after}/element',{
+                    'using':'css selector','value':'#pcms-a03-opaque-fixture'})
+                try:
+                    call('POST',f'/session/{after}/frame',{'id':a03_el})
+                    a03_isolation=call('POST',f'/session/{after}/execute/async',{
+                        'script':"""const done=arguments[arguments.length-1];
+                        (async()=>{
+                          let found=false,denied=false;
+                          try{
+                            const db=await new Promise((resolve,reject)=>{
+                              const req=indexedDB.open('pcms-private-git-credentials-v1');
+                              req.onsuccess=()=>resolve(req.result);
+                              req.onerror=()=>reject(Error('ISOLATED_IDB_DENIED'));
+                            });
+                            if(db.objectStoreNames.contains('credentials')){
+                              found=await new Promise(resolve=>{
+                                const q=db.transaction('credentials','readonly')
+                                  .objectStore('credentials').get('987654321');
+                                q.onsuccess=()=>resolve(!!q.result);
+                                q.onerror=()=>resolve(false);
+                              });
+                            }
+                            db.close();
+                          }catch{denied=true;}
+                          done({ran:true,origin:location.origin,found,denied});
+                        })().catch(e=>done({ran:false,error:String(e)}));""",
+                        'args':[]},timeout=30)
+                finally:
+                    call('POST',f'/session/{after}/frame',{'id':None})
+                    execute(after,"document.getElementById('pcms-a03-opaque-fixture')?.remove();return true")
+                assert a03_isolation=={'ran':True,'origin':'null',
+                    'found':False,'denied':True},('A03_SANDBOX_ISOLATION_FAILURE',a03_isolation)
+
                 print('B A03_INSTALLED_FIREFOX_INDEXEDDB_SECRET_READBACK_AND_EXCLUSION=PASS',flush=True)
                 print('B A03_SANDBOX_WEB_DOCUMENT_DENIED_EXTENSION_GIT_DATABASE=PASS',flush=True)
                 print('B A03_REAL_CONTENT_SCRIPT_INJECTION=NOT_TESTED_ROUTING_HOLD',flush=True)
