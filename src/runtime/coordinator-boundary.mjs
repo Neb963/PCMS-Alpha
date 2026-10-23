@@ -6,7 +6,8 @@ import {createCreationRunner} from './creation-runner.mjs';
 import {standingS06} from './s06-standing-authority.mjs';
 export const COORDINATOR_PORT='pcms-s00-coordinator';
 const types=new Set(['ACCEPT_CREATE_INTENT','GET_CREATE_INTENT','LIST_CREATE_INTENTS','ALLOCATE_CREATE_INTENT','RUN_CREATE_STEP','ADVANCE_CREATE_INTENT',
-  'BEGIN_CREATE_BATCH','APPEND_CREATE_BATCH','FINALIZE_CREATE_BATCH','GET_CREATE_BATCH','LIST_CREATE_BATCHES']);
+  'BEGIN_CREATE_BATCH','APPEND_CREATE_BATCH','FINALIZE_CREATE_BATCH','GET_CREATE_BATCH','LIST_CREATE_BATCHES',
+  'LIST_CREATE_BATCH_HOLDS','RETRY_CREATE_BATCH_HOLD']);
 export function validateCoordinatorMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let encoded;
@@ -34,6 +35,16 @@ export function validateCoordinatorMessage(api,sender,message){
   }else if(message.type==='FINALIZE_CREATE_BATCH'||message.type==='GET_CREATE_BATCH'){
     if(Object.keys(p).some(k=>k!=='batchId')||
        !/^batch_[0-9a-f]{32}$/.test(p.batchId||''))return fail('INVALID_BATCH');
+  }else if(message.type==='LIST_CREATE_BATCH_HOLDS'){
+    if(Object.keys(p).some(k=>!['batchId','after','limit'].includes(k))||
+       !/^batch_[0-9a-f]{32}$/.test(p.batchId||'')||
+       (p.after!==undefined&&p.after!==null&&(!Number.isSafeInteger(p.after)||p.after<0))||
+       (p.limit!==undefined&&(!Number.isSafeInteger(p.limit)||p.limit<1||p.limit>100)))
+      return fail('INVALID_BATCH_HOLD_CURSOR');
+  }else if(message.type==='RETRY_CREATE_BATCH_HOLD'){
+    if(Object.keys(p).some(k=>!['batchId','index'].includes(k))||
+       !/^batch_[0-9a-f]{32}$/.test(p.batchId||'')||
+       !Number.isSafeInteger(p.index)||p.index<0)return fail('INVALID_BATCH_HOLD');
   }else if(message.type==='LIST_CREATE_BATCHES'){
     if(Object.keys(p).some(k=>!['after','limit'].includes(k))||
        (p.after!==undefined&&p.after!==null&&!/^batch_[0-9a-f]{32}$/.test(p.after))||
@@ -72,6 +83,8 @@ export function createCoordinatorBoundary(api,{open=openCanonicalDatabase,
       if(message.type==='FINALIZE_CREATE_BATCH')return await s.finalizeBatch(p);
       if(message.type==='GET_CREATE_BATCH')return await s.getBatch(p);
       if(message.type==='LIST_CREATE_BATCHES')return await s.listBatches(p);
+      if(message.type==='LIST_CREATE_BATCH_HOLDS')return await s.listBatchHolds(p);
+      if(message.type==='RETRY_CREATE_BATCH_HOLD')return await s.retryBatchHold(p);
       if(message.type==='ACCEPT_CREATE_INTENT')return await s.acceptCreate(p);
       if(message.type==='GET_CREATE_INTENT')return await s.getCreate(p.intentId);
       if(message.type==='LIST_CREATE_INTENTS')return await s.listCreate(p);
