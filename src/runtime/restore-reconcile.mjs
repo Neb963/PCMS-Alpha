@@ -94,7 +94,9 @@ export async function reconcileRestore({gate,api,donor,db,archiveText,
     outcome=Object.keys(incoming.donor.gmValues||{}).length===0;
   }else if(group==='pcms-canonical'){
     const expected=prepareRestoredCanonical({incoming:incoming.archive.pcms,
-      current:old.archive.pcms,mode:row.recovery.mode,uidRemap:map});
+      current:old.archive.pcms,mode:row.recovery.mode,uidRemap:map,
+      fresh:portable&&row.fresh===true,
+      accountChoices:portable?row.recovery.accountChoices||{}:{}});
     operation={pcms:await digest(JSON.stringify(expected))};
     outcome=equal(await (portable?snapshotCanonicalV2(db,{serializedValues:true}):
       snapshotCanonical(db)),expected);
