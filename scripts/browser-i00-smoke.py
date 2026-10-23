@@ -3561,8 +3561,8 @@ def main():
                 # portable format, Settings action, and wrong-password failure.
                 # No live provider or native calls; no disk byte proof claimed.
                 call('POST',f'/session/{after}/url',{'url':url+'#settings'})
-                settings=execute(after,"return {button:!!document.getElementById('pcms-backup-export'),password:!!document.getElementById('pcms-backup-passphrase'),status:!!document.getElementById('pcms-backup-status')}")
-                assert settings=={'button':True,'password':True,'status':True},settings
+                settings=execute(after,"return {button:!!document.getElementById('pcms-backup-export'),passwordless:!document.getElementById('pcms-backup-passphrase'),status:!!document.getElementById('pcms-backup-status')}")
+                assert settings=={'button':True,'passwordless':True,'status':True},settings
                 # S02 B: new source-completeness action runs in the same installed
                 # XPI, reads the real synthetic historical IDB, and truthfully
                 # holds a source-incomplete legacy publication. v1 codec stays
@@ -3572,12 +3572,12 @@ def main():
                 audit_status=''
                 for _ in range(50):
                     audit_status=execute(after,"return document.getElementById('pcms-backup-audit-status')?.textContent||''")
-                    if 'Source-complete recovery HELD:' in audit_status or (
-                        'Local source-byte audit passed' in audit_status):
+                    if 'Source closure held:' in audit_status or (
+                        'Source closure verified:' in audit_status):
                         break
                     time.sleep(.1)
-                assert 'Source-complete recovery HELD: BACKUP_SOURCE_INCOMPLETE' in audit_status,audit_status
-                assert 'No external effects' in audit_status,audit_status
+                assert 'Source closure held: BACKUP_SOURCE_INCOMPLETE' in audit_status,audit_status
+                assert 'No state changed' in audit_status,audit_status
                 print('B S02_PACKAGED_READONLY_SOURCE_RECOVERY_HOLD=PASS',flush=True)
                 # S02 B: production packaged v2 codec runs on real Firefox
                 # with complete original/current/history/binary source and
@@ -4242,167 +4242,42 @@ def main():
                 assert re.fullmatch('[a-f0-9]{64}',proof.get('hash','')),proof
                 print('B I08_PACKAGED_FIREFOX_ENCRYPTED_IDB_DONOR_ROUNDTRIP=PASS',flush=True)
 
-                # Exercise the actual operator UI and Firefox Downloads API in
-                # this disposable profile. This is not a production on-disk
-                # byte re-read, and must never be called tier 3.
-                bad_password=execute(after,"document.getElementById('pcms-backup-passphrase').value='short';document.getElementById('pcms-backup-export').click();return document.getElementById('pcms-backup-status').textContent")
-                assert '12 characters' in bad_password,bad_password
-                execute(after,"document.getElementById('pcms-backup-passphrase').value='real-packaged-firefox-fixture-passphrase';document.getElementById('pcms-backup-export').click();return true")
-                backup_status=''
-                for _ in range(120):
-                    backup_status=execute(after,"return document.getElementById('pcms-backup-status')?.textContent||''")
-                    if 'Browser reported complete (tier 2)' in backup_status or (
-                        'Backup not confirmed:' in backup_status) or (
-                        'browser download not confirmed:' in backup_status):
-                        break
-                    time.sleep(.25)
-                if 'Browser reported complete (tier 2)' not in backup_status:
-                    donor_probe('MANUAL_FAILURE')
-                assert 'Browser reported complete (tier 2)' in backup_status,backup_status
-                assert 'Exact on-disk bytes have NOT been independently re-read' in backup_status,backup_status
-                receipt=execute(after,"return document.getElementById('pcms-overview-backup')?.textContent||''")
-                # Receipt projection is refreshed asynchronously after export.
-                for _ in range(30):
-                    receipt=execute(after,"return document.getElementById('pcms-overview-backup')?.textContent||''")
-                    if 'BROWSER_REPORTED_COMPLETE' in receipt: break
+                # A02: a real source-incomplete fixture cannot be exported by
+                # the installed passwordless manual UI, unlike legacy V1.
+                assert execute(after,"document.getElementById('pcms-backup-export').click();return true")
+                guarded_status=''
+                for _ in range(80):
+                    guarded_status=execute(after,"return document.getElementById('pcms-backup-status')?.textContent||''")
+                    if 'Portable backup held:' in guarded_status:break
                     time.sleep(.2)
-                assert 'BROWSER_REPORTED_COMPLETE' in receipt,receipt
-                print('B I08_MANUAL_UI_FIREFOX_DOWNLOAD_TIER2=PASS',flush=True)
+                assert 'Portable backup held: BACKUP_SOURCE_INCOMPLETE' in guarded_status,guarded_status
+                print('B A02_UI_DENIES_SOURCE_INCOMPLETE_EXPORT=PASS',flush=True)
 
-                # I15: real installed combined XPI. No provider/native-vault effects.
-                i15_ui=execute(after,"return {enabled:!!document.getElementById('pcms-auto-backup-enabled'),vault:!!document.getElementById('pcms-auto-backup-vault'),status:!!document.getElementById('pcms-auto-backup-status')}")
-                assert i15_ui=={'enabled':True,'vault':True,'status':True},i15_ui
-                i15_code="""const done=arguments[arguments.length-1];
-                (async()=>{
-                  const core=await import('./backup-auto-core.mjs');
-                  const runnerModule=await import('./backup-auto-run.mjs');
-                  const storeModule=await import('./backup-auto-store.mjs');
-                  async function portStatus(){
-                    return new Promise((resolve,reject)=>{
-                      const port=browser.runtime.connect({name:core.AUTO_PORT});
-                      port.onMessage.addListener(value=>{port.disconnect();resolve(value)});
-                      port.onDisconnect.addListener(()=>reject(Error('STATUS_PORT_DISCONNECTED')));
-                      port.postMessage({action:'STATUS'});
-                    });
-                  }
-                  const actual=await portStatus();
-                  const v2Denied=await new Promise((resolve,reject)=>{
-                    const port=browser.runtime.connect({name:core.AUTO_PORT});
-                    port.onMessage.addListener(value=>{try{port.disconnect()}catch{}resolve(value)});
-                    port.onDisconnect.addListener(()=>reject(Error('V2_MANUAL_PORT_DISCONNECTED')));
-                    port.postMessage({action:'RUN_V2_MANUAL'});
-                  });
-                  if(v2Denied?.ok!==false||v2Denied.code!=='BACKUP_V2_REVIEW_REQUIRED')
-                    throw Error('S02_PRODUCTION_MANUAL_NATIVE_NOT_FENCED');
-                  if(!actual.ok||actual.enabled!==false||actual.tier!==0)
-                    throw Error('CANONICAL_AUTO_BACKUP_NOT_OFF');
-                  async function makeDb(){
-                    return new Promise((resolve,reject)=>{
-                      const req=indexedDB.open('pcms-i15-b-'+crypto.randomUUID(),1);
-                      req.onupgradeneeded=()=>req.result.createObjectStore('meta',{keyPath:'key'});
-                      req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
-                    });
-                  }
-                  const db=await makeDb(),secondDb=await makeDb();
-                  const timestamp=25*86400000,runId='auto_'+('2'.repeat(32));
-                  const state=storeModule.createAutoStore(db,()=>timestamp);
-                  await state.enabled(true);
-                  let downloads=0,filename='',nativeCalls=0;
-                  const downloadsAPI={
-                    async download(request){downloads++;filename=request.filename;return 700;},
-                    async search({id}){return id===700?[{id,filename:'/home/fixture/Downloads/'+filename,
-                      state:'complete',exists:true,fileSize:3}]:[];},
-                    onChanged:{addListener(){},removeListener(){}},
-                    async removeFile(){throw Error('SHOULD_NOT_REMOVE_IN_1_ARCHIVE')}
-                  };
-                  const api={storage:{local:browser.storage.local},downloads:downloadsAPI,
-                    runtime:{getManifest:()=>browser.runtime.getManifest()}};
-                  const runner=runnerModule.createAutoRunner(api,{
-                    open:async()=>db,clock:()=>timestamp,newId:()=>('2'.repeat(32)),
-                    native:async()=>{nativeCalls++;return {ok:true,passphrase:'synthetic-portable-recovery-passphrase'};},
-                    seal:async()=>({bytes:new Uint8Array([2,3,4]),sha256:'b'.repeat(64)})
-                  });
-                  const first=await runner.tick(),duplicate=await runner.tick();
-                  const saved=await state.read();
-                  if(first.ok!==true||duplicate.code!=='BACKUP_ALREADY_DONE'||
-                    downloads!==1||nativeCalls!==1||saved.state.archives.length!==1||
-                    saved.state.archives[0].state!=='COMPLETE'||saved.state.archives[0].kind!=='AUTO'||
-                    saved.state.archives[0].filename!==('/home/fixture/Downloads/'+filename))
-                    throw Error('SYNTHETIC_DOWNLOAD_OR_DUPLICATE');
-                  const blockedStore=storeModule.createAutoStore(secondDb,()=>timestamp);
-                  await blockedStore.enabled(true);
-                  let blockedDownloads=0;
-                  const locked=runnerModule.createAutoRunner({
-                    storage:{local:browser.storage.local},
-                    downloads:{...downloadsAPI,download:async()=>{blockedDownloads++;return 701;}}
-                  },{
-                    open:async()=>secondDb,clock:()=>timestamp,newId:()=>('3'.repeat(32)),
-                    native:async()=>({ok:false,code:'LOCKED'}),
-                    seal:async()=>{throw Error('ENCRYPTION_ON_LOCKED_VAULT');}
-                  });
-                  const held=await locked.tick(),heldState=await blockedStore.read();
-                  if(held.code!=='SUSPENDED_KEY_UNAVAILABLE'||blockedDownloads!==0||
-                    heldState.state.archives.length!==0||heldState.state.status!=='SUSPENDED')
-                    throw Error('LOCKED_VAULT_FALLBACK_FAILED');
-                  // B-tier: the real packaged production runner, guarded
-                  // by an explicit privileged construction-only test grant.
-                  // No actual native file or provider effect in this case;
-                  // the separate H witness exercises the installed OS host.
-                  let manualNative=0,manualVerified=0;
-                  const makeReviewed=({bad=false,delayed=null,onDispatch=null,token='4'}={})=>
-                    runnerModule.createAutoRunner(api,{
-                      open:async()=>db,reviewedV2:async()=>true,
-                      newId:()=>token.repeat(32),
-                      native:async()=>({ok:true,passphrase:'synthetic-b-v2-portable-vault'}),
-                      captureV2:async()=>({pcms:{schema:1,stores:{}},
-                        donorEnvelope:'synthetic-b-donor-only'}),
-                      dispatchV2:async({runId})=>{
-                        manualNative++;
-                        onDispatch?.();
-                        if(delayed)await delayed;
-                        return {ok:true,runId,state:'AUTHENTICATED_INVENTORY_ONLY',
-                          ciphertextSha256:'a'.repeat(64)};
-                      },
-                      verifyV2:async({runId})=>{
-                        manualVerified++;
-                        return {ok:true,runId:bad?'s02_'+('9'.repeat(32)):runId,
-                          state:'RECOVERY_VERIFIED',sha256:'a'.repeat(64),
-                          preparedSha256:'b'.repeat(64),sourceRows:30};
-                      }
-                    });
-                  const manual=await makeReviewed().manualV2Candidate();
-                  if(!manual.ok||manual.state!=='RECOVERY_VERIFIED'||
-                     manual.sourceRows!==30||manual.retentionSuccess!==false||
-                     manual.activation!=='OFF'||manualNative!==1||manualVerified!==1)
-                    throw Error('S02_PACKAGED_MANUAL_NATIVE_RECOVERY_UNQUALIFIED');
-                  const bad=await makeReviewed({bad:true,token:'5'}).manualV2Candidate();
-                  if(bad.ok!==false||bad.code!=='V2_NATIVE_OUTCOME_UNKNOWN')
-                    throw Error('S02_PACKAGED_WRONG_MANUAL_NATIVE_RECEIPT_ACCEPTED');
-                  let resolveDispatch,signalDispatch;
-                  const delayed=new Promise(resolve=>resolveDispatch=resolve);
-                  const arrived=new Promise(resolve=>signalDispatch=resolve);
-                  const concurrent=makeReviewed({delayed,token:'6',
-                    onDispatch:signalDispatch});
-                  const pending=concurrent.manualV2Candidate();
-                  await Promise.race([arrived,new Promise((_,reject)=>
-                    setTimeout(()=>reject(Error('S02_MANUAL_DISPATCH_NOT_REACHED')),5000))]);
-                  if(manualNative!==3)throw Error('S02_MANUAL_DISPATCH_WRONG_COUNT');
-                  const competing=await concurrent.manualV2Candidate();
-                  const competingDaily=await concurrent.tick();
-                  if(competing.code!=='BACKUP_INFLIGHT'||
-                     competingDaily.code!=='BACKUP_INFLIGHT')
-                    throw Error('S02_MANUAL_DAILY_CONCURRENT_DISPATCH');
-                  resolveDispatch();
-                  if((await pending).state!=='RECOVERY_VERIFIED'||
-                     manualNative!==3||manualVerified!==3)
-                    throw Error('S02_MANUAL_RECEIPT_AFTER_SERIALIZATION_MISSING');
-                  db.close();secondDb.close();
-                  return {ok:true,actual,downloads,held:held.code,
-                    nativeManual:'EXACT_SOURCE_RECOVERY_AND_SINGLE_FLIGHT_VERIFIED'};
-                })().then(done).catch(e=>done({ok:false,code:String(e)}));"""
-                i15=call('POST',f'/session/{after}/execute/async',{'script':i15_code,'args':[]},timeout=90)
-                assert i15.get('ok') is True,i15
-                print('B I15_INSTALLED_BACKGROUND_PORT_DAILY_VAULT_SUSPENSION_AND_TRACKED_DOWNLOAD=PASS',flush=True)
+                # A02 runtime status and retired native/vault dispatch are
+                # exercised on the actual production port, not a stub.
+                i15_ui=execute(after,"return {enabled:!!document.getElementById('pcms-auto-backup-enabled'),noVault:!document.getElementById('pcms-auto-backup-vault'),status:!!document.getElementById('pcms-auto-backup-status')}")
+                assert i15_ui=={'enabled':True,'noVault':True,'status':True},i15_ui
+                i15_result=call('POST',f'/session/{after}/execute/async',{
+                  'script':"""const done=arguments[arguments.length-1];
+                  (async()=>{
+                    async function issue(action){
+                      return new Promise(resolve=>{
+                        const port=browser.runtime.connect({name:'pcms-i15-backup'});
+                        port.onMessage.addListener(x=>{try{port.disconnect()}catch{}resolve(x)});
+                        port.onDisconnect.addListener(()=>resolve({ok:false,code:'PORT_CLOSED'}));
+                        port.postMessage({action});
+                      });
+                    }
+                    const status=await issue('STATUS');
+                    const retired=await issue('RUN_V2_MANUAL');
+                    done({ok:status?.ok===true&&status.format==='PORTABLE'&&
+                      status.passwordRequired===false&&retired?.ok===false&&
+                      retired.code==='INVALID_COMMAND',
+                      status,retired});
+                  })().catch(e=>done({error:String(e)}));""",
+                  'args':[]},timeout=60)
+                assert i15_result.get('ok') is True,i15_result
+                print('B A02_DAILY_BACKGROUND_PORT_NATIVE_FREE_POLICY=PASS',flush=True)
 
                 # I16 B: actual installed XPI, extension Settings DOM and real
                 # canonical IDB + Firefox local-storage guard. Independent
@@ -4461,24 +4336,19 @@ def main():
                     element_id=element['element-6066-11e4-a52e-4f735466cecf']
                     call('POST',f'/session/{after}/element/{element_id}/value',
                          {'text':str(filepath),'value':list(str(filepath))})
-                setup_ui="const p=document.getElementById('pcms-restore-passphrase');p.value="+json.dumps(ui_data['password'])+";document.getElementById('pcms-restore-mappings').value="+json.dumps(json.dumps(ui_data['mappings']))+";document.getElementById('pcms-restore-preview').click();return true"
+                setup_ui="document.getElementById('pcms-restore-mappings').value="+json.dumps(json.dumps(ui_data['mappings']))+";document.getElementById('pcms-restore-preview').click();return true"
                 assert execute(after,setup_ui) is True
-                preview_result=None
+                # Deprecated encrypted archives are rejected by the actual
+                # passwordless parser before plan or guard creation.
+                negative_result=None
                 for _ in range(80):
-                    preview_result=execute(after,"return {status:document.getElementById('pcms-restore-status').textContent,plan:document.getElementById('pcms-restore-details').textContent,verifyDisabled:document.getElementById('pcms-restore-verify').disabled}")
-                    if not preview_result['verifyDisabled'] or 'Restore held:' in preview_result['status']:break
+                    negative_result=execute(after,"return {status:document.getElementById('pcms-restore-status').textContent,verifyDisabled:document.getElementById('pcms-restore-verify').disabled,applyDisabled:document.getElementById('pcms-restore-apply').disabled}")
+                    if 'Restore preview held:' in negative_result['status']:break
                     time.sleep(.1)
-                assert preview_result['verifyDisabled'] is False,preview_result
-                assert 'Authenticated plan:' in preview_result['plan'],preview_result
-                assert execute(after,"document.getElementById('pcms-restore-verify').click();return true")
-                disk_result=None
-                for _ in range(80):
-                    disk_result=execute(after,"return {status:document.getElementById('pcms-restore-status').textContent,button:document.getElementById('pcms-restore-apply').disabled}")
-                    if 'Checkpoint file independently re-read' in disk_result['status'] or 'Checkpoint not proven' in disk_result['status']:break
-                    time.sleep(.1)
-                assert 'Checkpoint file independently re-read' in disk_result['status'],disk_result
-                assert disk_result['button'] is True,disk_result
-                print('B I16_REAL_FILE_INPUT_AUTHENTICATED_PREVIEW_CHECKPOINT_UI=PASS',flush=True)
+                assert 'Restore preview held: PORTABLE_' in negative_result['status'],negative_result
+                assert negative_result['verifyDisabled'] is True,negative_result
+                assert negative_result['applyDisabled'] is True,negative_result
+                print('B A02_LEGACY_ENCRYPTED_FILE_REJECTED_WITHOUT_GUARD=PASS',flush=True)
 
                 i16_code="""const done=arguments[arguments.length-1];
                 (async()=>{
