@@ -76,3 +76,19 @@ test('A02 lost download ACK journals uncertainty and blocks replay, including ne
   assert.equal((await cold.tick()).code,'DOWNLOAD_OUTCOME_UNKNOWN');
   assert.equal(f.effects(),1);
 });
+
+test('A02 manual lost browser ACK is durable and cannot dispatch a second file',async()=>{
+  const f=fixture({failedDispatch:true});
+  const first=await f.runner.manual();
+  assert.equal(first.ok,false);
+  assert.equal(first.code,'DOWNLOAD_OUTCOME_UNKNOWN');
+  assert.equal(f.effects(),1);
+  const cold=createPortableRunner(f.api,{open:async()=>f.db,
+    clock:()=>100000000,nextId:()=>('f'.repeat(32)),
+    capture:async()=>{throw Error('DUPLICATE_BACKUP_PREVENTED')}});
+  const second=await cold.manual();
+  assert.equal(second.code,'MANUAL_DOWNLOAD_UNCERTAIN');
+  assert.equal(f.effects(),1);
+  const last=f.db.read('meta','backup:manual-active');
+  assert.equal(last.status,'HELD_UNCERTAIN');
+});
