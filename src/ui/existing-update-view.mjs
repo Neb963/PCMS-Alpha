@@ -2,7 +2,7 @@
 // no auto-advance after lost acknowledgement, even across tab reloads.
 const prefix='pcms-existing-';
 const get=id=>document.getElementById(prefix+id);
-const slug=get('slug'),token=get('token'),password=get('passphrase'),
+const slug=get('slug'),token=get('token'),
   status=get('status'),details=get('details');
 const actions=['GET','PREPARE','UNLIST','RECHECK_UNLIST','PIN_STAGE','STAGE',
   'RECHECK_STAGE','RECOVERY_UNLIST','RECHECK_RECOVERY_UNLIST','RESTORE',
@@ -21,7 +21,6 @@ const allowed={
 };
 let receipt=null,busy=false,epoch=0;
 const safeSlug=x=>/^[a-z0-9][a-z0-9-]{0,99}$/.test(x);
-const withPass=new Set(['PREPARE','UNLIST','PIN_STAGE','STAGE','RESTORE']);
 const withToken=new Set(['PIN_STAGE']);
 function paint(){
   for(const action of actions) {
@@ -29,7 +28,6 @@ function paint(){
       action==='PREPARE'?safeSlug(slug.value)&&(!receipt||receipt.state==='STAGE_CONFIRMED'):
       receipt&&receipt.slug===slug.value&&allowed[action]?.includes(receipt.state);
     buttons[action].disabled=busy||!eligible||
-      (withPass.has(action)&&password.value.length<12)||
       (withToken.has(action)&&token.value.length>0&&token.value.length<12);
   }
 }
@@ -71,7 +69,6 @@ async function act(type){
   status.textContent='Checking guarded canonical '+type+'…';
   const p={slug:slug.value};
   if(accepted)p.expectedRevision=receipt.revision;
-  if(withPass.has(type))p.passphrase=password.value;
   if(withToken.has(type)&&token.value)p.token=token.value;
   try{
     const v=await call(type,p);
@@ -92,7 +89,7 @@ async function act(type){
   }finally{if(serial===epoch){busy=false;paint();}}
 }
 for(const action of actions)buttons[action].addEventListener('click',()=>act(action));
-for(const input of [token,password])input.addEventListener('input',paint);
+token.addEventListener('input',paint);
 slug.addEventListener('input',()=>{
   if(busy)return;
   epoch++;receipt=null;
