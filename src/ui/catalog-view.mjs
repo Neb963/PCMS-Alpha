@@ -18,10 +18,16 @@ let busy=false,generation=0,connected=false,selectedScope=null;
 let promptBase=null,promptRevision=0,promptDirty=false,promptEffectState=null;
 function message(text){status.textContent=text;}
 const GIT_HELP={
- GIT_VAULT_STORE_OUTCOME_UNCERTAIN:'PCMS could not confirm that the GitHub credential was saved. Do not retry yet; check Settings → Diagnostics to reconcile the interrupted connection.',
- GIT_SECRET_SERVICE_UNAVAILABLE:'The secure credential store is not available. Check the PCMS native helper in Settings → Diagnostics.',
- GIT_SECRET_SERVICE_TIMEOUT:'The secure credential store did not respond. Check Settings → Diagnostics before retrying.',
- GIT_VAULT_OPERATION_DENIED:'The credential helper refused the request. Check its installation and extension permissions.',
+ GIT_LOCAL_STORAGE_UNAVAILABLE:'Firefox extension storage was unavailable. The Git connection remains unconfirmed.',
+ GIT_LOCAL_STORE_OUTCOME_UNCERTAIN:'The browser could not confirm the credential write. Use connection recovery before retrying.',
+ GIT_LOCAL_REMOVE_OUTCOME_UNCERTAIN:'The browser could not confirm removal. Inspect Git status before reconnecting.',
+ GIT_RECONCILIATION_SECRET_UNAVAILABLE:'The saved browser credential is unavailable. Reconnect GitHub.',
+ GIT_LOCAL_CREDENTIAL_STATUS_UNAVAILABLE:'The browser could not verify saved GitHub credentials.',
+
+ GIT_LOCAL_STORE_OUTCOME_UNCERTAIN:'PCMS could not confirm that the GitHub credential was saved. Do not retry yet; check Settings → Diagnostics to reconcile the interrupted connection.',
+ GIT_SECRET_SERVICE_UNAVAILABLE:'Firefox could not access the saved GitHub credential. Reconnect GitHub or inspect local extension storage.',
+ GIT_SECRET_SERVICE_TIMEOUT:'The browser credential store did not respond. Check Firefox extension storage before retrying.',
+ GIT_VAULT_OPERATION_DENIED:'Firefox did not confirm the local credential write. Check Diagnostics before retrying.',
  GIT_PENDING_CONNECTION_RECONCILIATION_REQUIRED:'A previous connection did not finish. Check Settings → Diagnostics and reconcile before connecting again.',
  GIT_CONFIG_COMMIT_OUTCOME_UNCERTAIN:'PCMS could not confirm that the connection settings were saved. Check Settings → Diagnostics before retrying.',
  GITHUB_AUTH_REJECTED:'GitHub rejected the credential. Check that it is valid and authorized for this repository.',
@@ -29,9 +35,9 @@ const GIT_HELP={
  GITHUB_REPOSITORY_INACCESSIBLE:'GitHub could not access this private repository. Check its name and your permissions.',
  GITHUB_TRANSPORT_UNAVAILABLE:'GitHub could not be reached. Check your connection and try again.',
  GITHUB_SERVICE_UNAVAILABLE:'GitHub is temporarily unavailable. No connection changes were made.',
- GIT_RECONNECT_REQUIRED:'GitHub has not been connected securely yet. The file preview can work without enabling automation.',
- GIT_CREDENTIAL_MISSING_OR_INVALID:'No usable GitHub credential was found. Check the native helper and reconnect.',
- GIT_VAULT_STATUS_UNCERTAIN:'PCMS could not read the credential status. Check Settings → Diagnostics.',
+ GIT_RECONNECT_REQUIRED:'GitHub has not been connected yet. The file preview can work without enabling automation.',
+ GIT_CREDENTIAL_MISSING_OR_INVALID:'No saved GitHub credential was found. Reconnect GitHub.',
+ GIT_VAULT_STATUS_UNCERTAIN:'PCMS could not read Firefox's saved GitHub credential status. Check Diagnostics.',
  GIT_RECOVERY_REQUIRES_PENDING:'There is no interrupted setup to restart. Use normal Connect instead.',
  GIT_RECOVERY_SCOPE_MISMATCH:'The repository does not match the interrupted setup. Review its identity before any changes.'
 };
@@ -272,15 +278,15 @@ async function refreshStatus(){
 }
 connect.addEventListener('click',async()=>{
   const n=++generation;
-  busy=true;controls();message('Verifying private repository identity and storing the credential in the OS vault…');
+  busy=true;controls();message('Verifying private repository identity and saving the credential in this Firefox extension…');
   try{
     const r=await request('CONNECT_GIT',{repository:repo.value.trim(),token:token.value});
     if(n!==generation)return;
     if(r?.ok){
       connected=true;selectedScope=null;promptBase=null;token.value='';
-      message('Git configuration and OS vault readback verified. Remote main tree not yet scanned; no Git/provider write performed.');
+      message('Git configuration and browser credential readback verified. Remote main tree not yet scanned; no Git/provider write performed.');
     }else message(gitHelp(r?.code));
-  }catch{if(n===generation)message('Git vault unavailable; no connection assumed.');}
+  }catch{if(n===generation)message('Git browser storage unavailable; no connection assumed.');}
   finally{busy=false;controls();}
 });
 recover.addEventListener('click',async()=>{
@@ -306,7 +312,7 @@ disconnect.addEventListener('click',async()=>{
     const r=await request('DISCONNECT_GIT');
     if(r?.ok){
       connected=false;selectedScope=null;promptBase=null;generation++;list.replaceChildren();prompt.value='';
-      message('Git connection removed from OS vault and local configuration.');
+      message('Git connection removed from browser credential storage and local configuration.');
     }else message('Disconnect held: '+(r?.code||'UNAVAILABLE')+'. No removal assumed.');
   }catch{message('Disconnect acknowledgment unavailable; recheck status before another operation.');}
   finally{busy=false;controls();}

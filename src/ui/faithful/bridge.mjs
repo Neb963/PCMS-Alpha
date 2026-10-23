@@ -56,8 +56,8 @@ function operatorReadinessGuidance(row){
 function friendlyConnectionIssue(code){
  const messages={
  GIT_RECONCILED_LOCALLY_VERIFIED:'GitHub connection repaired. Run a read-only check to verify the files.',
- GIT_RECONCILIATION_CREDENTIAL_UNAVAILABLE:'The saved GitHub credential could not be accessed. Check the native helper and secure storage before trying again.',
- GIT_RECONCILIATION_VAULT_UNAVAILABLE:'The GitHub credential helper is not responding. Check its installation before trying again.',
+ GIT_RECONCILIATION_CREDENTIAL_UNAVAILABLE:'The saved GitHub credential could not be accessed. Check Firefox extension storage and reconnect GitHub before trying again.',
+ GIT_RECONCILIATION_VAULT_UNAVAILABLE:'The browser credential store is unavailable. Check Firefox extension storage and reconnect GitHub.',
  GIT_RECONCILIATION_NETWORK_UNAVAILABLE:'GitHub could not be reached. Check your connection and try again.',
  GIT_CONFIG_COMMIT_OUTCOME_UNCERTAIN:'Connection settings could not be confirmed. No further changes were attempted.'
  };
@@ -1577,7 +1577,7 @@ function renderReadinessPanel(container){
  },'btn small');
  local.disabled=state.readinessBusy;remote.disabled=state.readinessBusy;
  const reconcile=b('Reconcile interrupted Git connection',()=>{
-  if(!window.confirm('Read the OS vault credential inside the background process, independently verify this exact private GitHub repository identity, and repair only local connection metadata? No token is exported; no remote write occurs.'))return;
+  if(!window.confirm('Read the saved browser credential inside the background process, independently verify this exact private GitHub repository identity, and repair only local connection metadata? No token is exported; no remote write occurs.'))return;
   void (async()=>{
    try{const out=await readPort('pcms-s03-catalog','RECONCILE_GIT',{},30000);
     notify(friendlyConnectionIssue(out?.code));await runReadiness(false);
@@ -1603,7 +1603,7 @@ function renderReadinessPanel(container){
  exportButton.disabled=!state.readiness?.ok||state.readinessBusy;
  controls.append(local,remote,reconcile,exportButton);section.append(controls);
  const pendingGit=state.readiness?.rows?.some(r=>r.component==='GIT_PARTIAL_CONNECTION'&&r.state==='OUTCOME_UNCERTAIN');
- const vaultReachable=state.readiness?.rows?.some(r=>r.component==='NATIVE_VAULT_HOST'&&r.state==='VERIFIED');
+ const vaultReachable=state.readiness?.rows?.some(r=>r.component==='BROWSER_GIT_STORE'&&r.state==='VERIFIED');
  if(pendingGit&&vaultReachable){
   const recovery=el('div','settings-section');
   recovery.append(el('p','setting-note',
