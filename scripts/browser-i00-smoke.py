@@ -3404,6 +3404,38 @@ def main():
                     proof['port']['state']=='PUBLICATION_UNCERTAIN'),proof
                 print('B I13_INSTALLED_RESTART_DURABLE_UNCERTAIN_PUBLICATION=PASS',flush=True)
 
+                # A05 B: run the production publication-flow module from the
+                # actually installed, enabled XPI, including a missing ACK.
+                # The fixture never contacts GitHub or a live Perchance route.
+                proof=call('POST',f'/session/{after}/execute/async',{'script':"""
+                const done=arguments[arguments.length-1];
+                (async()=>{
+                  const {advanceApprovedPublication}=await import('./faithful/publication-flow.mjs');
+                  const approval={ok:true,slug:'a05-fixture',state:'APPROVED',revision:3};
+                  const calls=[];
+                  const run=async(type,params)=>{
+                    calls.push({type,params});
+                    if(type==='DISPATCH')throw Error('simulated lost ACK');
+                    if(type==='GET')return {ok:true,slug:'a05-fixture',
+                      state:'DISPATCH_POSSIBLE',revision:4};
+                    if(type==='RECONCILE')return {ok:true,slug:'a05-fixture',
+                      state:'PUBLICATION_UNCERTAIN',revision:5};
+                  };
+                  const actual=await advanceApprovedPublication({
+                    slug:approval.slug,approval,invoke:run});
+                  const invalid=await advanceApprovedPublication({
+                    slug:approval.slug,approval:{...approval,revision:0},invoke:run});
+                  const ready=document.body.classList.contains('pcms-faithful-ready');
+                  done({ok:ready&&!actual.ok&&!invalid.ok&&
+                    actual.state==='PUBLICATION_UNCERTAIN'&&
+                    calls.length===3&&calls.filter(c=>c.type==='DISPATCH').length===1&&
+                    calls[2].params.expectedRevision===4,
+                    actual,calls,ready});
+                })().catch(e=>done({ok:false,error:String(e)}));
+                """,'args':[]},timeout=90)
+                assert proof.get('ok') is True,proof
+                print('B A05_INSTALLED_PRIMARY_FLOW_LOST_ACK_ONE_DISPATCH_AND_READONLY_RECONCILE=PASS',flush=True)
+
                 # A05 B: existing public P is an integrity-checked plaintext checkpoint;
                 # real Firefox IDB serializes races and holds uncertain effects.
                 call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
