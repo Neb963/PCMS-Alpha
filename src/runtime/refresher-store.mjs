@@ -102,7 +102,8 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
     r.accountId.includes(query.toLowerCase())||r.stableId.includes(query))&&
     (!accountId||r.accountId===accountId)&&phaseMatch(r)).sort(queueOrder);
   const items=match.slice(offset,offset+limit).map(r=>({stableId:r.stableId,slug:r.slug,
-    accountId:r.accountId,phase:r.phase,activeRemaining:r.activeRemaining,sleepRemaining:r.sleepRemaining,
+    accountId:r.accountId,sourceAuthority:r.sourceAuthority||'UNVERIFIED',
+    phase:r.phase,activeRemaining:r.activeRemaining,sleepRemaining:r.sleepRemaining,
     activeMs:r.activeMs,sleepMs:r.sleepMs,ordinal:r.ordinal,slot:r.slot,paused:r.paused,
     blockers:[...rowBlocks(s,r),r.readyUpdate&&'READY_UPDATE_FIRST'].filter(Boolean),
     presence:r.presence?{...r.presence,stale:r.presence.observedAt>now||now-r.presence.observedAt>2*s.policy.recentMs}:null,
