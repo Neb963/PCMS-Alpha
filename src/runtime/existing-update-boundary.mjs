@@ -46,8 +46,7 @@ export function validateExistingMessage(api,sender,m){
        (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))||
      ('token'in p&&(typeof p.token!=='string'||p.token.length<12||
        p.token.length>512||!/^[\x21-\x7e]+$/.test(p.token)))||
-     (allowed[m.type].includes('expectedRevision')&&!Number.isSafeInteger(p.expectedRevision))||
-     false)
+     (allowed[m.type].includes('expectedRevision')&&!Number.isSafeInteger(p.expectedRevision)))
     return fail('INVALID_PARAMS');
   return {ok:true};
 }
