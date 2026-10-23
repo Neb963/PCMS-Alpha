@@ -87,7 +87,7 @@ export function canonicalRefresherInputs(records){
           update.stagedFingerprint===release.sourceFingerprint
         )))||!!stage&&stage.state!=='HUMAN_OWNED'&&!released,
       readyUpdate:link?.readyUpdate===true||!!approvedSource&&link?.readyAtInspection===true&&
-        link.fingerprint!==release.sourceFingerprint};
+        link.fingerprint!==(released?release.sourceFingerprint:original?.stagedFingerprint)};
   });
 }
 function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={}){
