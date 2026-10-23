@@ -9,8 +9,9 @@ import {pathToFileURL} from 'node:url';
 // (runtime + ui flattened, donor lib alongside) in an isolated temp root.
 const root=await mkdtemp(path.join(os.tmpdir(),'pcms-backup-format-'));
 await cp('donor/personamonkey/extension/lib',path.join(root,'lib'),{recursive:true});
-await cp('src/ui',path.join(root,'pcms'),{recursive:true});
 await cp('src/runtime',path.join(root,'pcms'),{recursive:true});
+// The build overlays real UI primitives after resolving source-tree runtime aliases.
+await cp('src/ui',path.join(root,'pcms'),{recursive:true});
 const {createAutoRunner,operatorSelectedV2,BACKUP_FORMAT_KEY,FORMAT_GUARANTEE}=
   await import(pathToFileURL(path.join(root,'pcms','backup-auto-run.mjs')).href);
 function apiFixture(){
