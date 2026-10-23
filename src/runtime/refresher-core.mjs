@@ -3,6 +3,7 @@
 import {fail, isSafeId} from './journal.mjs';
 import {emptyRefreshEvidence,validRefreshEvidence} from './refresher-effect-core.mjs';
 import {qualifyNativeOperatingInterval,qualifyBoundedObservedInterval} from './refresher-qualified-clock.mjs';
+import {qualifyBrowserObservedInterval} from './refresher-browser-clock.mjs';
 export const HOUR=3600000, MINUTE=60000;
 export const REFRESHER_KEY='refresher:shadow:v1';
 export const DEFAULT_POLICY=Object.freeze({activeMs:24*HOUR,sleepMs:72*HOUR,
@@ -37,7 +38,7 @@ export function emptyShadow(){
     capacity:{defensible:null,samples:[],observedAt:0},
     provider:{state:'UNKNOWN',witnesses:0,observedAt:0},
     bootId:null,lastTurnAt:0,nextWakeAt:0,nextAdmissionAt:0,dueIndex:[],
-    nativeClock:null,
+    nativeClock:null,browserClock:null,
     recent:{observedAt:0,total:null,complete:false,nextDueAt:0,failures:0,
       accountBackoff:{},endpointBackoffUntil:0},
     inflight:[],readWindow:{start:0,used:0},timeline:[],healthIntervals:[],
@@ -51,6 +52,7 @@ export function validShadow(s){
     s.rows.every(r=>isSafeId(r.stableId)&&slugOK(r.slug)&&isSafeId(r.accountId)&&
       number(r.ordinal,1,Number.MAX_SAFE_INTEGER)&&number(r.activeRemaining,0,365*24*HOUR)&&
       number(r.sleepRemaining,0,365*24*HOUR)&&
+      (r.restCheckpointAt===undefined||number(r.restCheckpointAt,0,Number.MAX_SAFE_INTEGER))&&
       ['WAITING','ACTIVE','SLEEPING'].includes(r.phase)&&
       (!r.refresh||validRefreshEvidence(r.refresh)))&&
     Array.isArray(s.inflight)&&s.inflight.length<=2&&Array.isArray(s.timeline)&&
@@ -81,7 +83,7 @@ export function reconcileShadow(s,inputs){
         remoteId:input.remoteId,phase:'WAITING',activeRemaining:out.policy.activeMs,
         sleepRemaining:0,ordinal,cycle:0,slot:false,paused:false,
         activeMs:out.policy.activeMs,sleepMs:out.policy.sleepMs,checkpoint:0,
-        admittedAt:0,allocationEpoch:0,refresh:emptyRefreshEvidence(),
+        admittedAt:0,allocationEpoch:0,restCheckpointAt:0,refresh:emptyRefreshEvidence(),
         metrics:{raw:[],latest:null,nextDueAt:0,failures:0}};
       out.rows.push(r);bySlug.set(r.slug,r);
     }
@@ -183,12 +185,15 @@ function receiptValid(e,bootId){
       ['HEALTHY','UNAVAILABLE','UNKNOWN'].includes(a.health)&&
       (a.health!=='HEALTHY'||(a.protected===true&&a.sessionVerified===true)));
 }
-export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=undefined,qualifiedCoverages=null}={}){
+export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=undefined,
+  browserClock=undefined,qualifiedCoverages=null}={}){
   if(!validShadow(s)||!stamp(now)||!isSafeId(bootId))return fail('REFRESHER_STATE_UNAVAILABLE');
   const out=structuredClone(s),changes=[];
   const restarted=out.bootId!==bootId;
   if(restarted){
     out.bootId=bootId;
+    // No newly started background incarnation inherits an earlier uptime proof.
+    out.browserClock=null;
     // Read-only claims interrupted by event-page death get cooldown, not a
     // replay on entry. No mutating claim exists in shadow mode.
     for(const claim of out.inflight){
@@ -204,6 +209,28 @@ export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=undefined,q
   // next turn requires the original uninterrupted native pipe *and* explicit
   // independent provider+account continuous coverage before any credit.
   let operationalReceipt=receipt;
+  // Browser-only evidence: a bounded monotonic span within this same running
+  // background incarnation, independently ready routes at both endpoints
+  // and a previously complete recent feed. Lost wake, process death, suspend,
+  // restart and clock jumps never produce retrospective active credit.
+  if(browserClock!==undefined){
+    const valid=b=>b&&Number.isSafeInteger(b.observedAtMs)&&
+      b.observedAtMs>0&&b.observedAtMs<=now&&
+      isSafeId(b.runtimeEpoch)&&Number.isFinite(b.monotonicMs)&&
+      b.monotonicMs>=0&&Array.isArray(b.routes)&&b.routes.length<=1000;
+    if(valid(browserClock)){
+      const previous=out.browserClock?.witness;
+      if(!operationalReceipt&&valid(previous)){
+        const observed=qualifyBrowserObservedInterval({
+          previous,next:browserClock,recent:out.recent,bootId,
+          id:'browser_'+String(out.revision).padStart(8,'0'),
+          accounts:Object.entries(out.accounts).map(([accountId,a])=>({
+            accountId,...a}))});
+        if(observed.ok)operationalReceipt=observed.receipt;
+      }
+      out.browserClock={bootId,witness:structuredClone(browserClock)};
+    }else out.browserClock=null;
+  }
   const nativeOK=n=>n&&Number.isSafeInteger(n.observedAtMs)&&
     n.observedAtMs>0&&n.observedAtMs<=now&&
     ['observerEpoch','systemBootId','nativeLifetimeId','observerConnectionId']
@@ -269,7 +296,8 @@ export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=undefined,q
       changes.push({code:'PROVIDER_RECOVERED',scopeId:'provider_perchance'});
     reason=provider.state==='OUTAGE'?'PROVIDER_OUTAGE':
       e.origin==='S07_NATIVE_CAUSAL_WINDOW'?'NATIVE_ELIGIBILITY_CONFIRMED':
-      e.origin==='S07_BOUNDED_OBSERVED'?'BOUNDED_GUARDED_ELIGIBILITY':'EVIDENCED_INTERVAL';
+      e.origin==='S07_BOUNDED_OBSERVED'?'BOUNDED_GUARDED_ELIGIBILITY':
+      e.origin==='A06_BROWSER_OBSERVED'?'BROWSER_MONOTONIC_ELIGIBILITY':'EVIDENCED_INTERVAL';
     const health=new Map(e.accounts.map(a=>[a.accountId,a]));
     for(const [id,a] of Object.entries(out.accounts)){
       const h=health.get(id),matched=h?.bindingVersion===a.bindingVersion&&
@@ -308,19 +336,40 @@ export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=undefined,q
         const used=Math.min(remaining,r.activeRemaining);r.activeRemaining-=used;
         remaining-=used;credited+=used;
         if(r.activeRemaining===0){
-          r.slot=false;r.phase='SLEEPING';r.sleepRemaining=r.sleepMs;r.cycle++;
+          r.slot=false;r.phase='SLEEPING';r.sleepRemaining=r.sleepMs;
+          r.restCheckpointAt=e.to;r.cycle++;
           changes.push({code:'ACTIVE_COMPLETED',scopeId:r.stableId});
         }
       }
-      if(r.phase==='SLEEPING'){
-        const used=Math.min(remaining,r.sleepRemaining);r.sleepRemaining-=used;credited+=used;
-        if(r.sleepRemaining===0){
-          r.phase='WAITING';r.activeRemaining=r.activeMs;r.ordinal=out.nextOrdinal++;
-          changes.push({code:'SLEEP_COMPLETED',scopeId:r.stableId});
-        }
-      }
+      // Sleep is a wall-clock rest, not a qualified operating budget.
+      // It is handled once below, even if the browser/provider is offline.
     }
   }else out.diagnostics.unknownIntervals++;
+  // A06 wall rest: persist checkpoint per sleeping generator. Never credit a
+  // reversed clock or a gross (>90-day) unexplained forward jump. A legacy
+  // sleeping row without an anchor starts prospectively at this turn.
+  // This logic runs even with a dead provider, no native host, or a new boot.
+  for(const r of out.rows)if(r.phase==='SLEEPING'){
+    if(!stamp(r.restCheckpointAt)){
+      r.restCheckpointAt=now;
+      continue;
+    }
+    const elapsed=now-r.restCheckpointAt;
+    if(elapsed<=0)continue; // rollback cannot move the anchor backwards
+    if(elapsed>90*24*HOUR){
+      out.diagnostics.unknownIntervals++;
+      r.restCheckpointAt=now; // isolate discontinuity; never grant 90d
+      continue;
+    }
+    const used=Math.min(elapsed,r.sleepRemaining);
+    r.sleepRemaining-=used;
+    r.restCheckpointAt=now;
+    if(r.sleepRemaining===0){
+      r.phase='WAITING';r.activeRemaining=r.activeMs;r.ordinal=out.nextOrdinal++;
+      r.restCheckpointAt=0;
+      changes.push({code:'SLEEP_COMPLETED',scopeId:r.stableId});
+    }
+  }
   for(const a of Object.values(out.accounts))if(!a.healthAt||now-a.healthAt>MINUTE)
     a.health='UNKNOWN';
   for(const c of [...out.inflight])if(c.deadline<now){
