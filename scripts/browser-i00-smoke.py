@@ -3,6 +3,8 @@
 import base64
 import hashlib
 import http.client
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 import pathlib
@@ -1007,10 +1009,25 @@ def s01_legacy_and_archive(session,uuid,oracle,privacy_safe,added_id):
     print('B S01_ARCHIVE_DEFERS_IN_USE_RELEASE_AND_RELEASES_IDLE_VIA_DONOR=',states['legacy_account_ci01'][1],flush=True)
 
 
+class A03IsolationPage(BaseHTTPRequestHandler):
+    def do_GET(self):
+        html=b'<!doctype html><html><head><title>A03 isolated CI fixture</title></head><body>inert origin</body></html>'
+        self.send_response(200)
+        self.send_header('Content-Type','text/html; charset=utf-8')
+        self.send_header('Content-Length',str(len(html)))
+        self.end_headers()
+        self.wfile.write(html)
+
+    def log_message(self,*args):
+        pass
+
+
 def main():
-    # Public inert HTTPS page is a distinct ordinary web origin. No private
-    # provider/Git account operation, local server or OS extension is involved.
-    a03_url='https://example.com/'
+    # Only the disposable CI harness serves this inert HTTP document; there
+    # is no PCMS OS process, bridge mutation, or private provider operation.
+    a03_server=ThreadingHTTPServer(('127.0.0.1',0),A03IsolationPage)
+    threading.Thread(target=a03_server.serve_forever,daemon=True).start()
+    a03_url=f'http://127.0.0.1:{a03_server.server_port}/a03-isolated.html'
     archive=pathlib.Path(sys.argv[1]).resolve()
     browser=pathlib.Path(os.environ['FIREFOX_BINARY'])
     driver=pathlib.Path(os.environ['GECKODRIVER_BINARY'])
@@ -1102,36 +1119,18 @@ def main():
                     port.onDisconnect.addListener(()=>resolve({ok:false,code:'PORT_CLOSED'}));
                     port.postMessage({type:'GET_CREDENTIAL',params:{repositoryId:id}});
                   });
-                  // Inject a REAL extension content script into a separate
-                  // ordinary HTTPS web origin. It must execute, but the extension
-                  // origin's credentials store must not exist in that origin.
+                  // WebDriver has independently loaded this distinct HTTP
+                  // origin in a second tab. Injection must execute, not merely
+                  // receive a host-permission rejection.
                   const contentIsolation=await (async()=>{
                     const testUrl=A03_URL_LITERAL;
-                    const originalTab=await browser.tabs.getCurrent();
-                    // In disposable headless Firefox, an inactive newly
-                    // created tab may remain at about:blank until selected.
-                    const tab=await browser.tabs.create({url:testUrl,active:true});
+                    const tabs=await browser.tabs.query({});
+                    const matches=tabs.filter(t=>t.url===testUrl);
+                    if(matches.length!==1)return {ran:false,error:'A03_FIXTURE_TAB_UNAVAILABLE',
+                      observed:tabs.map(t=>t.url).slice(0,8)};
                     try{
-                      // A newly created Firefox tab can transiently report
-                      // about:blank as COMPLETE before its requested URL loads.
-                      // Await an independently observed HTTPS navigation, not
-                      // just a tab status transition; never count a missing
-                      // host permission from about:blank as an isolation PASS.
-                      let page=null,stable=0;
-                      for(let i=0;i<120;i++){
-                        page=await browser.tabs.get(tab.id);
-                        if(page.url===testUrl&&page.status==='complete'){
-                          stable++;
-                          if(stable>=2)break;
-                        }else stable=0;
-                        await new Promise(resolve=>setTimeout(resolve,100));
-                      }
-                      if(stable<2)return {ran:false,
-                        error:'A03_WEB_ORIGIN_NOT_SETTLED',
-                        url:page?.url,status:page?.status};
-                      let result;
-                      try{result=await browser.scripting.executeScript({
-                        target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
+                      const result=await browser.scripting.executeScript({
+                        target:{tabId:matches[0].id,frameIds:[0]},world:'ISOLATED',
                         func:async(name,key)=>{
                           try{
                             const db=await new Promise((resolve,reject)=>{
@@ -1155,16 +1154,10 @@ def main():
                             return {ran:true,origin:location.origin,found:false};
                           }
                         },args:[GIT_SECRET_DATABASE,id]
-                      });}
-                      catch(error){return {ran:false,error:String(error).slice(0,120),
-                        url:(await browser.tabs.get(tab.id)).url,
-                        permissions:await browser.permissions.getAll(),
-                        originGranted:await browser.permissions.contains({
-                          origins:['https://example.com/*']})};}
-                      return result?.[0]?.result||null;
-                    }finally{
-                      await browser.tabs.remove(tab.id);
-                      if(originalTab?.id)try{await browser.tabs.update(originalTab.id,{active:true});}catch{}
+                      });
+                      return result?.[0]?.result||{ran:false,error:'INJECTION_NO_RESULT'};
+                    }catch(error){
+                      return {ran:false,error:String(error).slice(0,130)};
                     }
                   })();
                   const isolated=contentIsolation?.ran===true&&
@@ -1185,10 +1178,28 @@ def main():
                     isolated,contentIsolation,excluded,reopened:observed.ok,removed:removed.ok,
                     database:GIT_SECRET_DATABASE});
                 })().catch(e=>done({ok:false,error:String(e).slice(0,190)}));"""
-                a03_script=a03_script.replace('A03_URL_LITERAL',json.dumps(a03_url))
-                a03_probe=call('POST',f'/session/{after}/execute/async',
-                    {'script':a03_script,'args':[]},timeout=45)
-                assert a03_probe.get('ok') is True,('A03_FIREFOX_IDB_FAILURE',a03_probe)
+                # The WebDriver controller, not an extension callback, opens
+                # and verifies the web page before the content-script probe.
+                # This keeps the extension-page async callback in its own tab.
+                a03_dashboard_handle=call('GET',f'/session/{after}/window')
+                a03_window=call('POST',f'/session/{after}/window/new',{'type':'tab'})
+                try:
+                    call('POST',f'/session/{after}/url',{'url':a03_url},timeout=25)
+                    a03_observed=call('GET',f'/session/{after}/url')
+                    assert a03_observed==a03_url,('A03_WEB_ORIGIN_UNAVAILABLE',a03_observed)
+                    call('POST',f'/session/{after}/window',
+                        {'handle':a03_dashboard_handle})
+                    a03_script=a03_script.replace('A03_URL_LITERAL',json.dumps(a03_url))
+                    a03_probe=call('POST',f'/session/{after}/execute/async',
+                        {'script':a03_script,'args':[]},timeout=30)
+                    assert a03_probe.get('ok') is True,('A03_FIREFOX_IDB_FAILURE',a03_probe)
+                finally:
+                    try:
+                        call('POST',f'/session/{after}/window',{'handle':a03_window['handle']})
+                        call('DELETE',f'/session/{after}/window')
+                        call('POST',f'/session/{after}/window',
+                            {'handle':a03_dashboard_handle})
+                    except Exception: pass
                 assert a03_probe['database']=='pcms-private-git-credentials-v1',a03_probe
                 print('B A03_INSTALLED_FIREFOX_INDEXEDDB_SECRET_READBACK_AND_EXCLUSION=PASS',flush=True)
                 print('B A03_REAL_CONTENT_SCRIPT_ORIGIN_DENIED_GIT_DATABASE_ACCESS=PASS',flush=True)
@@ -5236,6 +5247,8 @@ def main():
             server.terminate()
             try: server.wait(timeout=4)
             except subprocess.TimeoutExpired: server.kill()
+            a03_server.shutdown()
+            a03_server.server_close()
 
 
 if __name__=='__main__':
