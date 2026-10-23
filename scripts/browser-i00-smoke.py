@@ -3404,7 +3404,7 @@ def main():
                     proof['port']['state']=='PUBLICATION_UNCERTAIN'),proof
                 print('B I13_INSTALLED_RESTART_DURABLE_UNCERTAIN_PUBLICATION=PASS',flush=True)
 
-                # I13 B: existing public P is an encrypted sealed snapshot;
+                # A05 B: existing public P is an integrity-checked plaintext checkpoint;
                 # real Firefox IDB serializes races and holds uncertain effects.
                 call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
                 current=execute(after,"return {prepare:!!document.getElementById('pcms-existing-prepare'),verify:!!document.getElementById('pcms-existing-recheck-unlist'),restore:!!document.getElementById('pcms-existing-recheck-restore'),held:document.getElementById('pcms-existing-unlist').disabled}")
@@ -3425,9 +3425,11 @@ def main():
                     {path:'index.html',base64:btoa('<p>P</p>')},
                     {path:'src/binary.bin',base64:btoa(String.fromCharCode(0,255,8))}
                   ]);
-                  const seal=await core.sealPrevious(p,'browser-fixture-private-passphrase');
-                  const decrypted=await core.unlockPrevious(seal,'browser-fixture-private-passphrase');
-                  const negative=await core.unlockPrevious(seal,'wrong-browser-fixture-passphrase');
+                  const seal=await core.sealPrevious(p);
+                  const decrypted=await core.unlockPrevious(seal);
+                  const corrupt=structuredClone(seal);
+                  corrupt.blobs[2].base64=btoa('tampered binary');
+                  const negative=await core.unlockPrevious(corrupt);
                   const account={accountId,personaUid,revision:4,bindingVersion:1,state:'VERIFIED',
                     identity:{source:'GUARDED_SESSION_READBACK',bindingVersion:1,
                       principalFingerprint:fp}};
