@@ -1,6 +1,7 @@
 // S03 fixed-purpose GitHub connection and main-only catalog boundary.
-// Native Secret Service owns tokens; neither canonical state nor UI receives them.
+// Extension-background IndexedDB owns tokens; canonical state and UI never receive them.
 import {trustedExtensionPage} from './command-boundary.mjs';
+import {browserGitCredentialPacket} from './git-local-secret.mjs';
 import {createRestoreSentinel,openCanonicalDatabase,fail} from './journal.mjs';
 import {createImportApprovalStore,getImportScopeDigest} from './catalog-import.mjs';
 import {createGitPromptStore} from './catalog-prompt-store.mjs';
@@ -13,7 +14,6 @@ import {scanMainCatalog,validRepository,makeInitialImportPreview} from './git-ca
 export const CATALOG_PORT='pcms-s03-catalog';
 const STATE_KEY='pcmsS03Git';
 const PENDING_KEY='pcmsS03GitPending';
-const VAULT_HOST='local.pcms.backup_vault';
 const TOKEN=/^[\x21-\x7e]{12,512}$/;
 const validConfig=c=>c&&typeof c==='object'&&validRepository(c.repository)&&
   typeof c.repositoryId==='string'&&/^[1-9][0-9]{0,19}$/.test(c.repositoryId);
@@ -75,7 +75,7 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
   inspectDeclaration=inspectReadyCandidate,
   // Product gate stays inactive until independently authorized Git H/GIT proof.
   promptWriteGate=()=>false,
-  native=(packet)=>api.runtime.sendNativeMessage(VAULT_HOST,packet)}={}){
+  native=packet=>browserGitCredentialPacket(packet)}={}){
   let importDb;
   const approvalStore=async()=>createImportApprovalStore(await (importDb ||= open().catch(e=>{importDb=null;throw e;})));
   const promptStore=async()=>createGitPromptStore(await (importDb ||= open().catch(e=>{importDb=null;throw e;})));
@@ -118,7 +118,7 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
         return await scanAndPreview(p.repository,p.token,null);
       if(message.type==='CONNECT_GIT'||message.type==='RECOVER_GIT_CONNECTION'){
         const recovery=message.type==='RECOVER_GIT_CONNECTION';
-        // Repository identity first. No native/Secret Service write on an
+        // Repository identity first. No local secret write on an
         // unauthenticated, transient or wrong-repository response.
         let response;
         stage='GITHUB_TRANSPORT';
@@ -153,8 +153,8 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
         }else if(previousPending)return fail('GIT_PENDING_CONNECTION_RECONCILIATION_REQUIRED');
         if(current&&(current.repositoryId!==id||current.repository!==p.repository))
           return fail('GIT_CONNECTION_REPLACE_REQUIRES_DISCONNECT');
-        // Nonsecret intent survives the exact vault-before-config interruption.
-        // Never assume native write failure proves absence of the credential.
+        // Nonsecret intent survives the exact IndexedDB-before-config interruption.
+        // Never assume interrupted storage confirms absence of the credential.
         stage='PENDING_INTENT';
         await api.storage.local.set({[PENDING_KEY]:{
           repository:p.repository,repositoryId:id,startedAt:Date.now(),
@@ -186,13 +186,14 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
       }
       if(message.type==='RECONCILE_GIT'){
         // Explicitly requested recovery, never part of preflight or a retry.
-        // Only repairs local metadata after vault + GitHub identity readback.
+        // Only repairs local metadata after background secret + GitHub identity readback.
         stage='CONFIG_READ';
         const stored=await readConfig();
         const pending=(await api.storage.local.get(PENDING_KEY))?.[PENDING_KEY];
         const expected=pending&&validRepository(pending.repository)&&
           /^[1-9][0-9]{0,19}$/.test(pending.repositoryId)?pending:
-          {repository:'Neb963/per-gens',repositoryId:'1411034835'};
+          stored;
+        if(!expected)return fail('GIT_RECONNECT_REQUIRED');
         if(stored&&(stored.repository!==expected.repository||
           stored.repositoryId!==expected.repositoryId))return fail('GIT_RECONCILIATION_IDENTITY_CONFLICT');
         stage='VAULT_RECONCILIATION';
