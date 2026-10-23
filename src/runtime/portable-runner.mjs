@@ -13,21 +13,23 @@ const explain=e=>/^(BACKUP|PORTABLE|DOWNLOAD)_[A-Z0-9_]{3,70}$/.test(e?.message|
 const sha=async blob=>Array.from(new Uint8Array(await crypto.subtle.digest(
   'SHA-256',await blob.arrayBuffer())),x=>x.toString(16).padStart(2,'0')).join('');
 const keepAliveMs=10*60000;
-const manualReceipt=async(downloads,id,bytes)=>{
+const manualReceipt=async(downloads,id,bytes,runId)=>{
+  if(typeof runId!=='string'||!/^manual_[a-f0-9]{32}$/.test(runId))return null;
   let row;
   try{const found=await downloads.search({id});row=found?.length===1?found[0]:null;}
   catch{return null;}
+  const matched=typeof row?.filename==='string'?
+    /[/\\]pcms-backups[/\\]pcms-alpha-(manual_[a-f0-9]{32})(?: \(\d+\))?\.pcms\.jsonl$/i.exec(row.filename):null;
   if(row?.id!==id||row?.state!=='complete'||row.exists!==true||
-     row.fileSize!==bytes||typeof row.filename!=='string'||
-     !/[/\\]pcms-backups[/\\]pcms-alpha-manual_[a-f0-9]{32}(?: \(\d+\))?\.pcms\.jsonl$/i.test(row.filename))return null;
+     row.fileSize!==bytes||matched?.[1]!==runId)return null;
   return {tier:2,code:'BROWSER_REPORTED_COMPLETE',filename:row.filename};
 };
-const awaitManual=async(downloads,id,bytes,timeoutMs=120000)=>new Promise(resolve=>{
+const awaitManual=async(downloads,id,bytes,runId,timeoutMs=120000)=>new Promise(resolve=>{
   let ended=false;
   const done=value=>{if(ended)return;ended=true;clearTimeout(timer);
     try{downloads.onChanged.removeListener(changed);}catch{}resolve(value)};
   const inspect=async()=>{
-    const proof=await manualReceipt(downloads,id,bytes);
+    const proof=await manualReceipt(downloads,id,bytes,runId);
     if(proof)return done(proof);
     const found=await downloads.search({id}).catch(()=>[]);
     if(found?.[0]?.state==='interrupted')done(null);
@@ -181,10 +183,13 @@ export function createPortableRunner(api,{
         const previous=await readManual();
         if(previous&&['DISPATCH_POSSIBLE','DOWNLOAD_STARTED','HELD_UNCERTAIN']
           .includes(previous.status)){
-          if(previous.status==='DOWNLOAD_STARTED'&&
-             Number.isSafeInteger(previous.downloadId)){
+          // An interrupted/late-completing Firefox download may still have a
+          // durable ID. Reconcile it before permitting any further dispatch;
+          // a lost ACK without an ID remains held, never replayed.
+          if(['DOWNLOAD_STARTED','HELD_UNCERTAIN'].includes(previous.status)&&
+             Number.isSafeInteger(previous.downloadId)&&previous.downloadId>=0){
             const proof=await manualReceipt(api.downloads,previous.downloadId,
-              previous.bytes);
+              previous.bytes,previous.runId);
             if(!proof)return fail('MANUAL_DOWNLOAD_UNCERTAIN');
             await recordManual({...previous,status:'BROWSER_REPORTED_COMPLETE',
               code:'BROWSER_REPORTED_COMPLETE',tier:2});
@@ -210,7 +215,7 @@ export function createPortableRunner(api,{
         await recordManual({runId,status:'DOWNLOAD_STARTED',tier:1,
           sha256:fileHash,bytes:archive.bytes,downloadId:receipt.downloadId,
           startedAt:clock()});
-        const proof=await awaitManual(api.downloads,receipt.downloadId,archive.bytes);
+        const proof=await awaitManual(api.downloads,receipt.downloadId,archive.bytes,runId);
         if(!proof)throw Error('DOWNLOAD_OUTCOME_UNKNOWN');
         await recordManual({runId,status:'BROWSER_REPORTED_COMPLETE',tier:2,
           sha256:fileHash,bytes:archive.bytes,downloadId:receipt.downloadId,
