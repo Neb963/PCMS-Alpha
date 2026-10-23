@@ -17,18 +17,19 @@ export function validateAdoptionMessage(api,sender,msg){
   if(!msg||typeof msg!=='object'||Array.isArray(msg)||typeof json!=='string'||
      json.length>700||Object.keys(msg).some(k=>!['type','params'].includes(k)))
     return fail('INVALID_MESSAGE');
-  if(!['GET_ADOPTION','LIST_ADOPTIONS','CAPTURE_ADOPTION','ARCHIVE_LOCAL','ARCHIVE_GIT','RECHECK_GIT','ABORT_GIT_PREPARED'].includes(msg.type))
+  if(!['GET_ADOPTION','LIST_ADOPTIONS','CAPTURE_ADOPTION','RECHECK_IDENTITY','ARCHIVE_LOCAL','ARCHIVE_GIT','RECHECK_GIT','ABORT_GIT_PREPARED'].includes(msg.type))
     return fail('CAPABILITY_OFF');
   const p=msg.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
   const allowed=msg.type==='LIST_ADOPTIONS'?[]:
     msg.type==='CAPTURE_ADOPTION'?['slug','expectedRevision','explicitPublicConsent']:
+    msg.type==='RECHECK_IDENTITY'?['slug','expectedRevision']:
     msg.type==='GET_ADOPTION'?['slug']:
     ['ARCHIVE_GIT','RECHECK_GIT'].includes(msg.type)?['slug','expectedRevision']:
     ['slug','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k))||
      (msg.type!=='LIST_ADOPTIONS'&&!slug(p.slug)))return fail('INVALID_PARAMS');
-  if(['ARCHIVE_LOCAL','CAPTURE_ADOPTION','ARCHIVE_GIT','RECHECK_GIT','ABORT_GIT_PREPARED'].includes(msg.type)&&
+  if(['ARCHIVE_LOCAL','CAPTURE_ADOPTION','RECHECK_IDENTITY','ARCHIVE_GIT','RECHECK_GIT','ABORT_GIT_PREPARED'].includes(msg.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
     return fail('INVALID_PARAMS');
   if(msg.type==='CAPTURE_ADOPTION'&&typeof p.explicitPublicConsent!=='boolean')
@@ -155,8 +156,16 @@ export function createAdoptionBoundary(api,{
 
       const context=await readRow(database,p.slug);
       if(!context.ok)return context;
-      const eligible=validateAdoptionIntent(context.row,context.account,p);
-      if(!eligible.ok)return eligible;
+      const identityRecheck=msg.type==='RECHECK_IDENTITY';
+      if(identityRecheck){
+        if(context.row.revision!==p.expectedRevision||
+           context.row.ownerState!=='IDENTITY_CONFLICT'||
+           context.row.identityHold!=='PUBLIC_ID_REVALIDATION_REQUIRED')
+          return fail('IDENTITY_NOT_RECHECKABLE');
+      }else{
+        const eligible=validateAdoptionIntent(context.row,context.account,p);
+        if(!eligible.ok)return eligible;
+      }
       const g=guard();
       if(!g?.observeReadOnly||!g.getSafeRouteReadiness)return fail('GUARD_NOT_READY');
       const ready=await g.getSafeRouteReadiness(context.row.personaUid);
@@ -185,7 +194,9 @@ export function createAdoptionBoundary(api,{
          after.routeId!==ready.routeId||
          (await sentinel.inspect()).held)return fail('SESSION_CONTEXT_CHANGED');
       // Atomic commit rechecks the account/Persona and exact row revision.
-      return await store.adopt(p,second);
+      return identityRecheck?
+        await store.recheckIdentity(p.slug,p.expectedRevision,second):
+        await store.adopt(p,second);
     }catch{return fail('ADOPTION_AUTHORITY_UNAVAILABLE');}
   }
   // C-10: once account-level management is granted, discover and adopt
@@ -227,11 +238,19 @@ export function createAdoptionBoundary(api,{
         const a=accounts.get(row.accountId);
         // Only generators discovered on the account; PCMS-created private
         // generators (MANAGED_CREATED) have no human original to adopt.
-        if(!slug(row.slug)||row.ownerState!=='OBSERVED_OWNER'||
-           (row.management!==undefined&&row.management!=='OBSERVED_ONLY')||
-           !['PUBLIC','UNLISTED'].includes(row.visibility)||a?.state!=='VERIFIED')continue;
+        if(!slug(row.slug)||a?.state!=='VERIFIED')continue;
         if((backoff.get(row.slug)||0)>now)continue;
         const rec=adoptions.get(row.slug);
+        if(rec&&row.ownerState==='IDENTITY_CONFLICT'&&
+           row.identityHold==='PUBLIC_ID_REVALIDATION_REQUIRED'&&
+           rec.remotePublicId===row.remoteId){
+          work.push({slug:row.slug,type:'RECHECK_IDENTITY',params:{
+            slug:row.slug,expectedRevision:row.revision}});
+          continue;
+        }
+        if(row.ownerState!=='OBSERVED_OWNER'||
+           (row.management!==undefined&&row.management!=='OBSERVED_ONLY')||
+           !['PUBLIC','UNLISTED'].includes(row.visibility))continue;
         if(!rec)work.push({slug:row.slug,type:'CAPTURE_ADOPTION',params:{slug:row.slug,
           expectedRevision:row.revision,explicitPublicConsent:false,standingManagement:true}});
         else if(!rec.archived&&rec.archiveState==='ARCHIVE_PENDING'&&gitGate({slug:row.slug,record:rec})===true)
