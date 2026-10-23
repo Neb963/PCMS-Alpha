@@ -5039,6 +5039,112 @@ def main():
                     assert marker=={'held':True,'status':'COMPLETE_INACTIVE'},marker
                     print('B/H A02_PROCESS_RESTART_PRESERVES_INACTIVE_RESTORE_GUARD=PASS',flush=True)
                 finally:close(a02_reopened)
+                # A02 H: import the exact independently disk-reopened
+                # downloaded file into ANOTHER persistent fresh Firefox XPI.
+                # The file comes from the prior real browser Downloads effect,
+                # not a synthetic in-memory archive.
+                disk_restore_profile=pathlib.Path(folder)/'a02-disk-restore'
+                disk_restore_profile.mkdir()
+                (disk_restore_profile/'user.js').write_text(
+                    'user_pref("xpinstall.signatures.required", false);\n')
+                disk_first=open_session(browser,disk_restore_profile)
+                try:
+                    assert call('POST',f'/session/{disk_first}/moz/addon/install',
+                        {'path':str(archive),'temporary':False},timeout=45)==ID
+                finally:close(disk_first)
+                disk_session=open_session(browser,disk_restore_profile)
+                try:
+                    disk_uuid=addons_uuid(disk_restore_profile)
+                    call('POST',f'/session/{disk_session}/url',
+                        {'url':f'moz-extension://{disk_uuid}/pcms/index.html#settings'})
+                    wait_donor_ready(disk_session)
+                    input_el=call('POST',f'/session/{disk_session}/element',
+                        {'using':'css selector','value':'#pcms-restore-archive'})
+                    input_id=input_el['element-6066-11e4-a52e-4f735466cecf']
+                    call('POST',f'/session/{disk_session}/element/{input_id}/value',
+                        {'text':str(disk_path),'value':list(str(disk_path))})
+                    disk_restore_code="""const done=arguments[arguments.length-1];
+                    (async()=>{
+                      const pkg=await import('../lib/backup-package.js');
+                      const stage=await import('./portable-restore-stage.mjs');
+                      const plan=await import('./portable-restore-plan.mjs');
+                      const core=await import('./backup-core.mjs');
+                      const codec=await import('./portable-archive.mjs');
+                      const journal=await import('./journal.mjs');
+                      const donorModule=await import('./donor-snapshot.mjs');
+                      const hist=await import('../lib/automation-history.js');
+                      const file=document.getElementById('pcms-restore-archive')?.files?.[0];
+                      if(!file||file.size<1)throw Error('A02_IMPORTED_DISK_FILE_MISSING');
+                      const imported=await stage.preparePortableStage(file);
+                      const parsed=await stage.readPortableStage(imported.scope);
+                      if(parsed.receipt.rows<0||!parsed.sourceVerified)
+                        throw Error('A02_DISK_STAGE_UNVERIFIED');
+                      const donor=await donorModule.readProtectedDonorSnapshot(browser);
+                      const local=await browser.storage.local.get(null);
+                      const extra=Object.fromEntries(Object.entries(local).filter(([key])=>
+                        key==='automationJobs'||key.startsWith('gm-values:')));
+                      const params={state:donor.state,containers:donor.containers,
+                        userscriptData:extra,selection:{kind:'full'},
+                        automationHistory:hist.filterOrdinaryAutomationJobs(
+                          Object.values(extra.automationJobs||{}))};
+                      const prelim=pkg.createPortableBackupPayload(params);
+                      const cookies=Object.create(null);
+                      for(const entry of prelim.personas){
+                        const records=await browser.runtime.sendMessage({
+                          type:'PERSONA_COOKIES_LIST',profileId:entry.sourceId});
+                        if(!Array.isArray(records))throw Error('A02_DISK_COOKIE_UNAVAILABLE');
+                        cookies[entry.sourceId]=records;
+                      }
+                      const portable=pkg.createPortableBackupPayload({
+                        ...params,cookiesByProfile:cookies});
+                      const db=await journal.openCanonicalDatabase();
+                      const current=await core.snapshotCanonicalV2(db,{serializedValues:true});
+                      db.close();
+                      const cp=await codec.encodePortableArchive({pcms:current,donor:portable});
+                      const stagedCp=await stage.preparePortableStage(cp.blob);
+                      const inspection=await plan.inspectPortableRestore({
+                        incoming:parsed,currentPcms:current,currentDonor:donor,
+                        currentPortable:portable,containers:donor.containers,
+                        mappings:{},accountChoices:{},mode:'replace',fresh:false});
+                      if(parsed.donor.personas.length!==0)
+                        throw Error('A02_DISK_PERSONAS_REQUIRE_OPERATOR_MAPPING');
+                      await plan.verifyPortableCheckpoint({
+                        checkpoint:await stage.readPortableStage(stagedCp.scope),
+                        currentPcms:current,currentPortable:portable});
+                      const result=await new Promise(resolve=>{
+                        const port=browser.runtime.connect({name:'pcms-i16-restore'});
+                        port.onMessage.addListener(x=>{try{port.disconnect()}catch{}resolve(x)});
+                        port.onDisconnect.addListener(()=>resolve({ok:false,code:'PORT_CLOSED'}));
+                        port.postMessage({action:'APPLY_PORTABLE',params:{
+                          stageScope:imported.scope,checkpointScope:stagedCp.scope,
+                          reviewedPlanSha256:inspection.planSha256,mode:'replace',
+                          fresh:false,mappings:{},accountChoices:{}}});
+                      });
+                      const marker=(await browser.storage.local.get('pcmsRestoreInProgress'))
+                        .pcmsRestoreInProgress;
+                      done({ok:result?.ok===true&&
+                        result.code==='RESTORED_PORTABLE_INACTIVE'&&
+                        marker?.status==='COMPLETE_INACTIVE'&&
+                        marker?.active===true,
+                        code:result?.code,rows:parsed.receipt.rows,
+                        active:marker?.active,status:marker?.status});
+                    })().catch(error=>done({ok:false,error:String(error),
+                      stack:String(error?.stack||'').slice(0,900)}));"""
+                    disk_restored=call('POST',f'/session/{disk_session}/execute/async',
+                        {'script':disk_restore_code,'args':[]},timeout=180)
+                    assert disk_restored.get('ok') is True,disk_restored
+                    print('H A02_EXPORTED_DISK_ARCHIVE_IMPORTED_AND_RESTORED_IN_FRESH_FIREFOX=PASS',flush=True)
+                finally:close(disk_session)
+                disk_restart=open_session(browser,disk_restore_profile)
+                try:
+                    disk_uuid=addons_uuid(disk_restore_profile)
+                    call('POST',f'/session/{disk_restart}/url',
+                        {'url':f'moz-extension://{disk_uuid}/pcms/index.html#settings'})
+                    observed=execute(disk_restart,
+                        "return browser.storage.local.get('pcmsRestoreInProgress').then(v=>({active:v.pcmsRestoreInProgress?.active,status:v.pcmsRestoreInProgress?.status}))")
+                    assert observed=={'active':True,'status':'COMPLETE_INACTIVE'},observed
+                    print('H A02_IMPORTED_DISK_RESTORE_GUARD_PERSISTS_AFTER_RELAUNCH=PASS',flush=True)
+                finally:close(disk_restart)
                 s01_add_account_profile(browser,archive,pathlib.Path(folder))
                 # A01: independent CLEAN-HOME installed-XPI and exact-byte
                 # package census. No extra PCMS host is installed; no real
