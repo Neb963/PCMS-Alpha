@@ -23,8 +23,12 @@ function invalidate(){
   verify.disabled=true;apply.disabled=true;
   details.textContent='No reviewed portable restore plan. Existing state is unchanged.';
 }
-for(const control of [archive,checkpoint,mode,fresh,mappings])
+for(const control of [archive,mode,fresh,mappings])
   control.addEventListener('change',invalidate);
+checkpoint.addEventListener('change',()=>{
+  proof=null;checkpointScope=null;apply.disabled=true;
+  if(review)verify.disabled=false;
+});
 function snapshotPortable(donor,local){
   const extra=Object.create(null);
   for(const [key,value] of Object.entries(local||{}))
