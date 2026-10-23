@@ -88,10 +88,15 @@ export function createAdoptionStore(db){
               // Neither a second account nor a different slug may inherit
               // this provider immutable ID, even when source bytes match.
               const checkCollision=()=>{
+                let collision=false;
                 const cursor=m.openCursor();
                 cursor.onsuccess=e=>{
                   const c=e.target.result;
-                  if(!c){publish();return;}
+                  if(!c){
+                    if(collision)done(fail('IDENTITY_PUBLIC_ID_ALREADY_BOUND'));
+                    else publish();
+                    return;
+                  }
                   const rowOther=c.value?.generator;
                   const aliasOther=c.value?.identity;
                   if((c.key.startsWith('inventory:')&&rowOther&&rowOther.slug!==slug&&
@@ -99,23 +104,28 @@ export function createAdoptionStore(db){
                       rowOther.identityAliases?.includes(original.remotePublicId)))||
                      (c.key.startsWith('identity-alias:')&&aliasOther&&
                       aliasOther.slug!==slug&&aliasOther.publicId===original.remotePublicId)){
-                    done(fail('IDENTITY_PUBLIC_ID_ALREADY_BOUND'));return;
+                    collision=true;
                   }
                   c.continue();
                 };
               };
               const checkOperations=()=>{
+                let pending=false;
                 const cursor=t.objectStore('operations').openCursor();
                 cursor.onsuccess=e=>{
                   const c=e.target.result;
-                  if(!c){checkCollision();return;}
+                  if(!c){
+                    if(pending)done(fail('IDENTITY_UNCERTAIN_OPERATION_HELD'));
+                    else checkCollision();
+                    return;
+                  }
                   const operation=c.value||{};
                   const scope=[operation.slug,operation.targetSlug,
                     operation.resourceSlug,operation.requestedSlug,
                     operation.metadata?.slug,operation.targetId];
                   if(scope.includes(slug)&&
                      !['CONFIRMED','ABORTED','REJECTED','COMPLETED'].includes(operation.status)){
-                    done(fail('IDENTITY_UNCERTAIN_OPERATION_HELD'));return;
+                    pending=true;
                   }
                   c.continue();
                 };
