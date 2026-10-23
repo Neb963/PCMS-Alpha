@@ -1386,6 +1386,35 @@ def main():
                     {'script':a02_script,'args':[]},timeout=90)
                 assert a02_result.get('ok') is True,a02_result
                 print('B A02_INSTALLED_PASSWORDLESS_PORTABLE_CODEC_AND_STAGING=PASS',flush=True)
+                # Browser-native backup export in the disposable installed XPI;
+                # read exact bytes independently from the CI host disk only.
+                a02_manual_script="""const done=arguments[arguments.length-1];
+                const port=browser.runtime.connect({name:'pcms-i15-backup'});
+                let settled=false;
+                const finish=value=>{if(settled)return;settled=true;
+                  try{port.disconnect()}catch{}done(value)};
+                port.onMessage.addListener(async receipt=>{
+                  if(receipt?.ok!==true)return finish(receipt);
+                  const rows=await browser.downloads.search({id:receipt.downloadId});
+                  return finish({...receipt,filename:rows?.[0]?.filename||null});
+                });
+                port.onDisconnect.addListener(()=>finish({ok:false,code:'PORT_CLOSED'}));
+                port.postMessage({action:'MANUAL'});"""
+                manual_result=call('POST',f'/session/{after}/execute/async',
+                    {'script':a02_manual_script,'args':[]},timeout=180)
+                assert manual_result.get('ok') is True,manual_result
+                assert manual_result.get('code')=='BROWSER_REPORTED_COMPLETE',manual_result
+                disk_path=pathlib.Path(manual_result.get('filename') or '')
+                assert disk_path.is_file(),{'code':'A02_DISK_REOPEN_MISSING'}
+                raw_disk=disk_path.read_bytes()
+                assert len(raw_disk)==manual_result.get('bytes'),{
+                    'code':'A02_DISK_BYTES_MISMATCH'}
+                assert hashlib.sha256(raw_disk).hexdigest()==manual_result.get('sha256'),{
+                    'code':'A02_DISK_SHA256_MISMATCH'}
+                first_line=json.loads(raw_disk.splitlines()[0])
+                assert first_line.get('format')=='pcms-alpha-portable',first_line
+                assert b'"end":"pcms-alpha-portable"' in raw_disk[-2048:]
+                print('B/H A02_MANUAL_BROWSER_DOWNLOAD_INDEPENDENT_DISK_REOPEN=PASS',flush=True)
                 canonical=canonical_command(after,{'type':'SUMMARY'})
                 assert canonical.get('ok') is True and canonical.get('storage')=='READY',canonical
                 assert canonical.get('providerEffects')=='OFF',canonical
