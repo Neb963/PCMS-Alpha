@@ -59,7 +59,7 @@ test('A04: manifest, chunks, offset and finalization have immutable idempotent r
  assert.equal((await s.finalizeBatch({batchId:id})).duplicate,true);
  assert.equal((await s.appendBatch({batchId:id,offset:3,slugs:['four']})).ok,false);
  assert.deepEqual((await s.getBatch({batchId:id})).batch,
-  {batchId:id,accountId:null,total:3,appended:3,processed:0,state:'QUEUED',revision:4});
+  {batchId:id,accountId:null,total:3,appended:3,processed:0,state:'QUEUED',revision:4,held:0,lastHold:null});
  assert.equal(db.keys('operations').length,0);
 });
 test('A04: aborted append must not acknowledge missing input',async()=>{
@@ -147,4 +147,36 @@ test('A04: closed-dashboard watcher resumes finalized batch across event-page re
  assert.equal(step3.batchProgressed,4);
  assert.equal((await s.getBatch({batchId:id})).batch.state,'INTAKE_COMPLETE');
  assert.equal(db.keys('meta').filter(k=>k.startsWith('s00-create-slug:')).length,68);
+});
+
+test('A04: held intake does not starve healthy batch items; only repaired hold retries',async()=>{
+ const db=fakeDatabase(),s=createCoordinatorStore(db);
+ await seedBatch(s,3);
+ let failOne=true;
+ const batch=createBatchStore(db,{acceptCreate:async item=>
+   failOne&&item.slug===slugAt(1)?{ok:false,code:'OWNER_UNVERIFIED'}:
+   s.acceptCreate(item)});
+ assert.equal((await batch.processBatch({batchId:id})).held,false);
+ const blocked=await batch.processBatch({batchId:id});
+ assert.equal(blocked.ok,true);assert.equal(blocked.held,true);
+ assert.equal(blocked.code,'OWNER_UNVERIFIED');
+ assert.equal((await batch.processBatch({batchId:id})).ok,true);
+ const state=(await batch.getBatch({batchId:id})).batch;
+ assert.equal(state.state,'INTAKE_HELD');assert.equal(state.held,1);
+ const names=db.keys('meta').filter(k=>k.startsWith('s00-create-slug:'));
+ assert.equal(names.length,2);
+ assert.equal(db.read('meta','s00-create-slug:'+slugAt(1)),undefined);
+ const pending=await batch.listBatchHolds({batchId:id});
+ assert.equal(pending.ok,true);assert.equal(pending.items.length,1);
+ assert.equal(pending.items[0].slug,slugAt(1));
+ assert.equal((await batch.retryBatchHold({batchId:id,index:1})).code,'OWNER_UNVERIFIED');
+ assert.equal((await batch.getBatch({batchId:id})).batch.held,1);
+ failOne=false;
+ const retried=await batch.retryBatchHold({batchId:id,index:1});
+ assert.equal(retried.ok,true);
+ assert.equal(retried.batch.state,'INTAKE_COMPLETE');assert.equal(retried.batch.held,0);
+ assert.equal((await batch.retryBatchHold({batchId:id,index:1})).code,'BATCH_HOLD_NOT_FOUND');
+ assert.equal((await batch.listBatchHolds({batchId:id})).items.length,0);
+ assert.equal(db.keys('meta').filter(k=>k.startsWith('s00-create-slug:')).length,3);
+ assert.equal(db.keys('operations').length,0);
 });
