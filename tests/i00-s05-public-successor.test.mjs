@@ -13,8 +13,7 @@ import {planReadyDevelopment} from '../src/runtime/ready-development.mjs';
 globalThis.crypto??=webcrypto;
 const slug='existing-s05-successor',repoId='1411034835',
  accountId='account-fixture',personaUid='persona-fixture',
- rid='remote-fixture',H='a'.repeat(64),nonce='b'.repeat(32),
- password='fixture encrypted previous source';
+ rid='remote-fixture',H='a'.repeat(64),nonce='b'.repeat(32);
 const blobs=s=>[{path:'main.pjs',base64:Buffer.from(s).toString('base64')},
  {path:'index.html',base64:Buffer.from('<div>'+s+'</div>').toString('base64')}];
 async function set(db,rows){
@@ -28,7 +27,7 @@ async function fixture({dirty=false,running=false,changed=false}={}){
  const db=fakeDatabase(),P=await exactSource(blobs('original public P')),
   A=await exactSource(blobs('source A saved')),
   B=await exactSource(blobs('source B READY'));
- const seal=await sealPrevious(P,password);
+ const seal=await sealPrevious(P);
  const account={accountId,revision:2,state:'VERIFIED',
   personaUid,bindingVersion:1,
   identity:{source:'GUARDED_SESSION_READBACK',principalFingerprint:H}};
@@ -99,7 +98,7 @@ async function fixture({dirty=false,running=false,changed=false}={}){
  });
  return {db,ready,existing,stage,ai,A,B,P,b,boundary,api};
 }
-test('S05 public update supersedes saved unlisted A with READY B without re-unlist or losing encrypted P',async()=>{
+test('S05 public update supersedes saved unlisted A with READY B without re-unlist or losing exact recoverable P',async()=>{
  const f=await fixture();
  const plan=planReadyDevelopment({
   ready:await f.ready.get(slug),
@@ -108,12 +107,13 @@ test('S05 public update supersedes saved unlisted A with READY B without re-unli
   job:{ok:true,job:f.ai},effects:false,visibility:'UNLISTED'});
  assert.equal(plan.type,'PIN_STAGE');
  const result=await f.boundary.run({
-  type:'PIN_STAGE',params:{slug,expectedRevision:8,passphrase:password}},
+  type:'PIN_STAGE',params:{slug,expectedRevision:8}},
   {id:'fixture',url:'moz-extension://fixture/pcms/index.html'});
  assert.equal(result.ok,true,JSON.stringify(result));
  const old=f.db.read('meta','existing-update:'+slug).record;
  assert.equal(old.previousFingerprint,f.P.fingerprint,'restore P unchanged');
- assert.equal(old.recovery.ciphertext,f.existing.recovery.ciphertext);
+ assert.equal(old.recovery.fingerprint,f.existing.recovery.fingerprint);
+ assert.deepEqual(old.recovery.blobs,f.existing.recovery.blobs);
  assert.equal(old.stagePreviousFingerprint,f.A.fingerprint,'stage from saved A');
  assert.equal(old.stagedFingerprint,f.B.fingerprint,'staging B');
  assert.equal(old.state,'UNLIST_CONFIRMED');
@@ -129,12 +129,12 @@ test('S05 successor holds old running helper, human dirty editor and source drif
  for(const opts of [{running:true},{dirty:true},{changed:true}]){
   const f=await fixture(opts);
   const out=await f.boundary.run({type:'PIN_STAGE',params:{
-    slug,expectedRevision:8,passphrase:password}},
+    slug,expectedRevision:8}},
    {id:'fixture',url:'moz-extension://fixture/pcms/index.html'});
   assert.equal(out.ok,false,JSON.stringify({opts,out}));
   assert.equal(f.db.read('meta','existing-update:'+slug).record.state,'STAGE_CONFIRMED');
-  assert.equal(f.db.read('meta','existing-update:'+slug).record.recovery.ciphertext,
-    f.existing.recovery.ciphertext);
+  assert.deepEqual(f.db.read('meta','existing-update:'+slug).record.recovery.blobs,
+    f.existing.recovery.blobs);
   assert.equal((await f.ready.get(slug)).record.desired.identifier,f.b.identifier);
  }
 });
