@@ -7,7 +7,7 @@ import {validateBackupPayload,validateExternalArtifactHashes} from '../lib/backu
 const requireValid=(ok,code)=>{if(!ok)throw Error(code)};
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 export async function inspectPortableRestore({incoming,mode='merge',fresh=false,
-  mappings={},currentPcms,currentDonor,currentPortable,containers=[]}){
+  mappings={},accountChoices={},currentPcms,currentDonor,currentPortable,containers=[]}){
   requireValid(RESTORE_MODES.includes(mode),'RESTORE_MODE_INVALID');
   validatePcmsSnapshot(currentPcms);
   requireValid(currentPortable&&Array.isArray(currentPortable.personas),
@@ -23,12 +23,26 @@ export async function inspectPortableRestore({incoming,mode='merge',fresh=false,
   await validateExternalArtifactHashes(incoming.donor.scripts||[],{entries:true});
   const groups=inspectRestoreMappings(incoming.donor,mappings,containers,
     {fresh,strict:false});
+  requireValid(accountChoices&&typeof accountChoices==='object'&&
+    !Array.isArray(accountChoices)&&Object.keys(accountChoices).length<=10000,
+    'RESTORE_ACCOUNT_CHOICES_INVALID');
+  const accounts=incoming.canonical.stores.meta.filter(row=>
+    typeof row.key==='string'&&row.key.startsWith('account:')&&
+    row.value?.account).map(row=>row.value.account.accountId);
+  const names=new Set(accounts);
+  requireValid(names.size===accounts.length&&accounts.every(x=>
+    typeof x==='string'&&x.length>0),'RESTORE_ACCOUNT_CHOICES_INVALID');
+  for(const [id,choice] of Object.entries(accountChoices))
+    requireValid(names.has(id)&&['INCLUDE_INACTIVE','EXCLUDE'].includes(choice),
+      'RESTORE_ACCOUNT_CHOICES_INVALID');
+  const choicesMissing=fresh?accounts.filter(id=>!Object.hasOwn(accountChoices,id)).length:0;
   const destinationSha256=await digest(JSON.stringify({
     pcms:currentPcms,donor:stableRestoreDonorCut(currentDonor),
     portable:currentPortable}));
   const sourceSha256=await digest(JSON.stringify(incoming.canonical));
   const risk={
     importedPersonas:groups.length,
+    importedAccounts:accounts.length,accountDecisionsMissing:choicesMissing,
     unmappedPersonas:groups.filter(g=>g.status==='MAPPING_REQUIRED').length,
     newContainers:groups.filter(g=>g.status==='CREATE_REQUESTED').length,
     directRouteReviews:groups.filter(g=>g.status==='DIRECT_REVIEW_REQUIRED').length,
@@ -45,7 +59,7 @@ export async function inspectPortableRestore({incoming,mode='merge',fresh=false,
   };
   const plan={schema:2,format:'pcms-alpha-portable',mode,fresh,
     archiveSha256:incoming.receipt.chain,sourceSha256,destinationSha256,
-    groups,risk,exclusions:RESTORE_EXCLUSIONS};
+    groups,risk,accountChoices,exclusions:RESTORE_EXCLUSIONS};
   return {plan,planSha256:await digest(JSON.stringify(plan))};
 }
 export async function verifyPortableCheckpoint({
