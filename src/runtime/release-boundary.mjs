@@ -242,7 +242,7 @@ export function createReleaseBoundary(api,{
       return fail('CURRENT_GIT_SOURCE_NOT_FINAL_F');
     const g=guard();
     if(!g?.getSafeRouteReadiness||!g?.observeReadOnly||
-       !g?.inspectStageEditor||!g?.runNativeAiStep||!g?.runReleaseStep)
+       !g?.inspectStageEditor||!g?.runNativeAiStep)
       return fail('RELEASE_DONOR_GUARD_UNAVAILABLE');
     const route=await g.getSafeRouteReadiness(r.personaUid);
     if(!route?.ready)return fail(route?.code||'ROUTE_UNVERIFIED');
@@ -458,6 +458,8 @@ export function createReleaseBoundary(api,{
       if(checked.kind==='EXISTING_UPDATE'&&
          checked.existing.stagedFingerprint!==checked.source.fingerprint)
         return fail('EXISTING_FINAL_F_NOT_PINNED');
+      if(typeof guard()?.runReleaseStep!=='function')
+        return fail('RELEASE_EXECUTOR_UNAVAILABLE');
       if(effectGate({phase:'I13',record:stored.record})!==true)
         return fail('PUBLICATION_ACTIVATION_HELD');
       // The dispatch-possible transition commits *before* the only effect.
