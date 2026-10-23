@@ -82,3 +82,23 @@ test('P55-06: crash after possible remove or lost ACK never repeats delete on re
   assert.equal(possible.store.state().archives[0].state,'DELETE_HELD');
   assert.deepEqual(possible.removed,[]);
 });
+
+test('A02: new plaintext daily archives rotate at 14 without deleting manual/untracked',async()=>{
+  const portable=n=>({id:n,filename:'/fixture/Downloads/pcms-backups/pcms-alpha-'+run(n)+'.pcms.jsonl',
+    state:'complete',exists:true,fileSize:88});
+  const owned=Array.from({length:16},(_,i)=>archiveFromDownload(
+    run(i+1),i+1,'a'.repeat(64),88,portable(i+1)));
+  assert.ok(owned.every(Boolean),'all portable filenames must satisfy exact ownership');
+  const env=fixture(owned);
+  for(let n=1;n<=16;n++)env.actual.set(n,portable(n));
+  env.actual.set(17,{...portable(17),filename:'/tmp/other/pcms-alpha-'+run(17)+'.pcms.jsonl'});
+  env.actual.set(18,{...portable(18),filename:'/fixture/Downloads/pcms-backups/pcms-alpha-manual_'+
+    '1'.repeat(32)+'.pcms.jsonl'});
+  const result=await makeRetention(env.store,env.downloads).prune();
+  assert.equal(result.ok,true);
+  assert.deepEqual(env.removed,[1,2]);
+  assert.equal(env.store.state().archives.filter(r=>r.state==='COMPLETE').length,14);
+  assert.equal(env.actual.get(17).exists,true);
+  assert.equal(env.actual.get(18).exists,true);
+  assert.equal(env.erased.length,0);
+});

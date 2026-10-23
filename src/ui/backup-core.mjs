@@ -118,9 +118,12 @@ export function deserializeClone(value,depth=0){
 export function validatePcmsSnapshot(snapshot){
   requireValid(plain(snapshot)&&snapshot.schema===1&&plain(snapshot.stores),'BACKUP_PCMS_SCHEMA_UNSUPPORTED');
   requireValid(Object.keys(snapshot.stores).length===DB_STORES.length,'BACKUP_INCOMPLETE');
+  let totalRows=0;
   for(const store of DB_STORES){
     const entries=snapshot.stores[store];
-    requireValid(Array.isArray(entries)&&entries.length<=100000,'BACKUP_INCOMPLETE');
+    requireValid(Array.isArray(entries)&&entries.length<=500000,'BACKUP_INCOMPLETE');
+    totalRows+=entries.length;
+    requireValid(totalRows<=500000,'BACKUP_V2_ROW_LIMIT');
     const keys=new Set();
     for(const row of entries){
       requireValid(plain(row)&&Object.keys(row).length===2&&
@@ -354,7 +357,7 @@ function equalV2StructuredClone(left,right,depth=0){
   }
   return true;
 }
-export function verifyCanonicalV2Unchanged(db,before){
+export function verifyCanonicalV2Unchanged(db,before,{serializedValues=false}={}){
   validatePcmsSnapshot(before);
   return new Promise((resolve,reject)=>{
     if(!db||DB_STORES.some(s=>!db.objectStoreNames.contains(s))){
@@ -385,7 +388,8 @@ export function verifyCanonicalV2Unchanged(db,before){
           try{
             // IDB cursor values are already structured-cloned by IndexedDB;
             // do not structuredClone their source bytes a second time.
-            const current={key:serializeClone(cur.key),value:cur.value};
+            const current={key:serializeClone(cur.key),
+              value:serializedValues?serializeClone(cur.value):cur.value};
             const earlier=previous[index];
             if(!equalV2StructuredClone(current.key,earlier.key)||
                !equalV2StructuredClone(current.value,earlier.value)){

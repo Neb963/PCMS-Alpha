@@ -392,77 +392,60 @@
       <section class="workspace" id="view-settings" data-view="settings" aria-labelledby="heading-settings" hidden>
         <header class="workspace-head"><div><p class="eyebrow">Workspace / 06</p><h1 id="heading-settings" tabindex="-1">Settings</h1><p>Configuration, diagnostics and explicit protected workflow permissions. Remote effects default OFF.</p></div></header>
         <section class="panel" aria-labelledby="pcms-backup-title">
-          <div class="panel-head"><h2 id="pcms-backup-title">Manual integrated encrypted backup</h2><span class="unknown">Local export · no restore</span></div>
-          <p class="reason">One encrypted file includes a consistent PCMS record/source snapshot and PersonaMonkey's separately encrypted supported portable data. Native WireGuard private configuration, external provider state and unsaved browser editors are excluded. No passwords are stored.</p>
-          <label for="pcms-backup-passphrase">Portable recovery passphrase (12 characters minimum)</label>
-          <input id="pcms-backup-passphrase" type="password" autocomplete="new-password" minlength="12" maxlength="4096">
-          <button type="button" id="pcms-backup-export">Create and download encrypted backup</button>
+          <div class="panel-head"><h2 id="pcms-backup-title">Manual portable backup</h2><span class="unknown">Browser-local · no password</span></div>
+          <p>Exports exact PCMS source, histories and state together with supported PersonaMonkey settings, scripts, Persona mappings, cookies and userscript data. It excludes Git credentials, native WireGuard configurations, unsaved browser editors and remote provider data.</p>
+          <button type="button" id="pcms-backup-export">Create and download portable backup</button>
           <button type="button" id="pcms-backup-audit">Check source completeness (read-only)</button>
-          <p id="pcms-backup-audit-status" role="status" aria-live="polite">Source-complete recovery not checked. A v1 download does not prove recoverability.</p>
-          <p id="pcms-backup-status" role="status" aria-live="polite">No new backup attempted. Browser completion and independent disk-byte verification are different evidence tiers.</p>
-          <p class="reason">Tier 1: cryptographically verified in memory; tier 2: browser-reported completed download with existence and size; tier 3: independent on-disk file readback. The staged local restore controls are in the next panel; no provider activation follows a backup.</p>
+          <p id="pcms-backup-audit-status" role="status" aria-live="polite">Source completeness not inspected.</p>
+          <p id="pcms-backup-status" role="status" aria-live="polite">No portable backup attempted.</p>
+          <p class="reason">A source/hash check and Firefox-reported downloaded bytes do not independently establish disk readback. The resulting .pcms.jsonl file is unencrypted and needs no passphrase.</p>
         </section>
         <section class="panel" aria-labelledby="pcms-restore-title">
-          <div class="panel-head"><h2 id="pcms-restore-title">Restore from an encrypted backup</h2><span class="unknown">Local guarded apply · provider effects OFF</span></div>
-          <p>Choose the integrated encrypted archive and recovery passphrase. Preview authenticates both layers and inventories exact Persona mappings, exclusions and collision risks. A separate pre-restore checkpoint must be selected and independently re-read before local application. Applying changes donor/cookie/PCMS local state under a durable guard; no cross-store atomicity, provider effects or fresh-controller activation is implied. An uncertain group requires read-only reconciliation, never automatic retry.</p>
-          <label for="pcms-restore-archive">Incoming encrypted archive</label>
-          <input id="pcms-restore-archive" type="file" accept=".encrypted,.json">
-          <label for="pcms-restore-passphrase">Portable recovery passphrase</label>
-          <input id="pcms-restore-passphrase" type="password" autocomplete="off" maxlength="4096">
+          <div class="panel-head"><h2 id="pcms-restore-title">Restore portable backup</h2><span class="unknown">Inspected local import · inactive until reviewed</span></div>
+          <p>Select a plain .pcms.jsonl archive, inspect exact source, Personas and session mappings, and select a separate pre-restore checkpoint. No password, encryption, Git or PCMS native service is involved. All restored accounts and routes require independent review before activation.</p>
+          <label for="pcms-restore-archive">Portable backup file</label>
+          <input id="pcms-restore-archive" type="file" accept=".pcms.jsonl,.jsonl,application/x-ndjson">
           <label for="pcms-restore-mode">Destination policy</label>
           <select id="pcms-restore-mode"><option value="merge">Merge with existing</option><option value="replace">Replace after explicit review</option></select>
           <label for="pcms-restore-fresh">Fresh disposable Firefox profile</label>
           <input id="pcms-restore-fresh" type="checkbox">
           <label for="pcms-restore-mappings">Explicit Persona-key to current container-ID mapping (JSON)</label>
           <textarea id="pcms-restore-mappings" rows="3" spellcheck="false" placeholder='{"persona-1":"firefox-container-1"}'>{}</textarea>
-          <button type="button" id="pcms-restore-preview">Authenticate and preview without changes</button>
-          <label for="pcms-restore-checkpoint">Separate pre-restore encrypted checkpoint (select actual disk file)</label>
-          <input type="file" id="pcms-restore-checkpoint" accept=".encrypted,.json">
-          <button type="button" id="pcms-restore-verify" disabled>Verify checkpoint against current destination</button>
-          <label for="pcms-restore-reviewed-hash">Reviewed plan SHA-256</label>
-          <input id="pcms-restore-reviewed-hash" maxlength="64" spellcheck="false" autocomplete="off" placeholder="Paste the authenticated plan digest">
-          <label for="pcms-restore-consent">I approve this exact plan, mappings, holds and local import with the controller remaining inactive</label>
+          <label for="pcms-restore-account-choices">Restored account decisions (JSON): INCLUDE_INACTIVE or EXCLUDE for each account in a fresh profile</label>
+          <textarea id="pcms-restore-account-choices" rows="3" spellcheck="false" placeholder='{"account-id":"INCLUDE_INACTIVE"}'>{}</textarea>
+          <button type="button" id="pcms-restore-preview">Inspect and verify archive</button>
+          <label for="pcms-restore-checkpoint">Separate pre-restore portable checkpoint from disk</label>
+          <input type="file" id="pcms-restore-checkpoint" accept=".pcms.jsonl,.jsonl,application/x-ndjson">
+          <button type="button" id="pcms-restore-verify" disabled>Verify independent checkpoint</button>
+          <label for="pcms-restore-reviewed-hash">Reviewed exact plan SHA-256</label>
+          <input id="pcms-restore-reviewed-hash" maxlength="64" spellcheck="false" autocomplete="off" placeholder="Paste SHA-256 of reviewed plan">
+          <label for="pcms-restore-consent">I approve this exact source, mappings and inactive local import</label>
           <input id="pcms-restore-consent" type="checkbox">
-          <button type="button" id="pcms-restore-apply" disabled>Apply staged restore (controller stays inactive)</button>
-          <button type="button" id="pcms-restore-reconcile">Read back uncertain restore (never retry)</button>
-          <pre id="pcms-restore-details" class="table-wrap" style="white-space:pre-wrap" tabindex="0">No authenticated restore plan. Existing state remains unchanged.</pre>
-          <p id="pcms-restore-status" role="status" aria-live="polite">Checking independent restoration guard.</p>
+          <button type="button" id="pcms-restore-apply" disabled>Apply reviewed import (inactive)</button>
+          <button type="button" id="pcms-restore-reconcile">Reconcile uncertain restore (read only)</button>
+          <pre id="pcms-restore-details" class="table-wrap" style="white-space:pre-wrap" tabindex="0">No inspected plan.</pre>
+          <p id="pcms-restore-status" role="status" aria-live="polite">Inspecting restore guard.</p>
           <div id="pcms-restore-reactivate-box" class="notice" hidden>
-            <strong>Reactivate PCMS after a completed restore</strong>
-            <p>Every restore stage was independently observed. PCMS stays paused until you reactivate it here. Only reactivate once the previous PCMS installation (old profile or machine) is stopped, because two controllers must never run at the same time. Afterwards, reconnect GitHub, confirm each account's login and re-apply the protected workflow grants.</p>
-            <label><input type="checkbox" id="pcms-restore-predecessor"> The previous PCMS installation is stopped</label>
-            <label for="pcms-restore-reactivate-phrase">Type: THE PREVIOUS PCMS INSTALLATION IS STOPPED</label>
-            <input id="pcms-restore-reactivate-phrase" autocomplete="off" spellcheck="false" maxlength="64">
-            <button type="button" id="pcms-restore-reactivate" disabled>Reactivate PCMS</button>
+            <strong>Reactivation requires evidence that the predecessor PCMS controller has stopped.</strong>
+            <label for="pcms-restore-predecessor">I have stopped the previous PCMS installation</label>
+            <input id="pcms-restore-predecessor" type="checkbox">
+            <label for="pcms-restore-reactivate-phrase">Enter: THE PREVIOUS PCMS INSTALLATION IS STOPPED</label>
+            <input type="text" id="pcms-restore-reactivate-phrase" autocomplete="off">
+            <button type="button" id="pcms-restore-reactivate" disabled>Reactivate restored controller</button>
           </div>
-          <p class="reason">Restored approvals, authentication, routes and native secrets cannot be activated by a backup. Fresh-controller activation requires explicit predecessor shutdown proof and later H-06. If a partial restore guard exists, opening this view never clears it.</p>
         </section>
         <section class="panel" aria-labelledby="pcms-auto-backup-title">
-          <div class="panel-head"><h2 id="pcms-auto-backup-title">Scheduled encrypted backup</h2><span class="unknown">OS vault gated</span></div>
-          <p>Automatic backup runs in the Firefox background, independently of Refresher Pause. It requires a separately installed, unlocked Secret Service OS vault. Keep the portable recovery passphrase independently; an inaccessible vault suspends unattended exports without plaintext fallback.</p>
-          <label for="pcms-auto-backup-pass">Portable recovery passphrase (at least 12 characters)</label>
-          <input type="password" id="pcms-auto-backup-pass" maxlength="4096" autocomplete="new-password">
-          <label for="pcms-auto-backup-confirm">Confirm recovery passphrase</label>
-          <input type="password" id="pcms-auto-backup-confirm" maxlength="4096" autocomplete="new-password">
+          <div class="panel-head"><h2 id="pcms-auto-backup-title">Daily portable backups</h2><span class="unknown">Background alarm · no native helper</span></div>
+          <p>Firefox wakes the existing durable backup coordinator. Exports include full source and account recovery data and use the same passwordless .pcms.jsonl format as manual backups.</p>
           <div class="account-controls">
-            <button type="button" id="pcms-auto-backup-vault">Store in OS vault</button>
             <label for="pcms-auto-backup-enabled">Enable daily backup</label>
             <input type="checkbox" id="pcms-auto-backup-enabled">
             <button type="button" id="pcms-auto-backup-save">Save setting</button>
-            <button type="button" id="pcms-auto-backup-run">Attempt now</button>
+            <button type="button" id="pcms-auto-backup-run">Run scheduled backup now</button>
             <button type="button" id="pcms-auto-backup-refresh">Refresh status</button>
           </div>
-          <div class="account-controls">
-            <label for="pcms-auto-backup-format">Archive format</label>
-            <select id="pcms-auto-backup-format">
-              <option value="V2">Source-complete (native host, full readback verified)</option>
-              <option value="V1">Legacy browser download (not source-complete)</option>
-            </select>
-            <button type="button" id="pcms-auto-backup-format-save">Use this format</button>
-            <button type="button" id="pcms-auto-backup-v2-now">Back up now (source-complete)</button>
-          </div>
-          <p role="status" aria-live="polite" id="pcms-auto-backup-status">Checking canonical backup state.</p>
-          <p class="reason">Source-complete backups need the PCMS native hosts (see the operator guide installer). Selecting it checks the host and vault first; a failed source-complete run is reported, never replaced by a weaker archive. Up to 14 successful automatic archives are retained and the last known-good archive is never deleted. Legacy downloads keep only positively tracked excess files eligible for deletion.</p>
+          <p role="status" aria-live="polite" id="pcms-auto-backup-status">Checking backup state.</p>
+          <p class="reason">Up to 14 tracked successful daily downloads are retained. Uncertain downloads and the last known-good copy are held for inspection rather than removed.</p>
         </section>
         <section class="panel" aria-labelledby="pcms-diagnostic-heading">
           <div class="panel-head"><h2 id="pcms-diagnostic-heading">Full diagnostic</h2><span class="unknown">Designated disposable scope only</span></div>

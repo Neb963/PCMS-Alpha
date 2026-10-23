@@ -43,7 +43,7 @@ export async function applyCanonicalSnapshot(db,prepared,{assertHeld,expectedBef
         tx.objectStore(name).openCursor().onsuccess=e=>{
           const cursor=e.target.result;
           if(!cursor){if(--pending===0)replace();return;}
-          if(++rows>100000)return abort('RESTORE_TOO_MANY_ROWS');
+          if(++rows>500000)return abort('RESTORE_TOO_MANY_ROWS');
           try{previous.stores[name].push({
             key:serializeClone(cursor.key),value:serializeClone(cursor.value)
           });}catch{return abort('RESTORE_UNSUPPORTED_ROW');}

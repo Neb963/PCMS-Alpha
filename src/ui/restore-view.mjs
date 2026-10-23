@@ -1,261 +1,246 @@
-// I16 operator preflight. Preview is read-only and never sets the global restore
-// guard or imports donor/cookie/PCMS state. Mutating stages remain unexposed.
+// A02 portable file restore: local read-only inspection followed by the
+// existing guarded background stage engine. No password, vault or native PCMS
+// service. Imported source, identities, approvals and routes are never active.
 import {openCanonicalDatabase} from './journal.mjs';
 import {readProtectedDonorSnapshot} from './donor-snapshot.mjs';
-import {snapshotCanonical,MAX_ARCHIVE_BYTES} from './backup-core.mjs';
-import {createPortableBackupPayload,decodeBackupEnvelope} from '../lib/backup-package.js';
+import {snapshotCanonicalV2} from './backup-core.mjs';
+import {createPortableBackupPayload} from '../lib/backup-package.js';
 import {filterOrdinaryAutomationJobs} from '../lib/automation-history.js';
-import {previewRestore,verifyCheckpoint,revalidateRestorePlan} from './restore-core.mjs';
-import {createRestoreGate} from './restore-gate.mjs';
-const $=id=>document.getElementById(id);
-const source=$('pcms-restore-archive'),checkpoint=$('pcms-restore-checkpoint'),
-  pass=$('pcms-restore-passphrase'),mode=$('pcms-restore-mode'),
-  mappings=$('pcms-restore-mappings'),fresh=$('pcms-restore-fresh'),
-  preview=$('pcms-restore-preview'),verify=$('pcms-restore-verify'),
-  details=$('pcms-restore-details'),status=$('pcms-restore-status');
-const fault=e=>/^[A-Z][A-Z0-9_]{3,64}$/.test(e?.message||'')?e.message:'RESTORE_PREFLIGHT_FAILED';
-let review=null,checkpointProof=null;
+import {preparePortableStage,readPortableStage} from './portable-restore-stage.mjs';
+import {inspectPortableRestore,verifyPortableCheckpoint} from './portable-restore-plan.mjs';
+const el=id=>document.getElementById(id);
+const archive=el('pcms-restore-archive'),checkpoint=el('pcms-restore-checkpoint'),
+  mode=el('pcms-restore-mode'),fresh=el('pcms-restore-fresh'),
+  mappings=el('pcms-restore-mappings'),choices=el('pcms-restore-account-choices'),
+  preview=el('pcms-restore-preview'),
+  verify=el('pcms-restore-verify'),apply=el('pcms-restore-apply'),
+  details=el('pcms-restore-details'),status=el('pcms-restore-status'),
+  checked=el('pcms-restore-consent'),reviewedHash=el('pcms-restore-reviewed-hash');
+const fault=e=>/^(RESTORE|PORTABLE|BACKUP)_[A-Z0-9_]{3,70}$/.test(e?.message||'')?
+  e.message:'RESTORE_HELD_UNKNOWN';
+let review=null,sourceScope=null,checkpointScope=null,proof=null,working=false;
 function invalidate(){
-  review=null;checkpointProof=null;verify.disabled=true;
-  $('pcms-restore-apply').disabled=true;
-  details.textContent='No authenticated restore plan. Existing state remains unchanged.';
+  review=null;proof=null;sourceScope=null;checkpointScope=null;
+  verify.disabled=true;apply.disabled=true;
+  details.textContent='No reviewed portable restore plan. Existing state is unchanged.';
 }
-for(const el of [source,checkpoint,pass,mode,mappings,fresh])
-  el.addEventListener('change',invalidate);
-const readFile=async input=>{
-  const f=input.files?.[0];
-  if(!f||f.size<=0||f.size>MAX_ARCHIVE_BYTES)throw Error('RESTORE_ARCHIVE_LIMIT');
-  const text=await f.text();
-  if(new TextEncoder().encode(text).length>MAX_ARCHIVE_BYTES)throw Error('RESTORE_ARCHIVE_LIMIT');
-  return text;
-};
-async function snapshot(){
-  let response;
-  try{response=await readProtectedDonorSnapshot(browser);}
-  catch{throw Error('RESTORE_DONOR_UNAVAILABLE');}
-  const db=await openCanonicalDatabase();let pcms;
-  try{pcms=await snapshotCanonical(db);}finally{db.close();}
-  return {pcms,donor:response};
-}
-async function portableCurrent(donor){
-  const local=await browser.storage.local.get(null),extra=Object.create(null);
+for(const control of [archive,mode,fresh,mappings,choices])
+  control.addEventListener('change',invalidate);
+checkpoint.addEventListener('change',()=>{
+  proof=null;checkpointScope=null;apply.disabled=true;
+  if(review)verify.disabled=false;
+});
+function snapshotPortable(donor,local){
+  const extra=Object.create(null);
   for(const [key,value] of Object.entries(local||{}))
     if(key==='automationJobs'||key.startsWith('gm-values:'))extra[key]=value;
-  const params={state:donor.state,containers:donor.containers,userscriptData:extra,
-    automationHistory:filterOrdinaryAutomationJobs(Object.values(extra.automationJobs||{})),
-    selection:{kind:'full'}};
-  const initially=createPortableBackupPayload(params),cookies=Object.create(null);
-  for(const persona of initially.personas){
-    const list=await browser.runtime.sendMessage({type:'PERSONA_COOKIES_LIST',profileId:persona.sourceId});
-    if(!Array.isArray(list))throw Error('RESTORE_COOKIE_UNAVAILABLE');
-    cookies[persona.sourceId]=list;
+  const params={state:donor.state,containers:donor.containers,
+    userscriptData:extra,selection:{kind:'full'},
+    automationHistory:filterOrdinaryAutomationJobs(Object.values(extra.automationJobs||{}))};
+  return {extra,params};
+}
+async function destination(){
+  let donor;
+  try{donor=await readProtectedDonorSnapshot(browser);}
+  catch{throw Error('RESTORE_DONOR_UNAVAILABLE');}
+  const db=await openCanonicalDatabase();let pcms;
+  try{pcms=await snapshotCanonicalV2(db,{serializedValues:true});}
+  finally{db.close();}
+  const local=await browser.storage.local.get(null);
+  const {params}=snapshotPortable(donor,local);
+  const preliminary=createPortableBackupPayload(params),cookies=Object.create(null);
+  for(const p of preliminary.personas){
+    const records=await browser.runtime.sendMessage({
+      type:'PERSONA_COOKIES_LIST',profileId:p.sourceId});
+    if(!Array.isArray(records))throw Error('RESTORE_COOKIE_UNAVAILABLE');
+    cookies[p.sourceId]=records;
   }
-  return createPortableBackupPayload({...params,cookiesByProfile:cookies});
+  const portable=createPortableBackupPayload({...params,cookiesByProfile:cookies});
+  return {pcms,donor,portable};
 }
-function summary(plan,proof){
-  details.textContent=[
-    'Authenticated plan: '+plan.planSha256,
-    'Destination mode: '+plan.plan.mode+(plan.plan.fresh?' · fresh controller remains inactive':' · existing controller held'),
-    'Imported Personas: '+plan.plan.risk.importedPersonas,
-    'Missing explicit mappings: '+plan.plan.risk.unmappedPersonas,
-    'Direct-route security review required: '+plan.plan.risk.directRouteReviews,
-    ...plan.plan.groups.map(g=>'Persona '+g.key+': '+g.status+
-      (g.targetId?' → '+g.targetId:' · no trusted mapping')),
-    'Imported cookies: '+plan.plan.risk.importedCookies,
-    'Canonical rows: '+plan.plan.risk.canonicalRows,
-    'Route status: '+plan.plan.risk.routeStatus,
-    'Prior approvals: '+plan.plan.risk.importedApprovalStatus,
-    'Unverified identities: '+plan.plan.risk.sessionStatus,
-    'Excluded: '+plan.plan.exclusions.join('; '),
-    'Pre-restore checkpoint: '+(proof?.verified?'independent selected-file readback + authenticated destination cut':'NOT VERIFIED'),
-    'Restore activation: OFF. Preview does not apply imported source, routes, cookies or provider commands.'
-  ].join('\n');
-}
-preview.addEventListener('click',async()=>{
-  if(preview.disabled)return;preview.disabled=true;verify.disabled=true;review=null;checkpointProof=null;
-  status.textContent='Authenticating encrypted archive and comparing current destination. No mutation.';
-  try{
-    if(pass.value.length<12)throw Error('RESTORE_PASSPHRASE_REQUIRED');
-    const raw=await readFile(source),current=await snapshot();
-    const currentPortable=await portableCurrent(current.donor);
-    let map;try{map=JSON.parse(mappings.value||'{}');}catch{throw Error('RESTORE_MAPPING_INVALID');}
-    const plan=await previewRestore({archiveText:raw,password:pass.value,decodeDonor:decodeBackupEnvelope,
-      mode:mode.value,fresh:fresh.checked,mappings:map,
-      currentPcms:current.pcms,currentDonor:current.donor,currentPortable,
-      containers:current.donor.containers});
-    review={plan,current,raw};
-    summary(plan,null);
-    const risk=plan.plan.risk;
-    status.textContent=risk.unmappedPersonas||risk.directRouteReviews?
-      'Authenticated preview only: '+risk.unmappedPersonas+' missing mappings; '+
-      risk.directRouteReviews+' Direct-route reviews. Apply is held until every identity is explicitly mapped and Direct is excluded.':
-      'Authenticated preview. Review exact Persona associations and exclusions, then select an independent checkpoint.';
-    verify.disabled=false;
-  }catch(e){invalidate();status.textContent='Restore held: '+fault(e)+'. No donor or canonical write.';}
-  finally{preview.disabled=false;}
-});
-verify.addEventListener('click',async()=>{
-  if(verify.disabled||!review)return;verify.disabled=true;
-  $('pcms-restore-apply').disabled=true;
-  status.textContent='Re-reading selected checkpoint and current destination. No restore or remote action.';
-  try{
-    const checkpointText=await readFile(checkpoint);
-    const observed=await snapshot();
-    const donorPortable=await portableCurrent(observed.donor);
-    await revalidateRestorePlan({expectedPlanSha256:review.plan.planSha256,
-      expectedDestinationSha256:review.plan.plan.destinationSha256,
-      currentPcms:observed.pcms,currentDonor:observed.donor,
-      currentPortable:donorPortable,plan:review.plan.plan});
-    const proof=await verifyCheckpoint({checkpointText,password:pass.value,
-      decodeDonor:decodeBackupEnvelope,currentPcms:observed.pcms,
-      currentPortable:donorPortable,archivedAtLeastTier:3});
-    checkpointProof=proof;
-    summary(review.plan,proof);
-    syncApply();
-    status.textContent='Checkpoint file independently re-read, authenticated and matched to current destination. Restore mutation remains OFF.';
-  }catch(e){checkpointProof=null;syncApply();status.textContent='Checkpoint not proven: '+fault(e)+'. Restore not started.';}
-  finally{verify.disabled=false;}
-});
-async function health(){
-  try{
-    const gate=createRestoreGate(browser.storage.local);
-    const state=await gate.inspect();
-    const overview=$('pcms-overview-restore');
-    if(overview)overview.textContent=state.held?
-      'Restore controller INACTIVE; '+state.status+'; independently observed groups: '+
-        state.groups.filter(g=>g.status==='OBSERVED').length+
-        '/4. Provider effects OFF; review in Settings.':
-      'No restore guard installed. A restored archive never grants remote authority.';
-    if(state.held){
-      status.textContent='Restore hold active ('+state.status+'). Read-only preview remains accessible; no automatic resume, retry or activation. Groups: '+
-        state.groups.map(g=>g.key+'='+g.status).join(', ')+'. Use emergency diagnostics for recovery.';
-    }
-  }catch{
-    const overview=$('pcms-overview-restore');
-    if(overview)overview.textContent='Restore guard unavailable; never infer an active controller.';
-    status.textContent='Restore guard cannot be read. Mutating restore is unavailable; read-only archive inspection remains possible.';
-  }
-}
-void health();
-
-const reviewedHash=$('pcms-restore-reviewed-hash');
-const approval=$('pcms-restore-consent');
-const apply=$('pcms-restore-apply');
-function syncApply(){
-  const plan=review?.plan?.plan;
-  const complete=!!plan&&plan.risk.unmappedPersonas===0&&
-    plan.risk.directRouteReviews===0&&plan.groups.every(g=>
-      ['MAPPING_ONLY_UNVERIFIED','CREATE_REQUESTED'].includes(g.status));
-  let count=0;
-  try{count=Object.keys(JSON.parse(mappings.value||'{}')).length;}catch{}
-  apply.disabled=!(complete&&count===plan.risk.importedPersonas&&
-    checkpointProof?.verified&&approval.checked&&
-    reviewedHash.value===review.plan.planSha256);
-}
-reviewedHash.addEventListener('input',syncApply);
-approval.addEventListener('change',syncApply);
 function portCommand(message){
   return new Promise(resolve=>{
-    let done=false,port;
-    try{port=browser.runtime.connect({name:'pcms-i16-restore'});}
-    catch{return resolve({ok:false,code:'RESTORE_PORT_UNAVAILABLE'});}
-    const settle=result=>{
-      if(done)return;done=true;
-      try{port.disconnect();}catch{}
+    let port,finished=false;
+    const complete=result=>{
+      if(finished)return;finished=true;
+      try{port?.disconnect()}catch{}
       resolve(result);
     };
-    port.onMessage.addListener(settle);
-    port.onDisconnect.addListener(()=>settle({ok:false,code:'RESTORE_RESULT_UNKNOWN'}));
-    try{port.postMessage(message);}
-    catch{settle({ok:false,code:'RESTORE_PORT_WRITE_FAILED'});}
+    try{
+      port=browser.runtime.connect({name:'pcms-i16-restore'});
+      port.onMessage.addListener(complete);
+      port.onDisconnect.addListener(()=>
+        complete({ok:false,code:'RESTORE_RESULT_UNKNOWN'}));
+      port.postMessage(message);
+    }catch{complete({ok:false,code:'RESTORE_PORT_UNAVAILABLE'})}
   });
 }
-apply.addEventListener('click',async()=>{
-  if(apply.disabled||!review||!checkpointProof?.verified||!approval.checked||
-    reviewedHash.value!==review.plan.planSha256)return;
-  apply.disabled=true;verify.disabled=true;preview.disabled=true;
-  status.textContent='Restoring under the independent safety hold. Do not repeat an uncertain import.';
-  try{
-    const [archiveText,checkpointText,current]=await Promise.all([
-      readFile(source),readFile(checkpoint),snapshot()
-    ]);
-    const currentPortable=await portableCurrent(current.donor);
-    await revalidateRestorePlan({
-      expectedPlanSha256:review.plan.planSha256,
-      expectedDestinationSha256:review.plan.plan.destinationSha256,
-      currentPcms:current.pcms,currentDonor:current.donor,
-      currentPortable,plan:review.plan.plan
-    });
-    const independent=await verifyCheckpoint({
-      checkpointText,password:pass.value,decodeDonor:decodeBackupEnvelope,
-      currentPcms:current.pcms,currentPortable,archivedAtLeastTier:3
-    });
-    if(independent.sha256!==checkpointProof.sha256)
-      throw Error('RESTORE_CHECKPOINT_CHANGED');
-    const requested=JSON.parse(mappings.value||'{}');
-    const result=await portCommand({action:'APPLY',params:{
-      archiveText,checkpointText,password:pass.value,
-      reviewedPlanSha256:review.plan.planSha256,
-      mode:mode.value,fresh:fresh.checked,mappings:requested
-    }});
-    const held=await portCommand({action:'STATUS'});
-    status.textContent=result?.ok?
-      'Restored data under inactive controller. Routes, accounts and approvals still require independent review. '+(held.status||'RESTORE_HELD'):
-      'Restore uncertain/held: '+(result?.code||'RESTORE_RESULT_UNKNOWN')+
-      ' / '+(held?.status||'STATUS_UNAVAILABLE')+'. Never resend a possibly completed write.';
-    details.textContent+='\nLocal apply result: '+(result?.ok?'DATA_RECOVERED_INACTIVE':
-      'HELD_UNCERTAIN')+'; group guard: '+(held?.status||'UNAVAILABLE')+
-      '; live owner/session/route checks: NOT VERIFIED; controller activation: OFF.';
-  }catch(e){
-    status.textContent='Restore not confirmed: '+fault(e)+'. Inspect restore guard before any further action.';
-  }finally{
-    pass.value='';review=null;checkpointProof=null;
-    apply.disabled=true;preview.disabled=false;
-    void health();
-  }
-});
-
-$('pcms-restore-reconcile').addEventListener('click',async event=>{
-  const button=event.currentTarget;
-  if(button.disabled)return;button.disabled=true;
-  status.textContent='Observing the interrupted restore. No remote or local import is retried.';
-  try{
-    const [archiveText,checkpointText]=await Promise.all([readFile(source),readFile(checkpoint)]);
-    if(pass.value.length<12)throw Error('RESTORE_PASSPHRASE_REQUIRED');
-    const result=await portCommand({action:'RECONCILE',params:{
-      archiveText,checkpointText,password:pass.value}});
-    const current=await portCommand({action:'STATUS'});
-    status.textContent=(result?.ok?
-      'Readback: '+result.code:
-      'Readback held: '+(result?.code||'RESTORE_RESULT_UNKNOWN'))+
-      '. '+(result?.group||'No stage')+'; '+(current?.status||'INACTIVE')+
-      '. No duplicate effect dispatched; activation OFF.';
-  }catch(e){
-    status.textContent='Reconciliation held: '+fault(e)+'. No retry performed.';
-  }finally{pass.value='';button.disabled=false;void health();}
-});
-
-// Explicit fresh-controller reactivation after a COMPLETE_INACTIVE restore.
-const reactivateBox=$('pcms-restore-reactivate-box'),reactivateBtn=$('pcms-restore-reactivate'),
-  predecessor=$('pcms-restore-predecessor'),phrase=$('pcms-restore-reactivate-phrase');
-const PHRASE='THE PREVIOUS PCMS INSTALLATION IS STOPPED';
-let reactivationGuard=null;
-async function refreshReactivation(){
-  const g=await portCommand({action:'STATUS'});
-  reactivationGuard=g?.held&&g.status==='COMPLETE_INACTIVE'?g:null;
-  reactivateBox.hidden=!reactivationGuard;
-  reactivateBtn.disabled=!reactivationGuard||!predecessor.checked||phrase.value.trim()!==PHRASE;
+function readMapping(){
+  let value;try{value=JSON.parse(mappings.value||'{}')}
+  catch{throw Error('RESTORE_MAPPING_INVALID')}
+  if(!value||typeof value!=='object'||Array.isArray(value))
+    throw Error('RESTORE_MAPPING_INVALID');
+  return value;
 }
-predecessor.addEventListener('change',()=>void refreshReactivation());
-phrase.addEventListener('input',()=>{reactivateBtn.disabled=!reactivationGuard||
-  !predecessor.checked||phrase.value.trim()!==PHRASE;});
-reactivateBtn.addEventListener('click',async()=>{
-  if(!reactivationGuard)return;reactivateBtn.disabled=true;
-  const out=await portCommand({action:'REACTIVATE',params:{epoch:reactivationGuard.epoch,
-    revision:reactivationGuard.revision,predecessorStopped:predecessor.checked===true,
-    consent:phrase.value.trim()}});
-  status.textContent=out?.ok?'PCMS reactivated. Next: reconnect GitHub (Settings), confirm each account login (Accounts), '+
-    'then re-apply Protected workflow activation.':'Reactivation held: '+(out?.code||'UNKNOWN')+'.';
-  phrase.value='';predecessor.checked=false;void refreshReactivation();
+function readChoices(){
+  let value;try{value=JSON.parse(choices.value||'{}');}
+  catch{throw Error('RESTORE_ACCOUNT_CHOICES_INVALID');}
+  if(!value||typeof value!=='object'||Array.isArray(value))
+    throw Error('RESTORE_ACCOUNT_CHOICES_INVALID');
+  return value;
+}
+function displayPlan(row,checkpointVerified){
+  const plan=row.plan,risks=plan.risk;
+  details.textContent=[
+    'Inspected portable file: '+plan.archiveSha256,
+    'Exact reviewed plan SHA-256: '+row.planSha256,
+    'Destination: '+plan.mode+(plan.fresh?' · predecessor proof required':''),
+    'Imported Personas: '+risks.importedPersonas,
+    'Imported accounts: '+risks.importedAccounts,
+    'Accounts awaiting explicit fresh-profile decision: '+risks.accountDecisionsMissing,
+    'Unmapped Personas: '+risks.unmappedPersonas,
+    'Direct-route reviews: '+risks.directRouteReviews,
+    'Imported cookies: '+risks.importedCookies,
+    'Canonical records: '+risks.canonicalRows,
+    ...plan.groups.map(g=>'Persona '+g.key+': '+g.status+
+      (g.targetId?' → '+g.targetId:'')),
+    'Existing routes and sessions: NOT VERIFIED',
+    'Prior publication approvals: HISTORY ONLY',
+    'Excluded: '+plan.exclusions.join('; '),
+    'Independent pre-restore file checkpoint: '+(checkpointVerified?'MATCHED':'NOT VERIFIED'),
+    'Controller activation: OFF. No provider or Git effect is authorized.'
+  ].join('\n');
+}
+function syncApply(){
+  const p=review?.plan;
+  let n=0;try{n=Object.keys(readMapping()).length}catch{}
+  const complete=!!p&&p.risk.accountDecisionsMissing===0&&
+    p.risk.unmappedPersonas===0&&
+    p.risk.directRouteReviews===0&&p.groups.every(g=>
+      ['MAPPING_ONLY_UNVERIFIED','CREATE_REQUESTED'].includes(g.status));
+  apply.disabled=!(complete&&n===p.risk.importedPersonas&&
+    proof?.verified===true&&checked.checked===true&&
+    reviewedHash.value===review.planSha256&&
+    sourceScope&&checkpointScope&&!working);
+}
+checked.addEventListener('change',syncApply);
+reviewedHash.addEventListener('input',syncApply);
+preview.addEventListener('click',async()=>{
+  if(working)return;working=true;preview.disabled=true;verify.disabled=true;
+  apply.disabled=true;review=null;proof=null;
+  status.textContent='Inspecting portable file; verifying source and record integrity.';
+  try{
+    const file=archive.files?.[0];
+    if(!file||!file.size)throw Error('PORTABLE_INPUT_MISSING');
+    const staged=await preparePortableStage(file),incoming=await readPortableStage(staged.scope);
+    const current=await destination(),requested=readMapping();
+    review=await inspectPortableRestore({incoming,
+      mode:mode.value,fresh:fresh.checked,mappings:requested,
+      accountChoices:readChoices(),currentPcms:current.pcms,currentDonor:current.donor,
+      currentPortable:current.portable,containers:current.donor.containers});
+    sourceScope=staged.scope;checkpointScope=null;
+    displayPlan(review,false);verify.disabled=false;
+    status.textContent=review.plan.risk.unmappedPersonas||
+      review.plan.risk.directRouteReviews?
+      'Import held until every Persona mapping and protected route is reviewed.':
+      'Integrity verified. Review exact plan, then choose a separate local checkpoint.';
+  }catch(e){invalidate();status.textContent='Restore preview held: '+fault(e)+'. No writes performed.';}
+  finally{working=false;preview.disabled=false;}
 });
-void refreshReactivation();
+verify.addEventListener('click',async()=>{
+  if(working||!review||!sourceScope)return;
+  working=true;verify.disabled=true;apply.disabled=true;
+  status.textContent='Reading independent checkpoint from selected browser file.';
+  try{
+    const file=checkpoint.files?.[0];
+    if(!file||!file.size)throw Error('RESTORE_CHECKPOINT_FILE_REQUIRED');
+    const staged=await preparePortableStage(file);
+    if(staged.scope===sourceScope)throw Error('RESTORE_CHECKPOINT_SAME_SCOPE');
+    const observed=await destination(),checkpointData=await readPortableStage(staged.scope);
+    const p=await inspectPortableRestore({
+      incoming:await readPortableStage(sourceScope),
+      mode:mode.value,fresh:fresh.checked,mappings:readMapping(),
+      accountChoices:readChoices(),currentPcms:observed.pcms,currentDonor:observed.donor,
+      currentPortable:observed.portable,containers:observed.donor.containers});
+    if(p.planSha256!==review.planSha256)throw Error('RESTORE_DESTINATION_DRIFT');
+    proof=await verifyPortableCheckpoint({
+      checkpoint:checkpointData,currentPcms:observed.pcms,
+      currentPortable:observed.portable});
+    checkpointScope=staged.scope;
+    displayPlan(review,true);syncApply();
+    status.textContent='Selected checkpoint re-read and matched. Controller remains inactive.';
+  }catch(e){proof=null;checkpointScope=null;
+    status.textContent='Checkpoint held: '+fault(e)+'. Restore not started.';}
+  finally{working=false;verify.disabled=false;}
+});
+apply.addEventListener('click',async()=>{
+  if(apply.disabled||!review||!sourceScope||!checkpointScope||
+    !checked.checked||reviewedHash.value!==review.planSha256)return;
+  working=true;apply.disabled=true;preview.disabled=true;verify.disabled=true;
+  status.textContent='Applying reviewed data under durable inactive restore guard.';
+  try{
+    const out=await portCommand({action:'APPLY_PORTABLE',params:{
+      stageScope:sourceScope,checkpointScope,reviewedPlanSha256:review.planSha256,
+      mode:mode.value,fresh:fresh.checked,mappings:readMapping(),
+      accountChoices:readChoices()}});
+    const held=await portCommand({action:'STATUS'});
+    status.textContent=out?.ok?
+      'Portable data restored in inactive controller. Routes, owners and sessions require separate verification.':
+      'Restore held: '+(out?.code||'RESTORE_RESULT_UNKNOWN')+
+      '. '+(held?.status||'STATUS_UNKNOWN')+'. Never retry an uncertain effect.';
+    details.textContent+='\nRestore state: '+(held?.status||'UNKNOWN')+
+      '; runtime activation OFF; live effects NOT VERIFIED.';
+  }catch(e){status.textContent='Restore held: '+fault(e)+'. Do not repeat without reconciliation.';}
+  finally{working=false;review=null;proof=null;
+    apply.disabled=true;preview.disabled=false;verify.disabled=true;
+    void refreshStatus();}
+});
+el('pcms-restore-reconcile').addEventListener('click',async e=>{
+  const button=e.currentTarget;if(working)return;working=true;button.disabled=true;
+  status.textContent='Independently observing interrupted restore. No step will be repeated.';
+  try{
+    const held=await portCommand({action:'STATUS'});
+    const stages=held?.portableScopes;
+    if(!stages?.stageScope||!stages?.checkpointScope)
+      throw Error('RESTORE_PORTABLE_RECONCILE_SCOPE');
+    const out=await portCommand({action:'RECONCILE_PORTABLE',params:stages});
+    status.textContent=(out?.ok?'Readback: ':'Readback held: ')+
+      (out?.code||'RESTORE_RESULT_UNKNOWN')+
+      '; controller remains inactive.';
+  }catch(e){status.textContent='Reconciliation held: '+fault(e)+'. No replay.';}
+  finally{working=false;button.disabled=false;void refreshStatus();}
+});
+const box=el('pcms-restore-reactivate-box'),reactivate=el('pcms-restore-reactivate'),
+  stopped=el('pcms-restore-predecessor'),phrase=el('pcms-restore-reactivate-phrase');
+const consent='THE PREVIOUS PCMS INSTALLATION IS STOPPED';
+let activeGuard=null;
+async function refreshStatus(){
+  const held=await portCommand({action:'STATUS'});
+  const overview=el('pcms-overview-restore');
+  if(overview)overview.textContent=held?.held?
+    'Restore '+(held.status||'HELD')+' · controller inactive.':
+    'No active restore guard.';
+  activeGuard=held?.held&&held.status==='COMPLETE_INACTIVE'?held:null;
+  if(box)box.hidden=!activeGuard;
+  if(reactivate)reactivate.disabled=!(activeGuard&&stopped.checked&&
+    phrase.value.trim()===consent);
+  if(held?.held&&!working)status.textContent=
+    'Restore '+held.status+'. Inactive controller; re-observe uncertain steps, never retry.';
+}
+stopped?.addEventListener('change',()=>void refreshStatus());
+phrase?.addEventListener('input',()=>{
+  reactivate.disabled=!(activeGuard&&stopped.checked&&phrase.value.trim()===consent);
+});
+reactivate?.addEventListener('click',async()=>{
+  if(!activeGuard||reactivate.disabled)return;
+  reactivate.disabled=true;
+  const out=await portCommand({action:'REACTIVATE',params:{
+    epoch:activeGuard.epoch,revision:activeGuard.revision,
+    predecessorStopped:stopped.checked===true,
+    consent:phrase.value.trim()}});
+  status.textContent=out?.ok?
+    'Controller reactivated. Reconnect Git, verify account identities and explicitly grant protected workflows.':
+    'Reactivation held: '+(out?.code||'UNKNOWN')+'.';
+  phrase.value='';stopped.checked=false;void refreshStatus();
+});
+void refreshStatus();
