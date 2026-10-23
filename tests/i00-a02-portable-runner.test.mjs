@@ -6,9 +6,9 @@ import {createAutoStore} from '../src/runtime/backup-auto-store.mjs';
 import {archiveFromDownload} from '../src/runtime/backup-auto-core.mjs';
 import {createPortableRunner} from '../src/runtime/portable-runner.mjs';
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
-function fixture({failedDispatch=false}={}){
+function fixture({failedDispatch=false,manualInterrupted=false}={}){
   const db=fakeDatabase(),local=new Map();
-  let effects=0,captures=0,id=11;
+  let effects=0,captures=0,id=11,interrupt=manualInterrupted;
   const downloaded=new Map();
   const listeners=new Set();
   const api={
@@ -29,11 +29,12 @@ function fixture({failedDispatch=false}={}){
   const body=new Blob(['portable fixture with exact bytes']);
   const capture=async()=>{captures++;return {blob:body,bytes:body.size,
     sourceAudit:{manifests:0,uniqueBlobs:0}}};
-  const dispatch=async (_api,archive,{runId})=>{
+  const dispatch=async (_api,archive,{runId,manual=false})=>{
     effects++;
     if(failedDispatch)throw Error('LOST_ACK');
     const row={id:id++,filename:'/tmp/Downloads/pcms-backups/pcms-alpha-'+
-      runId+'.pcms.jsonl',state:'complete',fileSize:archive.bytes,exists:true};
+      runId+'.pcms.jsonl',state:manual&&interrupt?'interrupted':'complete',
+      fileSize:archive.bytes,exists:!(manual&&interrupt)};
     downloaded.set(row.id,row);
     return {downloadId:row.id,objectUrl:null};
   };
@@ -45,7 +46,11 @@ function fixture({failedDispatch=false}={}){
   return {db,api,store:createAutoStore(db,()=>100000000),local,
     runner:createPortableRunner(api,{open:async()=>db,clock:()=>100000000,
       nextId:()=>String(++next).padStart(32,'0'),capture,dispatch,wait}),
-    effects:()=>effects,captures:()=>captures};
+    effects:()=>effects,captures:()=>captures,
+    finishManualDownload:()=>{for(const row of downloaded.values()){
+      row.state='complete';row.exists=true;}interrupt=false;},
+    cold:()=>createPortableRunner(api,{open:async()=>db,clock:()=>100000000,
+      nextId:()=>String(++next).padStart(32,'0'),capture,dispatch,wait})};
 }
 test('A02 daily portable backup journals the effect, completes and never calls native vault',async()=>{
   const f=fixture();
@@ -91,4 +96,22 @@ test('A02 manual lost browser ACK is durable and cannot dispatch a second file',
   assert.equal(f.effects(),1);
   const last=f.db.read('meta','backup:manual-active');
   assert.equal(last.status,'HELD_UNCERTAIN');
+});
+
+// Regression: a timed-out manual download may finish after the operator loses
+// the first ACK. A known download ID must be reconciled by readback, not left
+// permanently held or silently dispatched again while still uncertain.
+test('A02 manual interrupted download reconciles a later verified completion after cold wake',async()=>{
+  const f=fixture({manualInterrupted:true});
+  const first=await f.runner.manual();
+  assert.equal(first.code,'DOWNLOAD_OUTCOME_UNKNOWN');
+  assert.equal(f.db.read('meta','backup:manual-active').status,'HELD_UNCERTAIN');
+  const cold=f.cold();
+  assert.equal((await cold.manual()).code,'MANUAL_DOWNLOAD_UNCERTAIN');
+  assert.equal(f.effects(),1,'no second download while receipt is uncertain');
+  f.finishManualDownload(); // independent Firefox downloads.search reports complete
+  const recovered=await cold.manual();
+  assert.equal(recovered.ok,true,JSON.stringify(recovered));
+  assert.equal(recovered.code,'BROWSER_REPORTED_COMPLETE');
+  assert.equal(f.effects(),2,'new manual export occurs only after receipt reconciliation');
 });
