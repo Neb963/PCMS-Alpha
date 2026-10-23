@@ -24,7 +24,7 @@ async function fixture(){
    savedSourceFingerprint:remote.fingerprint,savedMarkerId:markerId,savedNonce:nonce}};
  return {published,remote,row};
 }
-test('S07/S06 D: independently verified harmless marker becomes accurate encrypted-recovery P, not new F',async()=>{
+test('S07/S06 D: independently verified harmless marker becomes accurate plaintext recovery P, not new F',async()=>{
  const {published,remote,row}=await fixture();
  const result=await resolveRefreshedPrevious({published,remote,row});
  assert.equal(result.ok,true,JSON.stringify(result));
@@ -45,14 +45,15 @@ test('S07/S06 D: independently verified harmless marker becomes accurate encrypt
     ownerResult:'IS_OWNER',visibility:'PUBLIC',source:remote}});
  assert.equal(eligible.ok,true,JSON.stringify(eligible));
  assert.equal(eligible.previousFingerprint,remote.fingerprint);
- const passphrase='synthetic test passphrase 1234567890';
- const sealed=await sealPrevious(result.source,passphrase);
+ const sealed=await sealPrevious(result.source);
  assert.equal(sealed.ok,true);
  assert.equal(sealed.fingerprint,remote.fingerprint);
- const recovered=await unlockPrevious(sealed,passphrase);
+ const recovered=await unlockPrevious(sealed);
  assert.equal(recovered.ok,true);
  assert.deepEqual(recovered.source.blobs,remote.blobs);
- assert.equal((await unlockPrevious(sealed,'wrong passphrase 1234')).ok,false);
+ const modified=structuredClone(sealed);
+ modified.blobs[0].base64=btoa('unauthorized previous source edit');
+ assert.equal((await unlockPrevious(modified)).ok,false);
 });
 test('S07/S06 X: stale publication, unproven placement and source drift are not repairable previous P',async()=>{
  const {published,remote,row}=await fixture();
