@@ -89,3 +89,42 @@ test('A03 failed atomic commit leaves legacy inventory and original bytes untouc
  assert.equal(db.read('meta','identity-alias:'+slug),undefined);
  assert.equal(db.read('meta','adoption:'+slug),undefined);
 });
+
+test('A03 new slug-only owner poll holds proven public identity; protected recheck restores it without source rewrite',async()=>{
+ const {reconcileInventory}=await import('../src/runtime/inventory.mjs');
+ const db=fakeDatabase();await seed(db);
+ const adopted=await createAdoptionStore(db).adopt(args,original);
+ assert.equal(adopted.ok,true,JSON.stringify(adopted));
+ const promoted=db.read('meta','inventory:'+slug).generator;
+ const observation={source:'GUARDED_PERCHANCE_READBACK',complete:true,
+   observationId:'a03_owner_readback_02',observedAt:5678,
+   accountId,personaUid,accountRevision:account.revision,bindingVersion:account.bindingVersion,
+   principalFingerprint:principal,generators:[{
+     slug,remoteId:'slug-'+slug,ownerResult:'IS_OWNER',
+     ownerPrincipalFingerprint:principal,ownerObservationId:'a03_owner_readback_02',
+     visibility:'UNLISTED'}]};
+ const reconciled=reconcileInventory([promoted],account,observation);
+ assert.equal(reconciled.ok,true);
+ const held=reconciled.rows[0];
+ assert.equal(held.remoteId,id,'immutable ID must not be replaced by slug evidence');
+ assert.equal(held.ownerState,'IDENTITY_CONFLICT');
+ assert.equal(held.identityHold,'PUBLIC_ID_REVALIDATION_REQUIRED');
+ await new Promise((resolve,reject)=>{
+   const tx=db.transaction('meta','readwrite');
+   tx.oncomplete=resolve;tx.onabort=()=>reject(Error('SEED_HOLD_ABORT'));
+   tx.objectStore('meta').put({key:'inventory:'+slug,generator:held});
+ });
+ const store=createAdoptionStore(db);
+ const wrong=await store.recheckIdentity(slug,held.revision,
+   {...original,remotePublicId:'public_other_0001'});
+ assert.equal(wrong.code,'IDENTITY_IMMUTABLE_ID_CHANGED');
+ assert.equal(db.read('meta','inventory:'+slug).generator.ownerState,'IDENTITY_CONFLICT');
+ const repaired=await store.recheckIdentity(slug,held.revision,original);
+ assert.equal(repaired.ok,true,JSON.stringify(repaired));
+ assert.equal(repaired.code,'IDENTITY_PUBLIC_ID_REVALIDATED');
+ assert.equal(db.read('meta','inventory:'+slug).generator.ownerState,'OBSERVED_OWNER');
+ assert.equal(db.read('meta','inventory:'+slug).generator.identityHold,null);
+ assert.equal(db.read('meta','inventory:'+slug).generator.remoteId,id);
+ assert.equal(db.read('meta','adoption:'+slug).adoption.original.fingerprint,original.fingerprint);
+ assert.equal((await store.recheckIdentity(slug,held.revision,original)).code,'STALE_REVISION');
+});
