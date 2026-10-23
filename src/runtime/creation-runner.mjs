@@ -35,6 +35,12 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
       if(item.pinConflict||item.sourceDrift)return fail(item.hold||'SOURCE_CONFLICT');
       if(item.state==='WAITING_CAPABILITY')
         return await s.allocateCreate(item.intentId,item.revision);
+      if(item.state==='OWNER_READBACK_PENDING'){
+        const moved=await s.requeueArchivedUnattempted(item.intentId,item.revision);
+        if(moved.ok)return moved;
+        if(!['ACCOUNT_NOT_ARCHIVED','ALLOCATION_NOT_REDISTRIBUTABLE'].includes(moved.code))
+          return moved;
+      }
       if(item.state==='ADOPTION_ORIGINAL_PENDING'){
         const db=await (dbPromise||=open());
         const adopted=await createAdoptionStore(db).getFull(item.slug);

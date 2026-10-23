@@ -90,6 +90,60 @@ def main():
                     time.sleep(.1)
                 if selected!=route:raise AssertionError(('PRIMARY_ROUTE_NOT_RENDERED',route,selected))
                 routes[route]='SHOWN_READONLY_NO_EFFECT'
+            # A04: exercise the real creator in the persistently installed
+            # fully enabled XPI with 110 names (the old hard cap was 100).
+            mod.execute(session,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+              const nav=sh.querySelector('[data-nav="generators"]');
+              if(!nav)throw Error('A04_GENERATORS_NAV_MISSING');
+              nav.click();return true;""")
+            opened=False
+            for _ in range(60):
+                opened=mod.execute(session,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  const create=sh.querySelector('[data-action="create"]');
+                  if(!create)return false;
+                  create.click();
+                  return !!sh.querySelector('.drawer-overlay textarea');""")
+                if opened:break
+                time.sleep(.15)
+            assert opened,'A04_PRIMARY_CREATOR_UNAVAILABLE'
+            slugs='\n'.join('a04-installed-fixture-'+str(i).zfill(4) for i in range(110))
+            submitted=mod.execute(session,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+              const input=sh.querySelector('.drawer-overlay textarea');
+              const action=sh.querySelector('.drawer-overlay button.btn.primary');
+              if(!input||!action)throw Error('A04_PRIMARY_CREATOR_INCOMPLETE');
+              input.value=%s;action.click();return true;"""%json.dumps(slugs))
+            assert submitted
+            batch=None
+            for _ in range(120):
+                reply=mod.coordinator_command(session,{'type':'LIST_CREATE_BATCHES',
+                  'params':{'limit':10}})
+                if reply.get('ok') and reply.get('items'):
+                    batch=reply['items'][0]
+                    if batch['state']!='INGESTING':break
+                time.sleep(.2)
+            assert batch and batch['total']==110 and batch['appended']==110,(
+              'A04_UI_DURABLE_110_NOT_ACCEPTED',batch)
+            assert batch['state'] in ('QUEUED','INTAKE_COMPLETE'),batch
+            print('B A04_FULL_CAPABILITY_PRIMARY_UI_110_ITEM_BATCH=PASS',flush=True)
+            before=mod.owned_firefox_pids(profile)
+            mod.close(session);session=None
+            mod.require_owned_exit(profile,before)
+            session=mod.open_session(binary,profile)
+            restart=mod.owned_firefox_pids(profile)
+            assert restart and not before.intersection(restart),'A04_NOT_REAL_RESTART'
+            mod.call('POST',f'/session/{session}/url',
+                {'url':f'moz-extension://{uuid}/pcms/index.html#generators'},timeout=30)
+            resumed=None
+            for _ in range(100):
+                resumed=mod.coordinator_command(session,{'type':'GET_CREATE_BATCH',
+                  'params':{'batchId':batch['batchId']}})
+                if resumed.get('ok') and resumed['batch']['processed']>0:break
+                time.sleep(.2)
+            assert resumed.get('ok') and resumed['batch']['appended']==110,resumed
+            assert resumed['batch']['processed']>0,(
+              'A04_BACKGROUND_STARTUP_INTAKE_NOT_PROGRESSING',resumed)
+            assert resumed['batch']['state'] in ('QUEUED','INTAKE_COMPLETE'),resumed
+            print('B A04_PERSISTENT_FIREFOX_RESTART_BACKGROUND_BATCH_PROGRESS=PASS',flush=True)
             observed={'schema':'pcms.a01.clean-installed-firefox/1',
               'scope':'DISPOSABLE_CLEAN_HOME','xpiInstalledPersistently':True,
               'processExitAndReopenOSObserved':True,'geckoId':mod.ID,

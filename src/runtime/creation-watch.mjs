@@ -9,6 +9,7 @@ export const CREATION_FOLLOWUP_ALARM='pcms-s04-creation-followup';
 const PERIOD=10;
 const NEXT='pcmsS04WakeReceipt';
 const CURSOR='pcmsS04QueueCursor';
+const BATCH_CURSOR='pcmsS04BatchCursor';
 const ID=/^[A-Za-z0-9_-]{8,100}$/;
 export function createCreationWatcher(api,{open=openCanonicalDatabase,
   createRunner=createCreationRunner,clock=Date.now,maxPerWake=8}={}){
@@ -25,6 +26,36 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
       if((await sentinel.inspect()).held)return {ok:false,code:'RESTORE_HOLD'};
       const db=await (dbPromise||=open().catch(e=>{dbPromise=null;throw e;}));
       const store=createCoordinatorStore(db);
+      // Completed batch chunks become canonical per-slug reservations without
+      // relying on an open dashboard. The manifest cursor is persisted in IDB.
+      // Fairness cursor is only a storage-local hint, never effect authority.
+      const batchHint=(await api.storage.local.get(BATCH_CURSOR))?.[BATCH_CURSOR];
+      const batchPage=await store.listBatches({
+        after:typeof batchHint==='string'?batchHint:null,limit:100});
+      if(!batchPage.ok)return batchPage;
+      let batches=batchPage.items.filter(row=>row.state==='QUEUED');
+      if(!batches.length&&batchHint){
+        const wrapped=await store.listBatches({limit:100});
+        if(!wrapped.ok)return wrapped;
+        batches=wrapped.items.filter(row=>row.state==='QUEUED');
+      }
+      let batchProgressed=0,batchHeld=0,batchLast=batchHint||null;
+      // At most 32 bounded canonical intake writes on each wake. Every
+      // successful reservation is its own independently committed checkpoint.
+      for(let i=0;i<32&&batches.length;i++){
+        if((await sentinel.inspect()).held)break;
+        const row=batches[i%batches.length];
+        batchLast=row.batchId;
+        const outcome=await store.processBatch({batchId:row.batchId});
+        if(outcome?.ok){batchProgressed++;
+          if(outcome.batch.state!=='QUEUED')batches=batches.filter(b=>b.batchId!==row.batchId);
+        }else if(outcome?.code==='BATCH_NOT_QUEUED'){
+          batches=batches.filter(b=>b.batchId!==row.batchId);
+        }else{
+          batchHeld++;batches=batches.filter(b=>b.batchId!==row.batchId);
+        }
+      }
+      if(batchLast)await api.storage.local.set({[BATCH_CURSOR]:batchLast});
       const candidates=[],seen=new Set();
       const saved=(await api.storage.local.get(CURSOR))?.[CURSOR];
       const anchor=typeof saved==='string'&&ID.test(saved)?saved:null;
@@ -65,14 +96,15 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
         if(result?.ok)progressed++;else held++;
       }
       const result={ok:true,code:'S04_WAKE_CHECKPOINT',progressed,held,
-        selected:selected.length,more:candidates.length>selected.length||!!tail||pages===16,
+        selected:selected.length,batchProgressed,batchHeld,
+        more:batchProgressed>0||candidates.length>selected.length||!!tail||pages===16,
         observedAt:clock(),providerActivation:'HELD_UNLESS_SCOPED_GATE'};
       await api.storage.local.set({[NEXT]:result,
         [CURSOR]:selected.at(-1)?.intentId||tail||null});
       // Large batches keep moving: one bounded follow-up wake while queued
       // work remains and this wake made progress (held-only queues wait for
       // the periodic wake instead of spinning).
-      if(result.more&&progressed>0)
+      if(result.more&&(progressed>0||batchProgressed>0))
         try{void Promise.resolve(api.alarms.create(CREATION_FOLLOWUP_ALARM,
           {when:clock()+60000})).catch(()=>{});}catch{}
       return result;
