@@ -25,3 +25,30 @@ test('docs-only and protected root changes do not skip the PR check',()=>{
     assert.ok(path && flow.includes('pull_request:'));
   assert.match(flow,/permissions:\s*\n\s*contents: read/);
 });
+
+test('draft preflight skips Firefox only while PR remains unmergeable draft',()=>{
+ const good={baseline:'success',fast:'success',firefox:'skipped'};
+ assert.deepEqual(checkRequired(good,{mode:'draft'}),{
+  accepted:true,bad:[],tier:'DRAFT_PREFLIGHT_ONLY'});
+ assert.equal(checkRequired(good,{mode:'full'}).accepted,false);
+ for(const candidate of [
+  {baseline:'success',fast:'success',firefox:'success'},
+  {baseline:'success',fast:'failure',firefox:'skipped'},
+  {baseline:'skipped',fast:'success',firefox:'skipped'},
+  {baseline:'success',fast:'cancelled',firefox:'skipped'},
+ ])assert.equal(checkRequired(candidate,{mode:'draft'}).accepted,false,JSON.stringify(candidate));
+ assert.equal(checkRequired(good,{mode:'invalid'}).accepted,false);
+});
+test('ready PR, push main and manual workflow still require complete Firefox proof',()=>{
+ assert.match(flow,/ready_for_review/);
+ assert.match(flow,/converted_to_draft/);
+ assert.match(flow,/github\.event\.pull_request\.draft == true/);
+ assert.match(flow,/github\.event\.pull_request\.draft == false/);
+ assert.match(flow,/Draft-only changed-file preflight \(not product acceptance\)/);
+ assert.match(flow,/run: node scripts\/draft-preflight\.mjs/);
+ assert.match(flow,/CI_MODE:/);
+ assert.match(flow,/push:\s*\n\s*branches: \[main\]/);
+ assert.match(flow,/workflow_dispatch:/);
+ assert.match(flow,/name: pcms-required/);
+ assert.doesNotMatch(flow,/pull_request_target/);
+});
