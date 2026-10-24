@@ -88,8 +88,8 @@ def main():
             (async()=>{
               const {AddonManager}=ChromeUtils.importESModule(
                 'resource://gre/modules/AddonManager.sys.mjs');
-              const {Services}=ChromeUtils.importESModule(
-                'resource://gre/modules/Services.sys.mjs');
+              const io=Components.classes['@mozilla.org/network/io-service;1']
+                .getService(Components.interfaces.nsIIOService);
               const path=TARGET;
               const file=Components.classes['@mozilla.org/file/local;1']
                 .createInstance(Components.interfaces.nsIFile);
@@ -102,7 +102,7 @@ def main():
               let outcome;
               try {
                 outcome=await AddonManager.installAddonFromAOM(
-                  null,Services.io.newURI('about:addons'),install,
+                  null,io.newURI('about:addons'),install,
                   {preferUpdateOverInstall:true});
               } catch(error) {
                 throw Error('A08_ADDON_MANAGER_UPDATE_REFUSED:'+

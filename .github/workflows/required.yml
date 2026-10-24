@@ -90,10 +90,10 @@ jobs:
       # export, streamed restore staging and independent disposable file reopen.
       # Historical S02 host/crypto regression source remains in repository,
       # but is not a new operator/runtime product prerequisite.
-      - name: Persistent installed-XPI Firefox B smoke
-        run: python3 scripts/browser-i00-smoke.py build/pcms-alpha-i00.xpi
       - name: Persistent Firefox donor-to-PCMS upgrade and source-state survival
         run: python3 scripts/a08-upgrade-firefox.py build/pcms-alpha-i00.xpi
+      - name: Persistent installed-XPI Firefox B smoke
+        run: python3 scripts/browser-i00-smoke.py build/pcms-alpha-i00.xpi
   pcms-required:
     name: pcms-required
     if: ${{ always() }}
