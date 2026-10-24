@@ -4,7 +4,7 @@ import {importTargetTuple} from './creation-preview.mjs';
 
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 const fail=code=>({ok:false,code});
-export async function inspectCurrentImportItem({repository,repositoryId,token,slug},transport=fetch){
+export async function inspectCurrentImportItem({repository,repositoryId,token,slug,absentSlug=null},transport=fetch){
  if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository||'')||!/^generators\/[a-z0-9][a-z0-9-]{0,99}$/.test('generators/'+slug))return fail('INITIAL_IMPORT_SOURCE_UNVERIFIED');
  const sha=v=>/^[a-f0-9]{40}$/.test(v||'');
  try{const get=async path=>{const r=await transport('https://api.github.com/repos/'+repository+path,{method:'GET',credentials:'omit',redirect:'error',cache:'no-store',
@@ -14,10 +14,13 @@ export async function inspectCurrentImportItem({repository,repositoryId,token,sl
   const commit=await get('/git/commits/'+ref.object.sha);if(!sha(commit.tree?.sha))throw Error('MAIN_UNVERIFIED');
   const tree=async oid=>{const out=await get('/git/trees/'+oid);if(out.truncated!==false||!Array.isArray(out.tree))throw Error('TREE_INCOMPLETE');return out.tree};
   const child=async(oid,name)=>{const rows=(await tree(oid)).filter(x=>x.path===name);if(rows.length!==1||rows[0].type!=='tree'||rows[0].mode!=='040000'||!sha(rows[0].sha))throw Error('FOLDER_MISSING');return rows[0].sha};
-  const folderTreeOid=await child(await child(commit.tree.sha,'generators'),slug);
+  const generatorRoot=await child(commit.tree.sha,'generators');
+  const entries=await tree(generatorRoot),matches=entries.filter(x=>x.path===slug);
+  if(matches.length!==1||matches[0].type!=='tree'||matches[0].mode!=='040000'||!sha(matches[0].sha))throw Error('FOLDER_MISSING');
+  const folderTreeOid=matches[0].sha,oldAbsent=absentSlug===null?null:!entries.some(x=>x.path===absentSlug);
   const markers=(await tree(folderTreeOid)).filter(x=>x.path==='DEPLOYMENT.md');
   if(markers.length!==1||markers[0].type!=='blob'||markers[0].mode!=='100644'||!sha(markers[0].sha))throw Error('MARKER_UNVERIFIED');
-  return {ok:true,repositoryId,head:ref.object.sha,slug,folderTreeOid,markerOid:markers[0].sha};
+  return {ok:true,repositoryId,head:ref.object.sha,slug,folderTreeOid,markerOid:markers[0].sha,oldAbsent};
  }catch{return fail('INITIAL_IMPORT_SOURCE_UNAVAILABLE')}
 }
 export function createInitialImportGuard(api,{inspect=inspectCurrentImportItem,credential=browserGitCredentialPacket}={}){

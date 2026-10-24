@@ -88,7 +88,7 @@ export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=n
   try{
    const p=message.params;
    const current=plan.review.find(r=>r.newSlug===p.newSlug);
-   if(!current||current.revision!==p.expectedRevision)
+   if(!current||current.revision!==p.expectedRevision||current.newTreeOid!==p.expectedTreeOid)
      return fail('REVIEW_REVISION_CHANGED');
    if(plan.stale.includes(p.newSlug))return fail('REVIEW_SOURCE_CHANGED');
    if(current.oldSlug&&observed.generators.some(g=>g.slug===current.oldSlug))

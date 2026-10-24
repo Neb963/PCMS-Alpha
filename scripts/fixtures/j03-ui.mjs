@@ -14,6 +14,8 @@ export async function installGitFixture({empty=false}={}){
  const {browserGitCredentialPacket}=await import('./git-local-secret.mjs');
  const {standingS06}=await import('./s06-standing-authority.mjs');
  const {createCommandBoundary}=await import('./command-boundary.mjs');
+ const {createExistingRenameService}=await import('./folder-existing-rename.mjs');
+ const {createRenamedIdentityLinker,createRenameGitVerifier}=await import('./folder-rename-link.mjs');
  const {createFolderIdentityBoundary}=await import('./folder-identity-boundary.mjs');
  const key='j03OfflineGitOracle',prior=(await browser.storage.local.get(key))[key],model=await createGitModel(prior||null);
  const persist=()=>browser.storage.local.set({[key]:model.serialize()});
@@ -30,8 +32,9 @@ export async function installGitFixture({empty=false}={}){
   ...Object.fromEntries(Array.from({length:108},(_,i)=>['generators/j03-created-alpha/src/file-'+String(i).padStart(3,'0')+'.txt','File '+i+'\n']))
  });await persist()}
  const network=async(...args)=>{try{return await model.transport(...args)}finally{if(args[1]?.method!=='GET')await persist()}};
+ let providerGuard=null;
  await installGeneratorFixture({
-  createGit:(api,options)=>createS04GitContinuation(api,{...options,scan:o=>scanMainCatalog(o,network),transport:network}),
+  createGit:(api,options)=>{providerGuard=options.guard();return createS04GitContinuation(api,{...options,scan:o=>scanMainCatalog(o,network),transport:network})},
   createImportGuard:api=>createInitialImportGuard(api,{inspect:o=>inspectCurrentImportItem(o,network)})
  });
  const db=await openCanonicalDatabase({open:(_name,version)=>indexedDB.open('pcms-j02-ui-fixture',version)}),open=async()=>db;
@@ -39,7 +42,26 @@ export async function installGitFixture({empty=false}={}){
  const catalog=createCatalogBoundary(api,{open,transport:network,scan:o=>scanMainCatalog(o,network),native:browserGitCredentialPacket,
   promptWriteGate:()=>standingS06.gate('gitWrite'),authorityGeneration:()=>standingS06.policyGeneration()});
  const source=createSourceBoundary(api,{open,inspect:o=>inspectGitSource(o,network),readFile:o=>readVerifiedGitFile(o,network)});
- const canonical=createCommandBoundary(api,{open}),identity=createFolderIdentityBoundary(api);
+ const canonical=createCommandBoundary(api,{open});
+ const renameGuard={...providerGuard,inspectSourceEditorIdle:async()=>({ok:true,clean:true}),
+  observeReadOnly:async(uid,_edit,slug)=>{
+   const resource=model.state.renameResource||{oldSlug:'j02-owned-000-002',newSlug:null,remoteId:'public_0_2'};
+   if(slug!==(resource.newSlug||resource.oldSlug))return {ok:false,code:'OFFLINE_RENAMED_SOURCE_MISSING'};
+   const raw=await providerGuard.observeReadOnly(uid,false,slug);
+   return {...raw.original,ok:true,source:'DONOR_GUARDED_ORIGINAL_READBACK',slug,accountId:'account_j02_000',personaUid:uid,principalFingerprint:'a'.repeat(64),observedAt:Date.now()};
+  },
+  runSupplyStep:async(uid,request)=>{
+   if(request.kind==='RENAME_EXISTING'){
+    model.state.renameEffects||=[];model.state.renameEffects.push({oldSlug:request.temporarySlug,newSlug:request.slug,remoteId:request.remoteId});
+    model.state.renameResource={oldSlug:request.temporarySlug,newSlug:request.slug,remoteId:request.remoteId};await persist();return {ok:false,code:'OFFLINE_LOST_RENAME_ACK'};
+   }
+   if(request.kind==='READ_EXISTING_RENAME')return model.state.renameResource?.newSlug===request.slug&&model.state.renameResource.remoteId===request.remoteId?{ok:true,state:'RENAMED_SAME_REMOTE_ID'}:{ok:false};
+   return providerGuard.runSupplyStep(uid,request);
+  }};
+ const rename=createExistingRenameService(api,{open,guard:()=>renameGuard,developmentGate:()=>standingS06.gate('development'),
+  verifyGitIdentity:createRenameGitVerifier(api,{inspectItem:o=>inspectCurrentImportItem(o,network)}),
+  linkRenamed:createRenamedIdentityLinker(api,{open,guard:()=>renameGuard,inspect:o=>inspectGitSource(o,network),inspectItem:o=>inspectCurrentImportItem(o,network)})});
+ const identity=createFolderIdentityBoundary(api,{renameService:rename});
  const watcher=createCatalogWatcher(api,{scan:scanMainCatalog,network,native:browserGitCredentialPacket,incidents:async()=>{},
   ingestComplete:createCreationCatalogIntake(api,{open}).run,ingestReady:createReadyIntake(api,{open}).run});
  const commands=[],original=browser.runtime.connect.bind(browser.runtime),boundaries=new Map([
@@ -51,7 +73,8 @@ export async function installGitFixture({empty=false}={}){
    postMessage(msg){Promise.resolve(boundaries.get(name)(msg,sender)).then(out=>{commands.push({type:msg.type,ok:out?.ok,code:out?.code});if(!closed)for(const fn of handlers)fn(out)}).catch(()=>{if(!closed)for(const fn of disconnected)fn()})}};
  };
  window.__j03={async inspect(){return {git:structuredClone(model.state),provider:await window.__j02.inspect(),commands:structuredClone(commands),policy:await standingS06.state()}},
-  async tick(n=1){for(let i=0;i<n;i++){await watcher.tick();await window.__j02.tick(4)}await persist();return this.inspect()},
+  async tick(n=1){for(let i=0;i<n;i++){await watcher.tick();await identity.tick();await window.__j02.tick(4)}await persist();return this.inspect()},
+  async moveFolder(oldSlug,newSlug){const changes={};for(const [path,oid] of Object.entries(model.paths()))if(path.startsWith('generators/'+oldSlug+'/')){changes[path]=null;changes[path.replace('generators/'+oldSlug+'/','generators/'+newSlug+'/')]=Uint8Array.from(atob(model.state.blobs[oid].content),c=>c.charCodeAt(0));}await model.merge(changes,'external reviewed folder rename');await persist();return true},
   async merge(files,message){await model.merge(files,message);await persist();return model.state.head},
   async loseNextRef(){model.state.loseNextRef=true;await persist();return true},
   async clearRepository(){model.state.head=null;await persist();return true},

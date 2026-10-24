@@ -40,6 +40,7 @@ function setup({grant=true,collision=false,ack=false}={}){
  }
  let remoteRenamed=false,changedSource=false,renames=0,reads=0;
  const g={
+  inspectSourceEditorIdle:async()=>({ok:true,clean:true}),
   getSafeRouteReadiness:async()=>({ready:true,routeId:'mullvad-route',
     cookieStoreId:'firefox-container'}),
   observeReadOnly:async(uid,edit,slug)=>{
@@ -70,7 +71,7 @@ function setup({grant=true,collision=false,ack=false}={}){
  }}};
  let grantActive=grant;
  const service=createExistingRenameService(api,{open:async()=>db(),guard:()=>g,
-   clock:()=>200,developmentGate:()=>grantActive,linkRenamed:async()=>({ok:false,code:'RENAMED_SOURCE_LINK_NOT_VERIFIED'}),preserveOriginal:async()=>({ok:true})});
+   clock:()=>200,developmentGate:()=>grantActive,linkRenamed:async()=>({ok:false,code:'RENAMED_SOURCE_LINK_NOT_VERIFIED'}),preserveOriginal:async()=>({ok:true,baselineKey:'unit_baseline'}),verifyBaseline:async()=>({ok:true}),verifyGitIdentity:async()=>({ok:true}),sourceSafety:async()=>({ok:true})});
  return {service,saved,records,review,reads:()=>reads,renames:()=>renames,
    changeSource:()=>changedSource=true,removeOldInventory:()=>delete records['inventory:old-generator'],
    removeOldLink:()=>delete records['source-link:old-generator'],

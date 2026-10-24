@@ -1,3 +1,4 @@
+import {auditSourceClosureRows} from './backup-source-closure.mjs';
 // Complete a human-chosen same-resource rename from fresh independent live
 // bytes and exact main source. Keeps old source/history; never renames remotely.
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
@@ -7,6 +8,35 @@ import {inspectGitSource} from './git-source.mjs';
 import {inspectCurrentImportItem} from './creation-import-authority.mjs';
 import {verifyOriginal} from './adoption.mjs';
 const fail=code=>({ok:false,code});
+export async function preserveRenameBaseline(db,facts,original){
+ if(original?.source!=='INDEPENDENT_FULL_BYTE_READBACK'||original.ok!==true)return fail('ORIGINAL_SOURCE_UNVERIFIED');
+ const key='rename-original:'+facts.row.accountId+':'+facts.row.remoteId+':'+original.fingerprint;
+ return new Promise((resolve,reject)=>{const tx=db.transaction(['meta','events'],'readwrite'),m=tx.objectStore('meta');let out=fail('RENAME_BASELINE_UNAVAILABLE');
+  tx.oncomplete=()=>resolve(out);tx.onabort=()=>reject(Error('BASELINE_TRANSACTION_ABORTED'));
+  m.get('inventory:'+facts.row.slug).onsuccess=e=>{const row=e.target.result?.generator;
+   if(!row||row.revision!==facts.row.revision||row.remoteId!==original.remotePublicId||row.accountId!==facts.account.accountId)return;
+   m.get('account:'+facts.account.accountId).onsuccess=e=>{const a=e.target.result?.account;if(a?.state!=='VERIFIED'||a.revision!==facts.account.revision||a.identity?.principalFingerprint!==facts.account.identity.principalFingerprint)return;
+    m.get(key).onsuccess=e=>{if(!e.target.result){m.add({key,record:{slug:row.slug,accountId:row.accountId,remoteId:row.remoteId,personaUid:row.personaUid,bindingVersion:row.bindingVersion,
+      principalFingerprint:a.identity.principalFingerprint,original}});tx.objectStore('events').add({stage:'EXISTING_RENAME_BASELINE_SAVED',slug:row.slug,fingerprint:original.fingerprint});}
+     out={ok:true,baselineKey:key};
+    };
+   };
+  };
+ });
+}
+export async function verifyRenameBaseline(db,attempt){
+ try{const value=await new Promise((resolve,reject)=>{const tx=db.transaction(['meta'],'readonly');let row;tx.oncomplete=()=>resolve(row);tx.onabort=reject;tx.objectStore('meta').get(attempt.baselineKey).onsuccess=e=>{row=e.target.result}});
+  const r=value?.record;if(!r||r.remoteId!==attempt.remoteId||r.accountId!==attempt.accountId||r.personaUid!==attempt.personaUid||r.bindingVersion!==attempt.bindingVersion||
+   r.principalFingerprint!==attempt.principalFingerprint||r.original?.fingerprint!==attempt.sourceFingerprint)return fail('RENAME_BASELINE_UNAVAILABLE');
+  await auditSourceClosureRows([{key:attempt.baselineKey,value}]);return {ok:true};
+ }catch{return fail('RENAME_BASELINE_UNAVAILABLE')}
+}
+export function createRenameGitVerifier(api,{credential=createGitCredentialResolver(api),inspectItem=inspectCurrentImportItem}={}){
+ return async review=>{try{const secret=await credential();if(!secret.ok)return secret;if(secret.repositoryId!==review.repositoryId||secret.repository!=='Neb963/per-gens')return fail('GIT_IDENTITY_CHANGED');
+  const item=await inspectItem({repository:secret.repository,repositoryId:secret.repositoryId,token:secret.token,slug:review.newSlug,absentSlug:review.oldSlug});
+  return item.ok&&item.oldAbsent===true&&item.folderTreeOid===review.newTreeOid&&item.markerOid===review.markerOid?{ok:true}:fail('RENAME_GIT_IDENTITY_CHANGED');
+ }catch{return fail('RENAME_GIT_IDENTITY_CHANGED')}};
+}
 export function createRenamedIdentityLinker(api,{open=openCanonicalDatabase,guard=internalPcmsGuard,
  credential=createGitCredentialResolver(api),inspect=inspectGitSource,inspectItem=inspectCurrentImportItem}={}){
  const sentinel=createRestoreSentinel(api.storage.local);
