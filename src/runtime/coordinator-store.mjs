@@ -344,8 +344,9 @@ export function createCoordinatorStore(db){
            current.accountId!==adoption.accountId||
            current.personaUid!==adoption.personaUid||
            current.bindingVersion!==adoption.bindingVersion||
-           current.remoteId!==adoption.remotePublicId||
-           current.visibility!==adoption.visibility){
+           current.slug!==adoption.slug||current.pinConflict||current.sourceDrift||
+           current.createOperationId||current.renameOperationId||current.gitOperationId||current.activeOperationId||
+           current.visibility!=null&&current.visibility!==adoption.visibility){
           finish(fail('ADOPTION_OWNERSHIP_CHANGED'));return;
         }
         m.get('adoption:'+current.slug).onsuccess=a=>{
@@ -365,16 +366,50 @@ export function createCoordinatorStore(db){
                account.identity?.principalFingerprint!==adoption.principalFingerprint){
               finish(fail('ACCOUNT_CONTEXT_CHANGED'));return;
             }
-            const next={...current,revision:current.revision+1,
-              state:'GIT_INIT_PENDING',hold:'GIT_ASSOCIATION_PENDING',
-              originalFingerprint:adoption.original.fingerprint,
-              originalArchiveRef:adoption.archiveRef,
-              originalCheckpointId:adoption.originalCheckpoint.receiptId};
-            m.put({key:key(intentId),record:next});
-            tx.objectStore('events').add({stage:'S04_ADOPTION_ORIGINAL_PROTECTED',
-              intentId,slug:current.slug,originalFingerprint:next.originalFingerprint,
-              originalArchiveRef:next.originalArchiveRef});
-            finish({ok:true,record:next,providerEffects:'OFF'});
+            const promote=()=>{
+              const next={...current,revision:current.revision+1,
+                state:'GIT_INIT_PENDING',hold:'GIT_ASSOCIATION_PENDING',
+                remoteId:adoption.remotePublicId,visibility:adoption.visibility,
+                originalFingerprint:adoption.original.fingerprint,
+                originalArchiveRef:adoption.archiveRef,
+                originalCheckpointId:adoption.originalCheckpoint.receiptId};
+              m.put({key:key(intentId),record:next});
+              tx.objectStore('events').add({stage:'S04_ADOPTION_ORIGINAL_PROTECTED',
+                intentId,slug:current.slug,previousRemoteId:current.remoteId||null,
+                remoteId:next.remoteId,originalFingerprint:next.originalFingerprint,
+                originalArchiveRef:next.originalArchiveRef});
+              finish({ok:true,record:next,providerEffects:'OFF'});
+            };
+            if(current.remoteId===adoption.remotePublicId&&current.visibility===adoption.visibility){
+              promote();return;
+            }
+            // Full original readback may have replaced a list-level slug
+            // locator. Reconcile only the canonical same-owner alias; never
+            // infer identity from a name, equal bytes alone or a caller claim.
+            m.get('inventory:'+current.slug).onsuccess=seen=>{
+              const row=seen.target.result?.generator;
+              if(!row||row.ownerState!=='OBSERVED_OWNER'||row.accountId!==current.accountId||
+                 row.personaUid!==current.personaUid||row.bindingVersion!==current.bindingVersion||
+                 row.remoteId!==adoption.remotePublicId||row.visibility!==adoption.visibility||
+                 row.identitySchema!==2||row.identityBasis!=='INDEPENDENT_FULL_BYTE_READBACK'||
+                 row.identityProof?.fingerprint!==adoption.original.fingerprint){
+                finish(fail('ADOPTION_OWNERSHIP_CHANGED'));return;
+              }
+              m.get('identity-alias:'+current.slug).onsuccess=known=>{
+                const alias=known.target.result?.identity;
+                if(!alias||alias.schema!==2||alias.slug!==current.slug||
+                   alias.accountId!==current.accountId||alias.personaUid!==current.personaUid||
+                   alias.bindingVersion!==current.bindingVersion||
+                   alias.publicId!==adoption.remotePublicId||
+                   alias.originalFingerprint!==adoption.original.fingerprint||
+                   alias.evidence!=='INDEPENDENT_FULL_BYTE_READBACK'||
+                   current.remoteId!=null&&current.remoteId!==alias.previousId&&
+                    current.remoteId!==adoption.remotePublicId){
+                  finish(fail('ADOPTION_OWNERSHIP_CHANGED'));return;
+                }
+                promote();
+              };
+            };
           };
         };
       };
