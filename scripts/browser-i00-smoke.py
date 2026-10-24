@@ -1368,7 +1368,10 @@ def main():
                   sh.querySelector('[data-settings="ai"]').click();
                   const aiPanel=sh.querySelector('.settings-main');
                   const primaryAi=aiPanel?.textContent.includes('Managed AI development')&&
-                    !!aiPanel?.querySelector('textarea[aria-label="AI development guidance"]')&&
+                    !!aiPanel?.querySelector('[data-git-prompt] textarea[aria-label="Default AI testing instructions"]')&&
+                    !aiPanel?.querySelector('textarea[aria-label="AI development guidance"]')&&
+                    !!aiPanel?.querySelector('textarea[aria-label="Required test names"]')&&
+                    [...aiPanel.querySelectorAll('[data-git-prompt] button')].some(x=>x.textContent.includes('Save to GitHub'))&&
                     [...aiPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Save concurrency'));
                   sh.querySelector('[data-settings="backups"]').click();
                   const backupPanel=sh.querySelector('.settings-main');
