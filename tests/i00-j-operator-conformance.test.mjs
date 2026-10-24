@@ -20,6 +20,6 @@ test('current coding-agent instructions preserve every journey and accepted UX p
   assert.ok(plan.includes(phrase),'Missing acceptance action: '+phrase);
  assert.match(agent,/J01.*J07/);
  assert.match(agent,/full 34-finding operator UI audit/);
- assert.match(plan,/34 named observations/);
+ assert.match(plan,/\*\*34\*\* named observations/);
  assert.ok(!plan.includes('Replace persona with dummy'));
 });
