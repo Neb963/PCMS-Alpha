@@ -2,8 +2,16 @@
 // ports and canonical production receipts. Never invents a provider success.
 import {DIAGNOSTIC_CONFIG,DIAGNOSTIC_RUN,STAGES,
   validateDisposable,evaluateDisposable,createDiagnosticRun,
-  addDiagnosticEvent,diagnosticReport,recoverInterruptedDiagnostic} from './s08-diagnostic-core.mjs';
-const by=id=>document.getElementById('pcms-diagnostic-'+id);
+  addDiagnosticEvent,diagnosticReport,recoverInterruptedDiagnostic,canStartNewDiagnostic,
+  recoverDiagnosticIfInactive} from './s08-diagnostic-core.mjs';
+// A07 one-document execution owner. A settings remount must not race an
+// already dispatched diagnostic or convert RUNNING to a false cold-start hold.
+let activeDiagnosticDrive=false;
+const mountedViews=new Set();
+function refreshMountedViews(){for(const update of mountedViews)update();}
+// A07: direct primary UI mount; isolated per-view state and genuine guarded ports.
+export function mountDiagnosticController(root=document){
+const by=id=>root.querySelector('#pcms-diagnostic-'+id);
 const consent=by('consent'),xpiSha=by('xpi-sha');
 const account=by('account'),namespace=by('namespace'),save=by('designate'),
  start=by('run'),resume=by('resume'),rerun=by('rerun'),exporter=by('export'),
@@ -47,12 +55,13 @@ function request(which,type,params={}){
  });
 }
 function controls(){
- save.disabled=busy;start.disabled=busy||!configuration||
-   (run!==null&&run.status!=='NOT_TESTED');
- resume.disabled=busy||!run||!run.firstFailure;
- rerun.disabled=busy||!configuration;exporter.disabled=busy||!run;
- cleanup.disabled=busy||!run||run.cleanup==='VERIFIED_REMOTE_AND_GIT_ABSENT';
- account.disabled=busy;namespace.disabled=busy;xpiSha.disabled=busy;
+ const locked=busy||activeDiagnosticDrive;
+ save.disabled=locked;start.disabled=locked||!configuration||
+   !canStartNewDiagnostic(run);
+ resume.disabled=locked||!run||!run.firstFailure;
+ rerun.disabled=locked||!configuration;exporter.disabled=locked||!run;
+ cleanup.disabled=locked||!run||run.cleanup==='VERIFIED_REMOTE_AND_GIT_ABSENT';
+ account.disabled=locked;namespace.disabled=locked;xpiSha.disabled=locked;
 }
 function show(){
  if(designationError)scope.textContent=designationError;
@@ -84,7 +93,7 @@ function show(){
 async function persist(){
  run.updatedAt=Date.now();
  await browser.storage.local.set({[DIAGNOSTIC_RUN]:run});
- show();
+ show();refreshMountedViews();
 }
 async function mark(stage,outcome,code){
  run=addDiagnosticEvent(run,stage,outcome,code,Date.now());
@@ -248,65 +257,12 @@ async function refresher(){
    pause(result.code||'TEST_REFRESH_NOT_VERIFIED');
  return 'REFRESHER_MARKER_SOURCE_READBACK_VERIFIED';
 }
-async function isolatedRestart(){
- const sha=run.config.xpiSha256;
- if(!/^[a-f0-9]{64}$/.test(sha||''))pause('XPI_SHA256_REQUIRED');
- const response=await new Promise(resolve=>{
-  let port,done=false;
-  try{port=browser.runtime.connectNative('local.pcms.diagnostic_browser');}
-  catch{return resolve({ok:false,code:'ISOLATED_HOST_NOT_INSTALLED'});}
-  const timeout=setTimeout(()=>finish({ok:false,code:'ISOLATED_RESTART_TIMEOUT'}),930000);
-  function finish(value){
-   if(done)return;done=true;clearTimeout(timeout);
-   try{port.disconnect();}catch{}
-   resolve(value);
-  }
-  port.onMessage.addListener(finish);
-  port.onDisconnect.addListener(()=>finish({ok:false,code:'ISOLATED_HOST_DISCONNECTED'}));
-  try{port.postMessage({action:'RUN_ISOLATED_BROWSER',expectedSha256:sha});}
-  catch{finish({ok:false,code:'ISOLATED_HOST_WRITE_FAILED'});}
- });
- if(!response?.ok||response.code!=='ISOLATED_CANDIDATE_FIREFOX_RESTART_VERIFIED'||
-    response.xpiSha256!==sha||response.firefoxRestart!=='OS_OBSERVED'||
-    response.persistentXpi!=='VERIFIED_IN_TEST_PROFILE')
-   pause(response?.code||'ISOLATED_RESTART_NOT_VERIFIED');
- return 'ISOLATED_CANDIDATE_FIREFOX_RESTART_VERIFIED';
-}
-async function isolatedBackup(){
- const sha=run.config.xpiSha256;
- if(!/^[a-f0-9]{64}$/.test(sha||''))pause('XPI_SHA256_REQUIRED');
- const reply=await new Promise(resolve=>{
-   let port,done=false;
-   try{port=browser.runtime.connectNative('local.pcms.diagnostic_browser');}
-   catch{return resolve({ok:false,code:'ISOLATED_HOST_NOT_INSTALLED'});}
-   const timeout=setTimeout(()=>finish({ok:false,code:'ISOLATED_BACKUP_TIMEOUT'}),1260000);
-   function finish(value){
-     if(done)return;done=true;clearTimeout(timeout);
-     try{port.disconnect();}catch{}
-     resolve(value);
-   }
-   port.onMessage.addListener(finish);
-   port.onDisconnect.addListener(()=>finish({ok:false,code:'ISOLATED_HOST_DISCONNECTED'}));
-   try{port.postMessage({action:'RUN_ISOLATED_BACKUP_RESTORE',expectedSha256:sha});}
-   catch{finish({ok:false,code:'ISOLATED_HOST_WRITE_FAILED'});}
- });
- if(!reply?.ok||reply.code!=='ISOLATED_PRODUCTION_BACKUP_RESTORE_VERIFIED'||
-    reply.xpiSha256!==sha||reply.nativeArchive!=='REOPENED_AUTHENTICATED'||
-    reply.restore!=='FRESH_PROFILE_INACTIVE_VERIFIED'||reply.testOnly!==true)
-   pause(reply?.code||'ISOLATED_BACKUP_RESTORE_NOT_VERIFIED');
- run.isolatedRecoveryProof={version:1,xpiSha256:sha,
-   archive:'REOPENED_AUTHENTICATED',restore:'FRESH_PROFILE_INACTIVE_VERIFIED'};
- await persist();
- return 'ISOLATED_PRODUCTION_BACKUP_ARCHIVE_VERIFIED';
-}
-async function isolatedRestore(){
- const receipt=run.isolatedRecoveryProof;
- if(receipt?.version!==1||receipt.xpiSha256!==run.config.xpiSha256||
-    receipt.archive!=='REOPENED_AUTHENTICATED'||
-    receipt.restore!=='FRESH_PROFILE_INACTIVE_VERIFIED')
-   pause('ISOLATED_RESTORE_READBACK_REQUIRED');
- return 'ISOLATED_FRESH_PROFILE_DONOR_AND_CANONICAL_RESTORE_VERIFIED';
-}
+// OS process restart and independent disk/fresh-profile restore are performed
+// by the developer's disposable CI controller, never a user-installed PCMS host.
+const externalProofStages=new Set(['BACKUP','RESTORE','PROCESS_RESTART']);
+async function isolatedRestart(){pause('INDEPENDENT_PROCESS_RESTART_PROOF_REQUIRED');}
+async function isolatedBackup(){pause('INDEPENDENT_DISK_BACKUP_PROOF_REQUIRED');}
+async function isolatedRestore(){pause('INDEPENDENT_FRESH_PROFILE_RESTORE_PROOF_REQUIRED');}
 const ACTION={
  SCOPE:async()=>{await prerequisite();return 'SCOPED_RESOURCES_VERIFIED';},
  CREATE:creation,GIT_SOURCE:catalog,READY:ready,AI_TEST:ai,
@@ -316,11 +272,18 @@ const ACTION={
  PROCESS_RESTART:isolatedRestart
 };
 async function drive(){
- if(busy||!run)return;busy=true;controls();
+ if(busy||!run||activeDiagnosticDrive)return;
+ busy=true;activeDiagnosticDrive=true;controls();refreshMountedViews();
  try{
   const at=Math.max(0,STAGES.indexOf(run.stage));
   for(let i=at;i<STAGES.length;i++){
    const stage=STAGES[i];run.stage=stage;run.status='RUNNING';await persist();
+    if(externalProofStages.has(stage)){
+      // Do not call non-existent host services or assert external proof.
+      run=addDiagnosticEvent(run,stage,'NOT_TESTED',
+        'REQUIRES_INDEPENDENT_CI_OR_OPERATOR_EVIDENCE',Date.now());
+      run.stage=STAGES[i+1]||'COMPLETED';await persist();continue;
+    }
    try{
     const result=await ACTION[stage]();
     await mark(stage,'PASS',result);
@@ -332,9 +295,10 @@ async function drive(){
    }
   }
   if(run.stage==='COMPLETED'){
-   run.status='PASS';run.firstFailure=null;await persist();
+   run.status=run.events.some(event=>event.outcome!=='PASS')?'NOT_TESTED':'PASS';
+     run.firstFailure=null;await persist();
   }
- }finally{busy=false;show();}
+ }finally{busy=false;activeDiagnosticDrive=false;show();refreshMountedViews();}
 }
 async function populateAccounts(){
  const response=await request('accounts','LIST_ACCOUNTS');
@@ -351,7 +315,7 @@ async function populateAccounts(){
  if(configuration)account.value=configuration.accountId;
 }
 save.addEventListener('click',async()=>{
- if(busy)return;busy=true;controls();
+ if(busy||activeDiagnosticDrive)return;busy=true;controls();
  try{
   const selected=account.value;
   const current=await request('accounts','LIST_ACCOUNTS');
@@ -388,18 +352,18 @@ function nextRun(){
  return created.run;
 }
 start.addEventListener('click',async()=>{
- if(busy||!configuration||run&&run.status!=='NOT_TESTED')return;
+ if(busy||activeDiagnosticDrive||!configuration||!canStartNewDiagnostic(run))return;
  if(!run){run=nextRun();await persist();}
  void drive();
 });
-resume.addEventListener('click',()=>{if(!busy&&run?.firstFailure)void drive();});
+resume.addEventListener('click',()=>{if(!busy&&!activeDiagnosticDrive&&run?.firstFailure)void drive();});
 rerun.addEventListener('click',async()=>{
- if(busy||!configuration)return;
+ if(busy||activeDiagnosticDrive||!configuration)return;
  if(run&&!confirm('Start a new test slug? Existing remote test artifacts are preserved; export the previous report first if needed.'))return;
  run=nextRun();await persist();void drive();
 });
 cleanup.addEventListener('click',async()=>{
- if(busy||!run)return;
+ if(busy||activeDiagnosticDrive||!run)return;
  if(!confirm('This only verifies absence. First manually remove the exact test slug from Perchance and Git main. No other resources are touched. Continue?'))return;
  busy=true;controls();
  try{
@@ -435,13 +399,25 @@ exporter.addEventListener('click',()=>{
  a.href=url;a.download='pcms-s08-sanitized-diagnostic.json';
  a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
 });
+// Detached views cannot own effects, but they may observe canonical progress.
+// No observer ever persists, retries or infers a remote effect.
+async function refreshFromCanonical(){
+ if(!scope.isConnected){mountedViews.delete(refreshFromCanonical);return;}
+ if(busy)return;
+ try{
+  const saved=await browser.storage.local.get(DIAGNOSTIC_RUN);
+  const latest=saved[DIAGNOSTIC_RUN];
+  if(latest?.version===1){run=latest;show();}
+ }catch{/* leave current evidence displayed as unverified */}
+}
+mountedViews.add(refreshFromCanonical);
 (async()=>{
  try{
   const saved=await browser.storage.local.get([DIAGNOSTIC_CONFIG,DIAGNOSTIC_RUN]);
   if(validateDisposable(saved[DIAGNOSTIC_CONFIG]).ok)
    configuration=saved[DIAGNOSTIC_CONFIG];
   run=saved[DIAGNOSTIC_RUN]?.version===1?
-    recoverInterruptedDiagnostic(saved[DIAGNOSTIC_RUN]):null;
+    recoverDiagnosticIfInactive(saved[DIAGNOSTIC_RUN],activeDiagnosticDrive):null;
   if(run&&run!==saved[DIAGNOSTIC_RUN])
     await browser.storage.local.set({[DIAGNOSTIC_RUN]:run});
   if(configuration){namespace.value=configuration.namespace;
@@ -450,3 +426,7 @@ exporter.addEventListener('click',()=>{
   show();
  }catch{scope.textContent='Diagnostic storage or account provider unavailable. No test started.';}
 })();
+
+}
+// Keep historical diagnostics available during the protected distribution migration.
+if(document.getElementById('pcms-diagnostic-run'))mountDiagnosticController(document);

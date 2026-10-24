@@ -46,6 +46,14 @@ export function createDiagnosticRun(config,hex,now){
    created:false,remoteArtifactsPreserved:true,
    cleanup:'NOT_ATTEMPTED'}};
 }
+// A07: an incomplete already-executed diagnostic is not a new run.
+// Only a pristine initial SCOPE checkpoint can be started under the same ID.
+// Any subsequent deliberate rerun allocates a NEW slug and operation intent.
+export function canStartNewDiagnostic(run){
+  return run==null || (run.version===1&&run.status==='NOT_TESTED'&&
+    run.stage==='SCOPE'&&Array.isArray(run.events)&&run.events.length===0&&
+    run.firstFailure==null);
+}
 export function addDiagnosticEvent(run,stage,outcome,code,now){
  if(!STAGES.includes(stage)||!['PASS','NOT_TESTED','HELD','UNCERTAIN'].includes(outcome)||
    typeof code!=='string'||!/^[A-Z0-9_]{1,110}$/.test(code)||
@@ -72,6 +80,12 @@ export function diagnosticReport(run){
 
 // Browser shutdown while a stage was executing is not a PASS or permission to
 // silently rerun a possibly dispatched provider effect. Preserve run identity.
+// A07: a settings remount inside the same live extension document is not an
+// OS process restart. Only an actually inactive local driver may mark RUNNING
+// as held; all real external-effect uncertainty remains on cold recovery.
+export function recoverDiagnosticIfInactive(run,activeInDocument){
+  return activeInDocument?run:recoverInterruptedDiagnostic(run);
+}
 export function recoverInterruptedDiagnostic(run){
  if(run?.version!==1||run.status!=='RUNNING')return run;
  if(run.stage==='COMPLETED'&&STAGES.every(stage=>run.events?.some(e=>e.stage===stage&&e.outcome==='PASS')))

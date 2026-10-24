@@ -1310,8 +1310,10 @@ def main():
                           r.textContent.includes('Not checked')&&
                           r.querySelector('details')?.textContent.includes('AUTH_CHECK_NOT_REQUESTED')),
                         hasHost:rows.some(r=>r.querySelector('strong')?.textContent==='Firefox Git credential storage'&&
-                          r.querySelector('details')?.textContent.includes('LOCAL_GIT_'))&&
-                          !rows.some(r=>r.querySelector('strong')?.textContent==='GitHub credential helper'),
+                          r.querySelector('details')?.textContent.includes('LOCAL_GIT_')),
+                        hasPortable:rows.some(r=>r.querySelector('strong')?.textContent==='Portable backup coordinator'&&
+                          r.querySelector('details')?.textContent.includes('BROWSER_PORTABLE_BACKUP_RESPONDED')),
+                        noPcmsHelpers:!rows.some(r=>/Legacy Git helper|Backup helper|Diagnostic helper|native vault/i.test(r.querySelector('strong')?.textContent||'')),
                         readable:rows.every(r=>r.querySelector('strong')&&
                           !r.querySelector('strong').textContent.includes('_')&&
                           !!r.querySelector('details summary')&&
@@ -1323,9 +1325,9 @@ def main():
                             !!r.querySelector('details p')?.textContent.trim()),
                         exportEnabled:[...panel?.querySelectorAll('button')||[]].some(
                           b=>b.textContent.trim()==='Export sanitized report'&&!b.disabled)};""")
-                    if r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['readable'] and r3_result['guidance']:break
+                    if r3_result['count']>=8 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['hasPortable'] and r3_result['noPcmsHelpers'] and r3_result['readable']:break
                     time.sleep(.12)
-                assert r3_result and r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['readable'] and r3_result['guidance'] and r3_result['exportEnabled'],('R3_PREFLIGHT_FAILED',r3_result)
+                assert r3_result and r3_result['count']>=8 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['hasPortable'] and r3_result['noPcmsHelpers'] and r3_result['readable'] and r3_result['exportEnabled'],('R3_PREFLIGHT_FAILED',r3_result)
                 print('B R3_REAL_PRIMARY_SETTINGS_LOCAL_PREFLIGHT_NO_REMOTE=PASS',flush=True)
                 # R4: actual packaged main UI must expose primary creation and
                 # protected permissions without switching to the old controller.
@@ -1359,12 +1361,12 @@ def main():
                   const protectedRestore=!!backupPanel?.querySelector('input[type="file"]')&&
                     backupPanel.querySelectorAll('input[type="file"]').length===2&&
                     [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Verify independent checkpoint'))&&
-                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Read back uncertain restore'))&&
-                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Apply reviewed restore'));
-                  const restoreHeld=[...backupPanel.querySelectorAll('button')].find(x=>x.textContent.includes('Apply reviewed restore'))?.disabled===true;
+                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Reconcile uncertain restore'))&&
+                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Apply reviewed import'));
+                  const restoreHeld=[...backupPanel.querySelectorAll('button')].find(x=>x.textContent.includes('Apply reviewed import'))?.disabled===true;
                   sh.querySelector('[data-settings="diagnostics"]').click();
                   const details=sh.querySelector('.settings-main');
-                  const primaryDiagnostic=details?.textContent.includes('Full disposable diagnostic')&&
+                  const primaryDiagnostic=details?.textContent.includes('Operational diagnostics')&&
                     !!details?.querySelector('input[placeholder="pcms-test-alpha"]')&&
                     [...details.querySelectorAll('button')].some(x=>x.textContent.includes('Save disposable scope'));
                   sh.querySelector('[data-settings="connections"]').click();
@@ -1372,7 +1374,7 @@ def main():
                   const connectionRows=[...connected?.querySelectorAll('.settings-row')||[]];
                   const restoredConnections=connectionRows.length>=3&&
                     connectionRows.some(x=>x.textContent.includes('PersonaMonkey'))&&
-                    connectionRows.some(x=>x.querySelector('button[data-action="check-service:native"]'))&&
+                    connectionRows.some(x=>x.querySelector('button[data-action="check-service:backup"]'))&&
                     !!connected.querySelector('input[type="password"]');
                   const readableConnections=connectionRows.every(x=>
                     !/GIT_[A-Z_]+|NATIVE_[A-Z_]+|local[.]pcms[.]/.test(
@@ -1384,47 +1386,36 @@ def main():
                 print('B R4_PRIMARY_CREATION_AND_PROTECTED_SETTINGS_WITHOUT_LEGACY=PASS',flush=True)
                 execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=overview]').click();return true")
 
-                navigation=execute(after,"""const by=id=>document.getElementById(id);
-                  const original=by('pcms-backup-export');
-                  document.querySelector('[data-pcms-v014-open="generators:create"]').click();
-                  const create=document.querySelector('#view-generators [data-ui-group="create"]');
-                  const createShown=create?.getAttribute('aria-pressed')==='true'&&
-                    !by('pcms-supply-heading').closest('section.panel').hidden;
-                  document.querySelector('#view-settings [data-ui-group="diagnostics"]').click();
-                  const diagnosticsShown=!by('pcms-diagnostic-heading').closest('section.panel').hidden;
-                  document.querySelector('#view-settings [data-ui-group="backup"]').click();
-                  const backupPreserved=original===by('pcms-backup-export')&&
-                    !original.closest('section.panel').hidden;
-                  document.querySelector('#view-work-queue [data-ui-group="release"]').click();
-                  const releaseShown=!by('pcms-release-heading').closest('section.panel').hidden;
-                  document.querySelector('#view-generators [data-ui-group="inventory"]').click();
-                  const search=document.getElementById('pcms-v014-search');
-                  const shadow=document.getElementById('pcms-faithful-host').shadowRoot;
-                  const searchButton=shadow.querySelector('.top-search');
+                # A07: the operator uses a single primary workspace.
+                # Keep native donor maintenance separate; never open the hidden
+                # pre-A07 workflow DOM while navigating primary controls.
+                navigation=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-nav="generators"]').click();
+                  const generators=sh.querySelector('#page')?.dataset.view==='generators';
+                  sh.querySelector('[data-nav="settings"]').click();
+                  sh.querySelector('[data-settings="advanced"]').click();
+                  const advanced=sh.querySelector('.settings-main');
+                  const grant=[...advanced.querySelectorAll('button')]
+                    .find(x=>x.textContent.trim()==='Enable userScripts permission');
+                  const donor=[...advanced.querySelectorAll('button')]
+                    .some(x=>x.textContent.trim()==='PersonaMonkey settings');
+                  const noLegacyButton=![...advanced.querySelectorAll('button')]
+                    .some(x=>x.textContent.includes('Open protected recovery controls'));
+                  const searchButton=sh.querySelector('.top-search');
                   searchButton?.focus();
                   document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}));
-                  const overlay=shadow.querySelector('.overlay');
+                  const overlay=sh.querySelector('.overlay');
                   const visibleSearchFocused=!!overlay&&
-                    shadow.activeElement===overlay.querySelector('input[type=search]');
+                    sh.activeElement===overlay.querySelector('input[type=search]');
                   overlay?.querySelector('input[type=search]')?.dispatchEvent(
                     new KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true}));
-                  const escapeRestoresFocus=!shadow.querySelector('.overlay')&&
-                    shadow.activeElement===searchButton;
-                  shadow.querySelector('[data-nav="settings"]')?.click();
-                  shadow.querySelector('[data-settings="advanced"]')?.click();
-                  const advanced=[...shadow.querySelectorAll('#page button')]
-                    .find(x=>x.textContent.trim()==='Open protected recovery controls');
-                  advanced?.click();
-                  const nativeOpen=document.body.classList.contains('pcms-native-open');
-                  document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}));
-                  const nativeSearchFocused=document.activeElement===search;
-                  document.getElementById('pcms-legacy-return')?.click();
-                  return {createShown,diagnosticsShown,backupPreserved,releaseShown,
-                    inventoryRestored:!by('generators-table-title').closest('section.panel').hidden,
-                    visibleSearchFocused,escapeRestoresFocus,nativeOpen,nativeSearchFocused,
-                    returnedToPrototype:!document.body.classList.contains('pcms-native-open')};""")
-                assert all(navigation.values()),navigation
-                print('B V014_INSTALLED_DESKTOP_NAVIGATION_AND_DOM_PRESERVATION=PASS',flush=True)
+                  const escapeRestoresFocus=!sh.querySelector('.overlay')&&
+                    sh.activeElement===searchButton;
+                  return {generators,permissionAction:!!grant,donor,noLegacyButton,
+                    visibleSearchFocused,escapeRestoresFocus,
+                    noHiddenController:!document.body.classList.contains('pcms-native-open')};""")
+                assert all(navigation.values()),('A07_PRIMARY_NAVIGATION',navigation)
+                print('B A07_DIRECT_PRIMARY_PERMISSION_AND_KEYBOARD_NAVIGATION=PASS',flush=True)
                 assert execute(after,"location.hash='#overview';return location.hash")=='#overview'
                 # The exact installed XPI must expose a read-only guarded
                 # background status; no valid status enables PCMS effects.
@@ -5242,6 +5233,118 @@ def main():
                     'a01-package-census.py')),str(archive)],check=True,timeout=45)
                 subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name(
                     'a01-clean-firefox.py')),str(archive)],check=True,timeout=180)
+                # A07 uses an independently installed, persistent fully-enabled
+                # test profile. The earlier 'after' session was intentionally
+                # closed by the A02 migration/restore sequence.
+                a07_profile=pathlib.Path(folder)/'a07-primary-fleet'
+                a07_profile.mkdir()
+                (a07_profile/'user.js').write_text(
+                    'user_pref("xpinstall.signatures.required", false);\n')
+                a07_first=open_session(browser,a07_profile)
+                try:
+                    assert call('POST',f'/session/{a07_first}/moz/addon/install',
+                        {'path':str(archive),'temporary':False},timeout=45)==ID
+                finally:close(a07_first)
+                a07_session=open_session(browser,a07_profile)
+                try:
+                    a07_uuid=addons_uuid(a07_profile)
+                    call('POST',f'/session/{a07_session}/url',
+                        {'url':f'moz-extension://{a07_uuid}/pcms/index.html#generators'})
+                    wait_donor_ready(a07_session)
+                    for _ in range(70):
+                        ready=execute(a07_session,
+                            "return !!document.getElementById('pcms-faithful-host')?.shadowRoot?.querySelector('#page')")
+                        if ready:break
+                        time.sleep(.12)
+                    assert ready,'A07_PRIMARY_NOT_MOUNTED_ON_DISPOSABLE_RESTART'
+                    # A07 B: 55 synthetic inactive accounts and 1,200 locally
+                    # observed generators are written to this disposable profile's
+                    # real IndexedDB. No guarded route or provider effect occurs.
+                    a07_seed="""const done=arguments[arguments.length-1];
+                    (async()=>{
+                      const journal=await import('./journal.mjs');
+                      const db=await journal.openCanonicalDatabase();
+                      await new Promise((resolve,reject)=>{
+                        const tx=db.transaction(['meta'],'readwrite');
+                        const meta=tx.objectStore('meta');
+                        for(let i=0;i<55;i++){
+                          const accountId='a07-account-'+String(i).padStart(2,'0');
+                          meta.put({key:'account:'+accountId,account:{
+                            accountId,personaUid:null,bindingId:null,
+                            state:'ARCHIVED',revision:1,bindingVersion:1,identity:null}});
+                        }
+                        for(let i=0;i<1200;i++){
+                          const slug='a07fleet-'+String(i).padStart(4,'0');
+                          meta.put({key:'inventory:'+slug,generator:{
+                            slug,accountId:'a07-account-'+String(54-i%55).padStart(2,'0'),
+                            ownerState:'OWNER_UNVERIFIED',visibility:'UNKNOWN',
+                            source:'SOURCE_PENDING',revision:1}});
+                        }
+                        tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+                        tx.onabort=()=>reject(tx.error);
+                      });db.close();
+                      const reply=params=>new Promise(resolve=>{
+                        const port=browser.runtime.connect({name:'pcms-i04-inventory'});
+                        let done=false;
+                        const finish=v=>{if(done)return;done=true;try{port.disconnect()}catch{}resolve(v)};
+                        port.onMessage.addListener(finish);
+                        port.onDisconnect.addListener(()=>finish({ok:false,code:'PORT_CLOSED'}));
+                        port.postMessage({type:'LIST_INVENTORY',params});
+                      });
+                      const [page0,page1,owned]=await Promise.all([
+                        reply({query:'a07fleet-',sort:'account',offset:0,limit:24}),
+                        reply({query:'a07fleet-',sort:'account',offset:24,limit:24}),
+                        reply({query:'a07fleet-',sort:'account',offset:0,limit:24,
+                          ownerState:'OBSERVED_OWNER'})]);
+                      const both=[...(page0.items||[]),...(page1.items||[])];
+                      const sorted=both.every((g,i)=>i===0||
+                        both[i-1].accountId<g.accountId||
+                        (both[i-1].accountId===g.accountId&&both[i-1].slug<=g.slug));
+                      done({ok:page0.ok===true&&page1.ok===true&&
+                        page0.total===1200&&page1.total===1200&&
+                        page0.items.length===24&&page1.items.length===24&&
+                        owned.ok&&owned.total===0&&sorted&&
+                        new Set(both.map(x=>x.slug)).size===48,
+                        total:page0.total,second:page1.items?.[0]?.accountId,sorted});
+                    })().catch(e=>done({ok:false,error:String(e),stack:String(e.stack||'').slice(0,700)}));"""
+                    a07_result=call('POST',f'/session/{a07_session}/execute/async',
+                                    {'script':a07_seed,'args':[]},timeout=120)
+                    assert a07_result.get('ok') is True,('A07_LARGE_FLEET_BACKEND',a07_result)
+                    print('B A07_55_ACCOUNTS_1200_GENERATORS_GLOBAL_SERVER_PAGING=PASS',flush=True)
+                    execute(a07_session,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      sh.querySelector('[data-nav="generators"]').click();
+                      const search=sh.querySelector('#generator-search');
+                      search.value='a07fleet-';search.dispatchEvent(new Event('input',{bubbles:true}));
+                      const sort=sh.querySelector('#generator-sort');
+                      sort.value='account';sort.dispatchEvent(new Event('change',{bubbles:true}));
+                      return true;""")
+                    large_ui=None
+                    for _ in range(100):
+                        large_ui=execute(a07_session,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                          return {total:sh.querySelector('.workspace-surface .pagination span')?.textContent||'',
+                            rows:[...sh.querySelectorAll('.workspace-surface tbody tr[data-item-index]')]
+                              .map(tr=>({slug:tr.querySelector('.name-cell')?.textContent,
+                                account:tr.querySelectorAll('td')[1]?.textContent}))};""")
+                        if '1200' in large_ui['total'] and len(large_ui['rows'])==24:break
+                        time.sleep(.12)
+                    assert '1200' in large_ui['total'] and len(large_ui['rows'])==24,('A07_PRIMARY_1200_PAGE',large_ui)
+                    assert all(row['slug'].startswith('a07fleet-') for row in large_ui['rows']),large_ui
+                    execute(a07_session,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      sh.querySelector('[data-nav="accounts"]').click();
+                      const search=sh.querySelector('#account-search');
+                      search.value='a07-account-';search.dispatchEvent(new Event('input',{bubbles:true}));
+                      return true;""")
+                    fleet_accounts=None
+                    for _ in range(100):
+                        fleet_accounts=execute(a07_session,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                          return {total:sh.querySelector('.pagination span')?.textContent||'',
+                            rows:sh.querySelectorAll('.account-list-scroll .account-row').length,
+                            next:sh.querySelector('[data-action="account-next"]')?.disabled===false};""")
+                        if '55' in fleet_accounts['total'] and fleet_accounts['rows']==24:break
+                        time.sleep(.12)
+                    assert '55' in fleet_accounts['total'] and fleet_accounts['rows']==24 and fleet_accounts['next'],('A07_PRIMARY_55_ACCOUNTS',fleet_accounts)
+                    print('B A07_PRIMARY_1200_GENERATOR_AND_55_ACCOUNT_PAGING=PASS',flush=True)
+                finally:close(a07_session)
             finally:
                 if after: close(after)
         finally:

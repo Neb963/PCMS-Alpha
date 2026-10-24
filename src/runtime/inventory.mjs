@@ -175,28 +175,47 @@ export function createInventoryStore(db) {
       };
     });
   }
-  function list({query='',ownerState='ALL',accountId='',offset=0,limit=50}={}) {
+  // A07: sort before pagination, never rearrange a single already-sliced page.
+  // Keep at most offset+limit candidates (not the entire fleet) for sorted
+  // reads; count every matching canonical row without a product count cap.
+  function list({query='',ownerState='ALL',accountId='',offset=0,limit=50,sort='fleet'}={}) {
     if(typeof query!=='string' || query.length>80 ||
         (ownerState!=='ALL'&&!states.has(ownerState)) ||
         (accountId!==''&&!isSafeId(accountId)) ||
+        !['fleet','name','account'].includes(sort) ||
         !Number.isSafeInteger(offset)||offset<0||offset>100000 ||
         !Number.isSafeInteger(limit)||limit<1||limit>100)
       return Promise.resolve(fail('INVALID_INVENTORY_QUERY'));
-    const search=query.trim().toLowerCase();
+    const search=query.trim().toLowerCase(),keep=offset+limit;
+    const compare=(a,b)=>sort==='account'?
+      a.accountId.localeCompare(b.accountId)||a.slug.localeCompare(b.slug):
+      a.slug.localeCompare(b.slug);
     return transact('readonly',(tx,finish)=>{
-      const matches=[];let count=0,truncated=false;
+      const matches=[];let count=0;
       tx.objectStore('meta').openCursor().onsuccess=e=>{
         const row=e.target.result;
-        if(!row){finish({ok:true,items:matches,total:count,truncated});return;}
+        if(!row){
+          finish({ok:true,items:sort==='fleet'?matches:matches.slice(offset),
+            total:count,truncated:false});return;
+        }
         const g=row.value?.generator;
-        if(typeof row.key==='string'&&row.key.startsWith('inventory:')&&g){
-          if(count>=10000){truncated=true;row.continue();return;}
-          if((!accountId||g.accountId===accountId)&&
-             (ownerState==='ALL'||g.ownerState===ownerState)&&
-             (g.slug.toLowerCase().includes(search)||g.accountId.toLowerCase().includes(search))){
+        if(typeof row.key==='string'&&row.key.startsWith('inventory:')&&g&&
+            (!accountId||g.accountId===accountId)&&
+            (ownerState==='ALL'||g.ownerState===ownerState)&&
+            (g.slug.toLowerCase().includes(search)||g.accountId.toLowerCase().includes(search))){
+          if(sort==='fleet'){
             if(count>=offset&&matches.length<limit)matches.push(publicGenerator(g));
-            count++;
+          }else{
+            const value=publicGenerator(g);
+            // Insert in global order without retaining records beyond the
+            // requested last row. Retained candidate identity is canonical.
+            let low=0,high=matches.length;
+            while(low<high){const m=(low+high)>>>1;
+              if(compare(matches[m],value)<=0)low=m+1;else high=m;}
+            if(low<keep)matches.splice(low,0,value);
+            if(matches.length>keep)matches.pop();
           }
+          count++;
         }
         row.continue();
       };

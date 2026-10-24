@@ -1,4 +1,10 @@
 import {advanceApprovedPublication} from './publication-flow.mjs';
+import {mountPortableRestore} from '../restore-view.mjs';
+import {portableRestoreTemplate} from './portable-restore-template.mjs';
+import {diagnosticTemplate} from './diagnostic-template.mjs';
+import {mountDiagnosticController} from '../s08-diagnostics.mjs';
+import {openCanonicalDatabase} from '../journal.mjs';
+import {snapshotCanonicalV2,preflightSourceRecovery} from '../backup-core.mjs';
 /* PCMS prototype-structure production bridge, version 0.1.6.
  * The accepted single-file prototype supplies the actual shell/CSS/view HTML.
  * This module does not load its demo script or its sample data. Everything
@@ -7,13 +13,15 @@ import {advanceApprovedPublication} from './publication-flow.mjs';
  * buttons, required confirmations, capability gates, and revision fences.
  */
 const routes=['overview','generators','work-queue','accounts','refresher','settings'];
-const native=document.querySelector('body > .app');
 const host=document.createElement('div');host.id='pcms-faithful-host';
 document.body.append(host);const root=host.attachShadow({mode:'open'});
-const READINESS_NAMES={EXTENSION_RUNTIME:'PCMS extension',LOCAL_CONFIGURATION:'Local settings',RESTORE_HOLD:'Restore safety',REFRESHER_POLICY:'Refresher configuration',BACKUP_RESTORE:'Backup recovery',ACCOUNT_INVENTORY_READ:'Account inventory',REFRESHER_CURRENT_POLICY:'Current Refresher policy',BROWSER_GIT_STORE:'Firefox Git credential storage',NATIVE_VAULT_HOST:'Legacy Git helper (not required)',SECRET_SERVICE_ENVIRONMENT:'Secure credential storage',BACKUP_HOST:'Backup helper',DIAGNOSTIC_HOST:'Diagnostic helper',GIT_CONFIG:'GitHub connection',GIT_PARTIAL_CONNECTION:'Interrupted GitHub setup',GITHUB_AUTH:'GitHub access',GITHUB_MAIN_TREE:'GitHub file scan',GRANT_DEVELOPMENT:'Development permission',GRANT_GITWRITE:'Git write permission',GRANT_PUBLICATION:'Publication permission',PERSONA_AND_SESSION:'Account and secure route',REFRESHER_LIVE_EFFECT:'Refresher operation',INSTALLED_XPI_IDENTITY:'Installed extension verification'};
+const READINESS_NAMES={EXTENSION_RUNTIME:'PCMS extension',LOCAL_CONFIGURATION:'Local settings',RESTORE_HOLD:'Restore safety',REFRESHER_POLICY:'Refresher configuration',BACKUP_RESTORE:'Backup recovery',ACCOUNT_INVENTORY_READ:'Account inventory',REFRESHER_CURRENT_POLICY:'Current Refresher policy',BROWSER_GIT_STORE:'Firefox Git credential storage',NATIVE_VAULT_HOST:'Legacy Git helper (not required)',SECRET_SERVICE_ENVIRONMENT:'Secure credential storage',BACKUP_HOST:'Backup helper',DIAGNOSTIC_HOST:'Diagnostic helper',GIT_CONFIG:'GitHub connection',GIT_PARTIAL_CONNECTION:'Interrupted GitHub setup',GITHUB_AUTH:'GitHub access',GITHUB_MAIN_TREE:'GitHub file scan',GRANT_DEVELOPMENT:'Development permission',GRANT_GITWRITE:'Git write permission',GRANT_PUBLICATION:'Publication permission',PERSONA_AND_SESSION:'Account and secure route',REFRESHER_LIVE_EFFECT:'Refresher operation',PORTABLE_BACKUP_RUNTIME:'Portable backup coordinator',INSTALLED_XPI_IDENTITY:'Installed extension verification'};
 const READINESS_STATES={VERIFIED:'Checked',NOT_TESTED:'Not checked',OUTCOME_UNCERTAIN:'Needs review',UNREACHABLE:'Not responding',STALE:'Needs updating',SECURITY_HELD:'Waiting on setup',OFF_BY_POLICY:'Disabled',NOT_CONFIGURED:'Not connected',MISSING_CAPABILITY:'Needs an update'};
 function operatorReadinessGuidance(row){
  const code=row.code||'';
+ if(row.component==='PORTABLE_BACKUP_RUNTIME')
+   return row.state==='VERIFIED'?'The browser backup coordinator responded. Independent disk and restore proof require separate verification.':
+     'Check the Firefox background backup coordinator.';
  if(row.component==='BROWSER_GIT_STORE')
    return row.state==='VERIFIED'?'The saved browser credential is present; GitHub authorization is checked separately.':
      'Reconnect GitHub to use background Git operations. No PCMS helper is required.';
@@ -70,7 +78,7 @@ function friendlyConnectionIssue(code){
 const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',total:0,items:[]},
  ref:{offset:0,limit:25,query:'',phase:'ALL',snapshot:null,items:[],total:0},
  acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,readyItems:[],readyCursor:'',nextReady:null,readyMore:false,aiUnavailable:false,readyUnavailable:false,epoch:0},
- settings:'connections',settingsStatic:null,lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},nativeOpen:false,
+ settings:'connections',settingsStatic:null,lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},
  renderEpoch:0,version:'0.1.7',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
 const page=()=>shadow('#page');
@@ -95,18 +103,6 @@ const accounts=()=>guardedRead('pcms-i03-accounts','LIST_ACCOUNTS');
 const refresher=(params)=>guardedRead('pcms-i12-refresher','GET_REFRESHER',params);
 const safeCount=n=>Number.isInteger(n)&&n>=0?n:'—';
 const snippet=(s,n=150)=>String(s??'').trim().slice(0,n);
-function nativeRoute(route,group){
- if(!routes.includes(route))return;
- location.hash='#'+route;
- // Existing v014 production workflow navigation lives in the original DOM.
- if(group){const button=native.querySelector('#view-'+route+' [data-ui-group="'+group+'"]');button?.click()}
- state.nativeOpen=true;document.body.classList.add('pcms-native-open');
- const close=document.querySelector('#pcms-legacy-return');close?.focus();
-}
-function nativeReturn(){state.nativeOpen=false;document.body.classList.remove('pcms-native-open');shadow('[data-nav="'+state.route+'"]')?.focus({preventScroll:true})}
-const nativeControl=id=>document.getElementById(id);
-function guardedClick(id){const target=nativeControl(id);if(!target||target.disabled){notify('This guarded control is not available. Inspect the current authorization or recovery hold.');return false}target.click();return true}
-function nativeAction(route,group,id){nativeRoute(route,group);if(id){const e=nativeControl(id);e?.scrollIntoView({block:'nearest'});e?.focus({preventScroll:true})}}
 let currentToast;
 function notify(message){const e=shadow('#pcms-live-toast');if(!e)return;e.textContent=String(message);e.hidden=false;if(currentToast)clearTimeout(currentToast);currentToast=setTimeout(()=>e.hidden=true,6500)}
 function updateNav(){for(const a of root.querySelectorAll('[data-nav]'))a.setAttribute('aria-current',a.dataset.nav===state.route?'page':'false');
@@ -426,8 +422,7 @@ function routeHandlers(){
  // existing shortcut and let the legacy module own the event.
  document.addEventListener('keydown',event=>{
   if(event.defaultPrevented||event.isComposing||event.repeat||
-    !document.body.classList.contains('pcms-faithful-ready')||
-    document.body.classList.contains('pcms-native-open'))return;
+    !document.body.classList.contains('pcms-faithful-ready'))return;
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){
    event.preventDefault();event.stopImmediatePropagation();
    if(!shadow('.overlay'))openGlobalSearch();
@@ -520,7 +515,7 @@ function routeHandlers(){
  });
  root.addEventListener('change',event=>{const target=event.target;
  if(target.id==='generator-account'){state.gen.account=target.value;state.gen.offset=0;void loadGenerators()}
- if(target.id==='generator-sort'){state.gen.sort=target.value;void displayGenerators()}
+ if(target.id==='generator-sort'){state.gen.sort=target.value;state.gen.offset=0;void loadGenerators()}
  if(target.id==='account-filter'){state.acct.filter=target.value;state.acct.page=0;displayAccounts()}
  if(target.matches('.feature-switch')){void proposeRefresherEnable(target)}
  });
@@ -813,7 +808,7 @@ async function loadGenerators(){if(state.route!=='generators')return;
  const epoch=++state.renderEpoch,body=shadow('.workspace-surface table tbody');if(!body)return;
  renderEmpty(body,'Reading observed local generator inventory…');
  try{
-  const [res,accountsResult]=await Promise.all([inventory({query:state.gen.query,offset:state.gen.offset,limit:state.gen.limit,ownerState:state.gen.filter==='ALL'?'ALL':state.gen.filter,accountId:state.gen.account==='ALL'?'':state.gen.account}),accounts().catch(()=>null)]);
+  const [res,accountsResult]=await Promise.all([inventory({query:state.gen.query,offset:state.gen.offset,limit:state.gen.limit,ownerState:state.gen.filter==='ALL'?'ALL':state.gen.filter,accountId:state.gen.account==='ALL'?'':state.gen.account,sort:state.gen.sort}),accounts().catch(()=>null)]);
   if(epoch!==state.renderEpoch||state.route!=='generators')return;
   state.lastAccountList=accountsResult?.ok&&Array.isArray(accountsResult.accounts)?accountsResult.accounts:state.lastAccountList;
   state.gen.items=Array.isArray(res.items)?res.items:[];state.gen.total=safeCount(res.total)=== '—'?0:res.total;
@@ -823,8 +818,7 @@ async function loadGenerators(){if(state.route!=='generators')return;
 function displayGenerators(){if(state.route!=='generators')return;
  const body=shadow('.workspace-surface table tbody');if(!body)return;body.replaceChildren();
  const accountsMap=new Map(state.lastAccountList.map(a=>[a.accountId,a]));const itemList=[...state.gen.items];
- if(state.gen.sort==='name')itemList.sort((a,b)=>String(a.slug).localeCompare(String(b.slug)));
- if(state.gen.sort==='account')itemList.sort((a,b)=>String(a.accountId).localeCompare(String(b.accountId)));
+ // Server already sorted the complete matching fleet before slicing.
  state.gen.visibleItems=itemList;
  if(!itemList.length){rowsError('.workspace-surface table tbody',state.errors.generators?'Local inventory unavailable.': 'No matching local generator observations.',6)}
  for(const [i,item] of itemList.entries()){
@@ -1725,7 +1719,7 @@ function renderReadinessPanel(container){
   const keys=['component','scope','state','stage','code','dependency','observedAt',
     'evidenceKind','evidenceSource','safeRecovery','retrySafety'];
   const safe={schema:1,checkedAt:report.checkedAt,
-    remoteRequested:report.remoteRequested,rows:report.rows.map(row=>
+    remoteRequested:report.remoteRequested,rows:report.rows.filter(row=>!['NATIVE_VAULT_HOST','BACKUP_HOST','DIAGNOSTIC_HOST','SECRET_SERVICE_ENVIRONMENT','SECRET_SERVICE'].includes(row.component)).map(row=>
       Object.fromEntries(keys.map(k=>[k,row[k]??null])))};
   const blob=new Blob([JSON.stringify(safe,null,2)],{type:'application/json'});
   const uri=URL.createObjectURL(blob);const anchor=document.createElement('a');
@@ -1766,17 +1760,14 @@ function renderReadinessPanel(container){
  else if(!state.readiness)summary.textContent='Not checked in this dashboard session.';
  else if(!state.readiness.ok)summary.textContent='Preflight unavailable: '+String(state.readiness.code||'UNKNOWN');
  else {
-  const hostUnavailable=state.readiness.rows.some(row=>
-    ['NATIVE_VAULT_HOST','BACKUP_HOST','DIAGNOSTIC_HOST'].includes(row.component)&&row.state==='UNREACHABLE');
   const pending=state.readiness.rows.some(row=>row.component==='GIT_PARTIAL_CONNECTION'&&row.state==='OUTCOME_UNCERTAIN');
-  summary.textContent=hostUnavailable?
-    'PCMS local services are not responding. Install the native helpers from the matching PCMS release bundle, restart Firefox, then check again. Read-only inventory may still work.':
-    pending?'A previous GitHub connection did not finish. Review and reconcile it before running full diagnostics.':
-    'Readiness checked. Review any items that need attention; a local check does not prove live service operations.';
+  summary.textContent=pending?
+    'An interrupted GitHub connection needs read-only reconciliation.':
+    'Readiness checked. Browser-local status is separate from independent provider and restore evidence.';
  }
  section.append(summary);
  const details=el('details','settings-section');
- const rows=state.readiness?.rows||[];
+ const rows=(state.readiness?.rows||[]).filter(r=>!['NATIVE_VAULT_HOST','BACKUP_HOST','DIAGNOSTIC_HOST','SECRET_SERVICE_ENVIRONMENT','SECRET_SERVICE'].includes(r.component));
  const problematic=rows.filter(row=>
    ['UNREACHABLE','OUTCOME_UNCERTAIN','SECURITY_HELD','STALE','MISSING_CAPABILITY'].includes(row.state));
  const heading=el('summary','',
@@ -1804,7 +1795,7 @@ async function runReadiness(remote){
   if(!snapshot?.ok){state.readiness=snapshot;return;}
   // These existing canonical ports are independent of Git/native diagnosis.
   // They must not be converted into proof of a protected route or source save.
-  const replies=await Promise.allSettled([accounts(),refresher({phase:'ALL',offset:0,limit:1})]);
+  const replies=await Promise.allSettled([accounts(),refresher({phase:'ALL',offset:0,limit:1}),portableBackupCommand({action:'STATUS'})]);
   const at=Date.now();const make=(component,state,code,source,recovery)=>({
    component,scope:'LOCAL',state,stage:'CANONICAL_PORT_READ',code,
    dependency:'ACTIVE_BACKGROUND_BOUNDARY',observedAt:at,evidenceKind:'D',
@@ -1820,6 +1811,10 @@ async function runReadiness(remote){
   snapshot.rows.push(make('REFRESHER_LIVE_EFFECT','NOT_TESTED',
     'SOURCE_SAVE_AND_RECENT_UNVERIFIED','NO_INDEPENDENT_L_RECEIPT',
     'Use a separately authorized disposable live test to verify saved bytes and recent-feed placement.'));
+  const portable=replies[2].status==='fulfilled'?replies[2].value:null;
+  snapshot.rows.push(make('PORTABLE_BACKUP_RUNTIME',portable?.ok?'VERIFIED':'UNREACHABLE',
+    portable?.ok?'BROWSER_PORTABLE_BACKUP_RESPONDED':(portable?.code||'PORTABLE_BACKUP_UNAVAILABLE'),
+    'PCMS_I15_PORTABLE','Only browser receipt readback is verified; reopen the downloaded file and inspect restoration separately.'));
   state.readiness=snapshot;
  }catch{state.readiness={ok:false,code:'READINESS_TRANSPORT_UNAVAILABLE'};}
  finally{state.readinessBusy=false;if(state.route==='settings')renderSettingsSection();}
@@ -1980,7 +1975,7 @@ function primaryConnections(container){
    status.textContent=out?.ok?'Secure GitHub connection saved. Check files from main before any import.':
      out?.code==='GIT_PENDING_CONNECTION_RECONCILIATION_REQUIRED'?
      'A previous setup did not finish. Check the recovery section below before entering a new credential.':
-     'The secure connection could not be confirmed. Check local PCMS services in the readiness section.';
+     'GitHub setup was not verified. Check the read-only connection details.';
   }catch{status.textContent='Connection result uncertain. Check readiness before attempting another connection.'}
   finally{begin.disabled=false}
  })(),'btn primary');
@@ -2205,336 +2200,98 @@ function primaryAiSettings(container){
 // This primary workflow mirrors its encrypted files and explicit review
 // controls; it never reimplements or bypasses the restore gate.
 function primaryRestore(container){
- const section=primarySettingCard(container,'Restore from encrypted archive',
-  'An authenticated preview is read-only. Applying a restore requires an independently verified pre-restore checkpoint, exact plan fingerprint and explicit authorization. The restored controller stays inactive.');
- const form=el('div','form-stack'),feedback=el('p','setting-note',
-   'No authenticated restore plan. Nothing has been changed.');
- feedback.setAttribute('role','status');
- const archive=el('input','form-input'),checkpoint=el('input','form-input');
- for(const x of [archive,checkpoint]){x.type='file';x.accept='.encrypted,.json'}
- const pass=el('input','form-input');pass.type='password';pass.autocomplete='off';
- const mode=el('select','select');
- for(const [value,label] of [['merge','Merge into this installation'],['replace','Replace after independent checkpoint review']]){
-  const option=el('option','',label);option.value=value;mode.append(option)}
- const fresh=el('input');fresh.type='checkbox';
- const mapping=el('textarea','form-input');mapping.rows=3;mapping.value='{}';
- mapping.setAttribute('aria-label','Persona-key to destination container-ID mapping in JSON');
- const hash=el('input','form-input');hash.maxLength=64;
- hash.placeholder='Exact authenticated plan SHA-256';
- const approve=el('input');approve.type='checkbox';
- const consentLabel=el('label','setting-option');consentLabel.append(approve,
-  document.createTextNode(' I approve this exact reviewed restore plan, Persona mappings, safety holds and inactive import.'));
- function add(label,field){const wrapped=el('label','',label);wrapped.append(field);form.append(wrapped)}
- add('Incoming encrypted archive',archive);
- add('Separate independently recoverable pre-restore checkpoint',checkpoint);
- add('Archive recovery passphrase',pass);
- add('Destination import policy',mode);
- const freshLabel=el('label','setting-option');freshLabel.append(fresh,
-  document.createTextNode(' Fresh disposable Firefox profile'));form.append(freshLabel);
- add('Explicit Persona mapping JSON',mapping);
- add('Reviewed plan fingerprint',hash);form.append(consentLabel);
- const actions=el('div','form-foot'),detail=el('details','settings-section');
- detail.append(el('summary','','Authenticated plan and individual safety holds'));
- const plan=el('pre','source-preview','No authenticated plan.');detail.append(plan);
- const originalStatus=()=>nativeControl('pcms-restore-status');
- const slots=[
-  ['pcms-restore-preview','Authenticate and preview',false],
-  ['pcms-restore-verify','Verify independent checkpoint',false],
-  ['pcms-restore-apply','Apply reviewed restore',true],
-  ['pcms-restore-reconcile','Read back uncertain restore',false],
-  ['pcms-restore-reactivate','Reactivate after independent recovery',true]];
- const controls=new Map();
- function setValue(id,value,evt){
-  const target=nativeControl(id);if(!target)return false;
-  if(target.type==='file'){
-   const prior=target.files||[],next=value||[];
-   // Metadata equality is insufficient: two distinct encrypted archives
-   // can share name, size and modification time. Only unchanged file objects
-   // may preserve an authenticated preview without revalidation.
-   if(prior.length===next.length&&[...prior].every((file,i)=>file===next[i]))
-    return true;
-   target.files=value;
-  }else if(target.type==='checkbox'){
-   if(target.checked===Boolean(value))return true;
-   target.checked=Boolean(value);
-  }else{
-   if(target.value===String(value))return true;
-   target.value=value;
+ const section=primarySettingCard(container,'Restore portable backup',
+   'Inspect the complete plain archive and an independent pre-restore checkpoint. Imported routes, sessions and publication rights remain inactive.');
+ const tpl=document.createElement('template');tpl.innerHTML=portableRestoreTemplate;
+ const form=tpl.content.firstElementChild;
+ form.className='form-stack';
+ for(const input of form.querySelectorAll('input:not([type=checkbox]), select, textarea'))
+   input.classList.add('form-input');
+ for(const button of form.querySelectorAll('button'))button.classList.add('btn','small');
+ section.append(form);
+ // Reuse A02's exact production inspection, destination snapshot, CAS, and
+ // inactive restore logic, scoped to the visible primary container.
+ mountPortableRestore(section);
+}
+// A02's single background backup runner also handles these primary UI controls.
+// A disconnected port or lost ACK is not evidence a download did not occur.
+function portableBackupCommand(message,timeoutMs=90000){
+ return new Promise(resolve=>{
+  let port,settled=false;
+  const timer=setTimeout(()=>finish({ok:false,code:'BACKUP_RESULT_UNKNOWN'}),timeoutMs);
+  function finish(value){
+   if(settled)return;settled=true;clearTimeout(timer);
+   try{port?.disconnect()}catch{}
+   resolve(value);
   }
-  target.dispatchEvent(new Event(evt||'change',{bubbles:true}));
-  if(evt==='input')target.dispatchEvent(new Event('change',{bubbles:true}));
-  return true;
- }
- function transfer(){
   try{
-   setValue('pcms-restore-archive',archive.files);
-   setValue('pcms-restore-checkpoint',checkpoint.files);
-   setValue('pcms-restore-passphrase',pass.value);
-   setValue('pcms-restore-mode',mode.value);
-   setValue('pcms-restore-fresh',fresh.checked);
-   setValue('pcms-restore-mappings',mapping.value);
-   setValue('pcms-restore-reviewed-hash',hash.value,'input');
-   setValue('pcms-restore-consent',approve.checked);
-   return true;
-  }catch{return false}
- }
- function refresh(){
-  if(!section.isConnected)return;
-  const native=originalStatus();
-  const report=nativeControl('pcms-restore-details');
-  if(native?.textContent)feedback.textContent=native.textContent;
-  plan.textContent=report?.textContent||'No authenticated restore plan.';
-  const active=nativeControl('pcms-restore-reactivate-box')?.hidden===false;
-  for(const [id,control] of controls)control.disabled=
-    nativeControl(id)?.disabled!==false||(id==='pcms-restore-reactivate'&&!active);
- }
- for(const [id,label,mutating] of slots){
-  const button=b(label,()=>void (async()=>{
-   const original=nativeControl(id);
-   if(!original||original.disabled){
-    feedback.textContent='The protected restore stage is unavailable or its requirements are not met.';
-    return;
-   }
-   if(mutating&&!window.confirm(id==='pcms-restore-apply'?
-     'Apply the EXACT authenticated, checkpoint-verified restore to this local PCMS installation? The controller remains inactive and no provider changes are authorized.':
-     'Reactivate the restored controller only after the previous installation has been stopped and all required evidence reviewed?'))return;
-   if(!transfer()){
-    feedback.textContent='Restore inputs could not be transferred safely to the protected controller. No action was taken.';
-    return;
-   }
-   if(id==='pcms-restore-reactivate'){
-    setValue('pcms-restore-predecessor',predecessor.checked);
-    setValue('pcms-restore-reactivate-phrase',phrase.value,'input');
-   }
-   if(original.disabled){refresh();return;}
-   button.disabled=true;feedback.textContent='Protected restore stage running; never repeat a possible restore write.';
-   original.click();
-   if(['pcms-restore-apply','pcms-restore-reconcile',
-       'pcms-restore-reactivate'].includes(id))pass.value='';
-   if(id==='pcms-restore-reactivate')phrase.value='';
-   refresh();
-  })(),'btn small');
-  button.dataset.restoreStep=id;
-  button.disabled=true;controls.set(id,button);actions.append(button);
- }
- const reactivation=el('details','settings-section');
- reactivation.append(el('summary','','Post-restore reactivation (requires COMPLETE_INACTIVE status)'));
- const predecessor=el('input');predecessor.type='checkbox';
- const predecessorLabel=el('label','setting-option');
- predecessorLabel.append(predecessor,document.createTextNode(' The previous PCMS installation is stopped'));
- const phrase=el('input','form-input');phrase.maxLength=64;
- phrase.placeholder='THE PREVIOUS PCMS INSTALLATION IS STOPPED';
- reactivation.append(predecessorLabel,phrase);
- section.append(form,actions,feedback,detail,reactivation);
- const changes=[archive,checkpoint,pass,mode,fresh,mapping,hash,approve,predecessor,phrase];
- for(const control of changes)control.addEventListener('change',()=>{
-  if(control===pass)return;
-  if(control===predecessor||control===phrase){
-   setValue('pcms-restore-predecessor',predecessor.checked);
-   setValue('pcms-restore-reactivate-phrase',phrase.value,'input');
-   refresh();return}
-  if(transfer())refresh();
+   port=browser.runtime.connect({name:'pcms-i15-backup'});
+   port.onMessage.addListener(finish);
+   port.onDisconnect.addListener(()=>finish({ok:false,code:'BACKUP_RESULT_UNKNOWN'}));
+   port.postMessage(message);
+  }catch{finish({ok:false,code:'BACKUP_PORT_UNAVAILABLE'});}
  });
- hash.addEventListener('input',()=>{setValue('pcms-restore-reviewed-hash',hash.value,'input');refresh()});
- phrase.addEventListener('input',()=>{setValue('pcms-restore-reactivate-phrase',phrase.value,'input');refresh()});
- approve.addEventListener('change',()=>{setValue('pcms-restore-consent',approve.checked);refresh()});
- const nativeEls=['pcms-restore-status','pcms-restore-details','pcms-restore-preview',
-  'pcms-restore-verify','pcms-restore-apply','pcms-restore-reconcile',
-  'pcms-restore-reactivate','pcms-restore-reactivate-box'].map(nativeControl).filter(Boolean);
- const existing=state.restoreObservation;if(existing)existing.disconnect();
- const observation=new MutationObserver(()=>refresh());
- for(const item of nativeEls)observation.observe(item,{
-  attributes:true,childList:true,characterData:true,subtree:true});
- state.restoreObservation=observation;
- refresh();
 }
 function primaryBackups(container){
- const section=primarySettingCard(container,'Encrypted source-complete backups',
-  'The recoverable format requires the matching OS helper, a vault-held recovery key, full archive verification and a separate restore proof. Older browser downloads are not source-complete.');
- const status=el('p','setting-note','Reading the actual backup state…');status.setAttribute('role','status');
- const actions=el('div','form-foot'),setup=el('div','form-stack');
- section.append(setup,actions,status);
- const secretLabel=el('label','','Recovery passphrase (stored in the OS vault, not PCMS settings)');
- const secret=el('input','form-input');secret.type='password';secret.autocomplete='new-password';
- secret.placeholder='Enter recovery passphrase';secretLabel.append(secret);setup.append(secretLabel);
- const saveKey=b('Store recovery key securely',()=>void(async()=>{
-  const key=secret.value;secret.value='';
-  if(new TextEncoder().encode(key).length<12||new TextEncoder().encode(key).length>4096){
-   status.textContent='Enter a valid recovery passphrase of at least 12 bytes.';return}
-  saveKey.disabled=true;
+ const section=primarySettingCard(container,'Portable backup',
+  'Passwordless, unencrypted, source-complete archive. Firefox download completion does not independently verify disk bytes.');
+ const status=el('p','setting-note','Reading portable backup receipts…');status.setAttribute('role','status');
+ const actions=el('div','form-foot');
+ const dailyLabel=el('label','setting-option');
+ const daily=el('input');daily.type='checkbox';
+ dailyLabel.append(daily,document.createTextNode(' Daily automatic backups (up to 14 tracked copies)'));
+ section.append(dailyLabel,actions,status);
+ const run=async (message,feedback)=>{
+  for(const button of actions.querySelectorAll('button'))button.disabled=true;
+  status.textContent=feedback;
   try{
-   const out=await backupAction('STORE_VAULT',{passphrase:key});
-   status.textContent=out?.ok?
-     'Passphrase stored in the OS keyring. Preserve your separate recovery copy; this is not a verified backup.':
-     'Could not confirm secure key storage. Check the installed native helper and OS keyring.';
-  }catch{status.textContent='Key storage result uncertain. Check the OS helper before retrying.'}
-  finally{saveKey.disabled=false}
+   const r=await portableBackupCommand(message);
+   if(r?.ok&&message.action==='ENABLE')daily.checked=r.enabled===true;
+   status.textContent=r?.ok?
+    message.action==='MANUAL'&&r.code==='BROWSER_REPORTED_COMPLETE'?
+     'Firefox reports the archive download completed: '+r.bytes+' bytes, SHA-256 '+r.sha256+'. Independent disk readback not performed.':
+     'Backup operation: '+(r.code||r.status||'ACKNOWLEDGED')+'. Check receipts before repeating uncertain effects.':
+    'Backup held: '+(r?.code||'BACKUP_RESULT_UNKNOWN')+'. No additional download will be inferred or replayed.';
+  }catch{status.textContent='Backup result uncertain. Check durable receipts and Firefox Downloads before retrying.'}
+  finally{for(const button of actions.querySelectorAll('button'))button.disabled=false;}
+ };
+ const manual=b('Download complete backup',()=>void run({action:'MANUAL'},'Collecting exact source, sessions and recovery records…'),'btn primary');
+ const save=b('Save daily schedule',()=>void run({action:'ENABLE',enabled:daily.checked},'Updating persistent daily schedule…'),'btn small');
+ const now=b('Run daily backup now',()=>void run({action:'RUN_NOW'},'Checking durable backup schedule and receipts…'),'btn small');
+ const refresh=b('Check receipts',()=>void (async()=>{
+  const r=await portableBackupCommand({action:'STATUS'});
+  if(!r?.ok){status.textContent='Backup status unavailable: '+(r?.code||'UNKNOWN');return}
+  daily.checked=r.enabled===true;
+  const manual=r.manual?(' Last manual: '+r.manual.status+' ('+r.manual.code+').'):'';
+  status.textContent='Daily: '+(r.status||r.code||'NOT_OBSERVED')+
+   '. Tracked successes: '+(r.retained??'unknown')+'.'+manual+
+   ' Unknown download effects are held rather than repeated.';
  })(),'btn small');
- setup.append(saveKey);
- const selectFormat=b('Select source-complete archive',()=>void(async()=>{
-  selectFormat.disabled=true;
+ const audit=b('Audit stored source',()=>void (async()=>{
+  audit.disabled=true;let db;
   try{
-   const out=await backupAction('SET_FORMAT',{format:'V2'});
-   status.textContent=out?.ok&&out.format==='V2'?
-    'Source-complete format selected. A successful archive and a verified restore are still required.':
-    'The source-complete format could not be enabled. Verify the V2 helper and saved recovery key.';
-  }catch{status.textContent='Native backup format could not be confirmed. No downgrade was attempted.'}
-  finally{selectFormat.disabled=false;void refresh()}
+   db=await openCanonicalDatabase();
+   const auditState=await snapshotCanonicalV2(db,{serializedValues:true});
+   const outcome=await preflightSourceRecovery(auditState);
+   status.textContent='Local source closure: '+outcome.manifests+' manifests, '+
+    outcome.uniqueBlobs+' blobs, '+outcome.uniqueBytes+' bytes. No disk-backup proof implied.';
+  }catch(error){status.textContent='Source audit held: '+String(error?.message||'UNKNOWN').slice(0,90)}
+  finally{try{db?.close()}catch{}audit.disabled=false}
  })(),'btn small');
- actions.append(selectFormat);
- async function refresh(){
-  let s;try{s=await backupAction('STATUS')}catch{}
-  if(!section.isConnected)return;
-  if(!s?.ok){
-   status.textContent='Backup service unavailable. Install the matching native helpers from the operator package.';
-   return;
-  }
-  const genuine=s.format==='V2'&&s.tier===3&&s.proof==='NATIVE_READONLY_SOURCE_RECOVERY';
-  status.textContent='Scheduled backup: '+(s.enabled?'on':'off')+
-   '. Format: '+(s.format==='V2'?'source-complete':'legacy download — not source-complete')+
-   '. Independent archive recovery: '+(genuine?'verified archive exists':'not verified')+'.';
-  actions.querySelector('[data-backup-toggle]')?.remove();
-  actions.querySelector('[data-backup-manual]')?.remove();
-  const toggle=b(s.enabled?'Disable scheduled backups':'Enable scheduled backups',()=>void(async()=>{
-   if(!s.enabled&&s.format!=='V2'){
-    status.textContent='Select and verify the source-complete format before enabling the schedule.';return;}
-   if(!window.confirm(s.enabled?
-     'Disable future backups? Existing encrypted archives will be retained.':
-     'Enable scheduled source-complete encrypted backups? The native helper and OS recovery key are required.'))return;
-   toggle.disabled=true;
-   try{
-    const out=await backupAction('ENABLE',{enabled:!s.enabled});
-    status.textContent=out?.ok?'Scheduled backup policy updated. Independent archive verification remains separate.':
-     'The backup setting was not confirmed. Read its current state before retrying.';
-   }catch{status.textContent='Backup policy outcome uncertain; check state before retrying.'}
-   finally{toggle.disabled=false;void refresh()}
-  })(),'btn small');toggle.dataset.backupToggle='1';toggle.disabled=!s.enabled&&s.format!=='V2';
-  const manual=b('Run source-complete backup',()=>void(async()=>{
-   if(s.format!=='V2')return;
-   if(!window.confirm('Create one encrypted source-complete backup now? This can read protected account/source data but does not change remote generators.'))return;
-   manual.disabled=true;status.textContent='Running source-complete backup and independent encrypted archive verification…';
-   try{
-    const out=await backupAction('RUN_V2_MANUAL');
-    status.textContent=out?.ok&&out.state==='RECOVERY_VERIFIED'?
-     'Encrypted archive created and independently recovered in the native host. Fresh-profile restore still needs separate proof.':
-     'The backup could not be independently recovered. Treat the last attempt as held until investigated.';
-   }catch{status.textContent='Backup outcome uncertain. Do not repeat a possibly completed write before reconciliation.'}
-   finally{manual.disabled=false;void refresh()}
-  })(),'btn small');
-  manual.dataset.backupManual='1';manual.disabled=s.format!=='V2';
-  actions.append(toggle,manual);
- }
- void refresh();
+ actions.append(manual,save,now,refresh,audit);
+ void refresh.click();
  primaryRestore(container);
 }
-// The full diagnostic engine stays the original, guarded production stage
-// runner. This accepted UI mirrors its typed input controls and actual stage
-// results; it does not invent PASS or dispatch stages directly from a mock.
 function primaryDiagnostics(container){
- const section=primarySettingCard(container,'Full disposable diagnostic',
-  'Tests can create and change real disposable resources. Configure the dedicated scope once; normal provider accounts must not be used.');
- const form=el('div','form-stack');
- const selected=el('select','select'),placeholder=el('option','','Choose a verified disposable account');placeholder.value='';
- selected.append(placeholder);
- for(const acct of state.lastAccountList.filter(a=>a.state==='VERIFIED')){
-  const option=el('option','',acct.alias||acct.accountId);option.value=acct.accountId;
-  selected.append(option);
- }
- const stored=nativeControl('pcms-diagnostic-account');
- if(stored?.value&&[...selected.options].some(o=>o.value===stored.value))
-   selected.value=stored.value;
- const namespace=el('input','form-input');namespace.placeholder='pcms-test-alpha';namespace.maxLength=42;
- namespace.value=nativeControl('pcms-diagnostic-namespace')?.value||'pcms-test-alpha';
- const fingerprint=el('input','form-input');fingerprint.maxLength=64;
- fingerprint.value=nativeControl('pcms-diagnostic-xpi-sha')?.value||'';
- fingerprint.placeholder='Optional XPI SHA-256 for restart and backup verification';
- const confirm=el('label','setting-option'),consent=el('input');consent.type='checkbox';
- consent.checked=nativeControl('pcms-diagnostic-consent')?.checked===true;
- confirm.append(consent,document.createTextNode(' I authorize live testing on this specifically designated disposable account, Persona and namespace.'));
- const addLabel=(title,field)=>{
-  const label=el('label','',title);label.append(field);form.append(label)};
- addLabel('Disposable managed account',selected);
- addLabel('Dedicated test namespace',namespace);
- addLabel('Installed XPI fingerprint (optional for initial stages)',fingerprint);
- form.append(confirm);section.append(form);
- const tools=el('div','form-foot'),status=el('p','setting-note');
- status.setAttribute('role','status');section.append(tools,status);
- const stages=el('details','settings-section'),heading=el('summary','','Actual diagnostic stage receipts');
- const stageText=el('pre','source-preview');stages.append(heading,stageText);section.append(stages);
- const labels={
-  TEST_SCOPE_INVALID:'The test scope is incomplete. Finish secure GitHub connection and choose your verified disposable account.',
-  TEST_GITHUB_CONNECTION_REQUIRED:'GitHub file preview works, but secure connection setup is incomplete. Repair local PCMS helpers first.',
-  TEST_ACCOUNT_SELECTION_INVALID:'Select a verified disposable managed account.',
-  TEST_PERSONA_BINDING_INVALID:'The selected account lacks a verified protected Persona binding.',
-  TEST_NAMESPACE_INVALID:'Use a lowercase name starting with pcms-test-.',
-  ENABLE_SCOPED_DEVELOPMENT_AND_GIT:'Enable development and scoped Git writeback in Automation after the secure Git connection is verified.',
-  TEST_SCOPE_NOT_VERIFIED:'The disposable resources could not be verified. No live test started.'
- };
- const say=text=>{
-  const raw=String(text||'').trim();if(!raw)return 'No diagnostic run has been verified.';
-  for(const [code,replacement] of Object.entries(labels))if(raw.includes(code))return replacement;
-  if(raw.includes('NOT_TESTED'))return 'Diagnostic stages have not been executed yet.';
-  return raw.replace(/\b(?:TEST|GIT|DIAGNOSTIC)_[A-Z0-9_]{4,80}\b/g,
-    'an unresolved test prerequisite');
- };
- function refresh(){
-  if(!section.isConnected)return;
-  const origin=nativeControl('pcms-diagnostic-status')?.textContent||'';
-  const scope=nativeControl('pcms-diagnostic-scope')?.textContent||'';
-  status.textContent=say(origin)+' '+(scope&&scope!==origin?say(scope):'');
-  const results=nativeControl('pcms-diagnostic-stages');
-  stageText.textContent=results?.innerText||results?.textContent||'No real stage receipts.';
-  for(const [id,label] of [
-   ['pcms-diagnostic-run','Run full diagnostic'],
-   ['pcms-diagnostic-resume','Resume failed stage'],
-   ['pcms-diagnostic-rerun','Run new disposable test'],
-   ['pcms-diagnostic-export','Export sanitized report']]){
-    const x=[...tools.querySelectorAll('button')].find(b=>b.dataset.nativeAction===id);
-    if(x)x.disabled=nativeControl(id)?.disabled!==false;
-  }
- }
- const copyToNative=()=>{
-  for(const [id,value] of [['pcms-diagnostic-account',selected.value],
-   ['pcms-diagnostic-namespace',namespace.value],['pcms-diagnostic-xpi-sha',fingerprint.value]]){
-   const target=nativeControl(id);if(target){
-    target.value=value;target.dispatchEvent(new Event('input',{bubbles:true}));
-    target.dispatchEvent(new Event('change',{bubbles:true}));
-   }
-  }
-  const dest=nativeControl('pcms-diagnostic-consent');
-  if(dest){dest.checked=consent.checked;dest.dispatchEvent(new Event('change',{bubbles:true}));}
- };
- const save=b('Save disposable scope',()=>{
-  if(!selected.value||!/^pcms-test-[a-z0-9-]{1,31}$/.test(namespace.value)||!consent.checked){
-   status.textContent='Choose a verified account, enter a valid pcms-test- namespace and confirm disposable authorization.';return;
-  }
-  copyToNative();const nativeSave=nativeControl('pcms-diagnostic-designate');
-  if(!nativeSave){status.textContent='The full diagnostic controller is not installed in this build.';return;}
-  nativeSave.click();status.textContent='Checking the selected disposable scope before permitting any live test.';
- },'btn primary');tools.append(save);
- for(const [id,label] of [
-  ['pcms-diagnostic-run','Run full diagnostic'],
-  ['pcms-diagnostic-resume','Resume failed stage'],
-  ['pcms-diagnostic-rerun','Run new disposable test'],
-  ['pcms-diagnostic-export','Export sanitized report']]){
-  const button=b(label,()=>{
-   const ctrl=nativeControl(id);
-   if(!ctrl||ctrl.disabled)return;
-   if(id==='pcms-diagnostic-run'&&!window.confirm(
-     'Start the authorized live diagnostic now? Only the designated disposable account and namespace may be used.'))return;
-   ctrl.click();refresh();
-  },'btn small');
-  button.dataset.nativeAction=id;button.disabled=true;tools.append(button);
- }
- const oldNodes=['pcms-diagnostic-status','pcms-diagnostic-scope','pcms-diagnostic-stages',
-  'pcms-diagnostic-run','pcms-diagnostic-resume','pcms-diagnostic-rerun'].map(nativeControl).filter(Boolean);
- const observer=new MutationObserver(()=>refresh());
- for(const old of oldNodes)observer.observe(old,{subtree:true,childList:true,
-   attributes:true,characterData:true});
- const previousObserver=state.diagnosticObservation;
- if(previousObserver)previousObserver.disconnect();
- state.diagnosticObservation=observer;
- refresh();
+ const section=primarySettingCard(container,'Operational diagnostics',
+  'Runs through real guarded services for explicitly designated disposable resources. External process and disk evidence is NOT_TESTED unless independently measured.');
+ const tpl=document.createElement('template');tpl.innerHTML=diagnosticTemplate;
+ const form=tpl.content.firstElementChild;form.className='form-stack';
+ for(const input of form.querySelectorAll('input:not([type=checkbox]), select, textarea'))
+   input.classList.add('form-input');
+ for(const button of form.querySelectorAll('button'))button.classList.add('btn','small');
+ section.append(form);
+ mountDiagnosticController(section);
 }
 function renderSettingsSection(){if(state.route!=='settings')return;
  const names=['connections','automation','ai','backups','diagnostics','advanced'];
@@ -2551,26 +2308,26 @@ function renderSettingsSection(){if(state.route!=='settings')return;
  if(select==='connections'){
   container.replaceChildren(...state.settingsStatic.cloneNode(true).childNodes);
   const rows=[...container.querySelectorAll('.settings-row')];
-  const mapping=[['GitHub source','pcms-catalog-status','generators','catalog'],['PersonaMonkey routing','pcms-accounts-feedback','accounts',null],['Native vault and host','pcms-backup-status','settings','backup']];
+  const mapping=[['GitHub source','pcms-catalog-status','generators','catalog'],['PersonaMonkey routing','pcms-accounts-feedback','accounts',null],['Portable backup','pcms-overview-backup','settings','backups']];
   mapping.forEach(([label,id,target,group],i)=>{
    const row=rows[i];if(!row)return;const title=row.querySelector('.setting-title'),desc=row.querySelector('.setting-description'),pill=row.querySelector('.pill');
    if(title)title.textContent=label;
-   const components=[['GIT_CONFIG','GITHUB_AUTH'],['PERSONA_AND_SESSION'],['NATIVE_VAULT_HOST','BACKUP_HOST','DIAGNOSTIC_HOST']];
+   const components=[['GIT_CONFIG','GITHUB_AUTH'],['PERSONA_AND_SESSION'],['PORTABLE_BACKUP_RUNTIME']];
    const observed=state.readiness?.rows?.filter(r=>components[i].includes(r.component))||[];
    const unavailable=observed.some(r=>['UNREACHABLE','SECURITY_HELD','OUTCOME_UNCERTAIN'].includes(r.state));
    const checked=observed.length>0&&observed.every(r=>r.state==='VERIFIED');
    const status=unavailable?
-      i===2?'PCMS local helpers need attention. Use Operational readiness below.':
+      i===2?'The Firefox backup coordinator needs attention. Check its read-only status.':
       'A connection prerequisite needs attention. Check the detailed readiness report.':
      checked?(i===0?'Saved access and local verification were checked.':
        i===1?'The protected account connection was checked.':
-       'The local helper checks passed; live workflows require separate proof.'):
+       'The browser backup coordinator responded; file and restore evidence remain separate.'):
      i===0?'GitHub access has not been fully verified in this session.':
       i===1?'Check the protected account and Persona connection in Accounts.':
-      'Verify the matching PCMS native helpers before running full diagnostics.';
+      'Check the browser backup coordinator in Backup & Restore.';
    if(desc)desc.textContent=status;
    if(pill){pill.textContent=unavailable?'Needs attention':checked?'Checked':'Not checked';pill.className='pill'}
-   const button=row.querySelector('button[data-action]');if(button)button.dataset.action='check-service:'+(['github','persona','native'][i]);
+   const button=row.querySelector('button[data-action]');if(button)button.dataset.action='check-service:'+(['github','persona','backup'][i]);
   });
   container.querySelectorAll('.settings-row').forEach(row=>{if(row.querySelector('.pill')?.textContent==='Healthy')row.querySelector('.pill').textContent='Unknown'});
   primaryConnections(container);
@@ -2584,8 +2341,25 @@ function renderSettingsSection(){if(state.route!=='settings')return;
   else if(select==='diagnostics')primaryDiagnostics(container);
   else{
    section.append(el('p','setting-note',
-     'The original protected controller remains available for exceptional recovery workflows not yet migrated into the primary workspace. Routine actions are available directly in the main interface.'));
-   section.append(b('Open protected recovery controls',()=>nativeAction('settings'),'btn small'));
+     'Optional Firefox userScripts permission and PersonaMonkey maintenance controls.'));
+   const grant=b('Enable userScripts permission',()=>{
+     if(!browser.permissions?.request){notify('Firefox permission request unavailable.');return}
+     void browser.permissions.request({permissions:['userScripts']})
+       .then(ok=>notify(ok?'userScripts permission granted.':'userScripts permission was not granted.'))
+       .catch(()=>notify('Firefox rejected the permission request.'));
+   },'btn small');
+   const check=el('p','setting-note','Checking userScripts permission…');
+   void browser.permissions?.contains({permissions:['userScripts']})
+     .then(allowed=>{if(check.isConnected)check.textContent=allowed?
+       'userScripts permission granted.':'userScripts permission not yet granted.'})
+     .catch(()=>{if(check.isConnected)check.textContent='Permission status unavailable.'});
+   section.append(grant,check);
+   section.append(b('PersonaMonkey settings',()=>{
+     void browser.tabs.create({url:browser.runtime.getURL('options/options.html')});
+   },'btn small'));
+   section.append(b('Emergency diagnostics',()=>{
+     void browser.tabs.create({url:browser.runtime.getURL('pcms/emergency.html')});
+   },'btn small'));
    container.append(section);
   }
  }
@@ -2630,21 +2404,37 @@ async function mount(){
  const link=document.createElement('link');link.rel='stylesheet';link.href=new URL('prototype.css',url).href;root.prepend(link);
  const addon=document.createElement('style');addon.textContent=':host{display:block;height:100dvh;min-height:0} .pcms-action-toast{position:fixed;bottom:20px;right:25px;z-index:100;padding:12px 16px;background:#253e55;color:white;border-radius:7px;box-shadow:0 5px 24px #0003;max-width:380px} .pcms-action-toast[hidden]{display:none}';root.append(addon);
  let initial=location.hash.slice(1);if(!routes.includes(initial))initial='overview';state.route=initial;
- document.querySelector('#pcms-legacy-return')?.addEventListener('click',nativeReturn);
- routeHandlers();await render();document.body.classList.add('pcms-faithful-ready');
+ routeHandlers();await render();
+ const legacy=document.querySelector('body > .app');
+ if(legacy)legacy.inert=true; // no hidden workflow focus or operator input
+ document.body.classList.add('pcms-faithful-ready');
  window.addEventListener('hashchange',()=>{const dest=location.hash.slice(1);if(routes.includes(dest)&&dest!==state.route){state.route=dest;void render()}});
- // Native modules drive canonical state while dashboard remains closed; this
- // observer reads their projections only when the matching shadow UI is visible.
- const targets=['pcms-queue-refresher','pcms-overview-backup','pcms-guard-health','pcms-journal-health','pcms-s06-review-queue','pcms-ai-jobs'];
- let timer=null;const observer=new MutationObserver(()=>{
-  if(timer)clearTimeout(timer);
-  timer=setTimeout(()=>{if(state.route==='overview')displayOverview();else if(state.route==='work-queue')displayQueue()},250);
- });
- for(const id of targets){const n=nativeControl(id);if(n)observer.observe(n,{childList:true,characterData:true,subtree:true})}
+ // Foreground projection reads the same canonical background ports. Never
+ // mirror an inaccessible hidden controller or infer completion from its DOM.
+ const refreshOnWake=()=>{
+  if(document.visibilityState==='hidden')return;
+  if(state.route==='overview')displayOverview();
+  else if(state.route==='work-queue')void loadQueue(true);
+  else if(state.route==='generators')void loadGenerators();
+  else if(state.route==='accounts')void loadAccounts();
+  else if(state.route==='refresher')void loadRefresher();
+  else if(state.route==='settings')renderSettingsSection();
+ };
+ document.addEventListener('visibilitychange',refreshOnWake);
+ window.addEventListener('focus',refreshOnWake);
 }
 mount().catch(error=>{
- console.error('Faithful production UI boot failed',error);
- // Fail open to the original full-capability dashboard. Never hide protected
- // controls behind a broken presentation layer.
- document.body.classList.remove('pcms-faithful-ready');host.remove();
+ // Fail closed for presentation faults; never silently activate the historical
+ // hidden authoring dashboard or authorize a remote effect.
+ console.error('PCMS primary UI unavailable',error);
+ root.replaceChildren();
+ const failure=document.createElement('section');
+ failure.setAttribute('role','alert');
+ failure.style.cssText='font:16px system-ui;color:#13283a;background:#fff;min-height:100dvh;padding:32px;max-width:840px;margin:0 auto';
+ const title=document.createElement('h1');title.textContent='PCMS interface unavailable';
+ const detail=document.createElement('p');detail.textContent='Protected operations have not been attempted. Reload the extension, or inspect the independent emergency diagnostics.';
+ const retry=document.createElement('button');retry.type='button';retry.textContent='Reload PCMS';retry.addEventListener('click',()=>location.reload());
+ const emergency=document.createElement('a');emergency.href=browser.runtime.getURL('pcms/emergency.html');emergency.textContent='Emergency diagnostics';
+ failure.append(title,detail,retry,document.createTextNode(' '),emergency);
+ root.append(failure);document.body.classList.add('pcms-faithful-ready');
 });
