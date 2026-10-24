@@ -16,10 +16,13 @@ const routes=['overview','generators','work-queue','accounts','refresher','setti
 const native=document.querySelector('body > .app');
 const host=document.createElement('div');host.id='pcms-faithful-host';
 document.body.append(host);const root=host.attachShadow({mode:'open'});
-const READINESS_NAMES={EXTENSION_RUNTIME:'PCMS extension',LOCAL_CONFIGURATION:'Local settings',RESTORE_HOLD:'Restore safety',REFRESHER_POLICY:'Refresher configuration',BACKUP_RESTORE:'Backup recovery',ACCOUNT_INVENTORY_READ:'Account inventory',REFRESHER_CURRENT_POLICY:'Current Refresher policy',BROWSER_GIT_STORE:'Firefox Git credential storage',NATIVE_VAULT_HOST:'Legacy Git helper (not required)',SECRET_SERVICE_ENVIRONMENT:'Secure credential storage',BACKUP_HOST:'Backup helper',DIAGNOSTIC_HOST:'Diagnostic helper',GIT_CONFIG:'GitHub connection',GIT_PARTIAL_CONNECTION:'Interrupted GitHub setup',GITHUB_AUTH:'GitHub access',GITHUB_MAIN_TREE:'GitHub file scan',GRANT_DEVELOPMENT:'Development permission',GRANT_GITWRITE:'Git write permission',GRANT_PUBLICATION:'Publication permission',PERSONA_AND_SESSION:'Account and secure route',REFRESHER_LIVE_EFFECT:'Refresher operation',INSTALLED_XPI_IDENTITY:'Installed extension verification'};
+const READINESS_NAMES={EXTENSION_RUNTIME:'PCMS extension',LOCAL_CONFIGURATION:'Local settings',RESTORE_HOLD:'Restore safety',REFRESHER_POLICY:'Refresher configuration',BACKUP_RESTORE:'Backup recovery',ACCOUNT_INVENTORY_READ:'Account inventory',REFRESHER_CURRENT_POLICY:'Current Refresher policy',BROWSER_GIT_STORE:'Firefox Git credential storage',NATIVE_VAULT_HOST:'Legacy Git helper (not required)',SECRET_SERVICE_ENVIRONMENT:'Secure credential storage',BACKUP_HOST:'Backup helper',DIAGNOSTIC_HOST:'Diagnostic helper',GIT_CONFIG:'GitHub connection',GIT_PARTIAL_CONNECTION:'Interrupted GitHub setup',GITHUB_AUTH:'GitHub access',GITHUB_MAIN_TREE:'GitHub file scan',GRANT_DEVELOPMENT:'Development permission',GRANT_GITWRITE:'Git write permission',GRANT_PUBLICATION:'Publication permission',PERSONA_AND_SESSION:'Account and secure route',REFRESHER_LIVE_EFFECT:'Refresher operation',PORTABLE_BACKUP_RUNTIME:'Portable backup coordinator',INSTALLED_XPI_IDENTITY:'Installed extension verification'};
 const READINESS_STATES={VERIFIED:'Checked',NOT_TESTED:'Not checked',OUTCOME_UNCERTAIN:'Needs review',UNREACHABLE:'Not responding',STALE:'Needs updating',SECURITY_HELD:'Waiting on setup',OFF_BY_POLICY:'Disabled',NOT_CONFIGURED:'Not connected',MISSING_CAPABILITY:'Needs an update'};
 function operatorReadinessGuidance(row){
  const code=row.code||'';
+ if(row.component==='PORTABLE_BACKUP_RUNTIME')
+   return row.state==='VERIFIED'?'The browser backup coordinator responded. Independent disk and restore proof require separate verification.':
+     'Check the Firefox background backup coordinator.';
  if(row.component==='BROWSER_GIT_STORE')
    return row.state==='VERIFIED'?'The saved browser credential is present; GitHub authorization is checked separately.':
      'Reconnect GitHub to use background Git operations. No PCMS helper is required.';
@@ -1731,7 +1734,7 @@ function renderReadinessPanel(container){
   const keys=['component','scope','state','stage','code','dependency','observedAt',
     'evidenceKind','evidenceSource','safeRecovery','retrySafety'];
   const safe={schema:1,checkedAt:report.checkedAt,
-    remoteRequested:report.remoteRequested,rows:report.rows.map(row=>
+    remoteRequested:report.remoteRequested,rows:report.rows.filter(row=>!['NATIVE_VAULT_HOST','BACKUP_HOST','DIAGNOSTIC_HOST','SECRET_SERVICE_ENVIRONMENT','SECRET_SERVICE'].includes(row.component)).map(row=>
       Object.fromEntries(keys.map(k=>[k,row[k]??null])))};
   const blob=new Blob([JSON.stringify(safe,null,2)],{type:'application/json'});
   const uri=URL.createObjectURL(blob);const anchor=document.createElement('a');
@@ -1772,17 +1775,14 @@ function renderReadinessPanel(container){
  else if(!state.readiness)summary.textContent='Not checked in this dashboard session.';
  else if(!state.readiness.ok)summary.textContent='Preflight unavailable: '+String(state.readiness.code||'UNKNOWN');
  else {
-  const hostUnavailable=state.readiness.rows.some(row=>
-    ['NATIVE_VAULT_HOST','BACKUP_HOST','DIAGNOSTIC_HOST'].includes(row.component)&&row.state==='UNREACHABLE');
   const pending=state.readiness.rows.some(row=>row.component==='GIT_PARTIAL_CONNECTION'&&row.state==='OUTCOME_UNCERTAIN');
-  summary.textContent=hostUnavailable?
-    'PCMS local services are not responding. Install the native helpers from the matching PCMS release bundle, restart Firefox, then check again. Read-only inventory may still work.':
-    pending?'A previous GitHub connection did not finish. Review and reconcile it before running full diagnostics.':
-    'Readiness checked. Review any items that need attention; a local check does not prove live service operations.';
+  summary.textContent=pending?
+    'An interrupted GitHub connection needs read-only reconciliation.':
+    'Readiness checked. Browser-local status is separate from independent provider and restore evidence.';
  }
  section.append(summary);
  const details=el('details','settings-section');
- const rows=state.readiness?.rows||[];
+ const rows=(state.readiness?.rows||[]).filter(r=>!['NATIVE_VAULT_HOST','BACKUP_HOST','DIAGNOSTIC_HOST','SECRET_SERVICE_ENVIRONMENT','SECRET_SERVICE'].includes(r.component));
  const problematic=rows.filter(row=>
    ['UNREACHABLE','OUTCOME_UNCERTAIN','SECURITY_HELD','STALE','MISSING_CAPABILITY'].includes(row.state));
  const heading=el('summary','',
@@ -1810,7 +1810,7 @@ async function runReadiness(remote){
   if(!snapshot?.ok){state.readiness=snapshot;return;}
   // These existing canonical ports are independent of Git/native diagnosis.
   // They must not be converted into proof of a protected route or source save.
-  const replies=await Promise.allSettled([accounts(),refresher({phase:'ALL',offset:0,limit:1})]);
+  const replies=await Promise.allSettled([accounts(),refresher({phase:'ALL',offset:0,limit:1}),portableBackupCommand({action:'STATUS'})]);
   const at=Date.now();const make=(component,state,code,source,recovery)=>({
    component,scope:'LOCAL',state,stage:'CANONICAL_PORT_READ',code,
    dependency:'ACTIVE_BACKGROUND_BOUNDARY',observedAt:at,evidenceKind:'D',
@@ -1986,7 +1986,7 @@ function primaryConnections(container){
    status.textContent=out?.ok?'Secure GitHub connection saved. Check files from main before any import.':
      out?.code==='GIT_PENDING_CONNECTION_RECONCILIATION_REQUIRED'?
      'A previous setup did not finish. Check the recovery section below before entering a new credential.':
-     'The secure connection could not be confirmed. Check local PCMS services in the readiness section.';
+     'GitHub setup was not verified. Check the read-only connection details.';
   }catch{status.textContent='Connection result uncertain. Check readiness before attempting another connection.'}
   finally{begin.disabled=false}
  })(),'btn primary');
@@ -2319,26 +2319,26 @@ function renderSettingsSection(){if(state.route!=='settings')return;
  if(select==='connections'){
   container.replaceChildren(...state.settingsStatic.cloneNode(true).childNodes);
   const rows=[...container.querySelectorAll('.settings-row')];
-  const mapping=[['GitHub source','pcms-catalog-status','generators','catalog'],['PersonaMonkey routing','pcms-accounts-feedback','accounts',null],['Native vault and host','pcms-backup-status','settings','backup']];
+  const mapping=[['GitHub source','pcms-catalog-status','generators','catalog'],['PersonaMonkey routing','pcms-accounts-feedback','accounts',null],['Portable backup','pcms-overview-backup','settings','backups']];
   mapping.forEach(([label,id,target,group],i)=>{
    const row=rows[i];if(!row)return;const title=row.querySelector('.setting-title'),desc=row.querySelector('.setting-description'),pill=row.querySelector('.pill');
    if(title)title.textContent=label;
-   const components=[['GIT_CONFIG','GITHUB_AUTH'],['PERSONA_AND_SESSION'],['NATIVE_VAULT_HOST','BACKUP_HOST','DIAGNOSTIC_HOST']];
+   const components=[['GIT_CONFIG','GITHUB_AUTH'],['PERSONA_AND_SESSION'],['PORTABLE_BACKUP_RUNTIME']];
    const observed=state.readiness?.rows?.filter(r=>components[i].includes(r.component))||[];
    const unavailable=observed.some(r=>['UNREACHABLE','SECURITY_HELD','OUTCOME_UNCERTAIN'].includes(r.state));
    const checked=observed.length>0&&observed.every(r=>r.state==='VERIFIED');
    const status=unavailable?
-      i===2?'PCMS local helpers need attention. Use Operational readiness below.':
+      i===2?'The Firefox backup coordinator needs attention. Check its read-only status.':
       'A connection prerequisite needs attention. Check the detailed readiness report.':
      checked?(i===0?'Saved access and local verification were checked.':
        i===1?'The protected account connection was checked.':
-       'The local helper checks passed; live workflows require separate proof.'):
+       'The browser backup coordinator responded; file and restore evidence remain separate.'):
      i===0?'GitHub access has not been fully verified in this session.':
       i===1?'Check the protected account and Persona connection in Accounts.':
-      'Verify the matching PCMS native helpers before running full diagnostics.';
+      'Check the browser backup coordinator in Backup & Restore.';
    if(desc)desc.textContent=status;
    if(pill){pill.textContent=unavailable?'Needs attention':checked?'Checked':'Not checked';pill.className='pill'}
-   const button=row.querySelector('button[data-action]');if(button)button.dataset.action='check-service:'+(['github','persona','native'][i]);
+   const button=row.querySelector('button[data-action]');if(button)button.dataset.action='check-service:'+(['github','persona','backup'][i]);
   });
   container.querySelectorAll('.settings-row').forEach(row=>{if(row.querySelector('.pill')?.textContent==='Healthy')row.querySelector('.pill').textContent='Unknown'});
   primaryConnections(container);
