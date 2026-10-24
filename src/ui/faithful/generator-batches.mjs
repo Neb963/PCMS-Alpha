@@ -164,7 +164,7 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
     try{await browser.alarms.create('pcms-s04-creation-followup',{when:Date.now()+1000})}catch{}
     await browser.storage.local.remove(DRAFT);
     d.close();openBatch(batchId);await reload();
-   }catch{status.textContent='Submission was interrupted. Saved input is retained. Retry submission to resume this same batch.'}
+   }catch{status.textContent='Submission was interrupted. Your entered names are preserved in this view. Retry to reconcile the saved batch before continuing.'}
    finally{busy=false;submit.disabled=false;input.disabled=false;choice.disabled=false}
   })(),'btn primary');submit.hidden=true;
   const resume=b('Resume saved submission',()=>void resumeDraft()),cancel=b('Cancel unfinished input',()=>void cancelDraft());
