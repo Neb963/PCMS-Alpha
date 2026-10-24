@@ -143,6 +143,8 @@ async function main(args){
  const value=(flag)=>{const i=args.indexOf(flag);return i<0?null:args[i+1]};
  const xpi=value('--xpi'),sha=value('--source-sha'),receiptPath=value('--receipts'),out=value('--out-dir');
  assert(xpi&&sha,'A09_USAGE_REQUIRES_EXACT_XPI_AND_SOURCE_SHA');
+ const checkoutSha=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
+ assert(sha===checkoutSha,'A09_SOURCE_CHECKOUT_SHA_MISMATCH');
  const raw=await readFile(xpi);
  const digest=createHash('sha256').update(raw).digest('hex');
  const audited=JSON.parse(execFileSync('python3',['scripts/a08-xpi-audit.py',xpi],{encoding:'utf8'}));
