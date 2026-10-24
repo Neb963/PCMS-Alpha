@@ -59,7 +59,7 @@ test('S04 adoption D: independently qualified complete original unlocks only loc
   assert.equal(db.read('meta','adoption:'+slug).adoption.visibility,'PUBLIC');
 });
 
-async function aliasFixture(patch={}){
+async function aliasFixture(patch={}, {writeAlias=true}={}){
  const db=await seed(),store=createAdoptionStore(db);
  await store.confirmCheckpoint({slug,expectedRevision:6,proof});
  const migration=planOriginalIdentityMigration({slug,remoteId:'slug-'+slug,accountId,
@@ -68,7 +68,7 @@ async function aliasFixture(patch={}){
  assert.equal(migration.ok,true);
  const tx=db.transaction(['meta'],'readwrite'),m=tx.objectStore('meta');
  m.put({key:'inventory:'+slug,generator:migration.record});
- m.put({key:'identity-alias:'+slug,identity:{...migration.alias,...patch}});
+ if(writeAlias)m.put({key:'identity-alias:'+slug,identity:{...migration.alias,...patch}});
  const prior=db.read('meta','s00-create-intent:intent_s04_existing').record;
  m.put({key:'s00-create-intent:intent_s04_existing',record:{...prior,remoteId:'slug-'+slug}});
  await new Promise((r,j)=>{tx.oncomplete=r;tx.onabort=j;});return db;
@@ -98,10 +98,9 @@ test('J02 adoption alias cannot change owner, source fingerprint, target or a po
 });
 
 test('J02 preexisting owned allocation with missing target fields recovers only from qualified current same-owner original',async()=>{
- const db=await aliasFixture(),row=db.read('meta','s00-create-intent:intent_s04_existing');
+ const db=await aliasFixture({}, {writeAlias:false}),row=db.read('meta','s00-create-intent:intent_s04_existing');
  const tx=db.transaction(['meta'],'readwrite'),m=tx.objectStore('meta');
  m.put({...row,record:{...row.record,remoteId:null,visibility:null}});
- m.delete('identity-alias:'+slug);
  await new Promise((r,j)=>{tx.oncomplete=r;tx.onabort=j;});
  const out=await createCoordinatorStore(db).confirmAdoption('intent_s04_existing',2,
   db.read('meta','adoption:'+slug).adoption);
