@@ -1,0 +1,9 @@
+# J03 — Git onboarding and source workspace
+
+Scope: G05–G07 and the Git/operation search part of S06; C16/C21–23/C40–45/C61–63/C82–91, AC07–09/11. Complete one-time connect/reconnect, exact initial import preview with ownership and proposed allocation, main-only automatic intake/READY progression, safe identity choices, full source browsing and the canonical Git prompt editor in AI settings. Preserve original live bytes, concurrent edits, explicit pauses, pinned inputs and exact publication approval. No personal Firefox, live Perchance or private generator Git mutation is authorized.
+
+Base: main 673dc318649056ae4f6b182ede71e8c8c0ae2779, tree36e3b0aa90d2b6f0fb9f9a1f2bb9ee0801aa1ce6. J02 PR53 exact-head full40127085888 and postmerge full40127560666 passed, 957 D, donor/XPI/persistent Firefox; package SHA2568b9df087ac18af13806f255e9ed8bd006f92dd116fa953bca165c02a5fbc9e82. J01 PR52 and CI-policy PR51 already reviewed/merged/verified.
+
+Confirmed starting gaps: first-import UI describes only local recognition and omits allocations; changed initial scope cannot be reapproved; an existing READY folder is refused by creation's Git continuation; source manager is a manual path/hash list capped at100 displayed files; canonical Git prompt is under Connections while AI settings offer competing local guidance; missing/empty-repository prompt setup has no installed path; global search omits Git paths and operation IDs. Existing safe runtime will be reused and corrected at these boundaries.
+
+Draft checkpoints use focused deterministic tests/preflight. Stable final head requires independent review and full donor/deterministic/reproducible-XPI/installed-Firefox CI, protected squash merge and postmerge main verification before J04. Installed B tests use production UI/boundaries/IDB plus explicitly offline external Git/provider models and independent effect ledgers. D/B is not live GIT/L acceptance. This note records implementation work, not completion.
