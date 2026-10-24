@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { checkRequired, MANDATORY } from '../scripts/verify-required.mjs';
 import { readFile } from 'node:fs/promises';
+import {spawnSync} from 'node:child_process';
 const flow = await readFile(new URL('../.github/workflows/required.yml', import.meta.url),'utf8').catch(()=>'');
 test('pcms-required accepts only explicit success from both named mandatory jobs',()=>{
   assert.deepEqual(MANDATORY,['baseline','fast','firefox']);
@@ -26,29 +27,29 @@ test('docs-only and protected root changes do not skip the PR check',()=>{
   assert.match(flow,/permissions:\s*\n\s*contents: read/);
 });
 
-test('draft preflight skips Firefox only while PR remains unmergeable draft',()=>{
- const good={baseline:'success',fast:'success',firefox:'skipped'};
- assert.deepEqual(checkRequired(good,{mode:'draft'}),{
-  accepted:true,bad:[],tier:'DRAFT_PREFLIGHT_ONLY'});
- assert.equal(checkRequired(good,{mode:'full'}).accepted,false);
- for(const candidate of [
-  {baseline:'success',fast:'success',firefox:'success'},
-  {baseline:'success',fast:'failure',firefox:'skipped'},
-  {baseline:'skipped',fast:'success',firefox:'skipped'},
-  {baseline:'success',fast:'cancelled',firefox:'skipped'},
- ])assert.equal(checkRequired(candidate,{mode:'draft'}).accepted,false,JSON.stringify(candidate));
- assert.equal(checkRequired(good,{mode:'invalid'}).accepted,false);
+test('draft preflight cannot publish a successful full required context',()=>{
+  assert.equal(checkRequired({baseline:'success',fast:'success',firefox:'skipped'},{mode:'draft'}).accepted,false);
+  assert.match(flow,/name: \$\{\{.*'pcms-draft-preflight'.*'pcms-required'/);
+  assert.doesNotMatch(flow,/CI_MODE:/);
 });
-test('ready PR, push main and manual workflow still require complete Firefox proof',()=>{
- assert.match(flow,/ready_for_review/);
- assert.match(flow,/converted_to_draft/);
- assert.match(flow,/github\.event\.pull_request\.draft == true/);
- assert.match(flow,/github\.event\.pull_request\.draft == false/);
- assert.match(flow,/Draft-only changed-file preflight \(not product acceptance\)/);
- assert.match(flow,/run: node scripts\/draft-preflight\.mjs/);
- assert.match(flow,/CI_MODE:/);
- assert.match(flow,/push:\s*\n\s*branches: \[main\]/);
- assert.match(flow,/workflow_dispatch:/);
- assert.match(flow,/name: pcms-required/);
- assert.doesNotMatch(flow,/pull_request_target/);
+test('full acceptance executes protected base policy, not candidate policy',()=>{
+  assert.match(flow,/ref: \$\{\{ github.event.pull_request.base.sha \|\| github.event.repository.default_branch \}\}/);
+  assert.match(flow,/Checkout main-trusted full aggregate/);
+  assert.match(flow,/ready_for_review/);
+  assert.match(flow,/converted_to_draft/);
+  assert.match(flow,/Draft-only changed-file preflight/);
+  assert.match(flow,/run: node scripts\/draft-preflight.mjs/);
+  assert.match(flow,/push:\s*\n\s*branches: \[main\]/);
+  assert.match(flow,/workflow_dispatch:/);
+});
+
+test('CLI cannot turn skipped Firefox into protected success via CI_MODE',()=>{
+  for(const mode of ['draft','full','invalid','']){
+    const result=spawnSync(process.execPath,['scripts/verify-required.mjs',JSON.stringify({baseline:'success',fast:'success',firefox:'skipped'})],{encoding:'utf8',env:{...process.env,CI_MODE:mode}});
+    assert.equal(result.status,1);
+    assert.match(result.stderr,/firefox/);
+  }
+  const result=spawnSync(process.execPath,['scripts/verify-required.mjs',JSON.stringify({baseline:'success',fast:'success',firefox:'success'})],{encoding:'utf8'});
+  assert.equal(result.status,0);
+  assert.match(result.stdout,/FULL_ENGINEERING_GATE/);
 });

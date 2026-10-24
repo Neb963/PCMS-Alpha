@@ -109,20 +109,32 @@ jobs:
       - name: Persistent installed-XPI Firefox B smoke
         run: python3 scripts/browser-i00-smoke.py build/pcms-alpha-i00.xpi
   pcms-required:
-    name: pcms-required
+    # A draft must never publish the protected full-acceptance context.
+    name: ${{ (github.event_name == 'pull_request' && github.event.pull_request.draft == true) && 'pcms-draft-preflight' || 'pcms-required' }}
     if: ${{ always() }}
     needs: [baseline, fast, firefox]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Checkout fail-closed aggregate
+      - name: Checkout main-trusted full aggregate
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Evaluate every mandatory child result
+          # Never execute the candidate's changed gate to accept that candidate.
+          ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
+      - name: Evaluate every mandatory child result with main-trusted policy
+        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
         env:
           BASELINE_RESULT: ${{ needs.baseline.result }}
           FAST_RESULT: ${{ needs.fast.result }}
           FIREFOX_RESULT: ${{ needs.firefox.result }}
-          CI_MODE: ${{ (github.event_name == 'pull_request' && github.event.pull_request.draft == true) && 'draft' || 'full' }}
         run: node scripts/verify-required.mjs "{\"baseline\":\"${BASELINE_RESULT}\",\"fast\":\"${FAST_RESULT}\",\"firefox\":\"${FIREFOX_RESULT}\"}"
+      - name: Evaluate draft feedback only
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
+        env:
+          BASELINE_RESULT: ${{ needs.baseline.result }}
+          FAST_RESULT: ${{ needs.fast.result }}
+          FIREFOX_RESULT: ${{ needs.firefox.result }}
+        run: |
+          node -e 'if(process.env.BASELINE_RESULT!=="success" || process.env.FAST_RESULT!=="success" || process.env.FIREFOX_RESULT!=="skipped")process.exit(1); console.log("DRAFT_PREFLIGHT_ONLY: not full acceptance and not pcms-required")'
