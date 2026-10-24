@@ -1,3 +1,5 @@
+import {ensureCreationInventory} from './creation-inventory.mjs';
+import {inventoryBoundary} from './inventory-boundary.mjs';
 // S04 fixed, one-step guarded creation runner. No generic job engine.
 // The packaged mutation gates remain OFF without independently qualified
 // provider/Git scope; tests inject a strictly isolated effect ledger.
@@ -17,7 +19,8 @@ const routeSame=(before,after)=>before?.ready===true&&after?.ready===true&&
 export function createCreationRunner(api,{open=openCanonicalDatabase,
   makeStore=createCoordinatorStore,guard=internalPcmsGuard,
   effectGate=()=>false,gitGate=()=>false,
-  createGit=createS04GitContinuation,now=Date.now}={}){
+  createGit=createS04GitContinuation,now=Date.now,
+  syncInventory=(id,revision)=>inventoryBoundary?.syncAccount(id,revision)}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
   const git=createGit(api,{open,gate:gitGate});
   let dbPromise;
@@ -108,6 +111,9 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
       }
       if(item.state==='OWNER_MISSING_VERIFIED'){
         if(!mutable)return fail('PROVIDER_ACTIVATION_HELD');
+        const inventory=await ensureCreationInventory({db:await (dbPromise||=open()),
+          account,syncInventory,now});
+        if(!inventory.ok)return inventory;
         // A prior readback is historical; recheck target immediately before
         // starting a possible remote CREATE.
         const target=await read('READ_TARGET');
@@ -130,6 +136,11 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
       }
       if(['CREATE_PREPARED','RENAME_PREPARED'].includes(item.state)){
         if(!mutable)return fail('PROVIDER_ACTIVATION_HELD');
+        if(item.state==='CREATE_PREPARED'){
+        const inventory=await ensureCreationInventory({db:await (dbPromise||=open()),
+          account,syncInventory,now});
+        if(!inventory.ok)return inventory;
+        }
         // Prepared-only evidence may predate Archive or a human-created slug.
         // Re-observe immediately before dispatch; uncertainty is never replayed.
         const target=await read('READ_TARGET');

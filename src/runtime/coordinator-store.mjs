@@ -1,3 +1,4 @@
+import {qualifiedCreationInventory} from './creation-inventory.mjs';
 // S04: one canonical slug reservation for operator and verified Git-main intake.
 // Side effects are NOT performed here. All origin merges and conflicts commit in
 // one IndexedDB transaction; lost client ACK cannot create another slug intent.
@@ -248,8 +249,11 @@ export function createCoordinatorStore(db){
              account.identity?.bindingVersion!==previous.bindingVersion){
             result=fail('ACCOUNT_CONTEXT_CHANGED');return;
           }
+          let inventoryCheckpoint=null;
+          const continueStage=()=>{
           const moved=advanceS04Effect(previous,event,proof);
           if(!moved.ok){result=moved;return;}
+          if(inventoryCheckpoint)moved.record.inventoryCheckpoint=inventoryCheckpoint;
           const creating=['CREATE_PREPARE','RENAME_PREPARE'].includes(event);
           const create=event.startsWith('CREATE_')||
             (event==='PREPARED_ABORT'&&previous.state==='CREATE_PREPARED');
@@ -320,6 +324,21 @@ export function createCoordinatorStore(db){
           if(needsOperation)
             ops.get(opId).onsuccess=o=>complete(o.target.result);
           else complete(null);
+          };
+          if(event==='CREATE_PREPARE'||event==='CREATE_DISPATCH'){
+            m.get('inventory-batch:'+previous.accountId).onsuccess=observed=>{
+              const marker=observed.target.result;
+              if(!qualifiedCreationInventory(marker,account)){
+                result=fail('CURRENT_INVENTORY_REQUIRED');return;
+              }
+              m.get('inventory:'+previous.slug).onsuccess=target=>{
+                if(target.target.result?.generator){result=fail('TARGET_INVENTORY_CHANGED');return;}
+                inventoryCheckpoint={observationId:marker.observationId,observedAt:marker.observedAt,
+                  accountRevision:account.revision,bindingVersion:account.bindingVersion};
+                continueStage();
+              };
+            };
+          }else continueStage();
         };
       };
     });

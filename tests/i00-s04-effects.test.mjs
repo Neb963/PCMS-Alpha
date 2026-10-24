@@ -51,7 +51,15 @@ function runner(ctx,{gate=true,lostAck=false}={}){
     }
   };
   return {ledger,worker:createCreationRunner(ctx.api,{open:async()=>ctx.db,
-    guard:()=>guard,effectGate:()=>gate})};
+    guard:()=>guard,effectGate:()=>gate,
+    syncInventory:async(id,revision)=>{
+      const a=ctx.db.read('meta','account:'+id).account;
+      return createInventoryStore(ctx.db).applyObservation(a,{
+        source:'GUARDED_PERCHANCE_READBACK',complete:true,accountId:id,
+        personaUid:a.personaUid,accountRevision:revision,bindingVersion:a.bindingVersion,
+        principalFingerprint:a.identity.principalFingerprint,
+        observationId:'fresh_'+crypto.randomUUID(),observedAt:Date.now(),generators:[]});
+    }})};
 }
 test('S04 effect D: guarded two provider writes after committed possible-effect ledgers',async()=>{
   const ctx=await setup(),r=runner(ctx);

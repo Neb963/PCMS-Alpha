@@ -162,6 +162,7 @@ export function createInventoryStore(db) {
               meta.put({key:inventoryKey(value.slug),generator:value});
           }
           meta.put({key:'inventory-batch:'+account.accountId,
+            source:'GUARDED_PERCHANCE_READBACK',complete:true,conflicts:outcome.incidents.length,
             observedAt:observation.observedAt,observationId:observation.observationId,
             accountRevision:current.revision,bindingVersion:current.bindingVersion});
           tx.objectStore('events').add({
