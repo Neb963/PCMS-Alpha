@@ -25,11 +25,13 @@ export function validateCatalogMessage(api,sender,message){
   if(!message||typeof message!=='object'||Array.isArray(message)||
       Object.keys(message).some(k=>!['type','params'].includes(k)))
     return fail('CAPABILITY_OFF');
-  const types=['SCAN_CATALOG','CONNECT_GIT','SCAN_CONNECTED','GIT_STATUS','GET_CONNECTION_STATE','DISCONNECT_GIT','RECONCILE_GIT','RECOVER_GIT_CONNECTION','APPROVE_IMPORT','GET_PROMPT_DRAFT','SAVE_PROMPT_DRAFT','COMMIT_PROMPT','RECONCILE_PROMPT','INSPECT_DECLARATION','LIST_READY'];
+  const types=['SEARCH_PATHS','SCAN_CATALOG','CONNECT_GIT','SCAN_CONNECTED','GIT_STATUS','GET_CONNECTION_STATE','DISCONNECT_GIT','RECONCILE_GIT','RECOVER_GIT_CONNECTION','APPROVE_IMPORT','GET_PROMPT_DRAFT','SAVE_PROMPT_DRAFT','COMMIT_PROMPT','RECONCILE_PROMPT','INSPECT_DECLARATION','LIST_READY'];
   if(!types.includes(message.type))return fail('CAPABILITY_OFF');
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
-  if(['SCAN_CATALOG','CONNECT_GIT','RECOVER_GIT_CONNECTION'].includes(message.type)){
+  if(message.type==='SEARCH_PATHS'){
+    if(Object.keys(p).some(k=>!['query','limit'].includes(k))||typeof p.query!=='string'||p.query.length>512||!Number.isInteger(p.limit)||p.limit<1||p.limit>50)return fail('INVALID_PARAMS');
+  }else if(['SCAN_CATALOG','CONNECT_GIT','RECOVER_GIT_CONNECTION'].includes(message.type)){
     if(Object.keys(p).some(k=>!['repository','token',...(message.type==='RECOVER_GIT_CONNECTION'?['acknowledgeCredentialReplacement']:[])].includes(k))||
       !validRepository(p.repository)||!TOKEN.test(p.token||'')||
       (message.type==='RECOVER_GIT_CONNECTION'&&p.acknowledgeCredentialReplacement!==true))
@@ -78,7 +80,7 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
   observePrompt=observeGitPromptWrite,initialize=initializeEmptyPrivateGit,
   inspectDeclaration=inspectReadyCandidate,
   // Product gate stays inactive until independently authorized Git H/GIT proof.
-  promptWriteGate=()=>false,
+  promptWriteGate=()=>false,authorityGeneration=()=>standingS06?.policyGeneration(),
   native=packet=>browserGitCredentialPacket(packet)}={}){
   let importDb;
   const approvalStore=async()=>createImportApprovalStore(await (importDb ||= open().catch(e=>{importDb=null;throw e;})));
@@ -111,15 +113,17 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
     // no human approval or provider observation is fabricated.
     if(!approved?.ok&&result.generators.length===0&&/^[a-f0-9]{40}$/.test(result.head||'')){
       const empty=await (await approvalStore()).approve({repository:result.repository,repositoryId:expectedId,
-        head:result.head,scopeDigest,recognizedSlugs:[],approvalAt:Date.now(),planDigest:preview.planDigest,targets:[],emptyOnboarding:true});
+        head:result.head,scopeDigest,recognizedSlugs:[],approvalAt:Date.now(),planDigest:preview.planDigest,targets:[],reviewedSources:[],emptyOnboarding:true});
       if(empty.ok){approved=empty;await api.storage.local.set({pcmsS04CatalogIntakeProgress:{repositoryId:expectedId,head:result.head,
-        scopeDigest,initialScopeDigest:scopeDigest,initialImportCompleted:true,next:0,total:0}});}
+        scopeDigest,initialScopeDigest:scopeDigest,initialImportCompleted:true,initialApprovalRevision:empty.approval.revision,next:0,total:0}});}
     }
     const progress=(await api.storage.local.get('pcmsS04CatalogIntakeProgress'))?.pcmsS04CatalogIntakeProgress;
     const completed=progress?.repositoryId===expectedId&&progress.initialImportCompleted===true&&progress.initialScopeDigest===approved?.approval?.scopeDigest;
     const importStatus=completed&&!preview.initialReviewRequired?'IMPORT_SETUP_COMPLETE':approved?.ok?
       approved.approval.scopeDigest===scopeDigest&&approved.approval.planDigest===preview.planDigest?'IMPORT_SCOPE_APPROVED':'IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED':
       'IMPORT_SCOPE_UNAPPROVED';
+    if(result.head)await api.storage.local.set({pcmsS03SearchSnapshot:{repository:result.repository,repositoryId:result.repositoryId,head:result.head,complete:true,
+      generators:result.generators.map(g=>({slug:g.slug,folder:g.folder,paths:g.paths||[]}))}});
     return {...result,...(result.prompt?.state==='ABSENT'?{starterPrompt:DEFAULT_AI_PROMPT,starterVersion:'pcms.chat1-starter/1'}:{}),preview,importStatus,approvalRevision:approved?.approval?.revision||0};
   }
   async function run(message,sender){
@@ -129,6 +133,15 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
     const p=message.params||{};
     let stage='UNCLASSIFIED';
     try{
+      if(message.type==='SEARCH_PATHS'){
+        const cfg=await readConfig();if(!cfg)return fail('GIT_RECONNECT_REQUIRED');
+        const snapshot=(await api.storage.local.get('pcmsS03SearchSnapshot'))?.pcmsS03SearchSnapshot;
+        if(!snapshot?.complete||snapshot.repositoryId!==cfg.repositoryId)return {ok:true,items:[],snapshotAvailable:false};
+        const query=p.query.toLowerCase(),items=[];
+        for(const g of snapshot.generators){for(const path of [g.folder,...g.paths.map(path=>g.folder+'/'+path)]){
+          if(path.toLowerCase().includes(query)){items.push({slug:g.slug,path,folder:g.folder,head:snapshot.head});if(items.length>=p.limit)return {ok:true,items,snapshotAvailable:true};}
+        }}return {ok:true,items,snapshotAvailable:true};
+      }
       if(message.type==='GET_CONNECTION_STATE'){
         // Read-only nonsecret status. A pending intent cannot be treated as
         // no connection: it may follow an ambiguous browser-IDB credential write.
@@ -322,7 +335,8 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
       }
       if(message.type==='COMMIT_PROMPT'){
         if(p.repositoryId!==config.repositoryId)return fail('GIT_IDENTITY_CHANGED');
-        if(!promptWriteGate())return fail('GIT_WRITE_ACTIVATION_HELD');
+        const grantGeneration=authorityGeneration();
+        if(promptWriteGate()!==true)return fail('GIT_WRITE_ACTIVATION_HELD');
         const currentDraft=await (await promptStore()).read(config.repositoryId);
         if(!currentDraft.ok||currentDraft.record.revision!==p.expectedRevision||
            currentDraft.record.effect)return fail('PROMPT_DRAFT_STALE_OR_UNCERTAIN');
@@ -337,8 +351,9 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
         if(!journal.ok)return journal;
         const beforeDispatch=async()=>{
           if(promptWriteGate()!==true||(await sentinel.inspect()).held)return false;
-          const live=await readConfig();return live?.repositoryId===config.repositoryId&&live.repository===config.repository;
+          const live=await readConfig();return promptWriteGate()===true&&authorityGeneration()===grantGeneration&&live?.repositoryId===config.repositoryId&&live.repository===config.repository;
         };
+        beforeDispatch.current=()=>promptWriteGate()===true&&authorityGeneration()===grantGeneration;
         let result;
         try{
         if(current.head===null){
@@ -398,7 +413,8 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
           repository:current.repository,repositoryId:current.repositoryId,
           head:current.head,scopeDigest:p.scopeDigest,
           recognizedSlugs:current.generators.map(g=>g.slug),approvalAt:Date.now(),
-          planDigest:p.planDigest,targets:current.preview.targets,expectedRevision:p.expectedRevision
+          planDigest:p.planDigest,targets:current.preview.targets,expectedRevision:p.expectedRevision,
+          reviewedSources:current.generators.map(g=>({slug:g.slug,markerOid:g.markerOid,folderTreeOid:g.folderTreeOid||null}))
         });
         if(approved.ok)try{await api.alarms.create('pcms-s03-main-resume',{when:Date.now()+500});}catch{}
         return approved;

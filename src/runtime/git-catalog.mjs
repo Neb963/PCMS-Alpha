@@ -202,7 +202,7 @@ export async function scanMainCatalog({token,repository='Neb963/per-gens',maxReq
       const testing=entries.get(folder+'/TESTING.md');
       generators.push({slug,folder,markerOid:marker.sha,ready:sourceState==='READY_UNVERIFIED_COHERENCE',
         sourceState,testingOid:testing?.type==='blob'?testing.sha:null,
-        sourceFiles:deployable.length,
+        sourceFiles:deployable.length,paths:files.filter(f=>f.entry.type==='blob').map(f=>f.path.slice(folder.length+1)),
         // A tree OID is proof of *Git* snapshot identity, not host source bytes.
         folderTreeOid:entries.get(folder).sha});
     }

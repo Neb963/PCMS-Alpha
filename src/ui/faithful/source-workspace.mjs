@@ -12,7 +12,7 @@ export function createSourceWorkspace({root,el,b,request,reload,connect}){
   const search=el('input','form-input');search.type='search';search.placeholder='Find a source file';search.setAttribute('aria-label','Find a source file');
   const list=el('div'),pager=el('div','form-foot');tree.append(search,list,pager);layout.append(tree,view);body.append(actions,status,layout);
   panel.append(heading,body);overlay.append(panel);root.append(overlay);
-  let snapshot=null,folder='generators/'+item.slug,offset=0,epoch=0,busy=false,selected=null;
+  let snapshot=null,folder='generators/'+item.slug,offset=0,epoch=0,busy=false,selected=item.initialPath||null;
   const call=(type,params,timeout=95000)=>request('pcms-i05-source',type,params,timeout);
   function draw(){list.replaceChildren();pager.replaceChildren();if(!snapshot)return;
    const files=snapshot.paths.filter(f=>f.path.toLowerCase().includes(search.value.trim().toLowerCase()));

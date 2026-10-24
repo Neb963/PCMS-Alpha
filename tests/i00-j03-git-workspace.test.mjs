@@ -47,7 +47,7 @@ test('J03 initial approval binds source and ownership, allows reviewed changed s
 });
 test('J03 completed initial setup does not demand another approval for newly merged folders',async()=>{
  const {db}=await seed(),c=catalog(),scopeDigest=await getImportScopeDigest(c),plan=await buildImportPreview(db,c);
- await createImportApprovalStore(db).approve({...cfg,head:c.head,scopeDigest,recognizedSlugs:c.generators.map(g=>g.slug),approvalAt:10,planDigest:plan.planDigest,targets:plan.targets});
+ await createImportApprovalStore(db).approve({...cfg,head:c.head,scopeDigest,recognizedSlugs:c.generators.map(g=>g.slug),approvalAt:10,planDigest:plan.planDigest,targets:plan.targets,reviewedSources:c.generators.map(g=>({slug:g.slug,markerOid:g.markerOid,folderTreeOid:g.folderTreeOid||null}))});
  const local=storage({pcmsS03Git:cfg,pcmsS04CatalogIntakeProgress:{repositoryId:'42',initialScopeDigest:scopeDigest,initialImportCompleted:true,initialApprovalRevision:1}}),api={runtime,storage:{local}};
  const next=catalog(['known-owned','new-private','later-folder']),boundary=createCatalogBoundary(api,{open:async()=>db,scan:async()=>next,native:async()=>({ok:true,credential:'test-credential-only'})});
  assert.equal((await boundary.run({type:'SCAN_CONNECTED'},sender)).importStatus,'IMPORT_SETUP_COMPLETE');
@@ -72,21 +72,21 @@ test('J03 source-file UI boundary returns only a verified selected file from its
 
 test('J03 initial import remains bound through first creation, not only intake completion',async()=>{
  const {db}=await seed(),c=catalog(),plan=await buildImportPreview(db,c),scopeDigest=await getImportScopeDigest(c),approvals=createImportApprovalStore(db);
- const approval=await approvals.approve({...cfg,head:c.head,scopeDigest,recognizedSlugs:c.generators.map(g=>g.slug),approvalAt:100,planDigest:plan.planDigest,targets:plan.targets});
+ const approval=await approvals.approve({...cfg,head:c.head,scopeDigest,recognizedSlugs:c.generators.map(g=>g.slug),approvalAt:100,planDigest:plan.planDigest,targets:plan.targets,reviewedSources:c.generators.map(g=>({slug:g.slug,markerOid:g.markerOid,folderTreeOid:g.folderTreeOid||null}))});
  const local=storage({pcmsS03Git:cfg}),api={runtime,storage:{local}},intake=createCreationCatalogIntake(api,{open:async()=>db});
  assert.equal((await intake.run(c)).ok,true);const store=createCoordinatorStore(db),rows=await store.listCreate({limit:10});
  const item=(await store.getCreate(rows.items.find(r=>r.slug==='new-private').intentId)).record;assert.equal(item.sources[0].initialImport.revision,1);
- const guard=createInitialImportGuard(api,{scan:async()=>c,credential:async()=>({ok:true,credential:'test-credential-only'})});
+ const guard=createInitialImportGuard(api,{inspect:async()=>({ok:true,repositoryId:'42',...c.generators.find(g=>g.slug==='new-private')}),credential:async()=>({ok:true,credential:'test-credential-only'})});
  assert.equal((await guard(db,item)).ok,true);
  await put(db,[{key:'inventory:new-private',generator:{slug:'new-private',accountId:'account_j03_b',remoteId:'new-owner',ownerState:'OBSERVED_OWNER',bindingVersion:1}}]);
  assert.equal((await guard(db,item)).code,'INITIAL_IMPORT_SCOPE_REVIEW_REQUIRED');assert.equal((await buildImportPreview(db,c)).initialReviewRequired,true);
- const next=await buildImportPreview(db,c);await approvals.approve({...cfg,head:c.head,scopeDigest,recognizedSlugs:c.generators.map(g=>g.slug),approvalAt:101,planDigest:next.planDigest,targets:next.targets,expectedRevision:1});
+ const next=await buildImportPreview(db,c);await approvals.approve({...cfg,head:c.head,scopeDigest,recognizedSlugs:c.generators.map(g=>g.slug),approvalAt:101,planDigest:next.planDigest,targets:next.targets,reviewedSources:c.generators.map(g=>({slug:g.slug,markerOid:g.markerOid,folderTreeOid:g.folderTreeOid||null})),expectedRevision:1});
  assert.equal((await intake.run(c)).ok,true);const renewed=(await store.getCreate(item.intentId)).record;assert.equal(renewed.sources[0].initialImport.revision,2);
  assert.equal((await guard(db,renewed)).ok,true);
  assert.equal((await guard(db,{...renewed,sources:[...renewed.sources,{type:'OPERATOR',intentId:'genuine_explicit_request'}]})).ok,true);
- const stale=await approvals.approve({...cfg,head:c.head,scopeDigest,recognizedSlugs:c.generators.map(g=>g.slug),approvalAt:102,planDigest:'f'.repeat(64),targets:next.targets,expectedRevision:1});
+ const stale=await approvals.approve({...cfg,head:c.head,scopeDigest,recognizedSlugs:c.generators.map(g=>g.slug),approvalAt:102,planDigest:'f'.repeat(64),targets:next.targets,reviewedSources:c.generators.map(g=>({slug:g.slug,markerOid:g.markerOid,folderTreeOid:g.folderTreeOid||null})),expectedRevision:1});
  assert.equal(stale.ok,false);assert.equal(stale.code,'IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED');
  const changedSource={...c,generators:c.generators.map(g=>g.slug===renewed.slug?{...g,markerOid:'e'.repeat(40)}:g)};
- const sourceGuard=createInitialImportGuard(api,{scan:async()=>changedSource,credential:async()=>({ok:true,credential:'test-credential-only'})});
+ const sourceGuard=createInitialImportGuard(api,{inspect:async()=>({ok:true,repositoryId:'42',...changedSource.generators.find(g=>g.slug==='new-private')}),credential:async()=>({ok:true,credential:'test-credential-only'})});
  assert.equal((await sourceGuard(db,renewed)).code,'INITIAL_IMPORT_SOURCE_CHANGED_REVIEW_REQUIRED');
 });

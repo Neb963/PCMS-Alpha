@@ -36,7 +36,7 @@ export function createReadyIntake(api,{open=openCanonicalDatabase,
   const db=await (dbPromise||=open().catch(e=>{dbPromise=null;throw e;}));
   const approval=await createImportApprovalStore(db).get(catalog.repositoryId);
   if(!approval.ok||approval.approval.repository!==repository||
-     approval.approval.source!=='HUMAN_INITIAL_IMPORT_SCOPE')
+     !['HUMAN_INITIAL_IMPORT_SCOPE','EMPTY_MANAGED_SCOPE_ONBOARDING'].includes(approval.approval.source))
     return fail('INITIAL_IMPORT_SCOPE_UNAPPROVED');
   const digest=await getImportScopeDigest(catalog);
   if(!digest)return fail('READY_CATALOG_UNVERIFIED');

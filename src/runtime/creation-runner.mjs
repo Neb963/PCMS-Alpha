@@ -37,9 +37,10 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
       const item=found.record;
       if(item.revision!==expectedRevision)return fail('STALE_REVISION');
       if(isI17Quarantined(item))return fail(I17_QUARANTINE_CODE);
-      if(item.pinConflict||item.sourceDrift)return fail(item.hold||'SOURCE_CONFLICT');
+      const reconciling=['CREATE_DISPATCH_POSSIBLE','CREATE_UNCERTAIN','CREATE_OBSERVING','RENAME_DISPATCH_POSSIBLE','RENAME_UNCERTAIN','RENAME_OBSERVING','GIT_DISPATCH_POSSIBLE','GIT_UNCERTAIN','GIT_OBSERVING'].includes(item.state);
+      if((item.pinConflict||item.sourceDrift)&&!reconciling)return fail(item.hold||'SOURCE_CONFLICT');
       if(['WAITING_CAPABILITY','OWNER_MISSING_VERIFIED','PRIVATE_EMPTY_CONFIRMED','CREATE_PREPARED','RENAME_PREPARED'].includes(item.state)){
-        const scope=await importGuard(await (dbPromise||=open()),item);if(!scope.ok)return scope;
+        const scope=await importGuard(await (dbPromise||=open()),item,{verifyGit:!['WAITING_CAPABILITY','CREATE_PREPARED','RENAME_PREPARED'].includes(item.state)});if(!scope.ok)return scope;
       }
       if(item.state==='WAITING_CAPABILITY')
         return await s.allocateCreate(item.intentId,item.revision);
@@ -169,8 +170,7 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         // Exact revision + operation receipt must exist before dispatch.
         const newer=prepared.record;
         const policyGeneration=effectGate.generation?.();
-        const finalScope=await importGuard(await (dbPromise||=open()),newer);
-        const allowed=finalScope.ok&&(await effectGate({intent:newer,route:before}))===true;
+        const allowed=(await effectGate({intent:newer,route:before}))===true;
         const restoring=(await sentinel.inspect()).held;
         if(!allowed||restoring||policyGeneration!==effectGate.generation?.()){
           return await s.stageEffect({intentId:item.intentId,

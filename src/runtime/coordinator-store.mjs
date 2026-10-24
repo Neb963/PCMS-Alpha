@@ -276,6 +276,7 @@ export function createCoordinatorStore(db){
               m.get('inventory:'+previous.slug).onsuccess=target=>{
                 if(!a||a.revision!==b.revision||a.scopeDigest!==b.scopeDigest||
                   JSON.stringify(a.targets?.find(t=>t.slug===previous.slug))!==JSON.stringify(b.target)||
+                  !a.reviewedSources?.some(g=>g.slug===previous.slug&&g.markerOid===binding.markerOid&&(g.folderTreeOid||null)===(b.folderTreeOid||null))||
                   JSON.stringify(importTargetTuple(previous.slug,target.target.result?.generator))!==JSON.stringify(b.target)){
                   result=fail('INITIAL_IMPORT_SCOPE_REVIEW_REQUIRED');return;
                 }

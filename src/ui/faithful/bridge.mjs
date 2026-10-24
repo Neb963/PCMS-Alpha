@@ -131,22 +131,26 @@ function openGlobalSearch(){
  const priorFocus=root.activeElement;
  const overlay=el('div','overlay');const modal=el('div','modal');
  const closeSearch=()=>{clearTimeout(delay);epoch++;overlay.remove();
-  const restore=priorFocus?.isConnected?priorFocus:shadow('.top-search');restore?.focus({preventScroll:true});};modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label','Search local accounts and generators');
+  const restore=priorFocus?.isConnected?priorFocus:shadow('.top-search');restore?.focus({preventScroll:true});};modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label','Search PCMS records');
  const head=el('div','modal-head');head.append(el('h2','', 'Search PCMS'));
  const close=b('Close',closeSearch,'btn small');head.append(close);modal.append(head);
  const body=el('div','modal-body');
- const input=el('input');input.type='search';input.placeholder='Find a local generator or account';input.setAttribute('aria-label','Search local generators and accounts');input.maxLength=80;
+ const input=el('input');input.type='search';input.placeholder='Find a generator, account, source path or operation';input.setAttribute('aria-label','Search generators, accounts, source paths and operations');input.maxLength=512;
  input.style.width='100%';input.style.padding='11px';input.style.border='1px solid #c9d2da';input.style.borderRadius='7px';body.append(input);
- const caption=el('p','native-bridge-note','Only canonical local records are searched. Missing results are not proof of remote absence.');body.append(caption);
+ const caption=el('p','native-bridge-note','Search saved records and the latest complete Git source snapshot.');body.append(caption);
  const list=el('div','queue-list');body.append(list);modal.append(body);overlay.append(modal);root.append(overlay);
  let epoch=0,delay;
  async function search(){const query=input.value.trim(),n=++epoch;list.replaceChildren();if(query.length<2)return;
   list.append(el('p','pcms-unknown','Searching local records…'));
-  const settled=await Promise.allSettled([inventory({query,offset:0,limit:8}),accounts()]);if(n!==epoch||!overlay.isConnected)return;
+  const settled=await Promise.allSettled([inventory({query:query.slice(0,80),offset:0,limit:8}),accounts(),
+   readPort('pcms-s03-catalog','SEARCH_PATHS',{query,limit:8},12000),guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{after:'',limit:8,status:'ALL',query:query.slice(0,80)})]);if(n!==epoch||!overlay.isConnected)return;
   list.replaceChildren();const inv=settled[0].status==='fulfilled'?settled[0].value:null,acc=settled[1].status==='fulfilled'?settled[1].value:null;
   const found=[];
   for(const g of inv?.items||[])found.push({kind:'Generator',label:g.slug,execute:()=>{state.gen.query=g.slug;state.gen.offset=0;overlay.remove();routeTo('generators')}});
-  for(const a of acc?.accounts||[])if(a.accountId.toLowerCase().includes(query.toLowerCase()))found.push({kind:'Account',label:a.accountId,execute:()=>{state.acct.query=a.accountId;state.acct.page=0;overlay.remove();routeTo('accounts')}});
+  for(const a of acc?.accounts||[])if([a.accountId,a.alias].filter(Boolean).some(x=>x.toLowerCase().includes(query.toLowerCase())))found.push({kind:'Account',label:a.alias||a.accountId,execute:()=>{state.acct.query=a.accountId;state.acct.page=0;overlay.remove();routeTo('accounts')}});
+  const paths=settled[2].status==='fulfilled'?settled[2].value:null,operations=settled[3].status==='fulfilled'?settled[3].value:null;
+  for(const source of paths?.items||[])found.push({kind:'Git source',label:source.path,execute:()=>{overlay.remove();openSourceManager({slug:source.slug,initialPath:source.path.startsWith(source.folder+'/')?source.path.slice(source.folder.length+1):null})}});
+  for(const op of operations?.items||[])found.push({kind:'Operation',label:op.operationId,execute:()=>{state.queue.query=op.operationId;state.queue.filter='All';overlay.remove();routeTo('work-queue')}});
   if(!found.length){list.append(el('p','pcms-unknown',inv||acc?'No matching local records.':'Local search unavailable.'));return}
   for(const f of found.slice(0,12)){const row=el('div','queue-item');const strong=el('strong','',f.label);const kind=el('span','muted small',f.kind);row.append(strong,kind,b('Open',f.execute));list.append(row)}
  }

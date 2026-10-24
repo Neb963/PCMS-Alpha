@@ -69,7 +69,7 @@ export async function writeExistingGitPrompt({
     const commit=await call('POST','/git/commits',{message,tree:tree.sha,parents:[parent]});
     if(!OID.test(commit?.sha||''))return err('GIT_COMMIT_UNVERIFIED');
     newCommit=commit.sha;
-    if((await beforeDispatch())!==true)return err('GIT_AUTHORITY_REVOKED');
+    if((await beforeDispatch())!==true||beforeDispatch.current&&beforeDispatch.current()!==true)return err('GIT_AUTHORITY_REVOKED');
     possible=true;
     // A PATCH refusal or lost ACK requires read-only reconciliation; never replay.
     const patch=await call('PATCH','/git/refs/heads/main',{sha:newCommit,force:false});

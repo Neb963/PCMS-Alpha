@@ -63,11 +63,16 @@ export function coalesceCreation(existing,source){
   const pinConflict=pins.size>1||
     (!!existing?.accountId&&[...pins].some(p=>p!==existing.accountId));
   const selectedPin=!pinConflict&&pins.size===1?[...pins][0]:null;
+  if(idx>=0&&git&&nextSource.initialImport&&JSON.stringify(prior[idx].initialImport||null)!==JSON.stringify(nextSource.initialImport)){
+    if(nextSource.initialImport.revision<=(prior[idx].initialImport?.revision||0))return fail('INITIAL_IMPORT_UNREVIEWED_BINDING_CHANGED');
+    const sources=prior.slice();sources[idx]=nextSource;
+    return {ok:true,changed:true,record:{...existing,sources,revision:existing.revision+1,
+      ...(existing.hold==='GIT_SOURCE_CHANGED_WITH_ACTIVE_OPERATION'?{sourceDrift:false,hold:null}:{})}};
+  }
   if(idx>=0&&git&&prior[idx].markerOid===nextSource.markerOid){
     if(JSON.stringify(prior[idx].initialImport||null)===JSON.stringify(nextSource.initialImport||null)||!nextSource.initialImport)
       return {ok:true,duplicate:true,changed:false,record:existing};
-    const sources=prior.slice();sources[idx]=nextSource;
-    return {ok:true,changed:true,record:{...existing,sources,revision:existing.revision+1}};
+    return fail('INITIAL_IMPORT_UNREVIEWED_BINDING_CHANGED');
   }
   if(idx>=0&&git&&existing?.state==='ASSOCIATED_NOT_READY'&&!existing.sourceDrift&&!existing.pinConflict){
     const sources=prior.slice();sources[idx]=nextSource;

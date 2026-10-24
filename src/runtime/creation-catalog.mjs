@@ -82,13 +82,18 @@ export function createCreationCatalogIntake(api,{open=openCanonicalDatabase,
       for(;next<catalog.generators.length&&next<from+maxItems;next++){
         if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
         const g=catalog.generators[next];
+        const reviewed=approved.approval.reviewedSources?.find(x=>x.slug===g.slug);
+        // An unchanged marker cannot silently authorize changed source bytes.
+        // Retain the reviewed binding; the primary view offers reapproval for
+        // a still-pending initial item. READY/source work has its own intake.
+        if(reviewed&&(reviewed.markerOid!==g.markerOid||(reviewed.folderTreeOid||null)!==(g.folderTreeOid||null))){held++;continue;}
         if(identityHeld.has(g.slug)){held++;continue;}
         const out=await creation.ingestVerifiedMain({
           repository:catalog.repository,repositoryId:catalog.repositoryId,
           slug:g.slug,head:catalog.head,markerOid:g.markerOid,
           complete:true,verifiedMain:true,
           ...(Array.isArray(approved.approval.targets)&&approved.approval.recognizedSlugs.includes(g.slug)?{initialImport:{revision:approved.approval.revision,
-            scopeDigest:approved.approval.scopeDigest,target:approved.approval.targets.find(t=>t.slug===g.slug),folderTreeOid:g.folderTreeOid||null}}:{})
+            scopeDigest:approved.approval.scopeDigest,target:approved.approval.targets.find(t=>t.slug===g.slug),markerOid:reviewed?.markerOid||g.markerOid,folderTreeOid:reviewed?.folderTreeOid||null}}:{})
         });
         if(!out.ok){
           if(out.code==='I17_ORIGINAL_EFFECT_QUARANTINED'){

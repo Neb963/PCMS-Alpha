@@ -62,7 +62,7 @@ export async function initializeEmptyPrivateGit({
       tree:tree.body.sha,parents:[]});
     if(commit.status!==201||!SHA.test(commit.body?.sha||''))return fail('GIT_COMMIT_UNVERIFIED');
     createdCommit=commit.body.sha;
-    if((await beforeDispatch())!==true)return fail('GIT_AUTHORITY_REVOKED');
+    if((await beforeDispatch())!==true||beforeDispatch.current&&beforeDispatch.current()!==true)return fail('GIT_AUTHORITY_REVOKED');
     possible=true;
     const set=await get('POST','/git/refs',{ref:'refs/heads/main',sha:createdCommit});
     if(set.status!==201||set.body?.object?.sha!==createdCommit)

@@ -29,7 +29,7 @@ export function createImportApprovalStore(db){
     });
   }
   async function approve({repository,repositoryId,head,scopeDigest,
-    recognizedSlugs,approvalAt,planDigest=null,targets=null,expectedRevision=0,emptyOnboarding=false}){
+    recognizedSlugs,approvalAt,planDigest=null,targets=null,expectedRevision=0,emptyOnboarding=false,reviewedSources=null}){
     if(typeof repository!=='string'||repository.length>200||
       !id.test(repositoryId||'')||!/^[a-f0-9]{40}$/.test(head||'')||
       !sha.test(scopeDigest||'')||!Array.isArray(recognizedSlugs)||
@@ -37,7 +37,8 @@ export function createImportApprovalStore(db){
       new Set(recognizedSlugs).size!==recognizedSlugs.length||
       !Number.isSafeInteger(approvalAt)||approvalAt<1||
       (planDigest!==null&&(!sha.test(planDigest)||!Array.isArray(targets)||targets.length!==recognizedSlugs.length||
-        targets.some((t,i)=>t?.slug!==recognizedSlugs[i])))||!Number.isSafeInteger(expectedRevision)||expectedRevision<0||(emptyOnboarding&&recognizedSlugs.length!==0))return error('IMPORT_INVALID');
+        targets.some((t,i)=>t?.slug!==recognizedSlugs[i])||!Array.isArray(reviewedSources)||reviewedSources.length!==recognizedSlugs.length||
+        reviewedSources.some((g,i)=>g?.slug!==recognizedSlugs[i]||!/^[a-f0-9]{40}$/.test(g.markerOid||'')||!(g.folderTreeOid===null||/^[a-f0-9]{40}$/.test(g.folderTreeOid||'')))))||!Number.isSafeInteger(expectedRevision)||expectedRevision<0||(emptyOnboarding&&recognizedSlugs.length!==0))return error('IMPORT_INVALID');
     return new Promise((resolve,reject)=>{
       let result=error('IMPORT_UNAPPROVED'),tx;
       try{tx=db.transaction(['meta','events'],'readwrite');}
@@ -56,7 +57,7 @@ export function createImportApprovalStore(db){
         }
         const approval={repository,repositoryId,head,scopeDigest,
           recognizedSlugs,approvalAt,revision:(previous?.revision||0)+1,
-          ...(planDigest?{planDigest,targets}:{}),source:emptyOnboarding?'EMPTY_MANAGED_SCOPE_ONBOARDING':'HUMAN_INITIAL_IMPORT_SCOPE',
+          ...(planDigest?{planDigest,targets,reviewedSources}:{}),source:emptyOnboarding?'EMPTY_MANAGED_SCOPE_ONBOARDING':'HUMAN_INITIAL_IMPORT_SCOPE',
           authorizedEffects:'NONE'};
         store.put({key:key(repositoryId),approval});
         tx.objectStore('events').add({stage:'S03_INITIAL_IMPORT_APPROVED',
