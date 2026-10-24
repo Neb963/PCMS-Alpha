@@ -80,6 +80,8 @@ def run(browser,archive,folder):
         fill(s,'[aria-label="Default AI testing instructions"]','Reviewed operator instructions. Keep exact source and test actual behavior.\n');button(s,'Save to GitHub')
         wait(s,"sh.querySelector('[data-git-prompt]')?.textContent.includes('Saved and verified on GitHub main')",'J03_PROMPT_REAL_CONDITIONAL_WRITE')
         saved=oracle(s);assert len(saved['git']['effects'])==1 and not saved['git']['effects'][0]['force']
+        assert b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot,x=sh.querySelector('[data-git-prompt] textarea');return x.getBoundingClientRect().width>x.parentElement.getBoundingClientRect().width*.9"),'J03_PROMPT_FULL_WIDTH_IN_PRIMARY_SHADOW_ROOT'
+        b.execute(s,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#main').scrollTop=0")
         capture(s,'canonical-prompt',evidence)
         # Concurrent external edit preserves both versions and asks a real
         # conflict decision, without a blind overwrite or fabricated success.

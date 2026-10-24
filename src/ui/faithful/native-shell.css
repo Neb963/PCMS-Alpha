@@ -13,16 +13,3 @@ body.pcms-faithful-ready.pcms-native-open>.app{left:0!important;top:0!important;
  padding:12px 20px;font:700 13px system-ui;box-shadow:0 7px 28px #1628404d;cursor:pointer}
 body.pcms-native-open #pcms-legacy-return{display:block}
 
-.source-workspace{width:min(1120px,100vw)}
-.source-layout{display:grid;grid-template-columns:minmax(190px,28%) minmax(0,1fr);gap:20px}
-.source-tree{min-width:0}.source-tree input{width:100%}.source-file{min-width:0}
-.source-file-button{display:block;width:100%;padding:8px;text-align:left;border:0;border-radius:4px;background:transparent;color:inherit;overflow-wrap:anywhere;cursor:pointer}
-.source-file-button:hover,.source-file-button[aria-current=true]{background:var(--accent-soft,#eaf1f9)}
-.source-code{width:100%;font-family:ui-monospace,monospace;white-space:pre;overflow:auto;tab-size:2;resize:vertical}
-@media(max-width:650px){.source-layout{grid-template-columns:minmax(0,1fr)}.source-tree{max-height:260px;overflow:auto}}
-
-[data-git-prompt] textarea.form-input{box-sizing:border-box;width:100%;font-family:ui-monospace,monospace;line-height:1.5;padding:12px;border:1px solid #c9d2da;border-radius:6px;resize:vertical}
-.git-ai-policy{display:grid;gap:16px;margin-top:20px}.git-ai-policy>label{display:flex;flex-direction:column;gap:8px}
-.git-ai-policy textarea{box-sizing:border-box;width:100%;padding:10px;border:1px solid #c9d2da;border-radius:6px;resize:vertical}
-.git-ai-policy input[type=number]{width:110px;padding:8px;border:1px solid #c9d2da;border-radius:6px}
-@media(min-width:651px){.source-tree{max-height:calc(100dvh - 250px);overflow:auto;padding-right:6px}}

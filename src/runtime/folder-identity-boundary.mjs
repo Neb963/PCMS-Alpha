@@ -144,12 +144,17 @@ export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=n
   if(busy)return fail('REVIEW_BUSY');
   if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
   const rows=(await api.storage.local.get(REVIEW_KEY))?.[REVIEW_KEY]||[];
-  const candidates=rows.filter(r=>r.state==='RENAME_EXISTING_REQUESTED'&&r.automaticRenameApproved===true&&(!onlySlug||r.newSlug===onlySlug));
+  const attempts=await api.storage.local.get(rows.map(r=>'pcmsR4ExistingRenameAttempt:'+r.newSlug));
+  // Existing possible effects remain observable after upgrade or source drift.
+  // Only explicit current automatic approval can admit a new native effect.
+  const candidates=rows.filter(r=>(!onlySlug||r.newSlug===onlySlug)&&(
+    r.state==='RENAME_EXISTING_REQUESTED'&&r.automaticRenameApproved===true||
+    ['DISPATCH_POSSIBLE','OUTCOME_UNCERTAIN'].includes(attempts['pcmsR4ExistingRenameAttempt:'+r.newSlug]?.state)));
   const progress=await api.storage.local.get(candidates.map(r=>'pcmsR4RenameProgress:'+r.newSlug));
   const review=candidates.sort((a,b)=>(progress['pcmsR4RenameProgress:'+a.newSlug]?.observedAt||0)-(progress['pcmsR4RenameProgress:'+b.newSlug]?.observedAt||0))[0];
   if(!review)return {ok:true,code:'NO_PENDING_RENAME'};
   const saved=(await api.storage.local.get('pcmsR4ExistingRenameAttempt:'+review.newSlug))?.['pcmsR4ExistingRenameAttempt:'+review.newSlug];
-  const type=!saved?'PREPARE':saved.state==='RENAME_PREPARED'?'EXECUTE':['DISPATCH_POSSIBLE','OUTCOME_UNCERTAIN'].includes(saved.state)?'RECONCILE':saved.state==='REMOTE_RENAME_VERIFIED_LINK_PENDING'||saved.state==='RENAME_COMPLETED'?'FINALIZE':null;
+  const type=!saved&&review.automaticRenameApproved===true?'PREPARE':saved?.state==='RENAME_PREPARED'&&review.automaticRenameApproved===true?'EXECUTE':['DISPATCH_POSSIBLE','OUTCOME_UNCERTAIN'].includes(saved?.state)?'RECONCILE':review.automaticRenameApproved===true&&['REMOTE_RENAME_VERIFIED_LINK_PENDING','RENAME_COMPLETED'].includes(saved?.state)?'FINALIZE':null;
   if(!type)return fail('RENAME_STAGE_NOT_ADMISSIBLE');
   const out=await existingRename.run({type,newSlug:review.newSlug,expectedRevision:saved?.revision||review.revision,
     ...(type==='EXECUTE'?{consent:'I APPROVE THE EXACT EXISTING GENERATOR RENAME'}:{})});

@@ -118,3 +118,16 @@ test('R4 identity port is trusted, revision-fenced, and has zero provider/Git ef
  assert.equal((await boundary.dispatch({type:'CHOOSE',params:{
    newSlug:'new-generator',choice:'RENAME_EXISTING',expectedTreeOid:H('a'),expectedRevision:1}},sender)).code,'REVIEW_REVISION_CHANGED');
 });
+
+test('J03 legacy possible rename effects remain read-only reconcilable without automatic approval',async()=>{
+ for(const state of ['OUTCOME_UNCERTAIN','DISPATCH_POSSIBLE','RENAME_PREPARED',null]){
+  const review={...planMainFolderChanges(a,b).review[0],state:'RENAME_EXISTING_REQUESTED'};
+  const saved={[REVIEW_KEY]:[review],...state?{['pcmsR4ExistingRenameAttempt:'+review.newSlug]:{state,revision:7}}:{}};
+  const calls=[],api={storage:{local:{get:async keys=>Object.fromEntries((Array.isArray(keys)?keys:[keys]).filter(k=>k in saved).map(k=>[k,saved[k]])),set:async patch=>Object.assign(saved,patch)}},alarms:{create:async()=>{}}};
+  const boundary=createFolderIdentityBoundary(api,{renameService:{run:async command=>{calls.push(command);return {ok:true,state:'REMOTE_RENAME_VERIFIED_LINK_PENDING'}}}});
+  const result=await boundary.tick(review.newSlug);
+  if(['OUTCOME_UNCERTAIN','DISPATCH_POSSIBLE'].includes(state)){
+   assert.equal(result.ok,true);assert.equal(calls.length,1);assert.equal(calls[0].type,'RECONCILE');assert.equal(calls[0].expectedRevision,7);assert.equal(calls[0].consent,undefined);
+  }else{assert.equal(result.code,'NO_PENDING_RENAME');assert.equal(calls.length,0,'legacy choice must not prepare or dispatch a new effect');}
+ }
+});
