@@ -64,8 +64,8 @@ test('A09 S08 primary panel exposes standalone checks, tests settle independentl
  assert.match(controller,/Promise\.allSettled\(probes\.map/);
  assert.match(controller,/independentButton\.addEventListener\('click'/);
  assert.match(controller,/DIAGNOSTIC_INDEPENDENT/);
- assert.match(controller,/independentDiagnosticExport\\(independent,run\\)/);
- assert.doesNotMatch(controller,/if\\(document\\.getElementById\\('pcms-diagnostic-run'\\)\\)mountDiagnosticController\\(document\\)/,
+ assert.match(controller,/independentDiagnosticExport\(independent,run\)/);
+ assert.doesNotMatch(controller,/if\(document\.getElementById\('pcms-diagnostic-run'\)\)mountDiagnosticController\(document\)/,
    'hidden legacy diagnostic controller must never initialize during primary bridge imports');
  assert.match(template,/without a disposable generator/);
 });
