@@ -9,13 +9,14 @@ import { createEnrollment, SETUP_MESSAGES } from './enrollment.mjs';
 import { holdRoutePin, releaseRoutePinHold, reloadRoutePins, routePinSummary } from './route-pin.mjs';
 import { internalPcmsGuard } from './persona-guard.mjs';
 import { inventoryBoundary } from './inventory-boundary.mjs';
+import { createInventoryStore } from './inventory.mjs';
 import { trustedExtensionPage } from './command-boundary.mjs';
 
 export const ACCOUNT_PORT='pcms-i03-accounts';
 export const ROUTE_UPKEEP_ALARM='pcms-s01-route-upkeep';
-const READS=['LIST_ACCOUNTS','LIST_PERSONAS','LIST_ROUTES','NETWORK_STATUS','WITNESS_STATUS','ADD_ACCOUNT'];
+const READS=['INSPECT_ACCOUNT','LIST_ACCOUNTS','LIST_PERSONAS','LIST_ROUTES','NETWORK_STATUS','WITNESS_STATUS','ADD_ACCOUNT'];
 const permitted={
-  LIST_ACCOUNTS:[],LIST_PERSONAS:[],LIST_ROUTES:[],NETWORK_STATUS:[],WITNESS_STATUS:[],ADD_ACCOUNT:[],
+  INSPECT_ACCOUNT:['accountId'],LIST_ACCOUNTS:[],LIST_PERSONAS:[],LIST_ROUTES:[],NETWORK_STATUS:[],WITNESS_STATUS:[],ADD_ACCOUNT:[],
   RESUME_SETUP:['accountId','expectedRevision'],CONFIRM_LOGIN:['accountId','expectedRevision'],
   CHECK_IDENTITY:['accountId','expectedRevision'],VERIFY_ROUTE:['accountId','expectedRevision'],
   CHANGE_ROUTE:['accountId','expectedRevision'],UPGRADE_ACCOUNT:['accountId','expectedRevision'],
@@ -36,6 +37,7 @@ export function validateAccountMessage(api,sender,m) {
       Object.keys(m.params).length>5))return fail('INVALID_PARAMS');
   const p=m.params||{};
   if(Object.keys(p).some(k=>!permitted[m.type].includes(k)))return fail('INVALID_PARAMS');
+  if(m.type==='INSPECT_ACCOUNT'&&!isSafeId(p.accountId))return fail('INVALID_PARAMS');
   if(!READS.includes(m.type)) {
     if(!isSafeId(p.accountId)||!Number.isSafeInteger(p.expectedRevision)||
       p.expectedRevision<1) return fail('INVALID_PARAMS');
@@ -65,6 +67,22 @@ export async function guardedIdentityRead(guard,personaUid,identityReader) {
   if(proof.source!=='GUARDED_SESSION_READBACK'||proof.verified!==true||
       proof.personaUid!==personaUid)return fail('INDEPENDENT_IDENTITY_PROOF_REQUIRED');
   return {ok:true,proof};
+}
+
+export function inspectAccountProjection(account,network,inventory){
+  const ledger=network?.ok?network.ledger:null;
+  const binding=ledger?.bindings?.[account.bindingId];
+  const matches=binding?.accountId===account.accountId&&binding?.personaUid===account.personaUid;
+  const historicalExits=ledger?Object.entries(ledger.owners).filter(([,owner])=>owner===account.accountId)
+    .map(([key])=>({family:key.slice(0,key.indexOf(':')),address:key.slice(key.indexOf(':')+1)})):[];
+  return {ok:true,account:publicAccount(account),inventory:inventory||null,
+    protection:{state:matches?binding.pin:'UNVERIFIED',code:matches?binding.holdCode:(network?.code||null),
+      routeId:matches?binding.routeId:null,verifiedAtMs:matches?binding.verifiedAtMs:null,
+      exits:matches?binding.exits.map(x=>({family:x.family,address:x.address})):[],
+      ipv6Disposition:matches?binding.ipv6Disposition:'UNKNOWN',historicalExits},
+    history:(account.history||[]).map(x=>({event:x.event,revision:x.revision,
+      reportedReason:x.reportedReason||null,reportedAt:x.reportedAt||null,
+      routeAtReport:x.routeAtReport||null}))};
 }
 
 export function createAccountBoundary(api,{
@@ -112,7 +130,7 @@ export function createAccountBoundary(api,{
     try {
       const g=guard();
       // Local records are readable while PersonaMonkey is still starting.
-      if(!g&&message.type!=='LIST_ACCOUNTS')return fail('GUARD_NOT_READY');
+      if(!g&&!['LIST_ACCOUNTS','INSPECT_ACCOUNT','ARCHIVE','MANUAL_OVERRIDE','ACK_LOGIN'].includes(message.type))return fail('GUARD_NOT_READY');
       if(message.type==='LIST_PERSONAS')return {ok:true,personas:await g.listAvailablePersonas()};
       if(message.type==='LIST_ROUTES')return {ok:true,routes:await g.listProtectedRoutes()};
       if(message.type==='WITNESS_STATUS'){
@@ -128,11 +146,20 @@ export function createAccountBoundary(api,{
         const out=await (await exitLedger()).inspect();
         return out.ok?{...out,pins:routePinSummary(),admission:'PER_ACCOUNT_ROUTE_PIN'}:out;
       }
+      if(message.type==='INSPECT_ACCOUNT'){
+        const db=await connection(),found=await (await store()).get(p.accountId);
+        if(!found.ok)return found;
+        const a=found.account,network=await (await exitLedger()).read();
+        const summaries=await createInventoryStore(db).accountSummaries();
+        return inspectAccountProjection(a,network,summaries.summaries?.[a.accountId]);
+      }
       if(message.type==='LIST_ACCOUNTS') {
         const restore=await sentinel.inspect();
         const out=await (await store()).list();
         const f=await flow();
+        const inventory=await createInventoryStore(await connection()).accountSummaries().catch(()=>null);
         return out.ok?{ok:true,accounts:out.accounts.map(a=>({...publicAccount(a),
+          inventory:inventory?.summaries?.[a.accountId]||null,
           working:f?.running(a.accountId)===true,
           message:explain(a.setup?.code)||explain(a.upgrade?.code)||explain(a.route?.code)})),
           truncated:out.truncated,held:restore.held,holdCode:restore.code,
@@ -157,8 +184,7 @@ export function createAccountBoundary(api,{
       }
       if(message.type==='UPGRADE_ACCOUNT'){
         if(upgraded)return fail('ALREADY_UPGRADED');
-        void f.upgrade(p.accountId);
-        return {ok:true,started:true};
+        return await f.upgrade(p.accountId);
       }
       if(message.type==='REPLACE_PERSONA'){
         const out=await f.replacePersona(p.accountId,p.expectedRevision);
@@ -171,8 +197,7 @@ export function createAccountBoundary(api,{
       }
       if(message.type==='RESUME_SETUP'){
         if(old.account.state!=='PREPARING')return fail('INVALID_ACCOUNT_STATE');
-        void f.prepare(p.accountId);
-        return {ok:true,started:true};
+        return await f.prepare(p.accountId);
       }
       if(message.type==='CONFIRM_LOGIN'||message.type==='CHECK_IDENTITY'){
         const out=await f.confirm(p.accountId);
@@ -180,14 +205,12 @@ export function createAccountBoundary(api,{
       }
       if(message.type==='VERIFY_ROUTE'||message.type==='CHANGE_ROUTE'){
         // Operator-requested; may take several probes, progress is listed.
-        void f.verifyRoute(p.accountId,{change:message.type==='CHANGE_ROUTE'});
-        return {ok:true,started:true};
+        return await f.verifyRoute(p.accountId,{change:message.type==='CHANGE_ROUTE'});
       }
       if(message.type==='OPEN_LOGIN')return await g.openHumanLogin(old.account.personaUid);
       if(message.type==='REACTIVATE'){
         if(!f)return fail('ENROLLMENT_UNAVAILABLE');
-        void f.reactivate(p.accountId,p.expectedRevision);
-        return {ok:true,started:true};
+        return await f.reactivate(p.accountId,p.expectedRevision);
       }
       if(message.type==='REMOVE_ACCOUNT'){
         if(!f)return fail('ENROLLMENT_UNAVAILABLE');
@@ -220,8 +243,12 @@ export function createAccountBoundary(api,{
         return {ok:true,state:'ARCHIVED',release:'RELEASE_DEFERRED'};
       }
       const map={ACK_LOGIN:'ACK_LOGIN',MANUAL_OVERRIDE:'MANUAL_OVERRIDE'};
+      const route=message.type==='MANUAL_OVERRIDE'&&old.account.bindingId?
+        await (await exitLedger()).binding(old.account.bindingId):null;
       const out=await accounts.apply({...p,type:map[message.type],
-        ...(message.type==='MANUAL_OVERRIDE'?{reportedAt:new Date().toISOString()}:{} )});
+        ...(message.type==='MANUAL_OVERRIDE'?{reportedAt:new Date().toISOString(),
+          routeAtReport:route?.ok?{routeId:route.binding.routeId,pin:route.binding.pin,
+            verifiedAtMs:route.binding.verifiedAtMs}:null}:{} )});
       return out.ok?{ok:true,account:publicAccount(out.account)}:out;
     }catch {
       // No browser/provider error strings, tokens or stack reach the UI.

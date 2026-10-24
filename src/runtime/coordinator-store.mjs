@@ -7,6 +7,7 @@ import {coalesceCreation,validateGitCreationWitness} from './creation-intake.mjs
 import {selectS04Account} from './creation-allocation.mjs';
 import {advanceS04Effect} from './creation-effects.mjs';
 import {createBatchStore} from './creation-batch.mjs';
+import {isI17Quarantined,I17_QUARANTINE_CODE} from './legacy-quarantine.mjs';
 const key=id=>'s00-create-intent:'+id;
 const slugKey=slug=>'s00-create-slug:'+slug;
 function transact(db,mode,schedule){
@@ -534,6 +535,44 @@ export function createCoordinatorStore(db){
       };
     });
   }
+  function refreshCreateAccountContext(intentId,expectedRevision){
+    if(!isSafeId(intentId)||!Number.isSafeInteger(expectedRevision))return Promise.resolve(fail('INVALID_TARGET'));
+    return transact(db,'readwrite',(tx,finish)=>{
+      const meta=tx.objectStore('meta');
+      meta.get(key(intentId)).onsuccess=e=>{
+        const item=e.target.result?.record;
+        if(!item){finish(fail('INTENT_NOT_FOUND'));return;}
+        if(item.revision!==expectedRevision){finish(fail('STALE_REVISION'));return;}
+        if(isI17Quarantined(item)){finish(fail(I17_QUARANTINE_CODE));return;}
+        if(!item.accountId||!item.accountRevision){finish({ok:true,unchanged:true});return;}
+        meta.get('account:'+item.accountId).onsuccess=a=>{
+          const account=a.target.result?.account;
+          if(account?.revision===item.accountRevision){finish({ok:true,unchanged:true});return;}
+          if(!account||account.state!=='VERIFIED'||item.accountRevision>account.revision||
+             account.personaUid!==item.personaUid||account.bindingVersion!==item.bindingVersion||
+             account.identity?.bindingVersion!==account.bindingVersion||
+             account.identity?.source!=='GUARDED_SESSION_READBACK'||
+             !/^[a-f0-9]{64}$/.test(account.boundPrincipal||'')||
+             account.identity.principalFingerprint!==account.boundPrincipal||
+             item.principalFingerprint&&item.principalFingerprint!==account.boundPrincipal||
+             item.pinConflict||item.sourceDrift){finish(fail('ACCOUNT_CONTEXT_CHANGED'));return;}
+          meta.get('inventory-batch:'+item.accountId).onsuccess=seen=>{
+            const inventory=seen.target.result;
+            if(!inventory?.observationId||inventory.accountRevision!==account.revision||
+               inventory.bindingVersion!==account.bindingVersion){finish(fail('CURRENT_INVENTORY_REQUIRED'));return;}
+            // This is a local context checkpoint, never a new remote attempt.
+            // Preserve operation IDs, fingerprints, ACKs and uncertain states.
+            const next={...item,accountRevision:account.revision,revision:item.revision+1};
+            meta.put({key:key(intentId),record:next});
+            tx.objectStore('events').add({stage:'ACCOUNT_CONTEXT_REVALIDATED',intentId,
+              accountId:item.accountId,fromRevision:item.accountRevision,
+              accountRevision:account.revision,revision:next.revision});
+            finish({ok:true,contextRefreshed:true,record:next});
+          };
+        };
+      };
+    });
+  }
   async function advanceCreate(intentId,expectedRevision){
     const got=await getCreate(intentId);
     if(!got.ok)return got;
@@ -545,6 +584,6 @@ export function createCoordinatorStore(db){
     return decision.ok?{...decision,providerEffects:'OFF',
       code:'S04_CREATION_ACTIVATION_HELD'}:decision;
   }
-  return Object.freeze({acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,stageEffect,stageGit,confirmAdoption,advanceCreate,requeueArchivedUnattempted,
+  return Object.freeze({refreshCreateAccountContext,acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,stageEffect,stageGit,confirmAdoption,advanceCreate,requeueArchivedUnattempted,
     ...createBatchStore(db,{acceptCreate})});
 }

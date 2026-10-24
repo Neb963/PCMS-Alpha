@@ -5,7 +5,7 @@ const slugOK = v => typeof v === 'string' && /^[a-z0-9][a-z0-9-]{0,99}$/.test(v)
 const hashOK = v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
 const states = new Set(['OBSERVED_OWNER','OWNER_UNVERIFIED','OWNER_DISPUTED','UNOBSERVED','IDENTITY_CONFLICT','OWNER_CONFLICT']);
 const inventoryKey = slug => 'inventory:' + slug;
-const ownerAccount = a => a?.state === 'VERIFIED' && a.identity?.source === 'GUARDED_SESSION_READBACK' &&
+const ownerAccount = a => ['VERIFIED','INVENTORY_PENDING'].includes(a?.state) && a.identity?.source === 'GUARDED_SESSION_READBACK' &&
   hashOK(a.identity.principalFingerprint) && a.identity.bindingVersion === a.bindingVersion &&
   isSafeId(a.accountId) && Number.isSafeInteger(a.revision);
 
@@ -137,7 +137,7 @@ export function createInventoryStore(db) {
             current.bindingVersion!==account.bindingVersion ||
             current.personaUid!==account.personaUid ||
             current.identity?.principalFingerprint!==account.identity.principalFingerprint ||
-            current.state!=='VERIFIED') {finish(fail('ACCOUNT_CONTEXT_CHANGED'));return;}
+            !['VERIFIED','INVENTORY_PENDING'].includes(current.state)) {finish(fail('ACCOUNT_CONTEXT_CHANGED'));return;}
         // Monotone per-account observation watermark prevents a slow older
         // response or replay from overwriting a newer complete snapshot.
         meta.get('inventory-batch:'+account.accountId).onsuccess=mark=>{
@@ -162,7 +162,8 @@ export function createInventoryStore(db) {
               meta.put({key:inventoryKey(value.slug),generator:value});
           }
           meta.put({key:'inventory-batch:'+account.accountId,
-            observedAt:observation.observedAt,observationId:observation.observationId});
+            observedAt:observation.observedAt,observationId:observation.observationId,
+            accountRevision:current.revision,bindingVersion:current.bindingVersion});
           tx.objectStore('events').add({
             stage:'INVENTORY_OBSERVED',accountId:account.accountId,
             observationId:observation.observationId,entries:preliminary.items.length,
@@ -221,5 +222,26 @@ export function createInventoryStore(db) {
       };
     });
   }
-  return Object.freeze({applyObservation,list});
+  function accountSummaries(){
+    return transact('readonly',(tx,finish)=>{
+      const summaries={};
+      const summary=id=>summaries[id]||= {known:false,observedAt:null,verifiedOwned:0,unverified:0};
+      tx.objectStore('meta').openCursor().onsuccess=e=>{
+        const row=e.target.result;
+        if(!row){finish({ok:true,summaries});return;}
+        const name=String(row.key),value=row.value;
+        if(name.startsWith('inventory-batch:')&&value?.observationId){
+          const s=summary(name.slice('inventory-batch:'.length));
+          Object.assign(s,{known:true,observedAt:value.observedAt,
+            accountRevision:value.accountRevision??null,bindingVersion:value.bindingVersion??null});
+        }else if(name.startsWith('inventory:')&&value?.generator?.accountId){
+          const g=value.generator,s=summary(g.accountId);
+          if(g.ownerState==='OBSERVED_OWNER')s.verifiedOwned++;
+          else s.unverified++;
+        }
+        row.continue();
+      };
+    });
+  }
+  return Object.freeze({applyObservation,list,accountSummaries});
 }

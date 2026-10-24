@@ -10,3 +10,7 @@ Base: `43e7939923c20843c778a61e5293322166044c1d` (independently reviewed PR #51,
 - [ ] Independent final implementation review, exact-candidate full donor/D/reproducible-XPI/Firefox CI, protected squash merge, main tree/CI verification.
 
 No routing authority moves to the UI. PersonaMonkey remains the sole route/Persona/tab executor; no Direct fallback, wrong-owner binding, blind replay, relaxed source/publication checks or I17 quarantine change. Tests must label provider fixtures and actual network limitations. Final engineering status is recorded only after its corresponding checks execute.
+
+## Runtime checkpoint
+
+122 focused D tests passed locally across account/inventory/enrollment, staged donor routing and S04 creation/allocation/recovery. Repairs include distinct-command concurrency, safe donor-unavailable Archive, historical-candidate search and unused-forwarder cleanup, invalid-family admission holds, current-inventory enrollment completion, same-binding reactivation and non-replayed uncertain work. Primary UI implementation and installed-XPI journey proof remain pending; this checkpoint is not J01 completion.

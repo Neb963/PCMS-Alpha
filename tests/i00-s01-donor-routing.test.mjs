@@ -108,7 +108,7 @@ function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=fal
   const commit=(next,permit=null)=>{beforeDonorStateCommit(state,next,permit);state=next;};
   const echo=url=>url.includes('ipv6')?(v6==='OBSERVED'?{ip:'2a03:1b20::1',mullvad_exit_ip:true}:null):
     url.includes('dnsleak')?[{ip:'10.64.0.1',mullvad_dns:true}]:{ip:'45.83.1.1',mullvad_exit_ip:true};
-  const ctx={URL,crypto,setTimeout,Uint32Array,JSON,Object,Array,Number,String,Promise,Set,Map,
+  const ctx={URL,crypto,setTimeout,Uint32Array,JSON,Object,Array,Number,String,Promise,Set,Map,routeTestTargetLocks:new Map(),
     ...pins,issueBoundPersonaCreatePermit,issueExistingPersonaTagPermit,BLOCK_ROUTE_ID:'__block__',
     browser:{tabs:{query:async({cookieStoreId})=>tabs.get(cookieStoreId)||[]}},
     listActiveProfileIds:async()=>jobs,
@@ -157,7 +157,8 @@ function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=fal
   };
   const code=slice(bg,'function isPcmsProviderUrl(raw) {','\nasync function handleProxyRequest(details) {')
     .replace('void reloadRoutePins();','');
-  const donor=vm.runInNewContext(code+'\ncreatePcmsEnrollmentDonor();',ctx);
+  const lock=slice(bg,'async function withRouteTestTargetLock(target, task) {','async function fetchJsonThroughRouteTest(');
+  const donor=vm.runInNewContext(lock+code+'\ncreatePcmsEnrollmentDonor();',ctx);
   return {donor,effects,state:()=>state,set:next=>{state=next;}};
 }
 const relayList=[{hostname:'se-sto-wg-socks5-001',ipv4_address:'10.124.0.7',port:1080},
@@ -269,4 +270,21 @@ test('S01 release adapter D: only an idle, unshared, unleased forwarder is relea
   assert.equal((await gone.donor.observeRouteReleased({routeId:'mullvad-7'})).code,'NATIVE_UNAVAILABLE');
   assert.equal(bg.includes('stopTunnel()')&&slice(bg,'function createPcmsEnrollmentDonor(){','function pcmsProfileByUid').includes('stopTunnel'),false,
     'the adapter never stops the shared tunnel');
+});
+
+test('J01 donor candidate probes release unused forwarders and preserve assigned routes',async()=>{
+ const bg=await background();
+ const unused=adapter(bg,{relays:relayList});
+ const c=(await unused.donor.candidateRoutes({bindingId:'binding_0001'})).candidates[0];
+ const r=await unused.donor.ensureRoute(c);
+ assert.equal((await unused.donor.probeCandidate({routeId:r.routeId})).ok,true);
+ assert.ok(unused.effects.includes('DROP:'+r.routeId));
+ assert.ok(unused.effects.includes('RELEASE_EXIT:'+r.routeId));
+ const assigned=adapter(bg);assigned.set(legacyState());
+ assert.equal((await assigned.donor.probeCandidate({routeId:'mullvad-7'})).ok,true);
+ assert.ok(!assigned.effects.includes('DROP:mullvad-7'));
+ assert.ok(!assigned.effects.includes('RELEASE_EXIT:mullvad-7'));
+ const unavailable=adapter(bg,{relays:relayList,releaseFails:true});
+ const r2=await unavailable.donor.ensureRoute((await unavailable.donor.candidateRoutes({bindingId:'binding_0001'})).candidates[0]);
+ assert.equal((await unavailable.donor.probeCandidate({routeId:r2.routeId})).code,'CANDIDATE_RELEASE_UNCONFIRMED');
 });

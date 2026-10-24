@@ -41,6 +41,8 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         if(!['ACCOUNT_NOT_ARCHIVED','ALLOCATION_NOT_REDISTRIBUTABLE'].includes(moved.code))
           return moved;
       }
+      const context=await s.refreshCreateAccountContext(item.intentId,item.revision);
+      if(!context.ok||context.contextRefreshed)return context;
       if(item.state==='ADOPTION_ORIGINAL_PENDING'){
         const db=await (dbPromise||=open());
         const adopted=await createAdoptionStore(db).getFull(item.slug);
@@ -128,6 +130,18 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
       }
       if(['CREATE_PREPARED','RENAME_PREPARED'].includes(item.state)){
         if(!mutable)return fail('PROVIDER_ACTIVATION_HELD');
+        // Prepared-only evidence may predate Archive or a human-created slug.
+        // Re-observe immediately before dispatch; uncertainty is never replayed.
+        const target=await read('READ_TARGET');
+        if(!target.ok||target.source!=='INDEPENDENT_TARGET_READBACK'||target.state!=='MISSING_VERIFIED')
+          return fail(target.code||'TARGET_STATE_CHANGED');
+        if(item.state==='RENAME_PREPARED'){
+          const temporary=await read('READ_CREATE',{temporarySlug:item.temporarySlug,remoteId:item.remoteId});
+          if(!temporary.ok||temporary.source!=='INDEPENDENT_READBACK'||temporary.ownerMatches!==true||
+             temporary.privateEmpty!==true||temporary.remoteId!==item.remoteId||
+             temporary.temporarySlug!==item.temporarySlug)return fail('TEMPORARY_SOURCE_CHANGED');
+        }
+
         // Read guards again before crossing the dispatch-possible marker.
         const before=await g.getSafeRouteReadiness(item.personaUid);
         if(!routeSame(ready,before)||(await sentinel.inspect()).held)

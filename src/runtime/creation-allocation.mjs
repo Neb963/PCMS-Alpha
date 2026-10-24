@@ -32,8 +32,10 @@ export function selectS04Account({intent,accounts,inventory,pending}){
     }
   }
   const pendingCounts=new Map(eligible.map(a=>[a.accountId,0]));
+  const archived=new Set(accounts.filter(a=>a?.state==='ARCHIVED').map(a=>a.accountId));
   for(const item of pending){
     if(item?.state==='REJECTED'||item?.state==='ABORTED'||item?.state==='ARCHIVED')continue;
+    if(archived.has(item?.accountId))continue; // preserve its job without charging another account
     if(typeof item?.accountId!=='string'||!Number.isSafeInteger(pendingCounts.get(item.accountId)))
       return bad('PENDING_COUNT_UNVERIFIED');
     pendingCounts.set(item.accountId,pendingCounts.get(item.accountId)+1);

@@ -34,7 +34,7 @@ export function classifyOwnerResponse(httpStatus,payload) {
 export function normalizeReadOnlyInventory({
   sessionReply, items, ownerReplies, account, context, observationId, observedAt
 }) {
-  if(!account||account.state!=='VERIFIED'||account.identity?.source!=='GUARDED_SESSION_READBACK'||
+  if(!account||!['VERIFIED','INVENTORY_PENDING'].includes(account.state)||account.identity?.source!=='GUARDED_SESSION_READBACK'||
      !HEX.test(account.identity.principalFingerprint)||
      account.identity.bindingVersion!==account.bindingVersion)
     return fail('ACCOUNT_IDENTITY_UNVERIFIED');

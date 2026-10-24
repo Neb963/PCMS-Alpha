@@ -96,7 +96,13 @@ export function createInventoryBoundary(api,{
       const after=await g.getSafeRouteReadiness(account.account.personaUid);
       if(!sameGuardContext(before,after))return fail('SESSION_CONTEXT_CHANGED');
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
-      return await s.inventory.applyObservation(account.account,observed);
+      const applied=await s.inventory.applyObservation(account.account,observed);
+      if(!applied.ok)return applied;
+      if(account.account.state==='INVENTORY_PENDING'){
+        const completed=await s.accounts.confirmInventory(account.account.accountId,account.account.revision);
+        if(!completed.ok)return completed;
+      }
+      return applied;
     }catch{return fail('INVENTORY_AUTHORITY_UNAVAILABLE');}
   }
   function register(){
