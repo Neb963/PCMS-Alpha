@@ -88,9 +88,11 @@ def main():
             (async()=>{
               const {AddonManager}=ChromeUtils.importESModule(
                 'resource://gre/modules/AddonManager.sys.mjs');
+              const {Services}=ChromeUtils.importESModule(
+                'resource://gre/modules/Services.sys.mjs');
               const path=TARGET;
-              const file=Cc['@mozilla.org/file/local;1']
-                .createInstance(Ci.nsIFile);
+              const file=Components.classes['@mozilla.org/file/local;1']
+                .createInstance(Components.interfaces.nsIFile);
               file.initWithPath(path);
               const before=await AddonManager.getAddonByID(ADDON_ID);
               if(!before || before.version!=='1.2.0')
