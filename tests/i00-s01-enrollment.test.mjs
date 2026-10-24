@@ -915,3 +915,19 @@ test('J01 assigned probe updates current IPv6 disposition and keeps historic pub
  assert.equal((await h.ledger.binding(a.bindingId)).binding.ipv6Disposition,'BLOCKED_VERIFIED');
  assert.equal((await h.ledger.read()).ledger.owners['IPv6:2a03:1b20:1::1'],a.accountId);
 });
+
+test('J01 periodic recovery resumes transient Add setup without duplicate Persona or assignment',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
+ h.faults.host=true;const a=await enroll(h);
+ assert.equal(a.setup.code,'MULLVAD_LOCAL_SERVICE_UNAVAILABLE');
+ assert.equal(h.effects.filter(e=>e.kind==='ASSIGN').length,0);
+ h.faults.host=false;
+ assert.equal((await h.flow.upkeep()).ok,true);
+ const ready=(await h.accounts.get(a.accountId)).account;
+ assert.equal(ready.state,'WAITING_LOGIN');
+ assert.equal(ready.personaUid,a.personaUid);
+ await h.flow.upkeep();
+ assert.equal(h.effects.filter(e=>e.kind==='PERSONA_CREATE').length,1);
+ assert.equal(h.effects.filter(e=>e.kind==='ASSIGN').length,1);
+ assert.equal((await h.ledger.inspect()).activePins,1);
+});
