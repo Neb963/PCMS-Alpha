@@ -78,19 +78,54 @@ def main():
                 }));"""%json.dumps(marker))
             assert stored=={'marker':marker,'version':'1.2.0','gecko':b.ID},stored
             print('B A08_DONOR_PRE_UPGRADE_PERSISTED_STATE=PASS',flush=True)
-            # Gecko refuses replacing a currently running installed XPI on
-            # this pinned build (ERROR_FILE_ACCESS). Close only our owned CI
-            # process, then replace exactly its own persisted add-on archive.
-            # This tests process-cold package cutover, not Firefox UI update.
+            # Use the real Firefox add-on-manager update path. Replacing a
+            # cached XPI file under profile/extensions broke Gecko startup and
+            # is not a valid install/upgrade test. No profile filesystem edit.
+            # Developer-only privileged browser context is explicitly enabled
+            # by the disposable geckodriver's --allow-system-access flag.
+            b.call('POST',f'/session/{session}/moz/context',{'context':'chrome'})
+            upgrade_js="""const done=arguments[arguments.length-1];
+            (async()=>{
+              const {AddonManager}=ChromeUtils.importESModule(
+                'resource://gre/modules/AddonManager.sys.mjs');
+              const path=TARGET;
+              const file=Cc['@mozilla.org/file/local;1']
+                .createInstance(Ci.nsIFile);
+              file.initWithPath(path);
+              const before=await AddonManager.getAddonByID(ADDON_ID);
+              if(!before || before.version!=='1.2.0')
+                throw Error('A08_PRE_UPGRADE_ADDON_VERSION_CHANGED');
+              const install=await AddonManager.getInstallForFile(file);
+              if(!install)throw Error('A08_ADDON_INSTALL_NOT_CREATED');
+              let outcome;
+              try {
+                outcome=await AddonManager.installAddonFromAOM(
+                  null,Services.io.newURI('about:addons'),install,
+                  {preferUpdateOverInstall:true});
+              } catch(error) {
+                throw Error('A08_ADDON_MANAGER_UPDATE_REFUSED:'+
+                  String(error)+':CODE='+install.error+
+                  ':STATE='+install.state);
+              }
+              const current=await AddonManager.getAddonByID(ADDON_ID);
+              done({ok:current?.version==='1.2.5',
+                oldVersion:before.version,currentVersion:current?.version,
+                installed:!!current?.isActive,error:install.error,
+                state:install.state,action:'FIREFOX_ADDON_MANAGER_UPDATE',
+                outcomeVersion:outcome?.version||null});
+            })().catch(e=>done({ok:false,error:String(e),stack:String(e.stack)}));"""
+            upgrade_js=upgrade_js.replace('TARGET',json.dumps(str(target))).replace(
+                'ADDON_ID',json.dumps(b.ID))
+            b.call('POST',f'/session/{session}/timeouts',{
+                'script':40000,'pageLoad':15000})
+            upgraded=b.call('POST',f'/session/{session}/execute/async',
+                {'script':upgrade_js,'args':[]},timeout=48)
+            assert upgraded.get('ok') is True,('A08_REAL_FIREFOX_UPGRADE_FAILED',upgraded)
+            print('B A08_REAL_FIREFOX_ADDON_MANAGER_UPDATE=PASS',flush=True)
+            b.call('POST',f'/session/{session}/moz/context',{'context':'content'})
             exiting=b.owned_firefox_pids(profile)
             b.close(session);session=None
             b.require_owned_exit(profile,exiting)
-            installed_path=profile/'extensions'/(b.ID+'.xpi')
-            assert installed_path.is_file(),'A08_DONOR_PERSISTENT_XPI_NOT_FOUND'
-            assert hashlib.sha256(installed_path.read_bytes()).hexdigest()==hashlib.sha256(old.read_bytes()).hexdigest(), 'A08_BASELINE_PACKAGE_MISMATCH'
-            import shutil
-            shutil.copyfile(target,installed_path)
-            assert hashlib.sha256(installed_path.read_bytes()).hexdigest()==hashlib.sha256(target.read_bytes()).hexdigest(), 'A08_REPLACEMENT_PACKAGE_MISMATCH'
             session=b.open_session(firefox,profile)
             fresh=b.owned_firefox_pids(profile)
             assert fresh and not exiting.intersection(fresh),'A08_NOT_PROCESS_COLD'
@@ -116,7 +151,7 @@ def main():
             assert retained==marker,('A08_UPGRADE_STORAGE_LOST',retained)
             b.wait_donor_ready(session)
             assert not any(home.rglob('local.pcms.*.json')), 'A08_PCMS_HOST_REGISTERED'
-            print('B A08_PROCESS_STOPPED_XPI_REPLACEMENT_ID_AND_STORAGE_SURVIVE=PASS',
+            print('B A08_GENUINE_ADDON_MANAGER_UPGRADE_ID_AND_STORAGE_SURVIVE=PASS',
                   flush=True)
             print('B A08_ENABLED_PRIMARY_UI_NO_EXTRA_NATIVE_HOSTS=PASS',flush=True)
             print('B A08_XPI_SHA256='+hashlib.sha256(target.read_bytes()).hexdigest(),
