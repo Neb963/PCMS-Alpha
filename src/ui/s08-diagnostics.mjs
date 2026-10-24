@@ -475,5 +475,7 @@ mountedViews.add(refreshFromCanonical);
 })();
 
 }
-// Keep historical diagnostics available during the protected distribution migration.
-if(document.getElementById('pcms-diagnostic-run'))mountDiagnosticController(document);
+// The PRIMARY Settings panel owns diagnostics and calls mountDiagnosticController
+// explicitly. Do not auto-mount against the hidden legacy dashboard: it has a
+// different DOM contract and its missing controls can abort primary UI import.
+// The accepted single primary controller must be the only active S08 driver.
