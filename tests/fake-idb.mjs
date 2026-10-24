@@ -42,8 +42,10 @@ export function fakeDatabase(){
         return req;
       },
       put(value){stage(s,value.key??value.id??value.operationId,value);},
-      // Like real IDB keyPath 'key' stores: an explicit key is honoured.
-      add(value){stage(s,typeof value?.key==='string'?value.key:'auto'+String(++autoKey).padStart(8,'0'),value);},
+      // Match the real canonical operations keyPath as well as meta.key.
+      add(value){stage(s,typeof value?.key==='string'?value.key:
+        s==='operations'&&typeof value?.operationId==='string'?value.operationId:
+        'auto'+String(++autoKey).padStart(8,'0'),value);},
       openCursor(){
         requests++;const req={onsuccess:null};
         let rows=null,i=0;

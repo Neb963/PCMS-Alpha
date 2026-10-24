@@ -8,7 +8,7 @@ import {standingS06} from './s06-standing-authority.mjs';
 export const COORDINATOR_PORT='pcms-s00-coordinator';
 const types=new Set(['ACCEPT_CREATE_INTENT','GET_CREATE_INTENT','LIST_CREATE_INTENTS','ALLOCATE_CREATE_INTENT','RUN_CREATE_STEP','ADVANCE_CREATE_INTENT',
   'BEGIN_CREATE_BATCH','APPEND_CREATE_BATCH','FINALIZE_CREATE_BATCH','GET_CREATE_BATCH','LIST_CREATE_BATCHES',
-  'LIST_CREATE_BATCH_HOLDS','RETRY_CREATE_BATCH_HOLD','LIST_CREATE_BATCH_ITEMS','PREVIEW_CREATE_BATCH']);
+  'LIST_CREATE_BATCH_HOLDS','RETRY_CREATE_BATCH_HOLD','LIST_CREATE_BATCH_ITEMS','PREVIEW_CREATE_BATCH','CANCEL_CREATE_BATCH']);
 export function validateCoordinatorMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let encoded;
@@ -37,7 +37,7 @@ export function validateCoordinatorMessage(api,sender,message){
        !Number.isSafeInteger(p.offset)||p.offset<0||
        !Array.isArray(p.slugs)||p.slugs.length<1||p.slugs.length>32)
       return fail('INVALID_BATCH_CHUNK');
-  }else if(message.type==='FINALIZE_CREATE_BATCH'||message.type==='GET_CREATE_BATCH'){
+  }else if(['FINALIZE_CREATE_BATCH','GET_CREATE_BATCH','CANCEL_CREATE_BATCH'].includes(message.type)){
     if(Object.keys(p).some(k=>k!=='batchId')||
        !/^batch_[0-9a-f]{32}$/.test(p.batchId||''))return fail('INVALID_BATCH');
   }else if(message.type==='LIST_CREATE_BATCH_ITEMS'){
@@ -92,6 +92,7 @@ export function createCoordinatorBoundary(api,{open=openCanonicalDatabase,
     try{
       const s=await store(),p=message.params;
       if(message.type==='PREVIEW_CREATE_BATCH')return previewCreation(await dbPromise,p);
+      if(message.type==='CANCEL_CREATE_BATCH')return await s.cancelBatch(p);
       if(message.type==='BEGIN_CREATE_BATCH')return await s.beginBatch(p);
       if(message.type==='APPEND_CREATE_BATCH')return await s.appendBatch(p);
       if(message.type==='FINALIZE_CREATE_BATCH')return await s.finalizeBatch(p);

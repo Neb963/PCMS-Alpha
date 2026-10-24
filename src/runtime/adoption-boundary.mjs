@@ -257,6 +257,7 @@ export function createAdoptionBoundary(api,{
         if(!slug(row.slug)||a?.state!=='VERIFIED'||onlySlug&&row.slug!==onlySlug)continue;
         if((backoff.get(row.slug)||0)>now)continue;
         const rec=adoptions.get(row.slug);
+        if(rec?.archived)continue;
         if(rec&&rec.accountRevision!==a.revision&&rec.personaUid===a.personaUid&&
            rec.bindingVersion===a.bindingVersion&&rec.principalFingerprint===a.identity?.principalFingerprint){
           work.push({slug:row.slug,type:'REFRESH_CONTEXT',params:{slug:row.slug,expectedRevision:row.revision}});continue;
@@ -297,7 +298,10 @@ export function createAdoptionBoundary(api,{
       }
       if(results.some(r=>r.ok)||work.length>results.length)
         try{void Promise.resolve(api.alarms?.create(ADOPTION_AUTO_ALARM+'-followup',{when:clock()+60000})).catch(()=>{});}catch{}
-      const unqualified=[...adoptions.values()].some(a=>!a.archived&&a.archiveState==='ARCHIVED_GIT_CONFIRMED'&&!a.originalCheckpoint?.qualified);
+      const unqualified=[...adoptions.values()].some(a=>{const current=accounts.get(a.accountId);
+        return !a.archived&&a.archiveState==='ARCHIVED_GIT_CONFIRMED'&&!a.originalCheckpoint?.qualified&&
+          current?.state==='VERIFIED'&&current.revision===a.accountRevision&&current.personaUid===a.personaUid&&
+          current.bindingVersion===a.bindingVersion&&current.identity?.principalFingerprint===a.principalFingerprint;});
       if(unqualified&&clock()-lastCheckpointRequest>=5*60000){
         lastCheckpointRequest=clock();void Promise.resolve(requestCheckpoint()).catch(()=>{});
       }

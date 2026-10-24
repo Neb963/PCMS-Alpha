@@ -8,14 +8,14 @@ import importlib.util
 from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('upgrade','scripts/a08-upgrade-firefox.py')
 u=importlib.util.module_from_spec(spec);spec.loader.exec_module(u)
-ready={'version':'1.2.8','gecko':u.b.ID,'main':True,'storageAPI':True,'alarms':True}
+ready={'version':'1.2.9','gecko':u.b.ID,'main':True,'storageAPI':True,'alarms':True}
 old={**ready,'version':'1.2.0'}
 observed=[]
 samples=iter([old,None,ready])
 def read(session,script):
     value=next(samples);observed.append(value);return value
 with patch.object(u.b,'execute',read),patch.object(u.time,'sleep',lambda _:None):
-    assert u.wait_upgraded_runtime('isolated-session','1.2.8')==ready
+    assert u.wait_upgraded_runtime('isolated-session','1.2.9')==ready
 assert len(observed)==3, 'Visible old-version UI must not complete readiness'
 for sample in [old,None,{**ready,'alarms':False},{**ready,'main':False},
                {**ready,'gecko':'wrong-addon'}]:
@@ -24,7 +24,7 @@ for sample in [old,None,{**ready,'alarms':False},{**ready,'main':False},
          patch.object(u.time,'sleep',lambda _:None), \\
          patch.object(u.time,'monotonic',lambda:next(ticks)):
         try:
-            u.wait_upgraded_runtime('isolated-session','1.2.8',timeout_seconds=1)
+            u.wait_upgraded_runtime('isolated-session','1.2.9',timeout_seconds=1)
         except AssertionError:
             pass
         else:

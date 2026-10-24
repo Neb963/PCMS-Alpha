@@ -90,3 +90,29 @@ test('J02 1001 input preview balances offline account, adopts owner, coalesces d
  const direct=await s.acceptCreate({intentId:batchIntentId(I17_QUARANTINED_BATCH,0),slug:'unrelated-name',origin:'OPERATOR'});assert.equal(direct.ok,false);
  assert.equal(db.keys('operations').length,0);
 });
+
+test('J02 newer targeted positive/negative owner evidence invalidates conflicting current census without erasing last confirmed count',async()=>{
+ for(const state of ['OWNED_VERIFIED','MISSING_VERIFIED','COLLISION']){
+  const db=fakeDatabase(),s=createInventoryStore(db),owned=state!=='OWNED_VERIFIED';
+  await put(db,[{key:'account:'+account.accountId,account},
+   {key:'inventory:'+row.slug,generator:{...row,ownerState:'IDENTITY_CONFLICT',identityHold:'PUBLIC_ID_REVALIDATION_REQUIRED'}},
+   {key:'inventory-batch:'+account.accountId,countsTrusted:true,lastConfirmedCount:owned?1:0,ownedSlugs:owned?[row.slug]:[]}]);
+  await s.confirmIdentity(row.slug,row.revision,account,{ok:true,source:'INDEPENDENT_TARGET_READBACK',state,
+   ownerMatches:state==='OWNED_VERIFIED',slug:row.slug,remoteId:row.remoteId,visibility:'UNLISTED'});
+  const marker=db.read('meta','inventory-batch:'+account.accountId);assert.equal(marker.countsTrusted,false,state);
+  assert.equal(marker.lastConfirmedCount,owned?1:0);assert.equal(marker.countHold,'TARGET_OWNERSHIP_CENSUS_CHANGED');
+  assert.equal(db.read('meta','inventory:'+row.slug).generator.remoteId,row.remoteId);
+ }
+});
+
+test('J02 cancellation is limited to unsubmitted local manifest and can never stop or re-submit queued effects',async()=>{
+ const db=fakeDatabase(),s=createCoordinatorStore(db),batchId='batch_'+'8'.repeat(32);
+ await s.beginBatch({batchId,total:2});await s.appendBatch({batchId,offset:0,slugs:['saved-one']});
+ assert.equal((await s.cancelBatch({batchId})).batch.state,'CANCELLED');
+ assert.equal((await s.finalizeBatch({batchId})).batch.state,'CANCELLED');
+ assert.equal((await s.processBatch({batchId})).code,'BATCH_NOT_QUEUED');
+ const second='batch_'+'9'.repeat(32);await s.beginBatch({batchId:second,total:1});
+ await s.appendBatch({batchId:second,offset:0,slugs:['saved-two']});await s.finalizeBatch({batchId:second});
+ assert.equal((await s.cancelBatch({batchId:second})).code,'BATCH_ALREADY_SUBMITTED');
+ assert.equal(db.keys('operations').length,0);
+});

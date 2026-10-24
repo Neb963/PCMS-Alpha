@@ -98,6 +98,22 @@ export function createBatchStore(db,{acceptCreate}){
    };
   });
  }
+ function cancelBatch({batchId}={}){
+  if(isI17Quarantined({batchId}))return Promise.resolve(fail(I17_QUARANTINE_CODE));
+  if(!BATCH.test(batchId||''))return Promise.resolve(fail('INVALID_BATCH'));
+  return transaction(db,'readwrite',(tx,done)=>{
+   const meta=tx.objectStore('meta');meta.get(root(batchId)).onsuccess=e=>{
+    const batch=e.target.result?.batch;
+    if(!batch){done(fail('BATCH_NOT_FOUND'));return;}
+    if(batch.state==='CANCELLED'){done({ok:true,batch:view(batch)});return;}
+    if(batch.state!=='INGESTING'||batch.processed!==0){done(fail('BATCH_ALREADY_SUBMITTED'));return;}
+    const next={...batch,state:'CANCELLED',revision:batch.revision+1};
+    meta.put({key:root(batchId),batch:next});
+    tx.objectStore('events').add({stage:'J02_UNSUBMITTED_INPUT_CANCELLED',batchId,providerEffects:'OFF'});
+    done({ok:true,batch:view(next)});
+   };
+  });
+ }
  function getBatch({batchId}={}){
   if(isI17Quarantined({batchId}))return Promise.resolve(fail(I17_QUARANTINE_CODE));
   if(!BATCH.test(batchId||''))return Promise.resolve(fail('INVALID_BATCH'));
@@ -160,7 +176,7 @@ export function createBatchStore(db,{acceptCreate}){
         observed.accountId===record.accountId&&observed.remoteId===record.remoteId&&
         (record.state.startsWith('GIT_')||record.state==='ASSOCIATED_NOT_READY');
       const category=held?'HELD':confirmed?'CONFIRMED':'WORKING';
-      counts[category.toLowerCase()]++;
+      if(confirmed)counts.confirmed++;if(held)counts.held++;if(!confirmed&&!held)counts.working++;
       const row={index,slug,inputId,intentId:record?.intentId||null,
         coalesced:!!record&&record.intentId!==inputId,
         revision:record?.revision||null,accountId:record?.accountId||batch.accountId||null,
@@ -171,7 +187,8 @@ export function createBatchStore(db,{acceptCreate}){
         intakeHeld:hold?.status==='HELD',category,resourceConfirmed:confirmed,
         sourcePending:confirmed&&record.state!=='ASSOCIATED_NOT_READY',
         lastAttempt:record?.lastAttempt?{at:record.lastAttempt.at,ok:record.lastAttempt.ok,code:record.lastAttempt.code}:null};
-      if((status==='ALL'||status===category)&&(!query||slug.includes(query.toLowerCase())))matching.push(row);
+      if((status==='ALL'||status==='HELD'&&held||status==='CONFIRMED'&&confirmed||status==='WORKING'&&!held&&!confirmed)&&
+         (!query||slug.includes(query.toLowerCase())))matching.push(row);
      }
      done({ok:true,batch:view(batch),items:matching.slice(offset,offset+limit),total:matching.length,
        counts,more:offset+limit<matching.length,providerEffects:'OFF'});
@@ -303,6 +320,6 @@ export function createBatchStore(db,{acceptCreate}){
    };
   });
  }
- return Object.freeze({beginBatch,appendBatch,finalizeBatch,getBatch,listBatches,
+ return Object.freeze({beginBatch,appendBatch,finalizeBatch,cancelBatch,getBatch,listBatches,
   processBatch,retryBatchHold,listBatchHolds,listBatchItems});
 }

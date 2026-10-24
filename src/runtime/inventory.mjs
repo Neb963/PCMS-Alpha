@@ -268,7 +268,7 @@ export function createInventoryStore(db) {
               protected:a.archiveState==='ARCHIVED_GIT_CONFIRMED'&&a.originalCheckpoint?.qualified===true,
               originalGit:a.archiveState==='ARCHIVED_GIT_CONFIRMED'});}
           else if(k.startsWith('release:')&&v?.release)fact(v.release.slug).release=v.release.state;
-          else if(k.startsWith('ai-job:')&&v?.job)fact(v.job.slug).ai=v.job.state;
+          else if(k.startsWith('ai-job:')&&v?.job)Object.assign(fact(v.job.slug),{ai:v.job.state,aiReleased:v.job.executionSlotReleased===true});
           else if(k.startsWith('s05-ready:')&&v?.record){const r=v.record;
             Object.assign(fact(r.slug),{ready:r.active?.state,desired:!!r.desired,hold:r.hold});}
           else if(k.startsWith('s00-create-intent:')&&v?.record){const r=v.record;
@@ -281,9 +281,9 @@ export function createInventoryStore(db) {
             g.management==='OBSERVED_ONLY'?'CAPTURING':'PENDING';
           g.workflowStatus=g.ownerState!=='OBSERVED_OWNER'||f.hold||f.creationHold||
             ['HELD','FAILED','PUBLICATION_UNCERTAIN','DISPATCH_POSSIBLE'].includes(f.release)||
-            ['HELD','FAILED'].includes(f.ai)?'HELD':
-            ['REVIEW','AWAITING_APPROVAL','AWAITING_REVIEW'].includes(f.ai)||f.release==='APPROVED'?'REVIEW':
-            f.ready==='ACTIVE'||f.desired||f.ai&&!['COMPLETED','CANCELED','ABORTED'].includes(f.ai)?'DEVELOPING':
+            ['HELD','FAILED','HELD_RECONCILE','HELD_NO_PROGRESS','HUMAN_OWNED'].includes(f.ai)?'HELD':
+            ['TESTS_VERIFIED','REVIEW','AWAITING_APPROVAL','AWAITING_REVIEW'].includes(f.ai)||f.aiReleased?'REVIEW':
+            f.release==='APPROVED'||f.ready==='ACTIVE'||f.desired||f.ai&&!['COMPLETED','CANCELED','ABORTED'].includes(f.ai)?'DEVELOPING':
             g.visibility==='PUBLIC'?'PUBLISHED':'IDLE';
           g.workflowHold=f.creationHold||f.hold||null;
           const match=(!accountId||g.accountId===accountId)&&
@@ -309,8 +309,8 @@ export function createInventoryStore(db) {
   }
   function confirmIdentity(slug,expectedRevision,account,proof){
     if(proof?.ok!==true||proof.source!=='INDEPENDENT_TARGET_READBACK'||
-       proof.state!=='OWNED_VERIFIED'||proof.ownerMatches!==true||proof.slug!==slug||
-       !['PUBLIC','UNLISTED'].includes(proof.visibility)||!isSafeId(proof.remoteId))
+       !['OWNED_VERIFIED','MISSING_VERIFIED','COLLISION'].includes(proof.state)||proof.slug!==slug||
+       (proof.state==='OWNED_VERIFIED'&&(proof.ownerMatches!==true||!['PUBLIC','UNLISTED'].includes(proof.visibility)||!isSafeId(proof.remoteId))))
       return Promise.resolve(fail('TARGET_IDENTITY_UNVERIFIED'));
     return transact('readwrite',(tx,done)=>{
       const meta=tx.objectStore('meta');
@@ -324,9 +324,20 @@ export function createInventoryStore(db) {
         meta.get(inventoryKey(slug)).onsuccess=e=>{
           const row=e.target.result?.generator;
           if(!row||row.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
+          if(row.accountId!==current.accountId||row.personaUid!==current.personaUid||row.bindingVersion!==current.bindingVersion){
+            done(fail('ACCOUNT_CONTEXT_CHANGED'));return;}
+          meta.get('inventory-batch:'+current.accountId).onsuccess=e=>{
+            const marker=e.target.result;
+            if(marker?.countsTrusted===true&&Array.isArray(marker.ownedSlugs)&&
+               marker.ownedSlugs.includes(slug)!==(proof.state==='OWNED_VERIFIED'))
+              meta.put({...marker,countsTrusted:false,countHold:'TARGET_OWNERSHIP_CENSUS_CHANGED'});
+          };
+          if(proof.state!=='OWNED_VERIFIED'){
+            meta.put({key:inventoryKey(slug),generator:{...row,ownerState:proof.state==='MISSING_VERIFIED'?'UNOBSERVED':'OWNER_DISPUTED',revision:row.revision+1}});
+            done(fail('TARGET_OWNERSHIP_CHANGED'));return;
+          }
           if(!(row.ownerState==='OBSERVED_OWNER'||row.ownerState==='IDENTITY_CONFLICT'&&row.identityHold==='PUBLIC_ID_REVALIDATION_REQUIRED')||
-             row.accountId!==current.accountId||row.personaUid!==current.personaUid||
-             row.bindingVersion!==current.bindingVersion||row.remoteId!==proof.remoteId){
+             row.remoteId!==proof.remoteId){
             done(fail('TARGET_IDENTITY_CHANGED'));return;}
           // This proves current immutable identity/owner only. Original byte
           // fingerprints, source links and checkpoint authority remain intact.

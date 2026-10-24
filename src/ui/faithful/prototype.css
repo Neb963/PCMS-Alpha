@@ -332,3 +332,18 @@ body:has(.drawer-overlay:not([hidden])) #toast-root{right:min(555px,calc(100vw -
  #page[data-view="settings"] .settings-main{overflow-y:auto;max-height:none}
  #page[data-view="settings"] .settings-group{padding:14px}
 }
+
+/* Generator work remains readable at fleet and batch scale. */
+.batch-item{padding:12px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.batch-item .btn{margin:3px 5px 0 0}.batch-item textarea{margin-top:10px;width:100%}
+.drawer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:14px}
+.drawer-body>label{display:block;margin-bottom:14px}.drawer-body>label>textarea,.drawer-body>label>select{display:block;width:100%;margin-top:6px}
+[data-generator-extra-filters]{gap:16px;padding-bottom:16px}[data-generator-extra-filters] label{font-size:12px;color:var(--muted)}
+
+#page[data-view="generators"] .workspace-surface .table-scroll table.data th:last-child{width:88px!important}
+#page[data-view="generators"] .workspace-surface .data .open-col{width:88px;min-width:88px;padding-left:8px;padding-right:8px}
+#page[data-view="generators"] .workspace-surface .data th:first-child{width:48px!important}
+#page[data-view="generators"] .generator-select-cell{padding-left:12px;padding-right:10px}
+#page[data-view="generators"] .workspace-surface table.data{table-layout:auto}
+#page[data-view="generators"] .workspace-surface table.data td,#page[data-view="generators"] .workspace-surface table.data th{max-width:none}
+#page[data-view="generators"] .workspace-surface table.data .name-cell{max-width:240px}

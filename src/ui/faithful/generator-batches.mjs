@@ -1,6 +1,7 @@
 // Primary generator intake/progress. This view never manufactures ownership,
 // effect success or revisions; each action uses the production typed boundary.
 const port='pcms-s00-coordinator';
+const DRAFT='pcmsUiCreationDraftV1';
 const labels={WAITING_CAPABILITY:'Waiting for allocation',OWNER_READBACK_PENDING:'Checking ownership',
  OWNER_MISSING_VERIFIED:'Preparing private creation',CREATE_PREPARED:'Preparing private creation',
  CREATE_OBSERVING:'Confirming creation',CREATE_UNCERTAIN:'Reconciling creation',
@@ -30,7 +31,7 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
  function explain(code){
   if(!code)return '';
   if(code.includes('QUARANTINED'))return 'Historical operation retained for manual investigation.';
-  if(/INVENTORY|COUNT/.test(code))return 'Synchronize account inventory; queued work is preserved.';
+  if(/INVENTORY|(?:^|_)COUNT(?:_|$)/.test(code))return 'Synchronize account inventory; queued work is preserved.';
   if(/ROUTE|GUARD|DONOR/.test(code))return 'Check the account’s protected route.';
   if(/ACCOUNT|LOGIN|SESSION/.test(code))return 'Complete account login or reactivation.';
   if(/GIT|ARCHIVE|SOURCE_CHECKPOINT/.test(code))return 'Check GitHub connection and original-source backup.';
@@ -77,6 +78,8 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
    catch{status.textContent='The result was not confirmed. Refresh this item before retrying.'}finally{busy=false}}
   let timer;query.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>{offset=0;void draw()},180)});
   filter.addEventListener('change',()=>{offset=0;void draw()});void draw();
+  const polling=setInterval(()=>{if(!d.overlay.isConnected){clearInterval(polling);return}
+    if(!busy&&!list.contains(root.activeElement)&&!pager.contains(root.activeElement)&&root.activeElement!==query&&root.activeElement!==filter)void draw();},2500);
  }
  function openHistory(){
   const d=dialog('Creation batches'),status=el('p','setting-note','Reading saved batches…'),list=el('div'),pager=el('div','pagination-actions');
@@ -85,8 +88,11 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
    list.replaceChildren();pager.replaceChildren();status.textContent=out.items.length?'Background work continues with PCMS closed. Open a batch for item progress.':'No creation batches yet.';
    for(const batch of out.items){const row=el('section','batch-item');row.append(el('strong','',batch.total+' generator requests'),
     el('p','setting-note',(batch.createdAt?new Date(batch.createdAt).toLocaleString()+' · ':'')+
-     (batch.state==='INGESTING'?batch.appended+'/'+batch.total+' inputs saved · incomplete':batch.processed+'/'+batch.total+' inputs queued')),
-    b('View progress',()=>{d.close();openBatch(batch.batchId)}));list.append(row)}
+     (batch.state==='CANCELLED'?'Unsubmitted input canceled':batch.state==='INGESTING'?batch.appended+'/'+batch.total+' inputs saved · incomplete':batch.processed+'/'+batch.total+' inputs queued')),
+    b('View progress',()=>{d.close();openBatch(batch.batchId)}));
+    if(batch.state==='INGESTING')row.append(b('Recover saved input',()=>{d.close();openCreator()}),
+      b('Cancel unfinished input',()=>void(async()=>{const out=await call('CANCEL_CREATE_BATCH',{batchId:batch.batchId});
+        if(out.ok)await draw();else notify('Input could not be canceled. Submitted work is preserved.');})()));list.append(row)}
    const prev=b('Previous',()=>{after=history.pop()??null;void draw()});prev.disabled=!history.length;
    const next=b('Next',()=>{history.push(after);after=out.next;void draw()});next.disabled=!out.more;pager.append(prev,next);
   }catch{status.textContent='Batch history unavailable. Your requests are preserved.'}}
@@ -128,6 +134,7 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
    if(!frozen||busy)return;busy=true;submit.disabled=true;input.disabled=true;choice.disabled=true;
    const batchId=persisted||'batch_'+crypto.randomUUID().replaceAll('-','');persisted=batchId;
    try{
+    await browser.storage.local.set({[DRAFT]:{batchId,...frozen}});
     const begin=await call('BEGIN_CREATE_BATCH',{batchId,total:frozen.slugs.length,accountId:frozen.accountId});if(!begin.ok)throw Error(begin.code);
     for(let at=begin.batch.appended;at<frozen.slugs.length;at+=32){const chunk=frozen.slugs.slice(at,at+32);let out;
      try{out=await call('APPEND_CREATE_BATCH',{batchId,offset:at,slugs:chunk})}catch{
@@ -136,10 +143,37 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
     let final;try{final=await call('FINALIZE_CREATE_BATCH',{batchId})}catch{final=await call('GET_CREATE_BATCH',{batchId})}
     if(!final.ok||final.batch.state==='INGESTING')throw Error('FINALIZATION_UNCONFIRMED');
     try{await browser.alarms.create('pcms-s04-creation-followup',{when:Date.now()+1000})}catch{}
+    await browser.storage.local.remove(DRAFT);
     d.close();openBatch(batchId);await reload();
    }catch{status.textContent='Submission was interrupted. Saved input is retained. Retry submission to resume this same batch.'}
    finally{busy=false;submit.disabled=false;input.disabled=false;choice.disabled=false}
-  })(),'btn primary');submit.hidden=true;actions.append(review,submit,b('Batch history',()=>{d.close();openHistory()}));input.focus();
+  })(),'btn primary');submit.hidden=true;
+  const resume=b('Resume saved submission',()=>void resumeDraft()),cancel=b('Cancel unfinished input',()=>void cancelDraft());
+  resume.hidden=true;cancel.hidden=true;let savedDraft=null;
+  async function resumeDraft(){if(!savedDraft)return;
+   try{const out=await call('GET_CREATE_BATCH',{batchId:savedDraft.batchId});
+    if(out.ok&&out.batch.state!=='INGESTING'){await browser.storage.local.remove(DRAFT);d.close();openBatch(savedDraft.batchId);return}
+    if(!out.ok&&out.code!=='BATCH_NOT_FOUND')throw Error(out.code);
+    frozen=savedDraft;persisted=savedDraft.batchId;input.value=frozen.slugs.join('\n');choice.value=frozen.accountId||'';
+    input.disabled=true;choice.disabled=true;review.hidden=true;resume.hidden=true;submit.hidden=false;draw();
+    status.textContent='Saved submission restored. Resume uses the same durable batch and inputs.';
+   }catch{status.textContent='Saved submission could not be inspected. Its input is preserved.'}
+  }
+  async function cancelDraft(){if(!savedDraft)return;
+   try{const out=await call('CANCEL_CREATE_BATCH',{batchId:savedDraft.batchId});
+    if(!out.ok&&!['BATCH_NOT_FOUND','BATCH_ALREADY_SUBMITTED'].includes(out.code))throw Error(out.code);
+    await browser.storage.local.remove(DRAFT);d.close();
+    if(out.code==='BATCH_ALREADY_SUBMITTED')openBatch(savedDraft.batchId);else openCreator();
+   }catch{status.textContent='Cancellation was not confirmed. Saved input is preserved.'}
+  }
+  void browser.storage.local.get(DRAFT).then(data=>{const saved=data[DRAFT];
+   if(!saved||!/^batch_[a-f0-9]{32}$/.test(saved.batchId||'')||!Array.isArray(saved.slugs)||!saved.slugs.length||
+      saved.slugs.some(s=>typeof s!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(s))||
+      !Array.isArray(saved.items)||saved.items.length!==saved.slugs.length)return;
+   savedDraft=saved;resume.hidden=false;cancel.hidden=false;review.disabled=true;input.disabled=true;choice.disabled=true;
+   status.textContent='An interrupted submission has saved inputs. Resume it or cancel the unfinished input before starting another.';
+  }).catch(()=>{status.textContent='Saved input could not be read. Retry after checking Firefox storage.';review.disabled=true});
+  actions.append(review,submit,resume,cancel,b('Batch history',()=>{d.close();openHistory()}));input.focus();
  }
  return {openCreator,openBatch,openHistory};
 }

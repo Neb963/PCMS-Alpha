@@ -610,7 +610,7 @@ export function createCoordinatorStore(db){
           }
           items.push({intentId:record.intentId,slug:record.slug,
             accountId:record.accountId||null,state:record.state,
-            hold:record.hold,revision:record.revision,
+            hold:record.hold,revision:record.revision,...(record.lastAttempt?{lastAttempt:record.lastAttempt}:{}),
             conflict:record.pinConflict===true,
             origins:(record.sources||[]).map(s=>s.type)});
           tail=record.intentId;
