@@ -3,6 +3,7 @@
 **Status:** proposed governing corrective program, active only after reviewed merge to main.
 **Source code baseline:** combined XPI v1.2.7 at main `4f04d841b7702c57140265622f658058d4ff211d`.
 **Product authority, unchanged:** `docs/authority/PCMS-Alpha-CLIENT-SPEC-v1.0.0.md` and AC-01–AC-18 / T-01–T-10, with only explicit supersessions in client amendment v1.0.1. Original approved Stage 4 UI/UX prototype is visual and interaction reference when not superseded.
+**Evidence register:** [Full practical conformance audit, all 34 findings with primary UI/backend line references](../audit/2026-10-24-PRACTICAL-PRODUCT-CONFORMANCE.md). Treat this as an audit/evidence snapshot; the accepted client contract controls product behavior.
 **Why:** Prior A00–A09 built much guarded runtime and successful engineering checks, but the **visible primary product is incomplete**. On 2026-10-24 the operator could not run ordinary account/routing tests. The v1.2.7 code-level conformance audit enumerated **34** named observations (8 A, 7 G, 6 D, 3 R, 10 S). The earlier narrative saying "27" was a counting error; do not drop any of the 34 or interpret unverified items as proven runtime failures.
 
 ## Definition of actual product completion
