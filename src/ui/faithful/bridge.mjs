@@ -1973,7 +1973,13 @@ function primaryConnections(container){
  const status=el('p','setting-note','Checking saved connection…');status.setAttribute('role','status');
  const actions=el('div','pcms-settings-actions');
  let busy=false,view=null;
- const setBusy=value=>{busy=value;for(const control of [connect,inspect,reconcile,repair])control.disabled=value};
+ const setBusy=value=>{
+  busy=value;
+  connect.disabled=value||view?.interrupted===true;
+  inspect.disabled=value||!view?.configured||view?.interrupted===true;
+  reconcile.disabled=value||!view?.canRecover;
+  repair.disabled=value||!view?.canRecover;
+ };
  const connect=b('Connect',()=>void perform('CONNECT_GIT'),'btn primary');
  const inspect=b('Read GitHub main',()=>void (async()=>{
   if(busy)return;setBusy(true);status.textContent='Reading the committed main inventory…';
