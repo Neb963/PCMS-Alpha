@@ -1,8 +1,9 @@
-import test from 'node:test';
+import test,{after} from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
-import {readFile} from 'node:fs/promises';
+import {readFile,mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {buildI00} from '../scripts/build-i00.mjs';
 import * as pins from '../src/runtime/route-pin.mjs';
@@ -12,9 +13,11 @@ globalThis.crypto??=webcrypto;
 const route={id:'mullvad-0001',provider:'mullvad',host:'10.124.0.1',port:1080,type:'socks',enabled:true};
 const tagged={pcmsBindingId:'binding_0001',personaUid:'persona-0001',routeId:route.id,
   containerId:'firefox-container-001',managed:true,status:'active',killSwitch:true,blockLocalNetwork:true};
+const buildDirectory=await mkdtemp(path.join(tmpdir(),'pcms-routing-test-'));
+after(()=>rm(buildDirectory,{recursive:true,force:true}));
 let staged;
 async function background(){
-  staged??=(await buildI00({packageArchive:false})).stage;
+  staged??=(await buildI00({packageArchive:false,buildDirectory})).stage;
   return readFile(path.join(staged,'background.js'),'utf8');
 }
 const slice=(bg,begin,end)=>{
