@@ -1283,7 +1283,8 @@ def main():
                 # R3 acceptance: exercise the real packaged primary Settings
                 # preflight, not a fixture view or a token/network write path.
                 execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
-                  sh.querySelector('[data-nav="settings"]').click();return true""")
+                  sh.querySelector('[data-nav="settings"]').click();
+                  sh.querySelector('[data-settings="diagnostics"]').click();return true""")
                 r3_panel=None
                 for _ in range(45):
                     r3_panel=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
