@@ -135,6 +135,26 @@ def main():
                 {'expected':expected,'observed':observed})
             print('H A08_UPGRADED_PROFILE_XPI_BYTES_MATCH_CI_ARTIFACT=PASS',
                   flush=True)
+            # An XPI filesystem write can precede the AddonManager's durable
+            # extensions.json version transition. Never close/restart Firefox
+            # until the manager's independent disk registry confirms 1.2.5;
+            # an uncommitted candidate remains a failed upgrade, not success.
+            registry=profile/'extensions.json'
+            registry_version=None
+            for _ in range(100):
+                try:
+                    state=json.loads(registry.read_text())
+                    rows=[a for a in state.get('addons',[])
+                          if a.get('id')==b.ID]
+                    registry_version=rows[0].get('version') if len(rows)==1 else None
+                except (OSError,ValueError,IndexError,TypeError):
+                    registry_version=None
+                if registry_version=='1.2.5':break
+                time.sleep(.15)
+            assert registry_version=='1.2.5',(
+                'A08_ADDON_REGISTRY_UPDATE_NOT_COMMITTED',registry_version)
+            print('H A08_FIREFOX_ADDON_REGISTRY_UPDATED_BEFORE_SHUTDOWN=PASS',
+                  flush=True)
             exiting=b.owned_firefox_pids(profile)
             b.close(session);session=None
             # The single disposable CI profile may lose Marionette during a
