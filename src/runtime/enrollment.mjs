@@ -12,6 +12,7 @@ const TRANSIENT=new Set(['MULLVAD_LOCAL_SERVICE_UNAVAILABLE','DONOR_SECURITY_UNA
 const rid=prefix=>prefix+crypto.randomUUID().replaceAll('-','');
 // Codes shown to the operator; anything else is summarized generically.
 export const SETUP_MESSAGES=Object.freeze({
+  ENROLLMENT_INTERRUPTED:'Protected setup was interrupted. Resume setup checks the saved Persona and route before continuing.',
   MULLVAD_LOCAL_SERVICE_UNAVAILABLE:'The PersonaMonkey Mullvad helper is not running or not installed on this computer.',
   DONOR_SECURITY_UNAVAILABLE:'Firefox privacy protections are not in a safe state; PersonaMonkey is holding all protected routes.',
   NO_UNIQUE_EXIT_AVAILABLE:'No available Mullvad exit was found that has not already been used by another managed account.',
@@ -50,7 +51,16 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     if(archiving.has(accountId))return Promise.resolve(fail('ACCOUNT_BUSY'));
     const prior=running.get(accountId);
     if(prior)return prior.kind===kind?prior.promise:Promise.resolve(fail('ACCOUNT_BUSY'));
-    const promise=Promise.resolve().then(task).catch(()=>fail('ENROLLMENT_INTERRUPTED'))
+    const promise=Promise.resolve().then(task).catch(async()=>{
+      // A thrown adapter/storage error must not leave idle setup looking busy.
+      // Preserve the binding and donor intent; resume observes before effects.
+      try{const current=await accounts.get(accountId);if(current.ok&&current.account.state==='PREPARING'){
+        pins.hold(current.account.bindingId);
+        await ledger.hold(current.account.bindingId,'ENROLLMENT_INTERRUPTED');
+        await progress(accountId,'HELD','ENROLLMENT_INTERRUPTED');
+      }}catch{}
+      return fail('ENROLLMENT_INTERRUPTED');
+    })
       .finally(()=>running.delete(accountId));
     running.set(accountId,{kind,promise});
     return promise;

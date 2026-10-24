@@ -118,7 +118,7 @@ def run(browser, archive, folder):
         # Actual default UI -> actual runtime port -> donor. No shim yet.
         click(session,'[data-action="add-account"]')
         wait(session,"sh?.querySelectorAll('[data-account-id]').length===1","J01_REAL_ADD")
-        wait(session,"sh?.querySelector('.account-list-scroll')?.textContent.includes('helper')||sh?.querySelector('.account-list-scroll')?.textContent.includes('privacy')||sh?.querySelector('.account-list-scroll')?.textContent.includes('relay')","J01_REAL_HELD",140)
+        wait(session,"sh?.querySelector('.account-list-scroll')?.textContent.includes('helper')||sh?.querySelector('.account-list-scroll')?.textContent.includes('privacy')||sh?.querySelector('.account-list-scroll')?.textContent.includes('relay')||sh?.querySelector('.account-list-scroll')?.textContent.includes('setup was interrupted')","J01_REAL_HELD",140)
         if not b.execute(session,"return !!document.getElementById('pcms-faithful-host').shadowRoot.querySelector('.account-dialog')"):
             click(session,'[data-account-manage]')
         command(session,"ARCHIVE",True)
@@ -133,10 +133,20 @@ def run(browser, archive, folder):
 
         fixture(session)
         wait(session,"sh?.querySelectorAll('[data-account-id]').length===0","J01_FIXTURE_ISOLATION")
+        oracle(session,"await window.__j01.interruptNextPersona();return true;")
         click(session,'[data-action="add-account"]')
         wait(session,"sh?.querySelectorAll('[data-account-id]').length===1","J01_FIXTURE_ADD")
         data=oracle(session);account_id=data["accounts"][0]["accountId"]
+        wait(session,"sh?.querySelector('.account-state')?.textContent.includes('setup was interrupted')","J01_INTERRUPTED_SETUP_VISIBLE")
+        interrupted=oracle(session);assert interrupted["accounts"][0]["setup"]["code"]=="ENROLLMENT_INTERRUPTED",interrupted
+        assert len([x for x in interrupted["effects"] if x["kind"]=="PERSONA_CREATE"])==1
+        capture(session,"interrupted-setup",evidence)
+        b.close(session);session=b.open_session(browser,profile)
+        b.call("POST",f"/session/{session}/url",{"url":url});b.wait_donor_ready(session);fixture(session)
+        manage(session,account_id);command(session,"RESUME_SETUP")
         wait_state(session,account_id,"WAITING_LOGIN")
+        recovered=oracle(session);assert len([x for x in recovered["effects"] if x["kind"]=="PERSONA_CREATE"])==1,recovered
+        print("B J01_THROWN_SETUP_AFTER_PERSONA_EFFECT_COLD_RESTART_RESUME_NO_DUPLICATE=PASS",flush=True)
         if not b.execute(session,"return !!document.getElementById('pcms-faithful-host').shadowRoot.querySelector('.account-dialog')"):manage(session,account_id)
         command(session,"CONFIRM_LOGIN")
         wait(session,"sh?.querySelector('.account-feedback')?.textContent.includes('action could not')","J01_LOGIN_REQUIRED")

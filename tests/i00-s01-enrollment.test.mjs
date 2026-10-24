@@ -942,3 +942,17 @@ test('J01 upkeep reconciles lost Persona-create ACK without requiring another Ad
  assert.equal(h.effects.filter(e=>e.kind==='PERSONA_CREATE').length,1);
  assert.equal(h.profiles.size,1);assert.equal(h.effects.filter(e=>e.kind==='ASSIGN').length,1);
 });
+
+test('interrupted setup durably explains its hold and restart resumes the same donor Persona without duplicate creation',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),original=h.donor.createBoundPersona;
+ let once=true;
+ h.donor.createBoundPersona=async args=>{const made=await original(args);if(once){once=false;throw Error('lost response after Persona creation')}return made;};
+ const started=await h.flow.begin();await h.flow.prepare(started.accountId);
+ const held=(await h.accounts.get(started.accountId)).account;
+ assert.equal(held.state,'PREPARING');assert.equal(held.setup.phase,'HELD');assert.equal(held.setup.code,'ENROLLMENT_INTERRUPTED');assert.equal(h.flow.running(started.accountId),false);
+ assert.equal(h.effects.filter(x=>x.kind==='PERSONA_CREATE').length,1);
+ const fresh=createEnrollment({accounts:h.accounts,ledger:h.ledger,donor:h.donor,pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},openLogin:async()=>({ok:true}),identify:async()=>({ok:false})});
+ const recovered=await fresh.prepare(started.accountId);assert.equal(recovered.ok,true,recovered.code);
+ const ready=(await h.accounts.get(started.accountId)).account;
+ assert.equal(ready.state,'WAITING_LOGIN');assert.equal(ready.bindingId,held.bindingId);assert.equal(h.effects.filter(x=>x.kind==='PERSONA_CREATE').length,1);
+});
