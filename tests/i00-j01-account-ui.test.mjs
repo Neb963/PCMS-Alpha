@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {accountGrowthAdvice} from '../src/ui/faithful/accounts-workspace.mjs';
+import {accountGrowthAdvice,accountNeedsAttention,accountLabel} from '../src/ui/faithful/accounts-workspace.mjs';
 const a=(state,owned,known=true)=>({state,inventory:{known,verifiedOwned:owned}});
 test('J01 C79/C88 growth advice requires every managed account last-confirmed owned count, including unavailable accounts',()=>{
  assert.equal(accountGrowthAdvice([]),false);
@@ -11,4 +11,20 @@ test('J01 C79/C88 growth advice requires every managed account last-confirmed ow
  assert.equal(accountGrowthAdvice([a('VERIFIED',59)]),false);
  assert.equal(accountGrowthAdvice([a('VERIFIED',60),a('ARCHIVED',0)]),true);
  assert.equal(accountGrowthAdvice([{...a('ARCHIVED',60),removed:{at:123}}]),false);
+});
+
+test('J01 Attention includes identity-verified accounts with held, checking, missing or legacy routes',()=>{
+ const ready={state:'VERIFIED',protectedRoute:'PCMS_PINNED',route:{status:'PINNED'}};
+ assert.equal(accountNeedsAttention(ready),false);assert.equal(accountLabel(ready),'Ready');
+ for(const status of ['HELD','CHECKING',null]){
+  const item={...ready,route:{status}};
+  assert.equal(accountNeedsAttention(item),true);
+  assert.notEqual(accountLabel(item),'Ready');
+ }
+ for(const protectedRoute of ['LEGACY_UNPINNED','UPGRADING']){
+  const item={...ready,protectedRoute};assert.equal(accountNeedsAttention(item),true);
+  assert.notEqual(accountLabel(item),'Ready');
+ }
+ assert.equal(accountNeedsAttention({...ready,state:'ARCHIVED',route:{status:'HELD'}}),false);
+ assert.equal(accountNeedsAttention({...ready,state:'WAITING_LOGIN'}),true);
 });

@@ -22,8 +22,15 @@ const ERRORS={ACCOUNT_BUSY:'This account is finishing another action. Other acco
  RESTORE_HOLD:'Finish the inspected restore before changing accounts.',
  IPV6_EVIDENCE_UNVERIFIED:'IPv6 protection is unverified. Managed traffic stays held; verify or change the route.',
  ACCOUNT_ARCHIVED:'Reactivate this account before resuming its managed work.'};
-export const accountLabel=a=>a.removed?'Removed':a.state==='VERIFIED'&&a.route?.status==='HELD'?'Route needs attention':
- a.state==='VERIFIED'&&a.route?.status==='CHECKING'?'Checking route':LABELS[a.state]||'Needs attention';
+export function accountNeedsAttention(a){
+ if(a.state==='ARCHIVED'||a.removed)return false;
+ return a.state!=='VERIFIED'||a.protectedRoute!=='PCMS_PINNED'||a.route?.status!=='PINNED';
+}
+export const accountLabel=a=>a.removed?'Removed':
+ a.state==='VERIFIED'&&a.protectedRoute==='UPGRADING'?'Upgrading route':
+ a.state==='VERIFIED'&&a.protectedRoute==='LEGACY_UNPINNED'?'Route upgrade needed':
+ a.state==='VERIFIED'&&a.route?.status==='CHECKING'?'Checking route':
+ a.state==='VERIFIED'&&accountNeedsAttention(a)?'Route needs attention':LABELS[a.state]||'Needs attention';
 export function accountGrowthAdvice(accounts){
  const managed=accounts.filter(a=>a.state!=='ARCHIVED'&&!a.removed);
  return managed.length>0&&managed.every(a=>a.inventory?.known===true&&

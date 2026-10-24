@@ -1,4 +1,4 @@
-import {createAccountsWorkspace,accountGrowthAdvice} from './accounts-workspace.mjs';
+import {createAccountsWorkspace,accountGrowthAdvice,accountNeedsAttention} from './accounts-workspace.mjs';
 import {advanceApprovedPublication} from './publication-flow.mjs';
 import {mountPortableRestore} from '../restore-view.mjs';
 import {portableRestoreTemplate} from './portable-restore-template.mjs';
@@ -714,7 +714,7 @@ function displayAccounts(){if(state.route!=='accounts')return;
  const query=state.acct.query.trim().toLowerCase(),filter=state.acct.filter,all=state.lastAccountList;
  const displayed=all.filter(a=>{const term=String(a.accountId||'').toLowerCase(),name=String(a.state||'');
   return (!query||term.includes(query)||String(a.personaUid||'').toLowerCase().includes(query))&&
-   (filter==='All'||filter==='Connected'&&name==='VERIFIED'||filter==='Archived'&&name==='ARCHIVED'||filter==='Attention'&&!['VERIFIED','ARCHIVED'].includes(name));
+   (filter==='All'||filter==='Connected'&&name==='VERIFIED'&&!accountNeedsAttention(a)||filter==='Archived'&&name==='ARCHIVED'||filter==='Attention'&&accountNeedsAttention(a));
  });
  const pages=Math.ceil(displayed.length/state.acct.perPage);if(state.acct.page>=pages)state.acct.page=Math.max(0,pages-1);
  const offset=state.acct.page*state.acct.perPage;
