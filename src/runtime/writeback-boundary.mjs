@@ -11,6 +11,7 @@ import {createWritebackStore} from './writeback-store.mjs';
 import {createReadyStore} from './ready-store.mjs';
 import {createS06ExceptionStore,authorizeS06Exception} from './s06-exception-review.mjs';
 import {exactSource,diffSource,verifyReadback} from './staging-core.mjs';
+import {captureExceptionalIdle,exceptionalIdleEvidence} from './exception-idle.mjs';
 import {createGitCredentialResolver} from './git-credential.mjs';
 import {inspectWriteback,writeGitCandidate,observeGitCandidate,
   commitMessage,parseTerminalSuggestion} from './git-writeback.mjs';
@@ -69,6 +70,10 @@ function context(r){
 }
 async function guardedReadback(g,stage,job,sourceFingerprint=job?.job?.verifiedFinal){
   const r=stage.record;
+  if(job.job.exceptionFrozen&&job.job.exceptionQuiescence==='NEVER_DISPATCHED_SOURCE'&&!job.job.native){
+    const proof=await captureExceptionalIdle({guard:g,stage:r,job:job.job}),evidence=exceptionalIdleEvidence(proof,r,job.job);
+    return evidence?.source?.fingerprint===sourceFingerprint?{ok:true,source:evidence.source,route:evidence.route}:fail(proof.code||'MANUAL_SOURCE_UNVERIFIED');
+  }
   if(!g?.observeReadOnly||!g?.getSafeRouteReadiness||
      !g?.inspectStageEditor||!g?.runNativeAiStep)
     return fail('DONOR_GUARD_UNAVAILABLE');

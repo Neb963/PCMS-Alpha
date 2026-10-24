@@ -49,15 +49,7 @@ function tx(db,write,fn){
   try{fn(t.objectStore('meta'),t,x=>{result=x;});}catch{try{t.abort();}catch{}}
  });
 }
-const promptFor=(parent,text)=>{
-  const prompt={revision:parent?.prompt?.revision+1,
-    source:'S06_REQUEST_CHANGES_CHILD',
-    parentPromptRevision:parent?.prompt?.revision,
-    tests:parent?.prompt?.tests,
-    text:parent?.prompt?.text+'\n\nOperator Request Changes (exact saved F):\n'+text+
-      '\nContinue only this generator; preserve the source and run all pinned tests. No Git, routing, account or publication operations.'};
-  return validPromptRevision(prompt)?prompt:null;
-};
+const promptFor=parent=>validPromptRevision(parent?.prompt)?structuredClone(parent.prompt):null;
 export function createS06ChangeStore(db){
  const get=name=>!slug(name)?Promise.resolve(fail('S06_SLUG_INVALID')):
    tx(db,false,(m,t,done)=>m.get(key(name)).onsuccess=e=>
@@ -162,7 +154,9 @@ export function createS06ChangeStore(db){
         const result=prompt?beginAiJob({stage:childStage,
           prompt,optionalTesting:j.optionalTesting||null}):fail('S06_CHILD_PROMPT_INVALID');
         if(!result.ok){done(result);return;}
-        const childJob={...result.job,revision:j.revision+1,
+        const childJob={...result.job,revision:j.revision+1,operatorPaused:j.operatorPaused===true,controlRevision:(j.controlRevision||1)+1,
+          awaitingExecutionSlot:true,executionSlotReleased:true,
+          operatorInstruction:{id:1,text:req.instructions,status:'QUEUED',stageRevision:childStage.revision},
           createdAt:Date.now(),readyIdentifier:ready.active.identifier,
           readyInputFingerprint:ready.active.inputFingerprint,
           sourceFolder:s.sourceFolder,childRequestId:req.requestId,

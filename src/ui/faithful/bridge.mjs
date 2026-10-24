@@ -1,5 +1,9 @@
+import {matchesReviewGroup} from '../review-queue-state.mjs';
 import {renderGitInventory,mountGitPromptEditor} from './git-workspace.mjs';
 import {createSourceWorkspace} from './source-workspace.mjs';
+import {mountSourceComparison,mountSourceHistory} from './source-comparison.mjs';
+import {mountHumanRecovery,mountExceptionalReview} from './candidate-recovery.mjs';
+import {createCleanPublicationWorkspace} from './clean-publication.mjs';
 import {createGeneratorBatches} from './generator-batches.mjs';
 import {createGeneratorSelection} from './generator-selection.mjs';
 import {createAccountsWorkspace,accountGrowthAdvice,accountNeedsAttention} from './accounts-workspace.mjs';
@@ -82,7 +86,7 @@ function friendlyConnectionIssue(code){
 }
 const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',owner:'ALL',source:'ALL',total:0,items:[]},
  ref:{offset:0,limit:25,query:'',phase:'ALL',snapshot:null,items:[],total:0},
- acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,readyItems:[],readyCursor:'',nextReady:null,readyMore:false,aiUnavailable:false,readyUnavailable:false,epoch:0},
+ acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],releaseCursor:'',nextRelease:null,releaseUnavailable:false,aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,readyItems:[],readyCursor:'',nextReady:null,readyMore:false,aiUnavailable:false,readyUnavailable:false,epoch:0},
  settings:'connections',settingsStatic:null,lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},
  renderEpoch:0,version:'0.1.7',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
@@ -116,6 +120,8 @@ generatorSelection.subscribe(()=>updateGeneratorSelection());
 const accountWorkspace=createAccountsWorkspace({root,el,b,request:readPort,reload:()=>loadAccounts(),notify});
 const generatorBatches=createGeneratorBatches({root,el,b,request:readPort,accounts,
  reload:()=>loadGenerators(),manageAccount:openAccountManager,notify});
+const cleanPublication=createCleanPublicationWorkspace({root,el,b,notify,openReview:openReleaseReview,
+ request:(type,params)=>readPort('pcms-j04-clean-publication',type,params,120000)});
 function updateNav(){for(const a of root.querySelectorAll('[data-nav]'))a.setAttribute('aria-current',a.dataset.nav===state.route?'page':'false');
  const label=shadow('#breadcrumb');if(label)label.textContent=({'work-queue':'Work Queue',overview:'Overview',generators:'Generators',accounts:'Accounts',refresher:'Refresher',settings:'Settings'})[state.route];
  const t=shadow('[data-nav="work-queue"] .nav-count');if(t){
@@ -392,19 +398,19 @@ function routeHandlers(){
  if(action==='ref-next'){state.ref.offset+=state.ref.limit;void loadRefresher();return}
  if(action==='account-prev'){state.acct.page=Math.max(0,state.acct.page-1);displayAccounts();return}
  if(action==='account-next'){state.acct.page++;displayAccounts();return}
- if(action==='prepare-ai'){openAiPreparation();return}
  if(action==='queue-prev'){
    const prior=state.queue.history.pop();if(!prior)return;
    state.queue.opCursor=prior.op;state.queue.noticeCursor=prior.notice;
-   state.queue.aiCursor=prior.ai;state.queue.readyCursor=prior.ready;void loadQueue();return;
+   state.queue.aiCursor=prior.ai;state.queue.readyCursor=prior.ready;state.queue.releaseCursor=prior.release;void loadQueue();return;
  }
  if(action==='queue-next'){
    if(!state.queue.more)return;
-   state.queue.history.push({op:state.queue.opCursor,notice:state.queue.noticeCursor,ai:state.queue.aiCursor,ready:state.queue.readyCursor});
+   state.queue.history.push({op:state.queue.opCursor,notice:state.queue.noticeCursor,ai:state.queue.aiCursor,ready:state.queue.readyCursor,release:state.queue.releaseCursor});
    state.queue.opCursor=state.queue.nextOps===null?null:state.queue.nextOps;
    state.queue.noticeCursor=state.queue.nextNotices===null?null:state.queue.nextNotices;
    state.queue.aiCursor=state.queue.nextAi===null?null:state.queue.nextAi;
    state.queue.readyCursor=state.queue.nextReady===null?null:state.queue.nextReady;
+   state.queue.releaseCursor=state.queue.nextRelease===null?null:state.queue.nextRelease;
    void loadQueue();return;
  }
  if(action==='add-account'){void startAccountEnrollment();return}
@@ -787,7 +793,7 @@ function queueGroup(filter){
 async function loadQueue(reset=false){
  if(state.route!=='work-queue')return;
  const q=state.queue;
- if(reset){q.opCursor='';q.noticeCursor='';q.aiCursor='';q.readyCursor='';q.history=[];q.nextOps=null;q.nextNotices=null;q.nextAi=null;q.nextReady=null;}
+ if(reset){q.opCursor='';q.noticeCursor='';q.aiCursor='';q.readyCursor='';q.releaseCursor='';q.history=[];q.nextOps=null;q.nextNotices=null;q.nextAi=null;q.nextReady=null;q.nextRelease=null;}
  const epoch=++q.epoch;
  q.loading=true;q.error=null;displayQueue();
  const includeNotices=q.filter==='Needs action'||q.filter==='All';
@@ -800,8 +806,8 @@ async function loadQueue(reset=false){
        after:q.noticeCursor,limit:20,query:q.query}):Promise.resolve({ok:true,items:[],more:false,next:null}),
    guardedRead('pcms-i02-canonical-readonly','SUMMARY'),
    guardedRead('pcms-i02-canonical-readonly','NOTICE_SUMMARY'),
-   guardedRead('pcms-i13-release','LIST_REVIEW',{after:'',limit:40})
-     .catch(()=>({ok:false,items:[]})),
+   q.releaseCursor!==null?guardedRead('pcms-i13-release','LIST_REVIEW',{after:q.releaseCursor,limit:20,query:q.query.slice(0,100),status:queueGroup(q.filter)})
+     .catch(()=>({ok:false,items:[]})):Promise.resolve({ok:true,items:[],more:false,nextCursor:null}),
    q.aiCursor!==null?guardedRead('pcms-i10-ai','LIST_JOBS',{
      after:q.aiCursor,limit:20,query:q.query.slice(0,100),status:queueGroup(q.filter)
    }).catch(()=>({ok:false,jobs:[],more:false,nextCursor:null})):
@@ -822,7 +828,9 @@ async function loadQueue(reset=false){
   q.nextAi=q.aiMore?ai.nextCursor:null;
   q.readyUnavailable=ready?.ok!==true;q.readyItems=ready?.ok?(ready.items||[]):[];q.readyMore=ready?.ok&&ready.more===true;
   q.nextReady=q.readyMore?ready.nextCursor:null;
-  q.more=Boolean(ops.more||notices.more||q.aiMore||q.readyMore);q.summary={...summary,attention:noticeTotals};
+  q.nextRelease=releases?.ok&&releases.more?releases.nextCursor:null;
+  q.releaseUnavailable=releases?.ok!==true;
+  q.more=Boolean(ops.more||notices.more||q.aiMore||q.readyMore||releases?.more);q.summary={...summary,attention:noticeTotals};
   q.releaseItems=releases?.ok?(releases.items||[]):[];
   q.reviews=identities?.ok?(identities.items||[]):[];
   q.missing=identities?.ok?(identities.missingFolders||[]):[];
@@ -834,11 +842,13 @@ async function loadQueue(reset=false){
 }
 function displayQueue(){
  if(state.route!=='work-queue')return;
+ const toolbar=shadow('.page-head .head-actions');if(toolbar)cleanPublication.mountToolbar(toolbar);
  const q=state.queue;const holder=shadow('.queue-list');
  if(!holder)return;holder.replaceChildren();
  if(q.loading)renderEmpty(holder,'Reading recorded operations and incidents…');
  else if(q.error)renderEmpty(holder,'The local work queue is unavailable. No operation result has been assumed.');
  else{
+  if(q.releaseUnavailable)holder.append(el('p','setting-note','Publication records could not be read. Refresh the queue to try again.'));
   if(q.aiUnavailable)
    holder.append(el('p','setting-note','AI development records could not be read. Their absence here does not mean there is no work.'));
   if(q.readyUnavailable)
@@ -916,10 +926,7 @@ function displayQueue(){
        'The folder was absent from a complete main snapshot. The live generator has not been deleted or unlisted.'));
     row.append(mark,data);holder.append(row);
    }
-  if(q.filter==='Needs action'||q.filter==='All'||q.filter==='Waiting')
-   for(const candidate of q.releaseItems.filter(x=>q.filter==='All'||
-      q.filter==='Waiting'?x.state!=='CONFIRMED_PUBLIC':
-        ['READY_FOR_REVIEW','EXCEPTION_READY_FOR_REVIEW','BLOCKED','WAITING_FOR_GIT'].includes(x.state))){
+  for(const candidate of q.releaseItems.filter(x=>matchesReviewGroup(x.state,queueGroup(q.filter)))){
     if(q.query&&!candidate.slug.includes(q.query.toLowerCase()))continue;
     const row=el('div','queue-item');const detail=el('div','row-body');
     detail.append(el('strong','',candidate.slug),
@@ -928,12 +935,12 @@ function displayQueue(){
         candidate.state==='EXCEPTION_READY_FOR_REVIEW'?
         'Exceptional candidate — manual evidence and incomplete tests require individual review.':
         'Candidate state: '+candidate.state.replaceAll('_',' ').toLowerCase()));
-    const action=b('Review candidate',()=>void openReleaseReview(candidate.slug),'btn small');
-    if(!['READY_FOR_REVIEW','EXCEPTION_READY_FOR_REVIEW'].includes(candidate.state))
-      action.disabled=true;
-    row.append(el('span','row-mark', '•'),detail,action);holder.append(row);
+    const action=b('Inspect candidate',()=>void openReleaseReview(candidate.slug),'btn small'),manage=b('Manage development',()=>candidate.development?void openAiJob(candidate.slug):openReadyCandidate(candidate.readyCandidate),'btn small');
+    row.classList.add('candidate-item');const actions=el('div','candidate-actions');actions.append(action,manage);
+    row.append(cleanPublication.checkbox(candidate.slug),detail,actions);holder.append(row);
    }
   for(const candidate of q.readyItems||[]){
+   if(q.releaseItems.some(x=>x.slug===candidate.slug))continue;
    const active=Boolean(candidate.active),desired=Boolean(candidate.desired);
    const held=!!candidate.hold&&candidate.hold!=='NONE';
    const eligible=q.filter==='All'||
@@ -953,6 +960,7 @@ function displayQueue(){
    holder.append(row);
   }
   for(const job of q.aiJobs||[]){
+   if(q.releaseItems.some(x=>x.slug===job.slug))continue;
    const currentState=job.state||'NOT_VERIFIED';
    const complete=currentState==='TESTS_VERIFIED'||job.slotReleased===true;
    const needs=['HELD_RECONCILE','KNOWN_FAILURE','HELD_NO_PROGRESS','TESTS_UNVERIFIED','PENDING_NATIVE_SESSION'].includes(currentState);
@@ -1041,8 +1049,7 @@ function displayQueue(){
   if(badge)badge.textContent=q.summary?.ok&&!q.query?count:'—';
   tab.setAttribute('aria-selected',String(f===q.filter));
  }
- const foot=shadow('.pagination span');if(foot)foot.textContent=q.loading?'Loading recorded work…':
-  q.error?'Local journal unavailable':q.operations.length+q.incidents.length+q.aiJobs.length+q.readyItems.length+' journal, READY and AI records on this page · no remote success inferred';
+ const foot=shadow('.pagination span');if(foot)foot.textContent=q.loading?'Loading work…':q.error?'Saved work is unavailable':(holder?.children.length||0)+' work records on this page';
  const prev=shadow('[data-action="queue-prev"]'),next=shadow('[data-action="queue-next"]');
  if(prev)prev.disabled=q.loading||q.history.length===0;
  if(next)next.disabled=q.loading||!q.more;
@@ -1051,7 +1058,7 @@ function displayQueue(){
 // fingerprint are provided by the protected release boundary. The UI cannot
 // invent PASS, bypass source/route checks or publish from a review ACK.
 async function openReleaseReview(slug){
- const previous=root.activeElement,overlay=el('div','drawer-overlay'),dialog=el('div','drawer');
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),dialog=el('div','drawer review-workspace');
  dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');
  dialog.setAttribute('aria-label','Review exact candidate for '+slug);
  const close=()=>{overlay.remove();if(previous?.isConnected)previous.focus({preventScroll:true})};
@@ -1060,7 +1067,10 @@ async function openReleaseReview(slug){
  const body=el('div','drawer-body'),status=el('p','setting-note','Verifying the exact final candidate and tests…');
  status.setAttribute('role','status');body.append(status);dialog.append(body);overlay.append(dialog);root.append(overlay);
  head.querySelector('button')?.focus();
- overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close();return}if(e.key==='Tab'){
+  const controls=[...dialog.querySelectorAll('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),summary')].filter(x=>x.getClientRects().length);
+  const i=controls.indexOf(root.activeElement);if(e.shiftKey&&i<=0){e.preventDefault();controls.at(-1)?.focus()}else if(!e.shiftKey&&i===controls.length-1){e.preventDefault();controls[0]?.focus()}
+ }});
  overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
  const releaseCommand=async(type,params)=>{
   if(type==='DISPATCH')return readPort('pcms-i13-release','DISPATCH',params,95000);
@@ -1077,6 +1087,20 @@ async function openReleaseReview(slug){
      'Publication may have occurred. Only protected read-only reconciliation is permitted; no automatic retry.':
      'Publication not verified: '+(out?.code||'Unknown outcome')+'. Check current guarded state.';
  };
+ let local;
+ try{local=await readPort('pcms-i13-release','GET_LOCAL_REVIEW',{slug},30000)}catch{}
+ if(!overlay.isConnected)return;
+ if(local?.ok){
+  mountSourceComparison({container:body,view:local,el,b,request:(type,params)=>readPort('pcms-i13-release',type,params,30000)});
+  const checks=el('details');checks.append(el('summary','','Test observations · '+(local.tests?.state||'Unverified')));
+  for(const t of [...(local.tests?.default||[]),...(local.tests?.optional||[])])checks.append(el('p','setting-note',t.name+' — '+t.result));
+  body.append(checks);
+ }else body.append(el('p','setting-note','Saved source is not available for comparison yet.'));
+ mountSourceHistory({container:body,slug,el,b,request:(type,params)=>readPort('pcms-i13-release',type,params,30000)});
+ body.append(b('Refresh review',()=>{close();void openReleaseReview(slug)}));
+ const recover={container:body,slug,el,b,request:(type,params)=>readPort('pcms-i13-release',type,params,95000),onChanged:()=>{close();void openReleaseReview(slug)}};
+ await Promise.all([mountHumanRecovery(recover),mountExceptionalReview(recover)]);
+ if(!overlay.isConnected)return;
  let persisted;
  try{persisted=await releaseCommand('GET',{slug});}catch{persisted=null;}
  if(persisted?.ok&&persisted.state==='CONFIRMED_PUBLIC'){
@@ -1108,54 +1132,14 @@ async function openReleaseReview(slug){
  status.textContent=view.mode==='INDIVIDUAL_EXCEPTIONAL_MANUAL_REVIEW'?
   'Exceptional manual review: AI testing is not fully verified.':
   'Candidate source, test results and Git revision verified for this review snapshot.';
- const summary=el('dl');
- for(const [label,value] of [['Candidate source',view.sourceFingerprint],
-   ['Previous source',view.previousFingerprint],['Pinned Git main',view.gitHead],
-   ['Testing result',view.tests?.state||'Unverified'],['Publication', 'Not yet approved']]){
+ if(!local?.ok||local.stageRevision!==view.stageRevision||local.jobRevision!==view.jobRevision||local.sourceFingerprint!==view.sourceFingerprint){
+  status.textContent='The candidate changed while this review was opening. Refresh review to inspect the current source before approval.';return;
+ }
+ const provenance=el('details'),summary=el('dl');provenance.append(el('summary','','Source provenance'));
+ for(const [label,value] of [['Candidate fingerprint',view.sourceFingerprint],['Previous fingerprint',view.previousFingerprint],['Pinned Git main',view.gitHead]]){
   const pair=el('div','kv');pair.append(el('dt','',label),el('dd','',value));summary.append(pair);
  }
- body.append(summary);
- const checks=el('div','');
- checks.append(el('h3','','Required test observations'));
- for(const t of [...(view.tests?.default||[]),...(view.tests?.optional||[])]){
-  checks.append(el('p','setting-note',t.name+' — '+(t.result||'UNVERIFIED')));
- }
- body.append(checks,el('h3','','Full-source change manifest'));
- const changes=el('div','queue-list'),seen=new Set();
- const changedPaths=new Set((view.diff||[]).map(x=>x.path).filter(Boolean));
- for(const file of view.files||[]){
-  const row=el('div','queue-item');
-  const label=el('span','',file.path+' · '+file.size+' bytes'+
-    (changedPaths.has(file.path)?' · changed':' · unchanged'));
-  const inspect=b('Read exact file',()=>void (async()=>{
-   inspect.disabled=true;
-   let bytes=[],next=0,total=0,error=false;
-   do{
-    let r;
-    try{r=await readPort('pcms-i13-release','GET_REVIEW_CHUNK',{
-      slug,stageRevision:view.stageRevision,fingerprint:view.sourceFingerprint,
-      origin:'F',path:file.path,offset:next},30000)}
-    catch{error=true;break}
-    if(!r?.ok||r.fileSha256!==file.sha256){error=true;break}
-    const data=Uint8Array.from(atob(r.base64),x=>x.charCodeAt(0));
-    bytes.push(data);total+=data.length;next=r.nextOffset;
-    if(total>16*1024*1024){error=true;break}
-   }while(next!==null);
-   if(error){notify('Exact file read could not be confirmed. Approval remains a separate decision.');inspect.disabled=false;return}
-   const data=new Uint8Array(total);let offset=0;
-   for(const part of bytes){data.set(part,offset);offset+=part.length}
-   const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data)))
-     .map(x=>x.toString(16).padStart(2,'0')).join('');
-   if(digest!==file.sha256){notify('File bytes did not match verified source fingerprint.');inspect.disabled=false;return}
-   seen.add(file.path);
-   const details=el('pre','source-preview');
-   details.textContent=/\.(?:pjs|html|js|css|md|json|txt)$/i.test(file.path)?
-     new TextDecoder().decode(data):'Binary file verified: SHA-256 '+digest;
-   row.append(details);inspect.textContent='Verified and viewed';inspect.disabled=true;
-  })(),'btn small');
-  row.append(label,inspect);changes.append(row);
- }
- body.append(changes);
+ provenance.append(summary);body.append(provenance);
  const footer=el('div','form-foot');
  const instructions=el('textarea','form-input');instructions.rows=3;
  instructions.placeholder='Optional request: describe changes needed to the tested candidate';
@@ -1263,10 +1247,10 @@ function openReadyCandidate(candidate){
   await loadQueue(true);
  }
  const assess=b('Assess prerequisites',()=>void act('ASSESS_READY'),'btn small');
- const prepare=b('Prepare local development',()=>void act('PREPARE_LOCAL'),'btn primary');
+
  const pause=b(candidate.hold==='OPERATOR_PAUSED'?'Resume READY work':'Pause READY work',
   ()=>void act(candidate.hold==='OPERATOR_PAUSED'?'RESUME_READY':'PAUSE_READY'),'btn small');
- actions.append(assess,prepare,pause);body.append(facts,status,actions);panel.append(head,body);
+ actions.append(pause,assess);body.append(facts,status,actions);panel.append(head,body);
  overlay.append(panel);root.append(overlay);
  overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
  overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
@@ -1292,116 +1276,51 @@ function humanAiStatus(job){
 // the UI nor AI text can self-assert tests, Git writes or publication.
 async function openAiJob(slug){
  const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
- panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
- panel.setAttribute('aria-label','AI development for '+slug);
- const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-label','AI development for '+slug);
+ let timer,pending=false,loading=false,current=null,lastSignature='';
+ const close=()=>{clearInterval(timer);overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
  const head=el('div','drawer-head');head.append(el('h2','drawer-title','Develop · '+slug),b('Close',close));
- const body=el('div','drawer-body'),status=el('p','setting-note','Checking the current exact AI job…');
- status.setAttribute('role','status');body.append(status);
- const metadata=el('dl'),actions=el('div','form-foot');
- body.append(metadata,actions);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ const body=el('div','drawer-body'),status=el('p','setting-note','Reading development…');status.setAttribute('role','status');
+ const metadata=el('dl'),details=el('details'),actions=el('div','form-foot');details.append(el('summary','','Development details'),metadata);
+ const message=el('p','setting-note');message.setAttribute('role','status');
+ const label=el('label','','New instructions'),instructions=el('textarea','form-input');instructions.rows=4;instructions.maxLength=4000;instructions.setAttribute('aria-label','New development instructions');
+ label.append(instructions);const queued=el('p','setting-note'),give=b('Give new instructions',()=>void control('GIVE_INSTRUCTIONS',{instructions:instructions.value}),'btn primary');
+ const form=el('div','development-instructions');form.append(label,queued,give);
+ body.append(status,actions,form,message,details);panel.append(head,body);overlay.append(panel);root.append(overlay);
  overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
- overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
- head.querySelector('button')?.focus();
- let pending=false;
- async function load(){
-  metadata.replaceChildren();actions.replaceChildren();
-  let j;try{j=await readPort('pcms-i10-ai','GET_JOB',{slug},22000)}catch{}
-  if(!overlay.isConnected)return;
-  if(!j?.ok){status.textContent='Canonical AI job unavailable. No action can be authorized.';return;}
-  status.textContent=humanAiStatus(j)+
-    '. Protected owner, clean-editor, session and source-readback checks are applied independently.';
-  for(const [label,value] of [
-   ['Current revision',String(j.revision)],['Saved source',j.sourceFingerprint?.slice(0,16)||'Not verified'],
-   ['Prompt version',String(j.promptRevision??'Unavailable')],
-   ['Native state',(j.nativeState||'Not started').replaceAll('_',' ').toLowerCase()],
-   ['Tests',j.evidence?.state||'Unverified'],
-   ['Provider outcome',j.hold||'No independent effect receipt loaded']]){
-    const row=el('div','kv');row.append(el('dt','',label),el('dd','',value));metadata.append(row);
-  }
-  const opts=[
-   ['Continue development','ADVANCE_JOB',null,
-    !j.slotReleased&&!['TESTS_VERIFIED','HELD_NO_PROGRESS','HUMAN_OWNED'].includes(j.state)],
-   ['Start Chat 1','BEGIN_NATIVE','CHAT1_SEND',j.state==='PENDING_NATIVE_SESSION'],
-   ['Stop running session','BEGIN_NATIVE','STOP',j.nativeState==='RUNNING_OBSERVED'],
-   ['Reconcile session','PROBE_NATIVE',null,
-    ['HELD_RECONCILE','TESTS_UNVERIFIED','KNOWN_FAILURE'].includes(j.state)],
-   ['Run independent tests','RUN_TESTS',null,j.state==='TESTS_UNVERIFIED'],
-   ['Inspect Chat 2 workspace','INSPECT_WORKSPACE',null,
-    j.nativeState==='CHAT2_OBSERVED_IDLE'&&!j.chat2IsolationVerified],
-   ['Verify fresh Chat 2','VERIFY_FRESH_CHAT2',null,
-    j.nativeState==='CHAT2_OBSERVED_IDLE'&&!j.chat2IsolationVerified],
-   ['Repair observed failure','BEGIN_NATIVE',
-    j.nativeState==='CHAT2_OBSERVED_IDLE'?'CHAT2_REPAIR':'CHAT1_REPAIR',
-    j.state==='KNOWN_FAILURE'&&
-    (j.nativeState==='CHAT1_OBSERVED_IDLE'||(j.nativeState==='CHAT2_OBSERVED_IDLE'&&j.chat2IsolationVerified))],
-   ['Reset Chat 2','BEGIN_NATIVE','CHAT2_RESET',j.evidence?.chat1Pass===true],
-   ['Start Chat 2','BEGIN_NATIVE','CHAT2_SEND',j.optionalTestingSha!==null]
-  ];
-  for(const [label,type,step,allowed] of opts){
-   if(!allowed)continue;
-   const button=b(label,()=>void(async()=>{
-    if(pending)return;
-    const mutates=['ADVANCE_JOB','BEGIN_NATIVE','RUN_TESTS','VERIFY_FRESH_CHAT2'].includes(type)&&step!=='STOP';
-    if(mutates&&!window.confirm(
-      'Run the selected guarded '+label.toLowerCase()+' step for '+slug+
-      '? The exact AI job revision, protected account/route, source and native session are revalidated. A lost acknowledgment is never authorization to resend.'))return;
-    pending=true;actions.querySelectorAll('button').forEach(x=>x.disabled=true);
-    status.textContent=type==='PROBE_NATIVE'?
-      'Reading the current session without sending again…':
-      'Checking the exact job and protected runtime. No result is assumed from an acknowledgment.';
-    try{
-     const out=await readPort('pcms-i10-ai',type,{
-      slug,expectedRevision:j.revision,...(step?{step}:{})},95000);
-     status.textContent=out?.ok?
-      type==='RUN_TESTS'?
-       'Test command completed. Review independently observed assertion results and current job state.':
-       'Controller response recorded. Reloading independently verified current job state.':
-      'Action held or result unconfirmed. Read the current job before any further effect.';
-    }catch{
-     status.textContent='The outcome is uncertain. Do not resend a native AI command; reconcile the current session first.';
-    }finally{pending=false;await load();void loadQueue(true);}
-   })(),'btn small');
-   actions.append(button);
-  }
-  if(!actions.children.length)
-   actions.append(el('p','setting-note','No additional native step is currently eligible. Check the protected source or recoverable session.'));
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close();return}if(e.key==='Tab'){
+  const all=[...panel.querySelectorAll('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),summary')].filter(x=>x.getClientRects().length),i=all.indexOf(root.activeElement);
+  if(e.shiftKey&&i<=0){e.preventDefault();all.at(-1)?.focus()}else if(!e.shiftKey&&i===all.length-1){e.preventDefault();all[0]?.focus()}
+ }});head.querySelector('button')?.focus();
+ async function control(type,extra={}){if(pending||!current)return;if(type==='GIVE_INSTRUCTIONS'&&instructions.value.trim().length<3){message.textContent='Describe the change in at least three characters.';instructions.focus();return}
+  pending=true;give.disabled=true;actions.querySelectorAll('button').forEach(x=>x.disabled=true);
+  try{const out=await readPort('pcms-i10-ai',type,{slug,expectedRevision:current.revision,
+    ...(['SET_PAUSED','GIVE_INSTRUCTIONS'].includes(type)?{expectedControlRevision:current.controlRevision}:{}),...extra},95000);
+   message.textContent=out?.ok?type==='GIVE_INSTRUCTIONS'?'Instructions saved for the next eligible turn. The pinned testing prompt remains in force.':type==='SET_PAUSED'?(extra.paused?'Development paused. An active session will be stopped and its saved source checked.':'Development resumed. PCMS will continue when the account and source are ready.'):'Session checked.':
+    out?.code==='AI_ACCOUNT_CONCURRENCY_HELD'?'Resume is waiting for account capacity. Other jobs continue. Retry when a slot is available.':
+    out?.code==='STALE_REVISION'?'Development changed. Your instructions are preserved; check the current state and retry.':'The request could not be confirmed. Your text is preserved; the current saved job is shown below.';
+   if(out?.ok&&type==='GIVE_INSTRUCTIONS')instructions.value='';
+  }catch{message.textContent='The response was lost. The current saved job will be read before another request; your text is preserved.'}
+  finally{pending=false;lastSignature='';await load();void loadQueue(true)}
  }
- await load();
-}
-function openAiPreparation(){
- const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
- panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
- panel.setAttribute('aria-label','Prepare verified AI development job');
- const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
- const head=el('div','drawer-head');head.append(el('h2','drawer-title','Prepare development'),b('Close',close));
- const body=el('div','drawer-body'),help=el('p','setting-note',
-  'Use a generator with an independently verified private stage. PCMS reads the pinned GitHub instructions and saved-source revision before preparing the AI job.');
- const slug=el('input','form-input');slug.placeholder='generator-slug';
- slug.value=state.queue.query&&/^[a-z0-9-]{1,100}$/.test(state.queue.query)?state.queue.query:'';
- slug.setAttribute('aria-label','Generator slug for development');
- const status=el('p','setting-note','No job prepared.');status.setAttribute('role','status');
- const action=b('Verify stage and prepare',()=>void(async()=>{
-  if(!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug.value)){
-   status.textContent='Enter a valid lowercase generator name.';return;}
-  action.disabled=true;status.textContent='Verifying private saved source and current stage revision…';
-  try{
-   const stage=await readPort('pcms-i09-staging','GET_STAGE',{slug:slug.value},16000);
-   if(!stage?.ok||!Number.isSafeInteger(stage.revision)){
-    status.textContent='Private source stage not independently verified. Finish source staging first.';return;}
-   const out=await readPort('pcms-i10-ai','PREPARE_JOB',{
-    slug:slug.value,expectedStageRevision:stage.revision},95000);
-   status.textContent=out?.ok?
-    'Exact development job prepared. AI execution and tests remain separately guarded.':
-    'Preparation held. Check the stage, account, protected route and GitHub connection.';
-   await loadQueue(true);
-  }catch{status.textContent='Job preparation result uncertain. Check the canonical queue before retrying.'}
-  finally{action.disabled=false}
- })(),'btn primary');
- body.append(help,slug,action,status);panel.append(head,body);overlay.append(panel);root.append(overlay);
- overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
- overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
- slug.focus();
+ async function load(){if(loading||pending||!overlay.isConnected)return;loading=true;
+  try{const j=await readPort('pcms-i10-ai','GET_JOB',{slug},22000);if(!overlay.isConnected)return;
+   if(!j?.ok){status.textContent='Development is unavailable. Saved work is preserved; reconnect and retry.';return}
+   current=j;status.textContent=(j.operatorPaused?'Paused · ':j.awaitingExecutionSlot?'Waiting for account capacity · ':humanAiStatus(j)+' · ')+(j.state==='TESTS_VERIFIED'||j.exceptionFrozen?'Ready for source review.':'PCMS advances development and independent tests automatically.');
+   const signature=JSON.stringify([j.revision,j.controlRevision,j.nativeState,j.state,j.hold]);if(signature===lastSignature)return;lastSignature=signature;
+   metadata.replaceChildren();actions.replaceChildren();
+   for(const [name,value] of [['Job revision',j.revision],['Source',j.sourceFingerprint],['Pinned prompt',j.promptRevision],['Native session',j.nativeState],['Tests',j.evidence?.state],['Current hold',j.hold||'None']]){
+    const row=el('div','kv');row.append(el('dt','',name),el('dd','',value));metadata.append(row)}
+   if(j.state!=='HUMAN_OWNED')actions.append(b(j.operatorPaused?'Resume development':'Pause development',()=>void control('SET_PAUSED',{paused:!j.operatorPaused})));
+   actions.append(b('Inspect source and history',()=>{close();void openReleaseReview(slug)}));
+   if(j.state==='TESTS_VERIFIED'||j.exceptionFrozen)actions.append(b('Review and request changes',()=>{close();void openReleaseReview(slug)}));
+   if(['HELD_RECONCILE'].includes(j.state)||['DISPATCH_POSSIBLE','RUNNING_OBSERVED'].includes(j.nativeState))actions.append(b('Check session',()=>void control('PROBE_NATIVE')));
+   form.hidden=['TESTS_VERIFIED','HUMAN_OWNED'].includes(j.state)||j.exceptionFrozen;queued.textContent=j.pendingInstruction?'Queued: '+j.pendingInstruction.text:'';
+   give.disabled=!!j.pendingInstruction;give.textContent=j.pendingInstruction?'Instructions queued':'Give new instructions';
+  }catch{status.textContent='Development could not be read. Retry when the extension responds.'}
+  finally{loading=false}
+ }
+ await load();if(overlay.isConnected)timer=setInterval(()=>void load(),5000);
 }
 function openOperationRecord(op){
  const previous=root.activeElement,overlay=el('div','drawer-overlay'),dialog=el('div','drawer');
@@ -1916,35 +1835,7 @@ function primaryAiSettings(container){
     const row=el('div','queue-item'),body=el('div','row-body');
     body.append(el('strong','',job.slug),el('p','setting-note',jobLabel(job.state)+
       ' · source and test evidence must be verified separately.'));
-    const action=b('Inspect',()=>void (async()=>{
-     action.disabled=true;
-     try{
-      const current=await readPort('pcms-i10-ai','GET_JOB',{slug:job.slug},25000);
-      if(!current?.ok){jobsInfo.textContent='The current AI record was not verified.';return}
-      const j=current;
-      jobsInfo.textContent=j.slug+' — '+jobLabel(j.state)+
-       '; native session: '+(j.nativeState==='NOT_STARTED'?'not started':
-        j.nativeState==='RUNNING'?'in progress':'needs verification')+
-       '; required test evidence: '+(j.evidence?.status||'not independently verified')+
-       '. Current source is revision '+j.revision+'.';
-     }catch{jobsInfo.textContent='AI job could not be inspected. No remote state was inferred.'}
-     finally{action.disabled=false}
-    })(),'btn small');
-    const advance=b('Advance guarded step',()=>void (async()=>{
-     if(!window.confirm('Run one explicitly guarded AI development step for '+job.slug+'? This may contact Perchance or change its private editor. It will not publish or automatically retry a possibly completed effect.'))return;
-     advance.disabled=true;
-     try{
-      const result=await readPort('pcms-i10-ai','ADVANCE_JOB',{
-       slug:job.slug,expectedRevision:job.revision},110000);
-      jobsInfo.textContent=result?.ok?
-       'One protected development step was recorded for '+job.slug+
-       '. Re-read the job before taking another action.':
-       'The next development step was held or not confirmed. Read current job state before retrying.';
-     }catch{jobsInfo.textContent='Development-step outcome uncertain. Do not retry without independent reconciliation.'}
-     finally{advance.disabled=false;await showJobs()}
-    })(),'btn small');
-    if(['COMPLETE','HELD','FAILED'].includes(job.state))advance.disabled=true;
-    row.append(body,action,advance);jobs.append(row);
+    row.append(body,b('Manage development',()=>void openAiJob(job.slug),'btn small'));jobs.append(row);
    }
    const back=b('Previous jobs',()=>{const prev=history.pop();if(prev===undefined)return;
     cursor=prev;void showJobs()},'btn small');
@@ -2184,7 +2075,7 @@ async function mount(){
  const refreshOnWake=()=>{
   if(document.visibilityState==='hidden')return;
   if(state.route==='overview')displayOverview();
-  else if(state.route==='work-queue')void loadQueue(true);
+  else if(state.route==='work-queue')void loadQueue();
   else if(state.route==='generators')void loadGenerators();
   else if(state.route==='accounts')void loadAccounts();
   else if(state.route==='refresher')void loadRefresher();

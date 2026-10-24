@@ -5,9 +5,16 @@ export function renderPcmsEditorStrip({slug,nonce,accountId,personaUid}, env={lo
   if(location.origin!=='https://perchance.org'||
      location.pathname!=='/'+slug||location.hash!=='#edit')return;
   const existing=document.getElementById('pcms-alpha-editor-context');
-  if(existing)return;
+  if(existing){
+    if(existing.dataset.pcmsNonce===nonce&&existing.dataset.pcmsHumanIntent!=='true'){
+      const button=existing.querySelector('button'),status=existing.querySelector('[role=status]');
+      if(button)button.disabled=false;if(status)status.textContent='PCMS ownership resumed. Human handoff remains available.';
+    }
+    return;
+  }
   const host=document.createElement('aside');
   host.id='pcms-alpha-editor-context';
+  host.dataset.pcmsNonce=nonce;host.dataset.pcmsHumanIntentEpoch='0';
   host.setAttribute('role','region');
   host.setAttribute('aria-label','PCMS editor context');
   host.style.cssText='position:sticky;top:0;z-index:2147483640;box-sizing:border-box;background:Canvas;color:CanvasText;border:2px solid #737373;padding:8px;font:13px system-ui;display:block;max-width:100%;';
@@ -24,6 +31,7 @@ export function renderPcmsEditorStrip({slug,nonce,accountId,personaUid}, env={lo
   button.type='button';button.textContent='Take human ownership (keep tab)';
   button.addEventListener('click',()=>{
     host.dataset.pcmsHumanIntent='true';
+    host.dataset.pcmsHumanIntentEpoch=String(Number(host.dataset.pcmsHumanIntentEpoch||0)+1);
     button.disabled=true;status.textContent='Persisting human handoff…';
     try{
       const port=browser.runtime.connect({name:'pcms-i09-editor-handoff'});

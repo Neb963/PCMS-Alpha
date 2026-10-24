@@ -31,7 +31,7 @@ function encodeUtf8(text){
 }
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const ACT=new Set(['GET_PROMPTS','SET_PROMPT','IMPORT_PROMPT','EXPORT_PROMPTS',
-  'LIST_JOBS','GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS',
+  'LIST_JOBS','GET_JOB','SET_PAUSED','GIVE_INSTRUCTIONS','ADMIT_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS',
   'GET_CONCURRENCY','SET_CONCURRENCY','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2']);
 export function validateAiMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
@@ -44,24 +44,28 @@ export function validateAiMessage(api,sender,message){
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
   const allowed=message.type==='LIST_JOBS'?['after','limit','query','status']:
      message.type==='GET_JOB'?['slug']:
+    ['SET_PAUSED','GIVE_INSTRUCTIONS'].includes(message.type)?['slug','expectedRevision','expectedControlRevision',...(message.type==='SET_PAUSED'?['paused']:['instructions'])]:
     message.type==='PREPARE_JOB'?['slug','expectedStageRevision','token']:
     message.type==='BEGIN_NATIVE'?['slug','expectedRevision','step']:
-    ['PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)?['slug','expectedRevision']:
+    ['ADMIT_JOB','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)?['slug','expectedRevision']:
     message.type==='SET_CONCURRENCY'?['perAccount','expectedRevision']:
     message.type==='SET_PROMPT'?['text','tests','expectedRevision']:
     message.type==='IMPORT_PROMPT'?['envelope','expectedRevision']:[];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
-  if(['GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&!SLUG.test(p.slug||''))
+  if(['ADMIT_JOB','SET_PAUSED','GIVE_INSTRUCTIONS','GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&!SLUG.test(p.slug||''))
     return fail('INVALID_SLUG');
+  if(['SET_PAUSED','GIVE_INSTRUCTIONS'].includes(message.type)&&
+    (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||!Number.isSafeInteger(p.expectedControlRevision)||p.expectedControlRevision<1||
+     (message.type==='SET_PAUSED'?typeof p.paused!=='boolean':typeof p.instructions!=='string'||p.instructions.trim().length<3||p.instructions.length>4000||p.instructions.includes('\0'))))return fail('INVALID_PARAMS');
   if(message.type==='PREPARE_JOB'&&
      (!Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
       (p.token!==undefined&&
      (typeof p.token!=='string'||p.token.length<10||p.token.length>512))))
     return fail('INVALID_PARAMS');
-  if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&
+  if(['ADMIT_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
       (message.type==='BEGIN_NATIVE'&&
-       !['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','STOP'].includes(p.step))))
+       !['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','CHAT1_INSTRUCT','CHAT2_INSTRUCT','STOP'].includes(p.step))))
     return fail('INVALID_PARAMS');
   if(message.type==='LIST_JOBS'&&
       ((p.after!==undefined&&(typeof p.after!=='string'||p.after.length>100))||
@@ -105,6 +109,9 @@ export function createAiBoundary(api,{
       if(message.type==='LIST_JOBS')return store.list(p);
       if(message.type==='GET_JOB')return store.getJob(p.slug);
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      if(['SET_PAUSED','GIVE_INSTRUCTIONS'].includes(message.type))return store.operatorControl(p.slug,p.expectedRevision,p.expectedControlRevision,
+        message.type==='SET_PAUSED'?{paused:p.paused}:{instructions:p.instructions});
+      if(message.type==='ADMIT_JOB')return store.admitExecutionSlot(p.slug,p.expectedRevision);
       // A fresh coherent READY successor revokes advancement authority for
       // the older AI candidate. Read-only PROBE_NATIVE remains available for
       // uncertain-session reconciliation; it never starts a new mutation.
@@ -120,9 +127,11 @@ export function createAiBoundary(api,{
         // not depend on the new READY IndexedDB ledger, nor gain authority
         // from its absence. The S05 path always has canonical getJobFull.
         if(sealed?.ok&&sealed.job?.readyIdentifier){
+          const selected=message.type==='ADVANCE_JOB'?planAiStep(sealed.job,{oracleNames:AI_BROWSER_ASSERTIONS}):null;
+          const safetyOnly=selected?.ok&&(selected.type==='PROBE_NATIVE'||selected.step==='STOP');
           const current=await createReadyStore(db).get(p.slug);
           const authorized=authorizeReadyAiAdvance(sealed.job,current);
-          if(!authorized.ok)return authorized;
+          if(!authorized.ok&&!safetyOnly)return authorized;
           // An earlier local READY observation is not permanent Git authority.
           // For every effectful new AI action, independently re-read coherent
           // current main through S03's protected persistent Git vault. No
@@ -174,7 +183,9 @@ export function createAiBoundary(api,{
         if(!sealed.ok)return sealed;
         const job=sealed.job;
         if(job.revision!==p.expectedRevision)return fail('STALE_REVISION');
+        if(job.operatorPaused&&message.type!=='PROBE_NATIVE'&&!(message.type==='BEGIN_NATIVE'&&p.step==='STOP'))return fail('AI_OPERATOR_PAUSED');
         const stage=await stageFactory(db).getFull(p.slug);
+        if(stage?.record?.humanReclaimPending)return fail('S06_HUMAN_EDITOR_RECLAIM_PENDING');
         if(!stage.ok||stage.record.state!=='SOURCE_VERIFIED'||
            stage.record.revision!==job.stageRevision)return fail('AI_STAGE_CONTEXT_CHANGED');
         const r=stage.record,g=guard();
@@ -372,9 +383,21 @@ export function createAiBoundary(api,{
           if(effectGate({phase:'I10',job,stage:r,step:p.step})!==true)
             return fail('AI_PROVIDER_ACTIVATION_HELD');
           // Do not admit new AI work over human-owned or dirty source.
-          const clean=await g.inspectStageEditor?.(r.personaUid,r.slug,r.nonce);
-          if(clean?.ok!==true||clean.clean!==true)return fail('EDITOR_UNKNOWN');
-          if(job.childRequestId&&p.step==='CHAT1_SEND'){
+          if(p.step!=='STOP'){
+            const clean=await g.inspectStageEditor?.(r.personaUid,r.slug,r.nonce);
+            if(clean?.ok!==true||clean.clean!==true)return fail('EDITOR_UNKNOWN');
+          }
+          // Availability is a fixed READ ONLY observation before any possible
+          // dispatch marker. Missing helper controls are an actual no-send
+          // infrastructure limitation, not a fabricated uncertain effect.
+          const available=await g.runNativeAiStep(r.personaUid,{slug:r.slug,nonce:r.nonce,action:'OBSERVE'});
+          if(!available?.ok)return fail(available?.code||'NATIVE_HELPER_UNAVAILABLE');
+          if(p.step==='STOP'){
+            if(available.busy===false)return executeTrusted({type:'PROBE_NATIVE',params:{slug:p.slug,expectedRevision:p.expectedRevision}});
+            if(available.busy!==true||available.sessionDigest!==job.native?.sessionDigest)return fail('AI_STOP_SESSION_CHANGED');
+          }else if(available.busy!==false||available.editorClean!==true||available.sourceSaved!==true||available.hasQueue!==false||available.inputOccupied!==false||available.attachmentsPending!==false)
+            return fail('AI_NATIVE_PREFLIGHT_NOT_SETTLED');
+          if((job.childRequestId||job.adoptedHumanFingerprint)&&p.step==='CHAT1_SEND'){
             // Request Changes reuses the guarded generator; it does not
             // restage. Check exact inherited saved F before the first new
             // native effect, not merely the editor's clean indicator.
@@ -399,11 +422,11 @@ export function createAiBoundary(api,{
                again.routeId!==route.routeId)
               return fail('S06_CHILD_SAVED_F_OR_ROUTE_CHANGED');
           }
-          const isRepair=p.step==='CHAT1_REPAIR'||p.step==='CHAT2_REPAIR';
+          const isInstruction=p.step.endsWith('INSTRUCT'),isRepair=p.step==='CHAT1_REPAIR'||p.step==='CHAT2_REPAIR';
           const text=p.step==='CHAT1_SEND'?job.prompt.text:
-            p.step==='CHAT2_SEND'?job.optionalTesting?.text:isRepair?
+            p.step==='CHAT2_SEND'?job.optionalTesting?.text:isInstruction?job.operatorInstruction?.text:isRepair?
             'A separate browser assertion previously observed a real failing required test. Re-examine the current generator-owned code and src files, make a bounded corrective change, save and run the tests again. Do not declare PASS without an independent browser observation. If no safe progress is possible, report a blocker.':null;
-          if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR'].includes(p.step)&&
+          if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','CHAT1_INSTRUCT','CHAT2_INSTRUCT'].includes(p.step)&&
              (typeof text!=='string'||!text.trim()))return fail('AI_PROMPT_UNVERIFIED');
           if((await sentinel.inspect()).held||effectGate({phase:'I10',job,stage:r,step:p.step})!==true)
             return fail('AI_PROVIDER_ACTIVATION_HELD');
@@ -421,12 +444,12 @@ export function createAiBoundary(api,{
           let observed;
           try{observed=await g.runNativeAiStep(r.personaUid,{
             slug:r.slug,nonce:r.nonce,
-            action:p.step.endsWith('SEND')||p.step.endsWith('REPAIR')?'SEND':
+            action:p.step.endsWith('SEND')||p.step.endsWith('REPAIR')||isInstruction?'SEND':
               p.step==='CHAT2_RESET'?'NEW_CHAT':'STOP',
             ...(text?{text}:{}),
             chat:p.step.startsWith('CHAT2')?2:1,
-            ...(isRepair?{repair:true,
-              expectedSessionDigest:p.step==='CHAT1_REPAIR'?
+            ...((isRepair||isInstruction)?{repair:true,
+              expectedSessionDigest:p.step.startsWith('CHAT1')?
                 job.chat1.sessionDigest:job.chat2.sessionDigest}:{})
           });}catch{}
           // All outcomes are uncertain until a distinct read-only OBSERVE.

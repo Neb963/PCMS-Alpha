@@ -136,6 +136,8 @@ test('C-53 boundary adopts only stable guarded saved source, never unsaved draft
  const guard={
   getSafeRouteReadiness:async()=>({ready:true,routeId:'route-1',cookieStoreId:'ctx-1'}),
   inspectStageEditor:async()=>({ok:true,clean:!dirty}),
+  inspectHumanReview:async()=>({ok:!dirty,clean:!dirty,noEditors:false,sessionDigest:digest}),
+  reclaimHumanReview:async()=>({ok:true}),
   runNativeAiStep:async()=>native(),
   observeReadOnly:async()=>{
    observations++;

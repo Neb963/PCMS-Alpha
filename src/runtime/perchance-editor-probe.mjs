@@ -1,7 +1,7 @@
 // I09 fixed read-only native editor probe. Executed in the MAIN world
 // exclusively on an exact PCMS session-tagged Firefox tab. No page-supplied
 // privileged commands, source content or session tokens leave the page.
-export async function perchanceEditorProbe(slug) {
+export async function perchanceEditorProbe(slug,{allowHumanRead=false,reclaimNonce=null,expectedHumanEpoch=null}={}) {
   const hold=code=>({ok:false,code});
   if(location.origin!=='https://perchance.org'||location.pathname!=='/'+slug||
      location.hash!=='#edit')return hold('EDITOR_TARGET_CHANGED');
@@ -43,14 +43,21 @@ export async function perchanceEditorProbe(slug) {
        typeof src.conflictPaths!=='function'||src.conflictPaths().length!==0)
       return hold('COLLABORATION_UNVERIFIED');
     const host=document.getElementById('pcms-alpha-editor-context');
-    if(host?.dataset.pcmsHumanIntent==='true')return hold('HUMAN_HANDOFF_REQUESTED');
+    const humanEpoch=host?.dataset.pcmsHumanIntentEpoch;
+    if(host?.dataset.pcmsHumanIntent==='true'&&!allowHumanRead)return hold('HUMAN_HANDOFF_REQUESTED');
     const isDirty=await src.isDirty();
     if(isDirty!==false||model.isClean()!==true||html.isClean()!==true||
        window.__saveInFlight!==false||menu.saveState!=='saved')
       return hold('EDITOR_UNKNOWN');
     if(!soloCollaboration())return hold('COLLABORATION_CHANGED_DURING_EDITOR_PROBE');
+    if(host?.dataset.pcmsHumanIntentEpoch!==humanEpoch)return hold('HUMAN_HANDOFF_CHANGED_DURING_PROBE');
+    if(reclaimNonce!==null){
+      if(!allowHumanRead||!/^[a-f0-9]{32}$/.test(reclaimNonce)||host?.dataset.pcmsNonce!==reclaimNonce||
+         typeof expectedHumanEpoch!=='string'||humanEpoch!==expectedHumanEpoch)return hold('HUMAN_RECLAIM_CONTEXT_UNVERIFIED');
+      host.dataset.pcmsHumanIntent='false';
+    }
     // A beforeunload warning, tab ID or save response never establishes this.
     return {ok:true,source:'NATIVE_EDITOR_CLEAN_OBSERVATION',
-      slug,clean:true,collaboration:'ABSENT_AT_OBSERVATION'};
+      slug,clean:true,humanEpoch:humanEpoch??null,collaboration:'ABSENT_AT_OBSERVATION'};
   }catch{return hold('EDITOR_UNKNOWN');}
 }

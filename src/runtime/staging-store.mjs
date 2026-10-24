@@ -252,6 +252,11 @@ export function createStagingStore(db){
           reason:next==='SOURCE_VERIFIED'?null:reason||record.reason,
           tab:tab===null?record.tab:tab,
           ...(next==='SOURCE_VERIFIED'?{verifiedAt:Date.now()}: {})};
+        if(next==='HANDOFF_REQUESTED'&&record.state==='SOURCE_VERIFIED'){
+          updated.handoffParentRevision=record.revision;
+          updated.handoffParentFingerprint=record.candidate.fingerprint;
+          m.add({key:'stage-history:'+slugName+':'+record.revision,record:structuredClone(record)});
+        }
         m.put({key:key(slugName),record:updated});
         tx.objectStore('events').add({stage:'CANDIDATE_'+next,
           slug:slugName,revision:updated.revision,
