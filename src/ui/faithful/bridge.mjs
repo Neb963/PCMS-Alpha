@@ -13,7 +13,6 @@ import {snapshotCanonicalV2,preflightSourceRecovery} from '../backup-core.mjs';
  * buttons, required confirmations, capability gates, and revision fences.
  */
 const routes=['overview','generators','work-queue','accounts','refresher','settings'];
-const native=document.querySelector('body > .app');
 const host=document.createElement('div');host.id='pcms-faithful-host';
 document.body.append(host);const root=host.attachShadow({mode:'open'});
 const READINESS_NAMES={EXTENSION_RUNTIME:'PCMS extension',LOCAL_CONFIGURATION:'Local settings',RESTORE_HOLD:'Restore safety',REFRESHER_POLICY:'Refresher configuration',BACKUP_RESTORE:'Backup recovery',ACCOUNT_INVENTORY_READ:'Account inventory',REFRESHER_CURRENT_POLICY:'Current Refresher policy',BROWSER_GIT_STORE:'Firefox Git credential storage',NATIVE_VAULT_HOST:'Legacy Git helper (not required)',SECRET_SERVICE_ENVIRONMENT:'Secure credential storage',BACKUP_HOST:'Backup helper',DIAGNOSTIC_HOST:'Diagnostic helper',GIT_CONFIG:'GitHub connection',GIT_PARTIAL_CONNECTION:'Interrupted GitHub setup',GITHUB_AUTH:'GitHub access',GITHUB_MAIN_TREE:'GitHub file scan',GRANT_DEVELOPMENT:'Development permission',GRANT_GITWRITE:'Git write permission',GRANT_PUBLICATION:'Publication permission',PERSONA_AND_SESSION:'Account and secure route',REFRESHER_LIVE_EFFECT:'Refresher operation',PORTABLE_BACKUP_RUNTIME:'Portable backup coordinator',INSTALLED_XPI_IDENTITY:'Installed extension verification'};
@@ -79,7 +78,7 @@ function friendlyConnectionIssue(code){
 const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',total:0,items:[]},
  ref:{offset:0,limit:25,query:'',phase:'ALL',snapshot:null,items:[],total:0},
  acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,readyItems:[],readyCursor:'',nextReady:null,readyMore:false,aiUnavailable:false,readyUnavailable:false,epoch:0},
- settings:'connections',settingsStatic:null,lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},nativeOpen:false,
+ settings:'connections',settingsStatic:null,lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},
  renderEpoch:0,version:'0.1.7',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
 const page=()=>shadow('#page');
@@ -104,18 +103,6 @@ const accounts=()=>guardedRead('pcms-i03-accounts','LIST_ACCOUNTS');
 const refresher=(params)=>guardedRead('pcms-i12-refresher','GET_REFRESHER',params);
 const safeCount=n=>Number.isInteger(n)&&n>=0?n:'—';
 const snippet=(s,n=150)=>String(s??'').trim().slice(0,n);
-function nativeRoute(route,group){
- if(!routes.includes(route))return;
- location.hash='#'+route;
- // Existing v014 production workflow navigation lives in the original DOM.
- if(group){const button=native.querySelector('#view-'+route+' [data-ui-group="'+group+'"]');button?.click()}
- state.nativeOpen=true;document.body.classList.add('pcms-native-open');
- const close=document.querySelector('#pcms-legacy-return');close?.focus();
-}
-function nativeReturn(){state.nativeOpen=false;document.body.classList.remove('pcms-native-open');shadow('[data-nav="'+state.route+'"]')?.focus({preventScroll:true})}
-const nativeControl=id=>document.getElementById(id);
-function guardedClick(id){const target=nativeControl(id);if(!target||target.disabled){notify('This guarded control is not available. Inspect the current authorization or recovery hold.');return false}target.click();return true}
-function nativeAction(route,group,id){nativeRoute(route,group);if(id){const e=nativeControl(id);e?.scrollIntoView({block:'nearest'});e?.focus({preventScroll:true})}}
 let currentToast;
 function notify(message){const e=shadow('#pcms-live-toast');if(!e)return;e.textContent=String(message);e.hidden=false;if(currentToast)clearTimeout(currentToast);currentToast=setTimeout(()=>e.hidden=true,6500)}
 function updateNav(){for(const a of root.querySelectorAll('[data-nav]'))a.setAttribute('aria-current',a.dataset.nav===state.route?'page':'false');
@@ -2415,21 +2402,34 @@ async function mount(){
  const link=document.createElement('link');link.rel='stylesheet';link.href=new URL('prototype.css',url).href;root.prepend(link);
  const addon=document.createElement('style');addon.textContent=':host{display:block;height:100dvh;min-height:0} .pcms-action-toast{position:fixed;bottom:20px;right:25px;z-index:100;padding:12px 16px;background:#253e55;color:white;border-radius:7px;box-shadow:0 5px 24px #0003;max-width:380px} .pcms-action-toast[hidden]{display:none}';root.append(addon);
  let initial=location.hash.slice(1);if(!routes.includes(initial))initial='overview';state.route=initial;
- document.querySelector('#pcms-legacy-return')?.addEventListener('click',nativeReturn);
  routeHandlers();await render();document.body.classList.add('pcms-faithful-ready');
  window.addEventListener('hashchange',()=>{const dest=location.hash.slice(1);if(routes.includes(dest)&&dest!==state.route){state.route=dest;void render()}});
- // Native modules drive canonical state while dashboard remains closed; this
- // observer reads their projections only when the matching shadow UI is visible.
- const targets=['pcms-queue-refresher','pcms-overview-backup','pcms-guard-health','pcms-journal-health','pcms-s06-review-queue','pcms-ai-jobs'];
- let timer=null;const observer=new MutationObserver(()=>{
-  if(timer)clearTimeout(timer);
-  timer=setTimeout(()=>{if(state.route==='overview')displayOverview();else if(state.route==='work-queue')displayQueue()},250);
- });
- for(const id of targets){const n=nativeControl(id);if(n)observer.observe(n,{childList:true,characterData:true,subtree:true})}
+ // Foreground projection reads the same canonical background ports. Never
+ // mirror an inaccessible hidden controller or infer completion from its DOM.
+ const refreshOnWake=()=>{
+  if(document.visibilityState==='hidden')return;
+  if(state.route==='overview')displayOverview();
+  else if(state.route==='work-queue')void loadQueue(true);
+  else if(state.route==='generators')void loadGenerators();
+  else if(state.route==='accounts')void loadAccounts();
+  else if(state.route==='refresher')void loadRefresher();
+  else if(state.route==='settings')renderSettingsSection();
+ };
+ document.addEventListener('visibilitychange',refreshOnWake);
+ window.addEventListener('focus',refreshOnWake);
 }
 mount().catch(error=>{
- console.error('Faithful production UI boot failed',error);
- // Fail open to the original full-capability dashboard. Never hide protected
- // controls behind a broken presentation layer.
- document.body.classList.remove('pcms-faithful-ready');host.remove();
+ // Fail closed for presentation faults; never silently activate the historical
+ // hidden authoring dashboard or authorize a remote effect.
+ console.error('PCMS primary UI unavailable',error);
+ root.replaceChildren();
+ const failure=document.createElement('section');
+ failure.setAttribute('role','alert');
+ failure.style.cssText='font:16px system-ui;color:#13283a;background:#fff;min-height:100dvh;padding:32px;max-width:840px;margin:0 auto';
+ const title=document.createElement('h1');title.textContent='PCMS interface unavailable';
+ const detail=document.createElement('p');detail.textContent='Protected operations have not been attempted. Reload the extension, or inspect the independent emergency diagnostics.';
+ const retry=document.createElement('button');retry.type='button';retry.textContent='Reload PCMS';retry.addEventListener('click',()=>location.reload());
+ const emergency=document.createElement('a');emergency.href=browser.runtime.getURL('pcms/emergency.html');emergency.textContent='Emergency diagnostics';
+ failure.append(title,detail,retry,document.createTextNode(' '),emergency);
+ root.append(failure);document.body.classList.add('pcms-faithful-ready');
 });
