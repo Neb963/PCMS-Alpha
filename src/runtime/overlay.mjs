@@ -958,13 +958,15 @@ attachPcmsGuard({
     await browser.sessions.removeTabValue(found[0].tab.id,'pcmsI09Owned');
     return {ok:true,code:'HUMAN_TAB_RETAINED'};
   },
-  openHumanLogin: async ({personaUid,cookieStoreId,routeId}) =>
+  openHumanLogin: async ({personaUid,cookieStoreId,routeId,slug}) =>
     localMutationFence(cookieStoreId,async()=>{
       const state=await getState(), p=state.profiles?.[cookieStoreId];
       if(!p || p.personaUid!==personaUid || p.routeId!==routeId ||
           routeId==='direct'||routeId==='block'||state.routes?.[routeId]?.enabled===false)
         throw Error('PERSONA_ROUTE_CHANGED');
-      return personaPlatform.open(cookieStoreId,'https://perchance.org/',true);
+      if(slug!==undefined&&(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)))
+        throw Error('INVALID_GENERATOR_SLUG');
+      return personaPlatform.open(cookieStoreId,'https://perchance.org/'+(slug||''),true);
     })
 });
 

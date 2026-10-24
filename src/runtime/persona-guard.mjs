@@ -146,13 +146,15 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
       return {ok:true,created:true,providerEffects:'OFF'};
     }catch {return {ok:false,code:'PERSONA_CREATE_UNCONFIRMED'};}
   }
-  async function openLogin(personaUid) {
+  async function openLogin(personaUid,slug=null) {
+    if(slug!==null&&(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)))
+      return {ok:false,code:'INVALID_GENERATOR_SLUG'};
     const before=await inspect(personaUid);
     if(!before.ready)return {ok:false,code:before.code};
     if(typeof openHumanLogin!=='function')return {ok:false,code:'DONOR_TAB_OPEN_UNAVAILABLE'};
     try {
-      await openHumanLogin(before);
-      return {ok:true,opened:true,kind:'HUMAN_LOGIN_ONLY'};
+      await openHumanLogin(slug===null?before:{...before,slug});
+      return {ok:true,opened:true,kind:slug===null?'HUMAN_LOGIN_ONLY':'HUMAN_GENERATOR_VIEW'};
     }catch{return {ok:false,code:'HUMAN_TAB_OPEN_UNCONFIRMED'};}
   }
 
@@ -392,6 +394,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     listProtectedRoutes: availableRoutes,
     createProtectedPersona,
     openHumanLogin: openLogin,
+    openHumanGenerator:(personaUid,slug)=>openLogin(personaUid,slug),
     resolveUid: inspect,
     getSafeRouteReadiness: inspect,
     acquireConflictGuard,

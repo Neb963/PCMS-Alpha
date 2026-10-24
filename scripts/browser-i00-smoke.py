@@ -5405,7 +5405,7 @@ def main():
                           return {total:sh.querySelector('.workspace-surface .pagination span')?.textContent||'',
                             rows:[...sh.querySelectorAll('.workspace-surface tbody tr[data-item-index]')]
                               .map(tr=>({slug:tr.querySelector('.name-cell')?.textContent,
-                                account:tr.querySelectorAll('td')[1]?.textContent}))};""")
+                                account:tr.querySelector('[data-column="account"]')?.textContent}))};""")
                         if '1200' in large_ui['total'] and len(large_ui['rows'])==24:break
                         time.sleep(.12)
                     assert '1200' in large_ui['total'] and len(large_ui['rows'])==24,('A07_PRIMARY_1200_PAGE',large_ui)

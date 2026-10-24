@@ -15,17 +15,25 @@ export function validateInventoryMessage(api,sender,message) {
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   if(!message||typeof message!=='object'||Array.isArray(message))return fail('INVALID_MESSAGE');
   let json;try{json=JSON.stringify(message);}catch{return fail('INVALID_MESSAGE');}
-  if(!json||json.length>600||Object.keys(message).some(k=>!['type','params'].includes(k)))
+  if(!json||json.length>(message?.type==='INSPECT_GENERATORS'?16000:600)||Object.keys(message).some(k=>!['type','params'].includes(k)))
     return fail('INVALID_MESSAGE');
-  if(!['LIST_INVENTORY','SYNC_ACCOUNT'].includes(message.type))
+  if(!['LIST_INVENTORY','INSPECT_GENERATORS','OPEN_GENERATOR','SYNC_ACCOUNT'].includes(message.type))
     return fail('CAPABILITY_OFF');
   const p=message.params||{};
   if(typeof p!=='object'||!p||Array.isArray(p))return fail('INVALID_PARAMS');
   const allowed=message.type==='LIST_INVENTORY'?
     ['query','ownerState','accountId','offset','limit','sort']:
-    ['accountId','expectedRevision'];
+    message.type==='INSPECT_GENERATORS'?['slugs']:
+    message.type==='OPEN_GENERATOR'?['slug','expectedRevision']:['accountId','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
-  if(message.type==='SYNC_ACCOUNT'){
+  if(message.type==='INSPECT_GENERATORS'){
+    if(!Array.isArray(p.slugs)||p.slugs.length<1||p.slugs.length>100||
+       p.slugs.some(s=>typeof s!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(s)))
+      return fail('INVALID_INVENTORY_SELECTION');
+  }else if(message.type==='OPEN_GENERATOR'){
+    if(typeof p.slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(p.slug)||
+       !Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1)return fail('INVALID_PARAMS');
+  }else if(message.type==='SYNC_ACCOUNT'){
     if(!isSafeId(p.accountId)||!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1)
       return fail('INVALID_PARAMS');
   }else if((p.query!==undefined&&(typeof p.query!=='string'||p.query.length>80))||
@@ -72,7 +80,24 @@ export function createInventoryBoundary(api,{
           holdCode:restore.code,remoteSync:'ON_DEMAND_GUARDED_READ_ONLY',
           providerWrites:'OFF'}:out;
       }
+      if(message.type==='INSPECT_GENERATORS'){
+        const out=await s.inventory.inspect(p.slugs);
+        return {...out,restoreHeld:restore.held,holdCode:restore.code,providerWrites:'OFF'};
+      }
       if(restore.held)return fail('RESTORE_HOLD');
+      if(message.type==='OPEN_GENERATOR'){
+        const found=await s.inventory.getCurrent(p.slug),row=found.generator;
+        if(!found.ok||!row)return fail('TARGET_NOT_OBSERVED');
+        if(row.revision!==p.expectedRevision)return fail('STALE_REVISION');
+        const account=await s.accounts.get(row.accountId);
+        if(!account.ok||account.account.state==='ARCHIVED'||account.account.removed)
+          return fail('ACCOUNT_ARCHIVED');
+        if(account.account.personaUid!==row.personaUid||
+           account.account.bindingVersion!==row.bindingVersion)return fail('ACCOUNT_CONTEXT_CHANGED');
+        const g=guard();
+        return g?.openHumanGenerator?await g.openHumanGenerator(account.account.personaUid,row.slug):
+          fail('GUARD_NOT_READY');
+      }
       const account=await s.accounts.get(p.accountId);
       if(!account.ok)return account;
       if(account.account.revision!==p.expectedRevision)return fail('STALE_REVISION');

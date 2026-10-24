@@ -1,3 +1,4 @@
+import {createGeneratorSelection} from './generator-selection.mjs';
 import {createAccountsWorkspace,accountGrowthAdvice,accountNeedsAttention} from './accounts-workspace.mjs';
 import {advanceApprovedPublication} from './publication-flow.mjs';
 import {mountPortableRestore} from '../restore-view.mjs';
@@ -106,6 +107,9 @@ const safeCount=n=>Number.isInteger(n)&&n>=0?n:'—';
 const snippet=(s,n=150)=>String(s??'').trim().slice(0,n);
 let currentToast;
 function notify(message){const e=shadow('#pcms-live-toast');if(!e)return;e.textContent=String(message);e.hidden=false;if(currentToast)clearTimeout(currentToast);currentToast=setTimeout(()=>e.hidden=true,6500)}
+const generatorSelection=createGeneratorSelection(typeof browser==='object'?browser.storage.local:{
+ get:async()=>{throw Error('STORAGE_UNAVAILABLE')},set:async()=>{throw Error('STORAGE_UNAVAILABLE')}});
+generatorSelection.subscribe(()=>updateGeneratorSelection());
 const accountWorkspace=createAccountsWorkspace({root,el,b,request:readPort,reload:()=>loadAccounts(),notify});
 function updateNav(){for(const a of root.querySelectorAll('[data-nav]'))a.setAttribute('aria-current',a.dataset.nav===state.route?'page':'false');
  const label=shadow('#breadcrumb');if(label)label.textContent=({'work-queue':'Work Queue',overview:'Overview',generators:'Generators',accounts:'Accounts',refresher:'Refresher',settings:'Settings'})[state.route];
@@ -493,6 +497,8 @@ function routeHandlers(){
   }catch{notify('Global pause outcome uncertain. Reload before another change.')}
   await loadRefresher();
  })();return}
+ if(action==='review-generator-selection'){openGeneratorSelection();return}
+ if(action==='clear-generator-selection'){void generatorSelection.clear();return}
  if(action==='go-accounts'){routeTo('accounts');return}
  if(action==='refresh-accounts'){void loadAccounts();return}
  if(action==='queue-help'){notify('Work Queue shows pending work and items needing attention. Open an item to review its available actions.');return}
@@ -509,6 +515,7 @@ function routeHandlers(){
    const next=event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
    event.preventDefault();tabs[next]?.focus({preventScroll:true});tabs[next]?.click();return;
   }
+  if(event.target.closest('button,input,select,textarea,a'))return;
   const row=event.target.closest('tr[data-item-index]');if(!row)return;
   if(event.key==='Enter'||event.key===' '){event.preventDefault();row.click();return}
   if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){
@@ -518,6 +525,7 @@ function routeHandlers(){
   }
  });
  root.addEventListener('change',event=>{const target=event.target;
+ if(target.matches('[data-generator-select-page]')){void generatorSelection.setMany(state.gen.items,target.checked);return}
  if(target.id==='generator-account'){state.gen.account=target.value;state.gen.offset=0;void loadGenerators()}
  if(target.id==='generator-sort'){state.gen.sort=target.value;state.gen.offset=0;void loadGenerators()}
  if(target.id==='account-filter'){state.acct.filter=target.value;state.acct.page=0;displayAccounts()}
@@ -759,6 +767,98 @@ async function loadGenerators(){if(state.route!=='generators')return;
   state.errors.generators='';displayGenerators();
  }catch(err){if(epoch!==state.renderEpoch)return;state.errors.generators=err.message;state.gen.items=[];state.gen.total=0;rowsError('.workspace-surface table tbody','Local inventory unavailable: '+err.message+'. No remote absence inferred.',6)}
 }
+function updateGeneratorSelection(){
+ if(state.route!=='generators')return;
+ const selected=generatorSelection.status(),bar=shadow('[data-generator-selection]');
+ if(bar){bar.hidden=selected.count===0&&!selected.error;
+  const count=bar.querySelector('[data-selection-count]');if(count)count.textContent=selected.count+' selected across pages';
+  const error=bar.querySelector('[data-selection-error]');if(error){error.textContent=selected.error||'';error.hidden=!selected.error}}
+ for(const checkbox of root.querySelectorAll('[data-generator-select]')){
+  const item=state.gen.items.find(x=>x.slug===checkbox.dataset.generatorSelect);
+  if(item)checkbox.checked=generatorSelection.includes(item);
+ }
+ const all=shadow('[data-generator-select-page]');
+ if(all){const count=state.gen.items.filter(x=>generatorSelection.includes(x)).length;
+  all.checked=state.gen.items.length>0&&count===state.gen.items.length;
+  all.indeterminate=count>0&&count<state.gen.items.length;all.disabled=state.gen.items.length===0}
+}
+async function openGeneratorPage(item){
+ try{
+  const out=await readPort('pcms-i04-inventory','OPEN_GENERATOR',{slug:item.slug,expectedRevision:item.revision},45000);
+  notify(out?.ok&&out.opened?'Generator opened in its protected Persona.':
+   out?.code==='STALE_REVISION'?'This generator changed. Refresh its current record before opening it.':
+   out?.code==='ACCOUNT_ARCHIVED'?'Reactivate this account before opening its generator.':
+   out?.code==='ACCOUNT_CONTEXT_CHANGED'?'Synchronize this account’s inventory after completing its login.':
+   'The protected page could not be opened. Check the account’s login and route.');
+ }catch{notify('Opening the generator was not confirmed. Check its account before retrying.')}
+}
+function openGeneratorSelection(){
+ const targets=generatorSelection.snapshot();if(!targets.length)return;
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),dialog=el('section','drawer');
+ dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');dialog.setAttribute('aria-label','Selected generators');
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const header=el('div','drawer-head'),line=el('div','drawer-title-row');
+ line.append(el('h2','drawer-title','Selected generators'),b('Close',close));header.append(line);
+ const body=el('div','drawer-body'),status=el('p','setting-note','Reading '+targets.length+' current records…');
+ status.setAttribute('role','status');const actions=el('div','form-foot'),list=el('div'),pager=el('div','pagination-actions');
+ body.append(status,actions,list,pager);dialog.append(header,body);overlay.append(dialog);root.append(overlay);
+ let rows=[],offset=0,busy=false;const size=25;
+ function draw(){
+  list.replaceChildren();pager.replaceChildren();
+  for(const item of rows.slice(offset,offset+size)){
+   const frozen=targets.find(x=>x.slug===item.slug),row=el('section','setting-note');
+   row.style.marginTop='10px';row.append(el('strong','',item.slug));
+   row.append(el('p','',item.missing?'Local record unavailable. Remote absence has not been inferred.':
+    (item.accountId!==frozen.accountId?'Account changed since selection. ':
+     item.revision!==frozen.revision?'Updated since selection. ':'')+
+     (ownerLabels[item.ownerState]||'Ownership needs checking')+' · '+item.accountId));
+   if(!item.missing){
+    row.append(b('Open Perchance',()=>void openGeneratorPage(item)),
+     b('Source',()=>{close();openSourceManager(item)}),
+     b('Manage account',()=>void (async()=>{
+      const out=await accounts();const a=out.accounts?.find(a=>a.accountId===item.accountId);
+      if(a){close();openAccountManager(a)}else notify('Account record unavailable.')
+     })().catch(()=>notify('Account state could not be read.'))));
+   }
+   row.append(b('Remove from selection',()=>{void generatorSelection.remove(item.slug);
+    rows=rows.filter(x=>x.slug!==item.slug);if(offset>=rows.length)offset=Math.max(0,offset-size);draw()}));list.append(row);
+  }
+  const back=b('Previous',()=>{offset=Math.max(0,offset-size);draw()});back.disabled=offset===0;
+  const next=b('Next',()=>{offset+=size;draw()});next.disabled=offset+size>=rows.length;
+  pager.append(back,el('span','',String(rows.length?offset+1:0)+'–'+Math.min(offset+size,rows.length)+' of '+rows.length),next);
+ }
+ const sync=b('Sync selected accounts',()=>void (async()=>{
+  if(busy)return;busy=true;sync.disabled=true;status.textContent='Synchronizing the selected accounts…';
+  try{
+   const found=await accounts(),ids=new Set(rows.filter(x=>!x.missing).map(x=>x.accountId));
+   let confirmed=0,held=0;
+   const queue=found.accounts.filter(a=>ids.has(a.accountId));let index=0;
+   await Promise.all(Array.from({length:Math.min(2,queue.length)},async()=>{
+    while(index<queue.length){const a=queue[index++];try{
+     const out=await readPort('pcms-i04-inventory','SYNC_ACCOUNT',{accountId:a.accountId,expectedRevision:a.revision},100000);
+     if(out?.ok&&!out.held)confirmed++;else held++;
+    }catch{held++}}
+   }));
+   status.textContent=confirmed+' account inventories updated; '+held+' need attention. Use Manage account to recover login or routing.';
+   await loadGenerators();
+  }catch{status.textContent='Inventory synchronization was not confirmed. Your selection is preserved.'}
+  finally{busy=false;sync.disabled=false}
+ })(),'btn small');sync.disabled=true;actions.append(sync);
+ void (async()=>{try{
+  for(let i=0;i<targets.length;i+=100){
+   const out=await readPort('pcms-i04-inventory','INSPECT_GENERATORS',{slugs:targets.slice(i,i+100).map(x=>x.slug)},20000);
+   if(!out?.ok)throw Error('SELECTION_UNAVAILABLE');rows.push(...out.items);
+  }
+  if(!overlay.isConnected)return;status.textContent=rows.length+' selected records. Source and account actions always check current state.';
+  sync.disabled=!rows.some(x=>!x.missing);draw();
+ }catch{status.textContent='Selected records could not be read. Your saved selection is preserved.'}})();
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close();return}
+  if(e.key==='Tab'){const controls=[...dialog.querySelectorAll('button:not(:disabled),a,input')].filter(n=>n.getClientRects().length);
+   const at=controls.indexOf(root.activeElement);if(e.shiftKey&&at===0){e.preventDefault();controls.at(-1)?.focus()}
+   else if(!e.shiftKey&&at===controls.length-1){e.preventDefault();controls[0]?.focus()}}
+ });line.querySelector('button')?.focus({preventScroll:true});
+}
 function displayGenerators(){if(state.route!=='generators')return;
  const body=shadow('.workspace-surface table tbody');if(!body)return;body.replaceChildren();
  const accountsMap=new Map(state.lastAccountList.map(a=>[a.accountId,a]));const itemList=[...state.gen.items];
@@ -767,14 +867,18 @@ function displayGenerators(){if(state.route!=='generators')return;
  if(!itemList.length){rowsError('.workspace-surface table tbody',state.errors.generators?'Local inventory unavailable.': 'No matching local generator observations.',6)}
  for(const [i,item] of itemList.entries()){
   const tr=tableRow([item.slug],i);
+  const selectCell=el('td','generator-select-cell'),checkbox=el('input');checkbox.type='checkbox';
+  checkbox.dataset.generatorSelect=item.slug;checkbox.setAttribute('aria-label','Select '+item.slug);
+  checkbox.checked=generatorSelection.includes(item);checkbox.addEventListener('click',e=>e.stopPropagation());
+  checkbox.addEventListener('change',()=>void generatorSelection.set(item,checkbox.checked));selectCell.append(checkbox);
   const acct=accountsMap.get(item.accountId);const sourceState=item.source||'SOURCE_PENDING';const owner=item.ownerState||'UNKNOWN';
   const statusText=ownerLabels[owner]||owner.replaceAll('_',' ').toLowerCase();
   const td0=el('td','name-cell',item.slug||'Unknown');const td1=el('td','muted-cell',acct?.alias||item.accountId||'Unknown account');
   const td2=el('td');td2.append(statusPill(statusText,statusClasses[owner]||''));
   const td3=el('td','muted-cell',item.visibility||'UNKNOWN');
   const td4=el('td','muted-cell',sourceState+(item.lastObservedAt?' · '+fmtObservation({...item,observedAt:item.lastObservedAt}):''));
-  const cue=el('td','open-col');cue.append(icon('chevron'));
-  tr.append(td0,td1,td2,td3,td4,cue);body.append(tr);
+  const cue=el('td','open-col');cue.append(b('Open',e=>{e.stopPropagation();void openGeneratorPage(item)},'btn small'));
+  td1.dataset.column='account';tr.append(selectCell,td0,td1,td2,td3,td4,cue);body.append(tr);
  }
  setPagination('.workspace-surface .pagination span','[data-action="gen-prev"]','[data-action="gen-next"]',state.gen.offset,state.gen.total,state.gen.limit,
  `${state.gen.total?state.gen.offset+1:0}–${Math.min(state.gen.offset+state.gen.limit,state.gen.total)} of ${state.gen.total} historical local records${state.gen.account!=='ALL'?' · filtered account':''}`);
@@ -787,6 +891,7 @@ function displayGenerators(){if(state.route!=='generators')return;
   // These are real owner-evidence facets, not simulated publication states.
   tab.replaceChildren(document.createTextNode(canonicalLabels[value]));tab.setAttribute('aria-selected',String(state.gen.filter===value));tab.tabIndex=state.gen.filter===value?0:-1;
  }
+ updateGeneratorSelection();
  const accountSelect=shadow('#generator-account');if(accountSelect){const prior=accountSelect.value;accountSelect.replaceChildren();const first=el('option','', 'All accounts');first.value='ALL';accountSelect.append(first);
   for(const a of state.lastAccountList){const option=el('option','',a.alias||a.accountId);option.value=a.accountId;accountSelect.append(option)}accountSelect.value=[...accountSelect.options].some(x=>x.value===state.gen.account)?state.gen.account:'ALL';}
 }

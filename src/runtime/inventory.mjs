@@ -223,6 +223,29 @@ export function createInventoryStore(db) {
       };
     });
   }
+  function getCurrent(slug){
+    if(!slugOK(slug))return Promise.resolve(fail('INVALID_GENERATOR_SLUG'));
+    return transact('readonly',(tx,finish)=>{
+      tx.objectStore('meta').get(inventoryKey(slug)).onsuccess=e=>{
+        const row=e.target.result?.generator;
+        finish(row?{ok:true,generator:row}:fail('TARGET_NOT_OBSERVED'));
+      };
+    });
+  }
+  function inspect(slugs){
+    if(!Array.isArray(slugs)||slugs.length<1||slugs.length>100||slugs.some(s=>!slugOK(s)))
+      return Promise.resolve(fail('INVALID_INVENTORY_SELECTION'));
+    return transact('readonly',(tx,finish)=>{
+      const items=new Array(slugs.length);let remaining=slugs.length;
+      slugs.forEach((slug,index)=>{
+        tx.objectStore('meta').get(inventoryKey(slug)).onsuccess=e=>{
+          const row=e.target.result?.generator;
+          items[index]=row?publicGenerator(row):{slug,missing:true};
+          if(--remaining===0)finish({ok:true,items});
+        };
+      });
+    });
+  }
   function accountSummaries(){
     return transact('readonly',(tx,finish)=>{
       const summaries=Object.create(null);
@@ -244,5 +267,5 @@ export function createInventoryStore(db) {
       };
     });
   }
-  return Object.freeze({applyObservation,list,accountSummaries});
+  return Object.freeze({applyObservation,list,inspect,getCurrent,accountSummaries});
 }
