@@ -99,27 +99,44 @@ def main():
                 throw Error('A08_PRE_UPGRADE_ADDON_VERSION_CHANGED');
               const install=await AddonManager.getInstallForFile(file);
               if(!install)throw Error('A08_ADDON_INSTALL_NOT_CREATED');
-              let outcome;
-              try {
-                outcome=await AddonManager.installAddonFromAOM(
-                  null,io.newURI('about:addons'),install,
-                  {preferUpdateOverInstall:true});
-              } catch(error) {
-                throw Error('A08_ADDON_MANAGER_UPDATE_REFUSED:'+
-                  String(error)+':CODE='+install.error+
-                  ':STATE='+install.state);
-              }
-              // installAddonFromAOM prepares the user-initiated update.
-              // In this CI-only trusted context the test controller explicitly
-              // completes the actual AddonInstall and checks its result.
-              const installedAddon=await install.install();
+              // The Firefox About Add-ons frontend uses the WithOptions
+              // overload (the no-options wrapper discards the update flag).
+              // AOM starts asynchronously; a real add-on install listener
+              // witnesses the effect. An absent prompt/ACK is a HOLD.
+              let event='NO_TERMINAL_INSTALL_EVENT';
+              const terminal=new Promise(resolve=>{
+                const listener={
+                  onInstallEnded(i,addon){
+                    if(i===install){event='INSTALLED';doneListener();}
+                  },
+                  onInstallFailed(i){
+                    if(i===install){event='FAILED:'+i.error;doneListener();}
+                  },
+                  onInstallCancelled(i){
+                    if(i===install){event='CANCELLED';doneListener();}
+                  }
+                };
+                let settled=false;
+                const doneListener=()=>{
+                  if(settled)return;settled=true;
+                  AddonManager.removeInstallListener(listener);
+                  resolve(event);
+                };
+                AddonManager.addInstallListener(listener);
+                setTimeout(doneListener,9000);
+              });
+              AddonManager.installAddonFromAOMWithOptions(
+                window.gBrowser?.selectedBrowser||null,
+                io.newURI('about:addons'),install,
+                {preferUpdateOverInstall:true});
+              await terminal;
               const current=await AddonManager.getAddonByID(ADDON_ID);
               done({ok:current?.version==='1.2.5',
-                installedVersion:installedAddon?.version||null,
+                installEvent:event,
                 oldVersion:before.version,currentVersion:current?.version,
                 installed:!!current?.isActive,error:install.error,
                 state:install.state,action:'FIREFOX_ADDON_MANAGER_UPDATE',
-                outcomeVersion:outcome?.version||null});
+                existingAddon:!!install.existingAddon});
             })().catch(e=>done({ok:false,error:String(e),stack:String(e.stack)}));"""
             upgrade_js=upgrade_js.replace('TARGET',json.dumps(str(target))).replace(
                 'ADDON_ID',json.dumps(b.ID))
