@@ -79,7 +79,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       await ledger.hold(bindingId,'ACCOUNT_ARCHIVED');return fail('ACCOUNT_ARCHIVED');
     }
     const out=await ledger.observe({bindingId,routeId,exits:n.exits,
-      exitSetDigest:await exitSetDigest(n.exits),observedAtMs:n.observedAtMs,activate:true});
+      exitSetDigest:await exitSetDigest(n.exits),observedAtMs:n.observedAtMs,ipv6Disposition:n.ipv6Disposition,activate:true});
     if(!out.ok)return out;
     const latest=await accounts.get(accountId);
     if(!latest.ok||latest.account.bindingId!==bindingId||latest.account.state==='ARCHIVED'&&!allowArchived){
@@ -163,6 +163,8 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       if(!route.ok){last=route.code;continue;}
       const ev=await donor.probeCandidate({routeId:route.routeId});
       if(!ev.ok){if(ev.failure==='HOST')return ev;last=ev.code;await checked(route.routeId);continue;}
+      const afterProbe=await accounts.get(account.accountId);
+      if(!afterProbe.ok||afterProbe.account.state==='ARCHIVED'||afterProbe.account.bindingId!==bindingId)return fail('ACCOUNT_ARCHIVED');
       const n=normalizeRouteEvidence(ev);
       if(!n.ok){last=n.code;await checked(route.routeId);continue;}
       const reserved=await ledger.reserve({accountId:account.accountId,bindingId,
@@ -171,6 +173,8 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
         observedAtMs:n.observedAtMs,ipv6Disposition:n.ipv6Disposition,
         replacesPersona:prior.ok&&prior.binding.personaUid!==persona.personaUid});
       if(!reserved.ok){last=reserved.code==='EXIT_HISTORICALLY_OWNED'?'NO_UNIQUE_EXIT_AVAILABLE':reserved.code;await checked(route.routeId);continue;}
+      const beforeAssign=await accounts.get(account.accountId);
+      if(!beforeAssign.ok||beforeAssign.account.state==='ARCHIVED'||beforeAssign.account.bindingId!==bindingId)return fail('ACCOUNT_ARCHIVED');
       const assigned=await donor.assignRoute({bindingId,personaUid:persona.personaUid,
         contextId:persona.contextId,routeId:route.routeId});
       // Unconfirmed assignment: the reservation is durable; the next run

@@ -5418,6 +5418,8 @@ def main():
                     assert '55' in fleet_accounts['total'] and fleet_accounts['rows']==24 and fleet_accounts['next'],('A07_PRIMARY_55_ACCOUNTS',fleet_accounts)
                     print('B A07_PRIMARY_1200_GENERATOR_AND_55_ACCOUNT_PAGING=PASS',flush=True)
                 finally:close(a07_session)
+                from journey_accounts_ui import run as run_j01_primary
+                run_j01_primary(browser,archive,pathlib.Path(folder))
             finally:
                 if after: close(after)
         finally:

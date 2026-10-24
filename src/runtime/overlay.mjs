@@ -306,7 +306,13 @@ function createPcmsEnrollmentDonor(){
         return {ok:false,code:'PERSONA_IN_USE'};
       try{
         return await localMutationFence(p.containerId,async()=>
-          ({ok:true,removed:await personaPlatform.remove(p.containerId)===true}));
+          {
+          await personaPlatform.remove(p.containerId);
+          const after=await getState();
+          if(Object.values(after.profiles||{}).some(x=>String(x?.personaUid||'').toLowerCase()===String(personaUid).toLowerCase()))
+            return {ok:false,code:'PERSONA_REMOVAL_UNCONFIRMED'};
+          return {ok:true,removed:true};
+        });
       }catch{return {ok:false,code:'PERSONA_REMOVAL_UNCONFIRMED'};}
     },
     reloadPins:()=>reloadRoutePins()

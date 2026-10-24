@@ -143,7 +143,7 @@ export function reserveCandidate(raw,p){
 // Observation of the ASSIGNED Persona route. Unowned new exits are claimed
 // for this account; an exit owned by another account holds the pin. The
 // pin becomes ACTIVE only from PENDING/ACTIVE on the exact reserved route.
-export function observeAssigned(raw,{bindingId,routeId,exits,exitSetDigest,observedAtMs,activate=false}={}){
+export function observeAssigned(raw,{bindingId,routeId,exits,exitSetDigest,observedAtMs,ipv6Disposition,activate=false}={}){
  const read=readLedger(raw);if(!read.ok)return read;
  const ledger=read.ledger,b=ledger.bindings[bindingId];
  if(!b)return fail('BINDING_RESERVATION_ABSENT');
@@ -161,6 +161,7 @@ export function observeAssigned(raw,{bindingId,routeId,exits,exitSetDigest,obser
  }
  if(b.pin==='HELD'&&!activate)return {ok:false,code:b.holdCode||'ROUTE_HELD',binding:b,ledger};
  const next={...b,exits,exitSetDigest,verifiedAtMs:observedAtMs,
+   ipv6Disposition:ipv6Disposition||b.ipv6Disposition,
    pin:activate||b.pin==='ACTIVE'?'ACTIVE':b.pin,holdCode:null};
  return {ok:true,binding:next,ledger:bump(ledger,{...ledger.bindings,[bindingId]:next},
    claim(ledger.owners,b.accountId,exits))};

@@ -892,3 +892,26 @@ test('J01 unknown assigned IPv6 immediately holds admission and valid readback r
  assert.equal(inspectRoutePin(profile).allow,true);
  assert.equal((await h.ledger.binding(a.bindingId)).binding.routeId,held.routeId);
 });
+
+test('J01 failed explicit login confirmation withdraws old identity readiness without rotating',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
+ let a=await enroll(h);h.sessions.set(a.personaUid,fp('a'));
+ assert.equal((await h.flow.confirm(a.accountId)).ok,true);
+ const before=h.effects.filter(e=>e.kind==='ASSIGN').length;
+ h.sessions.delete(a.personaUid);
+ assert.equal((await h.flow.confirm(a.accountId)).code,'NO_PAGE_SESSION');
+ a=(await h.accounts.get(a.accountId)).account;
+ assert.notEqual(a.state,'VERIFIED');assert.equal(a.boundPrincipal,fp('a'));
+ assert.equal(h.effects.filter(e=>e.kind==='ASSIGN').length,before);
+});
+test('J01 assigned probe updates current IPv6 disposition and keeps historic public exits',async()=>{
+ const relays=[relay('10.124.0.1','45.83.1.1','BLOCKED')],h=setup({relays});
+ const a=await enroll(h);
+ relays[0].v6='2a03:1b20:1::1';
+ assert.equal((await h.flow.verifyRoute(a.accountId)).ok,true);
+ const observed=await h.ledger.binding(a.bindingId);
+ assert.equal(observed.binding.ipv6Disposition,'OBSERVED');
+ relays[0].v6='BLOCKED';assert.equal((await h.flow.verifyRoute(a.accountId)).ok,true);
+ assert.equal((await h.ledger.binding(a.bindingId)).binding.ipv6Disposition,'BLOCKED_VERIFIED');
+ assert.equal((await h.ledger.read()).ledger.owners['IPv6:2a03:1b20:1::1'],a.accountId);
+});
