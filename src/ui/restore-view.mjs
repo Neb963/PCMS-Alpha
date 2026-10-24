@@ -8,7 +8,7 @@ import {createPortableBackupPayload} from '../lib/backup-package.js';
 import {filterOrdinaryAutomationJobs} from '../lib/automation-history.js';
 import {preparePortableStage,readPortableStage} from './portable-restore-stage.mjs';
 import {inspectPortableRestore,verifyPortableCheckpoint} from './portable-restore-plan.mjs';
-const el=id=>document.getElementById(id);
+// The same source-verifying guarded handler serves the primary workspace and\n// the historic recovery panel until distribution cutover. No DOM forwarding.\nexport function mountPortableRestore(root=document){\nconst el=id=>root.querySelector('#'+id);
 const archive=el('pcms-restore-archive'),checkpoint=el('pcms-restore-checkpoint'),
   mode=el('pcms-restore-mode'),fresh=el('pcms-restore-fresh'),
   mappings=el('pcms-restore-mappings'),choices=el('pcms-restore-account-choices'),
@@ -244,3 +244,7 @@ reactivate?.addEventListener('click',async()=>{
   phrase.value='';stopped.checked=false;void refreshStatus();
 });
 void refreshStatus();
+
+}
+// Historical standalone recovery panel remains independently functional.
+if(document.getElementById('pcms-restore-archive'))mountPortableRestore(document);
