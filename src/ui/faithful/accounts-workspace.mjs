@@ -27,6 +27,7 @@ export function accountNeedsAttention(a){
  return a.state!=='VERIFIED'||a.protectedRoute!=='PCMS_PINNED'||a.route?.status!=='PINNED';
 }
 export const accountLabel=a=>a.removed?'Removed':
+ a.state==='PREPARING'&&a.setup?.phase==='HELD'?'Setup needs attention':
  a.state==='VERIFIED'&&a.protectedRoute==='UPGRADING'?'Upgrading route':
  a.state==='VERIFIED'&&a.protectedRoute==='LEGACY_UNPINNED'?'Route upgrade needed':
  a.state==='VERIFIED'&&a.route?.status==='CHECKING'?'Checking route':

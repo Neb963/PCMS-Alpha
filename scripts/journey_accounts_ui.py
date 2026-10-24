@@ -134,13 +134,16 @@ def run(browser, archive, folder):
 
         fixture(session)
         wait(session,"sh?.querySelectorAll('[data-account-id]').length===0","J01_FIXTURE_ISOLATION")
-        oracle(session,"await window.__j01.interruptNextPersona();return true;")
+        oracle(session,"await window.__j01.suspendNextPersona();return true;")
         click(session,'[data-action="add-account"]')
         wait(session,"sh?.querySelectorAll('[data-account-id]').length===1","J01_FIXTURE_ADD")
         data=oracle(session);account_id=data["accounts"][0]["accountId"]
-        wait(session,"sh?.querySelector('.account-state')?.textContent.includes('setup was interrupted')","J01_INTERRUPTED_SETUP_VISIBLE")
-        interrupted=oracle(session);assert interrupted["accounts"][0]["setup"]["code"]=="ENROLLMENT_INTERRUPTED",interrupted
-        assert len([x for x in interrupted["effects"] if x["kind"]=="PERSONA_CREATE"])==1
+        until=time.monotonic()+20
+        while time.monotonic()<until:
+            interrupted=oracle(session)
+            if len([x for x in interrupted["effects"] if x["kind"]=="PERSONA_CREATE"])==1:break
+            time.sleep(.1)
+        assert len([x for x in interrupted["effects"] if x["kind"]=="PERSONA_CREATE"])==1,interrupted
         capture(session,"interrupted-setup",evidence)
         interrupted_pids=b.owned_firefox_pids(profile);assert interrupted_pids,'J01_INTERRUPTED_PROCESS_NOT_OBSERVED'
         b.close(session);b.require_owned_exit(profile,interrupted_pids)
@@ -148,10 +151,13 @@ def run(browser, archive, folder):
         recovered_pids=b.owned_firefox_pids(profile)
         assert recovered_pids and not interrupted_pids.intersection(recovered_pids),'J01_INTERRUPTED_PROCESS_NOT_REPLACED'
         b.call("POST",f"/session/{session}/url",{"url":url});b.wait_donor_ready(session);fixture(session)
-        manage(session,account_id);command(session,"RESUME_SETUP")
+        manage(session,account_id)
+        wait(session,"sh?.querySelector('.account-state')?.textContent.includes('setup was interrupted')","J01_INTERRUPTED_SETUP_VISIBLE_AFTER_COLD_START")
+        interrupted=oracle(session);assert interrupted["accounts"][0]["setup"]["code"]=="ENROLLMENT_INTERRUPTED",interrupted
+        command(session,"RESUME_SETUP")
         wait_state(session,account_id,"WAITING_LOGIN")
         recovered=oracle(session);assert len([x for x in recovered["effects"] if x["kind"]=="PERSONA_CREATE"])==1,recovered
-        print("B J01_THROWN_SETUP_AFTER_PERSONA_EFFECT_COLD_RESTART_RESUME_NO_DUPLICATE=PASS",flush=True)
+        print("B J01_MISSING_SETUP_RESPONSE_AFTER_PERSONA_EFFECT_COLD_RESTART_RESUME_NO_DUPLICATE=PASS",flush=True)
         if not b.execute(session,"return !!document.getElementById('pcms-faithful-host').shadowRoot.querySelector('.account-dialog')"):manage(session,account_id)
         command(session,"CONFIRM_LOGIN")
         wait(session,"sh?.querySelector('.account-feedback')?.textContent.includes('action could not')","J01_LOGIN_REQUIRED")

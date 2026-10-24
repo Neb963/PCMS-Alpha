@@ -454,7 +454,20 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     return accounts.apply({type:'REMOVE',accountId,expectedRevision,
       explicitRemoval:true,personaDeleted,at:now()});
   }
+  async function recoverInterrupted(){
+    const listed=await accounts.list();if(!listed.ok)return listed;
+    let held=0;
+    for(const a of listed.accounts){
+      if(a.state!=='PREPARING'||a.setup?.phase==='HELD'||running.has(a.accountId))continue;
+      // A new controller owns no prior in-memory task. Preserve the durable
+      // binding/search history and require read-before-effect recovery.
+      pins.hold(a.bindingId);await ledger.hold(a.bindingId,'ENROLLMENT_INTERRUPTED');
+      const out=await progress(a.accountId,'HELD','ENROLLMENT_INTERRUPTED');if(!out.ok)return out;held++;
+    }
+    return {ok:true,held,providerEffects:'NONE'};
+  }
   return Object.freeze({
+    recoverInterrupted,
     remove:(accountId,expectedRevision,options)=>exclusive(accountId,'REMOVE:'+String(expectedRevision)+':'+String(options?.deletePersona===true),
       ()=>remove(accountId,expectedRevision,options)),
     async begin(){

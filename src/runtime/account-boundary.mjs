@@ -110,11 +110,12 @@ export function createAccountBoundary(api,{
     if(enrollmentInit)return enrollmentInit;
     const g=guard();if(!g?.enrollmentDonor)return null;
     enrollmentInit=(async()=>{
-      enrollment=createEnrollment({accounts:await store(),ledger:await exitLedger(),
+      const created=createEnrollment({accounts:await store(),ledger:await exitLedger(),
         donor:g.enrollmentDonor,pins,
         openLogin:personaUid=>g.openHumanLogin(personaUid),
         identify:personaUid=>guardedIdentityRead(g,personaUid,identityReader),syncInventory});
-      return enrollment;
+      const recovered=await created.recoverInterrupted();if(!recovered.ok)throw Error('SETUP_RECOVERY_UNAVAILABLE');
+      enrollment=created;return enrollment;
     })().catch(error=>{enrollmentInit=null;throw error});
     return enrollmentInit;
   }
@@ -286,7 +287,12 @@ export function createAccountBoundary(api,{
     // Donor route-test evidence expires after 15 minutes. Reuse the
     // existing bounded S01 upkeep, with its protected Mullvad echo probes,
     // before cache expiry; do not add a second Refresher route supervisor.
-    try{api.alarms?.create(ROUTE_UPKEEP_ALARM,{periodInMinutes:10});}catch{}
+    const schedule=async()=>{try{
+      // Repeated event-page evaluation must not postpone an existing alarm.
+      if(api.alarms?.get&&await api.alarms.get(ROUTE_UPKEEP_ALARM))return;
+      await api.alarms?.create(ROUTE_UPKEEP_ALARM,{delayInMinutes:1,periodInMinutes:10});
+    }catch{}};
+    void schedule();api.runtime.onStartup?.addListener(()=>void schedule());
     api.alarms?.onAlarm?.addListener(alarm=>{if(alarm?.name===ROUTE_UPKEEP_ALARM)void upkeep();});
   }
   return Object.freeze({register,run,upkeep});

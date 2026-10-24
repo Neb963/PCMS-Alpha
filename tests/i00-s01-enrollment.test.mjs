@@ -956,3 +956,15 @@ test('interrupted setup durably explains its hold and restart resumes the same d
  const ready=(await h.accounts.get(started.accountId)).account;
  assert.equal(ready.state,'WAITING_LOGIN');assert.equal(ready.bindingId,held.bindingId);assert.equal(h.effects.filter(x=>x.kind==='PERSONA_CREATE').length,1);
 });
+
+test('a cold controller exposes interrupted setup without replaying its already-created Persona',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),id='cold_setup_account',bindingId='cold_setup_binding';
+ await h.accounts.applyCurrent({type:'BEGIN_SETUP',accountId:id,bindingId});
+ await h.accounts.applyCurrent({type:'SETUP_PROGRESS',accountId:id,phase:'PERSONA'});
+ await h.donor.createBoundPersona({bindingId});const before=structuredClone(h.effects);
+ const fresh=createEnrollment({accounts:h.accounts,ledger:h.ledger,donor:h.donor,pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},openLogin:async()=>({ok:true}),identify:async()=>({ok:false})});
+ assert.equal((await fresh.recoverInterrupted()).held,1);assert.deepEqual(h.effects,before);
+ const interrupted=(await h.accounts.get(id)).account;assert.equal(interrupted.setup.code,'ENROLLMENT_INTERRUPTED');assert.equal(interrupted.bindingId,bindingId);
+ assert.equal((await fresh.recoverInterrupted()).held,0,'known holds keep their reason and revision');
+ assert.equal((await fresh.prepare(id)).ok,true);assert.equal(h.effects.filter(x=>x.kind==='PERSONA_CREATE').length,1);
+});
