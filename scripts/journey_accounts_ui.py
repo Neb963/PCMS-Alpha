@@ -43,7 +43,8 @@ def alert_accept(session):
 
 def fixture(session):
     source=pathlib.Path(__file__).with_name("fixtures").joinpath("j01-ui.mjs").read_text()
-    script="const done=arguments[arguments.length-1];(async()=>{"+source+"})().then(done).catch(e=>done({error:String(e),stack:String(e.stack)}));"
+    source=source.replace("export async function installJourneyFixture", "async function installJourneyFixture")
+    script="const done=arguments[arguments.length-1];(async()=>{"+source+"return await installJourneyFixture();})().then(done).catch(e=>done({error:String(e),stack:String(e.stack)}));"
     result=b.call("POST",f"/session/{session}/execute/async",{"script":script,"args":[]},timeout=60)
     assert result.get("ok") is True,result
     click(session,'[data-action="refresh-accounts"]')

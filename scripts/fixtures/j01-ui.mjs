@@ -108,7 +108,7 @@ function fakeDonor(relays,{n=0,made=0}={}){
   };
   return {donor,effects,profiles,routes,faults,tabs,leases,live,legacyPersona,counters:()=>({n,made})};
 }
-async function installJourneyFixture(){
+export async function installJourneyFixture(){
  const {openCanonicalDatabase}=await import('./journal.mjs');
  const {createAccountBoundary}=await import('./account-boundary.mjs');
  const {createInventoryBoundary}=await import('./inventory-boundary.mjs');
@@ -200,4 +200,3 @@ async function installJourneyFixture(){
  };
  return {ok:true,scope:'B_OFFLINE_DONOR_AND_PROVIDER_FIXTURE_REAL_PRODUCTION_BOUNDARIES_IDB'};
 }
-return await installJourneyFixture();
