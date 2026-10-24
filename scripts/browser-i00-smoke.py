@@ -1310,8 +1310,10 @@ def main():
                           r.textContent.includes('Not checked')&&
                           r.querySelector('details')?.textContent.includes('AUTH_CHECK_NOT_REQUESTED')),
                         hasHost:rows.some(r=>r.querySelector('strong')?.textContent==='Firefox Git credential storage'&&
-                          r.querySelector('details')?.textContent.includes('LOCAL_GIT_'))&&
-                          !rows.some(r=>r.querySelector('strong')?.textContent==='GitHub credential helper'),
+                          r.querySelector('details')?.textContent.includes('LOCAL_GIT_')),
+                        hasPortable:rows.some(r=>r.querySelector('strong')?.textContent==='Portable backup coordinator'&&
+                          r.querySelector('details')?.textContent.includes('BROWSER_PORTABLE_BACKUP_RESPONDED')),
+                        noPcmsHelpers:!rows.some(r=>/Legacy Git helper|Backup helper|Diagnostic helper|native vault/i.test(r.querySelector('strong')?.textContent||'')),
                         readable:rows.every(r=>r.querySelector('strong')&&
                           !r.querySelector('strong').textContent.includes('_')&&
                           !!r.querySelector('details summary')&&
