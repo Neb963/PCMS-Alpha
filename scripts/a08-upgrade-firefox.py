@@ -108,7 +108,7 @@ def main():
                 };""")
                 if verified['main']:break
                 time.sleep(.12)
-            assert verified['version']=='1.2.4',verified
+            assert verified['version']=='1.2.5',verified
             assert verified['gecko']==b.ID and verified['main'],verified
             assert verified['storageAPI'] and verified['alarms'],verified
             retained=b.execute(session,"""return browser.storage.local.get(

@@ -66,6 +66,8 @@ jobs:
           retention-days: 14
       - name: Independently audit exact XPI and donor-only native bridge
         run: python3 scripts/a08-xpi-audit.py build/pcms-alpha-i00.xpi
+      - name: A08 independent adverse XPI mutation controls
+        run: python3 scripts/a08-xpi-negative.py build/pcms-alpha-i00.xpi
   firefox:
     name: firefox
     needs: fast
