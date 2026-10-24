@@ -1,6 +1,8 @@
 import {advanceApprovedPublication} from './publication-flow.mjs';
 import {mountPortableRestore} from '../restore-view.mjs';
 import {portableRestoreTemplate} from './portable-restore-template.mjs';
+import {diagnosticTemplate} from './diagnostic-template.mjs';
+import {mountDiagnosticController} from '../s08-diagnostics.mjs';
 import {openCanonicalDatabase} from '../journal.mjs';
 import {snapshotCanonicalV2,preflightSourceRecovery} from '../backup-core.mjs';
 /* PCMS prototype-structure production bridge, version 0.1.6.
@@ -2292,110 +2294,15 @@ function primaryBackups(container){
  primaryRestore(container);
 }
 function primaryDiagnostics(container){
- const section=primarySettingCard(container,'Full disposable diagnostic',
-  'Tests can create and change real disposable resources. Configure the dedicated scope once; normal provider accounts must not be used.');
- const form=el('div','form-stack');
- const selected=el('select','select'),placeholder=el('option','','Choose a verified disposable account');placeholder.value='';
- selected.append(placeholder);
- for(const acct of state.lastAccountList.filter(a=>a.state==='VERIFIED')){
-  const option=el('option','',acct.alias||acct.accountId);option.value=acct.accountId;
-  selected.append(option);
- }
- const stored=nativeControl('pcms-diagnostic-account');
- if(stored?.value&&[...selected.options].some(o=>o.value===stored.value))
-   selected.value=stored.value;
- const namespace=el('input','form-input');namespace.placeholder='pcms-test-alpha';namespace.maxLength=42;
- namespace.value=nativeControl('pcms-diagnostic-namespace')?.value||'pcms-test-alpha';
- const fingerprint=el('input','form-input');fingerprint.maxLength=64;
- fingerprint.value=nativeControl('pcms-diagnostic-xpi-sha')?.value||'';
- fingerprint.placeholder='Optional XPI SHA-256 for restart and backup verification';
- const confirm=el('label','setting-option'),consent=el('input');consent.type='checkbox';
- consent.checked=nativeControl('pcms-diagnostic-consent')?.checked===true;
- confirm.append(consent,document.createTextNode(' I authorize live testing on this specifically designated disposable account, Persona and namespace.'));
- const addLabel=(title,field)=>{
-  const label=el('label','',title);label.append(field);form.append(label)};
- addLabel('Disposable managed account',selected);
- addLabel('Dedicated test namespace',namespace);
- addLabel('Installed XPI fingerprint (optional for initial stages)',fingerprint);
- form.append(confirm);section.append(form);
- const tools=el('div','form-foot'),status=el('p','setting-note');
- status.setAttribute('role','status');section.append(tools,status);
- const stages=el('details','settings-section'),heading=el('summary','','Actual diagnostic stage receipts');
- const stageText=el('pre','source-preview');stages.append(heading,stageText);section.append(stages);
- const labels={
-  TEST_SCOPE_INVALID:'The test scope is incomplete. Finish secure GitHub connection and choose your verified disposable account.',
-  TEST_GITHUB_CONNECTION_REQUIRED:'GitHub file preview works, but secure connection setup is incomplete. Repair local PCMS helpers first.',
-  TEST_ACCOUNT_SELECTION_INVALID:'Select a verified disposable managed account.',
-  TEST_PERSONA_BINDING_INVALID:'The selected account lacks a verified protected Persona binding.',
-  TEST_NAMESPACE_INVALID:'Use a lowercase name starting with pcms-test-.',
-  ENABLE_SCOPED_DEVELOPMENT_AND_GIT:'Enable development and scoped Git writeback in Automation after the secure Git connection is verified.',
-  TEST_SCOPE_NOT_VERIFIED:'The disposable resources could not be verified. No live test started.'
- };
- const say=text=>{
-  const raw=String(text||'').trim();if(!raw)return 'No diagnostic run has been verified.';
-  for(const [code,replacement] of Object.entries(labels))if(raw.includes(code))return replacement;
-  if(raw.includes('NOT_TESTED'))return 'Diagnostic stages have not been executed yet.';
-  return raw.replace(/\b(?:TEST|GIT|DIAGNOSTIC)_[A-Z0-9_]{4,80}\b/g,
-    'an unresolved test prerequisite');
- };
- function refresh(){
-  if(!section.isConnected)return;
-  const origin=nativeControl('pcms-diagnostic-status')?.textContent||'';
-  const scope=nativeControl('pcms-diagnostic-scope')?.textContent||'';
-  status.textContent=say(origin)+' '+(scope&&scope!==origin?say(scope):'');
-  const results=nativeControl('pcms-diagnostic-stages');
-  stageText.textContent=results?.innerText||results?.textContent||'No real stage receipts.';
-  for(const [id,label] of [
-   ['pcms-diagnostic-run','Run full diagnostic'],
-   ['pcms-diagnostic-resume','Resume failed stage'],
-   ['pcms-diagnostic-rerun','Run new disposable test'],
-   ['pcms-diagnostic-export','Export sanitized report']]){
-    const x=[...tools.querySelectorAll('button')].find(b=>b.dataset.nativeAction===id);
-    if(x)x.disabled=nativeControl(id)?.disabled!==false;
-  }
- }
- const copyToNative=()=>{
-  for(const [id,value] of [['pcms-diagnostic-account',selected.value],
-   ['pcms-diagnostic-namespace',namespace.value],['pcms-diagnostic-xpi-sha',fingerprint.value]]){
-   const target=nativeControl(id);if(target){
-    target.value=value;target.dispatchEvent(new Event('input',{bubbles:true}));
-    target.dispatchEvent(new Event('change',{bubbles:true}));
-   }
-  }
-  const dest=nativeControl('pcms-diagnostic-consent');
-  if(dest){dest.checked=consent.checked;dest.dispatchEvent(new Event('change',{bubbles:true}));}
- };
- const save=b('Save disposable scope',()=>{
-  if(!selected.value||!/^pcms-test-[a-z0-9-]{1,31}$/.test(namespace.value)||!consent.checked){
-   status.textContent='Choose a verified account, enter a valid pcms-test- namespace and confirm disposable authorization.';return;
-  }
-  copyToNative();const nativeSave=nativeControl('pcms-diagnostic-designate');
-  if(!nativeSave){status.textContent='The full diagnostic controller is not installed in this build.';return;}
-  nativeSave.click();status.textContent='Checking the selected disposable scope before permitting any live test.';
- },'btn primary');tools.append(save);
- for(const [id,label] of [
-  ['pcms-diagnostic-run','Run full diagnostic'],
-  ['pcms-diagnostic-resume','Resume failed stage'],
-  ['pcms-diagnostic-rerun','Run new disposable test'],
-  ['pcms-diagnostic-export','Export sanitized report']]){
-  const button=b(label,()=>{
-   const ctrl=nativeControl(id);
-   if(!ctrl||ctrl.disabled)return;
-   if(id==='pcms-diagnostic-run'&&!window.confirm(
-     'Start the authorized live diagnostic now? Only the designated disposable account and namespace may be used.'))return;
-   ctrl.click();refresh();
-  },'btn small');
-  button.dataset.nativeAction=id;button.disabled=true;tools.append(button);
- }
- const oldNodes=['pcms-diagnostic-status','pcms-diagnostic-scope','pcms-diagnostic-stages',
-  'pcms-diagnostic-run','pcms-diagnostic-resume','pcms-diagnostic-rerun'].map(nativeControl).filter(Boolean);
- const observer=new MutationObserver(()=>refresh());
- for(const old of oldNodes)observer.observe(old,{subtree:true,childList:true,
-   attributes:true,characterData:true});
- const previousObserver=state.diagnosticObservation;
- if(previousObserver)previousObserver.disconnect();
- state.diagnosticObservation=observer;
- refresh();
+ const section=primarySettingCard(container,'Operational diagnostics',
+  'Runs through real guarded services for explicitly designated disposable resources. External process and disk evidence is NOT_TESTED unless independently measured.');
+ const tpl=document.createElement('template');tpl.innerHTML=diagnosticTemplate;
+ const form=tpl.content.firstElementChild;form.className='form-stack';
+ for(const input of form.querySelectorAll('input:not([type=checkbox]), select, textarea'))
+   input.classList.add('form-input');
+ for(const button of form.querySelectorAll('button'))button.classList.add('btn','small');
+ section.append(form);
+ mountDiagnosticController(section);
 }
 function renderSettingsSection(){if(state.route!=='settings')return;
  const names=['connections','automation','ai','backups','diagnostics','advanced'];
@@ -2445,8 +2352,25 @@ function renderSettingsSection(){if(state.route!=='settings')return;
   else if(select==='diagnostics')primaryDiagnostics(container);
   else{
    section.append(el('p','setting-note',
-     'The original protected controller remains available for exceptional recovery workflows not yet migrated into the primary workspace. Routine actions are available directly in the main interface.'));
-   section.append(b('Open protected recovery controls',()=>nativeAction('settings'),'btn small'));
+     'Optional Firefox userScripts permission and PersonaMonkey maintenance controls.'));
+   const grant=b('Enable userScripts permission',()=>{
+     if(!browser.permissions?.request){notify('Firefox permission request unavailable.');return}
+     void browser.permissions.request({permissions:['userScripts']})
+       .then(ok=>notify(ok?'userScripts permission granted.':'userScripts permission was not granted.'))
+       .catch(()=>notify('Firefox rejected the permission request.'));
+   },'btn small');
+   const check=el('p','setting-note','Checking userScripts permission…');
+   void browser.permissions?.contains({permissions:['userScripts']})
+     .then(allowed=>{if(check.isConnected)check.textContent=allowed?
+       'userScripts permission granted.':'userScripts permission not yet granted.'})
+     .catch(()=>{if(check.isConnected)check.textContent='Permission status unavailable.'});
+   section.append(grant,check);
+   section.append(b('PersonaMonkey settings',()=>{
+     void browser.tabs.create({url:browser.runtime.getURL('options/options.html')});
+   },'btn small'));
+   section.append(b('Emergency diagnostics',()=>{
+     void browser.tabs.create({url:browser.runtime.getURL('pcms/emergency.html')});
+   },'btn small'));
    container.append(section);
   }
  }
