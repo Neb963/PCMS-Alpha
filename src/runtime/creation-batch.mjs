@@ -169,26 +169,27 @@ export function createBatchStore(db,{acceptCreate}){
        visited.add(stored.primaryId);stored=records.get(stored.primaryId);
       }
       const record=stored?.record,hold=holds.get(index),observed=inventory.get(slug);
+      const cancelled=batch.state==='CANCELLED';
       const currentFailure=!!record?.lastAttempt&&record.lastAttempt.revision===record.revision&&record.lastAttempt.ok===false;
-      const held=hold?.status==='HELD'||currentFailure||record?.pinConflict||record?.sourceDrift||
-        ['TARGET_COLLISION_HELD','REJECTED','ABORTED'].includes(record?.state);
-      const confirmed=!!record&&observed?.ownerState==='OBSERVED_OWNER'&&
+      const held=!cancelled&&(hold?.status==='HELD'||currentFailure||record?.pinConflict||record?.sourceDrift||
+        ['TARGET_COLLISION_HELD','REJECTED','ABORTED'].includes(record?.state));
+      const confirmed=!cancelled&&!!record&&observed?.ownerState==='OBSERVED_OWNER'&&
         observed.accountId===record.accountId&&observed.remoteId===record.remoteId&&
         (record.state.startsWith('GIT_')||record.state==='ASSOCIATED_NOT_READY');
-      const category=held?'HELD':confirmed?'CONFIRMED':'WORKING';
+      const category=cancelled?'CANCELLED':held?'HELD':confirmed?'CONFIRMED':'WORKING';
       if(confirmed){counts.confirmedInputs++;confirmedResources.add(JSON.stringify([record.accountId,record.remoteId]));}
-      if(held)counts.held++;if(!confirmed&&!held)counts.working++;
+      if(held)counts.held++;if(!confirmed&&!held&&!cancelled)counts.working++;
       const row={index,slug,inputId,intentId:record?.intentId||null,
         coalesced:!!record&&record.intentId!==inputId,
         revision:record?.revision||null,accountId:record?.accountId||batch.accountId||null,
-        state:hold?.status==='HELD'?'INTAKE_HELD':record?.state||
+        state:cancelled?'CANCELLED':hold?.status==='HELD'?'INTAKE_HELD':record?.state||
           (batch.state==='INGESTING'?'STAGED':'QUEUED'),
         hold:hold?.status==='HELD'?hold.code:currentFailure?record.lastAttempt.code:
           record?.pinConflict||record?.sourceDrift?record.hold:null,
         intakeHeld:hold?.status==='HELD',category,resourceConfirmed:confirmed,
         sourcePending:confirmed&&record.state!=='ASSOCIATED_NOT_READY',
         lastAttempt:record?.lastAttempt?{at:record.lastAttempt.at,ok:record.lastAttempt.ok,code:record.lastAttempt.code}:null};
-      if((status==='ALL'||status==='HELD'&&held||status==='CONFIRMED'&&confirmed||status==='WORKING'&&!held&&!confirmed)&&
+      if((status==='ALL'||status==='HELD'&&held||status==='CONFIRMED'&&confirmed||status==='WORKING'&&!held&&!confirmed&&!cancelled)&&
          (!query||slug.includes(query.toLowerCase())))matching.push(row);
      }
      counts.confirmed=confirmedResources.size;

@@ -111,6 +111,8 @@ test('J02 cancellation is limited to unsubmitted local manifest and can never st
  assert.equal((await s.cancelBatch({batchId})).batch.state,'CANCELLED');
  assert.equal((await s.finalizeBatch({batchId})).batch.state,'CANCELLED');
  assert.equal((await s.processBatch({batchId})).code,'BATCH_NOT_QUEUED');
+ const canceled=await s.listBatchItems({batchId});assert.equal(canceled.items[0].state,'CANCELLED');
+ assert.equal(canceled.counts.working,0);assert.equal((await s.listBatchItems({batchId,status:'WORKING'})).items.length,0);
  const second='batch_'+'9'.repeat(32);await s.beginBatch({batchId:second,total:1});
  await s.appendBatch({batchId:second,offset:0,slugs:['saved-two']});await s.finalizeBatch({batchId:second});
  assert.equal((await s.cancelBatch({batchId:second})).code,'BATCH_ALREADY_SUBMITTED');

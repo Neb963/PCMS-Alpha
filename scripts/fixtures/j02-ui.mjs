@@ -13,7 +13,7 @@ export async function installGeneratorFixture(){
  const {createS06StandingAuthority}=await import('./s06-standing-authority.mjs');
  const {createScopedCreationGate}=await import('./creation-authority.mjs');
  const db=await openCanonicalDatabase({open:(_name,version)=>indexedDB.open('pcms-j02-ui-fixture',version)});
- let abortNextTransaction=false;
+ let abortNextTransaction=false,releaseInputGate=null;
  const proxy=new Proxy(db,{get(target,key){if(key==='transaction')return (...args)=>{const tx=target.transaction(...args);
    if(abortNextTransaction&&args[1]==='readwrite'){abortNextTransaction=false;tx.abort()}return tx};
    const value=target[key];return typeof value==='function'?value.bind(target):value}});
@@ -113,11 +113,14 @@ export async function installGeneratorFixture(){
   return {onMessage:{addListener:fn=>handlers.add(fn)},onDisconnect:{addListener:fn=>disconnected.add(fn)},disconnect(){closed=true},
    postMessage(msg){if(msg.type==='APPEND_CREATE_BATCH'&&msg.params.offset>=32&&ledger.failures.intake){
     ledger.failures.intake=false;abortNextTransaction=true;void persist();}
-    Promise.resolve(boundaries.get(name).run(msg,sender)).then(out=>{commands.push({type:msg.type,ok:out?.ok,code:out?.code});if(!closed)for(const fn of handlers)fn(out)})
+    const execute=async()=>{if(msg.type==='APPEND_CREATE_BATCH'&&msg.params.offset===0&&ledger.failures.delayInput){
+      ledger.failures.delayInput=false;await persist();await new Promise(resolve=>{releaseInputGate=resolve});}
+      return boundaries.get(name).run(msg,sender);};
+    Promise.resolve(execute()).then(out=>{commands.push({type:msg.type,ok:out?.ok,code:out?.code});if(!closed)for(const fn of handlers)fn(out)})
     .catch(()=>{if(!closed)for(const fn of disconnected)fn()})}};
  };
  window.__j02={async inspect(){const data=await rows();return {accounts:data.filter(x=>x.account).map(x=>x.account),
-  records:data.filter(x=>x.record?.intentId).map(x=>x.record),batches:data.filter(x=>x.batch).map(x=>x.batch),
+  records:data.filter(x=>x.record?.intentId).map(x=>x.record),chunks:data.filter(x=>x.chunk).map(x=>({key:x.key,...x.chunk})),batches:data.filter(x=>x.batch).map(x=>x.batch),
   inventory:data.filter(x=>x.generator).map(x=>x.generator),commands:structuredClone(commands),ledger:structuredClone(ledger)}},
   async adopt(){return adoption.autoTick()},
   async tick(n=1){for(let i=0;i<n;i++)await watcher.tick();return this.inspect()},
@@ -125,6 +128,9 @@ export async function installGeneratorFixture(){
     bindingId:'binding_j02_unknown',revision:3,bindingVersion:1,state:'INVENTORY_PENDING',boundPrincipal:'e'.repeat(64),
     identity:{source:'GUARDED_SESSION_READBACK',bindingVersion:1,principalFingerprint:'e'.repeat(64)}};
     await put([{key:'account:'+a.accountId,account:a}]);return true},
+  async delayInput(){ledger.failures.delayInput=true;await persist()},
+  inputWaiting(){return !!releaseInputGate},
+  releaseInput(){const done=releaseInputGate;releaseInputGate=null;done?.();return true},
   async interruptInput(){ledger.failures.intake=true;await persist()},
   async hold(accountId,value){ledger.failures[accountId]=value;await persist()},
   async recover(){const data=await rows(),a=data.find(x=>x.account?.accountId==='account_j02_049').account;

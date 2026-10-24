@@ -106,6 +106,12 @@ def main():
                 if opened:break
                 time.sleep(.15)
             assert opened,'A04_PRIMARY_CREATOR_UNAVAILABLE'
+            creator_ready=False
+            for _ in range(60):
+                creator_ready=mod.execute(session,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;return [...sh.querySelectorAll('.drawer-overlay button')].some(b=>b.textContent.trim()==='Preview assignments'&&!b.disabled&&!b.hidden)")
+                if creator_ready:break
+                time.sleep(.1)
+            assert creator_ready,'A04_CREATOR_RECOVERY_INPUT_NOT_READY'
             slugs='\n'.join('a04-installed-fixture-'+str(i).zfill(4) for i in range(110))
             previewed=mod.execute(session,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
               const input=sh.querySelector('.drawer-overlay textarea');

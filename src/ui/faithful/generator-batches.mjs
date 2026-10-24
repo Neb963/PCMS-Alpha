@@ -11,7 +11,7 @@ const labels={WAITING_CAPABILITY:'Waiting for allocation',OWNER_READBACK_PENDING
  GIT_INIT_PENDING:'Generator confirmed · preparing Git',GIT_PREPARED:'Generator confirmed · preparing Git',
  GIT_OBSERVING:'Generator confirmed · checking Git',GIT_UNCERTAIN:'Generator confirmed · reconciling Git',
  GIT_DISPATCH_POSSIBLE:'Generator confirmed · reconciling Git',ASSOCIATED_NOT_READY:'Generator and source linked',
- INTAKE_HELD:'Input needs attention',STAGED:'Saved input · not submitted',QUEUED:'Queued for allocation'};
+ CANCELLED:'Input canceled',INTAKE_HELD:'Input needs attention',STAGED:'Saved input · not submitted',QUEUED:'Queued for allocation'};
 export function createGeneratorBatches({root,el,b,request,accounts,reload,manageAccount,notify}){
  const call=(type,params={},timeout=30000)=>request(port,type,params,timeout);
  function dialog(title){
@@ -56,7 +56,7 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
     if(!d.overlay.isConnected||current!==epoch)return;
     if(!out.ok)throw Error(out.code);rows=a.accounts||[];
     status.textContent=out.counts.confirmed+' generator'+(out.counts.confirmed===1?'':'s')+' confirmed · '+out.counts.working+' inputs in progress · '+out.counts.held+' inputs need attention'+
-     (out.batch.state==='INGESTING'?' · input incomplete ('+out.batch.appended+'/'+out.batch.total+' saved)':'');
+     (out.batch.state==='CANCELLED'?' · unsubmitted input canceled':out.batch.state==='INGESTING'?' · input incomplete ('+out.batch.appended+'/'+out.batch.total+' saved)':'');
     list.replaceChildren();pager.replaceChildren();
     for(const item of out.items){const row=el('section','batch-item');row.dataset.batchIndex=item.index;
      row.append(el('strong','',item.slug),el('p','setting-note',accountName(item.accountId,rows)+' · '+(labels[item.state]||'Waiting for a safe checkpoint')+
@@ -64,7 +64,7 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
      if(item.intakeHeld){row.append(b('Retry this input',()=>void action('RETRY_CREATE_BATCH_HOLD',{batchId,index:item.index})))}
      else if(item.intentId&&item.state!=='ASSOCIATED_NOT_READY')row.append(b('Retry check',()=>void action('RUN_CREATE_STEP',{
       intentId:item.intentId,expectedRevision:item.revision})));
-     if(item.accountId)row.append(b('Manage account',()=>{const a=rows.find(a=>a.accountId===item.accountId);if(a){d.close();manageAccount(a)}}));
+     if(item.accountId&&item.state!=='CANCELLED')row.append(b('Manage account',()=>{const a=rows.find(a=>a.accountId===item.accountId);if(a){d.close();manageAccount(a)}}));
      list.append(row);
     }
     if(!out.items.length)list.append(el('p','setting-note','No matching items.'));
@@ -106,7 +106,7 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
   const auto=el('option','','Automatic — balanced');auto.value='';choice.append(auto);accountLabel.append(choice);
   const status=el('p','setting-note','Preview account assignments before submitting. Existing owned generators are reconciled; new generators start private.'),preview=el('div'),actions=el('div','form-foot');
   status.setAttribute('role','status');d.body.append(label,accountLabel,status,preview,actions);
-  let frozen=null,accountRows=[],busy=false,offset=0,persisted=null;
+  let frozen=null,accountRows=[],busy=false,offset=0,persisted=null,draftReady=false;
   const policyStatus=el('p','setting-note'),policyButton=b('Checking creation policy…',()=>void togglePolicy());policyButton.disabled=true;
   let policy=null;
   async function loadPolicy(){try{const out=await request('pcms-s06-authority','GET_OPERATOR_MANAGEMENT',{},12000);
@@ -121,7 +121,7 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
   d.body.append(policyStatus,policyButton);void loadPolicy();
   void accounts().then(out=>{accountRows=out.accounts||[];
    for(const a of accountRows.filter(a=>a.state!=='ARCHIVED')){const o=el('option','',a.alias||a.accountId);o.value=a.accountId;choice.append(o)}}).catch(()=>{status.textContent='Accounts unavailable. Retry preview after recovering Accounts.'});
-  function reset(){if(!busy){frozen=null;preview.replaceChildren();submit.hidden=true;review.hidden=false;review.textContent='Preview assignments';review.className='btn primary';status.textContent='Preview the updated inputs before submitting.'}}
+  function reset(){if(!busy&&!persisted){frozen=null;preview.replaceChildren();submit.hidden=true;review.hidden=false;review.textContent='Preview assignments';review.className='btn primary';status.textContent='Preview the updated inputs before submitting.'}}
   input.addEventListener('input',reset);choice.addEventListener('change',reset);
   function draw(){preview.replaceChildren();
    const totals={CREATE:0,ADOPT:0,COALESCED:0,HELD:0},per=new Map();for(const r of frozen.items){totals[r.action]++;if(r.accountId&&r.action==='CREATE')per.set(r.accountId,(per.get(r.accountId)||0)+1)}
@@ -137,6 +137,7 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
    pager.append(prev,el('span','',String(offset+1)+'–'+Math.min(offset+25,frozen.items.length)+' of '+frozen.items.length),next);preview.append(pager);
   }
   const review=b('Preview assignments',()=>void(async()=>{
+   if(busy||persisted||!draftReady)return;
    const slugs=input.value.split(/[\s,;]+/).map(x=>x.trim()).filter(Boolean);
    if(!slugs.length||slugs.some(s=>!/^[a-z0-9][a-z0-9-]{0,99}$/.test(s))){status.textContent='Use lowercase letters, numbers and hyphens. Your input is preserved.';return}
    busy=true;review.disabled=true;input.disabled=true;choice.disabled=true;status.textContent='Reading current counts and existing jobs…';
@@ -148,47 +149,55 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
     submit.hidden=false;review.hidden=false;review.textContent='Update preview';review.className='btn';submit.focus();
    }catch{status.textContent='Preview unavailable. Your input is preserved. Retry after checking Accounts.'}
    finally{busy=false;review.disabled=false;input.disabled=false;choice.disabled=false}
-  })(),'btn primary');
+  })(),'btn primary');review.disabled=true;
   const submit=b('Submit batch',()=>void(async()=>{
-   if(!frozen||busy)return;busy=true;submit.disabled=true;input.disabled=true;choice.disabled=true;
+   if(!frozen||busy||!draftReady)return;
+   const submission=Object.freeze({...frozen,slugs:Object.freeze([...frozen.slugs])});
+   busy=true;submit.disabled=true;review.disabled=true;review.hidden=true;resume.hidden=true;cancel.disabled=true;
+   input.readOnly=true;choice.disabled=true;
    const batchId=persisted||'batch_'+crypto.randomUUID().replaceAll('-','');persisted=batchId;
+   savedDraft={batchId,...submission};cancel.hidden=false;
    try{
-    await browser.storage.local.set({[DRAFT]:{batchId,...frozen}});
-    const begin=await call('BEGIN_CREATE_BATCH',{batchId,total:frozen.slugs.length,accountId:frozen.accountId});if(!begin.ok)throw Error(begin.code);
-    for(let at=begin.batch.appended;at<frozen.slugs.length;at+=32){const chunk=frozen.slugs.slice(at,at+32);let out;
+    await browser.storage.local.set({[DRAFT]:{batchId,...submission}});
+    const begin=await call('BEGIN_CREATE_BATCH',{batchId,total:submission.slugs.length,accountId:submission.accountId});if(!begin.ok)throw Error(begin.code);
+    if(begin.batch.state==='CANCELLED')throw Error('BATCH_CANCELLED');
+    for(let at=begin.batch.appended;at<submission.slugs.length;at+=32){const chunk=submission.slugs.slice(at,at+32);let out;
      try{out=await call('APPEND_CREATE_BATCH',{batchId,offset:at,slugs:chunk})}catch{
       const observed=await call('GET_CREATE_BATCH',{batchId});if(observed.ok&&observed.batch.appended>=at+chunk.length)out={ok:true};else throw Error('INPUT_ACK_UNKNOWN')}
-     if(!out.ok)throw Error(out.code);status.textContent='Saved '+Math.min(at+32,frozen.slugs.length)+' of '+frozen.slugs.length+' requests…';}
+     if(!out.ok)throw Error(out.code);status.textContent='Saved '+Math.min(at+32,submission.slugs.length)+' of '+submission.slugs.length+' requests…';}
     let final;try{final=await call('FINALIZE_CREATE_BATCH',{batchId})}catch{final=await call('GET_CREATE_BATCH',{batchId})}
-    if(!final.ok||final.batch.state==='INGESTING')throw Error('FINALIZATION_UNCONFIRMED');
+    if(!final.ok||!['QUEUED','INTAKE_COMPLETE','INTAKE_HELD'].includes(final.batch?.state))throw Error('FINALIZATION_UNCONFIRMED');
     try{await browser.alarms.create('pcms-s04-creation-followup',{when:Date.now()+1000})}catch{}
     await browser.storage.local.remove(DRAFT);
     d.close();openBatch(batchId);await reload();
-   }catch{status.textContent='Submission was interrupted. Your entered names are preserved in this view. Retry to reconcile the saved batch before continuing.'}
-   finally{busy=false;submit.disabled=false;input.disabled=false;choice.disabled=false}
+   }catch(error){if(error?.message==='BATCH_CANCELLED'){cancel.textContent='Clear canceled input';status.textContent='This input was canceled. Clear it before entering a new batch.';}
+    else status.textContent='Submission was interrupted. Your entered names are preserved in this view. Retry to reconcile the saved batch before continuing.'}
+   finally{busy=false;submit.disabled=false;review.disabled=true;review.hidden=true;cancel.disabled=false;
+    input.disabled=false;input.readOnly=true;choice.disabled=true}
   })(),'btn primary');submit.hidden=true;
   const resume=b('Resume saved submission',()=>void resumeDraft()),cancel=b('Cancel unfinished input',()=>void cancelDraft());
   resume.hidden=true;cancel.hidden=true;let savedDraft=null;
-  async function resumeDraft(){if(!savedDraft)return;
+  async function resumeDraft(){if(!savedDraft||busy)return;
    try{const out=await call('GET_CREATE_BATCH',{batchId:savedDraft.batchId});
+    if(out.ok&&out.batch.state==='CANCELLED'){await browser.storage.local.remove(DRAFT);d.close();openCreator();return}
     if(out.ok&&out.batch.state!=='INGESTING'){await browser.storage.local.remove(DRAFT);d.close();openBatch(savedDraft.batchId);return}
     if(!out.ok&&out.code!=='BATCH_NOT_FOUND')throw Error(out.code);
     frozen=savedDraft;persisted=savedDraft.batchId;input.value=frozen.slugs.join('\n');choice.value=frozen.accountId||'';
-    input.disabled=true;choice.disabled=true;review.hidden=true;resume.hidden=true;submit.hidden=false;draw();
+    input.disabled=false;input.readOnly=true;choice.disabled=true;review.disabled=true;review.hidden=true;resume.hidden=true;submit.hidden=false;draw();
     status.textContent='Saved submission restored. Resume uses the same durable batch and inputs.';
    }catch{status.textContent='Saved submission could not be inspected. Its input is preserved.'}
   }
-  async function cancelDraft(){if(!savedDraft)return;
+  async function cancelDraft(){if(!savedDraft||busy)return;
    try{const out=await call('CANCEL_CREATE_BATCH',{batchId:savedDraft.batchId});
     if(!out.ok&&!['BATCH_NOT_FOUND','BATCH_ALREADY_SUBMITTED'].includes(out.code))throw Error(out.code);
     await browser.storage.local.remove(DRAFT);d.close();
     if(out.code==='BATCH_ALREADY_SUBMITTED')openBatch(savedDraft.batchId);else openCreator();
    }catch{status.textContent='Cancellation was not confirmed. Saved input is preserved.'}
   }
-  void browser.storage.local.get(DRAFT).then(data=>{const saved=data[DRAFT];
+  void browser.storage.local.get(DRAFT).then(data=>{const saved=data[DRAFT];draftReady=true;
    if(!saved||!/^batch_[a-f0-9]{32}$/.test(saved.batchId||'')||!Array.isArray(saved.slugs)||!saved.slugs.length||
       saved.slugs.some(s=>typeof s!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(s))||
-      !Array.isArray(saved.items)||saved.items.length!==saved.slugs.length)return;
+      !Array.isArray(saved.items)||saved.items.length!==saved.slugs.length){review.disabled=false;return;}
    savedDraft=saved;resume.hidden=false;cancel.hidden=false;review.disabled=true;input.disabled=true;choice.disabled=true;
    status.textContent='An interrupted submission has saved inputs. Resume it or cancel the unfinished input before starting another.';
   }).catch(()=>{status.textContent='Saved input could not be read. Retry after checking Firefox storage.';review.disabled=true});

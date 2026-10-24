@@ -145,8 +145,25 @@ def run(browser,archive,folder):
         assert b.execute(s,"return [...document.getElementById('pcms-faithful-host').shadowRoot.querySelectorAll('button')].some(b=>b.textContent==='Complete inventory · New account')")
         change(s,'[aria-label="Creation account"]','account_j02_000')
         click_text(s,'Preview assignments');wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('40 new')",'J02_PINNED_ACCOUNT_INDEPENDENT_PREVIEW')
-        oracle(s,'await window.__j02.interruptInput();return true;')
-        click_text(s,'Submit batch');wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('Submission was interrupted')",'J02_REAL_IDB_ABORT')
+        oracle(s,'await window.__j02.interruptInput();await window.__j02.delayInput();return true;')
+        click_text(s,'Submit batch')
+        for _ in range(100):
+            if oracle(s,'return window.__j02.inputWaiting();'):break
+            time.sleep(.05)
+        else:raise AssertionError('J02_DELAYED_APPEND_NOT_REACHED')
+        before_previews=len([c for c in oracle(s)['commands'] if c['type']=='PREVIEW_CREATE_BATCH'])
+        locked=b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;const update=[...sh.querySelectorAll('button')].find(b=>b.textContent==='Update preview');update.dispatchEvent(new MouseEvent('click',{bubbles:true}));return {readOnly:sh.querySelector('[aria-label=\"Generator names\"]').readOnly,locked:update.disabled&&update.hidden}")
+        assert locked=={'readOnly':True,'locked':True},locked
+        node=b.execute(s,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[aria-label=\"Generator names\"]')")
+        b.call('POST',f'/session/{s}/element/{node[a.ELEMENT]}/value',{'text':'CHANGED-INPUT'})
+        assert b.execute(s,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[aria-label=\"Generator names\"]').value")==partial
+        draft=oracle(s,"return (await browser.storage.local.get('pcmsUiCreationDraftV1')).pcmsUiCreationDraftV1;")
+        assert draft['slugs']==partial.split('\n'),draft
+        assert len([c for c in oracle(s)['commands'] if c['type']=='PREVIEW_CREATE_BATCH'])==before_previews
+        oracle(s,'return window.__j02.releaseInput();')
+        wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('Submission was interrupted')",'J02_REAL_IDB_ABORT')
+        assert b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;const update=[...sh.querySelectorAll('button')].find(b=>b.textContent==='Update preview');return sh.querySelector('[aria-label=\"Generator names\"]').readOnly&&update.disabled&&update.hidden")
+        print('B J02_DELAYED_APPEND_PREVIEW_EDIT_LOCK_AND_DRAFT_IDENTITY=PASS',flush=True)
         saved=oracle(s,"return (await window.__j02.inspect()).batches.find(b=>b.state==='INGESTING');")
         assert saved['appended']==32 and saved['total']==40,saved
         capture(s,'interrupted-input',evidence)
@@ -157,6 +174,8 @@ def run(browser,archive,folder):
         click_text(s,'Submit batch');wait(s,"!!sh.querySelector('[aria-label=\"Batch progress\"]')",'J02_RESUMED_QUEUED')
         resumed=oracle(s,"return (await window.__j02.inspect()).batches.find(b=>b.batchId==="+json.dumps(saved['batchId'])+");")
         assert resumed['appended']==40 and resumed['state']=='QUEUED',resumed
+        chunks=oracle(s,"return (await window.__j02.inspect()).chunks.filter(c=>c.key.startsWith('s04-batch-chunk:'+"+json.dumps(saved['batchId'])+"+':')).sort((a,b)=>a.offset-b.offset).flatMap(c=>c.slugs);")
+        assert chunks==partial.split('\n'),chunks
         assert len(oracle(s)['ledger']['effects'])==4,'intake recovery must never itself dispatch providers'
         capture(s,'resumed-same-batch',evidence);close(s)
         # Repair the exact missing account from the preview without losing
@@ -171,6 +190,24 @@ def run(browser,archive,folder):
         assert b.execute(s,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[aria-label=\"Generator names\"]').value")=='j02-inventory-context'
         click_text(s,'Update preview');wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('1 new')",'J02_CONTEXTUAL_PLAN_RECOVERY')
         capture(s,'contextual-inventory-recovery',evidence);close(s)
+        # Explicit cancellation applies only to unfinished intake and cannot
+        # report active work or provider success for the canceled manifest.
+        click(s,'[data-action=create]')
+        canceled_names='\n'.join('j02-cancel-input-'+str(i) for i in range(33))
+        b.execute(s,"const e=document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[aria-label=\"Generator names\"]');e.value="+json.dumps(canceled_names)+";e.dispatchEvent(new Event('input',{bubbles:true}));")
+        click_text(s,'Preview assignments');wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('33 new')",'J02_CANCELABLE_PREVIEW')
+        oracle(s,'await window.__j02.interruptInput();return true;')
+        click_text(s,'Submit batch');wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('Submission was interrupted')",'J02_CANCELABLE_INPUT')
+        click_text(s,'Cancel unfinished input')
+        wait(s,"[...sh.querySelectorAll('[role=dialog] button')].some(b=>b.textContent==='Preview assignments'&&!b.disabled)",'J02_CANCEL_RETURNS_CREATOR')
+        canceled=oracle(s,"return (await window.__j02.inspect()).batches.find(b=>b.total===33);")
+        assert canceled['state']=='CANCELLED' and canceled['appended']==32,canceled
+        click_text(s,'Batch history');wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('Unsubmitted input canceled')",'J02_CANCELED_HISTORY')
+        click_text(s,'View progress','[aria-label="Creation batches"] .batch-item')
+        wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('unsubmitted input canceled')",'J02_CANCELED_PROGRESS')
+        assert not b.execute(s,"return [...document.getElementById('pcms-faithful-host').shadowRoot.querySelectorAll('[role=dialog] button')].some(b=>b.textContent==='Retry check')")
+        assert len(oracle(s)['ledger']['effects'])==4
+        capture(s,'canceled-input',evidence);close(s)
         # Narrow geometry and keyboard leave all actions reachable.
         b.call('POST',f'/session/{s}/window/rect',{'width':760,'height':780});click(s,'[data-action=create]')
         capture(s,'narrow-keyboard',evidence);assert not evidence['narrow-keyboard']['overflow'],evidence['narrow-keyboard']
