@@ -756,7 +756,7 @@ function displayGenerators(){if(state.route!=='generators')return;
   checkbox.checked=generatorSelection.includes(item);checkbox.addEventListener('click',e=>e.stopPropagation());
   checkbox.addEventListener('change',()=>void generatorSelection.set(item,checkbox.checked));selectCell.append(checkbox);
   const acct=accountsMap.get(item.accountId);const sourceState=item.source||'SOURCE_PENDING';const owner=item.ownerState||'UNKNOWN';
-  const statusText=({PUBLISHED:'Published',DEVELOPING:'Developing',REVIEW:'Needs review',HELD:'Needs attention',IDLE:'Private · ready'})[item.workflowStatus]||ownerLabels[owner]||'Needs checking';
+  const statusText=({PUBLISHED:'Published',DEVELOPING:'Developing',REVIEW:'Needs review',HELD:'Needs attention',IDLE:'Private'})[item.workflowStatus]||ownerLabels[owner]||'Needs checking';
   const td0=el('td','name-cell',item.slug||'Unknown');const td1=el('td','muted-cell',acct?.alias||item.accountId||'Unknown account');
   const td2=el('td');td2.append(statusPill(statusText,statusClasses[owner]||''));
   const td3=el('td','muted-cell',item.visibility||'UNKNOWN');

@@ -25,7 +25,7 @@ export async function installGeneratorFixture(){
   t.oncomplete=()=>resolve(data);t.onabort=reject;t.objectStore('meta').openCursor().onsuccess=e=>{const c=e.target.result;if(c){data.push(c.value);c.continue()}}});
  const put=async data=>{const t=db.transaction(['meta'],'readwrite');for(const r of data)t.objectStore('meta').put(r);await new Promise((r,j)=>{t.oncomplete=r;t.onabort=j})};
  const accountForUid=async uid=>(await rows()).find(x=>x.account?.personaUid===uid)?.account;
- const readiness=async uid=>{const a=await accountForUid(uid);return a?.state==='VERIFIED'&&!ledger.failures[a.accountId]?
+ const readiness=async uid=>{const a=await accountForUid(uid);return ['VERIFIED','INVENTORY_PENDING'].includes(a?.state)&&!ledger.failures[a.accountId]?
   {ready:true,personaUid:uid,cookieStoreId:'fixture-'+a.accountId,routeId:'fixture-protected-'+a.accountId}:
   {ready:false,code:'FIXTURE_ACCOUNT_ROUTE_UNAVAILABLE'}};
  const guard={getSafeRouteReadiness:readiness,
@@ -121,6 +121,10 @@ export async function installGeneratorFixture(){
   inventory:data.filter(x=>x.generator).map(x=>x.generator),commands:structuredClone(commands),ledger:structuredClone(ledger)}},
   async adopt(){return adoption.autoTick()},
   async tick(n=1){for(let i=0;i<n;i++)await watcher.tick();return this.inspect()},
+  async addUnknownAccount(){const a={accountId:'account_j02_unknown',alias:'New account',personaUid:'persona-j02-unknown',
+    bindingId:'binding_j02_unknown',revision:3,bindingVersion:1,state:'INVENTORY_PENDING',boundPrincipal:'e'.repeat(64),
+    identity:{source:'GUARDED_SESSION_READBACK',bindingVersion:1,principalFingerprint:'e'.repeat(64)}};
+    await put([{key:'account:'+a.accountId,account:a}]);return true},
   async interruptInput(){ledger.failures.intake=true;await persist()},
   async hold(accountId,value){ledger.failures[accountId]=value;await persist()},
   async recover(){const data=await rows(),a=data.find(x=>x.account?.accountId==='account_j02_049').account;

@@ -24,6 +24,10 @@ export function previewCreation(db,{slugs,accountId=null}={}){
    for(const slug of slugs){
     if(isI17Quarantined({slug})){items.push({slug,action:'HELD',code:I17_QUARANTINE_CODE});continue;}
     const prior=planned.get(slug)||known.get(slug),owned=inventory.find(g=>g.slug===slug);
+    // Coalescence never hides a current owner/identity contradiction.
+    if(owned&&(owned.ownerState!=='OBSERVED_OWNER'||accountId&&accountId!==owned.accountId)){
+     items.push({slug,action:'HELD',accountId:owned.accountId,code:'TARGET_OWNERSHIP_AMBIGUOUS'});continue;
+    }
     if(prior){items.push({slug,action:'COALESCED',accountId:prior.accountId||null,
       code:accountId&&prior.accountId&&accountId!==prior.accountId?'EXPLICIT_ACCOUNT_CONFLICT':null});continue;}
     if(owned){const held=owned.ownerState!=='OBSERVED_OWNER'||accountId&&accountId!==owned.accountId;
@@ -36,7 +40,8 @@ export function previewCreation(db,{slugs,accountId=null}={}){
     if(plan.ok)pending.push({slug,accountId:plan.accountId,state:'OWNER_READBACK_PENDING'});
    }
    result={ok:true,items,observedAt:Date.now(),accounts:candidates.map(a=>({accountId:a.accountId,
-     state:a.state,owned:a.inventoryCount?.lastConfirmedCount??null})),providerEffects:'OFF'};
+     state:a.state,owned:a.inventoryCount?.lastConfirmedCount??null,
+     initialKnown:a.inventoryComplete===true&&(!('lastConfirmedCount' in (a.inventoryCount||{}))||Number.isSafeInteger(a.inventoryCount.lastConfirmedCount))})),providerEffects:'OFF'};
   };
  });
 }

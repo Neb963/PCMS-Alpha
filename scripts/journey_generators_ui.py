@@ -137,10 +137,14 @@ def run(browser,archive,folder):
         capture(s,'history',evidence);close(s)
         # Abort a real IDB write after the first bounded chunk, then recover
         # the exact saved input/batch across another complete process restart.
+        oracle(s,'await window.__j02.addUnknownAccount();return true;')
         click(s,'[data-action=create]')
         partial='\n'.join('j02-restart-input-'+str(i) for i in range(40))
         b.execute(s,"const e=document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[aria-label=\"Generator names\"]');e.value="+json.dumps(partial)+";e.dispatchEvent(new Event('input',{bubbles:true}));")
-        click_text(s,'Preview assignments');wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('40 new')",'J02_INTERRUPTED_PREVIEW')
+        click_text(s,'Preview assignments');wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('40 need attention')",'J02_AUTOMATIC_INITIAL_UNKNOWN_HOLD')
+        assert b.execute(s,"return [...document.getElementById('pcms-faithful-host').shadowRoot.querySelectorAll('button')].some(b=>b.textContent==='Complete inventory · New account')")
+        change(s,'[aria-label="Creation account"]','account_j02_000')
+        click_text(s,'Preview assignments');wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('40 new')",'J02_PINNED_ACCOUNT_INDEPENDENT_PREVIEW')
         oracle(s,'await window.__j02.interruptInput();return true;')
         click_text(s,'Submit batch');wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('Submission was interrupted')",'J02_REAL_IDB_ABORT')
         saved=oracle(s,"return (await window.__j02.inspect()).batches.find(b=>b.state==='INGESTING');")
@@ -155,6 +159,18 @@ def run(browser,archive,folder):
         assert resumed['appended']==40 and resumed['state']=='QUEUED',resumed
         assert len(oracle(s)['ledger']['effects'])==4,'intake recovery must never itself dispatch providers'
         capture(s,'resumed-same-batch',evidence);close(s)
+        # Repair the exact missing account from the preview without losing
+        # the entered name; update the frozen plan after real inventory commit.
+        click(s,'[data-action=create]');fill(s,'[aria-label="Generator names"]','j02-inventory-context')
+        click_text(s,'Preview assignments');wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('1 need attention')",'J02_CONTEXTUAL_INVENTORY_HOLD')
+        click_text(s,'Complete inventory · New account')
+        wait(s,"!!sh.querySelector('.account-dialog')",'J02_CONTEXTUAL_ACCOUNT_OPEN')
+        a.command(s,'SYNC_ACCOUNT')
+        wait(s,"sh.querySelector('.account-feedback')?.textContent.includes('inventory synchronized')",'J02_CONTEXTUAL_REAL_INVENTORY_COMMIT')
+        a.close_dialog(s)
+        assert b.execute(s,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[aria-label=\"Generator names\"]').value")=='j02-inventory-context'
+        click_text(s,'Update preview');wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('1 new')",'J02_CONTEXTUAL_PLAN_RECOVERY')
+        capture(s,'contextual-inventory-recovery',evidence);close(s)
         # Narrow geometry and keyboard leave all actions reachable.
         b.call('POST',f'/session/{s}/window/rect',{'width':760,'height':780});click(s,'[data-action=create]')
         capture(s,'narrow-keyboard',evidence);assert not evidence['narrow-keyboard']['overflow'],evidence['narrow-keyboard']

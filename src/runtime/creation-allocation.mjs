@@ -13,7 +13,11 @@ export function selectS04Account({intent,accounts,inventory,pending}){
   if(isI17Quarantined(intent))return bad(I17_QUARANTINE_CODE);
   if(intent.pinConflict||intent.sourceDrift||intent.state!=='WAITING_CAPABILITY')
     return bad('ALLOCATION_HELD');
-  const eligible=accounts.filter(a=>a?.state!=='ARCHIVED');
+  const managed=accounts.filter(a=>a?.state!=='ARCHIVED');
+  // Explicit selection scopes counting to that account; automatic balancing
+  // still needs every managed account's trustworthy initial inventory.
+  const eligible=intent.accountId?managed.filter(a=>a.accountId===intent.accountId):managed;
+  if(intent.accountId&&eligible.length!==1)return bad('PINNED_ACCOUNT_UNAVAILABLE');
   if(eligible.some(a=>!valid(a)||a.identity?.source!=='GUARDED_SESSION_READBACK'&&
      a.state==='VERIFIED'))return bad('ACCOUNT_COUNT_UNVERIFIED');
   if(eligible.length===0)return bad('NO_MANAGED_ACCOUNTS');
@@ -25,6 +29,7 @@ export function selectS04Account({intent,accounts,inventory,pending}){
     .map(a=>[a.accountId,a.inventoryCount]));
   const owners=new Map(eligible.map(a=>[a.accountId,snapshots.get(a.accountId)?.lastConfirmedCount||0]));
   for(const row of inventory){
+    if(intent.accountId&&row?.accountId!==intent.accountId)continue;
     if(!row||typeof row.slug!=='string'||typeof row.accountId!=='string')
       return bad('INVENTORY_COUNT_UNVERIFIED');
     if(owners.has(row.accountId)&&!snapshots.has(row.accountId)){
@@ -39,7 +44,8 @@ export function selectS04Account({intent,accounts,inventory,pending}){
   // Confirmed owned resources are already charged above. Their pending Git
   // or original-archive continuation is not a second remote generator.
   const materialized=new Set();
-  for(const row of inventory)if(row.ownerState==='OBSERVED_OWNER'&&typeof row.remoteId==='string'){
+  for(const row of inventory)if(row?.ownerState==='OBSERVED_OWNER'&&
+    (!intent.accountId||row.accountId===intent.accountId)&&typeof row.remoteId==='string'){
     const identities=[row.remoteId];
     if(row.identitySchema===2&&row.identityBasis==='INDEPENDENT_FULL_BYTE_READBACK'&&
        /^[a-f0-9]{64}$/.test(row.identityProof?.fingerprint||'')&&Array.isArray(row.identityAliases))
@@ -48,6 +54,7 @@ export function selectS04Account({intent,accounts,inventory,pending}){
   }
   const archived=new Set(accounts.filter(a=>a?.state==='ARCHIVED').map(a=>a.accountId));
   for(const item of pending){
+    if(intent.accountId&&item?.accountId!==intent.accountId)continue;
     if(item?.state==='REJECTED'||item?.state==='ABORTED'||item?.state==='ARCHIVED')continue;
     const snapshot=snapshots.get(item?.accountId);
     if(snapshot){

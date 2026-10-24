@@ -30,6 +30,7 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
  const accountName=(id,rows)=>rows.find(a=>a.accountId===id)?.alias||id||'Awaiting allocation';
  function explain(code){
   if(!code)return '';
+  if(code==='NO_MANAGED_ACCOUNTS')return 'Add an account in Accounts. Submitted requests can wait safely.';
   if(code.includes('QUARANTINED'))return 'Historical operation retained for manual investigation.';
   if(/INVENTORY|(?:^|_)COUNT(?:_|$)/.test(code))return 'Synchronize account inventory; queued work is preserved.';
   if(/ROUTE|GUARD|DONOR/.test(code))return 'Check the account’s protected route.';
@@ -110,8 +111,8 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
   let policy=null;
   async function loadPolicy(){try{const out=await request('pcms-s06-authority','GET_OPERATOR_MANAGEMENT',{},12000);
     if(!out.ok)throw Error(out.code);policy=out;policyButton.disabled=false;policyButton.textContent=out.enabled?'Pause creation':'Resume creation';
-    policyStatus.textContent=out.enabled?'':'New creation is paused. Submitted requests wait safely until you resume.';
-   }catch{policyStatus.textContent='Creation policy could not be read. Saved requests remain safe.'}}
+    policyStatus.hidden=out.enabled;policyStatus.textContent=out.enabled?'':'New creation is paused. Submitted requests wait safely until you resume.';
+   }catch{policyStatus.hidden=false;policyStatus.textContent='Creation policy could not be read. Saved requests remain safe.'}}
   async function togglePolicy(){if(!policy)return;policyButton.disabled=true;
    try{const out=await request('pcms-s06-authority','SET_OPERATOR_MANAGEMENT',{enabled:!policy.enabled,expectedRevision:policy.revision},15000);
     if(!out.ok)throw Error(out.code);await loadPolicy();
@@ -120,12 +121,16 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
   d.body.append(policyStatus,policyButton);void loadPolicy();
   void accounts().then(out=>{accountRows=out.accounts||[];
    for(const a of accountRows.filter(a=>a.state!=='ARCHIVED')){const o=el('option','',a.alias||a.accountId);o.value=a.accountId;choice.append(o)}}).catch(()=>{status.textContent='Accounts unavailable. Retry preview after recovering Accounts.'});
-  function reset(){if(!busy){frozen=null;preview.replaceChildren();submit.hidden=true;review.hidden=false;status.textContent='Preview the updated inputs before submitting.'}}
+  function reset(){if(!busy){frozen=null;preview.replaceChildren();submit.hidden=true;review.hidden=false;review.textContent='Preview assignments';review.className='btn primary';status.textContent='Preview the updated inputs before submitting.'}}
   input.addEventListener('input',reset);choice.addEventListener('change',reset);
   function draw(){preview.replaceChildren();
    const totals={CREATE:0,ADOPT:0,COALESCED:0,HELD:0},per=new Map();for(const r of frozen.items){totals[r.action]++;if(r.accountId&&r.action==='CREATE')per.set(r.accountId,(per.get(r.accountId)||0)+1)}
    preview.append(el('p','setting-note',totals.CREATE+' new · '+totals.ADOPT+' existing owned · '+totals.COALESCED+' shared jobs · '+totals.HELD+' need attention'));
-   for(const [id,count] of per)preview.append(el('p','setting-note',accountName(id,accountRows)+': '+count+' planned new'));
+   for(const id of frozen.inventoryBlockers||[]){const account=accountRows.find(a=>a.accountId===id);
+    if(account)preview.append(b('Complete inventory · '+accountName(id,accountRows),()=>manageAccount(account)));}
+   const allocationSummary=per.size>4?el('details'):preview;
+   if(per.size>4){allocationSummary.append(el('summary','setting-note',per.size+' account allocations'));preview.append(allocationSummary)}
+   for(const [id,count] of per)allocationSummary.append(el('p','setting-note',accountName(id,accountRows)+': '+count+' planned new'));
    for(const r of frozen.items.slice(offset,offset+25)){const row=el('div','batch-item');row.append(el('strong','',r.slug),el('p','setting-note',
     ({CREATE:'Create private',ADOPT:'Reconcile existing',COALESCED:'Share existing job',HELD:'Needs attention'})[r.action]+' · '+accountName(r.accountId,accountRows)+(r.waiting?' · waits for account recovery':'')),el('p','setting-note',explain(r.code)));preview.append(row)}
    const pager=el('div','pagination-actions'),prev=b('Previous',()=>{offset=Math.max(0,offset-25);draw()}),next=b('Next',()=>{offset+=25;draw()});prev.disabled=offset===0;next.disabled=offset+25>=frozen.items.length;
@@ -136,9 +141,11 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
    if(!slugs.length||slugs.some(s=>!/^[a-z0-9][a-z0-9-]{0,99}$/.test(s))){status.textContent='Use lowercase letters, numbers and hyphens. Your input is preserved.';return}
    busy=true;review.disabled=true;input.disabled=true;choice.disabled=true;status.textContent='Reading current counts and existing jobs…';
    try{const out=await call('PREVIEW_CREATE_BATCH',{slugs,accountId:choice.value||null},60000);if(!out.ok)throw Error(out.code);
-    frozen=Object.freeze({slugs:[...slugs],accountId:choice.value||null,items:out.items});offset=0;persisted=null;
+    const inventoryBlockers=out.items.some(i=>i.code==='INITIAL_INVENTORY_UNKNOWN')?
+      (out.accounts||[]).filter(a=>a.state!=='ARCHIVED'&&!a.initialKnown&&(!choice.value||a.accountId===choice.value)).map(a=>a.accountId):[];
+    frozen=Object.freeze({slugs:[...slugs],accountId:choice.value||null,items:out.items,inventoryBlockers});offset=0;persisted=null;
     draw();status.textContent='Preview frozen for these inputs. Counts are checked again before creation; held items do not stop the others.';
-    submit.hidden=false;review.hidden=true;submit.focus();
+    submit.hidden=false;review.hidden=false;review.textContent='Update preview';review.className='btn';submit.focus();
    }catch{status.textContent='Preview unavailable. Your input is preserved. Retry after checking Accounts.'}
    finally{busy=false;review.disabled=false;input.disabled=false;choice.disabled=false}
   })(),'btn primary');

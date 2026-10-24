@@ -130,3 +130,34 @@ test('J02 direct current readback of a different immutable ID holds previously o
  assert.equal(db.read('meta','source-link:'+row.slug).link.remoteId,row.remoteId);
  assert.equal(db.keys('operations').length,0);
 });
+
+test('J02 explicit healthy account selection is independent of another initial-unknown account while automatic/unknown selection and foreign ownership remain held',async()=>{
+ const db=fakeDatabase(),s=createCoordinatorStore(db),inv=createInventoryStore(db),b={...account,accountId:'account_j02_initial_unknown',personaUid:'persona_j02_initial_unknown'};
+ await put(db,[{key:'account:'+account.accountId,account},{key:'account:'+b.accountId,account:b},
+  {key:'s00-create-intent:intent_unknown_possible',record:{intentId:'intent_unknown_possible',slug:'unknown-possible',
+   accountId:b.accountId,state:'CREATE_UNCERTAIN',revision:7,createOperationId:'unknown_operation_kept',sources:[{type:'OPERATOR',accountId:b.accountId}]}}]);
+ await inv.applyObservation(account,observation(account,Date.now(),[]));
+ const marker=db.read('meta','inventory-batch:'+account.accountId);
+ const input={intent:{slug:'j02-only-selected',state:'WAITING_CAPABILITY',accountId:account.accountId},
+  accounts:[{...account,inventoryComplete:true,inventoryCount:marker},{...b,inventoryComplete:false}],
+  inventory:[],pending:[{accountId:b.accountId,state:'CREATE_UNCERTAIN'}]};
+ assert.equal(selectS04Account(input).accountId,account.accountId);
+ assert.equal(selectS04Account({...input,intent:{...input.intent,accountId:null}}).code,'INITIAL_INVENTORY_UNKNOWN');
+ assert.equal(selectS04Account({...input,intent:{...input.intent,accountId:b.accountId}}).code,'INITIAL_INVENTORY_UNKNOWN');
+ for(const target of [null,b.accountId,account.accountId]){
+  const preview=await previewCreation(db,{slugs:['j02-selected-preview'],accountId:target});
+  assert.equal(preview.items[0].action,target===account.accountId?'CREATE':'HELD');
+  assert.equal(preview.accounts.find(a=>a.accountId===b.accountId).initialKnown,false);
+ }
+ const accepted=await s.acceptCreate({intentId:'intent_j02_selected_only',slug:'j02-only-selected',accountId:account.accountId,origin:'OPERATOR'});
+ const allocated=await s.allocateCreate(accepted.record.intentId,accepted.record.revision);
+ assert.equal(allocated.ok,true,JSON.stringify(allocated));assert.equal(allocated.record.accountId,account.accountId);
+ assert.equal(allocated.record.allocation.pending,0,'foreign uncertain work is not charged to selected A');
+ const foreign={...row,slug:'j02-foreign-owned',accountId:b.accountId,personaUid:b.personaUid};await put(db,[{key:'inventory:'+foreign.slug,generator:foreign}]);
+ const collision=await s.acceptCreate({intentId:'intent_j02_no_foreign_move',slug:foreign.slug,accountId:account.accountId,origin:'OPERATOR'});
+ assert.equal((await s.allocateCreate(collision.record.intentId,collision.record.revision)).code,'OWNED_TARGET_ACCOUNT_MISMATCH');
+ assert.equal((await previewCreation(db,{slugs:[foreign.slug],accountId:account.accountId})).items[0].action,'HELD');
+ const retained=db.read('meta','s00-create-intent:intent_unknown_possible').record;assert.equal(retained.revision,7);
+ assert.equal(retained.accountId,b.accountId);assert.equal(retained.createOperationId,'unknown_operation_kept');
+ assert.equal(db.keys('operations').length,0);
+});
