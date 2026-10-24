@@ -107,11 +107,29 @@ def main():
                 time.sleep(.15)
             assert opened,'A04_PRIMARY_CREATOR_UNAVAILABLE'
             slugs='\n'.join('a04-installed-fixture-'+str(i).zfill(4) for i in range(110))
-            submitted=mod.execute(session,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+            previewed=mod.execute(session,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
               const input=sh.querySelector('.drawer-overlay textarea');
-              const action=sh.querySelector('.drawer-overlay button.btn.primary');
+              const action=[...sh.querySelectorAll('.drawer-overlay button')].find(b=>
+                b.textContent.trim()==='Preview assignments'&&!b.disabled&&!b.hidden);
               if(!input||!action)throw Error('A04_PRIMARY_CREATOR_INCOMPLETE');
-              input.value=%s;action.click();return true;"""%json.dumps(slugs))
+              input.value=%s;input.dispatchEvent(new Event('input',{bubbles:true}));action.click();return true;"""%json.dumps(slugs))
+            assert previewed
+            preview_ready=False
+            for _ in range(120):
+                preview_ready=mod.execute(session,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  const submit=[...sh.querySelectorAll('.drawer-overlay button')].find(b=>
+                    b.textContent.trim()==='Submit batch'&&!b.disabled&&!b.hidden);
+                  return !!submit&&sh.querySelector('.drawer-overlay')?.textContent.includes('110 need attention');""")
+                if preview_ready:break
+                time.sleep(.15)
+            assert preview_ready,'A04_FROZEN_PREVIEW_NOT_READY'
+            before_submit=mod.coordinator_command(session,{'type':'LIST_CREATE_BATCHES','params':{'limit':10}})
+            assert before_submit.get('ok') and before_submit.get('items')==[],('A04_PREVIEW_MUST_NOT_SUBMIT',before_submit)
+            print('B A04_PRIMARY_110_FROZEN_PREVIEW_BEFORE_DURABLE_INPUT=PASS',flush=True)
+            submitted=mod.execute(session,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+              const submit=[...sh.querySelectorAll('.drawer-overlay button')].find(b=>
+                b.textContent.trim()==='Submit batch'&&!b.disabled&&!b.hidden);
+              if(!submit)throw Error('A04_FROZEN_SUBMISSION_MISSING');submit.click();return true;""")
             assert submitted
             batch=None
             for _ in range(120):
