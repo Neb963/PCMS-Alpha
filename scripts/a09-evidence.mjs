@@ -57,6 +57,24 @@ const tMap={
  'T-09':['AC-07','AC-08'],
  'T-10':['AC-17']
 };
+// Cross-references are reviewer-derived from the *recovered* X narrative.
+// Historical A01 topic/AC labels are not original Part 8 source.
+const originalXRelatedAC={
+ 'X-01':['AC-04','AC-05','AC-06','AC-07','AC-09'],
+ 'X-02':['AC-04','AC-05'],
+ 'X-03':['AC-07','AC-08','AC-09','AC-11'],
+ 'X-04':['AC-10','AC-11','AC-12','AC-13'],
+ 'X-05':['AC-12','AC-13','AC-14'],
+ 'X-06':['AC-14','AC-15'],
+ 'X-07':['AC-01','AC-02','AC-15','AC-16'],
+ 'X-08':['AC-11','AC-17'],
+ 'X-09':['AC-17'],
+ 'X-10':['AC-16','AC-17','AC-18'],
+ 'X-11':['AC-01','AC-15','AC-17','AC-18'],
+ 'X-12':['AC-13','AC-14','AC-16','AC-17','AC-18'],
+ 'X-13':['AC-06','AC-10','AC-17'],
+ 'X-14':['AC-15','AC-16','AC-18']
+};
 function assert(condition,code){if(!condition)throw new Error(code);}
 const orderedTiers=xs=>TIER.filter(t=>xs.includes(t));
 const distinct=a=>[...new Set(a)];
@@ -92,7 +110,9 @@ export function buildCatalog(matrix,scenarioMap,originalXSource){
   assert(source,'A09_ORIGINAL_X_ID_MISSING:'+x.id);
   // Historical A01 labels/mapping are derived. The original 14 traces and
   // tier wording now come from the recovered, digest-pinned Part 8 report.
-  return {id:x.id,kind:'X',relatedAC:x.acceptance,tiers:source.tiers,
+  const relatedAC=originalXRelatedAC[x.id];
+  assert(relatedAC?.every(id=>lookup.has(id)),'A09_RECOVERED_X_CROSSWALK_INVALID:'+x.id);
+  return {id:x.id,kind:'X',relatedAC,relatedACProvenance:'REVIEW_DERIVED_NOT_ORIGINAL_AUDIT',tiers:source.tiers,
    cases:['adverse','recovery'],authority:'RECOVERED_PART8_AUDIT_VERBATIM',
    title:source.title,description:source.trigger,expected:source.expected,
    originalDescription:source.trigger,originalTierText:source.tierText};
