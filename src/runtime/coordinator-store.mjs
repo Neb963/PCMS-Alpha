@@ -390,14 +390,23 @@ export function createCoordinatorStore(db){
               const row=seen.target.result?.generator;
               if(!row||row.ownerState!=='OBSERVED_OWNER'||row.accountId!==current.accountId||
                  row.personaUid!==current.personaUid||row.bindingVersion!==current.bindingVersion||
-                 row.remoteId!==adoption.remotePublicId||row.visibility!==adoption.visibility||
-                 row.identitySchema!==2||row.identityBasis!=='INDEPENDENT_FULL_BYTE_READBACK'||
-                 row.identityProof?.fingerprint!==adoption.original.fingerprint){
+                 row.remoteId!==adoption.remotePublicId||row.visibility!==adoption.visibility){
                 finish(fail('ADOPTION_OWNERSHIP_CHANGED'));return;
               }
+              const migrated=row.identitySchema===2&&row.identityBasis==='INDEPENDENT_FULL_BYTE_READBACK'&&
+                row.identityProof?.fingerprint===adoption.original.fingerprint;
+              const qualifiedOriginal=saved.original?.ok===true&&
+                saved.original.source==='INDEPENDENT_FULL_BYTE_READBACK';
+              if(!migrated&&!qualifiedOriginal){finish(fail('ADOPTION_OWNERSHIP_CHANGED'));return;}
               m.get('identity-alias:'+current.slug).onsuccess=known=>{
                 const alias=known.target.result?.identity;
-                if(!alias||alias.schema!==2||alias.slug!==current.slug||
+                // Pre-J02 owned allocations omitted target metadata. The
+                // qualified same-owner original establishes those absent
+                // fields, but never replaces an existing different identity.
+                if(!alias&&(current.remoteId==null||current.remoteId===adoption.remotePublicId)){
+                  promote();return;
+                }
+                if(!migrated||!alias||alias.schema!==2||alias.slug!==current.slug||
                    alias.accountId!==current.accountId||alias.personaUid!==current.personaUid||
                    alias.bindingVersion!==current.bindingVersion||
                    alias.publicId!==adoption.remotePublicId||

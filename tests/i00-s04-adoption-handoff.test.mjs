@@ -96,3 +96,15 @@ test('J02 adoption alias cannot change owner, source fingerprint, target or a po
  assert.equal((await createCoordinatorStore(db).confirmAdoption('intent_s04_existing',2,
   db.read('meta','adoption:'+slug).adoption)).code,'ADOPTION_OWNERSHIP_CHANGED');
 });
+
+test('J02 preexisting owned allocation with missing target fields recovers only from qualified current same-owner original',async()=>{
+ const db=await aliasFixture(),row=db.read('meta','s00-create-intent:intent_s04_existing');
+ const tx=db.transaction(['meta'],'readwrite'),m=tx.objectStore('meta');
+ m.put({...row,record:{...row.record,remoteId:null,visibility:null}});
+ m.delete('identity-alias:'+slug);
+ await new Promise((r,j)=>{tx.oncomplete=r;tx.onabort=j;});
+ const out=await createCoordinatorStore(db).confirmAdoption('intent_s04_existing',2,
+  db.read('meta','adoption:'+slug).adoption);
+ assert.equal(out.ok,true,out.code);assert.equal(out.record.remoteId,original.remotePublicId);
+ assert.equal(out.record.visibility,'PUBLIC');assert.equal(db.keys('operations').length,0);
+});
