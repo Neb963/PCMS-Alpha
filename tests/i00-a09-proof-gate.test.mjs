@@ -100,3 +100,14 @@ test('A09 CLI denies a caller supplied arbitrary source SHA before inspecting an
  assert.notEqual(result.status,0);
  assert.match(result.stderr,/A09_SOURCE_CHECKOUT_SHA_MISMATCH/);
 });
+
+test('A09 uses latest accepted amendment rather than superseded encrypted backup or native clock',()=>{
+ const backup=catalog.find(x=>x.id==='AC-17');
+ assert.match(backup.description,/strictly passwordless, unencrypted, browser-native/);
+ assert.doesNotMatch(backup.description,/encrypted integrated backup/);
+ assert.match(backup.negative,/last known-good/);
+ const refresh=catalog.find(x=>x.id==='AC-14');
+ assert.match(refresh.negative,/rest advances with wall time/);
+ const resumed=catalog.find(x=>x.id==='AC-15');
+ assert.match(resumed.description,/browser alarms/);
+});
