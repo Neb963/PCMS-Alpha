@@ -711,7 +711,7 @@ async function loadAccounts(){
 }
 function displayAccounts(){if(state.route!=='accounts')return;
  const list=shadow('.account-list-scroll');if(!list)return;
- const query=state.acct.query.trim().toLowerCase(),filter=state.acct.filter,all=state.lastAccountList;
+ const query=state.acct.query.trim().toLowerCase(),filter=state.acct.filter,all=state.lastAccountList.filter(a=>!a.removed);
  const displayed=all.filter(a=>{const term=String(a.accountId||'').toLowerCase(),name=String(a.state||'');
   return (!query||term.includes(query)||String(a.personaUid||'').toLowerCase().includes(query))&&
    (filter==='All'||filter==='Connected'&&name==='VERIFIED'&&!accountNeedsAttention(a)||filter==='Archived'&&name==='ARCHIVED'||filter==='Attention'&&accountNeedsAttention(a));
