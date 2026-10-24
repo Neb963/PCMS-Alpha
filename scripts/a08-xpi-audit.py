@@ -57,7 +57,7 @@ def inspect(path, *, donor_root=pathlib.Path('donor/personamonkey/extension')):
             if not html.startswith('pcms/') or not html.endswith('.html'):
                 continue
             data=z.read(html)
-            for ref in re.findall(rb'<script\\b[^>]*\\bsrc=[\\x22\\x27]([^\\x22\\x27]+)',data):
+            for ref in re.findall(rb'<script\b[^>]*\bsrc=[\x22\x27]([^\x22\x27]+)',data):
                 module=posixpath.normpath(posixpath.join(
                     posixpath.dirname(html),ref.decode().split('?')[0]))
                 if module.startswith('pcms/') and module.endswith(('.mjs','.js')):
@@ -72,13 +72,13 @@ def inspect(path, *, donor_root=pathlib.Path('donor/personamonkey/extension')):
                 raise AssertionError('A08_PRODUCTION_MODULE_IMPORT_MISSING:'+member)
             visited.add(member)
             body=z.read(member)
-            if re.search(rb'\\b(?:connectNative|sendNativeMessage)\\s*\\(',body):
+            if re.search(rb'\b(?:connectNative|sendNativeMessage)\s*\(',body):
                 raise AssertionError('A08_PCMS_NATIVE_DISPATCH_REACHABLE:'+member)
             # Static imports, re-exports and literal dynamic imports. Variable
             # imports are not proof of safety and are independently browser-
             # exercised by the packaged smoke test.
             references=re.findall(
-                rb'(?:\\bfrom\\s*|\\bimport\\s*(?:\\(\\s*)?)[\\x22\\x27](\\.{1,2}/[^\\x22\\x27]+)[\\x22\\x27]',
+                rb'(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)[\x22\x27](\.{1,2}/[^\x22\x27]+)[\x22\x27]',
                 body)
             for ref in references:
                 child=posixpath.normpath(posixpath.join(
