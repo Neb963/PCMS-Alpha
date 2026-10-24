@@ -34,11 +34,9 @@ test('all six accepted prototype-derived templates are actual packaged assets',a
 });
 test('canonical primary controls call protected typed runtime with exact revisions; original safety gates survive',()=>{
  for(const s of ['pcms-i04-inventory','pcms-i03-accounts','pcms-i12-refresher','LIST_INVENTORY','LIST_ACCOUNTS','GET_REFRESHER'])assert.ok(bridge.includes(s));
- assert.match(bridge,/const native=document\.querySelector\('body > \.app'\)/);
- assert.match(bridge,/document\.getElementById\(id\)/);
- assert.match(bridge,/pcms-native-open/);
- assert.match(bridge,/function nativeAction\(/);
- assert.match(bridge,/function guardedClick\(/);
+ assert.doesNotMatch(bridge,/const native=document\.querySelector/);
+ assert.doesNotMatch(bridge,/function nativeAction\(|function guardedClick\(|pcms-native-open/);
+ assert.match(bridge,/window\.addEventListener\('focus',refreshOnWake\)/);
  assert.doesNotMatch(bridge,/guardedClick\('pcms-refresher-save'\)/);
  assert.match(bridge,/readPort\('pcms-i12-refresher','SET_POLICY'/);
  assert.match(bridge,/expectedRevision:snapshot\.revision,policy:\{refreshEnabled:next\}/);
@@ -67,8 +65,10 @@ test('prototype supports adverse navigation and fail-open presentation recovery'
  assert.match(bridge,/Unknown|unverified|Unavailable/i);
  assert.match(bridge,/root\.addEventListener\('keydown'/);
  assert.match(bridge,/root\.activeElement/);
- assert.match(bridge,/host\.remove\(\)/);
- assert.match(bridge,/body\.classList\.remove\('pcms-faithful-ready'\)/);
+ assert.match(bridge,/root\.replaceChildren\(\)/);
+ assert.match(bridge,/Emergency diagnostics/);
+ assert.match(bridge,/body\.classList\.add\('pcms-faithful-ready'\)/);
+ assert.doesNotMatch(bridge,/host\.remove\(\)/);
 });
 test('Firefox upgrades v1.2.1 XPI to 1.2.4 with donor manifest unchanged',()=>{
  assert.match(build,/original\.version!=='1\.2\.0'/);
