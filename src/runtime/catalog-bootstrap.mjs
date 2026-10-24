@@ -1,10 +1,11 @@
+import {scanMainCatalog} from './git-catalog.mjs';
 // S03 initial empty private Git repository setup. Explicitly dormant:
 // no installed port or scheduler calls this function. Callers must hold a
 // canonical DISPATCH_POSSIBLE journal and a separately approved starter hash.
 // Git ref creation is one-shot; lost ACK is reconciled, NEVER retried blindly.
 import {validRepository} from './git-catalog.mjs';
 const SHA=/^[a-f0-9]{40}$/,HEX=/^[a-f0-9]{64}$/;
-const fail=code=>({ok:false,code});
+const fail=code=>({ok:false,code,dispatchPossible:false});
 const encode=new TextEncoder();
 const hex=b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');
 async function hash(s){return hex(await crypto.subtle.digest('SHA-256',encode.encode(s)));}
@@ -15,7 +16,7 @@ export function validEmptyRepoIntent(v){
     HEX.test(v.approvedStarterSha256||'')&&v.starterApproved===true;
 }
 export async function initializeEmptyPrivateGit({
-  token,repository,intent,starterPrompt},transport=fetch){
+  token,repository,intent,starterPrompt,beforeDispatch=async()=>true},transport=fetch,scan=scanMainCatalog){
   if(!validEmptyRepoIntent(intent)||!validRepository(repository)||
      typeof token!=='string'||token.length<12||token.length>512||
      typeof starterPrompt!=='string'||!starterPrompt.length||
@@ -61,21 +62,22 @@ export async function initializeEmptyPrivateGit({
       tree:tree.body.sha,parents:[]});
     if(commit.status!==201||!SHA.test(commit.body?.sha||''))return fail('GIT_COMMIT_UNVERIFIED');
     createdCommit=commit.body.sha;
+    if((await beforeDispatch())!==true)return fail('GIT_AUTHORITY_REVOKED');
     possible=true;
     const set=await get('POST','/git/refs',{ref:'refs/heads/main',sha:createdCommit});
     if(set.status!==201||set.body?.object?.sha!==createdCommit)
-      return {ok:false,code:'GIT_INITIAL_REF_UNCERTAIN',possibleCommit:createdCommit};
+      return {ok:false,code:'GIT_INITIAL_REF_UNCERTAIN',possibleCommit:createdCommit,dispatchPossible:true};
     const mainRead=await get('GET','/git/ref/heads/main');
     const checked=await get('GET','/git/commits/'+createdCommit);
-    const snapshot=await get('GET','/git/trees/'+tree.body.sha);
+    const snapshot=await scan({token,repository},transport);
     if(mainRead.body?.object?.sha!==createdCommit||
        checked.body?.tree?.sha!==tree.body.sha||
-       !Array.isArray(snapshot.body?.tree)||
-       !snapshot.body.tree.some(x=>x.path==='pcms/prompts/default-chat1.md'&&x.sha===blob.body.sha))
-      return {ok:false,code:'GIT_INITIAL_READBACK_UNCERTAIN',possibleCommit:createdCommit};
-    return {ok:true,code:'GIT_INITIALIZED_VERIFIED',commit:createdCommit};
+       !snapshot?.ok||snapshot.repositoryId!==intent.repositoryId||snapshot.head!==createdCommit||
+       snapshot.prompt?.oid!==blob.body.sha||snapshot.prompt?.text!==starterPrompt)
+      return {ok:false,code:'GIT_INITIAL_READBACK_UNCERTAIN',possibleCommit:createdCommit,dispatchPossible:true};
+    return {ok:true,code:'GIT_INITIALIZED_VERIFIED',commit:createdCommit,head:createdCommit};
   }catch{
     return {ok:false,code:possible?'GIT_INITIAL_REF_UNCERTAIN':'GIT_PREPARE_UNCERTAIN',
-      ...(createdCommit?{possibleCommit:createdCommit}:{})};
+      dispatchPossible:possible,...(createdCommit?{possibleCommit:createdCommit}:{})};
   }
 }

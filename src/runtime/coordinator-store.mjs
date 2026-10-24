@@ -1,3 +1,4 @@
+import {importTargetTuple} from './creation-preview.mjs';
 import {qualifiedCreationInventory} from './creation-inventory.mjs';
 // S04: one canonical slug reservation for operator and verified Git-main intake.
 // Side effects are NOT performed here. All origin merges and conflicts commit in
@@ -268,6 +269,21 @@ export function createCoordinatorStore(db){
           }
           let inventoryCheckpoint=null;
           const continueStage=()=>{
+            const binding=previous.sources?.some(s=>s.type==='OPERATOR')?null:previous.sources?.find(s=>s.type==='GITHUB_MAIN'&&s.initialImport);
+            if(!binding||!['CREATE_PREPARE','CREATE_DISPATCH','RENAME_PREPARE','RENAME_DISPATCH'].includes(event)){applyStage();return;}
+            m.get('s03-import-approval:'+binding.repositoryId).onsuccess=approved=>{
+              const a=approved.target.result?.approval,b=binding.initialImport;
+              m.get('inventory:'+previous.slug).onsuccess=target=>{
+                if(!a||a.revision!==b.revision||a.scopeDigest!==b.scopeDigest||
+                  JSON.stringify(a.targets?.find(t=>t.slug===previous.slug))!==JSON.stringify(b.target)||
+                  JSON.stringify(importTargetTuple(previous.slug,target.target.result?.generator))!==JSON.stringify(b.target)){
+                  result=fail('INITIAL_IMPORT_SCOPE_REVIEW_REQUIRED');return;
+                }
+                applyStage();
+              };
+            };
+          };
+          const applyStage=()=>{
           const moved=advanceS04Effect(previous,event,proof);
           if(!moved.ok){result=moved;return;}
           if(inventoryCheckpoint)moved.record.inventoryCheckpoint=inventoryCheckpoint;

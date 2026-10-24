@@ -1,3 +1,5 @@
+import {initializeEmptyPrivateGit} from './catalog-bootstrap.mjs';
+import {DEFAULT_AI_PROMPT} from './ai-evidence.mjs';
 // S03 fixed-purpose GitHub connection and main-only catalog boundary.
 // Extension-background IndexedDB owns tokens; canonical state and UI never receive them.
 import {trustedExtensionPage} from './command-boundary.mjs';
@@ -36,7 +38,7 @@ export function validateCatalogMessage(api,sender,message){
     if(Object.keys(p).some(k=>!['repositoryId','expectedRevision','baseOid','text'].includes(k))||
       typeof p.repositoryId!=='string'||!/^[1-9][0-9]{0,19}$/.test(p.repositoryId)||
       !Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<0||
-      typeof p.baseOid!=='string'||!/^[0-9a-f]{40}$/.test(p.baseOid)||
+      !(p.baseOid===null||typeof p.baseOid==='string'&&/^[0-9a-f]{40}$/.test(p.baseOid))||
       typeof p.text!=='string'||p.text.length===0||p.text.length>131072)
       return fail('INVALID_PARAMS');
   } else if(message.type==='INSPECT_DECLARATION'){
@@ -46,7 +48,7 @@ export function validateCatalogMessage(api,sender,message){
     if(Object.keys(p).some(k=>!['repositoryId','expectedRevision','expectedHead'].includes(k))||
       typeof p.repositoryId!=='string'||!/^[1-9][0-9]{0,19}$/.test(p.repositoryId)||
       !Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
-      typeof p.expectedHead!=='string'||!/^[a-f0-9]{40}$/.test(p.expectedHead))
+      !(p.expectedHead===null||typeof p.expectedHead==='string'&&/^[a-f0-9]{40}$/.test(p.expectedHead)))
       return fail('INVALID_PARAMS');
   } else if(message.type==='APPROVE_IMPORT'){
     if(Object.keys(p).some(k=>!['repositoryId','scopeDigest','planDigest','expectedRevision'].includes(k))||
@@ -73,7 +75,7 @@ export function validateCatalogMessage(api,sender,message){
 }
 export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
   open=openCanonicalDatabase,writePrompt=writeExistingGitPrompt,
-  observePrompt=observeGitPromptWrite,
+  observePrompt=observeGitPromptWrite,initialize=initializeEmptyPrivateGit,
   inspectDeclaration=inspectReadyCandidate,
   // Product gate stays inactive until independently authorized Git H/GIT proof.
   promptWriteGate=()=>false,
@@ -104,12 +106,21 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
     if(!preview.ok)return preview;
     let approved=null;
     try{approved=await (await approvalStore()).get(expectedId);}catch{}
+    // There is no existing managed item to review in a genuinely empty
+    // scope. Connection establishes onboarding for future merged folders;
+    // no human approval or provider observation is fabricated.
+    if(!approved?.ok&&result.generators.length===0&&/^[a-f0-9]{40}$/.test(result.head||'')){
+      const empty=await (await approvalStore()).approve({repository:result.repository,repositoryId:expectedId,
+        head:result.head,scopeDigest,recognizedSlugs:[],approvalAt:Date.now(),planDigest:preview.planDigest,targets:[],emptyOnboarding:true});
+      if(empty.ok){approved=empty;await api.storage.local.set({pcmsS04CatalogIntakeProgress:{repositoryId:expectedId,head:result.head,
+        scopeDigest,initialScopeDigest:scopeDigest,initialImportCompleted:true,next:0,total:0}});}
+    }
     const progress=(await api.storage.local.get('pcmsS04CatalogIntakeProgress'))?.pcmsS04CatalogIntakeProgress;
     const completed=progress?.repositoryId===expectedId&&progress.initialImportCompleted===true&&progress.initialScopeDigest===approved?.approval?.scopeDigest;
-    const importStatus=completed?'IMPORT_SETUP_COMPLETE':approved?.ok?
+    const importStatus=completed&&!preview.initialReviewRequired?'IMPORT_SETUP_COMPLETE':approved?.ok?
       approved.approval.scopeDigest===scopeDigest&&approved.approval.planDigest===preview.planDigest?'IMPORT_SCOPE_APPROVED':'IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED':
       'IMPORT_SCOPE_UNAPPROVED';
-    return {...result,preview,importStatus,approvalRevision:approved?.approval?.revision||0};
+    return {...result,...(result.prompt?.state==='ABSENT'?{starterPrompt:DEFAULT_AI_PROMPT,starterVersion:'pcms.chat1-starter/1'}:{}),preview,importStatus,approvalRevision:approved?.approval?.revision||0};
   }
   async function run(message,sender){
     const auth=validateCatalogMessage(api,sender,message);
@@ -324,20 +335,31 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
           revision:p.expectedRevision,operationId,baseHead:current.head,
           baseOid:current.prompt.oid,updatedAt:Date.now()});
         if(!journal.ok)return journal;
-        const result=await writePrompt({token:secret.token,repository:config.repository,
-          draft:currentDraft.record.text,intent:{
+        const beforeDispatch=async()=>{
+          if(promptWriteGate()!==true||(await sentinel.inspect()).held)return false;
+          const live=await readConfig();return live?.repositoryId===config.repositoryId&&live.repository===config.repository;
+        };
+        let result;
+        try{
+        if(current.head===null){
+          const approvedStarterSha256=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(currentDraft.record.text)))].map(x=>x.toString(16).padStart(2,'0')).join('');
+          result=await initialize({token:secret.token,repository:config.repository,starterPrompt:currentDraft.record.text,beforeDispatch,
+            intent:{phase:'DISPATCH_POSSIBLE',operationId,repositoryId:config.repositoryId,approvedStarterSha256,starterApproved:true}},transport,scan);
+        }else result=await writePrompt({token:secret.token,repository:config.repository,
+          draft:currentDraft.record.text,beforeDispatch,intent:{
             phase:'DISPATCH_POSSIBLE',operationId,repositoryId:config.repositoryId,
             expectedHead:current.head,expectedOid:current.prompt.oid,
             requireExactHead:true,source:'PINNED_MAIN_PROMPT_EDITOR'
           }},transport,scan);
+        }catch{result={ok:false,dispatchPossible:true,code:'PROMPT_DISPATCH_UNCONFIRMED'};}
         // Uncertain or missing ACK must not be blindly replayed.
-        const state=result?.ok&&result.code==='PROMPT_COMMITTED_VERIFIED'?'VERIFIED':'UNCERTAIN';
+        const state=result?.ok&&['PROMPT_COMMITTED_VERIFIED','PROMPT_UNCHANGED','GIT_INITIALIZED_VERIFIED'].includes(result.code)?'VERIFIED':result?.dispatchPossible===false?'CONFLICT':'UNCERTAIN';
         const terminal=await (await promptStore()).reconcile({
           repositoryId:config.repositoryId,operationId,state,
           possibleCommit:result?.possibleCommit||
             (state==='VERIFIED'?result.head:null),receipt:result});
-        return {...terminal,code:state==='VERIFIED'?'PROMPT_GIT_VERIFIED':
-          'PROMPT_GIT_UNCERTAIN_RECONCILE_REQUIRED',writeCode:result?.code};
+        return {...terminal,ok:terminal.ok&&state==='VERIFIED',code:state==='VERIFIED'?'PROMPT_GIT_VERIFIED':
+          state==='CONFLICT'?'PROMPT_CONFLICT_KEEP_DRAFT':'PROMPT_GIT_UNCERTAIN_RECONCILE_REQUIRED',writeCode:result?.code};
       }
       if(message.type==='GIT_STATUS'){
         stage='VAULT_STATUS';

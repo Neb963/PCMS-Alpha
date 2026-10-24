@@ -1,3 +1,4 @@
+import {renderGitInventory,mountGitPromptEditor} from './git-workspace.mjs';
 import {createSourceWorkspace} from './source-workspace.mjs';
 import {createGeneratorBatches} from './generator-batches.mjs';
 import {createGeneratorSelection} from './generator-selection.mjs';
@@ -371,6 +372,7 @@ function routeHandlers(){
  event.preventDefault();
  if(action==='search'){openGlobalSearch();return}
  if(action==='create'){openGeneratorCreator();return}
+ if(action==='git-sources'){openGitWorkspace();return}
  if(action==='sync-inventory'){void syncManagedInventories();return}
  if(action==='queue'||action==='activity'){routeTo('work-queue');return}
  if(action==='diagnostics'||action==='health'){state.settings='diagnostics';routeTo('settings');return}
@@ -1694,136 +1696,27 @@ function primarySettingCard(container,title,intro){
 // main. Display its actual initial import scope and canonical prompt without
 // inferring remote ownership, deletion, creation or publication.
 function renderConnectedMain(section,snapshot){
- section.querySelector('[data-main-review]')?.remove();
- if(!snapshot?.ok||snapshot.complete!==true)return;
- const panel=el('section','settings-section');panel.dataset.mainReview='1';
- const summary=el('h3','','GitHub main · '+snapshot.recognizedCount+' recognized folders');
- const info=el('p','setting-note',
-  'This is a complete read-only GitHub file snapshot. Generator ownership and live publication need separate verification.');
- panel.append(summary,info);
- const preview=snapshot.preview||{},items=preview.items||[];
- const listing=el('details','settings-section');listing.append(el('summary','','Review folder declarations and owner evidence'));
- const search=el('input','form-input');search.placeholder='Find a generator folder';search.maxLength=100;
- search.setAttribute('aria-label','Find GitHub generator folder');
- const list=el('div','queue-list'),pagination=el('div','form-foot');
- let offset=0;
- const prev=b('Previous',()=>{offset=Math.max(0,offset-30);draw()},'btn small');
- const next=b('Next',()=>{offset+=30;draw()},'btn small');
- const count=el('span','setting-note','');
- function draw(){
-  list.replaceChildren();const query=search.value.trim().toLowerCase();
-  const filtered=items.filter(x=>x.slug?.toLowerCase().includes(query));
-  if(offset>=filtered.length)offset=Math.max(0,Math.floor(Math.max(0,filtered.length-1)/30)*30);
-  const visible=filtered.slice(offset,offset+30);
-  for(const item of visible){
-   const row=el('div','queue-item'),data=el('div','row-body');
-   data.append(el('strong','',item.slug),
-    el('p','setting-note',
-      (item.sourceState==='READY_UNVERIFIED_COHERENCE'?
-       'READY declaration detected; source verification remains separate.':
-       'Source declaration: '+String(item.sourceState||'not confirmed').replaceAll('_',' ').toLowerCase())+
-      ' · '+(item.observed==='AMBIGUOUS'?'Account or owner not independently verified':
-       'Owner observation: '+String(item.observed||'not confirmed').replaceAll('_',' ').toLowerCase())));
-   row.append(data);list.append(row);
-  }
-  if(!visible.length)list.append(el('p','setting-note','No folder matches this search in the complete GitHub snapshot.'));
-  count.textContent=filtered.length+' recognized folder(s) · '+(filtered.length?offset+1:0)+
-   '–'+Math.min(offset+visible.length,filtered.length)+' shown';
-  prev.disabled=offset===0;next.disabled=offset+30>=filtered.length;
- }
- search.addEventListener('input',()=>{offset=0;draw()});
- pagination.append(prev,next,count);listing.append(search,list,pagination);panel.append(listing);draw();
- if(preview.scopeDigest&&snapshot.importStatus!=='IMPORT_SCOPE_APPROVED'){
-  const approval=b('Approve inspected inventory scope',()=>void(async()=>{
-   if(!window.confirm('Approve this EXACT GitHub main folder inventory for local recognition? This does not create, rename, publish or allocate remote generators, and owner checks remain mandatory.'))return;
-   approval.disabled=true;
-   try{
-    const r=await readPort('pcms-s03-catalog','APPROVE_IMPORT',{
-     repositoryId:snapshot.repositoryId,scopeDigest:preview.scopeDigest},30000);
-    info.textContent=r?.ok?
-     'Exact initial GitHub folder scope approved. Account ownership and deployment remain separately unverified.':
-     'Folder-scope approval could not be confirmed. Read main again before retrying.';
-   }catch{info.textContent='Import approval result uncertain; re-scan before any further action.'}
-   finally{approval.disabled=false}
-  })(),'btn primary');
-  panel.append(approval);
- }
- if(snapshot.prompt?.state==='PRESENT'&&typeof snapshot.prompt.text==='string'){
-  const box=el('details','settings-section');
-  box.append(el('summary','','Canonical Chat 1 prompt · GitHub-controlled'));
-  box.append(el('p','setting-note',
-   'The committed main prompt remains authoritative. Local drafts cannot change it without an explicit conditional Git commit and independent readback.'));
-  const draft=el('textarea','form-input');draft.rows=10;draft.value=snapshot.prompt.text;
-  draft.setAttribute('aria-label','Canonical Chat 1 prompt draft');
-  const notes=el('p','setting-note','GitHub source loaded. No remote write was submitted. Saving a draft only changes local PCMS settings.');
-  notes.setAttribute('role','status');
-  const controls=el('div','form-foot');
-  let base={repositoryId:snapshot.repositoryId,head:snapshot.head,oid:snapshot.prompt.oid},
-   revision=0,dirty=false,uncertain=false,committed=false,loading=false;
-  draft.addEventListener('input',()=>{dirty=true;});
-  const save=b('Save local prompt draft',()=>void(async()=>{
-   if(loading||!draft.value.trim()||draft.value.length>131072)return;
-   loading=true;save.disabled=true;notes.textContent='Saving the local draft; GitHub remains unchanged.';
-   try{
-    const r=await readPort('pcms-s03-catalog','SAVE_PROMPT_DRAFT',{
-      repositoryId:base.repositoryId,expectedRevision:revision,
-      baseOid:base.oid,text:draft.value},20000);
-    if(r?.ok){revision=r.revision;dirty=false;
-     notes.textContent='Local prompt draft saved. GitHub main remains unchanged.'}
-    else notes.textContent='Draft was not confirmed. Preserve your text and reload the current draft before retrying.';
-   }catch{notes.textContent='Draft storage outcome uncertain. Preserve your edits and reload before retrying.'}
-   finally{loading=false;save.disabled=false}
-  })(),'btn small');
-  const commit=b('Commit reviewed prompt to GitHub main',()=>void(async()=>{
-   if(loading||revision<1||dirty||uncertain||committed){notes.textContent='Save and verify the current draft, then confirm the latest GitHub main before a new commit.';return}
-   if(!window.confirm('Commit this exact saved Chat 1 prompt to the verified GitHub main? PCMS uses a revision-checked nonforced write, independent readback and no blind retry.'))return;
-   loading=true;commit.disabled=true;notes.textContent='Checking standing Git permission and exact main revision…';
-   try{
-    const r=await readPort('pcms-s03-catalog','COMMIT_PROMPT',{
-      repositoryId:base.repositoryId,expectedRevision:revision,
-      expectedHead:base.head},95000);
-    uncertain=!r?.ok&&r?.code==='PROMPT_GIT_UNCERTAIN_RECONCILE_REQUIRED';
-    if(r?.ok)committed=true;
-    notes.textContent=r?.ok?
-      'Committed prompt verified on GitHub main. Re-scan before further source work.':
-      uncertain?'Commit outcome uncertain. Use read-only reconciliation; do not retry the write.':
-      'Commit held; GitHub source has not been independently verified. Preserve this draft.';
-   }catch{uncertain=true;notes.textContent='GitHub commit outcome unknown. Do not resend. Reconcile the exact write first.'}
-   finally{loading=false;commit.disabled=committed||uncertain}
-  })(),'btn primary');
-  const reconcile=b('Reconcile possible Git commit',()=>void(async()=>{
-   if(loading)return;
-   loading=true;reconcile.disabled=true;notes.textContent='Observing current GitHub history and exact prompt bytes without a write…';
-   try{
-    const r=await readPort('pcms-s03-catalog','RECONCILE_PROMPT',{
-      repositoryId:base.repositoryId},60000);
-    if(r?.ok){uncertain=false;committed=true;commit.disabled=true;
-      notes.textContent='Prior Git prompt commit independently verified. Read main again before editing.'}
-    else notes.textContent='Git prompt outcome remains unverified. No write was repeated.';
-   }catch{notes.textContent='Read-only reconciliation unavailable. Preserve the original draft and uncertainty hold.'}
-   finally{loading=false;reconcile.disabled=false}
-  })(),'btn small');
-  controls.append(save,commit,reconcile);
-  box.append(draft,controls,notes);panel.append(box);
-  void (async()=>{
-   try{
-    const r=await readPort('pcms-s03-catalog','GET_PROMPT_DRAFT',{},20000);
-    if(!panel.isConnected||dirty)return;
-    if(r?.ok){
-     draft.value=r.record.text;revision=r.record.revision;
-     uncertain=['DISPATCH_POSSIBLE','UNCERTAIN'].includes(r.record.effect?.state);
-     if(r.record.baseOid!==base.oid){
-      uncertain=true;notes.textContent='Saved draft is based on a different main revision. Reconcile before any commit.';
-     }else notes.textContent='Existing local draft loaded. GitHub main remains authoritative.';
-    }
-   }catch{}
-  })();
- }
- section.append(panel);
+ renderGitInventory({section,snapshot,el,b,request:readPort,refresh:async()=>{
+  try{const out=await readPort('pcms-s03-catalog','SCAN_CONNECTED',{},95000);if(out.ok)renderConnectedMain(section,out);else notify('GitHub main could not be read. Retry when the connection is available.')}catch{notify('GitHub main is unavailable.')}
+ },openSource:item=>openSourceManager({slug:item.slug}),openQueue:()=>routeTo('work-queue')});
+}
+function openGitWorkspace(){
+ const prior=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('section','drawer source-workspace');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-label','Git sources');
+ const close=()=>{overlay.remove();prior?.isConnected&&prior.focus({preventScroll:true})};
+ const head=el('div','drawer-head'),body=el('div','drawer-body');head.append(el('h2','drawer-title','Git sources'),b('Close',close));
+ const feedback=el('p','setting-note','Reading GitHub main…');feedback.setAttribute('role','status');body.append(feedback);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ async function refresh(){try{const out=await readPort('pcms-s03-catalog','SCAN_CONNECTED',{},95000);if(!overlay.isConnected)return;
+  if(!out.ok){feedback.textContent='Connect GitHub to browse and import source folders.';return}feedback.textContent='';
+  renderGitInventory({section:body,snapshot:out,el,b,request:readPort,refresh,
+   openSource:item=>{close();openSourceManager({slug:item.slug})},openQueue:()=>{close();routeTo('work-queue')}});
+ }catch{feedback.textContent='GitHub is unavailable. Retry after checking the connection.'}}
+ body.append(b('GitHub connection',()=>{close();state.settings='connections';routeTo('settings')},'btn small'),b('Retry',()=>void refresh(),'btn small'));
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});head.querySelector('button').focus();void refresh();
 }
 function primaryConnections(container){
  const section=primarySettingCard(container,'GitHub',
-  'Connect once to the configured private repository. PCMS reads committed main only.');
+  'Connect once to enable background creation, development and tested-source writeback from main. Publication always needs your exact approval.');
  section.dataset.gitConnection='1';
  const form=el('div','pcms-git-connection-form');
  const repo=el('input','form-input');repo.value='Neb963/per-gens';repo.readOnly=true;
@@ -1886,12 +1779,21 @@ function primaryConnections(container){
      repository:repo.value,token,
      ...(type==='RECOVER_GIT_CONNECTION'?{acknowledgeCredentialReplacement:true}:{})
    },30000);
+   if(out?.ok){
+    // First setup may enable accepted routine automation. Reconnect never
+    // overrides an explicit, restored or ambiguous legacy pause.
+    const policy=await readPort('pcms-s06-authority','GET',{},18000);
+    if(policy?.onboardingAllowed&&policy.record.repositoryId===out.repositoryId)
+      await readPort('pcms-s06-authority','SET',{repositoryId:out.repositoryId,expectedRevision:policy.record.revision,
+        grants:{development:true,gitWrite:true,publication:true},consent:'I AUTHORIZE PROTECTED PCMS OPERATIONS'},18000);
+   }
    status.textContent=out?.ok?'GitHub access saved. You can now read main.':
      out?.code==='GIT_PENDING_CONNECTION_RECONCILIATION_REQUIRED'?
      'Setup was interrupted. Use the recovery actions directly below.':
      out?.code==='GITHUB_AUTH_REJECTED'?'GitHub rejected this token. Check its access to the repository.':
      'Connection not confirmed. '+friendlyConnectionIssue(out?.code);
    await refreshConnection({retainStatus:true});
+   if(out?.ok){const main=await readPort('pcms-s03-catalog','SCAN_CONNECTED',{},95000);if(main.ok)renderConnectedMain(section,main);}
   }catch{
    status.textContent='Connection result uncertain. Use Reconcile saved access before another attempt.';
    await refreshConnection({retainStatus:true});
@@ -1982,32 +1884,29 @@ function backupAction(action,extra={}){
 // independently authoritative and is never overwritten here.
 function primaryAiSettings(container){
  const section=primarySettingCard(container,'AI development settings',
-  'Configure local development guidance and per-account concurrency. These settings do not modify the GitHub default Chat 1 prompt, enable a provider effect or certify a test PASS.');
+  'Default instructions come from GitHub. Configure the required test set and workload limits below.');
  const feedback=el('p','setting-note','Loading the current AI settings…');
  feedback.setAttribute('role','status');
- const editor=el('textarea','form-input');editor.rows=8;editor.maxLength=16000;
- editor.setAttribute('aria-label','AI development guidance');
+ mountGitPromptEditor({section,el,b,request:readPort,connect:()=>{state.settings='connections';renderSettingsSection()}});
  const testLabel=el('label','','Required test names (one per line)');
  const tests=el('textarea','form-input');tests.rows=4;
  tests.setAttribute('aria-label','Required test names');testLabel.append(tests);
  const countLabel=el('label','','Maximum concurrent AI tasks per verified account');
  const count=el('input','form-input');count.type='number';count.min='1';count.max='4';count.step='1';
  countLabel.append(count);
- const actions=el('div','form-foot'),save=b('Save guidance and tests',()=>void(async()=>{
+ const actions=el('div','form-foot'),save=b('Save required tests',()=>void(async()=>{
   const names=tests.value.split(/[\n,]+/).map(x=>x.trim()).filter(Boolean);
   if(!names.length||names.length>64||new Set(names).size!==names.length||
-   names.some(x=>!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$/.test(x))||
-   !editor.value.trim()||editor.value.length>16000){
-   feedback.textContent='Enter guidance and 1–64 distinct valid required test names.';return}
+   names.some(x=>!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$/.test(x))){
+   feedback.textContent='Enter 1–64 distinct valid required test names.';return}
   const current=state.aiCurrentPrompt;if(!current){feedback.textContent='Prompt revision unavailable. Reload current settings.';return}
-  if(!window.confirm('Replace local AI guidance for future jobs? Existing job candidates and the GitHub prompt remain unchanged.'))return;
   save.disabled=true;
   try{
    const out=await readPort('pcms-i10-ai','SET_PROMPT',{
-    text:editor.value,tests:names,expectedRevision:current.revision},16000);
-   feedback.textContent=out?.ok?'Local guidance saved for new jobs; recorded tests still require independent execution.':
-      'Guidance could not be saved. Reload the current revision before retrying.';
-  }catch{feedback.textContent='Guidance update outcome uncertain. Read current revision before retrying.'}
+    text:current.text,tests:names,expectedRevision:current.revision},16000);
+   feedback.textContent=out?.ok?'Required test names saved for new jobs.':
+      'Tests could not be saved. Reload the current revision before retrying.';
+  }catch{feedback.textContent='Test settings were not confirmed. Read current revision before retrying.'}
   finally{save.disabled=false;void refresh()}
  })(),'btn primary');
  const saveLimit=b('Save concurrency',()=>void(async()=>{
@@ -2026,7 +1925,7 @@ function primaryAiSettings(container){
  })(),'btn small');
  actions.append(save,saveLimit);
  const form=el('div','form-stack');
- form.append(el('label','','Local AI guidance'),editor,testLabel,countLabel,actions,feedback);
+ form.append(testLabel,countLabel,actions,feedback);
  section.append(form);
  const jobsSection=el('section','settings-section');
  jobsSection.append(el('h3','h3','Managed AI development'));
@@ -2111,12 +2010,12 @@ function primaryAiSettings(container){
   const concurrency=result[1].status==='fulfilled'&&result[1].value?.ok?result[1].value:null;
   state.aiCurrentPrompt=prompt?.current||null;state.aiConcurrency=concurrency?.setting||null;
   if(prompt?.current){
-   editor.value=prompt.current.text;tests.value=(prompt.current.tests||[]).join('\n');
+   tests.value=(prompt.current.tests||[]).join('\n');
   }
   if(concurrency?.setting)count.value=String(concurrency.setting.perAccount);
   save.disabled=!prompt?.current;saveLimit.disabled=!concurrency?.setting;
   feedback.textContent=prompt?.current&&concurrency?.setting?
-   'Current local guidance revision '+prompt.current.revision+
+   'Required-test settings revision '+prompt.current.revision+
    '; maximum '+concurrency.setting.perAccount+' parallel job(s) per account. No test outcome inferred.':
    'AI settings could not be read. Changes remain unavailable until the canonical runtime responds.';
  }

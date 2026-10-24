@@ -1,3 +1,4 @@
+import {fakeDatabase} from './fake-idb.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
@@ -187,7 +188,7 @@ test('S03: one-time native-vault connect, read-only reconnection scan and explic
     throw Error('unexpected native action');
   }
   const fx=fake();
-  const boundary=createCatalogBoundary(api,{native,
+  const boundary=createCatalogBoundary(api,{native,open:async()=>fakeDatabase(),
     transport:fx.transport,
     scan:async({repository,token})=>{
       assert.equal(repository,repo);assert.equal(token,TOKEN);
@@ -244,7 +245,7 @@ test('R3: pending vault outcome recovers only with explicit same-repository repl
     if(message.action==='git.status')return {ok:stores>=2,present:stores>=2};
     return {ok:false,code:'UNAVAILABLE'};
   };
-  const boundary=createCatalogBoundary(api,{native,transport:fx.transport});
+  const boundary=createCatalogBoundary(api,{native,open:async()=>fakeDatabase(),transport:fx.transport});
   assert.equal((await boundary.run({type:'CONNECT_GIT',params:{repository:repo,token:TOKEN}},sender)).code,
     'GIT_VAULT_STORE_OUTCOME_UNCERTAIN');
   assert.equal(stores,1);

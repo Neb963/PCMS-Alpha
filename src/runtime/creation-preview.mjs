@@ -2,6 +2,7 @@
 // actual assignments are revalidated against canonical facts before effects.
 import {selectS04Account} from './creation-allocation.mjs';
 import {isI17Quarantined,I17_QUARANTINE_CODE} from './legacy-quarantine.mjs';
+export const importTargetTuple=(slug,g)=>({slug,ownerState:g?.ownerState||'NOT_IN_MANAGED_INVENTORY',accountId:g?.accountId||null,remoteId:g?.remoteId||null,personaUid:g?.personaUid||null,bindingVersion:g?.bindingVersion||null});
 export function previewCreation(db,{slugs,accountId=null}={}){
  if(!Array.isArray(slugs)||!slugs.length||slugs.some(s=>typeof s!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(s))||
     accountId!==null&&typeof accountId!=='string')return Promise.resolve({ok:false,code:'INVALID_PREVIEW'});
@@ -39,7 +40,8 @@ export function previewCreation(db,{slugs,accountId=null}={}){
     items.push(row);planned.set(slug,row);
     if(plan.ok)pending.push({slug,accountId:plan.accountId,state:'OWNER_READBACK_PENDING'});
    }
-   result={ok:true,items,observedAt:Date.now(),accounts:candidates.map(a=>({accountId:a.accountId,
+   const initialPending=[...known.values()].filter(r=>!r.sources?.some(s=>s.type==='OPERATOR')&&['WAITING_CAPABILITY','OWNER_READBACK_PENDING','OWNER_MISSING_VERIFIED','CREATE_PREPARED','PRIVATE_EMPTY_CONFIRMED','RENAME_PREPARED'].includes(r.state)).flatMap(r=>r.sources.filter(s=>s.type==='GITHUB_MAIN'&&s.initialImport).map(s=>({slug:r.slug,markerOid:s.markerOid,initialImport:s.initialImport})));
+   result={ok:true,items,initialPending,targets:slugs.map(slug=>importTargetTuple(slug,inventory.find(g=>g.slug===slug))),observedAt:Date.now(),accounts:candidates.map(a=>({accountId:a.accountId,alias:a.alias||null,
      state:a.state,owned:a.inventoryCount?.lastConfirmedCount??null,
      initialKnown:a.inventoryComplete===true&&(!('lastConfirmedCount' in (a.inventoryCount||{}))||Number.isSafeInteger(a.inventoryCount.lastConfirmedCount))})),providerEffects:'OFF'};
   };

@@ -1,3 +1,4 @@
+import {createInitialImportGuard} from './creation-import-authority.mjs';
 import {ensureCreationInventory} from './creation-inventory.mjs';
 import {inventoryBoundary} from './inventory-boundary.mjs';
 // S04 fixed, one-step guarded creation runner. No generic job engine.
@@ -20,7 +21,8 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
   makeStore=createCoordinatorStore,guard=internalPcmsGuard,
   effectGate=()=>false,gitGate=()=>false,
   createGit=createS04GitContinuation,now=Date.now,
-  syncInventory=(id,revision)=>inventoryBoundary?.syncAccount(id,revision)}={}){
+  syncInventory=(id,revision)=>inventoryBoundary?.syncAccount(id,revision),
+  importGuard=createInitialImportGuard(api)}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
   const git=createGit(api,{open,gate:gitGate});
   let dbPromise;
@@ -36,6 +38,9 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
       if(item.revision!==expectedRevision)return fail('STALE_REVISION');
       if(isI17Quarantined(item))return fail(I17_QUARANTINE_CODE);
       if(item.pinConflict||item.sourceDrift)return fail(item.hold||'SOURCE_CONFLICT');
+      if(['WAITING_CAPABILITY','OWNER_MISSING_VERIFIED','PRIVATE_EMPTY_CONFIRMED','CREATE_PREPARED','RENAME_PREPARED'].includes(item.state)){
+        const scope=await importGuard(await (dbPromise||=open()),item);if(!scope.ok)return scope;
+      }
       if(item.state==='WAITING_CAPABILITY')
         return await s.allocateCreate(item.intentId,item.revision);
       if(item.state==='OWNER_READBACK_PENDING'){
@@ -154,6 +159,7 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         }
 
         // Read guards again before crossing the dispatch-possible marker.
+        const scope=await importGuard(await (dbPromise||=open()),item);if(!scope.ok)return scope;
         const before=await g.getSafeRouteReadiness(item.personaUid);
         if(!routeSame(ready,before)||(await sentinel.inspect()).held)
           return fail('PROTECTED_CONTEXT_CHANGED');
@@ -163,7 +169,8 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         // Exact revision + operation receipt must exist before dispatch.
         const newer=prepared.record;
         const policyGeneration=effectGate.generation?.();
-        const allowed=(await effectGate({intent:newer,route:before}))===true;
+        const finalScope=await importGuard(await (dbPromise||=open()),newer);
+        const allowed=finalScope.ok&&(await effectGate({intent:newer,route:before}))===true;
         const restoring=(await sentinel.inspect()).held;
         if(!allowed||restoring||policyGeneration!==effectGate.generation?.()){
           return await s.stageEffect({intentId:item.intentId,

@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash,webcrypto} from 'node:crypto';
 import {fakeDatabase} from './fake-idb.mjs';
+import {createInitialImportGuard} from '../src/runtime/creation-import-authority.mjs';
+import {createCoordinatorStore} from '../src/runtime/coordinator-store.mjs';
 import {buildImportPreview} from '../src/runtime/catalog-import-preview.mjs';
 import {getImportScopeDigest,createImportApprovalStore} from '../src/runtime/catalog-import.mjs';
 import {createCreationCatalogIntake} from '../src/runtime/creation-catalog.mjs';
@@ -46,7 +48,7 @@ test('J03 initial approval binds source and ownership, allows reviewed changed s
 test('J03 completed initial setup does not demand another approval for newly merged folders',async()=>{
  const {db}=await seed(),c=catalog(),scopeDigest=await getImportScopeDigest(c),plan=await buildImportPreview(db,c);
  await createImportApprovalStore(db).approve({...cfg,head:c.head,scopeDigest,recognizedSlugs:c.generators.map(g=>g.slug),approvalAt:10,planDigest:plan.planDigest,targets:plan.targets});
- const local=storage({pcmsS03Git:cfg,pcmsS04CatalogIntakeProgress:{repositoryId:'42',initialScopeDigest:scopeDigest,initialImportCompleted:true}}),api={runtime,storage:{local}};
+ const local=storage({pcmsS03Git:cfg,pcmsS04CatalogIntakeProgress:{repositoryId:'42',initialScopeDigest:scopeDigest,initialImportCompleted:true,initialApprovalRevision:1}}),api={runtime,storage:{local}};
  const next=catalog(['known-owned','new-private','later-folder']),boundary=createCatalogBoundary(api,{open:async()=>db,scan:async()=>next,native:async()=>({ok:true,credential:'test-credential-only'})});
  assert.equal((await boundary.run({type:'SCAN_CONNECTED'},sender)).importStatus,'IMPORT_SETUP_COMPLETE');
  const result=await createCreationCatalogIntake(api,{open:async()=>db}).run(next);assert.equal(result.ok,true,result.code);assert.equal(result.added,3);
@@ -66,4 +68,25 @@ test('J03 source-file UI boundary returns only a verified selected file from its
  assert.equal((await boundary.run({type:'READ_SOURCE_FILE',params},{id:'hostile'})).code,'UNTRUSTED_SENDER');assert.equal(reads,1);
  assert.equal(validateSourceMessage(api,sender,{type:'READ_SOURCE_FILE',params:{...params,folder:'other/root'}}).ok,false);
  for(const corrupt of [false,true]){const r=await readVerifiedGitFile({token:'test-credential-only',file},async()=>({status:200,json:async()=>({sha:file.oid,size:file.size,encoding:'base64',content:(corrupt?Buffer.from([1,1,1,1]):raw).toString('base64')})}));assert.equal(r.ok,!corrupt);}
+});
+
+test('J03 initial import remains bound through first creation, not only intake completion',async()=>{
+ const {db}=await seed(),c=catalog(),plan=await buildImportPreview(db,c),scopeDigest=await getImportScopeDigest(c),approvals=createImportApprovalStore(db);
+ const approval=await approvals.approve({...cfg,head:c.head,scopeDigest,recognizedSlugs:c.generators.map(g=>g.slug),approvalAt:100,planDigest:plan.planDigest,targets:plan.targets});
+ const local=storage({pcmsS03Git:cfg}),api={runtime,storage:{local}},intake=createCreationCatalogIntake(api,{open:async()=>db});
+ assert.equal((await intake.run(c)).ok,true);const store=createCoordinatorStore(db),rows=await store.listCreate({limit:10});
+ const item=(await store.getCreate(rows.items.find(r=>r.slug==='new-private').intentId)).record;assert.equal(item.sources[0].initialImport.revision,1);
+ const guard=createInitialImportGuard(api,{scan:async()=>c,credential:async()=>({ok:true,credential:'test-credential-only'})});
+ assert.equal((await guard(db,item)).ok,true);
+ await put(db,[{key:'inventory:new-private',generator:{slug:'new-private',accountId:'account_j03_b',remoteId:'new-owner',ownerState:'OBSERVED_OWNER',bindingVersion:1}}]);
+ assert.equal((await guard(db,item)).code,'INITIAL_IMPORT_SCOPE_REVIEW_REQUIRED');assert.equal((await buildImportPreview(db,c)).initialReviewRequired,true);
+ const next=await buildImportPreview(db,c);await approvals.approve({...cfg,head:c.head,scopeDigest,recognizedSlugs:c.generators.map(g=>g.slug),approvalAt:101,planDigest:next.planDigest,targets:next.targets,expectedRevision:1});
+ assert.equal((await intake.run(c)).ok,true);const renewed=(await store.getCreate(item.intentId)).record;assert.equal(renewed.sources[0].initialImport.revision,2);
+ assert.equal((await guard(db,renewed)).ok,true);
+ assert.equal((await guard(db,{...renewed,sources:[...renewed.sources,{type:'OPERATOR',intentId:'genuine_explicit_request'}]})).ok,true);
+ const stale=await approvals.approve({...cfg,head:c.head,scopeDigest,recognizedSlugs:c.generators.map(g=>g.slug),approvalAt:102,planDigest:'f'.repeat(64),targets:next.targets,expectedRevision:1});
+ assert.equal(stale.ok,false);assert.equal(stale.code,'IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED');
+ const changedSource={...c,generators:c.generators.map(g=>g.slug===renewed.slug?{...g,markerOid:'e'.repeat(40)}:g)};
+ const sourceGuard=createInitialImportGuard(api,{scan:async()=>changedSource,credential:async()=>({ok:true,credential:'test-credential-only'})});
+ assert.equal((await sourceGuard(db,renewed)).code,'INITIAL_IMPORT_SOURCE_CHANGED_REVIEW_REQUIRED');
 });
