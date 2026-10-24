@@ -17,7 +17,7 @@
 | AC-17 | A02 browser-only plain-format source-complete export, disk readback/import and inactive restore in disposable Firefox, 14-retention rules | Operator fresh/existing profile controlled restore and owner/exit reassessment H |
 | AC-18 | A07 B 55 managed accounts + 1,200 generators paging and resource measurements | Operator keyboard/screen-reader/reflow/usability and real H scaling |
 | T-01–T-10 | Relevant negative transaction, source, feed, journal, clock, profile-restore tests are present across existing D/B suites | Consolidated end-to-end cross-boundary scenario receipts, avoiding redundant real effects |
-| X-01–X-14 | A01 source-derived owner/AC/tier/topic mapping and recovery oracles | Original Part 8 prose and exact scenario-by-scenario verification; cannot assert original X PASS |
+| X-01–X-14 | Original Part 8 triggers/outcomes and evidence tiers recovered verbatim with a digest; A01 mappings remain labeled derived | Test the specific original scenarios, reuse relevant existing D/B adverse proofs, and record remaining H/GIT/L observations; source recovery does not mean X PASS |
 
 The **same XPI** can support engineering-evidence reuse for unchanged runtime paths; the full accepted operator journey is still not established by these partial component tests. A09's executable ledger defaults missing slots to NOT_TESTED, validates source/XPI pins, refuses fake fixture/external readback equivalence, and reports held requirements rather than promoting green CI to product PASS.
 
