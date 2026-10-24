@@ -32,9 +32,14 @@ export function selectS04Account({intent,accounts,inventory,pending}){
     }
   }
   const pendingCounts=new Map(eligible.map(a=>[a.accountId,0]));
+  // Confirmed owned resources are already charged above. Their pending Git
+  // or original-archive continuation is not a second remote generator.
+  const materialized=new Set(inventory.filter(row=>row.ownerState==='OBSERVED_OWNER'&&
+    typeof row.remoteId==='string').map(row=>JSON.stringify([row.accountId,row.slug,row.remoteId])));
   const archived=new Set(accounts.filter(a=>a?.state==='ARCHIVED').map(a=>a.accountId));
   for(const item of pending){
     if(item?.state==='REJECTED'||item?.state==='ABORTED'||item?.state==='ARCHIVED')continue;
+    if(materialized.has(JSON.stringify([item?.accountId,item?.slug,item?.remoteId])))continue;
     if(archived.has(item?.accountId))continue; // preserve its job without charging another account
     if(typeof item?.accountId!=='string'||!Number.isSafeInteger(pendingCounts.get(item.accountId)))
       return bad('PENDING_COUNT_UNVERIFIED');

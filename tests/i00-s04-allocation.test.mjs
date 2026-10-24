@@ -61,6 +61,7 @@ test('S04 allocation D: canonical IDB atomic pending counts and existing ownersh
   const chosen=await store.allocateCreate(adopt.record.intentId,adopt.record.revision);
   assert.equal(chosen.record.state,'ADOPTION_ORIGINAL_PENDING');
   assert.equal(chosen.record.accountId,'account_000');
+  assert.equal(chosen.record.remoteId,'public_12345678');assert.equal(chosen.record.visibility,'PUBLIC');
   assert.equal(chosen.record.hold,'ADOPTION_REQUIRES_ORIGINAL_SOURCE_PROOF');
 });
 test('S04 allocation D: initial unknown or conflicting account never coerced to zero',async()=>{
@@ -96,4 +97,15 @@ test('J01 preserved attempted work on archived A cannot block allocation to heal
    pending:[{accountId:a.accountId,state:'CREATE_DISPATCH_POSSIBLE'}]};
  assert.equal(selectS04Account(args).accountId,b.accountId);
  assert.equal(selectS04Account({...args,pending:[{accountId:'account_unknown',state:'CREATE_UNCERTAIN'}]}).code,'PENDING_COUNT_UNVERIFIED');
+});
+
+test('J02 confirmed owned resource is counted once while Git or adoption continuation is pending',()=>{
+ const a={...account('000'),inventoryComplete:true},b={...account('001'),inventoryComplete:true};
+ const inventory=[{slug:'already-created',accountId:a.accountId,remoteId:'remote_owned_001',ownerState:'OBSERVED_OWNER'},
+  {slug:'other-owned',accountId:b.accountId,remoteId:'remote_owned_002',ownerState:'OBSERVED_OWNER'}];
+ const args={intent:{...intent(),state:'WAITING_CAPABILITY'},accounts:[a,b],inventory,
+  pending:[{slug:'already-created',accountId:a.accountId,remoteId:'remote_owned_001',state:'GIT_INIT_PENDING'}]};
+ assert.equal(selectS04Account(args).accountId,a.accountId,'equal one-owned counts retain deterministic fair tie');
+ assert.equal(selectS04Account({...args,pending:[{...args.pending[0],remoteId:'unknown_different_resource'}]}).accountId,
+  b.accountId,'unmatched possible resource still counts provisionally');
 });

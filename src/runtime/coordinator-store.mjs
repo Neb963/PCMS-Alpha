@@ -139,11 +139,13 @@ export function createCoordinatorStore(db){
             else if(k.startsWith('s00-create-intent:')&&v?.record&&
                 v.record.intentId!==intentId&&
                 v.record.accountId&&v.record.state!=='REJECTED')
-              pending.push({state:v.record.state,accountId:v.record.accountId});
+              pending.push({state:v.record.state,accountId:v.record.accountId,
+                slug:v.record.slug,remoteId:v.record.remoteId});
             else if(k.startsWith('supply-batch:')&&v?.batch)
               for(const legacy of v.batch.items||[]){
                 if(legacy.state!=='REJECTED')
-                  pending.push({state:legacy.state,accountId:v.batch.accountId});
+                  pending.push({state:legacy.state,accountId:v.batch.accountId,
+                    slug:legacy.slug,remoteId:legacy.remoteId});
               }
             c.continue();return;
           }
@@ -166,6 +168,7 @@ export function createCoordinatorStore(db){
             hold:owned?'ADOPTION_REQUIRES_ORIGINAL_SOURCE_PROOF':
               'TARGET_MISSING_MUST_BE_INDEPENDENTLY_VERIFIED',
             accountId:owned?owned.accountId:plan.accountId,
+            ...(owned?{remoteId:owned.remoteId,visibility:owned.visibility}:{}),
             accountRevision:plan.accountRevision,
             personaUid:plan.personaUid,bindingVersion:plan.bindingVersion,
             allocation:{owned:plan.owned,pending:plan.pending,
