@@ -372,7 +372,7 @@ export function createAccountStore(db) {
 // Account command replies do not expose session fingerprints, cookieStoreIds,
 // user names, cookies, or evidence IDs.
 export function publicAccount(account) {
-  return {accountId:account.accountId,personaUid:account.personaUid,state:account.state,
+  return {accountId:account.accountId,...(typeof account.alias==='string'?{alias:account.alias.slice(0,80)}:{}),personaUid:account.personaUid,state:account.state,
     revision:account.revision,bindingVersion:account.bindingVersion,
     identity:account.identity?'VERIFIED':'UNVERIFIED',
     override:account.override?.reason||null,providerWrites:account.state==='VERIFIED'&&

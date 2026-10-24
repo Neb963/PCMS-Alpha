@@ -53,12 +53,14 @@ test('A04: manifest, chunks, offset and finalization have immutable idempotent r
  assert.equal((await s.appendBatch({batchId:id,offset:0,slugs:['other']})).code,
   'BATCH_CHUNK_CONFLICT');
  assert.equal((await s.appendBatch({batchId:id,offset:2,
-  slugs:[I17_QUARANTINED_SLUG]})).ok,false);
+  slugs:['INVALID SLUG']})).ok,false);
  assert.equal((await s.appendBatch({batchId:id,offset:2,slugs:['three']})).ok,true);
  assert.equal((await s.finalizeBatch({batchId:id})).ok,true);
  assert.equal((await s.finalizeBatch({batchId:id})).duplicate,true);
  assert.equal((await s.appendBatch({batchId:id,offset:3,slugs:['four']})).ok,false);
- assert.deepEqual((await s.getBatch({batchId:id})).batch,
+ const saved=(await s.getBatch({batchId:id})).batch;
+ assert.ok(saved.createdAt>0);delete saved.createdAt;
+ assert.deepEqual(saved,
   {batchId:id,accountId:null,total:3,appended:3,processed:0,state:'QUEUED',revision:4,held:0,lastHold:null});
  assert.equal(db.keys('operations').length,0);
 });
@@ -224,7 +226,7 @@ test('A04: only archived, unpinned, never-dispatched allocations can rebalance',
 });
 
 test('A04 installed creator delimiter parses actual newline, comma, semicolon and whitespace',async()=>{
- const source=await readFile(new URL('../src/ui/faithful/bridge.mjs',import.meta.url),'utf8');
+ const source=await readFile(new URL('../src/ui/faithful/generator-batches.mjs',import.meta.url),'utf8');
  const match=source.match(/input\.value\.split\(\/\[([^\n]+?)\]\+\/\)/);
  assert.ok(match,'primary creator must expose explicit lexical delimiter');
  const sep=new RegExp('['+match[1]+']+');

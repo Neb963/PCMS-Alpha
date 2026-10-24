@@ -61,6 +61,7 @@ test('S04 allocation D: canonical IDB atomic pending counts and existing ownersh
   const chosen=await store.allocateCreate(adopt.record.intentId,adopt.record.revision);
   assert.equal(chosen.record.state,'ADOPTION_ORIGINAL_PENDING');
   assert.equal(chosen.record.accountId,'account_000');
+  assert.equal(chosen.record.remoteId,'public_12345678');assert.equal(chosen.record.visibility,'PUBLIC');
   assert.equal(chosen.record.hold,'ADOPTION_REQUIRES_ORIGINAL_SOURCE_PROOF');
 });
 test('S04 allocation D: initial unknown or conflicting account never coerced to zero',async()=>{
@@ -73,21 +74,21 @@ test('S04 allocation D: initial unknown or conflicting account never coerced to 
   assert.equal((await s.allocateCreate(first.record.intentId,1)).ok,true);
 });
 
-test('S04 D: offline account counts remain but only verified identities receive new allocations',()=>{
-  const accounts=[{...account('000','WAITING_LOGIN'),inventoryComplete:true},
+test('J02 C36/C37: unavailable managed account receives a provisional balanced assignment without effect authority',()=>{
+  const accounts=[{...account('000','VERIFICATION_PENDING'),identity:null,
+    boundPrincipal:'a'.repeat(64),inventoryComplete:true},
     {...account('001'),inventoryComplete:true}];
-  const inventory=[{slug:'already-owned',accountId:'account_001',
-    ownerState:'OBSERVED_OWNER'}];
+  const inventory=[{slug:'already-owned',accountId:'account_001',ownerState:'OBSERVED_OWNER'}];
   const request={...intent(),state:'WAITING_CAPABILITY'};
   const selected=selectS04Account({intent:request,accounts,inventory,pending:[]});
-  assert.equal(selected.ok,true);
-  assert.equal(selected.accountId,'account_001');
-  const pinned=selectS04Account({intent:{...request,accountId:'account_000'},
-    accounts,inventory,pending:[]});
-  assert.equal(pinned.code,'PINNED_ACCOUNT_UNAVAILABLE');
-  const none=selectS04Account({intent:request,
-    accounts:[accounts[0]],inventory:[],pending:[]});
-  assert.equal(none.code,'NO_VERIFIED_ACCOUNTS');
+  assert.equal(selected.ok,true);assert.equal(selected.accountId,'account_000');
+  assert.equal(selected.readyForEffect,false);
+  const pinned=selectS04Account({intent:{...request,accountId:'account_000'},accounts,inventory,pending:[]});
+  assert.equal(pinned.ok,true);assert.equal(pinned.accountId,'account_000');assert.equal(pinned.readyForEffect,false);
+  const only=selectS04Account({intent:request,accounts:[accounts[0]],inventory:[],pending:[]});
+  assert.equal(only.ok,true);assert.equal(only.readyForEffect,false);
+  assert.equal(selectS04Account({intent:request,accounts:[{...accounts[0],inventoryComplete:false}],
+    inventory:[],pending:[]}).code,'INITIAL_INVENTORY_UNKNOWN');
 });
 
 test('J01 preserved attempted work on archived A cannot block allocation to healthy B',()=>{
@@ -96,4 +97,15 @@ test('J01 preserved attempted work on archived A cannot block allocation to heal
    pending:[{accountId:a.accountId,state:'CREATE_DISPATCH_POSSIBLE'}]};
  assert.equal(selectS04Account(args).accountId,b.accountId);
  assert.equal(selectS04Account({...args,pending:[{accountId:'account_unknown',state:'CREATE_UNCERTAIN'}]}).code,'PENDING_COUNT_UNVERIFIED');
+});
+
+test('J02 confirmed owned resource is counted once while Git or adoption continuation is pending',()=>{
+ const a={...account('000'),inventoryComplete:true},b={...account('001'),inventoryComplete:true};
+ const inventory=[{slug:'already-created',accountId:a.accountId,remoteId:'remote_owned_001',ownerState:'OBSERVED_OWNER'},
+  {slug:'other-owned',accountId:b.accountId,remoteId:'remote_owned_002',ownerState:'OBSERVED_OWNER'}];
+ const args={intent:{...intent(),state:'WAITING_CAPABILITY'},accounts:[a,b],inventory,
+  pending:[{slug:'already-created',accountId:a.accountId,remoteId:'remote_owned_001',state:'GIT_INIT_PENDING'}]};
+ assert.equal(selectS04Account(args).accountId,a.accountId,'equal one-owned counts retain deterministic fair tie');
+ assert.equal(selectS04Account({...args,pending:[{...args.pending[0],remoteId:'unknown_different_resource'}]}).accountId,
+  b.accountId,'unmatched possible resource still counts provisionally');
 });

@@ -33,7 +33,7 @@ function fixture(rows,{management=true,changing=new Set()}={}){
   const boundary=createAdoptionBoundary(api,{open:async()=>db,guard,
     managementGate:()=>management,gitGate:()=>false,
     gitWrite:async()=>{effects.push('GIT');return {ok:false};}});
-  return {db,boundary,reads,effects,ready:seed(db,rows)};
+  return {db,api,guard,boundary,reads,effects,ready:seed(db,rows)};
 }
 test('C-10: account-level management adopts verified owned public and unlisted generators automatically',async()=>{
   const rows=[gen('alpha'),gen('beta','UNLISTED'),gen('gamma')];
@@ -73,4 +73,46 @@ test('C-10: bounded per wake with fair rotation across a large owned fleet',asyn
   const seen=[];
   for(let i=0;i<4;i++)seen.push(...(await f.boundary.autoTick({maxSteps:3})).results.map(r=>r.slug));
   assert.equal(new Set(seen).size,12);
+});
+
+test('J02 interrupted original Git preparation aborts locally, then archives through guarded continuation; eligible originals coalesce checkpoint request',async()=>{
+ const f=fixture([gen('j02-original')]);await f.ready;await f.boundary.autoTick();
+ const {createAdoptionStore}=await import('../src/runtime/adoption-store.mjs');
+ const store=createAdoptionStore(f.db),captured=(await store.getFull('j02-original')).record;
+ assert.equal((await store.archiveStage('j02-original',captured.revision,'PREPARE')).ok,true);
+ let writes=0,requests=0;
+ const boundary=createAdoptionBoundary(f.api,{open:async()=>f.db,guard:f.guard,managementGate:()=>true,gitGate:()=>true,
+  getGitConnection:async()=>({repository:'fixture/originals',repositoryId:'123456'}),
+  getGitCredential:async()=>({ok:true,credential:'offline-fixture-only'}),
+  requestCheckpoint:async()=>{requests++;return {ok:true}},gitWrite:async({slug,original})=>{writes++;return {
+   ok:true,source:'INDEPENDENT_GIT_BYTE_READBACK',ready:false,archiveRef:'refs/tags/pcms-originals/'+original.remotePublicId+'/'+original.fingerprint,
+   prefix:'generators/'+slug,fingerprint:original.fingerprint,commit:'c'.repeat(40),head:'d'.repeat(40)}}});
+ const aborted=await boundary.autoTick();assert.equal(aborted.results[0].step,'ABORT_GIT_PREPARED');assert.equal(aborted.results[0].ok,true,JSON.stringify(aborted));assert.equal(writes,0);
+ assert.equal((await store.getFull('j02-original')).record.archiveState,'ARCHIVE_PENDING');
+ await boundary.autoTick();assert.equal(writes,1);assert.equal((await store.getFull('j02-original')).record.archiveState,'ARCHIVED_GIT_CONFIRMED');
+ await boundary.autoTick();await boundary.autoTick();assert.equal(requests,1,'one coalesced source checkpoint request within interval');
+ const prior=(await store.getFull('j02-original')).record;assert.deepEqual(prior.original,captured.original);
+ const t=f.db.transaction(['meta'],'readwrite');t.objectStore('meta').put({key:'account:'+account.accountId,account:{...account,state:'ARCHIVED',revision:4}});
+ await new Promise(r=>{t.oncomplete=r});
+ const cold=createAdoptionBoundary(f.api,{open:async()=>f.db,guard:f.guard,managementGate:()=>true,requestCheckpoint:async()=>{requests++}});
+ await cold.autoTick();assert.equal(requests,1,'archived account never generates repeated manual exports');
+});
+test('J02 archived original tombstone never enters context-refresh/readback loop after account revision changes',async()=>{
+ const f=fixture([gen('j02-tombstone')]);await f.ready;await f.boundary.autoTick();
+ const {createAdoptionStore}=await import('../src/runtime/adoption-store.mjs');const store=createAdoptionStore(f.db),rec=(await store.getFull('j02-tombstone')).record;
+ await store.archiveLocal('j02-tombstone',rec.revision);
+ const t=f.db.transaction(['meta'],'readwrite');t.objectStore('meta').put({key:'account:'+account.accountId,account:{...account,revision:4}});await new Promise(r=>{t.oncomplete=r});
+ let refreshes=0;const boundary=createAdoptionBoundary(f.api,{open:async()=>f.db,guard:f.guard,managementGate:()=>true,
+  refreshIdentity:async()=>{refreshes++;return {ok:true}}});
+ assert.equal((await boundary.autoTick()).results.length,0);assert.equal(refreshes,0);
+});
+
+test('J02 primary retry command re-reads canonical revision and advances only its target through actual production capture',async()=>{
+ const f=fixture([gen('j02-retry-target'),gen('j02-other')]);await f.ready;
+ const sender={id:'f',url:f.api.runtime.getURL('pcms/index.html')};
+ const out=await f.boundary.run({type:'RETRY_ADOPTION',params:{slug:'j02-retry-target'}},sender);
+ assert.equal(out.ok,true,JSON.stringify(out));assert.equal(out.code,'ADOPTION_AUTO_CHECKPOINT');
+ assert.equal(adoptionOf(f.db,'j02-retry-target').archiveState,'ARCHIVE_PENDING');
+ assert.equal(adoptionOf(f.db,'j02-other'),undefined);
+ assert.equal((await f.boundary.run({type:'RETRY_ADOPTION',params:{slug:'j02-retry-target',expectedRevision:4}},sender)).ok,false);
 });

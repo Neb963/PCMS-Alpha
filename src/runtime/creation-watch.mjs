@@ -1,3 +1,4 @@
+import {createScopedCreationGate} from './creation-authority.mjs';
 // S04 bounded no-dashboard wake. A due alarm is only a hint: canonical
 // revisions, guards and operation receipts remain the source of truth.
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
@@ -12,13 +13,13 @@ const CURSOR='pcmsS04QueueCursor';
 const BATCH_CURSOR='pcmsS04BatchCursor';
 const ID=/^[A-Za-z0-9_-]{8,100}$/;
 export function createCreationWatcher(api,{open=openCanonicalDatabase,
-  createRunner=createCreationRunner,clock=Date.now,maxPerWake=8}={}){
+  createRunner=createCreationRunner,clock=Date.now,maxPerWake=8,authority=standingS06}={}){
   if(!Number.isSafeInteger(maxPerWake)||maxPerWake<1||maxPerWake>32)
     throw Error('INVALID_WAKE_BUDGET');
   let pending=null,registered=false,dbPromise;
   const sentinel=createRestoreSentinel(api.storage.local);
   const runner=createRunner(api,{open,
-    effectGate:()=>standingS06?.gate('development')===true,
+    effectGate:createScopedCreationGate(authority),
     gitGate:()=>standingS06?.gate('gitWrite')===true});
   async function tick(){
     if(pending)return pending;
@@ -77,7 +78,8 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
               'PRIVATE_EMPTY_CONFIRMED','ADOPTION_ORIGINAL_PENDING',
               'GIT_INIT_PENDING','GIT_PREPARED','GIT_DISPATCH_POSSIBLE',
               'GIT_OBSERVING','GIT_UNCERTAIN'].includes(item.state)&&
-              !item.conflict)candidates.push(item);
+              !item.conflict&&!(item.lastAttempt?.revision===item.revision&&
+                item.lastAttempt.ok===false&&clock()-item.lastAttempt.at<5*60*1000))candidates.push(item);
         }
         tail=page.next;
         if(page.truncated){after=page.next;continue;}
@@ -89,11 +91,13 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
       // A held item can no longer monopolize the first eight slots: the next
       // wake continues after the last attempted canonical item ID.
       const selected=candidates.slice(0,maxPerWake);
-      let progressed=0,held=0;
+      let progressed=0,held=0,continuing=0;
       for(const item of selected){
         if((await sentinel.inspect()).held)break;
         const result=await runner.step(item.intentId,item.revision);
-        if(result?.ok)progressed++;else held++;
+        if(result?.ok&&result.record?.revision>item.revision){progressed++;
+          if(result.record.state!=='ASSOCIATED_NOT_READY')continuing++;
+        }else held++;
       }
       const result={ok:true,code:'S04_WAKE_CHECKPOINT',progressed,held,
         selected:selected.length,batchProgressed,batchHeld,
@@ -104,7 +108,7 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
       // Large batches keep moving: one bounded follow-up wake while queued
       // work remains and this wake made progress (held-only queues wait for
       // the periodic wake instead of spinning).
-      if(result.more&&(progressed>0||batchProgressed>0))
+      if(continuing>0||result.more)
         try{void Promise.resolve(api.alarms.create(CREATION_FOLLOWUP_ALARM,
           {when:clock()+60000})).catch(()=>{});}catch{}
       return result;

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fakeDatabase} from './fake-idb.mjs';
 import {createAdoptionStore} from '../src/runtime/adoption-store.mjs';
+import {planOriginalIdentityMigration} from '../src/runtime/identity-reconciliation.mjs';
 import {createCoordinatorStore} from '../src/runtime/coordinator-store.mjs';
 const slug='s04-existing-public',accountId='account_s04_existing';
 const original={remotePublicId:'public_12345678',fingerprint:'b'.repeat(64),
@@ -56,4 +57,53 @@ test('S04 adoption D: independently qualified complete original unlocks only loc
   assert.equal(db.keys('operations').length,0);
   assert.equal((await creation.confirmAdoption('intent_s04_existing',2,archive)).code,'STALE_REVISION');
   assert.equal(db.read('meta','adoption:'+slug).adoption.visibility,'PUBLIC');
+});
+
+async function aliasFixture(patch={}, {writeAlias=true}={}){
+ const db=await seed(),store=createAdoptionStore(db);
+ await store.confirmCheckpoint({slug,expectedRevision:6,proof});
+ const migration=planOriginalIdentityMigration({slug,remoteId:'slug-'+slug,accountId,
+  personaUid:account.personaUid,bindingVersion:1,revision:1,ownerState:'OBSERVED_OWNER',visibility:'PUBLIC'},
+  account,{...original,ok:true,source:'INDEPENDENT_FULL_BYTE_READBACK',observedAt:100});
+ assert.equal(migration.ok,true);
+ const tx=db.transaction(['meta'],'readwrite'),m=tx.objectStore('meta');
+ m.put({key:'inventory:'+slug,generator:migration.record});
+ if(writeAlias)m.put({key:'identity-alias:'+slug,identity:{...migration.alias,...patch}});
+ const prior=db.read('meta','s00-create-intent:intent_s04_existing').record;
+ m.put({key:'s00-create-intent:intent_s04_existing',record:{...prior,remoteId:'slug-'+slug}});
+ await new Promise((r,j)=>{tx.oncomplete=r;tx.onabort=j;});return db;
+}
+test('J02 qualified original reconciles the exact canonical slug locator atomically without provider effects',async()=>{
+ const db=await aliasFixture(),creation=createCoordinatorStore(db);
+ const archive=db.read('meta','adoption:'+slug).adoption;
+ const out=await creation.confirmAdoption('intent_s04_existing',2,archive);
+ assert.equal(out.ok,true,out.code);assert.equal(out.record.remoteId,original.remotePublicId);
+ assert.equal(out.record.state,'GIT_INIT_PENDING');assert.equal(db.keys('operations').length,0);
+ assert.equal(out.record.originalFingerprint,original.fingerprint);
+});
+test('J02 adoption alias cannot change owner, source fingerprint, target or a possible dispatched association',async()=>{
+ for(const patch of [{accountId:'account_wrong_owner'},{previousId:'different_resource'},
+   {publicId:'public_wrong_target'},{originalFingerprint:'e'.repeat(64)},{schema:1}]){
+  const db=await aliasFixture(patch),s=createCoordinatorStore(db);
+  const out=await s.confirmAdoption('intent_s04_existing',2,db.read('meta','adoption:'+slug).adoption);
+  assert.equal(out.code,'ADOPTION_OWNERSHIP_CHANGED',JSON.stringify(patch));
+  assert.equal(db.read('meta','s00-create-intent:intent_s04_existing').record.revision,2);
+ }
+ const db=await aliasFixture(),row=db.read('meta','s00-create-intent:intent_s04_existing');
+ const tx=db.transaction(['meta'],'readwrite');tx.objectStore('meta').put({...row,
+  record:{...row.record,createOperationId:'possible_create_before_adoption'}});
+ await new Promise((r,j)=>{tx.oncomplete=r;tx.onabort=j;});
+ assert.equal((await createCoordinatorStore(db).confirmAdoption('intent_s04_existing',2,
+  db.read('meta','adoption:'+slug).adoption)).code,'ADOPTION_OWNERSHIP_CHANGED');
+});
+
+test('J02 preexisting owned allocation with missing target fields recovers only from qualified current same-owner original',async()=>{
+ const db=await aliasFixture({}, {writeAlias:false}),row=db.read('meta','s00-create-intent:intent_s04_existing');
+ const tx=db.transaction(['meta'],'readwrite'),m=tx.objectStore('meta');
+ m.put({...row,record:{...row.record,remoteId:null,visibility:null}});
+ await new Promise((r,j)=>{tx.oncomplete=r;tx.onabort=j;});
+ const out=await createCoordinatorStore(db).confirmAdoption('intent_s04_existing',2,
+  db.read('meta','adoption:'+slug).adoption);
+ assert.equal(out.ok,true,out.code);assert.equal(out.record.remoteId,original.remotePublicId);
+ assert.equal(out.record.visibility,'PUBLIC');assert.equal(db.keys('operations').length,0);
 });

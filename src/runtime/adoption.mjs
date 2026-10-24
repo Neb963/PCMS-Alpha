@@ -110,6 +110,8 @@ export function publicAdoption(record) {
     originalFingerprint:record.original?.fingerprint||null,
     originalFiles:record.original?.files?.length||0,
     archive:record.archiveState||'ARCHIVE_PENDING',
+    originalProtected:record.archiveState==='ARCHIVED_GIT_CONFIRMED'&&record.originalCheckpoint?.qualified===true,
+    checkpointSource:record.originalCheckpoint?.source||null,
     source:'LOCAL_IMMUTABLE_ORIGINAL',providerWrites:'OFF',
     deployWrites:'OFF',publication:'OFF'};
 }

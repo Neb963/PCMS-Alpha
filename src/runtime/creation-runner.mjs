@@ -1,6 +1,8 @@
+import {ensureCreationInventory} from './creation-inventory.mjs';
+import {inventoryBoundary} from './inventory-boundary.mjs';
 // S04 fixed, one-step guarded creation runner. No generic job engine.
-// The packaged mutation gates remain OFF without independently qualified
-// provider/Git scope; tests inject a strictly isolated effect ledger.
+// Canonical operator intent scopes private creation independently of Git;
+// current account/route/owner and intent journal proofs remain mandatory.
 import {openCanonicalDatabase,createRestoreSentinel,fail} from './journal.mjs';
 import {createCoordinatorStore} from './coordinator-store.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
@@ -17,13 +19,14 @@ const routeSame=(before,after)=>before?.ready===true&&after?.ready===true&&
 export function createCreationRunner(api,{open=openCanonicalDatabase,
   makeStore=createCoordinatorStore,guard=internalPcmsGuard,
   effectGate=()=>false,gitGate=()=>false,
-  createGit=createS04GitContinuation,now=Date.now}={}){
+  createGit=createS04GitContinuation,now=Date.now,
+  syncInventory=(id,revision)=>inventoryBoundary?.syncAccount(id,revision)}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
   const git=createGit(api,{open,gate:gitGate});
   let dbPromise;
   const store=async()=>makeStore(await (dbPromise||=open().catch(e=>{
     dbPromise=null;throw e;})));
-  async function step(intentId,expectedRevision){
+  async function advance(intentId,expectedRevision){
     try{
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       const s=await store();
@@ -62,7 +65,7 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
       const current=await s.getCreate(item.intentId);
       if(!current.ok||current.record.revision!==item.revision)
         return fail('STALE_REVISION');
-      const mutable=!!effectGate({intent:item,route:ready});
+      const mutable=(await effectGate({intent:item,route:ready}))===true;
       const base={slug:item.slug,
         principalFingerprint:ready.principalFingerprint||
           item.principalFingerprint};
@@ -108,6 +111,9 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
       }
       if(item.state==='OWNER_MISSING_VERIFIED'){
         if(!mutable)return fail('PROVIDER_ACTIVATION_HELD');
+        const inventory=await ensureCreationInventory({db:await (dbPromise||=open()),
+          account,syncInventory,now});
+        if(!inventory.ok)return inventory;
         // A prior readback is historical; recheck target immediately before
         // starting a possible remote CREATE.
         const target=await read('READ_TARGET');
@@ -130,6 +136,11 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
       }
       if(['CREATE_PREPARED','RENAME_PREPARED'].includes(item.state)){
         if(!mutable)return fail('PROVIDER_ACTIVATION_HELD');
+        if(item.state==='CREATE_PREPARED'){
+        const inventory=await ensureCreationInventory({db:await (dbPromise||=open()),
+          account,syncInventory,now});
+        if(!inventory.ok)return inventory;
+        }
         // Prepared-only evidence may predate Archive or a human-created slug.
         // Re-observe immediately before dispatch; uncertainty is never replayed.
         const target=await read('READ_TARGET');
@@ -151,8 +162,10 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         if(!prepared.ok)return prepared;
         // Exact revision + operation receipt must exist before dispatch.
         const newer=prepared.record;
-        if(!effectGate({intent:newer,route:before})||
-           (await sentinel.inspect()).held){
+        const policyGeneration=effectGate.generation?.();
+        const allowed=(await effectGate({intent:newer,route:before}))===true;
+        const restoring=(await sentinel.inspect()).held;
+        if(!allowed||restoring||policyGeneration!==effectGate.generation?.()){
           return await s.stageEffect({intentId:item.intentId,
             expectedRevision:newer.revision,
             event:isCreate?'CREATE_UNCERTAIN':'RENAME_UNCERTAIN'});
@@ -200,6 +213,11 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         return fail('GIT_CONDITIONAL_ASSOCIATION_PENDING');
       return fail('CREATION_NO_SAFE_TRANSITION');
     }catch{return fail('S04_CREATION_RUNNER_UNAVAILABLE');}
+  }
+  async function step(intentId,expectedRevision){
+    const result=await advance(intentId,expectedRevision);
+    try{await (await store()).recordAttempt(intentId,result?.record?.revision??expectedRevision,result,now());}catch{}
+    return result;
   }
   return Object.freeze({step});
 }

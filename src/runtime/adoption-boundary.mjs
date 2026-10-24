@@ -1,3 +1,5 @@
+import {autoBackup} from './backup-auto-boundary.mjs';
+import {inventoryBoundary} from './inventory-boundary.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I07 same-XPI adoption port. Explicit consent never authorizes source writes.
 import {fail,openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
@@ -17,11 +19,12 @@ export function validateAdoptionMessage(api,sender,msg){
   if(!msg||typeof msg!=='object'||Array.isArray(msg)||typeof json!=='string'||
      json.length>700||Object.keys(msg).some(k=>!['type','params'].includes(k)))
     return fail('INVALID_MESSAGE');
-  if(!['GET_ADOPTION','LIST_ADOPTIONS','CAPTURE_ADOPTION','RECHECK_IDENTITY','ARCHIVE_LOCAL','ARCHIVE_GIT','RECHECK_GIT','ABORT_GIT_PREPARED'].includes(msg.type))
+  if(!['GET_ADOPTION','INSPECT_ORIGINAL','READ_ORIGINAL_FILE','LIST_ADOPTIONS','CAPTURE_ADOPTION','RECHECK_IDENTITY','ARCHIVE_LOCAL','ARCHIVE_GIT','RECHECK_GIT','ABORT_GIT_PREPARED','RETRY_ADOPTION'].includes(msg.type))
     return fail('CAPABILITY_OFF');
   const p=msg.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
-  const allowed=msg.type==='LIST_ADOPTIONS'?[]:
+  const allowed=msg.type==='RETRY_ADOPTION'?['slug']:msg.type==='READ_ORIGINAL_FILE'?['slug','path']:msg.type==='INSPECT_ORIGINAL'?['slug']:
+    msg.type==='LIST_ADOPTIONS'?[]:
     msg.type==='CAPTURE_ADOPTION'?['slug','expectedRevision','explicitPublicConsent']:
     msg.type==='RECHECK_IDENTITY'?['slug','expectedRevision']:
     msg.type==='GET_ADOPTION'?['slug']:
@@ -32,6 +35,8 @@ export function validateAdoptionMessage(api,sender,msg){
   if(['ARCHIVE_LOCAL','CAPTURE_ADOPTION','RECHECK_IDENTITY','ARCHIVE_GIT','RECHECK_GIT','ABORT_GIT_PREPARED'].includes(msg.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
     return fail('INVALID_PARAMS');
+  if(msg.type==='READ_ORIGINAL_FILE'&&(typeof p.path!=='string'||p.path.length>240))return fail('INVALID_PARAMS');
+  if(msg.type==='RETRY_ADOPTION')return {ok:true};
   if(msg.type==='CAPTURE_ADOPTION'&&typeof p.explicitPublicConsent!=='boolean')
     return fail('INVALID_PARAMS');
   return {ok:true};
@@ -60,6 +65,8 @@ export function createAdoptionBoundary(api,{
   // C-10 account-level management: production uses the standing operator
   // development grant. Off by default; tests inject.
   managementGate=()=>false,clock=Date.now,
+  refreshIdentity=(slug,revision)=>inventoryBoundary?.recheckGenerator(slug,revision),
+  requestCheckpoint=()=>autoBackup?.runner.requestOriginalCheckpoint(),
   getGitConnection=async()=>{const out=await api.storage.local.get('pcmsS03Git');
     return out?.pcmsS03Git;},
   getGitCredential=async repositoryId=>browserGitCredentialPacket({action:'git.get',repositoryId})
@@ -78,6 +85,14 @@ export function createAdoptionBoundary(api,{
       const database=await db(),store=storeFactory(database);
       if(msg.type==='LIST_ADOPTIONS')return await store.list();
       if(msg.type==='GET_ADOPTION')return await store.get(p.slug);
+      if(['INSPECT_ORIGINAL','READ_ORIGINAL_FILE'].includes(msg.type)){
+        const found=await store.getFull(p.slug),a=found.record;if(!found.ok||a.archived)return fail('ORIGINAL_UNAVAILABLE');
+        if(msg.type==='INSPECT_ORIGINAL')return {ok:true,files:a.original.files,visibility:a.visibility,
+          protected:a.archiveState==='ARCHIVED_GIT_CONFIRMED'&&a.originalCheckpoint?.qualified===true};
+        const file=a.original.blobs.find(f=>f.path===p.path);
+        return file?{ok:true,path:file.path,base64:file.base64}:fail('ORIGINAL_FILE_NOT_FOUND');
+      }
+      if(msg.type==='RETRY_ADOPTION'){backoff.delete(p.slug);return autoTick({maxSteps:8,onlySlug:p.slug});}
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(msg.type==='ARCHIVE_LOCAL')return await store.archiveLocal(p.slug,p.expectedRevision);
       if(msg.type==='ABORT_GIT_PREPARED'){
@@ -225,11 +240,12 @@ export function createAdoptionBoundary(api,{
       };
     });
   }
-  async function autoTick({maxSteps=3}={}){
+  let lastCheckpointRequest=0;
+  async function autoTick({maxSteps=8,onlySlug=null}={}){
     if(autoBusy)return fail('BUSY');
     autoBusy=true;
     try{
-      if(managementGate()!==true)return fail('ACCOUNT_MANAGEMENT_NOT_GRANTED');
+      if((await managementGate())!==true)return fail('ACCOUNT_MANAGEMENT_NOT_GRANTED');
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       const database=await db();
       const {inventory,adoptions,accounts}=await scanWork(database);
@@ -238,9 +254,14 @@ export function createAdoptionBoundary(api,{
         const a=accounts.get(row.accountId);
         // Only generators discovered on the account; PCMS-created private
         // generators (MANAGED_CREATED) have no human original to adopt.
-        if(!slug(row.slug)||a?.state!=='VERIFIED')continue;
+        if(!slug(row.slug)||a?.state!=='VERIFIED'||onlySlug&&row.slug!==onlySlug)continue;
         if((backoff.get(row.slug)||0)>now)continue;
         const rec=adoptions.get(row.slug);
+        if(rec?.archived)continue;
+        if(rec&&rec.accountRevision!==a.revision&&rec.personaUid===a.personaUid&&
+           rec.bindingVersion===a.bindingVersion&&rec.principalFingerprint===a.identity?.principalFingerprint){
+          work.push({slug:row.slug,type:'REFRESH_CONTEXT',params:{slug:row.slug,expectedRevision:row.revision}});continue;
+        }
         if(rec&&row.ownerState==='IDENTITY_CONFLICT'&&
            row.identityHold==='PUBLIC_ID_REVALIDATION_REQUIRED'&&
            rec.remotePublicId===row.remoteId){
@@ -255,6 +276,8 @@ export function createAdoptionBoundary(api,{
           expectedRevision:row.revision,explicitPublicConsent:false,standingManagement:true}});
         else if(!rec.archived&&rec.archiveState==='ARCHIVE_PENDING'&&gitGate({slug:row.slug,record:rec})===true)
           work.push({slug:row.slug,type:'ARCHIVE_GIT',params:{slug:row.slug,expectedRevision:rec.revision}});
+        else if(!rec.archived&&rec.archiveState==='GIT_PREPARED')
+          work.push({slug:row.slug,type:'ABORT_GIT_PREPARED',params:{slug:row.slug,expectedRevision:rec.revision}});
         else if(!rec.archived&&['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(rec.archiveState))
           // An uncertain Git write is reconciled read-only, never repeated.
           work.push({slug:row.slug,type:'RECHECK_GIT',params:{slug:row.slug,expectedRevision:rec.revision}});
@@ -266,11 +289,21 @@ export function createAdoptionBoundary(api,{
       const ordered=[...work.slice(start<0?0:start),...work.slice(0,start<0?0:start)];
       const results=[];
       for(const item of ordered.slice(0,maxSteps)){
-        if(managementGate()!==true||(await sentinel.inspect()).held)break;
-        const out=await runTrusted({type:item.type,params:item.params});
+        if((await managementGate())!==true||(await sentinel.inspect()).held)break;
+        const out=item.type==='REFRESH_CONTEXT'?await refreshIdentity(item.slug,item.params.expectedRevision):
+          await runTrusted({type:item.type,params:item.params});
         if(!out?.ok)backoff.set(item.slug,clock()+AUTO_BACKOFF);else backoff.delete(item.slug);
         results.push({slug:item.slug,step:item.type,ok:out?.ok===true,code:out?.ok?null:out?.code||'HELD'});
         try{await api.storage.local.set({[AUTO_CURSOR]:item.slug});}catch{}
+      }
+      if(results.some(r=>r.ok)||work.length>results.length)
+        try{void Promise.resolve(api.alarms?.create(ADOPTION_AUTO_ALARM+'-followup',{when:clock()+60000})).catch(()=>{});}catch{}
+      const unqualified=[...adoptions.values()].some(a=>{const current=accounts.get(a.accountId);
+        return !a.archived&&a.archiveState==='ARCHIVED_GIT_CONFIRMED'&&!a.originalCheckpoint?.qualified&&
+          current?.state==='VERIFIED'&&current.revision===a.accountRevision&&current.personaUid===a.personaUid&&
+          current.bindingVersion===a.bindingVersion&&current.identity?.principalFingerprint===a.principalFingerprint;});
+      if(unqualified&&clock()-lastCheckpointRequest>=5*60000){
+        lastCheckpointRequest=clock();void Promise.resolve(requestCheckpoint()).catch(()=>{});
       }
       return {ok:true,code:'ADOPTION_AUTO_CHECKPOINT',pending:work.length,results,
         providerWrites:'OFF',publication:'OFF'};
@@ -279,7 +312,7 @@ export function createAdoptionBoundary(api,{
   }
   function register(){
     try{api.alarms?.create(ADOPTION_AUTO_ALARM,{periodInMinutes:5});}catch{}
-    api.alarms?.onAlarm?.addListener(alarm=>{if(alarm?.name===ADOPTION_AUTO_ALARM)void autoTick();});
+    api.alarms?.onAlarm?.addListener(alarm=>{if([ADOPTION_AUTO_ALARM,ADOPTION_AUTO_ALARM+'-followup'].includes(alarm?.name))void autoTick();});
     api.runtime.onConnect.addListener(port=>{
       if(port?.name!==ADOPTION_PORT)return;
       let busy=false;
@@ -297,5 +330,5 @@ export function createAdoptionBoundary(api,{
 }
 if(typeof browser!=='undefined')createAdoptionBoundary(browser,{
   gitGate:()=>standingS06?.gate('gitWrite')===true,
-  managementGate:()=>standingS06?.gate('development')===true
+  managementGate:()=>standingS06?.allowsOperatorManagement()
 }).register();

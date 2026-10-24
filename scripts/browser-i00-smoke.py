@@ -1036,6 +1036,8 @@ def main():
             else: raise RuntimeError('geckodriver did not become ready')
             # Exercise the changed operator journey first; all unchanged
             # persistent donor/source/backup suites still run after it passes.
+            from journey_generators_ui import run as run_j02_primary
+            run_j02_primary(browser,archive,pathlib.Path(folder))
             from journey_accounts_ui import run as run_j01_primary
             run_j01_primary(browser,archive,pathlib.Path(folder))
             first=open_session(browser,profile)
@@ -1238,7 +1240,7 @@ def main():
                 assert faithful['inventoryTabs']>=4 and faithful['sourceWriters']==1,faithful
                 print('B V015_TRUE_DESKTOP_PRIMARY_WORKSPACES_AND_REAL_HANDLERS=PASS',flush=True)
                 release_version=execute(after,"return {manifest:browser.runtime.getManifest().version,ui:document.documentElement.dataset.pcmsUiVersion,badge:document.querySelector('.v015-top-status')?.textContent};")
-                assert release_version.get('manifest')=='1.2.8',release_version
+                assert release_version.get('manifest')=='1.2.9',release_version
                 assert release_version.get('ui')=='0.1.5' and '0.1.5' in release_version.get('badge',''),release_version
                 print('B V015_REAL_FIREFOX_UPDATE_VERSION_AND_VISIBLE_UI_MARKER=PASS',flush=True)
                 # V016 acceptance: the PRECISE accepted prototype structure is
@@ -1262,7 +1264,7 @@ def main():
                      canonicalNative:!!document.getElementById('pcms-refresher-rows')&&
                        !!document.getElementById('pcms-release-approve')&&
                        !!document.getElementById('pcms-restore-apply')};""")
-                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.8',actual
+                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.9',actual
                 assert actual['routes']==6 and actual['visible'] and actual['nativeHidden'],actual
                 assert actual['sidebar'] and actual['primary']=='overview' and actual['styles'] and actual['canonicalNative'],actual
                 assert actual['badge']=='PCMS local · Not verified',actual
@@ -1346,7 +1348,7 @@ def main():
                   const drawer=sh.querySelector('[aria-label="Create generators"]');
                   const primaryCreate=!!drawer&&
                     !!drawer.querySelector('textarea')&&
-                    !![...drawer.querySelectorAll('button')].find(x=>x.textContent.includes('Create private generators'));
+                    !![...drawer.querySelectorAll('button')].find(x=>x.textContent.includes('Preview assignments'));
                   const legacyOpened=document.body.classList.contains('pcms-native-open');
                   drawer?.querySelector('button')?.click();
                   sh.querySelector('[data-nav="work-queue"]').click();
@@ -5405,7 +5407,7 @@ def main():
                           return {total:sh.querySelector('.workspace-surface .pagination span')?.textContent||'',
                             rows:[...sh.querySelectorAll('.workspace-surface tbody tr[data-item-index]')]
                               .map(tr=>({slug:tr.querySelector('.name-cell')?.textContent,
-                                account:tr.querySelectorAll('td')[1]?.textContent}))};""")
+                                account:tr.querySelector('[data-column="account"]')?.textContent}))};""")
                         if '1200' in large_ui['total'] and len(large_ui['rows'])==24:break
                         time.sleep(.12)
                     assert '1200' in large_ui['total'] and len(large_ui['rows'])==24,('A07_PRIMARY_1200_PAGE',large_ui)

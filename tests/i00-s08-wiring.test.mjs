@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-test('S08 packaged creation entrypoints require explicit standing grants',async()=>{
+test('S08 creation entrypoints preserve Git authority and canonical scoped operator policy',async()=>{
  const paths=['src/runtime/coordinator-boundary.mjs','src/runtime/creation-watch.mjs',
   'src/runtime/supply-boundary.mjs'];
  for(const path of paths){
   const source=await readFile(path,'utf8');
-  assert.match(source,/standingS06\?\.gate\('development'\)===true/,path);
+  if(['coordinator-boundary.mjs','creation-watch.mjs'].some(name=>path.endsWith(name)))
+   assert.match(source,/effectGate:createScopedCreationGate\(authority\)/,path);
+  else assert.match(source,/standingS06\?\.gate\('development'\)===true/,path);
   assert.match(source,/standingS06\?\.gate\('gitWrite'\)===true/,path);
  }
  const runner=await readFile('src/runtime/creation-runner.mjs','utf8');

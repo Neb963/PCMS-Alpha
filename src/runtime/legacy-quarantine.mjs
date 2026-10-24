@@ -8,6 +8,8 @@ export const I17_QUARANTINE_CODE = 'I17_ORIGINAL_EFFECT_QUARANTINED';
 const normalize = value => typeof value === 'string' ? value.toLowerCase() : null;
 export function isI17Quarantined(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
+  if (typeof input.intentId==='string'&&input.intentId.startsWith(
+      'batchitem_'+I17_QUARANTINED_BATCH.slice(6)+'_'))return true;
   if (input.batchId === I17_QUARANTINED_BATCH ||
       input.itemId === I17_QUARANTINED_BATCH ||
       (typeof input.itemId === 'string' &&

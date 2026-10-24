@@ -42,7 +42,9 @@ test('canonical primary controls call protected typed runtime with exact revisio
  assert.match(bridge,/expectedRevision:snapshot\.revision,policy:\{refreshEnabled:next\}/);
  assert.match(bridge,/readPort\('pcms-i12-refresher','SET_GENERATOR_POLICY'/);
  assert.match(bridge,/readPort\('pcms-i05-source','INSPECT_SOURCE'/);
- assert.match(bridge,/readPort\('pcms-i07-adoption','CAPTURE_ADOPTION'/);
+ assert.match(bridge,/readPort\('pcms-i07-adoption','RETRY_ADOPTION'/);
+ assert.match(bridge,/readPort\('pcms-i07-adoption','READ_ORIGINAL_FILE'/);
+ assert.doesNotMatch(bridge,/explicitPublicConsent/,'routine adoption uses account-level authorization');
  assert.match(bridge,/mount\(\)\.catch/);
  assert.equal((bridge.match(/\binnerHTML\s*=/g)||[]).length,4,
    'only versioned, repository-bundled shell and static primary templates may be parsed as HTML');
@@ -70,9 +72,9 @@ test('prototype supports adverse navigation and fail-open presentation recovery'
  assert.match(bridge,/body\.classList\.add\('pcms-faithful-ready'\)/);
  assert.doesNotMatch(bridge,/host\.remove\(\)/);
 });
-test('Firefox upgrades v1.2.1 XPI to 1.2.8 with donor manifest unchanged',()=>{
+test('Firefox upgrades v1.2.1 XPI to 1.2.9 with donor manifest unchanged',()=>{
  assert.match(build,/original\.version!=='1\.2\.0'/);
- assert.match(build,/combined\.version='1\.2\.8'/);
+ assert.match(build,/combined\.version='1\.2\.9'/);
  assert.match(html,/v015-faithful\.mjs/);
  assert.match(html,/faithful\/bridge\.mjs/);
 });

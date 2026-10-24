@@ -1,3 +1,4 @@
+import {qualifiedCreationInventory} from './creation-inventory.mjs';
 // S04: one canonical slug reservation for operator and verified Git-main intake.
 // Side effects are NOT performed here. All origin merges and conflicts commit in
 // one IndexedDB transaction; lost client ACK cannot create another slug intent.
@@ -127,7 +128,7 @@ export function createCoordinatorStore(db){
         const item=e.target.result?.record;
         if(!item){finish(fail('INTENT_NOT_FOUND'));return;}
         if(item.revision!==expectedRevision){finish(fail('STALE_REVISION'));return;}
-        const accounts=[],inventory=[],pending=[],complete=new Set();
+        const accounts=[],inventory=[],pending=[],complete=new Map();
         meta.openCursor().onsuccess=ev=>{
           const c=ev.target.result;
           if(c){
@@ -135,15 +136,17 @@ export function createCoordinatorStore(db){
             if(k.startsWith('account:')&&v?.account)accounts.push(v.account);
             else if(k.startsWith('inventory:')&&v?.generator)inventory.push(v.generator);
             else if(k.startsWith('inventory-batch:')&&v?.observationId)
-              complete.add(k.slice('inventory-batch:'.length));
+              complete.set(k.slice('inventory-batch:'.length),v);
             else if(k.startsWith('s00-create-intent:')&&v?.record&&
                 v.record.intentId!==intentId&&
                 v.record.accountId&&v.record.state!=='REJECTED')
-              pending.push({state:v.record.state,accountId:v.record.accountId});
+              pending.push({state:v.record.state,accountId:v.record.accountId,
+                slug:v.record.slug,remoteId:v.record.remoteId,createdObservedAt:v.record.createdObservedAt,temporarySlug:v.record.temporarySlug});
             else if(k.startsWith('supply-batch:')&&v?.batch)
               for(const legacy of v.batch.items||[]){
                 if(legacy.state!=='REJECTED')
-                  pending.push({state:legacy.state,accountId:v.batch.accountId});
+                  pending.push({state:legacy.state,accountId:v.batch.accountId,
+                    slug:legacy.slug,remoteId:legacy.remoteId});
               }
             c.continue();return;
           }
@@ -157,15 +160,19 @@ export function createCoordinatorStore(db){
           if(owned&&item.accountId&&owned.accountId!==item.accountId){
             finish(fail('OWNED_TARGET_ACCOUNT_MISMATCH'));return;
           }
-          const candidates=accounts.map(a=>({...a,inventoryComplete:complete.has(a.accountId)}));
+          const candidates=accounts.map(a=>({...a,inventoryComplete:complete.has(a.accountId),
+            inventoryCount:complete.get(a.accountId)}));
           const plan=selectS04Account({intent:owned?{...item,accountId:owned.accountId}:item,
-            accounts:candidates,inventory,pending});
+            accounts:owned?candidates.filter(a=>a.accountId===owned.accountId):candidates,
+            inventory:owned?inventory.filter(g=>g.accountId===owned.accountId):inventory,pending:owned?
+              pending.filter(p=>p.accountId===owned.accountId):pending});
           if(!plan.ok){finish(plan);return;}
           const target=owned?'ADOPTION_ORIGINAL_PENDING':'OWNER_READBACK_PENDING';
           const next={...item,state:target,
             hold:owned?'ADOPTION_REQUIRES_ORIGINAL_SOURCE_PROOF':
               'TARGET_MISSING_MUST_BE_INDEPENDENTLY_VERIFIED',
             accountId:owned?owned.accountId:plan.accountId,
+            ...(owned?{remoteId:owned.remoteId,visibility:owned.visibility}:{}),
             accountRevision:plan.accountRevision,
             personaUid:plan.personaUid,bindingVersion:plan.bindingVersion,
             allocation:{owned:plan.owned,pending:plan.pending,
@@ -220,6 +227,20 @@ export function createCoordinatorStore(db){
       };
     });
   }
+  // Revision-bound operational feedback, not a transition or effect grant.
+  function recordAttempt(intentId,revision,outcome,at=Date.now()){
+    return transact(db,'readwrite',(tx,done)=>{
+      const meta=tx.objectStore('meta');
+      meta.get(key(intentId)).onsuccess=e=>{
+        const record=e.target.result?.record;
+        if(!record||record.revision!==revision){done(fail('STALE_REVISION'));return;}
+        meta.put({key:key(intentId),record:{...record,lastAttempt:{revision,at,
+          ok:outcome?.ok===true,code:/^[A-Z0-9_]{3,100}$/.test(outcome?.code||'')?
+            outcome.code:outcome?.ok?'PROGRESS_CHECKPOINT':'STEP_UNCONFIRMED'}}});
+        done({ok:true});
+      };
+    });
+  }
   function stageEffect({intentId,expectedRevision,event,proof={}}){
     if(!isSafeId(intentId)||!Number.isSafeInteger(expectedRevision)||
        expectedRevision<1)return Promise.resolve(fail('INVALID_STAGE_REQUEST'));
@@ -245,8 +266,12 @@ export function createCoordinatorStore(db){
              account.identity?.bindingVersion!==previous.bindingVersion){
             result=fail('ACCOUNT_CONTEXT_CHANGED');return;
           }
+          let inventoryCheckpoint=null;
+          const continueStage=()=>{
           const moved=advanceS04Effect(previous,event,proof);
           if(!moved.ok){result=moved;return;}
+          if(inventoryCheckpoint)moved.record.inventoryCheckpoint=inventoryCheckpoint;
+          if(event==='CREATE_CONFIRMED')moved.record.createdObservedAt=Date.now();
           const creating=['CREATE_PREPARE','RENAME_PREPARE'].includes(event);
           const create=event.startsWith('CREATE_')||
             (event==='PREPARED_ABORT'&&previous.state==='CREATE_PREPARED');
@@ -317,6 +342,21 @@ export function createCoordinatorStore(db){
           if(needsOperation)
             ops.get(opId).onsuccess=o=>complete(o.target.result);
           else complete(null);
+          };
+          if(event==='CREATE_PREPARE'||event==='CREATE_DISPATCH'){
+            m.get('inventory-batch:'+previous.accountId).onsuccess=observed=>{
+              const marker=observed.target.result;
+              if(!qualifiedCreationInventory(marker,account)){
+                result=fail('CURRENT_INVENTORY_REQUIRED');return;
+              }
+              m.get('inventory:'+previous.slug).onsuccess=target=>{
+                if(target.target.result?.generator){result=fail('TARGET_INVENTORY_CHANGED');return;}
+                inventoryCheckpoint={observationId:marker.observationId,observedAt:marker.observedAt,
+                  accountRevision:account.revision,bindingVersion:account.bindingVersion};
+                continueStage();
+              };
+            };
+          }else continueStage();
         };
       };
     });
@@ -326,7 +366,7 @@ export function createCoordinatorStore(db){
        expectedRevision<1||!adoption||
        adoption.archiveState!=='ARCHIVED_GIT_CONFIRMED'||
        adoption.originalCheckpoint?.qualified!==true||
-       adoption.originalCheckpoint.source!=='INDEPENDENT_AUTHENTICATED_RECOVERY'||
+       !['INDEPENDENT_AUTHENTICATED_RECOVERY','INDEPENDENT_PORTABLE_SOURCE_RECOVERY'].includes(adoption.originalCheckpoint.source)||
        adoption.originalCheckpoint.fingerprint!==adoption.original?.fingerprint||
        !/^[a-f0-9]{64}$/.test(adoption.original.fingerprint||''))
       return Promise.resolve(fail('ADOPTION_CHECKPOINT_UNVERIFIED'));
@@ -341,8 +381,9 @@ export function createCoordinatorStore(db){
            current.accountId!==adoption.accountId||
            current.personaUid!==adoption.personaUid||
            current.bindingVersion!==adoption.bindingVersion||
-           current.remoteId!==adoption.remotePublicId||
-           current.visibility!==adoption.visibility){
+           current.slug!==adoption.slug||current.pinConflict||current.sourceDrift||
+           current.createOperationId||current.renameOperationId||current.gitOperationId||current.activeOperationId||
+           current.visibility!=null&&current.visibility!==adoption.visibility){
           finish(fail('ADOPTION_OWNERSHIP_CHANGED'));return;
         }
         m.get('adoption:'+current.slug).onsuccess=a=>{
@@ -362,16 +403,59 @@ export function createCoordinatorStore(db){
                account.identity?.principalFingerprint!==adoption.principalFingerprint){
               finish(fail('ACCOUNT_CONTEXT_CHANGED'));return;
             }
-            const next={...current,revision:current.revision+1,
-              state:'GIT_INIT_PENDING',hold:'GIT_ASSOCIATION_PENDING',
-              originalFingerprint:adoption.original.fingerprint,
-              originalArchiveRef:adoption.archiveRef,
-              originalCheckpointId:adoption.originalCheckpoint.receiptId};
-            m.put({key:key(intentId),record:next});
-            tx.objectStore('events').add({stage:'S04_ADOPTION_ORIGINAL_PROTECTED',
-              intentId,slug:current.slug,originalFingerprint:next.originalFingerprint,
-              originalArchiveRef:next.originalArchiveRef});
-            finish({ok:true,record:next,providerEffects:'OFF'});
+            const promote=()=>{
+              const next={...current,revision:current.revision+1,
+                state:'GIT_INIT_PENDING',hold:'GIT_ASSOCIATION_PENDING',
+                remoteId:adoption.remotePublicId,visibility:adoption.visibility,
+                originalFingerprint:adoption.original.fingerprint,
+                originalArchiveRef:adoption.archiveRef,
+                originalCheckpointId:adoption.originalCheckpoint.receiptId};
+              m.put({key:key(intentId),record:next});
+              tx.objectStore('events').add({stage:'S04_ADOPTION_ORIGINAL_PROTECTED',
+                intentId,slug:current.slug,previousRemoteId:current.remoteId||null,
+                remoteId:next.remoteId,originalFingerprint:next.originalFingerprint,
+                originalArchiveRef:next.originalArchiveRef});
+              finish({ok:true,record:next,providerEffects:'OFF'});
+            };
+            if(current.remoteId===adoption.remotePublicId&&current.visibility===adoption.visibility){
+              promote();return;
+            }
+            // Full original readback may have replaced a list-level slug
+            // locator. Reconcile only the canonical same-owner alias; never
+            // infer identity from a name, equal bytes alone or a caller claim.
+            m.get('inventory:'+current.slug).onsuccess=seen=>{
+              const row=seen.target.result?.generator;
+              if(!row||row.ownerState!=='OBSERVED_OWNER'||row.accountId!==current.accountId||
+                 row.personaUid!==current.personaUid||row.bindingVersion!==current.bindingVersion||
+                 row.remoteId!==adoption.remotePublicId||row.visibility!==adoption.visibility){
+                finish(fail('ADOPTION_OWNERSHIP_CHANGED'));return;
+              }
+              const migrated=row.identitySchema===2&&row.identityBasis==='INDEPENDENT_FULL_BYTE_READBACK'&&
+                row.identityProof?.fingerprint===adoption.original.fingerprint;
+              const qualifiedOriginal=saved.original?.ok===true&&
+                saved.original.source==='INDEPENDENT_FULL_BYTE_READBACK';
+              if(!migrated&&!qualifiedOriginal){finish(fail('ADOPTION_OWNERSHIP_CHANGED'));return;}
+              m.get('identity-alias:'+current.slug).onsuccess=known=>{
+                const alias=known.target.result?.identity;
+                // Pre-J02 owned allocations omitted target metadata. The
+                // qualified same-owner original establishes those absent
+                // fields, but never replaces an existing different identity.
+                if(!alias&&(current.remoteId==null||current.remoteId===adoption.remotePublicId)){
+                  promote();return;
+                }
+                if(!migrated||!alias||alias.schema!==2||alias.slug!==current.slug||
+                   alias.accountId!==current.accountId||alias.personaUid!==current.personaUid||
+                   alias.bindingVersion!==current.bindingVersion||
+                   alias.publicId!==adoption.remotePublicId||
+                   alias.originalFingerprint!==adoption.original.fingerprint||
+                   alias.evidence!=='INDEPENDENT_FULL_BYTE_READBACK'||
+                   current.remoteId!=null&&current.remoteId!==alias.previousId&&
+                    current.remoteId!==adoption.remotePublicId){
+                  finish(fail('ADOPTION_OWNERSHIP_CHANGED'));return;
+                }
+                promote();
+              };
+            };
           };
         };
       };
@@ -526,7 +610,7 @@ export function createCoordinatorStore(db){
           }
           items.push({intentId:record.intentId,slug:record.slug,
             accountId:record.accountId||null,state:record.state,
-            hold:record.hold,revision:record.revision,
+            hold:record.hold,revision:record.revision,...(record.lastAttempt?{lastAttempt:record.lastAttempt}:{}),
             conflict:record.pinConflict===true,
             origins:(record.sources||[]).map(s=>s.type)});
           tail=record.intentId;
@@ -584,6 +668,6 @@ export function createCoordinatorStore(db){
     return decision.ok?{...decision,providerEffects:'OFF',
       code:'S04_CREATION_ACTIVATION_HELD'}:decision;
   }
-  return Object.freeze({refreshCreateAccountContext,acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,stageEffect,stageGit,confirmAdoption,advanceCreate,requeueArchivedUnattempted,
+  return Object.freeze({recordAttempt,refreshCreateAccountContext,acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,stageEffect,stageGit,confirmAdoption,advanceCreate,requeueArchivedUnattempted,
     ...createBatchStore(db,{acceptCreate})});
 }
