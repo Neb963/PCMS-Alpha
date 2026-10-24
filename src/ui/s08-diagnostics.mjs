@@ -3,7 +3,8 @@
 import {DIAGNOSTIC_CONFIG,DIAGNOSTIC_RUN,STAGES,
   validateDisposable,evaluateDisposable,createDiagnosticRun,
   addDiagnosticEvent,diagnosticReport,recoverInterruptedDiagnostic,canStartNewDiagnostic,
-  recoverDiagnosticIfInactive} from './s08-diagnostic-core.mjs';
+  recoverDiagnosticIfInactive,DIAGNOSTIC_INDEPENDENT,
+  independentReadOnlyResults,independentDiagnosticExport} from './s08-diagnostic-core.mjs';
 // A07 one-document execution owner. A settings remount must not race an
 // already dispatched diagnostic or convert RUNNING to a false cold-start hold.
 let activeDiagnosticDrive=false;
@@ -15,12 +16,15 @@ const by=id=>root.querySelector('#pcms-diagnostic-'+id);
 const consent=by('consent'),xpiSha=by('xpi-sha');
 const account=by('account'),namespace=by('namespace'),save=by('designate'),
  start=by('run'),resume=by('resume'),rerun=by('rerun'),exporter=by('export'),
+ independentButton=by('independent-run'),independentStatus=by('independent-status'),
+ independentRows=by('independent-results'),
  status=by('status'),stages=by('stages'),scope=by('scope'),cleanup=by('cleanup');
-let busy=false,configuration=null,run=null,designationError=null;
+let busy=false,independentBusy=false,independent=null,
+  configuration=null,run=null,designationError=null;
 const SCOPE_HELP={
  TEST_ACCOUNT_SELECTION_INVALID:'Select a verified test account from the list.',
  TEST_PERSONA_BINDING_INVALID:'The selected test account has no valid Persona binding. Check Accounts.',
- TEST_GITHUB_CONNECTION_REQUIRED:'GitHub files were readable, but the secure connection is not finished. Check Settings → Diagnostics, repair the native helper, then reconcile the interrupted Git connection.',
+ TEST_GITHUB_CONNECTION_REQUIRED:'GitHub connection is not verified. Use Settings → Connections to reconcile stored access; no extra native helper is required.',
  TEST_NAMESPACE_INVALID:'Use a test name starting with pcms-test-, followed by lowercase letters, numbers or hyphens.',
  TEST_ACCOUNT_LIST_UNAVAILABLE:'Account details are unavailable. Open Accounts and check the selected account.',
  TEST_ACCOUNT_NOT_PROTECTED_VERIFIED:'This account has not passed protected route and ownership verification. Check Accounts.',
@@ -32,6 +36,7 @@ const SCOPE_HELP={
 function scopeIssue(code){return SCOPE_HELP[code]||'The test setup could not be verified. Open Settings → Diagnostics for details.';}
 
 const PORT={accounts:'pcms-i03-accounts',git:'pcms-s03-catalog',
+ readiness:'pcms-r3-readiness',inventory:'pcms-i04-inventory',
  auth:'pcms-s06-authority',creation:'pcms-s00-coordinator',
  ai:'pcms-i10-ai',writeback:'pcms-i11-writeback',
  release:'pcms-i13-release',refresher:'pcms-i12-refresher',
@@ -59,7 +64,8 @@ function controls(){
  save.disabled=locked;start.disabled=locked||!configuration||
    !canStartNewDiagnostic(run);
  resume.disabled=locked||!run||!run.firstFailure;
- rerun.disabled=locked||!configuration;exporter.disabled=locked||!run;
+ rerun.disabled=locked||!configuration;exporter.disabled=locked||(!run&&!independent);
+ independentButton.disabled=independentBusy;
  cleanup.disabled=locked||!run||run.cleanup==='VERIFIED_REMOTE_AND_GIT_ABSENT';
  account.disabled=locked;namespace.disabled=locked;xpiSha.disabled=locked;
 }
@@ -88,6 +94,19 @@ function show(){
   list.append(row);
  }
  stages.append(list);
+ independentRows.replaceChildren();
+ const checks=document.createElement('ol');
+ for(const row of independent?.rows||[]){
+  const li=document.createElement('li');
+  li.textContent=row.id.replaceAll('_',' ')+' — '+row.outcome+
+   ' · '+row.code+(row.tier==='GIT'?' (Git read only)':' (local read only)');
+  checks.append(li);
+ }
+ independentRows.append(checks);
+ independentStatus.textContent=independentBusy?'Checking each independent module…':
+  independent?'Independent read-only checks: '+independent.rows.filter(x=>x.outcome==='PASS').length+
+    '/'+independent.rows.length+' responded. No Perchance writes, backup file reopen, or route proof was inferred.':
+  'No independent checks run. These can run even when generator creation is held.';
  controls();
 }
 async function persist(){
@@ -300,6 +319,28 @@ async function drive(){
   }
  }finally{busy=false;activeDiagnosticDrive=false;show();refreshMountedViews();}
 }
+// Standalone checks do NOT depend on S08's disposable generator or its
+// create/publish chain. Each request settles independently; a failure in one
+// module never suppresses observations from the remaining modules.
+async function runIndependentChecks(){
+ if(independentBusy)return;
+ independentBusy=true;show();
+ const probes=[['readiness','CHECK',{remote:true}],
+  ['accounts','LIST_ACCOUNTS',{}],['inventory','LIST_INVENTORY',{limit:1}],
+  ['refresher','GET_REFRESHER',{limit:1}],['auth','GET',{}]];
+ try{
+  const settled=await Promise.allSettled(probes.map(([which,type,params])=>
+    request(which,type,params)));
+  const values=settled.map(x=>x.status==='fulfilled'?x.value:
+   {ok:false,code:'READ_ONLY_PORT_UNAVAILABLE'});
+  independent=independentReadOnlyResults({
+    readiness:values[0],accounts:values[1],inventory:values[2],
+    refresher:values[3],authority:values[4]},Date.now());
+  await browser.storage.local.set({[DIAGNOSTIC_INDEPENDENT]:independent});
+ }catch{independentStatus.textContent='Independent results could not be saved; no write or repeat effect was attempted.';}
+ finally{independentBusy=false;show();}
+}
+independentButton.addEventListener('click',()=>void runIndependentChecks());
 async function populateAccounts(){
  const response=await request('accounts','LIST_ACCOUNTS');
  account.replaceChildren();
@@ -393,8 +434,9 @@ cleanup.addEventListener('click',async()=>{
  }finally{busy=false;controls();}
 });
 exporter.addEventListener('click',()=>{
- if(!run)return;
- const blob=new Blob([JSON.stringify(diagnosticReport(run),null,2)+'\n'],{type:'application/json'});
+ if(!run&&!independent)return;
+ const report=independent?independentDiagnosticExport(independent,run):diagnosticReport(run);
+ const blob=new Blob([JSON.stringify(report,null,2)+'\n'],{type:'application/json'});
  const url=URL.createObjectURL(blob),a=document.createElement('a');
  a.href=url;a.download='pcms-s08-sanitized-diagnostic.json';
  a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
@@ -413,7 +455,10 @@ async function refreshFromCanonical(){
 mountedViews.add(refreshFromCanonical);
 (async()=>{
  try{
-  const saved=await browser.storage.local.get([DIAGNOSTIC_CONFIG,DIAGNOSTIC_RUN]);
+  const saved=await browser.storage.local.get([DIAGNOSTIC_CONFIG,DIAGNOSTIC_RUN,DIAGNOSTIC_INDEPENDENT]);
+  if(saved[DIAGNOSTIC_INDEPENDENT]?.schema===1&&
+     saved[DIAGNOSTIC_INDEPENDENT]?.mode==='INDEPENDENT_READ_ONLY')
+    independent=saved[DIAGNOSTIC_INDEPENDENT];
   if(validateDisposable(saved[DIAGNOSTIC_CONFIG]).ok)
    configuration=saved[DIAGNOSTIC_CONFIG];
   run=saved[DIAGNOSTIC_RUN]?.version===1?
