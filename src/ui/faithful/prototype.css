@@ -312,3 +312,23 @@ body:has(.drawer-overlay:not([hidden])) #toast-root{right:min(555px,calc(100vw -
 .ref-feed-state>div{flex:1 1 auto;min-width:0;overflow:hidden;line-height:1.25}
 .ref-feed-state strong,.ref-feed-state div span{display:block;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
 .nav-count[hidden]{display:none!important}
+
+/* A09 operator correction: one Settings surface, one visible Git form, no
+   obsolete service cards or long fixed-width controls. */
+#page[data-view="settings"] .settings-layout{grid-template-columns:minmax(158px,192px) minmax(0,1fr)}
+#page[data-view="settings"] .settings-main{display:flex;flex-direction:column;gap:14px;min-width:0;min-height:0;padding:0 7px 8px 0;overflow-y:auto;overflow-x:hidden;align-items:stretch}
+#page[data-view="settings"] .settings-group{min-width:0;width:100%;padding:18px 20px}
+#page[data-view="settings"] .settings-group>.setting-note{margin:7px 0 13px;line-height:1.5}
+.pcms-git-connection-form{display:flex;flex-direction:column;gap:12px;min-width:0;max-width:720px}
+.pcms-git-connection-form>.form-input,.pcms-git-connection-form .field{width:100%;min-width:0}
+.pcms-git-connection-form input{max-width:100%;min-width:0}
+.pcms-settings-actions{display:flex;gap:9px;flex-wrap:wrap;align-items:center;justify-content:flex-start}
+.pcms-settings-actions .btn{max-width:100%;white-space:normal;text-align:center}
+.pcms-git-recovery{padding:14px;border:1px solid #d6e2f0;border-radius:8px;background:#f7fafd;display:flex;flex-direction:column;gap:10px}
+.pcms-git-recovery[hidden]{display:none}
+.pcms-git-recovery>.setting-description{margin:0}
+@media(max-width:760px){
+ #page[data-view="settings"] .settings-layout{grid-template-columns:minmax(0,1fr)}
+ #page[data-view="settings"] .settings-main{overflow-y:auto;max-height:none}
+ #page[data-view="settings"] .settings-group{padding:14px}
+}

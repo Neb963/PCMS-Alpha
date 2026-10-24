@@ -18,7 +18,7 @@ test('combined XPI preserves guarded donor bytes and opens the full dashboard ra
   assert.equal(Object.hasOwn(combined.action,'default_popup'),false);
   assert.equal(combined.browser_specific_settings.gecko.id,'persona-route-manager@local');
   assert.equal(original.version,'1.2.0','never rewrite donor manifest version');
-  assert.equal(combined.version,'1.2.5','installed PCMS UI must advance the existing v1.2.1 extension');
+  assert.equal(combined.version,'1.2.6','installed PCMS UI must advance the existing v1.2.1 extension');
   assert.deepEqual(combined.background,{scripts:['pcms/entry.mjs'],type:'module'});
   const entry=await readFile(path.join(stage,'pcms/entry.mjs'),'utf8');
   assert.match(entry,/import '\.\.\/lib\/recovery-bootstrap\.js'/);

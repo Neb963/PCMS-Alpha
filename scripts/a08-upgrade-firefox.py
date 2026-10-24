@@ -137,7 +137,7 @@ def main():
                   flush=True)
             # An XPI filesystem write can precede the AddonManager's durable
             # extensions.json version transition. Never close/restart Firefox
-            # until the manager's independent disk registry confirms 1.2.5;
+            # until the manager's independent disk registry confirms 1.2.6;
             # an uncommitted candidate remains a failed upgrade, not success.
             registry=profile/'extensions.json'
             registry_version=None
@@ -149,9 +149,9 @@ def main():
                     registry_version=rows[0].get('version') if len(rows)==1 else None
                 except (OSError,ValueError,IndexError,TypeError):
                     registry_version=None
-                if registry_version=='1.2.5':break
+                if registry_version=='1.2.6':break
                 time.sleep(.15)
-            assert registry_version=='1.2.5',(
+            assert registry_version=='1.2.6',(
                 'A08_ADDON_REGISTRY_UPDATE_NOT_COMMITTED',registry_version)
             print('H A08_FIREFOX_ADDON_REGISTRY_UPDATED_BEFORE_SHUTDOWN=PASS',
                   flush=True)
@@ -194,7 +194,7 @@ def main():
                 };""")
                 if verified['main']:break
                 time.sleep(.12)
-            assert verified['version']=='1.2.5',verified
+            assert verified['version']=='1.2.6',verified
             assert verified['gecko']==b.ID and verified['main'],verified
             assert verified['storageAPI'] and verified['alarms'],verified
             retained=b.execute(session,"""return browser.storage.local.get(

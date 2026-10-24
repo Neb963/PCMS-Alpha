@@ -1789,7 +1789,9 @@ function renderReadinessPanel(container){
 }
 async function runReadiness(remote){
  if(state.readinessBusy)return;
- state.readinessBusy=true;renderSettingsSection();
+ state.readinessBusy=true;
+ if(state.route==='settings'&&state.settings==='diagnostics')renderReadinessPanel(shadow('.settings-main'));
+
  try{
   const snapshot=await readPort('pcms-r3-readiness','CHECK',{remote},95000);
   if(!snapshot?.ok){state.readiness=snapshot;return;}
@@ -1817,7 +1819,9 @@ async function runReadiness(remote){
     'PCMS_I15_PORTABLE','Only browser receipt readback is verified; reopen the downloaded file and inspect restoration separately.'));
   state.readiness=snapshot;
  }catch{state.readiness={ok:false,code:'READINESS_TRANSPORT_UNAVAILABLE'};}
- finally{state.readinessBusy=false;if(state.route==='settings')renderSettingsSection();}
+ finally{state.readinessBusy=false;
+  if(state.route==='settings'&&state.settings==='diagnostics')renderReadinessPanel(shadow('.settings-main'));
+ }
 }
 function primarySettingCard(container,title,intro){
  const section=el('section','card settings-group'),header=el('h2','h2',title);
@@ -1956,41 +1960,101 @@ function renderConnectedMain(section,snapshot){
  section.append(panel);
 }
 function primaryConnections(container){
- const section=primarySettingCard(container,'GitHub connection',
-  'PCMS reads generator folders from the committed main branch only. A repository preview is not a saved connection.');
+ const section=primarySettingCard(container,'GitHub',
+  'Connect once to the configured private repository. PCMS reads committed main only.');
+ section.dataset.gitConnection='1';
+ const form=el('div','pcms-git-connection-form');
  const repo=el('input','form-input');repo.value='Neb963/per-gens';repo.readOnly=true;
  repo.setAttribute('aria-label','Managed GitHub repository');
  const credential=el('input','form-input');credential.type='password';
- credential.autocomplete='off';credential.placeholder='GitHub access credential';
- credential.setAttribute('aria-label','GitHub access credential');
- const status=el('p','setting-note','No authenticated read-only verification has run in this session.');
- status.setAttribute('role','status');
- const actions=el('div','form-foot');
- const begin= b('Connect securely',()=>void (async()=>{
-  if(!credential.value){status.textContent='Enter your GitHub credential first.';return}
-  const token=credential.value;credential.value='';begin.disabled=true;
-  try{
-   const out=await readPort('pcms-s03-catalog','CONNECT_GIT',
-      {repository:repo.value,token},30000);
-   status.textContent=out?.ok?'Secure GitHub connection saved. Check files from main before any import.':
-     out?.code==='GIT_PENDING_CONNECTION_RECONCILIATION_REQUIRED'?
-     'A previous setup did not finish. Check the recovery section below before entering a new credential.':
-     'GitHub setup was not verified. Check the read-only connection details.';
-  }catch{status.textContent='Connection result uncertain. Check readiness before attempting another connection.'}
-  finally{begin.disabled=false}
- })(),'btn primary');
- const inspect=b('Read main safely',()=>void (async()=>{
-  inspect.disabled=true;status.textContent='Reading the committed main inventory…';
+ credential.autocomplete='new-password';credential.spellcheck=false;
+ credential.placeholder='GitHub access token';credential.setAttribute('aria-label','GitHub access token');
+ const tokenField=el('label','field');tokenField.append(el('span','','Access token'),credential);
+ const status=el('p','setting-note','Checking saved connection…');status.setAttribute('role','status');
+ const actions=el('div','pcms-settings-actions');
+ let busy=false,view=null;
+ const setBusy=value=>{
+  busy=value;
+  connect.disabled=value||view?.interrupted===true;
+  inspect.disabled=value||!view?.configured||view?.interrupted===true;
+  reconcile.disabled=value||!view?.canRecover;
+  repair.disabled=value||!view?.canRecover;
+ };
+ const connect=b('Connect',()=>void perform('CONNECT_GIT'),'btn primary');
+ const inspect=b('Read GitHub main',()=>void (async()=>{
+  if(busy)return;setBusy(true);status.textContent='Reading the committed main inventory…';
   try{
    const out=await readPort('pcms-s03-catalog','SCAN_CONNECTED',{},95000);
    status.textContent=out?.ok&&out.complete?
-     out.recognizedCount+' recognized generator folder(s) on main. Account ownership, publication and deployment remain separate checks.':
-     'The committed main inventory could not be verified. No deletion or missing folder has been inferred.';
+     out.recognizedCount+' generator folders found on GitHub main.':
+     'GitHub main could not be verified. No source was changed.';
    if(out?.ok&&out.complete)renderConnectedMain(section,out);
-  }catch{status.textContent='GitHub read-only scan unavailable. No remote changes were made.'}
-  finally{inspect.disabled=false}
+  }catch{status.textContent='GitHub read-only scan unavailable. No remote change was made.'}
+  finally{setBusy(false)}
  })(),'btn small');
- actions.append(begin,inspect);section.append(repo,credential,actions,status);
+ const recovery=el('div','pcms-git-recovery');recovery.hidden=true;
+ recovery.append(el('h3','h3','Finish interrupted connection'));
+ const guidance=el('p','setting-description',
+  'First verify any credential saved before the interruption. If it is missing, enter a token above and finish setup. Neither action writes to GitHub.');
+ const recoveryActions=el('div','pcms-settings-actions');
+ const reconcile=b('Reconcile saved access',()=>void(async()=>{
+  if(busy)return;setBusy(true);status.textContent='Checking the saved credential and repository identity…';
+  try{
+   const out=await readPort('pcms-s03-catalog','RECONCILE_GIT',{},30000);
+   if(out?.ok){status.textContent='GitHub connection recovered and verified.';await refreshConnection({retainStatus:true});}
+   else status.textContent=out?.code==='GIT_RECONCILIATION_CREDENTIAL_UNAVAILABLE'?
+     'No usable saved credential was found. Enter your token and select Finish setup.':
+     friendlyConnectionIssue(out?.code);
+  }catch{status.textContent='Recovery could not be confirmed. No write was repeated.'}
+  finally{setBusy(false)}
+ })(),'btn small');
+ const repair=b('Finish setup with token',()=>void perform('RECOVER_GIT_CONNECTION'),'btn primary');
+ recoveryActions.append(reconcile,repair);recovery.append(guidance,recoveryActions);
+ async function perform(type){
+  if(busy)return;
+  const token=credential.value;
+  if(!token){status.textContent='Enter a GitHub token to continue.';credential.focus();return}
+  if(type==='RECOVER_GIT_CONNECTION'&&
+     !window.confirm('Finish the interrupted GitHub connection with this token? The previous credential may be replaced. No GitHub files will change.'))return;
+  // Clear the input before any asynchronous boundary call. Never log it.
+  credential.value='';setBusy(true);
+  status.textContent=type==='RECOVER_GIT_CONNECTION'?'Finishing the interrupted connection…':'Verifying GitHub access…';
+  try{
+   const out=await readPort('pcms-s03-catalog',type,{
+     repository:repo.value,token,
+     ...(type==='RECOVER_GIT_CONNECTION'?{acknowledgeCredentialReplacement:true}:{})
+   },30000);
+   status.textContent=out?.ok?'GitHub access saved. You can now read main.':
+     out?.code==='GIT_PENDING_CONNECTION_RECONCILIATION_REQUIRED'?
+     'Setup was interrupted. Use the recovery actions directly below.':
+     out?.code==='GITHUB_AUTH_REJECTED'?'GitHub rejected this token. Check its access to the repository.':
+     'Connection not confirmed. '+friendlyConnectionIssue(out?.code);
+   await refreshConnection({retainStatus:true});
+  }catch{
+   status.textContent='Connection result uncertain. Use Reconcile saved access before another attempt.';
+   await refreshConnection({retainStatus:true});
+  }finally{setBusy(false)}
+ }
+ async function refreshConnection({retainStatus=false}={}){
+  let result;
+  try{result=await readPort('pcms-s03-catalog','GET_CONNECTION_STATE',{},12000)}
+  catch{if(!retainStatus)status.textContent='Connection status unavailable. No changes made.';return}
+  if(!section.isConnected||!result?.ok){if(!retainStatus)status.textContent='Connection status unavailable.';return}
+  view=result;
+  const pending=result.interrupted===true;
+  recovery.hidden=!pending;
+  connect.hidden=pending;
+  inspect.disabled=busy||pending||!result.configured;
+  repair.disabled=busy||!result.canRecover;
+  reconcile.disabled=busy||!result.canRecover;
+  if(!retainStatus)status.textContent=pending?
+    'A previous connection setup was interrupted. Reconcile the saved credential or finish with a token below.':
+    result.configured?'GitHub connection saved. Read main to verify current files.':
+    'Not connected. Enter a GitHub token to connect.';
+ }
+ actions.append(connect,inspect);form.append(repo,tokenField,actions,status,recovery);
+ section.append(form);
+ void refreshConnection();
 }
 function primaryAutomation(container){
  const section=primarySettingCard(container,'Standing permissions',
@@ -2298,39 +2362,20 @@ function renderSettingsSection(){if(state.route!=='settings')return;
  const select=names.includes(state.settings)?state.settings:'connections';
  for(const b of page().querySelectorAll('[data-settings]')){b.classList.toggle('active',b.dataset.settings===select);b.setAttribute('aria-current',b.dataset.settings===select?'page':'false')}
  const container=shadow('.settings-main');if(!container)return;
- // Preserve pristine static connection rows across category round-trips.
- // Never reuse the live, mutated view as the source template.
- if(!state.settingsStatic)state.settingsStatic=container.cloneNode(true);
- // Display only user-readable connection summaries. Technical receipts
- // remain in separately collapsible Operational readiness evidence.
- // Other settings expose their original guarded controls without attempting to
- // reproduce authorization or credential editors in a simulated frontend.
+ // Each category owns its visible form. Do not rehydrate obsolete hidden service cards.
  if(select==='connections'){
-  container.replaceChildren(...state.settingsStatic.cloneNode(true).childNodes);
-  const rows=[...container.querySelectorAll('.settings-row')];
-  const mapping=[['GitHub source','pcms-catalog-status','generators','catalog'],['PersonaMonkey routing','pcms-accounts-feedback','accounts',null],['Portable backup','pcms-overview-backup','settings','backups']];
-  mapping.forEach(([label,id,target,group],i)=>{
-   const row=rows[i];if(!row)return;const title=row.querySelector('.setting-title'),desc=row.querySelector('.setting-description'),pill=row.querySelector('.pill');
-   if(title)title.textContent=label;
-   const components=[['GIT_CONFIG','GITHUB_AUTH'],['PERSONA_AND_SESSION'],['PORTABLE_BACKUP_RUNTIME']];
-   const observed=state.readiness?.rows?.filter(r=>components[i].includes(r.component))||[];
-   const unavailable=observed.some(r=>['UNREACHABLE','SECURITY_HELD','OUTCOME_UNCERTAIN'].includes(r.state));
-   const checked=observed.length>0&&observed.every(r=>r.state==='VERIFIED');
-   const status=unavailable?
-      i===2?'The Firefox backup coordinator needs attention. Check its read-only status.':
-      'A connection prerequisite needs attention. Check the detailed readiness report.':
-     checked?(i===0?'Saved access and local verification were checked.':
-       i===1?'The protected account connection was checked.':
-       'The browser backup coordinator responded; file and restore evidence remain separate.'):
-     i===0?'GitHub access has not been fully verified in this session.':
-      i===1?'Check the protected account and Persona connection in Accounts.':
-      'Check the browser backup coordinator in Backup & Restore.';
-   if(desc)desc.textContent=status;
-   if(pill){pill.textContent=unavailable?'Needs attention':checked?'Checked':'Not checked';pill.className='pill'}
-   const button=row.querySelector('button[data-action]');if(button)button.dataset.action='check-service:'+(['github','persona','backup'][i]);
-  });
-  container.querySelectorAll('.settings-row').forEach(row=>{if(row.querySelector('.pill')?.textContent==='Healthy')row.querySelector('.pill').textContent='Unknown'});
+  // Never mirror old service rows or native-host installation instructions.
+  // The Git connection and its recovery live on the same visible Settings page.
+  container.replaceChildren();
   primaryConnections(container);
+  const routing=primarySettingCard(container,'PersonaMonkey routing',
+    'Account protection and route verification are managed by PersonaMonkey.');
+  routing.append(b('Open Accounts',()=>routeTo('accounts'),'btn small'));
+  const backup=primarySettingCard(container,'Portable backups',
+    'Use the browser-native manual and daily backup controls in Backup & Restore.');
+  backup.append(b('Open Backup & Restore',()=>{
+    state.settings='backups';renderSettingsSection();
+  },'btn small'));
  } else {
   container.replaceChildren();
   const section=el('section','card settings-group');const head=el('div','settings-section-head');const titles={automation:'Automation',ai:'AI development',backups:'Backup & Restore',diagnostics:'Diagnostics',advanced:'Advanced'};
@@ -2363,7 +2408,7 @@ function renderSettingsSection(){if(state.route!=='settings')return;
    container.append(section);
   }
  }
- renderReadinessPanel(container);
+ if(select==='diagnostics')renderReadinessPanel(container);
 }
 function displayRouteScaffold(){
  if(state.route==='overview')displayOverview();
@@ -2418,7 +2463,8 @@ async function mount(){
   else if(state.route==='generators')void loadGenerators();
   else if(state.route==='accounts')void loadAccounts();
   else if(state.route==='refresher')void loadRefresher();
-  else if(state.route==='settings')renderSettingsSection();
+  // Do not destroy active Settings forms on window focus/visibility changes.
+  // The operator may be entering an unsaved Git token or restore path.
  };
  document.addEventListener('visibilitychange',refreshOnWake);
  window.addEventListener('focus',refreshOnWake);

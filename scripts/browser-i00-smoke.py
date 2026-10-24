@@ -1230,7 +1230,7 @@ def main():
                 assert faithful['inventoryTabs']>=4 and faithful['sourceWriters']==1,faithful
                 print('B V015_TRUE_DESKTOP_PRIMARY_WORKSPACES_AND_REAL_HANDLERS=PASS',flush=True)
                 release_version=execute(after,"return {manifest:browser.runtime.getManifest().version,ui:document.documentElement.dataset.pcmsUiVersion,badge:document.querySelector('.v015-top-status')?.textContent};")
-                assert release_version.get('manifest')=='1.2.5',release_version
+                assert release_version.get('manifest')=='1.2.6',release_version
                 assert release_version.get('ui')=='0.1.5' and '0.1.5' in release_version.get('badge',''),release_version
                 print('B V015_REAL_FIREFOX_UPDATE_VERSION_AND_VISIBLE_UI_MARKER=PASS',flush=True)
                 # V016 acceptance: the PRECISE accepted prototype structure is
@@ -1254,7 +1254,7 @@ def main():
                      canonicalNative:!!document.getElementById('pcms-refresher-rows')&&
                        !!document.getElementById('pcms-release-approve')&&
                        !!document.getElementById('pcms-restore-apply')};""")
-                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.5',actual
+                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.6',actual
                 assert actual['routes']==6 and actual['visible'] and actual['nativeHidden'],actual
                 assert actual['sidebar'] and actual['primary']=='overview' and actual['styles'] and actual['canonicalNative'],actual
                 assert actual['badge']=='PCMS local · Not verified',actual
@@ -1283,7 +1283,8 @@ def main():
                 # R3 acceptance: exercise the real packaged primary Settings
                 # preflight, not a fixture view or a token/network write path.
                 execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
-                  sh.querySelector('[data-nav="settings"]').click();return true""")
+                  sh.querySelector('[data-nav="settings"]').click();
+                  sh.querySelector('[data-settings="diagnostics"]').click();return true""")
                 r3_panel=None
                 for _ in range(45):
                     r3_panel=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
@@ -1371,19 +1372,66 @@ def main():
                     [...details.querySelectorAll('button')].some(x=>x.textContent.includes('Save disposable scope'));
                   sh.querySelector('[data-settings="connections"]').click();
                   const connected=sh.querySelector('.settings-main');
-                  const connectionRows=[...connected?.querySelectorAll('.settings-row')||[]];
-                  const restoredConnections=connectionRows.length>=3&&
-                    connectionRows.some(x=>x.textContent.includes('PersonaMonkey'))&&
-                    connectionRows.some(x=>x.querySelector('button[data-action="check-service:backup"]'))&&
-                    !!connected.querySelector('input[type="password"]');
-                  const readableConnections=connectionRows.every(x=>
-                    !/GIT_[A-Z_]+|NATIVE_[A-Z_]+|local[.]pcms[.]/.test(
-                      x.querySelector('.setting-description')?.textContent||''));
+                  const git=connected?.querySelector('[data-git-connection="1"]');
+                  const restoredConnections=!!git&&
+                    !!git.querySelector('input[type="password"]')&&
+                    connected.querySelectorAll('.settings-group').length===3&&
+                    connected.querySelectorAll('.settings-row').length===0&&
+                    !connected.textContent.includes('Check native hosts');
+                  const pane=connected.getBoundingClientRect();
+                  const readableConnections=pane.width>260&&
+                    connected.scrollWidth<=connected.clientWidth+5&&
+                    [...connected.querySelectorAll('.settings-group')].every(card=>{
+                      const r=card.getBoundingClientRect();
+                      return r.width>250&&r.right<=pane.right+5&&r.left>=pane.left-5;
+                    })&&
+                    !/GIT_[A-Z_]+|NATIVE_[A-Z_]+|local[.]pcms[.]/.test(connected.textContent);
                   return {primaryCreate,legacyOpened,primaryPermission,primaryDiagnostic,
                     primaryAi,primaryAiPreparation,protectedRestore,restoreHeld,restoredConnections,readableConnections,
                     drawerClosed:!sh.querySelector('[aria-label="Create generators"]')};""")
                 assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['primaryAi'] and r4_primary['primaryAiPreparation'] and r4_primary['protectedRestore'] and r4_primary['restoreHeld'] and r4_primary['restoredConnections'] and r4_primary['readableConnections'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
                 print('B R4_PRIMARY_CREATION_AND_PROTECTED_SETTINGS_WITHOUT_LEGACY=PASS',flush=True)
+                # A09 operator regression: one concrete interrupted local
+                # Git intent MUST reveal the recovery controls in the visible
+                # Settings form, with no real token or private network write.
+                git_recovery = call('POST',f'/session/{after}/execute/async',{
+                    'script':"""const done=arguments[arguments.length-1];
+                      (async()=>{
+                        const key='pcmsS03GitPending',state=await browser.storage.local.get(key);
+                        const old=state[key];const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                        let result=null;
+                        try{
+                          await browser.storage.local.set({[key]:{
+                            repository:'Neb963/per-gens',repositoryId:'42',startedAt:123}});
+                          sh.querySelector('[data-settings="automation"]').click();
+                          sh.querySelector('[data-settings="connections"]').click();
+                          for(let n=0;n<40;n++){
+                            await new Promise(r=>setTimeout(r,100));
+                            const panel=sh.querySelector('[data-git-connection="1"]');
+                            const controls=panel?.querySelector('.pcms-git-recovery');
+                            if(controls&&!controls.hidden){
+                              result={visible:true,reconcile:!![...controls.querySelectorAll('button')]
+                                  .find(x=>x.textContent==='Reconcile saved access'),
+                                explicitReplacement:!![...controls.querySelectorAll('button')]
+                                  .find(x=>x.textContent==='Finish setup with token'),
+                                ordinaryConnectHidden:panel.querySelector('button')?.hidden===true,
+                                duplicateRows:sh.querySelectorAll('.settings-main .settings-row').length,
+                                hasNativePrompt:sh.querySelector('.settings-main').textContent.includes('Check native hosts')};
+                              break;
+                            }
+                          }
+                        } finally {
+                          if(old===undefined)await browser.storage.local.remove(key);
+                          else await browser.storage.local.set({[key]:old});
+                          sh.querySelector('[data-settings="automation"]').click();
+                          sh.querySelector('[data-settings="connections"]').click();
+                        }
+                        done(result||{visible:false});
+                      })().catch(e=>done({error:String(e).slice(0,200)}));""",
+                    'args':[]},timeout=35)
+                assert git_recovery.get('visible') and git_recovery.get('reconcile') and git_recovery.get('explicitReplacement') and git_recovery.get('ordinaryConnectHidden') and git_recovery.get('duplicateRows')==0 and not git_recovery.get('hasNativePrompt'),('A09_SETTINGS_INTERRUPTED_GIT_RECOVERY_FAILED',git_recovery)
+                print('B A09_INLINE_GIT_RECOVERY_AND_COMPACT_SETTINGS=PASS',flush=True)
+
                 execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=overview]').click();return true")
 
                 # A07: the operator uses a single primary workspace.
