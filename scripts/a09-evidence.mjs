@@ -11,6 +11,13 @@ const CASES=['positive','adverse','recovery'];
 const STATES=['PASS','FAIL','BLOCKED','NOT_TESTED','NOT_APPLICABLE'];
 const external=new Set(['H','GIT','L']);
 const methodByTier={D:'deterministic-production',B:'installed-xpi',H:'host-process-disk',GIT:'remote-git-readback',L:'provider-readback'};
+// Later client amendment v1.0.1 overrides only contradictory historical acceptance wording.
+const amendedJourneys={
+ 'AC-14':{negative:'A partial feed is UNKNOWN; already-visible targets are not saved pointlessly; shutdown cannot fabricate active operating credit, but 72-hour rest advances with wall time; missed writes never burst-replay.'},
+ 'AC-15':{description:'Recover conserved background work and source history across dashboard close, worker suspension and Firefox restart using persisted state and browser alarms, with rest as elapsed wall time and active work only when observed.'},
+ 'AC-17':{description:'Export manual and daily strictly passwordless, unencrypted, browser-native source-complete portable backups and inspect/restore them into current or fresh profiles with inactive controller until identity/source/route verification.',negative:'Reject corrupt/incomplete archives, interruptible restore, removed-account ambiguity, stale approvals, UID/exit history loss and leaked Git credentials; preserve last known-good without any key/passphrase/native vault.'}
+};
+
 const tMap={
  'T-01':['AC-04','AC-07','AC-08'],
  'T-02':['AC-13','AC-14'],
@@ -39,7 +46,7 @@ export function buildCatalog(matrix,scenarioMap){
   const evid=cells[cells.length-2];
   const tiers=distinct(evid.match(/\b(?:GIT|D|B|H|L)\b/g)||[]);
   assert(tiers.includes('D')&&tiers.includes('B'),'A09_AC_TIERS_MISSING:'+m[1]);
-  ac.push({id:m[1],kind:'AC',description:cells[2],negative:cells[3],tiers:orderedTiers(tiers),cases:CASES,authority:'ACCEPTED_MATRIX_v1.0.0_AS_AMENDED_v1.0.1'});
+  ac.push({id:m[1],kind:'AC',description:amendedJourneys[m[1]]?.description||cells[2],negative:amendedJourneys[m[1]]?.negative||cells[3],tiers:orderedTiers(tiers),cases:CASES,authority:'ACCEPTED_MATRIX_v1.0.0_AS_AMENDED_v1.0.1'});
  }
  assert(ac.length===18,'A09_AC_COUNT_INVALID');
  const lookup=new Map(ac.map(x=>[x.id,x]));
