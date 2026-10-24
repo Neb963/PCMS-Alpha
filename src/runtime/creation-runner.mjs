@@ -133,7 +133,7 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         // Prepared-only evidence may predate Archive or a human-created slug.
         // Re-observe immediately before dispatch; uncertainty is never replayed.
         const target=await read('READ_TARGET');
-        if(!target.ok||target.source!=='INDEPENDENT_TARGET_READBACK'||target.state!=='MISSING_VERIFIED')
+        if(!target.ok||target.source!=='INDEPENDENT_TARGET_READBACK'||target.slug!==item.slug||target.state!=='MISSING_VERIFIED')
           return fail(target.code||'TARGET_STATE_CHANGED');
         if(item.state==='RENAME_PREPARED'){
           const temporary=await read('READ_CREATE',{temporarySlug:item.temporarySlug,remoteId:item.remoteId});

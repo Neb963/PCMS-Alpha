@@ -14,3 +14,11 @@ No routing authority moves to the UI. PersonaMonkey remains the sole route/Perso
 ## Runtime checkpoint
 
 122 focused D tests passed locally across account/inventory/enrollment, staged donor routing and S04 creation/allocation/recovery. Repairs include distinct-command concurrency, safe donor-unavailable Archive, historical-candidate search and unused-forwarder cleanup, invalid-family admission holds, current-inventory enrollment completion, same-binding reactivation and non-replayed uncertain work. Primary UI implementation and installed-XPI journey proof remain pending; this checkpoint is not J01 completion.
+
+## Primary Accounts checkpoint (in progress)
+
+Primary Accounts now exposes login, route verification/change, inventory, upgrade, missing-Persona repair, limited enrollment exceptions, Archive/reactivation and explicit local removal. The dialog reads the current revision before commands, preserves inputs during projection refresh and keeps Archive available while route search reaches a safe boundary. Inspector output excludes session fingerprints and other accounts' exit addresses.
+
+Additional lifecycle fixes invalidate failed identity confirmation, coalesce boundary initialization, finish resumed route-search metadata, preserve the original helper failure, reject mismatched prepared targets and allow Archive to suspend an ongoing search without activating its candidate.
+
+Verification: focused production-module tests ran before workspace loss (122 at the earlier runtime checkpoint; later focused suites also passed locally). The reconstructed pending diff has only been syntax-parsed in the orchestration runtime; its GitHub draft preflight and installed-Firefox interaction tests are still required. No J01 engineering completion, external-provider success or live proof is claimed.

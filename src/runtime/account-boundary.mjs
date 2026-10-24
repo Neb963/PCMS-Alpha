@@ -99,7 +99,7 @@ export function createAccountBoundary(api,{
     Promise.resolve(fail('INVENTORY_UNAVAILABLE')),
   backupRequester=null
 }={}) {
-  let dbPromise,enrollment;
+  let dbPromise,enrollment,enrollmentInit;
   const sentinel=createRestoreSentinel(api.storage.local);
   const connection=()=>dbPromise ||= open();
   const store=async()=>createAccountStore(await connection());
@@ -107,14 +107,16 @@ export function createAccountBoundary(api,{
   // The SAME production instance serves the UI port and background upkeep.
   async function flow(){
     if(enrollment)return enrollment;
-    const g=guard();
-    if(!g?.enrollmentDonor)return null;
-    enrollment=createEnrollment({accounts:await store(),ledger:await exitLedger(),
-      donor:g.enrollmentDonor,pins,
-      openLogin:personaUid=>g.openHumanLogin(personaUid),
-      identify:personaUid=>guardedIdentityRead(g,personaUid,identityReader),
-      syncInventory});
-    return enrollment;
+    if(enrollmentInit)return enrollmentInit;
+    const g=guard();if(!g?.enrollmentDonor)return null;
+    enrollmentInit=(async()=>{
+      enrollment=createEnrollment({accounts:await store(),ledger:await exitLedger(),
+        donor:g.enrollmentDonor,pins,
+        openLogin:personaUid=>g.openHumanLogin(personaUid),
+        identify:personaUid=>guardedIdentityRead(g,personaUid,identityReader),syncInventory});
+      return enrollment;
+    })().catch(error=>{enrollmentInit=null;throw error});
+    return enrollmentInit;
   }
   const explain=code=>SETUP_MESSAGES[code]||null;
   async function current(accounts,p){
@@ -151,7 +153,11 @@ export function createAccountBoundary(api,{
         if(!found.ok)return found;
         const a=found.account,network=await (await exitLedger()).read();
         const summaries=await createInventoryStore(db).accountSummaries();
-        return inspectAccountProjection(a,network,summaries.summaries?.[a.accountId]);
+        const projection=inspectAccountProjection(a,network,summaries.summaries?.[a.accountId]);
+        const f=await flow();
+        projection.account.working=f?.running(a.accountId)===true;
+        projection.account.message=explain(a.setup?.code)||explain(a.upgrade?.code)||explain(a.route?.code);
+        return projection;
       }
       if(message.type==='LIST_ACCOUNTS') {
         const restore=await sentinel.inspect();

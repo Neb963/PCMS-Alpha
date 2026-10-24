@@ -1,0 +1,20 @@
+.account-overlay{position:fixed;inset:0;z-index:90;background:#13223166;display:flex;justify-content:flex-end;padding:16px}
+.account-dialog{width:min(620px,100%);max-height:100%;min-width:0;display:flex;flex-direction:column;background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 40px #0003}
+.account-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 20px;border-bottom:1px solid var(--line);flex:none}
+.account-dialog-head h2{margin:0;font-size:19px;overflow-wrap:anywhere}
+.account-dialog-body{padding:18px 20px;overflow:auto;min-height:0;scrollbar-gutter:stable;display:flex;flex-direction:column;gap:16px}
+.account-dialog p{margin:0}.account-state{font-weight:600}.account-feedback{font-size:12px;color:var(--muted);min-height:18px;overflow-wrap:anywhere}
+.account-summary{margin:0;display:grid;grid-template-columns:minmax(100px,.8fr) minmax(0,1.2fr);gap:8px 16px;font-size:12px}
+.account-summary dt{color:var(--muted)}.account-summary dd{margin:0;overflow-wrap:anywhere}
+.account-action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.account-action-grid .btn{width:100%;white-space:normal;min-height:38px}
+.account-dialog [hidden]{display:none!important}.account-recovery{border-top:1px solid var(--line);padding-top:12px}.account-recovery>summary{cursor:pointer;font-size:12px;font-weight:650;padding:5px 0}.account-recovery>.account-action-grid{margin-top:12px}
+.account-subform{margin:14px 0 0;padding:14px;border:1px solid var(--line);border-radius:7px;display:flex;flex-direction:column;gap:12px;font-size:12px}
+.account-subform label:not(.account-check){display:grid;gap:6px}.account-subform select{width:100%;padding:8px;border:1px solid var(--strongline);border-radius:5px;background:var(--paper);color:inherit}
+.account-check{display:flex;align-items:flex-start;gap:9px}.account-check input{margin:3px 0 0;flex:none}.account-removal{border-color:#dba8a2;background:var(--paper)}
+.account-technical{font:11px/1.6 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;margin:10px 0 0}
+.account-row .row-body{min-width:0}.account-row .row-title,.account-row .row-meta{overflow-wrap:anywhere}.account-right{flex-wrap:wrap;justify-content:flex-end;gap:8px}
+.account-dialog :focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+#page[data-view="accounts"] .page-head{flex-wrap:wrap;gap:12px}#page[data-view="accounts"] .head-actions{flex-wrap:wrap}
+#page[data-view="accounts"] .card-title-row{flex-wrap:wrap;gap:12px}#page[data-view="accounts"] .filter-controls{flex-wrap:wrap;min-width:0}
+@media(max-width:600px){.account-overlay{padding:6px}.account-dialog-head{padding:13px}.account-dialog-body{padding:14px}.account-row{align-items:flex-start;flex-wrap:wrap}.account-right{width:100%;padding-left:50px;justify-content:flex-start}.account-summary{grid-template-columns:110px minmax(0,1fr);gap:7px 10px}}
+@media(max-width:360px){.account-action-grid{grid-template-columns:1fr}.account-summary{grid-template-columns:1fr}.account-summary dd{margin-bottom:6px}.account-right{padding-left:0}.account-circle{display:none}}

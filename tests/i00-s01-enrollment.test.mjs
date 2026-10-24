@@ -851,19 +851,19 @@ test('S01 D: route-pin refresh reuses one monitored IndexedDB connection, invali
   }
 });
 
-test('J01 different account intents cannot inherit a route check result',async()=>{
+test('J01 distinct intents do not join; Archive suspends at the current route effect checkpoint',async()=>{
  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
  const a=await enroll(h);let release,entered;
  const gate=new Promise(r=>release=r),started=new Promise(r=>entered=r);
  const probe=h.donor.probeAssigned;
  h.donor.probeAssigned=async p=>{entered();await gate;return probe(p)};
  const checking=h.flow.verifyRoute(a.accountId,{automatic:true});await started;
- const archive=await h.flow.archive(a.accountId,(await h.accounts.get(a.accountId)).account.revision);
- assert.equal(archive.ok,false);assert.equal(archive.code,'ACCOUNT_BUSY');
- assert.notEqual((await h.accounts.get(a.accountId)).account.state,'ARCHIVED');
- release();assert.equal((await checking).ok,true);
- const actual=await h.flow.archive(a.accountId,(await h.accounts.get(a.accountId)).account.revision);
- assert.equal(actual.state,'ARCHIVED');
+ const replacement=await h.flow.replacePersona(a.accountId,(await h.accounts.get(a.accountId)).account.revision);
+ assert.equal(replacement.ok,false);assert.equal(replacement.code,'ACCOUNT_BUSY');
+ const archiving=h.flow.archive(a.accountId,(await h.accounts.get(a.accountId)).account.revision);
+ for(let i=0;i<20&&(await h.accounts.get(a.accountId)).account.state!=='ARCHIVED';i++)await new Promise(r=>setImmediate(r));
+ assert.equal((await h.accounts.get(a.accountId)).account.state,'ARCHIVED');
+ release();await checking;assert.equal((await archiving).state,'ARCHIVED');
  assert.equal((await h.accounts.get(a.accountId)).account.state,'ARCHIVED');
 });
 test('J01 unique ninth candidate is reached after eight historical collisions',async()=>{

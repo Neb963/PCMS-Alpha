@@ -180,6 +180,7 @@ function createPcmsEnrollmentDonor(){
     },
     probeCandidate:({routeId})=>withRouteTestTargetLock('pcms-candidate-'+routeId,async()=>{
       const evidence=await pcmsProbeExits({routeId});
+      if(evidence.failure==='HOST')return evidence; // retain the first causal helper failure
       // A catalog probe must not accumulate an idle native forwarder for
       // every rejected relay. The donor's admission lock serializes this
       // unassigned-route cleanup against ordinary Persona route changes.

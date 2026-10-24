@@ -43,10 +43,11 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
   if(!accounts?.applyCurrent||!ledger?.reserve||!donor?.createBoundPersona||!pins?.hold||
      typeof openLogin!=='function'||typeof identify!=='function')
     throw new TypeError('Enrollment dependencies unavailable');
-  const running=new Map();
+  const running=new Map(),archiving=new Map();
   // Coalesce only the SAME intent. A different operator command must never
   // inherit a route probe's result and falsely claim it archived an account.
   function exclusive(accountId,kind,task){
+    if(archiving.has(accountId))return Promise.resolve(fail('ACCOUNT_BUSY'));
     const prior=running.get(accountId);
     if(prior)return prior.kind===kind?prior.promise:Promise.resolve(fail('ACCOUNT_BUSY'));
     const promise=Promise.resolve().then(task).catch(()=>fail('ENROLLMENT_INTERRUPTED'))
@@ -63,7 +64,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
   // restored after the ACTIVE record is committed. HELD->ACTIVE on the SAME
   // pinned route is allowed after a clean assigned probe (e.g. a manual route
   // edit undone); an exit owned by another account can never re-activate.
-  async function activate(bindingId,evidence,routeId){
+  async function activate(bindingId,evidence,routeId,accountId,allowArchived=false){
     // A successful IPv4/DNS probe is not complete exit-family evidence.
     // Withdraw old admission BEFORE parsing the new observation.
     pins.hold(bindingId);
@@ -73,9 +74,17 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       await ledger.hold(bindingId,out.code);
       return out;
     }
+    const current=await accounts.get(accountId);
+    if(!current.ok||current.account.bindingId!==bindingId||current.account.state==='ARCHIVED'&&!allowArchived){
+      await ledger.hold(bindingId,'ACCOUNT_ARCHIVED');return fail('ACCOUNT_ARCHIVED');
+    }
     const out=await ledger.observe({bindingId,routeId,exits:n.exits,
       exitSetDigest:await exitSetDigest(n.exits),observedAtMs:n.observedAtMs,activate:true});
     if(!out.ok)return out;
+    const latest=await accounts.get(accountId);
+    if(!latest.ok||latest.account.bindingId!==bindingId||latest.account.state==='ARCHIVED'&&!allowArchived){
+      await ledger.hold(bindingId,'ACCOUNT_ARCHIVED');return fail('ACCOUNT_ARCHIVED');
+    }
     pins.release(bindingId);
     await pins.reload();
     return {ok:true,routeId,changed:true};
@@ -98,8 +107,11 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     if(prior.ok&&prior.binding.routeId===persona.routeId&&!change){
       const ev=await donor.probeAssigned({bindingId,contextId:persona.contextId,routeId:persona.routeId});
       if(ev.ok){
-        const out=await activate(bindingId,ev,persona.routeId);
-        if(out.ok)return {ok:true,routeId:persona.routeId,changed:false};
+        const out=await activate(bindingId,ev,persona.routeId,account.accountId,!rotate);
+        if(out.ok){
+          if(account.routeSearch?.active)await accounts.applyCurrent({type:'ROUTE_SEARCH_COMPLETE',accountId:account.accountId});
+          return {ok:true,routeId:persona.routeId,changed:false};
+        }
         if(['EXIT_DRIFT_CONFLICT','IPV4_EVIDENCE_UNVERIFIED','IPV6_EVIDENCE_UNVERIFIED',
             'PROTECTED_EVIDENCE_UNVERIFIED','ROUTE_CHANGED_DURING_PROBE'].includes(out.code))return out;
         if(!rotate)return out;
@@ -166,7 +178,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       if(!assigned.ok)return assigned;
       const verified=await donor.probeAssigned({bindingId,contextId:persona.contextId,routeId:route.routeId});
       if(!verified.ok){if(verified.failure==='HOST')return verified;last=verified.code;failed.push(route.routeId);continue;}
-      const out=await activate(bindingId,verified,route.routeId);
+      const out=await activate(bindingId,verified,route.routeId,account.accountId);
       if(out.ok){await accounts.applyCurrent({type:'ROUTE_SEARCH_COMPLETE',accountId:account.accountId});return out;}
       if(out.code==='EXIT_DRIFT_CONFLICT')return out;
       last=out.code;await checked(route.routeId);
@@ -215,7 +227,14 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       account=acked.account;
     }
     const observed=await identify(account.personaUid);
-    if(!observed.ok)return silent?{ok:false,code:observed.code,needsLogin:true}:observed;
+    if(!observed.ok){
+      if(account.state==='VERIFIED')await accounts.applyCurrent({type:'REVERIFY',accountId});
+      return silent?{ok:false,code:observed.code,needsLogin:true}:observed;
+    }
+    if(account.state==='VERIFIED'&&account.boundPrincipal!==observed.proof.principalFingerprint){
+      await accounts.applyCurrent({type:'REVERIFY',accountId});
+      return fail('IDENTITY_CHANGED');
+    }
     // Same principal on an already verified record: nothing to rewrite, so
     // revision-bound generator/source associations stay valid.
     const verified=['VERIFIED','INVENTORY_PENDING'].includes(account.state)&&account.identity&&
@@ -321,11 +340,20 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
   // effect), then release only this account's OWN idle forwarder when the
   // donor proves it unused. Uncertain dispatched work keeps its journal;
   // Persona, cookies, principal and exit history are untouched.
-  async function archive(accountId,expectedRevision){
-    const out=await accounts.apply({type:'ARCHIVE',accountId,expectedRevision});
-    if(!out.ok)return out;
-    const release=await releaseIdle(out.account);
-    return {ok:true,state:'ARCHIVED',release:release.status};
+  function archive(accountId,expectedRevision){
+    const prior=archiving.get(accountId);
+    if(prior)return prior.revision===expectedRevision?prior.promise:Promise.resolve(fail('ACCOUNT_BUSY'));
+    const inFlight=running.get(accountId)?.promise;
+    const promise=(async()=>{
+      const out=await accounts.apply({type:'ARCHIVE',accountId,expectedRevision});
+      if(!out.ok)return out;
+      // Suspend durably now; the running effect settles at its next safe boundary.
+      if(inFlight)await inFlight;
+      const release=await releaseIdle(out.account);
+      return {ok:true,state:'ARCHIVED',release:release.status};
+    })().finally(()=>archiving.delete(accountId));
+    archiving.set(accountId,{revision:expectedRevision,promise});
+    return promise;
   }
   async function releaseIdle(snapshot){
     const accountId=snapshot.accountId;
@@ -412,7 +440,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       explicitRemoval:true,personaDeleted,at:now()});
   }
   return Object.freeze({
-    remove:(accountId,expectedRevision,options)=>exclusive(accountId,'REMOVE',
+    remove:(accountId,expectedRevision,options)=>exclusive(accountId,'REMOVE:'+String(expectedRevision)+':'+String(options?.deletePersona===true),
       ()=>remove(accountId,expectedRevision,options)),
     async begin(){
       const accountId=rid('acct_'),bindingId=rid('bind_');
@@ -429,7 +457,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     reactivate:(accountId,rev)=>exclusive(accountId,'REACTIVATE',()=>reactivate(accountId,rev)),
     upgrade:accountId=>exclusive(accountId,'UPGRADE',()=>upgrade(accountId)),
     replacePersona:(accountId,rev)=>exclusive(accountId,'REPLACE_PERSONA',()=>replacePersona(accountId,rev)),
-    archive:(accountId,rev)=>exclusive(accountId,'ARCHIVE',()=>archive(accountId,rev)),
+    archive:(accountId,rev)=>archive(accountId,rev),
     // Startup/alarm upkeep: resume operator-started setups and unfinished
     // upgrades, upgrade pre-S01 records in place, re-verify pinned routes.
     // Archived accounts are never probed (that would recreate a released
@@ -474,6 +502,6 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       }));
       return {ok:true,checked:results.length};
     },
-    running:accountId=>running.has(accountId)
+    running:accountId=>running.has(accountId)||archiving.has(accountId)
   });
 }

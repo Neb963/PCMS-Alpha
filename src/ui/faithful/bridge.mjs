@@ -1,3 +1,4 @@
+import {createAccountsWorkspace} from './accounts-workspace.mjs';
 import {advanceApprovedPublication} from './publication-flow.mjs';
 import {mountPortableRestore} from '../restore-view.mjs';
 import {portableRestoreTemplate} from './portable-restore-template.mjs';
@@ -105,6 +106,7 @@ const safeCount=n=>Number.isInteger(n)&&n>=0?n:'—';
 const snippet=(s,n=150)=>String(s??'').trim().slice(0,n);
 let currentToast;
 function notify(message){const e=shadow('#pcms-live-toast');if(!e)return;e.textContent=String(message);e.hidden=false;if(currentToast)clearTimeout(currentToast);currentToast=setTimeout(()=>e.hidden=true,6500)}
+const accountWorkspace=createAccountsWorkspace({root,el,b,request:readPort,reload:()=>loadAccounts(),notify});
 function updateNav(){for(const a of root.querySelectorAll('[data-nav]'))a.setAttribute('aria-current',a.dataset.nav===state.route?'page':'false');
  const label=shadow('#breadcrumb');if(label)label.textContent=({'work-queue':'Work Queue',overview:'Overview',generators:'Generators',accounts:'Accounts',refresher:'Refresher',settings:'Settings'})[state.route];
  const t=shadow('[data-nav="work-queue"] .nav-count');if(t){
@@ -492,7 +494,9 @@ function routeHandlers(){
   await loadRefresher();
  })();return}
  if(action==='go-accounts'){routeTo('accounts');return}
- if(action==='queue-help'||action==='account-info'){notify('Detailed operational guidance is available in Advanced protected controls.');return}
+ if(action==='refresh-accounts'){void loadAccounts();return}
+ if(action==='queue-help'){notify('Work Queue shows pending work and items needing attention. Open an item to review its available actions.');return}
+ if(action==='account-info'){notify('Use Manage to check an account’s login, protected route, inventory or recovery.');return}
  if(action.startsWith('check-service:')){state.settings='connections';void runReadiness(false);return}
  });
  root.addEventListener('click',event=>{const tab=event.target.closest('[data-filter]');if(tab){event.preventDefault();const [r,value]=tab.dataset.filter.split(':');if(r==='generators'){state.gen.filter=value;state.gen.offset=0;void loadGenerators()}if(r==='refresher'){state.ref.phase=value.toUpperCase();state.ref.offset=0;void loadRefresher()}if(r==='queue'){state.queue.filter=value;void loadQueue(true)}return}
@@ -696,114 +700,50 @@ async function syncManagedInventories(){
    ' unverified. No missing remote generator has been inferred.');
  await loadGenerators();
 }
+let accountReadEpoch=0;
 async function loadAccounts(){
- try{const result=await accounts();state.lastAccountList=Array.isArray(result.accounts)?result.accounts:[];state.errors.accounts='';if(state.route==='accounts')displayAccounts();return state.lastAccountList}
- catch(error){state.errors.accounts=error.message;state.lastAccountList=[];if(state.route==='accounts')displayAccounts();return []}
+ const epoch=++accountReadEpoch;
+ try{const result=await accounts();if(epoch!==accountReadEpoch)return state.lastAccountList;
+  state.lastAccountList=Array.isArray(result.accounts)?result.accounts:[];state.errors.accounts='';
+  if(state.route==='accounts')displayAccounts();return state.lastAccountList}
+ catch(error){if(epoch!==accountReadEpoch)return state.lastAccountList;
+  state.errors.accounts=error.message;if(state.route==='accounts')displayAccounts();return state.lastAccountList}
 }
 function displayAccounts(){if(state.route!=='accounts')return;
- const list=shadow('.account-list-scroll');if(!list)return;list.replaceChildren();
- const query=state.acct.query.trim().toLowerCase(),filter=state.acct.filter;
- const all=state.lastAccountList;
- const displayed=all.filter(a=>{const term=String(a.accountId||'').toLowerCase();const stateName=String(a.state||'');const matching=!query||term.includes(query)||String(a.personaUid||'').toLowerCase().includes(query);
- const status=filter==='All'||filter==='Connected'&&stateName==='VERIFIED'||filter==='Archived'&&stateName==='ARCHIVED'||filter==='Attention'&&!['VERIFIED','ARCHIVED'].includes(stateName);
- return matching&&status});
+ const list=shadow('.account-list-scroll');if(!list)return;
+ const query=state.acct.query.trim().toLowerCase(),filter=state.acct.filter,all=state.lastAccountList;
+ const displayed=all.filter(a=>{const term=String(a.accountId||'').toLowerCase(),name=String(a.state||'');
+  return (!query||term.includes(query)||String(a.personaUid||'').toLowerCase().includes(query))&&
+   (filter==='All'||filter==='Connected'&&name==='VERIFIED'||filter==='Archived'&&name==='ARCHIVED'||filter==='Attention'&&!['VERIFIED','ARCHIVED'].includes(name));
+ });
  const pages=Math.ceil(displayed.length/state.acct.perPage);if(state.acct.page>=pages)state.acct.page=Math.max(0,pages-1);
  const offset=state.acct.page*state.acct.perPage;
  const heading=shadow('.workspace-surface .card-title-row .h2 span');if(heading)heading.textContent=' · '+(state.errors.accounts?'unknown':all.length);
- if(state.errors.accounts){renderEmpty(list,'Account records unavailable: '+state.errors.accounts,'pcms-error');}
- else if(!all.length){renderEmpty(list,'No managed accounts observed locally. This is not a remote account census.');}
- else if(!displayed.length){renderEmpty(list,'No matching local account records.');}
- for(const item of displayed.slice(offset,offset+state.acct.perPage)){
-  const row=el('div','account-row');const mark=el('div','account-circle',String(item.accountId||'?').slice(-2).toUpperCase());
-  const data=el('div','row-body'),h=el('div','row-title',item.accountId||'Unnamed local account');const details=el('div','row-meta',`Persona ${item.personaUid?snippet(item.personaUid,18):'not observed'} · ${item.identity||'Identity unverified'} · ${item.protectedRoute||'Route unknown'}`);
-  data.append(h,details);
-  const right=el('div','account-right');const status=String(item.state||'UNKNOWN');const label=status==='VERIFIED'?'Ready':status==='ARCHIVED'?'Archived':status.replaceAll('_',' ').toLowerCase();
-  right.append(statusPill(label,status==='VERIFIED'?'green':status==='ARCHIVED'?'':'amber'));
-  right.append(b('Manage',()=>openAccountManager(item)));row.append(mark,data,right);list.append(row);
+ if(state.errors.accounts){list.replaceChildren();renderEmpty(list,'Account records unavailable: '+state.errors.accounts,'pcms-error')}
+ else if(!displayed.length){list.replaceChildren();renderEmpty(list,all.length?'No matching accounts.':'Add your first account to prepare a protected Persona and login tab.')}
+ else{
+  for(const child of [...list.children])if(!child.dataset.accountId)child.remove();
+  accountWorkspace.renderRows(list,displayed.slice(offset,offset+state.acct.perPage));
  }
- const pagination=shadow('.pagination span');if(pagination)pagination.textContent=state.errors.accounts?'Account read unavailable':`${displayed.length?offset+1:0}–${Math.min(offset+state.acct.perPage,displayed.length)} of ${displayed.length} matching local accounts`;
- const prev=shadow('[data-action="account-prev"]'),next=shadow('[data-action="account-next"]');if(prev)prev.disabled=state.acct.page===0;if(next)next.disabled=offset+state.acct.perPage>=displayed.length;
+ const pagination=shadow('.pagination span');if(pagination)pagination.textContent=state.errors.accounts?'Account read unavailable':
+  String(displayed.length?offset+1:0)+'–'+Math.min(offset+state.acct.perPage,displayed.length)+' of '+displayed.length+' accounts';
+ const prev=shadow('[data-action="account-prev"]'),next=shadow('[data-action="account-next"]');
+ if(prev)prev.disabled=state.acct.page===0;if(next)next.disabled=offset+state.acct.perPage>=displayed.length;
 }
-// The primary account interface issues only the same typed, revision-fenced
-// commands as the original account controller. No route/Persona authority lives
-// in the UI and status ACKs are never mistaken for finished remote effects.
 async function startAccountEnrollment(){
- if(!window.confirm('Add a new managed account? PCMS will prepare a protected Persona and open the Perchance login tab when the route is ready.'))return;
- notify('Starting protected account setup…');
+ const button=shadow('[data-action="add-account"]');if(button?.disabled)return;if(button)button.disabled=true;
+ notify('Preparing a protected Persona and route…');
  try{
   const out=await readPort('pcms-i03-accounts','ADD_ACCOUNT',{},90000);
-  notify(out?.ok?'Account setup started. Complete the login when prompted, then confirm it in Accounts.':
-    'Account setup could not start. Review the account and protected route status.');
- }catch{notify('Account setup could not be confirmed. Check the Accounts list before retrying.');}
- await loadAccounts();
+  await loadAccounts();
+  if(out?.ok){const account=state.lastAccountList.find(a=>a.accountId===out.accountId);
+   if(account&&state.route==='accounts')openAccountManager(account);
+   notify('Account setup started. Its protected route and login progress appear in Accounts.');
+  }else notify(out?.message||'Account setup could not start ('+String(out?.code||'unavailable').toLowerCase().replaceAll('_',' ')+').');
+ }catch{notify('Setup was not confirmed. Check Accounts before submitting another request.');await loadAccounts()}
+ finally{if(button?.isConnected)button.disabled=false}
 }
-function openAccountManager(item){
- const previous=root.activeElement;
- const overlay=el('div','drawer-overlay'),dialog=el('div','drawer');
- dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');
- dialog.setAttribute('aria-label','Manage protected account');
- const header=el('div','drawer-head'),title=el('h2','drawer-title','Account management'),actions=el('div','form-foot');
- const status=el('p','setting-note','Operations use the existing protected Persona and current account revision.');
- function close(){overlay.remove();if(previous?.isConnected)previous.focus({preventScroll:true})}
- header.append(title,b('Close',close));
- const body=el('div','drawer-body'),meta=el('dl');
- for(const [label,value] of [['Account',item.accountId],['State',item.state||'Unknown'],
-   ['Persona',item.personaUid||'Not observed'],['Route',item.protectedRoute||'Not verified']]){
-  const row=el('div','kv');row.append(el('dt','',label),el('dd','',value));meta.append(row);
- }
- body.append(meta,status);
- const allowed={
-  'Open login':'OPEN_LOGIN','Confirm login':'CONFIRM_LOGIN',
-  'Check protected route':'VERIFY_ROUTE','Sync generator inventory':'SYNC_ACCOUNT',
-  'Resume setup':'RESUME_SETUP','Reactivate':'REACTIVATE',
-  'Archive':'ARCHIVE'};
- async function execute(kind){
-  if(kind==='ARCHIVE'&&!window.confirm('Archive this account? PCMS preserves its Persona, source history and remote generators. Unfinished external effects must still be reconciled.'))return;
-  if(kind==='REACTIVATE'&&!window.confirm('Reactivate this archived account? PCMS will reverify its protected route and owner before resuming affected work.'))return;
-  const buttonList=[...actions.querySelectorAll('button')];buttonList.forEach(b=>b.disabled=true);
-  status.textContent=kind==='OPEN_LOGIN'?'Opening the protected login tab…':
-    'Checking the current account and applying the requested action…';
-  try{
-   const params={accountId:item.accountId,expectedRevision:item.revision};
-   if(kind==='REACTIVATE')params.explicitReactivation=true;
-   const out=await readPort(kind==='SYNC_ACCOUNT'?'pcms-i04-inventory':'pcms-i03-accounts',
-     kind,params,kind==='CONFIRM_LOGIN'||kind==='SYNC_ACCOUNT'?100000:45000);
-   if(out?.ok){
-    status.textContent=kind==='CONFIRM_LOGIN'&&out.state==='VERIFIED'?
-      'Login identity confirmed and saved. Refresh Accounts for current inventory.':
-      kind==='OPEN_LOGIN'?'Protected login tab requested. Return here after logging in.':
-      kind==='SYNC_ACCOUNT'?'Inventory read finished under the account’s protected route.':
-      'Request recorded. Its completion is tracked separately from this acknowledgment.';
-    notify(status.textContent);
-   }else{
-    status.textContent='The action was not confirmed. '+(
-      typeof out?.message==='string'?out.message:
-      'Check account status and prerequisites before retrying.');
-   }
-  }catch{status.textContent='The outcome is uncertain. Refresh Accounts before another action.';}
-  finally{await loadAccounts();buttonList.forEach(b=>b.disabled=false);}
- }
- const menu=item.state==='ARCHIVED'?
-   ['Reactivate']:item.state==='PREPARING'?
-   ['Resume setup','Check protected route']:
-   ['Open login','Confirm login','Check protected route','Sync generator inventory','Archive'];
- for(const label of menu){
-  const button=b(label,()=>void execute(allowed[label]),'btn small');
-  if(label==='Sync generator inventory'&&item.state!=='VERIFIED')button.disabled=true;
-  actions.append(button);
- }
- body.append(actions);dialog.append(header,body);overlay.append(dialog);root.append(overlay);
- overlay.addEventListener('keydown',event=>{
-  if(event.key==='Escape'){event.preventDefault();close();}
-  if(event.key==='Tab'){
-   const controls=[...dialog.querySelectorAll('button:not(:disabled)')],index=controls.indexOf(root.activeElement);
-   if(event.shiftKey&&index===0){event.preventDefault();controls.at(-1)?.focus();}
-   else if(!event.shiftKey&&index===controls.length-1){event.preventDefault();controls[0]?.focus();}
-  }
- });
- overlay.addEventListener('click',event=>{if(event.target===overlay)close()});
- header.querySelector('button')?.focus({preventScroll:true});
-}
+function openAccountManager(item){accountWorkspace.open(item)}
 async function loadGenerators(){if(state.route!=='generators')return;
  const epoch=++state.renderEpoch,body=shadow('.workspace-surface table tbody');if(!body)return;
  renderEmpty(body,'Reading observed local generator inventory…');
@@ -2447,6 +2387,7 @@ async function mount(){
  for(const r of routes)templates.set(r,assets[r+'.html']);
  root.innerHTML=assets['symbols.html']+assets['shell.html']+'<div id="pcms-live-toast" class="pcms-action-toast" role="status" hidden></div>';
  const link=document.createElement('link');link.rel='stylesheet';link.href=new URL('prototype.css',url).href;root.prepend(link);
+ const accountStyle=document.createElement('link');accountStyle.rel='stylesheet';accountStyle.href=new URL('accounts.css',url).href;root.append(accountStyle);
  const addon=document.createElement('style');addon.textContent=':host{display:block;height:100dvh;min-height:0} .pcms-action-toast{position:fixed;bottom:20px;right:25px;z-index:100;padding:12px 16px;background:#253e55;color:white;border-radius:7px;box-shadow:0 5px 24px #0003;max-width:380px} .pcms-action-toast[hidden]{display:none}';root.append(addon);
  let initial=location.hash.slice(1);if(!routes.includes(initial))initial='overview';state.route=initial;
  routeHandlers();await render();
@@ -2468,6 +2409,7 @@ async function mount(){
  };
  document.addEventListener('visibilitychange',refreshOnWake);
  window.addEventListener('focus',refreshOnWake);
+ setInterval(()=>{if(document.visibilityState!=='hidden'&&state.route==='accounts')void loadAccounts()},2500);
 }
 mount().catch(error=>{
  // Fail closed for presentation faults; never silently activate the historical

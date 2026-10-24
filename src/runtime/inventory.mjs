@@ -224,7 +224,7 @@ export function createInventoryStore(db) {
   }
   function accountSummaries(){
     return transact('readonly',(tx,finish)=>{
-      const summaries={};
+      const summaries=Object.create(null);
       const summary=id=>summaries[id]||= {known:false,observedAt:null,verifiedOwned:0,unverified:0};
       tx.objectStore('meta').openCursor().onsuccess=e=>{
         const row=e.target.result;
