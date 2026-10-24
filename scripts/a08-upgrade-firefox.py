@@ -108,6 +108,10 @@ def main():
             # is not a valid install/upgrade test. No profile filesystem edit.
             # Developer-only privileged browser context is explicitly enabled
             # by the disposable geckodriver's --allow-system-access flag.
+            # AOM must run from its own stable browser tab. Updating the
+            # currently selected donor extension document invalidates its
+            # Marionette actor before the upgrade has completed.
+            b.call('POST',f'/session/{session}/url',{'url':'about:addons'},timeout=30)
             b.call('POST',f'/session/{session}/moz/context',{'context':'chrome'})
             upgrade_js="""const done=arguments[arguments.length-1];
             (async()=>{
@@ -124,10 +128,9 @@ def main():
                 throw Error('A08_PRE_UPGRADE_ADDON_VERSION_CHANGED');
               const install=await AddonManager.getInstallForFile(file);
               if(!install)throw Error('A08_ADDON_INSTALL_NOT_CREATED');
-              // AOM's actual update invalidates the active extension tab,
-              // which can unload this Marionette document. Schedule the one
-              // update after the test-controller callback, then use the OS
-              // installed-archive hash as an independent completion oracle.
+              // Perform the single real update from about:addons after the
+              // test-controller callback; disk and runtime observations below
+              // establish completion separately from scheduling this intent.
               const existing=!!install.existingAddon;
               if(!existing)throw Error('A08_UPDATE_EXISTING_ADDON_NOT_DETECTED');
               const browserTab=window.gBrowser?.selectedBrowser||null;
@@ -231,6 +234,15 @@ def main():
             print('B A08_XPI_SHA256='+hashlib.sha256(target.read_bytes()).hexdigest(),
                   flush=True)
             print('B A08_PRIVATE_GIT_AND_LIVE_PROVIDER=NOT_TESTED',flush=True)
+        except Exception:
+            print('A08_FAILURE_LIFECYCLE='+json.dumps({
+                'ownedFirefoxPids':sorted(b.owned_firefox_pids(profile)),
+                'driverReturncode':server.poll(),
+                'installedArchiveMatches':installed_path.is_file() and
+                    hashlib.sha256(installed_path.read_bytes()).hexdigest()==expected
+                    if 'installed_path' in locals() else None
+            }),flush=True)
+            raise
         finally:
             if session:b.close(session)
             server.terminate()
