@@ -116,3 +116,29 @@ test('J02 scoped creation pause also holds Git-origin creation while preserving 
  assert.equal(await gate({intent:{sources:[{type:'GITHUB_MAIN'}]}}),false);
  for(const scope of ['development','gitWrite','publication'])assert.equal(authority.gate(scope),true);
 });
+
+test('J02 no-Git scoped revocation never reuses a revision; stale resume cannot undo later revoke or Git onboarding',async()=>{
+ const f=apiFixture(),a=createS06StandingAuthority(f.api);
+ assert.equal((await a.setOperatorManagement({enabled:false,expectedRevision:1})).revision,2);
+ assert.equal((await a.setOperatorManagement({enabled:true,expectedRevision:2})).revision,3);
+ const revoked=await a.revoke();assert.equal(revoked.record.revision,4);
+ assert.equal((await a.setOperatorManagement({enabled:true,expectedRevision:2})).code,'STALE_REVISION');
+ assert.equal(await createS06StandingAuthority(f.api).allowsOperatorManagement(),false);
+ await a.revoke('GIT_CONFIGURATION_CHANGED');assert.equal((await a.operatorManagementState()).revision,5);
+ f.values.pcmsS03Git={repository:'Neb963/per-gens',repositoryId:'12345'};
+ const before=await a.state();assert.equal(before.record.revision,5);
+ assert.equal((await a.update({repositoryId:'12345',expectedRevision:1,consent:'I AUTHORIZE PROTECTED PCMS OPERATIONS',grants})).code,'STANDING_AUTHORITY_STALE_REVISION');
+ const configured=await a.update({repositoryId:'12345',expectedRevision:5,consent:'I AUTHORIZE PROTECTED PCMS OPERATIONS',grants});
+ assert.equal(configured.record.revision,6);
+});
+test('J02 cold restore durably pauses scoped-only and absent default-enabled policy before the marker is removed',async()=>{
+ for(const existing of [undefined,{schema:1,revision:8,repository:'Neb963/per-gens',repositoryId:'0',grants,operatorManagement:true}]){
+  const f=apiFixture();if(existing)f.values[KEY]=existing;
+  f.values[restore]={runId:'restore_j02_policy',phase:'HOLD'};
+  const a=createS06StandingAuthority(f.api),held=await a.state();assert.equal(held.reason,'RESTORE_HOLD');
+  assert.equal(f.values[KEY].operatorManagement,false);assert.equal(f.values[KEY].revocationReason,'RESTORE_HOLD');
+  assert.equal(f.values[KEY].revision,existing?9:2);
+  const same=await a.state();assert.equal(same.record.revision,f.values[KEY].revision,'already persisted restore pause is idempotent');
+  delete f.values[restore];assert.equal(await createS06StandingAuthority(f.api).allowsOperatorManagement(),false);
+ }
+});

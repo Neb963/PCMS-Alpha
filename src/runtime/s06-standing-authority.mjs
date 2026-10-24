@@ -12,9 +12,9 @@ const fail=code=>({ok:false,code});
 const grantsValid=v=>v&&typeof v==='object'&&!Array.isArray(v)&&
  Object.keys(v).length===3&&Object.keys(OFF).every(k=>typeof v[k]==='boolean');
 const configured=c=>c?.repository==='Neb963/per-gens'&&RID.test(c.repositoryId||'');
-const valid=r=>r&&r.schema===1&&Number.isSafeInteger(r.revision)&&r.revision>0&&
- configured({repository:r.repository,repositoryId:r.repositoryId})&&
- grantsValid(r.grants);
+const policyValid=r=>r&&r.schema===1&&Number.isSafeInteger(r.revision)&&r.revision>0&&grantsValid(r.grants);
+const revisionOf=r=>Number.isSafeInteger(r?.revision)&&r.revision>0?r.revision:1;
+const valid=r=>policyValid(r)&&configured({repository:r.repository,repositoryId:r.repositoryId});
 const view=r=>({ok:true,record:{revision:r.revision,
  repository:r.repository,repositoryId:r.repositoryId,grants:{...r.grants},
  changedAt:r.changedAt||null,source:'EXPLICIT_OPERATOR_AUTHORITY'}});
@@ -39,9 +39,12 @@ export function createS06StandingAuthority(api){
      disable();
      // Restored standing grants may never reactivate when the restore marker
      // is eventually cleared. Persistently revoke on a cold restart, too.
-     if(restore.held&&valid(record)&&Object.values(record.grants).some(Boolean))
-       await revoke('RESTORE_HOLD');
-     return {ok:true,record:{revision:valid(record)?record.revision:1,
+     if(restore.held&&(!policyValid(record)||record.operatorManagement!==false||
+        Object.values(record.grants).some(Boolean)||record.revocationReason!=='RESTORE_HOLD')){
+       const paused=await revoke('RESTORE_HOLD');
+       return {...paused,reason:'RESTORE_HOLD'};
+     }
+     return {ok:true,record:{revision:revisionOf(record),
        repository:configured(cfg)?cfg.repository:null,
        repositoryId:configured(cfg)?cfg.repositoryId:null,
        grants:{...OFF},changedAt:null,source:'INACTIVE_NO_STANDING_GRANT'},
@@ -55,7 +58,7 @@ export function createS06StandingAuthority(api){
    // possible prior native/Git/provider dispatch still needs reconciliation.
    const previous=knownCurrent;disable();
    const raw=(await api.storage.local.get(KEY))?.[KEY];
-   const revision=Math.max(valid(raw)?raw.revision:1,valid(previous)?previous.revision:1);
+   const revision=Math.max(revisionOf(raw),revisionOf(previous));
    const cfg=(await api.storage.local.get(CONFIG))?.[CONFIG];
    const effectiveReason=reason==='GIT_CONFIGURATION_CHANGED'&&raw?.grants?.development===false&&
      raw.revocationReason!=='GIT_CONFIGURATION_CHANGED'?(raw.revocationReason||'LEGACY_PAUSED'):reason;
@@ -82,7 +85,7 @@ export function createS06StandingAuthority(api){
      return fail('STANDING_REPOSITORY_UNVERIFIED');
    const original=(await api.storage.local.get(KEY))?.[KEY];
    const prior=valid(original)&&original.repositoryId===cfg.repositoryId?
-     original:{schema:1,revision:1,repository:cfg.repository,
+     original:{schema:1,revision:revisionOf(original),repository:cfg.repository,
        repositoryId:cfg.repositoryId,grants:{...OFF},changedAt:null};
    if(prior.revision!==p.expectedRevision)
      return fail('STANDING_AUTHORITY_STALE_REVISION');
@@ -130,7 +133,7 @@ export function createS06StandingAuthority(api){
  }
  async function operatorManagementState(){
    const raw=(await api.storage.local.get(KEY))?.[KEY];
-   return {ok:true,revision:Number.isSafeInteger(raw?.revision)&&raw.revision>0?raw.revision:1,
+   return {ok:true,revision:revisionOf(raw),
      enabled:await allowsOperatorManagement()};
  }
  async function applyOperatorManagement(p){
@@ -140,7 +143,7 @@ export function createS06StandingAuthority(api){
    {
      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
      const raw=(await api.storage.local.get(KEY))?.[KEY];
-     const revision=Number.isSafeInteger(raw?.revision)&&raw.revision>0?raw.revision:1;
+     const revision=revisionOf(raw);
      if(p.expectedRevision!==revision)return fail('STALE_REVISION');
      // This scoped choice never grants source, Git or publication authority.
      const next={schema:1,revision:revision+1,repository:'Neb963/per-gens',repositoryId:'0',
