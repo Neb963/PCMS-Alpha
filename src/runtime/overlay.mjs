@@ -136,7 +136,9 @@ function createPcmsEnrollmentDonor(){
       const rank=r=>r.id===own?0:preferRouteIds.includes(r.id)?1:2;
       usable.sort((a,b)=>rank(a)-rank(b));
       let relays=[],relayList='AVAILABLE';
-      try{relays=await fetchMullvadRelays();}catch{relayList='UNAVAILABLE';}
+      const catalogAbort=new AbortController(),catalogTimer=setTimeout(()=>catalogAbort.abort(),10000);
+      try{relays=await fetchMullvadRelays({signal:catalogAbort.signal});}catch{relayList='UNAVAILABLE';}
+      finally{clearTimeout(catalogTimer);}
       const hosts=new Set(Object.values(state.routes||{}).map(r=>String(r?.host)+':'+Number(r?.port||0)));
       relays=relays.filter(r=>PCMS_RELAY_NET.test(r.ipv4_address)&&Number(r.port)===1080&&
         !hosts.has(r.ipv4_address+':1080'));
@@ -1066,6 +1068,11 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   bg = substituteOnce(bg, "    return buildProxyInfo(effectiveRoute, details.cookieStoreId || `tab-${details.tabId}`);", "    const latestPcmsState = pcmsContext.managed ? await getState() : state;\n    if(pcmsContext.managed &&\n        (!inspectRoutePin(latestPcmsState.profiles?.[details.cookieStoreId]).allow ||\n         decision.route?.id !== latestPcmsState.profiles?.[details.cookieStoreId]?.routeId))\n      return [{...BLACKHOLE_PROXY,connectionIsolationKey:details.cookieStoreId||'pcms-stale'},null];\n    return buildProxyInfo(effectiveRoute, details.cookieStoreId || `tab-${details.tabId}`);", "S01 proxy final pin");
   bg = substituteOnce(bg, "async function handleBeforeRequest(details) {\n  await initialize();\n  const state = await getState();", "async function handleBeforeRequest(details) {\n  await initialize();\n  const state = await getState();\n  const pcmsContext = await pcmsRouteGate(state.profiles?.[details.cookieStoreId]);\n  if(pcmsContext.managed && !pcmsContext.allow) {\n    recordBlock(details,'pcms-route-not-pinned');return {cancel:true};\n  }", "S01 blocking initial pin");
   bg = substituteOnce(bg, "  return {};\n}\n\nasync function fetchMullvadRelays()", "  const latestPcmsState = pcmsContext.managed ? await getState() : state;\n  if(pcmsContext.managed &&\n     (decision.mode!=='proxy' ||\n      !inspectRoutePin(latestPcmsState.profiles?.[details.cookieStoreId]).allow ||\n      decision.route?.id !== latestPcmsState.profiles?.[details.cookieStoreId]?.routeId)) {\n    recordBlock(details,'pcms-route-pin-changed');return {cancel:true};\n  }\n  return {};\n}\n\nasync function fetchMullvadRelays()", "S01 blocking final pin");
+  // Only PCMS enrollment supplies a deadline. Ordinary donor callers keep
+  // their existing behavior; frozen donor source remains untouched.
+  bg=substituteOnce(bg,'async function fetchMullvadRelays() {\n  const response = await fetch(MULLVAD_SOCKS_API, { cache: "no-store" });',
+    'async function fetchMullvadRelays({signal}={}) {\n  const response = await fetch(MULLVAD_SOCKS_API, { cache: "no-store", signal });','S01 bounded PCMS relay catalog read');
+
   bg = substituteOnce(bg,
     "  const decision = routeDecision(state, details);\n  if (decision.mode === \"block\") {\n    return [{ ...BLACKHOLE_PROXY",
     `  const decision = routeDecision(state, details);

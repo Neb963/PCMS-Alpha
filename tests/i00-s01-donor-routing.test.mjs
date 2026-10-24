@@ -39,7 +39,7 @@ function handlers(bg,{profile=tagged,mode='proxy',onResolve=()=>{}}={}){
   const gate=slice(bg,'function isPcmsProviderUrl(raw) {','void reloadRoutePins();');
   const fns=vm.runInNewContext(gate+'\n'+
     slice(bg,'async function handleProxyRequest(details) {','function recordBlock(details, reason) {')+
-    slice(bg,'async function handleBeforeRequest(details) {','async function fetchMullvadRelays()')+
+    slice(bg,'async function handleBeforeRequest(details) {','async function fetchMullvadRelays(')+
     '\n({proxy:handleProxyRequest,before:handleBeforeRequest});',ctx);
   return {...fns,blocks,state,resolves:()=>resolves,
     details:{tabId:3,cookieStoreId:profile.containerId,url:'https://perchance.org/',proxyInfo:{}}};
@@ -104,14 +104,14 @@ test('S01 D: extension-origin Perchance requests never inherit the donor extensi
 
 // Production enrollment adapter from the staged background, over fake donor primitives.
 function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=false,tabs=new Map(),leased=new Set(),
-  jobs=[],activeExits=['mullvad-7'],releaseFails=false}={}){
+  jobs=[],activeExits=['mullvad-7'],releaseFails=false,relayRead=null,timerSet=setTimeout,timerClear=clearTimeout}={}){
   const effects=[];
   let state={global:{},routes:{},profiles:{}};
   const securityState={ready:true,privacySafe:true};
   const commit=(next,permit=null)=>{beforeDonorStateCommit(state,next,permit);state=next;};
   const echo=url=>url.includes('ipv6')?(v6==='OBSERVED'?{ip:'2a03:1b20::1',mullvad_exit_ip:true}:null):
     url.includes('dnsleak')?[{ip:'10.64.0.1',mullvad_dns:true}]:{ip:'45.83.1.1',mullvad_exit_ip:true};
-  const ctx={URL,crypto,setTimeout,Uint32Array,JSON,Object,Array,Number,String,Promise,Set,Map,routeTestTargetLocks:new Map(),
+  const ctx={URL,crypto,AbortController,setTimeout:timerSet,clearTimeout:timerClear,Uint32Array,JSON,Object,Array,Number,String,Promise,Set,Map,routeTestTargetLocks:new Map(),
     ...pins,issueBoundPersonaCreatePermit,issueExistingPersonaTagPermit,BLOCK_ROUTE_ID:'__block__',
     browser:{tabs:{query:async({cookieStoreId})=>tabs.get(cookieStoreId)||[]}},
     listActiveProfileIds:async()=>jobs,
@@ -146,7 +146,7 @@ function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=fal
       next.routes[id]={id,provider:'mullvad',host:relay.ipv4_address,port:1080,type:'socks',enabled:true};
       effects.push('ROUTE_CREATE');commit(next);
     },
-    fetchMullvadRelays:async()=>relays,
+    fetchMullvadRelays:relayRead|| (async()=>relays),
     mullvadRuntime:{resolve:async r=>nativeError==='HOST'?null:r,drop:id=>effects.push('DROP:'+id)},
     async fetchJsonThroughRouteTest(_iso,_route,url){
       effects.push('PROBE:'+new URL(url).hostname.split('.')[0]);
@@ -290,4 +290,16 @@ test('J01 donor candidate probes release unused forwarders and preserve assigned
  const unavailable=adapter(bg,{relays:relayList,releaseFails:true});
  const r2=await unavailable.donor.ensureRoute((await unavailable.donor.candidateRoutes({bindingId:'binding_0001'})).candidates[0]);
  assert.equal((await unavailable.donor.probeCandidate({routeId:r2.routeId})).code,'CANDIDATE_RELEASE_UNCONFIRMED');
+});
+
+test('PCMS relay catalog timeout aborts the actual read and preserves existing route candidates without mutation',async()=>{
+ const bg=await background(),timers=[];let observedSignal=null,cleared=false;
+ const a=adapter(bg,{relayRead:({signal})=>new Promise((resolve,reject)=>{observedSignal=signal;signal.addEventListener('abort',()=>reject(signal.reason));}),
+  timerSet:(fn,ms)=>{timers.push({fn,ms});return 19;},timerClear:id=>{assert.equal(id,19);cleared=true;}});
+ a.set({global:{},profiles:{},routes:{[route.id]:route}});
+ const result=a.donor.candidateRoutes({bindingId:'binding_timeout'});
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(timers.length,1);assert.equal(timers[0].ms,10000);assert.equal(observedSignal.aborted,false);
+ timers[0].fn();const listed=await result;assert.equal(observedSignal.aborted,true);assert.equal(cleared,true);assert.equal(listed.relayList,'UNAVAILABLE');
+ assert.deepEqual(Array.from(listed.candidates,c=>c.routeId),[route.id]);assert.deepEqual(a.effects,[]);
+ assert.match(bg,/fetch\(MULLVAD_SOCKS_API, \{ cache: "no-store", signal \}\)/);
 });
