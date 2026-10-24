@@ -1391,6 +1391,31 @@ def main():
                     drawerClosed:!sh.querySelector('[aria-label="Create generators"]')};""")
                 assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['primaryAi'] and r4_primary['primaryAiPreparation'] and r4_primary['protectedRestore'] and r4_primary['restoreHeld'] and r4_primary['restoredConnections'] and r4_primary['readableConnections'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
                 print('B R4_PRIMARY_CREATION_AND_PROTECTED_SETTINGS_WITHOUT_LEGACY=PASS',flush=True)
+
+                # A09 post-acceptance regression: an independent read-only
+                # diagnostics run works without a disposable account or CREATE
+                # success. This is not a live Perchance/restore/Git-write proof.
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-settings="diagnostics"]').click();
+                  const btn=sh.querySelector('#pcms-diagnostic-independent-run');
+                  if(!btn||btn.disabled)throw Error('INDEPENDENT_DIAGNOSTIC_CONTROL_MISSING');
+                  btn.click();return true;""")
+                independent=None
+                for _ in range(160):
+                    independent=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                       const section=sh.querySelector('#pcms-diagnostic-independent-results');
+                       const text=sh.querySelector('#pcms-diagnostic-independent-status')?.textContent||'';
+                       return {count:section?.querySelectorAll('li')?.length||0,
+                          text,
+                          hasLocalInventory:section?.textContent.includes('INVENTORY STORE'),
+                          hasGit:section?.textContent.includes('GIT MAIN'),
+                          hasBackup:section?.textContent.includes('BACKUP RUNTIME'),
+                          independentExport:!sh.querySelector('#pcms-diagnostic-export')?.disabled};""")
+                    if independent['count']==8:break
+                    time.sleep(.14)
+                assert independent and independent['count']==8 and independent['hasLocalInventory'] and independent['hasGit'] and independent['hasBackup'] and independent['independentExport'],('A09_INDEPENDENT_CHECKS_BLOCKED_BY_CREATE',independent)
+                print('B A09_INDEPENDENT_READ_ONLY_MODULE_CHECKS=PASS',flush=True)
+
                 # A09 operator regression: one concrete interrupted local
                 # Git intent MUST reveal the recovery controls in the visible
                 # Settings form, with no real token or private network write.
