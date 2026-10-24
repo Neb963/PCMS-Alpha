@@ -60,6 +60,14 @@ export async function buildI00({ packageArchive = true } = {}) {
   await rm(path.join(stage,'pcms'),{recursive:true,force:true});
   await cp(path.join(root,'src/ui'),path.join(stage,'pcms'),{recursive:true});
   await applyI01Overlay(root,stage);
+  // A08: retired native/vault V2 implementations are historical source, not
+  // executable or packaged product capabilities. The portable runner and
+  // guarded portable restore remain fully enabled.
+  for (const obsolete of [
+    'backup-v2-session.mjs','restore-v2-qualified.mjs',
+    'backup-auto-export.mjs','backup-auto-run.mjs',
+    'backup-v2-verify.mjs','restore-v2-candidate.mjs'
+  ]) await rm(path.join(stage,'pcms',obsolete),{force:true});
   await verifyPackagedModuleGraph(stage);
   const combined = structuredClone(original);
   // Combined PCMS XPI is a distributable UPDATE of the same Firefox add-on.

@@ -42,6 +42,26 @@ def inspect(path, *, donor_root=pathlib.Path('donor/personamonkey/extension')):
                 raise AssertionError('A08_DONOR_BYTES_CHANGED:'+file)
         if DONOR.encode() not in z.read('lib/mullvad-native.js'):
             raise AssertionError('A08_DONOR_ROUTING_HOST_MISSING')
+        # The managed PCMS module graph must not contain reachable native
+        # host dispatch. PersonaMonkey donor native calls are deliberately
+        # outside this check, and donor byte equality is independently verified.
+        forbidden_ops=[]
+        for member in names:
+            if not member.startswith('pcms/') or not member.endswith(('.mjs','.js')):
+                continue
+            body=z.read(member)
+            if b'connectNative(' in body or b'sendNativeMessage(' in body:
+                forbidden_ops.append(member)
+        if forbidden_ops:
+            raise AssertionError('A08_PCMS_NATIVE_DISPATCH_PACKAGED:'+','.join(forbidden_ops))
+        # The modern startup module must retain full browser-local automation.
+        entry=z.read('pcms/entry.mjs')
+        auto=z.read('pcms/backup-auto-boundary.mjs')
+        restore=z.read('pcms/restore-boundary.mjs')
+        if b'./backup-auto-boundary.mjs' not in entry or b'createPortableRunner' not in auto:
+            raise AssertionError('A08_PORTABLE_AUTOBACKUP_DISABLED')
+        if b'APPLY_PORTABLE' not in restore or b'RECONCILE_PORTABLE' not in restore:
+            raise AssertionError('A08_PORTABLE_RESTORE_DISABLED')
         # No PCMS native host manifest or executable can be packaged. Only the
         # original donor's own nativeMessaging capability is retained.
         host_manifest=[n for n in names if n.endswith('.json') and (

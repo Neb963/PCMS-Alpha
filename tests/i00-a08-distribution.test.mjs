@@ -23,3 +23,15 @@ test('A08 operator instructions contain no superseded host, vault or backup requ
   assert.match(guide,/com\.persona\.mullvad_router/);
   assert.match(guide,/passwordless/i);
 });
+
+test('A08 active restore entry contains no retired PCMS native V2 dispatcher',async()=>{
+  const restore=await read('src/runtime/restore-boundary.mjs');
+  assert.doesNotMatch(restore,/createV2NativeConnection|prepareQualifiedV2FreshProfile|nativeV2Evidence/);
+  assert.match(restore,/APPLY_PORTABLE/);
+  assert.match(restore,/RESTORE_COMMAND_NOT_ALLOWED/);
+  const build=await read('scripts/build-i00.mjs');
+  for(const old of ['backup-v2-session.mjs','restore-v2-qualified.mjs',
+    'backup-auto-export.mjs','backup-auto-run.mjs','backup-v2-verify.mjs',
+    'restore-v2-candidate.mjs'])
+    assert.ok(build.includes("'"+old+"'"));
+});
