@@ -109,8 +109,13 @@ def main():
                   String(error)+':CODE='+install.error+
                   ':STATE='+install.state);
               }
+              // installAddonFromAOM prepares the user-initiated update.
+              // In this CI-only trusted context the test controller explicitly
+              // completes the actual AddonInstall and checks its result.
+              const installedAddon=await install.install();
               const current=await AddonManager.getAddonByID(ADDON_ID);
               done({ok:current?.version==='1.2.5',
+                installedVersion:installedAddon?.version||null,
                 oldVersion:before.version,currentVersion:current?.version,
                 installed:!!current?.isActive,error:install.error,
                 state:install.state,action:'FIREFOX_ADDON_MANAGER_UPDATE',
