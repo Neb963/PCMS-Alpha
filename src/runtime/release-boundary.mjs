@@ -39,7 +39,7 @@ export function validateReleaseMessage(api,sender,msg){
      Object.keys(msg).some(k=>!['type','params'].includes(k))||!TYPES.has(msg.type))
     return fail('INVALID_MESSAGE');
   const p=msg.params||{},allowed={
-    LIST:[],LIST_REVIEW:['after','limit'],GET:['slug'],GET_CHANGE:['slug'],
+    LIST:[],LIST_REVIEW:['after','limit','query','status'],GET:['slug'],GET_CHANGE:['slug'],
      HUMAN_CONTEXT:['slug'],GET_HUMAN:['slug'],
      DEFER_HUMAN:['slug','expectedStageRevision','expectedJobRevision','expectedFingerprint'],
      ADOPT_HUMAN:['slug','expectedRevision'],
@@ -60,7 +60,9 @@ export function validateReleaseMessage(api,sender,msg){
      (msg.type==='LIST_REVIEW'&&(
        (p.after!==undefined&&(typeof p.after!=='string'||p.after.length>100||
          !/^(?:[a-z0-9][a-z0-9-]{0,99})?$/.test(p.after)))||
-       (p.limit!==undefined&&(!Number.isSafeInteger(p.limit)||p.limit<1||p.limit>100))))||
+       (p.limit!==undefined&&(!Number.isSafeInteger(p.limit)||p.limit<1||p.limit>100))||
+       (p.query!==undefined&&(typeof p.query!=='string'||p.query.length>100))||
+       (p.status!==undefined&&!['ALL','NEEDS_ACTION','RUNNING','WAITING','COMPLETED'].includes(p.status))))||
      (['PREVIEW','APPROVE','DISPATCH','RECONCILE','REQUEST_CHANGES'].includes(msg.type)&&
        (p.token!==undefined&&(typeof p.token!=='string'||p.token.length<12||
         p.token.length>512||!/^[\x21-\x7e]+$/.test(p.token))))||
@@ -323,7 +325,7 @@ export function createReleaseBoundary(api,{
     if(msg.type==='ADOPT_HUMAN')return createS06HumanBoundary(api,{
       open:async()=>database,guard}).runTrusted(msg);
     if(msg.type==='LIST_REVIEW')return createS06ReviewQueue(database).list({
-      after:p.after||'',limit:p.limit||50});
+      after:p.after||'',limit:p.limit||50,query:p.query||'',status:p.status||'ALL'});
     if(msg.type==='GET_REVIEW_CHUNK'){
       // Source is taken only from sealed canonical stage/job. Read-only,
       // revision-fenced review never grants publisher or Git authority.

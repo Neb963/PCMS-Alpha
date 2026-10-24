@@ -1,3 +1,4 @@
+import {matchesReviewGroup} from '../review-queue-state.mjs';
 import {renderGitInventory,mountGitPromptEditor} from './git-workspace.mjs';
 import {createSourceWorkspace} from './source-workspace.mjs';
 import {createGeneratorBatches} from './generator-batches.mjs';
@@ -82,7 +83,7 @@ function friendlyConnectionIssue(code){
 }
 const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',owner:'ALL',source:'ALL',total:0,items:[]},
  ref:{offset:0,limit:25,query:'',phase:'ALL',snapshot:null,items:[],total:0},
- acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,readyItems:[],readyCursor:'',nextReady:null,readyMore:false,aiUnavailable:false,readyUnavailable:false,epoch:0},
+ acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],releaseCursor:'',nextRelease:null,releaseUnavailable:false,aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,readyItems:[],readyCursor:'',nextReady:null,readyMore:false,aiUnavailable:false,readyUnavailable:false,epoch:0},
  settings:'connections',settingsStatic:null,lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},
  renderEpoch:0,version:'0.1.7',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
@@ -396,15 +397,16 @@ function routeHandlers(){
  if(action==='queue-prev'){
    const prior=state.queue.history.pop();if(!prior)return;
    state.queue.opCursor=prior.op;state.queue.noticeCursor=prior.notice;
-   state.queue.aiCursor=prior.ai;state.queue.readyCursor=prior.ready;void loadQueue();return;
+   state.queue.aiCursor=prior.ai;state.queue.readyCursor=prior.ready;state.queue.releaseCursor=prior.release;void loadQueue();return;
  }
  if(action==='queue-next'){
    if(!state.queue.more)return;
-   state.queue.history.push({op:state.queue.opCursor,notice:state.queue.noticeCursor,ai:state.queue.aiCursor,ready:state.queue.readyCursor});
+   state.queue.history.push({op:state.queue.opCursor,notice:state.queue.noticeCursor,ai:state.queue.aiCursor,ready:state.queue.readyCursor,release:state.queue.releaseCursor});
    state.queue.opCursor=state.queue.nextOps===null?null:state.queue.nextOps;
    state.queue.noticeCursor=state.queue.nextNotices===null?null:state.queue.nextNotices;
    state.queue.aiCursor=state.queue.nextAi===null?null:state.queue.nextAi;
    state.queue.readyCursor=state.queue.nextReady===null?null:state.queue.nextReady;
+   state.queue.releaseCursor=state.queue.nextRelease===null?null:state.queue.nextRelease;
    void loadQueue();return;
  }
  if(action==='add-account'){void startAccountEnrollment();return}
@@ -787,7 +789,7 @@ function queueGroup(filter){
 async function loadQueue(reset=false){
  if(state.route!=='work-queue')return;
  const q=state.queue;
- if(reset){q.opCursor='';q.noticeCursor='';q.aiCursor='';q.readyCursor='';q.history=[];q.nextOps=null;q.nextNotices=null;q.nextAi=null;q.nextReady=null;}
+ if(reset){q.opCursor='';q.noticeCursor='';q.aiCursor='';q.readyCursor='';q.releaseCursor='';q.history=[];q.nextOps=null;q.nextNotices=null;q.nextAi=null;q.nextReady=null;q.nextRelease=null;}
  const epoch=++q.epoch;
  q.loading=true;q.error=null;displayQueue();
  const includeNotices=q.filter==='Needs action'||q.filter==='All';
@@ -800,8 +802,8 @@ async function loadQueue(reset=false){
        after:q.noticeCursor,limit:20,query:q.query}):Promise.resolve({ok:true,items:[],more:false,next:null}),
    guardedRead('pcms-i02-canonical-readonly','SUMMARY'),
    guardedRead('pcms-i02-canonical-readonly','NOTICE_SUMMARY'),
-   guardedRead('pcms-i13-release','LIST_REVIEW',{after:'',limit:40})
-     .catch(()=>({ok:false,items:[]})),
+   q.releaseCursor!==null?guardedRead('pcms-i13-release','LIST_REVIEW',{after:q.releaseCursor,limit:20,query:q.query.slice(0,100),status:queueGroup(q.filter)})
+     .catch(()=>({ok:false,items:[]})):Promise.resolve({ok:true,items:[],more:false,nextCursor:null}),
    q.aiCursor!==null?guardedRead('pcms-i10-ai','LIST_JOBS',{
      after:q.aiCursor,limit:20,query:q.query.slice(0,100),status:queueGroup(q.filter)
    }).catch(()=>({ok:false,jobs:[],more:false,nextCursor:null})):
@@ -822,7 +824,9 @@ async function loadQueue(reset=false){
   q.nextAi=q.aiMore?ai.nextCursor:null;
   q.readyUnavailable=ready?.ok!==true;q.readyItems=ready?.ok?(ready.items||[]):[];q.readyMore=ready?.ok&&ready.more===true;
   q.nextReady=q.readyMore?ready.nextCursor:null;
-  q.more=Boolean(ops.more||notices.more||q.aiMore||q.readyMore);q.summary={...summary,attention:noticeTotals};
+  q.nextRelease=releases?.ok&&releases.more?releases.nextCursor:null;
+  q.releaseUnavailable=releases?.ok!==true;
+  q.more=Boolean(ops.more||notices.more||q.aiMore||q.readyMore||releases?.more);q.summary={...summary,attention:noticeTotals};
   q.releaseItems=releases?.ok?(releases.items||[]):[];
   q.reviews=identities?.ok?(identities.items||[]):[];
   q.missing=identities?.ok?(identities.missingFolders||[]):[];
@@ -839,6 +843,7 @@ function displayQueue(){
  if(q.loading)renderEmpty(holder,'Reading recorded operations and incidents…');
  else if(q.error)renderEmpty(holder,'The local work queue is unavailable. No operation result has been assumed.');
  else{
+  if(q.releaseUnavailable)holder.append(el('p','setting-note','Publication records could not be read. Refresh the queue to try again.'));
   if(q.aiUnavailable)
    holder.append(el('p','setting-note','AI development records could not be read. Their absence here does not mean there is no work.'));
   if(q.readyUnavailable)
@@ -917,9 +922,7 @@ function displayQueue(){
     row.append(mark,data);holder.append(row);
    }
   if(q.filter==='Needs action'||q.filter==='All'||q.filter==='Waiting')
-   for(const candidate of q.releaseItems.filter(x=>q.filter==='All'||
-      q.filter==='Waiting'?x.state!=='CONFIRMED_PUBLIC':
-        ['READY_FOR_REVIEW','EXCEPTION_READY_FOR_REVIEW','BLOCKED','WAITING_FOR_GIT'].includes(x.state))){
+   for(const candidate of q.releaseItems.filter(x=>matchesReviewGroup(x.state,queueGroup(q.filter)))){
     if(q.query&&!candidate.slug.includes(q.query.toLowerCase()))continue;
     const row=el('div','queue-item');const detail=el('div','row-body');
     detail.append(el('strong','',candidate.slug),
@@ -2184,7 +2187,7 @@ async function mount(){
  const refreshOnWake=()=>{
   if(document.visibilityState==='hidden')return;
   if(state.route==='overview')displayOverview();
-  else if(state.route==='work-queue')void loadQueue(true);
+  else if(state.route==='work-queue')void loadQueue();
   else if(state.route==='generators')void loadGenerators();
   else if(state.route==='accounts')void loadAccounts();
   else if(state.route==='refresher')void loadRefresher();
