@@ -66,7 +66,7 @@ export function createAccountsWorkspace({root,el,b,request,reload,notify}){
    }
    row.account=a;set(row.querySelector('.row-title'),title(a));
    const inv=a.inventory,owned=inv?.known?inv.verifiedOwned+' owned':'Inventory not synchronized';
-   set(row.querySelector('.row-meta'),owned+' · '+(a.message||(a.working?'Working…':accountLabel(a))));
+   set(row.querySelector('.row-meta'),owned+' · '+(a.state==='ARCHIVED'?'Archived':a.message||(a.working?'Working…':accountLabel(a))));
    set(row.querySelector('[data-account-status]'),accountLabel(a));
    const open=row.querySelector('[data-account-open]');open.hidden=a.state==='ARCHIVED'||!!a.removed;
    open.disabled=!a.personaUid;open.title=a.personaUid?'Open in this account’s protected Persona':'Persona preparation is not finished';
@@ -134,7 +134,8 @@ export function createAccountsWorkspace({root,el,b,request,reload,notify}){
    set(cells.IPv6,p?.ipv6Disposition==='BLOCKED_VERIFIED'?'Blocked · verified':p?.exits?.filter(e=>e.family==='IPv6').map(e=>e.address).join(', ')||'Not verified');
    set(cells['Last route check'],date(p?.verifiedAtMs));set(cells['Owned generators'],inv?.known?inv.verifiedOwned:'Unknown · sync needed');
    set(cells['Inventory checked'],date(inv?.observedAt));
-   set(stateLine,current.removed?'Removed locally. Preserved records remain available for recovery.':current.message||
+   set(stateLine,current.removed?'Removed locally. Preserved records remain available for recovery.':
+    current.state==='ARCHIVED'?'Archived. Reactivate to verify and resume.':current.message||
     (current.working?'Working on this account…':current.state==='INVENTORY_PENDING'?'Login confirmed. Synchronize inventory to finish setup.':
     current.state==='VERIFIED'?'Ready for managed work.':current.state==='ARCHIVED'?'Archived. Reactivate to verify and resume.':
     current.state==='PREPARING'?'Preparing its protected Persona and route.':'Open Perchance, complete login or a challenge, then confirm login.'));
