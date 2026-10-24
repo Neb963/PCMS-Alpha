@@ -2,7 +2,7 @@
 // ports and canonical production receipts. Never invents a provider success.
 import {DIAGNOSTIC_CONFIG,DIAGNOSTIC_RUN,STAGES,
   validateDisposable,evaluateDisposable,createDiagnosticRun,
-  addDiagnosticEvent,diagnosticReport,recoverInterruptedDiagnostic} from './s08-diagnostic-core.mjs';
+  addDiagnosticEvent,diagnosticReport,recoverInterruptedDiagnostic,canStartNewDiagnostic} from './s08-diagnostic-core.mjs';
 // A07: direct primary UI mount; isolated per-view state and genuine guarded ports.
 export function mountDiagnosticController(root=document){
 const by=id=>root.querySelector('#pcms-diagnostic-'+id);
@@ -50,7 +50,7 @@ function request(which,type,params={}){
 }
 function controls(){
  save.disabled=busy;start.disabled=busy||!configuration||
-   (run!==null&&run.status!=='NOT_TESTED');
+   !canStartNewDiagnostic(run);
  resume.disabled=busy||!run||!run.firstFailure;
  rerun.disabled=busy||!configuration;exporter.disabled=busy||!run;
  cleanup.disabled=busy||!run||run.cleanup==='VERIFIED_REMOTE_AND_GIT_ABSENT';
@@ -344,7 +344,7 @@ function nextRun(){
  return created.run;
 }
 start.addEventListener('click',async()=>{
- if(busy||!configuration||run&&run.status!=='NOT_TESTED')return;
+ if(busy||!configuration||!canStartNewDiagnostic(run))return;
  if(!run){run=nextRun();await persist();}
  void drive();
 });
