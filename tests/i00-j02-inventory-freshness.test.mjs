@@ -11,14 +11,14 @@ const a={accountId:'account_j02_fresh',personaUid:'persona-j02-fresh',state:'VER
  revision:4,bindingVersion:1,boundPrincipal:'a'.repeat(64),
  identity:{source:'GUARDED_SESSION_READBACK',bindingVersion:1,principalFingerprint:'a'.repeat(64)}};
 const at=Date.now();
-const marker={source:'GUARDED_PERCHANCE_READBACK',complete:true,conflicts:0,
+const marker={source:'GUARDED_PERCHANCE_READBACK',complete:true,conflicts:0,countsTrusted:true,lastConfirmedCount:0,ownedSlugs:[],
  observationId:'initial_inventory_j02',observedAt:at,accountRevision:4,bindingVersion:1};
 async function put(db,rows){const tx=db.transaction(['meta'],'readwrite');
  for(const row of rows)tx.objectStore('meta').put(row);
  await new Promise((r,j)=>{tx.oncomplete=r;tx.onabort=j});}
-test('J02 fresh census requires complete guarded current context, no conflicts and no fabricated future age',()=>{
+test('J02 fresh census requires complete guarded current context, trustworthy counts and no fabricated future age',()=>{
  assert.equal(qualifiedCreationInventory(marker,a,at),true);
- for(const patch of [{complete:false},{conflicts:1},{accountRevision:3},{bindingVersion:2},
+ for(const patch of [{complete:false},{countsTrusted:false},{accountRevision:3},{bindingVersion:2},
   {source:'OPERATOR'},{observedAt:at-CREATION_INVENTORY_MAX_AGE_MS-1},{observedAt:at+1}]){
   assert.equal(qualifiedCreationInventory({...marker,...patch},a,at),false,JSON.stringify(patch));
  }

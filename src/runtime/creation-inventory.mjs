@@ -5,7 +5,7 @@ export function qualifiedCreationInventory(marker,account,at=Date.now()){
  return !!marker&&marker.source==='GUARDED_PERCHANCE_READBACK'&&marker.complete===true&&
   typeof marker.observationId==='string'&&marker.observationId.length>0&&
   marker.accountRevision===account.revision&&marker.bindingVersion===account.bindingVersion&&
-  marker.conflicts===0&&Number.isSafeInteger(marker.observedAt)&&marker.observedAt>0&&
+  marker.countsTrusted===true&&Number.isSafeInteger(marker.lastConfirmedCount)&&marker.lastConfirmedCount>=0&&Number.isSafeInteger(marker.observedAt)&&marker.observedAt>0&&
   marker.observedAt<=at&&at-marker.observedAt<=CREATION_INVENTORY_MAX_AGE_MS;
 }
 export function readCreationInventory(db,accountId){
@@ -22,7 +22,6 @@ export async function ensureCreationInventory({db,account,syncInventory,now=Date
  if(typeof syncInventory!=='function')return fail('CURRENT_INVENTORY_REQUIRED');
  const refreshed=await syncInventory(account.accountId,account.revision);
  if(!refreshed?.ok)return fail(refreshed?.code||'INVENTORY_REFRESH_UNAVAILABLE');
- if(refreshed.held===true||refreshed.conflicts!==0)return fail('INVENTORY_REFRESH_CONFLICT');
  const after=await readCreationInventory(db,account.accountId);
  if(!qualifiedCreationInventory(after,account,now())||after.observationId===before?.observationId)
   return fail('CURRENT_INVENTORY_REQUIRED');

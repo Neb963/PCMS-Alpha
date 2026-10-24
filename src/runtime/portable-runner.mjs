@@ -1,3 +1,4 @@
+import {preparePortableOriginals,completePortableOriginals} from './portable-originals.mjs';
 // A02: one browser-native daily and manual backup coordinator. Never invokes
 // a PCMS native host, credential vault or source/provider/Git mutation.
 import {openCanonicalDatabase,createRestoreSentinel,createCanonicalStore} from './journal.mjs';
@@ -45,7 +46,7 @@ export function createPortableRunner(api,{
   open=openCanonicalDatabase,clock=Date.now,
   nextId=()=>crypto.randomUUID().replaceAll('-',''),
   capture=capturePortableCut,dispatch=downloadPortable,wait=awaitAuto,
-  observe=inspectAuto
+  observe=inspectAuto,prepareOriginals=preparePortableOriginals,completeOriginals=completePortableOriginals
 }={}){
   let pending=null,manualTask=null,dbPromise=null;
   const db=()=>dbPromise ||= open().catch(e=>{dbPromise=null;throw e});
@@ -95,8 +96,10 @@ export function createPortableRunner(api,{
     if(a.status==='DOWNLOAD_STARTED'){
       const proof=await observe(api.downloads,{runId:a.runId,day:a.day,
         sha256:a.sha256,bytes:a.bytes,id:a.downloadId});
-      return proof?s.move(a.runId,'DOWNLOAD_STARTED','COMPLETE',{archive:proof}):
-        s.move(a.runId,'DOWNLOAD_STARTED','HELD',{code:'DOWNLOAD_OUTCOME_UNKNOWN'});
+      if(proof){const done=await s.move(a.runId,'DOWNLOAD_STARTED','COMPLETE',{archive:proof});
+        if(done.ok)await completeOriginals(await db(),{runId:a.runId,sha256:a.sha256,bytes:a.bytes,browserCompleted:true});
+        return done;}
+      return s.move(a.runId,'DOWNLOAD_STARTED','HELD',{code:'DOWNLOAD_OUTCOME_UNKNOWN'});
     }
     return fail('BACKUP_INFLIGHT');
   }
@@ -120,6 +123,7 @@ export function createPortableRunner(api,{
         catch(e){await s.move(runId,'PREPARING','FAILED',{code:explain(e)});
           return fail(explain(e));}
         const fileHash=await sha(archive.blob);
+        await prepareOriginals(await db(),archive,runId,fileHash);
         const verified=await s.move(runId,'PREPARING','VERIFIED',
           {sha256:fileHash,bytes:archive.bytes});
         if(!verified.ok)return verified;
@@ -151,6 +155,7 @@ export function createPortableRunner(api,{
         }
         const complete=await s.move(runId,'DOWNLOAD_STARTED','COMPLETE',{archive:proof});
         if(!complete.ok)return complete;
+        await completeOriginals(await db(),{runId,sha256:fileHash,bytes:archive.bytes,browserCompleted:true});
         await retention.prune();
         return {ok:true,code:'BROWSER_REPORTED_COMPLETE',sha256:fileHash,
           bytes:archive.bytes,diskReadback:false};
@@ -192,6 +197,7 @@ export function createPortableRunner(api,{
             const proof=await manualReceipt(api.downloads,previous.downloadId,
               previous.bytes,previous.runId);
             if(!proof)return fail('MANUAL_DOWNLOAD_UNCERTAIN');
+            await completeOriginals(await db(),{runId:previous.runId,sha256:previous.sha256,bytes:previous.bytes,browserCompleted:true});
             await recordManual({...previous,status:'BROWSER_REPORTED_COMPLETE',
               code:'BROWSER_REPORTED_COMPLETE',tier:2});
           }else return fail('MANUAL_DOWNLOAD_UNCERTAIN');
@@ -204,6 +210,7 @@ export function createPortableRunner(api,{
           startedAt:clock(),code:'PREPARING'});
         const archive=await capture(api,await db(),sentinel);
         const fileHash=await sha(archive.blob);
+        await prepareOriginals(await db(),archive,runId,fileHash);
         verifiedBytes=archive.bytes;verifiedSha256=fileHash;
         await recordManual({runId,status:'INTERNAL_VERIFIED',tier:1,
           sha256:fileHash,bytes:archive.bytes,startedAt:clock()});
@@ -222,6 +229,7 @@ export function createPortableRunner(api,{
         await recordManual({runId,status:'BROWSER_REPORTED_COMPLETE',tier:2,
           sha256:fileHash,bytes:archive.bytes,downloadId:receipt.downloadId,
           startedAt:clock(),code:'BROWSER_REPORTED_COMPLETE'});
+        await completeOriginals(await db(),{runId,sha256:fileHash,bytes:archive.bytes,browserCompleted:true});
         return {ok:true,code:'BROWSER_REPORTED_COMPLETE',tier:2,
           sha256:fileHash,bytes:archive.bytes,runId,
           downloadId:receipt.downloadId,diskReadback:false};
@@ -241,7 +249,7 @@ export function createPortableRunner(api,{
     try{return await manualTask;}finally{manualTask=null;}
   }
   return Object.freeze({
-    status,tick,manual,recover:async()=>reconcile(await store()),
+    status,tick,manual,requestOriginalCheckpoint:()=>manual(),recover:async()=>reconcile(await store()),
     enable:async value=>{
       const s=await store(),out=await s.enabled(value);
       if(out.ok&&value)void tick();

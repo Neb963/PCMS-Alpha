@@ -1346,7 +1346,7 @@ def main():
                   const drawer=sh.querySelector('[aria-label="Create generators"]');
                   const primaryCreate=!!drawer&&
                     !!drawer.querySelector('textarea')&&
-                    !![...drawer.querySelectorAll('button')].find(x=>x.textContent.includes('Create private generators'));
+                    !![...drawer.querySelectorAll('button')].find(x=>x.textContent.includes('Preview assignments'));
                   const legacyOpened=document.body.classList.contains('pcms-native-open');
                   drawer?.querySelector('button')?.click();
                   sh.querySelector('[data-nav="work-queue"]').click();

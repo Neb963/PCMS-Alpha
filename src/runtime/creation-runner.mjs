@@ -26,7 +26,7 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
   let dbPromise;
   const store=async()=>makeStore(await (dbPromise||=open().catch(e=>{
     dbPromise=null;throw e;})));
-  async function step(intentId,expectedRevision){
+  async function advance(intentId,expectedRevision){
     try{
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       const s=await store();
@@ -211,6 +211,11 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         return fail('GIT_CONDITIONAL_ASSOCIATION_PENDING');
       return fail('CREATION_NO_SAFE_TRANSITION');
     }catch{return fail('S04_CREATION_RUNNER_UNAVAILABLE');}
+  }
+  async function step(intentId,expectedRevision){
+    const result=await advance(intentId,expectedRevision);
+    try{await (await store()).recordAttempt(intentId,result?.record?.revision??expectedRevision,result,now());}catch{}
+    return result;
   }
   return Object.freeze({step});
 }

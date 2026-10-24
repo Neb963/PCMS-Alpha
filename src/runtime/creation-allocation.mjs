@@ -17,13 +17,17 @@ export function selectS04Account({intent,accounts,inventory,pending}){
   if(eligible.some(a=>!valid(a)||a.identity?.source!=='GUARDED_SESSION_READBACK'&&
      a.state==='VERIFIED'))return bad('ACCOUNT_COUNT_UNVERIFIED');
   if(eligible.length===0)return bad('NO_MANAGED_ACCOUNTS');
-  if(eligible.some(a=>a.inventoryComplete!==true))
+  if(eligible.some(a=>a.inventoryComplete!==true||
+      (a.inventoryCount&&'lastConfirmedCount' in a.inventoryCount&&
+       !Number.isSafeInteger(a.inventoryCount.lastConfirmedCount))))
     return bad('INITIAL_INVENTORY_UNKNOWN');
-  const owners=new Map(eligible.map(a=>[a.accountId,0]));
+  const snapshots=new Map(eligible.filter(a=>Number.isSafeInteger(a.inventoryCount?.lastConfirmedCount))
+    .map(a=>[a.accountId,a.inventoryCount]));
+  const owners=new Map(eligible.map(a=>[a.accountId,snapshots.get(a.accountId)?.lastConfirmedCount||0]));
   for(const row of inventory){
     if(!row||typeof row.slug!=='string'||typeof row.accountId!=='string')
       return bad('INVENTORY_COUNT_UNVERIFIED');
-    if(owners.has(row.accountId)){
+    if(owners.has(row.accountId)&&!snapshots.has(row.accountId)){
       // A disputed owner/identity is neither known-free nor definitely
       // safe for a new allocation. It must be resolved independently.
       if(['OWNER_CONFLICT','IDENTITY_CONFLICT','OWNER_UNVERIFIED'].includes(row.ownerState))
@@ -45,7 +49,11 @@ export function selectS04Account({intent,accounts,inventory,pending}){
   const archived=new Set(accounts.filter(a=>a?.state==='ARCHIVED').map(a=>a.accountId));
   for(const item of pending){
     if(item?.state==='REJECTED'||item?.state==='ABORTED'||item?.state==='ARCHIVED')continue;
-    if(materialized.has(JSON.stringify([item?.accountId,item?.slug,item?.remoteId])))continue;
+    const snapshot=snapshots.get(item?.accountId);
+    if(snapshot){
+      if(snapshot.ownedSlugs?.includes(item?.slug)||snapshot.ownedSlugs?.includes(item?.temporarySlug)||
+         (item?.createdObservedAt&&item.createdObservedAt<=snapshot.countObservedAt))continue;
+    }else if(materialized.has(JSON.stringify([item?.accountId,item?.slug,item?.remoteId])))continue;
     if(archived.has(item?.accountId))continue; // preserve its job without charging another account
     if(typeof item?.accountId!=='string'||!Number.isSafeInteger(pendingCounts.get(item.accountId)))
       return bad('PENDING_COUNT_UNVERIFIED');

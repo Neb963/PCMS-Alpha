@@ -44,7 +44,7 @@ function fixture({failedDispatch=false,manualInterrupted=false}={}){
       receipt.sha256,receipt.bytes,row):null;
   };
   return {db,api,store:createAutoStore(db,()=>100000000),local,
-    runner:createPortableRunner(api,{open:async()=>db,clock:()=>100000000,
+    runner:createPortableRunner(api,{prepareOriginals:async()=>{},open:async()=>db,clock:()=>100000000,
       nextId:()=>String(++next).padStart(32,'0'),capture,dispatch,wait}),
     effects:()=>effects,captures:()=>captures,
     finishManualDownload:()=>{for(const row of downloaded.values()){
@@ -52,7 +52,7 @@ function fixture({failedDispatch=false,manualInterrupted=false}={}){
     replaceManualRunId:fake=>{for(const row of downloaded.values())
       row.filename=row.filename.replace(/pcms-alpha-manual_[a-f0-9]{32}/,
         'pcms-alpha-'+fake);},
-    cold:()=>createPortableRunner(api,{open:async()=>db,clock:()=>100000000,
+    cold:()=>createPortableRunner(api,{prepareOriginals:async()=>{},open:async()=>db,clock:()=>100000000,
       nextId:()=>String(++next).padStart(32,'0'),capture,dispatch,wait})};
 }
 test('A02 daily portable backup journals the effect, completes and never calls native vault',async()=>{
@@ -79,7 +79,7 @@ test('A02 lost download ACK journals uncertainty and blocks replay, including ne
   const held=await f.store.read();
   assert.equal(held.state.active.status,'DISPATCH_POSSIBLE');
   assert.equal((await f.runner.tick()).ok,false);
-  const cold=createPortableRunner(f.api,{open:async()=>f.db,clock:()=>100000000,
+  const cold=createPortableRunner(f.api,{prepareOriginals:async()=>{},open:async()=>f.db,clock:()=>100000000,
     nextId:()=>String(44).padStart(32,'0'),capture:async()=>{throw Error('DO_NOT_CAPTURE');}});
   assert.equal((await cold.tick()).code,'DOWNLOAD_OUTCOME_UNKNOWN');
   assert.equal(f.effects(),1);
@@ -91,7 +91,7 @@ test('A02 manual lost browser ACK is durable and cannot dispatch a second file',
   assert.equal(first.ok,false);
   assert.equal(first.code,'DOWNLOAD_OUTCOME_UNKNOWN');
   assert.equal(f.effects(),1);
-  const cold=createPortableRunner(f.api,{open:async()=>f.db,
+  const cold=createPortableRunner(f.api,{prepareOriginals:async()=>{},open:async()=>f.db,
     clock:()=>100000000,nextId:()=>('f'.repeat(32)),
     capture:async()=>{throw Error('DUPLICATE_BACKUP_PREVENTED')}});
   const second=await cold.manual();

@@ -12,3 +12,9 @@ body.pcms-faithful-ready.pcms-native-open>.app{left:0!important;top:0!important;
  background:#175bb5;color:#fff;border:1px solid #1457ab;border-radius:7px;
  padding:12px 20px;font:700 13px system-ui;box-shadow:0 7px 28px #1628404d;cursor:pointer}
 body.pcms-native-open #pcms-legacy-return{display:block}
+/* Generator work remains readable at fleet and batch scale. */
+.batch-item{padding:12px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.batch-item .btn{margin:3px 5px 0 0}.batch-item textarea{margin-top:10px;width:100%}
+.drawer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:14px}
+.drawer-body>label{display:block;margin-bottom:14px}.drawer-body>label>textarea,.drawer-body>label>select{display:block;width:100%;margin-top:6px}
+[data-generator-extra-filters]{gap:16px;padding-bottom:16px}[data-generator-extra-filters] label{font-size:12px;color:var(--muted)}

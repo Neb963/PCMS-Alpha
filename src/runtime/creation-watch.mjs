@@ -77,7 +77,8 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
               'PRIVATE_EMPTY_CONFIRMED','ADOPTION_ORIGINAL_PENDING',
               'GIT_INIT_PENDING','GIT_PREPARED','GIT_DISPATCH_POSSIBLE',
               'GIT_OBSERVING','GIT_UNCERTAIN'].includes(item.state)&&
-              !item.conflict)candidates.push(item);
+              !item.conflict&&!(item.lastAttempt?.revision===item.revision&&
+                item.lastAttempt.ok===false&&clock()-item.lastAttempt.at<5*60*1000))candidates.push(item);
         }
         tail=page.next;
         if(page.truncated){after=page.next;continue;}
@@ -89,11 +90,13 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
       // A held item can no longer monopolize the first eight slots: the next
       // wake continues after the last attempted canonical item ID.
       const selected=candidates.slice(0,maxPerWake);
-      let progressed=0,held=0;
+      let progressed=0,held=0,continuing=0;
       for(const item of selected){
         if((await sentinel.inspect()).held)break;
         const result=await runner.step(item.intentId,item.revision);
-        if(result?.ok)progressed++;else held++;
+        if(result?.ok&&result.record?.revision>item.revision){progressed++;
+          if(result.record.state!=='ASSOCIATED_NOT_READY')continuing++;
+        }else held++;
       }
       const result={ok:true,code:'S04_WAKE_CHECKPOINT',progressed,held,
         selected:selected.length,batchProgressed,batchHeld,
@@ -104,7 +107,7 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
       // Large batches keep moving: one bounded follow-up wake while queued
       // work remains and this wake made progress (held-only queues wait for
       // the periodic wake instead of spinning).
-      if(result.more&&(progressed>0||batchProgressed>0))
+      if(continuing>0||result.more)
         try{void Promise.resolve(api.alarms.create(CREATION_FOLLOWUP_ALARM,
           {when:clock()+60000})).catch(()=>{});}catch{}
       return result;

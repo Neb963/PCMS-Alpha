@@ -25,9 +25,10 @@ function transaction(db,mode,schedule){
 const view=row=>({batchId:row.batchId,accountId:row.accountId,
  total:row.total,appended:row.appended,processed:row.processed,
  state:row.state,revision:row.revision,held:row.held||0,
- lastHold:row.lastHold||null});
+ lastHold:row.lastHold||null,createdAt:row.createdAt||null});
 export function createBatchStore(db,{acceptCreate}){
  function beginBatch({batchId,total,accountId=null}={}){
+  if(isI17Quarantined({batchId}))return Promise.resolve(fail(I17_QUARANTINE_CODE));
   if(!BATCH.test(batchId||'')||!validTotal(total)||
      (accountId!==null&&!isSafeId(accountId)))return Promise.resolve(fail('INVALID_BATCH'));
   return transaction(db,'readwrite',(tx,done)=>{
@@ -40,7 +41,7 @@ export function createBatchStore(db,{acceptCreate}){
      return;
     }
     const batch={batchId,total,accountId,appended:0,processed:0,
-      chunkOffset:0,inChunk:0,held:0,lastHold:null,revision:1,state:'INGESTING'};
+      chunkOffset:0,inChunk:0,held:0,lastHold:null,createdAt:Date.now(),revision:1,state:'INGESTING'};
     meta.put({key:root(batchId),batch});
     tx.objectStore('events').add({stage:'A04_BATCH_BEGUN',batchId,total});
     done({ok:true,batch:view(batch)});
@@ -50,10 +51,9 @@ export function createBatchStore(db,{acceptCreate}){
  function appendBatch({batchId,offset,slugs}={}){
   if(!BATCH.test(batchId||'')||!validOffset(offset)||
      !Array.isArray(slugs)||slugs.length<1||slugs.length>32||
-     slugs.some(s=>!SLUG.test(s))||
-     slugs.some(s=>isI17Quarantined({slug:s})))
-    return Promise.resolve(fail(slugs?.some?.(s=>isI17Quarantined({slug:s}))?
-      I17_QUARANTINE_CODE:'INVALID_BATCH_CHUNK'));
+     slugs.some(s=>!SLUG.test(s)))
+    return Promise.resolve(fail('INVALID_BATCH_CHUNK'));
+  if(isI17Quarantined({batchId}))return Promise.resolve(fail(I17_QUARANTINE_CODE));
   return transaction(db,'readwrite',(tx,done)=>{
    const meta=tx.objectStore('meta');
    meta.get(root(batchId)).onsuccess=e=>{
@@ -79,6 +79,7 @@ export function createBatchStore(db,{acceptCreate}){
   });
  }
  function finalizeBatch({batchId}={}){
+  if(isI17Quarantined({batchId}))return Promise.resolve(fail(I17_QUARANTINE_CODE));
   if(!BATCH.test(batchId||''))return Promise.resolve(fail('INVALID_BATCH'));
   return transaction(db,'readwrite',(tx,done)=>{
    const meta=tx.objectStore('meta');
@@ -98,6 +99,7 @@ export function createBatchStore(db,{acceptCreate}){
   });
  }
  function getBatch({batchId}={}){
+  if(isI17Quarantined({batchId}))return Promise.resolve(fail(I17_QUARANTINE_CODE));
   if(!BATCH.test(batchId||''))return Promise.resolve(fail('INVALID_BATCH'));
   return transaction(db,'readonly',(tx,done)=>{
    tx.objectStore('meta').get(root(batchId)).onsuccess=e=>{
@@ -107,26 +109,80 @@ export function createBatchStore(db,{acceptCreate}){
   });
  }
  function listBatches({after=null,limit=30}={}){
-  if(after!==null&&!BATCH.test(after)||!Number.isSafeInteger(limit)||
-     limit<1||limit>100)return Promise.resolve(fail('INVALID_BATCH_CURSOR'));
+  if(after!==null&&!BATCH.test(after)||!Number.isSafeInteger(limit)||limit<1||limit>100)
+    return Promise.resolve(fail('INVALID_BATCH_CURSOR'));
   return transaction(db,'readonly',(tx,done)=>{
-   const items=[];let more=false,last=null;
+   const all=[];
    tx.objectStore('meta').openCursor().onsuccess=e=>{
     const c=e.target.result;
-    if(!c){done({ok:true,items,more,next:more?last:null});return;}
-    const row=c.value?.batch;
-    if(row&&typeof c.key==='string'&&c.key.startsWith('s04-batch:')&&
-       (after===null||row.batchId>after)){
-      if(items.length>=limit){more=true;}
-      else{items.push(view(row));last=row.batchId;}
-    }
-    c.continue();
+    if(c){if(typeof c.key==='string'&&c.key.startsWith('s04-batch:')&&c.value?.batch)
+      all.push(view(c.value.batch));c.continue();return;}
+    all.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)||a.batchId.localeCompare(b.batchId));
+    const start=after===null?0:all.findIndex(x=>x.batchId===after)+1;
+    if(after!==null&&start===0){done(fail('INVALID_BATCH_CURSOR'));return;}
+    const items=all.slice(start,start+limit),more=start+limit<all.length;
+    done({ok:true,items,more,next:more?items.at(-1).batchId:null});
+   };
+  });
+ }
+ function listBatchItems({batchId,offset=0,limit=25,query='',status='ALL'}={}){
+  if(!BATCH.test(batchId||'')||!validOffset(offset)||!Number.isSafeInteger(limit)||limit<1||limit>100||
+     typeof query!=='string'||query.length>80||!['ALL','HELD','WORKING','CONFIRMED'].includes(status))
+    return Promise.resolve(fail('INVALID_BATCH_ITEM_QUERY'));
+  return transaction(db,'readonly',(tx,done)=>{
+   const meta=tx.objectStore('meta');
+   meta.get(root(batchId)).onsuccess=found=>{
+    const batch=found.target.result?.batch;if(!batch){done(fail('BATCH_NOT_FOUND'));return;}
+    const chunks=[],records=new Map(),holds=new Map(),inventory=new Map();
+    meta.openCursor().onsuccess=e=>{
+     const c=e.target.result;
+     if(c){
+      const name=String(c.key),value=c.value;
+      if(name.startsWith('s04-batch-chunk:'+batchId+':')&&value?.chunk)chunks.push(value.chunk);
+      else if(name.startsWith('s04-batch-hold:'+batchId+':')&&value?.hold)holds.set(value.hold.index,value.hold);
+      else if(name.startsWith('s00-create-intent:'))records.set(name.slice('s00-create-intent:'.length),value);
+      else if(name.startsWith('inventory:')&&value?.generator)inventory.set(value.generator.slug,value.generator);
+      c.continue();return;
+     }
+     chunks.sort((a,b)=>a.offset-b.offset);
+     const matching=[],counts={total:batch.total,persisted:batch.appended,confirmed:0,held:0,working:0};
+     for(const chunk of chunks)for(let n=0;n<chunk.slugs.length;n++){
+      const index=chunk.offset+n,slug=chunk.slugs[n],inputId=batchIntentId(batchId,index);
+      let stored=records.get(inputId),hops=0;const visited=new Set([inputId]);
+      while(stored?.primaryId&&!visited.has(stored.primaryId)&&hops++<8){
+       visited.add(stored.primaryId);stored=records.get(stored.primaryId);
+      }
+      const record=stored?.record,hold=holds.get(index),observed=inventory.get(slug);
+      const currentFailure=!!record?.lastAttempt&&record.lastAttempt.revision===record.revision&&record.lastAttempt.ok===false;
+      const held=hold?.status==='HELD'||currentFailure||record?.pinConflict||record?.sourceDrift||
+        ['TARGET_COLLISION_HELD','REJECTED','ABORTED'].includes(record?.state);
+      const confirmed=!!record&&observed?.ownerState==='OBSERVED_OWNER'&&
+        observed.accountId===record.accountId&&observed.remoteId===record.remoteId&&
+        (record.state.startsWith('GIT_')||record.state==='ASSOCIATED_NOT_READY');
+      const category=held?'HELD':confirmed?'CONFIRMED':'WORKING';
+      counts[category.toLowerCase()]++;
+      const row={index,slug,inputId,intentId:record?.intentId||null,
+        coalesced:!!record&&record.intentId!==inputId,
+        revision:record?.revision||null,accountId:record?.accountId||batch.accountId||null,
+        state:hold?.status==='HELD'?'INTAKE_HELD':record?.state||
+          (batch.state==='INGESTING'?'STAGED':'QUEUED'),
+        hold:hold?.status==='HELD'?hold.code:currentFailure?record.lastAttempt.code:
+          record?.pinConflict||record?.sourceDrift?record.hold:null,
+        intakeHeld:hold?.status==='HELD',category,resourceConfirmed:confirmed,
+        sourcePending:confirmed&&record.state!=='ASSOCIATED_NOT_READY',
+        lastAttempt:record?.lastAttempt?{at:record.lastAttempt.at,ok:record.lastAttempt.ok,code:record.lastAttempt.code}:null};
+      if((status==='ALL'||status===category)&&(!query||slug.includes(query.toLowerCase())))matching.push(row);
+     }
+     done({ok:true,batch:view(batch),items:matching.slice(offset,offset+limit),total:matching.length,
+       counts,more:offset+limit<matching.length,providerEffects:'OFF'});
+    };
    };
   });
  }
  // Exactly one slug is acknowledged only after its canonical slug reservation
  // commits; crash before progress CAS replays the SAME deterministic intent ID.
  async function processBatch({batchId}={}){
+  if(isI17Quarantined({batchId}))return fail(I17_QUARANTINE_CODE);
   if(!BATCH.test(batchId||''))return fail('INVALID_BATCH');
   const current=await transaction(db,'readonly',(tx,done)=>{
    const meta=tx.objectStore('meta');
@@ -144,7 +200,8 @@ export function createBatchStore(db,{acceptCreate}){
   });
   if(!current.ok)return current;
   const b=current.batch;
-  const accepted=await acceptCreate({intentId:batchIntentId(batchId,b.processed),
+  const accepted=isI17Quarantined({slug:current.slug})?fail(I17_QUARANTINE_CODE):
+    await acceptCreate({intentId:batchIntentId(batchId,b.processed),
     slug:current.slug,accountId:b.accountId||undefined,origin:'OPERATOR'});
   // A scoped conflict must not starve other healthy inputs in the same
   // batch. Persist its exact slug/index and reason rather than treating the
@@ -186,6 +243,7 @@ export function createBatchStore(db,{acceptCreate}){
  // Reconcile a single held intake only after the operator has repaired the
  // upstream reservation/identity issue. This never invokes a provider effect.
  async function retryBatchHold({batchId,index}={}){
+  if(isI17Quarantined({batchId}))return fail(I17_QUARANTINE_CODE);
   if(!BATCH.test(batchId||'')||!validOffset(index))return fail('INVALID_BATCH_HOLD');
   const snapshot=await transaction(db,'readonly',(tx,done)=>{
    tx.objectStore('meta').get(holdKey(batchId,index)).onsuccess=e=>{
@@ -194,6 +252,7 @@ export function createBatchStore(db,{acceptCreate}){
    };
   });
   if(!snapshot.ok)return snapshot;
+  if(isI17Quarantined({slug:snapshot.hold.slug}))return fail(I17_QUARANTINE_CODE);
   const accepted=await acceptCreate({intentId:batchIntentId(batchId,index),
     slug:snapshot.hold.slug,origin:'OPERATOR',
     accountId:(await getBatchInternalAccount(batchId))||undefined});
@@ -245,5 +304,5 @@ export function createBatchStore(db,{acceptCreate}){
   });
  }
  return Object.freeze({beginBatch,appendBatch,finalizeBatch,getBatch,listBatches,
-  processBatch,retryBatchHold,listBatchHolds});
+  processBatch,retryBatchHold,listBatchHolds,listBatchItems});
 }

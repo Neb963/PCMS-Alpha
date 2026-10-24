@@ -1,3 +1,4 @@
+import {createGeneratorBatches} from './generator-batches.mjs';
 import {createGeneratorSelection} from './generator-selection.mjs';
 import {createAccountsWorkspace,accountGrowthAdvice,accountNeedsAttention} from './accounts-workspace.mjs';
 import {advanceApprovedPublication} from './publication-flow.mjs';
@@ -77,7 +78,7 @@ function friendlyConnectionIssue(code){
  };
  return messages[code]||'GitHub connection could not be verified. See the details below before retrying.';
 }
-const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',total:0,items:[]},
+const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',owner:'ALL',source:'ALL',total:0,items:[]},
  ref:{offset:0,limit:25,query:'',phase:'ALL',snapshot:null,items:[],total:0},
  acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,readyItems:[],readyCursor:'',nextReady:null,readyMore:false,aiUnavailable:false,readyUnavailable:false,epoch:0},
  settings:'connections',settingsStatic:null,lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},
@@ -111,6 +112,8 @@ const generatorSelection=createGeneratorSelection(typeof browser==='object'?brow
  get:async()=>{throw Error('STORAGE_UNAVAILABLE')},set:async()=>{throw Error('STORAGE_UNAVAILABLE')}});
 generatorSelection.subscribe(()=>updateGeneratorSelection());
 const accountWorkspace=createAccountsWorkspace({root,el,b,request:readPort,reload:()=>loadAccounts(),notify});
+const generatorBatches=createGeneratorBatches({root,el,b,request:readPort,accounts,
+ reload:()=>loadGenerators(),manageAccount:openAccountManager,notify});
 function updateNav(){for(const a of root.querySelectorAll('[data-nav]'))a.setAttribute('aria-current',a.dataset.nav===state.route?'page':'false');
  const label=shadow('#breadcrumb');if(label)label.textContent=({'work-queue':'Work Queue',overview:'Overview',generators:'Generators',accounts:'Accounts',refresher:'Refresher',settings:'Settings'})[state.route];
  const t=shadow('[data-nav="work-queue"] .nav-count');if(t){
@@ -239,54 +242,44 @@ function openSourceManager(item){
 // Adoption is guarded by the protected account and owned-source readbacks.
 // The visible button never creates a new generator, writes source or publishes.
 function openAdoptionManager(item){
- const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
- panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
- panel.setAttribute('aria-label','Adopt existing generator '+item.slug);
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('section','drawer');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-label','Original source '+item.slug);
  const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
- const head=el('div','drawer-head');
- head.append(el('h2','drawer-title','Adopt · '+item.slug),b('Close',close));
- const body=el('div','drawer-body'),status=el('p','setting-note',
-   'Checking the existing generator and its protected account binding…');
- status.setAttribute('role','status');body.append(status);
- const meta=el('dl');
- for(const [label,value] of [['Generator',item.slug],
-   ['Owner evidence',item.ownerState||'Unverified'],
-   ['Account',item.accountId||'Unknown'],['Visibility',item.visibility||'Unknown']]){
-  const row=el('div','kv');row.append(el('dt','',label),el('dd','',value));meta.append(row);
- }body.append(meta);
- const actions=el('div','form-foot');
- const adopt=b('Adopt verified owned generator',()=>void(async()=>{
-  if(item.ownerState!=='OBSERVED_OWNER'||!Number.isSafeInteger(item.revision)){
-   status.textContent='Ownership and revision must be verified before adoption.';return}
-  const publicItem=item.visibility==='PUBLIC';
-  if(!window.confirm(publicItem?
-    'Capture the exact original source of this publicly visible owned generator? Existing content and publication remain untouched, and Git archival needs its own guarded checks.':
-    'Capture this owned generator and its exact original source? Remote contents remain unchanged.'))return;
-  adopt.disabled=true;status.textContent='Checking two independent original-source readbacks…';
-  try{
-   const out=await readPort('pcms-i07-adoption','CAPTURE_ADOPTION',{
-    slug:item.slug,expectedRevision:item.revision,explicitPublicConsent:publicItem},95000);
-   status.textContent=out?.ok?
-    'Original-source capture recorded. Source archival and any future editing require separate independent checks.':
-    'Original-source capture was not verified. Nothing was published or overwritten.';
-  }catch{status.textContent='Adoption outcome uncertain. Refresh the account and adoption state before retrying.'}
-  finally{adopt.disabled=false;}
- })(),'btn primary');
- if(item.ownerState!=='OBSERVED_OWNER')adopt.disabled=true;
- const check=b('View adoption status',()=>void(async()=>{
-  try{
-   const out=await readPort('pcms-i07-adoption','GET_ADOPTION',{slug:item.slug},15000);
-   status.textContent=out?.ok?
-    'Existing original capture: '+(out.record?.state||'recorded')+
-    '. This is a local record, not proof of a Git archive.':
-    'No previously verified original capture is available.';
-  }catch{status.textContent='Adoption state could not be read.'}
- })(),'btn small');
- actions.append(adopt,check);body.append(actions);panel.append(head,body);overlay.append(panel);root.append(overlay);
- overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
- overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
- check.focus();
+ const head=el('div','drawer-head');head.append(el('h2','drawer-title','Original source · '+item.slug),b('Close',close));
+ const body=el('div','drawer-body'),status=el('p','setting-note','Reading original-source preservation…'),files=el('div');
+ status.setAttribute('role','status');body.append(status,files);
+ async function draw(){try{
+  const out=await readPort('pcms-i07-adoption','GET_ADOPTION',{slug:item.slug},15000);
+  if(!out.ok){status.textContent=item.management==='MANAGED_CREATED'?'PCMS created this generator empty and private. No prior human source was replaced.':
+    'Automatic original-source capture is waiting for the protected account. Your published source remains unchanged.';return}
+  status.textContent=out.originalProtected?'Original source is preserved in Git and a source-verified portable backup.':
+   out.archive==='ARCHIVED_GIT_CONFIRMED'?'Original source is archived in Git; waiting for a verified portable backup.':
+   'Original source is saved locally. Git archival continues automatically when the connection is available.';
+  const manifest=await readPort('pcms-i07-adoption','INSPECT_ORIGINAL',{slug:item.slug});files.replaceChildren();
+  for(const file of manifest.files||[]){const row=el('div','batch-item');row.append(el('strong','',file.path),el('p','setting-note',file.size+' bytes'),
+   b('View original',()=>void(async()=>{try{
+    const result=await readPort('pcms-i07-adoption','READ_ORIGINAL_FILE',{slug:item.slug,path:file.path},30000);
+    if(!result.ok)throw Error();
+    const bytes=Uint8Array.from(atob(result.base64),c=>c.charCodeAt(0));
+    const old=files.querySelector('textarea');old?.remove();
+    const view=el('textarea','form-input');view.readOnly=true;view.rows=16;view.setAttribute('aria-label','Original '+file.path);
+    try{view.value=new TextDecoder('utf-8',{fatal:true}).decode(bytes)}catch{view.value='Binary asset · '+bytes.length+' bytes. Download to inspect.'}
+    row.append(view);view.focus();
+    row.append(b('Download original',()=>{const url=URL.createObjectURL(new Blob([bytes]));
+      const a=el('a');a.href=url;a.download=item.slug+'-'+file.path.replaceAll('/','-');a.click();setTimeout(()=>URL.revokeObjectURL(url),30000)}));
+   }catch{notify('Original file could not be read. The saved original is preserved.')}})()));files.append(row)}
+ }catch{status.textContent='Original-source status unavailable. Retry to read the saved state.'}}
+ const actions=el('div','form-foot');actions.append(b('Retry preservation',()=>void(async()=>{
+  status.textContent='Checking the next safe preservation step…';
+  try{const out=await readPort('pcms-i07-adoption','RETRY_ADOPTION',{slug:item.slug},100000);
+    if(!out.ok)notify('Preservation is waiting for its account or GitHub connection.');await draw();}
+  catch{status.textContent='Check was not confirmed. Refresh the saved state before retrying.'}
+ } )()),b('Refresh',()=>void draw()),b('Manage account',()=>void(async()=>{
+  const out=await accounts(),a=out.accounts.find(a=>a.accountId===item.accountId);if(a){close();openAccountManager(a)}
+ })()));body.append(actions);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});overlay.addEventListener('keydown',e=>{if(e.key==='Escape')close()});void draw();head.querySelector('button').focus();
 }
+
 function openDetails(kind,item){
  const priorFocus=root.activeElement;
  const backdrop=el('div','drawer-overlay');backdrop.setAttribute('role','presentation');
@@ -302,7 +295,7 @@ function openDetails(kind,item){
  } else{kv('Owner evidence',item.ownerState||'Unknown');kv('Visibility',item.visibility||'Unknown');kv('Source',item.source||'Unknown')}
  body.append(dl,el('p','native-bridge-note','Protected changes, source inspection and adoption remain subject to existing exact-record authorization and guarded runtime checks.'));
  const actions=el('div','form-foot');if(kind==='ref')actions.append(b('Open timing controls',()=>{backdrop.remove();nativeSelection('timing',item)}));
- else for(const [label,kind] of [['Inspect source','source'],['Refresher timing','timing'],['Adopt existing','adopt']])actions.append(b(label,()=>{backdrop.remove();nativeSelection(kind,item)}));
+ else for(const [label,kind] of [['Inspect source','source'],['Refresher timing','timing'],['Original source','adopt']])actions.append(b(label,()=>{backdrop.remove();nativeSelection(kind,item)}));
  body.append(actions);drawer.append(body);backdrop.append(drawer);root.append(backdrop);
  const focusable=()=>[...drawer.querySelectorAll('button:not(:disabled),[href],input:not(:disabled)')];
  backdrop.addEventListener('keydown',event=>{if(event.key==='Escape'){backdrop.remove();if(priorFocus?.isConnected)priorFocus.focus({preventScroll:true});return}if(event.key==='Tab'){let all=focusable();let index=all.indexOf(root.activeElement);if(event.shiftKey&&index<=0){event.preventDefault();all.at(-1)?.focus()}if(!event.shiftKey&&index===all.length-1){event.preventDefault();all[0]?.focus()}}});
@@ -451,7 +444,10 @@ function routeHandlers(){
  if(action==='diagnostics'||action==='health'){state.settings='diagnostics';routeTo('settings');return}
  if(action==='notifications'){routeTo('overview');return}
  if(action==='system-health'){routeTo('settings');return}
- if(action==='generator-filters'){shadow('#generator-account')?.focus();return}
+ if(action==='generator-filters'){const filters=shadow('[data-generator-extra-filters]');
+  if(filters){filters.hidden=!filters.hidden;shadow('[data-action=generator-filters]')?.setAttribute('aria-expanded',String(!filters.hidden));
+    if(!filters.hidden)shadow('#generator-owner')?.focus()}return}
+ if(action==='creation-batches'){generatorBatches.openHistory();return}
  if(action==='gen-prev'){state.gen.offset=Math.max(0,state.gen.offset-state.gen.limit);void loadGenerators();return}
  if(action==='gen-next'){state.gen.offset+=state.gen.limit;void loadGenerators();return}
  if(action==='ref-prev'){state.ref.offset=Math.max(0,state.ref.offset-state.ref.limit);void loadRefresher();return}
@@ -527,6 +523,8 @@ function routeHandlers(){
  root.addEventListener('change',event=>{const target=event.target;
  if(target.matches('[data-generator-select-page]')){void generatorSelection.setMany(state.gen.items,target.checked);return}
  if(target.id==='generator-account'){state.gen.account=target.value;state.gen.offset=0;void loadGenerators()}
+ if(target.id==='generator-owner'){state.gen.owner=target.value;state.gen.offset=0;void loadGenerators()}
+ if(target.id==='generator-source'){state.gen.source=target.value;state.gen.offset=0;void loadGenerators()}
  if(target.id==='generator-sort'){state.gen.sort=target.value;state.gen.offset=0;void loadGenerators()}
  if(target.id==='account-filter'){state.acct.filter=target.value;state.acct.page=0;displayAccounts()}
  if(target.matches('.feature-switch')){void proposeRefresherEnable(target)}
@@ -574,124 +572,8 @@ function fmtObservation(item){if(item.observedAt&&Number.isFinite(item.observedA
 // C-14/C-80: the accepted UI records durable intents through the same
 // slug-coalescing coordinator as main-only Git discovery. Side effects are
 // exclusively run later by the protected account/creation watcher.
-function openGeneratorCreator(){
- const previous=root.activeElement,backdrop=el('div','drawer-overlay'),drawer=el('div','drawer');
- drawer.setAttribute('role','dialog');drawer.setAttribute('aria-modal','true');
- drawer.setAttribute('aria-label','Create generators');
- const head=el('div','drawer-head');head.append(el('h2','drawer-title','Create generators'));
- const close=()=>{backdrop.remove();if(previous?.isConnected)previous.focus({preventScroll:true})};
- head.append(b('Close',close));drawer.append(head);
- const body=el('div','drawer-body');
- body.append(el('p','setting-note','Enter one or more generator names. PCMS uses your verified managed accounts and creates private generators only after the usual protected checks.'));
- const label=el('label','','Generator names (one per line)');
- const input=el('textarea','form-input');input.rows=6;input.placeholder='my-generator\nsecond-generator';
- label.append(input);body.append(label);
- const accountLabel=el('label','','Assign to account (optional)');
- const choice=el('select','select'),auto=el('option','','Automatic — balanced');auto.value='';
- choice.append(auto);
- for(const account of state.lastAccountList.filter(a=>a.state==='VERIFIED')){
-  const option=el('option','',account.alias||account.accountId);
-  option.value=account.accountId;choice.append(option);
- }
- accountLabel.append(choice);body.append(accountLabel);
- const status=el('p','setting-note','No creation request has been submitted.');status.setAttribute('role','status');
- const batchStatus=el('div','setting-note');
- batchStatus.setAttribute('aria-label','Recent background creation requests');
- body.append(batchStatus);
- async function showBatches(){
-  try{
-   const out=await readPort('pcms-s00-coordinator','LIST_CREATE_BATCHES',{limit:20},12000);
-   if(!out?.ok){batchStatus.textContent='Batch status unavailable.';return;}
-   batchStatus.replaceChildren(el('strong','','Recent durable requests'));
-   for(const batch of out.items.slice(-10).reverse()){
-    const row=el('div','setting-note');
-    row.append(el('p','',batch.batchId.slice(-8)+': '+batch.processed+'/'+
-      batch.total+' input handled · '+batch.state+
-      (batch.held?' · '+batch.held+' held ('+String(batch.lastHold||'review required')+')':'')+
-      (batch.state==='INGESTING'?' ('+batch.appended+'/'+batch.total+
-       ' input persisted; not finalized)':'')));
-    if(batch.held>0){
-      row.append(b('Retry held intake',async()=>{
-        try{
-          const pending=await readPort('pcms-s00-coordinator','LIST_CREATE_BATCH_HOLDS',
-            {batchId:batch.batchId,limit:1},12000);
-          const held=pending?.items?.[0];
-          if(!held){notify('Held item list unavailable.');return;}
-          const retried=await readPort('pcms-s00-coordinator','RETRY_CREATE_BATCH_HOLD',
-            {batchId:batch.batchId,index:held.index},20000);
-          notify(retried?.ok?'Held local intake was reconciled.':
-            'Intake still held: '+String(retried?.code||'UNVERIFIED'));
-          await showBatches();
-        }catch{notify('Intake reconciliation unknown; inspect the batch again.');}
-      }));
-    }
-    batchStatus.append(row);
-   }
-  }catch{batchStatus.textContent='Batch status unavailable; canonical receipts remain stored.';}
- }
- void showBatches();
- const submit=b('Create private generators',()=>{
-  const slugs=[...new Set(input.value.split(/[\s,;]+/).map(x=>x.trim()).filter(Boolean))];
-  if(!slugs.length||slugs.some(x=>!/^[a-z0-9][a-z0-9-]{0,99}$/.test(x))){
-   status.textContent='Enter valid lowercase generator names using letters, numbers and hyphens.';return;
-  }
-  const pinned=choice.value||null;
-  const batchId='batch_'+crypto.randomUUID().replaceAll('-','');
-  submit.disabled=true;input.disabled=true;choice.disabled=true;
-  status.textContent='Submitting '+slugs.length+' requests into persistent storage. Creation has not yet been confirmed.';
-  void (async()=>{
-   let appended=0;
-   try{
-    const begun=await readPort('pcms-s00-coordinator','BEGIN_CREATE_BATCH',{
-      batchId,total:slugs.length,...(pinned?{accountId:pinned}:{})},20000);
-    if(!begun?.ok)throw Error(begun?.code||'BATCH_BEGIN_UNCONFIRMED');
-    for(let offset=0;offset<slugs.length;offset+=32){
-     const chunk=slugs.slice(offset,offset+32);
-     let out;
-     try{out=await readPort('pcms-s00-coordinator','APPEND_CREATE_BATCH',{
-       batchId,offset,slugs:chunk},20000);}catch{
-       // Lost acknowledgement is reconciled by read-only persisted cursor.
-       const check=await readPort('pcms-s00-coordinator','GET_CREATE_BATCH',{batchId},12000);
-       if(check?.ok&&check.batch.appended>=offset+chunk.length)
-        out={ok:true};
-       else throw Error('BATCH_CHUNK_ACK_UNCERTAIN');
-     }
-     if(!out?.ok)throw Error(out?.code||'BATCH_CHUNK_HELD');
-     appended=offset+chunk.length;
-     status.textContent='Persisted '+appended+' of '+slugs.length+
-       ' input requests; not yet finalized.';
-    }
-    let finalized;
-    try{finalized=await readPort('pcms-s00-coordinator','FINALIZE_CREATE_BATCH',
-      {batchId},20000);}catch{
-      const check=await readPort('pcms-s00-coordinator','GET_CREATE_BATCH',{batchId},12000);
-      if(check?.ok&&check.batch.state!=='INGESTING')finalized=check;
-      else throw Error('BATCH_FINALIZATION_ACK_UNCERTAIN');
-    }
-    if(!finalized?.ok||finalized.batch?.state==='INGESTING')
-      throw Error(finalized?.code||'BATCH_NOT_FINALIZED');
-    status.textContent=slugs.length+' generator requests durably queued (batch '+
-      batchId.slice(-8)+'). Background work continues with this page closed; '+
-      'individual creation requires protected readback.';
-    try{await browser.alarms.create('pcms-s04-creation-followup',
-      {when:Date.now()+1000})}catch{}
-    await loadGenerators();
-   }catch(error){
-    status.textContent='Input not confirmed as a complete batch ('+
-      String(error?.message||'BATCH_UNAVAILABLE')+'). '+appended+
-      ' of '+slugs.length+' names were persisted. Batch '+batchId+
-      ' can be inspected; no remote create success is implied.';
-   }finally{
-    submit.disabled=false;input.disabled=false;choice.disabled=false;
-    await showBatches();
-   }
-  })();
- },'btn primary');
- body.append(submit,status);drawer.append(body);backdrop.append(drawer);root.append(backdrop);
- backdrop.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
- backdrop.addEventListener('click',e=>{if(e.target===backdrop)close()});
- input.focus();
-}
+function openGeneratorCreator(){generatorBatches.openCreator()}
+
 async function syncManagedInventories(){
  const verified=state.lastAccountList.filter(a=>a.state==='VERIFIED');
  if(!verified.length){notify('No verified account is available for a protected inventory check.');return}
@@ -760,11 +642,11 @@ async function loadGenerators(){if(state.route!=='generators')return;
  const epoch=++state.renderEpoch,body=shadow('.workspace-surface table tbody');if(!body)return;
  renderEmpty(body,'Reading observed local generator inventory…');
  try{
-  const [res,accountsResult]=await Promise.all([inventory({query:state.gen.query,offset:state.gen.offset,limit:state.gen.limit,ownerState:state.gen.filter==='ALL'?'ALL':state.gen.filter,accountId:state.gen.account==='ALL'?'':state.gen.account,sort:state.gen.sort}),accounts().catch(()=>null)]);
+  const [res,accountsResult]=await Promise.all([inventory({query:state.gen.query,offset:state.gen.offset,limit:state.gen.limit,workspace:true,status:state.gen.filter,source:state.gen.source,ownerState:state.gen.owner,accountId:state.gen.account==='ALL'?'':state.gen.account,sort:state.gen.sort}),accounts().catch(()=>null)]);
   if(epoch!==state.renderEpoch||state.route!=='generators')return;
   state.lastAccountList=accountsResult?.ok&&Array.isArray(accountsResult.accounts)?accountsResult.accounts:state.lastAccountList;
   state.gen.items=Array.isArray(res.items)?res.items:[];state.gen.total=safeCount(res.total)=== '—'?0:res.total;
-  state.errors.generators='';displayGenerators();
+  state.gen.facets=res.facets||{};state.errors.generators='';displayGenerators();
  }catch(err){if(epoch!==state.renderEpoch)return;state.errors.generators=err.message;state.gen.items=[];state.gen.total=0;rowsError('.workspace-surface table tbody','Local inventory unavailable: '+err.message+'. No remote absence inferred.',7)}
 }
 function updateGeneratorSelection(){
@@ -874,24 +756,21 @@ function displayGenerators(){if(state.route!=='generators')return;
   checkbox.checked=generatorSelection.includes(item);checkbox.addEventListener('click',e=>e.stopPropagation());
   checkbox.addEventListener('change',()=>void generatorSelection.set(item,checkbox.checked));selectCell.append(checkbox);
   const acct=accountsMap.get(item.accountId);const sourceState=item.source||'SOURCE_PENDING';const owner=item.ownerState||'UNKNOWN';
-  const statusText=ownerLabels[owner]||owner.replaceAll('_',' ').toLowerCase();
+  const statusText=({PUBLISHED:'Published',DEVELOPING:'Developing',REVIEW:'Needs review',HELD:'Needs attention',IDLE:'Private · ready'})[item.workflowStatus]||ownerLabels[owner]||'Needs checking';
   const td0=el('td','name-cell',item.slug||'Unknown');const td1=el('td','muted-cell',acct?.alias||item.accountId||'Unknown account');
   const td2=el('td');td2.append(statusPill(statusText,statusClasses[owner]||''));
   const td3=el('td','muted-cell',item.visibility||'UNKNOWN');
-  const td4=el('td','muted-cell',sourceState+(item.lastObservedAt?' · '+fmtObservation({...item,observedAt:item.lastObservedAt}):''));
+  const td4=el('td','muted-cell',({GIT:'Git linked',PROTECTED:'Original protected',ORIGINAL_SAVED:'Original saved · archiving',CAPTURING:'Capturing original',PENDING:'Source pending'})[item.sourceStatus]||sourceState);
   const cue=el('td','open-col');cue.append(b('Open',e=>{e.stopPropagation();void openGeneratorPage(item)},'btn small'));
   td1.dataset.column='account';tr.append(selectCell,td0,td1,td2,td3,td4,cue);body.append(tr);
  }
  setPagination('.workspace-surface .pagination span','[data-action="gen-prev"]','[data-action="gen-next"]',state.gen.offset,state.gen.total,state.gen.limit,
- `${state.gen.total?state.gen.offset+1:0}–${Math.min(state.gen.offset+state.gen.limit,state.gen.total)} of ${state.gen.total} historical local records${state.gen.account!=='ALL'?' · filtered account':''}`);
- // No unsupported fake Published/Developing counts: replace tabs with real owner-state facets.
- const labels={'All':'All','Published':'Owner observed','Developing':'Owner unknown','Needs review':'Disputed','Held':'Unobserved'};
- const map={'All':'ALL','Published':'OBSERVED_OWNER','Developing':'OWNER_UNVERIFIED','Needs review':'OWNER_DISPUTED','Held':'UNOBSERVED',ALL:'ALL',OBSERVED_OWNER:'OBSERVED_OWNER',OWNER_UNVERIFIED:'OWNER_UNVERIFIED',OWNER_DISPUTED:'OWNER_DISPUTED',UNOBSERVED:'UNOBSERVED'};
- const canonicalLabels={ALL:'All',OBSERVED_OWNER:'Owner observed',OWNER_UNVERIFIED:'Owner unknown',OWNER_DISPUTED:'Disputed',UNOBSERVED:'Unobserved'};
+ `${state.gen.total?state.gen.offset+1:0}–${Math.min(state.gen.offset+state.gen.limit,state.gen.total)} of ${state.gen.total} generators${state.gen.account!=='ALL'?' · filtered account':''}`);
+ const labels={ALL:'All',PUBLISHED:'Published',DEVELOPING:'Developing',REVIEW:'Needs review',HELD:'Held'};
  for(const tab of shadow('#page')?.querySelectorAll('[data-filter^="generators:"]')||[]){
-  const key=tab.dataset.filter.split(':')[1];const value=map[key];if(!value)continue;tab.dataset.filter='generators:'+value;
-  // These are real owner-evidence facets, not simulated publication states.
-  tab.replaceChildren(document.createTextNode(canonicalLabels[value]));tab.setAttribute('aria-selected',String(state.gen.filter===value));tab.tabIndex=state.gen.filter===value?0:-1;
+  const key=tab.dataset.filter.split(':')[1];
+  tab.replaceChildren(document.createTextNode((labels[key]||key)+' '+(state.gen.facets?.[key]??0)));
+  tab.setAttribute('aria-selected',String(state.gen.filter===key));tab.tabIndex=state.gen.filter===key?0:-1;
  }
  updateGeneratorSelection();
  const accountSelect=shadow('#generator-account');if(accountSelect){const prior=accountSelect.value;accountSelect.replaceChildren();const first=el('option','', 'All accounts');first.value='ALL';accountSelect.append(first);

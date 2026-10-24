@@ -356,7 +356,7 @@ export function createAdoptionStore(db){
   // source-bearing archive must be qualified before adopted original source
   // can become write-eligible. The Git archive alone is insufficient.
   function confirmCheckpoint({slug,expectedRevision,proof}){
-    if(!proof||proof.source!=='INDEPENDENT_AUTHENTICATED_RECOVERY'||
+    if(!proof||!['INDEPENDENT_AUTHENTICATED_RECOVERY','INDEPENDENT_PORTABLE_SOURCE_RECOVERY'].includes(proof.source)||
        proof.verified!==true||typeof proof.receiptId!=='string'||
        !/^[A-Za-z0-9_-]{8,100}$/.test(proof.receiptId)||
        !/^[a-f0-9]{64}$/.test(proof.originalFingerprint||'')||

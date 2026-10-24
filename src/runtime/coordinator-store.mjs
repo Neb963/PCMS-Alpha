@@ -128,7 +128,7 @@ export function createCoordinatorStore(db){
         const item=e.target.result?.record;
         if(!item){finish(fail('INTENT_NOT_FOUND'));return;}
         if(item.revision!==expectedRevision){finish(fail('STALE_REVISION'));return;}
-        const accounts=[],inventory=[],pending=[],complete=new Set();
+        const accounts=[],inventory=[],pending=[],complete=new Map();
         meta.openCursor().onsuccess=ev=>{
           const c=ev.target.result;
           if(c){
@@ -136,12 +136,12 @@ export function createCoordinatorStore(db){
             if(k.startsWith('account:')&&v?.account)accounts.push(v.account);
             else if(k.startsWith('inventory:')&&v?.generator)inventory.push(v.generator);
             else if(k.startsWith('inventory-batch:')&&v?.observationId)
-              complete.add(k.slice('inventory-batch:'.length));
+              complete.set(k.slice('inventory-batch:'.length),v);
             else if(k.startsWith('s00-create-intent:')&&v?.record&&
                 v.record.intentId!==intentId&&
                 v.record.accountId&&v.record.state!=='REJECTED')
               pending.push({state:v.record.state,accountId:v.record.accountId,
-                slug:v.record.slug,remoteId:v.record.remoteId});
+                slug:v.record.slug,remoteId:v.record.remoteId,createdObservedAt:v.record.createdObservedAt,temporarySlug:v.record.temporarySlug});
             else if(k.startsWith('supply-batch:')&&v?.batch)
               for(const legacy of v.batch.items||[]){
                 if(legacy.state!=='REJECTED')
@@ -160,9 +160,12 @@ export function createCoordinatorStore(db){
           if(owned&&item.accountId&&owned.accountId!==item.accountId){
             finish(fail('OWNED_TARGET_ACCOUNT_MISMATCH'));return;
           }
-          const candidates=accounts.map(a=>({...a,inventoryComplete:complete.has(a.accountId)}));
+          const candidates=accounts.map(a=>({...a,inventoryComplete:complete.has(a.accountId),
+            inventoryCount:complete.get(a.accountId)}));
           const plan=selectS04Account({intent:owned?{...item,accountId:owned.accountId}:item,
-            accounts:candidates,inventory,pending});
+            accounts:owned?candidates.filter(a=>a.accountId===owned.accountId):candidates,
+            inventory:owned?inventory.filter(g=>g.accountId===owned.accountId):inventory,pending:owned?
+              pending.filter(p=>p.accountId===owned.accountId):pending});
           if(!plan.ok){finish(plan);return;}
           const target=owned?'ADOPTION_ORIGINAL_PENDING':'OWNER_READBACK_PENDING';
           const next={...item,state:target,
@@ -224,6 +227,20 @@ export function createCoordinatorStore(db){
       };
     });
   }
+  // Revision-bound operational feedback, not a transition or effect grant.
+  function recordAttempt(intentId,revision,outcome,at=Date.now()){
+    return transact(db,'readwrite',(tx,done)=>{
+      const meta=tx.objectStore('meta');
+      meta.get(key(intentId)).onsuccess=e=>{
+        const record=e.target.result?.record;
+        if(!record||record.revision!==revision){done(fail('STALE_REVISION'));return;}
+        meta.put({key:key(intentId),record:{...record,lastAttempt:{revision,at,
+          ok:outcome?.ok===true,code:/^[A-Z0-9_]{3,100}$/.test(outcome?.code||'')?
+            outcome.code:outcome?.ok?'PROGRESS_CHECKPOINT':'STEP_UNCONFIRMED'}}});
+        done({ok:true});
+      };
+    });
+  }
   function stageEffect({intentId,expectedRevision,event,proof={}}){
     if(!isSafeId(intentId)||!Number.isSafeInteger(expectedRevision)||
        expectedRevision<1)return Promise.resolve(fail('INVALID_STAGE_REQUEST'));
@@ -254,6 +271,7 @@ export function createCoordinatorStore(db){
           const moved=advanceS04Effect(previous,event,proof);
           if(!moved.ok){result=moved;return;}
           if(inventoryCheckpoint)moved.record.inventoryCheckpoint=inventoryCheckpoint;
+          if(event==='CREATE_CONFIRMED')moved.record.createdObservedAt=Date.now();
           const creating=['CREATE_PREPARE','RENAME_PREPARE'].includes(event);
           const create=event.startsWith('CREATE_')||
             (event==='PREPARED_ABORT'&&previous.state==='CREATE_PREPARED');
@@ -348,7 +366,7 @@ export function createCoordinatorStore(db){
        expectedRevision<1||!adoption||
        adoption.archiveState!=='ARCHIVED_GIT_CONFIRMED'||
        adoption.originalCheckpoint?.qualified!==true||
-       adoption.originalCheckpoint.source!=='INDEPENDENT_AUTHENTICATED_RECOVERY'||
+       !['INDEPENDENT_AUTHENTICATED_RECOVERY','INDEPENDENT_PORTABLE_SOURCE_RECOVERY'].includes(adoption.originalCheckpoint.source)||
        adoption.originalCheckpoint.fingerprint!==adoption.original?.fingerprint||
        !/^[a-f0-9]{64}$/.test(adoption.original.fingerprint||''))
       return Promise.resolve(fail('ADOPTION_CHECKPOINT_UNVERIFIED'));
@@ -650,6 +668,6 @@ export function createCoordinatorStore(db){
     return decision.ok?{...decision,providerEffects:'OFF',
       code:'S04_CREATION_ACTIVATION_HELD'}:decision;
   }
-  return Object.freeze({refreshCreateAccountContext,acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,stageEffect,stageGit,confirmAdoption,advanceCreate,requeueArchivedUnattempted,
+  return Object.freeze({recordAttempt,refreshCreateAccountContext,acceptCreate,ingestVerifiedMain,getCreate,listCreate,allocateCreate,stageEffect,stageGit,confirmAdoption,advanceCreate,requeueArchivedUnattempted,
     ...createBatchStore(db,{acceptCreate})});
 }
