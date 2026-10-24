@@ -9,7 +9,7 @@ const sha='a'.repeat(40),digest='b'.repeat(64);
 test('R4 Connections first import and canonical Git prompt changes are protected by exact scope and revisions',()=>{
  assert.equal(validateCatalogMessage(api,sender,call('SCAN_CONNECTED',{})).ok,true);
  assert.equal(validateCatalogMessage(api,sender,call('APPROVE_IMPORT',{
-  repositoryId:'42',scopeDigest:digest})).ok,true);
+  repositoryId:'42',scopeDigest:digest,planDigest:digest,expectedRevision:0})).ok,true);
  assert.equal(validateCatalogMessage(api,sender,call('SAVE_PROMPT_DRAFT',{
   repositoryId:'42',expectedRevision:0,baseOid:sha,text:'Test instructions'})).ok,true);
  assert.equal(validateCatalogMessage(api,sender,call('COMMIT_PROMPT',{

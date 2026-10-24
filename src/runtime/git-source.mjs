@@ -11,7 +11,7 @@ export function safeFolder(path) {
     path.split('/').length <= 6 && path.split('/').every(segment) &&
     path === path.normalize('NFC');
 }
-function safeTreePath(path) {
+export function safeSourcePath(path) {
   return typeof path === 'string' && path.length <= 512 &&
     path.split('/').every(segment) && path === path.normalize('NFC');
 }
@@ -54,6 +54,20 @@ export function compareGitSource(pinned, fresh, { pinnedTesting = true }={}) {
     ready:true,source:'READY',testingSha:pinnedTesting?pinned.testingSha:fresh.testingSha,
     head:fresh.head,fingerprint:fresh.fingerprint};
 }
+export async function readVerifiedGitFile({token,file},transport=fetch){
+  if(typeof token!=='string'||token.length<10||token.length>512||/[^\x21-\x7e]/.test(token)||
+     !file||!shaOK(file.oid)||!Number.isSafeInteger(file.size)||file.size<0||file.size>12*1024*1024||
+     !/^[a-f0-9]{64}$/.test(file.sha256||''))return issue('SOURCE_FILE_INVALID');
+  try{
+    const response=await transport(API+'/git/blobs/'+file.oid,{method:'GET',credentials:'omit',cache:'no-store',redirect:'error',
+      headers:{Accept:'application/vnd.github+json',Authorization:'Bearer '+token,'X-GitHub-Api-Version':'2022-11-28'}});
+    if(response?.status!==200)return issue('SOURCE_FILE_UNAVAILABLE');
+    const blob=await response.json(),raw=bytesOfBase64(blob.content);
+    if(blob.sha!==file.oid||blob.encoding!=='base64'||blob.size!==file.size||raw.length!==file.size||
+       !(await verifyGitBlob(raw,file.oid))||await digest(raw)!==file.sha256)return issue('SOURCE_FILE_UNVERIFIED');
+    return {ok:true,base64:blob.content.replace(/\s/g,''),size:raw.length,sha256:file.sha256};
+  }catch{return issue('SOURCE_FILE_UNAVAILABLE')}
+}
 export async function inspectGitSource({token,folder,includeSourceBytes=false,includeTestingBytes=false}, transport=fetch) {
   if(!safeFolder(folder))return issue('UNSAFE_SOURCE_PATH');
   if(typeof token!=='string'||token.length<10||token.length>512||
@@ -95,9 +109,27 @@ export async function inspectGitSource({token,folder,includeSourceBytes=false,in
        ref.object?.type!=='commit')return issue('SOURCE_UNVERIFIED');
     const commit=await get('/git/commits/'+head);
     if(!shaOK(commit?.tree?.sha))return issue('SOURCE_UNVERIFIED');
-    const tree=await get('/git/trees/'+commit.tree.sha+'?recursive=1');
-    if(tree?.truncated!==false || !Array.isArray(tree.tree) ||
-       tree.tree.length>30000)return issue('SOURCE_MANIFEST_UNSUPPORTED');
+    let tree=await get('/git/trees/'+commit.tree.sha+'?recursive=1');
+    if(tree?.truncated!==false || !Array.isArray(tree.tree) ||tree.tree.length>30000){
+      // A large unrelated fleet must not hide this generator's complete tree.
+      // Resolve the exact path and walk only its descendants, failing closed
+      // on any incomplete segment instead of trusting a truncated prefix.
+      try{
+      const readTree=async oid=>{const t=await get('/git/trees/'+oid);
+        if(t?.truncated!==false||!Array.isArray(t.tree))throw Error('TREE_INCOMPLETE');return t.tree;};
+      let oid=commit.tree.sha;
+      for(const part of folder.split('/')){const matches=(await readTree(oid)).filter(x=>x.path===part);
+        if(matches.length!==1||matches[0].type!=='tree'||matches[0].mode!=='040000'||!shaOK(matches[0].sha))return issue('SOURCE_PENDING');
+        oid=matches[0].sha;}
+      const nodes=[{path:folder,type:'tree',mode:'040000',sha:oid}],queue=[{path:folder,oid}];
+      while(queue.length){const node=queue.shift();for(const child of await readTree(node.oid)){
+        if(typeof child.path!=='string'||child.path.includes('/')||!segment(child.path))return issue('SOURCE_MANIFEST_UNSUPPORTED');
+        const entry={...child,path:node.path+'/'+child.path};nodes.push(entry);
+        if(child.type==='tree'){if(!shaOK(child.sha)||child.mode!=='040000')return issue('SOURCE_MANIFEST_UNSUPPORTED');queue.push({path:entry.path,oid:child.sha});}
+      }}
+      tree={truncated:false,tree:nodes};
+      }catch{return issue('SOURCE_MANIFEST_UNSUPPORTED')}
+    }
     const prefix=folder+'/',entries=[],seen=new Set();
     let found=false,bytesTotal=0;
     for(const node of tree.tree){
@@ -107,9 +139,9 @@ export async function inspectGitSource({token,folder,includeSourceBytes=false,in
         found=true;continue;
       }
       if(typeof p!=='string'||!p.startsWith(prefix))continue;
-      if(!safeTreePath(p)||!shaOK(node.sha))return issue('SOURCE_MANIFEST_UNSUPPORTED');
+      if(!safeSourcePath(p)||!shaOK(node.sha))return issue('SOURCE_MANIFEST_UNSUPPORTED');
       const relative=p.slice(prefix.length);
-      if(!safeTreePath(relative))return issue('SOURCE_MANIFEST_UNSUPPORTED');
+      if(!safeSourcePath(relative))return issue('SOURCE_MANIFEST_UNSUPPORTED');
       const key=relative.toLowerCase();
       if(seen.has(key))return issue('SOURCE_ASSOCIATION_CONFLICT');
       seen.add(key);
@@ -169,7 +201,7 @@ export async function inspectGitSource({token,folder,includeSourceBytes=false,in
       // Private sealed internal boundary only; never return sourceBytes to a UI port.
       ...(includeSourceBytes?{sourceBytes}:{}),
       paths:entries.sort((a,b)=>a.path.localeCompare(b.path,'en')).map(e=>({
-        path:e.path,size:e.size,sha256:hashes.get(e.path)
+        path:e.path,size:e.size,sha256:hashes.get(e.path),oid:e.sha
       })),files:entries.length};
   }catch{return issue('SOURCE_UNVERIFIED');}
 }

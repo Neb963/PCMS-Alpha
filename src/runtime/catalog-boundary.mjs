@@ -5,6 +5,7 @@ import {browserGitCredentialPacket} from './git-local-secret.mjs';
 import {createRestoreSentinel,openCanonicalDatabase,fail} from './journal.mjs';
 import {createImportApprovalStore,getImportScopeDigest} from './catalog-import.mjs';
 import {createGitPromptStore} from './catalog-prompt-store.mjs';
+import {buildImportPreview} from './catalog-import-preview.mjs';
 import {standingS06} from './s06-standing-authority.mjs';
 import {writeExistingGitPrompt,observeGitPromptWrite} from './git-prompt.mjs';
 import {inspectReadyCandidate} from './catalog-declaration.mjs';
@@ -48,9 +49,10 @@ export function validateCatalogMessage(api,sender,message){
       typeof p.expectedHead!=='string'||!/^[a-f0-9]{40}$/.test(p.expectedHead))
       return fail('INVALID_PARAMS');
   } else if(message.type==='APPROVE_IMPORT'){
-    if(Object.keys(p).some(k=>!['repositoryId','scopeDigest'].includes(k))||
+    if(Object.keys(p).some(k=>!['repositoryId','scopeDigest','planDigest','expectedRevision'].includes(k))||
       typeof p.repositoryId!=='string'||!/^[1-9][0-9]{0,19}$/.test(p.repositoryId)||
-      typeof p.scopeDigest!=='string'||!/^[0-9a-f]{64}$/.test(p.scopeDigest))
+      typeof p.scopeDigest!=='string'||!/^[0-9a-f]{64}$/.test(p.scopeDigest)||
+      !/^[0-9a-f]{64}$/.test(p.planDigest||'')||!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<0)
       return fail('INVALID_PARAMS');
   } else if(message.type==='RECONCILE_PROMPT'){
     if(Object.keys(p).some(k=>k!=='repositoryId')||
@@ -96,14 +98,18 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
       {ok:false,complete:false,code:result.code}:fail('CATALOG_INCOMPLETE');
     if(expectedId&&result.repositoryId!==expectedId)return fail('GIT_IDENTITY_CHANGED');
     const scopeDigest=await getImportScopeDigest(result);
-    const preview={...makeInitialImportPreview(result),scopeDigest};
+    let preview={...makeInitialImportPreview(result),scopeDigest};
     if(!expectedId)return {...result,preview};
+    preview={...await buildImportPreview(await (importDb ||= open()),result),scopeDigest};
+    if(!preview.ok)return preview;
     let approved=null;
     try{approved=await (await approvalStore()).get(expectedId);}catch{}
-    const importStatus=approved?.ok?
-      approved.approval.scopeDigest===scopeDigest?'IMPORT_SCOPE_APPROVED':'IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED':
+    const progress=(await api.storage.local.get('pcmsS04CatalogIntakeProgress'))?.pcmsS04CatalogIntakeProgress;
+    const completed=progress?.repositoryId===expectedId&&progress.initialImportCompleted===true&&progress.initialScopeDigest===approved?.approval?.scopeDigest;
+    const importStatus=completed?'IMPORT_SETUP_COMPLETE':approved?.ok?
+      approved.approval.scopeDigest===scopeDigest&&approved.approval.planDigest===preview.planDigest?'IMPORT_SCOPE_APPROVED':'IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED':
       'IMPORT_SCOPE_UNAPPROVED';
-    return {...result,preview,importStatus};
+    return {...result,preview,importStatus,approvalRevision:approved?.approval?.revision||0};
   }
   async function run(message,sender){
     const auth=validateCatalogMessage(api,sender,message);
@@ -360,17 +366,20 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
         const current=await scanAndPreview(config.repository,secret.token,config.repositoryId);
         if(!current?.ok)return current;
         if(message.type==='SCAN_CONNECTED')return current;
-        if(current.preview.scopeDigest!==p.scopeDigest)
+        if(current.preview.scopeDigest!==p.scopeDigest||current.preview.planDigest!==p.planDigest||current.approvalRevision!==p.expectedRevision)
           return fail('IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED');
         if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
         const still=await readConfig();
         if(still?.repositoryId!==config.repositoryId||still.repository!==config.repository)
           return fail('GIT_CONNECTION_CHANGED');
-        return await (await approvalStore()).approve({
+        const approved=await (await approvalStore()).approve({
           repository:current.repository,repositoryId:current.repositoryId,
           head:current.head,scopeDigest:p.scopeDigest,
-          recognizedSlugs:current.generators.map(g=>g.slug),approvalAt:Date.now()
+          recognizedSlugs:current.generators.map(g=>g.slug),approvalAt:Date.now(),
+          planDigest:p.planDigest,targets:current.preview.targets,expectedRevision:p.expectedRevision
         });
+        if(approved.ok)try{await api.alarms.create('pcms-s03-main-resume',{when:Date.now()+500});}catch{}
+        return approved;
       }
       return fail('CAPABILITY_OFF');
     }catch{

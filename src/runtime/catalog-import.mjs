@@ -29,13 +29,15 @@ export function createImportApprovalStore(db){
     });
   }
   async function approve({repository,repositoryId,head,scopeDigest,
-    recognizedSlugs,approvalAt}){
+    recognizedSlugs,approvalAt,planDigest=null,targets=null,expectedRevision=0}){
     if(typeof repository!=='string'||repository.length>200||
       !id.test(repositoryId||'')||!/^[a-f0-9]{40}$/.test(head||'')||
       !sha.test(scopeDigest||'')||!Array.isArray(recognizedSlugs)||
       recognizedSlugs.some(s=>typeof s!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(s))||
       new Set(recognizedSlugs).size!==recognizedSlugs.length||
-      !Number.isSafeInteger(approvalAt)||approvalAt<1)return error('IMPORT_INVALID');
+      !Number.isSafeInteger(approvalAt)||approvalAt<1||
+      (planDigest!==null&&(!sha.test(planDigest)||!Array.isArray(targets)||targets.length!==recognizedSlugs.length||
+        targets.some((t,i)=>t?.slug!==recognizedSlugs[i])))||!Number.isSafeInteger(expectedRevision)||expectedRevision<0)return error('IMPORT_INVALID');
     return new Promise((resolve,reject)=>{
       let result=error('IMPORT_UNAPPROVED'),tx;
       try{tx=db.transaction(['meta','events'],'readwrite');}
@@ -44,14 +46,17 @@ export function createImportApprovalStore(db){
       const store=tx.objectStore('meta');
       store.get(key(repositoryId)).onsuccess=e=>{
         const previous=e.target.result?.approval;
-        if(previous){
+        if(!previous&&expectedRevision!==0){result=error('IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED');return;}
+        if(previous&&previous.scopeDigest===scopeDigest&&previous.planDigest===planDigest){result={ok:true,code:'IMPORT_ALREADY_APPROVED',approval:previous};return;}
+        if(previous&&!(planDigest&&Array.isArray(targets)&&expectedRevision===previous.revision)){
           result=previous.repository===repository&&previous.scopeDigest===scopeDigest?
             {ok:true,code:'IMPORT_ALREADY_APPROVED',approval:previous}:
             error('IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED');
           return;
         }
         const approval={repository,repositoryId,head,scopeDigest,
-          recognizedSlugs,approvalAt,revision:1,source:'HUMAN_INITIAL_IMPORT_SCOPE',
+          recognizedSlugs,approvalAt,revision:(previous?.revision||0)+1,
+          ...(planDigest?{planDigest,targets}:{}),source:'HUMAN_INITIAL_IMPORT_SCOPE',
           authorizedEffects:'NONE'};
         store.put({key:key(repositoryId),approval});
         tx.objectStore('events').add({stage:'S03_INITIAL_IMPORT_APPROVED',

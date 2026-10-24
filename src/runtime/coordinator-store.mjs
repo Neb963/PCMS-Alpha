@@ -557,9 +557,9 @@ export function createCoordinatorStore(db){
                 const sourceLink={slug:prior.slug,folder:'generators/'+prior.slug,
                   remoteId:prior.remoteId,accountId:prior.accountId,
                   personaUid:prior.personaUid,bindingVersion:prior.bindingVersion,
-                  mainHead:proof.head,readyAtInspection:false,
+                  mainHead:proof.head,readyAtInspection:proof.ready===true,
                   fingerprint:proof.sourceFingerprint||null,testingSha:null,
-                  revision:1,source:'S04_INDEPENDENT_NOT_READY_ASSOCIATION'};
+                  revision:1,source:'S04_PINNED_MAIN_ASSOCIATION'};
                 m.put({key:'source-link:'+prior.slug,link:sourceLink});
               }
             }

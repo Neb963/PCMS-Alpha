@@ -3,6 +3,7 @@
 // ownership allocation. The human-approved initial import is a prerequisite.
 // Each recognized folder becomes one held canonical slug intent.
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
+import {readImportTargets,sameImportTarget} from './catalog-import-preview.mjs';
 import {createImportApprovalStore,getImportScopeDigest} from './catalog-import.mjs';
 import {createCoordinatorStore} from './coordinator-store.mjs';
 import {validateGitCreationWitness} from './creation-intake.mjs';
@@ -72,6 +73,11 @@ export function createCreationCatalogIntake(api,{open=openCanonicalDatabase,
         Number.isSafeInteger(earlier.next)&&earlier.next>=0&&
         earlier.next<=catalog.generators.length;
       const from=continued?earlier.next:0;
+      if(!firstImportCompleted&&Array.isArray(approved.approval.targets)){
+        const fresh=await readImportTargets(await (dbPromise||=open()),catalog.generators.slice(from).map(g=>g.slug));
+        const pinned=new Map(approved.approval.targets.map(t=>[t.slug,t]));
+        if(fresh.some(t=>!sameImportTarget(t,pinned.get(t.slug))))return fail('INITIAL_IMPORT_OWNERSHIP_CHANGED_REVIEW_REQUIRED');
+      }
       let next=from,added=0,duplicates=0,held=0;
       for(;next<catalog.generators.length&&next<from+maxItems;next++){
         if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');

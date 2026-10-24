@@ -94,3 +94,29 @@ test('S04 Git D: existing valid human NOT_READY text keeps its OID and no write'
   assert.equal(writes,0);
   assert.equal(db.keys('operations').length,0);
 });
+
+test('S04 Git D: existing READY source links without replacing its source or declaration',async()=>{
+  const {db,store}=await make();
+  const config={repository:'Neb963/per-gens',repositoryId:'42'};
+  const api={storage:{local:{get:async key=>
+    key==='pcmsS03Git'?{pcmsS03Git:config}:{}}}};
+  let writes=0;
+  const runner=createS04GitContinuation(api,{open:async()=>db,
+    guard:()=>({getSafeRouteReadiness:async()=>({
+      ready:true,personaUid:account.personaUid,cookieStoreId:'fixture',routeId:'fixed'}),
+      runSupplyStep:async()=>({ok:true,source:'INDEPENDENT_TARGET_READBACK',
+        state:'OWNED_VERIFIED',ownerMatches:true,slug,remoteId:intent.remoteId,
+        visibility:'UNLISTED'})}),
+    vault:async()=>({ok:true,credential:'mock-native-secret-123456'}),
+    scan:async()=>({ok:true,complete:true,repositoryId:'42',
+      head:'c'.repeat(40),generators:[{slug,sourceState:'READY_UNVERIFIED_COHERENCE',ready:true,
+        folder:'generators/'+slug,markerOid:'f'.repeat(40)}]}),
+    write:async()=>{writes++;throw Error('Must preserve existing Git tree');}});
+  const result=await runner.step(intentId,10);
+  assert.equal(result.ok,true,result.code);
+  assert.equal(result.record.gitMarkerOid,'f'.repeat(40));
+  assert.equal(result.record.state,'ASSOCIATED_NOT_READY');
+  assert.equal(writes,0);
+  assert.equal(db.read('meta','source-link:'+slug).link.readyAtInspection,true);
+  assert.equal(db.keys('operations').length,0);
+});
