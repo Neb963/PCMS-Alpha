@@ -1363,7 +1363,7 @@ def main():
                     [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Verify independent checkpoint'))&&
                     [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Reconcile uncertain restore'))&&
                     [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Apply reviewed import'));
-                  const restoreHeld=[...backupPanel.querySelectorAll('button')].find(x=>x.textContent.includes('Apply reviewed restore'))?.disabled===true;
+                  const restoreHeld=[...backupPanel.querySelectorAll('button')].find(x=>x.textContent.includes('Apply reviewed import'))?.disabled===true;
                   sh.querySelector('[data-settings="diagnostics"]').click();
                   const details=sh.querySelector('.settings-main');
                   const primaryDiagnostic=details?.textContent.includes('Operational diagnostics')&&
