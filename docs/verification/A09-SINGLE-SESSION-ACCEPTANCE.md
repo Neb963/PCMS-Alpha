@@ -20,7 +20,7 @@ node scripts/a09-evidence.mjs --xpi build/pcms-alpha-i00.xpi --source-sha "$(git
 
 The output's `HELD` is expected while required positive/adverse/recovery observations are unavailable. `--require-ready` deliberately exits nonzero on HELD or FAIL. This is an **evidence structure and identity gate**, not an attestation of an external observer's authenticity or a bypass of human product acceptance. Each receipt must name an AC/T/X ID, tier, case, exact source SHA and XPI digest, environment, time, independently observable result and linked sanitized evidence. H/GIT/L PASS require a separate independent observer/readback. Never insert credentials, cookies, session state, IP addresses, confidential sources, URLs containing tokens, or provider chat data in the report.
 
-**Evidence gap:** The merged `tests/fixtures/a01-recovery-scenarios.json` expressly lacks the original Part 8 narrative for X-01–X-14. Its labels are derived topic mappings, not authoritative original scenarios. The verifier holds X release certification until that original source is independently recovered and reconciled; do not substitute invented descriptions.
+**Resolved provenance gap:** The original Part 8 X-01–X-14 narratives were recovered from the user-supplied report and committed verbatim to `docs/audit/PART8-ORIGINAL-X01-X14.md` with an exact table SHA-256. The A01 fixture's former topic labels are derived groupings, not replacements for the original triggers and expected outcomes. Source presence alone does not prove any scenario passed; execute and record only the evidence that the specific original trace requires.
 
 ## Reuse verified automated evidence; avoid operator repetition
 
@@ -37,6 +37,6 @@ Before asking for human action, inspect current **same-XPI, same-compatible-runt
 
 ## Release and rollback decision
 
-AC-01–AC-18 are the accepted operator journeys (subject to Client Amendment v1.0.1), T-01–T-10 are cross-workflow adversarial traces, and X-01–X-14 are recoverable original audit cases with incomplete provenance. A09 marks **no final release** while any applicable tier, relevant positive/adverse/recovery case, original X source or manual accessibility/product signoff remains missing/failed. A CI success alone is insufficient.
+AC-01–AC-18 are the accepted operator journeys (subject to Client Amendment v1.0.1), T-01–T-10 are cross-workflow adversarial traces, and X-01–X-14 are recovered, verbatim audit traces with outstanding execution evidence. A09 marks **no final release** while any applicable tier, relevant positive/adverse/recovery case, X scenario evidence or manual accessibility/product signoff remains missing/failed. A CI success alone is insufficient.
 
 Preserve the previously tested XPI and an independent old-profile checkpoint. On failed upgrade/recovery stop affected automation, restore only from verified safe checkpoint into a separate profile, rebind/reverify account/route/source, leave remote uncertain effects held and never retry publication/create/save to 'undo' uncertainty. Do not replace the operator's installed XPI or reconfigure the native bridge without separate authorization. Record explicit **NOT_TESTED** for real H/operator bridge, private GIT and Perchance L until actually observed.
