@@ -54,6 +54,7 @@ export function buildCatalog(matrix,scenarioMap){
  const xs=scenarioMap.scenarios.map(x=>{
   assert(x.id&&x.acceptance?.length&&x.acceptance.every(id=>lookup.has(id)),'A09_X_MAPPING_INVALID');
   assert(TIER.includes(x.minimumTier),'A09_X_MINIMUM_TIER_INVALID:'+x.id);
+  assert(x.originalPart8Description==='UNAVAILABLE','A09_UNVERIFIED_X_SOURCE_REPLACEMENT');
   const tiers=orderedTiers(distinct(['D','B',x.minimumTier]));
   return {id:x.id,kind:'X',relatedAC:x.acceptance,tiers,cases:['adverse','recovery'],
    authority:x.originalPart8Description==='UNAVAILABLE'?'DERIVED_MAPPING_ONLY_ORIGINAL_X_UNAVAILABLE':'ORIGINAL_PART8_VERIFIED',
