@@ -8,10 +8,12 @@ import {normalizeRouteEvidence,exitSetDigest} from './network-ledger.mjs';
 
 // Hold codes that a later automatic attempt may clear without operator input.
 const TRANSIENT=new Set(['MULLVAD_LOCAL_SERVICE_UNAVAILABLE','DONOR_SECURITY_UNAVAILABLE',
-  'PERSONA_CREATE_UNCONFIRMED','PERSONA_TAG_UNCONFIRMED','ROUTE_ASSIGN_UNCONFIRMED','NO_ROUTE_CANDIDATES','ENROLLMENT_INTERRUPTED']);
+  'PERSONA_CREATE_UNCONFIRMED','PERSONA_TAG_UNCONFIRMED','ROUTE_ASSIGN_UNCONFIRMED','NO_ROUTE_CANDIDATES','MULLVAD_RELAY_CATALOG_UNAVAILABLE','ENROLLMENT_INTERRUPTED']);
 const rid=prefix=>prefix+crypto.randomUUID().replaceAll('-','');
 // Codes shown to the operator; anything else is summarized generically.
 export const SETUP_MESSAGES=Object.freeze({
+  ENROLLMENT_INTERRUPTED:'Protected setup was interrupted. Resume setup checks the saved Persona and route before continuing.',
+  MULLVAD_RELAY_CATALOG_UNAVAILABLE:'The Mullvad relay list is unavailable. Existing verified routes remain usable; resume setup when the connection returns.',
   MULLVAD_LOCAL_SERVICE_UNAVAILABLE:'The PersonaMonkey Mullvad helper is not running or not installed on this computer.',
   DONOR_SECURITY_UNAVAILABLE:'Firefox privacy protections are not in a safe state; PersonaMonkey is holding all protected routes.',
   NO_UNIQUE_EXIT_AVAILABLE:'No available Mullvad exit was found that has not already been used by another managed account.',
@@ -39,7 +41,7 @@ export const SETUP_MESSAGES=Object.freeze({
 });
 
 export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,syncInventory,
-  now=Date.now}={}){
+  now=Date.now,mutationAllowed=async()=>true}={}){
   if(!accounts?.applyCurrent||!ledger?.reserve||!donor?.createBoundPersona||!pins?.hold||
      typeof openLogin!=='function'||typeof identify!=='function')
     throw new TypeError('Enrollment dependencies unavailable');
@@ -50,7 +52,18 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     if(archiving.has(accountId))return Promise.resolve(fail('ACCOUNT_BUSY'));
     const prior=running.get(accountId);
     if(prior)return prior.kind===kind?prior.promise:Promise.resolve(fail('ACCOUNT_BUSY'));
-    const promise=Promise.resolve().then(task).catch(()=>fail('ENROLLMENT_INTERRUPTED'))
+    const promise=Promise.resolve().then(task).catch(async()=>{
+      // A thrown adapter/storage error must not leave idle setup looking busy.
+      // Preserve the binding and donor intent; resume observes before effects.
+      try{const current=await accounts.get(accountId);if(current.ok&&current.account.state==='PREPARING'){
+        pins.hold(current.account.bindingId);
+        if(await mutationAllowed()===true){
+          await ledger.hold(current.account.bindingId,'ENROLLMENT_INTERRUPTED');
+          if(await mutationAllowed()===true)await progress(accountId,'HELD','ENROLLMENT_INTERRUPTED');
+        }
+      }}catch{}
+      return fail('ENROLLMENT_INTERRUPTED');
+    })
       .finally(()=>running.delete(accountId));
     running.set(accountId,{kind,promise});
     return promise;
@@ -151,7 +164,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       await accounts.applyCurrent({type:'ROUTE_SEARCH_STEP',accountId:account.accountId,routeId});
     };
     const candidates=listed.ok&&Array.isArray(listed.candidates)?listed.candidates:[];
-    let last=candidates.length?'NO_UNIQUE_EXIT_AVAILABLE':'NO_ROUTE_CANDIDATES';
+    let last=candidates.length?'NO_UNIQUE_EXIT_AVAILABLE':listed.relayList==='UNAVAILABLE'?'MULLVAD_RELAY_CATALOG_UNAVAILABLE':'NO_ROUTE_CANDIDATES';
     for(const candidate of candidates){
       // The catalog is finite; visit its complete eligible set rather than
       // retrying the same colliding prefix forever. Only one probe/assignment
@@ -443,7 +456,24 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     return accounts.apply({type:'REMOVE',accountId,expectedRevision,
       explicitRemoval:true,personaDeleted,at:now()});
   }
+  async function recoverInterrupted({canRecover=mutationAllowed}={}){
+    const listed=await accounts.list();if(!listed.ok)return listed;
+    let held=0;
+    for(const a of listed.accounts){
+      if(a.state!=='PREPARING'||a.setup?.phase==='HELD'||running.has(a.accountId))continue;
+      // A new controller owns no prior in-memory task. Preserve the durable
+      // binding/search history and require read-before-effect recovery.
+      if(await canRecover()!==true)return fail('RESTORE_HOLD');
+      pins.hold(a.bindingId);
+      if(await canRecover()!==true)return fail('RESTORE_HOLD');
+      await ledger.hold(a.bindingId,'ENROLLMENT_INTERRUPTED');
+      if(await canRecover()!==true)return fail('RESTORE_HOLD');
+      const out=await progress(a.accountId,'HELD','ENROLLMENT_INTERRUPTED');if(!out.ok)return out;held++;
+    }
+    return {ok:true,held,providerEffects:'NONE'};
+  }
   return Object.freeze({
+    recoverInterrupted,
     remove:(accountId,expectedRevision,options)=>exclusive(accountId,'REMOVE:'+String(expectedRevision)+':'+String(options?.deletePersona===true),
       ()=>remove(accountId,expectedRevision,options)),
     async begin(){

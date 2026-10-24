@@ -3,6 +3,7 @@
 // ownership allocation. The human-approved initial import is a prerequisite.
 // Each recognized folder becomes one held canonical slug intent.
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
+import {readImportTargets,sameImportTarget} from './catalog-import-preview.mjs';
 import {createImportApprovalStore,getImportScopeDigest} from './catalog-import.mjs';
 import {createCoordinatorStore} from './coordinator-store.mjs';
 import {validateGitCreationWitness} from './creation-intake.mjs';
@@ -55,32 +56,45 @@ export function createCreationCatalogIntake(api,{open=openCanonicalDatabase,
       const {approval,creation}=await stores();
       const approved=await approval.get(catalog.repositoryId);
       if(!approved.ok||approved.approval.repository!==catalog.repository||
-         approved.approval.source!=='HUMAN_INITIAL_IMPORT_SCOPE')
+         !['HUMAN_INITIAL_IMPORT_SCOPE','EMPTY_MANAGED_SCOPE_ONBOARDING'].includes(approved.approval.source))
         return fail('INITIAL_IMPORT_SCOPE_UNAPPROVED');
       const earlier=(await api.storage.local.get(PROGRESS))?.[PROGRESS];
       const scopeDigest=await getImportScopeDigest(catalog);
       if(!scopeDigest)return fail('S04_CATALOG_UNVERIFIED');
       const firstImportCompleted=earlier?.repositoryId===catalog.repositoryId&&
         earlier?.initialScopeDigest===approved.approval.scopeDigest&&
-        earlier?.initialImportCompleted===true;
+        earlier?.initialImportCompleted===true&&(!approved.approval.planDigest||earlier.initialApprovalRevision===approved.approval.revision);
       // A different initial folder set cannot become an automatic source of
       // effects before the exactly approved first scope was durably consumed.
       if(!firstImportCompleted&&scopeDigest!==approved.approval.scopeDigest)
         return fail('INITIAL_IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED');
       const continued=earlier?.repositoryId===catalog.repositoryId&&
-        earlier?.scopeDigest===scopeDigest&&
+        earlier?.scopeDigest===scopeDigest&&(!approved.approval.planDigest||earlier.initialApprovalRevision===approved.approval.revision)&&
         Number.isSafeInteger(earlier.next)&&earlier.next>=0&&
         earlier.next<=catalog.generators.length;
-      const from=continued?earlier.next:0;
+      const retryHeld=continued&&earlier.next===catalog.generators.length&&earlier.hasHeldItems===true;
+      const from=continued&&!retryHeld?earlier.next:0;
+      if(!firstImportCompleted&&Array.isArray(approved.approval.targets)){
+        const fresh=await readImportTargets(await (dbPromise||=open()),catalog.generators.slice(from).map(g=>g.slug));
+        const pinned=new Map(approved.approval.targets.map(t=>[t.slug,t]));
+        if(fresh.some(t=>!sameImportTarget(t,pinned.get(t.slug))))return fail('INITIAL_IMPORT_OWNERSHIP_CHANGED_REVIEW_REQUIRED');
+      }
       let next=from,added=0,duplicates=0,held=0;
       for(;next<catalog.generators.length&&next<from+maxItems;next++){
         if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
         const g=catalog.generators[next];
+        const reviewed=approved.approval.reviewedSources?.find(x=>x.slug===g.slug);
+        // An unchanged marker cannot silently authorize changed source bytes.
+        // Retain the reviewed binding; the primary view offers reapproval for
+        // a still-pending initial item. READY/source work has its own intake.
+        if(reviewed&&(reviewed.markerOid!==g.markerOid||(reviewed.folderTreeOid||null)!==(g.folderTreeOid||null))){held++;continue;}
         if(identityHeld.has(g.slug)){held++;continue;}
         const out=await creation.ingestVerifiedMain({
           repository:catalog.repository,repositoryId:catalog.repositoryId,
           slug:g.slug,head:catalog.head,markerOid:g.markerOid,
-          complete:true,verifiedMain:true
+          complete:true,verifiedMain:true,
+          ...(Array.isArray(approved.approval.targets)&&approved.approval.recognizedSlugs.includes(g.slug)?{initialImport:{revision:approved.approval.revision,
+            scopeDigest:approved.approval.scopeDigest,target:approved.approval.targets.find(t=>t.slug===g.slug),markerOid:reviewed?.markerOid||g.markerOid,folderTreeOid:reviewed?.folderTreeOid||null}}:{})
         });
         if(!out.ok){
           if(out.code==='I17_ORIGINAL_EFFECT_QUARANTINED'){
@@ -99,8 +113,8 @@ export function createCreationCatalogIntake(api,{open=openCanonicalDatabase,
       const more=next<catalog.generators.length;
       const progress={repositoryId:catalog.repositoryId,head:catalog.head,
         scopeDigest,initialScopeDigest:approved.approval.scopeDigest,
-        initialImportCompleted:firstImportCompleted||!more,
-        next,total:catalog.generators.length,observedAt:now()};
+        initialImportCompleted:firstImportCompleted||!more,initialApprovalRevision:approved.approval.revision,
+        next,total:catalog.generators.length,hasHeldItems:held>0||from>0&&earlier?.hasHeldItems===true,observedAt:now()};
       await api.storage.local.set({[PROGRESS]:progress,[RECEIPT]:{
         code:more?'S04_LOCAL_INTAKE_CHECKPOINTED':'S04_LOCAL_INTAKE_COMPLETE',
         ...progress,added,duplicates,held,providerEffects:'OFF',gitEffects:'OFF'}});

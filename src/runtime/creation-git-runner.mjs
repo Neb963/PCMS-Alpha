@@ -59,13 +59,13 @@ export function createS04GitContinuation(api,{open=openCanonicalDatabase,
       const row=observed.generators.find(g=>g.slug===item.slug);
       if(item.state==='GIT_INIT_PENDING'){
         if(row){
-          if(row.sourceState!=='NOT_READY'||!/^[a-f0-9]{40}$/.test(row.markerOid||''))
-            return fail('GIT_FOLDER_DIVERGENT_OR_READY');
+          if(!['NOT_READY','READY_UNVERIFIED_COHERENCE'].includes(row.sourceState)||!/^[a-f0-9]{40}$/.test(row.markerOid||''))
+            return fail('GIT_FOLDER_DECLARATION_UNVERIFIED');
           // Explicit verified main folder requires no Git write.
           return await s.stageGit({intentId,expectedRevision,event:'EXISTING',proof:{
             source:'PINNED_MAIN_READ_ONLY',repositoryId:cfg.repositoryId,
             folder:'generators/'+item.slug,head:observed.head,
-            markerOid:row.markerOid}});
+            markerOid:row.markerOid,ready:row.ready===true}});
         }
         if(!gate({intent:item,repositoryId:cfg.repositoryId}))
           return fail('GIT_WRITE_ACTIVATION_HELD');

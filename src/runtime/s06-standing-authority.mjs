@@ -15,7 +15,7 @@ const configured=c=>c?.repository==='Neb963/per-gens'&&RID.test(c.repositoryId||
 const policyValid=r=>r&&r.schema===1&&Number.isSafeInteger(r.revision)&&r.revision>0&&grantsValid(r.grants);
 const revisionOf=r=>Number.isSafeInteger(r?.revision)&&r.revision>0?r.revision:1;
 const valid=r=>policyValid(r)&&configured({repository:r.repository,repositoryId:r.repositoryId});
-const view=r=>({ok:true,record:{revision:r.revision,
+const view=r=>({ok:true,onboardingAllowed:r.revocationReason==='GIT_CONFIGURATION_CHANGED',record:{revision:r.revision,
  repository:r.repository,repositoryId:r.repositoryId,grants:{...r.grants},
  changedAt:r.changedAt||null,source:'EXPLICIT_OPERATOR_AUTHORITY'}});
 export function createS06StandingAuthority(api){
@@ -45,7 +45,7 @@ export function createS06StandingAuthority(api){
        const paused=await revoke('RESTORE_HOLD');
        return {...paused,reason:'RESTORE_HOLD'};
      }
-     return {ok:true,record:{revision:revisionOf(record),
+     return {ok:true,onboardingAllowed:record===undefined||record?.revocationReason==='GIT_CONFIGURATION_CHANGED',record:{revision:revisionOf(record),
        repository:configured(cfg)?cfg.repository:null,
        repositoryId:configured(cfg)?cfg.repositoryId:null,
        grants:{...OFF},changedAt:null,source:'INACTIVE_NO_STANDING_GRANT'},
@@ -200,4 +200,6 @@ export function createS06StandingAuthority(api){
 }
 export const standingS06=typeof browser==='undefined'?null:
   createS06StandingAuthority(browser);
-if(standingS06)standingS06.register();
+// Only the background entrypoint registers this singleton. Importing a
+// production adapter in another extension context must not create another
+// policy writer or a second configuration-invalidation queue.

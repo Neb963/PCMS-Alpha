@@ -1,3 +1,8 @@
+import {standingS06} from './s06-standing-authority.mjs';
+import {defaultRenameSafety} from './folder-rename-safety.mjs';
+const renameNoInvocation=new WeakSet();
+function renamePreInvocationHold(code){const reply=Object.freeze({ok:false,code,source:'GUARDED_RENAME_PREINVOCATION_HOLD'});renameNoInvocation.add(reply);return reply;}
+export const isGuardedRenamePreInvocationHold=reply=>!!reply&&renameNoInvocation.has(reply);
 import {admissionForI17Supply} from './legacy-quarantine.mjs';
 import {validateNativeWitness} from './qualified-clock.mjs';
 import {inspectRoutePin} from './route-pin.mjs';
@@ -20,7 +25,7 @@ export async function cachedHealthDomain(evidence){
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
-  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, inspectNoEditorTabs, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, refresherCleanupTab, readRuntimeWitness, enrollmentDonor, pinGate = inspectRoutePin }) {
+  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, inspectNoEditorTabs, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, refresherCleanupTab, readRuntimeWitness, enrollmentDonor, renameSafety=defaultRenameSafety,renameAuthority=()=>standingS06?.gate('development')===true,renameAuthorityGeneration=()=>standingS06?.policyGeneration(), pinGate = inspectRoutePin }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -197,17 +202,28 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     const quarantine=admissionForI17Supply(request?.kind,request);
     if(!quarantine.ok)return quarantine;
     if(typeof supplyIsolatedTab!=='function')return {ok:false,code:'SUPPLY_EXECUTOR_UNAVAILABLE'};
+    const renameGeneration=renameAuthorityGeneration();
+    if(request?.kind==='RENAME_EXISTING'&&renameAuthority()!==true)return renamePreInvocationHold('RENAME_AUTHORITY_PAUSED');
     const leased=await acquireConflictGuard(personaUid);
     if(!leased?.ready||!leased.leaseId)
-      return {ok:false,code:leased?.code||'GUARD_UNAVAILABLE'};
+      return request.kind==='RENAME_EXISTING'?renamePreInvocationHold(leased?.code||'GUARD_UNAVAILABLE'):{ok:false,code:leased?.code||'GUARD_UNAVAILABLE'};
+    let supplyInvoked=false;
     try {
       const before=await inspectOwnedAction(leased);
-      if(!before?.ready)return {ok:false,code:before?.code||'GUARD_CHANGED'};
+      if(!before?.ready)return request.kind==='RENAME_EXISTING'?renamePreInvocationHold(before?.code||'GUARD_CHANGED'):{ok:false,code:before?.code||'GUARD_CHANGED'};
+      if(request.kind==='RENAME_EXISTING'){
+        const safety=await renameSafety(request.temporarySlug);if(safety?.ok!==true)return renamePreInvocationHold(safety?.code||'RENAME_SOURCE_WORKFLOW_ACTIVE');
+        const editor=await inspectNoEditorTabs?.(leased,{slug:request.temporarySlug});
+        if(editor?.ok!==true||editor.noEditors!==true)return renamePreInvocationHold('RENAME_EDITOR_OPEN_OR_DIRTY');
+        const current=await inspectOwnedAction(leased);if(current?.ready!==true)return renamePreInvocationHold('GUARD_CHANGED');
+      }
+      if(request.kind==='RENAME_EXISTING'&&(renameAuthority()!==true||renameAuthorityGeneration()!==renameGeneration))return renamePreInvocationHold('RENAME_AUTHORITY_PAUSED');
+      supplyInvoked=true;
       const packet=await supplyIsolatedTab(leased,request);
       const after=await inspectOwnedAction(leased);
       if(!after?.ready)return {ok:false,code:'POST_EFFECT_GUARD_CHANGED'};
       return packet&&typeof packet==='object'?packet:{ok:false,code:'SUPPLY_PACKET_UNVERIFIED'};
-    }catch{return {ok:false,code:'SUPPLY_EXECUTOR_UNAVAILABLE'};}
+    }catch{return request?.kind==='RENAME_EXISTING'&&!supplyInvoked?renamePreInvocationHold('RENAME_SOURCE_ACTIVITY_UNAVAILABLE'):{ok:false,code:'SUPPLY_EXECUTOR_UNAVAILABLE'};}
     finally{await releaseConflictGuard(leased);}
   }
 

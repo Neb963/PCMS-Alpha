@@ -347,3 +347,18 @@ body:has(.drawer-overlay:not([hidden])) #toast-root{right:min(555px,calc(100vw -
 #page[data-view="generators"] .workspace-surface table.data{table-layout:auto}
 #page[data-view="generators"] .workspace-surface table.data td,#page[data-view="generators"] .workspace-surface table.data th{max-width:none}
 #page[data-view="generators"] .workspace-surface table.data .name-cell{max-width:240px}
+
+/* Git/source workspace lives inside the primary dashboard shadow root. */
+.source-workspace{width:min(1120px,100vw)}
+.source-layout{display:grid;grid-template-columns:minmax(190px,28%) minmax(0,1fr);gap:20px}
+.source-tree{min-width:0}.source-tree input{width:100%}.source-file{min-width:0}
+.source-file-button{display:block;width:100%;padding:8px;text-align:left;border:0;border-radius:4px;background:transparent;color:inherit;overflow-wrap:anywhere;cursor:pointer}
+.source-file-button:hover,.source-file-button[aria-current=true]{background:var(--accent-soft,#eaf1f9)}
+.source-code{width:100%;font-family:ui-monospace,monospace;white-space:pre;overflow:auto;tab-size:2;resize:vertical}
+@media(max-width:650px){.source-layout{grid-template-columns:minmax(0,1fr)}.source-tree{max-height:260px;overflow:auto}}
+
+[data-git-prompt] textarea.form-input{box-sizing:border-box;width:100%;font-family:ui-monospace,monospace;line-height:1.5;padding:12px;border:1px solid #c9d2da;border-radius:6px;resize:vertical}
+.git-ai-policy{display:grid;gap:16px;margin-top:20px}.git-ai-policy>label{display:flex;flex-direction:column;gap:8px}
+.git-ai-policy textarea{box-sizing:border-box;width:100%;padding:10px;border:1px solid #c9d2da;border-radius:6px;resize:vertical}
+.git-ai-policy input[type=number]{width:110px;padding:8px;border:1px solid #c9d2da;border-radius:6px}
+@media(min-width:651px){.source-tree{max-height:calc(100dvh - 250px);overflow:auto;padding-right:6px}}

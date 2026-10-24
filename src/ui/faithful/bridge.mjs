@@ -1,3 +1,5 @@
+import {renderGitInventory,mountGitPromptEditor} from './git-workspace.mjs';
+import {createSourceWorkspace} from './source-workspace.mjs';
 import {createGeneratorBatches} from './generator-batches.mjs';
 import {createGeneratorSelection} from './generator-selection.mjs';
 import {createAccountsWorkspace,accountGrowthAdvice,accountNeedsAttention} from './accounts-workspace.mjs';
@@ -129,22 +131,26 @@ function openGlobalSearch(){
  const priorFocus=root.activeElement;
  const overlay=el('div','overlay');const modal=el('div','modal');
  const closeSearch=()=>{clearTimeout(delay);epoch++;overlay.remove();
-  const restore=priorFocus?.isConnected?priorFocus:shadow('.top-search');restore?.focus({preventScroll:true});};modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label','Search local accounts and generators');
+  const restore=priorFocus?.isConnected?priorFocus:shadow('.top-search');restore?.focus({preventScroll:true});};modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label','Search PCMS records');
  const head=el('div','modal-head');head.append(el('h2','', 'Search PCMS'));
  const close=b('Close',closeSearch,'btn small');head.append(close);modal.append(head);
  const body=el('div','modal-body');
- const input=el('input');input.type='search';input.placeholder='Find a local generator or account';input.setAttribute('aria-label','Search local generators and accounts');input.maxLength=80;
+ const input=el('input');input.type='search';input.placeholder='Find a generator, account, source path or operation';input.setAttribute('aria-label','Search generators, accounts, source paths and operations');input.maxLength=512;
  input.style.width='100%';input.style.padding='11px';input.style.border='1px solid #c9d2da';input.style.borderRadius='7px';body.append(input);
- const caption=el('p','native-bridge-note','Only canonical local records are searched. Missing results are not proof of remote absence.');body.append(caption);
+ const caption=el('p','native-bridge-note','Search saved records and the latest complete Git source snapshot.');body.append(caption);
  const list=el('div','queue-list');body.append(list);modal.append(body);overlay.append(modal);root.append(overlay);
  let epoch=0,delay;
  async function search(){const query=input.value.trim(),n=++epoch;list.replaceChildren();if(query.length<2)return;
   list.append(el('p','pcms-unknown','Searching local records…'));
-  const settled=await Promise.allSettled([inventory({query,offset:0,limit:8}),accounts()]);if(n!==epoch||!overlay.isConnected)return;
+  const settled=await Promise.allSettled([inventory({query:query.slice(0,80),offset:0,limit:8}),accounts(),
+   readPort('pcms-s03-catalog','SEARCH_PATHS',{query,limit:8},12000),guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{after:'',limit:8,status:'ALL',query:query.slice(0,80)})]);if(n!==epoch||!overlay.isConnected)return;
   list.replaceChildren();const inv=settled[0].status==='fulfilled'?settled[0].value:null,acc=settled[1].status==='fulfilled'?settled[1].value:null;
   const found=[];
   for(const g of inv?.items||[])found.push({kind:'Generator',label:g.slug,execute:()=>{state.gen.query=g.slug;state.gen.offset=0;overlay.remove();routeTo('generators')}});
-  for(const a of acc?.accounts||[])if(a.accountId.toLowerCase().includes(query.toLowerCase()))found.push({kind:'Account',label:a.accountId,execute:()=>{state.acct.query=a.accountId;state.acct.page=0;overlay.remove();routeTo('accounts')}});
+  for(const a of acc?.accounts||[])if([a.accountId,a.alias].filter(Boolean).some(x=>x.toLowerCase().includes(query.toLowerCase())))found.push({kind:'Account',label:a.alias||a.accountId,execute:()=>{state.acct.query=a.accountId;state.acct.page=0;overlay.remove();routeTo('accounts')}});
+  const paths=settled[2].status==='fulfilled'?settled[2].value:null,operations=settled[3].status==='fulfilled'?settled[3].value:null;
+  for(const source of paths?.items||[])found.push({kind:'Git source',label:source.path,execute:()=>{overlay.remove();openSourceManager({slug:source.slug,initialPath:source.path.startsWith(source.folder+'/')?source.path.slice(source.folder.length+1):null})}});
+  for(const op of operations?.items||[])found.push({kind:'Operation',label:op.operationId,execute:()=>{state.queue.query=op.operationId;state.queue.filter='All';overlay.remove();routeTo('work-queue')}});
   if(!found.length){list.append(el('p','pcms-unknown',inv||acc?'No matching local records.':'Local search unavailable.'));return}
   for(const f of found.slice(0,12)){const row=el('div','queue-item');const strong=el('strong','',f.label);const kind=el('span','muted small',f.kind);row.append(strong,kind,b('Open',f.execute));list.append(row)}
  }
@@ -169,76 +175,7 @@ function nativeSelection(type,item){
 }
 // Primary source association is a read-only pinned-main inspection followed
 // by a local, revision-fenced link. It performs no Git/provider modification.
-function openSourceManager(item){
- const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
- panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
- panel.setAttribute('aria-label','GitHub source for '+item.slug);
- const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
- const head=el('div','drawer-head');head.append(el('h2','drawer-title','Source · '+item.slug),b('Close',close));
- const body=el('div','drawer-body'),status=el('p','setting-note',
-  'Reading the locally verified source association…');status.setAttribute('role','status');
- const folder=el('input','form-input');folder.value='generators/'+item.slug;folder.maxLength=240;
- const label=el('label','','GitHub folder on committed main');label.append(folder);
- const actions=el('div','form-foot'),manifest=el('div','queue-list');
- body.append(label,actions,status,manifest);panel.append(head,body);overlay.append(panel);root.append(overlay);
- overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
- overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
- async function association(){
-  try{
-   const reply=await readPort('pcms-i05-source','GET_ASSOCIATION',{slug:item.slug},12000);
-   if(!overlay.isConnected)return;
-   if(reply?.ok){folder.value=reply.link.folder;
-    status.textContent='Previously associated GitHub main folder. This is historical evidence, not a fresh source or owner verification.';
-   }else status.textContent='No verified source association is recorded for this generator.';
-  }catch{status.textContent='Source association could not be read. No change has been made.';}
- }
- const inspect=b('Read source from main',()=>void(async()=>{
-  inspect.disabled=true;manifest.replaceChildren();
-  status.textContent='Checking the complete source manifest from GitHub main…';
-  try{
-   const data=await readPort('pcms-i05-source','INSPECT_SOURCE',{folder:folder.value.trim()},95000);
-   if(!data?.ok){status.textContent='Source could not be verified on GitHub main. No association has been changed.';return}
-   status.textContent='Read-only GitHub source verified at '+data.head.slice(0,12)+
-    '. Deployment status: '+(data.ready?'READY':'NOT_READY')+'.';
-   for(const file of (data.paths||[]).slice(0,100)){
-    const row=el('p','setting-note',file.path+' · '+file.size+' bytes · SHA-256 '+file.sha256);
-    manifest.append(row);
-   }
-   if(item.ownerState!=='OBSERVED_OWNER'||!Number.isSafeInteger(item.revision)){
-    manifest.append(el('p','setting-note',
-      'Local association requires a separately verified owner and current inventory revision.'));
-    return;
-   }
-   const assign=b('Associate verified source',()=>void(async()=>{
-    if(!window.confirm('Associate this exact verified main source with the currently observed owned generator? This changes only the local PCMS association.'))return;
-    assign.disabled=true;
-    try{
-     const out=await readPort('pcms-i05-source','ASSOCIATE_SOURCE',{
-      slug:item.slug,folder:data.folder,expectedRevision:item.revision,
-      pinnedFingerprint:data.fingerprint,pinnedHead:data.head,
-      pinnedTestingSha:data.testingSha},95000);
-     status.textContent=out?.ok?
-       'Source association saved. PCMS still requires fresh owner and source readbacks for each protected effect.':
-       'Source association was not confirmed. Refresh the generator inventory before retrying.';
-    }catch{status.textContent='Association outcome uncertain; check the current source link before retrying.'}
-    finally{assign.disabled=false;}
-   })(),'btn primary');
-   manifest.append(assign);
-  }catch{status.textContent='GitHub verification did not complete. No source link was changed.'}
-  finally{inspect.disabled=false}
- })(),'btn small');
- const recheck=b('Verify existing source link',()=>void(async()=>{
-  recheck.disabled=true;
-  try{
-   const result=await readPort('pcms-i05-source','RECHECK_SOURCE',{slug:item.slug},95000);
-   status.textContent=result?.ok?
-    'Existing source link was checked against current main. Review differences before any write.':
-    'Existing source could not be verified; protected writes remain held.';
-  }catch{status.textContent='The current source link could not be checked.'}
-  finally{recheck.disabled=false}
- })(),'btn small');
- actions.append(inspect,recheck);void association();folder.focus();
-}
+const openSourceManager=createSourceWorkspace({root,el,b,request:readPort,reload:()=>loadGenerators(),connect:()=>{state.settings='connections';routeTo('settings')}});
 // Adoption is guarded by the protected account and owned-source readbacks.
 // The visible button never creates a new generator, writes source or publishes.
 function openAdoptionManager(item){
@@ -439,6 +376,7 @@ function routeHandlers(){
  event.preventDefault();
  if(action==='search'){openGlobalSearch();return}
  if(action==='create'){openGeneratorCreator();return}
+ if(action==='git-sources'){openGitWorkspace();return}
  if(action==='sync-inventory'){void syncManagedInventories();return}
  if(action==='queue'||action==='activity'){routeTo('work-queue');return}
  if(action==='diagnostics'||action==='health'){state.settings='diagnostics';routeTo('settings');return}
@@ -917,74 +855,29 @@ function displayQueue(){
       ' is no longer recognized. The live generator is unchanged.'));
     if(review.stale){
       content.append(el('p','setting-note',
-        'The Git source changed after this review began. Refresh the catalog before choosing.'));
+        'The Git source changed. Review its current files before continuing.'));
+      content.append(b('Browse current source',()=>openSourceManager({slug:review.newSlug}),'btn small'),b('Update source review',()=>void(async()=>{
+        try{const out=await readPort('pcms-r4-folder-identity','REFRESH_REVIEW',{newSlug:review.newSlug,expectedRevision:review.revision},120000);
+         if(!out.ok)notify(out.code==='RENAME_READBACK_REQUIRED'?'Check the pending rename result before changing its source review.':'Source review could not be updated. The original identity and source are preserved.');await loadQueue(true);
+        }catch{notify('GitHub is unavailable. The current review is preserved.')}
+      })(),'btn small'),b('Check rename result',()=>void(async()=>{try{await readPort('pcms-r4-folder-identity','RUN_RENAME_JOB',{newSlug:review.newSlug},120000);await loadQueue(true)}catch{notify('Rename readback is unavailable. No rename was repeated.')}})(),'btn small'));
+
     }else if(review.state==='RENAME_EXISTING_REQUESTED'){
-      const stateNote=el('p','setting-note','Reading the existing-generator rename stage…');
-      const actions=el('div','form-foot');content.append(stateNote,actions);
-      void (async()=>{
-       let attempt;
-       try{attempt=await readPort('pcms-r4-folder-identity','GET_RENAME_ATTEMPT',{
-        newSlug:review.newSlug},15000)}
-       catch{}
-       if(!row.isConnected)return;
-       actions.replaceChildren();
-       if(!attempt?.ok){stateNote.textContent='Rename safety state unavailable. No live operation is permitted.';return;}
-       const stage=attempt.state;
-       const label=stage==='NOT_PREPARED'?'Pending owner/source verification':
-         stage==='RENAME_PREPARED'?'Verified for one guarded rename attempt':
-         stage==='DISPATCH_POSSIBLE'||stage==='OUTCOME_UNCERTAIN'?
-          'Remote outcome uncertain — do not retry':
-         stage==='REMOTE_RENAME_VERIFIED_LINK_PENDING'?
-          'Remote identity verified; source association still pending':
-          'The rename requires additional review';
-       stateNote.textContent=label;
-       async function next(type,revision){
-        const text=type==='PREPARE_RENAME'?
-          'Read the protected owner and entire existing source to prepare an exact one-time rename? No remote change occurs during preparation.':
-          type==='EXECUTE_RENAME'?
-          'Rename the EXISTING owned Perchance generator now? Renaming may break imports, URLs or slug-dependent storage. Its complete original source must remain unchanged. This request may have an uncertain outcome and will never be automatically retried.':
-          'Read back the possibly completed remote rename without executing any new provider write?';
-        if(!window.confirm(text))return;
-        actions.querySelectorAll('button').forEach(x=>x.disabled=true);
-        stateNote.textContent='Checking protected account, source and current Git identity…';
-        try{
-         const result=await readPort('pcms-r4-folder-identity',type,{
-          newSlug:review.newSlug,expectedRevision:revision,
-          ...(type==='EXECUTE_RENAME'?{consent:'I APPROVE THE EXACT EXISTING GENERATOR RENAME'}:{})},
-          type==='EXECUTE_RENAME'?120000:95000);
-         stateNote.textContent=result?.ok?
-          type==='EXECUTE_RENAME'?'One rename attempt may have occurred. Reconcile the remote result; do not retry.':
-          type==='RECONCILE_RENAME'?
-           'Remote name and original source verified. Synchronize the account inventory and associate the new Git folder before any development.':
-           'Existing owner and original source verified. A single rename attempt can now be explicitly authorized.':
-          'The operation was held. Inspect the current scope before taking another action.';
-        }catch{stateNote.textContent='Outcome could not be confirmed. Do not retry a possible rename. Read current stage.'}
-        await loadQueue(true);
-       }
-       if(stage==='NOT_PREPARED')
-         actions.append(b('Verify owner and prepare rename',()=>void next('PREPARE_RENAME',review.revision),'btn small'));
-       if(stage==='RENAME_PREPARED')
-         actions.append(b('Execute one verified rename',()=>void next('EXECUTE_RENAME',attempt.revision),'btn primary'));
-       if(stage==='DISPATCH_POSSIBLE'||stage==='OUTCOME_UNCERTAIN')
-         actions.append(b('Reconcile remote rename',()=>void next('RECONCILE_RENAME',attempt.revision),'btn small'));
-       if(stage==='REMOTE_RENAME_VERIFIED_LINK_PENDING'){
-         actions.append(b('Verify inventory and finish rename',()=>void (async()=>{
-           if(!window.confirm('Finish reconciliation only if the new generator inventory and Git source association are independently verified? This does not perform another remote rename.'))return;
-           stateNote.textContent='Checking new owner, remote identity and exact Git source association…';
-           try{
-             const result=await readPort('pcms-r4-folder-identity','FINALIZE_RENAME',{
-               newSlug:review.newSlug,expectedRevision:attempt.revision},45000);
-             stateNote.textContent=result?.ok&&result.state==='RENAME_COMPLETED'?
-               'New identity and source association verified. Previous source history retained.':
-               'The new inventory or source association is not yet independently verified. No remote change was attempted.';
-           }catch{stateNote.textContent='Reconciliation could not be confirmed. Remote rename will not be repeated.'}
-           await loadQueue(true);
-         })(),'btn small'));
-         actions.append(b('Open new generator source',()=>{
-           state.gen.query=review.newSlug;state.gen.offset=0;routeTo('generators');
-         },'btn small'));
-       }
-      })();
+      const note=el('p','setting-note','Checking rename progress…'),actions=el('div','form-foot');content.append(note,actions);
+      void (async()=>{try{const attempt=await readPort('pcms-r4-folder-identity','GET_RENAME_ATTEMPT',{newSlug:review.newSlug},15000);if(!row.isConnected)return;
+       if(!attempt.ok){note.textContent='Rename status is unavailable. Retry when the account is available.';return}
+       note.textContent=attempt.state==='REMOTE_RENAME_VERIFIED_LINK_PENDING'?'Rename verified. Connecting the new source automatically.':
+        ['DISPATCH_POSSIBLE','OUTCOME_UNCERTAIN'].includes(attempt.state)?'Checking the remote result. The rename will not be repeated.':
+        attempt.automaticApproved?'Rename queued. Owner, source and protected route are checked automatically.':'Approve this rename to continue. The original generator is unchanged.';
+       const check=b(attempt.automaticApproved?'Check rename':'Approve rename',()=>void(async()=>{
+        if(!attempt.automaticApproved&&!window.confirm('Rename '+review.oldSlug+' to '+review.newSlug+' after verified owner and source checks? URLs and imports may change. PCMS makes one attempt and verifies the outcome.'))return;
+        check.disabled=true;
+        try{const out=attempt.automaticApproved?await readPort('pcms-r4-folder-identity','RUN_RENAME_JOB',{newSlug:review.newSlug},120000):
+          await readPort('pcms-r4-folder-identity','CHOOSE',{newSlug:review.newSlug,choice:'RENAME_EXISTING',expectedTreeOid:review.newTreeOid,expectedRevision:review.revision,authorizeRename:true},15000);
+         if(!out.ok)notify('Rename is waiting for current owner, source or route verification. Its original history is preserved.');await loadQueue(true);
+        }catch{note.textContent='Rename result is not confirmed. Check progress; no possible rename is repeated.'}finally{check.disabled=false}
+       })(),'btn small');actions.append(check,b('Open original generator',()=>{state.gen.query=review.oldSlug;state.gen.offset=0;routeTo('generators')},'btn small'));
+      }catch{note.textContent='Rename status is unavailable. The existing resource is preserved.'}})();
     }else if(review.state==='REMOTE_RENAMED_LINK_PENDING'){
       content.append(el('p','setting-note',
         'Remote rename readback was recorded. The inventory and new source link must still be verified.'));
@@ -994,16 +887,16 @@ function displayQueue(){
       async function choose(choice){
        const prompt=choice==='CREATE_SEPARATE'?
         'Keep the original generator unchanged and authorize a separate new generator from this Git folder? Normal owner, route, source and publication safety checks still apply.':
-        'Request renaming the verified existing generator? PCMS will hold this request until ownership, route and source safety are independently confirmed. No rename occurs now.';
+        'Rename '+review.oldSlug+' to '+review.newSlug+'? PCMS verifies ownership, protected route and unchanged source, makes one rename attempt and checks the result. URLs and imports may change.';
        if(!window.confirm(prompt))return;
        try{
         const answer=await readPort('pcms-r4-folder-identity','CHOOSE',{
          newSlug:review.newSlug,choice,expectedTreeOid:review.newTreeOid,
-         expectedRevision:review.revision},12000);
+         expectedRevision:review.revision,...(choice==='RENAME_EXISTING'?{authorizeRename:true}:{})},12000);
         if(!answer?.ok){notify('The identity choice could not be confirmed. Refresh and review again.');return;}
         notify(choice==='CREATE_SEPARATE'?
           'Separate identity recorded. The next complete Git scan will check eligibility.':
-          'Rename request recorded. The existing generator has not been changed.');
+          'Rename queued. PCMS will verify the original resource and preserve its source.');
         await loadQueue(true);
        }catch{notify('The review result is uncertain. Refresh before taking another action.');}
       }
@@ -1762,136 +1655,27 @@ function primarySettingCard(container,title,intro){
 // main. Display its actual initial import scope and canonical prompt without
 // inferring remote ownership, deletion, creation or publication.
 function renderConnectedMain(section,snapshot){
- section.querySelector('[data-main-review]')?.remove();
- if(!snapshot?.ok||snapshot.complete!==true)return;
- const panel=el('section','settings-section');panel.dataset.mainReview='1';
- const summary=el('h3','','GitHub main · '+snapshot.recognizedCount+' recognized folders');
- const info=el('p','setting-note',
-  'This is a complete read-only GitHub file snapshot. Generator ownership and live publication need separate verification.');
- panel.append(summary,info);
- const preview=snapshot.preview||{},items=preview.items||[];
- const listing=el('details','settings-section');listing.append(el('summary','','Review folder declarations and owner evidence'));
- const search=el('input','form-input');search.placeholder='Find a generator folder';search.maxLength=100;
- search.setAttribute('aria-label','Find GitHub generator folder');
- const list=el('div','queue-list'),pagination=el('div','form-foot');
- let offset=0;
- const prev=b('Previous',()=>{offset=Math.max(0,offset-30);draw()},'btn small');
- const next=b('Next',()=>{offset+=30;draw()},'btn small');
- const count=el('span','setting-note','');
- function draw(){
-  list.replaceChildren();const query=search.value.trim().toLowerCase();
-  const filtered=items.filter(x=>x.slug?.toLowerCase().includes(query));
-  if(offset>=filtered.length)offset=Math.max(0,Math.floor(Math.max(0,filtered.length-1)/30)*30);
-  const visible=filtered.slice(offset,offset+30);
-  for(const item of visible){
-   const row=el('div','queue-item'),data=el('div','row-body');
-   data.append(el('strong','',item.slug),
-    el('p','setting-note',
-      (item.sourceState==='READY_UNVERIFIED_COHERENCE'?
-       'READY declaration detected; source verification remains separate.':
-       'Source declaration: '+String(item.sourceState||'not confirmed').replaceAll('_',' ').toLowerCase())+
-      ' · '+(item.observed==='AMBIGUOUS'?'Account or owner not independently verified':
-       'Owner observation: '+String(item.observed||'not confirmed').replaceAll('_',' ').toLowerCase())));
-   row.append(data);list.append(row);
-  }
-  if(!visible.length)list.append(el('p','setting-note','No folder matches this search in the complete GitHub snapshot.'));
-  count.textContent=filtered.length+' recognized folder(s) · '+(filtered.length?offset+1:0)+
-   '–'+Math.min(offset+visible.length,filtered.length)+' shown';
-  prev.disabled=offset===0;next.disabled=offset+30>=filtered.length;
- }
- search.addEventListener('input',()=>{offset=0;draw()});
- pagination.append(prev,next,count);listing.append(search,list,pagination);panel.append(listing);draw();
- if(preview.scopeDigest&&snapshot.importStatus!=='IMPORT_SCOPE_APPROVED'){
-  const approval=b('Approve inspected inventory scope',()=>void(async()=>{
-   if(!window.confirm('Approve this EXACT GitHub main folder inventory for local recognition? This does not create, rename, publish or allocate remote generators, and owner checks remain mandatory.'))return;
-   approval.disabled=true;
-   try{
-    const r=await readPort('pcms-s03-catalog','APPROVE_IMPORT',{
-     repositoryId:snapshot.repositoryId,scopeDigest:preview.scopeDigest},30000);
-    info.textContent=r?.ok?
-     'Exact initial GitHub folder scope approved. Account ownership and deployment remain separately unverified.':
-     'Folder-scope approval could not be confirmed. Read main again before retrying.';
-   }catch{info.textContent='Import approval result uncertain; re-scan before any further action.'}
-   finally{approval.disabled=false}
-  })(),'btn primary');
-  panel.append(approval);
- }
- if(snapshot.prompt?.state==='PRESENT'&&typeof snapshot.prompt.text==='string'){
-  const box=el('details','settings-section');
-  box.append(el('summary','','Canonical Chat 1 prompt · GitHub-controlled'));
-  box.append(el('p','setting-note',
-   'The committed main prompt remains authoritative. Local drafts cannot change it without an explicit conditional Git commit and independent readback.'));
-  const draft=el('textarea','form-input');draft.rows=10;draft.value=snapshot.prompt.text;
-  draft.setAttribute('aria-label','Canonical Chat 1 prompt draft');
-  const notes=el('p','setting-note','GitHub source loaded. No remote write was submitted. Saving a draft only changes local PCMS settings.');
-  notes.setAttribute('role','status');
-  const controls=el('div','form-foot');
-  let base={repositoryId:snapshot.repositoryId,head:snapshot.head,oid:snapshot.prompt.oid},
-   revision=0,dirty=false,uncertain=false,committed=false,loading=false;
-  draft.addEventListener('input',()=>{dirty=true;});
-  const save=b('Save local prompt draft',()=>void(async()=>{
-   if(loading||!draft.value.trim()||draft.value.length>131072)return;
-   loading=true;save.disabled=true;notes.textContent='Saving the local draft; GitHub remains unchanged.';
-   try{
-    const r=await readPort('pcms-s03-catalog','SAVE_PROMPT_DRAFT',{
-      repositoryId:base.repositoryId,expectedRevision:revision,
-      baseOid:base.oid,text:draft.value},20000);
-    if(r?.ok){revision=r.revision;dirty=false;
-     notes.textContent='Local prompt draft saved. GitHub main remains unchanged.'}
-    else notes.textContent='Draft was not confirmed. Preserve your text and reload the current draft before retrying.';
-   }catch{notes.textContent='Draft storage outcome uncertain. Preserve your edits and reload before retrying.'}
-   finally{loading=false;save.disabled=false}
-  })(),'btn small');
-  const commit=b('Commit reviewed prompt to GitHub main',()=>void(async()=>{
-   if(loading||revision<1||dirty||uncertain||committed){notes.textContent='Save and verify the current draft, then confirm the latest GitHub main before a new commit.';return}
-   if(!window.confirm('Commit this exact saved Chat 1 prompt to the verified GitHub main? PCMS uses a revision-checked nonforced write, independent readback and no blind retry.'))return;
-   loading=true;commit.disabled=true;notes.textContent='Checking standing Git permission and exact main revision…';
-   try{
-    const r=await readPort('pcms-s03-catalog','COMMIT_PROMPT',{
-      repositoryId:base.repositoryId,expectedRevision:revision,
-      expectedHead:base.head},95000);
-    uncertain=!r?.ok&&r?.code==='PROMPT_GIT_UNCERTAIN_RECONCILE_REQUIRED';
-    if(r?.ok)committed=true;
-    notes.textContent=r?.ok?
-      'Committed prompt verified on GitHub main. Re-scan before further source work.':
-      uncertain?'Commit outcome uncertain. Use read-only reconciliation; do not retry the write.':
-      'Commit held; GitHub source has not been independently verified. Preserve this draft.';
-   }catch{uncertain=true;notes.textContent='GitHub commit outcome unknown. Do not resend. Reconcile the exact write first.'}
-   finally{loading=false;commit.disabled=committed||uncertain}
-  })(),'btn primary');
-  const reconcile=b('Reconcile possible Git commit',()=>void(async()=>{
-   if(loading)return;
-   loading=true;reconcile.disabled=true;notes.textContent='Observing current GitHub history and exact prompt bytes without a write…';
-   try{
-    const r=await readPort('pcms-s03-catalog','RECONCILE_PROMPT',{
-      repositoryId:base.repositoryId},60000);
-    if(r?.ok){uncertain=false;committed=true;commit.disabled=true;
-      notes.textContent='Prior Git prompt commit independently verified. Read main again before editing.'}
-    else notes.textContent='Git prompt outcome remains unverified. No write was repeated.';
-   }catch{notes.textContent='Read-only reconciliation unavailable. Preserve the original draft and uncertainty hold.'}
-   finally{loading=false;reconcile.disabled=false}
-  })(),'btn small');
-  controls.append(save,commit,reconcile);
-  box.append(draft,controls,notes);panel.append(box);
-  void (async()=>{
-   try{
-    const r=await readPort('pcms-s03-catalog','GET_PROMPT_DRAFT',{},20000);
-    if(!panel.isConnected||dirty)return;
-    if(r?.ok){
-     draft.value=r.record.text;revision=r.record.revision;
-     uncertain=['DISPATCH_POSSIBLE','UNCERTAIN'].includes(r.record.effect?.state);
-     if(r.record.baseOid!==base.oid){
-      uncertain=true;notes.textContent='Saved draft is based on a different main revision. Reconcile before any commit.';
-     }else notes.textContent='Existing local draft loaded. GitHub main remains authoritative.';
-    }
-   }catch{}
-  })();
- }
- section.append(panel);
+ renderGitInventory({section,snapshot,el,b,request:readPort,refresh:async()=>{
+  try{const out=await readPort('pcms-s03-catalog','SCAN_CONNECTED',{},95000);if(out.ok)renderConnectedMain(section,out);else notify('GitHub main could not be read. Retry when the connection is available.')}catch{notify('GitHub main is unavailable.')}
+ },openSource:item=>openSourceManager({slug:item.slug}),openQueue:()=>routeTo('work-queue')});
+}
+function openGitWorkspace(){
+ const prior=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('section','drawer source-workspace');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-label','Git sources');
+ const close=()=>{overlay.remove();prior?.isConnected&&prior.focus({preventScroll:true})};
+ const head=el('div','drawer-head'),body=el('div','drawer-body');head.append(el('h2','drawer-title','Git sources'),b('Close',close));
+ const feedback=el('p','setting-note','Reading GitHub main…');feedback.setAttribute('role','status');body.append(feedback);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ async function refresh(){try{const out=await readPort('pcms-s03-catalog','SCAN_CONNECTED',{},95000);if(!overlay.isConnected)return;
+  if(!out.ok){feedback.textContent='Connect GitHub to browse and import source folders.';return}feedback.textContent='';
+  renderGitInventory({section:body,snapshot:out,el,b,request:readPort,refresh,
+   openSource:item=>{close();openSourceManager({slug:item.slug})},openQueue:()=>{close();routeTo('work-queue')}});
+ }catch{feedback.textContent='GitHub is unavailable. Retry after checking the connection.'}}
+ body.append(b('GitHub connection',()=>{close();state.settings='connections';routeTo('settings')},'btn small'),b('Retry',()=>void refresh(),'btn small'));
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}else if(e.key==='Tab'){const controls=[...panel.querySelectorAll('button:not(:disabled),input:not(:disabled)')].filter(x=>!x.hidden);const i=controls.indexOf(root.activeElement);if(e.shiftKey&&i<=0){e.preventDefault();controls.at(-1)?.focus()}else if(!e.shiftKey&&i===controls.length-1){e.preventDefault();controls[0]?.focus()}}});head.querySelector('button').focus();void refresh();
 }
 function primaryConnections(container){
  const section=primarySettingCard(container,'GitHub',
-  'Connect once to the configured private repository. PCMS reads committed main only.');
+  'Connect once to enable background creation, development and tested-source writeback from main. Publication always needs your exact approval.');
  section.dataset.gitConnection='1';
  const form=el('div','pcms-git-connection-form');
  const repo=el('input','form-input');repo.value='Neb963/per-gens';repo.readOnly=true;
@@ -1954,12 +1738,21 @@ function primaryConnections(container){
      repository:repo.value,token,
      ...(type==='RECOVER_GIT_CONNECTION'?{acknowledgeCredentialReplacement:true}:{})
    },30000);
+   if(out?.ok){
+    // First setup may enable accepted routine automation. Reconnect never
+    // overrides an explicit, restored or ambiguous legacy pause.
+    const policy=await readPort('pcms-s06-authority','GET',{},18000);
+    if(policy?.onboardingAllowed&&policy.record.repositoryId===out.repositoryId)
+      await readPort('pcms-s06-authority','SET',{repositoryId:out.repositoryId,expectedRevision:policy.record.revision,
+        grants:{development:true,gitWrite:true,publication:true},consent:'I AUTHORIZE PROTECTED PCMS OPERATIONS'},18000);
+   }
    status.textContent=out?.ok?'GitHub access saved. You can now read main.':
      out?.code==='GIT_PENDING_CONNECTION_RECONCILIATION_REQUIRED'?
      'Setup was interrupted. Use the recovery actions directly below.':
      out?.code==='GITHUB_AUTH_REJECTED'?'GitHub rejected this token. Check its access to the repository.':
      'Connection not confirmed. '+friendlyConnectionIssue(out?.code);
    await refreshConnection({retainStatus:true});
+   if(out?.ok){const main=await readPort('pcms-s03-catalog','SCAN_CONNECTED',{},95000);if(main.ok)renderConnectedMain(section,main);}
   }catch{
    status.textContent='Connection result uncertain. Use Reconcile saved access before another attempt.';
    await refreshConnection({retainStatus:true});
@@ -2050,32 +1843,29 @@ function backupAction(action,extra={}){
 // independently authoritative and is never overwritten here.
 function primaryAiSettings(container){
  const section=primarySettingCard(container,'AI development settings',
-  'Configure local development guidance and per-account concurrency. These settings do not modify the GitHub default Chat 1 prompt, enable a provider effect or certify a test PASS.');
+  'Default instructions come from GitHub. Configure the required test set and workload limits below.');
  const feedback=el('p','setting-note','Loading the current AI settings…');
  feedback.setAttribute('role','status');
- const editor=el('textarea','form-input');editor.rows=8;editor.maxLength=16000;
- editor.setAttribute('aria-label','AI development guidance');
+ mountGitPromptEditor({section,el,b,request:readPort,connect:()=>{state.settings='connections';renderSettingsSection()}});
  const testLabel=el('label','','Required test names (one per line)');
  const tests=el('textarea','form-input');tests.rows=4;
  tests.setAttribute('aria-label','Required test names');testLabel.append(tests);
  const countLabel=el('label','','Maximum concurrent AI tasks per verified account');
  const count=el('input','form-input');count.type='number';count.min='1';count.max='4';count.step='1';
  countLabel.append(count);
- const actions=el('div','form-foot'),save=b('Save guidance and tests',()=>void(async()=>{
+ const actions=el('div','form-foot'),save=b('Save required tests',()=>void(async()=>{
   const names=tests.value.split(/[\n,]+/).map(x=>x.trim()).filter(Boolean);
   if(!names.length||names.length>64||new Set(names).size!==names.length||
-   names.some(x=>!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$/.test(x))||
-   !editor.value.trim()||editor.value.length>16000){
-   feedback.textContent='Enter guidance and 1–64 distinct valid required test names.';return}
+   names.some(x=>!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$/.test(x))){
+   feedback.textContent='Enter 1–64 distinct valid required test names.';return}
   const current=state.aiCurrentPrompt;if(!current){feedback.textContent='Prompt revision unavailable. Reload current settings.';return}
-  if(!window.confirm('Replace local AI guidance for future jobs? Existing job candidates and the GitHub prompt remain unchanged.'))return;
   save.disabled=true;
   try{
    const out=await readPort('pcms-i10-ai','SET_PROMPT',{
-    text:editor.value,tests:names,expectedRevision:current.revision},16000);
-   feedback.textContent=out?.ok?'Local guidance saved for new jobs; recorded tests still require independent execution.':
-      'Guidance could not be saved. Reload the current revision before retrying.';
-  }catch{feedback.textContent='Guidance update outcome uncertain. Read current revision before retrying.'}
+    text:current.text,tests:names,expectedRevision:current.revision},16000);
+   feedback.textContent=out?.ok?'Required test names saved for new jobs.':
+      'Tests could not be saved. Reload the current revision before retrying.';
+  }catch{feedback.textContent='Test settings were not confirmed. Read current revision before retrying.'}
   finally{save.disabled=false;void refresh()}
  })(),'btn primary');
  const saveLimit=b('Save concurrency',()=>void(async()=>{
@@ -2094,7 +1884,7 @@ function primaryAiSettings(container){
  })(),'btn small');
  actions.append(save,saveLimit);
  const form=el('div','form-stack');
- form.append(el('label','','Local AI guidance'),editor,testLabel,countLabel,actions,feedback);
+ form.classList.add('git-ai-policy');form.append(testLabel,countLabel,actions,feedback);
  section.append(form);
  const jobsSection=el('section','settings-section');
  jobsSection.append(el('h3','h3','Managed AI development'));
@@ -2179,12 +1969,12 @@ function primaryAiSettings(container){
   const concurrency=result[1].status==='fulfilled'&&result[1].value?.ok?result[1].value:null;
   state.aiCurrentPrompt=prompt?.current||null;state.aiConcurrency=concurrency?.setting||null;
   if(prompt?.current){
-   editor.value=prompt.current.text;tests.value=(prompt.current.tests||[]).join('\n');
+   tests.value=(prompt.current.tests||[]).join('\n');
   }
   if(concurrency?.setting)count.value=String(concurrency.setting.perAccount);
   save.disabled=!prompt?.current;saveLimit.disabled=!concurrency?.setting;
   feedback.textContent=prompt?.current&&concurrency?.setting?
-   'Current local guidance revision '+prompt.current.revision+
+   'Required-test settings revision '+prompt.current.revision+
    '; maximum '+concurrency.setting.perAccount+' parallel job(s) per account. No test outcome inferred.':
    'AI settings could not be read. Changes remain unavailable until the canonical runtime responds.';
  }
@@ -2342,7 +2132,11 @@ function renderSettingsSection(){if(state.route!=='settings')return;
 }
 function displayRouteScaffold(){
  if(state.route==='overview')displayOverview();
- if(state.route==='work-queue'){displayQueue();void loadQueue(true);}
+ if(state.route==='work-queue'){
+  const input=shadow('#queue-search');if(input)input.value=state.queue.query;
+  for(const tab of root.querySelectorAll('[data-filter^="queue:"]')){const active=tab.dataset.filter==='queue:'+state.queue.filter;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;}
+  displayQueue();void loadQueue(true);
+ }
  if(state.route==='generators'){
   const select=shadow('#generator-account');if(select)select.value=state.gen.account;
   const q=shadow('#generator-search');if(q)q.value=state.gen.query;

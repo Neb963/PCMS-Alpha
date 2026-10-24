@@ -1,3 +1,4 @@
+import {createInitialImportGuard} from './creation-import-authority.mjs';
 import {ensureCreationInventory} from './creation-inventory.mjs';
 import {inventoryBoundary} from './inventory-boundary.mjs';
 // S04 fixed, one-step guarded creation runner. No generic job engine.
@@ -20,7 +21,8 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
   makeStore=createCoordinatorStore,guard=internalPcmsGuard,
   effectGate=()=>false,gitGate=()=>false,
   createGit=createS04GitContinuation,now=Date.now,
-  syncInventory=(id,revision)=>inventoryBoundary?.syncAccount(id,revision)}={}){
+  syncInventory=(id,revision)=>inventoryBoundary?.syncAccount(id,revision),
+  importGuard=createInitialImportGuard(api)}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
   const git=createGit(api,{open,gate:gitGate});
   let dbPromise;
@@ -35,7 +37,11 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
       const item=found.record;
       if(item.revision!==expectedRevision)return fail('STALE_REVISION');
       if(isI17Quarantined(item))return fail(I17_QUARANTINE_CODE);
-      if(item.pinConflict||item.sourceDrift)return fail(item.hold||'SOURCE_CONFLICT');
+      const reconciling=['CREATE_DISPATCH_POSSIBLE','CREATE_UNCERTAIN','CREATE_OBSERVING','RENAME_DISPATCH_POSSIBLE','RENAME_UNCERTAIN','RENAME_OBSERVING','GIT_DISPATCH_POSSIBLE','GIT_UNCERTAIN','GIT_OBSERVING'].includes(item.state);
+      if((item.pinConflict||item.sourceDrift)&&!reconciling)return fail(item.hold||'SOURCE_CONFLICT');
+      if(['WAITING_CAPABILITY','OWNER_MISSING_VERIFIED','PRIVATE_EMPTY_CONFIRMED','CREATE_PREPARED','RENAME_PREPARED'].includes(item.state)){
+        const scope=await importGuard(await (dbPromise||=open()),item,{verifyGit:!['WAITING_CAPABILITY','CREATE_PREPARED','RENAME_PREPARED'].includes(item.state)});if(!scope.ok)return scope;
+      }
       if(item.state==='WAITING_CAPABILITY')
         return await s.allocateCreate(item.intentId,item.revision);
       if(item.state==='OWNER_READBACK_PENDING'){
@@ -154,6 +160,7 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         }
 
         // Read guards again before crossing the dispatch-possible marker.
+        const scope=await importGuard(await (dbPromise||=open()),item);if(!scope.ok)return scope;
         const before=await g.getSafeRouteReadiness(item.personaUid);
         if(!routeSame(ready,before)||(await sentinel.inspect()).held)
           return fail('PROTECTED_CONTEXT_CHANGED');

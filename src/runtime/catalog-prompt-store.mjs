@@ -25,7 +25,7 @@ export function createGitPromptStore(db){
     });
   }
   function save({repositoryId,expectedRevision,baseOid,text,updatedAt}){
-    if(!repoId(repositoryId)||!oid(baseOid)||!draftOK(text)||
+    if(!repoId(repositoryId)||!(baseOid===null||oid(baseOid))||!draftOK(text)||
        !Number.isSafeInteger(expectedRevision)||expectedRevision<0||
        !Number.isSafeInteger(updatedAt)||updatedAt<1)
       return Promise.resolve(fail('PROMPT_DRAFT_INVALID'));
@@ -44,7 +44,7 @@ export function createGitPromptStore(db){
     });
   }
   function prepare({repositoryId,revision,operationId,baseHead,baseOid,updatedAt}){
-    if(!repoId(repositoryId)||!idOK(operationId)||!oid(baseHead)||!oid(baseOid)||
+    if(!repoId(repositoryId)||!idOK(operationId)||!(oid(baseHead)||baseHead===null&&baseOid===null)||!(oid(baseOid)||baseOid===null)||
        !Number.isSafeInteger(revision)||revision<1||!Number.isSafeInteger(updatedAt)||updatedAt<1)
       return Promise.resolve(fail('PROMPT_INTENT_INVALID'));
     return tx(db,true,(m,t,done)=>m.get(key(repositoryId)).onsuccess=e=>{

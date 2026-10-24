@@ -106,16 +106,21 @@ export function createAccountBoundary(api,{
   const exitLedger=async()=>createExitLedger(await connection());
   // The SAME production instance serves the UI port and background upkeep.
   async function flow(){
+    // Read-only account views remain available throughout restore.
+    if((await sentinel.inspect()).held)return null;
     if(enrollment)return enrollment;
     if(enrollmentInit)return enrollmentInit;
     const g=guard();if(!g?.enrollmentDonor)return null;
     enrollmentInit=(async()=>{
-      enrollment=createEnrollment({accounts:await store(),ledger:await exitLedger(),
-        donor:g.enrollmentDonor,pins,
+      const created=createEnrollment({accounts:await store(),ledger:await exitLedger(),
+        donor:g.enrollmentDonor,pins,mutationAllowed:async()=>!(await sentinel.inspect()).held,
         openLogin:personaUid=>g.openHumanLogin(personaUid),
         identify:personaUid=>guardedIdentityRead(g,personaUid,identityReader),syncInventory});
-      return enrollment;
-    })().catch(error=>{enrollmentInit=null;throw error});
+      const recovered=await created.recoverInterrupted({canRecover:async()=>!(await sentinel.inspect()).held});
+      if(!recovered.ok){if(recovered.code==='RESTORE_HOLD')return null;throw Error('SETUP_RECOVERY_UNAVAILABLE');}
+      if((await sentinel.inspect()).held)return null;
+      enrollment=created;return enrollment;
+    })().then(created=>{if(!created)enrollmentInit=null;return created;}).catch(error=>{enrollmentInit=null;throw error});
     return enrollmentInit;
   }
   const explain=code=>SETUP_MESSAGES[code]||null;
@@ -286,7 +291,12 @@ export function createAccountBoundary(api,{
     // Donor route-test evidence expires after 15 minutes. Reuse the
     // existing bounded S01 upkeep, with its protected Mullvad echo probes,
     // before cache expiry; do not add a second Refresher route supervisor.
-    try{api.alarms?.create(ROUTE_UPKEEP_ALARM,{periodInMinutes:10});}catch{}
+    const schedule=async()=>{try{
+      // Repeated event-page evaluation must not postpone an existing alarm.
+      if(api.alarms?.get&&await api.alarms.get(ROUTE_UPKEEP_ALARM))return;
+      await api.alarms?.create(ROUTE_UPKEEP_ALARM,{delayInMinutes:1,periodInMinutes:10});
+    }catch{}};
+    void schedule();api.runtime.onStartup?.addListener(()=>void schedule());
     api.alarms?.onAlarm?.addListener(alarm=>{if(alarm?.name===ROUTE_UPKEEP_ALARM)void upkeep();});
   }
   return Object.freeze({register,run,upkeep});

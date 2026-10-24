@@ -28,6 +28,7 @@ function references(row) {
   if (!data || typeof data !== 'object') return [];
   const cases = [
     [/^adoption:/, 'adoption', ['original']],
+    [/^rename-original:/, 'record', ['original']],
     [/^stage(?:-history)?:/, 'record', ['candidate', 'previous']],
     [/^ai-(?:job|history):/, 'job', ['finalSource']],
     [/^release(?:-history)?:/, 'release', ['sealedSource', 'previousSource']],
@@ -41,7 +42,7 @@ function references(row) {
   // Historical source is not optional after a source-bearing effect.
   // Newly prepared existing updates and unfinished AI jobs legitimately have
   // no staged/final source yet; they remain preserved as unresolved records.
-  const required = key.startsWith('adoption:') ||
+  const required = key.startsWith('adoption:') || key.startsWith('rename-original:') ||
     key.startsWith('stage:') || key.startsWith('stage-history:') ||
     key.startsWith('release:') || key.startsWith('release-history:');
   for (const field of fields) {

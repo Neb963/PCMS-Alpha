@@ -1,3 +1,5 @@
+import {initializeEmptyPrivateGit} from './catalog-bootstrap.mjs';
+import {DEFAULT_AI_PROMPT} from './ai-evidence.mjs';
 // S03 fixed-purpose GitHub connection and main-only catalog boundary.
 // Extension-background IndexedDB owns tokens; canonical state and UI never receive them.
 import {trustedExtensionPage} from './command-boundary.mjs';
@@ -5,6 +7,7 @@ import {browserGitCredentialPacket} from './git-local-secret.mjs';
 import {createRestoreSentinel,openCanonicalDatabase,fail} from './journal.mjs';
 import {createImportApprovalStore,getImportScopeDigest} from './catalog-import.mjs';
 import {createGitPromptStore} from './catalog-prompt-store.mjs';
+import {buildImportPreview} from './catalog-import-preview.mjs';
 import {standingS06} from './s06-standing-authority.mjs';
 import {writeExistingGitPrompt,observeGitPromptWrite} from './git-prompt.mjs';
 import {inspectReadyCandidate} from './catalog-declaration.mjs';
@@ -22,11 +25,13 @@ export function validateCatalogMessage(api,sender,message){
   if(!message||typeof message!=='object'||Array.isArray(message)||
       Object.keys(message).some(k=>!['type','params'].includes(k)))
     return fail('CAPABILITY_OFF');
-  const types=['SCAN_CATALOG','CONNECT_GIT','SCAN_CONNECTED','GIT_STATUS','GET_CONNECTION_STATE','DISCONNECT_GIT','RECONCILE_GIT','RECOVER_GIT_CONNECTION','APPROVE_IMPORT','GET_PROMPT_DRAFT','SAVE_PROMPT_DRAFT','COMMIT_PROMPT','RECONCILE_PROMPT','INSPECT_DECLARATION','LIST_READY'];
+  const types=['SEARCH_PATHS','SCAN_CATALOG','CONNECT_GIT','SCAN_CONNECTED','GIT_STATUS','GET_CONNECTION_STATE','DISCONNECT_GIT','RECONCILE_GIT','RECOVER_GIT_CONNECTION','APPROVE_IMPORT','GET_PROMPT_DRAFT','SAVE_PROMPT_DRAFT','COMMIT_PROMPT','RECONCILE_PROMPT','INSPECT_DECLARATION','LIST_READY'];
   if(!types.includes(message.type))return fail('CAPABILITY_OFF');
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
-  if(['SCAN_CATALOG','CONNECT_GIT','RECOVER_GIT_CONNECTION'].includes(message.type)){
+  if(message.type==='SEARCH_PATHS'){
+    if(Object.keys(p).some(k=>!['query','limit'].includes(k))||typeof p.query!=='string'||p.query.length>512||!Number.isInteger(p.limit)||p.limit<1||p.limit>50)return fail('INVALID_PARAMS');
+  }else if(['SCAN_CATALOG','CONNECT_GIT','RECOVER_GIT_CONNECTION'].includes(message.type)){
     if(Object.keys(p).some(k=>!['repository','token',...(message.type==='RECOVER_GIT_CONNECTION'?['acknowledgeCredentialReplacement']:[])].includes(k))||
       !validRepository(p.repository)||!TOKEN.test(p.token||'')||
       (message.type==='RECOVER_GIT_CONNECTION'&&p.acknowledgeCredentialReplacement!==true))
@@ -35,7 +40,7 @@ export function validateCatalogMessage(api,sender,message){
     if(Object.keys(p).some(k=>!['repositoryId','expectedRevision','baseOid','text'].includes(k))||
       typeof p.repositoryId!=='string'||!/^[1-9][0-9]{0,19}$/.test(p.repositoryId)||
       !Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<0||
-      typeof p.baseOid!=='string'||!/^[0-9a-f]{40}$/.test(p.baseOid)||
+      !(p.baseOid===null||typeof p.baseOid==='string'&&/^[0-9a-f]{40}$/.test(p.baseOid))||
       typeof p.text!=='string'||p.text.length===0||p.text.length>131072)
       return fail('INVALID_PARAMS');
   } else if(message.type==='INSPECT_DECLARATION'){
@@ -45,12 +50,13 @@ export function validateCatalogMessage(api,sender,message){
     if(Object.keys(p).some(k=>!['repositoryId','expectedRevision','expectedHead'].includes(k))||
       typeof p.repositoryId!=='string'||!/^[1-9][0-9]{0,19}$/.test(p.repositoryId)||
       !Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
-      typeof p.expectedHead!=='string'||!/^[a-f0-9]{40}$/.test(p.expectedHead))
+      !(p.expectedHead===null||typeof p.expectedHead==='string'&&/^[a-f0-9]{40}$/.test(p.expectedHead)))
       return fail('INVALID_PARAMS');
   } else if(message.type==='APPROVE_IMPORT'){
-    if(Object.keys(p).some(k=>!['repositoryId','scopeDigest'].includes(k))||
+    if(Object.keys(p).some(k=>!['repositoryId','scopeDigest','planDigest','expectedRevision'].includes(k))||
       typeof p.repositoryId!=='string'||!/^[1-9][0-9]{0,19}$/.test(p.repositoryId)||
-      typeof p.scopeDigest!=='string'||!/^[0-9a-f]{64}$/.test(p.scopeDigest))
+      typeof p.scopeDigest!=='string'||!/^[0-9a-f]{64}$/.test(p.scopeDigest)||
+      !/^[0-9a-f]{64}$/.test(p.planDigest||'')||!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<0)
       return fail('INVALID_PARAMS');
   } else if(message.type==='RECONCILE_PROMPT'){
     if(Object.keys(p).some(k=>k!=='repositoryId')||
@@ -71,10 +77,10 @@ export function validateCatalogMessage(api,sender,message){
 }
 export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
   open=openCanonicalDatabase,writePrompt=writeExistingGitPrompt,
-  observePrompt=observeGitPromptWrite,
+  observePrompt=observeGitPromptWrite,initialize=initializeEmptyPrivateGit,
   inspectDeclaration=inspectReadyCandidate,
   // Product gate stays inactive until independently authorized Git H/GIT proof.
-  promptWriteGate=()=>false,
+  promptWriteGate=()=>false,authorityGeneration=()=>standingS06?.policyGeneration(),
   native=packet=>browserGitCredentialPacket(packet)}={}){
   let importDb;
   const approvalStore=async()=>createImportApprovalStore(await (importDb ||= open().catch(e=>{importDb=null;throw e;})));
@@ -96,14 +102,29 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
       {ok:false,complete:false,code:result.code}:fail('CATALOG_INCOMPLETE');
     if(expectedId&&result.repositoryId!==expectedId)return fail('GIT_IDENTITY_CHANGED');
     const scopeDigest=await getImportScopeDigest(result);
-    const preview={...makeInitialImportPreview(result),scopeDigest};
+    let preview={...makeInitialImportPreview(result),scopeDigest};
     if(!expectedId)return {...result,preview};
+    preview={...await buildImportPreview(await (importDb ||= open()),result),scopeDigest};
+    if(!preview.ok)return preview;
     let approved=null;
     try{approved=await (await approvalStore()).get(expectedId);}catch{}
-    const importStatus=approved?.ok?
-      approved.approval.scopeDigest===scopeDigest?'IMPORT_SCOPE_APPROVED':'IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED':
+    // There is no existing managed item to review in a genuinely empty
+    // scope. Connection establishes onboarding for future merged folders;
+    // no human approval or provider observation is fabricated.
+    if(!approved?.ok&&result.generators.length===0&&/^[a-f0-9]{40}$/.test(result.head||'')){
+      const empty=await (await approvalStore()).approve({repository:result.repository,repositoryId:expectedId,
+        head:result.head,scopeDigest,recognizedSlugs:[],approvalAt:Date.now(),planDigest:preview.planDigest,targets:[],reviewedSources:[],emptyOnboarding:true});
+      if(empty.ok){approved=empty;await api.storage.local.set({pcmsS04CatalogIntakeProgress:{repositoryId:expectedId,head:result.head,
+        scopeDigest,initialScopeDigest:scopeDigest,initialImportCompleted:true,initialApprovalRevision:empty.approval.revision,next:0,total:0}});}
+    }
+    const progress=(await api.storage.local.get('pcmsS04CatalogIntakeProgress'))?.pcmsS04CatalogIntakeProgress;
+    const completed=progress?.repositoryId===expectedId&&progress.initialImportCompleted===true&&progress.initialScopeDigest===approved?.approval?.scopeDigest;
+    const importStatus=completed&&!preview.initialReviewRequired?'IMPORT_SETUP_COMPLETE':approved?.ok?
+      approved.approval.scopeDigest===scopeDigest&&approved.approval.planDigest===preview.planDigest?'IMPORT_SCOPE_APPROVED':'IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED':
       'IMPORT_SCOPE_UNAPPROVED';
-    return {...result,preview,importStatus};
+    if(result.head)await api.storage.local.set({pcmsS03SearchSnapshot:{repository:result.repository,repositoryId:result.repositoryId,head:result.head,complete:true,
+      generators:result.generators.map(g=>({slug:g.slug,folder:g.folder,paths:g.paths||[]}))}});
+    return {...result,...(result.prompt?.state==='ABSENT'?{starterPrompt:DEFAULT_AI_PROMPT,starterVersion:'pcms.chat1-starter/1'}:{}),preview,importStatus,approvalRevision:approved?.approval?.revision||0};
   }
   async function run(message,sender){
     const auth=validateCatalogMessage(api,sender,message);
@@ -112,6 +133,15 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
     const p=message.params||{};
     let stage='UNCLASSIFIED';
     try{
+      if(message.type==='SEARCH_PATHS'){
+        const cfg=await readConfig();if(!cfg)return fail('GIT_RECONNECT_REQUIRED');
+        const snapshot=(await api.storage.local.get('pcmsS03SearchSnapshot'))?.pcmsS03SearchSnapshot;
+        if(!snapshot?.complete||snapshot.repositoryId!==cfg.repositoryId)return {ok:true,items:[],snapshotAvailable:false};
+        const query=p.query.toLowerCase(),items=[];
+        for(const g of snapshot.generators){for(const path of [g.folder,...g.paths.map(path=>g.folder+'/'+path)]){
+          if(path.toLowerCase().includes(query)){items.push({slug:g.slug,path,folder:g.folder,head:snapshot.head});if(items.length>=p.limit)return {ok:true,items,snapshotAvailable:true};}
+        }}return {ok:true,items,snapshotAvailable:true};
+      }
       if(message.type==='GET_CONNECTION_STATE'){
         // Read-only nonsecret status. A pending intent cannot be treated as
         // no connection: it may follow an ambiguous browser-IDB credential write.
@@ -305,7 +335,8 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
       }
       if(message.type==='COMMIT_PROMPT'){
         if(p.repositoryId!==config.repositoryId)return fail('GIT_IDENTITY_CHANGED');
-        if(!promptWriteGate())return fail('GIT_WRITE_ACTIVATION_HELD');
+        const grantGeneration=authorityGeneration();
+        if(promptWriteGate()!==true)return fail('GIT_WRITE_ACTIVATION_HELD');
         const currentDraft=await (await promptStore()).read(config.repositoryId);
         if(!currentDraft.ok||currentDraft.record.revision!==p.expectedRevision||
            currentDraft.record.effect)return fail('PROMPT_DRAFT_STALE_OR_UNCERTAIN');
@@ -318,20 +349,32 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
           revision:p.expectedRevision,operationId,baseHead:current.head,
           baseOid:current.prompt.oid,updatedAt:Date.now()});
         if(!journal.ok)return journal;
-        const result=await writePrompt({token:secret.token,repository:config.repository,
-          draft:currentDraft.record.text,intent:{
+        const beforeDispatch=async()=>{
+          if(promptWriteGate()!==true||(await sentinel.inspect()).held)return false;
+          const live=await readConfig();return promptWriteGate()===true&&authorityGeneration()===grantGeneration&&live?.repositoryId===config.repositoryId&&live.repository===config.repository;
+        };
+        beforeDispatch.current=()=>promptWriteGate()===true&&authorityGeneration()===grantGeneration;
+        let result;
+        try{
+        if(current.head===null){
+          const approvedStarterSha256=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(currentDraft.record.text)))].map(x=>x.toString(16).padStart(2,'0')).join('');
+          result=await initialize({token:secret.token,repository:config.repository,starterPrompt:currentDraft.record.text,beforeDispatch,
+            intent:{phase:'DISPATCH_POSSIBLE',operationId,repositoryId:config.repositoryId,approvedStarterSha256,starterApproved:true}},transport,scan);
+        }else result=await writePrompt({token:secret.token,repository:config.repository,
+          draft:currentDraft.record.text,beforeDispatch,intent:{
             phase:'DISPATCH_POSSIBLE',operationId,repositoryId:config.repositoryId,
             expectedHead:current.head,expectedOid:current.prompt.oid,
             requireExactHead:true,source:'PINNED_MAIN_PROMPT_EDITOR'
           }},transport,scan);
+        }catch{result={ok:false,dispatchPossible:true,code:'PROMPT_DISPATCH_UNCONFIRMED'};}
         // Uncertain or missing ACK must not be blindly replayed.
-        const state=result?.ok&&result.code==='PROMPT_COMMITTED_VERIFIED'?'VERIFIED':'UNCERTAIN';
+        const state=result?.ok&&['PROMPT_COMMITTED_VERIFIED','PROMPT_UNCHANGED','GIT_INITIALIZED_VERIFIED'].includes(result.code)?'VERIFIED':result?.dispatchPossible===false?'CONFLICT':'UNCERTAIN';
         const terminal=await (await promptStore()).reconcile({
           repositoryId:config.repositoryId,operationId,state,
           possibleCommit:result?.possibleCommit||
             (state==='VERIFIED'?result.head:null),receipt:result});
-        return {...terminal,code:state==='VERIFIED'?'PROMPT_GIT_VERIFIED':
-          'PROMPT_GIT_UNCERTAIN_RECONCILE_REQUIRED',writeCode:result?.code};
+        return {...terminal,ok:terminal.ok&&state==='VERIFIED',code:state==='VERIFIED'?'PROMPT_GIT_VERIFIED':
+          state==='CONFLICT'?'PROMPT_CONFLICT_KEEP_DRAFT':'PROMPT_GIT_UNCERTAIN_RECONCILE_REQUIRED',writeCode:result?.code};
       }
       if(message.type==='GIT_STATUS'){
         stage='VAULT_STATUS';
@@ -360,17 +403,21 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
         const current=await scanAndPreview(config.repository,secret.token,config.repositoryId);
         if(!current?.ok)return current;
         if(message.type==='SCAN_CONNECTED')return current;
-        if(current.preview.scopeDigest!==p.scopeDigest)
+        if(current.preview.scopeDigest!==p.scopeDigest||current.preview.planDigest!==p.planDigest||current.approvalRevision!==p.expectedRevision)
           return fail('IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED');
         if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
         const still=await readConfig();
         if(still?.repositoryId!==config.repositoryId||still.repository!==config.repository)
           return fail('GIT_CONNECTION_CHANGED');
-        return await (await approvalStore()).approve({
+        const approved=await (await approvalStore()).approve({
           repository:current.repository,repositoryId:current.repositoryId,
           head:current.head,scopeDigest:p.scopeDigest,
-          recognizedSlugs:current.generators.map(g=>g.slug),approvalAt:Date.now()
+          recognizedSlugs:current.generators.map(g=>g.slug),approvalAt:Date.now(),
+          planDigest:p.planDigest,targets:current.preview.targets,expectedRevision:p.expectedRevision,
+          reviewedSources:current.generators.map(g=>({slug:g.slug,markerOid:g.markerOid,folderTreeOid:g.folderTreeOid||null}))
         });
+        if(approved.ok)try{await api.alarms.create('pcms-s03-main-resume',{when:Date.now()+500});}catch{}
+        return approved;
       }
       return fail('CAPABILITY_OFF');
     }catch{

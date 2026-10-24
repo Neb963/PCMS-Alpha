@@ -1,9 +1,12 @@
+import {inspectCanonicalRenameSafety} from './folder-rename-safety.mjs';
+import {createAdoptionStore} from './adoption-store.mjs';
+import {createRenamedIdentityLinker,preserveRenameBaseline,verifyRenameBaseline,createRenameGitVerifier} from './folder-rename-link.mjs';
 // AC-09: user-authorized existing-owned generator rename.
 // This is NOT I06's private/empty create rename. All remote effects pass the
 // donor's protected Persona lease and a durable DISPATCH_POSSIBLE record.
 // A lost ACK is never permission to execute again.
 import {openCanonicalDatabase,createRestoreSentinel,fail} from './journal.mjs';
-import {internalPcmsGuard} from './persona-guard.mjs';
+import {internalPcmsGuard,isGuardedRenamePreInvocationHold} from './persona-guard.mjs';
 import {standingS06} from './s06-standing-authority.mjs';
 import {verifyOriginal} from './adoption.mjs';
 import {REVIEW_KEY,planMainFolderChanges} from './catalog-identity-review.mjs';
@@ -27,7 +30,6 @@ function readFacts(db,slug){
     if(!account){out=rejectState('EXISTING_ACCOUNT_NOT_FOUND');return}
     m.get('source-link:'+slug).onsuccess=linked=>{
      const link=linked.target.result?.link;
-     if(!link){out=rejectState('EXISTING_SOURCE_ASSOCIATION_REQUIRED');return}
      m.get('inventory:'+row.slug).onsuccess=again=>{
       if(again.target.result?.generator?.revision!==row.revision){
        out=rejectState('INVENTORY_CHANGED');return}
@@ -57,7 +59,7 @@ function readAttemptFacts(db,attempt){
       account.identity.principalFingerprint!==attempt.principalFingerprint)return;
    m.get('source-link:'+attempt.oldSlug).onsuccess=s=>{
     const link=s.target.result?.link;
-    if(!link)return;
+    if(!link&&attempt.ownerChoiceSource!=='HUMAN_EXACT_RENAME_SCOPE')return;
     result={ok:true,account,link,row:{slug:attempt.oldSlug,
      accountId:attempt.accountId,remoteId:attempt.remoteId,
      personaUid:attempt.personaUid,bindingVersion:attempt.bindingVersion,
@@ -88,13 +90,11 @@ function readLinkedIdentity(db,slug){
   };
  });
 }
-function validFacts(data,oldSlug){
+function validFacts(data,oldSlug,chosen=false){
  const {row:r,account:a,link:l}=data||{};
  return data?.ok===true&&r?.slug===oldSlug&&r.ownerState==='OBSERVED_OWNER'&&
-  l?.slug===oldSlug&&l.folder==='generators/'+oldSlug&&
-  l.remoteId===r.remoteId&&l.accountId===r.accountId&&
-  l.personaUid===r.personaUid&&l.bindingVersion===r.bindingVersion&&
-  FP.test(l.fingerprint||'')&&
+  (l?l.slug===oldSlug&&l.folder==='generators/'+oldSlug&&
+    l.remoteId===r.remoteId&&l.accountId===r.accountId&&l.personaUid===r.personaUid&&l.bindingVersion===r.bindingVersion&&FP.test(l.fingerprint||''):chosen===true)&&
   a?.state==='VERIFIED'&&a.accountId===r.accountId&&
   a.personaUid===r.personaUid&&r.bindingVersion===a.bindingVersion&&
   a.revision===r.accountRevision&&
@@ -116,7 +116,7 @@ async function readSource(g,{row,account},slug){
    visibility:row.visibility||packet.visibility},account);
  if(!original?.ok||original.remotePublicId!==row.remoteId)
   return reject('RENAMED_OWNER_OR_SOURCE_UNVERIFIED');
- return {ok:true,fingerprint:original.fingerprint,visibility:original.visibility};
+ return {ok:true,fingerprint:original.fingerprint,visibility:original.visibility,original};
 }
 async function readRoute(g,row){
  try{
@@ -130,13 +130,18 @@ function sameRoute(a,b){return a?.routeId===b?.routeId&&
  a?.cookieStoreId===b?.cookieStoreId&&a?.ready===true&&b?.ready===true}
 export function createExistingRenameService(api,{
  guard=internalPcmsGuard,open=openCanonicalDatabase,clock=Date.now,
- developmentGate=()=>standingS06?.gate('development')===true}={}){
+ developmentGate=()=>standingS06?.gate('development')===true,linkRenamed=null,
+ preserveOriginal=async(db,facts,original)=>{const archive=createAdoptionStore(db),prior=await archive.getFull(facts.row.slug);if(!prior.ok){const first=await archive.adopt({slug:facts.row.slug,expectedRevision:facts.row.revision,standingManagement:true},original);if(!first.ok)return first;}return preserveRenameBaseline(db,facts,original);},
+ verifyBaseline=verifyRenameBaseline,verifyGitIdentity=null,sourceSafety=inspectCanonicalRenameSafety}={}){
  const sentinel=createRestoreSentinel(api.storage.local);
+ const verifyGit=verifyGitIdentity||createRenameGitVerifier(api);
+ const linker=linkRenamed||createRenamedIdentityLinker(api,{open,guard});
  let busy=false,dbPromise=null;
  const db=()=>dbPromise||=open().catch(error=>{dbPromise=null;throw error});
- async function current(newSlug){
+ async function current(newSlug,{readbackOnly=false}={}){
   const saved=await api.storage.local.get([CONFIG,CATALOG,REVIEW_KEY,key(newSlug)]);
-  const cfg=saved[CONFIG],snap=saved[CATALOG],all=saved[REVIEW_KEY]||[];
+  const cfg=saved[CONFIG],snap=saved[CATALOG],all=saved[REVIEW_KEY]||[],attempt=saved[key(newSlug)];
+  if(readbackOnly&&attempt&&['DISPATCH_POSSIBLE','OUTCOME_UNCERTAIN','REMOTE_RENAME_VERIFIED_LINK_PENDING'].includes(attempt.state))return {ok:true,cfg,snap,attempt,review:{oldSlug:attempt.oldSlug,newSlug:attempt.newSlug,newTreeOid:attempt.folderTreeOid,markerOid:attempt.markerOid,state:'RENAME_EXISTING_REQUESTED',automaticRenameApproved:attempt.ownerChoiceSource==='HUMAN_EXACT_RENAME_SCOPE'}};
   if(cfg?.repository!=='Neb963/per-gens'||cfg.repositoryId!==snap?.repositoryId||
     snap.complete!==true)return reject('RENAME_GIT_MAIN_UNVERIFIED');
   const planned=planMainFolderChanges(null,snap,all);
@@ -160,7 +165,7 @@ export function createExistingRenameService(api,{
    if((await sentinel.inspect()).held)return reject('RESTORE_HOLD');
    if(['PREPARE','EXECUTE'].includes(type)&&developmentGate()!==true)
     return reject('DEVELOPMENT_AUTHORITY_REQUIRED');
-   const state=await current(newSlug);if(!state.ok)return state;
+   const state=await current(newSlug,{readbackOnly:type==='RECONCILE'});if(!state.ok)return state;
    const {review,attempt}=state;
    const allowed=type==='PREPARE'?review.state==='RENAME_EXISTING_REQUESTED'&&!attempt:
      type==='EXECUTE'?attempt?.state==='RENAME_PREPARED':
@@ -178,7 +183,8 @@ export function createExistingRenameService(api,{
     if(attempt.state==='RENAME_COMPLETED'&&review.state==='RENAME_EXISTING_COMPLETED')
      return {ok:true,code:'VERIFIED_EXISTING_RENAME_COMPLETED',
        state:attempt.state,revision:attempt.revision,providerEffects:'NO_NEW_EFFECT'};
-    const linked=await readLinkedIdentity(await db(),newSlug);
+    let linked=await readLinkedIdentity(await db(),newSlug);
+    if(!linked.ok){const repaired=await linker(attempt);if(!repaired.ok)return repaired;linked=await readLinkedIdentity(await db(),newSlug);}
     if(!linked.ok)return linked;
     const {row:newRow,link,account}=linked;
     if(account?.state!=='VERIFIED'||newRow.ownerState!=='OBSERVED_OWNER'||
@@ -227,9 +233,9 @@ export function createExistingRenameService(api,{
    }
 
    let facts=await readFacts(await db(),review.oldSlug);
-   if(type==='RECONCILE'&&!validFacts(facts,review.oldSlug)&&attempt)
+   if(type==='RECONCILE'&&!validFacts(facts,review.oldSlug,review.automaticRenameApproved===true)&&attempt)
     facts=await readAttemptFacts(await db(),attempt);
-   if(!validFacts(facts,review.oldSlug))return reject('RENAMED_OWNER_CONTEXT_UNVERIFIED');
+   if(!validFacts(facts,review.oldSlug,review.automaticRenameApproved===true))return reject('RENAMED_OWNER_CONTEXT_UNVERIFIED');
    if(attempt&&(facts.row.remoteId!==attempt.remoteId||
       facts.row.personaUid!==attempt.personaUid||
       facts.account.identity.principalFingerprint!==attempt.principalFingerprint))
@@ -275,15 +281,20 @@ export function createExistingRenameService(api,{
    const currentAgain=await current(newSlug);
    if(!currentAgain.ok||currentAgain.review.newTreeOid!==review.newTreeOid||
       currentAgain.review.state!==review.state)return reject('RENAME_GIT_IDENTITY_CHANGED');
+   const sourceAdmission=await sourceSafety(await db(),review.oldSlug);if(!sourceAdmission.ok)return sourceAdmission;
+   const editor=await g.inspectSourceEditorIdle?.(facts.row.personaUid,review.oldSlug);if(editor?.ok!==true||editor.clean!==true)return reject('RENAME_EDITOR_OPEN_OR_DIRTY');
+   const gitIdentity=await verifyGit({...review,repositoryId:state.cfg.repositoryId});if(!gitIdentity.ok)return gitIdentity;
+   if(developmentGate()!==true)return reject('DEVELOPMENT_AUTHORITY_REQUIRED');
    if(type==='PREPARE'){
-    const prepared={schema:1,repositoryId:state.cfg.repositoryId,
+    const preserved=await preserveOriginal(await db(),facts,prior.original);if(!preserved?.ok)return reject(preserved?.code||'ORIGINAL_SOURCE_PRESERVATION_REQUIRED');
+    const prepared={schema:1,...(!facts.link&&review.automaticRenameApproved===true?{ownerChoiceSource:'HUMAN_EXACT_RENAME_SCOPE'}:{}),repositoryId:state.cfg.repositoryId,
       oldSlug:review.oldSlug,newSlug,markerOid:review.markerOid,
       folderTreeOid:review.newTreeOid,sourceFingerprint:prior.fingerprint,
       visibility:prior.visibility,remoteId:facts.row.remoteId,
       personaUid:facts.row.personaUid,
       accountId:facts.row.accountId,bindingVersion:facts.row.bindingVersion,
       principalFingerprint:facts.account.identity.principalFingerprint,
-      state:'RENAME_PREPARED',revision:1,preparedAt:clock()};
+      baselineKey:preserved.baselineKey,state:'RENAME_PREPARED',revision:1,preparedAt:clock()};
     await api.storage.local.set({[key(newSlug)]:prepared});
     const saved=(await api.storage.local.get(key(newSlug)))?.[key(newSlug)];
     if(saved?.state!=='RENAME_PREPARED'||saved?.revision!==1)
@@ -291,10 +302,11 @@ export function createExistingRenameService(api,{
     return {ok:true,code:'EXACT_EXISTING_RENAME_PREPARED',state:saved.state,
       revision:1,providerEffects:'OFF'};
    }
+   const baseline=await verifyBaseline(await db(),attempt);if(!baseline.ok)return baseline;
    // Once this durable record may exist, NO automatic/manual retry of the
    // provider request is admissible. A lost storage ACK is itself a hold.
    const marked={...attempt,state:'DISPATCH_POSSIBLE',revision:attempt.revision+1,
-     dispatchAt:clock(),operationId:'rename_'+crypto.randomUUID().replaceAll('-')};
+     dispatchAt:clock(),operationId:'rename_'+crypto.randomUUID().replaceAll('-','')};
    await api.storage.local.set({[key(newSlug)]:marked});
    const saved=(await api.storage.local.get(key(newSlug)))?.[key(newSlug)];
    if(saved?.state!=='DISPATCH_POSSIBLE'||saved?.revision!==marked.revision)
@@ -307,6 +319,11 @@ export function createExistingRenameService(api,{
      remoteId:facts.row.remoteId,
      principalFingerprint:facts.account.identity.principalFingerprint});}
    catch{result=reject('RENAME_PROVIDER_OUTCOME_UNCERTAIN')}
+   if(isGuardedRenamePreInvocationHold(result)){
+     const held={...attempt,state:'RENAME_PREPARED',revision:marked.revision+1,lastPreInvocationHold:result.code};
+     await api.storage.local.set({[key(newSlug)+':dispatch-history:'+marked.operationId]:{...marked,state:'ABORTED_BEFORE_NATIVE'},[key(newSlug)]:held});
+     return {ok:false,code:result.code,state:held.state,revision:held.revision,providerEffects:'NONE'};
+   }
    // No ACK is an independent source/identity success. Never repeat.
    const unknown={...marked,state:'OUTCOME_UNCERTAIN',revision:marked.revision+1,
      providerAcknowledged:result?.ok===true&&result.ack==='RENAME_EXISTING_ACK_ONLY'};

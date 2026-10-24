@@ -3,7 +3,7 @@
 import {openCanonicalDatabase, createRestoreSentinel, fail} from './journal.mjs';
 import {createGitCredentialResolver} from './git-credential.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
-import {inspectGitSource, compareGitSource, safeFolder} from './git-source.mjs';
+import {inspectGitSource,readVerifiedGitFile,safeSourcePath, compareGitSource, safeFolder} from './git-source.mjs';
 export const SOURCE_PORT='pcms-i05-source';
 const slugOK=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const fpOK=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
@@ -15,16 +15,19 @@ export function validateSourceMessage(api,sender,message){
      typeof message!=='object'||Array.isArray(message)||
      Object.keys(message).some(x=>!['type','params'].includes(x)))
     return fail('INVALID_MESSAGE');
-  const types=['GET_ASSOCIATION','INSPECT_SOURCE','ASSOCIATE_SOURCE','RECHECK_SOURCE'];
+  const types=['GET_ASSOCIATION','INSPECT_SOURCE','READ_SOURCE_FILE','ASSOCIATE_SOURCE','RECHECK_SOURCE'];
   if(!types.includes(message.type))return fail('CAPABILITY_OFF');
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
-  const keys=message.type==='INSPECT_SOURCE'?['token','folder']:
+  const keys=message.type==='READ_SOURCE_FILE'?['folder','path','pinnedHead','pinnedSha256']:
+    message.type==='INSPECT_SOURCE'?['token','folder']:
     message.type==='GET_ASSOCIATION'?['slug']:
     message.type==='RECHECK_SOURCE'?['slug','token']:
     ['slug','folder','token','expectedRevision','pinnedFingerprint','pinnedHead','pinnedTestingSha'];
   if(Object.keys(p).some(k=>!keys.includes(k)))return fail('INVALID_PARAMS');
-  if(message.type!=='INSPECT_SOURCE'&&!slugOK(p.slug))return fail('INVALID_PARAMS');
+  if(!['INSPECT_SOURCE','READ_SOURCE_FILE'].includes(message.type)&&!slugOK(p.slug))return fail('INVALID_PARAMS');
+  if(message.type==='READ_SOURCE_FILE'&&(!/^generators\/[a-z0-9][a-z0-9-]{0,99}$/.test(p.folder||'')||
+    !safeSourcePath(p.path)||!shaOK(p.pinnedHead)||!fpOK(p.pinnedSha256)))return fail('INVALID_PARAMS');
   if(['ASSOCIATE_SOURCE','INSPECT_SOURCE'].includes(message.type)&&!safeFolder(p.folder))
     return fail('UNSAFE_SOURCE_PATH');
   if(message.type!=='GET_ASSOCIATION'&&p.token!==undefined&&(typeof p.token!=='string'||p.token.length>512))
@@ -123,9 +126,12 @@ function txAssociate(db,slug,expectedRevision,snapshot){
 }
 export function createSourceBoundary(api,{
   open=openCanonicalDatabase,inspect=inspectGitSource,
-  credential=createGitCredentialResolver(api)
+  credential=createGitCredentialResolver(api),readFile=readVerifiedGitFile
 }={}){
   let dbPromise;
+  // One bounded, independently inspected manifest. No source bytes or token
+  // are cached. Browsing this named main snapshot grants no effect authority.
+  let workspace=null;
   const db=()=>dbPromise ||=open();
   const sentinel=createRestoreSentinel(api.storage.local);
   async function run(message,sender){
@@ -139,7 +145,20 @@ export function createSourceBoundary(api,{
         p={...p,token:cred.token};
       }
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
-      if(message.type==='INSPECT_SOURCE')return await inspect({token:p.token,folder:p.folder});
+      if(message.type==='INSPECT_SOURCE'){
+        const result=await inspect({token:p.token,folder:p.folder});
+        if(result.ok)workspace={folder:result.folder,head:result.head,paths:result.paths};
+        return result;
+      }
+      if(message.type==='READ_SOURCE_FILE'){
+        const snapshot=workspace;
+        const file=snapshot?.folder===p.folder&&snapshot.head===p.pinnedHead&&
+          snapshot.paths.find(f=>f.path===p.path&&f.sha256===p.pinnedSha256);
+        if(!file)return fail('SOURCE_SNAPSHOT_EXPIRED');
+        const result=await readFile({token:p.token,file});
+        if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+        return result.ok?{...result,path:file.path,head:snapshot.head,source:'PINNED_MAIN_READ_ONLY'}:result;
+      }
       if(message.type==='ASSOCIATE_SOURCE'){
         // Never let UI's self-asserted preview stand in for a new authoritative
         // Git read. HEAD may move; accept unrelated changes only when both

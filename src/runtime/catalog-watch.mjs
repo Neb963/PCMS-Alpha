@@ -203,7 +203,7 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
   }
   return Object.freeze({register,tick});
 }
-if(typeof browser!=='undefined')createCatalogWatcher(browser,{
+export const catalogWatcher=typeof browser==='undefined'?null:createCatalogWatcher(browser,{
   ingestComplete:createCreationCatalogIntake(browser).run,
   ingestReady:createReadyIntake(browser).run,
   progressReady:createReadyDevelopment(browser,{
@@ -211,4 +211,5 @@ if(typeof browser!=='undefined')createCatalogWatcher(browser,{
   progressChanges:createS06ChangeProgress(browser).tick,
   progressWriteback:createS06WritebackProgress(browser,{
     effectGate:()=>standingS06?.gate('gitWrite')===true}).tick
-}).register();
+});
+if(catalogWatcher)catalogWatcher.register();

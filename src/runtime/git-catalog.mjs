@@ -82,8 +82,8 @@ export async function scanMainCatalog({token,repository='Neb963/per-gens',maxReq
         'X-GitHub-Api-Version':'2022-11-28'}
     });
     if(response?.status===401||response?.status===403||response?.status===404)
-      throw Error('GIT_ACCESS_DENIED');
-    if(response?.status!==200)throw Error('GIT_UNAVAILABLE');
+      {const e=Error('GIT_ACCESS_DENIED');e.http=response.status;throw e;}
+    if(response?.status!==200){const e=Error('GIT_UNAVAILABLE');e.http=response?.status;throw e;}
     return await response.json();
   }
   async function tree(sha) {
@@ -136,7 +136,16 @@ export async function scanMainCatalog({token,repository='Neb963/per-gens',maxReq
     if(repo?.full_name!==repository||repo.private!==true||
       !(typeof repo.id==='number'||typeof repo.id==='string'))
       return error('REPOSITORY_IDENTITY_UNVERIFIED');
-    const ref=await get('/git/ref/heads/main');
+    let ref;
+    try{ref=await get('/git/ref/heads/main')}catch(refError){
+      if(![404,409].includes(refError.http))throw refError;
+      // A missing main branch alone never proves an empty repository.
+      // GitHub's explicit empty-history response or empty arrays are needed.
+      const empty=async path=>{try{const rows=await get(path);return Array.isArray(rows)&&rows.length===0}catch(e){return e.http===409}};
+      if(!(await empty('/git/refs'))||!(await empty('/commits?per_page=1')))return error('MAIN_UNVERIFIED');
+      return {ok:true,code:'GIT_EMPTY_VERIFIED',complete:true,initialized:false,repository,repositoryId:String(repo.id),
+        head:null,rootTreeOid:null,prompt:{state:'ABSENT',path:PROMPT,oid:null,text:null},generators:[],recognizedCount:0,requests,source:'PINNED_MAIN_READ_ONLY'};
+    }
     if(ref?.ref!=='refs/heads/main'||ref.object?.type!=='commit'||
       !SHA.test(ref.object?.sha||''))return error('MAIN_UNVERIFIED');
     const head=ref.object.sha;
@@ -193,7 +202,7 @@ export async function scanMainCatalog({token,repository='Neb963/per-gens',maxReq
       const testing=entries.get(folder+'/TESTING.md');
       generators.push({slug,folder,markerOid:marker.sha,ready:sourceState==='READY_UNVERIFIED_COHERENCE',
         sourceState,testingOid:testing?.type==='blob'?testing.sha:null,
-        sourceFiles:deployable.length,
+        sourceFiles:deployable.length,paths:files.filter(f=>f.entry.type==='blob').map(f=>f.path.slice(folder.length+1)),
         // A tree OID is proof of *Git* snapshot identity, not host source bytes.
         folderTreeOid:entries.get(folder).sha});
     }

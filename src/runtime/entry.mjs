@@ -1,6 +1,7 @@
 // Statically evaluate the unmodified donor fail-closed gate before registering
 // PCMS wake sources. Neither module awaits during listener registration.
 import '../lib/recovery-bootstrap.js';
+import './s06-authority-bootstrap.mjs';
 // Restore STATUS must register before optional dashboard and lengthy startup work.
 import './restore-boundary.mjs';
 import './wake.mjs';

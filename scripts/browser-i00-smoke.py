@@ -1036,6 +1036,9 @@ def main():
             else: raise RuntimeError('geckodriver did not become ready')
             # Exercise the changed operator journey first; all unchanged
             # persistent donor/source/backup suites still run after it passes.
+            from journey_git_ui import run as run_j03_primary, run_empty as run_j03_empty
+            run_j03_primary(browser,archive,pathlib.Path(folder))
+            run_j03_empty(browser,archive,pathlib.Path(folder))
             from journey_generators_ui import run as run_j02_primary
             run_j02_primary(browser,archive,pathlib.Path(folder))
             from journey_accounts_ui import run as run_j01_primary
@@ -1240,7 +1243,7 @@ def main():
                 assert faithful['inventoryTabs']>=4 and faithful['sourceWriters']==1,faithful
                 print('B V015_TRUE_DESKTOP_PRIMARY_WORKSPACES_AND_REAL_HANDLERS=PASS',flush=True)
                 release_version=execute(after,"return {manifest:browser.runtime.getManifest().version,ui:document.documentElement.dataset.pcmsUiVersion,badge:document.querySelector('.v015-top-status')?.textContent};")
-                assert release_version.get('manifest')=='1.2.9',release_version
+                assert release_version.get('manifest')=='1.2.10',release_version
                 assert release_version.get('ui')=='0.1.5' and '0.1.5' in release_version.get('badge',''),release_version
                 print('B V015_REAL_FIREFOX_UPDATE_VERSION_AND_VISIBLE_UI_MARKER=PASS',flush=True)
                 # V016 acceptance: the PRECISE accepted prototype structure is
@@ -1264,7 +1267,7 @@ def main():
                      canonicalNative:!!document.getElementById('pcms-refresher-rows')&&
                        !!document.getElementById('pcms-release-approve')&&
                        !!document.getElementById('pcms-restore-apply')};""")
-                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.9',actual
+                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.10',actual
                 assert actual['routes']==6 and actual['visible'] and actual['nativeHidden'],actual
                 assert actual['sidebar'] and actual['primary']=='overview' and actual['styles'] and actual['canonicalNative'],actual
                 assert actual['badge']=='PCMS local · Not verified',actual
@@ -1365,7 +1368,10 @@ def main():
                   sh.querySelector('[data-settings="ai"]').click();
                   const aiPanel=sh.querySelector('.settings-main');
                   const primaryAi=aiPanel?.textContent.includes('Managed AI development')&&
-                    !!aiPanel?.querySelector('textarea[aria-label="AI development guidance"]')&&
+                    !!aiPanel?.querySelector('[data-git-prompt] textarea[aria-label="Default AI testing instructions"]')&&
+                    !aiPanel?.querySelector('textarea[aria-label="AI development guidance"]')&&
+                    !!aiPanel?.querySelector('textarea[aria-label="Required test names"]')&&
+                    [...aiPanel.querySelectorAll('[data-git-prompt] button')].some(x=>x.textContent.includes('Save to GitHub'))&&
                     [...aiPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Save concurrency'));
                   sh.querySelector('[data-settings="backups"]').click();
                   const backupPanel=sh.querySelector('.settings-main');

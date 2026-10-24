@@ -5,7 +5,7 @@ const read=path=>readFile(path,'utf8');
 const base='src/ui/faithful/';
 const html=await read('src/ui/index.html'),build=await read('scripts/build-i00.mjs');
 const bridge=await read(base+'bridge.mjs'),stylesheet=await read(base+'prototype.css');
-const shell=await read(base+'shell.html');
+const shell=await read(base+'shell.html'),awaitSource=await read(base+'source-workspace.mjs');
 const routes=['overview','generators','work-queue','accounts','refresher','settings'];
 test('accepted prototype structure rather than prior native markup is PRIMARY',()=>{
  assert.match(html,/faithful\/native-shell\.css/);
@@ -41,7 +41,9 @@ test('canonical primary controls call protected typed runtime with exact revisio
  assert.match(bridge,/readPort\('pcms-i12-refresher','SET_POLICY'/);
  assert.match(bridge,/expectedRevision:snapshot\.revision,policy:\{refreshEnabled:next\}/);
  assert.match(bridge,/readPort\('pcms-i12-refresher','SET_GENERATOR_POLICY'/);
- assert.match(bridge,/readPort\('pcms-i05-source','INSPECT_SOURCE'/);
+ assert.match(bridge,/createSourceWorkspace\(\{root,el,b,request:readPort/);
+ const source=awaitSource;assert.match(source,/request\('pcms-i05-source',type/);
+ assert.match(source,/call\('INSPECT_SOURCE'/);assert.match(source,/call\('READ_SOURCE_FILE'/);assert.match(source,/expectedRevision:item.revision/);
  assert.match(bridge,/readPort\('pcms-i07-adoption','RETRY_ADOPTION'/);
  assert.match(bridge,/readPort\('pcms-i07-adoption','READ_ORIGINAL_FILE'/);
  assert.doesNotMatch(bridge,/explicitPublicConsent/,'routine adoption uses account-level authorization');
@@ -72,9 +74,9 @@ test('prototype supports adverse navigation and fail-open presentation recovery'
  assert.match(bridge,/body\.classList\.add\('pcms-faithful-ready'\)/);
  assert.doesNotMatch(bridge,/host\.remove\(\)/);
 });
-test('Firefox upgrades v1.2.1 XPI to 1.2.9 with donor manifest unchanged',()=>{
+test('Firefox upgrades v1.2.1 XPI to 1.2.10 with donor manifest unchanged',()=>{
  assert.match(build,/original\.version!=='1\.2\.0'/);
- assert.match(build,/combined\.version='1\.2\.9'/);
+ assert.match(build,/combined\.version='1\.2\.10'/);
  assert.match(html,/v015-faithful\.mjs/);
  assert.match(html,/faithful\/bridge\.mjs/);
 });

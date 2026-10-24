@@ -2,16 +2,18 @@
 // actual assignments are revalidated against canonical facts before effects.
 import {selectS04Account} from './creation-allocation.mjs';
 import {isI17Quarantined,I17_QUARANTINE_CODE} from './legacy-quarantine.mjs';
-export function previewCreation(db,{slugs,accountId=null}={}){
+export const importTargetTuple=(slug,g)=>({slug,ownerState:g?.ownerState||'NOT_IN_MANAGED_INVENTORY',accountId:g?.accountId||null,remoteId:g?.remoteId||null,personaUid:g?.personaUid||null,bindingVersion:g?.bindingVersion||null});
+export function previewCreation(db,{slugs,accountId=null,repositoryId=null}={}){
  if(!Array.isArray(slugs)||!slugs.length||slugs.some(s=>typeof s!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(s))||
     accountId!==null&&typeof accountId!=='string')return Promise.resolve({ok:false,code:'INVALID_PREVIEW'});
  return new Promise((resolve,reject)=>{
   const tx=db.transaction(['meta'],'readonly'),accounts=[],inventory=[],pending=[],counts=new Map(),known=new Map();
-  let result;
+  let result,initialApproval=null;
   tx.oncomplete=()=>resolve(result);tx.onabort=()=>reject(Error('PREVIEW_UNAVAILABLE'));
   tx.objectStore('meta').openCursor().onsuccess=e=>{
    const c=e.target.result;
    if(c){const k=String(c.key),v=c.value;
+    if(repositoryId&&k==='s03-import-approval:'+repositoryId)initialApproval=v.approval||null;
     if(k.startsWith('account:')&&v?.account)accounts.push(v.account);
     else if(k.startsWith('inventory:')&&v?.generator)inventory.push(v.generator);
     else if(k.startsWith('inventory-batch:'))counts.set(k.slice(16),v);
@@ -39,7 +41,8 @@ export function previewCreation(db,{slugs,accountId=null}={}){
     items.push(row);planned.set(slug,row);
     if(plan.ok)pending.push({slug,accountId:plan.accountId,state:'OWNER_READBACK_PENDING'});
    }
-   result={ok:true,items,observedAt:Date.now(),accounts:candidates.map(a=>({accountId:a.accountId,
+   const initialPending=[...known.values()].filter(r=>!r.sources?.some(s=>s.type==='OPERATOR')&&['WAITING_CAPABILITY','OWNER_READBACK_PENDING','OWNER_MISSING_VERIFIED','CREATE_PREPARED','PRIVATE_EMPTY_CONFIRMED','RENAME_PREPARED'].includes(r.state)).flatMap(r=>r.sources.filter(s=>s.type==='GITHUB_MAIN'&&s.initialImport).map(s=>({slug:r.slug,markerOid:s.markerOid,initialImport:s.initialImport})));
+   result={ok:true,items,initialPending,initialApproval,ingestedSlugs:[...known.keys()],targets:slugs.map(slug=>importTargetTuple(slug,inventory.find(g=>g.slug===slug))),observedAt:Date.now(),accounts:candidates.map(a=>({accountId:a.accountId,alias:a.alias||null,
      state:a.state,owned:a.inventoryCount?.lastConfirmedCount??null,
      initialKnown:a.inventoryComplete===true&&(!('lastConfirmedCount' in (a.inventoryCount||{}))||Number.isSafeInteger(a.inventoryCount.lastConfirmedCount))})),providerEffects:'OFF'};
   };

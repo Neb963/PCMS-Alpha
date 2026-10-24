@@ -1,6 +1,6 @@
 // OFFLINE B fixture only. Installed production UI/boundaries/IDB/runners,
 // with independent durable provider ledger. Never packaged in the XPI.
-export async function installGeneratorFixture(){
+export async function installGeneratorFixture(options={}){
  const {openCanonicalDatabase}=await import('./journal.mjs');
  const {createAccountBoundary}=await import('./account-boundary.mjs');
  const {createInventoryBoundary}=await import('./inventory-boundary.mjs');
@@ -76,8 +76,11 @@ export async function installGeneratorFixture(){
      ownerResult:'IS_OWNER',ownerPrincipalFingerprint:ctx.principalFingerprint,ownerObservationId:'j02_owner_'+crypto.randomUUID(),visibility:'UNLISTED'}))]};
  }});
  const authority=createS06StandingAuthority(api),creationGate=createScopedCreationGate(authority);
+ await authority.state(); // Production register() performs this cold policy load.
  const runner=createCreationRunner(api,{open,guard:()=>guard,effectGate:creationGate,
-  syncInventory:inventory.syncAccount,createGit:()=>({step:async()=>({ok:false,code:'GIT_RECONNECT_REQUIRED'})})});
+  syncInventory:inventory.syncAccount,gitGate:()=>authority.gate('gitWrite'),
+  ...(options.createImportGuard?{importGuard:options.createImportGuard(api)}:{}),
+  createGit:(a,opts)=>options.createGit?options.createGit(a,{...opts,guard:()=>guard}):({step:async()=>({ok:false,code:'GIT_RECONNECT_REQUIRED'})})});
  const coordinator=createCoordinatorBoundary(api,{open,makeRunner:()=>runner});
  const accounts=createAccountBoundary(api,{open,guard:()=>guard,syncInventory:inventory.syncAccount});
  const adoption=createAdoptionBoundary(api,{open,guard:()=>guard,managementGate:()=>authority.allowsOperatorManagement(),gitGate:()=>false});
@@ -106,7 +109,7 @@ export async function installGeneratorFixture(){
  }
  const commands=[];
  const original=browser.runtime.connect.bind(browser.runtime),boundaries=new Map([
-  ['pcms-s06-authority',{run:(msg,sender)=>authority.handle(msg,sender)}],['pcms-i03-accounts',accounts],['pcms-i04-inventory',inventory],['pcms-s00-coordinator',coordinator],['pcms-i07-adoption',adoption]]);
+  ...(!options.externalPolicy?[['pcms-s06-authority',{run:(msg,sender)=>authority.handle(msg,sender)}]]:[]),['pcms-i03-accounts',accounts],['pcms-i04-inventory',inventory],['pcms-s00-coordinator',coordinator],['pcms-i07-adoption',adoption]]);
  const sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')+'#generators'};
  browser.runtime.connect=function(...args){const name=args.at(-1)?.name;if(!boundaries.has(name))return original(...args);
   const handlers=new Set(),disconnected=new Set();let closed=false;
@@ -123,7 +126,7 @@ export async function installGeneratorFixture(){
   records:data.filter(x=>x.record?.intentId).map(x=>x.record),chunks:data.filter(x=>x.chunk).map(x=>({key:x.key,...x.chunk})),batches:data.filter(x=>x.batch).map(x=>x.batch),
   inventory:data.filter(x=>x.generator).map(x=>x.generator),commands:structuredClone(commands),ledger:structuredClone(ledger)}},
   async adopt(){return adoption.autoTick()},
-  async tick(n=1){for(let i=0;i<n;i++)await watcher.tick();return this.inspect()},
+  async tick(n=1){for(let i=0;i<n;i++){await authority.state();await watcher.tick();}return this.inspect()},
   async addUnknownAccount(){const a={accountId:'account_j02_unknown',alias:'New account',personaUid:'persona-j02-unknown',
     bindingId:'binding_j02_unknown',revision:3,bindingVersion:1,state:'INVENTORY_PENDING',boundPrincipal:'e'.repeat(64),
     identity:{source:'GUARDED_SESSION_READBACK',bindingVersion:1,principalFingerprint:'e'.repeat(64)}};

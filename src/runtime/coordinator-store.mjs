@@ -1,3 +1,4 @@
+import {importTargetTuple} from './creation-preview.mjs';
 import {qualifiedCreationInventory} from './creation-inventory.mjs';
 // S04: one canonical slug reservation for operator and verified Git-main intake.
 // Side effects are NOT performed here. All origin merges and conflicts commit in
@@ -268,6 +269,22 @@ export function createCoordinatorStore(db){
           }
           let inventoryCheckpoint=null;
           const continueStage=()=>{
+            const binding=previous.sources?.some(s=>s.type==='OPERATOR')?null:previous.sources?.find(s=>s.type==='GITHUB_MAIN'&&s.initialImport);
+            if(!binding||!['CREATE_PREPARE','CREATE_DISPATCH','RENAME_PREPARE','RENAME_DISPATCH'].includes(event)){applyStage();return;}
+            m.get('s03-import-approval:'+binding.repositoryId).onsuccess=approved=>{
+              const a=approved.target.result?.approval,b=binding.initialImport;
+              m.get('inventory:'+previous.slug).onsuccess=target=>{
+                if(!a||a.revision!==b.revision||a.scopeDigest!==b.scopeDigest||
+                  JSON.stringify(a.targets?.find(t=>t.slug===previous.slug))!==JSON.stringify(b.target)||
+                  !a.reviewedSources?.some(g=>g.slug===previous.slug&&g.markerOid===binding.markerOid&&(g.folderTreeOid||null)===(b.folderTreeOid||null))||
+                  JSON.stringify(importTargetTuple(previous.slug,target.target.result?.generator))!==JSON.stringify(b.target)){
+                  result=fail('INITIAL_IMPORT_SCOPE_REVIEW_REQUIRED');return;
+                }
+                applyStage();
+              };
+            };
+          };
+          const applyStage=()=>{
           const moved=advanceS04Effect(previous,event,proof);
           if(!moved.ok){result=moved;return;}
           if(inventoryCheckpoint)moved.record.inventoryCheckpoint=inventoryCheckpoint;
@@ -557,9 +574,9 @@ export function createCoordinatorStore(db){
                 const sourceLink={slug:prior.slug,folder:'generators/'+prior.slug,
                   remoteId:prior.remoteId,accountId:prior.accountId,
                   personaUid:prior.personaUid,bindingVersion:prior.bindingVersion,
-                  mainHead:proof.head,readyAtInspection:false,
+                  mainHead:proof.head,readyAtInspection:proof.ready===true,
                   fingerprint:proof.sourceFingerprint||null,testingSha:null,
-                  revision:1,source:'S04_INDEPENDENT_NOT_READY_ASSOCIATION'};
+                  revision:1,source:'S04_PINNED_MAIN_ASSOCIATION'};
                 m.put({key:'source-link:'+prior.slug,link:sourceLink});
               }
             }
@@ -639,7 +656,7 @@ export function createCoordinatorStore(db){
              !/^[a-f0-9]{64}$/.test(account.boundPrincipal||'')||
              account.identity.principalFingerprint!==account.boundPrincipal||
              item.principalFingerprint&&item.principalFingerprint!==account.boundPrincipal||
-             item.pinConflict||item.sourceDrift){finish(fail('ACCOUNT_CONTEXT_CHANGED'));return;}
+             (item.pinConflict||item.sourceDrift)&&!['CREATE_DISPATCH_POSSIBLE','CREATE_UNCERTAIN','CREATE_OBSERVING','RENAME_DISPATCH_POSSIBLE','RENAME_UNCERTAIN','RENAME_OBSERVING','GIT_DISPATCH_POSSIBLE','GIT_UNCERTAIN','GIT_OBSERVING'].includes(item.state)){finish(fail('ACCOUNT_CONTEXT_CHANGED'));return;}
           meta.get('inventory-batch:'+item.accountId).onsuccess=seen=>{
             const inventory=seen.target.result;
             if(!inventory?.observationId||inventory.accountRevision!==account.revision||

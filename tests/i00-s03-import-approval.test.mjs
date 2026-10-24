@@ -61,7 +61,7 @@ test('S03 initial approval: independently rechecks material scope and host token
   const initially=await boundary.run({type:'SCAN_CONNECTED'},sender);
   assert.equal(initially.importStatus,'IMPORT_SCOPE_UNAPPROVED');
   assert.equal(initially.preview.approved,false);
-  const params={repositoryId:'42',scopeDigest:initially.preview.scopeDigest};
+  const params={repositoryId:'42',scopeDigest:initially.preview.scopeDigest,planDigest:initially.preview.planDigest,expectedRevision:initially.approvalRevision};
   current={...snapshot(),generators:[{...row,markerOid:'8'.repeat(40)}]};
   const changed=await boundary.run({type:'APPROVE_IMPORT',params},sender);
   assert.equal(changed.code,'IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED');
@@ -72,7 +72,7 @@ test('S03 initial approval: independently rechecks material scope and host token
   assert.equal(accepted.approval.authorizedEffects,'NONE');
   assert.equal((await boundary.run({type:'SCAN_CONNECTED'},sender)).importStatus,'IMPORT_SCOPE_APPROVED');
   assert.equal((await boundary.run({type:'APPROVE_IMPORT',
-    params:{repositoryId:'99',scopeDigest:params.scopeDigest}},sender)).code,'GIT_IDENTITY_CHANGED');
+    params:{...params,repositoryId:'99'}},sender)).code,'GIT_IDENTITY_CHANGED');
   assert.equal(db.keys('events').length,1);
   assert.ok(nativeGets>=3);
   assert.deepEqual([...new Set(observedRequests.map(x=>x.action))],['git.get']);

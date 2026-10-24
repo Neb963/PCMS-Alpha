@@ -942,3 +942,37 @@ test('J01 upkeep reconciles lost Persona-create ACK without requiring another Ad
  assert.equal(h.effects.filter(e=>e.kind==='PERSONA_CREATE').length,1);
  assert.equal(h.profiles.size,1);assert.equal(h.effects.filter(e=>e.kind==='ASSIGN').length,1);
 });
+
+test('interrupted setup durably explains its hold and restart resumes the same donor Persona without duplicate creation',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),original=h.donor.createBoundPersona;
+ let once=true;
+ h.donor.createBoundPersona=async args=>{const made=await original(args);if(once){once=false;throw Error('lost response after Persona creation')}return made;};
+ const started=await h.flow.begin();await h.flow.prepare(started.accountId);
+ const held=(await h.accounts.get(started.accountId)).account;
+ assert.equal(held.state,'PREPARING');assert.equal(held.setup.phase,'HELD');assert.equal(held.setup.code,'ENROLLMENT_INTERRUPTED');assert.equal(h.flow.running(started.accountId),false);
+ assert.equal(h.effects.filter(x=>x.kind==='PERSONA_CREATE').length,1);
+ const fresh=createEnrollment({accounts:h.accounts,ledger:h.ledger,donor:h.donor,pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},openLogin:async()=>({ok:true}),identify:async()=>({ok:false})});
+ const recovered=await fresh.prepare(started.accountId);assert.equal(recovered.ok,true,recovered.code);
+ const ready=(await h.accounts.get(started.accountId)).account;
+ assert.equal(ready.state,'WAITING_LOGIN');assert.equal(ready.bindingId,held.bindingId);assert.equal(h.effects.filter(x=>x.kind==='PERSONA_CREATE').length,1);
+});
+
+test('a cold controller exposes interrupted setup without replaying its already-created Persona',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),id='cold_setup_account',bindingId='cold_setup_binding';
+ await h.accounts.applyCurrent({type:'BEGIN_SETUP',accountId:id,bindingId});
+ await h.accounts.applyCurrent({type:'SETUP_PROGRESS',accountId:id,phase:'PERSONA'});
+ await h.donor.createBoundPersona({bindingId});const before=structuredClone(h.effects);
+ const fresh=createEnrollment({accounts:h.accounts,ledger:h.ledger,donor:h.donor,pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},openLogin:async()=>({ok:true}),identify:async()=>({ok:false})});
+ assert.equal((await fresh.recoverInterrupted()).held,1);assert.deepEqual(h.effects,before);
+ const interrupted=(await h.accounts.get(id)).account;assert.equal(interrupted.setup.code,'ENROLLMENT_INTERRUPTED');assert.equal(interrupted.bindingId,bindingId);
+ assert.equal((await fresh.recoverInterrupted()).held,0,'known holds keep their reason and revision');
+ assert.equal((await fresh.prepare(id)).ok,true);assert.equal(h.effects.filter(x=>x.kind==='PERSONA_CREATE').length,1);
+});
+
+test('restore beginning during cold recovery prevents subsequent canonical recovery writes',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),id='restore_race_setup';
+ await h.accounts.applyCurrent({type:'BEGIN_SETUP',accountId:id,bindingId:'restore_race_binding'});
+ const before=(await h.accounts.get(id)).account,events=h.db.keys('events').length;let checks=0;
+ assert.equal((await h.flow.recoverInterrupted({canRecover:async()=>++checks<2})).code,'RESTORE_HOLD');
+ assert.deepEqual((await h.accounts.get(id)).account,before);assert.equal(h.db.keys('events').length,events);assert.deepEqual(h.effects,[]);
+});

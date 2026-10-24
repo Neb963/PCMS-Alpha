@@ -133,7 +133,7 @@ export async function installJourneyFixture(){
    for(const [id,p] of d.profiles)if(p.personaUid===personaUid){d.profiles.delete(id);d.effects.push({kind:'PERSONA_REMOVE',personaUid})}
    await save();return {ok:true,removed:true};
   };
-  const fn=target[name];return typeof fn==='function'?async(...args)=>{try{return await fn(...args)}finally{await save()}}:fn;
+  const fn=target[name];return typeof fn==='function'?async(...args)=>{try{const out=await fn(...args);if(name==='createBoundPersona'&&controls.suspendPersona){controls.suspendPersona=false;await save();return new Promise(()=>{})}if(name==='createBoundPersona'&&controls.interruptPersona){controls.interruptPersona=false;throw Error('Offline lost Persona create response')}return out}finally{await save()}}:fn;
  }});
  const profile=uid=>{const entry=[...d.profiles].find(([,p])=>p.personaUid===uid);
   return entry?{...entry[1],containerId:entry[0],managed:true,killSwitch:true}:null};
@@ -192,6 +192,8 @@ export async function installJourneyFixture(){
   async inventoryCount(value){controls.inventoryCount=value;await save()},
   async recover(){return boundary.upkeep()},
   async inventoryFailure(value){controls.inventoryFailure=value;await save()},
+  async suspendNextPersona(){controls.suspendPersona=true;await save()},
+  async interruptNextPersona(){controls.interruptPersona=true;await save()},
   async helperFailure(value){d.faults.host=value;await save()},
   async legacy(){const p=d.legacyPersona('10.124.0.12'),accountId='j01_legacy_account';
    const enrolled=await accounts.apply({type:'ENROLL',accountId,personaUid:p.personaUid,expectedRevision:0});
