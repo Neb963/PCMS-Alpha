@@ -1230,7 +1230,7 @@ def main():
                 assert faithful['inventoryTabs']>=4 and faithful['sourceWriters']==1,faithful
                 print('B V015_TRUE_DESKTOP_PRIMARY_WORKSPACES_AND_REAL_HANDLERS=PASS',flush=True)
                 release_version=execute(after,"return {manifest:browser.runtime.getManifest().version,ui:document.documentElement.dataset.pcmsUiVersion,badge:document.querySelector('.v015-top-status')?.textContent};")
-                assert release_version.get('manifest')=='1.2.6',release_version
+                assert release_version.get('manifest')=='1.2.7',release_version
                 assert release_version.get('ui')=='0.1.5' and '0.1.5' in release_version.get('badge',''),release_version
                 print('B V015_REAL_FIREFOX_UPDATE_VERSION_AND_VISIBLE_UI_MARKER=PASS',flush=True)
                 # V016 acceptance: the PRECISE accepted prototype structure is
@@ -1254,7 +1254,7 @@ def main():
                      canonicalNative:!!document.getElementById('pcms-refresher-rows')&&
                        !!document.getElementById('pcms-release-approve')&&
                        !!document.getElementById('pcms-restore-apply')};""")
-                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.6',actual
+                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.7',actual
                 assert actual['routes']==6 and actual['visible'] and actual['nativeHidden'],actual
                 assert actual['sidebar'] and actual['primary']=='overview' and actual['styles'] and actual['canonicalNative'],actual
                 assert actual['badge']=='PCMS local · Not verified',actual
@@ -1391,6 +1391,31 @@ def main():
                     drawerClosed:!sh.querySelector('[aria-label="Create generators"]')};""")
                 assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['primaryAi'] and r4_primary['primaryAiPreparation'] and r4_primary['protectedRestore'] and r4_primary['restoreHeld'] and r4_primary['restoredConnections'] and r4_primary['readableConnections'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
                 print('B R4_PRIMARY_CREATION_AND_PROTECTED_SETTINGS_WITHOUT_LEGACY=PASS',flush=True)
+
+                # A09 post-acceptance regression: an independent read-only
+                # diagnostics run works without a disposable account or CREATE
+                # success. This is not a live Perchance/restore/Git-write proof.
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-settings="diagnostics"]').click();
+                  const btn=sh.querySelector('#pcms-diagnostic-independent-run');
+                  if(!btn||btn.disabled)throw Error('INDEPENDENT_DIAGNOSTIC_CONTROL_MISSING');
+                  btn.click();return true;""")
+                independent=None
+                for _ in range(160):
+                    independent=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                       const section=sh.querySelector('#pcms-diagnostic-independent-results');
+                       const text=sh.querySelector('#pcms-diagnostic-independent-status')?.textContent||'';
+                       return {count:section?.querySelectorAll('li')?.length||0,
+                          text,
+                          hasLocalInventory:section?.textContent.includes('INVENTORY STORE'),
+                          hasGit:section?.textContent.includes('GIT MAIN'),
+                          hasBackup:section?.textContent.includes('BACKUP RUNTIME'),
+                          independentExport:!sh.querySelector('#pcms-diagnostic-export')?.disabled};""")
+                    if independent['count']==8:break
+                    time.sleep(.14)
+                assert independent and independent['count']==8 and independent['hasLocalInventory'] and independent['hasGit'] and independent['hasBackup'] and independent['independentExport'],('A09_INDEPENDENT_CHECKS_BLOCKED_BY_CREATE',independent)
+                print('B A09_INDEPENDENT_READ_ONLY_MODULE_CHECKS=PASS',flush=True)
+
                 # A09 operator regression: one concrete interrupted local
                 # Git intent MUST reveal the recovery controls in the visible
                 # Settings form, with no real token or private network write.
