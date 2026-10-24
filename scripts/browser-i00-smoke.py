@@ -5239,7 +5239,7 @@ def main():
                 a07_profile=pathlib.Path(folder)/'a07-primary-fleet'
                 a07_profile.mkdir()
                 (a07_profile/'user.js').write_text(
-                    'user_pref("xpinstall.signatures.required", false);\\n')
+                    'user_pref("xpinstall.signatures.required", false);\n')
                 a07_first=open_session(browser,a07_profile)
                 try:
                     assert call('POST',f'/session/{a07_first}/moz/addon/install',
