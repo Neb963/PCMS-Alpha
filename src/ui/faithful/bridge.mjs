@@ -1789,7 +1789,9 @@ function renderReadinessPanel(container){
 }
 async function runReadiness(remote){
  if(state.readinessBusy)return;
- state.readinessBusy=true;renderSettingsSection();
+ state.readinessBusy=true;
+ if(state.route==='settings'&&state.settings==='diagnostics')renderReadinessPanel(shadow('.settings-main'));
+
  try{
   const snapshot=await readPort('pcms-r3-readiness','CHECK',{remote},95000);
   if(!snapshot?.ok){state.readiness=snapshot;return;}
@@ -1817,7 +1819,9 @@ async function runReadiness(remote){
     'PCMS_I15_PORTABLE','Only browser receipt readback is verified; reopen the downloaded file and inspect restoration separately.'));
   state.readiness=snapshot;
  }catch{state.readiness={ok:false,code:'READINESS_TRANSPORT_UNAVAILABLE'};}
- finally{state.readinessBusy=false;if(state.route==='settings')renderSettingsSection();}
+ finally{state.readinessBusy=false;
+  if(state.route==='settings'&&state.settings==='diagnostics')renderReadinessPanel(shadow('.settings-main'));
+ }
 }
 function primarySettingCard(container,title,intro){
  const section=el('section','card settings-group'),header=el('h2','h2',title);
