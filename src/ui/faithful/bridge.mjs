@@ -422,8 +422,7 @@ function routeHandlers(){
  // existing shortcut and let the legacy module own the event.
  document.addEventListener('keydown',event=>{
   if(event.defaultPrevented||event.isComposing||event.repeat||
-    !document.body.classList.contains('pcms-faithful-ready')||
-    document.body.classList.contains('pcms-native-open'))return;
+    !document.body.classList.contains('pcms-faithful-ready'))return;
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){
    event.preventDefault();event.stopImmediatePropagation();
    if(!shadow('.overlay'))openGlobalSearch();
@@ -2402,7 +2401,10 @@ async function mount(){
  const link=document.createElement('link');link.rel='stylesheet';link.href=new URL('prototype.css',url).href;root.prepend(link);
  const addon=document.createElement('style');addon.textContent=':host{display:block;height:100dvh;min-height:0} .pcms-action-toast{position:fixed;bottom:20px;right:25px;z-index:100;padding:12px 16px;background:#253e55;color:white;border-radius:7px;box-shadow:0 5px 24px #0003;max-width:380px} .pcms-action-toast[hidden]{display:none}';root.append(addon);
  let initial=location.hash.slice(1);if(!routes.includes(initial))initial='overview';state.route=initial;
- routeHandlers();await render();document.body.classList.add('pcms-faithful-ready');
+ routeHandlers();await render();
+ const legacy=document.querySelector('body > .app');
+ if(legacy)legacy.inert=true; // no hidden workflow focus or operator input
+ document.body.classList.add('pcms-faithful-ready');
  window.addEventListener('hashchange',()=>{const dest=location.hash.slice(1);if(routes.includes(dest)&&dest!==state.route){state.route=dest;void render()}});
  // Foreground projection reads the same canonical background ports. Never
  // mirror an inaccessible hidden controller or infer completion from its DOM.
