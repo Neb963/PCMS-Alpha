@@ -99,57 +99,64 @@ def main():
                 throw Error('A08_PRE_UPGRADE_ADDON_VERSION_CHANGED');
               const install=await AddonManager.getInstallForFile(file);
               if(!install)throw Error('A08_ADDON_INSTALL_NOT_CREATED');
-              // The Firefox About Add-ons frontend uses the WithOptions
-              // overload (the no-options wrapper discards the update flag).
-              // AOM starts asynchronously; a real add-on install listener
-              // witnesses the effect. An absent prompt/ACK is a HOLD.
-              let event='NO_TERMINAL_INSTALL_EVENT';
-              const terminal=new Promise(resolve=>{
-                const listener={
-                  onInstallEnded(i,addon){
-                    if(i===install){event='INSTALLED';doneListener();}
-                  },
-                  onInstallFailed(i){
-                    if(i===install){event='FAILED:'+i.error;doneListener();}
-                  },
-                  onInstallCancelled(i){
-                    if(i===install){event='CANCELLED';doneListener();}
-                  }
-                };
-                let settled=false;
-                const doneListener=()=>{
-                  if(settled)return;settled=true;
-                  AddonManager.removeInstallListener(listener);
-                  resolve(event);
-                };
-                AddonManager.addInstallListener(listener);
-                setTimeout(doneListener,9000);
-              });
-              AddonManager.installAddonFromAOMWithOptions(
-                window.gBrowser?.selectedBrowser||null,
-                io.newURI('about:addons'),install,
-                {preferUpdateOverInstall:true});
-              await terminal;
-              const current=await AddonManager.getAddonByID(ADDON_ID);
-              done({ok:current?.version==='1.2.5',
-                installEvent:event,
-                oldVersion:before.version,currentVersion:current?.version,
-                installed:!!current?.isActive,error:install.error,
-                state:install.state,action:'FIREFOX_ADDON_MANAGER_UPDATE',
-                existingAddon:!!install.existingAddon});
+              // AOM's actual update invalidates the active extension tab,
+              // which can unload this Marionette document. Schedule the one
+              // update after the test-controller callback, then use the OS
+              // installed-archive hash as an independent completion oracle.
+              const existing=!!install.existingAddon;
+              if(!existing)throw Error('A08_UPDATE_EXISTING_ADDON_NOT_DETECTED');
+              const browserTab=window.gBrowser?.selectedBrowser||null;
+              window.setTimeout(()=>{
+                AddonManager.installAddonFromAOMWithOptions(
+                  browserTab,io.newURI('about:addons'),install,
+                  {preferUpdateOverInstall:true});
+              },250);
+              done({ok:true,stage:'UPDATE_SCHEDULED_NOT_YET_ACCEPTED',
+                oldVersion:before.version,existingAddon:existing});
             })().catch(e=>done({ok:false,error:String(e),stack:String(e.stack)}));"""
             upgrade_js=upgrade_js.replace('TARGET',json.dumps(str(target))).replace(
                 'ADDON_ID',json.dumps(b.ID))
             b.call('POST',f'/session/{session}/timeouts',{
                 'script':40000,'pageLoad':15000})
             upgraded=b.call('POST',f'/session/{session}/execute/async',
-                {'script':upgrade_js,'args':[]},timeout=48)
-            assert upgraded.get('ok') is True,('A08_REAL_FIREFOX_UPGRADE_FAILED',upgraded)
-            print('B A08_REAL_FIREFOX_ADDON_MANAGER_UPDATE=PASS',flush=True)
-            b.call('POST',f'/session/{session}/moz/context',{'context':'content'})
+                {'script':upgrade_js,'args':[]},timeout=35)
+            assert upgraded=={'ok':True,'stage':'UPDATE_SCHEDULED_NOT_YET_ACCEPTED',
+                'oldVersion':'1.2.0','existingAddon':True},upgraded
+            print('B A08_UPGRADE_INTENT_SCHEDULED_NOT_ACCEPTED',flush=True)
+            installed_path=profile/'extensions'/(b.ID+'.xpi')
+            expected=hashlib.sha256(target.read_bytes()).hexdigest()
+            observed=None
+            for _ in range(60):
+                if installed_path.is_file():
+                    observed=hashlib.sha256(installed_path.read_bytes()).hexdigest()
+                    if observed==expected:break
+                time.sleep(.2)
+            assert observed==expected,('A08_UPDATE_NOT_INSTALLED_BY_FIREFOX',
+                {'expected':expected,'observed':observed})
+            print('H A08_UPGRADED_PROFILE_XPI_BYTES_MATCH_CI_ARTIFACT=PASS',
+                  flush=True)
             exiting=b.owned_firefox_pids(profile)
             b.close(session);session=None
+            # The single disposable CI profile may lose Marionette during a
+            # legitimate browser-level extension upgrade. Never terminate any
+            # process unless /proc verifies the exact temporary profile owner.
+            import signal
+            for pid in b.owned_firefox_pids(profile)&exiting:
+                os.kill(pid,signal.SIGTERM)
             b.require_owned_exit(profile,exiting)
+            server.terminate()
+            try:server.wait(timeout=7)
+            except subprocess.TimeoutExpired:
+                server.kill();server.wait(timeout=5)
+            server=subprocess.Popen([str(driver),'--port',str(b.PORT),
+                                     '--allow-system-access'],env=env,
+                stdout=subprocess.DEVNULL,stderr=subprocess.STDOUT)
+            for _ in range(70):
+                try:
+                    with urlopen(b.HOST+'/status',timeout=1) as resp:
+                        if json.load(resp).get('value',{}).get('ready'):break
+                except Exception:time.sleep(.2)
+            else:raise AssertionError('A08_REOPEN_DRIVER_NOT_READY')
             session=b.open_session(firefox,profile)
             fresh=b.owned_firefox_pids(profile)
             assert fresh and not exiting.intersection(fresh),'A08_NOT_PROCESS_COLD'
