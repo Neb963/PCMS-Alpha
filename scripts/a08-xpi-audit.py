@@ -53,7 +53,7 @@ def inspect(path, *, donor_root=pathlib.Path('donor/personamonkey/extension')):
             if not member.startswith('pcms/') or not member.endswith(('.mjs','.js')):
                 continue
             body=z.read(member)
-            if re.search(rb'\\b(?:connectNative|sendNativeMessage)\\s*\\(',body):
+            if re.search(rb'\b(?:connectNative|sendNativeMessage)\s*\(',body):
                 forbidden_ops.append(member)
         if forbidden_ops:
             raise AssertionError('A08_PCMS_NATIVE_DISPATCH_PACKAGED:'+','.join(forbidden_ops))
