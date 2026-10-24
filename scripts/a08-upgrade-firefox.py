@@ -19,6 +19,31 @@ spec=importlib.util.spec_from_file_location('pcms_browser_smoke',module_path)
 b=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(b)
 
+
+def wait_upgraded_runtime(session, expected_version, timeout_seconds=12):
+    """A written archive/registry is not proof that the new extension started.
+
+    Observe the actual extension API and primary UI before shutdown and again
+    after cold restart. These are read-only probes; the upgrade is never replayed.
+    """
+    until=time.monotonic()+timeout_seconds
+    last=None
+    while time.monotonic()<until:
+        last=b.execute(session,"""return typeof browser==='undefined' ? null : {
+            version:browser.runtime.getManifest().version,
+            gecko:browser.runtime.getManifest().browser_specific_settings?.gecko?.id,
+            main:!!document.getElementById('pcms-faithful-host')?.shadowRoot,
+            storageAPI:!!browser.storage.local,alarms:!!browser.alarms
+        };""")
+        if last and last.get('gecko')!=b.ID:
+            raise AssertionError(('A08_WRONG_RUNTIME_PRINCIPAL',last))
+        if (last and last.get('version')==expected_version and last.get('main')
+                and last.get('storageAPI') and last.get('alarms')):
+            return last
+        time.sleep(.12)
+    raise AssertionError(('A08_UPGRADED_RUNTIME_NOT_READY',last))
+
+
 def main():
     target=pathlib.Path(sys.argv[1]).resolve()
     firefox=pathlib.Path(os.environ['FIREFOX_BINARY'])
@@ -83,6 +108,10 @@ def main():
             # is not a valid install/upgrade test. No profile filesystem edit.
             # Developer-only privileged browser context is explicitly enabled
             # by the disposable geckodriver's --allow-system-access flag.
+            # AOM must run from its own stable browser tab. Updating the
+            # currently selected donor extension document invalidates its
+            # Marionette actor before the upgrade has completed.
+            b.call('POST',f'/session/{session}/url',{'url':'about:addons'},timeout=30)
             b.call('POST',f'/session/{session}/moz/context',{'context':'chrome'})
             upgrade_js="""const done=arguments[arguments.length-1];
             (async()=>{
@@ -99,10 +128,9 @@ def main():
                 throw Error('A08_PRE_UPGRADE_ADDON_VERSION_CHANGED');
               const install=await AddonManager.getInstallForFile(file);
               if(!install)throw Error('A08_ADDON_INSTALL_NOT_CREATED');
-              // AOM's actual update invalidates the active extension tab,
-              // which can unload this Marionette document. Schedule the one
-              // update after the test-controller callback, then use the OS
-              // installed-archive hash as an independent completion oracle.
+              // Perform the single real update from about:addons after the
+              // test-controller callback; disk and runtime observations below
+              // establish completion separately from scheduling this intent.
               const existing=!!install.existingAddon;
               if(!existing)throw Error('A08_UPDATE_EXISTING_ADDON_NOT_DETECTED');
               const browserTab=window.gBrowser?.selectedBrowser||null;
@@ -155,6 +183,16 @@ def main():
                 'A08_ADDON_REGISTRY_UPDATE_NOT_COMMITTED',registry_version)
             print('H A08_FIREFOX_ADDON_REGISTRY_UPDATED_BEFORE_SHUTDOWN=PASS',
                   flush=True)
+            # The old extension tab can outlive the on-disk registration.
+            # Leave that document and prove actual target-runtime startup
+            # before requesting a clean WebDriver shutdown. No cache edits,
+            # reinstallation, profile mutation or assertion relaxation.
+            b.call('POST',f'/session/{session}/moz/context',{'context':'content'})
+            b.call('POST',f'/session/{session}/url',{'url':'about:blank'},timeout=30)
+            b.call('POST',f'/session/{session}/url',{
+                'url':f'moz-extension://{uuid_before}/pcms/index.html'},timeout=30)
+            wait_upgraded_runtime(session,'1.2.7')
+            print('B A08_TARGET_RUNTIME_READY_BEFORE_SHUTDOWN=PASS',flush=True)
             exiting=b.owned_firefox_pids(profile)
             b.close(session);session=None
             # The single disposable CI profile may lose Marionette during a
@@ -184,19 +222,7 @@ def main():
             assert uuid_before==uuid_after,'A08_GECKO_PRINCIPAL_UUID_CHANGED'
             b.call('POST',f'/session/{session}/url',{
                 'url':f'moz-extension://{uuid_after}/pcms/index.html'},timeout=30)
-            verified=None
-            for _ in range(100):
-                verified=b.execute(session,"""return {
-                   version:browser.runtime.getManifest().version,
-                   gecko:browser.runtime.getManifest().browser_specific_settings?.gecko?.id,
-                   state:null,main:!!document.getElementById('pcms-faithful-host')?.shadowRoot,
-                   storageAPI:!!browser.storage.local,alarms:!!browser.alarms
-                };""")
-                if verified['main']:break
-                time.sleep(.12)
-            assert verified['version']=='1.2.7',verified
-            assert verified['gecko']==b.ID and verified['main'],verified
-            assert verified['storageAPI'] and verified['alarms'],verified
+            verified=wait_upgraded_runtime(session,'1.2.7')
             retained=b.execute(session,"""return browser.storage.local.get(
                 'a08UpgradeCheckpoint').then(s=>s.a08UpgradeCheckpoint);""")
             assert retained==marker,('A08_UPGRADE_STORAGE_LOST',retained)
@@ -208,6 +234,15 @@ def main():
             print('B A08_XPI_SHA256='+hashlib.sha256(target.read_bytes()).hexdigest(),
                   flush=True)
             print('B A08_PRIVATE_GIT_AND_LIVE_PROVIDER=NOT_TESTED',flush=True)
+        except Exception:
+            print('A08_FAILURE_LIFECYCLE='+json.dumps({
+                'ownedFirefoxPids':sorted(b.owned_firefox_pids(profile)),
+                'driverReturncode':server.poll(),
+                'installedArchiveMatches':installed_path.is_file() and
+                    hashlib.sha256(installed_path.read_bytes()).hexdigest()==expected
+                    if 'installed_path' in locals() else None
+            }),flush=True)
+            raise
         finally:
             if session:b.close(session)
             server.terminate()

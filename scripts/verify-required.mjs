@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Fail-closed aggregate of observed GitHub job results. */
+/** Full acceptance only. Draft preflight never publishes pcms-required. */
 export const MANDATORY = Object.freeze(['baseline', 'fast', 'firefox']);
 export function checkRequired(result) {
   const bad = MANDATORY.filter(name => !result || result[name] !== 'success');
@@ -13,5 +13,5 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   if (!verdict.accepted) {
     console.error(`pcms-required FAIL: mandatory jobs not successful: ${verdict.bad.join(', ')}`);
     process.exitCode = 1;
-  } else console.log('pcms-required PASS: all mandatory jobs succeeded');
+  } else console.log('pcms-required PASS [FULL_ENGINEERING_GATE]: all mandatory jobs succeeded');
 }

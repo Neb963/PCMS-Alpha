@@ -1,5 +1,8 @@
 # PCMS-Alpha — Verified Single-Bridge Recovery Implementation Plan
 
+> **Historical engineering recovery program (2026-10-24 supersession):** A00–A09 source/CI work has been carried into main. It did **not** establish full client UI/product conformance. New tasks must use [Operator Journey Completion J01–J07](OPERATOR-JOURNEYS-2026-10-24.md), not restart A00–A09. Retain this document for architecture and evidence history. The client spec and amendment remain authoritative.
+
+
 **Plan ID:** PCMS-RECOVERY-2026-10-22
 **Revision:** 1
 **Status:** Approved *engineering execution program* following the operator's explicit repository/rules delegation on 2026-10-22; individual product journeys are NOT implemented by this document.
