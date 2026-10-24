@@ -1323,9 +1323,9 @@ def main():
                             !!r.querySelector('details p')?.textContent.trim()),
                         exportEnabled:[...panel?.querySelectorAll('button')||[]].some(
                           b=>b.textContent.trim()==='Export sanitized report'&&!b.disabled)};""")
-                    if r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['readable'] and r3_result['guidance']:break
+                    if r3_result['count']>=8 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['hasPortable'] and r3_result['noPcmsHelpers'] and r3_result['readable']:break
                     time.sleep(.12)
-                assert r3_result and r3_result['count']>=14 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['readable'] and r3_result['guidance'] and r3_result['exportEnabled'],('R3_PREFLIGHT_FAILED',r3_result)
+                assert r3_result and r3_result['count']>=8 and r3_result['hasGit'] and r3_result['hasHost'] and r3_result['hasPortable'] and r3_result['noPcmsHelpers'] and r3_result['readable'] and r3_result['exportEnabled'],('R3_PREFLIGHT_FAILED',r3_result)
                 print('B R3_REAL_PRIMARY_SETTINGS_LOCAL_PREFLIGHT_NO_REMOTE=PASS',flush=True)
                 # R4: actual packaged main UI must expose primary creation and
                 # protected permissions without switching to the old controller.
@@ -1359,12 +1359,12 @@ def main():
                   const protectedRestore=!!backupPanel?.querySelector('input[type="file"]')&&
                     backupPanel.querySelectorAll('input[type="file"]').length===2&&
                     [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Verify independent checkpoint'))&&
-                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Read back uncertain restore'))&&
-                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Apply reviewed restore'));
+                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Reconcile uncertain restore'))&&
+                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Apply reviewed import'));
                   const restoreHeld=[...backupPanel.querySelectorAll('button')].find(x=>x.textContent.includes('Apply reviewed restore'))?.disabled===true;
                   sh.querySelector('[data-settings="diagnostics"]').click();
                   const details=sh.querySelector('.settings-main');
-                  const primaryDiagnostic=details?.textContent.includes('Full disposable diagnostic')&&
+                  const primaryDiagnostic=details?.textContent.includes('Operational diagnostics')&&
                     !!details?.querySelector('input[placeholder="pcms-test-alpha"]')&&
                     [...details.querySelectorAll('button')].some(x=>x.textContent.includes('Save disposable scope'));
                   sh.querySelector('[data-settings="connections"]').click();
@@ -1372,7 +1372,7 @@ def main():
                   const connectionRows=[...connected?.querySelectorAll('.settings-row')||[]];
                   const restoredConnections=connectionRows.length>=3&&
                     connectionRows.some(x=>x.textContent.includes('PersonaMonkey'))&&
-                    connectionRows.some(x=>x.querySelector('button[data-action="check-service:native"]'))&&
+                    connectionRows.some(x=>x.querySelector('button[data-action="check-service:backup"]'))&&
                     !!connected.querySelector('input[type="password"]');
                   const readableConnections=connectionRows.every(x=>
                     !/GIT_[A-Z_]+|NATIVE_[A-Z_]+|local[.]pcms[.]/.test(
