@@ -3,6 +3,7 @@
 import hashlib
 import json
 import pathlib
+import posixpath
 import re
 import sys
 import zipfile
@@ -45,18 +46,52 @@ def inspect(path, *, donor_root=pathlib.Path('donor/personamonkey/extension')):
                 raise AssertionError('A08_DONOR_BYTES_CHANGED:'+file)
         if DONOR.encode() not in z.read('lib/mullvad-native.js'):
             raise AssertionError('A08_DONOR_ROUTING_HOST_MISSING')
-        # The managed PCMS module graph must not contain reachable native
-        # host dispatch. PersonaMonkey donor native calls are deliberately
-        # outside this check, and donor byte equality is independently verified.
-        forbidden_ops=[]
-        for member in names:
-            if not member.startswith('pcms/') or not member.endswith(('.mjs','.js')):
+        # Reachability is proved from the actual installed Firefox roots,
+        # not by grepping historical mock fixtures that old B tests import
+        # directly. Traverse imported PCMS modules conservatively and reject
+        # missing relative imports. No UI/background entry may invoke a
+        # supplemental native host; donor-owned bridge remains separate.
+        nameset=set(names)
+        roots={'pcms/entry.mjs'}
+        for html in names:
+            if not html.startswith('pcms/') or not html.endswith('.html'):
                 continue
+            data=z.read(html)
+            for ref in re.findall(rb'<script\\b[^>]*\\bsrc=[\\x22\\x27]([^\\x22\\x27]+)',data):
+                module=posixpath.normpath(posixpath.join(
+                    posixpath.dirname(html),ref.decode().split('?')[0]))
+                if module.startswith('pcms/') and module.endswith(('.mjs','.js')):
+                    roots.add(module)
+        visited=set()
+        pending=list(roots)
+        while pending:
+            member=pending.pop()
+            if member in visited:
+                continue
+            if member not in nameset:
+                raise AssertionError('A08_PRODUCTION_MODULE_IMPORT_MISSING:'+member)
+            visited.add(member)
             body=z.read(member)
-            if re.search(rb'\b(?:connectNative|sendNativeMessage)\s*\(',body):
-                forbidden_ops.append(member)
-        if forbidden_ops:
-            raise AssertionError('A08_PCMS_NATIVE_DISPATCH_PACKAGED:'+','.join(forbidden_ops))
+            if re.search(rb'\\b(?:connectNative|sendNativeMessage)\\s*\\(',body):
+                raise AssertionError('A08_PCMS_NATIVE_DISPATCH_REACHABLE:'+member)
+            # Static imports, re-exports and literal dynamic imports. Variable
+            # imports are not proof of safety and are independently browser-
+            # exercised by the packaged smoke test.
+            references=re.findall(
+                rb'(?:\\bfrom\\s*|\\bimport\\s*(?:\\(\\s*)?)[\\x22\\x27](\\.{1,2}/[^\\x22\\x27]+)[\\x22\\x27]',
+                body)
+            for ref in references:
+                child=posixpath.normpath(posixpath.join(
+                    posixpath.dirname(member),ref.decode().split('?')[0]))
+                if child.startswith('pcms/') and child.endswith(('.mjs','.js')):
+                    pending.append(child)
+        retired=set(n for n in names if n.startswith('pcms/') and
+            n.endswith(('.mjs','.js')))-visited
+        for forbidden in ('pcms/backup-v2-session.mjs',
+                          'pcms/backup-auto-run.mjs',
+                          'pcms/restore-v2-candidate.mjs'):
+            if forbidden not in retired:
+                raise AssertionError('A08_RETIRED_NATIVE_MODULE_REACHABLE:'+forbidden)
         # The modern startup module must retain full browser-local automation.
         entry=z.read('pcms/entry.mjs')
         auto=z.read('pcms/backup-auto-boundary.mjs')
@@ -77,6 +112,8 @@ def inspect(path, *, donor_root=pathlib.Path('donor/personamonkey/extension')):
                 'geckoId':ID,'version':manifest['version'],
                 'zipEntries':len(names),'donorCriticalFilesVerified':len(CRITICAL),
                 'donorNativeBridge':'PRESERVED_BY_BYTE_COMPARISON',
+                'productionPcmsModulesReachable':len(visited),
+                'retiredHistoricalModulesOutsideProductionGraph':len(retired),
                 'pcmsInstalledNativeServices':0,'pcmsInstallerFiles':0,
                 'livePerchance':'NOT_TESTED','privateGit':'NOT_TESTED',
                 'operatorHost':'NOT_TESTED'}

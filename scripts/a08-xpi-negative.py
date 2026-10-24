@@ -43,7 +43,7 @@ def main():
       ('old-version',{'manifest.json':altered(lambda m:m.update(version='1.2.4'))},None,(),'A08_DISTRIBUTION_VERSION_NOT_ADVANCED'),
       ('donor-modification',{'lib/mullvad-native.js':donor+b'\\n// tamper\\n'},None,(),'A08_DONOR_BYTES_CHANGED'),
       ('extra-host',None,{'native/local.pcms.bad.json':'{}'},(),'A08_NATIVE_INSTALLER_OR_SCRIPT_PACKAGED'),
-      ('native-dispatch',{'pcms/entry.mjs':entry+b"\\nbrowser.runtime.connectNative ('local.pcms.bad');\\n"},None,(),'A08_PCMS_NATIVE_DISPATCH_PACKAGED'),
+      ('native-dispatch',{'pcms/entry.mjs':entry+b"\\nbrowser.runtime.connectNative ('local.pcms.bad');\\n"},None,(),'A08_PCMS_NATIVE_DISPATCH_REACHABLE'),
       ('userScripts-removed',{'manifest.json':altered(lambda m:m.update(optional_permissions=[]))},None,(),'A08_USERSCRIPTS_GRANT_MISSING'),
       ('backup-disabled',{'pcms/backup-auto-boundary.mjs':auto.replace(b'createPortableRunner',b'createPlaceholderRunner')},None,(),'A08_PORTABLE_AUTOBACKUP_DISABLED'),
       ('missing-clock',None,None,('pcms/refresher-browser-clock.mjs',),'A08_REQUIRED_PRODUCTION_MODULE_MISSING')

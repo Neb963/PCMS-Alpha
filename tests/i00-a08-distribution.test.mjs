@@ -29,9 +29,10 @@ test('A08 active restore entry contains no retired PCMS native V2 dispatcher',as
   assert.doesNotMatch(restore,/createV2NativeConnection|prepareQualifiedV2FreshProfile|nativeV2Evidence/);
   assert.match(restore,/APPLY_PORTABLE/);
   assert.match(restore,/RESTORE_COMMAND_NOT_ALLOWED/);
-  const build=await read('scripts/build-i00.mjs');
-  for(const old of ['backup-v2-session.mjs','restore-v2-qualified.mjs',
-    'backup-auto-export.mjs','backup-auto-run.mjs','backup-v2-verify.mjs',
-    'restore-v2-candidate.mjs'])
-    assert.ok(build.includes("'"+old+"'"));
+  const overlay=await read('src/runtime/overlay.mjs');
+  const builder=await read('scripts/build-i00.mjs');
+  assert.doesNotMatch(builder,/await rm\(path\.join\(stage,'pcms',obsolete\)/);
+  for(const old of ['backup-auto-export.mjs','backup-auto-run.mjs',
+    'backup-v2-verify.mjs','restore-v2-candidate.mjs'])
+    assert.ok(overlay.includes("'"+old+"'"),old+' historical synthetic test fixture missing');
 });
