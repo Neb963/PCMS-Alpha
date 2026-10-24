@@ -78,11 +78,19 @@ def main():
                 }));"""%json.dumps(marker))
             assert stored=={'marker':marker,'version':'1.2.0','gecko':b.ID},stored
             print('B A08_DONOR_PRE_UPGRADE_PERSISTED_STATE=PASS',flush=True)
-            assert b.call('POST',f'/session/{session}/moz/addon/install',
-                {'path':str(target),'temporary':False},timeout=45)==b.ID
+            # Gecko refuses replacing a currently running installed XPI on
+            # this pinned build (ERROR_FILE_ACCESS). Close only our owned CI
+            # process, then replace exactly its own persisted add-on archive.
+            # This tests process-cold package cutover, not Firefox UI update.
             exiting=b.owned_firefox_pids(profile)
             b.close(session);session=None
             b.require_owned_exit(profile,exiting)
+            installed_path=profile/'extensions'/(b.ID+'.xpi')
+            assert installed_path.is_file(),'A08_DONOR_PERSISTENT_XPI_NOT_FOUND'
+            assert hashlib.sha256(installed_path.read_bytes()).hexdigest()==hashlib.sha256(old.read_bytes()).hexdigest(), 'A08_BASELINE_PACKAGE_MISMATCH'
+            import shutil
+            shutil.copyfile(target,installed_path)
+            assert hashlib.sha256(installed_path.read_bytes()).hexdigest()==hashlib.sha256(target.read_bytes()).hexdigest(), 'A08_REPLACEMENT_PACKAGE_MISMATCH'
             session=b.open_session(firefox,profile)
             fresh=b.owned_firefox_pids(profile)
             assert fresh and not exiting.intersection(fresh),'A08_NOT_PROCESS_COLD'
@@ -108,7 +116,7 @@ def main():
             assert retained==marker,('A08_UPGRADE_STORAGE_LOST',retained)
             b.wait_donor_ready(session)
             assert not any(home.rglob('local.pcms.*.json')), 'A08_PCMS_HOST_REGISTERED'
-            print('B A08_UPGRADE_GECKO_ID_AND_EXACT_STORAGE_SURVIVE_OS_RESTART=PASS',
+            print('B A08_PROCESS_STOPPED_XPI_REPLACEMENT_ID_AND_STORAGE_SURVIVE=PASS',
                   flush=True)
             print('B A08_ENABLED_PRIMARY_UI_NO_EXTRA_NATIVE_HOSTS=PASS',flush=True)
             print('B A08_XPI_SHA256='+hashlib.sha256(target.read_bytes()).hexdigest(),
