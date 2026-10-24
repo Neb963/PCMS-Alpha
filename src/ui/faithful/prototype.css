@@ -362,3 +362,12 @@ body:has(.drawer-overlay:not([hidden])) #toast-root{right:min(555px,calc(100vw -
 .git-ai-policy textarea{box-sizing:border-box;width:100%;padding:10px;border:1px solid #c9d2da;border-radius:6px;resize:vertical}
 .git-ai-policy input[type=number]{width:110px;padding:8px;border:1px solid #c9d2da;border-radius:6px}
 @media(min-width:651px){.source-tree{max-height:calc(100dvh - 250px);overflow:auto;padding-right:6px}}
+.review-workspace{width:min(1200px,100vw)}
+.review-workspace .drawer-body{display:flex;flex-direction:column;gap:16px}
+.review-workspace .source-layout{grid-template-columns:minmax(170px,22%) minmax(0,1fr)}
+.source-compare-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.source-compare-columns>section{min-width:0}.source-compare-columns h4{margin:8px 0}
+.source-line-diff pre{max-height:65dvh;overflow:auto;white-space:pre;font-family:ui-monospace,monospace;font-size:12px;padding:12px;border:1px solid var(--line)}
+.source-line-diff .diff-added{background:#e5f5e9;color:#215d34}.source-line-diff .diff-removed{background:#fde9e7;color:#843b33}
+.review-workspace dd{overflow-wrap:anywhere}.review-workspace textarea{max-width:100%}
+@media(max-width:750px){.review-workspace .source-layout,.source-compare-columns{grid-template-columns:minmax(0,1fr)}}

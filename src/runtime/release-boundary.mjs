@@ -1,3 +1,4 @@
+import {createLocalSourceReview} from './source-review.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I13 guarded source-bound human release. Same-XPI background authority;
 // UI supplies ONLY slug, expected revisions, explicit approval and ephemeral
@@ -29,7 +30,7 @@ import {releaseContext,releaseTestContext,candidateManifest,releaseGitContext,
 export const RELEASE_PORT='pcms-i13-release';
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const fp=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
-const TYPES=new Set(['LIST','LIST_REVIEW','GET','GET_CHANGE','REQUEST_CHANGES','HUMAN_CONTEXT','GET_HUMAN','DEFER_HUMAN','ADOPT_HUMAN','GET_EXCEPTION','EXCEPTION_CONTEXT','RECORD_EXCEPTION','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
+const TYPES=new Set(['LIST','LIST_REVIEW','GET_LOCAL_REVIEW','GET_LOCAL_CHUNK','GET','GET_CHANGE','REQUEST_CHANGES','HUMAN_CONTEXT','GET_HUMAN','DEFER_HUMAN','ADOPT_HUMAN','GET_EXCEPTION','EXCEPTION_CONTEXT','RECORD_EXCEPTION','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
 export function validateReleaseMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
@@ -39,7 +40,7 @@ export function validateReleaseMessage(api,sender,msg){
      Object.keys(msg).some(k=>!['type','params'].includes(k))||!TYPES.has(msg.type))
     return fail('INVALID_MESSAGE');
   const p=msg.params||{},allowed={
-    LIST:[],LIST_REVIEW:['after','limit','query','status'],GET:['slug'],GET_CHANGE:['slug'],
+    LIST:[],LIST_REVIEW:['after','limit','query','status'],GET_LOCAL_REVIEW:['slug'],GET_LOCAL_CHUNK:['slug','stageRevision','jobRevision','fingerprint','origin','path','offset'],GET:['slug'],GET_CHANGE:['slug'],
      HUMAN_CONTEXT:['slug'],GET_HUMAN:['slug'],
      DEFER_HUMAN:['slug','expectedStageRevision','expectedJobRevision','expectedFingerprint'],
      ADOPT_HUMAN:['slug','expectedRevision'],
@@ -66,7 +67,8 @@ export function validateReleaseMessage(api,sender,msg){
      (['PREVIEW','APPROVE','DISPATCH','RECONCILE','REQUEST_CHANGES'].includes(msg.type)&&
        (p.token!==undefined&&(typeof p.token!=='string'||p.token.length<12||
         p.token.length>512||!/^[\x21-\x7e]+$/.test(p.token))))||
-     (msg.type==='GET_REVIEW_CHUNK'&&(
+     (['GET_REVIEW_CHUNK','GET_LOCAL_CHUNK'].includes(msg.type)&&(
+       (msg.type==='GET_LOCAL_CHUNK'&&(!Number.isSafeInteger(p.jobRevision)||p.jobRevision<0))||
        !Number.isSafeInteger(p.stageRevision)||p.stageRevision<1||
        !fp(p.fingerprint)||!['F','P'].includes(p.origin)||
        typeof p.path!=='string'||p.path.length>240||
@@ -276,6 +278,8 @@ export function createReleaseBoundary(api,{
   }
   async function runTrusted(msg){
     const p=msg.params||{},database=await db(),store=releaseFactory(database);
+    if(msg.type==='GET_LOCAL_REVIEW')return createLocalSourceReview(database,{stageFactory,aiFactory}).view(p.slug);
+    if(msg.type==='GET_LOCAL_CHUNK')return createLocalSourceReview(database,{stageFactory,aiFactory}).chunk(p);
     if(msg.type==='GET')return store.get(p.slug);
     if(msg.type==='LIST')return store.list();
     if(msg.type==='GET_CHANGE')return createS06ChangeStore(database).get(p.slug);

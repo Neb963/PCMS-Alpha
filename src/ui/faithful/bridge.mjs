@@ -1,6 +1,7 @@
 import {matchesReviewGroup} from '../review-queue-state.mjs';
 import {renderGitInventory,mountGitPromptEditor} from './git-workspace.mjs';
 import {createSourceWorkspace} from './source-workspace.mjs';
+import {mountSourceComparison} from './source-comparison.mjs';
 import {createGeneratorBatches} from './generator-batches.mjs';
 import {createGeneratorSelection} from './generator-selection.mjs';
 import {createAccountsWorkspace,accountGrowthAdvice,accountNeedsAttention} from './accounts-workspace.mjs';
@@ -1054,7 +1055,7 @@ function displayQueue(){
 // fingerprint are provided by the protected release boundary. The UI cannot
 // invent PASS, bypass source/route checks or publish from a review ACK.
 async function openReleaseReview(slug){
- const previous=root.activeElement,overlay=el('div','drawer-overlay'),dialog=el('div','drawer');
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),dialog=el('div','drawer review-workspace');
  dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');
  dialog.setAttribute('aria-label','Review exact candidate for '+slug);
  const close=()=>{overlay.remove();if(previous?.isConnected)previous.focus({preventScroll:true})};
@@ -1063,7 +1064,10 @@ async function openReleaseReview(slug){
  const body=el('div','drawer-body'),status=el('p','setting-note','Verifying the exact final candidate and tests…');
  status.setAttribute('role','status');body.append(status);dialog.append(body);overlay.append(dialog);root.append(overlay);
  head.querySelector('button')?.focus();
- overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close();return}if(e.key==='Tab'){
+  const controls=[...dialog.querySelectorAll('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),summary')].filter(x=>x.getClientRects().length);
+  const i=controls.indexOf(root.activeElement);if(e.shiftKey&&i<=0){e.preventDefault();controls.at(-1)?.focus()}else if(!e.shiftKey&&i===controls.length-1){e.preventDefault();controls[0]?.focus()}
+ }});
  overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
  const releaseCommand=async(type,params)=>{
   if(type==='DISPATCH')return readPort('pcms-i13-release','DISPATCH',params,95000);
@@ -1080,6 +1084,16 @@ async function openReleaseReview(slug){
      'Publication may have occurred. Only protected read-only reconciliation is permitted; no automatic retry.':
      'Publication not verified: '+(out?.code||'Unknown outcome')+'. Check current guarded state.';
  };
+ let local;
+ try{local=await readPort('pcms-i13-release','GET_LOCAL_REVIEW',{slug},30000)}catch{}
+ if(!overlay.isConnected)return;
+ if(local?.ok){
+  mountSourceComparison({container:body,view:local,el,b,request:(type,params)=>readPort('pcms-i13-release',type,params,30000)});
+  const checks=el('details');checks.append(el('summary','','Test observations · '+(local.tests?.state||'Unverified')));
+  for(const t of [...(local.tests?.default||[]),...(local.tests?.optional||[])])checks.append(el('p','setting-note',t.name+' — '+t.result));
+  body.append(checks);
+ }else body.append(el('p','setting-note','Saved source is not available for comparison yet.'));
+ body.append(b('Refresh review',()=>{close();void openReleaseReview(slug)}));
  let persisted;
  try{persisted=await releaseCommand('GET',{slug});}catch{persisted=null;}
  if(persisted?.ok&&persisted.state==='CONFIRMED_PUBLIC'){
@@ -1111,54 +1125,14 @@ async function openReleaseReview(slug){
  status.textContent=view.mode==='INDIVIDUAL_EXCEPTIONAL_MANUAL_REVIEW'?
   'Exceptional manual review: AI testing is not fully verified.':
   'Candidate source, test results and Git revision verified for this review snapshot.';
- const summary=el('dl');
- for(const [label,value] of [['Candidate source',view.sourceFingerprint],
-   ['Previous source',view.previousFingerprint],['Pinned Git main',view.gitHead],
-   ['Testing result',view.tests?.state||'Unverified'],['Publication', 'Not yet approved']]){
+ if(!local?.ok||local.stageRevision!==view.stageRevision||local.jobRevision!==view.jobRevision||local.sourceFingerprint!==view.sourceFingerprint){
+  status.textContent='The candidate changed while this review was opening. Refresh review to inspect the current source before approval.';return;
+ }
+ const provenance=el('details'),summary=el('dl');provenance.append(el('summary','','Source provenance'));
+ for(const [label,value] of [['Candidate fingerprint',view.sourceFingerprint],['Previous fingerprint',view.previousFingerprint],['Pinned Git main',view.gitHead]]){
   const pair=el('div','kv');pair.append(el('dt','',label),el('dd','',value));summary.append(pair);
  }
- body.append(summary);
- const checks=el('div','');
- checks.append(el('h3','','Required test observations'));
- for(const t of [...(view.tests?.default||[]),...(view.tests?.optional||[])]){
-  checks.append(el('p','setting-note',t.name+' — '+(t.result||'UNVERIFIED')));
- }
- body.append(checks,el('h3','','Full-source change manifest'));
- const changes=el('div','queue-list'),seen=new Set();
- const changedPaths=new Set((view.diff||[]).map(x=>x.path).filter(Boolean));
- for(const file of view.files||[]){
-  const row=el('div','queue-item');
-  const label=el('span','',file.path+' · '+file.size+' bytes'+
-    (changedPaths.has(file.path)?' · changed':' · unchanged'));
-  const inspect=b('Read exact file',()=>void (async()=>{
-   inspect.disabled=true;
-   let bytes=[],next=0,total=0,error=false;
-   do{
-    let r;
-    try{r=await readPort('pcms-i13-release','GET_REVIEW_CHUNK',{
-      slug,stageRevision:view.stageRevision,fingerprint:view.sourceFingerprint,
-      origin:'F',path:file.path,offset:next},30000)}
-    catch{error=true;break}
-    if(!r?.ok||r.fileSha256!==file.sha256){error=true;break}
-    const data=Uint8Array.from(atob(r.base64),x=>x.charCodeAt(0));
-    bytes.push(data);total+=data.length;next=r.nextOffset;
-    if(total>16*1024*1024){error=true;break}
-   }while(next!==null);
-   if(error){notify('Exact file read could not be confirmed. Approval remains a separate decision.');inspect.disabled=false;return}
-   const data=new Uint8Array(total);let offset=0;
-   for(const part of bytes){data.set(part,offset);offset+=part.length}
-   const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data)))
-     .map(x=>x.toString(16).padStart(2,'0')).join('');
-   if(digest!==file.sha256){notify('File bytes did not match verified source fingerprint.');inspect.disabled=false;return}
-   seen.add(file.path);
-   const details=el('pre','source-preview');
-   details.textContent=/\.(?:pjs|html|js|css|md|json|txt)$/i.test(file.path)?
-     new TextDecoder().decode(data):'Binary file verified: SHA-256 '+digest;
-   row.append(details);inspect.textContent='Verified and viewed';inspect.disabled=true;
-  })(),'btn small');
-  row.append(label,inspect);changes.append(row);
- }
- body.append(changes);
+ provenance.append(summary);body.append(provenance);
  const footer=el('div','form-foot');
  const instructions=el('textarea','form-input');instructions.rows=3;
  instructions.placeholder='Optional request: describe changes needed to the tested candidate';
