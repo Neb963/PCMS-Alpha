@@ -12,6 +12,33 @@ const STATES=['PASS','FAIL','BLOCKED','NOT_TESTED','NOT_APPLICABLE'];
 const external=new Set(['H','GIT','L']);
 const methodByTier={D:'deterministic-production',B:'installed-xpi',H:'host-process-disk',GIT:'remote-git-readback',L:'provider-readback'};
 // Later client amendment v1.0.1 overrides only contradictory historical acceptance wording.
+const ORIGINAL_X_SHA256='1cd35938134e18422037a5123f2ae4a041d06c37a9a8b86c4dadac5d0dec73ac';
+
+export function parseOriginalXScenarios(source){
+ assert(typeof source==='string','A09_ORIGINAL_X_SOURCE_REQUIRED');
+ const lines=source.split(/\r?\n/).filter(x=>/^\| \*\*X-\d{2}:/.test(x));
+ assert(lines.length===14,'A09_ORIGINAL_X_COUNT_INVALID');
+ const bytes=lines.join('\n')+'\n';
+ assert(createHash('sha256').update(bytes).digest('hex')===ORIGINAL_X_SHA256,'A09_ORIGINAL_X_SOURCE_HASH_MISMATCH');
+ const out=new Map();
+ for(const line of lines){
+  const m=/^\| \*\*(X-\d{2}): ([^*]+)\*\* \| (.*?) \| (.*?) \| (.*?) \|$/.exec(line);
+  assert(m,'A09_ORIGINAL_X_ROW_INVALID');
+  assert(!out.has(m[1]),'A09_ORIGINAL_X_DUPLICATE');
+  const advertised=m[5];
+  const optionalExternal=/\b(?:only when needed|where necessary|appropriate real tier)\b/i.test(advertised);
+  const included=distinct((advertised.match(/\b(?:D|B|H|GIT|L)\b/g)||[])
+    .filter(t=>!optionalExternal||!external.has(t)));
+  assert(included.includes('D')&&included.includes('B'),'A09_ORIGINAL_X_TIERS_INVALID');
+  out.set(m[1],{id:m[1],title:m[2],trigger:m[3],expected:m[4],tierText:advertised,
+   tiers:orderedTiers(included)});
+ }
+ for(let i=1;i<=14;i++)assert(out.has('X-'+String(i).padStart(2,'0')),'A09_ORIGINAL_X_ID_MISSING');
+ return out;
+}
+
+// Later accepted operator amendments control implementation; the X scenarios
+// are auditable 2026-10-22 review traces, not a new sacred product contract.
 const amendedJourneys={
  'AC-14':{negative:'A partial feed is UNKNOWN; already-visible targets are not saved pointlessly; shutdown cannot fabricate active operating credit, but 72-hour rest advances with wall time; missed writes never burst-replay.'},
  'AC-15':{description:'Recover conserved background work and source history across dashboard close, worker suspension and Firefox restart using persisted state and browser alarms, with rest as elapsed wall time and active work only when observed.'},
@@ -34,9 +61,10 @@ function assert(condition,code){if(!condition)throw new Error(code);}
 const orderedTiers=xs=>TIER.filter(t=>xs.includes(t));
 const distinct=a=>[...new Set(a)];
 
-export function buildCatalog(matrix,scenarioMap){
+export function buildCatalog(matrix,scenarioMap,originalXSource){
  assert(typeof matrix==='string'&&matrix.length>100,'A09_MATRIX_REQUIRED');
  assert(scenarioMap?.schema==='pcms.a01.scenario-map/1','A09_X_AUTHORITY_INVALID');
+ const originalX=parseOriginalXScenarios(originalXSource);
  const ac=[];
  for(const line of matrix.split(/\r?\n/)){
   const m=line.match(/^\|\s*\*\*(AC-\d{2})\*\*\s*\|/);
@@ -60,12 +88,14 @@ export function buildCatalog(matrix,scenarioMap){
  assert(Array.isArray(scenarioMap.scenarios)&&scenarioMap.scenarios.length===14,'A09_X_COUNT_INVALID');
  const xs=scenarioMap.scenarios.map(x=>{
   assert(x.id&&x.acceptance?.length&&x.acceptance.every(id=>lookup.has(id)),'A09_X_MAPPING_INVALID');
-  assert(TIER.includes(x.minimumTier),'A09_X_MINIMUM_TIER_INVALID:'+x.id);
-  assert(x.originalPart8Description==='UNAVAILABLE','A09_UNVERIFIED_X_SOURCE_REPLACEMENT');
-  const tiers=orderedTiers(distinct(['D','B',x.minimumTier]));
-  return {id:x.id,kind:'X',relatedAC:x.acceptance,tiers,cases:['adverse','recovery'],
-   authority:x.originalPart8Description==='UNAVAILABLE'?'DERIVED_MAPPING_ONLY_ORIGINAL_X_UNAVAILABLE':'ORIGINAL_PART8_VERIFIED',
-   description:x.topic,originalDescription:x.originalPart8Description};
+  const source=originalX.get(x.id);
+  assert(source,'A09_ORIGINAL_X_ID_MISSING:'+x.id);
+  // Historical A01 labels/mapping are derived. The original 14 traces and
+  // tier wording now come from the recovered, digest-pinned Part 8 report.
+  return {id:x.id,kind:'X',relatedAC:x.acceptance,tiers:source.tiers,
+   cases:['adverse','recovery'],authority:'RECOVERED_PART8_AUDIT_VERBATIM',
+   title:source.title,description:source.trigger,expected:source.expected,
+   originalDescription:source.trigger,originalTierText:source.tierText};
  });
  const rows=[...ac,...t,...xs];
  assert(rows.length===42&&new Set(rows.map(x=>x.id)).size===42,'A09_ID_COLLISION');
@@ -73,6 +103,16 @@ export function buildCatalog(matrix,scenarioMap){
  return rows;
 }
 
+// External real-world observations must be directly relevant, but must not
+// multiply every negative/recovery fixture into a dangerous live operation.
+// AC: observe a real positive external path; T and X: observe the applicable
+// adverse/recovery boundary, with deterministic B/D fault injection reused.
+function casesFor(row,tier){
+ if(!external.has(tier))return row.cases;
+ if(row.kind==='AC')return ['positive'];
+ if(row.kind==='X'&&/restore|restart|continuity|clock|lost-intent/i.test(row.title||''))return ['recovery'];
+ return ['adverse'];
+}
 function receiptProof(r,sourceSha,xpiSha256){
  assert(r&&typeof r==='object'&&!Array.isArray(r),'A09_RECEIPT_INVALID');
  assert(STATES.includes(r.status),'A09_RECEIPT_STATUS_INVALID');
@@ -98,7 +138,7 @@ export function evaluateEvidence({catalog,receipts,sourceSha,xpiSha256}){
  const byId=new Map(catalog.map(x=>[x.id,x]));const slots=new Map();
  for(const r of receipts){
   const row=byId.get(r?.id);assert(row,'A09_UNKNOWN_ACCEPTANCE_ID');
-  assert(row.tiers.includes(r.tier)&&row.cases.includes(r.case),'A09_OUTSIDE_ACCEPTANCE_SCOPE');
+  assert(row.tiers.includes(r.tier)&&casesFor(row,r.tier).includes(r.case),'A09_OUTSIDE_ACCEPTANCE_SCOPE');
   receiptProof(r,sourceSha,xpiSha256);
   const key=[r.id,r.tier,r.case].join('/');
   assert(!slots.has(key),'A09_DUPLICATE_OR_CONFLICTING_RECEIPT:'+key);
@@ -108,7 +148,7 @@ export function evaluateEvidence({catalog,receipts,sourceSha,xpiSha256}){
  const rows=catalog.map(x=>{
   let pass=0,fail=0,blocked=0,unverified=0;
   const evidence=[];
-  for(const tier of x.tiers)for(const caseName of x.cases){
+  for(const tier of x.tiers)for(const caseName of casesFor(x,tier)){
    const r=slots.get([x.id,tier,caseName].join('/'));
    const status=r?.status||'NOT_TESTED';
    if(status==='PASS')pass++;
@@ -117,13 +157,13 @@ export function evaluateEvidence({catalog,receipts,sourceSha,xpiSha256}){
    else unverified++;
    evidence.push({tier,case:caseName,status,artifact:r?.artifact||null});
   }
-  const originalMissing=x.kind==='X'&&x.authority==='DERIVED_MAPPING_ONLY_ORIGINAL_X_UNAVAILABLE';
+  const originalMissing=false; // Original Part 8 X source recovered and SHA-256 pinned.
   const status=fail?'FAIL':(unverified||blocked||originalMissing)?'HELD':'PASS';
   return {id:x.id,kind:x.kind,status,required:x.tiers,positiveAdverseRecovery:x.cases,
     missingOriginalXDescription:originalMissing,evidence,pass,fail,blocked,unverified};
  });
  const holds=[];
- if(rows.some(x=>x.missingOriginalXDescription))holds.push('ORIGINAL_X_DESCRIPTIONS_UNAVAILABLE');
+ // Original Part 8 X prose is present and digest-checked; no invented provenance hold.
  if(rows.some(x=>x.evidence.some(e=>external.has(e.tier)&&e.status!=='PASS')))holds.push('MISSING_PROVIDER_GIT_HOST_EVIDENCE');
  if(rows.some(x=>x.evidence.some(e=>!external.has(e.tier)&&e.status!=='PASS')))holds.push('MISSING_ENGINEERING_EVIDENCE');
  if(rows.some(x=>x.status==='FAIL'))holds.push('FAILING_ACCEPTANCE_EVIDENCE');
@@ -158,8 +198,9 @@ async function main(args){
  assert(audited.xpiSha256===digest&&audited.pcmsInstalledNativeServices===0,'A09_EXACT_XPI_AUDIT_FAILED');
  const acceptance=await readFile('docs/authority/PCMS-Alpha-ACCEPTANCE-MATRIX-v1.0.0.md','utf8');
  const scenarios=JSON.parse(await readFile('tests/fixtures/a01-recovery-scenarios.json','utf8'));
+ const originalX=await readFile('docs/audit/PART8-ORIGINAL-X01-X14.md','utf8');
  const receipts=receiptPath?JSON.parse(await readFile(receiptPath,'utf8')):[];
- const report=evaluateEvidence({catalog:buildCatalog(acceptance,scenarios),receipts,sourceSha:sha,xpiSha256:digest});
+ const report=evaluateEvidence({catalog:buildCatalog(acceptance,scenarios,originalX),receipts,sourceSha:sha,xpiSha256:digest});
  if(out){await mkdir(out,{recursive:true});await writeFile(path.join(out,'a09-evidence.json'),JSON.stringify(report,null,2)+'\n');await writeFile(path.join(out,'a09-evidence.md'),markdownReport(report));}
  process.stdout.write(JSON.stringify({release:report.release,sourceSha:sha,xpiSha256:digest,counts:report.counts,holds:report.holds})+'\n');
  if(args.includes('--require-ready')&&report.release!=='READY_FOR_INDEPENDENT_OPERATOR_SIGNOFF')process.exitCode=2;
