@@ -5,6 +5,7 @@ import {fakeDatabase} from './fake-idb.mjs';
 import {createCoordinatorStore} from '../src/runtime/coordinator-store.mjs';
 import {createCreationRunner} from '../src/runtime/creation-runner.mjs';
 import {advanceS04Effect} from '../src/runtime/creation-effects.mjs';
+import {createInventoryStore} from '../src/runtime/inventory.mjs';
 import {createAccountStore} from '../src/runtime/accounts.mjs';
 globalThis.crypto??=webcrypto;
 const slug='s04-runner-test';
@@ -145,4 +146,37 @@ test('J01 Archive still requeues never-attempted automatic work before context r
  const pinned=await ctx.store.getCreate(ctx.id);
  // The separately pinned reservation was never silently reassigned.
  assert.equal(pinned.record.accountId,account.accountId);
+});
+
+test('J02 unavailable provisional allocation waits through identity and inventory recovery before provider writes',async()=>{
+ const ctx=await setup(),accounts=createAccountStore(ctx.db),r=runner(ctx,{gate:true});
+ await put(ctx.db,[{key:'account:'+account.accountId,account:{...account,boundPrincipal:'a'.repeat(64)}}]);
+ const hold=await accounts.apply({type:'REVERIFY',accountId:account.accountId,expectedRevision:4});
+ assert.equal(hold.ok,true);assert.equal(hold.account.identity,null);
+ const planned=await r.worker.step(ctx.id,1);
+ assert.equal(planned.ok,true);assert.equal(planned.record.accountId,account.accountId);
+ let current=await ctx.store.getCreate(ctx.id);
+ assert.equal((await r.worker.step(ctx.id,current.record.revision)).code,'ACCOUNT_CONTEXT_CHANGED');
+ assert.deepEqual(r.ledger,[]);assert.equal(ctx.db.keys('operations').length,0);
+ const verified=await accounts.apply({type:'VERIFY',accountId:account.accountId,
+  expectedRevision:hold.account.revision,requireInventory:true,proof:{
+   source:'GUARDED_SESSION_READBACK',verified:true,personaUid:account.personaUid,
+   principalFingerprint:'a'.repeat(64),observationId:'identity_j02_recovered'}});
+ assert.equal(verified.ok,true);assert.equal(verified.account.state,'INVENTORY_PENDING');
+ assert.equal((await r.worker.step(ctx.id,current.record.revision)).code,'ACCOUNT_CONTEXT_CHANGED');
+ const synced=await createInventoryStore(ctx.db).applyObservation(verified.account,{
+  source:'GUARDED_PERCHANCE_READBACK',complete:true,accountId:account.accountId,
+  personaUid:account.personaUid,accountRevision:verified.account.revision,bindingVersion:1,
+  principalFingerprint:'a'.repeat(64),observationId:'inventory_j02_recovered',
+  observedAt:Date.now(),generators:[]});
+ assert.equal(synced.ok,true);
+ assert.equal((await accounts.confirmInventory(account.accountId,verified.account.revision)).ok,true);
+ const restored=await r.worker.step(ctx.id,current.record.revision);
+ assert.equal(restored.contextRefreshed,true);assert.deepEqual(r.ledger,[]);
+ for(let i=0;i<3;i++){
+  current=await ctx.store.getCreate(ctx.id);
+  const out=await r.worker.step(ctx.id,current.record.revision);
+  assert.equal(out.ok,true,JSON.stringify(out));
+ }
+ assert.deepEqual(r.ledger,['CREATE']);assert.equal(ctx.db.keys('operations').length,1);
 });

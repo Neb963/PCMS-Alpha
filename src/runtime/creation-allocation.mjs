@@ -40,15 +40,19 @@ export function selectS04Account({intent,accounts,inventory,pending}){
       return bad('PENDING_COUNT_UNVERIFIED');
     pendingCounts.set(item.accountId,pendingCounts.get(item.accountId)+1);
   }
-  // Preserve unavailable accounts' historical owned/pending counts, but
-  // never assign a *new* generator to an account whose protected identity
-  // and route are currently unavailable. A pinned unavailable account holds
-  // instead of silently rebinding to a different principal.
-  const ready=eligible.filter(a=>a.state==='VERIFIED');
+  // C36/C37: assignment is a durable plan, never effect admission. A
+  // temporarily unavailable account with confirmed inventory and a known
+  // original principal remains in NEW balancing; its work waits for current
+  // guarded identity/inventory before any provider effect.
+  const knownPrincipal=a=>/^[a-f0-9]{64}$/.test(a.boundPrincipal||'')||
+    (a.identity?.source==='GUARDED_SESSION_READBACK'&&
+     a.identity.bindingVersion===a.bindingVersion&&
+     /^[a-f0-9]{64}$/.test(a.identity.principalFingerprint||''));
+  if(eligible.some(a=>!knownPrincipal(a)))return bad('ACCOUNT_COUNT_UNVERIFIED');
   const candidates=intent.accountId?
-    ready.filter(a=>a.accountId===intent.accountId):ready;
+    eligible.filter(a=>a.accountId===intent.accountId):eligible;
   if(intent.accountId&&candidates.length!==1)return bad('PINNED_ACCOUNT_UNAVAILABLE');
-  if(!candidates.length)return bad('NO_VERIFIED_ACCOUNTS');
+  if(!candidates.length)return bad('NO_MANAGED_ACCOUNTS');
   const ranked=candidates.map(a=>({account:a,owned:owners.get(a.accountId),
     pending:pendingCounts.get(a.accountId)}))
     .sort((a,b)=>(a.owned+a.pending)-(b.owned+b.pending)||
