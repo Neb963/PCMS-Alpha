@@ -22,7 +22,7 @@ export function validateCatalogMessage(api,sender,message){
   if(!message||typeof message!=='object'||Array.isArray(message)||
       Object.keys(message).some(k=>!['type','params'].includes(k)))
     return fail('CAPABILITY_OFF');
-  const types=['SCAN_CATALOG','CONNECT_GIT','SCAN_CONNECTED','GIT_STATUS','DISCONNECT_GIT','RECONCILE_GIT','RECOVER_GIT_CONNECTION','APPROVE_IMPORT','GET_PROMPT_DRAFT','SAVE_PROMPT_DRAFT','COMMIT_PROMPT','RECONCILE_PROMPT','INSPECT_DECLARATION','LIST_READY'];
+  const types=['SCAN_CATALOG','CONNECT_GIT','SCAN_CONNECTED','GIT_STATUS','GET_CONNECTION_STATE','DISCONNECT_GIT','RECONCILE_GIT','RECOVER_GIT_CONNECTION','APPROVE_IMPORT','GET_PROMPT_DRAFT','SAVE_PROMPT_DRAFT','COMMIT_PROMPT','RECONCILE_PROMPT','INSPECT_DECLARATION','LIST_READY'];
   if(!types.includes(message.type))return fail('CAPABILITY_OFF');
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
@@ -112,6 +112,17 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
     const p=message.params||{};
     let stage='UNCLASSIFIED';
     try{
+      if(message.type==='GET_CONNECTION_STATE'){
+        // Read-only nonsecret status. A pending intent cannot be treated as
+        // no connection: it may follow an ambiguous browser-IDB credential write.
+        const configured=await readConfig();
+        const pending=(await api.storage.local.get(PENDING_KEY))?.[PENDING_KEY];
+        const validPending=validConfig(pending)?pending:null;
+        return {ok:true,configured:!!configured,interrupted:!!pending,
+          repository:configured?.repository||validPending?.repository||null,
+          canRecover:!!validPending,
+          credentialPresence:'NOT_CHECKED',remoteIdentityVerified:false};
+      }
       if(message.type==='LIST_READY')
         return createReadyStore(await (importDb ||= open())).list(p);
       if(message.type==='SCAN_CATALOG')
