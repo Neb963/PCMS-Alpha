@@ -1384,47 +1384,36 @@ def main():
                 print('B R4_PRIMARY_CREATION_AND_PROTECTED_SETTINGS_WITHOUT_LEGACY=PASS',flush=True)
                 execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=overview]').click();return true")
 
-                navigation=execute(after,"""const by=id=>document.getElementById(id);
-                  const original=by('pcms-backup-export');
-                  document.querySelector('[data-pcms-v014-open="generators:create"]').click();
-                  const create=document.querySelector('#view-generators [data-ui-group="create"]');
-                  const createShown=create?.getAttribute('aria-pressed')==='true'&&
-                    !by('pcms-supply-heading').closest('section.panel').hidden;
-                  document.querySelector('#view-settings [data-ui-group="diagnostics"]').click();
-                  const diagnosticsShown=!by('pcms-diagnostic-heading').closest('section.panel').hidden;
-                  document.querySelector('#view-settings [data-ui-group="backup"]').click();
-                  const backupPreserved=original===by('pcms-backup-export')&&
-                    !original.closest('section.panel').hidden;
-                  document.querySelector('#view-work-queue [data-ui-group="release"]').click();
-                  const releaseShown=!by('pcms-release-heading').closest('section.panel').hidden;
-                  document.querySelector('#view-generators [data-ui-group="inventory"]').click();
-                  const search=document.getElementById('pcms-v014-search');
-                  const shadow=document.getElementById('pcms-faithful-host').shadowRoot;
-                  const searchButton=shadow.querySelector('.top-search');
+                # A07: the operator uses a single primary workspace.
+                # Keep native donor maintenance separate; never open the hidden
+                # pre-A07 workflow DOM while navigating primary controls.
+                navigation=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-nav="generators"]').click();
+                  const generators=sh.querySelector('#page')?.dataset.view==='generators';
+                  sh.querySelector('[data-nav="settings"]').click();
+                  sh.querySelector('[data-settings="advanced"]').click();
+                  const advanced=sh.querySelector('.settings-main');
+                  const grant=[...advanced.querySelectorAll('button')]
+                    .find(x=>x.textContent.trim()==='Enable userScripts permission');
+                  const donor=[...advanced.querySelectorAll('button')]
+                    .some(x=>x.textContent.trim()==='PersonaMonkey settings');
+                  const noLegacyButton=![...advanced.querySelectorAll('button')]
+                    .some(x=>x.textContent.includes('Open protected recovery controls'));
+                  const searchButton=sh.querySelector('.top-search');
                   searchButton?.focus();
                   document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}));
-                  const overlay=shadow.querySelector('.overlay');
+                  const overlay=sh.querySelector('.overlay');
                   const visibleSearchFocused=!!overlay&&
-                    shadow.activeElement===overlay.querySelector('input[type=search]');
+                    sh.activeElement===overlay.querySelector('input[type=search]');
                   overlay?.querySelector('input[type=search]')?.dispatchEvent(
                     new KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true}));
-                  const escapeRestoresFocus=!shadow.querySelector('.overlay')&&
-                    shadow.activeElement===searchButton;
-                  shadow.querySelector('[data-nav="settings"]')?.click();
-                  shadow.querySelector('[data-settings="advanced"]')?.click();
-                  const advanced=[...shadow.querySelectorAll('#page button')]
-                    .find(x=>x.textContent.trim()==='Open protected recovery controls');
-                  advanced?.click();
-                  const nativeOpen=document.body.classList.contains('pcms-native-open');
-                  document.dispatchEvent(new KeyboardEvent('keydown',{key:'k',ctrlKey:true,bubbles:true}));
-                  const nativeSearchFocused=document.activeElement===search;
-                  document.getElementById('pcms-legacy-return')?.click();
-                  return {createShown,diagnosticsShown,backupPreserved,releaseShown,
-                    inventoryRestored:!by('generators-table-title').closest('section.panel').hidden,
-                    visibleSearchFocused,escapeRestoresFocus,nativeOpen,nativeSearchFocused,
-                    returnedToPrototype:!document.body.classList.contains('pcms-native-open')};""")
-                assert all(navigation.values()),navigation
-                print('B V014_INSTALLED_DESKTOP_NAVIGATION_AND_DOM_PRESERVATION=PASS',flush=True)
+                  const escapeRestoresFocus=!sh.querySelector('.overlay')&&
+                    sh.activeElement===searchButton;
+                  return {generators,permissionAction:!!grant,donor,noLegacyButton,
+                    visibleSearchFocused,escapeRestoresFocus,
+                    noHiddenController:!document.body.classList.contains('pcms-native-open')};""")
+                assert all(navigation.values()),('A07_PRIMARY_NAVIGATION',navigation)
+                print('B A07_DIRECT_PRIMARY_PERMISSION_AND_KEYBOARD_NAVIGATION=PASS',flush=True)
                 assert execute(after,"location.hash='#overview';return location.hash")=='#overview'
                 # The exact installed XPI must expose a read-only guarded
                 # background status; no valid status enables PCMS effects.
