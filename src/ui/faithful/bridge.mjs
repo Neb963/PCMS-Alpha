@@ -765,14 +765,14 @@ async function loadGenerators(){if(state.route!=='generators')return;
   state.lastAccountList=accountsResult?.ok&&Array.isArray(accountsResult.accounts)?accountsResult.accounts:state.lastAccountList;
   state.gen.items=Array.isArray(res.items)?res.items:[];state.gen.total=safeCount(res.total)=== '—'?0:res.total;
   state.errors.generators='';displayGenerators();
- }catch(err){if(epoch!==state.renderEpoch)return;state.errors.generators=err.message;state.gen.items=[];state.gen.total=0;rowsError('.workspace-surface table tbody','Local inventory unavailable: '+err.message+'. No remote absence inferred.',6)}
+ }catch(err){if(epoch!==state.renderEpoch)return;state.errors.generators=err.message;state.gen.items=[];state.gen.total=0;rowsError('.workspace-surface table tbody','Local inventory unavailable: '+err.message+'. No remote absence inferred.',7)}
 }
 function updateGeneratorSelection(){
  if(state.route!=='generators')return;
  const selected=generatorSelection.status(),bar=shadow('[data-generator-selection]');
  if(bar){bar.hidden=selected.count===0&&!selected.error;
   const count=bar.querySelector('[data-selection-count]');if(count)count.textContent=selected.count+' selected across pages';
-  const error=bar.querySelector('[data-selection-error]');if(error){error.textContent=selected.error||'';error.hidden=!selected.error}}
+  const error=bar.querySelector('[data-selection-error]');if(error){error.textContent=selected.error||(selected.saving?'Saving selection…':'');error.hidden=!selected.error&&!selected.saving}}
  for(const checkbox of root.querySelectorAll('[data-generator-select]')){
   const item=state.gen.items.find(x=>x.slug===checkbox.dataset.generatorSelect);
   if(item)checkbox.checked=generatorSelection.includes(item);
@@ -803,7 +803,7 @@ function openGeneratorSelection(){
  status.setAttribute('role','status');const actions=el('div','form-foot'),list=el('div'),pager=el('div','pagination-actions');
  body.append(status,actions,list,pager);dialog.append(header,body);overlay.append(dialog);root.append(overlay);
  let rows=[],offset=0,busy=false;const size=25;
- function draw(){
+ function draw(focusLabel=null){
   list.replaceChildren();pager.replaceChildren();
   for(const item of rows.slice(offset,offset+size)){
    const frozen=targets.find(x=>x.slug===item.slug),row=el('section','setting-note');
@@ -821,11 +821,13 @@ function openGeneratorSelection(){
      })().catch(()=>notify('Account state could not be read.'))));
    }
    row.append(b('Remove from selection',()=>{void generatorSelection.remove(item.slug);
-    rows=rows.filter(x=>x.slug!==item.slug);if(offset>=rows.length)offset=Math.max(0,offset-size);draw()}));list.append(row);
+    rows=rows.filter(x=>x.slug!==item.slug);if(offset>=rows.length)offset=Math.max(0,offset-size);draw('Previous')}));list.append(row);
   }
   const back=b('Previous',()=>{offset=Math.max(0,offset-size);draw()});back.disabled=offset===0;
-  const next=b('Next',()=>{offset+=size;draw()});next.disabled=offset+size>=rows.length;
+  const next=b('Next',()=>{offset+=size;draw('Next')});next.disabled=offset+size>=rows.length;
   pager.append(back,el('span','',String(rows.length?offset+1:0)+'–'+Math.min(offset+size,rows.length)+' of '+rows.length),next);
+  if(focusLabel){const buttons=[...pager.querySelectorAll('button:not(:disabled)')];
+   (buttons.find(b=>b.textContent===focusLabel)||buttons[0])?.focus({preventScroll:true})}
  }
  const sync=b('Sync selected accounts',()=>void (async()=>{
   if(busy)return;busy=true;sync.disabled=true;status.textContent='Synchronizing the selected accounts…';
@@ -864,7 +866,7 @@ function displayGenerators(){if(state.route!=='generators')return;
  const accountsMap=new Map(state.lastAccountList.map(a=>[a.accountId,a]));const itemList=[...state.gen.items];
  // Server already sorted the complete matching fleet before slicing.
  state.gen.visibleItems=itemList;
- if(!itemList.length){rowsError('.workspace-surface table tbody',state.errors.generators?'Local inventory unavailable.': 'No matching local generator observations.',6)}
+ if(!itemList.length){rowsError('.workspace-surface table tbody',state.errors.generators?'Local inventory unavailable.': 'No matching local generator observations.',7)}
  for(const [i,item] of itemList.entries()){
   const tr=tableRow([item.slug],i);
   const selectCell=el('td','generator-select-cell'),checkbox=el('input');checkbox.type='checkbox';
