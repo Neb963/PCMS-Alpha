@@ -121,3 +121,21 @@ test('J03 same-head intake revisits an identity-held item after a real choice re
  const released=await intake.run(c,{heldSlugs:[]});assert.equal(released.added,1);assert.equal(released.ok,true);
  assert.equal((await intake.run(c)).added,0,'a complete unheld head is not resubmitted');
 });
+
+test('J03 changed initial item skipped for identity review remains visibly reapprovable after intake completion',async()=>{
+ const {db}=await seed(),c=catalog(['held-initial']),local=storage({pcmsS03Git:cfg}),api={runtime,storage:{local},alarms:{create:async()=>{}}};
+ const plan=await buildImportPreview(db,c),scopeDigest=await getImportScopeDigest(c);
+ await createImportApprovalStore(db).approve({...cfg,head:c.head,scopeDigest,recognizedSlugs:['held-initial'],approvalAt:1,planDigest:plan.planDigest,targets:plan.targets,reviewedSources:c.generators.map(g=>({slug:g.slug,markerOid:g.markerOid,folderTreeOid:null}))});
+ const intake=createCreationCatalogIntake(api,{open:async()=>db});assert.equal((await intake.run(c,{heldSlugs:['held-initial']})).held,1);
+ const changed={...c,head:'e'.repeat(40),generators:c.generators.map(g=>({...g,folderTreeOid:'f'.repeat(40)}))};
+ assert.equal((await buildImportPreview(db,changed)).initialReviewRequired,true);
+ const boundary=createCatalogBoundary(api,{open:async()=>db,scan:async()=>changed,native:async()=>({ok:true,credential:'test-credential-only'})});
+ const review=await boundary.run({type:'SCAN_CONNECTED'},sender);assert.equal(review.importStatus,'IMPORT_SCOPE_CHANGED_REVIEW_REQUIRED');
+ assert.equal((await boundary.run({type:'APPROVE_IMPORT',params:{repositoryId:'42',scopeDigest:review.preview.scopeDigest,planDigest:review.preview.planDigest,expectedRevision:review.approvalRevision}},sender)).ok,true);
+ assert.equal((await intake.run(changed)).added,1);
+ // Once an ordinary resource is complete, later READY edits use deployment
+ // intake rather than asking for the initial import again.
+ const key=db.keys('meta').find(k=>k.startsWith('s00-create-intent:')),record=db.read('meta',key).record;
+ await put(db,[{key,record:{...record,state:'ASSOCIATED_NOT_READY'}}]);
+ assert.equal((await buildImportPreview(db,{...changed,generators:changed.generators.map(g=>({...g,folderTreeOid:'a'.repeat(40)}))})).initialReviewRequired,false);
+});
