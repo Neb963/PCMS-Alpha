@@ -46,7 +46,12 @@ test('canonical primary controls call protected typed runtime with exact revisio
  assert.match(bridge,/readPort\('pcms-i05-source','INSPECT_SOURCE'/);
  assert.match(bridge,/readPort\('pcms-i07-adoption','CAPTURE_ADOPTION'/);
  assert.match(bridge,/mount\(\)\.catch/);
- assert.equal((bridge.match(/\binnerHTML\s*=/g)||[]).length,2,'only static bundled shell and selected local template may be parsed as HTML');
+ assert.equal((bridge.match(/\\binnerHTML\\s*=/g)||[]).length,4,
+   'only versioned, repository-bundled shell and static primary templates may be parsed as HTML');
+ assert.match(bridge,/tpl\.innerHTML=portableRestoreTemplate/);
+ assert.match(bridge,/tpl\.innerHTML=diagnosticTemplate/);
+ assert.match(bridge,/mountPortableRestore\(section\)/);
+ assert.match(bridge,/mountDiagnosticController\(section\)/);
  assert.match(bridge,/template\.innerHTML=html/);
  assert.match(bridge,/const route=state\.route,html=templates\.get\(route\)/);
  assert.match(bridge,/root\.innerHTML=assets\['symbols\.html'\]\+assets\['shell\.html'\]/);
