@@ -1,6 +1,6 @@
 # A09 — Existing-evidence reuse map and unresolved acceptance
 
-**Classification:** Evidence inventory, not a list of completed AC journeys. Product authority is Client Amendment v1.0.1, accepted AC-01–AC-18 and T-01–T-10. The original audit descriptions for X-01–X-14 are absent from merged main; only the expressly labeled *derived* `tests/fixtures/a01-recovery-scenarios.json` mapping is available.
+**Classification:** Evidence inventory, not a list of completed AC journeys. Product authority is Client Amendment v1.0.1, accepted AC-01–AC-18 and T-01–T-10. The original X-01–X-14 scenario descriptions were recovered from the attached Part 8 audit report and are preserved verbatim in `docs/audit/PART8-ORIGINAL-X01-X14.md`, with a SHA-256-pinned table. The A01 mapping remains a *derived* grouping only; its old topic names must not override the recovered original scenario names or tier rules.
 
 **Baseline accepted engineering candidate before A09:** A08 merged `main` `3bf6635841182203c5c3b4ff72bdf2816abc4594`, tree `5096cf5c123c0528c9706acc77dc047f91d5d885`, [postmerge Actions run 40088006348](https://github.com/Neb963/PCMS-Alpha/actions/runs/40088006348), all four required jobs SUCCESS. A08 packaged XPI version 1.2.5, Gecko ID `persona-route-manager@local`; recorded XPI SHA-256 `97ca33b880146685362310c1b9c6e029ca169babc55385913f3cbeaac9c01551`. Do not import a historical result into A09 without matching current XPI bytes/interfaces, source identity and test assumptions.
 
@@ -27,4 +27,4 @@ One authorized disposable account pair, one new private generator, one controlle
 
 ## Cutover / release no-go
 
-The release stays **HELD**, even if all code CI jobs are green, until missing original X narratives and necessary real H/GIT/L and accessibility/source-identity evidence are independently observed and accepted. Current passable code may be merged as an engineering checkpoint, not described as fully live-accepted. Historical I17 uncertain resource is permanently quarantined from automatic CREATE/RENAME.
+The release stays **HELD**, even if all code CI jobs are green, until necessary scenario-specific D/B/H/GIT/L and accessibility/source-identity evidence are independently observed and accepted. Current passable code may be merged as an engineering checkpoint, not described as fully live-accepted. Historical I17 uncertain resource is permanently quarantined from automatic CREATE/RENAME.
