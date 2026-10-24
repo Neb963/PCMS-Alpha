@@ -17,7 +17,7 @@ export function createLocalSourceReview(db,{stageFactory=createStagingStore,aiFa
  async function snapshot(slug,historyRevision){
   const [stage,job]=await Promise.all([stageFactory(db).getFull(slug),aiFactory(db).getJobFull(slug)]);
   if(!stage.ok)return fail('REVIEW_STAGE_UNAVAILABLE');
-  let r=stage.record,j=job.ok&&job.job.stageRevision===r.revision?job.job:null;
+  let r=stage.record,j=job.ok&&(job.job.stageRevision===r.revision||job.job.stageRevision===r.handoffParentRevision)?job.job:null;
   if(historyRevision!==undefined){
    const archived=await read('ai-history:'+slug+':'+historyRevision);j=archived?.job;
    if(j?.slug!==slug||j.revision!==historyRevision)return fail('REVIEW_HISTORY_NOT_FOUND');

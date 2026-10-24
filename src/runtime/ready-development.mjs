@@ -34,6 +34,7 @@ export function planReadyDevelopment({ready,stage,existing,job,exception,
   return fail(r.hold||'AI_OPERATOR_PAUSED');
  }
  if(!candidate)return fail('S05_READY_NO_CURRENT_CANDIDATE');
+ if(stage?.record?.humanReclaimPending)return fail('S06_HUMAN_EDITOR_RECLAIM_PENDING');
  // A newer candidate never steals an in-flight old writer. First reconcile
  // any possible dispatch. Once the old helper is observed running, request
  // exactly one guarded STOP, then wait for independent saved-F idle proof.

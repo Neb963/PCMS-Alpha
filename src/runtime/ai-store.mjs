@@ -427,6 +427,7 @@ export function createAiStore(db){
         if(!j){done(fail('AI_JOB_NOT_FOUND'));return;}
         if(j.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
         if(j.native?.state==='DISPATCH_POSSIBLE'){done(fail('AI_EFFECT_RECONCILIATION_REQUIRED'));return;}
+        if(j.executionSlotReleased&&step!=='STOP'){done(fail('AI_EXECUTION_SLOT_RELEASED'));return;}
         const decision=evaluation(j);
         if(step==='CHAT1_SEND'&&
            (j.chat1.sessionDigest!==null||j.native))

@@ -2,7 +2,7 @@
 // function on the exact donor-guarded, PCMS-owned #edit tab. Page and model
 // replies are untrusted; none of these return values is independent test PASS.
 // Do not call outside the guarded overlay's verified tab and donor lease.
-export async function perchanceAiNative(request){
+export async function perchanceAiNative(request,{allowHumanRead=false}={}){
   const hold=code=>({ok:false,code});
   const slug=request?.slug,action=request?.action,nonce=request?.nonce;
   if(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)||
@@ -48,7 +48,7 @@ export async function perchanceAiNative(request){
        window.saveCheckpointManager.isDivergenceBlocked()!==false)
       return hold('NATIVE_EDITOR_OR_OWNER_UNVERIFIED');
     const host=document.getElementById('pcms-alpha-editor-context');
-    if(host?.dataset?.pcmsHumanIntent==='true')return hold('HUMAN_EDITOR_HOLD');
+    if(host?.dataset?.pcmsHumanIntent==='true'&&!(allowHumanRead&&action==='OBSERVE'))return hold('HUMAN_EDITOR_HOLD');
     const get=id=>document.getElementById(id);
     const send=get('aiAgentSendBtn'),stop=get('aiAgentStopBtn'),
       newChat=get('aiAgentNewChatBtn'),input=get('aiAgentInputEl'),

@@ -2,6 +2,7 @@ import {matchesReviewGroup} from '../review-queue-state.mjs';
 import {renderGitInventory,mountGitPromptEditor} from './git-workspace.mjs';
 import {createSourceWorkspace} from './source-workspace.mjs';
 import {mountSourceComparison,mountSourceHistory} from './source-comparison.mjs';
+import {mountHumanRecovery,mountExceptionalReview} from './candidate-recovery.mjs';
 import {createGeneratorBatches} from './generator-batches.mjs';
 import {createGeneratorSelection} from './generator-selection.mjs';
 import {createAccountsWorkspace,accountGrowthAdvice,accountNeedsAttention} from './accounts-workspace.mjs';
@@ -1095,6 +1096,9 @@ async function openReleaseReview(slug){
  }else body.append(el('p','setting-note','Saved source is not available for comparison yet.'));
  mountSourceHistory({container:body,slug,el,b,request:(type,params)=>readPort('pcms-i13-release',type,params,30000)});
  body.append(b('Refresh review',()=>{close();void openReleaseReview(slug)}));
+ const recover={container:body,slug,el,b,request:(type,params)=>readPort('pcms-i13-release',type,params,95000),onChanged:()=>{close();void openReleaseReview(slug)}};
+ await Promise.all([mountHumanRecovery(recover),mountExceptionalReview(recover)]);
+ if(!overlay.isConnected)return;
  let persisted;
  try{persisted=await releaseCommand('GET',{slug});}catch{persisted=null;}
  if(persisted?.ok&&persisted.state==='CONFIRMED_PUBLIC'){

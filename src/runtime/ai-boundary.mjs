@@ -184,6 +184,7 @@ export function createAiBoundary(api,{
         if(job.revision!==p.expectedRevision)return fail('STALE_REVISION');
         if(job.operatorPaused&&message.type!=='PROBE_NATIVE'&&!(message.type==='BEGIN_NATIVE'&&p.step==='STOP'))return fail('AI_OPERATOR_PAUSED');
         const stage=await stageFactory(db).getFull(p.slug);
+        if(stage?.record?.humanReclaimPending)return fail('S06_HUMAN_EDITOR_RECLAIM_PENDING');
         if(!stage.ok||stage.record.state!=='SOURCE_VERIFIED'||
            stage.record.revision!==job.stageRevision)return fail('AI_STAGE_CONTEXT_CHANGED');
         const r=stage.record,g=guard();

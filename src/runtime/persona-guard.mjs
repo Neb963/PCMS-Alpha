@@ -25,7 +25,7 @@ export async function cachedHealthDomain(evidence){
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
-  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, inspectNoEditorTabs, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, refresherCleanupTab, readRuntimeWitness, enrollmentDonor, renameSafety=defaultRenameSafety,renameAuthority=()=>standingS06?.gate('development')===true,renameAuthorityGeneration=()=>standingS06?.policyGeneration(), pinGate = inspectRoutePin }) {
+  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, humanReviewTab, inspectNoEditorTabs, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, refresherCleanupTab, readRuntimeWitness, enrollmentDonor, renameSafety=defaultRenameSafety,renameAuthority=()=>standingS06?.gate('development')===true,renameAuthorityGeneration=()=>standingS06?.policyGeneration(), pinGate = inspectRoutePin }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -284,6 +284,15 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     finally{await releaseConflictGuard(leased);}
   }
 
+  async function humanReview(personaUid,request){
+    if(typeof humanReviewTab!=='function')return {ok:false,code:'HUMAN_EDITOR_BRIDGE_UNAVAILABLE'};
+    const leased=await acquireConflictGuard(personaUid);if(!leased?.ready||!leased.leaseId)return {ok:false,code:leased?.code||'GUARD_UNAVAILABLE'};
+    try{if(!(await inspectOwnedAction(leased)).ready)return {ok:false,code:'HUMAN_EDITOR_LEASE_CHANGED'};
+      const out=await humanReviewTab(leased,request);
+      return (await inspectOwnedAction(leased)).ready?out:{ok:false,code:'HUMAN_EDITOR_POST_GUARD_CHANGED'};
+    }catch{return {ok:false,code:'HUMAN_EDITOR_OUTCOME_UNVERIFIED'}}finally{await releaseConflictGuard(leased)}
+  }
+
   // I10 native AI executes only through the existing donor control lease.
   // Return packets describe observations/attempts, not independent test PASS.
   async function runNativeAiStep(personaUid,request){
@@ -404,6 +413,9 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     runRefresherStep,
     closeRefresherTab,
     inspectStageEditor,
+    inspectHumanReview:(personaUid,slug,nonce)=>humanReview(personaUid,{slug,nonce,action:'OBSERVE'}),
+    openHumanReview:(personaUid,slug,nonce)=>humanReview(personaUid,{slug,nonce,action:'OPEN'}),
+    reclaimHumanReview:(personaUid,slug,nonce,fingerprint)=>humanReview(personaUid,{slug,nonce,fingerprint,action:'RECLAIM'}),
     inspectSourceEditorIdle,
     releaseStagingTab,
     listAvailablePersonas,
