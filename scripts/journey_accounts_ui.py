@@ -33,7 +33,7 @@ def wait(session, expression, label, seconds=35):
 
 
 def click(session, selector):
-    node=b.execute(session,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector("+json.dumps(selector)+")")
+    node=b.execute(session,"const e=document.getElementById('pcms-faithful-host').shadowRoot.querySelector("+json.dumps(selector)+");if(e)e.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});return e")
     assert node and ELEMENT in node,("J01_CLICK_TARGET_MISSING",selector,node)
     b.call("POST",f"/session/{session}/element/{node[ELEMENT]}/click",{})
 
@@ -320,6 +320,7 @@ def run(browser, archive, folder):
         if session:
             try:capture(session,"failure",evidence)
             except Exception as capture_error:evidence["capture_error"]=str(capture_error)
+        print("B J01_FAILURE_CONTEXT="+json.dumps(evidence.get("failure",evidence))[:12000],flush=True)
         pathlib.Path("build/j01-ui-evidence.json").write_text(json.dumps(evidence,indent=2))
         raise
     finally:
