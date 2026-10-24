@@ -28,7 +28,8 @@ def wait(session, expression, label, seconds=35):
         last=b.execute(session,"const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;return "+expression)
         if last:return last
         time.sleep(.15)
-    raise AssertionError((label,last))
+    context=b.execute(session,"const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;return {page:sh?.querySelector('#page')?.innerText?.slice(0,4000),dialog:sh?.querySelector('.account-dialog')?.innerText?.slice(0,4000)}")
+    raise AssertionError((label,last,context))
 
 
 def click(session, selector):
@@ -289,6 +290,12 @@ def run(browser, archive, folder):
         print("B J01_PRIMARY_LEGACY_UPGRADE_LIMITED_EXCEPTION_AND_REMOVAL_SCOPE=PASS; PROVIDERS=OFFLINE_FIXTURES",flush=True)
 
         pathlib.Path("build/j01-ui-evidence.json").write_text(json.dumps(evidence,indent=2))
+    except Exception:
+        if session:
+            try:capture(session,"failure",evidence)
+            except Exception as capture_error:evidence["capture_error"]=str(capture_error)
+        pathlib.Path("build/j01-ui-evidence.json").write_text(json.dumps(evidence,indent=2))
+        raise
     finally:
         if session:b.close(session)
 
