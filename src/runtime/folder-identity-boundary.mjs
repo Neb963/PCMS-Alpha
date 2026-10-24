@@ -1,3 +1,4 @@
+import {catalogWatcher} from './catalog-watch.mjs';
 // R4: exact-scope identity review after a complete pinned main observation.
 // A decision is not an owner, rename, publication, or effect receipt.
 import {trustedExtensionPage} from './command-boundary.mjs';
@@ -12,9 +13,10 @@ const fail=code=>({ok:false,code});
 export function validateIdentityMessage(api,sender,message){
  if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
  if(!message||typeof message!=='object'||Array.isArray(message)||
-   !['LIST','CHOOSE','GET_RENAME_ATTEMPT','PREPARE_RENAME','EXECUTE_RENAME','RECONCILE_RENAME','FINALIZE_RENAME','RUN_RENAME_JOB'].includes(message.type)||
+   !['LIST','CHOOSE','GET_RENAME_ATTEMPT','PREPARE_RENAME','EXECUTE_RENAME','RECONCILE_RENAME','FINALIZE_RENAME','RUN_RENAME_JOB','REFRESH_REVIEW'].includes(message.type)||
    Object.keys(message).some(k=>!['type','params'].includes(k)))return fail('INVALID_MESSAGE');
  const p=message.params||{};
+ if(message.type==='REFRESH_REVIEW'){return p&&typeof p==='object'&&!Array.isArray(p)&&Object.keys(p).length===2&&SLUG.test(p.newSlug||'')&&Number.isSafeInteger(p.expectedRevision)&&p.expectedRevision>0?{ok:true}:fail('INVALID_PARAMS');}
  if(['GET_RENAME_ATTEMPT','RUN_RENAME_JOB'].includes(message.type)){
   return typeof p==='object'&&!Array.isArray(p)&&
     Object.keys(p).length===1&&SLUG.test(p.newSlug||'')?{ok:true}:fail('INVALID_PARAMS');
@@ -40,7 +42,7 @@ export function validateIdentityMessage(api,sender,message){
    return fail('INVALID_PARAMS');
  return {ok:true};
 }
-export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=null}={}){
+export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=null,refreshMain=()=>catalogWatcher?.tick()}={}){
  const sentinel=createRestoreSentinel(api.storage.local);
  const existingRename=renameService||createExistingRenameService(api,{clock});
  const ALARM='pcms-r4-identity-followup';let ticking=null;
@@ -48,6 +50,28 @@ export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=n
  async function dispatch(message,sender){
   const a=validateIdentityMessage(api,sender,message);if(!a.ok)return a;
   if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+  if(message.type==='REFRESH_REVIEW'){
+    if(busy||ticking)return fail('REVIEW_BUSY');busy=true;
+    try{
+      const synced=await refreshMain();if(synced?.ok!==true)return fail('GIT_MAIN_UNAVAILABLE');
+      const data=await api.storage.local.get([LAST,REVIEW_KEY,CONFIG,'pcmsR4ExistingRenameAttempt:'+message.params.newSlug]);
+      const rows=data[REVIEW_KEY]||[],review=rows.find(r=>r.newSlug===message.params.newSlug),snapshot=data[LAST],attempt=data['pcmsR4ExistingRenameAttempt:'+message.params.newSlug];
+      if(!review||review.revision!==message.params.expectedRevision||snapshot?.complete!==true||snapshot.repositoryId!==data[CONFIG]?.repositoryId)return fail('REVIEW_REVISION_CHANGED');
+      const target=snapshot.generators.find(g=>g.slug===review.newSlug);
+      if(!target||review.oldSlug&&snapshot.generators.some(g=>g.slug===review.oldSlug))return fail('ORIGINAL_FOLDER_PRESENT_REVIEW_REQUIRED');
+      if(attempt&&['DISPATCH_POSSIBLE','OUTCOME_UNCERTAIN'].includes(attempt.state))return fail('RENAME_READBACK_REQUIRED');
+      if(attempt&&!['RENAME_PREPARED','REMOTE_RENAME_VERIFIED_LINK_PENDING'].includes(attempt.state))return fail('RENAME_STAGE_NOT_ADMISSIBLE');
+      const linked=attempt?.state==='REMOTE_RENAME_VERIFIED_LINK_PENDING';
+      const next={...review,newTreeOid:target.folderTreeOid,markerOid:target.markerOid,evidenceHead:snapshot.head,revision:review.revision+1,
+        state:linked?'RENAME_EXISTING_REQUESTED':'REVIEW_REQUIRED',automaticRenameApproved:linked,sourceReviewAt:clock()};
+      const patch={[REVIEW_KEY]:rows.map(r=>r===review?next:r)};
+      if(attempt){patch['pcmsR4ExistingRenameHistory:'+review.newSlug+':'+attempt.revision]=attempt;
+        patch['pcmsR4ExistingRenameAttempt:'+review.newSlug]=linked?{...attempt,folderTreeOid:target.folderTreeOid,markerOid:target.markerOid,revision:attempt.revision+1,sourceReviewAt:clock()}:null;}
+      await api.storage.local.set(patch);
+      if(linked)try{await api.alarms.create(ALARM+'-soon',{when:clock()+500});}catch{}
+      return {ok:true,code:linked?'RENAMED_SOURCE_SCOPE_REVIEWED':'SOURCE_SCOPE_READY_FOR_REVIEW',providerEffects:'NONE'};
+    }catch{return fail('REVIEW_REFRESH_UNAVAILABLE')}finally{busy=false}
+  }
   if(message.type==='RUN_RENAME_JOB')return tick(message.params.newSlug);
   if(message.type==='GET_RENAME_ATTEMPT'){
     try{
@@ -83,7 +107,7 @@ export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=n
         reason:r.reason,stale:plan.stale.includes(r.newSlug)})),
       missingFolders:(await api.storage.local.get('pcmsR4MissingGitFolders'))
         ?.pcmsR4MissingGitFolders?.slugs||[]};
-  if(busy)return fail('REVIEW_BUSY');
+  if(busy||ticking)return fail('REVIEW_BUSY');
   busy=true;
   try{
    const p=message.params;
@@ -117,6 +141,7 @@ export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=n
   finally{busy=false;}
  }
  async function performTick(onlySlug){
+  if(busy)return fail('REVIEW_BUSY');
   if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
   const rows=(await api.storage.local.get(REVIEW_KEY))?.[REVIEW_KEY]||[];
   const candidates=rows.filter(r=>r.state==='RENAME_EXISTING_REQUESTED'&&r.automaticRenameApproved===true&&(!onlySlug||r.newSlug===onlySlug));

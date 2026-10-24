@@ -111,3 +111,13 @@ test('J03 uncertain source drift survives readback, exact account refresh, and r
  assert.equal(recovered.record.state,'PRIVATE_EMPTY_CONFIRMED');assert.equal(recovered.record.createOperationId,original.createOperationId);assert.equal(recovered.record.remoteId,'public_created');
  const unreviewed=coalesceCreation(original,{type:'GITHUB_MAIN',intentId:'unreviewed_same_revision',witness:{...witness,markerOid:'b'.repeat(40),initialImport:{...original.sources[0].initialImport,folderTreeOid:'e'.repeat(40)}}});assert.equal(unreviewed.ok,false);
 });
+
+test('J03 same-head intake revisits an identity-held item after a real choice releases it',async()=>{
+ const {db}=await seed(),c=catalog(['later-folder']),local=storage({pcmsS03Git:cfg});
+ const scopeDigest=await getImportScopeDigest(c),plan=await buildImportPreview(db,c);
+ await createImportApprovalStore(db).approve({...cfg,head:c.head,scopeDigest,recognizedSlugs:['later-folder'],approvalAt:1,planDigest:plan.planDigest,targets:plan.targets,reviewedSources:c.generators.map(g=>({slug:g.slug,markerOid:g.markerOid,folderTreeOid:null}))});
+ const intake=createCreationCatalogIntake({storage:{local}},{open:async()=>db});
+ const held=await intake.run(c,{heldSlugs:['later-folder']});assert.equal(held.held,1);assert.equal(held.added,0);
+ const released=await intake.run(c,{heldSlugs:[]});assert.equal(released.added,1);assert.equal(released.ok,true);
+ assert.equal((await intake.run(c)).added,0,'a complete unheld head is not resubmitted');
+});

@@ -118,6 +118,8 @@ jobs:
             build/j01-ui-evidence.json
             build/j02-*.png
             build/j02-ui-evidence.json
+            build/j03-*.png
+            build/j03-ui-evidence.json
           if-no-files-found: ignore
           retention-days: 14
   pcms-required:

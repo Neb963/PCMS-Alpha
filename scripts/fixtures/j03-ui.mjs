@@ -33,7 +33,7 @@ export async function installGitFixture({empty=false}={}){
  });await persist()}
  const network=async(...args)=>{try{return await model.transport(...args)}finally{if(args[1]?.method!=='GET')await persist()}};
  let providerGuard=null;
- await installGeneratorFixture({
+ await installGeneratorFixture({externalPolicy:true,
   createGit:(api,options)=>{providerGuard=options.guard();return createS04GitContinuation(api,{...options,scan:o=>scanMainCatalog(o,network),transport:network})},
   createImportGuard:api=>createInitialImportGuard(api,{inspect:o=>inspectCurrentImportItem(o,network)})
  });
@@ -61,8 +61,8 @@ export async function installGitFixture({empty=false}={}){
  const rename=createExistingRenameService(api,{open,guard:()=>renameGuard,developmentGate:()=>standingS06.gate('development'),
   verifyGitIdentity:createRenameGitVerifier(api,{inspectItem:o=>inspectCurrentImportItem(o,network)}),
   linkRenamed:createRenamedIdentityLinker(api,{open,guard:()=>renameGuard,inspect:o=>inspectGitSource(o,network),inspectItem:o=>inspectCurrentImportItem(o,network)})});
- const identity=createFolderIdentityBoundary(api,{renameService:rename});
- const watcher=createCatalogWatcher(api,{scan:scanMainCatalog,network,native:browserGitCredentialPacket,incidents:async()=>{},
+ let watcher;const identity=createFolderIdentityBoundary(api,{renameService:rename,refreshMain:()=>watcher.tick()});
+ watcher=createCatalogWatcher(api,{scan:scanMainCatalog,network,native:browserGitCredentialPacket,incidents:async()=>{},
   ingestComplete:createCreationCatalogIntake(api,{open}).run,ingestReady:createReadyIntake(api,{open}).run});
  const commands=[],original=browser.runtime.connect.bind(browser.runtime),boundaries=new Map([
   ['pcms-s03-catalog',catalog.run],['pcms-i05-source',source.run],['pcms-i02-canonical-readonly',canonical.dispatch],['pcms-r4-folder-identity',identity.dispatch]]);
@@ -70,11 +70,12 @@ export async function installGitFixture({empty=false}={}){
  browser.runtime.connect=function(...args){const name=args.at(-1)?.name;if(!boundaries.has(name))return original(...args);
   const handlers=new Set(),disconnected=new Set();let closed=false;
   return {onMessage:{addListener:fn=>handlers.add(fn)},onDisconnect:{addListener:fn=>disconnected.add(fn)},disconnect(){closed=true},
-   postMessage(msg){Promise.resolve(boundaries.get(name)(msg,sender)).then(out=>{commands.push({type:msg.type,ok:out?.ok,code:out?.code});if(!closed)for(const fn of handlers)fn(out)}).catch(()=>{if(!closed)for(const fn of disconnected)fn()})}};
+   postMessage(msg){Promise.resolve().then(async()=>{await standingS06.state();return boundaries.get(name)(msg,sender)}).then(out=>{commands.push({type:msg.type,ok:out?.ok,code:out?.code});if(!closed)for(const fn of handlers)fn(out)}).catch(()=>{if(!closed)for(const fn of disconnected)fn()})}};
  };
  window.__j03={async inspect(){return {git:structuredClone(model.state),provider:await window.__j02.inspect(),commands:structuredClone(commands),policy:await standingS06.state()}},
   async tick(n=1){for(let i=0;i<n;i++){await watcher.tick();await identity.tick();await window.__j02.tick(4)}await persist();return this.inspect()},
   async moveFolder(oldSlug,newSlug){const changes={};for(const [path,oid] of Object.entries(model.paths()))if(path.startsWith('generators/'+oldSlug+'/')){changes[path]=null;changes[path.replace('generators/'+oldSlug+'/','generators/'+newSlug+'/')]=Uint8Array.from(atob(model.state.blobs[oid].content),c=>c.charCodeAt(0));}await model.merge(changes,'external reviewed folder rename');await persist();return true},
+  async renameStep(slug){await standingS06.state();return identity.tick(slug)},
   async merge(files,message){await model.merge(files,message);await persist();return model.state.head},
   async loseNextRef(){model.state.loseNextRef=true;await persist();return true},
   async clearRepository(){model.state.head=null;await persist();return true},

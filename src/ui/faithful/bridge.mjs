@@ -855,7 +855,13 @@ function displayQueue(){
       ' is no longer recognized. The live generator is unchanged.'));
     if(review.stale){
       content.append(el('p','setting-note',
-        'The Git source changed after this review began. Refresh the catalog before choosing.'));
+        'The Git source changed. Review its current files before continuing.'));
+      content.append(b('Browse current source',()=>openSourceManager({slug:review.newSlug}),'btn small'),b('Update source review',()=>void(async()=>{
+        try{const out=await readPort('pcms-r4-folder-identity','REFRESH_REVIEW',{newSlug:review.newSlug,expectedRevision:review.revision},120000);
+         if(!out.ok)notify(out.code==='RENAME_READBACK_REQUIRED'?'Check the pending rename result before changing its source review.':'Source review could not be updated. The original identity and source are preserved.');await loadQueue(true);
+        }catch{notify('GitHub is unavailable. The current review is preserved.')}
+      })(),'btn small'),b('Check rename result',()=>void(async()=>{try{await readPort('pcms-r4-folder-identity','RUN_RENAME_JOB',{newSlug:review.newSlug},120000);await loadQueue(true)}catch{notify('Rename readback is unavailable. No rename was repeated.')}})(),'btn small'));
+
     }else if(review.state==='RENAME_EXISTING_REQUESTED'){
       const note=el('p','setting-note','Checking rename progress…'),actions=el('div','form-foot');content.append(note,actions);
       void (async()=>{try{const attempt=await readPort('pcms-r4-folder-identity','GET_RENAME_ATTEMPT',{newSlug:review.newSlug},15000);if(!row.isConnected)return;
@@ -2126,7 +2132,11 @@ function renderSettingsSection(){if(state.route!=='settings')return;
 }
 function displayRouteScaffold(){
  if(state.route==='overview')displayOverview();
- if(state.route==='work-queue'){displayQueue();void loadQueue(true);}
+ if(state.route==='work-queue'){
+  const input=shadow('#queue-search');if(input)input.value=state.queue.query;
+  for(const tab of root.querySelectorAll('[data-filter^="queue:"]')){const active=tab.dataset.filter==='queue:'+state.queue.filter;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;}
+  displayQueue();void loadQueue(true);
+ }
  if(state.route==='generators'){
   const select=shadow('#generator-account');if(select)select.value=state.gen.account;
   const q=shadow('#generator-search');if(q)q.value=state.gen.query;

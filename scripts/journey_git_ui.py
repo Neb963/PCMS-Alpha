@@ -7,7 +7,14 @@ import base64,json,os,pathlib,subprocess,sys,tempfile,time
 from urllib.request import urlopen
 import journey_generators_ui as g
 b=g.b;a=g.a
-click=g.click;click_text=g.click_text;fill=g.fill;wait=g.wait
+click=g.click;click_text=g.click_text;fill=g.fill
+
+def wait(s,expression,label,seconds=45):
+    try:return g.wait(s,expression,label,seconds)
+    except Exception:
+        details=b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;return {dialogs:[...sh.querySelectorAll('[role=dialog]')].map(x=>({label:x.getAttribute('aria-label'),text:x.innerText.slice(0,2500)}))}")
+        print('J03_FAILURE_CONTEXT='+json.dumps(details),flush=True)
+        raise
 
 def oracle(s,body='return await window.__j03.inspect()'):return g.oracle(s,body)
 def fixture(s,empty=False):
@@ -102,18 +109,26 @@ def run(browser,archive,folder):
         # Search opens an actual nested Git file, not only a generator match.
         click(s,'[data-action=search]');fill(s,'[aria-label="Search generators, accounts, source paths and operations"]','src/file-107.txt')
         wait(s,"sh.querySelector('.overlay')?.textContent.includes('generators/j03-created-alpha/src/file-107.txt')",'J03_GIT_FILE_GLOBAL_SEARCH')
-        button(s,'Open');wait(s,"sh.querySelector('[aria-label=\"Source src/file-107.txt\"]')?.value==='File 107\\n'",'J03_SEARCH_OPENS_EXACT_FILE')
+        click_text(s,'Open','.overlay');wait(s,"sh.querySelector('[aria-label=\"Source src/file-107.txt\"]')?.value==='File 107\\n'",'J03_SEARCH_OPENS_EXACT_FILE')
         capture(s,'source-search',evidence);g.close(s)
         # Existing-source identity choice is a single consequential approval,
         # followed by the real bounded prepare/one-attempt/readback/link job.
         click(s,'[data-nav=generators]');fill(s,'#generator-search','j02-owned-000-002')
-        wait(s,"sh.querySelector('.workspace-surface tbody')?.textContent.includes('j02-owned-000-002')",'J03_RENAME_ORIGINAL')
+        wait(s,"sh.querySelectorAll('.workspace-surface tbody tr').length===1&&sh.querySelector('.workspace-surface tbody .name-cell')?.textContent==='j02-owned-000-002'",'J03_RENAME_ORIGINAL')
         click(s,'.workspace-surface tbody .name-cell');button(s,'Inspect source');wait(s,"!!sh.querySelector('[aria-label=\"Source main.pjs\"]')",'J03_RENAME_SOURCE_LINK');g.close(s)
         oracle(s,"return await window.__j03.moveFolder('j02-owned-000-002','j03-renamed-original')")
         held=oracle(s,'return await window.__j03.tick(1)');assert not held['git'].get('renameEffects')
         click(s,'[data-nav=work-queue]');wait(s,"sh.querySelector('.queue-list')?.textContent.includes('Review possible source-folder rename')",'J03_REAL_RENAME_CHOICE')
         button(s,'Rename verified existing');a.alert_accept(s)
         wait(s,"sh.querySelector('.queue-list')?.textContent.includes('Rename queued')",'J03_ONE_RENAME_DECISION')
+        prepared=oracle(s,"return await window.__j03.renameStep('j03-renamed-original')");assert prepared['state']=='RENAME_PREPARED',prepared
+        oracle(s,"return await window.__j03.merge({'generators/j03-renamed-original/src/reviewed-update.txt':'New reviewed Git source\\n'},'external source changed after rename preparation')")
+        blocked=oracle(s,"return await window.__j03.renameStep('j03-renamed-original')");assert not blocked['ok'] and blocked['code']=='RENAME_GIT_IDENTITY_CHANGED',blocked
+        assert not oracle(s)['git'].get('renameEffects')
+        oracle(s,'return await window.__j03.tick(1)');click(s,'[data-nav=work-queue]')
+        wait(s,"sh.querySelector('.queue-list')?.textContent.includes('The Git source changed')",'J03_CHANGED_SOURCE_HELD_BEFORE_RENAME')
+        button(s,'Update source review');wait(s,"[...sh.querySelectorAll('.queue-list button')].some(x=>x.textContent==='Rename verified existing')",'J03_CURRENT_SOURCE_REVIEW_RECOVERY')
+        button(s,'Rename verified existing');a.alert_accept(s);wait(s,"sh.querySelector('.queue-list')?.textContent.includes('Rename queued')",'J03_CHANGED_SCOPE_APPROVED')
         renamed=oracle(s,'return await window.__j03.tick(5)');assert len(renamed['git'].get('renameEffects',[]))==1,renamed['git'].get('renameEffects')
         newrow=next(r for r in renamed['provider']['inventory'] if r['slug']=='j03-renamed-original');assert newrow['remoteId']=='public_0_2' and newrow['ownerState']=='OBSERVED_OWNER',newrow
         oldrow=next(r for r in renamed['provider']['inventory'] if r['slug']=='j02-owned-000-002');assert oldrow['ownerState']=='UNOBSERVED' and oldrow['remoteId']=='public_0_2'
@@ -124,8 +139,14 @@ def run(browser,archive,folder):
         oracle(s,"return await window.__j03.moveFolder('j03-later','j03-separate')");oracle(s,'return await window.__j03.tick(1)')
         click(s,'[data-nav=work-queue]');wait(s,"sh.querySelector('.queue-list')?.textContent.includes('j03-separate')",'J03_SEPARATE_CHOICE')
         button(s,'Create separate generator');a.alert_accept(s)
-        separate=oracle(s,'return await window.__j03.tick(9)');resources=separate['provider']['ledger']['resources'];old=next(x for x in resources if x['slug']=='j03-later');new=next(x for x in resources if x['slug']=='j03-separate');assert old['id']!=new['id']
+        wait(s,"![...sh.querySelectorAll('.queue-list .queue-item')].some(x=>x.textContent.includes('Review possible source-folder rename')&&x.textContent.includes('j03-separate'))",'J03_SEPARATE_CHOICE_COMMITTED')
+        separate=oracle(s,'return await window.__j03.tick(9)');resources=separate['provider']['ledger']['resources'];old=next(x for x in resources if x['slug']=='j03-later');matches=[x for x in resources if x['slug']=='j03-separate'];assert matches,{'records':[r for r in separate['provider']['records'] if r['slug']=='j03-separate'],'commands':separate['commands'][-8:]};new=matches[0];assert old['id']!=new['id']
         assert len(separate['git']['renameEffects'])==1
+        operation=next(r['createOperationId'] for r in separate['provider']['records'] if r['slug']=='j03-separate')
+        click(s,'[data-action=search]');fill(s,'[aria-label="Search generators, accounts, source paths and operations"]',operation)
+        wait(s,"sh.querySelector('.overlay')?.textContent.includes("+json.dumps(operation)+")",'J03_OPERATION_ID_SEARCH')
+        click_text(s,'Open','.overlay');wait(s,"sh.querySelector('#queue-search')?.value==="+json.dumps(operation),'J03_SEARCH_OPENS_EXACT_OPERATION')
+        capture(s,'operation-search',evidence)
         print('B J03_PRIMARY_EXISTING_RENAME_ONE_LOST_ACK_NO_REPLAY_ORIGINALS_RETAINED_AND_CREATE_SEPARATE=PASS',flush=True)
         print('B J03_PRIMARY_CONNECT_IMPORT_FULL_SOURCE_PROMPT_CONFLICT_LOST_ACK_COLD_RESTART_AUTOMATIC_MAIN=PASS',flush=True)
     finally:

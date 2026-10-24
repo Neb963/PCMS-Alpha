@@ -109,7 +109,7 @@ export async function installGeneratorFixture(options={}){
  }
  const commands=[];
  const original=browser.runtime.connect.bind(browser.runtime),boundaries=new Map([
-  ['pcms-s06-authority',{run:(msg,sender)=>authority.handle(msg,sender)}],['pcms-i03-accounts',accounts],['pcms-i04-inventory',inventory],['pcms-s00-coordinator',coordinator],['pcms-i07-adoption',adoption]]);
+  ...(!options.externalPolicy?[['pcms-s06-authority',{run:(msg,sender)=>authority.handle(msg,sender)}]]:[]),['pcms-i03-accounts',accounts],['pcms-i04-inventory',inventory],['pcms-s00-coordinator',coordinator],['pcms-i07-adoption',adoption]]);
  const sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')+'#generators'};
  browser.runtime.connect=function(...args){const name=args.at(-1)?.name;if(!boundaries.has(name))return original(...args);
   const handlers=new Set(),disconnected=new Set();let closed=false;
@@ -126,7 +126,7 @@ export async function installGeneratorFixture(options={}){
   records:data.filter(x=>x.record?.intentId).map(x=>x.record),chunks:data.filter(x=>x.chunk).map(x=>({key:x.key,...x.chunk})),batches:data.filter(x=>x.batch).map(x=>x.batch),
   inventory:data.filter(x=>x.generator).map(x=>x.generator),commands:structuredClone(commands),ledger:structuredClone(ledger)}},
   async adopt(){return adoption.autoTick()},
-  async tick(n=1){for(let i=0;i<n;i++)await watcher.tick();return this.inspect()},
+  async tick(n=1){for(let i=0;i<n;i++){await authority.state();await watcher.tick();}return this.inspect()},
   async addUnknownAccount(){const a={accountId:'account_j02_unknown',alias:'New account',personaUid:'persona-j02-unknown',
     bindingId:'binding_j02_unknown',revision:3,bindingVersion:1,state:'INVENTORY_PENDING',boundPrincipal:'e'.repeat(64),
     identity:{source:'GUARDED_SESSION_READBACK',bindingVersion:1,principalFingerprint:'e'.repeat(64)}};

@@ -1,3 +1,4 @@
+import {readFile} from 'node:fs/promises';
 import test from 'node:test';import assert from 'node:assert/strict';import {webcrypto} from 'node:crypto';
 import {fakeDatabase} from './fake-idb.mjs';import {verifyOriginal} from '../src/runtime/adoption.mjs';
 import {createAdoptionStore} from '../src/runtime/adoption-store.mjs';
@@ -42,13 +43,23 @@ test('J03 rename source admission holds native AI, source uncertainty and Refres
  ]){const db=fakeDatabase();await put(db,[record]);assert.equal((await inspectCanonicalRenameSafety(db,row.slug)).ok,false);assert.equal((await inspectCanonicalRenameSafety(db,'unrelated')).ok,true);}
 });
 test('J03 final rename source/editor checks execute under the same donor lease and return unforgeable no-invocation holds',async()=>{
- for(const kind of ['busy','dirty','throw','clear']){let active=false,effects=0;
+ for(const kind of ['busy','dirty','throw','revoke','clear']){let active=false,effects=0,enabled=true,generation=0;
   const uid='persona-rename',context={personaUid:uid,cookieStoreId:'firefox-rename',routeId:'protected',route:{enabled:true},pcmsBindingId:'binding_rename'};
   const guard=createPersonaGuard({initialize:async()=>{},securityState:{ready:true,privacySafe:true,proxyControl:'controlled_by_this_extension'},
    shared:{resolve:async()=>context,acquire:async()=>{active=true;return {leaseId:'rename_lease',cookieStoreId:context.cookieStoreId}},validate:async()=>{assert.equal(active,true);return {cookieStoreId:context.cookieStoreId}},release:async()=>{active=false}},
-   getRouteTest:async()=>({ok:true}),pinGate:()=>({allow:true}),renameSafety:async()=>{assert.equal(active,true);if(kind==='throw')throw Error('storage');return {ok:kind!=='busy'}},
-   inspectNoEditorTabs:async()=>{assert.equal(active,true);return {ok:true,noEditors:kind!=='dirty'}},supplyIsolatedTab:async()=>{assert.equal(active,true);effects++;return {ok:true,ack:'RENAME_EXISTING_ACK_ONLY'}}});
+   renameAuthority:()=>enabled,renameAuthorityGeneration:()=>generation,getRouteTest:async()=>({ok:true}),pinGate:()=>({allow:true}),renameSafety:async()=>{assert.equal(active,true);if(kind==='throw')throw Error('storage');return {ok:kind!=='busy'}},
+   inspectNoEditorTabs:async()=>{assert.equal(active,true);if(kind==='revoke'){enabled=false;generation++;}return {ok:true,noEditors:kind!=='dirty'}},supplyIsolatedTab:async()=>{assert.equal(active,true);effects++;return {ok:true,ack:'RENAME_EXISTING_ACK_ONLY'}}});
   const result=await guard.runSupplyStep(uid,{kind:'RENAME_EXISTING',temporarySlug:'old',slug:'new'});
   assert.equal(active,false);assert.equal(effects,kind==='clear'?1:0);assert.equal(isGuardedRenamePreInvocationHold(result),kind!=='clear');assert.equal(isGuardedRenamePreInvocationHold({...result}),false);
  }
+});
+
+test('J03 policy listener has one background bootstrap and no automatic dashboard-side registration',async()=>{
+ const authority=await readFile(new URL('../src/runtime/s06-standing-authority.mjs',import.meta.url),'utf8');
+ const bootstrap=await readFile(new URL('../src/runtime/s06-authority-bootstrap.mjs',import.meta.url),'utf8');
+ const entry=await readFile(new URL('../src/runtime/entry.mjs',import.meta.url),'utf8');
+ assert.doesNotMatch(authority,/if\(standingS06\)standingS06\.register\(\)/);
+ assert.match(bootstrap,/if\(standingS06\)standingS06\.register\(\)/);
+ assert.ok(entry.indexOf("import '../lib/recovery-bootstrap.js'")<entry.indexOf("import './s06-authority-bootstrap.mjs'"));
+ assert.ok(entry.indexOf("import './s06-authority-bootstrap.mjs'")<entry.indexOf("import './coordinator-boundary.mjs'"));
 });

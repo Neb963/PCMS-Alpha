@@ -10,7 +10,8 @@ import {verifyOriginal} from './adoption.mjs';
 const fail=code=>({ok:false,code});
 export async function preserveRenameBaseline(db,facts,original){
  if(original?.source!=='INDEPENDENT_FULL_BYTE_READBACK'||original.ok!==true)return fail('ORIGINAL_SOURCE_UNVERIFIED');
- const key='rename-original:'+facts.row.accountId+':'+facts.row.remoteId+':'+original.fingerprint;
+ const digest=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify([facts.row.accountId,facts.row.remoteId,facts.row.personaUid,facts.row.bindingVersion,original.fingerprint]))))].map(x=>x.toString(16).padStart(2,'0')).join('');
+ const key='rename-original:'+digest;
  return new Promise((resolve,reject)=>{const tx=db.transaction(['meta','events'],'readwrite'),m=tx.objectStore('meta');let out=fail('RENAME_BASELINE_UNAVAILABLE');
   tx.oncomplete=()=>resolve(out);tx.onabort=()=>reject(Error('BASELINE_TRANSACTION_ABORTED'));
   m.get('inventory:'+facts.row.slug).onsuccess=e=>{const row=e.target.result?.generator;

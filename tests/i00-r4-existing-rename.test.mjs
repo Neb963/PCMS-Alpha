@@ -161,3 +161,13 @@ test('R4 identity port rejects foreign pages, unversioned or malformed existing-
  assert.equal(validateIdentityMessage(api,sender,{
    type:'PREPARE_RENAME',params:{newSlug:'new-generator',expectedRevision:2}}).ok,true);
 });
+
+test('J03 explicit rename scope needs no manual old-folder association and reconciles despite later Git drift',async()=>{
+ const legacy=setup();legacy.removeOldLink();assert.equal((await legacy.service.run({type:'PREPARE',newSlug:'new-generator',expectedRevision:2})).ok,false);assert.equal(legacy.renames(),0);
+ const x=setup();x.saved.pcmsR4FolderIdentityReviews[0].automaticRenameApproved=true;x.removeOldLink();
+ const prepared=await x.service.run({type:'PREPARE',newSlug:'new-generator',expectedRevision:2});assert.equal(prepared.ok,true,prepared.code);
+ assert.equal(x.saved['pcmsR4ExistingRenameAttempt:new-generator'].ownerChoiceSource,'HUMAN_EXACT_RENAME_SCOPE');
+ assert.equal((await x.service.run({type:'EXECUTE',newSlug:'new-generator',expectedRevision:1,consent:'I APPROVE THE EXACT EXISTING GENERATOR RENAME'})).ok,true);
+ x.saved.pcmsS03CatalogLastComplete.generators[0].folderTreeOid=SHA('f');x.setGrant(false);x.removeOldInventory();
+ const observed=await x.service.run({type:'RECONCILE',newSlug:'new-generator',expectedRevision:3});assert.equal(observed.ok,true,observed.code);assert.equal(x.renames(),1);
+});

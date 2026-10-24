@@ -72,7 +72,8 @@ export function createCreationCatalogIntake(api,{open=openCanonicalDatabase,
         earlier?.scopeDigest===scopeDigest&&(!approved.approval.planDigest||earlier.initialApprovalRevision===approved.approval.revision)&&
         Number.isSafeInteger(earlier.next)&&earlier.next>=0&&
         earlier.next<=catalog.generators.length;
-      const from=continued?earlier.next:0;
+      const retryHeld=continued&&earlier.next===catalog.generators.length&&earlier.hasHeldItems===true;
+      const from=continued&&!retryHeld?earlier.next:0;
       if(!firstImportCompleted&&Array.isArray(approved.approval.targets)){
         const fresh=await readImportTargets(await (dbPromise||=open()),catalog.generators.slice(from).map(g=>g.slug));
         const pinned=new Map(approved.approval.targets.map(t=>[t.slug,t]));
@@ -113,7 +114,7 @@ export function createCreationCatalogIntake(api,{open=openCanonicalDatabase,
       const progress={repositoryId:catalog.repositoryId,head:catalog.head,
         scopeDigest,initialScopeDigest:approved.approval.scopeDigest,
         initialImportCompleted:firstImportCompleted||!more,initialApprovalRevision:approved.approval.revision,
-        next,total:catalog.generators.length,observedAt:now()};
+        next,total:catalog.generators.length,hasHeldItems:held>0||from>0&&earlier?.hasHeldItems===true,observedAt:now()};
       await api.storage.local.set({[PROGRESS]:progress,[RECEIPT]:{
         code:more?'S04_LOCAL_INTAKE_CHECKPOINTED':'S04_LOCAL_INTAKE_COMPLETE',
         ...progress,added,duplicates,held,providerEffects:'OFF',gitEffects:'OFF'}});

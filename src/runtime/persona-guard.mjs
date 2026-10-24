@@ -1,3 +1,4 @@
+import {standingS06} from './s06-standing-authority.mjs';
 import {defaultRenameSafety} from './folder-rename-safety.mjs';
 const renameNoInvocation=new WeakSet();
 function renamePreInvocationHold(code){const reply=Object.freeze({ok:false,code,source:'GUARDED_RENAME_PREINVOCATION_HOLD'});renameNoInvocation.add(reply);return reply;}
@@ -24,7 +25,7 @@ export async function cachedHealthDomain(evidence){
 
 export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
-  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, inspectNoEditorTabs, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, refresherCleanupTab, readRuntimeWitness, enrollmentDonor, renameSafety=defaultRenameSafety, pinGate = inspectRoutePin }) {
+  supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, inspectNoEditorTabs, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, refresherCleanupTab, readRuntimeWitness, enrollmentDonor, renameSafety=defaultRenameSafety,renameAuthority=()=>standingS06?.gate('development')===true,renameAuthorityGeneration=()=>standingS06?.policyGeneration(), pinGate = inspectRoutePin }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
@@ -201,6 +202,8 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     const quarantine=admissionForI17Supply(request?.kind,request);
     if(!quarantine.ok)return quarantine;
     if(typeof supplyIsolatedTab!=='function')return {ok:false,code:'SUPPLY_EXECUTOR_UNAVAILABLE'};
+    const renameGeneration=renameAuthorityGeneration();
+    if(request?.kind==='RENAME_EXISTING'&&renameAuthority()!==true)return renamePreInvocationHold('RENAME_AUTHORITY_PAUSED');
     const leased=await acquireConflictGuard(personaUid);
     if(!leased?.ready||!leased.leaseId)
       return request.kind==='RENAME_EXISTING'?renamePreInvocationHold(leased?.code||'GUARD_UNAVAILABLE'):{ok:false,code:leased?.code||'GUARD_UNAVAILABLE'};
@@ -214,6 +217,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
         if(editor?.ok!==true||editor.noEditors!==true)return renamePreInvocationHold('RENAME_EDITOR_OPEN_OR_DIRTY');
         const current=await inspectOwnedAction(leased);if(current?.ready!==true)return renamePreInvocationHold('GUARD_CHANGED');
       }
+      if(request.kind==='RENAME_EXISTING'&&(renameAuthority()!==true||renameAuthorityGeneration()!==renameGeneration))return renamePreInvocationHold('RENAME_AUTHORITY_PAUSED');
       supplyInvoked=true;
       const packet=await supplyIsolatedTab(leased,request);
       const after=await inspectOwnedAction(leased);

@@ -200,4 +200,6 @@ export function createS06StandingAuthority(api){
 }
 export const standingS06=typeof browser==='undefined'?null:
   createS06StandingAuthority(browser);
-if(standingS06)standingS06.register();
+// Only the background entrypoint registers this singleton. Importing a
+// production adapter in another extension context must not create another
+// policy writer or a second configuration-invalidation queue.
