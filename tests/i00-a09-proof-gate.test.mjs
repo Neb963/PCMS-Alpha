@@ -85,6 +85,8 @@ test('A09 passing all scoped slots for one real claim does not generalize to ent
 
 test('A09 refuses malformed acceptance catalog/unknown source identity rather than emitting green ledger',()=>{
  assert.throws(()=>buildCatalog('fake',scenarios),/A09_MATRIX_REQUIRED/);
+ const forged=structuredClone(scenarios);forged.scenarios[0].originalPart8Description='fabricated source';
+ assert.throws(()=>buildCatalog(acceptance,forged),/A09_UNVERIFIED_X_SOURCE_REPLACEMENT/);
  const mutilated=acceptance.replace(/^\| \*\*AC-17\*\* \|.*\n/m,'');
  assert.throws(()=>buildCatalog(mutilated,scenarios),/A09_AC_COUNT_INVALID/);
  assert.throws(()=>evaluateEvidence({catalog,receipts:[],sourceSha:'HEAD',xpiSha256:XPI}),/A09_SOURCE_SHA_REQUIRED/);
