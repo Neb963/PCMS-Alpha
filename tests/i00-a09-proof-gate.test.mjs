@@ -25,6 +25,8 @@ test('A09 catalog is 18 AC + 10 T + 14 X from accepted authority and source-deri
  assert.ok(catalog.every(x=>x.tiers.includes('D')&&x.tiers.includes('B')));
  assert.ok(catalog.filter(x=>x.kind==='X').every(x=>x.authority==='RECOVERED_PART8_AUDIT_VERBATIM'));
  assert.match(catalog.find(x=>x.id==='X-02').description,/1,000 slugs/);
+ assert.deepEqual(catalog.find(x=>x.id==='X-02').relatedAC,['AC-04','AC-05']);
+ assert.equal(catalog.find(x=>x.id==='X-02').relatedACProvenance,'REVIEW_DERIVED_NOT_ORIGINAL_AUDIT');
  assert.equal(catalog.find(x=>x.id==='X-03').tiers.includes('GIT'),true);
  assert.equal(catalog.find(x=>x.id==='X-10').tiers.includes('H'),false);
  assert.deepEqual(catalog.find(x=>x.id==='AC-17').tiers,['D','B','H','L']);
