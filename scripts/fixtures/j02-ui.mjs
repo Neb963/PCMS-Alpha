@@ -10,6 +10,8 @@ export async function installGeneratorFixture(){
  const {createCreationRunner}=await import('./creation-runner.mjs');
  const {createCreationWatcher}=await import('./creation-watch.mjs');
  const {createAdoptionBoundary}=await import('./adoption-boundary.mjs');
+ const {createS06StandingAuthority}=await import('./s06-standing-authority.mjs');
+ const {createScopedCreationGate}=await import('./creation-authority.mjs');
  const db=await openCanonicalDatabase({open:(_name,version)=>indexedDB.open('pcms-j02-ui-fixture',version)});
  let abortNextTransaction=false;
  const proxy=new Proxy(db,{get(target,key){if(key==='transaction')return (...args)=>{const tx=target.transaction(...args);
@@ -73,11 +75,12 @@ export async function installGeneratorFixture(){
     ...ledger.resources.filter(x=>x.accountId===ctx.accountId).map(x=>({slug:x.slug,remoteId:'slug-'+x.slug,
      ownerResult:'IS_OWNER',ownerPrincipalFingerprint:ctx.principalFingerprint,ownerObservationId:'j02_owner_'+crypto.randomUUID(),visibility:'UNLISTED'}))]};
  }});
- const runner=createCreationRunner(api,{open,guard:()=>guard,effectGate:()=>true,
+ const authority=createS06StandingAuthority(api),creationGate=createScopedCreationGate(authority);
+ const runner=createCreationRunner(api,{open,guard:()=>guard,effectGate:creationGate,
   syncInventory:inventory.syncAccount,createGit:()=>({step:async()=>({ok:false,code:'GIT_RECONNECT_REQUIRED'})})});
  const coordinator=createCoordinatorBoundary(api,{open,makeRunner:()=>runner});
  const accounts=createAccountBoundary(api,{open,guard:()=>guard,syncInventory:inventory.syncAccount});
- const adoption=createAdoptionBoundary(api,{open,guard:()=>guard,managementGate:()=>true,gitGate:()=>false});
+ const adoption=createAdoptionBoundary(api,{open,guard:()=>guard,managementGate:()=>authority.allowsOperatorManagement(),gitGate:()=>false});
  const watcher=createCreationWatcher(api,{open,createRunner:()=>runner,maxPerWake:8});
  if(!ledger.initialized){
   const all=[];for(let n=0;n<50;n++){
@@ -101,20 +104,21 @@ export async function installGeneratorFixture(){
   await store.acceptCreate({intentId:'intent_j02_waiting',slug:'j02-held',accountId:heldAccount.accountId,origin:'OPERATOR'});
   ledger.initialized=true;await persist();
  }
+ const commands=[];
  const original=browser.runtime.connect.bind(browser.runtime),boundaries=new Map([
-  ['pcms-i03-accounts',accounts],['pcms-i04-inventory',inventory],['pcms-s00-coordinator',coordinator],['pcms-i07-adoption',adoption]]);
+  ['pcms-s06-authority',{run:(msg,sender)=>authority.handle(msg,sender)}],['pcms-i03-accounts',accounts],['pcms-i04-inventory',inventory],['pcms-s00-coordinator',coordinator],['pcms-i07-adoption',adoption]]);
  const sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')+'#generators'};
  browser.runtime.connect=function(...args){const name=args.at(-1)?.name;if(!boundaries.has(name))return original(...args);
   const handlers=new Set(),disconnected=new Set();let closed=false;
   return {onMessage:{addListener:fn=>handlers.add(fn)},onDisconnect:{addListener:fn=>disconnected.add(fn)},disconnect(){closed=true},
    postMessage(msg){if(msg.type==='APPEND_CREATE_BATCH'&&msg.params.offset>=32&&ledger.failures.intake){
     ledger.failures.intake=false;abortNextTransaction=true;void persist();}
-    Promise.resolve(boundaries.get(name).run(msg,sender)).then(out=>{if(!closed)for(const fn of handlers)fn(out)})
+    Promise.resolve(boundaries.get(name).run(msg,sender)).then(out=>{commands.push({type:msg.type,ok:out?.ok,code:out?.code});if(!closed)for(const fn of handlers)fn(out)})
     .catch(()=>{if(!closed)for(const fn of disconnected)fn()})}};
  };
  window.__j02={async inspect(){const data=await rows();return {accounts:data.filter(x=>x.account).map(x=>x.account),
   records:data.filter(x=>x.record?.intentId).map(x=>x.record),batches:data.filter(x=>x.batch).map(x=>x.batch),
-  inventory:data.filter(x=>x.generator).map(x=>x.generator),ledger:structuredClone(ledger)}},
+  inventory:data.filter(x=>x.generator).map(x=>x.generator),commands:structuredClone(commands),ledger:structuredClone(ledger)}},
   async adopt(){return adoption.autoTick()},
   async tick(n=1){for(let i=0;i<n;i++)await watcher.tick();return this.inspect()},
   async interruptInput(){ledger.failures.intake=true;await persist()},

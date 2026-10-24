@@ -1,8 +1,8 @@
 import {ensureCreationInventory} from './creation-inventory.mjs';
 import {inventoryBoundary} from './inventory-boundary.mjs';
 // S04 fixed, one-step guarded creation runner. No generic job engine.
-// The packaged mutation gates remain OFF without independently qualified
-// provider/Git scope; tests inject a strictly isolated effect ledger.
+// Canonical operator intent scopes private creation independently of Git;
+// current account/route/owner and intent journal proofs remain mandatory.
 import {openCanonicalDatabase,createRestoreSentinel,fail} from './journal.mjs';
 import {createCoordinatorStore} from './coordinator-store.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
@@ -65,7 +65,7 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
       const current=await s.getCreate(item.intentId);
       if(!current.ok||current.record.revision!==item.revision)
         return fail('STALE_REVISION');
-      const mutable=!!effectGate({intent:item,route:ready});
+      const mutable=(await effectGate({intent:item,route:ready}))===true;
       const base={slug:item.slug,
         principalFingerprint:ready.principalFingerprint||
           item.principalFingerprint};
@@ -162,8 +162,10 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         if(!prepared.ok)return prepared;
         // Exact revision + operation receipt must exist before dispatch.
         const newer=prepared.record;
-        if(!effectGate({intent:newer,route:before})||
-           (await sentinel.inspect()).held){
+        const policyGeneration=effectGate.generation?.();
+        const allowed=(await effectGate({intent:newer,route:before}))===true;
+        const restoring=(await sentinel.inspect()).held;
+        if(!allowed||restoring||policyGeneration!==effectGate.generation?.()){
           return await s.stageEffect({intentId:item.intentId,
             expectedRevision:newer.revision,
             event:isCreate?'CREATE_UNCERTAIN':'RENAME_UNCERTAIN'});

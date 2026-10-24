@@ -23,7 +23,7 @@ export function validateAdoptionMessage(api,sender,msg){
     return fail('CAPABILITY_OFF');
   const p=msg.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
-  const allowed=msg.type==='READ_ORIGINAL_FILE'?['slug','path']:msg.type==='INSPECT_ORIGINAL'?['slug']:
+  const allowed=msg.type==='RETRY_ADOPTION'?['slug']:msg.type==='READ_ORIGINAL_FILE'?['slug','path']:msg.type==='INSPECT_ORIGINAL'?['slug']:
     msg.type==='LIST_ADOPTIONS'?[]:
     msg.type==='CAPTURE_ADOPTION'?['slug','expectedRevision','explicitPublicConsent']:
     msg.type==='RECHECK_IDENTITY'?['slug','expectedRevision']:
@@ -32,7 +32,7 @@ export function validateAdoptionMessage(api,sender,msg){
     ['slug','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k))||
      (msg.type!=='LIST_ADOPTIONS'&&!slug(p.slug)))return fail('INVALID_PARAMS');
-  if(['ARCHIVE_LOCAL','CAPTURE_ADOPTION','RECHECK_IDENTITY','ARCHIVE_GIT','RECHECK_GIT','ABORT_GIT_PREPARED','RETRY_ADOPTION'].includes(msg.type)&&
+  if(['ARCHIVE_LOCAL','CAPTURE_ADOPTION','RECHECK_IDENTITY','ARCHIVE_GIT','RECHECK_GIT','ABORT_GIT_PREPARED'].includes(msg.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1))
     return fail('INVALID_PARAMS');
   if(msg.type==='READ_ORIGINAL_FILE'&&(typeof p.path!=='string'||p.path.length>240))return fail('INVALID_PARAMS');
@@ -245,7 +245,7 @@ export function createAdoptionBoundary(api,{
     if(autoBusy)return fail('BUSY');
     autoBusy=true;
     try{
-      if(managementGate()!==true)return fail('ACCOUNT_MANAGEMENT_NOT_GRANTED');
+      if((await managementGate())!==true)return fail('ACCOUNT_MANAGEMENT_NOT_GRANTED');
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       const database=await db();
       const {inventory,adoptions,accounts}=await scanWork(database);
@@ -289,7 +289,7 @@ export function createAdoptionBoundary(api,{
       const ordered=[...work.slice(start<0?0:start),...work.slice(0,start<0?0:start)];
       const results=[];
       for(const item of ordered.slice(0,maxSteps)){
-        if(managementGate()!==true||(await sentinel.inspect()).held)break;
+        if((await managementGate())!==true||(await sentinel.inspect()).held)break;
         const out=item.type==='REFRESH_CONTEXT'?await refreshIdentity(item.slug,item.params.expectedRevision):
           await runTrusted({type:item.type,params:item.params});
         if(!out?.ok)backoff.set(item.slug,clock()+AUTO_BACKOFF);else backoff.delete(item.slug);
@@ -330,5 +330,5 @@ export function createAdoptionBoundary(api,{
 }
 if(typeof browser!=='undefined')createAdoptionBoundary(browser,{
   gitGate:()=>standingS06?.gate('gitWrite')===true,
-  managementGate:()=>standingS06?.gate('development')===true
+  managementGate:()=>standingS06?.allowsOperatorManagement()
 }).register();

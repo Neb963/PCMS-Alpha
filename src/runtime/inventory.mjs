@@ -65,7 +65,8 @@ export function reconcileInventory(existing, account, observation) {
       // independent protected full-source recheck proves it has not changed.
       const state=accountConflict?'OWNER_CONFLICT':'IDENTITY_CONFLICT';
       next.set(item.slug,{...prior,ownerState:state,revision:prior.revision+1,
-        ...(slugOnlyAfterProven?{identityHold:'PUBLIC_ID_REVALIDATION_REQUIRED'}:{})});
+        ...(slugOnlyAfterProven?{identityHold:prior.identityHold==='IMMUTABLE_PUBLIC_ID_CHANGED'?
+          prior.identityHold:'PUBLIC_ID_REVALIDATION_REQUIRED'}:{})});
       incidents.push({slug:item.slug,code:slugOnlyAfterProven?
         'PUBLIC_ID_REVALIDATION_REQUIRED':state});
       continue;
@@ -336,8 +337,12 @@ export function createInventoryStore(db) {
             meta.put({key:inventoryKey(slug),generator:{...row,ownerState:proof.state==='MISSING_VERIFIED'?'UNOBSERVED':'OWNER_DISPUTED',revision:row.revision+1}});
             done(fail('TARGET_OWNERSHIP_CHANGED'));return;
           }
-          if(!(row.ownerState==='OBSERVED_OWNER'||row.ownerState==='IDENTITY_CONFLICT'&&row.identityHold==='PUBLIC_ID_REVALIDATION_REQUIRED')||
-             row.remoteId!==proof.remoteId){
+          if(row.remoteId!==proof.remoteId){
+            meta.put({key:inventoryKey(slug),generator:{...row,ownerState:'IDENTITY_CONFLICT',
+              identityHold:'IMMUTABLE_PUBLIC_ID_CHANGED',revision:row.revision+1}});
+            done(fail('TARGET_IDENTITY_CHANGED'));return;
+          }
+          if(!(row.ownerState==='OBSERVED_OWNER'||row.ownerState==='IDENTITY_CONFLICT'&&row.identityHold==='PUBLIC_ID_REVALIDATION_REQUIRED')){
             done(fail('TARGET_IDENTITY_CHANGED'));return;}
           // This proves current immutable identity/owner only. Original byte
           // fingerprints, source links and checkpoint authority remain intact.

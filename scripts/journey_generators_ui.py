@@ -13,13 +13,17 @@ def wait(s,expression,label,seconds=45):
     return a.wait(s,expression,label,seconds)
 def click(s,selector):return a.click(s,selector)
 def click_text(s,label,scope=''):
-    node=b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;const p="+("sh.querySelector("+json.dumps(scope)+")" if scope else "sh")+";const e=[...p.querySelectorAll('button')].find(x=>x.textContent.trim()==="+json.dumps(label)+");if(e)e.scrollIntoView({block:'center',behavior:'instant'});return e")
+    container=("[...sh.querySelectorAll('.batch-item')].find(x=>x.querySelector('strong')?.textContent==="+json.dumps(scope[5:])+")" if scope.startswith('file:') else "sh.querySelector("+json.dumps(scope)+")" if scope else "sh")
+    node=b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;const p="+container+";const e=[...p.querySelectorAll('button')].find(x=>x.textContent.trim()==="+json.dumps(label)+");if(e)e.scrollIntoView({block:'center',behavior:'instant'});return e")
     assert node and a.ELEMENT in node,(label,scope)
     b.call('POST',f'/session/{s}/element/{node[a.ELEMENT]}/click',{})
 def fill(s,selector,text):
     node=b.execute(s,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector("+json.dumps(selector)+")")
-    b.call('POST',f'/session/{s}/element/{node[a.ELEMENT]}/clear',{})
-    b.call('POST',f'/session/{s}/element/{node[a.ELEMENT]}/value',{'text':text})
+    if text=='':
+        b.call('POST',f'/session/{s}/element/{node[a.ELEMENT]}/value',{'text':'\ue009a\ue000\ue003'})
+    else:
+        b.call('POST',f'/session/{s}/element/{node[a.ELEMENT]}/clear',{})
+        b.call('POST',f'/session/{s}/element/{node[a.ELEMENT]}/value',{'text':text})
 def change(s,selector,value):
     b.execute(s,"const e=document.getElementById('pcms-faithful-host').shadowRoot.querySelector("+json.dumps(selector)+");e.value="+json.dumps(value)+";e.dispatchEvent(new Event('change',{bubbles:true}));")
 def oracle(s,body='return await window.__j02.inspect()'):
@@ -75,14 +79,21 @@ def run(browser,archive,folder):
         wait(s,"sh.querySelector('.pagination')?.textContent.includes('of 1 generators')",'J02_ORIGINAL_TARGET')
         click(s,'.workspace-surface tbody tr .name-cell');click_text(s,'Original source')
         wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('src/binary.dat')",'J02_ORIGINAL_MANIFEST')
-        click_text(s,'View original')
+        click_text(s,'View original','file:main.pjs')
         wait(s,"sh.querySelector('[aria-label=\"Original main.pjs\"]')?.value.includes('Original source é')",'J02_ORIGINAL_ACTUAL_BYTES')
+        click_text(s,'Retry preservation')
+        wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('Original source is saved locally')",'J02_ORIGINAL_RECOVERY_CONTROL')
+        assert any(c['type']=='RETRY_ADOPTION' and c['ok'] is True and c.get('code')=='ADOPTION_AUTO_CHECKPOINT' for c in oracle(s)['commands'])
         capture(s,'original-source-git-outage',evidence);close(s)
         fill(s,'#generator-search','');wait(s,"sh.querySelector('.pagination').textContent.includes('1200')",'J02_ORIGINAL_FLEET_RESTORE')
         # Open uses the account-bound production capability and independent tab oracle.
         click(s,'.workspace-surface tbody tr .open-col button')
         assert len(oracle(s)['ledger']['opened'])==1
-        click(s,'[data-action=create]');fill(s,'[aria-label="Generator names"]','INVALID NAME')
+        click(s,'[data-action=create]')
+        wait(s,"[...sh.querySelectorAll('[role=dialog] button')].some(b=>b.textContent==='Pause creation'&&!b.disabled)",'J02_SCOPED_POLICY')
+        click_text(s,'Pause creation');wait(s,"[...sh.querySelectorAll('[role=dialog] button')].some(b=>b.textContent==='Resume creation'&&!b.disabled)",'J02_PAUSE_INDEPENDENT_NO_GIT')
+        click_text(s,'Resume creation');wait(s,"[...sh.querySelectorAll('[role=dialog] button')].some(b=>b.textContent==='Pause creation'&&!b.disabled)",'J02_RESUME_INDEPENDENT_NO_GIT')
+        fill(s,'[aria-label="Generator names"]','INVALID NAME')
         click_text(s,'Preview assignments')
         wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('lowercase')",'J02_INVALID_INPUT_RECOVERY')
         # Large paste is one input event, as pasting 1001 lines in Firefox.
@@ -102,7 +113,7 @@ def run(browser,archive,folder):
         effects=state['ledger']['effects'];assert [x['kind'] for x in effects]==['CREATE','RENAME'],effects
         assert not any(r['slug']=='pcms-test-esr-chain-20261015-a01' for r in state['records']),state['records']
         click_text(s,'Refresh','[aria-label="Batch progress"]')
-        wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('2 generators confirmed')",'J02_CONFIRMED_REAL_CREATION')
+        wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('1 generator confirmed')",'J02_CONFIRMED_REAL_CREATION')
         capture(s,'mixed-progress-git-outage',evidence)
         # Readback/identity recovery after actual production-shaped slug census.
         result=oracle(s,'const d=await window.__j02.inspect();const r=d.records.find(r=>r.slug===\'j02-created-alpha\');await window.__j02.census(r.accountId);return await window.__j02.recheck();')

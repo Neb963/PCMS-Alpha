@@ -54,7 +54,7 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
     const [out,a]=await Promise.all([call('LIST_CREATE_BATCH_ITEMS',{batchId,offset,limit:25,query:query.value,status:filter.value}),accounts()]);
     if(!d.overlay.isConnected||current!==epoch)return;
     if(!out.ok)throw Error(out.code);rows=a.accounts||[];
-    status.textContent=out.counts.confirmed+' generator'+(out.counts.confirmed===1?'':'s')+' confirmed · '+out.counts.working+' in progress · '+out.counts.held+' need attention'+
+    status.textContent=out.counts.confirmed+' generator'+(out.counts.confirmed===1?'':'s')+' confirmed · '+out.counts.working+' inputs in progress · '+out.counts.held+' inputs need attention'+
      (out.batch.state==='INGESTING'?' · input incomplete ('+out.batch.appended+'/'+out.batch.total+' saved)':'');
     list.replaceChildren();pager.replaceChildren();
     for(const item of out.items){const row=el('section','batch-item');row.dataset.batchIndex=item.index;
@@ -106,6 +106,18 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
   const status=el('p','setting-note','Preview account assignments before submitting. Existing owned generators are reconciled; new generators start private.'),preview=el('div'),actions=el('div','form-foot');
   status.setAttribute('role','status');d.body.append(label,accountLabel,status,preview,actions);
   let frozen=null,accountRows=[],busy=false,offset=0,persisted=null;
+  const policyStatus=el('p','setting-note'),policyButton=b('Checking creation policy…',()=>void togglePolicy());policyButton.disabled=true;
+  let policy=null;
+  async function loadPolicy(){try{const out=await request('pcms-s06-authority','GET_OPERATOR_MANAGEMENT',{},12000);
+    if(!out.ok)throw Error(out.code);policy=out;policyButton.disabled=false;policyButton.textContent=out.enabled?'Pause creation':'Resume creation';
+    policyStatus.textContent=out.enabled?'':'New creation is paused. Submitted requests wait safely until you resume.';
+   }catch{policyStatus.textContent='Creation policy could not be read. Saved requests remain safe.'}}
+  async function togglePolicy(){if(!policy)return;policyButton.disabled=true;
+   try{const out=await request('pcms-s06-authority','SET_OPERATOR_MANAGEMENT',{enabled:!policy.enabled,expectedRevision:policy.revision},15000);
+    if(!out.ok)throw Error(out.code);await loadPolicy();
+    if(out.enabled)try{await browser.alarms.create('pcms-s04-creation-followup',{when:Date.now()+1000})}catch{}
+   }catch{policyStatus.textContent='Policy change was not confirmed. Refresh before retrying.';await loadPolicy()}}
+  d.body.append(policyStatus,policyButton);void loadPolicy();
   void accounts().then(out=>{accountRows=out.accounts||[];
    for(const a of accountRows.filter(a=>a.state!=='ARCHIVED')){const o=el('option','',a.alias||a.accountId);o.value=a.accountId;choice.append(o)}}).catch(()=>{status.textContent='Accounts unavailable. Retry preview after recovering Accounts.'});
   function reset(){if(!busy){frozen=null;preview.replaceChildren();submit.hidden=true;review.hidden=false;status.textContent='Preview the updated inputs before submitting.'}}

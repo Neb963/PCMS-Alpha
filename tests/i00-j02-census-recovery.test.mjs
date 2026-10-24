@@ -43,7 +43,7 @@ test('J02 targeted current identity CAS repairs created/adopted context without 
     revision:5,original:{fingerprint:'b'.repeat(64)},archiveOperationId:'original_uncertain',archiveState:'HELD_UNCERTAIN'}}]:[])]);
  const proof={ok:true,source:'INDEPENDENT_TARGET_READBACK',state:'OWNED_VERIFIED',ownerMatches:true,
   slug:row.slug,remoteId:row.remoteId,visibility:'UNLISTED'};
- for(const patch of [{remoteId:'public_replaced'},{ownerMatches:false},{slug:'other'}])
+ for(const patch of [{ownerMatches:false},{slug:'other'}])
   assert.equal((await s.confirmIdentity(row.slug,2,account,{...proof,...patch})).ok,false);
  assert.equal((await s.confirmIdentity(row.slug,1,account,proof)).code,'STALE_REVISION');
  assert.equal((await s.confirmIdentity(row.slug,2,{...account,revision:3},proof)).code,'ACCOUNT_CONTEXT_CHANGED');
@@ -114,5 +114,19 @@ test('J02 cancellation is limited to unsubmitted local manifest and can never st
  const second='batch_'+'9'.repeat(32);await s.beginBatch({batchId:second,total:1});
  await s.appendBatch({batchId:second,offset:0,slugs:['saved-two']});await s.finalizeBatch({batchId:second});
  assert.equal((await s.cancelBatch({batchId:second})).code,'BATCH_ALREADY_SUBMITTED');
+ assert.equal(db.keys('operations').length,0);
+});
+
+test('J02 direct current readback of a different immutable ID holds previously observed source without changing its owner count',async()=>{
+ const db=fakeDatabase(),s=createInventoryStore(db);
+ await put(db,[{key:'account:'+account.accountId,account},{key:'inventory:'+row.slug,generator:row},
+  {key:'source-link:'+row.slug,link:{slug:row.slug,remoteId:row.remoteId,fingerprint:'b'.repeat(64)}},
+  {key:'inventory-batch:'+account.accountId,countsTrusted:true,lastConfirmedCount:1,ownedSlugs:[row.slug]}]);
+ const out=await s.confirmIdentity(row.slug,row.revision,account,{ok:true,source:'INDEPENDENT_TARGET_READBACK',
+  slug:row.slug,state:'OWNED_VERIFIED',ownerMatches:true,remoteId:'public_replaced_j02',visibility:'PUBLIC'});
+ assert.equal(out.ok,false);const held=db.read('meta','inventory:'+row.slug).generator;
+ assert.equal(held.ownerState,'IDENTITY_CONFLICT');assert.equal(held.identityHold,'IMMUTABLE_PUBLIC_ID_CHANGED');
+ assert.equal(held.remoteId,row.remoteId);assert.equal(db.read('meta','inventory-batch:'+account.accountId).countsTrusted,true);
+ assert.equal(db.read('meta','source-link:'+row.slug).link.remoteId,row.remoteId);
  assert.equal(db.keys('operations').length,0);
 });

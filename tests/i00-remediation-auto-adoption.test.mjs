@@ -106,3 +106,13 @@ test('J02 archived original tombstone never enters context-refresh/readback loop
   refreshIdentity:async()=>{refreshes++;return {ok:true}}});
  assert.equal((await boundary.autoTick()).results.length,0);assert.equal(refreshes,0);
 });
+
+test('J02 primary retry command re-reads canonical revision and advances only its target through actual production capture',async()=>{
+ const f=fixture([gen('j02-retry-target'),gen('j02-other')]);await f.ready;
+ const sender={id:'f',url:f.api.runtime.getURL('pcms/index.html')};
+ const out=await f.boundary.run({type:'RETRY_ADOPTION',params:{slug:'j02-retry-target'}},sender);
+ assert.equal(out.ok,true,JSON.stringify(out));assert.equal(out.code,'ADOPTION_AUTO_CHECKPOINT');
+ assert.equal(adoptionOf(f.db,'j02-retry-target').archiveState,'ARCHIVE_PENDING');
+ assert.equal(adoptionOf(f.db,'j02-other'),undefined);
+ assert.equal((await f.boundary.run({type:'RETRY_ADOPTION',params:{slug:'j02-retry-target',expectedRevision:4}},sender)).ok,false);
+});

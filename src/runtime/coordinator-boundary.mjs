@@ -1,3 +1,4 @@
+import {createScopedCreationGate} from './creation-authority.mjs';
 import {previewCreation} from './creation-preview.mjs';
 // S00: trusted, installed-XPI command ingress; no provider, Git or native writes.
 import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId} from './journal.mjs';
@@ -77,10 +78,10 @@ export function validateCoordinatorMessage(api,sender,message){
   return {ok:true};
 }
 export function createCoordinatorBoundary(api,{open=openCanonicalDatabase,
-  factory=createCoordinatorStore,makeRunner=createCreationRunner}={}){
+  factory=createCoordinatorStore,makeRunner=createCreationRunner,authority=standingS06}={}){
   let dbPromise;
   const runner=makeRunner(api,{open,factory:undefined,
-    effectGate:()=>standingS06?.gate('development')===true,
+    effectGate:createScopedCreationGate(authority),
     gitGate:()=>standingS06?.gate('gitWrite')===true});
   const sentinel=createRestoreSentinel(api.storage.local);
   const store=async()=>factory(await (dbPromise||=open().catch(e=>{dbPromise=null;throw e;})));

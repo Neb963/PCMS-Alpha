@@ -161,7 +161,7 @@ export function createBatchStore(db,{acceptCreate}){
       c.continue();return;
      }
      chunks.sort((a,b)=>a.offset-b.offset);
-     const matching=[],counts={total:batch.total,persisted:batch.appended,confirmed:0,held:0,working:0};
+     const matching=[],confirmedResources=new Set(),counts={total:batch.total,persisted:batch.appended,confirmed:0,confirmedInputs:0,held:0,working:0};
      for(const chunk of chunks)for(let n=0;n<chunk.slugs.length;n++){
       const index=chunk.offset+n,slug=chunk.slugs[n],inputId=batchIntentId(batchId,index);
       let stored=records.get(inputId),hops=0;const visited=new Set([inputId]);
@@ -176,7 +176,8 @@ export function createBatchStore(db,{acceptCreate}){
         observed.accountId===record.accountId&&observed.remoteId===record.remoteId&&
         (record.state.startsWith('GIT_')||record.state==='ASSOCIATED_NOT_READY');
       const category=held?'HELD':confirmed?'CONFIRMED':'WORKING';
-      if(confirmed)counts.confirmed++;if(held)counts.held++;if(!confirmed&&!held)counts.working++;
+      if(confirmed){counts.confirmedInputs++;confirmedResources.add(JSON.stringify([record.accountId,record.remoteId]));}
+      if(held)counts.held++;if(!confirmed&&!held)counts.working++;
       const row={index,slug,inputId,intentId:record?.intentId||null,
         coalesced:!!record&&record.intentId!==inputId,
         revision:record?.revision||null,accountId:record?.accountId||batch.accountId||null,
@@ -190,6 +191,7 @@ export function createBatchStore(db,{acceptCreate}){
       if((status==='ALL'||status==='HELD'&&held||status==='CONFIRMED'&&confirmed||status==='WORKING'&&!held&&!confirmed)&&
          (!query||slug.includes(query.toLowerCase())))matching.push(row);
      }
+     counts.confirmed=confirmedResources.size;
      done({ok:true,batch:view(batch),items:matching.slice(offset,offset+limit),total:matching.length,
        counts,more:offset+limit<matching.length,providerEffects:'OFF'});
     };

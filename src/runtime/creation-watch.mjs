@@ -1,3 +1,4 @@
+import {createScopedCreationGate} from './creation-authority.mjs';
 // S04 bounded no-dashboard wake. A due alarm is only a hint: canonical
 // revisions, guards and operation receipts remain the source of truth.
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
@@ -12,13 +13,13 @@ const CURSOR='pcmsS04QueueCursor';
 const BATCH_CURSOR='pcmsS04BatchCursor';
 const ID=/^[A-Za-z0-9_-]{8,100}$/;
 export function createCreationWatcher(api,{open=openCanonicalDatabase,
-  createRunner=createCreationRunner,clock=Date.now,maxPerWake=8}={}){
+  createRunner=createCreationRunner,clock=Date.now,maxPerWake=8,authority=standingS06}={}){
   if(!Number.isSafeInteger(maxPerWake)||maxPerWake<1||maxPerWake>32)
     throw Error('INVALID_WAKE_BUDGET');
   let pending=null,registered=false,dbPromise;
   const sentinel=createRestoreSentinel(api.storage.local);
   const runner=createRunner(api,{open,
-    effectGate:()=>standingS06?.gate('development')===true,
+    effectGate:createScopedCreationGate(authority),
     gitGate:()=>standingS06?.gate('gitWrite')===true});
   async function tick(){
     if(pending)return pending;
