@@ -46,6 +46,14 @@ export function createDiagnosticRun(config,hex,now){
    created:false,remoteArtifactsPreserved:true,
    cleanup:'NOT_ATTEMPTED'}};
 }
+// A07: an incomplete already-executed diagnostic is not a new run.
+// Only a pristine initial SCOPE checkpoint can be started under the same ID.
+// Any subsequent deliberate rerun allocates a NEW slug and operation intent.
+export function canStartNewDiagnostic(run){
+  return run==null || (run.version===1&&run.status==='NOT_TESTED'&&
+    run.stage==='SCOPE'&&Array.isArray(run.events)&&run.events.length===0&&
+    run.firstFailure==null);
+}
 export function addDiagnosticEvent(run,stage,outcome,code,now){
  if(!STAGES.includes(stage)||!['PASS','NOT_TESTED','HELD','UNCERTAIN'].includes(outcome)||
    typeof code!=='string'||!/^[A-Z0-9_]{1,110}$/.test(code)||
