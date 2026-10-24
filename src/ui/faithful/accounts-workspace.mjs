@@ -24,6 +24,11 @@ const ERRORS={ACCOUNT_BUSY:'This account is finishing another action. Other acco
  ACCOUNT_ARCHIVED:'Reactivate this account before resuming its managed work.'};
 export const accountLabel=a=>a.removed?'Removed':a.state==='VERIFIED'&&a.route?.status==='HELD'?'Route needs attention':
  a.state==='VERIFIED'&&a.route?.status==='CHECKING'?'Checking route':LABELS[a.state]||'Needs attention';
+export function accountGrowthAdvice(accounts){
+ const managed=accounts.filter(a=>a.state!=='ARCHIVED'&&!a.removed);
+ return managed.length>0&&managed.every(a=>a.inventory?.known===true&&
+  Number.isSafeInteger(a.inventory.verifiedOwned)&&a.inventory.verifiedOwned>=60);
+}
 export function accountActions(a){
  if(a.removed)return [];
  if(a.state==='ARCHIVED')return ['REACTIVATE','REMOVE_ACCOUNT'];

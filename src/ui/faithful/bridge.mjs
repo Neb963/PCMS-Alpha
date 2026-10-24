@@ -1,4 +1,4 @@
-import {createAccountsWorkspace} from './accounts-workspace.mjs';
+import {createAccountsWorkspace,accountGrowthAdvice} from './accounts-workspace.mjs';
 import {advanceApprovedPublication} from './publication-flow.mjs';
 import {mountPortableRestore} from '../restore-view.mjs';
 import {portableRestoreTemplate} from './portable-restore-template.mjs';
@@ -727,6 +727,10 @@ function displayAccounts(){if(state.route!=='accounts')return;
  }
  const pagination=shadow('.pagination span');if(pagination)pagination.textContent=state.errors.accounts?'Account read unavailable':
   String(displayed.length?offset+1:0)+'–'+Math.min(offset+state.acct.perPage,displayed.length)+' of '+displayed.length+' accounts';
+ const advice=shadow('#page .action-callout');
+ if(advice)advice.textContent=!state.errors.accounts&&accountGrowthAdvice(all)?
+  'Every managed account has at least 60 confirmed owned generators. Consider adding another account.':
+  'Open an account to manage its login, protected route, inventory and recovery.';
  const prev=shadow('[data-action="account-prev"]'),next=shadow('[data-action="account-next"]');
  if(prev)prev.disabled=state.acct.page===0;if(next)next.disabled=offset+state.acct.perPage>=displayed.length;
 }

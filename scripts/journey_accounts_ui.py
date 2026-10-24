@@ -164,6 +164,10 @@ def run(browser, archive, folder):
         assert len(data["ledger"]["owners"])>=2,data
         capture(session,"ready-route-and-inventory",evidence)
 
+        # Advisory uses verified owned counts, never pending or unknown zero.
+        oracle(session,"await window.__j01.inventoryCount(60);return true;")
+        command(session,"SYNC_ACCOUNT")
+        wait(session,"sh?.querySelector('#page .action-callout')?.textContent.includes('Consider adding another account')","J01_GROWTH_ADVICE")
         # The primary Upgrade control migrates a genuine historical account
         # in place; legacy storage is seeded through production transitions.
         close_dialog(session)
@@ -203,8 +207,15 @@ def run(browser, archive, folder):
         fixture(session)
         wait(session,"sh?.querySelectorAll('[data-account-id]').length===2","J01_RESTART_ROWS")
         assert canonical_state(session,account_id,"VERIFIED"),oracle(session)
+        # Controlled production upkeep reconstructs from persisted fixture
+        # stores. This is not a claim of real background/provider acceptance.
+        recovery=oracle(session,"return await window.__j01.recover();")
+        assert recovery.get("ok") is True,recovery
         after=oracle(session)
-        assert len(before["effects"])==len(after["effects"]),"J01_RESTART_REPLAYED_EFFECT"
+        # Read-only assigned probes may recur; creation/assignment/removal
+        # effects must not replay after process restart.
+        mutations=lambda data:[e for e in data["effects"] if e["kind"] not in ("PROBE","PROBE_ASSIGNED")]
+        assert mutations(before)==mutations(after),"J01_RESTART_REPLAYED_EFFECT"
         print("B J01_PRIMARY_LOGIN_INVENTORY_ROUTE_AND_COLD_RESTART=PASS; PROVIDERS=OFFLINE_FIXTURES",flush=True)
 
         # A second held account cannot disable the first or other workspaces.
@@ -218,6 +229,7 @@ def run(browser, archive, folder):
             if second and second.get("setup",{}).get("phase")=="HELD":break
             time.sleep(.15)
         assert second and second["state"]=="PREPARING" and second["setup"]["phase"]=="HELD",data
+        wait(session,"!sh?.querySelector('#page .action-callout')?.textContent.includes('Consider adding another account')","J01_UNKNOWN_COUNT_DEFERS_ADVICE")
         if b.execute(session,"return !!document.getElementById('pcms-faithful-host').shadowRoot.querySelector('.account-dialog')"):close_dialog(session)
         manage(session,account_id)
         # Inventory reading is independent of new route setup/helper failure.
@@ -248,6 +260,7 @@ def run(browser, archive, folder):
         command(session,"ARCHIVE",True)
         wait_state(session,account_id,"ARCHIVED")
         wait(session,"!!sh?.querySelector('[data-account-remove]')&&!sh.querySelector('[data-account-remove]').hidden","J01_REMOVE_READY")
+        before_removal=next(a for a in oracle(session)["accounts"] if a["accountId"]==account_id)
         click(session,'[data-account-remove]')
         click(session,'.account-removal input[type="checkbox"]')
         command(session,"REMOVE_ACCOUNT")
@@ -257,7 +270,10 @@ def run(browser, archive, folder):
             if removed.get("removed"):break
             time.sleep(.15)
         assert removed.get("removed",{}).get("personaDeleted") is True,data
-        assert removed["boundPrincipal"]==original["boundPrincipal"] and len(data["ledger"]["owners"])>=2,data
+        assert removed["boundPrincipal"] is None and removed["identity"] is None and removed["personaUid"] is None,removed
+        assert sum(owner==account_id for owner in data["ledger"]["owners"].values())>=2,data
+        assert not any(p["personaUid"]==before_removal["personaUid"] for p in data["profiles"]),data
+        assert any(e["kind"]=="PERSONA_REMOVE" and e["personaUid"]==before_removal["personaUid"] for e in data["effects"]),data
         removal=[m for m in data["commands"] if m["type"]=="REMOVE_ACCOUNT"]
         assert removal[-1]["params"]["explicitRemoval"] is True and removal[-1]["params"]["deletePersona"] is True,removal
         capture(session,"recovery-and-removal",evidence)
@@ -278,6 +294,7 @@ def run(browser, archive, folder):
         command(session,"ARCHIVE",True)
         wait_state(session,second["accountId"],"ARCHIVED")
         wait(session,"!!sh?.querySelector('[data-account-remove]')&&!sh.querySelector('[data-account-remove]').hidden","J01_KEEP_PERSONA_REMOVE")
+        before_keep=next(a for a in oracle(session)["accounts"] if a["accountId"]==second["accountId"])
         click(session,'[data-account-remove]')
         command(session,"REMOVE_ACCOUNT")
         until=time.monotonic()+30
@@ -286,7 +303,9 @@ def run(browser, archive, folder):
             if kept.get("removed"):break
             time.sleep(.15)
         assert kept.get("removed",{}).get("personaDeleted") is False,kept
-        assert any(p["personaUid"]==kept["personaUid"] for p in final["profiles"]),final
+        assert kept["personaUid"] is None and kept["identity"] is None and kept["boundPrincipal"] is None,kept
+        assert any(p["personaUid"]==before_keep["personaUid"] for p in final["profiles"]),final
+        assert not any(e["kind"]=="PERSONA_REMOVE" and e["personaUid"]==before_keep["personaUid"] for e in final["effects"]),final
         print("B J01_PRIMARY_LEGACY_UPGRADE_LIMITED_EXCEPTION_AND_REMOVAL_SCOPE=PASS; PROVIDERS=OFFLINE_FIXTURES",flush=True)
 
         pathlib.Path("build/j01-ui-evidence.json").write_text(json.dumps(evidence,indent=2))

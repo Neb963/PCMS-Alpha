@@ -155,9 +155,10 @@ export async function installJourneyFixture(){
  const inventory=createInventoryBoundary(api,{open,guard:()=>guard,inventoryReader:async(ctx)=>{
   if(controls.inventoryFailure)return {ok:false,code:'INVENTORY_UNAVAILABLE'};
   return {source:'GUARDED_PERCHANCE_READBACK',complete:true,...ctx,observationId:'j01_inventory_'+crypto.randomUUID(),
-   observedAt:Date.now(),generators:[{slug:'j01-owned-'+ctx.accountId.slice(-8),remoteId:'j01_remote_'+ctx.accountId.slice(-8),
+   observedAt:Date.now(),generators:Array.from({length:controls.inventoryCount||1},(_,i)=>({
+    slug:'j01-owned-'+ctx.accountId.slice(-8)+(i?'-'+i:''),remoteId:'j01_remote_'+ctx.accountId.slice(-8)+'_'+i,
     ownerResult:'IS_OWNER',ownerPrincipalFingerprint:ctx.principalFingerprint,
-    ownerObservationId:'j01_owner_'+crypto.randomUUID(),visibility:'UNLISTED'}]};
+    ownerObservationId:'j01_owner_'+crypto.randomUUID(),visibility:'UNLISTED'}))};
  }});
  const boundary=createAccountBoundary(api,{open,guard:()=>guard,
   pins:{hold:pin.holdRoutePin,release:pin.releaseRoutePinHold,reload:pin.reloadRoutePins},
@@ -188,6 +189,8 @@ export async function installJourneyFixture(){
     effects:structuredClone(d.effects),profiles:[...d.profiles.values()],opened:structuredClone(opened),commands:structuredClone(commands)}},
   async session(accountId,principal){const a=(await accounts.get(accountId)).account;
    if(principal)sessions.set(a.personaUid,principal);else sessions.delete(a.personaUid);await save()},
+  async inventoryCount(value){controls.inventoryCount=value;await save()},
+  async recover(){return boundary.upkeep()},
   async inventoryFailure(value){controls.inventoryFailure=value;await save()},
   async helperFailure(value){d.faults.host=value;await save()},
   async legacy(){const p=d.legacyPersona('10.124.0.12'),accountId='j01_legacy_account';

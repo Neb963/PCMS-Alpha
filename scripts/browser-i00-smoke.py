@@ -942,7 +942,11 @@ def s01_legacy_and_archive(session,uuid,oracle,privacy_safe,added_id):
     legacy=next(a for a in listed['accounts'] if a['accountId']=='legacy_account_ci01')
     assert legacy['protectedRoute']=='LEGACY_UNPINNED',legacy
     started=account_command(session,{'type':'UPGRADE_ACCOUNT','params':{'accountId':'legacy_account_ci01','expectedRevision':2}})
-    assert started.get('ok') is True,started
+    # The production boundary now awaits the actual upgrade result. Missing
+    # native service is a real HELD receipt, not a fabricated started-success.
+    assert started.get('ok') is False and started.get('code') in (
+        'MULLVAD_LOCAL_SERVICE_UNAVAILABLE','NO_ROUTE_CANDIDATES',
+        'NO_UNIQUE_EXIT_AVAILABLE'),started
     legacy=_wait_account(session,'legacy_account_ci01',lambda a:a.get('upgrade',{}) and a['upgrade'].get('phase') in ('HELD','COMPLETE'))
     # No native Mullvad helper in CI: the route step holds, but identity is intact.
     assert legacy['upgrade']['phase']=='HELD',legacy
