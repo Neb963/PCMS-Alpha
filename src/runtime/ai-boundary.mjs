@@ -31,7 +31,7 @@ function encodeUtf8(text){
 }
 const SLUG=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const ACT=new Set(['GET_PROMPTS','SET_PROMPT','IMPORT_PROMPT','EXPORT_PROMPTS',
-  'LIST_JOBS','GET_JOB','SET_PAUSED','GIVE_INSTRUCTIONS','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS',
+  'LIST_JOBS','GET_JOB','SET_PAUSED','GIVE_INSTRUCTIONS','ADMIT_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS',
   'GET_CONCURRENCY','SET_CONCURRENCY','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2']);
 export function validateAiMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
@@ -47,12 +47,12 @@ export function validateAiMessage(api,sender,message){
     ['SET_PAUSED','GIVE_INSTRUCTIONS'].includes(message.type)?['slug','expectedRevision','expectedControlRevision',...(message.type==='SET_PAUSED'?['paused']:['instructions'])]:
     message.type==='PREPARE_JOB'?['slug','expectedStageRevision','token']:
     message.type==='BEGIN_NATIVE'?['slug','expectedRevision','step']:
-    ['PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)?['slug','expectedRevision']:
+    ['ADMIT_JOB','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)?['slug','expectedRevision']:
     message.type==='SET_CONCURRENCY'?['perAccount','expectedRevision']:
     message.type==='SET_PROMPT'?['text','tests','expectedRevision']:
     message.type==='IMPORT_PROMPT'?['envelope','expectedRevision']:[];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
-  if(['SET_PAUSED','GIVE_INSTRUCTIONS','GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&!SLUG.test(p.slug||''))
+  if(['ADMIT_JOB','SET_PAUSED','GIVE_INSTRUCTIONS','GET_JOB','PREPARE_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&!SLUG.test(p.slug||''))
     return fail('INVALID_SLUG');
   if(['SET_PAUSED','GIVE_INSTRUCTIONS'].includes(message.type)&&
     (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||!Number.isSafeInteger(p.expectedControlRevision)||p.expectedControlRevision<1||
@@ -62,7 +62,7 @@ export function validateAiMessage(api,sender,message){
       (p.token!==undefined&&
      (typeof p.token!=='string'||p.token.length<10||p.token.length>512))))
     return fail('INVALID_PARAMS');
-  if(['BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&
+  if(['ADMIT_JOB','BEGIN_NATIVE','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)&&
      (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||
       (message.type==='BEGIN_NATIVE'&&
        !['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','CHAT1_INSTRUCT','CHAT2_INSTRUCT','STOP'].includes(p.step))))
@@ -111,6 +111,7 @@ export function createAiBoundary(api,{
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(['SET_PAUSED','GIVE_INSTRUCTIONS'].includes(message.type))return store.operatorControl(p.slug,p.expectedRevision,p.expectedControlRevision,
         message.type==='SET_PAUSED'?{paused:p.paused}:{instructions:p.instructions});
+      if(message.type==='ADMIT_JOB')return store.admitExecutionSlot(p.slug,p.expectedRevision);
       // A fresh coherent READY successor revokes advancement authority for
       // the older AI candidate. Read-only PROBE_NATIVE remains available for
       // uncertain-session reconciliation; it never starts a new mutation.

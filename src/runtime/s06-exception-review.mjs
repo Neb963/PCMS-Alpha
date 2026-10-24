@@ -4,7 +4,7 @@
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {evaluation} from './ai-evidence.mjs';
 import {exactSource} from './staging-core.mjs';
-import {captureExceptionalIdle,validExceptionalIdleProof} from './exception-idle.mjs';
+import {captureExceptionalIdle,validExceptionalIdleProof,exceptionalIdleEvidence} from './exception-idle.mjs';
 import {createStagingStore} from './staging-store.mjs';
 import {createAiStore} from './ai-store.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
@@ -20,6 +20,7 @@ const INFRASTRUCTURE=new Set([
  'AI_TEST_INFRASTRUCTURE_UNAVAILABLE','AI_ORACLE_UNAVAILABLE',
  'AI_NATIVE_SESSION_UNAVAILABLE','AI_CHAT2_ISOLATION_UNVERIFIED',
  'AI_SCHEDULER_BRIDGE_UNAVAILABLE'
+ ,'NATIVE_HELPER_UNAVAILABLE','AI_PROVIDER_NOT_AVAILABLE','NATIVE_AI_GUARD_UNAVAILABLE'
 ]);
 export const hasManualInfrastructure=job=>[job?.hold,job?.schedulerHold].some(code=>typeof code==='string'&&INFRASTRUCTURE.has(code.replace(/^AI_WAKE_/,'')));
 const validChecks=(checks,required)=>Array.isArray(checks)&&
@@ -41,7 +42,8 @@ export function assessS06Exception({ready,stage,job,mode,checks}={}){
      job.readyInputFingerprint!==active.inputFingerprint||
      stage.state!=='SOURCE_VERIFIED'||!stage.verifiedAt||
      job.executionSlotReleased!==true||
-     !['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(job.native?.state)||
+     !(mode==='MANUAL_INFRASTRUCTURE'&&job.exceptionQuiescence==='NEVER_DISPATCHED_SOURCE'&&job.exceptionFrozen&&!job.native||
+       ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(job.native?.state))||
      !fp(job.sourceFingerprint)||job.finalSource?.fingerprint!==job.sourceFingerprint||
      !Array.isArray(job.finalSource?.blobs))
     return fail('S06_EXCEPTION_CANONICAL_SOURCE_UNVERIFIED');
@@ -132,7 +134,9 @@ export function createS06ExceptionStore(db){
          const ready=rr.target.result?.record,stage=ss.target.result?.record,
           job=jj.target.result?.job,release=pub.target.result?.release;
          const freeze=validExceptionalIdleProof(idleProof,stage,job);
-         const settled=freeze?{...job,executionSlotReleased:true}:job;
+         const evidence=exceptionalIdleEvidence(idleProof,stage,job);
+         const settled=freeze?{...job,revision:job.revision+1,executionSlotReleased:true,exceptionFrozen:true,
+          finalSource:evidence.source,exceptionQuiescence:evidence.kind}:job;
          const admit=assessS06Exception({ready,stage,job:settled,mode,checks});
          if(!admit.ok){done(admit);return;}
          if(stage.revision!==expectedStageRevision||
@@ -152,7 +156,7 @@ export function createS06ExceptionStore(db){
          }
          const rec={slug:name,revision:(previous?.revision||0)+1,
           state:'RECORDED',mode,sourceFingerprint,
-          stageRevision:stage.revision,jobRevision:job.revision,
+          stageRevision:stage.revision,jobRevision:settled.revision,
           readyIdentifier:ready.active.identifier,
           readyInputFingerprint:ready.active.inputFingerprint,
           manualChecks:checks.map(x=>({name:x.name,result:'PASS',

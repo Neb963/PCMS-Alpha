@@ -1,4 +1,5 @@
 import {createLocalSourceReview} from './source-review.mjs';
+import {captureExceptionalIdle,exceptionalIdleEvidence} from './exception-idle.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I13 guarded source-bound human release. Same-XPI background authority;
 // UI supplies ONLY slug, expected revisions, explicit approval and ephemeral
@@ -179,7 +180,7 @@ export function createReleaseBoundary(api,{
       reply.credential.length>=12&&reply.credential.length<=512&&
       /^[\x21-\x7e]+$/.test(reply.credential)?reply.credential:null;
   }
-  async function checkCurrent(database,name,token,{requireEditor=true}={}){
+  async function checkCurrent(database,name,token,{requireEditor=true,physicalManualEditor=false}={}){
     const stage=await stageFactory(database).getFull(name),
       job=await aiFactory(database).getJobFull(name),
       facts=await ownerFacts(database,name);
@@ -253,13 +254,19 @@ export function createReleaseBoundary(api,{
       return fail('RELEASE_DONOR_GUARD_UNAVAILABLE');
     const route=await g.getSafeRouteReadiness(r.personaUid);
     if(!route?.ready)return fail(route?.code||'ROUTE_UNVERIFIED');
-    const native=await g.runNativeAiStep(r.personaUid,{
-      slug:r.slug,nonce:r.nonce,action:'OBSERVE'});
-    const editor=await g.inspectStageEditor(r.personaUid,r.slug,r.nonce);
-    const safe=releaseEditorContext({stage:r,route,previousRoute:route,native,editor});
-    if(requireEditor&&!safe.ok)return safe;
-    if(native?.sessionDigest!==j.native?.sessionDigest)
-      return fail('AI_SESSION_CHANGED');
+    let native=null,editor;
+    if(tests.mode==='EXCEPTION_MANUAL_REVIEW'&&j.exceptionQuiescence==='NEVER_DISPATCHED_SOURCE'&&!j.native){
+      const proof=await captureExceptionalIdle({guard:g,stage:r,job:j,held:async()=>(await sentinel.inspect()).held}),evidence=exceptionalIdleEvidence(proof,r,j);
+      if(!evidence)return fail(proof.code||'MANUAL_SOURCE_UNVERIFIED');
+      editor=evidence.editor;
+      if(physicalManualEditor&&editor.noEditors)return fail('MANUAL_PUBLICATION_EDITOR_PENDING');
+    }else{
+      native=await g.runNativeAiStep(r.personaUid,{slug:r.slug,nonce:r.nonce,action:'OBSERVE'});
+      editor=await g.inspectStageEditor(r.personaUid,r.slug,r.nonce);
+      const safe=releaseEditorContext({stage:r,route,previousRoute:route,native,editor});
+      if(requireEditor&&!safe.ok)return safe;
+      if(native?.sessionDigest!==j.native?.sessionDigest)return fail('AI_SESSION_CHANGED');
+    }
     const remote=await readRemote(g,r);
     if(!remote.ok)return remote;
     if(remote.packet.visibility!=='UNLISTED'||
@@ -293,11 +300,12 @@ export function createReleaseBoundary(api,{
       const [stage,job,ready]=await Promise.all([
         stageFactory(database).getFull(p.slug),aiFactory(database).getJobFull(p.slug),
         createReadyStore(database).get(p.slug)]);
+      const saved=job?.job?.finalSource||(!job?.job?.native?stage?.record?.candidate:null);
       if(!stage.ok||!job.ok||!ready.ok||
         job.job.stageRevision!==stage.record.revision||
         ready.record.active?.identifier!==stage.record.readyIdentifier||
         ready.record.active?.inputFingerprint!==stage.record.readyInputFingerprint||
-        !job.job.finalSource||job.job.finalSource.fingerprint!==job.job.sourceFingerprint)
+        !saved||saved.fingerprint!==job.job.sourceFingerprint)
         return fail('S06_EXCEPTION_CONTEXT_UNAVAILABLE');
       const verdict=evaluation(job.job);
       return {ok:true,slug:p.slug,stageRevision:stage.record.revision,
@@ -322,7 +330,7 @@ export function createReleaseBoundary(api,{
         return fail('S06_HUMAN_CONTEXT_UNAVAILABLE');
       return {ok:true,slug:p.slug,stageRevision:stage.record.revision,
         jobRevision:job.job.revision,sourceFingerprint:job.job.verifiedFinal,
-        human:human.ok?human:null,publication:'NO_ACTION'};
+        human:human.ok?human:null,tested:job.job.state==='TESTS_VERIFIED',publication:'NO_ACTION'};
     }
     if(msg.type==='DEFER_HUMAN'){
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
@@ -399,7 +407,16 @@ export function createReleaseBoundary(api,{
         proof:evidence.ok?evidence:null,reason:evidence.code||'PUBLICATION_UNCERTAIN'
       });
     }
-    const checked=await checkCurrent(database,p.slug,token);
+    if(msg.type==='DISPATCH'){
+      const [release,job,stage]=await Promise.all([store.getFull(p.slug),aiFactory(database).getJobFull(p.slug),stageFactory(database).getFull(p.slug)]);
+      if(release.ok&&release.record.state==='APPROVED'&&release.record.revision===p.expectedRevision&&job.ok&&stage.ok&&
+        job.job.exceptionQuiescence==='NEVER_DISPATCHED_SOURCE'&&!job.job.native){
+        if(effectGate({phase:'I13',record:release.record})!==true)return fail('PUBLICATION_ACTIVATION_HELD');
+        const prepared=await guard()?.prepareManualEditor?.(stage.record.personaUid,p.slug,stage.record.nonce);
+        if(!prepared?.ok)return fail(prepared?.code||'MANUAL_PUBLICATION_EDITOR_PENDING');
+      }
+    }
+    const checked=await checkCurrent(database,p.slug,token,{physicalManualEditor:msg.type==='DISPATCH'});
     if(!checked.ok)return checked;
     const change=await createS06ChangeStore(database).get(p.slug);
     if(change.ok&&change.state==='REQUESTED')
@@ -510,7 +527,10 @@ export function createReleaseBoundary(api,{
       });
     });
   }
-  return Object.freeze({register,run});
+  return Object.freeze({register,run,runTrusted:async msg=>{
+    if(!['GET','PREVIEW','APPROVE','DISPATCH','RECONCILE'].includes(msg?.type))return fail('COMMAND_NOT_ALLOWED');
+    try{return await runTrusted(msg)}catch{return fail('RELEASE_CANONICAL_HOLD')}
+  }});
 }
 if(typeof browser!=='undefined')createReleaseBoundary(browser,{
   effectGate:()=>standingS06?.gate('publication')===true}).register();

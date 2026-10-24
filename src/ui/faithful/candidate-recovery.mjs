@@ -18,9 +18,9 @@ export async function mountHumanRecovery({container,slug,el,b,request,onChanged}
   const human=r.human;
   if(human?.state==='DEFERRED'){
    details.open=true;actions.append(b('Open human editor',()=>void act('OPEN_HUMAN_EDITOR',{expectedRevision:human.revision})),b('Adopt saved human changes',()=>void act('ADOPT_HUMAN',{expectedRevision:human.revision}),'btn primary'));
-  }else if(human?.state==='ADOPTED_UNTESTED'){
+  }else if(human?.state==='ADOPTED_UNTESTED'&&!r.tested){
    note.textContent=human.reclaimPending?'The saved candidate is held while editor recovery finishes.':'Human source adopted. It needs independent tests and fresh review.';
-   if(human.reclaimPending){details.open=true;actions.append(b('Finish adopting saved changes',()=>void act('ADOPT_HUMAN',{expectedRevision:human.revision}),'btn primary'))}
+   if(human.reclaimPending)details.open=true;actions.append(b(human.reclaimPending?'Finish adopting saved changes':'Adopt latest saved human source',()=>void act('ADOPT_HUMAN',{expectedRevision:human.revision}),'btn primary'))
   }else if(/^[a-f0-9]{64}$/.test(r.sourceFingerprint||''))actions.append(b('Defer for human editing',()=>void act('DEFER_HUMAN',{
    expectedStageRevision:r.stageRevision,expectedJobRevision:r.jobRevision,expectedFingerprint:r.sourceFingerprint})));
   else note.textContent='The current source is still in development. Use development controls to pause or give instructions.';
@@ -32,6 +32,12 @@ export async function mountExceptionalReview({container,slug,el,b,request,onChan
  if(!view?.ok||view.evidenceState==='TESTS_VERIFIED')return;
  const details=el('details','candidate-exception-review');details.append(el('summary','','Testing recovery'));
  const note=el('p','setting-note'),status=el('p','setting-note');status.setAttribute('role','status');details.append(note);container.append(details);
+ let recorded;try{recorded=await request('GET_EXCEPTION',{slug})}catch{}
+ if(recorded?.ok&&recorded.stageRevision===view.stageRevision&&recorded.jobRevision===view.jobRevision&&recorded.sourceFingerprint===view.sourceFingerprint){
+  note.textContent='Exceptional review saved. It remains individual and does not claim complete AI verification.';
+  for(const check of recorded.manualChecks||[])details.append(el('p','setting-note',check.name+' · '+check.observation));
+  return;
+ }
  if(view.evidenceState==='KNOWN_FAILURE'){note.textContent='A required test has failed. Continue development or correct the Git-owned test; manual review cannot override this failure.';return}
  if(!view.manualInfrastructureObserved&&!(view.optionalConfigured&&view.chat1Verified&&!view.chat2Verified)){
   note.textContent='Independent testing is still pending. PCMS will continue when the account and testing service are available.';return;

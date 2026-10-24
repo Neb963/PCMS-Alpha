@@ -12,13 +12,13 @@ import {createS06HumanStore} from './s06-human-review.mjs';
 import {createS06ExceptionStore} from './s06-exception-review.mjs';
 import {planS06Writeback} from './s06-writeback-progress.mjs';
 const fail=code=>({ok:false,code});
-export function s06ReviewStatus({decision,release,change,human,exception,sourceFingerprint,stageRevision}={}){
+export function s06ReviewStatus({decision,release,change,human,exception,sourceFingerprint,stageRevision,parentStageRevision}={}){
   const r=release?.record||release;
   // An uncertain release cannot be reapproved from a new queue projection.
   if(r&&['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN',
       'RECOVERY_HOLD'].includes(r.state))
     return {state:'PUBLICATION_UNCERTAIN',code:'RECONCILE_ONLY'};
-  if(human?.state==='DEFERRED'&&human.parentStageRevision===stageRevision)
+  if(human?.state==='DEFERRED'&&[stageRevision,parentStageRevision].includes(human.parentStageRevision))
     return {state:'HUMAN_DEFERRED',code:'PRESERVE_EDITOR_WORK_ADOPT_OR_DEFER'};
   if(human?.state==='ADOPTED_UNTESTED'&&
      human.childStageRevision===stageRevision&&!decision?.ok)
@@ -33,7 +33,7 @@ export function s06ReviewStatus({decision,release,change,human,exception,sourceF
     return {state:'IN_DEVELOPMENT',code:'REQUEST_CHILD_RETESTING'};
   if(r?.state==='APPROVED')
     return r.approval?.sourceFingerprint===sourceFingerprint?
-      {state:'APPROVED',code:'HUMAN_APPROVAL_HELD_FOR_DISPATCH'}:
+      {state:r.progressHold?'APPROVED_HELD':'APPROVED',code:r.progressHold||'HUMAN_APPROVAL_HELD_FOR_DISPATCH'}:
       {state:'BLOCKED',code:'PRIOR_APPROVAL_SOURCE_CHANGED'};
   if(r?.state==='CONFIRMED_PUBLIC'&&r.approval?.sourceFingerprint===sourceFingerprint)
     return {state:'CONFIRMED_PUBLIC',code:'INDEPENDENT_PUBLIC_READBACK'};
@@ -87,9 +87,10 @@ export function createS06ReviewQueue(db){
         release:release.ok?release:null,sourceFingerprint,
         change:change.ok?change:null,human:human.ok?human:null,
         exception:exception.ok?exception:null,
-        stageRevision:stage.ok?stage.record.revision:null});
+        stageRevision:stage.ok?stage.record.revision:null,
+        parentStageRevision:stage.ok?stage.record.handoffParentRevision:null});
       if(!matchesReviewGroup(status.state,requestedGroup))continue;
-      items.push({slug:item.slug,revision:item.revision,
+      items.push({slug:item.slug,revision:item.revision,development:job.ok,readyCandidate:item,
         state:status.state,code:status.code,
         sourceFingerprint:decision.ok&&decision.type==='REVIEW'?
           decision.sourceFingerprint:null,

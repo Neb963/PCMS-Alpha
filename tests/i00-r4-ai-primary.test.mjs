@@ -32,13 +32,8 @@ test('R4 AI primary queue: only exact typed, revision-bound native steps are eli
 test('R4 AI main controls use live canonical stage/job revisions and safe recovery',async()=>{
  const ui=await readFile(new URL('../src/ui/faithful/bridge.mjs',import.meta.url),'utf8');
  const page=await readFile(new URL('../src/ui/faithful/work-queue.html',import.meta.url),'utf8');
- assert.match(page,/data-action="prepare-ai"/);
- assert.match(ui,/openAiPreparation\(/);
- assert.match(ui,/readPort\('pcms-i09-staging','GET_STAGE',\{slug:slug\.value\}/);
- assert.match(ui,/expectedStageRevision:stage\.revision/);
- assert.match(ui,/readPort\('pcms-i10-ai','LIST_JOBS'/);
- assert.match(ui,/readPort\('pcms-i10-ai','GET_JOB',\{slug\}/);
- assert.match(ui,/expectedRevision:j\.revision/);
- assert.match(ui,/The outcome is uncertain\. Do not resend a native AI command/);
+ assert.doesNotMatch(page,/data-action="prepare-ai"/);
+ assert.match(ui,/Pause development/);assert.match(ui,/Resume development/);assert.match(ui,/Give new instructions/);
+ assert.doesNotMatch(ui,/Start Chat 1|Reset Chat 2|Advance guarded step|Verify stage and prepare/);
  assert.doesNotMatch(ui,/nativeRoute\('work-queue','ai'\)/);
 });

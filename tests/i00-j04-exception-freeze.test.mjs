@@ -2,6 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {fakeDatabase} from './fake-idb.mjs';import {exactSource} from '../src/runtime/staging-core.mjs';
 import {createS06ExceptionBoundary,createS06ExceptionStore,authorizeS06Exception} from '../src/runtime/s06-exception-review.mjs';
 import {planAiStep} from '../src/runtime/ai-supervisor.mjs';
+import {createAiStore} from '../src/runtime/ai-store.mjs';
 const slug='exception-idle',F='a'.repeat(64),session='b'.repeat(64),nonce='c'.repeat(32);
 const put=(db,...rows)=>new Promise(resolve=>{const t=db.transaction('meta','readwrite');t.oncomplete=resolve;for(const r of rows)t.objectStore('meta').put(r)});
 async function fixture(mode,adverse=''){
@@ -24,10 +25,16 @@ async function fixture(mode,adverse=''){
 test('J04 explicit exceptional review freezes only independently settled exact saved source without inventing test PASS',async()=>{
  for(const mode of ['MANUAL_INFRASTRUCTURE','OPTIONAL_CHAT2_INCOMPLETE']){const f=await fixture(mode);
   const r=await f.boundary.runTrusted({type:'RECORD_EXCEPTION',params:f.params});assert.equal(r.ok,true,JSON.stringify(r));
-  const job=f.db.read('meta','ai-job:'+slug).job;assert.equal(job.revision,5);assert.equal(job.executionSlotReleased,true);assert.equal(job.verifiedFinal,null);
+  const job=f.db.read('meta','ai-job:'+slug).job;assert.equal(job.revision,6);assert.equal(job.executionSlotReleased,true);assert.equal(job.verifiedFinal,null);
   assert.equal(job.state,'TESTS_UNVERIFIED');assert.equal(planAiStep(job).code,'AI_VERIFIED_REVIEW_REQUIRED');
   assert.equal(authorizeS06Exception({ready:f.ready,stage:f.stage,job,record:f.db.read('meta','s06-exception:'+slug).record}).ok,true);
   assert.equal(f.observations(),2);assert.equal(f.db.keys('operations').length,0);
+  const store=createAiStore(f.db),pause=await store.operatorControl(slug,job.revision,1,{paused:true});assert.equal(pause.ok,true);
+  const resumed=await store.operatorControl(slug,job.revision,pause.controlRevision,{paused:false});assert.equal(resumed.ok,true);assert.equal(resumed.slotReleased,true);
+  const current=(await store.getJobFull(slug)).job;assert.equal(current.revision,6);assert.equal(current.awaitingExecutionSlot,undefined);
+  assert.equal(authorizeS06Exception({ready:f.ready,stage:f.stage,job:current,record:f.db.read('meta','s06-exception:'+slug).record}).ok,true);
+  assert.equal((await store.operatorControl(slug,job.revision,resumed.controlRevision,{instructions:'Try new repairs'})).code,'AI_TESTED_CANDIDATE_REQUEST_CHANGES_REQUIRED');
+  assert.equal((await store.checkpointSource(slug,job.revision,f.source)).revision,6,'readonly same-F probe cannot invalidate frozen exceptional evidence');
  }
 });
 test('J04 pending native work, dirty edits, session/source drift, stale CAS and known failures cannot freeze exceptional review',async()=>{

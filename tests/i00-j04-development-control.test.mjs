@@ -28,9 +28,10 @@ test('J04 pause retains tested revision, prevents effects, preserves pending wor
  assert.equal((await f.boundary().run({type:'BEGIN_NATIVE',params:{slug:name,expectedRevision:1,step:'CHAT1_REPAIR'}},sender)).code,'AI_OPERATOR_PAUSED');assert.equal(f.effects.length,0);
  assert.equal((await f.store.operatorControl(name,1,1,{paused:false})).code,'STALE_REVISION');
  await put(f.db,{key:'ai-job:other',accountId:'account',job:{slug:'other',executionSlotReleased:false}});
- assert.equal((await f.store.operatorControl(name,1,2,{paused:false})).code,'AI_ACCOUNT_CONCURRENCY_HELD');assert.equal((await f.current()).operatorPaused,true);
+ const waiting=await f.store.operatorControl(name,1,2,{paused:false});assert.equal(waiting.ok,true);assert.equal((await f.current()).operatorPaused,false);assert.equal(planAiStep(await f.current()).type,'ADMIT_JOB');
+ assert.equal((await f.store.admitExecutionSlot(name,1)).code,'AI_ACCOUNT_CONCURRENCY_HELD');
  await put(f.db,{key:'ai-job:other',accountId:'account',job:{slug:'other',executionSlotReleased:true}});
- const resumed=await f.store.operatorControl(name,1,2,{paused:false});assert.equal(resumed.ok,true);assert.equal(resumed.slotReleased,false);assert.equal(resumed.revision,1);assert.equal(resumed.evidence.state,'KNOWN_FAILURE');
+ const resumed=await f.store.admitExecutionSlot(name,1);assert.equal(resumed.ok,true);assert.equal(resumed.slotReleased,false);assert.equal(resumed.revision,1);assert.equal(resumed.evidence.state,'KNOWN_FAILURE');
 });
 test('J04 pause stops only an observed active session; restart reconciles without replay and checkpoints before freeing its slot',async()=>{
  const f=await fixture();await put(f.db,{key:'ai-job:'+name,accountId:'account',job:{...f.job,native:{...f.job.native,state:'RUNNING_OBSERVED'}}});

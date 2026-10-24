@@ -48,11 +48,29 @@ const publicJob=j=>j?{ok:true,slug:j.slug,revision:j.revision,state:j.state,
   schedulerHold:typeof j.schedulerHold==='string'?j.schedulerHold:null,
   chat2IsolationVerified:j.chat2?.state==='FRESH_VERIFIED',
   operatorPaused:j.operatorPaused===true,controlRevision:j.controlRevision||1,
+  awaitingExecutionSlot:j.awaitingExecutionSlot===true,exceptionFrozen:j.exceptionFrozen===true,
   pendingInstruction:j.operatorInstruction?{id:j.operatorInstruction.id,
     text:j.operatorInstruction.text,status:j.operatorInstruction.status}:null,
   provider:'GUARDED_NATIVE_AI_DEVELOPMENT_GRANT',
   github:'NO_AI_WRITEBACK',publication:'OFF'}:fail('AI_JOB_NOT_FOUND');
 export function createAiStore(db){
+  function admitExecutionSlot(name,expectedRevision){
+    if(!slug(name)||!Number.isSafeInteger(expectedRevision)||expectedRevision<1)return Promise.resolve(fail('AI_COMMAND_INVALID'));
+    return tx(db,'readwrite',(t,done)=>{const m=t.objectStore('meta');m.get(key(name)).onsuccess=e=>{const row=e.target.result,j=row?.job;
+      if(!j||j.revision!==expectedRevision){done(fail('STALE_REVISION'));return}
+      if(j.awaitingExecutionSlot!==true||j.executionSlotReleased!==true||j.state==='TESTS_VERIFIED'){done(fail('AI_SLOT_ADMISSION_NOT_PENDING'));return}
+      withCurrentReady(m,j,done,()=>m.get('stage:'+name).onsuccess=st=>{const s=st.target.result?.record;
+       if(!s||s.state!=='SOURCE_VERIFIED'||s.revision!==j.stageRevision||s.humanReclaimPending){done(fail('AI_STAGE_OR_HUMAN_RECLAIM_PENDING'));return;}
+       m.get('ai-concurrency').onsuccess=setting=>{const limit=setting.target.result?.setting?.perAccount||1;let active=0;
+        m.openCursor().onsuccess=scan=>{const c=scan.target.result;if(c){if(typeof c.key==='string'&&c.key.startsWith('ai-job:')&&c.key!==key(name)&&c.value.accountId===row.accountId&&!slotReleased(c.value.job))active++;c.continue();return}
+          if(active>=limit){done(fail('AI_ACCOUNT_CONCURRENCY_HELD'));return}
+          const next={...j,awaitingExecutionSlot:false,executionSlotReleased:false,controlRevision:(j.controlRevision||1)+1};m.put({...row,job:next});
+          t.objectStore('events').add({stage:'AI_EXECUTION_SLOT_RESERVED',slug:name,revision:j.revision});done(publicJob(next));
+        };
+       };
+      });
+    }});
+  }
   function operatorControl(name,expectedRevision,expectedControlRevision,{paused,instructions}={}){
     if(!slug(name)||!Number.isSafeInteger(expectedRevision)||expectedRevision<1||
        !Number.isSafeInteger(expectedControlRevision)||expectedControlRevision<1||
@@ -63,7 +81,7 @@ export function createAiStore(db){
       const row=e.target.result,j=row?.job;if(!j){done(fail('AI_JOB_NOT_FOUND'));return;}
       if(j.revision!==expectedRevision||(j.controlRevision||1)!==expectedControlRevision){done(fail('STALE_REVISION'));return;}
       if(j.state==='HUMAN_OWNED'){done(fail('HUMAN_EDITOR_HOLD'));return;}
-      if(instructions!==undefined&&(j.state==='TESTS_VERIFIED'||j.operatorInstruction)){
+      if(instructions!==undefined&&(j.state==='TESTS_VERIFIED'||j.operatorInstruction||j.exceptionFrozen)){
         done(fail(j.operatorInstruction?'AI_INSTRUCTION_ALREADY_QUEUED':'AI_TESTED_CANDIDATE_REQUEST_CHANGES_REQUIRED'));return;
       }
       const next={...j,controlRevision:expectedControlRevision+1};
@@ -73,12 +91,10 @@ export function createAiStore(db){
       if(paused===true&&idle)next.executionSlotReleased=true;
       const commit=()=>{m.put({...row,job:next});t.objectStore('events').add({stage:instructions!==undefined?'AI_OPERATOR_INSTRUCTION_QUEUED':'AI_OPERATOR_PAUSE_CHANGED',slug:name,
         controlRevision:next.controlRevision,jobRevision:j.revision,...(instructions!==undefined?{instructions:instructions.trim()}:{paused})});done(publicJob(next));};
-      if(paused!==false||!j.executionSlotReleased||j.state==='TESTS_VERIFIED'){commit();return;}
-      // Resume reserves capacity atomically, independently of evidence revision.
-      m.get('ai-concurrency').onsuccess=setting=>{const limit=setting.target.result?.setting?.perAccount||1;let active=0;
-        m.openCursor().onsuccess=scan=>{const c=scan.target.result;if(c){if(typeof c.key==='string'&&c.key.startsWith('ai-job:')&&c.key!==key(name)&&c.value.accountId===row.accountId&&!slotReleased(c.value.job))active++;c.continue();return}
-          if(active>=limit){done(fail('AI_ACCOUNT_CONCURRENCY_HELD'));return;}next.executionSlotReleased=false;commit();};
-      };
+      if(paused!==false||!j.executionSlotReleased||j.state==='TESTS_VERIFIED'||j.exceptionFrozen){commit();return;}
+      // Resume records intent immediately; the existing supervisor reserves
+      // capacity atomically before another native effect, without operator polling.
+      next.awaitingExecutionSlot=true;next.executionSlotReleased=true;commit();
     }});
   }
   const getPrompt=()=>tx(db,'readonly',(t,done)=>{
@@ -355,6 +371,10 @@ export function createAiStore(db){
           result.job.state==='TESTS_VERIFIED'&&
           result.job.finalSource?.fingerprint===result.job.verifiedFinal&&
           ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(result.job.native?.state));
+        result.job.exceptionFrozen=false;
+        if(prior.job.executionSlotReleased&&result.job.state!=='TESTS_VERIFIED'){
+          result.job.awaitingExecutionSlot=true;result.job.executionSlotReleased=true;
+        }
         const write=()=>{
           m.put({...prior,job:result.job});
           t.objectStore('events').add({stage:'AI_EVIDENCE_RECORDED',slug:slugName,
@@ -565,7 +585,9 @@ export function createAiStore(db){
         if(!['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(j.native?.state))
           {done(fail('AI_NATIVE_IDLE_REQUIRED'));return;}
         const changed=j.sourceFingerprint!==snapshot.fingerprint;
+        if(j.exceptionFrozen&&!changed){done(publicJob(j));return;}
         const next={...j,revision:j.revision+1,
+          exceptionFrozen:changed?false:j.exceptionFrozen===true,
           sourceFingerprint:snapshot.fingerprint,
           executionSlotReleased:changed?false:j.executionSlotReleased===true,
           finalSource:{fingerprint:snapshot.fingerprint,
@@ -576,6 +598,7 @@ export function createAiStore(db){
             'AI_CHAT2_ISOLATION_UNVERIFIED':
             changed?'INDEPENDENT_BROWSER_TESTS_REQUIRED':j.hold,
           state:changed?'TESTS_UNVERIFIED':j.state};
+        if(changed&&j.executionSlotReleased){next.awaitingExecutionSlot=true;next.executionSlotReleased=true;}
         if(changed){
           next.chat1={...next.chat1,tests:{}};
           if(next.chat2)next.chat2={...next.chat2,tests:{}};
@@ -644,6 +667,6 @@ export function createAiStore(db){
   }
   return Object.freeze({
     getPrompt,changePrompt,getConcurrency,changeConcurrency,exportPrompt,getJob,getJobFull,list,start,record,
-    armNative,observeNative,checkpointSource,recoverNative,deferScheduler,verifySecondChat,operatorControl
+    armNative,observeNative,checkpointSource,recoverNative,deferScheduler,verifySecondChat,operatorControl,admitExecutionSlot
   });
 }

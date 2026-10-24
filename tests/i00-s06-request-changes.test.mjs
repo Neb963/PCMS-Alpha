@@ -86,8 +86,10 @@ test('S06 Request Changes child retains P and parent tested F, creates new AI se
  assert.equal(job.revision,8);
  assert.equal(job.state,'PENDING_NATIVE_SESSION');
  assert.equal(job.sourceFingerprint,x.F.fingerprint);
- assert.equal(job.prompt.source,'S06_REQUEST_CHANGES_CHILD');
- assert.match(job.prompt.text,/Change the greeting/);
+ assert.equal(job.prompt.source,'GIT_MAIN_CHAT1_PINNED');
+ assert.deepEqual(job.prompt,x.job.prompt);
+ assert.match(job.operatorInstruction.text,/Change the greeting/);
+ assert.equal(job.awaitingExecutionSlot,true);assert.equal(job.executionSlotReleased,true);
  assert.equal(job.prompt.tests[0],'default_generator_smoke');
  assert.equal(job.readyInputFingerprint,INPUT);
  assert.equal(x.db.read('meta','stage-history:'+name+':4').record.candidate.fingerprint,x.P.fingerprint);

@@ -395,7 +395,6 @@ function routeHandlers(){
  if(action==='ref-next'){state.ref.offset+=state.ref.limit;void loadRefresher();return}
  if(action==='account-prev'){state.acct.page=Math.max(0,state.acct.page-1);displayAccounts();return}
  if(action==='account-next'){state.acct.page++;displayAccounts();return}
- if(action==='prepare-ai'){openAiPreparation();return}
  if(action==='queue-prev'){
    const prior=state.queue.history.pop();if(!prior)return;
    state.queue.opCursor=prior.op;state.queue.noticeCursor=prior.notice;
@@ -923,8 +922,7 @@ function displayQueue(){
        'The folder was absent from a complete main snapshot. The live generator has not been deleted or unlisted.'));
     row.append(mark,data);holder.append(row);
    }
-  if(q.filter==='Needs action'||q.filter==='All'||q.filter==='Waiting')
-   for(const candidate of q.releaseItems.filter(x=>matchesReviewGroup(x.state,queueGroup(q.filter)))){
+  for(const candidate of q.releaseItems.filter(x=>matchesReviewGroup(x.state,queueGroup(q.filter)))){
     if(q.query&&!candidate.slug.includes(q.query.toLowerCase()))continue;
     const row=el('div','queue-item');const detail=el('div','row-body');
     detail.append(el('strong','',candidate.slug),
@@ -933,12 +931,11 @@ function displayQueue(){
         candidate.state==='EXCEPTION_READY_FOR_REVIEW'?
         'Exceptional candidate — manual evidence and incomplete tests require individual review.':
         'Candidate state: '+candidate.state.replaceAll('_',' ').toLowerCase()));
-    const action=b('Review candidate',()=>void openReleaseReview(candidate.slug),'btn small');
-    if(!['READY_FOR_REVIEW','EXCEPTION_READY_FOR_REVIEW'].includes(candidate.state))
-      action.disabled=true;
-    row.append(el('span','row-mark', '•'),detail,action);holder.append(row);
+    const action=b('Inspect candidate',()=>void openReleaseReview(candidate.slug),'btn small'),manage=b('Manage development',()=>candidate.development?void openAiJob(candidate.slug):openReadyCandidate(candidate.readyCandidate),'btn small');
+    row.append(el('span','row-mark', '•'),detail,action,manage);holder.append(row);
    }
   for(const candidate of q.readyItems||[]){
+   if(q.releaseItems.some(x=>x.slug===candidate.slug))continue;
    const active=Boolean(candidate.active),desired=Boolean(candidate.desired);
    const held=!!candidate.hold&&candidate.hold!=='NONE';
    const eligible=q.filter==='All'||
@@ -958,6 +955,7 @@ function displayQueue(){
    holder.append(row);
   }
   for(const job of q.aiJobs||[]){
+   if(q.releaseItems.some(x=>x.slug===job.slug))continue;
    const currentState=job.state||'NOT_VERIFIED';
    const complete=currentState==='TESTS_VERIFIED'||job.slotReleased===true;
    const needs=['HELD_RECONCILE','KNOWN_FAILURE','HELD_NO_PROGRESS','TESTS_UNVERIFIED','PENDING_NATIVE_SESSION'].includes(currentState);
@@ -1046,8 +1044,7 @@ function displayQueue(){
   if(badge)badge.textContent=q.summary?.ok&&!q.query?count:'—';
   tab.setAttribute('aria-selected',String(f===q.filter));
  }
- const foot=shadow('.pagination span');if(foot)foot.textContent=q.loading?'Loading recorded work…':
-  q.error?'Local journal unavailable':q.operations.length+q.incidents.length+q.aiJobs.length+q.readyItems.length+' journal, READY and AI records on this page · no remote success inferred';
+ const foot=shadow('.pagination span');if(foot)foot.textContent=q.loading?'Loading work…':q.error?'Saved work is unavailable':(holder?.children.length||0)+' work records on this page';
  const prev=shadow('[data-action="queue-prev"]'),next=shadow('[data-action="queue-next"]');
  if(prev)prev.disabled=q.loading||q.history.length===0;
  if(next)next.disabled=q.loading||!q.more;
@@ -1304,55 +1301,21 @@ async function openAiJob(slug){
  async function load(){if(loading||pending||!overlay.isConnected)return;loading=true;
   try{const j=await readPort('pcms-i10-ai','GET_JOB',{slug},22000);if(!overlay.isConnected)return;
    if(!j?.ok){status.textContent='Development is unavailable. Saved work is preserved; reconnect and retry.';return}
-   current=j;status.textContent=(j.operatorPaused?'Paused · ':humanAiStatus(j)+' · ')+(j.state==='TESTS_VERIFIED'?'Ready for source review.':'PCMS advances development and independent tests automatically.');
+   current=j;status.textContent=(j.operatorPaused?'Paused · ':j.awaitingExecutionSlot?'Waiting for account capacity · ':humanAiStatus(j)+' · ')+(j.state==='TESTS_VERIFIED'||j.exceptionFrozen?'Ready for source review.':'PCMS advances development and independent tests automatically.');
    const signature=JSON.stringify([j.revision,j.controlRevision,j.nativeState,j.state,j.hold]);if(signature===lastSignature)return;lastSignature=signature;
    metadata.replaceChildren();actions.replaceChildren();
    for(const [name,value] of [['Job revision',j.revision],['Source',j.sourceFingerprint],['Pinned prompt',j.promptRevision],['Native session',j.nativeState],['Tests',j.evidence?.state],['Current hold',j.hold||'None']]){
     const row=el('div','kv');row.append(el('dt','',name),el('dd','',value));metadata.append(row)}
    if(j.state!=='HUMAN_OWNED')actions.append(b(j.operatorPaused?'Resume development':'Pause development',()=>void control('SET_PAUSED',{paused:!j.operatorPaused})));
    actions.append(b('Inspect source and history',()=>{close();void openReleaseReview(slug)}));
-   if(j.state==='TESTS_VERIFIED')actions.append(b('Review and request changes',()=>{close();void openReleaseReview(slug)}));
+   if(j.state==='TESTS_VERIFIED'||j.exceptionFrozen)actions.append(b('Review and request changes',()=>{close();void openReleaseReview(slug)}));
    if(['HELD_RECONCILE'].includes(j.state)||['DISPATCH_POSSIBLE','RUNNING_OBSERVED'].includes(j.nativeState))actions.append(b('Check session',()=>void control('PROBE_NATIVE')));
-   form.hidden=['TESTS_VERIFIED','HUMAN_OWNED'].includes(j.state);queued.textContent=j.pendingInstruction?'Queued: '+j.pendingInstruction.text:'';
+   form.hidden=['TESTS_VERIFIED','HUMAN_OWNED'].includes(j.state)||j.exceptionFrozen;queued.textContent=j.pendingInstruction?'Queued: '+j.pendingInstruction.text:'';
    give.disabled=!!j.pendingInstruction;give.textContent=j.pendingInstruction?'Instructions queued':'Give new instructions';
   }catch{status.textContent='Development could not be read. Retry when the extension responds.'}
   finally{loading=false}
  }
  await load();timer=setInterval(()=>void load(),5000);
-}
-function openAiPreparation(){
- const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
- panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
- panel.setAttribute('aria-label','Prepare verified AI development job');
- const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
- const head=el('div','drawer-head');head.append(el('h2','drawer-title','Prepare development'),b('Close',close));
- const body=el('div','drawer-body'),help=el('p','setting-note',
-  'Use a generator with an independently verified private stage. PCMS reads the pinned GitHub instructions and saved-source revision before preparing the AI job.');
- const slug=el('input','form-input');slug.placeholder='generator-slug';
- slug.value=state.queue.query&&/^[a-z0-9-]{1,100}$/.test(state.queue.query)?state.queue.query:'';
- slug.setAttribute('aria-label','Generator slug for development');
- const status=el('p','setting-note','No job prepared.');status.setAttribute('role','status');
- const action=b('Verify stage and prepare',()=>void(async()=>{
-  if(!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug.value)){
-   status.textContent='Enter a valid lowercase generator name.';return;}
-  action.disabled=true;status.textContent='Verifying private saved source and current stage revision…';
-  try{
-   const stage=await readPort('pcms-i09-staging','GET_STAGE',{slug:slug.value},16000);
-   if(!stage?.ok||!Number.isSafeInteger(stage.revision)){
-    status.textContent='Private source stage not independently verified. Finish source staging first.';return;}
-   const out=await readPort('pcms-i10-ai','PREPARE_JOB',{
-    slug:slug.value,expectedStageRevision:stage.revision},95000);
-   status.textContent=out?.ok?
-    'Exact development job prepared. AI execution and tests remain separately guarded.':
-    'Preparation held. Check the stage, account, protected route and GitHub connection.';
-   await loadQueue(true);
-  }catch{status.textContent='Job preparation result uncertain. Check the canonical queue before retrying.'}
-  finally{action.disabled=false}
- })(),'btn primary');
- body.append(help,slug,action,status);panel.append(head,body);overlay.append(panel);root.append(overlay);
- overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
- overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
- slug.focus();
 }
 function openOperationRecord(op){
  const previous=root.activeElement,overlay=el('div','drawer-overlay'),dialog=el('div','drawer');
@@ -1867,35 +1830,7 @@ function primaryAiSettings(container){
     const row=el('div','queue-item'),body=el('div','row-body');
     body.append(el('strong','',job.slug),el('p','setting-note',jobLabel(job.state)+
       ' · source and test evidence must be verified separately.'));
-    const action=b('Inspect',()=>void (async()=>{
-     action.disabled=true;
-     try{
-      const current=await readPort('pcms-i10-ai','GET_JOB',{slug:job.slug},25000);
-      if(!current?.ok){jobsInfo.textContent='The current AI record was not verified.';return}
-      const j=current;
-      jobsInfo.textContent=j.slug+' — '+jobLabel(j.state)+
-       '; native session: '+(j.nativeState==='NOT_STARTED'?'not started':
-        j.nativeState==='RUNNING'?'in progress':'needs verification')+
-       '; required test evidence: '+(j.evidence?.status||'not independently verified')+
-       '. Current source is revision '+j.revision+'.';
-     }catch{jobsInfo.textContent='AI job could not be inspected. No remote state was inferred.'}
-     finally{action.disabled=false}
-    })(),'btn small');
-    const advance=b('Advance guarded step',()=>void (async()=>{
-     if(!window.confirm('Run one explicitly guarded AI development step for '+job.slug+'? This may contact Perchance or change its private editor. It will not publish or automatically retry a possibly completed effect.'))return;
-     advance.disabled=true;
-     try{
-      const result=await readPort('pcms-i10-ai','ADVANCE_JOB',{
-       slug:job.slug,expectedRevision:job.revision},110000);
-      jobsInfo.textContent=result?.ok?
-       'One protected development step was recorded for '+job.slug+
-       '. Re-read the job before taking another action.':
-       'The next development step was held or not confirmed. Read current job state before retrying.';
-     }catch{jobsInfo.textContent='Development-step outcome uncertain. Do not retry without independent reconciliation.'}
-     finally{advance.disabled=false;await showJobs()}
-    })(),'btn small');
-    if(['COMPLETE','HELD','FAILED'].includes(job.state))advance.disabled=true;
-    row.append(body,action,advance);jobs.append(row);
+    row.append(body,b('Manage development',()=>void openAiJob(job.slug),'btn small'));jobs.append(row);
    }
    const back=b('Previous jobs',()=>{const prev=history.pop();if(prev===undefined)return;
     cursor=prev;void showJobs()},'btn small');

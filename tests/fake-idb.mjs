@@ -51,9 +51,18 @@ export function fakeDatabase(){
         let rows=null,i=0;
         const step=()=>setImmediate(()=>{
           rows??=[...view(s).entries()].sort(([a],[b])=>String(a).localeCompare(String(b)));
-          if(i>=rows.length){req.onsuccess?.({target:{result:null}});requests--;finish();return;}
+          requests--;
+          if(i>=rows.length){req.onsuccess?.({target:{result:null}});finish();return;}
           const [key,value]=rows[i++];
-          req.onsuccess?.({target:{result:{key,value:structuredClone(value),continue:step}}});
+          let continued=false;
+          req.onsuccess?.({target:{result:{key,value:structuredClone(value),continue(){
+            if(continued||closed)throw Error('TransactionInactiveOrCursorAdvanced');
+            continued=true;requests++;step();
+          }}}});
+          // A cursor request completes even if its consumer stops reading.
+          // Later continuation is legal while another IDB request keeps the
+          // transaction alive, just as in Firefox.
+          finish();
         });
         started.then(step);return req;
       }

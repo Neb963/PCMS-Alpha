@@ -17,9 +17,12 @@ export function createHumanEditorBridge({browser,getState,open=openCanonicalData
     (action!=='RECLAIM'||s.state==='SOURCE_VERIFIED'&&s.humanReclaimPending===true&&s.candidate?.fingerprint===fingerprint);
   };
   if(!await valid())return fail('HUMAN_EDITOR_CONTEXT_CHANGED');
+  const admission=await stage(slug),observation=admission.humanReclaimObservation;
+  if(action==='RECLAIM'&&(!observation||typeof observation.noEditors!=='boolean'))return fail('HUMAN_EDITOR_ADOPTION_OBSERVATION_MISSING');
   const url='https://perchance.org/'+slug+'#edit';
   const matches=async()=>{const all=await browser.tabs.query({});return all.filter(t=>{try{const u=new URL(t.url);return u.origin==='https://perchance.org'&&u.pathname==='/'+slug&&u.hash.startsWith('#edit')}catch{return false}})};
   let tabs=await matches();
+  let createdHere=false;
   if(action==='OPEN'){
    if(tabs.length>1||tabs.length===1&&(tabs[0].cookieStoreId!==cookieStoreId||tabs[0].url!==url))return fail('HUMAN_EDITOR_AMBIGUOUS');
    if(tabs.length){await browser.tabs.update(tabs[0].id,{active:true});return {ok:true,source:'HUMAN_EDITOR_FOCUSED'};}
@@ -32,19 +35,24 @@ export function createHumanEditorBridge({browser,getState,open=openCanonicalData
   if(!tabs.length){
    if(!await valid()||(await matches()).length)return fail('HUMAN_EDITOR_CONTEXT_CHANGED');
    const tab=await browser.tabs.create({url,cookieStoreId,active:false});
+   createdHere=true;
    await browser.sessions.setTabValue(tab.id,'pcmsHumanReview',{slug,nonce,personaUid,cookieStoreId,createdBy:'PCMS_C53_RECLAIM'});
    tabs=[tab];
   }
   if(tabs.length!==1||tabs[0].cookieStoreId!==cookieStoreId||tabs[0].url!==url)return fail('HUMAN_EDITOR_AMBIGUOUS');
   const tab=tabs[0],tag=await browser.sessions.getTabValue(tab.id,'pcmsI09Owned');
   if(tag&&(tag.slug!==slug||tag.nonce!==nonce||tag.personaUid!==personaUid||tag.cookieStoreId!==cookieStoreId))return fail('HUMAN_EDITOR_DIFFERENT_OWNER');
+  const receipt=await browser.sessions.getTabValue(tab.id,'pcmsHumanReview');
+  const recreated=createdHere||(observation?.noEditors||observation?.tabId!==tab.id)&&receipt?.createdBy==='PCMS_C53_RECLAIM'&&receipt.slug===slug&&receipt.nonce===nonce&&receipt.personaUid===personaUid&&receipt.cookieStoreId===cookieStoreId;
+  if(action==='RECLAIM'&&!recreated&&(observation.noEditors||observation.tabId!==tab.id))return fail('HUMAN_EDITOR_NEWER_TAKEOVER');
   async function inject(func,args){const r=await browser.scripting.executeScript({target:{tabId:tab.id,frameIds:[0]},world:'MAIN',func,args});return r?.length===1&&r[0].frameId===0&&!r[0].error?r[0].result:null;}
   const editor=await inject(perchanceEditorProbe,[slug,{allowHumanRead:true}]);
   const native=await inject(perchanceAiNative,[{slug,nonce,action:'OBSERVE'},{allowHumanRead:true}]);
   if(!editor?.ok||editor.clean!==true||!native?.ok||native.busy!==false||native.editorClean!==true||native.sourceSaved!==true||native.hasQueue!==false||native.inputOccupied!==false||native.attachmentsPending!==false)return fail('HUMAN_EDITOR_UNSAVED_OR_ACTIVE');
+  if(action==='RECLAIM'&&(recreated?editor.humanEpoch!=='0':editor.humanEpoch!==observation.humanEpoch||native.sessionDigest!==observation.sessionDigest))return fail('HUMAN_EDITOR_NEWER_TAKEOVER');
   const after=await browser.tabs.get(tab.id),again=await matches();
   if(!await valid()||after.url!==url||after.cookieStoreId!==cookieStoreId||again.length!==1||again[0].id!==tab.id)return fail('HUMAN_EDITOR_CONTEXT_CHANGED');
-  if(action==='OBSERVE')return {ok:true,noEditors:false,clean:true,sessionDigest:native.sessionDigest,humanEpoch:editor.humanEpoch,source:'GUARDED_HUMAN_EDITOR_OBSERVATION'};
+  if(action==='OBSERVE')return {ok:true,noEditors:false,tabId:tab.id,clean:true,sessionDigest:native.sessionDigest,humanEpoch:editor.humanEpoch,source:'GUARDED_HUMAN_EDITOR_OBSERVATION'};
   // Tagging is local ownership admission only. No provider source is saved.
   // Any interruption retains the tab; the canonical pending child can retry.
   await browser.scripting.executeScript({target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',func:renderPcmsEditorStrip,args:[{slug,nonce,accountId:'Verified account',personaUid}]});
@@ -52,6 +60,7 @@ export function createHumanEditorBridge({browser,getState,open=openCanonicalData
   await browser.sessions.setTabValue(tab.id,'pcmsI09Owned',{slug,nonce,personaUid,cookieStoreId,createdBy:'PCMS_I09',humanIntent:false});
   const reclaimed=await inject(perchanceEditorProbe,[slug,{allowHumanRead:true,reclaimNonce:nonce,expectedHumanEpoch:editor.humanEpoch??'0'}]);
   if(!reclaimed?.ok||!await valid())return fail('HUMAN_EDITOR_RECLAIM_PENDING');
+  await browser.scripting.executeScript({target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',func:renderPcmsEditorStrip,args:[{slug,nonce,accountId:'Verified account',personaUid}]});
   return {ok:true,clean:true,source:'GUARDED_HUMAN_EDITOR_RECLAIMED'};
  };
 }

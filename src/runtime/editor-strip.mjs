@@ -5,7 +5,13 @@ export function renderPcmsEditorStrip({slug,nonce,accountId,personaUid}, env={lo
   if(location.origin!=='https://perchance.org'||
      location.pathname!=='/'+slug||location.hash!=='#edit')return;
   const existing=document.getElementById('pcms-alpha-editor-context');
-  if(existing)return;
+  if(existing){
+    if(existing.dataset.pcmsNonce===nonce&&existing.dataset.pcmsHumanIntent!=='true'){
+      const button=existing.querySelector('button'),status=existing.querySelector('[role=status]');
+      if(button)button.disabled=false;if(status)status.textContent='PCMS ownership resumed. Human handoff remains available.';
+    }
+    return;
+  }
   const host=document.createElement('aside');
   host.id='pcms-alpha-editor-context';
   host.dataset.pcmsNonce=nonce;host.dataset.pcmsHumanIntentEpoch='0';

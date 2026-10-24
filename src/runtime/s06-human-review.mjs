@@ -118,7 +118,7 @@ export function createS06HumanStore(db){
    };
   });
  }
- async function adopt({name,expectedRevision,source}){
+ async function adopt({name,expectedRevision,source,editorObservation=null}){
   if(!slug(name)||!Number.isSafeInteger(expectedRevision)||expectedRevision<1||
     !source?.ok||!fp(source.fingerprint))
     return fail('S06_HUMAN_ADOPTION_INVALID');
@@ -131,18 +131,22 @@ export function createS06HumanStore(db){
     return fail('S06_HUMAN_SOURCE_PROOF_INVALID');
   return transact(db,true,(m,t,done)=>m.get(KEY(name)).onsuccess=e=>{
    const prior=e.target.result?.record;
-   if(!prior||prior.revision!==expectedRevision||prior.state!=='DEFERRED'){
+   if(!prior||prior.revision!==expectedRevision||!['DEFERRED','ADOPTED_UNTESTED'].includes(prior.state)){
     done(fail('S06_HUMAN_ADOPTION_STALE'));return;
    }
    readCurrent(m,name,done,({ready,s,j,w,release})=>{
-    if(!candidate(ready,s,j,w)||
-       prior.parentStageRevision!==humanReviewParentRevision(s)||
-       prior.parentJobRevision!==j.revision||
-       prior.parentFingerprint!==j.verifiedFinal||
-       prior.parentCommit!==w.commitSha||
+    const refresh=prior.state==='ADOPTED_UNTESTED';
+    const child=refresh&&ready?.active&&!ready.desired&&!ready.hold&&ready.active.identifier===prior.readyIdentifier&&ready.active.inputFingerprint===prior.readyInputFingerprint&&
+      humanReviewParentRevision(s)===prior.childStageRevision&&j?.stageRevision===prior.childStageRevision&&j.adoptedHumanFingerprint===s?.candidate?.fingerprint&&
+      w?.state==='CONFIRMED'&&!['DISPATCH_POSSIBLE','RUNNING_OBSERVED'].includes(j.native?.state);
+    if(!(refresh?child:candidate(ready,s,j,w))||
+       (!refresh&&prior.parentStageRevision!==humanReviewParentRevision(s))||
+       (!refresh&&prior.parentJobRevision!==j.revision)||
+       (!refresh&&prior.parentFingerprint!==j.verifiedFinal)||
+       (!refresh&&prior.parentCommit!==w.commitSha)||
        prior.readyIdentifier!==ready.active.identifier||
        prior.readyInputFingerprint!==ready.active.inputFingerprint||
-       source.fingerprint===j.verifiedFinal||
+       (!refresh&&source.fingerprint===j.verifiedFinal)||
        (release&&release.state!=='CANCELED'&&
         !(release.state==='CONFIRMED_PUBLIC'&&
           release.approval?.sourceFingerprint===s.previous?.fingerprint))){
@@ -150,6 +154,7 @@ export function createS06HumanStore(db){
     }
     const stage={...s,revision:s.revision+1,
       state:'SOURCE_VERIFIED',candidate:structuredClone(source),humanReclaimPending:true,
+      humanReclaimObservation:editorObservation?structuredClone(editorObservation):null,
       handoffParentRevision:null,handoffParentFingerprint:null,
       sourceHead:w.commitSha,verifiedAt:Date.now(),
       childSource:'S06_INDEPENDENT_SAVED_HUMAN_SOURCE',
@@ -158,6 +163,7 @@ export function createS06HumanStore(db){
       optionalTesting:j.optionalTesting||null});
     if(!initial.ok){done(initial);return;}
     const job={...initial.job,revision:j.revision+1,createdAt:Date.now(),
+      operatorPaused:j.operatorPaused===true,controlRevision:(j.controlRevision||1)+1,awaitingExecutionSlot:true,executionSlotReleased:true,
       readyIdentifier:s.readyIdentifier,
       readyInputFingerprint:s.readyInputFingerprint,
       sourceFolder:s.sourceFolder,
@@ -248,8 +254,9 @@ export function createS06HumanBoundary(api,{
    if(!out?.ok||(await sentinel.inspect()).held)return {ok:false,code:'S06_HUMAN_EDITOR_RECLAIM_PENDING',human:row};
    return store.finishReclaim(p.slug,row.revision);
   }
-  if(held.state==='ADOPTED_UNTESTED'&&held.reclaimPending)return reclaim(held);
-  if(held.state!=='DEFERRED'||!candidate(ready.record,s,j,writeback.record))return fail('S06_HUMAN_ADOPTION_CONTEXT_UNVERIFIED');
+  const refresh=held.state==='ADOPTED_UNTESTED';
+  if(!refresh&&(held.state!=='DEFERRED'||!candidate(ready.record,s,j,writeback.record)))return fail('S06_HUMAN_ADOPTION_CONTEXT_UNVERIFIED');
+  if(refresh&&['DISPATCH_POSSIBLE','RUNNING_OBSERVED'].includes(j.native?.state))return fail('S06_HUMAN_ADOPTION_CONTEXT_UNVERIFIED');
   const before=await g.getSafeRouteReadiness(s.personaUid);if(before?.ready!==true)return fail('S06_HUMAN_ROUTE_UNVERIFIED');
   const editor=await g.inspectHumanReview(s.personaUid,s.slug,s.nonce);
   if(!editor?.ok||editor.clean!==true)return fail('S06_HUMAN_UNSAVED_OR_ACTIVE_EDITOR_DEFERRED');
@@ -266,11 +273,11 @@ export function createS06HumanBoundary(api,{
     {path:'index.html',base64:encode(owner.original.html)},
     ...owner.original.assets]);
   if(!fresh.ok)return fail('S06_HUMAN_SAVED_BYTES_UNVERIFIED');
-  if(fresh.fingerprint===j.verifiedFinal)
+  if(!refresh&&fresh.fingerprint===j.verifiedFinal)
     return fail('S06_HUMAN_NO_CHANGED_SAVED_SOURCE');
   const after=await g.getSafeRouteReadiness(s.personaUid),editorAfter=await g.inspectHumanReview(s.personaUid,s.slug,s.nonce);
   if(!after?.ready||after.routeId!==before.routeId||after.cookieStoreId!==before.cookieStoreId||!editorAfter?.ok||editorAfter.clean!==true||
-    editorAfter.noEditors!==editor.noEditors||editorAfter.sessionDigest!==editor.sessionDigest||editorAfter.humanEpoch!==editor.humanEpoch||(await sentinel.inspect()).held)return fail('S06_HUMAN_EDITOR_CHANGED_DURING_ADOPTION');
+    editorAfter.noEditors!==editor.noEditors||editorAfter.tabId!==editor.tabId||editorAfter.sessionDigest!==editor.sessionDigest||editorAfter.humanEpoch!==editor.humanEpoch||(await sentinel.inspect()).held)return fail('S06_HUMAN_EDITOR_CHANGED_DURING_ADOPTION');
   // An intervening human save can leave the native session idle and clean
   // again. A fresh, independently observed full provider source is required
   // immediately before admitting this exact fingerprint into local testing.
@@ -291,7 +298,7 @@ export function createS06HumanBoundary(api,{
   if(!repeated.ok||repeated.fingerprint!==fresh.fingerprint||
      (await sentinel.inspect()).held)
     return fail('S06_HUMAN_SAVED_SOURCE_CHANGED_DURING_ADOPTION');
-  const adopted=await store.adopt({name:p.slug,expectedRevision:p.expectedRevision,source:fresh});
+  const adopted=await store.adopt({name:p.slug,expectedRevision:p.expectedRevision,source:fresh,editorObservation:{noEditors:editor.noEditors===true,tabId:editor.tabId??null,sessionDigest:editor.sessionDigest??null,humanEpoch:editor.humanEpoch??null}});
   return adopted.ok?reclaim(adopted):adopted;
  }
  return Object.freeze({runTrusted});

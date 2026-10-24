@@ -9,6 +9,7 @@ import {createCreationCatalogIntake} from './creation-catalog.mjs';
 import {createReadyIntake} from './ready-intake.mjs';
 import {createReadyDevelopment} from './ready-development.mjs';
 import {createS06WritebackProgress} from './s06-writeback-progress.mjs';
+import {createS06PublicationProgress} from './s06-publication-progress.mjs';
 import {createS06ChangeProgress} from './s06-request-changes.mjs';
 import {standingS06} from './s06-standing-authority.mjs';
 import {planMainFolderChanges,REVIEW_KEY} from './catalog-identity-review.mjs';
@@ -25,7 +26,7 @@ const MINUTES=15;
 export function createCatalogWatcher(api,{scan=scanMainCatalog,
   native=p=>browserGitCredentialPacket(p),
   network=fetch,clock=Date.now,ingestComplete=null,ingestReady=null,
-  progressReady=null,progressChanges=null,progressWriteback=null,
+  progressReady=null,progressChanges=null,progressWriteback=null,progressPublication=null,
   // C-68/C-69: one GitHub-connection incident (queued work stays queued);
   // resolved only by the next successful vault credential read.
   incidents=async(kind)=>{
@@ -170,6 +171,7 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       if(progressReady)try{await progressReady();}catch{}
       if(progressChanges)try{await progressChanges();}catch{}
       if(progressWriteback)try{await progressWriteback();}catch{}
+      if(progressPublication)try{await progressPublication();}catch{}
       return {ok:true,code:'CATALOG_OBSERVED_READ_ONLY',head:result.head,
         newFolders:added,missingFolderObservations:missing};
     }catch{return persistStatus('CATALOG_OBSERVATION_UNAVAILABLE');}
@@ -180,18 +182,19 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
     catch{}
     // Native/READY transitions may resume without another large Git scan.
     // Each step revalidates canonical source and, where applicable, main.
-    if(progressReady||progressChanges||progressWriteback)try{void Promise.resolve(api.alarms.create(READY_PROGRESS_ALARM,{periodInMinutes:1})).catch(()=>{});}
+    if(progressReady||progressChanges||progressWriteback||progressPublication)try{void Promise.resolve(api.alarms.create(READY_PROGRESS_ALARM,{periodInMinutes:1})).catch(()=>{});}
     catch{}
   }
   function register(){
     if(registered)return;registered=true;
     api.alarms.onAlarm.addListener(event=>{
       if(event?.name===CATALOG_ALARM||event?.name===CATALOG_RESUME_ALARM)void tick();
-      if(event?.name===READY_PROGRESS_ALARM&&(progressReady||progressChanges||progressWriteback))
+      if(event?.name===READY_PROGRESS_ALARM&&(progressReady||progressChanges||progressWriteback||progressPublication))
         void Promise.resolve().then(async()=>{
           if(progressReady)await progressReady();
           if(progressChanges)await progressChanges();
           if(progressWriteback)await progressWriteback();
+          if(progressPublication)await progressPublication();
         }).catch(()=>{});
     });
     api.runtime.onStartup.addListener(()=>{schedule();void tick();});
@@ -210,6 +213,8 @@ export const catalogWatcher=typeof browser==='undefined'?null:createCatalogWatch
     effectGate:()=>standingS06?.gate('development')===true}).tick,
   progressChanges:createS06ChangeProgress(browser).tick,
   progressWriteback:createS06WritebackProgress(browser,{
-    effectGate:()=>standingS06?.gate('gitWrite')===true}).tick
+    effectGate:()=>standingS06?.gate('gitWrite')===true}).tick,
+  progressPublication:createS06PublicationProgress(browser,{
+    effectGate:()=>standingS06?.gate('publication')===true}).tick
 });
 if(catalogWatcher)catalogWatcher.register();

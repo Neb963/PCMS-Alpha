@@ -68,7 +68,7 @@ const display=r=>r?{
   previousFingerprint:r.approval.previousFingerprint,
   fileCount:r.approval.files.length,
   accountId:r.approval.accountId,observedAt:r.observedAt||null,
-  reason:r.reason||null,dispatchPossible:r.dispatchPossible===true,
+  reason:r.progressHold||r.reason||null,dispatchPossible:r.dispatchPossible===true,
   publication:r.state==='CONFIRMED_PUBLIC'?'INDEPENDENTLY_VERIFIED':'HELD_OR_UNVERIFIED',
   review:r.state==='APPROVED'?'SOURCE_BOUND_APPROVAL':'READ_ONLY_RECOVERY'
 }:fail('RELEASE_NOT_FOUND');
@@ -94,17 +94,30 @@ export function createReleaseStore(db){
     const result=await getFull(name);
     return result.ok?display(result.record):result;
   };
-  const list=()=>transact(db,'readonly',(t,done)=>{
-    const items=[];let truncated=false;
+  const list=({after='',limit=200,states=null}={})=>{
+   if(typeof after!=='string'||after.length>100||!Number.isInteger(limit)||limit<1||limit>200||
+      (states!==null&&(!Array.isArray(states)||states.some(s=>!['APPROVED','DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN','RECOVERY_HOLD','CONFIRMED_PUBLIC','CANCELED'].includes(s)))))return Promise.resolve(fail('RELEASE_PAGE_INVALID'));
+   return transact(db,'readonly',(t,done)=>{
+    const items=[];
     t.objectStore('meta').openCursor().onsuccess=e=>{
       const cur=e.target.result;
-      if(!cur){done({ok:true,items,truncated});return;}
+      const finish=()=>{const more=items.length>limit,page=items.slice(0,limit);done({ok:true,items:page,truncated:more,more,nextCursor:more?page.at(-1).slug:null})};
+      if(!cur){finish();return;}
       if(typeof cur.key==='string'&&cur.key.startsWith('release:')&&cur.value?.release){
-        if(items.length<200)items.push(display(cur.value.release));else truncated=true;
+        const r=cur.value.release;if(r.slug>after&&(!states||states.includes(r.state)))items.push(display(r));
+        if(items.length>limit){finish();return;}
       }
       cur.continue();
     };
-  });
+   });
+  };
+  function recordProgress(name,expectedRevision,code){
+   return transact(db,'readwrite',(t,done)=>{const m=t.objectStore('meta');m.get(key(name)).onsuccess=e=>{const r=e.target.result?.release;
+    if(!r||r.state!=='APPROVED'||r.revision!==expectedRevision){done(fail('STALE_RELEASE'));return}
+    if(!/^[A-Z0-9_]{1,90}$/.test(code||'')){done(fail('RELEASE_PROGRESS_INVALID'));return}
+    m.put({key:key(name),release:{...r,progressHold:code,progressAt:Date.now()}});done(display({...r,progressHold:code}));
+   }});
+  }
   function approve({approval,stage,job,account,inventory,source,previous,releaseId,kind}){
     if(!approval?.ok||!slug(stage?.slug)||stage.slug!==job?.slug||
        stage.slug!==inventory?.slug||stage.accountId!==account?.accountId||
@@ -248,7 +261,7 @@ export function createReleaseStore(db){
                 }
                 function mark(){
                   const next={...r,revision:r.revision+1,
-                    state:'DISPATCH_POSSIBLE',dispatchPossible:true,changedAt:Date.now()};
+                    state:'DISPATCH_POSSIBLE',progressHold:null,dispatchPossible:true,changedAt:Date.now()};
                   m.put({key:key(name),release:next});
                   t.objectStore('operations').add({operationId:r.releaseId,
                     targetId:'release_'+name,fingerprint:r.approval.sourceFingerprint,
@@ -335,5 +348,5 @@ export function createReleaseStore(db){
       };
     });
   }
-  return Object.freeze({get,getFull,list,approve,cancelApproved,markDispatch,settle});
+  return Object.freeze({get,getFull,list,approve,cancelApproved,markDispatch,settle,recordProgress});
 }
