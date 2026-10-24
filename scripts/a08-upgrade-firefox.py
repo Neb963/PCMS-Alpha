@@ -13,7 +13,11 @@ import sys
 import tempfile
 import time
 from urllib.request import urlopen
-import browser_i00_smoke as b
+import importlib.util
+module_path=pathlib.Path(__file__).with_name('browser-i00-smoke.py')
+spec=importlib.util.spec_from_file_location('pcms_browser_smoke',module_path)
+b=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(b)
 
 def main():
     target=pathlib.Path(sys.argv[1]).resolve()
@@ -34,7 +38,7 @@ def main():
         profile=folder/'profile'
         profile.mkdir()
         (profile/'user.js').write_text(
-            'user_pref("xpinstall.signatures.required",false);\\n')
+            'user_pref("xpinstall.signatures.required",false);\n')
         # Firefox driver receives no native service or secret-service setup.
         home=folder/'home'
         home.mkdir()
