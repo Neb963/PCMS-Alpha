@@ -1,6 +1,6 @@
-# PCMS Alpha — XPI-only operator guide (A08)
+# PCMS Alpha — XPI-only operator guide (A09 acceptance candidate)
  
-**Status:** Engineering test candidate only. Live Perchance, protected Mullvad routing, private generator Git writeback and host/disk acceptance need their separate authorized evidence. Do not treat a green fixture or Firefox CI check as live acceptance.
+**Status:** A09 engineering acceptance candidate, **not an operator-accepted production release**. Live Perchance, protected Mullvad routing, private generator Git writeback and host/disk acceptance need their separate authorized evidence. Do not treat a green fixture or Firefox CI check as live acceptance.
 
 ## Prerequisites
 
@@ -35,3 +35,7 @@ Use Settings diagnostics or the emergency read-only export to see per-capability
 A restore leaves managed automation inactive and requires protected identity/source review, account-login re-verification and Git re-connection where applicable. If a prior profile's operation journal is missing, do not infer an external effect is absent. Production readback, private Git writes, disk/process host evidence and real Perchance effects are **NOT_TESTED** until independently observed at their correct tiers.
 
 See `docs/authority/PCMS-Alpha-CLIENT-AMENDMENT-v1.0.1.md` and `docs/implementation/RECOVERY-PLAN-2026-10-22.md` for the binding behavioral limits.
+
+## A09 release acceptance
+
+The [A09 single-session protocol](../verification/A09-SINGLE-SESSION-ACCEPTANCE.md) and [evidence reuse/holds map](../verification/A09-EVIDENCE-REUSE-AND-HOLDS.md) describe the exact candidate gate. Build an AC-01–AC-18 / T-01–T-10 / X-01–X-14 evidence report with `node scripts/a09-evidence.mjs --xpi build/pcms-alpha-i00.xpi --source-sha "$(git rev-parse HEAD)" --out-dir build/a09`. Missing external H/GIT/L proof remains **NOT_TESTED**; no routine workflow is made available by fabricated evidence. This guide is not authority for live provider, private Git or original-profile operations.
