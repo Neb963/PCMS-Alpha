@@ -145,8 +145,8 @@ function createPcmsEnrollmentDonor(){
         [relays[i],relays[j]]=[relays[j],relays[i]];
       }
       return {ok:true,relayList,taggedBindings,candidates:[
-        ...usable.slice(0,8).map(r=>({kind:'ROUTE',routeId:r.id})),
-        ...relays.slice(0,8).map(r=>({kind:'RELAY',relay:{hostname:r.hostname,ipv4_address:r.ipv4_address,
+        ...usable.map(r=>({kind:'ROUTE',routeId:r.id})),
+        ...relays.map(r=>({kind:'RELAY',relay:{hostname:r.hostname,ipv4_address:r.ipv4_address,
           port:1080,country:r.country,city:r.city}}))]};
     },
     // Adds one Mullvad relay route. The donor security preview must contain
@@ -178,7 +178,24 @@ function createPcmsEnrollmentDonor(){
         r.host===relay.ipv4_address&&Number(r.port)===1080);
       return made?{ok:true,routeId:made.id}:{ok:false,code:'ROUTE_CREATE_UNCONFIRMED'};
     },
-    probeCandidate:({routeId})=>pcmsProbeExits({routeId}),
+    probeCandidate:({routeId})=>withRouteTestTargetLock('pcms-candidate-'+routeId,async()=>{
+      const evidence=await pcmsProbeExits({routeId});
+      if(evidence.failure==='HOST')return evidence; // retain the first causal helper failure
+      // A catalog probe must not accumulate an idle native forwarder for
+      // every rejected relay. The donor's admission lock serializes this
+      // unassigned-route cleanup against ordinary Persona route changes.
+      try{
+        const released=await localMutationFence([],async()=>{
+          const state=await getState();
+          if(Object.values(state.profiles||{}).some(p=>p?.routeId===routeId))return true;
+          if(state.routes?.[routeId]?.provider!=='mullvad')return false;
+          mullvadRuntime.drop(routeId);
+          try{await releaseExit(routeId);return true;}catch{return false;}
+        });
+        if(!released)return pcmsFailure('CANDIDATE_RELEASE_UNCONFIRMED','HOST');
+      }catch{return pcmsFailure('CANDIDATE_RELEASE_UNCONFIRMED','HOST');}
+      return evidence;
+    }),
     probeAssigned:async({bindingId,contextId,routeId})=>{
       const p=(await getState()).profiles?.[contextId];
       if(p?.pcmsBindingId!==bindingId)return pcmsFailure('BINDING_PERSONA_CHANGED','ROUTE');
@@ -289,7 +306,13 @@ function createPcmsEnrollmentDonor(){
         return {ok:false,code:'PERSONA_IN_USE'};
       try{
         return await localMutationFence(p.containerId,async()=>
-          ({ok:true,removed:await personaPlatform.remove(p.containerId)===true}));
+          {
+          await personaPlatform.remove(p.containerId);
+          const after=await getState();
+          if(Object.values(after.profiles||{}).some(x=>String(x?.personaUid||'').toLowerCase()===String(personaUid).toLowerCase()))
+            return {ok:false,code:'PERSONA_REMOVAL_UNCONFIRMED'};
+          return {ok:true,removed:true};
+        });
       }catch{return {ok:false,code:'PERSONA_REMOVAL_UNCONFIRMED'};}
     },
     reloadPins:()=>reloadRoutePins()

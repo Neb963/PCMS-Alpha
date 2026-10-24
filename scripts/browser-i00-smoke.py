@@ -942,7 +942,11 @@ def s01_legacy_and_archive(session,uuid,oracle,privacy_safe,added_id):
     legacy=next(a for a in listed['accounts'] if a['accountId']=='legacy_account_ci01')
     assert legacy['protectedRoute']=='LEGACY_UNPINNED',legacy
     started=account_command(session,{'type':'UPGRADE_ACCOUNT','params':{'accountId':'legacy_account_ci01','expectedRevision':2}})
-    assert started.get('ok') is True,started
+    # The production boundary now awaits the actual upgrade result. Missing
+    # native service is a real HELD receipt, not a fabricated started-success.
+    assert started.get('ok') is False and started.get('code') in (
+        'MULLVAD_LOCAL_SERVICE_UNAVAILABLE','NO_ROUTE_CANDIDATES',
+        'NO_UNIQUE_EXIT_AVAILABLE'),started
     legacy=_wait_account(session,'legacy_account_ci01',lambda a:a.get('upgrade',{}) and a['upgrade'].get('phase') in ('HELD','COMPLETE'))
     # No native Mullvad helper in CI: the route step holds, but identity is intact.
     assert legacy['upgrade']['phase']=='HELD',legacy
@@ -1030,6 +1034,10 @@ def main():
                         if json.load(s).get('value',{}).get('ready'): break
                 except Exception: time.sleep(.25)
             else: raise RuntimeError('geckodriver did not become ready')
+            # Exercise the changed operator journey first; all unchanged
+            # persistent donor/source/backup suites still run after it passes.
+            from journey_accounts_ui import run as run_j01_primary
+            run_j01_primary(browser,archive,pathlib.Path(folder))
             first=open_session(browser,profile)
             original_firefox_pids=owned_firefox_pids(profile)
             assert original_firefox_pids,'S01_FIRST_FIREFOX_PROCESS_NOT_OBSERVED'
@@ -1230,7 +1238,7 @@ def main():
                 assert faithful['inventoryTabs']>=4 and faithful['sourceWriters']==1,faithful
                 print('B V015_TRUE_DESKTOP_PRIMARY_WORKSPACES_AND_REAL_HANDLERS=PASS',flush=True)
                 release_version=execute(after,"return {manifest:browser.runtime.getManifest().version,ui:document.documentElement.dataset.pcmsUiVersion,badge:document.querySelector('.v015-top-status')?.textContent};")
-                assert release_version.get('manifest')=='1.2.7',release_version
+                assert release_version.get('manifest')=='1.2.8',release_version
                 assert release_version.get('ui')=='0.1.5' and '0.1.5' in release_version.get('badge',''),release_version
                 print('B V015_REAL_FIREFOX_UPDATE_VERSION_AND_VISIBLE_UI_MARKER=PASS',flush=True)
                 # V016 acceptance: the PRECISE accepted prototype structure is
@@ -1254,7 +1262,7 @@ def main():
                      canonicalNative:!!document.getElementById('pcms-refresher-rows')&&
                        !!document.getElementById('pcms-release-approve')&&
                        !!document.getElementById('pcms-restore-apply')};""")
-                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.7',actual
+                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.8',actual
                 assert actual['routes']==6 and actual['visible'] and actual['nativeHidden'],actual
                 assert actual['sidebar'] and actual['primary']=='overview' and actual['styles'] and actual['canonicalNative'],actual
                 assert actual['badge']=='PCMS local · Not verified',actual

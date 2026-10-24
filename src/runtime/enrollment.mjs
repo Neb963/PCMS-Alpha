@@ -6,10 +6,9 @@
 import {fail} from './journal.mjs';
 import {normalizeRouteEvidence,exitSetDigest} from './network-ledger.mjs';
 
-const MAX_CANDIDATES=8;
 // Hold codes that a later automatic attempt may clear without operator input.
 const TRANSIENT=new Set(['MULLVAD_LOCAL_SERVICE_UNAVAILABLE','DONOR_SECURITY_UNAVAILABLE',
-  'PERSONA_TAG_UNCONFIRMED','ROUTE_ASSIGN_UNCONFIRMED','NO_ROUTE_CANDIDATES','ENROLLMENT_INTERRUPTED']);
+  'PERSONA_CREATE_UNCONFIRMED','PERSONA_TAG_UNCONFIRMED','ROUTE_ASSIGN_UNCONFIRMED','NO_ROUTE_CANDIDATES','ENROLLMENT_INTERRUPTED']);
 const rid=prefix=>prefix+crypto.randomUUID().replaceAll('-','');
 // Codes shown to the operator; anything else is summarized generically.
 export const SETUP_MESSAGES=Object.freeze({
@@ -35,6 +34,7 @@ export const SETUP_MESSAGES=Object.freeze({
   UPGRADE_IN_PROGRESS:'This account is being upgraded to a reserved protected exit; it keeps its Persona, login and generators.',
   RESOURCE_IN_USE:'The account\'s route is still in use (open tab or running work); it will be released once idle.',
   RESOURCE_SHARED:'The account\'s route is shared with another Persona, so it is not released.',
+  CANDIDATE_RELEASE_UNCONFIRMED:'A temporary route check could not confirm releasing its unused resources. Check the Mullvad helper, then resume.',
   RELEASE_UNCONFIRMED:'PersonaMonkey did not confirm releasing the route; PCMS will check and retry safely.'
 });
 
@@ -43,14 +43,17 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
   if(!accounts?.applyCurrent||!ledger?.reserve||!donor?.createBoundPersona||!pins?.hold||
      typeof openLogin!=='function'||typeof identify!=='function')
     throw new TypeError('Enrollment dependencies unavailable');
-  const running=new Map();
-  // One in-process run per account; a second request joins the first.
-  function exclusive(accountId,task){
-    if(running.has(accountId))return running.get(accountId);
-    const run=Promise.resolve().then(task).catch(()=>fail('ENROLLMENT_INTERRUPTED'))
+  const running=new Map(),archiving=new Map();
+  // Coalesce only the SAME intent. A different operator command must never
+  // inherit a route probe's result and falsely claim it archived an account.
+  function exclusive(accountId,kind,task){
+    if(archiving.has(accountId))return Promise.resolve(fail('ACCOUNT_BUSY'));
+    const prior=running.get(accountId);
+    if(prior)return prior.kind===kind?prior.promise:Promise.resolve(fail('ACCOUNT_BUSY'));
+    const promise=Promise.resolve().then(task).catch(()=>fail('ENROLLMENT_INTERRUPTED'))
       .finally(()=>running.delete(accountId));
-    running.set(accountId,run);
-    return run;
+    running.set(accountId,{kind,promise});
+    return promise;
   }
   const progress=(accountId,phase,code=null,extra={})=>
     accounts.applyCurrent({type:'SETUP_PROGRESS',accountId,phase,code,...extra});
@@ -61,13 +64,27 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
   // restored after the ACTIVE record is committed. HELD->ACTIVE on the SAME
   // pinned route is allowed after a clean assigned probe (e.g. a manual route
   // edit undone); an exit owned by another account can never re-activate.
-  async function activate(bindingId,evidence,routeId){
-    const n=normalizeRouteEvidence(evidence);
-    if(!n.ok||n.routeId!==routeId)return n.ok?fail('ROUTE_CHANGED_DURING_PROBE'):n;
+  async function activate(bindingId,evidence,routeId,accountId,allowArchived=false){
+    // A successful IPv4/DNS probe is not complete exit-family evidence.
+    // Withdraw old admission BEFORE parsing the new observation.
     pins.hold(bindingId);
+    const n=normalizeRouteEvidence(evidence);
+    if(!n.ok||n.routeId!==routeId){
+      const out=n.ok?fail('ROUTE_CHANGED_DURING_PROBE'):n;
+      await ledger.hold(bindingId,out.code);
+      return out;
+    }
+    const current=await accounts.get(accountId);
+    if(!current.ok||current.account.bindingId!==bindingId||current.account.state==='ARCHIVED'&&!allowArchived){
+      await ledger.hold(bindingId,'ACCOUNT_ARCHIVED');return fail('ACCOUNT_ARCHIVED');
+    }
     const out=await ledger.observe({bindingId,routeId,exits:n.exits,
-      exitSetDigest:await exitSetDigest(n.exits),observedAtMs:n.observedAtMs,activate:true});
+      exitSetDigest:await exitSetDigest(n.exits),observedAtMs:n.observedAtMs,ipv6Disposition:n.ipv6Disposition,activate:true});
     if(!out.ok)return out;
+    const latest=await accounts.get(accountId);
+    if(!latest.ok||latest.account.bindingId!==bindingId||latest.account.state==='ARCHIVED'&&!allowArchived){
+      await ledger.hold(bindingId,'ACCOUNT_ARCHIVED');return fail('ACCOUNT_ARCHIVED');
+    }
     pins.release(bindingId);
     await pins.reload();
     return {ok:true,routeId,changed:true};
@@ -90,10 +107,13 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     if(prior.ok&&prior.binding.routeId===persona.routeId&&!change){
       const ev=await donor.probeAssigned({bindingId,contextId:persona.contextId,routeId:persona.routeId});
       if(ev.ok){
-        const out=await activate(bindingId,ev,persona.routeId);
-        if(out.ok)return {ok:true,routeId:persona.routeId,changed:false};
-        if(out.code==='EXIT_DRIFT_CONFLICT')return out;
-        pins.release(bindingId);
+        const out=await activate(bindingId,ev,persona.routeId,account.accountId,!rotate);
+        if(out.ok){
+          if(account.routeSearch?.active)await accounts.applyCurrent({type:'ROUTE_SEARCH_COMPLETE',accountId:account.accountId});
+          return {ok:true,routeId:persona.routeId,changed:false};
+        }
+        if(['EXIT_DRIFT_CONFLICT','IPV4_EVIDENCE_UNVERIFIED','IPV6_EVIDENCE_UNVERIFIED',
+            'PROTECTED_EVIDENCE_UNVERIFIED','ROUTE_CHANGED_DURING_PROBE'].includes(out.code))return out;
         if(!rotate)return out;
         if(automatic&&account.route?.code!=='ROUTE_CHECK_FAILED')return fail('ROUTE_CHECK_FAILED');
         failed.push(persona.routeId);
@@ -123,21 +143,38 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       const ids=new Set(known.accounts.map(a=>a.bindingId).filter(Boolean));
       if(listed.taggedBindings.some(id=>!ids.has(id)))return fail('EXIT_LEDGER_MISSING');
     }
-    const candidates=listed.ok?listed.candidates.slice(0,MAX_CANDIDATES):[];
+    const latest=await accounts.get(account.accountId);
+    const attempted=new Set(latest.account?.routeSearch?.active?latest.account.routeSearch.attempted:[]);
+    if(!latest.account?.routeSearch?.active)await accounts.applyCurrent({type:'ROUTE_SEARCH_START',accountId:account.accountId});
+    const checked=async routeId=>{
+      attempted.add(routeId);
+      await accounts.applyCurrent({type:'ROUTE_SEARCH_STEP',accountId:account.accountId,routeId});
+    };
+    const candidates=listed.ok&&Array.isArray(listed.candidates)?listed.candidates:[];
     let last=candidates.length?'NO_UNIQUE_EXIT_AVAILABLE':'NO_ROUTE_CANDIDATES';
     for(const candidate of candidates){
+      // The catalog is finite; visit its complete eligible set rather than
+      // retrying the same colliding prefix forever. Only one probe/assignment
+      // is in flight for this account; other accounts remain independent.
+      const fresh=await accounts.get(account.accountId);
+      if(!fresh.ok||fresh.account.state==='ARCHIVED')return fail('ACCOUNT_ARCHIVED');
+      if(candidate.kind==='ROUTE'&&attempted.has(candidate.routeId))continue;
       const route=await donor.ensureRoute(candidate);
       if(!route.ok){last=route.code;continue;}
       const ev=await donor.probeCandidate({routeId:route.routeId});
-      if(!ev.ok){if(ev.failure==='HOST')return ev;last=ev.code;continue;}
+      if(!ev.ok){if(ev.failure==='HOST')return ev;last=ev.code;await checked(route.routeId);continue;}
+      const afterProbe=await accounts.get(account.accountId);
+      if(!afterProbe.ok||afterProbe.account.state==='ARCHIVED'||afterProbe.account.bindingId!==bindingId)return fail('ACCOUNT_ARCHIVED');
       const n=normalizeRouteEvidence(ev);
-      if(!n.ok){last=n.code;continue;}
+      if(!n.ok){last=n.code;await checked(route.routeId);continue;}
       const reserved=await ledger.reserve({accountId:account.accountId,bindingId,
         personaUid:persona.personaUid,contextId:persona.contextId,routeId:route.routeId,
         exits:n.exits,exitSetDigest:await exitSetDigest(n.exits),evidenceId:n.evidenceId,
         observedAtMs:n.observedAtMs,ipv6Disposition:n.ipv6Disposition,
         replacesPersona:prior.ok&&prior.binding.personaUid!==persona.personaUid});
-      if(!reserved.ok){last=reserved.code==='EXIT_HISTORICALLY_OWNED'?'NO_UNIQUE_EXIT_AVAILABLE':reserved.code;continue;}
+      if(!reserved.ok){last=reserved.code==='EXIT_HISTORICALLY_OWNED'?'NO_UNIQUE_EXIT_AVAILABLE':reserved.code;await checked(route.routeId);continue;}
+      const beforeAssign=await accounts.get(account.accountId);
+      if(!beforeAssign.ok||beforeAssign.account.state==='ARCHIVED'||beforeAssign.account.bindingId!==bindingId)return fail('ACCOUNT_ARCHIVED');
       const assigned=await donor.assignRoute({bindingId,personaUid:persona.personaUid,
         contextId:persona.contextId,routeId:route.routeId});
       // Unconfirmed assignment: the reservation is durable; the next run
@@ -145,11 +182,12 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       if(!assigned.ok)return assigned;
       const verified=await donor.probeAssigned({bindingId,contextId:persona.contextId,routeId:route.routeId});
       if(!verified.ok){if(verified.failure==='HOST')return verified;last=verified.code;failed.push(route.routeId);continue;}
-      const out=await activate(bindingId,verified,route.routeId);
-      if(out.ok)return out;
+      const out=await activate(bindingId,verified,route.routeId,account.accountId);
+      if(out.ok){await accounts.applyCurrent({type:'ROUTE_SEARCH_COMPLETE',accountId:account.accountId});return out;}
       if(out.code==='EXIT_DRIFT_CONFLICT')return out;
-      last=out.code;
+      last=out.code;await checked(route.routeId);
     }
+    await accounts.applyCurrent({type:'ROUTE_SEARCH_COMPLETE',accountId:account.accountId});
     return fail(last);
   }
 
@@ -182,7 +220,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     const got=await accounts.get(accountId);
     if(!got.ok)return got;
     let account=got.account;
-    if(!['WAITING_LOGIN','VERIFICATION_PENDING','REBIND_PENDING','VERIFIED','OVERRIDDEN'].includes(account.state)||
+    if(!['WAITING_LOGIN','VERIFICATION_PENDING','REBIND_PENDING','VERIFIED','OVERRIDDEN','INVENTORY_PENDING'].includes(account.state)||
        typeof account.bindingId!=='string')return fail('INVALID_ACCOUNT_STATE');
     const route=await ensurePinnedRoute(account);
     if(!route.ok){await routeStatus(accountId,'HELD',route.code);return route;}
@@ -193,16 +231,27 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       account=acked.account;
     }
     const observed=await identify(account.personaUid);
-    if(!observed.ok)return silent?{ok:false,code:observed.code,needsLogin:true}:observed;
+    if(!observed.ok){
+      if(account.state==='VERIFIED')await accounts.applyCurrent({type:'REVERIFY',accountId});
+      return silent?{ok:false,code:observed.code,needsLogin:true}:observed;
+    }
+    if(account.state==='VERIFIED'&&account.boundPrincipal!==observed.proof.principalFingerprint){
+      await accounts.applyCurrent({type:'REVERIFY',accountId});
+      return fail('IDENTITY_CHANGED');
+    }
     // Same principal on an already verified record: nothing to rewrite, so
     // revision-bound generator/source associations stay valid.
-    const verified=account.state==='VERIFIED'&&account.identity&&
+    const verified=['VERIFIED','INVENTORY_PENDING'].includes(account.state)&&account.identity&&
       observed.proof.principalFingerprint===account.boundPrincipal&&
       account.identity.principalFingerprint===account.boundPrincipal?{ok:true,account}:
-      await accounts.applyCurrent({type:'VERIFY',accountId,proof:observed.proof});
+      await accounts.applyCurrent({type:'VERIFY',accountId,proof:observed.proof,requireInventory:true});
     if(!verified.ok)return verified;
     const inventory=typeof syncInventory==='function'?await syncInventory(accountId,verified.account.revision):null;
-    return {ok:true,state:'VERIFIED',inventory:inventory?.ok===true?'SYNCHRONIZED':(inventory?.code||'NOT_RUN')};
+    if(!inventory?.ok)return {ok:false,identityConfirmed:true,state:verified.account.state,
+      code:inventory?.code||'INVENTORY_UNAVAILABLE'};
+    const complete=await accounts.confirmInventory(accountId,verified.account.revision);
+    if(!complete.ok)return complete;
+    return {ok:true,state:'VERIFIED',inventory:'SYNCHRONIZED'};
   }
 
   // Background/periodic or operator route check for one active account.
@@ -295,11 +344,20 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
   // effect), then release only this account's OWN idle forwarder when the
   // donor proves it unused. Uncertain dispatched work keeps its journal;
   // Persona, cookies, principal and exit history are untouched.
-  async function archive(accountId,expectedRevision){
-    const out=await accounts.apply({type:'ARCHIVE',accountId,expectedRevision});
-    if(!out.ok)return out;
-    const release=await releaseIdle(out.account);
-    return {ok:true,state:'ARCHIVED',release:release.status};
+  function archive(accountId,expectedRevision){
+    const prior=archiving.get(accountId);
+    if(prior)return prior.revision===expectedRevision?prior.promise:Promise.resolve(fail('ACCOUNT_BUSY'));
+    const inFlight=running.get(accountId)?.promise;
+    const promise=(async()=>{
+      const out=await accounts.apply({type:'ARCHIVE',accountId,expectedRevision});
+      if(!out.ok)return out;
+      // Suspend durably now; the running effect settles at its next safe boundary.
+      if(inFlight)await inFlight;
+      const release=await releaseIdle(out.account);
+      return {ok:true,state:'ARCHIVED',release:release.status};
+    })().finally(()=>archiving.delete(accountId));
+    archiving.set(accountId,{revision:expectedRevision,promise});
+    return promise;
   }
   async function releaseIdle(snapshot){
     const accountId=snapshot.accountId;
@@ -362,6 +420,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     }
     const again=await confirm(accountId,{silent:true});
     if(again.ok)return again;
+    if(!again.needsLogin)return again;
     if(again.needsLogin)await openLogin(out.account.personaUid);
     return {ok:true,state:'WAITING_LOGIN',code:again.code};
   }
@@ -385,24 +444,24 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       explicitRemoval:true,personaDeleted,at:now()});
   }
   return Object.freeze({
-    remove:(accountId,expectedRevision,options)=>exclusive(accountId,
+    remove:(accountId,expectedRevision,options)=>exclusive(accountId,'REMOVE:'+String(expectedRevision)+':'+String(options?.deletePersona===true),
       ()=>remove(accountId,expectedRevision,options)),
     async begin(){
       const accountId=rid('acct_'),bindingId=rid('bind_');
       const out=await accounts.applyCurrent({type:'BEGIN_SETUP',accountId,bindingId});
       if(!out.ok)return out;
       // Setup continues in the background; the operator watches progress.
-      void exclusive(accountId,()=>prepare(accountId));
+      void exclusive(accountId,'SETUP',()=>prepare(accountId));
       return {ok:true,accountId};
     },
-    resume:accountId=>exclusive(accountId,()=>prepare(accountId)),
-    prepare:accountId=>exclusive(accountId,()=>prepare(accountId)),
-    confirm:accountId=>exclusive(accountId,()=>confirm(accountId)),
-    verifyRoute:(accountId,options)=>exclusive(accountId,()=>verifyRoute(accountId,options)),
-    reactivate:(accountId,rev)=>exclusive(accountId,()=>reactivate(accountId,rev)),
-    upgrade:accountId=>exclusive(accountId,()=>upgrade(accountId)),
-    replacePersona:(accountId,rev)=>exclusive(accountId,()=>replacePersona(accountId,rev)),
-    archive:(accountId,rev)=>exclusive(accountId,()=>archive(accountId,rev)),
+    resume:accountId=>exclusive(accountId,'SETUP',()=>prepare(accountId)),
+    prepare:accountId=>exclusive(accountId,'SETUP',()=>prepare(accountId)),
+    confirm:accountId=>exclusive(accountId,'CONFIRM',()=>confirm(accountId)),
+    verifyRoute:(accountId,options)=>exclusive(accountId,'ROUTE:'+String(options?.change===true)+':'+String(options?.automatic===true),()=>verifyRoute(accountId,options)),
+    reactivate:(accountId,rev)=>exclusive(accountId,'REACTIVATE',()=>reactivate(accountId,rev)),
+    upgrade:accountId=>exclusive(accountId,'UPGRADE',()=>upgrade(accountId)),
+    replacePersona:(accountId,rev)=>exclusive(accountId,'REPLACE_PERSONA',()=>replacePersona(accountId,rev)),
+    archive:(accountId,rev)=>archive(accountId,rev),
     // Startup/alarm upkeep: resume operator-started setups and unfinished
     // upgrades, upgrade pre-S01 records in place, re-verify pinned routes.
     // Archived accounts are never probed (that would recreate a released
@@ -411,17 +470,19 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       const listed=await accounts.list();
       if(!listed.ok)return listed;
       const results=[];
-      for(const a of listed.accounts){
+      async function checkAccount(a){
         const id=a.accountId;
         if(a.state==='ARCHIVED'){
           // Includes accounts archived before release existed or interrupted
           // between the Archive commit and the release.
-          if(a.route?.status!=='RELEASED')results.push(await exclusive(id,()=>releaseIdle(a)));
-          continue;
+          if(a.route?.status!=='RELEASED')results.push(await exclusive(id,'RELEASE',()=>releaseIdle(a)));
+          return;
         }
-        if(a.state==='PREPARING'){
-          if(typeof a.bindingId==='string'&&a.setup?.phase!=='HELD')
-            results.push(await exclusive(id,()=>prepare(id)));
+        if(a.state==='INVENTORY_PENDING'){
+          results.push(await exclusive(id,'CONFIRM',()=>confirm(id,{silent:true})));
+        }else if(a.state==='PREPARING'){
+          if(typeof a.bindingId==='string'&&(a.setup?.phase!=='HELD'||TRANSIENT.has(a.setup?.code)))
+            results.push(await exclusive(id,'SETUP',()=>prepare(id)));
         }else if(typeof a.bindingId!=='string'||(a.upgrade&&a.upgrade.phase!=='COMPLETE'&&
             (a.upgrade.phase!=='HELD'||TRANSIENT.has(a.upgrade.code)))){
           // Never start tagging (which blocks the Persona until pinned) while
@@ -431,14 +492,20 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
           if(!a.upgrade){
             let use=null;
             try{use=await donor.inspectRouteUse({personaUid:a.personaUid});}catch{}
-            if(use?.ok!==true||use.inUse!==false)continue;
+            if(use?.ok!==true||use.inUse!==false)return;
           }
-          results.push(await exclusive(id,()=>upgrade(id)));
+          results.push(await exclusive(id,'UPGRADE',()=>upgrade(id)));
         }else if(!a.upgrade||a.upgrade.phase==='COMPLETE')
-          results.push(await exclusive(id,()=>verifyRoute(id,{automatic:true})));
+          results.push(await exclusive(id,'ROUTE:false:true',()=>verifyRoute(id,{automatic:true})));
       }
+      // One slow inventory/search must not prevent another account's renewal.
+      // Bound in-flight account tasks while allowing ready workers to advance.
+      let cursor=0;
+      await Promise.all(Array.from({length:Math.min(4,listed.accounts.length)},async()=>{
+        while(cursor<listed.accounts.length)await checkAccount(listed.accounts[cursor++]);
+      }));
       return {ok:true,checked:results.length};
     },
-    running:accountId=>running.has(accountId)
+    running:accountId=>running.has(accountId)||archiving.has(accountId)
   });
 }

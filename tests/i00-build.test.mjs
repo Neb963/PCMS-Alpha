@@ -9,8 +9,10 @@ import { buildI00 } from '../scripts/build-i00.mjs';
 const pin='9995f6eadfa54be6cc0001f4e04f2a2d9b9401bf';
 const critical=['lib/recovery-bootstrap.js','lib/routing-gate.js','lib/mullvad-native.js','content/userscript-trigger.js'];
 const sha=async p=>createHash('sha256').update(await readFile(p)).digest('hex');
-test('combined XPI preserves guarded donor bytes and opens the full dashboard rather than donor popup',async()=>{
-  const {original,combined,stage}=await buildI00({packageArchive:false});
+test('combined XPI preserves guarded donor bytes and opens the full dashboard rather than donor popup',async t=>{
+  const buildDirectory=await mkdtemp(path.join(tmpdir(),'pcms-build-test-'));
+  t.after(()=>rm(buildDirectory,{recursive:true,force:true}));
+  const {original,combined,stage}=await buildI00({packageArchive:false,buildDirectory});
   for(const key of ['permissions','optional_permissions','host_permissions','content_scripts','browser_specific_settings'])
     assert.deepEqual(combined[key],original[key],`donor ${key} was modified`);
   assert.deepEqual(combined.action.default_icon,original.action.default_icon);
@@ -18,7 +20,7 @@ test('combined XPI preserves guarded donor bytes and opens the full dashboard ra
   assert.equal(Object.hasOwn(combined.action,'default_popup'),false);
   assert.equal(combined.browser_specific_settings.gecko.id,'persona-route-manager@local');
   assert.equal(original.version,'1.2.0','never rewrite donor manifest version');
-  assert.equal(combined.version,'1.2.7','installed PCMS UI must advance the existing v1.2.1 extension');
+  assert.equal(combined.version,'1.2.8','installed PCMS UI must advance the existing v1.2.1 extension');
   assert.deepEqual(combined.background,{scripts:['pcms/entry.mjs'],type:'module'});
   const entry=await readFile(path.join(stage,'pcms/entry.mjs'),'utf8');
   assert.match(entry,/import '\.\.\/lib\/recovery-bootstrap\.js'/);

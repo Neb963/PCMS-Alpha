@@ -8,7 +8,7 @@ const active = a => a && a.state !== 'ARCHIVED';
 const key = id => 'account:' + id;
 const reasons = new Set(['IDENTITY_UNOBSERVABLE','CHALLENGE','SESSION_UNAVAILABLE']);
 const allowed = new Set(['ENROLL','ACK_LOGIN','VERIFY','MANUAL_OVERRIDE','ARCHIVE','REACTIVATE','REBIND','REMOVE',
-  'BEGIN_SETUP','SETUP_PROGRESS','SETUP_COMPLETE','ROUTE_STATUS','REVERIFY',
+  'ROUTE_SEARCH_START','ROUTE_SEARCH_STEP','ROUTE_SEARCH_COMPLETE','BEGIN_SETUP','SETUP_PROGRESS','SETUP_COMPLETE','ROUTE_STATUS','REVERIFY',
   'BEGIN_UPGRADE','UPGRADE_PROGRESS','REPLACE_PERSONA']);
 const code = v => v===null || (typeof v==='string' && /^[A-Z0-9_]{3,64}$/.test(v));
 const phases = new Set(['START','PERSONA','ROUTE','LOGIN','HELD']);
@@ -107,9 +107,19 @@ export function transitionAccount(previous, action, all = []) {
     return {ok:true,account:{...previous,state:resumeSetup?'PREPARING':'WAITING_LOGIN',
       ...(resumeSetup?{setup:{phase:'START',code:null}}:{}),
       identity:null,override:null,revision:previous.revision+1,
-      bindingVersion:previous.bindingVersion+1,
+      // Archive/reactivate retains the SAME Persona/principal binding.
+      // Revision still changes, so old publication approvals stay invalid.
+      bindingVersion:previous.bindingVersion,
       history:withHistory(previous,{event:'REACTIVATE',revision:previous.revision+1})},
       event:'REACTIVATE'};
+  }
+  if (action.type==='ROUTE_SEARCH_START'||action.type==='ROUTE_SEARCH_STEP'||action.type==='ROUTE_SEARCH_COMPLETE'){
+    if(!active(previous))return fail('ACCOUNT_ARCHIVED');
+    if(action.type==='ROUTE_SEARCH_STEP'&&!isSafeId(action.routeId))return fail('INVALID_ROUTE_SEARCH');
+    const old=previous.routeSearch||{active:false,attempted:[]};
+    const attempted=action.type==='ROUTE_SEARCH_START'?[]:
+      action.type==='ROUTE_SEARCH_STEP'?[...new Set([...(old.attempted||[]),action.routeId])]:old.attempted;
+    return {ok:true,account:{...previous,routeSearch:{active:action.type!=='ROUTE_SEARCH_COMPLETE',attempted}},event:action.type};
   }
   if (action.type === 'ROUTE_STATUS') {
     // Internal route projection: metadata only. It never changes the account
@@ -187,7 +197,7 @@ export function transitionAccount(previous, action, all = []) {
       if (!['WAITING_LOGIN','REBIND_PENDING'].includes(previous.state)) return fail('INVALID_ACCOUNT_STATE');
       state='VERIFICATION_PENDING'; identity=null; override=null; break;
     case 'MANUAL_OVERRIDE':
-      if (!['WAITING_LOGIN','VERIFICATION_PENDING','REBIND_PENDING','OVERRIDDEN'].includes(previous.state) ||
+      if (!['WAITING_LOGIN','VERIFICATION_PENDING','REBIND_PENDING','OVERRIDDEN','INVENTORY_PENDING'].includes(previous.state) ||
           !reasons.has(action.reason) || action.acknowledgeLimitedAuthority !== true)
         return fail('OVERRIDE_NOT_AUTHORIZED');
       state='OVERRIDDEN'; identity=null;
@@ -198,7 +208,7 @@ export function transitionAccount(previous, action, all = []) {
       // This state transition is only invoked by a privileged readback adapter,
       // never directly by a UI message or a manual declaration.
       const proof=action.proof;
-      if (!['WAITING_LOGIN','VERIFICATION_PENDING','OVERRIDDEN','REBIND_PENDING','VERIFIED'].includes(previous.state) ||
+      if (!['WAITING_LOGIN','VERIFICATION_PENDING','OVERRIDDEN','REBIND_PENDING','VERIFIED','INVENTORY_PENDING'].includes(previous.state) ||
           proof?.source !== 'GUARDED_SESSION_READBACK' || proof.verified !== true ||
           proof.personaUid !== previous.personaUid || !digest(proof.principalFingerprint) ||
           !isSafeId(proof.observationId))
@@ -216,7 +226,7 @@ export function transitionAccount(previous, action, all = []) {
         return fail('IDENTITY_ALREADY_BOUND');
       identity={principalFingerprint:proof.principalFingerprint,observationId:proof.observationId,
         source:'GUARDED_SESSION_READBACK',bindingVersion};
-      state='VERIFIED'; override=null; break;
+      state=action.requireInventory===true?'INVENTORY_PENDING':'VERIFIED'; override=null; break;
     }
     case 'REBIND':
       if (!uid(action.personaUid) || action.personaUid === previous.personaUid ||
@@ -330,7 +340,33 @@ export function createAccountStore(db) {
       };
     });
   }
-  return Object.freeze({apply,applyCurrent,list,get});
+  function confirmInventory(accountId,expectedRevision){
+    if(!isSafeId(accountId)||!Number.isSafeInteger(expectedRevision))return Promise.resolve(fail('INVALID_ACCOUNT_COMMAND'));
+    return transact('readwrite',(tx,finish)=>{
+      const meta=tx.objectStore('meta');
+      meta.get(key(accountId)).onsuccess=e=>{
+        const account=e.target.result?.account;
+        if(!account||account.revision!==expectedRevision){finish(fail('STALE_REVISION'));return;}
+        if(account.state==='VERIFIED'){finish({ok:true,account,already:true});return;}
+        if(account.state!=='INVENTORY_PENDING'||account.identity?.source!=='GUARDED_SESSION_READBACK'||
+           account.identity.bindingVersion!==account.bindingVersion||
+           account.identity.principalFingerprint!==account.boundPrincipal){
+          finish(fail('INDEPENDENT_IDENTITY_PROOF_REQUIRED'));return;
+        }
+        meta.get('inventory-batch:'+accountId).onsuccess=seen=>{
+          const marker=seen.target.result;
+          if(!marker?.observationId||marker.accountRevision!==account.revision||
+             marker.bindingVersion!==account.bindingVersion){finish(fail('CURRENT_INVENTORY_REQUIRED'));return;}
+          // Completes the same identity verification revision atomically.
+          const next={...account,state:'VERIFIED'};
+          meta.put({key:key(accountId),account:next});
+          tx.objectStore('events').add({stage:'ACCOUNT_INVENTORY_CONFIRMED',accountId,revision:account.revision});
+          finish({ok:true,account:next});
+        };
+      };
+    });
+  }
+  return Object.freeze({apply,applyCurrent,list,get,confirmInventory});
 }
 
 // Account command replies do not expose session fingerprints, cookieStoreIds,
@@ -345,6 +381,7 @@ export function publicAccount(account) {
       (!account.upgrade||account.upgrade.phase==='COMPLETE')?
         'OPERATION_GUARDED':'OFF',
     setup:account.setup||null,route:account.route||null,upgrade:account.upgrade||null,
+    routeSearch:{active:account.routeSearch?.active===true,checked:account.routeSearch?.attempted?.length||0},
     removed:account.removed?{at:account.removed.at,personaDeleted:account.removed.personaDeleted===true}:null,
     protectedRoute:typeof account.bindingId!=='string'?'LEGACY_UNPINNED':
       account.upgrade&&account.upgrade.phase!=='COMPLETE'?'UPGRADING':'PCMS_PINNED'};

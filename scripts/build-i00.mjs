@@ -8,8 +8,6 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const donor = path.join(root, 'donor/personamonkey');
 const sourceExtension = path.join(donor, 'extension');
-const stage = path.join(root, 'build/xpi-root');
-const output = path.join(root, 'build/pcms-alpha-i00.xpi');
 const PIN = '9995f6eadfa54be6cc0001f4e04f2a2d9b9401bf';
 const ID = 'persona-route-manager@local';
 
@@ -42,7 +40,11 @@ export async function verifyPackagedModuleGraph(root){
   return {modules:paths.length,missing:0};
 }
 
-export async function buildI00({ packageArchive = true } = {}) {
+export async function buildI00({ packageArchive = true, buildDirectory = path.join(root,'build') } = {}) {
+  // Test callers own isolated staging roots; concurrent builds must not erase
+  // another test's exact donor overlay while it is being inspected.
+  const stage=path.join(buildDirectory,'xpi-root');
+  const output=path.join(buildDirectory,'pcms-alpha-i00.xpi');
   // Verify all original donor bytes, modes and canonical pinned Git tree.
   await verifyDonor();
   await stat(path.join(donor, 'LICENSE'));
@@ -69,7 +71,7 @@ export async function buildI00({ packageArchive = true } = {}) {
   // Leaving the donor's 1.2.0 version unchanged allowed an old installed UI
   // to masquerade as this new package. Donor bytes are untouched.
   if(original.version!=='1.2.0')throw Error('PINNED_DONOR_VERSION_CHANGED');
-  combined.version='1.2.7';
+  combined.version='1.2.8';
   combined.name = 'PCMS Alpha + PersonaMonkey';
   combined.description = 'PCMS dashboard with PersonaMonkey protected routing and operator-authorized generator management.';
   // An action popup suppresses Firefox's action.onClicked listener.

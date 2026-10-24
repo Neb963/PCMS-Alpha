@@ -89,3 +89,11 @@ test('S04 D: offline account counts remain but only verified identities receive 
     accounts:[accounts[0]],inventory:[],pending:[]});
   assert.equal(none.code,'NO_VERIFIED_ACCOUNTS');
 });
+
+test('J01 preserved attempted work on archived A cannot block allocation to healthy B',()=>{
+ const a={...account('archived'),'state':'ARCHIVED'},b={...account('healthy'),inventoryComplete:true};
+ const args={intent:{...intent(),state:'WAITING_CAPABILITY'},accounts:[a,b],inventory:[],
+   pending:[{accountId:a.accountId,state:'CREATE_DISPATCH_POSSIBLE'}]};
+ assert.equal(selectS04Account(args).accountId,b.accountId);
+ assert.equal(selectS04Account({...args,pending:[{accountId:'account_unknown',state:'CREATE_UNCERTAIN'}]}).code,'PENDING_COUNT_UNVERIFIED');
+});

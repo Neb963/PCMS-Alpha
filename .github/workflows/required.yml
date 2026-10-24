@@ -108,6 +108,16 @@ jobs:
         run: python3 scripts/a08-upgrade-firefox.py build/pcms-alpha-i00.xpi
       - name: Persistent installed-XPI Firefox B smoke
         run: python3 scripts/browser-i00-smoke.py build/pcms-alpha-i00.xpi
+      - name: Preserve redacted operator UI evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pcms-journey-ui
+          path: |
+            build/j01-*.png
+            build/j01-ui-evidence.json
+          if-no-files-found: ignore
+          retention-days: 14
   pcms-required:
     # A draft must never publish the protected full-acceptance context.
     name: ${{ (github.event_name == 'pull_request' && github.event.pull_request.draft == true) && 'pcms-draft-preflight' || 'pcms-required' }}

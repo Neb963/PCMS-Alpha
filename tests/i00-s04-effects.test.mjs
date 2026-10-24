@@ -5,6 +5,7 @@ import {fakeDatabase} from './fake-idb.mjs';
 import {createCoordinatorStore} from '../src/runtime/coordinator-store.mjs';
 import {createCreationRunner} from '../src/runtime/creation-runner.mjs';
 import {advanceS04Effect} from '../src/runtime/creation-effects.mjs';
+import {createAccountStore} from '../src/runtime/accounts.mjs';
 globalThis.crypto??=webcrypto;
 const slug='s04-runner-test';
 const account={accountId:'account_s04_123',personaUid:'persona_s04_123',
@@ -100,4 +101,48 @@ test('S04 effect D: ACK, visibility or remote ID are not independent proof',()=>
   assert.equal(wrong.ok,false);
   assert.equal(advanceS04Effect({...record,state:'CREATE_UNCERTAIN'},
     'CREATE_PREPARE',{operationId:'op_00000001',fingerprint:'a'.repeat(64)}).ok,false);
+});
+
+test('J01 same-principal reactivation safely resumes uncertain CREATE by readback after current inventory',async()=>{
+ const ctx=await setup(),worker=runner(ctx),accounts=createAccountStore(ctx.db);
+ await put(ctx.db,[{key:'account:'+account.accountId,account:{...account,boundPrincipal:'a'.repeat(64)}}]);
+ const next=async()=>{const x=await ctx.store.getCreate(ctx.id);return worker.worker.step(ctx.id,x.record.revision)};
+ await next();await next();let prepared=await next();
+ let dispatched=await ctx.store.stageEffect({intentId:ctx.id,expectedRevision:prepared.record.revision,event:'CREATE_DISPATCH'});
+ const unknown=await ctx.store.stageEffect({intentId:ctx.id,expectedRevision:dispatched.record.revision,event:'CREATE_UNCERTAIN',proof:{temporarySlug:'temp-s04'}});
+ assert.equal(unknown.record.state,'CREATE_UNCERTAIN');
+ const original=structuredClone(unknown.record);
+ let a=(await accounts.get(account.accountId)).account;
+ a=(await accounts.apply({type:'ARCHIVE',accountId:a.accountId,expectedRevision:a.revision})).account;
+ a=(await accounts.apply({type:'REACTIVATE',accountId:a.accountId,expectedRevision:a.revision,explicitReactivation:true})).account;
+ a=(await accounts.apply({type:'VERIFY',accountId:a.accountId,expectedRevision:a.revision,proof:{
+   source:'GUARDED_SESSION_READBACK',verified:true,personaUid:a.personaUid,
+   principalFingerprint:'a'.repeat(64),observationId:'identity_reactivated_01'}})).account;
+ assert.equal(a.bindingVersion,account.bindingVersion);
+ assert.ok(a.revision>original.accountRevision);
+ assert.equal((await next()).code,'CURRENT_INVENTORY_REQUIRED');
+ await put(ctx.db,[{key:'inventory-batch:'+a.accountId,observationId:'inventory_current_01',
+   accountRevision:a.revision,bindingVersion:a.bindingVersion,observedAt:999}]);
+ const refreshed=await next();assert.equal(refreshed.contextRefreshed,true);
+ assert.equal(refreshed.record.state,original.state);
+ assert.equal(refreshed.record.createOperationId,original.createOperationId);
+ assert.equal(refreshed.record.createFingerprint,original.createFingerprint);
+ assert.deepEqual(worker.ledger,[]);
+ const readback=await next();assert.equal(readback.record.state,'PRIVATE_EMPTY_CONFIRMED');
+ assert.deepEqual(worker.ledger,[],'no CREATE or RENAME replay on resumed uncertainty');
+});
+
+test('J01 Archive still requeues never-attempted automatic work before context recovery',async()=>{
+ const ctx=await setup();
+ const auto=await ctx.store.acceptCreate({origin:'OPERATOR',slug:'j01-auto-requeue',intentId:'intent_j01_auto'});
+ const allocated=await ctx.store.allocateCreate(auto.record.intentId,auto.record.revision);
+ assert.equal(allocated.record.state,'OWNER_READBACK_PENDING');
+ const accounts=createAccountStore(ctx.db);
+ await accounts.apply({type:'ARCHIVE',accountId:account.accountId,expectedRevision:account.revision});
+ const out=await runner(ctx).worker.step(auto.record.intentId,allocated.record.revision);
+ assert.equal(out.ok,true);assert.equal(out.record.state,'WAITING_CAPABILITY');
+ assert.equal(out.record.accountId,null);
+ const pinned=await ctx.store.getCreate(ctx.id);
+ // The separately pinned reservation was never silently reassigned.
+ assert.equal(pinned.record.accountId,account.accountId);
 });

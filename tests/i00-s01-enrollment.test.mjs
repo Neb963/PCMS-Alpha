@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
 import {fakeDatabase} from './fake-idb.mjs';
 import {createAccountStore} from '../src/runtime/accounts.mjs';
+import {createInventoryStore} from '../src/runtime/inventory.mjs';
 import {createExitLedger,LEDGER_KEY} from '../src/runtime/network-ledger.mjs';
 import {createEnrollment} from '../src/runtime/enrollment.mjs';
 import {configureRoutePinSource,closeRoutePins,reloadRoutePins,holdRoutePin,
@@ -136,7 +137,13 @@ function setup({relays}){
     identify:async personaUid=>sessions.has(personaUid)?{ok:true,proof:{source:'GUARDED_SESSION_READBACK',
       verified:true,personaUid,principalFingerprint:sessions.get(personaUid),
       observationId:'identity_'+crypto.randomUUID().replaceAll('-','')}}:{ok:false,code:'NO_PAGE_SESSION'},
-    syncInventory:async(accountId)=>{synced.push(accountId);return {ok:true};}});
+    syncInventory:async(accountId,revision)=>{
+      synced.push(accountId);const account=(await accounts.get(accountId)).account;
+      return createInventoryStore(db).applyObservation(account,{
+        source:'GUARDED_PERCHANCE_READBACK',complete:true,accountId,personaUid:account.personaUid,
+        accountRevision:revision,bindingVersion:account.bindingVersion,
+        principalFingerprint:account.identity.principalFingerprint,
+        observationId:'inventory_'+crypto.randomUUID(),observedAt:Date.now()+synced.length,generators:[]});}});
   const profileOf=account=>{
     const [contextId,p]=[...d.profiles.entries()].find(([,x])=>x.pcmsBindingId===account.bindingId);
     return {...p,containerId:contextId,managed:true,killSwitch:true};
@@ -842,4 +849,96 @@ test('S01 D: route-pin refresh reuses one monitored IndexedDB connection, invali
     configureRoutePinSource(async()=>({ok:true,pins:[]}));
     closeRoutePins();
   }
+});
+
+test('J01 distinct intents do not join; Archive suspends at the current route effect checkpoint',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
+ const a=await enroll(h);let release,entered;
+ const gate=new Promise(r=>release=r),started=new Promise(r=>entered=r);
+ const probe=h.donor.probeAssigned;
+ h.donor.probeAssigned=async p=>{entered();await gate;return probe(p)};
+ const checking=h.flow.verifyRoute(a.accountId,{automatic:true});await started;
+ const replacement=await h.flow.replacePersona(a.accountId,(await h.accounts.get(a.accountId)).account.revision);
+ assert.equal(replacement.ok,false);assert.equal(replacement.code,'ACCOUNT_BUSY');
+ const archiving=h.flow.archive(a.accountId,(await h.accounts.get(a.accountId)).account.revision);
+ for(let i=0;i<20&&(await h.accounts.get(a.accountId)).account.state!=='ARCHIVED';i++)await new Promise(r=>setImmediate(r));
+ assert.equal((await h.accounts.get(a.accountId)).account.state,'ARCHIVED');
+ release();await checking;assert.equal((await archiving).state,'ARCHIVED');
+ assert.equal((await h.accounts.get(a.accountId)).account.state,'ARCHIVED');
+});
+test('J01 unique ninth candidate is reached after eight historical collisions',async()=>{
+ const relays=[relay('10.124.0.1','45.83.1.1','BLOCKED'),
+   ...Array.from({length:8},(_,i)=>relay('10.124.0.'+(i+2),'45.83.1.1','BLOCKED')),
+   relay('10.124.0.10','45.83.1.10','BLOCKED')];
+ const h=setup({relays}),a=await enroll(h),b=await enroll(h);
+ assert.equal(a.state,'WAITING_LOGIN');assert.equal(b.state,'WAITING_LOGIN');
+ const binding=await h.ledger.binding(b.bindingId);
+ assert.equal(binding.binding.exits[0].address,'45.83.1.10');
+ assert.equal((await h.ledger.read()).ledger.owners['IPv4:45.83.1.1'],a.accountId);
+ assert.equal(b.routeSearch.attempted.length,8);
+});
+test('J01 unknown assigned IPv6 immediately holds admission and valid readback restores same route',async()=>{
+ const relays=[relay('10.124.0.1','45.83.1.1','BLOCKED')],h=setup({relays});
+ const a=await enroll(h),profile=h.profileOf(a);
+ assert.equal(inspectRoutePin(profile).allow,true);
+ relays[0].v6=null;
+ const result=await h.flow.verifyRoute(a.accountId,{automatic:true});
+ assert.equal(result.code,'IPV6_EVIDENCE_UNVERIFIED');
+ assert.equal(inspectRoutePin(profile).allow,false);
+ const held=(await h.ledger.binding(a.bindingId)).binding;
+ assert.equal(held.pin,'HELD');assert.equal(held.holdCode,'IPV6_EVIDENCE_UNVERIFIED');
+ relays[0].v6='BLOCKED';
+ assert.equal((await h.flow.verifyRoute(a.accountId)).ok,true);
+ assert.equal(inspectRoutePin(profile).allow,true);
+ assert.equal((await h.ledger.binding(a.bindingId)).binding.routeId,held.routeId);
+});
+
+test('J01 failed explicit login confirmation withdraws old identity readiness without rotating',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
+ let a=await enroll(h);h.sessions.set(a.personaUid,fp('a'));
+ assert.equal((await h.flow.confirm(a.accountId)).ok,true);
+ const before=h.effects.filter(e=>e.kind==='ASSIGN').length;
+ h.sessions.delete(a.personaUid);
+ assert.equal((await h.flow.confirm(a.accountId)).code,'NO_PAGE_SESSION');
+ a=(await h.accounts.get(a.accountId)).account;
+ assert.notEqual(a.state,'VERIFIED');assert.equal(a.boundPrincipal,fp('a'));
+ assert.equal(h.effects.filter(e=>e.kind==='ASSIGN').length,before);
+});
+test('J01 assigned probe updates current IPv6 disposition and keeps historic public exits',async()=>{
+ const relays=[relay('10.124.0.1','45.83.1.1','BLOCKED')],h=setup({relays});
+ const a=await enroll(h);
+ relays[0].v6='2a03:1b20:1::1';
+ assert.equal((await h.flow.verifyRoute(a.accountId)).ok,true);
+ const observed=await h.ledger.binding(a.bindingId);
+ assert.equal(observed.binding.ipv6Disposition,'OBSERVED');
+ relays[0].v6='BLOCKED';assert.equal((await h.flow.verifyRoute(a.accountId)).ok,true);
+ assert.equal((await h.ledger.binding(a.bindingId)).binding.ipv6Disposition,'BLOCKED_VERIFIED');
+ assert.equal((await h.ledger.read()).ledger.owners['IPv6:2a03:1b20:1::1'],a.accountId);
+});
+
+test('J01 periodic recovery resumes transient Add setup without duplicate Persona or assignment',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
+ h.faults.host=true;const a=await enroll(h);
+ assert.equal(a.setup.code,'MULLVAD_LOCAL_SERVICE_UNAVAILABLE');
+ assert.equal(h.effects.filter(e=>e.kind==='ASSIGN').length,0);
+ h.faults.host=false;
+ assert.equal((await h.flow.upkeep()).ok,true);
+ const ready=(await h.accounts.get(a.accountId)).account;
+ assert.equal(ready.state,'WAITING_LOGIN');
+ assert.equal(ready.personaUid,a.personaUid);
+ await h.flow.upkeep();
+ assert.equal(h.effects.filter(e=>e.kind==='PERSONA_CREATE').length,1);
+ assert.equal(h.effects.filter(e=>e.kind==='ASSIGN').length,1);
+ assert.equal((await h.ledger.inspect()).activePins,1);
+});
+
+test('J01 upkeep reconciles lost Persona-create ACK without requiring another Add or creating a duplicate',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
+ h.faults.lostCreateAck=true;const a=await enroll(h);
+ assert.equal(a.setup.code,'PERSONA_CREATE_UNCONFIRMED');
+ assert.equal((await h.flow.upkeep()).ok,true);
+ const ready=(await h.accounts.get(a.accountId)).account;
+ assert.equal(ready.state,'WAITING_LOGIN');
+ assert.equal(h.effects.filter(e=>e.kind==='PERSONA_CREATE').length,1);
+ assert.equal(h.profiles.size,1);assert.equal(h.effects.filter(e=>e.kind==='ASSIGN').length,1);
 });
