@@ -92,3 +92,11 @@ test('A09 refuses malformed acceptance catalog/unknown source identity rather th
  assert.throws(()=>evaluateEvidence({catalog,receipts:[],sourceSha:'HEAD',xpiSha256:XPI}),/A09_SOURCE_SHA_REQUIRED/);
  assert.throws(()=>evaluateEvidence({catalog,receipts:[],sourceSha:SHA,xpiSha256:'artifact.zip'}),/A09_EXACT_XPI_SHA256_REQUIRED/);
 });
+
+test('A09 CLI denies a caller supplied arbitrary source SHA before inspecting any XPI',async()=>{
+ const {spawnSync}=await import('node:child_process');
+ const result=spawnSync(process.execPath,['scripts/a09-evidence.mjs','--xpi','does-not-exist.xpi','--source-sha','a'.repeat(40)],
+   {cwd:new URL('../',import.meta.url),encoding:'utf8'});
+ assert.notEqual(result.status,0);
+ assert.match(result.stderr,/A09_SOURCE_CHECKOUT_SHA_MISMATCH/);
+});
