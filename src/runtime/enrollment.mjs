@@ -8,7 +8,7 @@ import {normalizeRouteEvidence,exitSetDigest} from './network-ledger.mjs';
 
 // Hold codes that a later automatic attempt may clear without operator input.
 const TRANSIENT=new Set(['MULLVAD_LOCAL_SERVICE_UNAVAILABLE','DONOR_SECURITY_UNAVAILABLE',
-  'PERSONA_TAG_UNCONFIRMED','ROUTE_ASSIGN_UNCONFIRMED','NO_ROUTE_CANDIDATES','ENROLLMENT_INTERRUPTED']);
+  'PERSONA_CREATE_UNCONFIRMED','PERSONA_TAG_UNCONFIRMED','ROUTE_ASSIGN_UNCONFIRMED','NO_ROUTE_CANDIDATES','ENROLLMENT_INTERRUPTED']);
 const rid=prefix=>prefix+crypto.randomUUID().replaceAll('-','');
 // Codes shown to the operator; anything else is summarized generically.
 export const SETUP_MESSAGES=Object.freeze({

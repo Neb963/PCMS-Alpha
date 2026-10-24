@@ -931,3 +931,14 @@ test('J01 periodic recovery resumes transient Add setup without duplicate Person
  assert.equal(h.effects.filter(e=>e.kind==='ASSIGN').length,1);
  assert.equal((await h.ledger.inspect()).activePins,1);
 });
+
+test('J01 upkeep reconciles lost Persona-create ACK without requiring another Add or creating a duplicate',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]});
+ h.faults.lostCreateAck=true;const a=await enroll(h);
+ assert.equal(a.setup.code,'PERSONA_CREATE_UNCONFIRMED');
+ assert.equal((await h.flow.upkeep()).ok,true);
+ const ready=(await h.accounts.get(a.accountId)).account;
+ assert.equal(ready.state,'WAITING_LOGIN');
+ assert.equal(h.effects.filter(e=>e.kind==='PERSONA_CREATE').length,1);
+ assert.equal(h.profiles.size,1);assert.equal(h.effects.filter(e=>e.kind==='ASSIGN').length,1);
+});
