@@ -515,7 +515,7 @@ function routeHandlers(){
  });
  root.addEventListener('change',event=>{const target=event.target;
  if(target.id==='generator-account'){state.gen.account=target.value;state.gen.offset=0;void loadGenerators()}
- if(target.id==='generator-sort'){state.gen.sort=target.value;void displayGenerators()}
+ if(target.id==='generator-sort'){state.gen.sort=target.value;state.gen.offset=0;void loadGenerators()}
  if(target.id==='account-filter'){state.acct.filter=target.value;state.acct.page=0;displayAccounts()}
  if(target.matches('.feature-switch')){void proposeRefresherEnable(target)}
  });
@@ -808,7 +808,7 @@ async function loadGenerators(){if(state.route!=='generators')return;
  const epoch=++state.renderEpoch,body=shadow('.workspace-surface table tbody');if(!body)return;
  renderEmpty(body,'Reading observed local generator inventory…');
  try{
-  const [res,accountsResult]=await Promise.all([inventory({query:state.gen.query,offset:state.gen.offset,limit:state.gen.limit,ownerState:state.gen.filter==='ALL'?'ALL':state.gen.filter,accountId:state.gen.account==='ALL'?'':state.gen.account}),accounts().catch(()=>null)]);
+  const [res,accountsResult]=await Promise.all([inventory({query:state.gen.query,offset:state.gen.offset,limit:state.gen.limit,ownerState:state.gen.filter==='ALL'?'ALL':state.gen.filter,accountId:state.gen.account==='ALL'?'':state.gen.account,sort:state.gen.sort}),accounts().catch(()=>null)]);
   if(epoch!==state.renderEpoch||state.route!=='generators')return;
   state.lastAccountList=accountsResult?.ok&&Array.isArray(accountsResult.accounts)?accountsResult.accounts:state.lastAccountList;
   state.gen.items=Array.isArray(res.items)?res.items:[];state.gen.total=safeCount(res.total)=== '—'?0:res.total;
@@ -818,8 +818,7 @@ async function loadGenerators(){if(state.route!=='generators')return;
 function displayGenerators(){if(state.route!=='generators')return;
  const body=shadow('.workspace-surface table tbody');if(!body)return;body.replaceChildren();
  const accountsMap=new Map(state.lastAccountList.map(a=>[a.accountId,a]));const itemList=[...state.gen.items];
- if(state.gen.sort==='name')itemList.sort((a,b)=>String(a.slug).localeCompare(String(b.slug)));
- if(state.gen.sort==='account')itemList.sort((a,b)=>String(a.accountId).localeCompare(String(b.accountId)));
+ // Server already sorted the complete matching fleet before slicing.
  state.gen.visibleItems=itemList;
  if(!itemList.length){rowsError('.workspace-surface table tbody',state.errors.generators?'Local inventory unavailable.': 'No matching local generator observations.',6)}
  for(const [i,item] of itemList.entries()){
