@@ -78,6 +78,8 @@ function show(){
  status.textContent=run?
   'Test generator '+run.slug+' · '+run.status+' · next '+run.stage+
   (run.firstFailure?' · '+run.firstFailure.code+(
+    run.firstFailure.code==='INITIAL_INVENTORY_UNKNOWN'?
+      ' — In Accounts, synchronize the generator inventory for every non-archived managed account under its verified protected route. Then Resume this same run; do not start a new slug. Independent module checks below remain available.':
     run.firstFailure.code==='GIT_WRITE_GRANT_REQUIRED'?
       ' — Grant Git in Settings → Protected workflow activation, then Resume.':
     run.firstFailure.code==='ENABLE_GUARDED_REFRESHER_POLICY'?
