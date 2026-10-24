@@ -106,17 +106,21 @@ export function createAccountBoundary(api,{
   const exitLedger=async()=>createExitLedger(await connection());
   // The SAME production instance serves the UI port and background upkeep.
   async function flow(){
+    // Read-only account views remain available throughout restore.
+    if((await sentinel.inspect()).held)return null;
     if(enrollment)return enrollment;
     if(enrollmentInit)return enrollmentInit;
     const g=guard();if(!g?.enrollmentDonor)return null;
     enrollmentInit=(async()=>{
       const created=createEnrollment({accounts:await store(),ledger:await exitLedger(),
-        donor:g.enrollmentDonor,pins,
+        donor:g.enrollmentDonor,pins,mutationAllowed:async()=>!(await sentinel.inspect()).held,
         openLogin:personaUid=>g.openHumanLogin(personaUid),
         identify:personaUid=>guardedIdentityRead(g,personaUid,identityReader),syncInventory});
-      const recovered=await created.recoverInterrupted();if(!recovered.ok)throw Error('SETUP_RECOVERY_UNAVAILABLE');
+      const recovered=await created.recoverInterrupted({canRecover:async()=>!(await sentinel.inspect()).held});
+      if(!recovered.ok){if(recovered.code==='RESTORE_HOLD')return null;throw Error('SETUP_RECOVERY_UNAVAILABLE');}
+      if((await sentinel.inspect()).held)return null;
       enrollment=created;return enrollment;
-    })().catch(error=>{enrollmentInit=null;throw error});
+    })().then(created=>{if(!created)enrollmentInit=null;return created;}).catch(error=>{enrollmentInit=null;throw error});
     return enrollmentInit;
   }
   const explain=code=>SETUP_MESSAGES[code]||null;

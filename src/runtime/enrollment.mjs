@@ -41,7 +41,7 @@ export const SETUP_MESSAGES=Object.freeze({
 });
 
 export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,syncInventory,
-  now=Date.now}={}){
+  now=Date.now,mutationAllowed=async()=>true}={}){
   if(!accounts?.applyCurrent||!ledger?.reserve||!donor?.createBoundPersona||!pins?.hold||
      typeof openLogin!=='function'||typeof identify!=='function')
     throw new TypeError('Enrollment dependencies unavailable');
@@ -57,8 +57,10 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       // Preserve the binding and donor intent; resume observes before effects.
       try{const current=await accounts.get(accountId);if(current.ok&&current.account.state==='PREPARING'){
         pins.hold(current.account.bindingId);
-        await ledger.hold(current.account.bindingId,'ENROLLMENT_INTERRUPTED');
-        await progress(accountId,'HELD','ENROLLMENT_INTERRUPTED');
+        if(await mutationAllowed()===true){
+          await ledger.hold(current.account.bindingId,'ENROLLMENT_INTERRUPTED');
+          if(await mutationAllowed()===true)await progress(accountId,'HELD','ENROLLMENT_INTERRUPTED');
+        }
       }}catch{}
       return fail('ENROLLMENT_INTERRUPTED');
     })
@@ -454,14 +456,18 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     return accounts.apply({type:'REMOVE',accountId,expectedRevision,
       explicitRemoval:true,personaDeleted,at:now()});
   }
-  async function recoverInterrupted(){
+  async function recoverInterrupted({canRecover=mutationAllowed}={}){
     const listed=await accounts.list();if(!listed.ok)return listed;
     let held=0;
     for(const a of listed.accounts){
       if(a.state!=='PREPARING'||a.setup?.phase==='HELD'||running.has(a.accountId))continue;
       // A new controller owns no prior in-memory task. Preserve the durable
       // binding/search history and require read-before-effect recovery.
-      pins.hold(a.bindingId);await ledger.hold(a.bindingId,'ENROLLMENT_INTERRUPTED');
+      if(await canRecover()!==true)return fail('RESTORE_HOLD');
+      pins.hold(a.bindingId);
+      if(await canRecover()!==true)return fail('RESTORE_HOLD');
+      await ledger.hold(a.bindingId,'ENROLLMENT_INTERRUPTED');
+      if(await canRecover()!==true)return fail('RESTORE_HOLD');
       const out=await progress(a.accountId,'HELD','ENROLLMENT_INTERRUPTED');if(!out.ok)return out;held++;
     }
     return {ok:true,held,providerEffects:'NONE'};

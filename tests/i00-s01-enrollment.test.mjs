@@ -968,3 +968,11 @@ test('a cold controller exposes interrupted setup without replaying its already-
  assert.equal((await fresh.recoverInterrupted()).held,0,'known holds keep their reason and revision');
  assert.equal((await fresh.prepare(id)).ok,true);assert.equal(h.effects.filter(x=>x.kind==='PERSONA_CREATE').length,1);
 });
+
+test('restore beginning during cold recovery prevents subsequent canonical recovery writes',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),id='restore_race_setup';
+ await h.accounts.applyCurrent({type:'BEGIN_SETUP',accountId:id,bindingId:'restore_race_binding'});
+ const before=(await h.accounts.get(id)).account,events=h.db.keys('events').length;let checks=0;
+ assert.equal((await h.flow.recoverInterrupted({canRecover:async()=>++checks<2})).code,'RESTORE_HOLD');
+ assert.deepEqual((await h.accounts.get(id)).account,before);assert.equal(h.db.keys('events').length,events);assert.deepEqual(h.effects,[]);
+});
