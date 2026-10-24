@@ -102,7 +102,8 @@ def capture(session, name, evidence):
 def run(browser, archive, folder):
     profile=pathlib.Path(folder)/"j01-primary-accounts"
     profile.mkdir()
-    (profile/"user.js").write_text('user_pref("xpinstall.signatures.required", false);\n')
+    # Keep this negative unmocked-port profile and all provider fixtures offline.
+    (profile/"user.js").write_text('user_pref("xpinstall.signatures.required", false);\nuser_pref("network.dns.forceResolve", "127.0.0.1");\n')
     first=b.open_session(browser,profile)
     try:
         assert b.call("POST",f"/session/{first}/moz/addon/install",{"path":str(archive),"temporary":False},timeout=45)==b.ID
@@ -141,7 +142,11 @@ def run(browser, archive, folder):
         interrupted=oracle(session);assert interrupted["accounts"][0]["setup"]["code"]=="ENROLLMENT_INTERRUPTED",interrupted
         assert len([x for x in interrupted["effects"] if x["kind"]=="PERSONA_CREATE"])==1
         capture(session,"interrupted-setup",evidence)
-        b.close(session);session=b.open_session(browser,profile)
+        interrupted_pids=b.owned_firefox_pids(profile);assert interrupted_pids,'J01_INTERRUPTED_PROCESS_NOT_OBSERVED'
+        b.close(session);b.require_owned_exit(profile,interrupted_pids)
+        session=b.open_session(browser,profile)
+        recovered_pids=b.owned_firefox_pids(profile)
+        assert recovered_pids and not interrupted_pids.intersection(recovered_pids),'J01_INTERRUPTED_PROCESS_NOT_REPLACED'
         b.call("POST",f"/session/{session}/url",{"url":url});b.wait_donor_ready(session);fixture(session)
         manage(session,account_id);command(session,"RESUME_SETUP")
         wait_state(session,account_id,"WAITING_LOGIN")
