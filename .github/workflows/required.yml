@@ -64,26 +64,8 @@ jobs:
           path: build/pcms-alpha-i00.xpi
           if-no-files-found: error
           retention-days: 14
-      - name: Build checksum-verified matching operator/native host package
-        run: |
-          set -euo pipefail
-          xpi_before="$(sha256sum build/pcms-alpha-i00.xpi | cut -d' ' -f1)"
-          node scripts/build-operator-package.mjs
-          test "$xpi_before" = "$(sha256sum build/pcms-alpha-i00.xpi | cut -d' ' -f1)"
-          mkdir -p build/operator-repro
-          cp build/pcms-alpha-operator.tar.gz build/operator-repro/first.tar.gz
-          node scripts/build-operator-package.mjs
-          cmp build/operator-repro/first.tar.gz build/pcms-alpha-operator.tar.gz
-          tar -xOzf build/pcms-alpha-operator.tar.gz pcms-alpha-operator/pcms-alpha.xpi | cmp - build/pcms-alpha-i00.xpi
-          tar -xOzf build/pcms-alpha-operator.tar.gz pcms-alpha-operator/SHA256SUMS |
-            grep -F '  pcms-alpha.xpi' | cut -d' ' -f1 | grep -Fx "$xpi_before"
-      - name: Upload matching OS native host installer and XPI
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: pcms-alpha-operator-matched
-          path: build/pcms-alpha-operator.tar.gz
-          if-no-files-found: error
-          retention-days: 14
+      - name: Independently audit exact XPI and donor-only native bridge
+        run: python3 scripts/a08-xpi-audit.py build/pcms-alpha-i00.xpi
   firefox:
     name: firefox
     needs: fast
@@ -108,6 +90,8 @@ jobs:
       # but is not a new operator/runtime product prerequisite.
       - name: Persistent installed-XPI Firefox B smoke
         run: python3 scripts/browser-i00-smoke.py build/pcms-alpha-i00.xpi
+      - name: Persistent Firefox donor-to-PCMS upgrade and source-state survival
+        run: python3 scripts/a08-upgrade-firefox.py build/pcms-alpha-i00.xpi
   pcms-required:
     name: pcms-required
     if: ${{ always() }}
