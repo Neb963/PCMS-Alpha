@@ -1,5 +1,6 @@
 // I07 — exact, bounded, fail-closed original-source evidence. No provider effects.
 import {fail,isSafeId} from './journal.mjs';
+import {exactSource} from './staging-core.mjs';
 const slugPattern=/^[a-z0-9][a-z0-9-]{0,99}$/;
 const hex=/^[a-f0-9]{64}$/;
 const assetPath=p=>typeof p==='string' && p.startsWith('src/') &&
@@ -88,7 +89,13 @@ export async function verifyOriginal(packet, row, account) {
     sha256:await sha256(b.bytes)});
   const fingerprint=await sha256(utf8('PCMS_ORIGINAL_V1\n'+
     fileProof.map(f=>JSON.stringify([f.path,f.size,f.sha256])).join('\n')));
+  // Refresher uses the exact staged-source manifest encoding. Preserve the
+  // independent I07 original fingerprint and original bytes unchanged.
+  const staged=await exactSource(blobs.map(b=>({
+    path:b.path,base64:toBase64(b.bytes)})));
+  if(!staged.ok)return fail('ADOPTION_STAGED_SOURCE_UNVERIFIED');
   return {ok:true,source:'INDEPENDENT_FULL_BYTE_READBACK',
+    stagedFingerprint:staged.fingerprint,sourceStage:'PCMS_STAGED_SOURCE_V1',
     fingerprint,remotePublicId:packet.remotePublicId,
     visibility:packet.visibility,observedAt:packet.observedAt,
     files:fileProof,blobs:blobs.map(b=>({

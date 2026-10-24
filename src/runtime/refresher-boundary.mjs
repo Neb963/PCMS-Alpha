@@ -4,6 +4,7 @@ import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId,createCanonica
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 import {createRefresherStore} from './refresher-store.mjs';
+import {backfillLegacyAdoptions} from './refresher-adopted.mjs';
 import {MINUTE} from './refresher-core.mjs';
 import {qualifyRecentAbsence} from './refresher-admission.mjs';
 import {createNoticeDispatcher} from './notices.mjs';
@@ -63,6 +64,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
   guard=internalPcmsGuard,observationGate=()=>false,
   refreshGate=()=>false,qualificationFor=()=>null,refreshAdapter=null,clock=Date.now,
   nativeClockGate=()=>false,continuousCoverageFor=()=>null,
+  browserClockGate=()=>false,monotonicClock=()=>performance.now(),
   newId=()=>crypto.randomUUID().replaceAll('-','')}={}){
   let dbPromise,turnPromise=null,registered=false,alarmHeld=false,alarmTail=Promise.resolve();
   const bootId=newId(),sentinel=createRestoreSentinel(api.storage.local);
@@ -341,7 +343,36 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       try{
         if((await sentinel.inspect()).held){await safeBreadcrumb(null,'RESTORE_HOLD');return fail('RESTORE_HOLD');}
         const s=await store();
-        let nativeClock=null,qualifiedCoverages=null,turnReadiness=null;
+        // Passive additive migration of previously adopted public originals.
+        // Independent hashing and CAS occur outside scheduler transactions;
+        // changed/corrupt snapshots stay held, never promoted by timestamps.
+        try{if(!(await sentinel.inspect()).held)
+          await backfillLegacyAdoptions(await dbPromise,{shouldHold:async()=>
+            (await sentinel.inspect()).held});}
+        catch{/* migration failure never disables monitoring or grants a write */}
+        let nativeClock=null,qualifiedCoverages=null,turnReadiness=null,browserClock=null;
+        if(browserClockGate()){
+          // The elapsed monotonic clock is meaningful only inside this one
+          // executing Firefox background incarnation. Capture current donor
+          // readiness without OS-PCMS clock or patched bridge dependencies.
+          try{
+            const g=guard(),previous=await s.read();
+            const scopes=verifiedScopes(previous?.state||{accounts:{}});
+            turnReadiness=await readinessFor(g,scopes);
+            const routes=[];
+            for(const [accountId,a] of scopes){
+              const ready=turnReadiness.get(accountId);
+              if(ready?.ready===true&&ready.personaUid===a.personaUid)
+                routes.push({ready:true,accountId,personaUid:a.personaUid,
+                  bindingVersion:a.bindingVersion,
+                  principalFingerprint:a.principalFingerprint,
+                  routeId:ready.routeId,cookieStoreId:ready.cookieStoreId,
+                  healthDomain:ready.healthDomain});
+            }
+            browserClock={runtimeEpoch:bootId,monotonicMs:monotonicClock(),
+              observedAtMs:clock(),routes};
+          }catch{browserClock=null;turnReadiness=null;}
+        }
         if(nativeClockGate()){
           // Existing donor pin + native witness; no new observer or synthetic
           // future certificates. A route failure at either endpoint freezes
@@ -368,7 +399,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
             }
           }catch{/* no fake time credited on native/route failure */}
         }
-        const now=clock(),result=await s.turn({now,bootId,nativeClock,qualifiedCoverages});
+        const now=clock(),result=await s.turn({now,bootId,nativeClock,qualifiedCoverages,browserClock});
         if(!result.ok){await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return result;}
         await schedule(result.state.nextWakeAt);
         // At most two protected reads per turn. Persistent quota/coalescing spans
@@ -407,8 +438,8 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
             'LIVE_REFRESH_OFF_UNTIL_PROVEN',
           // This reports the actual production gate, never assumes that
           // monotonic host time is eligible provider/account operating time.
-          clockCapability:nativeClockGate()?
-            'BOUNDED_NATIVE_ROUTE_FEED_ELIGIBILITY':
+          clockCapability:browserClockGate()?'BROWSER_MONOTONIC_ROUTE_FEED_ELIGIBILITY':
+            nativeClockGate()?'BOUNDED_NATIVE_ROUTE_FEED_ELIGIBILITY':
             'CONTINUOUS_ELIGIBILITY_NOT_ESTABLISHED'};
       }
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
@@ -467,8 +498,12 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     api.alarms.onAlarm.addListener(alarm=>{
       if(alarm?.name===REFRESHER_ALARM){void alarmReceipt();void tick();}
     });
-    api.runtime.onStartup.addListener(()=>void tick());
-    api.runtime.onInstalled.addListener(()=>void tick());
+    // Firefox discards alarms on a full exit. Recreate the one wake alarm
+    // *before* slow IDB migration, route readiness or provider monitoring.
+    // Scheduling is a wake hint only; it confers no operating-time credit.
+    const coldWake=()=>{void schedule(clock()+MINUTE);void tick();};
+    api.runtime.onStartup.addListener(coldWake);
+    api.runtime.onInstalled.addListener(coldWake);
     api.runtime.onConnect.addListener(port=>{
       if(port?.name!==REFRESHER_PORT)return;
       let busy=false;
@@ -480,7 +515,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
           .finally(()=>{busy=false;});
       });
     });
-    registered=true;void tick();
+    registered=true;coldWake();
   }
   return Object.freeze({register,tick,run});
 }

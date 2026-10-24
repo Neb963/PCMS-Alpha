@@ -3059,7 +3059,7 @@ def main():
                   const second=state.rows.find(r=>r.slug==='i12-b-0001');
                   first.phase='ACTIVE';first.slot=true;first.activeRemaining=24*core.HOUR;
                   first.admittedAt=now-8*core.HOUR;first.checkpoint=now-8*core.HOUR;
-                  second.phase='SLEEPING';second.sleepRemaining=72*core.HOUR;
+                  second.phase='SLEEPING';second.sleepRemaining=72*core.HOUR;second.restCheckpointAt=now-8*core.HOUR;
                   await new Promise((resolve,reject)=>{
                     const tx=db.transaction('meta','readwrite');tx.objectStore('meta').put({key:core.REFRESHER_KEY,state});
                     tx.oncomplete=resolve;tx.onabort=()=>reject(Error('seed aborted'));
@@ -3200,11 +3200,17 @@ def main():
                   const state=(await (await import('./refresher-store.mjs')).createRefresherStore(db).read()).state;
                   const alarm=await browser.alarms.get('pcms-refresher-turn');
                   done({paused:state.globalPause,first:state.rows.find(r=>r.slug==='i12-b-0000').activeRemaining,
+                    rest:state.rows.find(r=>r.slug==='i12-b-0001').sleepRemaining,
+                    clockOrigin:state.browserClock?.witness?.runtimeEpoch||null,
                     alarm:!!alarm,alarms:(await browser.alarms.getAll()).filter(a=>a.name==='pcms-refresher-turn').length,
                     held:state.accounts['i12_account_0000'].health});db.close();
                 })().catch(e=>done({error:String(e)}));"""
                 restarted=call('POST',f'/session/{after}/execute/async',{'script':restart_code,'args':[]})
                 assert restarted['paused'] is True and restarted['first']==16*3600000,restarted
+                assert 0<restarted['rest']<64*3600000,('A06_REST_PROGRESS_ON_REAL_PROCESS_RESTART',restarted)
+                # Cold startup may seed a NEW browser epoch immediately; the
+                # unchanged ACTIVE budget, not absence of a new seed, proves
+                # no previous-run operating time was replayed.
                 assert restarted['alarm'] is True and restarted['alarms']==1,restarted
                 assert restarted['held']=='UNKNOWN',restarted
                 print('B I12_PERSISTENT_RESTART_BUDGET_PAUSE_SINGLE_ALARM_REPAIR=PASS',flush=True)
@@ -3245,17 +3251,19 @@ def main():
                   const denied=await store.reserveAttempt({stableId:row?.stableId,
                     id:'packaged_test_attempt',now:Date.now(),candidate:null,liveAuthorized:false});
                   const after=await store.read();
+                  const targetAfter=after.state.rows.find(r=>r.stableId===row?.stableId);
+                  const unchangedEffect=JSON.stringify(row?.refresh)===JSON.stringify(targetAfter?.refresh);
                   const port=browser.runtime.connect({name:'pcms-i12-refresher'});
                   port.onMessage.addListener(result=>{
                     done({ok:before.ok&&after.ok&&!denied.ok&&
-                      before.revision===after.revision&&
-                      before.state.revision===after.state.revision&&
+                      unchangedEffect&&denied.code==='REFRESH_ADMISSION_HELD'&&
+                      !targetAfter?.refresh?.intent&&
                       result.ok&&result.refreshCapability==='OPERATOR_MUTATION_DISABLED'&&
-                      result.clockCapability==='BOUNDED_NATIVE_ROUTE_FEED_ELIGIBILITY'&&
+                      result.clockCapability==='BROWSER_MONOTONIC_ROUTE_FEED_ELIGIBILITY'&&
                       core.qualifyRefreshCandidate(null).ok===false,
                       beforeRows:before.state.rows.length,
                       denied:denied.code,capability:result.refreshCapability,
-                      response:result,unchanged:before.state.revision===after.state.revision});
+                      response:result,unchanged:unchangedEffect});
                     port.disconnect();db.close();
                   });
                   port.postMessage({type:'GET_REFRESHER',params:{limit:5}});
@@ -3265,7 +3273,7 @@ def main():
                 assert i14.get('ok') is True,i14
                 ui=execute(after,"return {provider:document.getElementById('pcms-refresher-provider')?.textContent||'',summary:document.getElementById('pcms-refresher-summary')?.textContent||'',optIn:document.getElementById('pcms-refresher-enable')?.checked}")
                 assert ('refresh mutation OFF' in ui['provider'] and
-                        'bounded native awake time' in ui['provider'] and
+                        'qualified browser operating time' in ui['provider'] and
                         ui['optIn'] is False and
                         'visibility-held' in ui['summary']),ui
                 print('B I14_PACKAGED_PERSISTENT_IDB_GATED_EFFECTS_AND_REFERSHER_PROOF_UI=PASS',flush=True)

@@ -37,7 +37,9 @@ function inspector(){
     ' · Source save verified; waiting for new recent-page return':
     proof?.proof?.effect==='EFFECT_CONFIRMED'?
     ' · Source save verified; recent-page effectiveness separate':'';
-  el('selected').textContent+=' · visibility '+(proof?.state||'UNOBSERVED')+
+  el('selected').textContent+=' · source '+(r.sourceAuthority==='ADOPTED_FULL_ORIGINAL_READBACK'?
+    'independently verified adopted original':
+    r.sourceAuthority==='INDEPENDENT_PUBLICATION_READBACK'?'verified publication':'unverified')+' · visibility '+(proof?.state||'UNOBSERVED')+
     ' · misses '+(proof?.misses||0)+' · attempts '+(proof?.attempts||0)+
     ' · independent source effect '+(proof?.proof?.effect||'UNVERIFIED')+
     ' · current recent feed '+(snapshot.recent.complete?'verified':'UNKNOWN')+
@@ -69,7 +71,9 @@ function draw(s){
   el('provider').textContent='Provider '+s.provider.state+
     (s.policy.refreshEnabled?' · guarded marker saves ENABLED':' · refresh mutation OFF')+
     ' · operating time: '+
-    (s.clockCapability==='BOUNDED_NATIVE_ROUTE_FEED_ELIGIBILITY'?
+    (s.clockCapability==='BROWSER_MONOTONIC_ROUTE_FEED_ELIGIBILITY'?
+      'qualified browser operating time; offline active gaps frozen':
+      s.clockCapability==='BOUNDED_NATIVE_ROUTE_FEED_ELIGIBILITY'?
       'bounded native awake time with current protected route/feed evidence; unknown frozen':
       'continuous eligibility not verified')+
     ' · observations: '+s.monitoring+'.';

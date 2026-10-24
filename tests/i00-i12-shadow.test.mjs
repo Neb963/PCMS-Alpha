@@ -27,34 +27,38 @@ function advance(s,from,to,options={}){
   const x=advanceShadow(s,{now:to,bootId:options.bootId||boot,
     receipt:receipt(s,from,to,options)});assert.equal(x.ok,true);return x.state;
 }
-test('P54-01 F/X: 8 evidenced hours leaves exactly 16; shutdown, crash and stale evidence freeze both clocks',()=>{
+test('P54-01 F/X: 8 evidenced hours leaves exactly 16; shutdown and stale evidence freeze active only; wall rest continues',()=>{
   let {s}=fleet(2,2);s.rows[0].phase='ACTIVE';s.rows[0].slot=true;
   s.rows[1].phase='SLEEPING';s.rows[1].sleepRemaining=72*HOUR;
+  s.rows[1].restCheckpointAt=at;
   s=advance(s,at,at+8*HOUR);
   assert.equal(s.rows[0].activeRemaining,16*HOUR);
   assert.equal(s.rows[1].sleepRemaining,64*HOUR);
   const remaining=s.rows.map(r=>[r.activeRemaining,r.sleepRemaining]);
   s=advanceShadow(s,{now:at+18*HOUR,bootId:'browser_boot_02'}).state;
-  assert.deepEqual(s.rows.map(r=>[r.activeRemaining,r.sleepRemaining]),remaining);
+  assert.equal(s.rows[0].activeRemaining,remaining[0][0]);
+  assert.equal(s.rows[1].sleepRemaining,54*HOUR);
   s=advanceShadow(s,{now:at+18*HOUR+27*MINUTE,bootId:'browser_boot_02'}).state;
-  assert.deepEqual(s.rows.map(r=>[r.activeRemaining,r.sleepRemaining]),remaining);
+  assert.equal(s.rows[0].activeRemaining,remaining[0][0]);
+  assert.equal(s.rows[1].sleepRemaining,54*HOUR-27*MINUTE);
   const stale=receipt(s,at+18*HOUR,at+19*HOUR,{bootId:boot});
   s=advanceShadow(s,{now:at+19*HOUR,bootId:'browser_boot_02',receipt:stale}).state;
-  assert.deepEqual(s.rows.map(r=>[r.activeRemaining,r.sleepRemaining]),remaining);
+  assert.equal(s.rows[0].activeRemaining,remaining[0][0]);
+  assert.equal(s.rows[1].sleepRemaining,53*HOUR);
   assert.equal(s.timeline.at(-1).reason,'CLOCK_EVIDENCE_INCOMPLETE');
 });
 test('P54-01 F/X: replay/overlap/clock rollback cannot double-credit; continuous phase transitions exactly once',()=>{
   let {s}=fleet(2,2);s.rows[0].phase='ACTIVE';s.rows[0].slot=true;
   s.rows[0].activeRemaining=HOUR;s.rows[0].sleepMs=3*HOUR;
   s=advance(s,at,at+2*HOUR);
-  assert.equal(s.rows[0].phase,'SLEEPING');assert.equal(s.rows[0].sleepRemaining,2*HOUR);
+  assert.equal(s.rows[0].phase,'SLEEPING');assert.equal(s.rows[0].sleepRemaining,3*HOUR);
   assert.equal(s.rows[0].cycle,1);
   s=advance(s,at,at+2*HOUR);
-  assert.equal(s.rows[0].sleepRemaining,2*HOUR);assert.equal(s.rows[0].cycle,1);
+  assert.equal(s.rows[0].sleepRemaining,3*HOUR);assert.equal(s.rows[0].cycle,1);
   s=advance(s,at+HOUR,at+3*HOUR);
-  assert.equal(s.rows[0].sleepRemaining,HOUR);
+  assert.equal(s.rows[0].sleepRemaining,2*HOUR);
   s=advanceShadow(s,{now:at+HOUR,bootId:boot,receipt:receipt(s,at,at+HOUR)}).state;
-  assert.equal(s.rows[0].sleepRemaining,HOUR);assert.equal(s.rows[0].cycle,1);
+  assert.equal(s.rows[0].sleepRemaining,2*HOUR);assert.equal(s.rows[0].cycle,1);
 });
 test('P54-02 F/X: 12 slots expire only after 35+25 evidenced grace minutes; offline/outage do not expire',()=>{
   let {s}=fleet(60,5);s.policy.manualCap=30;s.policy.initialCap=30;
@@ -85,15 +89,16 @@ test('P54-03 / S6-I12-DISPATCH-STAGGER F: oldest eligible order, retained priori
   s=reconcileShadow(s,[...inputs].reverse()).state;
   assert.deepEqual(s.rows.map(r=>[r.stableId,r.ordinal]).sort(),preserved);
 });
-test('P54-03 / P54-11 / S6-I12-SLEEP-LISTED F: per-target READY precedence preserves 22h sleep and public ordinary sleep',()=>{
+test('P54-03 / P54-11 / S6-I12-SLEEP-LISTED F: per-target READY precedence does not stop wall-clock rest',()=>{
   let {s,inputs}=fleet(3,3);s.rows[0].phase='SLEEPING';s.rows[0].sleepRemaining=22*HOUR;
+  s.rows[0].restCheckpointAt=at;
   inputs[0].readyUpdate=true;inputs[0].reviewHeld=true;inputs[0].listing='UNLISTED';
   s=reconcileShadow(s,inputs).state;s=advance(s,at,at+HOUR);
-  assert.equal(s.rows[0].sleepRemaining,22*HOUR);assert.equal(s.rows[0].slot,false);
+  assert.equal(s.rows[0].sleepRemaining,21*HOUR);assert.equal(s.rows[0].slot,false);
   assert.ok(s.rows.slice(1).some(r=>r.slot));
   inputs[0].reviewHeld=false;inputs[0].listing='PUBLIC';inputs[0].readyUpdate=false;
   s=reconcileShadow(s,inputs).state;s=advance(s,at+HOUR,at+2*HOUR);
-  assert.equal(s.rows[0].sleepRemaining,21*HOUR);assert.equal(s.rows[0].listing,'PUBLIC');
+  assert.equal(s.rows[0].sleepRemaining,20*HOUR);assert.equal(s.rows[0].listing,'PUBLIC');
 });
 test('P54-04 F/X: demand 250 is no slot promise; 195 incumbents survive cap 180; noise and stale windows labeled',()=>{
   let {s}=fleet();s.policy.manualCap=200;s.capacity.defensible=200;

@@ -102,7 +102,7 @@ test('I12 packaging F: static graph/guarded fixed executor/view available; no di
   assert.match(entry,/createRefresherBoundary\(browser,\{/);
   assert.match(entry,/refreshAdapter:native/);
   assert.match(entry,/createRefresherNativeAdapter\(\{/);
-  assert.match(entry,/observationGate:\(\)=>true,nativeClockGate:\(\)=>true/);
+  assert.match(entry,/observationGate:\(\)=>true,browserClockGate:\(\)=>true/);
   assert.match(entry,/refreshGate:\(\)=>true/);
   assert.equal((entry.match(/createRefresherBoundary\(browser/g)||[]).length,1);
   assert.match(await readFile('src/ui/index.html','utf8'),/refresher-view\.mjs/);

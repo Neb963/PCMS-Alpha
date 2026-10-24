@@ -7,7 +7,7 @@ test('S07 B packaging input: sole Refresher wake includes explicit-off-by-defaul
   const overlay=await readFile('src/runtime/overlay.mjs','utf8');
   assert.match(entry,/createRefresherNativeAdapter\(\{/);
   assert.match(entry,/createRefresherBoundary\(browser,\{/);
-  assert.match(entry,/observationGate:\(\)=>true,nativeClockGate:\(\)=>true/);
+  assert.match(entry,/observationGate:\(\)=>true,browserClockGate:\(\)=>true/);
   assert.match(entry,/refreshGate:\(\)=>true/);
   assert.equal((entry.match(/createRefresherBoundary\(browser/g)||[]).length,1);
   for(const required of ['refresher-native.mjs','refresher-admission.mjs',

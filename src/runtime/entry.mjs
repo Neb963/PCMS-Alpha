@@ -74,7 +74,7 @@ if(typeof browser!=='undefined'){
     }
   });
   createRefresherBoundary(browser,{
-    observationGate:()=>true,nativeClockGate:()=>true,
+    observationGate:()=>true,browserClockGate:()=>true,
     refreshGate:()=>true, // canonical policy defaults OFF; operator opts in
     qualificationFor:(row,account)=>native.prepare(row,account),
     refreshAdapter:native
