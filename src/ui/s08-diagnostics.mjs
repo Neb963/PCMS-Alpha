@@ -2,7 +2,13 @@
 // ports and canonical production receipts. Never invents a provider success.
 import {DIAGNOSTIC_CONFIG,DIAGNOSTIC_RUN,STAGES,
   validateDisposable,evaluateDisposable,createDiagnosticRun,
-  addDiagnosticEvent,diagnosticReport,recoverInterruptedDiagnostic,canStartNewDiagnostic} from './s08-diagnostic-core.mjs';
+  addDiagnosticEvent,diagnosticReport,recoverInterruptedDiagnostic,canStartNewDiagnostic,
+  recoverDiagnosticIfInactive} from './s08-diagnostic-core.mjs';
+// A07 one-document execution owner. A settings remount must not race an
+// already dispatched diagnostic or convert RUNNING to a false cold-start hold.
+let activeDiagnosticDrive=false;
+const mountedViews=new Set();
+function refreshMountedViews(){for(const update of mountedViews)update();}
 // A07: direct primary UI mount; isolated per-view state and genuine guarded ports.
 export function mountDiagnosticController(root=document){
 const by=id=>root.querySelector('#pcms-diagnostic-'+id);
@@ -49,12 +55,13 @@ function request(which,type,params={}){
  });
 }
 function controls(){
- save.disabled=busy;start.disabled=busy||!configuration||
+ const locked=busy||activeDiagnosticDrive;
+ save.disabled=locked;start.disabled=locked||!configuration||
    !canStartNewDiagnostic(run);
- resume.disabled=busy||!run||!run.firstFailure;
- rerun.disabled=busy||!configuration;exporter.disabled=busy||!run;
- cleanup.disabled=busy||!run||run.cleanup==='VERIFIED_REMOTE_AND_GIT_ABSENT';
- account.disabled=busy;namespace.disabled=busy;xpiSha.disabled=busy;
+ resume.disabled=locked||!run||!run.firstFailure;
+ rerun.disabled=locked||!configuration;exporter.disabled=locked||!run;
+ cleanup.disabled=locked||!run||run.cleanup==='VERIFIED_REMOTE_AND_GIT_ABSENT';
+ account.disabled=locked;namespace.disabled=locked;xpiSha.disabled=locked;
 }
 function show(){
  if(designationError)scope.textContent=designationError;
@@ -86,7 +93,7 @@ function show(){
 async function persist(){
  run.updatedAt=Date.now();
  await browser.storage.local.set({[DIAGNOSTIC_RUN]:run});
- show();
+ show();refreshMountedViews();
 }
 async function mark(stage,outcome,code){
  run=addDiagnosticEvent(run,stage,outcome,code,Date.now());
@@ -265,7 +272,8 @@ const ACTION={
  PROCESS_RESTART:isolatedRestart
 };
 async function drive(){
- if(busy||!run)return;busy=true;controls();
+ if(busy||!run||activeDiagnosticDrive)return;
+ busy=true;activeDiagnosticDrive=true;controls();refreshMountedViews();
  try{
   const at=Math.max(0,STAGES.indexOf(run.stage));
   for(let i=at;i<STAGES.length;i++){
@@ -290,7 +298,7 @@ async function drive(){
    run.status=run.events.some(event=>event.outcome!=='PASS')?'NOT_TESTED':'PASS';
      run.firstFailure=null;await persist();
   }
- }finally{busy=false;show();}
+ }finally{busy=false;activeDiagnosticDrive=false;show();refreshMountedViews();}
 }
 async function populateAccounts(){
  const response=await request('accounts','LIST_ACCOUNTS');
@@ -307,7 +315,7 @@ async function populateAccounts(){
  if(configuration)account.value=configuration.accountId;
 }
 save.addEventListener('click',async()=>{
- if(busy)return;busy=true;controls();
+ if(busy||activeDiagnosticDrive)return;busy=true;controls();
  try{
   const selected=account.value;
   const current=await request('accounts','LIST_ACCOUNTS');
@@ -344,18 +352,18 @@ function nextRun(){
  return created.run;
 }
 start.addEventListener('click',async()=>{
- if(busy||!configuration||!canStartNewDiagnostic(run))return;
+ if(busy||activeDiagnosticDrive||!configuration||!canStartNewDiagnostic(run))return;
  if(!run){run=nextRun();await persist();}
  void drive();
 });
-resume.addEventListener('click',()=>{if(!busy&&run?.firstFailure)void drive();});
+resume.addEventListener('click',()=>{if(!busy&&!activeDiagnosticDrive&&run?.firstFailure)void drive();});
 rerun.addEventListener('click',async()=>{
- if(busy||!configuration)return;
+ if(busy||activeDiagnosticDrive||!configuration)return;
  if(run&&!confirm('Start a new test slug? Existing remote test artifacts are preserved; export the previous report first if needed.'))return;
  run=nextRun();await persist();void drive();
 });
 cleanup.addEventListener('click',async()=>{
- if(busy||!run)return;
+ if(busy||activeDiagnosticDrive||!run)return;
  if(!confirm('This only verifies absence. First manually remove the exact test slug from Perchance and Git main. No other resources are touched. Continue?'))return;
  busy=true;controls();
  try{
@@ -391,13 +399,25 @@ exporter.addEventListener('click',()=>{
  a.href=url;a.download='pcms-s08-sanitized-diagnostic.json';
  a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
 });
+// Detached views cannot own effects, but they may observe canonical progress.
+// No observer ever persists, retries or infers a remote effect.
+async function refreshFromCanonical(){
+ if(!scope.isConnected){mountedViews.delete(refreshFromCanonical);return;}
+ if(busy)return;
+ try{
+  const saved=await browser.storage.local.get(DIAGNOSTIC_RUN);
+  const latest=saved[DIAGNOSTIC_RUN];
+  if(latest?.version===1){run=latest;show();}
+ }catch{/* leave current evidence displayed as unverified */}
+}
+mountedViews.add(refreshFromCanonical);
 (async()=>{
  try{
   const saved=await browser.storage.local.get([DIAGNOSTIC_CONFIG,DIAGNOSTIC_RUN]);
   if(validateDisposable(saved[DIAGNOSTIC_CONFIG]).ok)
    configuration=saved[DIAGNOSTIC_CONFIG];
   run=saved[DIAGNOSTIC_RUN]?.version===1?
-    recoverInterruptedDiagnostic(saved[DIAGNOSTIC_RUN]):null;
+    recoverDiagnosticIfInactive(saved[DIAGNOSTIC_RUN],activeDiagnosticDrive):null;
   if(run&&run!==saved[DIAGNOSTIC_RUN])
     await browser.storage.local.set({[DIAGNOSTIC_RUN]:run});
   if(configuration){namespace.value=configuration.namespace;
