@@ -56,7 +56,7 @@ export function planReadyDevelopment({ready,stage,existing,job,exception,
     ex.stageRevision===stage?.record?.revision&&
     ex.jobRevision===job?.job?.revision&&
     ex.sourceFingerprint===job?.job?.sourceFingerprint&&
-    ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(job?.job?.native?.state))
+    (job?.job?.exceptionFrozen||['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(job?.job?.native?.state)))
    return {ok:true,type:'HOLD',code:'S06_EXCEPTION_REVIEW_SOURCE_FROZEN'};
  if(existing?.ok){
    const s=existing.record?.state;

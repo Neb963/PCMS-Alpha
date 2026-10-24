@@ -2,7 +2,7 @@
 // session stopped. Only fresh guarded observations can freeze a review source.
 import {exactSource,verifyReadback} from './staging-core.mjs';
 const proofs=new WeakMap();
-const tuple=(s,j)=>[s.slug,s.revision,s.nonce,j.revision,j.sourceFingerprint,j.native?.sessionDigest];
+const tuple=(s,j)=>[s.slug,s.revision,s.nonce,j.revision,j.controlRevision||1,j.sourceFingerprint,j.native?.sessionDigest,j.operatorInstruction||null];
 export const validExceptionalIdleProof=(proof,stage,job)=>!!stage&&!!job&&!!proof&&proofs.has(proof)&&JSON.stringify(proofs.get(proof).tuple)===JSON.stringify(tuple(stage,job));
 export const exceptionalIdleEvidence=(proof,stage,job)=>validExceptionalIdleProof(proof,stage,job)?proofs.get(proof):null;
 export async function captureExceptionalIdle({guard:g,stage:s,job:j,held=async()=>false}){

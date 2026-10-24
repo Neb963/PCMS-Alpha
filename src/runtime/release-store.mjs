@@ -1,6 +1,7 @@
 // I13 canonical release journal. No provider effect may occur in an IDB
 // transaction. A lost dispatch reply is always uncertain, never retried.
 import {fail} from './journal.mjs';
+import {cleanBulkAuthorization} from './clean-bulk-authority.mjs';
 import {matchesApproval,releaseContext,releaseTestContext,
   releaseCandidateTestContext} from './release-core.mjs';
 import {REFRESHER_KEY,validShadow} from './refresher-core.mjs';
@@ -118,7 +119,7 @@ export function createReleaseStore(db){
     m.put({key:key(name),release:{...r,progressHold:code,progressAt:Date.now()}});done(display({...r,progressHold:code}));
    }});
   }
-  function approve({approval,stage,job,account,inventory,source,previous,releaseId,kind}){
+  function approve({approval,stage,job,account,inventory,source,previous,releaseId,kind,bulkAuthorization=null}){
     if(!approval?.ok||!slug(stage?.slug)||stage.slug!==job?.slug||
        stage.slug!==inventory?.slug||stage.accountId!==account?.accountId||
        kind!=='PRIVATE_NEW'&&kind!=='EXISTING_UPDATE'||
@@ -176,11 +177,13 @@ export function createReleaseStore(db){
                   done(fail('RELEASE_CONTEXT_CHANGED'));return;
                 }
                 const commit=()=>{
+                const write=bulk=>{
                 const record={slug:stage.slug,kind,revision:old?old.revision+1:1,releaseId,
                   state:'APPROVED',approval:structuredClone(approval.tuple),
                   sealedSource:structuredClone(source),previousSource:structuredClone(previous),
                   approvedAt:Date.now(),changedAt:Date.now(),
                   dispatchPossible:false,reason:null};
+                if(bulk)record.cleanBulkSetId=bulk.id;
                 if(old){
                   meta.put({key:'release-history:'+stage.slug+':'+old.releaseId,
                     release:structuredClone(old)});
@@ -190,6 +193,15 @@ export function createReleaseStore(db){
                   slug:stage.slug,releaseId,sourceFingerprint:source.fingerprint,
                   kind,accountId:stage.accountId});
                 done(display(record));
+                };
+                if(bulkAuthorization===null){write(null);return;}
+                const bulk=cleanBulkAuthorization(bulkAuthorization);if(!bulk){done(fail('CLEAN_BULK_AUTHORITY_INVALID'));return;}
+                meta.get('clean-bulk:'+bulk.id).onsuccess=br=>{const set=br.target.result?.record,item=set?.items?.[bulk.index];
+                  if(set?.state!=='APPROVED'||set.digest!==bulk.digest||!set.approvedAt||item?.state!=='APPROVAL_REQUESTED'||item.slug!==stage.slug||
+                    item.snapshot.readyIdentifier!==stage.readyIdentifier||item.snapshot.readyInputFingerprint!==stage.readyInputFingerprint||
+                    !matchesApproval(item.snapshot.tuple,approval.tuple).ok){done(fail('CLEAN_BULK_AUTHORITY_REVOKED'));return}
+                  write(bulk);
+                };
                 };
                 withS06Candidate(meta,liveStage,liveJob,done,()=>
                   withoutPendingChild(meta,liveStage,done,commit),approval.tuple);

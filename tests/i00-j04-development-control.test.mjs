@@ -34,10 +34,10 @@ test('J04 pause retains tested revision, prevents effects, preserves pending wor
  const resumed=await f.store.admitExecutionSlot(name,1);assert.equal(resumed.ok,true);assert.equal(resumed.slotReleased,false);assert.equal(resumed.revision,1);assert.equal(resumed.evidence.state,'KNOWN_FAILURE');
 });
 test('J04 pause stops only an observed active session; restart reconciles without replay and checkpoints before freeing its slot',async()=>{
- const f=await fixture();await put(f.db,{key:'ai-job:'+name,accountId:'account',job:{...f.job,native:{...f.job.native,state:'RUNNING_OBSERVED'}}});
+ const f=await fixture();f.busy(true);await put(f.db,{key:'ai-job:'+name,accountId:'account',job:{...f.job,native:{...f.job.native,state:'RUNNING_OBSERVED'}}});
  const pause=await f.store.operatorControl(name,1,1,{paused:true});assert.equal(pause.slotReleased,false);assert.equal(planAiStep(await f.current()).step,'STOP');
  const out=await f.boundary().run({type:'ADVANCE_JOB',params:{slug:name,expectedRevision:1}},sender);assert.equal(out.code,'AI_DISPATCH_POSSIBLE_RECONCILE');assert.deepEqual(f.effects.map(x=>x.action),['STOP']);
- const marked=await f.current();assert.equal(planAiStep(marked).type,'PROBE_NATIVE');
+ const marked=await f.current();assert.equal(planAiStep(marked).type,'PROBE_NATIVE');f.busy(false);
  const reconciled=await f.boundary().run({type:'ADVANCE_JOB',params:{slug:name,expectedRevision:marked.revision}},sender);
  assert.equal(reconciled.ok,true,JSON.stringify(reconciled));assert.equal(reconciled.slotReleased,true);assert.equal(reconciled.evidence.state,'KNOWN_FAILURE');
  assert.deepEqual(f.effects.map(x=>x.action),['STOP']);assert.equal(planAiStep(await f.current()).code,'AI_OPERATOR_PAUSED');

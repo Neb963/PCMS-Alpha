@@ -5,6 +5,8 @@ import {fakeDatabase} from './fake-idb.mjs';import {exactSource} from '../src/ru
 import {createReleaseStore} from '../src/runtime/release-store.mjs';import {approvalTuple} from '../src/runtime/release-core.mjs';
 import {createS06PublicationProgress} from '../src/runtime/s06-publication-progress.mjs';
 import {s06ReviewStatus} from '../src/runtime/s06-review-queue.mjs';
+import {createReleaseBoundary} from '../src/runtime/release-boundary.mjs';
+import {createCatalogWatcher,READY_PROGRESS_ALARM} from '../src/runtime/catalog-watch.mjs';
 const D='d'.repeat(64),P='c'.repeat(64),put=(db,rows)=>new Promise(resolve=>{const t=db.transaction('meta','readwrite');t.oncomplete=resolve;for(const row of rows)t.objectStore('meta').put(row)});
 async function fixture(count){
  const source=await exactSource([{path:'main.pjs',base64:btoa('output = 1')},{path:'index.html',base64:btoa('<p>saved</p>')}]),previous=await exactSource([{path:'main.pjs',base64:''},{path:'index.html',base64:''}]),db=fakeDatabase(),store=createReleaseStore(db),items=[];
@@ -41,4 +43,28 @@ test('J04 approved publication continues without a dashboard across restarts, lo
  assert.equal(f.commands.filter(x=>x.slug==='publication-0100'&&x.type==='DISPATCH').length,1);
  const last=(await f.store.list({after:'publication-0200',limit:2}));assert.deepEqual(last.items.map(x=>x.slug),['publication-0201','publication-0202']);assert.equal(last.more,true);
  const before=f.commands.length;f.saved.pcmsRestoreInProgress={active:true};assert.equal((await f.make().tick()).code,'RESTORE_HOLD');assert.equal(f.commands.length,before);
+});
+test('J04 actual immutable publication readback is independent of later Git loss/drift; source contradiction stays held and never replays',async()=>{
+ for(const contradiction of [false,true]){const f=await fixture(1),slug=f.items[0],row=await f.store.getFull(slug);
+  const armed=await f.store.markDispatch(slug,row.record.revision,row.record.approval);assert.equal(armed.ok,true);f.effects.set(slug,1);
+  await put(f.db,[{key:'s05-ready:'+slug,record:{slug,active:{identifier:'rev-new',inputFingerprint:P},desired:{identifier:'rev-newest'},hold:'WAIT_FOR_SAFE_SOURCE_HANDOFF'}}]);
+  let gitReads=0,publishes=0,reads=0;
+  const api={...f.api,runtime:{id:'fixture',getURL:p=>'moz-extension://fixture/'+p}},boundary=createReleaseBoundary(api,{open:async()=>f.db,
+   gitCredential:async()=>{gitReads++;throw Error('Git credential lost after publish')},inspect:async()=>{gitReads++;throw Error('Git folder changed after publish')},dispatch:async()=>{publishes++;throw Error('must not replay')},
+   guard:()=>({getSafeRouteReadiness:async()=>({ready:true,routeId:'protected',cookieStoreId:'container'}),observeReadOnly:async(_,identity,target)=>{assert.equal(identity,false);assert.equal(target,slug);reads++;
+    return {ok:true,principalFingerprint:P,original:{remotePublicId:'remote-0',ownerResult:'IS_OWNER',visibility:'PUBLIC',pjs:contradiction?'a changed current source':'output = 1',html:'<p>saved</p>',assets:[]}};}})});
+  const out=await boundary.run({type:'RECONCILE',params:{slug,expectedRevision:armed.revision}},{id:'fixture',url:'moz-extension://fixture/pcms/index.html'});
+  assert.equal(out.state,contradiction?'PUBLICATION_UNCERTAIN':'CONFIRMED_PUBLIC',JSON.stringify(out));assert.equal(reads,1);assert.equal(gitReads,0);assert.equal(publishes,0);assert.equal(f.effects.get(slug),1);
+  if(contradiction)assert.equal((await f.store.getFull(slug)).record.reason,'PUBLICATION_SOURCE_CONTRADICTION');
+ }
+});
+test('J04 repeated cold registrations preserve progress deadlines and the shared alarm progresses without a Git catalog connection or dashboard',async()=>{
+ const saved={},alarms=new Map([[READY_PROGRESS_ALARM,{name:READY_PROGRESS_ALARM,scheduledTime:123456789,periodInMinutes:1}],['pcms-s03-main-observe',{name:'pcms-s03-main-observe',scheduledTime:234567890,periodInMinutes:15}]]),created=[],calls=[];
+ for(let wake=0;wake<4;wake++){
+  let listener;const api={storage:{local:{get:async k=>({[k]:saved[k]}),set:async o=>Object.assign(saved,o)}},alarms:{get:async k=>alarms.get(k),create:async(k,v)=>{created.push(k);alarms.set(k,v)},onAlarm:{addListener:f=>listener=f}},runtime:{onStartup:{addListener(){}},onInstalled:{addListener(){}}}};
+  createCatalogWatcher(api,{progressPublication:async()=>{calls.push(wake);return {ok:true}},scan:async()=>{throw Error('no Git connection')}}).register();
+  for(let n=0;n<4;n++)await new Promise(resolve=>setImmediate(resolve));
+  listener({name:READY_PROGRESS_ALARM});for(let n=0;n<4;n++)await new Promise(resolve=>setImmediate(resolve));
+ }
+ assert.deepEqual(created,[]);assert.deepEqual(calls,[0,1,2,3]);assert.equal(alarms.get(READY_PROGRESS_ALARM).scheduledTime,123456789);
 });

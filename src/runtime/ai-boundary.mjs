@@ -383,8 +383,20 @@ export function createAiBoundary(api,{
           if(effectGate({phase:'I10',job,stage:r,step:p.step})!==true)
             return fail('AI_PROVIDER_ACTIVATION_HELD');
           // Do not admit new AI work over human-owned or dirty source.
-          const clean=await g.inspectStageEditor?.(r.personaUid,r.slug,r.nonce);
-          if(clean?.ok!==true||clean.clean!==true)return fail('EDITOR_UNKNOWN');
+          if(p.step!=='STOP'){
+            const clean=await g.inspectStageEditor?.(r.personaUid,r.slug,r.nonce);
+            if(clean?.ok!==true||clean.clean!==true)return fail('EDITOR_UNKNOWN');
+          }
+          // Availability is a fixed READ ONLY observation before any possible
+          // dispatch marker. Missing helper controls are an actual no-send
+          // infrastructure limitation, not a fabricated uncertain effect.
+          const available=await g.runNativeAiStep(r.personaUid,{slug:r.slug,nonce:r.nonce,action:'OBSERVE'});
+          if(!available?.ok)return fail(available?.code||'NATIVE_HELPER_UNAVAILABLE');
+          if(p.step==='STOP'){
+            if(available.busy===false)return executeTrusted({type:'PROBE_NATIVE',params:{slug:p.slug,expectedRevision:p.expectedRevision}});
+            if(available.busy!==true||available.sessionDigest!==job.native?.sessionDigest)return fail('AI_STOP_SESSION_CHANGED');
+          }else if(available.busy!==false||available.editorClean!==true||available.sourceSaved!==true||available.hasQueue!==false||available.inputOccupied!==false||available.attachmentsPending!==false)
+            return fail('AI_NATIVE_PREFLIGHT_NOT_SETTLED');
           if((job.childRequestId||job.adoptedHumanFingerprint)&&p.step==='CHAT1_SEND'){
             // Request Changes reuses the guarded generator; it does not
             // restage. Check exact inherited saved F before the first new

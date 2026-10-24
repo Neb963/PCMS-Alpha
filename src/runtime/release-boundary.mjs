@@ -376,8 +376,6 @@ export function createReleaseBoundary(api,{
     }
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
     if(msg.type==='CANCEL_APPROVED')return store.cancelApproved(p.slug,p.expectedRevision);
-    const token=await vaultToken(p.token);
-    if(!token)return fail('S06_GIT_VAULT_UNAVAILABLE');
     if(msg.type==='RECONCILE'){
       const row=await store.getFull(p.slug);
       if(!row.ok||row.record.revision!==p.expectedRevision)return fail('STALE_RELEASE');
@@ -387,13 +385,6 @@ export function createReleaseBoundary(api,{
         return fail('RECONCILIATION_NOT_REQUIRED');
       const g=guard(),route=await g.getSafeRouteReadiness(r.approval.personaUid);
       if(!route?.ready)return fail('PROTECTED_ROUTE_UNVERIFIED');
-      const fresh=await inspect({token,folder:r.approval.gitFolder,includeSourceBytes:true});
-      if(!releaseGitContext({sourceFolder:r.approval.gitFolder,
-        testingSha:r.approval.gitTestingSha},fresh).ok)
-        return fail('READY_REVOKED');
-      const fromGit=await exactSource(fresh.sourceBytes);
-      if(!fromGit.ok||fromGit.fingerprint!==r.approval.sourceFingerprint)
-        return fail('GIT_F_CHANGED');
       const remote=await readRemote(g,{slug:r.slug,...r.approval});
       if(!remote.ok)return remote;
       const after=await g.getSafeRouteReadiness(r.approval.personaUid);
@@ -407,6 +398,8 @@ export function createReleaseBoundary(api,{
         proof:evidence.ok?evidence:null,reason:evidence.code||'PUBLICATION_UNCERTAIN'
       });
     }
+    const token=await vaultToken(p.token);
+    if(!token)return fail('S06_GIT_VAULT_UNAVAILABLE');
     if(msg.type==='DISPATCH'){
       const [release,job,stage]=await Promise.all([store.getFull(p.slug),aiFactory(database).getJobFull(p.slug),stageFactory(database).getFull(p.slug)]);
       if(release.ok&&release.record.state==='APPROVED'&&release.record.revision===p.expectedRevision&&job.ok&&stage.ok&&
@@ -475,6 +468,7 @@ export function createReleaseBoundary(api,{
         stage:checked.r,job:checked.j,account:facts.account,
         inventory:facts.inventory,source:checked.source,
         previous:checked.previous,kind:checked.kind,
+        bulkAuthorization:msg.bulkAuthorization===undefined?null:msg.bulkAuthorization,
         releaseId:'release_'+crypto.randomUUID().replaceAll('-','')});
     }
     if(msg.type==='DISPATCH'){

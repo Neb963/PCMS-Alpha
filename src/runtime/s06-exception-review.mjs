@@ -41,7 +41,7 @@ export function assessS06Exception({ready,stage,job,mode,checks}={}){
      job.stageRevision!==stage.revision||job.readyIdentifier!==active.identifier||
      job.readyInputFingerprint!==active.inputFingerprint||
      stage.state!=='SOURCE_VERIFIED'||!stage.verifiedAt||
-     job.executionSlotReleased!==true||
+     job.executionSlotReleased!==true||job.operatorInstruction||
      !(mode==='MANUAL_INFRASTRUCTURE'&&job.exceptionQuiescence==='NEVER_DISPATCHED_SOURCE'&&job.exceptionFrozen&&!job.native||
        ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(job.native?.state))||
      !fp(job.sourceFingerprint)||job.finalSource?.fingerprint!==job.sourceFingerprint||
@@ -135,7 +135,7 @@ export function createS06ExceptionStore(db){
           job=jj.target.result?.job,release=pub.target.result?.release;
          const freeze=validExceptionalIdleProof(idleProof,stage,job);
          const evidence=exceptionalIdleEvidence(idleProof,stage,job);
-         const settled=freeze?{...job,revision:job.revision+1,executionSlotReleased:true,exceptionFrozen:true,
+         const settled=freeze?{...job,revision:job.revision+1,executionSlotReleased:true,awaitingExecutionSlot:false,exceptionFrozen:true,
           finalSource:evidence.source,exceptionQuiescence:evidence.kind}:job;
          const admit=assessS06Exception({ready,stage,job:settled,mode,checks});
          if(!admit.ok){done(admit);return;}

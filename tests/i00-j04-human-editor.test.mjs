@@ -8,6 +8,10 @@ import {createPersonaGuard} from '../src/runtime/persona-guard.mjs';
 import {perchanceAiNative} from '../src/runtime/perchance-ai-native.mjs';
 import {createS06ExceptionBoundary,authorizeS06Exception} from '../src/runtime/s06-exception-review.mjs';
 import {createManualEditorBridge} from '../src/runtime/manual-editor-bridge.mjs';
+import {createAiBoundary} from '../src/runtime/ai-boundary.mjs';
+import {scanMainCatalog} from '../src/runtime/git-catalog.mjs';
+import {inspectReadyCandidate} from '../src/runtime/catalog-declaration.mjs';
+import {createGitModel} from '../scripts/fixtures/j03-git-model.mjs';
 import {createAiStore} from '../src/runtime/ai-store.mjs';
 import {planAiStep} from '../src/runtime/ai-supervisor.mjs';
 import {perchanceEditorProbe} from '../src/runtime/perchance-editor-probe.mjs';
@@ -25,7 +29,7 @@ async function fixture({closed=false}={}){
   {key:'s05-ready:'+slug,record:{slug,revision:1,active:{identifier:'ready-current',inputFingerprint:input},desired:null,hold:null}},
   {key:'writeback:'+slug,record:{slug,revision:1,state:'CONFIRMED',mode:'S06',stageRevision:4,jobRevision:7,sourceFingerprint:F.fingerprint,commitSha:commit,folder:'generators/'+slug,readyIdentifier:'ready-current',readyInputFingerprint:input}});
  const prior={browser:globalThis.browser,window:globalThis.window,document:globalThis.document,location:globalThis.location};
- let currentSid=sid,helperMissing=false,savedText='human saved',dirty=false,busy=false,collab=false,failUntag=false,failReclaim=false,newerTakeover=false,changedDuringCapture=false,reads=0,created=0;const effects={send:0,stop:0,newChat:0,close:0,navigate:0};
+ let currentSid=sid,helperMissing=false,savedText='human saved',dirty=false,busy=false,collab=false,failUntag=false,failReclaim=false,newerTakeover=false,changedDuringCapture=false,reads=0,created=0;const settings={},effects={send:0,stop:0,newChat:0,close:0,navigate:0};
  const handoffButton={disabled:true},handoffStatus={textContent:''},host={dataset:{pcmsNonce:nonce,pcmsHumanIntent:'true',pcmsHumanIntentEpoch:'1'},querySelector:s=>s==='button'?handoffButton:handoffStatus};
  const button=key=>({tagName:'BUTTON',get hidden(){return key==='stop'?!busy:false},disabled:false,click:()=>effects[key]++});
  const ids={'pcms-alpha-editor-context':host,aiAgentSendBtn:button('send'),aiAgentStopBtn:button('stop'),aiAgentNewChatBtn:button('newChat'),aiAgentInputEl:{tagName:'TEXTAREA',value:'',dispatchEvent(){}},
@@ -37,7 +41,7 @@ async function fixture({closed=false}={}){
  const tabs=new Map(closed?[]:[[1,{id:1,url:'https://perchance.org/'+slug+'#edit',cookieStoreId}]]),tags=new Map();
  const tagKey=(id,key)=>id+':'+key;
  if(!closed)tags.set(tagKey(1,'pcmsI09Owned'),{slug,nonce,personaUid,cookieStoreId,createdBy:'PCMS_I09'});
- const api={runtime:{id:'fixture',getURL:p=>'moz-extension://fixture/'+p},storage:{local:{get:async()=>({})}},
+ const api={runtime:{id:'fixture',getURL:p=>'moz-extension://fixture/'+p},storage:{local:{get:async key=>({[key]:settings[key]})}},
   tabs:{query:async()=>[...tabs.values()],get:async id=>tabs.get(id),create:async({url,cookieStoreId})=>{created++;host.dataset.pcmsHumanIntent='false';host.dataset.pcmsHumanIntentEpoch='0';const tab={id:100+created,url,cookieStoreId};tabs.set(tab.id,tab);return tab},remove:()=>effects.close++,update:()=>effects.navigate++},
   sessions:{getTabValue:async(id,key)=>structuredClone(tags.get(tagKey(id,key))),setTabValue:async(id,key,value)=>{if(failReclaim&&key==='pcmsI09Owned')throw Error('interrupted reclaim');tags.set(tagKey(id,key),structuredClone(value))},removeTabValue:async(id,key)=>{if(failUntag)throw Error('interrupted handoff');tags.delete(tagKey(id,key))}},
   scripting:{executeScript:async({func,args})=>[{frameId:0,result:await func(...args)}]}};
@@ -45,13 +49,13 @@ async function fixture({closed=false}={}){
  const state={profiles:{[cookieStoreId]:{personaUid,routeId}},routes:{[routeId]:{enabled:true}}},active=new Map();let seq=0;
  const shared={resolve:async()=>({personaUid,cookieStoreId,routeId,route:{enabled:true},pcmsBindingId:'binding'}),acquire:async()=>{assert.equal(active.size,0);const lease={leaseId:'lease-'+(++seq),cookieStoreId};active.set(lease.leaseId,lease);return lease},validate:async(_,id)=>{assert.ok(active.has(id));return {cookieStoreId}},release:async id=>active.delete(id)};
  const bridge=createHumanEditorBridge({browser:api,getState:async()=>state,open:async()=>db});
- const guard=createPersonaGuard({initialize:async()=>{},securityState:{ready:true,privacySafe:true,proxyControl:'controlled_by_this_extension'},shared,getRouteTest:async()=>({ok:true}),pinGate:()=>({allow:true}),manualEditorTab:createManualEditorBridge({browser:api,getState:async()=>state,open:async()=>db}),humanReviewTab:async(context,request)=>{if(request.action==='RECLAIM'&&newerTakeover)host.dataset.pcmsHumanIntentEpoch=String(Number(host.dataset.pcmsHumanIntentEpoch)+1);return bridge(context,request)},
+ const guard=createPersonaGuard({initialize:async()=>{},securityState:{ready:true,privacySafe:true,proxyControl:'controlled_by_this_extension'},shared,getRouteTest:async()=>({ok:true}),pinGate:()=>({allow:true}),inspectStageTab:async(_,r)=>perchanceEditorProbe(r.slug),aiNativeStep:async(_,request)=>perchanceAiNative(request),manualEditorTab:createManualEditorBridge({browser:api,getState:async()=>state,open:async()=>db}),humanReviewTab:async(context,request)=>{if(request.action==='RECLAIM'&&newerTakeover)host.dataset.pcmsHumanIntentEpoch=String(Number(host.dataset.pcmsHumanIntentEpoch)+1);return bridge(context,request)},
   handoffStagingTab:r=>handoffHumanEditor(api,r),readIsolatedTab:async()=>{reads++;const text=changedDuringCapture&&reads===2?'a later human save':savedText;return {ok:true,principalFingerprint:principal,original:{remotePublicId:'remote',ownerResult:'IS_OWNER',visibility:'UNLISTED',pjs:text,html:'<p>'+text+'</p>',assets:[]}}}});
  const stageBoundary=()=>createStagingBoundary(api,{open:async()=>db,guard:()=>guard});
  const handoff=async()=>stageBoundary().run({type:'HANDOFF_STAGE',params:{slug,expectedRevision:db.read('meta','stage:'+slug).record.revision}},{id:'fixture',url:'moz-extension://fixture/pcms/index.html'});
  const human=createS06HumanStore(db),humanBoundary=()=>createS06HumanBoundary(api,{open:async()=>db,guard:()=>guard});
  const defer=()=>human.defer({name:slug,expectedStageRevision:db.read('meta','stage:'+slug).record.revision,expectedJobRevision:7,expectedFingerprint:F.fingerprint});
- return {db,P,F,H,host,handoffButton,handoffStatus,api,tabs,tags,active,effects,guard,handoff,human,defer,stageBoundary,humanBoundary,created:()=>created,
+ return {db,P,F,H,settings,host,handoffButton,handoffStatus,api,tabs,tags,active,effects,guard,handoff,human,defer,stageBoundary,humanBoundary,created:()=>created,
   noNative:()=>{currentSid=null;helperMissing=true;host.dataset.pcmsHumanIntent='false'},savedText:v=>savedText=v,takeover:v=>newerTakeover=v,dirty:v=>dirty=v,busy:v=>busy=v,collab:v=>collab=v,failUntag:v=>failUntag=v,failReclaim:v=>failReclaim=v,race:v=>changedDuringCapture=v,
   restore:()=>Object.assign(globalThis,prior)};
 }
@@ -138,4 +142,36 @@ test('J04 native absence is not inferred from missing controls when a session, d
   const boundary=createS06ExceptionBoundary(f.api,{open:async()=>f.db,guard:()=>f.guard}),r=await boundary.runTrusted({type:'RECORD_EXCEPTION',params:{slug,mode:'MANUAL_INFRASTRUCTURE',checks:[{name:'default_generator_smoke',result:'PASS',observation:'I actually checked the saved generator behavior.'}],consent:'I PERFORMED THE RECORDED MANUAL CHECKS',expectedStageRevision:4,expectedJobRevision:7,sourceFingerprint:f.F.fingerprint}});
   assert.equal(r.ok,false,adverse+JSON.stringify(r));assert.equal(f.db.read('meta','s06-exception:'+slug),undefined);assert.equal(f.created(),0);assert.deepEqual(f.effects,{send:0,stop:0,newChat:0,close:0,navigate:0});
  }finally{f.restore()}}
+});
+test('J04 actual BEGIN_NATIVE observes a missing helper before dispatch intent, then permits guarded manual review and stays frozen across supervisor wakes',async()=>{
+ const f=await fixture();try{
+  f.noNative();f.savedText('tested');const model=await createGitModel(),repository='Neb963/per-gens',token='offline-helper-availability-credential';
+  await model.merge({'pcms/prompts/default-chat1.md':'Test the saved source.',['generators/'+slug+'/DEPLOYMENT.md']:'Status: READY\nReady-Revision: missing-helper-001\n',
+    ['generators/'+slug+'/main.pjs']:'tested',['generators/'+slug+'/index.html']:'<p>tested</p>'});
+  const catalog=await scanMainCatalog({repository,token},model.transport),coherent=await inspectReadyCandidate({repository,token,slug,pinnedHead:catalog.head,includeSourceBytes:true},model.transport);assert.equal(coherent.ok,true,JSON.stringify(coherent));
+  f.settings.pcmsS03Git={repository,repositoryId:'42'};
+  const row=f.db.read('meta','ai-job:'+slug),stage=f.db.read('meta','stage:'+slug).record;
+  const job={...row.job,state:'PENDING_NATIVE_SESSION',native:null,finalSource:null,verifiedFinal:null,executionSlotReleased:true,awaitingExecutionSlot:true,
+   hold:'NATIVE_AI_ACTIVATION_NOT_PROVEN',readyIdentifier:'rev-missing-helper-001',readyInputFingerprint:coherent.inputFingerprint,chat1:{state:'PENDING',sessionDigest:null,tests:{}}};
+  await put(f.db,{...row,job},{key:'stage:'+slug,record:{...stage,readyIdentifier:job.readyIdentifier,readyInputFingerprint:coherent.inputFingerprint}},
+    {key:'s05-ready:'+slug,record:{slug,revision:2,repositoryId:'42',active:{identifier:job.readyIdentifier,inputFingerprint:coherent.inputFingerprint},desired:null,hold:null}});
+  const ai=createAiBoundary(f.api,{open:async()=>f.db,guard:()=>f.guard,effectGate:()=>true,clock:()=>Date.now()+180000,
+   gitCredential:async()=>({ok:true,credential:token}),scanCatalog:o=>scanMainCatalog(o,model.transport),inspectReady:o=>inspectReadyCandidate(o,model.transport)});
+  const admitted=await ai.tick();assert.equal(admitted.ok,true,JSON.stringify(admitted));
+  const failed=await ai.tick();assert.equal(failed.code,'NATIVE_HELPER_UNAVAILABLE',JSON.stringify(failed));
+  const never=f.db.read('meta','ai-job:'+slug).job;assert.equal(never.native,null);assert.equal(never.schedulerHold,'AI_WAKE_NATIVE_HELPER_UNAVAILABLE');
+  assert.equal(f.db.keys('events').map(k=>f.db.read('events',k)).some(e=>e.stage==='AI_DISPATCH_POSSIBLE'),false);
+  // Exercise the queued-capacity freeze race using real operator intent.
+  await createAiStore(f.db).operatorControl(slug,never.revision,never.controlRevision,{paused:true});
+  const paused=(await createAiStore(f.db).getJobFull(slug)).job;
+  // A released never-started child may wait for capacity after Resume.
+  await put(f.db,{key:'ai-job:'+slug,accountId:'account',job:{...paused,executionSlotReleased:true}});
+  assert.equal((await createAiStore(f.db).operatorControl(slug,paused.revision,paused.controlRevision,{paused:false})).ok,true);
+  const queued=(await createAiStore(f.db).getJobFull(slug)).job;assert.equal(queued.awaitingExecutionSlot,true);
+  const manual=await createS06ExceptionBoundary(f.api,{open:async()=>f.db,guard:()=>f.guard}).runTrusted({type:'RECORD_EXCEPTION',params:{slug,mode:'MANUAL_INFRASTRUCTURE',checks:[{name:'default_generator_smoke',result:'PASS',observation:'I inspected the saved output and keyboard actions in Firefox.'}],consent:'I PERFORMED THE RECORDED MANUAL CHECKS',expectedStageRevision:4,expectedJobRevision:queued.revision,sourceFingerprint:f.F.fingerprint}});
+  assert.equal(manual.ok,true,JSON.stringify(manual));const frozen=(await createAiStore(f.db).getJobFull(slug)).job;assert.equal(frozen.awaitingExecutionSlot,false);assert.equal(frozen.executionSlotReleased,true);
+  for(let n=0;n<3;n++)assert.equal((await ai.tick()).code,'AI_NO_ELIGIBLE_WORK');
+  assert.equal((await createAiStore(f.db).admitExecutionSlot(slug,frozen.revision)).code,'AI_EXCEPTION_REVIEW_FROZEN');
+  assert.deepEqual(f.effects,{send:0,stop:0,newChat:0,close:0,navigate:0});assert.equal(model.state.effects.length,0);
+ }finally{f.restore()}
 });

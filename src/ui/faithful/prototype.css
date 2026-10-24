@@ -371,3 +371,8 @@ body:has(.drawer-overlay:not([hidden])) #toast-root{right:min(555px,calc(100vw -
 .source-line-diff .diff-added{background:#e5f5e9;color:#215d34}.source-line-diff .diff-removed{background:#fde9e7;color:#843b33}
 .review-workspace dd{overflow-wrap:anywhere}.review-workspace textarea{max-width:100%}
 @media(max-width:750px){.review-workspace .source-layout,.source-compare-columns{grid-template-columns:minmax(0,1fr)}}
+.queue-item.candidate-item{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:12px}
+.candidate-item input[type=checkbox]{margin:4px 0 0}.candidate-item strong{overflow-wrap:anywhere}
+.candidate-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.development-instructions label,.development-instructions textarea{display:block;width:100%}.development-instructions textarea{margin:8px 0}
+@media(max-width:750px){.queue-item.candidate-item{grid-template-columns:18px minmax(0,1fr)}.candidate-actions{grid-column:2;justify-content:flex-start}.page-head .head-actions{flex-wrap:wrap}}

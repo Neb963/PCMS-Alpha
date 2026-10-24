@@ -58,6 +58,7 @@ export function createAiStore(db){
     if(!slug(name)||!Number.isSafeInteger(expectedRevision)||expectedRevision<1)return Promise.resolve(fail('AI_COMMAND_INVALID'));
     return tx(db,'readwrite',(t,done)=>{const m=t.objectStore('meta');m.get(key(name)).onsuccess=e=>{const row=e.target.result,j=row?.job;
       if(!j||j.revision!==expectedRevision){done(fail('STALE_REVISION'));return}
+      if(j.exceptionFrozen){done(fail('AI_EXCEPTION_REVIEW_FROZEN'));return}
       if(j.awaitingExecutionSlot!==true||j.executionSlotReleased!==true||j.state==='TESTS_VERIFIED'){done(fail('AI_SLOT_ADMISSION_NOT_PENDING'));return}
       withCurrentReady(m,j,done,()=>m.get('stage:'+name).onsuccess=st=>{const s=st.target.result?.record;
        if(!s||s.state!=='SOURCE_VERIFIED'||s.revision!==j.stageRevision||s.humanReclaimPending){done(fail('AI_STAGE_OR_HUMAN_RECLAIM_PENDING'));return;}
@@ -447,6 +448,7 @@ export function createAiStore(db){
         if(!j){done(fail('AI_JOB_NOT_FOUND'));return;}
         if(j.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
         if(j.native?.state==='DISPATCH_POSSIBLE'){done(fail('AI_EFFECT_RECONCILIATION_REQUIRED'));return;}
+        if(j.exceptionFrozen&&step!=='STOP'){done(fail('AI_EXCEPTION_REVIEW_FROZEN'));return;}
         if(j.executionSlotReleased&&step!=='STOP'){done(fail('AI_EXECUTION_SLOT_RELEASED'));return;}
         const decision=evaluation(j);
         if(step==='CHAT1_SEND'&&

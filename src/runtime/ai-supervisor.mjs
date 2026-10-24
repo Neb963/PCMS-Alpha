@@ -24,6 +24,7 @@ export function planAiStep(job,{oracleNames=['default_generator_smoke']}={}){
   }
   if(job.state==='HELD_NO_PROGRESS'||job.state==='HUMAN_OWNED')
     return hold(job.hold||'AI_TERMINAL_HOLD');
+  if(job.exceptionFrozen)return hold('AI_EXCEPTION_REVIEW_FROZEN');
   if(job.awaitingExecutionSlot===true)return {ok:true,type:'ADMIT_JOB',revision:job.revision,effect:'LOCAL_CAPACITY_ONLY'};
   if(job.executionSlotReleased===true||job.state==='TESTS_VERIFIED')
     return hold('AI_VERIFIED_REVIEW_REQUIRED');

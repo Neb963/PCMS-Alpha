@@ -17,7 +17,7 @@ async function fixture(mode,adverse=''){
  const effects=[],api={storage:{local:{get:async()=>({})}}};let observations=0;
  const guard=()=>({getSafeRouteReadiness:async()=>({ready:true,routeId:'route',cookieStoreId:'container'}),inspectStageEditor:async()=>({ok:true,clean:adverse!=='dirty'}),
   runNativeAiStep:async(_,r)=>{assert.equal(r.action,'OBSERVE');observations++;return {ok:true,busy:adverse==='busy',sessionDigest:adverse==='session'?F:session,sourceSaved:true,editorClean:true,hasQueue:false,inputOccupied:false,attachmentsPending:false}},
-  observeReadOnly:async()=>{if(adverse==='race')await put(db,{key:'ai-job:'+slug,accountId:'account',job:{...job,revision:6}});
+  observeReadOnly:async()=>{if(adverse==='instruction')assert.equal((await createAiStore(db).operatorControl(slug,5,1,{instructions:'Keep this explicitly requested fix pending.'})).ok,true);if(adverse==='race')await put(db,{key:'ai-job:'+slug,accountId:'account',job:{...job,revision:6}});
    return {ok:true,principalFingerprint:F,original:{remotePublicId:'remote',ownerResult:'IS_OWNER',visibility:'UNLISTED',pjs:adverse==='source'?'changed':'output = 1',html:'<p>source</p>',assets:[]}};}});
  const params={slug,mode,checks:mode==='MANUAL_INFRASTRUCTURE'?[{name:'smoke',result:'PASS',observation:'I loaded the saved source and checked the expected rendered output.'}]:[],consent:'I PERFORMED THE RECORDED MANUAL CHECKS',expectedStageRevision:3,expectedJobRevision:5,sourceFingerprint:source.fingerprint};
  return {db,source,stage,job,ready,effects,params,boundary:createS06ExceptionBoundary(api,{open:async()=>db,guard}),observations:()=>observations};
@@ -26,21 +26,21 @@ test('J04 explicit exceptional review freezes only independently settled exact s
  for(const mode of ['MANUAL_INFRASTRUCTURE','OPTIONAL_CHAT2_INCOMPLETE']){const f=await fixture(mode);
   const r=await f.boundary.runTrusted({type:'RECORD_EXCEPTION',params:f.params});assert.equal(r.ok,true,JSON.stringify(r));
   const job=f.db.read('meta','ai-job:'+slug).job;assert.equal(job.revision,6);assert.equal(job.executionSlotReleased,true);assert.equal(job.verifiedFinal,null);
-  assert.equal(job.state,'TESTS_UNVERIFIED');assert.equal(planAiStep(job).code,'AI_VERIFIED_REVIEW_REQUIRED');
+  assert.equal(job.state,'TESTS_UNVERIFIED');assert.equal(planAiStep(job).code,'AI_EXCEPTION_REVIEW_FROZEN');
   assert.equal(authorizeS06Exception({ready:f.ready,stage:f.stage,job,record:f.db.read('meta','s06-exception:'+slug).record}).ok,true);
   assert.equal(f.observations(),2);assert.equal(f.db.keys('operations').length,0);
   const store=createAiStore(f.db),pause=await store.operatorControl(slug,job.revision,1,{paused:true});assert.equal(pause.ok,true);
   const resumed=await store.operatorControl(slug,job.revision,pause.controlRevision,{paused:false});assert.equal(resumed.ok,true);assert.equal(resumed.slotReleased,true);
-  const current=(await store.getJobFull(slug)).job;assert.equal(current.revision,6);assert.equal(current.awaitingExecutionSlot,undefined);
+  const current=(await store.getJobFull(slug)).job;assert.equal(current.revision,6);assert.equal(current.awaitingExecutionSlot,false);
   assert.equal(authorizeS06Exception({ready:f.ready,stage:f.stage,job:current,record:f.db.read('meta','s06-exception:'+slug).record}).ok,true);
   assert.equal((await store.operatorControl(slug,job.revision,resumed.controlRevision,{instructions:'Try new repairs'})).code,'AI_TESTED_CANDIDATE_REQUEST_CHANGES_REQUIRED');
   assert.equal((await store.checkpointSource(slug,job.revision,f.source)).revision,6,'readonly same-F probe cannot invalidate frozen exceptional evidence');
  }
 });
 test('J04 pending native work, dirty edits, session/source drift, stale CAS and known failures cannot freeze exceptional review',async()=>{
- for(const adverse of ['busy','dirty','session','source','race','known-failure']){const f=await fixture('MANUAL_INFRASTRUCTURE',adverse);
+ for(const adverse of ['busy','dirty','session','source','race','instruction','known-failure']){const f=await fixture('MANUAL_INFRASTRUCTURE',adverse);
   const r=await f.boundary.runTrusted({type:'RECORD_EXCEPTION',params:f.params});assert.equal(r.ok,false,adverse+JSON.stringify(r));
-  assert.equal(f.db.read('meta','ai-job:'+slug).job.executionSlotReleased,false);assert.equal(f.db.read('meta','s06-exception:'+slug),undefined);assert.equal(f.db.keys('operations').length,0);
+  assert.equal(f.db.read('meta','ai-job:'+slug).job.executionSlotReleased,false);if(adverse==='instruction')assert.ok(f.db.read('meta','ai-job:'+slug).job.operatorInstruction);assert.equal(f.db.read('meta','s06-exception:'+slug),undefined);assert.equal(f.db.keys('operations').length,0);
  }
  const f=await fixture('MANUAL_INFRASTRUCTURE');const forged=await createS06ExceptionStore(f.db).record({name:slug,...f.params,idleProof:{ok:true}});
  assert.equal(forged.code,'S06_EXCEPTION_CANONICAL_SOURCE_UNVERIFIED');assert.equal(f.db.read('meta','ai-job:'+slug).job.executionSlotReleased,false);

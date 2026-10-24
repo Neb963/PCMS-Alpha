@@ -3,6 +3,7 @@ import {renderGitInventory,mountGitPromptEditor} from './git-workspace.mjs';
 import {createSourceWorkspace} from './source-workspace.mjs';
 import {mountSourceComparison,mountSourceHistory} from './source-comparison.mjs';
 import {mountHumanRecovery,mountExceptionalReview} from './candidate-recovery.mjs';
+import {createCleanPublicationWorkspace} from './clean-publication.mjs';
 import {createGeneratorBatches} from './generator-batches.mjs';
 import {createGeneratorSelection} from './generator-selection.mjs';
 import {createAccountsWorkspace,accountGrowthAdvice,accountNeedsAttention} from './accounts-workspace.mjs';
@@ -119,6 +120,8 @@ generatorSelection.subscribe(()=>updateGeneratorSelection());
 const accountWorkspace=createAccountsWorkspace({root,el,b,request:readPort,reload:()=>loadAccounts(),notify});
 const generatorBatches=createGeneratorBatches({root,el,b,request:readPort,accounts,
  reload:()=>loadGenerators(),manageAccount:openAccountManager,notify});
+const cleanPublication=createCleanPublicationWorkspace({root,el,b,notify,openReview:openReleaseReview,
+ request:(type,params)=>readPort('pcms-j04-clean-publication',type,params,120000)});
 function updateNav(){for(const a of root.querySelectorAll('[data-nav]'))a.setAttribute('aria-current',a.dataset.nav===state.route?'page':'false');
  const label=shadow('#breadcrumb');if(label)label.textContent=({'work-queue':'Work Queue',overview:'Overview',generators:'Generators',accounts:'Accounts',refresher:'Refresher',settings:'Settings'})[state.route];
  const t=shadow('[data-nav="work-queue"] .nav-count');if(t){
@@ -839,6 +842,7 @@ async function loadQueue(reset=false){
 }
 function displayQueue(){
  if(state.route!=='work-queue')return;
+ const toolbar=shadow('.page-head .head-actions');if(toolbar)cleanPublication.mountToolbar(toolbar);
  const q=state.queue;const holder=shadow('.queue-list');
  if(!holder)return;holder.replaceChildren();
  if(q.loading)renderEmpty(holder,'Reading recorded operations and incidents…');
@@ -932,7 +936,8 @@ function displayQueue(){
         'Exceptional candidate — manual evidence and incomplete tests require individual review.':
         'Candidate state: '+candidate.state.replaceAll('_',' ').toLowerCase()));
     const action=b('Inspect candidate',()=>void openReleaseReview(candidate.slug),'btn small'),manage=b('Manage development',()=>candidate.development?void openAiJob(candidate.slug):openReadyCandidate(candidate.readyCandidate),'btn small');
-    row.append(el('span','row-mark', '•'),detail,action,manage);holder.append(row);
+    row.classList.add('candidate-item');const actions=el('div','candidate-actions');actions.append(action,manage);
+    row.append(cleanPublication.checkbox(candidate.slug),detail,actions);holder.append(row);
    }
   for(const candidate of q.readyItems||[]){
    if(q.releaseItems.some(x=>x.slug===candidate.slug))continue;
@@ -1315,7 +1320,7 @@ async function openAiJob(slug){
   }catch{status.textContent='Development could not be read. Retry when the extension responds.'}
   finally{loading=false}
  }
- await load();timer=setInterval(()=>void load(),5000);
+ await load();if(overlay.isConnected)timer=setInterval(()=>void load(),5000);
 }
 function openOperationRecord(op){
  const previous=root.activeElement,overlay=el('div','drawer-overlay'),dialog=el('div','drawer');
