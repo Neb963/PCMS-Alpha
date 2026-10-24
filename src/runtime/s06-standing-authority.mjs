@@ -30,6 +30,7 @@ export function createS06StandingAuthority(api){
    return task;
  };
  async function state(){
+   await mutationSerial;
    const at=generation;
    const record=(await api.storage.local.get(KEY))?.[KEY];
    const cfg=(await api.storage.local.get(CONFIG))?.[CONFIG];
@@ -132,6 +133,7 @@ export function createS06StandingAuthority(api){
    return mutation(()=>applyUpdate(p)).finally(()=>{pendingChanges--;});
  }
  async function operatorManagementState(){
+   await mutationSerial;
    const raw=(await api.storage.local.get(KEY))?.[KEY];
    return {ok:true,revision:revisionOf(raw),
      enabled:await allowsOperatorManagement()};

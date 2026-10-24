@@ -142,3 +142,18 @@ test('J02 cold restore durably pauses scoped-only and absent default-enabled pol
   delete f.values[restore];assert.equal(await createS06StandingAuthority(f.api).allowsOperatorManagement(),false);
  }
 });
+
+test('J02 policy GET waits for earlier invalidation to commit and returns the revision required for its next CAS',async()=>{
+ const f=apiFixture(),a=createS06StandingAuthority(f.api),write=f.api.storage.local.set;let release;
+ f.values[KEY]={schema:1,revision:3,repository:'Neb963/per-gens',repositoryId:'0',grants,operatorManagement:true};
+ f.values.pcmsS03Git={repository:'Neb963/per-gens',repositoryId:'12345'};
+ f.api.storage.local.set=async data=>{await new Promise(r=>{release=r});return write(data)};
+ const revoked=a.revoke('GIT_CONFIGURATION_CHANGED');while(!release)await new Promise(r=>setImmediate(r));
+ let returned=false;const initial=a.state().then(v=>{returned=true;return v});
+ await new Promise(r=>setImmediate(r));assert.equal(returned,false,'do not expose the stale revision during invalidation');
+ release();await revoked;const state=await initial;assert.equal(state.record.revision,4);
+ f.api.storage.local.set=write;
+ const granted=await a.update({expectedRevision:state.record.revision,repositoryId:'12345',
+  grants:{development:false,gitWrite:false,publication:true},consent:'I AUTHORIZE PROTECTED PCMS OPERATIONS'});
+ assert.equal(granted.ok,true);assert.equal(granted.record.revision,5);
+});
