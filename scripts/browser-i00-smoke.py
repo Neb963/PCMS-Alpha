@@ -1034,6 +1034,10 @@ def main():
                         if json.load(s).get('value',{}).get('ready'): break
                 except Exception: time.sleep(.25)
             else: raise RuntimeError('geckodriver did not become ready')
+            # Exercise the changed operator journey first; all unchanged
+            # persistent donor/source/backup suites still run after it passes.
+            from journey_accounts_ui import run as run_j01_primary
+            run_j01_primary(browser,archive,pathlib.Path(folder))
             first=open_session(browser,profile)
             original_firefox_pids=owned_firefox_pids(profile)
             assert original_firefox_pids,'S01_FIRST_FIREFOX_PROCESS_NOT_OBSERVED'
@@ -5422,8 +5426,6 @@ def main():
                     assert '55' in fleet_accounts['total'] and fleet_accounts['rows']==24 and fleet_accounts['next'],('A07_PRIMARY_55_ACCOUNTS',fleet_accounts)
                     print('B A07_PRIMARY_1200_GENERATOR_AND_55_ACCOUNT_PAGING=PASS',flush=True)
                 finally:close(a07_session)
-                from journey_accounts_ui import run as run_j01_primary
-                run_j01_primary(browser,archive,pathlib.Path(folder))
             finally:
                 if after: close(after)
         finally:
