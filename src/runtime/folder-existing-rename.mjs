@@ -1,3 +1,5 @@
+import {createAdoptionStore} from './adoption-store.mjs';
+import {createRenamedIdentityLinker} from './folder-rename-link.mjs';
 // AC-09: user-authorized existing-owned generator rename.
 // This is NOT I06's private/empty create rename. All remote effects pass the
 // donor's protected Persona lease and a durable DISPATCH_POSSIBLE record.
@@ -116,7 +118,7 @@ async function readSource(g,{row,account},slug){
    visibility:row.visibility||packet.visibility},account);
  if(!original?.ok||original.remotePublicId!==row.remoteId)
   return reject('RENAMED_OWNER_OR_SOURCE_UNVERIFIED');
- return {ok:true,fingerprint:original.fingerprint,visibility:original.visibility};
+ return {ok:true,fingerprint:original.fingerprint,visibility:original.visibility,original};
 }
 async function readRoute(g,row){
  try{
@@ -130,8 +132,10 @@ function sameRoute(a,b){return a?.routeId===b?.routeId&&
  a?.cookieStoreId===b?.cookieStoreId&&a?.ready===true&&b?.ready===true}
 export function createExistingRenameService(api,{
  guard=internalPcmsGuard,open=openCanonicalDatabase,clock=Date.now,
- developmentGate=()=>standingS06?.gate('development')===true}={}){
+ developmentGate=()=>standingS06?.gate('development')===true,linkRenamed=null,
+ preserveOriginal=(db,facts,original)=>createAdoptionStore(db).adopt({slug:facts.row.slug,expectedRevision:facts.row.revision,standingManagement:true},original)}={}){
  const sentinel=createRestoreSentinel(api.storage.local);
+ const linker=linkRenamed||createRenamedIdentityLinker(api,{open,guard});
  let busy=false,dbPromise=null;
  const db=()=>dbPromise||=open().catch(error=>{dbPromise=null;throw error});
  async function current(newSlug){
@@ -178,7 +182,8 @@ export function createExistingRenameService(api,{
     if(attempt.state==='RENAME_COMPLETED'&&review.state==='RENAME_EXISTING_COMPLETED')
      return {ok:true,code:'VERIFIED_EXISTING_RENAME_COMPLETED',
        state:attempt.state,revision:attempt.revision,providerEffects:'NO_NEW_EFFECT'};
-    const linked=await readLinkedIdentity(await db(),newSlug);
+    let linked=await readLinkedIdentity(await db(),newSlug);
+    if(!linked.ok){const repaired=await linker(attempt);if(!repaired.ok)return repaired;linked=await readLinkedIdentity(await db(),newSlug);}
     if(!linked.ok)return linked;
     const {row:newRow,link,account}=linked;
     if(account?.state!=='VERIFIED'||newRow.ownerState!=='OBSERVED_OWNER'||
@@ -276,6 +281,7 @@ export function createExistingRenameService(api,{
    if(!currentAgain.ok||currentAgain.review.newTreeOid!==review.newTreeOid||
       currentAgain.review.state!==review.state)return reject('RENAME_GIT_IDENTITY_CHANGED');
    if(type==='PREPARE'){
+    const preserved=await preserveOriginal(await db(),facts,prior.original);if(!preserved?.ok)return reject(preserved?.code||'ORIGINAL_SOURCE_PRESERVATION_REQUIRED');
     const prepared={schema:1,repositoryId:state.cfg.repositoryId,
       oldSlug:review.oldSlug,newSlug,markerOid:review.markerOid,
       folderTreeOid:review.newTreeOid,sourceFingerprint:prior.fingerprint,
@@ -294,7 +300,7 @@ export function createExistingRenameService(api,{
    // Once this durable record may exist, NO automatic/manual retry of the
    // provider request is admissible. A lost storage ACK is itself a hold.
    const marked={...attempt,state:'DISPATCH_POSSIBLE',revision:attempt.revision+1,
-     dispatchAt:clock(),operationId:'rename_'+crypto.randomUUID().replaceAll('-')};
+     dispatchAt:clock(),operationId:'rename_'+crypto.randomUUID().replaceAll('-','')};
    await api.storage.local.set({[key(newSlug)]:marked});
    const saved=(await api.storage.local.get(key(newSlug)))?.[key(newSlug)];
    if(saved?.state!=='DISPATCH_POSSIBLE'||saved?.revision!==marked.revision)

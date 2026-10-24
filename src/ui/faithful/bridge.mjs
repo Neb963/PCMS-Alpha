@@ -857,72 +857,21 @@ function displayQueue(){
       content.append(el('p','setting-note',
         'The Git source changed after this review began. Refresh the catalog before choosing.'));
     }else if(review.state==='RENAME_EXISTING_REQUESTED'){
-      const stateNote=el('p','setting-note','Reading the existing-generator rename stage…');
-      const actions=el('div','form-foot');content.append(stateNote,actions);
-      void (async()=>{
-       let attempt;
-       try{attempt=await readPort('pcms-r4-folder-identity','GET_RENAME_ATTEMPT',{
-        newSlug:review.newSlug},15000)}
-       catch{}
-       if(!row.isConnected)return;
-       actions.replaceChildren();
-       if(!attempt?.ok){stateNote.textContent='Rename safety state unavailable. No live operation is permitted.';return;}
-       const stage=attempt.state;
-       const label=stage==='NOT_PREPARED'?'Pending owner/source verification':
-         stage==='RENAME_PREPARED'?'Verified for one guarded rename attempt':
-         stage==='DISPATCH_POSSIBLE'||stage==='OUTCOME_UNCERTAIN'?
-          'Remote outcome uncertain — do not retry':
-         stage==='REMOTE_RENAME_VERIFIED_LINK_PENDING'?
-          'Remote identity verified; source association still pending':
-          'The rename requires additional review';
-       stateNote.textContent=label;
-       async function next(type,revision){
-        const text=type==='PREPARE_RENAME'?
-          'Read the protected owner and entire existing source to prepare an exact one-time rename? No remote change occurs during preparation.':
-          type==='EXECUTE_RENAME'?
-          'Rename the EXISTING owned Perchance generator now? Renaming may break imports, URLs or slug-dependent storage. Its complete original source must remain unchanged. This request may have an uncertain outcome and will never be automatically retried.':
-          'Read back the possibly completed remote rename without executing any new provider write?';
-        if(!window.confirm(text))return;
-        actions.querySelectorAll('button').forEach(x=>x.disabled=true);
-        stateNote.textContent='Checking protected account, source and current Git identity…';
-        try{
-         const result=await readPort('pcms-r4-folder-identity',type,{
-          newSlug:review.newSlug,expectedRevision:revision,
-          ...(type==='EXECUTE_RENAME'?{consent:'I APPROVE THE EXACT EXISTING GENERATOR RENAME'}:{})},
-          type==='EXECUTE_RENAME'?120000:95000);
-         stateNote.textContent=result?.ok?
-          type==='EXECUTE_RENAME'?'One rename attempt may have occurred. Reconcile the remote result; do not retry.':
-          type==='RECONCILE_RENAME'?
-           'Remote name and original source verified. Synchronize the account inventory and associate the new Git folder before any development.':
-           'Existing owner and original source verified. A single rename attempt can now be explicitly authorized.':
-          'The operation was held. Inspect the current scope before taking another action.';
-        }catch{stateNote.textContent='Outcome could not be confirmed. Do not retry a possible rename. Read current stage.'}
-        await loadQueue(true);
-       }
-       if(stage==='NOT_PREPARED')
-         actions.append(b('Verify owner and prepare rename',()=>void next('PREPARE_RENAME',review.revision),'btn small'));
-       if(stage==='RENAME_PREPARED')
-         actions.append(b('Execute one verified rename',()=>void next('EXECUTE_RENAME',attempt.revision),'btn primary'));
-       if(stage==='DISPATCH_POSSIBLE'||stage==='OUTCOME_UNCERTAIN')
-         actions.append(b('Reconcile remote rename',()=>void next('RECONCILE_RENAME',attempt.revision),'btn small'));
-       if(stage==='REMOTE_RENAME_VERIFIED_LINK_PENDING'){
-         actions.append(b('Verify inventory and finish rename',()=>void (async()=>{
-           if(!window.confirm('Finish reconciliation only if the new generator inventory and Git source association are independently verified? This does not perform another remote rename.'))return;
-           stateNote.textContent='Checking new owner, remote identity and exact Git source association…';
-           try{
-             const result=await readPort('pcms-r4-folder-identity','FINALIZE_RENAME',{
-               newSlug:review.newSlug,expectedRevision:attempt.revision},45000);
-             stateNote.textContent=result?.ok&&result.state==='RENAME_COMPLETED'?
-               'New identity and source association verified. Previous source history retained.':
-               'The new inventory or source association is not yet independently verified. No remote change was attempted.';
-           }catch{stateNote.textContent='Reconciliation could not be confirmed. Remote rename will not be repeated.'}
-           await loadQueue(true);
-         })(),'btn small'));
-         actions.append(b('Open new generator source',()=>{
-           state.gen.query=review.newSlug;state.gen.offset=0;routeTo('generators');
-         },'btn small'));
-       }
-      })();
+      const note=el('p','setting-note','Checking rename progress…'),actions=el('div','form-foot');content.append(note,actions);
+      void (async()=>{try{const attempt=await readPort('pcms-r4-folder-identity','GET_RENAME_ATTEMPT',{newSlug:review.newSlug},15000);if(!row.isConnected)return;
+       if(!attempt.ok){note.textContent='Rename status is unavailable. Retry when the account is available.';return}
+       note.textContent=attempt.state==='REMOTE_RENAME_VERIFIED_LINK_PENDING'?'Rename verified. Connecting the new source automatically.':
+        ['DISPATCH_POSSIBLE','OUTCOME_UNCERTAIN'].includes(attempt.state)?'Checking the remote result. The rename will not be repeated.':
+        attempt.automaticApproved?'Rename queued. Owner, source and protected route are checked automatically.':'Approve this rename to continue. The original generator is unchanged.';
+       const check=b(attempt.automaticApproved?'Check rename':'Approve rename',()=>void(async()=>{
+        if(!attempt.automaticApproved&&!window.confirm('Rename '+review.oldSlug+' to '+review.newSlug+' after verified owner and source checks? URLs and imports may change. PCMS makes one attempt and verifies the outcome.'))return;
+        check.disabled=true;
+        try{const out=attempt.automaticApproved?await readPort('pcms-r4-folder-identity','RUN_RENAME_JOB',{newSlug:review.newSlug},120000):
+          await readPort('pcms-r4-folder-identity','CHOOSE',{newSlug:review.newSlug,choice:'RENAME_EXISTING',expectedTreeOid:review.newTreeOid,expectedRevision:review.revision,authorizeRename:true},15000);
+         if(!out.ok)notify('Rename is waiting for current owner, source or route verification. Its original history is preserved.');await loadQueue(true);
+        }catch{note.textContent='Rename result is not confirmed. Check progress; no possible rename is repeated.'}finally{check.disabled=false}
+       })(),'btn small');actions.append(check,b('Open original generator',()=>{state.gen.query=review.oldSlug;state.gen.offset=0;routeTo('generators')},'btn small'));
+      }catch{note.textContent='Rename status is unavailable. The existing resource is preserved.'}})();
     }else if(review.state==='REMOTE_RENAMED_LINK_PENDING'){
       content.append(el('p','setting-note',
         'Remote rename readback was recorded. The inventory and new source link must still be verified.'));
@@ -932,16 +881,16 @@ function displayQueue(){
       async function choose(choice){
        const prompt=choice==='CREATE_SEPARATE'?
         'Keep the original generator unchanged and authorize a separate new generator from this Git folder? Normal owner, route, source and publication safety checks still apply.':
-        'Request renaming the verified existing generator? PCMS will hold this request until ownership, route and source safety are independently confirmed. No rename occurs now.';
+        'Rename '+review.oldSlug+' to '+review.newSlug+'? PCMS verifies ownership, protected route and unchanged source, makes one rename attempt and checks the result. URLs and imports may change.';
        if(!window.confirm(prompt))return;
        try{
         const answer=await readPort('pcms-r4-folder-identity','CHOOSE',{
          newSlug:review.newSlug,choice,expectedTreeOid:review.newTreeOid,
-         expectedRevision:review.revision},12000);
+         expectedRevision:review.revision,...(choice==='RENAME_EXISTING'?{authorizeRename:true}:{})},12000);
         if(!answer?.ok){notify('The identity choice could not be confirmed. Refresh and review again.');return;}
         notify(choice==='CREATE_SEPARATE'?
           'Separate identity recorded. The next complete Git scan will check eligibility.':
-          'Rename request recorded. The existing generator has not been changed.');
+          'Rename queued. PCMS will verify the original resource and preserve its source.');
         await loadQueue(true);
        }catch{notify('The review result is uncertain. Refresh before taking another action.');}
       }
@@ -1716,7 +1665,7 @@ function openGitWorkspace(){
    openSource:item=>{close();openSourceManager({slug:item.slug})},openQueue:()=>{close();routeTo('work-queue')}});
  }catch{feedback.textContent='GitHub is unavailable. Retry after checking the connection.'}}
  body.append(b('GitHub connection',()=>{close();state.settings='connections';routeTo('settings')},'btn small'),b('Retry',()=>void refresh(),'btn small'));
- overlay.addEventListener('click',e=>{if(e.target===overlay)close()});overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});head.querySelector('button').focus();void refresh();
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}else if(e.key==='Tab'){const controls=[...panel.querySelectorAll('button:not(:disabled),input:not(:disabled)')].filter(x=>!x.hidden);const i=controls.indexOf(root.activeElement);if(e.shiftKey&&i<=0){e.preventDefault();controls.at(-1)?.focus()}else if(!e.shiftKey&&i===controls.length-1){e.preventDefault();controls[0]?.focus()}}});head.querySelector('button').focus();void refresh();
 }
 function primaryConnections(container){
  const section=primarySettingCard(container,'GitHub',
@@ -1929,7 +1878,7 @@ function primaryAiSettings(container){
  })(),'btn small');
  actions.append(save,saveLimit);
  const form=el('div','form-stack');
- form.append(testLabel,countLabel,actions,feedback);
+ form.classList.add('git-ai-policy');form.append(testLabel,countLabel,actions,feedback);
  section.append(form);
  const jobsSection=el('section','settings-section');
  jobsSection.append(el('h3','h3','Managed AI development'));

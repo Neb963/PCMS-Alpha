@@ -26,6 +26,13 @@ export async function createGitModel(saved=null){
   if(method==='GET'){
    if(!path)return response(200,{id:42,private:true,full_name:'Neb963/per-gens'});
    if(path==='/git/ref/heads/main')return state.head?response(200,{ref:'refs/heads/main',object:{type:'commit',sha:state.head}}):response(404,{});
+   if(path==='/commits'&&state.head&&u.searchParams.get('path')){
+    const target=u.searchParams.get('path'),changes=[];let cursor=u.searchParams.get('sha')||state.head;
+    const at=head=>head?flatten(state.commits[head].tree.sha).find(x=>x.path===target)?.sha:null;
+    while(cursor&&changes.length<100){const c=state.commits[cursor],parent=c.parents[0]?.sha||null;
+      if(at(cursor)!==at(parent))changes.push({sha:cursor});cursor=parent;}
+    return response(200,changes);
+   }
    if(path==='/git/refs'||path==='/commits')return state.head?response(200,[{sha:state.head}]):response(409,{});
    if(path.startsWith('/git/commits/'))return state.commits[path.slice(13)]?response(200,state.commits[path.slice(13)]):response(404,{});
    if(path.startsWith('/git/trees/')){const sha=path.slice(11);return state.trees[sha]?response(200,{sha,truncated:false,tree:u.searchParams.get('recursive')==='1'?flatten(sha):state.trees[sha]}):response(404,{});}

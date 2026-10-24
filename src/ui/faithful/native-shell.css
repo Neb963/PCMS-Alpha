@@ -20,3 +20,9 @@ body.pcms-native-open #pcms-legacy-return{display:block}
 .source-file-button:hover,.source-file-button[aria-current=true]{background:var(--accent-soft,#eaf1f9)}
 .source-code{width:100%;font-family:ui-monospace,monospace;white-space:pre;overflow:auto;tab-size:2;resize:vertical}
 @media(max-width:650px){.source-layout{grid-template-columns:minmax(0,1fr)}.source-tree{max-height:260px;overflow:auto}}
+
+[data-git-prompt] textarea.form-input{box-sizing:border-box;width:100%;font-family:ui-monospace,monospace;line-height:1.5;padding:12px;border:1px solid #c9d2da;border-radius:6px;resize:vertical}
+.git-ai-policy{display:grid;gap:16px;margin-top:20px}.git-ai-policy>label{display:flex;flex-direction:column;gap:8px}
+.git-ai-policy textarea{box-sizing:border-box;width:100%;padding:10px;border:1px solid #c9d2da;border-radius:6px;resize:vertical}
+.git-ai-policy input[type=number]{width:110px;padding:8px;border:1px solid #c9d2da;border-radius:6px}
+@media(min-width:651px){.source-tree{max-height:calc(100dvh - 250px);overflow:auto;padding-right:6px}}

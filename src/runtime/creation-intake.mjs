@@ -67,7 +67,7 @@ export function coalesceCreation(existing,source){
     if(nextSource.initialImport.revision<=(prior[idx].initialImport?.revision||0))return fail('INITIAL_IMPORT_UNREVIEWED_BINDING_CHANGED');
     const sources=prior.slice();sources[idx]=nextSource;
     return {ok:true,changed:true,record:{...existing,sources,revision:existing.revision+1,
-      ...(existing.hold==='GIT_SOURCE_CHANGED_WITH_ACTIVE_OPERATION'?{sourceDrift:false,hold:null}:{})}};
+      ...((existing.sourceDriftReason||existing.hold)==='GIT_SOURCE_CHANGED_WITH_ACTIVE_OPERATION'?{sourceDrift:false,sourceDriftReason:null,hold:null}:{})}};
   }
   if(idx>=0&&git&&prior[idx].markerOid===nextSource.markerOid){
     if(JSON.stringify(prior[idx].initialImport||null)===JSON.stringify(nextSource.initialImport||null)||!nextSource.initialImport)
@@ -85,7 +85,7 @@ export function coalesceCreation(existing,source){
     // not replace the evidence to which the possible effect was bound.
     return {ok:true,changed:true,conflict:true,
       record:{...existing,revision:existing.revision+1,
-        hold:'GIT_SOURCE_CHANGED_WITH_ACTIVE_OPERATION',sourceDrift:true}};
+        hold:'GIT_SOURCE_CHANGED_WITH_ACTIVE_OPERATION',sourceDriftReason:'GIT_SOURCE_CHANGED_WITH_ACTIVE_OPERATION',sourceDrift:true}};
   }
   if(idx>=0&&JSON.stringify(prior[idx])===JSON.stringify(nextSource))
     return {ok:true,duplicate:true,changed:false,record:existing};

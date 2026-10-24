@@ -1,3 +1,5 @@
+import {coalesceCreation} from '../src/runtime/creation-intake.mjs';
+import {advanceS04Effect} from '../src/runtime/creation-effects.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash,webcrypto} from 'node:crypto';
@@ -89,4 +91,23 @@ test('J03 initial import remains bound through first creation, not only intake c
  const changedSource={...c,generators:c.generators.map(g=>g.slug===renewed.slug?{...g,markerOid:'e'.repeat(40)}:g)};
  const sourceGuard=createInitialImportGuard(api,{inspect:async()=>({ok:true,repositoryId:'42',...changedSource.generators.find(g=>g.slug==='new-private')}),credential:async()=>({ok:true,credential:'test-credential-only'})});
  assert.equal((await sourceGuard(db,renewed)).code,'INITIAL_IMPORT_SOURCE_CHANGED_REVIEW_REQUIRED');
+});
+
+test('J03 uncertain source drift survives readback, exact account refresh, and reviewed recovery without replay',async()=>{
+ const {db,accounts}=await seed(),a=accounts[0],original={intentId:'initial_uncertain',slug:'new-private',origin:'GITHUB_MAIN',revision:4,state:'CREATE_UNCERTAIN',
+  accountId:a.accountId,accountRevision:2,personaUid:a.personaUid,bindingVersion:1,principalFingerprint:a.identity.principalFingerprint,
+  createOperationId:'original_create_operation',createFingerprint:'a'.repeat(64),ackTemporarySlug:'temporary-source',
+  sources:[{type:'GITHUB_MAIN',...cfg,slug:'new-private',markerOid:'b'.repeat(40),head:'a'.repeat(40),initialImport:{revision:1,scopeDigest:'a'.repeat(64),target:{slug:'new-private'},folderTreeOid:'d'.repeat(40)}}]};
+ const witness={...cfg,slug:'new-private',head:'c'.repeat(40),markerOid:'e'.repeat(40),complete:true,verifiedMain:true};
+ const drift=coalesceCreation(original,{type:'GITHUB_MAIN',intentId:'other_git_witness',witness}).record;assert.equal(drift.sourceDrift,true);assert.equal(drift.sourceDriftReason,'GIT_SOURCE_CHANGED_WITH_ACTIVE_OPERATION');
+ await put(db,[{key:'account:'+a.accountId,account:{...a,boundPrincipal:a.identity.principalFingerprint}},{key:'s00-create-intent:'+original.intentId,record:drift},
+  {key:'inventory-batch:'+a.accountId,accountRevision:a.revision,bindingVersion:1,observationId:'fresh_census'}]);
+ const refreshed=await createCoordinatorStore(db).refreshCreateAccountContext(original.intentId,drift.revision);assert.equal(refreshed.ok,true,refreshed.code);
+ assert.equal(refreshed.record.createOperationId,original.createOperationId);assert.equal(refreshed.record.sourceDrift,true);
+ const observing=advanceS04Effect(refreshed.record,'CREATE_OBSERVING',{temporarySlug:'temporary-source'});assert.equal(observing.ok,true);
+ const confirmed=advanceS04Effect(observing.record,'CREATE_CONFIRMED',{source:'INDEPENDENT_READBACK',ownerMatches:true,privateEmpty:true,remoteId:'public_created',temporarySlug:'temporary-source'});assert.equal(confirmed.ok,true);assert.equal(confirmed.record.hold,null);assert.equal(confirmed.record.sourceDriftReason,'GIT_SOURCE_CHANGED_WITH_ACTIVE_OPERATION');
+ const newer={...witness,initialImport:{...original.sources[0].initialImport,revision:2,scopeDigest:'f'.repeat(64),markerOid:witness.markerOid}};
+ const recovered=coalesceCreation(confirmed.record,{type:'GITHUB_MAIN',intentId:'newer_reviewed_witness',witness:newer});assert.equal(recovered.ok,true);assert.equal(recovered.record.sourceDrift,false);
+ assert.equal(recovered.record.state,'PRIVATE_EMPTY_CONFIRMED');assert.equal(recovered.record.createOperationId,original.createOperationId);assert.equal(recovered.record.remoteId,'public_created');
+ const unreviewed=coalesceCreation(original,{type:'GITHUB_MAIN',intentId:'unreviewed_same_revision',witness:{...witness,markerOid:'b'.repeat(40),initialImport:{...original.sources[0].initialImport,folderTreeOid:'e'.repeat(40)}}});assert.equal(unreviewed.ok,false);
 });

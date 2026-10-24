@@ -1,6 +1,6 @@
 // OFFLINE B fixture only. Installed production UI/boundaries/IDB/runners,
 // with independent durable provider ledger. Never packaged in the XPI.
-export async function installGeneratorFixture(){
+export async function installGeneratorFixture(options={}){
  const {openCanonicalDatabase}=await import('./journal.mjs');
  const {createAccountBoundary}=await import('./account-boundary.mjs');
  const {createInventoryBoundary}=await import('./inventory-boundary.mjs');
@@ -76,8 +76,11 @@ export async function installGeneratorFixture(){
      ownerResult:'IS_OWNER',ownerPrincipalFingerprint:ctx.principalFingerprint,ownerObservationId:'j02_owner_'+crypto.randomUUID(),visibility:'UNLISTED'}))]};
  }});
  const authority=createS06StandingAuthority(api),creationGate=createScopedCreationGate(authority);
+ await authority.state(); // Production register() performs this cold policy load.
  const runner=createCreationRunner(api,{open,guard:()=>guard,effectGate:creationGate,
-  syncInventory:inventory.syncAccount,createGit:()=>({step:async()=>({ok:false,code:'GIT_RECONNECT_REQUIRED'})})});
+  syncInventory:inventory.syncAccount,gitGate:()=>authority.gate('gitWrite'),
+  ...(options.createImportGuard?{importGuard:options.createImportGuard(api)}:{}),
+  createGit:(a,opts)=>options.createGit?options.createGit(a,{...opts,guard:()=>guard}):({step:async()=>({ok:false,code:'GIT_RECONNECT_REQUIRED'})})});
  const coordinator=createCoordinatorBoundary(api,{open,makeRunner:()=>runner});
  const accounts=createAccountBoundary(api,{open,guard:()=>guard,syncInventory:inventory.syncAccount});
  const adoption=createAdoptionBoundary(api,{open,guard:()=>guard,managementGate:()=>authority.allowsOperatorManagement(),gitGate:()=>false});

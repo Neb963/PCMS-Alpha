@@ -656,7 +656,7 @@ export function createCoordinatorStore(db){
              !/^[a-f0-9]{64}$/.test(account.boundPrincipal||'')||
              account.identity.principalFingerprint!==account.boundPrincipal||
              item.principalFingerprint&&item.principalFingerprint!==account.boundPrincipal||
-             item.pinConflict||item.sourceDrift){finish(fail('ACCOUNT_CONTEXT_CHANGED'));return;}
+             (item.pinConflict||item.sourceDrift)&&!['CREATE_DISPATCH_POSSIBLE','CREATE_UNCERTAIN','CREATE_OBSERVING','RENAME_DISPATCH_POSSIBLE','RENAME_UNCERTAIN','RENAME_OBSERVING','GIT_DISPATCH_POSSIBLE','GIT_UNCERTAIN','GIT_OBSERVING'].includes(item.state)){finish(fail('ACCOUNT_CONTEXT_CHANGED'));return;}
           meta.get('inventory-batch:'+item.accountId).onsuccess=seen=>{
             const inventory=seen.target.result;
             if(!inventory?.observationId||inventory.accountRevision!==account.revision||

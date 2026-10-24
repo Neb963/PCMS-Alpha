@@ -70,7 +70,7 @@ function setup({grant=true,collision=false,ack=false}={}){
  }}};
  let grantActive=grant;
  const service=createExistingRenameService(api,{open:async()=>db(),guard:()=>g,
-   clock:()=>200,developmentGate:()=>grantActive});
+   clock:()=>200,developmentGate:()=>grantActive,linkRenamed:async()=>({ok:false,code:'RENAMED_SOURCE_LINK_NOT_VERIFIED'}),preserveOriginal:async()=>({ok:true})});
  return {service,saved,records,review,reads:()=>reads,renames:()=>renames,
    changeSource:()=>changedSource=true,removeOldInventory:()=>delete records['inventory:old-generator'],
    removeOldLink:()=>delete records['source-link:old-generator'],
