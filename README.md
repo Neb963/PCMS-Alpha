@@ -1,9 +1,11 @@
 # PCMS-Alpha
 
-Firefox extension for guarded multi-account Perchance generator management, Git source and READY deployment, AI development, exact-source publication, Refresher, backup and recovery.
+Combined Firefox extension for guarded PersonaMonkey accounts, generator lifecycle, Git main intake, source development, exact-source publication, Refresher and portable backup/restore.
 
-**State:** S00–S07 merged; **S08 remains an unaccepted integration candidate** on [PR #31](https://github.com/Neb963/PCMS-Alpha/pull/31). The combined XPI is intended to contain all production boundaries; scoped consent and real safety guards still apply. S08 integrates guarded disposable live stages, an isolated installed-Firefox restart, production-v2 backup/restore witnesses, and independent recent-feed Refresher checks. AC-16 remains NOT_TESTED until an authorized disposable end-to-end live run passes; these stages are not represented as empirical Perchance successes.
+**Active engineering program:** [Recovery A00–A09](docs/implementation/RECOVERY-PLAN-2026-10-22.md), governed by the [accepted browser-only client amendment](docs/authority/PCMS-Alpha-CLIENT-AMENDMENT-v1.0.1.md). Historical I17/S-slice reports do not establish live acceptance.
 
-See [S08 operator guide](docs/implementation/S08-OPERATOR-GUIDE.md) for local host setup, installation, actionable diagnostics and limitations.
+Build the **XPI only**: `node scripts/build-i00.mjs` → `build/pcms-alpha-i00.xpi`. Distribution is a single extension plus the pre-existing, unmodified PersonaMonkey `com.persona.mullvad_router` bridge. There are no PCMS-specific installed native helpers, keyrings, witnesses or encrypted backups.
 
-**Authority:** `docs/authority/PCMS-Alpha-CLIENT-SPEC-v1.0.0.md` and its accepted matrix, together with the pinned PersonaMonkey donor revision `9995f6eadfa54be6cc0001f4e04f2a2d9b9401bf`. Build with `node scripts/build-i00.mjs`, which first verifies the donor. Historical implementation reports prove only their scoped evidence; they do not establish end-to-end provider outcomes.
+[Operator installation, upgrade and recovery](docs/operator/OPERATOR-GUIDE.md). Source-level (D), packaged-Firefox (B), real host (H), private Git (GIT) and authorized provider (L) evidence are reported independently; no current green CI run proves full live acceptance.
+
+Pinned original PersonaMonkey donor: `9995f6eadfa54be6cc0001f4e04f2a2d9b9401bf`.
