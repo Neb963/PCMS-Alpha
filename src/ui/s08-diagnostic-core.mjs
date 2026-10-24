@@ -7,6 +7,57 @@ export const DIAGNOSTIC_CONFIG='pcmsS08DisposableScope';
 export const DIAGNOSTIC_RUN='pcmsS08DiagnosticRun';
 export const STAGES=Object.freeze(['SCOPE','CREATE','GIT_SOURCE','READY','AI_TEST',
   'GIT_WRITEBACK','PUBLICATION','REFRESHER','BACKUP','RESTORE','PROCESS_RESTART']);
+
+export const DIAGNOSTIC_INDEPENDENT='pcmsS08IndependentReadOnly';
+const INDEPENDENT_MODULES=Object.freeze([
+ ['GIT_AUTH','GITHUB_AUTH','GIT'],
+ ['GIT_MAIN','GITHUB_MAIN_TREE','GIT'],
+ ['GIT_CREDENTIAL','BROWSER_GIT_STORE','D'],
+ ['BACKUP_RUNTIME','PORTABLE_BACKUP_RUNTIME','D']
+]);
+const CODE=/^[A-Z][A-Z0-9_]{1,109}$/;
+function safeCode(v,fallback='READ_NOT_CONFIRMED'){
+ return typeof v==='string'&&CODE.test(v)?v:fallback;
+}
+// Independence is about the TEST, not a claim that a provider effect occurred.
+// A disabled Refresher or unobserved remote login can still have a healthy local
+// runtime. Never translate a local response into H/L proof.
+export function independentReadOnlyResults({readiness,accounts,inventory,refresher,authority},now){
+ if(!Number.isSafeInteger(now)||now<=0)throw Error('INDEPENDENT_CHECK_CLOCK_INVALID');
+ const rows=[];
+ const add=(id,ok,code,tier='D')=>rows.push({
+  id,outcome:ok?'PASS':'NOT_TESTED',code:safeCode(code),tier,
+  proof:ok?'READ_ONLY_API_RESPONSE':'NO_AUTHORITATIVE_READBACK'
+ });
+ const lookup=new Map(readiness?.ok===true&&Array.isArray(readiness.rows)?
+  readiness.rows.filter(x=>typeof x?.component==='string').map(x=>[x.component,x]):[]);
+ for(const [id,component,tier] of INDEPENDENT_MODULES){
+  const v=lookup.get(component);
+  add(id,v?.state==='VERIFIED',v?.code||'READINESS_NOT_AVAILABLE',tier);
+ }
+ add('ACCOUNT_STORE',accounts?.ok===true&&Array.isArray(accounts.accounts),
+  accounts?.ok?'CANONICAL_ACCOUNT_LIST_READ':accounts?.code||'ACCOUNT_LIST_UNAVAILABLE');
+ add('INVENTORY_STORE',inventory?.ok===true&&Array.isArray(inventory.items),
+  inventory?.ok?'LOCAL_INVENTORY_PAGE_READ':inventory?.code||'INVENTORY_READ_UNAVAILABLE');
+ add('REFRESHER_POLICY',refresher?.ok===true&&!!refresher.policy,
+  refresher?.ok?'CANONICAL_REFRESHER_POLICY_READ':refresher?.code||'REFRESHER_POLICY_UNAVAILABLE');
+ add('STANDING_GRANTS',authority?.ok===true&&!!authority.record,
+  authority?.ok?'AUTHORIZATION_RECORD_READ':authority?.code||'AUTHORIZATION_READ_UNAVAILABLE');
+ return {schema:1,checkedAt:now,mode:'INDEPENDENT_READ_ONLY',rows,
+  limitations:['NO_PROTECTED_ROUTE_OR_LOGIN_PROOF','NO_PRIVATE_GIT_WRITE_PROOF',
+   'NO_PERCHANCE_CREATE_OR_PUBLICATION_PROOF','NO_DISK_REOPEN_OR_RESTORE_PROOF']};
+}
+export function independentDiagnosticExport(snapshot,run=null){
+ if(snapshot?.schema!==1||snapshot.mode!=='INDEPENDENT_READ_ONLY'||
+    !Array.isArray(snapshot.rows))return {ok:false,code:'INDEPENDENT_REPORT_UNAVAILABLE'};
+ // These sanitized fields never contain account IDs, token, source or URLs.
+ const checks=snapshot.rows.map(r=>({id:safeCode(r.id,'UNKNOWN_CHECK'),
+  outcome:r.outcome==='PASS'?'PASS':'NOT_TESTED',code:safeCode(r.code),
+  tier:r.tier==='GIT'?'GIT':'D',proof:safeCode(r.proof)}));
+ return {format:'PCMS_S08_INDEPENDENT_SANITIZED',version:1,
+  checkedAt:snapshot.checkedAt,mode:snapshot.mode,checks,
+  limitations:snapshot.limitations,chain:run?diagnosticReport(run):null};
+}
 export function validateDisposable(config){
  if(!config||!ID.test(config.accountId||''))return {ok:false,code:'TEST_ACCOUNT_SELECTION_INVALID'};
  if(!ID.test(config.personaUid||''))return {ok:false,code:'TEST_PERSONA_BINDING_INVALID'};
