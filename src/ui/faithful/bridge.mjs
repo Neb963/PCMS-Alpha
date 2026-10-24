@@ -1,7 +1,7 @@
 import {matchesReviewGroup} from '../review-queue-state.mjs';
 import {renderGitInventory,mountGitPromptEditor} from './git-workspace.mjs';
 import {createSourceWorkspace} from './source-workspace.mjs';
-import {mountSourceComparison} from './source-comparison.mjs';
+import {mountSourceComparison,mountSourceHistory} from './source-comparison.mjs';
 import {createGeneratorBatches} from './generator-batches.mjs';
 import {createGeneratorSelection} from './generator-selection.mjs';
 import {createAccountsWorkspace,accountGrowthAdvice,accountNeedsAttention} from './accounts-workspace.mjs';
@@ -1093,6 +1093,7 @@ async function openReleaseReview(slug){
   for(const t of [...(local.tests?.default||[]),...(local.tests?.optional||[])])checks.append(el('p','setting-note',t.name+' — '+t.result));
   body.append(checks);
  }else body.append(el('p','setting-note','Saved source is not available for comparison yet.'));
+ mountSourceHistory({container:body,slug,el,b,request:(type,params)=>readPort('pcms-i13-release',type,params,30000)});
  body.append(b('Refresh review',()=>{close();void openReleaseReview(slug)}));
  let persisted;
  try{persisted=await releaseCommand('GET',{slug});}catch{persisted=null;}
@@ -1240,10 +1241,10 @@ function openReadyCandidate(candidate){
   await loadQueue(true);
  }
  const assess=b('Assess prerequisites',()=>void act('ASSESS_READY'),'btn small');
- const prepare=b('Prepare local development',()=>void act('PREPARE_LOCAL'),'btn primary');
+
  const pause=b(candidate.hold==='OPERATOR_PAUSED'?'Resume READY work':'Pause READY work',
   ()=>void act(candidate.hold==='OPERATOR_PAUSED'?'RESUME_READY':'PAUSE_READY'),'btn small');
- actions.append(assess,prepare,pause);body.append(facts,status,actions);panel.append(head,body);
+ actions.append(pause,assess);body.append(facts,status,actions);panel.append(head,body);
  overlay.append(panel);root.append(overlay);
  overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
  overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
@@ -1269,82 +1270,51 @@ function humanAiStatus(job){
 // the UI nor AI text can self-assert tests, Git writes or publication.
 async function openAiJob(slug){
  const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
- panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
- panel.setAttribute('aria-label','AI development for '+slug);
- const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-label','AI development for '+slug);
+ let timer,pending=false,loading=false,current=null,lastSignature='';
+ const close=()=>{clearInterval(timer);overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
  const head=el('div','drawer-head');head.append(el('h2','drawer-title','Develop · '+slug),b('Close',close));
- const body=el('div','drawer-body'),status=el('p','setting-note','Checking the current exact AI job…');
- status.setAttribute('role','status');body.append(status);
- const metadata=el('dl'),actions=el('div','form-foot');
- body.append(metadata,actions);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ const body=el('div','drawer-body'),status=el('p','setting-note','Reading development…');status.setAttribute('role','status');
+ const metadata=el('dl'),details=el('details'),actions=el('div','form-foot');details.append(el('summary','','Development details'),metadata);
+ const message=el('p','setting-note');message.setAttribute('role','status');
+ const label=el('label','','New instructions'),instructions=el('textarea','form-input');instructions.rows=4;instructions.maxLength=4000;instructions.setAttribute('aria-label','New development instructions');
+ label.append(instructions);const queued=el('p','setting-note'),give=b('Give new instructions',()=>void control('GIVE_INSTRUCTIONS',{instructions:instructions.value}),'btn primary');
+ const form=el('div','development-instructions');form.append(label,queued,give);
+ body.append(status,actions,form,message,details);panel.append(head,body);overlay.append(panel);root.append(overlay);
  overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
- overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
- head.querySelector('button')?.focus();
- let pending=false;
- async function load(){
-  metadata.replaceChildren();actions.replaceChildren();
-  let j;try{j=await readPort('pcms-i10-ai','GET_JOB',{slug},22000)}catch{}
-  if(!overlay.isConnected)return;
-  if(!j?.ok){status.textContent='Canonical AI job unavailable. No action can be authorized.';return;}
-  status.textContent=humanAiStatus(j)+
-    '. Protected owner, clean-editor, session and source-readback checks are applied independently.';
-  for(const [label,value] of [
-   ['Current revision',String(j.revision)],['Saved source',j.sourceFingerprint?.slice(0,16)||'Not verified'],
-   ['Prompt version',String(j.promptRevision??'Unavailable')],
-   ['Native state',(j.nativeState||'Not started').replaceAll('_',' ').toLowerCase()],
-   ['Tests',j.evidence?.state||'Unverified'],
-   ['Provider outcome',j.hold||'No independent effect receipt loaded']]){
-    const row=el('div','kv');row.append(el('dt','',label),el('dd','',value));metadata.append(row);
-  }
-  const opts=[
-   ['Continue development','ADVANCE_JOB',null,
-    !j.slotReleased&&!['TESTS_VERIFIED','HELD_NO_PROGRESS','HUMAN_OWNED'].includes(j.state)],
-   ['Start Chat 1','BEGIN_NATIVE','CHAT1_SEND',j.state==='PENDING_NATIVE_SESSION'],
-   ['Stop running session','BEGIN_NATIVE','STOP',j.nativeState==='RUNNING_OBSERVED'],
-   ['Reconcile session','PROBE_NATIVE',null,
-    ['HELD_RECONCILE','TESTS_UNVERIFIED','KNOWN_FAILURE'].includes(j.state)],
-   ['Run independent tests','RUN_TESTS',null,j.state==='TESTS_UNVERIFIED'],
-   ['Inspect Chat 2 workspace','INSPECT_WORKSPACE',null,
-    j.nativeState==='CHAT2_OBSERVED_IDLE'&&!j.chat2IsolationVerified],
-   ['Verify fresh Chat 2','VERIFY_FRESH_CHAT2',null,
-    j.nativeState==='CHAT2_OBSERVED_IDLE'&&!j.chat2IsolationVerified],
-   ['Repair observed failure','BEGIN_NATIVE',
-    j.nativeState==='CHAT2_OBSERVED_IDLE'?'CHAT2_REPAIR':'CHAT1_REPAIR',
-    j.state==='KNOWN_FAILURE'&&
-    (j.nativeState==='CHAT1_OBSERVED_IDLE'||(j.nativeState==='CHAT2_OBSERVED_IDLE'&&j.chat2IsolationVerified))],
-   ['Reset Chat 2','BEGIN_NATIVE','CHAT2_RESET',j.evidence?.chat1Pass===true],
-   ['Start Chat 2','BEGIN_NATIVE','CHAT2_SEND',j.optionalTestingSha!==null]
-  ];
-  for(const [label,type,step,allowed] of opts){
-   if(!allowed)continue;
-   const button=b(label,()=>void(async()=>{
-    if(pending)return;
-    const mutates=['ADVANCE_JOB','BEGIN_NATIVE','RUN_TESTS','VERIFY_FRESH_CHAT2'].includes(type)&&step!=='STOP';
-    if(mutates&&!window.confirm(
-      'Run the selected guarded '+label.toLowerCase()+' step for '+slug+
-      '? The exact AI job revision, protected account/route, source and native session are revalidated. A lost acknowledgment is never authorization to resend.'))return;
-    pending=true;actions.querySelectorAll('button').forEach(x=>x.disabled=true);
-    status.textContent=type==='PROBE_NATIVE'?
-      'Reading the current session without sending again…':
-      'Checking the exact job and protected runtime. No result is assumed from an acknowledgment.';
-    try{
-     const out=await readPort('pcms-i10-ai',type,{
-      slug,expectedRevision:j.revision,...(step?{step}:{})},95000);
-     status.textContent=out?.ok?
-      type==='RUN_TESTS'?
-       'Test command completed. Review independently observed assertion results and current job state.':
-       'Controller response recorded. Reloading independently verified current job state.':
-      'Action held or result unconfirmed. Read the current job before any further effect.';
-    }catch{
-     status.textContent='The outcome is uncertain. Do not resend a native AI command; reconcile the current session first.';
-    }finally{pending=false;await load();void loadQueue(true);}
-   })(),'btn small');
-   actions.append(button);
-  }
-  if(!actions.children.length)
-   actions.append(el('p','setting-note','No additional native step is currently eligible. Check the protected source or recoverable session.'));
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close();return}if(e.key==='Tab'){
+  const all=[...panel.querySelectorAll('button:not(:disabled),input:not(:disabled),textarea:not(:disabled),summary')].filter(x=>x.getClientRects().length),i=all.indexOf(root.activeElement);
+  if(e.shiftKey&&i<=0){e.preventDefault();all.at(-1)?.focus()}else if(!e.shiftKey&&i===all.length-1){e.preventDefault();all[0]?.focus()}
+ }});head.querySelector('button')?.focus();
+ async function control(type,extra={}){if(pending||!current)return;if(type==='GIVE_INSTRUCTIONS'&&instructions.value.trim().length<3){message.textContent='Describe the change in at least three characters.';instructions.focus();return}
+  pending=true;give.disabled=true;actions.querySelectorAll('button').forEach(x=>x.disabled=true);
+  try{const out=await readPort('pcms-i10-ai',type,{slug,expectedRevision:current.revision,
+    ...(['SET_PAUSED','GIVE_INSTRUCTIONS'].includes(type)?{expectedControlRevision:current.controlRevision}:{}),...extra},95000);
+   message.textContent=out?.ok?type==='GIVE_INSTRUCTIONS'?'Instructions saved for the next eligible turn. The pinned testing prompt remains in force.':type==='SET_PAUSED'?(extra.paused?'Development paused. An active session will be stopped and its saved source checked.':'Development resumed. PCMS will continue when the account and source are ready.'):'Session checked.':
+    out?.code==='AI_ACCOUNT_CONCURRENCY_HELD'?'Resume is waiting for account capacity. Other jobs continue. Retry when a slot is available.':
+    out?.code==='STALE_REVISION'?'Development changed. Your instructions are preserved; check the current state and retry.':'The request could not be confirmed. Your text is preserved; the current saved job is shown below.';
+   if(out?.ok&&type==='GIVE_INSTRUCTIONS')instructions.value='';
+  }catch{message.textContent='The response was lost. The current saved job will be read before another request; your text is preserved.'}
+  finally{pending=false;lastSignature='';await load();void loadQueue(true)}
  }
- await load();
+ async function load(){if(loading||pending||!overlay.isConnected)return;loading=true;
+  try{const j=await readPort('pcms-i10-ai','GET_JOB',{slug},22000);if(!overlay.isConnected)return;
+   if(!j?.ok){status.textContent='Development is unavailable. Saved work is preserved; reconnect and retry.';return}
+   current=j;status.textContent=(j.operatorPaused?'Paused · ':humanAiStatus(j)+' · ')+(j.state==='TESTS_VERIFIED'?'Ready for source review.':'PCMS advances development and independent tests automatically.');
+   const signature=JSON.stringify([j.revision,j.controlRevision,j.nativeState,j.state,j.hold]);if(signature===lastSignature)return;lastSignature=signature;
+   metadata.replaceChildren();actions.replaceChildren();
+   for(const [name,value] of [['Job revision',j.revision],['Source',j.sourceFingerprint],['Pinned prompt',j.promptRevision],['Native session',j.nativeState],['Tests',j.evidence?.state],['Current hold',j.hold||'None']]){
+    const row=el('div','kv');row.append(el('dt','',name),el('dd','',value));metadata.append(row)}
+   if(j.state!=='HUMAN_OWNED')actions.append(b(j.operatorPaused?'Resume development':'Pause development',()=>void control('SET_PAUSED',{paused:!j.operatorPaused})));
+   actions.append(b('Inspect source and history',()=>{close();void openReleaseReview(slug)}));
+   if(j.state==='TESTS_VERIFIED')actions.append(b('Review and request changes',()=>{close();void openReleaseReview(slug)}));
+   if(['HELD_RECONCILE'].includes(j.state)||['DISPATCH_POSSIBLE','RUNNING_OBSERVED'].includes(j.nativeState))actions.append(b('Check session',()=>void control('PROBE_NATIVE')));
+   form.hidden=['TESTS_VERIFIED','HUMAN_OWNED'].includes(j.state);queued.textContent=j.pendingInstruction?'Queued: '+j.pendingInstruction.text:'';
+   give.disabled=!!j.pendingInstruction;give.textContent=j.pendingInstruction?'Instructions queued':'Give new instructions';
+  }catch{status.textContent='Development could not be read. Retry when the extension responds.'}
+  finally{loading=false}
+ }
+ await load();timer=setInterval(()=>void load(),5000);
 }
 function openAiPreparation(){
  const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');

@@ -4,7 +4,8 @@ export async function readComparisonFile({view,origin,file,request}){
  const parts=[];let offset=0,total=0;
  do{
   const r=await request('GET_LOCAL_CHUNK',{slug:view.slug,stageRevision:view.stageRevision,
-   jobRevision:view.jobRevision,fingerprint:view.sourceFingerprint,origin,path:file.path,offset});
+   jobRevision:view.jobRevision,fingerprint:view.sourceFingerprint,origin,path:file.path,offset,
+   ...(view.historyRevision!==undefined?{historyRevision:view.historyRevision}:{})});
   if(!r?.ok||r.slug!==view.slug||r.stageRevision!==view.stageRevision||r.jobRevision!==view.jobRevision||
    r.fingerprint!==view.sourceFingerprint||r.selectedFingerprint!==(origin==='P'?view.previousFingerprint:view.sourceFingerprint)||
    r.origin!==origin||r.path!==file.path||r.offset!==offset||r.total!==file.size||r.fileSha256!==file.sha256)
@@ -51,7 +52,7 @@ export function sourceLineDiff(before,after){
 }
 export function mountSourceComparison({container,view,el,b,request}){
  const section=el('section','source-comparison'),heading=el('h3','','Source changes'),note=el('p','setting-note',
-  'Previous saved source and '+(view.sourceKind==='DEVELOPMENT_SNAPSHOT'?'saved development checkpoint':'staged input')+'. Publication eligibility is checked separately.');
+  'Previous saved source and '+(view.sourceKind==='HISTORICAL_CHECKPOINT'?'historical checkpoint':view.sourceKind==='DEVELOPMENT_SNAPSHOT'?'saved development checkpoint':'staged input')+'. Publication eligibility is checked separately.');
  const layout=el('div','source-layout'),tree=el('nav','source-tree'),display=el('section','source-file');
  tree.setAttribute('aria-label','Compare source files');display.setAttribute('aria-label','Source comparison');
  const search=el('input','form-input');search.type='search';search.placeholder='Find a file';search.setAttribute('aria-label','Find a comparison file');
@@ -90,4 +91,23 @@ export function mountSourceComparison({container,view,el,b,request}){
  }
  search.addEventListener('input',()=>{offset=0;draw()});draw();if(paths.length)void show(paths.includes('main.pjs')?'main.pjs':paths[0]);
  return {element:section};
+}
+export function mountSourceHistory({container,slug,el,b,request}){
+ const details=el('details','source-history');details.append(el('summary','','Source history'));
+ const status=el('p','setting-note'),list=el('div'),pager=el('div','form-foot'),preview=el('div');
+ details.append(status,list,pager,preview);container.append(details);let loaded=false,before=0,busy=false,stack=[];
+ async function load(){if(busy)return;busy=true;status.textContent='Reading saved checkpoints…';
+  try{const r=await request('LIST_SOURCE_HISTORY',{slug,before,limit:20});if(!r?.ok)throw Error('HISTORY_UNAVAILABLE');
+   list.replaceChildren();pager.replaceChildren();status.textContent=r.items.length?'Saved checkpoints · viewing history never approves publication.':'No earlier development checkpoints saved yet.';
+   for(const item of r.items){const row=el('div','queue-item'),open=b('Inspect checkpoint',()=>void (async()=>{
+    open.disabled=true;try{const view=await request('GET_LOCAL_REVIEW',{slug,historyRevision:item.revision});if(!view?.ok)throw Error('HISTORY_UNAVAILABLE');
+     preview.replaceChildren();mountSourceComparison({container:preview,view,el,b,request});
+    }catch{status.textContent='Checkpoint source could not be verified. Current source and publication remain unchanged.'}finally{open.disabled=false}
+   })());row.append(el('span','','Revision '+item.revision+' · '+item.state.replaceAll('_',' ').toLowerCase()),open);list.append(row)}
+   const prev=b('Newer checkpoints',()=>{before=stack.pop()||0;void load()}),next=b('Older checkpoints',()=>{stack.push(before);before=r.nextCursor;void load()});
+   prev.disabled=!stack.length;next.disabled=!r.more;pager.append(prev,next);loaded=true;
+  }catch{status.textContent='History is unavailable. Close and reopen this section to retry.'}
+  finally{busy=false}
+ }
+ details.addEventListener('toggle',()=>{if(details.open&&!loaded)void load()});
 }

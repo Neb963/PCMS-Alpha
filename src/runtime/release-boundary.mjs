@@ -30,7 +30,7 @@ import {releaseContext,releaseTestContext,candidateManifest,releaseGitContext,
 export const RELEASE_PORT='pcms-i13-release';
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const fp=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
-const TYPES=new Set(['LIST','LIST_REVIEW','GET_LOCAL_REVIEW','GET_LOCAL_CHUNK','GET','GET_CHANGE','REQUEST_CHANGES','HUMAN_CONTEXT','GET_HUMAN','DEFER_HUMAN','ADOPT_HUMAN','GET_EXCEPTION','EXCEPTION_CONTEXT','RECORD_EXCEPTION','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
+const TYPES=new Set(['LIST','LIST_REVIEW','LIST_SOURCE_HISTORY','GET_LOCAL_REVIEW','GET_LOCAL_CHUNK','GET','GET_CHANGE','REQUEST_CHANGES','HUMAN_CONTEXT','GET_HUMAN','DEFER_HUMAN','ADOPT_HUMAN','GET_EXCEPTION','EXCEPTION_CONTEXT','RECORD_EXCEPTION','PREVIEW','GET_REVIEW_CHUNK','APPROVE','CANCEL_APPROVED','DISPATCH','RECONCILE']);
 export function validateReleaseMessage(api,sender,msg){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
   let json;try{json=JSON.stringify(msg);}catch{return fail('INVALID_MESSAGE');}
@@ -40,7 +40,7 @@ export function validateReleaseMessage(api,sender,msg){
      Object.keys(msg).some(k=>!['type','params'].includes(k))||!TYPES.has(msg.type))
     return fail('INVALID_MESSAGE');
   const p=msg.params||{},allowed={
-    LIST:[],LIST_REVIEW:['after','limit','query','status'],GET_LOCAL_REVIEW:['slug'],GET_LOCAL_CHUNK:['slug','stageRevision','jobRevision','fingerprint','origin','path','offset'],GET:['slug'],GET_CHANGE:['slug'],
+    LIST:[],LIST_REVIEW:['after','limit','query','status'],LIST_SOURCE_HISTORY:['slug','before','limit'],GET_LOCAL_REVIEW:['slug','historyRevision'],GET_LOCAL_CHUNK:['slug','stageRevision','jobRevision','fingerprint','origin','path','offset','historyRevision'],GET:['slug'],GET_CHANGE:['slug'],
      HUMAN_CONTEXT:['slug'],GET_HUMAN:['slug'],
      DEFER_HUMAN:['slug','expectedStageRevision','expectedJobRevision','expectedFingerprint'],
      ADOPT_HUMAN:['slug','expectedRevision'],
@@ -67,6 +67,8 @@ export function validateReleaseMessage(api,sender,msg){
      (['PREVIEW','APPROVE','DISPATCH','RECONCILE','REQUEST_CHANGES'].includes(msg.type)&&
        (p.token!==undefined&&(typeof p.token!=='string'||p.token.length<12||
         p.token.length>512||!/^[\x21-\x7e]+$/.test(p.token))))||
+     (['GET_LOCAL_REVIEW','GET_LOCAL_CHUNK'].includes(msg.type)&&p.historyRevision!==undefined&&(!Number.isSafeInteger(p.historyRevision)||p.historyRevision<1))||
+     (msg.type==='LIST_SOURCE_HISTORY'&&((p.before!==undefined&&(!Number.isSafeInteger(p.before)||p.before<0))||(p.limit!==undefined&&(!Number.isSafeInteger(p.limit)||p.limit<1||p.limit>100))))||
      (['GET_REVIEW_CHUNK','GET_LOCAL_CHUNK'].includes(msg.type)&&(
        (msg.type==='GET_LOCAL_CHUNK'&&(!Number.isSafeInteger(p.jobRevision)||p.jobRevision<0))||
        !Number.isSafeInteger(p.stageRevision)||p.stageRevision<1||
@@ -183,6 +185,7 @@ export function createReleaseBoundary(api,{
       facts=await ownerFacts(database,name);
     if(!stage.ok||!job.ok||!facts.ok)return fail('RELEASE_CANONICAL_EVIDENCE_MISSING');
     const r=stage.record,j=job.job,{account,inventory}=facts;
+    if(j.operatorPaused)return fail('AI_OPERATOR_PAUSED');
     const [ready,exception]=await Promise.all([
       createReadyStore(database).get(name),
       createS06ExceptionStore(database).getFull(name)]);
@@ -278,7 +281,8 @@ export function createReleaseBoundary(api,{
   }
   async function runTrusted(msg){
     const p=msg.params||{},database=await db(),store=releaseFactory(database);
-    if(msg.type==='GET_LOCAL_REVIEW')return createLocalSourceReview(database,{stageFactory,aiFactory}).view(p.slug);
+    if(msg.type==='LIST_SOURCE_HISTORY')return createLocalSourceReview(database,{stageFactory,aiFactory}).history(p.slug,p);
+    if(msg.type==='GET_LOCAL_REVIEW')return createLocalSourceReview(database,{stageFactory,aiFactory}).view(p.slug,p.historyRevision);
     if(msg.type==='GET_LOCAL_CHUNK')return createLocalSourceReview(database,{stageFactory,aiFactory}).chunk(p);
     if(msg.type==='GET')return store.get(p.slug);
     if(msg.type==='LIST')return store.list();

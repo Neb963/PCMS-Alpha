@@ -26,6 +26,7 @@ function withoutPendingChild(m,stage,done,commit){
   };
 }
 function withS06Candidate(m,stage,job,done,commit,approval=null){
+  if(job?.operatorPaused){done(fail('AI_OPERATOR_PAUSED'));return;}
   if(!stage?.readyIdentifier){commit();return;}
   m.get('s05-ready:'+stage.slug).onsuccess=rr=>{
     const ready=rr.target.result?.record;

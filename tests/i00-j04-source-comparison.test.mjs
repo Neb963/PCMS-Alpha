@@ -5,6 +5,8 @@ import {createLocalSourceReview} from '../src/runtime/source-review.mjs';
 import {createReleaseBoundary,validateReleaseMessage} from '../src/runtime/release-boundary.mjs';
 import {readComparisonFile,sourceLineDiff} from '../src/ui/faithful/source-comparison.mjs';
 import {fakeDatabase} from './fake-idb.mjs';
+import {createAiStore} from '../src/runtime/ai-store.mjs';
+import {auditSourceClosure} from '../src/ui/backup-source-closure.mjs';
 globalThis.crypto??=webcrypto;
 const file=(path,text)=>({path,base64:Buffer.from(text).toString('base64')});
 async function fixture(){
@@ -41,4 +43,30 @@ test('J04 patience diff reconstructs both complete sources, including repeated l
  for(const [a,b] of [['',''],['abc','abc\n'],['a\r\nb\n','a\nb\n'],['same\nold\nanchor\n','same\nnew\nanchor\n'],['x\n'.repeat(20000),'y\n'.repeat(20000)],['one\ntwo\none\nthree','one\none\ntwo\nthree']]){
   const diff=sourceLineDiff(a,b);assert.equal(diff.filter(x=>x.kind!=='added').map(x=>x.text).join(''),a);assert.equal(diff.filter(x=>x.kind!=='removed').map(x=>x.text).join(''),b);
  }
+});
+test('J04 more than256 source-changing repairs preserve every full checkpoint without an iteration hold; backup independently audits old bytes',async()=>{
+ const f=await fixture(),name='generator-one',store=createAiStore(f.db);
+ const job={schema:1,slug:name,revision:1,stageRevision:3,sourceFingerprint:f.source.fingerprint,
+  state:'TESTS_UNVERIFIED',prompt:{revision:1,tests:['default_generator_smoke']},chat1:{tests:{}},chat2:null,
+  native:{state:'CHAT1_OBSERVED_IDLE'},changes:[],verifiedFinal:null};
+ await new Promise(resolve=>{const t=f.db.transaction('meta','readwrite'),m=t.objectStore('meta');t.oncomplete=resolve;
+  m.put({key:'stage:'+name,record:f.record});m.put({key:'ai-job:'+name,accountId:'account',job})});
+ let revision=1;const fingerprints=[f.source.fingerprint];
+ for(let i=0;i<260;i++){
+  const next=await exactSource([file('main.pjs','repair '+i),file('index.html','<p>'+i+'</p>'),file('src/retained.bin',[0,255,i%256])]);
+  const result=await store.checkpointSource(name,revision,next);assert.equal(result.ok,true,JSON.stringify(result));assert.equal(result.state,'TESTS_UNVERIFIED');
+  revision=result.revision;fingerprints.push(next.fingerprint);
+ }
+ assert.equal((await store.getJobFull(name)).job.changes.length,128);
+ const review=createLocalSourceReview(f.db),seen=[];let before=0;
+ do{const page=await review.history(name,{before,limit:17});seen.push(...page.items);before=page.nextCursor;}while(before!==null);
+ assert.equal(seen.length,260);assert.equal(new Set(seen.map(x=>x.revision)).size,260);
+ for(const revision of [1,2,129,260]){const v=await review.view(name,revision);assert.equal(v.ok,true,JSON.stringify(v));
+  assert.equal(v.sourceFingerprint,fingerprints[revision-1]);
+  const meta=v.files.find(x=>x.path==='main.pjs');await readComparisonFile({view:v,origin:'F',file:meta,request:(_,p)=>review.chunk(p)});
+ }
+ const snapshot={schema:1,stores:{meta:f.db.keys('meta').map(key=>({key,value:f.db.read('meta',key)}))}};
+ const audit=await auditSourceClosure(snapshot);assert.equal(audit.manifests,263);
+ const history=snapshot.stores.meta.find(x=>x.key==='ai-history:'+name+':129');history.value.job.finalSource.blobs[0].base64='AA==';
+ await assert.rejects(auditSourceClosure(snapshot),/BACKUP_SOURCE_BYTE_MISMATCH/);
 });

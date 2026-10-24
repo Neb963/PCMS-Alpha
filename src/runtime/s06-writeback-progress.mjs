@@ -42,6 +42,7 @@ export function planS06Writeback({ready,stage,job,writeback,exception}={}){
       previous.jobRevision!==j?.revision))
     return {ok:true,type:'CANCEL_PREPARED',slug:previous.slug,
       revision:previous.revision,localOnly:true};
+  if(j?.operatorPaused)return fail('AI_OPERATOR_PAUSED');
   const wanted=record?.active;
   // A queued desired READY has no admission/writer authority. Only
   // current active READY without a successor may write back tested F.
