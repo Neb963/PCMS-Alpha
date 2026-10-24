@@ -1812,6 +1812,10 @@ async function runReadiness(remote){
   snapshot.rows.push(make('REFRESHER_LIVE_EFFECT','NOT_TESTED',
     'SOURCE_SAVE_AND_RECENT_UNVERIFIED','NO_INDEPENDENT_L_RECEIPT',
     'Use a separately authorized disposable live test to verify saved bytes and recent-feed placement.'));
+  const portable=replies[2].status==='fulfilled'?replies[2].value:null;
+  snapshot.rows.push(make('PORTABLE_BACKUP_RUNTIME',portable?.ok?'VERIFIED':'UNREACHABLE',
+    portable?.ok?'BROWSER_PORTABLE_BACKUP_RESPONDED':(portable?.code||'PORTABLE_BACKUP_UNAVAILABLE'),
+    'PCMS_I15_PORTABLE','Only browser receipt readback is verified; reopen the downloaded file and inspect restoration separately.'));
   state.readiness=snapshot;
  }catch{state.readiness={ok:false,code:'READINESS_TRANSPORT_UNAVAILABLE'};}
  finally{state.readinessBusy=false;if(state.route==='settings')renderSettingsSection();}
