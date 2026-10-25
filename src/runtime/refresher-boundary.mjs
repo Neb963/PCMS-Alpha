@@ -5,7 +5,7 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
 import {createRefresherStore} from './refresher-store.mjs';
 import {backfillLegacyAdoptions} from './refresher-adopted.mjs';
-import {MINUTE} from './refresher-core.mjs';
+import {MINUTE,rowBlocks,effectiveCapacity} from './refresher-core.mjs';
 import {qualifyRecentAbsence} from './refresher-admission.mjs';
 import {createNoticeDispatcher} from './notices.mjs';
 // A saved source marker is not an observation that the target returned to
@@ -21,6 +21,28 @@ export function verifiedRefreshFeed(row){
    Number.isSafeInteger(feed.position)&&feed.position>=1&&
    Number.isSafeInteger(feed.observedAt)&&feed.observedAt>last.at;
 }
+// A legitimate active-time observation must happen before Firefox's idle
+// event page can disappear. This is a work hint, never time/source authority.
+export const REFRESHER_CLOCK_PULSE_MS=20_000;
+export function needsActiveClock(state,routes=[],now=Date.now()){
+ if(!state||!state.policy||!state.capacity||!state.accounts||state.globalPause||!Array.isArray(state.rows)||!Array.isArray(routes)||
+    !Number.isSafeInteger(now)||state.recent?.complete!==true||state.recent.suspended||
+    !Number.isSafeInteger(state.recent.observedAt)||state.recent.observedAt<=0||
+    state.recent.observedAt>now||now-state.recent.observedAt>600_000)return false;
+ const ready=new Set(routes.filter(r=>{
+  const a=state.accounts?.[r.accountId];
+  return r.ready===true&&a?.verifiedIdentity===true&&!a.paused&&
+    r.personaUid===a.personaUid&&r.bindingVersion===a.bindingVersion&&
+    r.principalFingerprint===a.principalFingerprint&&
+    typeof r.cookieStoreId==='string'&&r.cookieStoreId&&
+    typeof r.routeId==='string'&&r.routeId&&!['direct','block'].includes(r.routeId)&&
+    typeof r.healthDomain==='string'&&r.healthDomain;
+ }).map(r=>r.accountId));
+ const occupied=state.rows.filter(r=>r.slot).length,capacity=effectiveCapacity(state,now).cap;
+ return state.rows.some(r=>ready.has(r.accountId)&&!r.readyUpdate&&
+   (r.phase==='ACTIVE'&&r.slot||r.phase==='WAITING'&&!r.slot&&!r.sleepRemaining&&occupied<capacity)&&
+   rowBlocks(state,r).every(code=>code==='ACCOUNT_UNAVAILABLE'));
+}
 export const REFRESHER_PORT='pcms-i12-refresher',REFRESHER_ALARM='pcms-refresher-turn';
 const types=new Set(['GET_REFRESHER','SET_POLICY','SET_PAUSE','SET_GENERATOR_POLICY','DEMAND_STATISTIC','OBSERVE_NOW','RESET_RECENT_BACKOFF','DIAGNOSTIC_TARGET_REFRESH']);
 export function validateRefresherMessage(api,sender,message){
@@ -34,11 +56,14 @@ export function validateRefresherMessage(api,sender,message){
   const allowed=message.type==='GET_REFRESHER'?['query','phase','accountId','offset','limit']:
     message.type==='SET_POLICY'?['expectedRevision','policy']:
     message.type==='SET_PAUSE'?['expectedRevision','scope','target','paused']:
-    message.type==='SET_GENERATOR_POLICY'?['expectedRevision','stableId','activeMs','sleepMs']:
+    message.type==='SET_GENERATOR_POLICY'?['expectedRevision','stableId','activeMs','sleepMs','useDefaults']:
     message.type==='DEMAND_STATISTIC'?['expectedRevision','stableId']:
     message.type==='RESET_RECENT_BACKOFF'?['expectedRevision']:
     message.type==='DIAGNOSTIC_TARGET_REFRESH'?['slug','accountId','runId']:[];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
+  if(message.type==='SET_GENERATOR_POLICY'&&
+     (p.useDefaults!==undefined&&typeof p.useDefaults!=='boolean'||
+      p.useDefaults===true&&(p.activeMs!==undefined||p.sleepMs!==undefined)))return fail('INVALID_PARAMS');
   if(message.type==='GET_REFRESHER'){
     if((p.query!=null&&(typeof p.query!=='string'||p.query.length>80))||
       (p.accountId!=null&&p.accountId!==''&&!isSafeId(p.accountId))||
@@ -65,9 +90,28 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
   refreshGate=()=>false,qualificationFor=()=>null,refreshAdapter=null,clock=Date.now,
   nativeClockGate=()=>false,continuousCoverageFor=()=>null,
   browserClockGate=()=>false,monotonicClock=()=>performance.now(),
+  clockPulseMs=REFRESHER_CLOCK_PULSE_MS,setClockTimer=(fn,ms)=>setTimeout(fn,ms),
+  clearClockTimer=id=>clearTimeout(id),
   newId=()=>crypto.randomUUID().replaceAll('-','')}={}){
   let dbPromise,turnPromise=null,registered=false,alarmHeld=false,alarmTail=Promise.resolve();
   const bootId=newId(),sentinel=createRestoreSentinel(api.storage.local);
+  let clockTimer=null,clockGeneration=0;
+  const pulse=Number.isSafeInteger(clockPulseMs)&&clockPulseMs>=1000&&clockPulseMs<=REFRESHER_CLOCK_PULSE_MS?clockPulseMs:0;
+  function stopActiveClock(){
+    clockGeneration++;
+    if(clockTimer!==null)try{clearClockTimer(clockTimer);}catch{}
+    clockTimer=null;
+  }
+  function followActiveClock(state,routes){
+    stopActiveClock();
+    if(!registered||!pulse||!browserClockGate()||!needsActiveClock(state,routes,clock()))return;
+    const generation=clockGeneration;
+    clockTimer=setClockTimer(()=>{
+      if(generation!==clockGeneration)return;
+      clockTimer=null;void tick();
+    },pulse);
+    clockTimer?.unref?.();
+  }
   const store=async()=>storeFactory(await (dbPromise ||=open().catch(e=>{dbPromise=null;throw e;})));
   async function notifyChanges(result){
     for(const change of result?.changes||[]){
@@ -341,7 +385,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     if(turnPromise)return turnPromise;
     turnPromise=(async()=>{
       try{
-        if((await sentinel.inspect()).held){await safeBreadcrumb(null,'RESTORE_HOLD');return fail('RESTORE_HOLD');}
+        if((await sentinel.inspect()).held){stopActiveClock();await safeBreadcrumb(null,'RESTORE_HOLD');return fail('RESTORE_HOLD');}
         const s=await store();
         // Passive additive migration of previously adopted public originals.
         // Independent hashing and CAS occur outside scheduler transactions;
@@ -400,7 +444,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
           }catch{/* no fake time credited on native/route failure */}
         }
         const now=clock(),result=await s.turn({now,bootId,nativeClock,qualifiedCoverages,browserClock});
-        if(!result.ok){await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return result;}
+        if(!result.ok){stopActiveClock();await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return result;}
         await schedule(result.state.nextWakeAt);
         // At most two protected reads per turn. Persistent quota/coalescing spans
         // all wake sources and both recent-list/statistics request classes.
@@ -409,6 +453,10 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         let refresh='REFRESH_ACTIVATION_HELD';
         try{refresh=await maybeRefresh(s);}catch{refresh='REFRESH_EFFECT_UNCERTAIN';}
         await notifyChanges(result);await notifyChanges(observed);
+        // Read actual post-observation state: a first feed/account read can
+        // bootstrap eligible work without keeping a dashboard or port open.
+        const settledClock=await s.read();
+        followActiveClock(settledClock?.state,browserClock?.routes||[]);
         const mutationPossible=['EFFECT_INDEPENDENTLY_PROVEN','REFRESH_EFFECT_HELD',
           'REFRESH_EFFECT_UNCERTAIN'].includes(refresh);
         await safeBreadcrumb(result,alarmHeld?'ALARM_UNVERIFIED':
@@ -419,7 +467,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
             'GUARDED_REFRESH_ENABLED':'SHADOW_ONLY',
           providerEffects:mutationPossible?'POSSIBLE_SOURCE_WRITE':
             'OFF',alarmHeld,observation:observed.code||'OBSERVED',refresh};
-      }catch{await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return fail('REFRESHER_AUTHORITY_UNAVAILABLE');}
+      }catch{stopActiveClock();await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return fail('REFRESHER_AUTHORITY_UNAVAILABLE');}
       finally{turnPromise=null;}
     })();
     return turnPromise;
@@ -480,13 +528,14 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       }
       if(message.type==='OBSERVE_NOW'){
         if(!observationGate())return fail('MONITOR_ACTIVATION_HELD');
+        const requested=await s.demandRecent(clock());if(!requested.ok)return requested;
         return tick();
       }
       let result;
       if(message.type==='SET_POLICY')result=await s.changePolicy(p.expectedRevision,p.policy);
-      if(message.type==='SET_PAUSE')result=await s.pause(p.expectedRevision,p.scope,p.target,p.paused);
+      if(message.type==='SET_PAUSE')result=await s.pause(p.expectedRevision,p.scope,p.target,p.paused,clock());
       if(message.type==='SET_GENERATOR_POLICY')result=await s.generatorPolicy(
-        p.expectedRevision,p.stableId,p.activeMs,p.sleepMs);
+        p.expectedRevision,p.stableId,p.activeMs,p.sleepMs,{useDefaults:p.useDefaults===true});
       if(message.type==='DEMAND_STATISTIC')result=await s.demand(p.expectedRevision,p.stableId,clock());
       if(message.type==='RESET_RECENT_BACKOFF')result=await s.resetRecentBackoff(p.expectedRevision,clock());
       return result?.ok?{ok:true,revision:result.revision,providerEffects:'OFF'}:result||fail('CAPABILITY_OFF');

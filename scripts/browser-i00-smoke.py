@@ -1036,6 +1036,10 @@ def main():
             else: raise RuntimeError('geckodriver did not become ready')
             # Exercise the changed operator journey first; all unchanged
             # persistent donor/source/backup suites still run after it passes.
+            from journey_refresher_ui import run as run_j05_primary
+            run_j05_primary(browser,archive,pathlib.Path(folder))
+            from journey_refresher_clock import run as run_j05_clock
+            run_j05_clock(browser,archive,pathlib.Path(folder))
             from journey_development_ui import run as run_j04_primary
             run_j04_primary(browser,archive,pathlib.Path(folder))
             from journey_development_pipeline import run as run_j04_pipeline
@@ -1247,7 +1251,7 @@ def main():
                 assert faithful['inventoryTabs']>=4 and faithful['sourceWriters']==1,faithful
                 print('B V015_TRUE_DESKTOP_PRIMARY_WORKSPACES_AND_REAL_HANDLERS=PASS',flush=True)
                 release_version=execute(after,"return {manifest:browser.runtime.getManifest().version,ui:document.documentElement.dataset.pcmsUiVersion,badge:document.querySelector('.v015-top-status')?.textContent};")
-                assert release_version.get('manifest')=='1.2.11',release_version
+                assert release_version.get('manifest')=='1.2.12',release_version
                 assert release_version.get('ui')=='0.1.5' and '0.1.5' in release_version.get('badge',''),release_version
                 print('B V015_REAL_FIREFOX_UPDATE_VERSION_AND_VISIBLE_UI_MARKER=PASS',flush=True)
                 # V016 acceptance: the PRECISE accepted prototype structure is
@@ -1271,7 +1275,7 @@ def main():
                      canonicalNative:!!document.getElementById('pcms-refresher-rows')&&
                        !!document.getElementById('pcms-release-approve')&&
                        !!document.getElementById('pcms-restore-apply')};""")
-                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.11',actual
+                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.12',actual
                 assert actual['routes']==6 and actual['visible'] and actual['nativeHidden'],actual
                 assert actual['sidebar'] and actual['primary']=='overview' and actual['styles'] and actual['canonicalNative'],actual
                 assert actual['badge']=='PCMS local · Not verified',actual

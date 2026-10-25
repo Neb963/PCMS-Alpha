@@ -1,3 +1,4 @@
+import {createRefresherWorkspace} from './refresher-workspace.mjs';
 import {matchesReviewGroup} from '../review-queue-state.mjs';
 import {renderGitInventory,mountGitPromptEditor} from './git-workspace.mjs';
 import {createSourceWorkspace} from './source-workspace.mjs';
@@ -85,7 +86,7 @@ function friendlyConnectionIssue(code){
  return messages[code]||'GitHub connection could not be verified. See the details below before retrying.';
 }
 const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',owner:'ALL',source:'ALL',total:0,items:[]},
- ref:{offset:0,limit:25,query:'',phase:'ALL',snapshot:null,items:[],total:0},
+ ref:{offset:0,limit:25,query:'',account:'',phase:'ALL',snapshot:null,items:[],total:0},
  acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],releaseCursor:'',nextRelease:null,releaseUnavailable:false,aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,readyItems:[],readyCursor:'',nextReady:null,readyMore:false,aiUnavailable:false,readyUnavailable:false,epoch:0},
  settings:'connections',settingsStatic:null,lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},
  renderEpoch:0,version:'0.1.7',readiness:null,readinessBusy:false};
@@ -118,6 +119,13 @@ const generatorSelection=createGeneratorSelection(typeof browser==='object'?brow
  get:async()=>{throw Error('STORAGE_UNAVAILABLE')},set:async()=>{throw Error('STORAGE_UNAVAILABLE')}});
 generatorSelection.subscribe(()=>updateGeneratorSelection());
 const accountWorkspace=createAccountsWorkspace({root,el,b,request:readPort,reload:()=>loadAccounts(),notify});
+const refresherWorkspace=createRefresherWorkspace({root,el,b,
+ request:(type,params)=>readPort('pcms-i12-refresher',type,params,type==='OBSERVE_NOW'?90000:16000),
+ snapshot:()=>state.ref.snapshot,reload:()=>loadRefresher(),accounts,notify,formatTime,
+ manageAccount:async id=>{try{const r=await accounts();const account=r.accounts?.find(a=>a.accountId===id);
+  if(account)accountWorkspace.open(account);else notify('This account is no longer available.');
+ }catch{notify('Account details could not be read. Other schedule controls remain available.')}}});
+
 const generatorBatches=createGeneratorBatches({root,el,b,request:readPort,accounts,
  reload:()=>loadGenerators(),manageAccount:openAccountManager,notify});
 const cleanPublication=createCleanPublicationWorkspace({root,el,b,notify,openReview:openReleaseReview,
@@ -246,112 +254,9 @@ function openDetails(kind,item){
 }
 // Primary per-generator timing and activity controls reuse exact canonical
 // Refresher revisions; they never claim a successful provider source save.
-function openGlobalRefresherPolicy(){
- const snap=state.ref.snapshot;
- if(!snap?.ok||!Number.isSafeInteger(snap.revision)){
-  notify('Current Refresher policy is not verified. Refresh before changing its timing.');return}
- const original=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('div','drawer');
- panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
- panel.setAttribute('aria-label','Refresher default timing policy');
- const close=()=>{overlay.remove();original?.isConnected&&original.focus({preventScroll:true})};
- const header=el('div','drawer-head');header.append(
-  el('h2','drawer-title','Refresher default timing'),b('Close',close));
- const body=el('div','drawer-body');
- body.append(el('p','setting-note',
-  'Default periods apply to subsequently scheduled work; per-generator overrides remain separate. The source-save policy is controlled independently.'));
- const fields=[];
- for(const [name,value] of [['Active period',snap.policy.activeMs],['Rest period',snap.policy.sleepMs]]){
-  const label=el('label','',name+' (minutes)'),input=el('input','form-input');
-  input.type='number';input.min='1';input.max='525600';input.step='1';
-  input.value=String(Math.round(value/60000));label.append(input);body.append(label);fields.push(input);
- }
- const status=el('p','setting-note','No change submitted.');
- const save=b('Save default timing',()=>void(async()=>{
-  const nums=fields.map(x=>Number(x.value));
-  if(nums.some(x=>!Number.isSafeInteger(x)||x<1||x>525600)){
-   status.textContent='Use 1 to 525,600 minutes for each period.';return}
-  if(!window.confirm('Save the default active and rest periods? Existing target overrides and verified provider receipts remain unchanged.'))return;
-  save.disabled=true;
-  try{
-   const r=await readPort('pcms-i12-refresher','SET_POLICY',{
-    expectedRevision:snap.revision,
-    policy:{activeMs:nums[0]*60000,sleepMs:nums[1]*60000}},16000);
-   status.textContent=r?.ok?'Default scheduling periods saved.':
-    'Timing could not be saved. Refresh current policy before retrying.';
-  }catch{status.textContent='Timing outcome uncertain. Reload policy before retrying.'}
-  finally{save.disabled=false;await loadRefresher()}
- })(),'btn primary');
- body.append(save,status);panel.append(header,body);overlay.append(panel);root.append(overlay);
- overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
- overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
- fields[0].focus();
-}
-function openRefresherTiming(item){
- const snap=state.ref.snapshot;
- if(!snap?.ok||!Number.isSafeInteger(snap.revision)||!item?.stableId){
-  notify('Current Refresher state is unavailable. No policy was changed.');return}
- const previous=root.activeElement,overlay=el('div','drawer-overlay'),drawer=el('div','drawer');
- drawer.setAttribute('role','dialog');drawer.setAttribute('aria-modal','true');
- drawer.setAttribute('aria-label','Manage Refresher timing for '+item.slug);
- const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
- const header=el('div','drawer-head');header.append(el('h2','drawer-title','Refresher · '+item.slug),b('Close',close));
- const body=el('div','drawer-body');
- body.append(el('p','setting-note',
-  'These timings affect subsequent scheduling periods. Already accrued activity and source-save evidence are preserved.'));
- const active=el('input','form-input'),sleep=el('input','form-input');
- for(const [control,value] of [[active,item.activeMs],[sleep,item.sleepMs]]){
-  control.type='number';control.min='1';control.max=String(365*24*60);control.step='1';
-  control.value=Number.isFinite(value)?String(Math.round(value/60000)):'';
- }
- const aLabel=el('label','','Active period (minutes)'),sLabel=el('label','','Rest period (minutes)');
- aLabel.append(active);sLabel.append(sleep);body.append(aLabel,sLabel);
- const status=el('p','setting-note','No change submitted.');status.setAttribute('role','status');
- const save=b('Save generator timing',()=>void(async()=>{
-  const m=Number(active.value),n=Number(sleep.value);
-  if(!Number.isSafeInteger(m)||!Number.isSafeInteger(n)||m<1||n<1||
-     m>525600||n>525600){
-    status.textContent='Enter active and rest periods of 1 minute to 365 days.';return;}
-  if(!window.confirm('Save this generator’s timing policy for subsequent Refresher periods?'))return;
-  save.disabled=true;
-  try{
-   const result=await readPort('pcms-i12-refresher','SET_GENERATOR_POLICY',{
-    expectedRevision:snap.revision,stableId:item.stableId,
-    activeMs:m*60000,sleepMs:n*60000},16000);
-   status.textContent=result?.ok?'Generator timing saved. Current period and remote evidence remain unchanged.':
-     'Generator timing could not be saved; state may have changed. Reload before retrying.';
-  }catch{status.textContent='Timing save outcome unconfirmed. Do not retry before refreshing state.'}
-  await loadRefresher();save.disabled=false;
- })(),'btn primary');
- const pause=b(item.paused?'Resume this generator':'Pause this generator',()=>void(async()=>{
-  const desired=!item.paused;
-  if(!window.confirm(desired?'Pause scheduling for this generator?':'Resume guarded scheduling for this generator?'))return;
-  pause.disabled=true;
-  try{
-   const result=await readPort('pcms-i12-refresher','SET_PAUSE',{
-    expectedRevision:snap.revision,scope:'GENERATOR',target:item.stableId,paused:desired},16000);
-   status.textContent=result?.ok?'Generator scheduling policy updated.':
-      'Change not confirmed. Refresh state before retrying.';
-  }catch{status.textContent='Change outcome uncertain; refresh before retrying.'}
-  await loadRefresher();pause.disabled=false;
- })(),'btn small');
- const statistic=b('Request a new statistic',()=>void(async()=>{
-  statistic.disabled=true;
-  try{
-   const result=await readPort('pcms-i12-refresher','DEMAND_STATISTIC',{
-    expectedRevision:snap.revision,stableId:item.stableId},16000);
-   status.textContent=result?.ok?
-     'A read-only statistic observation was requested; a fresh provider result is not yet confirmed.':
-     'Statistic request was not confirmed.';
-  }catch{status.textContent='Statistic request status unknown; check again.'}
-  await loadRefresher();statistic.disabled=false;
- })(),'btn small');
- const actions=el('div','form-foot');actions.append(save,pause,statistic);
- body.append(actions,status);
- drawer.append(header,body);overlay.append(drawer);root.append(overlay);
- overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
- overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
- active.focus();
-}
+function openGlobalRefresherPolicy(){refresherWorkspace.openTiming()}
+function openRefresherTiming(item){void refresherWorkspace.openGenerator(item)}
+
 function formatTime(ms){if(!Number.isFinite(ms)||ms<0)return '—';const m=Math.round(ms/60000),hours=Math.floor(m/60);return hours+'h '+String(m%60).padStart(2,'0')+'m'}
 function setTab(group,value){for(const b of page()?.querySelectorAll(group+' [role=tab]')||[]){const active=b.dataset.filter?.split(':')[1]===value;b.setAttribute('aria-selected',String(active));b.tabIndex=active?0:-1}}
 function renderEmpty(holder,message,cls='pcms-unknown'){holder?.replaceChildren(el('div',cls,message))}
@@ -414,29 +319,9 @@ function routeHandlers(){
    void loadQueue();return;
  }
  if(action==='add-account'){void startAccountEnrollment();return}
- if(action==='feed-check'){void (async()=>{
-  try{
-   const r=await readPort('pcms-i12-refresher','OBSERVE_NOW',{},90000);
-   notify(r?.ok?'Read-only observation requested. Its provider evidence will be displayed separately.':
-     'The latest protected observation could not be verified.');
-  }catch{notify('Read-only observation unavailable. Provider state remains unknown.')}
-  await loadRefresher();
- })();return}
- if(action==='edit-timing'){openGlobalRefresherPolicy();return}
- if(action==='pause-refresher'){void (async()=>{
-  const s=state.ref.snapshot;
-  if(!s?.ok||!Number.isSafeInteger(s.revision)){notify('Current Refresher revision is not verified.');return}
-  const paused=!s.globalPause;
-  if(!window.confirm(paused?'Pause scheduling across every managed generator?':
-   'Resume the scheduler, subject to every account, route, source, visibility and policy hold?'))return;
-  try{
-   const r=await readPort('pcms-i12-refresher','SET_PAUSE',{
-    expectedRevision:s.revision,scope:'GLOBAL',paused},16000);
-   notify(r?.ok?'Global Refresher pause setting saved. Remote source effects are not inferred.':
-     'Pause change could not be confirmed. Reload state before retrying.');
-  }catch{notify('Global pause outcome uncertain. Reload before another change.')}
-  await loadRefresher();
- })();return}
+ if(action==='feed-check'){void refresherWorkspace.checkNow();return}
+ if(action==='edit-timing'){refresherWorkspace.openTiming();return}
+ if(action==='pause-refresher'){void refresherWorkspace.pauseGlobal();return}
  if(action==='review-generator-selection'){openGeneratorSelection();return}
  if(action==='clear-generator-selection'){void generatorSelection.clear();return}
  if(action==='go-accounts'){routeTo('accounts');return}
@@ -446,7 +331,7 @@ function routeHandlers(){
  if(action.startsWith('check-service:')){state.settings='connections';void runReadiness(false);return}
  });
  root.addEventListener('click',event=>{const tab=event.target.closest('[data-filter]');if(tab){event.preventDefault();const [r,value]=tab.dataset.filter.split(':');if(r==='generators'){state.gen.filter=value;state.gen.offset=0;void loadGenerators()}if(r==='refresher'){state.ref.phase=value.toUpperCase();state.ref.offset=0;void loadRefresher()}if(r==='queue'){state.queue.filter=value;void loadQueue(true)}return}
- const row=event.target.closest('tr[data-item-index]');if(row){const i=Number(row.dataset.itemIndex);if(state.route==='refresher'&&state.ref.visibleItems?.[i])openDetails('ref',state.ref.visibleItems[i]);else if(state.route==='generators'&&state.gen.visibleItems?.[i])openDetails('gen',state.gen.visibleItems[i]);}
+ const row=event.target.closest('tr[data-item-index]');if(row){const i=Number(row.dataset.itemIndex);if(state.route==='refresher'&&state.ref.visibleItems?.[i])void refresherWorkspace.openGenerator(state.ref.visibleItems[i]);else if(state.route==='generators'&&state.gen.visibleItems?.[i])openDetails('gen',state.gen.visibleItems[i]);}
  });
  root.addEventListener('keydown',event=>{
   const tab=event.target.closest('.tabs [role=tab]');
@@ -470,6 +355,7 @@ function routeHandlers(){
  if(target.id==='generator-owner'){state.gen.owner=target.value;state.gen.offset=0;void loadGenerators()}
  if(target.id==='generator-source'){state.gen.source=target.value;state.gen.offset=0;void loadGenerators()}
  if(target.id==='generator-sort'){state.gen.sort=target.value;state.gen.offset=0;void loadGenerators()}
+ if(target.id==='refresher-account'){state.ref.account=target.value;state.ref.offset=0;void loadRefresher();return}
  if(target.id==='account-filter'){state.acct.filter=target.value;state.acct.page=0;displayAccounts()}
  if(target.matches('.feature-switch')){void proposeRefresherEnable(target)}
  });
@@ -484,27 +370,7 @@ function routeHandlers(){
 }
 // Native controller remains the sole authorizer. The shadow switch itself is
 // intentionally never a direct marker-source-write command.
-async function proposeRefresherEnable(switchEl){
- // A shadow switch MUST NOT submit the native multi-field policy form:
- // pending edits in its other fields could otherwise be sent accidentally.
- const before=state.lastRef?.policy?.refreshEnabled===true;
- switchEl.checked=before;
- const snapshot=state.ref.snapshot;
- if(!snapshot?.ok||!Number.isSafeInteger(snapshot.revision)){
-  notify('Current Refresher policy was not verified. No change was submitted.');return;
- }
- const next=!before;
- if(!window.confirm(next?
-  'Enable guarded Refresher source saves? Each target still requires independently verified owner, protected route, source, qualified time and safety checks. Visibility is not guaranteed.':
-  'Disable further scheduled Refresher source saves? In-flight uncertain effects remain held for reconciliation.'))return;
- try{
-  const result=await readPort('pcms-i12-refresher','SET_POLICY',{
-   expectedRevision:snapshot.revision,policy:{refreshEnabled:next}},15000);
-  notify(result?.ok?'Refresher policy recorded; source saves and recent-list visibility require separate proof.':
-    'Refresher setting was not confirmed. Reload the actual policy before retrying.');
- }catch{notify('Refresher outcome unconfirmed. Reload current state before retrying.')}
- await loadRefresher();
-}
+async function proposeRefresherEnable(control){await refresherWorkspace.enable(control)}
 
 function statusPill(label,kind=''){const p=el('span','pill'+(kind?' '+kind:''),label);return p}
 function tableRow(cells,itemIndex){const tr=el('tr');tr.tabIndex=itemIndex===0?0:-1;tr.dataset.itemIndex=String(itemIndex);tr.setAttribute('role','button');tr.setAttribute('aria-label','Inspect '+cells[0]);return tr}
@@ -721,62 +587,32 @@ function displayGenerators(){if(state.route!=='generators')return;
   for(const a of state.lastAccountList){const option=el('option','',a.alias||a.accountId);option.value=a.accountId;accountSelect.append(option)}accountSelect.value=[...accountSelect.options].some(x=>x.value===state.gen.account)?state.gen.account:'ALL';}
 }
 async function loadRefresher(){if(state.route!=='refresher')return;
- const epoch=++state.renderEpoch;const holder=shadow('.ref-table-scroll tbody');if(holder)renderEmpty(holder,'Reading canonical Refresher state…');
+ const epoch=++state.renderEpoch;
+ const holder=shadow('.ref-table-scroll tbody');
+ if(holder&&!state.ref.snapshot)rowsError('.ref-table-scroll tbody','Reading Refresher schedules…',4);
  try{
-  const phase=state.ref.phase;
-  // Backend supports phases ALL/ACTIVE/SLEEPING/WAITING. No invented HELD phase.
-  const serverPhase=['ALL','ACTIVE','SLEEPING','WAITING','HELD','INELIGIBLE'].includes(phase)?phase:'ALL';
-  const result=await refresher({query:state.ref.query,phase:serverPhase,offset:state.ref.offset,limit:state.ref.limit});
+  const result=await refresher({query:state.ref.query,accountId:state.ref.account,phase:state.ref.phase,offset:state.ref.offset,limit:state.ref.limit});
   if(epoch!==state.renderEpoch||state.route!=='refresher')return;
-  state.ref.snapshot=result;state.lastRef=result;state.ref.items=Array.isArray(result.items)?result.items:[];
-  state.ref.total=Number.isInteger(result.total)?result.total:0;state.errors.refresher='';displayRefresher();
-  void refreshRefCounts(epoch);
- }catch(err){if(epoch!==state.renderEpoch)return;state.errors.refresher=err.message;state.ref.items=[];state.ref.total=0;
- rowsError('.ref-table-scroll tbody','Refresher unavailable: '+err.message+'. No feed health inferred.',4);
- text('.ref-table-heading .muted','State unavailable');for(const x of shadow('.ref-kpi-strip')?.querySelectorAll('strong.tabnums')||[])x.textContent='—';}
+  state.ref.snapshot=result;state.lastRef=result;state.ref.items=result.items||[];
+  state.ref.total=result.total||0;state.errors.refresher='';displayRefresher();
+  void refresherWorkspace.refreshAccounts();void refreshRefCounts(epoch);
+ }catch(err){if(epoch!==state.renderEpoch)return;state.errors.refresher=err.message;
+  if(state.ref.snapshot){
+   const cached={...state.ref.snapshot,readUnavailable:true,
+    recent:{...state.ref.snapshot.recent,complete:false,stale:true},
+    items:state.ref.items.map(row=>({...row,presence:row.presence?{...row.presence,stale:true}:null}))};
+   refresherWorkspace.render(cached,state.ref);
+   text('.ref-table-heading .muted','Current schedules unavailable · previous values shown');
+   text('.ref-feed-state strong','Current observation unavailable');
+  }
+  else rowsError('.ref-table-scroll tbody','Refresher unavailable. Retry Check now or reopen this page.',4);
+ }
 }
-function displayRefresher(){if(state.route!=='refresher')return;
- const res=state.ref.snapshot;if(!res)return;
- const table=shadow('.ref-table-scroll tbody');if(!table)return;table.replaceChildren();
- const items=state.ref.items;
- state.ref.visibleItems=items;
- for(const [i,row] of items.entries()){
-  const tr=tableRow([row.slug],i);
-  const block=Array.isArray(row.blockers)&&row.blockers.length;
-  const stateName=block&&row.phase==='WAITING'?'Needs attention':row.phase==='ACTIVE'?'Active':row.phase==='SLEEPING'?'Sleeping':row.phase==='WAITING'?'Waiting':'Unknown';
-  const status=stateName==='Active'?'green':stateName==='Needs attention'?'red':'';
-  const remain=row.phase==='ACTIVE'?formatTime(row.activeRemaining):row.phase==='SLEEPING'?formatTime(row.sleepRemaining):'—';
-  const first=el('td','name-cell',row.slug);first.title=row.slug;
-  const st=el('td');st.append(statusPill(stateName,status));
-  const remaining=el('td','muted-cell tabnums',remain);const cue=el('td','open-col');cue.append(icon('chevron'));
-  tr.append(first,st,remaining,cue);table.append(tr);
- }
- if(!items.length)rowsError('.ref-table-scroll tbody','No matching locally managed generators in this fleet-wide filter. Remote status unknown.',4);
- text('.ref-table-heading .muted',safeCount(res.total)+' matching');
- const s=shadow('.ref-pagination span');if(s)s.textContent=`${res.total?state.ref.offset+1:0}–${Math.min(state.ref.offset+state.ref.limit,res.total)} of ${res.total} · canonical fleet-filtered local records`;
- const prev=shadow('[data-action="ref-prev"]'),next=shadow('[data-action="ref-next"]');if(prev)prev.disabled=state.ref.offset===0;if(next)next.disabled=state.ref.offset+state.ref.limit>=res.total;
- for(const b of shadow('.ref-tabs')?.querySelectorAll('[data-filter]')||[]){const value=b.dataset.filter.split(':')[1];b.setAttribute('aria-selected',String(value.toUpperCase()===state.ref.phase.toUpperCase()));b.tabIndex=b.getAttribute('aria-selected')==='true'?0:-1}
- const side=shadow('.ref-side');if(side){
-  const badge=side.querySelector('.ref-side-title .pill');if(badge){const enabled=res.policy?.refreshEnabled===true;badge.textContent=res.restoreHeld?'Held':enabled?'Enabled':'Off';badge.className='pill '+(enabled?'green':'')}
-  const descr=side.querySelector('.ref-setting-row .setting-description');if(descr)descr.textContent=res.policy?.refreshEnabled?'Guarded marker saves enabled':'Explicit opt-in required';
-  const toggle=side.querySelector('input.feature-switch');if(toggle){toggle.checked=res.policy?.refreshEnabled===true;toggle.disabled=res.restoreHeld===true}
-  const details=side.querySelectorAll('.ref-setting-row .setting-description');if(details[1])details[1].textContent=res.policy?`${Math.round(res.policy.activeMs/3600000)}h active / ${Math.round(res.policy.sleepMs/3600000)}h sleep`:'Not verified';
-  const pause=side.querySelector('[data-action="pause-refresher"]');if(pause){pause.textContent=res.globalPause?'Resume Refresher':'Pause Refresher';pause.disabled=res.restoreHeld===true}
-  const monitorLabels=side.querySelectorAll('.ref-monitor-row>span:first-child');
-  if(monitorLabels.length>=3){monitorLabels[1].textContent='Provider';monitorLabels[2].textContent='Scheduler';}
-  const vals=side.querySelectorAll('.ref-monitor-value');
-  // Source and feed states are always qualified observations.
-  const values=[res.recent?.complete===true?'Verified local sample':res.recent?.latestOccupancy?'Historical sample':'Not observed',
-    (res.provider?.state||'Provider unknown'),(res.monitoring||'Scheduler unknown'),res.nextWakeAt?new Date(res.nextWakeAt).toLocaleTimeString():'Unknown'];
-  [...vals].slice(0,4).forEach((v,i)=>{v.textContent=values[i];v.title=values[i]});
- }
- const feed=shadow('.ref-feed-state');if(feed){const primary=feed.querySelector('strong');const description=feed.querySelector('div span');const confirmed=res.recent?.complete===true;
-  if(primary)primary.textContent=confirmed?'Observed':'Not measured';
-  if(description)description.textContent='';
-  feed.title=confirmed?'Current local feed sample recorded':'Current feed observation unavailable';}
+function displayRefresher(){if(state.route!=='refresher'||!state.ref.snapshot)return;
+ state.ref.visibleItems=state.ref.items;refresherWorkspace.render(state.ref.snapshot,state.ref);
 }
 async function refreshRefCounts(epoch){
- const keys=['ACTIVE','SLEEPING','WAITING'];const reads=await Promise.allSettled(keys.map(p=>refresher({query:'',phase:p,offset:0,limit:1})));
+ const keys=['ACTIVE','SLEEPING','WAITING'];const reads=await Promise.allSettled(keys.map(p=>refresher({query:'',accountId:state.ref.account,phase:p,offset:0,limit:1})));
  if(epoch!==state.renderEpoch||state.route!=='refresher')return;
  const vals=shadow('.ref-kpi-strip')?.querySelectorAll('.ref-kpi strong.tabnums');if(vals)reads.forEach((r,i)=>{vals[i].textContent=r.status==='fulfilled'?safeCount(r.value.total):'—'});
 }
@@ -2093,6 +1929,7 @@ async function mount(){
  document.addEventListener('visibilitychange',refreshOnWake);
  window.addEventListener('focus',refreshOnWake);
  setInterval(()=>{if(document.visibilityState!=='hidden'&&state.route==='accounts')void loadAccounts()},2500);
+ setInterval(()=>{if(document.visibilityState!=='hidden'&&state.route==='refresher')void loadRefresher()},20000);
 }
 mount().catch(error=>{
  // Fail closed for presentation faults; never silently activate the historical

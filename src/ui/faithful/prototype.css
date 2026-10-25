@@ -379,3 +379,32 @@ body:has(.drawer-overlay:not([hidden])) #toast-root{right:min(555px,calc(100vw -
 .source-tree>.form-foot>.setting-note{grid-column:1 / -1;grid-row:1;text-align:center;white-space:normal;margin:0;padding:5px}
 .source-tree>.form-foot .btn{min-width:0;white-space:normal;width:100%}
 @media(max-width:750px){.queue-item.candidate-item{grid-template-columns:18px minmax(0,1fr)}.candidate-actions{grid-column:2;justify-content:flex-start}.page-head .head-actions{flex-wrap:wrap}}
+
+/* J05 Refresher: primary observed value and scoped policy controls. */
+.ref-secondary{display:block;font-size:11px;color:var(--muted,#64748b);margin-top:5px;line-height:1.45;overflow-wrap:anywhere;font-weight:400}
+.ref-account-tools{display:flex;flex-wrap:wrap;align-items:end;gap:10px;padding:14px 16px;border-block:1px solid var(--line,#e5e9ef)}
+.ref-account-tools label{display:flex;align-items:center;gap:8px;font-size:12px;min-width:0}
+.ref-account-tools select{width:min(280px,40vw);min-width:100px}
+.ref-account-tools .setting-note{flex-basis:100%;margin:0}
+.ref-value-card{padding:16px;display:grid;gap:10px;min-width:0}
+.ref-value{font-size:24px;font-variant-numeric:tabular-nums}
+.ref-value-card .setting-note{margin:0;line-height:1.5}
+.ref-value-card summary{cursor:pointer;font-size:12px}
+.ref-value-card ul{padding-left:16px;display:grid;gap:8px;font-size:11px}
+.ref-table-scroll td{white-space:normal;overflow-wrap:anywhere}
+.ref-table-scroll td:nth-child(3){min-width:150px}
+.ref-table-scroll td:last-child{white-space:nowrap;font-size:12px}
+.ref-table-scroll tr[role=button]{cursor:pointer}
+.ref-table-scroll tr[role=button]:focus-visible{outline:2px solid var(--accent,#327ac3);outline-offset:-3px}
+@media(max-width:1050px){.refresher-layout{grid-template-columns:minmax(0,1fr)}.ref-side{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}}
+@media(max-width:680px){.ref-side{grid-template-columns:minmax(0,1fr)}.ref-account-tools{padding:12px}.ref-account-tools label{flex-basis:100%}.ref-account-tools select{width:100%}.ref-table-scroll table{min-width:630px}}
+
+.refresher-dialog{min-width:0}.refresher-dialog .form-foot{flex-wrap:wrap;justify-content:flex-start;align-items:center}.refresher-dialog .form-foot .btn{max-width:100%;white-space:normal}.refresher-dialog .drawer-body{min-width:0}.refresher-dialog .drawer-head{display:flex;justify-content:space-between;align-items:start;gap:12px;padding-bottom:16px}.refresher-dialog .drawer-title{overflow-wrap:anywhere}.refresher-dialog .drawer-head .btn{flex-shrink:0}
+
+#page[data-view=refresher] .ref-side{overflow-y:auto;overscroll-behavior:contain;padding-right:2px;max-height:100%}
+#page[data-view=refresher] .ref-table-scroll td{white-space:normal;text-overflow:clip;overflow-wrap:anywhere}
+#page[data-view=refresher] .ref-table-scroll td.open-col{width:26px;min-width:26px;text-align:center;font-size:20px}
+.refresher-dialog .drawer-body>label{display:grid;grid-template-columns:minmax(0,1fr) 130px;gap:12px;align-items:center;margin:14px 0}
+.refresher-dialog .form-input{box-sizing:border-box;width:100%;min-width:0;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;font:inherit}
+.refresher-dialog label:has(input[type=checkbox]){display:flex;gap:10px}
+@media(max-width:600px){.refresher-dialog .drawer-body>label{grid-template-columns:minmax(0,1fr)}}

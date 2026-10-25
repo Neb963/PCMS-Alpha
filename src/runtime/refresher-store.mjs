@@ -101,45 +101,55 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
       return r.phase==='WAITING'&&(rowBlocks(s,r).length>0||r.readyUpdate===true);
     return r.phase===phase;
   };
+  const eligible=s.rows.filter(r=>r.phase==='WAITING'&&!rowBlocks(s,r).length&&!r.readyUpdate&&!r.sleepRemaining&&!r.slot).sort(queueOrder);
+  const eligiblePositions=new Map(eligible.map((r,i)=>[r.stableId,i+1]));
+  const accountCounts=new Map();for(const r of s.rows){const c=accountCounts.get(r.accountId)||{total:0,active:0,sleeping:0,waiting:0};c.total++;c[r.phase==='ACTIVE'?'active':r.phase==='SLEEPING'?'sleeping':'waiting']++;accountCounts.set(r.accountId,c);}
   const match=s.rows.filter(r=>(!query||r.slug.includes(query.toLowerCase())||
     r.accountId.includes(query.toLowerCase())||r.stableId.includes(query))&&
     (!accountId||r.accountId===accountId)&&phaseMatch(r)).sort(queueOrder);
   const items=match.slice(offset,offset+limit).map(r=>({stableId:r.stableId,slug:r.slug,
     accountId:r.accountId,sourceAuthority:r.sourceAuthority||'UNVERIFIED',
     phase:r.phase,activeRemaining:r.activeRemaining,sleepRemaining:r.sleepRemaining,
-    activeMs:r.activeMs,sleepMs:r.sleepMs,ordinal:r.ordinal,slot:r.slot,paused:r.paused,
+    activeMs:r.activeMs,sleepMs:r.sleepMs,timingOverride:r.timingOverride===true||r.timingOverride===undefined&&(r.activeMs!==s.policy.activeMs||r.sleepMs!==s.policy.sleepMs),ordinal:r.ordinal,slot:r.slot,paused:r.paused,
     blockers:[...rowBlocks(s,r),r.readyUpdate&&'READY_UPDATE_FIRST'].filter(Boolean),
     presence:r.presence?{...r.presence,stale:r.presence.observedAt>now||now-r.presence.observedAt>2*s.policy.recentMs}:null,
+    eligiblePosition:eligiblePositions.get(r.stableId)||null,
     statisticSuspended:r.metrics.suspended===true,
     refresh:{state:r.refresh?.state||'UNOBSERVED',
       awaitingVisibility:r.refresh?.awaitingVisibility===true,
       misses:r.refresh?.misses||0,
       attempts:r.refresh?.attempts||0,suspended:r.refresh?.suspended===true,
       nextAttemptAt:r.refresh?.nextAttemptAt||0,
-      proof:r.refresh?.history?.at(-1)||null},
+      proof:r.refresh?.history?.at(-1)||null,
+      sourceSavedAt:r.refresh?.savedSourceFingerprint?[...(r.refresh.history||[])].reverse().find(x=>x.effect==='EFFECT_CONFIRMED')?.at||null:null},
     metric:r.metrics.latest?{...r.metrics.latest,stale:r.metrics.latest.observedAt>now||now-r.metrics.latest.observedAt>
       s.policy.statsMaxMs}:null,nextStatisticAt:r.metrics.nextDueAt}));
   return {ok:true,revision:s.revision,
     mode:s.policy.refreshEnabled===true?'GUARDED_REFRESH_ENABLED':'SHADOW_ONLY',
     providerEffects:s.policy.refreshEnabled===true?'OPERATOR_OPT_IN_GATED':'OFF',items,
     total:match.length,occupied:s.rows.filter(r=>r.slot).length,
-    eligible:s.rows.filter(r=>r.phase==='WAITING'&&!rowBlocks(s,r).length&&!r.readyUpdate).length,
+    eligible:eligible.length,
     visibilitySuspended:s.rows.filter(r=>r.refresh?.suspended).length,
-    capacity:effectiveCapacity(s,now),provider:s.provider,globalPause:s.globalPause,
+    capacity:effectiveCapacity(s,now),capacityEvidence:{estimate:s.capacity.defensible,observedAt:s.capacity.observedAt||null,
+      samples:(s.capacity.samples||[]).length,increaseWindows:s.policy.increaseWindows,decreaseWindows:s.policy.decreaseWindows,
+      safetyCeiling:s.policy.safetyCap,manualLimit:s.policy.manualCap},provider:s.provider,globalPause:s.globalPause,
     accounts:Object.entries(s.accounts).map(([id,a])=>({accountId:id,paused:a.paused,
-      health:a.health,graceUsed:a.graceUsed})),policy:s.policy,
+      health:a.health,healthAt:a.healthAt||null,graceUsed:a.graceUsed,
+      graceRemaining:Math.max(0,s.policy.graceMs-(a.graceUsed||0)),...(accountCounts.get(id)||{total:0,active:0,sleeping:0,waiting:0})})),policy:s.policy,
     recent:{observedAt:s.recent.observedAt,total:s.recent.total,complete:s.recent.complete,
-      latestOccupancy:s.recent.latestOccupancy||null,observedSampleCount:(s.recent.samples||[]).length,
+      latestOccupancy:s.recent.latestOccupancy||null,
+      samples:Array.isArray(s.recent.samples)?s.recent.samples.slice(-12).map(x=>({at:x.at,feedSize:x.feedSize,ownedPublic:x.ownedPublic,ownedVisible:x.ownedVisible,activeVisible:x.activeVisible})):[],
+      observedSampleCount:(s.recent.samples||[]).length,
       coverage:s.recent.complete===true?'COMPLETE':'UNKNOWN',
       lastUnknownAt:s.recent.lastUnknownAt||0,
       suspended:s.recent.suspended===true,
       endpointBackoffUntil:s.recent.endpointBackoffUntil||0,
       stale:!s.recent.observedAt||s.recent.observedAt>now||now-s.recent.observedAt>2*s.policy.recentMs},
-    nextWakeAt:s.nextWakeAt,diagnostics:{...s.diagnostics},
+    nextWakeAt:s.nextWakeAt,activityObservedAt:s.browserClock?.witness?.observedAtMs||null,diagnostics:{...s.diagnostics},
     timeline:s.timeline.slice(-8),clock:'EVIDENCED_ONLY',monitoring:'GATED_READ_ONLY'};
 }
 export function createRefresherStore(db){
-  function mutate(expectedRevision,fn,{sync=false}={}){
+  function mutate(expectedRevision,fn,{sync=false,accountTarget=null}={}){
     return transact(db,'readwrite',(tx,done)=>{
       const meta=tx.objectStore('meta');
       meta.get(REFRESHER_KEY).onsuccess=e=>{
@@ -150,7 +160,7 @@ export function createRefresherStore(db){
           try{
             const merged=sync?reconcileShadow(state,canonicalRefresherInputs(records)):{ok:true,state};
             if(!merged.ok){done(merged);return;}
-            const out=fn(merged.state);
+            const out=fn(merged.state,records);
             if(!out?.ok){done(out||fail('REFRESHER_REDUCER_FAILED'));return;}
             out.state.revision=state.revision+1;
             if(!validShadow(out.state)){done(fail('REFRESHER_STATE_CORRUPT'));return;}
@@ -161,16 +171,30 @@ export function createRefresherStore(db){
             done({...out,revision:out.state.revision});
           }catch{tx.abort();}
         }
-        if(!sync){apply();return;}
-        const records=[];let seen=0;
-        meta.openCursor().onsuccess=ev=>{
-          const c=ev.target.result;
-          if(!c){apply(records);return;}
-          if(++seen>50000){done(fail('CANONICAL_SCAN_LIMIT'));return;}
-          if(typeof c.key==='string'&&/^(account|inventory|stage|release|adoption|source-link|existing-update|s05-ready):/.test(c.key))
-            records.push(c.value);
-          c.continue();
-        };
+        if(!sync){
+          if(accountTarget===null){apply();return;}
+          meta.get('account:'+accountTarget).onsuccess=ev=>apply(ev.target.result?[ev.target.result]:[]);
+          return;
+        }
+        const records=[];let seen=0,index=0;
+        // Canonical namespaces only. Unrelated immutable repair history must
+        // not exhaust the scheduler's budget or be cloned on every clock tick.
+        const prefixes=['account:','inventory:','stage:','release:','adoption:','source-link:','existing-update:','s05-ready:'];
+        function nextPrefix(){
+          if(index===prefixes.length){apply(records);return;}
+          const prefix=prefixes[index++],range=typeof IDBKeyRange==='undefined'?null:IDBKeyRange.bound(prefix,prefix+'\uffff');
+          const request=range===null?meta.openCursor():meta.openCursor(range);
+          request.onsuccess=ev=>{
+            const c=ev.target.result;
+            if(!c){nextPrefix();return;}
+            if(typeof c.key==='string'&&c.key.startsWith(prefix)){
+              if(++seen>50000){done(fail('CANONICAL_SCAN_LIMIT'));return;}
+              records.push(c.value);
+            }
+            c.continue();
+          };
+        }
+        nextPrefix();
       };
     });
   }
@@ -189,25 +213,54 @@ export function createRefresherStore(db){
   const changePolicy=(expectedRevision,changes)=>mutate(expectedRevision,s=>{
     const policy={...s.policy,...changes};
     if(!validatePolicy(policy).ok)return fail('INVALID_REFRESHER_POLICY');
-    return {ok:true,state:{...s,policy}};
+    const out=structuredClone(s);out.policy=policy;
+    if(policy.activeMs!==s.policy.activeMs||policy.sleepMs!==s.policy.sleepMs){
+      for(const row of out.rows){
+        const custom=row.timingOverride===true||row.timingOverride===undefined&&
+          (row.activeMs!==s.policy.activeMs||row.sleepMs!==s.policy.sleepMs);
+        row.timingOverride=custom;
+        if(!custom){row.activeMs=policy.activeMs;row.sleepMs=policy.sleepMs;}
+      }
+    }
+    // Inherited defaults affect later periods; already accrued budgets remain exact.
+    return {ok:true,state:out};
   });
-  const pause=(expectedRevision,scope,target,paused)=>mutate(expectedRevision,s=>{
-    if(typeof paused!=='boolean')return fail('INVALID_PAUSE');
+  const pause=(expectedRevision,scope,target,paused,now=Date.now())=>mutate(expectedRevision,(s,records)=>{
+    if(typeof paused!=='boolean'||!Number.isSafeInteger(now)||now<=0)return fail('INVALID_PAUSE');
     const out=structuredClone(s);
     if(scope==='GLOBAL')out.globalPause=paused;
-    else if(scope==='ACCOUNT'&&out.accounts[target])out.accounts[target].paused=paused;
+    else if(scope==='ACCOUNT'){
+      if(!Object.hasOwn(out.accounts,target)){
+        const account=records.find(r=>r.key==='account:'+target&&r.account?.accountId===target)?.account;
+        if(!account)return fail('PAUSE_TARGET_UNKNOWN');
+        // A local future-work preference is not an identity or route observation.
+        Object.defineProperty(out.accounts,target,{value:{paused:false,health:'UNKNOWN',
+          graceUsed:0,checkpoint:0,verifiedIdentity:false},enumerable:true,writable:true,configurable:true});
+      }
+      out.accounts[target].paused=paused;
+    }
     else if(scope==='GENERATOR'&&out.rows.some(r=>r.stableId===target))
       out.rows.find(r=>r.stableId===target).paused=paused;
     else return fail('PAUSE_TARGET_UNKNOWN');
+    // Cut the scoped interval at BOTH edges. Two observations surrounding a
+    // quick Pause/Resume must never credit the hidden paused span. Other
+    // accounts/generators retain their own independent interval checkpoints.
+    for(const row of out.rows)if(scope==='GLOBAL'||scope==='ACCOUNT'&&row.accountId===target||scope==='GENERATOR'&&row.stableId===target){
+      row.checkpoint=Math.max(row.checkpoint||0,now);
+      if(row.phase==='SLEEPING')row.restCheckpointAt=Math.max(row.restCheckpointAt||0,now);
+    }
+    for(const [id,account] of Object.entries(out.accounts))if(scope==='GLOBAL'||scope==='ACCOUNT'&&id===target)
+      account.checkpoint=Math.max(account.checkpoint||0,now);
     return {ok:true,state:out,changes:[{code:paused?'PAUSED':'RESUMED',scopeId:target||'global_scope'}]};
-  });
-  const generatorPolicy=(expectedRevision,stableId,activeMs,sleepMs)=>mutate(expectedRevision,s=>{
+  },{accountTarget:scope==='ACCOUNT'?target:null});
+  const generatorPolicy=(expectedRevision,stableId,activeMs,sleepMs,{useDefaults=false}={})=>mutate(expectedRevision,s=>{
+    if(useDefaults){activeMs=s.policy.activeMs;sleepMs=s.policy.sleepMs;}
     const policy={...s.policy,activeMs,sleepMs};
     if(!validatePolicy(policy).ok)return fail('INVALID_REFRESHER_POLICY');
     const out=structuredClone(s),r=out.rows.find(r=>r.stableId===stableId);
     if(!r)return fail('GENERATOR_UNKNOWN');
     // New policy affects subsequent full periods; unfinished budgets retained.
-    r.activeMs=activeMs;r.sleepMs=sleepMs;
+    r.activeMs=activeMs;r.sleepMs=sleepMs;r.timingOverride=!useDefaults;
     return {ok:true,state:out};
   });
   const demand=(expectedRevision,stableId,now)=>mutate(expectedRevision,s=>{
@@ -430,10 +483,17 @@ export function createRefresherStore(db){
       feedState:packet.feedState},changes:[{code:packet.effectVerified?
       'REFRESH_EFFECT_PROVEN':'REFRESH_EFFECT_HELD',scopeId:stableId}]};
   },{sync:true});
+  const demandRecent=now=>mutate(null,s=>{
+    if(!Number.isSafeInteger(now)||now<=0)return fail('OBSERVATION_TIME_INVALID');
+    const out=structuredClone(s);out.recent.nextDueAt=Math.min(out.recent.nextDueAt||0,now);
+    out.recent.operatorRequestedAt=now;
+    // Explicit observation cannot erase endpoint/account backoff or read quota.
+    return {ok:true,state:out};
+  });
   const resetRecentBackoff=(expectedRevision,now)=>mutate(expectedRevision,s=>{
     const out=structuredClone(s);out.recent.suspended=false;out.recent.failures=0;
     out.recent.nextDueAt=now+MINUTE;return {ok:true,state:out};
   });
   return Object.freeze({read,list,turn,changePolicy,pause,generatorPolicy,demand,claim,complete,
-    reserveAttempt,cancelReserved,markDispatch,settleAttempt,resetRecentBackoff});
+    reserveAttempt,cancelReserved,markDispatch,settleAttempt,demandRecent,resetRecentBackoff});
 }
