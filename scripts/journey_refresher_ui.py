@@ -21,6 +21,8 @@ def fixture(s):
     wait(s,"sh.querySelector('.ref-pagination')?.textContent.includes('1200')",'J05_REAL_1200_SCHEDULE_ROWS')
 def capture(s,name,evidence):
     time.sleep(.2);pathlib.Path('build/j05-'+name+'.png').write_bytes(base64.b64decode(b.call('GET',f'/session/{s}/screenshot')))
+    if name in ['coverage-capacity-placement','timing-pause-recovery']:
+        print('J05_SCREENSHOT_'+name+'='+base64.b64encode(pathlib.Path('build/j05-'+name+'.png').read_bytes()).decode('ascii'),flush=True)
     evidence[name]=b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;return {page:sh.querySelector('#page')?.innerText,dialog:sh.querySelector('[role=dialog]')?.innerText,width:innerWidth,overflow:document.documentElement.scrollWidth>innerWidth}")
 def confirm(s,label):button(s,label);a.alert_accept(s)
 def run(browser,archive,folder):
@@ -58,6 +60,7 @@ def run(browser,archive,folder):
         click(s,'tr[data-item-index]');wait(s,"!!sh.querySelector('[role=dialog] input')",'J05_GENERATOR_DRAWER')
         confirm(s,'Pause this generator');wait(s,"[...sh.querySelectorAll('[role=dialog] button')].some(x=>x.textContent==='Resume this generator')",'J05_GENERATOR_PAUSE_READBACK')
         confirm(s,'Resume this generator')
+        assert b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;const panel=sh.querySelector('[role=dialog]'),r=panel.getBoundingClientRect();return [...panel.querySelectorAll('.form-foot button')].every(x=>{const b=x.getBoundingClientRect();return b.left>=r.left&&b.right<=r.right})"),'J05_DRAWER_ACTIONS_HORIZONTAL_OVERFLOW'
         fill(s,'[aria-label="Active period (minutes)"]','0');button(s,'Save generator timing')
         wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('Use 1 to 525,600')",'J05_INVALID_INPUT_PRESERVED')
         fill(s,'[aria-label="Active period (minutes)"]','90');fill(s,'[aria-label="Rest period (minutes)"]','180')
@@ -85,6 +88,12 @@ def run(browser,archive,folder):
         oracle(s,'return await window.__j05.restoreHold(false)')
         oracle(s,'return await window.__j05.staleFeed()');click(s,'[data-nav=generators]');click(s,'[data-nav=refresher]')
         wait(s,"sh.querySelector('#refresher-coverage-age')?.textContent.startsWith('Historical')",'J05_UNKNOWN_FEED_IS_NOT_GREEN')
+        backoff=oracle(s,'return await window.__j05.suspendFeed()')
+        b.execute(s,"window.dispatchEvent(new Event('focus'));return true")
+        wait(s,"sh.querySelector('#refresher-resume-observations')?.hidden===false",'J05_CONTEXTUAL_OBSERVATION_RECOVERY')
+        click(s,'#refresher-resume-observations')
+        wait(s,"sh.querySelector('#refresher-resume-observations')?.hidden===true",'J05_OBSERVATION_RECOVERY_PERSISTED')
+        recovered=oracle(s)['state']['recent'];assert recovered['suspended'] is False and recovered['endpointBackoffUntil']==backoff,'J05_RECOVERY_ERASED_PROVIDER_BACKOFF'
         # Unrelated outage and absent Git did not block any local operation.
         click(s,'[data-action=feed-check]');wait(s,"sh.querySelector('[data-action=feed-check]')?.disabled===false",'J05_OBSERVATION_FAILURE_RECOVERY',90)
         capture(s,'stale-feed-isolation',evidence)

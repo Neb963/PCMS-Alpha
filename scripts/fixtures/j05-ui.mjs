@@ -53,6 +53,7 @@ export async function installRefresherFixture(){
   async restoreHold(value){if(value)await browser.storage.local.set({pcmsRestoreInProgress:{active:true}});else await browser.storage.local.remove('pcmsRestoreInProgress');return true},
   async touch(){const s=(await store.read()).state;return store.changePolicy(s.revision,{activeMs:77*60000})},
   async staleFeed(){const s=(await store.read()).state;s.recent.complete=false;s.recent.observedAt=Date.now()-1800000;s.recent.latestOccupancy.at=s.recent.observedAt;await put([{key:REFRESHER_KEY,state:s}]);return true},
+  async suspendFeed(){const s=(await store.read()).state;s.recent.suspended=true;s.recent.endpointBackoffUntil=Date.now()+300000;await put([{key:REFRESHER_KEY,state:s}]);return s.recent.endpointBackoffUntil},
   async fresh(){return controller.run({type:'GET_REFRESHER',params:{}},sender)}};
  return {ok:true,accounts:55,generators:1200};
 }

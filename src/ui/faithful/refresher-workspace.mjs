@@ -21,7 +21,7 @@ export function createRefresherWorkspace({root,el,b,request,snapshot,reload,acco
   if(q('#refresher-account'))renderAccounts(snapshot());
  }
  function dialog(label,title){
-  const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('section','drawer');
+  const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('section','drawer refresher-dialog');
   panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-label',label);
   const close=()=>{overlay.remove();if(previous?.isConnected)previous.focus({preventScroll:true})};
   const head=el('div','drawer-head'),body=el('div','drawer-body');
