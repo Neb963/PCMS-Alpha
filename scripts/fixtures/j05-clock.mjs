@@ -1,9 +1,10 @@
 // Real default-clock controller in the packaged background, disposable IDB.
 // Guarded route/feed endpoints are explicitly offline facts. No clock injection.
 export async function installRefresherClockFixture(pulseEnabled=true){
- const {openCanonicalDatabase}=await import('./pcms/journal.mjs'),{createRefresherStore}=await import('./pcms/refresher-store.mjs');
- const {emptyShadow,reconcileShadow,REFRESHER_KEY}=await import('./pcms/refresher-core.mjs');
- const {createRefresherBoundary}=await import('./pcms/refresher-boundary.mjs'),{exactSource}=await import('./pcms/staging-core.mjs');
+ const module=path=>import(browser.runtime.getURL('pcms/'+path));
+ const {openCanonicalDatabase}=await module('journal.mjs'),{createRefresherStore}=await module('refresher-store.mjs');
+ const {emptyShadow,reconcileShadow,REFRESHER_KEY}=await module('refresher-core.mjs');
+ const {createRefresherBoundary}=await module('refresher-boundary.mjs'),{exactSource}=await module('staging-core.mjs');
  const dbName='pcms-j05-clock-'+(pulseEnabled?'on':'off'),db=await openCanonicalDatabase({open:(_n,v)=>indexedDB.open(dbName,v)}),store=createRefresherStore(db);
  const read=key=>new Promise((resolve,reject)=>{const q=db.transaction('meta','readonly').objectStore('meta').get(key);q.onsuccess=()=>resolve(q.result);q.onerror=reject});
  const put=rows=>new Promise((resolve,reject)=>{const t=db.transaction('meta','readwrite');for(const r of rows)t.objectStore('meta').put(r);t.oncomplete=resolve;t.onabort=reject});
