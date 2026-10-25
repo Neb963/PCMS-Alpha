@@ -57,6 +57,16 @@ test('P51-02 F: stable Persona UID binds to fresh container and shared donor lea
   assert.equal(f.forbiddenEffects(),0);
 });
 
+test('Issue60: same-sender donor lease reuse cannot merge two independent PCMS owners or let a stale release revoke current work',async()=>{
+ const f=donorFixture(),acquire=f.shared.acquire;
+ let reused=0;f.shared.acquire=async uid=>{if(f.active.has(uid)){reused++;return {...f.active.get(uid)}}return acquire(uid)};
+ const first=await f.guard.acquireConflictGuard('aaaaaaaa');
+ assert.equal((await f.guard.acquireConflictGuard('aaaaaaaa')).code,'DONOR_LEASE_BUSY_OR_REVOKED');assert.equal(reused,0);
+ await f.guard.releaseConflictGuard(first);const second=await f.guard.acquireConflictGuard('aaaaaaaa');
+ assert.equal((await f.guard.releaseConflictGuard(first)).code,'LEASE_ALREADY_LOST');
+ assert.equal((await f.guard.inspectOwnedAction(second)).ready,true);await f.guard.releaseConflictGuard(second);
+});
+
 test('P51-02 F negative: revocation, route drift, container rotation and no Direct fallback',async()=>{
   const f=donorFixture();
   const owned=await f.guard.acquireConflictGuard('aaaaaaaa');

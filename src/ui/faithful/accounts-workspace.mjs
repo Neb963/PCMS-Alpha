@@ -24,7 +24,7 @@ const ERRORS={ACCOUNT_BUSY:'This account is finishing another action. Other acco
  ACCOUNT_ARCHIVED:'Reactivate this account before resuming its managed work.'};
 export function accountNeedsAttention(a){
  if(a.state==='ARCHIVED'||a.removed)return false;
- return a.state!=='VERIFIED'||a.protectedRoute!=='PCMS_PINNED'||a.route?.status!=='PINNED';
+ return a.state!=='VERIFIED'||a.protectedRoute!=='PCMS_PINNED'||a.route?.status!=='PINNED'||a.readiness?.ready===false;
 }
 export const accountLabel=a=>a.removed?'Removed':
  a.state==='PREPARING'&&a.setup?.phase==='HELD'?'Setup needs attention':
@@ -46,10 +46,11 @@ export function accountActions(a){
 }
 export function accountCommandBlocked(a,kind){
  if(!a.working)return false;
+ if(kind==='OPEN_LOGIN'&&['SYNC','CONFIRM'].includes(a.activity?.kind))return false;
  return !(a.activity?.cancellable===true&&['OPEN_LOGIN','CONFIRM_LOGIN','VERIFY_ROUTE','CHANGE_ROUTE','SYNC_ACCOUNT'].includes(kind));
 }
 const date=value=>Number.isFinite(value)&&value>0?new Date(value).toLocaleString():'Not yet observed';
-const title=a=>'Account '+String(a.accountId).slice(-8);
+const title=a=>a.alias||'Account '+String(a.accountId).slice(-8);
 const explain=out=>out?.message||ERRORS[out?.code]||('The action could not be completed ('+String(out?.code||'unavailable').toLowerCase().replaceAll('_',' ')+').');
 export function createAccountsWorkspace({root,el,b,request,reload,notify}){
  let panel=null;
@@ -144,12 +145,12 @@ export function createAccountsWorkspace({root,el,b,request,reload,notify}){
    set(stateLine,current.removed?'Removed locally. Preserved records remain available for recovery.':
     current.state==='ARCHIVED'?'Archived. Reactivate to verify and resume.':current.message||
     (current.working?'Working on this account…':current.state==='INVENTORY_PENDING'?'Login confirmed. Synchronize inventory to finish setup.':
-    current.state==='VERIFIED'?'Ready for managed work.':current.state==='ARCHIVED'?'Archived. Reactivate to verify and resume.':
+    current.state==='VERIFIED'?(current.readiness?.ready===false?'Verify this account’s protected route to resume managed work.':'Ready for managed work.'):current.state==='ARCHIVED'?'Archived. Reactivate to verify and resume.':
     current.state==='PREPARING'?'Preparing its protected Persona and route.':'Open Perchance, complete login or a challenge, then confirm login.'));
    const allowed=accountActions(current);
    const incompatible=current.working===true&&current.activity?.cancellable!==true;
    for(const [kind,button] of buttons){button.hidden=!allowed.includes(kind);
-    button.disabled=kind==='ARCHIVE'?activeCommands.has('ARCHIVE'):(busy||accountCommandBlocked(current,kind)||kind==='OPEN_LOGIN'&&!current.personaUid);
+    button.disabled=kind==='ARCHIVE'?activeCommands.has('ARCHIVE'):(activeCommands.has(kind)||(busy&&kind!=='OPEN_LOGIN')||accountCommandBlocked(current,kind)||kind==='OPEN_LOGIN'&&!current.personaUid);
     if(kind==='VERIFY_ROUTE')set(button,current.route?.status==='PINNED'?'Verify route':'Retry route check');
    }
    override.hidden=!allowed.includes('MANUAL_OVERRIDE');saveOverride.disabled=busy||incompatible||!acknowledge.checked;
@@ -176,7 +177,7 @@ export function createAccountsWorkspace({root,el,b,request,reload,notify}){
    finally{connection.disabled=false;}
   }
   async function act(kind,extra={}){
-   if(activeCommands.has(kind)||busy&&kind!=='ARCHIVE')return;
+   if(activeCommands.has(kind)||busy&&!['ARCHIVE','OPEN_LOGIN'].includes(kind))return;
    if(kind==='ARCHIVE'&&!window.confirm('Archive this account and pause its managed work? Its Persona, generators, source and history are kept.'))return;
    if(kind==='REPLACE_PERSONA'&&!window.confirm('Repair a missing Persona? Its replacement requires login with the same account.'))return;
    if(kind==='MANUAL_OVERRIDE'&&extra.acknowledgeLimitedAuthority!==true)return;

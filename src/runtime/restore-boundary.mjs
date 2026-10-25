@@ -1,6 +1,7 @@
 import {restoredTargetBindings} from './restore-identities.mjs';
 import {donorPreparationReceipt,observeDonorPreparation,checkpointCanonicalBaseline,donorBaselineReceipt,observeDonorBaseline,restoredAutomationHistory,canonicalWithAutomationHistory} from './restore-observation.mjs';
 import {collectPortableLocal,splitPortableLocal,preparePortableLocalRestore} from './portable-local.mjs';
+import {restoreNativeReceipt} from './native-receipts.mjs';
 // I16: one guarded local restore command. A resume NEVER redispatches a step.
 // No provider/API calls or fresh-controller activation. Source/checkpoint secrets
 // exist only in the caller's live extension port and this invocation.
@@ -279,12 +280,16 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           ...(incomingLocal!==null?{local:await digest(JSON.stringify(localPatch))}:{})};
         await step('donor-portable',portableOperation,
           async()=>{
-            if(Object.keys(portableValues).length)await api.storage.local.set(portableValues);
+            const ordinary=Object.fromEntries(Object.entries(portableValues).filter(([key])=>!key.startsWith('personaMullvadPendingPrepare:')));
+            if(Object.keys(ordinary).length)await api.storage.local.set(ordinary);
+            for(const [key,value] of Object.entries(portableValues))if(key.startsWith('personaMullvadPendingPrepare:'))
+              await restoreNativeReceipt(api.storage.local,key,value);
           },
           async fp=>{
             const got=await api.storage.local.get(Object.keys(portableValues));
             return {source:'INDEPENDENT_READBACK',
-              digest:Object.keys(portableValues).every(k=>same(got[k],portableValues[k]))?fp:'0'.repeat(64)};
+              digest:Object.keys(portableValues).every(k=>k.startsWith('personaMullvadPendingPrepare:')?
+                got[k]!==undefined:same(got[k],portableValues[k]))?fp:'0'.repeat(64)};
           });
         preparedCanonical=prepareRestoredCanonical({incoming:canonicalWithAutomationHistory(incomingPcms,history,intent.epoch),
           current:baseline.pcms,mode,uidRemap:remaps,targetBindings:restoredTargetBindings(preparedDonor.sourcePersonas),fresh,accountChoices});

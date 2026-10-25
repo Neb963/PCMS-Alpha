@@ -31,6 +31,9 @@ test('Issue60: bare/contradictory preflight labels never prove no dispatch or au
   [{...op,firstFailure:undefined},linked,[]],
   [op,[],[]],[op,[...linked,...linked],[]],
   [op,linked,[{stage:'SUPPLY_CREATE_DISPATCH_POSSIBLE'}]],
+  [op,linked,[{stage:'SUPPLY_CREATE_DISPATCH'}]],
+  [op,linked,[{stage:'PROVIDER_REQUEST_SENT'}]],
+  [op,linked,[{stage:'FUTURE_UNKNOWN_EVENT'}]],
   [op,[{batch,item:{...item,ack:{classification:'UNKNOWN'}}}],[]],
   [{...op,remoteId:'already_effected'},linked,[]],
  ]){

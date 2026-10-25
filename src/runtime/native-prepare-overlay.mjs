@@ -1,5 +1,6 @@
 // Build-copy native effect receipts. No OS service changes or new host.
 export function repairNativePrepare(source){
+ source='import {withNativeReceiptLock} from "../pcms/native-receipts.mjs";\n'+source;
  const once=(before,after)=>{if(source.split(before).length!==2)throw Error('NATIVE_PREPARE_ANCHOR_MISMATCH');source=source.replace(before,after)};
  once('export function nativeRequest(command, payload = {}, timeoutMs = 45000) {',
   'export function nativeRequest(command, payload = {}, timeoutMs = 45000, onLateReply = null) {');
@@ -28,8 +29,10 @@ function uncertainPrepare(){
   error.nativeOutcomeUncertain=true;return error;
 }
 async function settlePrepare(key,nonce){
-  const saved=(await browser.storage.local.get(key))[key];
-  if(saved?.nonce===nonce)await browser.storage.local.remove(key);
+  await withNativeReceiptLock(key,async()=>{
+    const saved=(await browser.storage.local.get(key))[key];
+    if(saved?.nonce===nonce)await browser.storage.local.remove(key);
+  });
 }
 export function prepareExit(route, start = true, forwarderToken){
   const key=PREPARE_PREFIX+route.id;
@@ -38,18 +41,19 @@ export function prepareExit(route, start = true, forwarderToken){
   if(prior)return prior.fingerprint===fingerprint?prior.promise:Promise.reject(uncertainPrepare());
   const promise=(async()=>{
     // Pre-dispatch receipt contains no credential and survives a cold restart.
-    let saved;
-    try{saved=(await browser.storage.local.get(key))[key];}catch{throw uncertainPrepare();}
-    if(saved?.phase==='PREPARED')await settlePrepare(key,saved.nonce);
-    else if(saved)throw uncertainPrepare();
     const nonce=crypto.randomUUID();
     const receipt={schema:2,phase:'PREPARED',nonce,routeId:route.id,relayIp:route.host,relayPort:Number(route.port||1080),password:forwarderToken,createdAtMs:Date.now()};
     try{
+     await withNativeReceiptLock(key,async()=>{
+      const saved=(await browser.storage.local.get(key))[key];
+      if(saved?.phase==='PREPARED')await browser.storage.local.remove(key);
+      else if(saved)throw uncertainPrepare();
       await browser.storage.local.set({[key]:receipt});
       await browser.storage.local.set({[key]:{...receipt,phase:'DISPATCH_POSSIBLE'}});
+     });
     }
     catch{const error=uncertainPrepare();error.nativeNoDispatch=true;throw error;}
-    const valid=reply=>reply?.ok!==false&&reply?.route_id===route.id&&
+    const valid=reply=>reply?.ok===true&&reply.ready===true&&reply?.route_id===route.id&&
       reply.relay_ip===route.host&&Number(reply.relay_port)===Number(route.port||1080)&&
       reply.local_host==="127.0.0.1"&&Number.isInteger(reply.local_port)&&reply.local_port>0&&reply.local_port<=65535;
     try{
@@ -91,22 +95,39 @@ export async function settleObservedPreparation(candidate){
 }`+source.slice(end);
  once('export function releaseExit(routeId) { return nativeRequest("release_exit", { route_id: routeId }, 6000); }',
   `export async function releaseExit(routeId) {
-    if((await browser.storage.local.get(PREPARE_PREFIX+routeId))[PREPARE_PREFIX+routeId])throw uncertainPrepare();
-    return nativeRequest("release_exit",{route_id:routeId},6000);
+    const key=PREPARE_PREFIX+routeId,nonce=crypto.randomUUID();
+    await withNativeReceiptLock(key,async()=>{
+      if((await browser.storage.local.get(key))[key])throw uncertainPrepare();
+      await browser.storage.local.set({[key]:{schema:2,phase:'DISPATCH_POSSIBLE',operation:'RELEASE',routeId,nonce,createdAtMs:Date.now()}});
+    });
+    const valid=reply=>reply?.ok===true&&typeof reply.released==='boolean';
+    try{
+      const reply=await nativeRequest("release_exit",{route_id:routeId},6000,async late=>{
+        if(valid(late))try{await settlePrepare(key,nonce);}catch{}
+      });
+      if(!valid(reply))throw uncertainPrepare();
+      await settlePrepare(key,nonce);return reply;
+    }catch(error){
+      if(error.nativeNotSent===true||(error.nativeReply===true&&!/timed out|disconnect|no response|returned no response/i.test(String(error.message)))){
+        await settlePrepare(key,nonce);throw error;
+      }
+      throw uncertainPrepare();
+    }
   }`);
  return source;
 }
 export function repairMullvadRuntime(source){
+ const once=(before,after)=>{if(source.split(before).length!==2)throw Error('NATIVE_RUNTIME_ANCHOR_MISMATCH');source=source.replace(before,after)};
  const before='        try { await operations.releaseExit?.(route.id); } catch {}\n        const message = String(error?.message || error);';
  if(source.split(before).length!==2)throw Error('NATIVE_UNCERTAINTY_ANCHOR_MISMATCH');
- let result=source.replace(before,
-  '        if(error?.nativeOutcomeUncertain!==true&&error?.nativeNoDispatch!==true&&error?.nativeNotSent!==true)try { await operations.releaseExit?.(route.id); } catch {}\n        const message = String(error?.message || error);')
-  .replace('          ready: false,\n          error: message','          ready: false,\n          preparationHeld: error?.nativeOutcomeUncertain===true||error?.nativeNoDispatch===true,\n          error: message');
- result=result.replace('  async function resolve(route) {','  async function resolve(route,{fresh=false}={}) {')
-  .replace('if (cached && now() - cached.at < 8000) {','if (!fresh && cached && now() - cached.at < 8000) {');
+ once(before,
+  '        if(error?.nativeOutcomeUncertain!==true&&error?.nativeNoDispatch!==true&&error?.nativeNotSent!==true)try { await operations.releaseExit?.(route.id); } catch {}\n        const message = String(error?.message || error);'
+ );
+ once('          ready: false,\n          error: message','          ready: false,\n          preparationHeld: error?.nativeOutcomeUncertain===true||error?.nativeNoDispatch===true,\n          error: message');
+ once('  async function resolve(route) {','  async function resolve(route,{fresh=false}={}) {');
+ once('if (cached && now() - cached.at < 8000) {','if (!fresh && cached && now() - cached.at < 8000) {');
  const anchor='        let forwarderToken = cachedTokenIsFresh ? cached.route.password : createForwarderToken();\n        let tokenCreatedAt = cachedTokenIsFresh ? cached.tokenCreatedAt : now();';
- if(result.split(anchor).length!==2)throw Error('NATIVE_FRESH_TOKEN_ANCHOR_MISMATCH');
- result=result.replace(anchor,`        const existing=(bridgeStatus.active_exits||[]).filter(e=>e.route_id===route.id&&e.relay_ip===route.host&&Number(e.relay_port)===Number(route.port||1080)&&
+ once(anchor,`        const existing=(bridgeStatus.active_exits||[]).filter(e=>e.route_id===route.id&&e.relay_ip===route.host&&Number(e.relay_port)===Number(route.port||1080)&&
           e.local_host==="127.0.0.1"&&e.local_port===cached?.route?.port);
         const pending=bridgeStatus.pending_prepare_routes||[];
         if(cachedTokenIsFresh&&bridgeStatus.ready===true&&existing.length===1&&!pending.includes(route.id)&&!pending.includes("OBSERVATION_UNAVAILABLE")){
@@ -116,12 +137,18 @@ export function repairMullvadRuntime(source){
         // later proves that THIS uncertain operation reached its last mutation.
         let forwarderToken = createForwarderToken();
         let tokenCreatedAt = now();`);
- result=result.replace('    const tabs = await browserApi.tabs.query({});',
+ once('    const tabs = await browserApi.tabs.query({});',
   '    if(inFlight.size||(await operations.getStatus()).pending_prepare_routes?.length)return false;\n    const tabs = await browserApi.tabs.query({});');
- result=result.replace('  return { resolve, refreshStatus, maybeStopIdle, clear, drop, setStatus, getStatus };',
-  `  function acceptObservedPreparation(route,prepared,password,tokenCreatedAt){
+ once('      await operations.stopTunnel();\n      routes.clear();','      clear();\n      await operations.stopTunnel();');
+ once('  return { resolve, refreshStatus, maybeStopIdle, clear, drop, setStatus, getStatus };',
+  `  function recoveryGeneration(routeId){return {routeId,lifecycle:lifecycleGeneration,route:routeGenerations.get(routeId)||0};}
+  function recoveryCurrent(generation){return !!generation&&generation.lifecycle===lifecycleGeneration&&
+    generation.route===(routeGenerations.get(generation.routeId)||0)&&!inFlight.has(generation.routeId);}
+  function acceptObservedPreparation(route,prepared,password,tokenCreatedAt,generation){
+    if(generation?.routeId!==route.id||!recoveryCurrent(generation))return false;
     routes.set(route.id,{route:materialize(route,prepared,password),at:now(),tokenCreatedAt});
+    return true;
   }
-  return { resolve, refreshStatus, maybeStopIdle, clear, drop, setStatus, getStatus, acceptObservedPreparation };`);
- return result;
+  return { resolve, refreshStatus, maybeStopIdle, clear, drop, setStatus, getStatus, recoveryGeneration,recoveryCurrent,acceptObservedPreparation };`);
+ return source;
 }

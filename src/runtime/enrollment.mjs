@@ -68,7 +68,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       if(prior.kind===kind)return prior.promise;
       // Human intent cancels only automatic observation. Keep ownership
       // until the donor actually settles, including any native preparation.
-      if(prior.kind==='ROUTE:false:true'&&['CONFIRM','SYNC','OPEN_LOGIN','ROUTE:false:false','ROUTE:true:false'].includes(kind)){
+      if(['ROUTE:false:true','CONFIRM:auto'].includes(prior.kind)&&['CONFIRM','SYNC','OPEN_LOGIN','ROUTE:false:false','ROUTE:true:false'].includes(kind)){
         prior.controller.abort();
         return prior.promise.then(()=>exclusive(accountId,kind,task));
       }
@@ -523,7 +523,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     }
     return {ok:true,held,providerEffects:'NONE'};
   }
-  return Object.freeze({
+  const api=Object.freeze({
     recoverInterrupted,
     remove:(accountId,expectedRevision,options)=>exclusive(accountId,'REMOVE:'+String(expectedRevision)+':'+String(options?.deletePersona===true),
       ()=>remove(accountId,expectedRevision,options)),
@@ -548,7 +548,14 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
           'ACCOUNT_IDENTITY_UNVERIFIED','ACCOUNT_NOT_VERIFIED'].includes(out?.code))return confirm(accountId);
       return out||fail('INVENTORY_UNAVAILABLE');
     }),
-    openLogin:accountId=>exclusive(accountId,'OPEN_LOGIN',async()=>{
+    openLogin:accountId=>{
+      const task=running.get(accountId);
+      // Accept the human command while a bounded account read is finishing,
+      // then use ordinary donor admission after its control lease releases.
+      // Never open through or revoke that read's (possibly shared) lease.
+      if(!archiving.has(accountId)&&['SYNC','CONFIRM'].includes(task?.kind))
+        return task.promise.then(()=>api.openLogin(accountId));
+      return exclusive(accountId,'OPEN_LOGIN',async()=>{
       const got=await accounts.get(accountId);if(!got.ok)return got;
       const a=got.account;if(a.state==='ARCHIVED')return fail('ACCOUNT_ARCHIVED');
       // Existing valid donor admission opens immediately. An uncertain tab
@@ -557,7 +564,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       if(opened?.ok||!['PROTECTED_ROUTE_NOT_PINNED','PROTECTED_ROUTE_UNVERIFIED','PROTECTED_ROUTE_UNAVAILABLE'].includes(opened?.code))return opened;
       const route=await verifyRoute(accountId);if(!route.ok)return route;
       return openLogin(a.personaUid);
-    }),
+    });},
     verifyRoute:(accountId,options)=>exclusive(accountId,'ROUTE:'+String(options?.change===true)+':'+String(options?.automatic===true),()=>verifyRoute(accountId,options)),
     reactivate:(accountId,rev)=>exclusive(accountId,'REACTIVATE',()=>reactivate(accountId,rev)),
     upgrade:accountId=>exclusive(accountId,'UPGRADE',()=>upgrade(accountId)),
@@ -580,7 +587,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
           return;
         }
         if(a.state==='INVENTORY_PENDING'||a.state==='VERIFIED'&&await inventoryNeeded(id)){
-          results.push(await exclusive(id,'CONFIRM',()=>confirm(id,{silent:true,automatic:true})));
+          results.push(await exclusive(id,'CONFIRM:auto',()=>confirm(id,{silent:true,automatic:true})));
         }else if(a.state==='PREPARING'){
           if(typeof a.bindingId==='string'&&(a.setup?.phase!=='HELD'||TRANSIENT.has(a.setup?.code)))
             results.push(await exclusive(id,'SETUP',()=>prepare(id)));
@@ -610,8 +617,9 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     activity:accountId=>{
       const task=running.get(accountId);
       return archiving.has(accountId)?{kind:'ARCHIVE',automatic:false,cancellable:false}:
-        task?{kind:task.kind,automatic:task.kind==='ROUTE:false:true',cancellable:task.kind==='ROUTE:false:true',startedAt:task.startedAt}:null;
+        task?{kind:task.kind,automatic:['ROUTE:false:true','CONFIRM:auto'].includes(task.kind),cancellable:['ROUTE:false:true','CONFIRM:auto'].includes(task.kind),startedAt:task.startedAt}:null;
     },
     running:accountId=>running.has(accountId)||archiving.has(accountId)
   });
+  return api;
 }

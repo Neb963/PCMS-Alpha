@@ -220,7 +220,7 @@ export function createCanonicalStore(db) {
     return transact(db,['operations','meta','events'],'readonly',(tx,finish)=>{
       tx.objectStore('operations').get(operationId).onsuccess=e=>{
         const op=e.target.result;if(!op){finish(fail('OPERATION_NOT_FOUND'));return;}
-        const links=[],events=[];
+        const links=[],events=[],inventory=[],eventStages=new Set();
         tx.objectStore('meta').openCursor().onsuccess=e=>{
           const row=e.target.result;
           if(row){
@@ -228,12 +228,13 @@ export function createCanonicalStore(db) {
               const batch=row.value.batch;
               for(const item of batch.items||[])if(item.itemId===op.targetId)links.push({batch,item});
             }
+            if(row.value?.generator?.ownerState==='OBSERVED_OWNER')inventory.push({slug:row.value.generator.slug,accountId:row.value.generator.accountId,ownerState:'OBSERVED_OWNER'});
             row.continue();return;
           }
           tx.objectStore('events').openCursor().onsuccess=e=>{
             const cursor=e.target.result;
-            if(cursor){if(cursor.value?.operationId===operationId)events.push({stage:cursor.value.stage});cursor.continue();return;}
-            finish(ok({context:projectOperationContext(op,links,events),providerEffects:'NONE'}));
+            if(cursor){if(cursor.value?.operationId===operationId&&!eventStages.has(cursor.value.stage)){eventStages.add(cursor.value.stage);events.push({stage:cursor.value.stage});}cursor.continue();return;}
+            finish(ok({context:projectOperationContext(op,links,events,inventory),providerEffects:'NONE'}));
           };
         };
       };

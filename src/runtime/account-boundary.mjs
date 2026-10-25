@@ -150,6 +150,11 @@ export function createAccountBoundary(api,{
     const p=message.params||{};
     try {
       const g=guard();
+      const cachedReadiness=async a=>{
+        if(typeof g?.getSafeRouteReadiness!=='function'||!a.personaUid||a.state==='ARCHIVED'||a.removed)return null;
+        try{const out=await g.getSafeRouteReadiness(a.personaUid);return {ready:out?.ready===true};}
+        catch{return {ready:false};}
+      };
       // Local records are readable while PersonaMonkey is still starting.
       if(!g&&!['LIST_ACCOUNTS','INSPECT_ACCOUNT','ARCHIVE','MANUAL_OVERRIDE','ACK_LOGIN'].includes(message.type))return fail('GUARD_NOT_READY');
       if(message.type==='LIST_PERSONAS')return {ok:true,personas:await g.listAvailablePersonas()};
@@ -181,6 +186,7 @@ export function createAccountBoundary(api,{
         projection.account.working=f?.running(a.accountId)===true;
         projection.account.activity=f?.activity(a.accountId)||null;
         projection.account.message=accountCurrentMessage(a);
+        projection.account.readiness=await cachedReadiness(a);
         return projection;
       }
       if(message.type==='LIST_ACCOUNTS') {
@@ -188,10 +194,10 @@ export function createAccountBoundary(api,{
         const out=await (await store()).list();
         const f=await flow();
         const inventory=await createInventoryStore(await connection()).accountSummaries().catch(()=>null);
-        return out.ok?{ok:true,accounts:out.accounts.map(a=>({...publicAccount(a),
+        return out.ok?{ok:true,accounts:await Promise.all(out.accounts.map(async a=>({...publicAccount(a),
           inventory:inventory?.summaries?.[a.accountId]||null,
           working:f?.running(a.accountId)===true,
-          activity:f?.activity(a.accountId)||null,message:accountCurrentMessage(a)})),
+          activity:f?.activity(a.accountId)||null,message:accountCurrentMessage(a),readiness:await cachedReadiness(a)}))),
           truncated:out.truncated,held:restore.held,holdCode:restore.code,
           enrollment:f?'AVAILABLE':'DONOR_UNAVAILABLE'}:out;
       }

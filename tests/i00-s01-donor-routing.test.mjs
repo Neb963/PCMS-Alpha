@@ -148,7 +148,7 @@ function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=fal
     },
     fetchMullvadRelays:relayRead|| (async()=>relays),
     mullvadRuntime:{resolve:async r=>nativeError==='HOST'?null:r,drop:id=>effects.push('DROP:'+id),
-      getStatus:()=>({}),
+      getStatus:()=>({}),recoveryGeneration:routeId=>({routeId}),
       refreshStatus:async()=>nativeStatus||(nativeError==='HOST'?{installed:false}:{installed:true,compatible:true,ready:true,interface_up:true,base_proxy_reachable:true,base_route_bound:true})},
     async fetchJsonThroughRouteTest(_iso,_route,url){
       effects.push('PROBE:'+new URL(url).hostname.split('.')[0]);

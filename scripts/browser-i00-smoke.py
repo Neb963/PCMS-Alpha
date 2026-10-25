@@ -1038,6 +1038,11 @@ def main():
             # Exercise the changed operator journey first; all unchanged
             # persistent donor/source/backup suites still run after it passes.
             completed=[]
+            # Issue60 uses real authenticated SOCKS/TLS and the actual donor,
+            # page readers, canonical stores and UI on a persistent upgrade.
+            # Native/provider protocols remain explicit offline fixtures.
+            from journey_integration_recovery import run as run_issue60
+            run_issue60(browser,archive,pathlib.Path(folder))
             def journey(name,runner):
                 runner(browser,archive,pathlib.Path(folder))
                 completed.append(name)

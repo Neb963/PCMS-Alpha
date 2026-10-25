@@ -2,7 +2,7 @@
 // Native Messaging is the sole dependency substituted here. All registered
 // production ports, stores, donor routes, proxy listeners and page readers run.
 export async function installIssue60NativeFixture({url,key}){
- const nativeFetch=globalThis.fetch.bind(globalThis);
+ const nativeFetch=window.fetch.bind(window);
  const event=()=>{const listeners=new Set();return {addListener:f=>listeners.add(f),removeListener:f=>listeners.delete(f),emit:m=>{for(const f of [...listeners])f(m)}}};
  browser.runtime.connectNative=name=>{
   if(name!=='com.persona.mullvad_router')throw Error('FIXTURE_UNEXPECTED_NATIVE_HOST');
@@ -13,7 +13,7 @@ export async function installIssue60NativeFixture({url,key}){
     }catch{if(!closed){closed=true;port.onDisconnect.emit()}}
    })}};return port;
  };
- const {openCanonicalDatabase}=await import('./journal.mjs');
+ const {openCanonicalDatabase}=await import(browser.runtime.getURL('pcms/journal.mjs'));
  const db=await openCanonicalDatabase();
  const read=async name=>new Promise(resolve=>{const rows=[],r=db.transaction([name],'readonly').objectStore(name).openCursor();
   r.onsuccess=e=>{const row=e.target.result;if(!row)return resolve(rows);rows.push(row.value);row.continue()}});
@@ -43,11 +43,6 @@ export async function installIssue60NativeFixture({url,key}){
    m.put({key:'account:'+a.accountId,account:{...a,setup:{phase:'COMPLETE',code:'MULLVAD_LOCAL_SERVICE_UNAVAILABLE'}}});
    await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=reject});
    return {batchId,operationId};
-  },
-  async expireForwarderCache(){
-   // An actual cold process restart is used by the Python controller; this
-   // helper intentionally has no cache-clearing or routing authority.
-   return {supported:false};
   },
   async corruptPending(routeId){
    const key='personaMullvadPendingPrepare:'+routeId;

@@ -63,7 +63,9 @@ export async function perchanceSupplyIsolated(request) {
       const manifestVerified=manifest!==null&&typeof manifest==='object'&&
         (Array.isArray(manifest)?
           manifest.length===0:
-          Object.getPrototypeOf(manifest)===Object.prototype&&
+          (Object.getPrototypeOf(manifest)===Object.prototype||
+           (Object.prototype.toString.call(manifest)==='[object Object]'&&
+            Object.getPrototypeOf(manifest)!==null&&Object.getPrototypeOf(Object.getPrototypeOf(manifest))===null))&&
           Object.keys(manifest).length===0);
       if(owner.status!=='is-owner'||page.status!=='success'||!page.generator||
          page.generator.name!==name||page.generator.isPrivate!==true||
@@ -102,7 +104,7 @@ export async function perchanceSupplyIsolated(request) {
     }
     if(request.kind==='READ_CREATE') {
       const checked=await read(request.temporarySlug);
-      if(!checked.ok)return hold('CREATE_READBACK_UNVERIFIED');
+      if(!checked.ok)return hold(checked.code||'CREATE_READBACK_UNVERIFIED');
       return sameSession()?{ok:true,source:'INDEPENDENT_READBACK',
         temporarySlug:request.temporarySlug,remoteId:checked.remoteId,
         ownerMatches:true,privateEmpty:true}:hold('SESSION_CHANGED');

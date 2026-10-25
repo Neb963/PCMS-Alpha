@@ -44,7 +44,7 @@ export function collectPortableLocal(local={}){
   }else if(/^personaMullvadPendingPrepare:[a-zA-Z0-9_-]{1,100}$/.test(key)&&value&&[1,2].includes(value.schema)){
    // Native credentials are machine-local and short lived. Preserve the
    // unresolved effect metadata, never its authentication secret.
-   out[key]=fields(value,['schema','phase','nonce','routeId','relayIp','relayPort','createdAtMs']);
+   out[key]=fields(value,['schema','phase','operation','nonce','routeId','relayIp','relayPort','createdAtMs']);
   }else if(key==='pcmsUiGeneratorSelectionV1'){
    out[key]={schema:1,items:(value?.items||[]).map(r=>fields(r,['slug','accountId','revision']))};
   }else if(key==='pcmsR4FolderIdentityReviews'&&Array.isArray(value))out[key]=value.map(r=>fields(r,renameFields));

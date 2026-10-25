@@ -22,7 +22,8 @@ class Oracle:
         self.tls=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);self.tls.load_cert_chain(cert,key)
         self.exits={};self.native=[];self.auth=[];self.effects=[];self.requests=[];self.resources={}
         self.helper_down=False;self.proxy_down=False;self.inventory_unknown={2};self.lost_prepare=set();self.lost_create=False
-        self.sequence=0;self.wrong_exit=None
+        self.sequence=0;self.wrong_exit=None;self.ipv6_unverified=set();self.connections=set()
+        self.delay_inventory=False;self.inventory_started=threading.Event();self.inventory_release=threading.Event();self.inventory_release.set()
         for owner,count in [(0,2),(1,1),(2,1)]:
             for i in range(count):
                 name=f'issue60-existing-{owner}-{i}';self.resources[name]=self.generator(name,owner,'original source '+name)
@@ -80,7 +81,8 @@ class Oracle:
                     password=read_exact(stream,read_exact(stream,1)[0]).decode()
                     with oracle.lock:
                         route=oracle.exits.get(route_id);accepted=bool(route and not oracle.proxy_down and username==b'persona' and password==route['password'])
-                        oracle.auth.append({'route':route_id,'accepted':accepted,'passwordSha256':hashlib.sha256(password.encode()).hexdigest()})
+                        connection=len(oracle.auth)+1
+                        oracle.auth.append({'route':route_id,'accepted':accepted,'connection':connection,'passwordSha256':hashlib.sha256(password.encode()).hexdigest()})
                     stream.sendall(b'\x01'+(b'\x00' if accepted else b'\x01'))
                     if not accepted:return
                     version,command,reserved,kind=read_exact(stream,4)
@@ -90,12 +92,15 @@ class Oracle:
                     if command!=1 or port!=443 or not allowed:stream.sendall(b'\x05\x02\x00\x01'+bytes(6));return
                     stream.sendall(b'\x05\x00\x00\x01\x7f\x00\x00\x01\x00\x00')
                     wrapped=oracle.tls.wrap_socket(stream,server_side=True)
-                    Provider(wrapped,self.client_address,SimpleNamespace(oracle=oracle,route_id=route_id,domain=domain,server_name='offline-fixture',server_port=443))
+                    with oracle.lock:oracle.connections.add(connection)
+                    try:Provider(wrapped,self.client_address,SimpleNamespace(oracle=oracle,route_id=route_id,domain=domain,server_name='offline-fixture',server_port=443))
+                    finally:
+                        with oracle.lock:oracle.connections.discard(connection)
                 except (EOFError,OSError,ssl.SSLError):pass
         server=socketserver.ThreadingTCPServer(('127.0.0.1',0),Forwarder);server.daemon_threads=True
         threading.Thread(target=server.serve_forever,daemon=True).start();return server
     def inspect(self):
-        with self.lock:return {'native':list(self.native),'auth':list(self.auth),'effects':list(self.effects),'requests':list(self.requests),
+        with self.lock:return {'native':list(self.native),'auth':list(self.auth),'openAuthenticatedConnections':len(self.connections),'effects':list(self.effects),'requests':list(self.requests),
                                'resources':{k:{x:v for x,v in value.items() if x!='owner'} for k,value in self.resources.items()}}
     def close(self):
         for value in list(self.exits.values()):value['server'].shutdown();value['server'].server_close()
@@ -117,18 +122,21 @@ class Provider(BaseHTTPRequestHandler):
             if domain.endswith('.dnsleak.am.i.mullvad.net'):return self.reply([{'ip':'10.64.0.1','mullvad_dns':True}])
             if domain!='perchance.org':
                 exit_owner=oracle.wrong_exit if oracle.wrong_exit is not None else owner
-                return self.reply({'mullvad_exit_ip':True,'ip':f'2a03:1b20:{exit_owner+1}::1' if domain.startswith('ipv6.') else f'45.83.{exit_owner+1}.1'})
+                return self.reply({'mullvad_exit_ip':not(domain.startswith('ipv6.') and self.server.route_id in oracle.ipv6_unverified),'ip':f'2a03:1b20:{exit_owner+1}::1' if domain.startswith('ipv6.') else f'45.83.{exit_owner+1}.1'})
             user=json.dumps(oracle.credentials(owner))
-            self.reply('<!doctype html><meta charset="utf-8"><title>Offline Perchance fixture</title><h1>Disposable protected session</h1><script>localStorage.setItem("app-storage",JSON.stringify({user:'+user+'}));localStorage.setItem("sessionTokenLastChangeTime","fixture-stable");</script>','text/html')
+            self.reply('<!doctype html><meta charset="utf-8"><title>Offline Perchance fixture</title><h1>Disposable protected session</h1><script>if(!localStorage.getItem("app-storage")){localStorage.setItem("app-storage",JSON.stringify({user:'+user+'}));localStorage.setItem("sessionTokenLastChangeTime","fixture-stable");}</script>','text/html')
     def do_POST(self):
         oracle=self.server.oracle
+        data=json.loads(self.rfile.read(int(self.headers.get('Content-Length',0))));endpoint=self.path.split('/')[-1]
+        if oracle.delay_inventory and endpoint=='getGeneratorsByUser' and data.get('email')==oracle.credentials(0)['email']:
+            oracle.inventory_started.set();oracle.inventory_release.wait(25)
         with oracle.lock:
             route=oracle.exits.get(self.server.route_id)
             if not route:self.send_error(503);return
-            owner=oracle.owner(route);data=json.loads(self.rfile.read(int(self.headers.get('Content-Length',0))));endpoint=self.path.split('/')[-1]
-            oracle.requests.append({'domain':self.server.domain,'method':'POST','path':self.path,'owner':owner})
-            user=oracle.credentials(owner)
-            if endpoint!='getGeneratorPageData' and (data.get('email')!=user['email'] or data.get('sessionToken')!=user['sessionToken']):return self.reply({'status':'session-token-error'})
+            route_owner=oracle.owner(route)
+            owner=next((i for i in range(4) if data.get('email')==oracle.credentials(i)['email'] and data.get('sessionToken')==oracle.credentials(i)['sessionToken']),None)
+            oracle.requests.append({'domain':self.server.domain,'method':'POST','path':self.path,'owner':owner,'generatorName':data.get('generatorName')})
+            if endpoint!='getGeneratorPageData' and owner is None:return self.reply({'status':'session-token-error'})
             name=data.get('generatorName');generator=oracle.resources.get(name)
             if endpoint=='getGeneratorsByUser':
                 return self.reply({'status':'success','generators':[{'name':k,'isPrivate':v['isPrivate']} for k,v in oracle.resources.items() if v['owner']==owner],'generatorFolderMap':{}})

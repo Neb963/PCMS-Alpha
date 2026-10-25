@@ -1262,7 +1262,7 @@ function openOperationRecord(op){
      finally{account.disabled=false;}
     })());account.dataset.operationRelated='';actions.prepend(account);
    }
-   if(c.related?.slug){const target=b('Inspect generator',()=>{close();openSourceManager({slug:c.related.slug})});target.dataset.operationRelated='';actions.append(target)}
+   if(c.related?.generatorObserved){const target=b('Inspect generator',()=>{close();openSourceManager({slug:c.related.slug})});target.dataset.operationRelated='';actions.append(target)}
   }catch{if(overlay.isConnected)context.textContent='Saved details could not be checked. Retry; nothing was dispatched.'}
   finally{check.disabled=false;}
  }

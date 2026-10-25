@@ -96,12 +96,13 @@ async function pcmsProbeExitsWithinDeadline({routeId,profileId=null},signal,prob
     if(!p?.pcmsBindingId||p.routeId!==routeId)return pcmsFailure('ASSIGNED_ROUTE_CHANGED','ROUTE');
   }
   if(signal.aborted)return pcmsFailure('ROUTE_OBSERVATION_CANCELLED','HOST');
-  let effective=await mullvadRuntime.resolve(route,{fresh:true}),recovery=null;
+  let effective=await mullvadRuntime.resolve(route,{fresh:true}),recovery=null,recoveryGeneration=null;
   probe.prepared=!!effective;
   // Native preparation is allowed to settle; its timeout is not proof that
   // an effect was canceled. Only the following read-only probe is abortable.
   if(signal.aborted)return pcmsFailure('ROUTE_OBSERVATION_CANCELLED','HOST');
   if(!effective){
+    recoveryGeneration=mullvadRuntime.recoveryGeneration(routeId);
     const held=mullvadRuntime.getStatus().preparationHeld===true;
     const status=await mullvadRuntime.refreshStatus();
     const code=pcmsConnectionCode(status,routeId)||(held?'MULLVAD_PREPARATION_UNAVAILABLE':null);
@@ -142,12 +143,14 @@ async function pcmsProbeExitsWithinDeadline({routeId,profileId=null},signal,prob
   if(recovery){
     if(signal.aborted||!['OBSERVED','BLOCKED_VERIFIED'].includes(ipv6.state)||
        !await pcmsSettleObservedPreparation(recovery))return pcmsFailure('MULLVAD_ROUTE_UNCONFIRMED','HOST');
-    mullvadRuntime.acceptObservedPreparation(route,recovery.endpoint,recovery.password,recovery.createdAtMs);
+    if(!mullvadRuntime.acceptObservedPreparation(route,recovery.endpoint,recovery.password,recovery.createdAtMs,recoveryGeneration))
+      return pcmsFailure('ROUTE_CHANGED_DURING_PROBE','ROUTE');
     probe.prepared=true;
     if(profileId){
       const health=await testProfile(profileId,signal);
       if(!health?.ok||health.data?.ip!==v4.ip)return pcmsFailure('ROUTE_CHANGED_DURING_PROBE','ROUTE');
     }
+    if(!mullvadRuntime.recoveryCurrent(recoveryGeneration))return pcmsFailure('ROUTE_CHANGED_DURING_PROBE','ROUTE');
   }
   return {ok:true,source:'DONOR_ROUTE_PROBE',evidenceId:'evidence_'+crypto.randomUUID().replaceAll('-',''),
     routeId,ipv4:{state:'OBSERVED',address:v4.ip},ipv6,dns:'VERIFIED_PROTECTED',observedAtMs:Date.now()};
@@ -353,6 +356,8 @@ function createPcmsEnrollmentDonor(){
     // Read-only native inventory: is a forwarder for this route still live?
     async observeRouteReleased({routeId}){
       const status=await getNativeStatus();
+      if(status?.pending_prepare_routes?.includes(routeId)||status?.pending_prepare_routes?.includes('OBSERVATION_UNAVAILABLE'))
+        return {ok:false,code:'RELEASE_UNCONFIRMED'};
       if(status?.installed!==true||!Array.isArray(status.active_exits))return {ok:false,code:'NATIVE_UNAVAILABLE'};
       return {ok:true,released:!status.active_exits.some(e=>e?.route_id===routeId)};
     },
@@ -1114,7 +1119,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   await writeFile(donorStoragePath,donorStorage);
 
   await writeFile(bgPath, bg);
-  for (const name of ['legacy-quarantine.mjs','creation-intake.mjs','creation-batch.mjs','creation-preview.mjs','creation-allocation.mjs','creation-authority.mjs','creation-inventory.mjs','creation-import-authority.mjs','creation-effects.mjs','creation-git.mjs','creation-git-owner.mjs','creation-git-runner.mjs','creation-runner.mjs','creation-watch.mjs','coordinator-core.mjs','coordinator-store.mjs','coordinator-boundary.mjs','s08-cleanup-boundary.mjs','diagnostic-startup.mjs','operator-record-boundary.mjs','pcms-donor-fence.mjs','network-ledger.mjs','route-pin.mjs','enrollment.mjs','qualified-clock.mjs','entry.mjs', 'wake.mjs', 'dashboard-action.mjs', 'persona-guard.mjs', 'operation-context.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'git-catalog.mjs', 'git-local-secret.mjs', 'identity-reconciliation.mjs', 'git-prompt.mjs', 'catalog-bootstrap.mjs', 'catalog-import.mjs', 'catalog-import-preview.mjs', 'catalog-prompt-store.mjs', 'catalog-resume.mjs', 'catalog-declaration.mjs', 'catalog-ready-store.mjs', 'ready-planner.mjs', 'ready-git-prompt.mjs', 'ready-git-source.mjs', 'ready-native-source.mjs', 'ai-declarative-assertion.mjs', 'ready-ai-gate.mjs', 'ready-source-safety.mjs','restored-source.mjs', 'ready-store.mjs', 'ready-intake.mjs', 'ready-operator.mjs', 'ready-development.mjs', 's06-output-proof.mjs', 's06-writeback-progress.mjs','s06-publication-progress.mjs','clean-bulk-authority.mjs','clean-bulk-release.mjs','clean-bulk-boundary.mjs', 's06-review-queue.mjs', 's06-request-changes.mjs', 's06-human-review.mjs', 's06-exception-review.mjs','exception-idle.mjs', 's06-standing-authority.mjs','s06-authority-bootstrap.mjs', 'readiness-boundary.mjs','catalog-boundary.mjs', 'catalog-identity-review.mjs','folder-existing-rename.mjs','folder-rename-link.mjs','folder-rename-safety.mjs','folder-identity-boundary.mjs', 'creation-catalog.mjs', 'catalog-watch.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'original-archive.mjs','adoption-recovery.mjs','adoption-recovery-bridge.mjs', 'adoption-boundary.mjs',
+  for (const name of ['native-receipts.mjs','legacy-quarantine.mjs','creation-intake.mjs','creation-batch.mjs','creation-preview.mjs','creation-allocation.mjs','creation-authority.mjs','creation-inventory.mjs','creation-import-authority.mjs','creation-effects.mjs','creation-git.mjs','creation-git-owner.mjs','creation-git-runner.mjs','creation-runner.mjs','creation-watch.mjs','coordinator-core.mjs','coordinator-store.mjs','coordinator-boundary.mjs','s08-cleanup-boundary.mjs','diagnostic-startup.mjs','operator-record-boundary.mjs','pcms-donor-fence.mjs','network-ledger.mjs','route-pin.mjs','enrollment.mjs','qualified-clock.mjs','entry.mjs', 'wake.mjs', 'dashboard-action.mjs', 'persona-guard.mjs', 'operation-context.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'git-catalog.mjs', 'git-local-secret.mjs', 'identity-reconciliation.mjs', 'git-prompt.mjs', 'catalog-bootstrap.mjs', 'catalog-import.mjs', 'catalog-import-preview.mjs', 'catalog-prompt-store.mjs', 'catalog-resume.mjs', 'catalog-declaration.mjs', 'catalog-ready-store.mjs', 'ready-planner.mjs', 'ready-git-prompt.mjs', 'ready-git-source.mjs', 'ready-native-source.mjs', 'ai-declarative-assertion.mjs', 'ready-ai-gate.mjs', 'ready-source-safety.mjs','restored-source.mjs', 'ready-store.mjs', 'ready-intake.mjs', 'ready-operator.mjs', 'ready-development.mjs', 's06-output-proof.mjs', 's06-writeback-progress.mjs','s06-publication-progress.mjs','clean-bulk-authority.mjs','clean-bulk-release.mjs','clean-bulk-boundary.mjs', 's06-review-queue.mjs', 's06-request-changes.mjs', 's06-human-review.mjs', 's06-exception-review.mjs','exception-idle.mjs', 's06-standing-authority.mjs','s06-authority-bootstrap.mjs', 'readiness-boundary.mjs','catalog-boundary.mjs', 'catalog-identity-review.mjs','folder-existing-rename.mjs','folder-rename-link.mjs','folder-rename-safety.mjs','folder-identity-boundary.mjs', 'creation-catalog.mjs', 'catalog-watch.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'original-archive.mjs','adoption-recovery.mjs','adoption-recovery-bridge.mjs', 'adoption-boundary.mjs',
     'staging-core.mjs','staging-store.mjs','staging-boundary.mjs',
     'human-editor-bridge.mjs','manual-editor-bridge.mjs','stage-editor-bridge.mjs','perchance-stage.mjs','editor-strip.mjs','perchance-editor-probe.mjs','perchance-ai-native.mjs','perchance-ai-oracle.mjs','perchance-ai-opfs.mjs','perchance-ai-history.mjs','ai-supervisor.mjs','ai-testing.mjs','ai-evidence.mjs','ai-store.mjs','ai-boundary.mjs',
     'git-credential.mjs','diagnostic-ready-git.mjs','git-writeback.mjs','writeback-store.mjs','writeback-boundary.mjs',

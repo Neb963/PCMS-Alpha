@@ -16,14 +16,18 @@ export function operationGroup(status){
 const id=x=>typeof x==='string'&&/^[a-zA-Z0-9_-]{8,100}$/.test(x)?x:null;
 const slug=x=>typeof x==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(x)?x:null;
 const code=x=>typeof x==='string'&&/^[A-Z][A-Z0-9_]{2,79}$/.test(x)?x:null;
-export function projectOperationContext(op,links,events){
+export function projectOperationContext(op,links,events,inventory=[]){
  const matches=links.filter(({batch,item})=>item.itemId===op.targetId&&
-  [item.createOperationId,item.renameOperationId,item.gitOperationId].includes(op.operationId));
+  [item.createOperationId,item.renameOperationId,item.gitOperationId].includes(op.operationId)&&
+  (!op.accountId||op.accountId===batch.accountId)&&(!op.slug||op.slug===item.requestedSlug));
  const link=matches.length===1?matches[0]:null;
  const legacy=/^supply_(create|rename|git_marker)_v1$/.test(op.effectType||'');
  const phase=op.effectType==='supply_create_v1'?'CREATE':op.effectType==='supply_rename_v1'?'RENAME':'GIT';
  const failure=op.firstFailure||link?.item.diagnostic?.first;
- const laterDispatch=events.some(e=>/DISPATCH_POSSIBLE|ACKNOWLEDGED|OBSERVING|UNCERTAIN|CONFIRMED|INVESTIGATION/.test(e.stage||''));
+ // Only positively known no-effect vocabulary can support the stronger
+ // historical claim. Unknown later schemas remain unresolved.
+ const safeEvents=new Set(['SUPPLY_'+phase+'_PREPARED','SUPPLY_'+phase+'_READY_TO_DISPATCH','SUPPLY_'+phase+'_PREFLIGHT_FAILED']);
+ const laterDispatch=events.some(e=>!safeEvents.has(e.stage));
  const noDispatch=legacy&&!!link&&op.status==='PREFLIGHT_FAILED'&&op.effectBoundary==='NOT_DISPATCHED'&&
    failure?.effectBoundary==='NOT_DISPATCHED'&&link.item.state===phase+'_PREFLIGHT_FAILED'&&
    !op.ack&&!op.remoteId&&!op.temporarySlug&&!link.item.ack&&!link.item.ackTemporarySlug&&!link.item.ackRemoteId&&!laterDispatch;
@@ -34,6 +38,7 @@ export function projectOperationContext(op,links,events){
   failure:{code:code(failure?.code)||code(link?.item.reason),stage:code(failure?.stage),
    at:Number.isSafeInteger(failure?.at)?failure.at:null},
   related:link?{batchId:id(link.batch.batchId),accountId:id(link.batch.accountId),itemId:id(link.item.itemId),
-   slug:slug(link.item.requestedSlug),temporarySlug:slug(link.item.temporarySlug),state:code(link.item.state)}:null,
+   slug:slug(link.item.requestedSlug),temporarySlug:slug(link.item.temporarySlug),state:code(link.item.state),
+   generatorObserved:inventory.some(g=>g.slug===link.item.requestedSlug&&g.accountId===link.batch.accountId&&g.ownerState==='OBSERVED_OWNER')}:null,
   ambiguous:matches.length>1,replayAllowed:false};
 }
