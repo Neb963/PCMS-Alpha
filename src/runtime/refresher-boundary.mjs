@@ -34,11 +34,14 @@ export function validateRefresherMessage(api,sender,message){
   const allowed=message.type==='GET_REFRESHER'?['query','phase','accountId','offset','limit']:
     message.type==='SET_POLICY'?['expectedRevision','policy']:
     message.type==='SET_PAUSE'?['expectedRevision','scope','target','paused']:
-    message.type==='SET_GENERATOR_POLICY'?['expectedRevision','stableId','activeMs','sleepMs']:
+    message.type==='SET_GENERATOR_POLICY'?['expectedRevision','stableId','activeMs','sleepMs','useDefaults']:
     message.type==='DEMAND_STATISTIC'?['expectedRevision','stableId']:
     message.type==='RESET_RECENT_BACKOFF'?['expectedRevision']:
     message.type==='DIAGNOSTIC_TARGET_REFRESH'?['slug','accountId','runId']:[];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
+  if(message.type==='SET_GENERATOR_POLICY'&&
+     (p.useDefaults!==undefined&&typeof p.useDefaults!=='boolean'||
+      p.useDefaults===true&&(p.activeMs!==undefined||p.sleepMs!==undefined)))return fail('INVALID_PARAMS');
   if(message.type==='GET_REFRESHER'){
     if((p.query!=null&&(typeof p.query!=='string'||p.query.length>80))||
       (p.accountId!=null&&p.accountId!==''&&!isSafeId(p.accountId))||
@@ -486,7 +489,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       if(message.type==='SET_POLICY')result=await s.changePolicy(p.expectedRevision,p.policy);
       if(message.type==='SET_PAUSE')result=await s.pause(p.expectedRevision,p.scope,p.target,p.paused);
       if(message.type==='SET_GENERATOR_POLICY')result=await s.generatorPolicy(
-        p.expectedRevision,p.stableId,p.activeMs,p.sleepMs);
+        p.expectedRevision,p.stableId,p.activeMs,p.sleepMs,{useDefaults:p.useDefaults===true});
       if(message.type==='DEMAND_STATISTIC')result=await s.demand(p.expectedRevision,p.stableId,clock());
       if(message.type==='RESET_RECENT_BACKOFF')result=await s.resetRecentBackoff(p.expectedRevision,clock());
       return result?.ok?{ok:true,revision:result.revision,providerEffects:'OFF'}:result||fail('CAPABILITY_OFF');

@@ -82,7 +82,7 @@ export function reconcileShadow(s,inputs){
         accountId:input.accountId,personaUid:input.personaUid,bindingVersion:input.bindingVersion,
         remoteId:input.remoteId,phase:'WAITING',activeRemaining:out.policy.activeMs,
         sleepRemaining:0,ordinal,cycle:0,slot:false,paused:false,
-        activeMs:out.policy.activeMs,sleepMs:out.policy.sleepMs,checkpoint:0,
+        activeMs:out.policy.activeMs,sleepMs:out.policy.sleepMs,timingOverride:false,checkpoint:0,
         admittedAt:0,allocationEpoch:0,restCheckpointAt:0,refresh:emptyRefreshEvidence(),
         metrics:{raw:[],latest:null,nextDueAt:0,failures:0}};
       out.rows.push(r);bySlug.set(r.slug,r);

@@ -107,7 +107,7 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
   const items=match.slice(offset,offset+limit).map(r=>({stableId:r.stableId,slug:r.slug,
     accountId:r.accountId,sourceAuthority:r.sourceAuthority||'UNVERIFIED',
     phase:r.phase,activeRemaining:r.activeRemaining,sleepRemaining:r.sleepRemaining,
-    activeMs:r.activeMs,sleepMs:r.sleepMs,ordinal:r.ordinal,slot:r.slot,paused:r.paused,
+    activeMs:r.activeMs,sleepMs:r.sleepMs,timingOverride:r.timingOverride===true||r.timingOverride===undefined&&(r.activeMs!==s.policy.activeMs||r.sleepMs!==s.policy.sleepMs),ordinal:r.ordinal,slot:r.slot,paused:r.paused,
     blockers:[...rowBlocks(s,r),r.readyUpdate&&'READY_UPDATE_FIRST'].filter(Boolean),
     presence:r.presence?{...r.presence,stale:r.presence.observedAt>now||now-r.presence.observedAt>2*s.policy.recentMs}:null,
     statisticSuspended:r.metrics.suspended===true,
@@ -139,7 +139,7 @@ function project(s,now,{query='',accountId='',phase='ALL',offset=0,limit=25}={})
     timeline:s.timeline.slice(-8),clock:'EVIDENCED_ONLY',monitoring:'GATED_READ_ONLY'};
 }
 export function createRefresherStore(db){
-  function mutate(expectedRevision,fn,{sync=false}={}){
+  function mutate(expectedRevision,fn,{sync=false,accountTarget=null}={}){
     return transact(db,'readwrite',(tx,done)=>{
       const meta=tx.objectStore('meta');
       meta.get(REFRESHER_KEY).onsuccess=e=>{
@@ -150,7 +150,7 @@ export function createRefresherStore(db){
           try{
             const merged=sync?reconcileShadow(state,canonicalRefresherInputs(records)):{ok:true,state};
             if(!merged.ok){done(merged);return;}
-            const out=fn(merged.state);
+            const out=fn(merged.state,records);
             if(!out?.ok){done(out||fail('REFRESHER_REDUCER_FAILED'));return;}
             out.state.revision=state.revision+1;
             if(!validShadow(out.state)){done(fail('REFRESHER_STATE_CORRUPT'));return;}
@@ -161,7 +161,11 @@ export function createRefresherStore(db){
             done({...out,revision:out.state.revision});
           }catch{tx.abort();}
         }
-        if(!sync){apply();return;}
+        if(!sync){
+          if(accountTarget===null){apply();return;}
+          meta.get('account:'+accountTarget).onsuccess=ev=>apply(ev.target.result?[ev.target.result]:[]);
+          return;
+        }
         const records=[];let seen=0;
         meta.openCursor().onsuccess=ev=>{
           const c=ev.target.result;
@@ -189,25 +193,45 @@ export function createRefresherStore(db){
   const changePolicy=(expectedRevision,changes)=>mutate(expectedRevision,s=>{
     const policy={...s.policy,...changes};
     if(!validatePolicy(policy).ok)return fail('INVALID_REFRESHER_POLICY');
-    return {ok:true,state:{...s,policy}};
+    const out=structuredClone(s);out.policy=policy;
+    if(policy.activeMs!==s.policy.activeMs||policy.sleepMs!==s.policy.sleepMs){
+      for(const row of out.rows){
+        const custom=row.timingOverride===true||row.timingOverride===undefined&&
+          (row.activeMs!==s.policy.activeMs||row.sleepMs!==s.policy.sleepMs);
+        row.timingOverride=custom;
+        if(!custom){row.activeMs=policy.activeMs;row.sleepMs=policy.sleepMs;}
+      }
+    }
+    // Inherited defaults affect later periods; already accrued budgets remain exact.
+    return {ok:true,state:out};
   });
-  const pause=(expectedRevision,scope,target,paused)=>mutate(expectedRevision,s=>{
+  const pause=(expectedRevision,scope,target,paused)=>mutate(expectedRevision,(s,records)=>{
     if(typeof paused!=='boolean')return fail('INVALID_PAUSE');
     const out=structuredClone(s);
     if(scope==='GLOBAL')out.globalPause=paused;
-    else if(scope==='ACCOUNT'&&out.accounts[target])out.accounts[target].paused=paused;
+    else if(scope==='ACCOUNT'){
+      if(!Object.hasOwn(out.accounts,target)){
+        const account=records.find(r=>r.key==='account:'+target&&r.account?.accountId===target)?.account;
+        if(!account)return fail('PAUSE_TARGET_UNKNOWN');
+        // A local future-work preference is not an identity or route observation.
+        Object.defineProperty(out.accounts,target,{value:{paused:false,health:'UNKNOWN',
+          graceUsed:0,checkpoint:0,verifiedIdentity:false},enumerable:true,writable:true,configurable:true});
+      }
+      out.accounts[target].paused=paused;
+    }
     else if(scope==='GENERATOR'&&out.rows.some(r=>r.stableId===target))
       out.rows.find(r=>r.stableId===target).paused=paused;
     else return fail('PAUSE_TARGET_UNKNOWN');
     return {ok:true,state:out,changes:[{code:paused?'PAUSED':'RESUMED',scopeId:target||'global_scope'}]};
-  });
-  const generatorPolicy=(expectedRevision,stableId,activeMs,sleepMs)=>mutate(expectedRevision,s=>{
+  },{accountTarget:scope==='ACCOUNT'?target:null});
+  const generatorPolicy=(expectedRevision,stableId,activeMs,sleepMs,{useDefaults=false}={})=>mutate(expectedRevision,s=>{
+    if(useDefaults){activeMs=s.policy.activeMs;sleepMs=s.policy.sleepMs;}
     const policy={...s.policy,activeMs,sleepMs};
     if(!validatePolicy(policy).ok)return fail('INVALID_REFRESHER_POLICY');
     const out=structuredClone(s),r=out.rows.find(r=>r.stableId===stableId);
     if(!r)return fail('GENERATOR_UNKNOWN');
     // New policy affects subsequent full periods; unfinished budgets retained.
-    r.activeMs=activeMs;r.sleepMs=sleepMs;
+    r.activeMs=activeMs;r.sleepMs=sleepMs;r.timingOverride=!useDefaults;
     return {ok:true,state:out};
   });
   const demand=(expectedRevision,stableId,now)=>mutate(expectedRevision,s=>{
