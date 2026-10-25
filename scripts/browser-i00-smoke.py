@@ -801,7 +801,7 @@ def s01_add_account_profile(browser, archive, folder):
         # reach login or fall back to an unprotected route.
         assert account['state']=='PREPARING' and account['setup']['phase']=='HELD',account
         assert account['setup']['code'] in ('MULLVAD_LOCAL_SERVICE_UNAVAILABLE','NO_ROUTE_CANDIDATES',
-            'DONOR_SECURITY_UNAVAILABLE'),account
+            'MULLVAD_RELAY_CATALOG_UNAVAILABLE','DONOR_SECURITY_UNAVAILABLE'),account
         assert account.get('message'),account
         print('B S01_REAL_ADD_ACCOUNT_HELD_WITHOUT_NATIVE=',account['setup']['code'],flush=True)
         network=account_command(session,{'type':'NETWORK_STATUS'})

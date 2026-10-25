@@ -70,6 +70,16 @@ export function createPortableRunner(api,{
   const db=()=>dbPromise ||= open().catch(e=>{dbPromise=null;throw e});
   const sentinel=createRestoreSentinel(api.storage.local);
   const store=async()=>createAutoStore(await db(),clock);
+  async function settleDisabledWake(){
+    const running=pending;if(!running)return true;
+    // A freshly woken background starts its AUTO_OFF check before accepting
+    // page commands. That read-only turn must not spuriously reject a manual
+    // export or independent check. Never queue behind an enabled or active
+    // export; its actual/uncertain download retains ordinary busy handling.
+    const read=await (await store()).read();
+    if(!read.ok||read.state.enabled||read.state.active)return false;
+    await running;return !pending;
+  }
   async function recordManual(row,{expectedRunId=null}={}){
     const database=await db();
     return new Promise((resolve,reject)=>{
@@ -266,6 +276,7 @@ export function createPortableRunner(api,{
   }
   async function inspectArchive(){
     if(inspection)return inspection;
+    if(pending&&!await settleDisabledWake())return fail('BACKUP_INFLIGHT');
     if(pending||manualTask)return fail('BACKUP_INFLIGHT');
     inspection=(async()=>{
       try{
@@ -286,6 +297,7 @@ export function createPortableRunner(api,{
     try{return await inspection}finally{inspection=null}
   }
   async function inspectRestore(){
+    if(pending&&!await settleDisabledWake())return fail('BACKUP_INFLIGHT');
     if(pending||manualTask||inspection)return fail('BACKUP_INFLIGHT');
     inspection=(async()=>{
       try{
@@ -306,6 +318,7 @@ export function createPortableRunner(api,{
   }
   async function manual(preparation=null){
     if(preparation&&!(await ownsPreparation(preparation)))return fail('BACKUP_RESTORE_HOLD');
+    if(pending&&!await settleDisabledWake())return fail('BACKUP_INFLIGHT');
     if(manualTask||pending||inspection)return fail('BACKUP_INFLIGHT');
     manualTask=(async()=>{
       let url=null,runId=null,possible=false,receipt=null,startedAt=null;
