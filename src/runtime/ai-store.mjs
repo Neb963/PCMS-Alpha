@@ -293,6 +293,7 @@ export function createAiStore(db){
                      current.nonce!==stage.nonce||
                      current.candidate?.fingerprint!==stage.candidate?.fingerprint||
                      current.previous?.fingerprint!==stage.previous?.fingerprint||
+                     (current.writePrevious||current.previous)?.fingerprint!==(stage.writePrevious||stage.previous)?.fingerprint||
                      !Number.isSafeInteger(current.verifiedAt)||
                      current.verifiedAt<1){
                     done(fail('AI_CANONICAL_STAGE_CHANGED'));return;
@@ -330,8 +331,9 @@ export function createAiStore(db){
                     ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(native);
                   const saved=previous.finalSource?.fingerprint||
                     (previous.state==='PENDING_NATIVE_SESSION'?previous.sourceFingerprint:null);
-                  if(!provenIdle||!stage.previous?.ok||
-                     saved!==stage.previous.fingerprint||
+                  const replacement=stage.sourceOrigin==='EXISTING_UPDATE'?(stage.writePrevious||stage.previous):stage.previous;
+                  if(!provenIdle||!replacement?.ok||
+                     saved!==replacement.fingerprint||
                      ['HELD_RECONCILE','HUMAN_OWNED','HELD_NO_PROGRESS'].includes(previous.state)){
                     done(fail('AI_PREVIOUS_NATIVE_OR_SOURCE_NOT_QUIESCENT'));return;
                   }

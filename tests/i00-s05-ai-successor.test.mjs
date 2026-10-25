@@ -97,3 +97,16 @@ test('S05 start rejects stale or absent canonical stage inside the committing tr
    assert.equal(db.keys('events').length,0);
  }
 });
+
+test('J04 public successor AI uses saved unapproved replacement F1 and retains original P for release; stale replacement CAS is held',async()=>{
+ const P=await source('original published P'),F1=await source('saved unapproved F1'),F2=await source('new READY F2');
+ for(const mode of ['valid','wrong-baseline','changed-canonical']){
+  const db=fakeDatabase(),store=createAiStore(db),stage={...fullStage(P,F2),sourceOrigin:'EXISTING_UPDATE',writePrevious:mode==='wrong-baseline'?P:F1};
+  const job={schema:1,slug,revision:6,stageRevision:8,accountId:'account-01',state:'TESTS_VERIFIED',sourceFingerprint:F1.fingerprint,finalSource:{fingerprint:F1.fingerprint},native:{state:'CHAT1_OBSERVED_IDLE'},executionSlotReleased:true};
+  await seed(db,[{key:'ai-job:'+slug,accountId:'account-01',job},{key:'s05-ready:'+slug,record:{active:{identifier:'rev-revision-B',inputFingerprint:A},desired:null}},{key:'stage:'+slug,record:mode==='changed-canonical'?{...stage,writePrevious:P}:stage}]);
+  const out=await store.start(stage);
+  assert.equal(out.ok,mode==='valid',JSON.stringify({mode,out}));
+  if(mode==='valid'){assert.equal(out.state,'PENDING_NATIVE_SESSION');assert.equal(db.read('meta','stage:'+slug).record.previous.fingerprint,P.fingerprint);assert.equal(db.read('meta','stage:'+slug).record.writePrevious.fingerprint,F1.fingerprint)}
+  else {assert.equal(out.code,mode==='wrong-baseline'?'AI_PREVIOUS_NATIVE_OR_SOURCE_NOT_QUIESCENT':'AI_CANONICAL_STAGE_CHANGED');assert.equal(db.read('meta','ai-job:'+slug).job.revision,6);assert.equal(db.keys('events').length,0)}
+ }
+});
