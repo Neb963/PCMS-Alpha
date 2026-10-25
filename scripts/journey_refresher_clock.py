@@ -54,6 +54,7 @@ def run(browser,archive,folder):
                 assert paused['ok'];old=b.owned_firefox_pids(profile);assert old;b.close(s);b.require_owned_exit(profile,old);s=None
                 closed_start=time.monotonic();time.sleep(3);s=open_clock_session(browser,profile);new=b.owned_firefox_pids(profile);assert new and not old.intersection(new)
                 b.call('POST',f'/session/{s}/url',{'url':'about:blank'})
+                restart_idle=idle_settings(s);assert restart_idle['effectiveMs']==restart_idle['defaultMs'] and not restart_idle['userOverride'],('J05_RESTART_IDLE_CHANGED',restart_idle)
                 resumed=p.background(s,source+';return await installRefresherClockFixture(true);')
                 assert resumed['ok'];post=resumed['state'];pre=paused['state']
                 assert post['bootId']!=pre['bootId'],'J05_RESTART_REUSED_EPOCH'
@@ -64,7 +65,7 @@ def run(browser,archive,folder):
                 assert rest_elapsed>=3000 and abs(rest_used-rest_elapsed)<=1,('J05_SHUTDOWN_REST_NOT_EXACT_WALL_TIME',rest_used,rest_elapsed,closed_elapsed)
                 assert rest_used>=closed_elapsed-1500,('J05_CLOSED_INTERVAL_MISSING_FROM_REST',rest_used,closed_elapsed)
                 assert post['rows'][2]['sleepRemaining']==pre['rows'][2]['sleepRemaining'],'J05_RESTART_PAUSED_REST_ADVANCED'
-                evidence['restart']={'oldPids':sorted(old),'newPids':sorted(new),'before':pre,'after':post}
+                evidence['restart']={'idle':restart_idle,'oldPids':sorted(old),'newPids':sorted(new),'before':pre,'after':post}
             print('B J05_COMMAND_FREE_CLOCK_'+('ON' if enabled else 'OFF')+'=PASS credit='+str(credit),flush=True)
         finally:
             if s:b.close(s)

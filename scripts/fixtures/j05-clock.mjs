@@ -29,7 +29,5 @@ export async function installRefresherClockFixture(pulseEnabled=true){
  controller.register();const initial=await controller.tick();
  window.__j05clock={controller,store,dbName,boot:(await store.read()).state.bootId};
  const state=(await store.read()).state;
- let timers;try{const id=setTimeout(()=>{},1);clearTimeout(id);timers={ok:true}}catch(error){timers={ok:false,error:String(error)}}
- let boundTimers;try{const id=window.setTimeout(()=>{},1);window.clearTimeout(id);boundTimers={ok:true}}catch(error){boundTimers={ok:false,error:String(error)}}
- return {ok:initial?.ok===true,initial,timers,boundTimers,eligible:needsActiveClock(state,state.browserClock?.witness?.routes||[],Date.now()),dbName,state,status:(await browser.storage.local.get('pcmsI12Status')).pcmsI12Status};
+ return {ok:initial?.ok===true,initial,eligible:needsActiveClock(state,state.browserClock?.witness?.routes||[],Date.now()),dbName,state,status:(await browser.storage.local.get('pcmsI12Status')).pcmsI12Status};
 }
