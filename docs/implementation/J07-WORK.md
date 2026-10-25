@@ -20,3 +20,6 @@ Installed Firefox154.0b10 local B (j07-primary-ui13.log) PASS: all four built-in
 
 
 Required local selector node --test tests/i00-*.test.mjs passed1134/1134 with no skips/cancels. Independent donor verifier confirmed all223 files at commit9995f6eadfa54be6cc0001f4e04f2a2d9b9401bf/tree9d59d800c3a687b2e7360c64d9dd859d701d6ba5. The generated audit remains pending complete final CI. Additional narrow account/Git-source/timing-dialog and native Menu Escape cases are included before freezing the final candidate.
+
+
+Independent exact-head review5717dae caught a retained browser assertion still expecting the retired 'Not verified' header. PR returned to Draft; the assertion now requires the actual manifest-derived PCMS version while retaining current manifest, six routes, visible primary/hidden legacy and native capability checks. New B14 also passed fully loaded narrow generator/account routes, actual account actions/Git sources/default timing dialog bounds and native Menu Escape focus. The prior full candidate run is superseded and cannot authorize this corrected head. XPI product bytes are unchanged by this oracle-only correction.

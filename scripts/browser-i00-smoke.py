@@ -1289,7 +1289,7 @@ def main():
                 assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.14',actual
                 assert actual['routes']==6 and actual['visible'] and actual['nativeHidden'],actual
                 assert actual['sidebar'] and actual['primary']=='overview' and actual['styles'] and actual['canonicalNative'],actual
-                assert actual['badge']=='PCMS local · Not verified',actual
+                assert actual['badge']=='PCMS '+actual['manifest'],actual
                 for workspace in ['generators','work-queue','accounts','refresher','settings','overview']:
                     execute(after,"""const route=%s;
                         const h=document.getElementById('pcms-faithful-host');
