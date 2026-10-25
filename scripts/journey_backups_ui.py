@@ -27,6 +27,24 @@ def run(browser,archive,folder):
         wait(s,"!!sh.querySelector('#pcms-check-AC-01')&&!sh.querySelector('#pcms-check-AC-01').disabled",'J06_OPERATOR_CHECKLIST_LOADED')
         g.click(s,'#pcms-diagnostic-independent-run')
         wait(s,"sh.querySelector('#pcms-diagnostic-independent-results')?.textContent.includes('Local data restore — Passed')",'J06_DIAGNOSTICS_ACTUAL_RESTORE_WITHOUT_CREATE',90)
+        # Use real IndexedDB/codec for ownership collisions: an existing scope
+        # and concurrent same-scope prepares cannot overwrite its receipt/rows.
+        collision=g.oracle(s,"""
+const {DB_STORES}=await import('./backup-core.mjs'),codec=await import('./portable-archive.mjs'),stage=await import('./portable-restore-stage.mjs');
+const pcms={schema:1,stores:Object.fromEntries(DB_STORES.map(k=>[k,[]]))};pcms.stores.meta.push({key:'ownership-oracle',value:{exact:'original stage bytes'}});
+const donor={version:1,settings:null,routes:[],personas:[],scripts:[],workflows:[],cookies:{},gmValues:{},automationHistory:[]};
+const archive=await codec.encodePortableArchive({pcms,donor}),scope='portable_'+crypto.randomUUID().replaceAll('-','');
+const readRaw=async()=>{const db=await stage.openRestoreStage();try{return await new Promise((resolve,reject)=>{const tx=db.transaction(['sessions','rows'],'readonly'),out={};tx.objectStore('sessions').get(scope).onsuccess=e=>out.session=e.target.result;tx.objectStore('rows').getAll().onsuccess=e=>out.rows=e.target.result.filter(r=>r.scope===scope);tx.oncomplete=()=>resolve(out);tx.onabort=reject})}finally{db.close()}};
+try{
+const attempts=await Promise.allSettled([stage.preparePortableStage(archive.blob,{scope}),stage.preparePortableStage(archive.blob,{scope})]);
+const before=await readRaw();let reused=false;try{await stage.preparePortableStage(new Blob(['corrupt different bytes']),{scope})}catch(e){reused=e.message==='PORTABLE_STAGE_REUSED'}
+const after=await readRaw(),opened=await stage.readPortableStage(scope);
+return {ok:attempts.filter(r=>r.status==='fulfilled').length===1&&attempts.filter(r=>r.status==='rejected'&&r.reason.message==='PORTABLE_STAGE_REUSED').length===1&&reused&&JSON.stringify(before)===JSON.stringify(after)&&after.session.status==='READY'&&opened.canonical.stores.meta[0].value.exact==='original stage bytes',rows:after.rows.length,session:after.session.status};
+}finally{await stage.discardPortableStage(scope)}
+""")
+        assert collision.get('ok'),collision
+        evidence['real-idb-stage-ownership']=collision
+        print('B J06_REAL_IDB_ATOMIC_STAGE_CLAIM_COLLISION_PRESERVES_SESSION_AND_ROWS=PASS',flush=True)
         # Persist real notes through the trusted tracked background port.
         b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;sh.querySelector('#pcms-check-AC-01').closest('details').open=true")
         g.change(s,'#pcms-check-AC-01','PASS');g.fill(s,'#pcms-notes-AC-01','Disposable UI evidence; operator-reported, not live provider acceptance.')
@@ -102,8 +120,12 @@ const out=await createOperatorRecords().put('ui:diagnostic-report:'+run.runId,{s
         corrupt=downloads/'corrupt.pcms.jsonl';data=saved.read_bytes();corrupt.write_bytes(data[:len(data)//2]+b'CORRUPTED'+data[len(data)//2:])
         b.call('POST',f'/session/{s}/element/{control[a.ELEMENT]}/value',{'text':str(corrupt)})
         g.click_text(s,'Verify selected backup')
-        wait(s,"sh.querySelector('#page')?.textContent.includes('This file could not be verified')",'J06_CORRUPT_FILE_REJECTED')
+        wait(s,"sh.querySelector('#page')?.textContent.includes('This file could not be verified')&&!sh.querySelector('#pcms-backup-inspect-file').disabled&&[...sh.querySelectorAll('button')].some(x=>x.textContent==='Verify selected backup'&&!x.disabled)",'J06_CORRUPT_FILE_REJECTED')
+        chosen=b.execute(s,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#pcms-backup-inspect-file').files[0].name")
+        assert chosen==corrupt.name,chosen
         b.call('POST',f'/session/{s}/element/{control[a.ELEMENT]}/value',{'text':str(saved)})
+        chosen=b.execute(s,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#pcms-backup-inspect-file').files[0].name")
+        assert chosen==saved.name,chosen
         g.click_text(s,'Verify selected backup');wait(s,"sh.querySelector('#page')?.textContent.includes('Selected file verified')",'J06_FILE_ERROR_RECOVERY')
         # No configured Git or managed account exists: functional checks remain independent.
         b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;const d=[...sh.querySelectorAll('details')].find(x=>x.querySelector('summary')?.textContent==='Local functional checks');d.open=true;return true")
