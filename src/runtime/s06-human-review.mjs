@@ -17,16 +17,18 @@ const show=r=>r?{ok:true,slug:r.slug,state:r.state,revision:r.revision,
   parentStageRevision:r.parentStageRevision,
   parentJobRevision:r.parentJobRevision,parentFingerprint:r.parentFingerprint,
   adoptedFingerprint:r.adoptedFingerprint||null,
-  childStageRevision:r.childStageRevision||null,changedAt:r.changedAt}:
+  childStageRevision:r.childStageRevision||null,reclaimPending:r.reclaimPending===true,changedAt:r.changedAt}:
   fail('S06_HUMAN_REVIEW_NOT_FOUND');
+export const humanReviewParentRevision=s=>s?.state==='SOURCE_VERIFIED'?s.revision:
+ ['HANDOFF_REQUESTED','HUMAN_OWNED'].includes(s?.state)&&Number.isSafeInteger(s.handoffParentRevision)&&s.handoffParentRevision<s.revision&&s.handoffParentFingerprint===s.candidate?.fingerprint?s.handoffParentRevision:null;
 const candidate=(ready,s,j,w)=>!!(ready?.active&&!ready.desired&&!ready.hold&&
   slug(ready?.slug)&&ready.slug===s?.slug&&s.slug===j?.slug&&
   s.slug===w?.slug&&w.folder==='generators/'+s.slug&&
   s.sourceFolder===w.folder&&
-  s?.state==='SOURCE_VERIFIED'&&s.verifiedAt&&
+  humanReviewParentRevision(s)!==null&&s.verifiedAt&&
   s.readyIdentifier===ready.active.identifier&&
   s.readyInputFingerprint===ready.active.inputFingerprint&&
-  j?.stageRevision===s.revision&&j.state==='TESTS_VERIFIED'&&
+  j?.stageRevision===humanReviewParentRevision(s)&&j.state==='TESTS_VERIFIED'&&
   j.readyIdentifier===s.readyIdentifier&&
   j.readyInputFingerprint===s.readyInputFingerprint&&
   j.executionSlotReleased===true&&
@@ -34,7 +36,7 @@ const candidate=(ready,s,j,w)=>!!(ready?.active&&!ready.desired&&!ready.hold&&
   fp(j.verifiedFinal)&&j.verifiedFinal===j.sourceFingerprint&&
   j.finalSource?.fingerprint===j.verifiedFinal&&
   w?.mode==='S06'&&w.state==='CONFIRMED'&&
-  w.stageRevision===s.revision&&w.jobRevision===j.revision&&
+  w.stageRevision===humanReviewParentRevision(s)&&w.jobRevision===j.revision&&
   w.sourceFingerprint===j.verifiedFinal&&
   w.readyIdentifier===s.readyIdentifier&&
   w.readyInputFingerprint===s.readyInputFingerprint&&
@@ -94,7 +96,7 @@ export function createS06HumanStore(db){
       done(fail('S06_HUMAN_CONTEXT_CHANGED'));return;
     }
     const row={slug:name,revision:(prior?.revision||0)+1,state:'DEFERRED',
-      parentStageRevision:s.revision,parentJobRevision:j.revision,
+      parentStageRevision:humanReviewParentRevision(s),parentJobRevision:j.revision,
       parentFingerprint:j.verifiedFinal,
       readyIdentifier:ready.active.identifier,
       readyInputFingerprint:ready.active.inputFingerprint,
@@ -116,7 +118,7 @@ export function createS06HumanStore(db){
    };
   });
  }
- async function adopt({name,expectedRevision,source}){
+ async function adopt({name,expectedRevision,source,editorObservation=null}){
   if(!slug(name)||!Number.isSafeInteger(expectedRevision)||expectedRevision<1||
     !source?.ok||!fp(source.fingerprint))
     return fail('S06_HUMAN_ADOPTION_INVALID');
@@ -129,32 +131,38 @@ export function createS06HumanStore(db){
     return fail('S06_HUMAN_SOURCE_PROOF_INVALID');
   return transact(db,true,(m,t,done)=>m.get(KEY(name)).onsuccess=e=>{
    const prior=e.target.result?.record;
-   if(!prior||prior.revision!==expectedRevision||prior.state!=='DEFERRED'){
+   if(!prior||prior.revision!==expectedRevision||!['DEFERRED','ADOPTED_UNTESTED'].includes(prior.state)){
     done(fail('S06_HUMAN_ADOPTION_STALE'));return;
    }
    readCurrent(m,name,done,({ready,s,j,w,release})=>{
-    if(!candidate(ready,s,j,w)||
-       prior.parentStageRevision!==s.revision||
-       prior.parentJobRevision!==j.revision||
-       prior.parentFingerprint!==j.verifiedFinal||
-       prior.parentCommit!==w.commitSha||
+    const refresh=prior.state==='ADOPTED_UNTESTED';
+    const child=refresh&&ready?.active&&!ready.desired&&!ready.hold&&ready.active.identifier===prior.readyIdentifier&&ready.active.inputFingerprint===prior.readyInputFingerprint&&
+      humanReviewParentRevision(s)===prior.childStageRevision&&j?.stageRevision===prior.childStageRevision&&j.adoptedHumanFingerprint===s?.candidate?.fingerprint&&
+      w?.state==='CONFIRMED'&&!['DISPATCH_POSSIBLE','RUNNING_OBSERVED'].includes(j.native?.state);
+    if(!(refresh?child:candidate(ready,s,j,w))||
+       (!refresh&&prior.parentStageRevision!==humanReviewParentRevision(s))||
+       (!refresh&&prior.parentJobRevision!==j.revision)||
+       (!refresh&&prior.parentFingerprint!==j.verifiedFinal)||
+       (!refresh&&prior.parentCommit!==w.commitSha)||
        prior.readyIdentifier!==ready.active.identifier||
        prior.readyInputFingerprint!==ready.active.inputFingerprint||
-       source.fingerprint===j.verifiedFinal||
        (release&&release.state!=='CANCELED'&&
         !(release.state==='CONFIRMED_PUBLIC'&&
           release.approval?.sourceFingerprint===s.previous?.fingerprint))){
       done(fail('S06_HUMAN_SAVED_SOURCE_OR_RELEASE_CHANGED'));return;
     }
     const stage={...s,revision:s.revision+1,
-      state:'SOURCE_VERIFIED',candidate:structuredClone(source),
+      state:'SOURCE_VERIFIED',candidate:structuredClone(source),humanReclaimPending:true,
+      humanReclaimObservation:editorObservation?structuredClone(editorObservation):null,
+      handoffParentRevision:null,handoffParentFingerprint:null,
       sourceHead:w.commitSha,verifiedAt:Date.now(),
       childSource:'S06_INDEPENDENT_SAVED_HUMAN_SOURCE',
-      parentStageRevision:s.revision,humanReviewRevision:prior.revision};
+      parentStageRevision:humanReviewParentRevision(s),humanReviewRevision:prior.revision};
     const initial=beginAiJob({stage,prompt:j.prompt,
       optionalTesting:j.optionalTesting||null});
     if(!initial.ok){done(initial);return;}
     const job={...initial.job,revision:j.revision+1,createdAt:Date.now(),
+      operatorPaused:j.operatorPaused===true,controlRevision:(j.controlRevision||1)+1,awaitingExecutionSlot:true,executionSlotReleased:true,
       readyIdentifier:s.readyIdentifier,
       readyInputFingerprint:s.readyInputFingerprint,
       sourceFolder:s.sourceFolder,
@@ -166,7 +174,7 @@ export function createS06HumanStore(db){
     m.put({key:'stage:'+name,record:stage});
     m.put({key:'ai-job:'+name,accountId:s.accountId,job});
     const updated={...prior,revision:prior.revision+1,
-      state:'ADOPTED_UNTESTED',adoptedFingerprint:source.fingerprint,
+      state:'ADOPTED_UNTESTED',reclaimPending:true,adoptedFingerprint:source.fingerprint,
       childStageRevision:stage.revision,childJobRevision:job.revision,
       changedAt:Date.now()};
     m.put({key:KEY(name),record:updated});
@@ -179,7 +187,20 @@ export function createS06HumanStore(db){
    });
   });
  }
- return Object.freeze({get,defer,adopt});
+ function finishReclaim(name,expectedRevision){
+  return transact(db,true,(m,t,done)=>m.get(KEY(name)).onsuccess=e=>{const r=e.target.result?.record;
+   if(r?.state!=='ADOPTED_UNTESTED'||r.revision!==expectedRevision||!r.reclaimPending){done(fail('S06_HUMAN_RECLAIM_STALE'));return}
+   readCurrent(m,name,done,({ready,s,j})=>{
+    if(s?.revision!==r.childStageRevision||j?.revision!==r.childJobRevision||s.state!=='SOURCE_VERIFIED'||!s.humanReclaimPending||
+      s.candidate?.fingerprint!==r.adoptedFingerprint||j.adoptedHumanFingerprint!==r.adoptedFingerprint||j.native||!ready?.active||ready.desired||
+      ready.active.identifier!==r.readyIdentifier||ready.active.inputFingerprint!==r.readyInputFingerprint){done(fail('S06_HUMAN_RECLAIM_CHILD_CHANGED'));return}
+    m.put({key:'stage:'+name,record:{...s,humanReclaimPending:false}});
+    const next={...r,revision:r.revision+1,reclaimPending:false,changedAt:Date.now()};m.put({key:KEY(name),record:next});
+    t.objectStore('events').add({stage:'S06_HUMAN_EDITOR_RECLAIM_CONFIRMED',slug:name,childStageRevision:s.revision,tests:'UNVERIFIED'});done(show(next));
+   });
+  });
+ }
+ return Object.freeze({get,defer,adopt,finishReclaim});
 }
 const encode=text=>{
  const raw=new TextEncoder().encode(text);let bin='';
@@ -201,33 +222,43 @@ export function createS06HumanBoundary(api,{
     name:p.slug,expectedStageRevision:p.expectedStageRevision,
     expectedJobRevision:p.expectedJobRevision,
     expectedFingerprint:p.expectedFingerprint});
-  if(message.type!=='ADOPT_HUMAN')return fail('S06_HUMAN_ACTION_INVALID');
+  if(!['ADOPT_HUMAN','OPEN_HUMAN_EDITOR'].includes(message.type))return fail('S06_HUMAN_ACTION_INVALID');
   const [held,stage,job,writeback,ready]=await Promise.all([
     store.get(p.slug),createStagingStore(database).getFull(p.slug),
     createAiStore(database).getJobFull(p.slug),
     createWritebackStore(database).getFull(p.slug),
     createReadyStore(database).get(p.slug)
   ]);
-  if(!held.ok||held.state!=='DEFERRED'||held.revision!==p.expectedRevision||
-     !stage.ok||!job.ok||!writeback.ok||!ready.ok||
-     !candidate(ready.record,stage.record,job.job,writeback.record))
-    return fail('S06_HUMAN_ADOPTION_CONTEXT_UNVERIFIED');
+  if(!held.ok||held.revision!==p.expectedRevision||!stage.ok||!job.ok||!writeback.ok||!ready.ok)return fail('S06_HUMAN_ADOPTION_CONTEXT_UNVERIFIED');
   const s=stage.record,j=job.job,g=guard();
-  if(!g?.getSafeRouteReadiness||!g?.inspectStageEditor||
-     !g?.runNativeAiStep||!g?.observeReadOnly)
-    return fail('S06_HUMAN_DONOR_GUARD_UNAVAILABLE');
-  const before=await g.getSafeRouteReadiness(s.personaUid);
-  if(before?.ready!==true)return fail('S06_HUMAN_ROUTE_UNVERIFIED');
-  const editor=await g.inspectStageEditor(s.personaUid,s.slug,s.nonce);
-  const native=await g.runNativeAiStep(s.personaUid,{slug:s.slug,
-    nonce:s.nonce,action:'OBSERVE'});
-  if(editor?.ok!==true||editor.clean!==true||
-     native?.ok!==true||native.busy!==false||
-     native.editorClean!==true||native.sourceSaved!==true||
-     native.sessionDigest!==j.native?.sessionDigest||
-     native.hasQueue!==false||native.inputOccupied!==false||
-     native.attachmentsPending!==false)
-    return fail('S06_HUMAN_UNSAVED_OR_ACTIVE_EDITOR_DEFERRED');
+  if(message.type==='OPEN_HUMAN_EDITOR'){
+   if(held.state!=='DEFERRED'||!candidate(ready.record,s,j,writeback.record))return fail('S06_HUMAN_ADOPTION_CONTEXT_UNVERIFIED');
+   const stages=createStagingStore(database);let current=s;
+   if(current.state==='SOURCE_VERIFIED'){
+    const request=await stages.move(p.slug,current.revision,'HANDOFF_REQUESTED',{reason:'HUMAN_TAKEOVER'});if(!request.ok)return request;
+    current=(await stages.getFull(p.slug)).record;
+   }
+   if(current.state==='HANDOFF_REQUESTED'){
+    const release=await g?.releaseStagingTab?.(s.personaUid,p.slug,s.nonce);if(!release?.ok)return fail('HANDOFF_RELEASE_UNVERIFIED');
+    const moved=await stages.move(p.slug,current.revision,'HUMAN_OWNED');if(!moved.ok)return moved;
+   }
+   if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+   return g?.openHumanReview?.(s.personaUid,p.slug,s.nonce)||fail('S06_HUMAN_DONOR_GUARD_UNAVAILABLE');
+  }
+  if(!g?.getSafeRouteReadiness||!g?.inspectHumanReview||!g?.reclaimHumanReview||!g?.observeReadOnly)return fail('S06_HUMAN_DONOR_GUARD_UNAVAILABLE');
+  async function reclaim(row){
+   const current=await createStagingStore(database).getFull(p.slug);
+   if(!current.ok||current.record.revision!==row.childStageRevision||current.record.candidate?.fingerprint!==row.adoptedFingerprint||!current.record.humanReclaimPending)return fail('S06_HUMAN_RECLAIM_CHILD_CHANGED');
+   const out=await g.reclaimHumanReview(current.record.personaUid,p.slug,current.record.nonce,row.adoptedFingerprint);
+   if(!out?.ok||(await sentinel.inspect()).held)return {ok:false,code:'S06_HUMAN_EDITOR_RECLAIM_PENDING',human:row};
+   return store.finishReclaim(p.slug,row.revision);
+  }
+  const refresh=held.state==='ADOPTED_UNTESTED';
+  if(!refresh&&(held.state!=='DEFERRED'||!candidate(ready.record,s,j,writeback.record)))return fail('S06_HUMAN_ADOPTION_CONTEXT_UNVERIFIED');
+  if(refresh&&['DISPATCH_POSSIBLE','RUNNING_OBSERVED'].includes(j.native?.state))return fail('S06_HUMAN_ADOPTION_CONTEXT_UNVERIFIED');
+  const before=await g.getSafeRouteReadiness(s.personaUid);if(before?.ready!==true)return fail('S06_HUMAN_ROUTE_UNVERIFIED');
+  const editor=await g.inspectHumanReview(s.personaUid,s.slug,s.nonce);
+  if(!editor?.ok||editor.clean!==true)return fail('S06_HUMAN_UNSAVED_OR_ACTIVE_EDITOR_DEFERRED');
   const owner=await g.observeReadOnly(s.personaUid,false,s.slug);
   if(owner?.ok!==true||owner.principalFingerprint!==s.principalFingerprint||
      owner.original?.ownerResult!=='IS_OWNER'||
@@ -241,22 +272,9 @@ export function createS06HumanBoundary(api,{
     {path:'index.html',base64:encode(owner.original.html)},
     ...owner.original.assets]);
   if(!fresh.ok)return fail('S06_HUMAN_SAVED_BYTES_UNVERIFIED');
-  if(fresh.fingerprint===j.verifiedFinal)
-    return fail('S06_HUMAN_NO_CHANGED_SAVED_SOURCE');
-  const after=await g.getSafeRouteReadiness(s.personaUid);
-  const nativeAfter=await g.runNativeAiStep(s.personaUid,
-    {slug:s.slug,nonce:s.nonce,action:'OBSERVE'});
-  const editorAfter=await g.inspectStageEditor(s.personaUid,s.slug,s.nonce);
-  if(!after?.ready||after.routeId!==before.routeId||
-     after.cookieStoreId!==before.cookieStoreId||
-     nativeAfter?.ok!==true||nativeAfter.busy!==false||
-     nativeAfter.editorClean!==true||nativeAfter.sourceSaved!==true||
-     nativeAfter.sessionDigest!==native.sessionDigest||
-     nativeAfter.hasQueue!==false||nativeAfter.inputOccupied!==false||
-     nativeAfter.attachmentsPending!==false||
-     editorAfter?.ok!==true||editorAfter.clean!==true||
-     (await sentinel.inspect()).held)
-    return fail('S06_HUMAN_EDITOR_CHANGED_DURING_ADOPTION');
+  const after=await g.getSafeRouteReadiness(s.personaUid),editorAfter=await g.inspectHumanReview(s.personaUid,s.slug,s.nonce);
+  if(!after?.ready||after.routeId!==before.routeId||after.cookieStoreId!==before.cookieStoreId||!editorAfter?.ok||editorAfter.clean!==true||
+    editorAfter.noEditors!==editor.noEditors||editorAfter.tabId!==editor.tabId||editorAfter.sessionDigest!==editor.sessionDigest||editorAfter.humanEpoch!==editor.humanEpoch||(await sentinel.inspect()).held)return fail('S06_HUMAN_EDITOR_CHANGED_DURING_ADOPTION');
   // An intervening human save can leave the native session idle and clean
   // again. A fresh, independently observed full provider source is required
   // immediately before admitting this exact fingerprint into local testing.
@@ -277,8 +295,8 @@ export function createS06HumanBoundary(api,{
   if(!repeated.ok||repeated.fingerprint!==fresh.fingerprint||
      (await sentinel.inspect()).held)
     return fail('S06_HUMAN_SAVED_SOURCE_CHANGED_DURING_ADOPTION');
-  return store.adopt({name:p.slug,expectedRevision:p.expectedRevision,
-    source:fresh});
+  const adopted=await store.adopt({name:p.slug,expectedRevision:p.expectedRevision,source:fresh,editorObservation:{noEditors:editor.noEditors===true,tabId:editor.tabId??null,sessionDigest:editor.sessionDigest??null,humanEpoch:editor.humanEpoch??null}});
+  return adopted.ok?reclaim(adopted):adopted;
  }
  return Object.freeze({runTrusted});
 }

@@ -1036,6 +1036,10 @@ def main():
             else: raise RuntimeError('geckodriver did not become ready')
             # Exercise the changed operator journey first; all unchanged
             # persistent donor/source/backup suites still run after it passes.
+            from journey_development_ui import run as run_j04_primary
+            run_j04_primary(browser,archive,pathlib.Path(folder))
+            from journey_development_pipeline import run as run_j04_pipeline
+            run_j04_pipeline(browser,archive,pathlib.Path(folder))
             from journey_git_ui import run as run_j03_primary, run_empty as run_j03_empty
             run_j03_primary(browser,archive,pathlib.Path(folder))
             run_j03_empty(browser,archive,pathlib.Path(folder))
@@ -1243,7 +1247,7 @@ def main():
                 assert faithful['inventoryTabs']>=4 and faithful['sourceWriters']==1,faithful
                 print('B V015_TRUE_DESKTOP_PRIMARY_WORKSPACES_AND_REAL_HANDLERS=PASS',flush=True)
                 release_version=execute(after,"return {manifest:browser.runtime.getManifest().version,ui:document.documentElement.dataset.pcmsUiVersion,badge:document.querySelector('.v015-top-status')?.textContent};")
-                assert release_version.get('manifest')=='1.2.10',release_version
+                assert release_version.get('manifest')=='1.2.11',release_version
                 assert release_version.get('ui')=='0.1.5' and '0.1.5' in release_version.get('badge',''),release_version
                 print('B V015_REAL_FIREFOX_UPDATE_VERSION_AND_VISIBLE_UI_MARKER=PASS',flush=True)
                 # V016 acceptance: the PRECISE accepted prototype structure is
@@ -1267,7 +1271,7 @@ def main():
                      canonicalNative:!!document.getElementById('pcms-refresher-rows')&&
                        !!document.getElementById('pcms-release-approve')&&
                        !!document.getElementById('pcms-restore-apply')};""")
-                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.10',actual
+                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.11',actual
                 assert actual['routes']==6 and actual['visible'] and actual['nativeHidden'],actual
                 assert actual['sidebar'] and actual['primary']=='overview' and actual['styles'] and actual['canonicalNative'],actual
                 assert actual['badge']=='PCMS local · Not verified',actual
@@ -1355,12 +1359,14 @@ def main():
                   const legacyOpened=document.body.classList.contains('pcms-native-open');
                   drawer?.querySelector('button')?.click();
                   sh.querySelector('[data-nav="work-queue"]').click();
-                  sh.querySelector('[data-action="prepare-ai"]')?.click();
-                  const aiDrawer=sh.querySelector('[aria-label="Prepare verified AI development job"]');
-                  const primaryAiPreparation=!!aiDrawer&&
-                    !!aiDrawer.querySelector('input[placeholder="generator-slug"]')&&
-                    [...aiDrawer.querySelectorAll('button')].some(x=>x.textContent.includes('Verify stage and prepare'));
-                  aiDrawer?.querySelector('button')?.click();
+                  // Normal READY progression is autonomous. Actual full
+                  // source/controls/repair/publication effects are mandatory
+                  // in the J04 installed journey before this retained mapping.
+                  const primaryAiQueue=!!sh.querySelector('#queue-search')&&
+                    !!sh.querySelector('[data-filter="queue:All"]')&&
+                    !!sh.querySelector('[data-filter="queue:Waiting"]')&&
+                    !sh.querySelector('[data-action="prepare-ai"]')&&
+                    !sh.querySelector('[aria-label="Prepare verified AI development job"]');
                   sh.querySelector('[data-nav="settings"]').click();
                   sh.querySelector('[data-settings="automation"]').click();
                   const primaryPermission=sh.querySelector('.settings-main')?.textContent.includes('Standing permissions')&&
@@ -1403,9 +1409,9 @@ def main():
                     })&&
                     !/GIT_[A-Z_]+|NATIVE_[A-Z_]+|local[.]pcms[.]/.test(connected.textContent);
                   return {primaryCreate,legacyOpened,primaryPermission,primaryDiagnostic,
-                    primaryAi,primaryAiPreparation,protectedRestore,restoreHeld,restoredConnections,readableConnections,
+                    primaryAi,primaryAiQueue,protectedRestore,restoreHeld,restoredConnections,readableConnections,
                     drawerClosed:!sh.querySelector('[aria-label="Create generators"]')};""")
-                assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['primaryAi'] and r4_primary['primaryAiPreparation'] and r4_primary['protectedRestore'] and r4_primary['restoreHeld'] and r4_primary['restoredConnections'] and r4_primary['readableConnections'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
+                assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['primaryAi'] and r4_primary['primaryAiQueue'] and r4_primary['protectedRestore'] and r4_primary['restoreHeld'] and r4_primary['restoredConnections'] and r4_primary['readableConnections'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
                 print('B R4_PRIMARY_CREATION_AND_PROTECTED_SETTINGS_WITHOUT_LEGACY=PASS',flush=True)
 
                 # A09 post-acceptance regression: an independent read-only
@@ -1696,7 +1702,7 @@ def main():
                       readyInputFingerprint:input,testingSha:null,
                       accountId:'fixture-account',personaUid:'fixture-persona',
                       principalFingerprint:principal,remotePublicId:'fixture-remote',
-                      nonce:'fixture-nonce',bindingVersion:1}});
+                      nonce:'e'.repeat(32),bindingVersion:1}});
                     m.put({key:'ai-job:'+humanSlug,accountId:'fixture-account',job:{
                       slug:humanSlug,revision:7,stageRevision:4,
                       state:'TESTS_VERIFIED',sourceFingerprint:humanF.fingerprint,
@@ -1732,6 +1738,8 @@ def main():
                     getSafeRouteReadiness:async()=>({ready:true,
                       cookieStoreId:'fixture-ctx',routeId:'fixture-route'}),
                     inspectStageEditor:async()=>({ok:true,clean:true}),
+                    inspectHumanReview:async()=>({ok:true,clean:true,noEditors:true}),
+                    reclaimHumanReview:async()=>({ok:true,clean:true}),
                     runNativeAiStep:async()=>({ok:true,busy:false,editorClean:true,
                       sourceSaved:true,sessionDigest:session,hasQueue:false,
                       inputOccupied:false,attachmentsPending:false}),
@@ -1772,7 +1780,10 @@ def main():
                       slug:exceptionSlug,revision:4,state:'SOURCE_VERIFIED',verifiedAt:1,
                       candidate:humanF,previous:humanF,
                       sourceFolder:'generators/'+exceptionSlug,
-                      readyIdentifier:'rev-fixture-ex',readyInputFingerprint:input}});
+                      readyIdentifier:'rev-fixture-ex',readyInputFingerprint:input,
+                      accountId:'fixture-account',personaUid:'fixture-persona',
+                      principalFingerprint:principal,remotePublicId:'fixture-remote',
+                      nonce:'e'.repeat(32),bindingVersion:1}});
                     m.put({key:'ai-job:'+exceptionSlug,accountId:'fixture-account',job:{
                       slug:exceptionSlug,revision:7,stageRevision:4,
                       state:'TESTS_UNVERIFIED',sourceFingerprint:humanF.fingerprint,
@@ -1791,11 +1802,25 @@ def main():
                       hold:'AI_CHAT2_ISOLATION_UNVERIFIED'}});
                   });
                   const exceptionBefore=await call('EXCEPTION_CONTEXT',{slug:exceptionSlug});
-                  const exceptionRecorded=await call('RECORD_EXCEPTION',{
-                    slug:exceptionSlug,mode:'OPTIONAL_CHAT2_INCOMPLETE',
-                    checks:[],consent:'I PERFORMED THE RECORDED MANUAL CHECKS',
-                    expectedStageRevision:4,expectedJobRevision:7,
-                    sourceFingerprint:humanF.fingerprint});
+                  // The installed typed production boundary must capture a
+                  // fresh guarded idle/full-source proof; a port fixture cannot
+                  // assert that the real donor has an offline provider tab.
+                  // All negative/background-port reads above remain real.
+                  const releaseModule=await import(browser.runtime.getURL('pcms/release-boundary.mjs'));
+                  const exceptionGuard={...synthetic,observeReadOnly:async()=>({
+                    ok:true,principalFingerprint:principal,original:{
+                      remotePublicId:'fixture-remote',ownerResult:'IS_OWNER',
+                      visibility:'UNLISTED',pjs:'tested F fixture',
+                      html:'<main>tested F</main>',assets:[]}})};
+                  const guardedException=releaseModule.createReleaseBoundary(browser,{
+                    open:async()=>db,guard:()=>exceptionGuard});
+                  const exceptionRecorded=await guardedException.run({
+                    type:'RECORD_EXCEPTION',params:{
+                      slug:exceptionSlug,mode:'OPTIONAL_CHAT2_INCOMPLETE',
+                      checks:[],consent:'I PERFORMED THE RECORDED MANUAL CHECKS',
+                      expectedStageRevision:4,expectedJobRevision:7,
+                      sourceFingerprint:humanF.fingerprint}},
+                    {id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')});
                   const exceptionSaved=await call('GET_EXCEPTION',{slug:exceptionSlug});
                   const exceptionCycle=exceptionBefore?.ok===true&&
                     exceptionBefore.evidenceState==='TESTS_UNVERIFIED'&&
@@ -1832,6 +1857,9 @@ def main():
                     standingCode:standing?.reason,
                     forgedGrantCode:forgedGrant?.code,standingCycle,humanCycle,
                     humanAdoptedState:humanAdopted?.state,
+                    humanAdoptionCode:humanAdopted?.code||null,
+                    humanDeferCode:humanDeferred?.code||null,
+                    exceptionRecordCode:exceptionRecorded?.code||null,
                     exceptionCycle,exceptionMode:exceptionSaved?.mode,
                     positiveCode:entitled?.code||'GRANTED',
                     pauseCode:paused?.code||null,ui});
@@ -2395,9 +2423,21 @@ def main():
                     tests:['observed_smoke']},before.current.revision);
                   const later=await store.getPrompt();
                   const exported=store.exportPrompt(later.history);
+                  const sourceCore=await import('./staging-core.mjs');
+                  const baseline=await sourceCore.exactSource([
+                    {path:'main.pjs',base64:btoa('original I10 source')},
+                    {path:'index.html',base64:btoa('<p>original I10</p>')}]);
+                  const previous=await sourceCore.exactSource([
+                    {path:'main.pjs',base64:''},{path:'index.html',base64:''}]);
                   const stage={slug:'i10-b-private',revision:6,state:'SOURCE_VERIFIED',
-                    accountId:'account-i10',candidate:{fingerprint:'a'.repeat(64)},
-                    previous:{fingerprint:'b'.repeat(64)}};
+                    accountId:'account-i10',personaUid:'persona-i10',bindingVersion:1,
+                    remotePublicId:'remote-i10',nonce:'e'.repeat(32),verifiedAt:Date.now(),
+                    candidate:baseline,previous};
+                  // Preserve the real prior bytes in canonical stage storage:
+                  // the first changed native checkpoint must archive them.
+                  await new Promise((resolve,reject)=>{const t=db.transaction('meta','readwrite');
+                    t.oncomplete=resolve;t.onabort=()=>reject(Error('I10_STAGE_FIXTURE_ABORT'));
+                    t.objectStore('meta').put({key:'stage:'+stage.slug,record:stage});});
                   const prepared=await store.start(stage);
                   const blockedDuplicate=await store.start({...stage,slug:'i10-b-other'});
                   const untrusted=policy.applyAiEvidence(policy.beginAiJob({
@@ -2413,7 +2453,7 @@ def main():
                   const wrongProof=policy.applyAiEvidence(policy.beginAiJob({
                     stage,prompt:later.current}).job,{type:'TEST',chat:1,
                       name:'observed_smoke',result:'PASS',observedAt:1,
-                      sourceFingerprint:'a'.repeat(64),
+                      sourceFingerprint:baseline.fingerprint,
                       independentSource:'AI_PROSE'});
                   done({ok:before.ok&&updated.ok&&
                     later.current.revision===before.current.revision+1&&
@@ -2469,6 +2509,8 @@ def main():
                   ]);
                   const full=await store.checkpointSource('i10-b-private',idle.revision,snapshot);
                   const stored=await store.getJobFull('i10-b-private');
+                  const archived=await new Promise(resolve=>{const q=db.transaction('meta','readonly').objectStore('meta').get('ai-history:i10-b-private:'+idle.revision);q.onsuccess=()=>resolve(q.result?.job?.finalSource)});
+                  const archivedSource=archived?.blobs?await stageCore.exactSource(archived.blobs):null;
                   const port=msg=>new Promise(resolve=>{
                     const p=browser.runtime.connect({name:'pcms-i10-ai'});
                     p.onMessage.addListener(v=>{try{p.disconnect()}catch{}resolve(v)});
@@ -2485,12 +2527,17 @@ def main():
                     greetingOnly.code==='AI_SESSION_UNVERIFIED'&&
                     busy.ok&&idle.ok&&
                     full.ok&&stored.job.finalSource.blobs.length===3&&
+                    archivedSource?.ok===true&&archivedSource.fingerprint===archived.fingerprint&&
+                    archivedSource.blobs.length===2&&
+                    archivedSource.blobs.find(f=>f.path==='main.pjs')?.base64===btoa('original I10 source')&&
+                    archivedSource.blobs.find(f=>f.path==='index.html')?.base64===btoa('<p>original I10</p>')&&
                     stored.job.chat1.tests&&
                     stored.job.sourceFingerprint===snapshot.fingerprint&&
                     stored.job.state==='TESTS_UNVERIFIED'&&
                     denied.ok!==true,armed,repeat,recovered,denied,
                     greetingOnly,recoveredAgain,afterAgainRevision:afterAgain.revision,
-                    fingerprint:snapshot.fingerprint,held:stored.job.hold});
+                    fingerprint:snapshot.fingerprint,held:stored.job.hold,
+                    checkpointCode:full.code||null,archivedComplete:archivedSource?.ok===true});
                   db.close();
                 })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
                 ai_recovery=call('POST',f'/session/{after}/execute/async',
@@ -2602,7 +2649,8 @@ def main():
                     oldResult.code==='INDEPENDENT_TEST_EVIDENCE_REQUIRED'&&
                     pass.ok&&pass.state==='TESTS_VERIFIED'&&
                     pass.slotReleased===true&&
-                    noRepair.code==='AI_VERIFIED_FAILURE_AND_SESSION_REQUIRED'&&
+                    noRepair.code==='AI_EXECUTION_SLOT_RELEASED'&&
+                    final.job.native?.state==='CHAT1_OBSERVED_IDLE'&&
                     recheck.ok&&recheck.state==='TESTS_VERIFIED'&&
                     final.ok&&final.job.sourceFingerprint===F.fingerprint&&
                     final.job.finalSource.files.length===3&&

@@ -20,6 +20,7 @@ function s06ReadyMatches(stage,job,ready){
     job?.verifiedFinal===job?.sourceFingerprint);
 }
 const exceptionalEligible=(stage,job,origin,exception,ready)=>{
+  if(job?.operatorPaused)return fail('AI_OPERATOR_PAUSED');
   const evidence=authorizeS06Exception({ready,stage,job,record:exception});
   if(!evidence.ok)return evidence;
   if(job?.state==='TESTS_VERIFIED'||job?.verifiedFinal||
@@ -50,7 +51,7 @@ function transact(db,mode,run){
 }
 const eligible=(stage,job,origin)=>{
   if(!stage||stage.state!=='SOURCE_VERIFIED'||!stage.verifiedAt||
-     !job||job.stageRevision!==stage.revision||
+     !job||job.operatorPaused||job.stageRevision!==stage.revision||
      job.slug!==stage.slug||!fp(stage.candidate?.fingerprint)||
      !fp(job.sourceFingerprint)||job.sourceFingerprint!==job.verifiedFinal||
      !job.finalSource||job.finalSource.fingerprint!==job.verifiedFinal||

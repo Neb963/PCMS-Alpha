@@ -16,8 +16,16 @@ export function planAiStep(job,{oracleNames=['default_generator_smoke']}={}){
      !/^[a-f0-9]{64}$/.test(job.sourceFingerprint||'')||
      !job.prompt?.tests?.length||!job.chat1)
     return hold('AI_JOB_UNVERIFIED');
+  if(job.operatorPaused===true){
+    if(job.native?.state==='DISPATCH_POSSIBLE')return {ok:true,type:'PROBE_NATIVE',effect:'READ_ONLY_RECONCILE'};
+    if(job.native?.state==='RUNNING_OBSERVED')return {ok:true,type:'BEGIN_NATIVE',step:'STOP'};
+    if(idle.has(job.native?.state)&&!job.executionSlotReleased)return {ok:true,type:'PROBE_NATIVE',effect:'READ_ONLY_FULL_SOURCE'};
+    return hold('AI_OPERATOR_PAUSED');
+  }
   if(job.state==='HELD_NO_PROGRESS'||job.state==='HUMAN_OWNED')
     return hold(job.hold||'AI_TERMINAL_HOLD');
+  if(job.exceptionFrozen)return hold('AI_EXCEPTION_REVIEW_FROZEN');
+  if(job.awaitingExecutionSlot===true)return {ok:true,type:'ADMIT_JOB',revision:job.revision,effect:'LOCAL_CAPACITY_ONLY'};
   if(job.executionSlotReleased===true||job.state==='TESTS_VERIFIED')
     return hold('AI_VERIFIED_REVIEW_REQUIRED');
   if(!actionable.has(job.state)&&job.state!=='HELD_RECONCILE')
@@ -44,6 +52,10 @@ export function planAiStep(job,{oracleNames=['default_generator_smoke']}={}){
   if(!job.finalSource||job.finalSource.fingerprint!==job.sourceFingerprint)
     return {ok:true,type:'PROBE_NATIVE',revision:job.revision,
       effect:'READ_ONLY_FULL_SOURCE'};
+  if(job.operatorInstruction?.status==='QUEUED'){
+    if(isolatedChat2Missing)return hold('AI_CHAT2_ISOLATION_UNVERIFIED');
+    return {ok:true,type:'BEGIN_NATIVE',step:active===1?'CHAT1_INSTRUCT':'CHAT2_INSTRUCT',revision:job.revision};
+  }
   if(isolatedChat2Missing){
     // Browser-only reruns of Chat1 on the new final source are safe even
     // while fresh Chat2 OPFS/server isolation is unverified. Do not issue

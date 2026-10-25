@@ -1,3 +1,4 @@
+import {stageWasNotInvoked} from './stage-editor-bridge.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I09 private-only stage orchestration. UI cannot supply tab ids, page code,
 // source bytes, route or operation proof. There is NO automatic retry of a
@@ -142,7 +143,7 @@ export function createStagingBoundary(api,{
         remotePublicId:item.remoteId,principalFingerprint:account.identity.principalFingerprint};
       const baseline=await readPrevious(g,owner);
       if(!baseline.ok)return baseline;
-      if(baseline.source.files.length!==2||baseline.source.files.some(f=>f.size!==0))
+      if(eligible.origin==='ADOPTED_PRIVATE'?baseline.source.fingerprint!==eligible.originalSource?.fingerprint:baseline.source.files.length!==2||baseline.source.files.some(f=>f.size!==0))
         return fail('NOT_PRIVATE_EMPTY_NEW_TARGET');
       const routeAfter=await g.getSafeRouteReadiness(account.personaUid);
       if(!routeAfter?.ready||routeAfter.cookieStoreId!==route.cookieStoreId||
@@ -159,8 +160,8 @@ export function createStagingBoundary(api,{
       if(r.state==='HUMAN_OWNED')return {ok:true,state:'HUMAN_OWNED'};
       // Commit durable human intent FIRST. If crash, no automatic cleanup or
       // readmission; a tab with lost ownership evidence must remain open.
-      const held=await s.move(r.slug,r.revision,'HANDOFF_REQUESTED',
-        {reason:'HUMAN_TAKEOVER'});
+      const held=r.state==='HANDOFF_REQUESTED'?{ok:true,revision:r.revision}:
+        await s.move(r.slug,r.revision,'HANDOFF_REQUESTED',{reason:'HUMAN_TAKEOVER'});
       if(!held.ok)return held;
       if(!g.releaseStagingTab)return fail('HANDOFF_RELEASE_UNVERIFIED');
       let released;
@@ -213,7 +214,7 @@ export function createStagingBoundary(api,{
       // Marker is committed; any transport failure is now ambiguous.
       let result;
       try{result=await g.runStageStep(r.personaUid,{
-        slug:r.slug,nonce:r.nonce,remotePublicId:r.remotePublicId,
+        slug:r.slug,nonce:r.nonce,stageRevision:intent.revision,remotePublicId:r.remotePublicId,
         previousFingerprint:r.previous.fingerprint,
         previousFiles:r.previous.blobs,
         candidate:r.candidate.blobs
@@ -221,6 +222,10 @@ export function createStagingBoundary(api,{
       const after=await s.getFull(r.slug);
       if(!after.ok||after.record.state!=='DISPATCH_POSSIBLE')return fail('STAGING_UNCERTAIN');
       if(result?.ok!==true){
+        if(stageWasNotInvoked(result,after.record)){
+          await s.move(r.slug,after.record.revision,'PINNED',{reason:result.code});
+          return fail(result.code);
+        }
         await s.move(r.slug,after.record.revision,'HELD_UNCERTAIN',
           {reason:result?.code||'STAGING_EFFECT_UNCERTAIN'});
         return fail('STAGING_EFFECT_UNCERTAIN');
@@ -283,21 +288,22 @@ export function createStagingBoundary(api,{
              tabURL!=='https://perchance.org/'+msg.slug+'#edit'||
              Object.keys(msg).some(k=>!['slug','nonce'].includes(k)))
             return fail('UNTRUSTED_EDITOR');
-          const tag=await api.sessions?.getTabValue(tab.id,'pcmsI09Owned');
+          const tag=(await api.sessions?.getTabValue(tab.id,'pcmsI09Owned'))||
+            (await api.sessions?.getTabValue(tab.id,'pcmsHumanReview'));
           const actual=await api.tabs.get(tab.id);
           if(tag?.nonce!==msg.nonce||tag.slug!==msg.slug||
-             tag.createdBy!=='PCMS_I09'||actual?.cookieStoreId!==tag.cookieStoreId||
+             !['PCMS_I09','PCMS_C53_HANDOFF'].includes(tag.createdBy)||actual?.cookieStoreId!==tag.cookieStoreId||
              actual?.url!==tabURL)return fail('TAB_OWNER_UNKNOWN');
           const db=await database(),store=storeFactory(db),saved=await store.getFull(msg.slug);
           if(!saved.ok)return saved;
           const record=saved.record;
-          if(record.nonce!==msg.nonce||record.personaUid!==tag.personaUid||
-             record.state==='HUMAN_OWNED')return fail('HANDOFF_CONTEXT_CHANGED');
+          if(record.nonce!==msg.nonce||record.personaUid!==tag.personaUid)return fail('HANDOFF_CONTEXT_CHANGED');
+          if(record.state==='HUMAN_OWNED')return {ok:true,state:'HUMAN_OWNED'};
           if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
           // Durable intent precedes untag. If interrupted, tab must survive
           // and no auto retry of a dirty/ambiguous editor may occur.
-          const next=await store.move(msg.slug,record.revision,
-            'HANDOFF_REQUESTED',{reason:'HUMAN_TAKEOVER'});
+          const next=record.state==='HANDOFF_REQUESTED'?{ok:true,revision:record.revision}:
+            await store.move(msg.slug,record.revision,'HANDOFF_REQUESTED',{reason:'HUMAN_TAKEOVER'});
           if(!next.ok)return next;
           const release=await guard()?.releaseStagingTab?.(record.personaUid,msg.slug,msg.nonce);
           if(release?.ok!==true)return fail('HANDOFF_RELEASE_UNVERIFIED');

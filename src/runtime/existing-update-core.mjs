@@ -30,7 +30,7 @@ export async function unlockPrevious(checkpoint){
     return {ok:true,source};
   }catch{return fail('RECOVERY_CHECKPOINT_CORRUPT');}
 }
-export function authorizeSleepingUpdate({account,inventory,adoption,shadow,original,remote}){
+export function authorizeSleepingUpdate({account,inventory,adoption,shadow,original,remote,windowOverride=false}){
   if(!account||!inventory||!adoption||!original?.ok||!remote?.ok||
     account.state!=='VERIFIED'||account.revision!==adoption.accountRevision||
     account.identity?.source!=='GUARDED_SESSION_READBACK'||
@@ -45,8 +45,7 @@ export function authorizeSleepingUpdate({account,inventory,adoption,shadow,origi
     remote.remotePublicId!==inventory.remoteId||remote.ownerResult!=='IS_OWNER'||
     remote.visibility!=='PUBLIC'||
     original.fingerprint!==remote.source?.fingerprint||
-    shadow?.phase!=='SLEEPING'||!Number.isSafeInteger(shadow.sleepRemaining)||
-    shadow.sleepRemaining<=0||shadow.paused===true||shadow.slot===true||
+    (!windowOverride&&(shadow?.phase!=='SLEEPING'||!Number.isSafeInteger(shadow.sleepRemaining)||shadow.sleepRemaining<=0||shadow.slot===true))||shadow?.paused===true||
     shadow.identityHeld===true||shadow.reviewHeld===true||
     shadow.ownerVerified!==true||shadow.releaseVerified!==true||
     shadow.bindingVersion!==inventory.bindingVersion||

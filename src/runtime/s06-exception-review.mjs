@@ -4,6 +4,10 @@
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {evaluation} from './ai-evidence.mjs';
 import {exactSource} from './staging-core.mjs';
+import {captureExceptionalIdle,validExceptionalIdleProof,exceptionalIdleEvidence} from './exception-idle.mjs';
+import {createStagingStore} from './staging-store.mjs';
+import {createAiStore} from './ai-store.mjs';
+import {internalPcmsGuard} from './persona-guard.mjs';
 const fail=code=>({ok:false,code});
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const fp=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
@@ -16,7 +20,9 @@ const INFRASTRUCTURE=new Set([
  'AI_TEST_INFRASTRUCTURE_UNAVAILABLE','AI_ORACLE_UNAVAILABLE',
  'AI_NATIVE_SESSION_UNAVAILABLE','AI_CHAT2_ISOLATION_UNVERIFIED',
  'AI_SCHEDULER_BRIDGE_UNAVAILABLE'
+ ,'NATIVE_HELPER_UNAVAILABLE','AI_PROVIDER_NOT_AVAILABLE','NATIVE_AI_GUARD_UNAVAILABLE'
 ]);
+export const hasManualInfrastructure=job=>[job?.hold,job?.schedulerHold].some(code=>typeof code==='string'&&INFRASTRUCTURE.has(code.replace(/^AI_WAKE_/,'')));
 const validChecks=(checks,required)=>Array.isArray(checks)&&
   checks.length===required.length&&checks.length>0&&checks.length<=128&&
   new Set(checks.map(x=>x?.name)).size===checks.length&&
@@ -35,8 +41,9 @@ export function assessS06Exception({ready,stage,job,mode,checks}={}){
      job.stageRevision!==stage.revision||job.readyIdentifier!==active.identifier||
      job.readyInputFingerprint!==active.inputFingerprint||
      stage.state!=='SOURCE_VERIFIED'||!stage.verifiedAt||
-     job.executionSlotReleased!==true||
-     !['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(job.native?.state)||
+     job.executionSlotReleased!==true||job.operatorInstruction||
+     !(mode==='MANUAL_INFRASTRUCTURE'&&job.exceptionQuiescence==='NEVER_DISPATCHED_SOURCE'&&job.exceptionFrozen&&!job.native||
+       ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(job.native?.state))||
      !fp(job.sourceFingerprint)||job.finalSource?.fingerprint!==job.sourceFingerprint||
      !Array.isArray(job.finalSource?.blobs))
     return fail('S06_EXCEPTION_CANONICAL_SOURCE_UNVERIFIED');
@@ -50,8 +57,7 @@ export function assessS06Exception({ready,stage,job,mode,checks}={}){
       return fail('S06_OPTIONAL_CHAT2_EXCEPTION_INELIGIBLE');
     if(checks&&checks.length)return fail('S06_CHAT2_NO_MANUAL_PASS_INFERENCE');
   }else{
-    if(!INFRASTRUCTURE.has(job.hold)&&
-       !INFRASTRUCTURE.has(job.schedulerHold))
+    if(!hasManualInfrastructure(job))
       return fail('S06_MANUAL_INFRASTRUCTURE_NOT_PROVEN');
     if(!validChecks(checks,testedNames(job)))
       return fail('S06_MANUAL_CHECKS_INCOMPLETE');
@@ -111,7 +117,7 @@ export function createS06ExceptionStore(db){
   transact(db,false,(m,t,done)=>m.get(key(name)).onsuccess=e=>
     done(visible(e.target.result?.record)));
  async function record({name,mode,checks=[],consent,expectedStageRevision,
-   expectedJobRevision,sourceFingerprint}){
+   expectedJobRevision,sourceFingerprint,idleProof=null}){
   if(!slug(name)||!MODES.has(mode)||consent!==NOTICE||
      !Number.isSafeInteger(expectedStageRevision)||expectedStageRevision<1||
      !Number.isSafeInteger(expectedJobRevision)||expectedJobRevision<1||
@@ -127,7 +133,11 @@ export function createS06ExceptionStore(db){
         m.get('s06-change:'+name).onsuccess=child=>{
          const ready=rr.target.result?.record,stage=ss.target.result?.record,
           job=jj.target.result?.job,release=pub.target.result?.release;
-         const admit=assessS06Exception({ready,stage,job,mode,checks});
+         const freeze=validExceptionalIdleProof(idleProof,stage,job);
+         const evidence=exceptionalIdleEvidence(idleProof,stage,job);
+         const settled=freeze?{...job,revision:job.revision+1,executionSlotReleased:true,awaitingExecutionSlot:false,exceptionFrozen:true,
+          finalSource:evidence.source,exceptionQuiescence:evidence.kind}:job;
+         const admit=assessS06Exception({ready,stage,job:settled,mode,checks});
          if(!admit.ok){done(admit);return;}
          if(stage.revision!==expectedStageRevision||
             job.revision!==expectedJobRevision||
@@ -146,7 +156,7 @@ export function createS06ExceptionStore(db){
          }
          const rec={slug:name,revision:(previous?.revision||0)+1,
           state:'RECORDED',mode,sourceFingerprint,
-          stageRevision:stage.revision,jobRevision:job.revision,
+          stageRevision:stage.revision,jobRevision:settled.revision,
           readyIdentifier:ready.active.identifier,
           readyInputFingerprint:ready.active.inputFingerprint,
           manualChecks:checks.map(x=>({name:x.name,result:'PASS',
@@ -156,6 +166,7 @@ export function createS06ExceptionStore(db){
          if(previous)m.put({key:'s06-exception-history:'+name+':'+previous.revision,
            record:structuredClone(previous)});
          m.put({key:key(name),record:rec});
+         if(freeze)m.put({...jj.target.result,job:settled});
          t.objectStore('events').add({stage:'S06_EXCEPTION_MANUAL_REVIEW_RECORDED',
           slug:name,mode,sourceFingerprint,stageRevision:stage.revision,
           assertedBy:'EXPLICIT_OPERATOR',aiVerified:false,remoteEffects:'NONE'});
@@ -170,7 +181,7 @@ export function createS06ExceptionStore(db){
  }
  return Object.freeze({get,getFull,record});
 }
-export function createS06ExceptionBoundary(api,{open=openCanonicalDatabase}={}){
+export function createS06ExceptionBoundary(api,{open=openCanonicalDatabase,guard=internalPcmsGuard}={}){
  const sentinel=createRestoreSentinel(api.storage.local);
  let dbPromise;const database=()=>dbPromise||=open();
  async function runTrusted(msg){
@@ -178,10 +189,16 @@ export function createS06ExceptionBoundary(api,{open=openCanonicalDatabase}={}){
   if(msg.type==='GET_EXCEPTION')return store.get(p.slug);
   if(msg.type!=='RECORD_EXCEPTION')return fail('S06_EXCEPTION_ACTION_INVALID');
   if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+  const [stage,job]=await Promise.all([createStagingStore(db).getFull(p.slug),createAiStore(db).getJobFull(p.slug)]);
+  if(!stage.ok||!job.ok||stage.record.revision!==p.expectedStageRevision||job.job.revision!==p.expectedJobRevision||job.job.sourceFingerprint!==p.sourceFingerprint)
+   return fail('S06_EXCEPTION_CONTEXT_CHANGED');
+  if(evaluation(job.job).state==='KNOWN_FAILURE')return fail('S06_EXCEPTION_KNOWN_FAILURE_BLOCKED');
+  const idleProof=await captureExceptionalIdle({guard:guard(),stage:stage.record,job:job.job,held:async()=>(await sentinel.inspect()).held});
+  if(!idleProof.ok)return idleProof;
   return store.record({name:p.slug,mode:p.mode,checks:p.checks,
    consent:p.consent,expectedStageRevision:p.expectedStageRevision,
    expectedJobRevision:p.expectedJobRevision,
-   sourceFingerprint:p.sourceFingerprint});
+   sourceFingerprint:p.sourceFingerprint,idleProof});
  }
  return Object.freeze({runTrusted});
 }

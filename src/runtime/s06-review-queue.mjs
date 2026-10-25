@@ -1,3 +1,6 @@
+import {planAiStep} from './ai-supervisor.mjs';
+import {AI_BROWSER_ASSERTIONS} from './perchance-ai-oracle.mjs';
+import {matchesReviewGroup} from './review-queue-state.mjs';
 // S06 operator queue: cursor-paged canonical READ ONLY projection. Not an
 // approval/effect authority. Every listed status is derived from persisted
 // READY, exact staged/tested F, Git lineage and release state on this read.
@@ -11,18 +14,18 @@ import {createS06HumanStore} from './s06-human-review.mjs';
 import {createS06ExceptionStore} from './s06-exception-review.mjs';
 import {planS06Writeback} from './s06-writeback-progress.mjs';
 const fail=code=>({ok:false,code});
-export function s06ReviewStatus({decision,release,change,human,exception,sourceFingerprint,stageRevision}={}){
+export function s06ReviewStatus({decision,release,change,human,exception,sourceFingerprint,stageRevision,jobRevision,parentStageRevision,job,currentReady=false}={}){
   const r=release?.record||release;
   // An uncertain release cannot be reapproved from a new queue projection.
   if(r&&['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN',
       'RECOVERY_HOLD'].includes(r.state))
     return {state:'PUBLICATION_UNCERTAIN',code:'RECONCILE_ONLY'};
-  if(human?.state==='DEFERRED'&&human.parentStageRevision===stageRevision)
+  if(human?.state==='DEFERRED'&&[stageRevision,parentStageRevision].includes(human.parentStageRevision))
     return {state:'HUMAN_DEFERRED',code:'PRESERVE_EDITOR_WORK_ADOPT_OR_DEFER'};
   if(human?.state==='ADOPTED_UNTESTED'&&
      human.childStageRevision===stageRevision&&!decision?.ok)
     return {state:'IN_DEVELOPMENT',code:'ADOPTED_HUMAN_SOURCE_RETEST_REQUIRED'};
-  if(change?.state==='REQUESTED')
+  if(change?.state==='REQUESTED'&&change.parentStageRevision===stageRevision)
     return {state:'CHANGES_REQUESTED',code:'AWAITING_GUARDED_CHILD_ADMISSION'};
   // Child admission is not a permanent queue status. Once tests and the
   // independently attributed Git F are verified, the new F must become
@@ -32,9 +35,10 @@ export function s06ReviewStatus({decision,release,change,human,exception,sourceF
     return {state:'IN_DEVELOPMENT',code:'REQUEST_CHILD_RETESTING'};
   if(r?.state==='APPROVED')
     return r.approval?.sourceFingerprint===sourceFingerprint?
-      {state:'APPROVED',code:'HUMAN_APPROVAL_HELD_FOR_DISPATCH'}:
+      {state:r.progressHold?'APPROVED_HELD':'APPROVED',code:r.progressHold||'HUMAN_APPROVAL_HELD_FOR_DISPATCH'}:
       {state:'BLOCKED',code:'PRIOR_APPROVAL_SOURCE_CHANGED'};
-  if(r?.state==='CONFIRMED_PUBLIC'&&r.approval?.sourceFingerprint===sourceFingerprint)
+  if(r?.state==='CONFIRMED_PUBLIC'&&r.approval?.sourceFingerprint===sourceFingerprint&&
+     r.approval.stageRevision===stageRevision&&r.approval.jobRevision===jobRevision&&decision?.ok&&decision.type==='REVIEW')
     return {state:'CONFIRMED_PUBLIC',code:'INDEPENDENT_PUBLIC_READBACK'};
   if(exception?.state==='RECORDED'&&exception.stageRevision===stageRevision&&
      exception.sourceFingerprint===sourceFingerprint)
@@ -44,6 +48,10 @@ export function s06ReviewStatus({decision,release,change,human,exception,sourceF
         code:'EXACT_EXCEPTIONAL_GIT_F_INDIVIDUAL_APPROVAL_REQUIRED'}:
       {state:'EXCEPTION_HELD',
         code:'HUMAN_CHECKS_RECORDED_NOT_AI_VERIFIED_OR_GIT_CONFIRMED'};
+  if(!decision?.ok&&job&&currentReady&&job.stageRevision===stageRevision&&!job.operatorPaused&&!job.exceptionFrozen&&
+     !(job.schedulerHold&&(job.schedulerDeferredUntil||0)>Date.now())&&
+     decision?.code==='S06_CANDIDATE_OR_TEST_EVIDENCE_UNVERIFIED'&&planAiStep(job,{oracleNames:AI_BROWSER_ASSERTIONS}).ok)
+    return {state:job.native?.state==='RUNNING_OBSERVED'?'DEVELOPMENT_RUNNING':'IN_DEVELOPMENT',code:'AUTOMATIC_DEVELOPMENT_IN_PROGRESS'};
   if(!decision?.ok)return {state:'BLOCKED',code:decision?.code||'CANDIDATE_UNVERIFIED'};
   if(decision.type==='REVIEW')
     return {state:'READY_FOR_REVIEW',code:'EXACT_TESTED_GIT_F_VERIFIED'};
@@ -59,13 +67,15 @@ export function createS06ReviewQueue(db){
     releaseStore=createReleaseStore(db),changeStore=createS06ChangeStore(db),
     humanStore=createS06HumanStore(db),
     exceptionStore=createS06ExceptionStore(db);
-  async function list({after='',limit=50}={}){
+  async function list({after='',limit=50,query='',status='ALL'}={}){
     if(typeof after!=='string'||after.length>100||
-       !Number.isSafeInteger(limit)||limit<1||limit>100)
+       !Number.isSafeInteger(limit)||limit<1||limit>100||typeof query!=='string'||query.length>100||
+       !['ALL','NEEDS_ACTION','RUNNING','WAITING','COMPLETED'].includes(status))
       return fail('S06_REVIEW_PAGE_INVALID');
-    const snapshot=await readyStore.list({after,limit});
+    const requestedGroup=status,items=[];let cursor=after;
+    for(;;){
+    const snapshot=await readyStore.list({after:cursor,limit:Math.min(100,Math.max(40,limit+1)),query});
     if(!snapshot.ok)return snapshot;
-    const items=[];
     for(const item of snapshot.items){
       const [ready,stage,job,writeback,release,change,human,exception]=await Promise.all([
         readyStore.get(item.slug),stageStore.getFull(item.slug),
@@ -84,8 +94,12 @@ export function createS06ReviewQueue(db){
         release:release.ok?release:null,sourceFingerprint,
         change:change.ok?change:null,human:human.ok?human:null,
         exception:exception.ok?exception:null,
-        stageRevision:stage.ok?stage.record.revision:null});
-      items.push({slug:item.slug,revision:item.revision,
+        currentReady:!!(stage.ok&&ready.record.active&&!ready.record.desired&&!ready.record.hold&&ready.record.active.identifier===stage.record.readyIdentifier&&ready.record.active.inputFingerprint===stage.record.readyInputFingerprint),
+        stageRevision:stage.ok?stage.record.revision:null,jobRevision:job.ok?job.job.revision:null,job:job.ok?job.job:null,
+        parentStageRevision:stage.ok?stage.record.handoffParentRevision:null});
+      if(!matchesReviewGroup(status.state,requestedGroup))continue;
+      const visibility=await new Promise((resolve,reject)=>{const q=db.transaction('meta','readonly').objectStore('meta').get('inventory:'+item.slug);q.onsuccess=()=>resolve(q.result?.generator?.visibility);q.onerror=reject});
+      items.push({providerVisibility:visibility,slug:item.slug,revision:item.revision,development:job.ok,readyCandidate:item,
         state:status.state,code:status.code,
         sourceFingerprint:decision.ok&&decision.type==='REVIEW'?
           decision.sourceFingerprint:null,
@@ -94,9 +108,12 @@ export function createS06ReviewQueue(db){
           decision.mode!=='S06_EXCEPTION',
         releaseRevision:release.ok?release.record.revision:null,
         releaseId:release.ok?release.record.releaseId:null});
+      if(items.length>limit)return {ok:true,items:items.slice(0,limit),more:true,nextCursor:items[limit-1].slug};
     }
-    return {ok:true,items,more:snapshot.more,
-      nextCursor:snapshot.nextCursor};
+    if(!snapshot.more)return {ok:true,items,more:false,nextCursor:null};
+    if(!snapshot.nextCursor||snapshot.nextCursor<=cursor)return fail('S06_QUEUE_CURSOR_UNVERIFIED');
+    cursor=snapshot.nextCursor;
+    }
   }
   return Object.freeze({list});
 }

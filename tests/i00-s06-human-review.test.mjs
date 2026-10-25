@@ -103,8 +103,6 @@ test('C-53 stale/ambiguous attempts cannot erase human work or alter approval',a
  const x=await fixture();
  const held=await x.defer();
  assert.equal((await x.store.adopt({name,expectedRevision:held.revision,
-   source:x.F})).code,'S06_HUMAN_SAVED_SOURCE_OR_RELEASE_CHANGED');
- assert.equal((await x.store.adopt({name,expectedRevision:held.revision,
    source:{...x.H,blobs:x.F.blobs}})).code,'S06_HUMAN_SOURCE_PROOF_INVALID');
  assert.equal((await x.store.adopt({name,expectedRevision:held.revision,
    source:{...x.H,files:x.F.files}})).code,'S06_HUMAN_SOURCE_PROOF_INVALID');
@@ -136,6 +134,8 @@ test('C-53 boundary adopts only stable guarded saved source, never unsaved draft
  const guard={
   getSafeRouteReadiness:async()=>({ready:true,routeId:'route-1',cookieStoreId:'ctx-1'}),
   inspectStageEditor:async()=>({ok:true,clean:!dirty}),
+  inspectHumanReview:async()=>({ok:!dirty,clean:!dirty,noEditors:false,sessionDigest:digest}),
+  reclaimHumanReview:async()=>({ok:true}),
   runNativeAiStep:async()=>native(),
   observeReadOnly:async()=>{
    observations++;
@@ -154,11 +154,7 @@ test('C-53 boundary adopts only stable guarded saved source, never unsaved draft
   params:{slug:name,expectedRevision:held.revision}})).code,
   'S06_HUMAN_UNSAVED_OR_ACTIVE_EDITOR_DEFERRED');
  assert.equal(observations,0);
- dirty=false;changed=true;
- assert.equal((await b.runTrusted({type:'ADOPT_HUMAN',
-  params:{slug:name,expectedRevision:held.revision}})).code,
-  'S06_HUMAN_NO_CHANGED_SAVED_SOURCE');
- changed=false;
+ dirty=false;changed=false;
  raceSecondSave=true;
  assert.equal((await b.runTrusted({type:'ADOPT_HUMAN',
   params:{slug:name,expectedRevision:held.revision}})).code,
@@ -206,4 +202,14 @@ test('C-53 unrelated public receipt cannot authorize adoption of another prior-g
  });
  assert.equal((await x.defer()).code,'S06_HUMAN_CONTEXT_CHANGED');
  assert.equal(x.db.read('meta','s06-human:'+name),undefined);
+});
+
+test('C-53 explicit unchanged saved-source adoption returns to automation with fresh untested lineage',async()=>{
+ const x=await fixture(),held=await x.defer();
+ const adopted=await x.store.adopt({name,expectedRevision:held.revision,source:x.F});
+ assert.equal(adopted.state,'ADOPTED_UNTESTED',JSON.stringify(adopted));
+ const child=x.db.read('meta','ai-job:'+name).job;
+ assert.equal(child.verifiedFinal,null);assert.equal(child.sourceFingerprint,x.F.fingerprint);
+ assert.equal(child.state,'PENDING_NATIVE_SESSION');assert.equal(child.awaitingExecutionSlot,true);
+ assert.equal(x.db.read('meta','ai-history:'+name+':7').job.verifiedFinal,x.F.fingerprint);
 });

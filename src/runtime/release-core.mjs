@@ -11,6 +11,16 @@ export const RELEASE_STATES=Object.freeze([
 ]);
 const fp=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
 const slug=v=>typeof v==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(v);
+// Existing-update provenance takes precedence even when published P was empty.
+export function releaseCandidateKind(stage,inventory,existing=null){
+ if(!existing&&stage?.sourceOrigin==='ADOPTED_PRIVATE')return 'PRIVATE_EXISTING';
+ if(existing||stage?.sourceOrigin==='EXISTING_UPDATE'||
+    (inventory?.management&&inventory.management!=='MANAGED_CREATED'))return 'EXISTING_UPDATE';
+ if(stage?.sourceOrigin==='PRIVATE_NEW')return 'PRIVATE_NEW';
+ // Legacy private candidates have no explicit origin. Existing records and
+ // canonical adoption/management still take precedence over this migration case.
+ return stage?.previous?.files?.length===2&&stage.previous.files.every(f=>f.size===0)?'PRIVATE_NEW':'EXISTING_UPDATE';
+}
 export function releaseContext(stage,account,inventory) {
   if(!stage||!account||!inventory||!slug(stage.slug)||
      inventory.slug!==stage.slug||inventory.accountId!==stage.accountId||

@@ -372,12 +372,14 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { inspectRoutePin, routePinsReady, reloadRoutePins } from "./pcms/route-pin.mjs";\nimport { issueBoundPersonaCreatePermit, issueExistingPersonaTagPermit } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest, fetchViaExit as pcmsFetchViaExit } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain, perchanceRefresherCleanMain } from "./pcms/perchance-existing.mjs";\nimport { choosePrivateStageAdapter } from "./pcms/ready-native-source.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { inspectRoutePin, routePinsReady, reloadRoutePins } from "./pcms/route-pin.mjs";\nimport { issueBoundPersonaCreatePermit, issueExistingPersonaTagPermit } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest, fetchViaExit as pcmsFetchViaExit } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain, perchanceRefresherCleanMain } from "./pcms/perchance-existing.mjs";\nimport { choosePrivateStageAdapter } from "./pcms/ready-native-source.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";\nimport { createHumanEditorBridge, handoffHumanEditor } from "./pcms/human-editor-bridge.mjs";\nimport { createManualEditorBridge } from "./pcms/manual-editor-bridge.mjs";\nimport { createStageEditorBridge } from "./pcms/stage-editor-bridge.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
 attachPcmsGuard({
   initialize, securityState,
+  humanReviewTab:createHumanEditorBridge({browser,getState}),
+  manualEditorTab:createManualEditorBridge({browser,getState}),
   shared: managementIntegration.pcmsGuard,
   // Donor's currentTest validates the route-test context and invalidates
   // stale/rotated/failed route evidence; it does not trigger a network probe.
@@ -545,79 +547,7 @@ attachPcmsGuard({
 
   // One donor-guarded, protected-container stage tab; never touch an
   // unrelated human editor or reuse a tab merely because its number matches.
-  stageIsolatedTab: async ({personaUid,cookieStoreId,routeId},request) => {
-    const valid=typeof request?.slug==='string'&&
-      /^[a-z0-9][a-z0-9-]{0,99}$/.test(request.slug)&&
-      /^[a-f0-9]{32}$/.test(request.nonce)&&
-      Array.isArray(request.candidate)&&request.candidate.length>=2&&
-      request.candidate.length<=502&&
-      Array.isArray(request.previousFiles)&&request.previousFiles.length>=2&&
-      request.previousFiles.length<=502;
-    if(!valid)return {ok:false,code:'INVALID_STAGING_REQUEST'};
-    const tagKey='pcmsI09Owned';
-    const before=await getState(),profile=before.profiles?.[cookieStoreId];
-    if(!profile||profile.personaUid!==personaUid||profile.routeId!==routeId||
-       routeId==='direct'||routeId==='block'||!before.routes?.[routeId]||
-       before.routes[routeId].enabled===false)
-      return {ok:false,code:'PERSONA_ROUTE_CHANGED'};
-    const tabs=await browser.tabs.query({});
-    const url='https://perchance.org/'+request.slug+'#edit';
-    // A conflicting human/PCMS editor anywhere in this same container or
-    // at this target is not safe to overwrite.
-    if(tabs.some(t=>t?.url?.startsWith('https://perchance.org/'+request.slug)&&
-        (t.cookieStoreId===cookieStoreId||t.url?.includes('#edit'))))
-      return {ok:false,code:'HUMAN_OR_AMBIGUOUS_EDITOR'};
-    const tab=await browser.tabs.create({url,cookieStoreId,active:false});
-    if(!Number.isSafeInteger(tab?.id))return {ok:false,code:'TAB_CREATE_UNVERIFIED'};
-    // An interruption before tagging leaves a HUMAN-PRESERVED unknown tab.
-    await browser.sessions.setTabValue(tab.id,tagKey,{
-      slug:request.slug,nonce:request.nonce,personaUid,cookieStoreId,
-      createdBy:'PCMS_I09',humanIntent:false
-    });
-    const identity=await browser.sessions.getTabValue(tab.id,tagKey);
-    const current=await browser.tabs.get(tab.id),again=await getState();
-    if(identity?.nonce!==request.nonce||current?.cookieStoreId!==cookieStoreId||
-       current?.url!==url||again.profiles?.[cookieStoreId]?.personaUid!==personaUid||
-       again.profiles?.[cookieStoreId]?.routeId!==routeId)
-      return {ok:false,code:'TAB_CONTEXT_UNVERIFIED'};
-    await browser.scripting.executeScript({
-      target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
-      func:renderPcmsEditorStrip,args:[{
-        slug:request.slug,nonce:request.nonce,
-        accountId:'Verified account',personaUid
-      }]
-    });
-    // Both fixed adapters are already packaged inside the same verified
-    // donor extension. PRIVATE_INITIAL stays in the strict empty-only
-    // adapter; PRIVATE_SUCCESSOR uses I13's exact old-P comparison and
-    // complete replace/delete semantics, not a weaker ad-hoc write.
-    const selection=choosePrivateStageAdapter(request.previousFiles);
-    if(!selection.ok)return selection;
-    const native=selection.adapter==='PRIVATE_EMPTY_I09'?{
-      func:perchanceStageMain,
-      args:[{slug:request.slug,files:request.candidate}]
-    }:{
-      func:perchanceExistingMain,
-      args:[{action:'STAGE',slug:request.slug,nonce:request.nonce,
-        previousFiles:request.previousFiles,targetFiles:request.candidate}]
-    };
-    const results=await browser.scripting.executeScript({
-      target:{tabId:tab.id,frameIds:[0]},world:'MAIN',
-      func:native.func,args:native.args
-    });
-    const post=await browser.tabs.get(tab.id),receipt=await browser.sessions.getTabValue(tab.id,tagKey);
-    const after=await getState();
-    if(post?.url!==url||post.cookieStoreId!==cookieStoreId||
-       receipt?.nonce!==request.nonce||receipt.humanIntent===true||
-       after.profiles?.[cookieStoreId]?.personaUid!==personaUid||
-       after.profiles?.[cookieStoreId]?.routeId!==routeId)
-      return {ok:false,code:'STAGING_TAB_OR_ROUTE_CHANGED'};
-    if(results?.length!==1||results[0].frameId!==0||results[0].error||
-       results[0].result?.ok!==true)
-      return {ok:false,code:results?.[0]?.result?.code||'EDITOR_SAVE_UNKNOWN'};
-    return {ok:true,code:'SAVE_ACK_ONLY',
-      tab:{tabId:tab.id,cookieStoreId,ownershipNonce:request.nonce,location:url}};
-  },
+  stageIsolatedTab:createStageEditorBridge({browser,getState}),
   // A current native editor clean/owner observation must accompany the
   // independent saved-byte readback before staged source is accepted.
   // S05 local preflight: read-only source/editor conflict check, guarded by
@@ -943,23 +873,7 @@ attachPcmsGuard({
   },
   // A human handoff never closes/navigates a tab, and never releases donor
   // automation ownership or any unmatched/recycled tab.
-  handoffStagingTab: async ({personaUid,slug,nonce}) => {
-    if(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)||
-       typeof nonce!=='string'||!/^[a-f0-9]{32}$/.test(nonce))
-      return {ok:false,code:'HANDOFF_IDENTITY_INVALID'};
-    const tabs=await browser.tabs.query({}),found=[];
-    for(const t of tabs){
-      if(!Number.isSafeInteger(t?.id))continue;
-      let value;
-      try{value=await browser.sessions.getTabValue(t.id,'pcmsI09Owned');}catch{continue;}
-      if(value?.nonce===nonce&&value.slug===slug&&value.personaUid===personaUid)
-        found.push({tab:t,tag:value});
-    }
-    if(found.length!==1||found[0].tab.url!=='https://perchance.org/'+slug+'#edit')
-      return {ok:false,code:'HANDOFF_TAB_UNVERIFIED'};
-    await browser.sessions.removeTabValue(found[0].tab.id,'pcmsI09Owned');
-    return {ok:true,code:'HUMAN_TAB_RETAINED'};
-  },
+  handoffStagingTab: ({personaUid,slug,nonce})=>handoffHumanEditor(browser,{personaUid,slug,nonce}),
   openHumanLogin: async ({personaUid,cookieStoreId,routeId,slug}) =>
     localMutationFence(cookieStoreId,async()=>{
       const state=await getState(), p=state.profiles?.[cookieStoreId];
@@ -1098,8 +1012,8 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   // Mullvad IPv6 echo endpoint, under the same single-request binding.
   bg = substituteOnce(bg, "    || target === canonicalNetworkUrl(MULLVAD_IPV4_CHECK_URL)\n", "    || target === canonicalNetworkUrl(MULLVAD_IPV4_CHECK_URL)\n    || target === canonicalNetworkUrl(PCMS_IPV6_CHECK_URL)\n", "S01 IPv6 route-test endpoint");
   bg = substituteOnce(bg, 'const MULLVAD_IPV4_CHECK_URL = "https://ipv4.am.i.mullvad.net/json";', 'const MULLVAD_IPV4_CHECK_URL = "https://ipv4.am.i.mullvad.net/json";\nconst PCMS_IPV6_CHECK_URL = "https://ipv6.am.i.mullvad.net/json";', "S01 IPv6 echo constant");
-  bg = substituteOnce(bg,"attachPcmsGuard({\n  initialize, securityState,\n  shared:",
-  "attachPcmsGuard({\n  initialize, securityState,\n  readRuntimeWitness:()=>nativeRequest('pcms.runtime_witness',{},6000),\n  shared:",
+  bg = substituteOnce(bg,"attachPcmsGuard({\n  initialize, securityState,\n  humanReviewTab:createHumanEditorBridge({browser,getState}),\n  manualEditorTab:createManualEditorBridge({browser,getState}),\n  shared:",
+  "attachPcmsGuard({\n  initialize, securityState,\n  readRuntimeWitness:()=>nativeRequest('pcms.runtime_witness',{},6000),\n  humanReviewTab:createHumanEditorBridge({browser,getState}),\n  manualEditorTab:createManualEditorBridge({browser,getState}),\n  shared:",
   'S01 guard native witness binding');
   // Preserve donor's normalized durable binding tag in the BUILD COPY only.
   const donorStoragePath = path.join(stage, 'lib/storage.js');
@@ -1111,11 +1025,11 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   await writeFile(donorStoragePath,donorStorage);
 
   await writeFile(bgPath, bg);
-  for (const name of ['legacy-quarantine.mjs','creation-intake.mjs','creation-batch.mjs','creation-preview.mjs','creation-allocation.mjs','creation-authority.mjs','creation-inventory.mjs','creation-import-authority.mjs','creation-effects.mjs','creation-git.mjs','creation-git-owner.mjs','creation-git-runner.mjs','creation-runner.mjs','creation-watch.mjs','coordinator-core.mjs','coordinator-store.mjs','coordinator-boundary.mjs','s08-cleanup-boundary.mjs','pcms-donor-fence.mjs','network-ledger.mjs','route-pin.mjs','enrollment.mjs','qualified-clock.mjs','entry.mjs', 'wake.mjs', 'dashboard-action.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'git-catalog.mjs', 'git-local-secret.mjs', 'identity-reconciliation.mjs', 'git-prompt.mjs', 'catalog-bootstrap.mjs', 'catalog-import.mjs', 'catalog-import-preview.mjs', 'catalog-prompt-store.mjs', 'catalog-resume.mjs', 'catalog-declaration.mjs', 'catalog-ready-store.mjs', 'ready-planner.mjs', 'ready-git-prompt.mjs', 'ready-git-source.mjs', 'ready-native-source.mjs', 'ai-declarative-assertion.mjs', 'ready-ai-gate.mjs', 'ready-source-safety.mjs', 'ready-store.mjs', 'ready-intake.mjs', 'ready-operator.mjs', 'ready-development.mjs', 's06-output-proof.mjs', 's06-writeback-progress.mjs', 's06-review-queue.mjs', 's06-request-changes.mjs', 's06-human-review.mjs', 's06-exception-review.mjs', 's06-standing-authority.mjs','s06-authority-bootstrap.mjs', 'readiness-boundary.mjs','catalog-boundary.mjs', 'catalog-identity-review.mjs','folder-existing-rename.mjs','folder-rename-link.mjs','folder-rename-safety.mjs','folder-identity-boundary.mjs', 'creation-catalog.mjs', 'catalog-watch.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'original-archive.mjs','adoption-recovery.mjs','adoption-recovery-bridge.mjs', 'adoption-boundary.mjs',
+  for (const name of ['legacy-quarantine.mjs','creation-intake.mjs','creation-batch.mjs','creation-preview.mjs','creation-allocation.mjs','creation-authority.mjs','creation-inventory.mjs','creation-import-authority.mjs','creation-effects.mjs','creation-git.mjs','creation-git-owner.mjs','creation-git-runner.mjs','creation-runner.mjs','creation-watch.mjs','coordinator-core.mjs','coordinator-store.mjs','coordinator-boundary.mjs','s08-cleanup-boundary.mjs','pcms-donor-fence.mjs','network-ledger.mjs','route-pin.mjs','enrollment.mjs','qualified-clock.mjs','entry.mjs', 'wake.mjs', 'dashboard-action.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'git-catalog.mjs', 'git-local-secret.mjs', 'identity-reconciliation.mjs', 'git-prompt.mjs', 'catalog-bootstrap.mjs', 'catalog-import.mjs', 'catalog-import-preview.mjs', 'catalog-prompt-store.mjs', 'catalog-resume.mjs', 'catalog-declaration.mjs', 'catalog-ready-store.mjs', 'ready-planner.mjs', 'ready-git-prompt.mjs', 'ready-git-source.mjs', 'ready-native-source.mjs', 'ai-declarative-assertion.mjs', 'ready-ai-gate.mjs', 'ready-source-safety.mjs', 'ready-store.mjs', 'ready-intake.mjs', 'ready-operator.mjs', 'ready-development.mjs', 's06-output-proof.mjs', 's06-writeback-progress.mjs','s06-publication-progress.mjs','clean-bulk-authority.mjs','clean-bulk-release.mjs','clean-bulk-boundary.mjs', 's06-review-queue.mjs', 's06-request-changes.mjs', 's06-human-review.mjs', 's06-exception-review.mjs','exception-idle.mjs', 's06-standing-authority.mjs','s06-authority-bootstrap.mjs', 'readiness-boundary.mjs','catalog-boundary.mjs', 'catalog-identity-review.mjs','folder-existing-rename.mjs','folder-rename-link.mjs','folder-rename-safety.mjs','folder-identity-boundary.mjs', 'creation-catalog.mjs', 'catalog-watch.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'original-archive.mjs','adoption-recovery.mjs','adoption-recovery-bridge.mjs', 'adoption-boundary.mjs',
     'staging-core.mjs','staging-store.mjs','staging-boundary.mjs',
-    'perchance-stage.mjs','editor-strip.mjs','perchance-editor-probe.mjs','perchance-ai-native.mjs','perchance-ai-oracle.mjs','perchance-ai-opfs.mjs','perchance-ai-history.mjs','ai-supervisor.mjs','ai-testing.mjs','ai-evidence.mjs','ai-store.mjs','ai-boundary.mjs',
+    'human-editor-bridge.mjs','manual-editor-bridge.mjs','stage-editor-bridge.mjs','perchance-stage.mjs','editor-strip.mjs','perchance-editor-probe.mjs','perchance-ai-native.mjs','perchance-ai-oracle.mjs','perchance-ai-opfs.mjs','perchance-ai-history.mjs','ai-supervisor.mjs','ai-testing.mjs','ai-evidence.mjs','ai-store.mjs','ai-boundary.mjs',
     'git-credential.mjs','diagnostic-ready-git.mjs','git-writeback.mjs','writeback-store.mjs','writeback-boundary.mjs',
-    'release-core.mjs','release-store.mjs','release-boundary.mjs','perchance-release.mjs',
+    'update-window.mjs','release-core.mjs','release-store.mjs','release-boundary.mjs','source-review.mjs','perchance-release.mjs',
     'existing-update-core.mjs','existing-update-store.mjs','existing-update-boundary.mjs','perchance-existing.mjs',
     'backup-auto-donor.mjs','backup-donor-port.mjs','restore-donor.mjs','restore-v2-candidate.mjs','restore-boundary.mjs','restore-reconcile.mjs','backup-auto-core.mjs','backup-auto-store.mjs','backup-auto-download.mjs',
     'backup-auto-retention.mjs','backup-auto-export.mjs','portable-archive.mjs','portable-cut.mjs','portable-runner.mjs','portable-originals.mjs','portable-restore-stage.mjs','portable-restore-plan.mjs','source-cut-retry.mjs','backup-v2-verify.mjs','backup-auto-run.mjs','backup-auto-boundary.mjs',

@@ -199,14 +199,14 @@ test('S05 reconciles I13 staged A to independently checked tested F without chan
   previousFingerprint:original.fingerprint,recovery,
   stagedFingerprint:staged.fingerprint,stageSource:staged}});
  await save(db,{key:'stage:'+s,record:{
-  slug:s,state:'SOURCE_VERIFIED',revision:4,nonce:'12345678',
+  slug:s,state:'SOURCE_VERIFIED',verifiedAt:100,revision:4,nonce:'12345678',
   accountId:'account1',candidate:staged,
   readyIdentifier:witness.identifier,readyInputFingerprint:H}});
  await save(db,{key:'ai-job:'+s,accountId:'account1',job:{
   slug:s,revision:9,stageRevision:4,state:'TESTS_VERIFIED',
   sourceFingerprint:final.fingerprint,verifiedFinal:final.fingerprint,
-  finalSource:{fingerprint:final.fingerprint,blobs:final.blobs},
-  executionSlotReleased:true}});
+  finalSource:final,
+  executionSlotReleased:true,native:{state:'CHAT1_OBSERVED_IDLE',sessionDigest:H},prompt:{revision:1,text:'Test actual source',tests:['smoke']},chat1:{tests:{smoke:{result:'PASS',sourceFingerprint:final.fingerprint}}}}});
  const api={storage:{local:{
   get:async()=>({}),set:async()=>{}
  }}};

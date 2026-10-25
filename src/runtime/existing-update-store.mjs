@@ -1,5 +1,9 @@
 // I13 local existing-source mutation ledger. One independent step per command;
 // never infer safe retry from absent ACK or restart. No remote effect in IDB.
+import {updateWindowAvailable,operatorUpdateWindow} from './update-window.mjs';
+import {countAiCapacity,compareUpdateReservations} from './ai-store.mjs';
+import {releaseCandidateTestContext} from './release-core.mjs';
+import {exactSource} from './staging-core.mjs';
 import {fail} from './journal.mjs';
 import {REFRESHER_KEY,validShadow} from './refresher-core.mjs';
 import {authorizeSleepingUpdate} from './existing-update-core.mjs';
@@ -14,6 +18,30 @@ function tx(db,mode,fn){
     t.onerror=()=>{};
     try{fn(t,x=>{result=x;});}catch{try{t.abort();}catch{}}
   });
+}
+// Admission consumes genuine AI capacity through review/publication, not
+// merely while the helper runs. Count reservations atomically before UNLIST.
+function withUpdateCapacity(m,accountId,target,done,commit){
+ const rows=[];m.openCursor().onsuccess=e=>{const c=e.target.result;if(c){rows.push(c.value);c.continue();return;}
+  const limit=rows.find(v=>v.key==='ai-concurrency')?.setting?.perAccount||1;
+  const own=rows.find(v=>v.key==='existing-update:'+target)?.record;
+  const inventories=rows.filter(v=>v.key?.startsWith('inventory:')).map(v=>v.generator).filter(Boolean);
+  const holds=rows.filter(v=>v.key?.startsWith('existing-update:')&&v.record?.slug!==target).map(v=>v.record).filter(r=>{
+   if(own?.state==='PREPARED'&&r.state==='PREPARED'&&compareUpdateReservations(r,own)>0)return false;
+   const ready=rows.find(v=>v.key==='s05-ready:'+r.slug)?.record,owner=rows.find(v=>v.key==='account:'+r.accountId)?.account;
+   if(r.state==='PREPARED'&&(ready?.hold==='OPERATOR_PAUSED'||owner&&owner.state!=='VERIFIED'))return false;
+   const published=rows.find(v=>v.key==='release:'+r.slug)?.release;
+   return !(published?.state==='CONFIRMED_PUBLIC'&&published.source==='INDEPENDENT_PUBLICATION_READBACK'&&published.accountId===r.accountId&&published.remoteId===r.remotePublicId&&published.bindingVersion===r.bindingVersion&&published.approval?.sourceFingerprint===r.stagedFingerprint);
+  });
+  if(countAiCapacity(rows,accountId,target)>=limit){done(fail('PUBLIC_UPDATE_EXECUTION_CAPACITY_RESERVED'));return;}
+  if(holds.length>=limit){done(fail('PUBLIC_UPDATE_MACHINE_VISIBILITY_RESERVED'));return;}
+  if(holds.filter(r=>r.accountId===accountId).length>=limit){done(fail('PUBLIC_UPDATE_ACCOUNT_CAPACITY_RESERVED'));return;}
+  // Do not reserve the last observed public generator while other public
+  // updates are still held. A single-generator fleet can still update.
+  const reserved=new Set(holds.map(r=>r.slug)),visible=inventories.filter(v=>v.ownerState==='OBSERVED_OWNER'&&v.visibility==='PUBLIC'&&!reserved.has(v.slug));
+  if(visible.length<=1&&holds.length){done(fail('PUBLIC_UPDATE_VISIBILITY_RESERVED'));return;}
+  commit();
+ };
 }
 export const publicExisting=r=>r?{
   ok:true,slug:r.slug,revision:r.revision,state:r.state,
@@ -49,6 +77,8 @@ export function createExistingStore(db){
           m.get('inventory:'+s).onsuccess=i=>{
             m.get('adoption:'+s).onsuccess=o=>{
               m.get(REFRESHER_KEY).onsuccess=sh=>{
+                m.get('s05-ready:'+s).onsuccess=rr=>{
+                const ready=rr.target.result?.record;
                 const liveAccount=a.target.result?.account,
                   liveInventory=i.target.result?.generator,
                   liveAdoption=o.target.result?.adoption,
@@ -64,7 +94,7 @@ export function createExistingStore(db){
                    state.globalPause===true||state.accounts?.[account.accountId]?.paused===true||
                    !authorizeSleepingUpdate({account:liveAccount,
                      inventory:liveInventory,adoption:liveAdoption,shadow:liveShadow,
-                     original,remote}).ok){
+                     original,remote,windowOverride:operatorUpdateWindow(liveShadow,ready,{...liveAccount,principalFingerprint:liveAccount?.identity?.principalFingerprint,remotePublicId:liveInventory?.remoteId},original.fingerprint)&&updateWindowAvailable(state,liveShadow,ready,{...liveAccount,principalFingerprint:liveAccount?.identity?.principalFingerprint,remotePublicId:liveInventory?.remoteId},original.fingerprint)}).ok){
                   done(fail('EXISTING_CONTEXT_CHANGED'));return;
                 }
                 const commit=()=>{
@@ -87,7 +117,7 @@ export function createExistingStore(db){
                   operationId:record.operationId,previousFingerprint:original.fingerprint});
                 done(publicExisting(record));
                 };
-                if(!prior){commit();return;}
+                if(!prior){withUpdateCapacity(m,account.accountId,s,done,commit);return;}
                 m.get('release:'+s).onsuccess=releaseRequest=>{
                   const released=releaseRequest.target.result?.release;
                   if(released?.state!=='CONFIRMED_PUBLIC'||
@@ -99,7 +129,8 @@ export function createExistingStore(db){
                      released.bindingVersion!==account.bindingVersion){
                     done(fail('PREVIOUS_RELEASE_NOT_CONFIRMED'));return;
                   }
-                  commit();
+                  withUpdateCapacity(m,account.accountId,s,done,commit);
+                };
                 };
               };
             };
@@ -159,17 +190,22 @@ export function createExistingStore(db){
           };
           function checkShadow(item){
           m.get(REFRESHER_KEY).onsuccess=sh=>{
-            const state=sh.target.result?.state,row=state?.rows?.find(v=>v.slug===s);
+            m.get('s05-ready:'+s).onsuccess=rr=>{
+            const ready=rr.target.result?.record,state=sh.target.result?.state,row=state?.rows?.find(v=>v.slug===s);
             if(!validShadow(state)||!row||(
                  !['RESTORE_DISPATCH','RECOVERY_UNLIST_DISPATCH'].includes(event)&&
-                 (row.phase!=='SLEEPING'||row.slot===true)
+                 !updateWindowAvailable(state,row,ready,r,r.previousFingerprint,r)
                )||row.paused===true||state.globalPause===true||
                state.accounts?.[r.accountId]?.paused===true||
                row.bindingVersion!==r.bindingVersion||
                row.remoteId!==r.remotePublicId){
               done(fail('EXISTING_SLEEP_CHANGED'));return;
             }
-            commit(r);
+            if(event==='UNLIST_DISPATCH'){
+              const admission=operatorUpdateWindow(row,ready,r,r.previousFingerprint)?{...r,windowAdmission:{version:1,mode:'OPERATOR_EARLY_UPDATE',nonce:r.nonce,accountId:r.accountId,personaUid:r.personaUid,bindingVersion:r.bindingVersion,principalFingerprint:r.principalFingerprint,remotePublicId:r.remotePublicId,previousFingerprint:r.previousFingerprint,admittedAt:Date.now()}}:r;
+              withUpdateCapacity(m,r.accountId,s,done,()=>commit(admission));
+            }else commit(r);
+            };
           };
           }
         }else commit(r);
@@ -182,6 +218,11 @@ export function createExistingStore(db){
             reason:verified?null:reason||current.reason,
             changedAt:Date.now()};
           m.put({key:key(s),record:next});
+          if(['UNLIST_CONFIRMED','RECOVERY_UNLIST_CONFIRMED','RESTORE_CONFIRMED'].includes(event))m.get('inventory:'+s).onsuccess=iv=>{
+            const i=iv.target.result?.generator;
+            if(i?.accountId===current.accountId&&i.personaUid===current.personaUid&&i.remoteId===current.remotePublicId&&i.bindingVersion===current.bindingVersion&&i.ownerState==='OBSERVED_OWNER')
+              m.put({key:'inventory:'+s,generator:{...i,revision:(i.revision||0)+1,visibility:'UNLISTED',lastObservedAt:Date.now()}});
+          };
           if(event==='RESTORE_CONFIRMED'){
             m.get('release:'+s).onsuccess=lv=>{
               const release=lv.target.result?.release;
@@ -246,9 +287,11 @@ export function createExistingStore(db){
   }
   // Once AI has independently produced exact tested F, replace only the
   // recovery comparison candidate, never the original encrypted P.
-  function setFinal(s,revision,source){
+  async function setFinal(s,revision,source){
     if(!valid(s)||!source?.ok||!source.fingerprint||
        !Array.isArray(source.blobs))return Promise.resolve(fail('FINAL_F_INVALID'));
+    const sealed=await exactSource(source.blobs);
+    if(!sealed.ok||sealed.fingerprint!==source.fingerprint||JSON.stringify(sealed.files)!==JSON.stringify(source.files))return fail('FINAL_F_INVALID');
     return tx(db,'readwrite',(t,done)=>{
       const m=t.objectStore('meta');
       m.get(key(s)).onsuccess=e=>{
@@ -258,11 +301,12 @@ export function createExistingStore(db){
         }
         m.get('stage:'+s).onsuccess=st=>{
           m.get('ai-job:'+s).onsuccess=ai=>{
-            const stage=st.target.result?.record,job=ai.target.result?.job;
+            m.get('s05-ready:'+s).onsuccess=rd=>{m.get('s06-exception:'+s).onsuccess=ex=>{
+            const stage=st.target.result?.record,job=ai.target.result?.job,evidence=releaseCandidateTestContext(stage,job,{ready:rd.target.result?.record,exception:ex.target.result?.record});
             if(stage?.state!=='SOURCE_VERIFIED'||stage.nonce!==old.nonce||
                stage.accountId!==old.accountId||
-               job?.state!=='TESTS_VERIFIED'||job.stageRevision!==stage.revision||
-               job.verifiedFinal!==source.fingerprint||
+               !evidence.ok||job.stageRevision!==stage.revision||
+               job.sourceFingerprint!==source.fingerprint||
                job.finalSource?.fingerprint!==source.fingerprint||
                job.executionSlotReleased!==true){
               done(fail('EXISTING_FINAL_TESTS_OR_STAGE_CHANGED'));return;
@@ -273,6 +317,7 @@ export function createExistingStore(db){
             t.objectStore('events').add({stage:'EXISTING_FINAL_F_PINNED',
               slug:s,revision:next.revision,sourceFingerprint:source.fingerprint});
             done(publicExisting(next));
+            };};
           };
         };
       };

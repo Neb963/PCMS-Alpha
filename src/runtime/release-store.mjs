@@ -1,6 +1,8 @@
 // I13 canonical release journal. No provider effect may occur in an IDB
 // transaction. A lost dispatch reply is always uncertain, never retried.
+import {updateWindowAvailable} from './update-window.mjs';
 import {fail} from './journal.mjs';
+import {cleanBulkAuthorization} from './clean-bulk-authority.mjs';
 import {matchesApproval,releaseContext,releaseTestContext,
   releaseCandidateTestContext} from './release-core.mjs';
 import {REFRESHER_KEY,validShadow} from './refresher-core.mjs';
@@ -26,6 +28,7 @@ function withoutPendingChild(m,stage,done,commit){
   };
 }
 function withS06Candidate(m,stage,job,done,commit,approval=null){
+  if(job?.operatorPaused){done(fail('AI_OPERATOR_PAUSED'));return;}
   if(!stage?.readyIdentifier){commit();return;}
   m.get('s05-ready:'+stage.slug).onsuccess=rr=>{
     const ready=rr.target.result?.record;
@@ -64,10 +67,10 @@ function withS06Candidate(m,stage,job,done,commit,approval=null){
 const display=r=>r?{
   ok:true,slug:r.slug,revision:r.revision,state:r.state,
   releaseId:r.releaseId,kind:r.kind,sourceFingerprint:r.approval.sourceFingerprint,
-  previousFingerprint:r.approval.previousFingerprint,
+  previousFingerprint:r.approval.previousFingerprint,stageRevision:r.approval.stageRevision,jobRevision:r.approval.jobRevision,
   fileCount:r.approval.files.length,
   accountId:r.approval.accountId,observedAt:r.observedAt||null,
-  reason:r.reason||null,dispatchPossible:r.dispatchPossible===true,
+  reason:r.progressHold||r.reason||null,dispatchPossible:r.dispatchPossible===true,
   publication:r.state==='CONFIRMED_PUBLIC'?'INDEPENDENTLY_VERIFIED':'HELD_OR_UNVERIFIED',
   review:r.state==='APPROVED'?'SOURCE_BOUND_APPROVAL':'READ_ONLY_RECOVERY'
 }:fail('RELEASE_NOT_FOUND');
@@ -93,21 +96,34 @@ export function createReleaseStore(db){
     const result=await getFull(name);
     return result.ok?display(result.record):result;
   };
-  const list=()=>transact(db,'readonly',(t,done)=>{
-    const items=[];let truncated=false;
+  const list=({after='',limit=200,states=null}={})=>{
+   if(typeof after!=='string'||after.length>100||!Number.isInteger(limit)||limit<1||limit>200||
+      (states!==null&&(!Array.isArray(states)||states.some(s=>!['APPROVED','DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN','RECOVERY_HOLD','CONFIRMED_PUBLIC','CANCELED'].includes(s)))))return Promise.resolve(fail('RELEASE_PAGE_INVALID'));
+   return transact(db,'readonly',(t,done)=>{
+    const items=[];
     t.objectStore('meta').openCursor().onsuccess=e=>{
       const cur=e.target.result;
-      if(!cur){done({ok:true,items,truncated});return;}
+      const finish=()=>{const more=items.length>limit,page=items.slice(0,limit);done({ok:true,items:page,truncated:more,more,nextCursor:more?page.at(-1).slug:null})};
+      if(!cur){finish();return;}
       if(typeof cur.key==='string'&&cur.key.startsWith('release:')&&cur.value?.release){
-        if(items.length<200)items.push(display(cur.value.release));else truncated=true;
+        const r=cur.value.release;if(r.slug>after&&(!states||states.includes(r.state)))items.push(display(r));
+        if(items.length>limit){finish();return;}
       }
       cur.continue();
     };
-  });
-  function approve({approval,stage,job,account,inventory,source,previous,releaseId,kind}){
+   });
+  };
+  function recordProgress(name,expectedRevision,code){
+   return transact(db,'readwrite',(t,done)=>{const m=t.objectStore('meta');m.get(key(name)).onsuccess=e=>{const r=e.target.result?.release;
+    if(!r||r.state!=='APPROVED'||r.revision!==expectedRevision){done(fail('STALE_RELEASE'));return}
+    if(!/^[A-Z0-9_]{1,90}$/.test(code||'')){done(fail('RELEASE_PROGRESS_INVALID'));return}
+    m.put({key:key(name),release:{...r,progressHold:code,progressAt:Date.now()}});done(display({...r,progressHold:code}));
+   }});
+  }
+  function approve({approval,stage,job,account,inventory,source,previous,releaseId,kind,bulkAuthorization=null}){
     if(!approval?.ok||!slug(stage?.slug)||stage.slug!==job?.slug||
        stage.slug!==inventory?.slug||stage.accountId!==account?.accountId||
-       kind!=='PRIVATE_NEW'&&kind!=='EXISTING_UPDATE'||
+       !['PRIVATE_NEW','PRIVATE_EXISTING','EXISTING_UPDATE'].includes(kind)||
        !/^release_[a-f0-9]{32}$/.test(releaseId||'')||
        !source?.ok||!previous?.ok||
        source.fingerprint!==approval.tuple.sourceFingerprint||
@@ -162,11 +178,13 @@ export function createReleaseStore(db){
                   done(fail('RELEASE_CONTEXT_CHANGED'));return;
                 }
                 const commit=()=>{
+                const write=bulk=>{
                 const record={slug:stage.slug,kind,revision:old?old.revision+1:1,releaseId,
                   state:'APPROVED',approval:structuredClone(approval.tuple),
                   sealedSource:structuredClone(source),previousSource:structuredClone(previous),
                   approvedAt:Date.now(),changedAt:Date.now(),
                   dispatchPossible:false,reason:null};
+                if(bulk)record.cleanBulkSetId=bulk.id;
                 if(old){
                   meta.put({key:'release-history:'+stage.slug+':'+old.releaseId,
                     release:structuredClone(old)});
@@ -176,6 +194,18 @@ export function createReleaseStore(db){
                   slug:stage.slug,releaseId,sourceFingerprint:source.fingerprint,
                   kind,accountId:stage.accountId});
                 done(display(record));
+                };
+                if(bulkAuthorization===null){write(null);return;}
+                const bulk=cleanBulkAuthorization(bulkAuthorization);if(!bulk){done(fail('CLEAN_BULK_AUTHORITY_INVALID'));return;}
+                meta.get('clean-bulk:'+bulk.id).onsuccess=br=>{const set=br.target.result?.record,item=set?.items?.[bulk.index];
+                  if(set?.state!=='APPROVED'||set.digest!==bulk.digest||!set.approvedAt||item?.state!=='APPROVAL_REQUESTED'||item.slug!==stage.slug||
+                    item.snapshot.readyIdentifier!==stage.readyIdentifier||item.snapshot.readyInputFingerprint!==stage.readyInputFingerprint||
+                    !matchesApproval(item.snapshot.tuple,approval.tuple).ok){done(fail('CLEAN_BULK_AUTHORITY_REVOKED'));return}
+                  if(old?.state==='CANCELED'&&(item.previousRelease?.state!=='CANCELED'||item.previousRelease.releaseId!==old.releaseId||item.previousRelease.revision!==old.revision)){
+                    done(fail('CLEAN_BULK_SOURCE_APPROVAL_REVOKED'));return;
+                  }
+                  write(bulk);
+                };
                 };
                 withS06Candidate(meta,liveStage,liveJob,done,()=>
                   withoutPendingChild(meta,liveStage,done,commit),approval.tuple);
@@ -247,7 +277,7 @@ export function createReleaseStore(db){
                 }
                 function mark(){
                   const next={...r,revision:r.revision+1,
-                    state:'DISPATCH_POSSIBLE',dispatchPossible:true,changedAt:Date.now()};
+                    state:'DISPATCH_POSSIBLE',progressHold:null,dispatchPossible:true,changedAt:Date.now()};
                   m.put({key:key(name),release:next});
                   t.objectStore('operations').add({operationId:r.releaseId,
                     targetId:'release_'+name,fingerprint:r.approval.sourceFingerprint,
@@ -271,10 +301,10 @@ export function createReleaseStore(db){
                       done(fail('EXISTING_RECOVERY_OR_STAGE_CHANGED'));return;
                     }
                     m.get(REFRESHER_KEY).onsuccess=sh=>{
-                      const state=sh.target.result?.state,
+                      m.get('s05-ready:'+name).onsuccess=rr=>{
+                      const ready=rr.target.result?.record,state=sh.target.result?.state,
                         row=state?.rows?.find(z=>z.slug===name);
-                      if(!validShadow(state)||!row||row.phase!=='SLEEPING'||
-                         row.slot===true||row.paused===true||
+                      if(!validShadow(state)||!row||!updateWindowAvailable(state,row,ready,r.approval,r.approval.previousFingerprint,update)||row.paused===true||
                          row.remoteId!==r.approval.remotePublicId||
                          row.bindingVersion!==r.approval.bindingVersion||
                          state.globalPause===true||
@@ -282,9 +312,10 @@ export function createReleaseStore(db){
                         done(fail('EXISTING_SLEEP_REVOKED'));return;
                       }
                       guardedMark();
+                      };
                     };
                   };
-                }else if(r.kind==='PRIVATE_NEW')guardedMark();
+                }else if(['PRIVATE_NEW','PRIVATE_EXISTING'].includes(r.kind))guardedMark();
                 else done(fail('RELEASE_KIND_INVALID'));
               };
             };
@@ -334,5 +365,5 @@ export function createReleaseStore(db){
       };
     });
   }
-  return Object.freeze({get,getFull,list,approve,cancelApproved,markDispatch,settle});
+  return Object.freeze({get,getFull,list,approve,cancelApproved,markDispatch,settle,recordProgress});
 }

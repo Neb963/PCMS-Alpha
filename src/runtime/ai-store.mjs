@@ -8,6 +8,24 @@ const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 // slots. Even verified test results do not prove the helper session stopped.
 const slotReleased=j=>j?.executionSlotReleased===true &&
   j.native?.state!=='DISPATCH_POSSIBLE';
+// Shared admission includes existing-public reservations before any UNLIST.
+// Once its own current AI job exists, count that job exactly once instead.
+export const compareUpdateReservations=(a,b)=>(a.state==='PREPARED'?1:0)-(b.state==='PREPARED'?1:0)||(a.createdAt||0)-(b.createdAt||0)||a.slug.localeCompare(b.slug,'en');
+export function countAiCapacity(rows,accountId,excludeSlug=''){
+ const jobs=rows.filter(r=>r.key?.startsWith('ai-job:')&&r.accountId===accountId&&r.job?.slug!==excludeSlug);
+ let used=jobs.filter(r=>!slotReleased(r.job)).length;
+ const own=rows.find(v=>v.key==='existing-update:'+excludeSlug&&v.record?.accountId===accountId)?.record;
+ for(const row of rows){const r=row.record;if(!row.key?.startsWith('existing-update:')||!r||r.accountId!==accountId||r.slug===excludeSlug)continue;
+  const queued=rows.find(v=>v.key==='s05-ready:'+r.slug)?.record,owner=rows.find(v=>v.key==='account:'+r.accountId)?.account;
+  if(r.state==='PREPARED'&&(queued?.hold==='OPERATOR_PAUSED'||owner&&owner.state!=='VERIFIED'))continue;
+  const published=rows.find(v=>v.key==='release:'+r.slug)?.release;
+  if(published?.state==='CONFIRMED_PUBLIC'&&published.source==='INDEPENDENT_PUBLICATION_READBACK'&&published.accountId===r.accountId&&published.remoteId===r.remotePublicId&&published.bindingVersion===r.bindingVersion&&published.approval?.sourceFingerprint===r.stagedFingerprint)continue;
+  const j=jobs.find(v=>v.job.slug===r.slug)?.job,stage=rows.find(v=>v.key==='stage:'+r.slug)?.record;
+  const current=j&&stage?.nonce===r.nonce&&j.stageRevision===stage.revision;
+  if(!current&&!(own&&compareUpdateReservations(r,own)>0))used++;
+ }
+ return used;
+}
 function tx(db,mode,fn){
   return new Promise((resolve,reject)=>{
     let t,result=fail('AI_TRANSACTION_INCOMPLETE');
@@ -23,6 +41,7 @@ function tx(db,mode,fn){
 // transaction. A boundary read performed earlier can never authorize a
 // native dispatch or test PASS after a later candidate has been queued.
 function withCurrentReady(m,job,done,commit){
+  if(job.operatorPaused===true){done(fail('AI_OPERATOR_PAUSED'));return;}
   if(!job.readyIdentifier){commit();return;}
   m.get('s05-ready:'+job.slug).onsuccess=e=>{
     const r=e.target.result?.record;
@@ -46,9 +65,60 @@ const publicJob=j=>j?{ok:true,slug:j.slug,revision:j.revision,state:j.state,
     j.schedulerDeferredUntil:null,
   schedulerHold:typeof j.schedulerHold==='string'?j.schedulerHold:null,
   chat2IsolationVerified:j.chat2?.state==='FRESH_VERIFIED',
+  readyManaged:typeof j.readyIdentifier==='string',operatorJudgment:j.operatorJudgment||null,operatorPaused:j.operatorPaused===true,controlRevision:j.controlRevision||1,
+  awaitingExecutionSlot:j.awaitingExecutionSlot===true,exceptionFrozen:j.exceptionFrozen===true,
+  pendingInstruction:j.operatorInstruction?{id:j.operatorInstruction.id,
+    text:j.operatorInstruction.text,status:j.operatorInstruction.status}:null,
   provider:'GUARDED_NATIVE_AI_DEVELOPMENT_GRANT',
   github:'NO_AI_WRITEBACK',publication:'OFF'}:fail('AI_JOB_NOT_FOUND');
 export function createAiStore(db){
+  function admitExecutionSlot(name,expectedRevision){
+    if(!slug(name)||!Number.isSafeInteger(expectedRevision)||expectedRevision<1)return Promise.resolve(fail('AI_COMMAND_INVALID'));
+    return tx(db,'readwrite',(t,done)=>{const m=t.objectStore('meta');m.get(key(name)).onsuccess=e=>{const row=e.target.result,j=row?.job;
+      if(!j||j.revision!==expectedRevision){done(fail('STALE_REVISION'));return}
+      if(j.exceptionFrozen){done(fail('AI_EXCEPTION_REVIEW_FROZEN'));return}
+      if(j.awaitingExecutionSlot!==true||j.executionSlotReleased!==true||j.state==='TESTS_VERIFIED'){done(fail('AI_SLOT_ADMISSION_NOT_PENDING'));return}
+      withCurrentReady(m,j,done,()=>m.get('stage:'+name).onsuccess=st=>{const s=st.target.result?.record;
+       if(!s||s.state!=='SOURCE_VERIFIED'||s.revision!==j.stageRevision||s.humanReclaimPending){done(fail('AI_STAGE_OR_HUMAN_RECLAIM_PENDING'));return;}
+       m.get('ai-concurrency').onsuccess=setting=>{const limit=setting.target.result?.setting?.perAccount||1;const capacityRows=[];
+        m.openCursor().onsuccess=scan=>{const c=scan.target.result;if(c){capacityRows.push(c.value);c.continue();return}
+          if(countAiCapacity(capacityRows,row.accountId,name)>=limit){done(fail('AI_ACCOUNT_CONCURRENCY_HELD'));return}
+          const next={...j,awaitingExecutionSlot:false,executionSlotReleased:false,controlRevision:(j.controlRevision||1)+1};m.put({...row,job:next});
+          t.objectStore('events').add({stage:'AI_EXECUTION_SLOT_RESERVED',slug:name,revision:j.revision});done(publicJob(next));
+        };
+       };
+      });
+    }});
+  }
+  function operatorControl(name,expectedRevision,expectedControlRevision,{paused,instructions,judgment}={}){
+    if(!slug(name)||!Number.isSafeInteger(expectedRevision)||expectedRevision<1||
+       !Number.isSafeInteger(expectedControlRevision)||expectedControlRevision<1||
+       (paused!==undefined&&typeof paused!=='boolean')||
+       (judgment!==undefined&&(judgment!=='UNPRODUCTIVE'||paused!==true))||
+       (instructions!==undefined&&(typeof instructions!=='string'||instructions.trim().length<3||instructions.length>4000||instructions.includes('\0')))||
+       (paused===undefined)===(instructions===undefined))return Promise.resolve(fail('AI_CONTROL_INVALID'));
+    return tx(db,'readwrite',(t,done)=>{const m=t.objectStore('meta');m.get(key(name)).onsuccess=e=>{
+      const row=e.target.result,j=row?.job;if(!j){done(fail('AI_JOB_NOT_FOUND'));return;}
+      if(j.revision!==expectedRevision||(j.controlRevision||1)!==expectedControlRevision){done(fail('STALE_REVISION'));return;}
+      if(j.state==='HUMAN_OWNED'){done(fail('HUMAN_EDITOR_HOLD'));return;}
+      if(instructions!==undefined&&(j.state==='TESTS_VERIFIED'||j.operatorInstruction||j.exceptionFrozen)){
+        done(fail(j.operatorInstruction?'AI_INSTRUCTION_ALREADY_QUEUED':'AI_TESTED_CANDIDATE_REQUEST_CHANGES_REQUIRED'));return;
+      }
+      const next={...j,controlRevision:expectedControlRevision+1};
+      if(instructions!==undefined)next.operatorInstruction={id:next.controlRevision,text:instructions.trim(),status:'QUEUED',stageRevision:j.stageRevision};
+      if(paused!==undefined)next.operatorPaused=paused;
+      if(judgment==='UNPRODUCTIVE')next.operatorJudgment={kind:judgment,sourceFingerprint:j.sourceFingerprint,at:Date.now()};
+      if(paused===false)next.operatorJudgment=null;
+      const idle=['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(j.native?.state)&&j.finalSource?.fingerprint===j.sourceFingerprint;
+      if(paused===true&&idle)next.executionSlotReleased=true;
+      const commit=()=>{m.put({...row,job:next});t.objectStore('events').add({stage:instructions!==undefined?'AI_OPERATOR_INSTRUCTION_QUEUED':'AI_OPERATOR_PAUSE_CHANGED',slug:name,
+        controlRevision:next.controlRevision,jobRevision:j.revision,...(instructions!==undefined?{instructions:instructions.trim()}:{paused,judgment:judgment||null})});done(publicJob(next));};
+      if(paused!==false||!j.executionSlotReleased||j.state==='TESTS_VERIFIED'||j.exceptionFrozen){commit();return;}
+      // Resume records intent immediately; the existing supervisor reserves
+      // capacity atomically before another native effect, without operator polling.
+      next.awaitingExecutionSlot=true;next.executionSlotReleased=true;commit();
+    }});
+  }
   const getPrompt=()=>tx(db,'readonly',(t,done)=>{
     t.objectStore('meta').get('ai-prompts').onsuccess=e=>{
       const history=e.target.result?.history||initialPrompt();
@@ -129,8 +199,8 @@ export function createAiStore(db){
     });
   // S05 paginated listing; prior 200-job truncation silently hid eligible
   // work. Cursor is an ordinary ordered slug, not an effect/claim token.
-  const list=({after='',limit=200,query='',status='ALL'}={})=>{
-    if(typeof query!=='string'||query.length>100||
+  const list=({after='',limit=200,query='',status='ALL',legacyOnly=false}={})=>{
+    if(typeof legacyOnly!=='boolean'||typeof query!=='string'||query.length>100||
        !['ALL','NEEDS_ACTION','RUNNING','WAITING','COMPLETED'].includes(status))
       return Promise.resolve(fail('AI_PAGE_INVALID'));
     if(typeof after!=='string'||after.length>100||
@@ -145,7 +215,7 @@ export function createAiStore(db){
         if(typeof cursor.key==='string'&&cursor.key.startsWith('ai-job:')&&
            cursor.value?.job){
           const slugName=cursor.key.slice('ai-job:'.length);
-          if(slugName>after&&slugName.toLowerCase().includes(query.toLowerCase())){
+          if((!legacyOnly||!cursor.value.job.readyIdentifier)&&slugName>after&&slugName.toLowerCase().includes(query.toLowerCase())){
             const job=publicJob(cursor.value.job);
             const completed=job.state==='TESTS_VERIFIED'||job.slotReleased===true;
             const needs=['HELD_RECONCILE','KNOWN_FAILURE','HELD_NO_PROGRESS',
@@ -177,20 +247,18 @@ export function createAiStore(db){
         const account=stage.accountId;
         m.get('ai-concurrency').onsuccess=settingRequest=>{
           const limit=settingRequest.target.result?.setting?.perAccount||1;
-          let otherActive=0;
+          const capacityRows=[];
           m.openCursor().onsuccess=e=>{
             const cursor=e.target.result;
             if(cursor){
-              if(typeof cursor.key==='string'&&cursor.key.startsWith('ai-job:')&&
-                 cursor.key!==key(stage.slug)&&
-                 cursor.value?.accountId===account&&!slotReleased(cursor.value.job))
-                otherActive++;
+              capacityRows.push(cursor.value);
               cursor.continue();return;
             }
-            if(otherActive>=limit){done(fail('AI_ACCOUNT_CONCURRENCY_HELD'));return;}
+            if(countAiCapacity(capacityRows,account,stage.slug)>=limit){done(fail('AI_ACCOUNT_CONCURRENCY_HELD'));return;}
             m.get(key(stage.slug)).onsuccess=old=>{
               const previous=old.target.result?.job;
               const commit=()=>{
+                if(previous?.operatorPaused){done(fail('AI_OPERATOR_PAUSED'));return;}
                 const write=()=>{
                   const job={...started.job,revision:previous?previous.revision+1:1,
                     createdAt:Date.now(),
@@ -198,7 +266,7 @@ export function createAiStore(db){
                       readyIdentifier:stage.readyIdentifier,
                       readyInputFingerprint:stage.readyInputFingerprint}:{})};
                   if(previous){
-                    m.put({key:'ai-history:'+stage.slug+':'+previous.revision,
+                    m.add({key:'ai-history:'+stage.slug+':'+previous.revision,
                       accountId:account,job:structuredClone(previous)});
                     m.put({key:key(stage.slug),accountId:account,job});
                   }else m.add({key:key(stage.slug),accountId:account,job});
@@ -225,6 +293,7 @@ export function createAiStore(db){
                      current.nonce!==stage.nonce||
                      current.candidate?.fingerprint!==stage.candidate?.fingerprint||
                      current.previous?.fingerprint!==stage.previous?.fingerprint||
+                     (current.writePrevious||current.previous)?.fingerprint!==(stage.writePrevious||stage.previous)?.fingerprint||
                      !Number.isSafeInteger(current.verifiedAt)||
                      current.verifiedAt<1){
                     done(fail('AI_CANONICAL_STAGE_CHANGED'));return;
@@ -262,8 +331,9 @@ export function createAiStore(db){
                     ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(native);
                   const saved=previous.finalSource?.fingerprint||
                     (previous.state==='PENDING_NATIVE_SESSION'?previous.sourceFingerprint:null);
-                  if(!provenIdle||!stage.previous?.ok||
-                     saved!==stage.previous.fingerprint||
+                  const replacement=stage.sourceOrigin==='EXISTING_UPDATE'?(stage.writePrevious||stage.previous):stage.previous;
+                  if(!provenIdle||!replacement?.ok||
+                     saved!==replacement.fingerprint||
                      ['HELD_RECONCILE','HUMAN_OWNED','HELD_NO_PROGRESS'].includes(previous.state)){
                     done(fail('AI_PREVIOUS_NATIVE_OR_SOURCE_NOT_QUIESCENT'));return;
                   }
@@ -322,6 +392,10 @@ export function createAiStore(db){
           result.job.state==='TESTS_VERIFIED'&&
           result.job.finalSource?.fingerprint===result.job.verifiedFinal&&
           ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(result.job.native?.state));
+        result.job.exceptionFrozen=false;
+        if(prior.job.executionSlotReleased&&result.job.state!=='TESTS_VERIFIED'){
+          result.job.awaitingExecutionSlot=true;result.job.executionSlotReleased=true;
+        }
         const write=()=>{
           m.put({...prior,job:result.job});
           t.objectStore('events').add({stage:'AI_EVIDENCE_RECORDED',slug:slugName,
@@ -385,7 +459,7 @@ export function createAiStore(db){
   // Durable external-effect marker. Firefox (or a disconnected response)
   // can die at any boundary; no code automatically retries this marker.
   function armNative(slugName,expectedRevision,step){
-    if(!slug(slugName)||!['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','STOP'].includes(step))
+    if(!slug(slugName)||!['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','CHAT1_INSTRUCT','CHAT2_INSTRUCT','STOP'].includes(step))
       return Promise.resolve(fail('AI_STEP_INVALID'));
     return tx(db,'readwrite',(t,done)=>{
       const m=t.objectStore('meta');
@@ -394,6 +468,8 @@ export function createAiStore(db){
         if(!j){done(fail('AI_JOB_NOT_FOUND'));return;}
         if(j.revision!==expectedRevision){done(fail('STALE_REVISION'));return;}
         if(j.native?.state==='DISPATCH_POSSIBLE'){done(fail('AI_EFFECT_RECONCILIATION_REQUIRED'));return;}
+        if(j.exceptionFrozen&&step!=='STOP'){done(fail('AI_EXCEPTION_REVIEW_FROZEN'));return;}
+        if(j.executionSlotReleased&&step!=='STOP'){done(fail('AI_EXECUTION_SLOT_RELEASED'));return;}
         const decision=evaluation(j);
         if(step==='CHAT1_SEND'&&
            (j.chat1.sessionDigest!==null||j.native))
@@ -416,14 +492,25 @@ export function createAiStore(db){
              !j.finalSource||j.finalSource.fingerprint!==j.sourceFingerprint)
             {done(fail('AI_VERIFIED_FAILURE_AND_SESSION_REQUIRED'));return;}
         }
+        if(step.endsWith('INSTRUCT')){
+          const chat=step==='CHAT1_INSTRUCT'?j.chat1:j.chat2,idle=step==='CHAT1_INSTRUCT'?'CHAT1_OBSERVED_IDLE':'CHAT2_OBSERVED_IDLE';
+          if(j.operatorInstruction?.status!=='QUEUED'||j.operatorInstruction.stageRevision!==j.stageRevision||
+             j.state==='TESTS_VERIFIED'||j.native?.state!==idle||!chat?.sessionDigest||j.native.sessionDigest!==chat.sessionDigest||
+             !j.finalSource||j.finalSource.fingerprint!==j.sourceFingerprint||(step==='CHAT2_INSTRUCT'&&chat.state!=='FRESH_VERIFIED')){
+            done(fail('AI_INSTRUCTION_CONTEXT_CHANGED'));return;
+          }
+        }
         if(step==='STOP'&&j.native?.state!=='RUNNING_OBSERVED')
           {done(fail('AI_STOP_NOT_ADMISSIBLE'));return;}
         const next={...j,revision:j.revision+1,
           native:{step,state:'DISPATCH_POSSIBLE',
             previousSessionDigest:j.native?.sessionDigest||j.chat1.sessionDigest||null,
+            stoppedChat:j.native?.step?.startsWith('CHAT2')?2:1,
+            ...(step.endsWith('INSTRUCT')?{instructionId:j.operatorInstruction.id}:{}),
             armedAt:Date.now()},state:'HELD_RECONCILE',
           hold:'NATIVE_EFFECT_MAY_HAVE_OCCURRED'};
         const commit=()=>{
+          if(step.endsWith('INSTRUCT')){next.operatorInstruction=null;t.objectStore('events').add({stage:'AI_OPERATOR_INSTRUCTION_DISPATCH_POSSIBLE',slug:slugName,instructionId:j.operatorInstruction.id,instructions:j.operatorInstruction.text,revision:next.revision});}
           m.put({...row,job:next});
           t.objectStore('events').add({stage:'AI_DISPATCH_POSSIBLE',
             slug:slugName,revision:next.revision,step});
@@ -453,18 +540,18 @@ export function createAiStore(db){
           {done(fail('AI_NO_PENDING_NATIVE_EFFECT'));return;}
         const step=j.native.step,digest=observation.sessionDigest;
         let state;
-        if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR'].includes(step)){
+        if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','CHAT1_INSTRUCT','CHAT2_INSTRUCT'].includes(step)){
           // One static native greeting is *not* evidence that an armed
           // SEND actually entered the conversation. Require a separate
           // native message row before accepting a session/idle receipt.
           if(!digest||!Number.isSafeInteger(observation.chatEntries)||
              observation.chatEntries<2||
-             (step.endsWith('REPAIR')?
+             (step.endsWith('REPAIR')||step.endsWith('INSTRUCT')?
                digest!==j.native.previousSessionDigest:
                digest===j.native.previousSessionDigest))
             {done(fail('AI_SESSION_UNVERIFIED'));return;}
           state=observation.busy?'RUNNING_OBSERVED':
-            ['CHAT1_SEND','CHAT1_REPAIR'].includes(step)?'CHAT1_OBSERVED_IDLE':'CHAT2_OBSERVED_IDLE';
+            ['CHAT1_SEND','CHAT1_REPAIR','CHAT1_INSTRUCT'].includes(step)?'CHAT1_OBSERVED_IDLE':'CHAT2_OBSERVED_IDLE';
         }else if(step==='CHAT2_RESET'){
           // A session identifier reset alone cannot prove a new Chat2.
           // All old visible messages, draft input and queued work must also
@@ -477,8 +564,8 @@ export function createAiStore(db){
             {done(fail('AI_CHAT2_RESET_NOT_PROVEN'));return;}
           state='CHAT2_RESET_OBSERVED';
         }else{
-          if(observation.busy){done(fail('AI_STOP_NOT_OBSERVED'));return;}
-          state='STOP_OBSERVED';
+          if(observation.busy||!digest||digest!==j.native.previousSessionDigest){done(fail('AI_STOP_NOT_OBSERVED'));return;}
+          state=j.native.stoppedChat===2?'CHAT2_OBSERVED_IDLE':'CHAT1_OBSERVED_IDLE';
         }
         const next={...j,revision:j.revision+1,
           native:{...j.native,state,sessionDigest:digest,observedAt:Date.now()},
@@ -486,14 +573,13 @@ export function createAiStore(db){
             'AI_CHAT2_ISOLATION_UNVERIFIED':'INDEPENDENT_BROWSER_TESTS_REQUIRED'};
         // Native session evidence is distinguished from proof of user-facing
         // test assertions: no success here comes from text or busy=false.
-        if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR'].includes(step)){
-          const chat=['CHAT1_SEND','CHAT1_REPAIR'].includes(step)?next.chat1:next.chat2;
+        if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','CHAT1_INSTRUCT','CHAT2_INSTRUCT'].includes(step)){
+          const chat=['CHAT1_SEND','CHAT1_REPAIR','CHAT1_INSTRUCT'].includes(step)?next.chat1:next.chat2;
           chat.sessionDigest=digest;
           // A new hashed SID plus cleared UI is necessary but insufficient
           // to prove the native server/OPFS workspace is isolated. No
           // independent OPFS namespace oracle currently exists.
-          chat.state=['CHAT2_SEND','CHAT2_REPAIR'].includes(step)?
-            'FRESH_OBSERVED':'RUNNING';
+          if(!step.endsWith('INSTRUCT'))chat.state=['CHAT2_SEND','CHAT2_REPAIR'].includes(step)?'FRESH_OBSERVED':'RUNNING';
         }
         m.put({...row,job:next});
         t.objectStore('events').add({stage:'AI_NATIVE_OBSERVED',
@@ -521,7 +607,9 @@ export function createAiStore(db){
         if(!['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(j.native?.state))
           {done(fail('AI_NATIVE_IDLE_REQUIRED'));return;}
         const changed=j.sourceFingerprint!==snapshot.fingerprint;
+        if(j.exceptionFrozen&&!changed){done(publicJob(j));return;}
         const next={...j,revision:j.revision+1,
+          exceptionFrozen:changed?false:j.exceptionFrozen===true,
           sourceFingerprint:snapshot.fingerprint,
           executionSlotReleased:changed?false:j.executionSlotReleased===true,
           finalSource:{fingerprint:snapshot.fingerprint,
@@ -532,14 +620,14 @@ export function createAiStore(db){
             'AI_CHAT2_ISOLATION_UNVERIFIED':
             changed?'INDEPENDENT_BROWSER_TESTS_REQUIRED':j.hold,
           state:changed?'TESTS_UNVERIFIED':j.state};
+        if(changed&&j.executionSlotReleased){next.awaitingExecutionSlot=true;next.executionSlotReleased=true;}
         if(changed){
           next.chat1={...next.chat1,tests:{}};
           if(next.chat2)next.chat2={...next.chat2,tests:{}};
-          next.changes=[...next.changes,{fingerprint:snapshot.fingerprint,
-            kind:'GUARDED_NATIVE_FULL_SOURCE_READBACK'}];
-          if(next.changes.length>256){
-            next.state='HELD_NO_PROGRESS';next.hold='REPAIR_RESOURCE_BOUND';
-          }
+          // This is a bounded recent-change index, not an iteration budget.
+          // Complete source checkpoints remain in immutable history rows.
+          next.changes=[...(next.changes||[]),{fingerprint:snapshot.fingerprint,
+            kind:'GUARDED_NATIVE_FULL_SOURCE_READBACK'}].slice(-128);
         }
         // C-46: unchanged bytes or repeated failing assertions are NOT
         // evidence of subjective AI stagnation. Preserve genuine failure
@@ -551,11 +639,27 @@ export function createAiStore(db){
         if(next.state==='HELD_NO_PROGRESS'&&
            ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(next.native?.state))
           next.executionSlotReleased=true;
-        m.put({...row,job:next});
-        t.objectStore('events').add({stage:'AI_FULL_SOURCE_CHECKPOINT',
-          slug:slugName,revision:next.revision,sourceFingerprint:snapshot.fingerprint,
-          changed});
-        done(publicJob(next));
+        if(next.operatorPaused&&['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(next.native?.state))next.executionSlotReleased=true;
+        const commit=prior=>{
+          if(changed)m.add({key:'ai-history:'+slugName+':'+j.revision,
+            accountId:row.accountId,job:{...structuredClone(j),finalSource:structuredClone(prior)},
+            archivedAt:Date.now(),reason:'SOURCE_CHANGED'});
+          m.put({...row,job:next});
+          t.objectStore('events').add({stage:'AI_FULL_SOURCE_CHECKPOINT',
+            slug:slugName,revision:next.revision,sourceFingerprint:snapshot.fingerprint,
+            changed});
+          done(publicJob(next));
+        };
+        if(!changed||j.finalSource?.fingerprint===j.sourceFingerprint){commit(j.finalSource);return;}
+        // Before the first native edit, the exact old source lives in its
+        // canonical stage. Archive it in the same transaction as the change.
+        m.get('stage:'+slugName).onsuccess=sr=>{
+          const s=sr.target.result?.record;
+          if(s?.revision!==j.stageRevision||s.candidate?.fingerprint!==j.sourceFingerprint){
+            done(fail('AI_PREVIOUS_SOURCE_CHECKPOINT_REQUIRED'));return;
+          }
+          commit(s.candidate);
+        };
       };
     });
   }
@@ -585,6 +689,6 @@ export function createAiStore(db){
   }
   return Object.freeze({
     getPrompt,changePrompt,getConcurrency,changeConcurrency,exportPrompt,getJob,getJobFull,list,start,record,
-    armNative,observeNative,checkpointSource,recoverNative,deferScheduler,verifySecondChat
+    armNative,observeNative,checkpointSource,recoverNative,deferScheduler,verifySecondChat,operatorControl,admitExecutionSlot
   });
 }

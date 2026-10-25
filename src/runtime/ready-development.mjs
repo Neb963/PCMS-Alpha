@@ -25,8 +25,16 @@ export function planReadyDevelopment({ready,stage,existing,job,exception,
  visibility,effects=false}){
  if(!ready?.ok)return fail('S05_READY_NOT_OBSERVED');
  const r=ready.record,candidate=r.desired||r.active;
- if(!candidate||['OPERATOR_PAUSED','READY_REVOKED_NOT_READY'].includes(r.hold))
-   return fail(r.hold||'S05_READY_NO_CURRENT_CANDIDATE');
+ if(['OPERATOR_PAUSED','READY_REVOKED_NOT_READY'].includes(r.hold)||job?.job?.operatorPaused){
+  if(job?.ok&&stage?.ok&&job.job.stageRevision===stage.record.revision){
+   const next=planAiStep({...job.job,operatorPaused:true});
+   if(next.ok&&next.type==='PROBE_NATIVE')return {ok:true,type:'PROBE_NATIVE'};
+   if(next.ok&&next.step==='STOP')return {ok:true,type:effects?'STOP_OLDER_NATIVE':'HOLD',code:'S05_PAUSED_NATIVE_STOP_ACTIVATION_HELD'};
+  }
+  return fail(r.hold||'AI_OPERATOR_PAUSED');
+ }
+ if(!candidate)return fail('S05_READY_NO_CURRENT_CANDIDATE');
+ if(stage?.record?.humanReclaimPending)return fail('S06_HUMAN_EDITOR_RECLAIM_PENDING');
  // A newer candidate never steals an in-flight old writer. First reconcile
  // any possible dispatch. Once the old helper is observed running, request
  // exactly one guarded STOP, then wait for independent saved-F idle proof.
@@ -48,7 +56,7 @@ export function planReadyDevelopment({ready,stage,existing,job,exception,
     ex.stageRevision===stage?.record?.revision&&
     ex.jobRevision===job?.job?.revision&&
     ex.sourceFingerprint===job?.job?.sourceFingerprint&&
-    ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(job?.job?.native?.state))
+    (job?.job?.exceptionFrozen||['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(job?.job?.native?.state)))
    return {ok:true,type:'HOLD',code:'S06_EXCEPTION_REVIEW_SOURCE_FROZEN'};
  if(existing?.ok){
    const s=existing.record?.state;
@@ -150,8 +158,7 @@ export function createReadyDevelopment(api,{
     for(let i=0;i<listing.items.length;i++){
      const row=listing.items[i];
      examined++;lastSeen=row.slug;
-     if(!row.desired&&!row.active||
-        ['OPERATOR_PAUSED','READY_REVOKED_NOT_READY'].includes(row.hold))continue;
+     if(!row.desired&&!row.active)continue;
      const full=await queue.get(row.slug);
      if(!full.ok||full.record.revision!==row.revision)continue;
      const stage=await createStagingStore(database).getFull(row.slug);

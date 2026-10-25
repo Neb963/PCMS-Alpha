@@ -251,6 +251,30 @@ export function transitionAccount(previous, action, all = []) {
     history,boundPrincipal,revision:previous.revision+1},event:action.type};
 }
 
+// Same-binding recovery refreshes only current ownership headers after an
+// independent identity verification. Bytes, candidate/test revisions, history
+// and immutable release approvals remain unchanged. Old approvals still need
+// their own current-account validation and can be canceled from primary UI.
+function refreshOwnedContexts(meta,events,account){
+ if(account.state!=='VERIFIED'||account.identity?.source!=='GUARDED_SESSION_READBACK'||
+    account.identity.bindingVersion!==account.bindingVersion||!account.boundPrincipal||account.boundPrincipal!==account.identity.principalFingerprint)return;
+ let refreshed=0;meta.openCursor().onsuccess=e=>{const c=e.target.result;if(!c){if(refreshed)events.add({stage:'ACCOUNT_CONTEXTS_REFRESHED',accountId:account.accountId,accountRevision:account.revision,count:refreshed});return;}
+  const v=c.value;let property=null;
+  if(typeof c.key==='string'){
+   if(c.key.startsWith('stage:')||c.key.startsWith('existing-update:'))property='record';
+   else if(c.key.startsWith('adoption:'))property='adoption';
+   else if(c.key.startsWith('supply-batch:'))property='batch';
+   else if(c.key.startsWith('source-link:'))property='link';
+  }
+  const r=property&&v[property];
+  if(r?.accountId===account.accountId&&r.personaUid===account.personaUid&&r.bindingVersion===account.bindingVersion&&
+     Number.isSafeInteger(r.accountRevision)&&r.accountRevision<account.revision&&
+     (!r.principalFingerprint||r.principalFingerprint===account.boundPrincipal)){
+   meta.put({...v,[property]:{...r,accountRevision:account.revision}});refreshed++;
+  }
+  c.continue();
+ };
+}
 export function createAccountStore(db) {
   function transact(mode, fn) {
     return new Promise((resolve,reject)=>{
@@ -281,6 +305,7 @@ export function createAccountStore(db) {
         const result=transitionAccount(previous,action,all);
         if (result.ok) {
           meta.put({key:key(action.accountId),account:result.account});
+          if(result.event==='VERIFY')refreshOwnedContexts(meta,tx.objectStore('events'),result.account);
           // C-74 removal history, read by inspected restore: an archive holding
           // an older revision of this account is excluded unless re-reviewed.
           if (result.event==='REMOVED')
@@ -311,6 +336,7 @@ export function createAccountStore(db) {
           expectedRevision:previous?previous.revision:0},all);
         if (result.ok) {
           meta.put({key:key(action.accountId),account:result.account});
+          if(result.event==='VERIFY')refreshOwnedContexts(meta,tx.objectStore('events'),result.account);
           tx.objectStore('events').add({stage:'ACCOUNT_'+result.event,
             accountId:action.accountId,revision:result.account.revision});
         }
@@ -360,6 +386,7 @@ export function createAccountStore(db) {
           // Completes the same identity verification revision atomically.
           const next={...account,state:'VERIFIED'};
           meta.put({key:key(accountId),account:next});
+          refreshOwnedContexts(meta,tx.objectStore('events'),next);
           tx.objectStore('events').add({stage:'ACCOUNT_INVENTORY_CONFIRMED',accountId,revision:account.revision});
           finish({ok:true,account:next});
         };
