@@ -23,7 +23,7 @@ export async function cachedHealthDomain(evidence){
   return 'egress_'+Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
-export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
+export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,observeRenewMs=5000,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
   supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, humanReviewTab, manualEditorTab, inspectNoEditorTabs, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, refresherCleanupTab, readRuntimeWitness, enrollmentDonor, renameSafety=defaultRenameSafety,renameAuthority=()=>standingS06?.gate('development')===true,renameAuthorityGeneration=()=>standingS06?.policyGeneration(), pinGate = inspectRoutePin }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
@@ -167,14 +167,23 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     if(typeof readIsolatedTab!=='function')return {ok:false,code:'OBSERVER_UNAVAILABLE'};
     const leased=await acquireConflictGuard(personaUid);
     if(!leased?.ready||!leased.leaseId)return {ok:false,code:leased?.code||'GUARD_UNAVAILABLE'};
+    let timer=null,stopped=false,lost=false,renewal=Promise.resolve();
+    const schedule=()=>{if(stopped||lost||typeof shared.renew!=='function')return;
+      timer=setTimeout(()=>{renewal=(async()=>{
+        try{await shared.renew(leased.leaseId);if(!(await inspectOwnedAction(leased)).ready)lost=true;}
+        catch{lost=true;}
+      })().finally(schedule);},observeRenewMs);
+    };
+    schedule();
     try {
       const packet=await readIsolatedTab(leased,{identityOnly:identityOnly===true,originalSlug});
+      if(lost)return {ok:false,code:'DONOR_LEASE_BUSY_OR_REVOKED'};
       if(!packet?.ok)return {ok:false,code:packet?.code||'OBSERVER_UNVERIFIED'};
       const rechecked=await inspectOwnedAction(leased);
       if(!rechecked?.ready)return {ok:false,code:rechecked?.code||'GUARD_CHANGED'};
       return packet;
     }catch{return {ok:false,code:'OBSERVER_UNAVAILABLE'};}
-    finally{await releaseConflictGuard(leased);}
+    finally{stopped=true;clearTimeout(timer);await renewal;await releaseConflictGuard(leased);}
   }
 
   // Fixed public feed/statistics GETs use the SAME donor lease and isolated

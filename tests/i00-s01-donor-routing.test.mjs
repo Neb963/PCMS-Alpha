@@ -104,7 +104,7 @@ test('S01 D: extension-origin Perchance requests never inherit the donor extensi
 
 // Production enrollment adapter from the staged background, over fake donor primitives.
 function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=false,tabs=new Map(),leased=new Set(),
-  jobs=[],activeExits=['mullvad-7'],releaseFails=false,relayRead=null,timerSet=setTimeout,timerClear=clearTimeout}={}){
+  jobs=[],activeExits=['mullvad-7'],releaseFails=false,relayRead=null,timerSet=setTimeout,timerClear=clearTimeout,nativeStatus=null}={}){
   const effects=[];
   let state={global:{},routes:{},profiles:{}};
   const securityState={ready:true,privacySafe:true};
@@ -147,7 +147,9 @@ function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=fal
       effects.push('ROUTE_CREATE');commit(next);
     },
     fetchMullvadRelays:relayRead|| (async()=>relays),
-    mullvadRuntime:{resolve:async r=>nativeError==='HOST'?null:r,drop:id=>effects.push('DROP:'+id)},
+    mullvadRuntime:{resolve:async r=>nativeError==='HOST'?null:r,drop:id=>effects.push('DROP:'+id),
+      getStatus:()=>({}),
+      refreshStatus:async()=>nativeStatus||(nativeError==='HOST'?{installed:false}:{installed:true,compatible:true,ready:true,interface_up:true,base_proxy_reachable:true,base_route_bound:true})},
     async fetchJsonThroughRouteTest(_iso,_route,url){
       effects.push('PROBE:'+new URL(url).hostname.split('.')[0]);
       if(routeTestFails)throw Error('Route check timed out');
@@ -160,7 +162,7 @@ function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=fal
   };
   const code=slice(bg,'function isPcmsProviderUrl(raw) {','\nasync function handleProxyRequest(details) {')
     .replace('void reloadRoutePins();','');
-  const lock=slice(bg,'async function withRouteTestTargetLock(target, task) {','async function fetchJsonThroughRouteTest(');
+  const lock=slice(bg,'async function withRouteTestTargetLock(target, task, signal = null) {','async function fetchJsonThroughRouteTest(');
   const donor=vm.runInNewContext(lock+code+'\ncreatePcmsEnrollmentDonor();',ctx);
   return {donor,effects,state:()=>state,set:next=>{state=next;}};
 }
@@ -302,4 +304,30 @@ test('PCMS relay catalog timeout aborts the actual read and preserves existing r
  timers[0].fn();const listed=await result;assert.equal(observedSignal.aborted,true);assert.equal(cleared,true);assert.equal(listed.relayList,'UNAVAILABLE');
  assert.deepEqual(Array.from(listed.candidates,c=>c.routeId),[route.id]);assert.deepEqual(a.effects,[]);
  assert.match(bg,/fetch\(MULLVAD_SOCKS_API, \{ cache: "no-store", signal \}\)/);
+});
+
+test('Issue60: tunnel-up/proxy-down is a host connection hold, not missing helper or a reason to rotate relays',async()=>{
+ const a=adapter(await background(),{nativeError:'HOST',nativeStatus:{installed:true,compatible:true,interface_up:true,base_route_bound:true,base_proxy_reachable:false,ready:false}});
+ const probe=await a.donor.probeCandidate({routeId:'mullvad-7'});
+ // Install a route using the same donor-owned path before its observation.
+ a.set({...legacyState(),profiles:{}});
+ const out=await a.donor.probeCandidate({routeId:'mullvad-7'});
+ assert.equal(out.code,'MULLVAD_PROXY_UNREACHABLE');assert.equal(out.failure,'HOST');
+ assert.equal(a.effects.filter(x=>x==='ROUTE_CREATE'||x==='ASSIGN').length,0);
+ assert.equal((await a.donor.inspectConnection()).tunnelUp,true);
+ assert.equal((await a.donor.inspectConnection()).proxyReachable,false);
+});
+test('Issue60: aborting a queued verifier releases no successor before its original predecessor settles',async()=>{
+ const bg=await background(),code=slice(bg,'async function withRouteTestTargetLock(target, task, signal = null) {','async function fetchJsonThroughRouteTest(');
+ const lock=vm.runInNewContext(code+'\nwithRouteTestTargetLock',{routeTestTargetLocks:new Map()});
+ const events=[];let release;const gate=new Promise(resolve=>release=resolve);
+ const first=lock('fixed-echo',async()=>{events.push('first');await gate;events.push('settled')});
+ await new Promise(resolve=>setImmediate(resolve));
+ const abort=new AbortController(),second=lock('fixed-echo',async()=>{events.push('cancelled must not run')},abort.signal).catch(e=>({cancelled:/cancelled/.test(e.message)}));
+ abort.abort();const third=lock('fixed-echo',async()=>{events.push('third')});
+ try{
+  const out=await Promise.race([second,new Promise(resolve=>setTimeout(()=>resolve({cancelled:false}),40))]);
+  assert.equal(out.cancelled,true);assert.deepEqual(events,['first']);
+ }finally{release();await first;await second;await third;}
+ assert.deepEqual(events,['first','settled','third']);
 });

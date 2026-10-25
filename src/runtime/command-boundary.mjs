@@ -3,7 +3,7 @@ import {trackPcmsWork} from './work-checkpoint.mjs';
 import { createCanonicalStore, createRestoreSentinel, openCanonicalDatabase, fail } from './journal.mjs';
 
 export const COMMAND_PORT = 'pcms-i02-canonical-readonly';
-const SAFE_NAMES = new Set(['HEALTH','SUMMARY','GET_OPERATION','GET_NOTICES','NOTICE_SUMMARY','LIST_OPERATION_PAGE','LIST_NOTICE_PAGE','IGNORE_NOTICE','ACK_NOTICE','PREVIEW']);
+const SAFE_NAMES = new Set(['HEALTH','SUMMARY','GET_OPERATION','GET_OPERATION_CONTEXT','GET_NOTICES','NOTICE_SUMMARY','LIST_OPERATION_PAGE','LIST_NOTICE_PAGE','IGNORE_NOTICE','ACK_NOTICE','PREVIEW']);
 export function trustedExtensionPage(api, sender) {
   if (sender?.id !== api.runtime.id || typeof sender.url !== 'string') return false;
   const base = api.runtime.getURL('pcms/');
@@ -46,6 +46,10 @@ export function validateCommand(api, sender, message) {
   if (message.type === 'GET_OPERATION' &&
       (typeof message.operationId !== 'string' || !/^[a-zA-Z0-9_-]{8,100}$/.test(message.operationId)))
     return fail('INVALID_TARGET');
+  if(message.type==='GET_OPERATION_CONTEXT'&&
+    (Object.keys(message).some(k=>!['type','params'].includes(k))||
+     !message.params||typeof message.params!=='object'||Array.isArray(message.params)||Object.keys(message.params).length!==1||
+     !/^[a-zA-Z0-9_-]{8,100}$/.test(message.params.operationId||'')))return fail('INVALID_TARGET');
   return { ok: true };
 }
 export function createCommandBoundary(api, { open = openCanonicalDatabase } = {}) {
@@ -107,6 +111,10 @@ export function createCommandBoundary(api, { open = openCanonicalDatabase } = {}
         // Deliberately do not disclose target/account/slug/manifest/operation identity.
         return { ok: true, state: op.operation.status, revision: op.operation.revision };
       } catch { return fail('CANONICAL_HOLD'); }
+    }
+    if(message.type==='GET_OPERATION_CONTEXT'){
+      try{return await (await canonical()).inspectOperationContext(message.params.operationId);}
+      catch{return fail('CANONICAL_HOLD');}
     }
     return { ok: true, admissible: false, reason: 'CAPABILITY_OFF' };
   }

@@ -124,6 +124,10 @@ export function createAccountBoundary(api,{
     enrollmentInit=(async()=>{
       const created=createEnrollment({accounts:await store(),ledger:await exitLedger(),
         donor:g.enrollmentDonor,pins,mutationAllowed:async()=>!(await sentinel.inspect()).held,
+        inventoryNeeded:async accountId=>{
+          const out=await createInventoryStore(await connection()).accountSummaries();
+          return out.ok&&out.summaries?.[accountId]?.known!==true;
+        },
         openLogin:personaUid=>g.openHumanLogin(personaUid),
         identify:personaUid=>guardedIdentityRead(g,personaUid,identityReader),syncInventory});
       const recovered=await created.recoverInterrupted({canRecover:async()=>!(await sentinel.inspect()).held});
@@ -225,7 +229,11 @@ export function createAccountBoundary(api,{
         if(old.account.state!=='PREPARING')return fail('INVALID_ACCOUNT_STATE');
         return await f.prepare(p.accountId);
       }
-      if(['SYNC_ACCOUNT','CONFIRM_LOGIN','CHECK_IDENTITY'].includes(message.type)){
+      if(message.type==='SYNC_ACCOUNT'){
+        const out=await f.syncInventory(p.accountId);
+        return out.ok?out:{...out,message:explain(out.code)};
+      }
+      if(['CONFIRM_LOGIN','CHECK_IDENTITY'].includes(message.type)){
         const out=await f.confirm(p.accountId);
         return out.ok?out:{...out,message:explain(out.code)};
       }

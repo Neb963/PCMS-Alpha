@@ -40,9 +40,15 @@ export function prepareExit(route, start = true, forwarderToken){
     // Pre-dispatch receipt contains no credential and survives a cold restart.
     let saved;
     try{saved=(await browser.storage.local.get(key))[key];}catch{throw uncertainPrepare();}
-    if(saved)throw uncertainPrepare();
+    if(saved?.phase==='PREPARED')await settlePrepare(key,saved.nonce);
+    else if(saved)throw uncertainPrepare();
     const nonce=crypto.randomUUID();
-    await browser.storage.local.set({[key]:{schema:1,nonce,routeId:route.id,relayIp:route.host,relayPort:Number(route.port||1080)}});
+    const receipt={schema:2,phase:'PREPARED',nonce,routeId:route.id,relayIp:route.host,relayPort:Number(route.port||1080),password:forwarderToken,createdAtMs:Date.now()};
+    try{
+      await browser.storage.local.set({[key]:receipt});
+      await browser.storage.local.set({[key]:{...receipt,phase:'DISPATCH_POSSIBLE'}});
+    }
+    catch{const error=uncertainPrepare();error.nativeNoDispatch=true;throw error;}
     const valid=reply=>reply?.ok!==false&&reply?.route_id===route.id&&
       reply.relay_ip===route.host&&Number(reply.relay_port)===Number(route.port||1080)&&
       reply.local_host==="127.0.0.1"&&Number.isInteger(reply.local_port)&&reply.local_port>0&&reply.local_port<=65535;
@@ -56,14 +62,32 @@ export function prepareExit(route, start = true, forwarderToken){
       // Native-host socket timeout does not cancel the daemon worker. Only
       // explicit settled negative replies permit a future automatic attempt.
       const text=String(error?.message||error);
-      const missing=/not found|no such native application|not registered|native messaging api is unavailable/i.test(text);
-      if((!error.nativeOutcomeUncertain&&!/timed out|disconnect|no response/i.test(text))||missing){
+      if(error.nativeNotSent===true||(error.nativeReply===true&&!/timed out|disconnect|no response|returned no response/i.test(text))){
         await settlePrepare(key,nonce);throw error;
       }
       throw uncertainPrepare();
     }
   })().finally(()=>prepareFlights.delete(route.id));
   prepareFlights.set(route.id,{fingerprint,promise});return promise;
+}
+// Private background recovery candidate, never a general proxy resolution or
+// a public port response. The secret is excluded from every portable export.
+export async function inspectPendingPreparation(routeId,status){
+  const row=(await browser.storage.local.get(PREPARE_PREFIX+routeId))[PREPARE_PREFIX+routeId];
+  if(status?.installed!==true||status.ready!==true||status.version!=="0.3.0"||
+     row?.schema!==2||row.phase!=='DISPATCH_POSSIBLE'||row.routeId!==routeId||!/^[a-f0-9]{64}$/.test(row.password||"")||
+     !/^[a-zA-Z0-9-]{8,100}$/.test(row.nonce||"")||
+     !Number.isSafeInteger(row.createdAtMs)||Date.now()-row.createdAtMs>=3600000||Date.now()<row.createdAtMs)return null;
+  const exits=(status.active_exits||[]).filter(e=>e.route_id===routeId&&e.relay_ip===row.relayIp&&Number(e.relay_port)===row.relayPort&&
+    e.local_host==="127.0.0.1"&&Number.isInteger(e.local_port)&&e.local_port>0&&e.local_port<=65535);
+  if(exits.length!==1)return null;
+  return {...row,endpoint:exits[0]};
+}
+export async function settleObservedPreparation(candidate){
+  const current=await inspectPendingPreparation(candidate.routeId,await getNativeStatus());
+  if(!current||current.nonce!==candidate.nonce||current.password!==candidate.password||
+     JSON.stringify(current.endpoint)!==JSON.stringify(candidate.endpoint))return false;
+  await settlePrepare(PREPARE_PREFIX+candidate.routeId,candidate.nonce);return true;
 }`+source.slice(end);
  once('export function releaseExit(routeId) { return nativeRequest("release_exit", { route_id: routeId }, 6000); }',
   `export async function releaseExit(routeId) {
@@ -75,6 +99,29 @@ export function prepareExit(route, start = true, forwarderToken){
 export function repairMullvadRuntime(source){
  const before='        try { await operations.releaseExit?.(route.id); } catch {}\n        const message = String(error?.message || error);';
  if(source.split(before).length!==2)throw Error('NATIVE_UNCERTAINTY_ANCHOR_MISMATCH');
- return source.replace(before,
-  '        if(error?.nativeOutcomeUncertain!==true)try { await operations.releaseExit?.(route.id); } catch {}\n        const message = String(error?.message || error);');
+ let result=source.replace(before,
+  '        if(error?.nativeOutcomeUncertain!==true&&error?.nativeNoDispatch!==true&&error?.nativeNotSent!==true)try { await operations.releaseExit?.(route.id); } catch {}\n        const message = String(error?.message || error);')
+  .replace('          ready: false,\n          error: message','          ready: false,\n          preparationHeld: error?.nativeOutcomeUncertain===true||error?.nativeNoDispatch===true,\n          error: message');
+ result=result.replace('  async function resolve(route) {','  async function resolve(route,{fresh=false}={}) {')
+  .replace('if (cached && now() - cached.at < 8000) {','if (!fresh && cached && now() - cached.at < 8000) {');
+ const anchor='        let forwarderToken = cachedTokenIsFresh ? cached.route.password : createForwarderToken();\n        let tokenCreatedAt = cachedTokenIsFresh ? cached.tokenCreatedAt : now();';
+ if(result.split(anchor).length!==2)throw Error('NATIVE_FRESH_TOKEN_ANCHOR_MISMATCH');
+ result=result.replace(anchor,`        const existing=(bridgeStatus.active_exits||[]).filter(e=>e.route_id===route.id&&e.relay_ip===route.host&&Number(e.relay_port)===Number(route.port||1080)&&
+          e.local_host==="127.0.0.1"&&e.local_port===cached?.route?.port);
+        const pending=bridgeStatus.pending_prepare_routes||[];
+        if(cachedTokenIsFresh&&bridgeStatus.ready===true&&existing.length===1&&!pending.includes(route.id)&&!pending.includes("OBSERVATION_UNAVAILABLE")){
+          routes.set(route.id,{...cached,at:now()});return cached.route;
+        }
+        // Only actual preparation/renewal rotates a credential. A unique token
+        // later proves that THIS uncertain operation reached its last mutation.
+        let forwarderToken = createForwarderToken();
+        let tokenCreatedAt = now();`);
+ result=result.replace('    const tabs = await browserApi.tabs.query({});',
+  '    if(inFlight.size||(await operations.getStatus()).pending_prepare_routes?.length)return false;\n    const tabs = await browserApi.tabs.query({});');
+ result=result.replace('  return { resolve, refreshStatus, maybeStopIdle, clear, drop, setStatus, getStatus };',
+  `  function acceptObservedPreparation(route,prepared,password,tokenCreatedAt){
+    routes.set(route.id,{route:materialize(route,prepared,password),at:now(),tokenCreatedAt});
+  }
+  return { resolve, refreshStatus, maybeStopIdle, clear, drop, setStatus, getStatus, acceptObservedPreparation };`);
+ return result;
 }

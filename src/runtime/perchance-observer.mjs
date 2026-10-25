@@ -25,11 +25,14 @@ export async function perchanceReadIsolated({identityOnly=false,originalSlug=nul
       .map(b=>b.toString(16).padStart(2,'0')).join('');
     const startChange=localStorage.getItem('sessionTokenLastChangeTime');
     const safeStatus=x=>['success','is-owner','is-not-owner','session-token-error'].includes(x)?x:'unknown';
+    const inventoryDeadline=Date.now()+90000;
     async function call(path,params,{unauthenticated=false}={}) {
       // Isolated-world fetch, fixed same-origin URL, bounded response; no
       // underlying mutable editor APIs or page-world fetch monkeypatch.
+      const remaining=inventoryDeadline-Date.now();
+      if(remaining<=0)return {httpStatus:0,body:{status:'unknown'}};
       const ctrl=new AbortController();
-      const timer=setTimeout(()=>ctrl.abort(),9000);
+      const timer=setTimeout(()=>ctrl.abort(),Math.min(9000,remaining));
       try {
         const res=await fetch('https://perchance.org/api/'+path,{
           method:'POST',credentials:'same-origin',

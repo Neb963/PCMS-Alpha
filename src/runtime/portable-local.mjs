@@ -41,6 +41,10 @@ export function collectPortableLocal(local={}){
    if(typeof value?.repository==='string'&&/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value.repository)&&/^[1-9][0-9]{0,19}$/.test(value.repositoryId||''))
     out[key]={repository:value.repository,repositoryId:value.repositoryId};
   }else if(key===PRESENTATION_KEY){out[key]=normalizePresentation(value);
+  }else if(/^personaMullvadPendingPrepare:[a-zA-Z0-9_-]{1,100}$/.test(key)&&value&&[1,2].includes(value.schema)){
+   // Native credentials are machine-local and short lived. Preserve the
+   // unresolved effect metadata, never its authentication secret.
+   out[key]=fields(value,['schema','phase','nonce','routeId','relayIp','relayPort','createdAtMs']);
   }else if(key==='pcmsUiGeneratorSelectionV1'){
    out[key]={schema:1,items:(value?.items||[]).map(r=>fields(r,['slug','accountId','revision']))};
   }else if(key==='pcmsR4FolderIdentityReviews'&&Array.isArray(value))out[key]=value.map(r=>fields(r,renameFields));
@@ -83,11 +87,13 @@ export function preparePortableLocalRestore(incoming,current,{mode='merge',uidRe
  if(incoming===null)return {};
  const source=collectPortableLocal(incoming),destination=collectPortableLocal(current),patch={};
  for(const [key,raw] of Object.entries(source)){
+  if(key.startsWith('personaMullvadPendingPrepare:')&&Object.hasOwn(current,key))continue;
   if(mode==='merge'&&Object.hasOwn(destination,key)&&!exact(destination[key],raw))
    deny('RESTORE_LOCAL_SETTINGS_CONFLICT');
   if(key.startsWith('pcmsR4ExistingRenameAttempt:')&&uncertain(destination[key])&&!exact(destination[key],raw))
    deny('RESTORE_LOCAL_RENAME_UNCERTAIN');
   let value=structuredClone(raw);
+  if(key.startsWith('personaMullvadPendingPrepare:'))value.phase='RESTORED_UNCONFIRMED';
   if(key==='pcmsR4FolderIdentityReviews')value=value.map(r=>({...r,
    automaticRenameApproved:false,state:r.state==='RENAME_EXISTING_COMPLETED'?r.state:'REVIEW_REQUIRED',
    revision:(Number.isSafeInteger(r.revision)?r.revision:0)+1}));

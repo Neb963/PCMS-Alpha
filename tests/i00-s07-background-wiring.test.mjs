@@ -25,7 +25,8 @@ test('S07 background monitor: temporary tab is fixed same-origin, protected cont
   assert.ok(start>0&&end>start);
   const route=overlay.slice(start,end);
   assert.match(route,/const fixedSource=!identityOnly&&originalSlug!==null/);
-  assert.match(route,/if\(!monitoringRequest&&!fixedSource\)/);
+  assert.match(route,/const fixedAccountRead=originalSlug===null&&typeof identityOnly==='boolean'/);
+  assert.match(route,/if\(!monitoringRequest&&!fixedSource&&!fixedAccountRead\)/);
   assert.match(route,/return \{ok:false,code:'NO_PERCHANCE_TAB'\}/);
   assert.match(route,/url:'https:\/\/perchance.org\/',cookieStoreId,active:false/);
   assert.match(route,/createdBy:'PCMS_S07_MONITOR'/);

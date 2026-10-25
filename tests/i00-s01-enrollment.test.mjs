@@ -124,7 +124,7 @@ function fakeDonor(relays){
   return {donor,effects,profiles,routes,faults,tabs,leases,live,legacyPersona};
 }
 const fp=c=>c.repeat(64);
-function setup({relays}){
+function setup({relays,...options}){
   const db=fakeDatabase(),accounts=createAccountStore(db),ledger=createExitLedger(db);
   const d=fakeDonor(relays),opened=[],synced=[],order=[];
   const sessions=new Map(); // personaUid -> principal fingerprint (real session oracle)
@@ -137,7 +137,7 @@ function setup({relays}){
     identify:async personaUid=>sessions.has(personaUid)?{ok:true,proof:{source:'GUARDED_SESSION_READBACK',
       verified:true,personaUid,principalFingerprint:sessions.get(personaUid),
       observationId:'identity_'+crypto.randomUUID().replaceAll('-','')}}:{ok:false,code:'NO_PAGE_SESSION'},
-    syncInventory:async(accountId,revision)=>{
+    ...options,syncInventory:async(accountId,revision)=>{
       synced.push(accountId);const account=(await accounts.get(accountId)).account;
       return createInventoryStore(db).applyObservation(account,{
         source:'GUARDED_PERCHANCE_READBACK',complete:true,accountId,personaUid:account.personaUid,
@@ -151,6 +151,39 @@ function setup({relays}){
   return {db,accounts,ledger,flow,...d,opened,synced,order,sessions,profileOf};
 }
 const relay=(host,v4,v6)=>({host,v4,v6});
+test('Issue60: human route command cancels automatic observation at its boundary; another account progresses independently',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED'),relay('10.124.0.2','45.83.2.1','BLOCKED')]}),a=await enroll(h),b=await enroll(h);
+ let enter;const entered=new Promise(resolve=>enter=resolve),original=h.donor.probeAssigned;let first=true,active=0,max=0;
+ h.donor.probeAssigned=async p=>{
+  if(p.bindingId!==a.bindingId)return original(p);
+  active++;max=Math.max(max,active);
+  try{if(first){first=false;enter();return await new Promise(resolve=>p.signal.addEventListener('abort',()=>resolve({ok:false,code:'ROUTE_OBSERVATION_CANCELLED',failure:'HOST'}),{once:true}))}return await original(p)}finally{active--;}
+ };
+ const background=h.flow.verifyRoute(a.accountId,{automatic:true});await entered;
+ assert.equal(h.flow.activity(a.accountId).cancellable,true);
+ assert.equal((await h.flow.verifyRoute(b.accountId)).ok,true);
+ const operator=h.flow.verifyRoute(a.accountId);
+ assert.equal((await background).code,'ROUTE_OBSERVATION_CANCELLED');assert.equal((await operator).ok,true);
+ assert.equal(max,1,'never overlap donor commands for the same account');
+ assert.equal(h.flow.running(a.accountId),false);assert.equal((await h.ledger.binding(a.bindingId)).binding.pin,'ACTIVE');
+ assert.equal(h.effects.filter(x=>x.kind==='ASSIGN').length,2,'only original enrollments assigned routes');
+});
+test('Issue60: an incompatible active human command remains owned until its donor effect settles',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),a=await enroll(h),original=h.donor.probeAssigned;
+ let enter,release,observedSignal;const entered=new Promise(resolve=>enter=resolve),gate=new Promise(resolve=>release=resolve);
+ h.donor.probeAssigned=async p=>{observedSignal=p.signal;enter();await gate;return original(p)};
+ const checking=h.flow.verifyRoute(a.accountId);await entered;
+ assert.equal((await h.flow.confirm(a.accountId)).code,'ACCOUNT_BUSY');assert.equal(h.flow.running(a.accountId),true);
+ assert.equal(observedSignal.aborted,false);release();assert.equal((await checking).ok,true);
+});
+test('Issue60: verified accounts with missing initial inventory retry guarded identity/inventory after connection recovery',async()=>{
+ let missing=false;
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')],inventoryNeeded:async()=>missing}),a=await enroll(h);
+ h.sessions.set(a.personaUid,fp('a'));assert.equal((await h.flow.confirm(a.accountId)).ok,true);
+ const baseline=h.synced.length;missing=true;h.faults.host=true;await h.flow.upkeep();assert.equal(h.synced.length,baseline);
+ h.faults.host=false;await h.flow.upkeep();assert.equal(h.synced.length,baseline+1);
+ assert.equal((await h.accounts.get(a.accountId)).account.boundPrincipal,fp('a'));
+});
 test('Issue60: known helper failure durably revokes current route admission; healthy same-route recovery retains identity/history',async()=>{
  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),a=await enroll(h);
  h.sessions.set(a.personaUid,fp('a'));assert.equal((await h.flow.confirm(a.accountId)).ok,true);

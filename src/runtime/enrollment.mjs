@@ -10,7 +10,7 @@ import {normalizeRouteEvidence,exitSetDigest} from './network-ledger.mjs';
 // Hold codes that a later automatic attempt may clear without operator input.
 const TRANSIENT=new Set(['MULLVAD_LOCAL_SERVICE_UNAVAILABLE','DONOR_SECURITY_UNAVAILABLE',
   'PERSONA_CREATE_UNCONFIRMED','PERSONA_TAG_UNCONFIRMED','ROUTE_ASSIGN_UNCONFIRMED','NO_ROUTE_CANDIDATES','MULLVAD_RELAY_CATALOG_UNAVAILABLE','ENROLLMENT_INTERRUPTED',
-  'ROUTE_SEARCH_PENDING','MULLVAD_STATUS_TIMEOUT','MULLVAD_PROXY_UNREACHABLE','MULLVAD_TUNNEL_UNAVAILABLE','MULLVAD_TUNNEL_ROUTE_UNAVAILABLE','MULLVAD_CONNECTION_UNVERIFIED','ROUTE_OBSERVATION_TIMEOUT','ROUTE_OBSERVATION_CANCELLED']);
+  'ROUTE_SEARCH_PENDING','MULLVAD_STATUS_TIMEOUT','MULLVAD_PROXY_UNREACHABLE','MULLVAD_TUNNEL_UNAVAILABLE','MULLVAD_TUNNEL_ROUTE_UNAVAILABLE','MULLVAD_CONNECTION_UNVERIFIED','MULLVAD_ROUTE_UNCONFIRMED','ROUTE_OBSERVATION_TIMEOUT','ROUTE_OBSERVATION_CANCELLED']);
 const rid=prefix=>prefix+crypto.randomUUID().replaceAll('-','');
 // Codes shown to the operator; anything else is summarized generically.
 export const SETUP_MESSAGES=Object.freeze({
@@ -24,6 +24,7 @@ export const SETUP_MESSAGES=Object.freeze({
   MULLVAD_TUNNEL_ROUTE_UNAVAILABLE:'The tunnel is running, but the protected proxy route is unavailable. Retry the route check after repairing the PersonaMonkey connection.',
   MULLVAD_CONNECTION_UNVERIFIED:'The Mullvad connection could not be verified. Retry the route check.',
   MULLVAD_ROUTE_UNCONFIRMED:'A previous connection update has an unconfirmed outcome. This route stays held; checking connection status does not retry it. Other accounts remain available.',
+  MULLVAD_PREPARATION_UNAVAILABLE:'Firefox could not safely complete the connection update. Check available storage and retry the route check.',
   ROUTE_OBSERVATION_TIMEOUT:'The protected route check timed out. Traffic remains held; retry when the connection recovers.',
   ROUTE_OBSERVATION_CANCELLED:'The background route check stopped for your action. A fresh protected check is required before traffic resumes.',
   ROUTE_SEARCH_PENDING:'Still looking for an available unique protected exit. Progress is saved; setup will continue automatically.',
@@ -53,7 +54,7 @@ export const SETUP_MESSAGES=Object.freeze({
 });
 
 export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,syncInventory,
-  now=Date.now,mutationAllowed=async()=>true,routeTurnMs=90000,maxRouteCandidates=4}={}){
+  now=Date.now,mutationAllowed=async()=>true,inventoryNeeded=async()=>false,routeTurnMs=90000,maxRouteCandidates=4}={}){
   if(!accounts?.applyCurrent||!ledger?.reserve||!donor?.createBoundPersona||!pins?.hold||
      typeof openLogin!=='function'||typeof identify!=='function')
     throw new TypeError('Enrollment dependencies unavailable');
@@ -67,7 +68,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       if(prior.kind===kind)return prior.promise;
       // Human intent cancels only automatic observation. Keep ownership
       // until the donor actually settles, including any native preparation.
-      if(prior.kind==='ROUTE:false:true'&&['CONFIRM','OPEN_LOGIN','ROUTE:false:false','ROUTE:true:false'].includes(kind)){
+      if(prior.kind==='ROUTE:false:true'&&['CONFIRM','SYNC','OPEN_LOGIN','ROUTE:false:false','ROUTE:true:false'].includes(kind)){
         prior.controller.abort();
         return prior.promise.then(()=>exclusive(accountId,kind,task));
       }
@@ -77,11 +78,14 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     const promise=Promise.resolve().then(task).catch(async()=>{
       // A thrown adapter/storage error must not leave idle setup looking busy.
       // Preserve the binding and donor intent; resume observes before effects.
-      try{const current=await accounts.get(accountId);if(current.ok&&current.account.state==='PREPARING'){
+      try{const current=await accounts.get(accountId);if(current.ok&&current.account.bindingId){
         pins.hold(current.account.bindingId);
         if(await mutationAllowed()===true){
           await ledger.hold(current.account.bindingId,'ENROLLMENT_INTERRUPTED');
-          if(await mutationAllowed()===true)await progress(accountId,'HELD','ENROLLMENT_INTERRUPTED');
+          if(await mutationAllowed()===true){
+            if(current.account.state==='PREPARING')await progress(accountId,'HELD','ENROLLMENT_INTERRUPTED');
+            else if(current.account.state!=='ARCHIVED')await routeStatus(accountId,'HELD','ENROLLMENT_INTERRUPTED');
+          }
         }
       }}catch{}
       return fail('ENROLLMENT_INTERRUPTED');
@@ -137,11 +141,11 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     const hold=async code=>{pins.hold(bindingId);await ledger.hold(bindingId,code);return fail(code)};
     const startedAt=now();
     const persona=await donor.boundPersona({bindingId});
-    if(!persona.ok)return persona;
+    if(!persona.ok)return hold(persona.code);
     // The donor's tagged Persona must be the one the account record names;
     // a replacement is adopted only after REPLACE_PERSONA has committed.
     if(String(persona.personaUid).toLowerCase()!==String(account.personaUid).toLowerCase())
-      return fail('BINDING_PERSONA_CONFLICT');
+      return hold('BINDING_PERSONA_CONFLICT');
     const prior=await ledger.binding(bindingId);
     const failed=[];
     if(prior.ok&&prior.binding.routeId===persona.routeId&&!change){
@@ -276,13 +280,13 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
 
   // Confirm: verify the pinned route, then the real session principal, then
   // the owned inventory. A UI click is never identity evidence.
-  async function confirm(accountId,{silent=false}={}){
+  async function confirm(accountId,{silent=false,automatic=false}={}){
     const got=await accounts.get(accountId);
     if(!got.ok)return got;
     let account=got.account;
     if(!['WAITING_LOGIN','VERIFICATION_PENDING','REBIND_PENDING','VERIFIED','OVERRIDDEN','INVENTORY_PENDING'].includes(account.state)||
        typeof account.bindingId!=='string')return fail('INVALID_ACCOUNT_STATE');
-    const route=await ensurePinnedRoute(account);
+    const route=await ensurePinnedRoute(account,{automatic});
     if(!route.ok){await routeStatus(accountId,'HELD',route.code);return route;}
     await routeStatus(accountId,'PINNED');
     if(account.state==='WAITING_LOGIN'||account.state==='REBIND_PENDING'){
@@ -534,6 +538,16 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     resume:accountId=>exclusive(accountId,'SETUP',()=>prepare(accountId)),
     prepare:accountId=>exclusive(accountId,'SETUP',()=>prepare(accountId)),
     confirm:accountId=>exclusive(accountId,'CONFIRM',()=>confirm(accountId)),
+    syncInventory:accountId=>exclusive(accountId,'SYNC',async()=>{
+      const got=await accounts.get(accountId);if(!got.ok)return got;
+      // Reuse current guarded admission for a read-only inventory. A cached
+      // healthy account need not prepare a native forwarder just to sync.
+      const out=await syncInventory(accountId,got.account.revision);
+      if(out?.ok)return out;
+      if(['PROTECTED_ROUTE_NOT_PINNED','PROTECTED_ROUTE_UNVERIFIED','PROTECTED_ROUTE_UNAVAILABLE',
+          'ACCOUNT_IDENTITY_UNVERIFIED','ACCOUNT_NOT_VERIFIED'].includes(out?.code))return confirm(accountId);
+      return out||fail('INVENTORY_UNAVAILABLE');
+    }),
     openLogin:accountId=>exclusive(accountId,'OPEN_LOGIN',async()=>{
       const got=await accounts.get(accountId);if(!got.ok)return got;
       const a=got.account;if(a.state==='ARCHIVED')return fail('ACCOUNT_ARCHIVED');
@@ -565,8 +579,8 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
           if(a.route?.status!=='RELEASED')results.push(await exclusive(id,'RELEASE',()=>releaseIdle(a)));
           return;
         }
-        if(a.state==='INVENTORY_PENDING'){
-          results.push(await exclusive(id,'CONFIRM',()=>confirm(id,{silent:true})));
+        if(a.state==='INVENTORY_PENDING'||a.state==='VERIFIED'&&await inventoryNeeded(id)){
+          results.push(await exclusive(id,'CONFIRM',()=>confirm(id,{silent:true,automatic:true})));
         }else if(a.state==='PREPARING'){
           if(typeof a.bindingId==='string'&&(a.setup?.phase!=='HELD'||TRANSIENT.has(a.setup?.code)))
             results.push(await exclusive(id,'SETUP',()=>prepare(id)));

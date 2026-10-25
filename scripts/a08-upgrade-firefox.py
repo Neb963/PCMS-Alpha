@@ -165,7 +165,7 @@ def main():
                   flush=True)
             # An XPI filesystem write can precede the AddonManager's durable
             # extensions.json version transition. Never close/restart Firefox
-            # until the manager's independent disk registry confirms 1.2.14;
+            # until the manager's independent disk registry confirms 1.2.15;
             # an uncommitted candidate remains a failed upgrade, not success.
             registry=profile/'extensions.json'
             registry_version=None
@@ -177,9 +177,9 @@ def main():
                     registry_version=rows[0].get('version') if len(rows)==1 else None
                 except (OSError,ValueError,IndexError,TypeError):
                     registry_version=None
-                if registry_version=='1.2.14':break
+                if registry_version=='1.2.15':break
                 time.sleep(.15)
-            assert registry_version=='1.2.14',(
+            assert registry_version=='1.2.15',(
                 'A08_ADDON_REGISTRY_UPDATE_NOT_COMMITTED',registry_version)
             print('H A08_FIREFOX_ADDON_REGISTRY_UPDATED_BEFORE_SHUTDOWN=PASS',
                   flush=True)
@@ -191,7 +191,7 @@ def main():
             b.call('POST',f'/session/{session}/url',{'url':'about:blank'},timeout=30)
             b.call('POST',f'/session/{session}/url',{
                 'url':f'moz-extension://{uuid_before}/pcms/index.html'},timeout=30)
-            wait_upgraded_runtime(session,'1.2.14')
+            wait_upgraded_runtime(session,'1.2.15')
             print('B A08_TARGET_RUNTIME_READY_BEFORE_SHUTDOWN=PASS',flush=True)
             exiting=b.owned_firefox_pids(profile)
             b.close(session);session=None
@@ -222,7 +222,7 @@ def main():
             assert uuid_before==uuid_after,'A08_GECKO_PRINCIPAL_UUID_CHANGED'
             b.call('POST',f'/session/{session}/url',{
                 'url':f'moz-extension://{uuid_after}/pcms/index.html'},timeout=30)
-            verified=wait_upgraded_runtime(session,'1.2.14')
+            verified=wait_upgraded_runtime(session,'1.2.15')
             retained=b.execute(session,"""return browser.storage.local.get(
                 'a08UpgradeCheckpoint').then(s=>s.a08UpgradeCheckpoint);""")
             assert retained==marker,('A08_UPGRADE_STORAGE_LOST',retained)

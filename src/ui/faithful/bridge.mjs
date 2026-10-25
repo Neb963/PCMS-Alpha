@@ -1,5 +1,6 @@
 import {createPresentationWorkspace} from './presentation-workspace.mjs';
 import {COLUMN_IDS} from '../presentation-preferences.mjs';
+import {OPERATION_STATES,operationGroup} from '../operation-context.mjs';
 import {installInteraction} from './interaction.mjs';
 import {mountOperatorChecklist} from '../operator-checklist.mjs';
 import {mountBackupWorkspace} from './backup-workspace.mjs';
@@ -141,7 +142,7 @@ function updateNav(){for(const a of root.querySelectorAll('[data-nav]'))a.setAtt
  const label=shadow('#breadcrumb');if(label)label.textContent=({'work-queue':'Work Queue',overview:'Overview',generators:'Generators',accounts:'Accounts',refresher:'Refresher',settings:'Settings'})[state.route];
  const t=shadow('[data-nav="work-queue"] .nav-count');if(t){
   const stats=state.queue.summary?.states,notices=state.queue.summary?.attention?.counts;
-  const count=stats?(stats.HELD_UNCERTAIN||0)+(stats.REJECTED||0)+(stats.DISPATCH_POSSIBLE||0)+
+  const count=stats?Object.entries(stats).reduce((n,[key,value])=>n+(operationGroup(key)==='NEEDS_ACTION'?value:0),0)+
     (notices?.actionRequired||0)+(notices?.serious||0):0;
   t.textContent=count?String(count):'';t.hidden=!count;
  }
@@ -402,17 +403,18 @@ function generatorFacets(item){
 function openGeneratorCreator(){generatorBatches.openCreator()}
 
 async function syncManagedInventories(){
- const verified=state.lastAccountList.filter(a=>a.state==='VERIFIED');
+ const verified=state.lastAccountList.filter(a=>['VERIFIED','INVENTORY_PENDING'].includes(a.state));
  if(!verified.length){notify('No verified account is available for a protected inventory check.');return}
  notify('Checking owned inventory for '+verified.length+' verified account(s)…');
  let good=0,held=0;
- for(const account of verified){
+ let cursor=0;
+ await Promise.all(Array.from({length:Math.min(4,verified.length)},async()=>{while(cursor<verified.length){const account=verified[cursor++];
   try{
-   const out=await readPort('pcms-i04-inventory','SYNC_ACCOUNT',{
+   const out=await readPort('pcms-i03-accounts','SYNC_ACCOUNT',{
     accountId:account.accountId,expectedRevision:account.revision},100000);
    if(out?.ok)good++;else held++;
   }catch{held++;}
- }
+ }}));
  notify('Inventory check finished: '+good+' confirmed, '+held+
    ' unverified. No missing remote generator has been inferred.');
  await loadGenerators();
@@ -549,7 +551,7 @@ function openGeneratorSelection(){
    const queue=found.accounts.filter(a=>ids.has(a.accountId));let index=0;
    await Promise.all(Array.from({length:Math.min(2,queue.length)},async()=>{
     while(index<queue.length){const a=queue[index++];try{
-     const out=await readPort('pcms-i04-inventory','SYNC_ACCOUNT',{accountId:a.accountId,expectedRevision:a.revision},100000);
+     const out=await readPort('pcms-i03-accounts','SYNC_ACCOUNT',{accountId:a.accountId,expectedRevision:a.revision},100000);
      if(out?.ok&&!out.held)confirmed++;else held++;
     }catch{held++}}
    }));
@@ -645,11 +647,8 @@ async function refreshRefCounts(epoch){
  const vals=shadow('.ref-kpi-strip')?.querySelectorAll('.ref-kpi strong.tabnums');if(vals)reads.forEach((r,i)=>{vals[i].textContent=r.status==='fulfilled'?safeCount(r.value.total):'—'});
 }
 // Canonical queue only: no status derived from native view text.
-const queueState={
- PREPARED:['Waiting',''],DISPATCH_POSSIBLE:['Outcome not confirmed','amber'],
- OBSERVING:['Verifying result',''],HELD_UNCERTAIN:['Needs reconciliation','amber'],
- CONFIRMED:['Confirmed','green'],ABORTED:['Cancelled',''],
- REJECTED:['Rejected','amber']};
+const queueState=OPERATION_STATES;
+const operationTitle=op=>({supply_create_v1:'Generator creation',supply_rename_v1:'Generator rename',supply_git_marker_v1:'Git source setup'})[op.effectType]||'Recorded operation';
 function queueGroup(filter){
  return ({'Needs action':'NEEDS_ACTION',Running:'RUNNING',Waiting:'WAITING',
    Completed:'COMPLETED',All:'ALL'})[filter]||'NEEDS_ACTION';
@@ -892,7 +891,7 @@ function displayQueue(){
    const row=el('div','queue-item');const info=queueState[op.status]||['Not verified',''];
    const marker=el('span','row-mark'+(info[1]==='amber'?' warn':''));marker.append(icon(info[1]==='amber'?'alert':'activity'));
    const detail=el('div','row-body'),header=el('div','queue-head');
-   header.append(el('strong','',op.effectType?.replaceAll('_',' ')||'Recorded operation'),statusPill(info[0],info[1]));
+   header.append(el('strong','',operationTitle(op)),statusPill(info[0],info[1]));
    detail.append(header,el('div','row-meta',
      'Protected operation'+(Number.isFinite(op.updatedAt)?
       ' · last recorded '+new Date(op.updatedAt).toLocaleString():
@@ -1204,17 +1203,20 @@ function openOperationRecord(op){
  dialog.setAttribute('aria-label','Recorded operation details');
  const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
  const header=el('div','drawer-head');
- header.append(el('h2','drawer-title','Operation · '+(queueState[op.status]?.[0]||'Unverified')),b('Close',close));
- const body=el('div','drawer-body'),fields=el('dl');
+ header.append(el('h2','drawer-title',operationTitle(op)+' · '+(queueState[op.status]?.[0]||'Needs review')),b('Close',close));
+ const body=el('div','drawer-body'),fields=el('dl'),context=el('div'),technical=el('details');
+ context.setAttribute('role','status');technical.append(el('summary','','Recorded details'),fields);
  for(const [name,value] of [['Target',op.targetId],['Operation',op.operationId],
   ['Type',op.effectType||'Unknown'],['State',op.status||'Unknown'],
   ['Revision',String(op.revision??'Unknown')],
   ['Updated',Number.isSafeInteger(op.updatedAt)?new Date(op.updatedAt).toLocaleString():'Not recorded']]){
   const row=el('div','kv');row.append(el('dt','',name),el('dd','',value));fields.append(row);
  }
- body.append(fields);
+ body.append(context,technical);
  const help={
   PREPARED:'This operation is reserved locally. It has not been dispatched. Check account, route, permissions and scheduling before expecting a remote change.',
+  READY_TO_DISPATCH:'This older request passed its recorded prerequisites. Its saved state must be checked before any further action.',
+  PREFLIGHT_FAILED:'An earlier prerequisite check failed. Check the saved request and its account; a failure label alone does not prove whether a remote action occurred.',
   DISPATCH_POSSIBLE:'A remote effect may already have occurred. Do not retry. Reconcile the exact target using an independent provider readback.',
   OBSERVING:'The runtime is verifying the remote result. An acknowledgment alone does not confirm the effect.',
   HELD_UNCERTAIN:'The effect outcome is uncertain. It remains fenced; use the matching protected workflow’s reconciliation action, not a retry.',
@@ -1222,13 +1224,49 @@ function openOperationRecord(op){
   ABORTED:'The operation ended before dispatch. No remote effect was authorized by this record.',
   REJECTED:'The controller rejected the operation. Check current prerequisites and latest canonical state before creating a new request.'
  };
- body.append(el('p','setting-note',help[op.status]||
-  'State is not recognized; keep all remote effects held until the runtime is checked.'));
+ const guidance=el('p','setting-note',help[op.status]||
+  'This older request needs review. Its history is preserved and possible remote actions remain held.');
+ body.append(guidance);
  const actions=el('div','form-foot');
+ const check=b('Check saved status',()=>void loadContext(),'btn small');
+ actions.append(check);
  actions.append(b('View current queue',()=>{close();void loadQueue(true)},'btn small'));
  body.append(actions);dialog.append(header,body);overlay.append(dialog);root.append(overlay);
  overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
  overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ async function loadContext(){
+  check.disabled=true;
+  try{
+   const out=await readPort('pcms-i02-canonical-readonly','GET_OPERATION_CONTEXT',{operationId:op.operationId},15000);
+   if(!overlay.isConnected)return;
+   if(!out?.ok){context.textContent='Saved request details could not be read. Retry; the original operation is preserved.';return}
+   const c=out.context;context.replaceChildren();
+   if(c.related?.slug)context.append(el('strong','',c.related.slug));
+   if(c.evidence==='RECORDED_NO_DISPATCH')guidance.textContent='The saved checks failed before dispatch. No creation or rename was sent by this recorded attempt. Repair its account prerequisites; the original request remains preserved and is not replayed.';
+   else if(c.status==='PREFLIGHT_FAILED')guidance.textContent='This historical request failed a prerequisite check, but its dispatch history is incomplete or conflicting. Keep its possible remote result held. Checking saved status never retries creation or rename.';
+   if(c.failure?.code){
+    const note=el('p','setting-note',({INITIAL_INVENTORY_UNKNOWN:'An account’s initial owned inventory was not available.',
+     MULLVAD_LOCAL_SERVICE_UNAVAILABLE:'The Mullvad connection was unavailable when this request was checked.',
+     PROTECTED_ROUTE_NOT_PINNED:'This account did not have a verified protected route.',
+     PROTECTED_ROUTE_UNVERIFIED:'This account’s protected route was not verified.'})[c.failure.code]||'The earlier check recorded a failure. Its original reason is retained in Recorded details.');context.append(note);
+    fields.querySelector('[data-operation-failure]')?.remove();
+    const reason=el('div','kv');reason.dataset.operationFailure='';reason.append(el('dt','','First recorded reason'),el('dd','',c.failure.code));fields.append(reason);
+   }
+   actions.querySelectorAll('[data-operation-related]').forEach(e=>e.remove());
+   if(c.related?.accountId){
+    const account=b('Open account',()=>void(async()=>{
+     account.disabled=true;
+     try{const out=await accounts(),a=out.accounts.find(a=>a.accountId===c.related.accountId);
+      if(a){close();openAccountManager(a)}else notify('The original account is unavailable. Its request and history are preserved.');
+     }catch{notify('The account could not be read. Retry without resubmitting the request.')}
+     finally{account.disabled=false;}
+    })());account.dataset.operationRelated='';actions.prepend(account);
+   }
+   if(c.related?.slug){const target=b('Inspect generator',()=>{close();openSourceManager({slug:c.related.slug})});target.dataset.operationRelated='';actions.append(target)}
+  }catch{if(overlay.isConnected)context.textContent='Saved details could not be checked. Retry; nothing was dispatched.'}
+  finally{check.disabled=false;}
+ }
+ void loadContext();
  header.querySelector('button')?.focus();
 }
 async function openIncident(n){
@@ -1292,8 +1330,8 @@ function displayOverview(){if(state.route!=='overview')return;
   stat(1,ref?.ok?String(ref.occupied??'—'):'—',
     ref?.ok?'Currently occupied Refresher slots; provider visibility is separate':'Refresher state unavailable');
   const counts=summary?.states,attention=noticeTotals?.counts;
-  const need=counts?(counts.HELD_UNCERTAIN||0)+(counts.REJECTED||0)+
-    (counts.DISPATCH_POSSIBLE||0)+(attention?.actionRequired||0)+(attention?.serious||0):null;
+  const need=counts?Object.entries(counts).reduce((n,[key,value])=>n+(operationGroup(key)==='NEEDS_ACTION'?value:0),0)+
+    (attention?.actionRequired||0)+(attention?.serious||0):null;
   stat(2,need===null?'—':String(need),
     need===null?'Incident journal unavailable':'Recorded local holds and incidents');
   const listRows=(index,items)=>{
