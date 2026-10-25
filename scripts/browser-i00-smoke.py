@@ -2649,7 +2649,8 @@ def main():
                     oldResult.code==='INDEPENDENT_TEST_EVIDENCE_REQUIRED'&&
                     pass.ok&&pass.state==='TESTS_VERIFIED'&&
                     pass.slotReleased===true&&
-                    noRepair.code==='AI_VERIFIED_FAILURE_AND_SESSION_REQUIRED'&&
+                    noRepair.code==='AI_EXECUTION_SLOT_RELEASED'&&
+                    final.job.native?.state==='CHAT1_OBSERVED_IDLE'&&
                     recheck.ok&&recheck.state==='TESTS_VERIFIED'&&
                     final.ok&&final.job.sourceFingerprint===F.fingerprint&&
                     final.job.finalSource.files.length===3&&
