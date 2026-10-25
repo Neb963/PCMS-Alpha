@@ -69,3 +69,14 @@ test('J04 typed clean-set requests cannot submit test/source evidence or bypass 
  for(const params of [{id,expectedRevision:1,digest:'a'.repeat(64),explicitApproval:false},{id,expectedRevision:1,digest:'a'.repeat(64),explicitApproval:true,bulkAuthorization:{}}])assert.equal(validateCleanBulkMessage(api,sender,{type:'APPROVE',params}).ok,false);
  assert.equal(validateCleanBulkMessage(api,{id:'other',url:'https://perchance.org'},{type:'PREPARE',params:{slugs:[slug(0)]}}).ok,false);
 });
+test('J04 individual cancellation permanently revokes that item in the older bulk decision; other items continue and a fresh explicit set may reinstate it',async()=>{
+ const f=await fixture(2),plan=await f.bulk.prepare([slug(0),slug(1)]);await f.bulk.approve(plan.id,1,plan.digest);await f.progress().tick();
+ const approved=await f.releases.get(slug(0));assert.equal(approved.state,'APPROVED');assert.equal((await f.releases.cancelApproved(slug(0),approved.revision)).state,'CANCELED');
+ for(let n=0;n<6;n++)await f.progress().tick();
+ assert.equal((await f.releases.get(slug(0))).state,'CANCELED');assert.equal((await f.releases.get(slug(1))).state,'APPROVED');
+ assert.equal(f.db.keys('events').map(k=>f.db.read('events',k)).filter(e=>e.stage==='RELEASE_APPROVED'&&e.slug===slug(0)).length,1);
+ const prior=await f.bulk.get(plan.id);assert.equal(prior.counts.CANCELED,1);
+ const fresh=await f.bulk.prepare([slug(0)]);assert.equal(fresh.eligible,1);assert.equal((await f.bulk.approve(fresh.id,1,fresh.digest)).ok,true);
+ for(let n=0;n<3;n++)await f.progress().tick();assert.equal((await f.releases.get(slug(0))).state,'APPROVED');
+ assert.equal(f.db.keys('events').map(k=>f.db.read('events',k)).filter(e=>e.stage==='RELEASE_APPROVED'&&e.slug===slug(0)).length,2);
+});

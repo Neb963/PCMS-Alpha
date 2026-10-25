@@ -421,6 +421,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     closeRefresherTab,
     inspectStageEditor,
     inspectManualEditor:(personaUid,slug,nonce)=>manualEditor(personaUid,slug,nonce),
+    prepareChangeEditor:(personaUid,slug,nonce)=>manualEditor(personaUid,slug,nonce,'request-changes'),
     prepareManualEditor:(personaUid,slug,nonce)=>manualEditor(personaUid,slug,nonce,true),
     inspectHumanReview:(personaUid,slug,nonce)=>humanReview(personaUid,{slug,nonce,action:'OBSERVE'}),
     openHumanReview:(personaUid,slug,nonce)=>humanReview(personaUid,{slug,nonce,action:'OPEN'}),

@@ -45,3 +45,32 @@ test('J04 pending native work, dirty edits, session/source drift, stale CAS and 
  const f=await fixture('MANUAL_INFRASTRUCTURE');const forged=await createS06ExceptionStore(f.db).record({name:slug,...f.params,idleProof:{ok:true}});
  assert.equal(forged.code,'S06_EXCEPTION_CANONICAL_SOURCE_UNVERIFIED');assert.equal(f.db.read('meta','ai-job:'+slug).job.executionSlotReleased,false);
 });
+
+test('J04 manual and optional incomplete candidates accept source-bound Request Changes as fresh untested children',async()=>{
+ const {createS06ChangeStore}=await import('../src/runtime/s06-request-changes.mjs');
+ for(const mode of ['MANUAL_INFRASTRUCTURE','OPTIONAL_CHAT2_INCOMPLETE']){
+  const f=await fixture(mode),recorded=await f.boundary.runTrusted({type:'RECORD_EXCEPTION',params:f.params});assert.equal(recorded.ok,true);
+  const job=f.db.read('meta','ai-job:'+slug).job,ex=f.db.read('meta','s06-exception:'+slug).record;
+  await put(f.db,{key:'writeback:'+slug,record:{slug,operationId:'writeback_'+'1'.repeat(32),revision:1,state:'CONFIRMED',mode:'S06_EXCEPTION',exceptionRevision:ex.revision,stageRevision:3,jobRevision:job.revision,sourceFingerprint:job.sourceFingerprint,sealedSource:f.source,commitSha:'c'.repeat(40),readyIdentifier:'ready',readyInputFingerprint:F}});
+  const store=createS06ChangeStore(f.db),r=await store.request({name:slug,stage:f.stage,job,sourceFingerprint:job.sourceFingerprint,instructions:'Revise this exceptional candidate.',expectedStageRevision:3,expectedJobRevision:job.revision,requestId:'change_'+'2'.repeat(32)});
+  assert.equal(r.state,'REQUESTED',JSON.stringify(r));assert.equal((await store.admit(slug,r.revision)).state,'ADMITTED');
+  const child=f.db.read('meta','ai-job:'+slug).job;assert.equal(child.verifiedFinal,null);assert.equal(child.exceptionFrozen,undefined);assert.equal(child.state,'PENDING_NATIVE_SESSION');assert.equal(child.operatorInstruction.text,'Revise this exceptional candidate.');
+  assert.equal(authorizeS06Exception({ready:f.ready,stage:f.db.read('meta','stage:'+slug).record,job:child,record:ex}).ok,false);
+ }
+});
+
+test('J04 exceptional final F updates only the existing comparison source and preserves immutable public P',async()=>{
+ const {createExistingStore}=await import('../src/runtime/existing-update-store.mjs');
+ for(const mode of ['MANUAL_INFRASTRUCTURE','OPTIONAL_CHAT2_INCOMPLETE']){
+  const f=await fixture(mode);assert.equal((await f.boundary.runTrusted({type:'RECORD_EXCEPTION',params:f.params})).ok,true);
+  const old={slug,revision:1,state:'STAGE_CONFIRMED',nonce,accountId:f.stage.accountId,previousFingerprint:'d'.repeat(64),recovery:{immutable:'previous-good'},stagedFingerprint:'e'.repeat(64)};
+  await put(f.db,{key:'existing-update:'+slug,record:old});
+  const store=createExistingStore(f.db),out=await store.setFinal(slug,1,f.source);assert.equal(out.ok,true,JSON.stringify(out));
+  const saved=f.db.read('meta','existing-update:'+slug).record;assert.equal(saved.stagedFingerprint,f.source.fingerprint);assert.deepEqual(saved.recovery,old.recovery);assert.equal(saved.previousFingerprint,old.previousFingerprint);
+  const job=f.db.read('meta','ai-job:'+slug).job;
+  await put(f.db,{key:'ai-job:'+slug,accountId:f.stage.accountId,job:{...job,revision:job.revision+1}});
+  assert.equal((await store.setFinal(slug,2,f.source)).code,'EXISTING_FINAL_TESTS_OR_STAGE_CHANGED');
+  await put(f.db,{key:'ai-job:'+slug,accountId:f.stage.accountId,job:{...job,chat1:{...job.chat1,tests:{smoke:{result:'FAIL',sourceFingerprint:f.source.fingerprint}}}}});
+  assert.equal((await store.setFinal(slug,2,f.source)).code,'EXISTING_FINAL_TESTS_OR_STAGE_CHANGED');
+ }
+});

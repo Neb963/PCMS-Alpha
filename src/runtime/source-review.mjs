@@ -29,7 +29,11 @@ export function createLocalSourceReview(db,{stageFactory=createStagingStore,aiFa
   if(!source.ok||source.fingerprint!==stored?.fingerprint||!previous.ok||previous.fingerprint!==r.previous?.fingerprint)
    return fail('REVIEW_STORED_SOURCE_CORRUPT');
   const tests=j?evaluation(j):{state:'UNVERIFIED'};
+  const [ready,exception]=await Promise.all([read('s05-ready:'+slug),read('s06-exception:'+slug)]),active=ready?.record;
+  const currentReady=!r.readyIdentifier||!!(active?.active&&!active.desired&&!active.hold&&active.active.identifier===r.readyIdentifier&&active.active.inputFingerprint===r.readyInputFingerprint);
+  const exceptional=exception?.record;
   return {ok:true,source,previous,summary:{ok:true,slug,stageRevision:r.revision,jobRevision:j?.revision||0,
+   currentReady,operatorPaused:j?.operatorPaused===true,requestChangesEligible:tests.state==='TESTS_VERIFIED'||!!(exceptional?.state==='RECORDED'&&exceptional.stageRevision===r.revision&&exceptional.jobRevision===j?.revision&&exceptional.sourceFingerprint===source.fingerprint),
    sourceFingerprint:source.fingerprint,previousFingerprint:previous.fingerprint,
    files:source.files,priorFiles:previous.files,diff:diffSource(previous,source).changes,
    sourceKind:historyRevision!==undefined?'HISTORICAL_CHECKPOINT':j?.finalSource?'DEVELOPMENT_SNAPSHOT':'STAGED_INPUT',

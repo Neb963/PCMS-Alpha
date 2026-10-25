@@ -66,7 +66,7 @@ function withS06Candidate(m,stage,job,done,commit,approval=null){
 const display=r=>r?{
   ok:true,slug:r.slug,revision:r.revision,state:r.state,
   releaseId:r.releaseId,kind:r.kind,sourceFingerprint:r.approval.sourceFingerprint,
-  previousFingerprint:r.approval.previousFingerprint,
+  previousFingerprint:r.approval.previousFingerprint,stageRevision:r.approval.stageRevision,jobRevision:r.approval.jobRevision,
   fileCount:r.approval.files.length,
   accountId:r.approval.accountId,observedAt:r.observedAt||null,
   reason:r.progressHold||r.reason||null,dispatchPossible:r.dispatchPossible===true,
@@ -200,6 +200,9 @@ export function createReleaseStore(db){
                   if(set?.state!=='APPROVED'||set.digest!==bulk.digest||!set.approvedAt||item?.state!=='APPROVAL_REQUESTED'||item.slug!==stage.slug||
                     item.snapshot.readyIdentifier!==stage.readyIdentifier||item.snapshot.readyInputFingerprint!==stage.readyInputFingerprint||
                     !matchesApproval(item.snapshot.tuple,approval.tuple).ok){done(fail('CLEAN_BULK_AUTHORITY_REVOKED'));return}
+                  if(old?.state==='CANCELED'&&(item.previousRelease?.state!=='CANCELED'||item.previousRelease.releaseId!==old.releaseId||item.previousRelease.revision!==old.revision)){
+                    done(fail('CLEAN_BULK_SOURCE_APPROVAL_REVOKED'));return;
+                  }
                   write(bulk);
                 };
                 };

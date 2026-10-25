@@ -375,4 +375,7 @@ body:has(.drawer-overlay:not([hidden])) #toast-root{right:min(555px,calc(100vw -
 .candidate-item input[type=checkbox]{margin:4px 0 0}.candidate-item strong{overflow-wrap:anywhere}
 .candidate-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .development-instructions label,.development-instructions textarea{display:block;width:100%}.development-instructions textarea{margin:8px 0}
+.source-tree>.form-foot{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;justify-content:stretch}
+.source-tree>.form-foot>.setting-note{grid-column:1 / -1;grid-row:1;text-align:center;white-space:normal;margin:0;padding:5px}
+.source-tree>.form-foot .btn{min-width:0;white-space:normal;width:100%}
 @media(max-width:750px){.queue-item.candidate-item{grid-template-columns:18px minmax(0,1fr)}.candidate-actions{grid-column:2;justify-content:flex-start}.page-head .head-actions{flex-wrap:wrap}}

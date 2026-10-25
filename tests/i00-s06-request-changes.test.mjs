@@ -191,3 +191,29 @@ test('S06 Request Changes cannot bypass an existing human-editor hold',async()=>
  assert.equal(x.db.read('meta','s06-change:'+name),undefined);
  assert.equal(x.db.keys('operations').length,0);
 });
+
+test('J04 Request Changes is durable local intent during Git/provider outage and preserves a paused 16000-character prompt',async()=>{
+ const {createReleaseBoundary}=await import('../src/runtime/release-boundary.mjs');
+ const x=await setup({releaseState:null});x.job={...x.job,operatorPaused:true,prompt:{...x.job.prompt,text:'x'.repeat(16000)}};
+ await new Promise(resolve=>{const t=x.db.transaction('meta','readwrite');t.oncomplete=resolve;t.objectStore('meta').put({key:'ai-job:'+name,accountId:'account-1',job:x.job})});
+ const api={runtime:{id:'test',getURL:p=>'moz-extension://test/'+p},storage:{local:{get:async()=>({})}}};
+ const deny=()=>{throw Error('EXTERNAL_UNAVAILABLE')};
+ const boundary=createReleaseBoundary(api,{open:async()=>x.db,guard:deny,inspect:deny,gitCredential:deny});
+ const r=await boundary.run({type:'REQUEST_CHANGES',params:{slug:name,expectedStageRevision:4,expectedJobRevision:7,sourceFingerprint:x.F.fingerprint,instructions:'Keep this separately queued instruction.'}},{id:'test',url:api.runtime.getURL('pcms/index.html')});
+ assert.equal(r.state,'REQUESTED',JSON.stringify(r));
+ assert.equal((await x.store.admit(name,r.revision)).state,'ADMITTED');
+ const child=x.db.read('meta','ai-job:'+name).job;
+ assert.equal(child.prompt.text,x.job.prompt.text);assert.equal(child.operatorPaused,true);
+ assert.equal(child.operatorInstruction.text,'Keep this separately queued instruction.');
+ assert.equal(child.awaitingExecutionSlot,true);assert.equal(child.executionSlotReleased,true);
+ assert.equal(x.db.keys('operations').length,0);
+});
+test('J04 a pending old-F request is superseded by a new READY without transferring instructions or blocking later review',async()=>{
+ const x=await setup({releaseState:null}),requested=await x.request();
+ assert.equal((await x.store.supersede(name,requested.revision)).code,'S06_REQUEST_NOT_SUPERSEDED');
+ await new Promise(resolve=>{const t=x.db.transaction('meta','readwrite');t.oncomplete=resolve;t.objectStore('meta').put({key:'s05-ready:'+name,record:{...x.ready,desired:{identifier:'new-ready',inputFingerprint:'a'.repeat(64)}}})});
+ assert.equal((await x.store.supersede(name,requested.revision)).state,'SUPERSEDED');
+ assert.equal((await x.store.admit(name,requested.revision)).ok,false);
+ assert.equal(x.db.read('meta','ai-job:'+name).job.operatorInstruction,undefined);
+ assert.equal(x.db.read('meta','s06-change-history:'+name+':'+ID+':1').record.instructions,'Change the greeting and keep the required tests.');
+});

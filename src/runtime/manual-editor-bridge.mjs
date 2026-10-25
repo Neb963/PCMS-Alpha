@@ -25,7 +25,9 @@ export function createManualEditorBridge({browser,getState,open=openCanonicalDat
   async function valid(){const [st,ai,state,hold]=await Promise.all([read('stage:'+slug),read('ai-job:'+slug),getState(),sentinel.inspect()]),s=st?.record,j=ai?.job,p=state.profiles?.[cookieStoreId];
    if(hold.held||!s||!j||j.native||j.stageRevision!==s.revision||s.state!=='SOURCE_VERIFIED'||s.nonce!==nonce||s.personaUid!==personaUid||p?.personaUid!==personaUid||p.routeId!==routeId||['direct','block'].includes(routeId)||!state.routes?.[routeId]||state.routes[routeId].enabled===false)return false;
    if(!prepare)return true;
-   const [ex,rl]=await Promise.all([read('s06-exception:'+slug),read('release:'+slug)]),e=ex?.record,r=rl?.release;
+   const [ex,rl,change,ready]=await Promise.all([read('s06-exception:'+slug),read('release:'+slug),read('s06-change:'+slug),read('s05-ready:'+slug)]),e=ex?.record,r=rl?.release,req=change?.record,a=ready?.record;
+   if(prepare==='request-changes')return !j.operatorPaused&&j.exceptionQuiescence==='NEVER_DISPATCHED_SOURCE'&&j.exceptionFrozen&&e?.state==='RECORDED'&&e.jobRevision===j.revision&&e.stageRevision===s.revision&&e.sourceFingerprint===j.sourceFingerprint&&
+    req?.state==='REQUESTED'&&req.parentStageRevision===s.revision&&req.parentJobRevision===j.revision&&req.parentFingerprint===j.sourceFingerprint&&req.parentExceptionRevision===e.revision&&a?.active&&!a.desired&&!a.hold&&a.active.identifier===req.readyIdentifier&&a.active.inputFingerprint===req.readyInputFingerprint;
    return j.exceptionQuiescence==='NEVER_DISPATCHED_SOURCE'&&j.exceptionFrozen&&e?.state==='RECORDED'&&e.jobRevision===j.revision&&e.stageRevision===s.revision&&e.sourceFingerprint===j.sourceFingerprint&&r?.state==='APPROVED'&&r.approval?.aiVerified===false&&r.approval.jobRevision===j.revision&&r.approval.stageRevision===s.revision&&r.approval.sourceFingerprint===j.sourceFingerprint;
   }
   if(!await valid())return fail('MANUAL_EDITOR_CONTEXT_CHANGED');

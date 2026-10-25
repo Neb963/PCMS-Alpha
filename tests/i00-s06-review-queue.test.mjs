@@ -26,15 +26,15 @@ test('S06 independently projected publication labels never turn unverified Git i
  assert.equal(s06ReviewStatus({decision:{ok:true,type:'REVIEW',
    mode:'S06_EXCEPTION',sourceFingerprint:F},
    exception:{state:'RECORDED',stageRevision:4,sourceFingerprint:F},
-   release:{state:'CONFIRMED_PUBLIC',approval:{sourceFingerprint:F}},
-   sourceFingerprint:F,stageRevision:4}).state,'CONFIRMED_PUBLIC');
+   release:{state:'CONFIRMED_PUBLIC',approval:{sourceFingerprint:F,stageRevision:4,jobRevision:7}},
+   sourceFingerprint:F,stageRevision:4,jobRevision:7}).state,'CONFIRMED_PUBLIC');
  assert.equal(s06ReviewStatus({decision:{ok:true,type:'REVIEW'},
   human:{state:'DEFERRED',parentStageRevision:4},stageRevision:4}).state,'HUMAN_DEFERRED');
  assert.equal(s06ReviewStatus({decision:{ok:false,code:'S06_CANDIDATE_OR_TEST_EVIDENCE_UNVERIFIED'},
   human:{state:'ADOPTED_UNTESTED',childStageRevision:5},stageRevision:5}).state,'IN_DEVELOPMENT');
  assert.equal(s06ReviewStatus({decision:{ok:true,type:'RECONCILE'}}).state,'BLOCKED');
  assert.equal(s06ReviewStatus({decision:{ok:true,type:'REVIEW'},
-   change:{state:'REQUESTED'},stageRevision:4}).state,'CHANGES_REQUESTED');
+   change:{state:'REQUESTED',parentStageRevision:4},stageRevision:4}).state,'CHANGES_REQUESTED');
  assert.equal(s06ReviewStatus({decision:{
    ok:false,code:'S06_CANDIDATE_OR_TEST_EVIDENCE_UNVERIFIED'},
    change:{state:'ADMITTED',childStageRevision:5},stageRevision:5}).state,'IN_DEVELOPMENT');
@@ -49,7 +49,7 @@ test('S06 independently projected publication labels never turn unverified Git i
  assert.equal(s06ReviewStatus({decision:{ok:true,type:'REVIEW'},release:{
    state:'PUBLICATION_UNCERTAIN'},sourceFingerprint:F}).state,'PUBLICATION_UNCERTAIN');
  assert.equal(s06ReviewStatus({decision:{ok:true,type:'REVIEW'},release:{
-   state:'CONFIRMED_PUBLIC',approval:{sourceFingerprint:F}},sourceFingerprint:F}).state,'CONFIRMED_PUBLIC');
+   state:'CONFIRMED_PUBLIC',approval:{sourceFingerprint:F,stageRevision:4,jobRevision:7}},sourceFingerprint:F,stageRevision:4,jobRevision:7}).state,'CONFIRMED_PUBLIC');
 });
 test('S06 queue accepts read-only paged request but rejects UI effect or oversized page',()=>{
  const api={runtime:{id:'donor-id',getURL:x=>'moz-extension://test/'+x}};
@@ -91,4 +91,10 @@ test('S06 canonical queue retains blocked candidates and paginates without effec
  assert.equal(all.length,205);
  assert.equal(new Set(all.map(x=>x.slug)).size,205);
  assert.equal(db.keys('events').length,0);
+});
+
+test('J04 identical-byte historical publication cannot conceal a new stage or superseding READY',()=>{
+ const release={state:'CONFIRMED_PUBLIC',approval:{sourceFingerprint:F,stageRevision:4,jobRevision:7}};
+ assert.equal(s06ReviewStatus({release,sourceFingerprint:F,stageRevision:5,jobRevision:9,decision:{ok:true,type:'REVIEW'}}).state,'READY_FOR_REVIEW');
+ assert.equal(s06ReviewStatus({release,sourceFingerprint:F,stageRevision:4,jobRevision:7,decision:{ok:false,code:'S06_CURRENT_READY_UNAVAILABLE'}}).state,'BLOCKED');
 });

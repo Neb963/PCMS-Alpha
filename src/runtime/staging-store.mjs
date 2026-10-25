@@ -186,7 +186,7 @@ export function createStagingStore(db){
                 remotePublicId:eligibility.item.remoteId,
                 sourceFolder:source.folder,sourceHead:source.head,
                 gitFingerprint:source.fingerprint,testingSha:source.testingSha,
-                candidate,previous,nonce,tab:null,reason:null,
+                candidate,previous,nonce,tab:null,reason:null,sourceOrigin:eligibility.origin==='EXISTING_UPDATE'?'EXISTING_UPDATE':'PRIVATE_NEW',
                 ...(source.gitReadyIdentifier?{
                   readyIdentifier:source.gitReadyIdentifier,
                   readyInputFingerprint:source.gitReadyInputFingerprint}: {})};

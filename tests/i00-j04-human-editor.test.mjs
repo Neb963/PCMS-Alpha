@@ -175,3 +175,20 @@ test('J04 actual BEGIN_NATIVE observes a missing helper before dispatch intent, 
   assert.deepEqual(f.effects,{send:0,stop:0,newChat:0,close:0,navigate:0});assert.equal(model.state.effects.length,0);
  }finally{f.restore()}
 });
+
+test('J04 closed never-dispatched manual source recovers one owned editor before Request Changes child admission',async()=>{
+ const {createS06ChangeStore,createS06ChangeProgress}=await import('../src/runtime/s06-request-changes.mjs');
+ const f=await fixture({closed:true});try{
+  f.noNative();f.savedText('tested');f.api.storage.local.set=async values=>Object.assign(f.settings,values);
+  const row=f.db.read('meta','ai-job:'+slug),job={...row.job,state:'PENDING_NATIVE_SESSION',native:null,finalSource:null,verifiedFinal:null,executionSlotReleased:false,hold:'NATIVE_AI_NOT_WIRED',chat1:{state:'PENDING',sessionDigest:null,tests:{}}};await put(f.db,{...row,job});
+  const out=await createS06ExceptionBoundary(f.api,{open:async()=>f.db,guard:()=>f.guard}).runTrusted({type:'RECORD_EXCEPTION',params:{slug,mode:'MANUAL_INFRASTRUCTURE',checks:[{name:'default_generator_smoke',result:'PASS',observation:'I inspected the saved output and actual keyboard behavior.'}],consent:'I PERFORMED THE RECORDED MANUAL CHECKS',expectedStageRevision:4,expectedJobRevision:7,sourceFingerprint:f.F.fingerprint}});assert.equal(out.ok,true,JSON.stringify(out));
+  const j=f.db.read('meta','ai-job:'+slug).job,stage=f.db.read('meta','stage:'+slug).record,ex=f.db.read('meta','s06-exception:'+slug).record;
+  await put(f.db,{key:'writeback:'+slug,record:{slug,revision:2,state:'CONFIRMED',operationId:'writeback_'+'1'.repeat(32),mode:'S06_EXCEPTION',exceptionRevision:ex.revision,stageRevision:4,jobRevision:j.revision,sourceFingerprint:f.F.fingerprint,sealedSource:f.F,commitSha:commit,readyIdentifier:stage.readyIdentifier,readyInputFingerprint:stage.readyInputFingerprint}});
+  assert.equal((await f.guard.prepareChangeEditor(personaUid,slug,nonce)).ok,false,'no editor creation before actual request');
+  const req=await createS06ChangeStore(f.db).request({name:slug,stage,job:j,sourceFingerprint:f.F.fingerprint,instructions:'Revise the saved source after helper recovery.',expectedStageRevision:4,expectedJobRevision:j.revision,requestId:'change_'+'2'.repeat(32)});assert.equal(req.ok,true,JSON.stringify(req));
+  const progress=createS06ChangeProgress(f.api,{open:async()=>f.db,guard:()=>f.guard}),admitted=await progress.tick();assert.equal(admitted.state,'ADMITTED',JSON.stringify(admitted));assert.equal(f.created(),1);
+  const child=f.db.read('meta','ai-job:'+slug).job;assert.equal(child.state,'PENDING_NATIVE_SESSION');assert.equal(child.sourceFingerprint,f.F.fingerprint);assert.equal(child.verifiedFinal,null);assert.equal(child.operatorInstruction.text,'Revise the saved source after helper recovery.');
+  await progress.tick();assert.equal(f.created(),1);assert.equal((await createAiStore(f.db).admitExecutionSlot(slug,child.revision)).ok,true);
+  assert.deepEqual(f.effects,{send:0,stop:0,newChat:0,close:0,navigate:0});assert.equal(f.active.size,0);
+ }finally{f.restore()}
+});

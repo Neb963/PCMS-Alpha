@@ -49,6 +49,8 @@ export function createCleanBulkProgress(api,{open=openCanonicalDatabase,makeRele
    const update=patch=>store.update(r.id,r.revision,index,patch);
    if(existing.ok&&['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN','RECOVERY_HOLD'].includes(existing.record.state))return update({state:'VERIFYING',code:'PUBLICATION_READBACK_PENDING',...(same?{releaseId:existing.record.releaseId}:{})});
    if(same&&existing.record.state==='CONFIRMED_PUBLIC')return update({state:'CONFIRMED',code:'INDEPENDENT_PUBLIC_READBACK',releaseId:existing.record.releaseId});
+   if(same&&existing.record.state==='CANCELED'&&(item.previousRelease?.state!=='CANCELED'||item.previousRelease.releaseId!==existing.record.releaseId||item.previousRelease.revision!==existing.record.revision))
+    return update({state:'CANCELED',code:'INDIVIDUAL_PUBLICATION_APPROVAL_CANCELED'});
    if(r.state==='CANCEL_REQUESTED'){
     if(same&&existing.record.state==='APPROVED'&&existing.record.cleanBulkSetId===r.id){
      const canceled=await releases.cancelApproved(item.slug,existing.record.revision);if(!canceled.ok)return update({state:'WAITING',code:canceled.code});

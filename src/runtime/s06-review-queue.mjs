@@ -12,7 +12,7 @@ import {createS06HumanStore} from './s06-human-review.mjs';
 import {createS06ExceptionStore} from './s06-exception-review.mjs';
 import {planS06Writeback} from './s06-writeback-progress.mjs';
 const fail=code=>({ok:false,code});
-export function s06ReviewStatus({decision,release,change,human,exception,sourceFingerprint,stageRevision,parentStageRevision}={}){
+export function s06ReviewStatus({decision,release,change,human,exception,sourceFingerprint,stageRevision,jobRevision,parentStageRevision,job}={}){
   const r=release?.record||release;
   // An uncertain release cannot be reapproved from a new queue projection.
   if(r&&['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN',
@@ -23,7 +23,7 @@ export function s06ReviewStatus({decision,release,change,human,exception,sourceF
   if(human?.state==='ADOPTED_UNTESTED'&&
      human.childStageRevision===stageRevision&&!decision?.ok)
     return {state:'IN_DEVELOPMENT',code:'ADOPTED_HUMAN_SOURCE_RETEST_REQUIRED'};
-  if(change?.state==='REQUESTED')
+  if(change?.state==='REQUESTED'&&change.parentStageRevision===stageRevision)
     return {state:'CHANGES_REQUESTED',code:'AWAITING_GUARDED_CHILD_ADMISSION'};
   // Child admission is not a permanent queue status. Once tests and the
   // independently attributed Git F are verified, the new F must become
@@ -35,7 +35,8 @@ export function s06ReviewStatus({decision,release,change,human,exception,sourceF
     return r.approval?.sourceFingerprint===sourceFingerprint?
       {state:r.progressHold?'APPROVED_HELD':'APPROVED',code:r.progressHold||'HUMAN_APPROVAL_HELD_FOR_DISPATCH'}:
       {state:'BLOCKED',code:'PRIOR_APPROVAL_SOURCE_CHANGED'};
-  if(r?.state==='CONFIRMED_PUBLIC'&&r.approval?.sourceFingerprint===sourceFingerprint)
+  if(r?.state==='CONFIRMED_PUBLIC'&&r.approval?.sourceFingerprint===sourceFingerprint&&
+     r.approval.stageRevision===stageRevision&&r.approval.jobRevision===jobRevision&&decision?.ok&&decision.type==='REVIEW')
     return {state:'CONFIRMED_PUBLIC',code:'INDEPENDENT_PUBLIC_READBACK'};
   if(exception?.state==='RECORDED'&&exception.stageRevision===stageRevision&&
      exception.sourceFingerprint===sourceFingerprint)
@@ -45,6 +46,9 @@ export function s06ReviewStatus({decision,release,change,human,exception,sourceF
         code:'EXACT_EXCEPTIONAL_GIT_F_INDIVIDUAL_APPROVAL_REQUIRED'}:
       {state:'EXCEPTION_HELD',
         code:'HUMAN_CHECKS_RECORDED_NOT_AI_VERIFIED_OR_GIT_CONFIRMED'};
+  if(!decision?.ok&&job&&!job.operatorPaused&&!job.exceptionFrozen&&!job.schedulerHold&&!job.hold&&
+     ['S06_CANDIDATE_OR_TEST_EVIDENCE_UNVERIFIED'].includes(decision?.code))
+    return {state:job.native?.state==='RUNNING_OBSERVED'?'DEVELOPMENT_RUNNING':'IN_DEVELOPMENT',code:'AUTOMATIC_DEVELOPMENT_IN_PROGRESS'};
   if(!decision?.ok)return {state:'BLOCKED',code:decision?.code||'CANDIDATE_UNVERIFIED'};
   if(decision.type==='REVIEW')
     return {state:'READY_FOR_REVIEW',code:'EXACT_TESTED_GIT_F_VERIFIED'};
@@ -87,7 +91,7 @@ export function createS06ReviewQueue(db){
         release:release.ok?release:null,sourceFingerprint,
         change:change.ok?change:null,human:human.ok?human:null,
         exception:exception.ok?exception:null,
-        stageRevision:stage.ok?stage.record.revision:null,
+        stageRevision:stage.ok?stage.record.revision:null,jobRevision:job.ok?job.job.revision:null,job:job.ok?job.job:null,
         parentStageRevision:stage.ok?stage.record.handoffParentRevision:null});
       if(!matchesReviewGroup(status.state,requestedGroup))continue;
       items.push({slug:item.slug,revision:item.revision,development:job.ok,readyCandidate:item,

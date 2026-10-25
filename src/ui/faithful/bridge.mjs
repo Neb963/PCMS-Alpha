@@ -1031,25 +1031,17 @@ function displayQueue(){
   }
   if(!holder.children.length)
     renderEmpty(holder,q.more?'No matches on this page. More recorded work may be available on subsequent pages.':
-      'No matching verified local work records. This is not proof of remote health.');
+      'No matching work items.');
  }
- const counts=q.summary?.states||{},attention=q.summary?.attention?.counts||{};
- const needs=(counts.HELD_UNCERTAIN||0)+(counts.REJECTED||0)+(counts.DISPATCH_POSSIBLE||0)+
-   (q.reviews||[]).filter(x=>x.state==='REVIEW_REQUIRED').length+
-   (attention.actionRequired||0)+(attention.serious||0);
- const running=counts.OBSERVING||0,waiting=counts.PREPARED||0,completed=(counts.CONFIRMED||0)+(counts.ABORTED||0);
+ const records=holder.querySelectorAll('.queue-item').length,candidates=holder.querySelectorAll('.candidate-item').length;
  const counters=shadow('.queue-stats');if(counters){counters.replaceChildren();
-  for(const [label,num] of [['need action',needs],['verifying',running],['waiting',waiting]]){
-   const tag=el('span');tag.append(el('strong','',q.summary?.ok?num:'—'),document.createTextNode(' '+label));counters.append(tag)}
+  counters.append(el('span','',q.loading?'Loading work…':candidates+' candidates · '+Math.max(0,records-candidates)+' other items on this page'));
  }
  for(const tab of shadow('.tabs[aria-label="Work queue status"]')?.querySelectorAll('[data-filter]')||[]){
-  const f=tab.dataset.filter.split(':')[1],badge=tab.querySelector('.count');
-  const count=f==='Needs action'?needs:f==='Running'?running:f==='Waiting'?waiting:f==='Completed'?completed:
-    needs+running+waiting+completed;
-  if(badge)badge.textContent=q.summary?.ok&&!q.query?count:'—';
+  const f=tab.dataset.filter.split(':')[1],badge=tab.querySelector('.count');if(badge)badge.hidden=true;
   tab.setAttribute('aria-selected',String(f===q.filter));
  }
- const foot=shadow('.pagination span');if(foot)foot.textContent=q.loading?'Loading work…':q.error?'Saved work is unavailable':(holder?.children.length||0)+' work records on this page';
+ const foot=shadow('.pagination span');if(foot)foot.textContent=q.loading?'Loading work…':q.error?'Saved work is unavailable':records+' work '+(records===1?'item':'items')+' on this page';
  const prev=shadow('[data-action="queue-prev"]'),next=shadow('[data-action="queue-next"]');
  if(prev)prev.disabled=q.loading||q.history.length===0;
  if(next)next.disabled=q.loading||!q.more;
@@ -1092,7 +1084,8 @@ async function openReleaseReview(slug){
  if(!overlay.isConnected)return;
  if(local?.ok){
   mountSourceComparison({container:body,view:local,el,b,request:(type,params)=>readPort('pcms-i13-release',type,params,30000)});
-  const checks=el('details');checks.append(el('summary','','Test observations · '+(local.tests?.state||'Unverified')));
+  const testsLabel=({TESTS_VERIFIED:'Tests verified',KNOWN_FAILURE:'A required test failed',TESTS_UNVERIFIED:'Testing incomplete',UNVERIFIED:'Not tested'})[local.tests?.state]||'Testing incomplete';
+  const checks=el('details');checks.append(el('summary','','Test observations · '+testsLabel));
   for(const t of [...(local.tests?.default||[]),...(local.tests?.optional||[])])checks.append(el('p','setting-note',t.name+' — '+t.result));
   body.append(checks);
  }else body.append(el('p','setting-note','Saved source is not available for comparison yet.'));
@@ -1103,7 +1096,8 @@ async function openReleaseReview(slug){
  if(!overlay.isConnected)return;
  let persisted;
  try{persisted=await releaseCommand('GET',{slug});}catch{persisted=null;}
- if(persisted?.ok&&persisted.state==='CONFIRMED_PUBLIC'){
+ if(persisted?.ok&&persisted.state==='CONFIRMED_PUBLIC'&&local?.currentReady&&
+    persisted.stageRevision===local.stageRevision&&persisted.jobRevision===local.jobRevision&&persisted.sourceFingerprint===local.sourceFingerprint){
    status.textContent='Published: independently confirmed for exact candidate '+persisted.sourceFingerprint+'.';
    return;
  }
@@ -1124,6 +1118,38 @@ async function openReleaseReview(slug){
    body.append(reconcile);
    return;
  }
+ if(persisted?.ok&&persisted.state==='CONFIRMED_PUBLIC')body.append(el('p','setting-note','A previous candidate was published. The source shown here requires its own review.'));
+ if(persisted?.ok&&persisted.state==='APPROVED'){
+  const cancel=b('Cancel unsent publication',()=>void(async()=>{
+   cancel.disabled=true;
+   try{const current=await releaseCommand('GET',{slug});
+    const result=current?.ok&&current.state==='APPROVED'?await readPort('pcms-i13-release','CANCEL_APPROVED',{slug,expectedRevision:current.revision},30000):null;
+    if(result?.ok){close();void openReleaseReview(slug);void loadQueue(true)}else status.textContent='Publication state changed. Refresh to inspect its current outcome.';
+   }catch{status.textContent='Cancellation could not be confirmed. Refresh the saved publication state.'}finally{cancel.disabled=false}
+  })());body.append(cancel,el('p','setting-note','Approval is saved. Publication continues automatically when its current checks are satisfied.'));
+ }
+ if(local?.ok&&local.requestChangesEligible){
+ const instructions=el('textarea','form-input');instructions.rows=3;
+ instructions.placeholder='Optional request: describe changes needed to the tested candidate';
+ instructions.setAttribute('aria-label','Request changes to candidate');
+ const requestChanges=b('Request changes',()=>void (async()=>{
+  if(instructions.value.trim().length<3)return;
+  const message=instructions.value.trim();
+  if(!window.confirm('Request these changes? The current candidate will no longer be eligible for unchanged publication approval.'))return;
+  requestChanges.disabled=true;
+  try{
+   const r=await readPort('pcms-i13-release','REQUEST_CHANGES',{
+    slug,expectedStageRevision:local.stageRevision,expectedJobRevision:local.jobRevision,
+    sourceFingerprint:local.sourceFingerprint,instructions:message,
+    ...(persisted?.revision?{releaseRevision:persisted?.revision}:{})},95000);
+   status.textContent=r?.ok?'Changes requested. New tested source needs fresh individual review.':
+      'Changes were not requested: '+(r?.code||'unconfirmed outcome')+'. Your instructions are preserved.';
+   if(r?.ok){instructions.value='';void loadQueue(true)}
+  }catch{status.textContent='Change request outcome unconfirmed; check the candidate record.'}
+  finally{requestChanges.disabled=false}
+ })(),'btn small');
+ body.append(instructions,requestChanges);
+ }
  let view;
  try{view=await readPort('pcms-i13-release','PREVIEW',{slug},95000)}
  catch{status.textContent='Review cannot open until secure GitHub access and source evidence are available.';return}
@@ -1141,22 +1167,6 @@ async function openReleaseReview(slug){
  }
  provenance.append(summary);body.append(provenance);
  const footer=el('div','form-foot');
- const instructions=el('textarea','form-input');instructions.rows=3;
- instructions.placeholder='Optional request: describe changes needed to the tested candidate';
- instructions.setAttribute('aria-label','Request changes to candidate');
- const requestChanges=b('Request changes',()=>void (async()=>{
-  if(instructions.value.trim().length<3)return;
-  const message=instructions.value.trim();
-  if(!window.confirm('Request these changes? The current candidate will no longer be eligible for unchanged publication approval.'))return;
-  try{
-   const r=await readPort('pcms-i13-release','REQUEST_CHANGES',{
-    slug,expectedStageRevision:view.stageRevision,expectedJobRevision:view.jobRevision,
-    sourceFingerprint:view.sourceFingerprint,instructions:message,
-    ...(view.releaseRevision?{releaseRevision:view.releaseRevision}:{})},95000);
-   status.textContent=r?.ok?'Changes requested. New tested source needs fresh individual review.':
-      'Request was not confirmed. Keep the candidate held.';
-  }catch{status.textContent='Change request outcome unconfirmed; check the candidate record.'}
- })(),'btn small');
  const checkLabel=el('label','setting-option'),ack=el('input');ack.type='checkbox';
  checkLabel.append(ack,document.createTextNode(' I inspected the exact source changes and required test results for this candidate.'));
  const publish=async receipt=>{
@@ -1170,7 +1180,7 @@ async function openReleaseReview(slug){
    status.textContent='Inspect the exact source manifest and test observations before publication.';return;
   }
   if(!window.confirm('Approve and publish this exact candidate now? Only the currently verified owner, editor, route, Git revision and source can be used.'))return;
-  approve.disabled=true;requestChanges.disabled=true;
+  approve.disabled=true;
   try{
    const r=await readPort('pcms-i13-release','APPROVE',{
     slug,expectedStageRevision:view.stageRevision,expectedJobRevision:view.jobRevision,
@@ -1180,23 +1190,10 @@ async function openReleaseReview(slug){
   }catch{status.textContent='Approval outcome uncertain. Read the saved release record before any new request.'}
   finally{await loadQueue(true);}
  })(),'btn primary');
- footer.append(requestChanges,approve);
- if(persisted?.ok&&persisted.state==='APPROVED'&&
-    persisted.sourceFingerprint===view.sourceFingerprint){
-   // The exact approved record remains immutable; publishing it does not
-   // require a second operator approval or a redundant source manifest crawl.
-   approve.disabled=true;
-   const resume=b('Publish previously approved candidate',()=>void (async()=>{
-     if(!ack.checked){
-       status.textContent='Inspect the exact source manifest and test observations before publication.';return;
-     }
-     if(!window.confirm('Publish the previously approved exact candidate now?'))return;
-     resume.disabled=true;approve.disabled=true;
-     await publish(persisted);
-   })(),'btn primary');
-   footer.append(resume);
- }
- body.append(instructions,checkLabel,footer);
+ if(!view.operatorPaused)footer.append(approve);
+ else body.append(el('p','setting-note','Development is paused. Resume it when you are ready to publish; you can still request changes.'));
+ if(persisted?.ok&&persisted.state==='APPROVED')approve.remove();
+ body.append(checkLabel,footer);
 }
 // An operation inspector is a read-only projection. A possible dispatched
 // effect cannot be retried from this drawer, even after browser restart.
@@ -1297,7 +1294,7 @@ async function openAiJob(slug){
   try{const out=await readPort('pcms-i10-ai',type,{slug,expectedRevision:current.revision,
     ...(['SET_PAUSED','GIVE_INSTRUCTIONS'].includes(type)?{expectedControlRevision:current.controlRevision}:{}),...extra},95000);
    message.textContent=out?.ok?type==='GIVE_INSTRUCTIONS'?'Instructions saved for the next eligible turn. The pinned testing prompt remains in force.':type==='SET_PAUSED'?(extra.paused?'Development paused. An active session will be stopped and its saved source checked.':'Development resumed. PCMS will continue when the account and source are ready.'):'Session checked.':
-    out?.code==='AI_ACCOUNT_CONCURRENCY_HELD'?'Resume is waiting for account capacity. Other jobs continue. Retry when a slot is available.':
+    out?.code==='AI_ACCOUNT_CONCURRENCY_HELD'?'Resume is waiting for account capacity. Other jobs continue. PCMS will continue automatically when a slot is available.':
     out?.code==='STALE_REVISION'?'Development changed. Your instructions are preserved; check the current state and retry.':'The request could not be confirmed. Your text is preserved; the current saved job is shown below.';
    if(out?.ok&&type==='GIVE_INSTRUCTIONS')instructions.value='';
   }catch{message.textContent='The response was lost. The current saved job will be read before another request; your text is preserved.'}
@@ -1306,12 +1303,13 @@ async function openAiJob(slug){
  async function load(){if(loading||pending||!overlay.isConnected)return;loading=true;
   try{const j=await readPort('pcms-i10-ai','GET_JOB',{slug},22000);if(!overlay.isConnected)return;
    if(!j?.ok){status.textContent='Development is unavailable. Saved work is preserved; reconnect and retry.';return}
-   current=j;status.textContent=(j.operatorPaused?'Paused · ':j.awaitingExecutionSlot?'Waiting for account capacity · ':humanAiStatus(j)+' · ')+(j.state==='TESTS_VERIFIED'||j.exceptionFrozen?'Ready for source review.':'PCMS advances development and independent tests automatically.');
+   current=j;status.textContent=(j.operatorPaused?(j.operatorJudgment?'Repair ended by you · ':'Paused · '):j.awaitingExecutionSlot?'Waiting for account capacity · ':humanAiStatus(j)+' · ')+(j.state==='TESTS_VERIFIED'||j.exceptionFrozen?'Ready for source review.':'PCMS advances development and independent tests automatically.');
    const signature=JSON.stringify([j.revision,j.controlRevision,j.nativeState,j.state,j.hold]);if(signature===lastSignature)return;lastSignature=signature;
    metadata.replaceChildren();actions.replaceChildren();
    for(const [name,value] of [['Job revision',j.revision],['Source',j.sourceFingerprint],['Pinned prompt',j.promptRevision],['Native session',j.nativeState],['Tests',j.evidence?.state],['Current hold',j.hold||'None']]){
     const row=el('div','kv');row.append(el('dt','',name),el('dd','',value));metadata.append(row)}
    if(j.state!=='HUMAN_OWNED')actions.append(b(j.operatorPaused?'Resume development':'Pause development',()=>void control('SET_PAUSED',{paused:!j.operatorPaused})));
+   if(!j.operatorPaused&&!['TESTS_VERIFIED','HUMAN_OWNED'].includes(j.state)&&!j.exceptionFrozen)actions.append(b('End further repair',()=>{if(window.confirm('Confirm that further repair of this candidate is unproductive? PCMS will stop this repair and preserve its source, failures and history. You can resume later.'))void control('SET_PAUSED',{paused:true,judgment:'UNPRODUCTIVE'})}));
    actions.append(b('Inspect source and history',()=>{close();void openReleaseReview(slug)}));
    if(j.state==='TESTS_VERIFIED'||j.exceptionFrozen)actions.append(b('Review and request changes',()=>{close();void openReleaseReview(slug)}));
    if(['HELD_RECONCILE'].includes(j.state)||['DISPATCH_POSSIBLE','RUNNING_OBSERVED'].includes(j.nativeState))actions.append(b('Check session',()=>void control('PROBE_NATIVE')));

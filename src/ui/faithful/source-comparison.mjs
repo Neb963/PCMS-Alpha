@@ -52,7 +52,7 @@ export function sourceLineDiff(before,after){
 }
 export function mountSourceComparison({container,view,el,b,request}){
  const section=el('section','source-comparison'),heading=el('h3','','Source changes'),note=el('p','setting-note',
-  'Previous saved source and '+(view.sourceKind==='HISTORICAL_CHECKPOINT'?'historical checkpoint':view.sourceKind==='DEVELOPMENT_SNAPSHOT'?'saved development checkpoint':'staged input')+'. Publication eligibility is checked separately.');
+  'Previous saved source compared with '+(view.sourceKind==='HISTORICAL_CHECKPOINT'?'a saved historical checkpoint':view.sourceKind==='DEVELOPMENT_SNAPSHOT'?'the saved development checkpoint':'the staged input')+'.');
  const layout=el('div','source-layout'),tree=el('nav','source-tree'),display=el('section','source-file');
  tree.setAttribute('aria-label','Compare source files');display.setAttribute('aria-label','Source comparison');
  const search=el('input','form-input');search.type='search';search.placeholder='Find a file';search.setAttribute('aria-label','Find a comparison file');
@@ -79,7 +79,9 @@ export function mountSourceComparison({container,view,el,b,request}){
    display.append(actions);const columns=el('div','source-compare-columns');let textPair=[];
    for(const [name,data] of [['Previous',p],['Candidate',f]]){const column=el('section');column.append(el('h4','',name));
     if(data===null){column.append(el('p','setting-note','File absent'));textPair.push('')}
-    else{try{const text=new TextDecoder('utf-8',{fatal:true}).decode(data);if(text.includes('\0'))throw Error('BINARY');textPair.push(text);
+    else{try{const text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(data);if(text.includes('\0'))throw Error('BINARY');textPair.push(text);
+      const crlf=(text.match(/\r\n/g)||[]).length,lf=(text.match(/\n/g)||[]).length-crlf;
+      column.append(el('p','setting-note',data.length+' bytes'+(text.startsWith('\uFEFF')?' · UTF-8 BOM':'')+(crlf?' · '+crlf+' CRLF lines':'')+(lf?' · '+lf+' LF lines':'')));
       const code=el('textarea','form-input source-code');code.readOnly=true;code.rows=20;code.spellcheck=false;code.value=text;code.setAttribute('aria-label',name+' '+path);column.append(code);
      }catch{textPair.push(null);column.append(el('p','setting-note','Binary asset · '+data.length+' verified bytes. Download to inspect.'))}}
     columns.append(column);
@@ -98,10 +100,10 @@ export function mountSourceHistory({container,slug,el,b,request}){
  details.append(status,list,pager,preview);container.append(details);let loaded=false,before=0,busy=false,stack=[];
  async function load(){if(busy)return;busy=true;status.textContent='Reading saved checkpoints…';
   try{const r=await request('LIST_SOURCE_HISTORY',{slug,before,limit:20});if(!r?.ok)throw Error('HISTORY_UNAVAILABLE');
-   list.replaceChildren();pager.replaceChildren();status.textContent=r.items.length?'Saved checkpoints · viewing history never approves publication.':'No earlier development checkpoints saved yet.';
+   list.replaceChildren();pager.replaceChildren();status.textContent=r.items.length?'Saved development checkpoints.':'No earlier development checkpoints saved yet.';
    for(const item of r.items){const row=el('div','queue-item'),open=b('Inspect checkpoint',()=>void (async()=>{
     open.disabled=true;try{const view=await request('GET_LOCAL_REVIEW',{slug,historyRevision:item.revision});if(!view?.ok)throw Error('HISTORY_UNAVAILABLE');
-     preview.replaceChildren();mountSourceComparison({container:preview,view,el,b,request});
+     preview.replaceChildren();mountSourceComparison({container:preview,view,el,b,request});preview.scrollIntoView({block:'start',behavior:'instant'});
     }catch{status.textContent='Checkpoint source could not be verified. Current source and publication remain unchanged.'}finally{open.disabled=false}
    })());row.append(el('span','','Revision '+item.revision+' · '+item.state.replaceAll('_',' ').toLowerCase()),open);list.append(row)}
    const prev=b('Newer checkpoints',()=>{before=stack.pop()||0;void load()}),next=b('Older checkpoints',()=>{stack.push(before);before=r.nextCursor;void load()});

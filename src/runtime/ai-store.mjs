@@ -8,6 +8,18 @@ const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 // slots. Even verified test results do not prove the helper session stopped.
 const slotReleased=j=>j?.executionSlotReleased===true &&
   j.native?.state!=='DISPATCH_POSSIBLE';
+// Shared admission includes existing-public reservations before any UNLIST.
+// Once its own current AI job exists, count that job exactly once instead.
+export function countAiCapacity(rows,accountId,excludeSlug=''){
+ const jobs=rows.filter(r=>r.key?.startsWith('ai-job:')&&r.accountId===accountId&&r.job?.slug!==excludeSlug);
+ let used=jobs.filter(r=>!slotReleased(r.job)).length;
+ for(const row of rows){const r=row.record;if(!row.key?.startsWith('existing-update:')||!r||r.accountId!==accountId||r.slug===excludeSlug)continue;
+  const j=jobs.find(v=>v.job.slug===r.slug)?.job,stage=rows.find(v=>v.key==='stage:'+r.slug)?.record;
+  const current=j&&stage?.nonce===r.nonce&&j.stageRevision===stage.revision;
+  if(!current)used++;
+ }
+ return used;
+}
 function tx(db,mode,fn){
   return new Promise((resolve,reject)=>{
     let t,result=fail('AI_TRANSACTION_INCOMPLETE');
@@ -47,7 +59,7 @@ const publicJob=j=>j?{ok:true,slug:j.slug,revision:j.revision,state:j.state,
     j.schedulerDeferredUntil:null,
   schedulerHold:typeof j.schedulerHold==='string'?j.schedulerHold:null,
   chat2IsolationVerified:j.chat2?.state==='FRESH_VERIFIED',
-  operatorPaused:j.operatorPaused===true,controlRevision:j.controlRevision||1,
+  operatorJudgment:j.operatorJudgment||null,operatorPaused:j.operatorPaused===true,controlRevision:j.controlRevision||1,
   awaitingExecutionSlot:j.awaitingExecutionSlot===true,exceptionFrozen:j.exceptionFrozen===true,
   pendingInstruction:j.operatorInstruction?{id:j.operatorInstruction.id,
     text:j.operatorInstruction.text,status:j.operatorInstruction.status}:null,
@@ -62,9 +74,9 @@ export function createAiStore(db){
       if(j.awaitingExecutionSlot!==true||j.executionSlotReleased!==true||j.state==='TESTS_VERIFIED'){done(fail('AI_SLOT_ADMISSION_NOT_PENDING'));return}
       withCurrentReady(m,j,done,()=>m.get('stage:'+name).onsuccess=st=>{const s=st.target.result?.record;
        if(!s||s.state!=='SOURCE_VERIFIED'||s.revision!==j.stageRevision||s.humanReclaimPending){done(fail('AI_STAGE_OR_HUMAN_RECLAIM_PENDING'));return;}
-       m.get('ai-concurrency').onsuccess=setting=>{const limit=setting.target.result?.setting?.perAccount||1;let active=0;
-        m.openCursor().onsuccess=scan=>{const c=scan.target.result;if(c){if(typeof c.key==='string'&&c.key.startsWith('ai-job:')&&c.key!==key(name)&&c.value.accountId===row.accountId&&!slotReleased(c.value.job))active++;c.continue();return}
-          if(active>=limit){done(fail('AI_ACCOUNT_CONCURRENCY_HELD'));return}
+       m.get('ai-concurrency').onsuccess=setting=>{const limit=setting.target.result?.setting?.perAccount||1;const capacityRows=[];
+        m.openCursor().onsuccess=scan=>{const c=scan.target.result;if(c){capacityRows.push(c.value);c.continue();return}
+          if(countAiCapacity(capacityRows,row.accountId,name)>=limit){done(fail('AI_ACCOUNT_CONCURRENCY_HELD'));return}
           const next={...j,awaitingExecutionSlot:false,executionSlotReleased:false,controlRevision:(j.controlRevision||1)+1};m.put({...row,job:next});
           t.objectStore('events').add({stage:'AI_EXECUTION_SLOT_RESERVED',slug:name,revision:j.revision});done(publicJob(next));
         };
@@ -72,10 +84,11 @@ export function createAiStore(db){
       });
     }});
   }
-  function operatorControl(name,expectedRevision,expectedControlRevision,{paused,instructions}={}){
+  function operatorControl(name,expectedRevision,expectedControlRevision,{paused,instructions,judgment}={}){
     if(!slug(name)||!Number.isSafeInteger(expectedRevision)||expectedRevision<1||
        !Number.isSafeInteger(expectedControlRevision)||expectedControlRevision<1||
        (paused!==undefined&&typeof paused!=='boolean')||
+       (judgment!==undefined&&(judgment!=='UNPRODUCTIVE'||paused!==true))||
        (instructions!==undefined&&(typeof instructions!=='string'||instructions.trim().length<3||instructions.length>4000||instructions.includes('\0')))||
        (paused===undefined)===(instructions===undefined))return Promise.resolve(fail('AI_CONTROL_INVALID'));
     return tx(db,'readwrite',(t,done)=>{const m=t.objectStore('meta');m.get(key(name)).onsuccess=e=>{
@@ -88,10 +101,12 @@ export function createAiStore(db){
       const next={...j,controlRevision:expectedControlRevision+1};
       if(instructions!==undefined)next.operatorInstruction={id:next.controlRevision,text:instructions.trim(),status:'QUEUED',stageRevision:j.stageRevision};
       if(paused!==undefined)next.operatorPaused=paused;
+      if(judgment==='UNPRODUCTIVE')next.operatorJudgment={kind:judgment,sourceFingerprint:j.sourceFingerprint,at:Date.now()};
+      if(paused===false)next.operatorJudgment=null;
       const idle=['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(j.native?.state)&&j.finalSource?.fingerprint===j.sourceFingerprint;
       if(paused===true&&idle)next.executionSlotReleased=true;
       const commit=()=>{m.put({...row,job:next});t.objectStore('events').add({stage:instructions!==undefined?'AI_OPERATOR_INSTRUCTION_QUEUED':'AI_OPERATOR_PAUSE_CHANGED',slug:name,
-        controlRevision:next.controlRevision,jobRevision:j.revision,...(instructions!==undefined?{instructions:instructions.trim()}:{paused})});done(publicJob(next));};
+        controlRevision:next.controlRevision,jobRevision:j.revision,...(instructions!==undefined?{instructions:instructions.trim()}:{paused,judgment:judgment||null})});done(publicJob(next));};
       if(paused!==false||!j.executionSlotReleased||j.state==='TESTS_VERIFIED'||j.exceptionFrozen){commit();return;}
       // Resume records intent immediately; the existing supervisor reserves
       // capacity atomically before another native effect, without operator polling.
@@ -226,17 +241,14 @@ export function createAiStore(db){
         const account=stage.accountId;
         m.get('ai-concurrency').onsuccess=settingRequest=>{
           const limit=settingRequest.target.result?.setting?.perAccount||1;
-          let otherActive=0;
+          const capacityRows=[];
           m.openCursor().onsuccess=e=>{
             const cursor=e.target.result;
             if(cursor){
-              if(typeof cursor.key==='string'&&cursor.key.startsWith('ai-job:')&&
-                 cursor.key!==key(stage.slug)&&
-                 cursor.value?.accountId===account&&!slotReleased(cursor.value.job))
-                otherActive++;
+              capacityRows.push(cursor.value);
               cursor.continue();return;
             }
-            if(otherActive>=limit){done(fail('AI_ACCOUNT_CONCURRENCY_HELD'));return;}
+            if(countAiCapacity(capacityRows,account,stage.slug)>=limit){done(fail('AI_ACCOUNT_CONCURRENCY_HELD'));return;}
             m.get(key(stage.slug)).onsuccess=old=>{
               const previous=old.target.result?.job;
               const commit=()=>{

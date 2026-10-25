@@ -26,7 +26,7 @@ import {inspectGitSource} from './git-source.mjs';
 import {exactSource,diffSource} from './staging-core.mjs';
 import {releaseContext,releaseTestContext,candidateManifest,releaseGitContext,
   releaseEditorContext,approvalTuple,matchesApproval,publicationReadback,
-  releaseCandidateTestContext}
+  releaseCandidateTestContext,releaseCandidateKind}
   from './release-core.mjs';
 export const RELEASE_PORT='pcms-i13-release';
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
@@ -180,13 +180,13 @@ export function createReleaseBoundary(api,{
       reply.credential.length>=12&&reply.credential.length<=512&&
       /^[\x21-\x7e]+$/.test(reply.credential)?reply.credential:null;
   }
-  async function checkCurrent(database,name,token,{requireEditor=true,physicalManualEditor=false}={}){
+  async function checkCurrent(database,name,token,{requireEditor=true,physicalManualEditor=false,allowPausedReview=false}={}){
     const stage=await stageFactory(database).getFull(name),
       job=await aiFactory(database).getJobFull(name),
       facts=await ownerFacts(database,name);
     if(!stage.ok||!job.ok||!facts.ok)return fail('RELEASE_CANONICAL_EVIDENCE_MISSING');
     const r=stage.record,j=job.job,{account,inventory}=facts;
-    if(j.operatorPaused)return fail('AI_OPERATOR_PAUSED');
+    if(j.operatorPaused&&!allowPausedReview)return fail('AI_OPERATOR_PAUSED');
     const [ready,exception]=await Promise.all([
       createReadyStore(database).get(name),
       createS06ExceptionStore(database).getFull(name)]);
@@ -196,10 +196,8 @@ export function createReleaseBoundary(api,{
       tests=releaseCandidateTestContext(r,j,reviewContext);
     if(!owner.ok)return owner;
     if(!tests.ok)return tests;
-    const privateNew=r.previous?.files?.length===2&&
-      r.previous.files.every(f=>f.size===0);
-    const existingRow=privateNew?null:
-      await createExistingStore(database).getFull(name);
+    const existingRow=await createExistingStore(database).getFull(name);
+    const privateNew=releaseCandidateKind(r,inventory,existingRow.ok?existingRow.record:null)==='PRIVATE_NEW';
     if(!privateNew){
       if(!existingRow?.ok||existingRow.record.state!=='STAGE_CONFIRMED'||
          existingRow.record.nonce!==r.nonce||
@@ -235,7 +233,7 @@ export function createReleaseBoundary(api,{
     if(r.readyIdentifier){
       if(!ready.ok)return fail('S06_CURRENT_READY_RECORD_REQUIRED');
       const wb=await createWritebackStore(database).getFull(name);
-      const check=planS06Writeback({ready,stage,job,writeback:wb.ok?wb:null,
+      const check=planS06Writeback({ready,stage,job:allowPausedReview?{...job,job:{...j,operatorPaused:false}}:job,writeback:wb.ok?wb:null,
         exception:exception.ok?exception:null});
       if(!check.ok||check.type!=='REVIEW'||
          !/^[0-9a-f]{40}$/.test(check.commitSha||''))
@@ -398,6 +396,24 @@ export function createReleaseBoundary(api,{
         proof:evidence.ok?evidence:null,reason:evidence.code||'PUBLICATION_UNCERTAIN'
       });
     }
+    if(msg.type==='REQUEST_CHANGES'){
+      // Persist local F-scoped intent even when Git or the provider is
+      // unavailable. Admission and every later effect have fresh guards.
+      const [stage,job,existing]=await Promise.all([
+        stageFactory(database).getFull(p.slug),aiFactory(database).getJobFull(p.slug),store.get(p.slug)]);
+      if(!stage.ok||!job.ok||p.expectedStageRevision!==stage.record.revision||
+         p.expectedJobRevision!==job.job.revision)return fail('S06_REQUEST_PREVIEW_STALE');
+      const saved=await exactSource(job.job.finalSource?.blobs);
+      if(!saved.ok||saved.fingerprint!==p.sourceFingerprint||saved.fingerprint!==job.job.sourceFingerprint)
+        return fail('S06_REQUEST_PREVIEW_STALE');
+      if(p.releaseRevision!==(existing.ok?existing.revision:undefined))
+        return fail('S06_REQUEST_RELEASE_REVISION_STALE');
+      return createS06ChangeStore(database).request({name:p.slug,stage:stage.record,job:job.job,
+        expectedStageRevision:p.expectedStageRevision,expectedJobRevision:p.expectedJobRevision,
+        sourceFingerprint:p.sourceFingerprint,instructions:p.instructions,
+        releaseRevision:existing.ok?existing.revision:null,
+        requestId:'change_'+crypto.randomUUID().replaceAll('-','')});
+    }
     const token=await vaultToken(p.token);
     if(!token)return fail('S06_GIT_VAULT_UNAVAILABLE');
     if(msg.type==='DISPATCH'){
@@ -409,14 +425,14 @@ export function createReleaseBoundary(api,{
         if(!prepared?.ok)return fail(prepared?.code||'MANUAL_PUBLICATION_EDITOR_PENDING');
       }
     }
-    const checked=await checkCurrent(database,p.slug,token,{physicalManualEditor:msg.type==='DISPATCH'});
+    const checked=await checkCurrent(database,p.slug,token,{physicalManualEditor:msg.type==='DISPATCH',allowPausedReview:msg.type==='PREVIEW'});
     if(!checked.ok)return checked;
     const change=await createS06ChangeStore(database).get(p.slug);
-    if(change.ok&&change.state==='REQUESTED')
+    if(change.ok&&change.state==='REQUESTED'&&change.parentStageRevision===checked.r.revision)
       return fail('S06_PENDING_REQUEST_BLOCKS_APPROVAL');
     if(msg.type==='PREVIEW'){
       return {ok:true,slug:p.slug,stageRevision:checked.r.revision,
-        jobRevision:checked.j.revision,sourceFingerprint:checked.source.fingerprint,
+        operatorPaused:checked.j.operatorPaused===true,jobRevision:checked.j.revision,sourceFingerprint:checked.source.fingerprint,
         previousFingerprint:checked.previous.fingerprint,files:checked.source.files,
         priorFiles:checked.previous.files,
         promptRevision:checked.j.prompt.revision,
@@ -436,22 +452,6 @@ export function createReleaseBoundary(api,{
         warning:checked.testContext.mode==='EXCEPTION_MANUAL_REVIEW'?
           'EXCEPTIONAL MANUAL/INCOMPLETE TESTING: AI verified tests remain UNVERIFIED. Confirm the exact manual checks, incomplete Chat 2 warning and F before individual approval; a green review is NOT a test PASS.':
           'Approval alone cannot publish; remote effects held until proven'};
-    }
-    if(msg.type==='REQUEST_CHANGES'){
-      if(p.expectedStageRevision!==checked.r.revision||
-         p.expectedJobRevision!==checked.j.revision||
-         p.sourceFingerprint!==checked.source.fingerprint)
-        return fail('S06_REQUEST_PREVIEW_STALE');
-      const existing=await store.get(p.slug);
-      if(p.releaseRevision!==(existing.ok?existing.revision:undefined))
-        return fail('S06_REQUEST_RELEASE_REVISION_STALE');
-      return createS06ChangeStore(database).request({
-        name:p.slug,stage:checked.r,job:checked.j,
-        expectedStageRevision:p.expectedStageRevision,
-        expectedJobRevision:p.expectedJobRevision,
-        sourceFingerprint:p.sourceFingerprint,instructions:p.instructions,
-        releaseRevision:existing.ok?existing.revision:null,
-        requestId:'change_'+crypto.randomUUID().replaceAll('-','')});
     }
     if(msg.type==='APPROVE'){
       if(p.expectedStageRevision!==checked.r.revision||

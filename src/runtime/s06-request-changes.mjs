@@ -3,6 +3,9 @@
 // same READY declaration, stable owner, same guarded generator/editor slot,
 // previous-good P and Git source preserved, old AI/approval archived.
 import {beginAiJob,validPromptRevision} from './ai-evidence.mjs';
+import {releaseCandidateTestContext} from './release-core.mjs';
+import {createS06ExceptionStore} from './s06-exception-review.mjs';
+import {captureExceptionalIdle,exceptionalIdleEvidence} from './exception-idle.mjs';
 import {exactSource,verifyReadback} from './staging-core.mjs';
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {createReadyStore} from './ready-store.mjs';
@@ -20,25 +23,18 @@ const show=r=>r?{ok:true,slug:r.slug,revision:r.revision,
   parentJobRevision:r.parentJobRevision,parentFingerprint:r.parentFingerprint,
   childStageRevision:r.childStageRevision||null,changedAt:r.changedAt}:
   fail('S06_REQUEST_NOT_FOUND');
-const verified=(ready,stage,job,wb)=>{
-  const active=ready?.active;
-  return !!(active&&!ready.desired&&!ready.hold&&stage&&job&&wb&&
-    stage.state==='SOURCE_VERIFIED'&&stage.verifiedAt&&
-    stage.readyIdentifier===active.identifier&&
-    stage.readyInputFingerprint===active.inputFingerprint&&
-    job.stageRevision===stage.revision&&job.state==='TESTS_VERIFIED'&&
-    job.readyIdentifier===active.identifier&&
-    job.readyInputFingerprint===active.inputFingerprint&&
-    job.executionSlotReleased===true&&
-    ['CHAT1_OBSERVED_IDLE','CHAT2_OBSERVED_IDLE'].includes(job.native?.state)&&
-    fp(job.verifiedFinal)&&job.verifiedFinal===job.sourceFingerprint&&
-    job.finalSource?.fingerprint===job.verifiedFinal&&
-    wb.state==='CONFIRMED'&&wb.mode==='S06'&&
-    wb.stageRevision===stage.revision&&wb.jobRevision===job.revision&&
-    wb.sourceFingerprint===job.verifiedFinal&&wb.sealedSource?.fingerprint===job.verifiedFinal&&
-    /^[a-f0-9]{40}$/.test(wb.commitSha||'')&&
-    wb.readyIdentifier===active.identifier&&
-    wb.readyInputFingerprint===active.inputFingerprint);
+const historicalPublic=(release,s)=>release?.state==='CONFIRMED_PUBLIC'&&release.approval?.sourceFingerprint===s.previous?.fingerprint&&
+ release.approval.accountId===s.accountId&&release.approval.personaUid===s.personaUid&&release.approval.remotePublicId===s.remotePublicId&&release.approval.bindingVersion===s.bindingVersion;
+const verified=(ready,stage,job,wb,exception=null)=>{
+ const active=ready?.active;if(!stage||!job)return false;
+ const evidence=releaseCandidateTestContext(stage,job,{ready,exception}),special=evidence.mode==='EXCEPTION_MANUAL_REVIEW';
+ return !!(evidence.ok&&active&&!ready.desired&&!ready.hold&&wb&&stage.state==='SOURCE_VERIFIED'&&stage.verifiedAt&&
+  stage.readyIdentifier===active.identifier&&stage.readyInputFingerprint===active.inputFingerprint&&job.stageRevision===stage.revision&&
+  job.readyIdentifier===active.identifier&&job.readyInputFingerprint===active.inputFingerprint&&job.executionSlotReleased===true&&
+  fp(job.sourceFingerprint)&&job.finalSource?.fingerprint===job.sourceFingerprint&&wb.state==='CONFIRMED'&&wb.mode===(special?'S06_EXCEPTION':'S06')&&
+  (!special||wb.exceptionRevision===exception?.revision)&&wb.stageRevision===stage.revision&&wb.jobRevision===job.revision&&
+  wb.sourceFingerprint===job.sourceFingerprint&&wb.sealedSource?.fingerprint===job.sourceFingerprint&&/^[a-f0-9]{40}$/.test(wb.commitSha||'')&&
+  wb.readyIdentifier===active.identifier&&wb.readyInputFingerprint===active.inputFingerprint);
 };
 function tx(db,write,fn){
  return new Promise((resolve,reject)=>{
@@ -67,9 +63,6 @@ export function createS06ChangeStore(db){
     return Promise.resolve(fail('S06_CHANGE_REQUEST_INVALID'));
   return tx(db,true,(m,t,done)=>m.get(key(name)).onsuccess=oldReq=>{
    const old=oldReq.target.result?.record;
-   if(old&&old.state==='REQUESTED'){
-     done(fail('S06_REQUEST_ALREADY_PENDING'));return;
-   }
    m.get('s06-human:'+name).onsuccess=human=>{
     if(human.target.result?.record?.state==='DEFERRED'){
      done(fail('S06_HUMAN_REVIEW_DEFERRED'));return;
@@ -79,18 +72,21 @@ export function createS06ChangeStore(db){
      m.get('ai-job:'+name).onsuccess=ai=>{
       m.get('writeback:'+name).onsuccess=gi=>{
        m.get('release:'+name).onsuccess=rl=>{
+        m.get('s06-exception:'+name).onsuccess=ex=>{
+        const exception=ex.target.result?.record;
         const ready=rd.target.result?.record,s=st.target.result?.record,
           j=ai.target.result?.job,w=gi.target.result?.record,
           release=rl.target.result?.release;
-        if(!verified(ready,s,j,w)||s.revision!==expectedStageRevision||
+        if(old?.state==='REQUESTED'&&old.readyIdentifier===ready?.active?.identifier&&old.readyInputFingerprint===ready?.active?.inputFingerprint){done(fail('S06_REQUEST_ALREADY_PENDING'));return;}
+        if(!verified(ready,s,j,w,exception)||s.revision!==expectedStageRevision||
            j.revision!==expectedJobRevision||
-           sourceFingerprint!==j.verifiedFinal||
+           sourceFingerprint!==j.sourceFingerprint||
            !stage||!job||stage.revision!==s.revision||job.revision!==j.revision||
            release?.revision!==(releaseRevision??undefined)){
           // A caller may omit releaseRevision only when no release exists.
           done(fail('S06_CHANGE_CONTEXT_CHANGED'));return;
         }
-        if(release&&!['APPROVED','CANCELED'].includes(release.state)){
+        if(release&&!['APPROVED','CANCELED'].includes(release.state)&&!historicalPublic(release,s)){
           done(fail('S06_PUBLICATION_ALREADY_ATTEMPTED'));return;
         }
         const record={slug:name,revision:(old?.revision||0)+1,
@@ -98,9 +94,9 @@ export function createS06ChangeStore(db){
           readyIdentifier:ready.active.identifier,
           readyInputFingerprint:ready.active.inputFingerprint,
           parentStageRevision:s.revision,parentJobRevision:j.revision,
-          parentFingerprint:j.verifiedFinal,parentWriteback:w.operationId,
+          parentFingerprint:j.sourceFingerprint,parentExceptionRevision:exception?.revision||null,parentWriteback:w.operationId,
           parentCommit:w.commitSha,changedAt:Date.now()};
-        if(old)m.put({key:'s06-change-history:'+name+':'+old.requestId,
+        if(old)m.put({key:'s06-change-history:'+name+':'+old.requestId+':'+old.revision,
           record:structuredClone(old)});
         m.put({key:key(name),record});
         if(release?.state==='APPROVED'){
@@ -114,6 +110,7 @@ export function createS06ChangeStore(db){
           requestId,parentFingerprint:record.parentFingerprint,
           providerEffects:'NONE'});
         done(show(record));
+        };
        };
       };
      };
@@ -135,15 +132,17 @@ export function createS06ChangeStore(db){
      m.get('ai-job:'+name).onsuccess=ai=>{
       m.get('writeback:'+name).onsuccess=gi=>{
        m.get('release:'+name).onsuccess=rl=>{
+        m.get('s06-exception:'+name).onsuccess=ex=>{
+        const exception=ex.target.result?.record;
         const ready=rd.target.result?.record,s=st.target.result?.record,
           j=ai.target.result?.job,w=gi.target.result?.record,
           release=rl.target.result?.release;
-        if(!verified(ready,s,j,w)||s.revision!==req.parentStageRevision||
-           j.revision!==req.parentJobRevision||j.verifiedFinal!==req.parentFingerprint||
-           w.operationId!==req.parentWriteback||w.commitSha!==req.parentCommit||
+        if(!verified(ready,s,j,w,exception)||s.revision!==req.parentStageRevision||
+           j.revision!==req.parentJobRevision||j.sourceFingerprint!==req.parentFingerprint||
+           (exception?.revision||null)!==req.parentExceptionRevision||w.operationId!==req.parentWriteback||w.commitSha!==req.parentCommit||
            ready.active.identifier!==req.readyIdentifier||
            ready.active.inputFingerprint!==req.readyInputFingerprint||
-           (release&&!['CANCELED'].includes(release.state))){
+           (release&&release.state!=='CANCELED'&&!historicalPublic(release,s))){
           done(fail('S06_REQUEST_SOURCE_OR_OWNERSHIP_CHANGED'));return;
         }
         const prompt=promptFor(j,req.instructions);
@@ -160,7 +159,7 @@ export function createS06ChangeStore(db){
           createdAt:Date.now(),readyIdentifier:ready.active.identifier,
           readyInputFingerprint:ready.active.inputFingerprint,
           sourceFolder:s.sourceFolder,childRequestId:req.requestId,
-          parentJobRevision:j.revision,parentFingerprint:j.verifiedFinal};
+          parentJobRevision:j.revision,parentFingerprint:j.sourceFingerprint};
         m.put({key:'stage-history:'+name+':'+s.revision,record:structuredClone(s)});
         m.put({key:'ai-history:'+name+':'+j.revision,
           accountId:s.accountId,job:structuredClone(j)});
@@ -174,6 +173,7 @@ export function createS06ChangeStore(db){
           requestId:req.requestId,parentFingerprint:req.parentFingerprint,
           childStageRevision:childStage.revision,providerEffects:'NONE'});
         done(show(next));
+        };
        };
       };
      };
@@ -181,7 +181,20 @@ export function createS06ChangeStore(db){
    };
   });
  }
- return Object.freeze({get,request,admit});
+ function supersede(name,expectedRevision){
+  return tx(db,true,(m,t,done)=>m.get(key(name)).onsuccess=e=>{
+   const req=e.target.result?.record;
+   if(req?.state!=='REQUESTED'||req.revision!==expectedRevision){done(fail('S06_REQUEST_STALE_OR_CONSUMED'));return;}
+   m.get('s05-ready:'+name).onsuccess=rd=>{
+    const ready=rd.target.result?.record,a=ready?.desired||ready?.active;
+    if(!a||(a.identifier===req.readyIdentifier&&a.inputFingerprint===req.readyInputFingerprint)){done(fail('S06_REQUEST_NOT_SUPERSEDED'));return;}
+    const next={...req,revision:req.revision+1,state:'SUPERSEDED',changedAt:Date.now()};
+    m.put({key:'s06-change-history:'+name+':'+req.requestId+':'+req.revision,record:structuredClone(req)});
+    m.put({key:key(name),record:next});t.objectStore('events').add({stage:'S06_REQUEST_SUPERSEDED',slug:name,requestId:req.requestId,providerEffects:'NONE'});done(show(next));
+   };
+  });
+ }
+ return Object.freeze({get,request,admit,supersede});
 }
 // A separate guarded read-only preflight, before atomic admission. A changed
 // editor, route, owner or saved F holds the child rather than overwriting it.
@@ -210,16 +223,30 @@ export function createS06ChangeProgress(api,{
            observedAt:Date.now()}});
        return fail(code);
      };
-     const [stage,job,writeback,ready]=await Promise.all([
+     const superseded=await store.supersede(item.slug,req.revision);
+     if(superseded.ok){await api.storage.local.set({[cursorKey]:next});return superseded;}
+     const [stage,job,writeback,ready,exception]=await Promise.all([
       createStagingStore(d).getFull(item.slug),createAiStore(d).getJobFull(item.slug),
-      createWritebackStore(d).getFull(item.slug),queue.get(item.slug)]);
+      createWritebackStore(d).getFull(item.slug),queue.get(item.slug),createS06ExceptionStore(d).getFull(item.slug)]);
      if(!stage.ok||!job.ok||!writeback.ok||!ready.ok||
-        !verified(ready.record,stage.record,job.job,writeback.record))
+        !verified(ready.record,stage.record,job.job,writeback.record,exception.ok?exception.record:null))
        return held('S06_CHANGE_CURRENT_EVIDENCE_UNVERIFIED');
      const g=guard(),s=stage.record,j=job.job;
+     if(j.operatorPaused)return held('AI_OPERATOR_PAUSED');
      if(!g?.getSafeRouteReadiness||!g?.inspectStageEditor||
         !g?.runNativeAiStep||!g?.observeReadOnly)
        return held('S06_CHILD_DONOR_GUARD_UNAVAILABLE');
+     if(j.exceptionQuiescence==='NEVER_DISPATCHED_SOURCE'&&!j.native){
+      const proof=await captureExceptionalIdle({guard:g,stage:s,job:j,held:async()=>(await sentinel.inspect()).held});
+      const evidence=exceptionalIdleEvidence(proof,s,j);
+      if(!evidence)return held(proof.code||'S06_CHILD_MANUAL_SOURCE_UNVERIFIED');
+      if(evidence.editor.noEditors){
+       const prepared=await g.prepareChangeEditor?.(s.personaUid,s.slug,s.nonce);
+       if(!prepared?.ok)return held(prepared?.code||'S06_CHILD_SAVED_EDITOR_PENDING');
+       const repeated=await captureExceptionalIdle({guard:g,stage:s,job:j,held:async()=>(await sentinel.inspect()).held}),fresh=exceptionalIdleEvidence(repeated,s,j);
+       if(!fresh||fresh.editor.noEditors)return held(repeated.code||'S06_CHILD_SAVED_EDITOR_PENDING');
+      }
+     }else{
      const route=await g.getSafeRouteReadiness(s.personaUid);
      const editor=await g.inspectStageEditor(s.personaUid,s.slug,s.nonce);
      const native=await g.runNativeAiStep(s.personaUid,{slug:s.slug,
@@ -233,7 +260,7 @@ export function createS06ChangeProgress(api,{
        ownerResult:seen?.original?.ownerResult,visibility:seen?.original?.visibility,
        pjs:seen?.original?.pjs,html:seen?.original?.html,
        assets:seen?.original?.assets};
-     const source=f.ok&&f.fingerprint===j.verifiedFinal?
+     const source=f.ok&&f.fingerprint===j.sourceFingerprint?
        await verifyReadback(f,packet,{slug:s.slug,accountId:s.accountId,
          personaUid:s.personaUid,principalFingerprint:s.principalFingerprint,
          remotePublicId:s.remotePublicId}):fail('S06_CHILD_F_CORRUPT');
@@ -247,6 +274,7 @@ export function createS06ChangeProgress(api,{
         native.inputOccupied!==false||native.attachmentsPending!==false||
         !source.ok||seen.original?.visibility!=='UNLISTED')
        return held('S06_CHILD_EDITOR_ROUTE_OR_SAVED_F_UNVERIFIED');
+     }
      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
      const result=await store.admit(item.slug,req.revision);
      await api.storage.local.set({[cursorKey]:next,

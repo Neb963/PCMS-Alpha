@@ -60,3 +60,11 @@ test('J04 operator control rejects untrusted, stale and effect-bearing input',()
  assert.equal(validateAiMessage(api,sender,valid).ok,true);assert.equal(validateAiMessage(api,{id:'other',url:'https://perchance.org'},valid).ok,false);
  for(const params of [{...valid.params,sourceFingerprint:'a'.repeat(64)},{...valid.params,expectedControlRevision:0},{...valid.params,instructions:'\0bad'}])assert.equal(validateAiMessage(api,sender,{...valid,params}).ok,false);
 });
+
+test('J04 only explicit operator judgment ends further repair, preserving failures and allowing deliberate Resume',async()=>{
+ const f=await fixture();
+ assert.equal((await f.store.operatorControl(name,1,1,{paused:false,judgment:'UNPRODUCTIVE'})).ok,false);
+ const ended=await f.boundary().run({type:'SET_PAUSED',params:{slug:name,expectedRevision:1,expectedControlRevision:1,paused:true,judgment:'UNPRODUCTIVE'}},sender);
+ assert.equal(ended.ok,true,JSON.stringify(ended));assert.equal(ended.operatorJudgment.kind,'UNPRODUCTIVE');assert.equal(ended.evidence.state,'KNOWN_FAILURE');assert.equal(planAiStep(await f.current()).code,'AI_OPERATOR_PAUSED');assert.equal(f.effects.length,0);
+ const resumed=await f.store.operatorControl(name,1,ended.controlRevision,{paused:false});assert.equal(resumed.ok,true);assert.equal(resumed.operatorJudgment,null);assert.equal(resumed.evidence.state,'KNOWN_FAILURE');
+});

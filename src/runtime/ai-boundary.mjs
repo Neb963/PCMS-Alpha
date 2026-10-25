@@ -44,7 +44,7 @@ export function validateAiMessage(api,sender,message){
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
   const allowed=message.type==='LIST_JOBS'?['after','limit','query','status']:
      message.type==='GET_JOB'?['slug']:
-    ['SET_PAUSED','GIVE_INSTRUCTIONS'].includes(message.type)?['slug','expectedRevision','expectedControlRevision',...(message.type==='SET_PAUSED'?['paused']:['instructions'])]:
+    ['SET_PAUSED','GIVE_INSTRUCTIONS'].includes(message.type)?['slug','expectedRevision','expectedControlRevision',...(message.type==='SET_PAUSED'?['paused','judgment']:['instructions'])]:
     message.type==='PREPARE_JOB'?['slug','expectedStageRevision','token']:
     message.type==='BEGIN_NATIVE'?['slug','expectedRevision','step']:
     ['ADMIT_JOB','PROBE_NATIVE','RUN_TESTS','ADVANCE_JOB','INSPECT_WORKSPACE','VERIFY_FRESH_CHAT2'].includes(message.type)?['slug','expectedRevision']:
@@ -57,6 +57,7 @@ export function validateAiMessage(api,sender,message){
   if(['SET_PAUSED','GIVE_INSTRUCTIONS'].includes(message.type)&&
     (!Number.isSafeInteger(p.expectedRevision)||p.expectedRevision<1||!Number.isSafeInteger(p.expectedControlRevision)||p.expectedControlRevision<1||
      (message.type==='SET_PAUSED'?typeof p.paused!=='boolean':typeof p.instructions!=='string'||p.instructions.trim().length<3||p.instructions.length>4000||p.instructions.includes('\0'))))return fail('INVALID_PARAMS');
+  if(p.judgment!==undefined&&(message.type!=='SET_PAUSED'||p.paused!==true||p.judgment!=='UNPRODUCTIVE'))return fail('INVALID_PARAMS');
   if(message.type==='PREPARE_JOB'&&
      (!Number.isSafeInteger(p.expectedStageRevision)||p.expectedStageRevision<1||
       (p.token!==undefined&&
@@ -110,7 +111,7 @@ export function createAiBoundary(api,{
       if(message.type==='GET_JOB')return store.getJob(p.slug);
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       if(['SET_PAUSED','GIVE_INSTRUCTIONS'].includes(message.type))return store.operatorControl(p.slug,p.expectedRevision,p.expectedControlRevision,
-        message.type==='SET_PAUSED'?{paused:p.paused}:{instructions:p.instructions});
+        message.type==='SET_PAUSED'?{paused:p.paused,...(p.judgment?{judgment:p.judgment}:{})}:{instructions:p.instructions});
       if(message.type==='ADMIT_JOB')return store.admitExecutionSlot(p.slug,p.expectedRevision);
       // A fresh coherent READY successor revokes advancement authority for
       // the older AI candidate. Read-only PROBE_NATIVE remains available for

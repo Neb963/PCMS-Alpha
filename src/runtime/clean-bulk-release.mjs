@@ -9,7 +9,7 @@ import {createReleaseStore} from './release-store.mjs';
 import {createS06HumanStore} from './s06-human-review.mjs';
 import {createS06ChangeStore} from './s06-request-changes.mjs';
 import {planS06Writeback} from './s06-writeback-progress.mjs';
-import {releaseContext,releaseTestContext,approvalTuple,matchesApproval} from './release-core.mjs';
+import {releaseContext,releaseTestContext,approvalTuple,matchesApproval,releaseCandidateKind} from './release-core.mjs';
 import {exactSource} from './staging-core.mjs';
 const fail=code=>({ok:false,code}),key=id=>'clean-bulk:'+id;
 export const cleanBulkId=id=>typeof id==='string'&&/^clean_[a-z0-9]{8,16}_[a-f0-9]{32}$/.test(id);
@@ -20,7 +20,7 @@ export async function inspectCleanCandidate(db,slug){
  const [stage,job,ready,writeback,human,change]=await Promise.all([createStagingStore(db).getFull(slug),createAiStore(db).getJobFull(slug),createReadyStore(db).get(slug),createWritebackStore(db).getFull(slug),createS06HumanStore(db).get(slug),createS06ChangeStore(db).get(slug)]);
  if(!stage.ok||!job.ok||!ready.ok||!writeback.ok)return fail('CLEAN_CANDIDATE_NOT_READY');
  const s=stage.record,j=job.job;
- if(j.operatorPaused||j.exceptionFrozen||s.humanReclaimPending||human?.state==='DEFERRED'||change?.state==='REQUESTED')return fail('CLEAN_CANDIDATE_OPERATOR_HOLD');
+ if(j.operatorPaused||j.exceptionFrozen||s.humanReclaimPending||human?.state==='DEFERRED'||(change?.state==='REQUESTED'&&change.parentStageRevision===s.revision))return fail('CLEAN_CANDIDATE_OPERATOR_HOLD');
  if(!releaseTestContext(s,j).ok)return fail('CLEAN_INDEPENDENT_TESTS_REQUIRED');
  const decision=planS06Writeback({ready,stage,job,writeback});
  if(!decision.ok||decision.type!=='REVIEW'||decision.mode!=='S06')return fail('CLEAN_CONFIRMED_GIT_SOURCE_REQUIRED');
@@ -31,7 +31,8 @@ export async function inspectCleanCandidate(db,slug){
  // and not a child stage which may already contain AI-modified source.
  const input=await hash('PCMS_SOURCE_V1\n'+[...source.files].sort((a,b)=>a.path.localeCompare(b.path,'en')).map(f=>JSON.stringify([f.path,f.size,f.sha256])).join('\n'));
  if(input!==ready.record.active?.inputFingerprint||input!==s.readyInputFingerprint)return fail('MODIFIED_SOURCE_REQUIRES_INDIVIDUAL_REVIEW');
- const kind=s.previous.files.length===2&&s.previous.files.every(f=>f.size===0)?'PRIVATE_NEW':'EXISTING_UPDATE';
+ const existing=(await read(db,'existing-update:'+slug))?.record;
+ const kind=releaseCandidateKind(s,inventoryRow?.generator,existing);
  const approval=approvalTuple({slug,stage:s,job:j,source,previous,git:{ok:true,testingSha:s.testingSha},kind});
  if(!approval.ok)return approval;
  return {ok:true,snapshot:{tuple:approval.tuple,readyIdentifier:s.readyIdentifier,readyInputFingerprint:input,writebackCommit:writeback.record.commitSha}};
@@ -54,10 +55,10 @@ export function createCleanBulkStore(db){
    if(release.ok&&['APPROVED','DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN','RECOVERY_HOLD'].includes(release.state)){excluded.push({slug,state:'EXCLUDED',code:'EXISTING_PUBLICATION_REQUIRES_INSPECTION'});continue}
    const out=await inspectCleanCandidate(db,slug);
    if(!out.ok){excluded.push({slug,state:'EXCLUDED',code:out.code});continue}
-   if(release.ok&&release.state==='CONFIRMED_PUBLIC'&&release.sourceFingerprint===out.snapshot.tuple.sourceFingerprint){excluded.push({slug,state:'EXCLUDED',code:'EXACT_SOURCE_ALREADY_PUBLISHED'});continue}
-   items.push({slug,state:'PENDING',snapshot:out.snapshot});
+   if(release.ok&&release.state==='CONFIRMED_PUBLIC'&&release.sourceFingerprint===out.snapshot.tuple.sourceFingerprint&&release.stageRevision===out.snapshot.tuple.stageRevision&&release.jobRevision===out.snapshot.tuple.jobRevision){excluded.push({slug,state:'EXCLUDED',code:'EXACT_SOURCE_ALREADY_PUBLISHED'});continue}
+   items.push({slug,state:'PENDING',snapshot:out.snapshot,previousRelease:release.ok?{releaseId:release.releaseId,revision:release.revision,state:release.state}:null});
   }
-  const id='clean_'+Date.now().toString(36)+'_'+crypto.randomUUID().replaceAll('-',''),digest=await hash(JSON.stringify(items.map(x=>[x.slug,x.snapshot])));
+  const id='clean_'+Date.now().toString(36)+'_'+crypto.randomUUID().replaceAll('-',''),digest=await hash(JSON.stringify(items.map(x=>[x.slug,x.snapshot,x.previousRelease])));
   const record={id,revision:1,state:'DRAFT',digest,createdAt:Date.now(),items,excluded,cursor:0};
   return transact(db,(m,t,done)=>{m.add({key:key(id),record});t.objectStore('events').add({stage:'CLEAN_PUBLICATION_SET_PREPARED',id,digest,eligible:items.length,excluded:excluded.length,providerEffects:'NONE'});done(view(record))});
  }

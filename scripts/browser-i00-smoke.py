@@ -1036,6 +1036,8 @@ def main():
             else: raise RuntimeError('geckodriver did not become ready')
             # Exercise the changed operator journey first; all unchanged
             # persistent donor/source/backup suites still run after it passes.
+            from journey_development_ui import run as run_j04_primary
+            run_j04_primary(browser,archive,pathlib.Path(folder))
             from journey_git_ui import run as run_j03_primary, run_empty as run_j03_empty
             run_j03_primary(browser,archive,pathlib.Path(folder))
             run_j03_empty(browser,archive,pathlib.Path(folder))

@@ -146,7 +146,6 @@ export function createS06HumanStore(db){
        (!refresh&&prior.parentCommit!==w.commitSha)||
        prior.readyIdentifier!==ready.active.identifier||
        prior.readyInputFingerprint!==ready.active.inputFingerprint||
-       (!refresh&&source.fingerprint===j.verifiedFinal)||
        (release&&release.state!=='CANCELED'&&
         !(release.state==='CONFIRMED_PUBLIC'&&
           release.approval?.sourceFingerprint===s.previous?.fingerprint))){
@@ -273,8 +272,6 @@ export function createS06HumanBoundary(api,{
     {path:'index.html',base64:encode(owner.original.html)},
     ...owner.original.assets]);
   if(!fresh.ok)return fail('S06_HUMAN_SAVED_BYTES_UNVERIFIED');
-  if(!refresh&&fresh.fingerprint===j.verifiedFinal)
-    return fail('S06_HUMAN_NO_CHANGED_SAVED_SOURCE');
   const after=await g.getSafeRouteReadiness(s.personaUid),editorAfter=await g.inspectHumanReview(s.personaUid,s.slug,s.nonce);
   if(!after?.ready||after.routeId!==before.routeId||after.cookieStoreId!==before.cookieStoreId||!editorAfter?.ok||editorAfter.clean!==true||
     editorAfter.noEditors!==editor.noEditors||editorAfter.tabId!==editor.tabId||editorAfter.sessionDigest!==editor.sessionDigest||editorAfter.humanEpoch!==editor.humanEpoch||(await sentinel.inspect()).held)return fail('S06_HUMAN_EDITOR_CHANGED_DURING_ADOPTION');
