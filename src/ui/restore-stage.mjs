@@ -5,13 +5,15 @@ import {RESTORE_GROUPS} from './restore-core.mjs';
 const okHash=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
 const err=s=>{throw Error(s);};
 export function createRestoreStageEngine(gate,{dispatch,readback}={}){
-  const check=async ({epoch,revision,group,fingerprint})=>{
+  const check=async ({epoch,revision,group,fingerprint,continuePrepared=false})=>{
     if(!RESTORE_GROUPS.includes(group)||!okHash(fingerprint))
       err('RESTORE_STAGE_INVALID');
     const s=await gate.read();
     if(!s?.active||s.epoch!==epoch||s.revision!==revision)
       err('RESTORE_STALE_GUARD');
-    if(s.groups[group])err('RESTORE_GROUP_ALREADY_STARTED');
+    if(s.groups[group]&&!(continuePrepared&&s.protocol===2&&
+       s.groups[group].status==='BEFORE_DISPATCH'&&s.groups[group].fingerprint===fingerprint))
+      err('RESTORE_GROUP_ALREADY_STARTED');
     const index=RESTORE_GROUPS.indexOf(group);
     // An independently OBSERVED preceding group is required. No optimistic
     // overlap across donor, cookies and canonical persistence.
@@ -31,11 +33,12 @@ export function createRestoreStageEngine(gate,{dispatch,readback}={}){
     return gate.advance({epoch:row.epoch,revision:row.revision,group,step,
       status:'HELD_UNCERTAIN'});
   };
-  async function execute({epoch,revision,group,step,fingerprint}){
+  async function execute({epoch,revision,group,step,fingerprint,continuePrepared=false}){
     if(typeof dispatch!=='function'||typeof readback!=='function')
       err('RESTORE_ADAPTER_NOT_CONFIGURED');
-    await check({epoch,revision,group,fingerprint});
-    const prepared=await gate.advance({epoch,revision,group,step,status:'BEFORE_DISPATCH',fingerprint});
+    const prior=await check({epoch,revision,group,fingerprint,continuePrepared});
+    const prepared=prior.groups[group]?.status==='BEFORE_DISPATCH'?prior:
+      await gate.advance({epoch,revision,group,step,status:'BEFORE_DISPATCH',fingerprint});
     // Durable DISPATCH_POSSIBLE is a hard precondition to calling the adapter.
     const possible=await gate.advance({epoch,revision:prepared.revision,group,
       step,status:'DISPATCH_POSSIBLE'});

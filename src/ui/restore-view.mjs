@@ -27,7 +27,7 @@ export function mountPortableRestore(root=document){
  stopped=el('pcms-restore-predecessor'),reactivate=el('pcms-restore-reactivate'),
  activationBox=el('pcms-restore-reactivate-box');
  let incoming=null,sourceScope=null,checkpointScope=null,review=null,proof=null,
- preparation=null,activeGuard=null,working=false,copyId=null;
+ preparation=null,activeGuard=null,heldImport=false,working=false,copyId=null;
  const fault=e=>/^(RESTORE|PORTABLE|BACKUP)_[A-Z0-9_]{3,70}$/.test(e?.message||'')?e.message:'RESTORE_HELD_UNKNOWN';
  const messages={
  RESTORE_CHECKPOINT_PCMS_DRIFT:'PCMS data changed after the safety copy. Save a new safety copy and select it again.',
@@ -49,11 +49,11 @@ export function mountPortableRestore(root=document){
  function sync(){
   apply.disabled=working||!review||!proof?.verified||!checked.checked||!sourceScope||!checkpointScope;
   verify.disabled=working||!incoming||!preparation||!checkpoint.files?.[0];
-  preview.disabled=working||!!preparation||!!activeGuard;
-  copy.disabled=working||!incoming||!!activeGuard;
+  preview.disabled=working||!!preparation||heldImport;
+  copy.disabled=working||!incoming||heldImport;
   cancel.hidden=!preparation;cancel.disabled=working;
-  archive.disabled=working||!!preparation||!!activeGuard;
-  for(const control of [mode,fresh,...accounts.querySelectorAll('input'),...personas.querySelectorAll('select')])control.disabled=working||!!activeGuard;
+  archive.disabled=working||!!preparation||heldImport;
+  for(const control of [mode,fresh,...accounts.querySelectorAll('input'),...personas.querySelectorAll('select')])control.disabled=working||heldImport;
   reactivate.disabled=working||!activeGuard||!stopped.checked;
   showCopy.hidden=copyId===null;
  }
@@ -139,14 +139,14 @@ function portCommand(message){
   const overview=el('pcms-overview-restore');
   if(overview)overview.textContent=held.held?'Restore '+held.status+' · work held.':'No restore in progress.';
   activeGuard=held.held&&held.status==='COMPLETE_INACTIVE'?held:null;
-  preparation=held.preparation||null;activationBox.hidden=!activeGuard;
+  preparation=held.preparation||null;heldImport=held.held&&!preparation;activationBox.hidden=!activeGuard;
   reconcile.hidden=!held.held||!!preparation||!!activeGuard;
   if(preparation&&resume&&!incoming){
    sourceScope=preparation.stageScope;
    try{incoming=await readPortableStage(sourceScope);await renderChoices();status.textContent='Restore preparation recovered. Select your safety copy, then review the import.'}
    catch(e){report(fault(e))}
   }else if(activeGuard)status.textContent='Data restored. Confirm other PCMS installations are closed to continue.';
-  else if(held.held&&!preparation)status.textContent='An interrupted restore is held. Check its saved progress before continuing.';
+  else if(held.held&&!preparation)status.textContent='An interrupted restore is held. Check and continue to verify saved results and finish only work that never started.';
   sync();return held;
  }
  async function action(fn){

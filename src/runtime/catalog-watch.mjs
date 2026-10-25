@@ -121,12 +121,12 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       }
       for(const slug of missing.slice(0,64)){
         try{await dispatcher.emit({scopeId:await scopeFor(slug),
-          code:'GIT_FOLDER_MISSING',severity:'ACTION_REQUIRED',
+          code:'GIT_FOLDER_MISSING',target:{kind:'GENERATOR',id:slug},severity:'ACTION_REQUIRED',
           revision:Math.max(1,clock())});}catch{}
       }
       for(const rec of planned.created.slice(0,64)){
         try{await dispatcher.emit({scopeId:await scopeFor(rec.newSlug),
-          code:'GIT_FOLDER_RENAME_REVIEW',severity:'ACTION_REQUIRED',
+          code:'GIT_FOLDER_RENAME_REVIEW',target:{kind:'GENERATOR',id:rec.newSlug},severity:'ACTION_REQUIRED',
           revision:Math.max(1,clock())});}catch{}
       }
       // Incident resolution is independent of owner/source write authority.

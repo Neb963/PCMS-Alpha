@@ -1,3 +1,4 @@
+import {validDonorPreparation,validDonorBaseline} from './restore-observation.mjs';
 // I16 restore intent is outside replaceable canonical IndexedDB.
 // Effect-free PREPARING may be explicitly cancelled. Once sealed, only explicit
 // reactivation of a fully observed COMPLETE_INACTIVE restore releases the hold.
@@ -50,7 +51,7 @@ export function createRestoreGate(storage,{now=()=>Date.now(),
     return {ok:true,code:'RESTORE_PREPARATION_CANCELLED',epoch};
   }
   async function begin({planSha256,archiveSha256,destinationSha256,checkpointSha256,
-    reviewedPlanSha256,checkpointTier,fresh,recovery=null,preparation=null}){
+    reviewedPlanSha256,checkpointTier,fresh,recovery=null,preparation=null,protocol=1,donorBaseline=null}){
     const prior=await read();
     if(preparation){
       if(!prior||prior.status!=='PREPARING'||prior.epoch!==preparation.epoch||
@@ -68,7 +69,8 @@ export function createRestoreGate(storage,{now=()=>Date.now(),
        Object.entries(recovery.mappings).some(([k,v])=>k.length>256||
          typeof v!=='string'||v.length>256)))
        fail('RESTORE_RECOVERY_PLAN_INVALID');
-    const row={active:true,revision:prior?prior.revision+1:1,epoch:prior?.epoch||'restore_'+uuid(),fresh:fresh===true,
+    if(![1,2].includes(protocol)||protocol===2&&!validDonorBaseline(donorBaseline))fail('RESTORE_PROTOCOL_INVALID');
+    const row={active:true,protocol,donorBaseline,revision:prior?prior.revision+1:1,epoch:prior?.epoch||'restore_'+uuid(),fresh:fresh===true,
       status:'GUARD_INSTALLED',step:'GUARD',planSha256,archiveSha256,
       destinationSha256,checkpointSha256,startedAt:prior?.startedAt||now(),groups:{},createdContainers:{},recovery};
     if(!token(row.epoch))fail('RESTORE_EPOCH_INVALID');
@@ -108,10 +110,21 @@ export function createRestoreGate(storage,{now=()=>Date.now(),
         allDone?'COMPLETE_INACTIVE':'RESTORE_IN_PROGRESS',
       groups});
   }
+  async function prepareContainer({epoch,revision,personaKey,name}){
+    const prior=await read();
+    if(!prior||prior.protocol!==2||prior.epoch!==epoch||prior.revision!==revision||
+      !['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(prior.groups['donor-personas']?.status)||
+      prior.recovery?.mappings?.[personaKey]!=='__create__'||
+      typeof name!=='string'||!/^PCMS Restore [a-f0-9]{12} [0-9]{3,5}$/.test(name))
+      fail('RESTORE_CONTAINER_INTENT_INVALID');
+    if(prior.containerIntents?.[personaKey])fail('RESTORE_CONTAINER_ALREADY_POSSIBLE');
+    return persist({...prior,revision:prior.revision+1,
+      containerIntents:{...(prior.containerIntents||{}),[personaKey]:{name,status:'CREATE_POSSIBLE'}}});
+  }
   async function recordContainer({epoch,revision,personaKey,cookieStoreId}){
     const prior=await read();
     if(!prior||prior.epoch!==epoch||prior.revision!==revision||
-       prior.groups['donor-personas']?.status!=='DISPATCH_POSSIBLE')
+       !['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(prior.groups['donor-personas']?.status))
       fail('RESTORE_CONTAINER_RECEIPT_STALE');
     if(typeof personaKey!=='string'||personaKey.length>256||
        prior.recovery?.mappings?.[personaKey]!=='__create__'||
@@ -124,6 +137,21 @@ export function createRestoreGate(storage,{now=()=>Date.now(),
       fail('RESTORE_CONTAINER_ID_DUPLICATE');
     return persist({...prior,revision:prior.revision+1,
       createdContainers:{...entries,[personaKey]:cookieStoreId}});
+  }
+  async function donorReceipt({epoch,revision,receipt,commitPossible=false}){
+    const prior=await read();
+    if(!prior||prior.protocol!==2||prior.epoch!==epoch||prior.revision!==revision||
+       !['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(prior.groups['donor-personas']?.status))
+      fail('RESTORE_DONOR_RECEIPT_STALE');
+    // Callers validate the fixed nonsecret receipt schema before this CAS.
+    if(commitPossible){
+      if(prior.donorPreparation?.status!=='PREPARED')fail('RESTORE_DONOR_COMMIT_ALREADY_POSSIBLE');
+      return persist({...prior,revision:prior.revision+1,
+        donorPreparation:{...prior.donorPreparation,status:'COMMIT_POSSIBLE'}});
+    }
+    if(prior.donorPreparation?.status==='COMMIT_POSSIBLE'||!validDonorPreparation(receipt)||receipt.status!=='PREPARED')
+      fail('RESTORE_DONOR_RECEIPT_INVALID');
+    return persist({...prior,revision:prior.revision+1,donorPreparation:structuredClone(receipt)});
   }
   // The ONLY guard release: an explicit operator reactivation of a fully
   // observed (COMPLETE_INACTIVE) restore. A partial/uncertain restore stays
@@ -153,6 +181,7 @@ export function createRestoreGate(storage,{now=()=>Date.now(),
   };
   return Object.freeze({read,prepare:serialized(prepare),cancel:serialized(cancel),
     begin:serialized(begin),advance:serialized(advance),
-    recordContainer:serialized(recordContainer),reactivate:serialized(reactivate),
+    donorReceipt:serialized(donorReceipt),
+    prepareContainer:serialized(prepareContainer),recordContainer:serialized(recordContainer),reactivate:serialized(reactivate),
     inspect:async()=>safeRestoreReceipt(await read())});
 }

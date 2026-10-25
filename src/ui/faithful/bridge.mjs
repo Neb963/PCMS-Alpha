@@ -1,3 +1,4 @@
+import {acknowledgeIncident,incidentDestination} from './attention.mjs';
 import {createRefresherWorkspace} from './refresher-workspace.mjs';
 import {matchesReviewGroup} from '../review-queue-state.mjs';
 import {renderGitInventory,mountGitPromptEditor} from './git-workspace.mjs';
@@ -157,13 +158,15 @@ function openGlobalSearch(){
  async function search(){const query=input.value.trim(),n=++epoch;list.replaceChildren();if(query.length<2)return;
   list.append(el('p','pcms-unknown','Searching local records…'));
   const settled=await Promise.allSettled([inventory({query:query.slice(0,80),offset:0,limit:8}),accounts(),
-   readPort('pcms-s03-catalog','SEARCH_PATHS',{query,limit:8},12000),guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{after:'',limit:8,status:'ALL',query:query.slice(0,80)})]);if(n!==epoch||!overlay.isConnected)return;
+   readPort('pcms-s03-catalog','SEARCH_PATHS',{query,limit:8},12000),guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{after:'',limit:8,status:'ALL',query:query.slice(0,80)}),guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_PAGE',{after:'',limit:8,query:query.slice(0,80)})]);if(n!==epoch||!overlay.isConnected)return;
   list.replaceChildren();const inv=settled[0].status==='fulfilled'?settled[0].value:null,acc=settled[1].status==='fulfilled'?settled[1].value:null;
   const found=[];
   for(const g of inv?.items||[])found.push({kind:'Generator',label:g.slug,execute:()=>{state.gen.query=g.slug;state.gen.offset=0;overlay.remove();routeTo('generators')}});
   for(const a of acc?.accounts||[])if([a.accountId,a.alias].filter(Boolean).some(x=>x.toLowerCase().includes(query.toLowerCase())))found.push({kind:'Account',label:a.alias||a.accountId,execute:()=>{state.acct.query=a.accountId;state.acct.page=0;overlay.remove();routeTo('accounts')}});
   const paths=settled[2].status==='fulfilled'?settled[2].value:null,operations=settled[3].status==='fulfilled'?settled[3].value:null;
   for(const source of paths?.items||[])found.push({kind:'Git source',label:source.path,execute:()=>{overlay.remove();openSourceManager({slug:source.slug,initialPath:source.path.startsWith(source.folder+'/')?source.path.slice(source.folder.length+1):null})}});
+  const incidents=settled[4]?.status==='fulfilled'?settled[4].value:null;
+  for(const notice of incidents?.items||[])found.push({kind:'Incident',label:notice.code.replaceAll('_',' ')+' · '+notice.scopeId,execute:()=>{overlay.remove();void openIncident(notice)}});
   for(const op of operations?.items||[])found.push({kind:'Operation',label:op.operationId,execute:()=>{state.queue.query=op.operationId;state.queue.filter='All';overlay.remove();routeTo('work-queue')}});
   if(!found.length){list.append(el('p','pcms-unknown',inv||acc?'No matching local records.':'Local search unavailable.'));return}
   for(const f of found.slice(0,12)){const row=el('div','queue-item');const strong=el('strong','',f.label);const kind=el('span','muted small',f.kind);row.append(strong,kind,b('Open',f.execute));list.append(row)}
@@ -841,7 +844,7 @@ function displayQueue(){
     CANONICAL_UNAVAILABLE:'Local records unavailable',
     OPERATION_UNCERTAIN:'Operation outcome uncertain',
     PROVIDER_OUTAGE:'Provider connection interrupted',
-    BACKUP_FAILED:'Encrypted backup needs attention'
+    BACKUP_FAILED:'Backup needs attention'
    }[n.code]||'An operational issue needs review';
    header.append(el('strong','',issueTitle),
      statusPill(n.reviewed?'Reviewed — still active':'Needs attention','amber'));
@@ -851,13 +854,14 @@ function displayQueue(){
    action.type='button';
    action.addEventListener('click',async()=>{action.disabled=true;
     try{
-     const out=await readQueueNoticeAck(n);
+     const out=await acknowledgeIncident(n,async(type,params)=>type==='ACK_NOTICE'?readQueueNoticeAck({...n,scopeId:params.scopeId,code:params.code,revision:params.expectedRevision}):guardedRead('pcms-i02-canonical-readonly',type,params));
      if(out?.ok&&out.stillActionable===true)await loadQueue(true);
      else notify('Review not confirmed. Incident remains active.');
     }catch{notify('Review not confirmed. Incident remains active.');}
     finally{action.disabled=n.reviewed;}
-   },{once:true});
-   action.disabled=n.reviewed;row.append(marker,detail,action);holder.append(row);
+   });
+   const recovery=b('Open affected item',()=>void openIncident(n),'btn small');
+   action.disabled=n.reviewed;row.append(marker,detail,recovery,action);holder.append(row);
   }
   for(const op of q.operations){
    const row=el('div','queue-item');const info=queueState[op.status]||['Not verified',''];
@@ -1199,6 +1203,23 @@ function openOperationRecord(op){
  overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
  header.querySelector('button')?.focus();
 }
+async function openIncident(n){
+ const target=incidentDestination(n);
+ if(target.kind==='SETTINGS'){
+  if(target.id==='refresher'){routeTo('refresher');return}
+  state.settings=target.id;routeTo('settings');return;
+ }
+ if(target.kind==='ACCOUNT'){
+  const response=await accounts(),account=response?.accounts?.find(a=>a.accountId===target.id);
+  if(account){openAccountManager(account);return}
+  state.acct.query=target.id;routeTo('accounts');notify('The affected account could not be read. Retry its account details.');return;
+ }
+ if(target.kind==='GENERATOR'){
+  if(n.code==='GIT_FOLDER_RENAME_REVIEW'){state.queue.query=target.id;state.queue.filter='All';routeTo('work-queue');return}
+  openSourceManager({slug:target.id});return;
+ }
+ state.queue.query=target.id;state.queue.filter='All';routeTo('work-queue');
+}
 function readQueueNoticeAck(n){
  return new Promise((resolve,reject)=>{
   const port=browser.runtime.connect({name:'pcms-i02-canonical-readonly'});
@@ -1214,7 +1235,7 @@ function readQueueNoticeAck(n){
 function displayOverview(){if(state.route!=='overview')return;
  const epoch=state.renderEpoch;
  const cards=[...page().querySelectorAll('.stat-grid .stat-card')];
- for(const [i,label] of ['Managed generators','Refresher','Work requiring attention','Last verified backup'].entries())
+ for(const [i,label] of ['Managed generators','Refresher','Work requiring attention','Last completed backup'].entries())
   cards[i]?.querySelector('.stat-label')?.replaceChildren(document.createTextNode(label));
  function stat(index,value,note){
   const card=cards[index];if(!card)return;
@@ -1233,7 +1254,8 @@ function displayOverview(){if(state.route!=='overview')return;
   guardedRead('pcms-i02-canonical-readonly','NOTICE_SUMMARY'),
   guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{limit:8,status:'NEEDS_ACTION'}),
   guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_PAGE',{limit:8}),
-  guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{limit:8,status:'RUNNING'})
+  guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{limit:8,status:'RUNNING'}),
+  portableBackupCommand({action:'STATUS'})
  ]).then(results=>{
   if(!still())return;
   const val=i=>results[i].status==='fulfilled'&&results[i].value?.ok?results[i].value:null;
@@ -1259,7 +1281,7 @@ function displayOverview(){if(state.route!=='overview')return;
       (x.effectType||'Recorded operation').replaceAll('_',' ')),
       el('div','row-meta',x.severity?'Still requires review':
         'Target '+x.targetId+' · '+(queueState[x.status]?.[0]||'Unknown status')));
-    row.append(body,b('Open Work Queue',()=>routeTo('work-queue')));panel.append(row);
+    row.append(body,b(x.severity?'Open affected item':'Inspect operation',()=>x.severity?void openIncident(x):openOperationRecord(x)));panel.append(row);
    }
   };
   listRows(0,[...(inc?.items||[]),...(ops?.items||[])].slice(0,8));
@@ -1268,7 +1290,10 @@ function displayOverview(){if(state.route!=='overview')return;
    if(holder){holder.replaceChildren();renderEmpty(holder,'No independent local proof has been loaded for this section.')}}
   // A native host or downloaded archive being present does not establish
   // an independently verified and recoverable backup.
-  stat(3,'—','Independent backup/restore evidence not loaded');
+  const backup=val(7),good=backup?.lastSuccess;
+  stat(3,good?new Date(good.completedAt||good.day*86400000).toLocaleDateString():'—',
+    good?'Firefox completed '+(good.kind==='MANUAL'?'manual':'daily')+' backup'+(backup.manual?.status==='FAILED'?' · latest manual attempt failed':''):
+    backup?'No completed backup recorded':'Backup status unavailable');
   state.queue.summary=summary?.ok?{...summary,attention:noticeTotals}:null;updateNav();
  });
 }

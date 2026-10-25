@@ -963,6 +963,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
     const result=await stateManager.commitPreview(preview.previewId);
     return {ok:true,revision:result.revision};
   }),
+  restoreHistory:async jobs=>replaceJobsTrusted(jobs),
   importCookies:async (id,rows)=>localMutationFence(id,()=>cookieService.importRecords(id,rows,'merge'))
 });
 \nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {`,
@@ -1031,7 +1032,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
     'git-credential.mjs','diagnostic-ready-git.mjs','git-writeback.mjs','writeback-store.mjs','writeback-boundary.mjs',
     'update-window.mjs','release-core.mjs','release-store.mjs','release-boundary.mjs','source-review.mjs','perchance-release.mjs',
     'existing-update-core.mjs','existing-update-store.mjs','existing-update-boundary.mjs','perchance-existing.mjs',
-    'backup-auto-donor.mjs','backup-donor-port.mjs','restore-donor.mjs','restore-v2-candidate.mjs','restore-boundary.mjs','work-checkpoint.mjs','restore-reconcile.mjs','backup-auto-core.mjs','backup-auto-store.mjs','backup-auto-download.mjs',
+    'backup-auto-donor.mjs','backup-donor-port.mjs','restore-donor.mjs','restore-v2-candidate.mjs','restore-boundary.mjs','restore-observation.mjs','work-checkpoint.mjs','restore-reconcile.mjs','backup-auto-core.mjs','backup-auto-store.mjs','backup-auto-download.mjs',
     'backup-auto-retention.mjs','backup-auto-export.mjs','portable-archive.mjs','portable-local.mjs','portable-cut.mjs','portable-runner.mjs','portable-originals.mjs','portable-restore-stage.mjs','portable-restore-plan.mjs','source-cut-retry.mjs','backup-v2-verify.mjs','backup-auto-run.mjs','backup-auto-boundary.mjs',
     'refresher-native.mjs','refresher-qualified-clock.mjs','refresher-browser-clock.mjs','refresher-adopted.mjs','refresher-admission.mjs','refresher-effect-core.mjs','refresher-core.mjs','refresher-store.mjs','refresher-boundary.mjs','perchance-monitor.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));

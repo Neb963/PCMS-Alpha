@@ -1,3 +1,4 @@
+import {validIncidentTarget} from './incident-target.mjs';
 // PCMS canonical journal. Only short IndexedDB transactions own state.
 // This module neither imports nor invokes the donor, a provider, or a browser mutator.
 export const DB_NAME = 'pcms-alpha-canonical';
@@ -250,11 +251,11 @@ export function createCanonicalStore(db) {
   const causeOk = c => typeof c === 'string' && /^[A-Za-z0-9_:.-]{3,120}$/.test(c);
   const active = n => n && n.state !== 'RESOLVED';
   const pushHistory = (n, entry) => [...(Array.isArray(n?.history) ? n.history : []), entry].slice(-20);
-  function recordNotice({ scopeId, code, severity, revision, cause, at = Date.now() }) {
+  function recordNotice({ scopeId, code, severity, revision, cause, target, at = Date.now() }) {
     if (!isSafeId(scopeId) || !NOTICE_CODES.has(code) ||
         !['SERIOUS','ACTION_REQUIRED','INFORMATIONAL'].includes(severity) ||
         !Number.isSafeInteger(revision) || revision < 1 ||
-        (cause !== undefined && !causeOk(cause)) || !Number.isSafeInteger(at))
+        (cause !== undefined && !causeOk(cause)) || (target!==undefined&&!validIncidentTarget(target)) || !Number.isSafeInteger(at))
       return Promise.resolve(fail('INVALID_NOTICE'));
     const key = 'attention:' + scopeId + ':' + code, causeKey = cause || code;
     return transact(db, ['meta'], 'readwrite', (tx, finish) => {
@@ -285,6 +286,7 @@ export function createCanonicalStore(db) {
               (Array.isArray(prior.history) ? prior.history : []) };
           changed = escalated;
         }
+        if(target)next.target={kind:target.kind,id:target.id};
         meta.put(next);
         if (!changed) { finish(ok({ changed:false, notify:false, reviewed:next.reviewed, event:event2 })); return; }
         // One desktop notification per cause per window: a provider outage
@@ -374,7 +376,7 @@ export function createCanonicalStore(db) {
           if (active(n) || includeResolved) {
             if (notices.length>=limit) truncated=true;
             else notices.push({scopeId:n.scopeId,code:n.code,cause:n.cause||n.code,
-              severity:n.severity,revision:n.revision,
+              severity:n.severity,revision:n.revision,...(validIncidentTarget(n.target)?{target:n.target}:{}),
               reviewed:n.reviewed===true||n.ignored===true,state:active(n)?'ACTIVE':'RESOLVED',
               count:Number.isSafeInteger(n.count)?n.count:1,
               firstAt:n.firstAt??null,lastAt:n.lastAt??null,resolvedAt:n.resolvedAt??null});
@@ -400,11 +402,11 @@ export function createCanonicalStore(db) {
         const key=String(row.key);
         if(!key.startsWith('attention:')){finish(ok({items,more:false,next:null}));return;}
         const n=row.value;
-        if(n?.state==='RESOLVED'||(query&&!([n?.scopeId,n?.code,n?.cause].join(' ').toLowerCase().includes(query.toLowerCase())))){
+        if(n?.state==='RESOLVED'||(query&&!([key,n?.scopeId,n?.code,n?.cause,n?.target?.id].join(' ').toLowerCase().includes(query.toLowerCase())))){
           row.continue();return;}
         if(items.length>=limit){more=true;finish(ok({items,more,next:items.at(-1)?.cursor||null}));return;}
         if(n?.scopeId&&n?.code)items.push({cursor:key,scopeId:n.scopeId,code:n.code,
-          cause:n.cause||n.code,severity:n.severity,revision:n.revision,
+          cause:n.cause||n.code,severity:n.severity,revision:n.revision,...(validIncidentTarget(n.target)?{target:n.target}:{}),
           reviewed:n.reviewed===true||n.ignored===true,firstAt:n.firstAt??null,
           lastAt:n.lastAt??null});
         row.continue();

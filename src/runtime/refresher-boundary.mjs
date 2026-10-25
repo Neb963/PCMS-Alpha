@@ -120,7 +120,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       try{
         if(change.code==='ACCOUNT_GRACE_EXPIRED')await d.emit({scopeId:change.scopeId,
           code:'ROUTE_UNAVAILABLE',severity:'ACTION_REQUIRED',revision:result.revision,
-          cause:'ACCOUNT_ROUTE_UNAVAILABLE'});
+          cause:'ACCOUNT_ROUTE_UNAVAILABLE',target:{kind:'ACCOUNT',id:change.scopeId}});
         else if(change.code==='ACCOUNT_ROUTE_RECOVERED')await d.resolve({scopeId:change.scopeId,
           code:'ROUTE_UNAVAILABLE',evidence:'ROUTE_HEALTH_OBSERVED'});
         else if(change.code==='PROVIDER_OUTAGE')await d.emit({scopeId:change.scopeId,
