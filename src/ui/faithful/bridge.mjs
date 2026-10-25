@@ -780,7 +780,7 @@ function displayQueue(){
         candidate.state==='EXCEPTION_READY_FOR_REVIEW'?
         'Exceptional candidate — manual evidence and incomplete tests require individual review.':
         ({IN_DEVELOPMENT:'Development and independent tests continue automatically.',DEVELOPMENT_RUNNING:'The helper is working on this candidate.',WAITING_FOR_GIT:'Saving verified source to GitHub.',APPROVED:'Approved. Publication continues automatically.',APPROVED_HELD:'Approval is saved. Inspect the current hold or cancel unsent publication.',CONFIRMED_PUBLIC:'Published source was independently confirmed.',HUMAN_DEFERRED:'Your editor is preserved. Adopt its saved source when ready.',CHANGES_REQUESTED:'Your instructions are saved. Development will resume automatically.',PUBLICATION_UNCERTAIN:'Checking a possible publication without sending it again.'})[candidate.state]||'Inspect this candidate to resolve its current hold.'));
-    const action=b('Inspect candidate',()=>void openReleaseReview(candidate.slug),'btn small'),manage=b('Manage development',()=>candidate.development?void openAiJob(candidate.slug):openReadyCandidate(candidate.readyCandidate),'btn small');
+    const action=b('Inspect candidate',()=>void openReleaseReview(candidate.slug),'btn small'),manage=b(candidate.readyCandidate?.restoredHistorical?'Recover restored source':'Manage development',()=>candidate.readyCandidate?.restoredHistorical?openReadyCandidate(candidate.readyCandidate):candidate.development?void openAiJob(candidate.slug):openReadyCandidate(candidate.readyCandidate),'btn small');
     row.classList.add('candidate-item');const actions=el('div','candidate-actions');actions.append(action,manage);
     if(candidate.providerVisibility==='PUBLIC'&&candidate.state!=='CONFIRMED_PUBLIC')actions.append(b('Update now',()=>openReadyCandidate({...candidate.readyCandidate,updateNowAvailable:true})));
     row.append(cleanPublication.checkbox(candidate.slug),detail,actions);holder.append(row);
@@ -858,7 +858,7 @@ function displayQueue(){
     try{
      const out=await acknowledgeIncident(n,async(type,params)=>type==='ACK_NOTICE'?readQueueNoticeAck({...n,scopeId:params.scopeId,code:params.code,revision:params.expectedRevision}):guardedRead('pcms-i02-canonical-readonly',type,params));
      if(out?.ok&&out.stillActionable===true)await loadQueue(true);
-     else notify('Review not confirmed. Incident remains active.');
+     else{notify('Review not confirmed. Incident remains active.');if(out?.code==='STALE_REVISION')await loadQueue(true);}
     }catch{notify('Review not confirmed. Incident remains active.');}
     finally{action.disabled=n.reviewed;}
    });
@@ -1063,7 +1063,7 @@ function openReadyCandidate(candidate){
  }
  const actions=el('div','form-foot');
  async function act(type){
-  if(type!=='ASSESS_READY'&&!window.confirm(
+  if(!['ASSESS_READY','REQUALIFY_RESTORED'].includes(type)&&!window.confirm(
    type==='UPDATE_NOW'?'Update this public generator now, before its normal maintenance window? PCMS will preserve its previous source, wait for safe capacity, unlist it before editing, and require your approval before publishing.':
    type==='PREPARE_LOCAL'?
     'Prepare a local, revision-bound READY stage after verifying source, protected owner, route and current editor? This does not publish or save the remote generator.':
@@ -1082,6 +1082,7 @@ function openReadyCandidate(candidate){
     UPDATE_NOW_SAFE_PUBLIC_BASELINE_REQUIRED:'The public source or a current operation needs verification before this update can start.',
     S05_PUBLIC_SLEEP_AND_UNLIST_REQUIRED:'This public generator must first complete its protected sleep/unlisting workflow.',
     S05_NONEMPTY_TARGET_REQUIRES_RECOVERABLE_PREDECESSOR:'A recoverable previous source is required before this update.',
+    RESTORED_SOURCE_REQUALIFIED:'Restored source is verified under this account. Old tests and approvals remain historical; guarded work can continue.',
     S05_LOCAL_STAGE_PINNED:'A new exact local development stage is prepared. AI execution is separate.',
     S05_EDITOR_AND_NATIVE_ADMISSION_REQUIRED:'The editor and native AI prerequisites require separate verification.',
     READY_OPERATOR_PAUSED:'This generator is paused.',
@@ -1093,12 +1094,14 @@ function openReadyCandidate(candidate){
       'This operation cannot proceed until the current owner, source and protected editor are verified.');
   }catch{status.textContent='Outcome unavailable. Refresh the READY candidate before another action.'}
   await loadQueue(true);
+  [...actions.querySelectorAll('button')].forEach(x=>x.disabled=false);
  }
  const assess=b('Assess prerequisites',()=>void act('ASSESS_READY'),'btn small');
 
  const pause=b(candidate.hold==='OPERATOR_PAUSED'?'Resume READY work':'Pause READY work',
   ()=>void act(candidate.hold==='OPERATOR_PAUSED'?'RESUME_READY':'PAUSE_READY'),'btn small');
  if(candidate.updateNowAvailable)actions.append(b('Update now',()=>void act('UPDATE_NOW'),'btn primary'));
+ if(candidate.restoredHistorical)actions.append(b('Recheck restored source',()=>void act('REQUALIFY_RESTORED'),'btn primary'));
  actions.append(pause,assess);body.append(facts,status,actions);panel.append(head,body);
  overlay.append(panel);root.append(overlay);
  overlay.addEventListener('click',e=>{if(e.target===overlay)close()});

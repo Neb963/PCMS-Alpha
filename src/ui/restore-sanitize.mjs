@@ -32,17 +32,24 @@ function inertMeta(key,row,remap,existing=null){
     g.ownerObservationId=null;g.principalFingerprint=null;
     g.reviewHeld=true;g.identityHeld=true;
   }
+  if(typeof key==='string'&&key.startsWith('stage:')&&data.record)data.record.restoredHistorical=true;
+  if(typeof key==='string'&&key.startsWith('s05-ready:')&&data.record)data.record.restoredHistorical=true;
   if(typeof key==='string'&&key.startsWith('release:')&&data.release){
+    if(data.release.state!=='RESTORE_REVIEW_REQUIRED'||!data.release.restoredEffects?.length)data.release.restoredEffects=[...(data.release.restoredEffects||[]),{state:data.release.state,dispatchPossible:data.release.dispatchPossible===true,source:data.release.source||null,sourceFingerprint:data.release.approval?.sourceFingerprint||null}];
     data.release={...data.release,
       state:'RESTORE_REVIEW_REQUIRED',dispatchPossible:false,
       approval:null,reason:'RESTORED_APPROVAL_IS_HISTORY'};
   }
   if(typeof key==='string'&&key.startsWith('ai-job:')&&data.job){
+    if(!data.job.restoredOriginal){const raw=structuredClone(data.job);delete raw.restoredOriginal;data.job.restoredOriginal=raw;}
+    data.job.restoredEffects=[...(data.job.restoredEffects||[]),{state:data.job.state,native:data.job.native?.state||null}];
     data.job={...data.job,state:'TESTS_UNVERIFIED',
       hold:'RESTORED_TESTS_NEED_NEW_OBSERVATION',executionSlotReleased:true};
   }
   if(typeof key==='string'&&key.startsWith('writeback:')&&data.record){
-    data.record={...data.record,state:'RESTORE_REVIEW_REQUIRED'};
+    data.record={...data.record,restoredHistorical:true,
+      restoredEffects:data.record.state==='RESTORE_REVIEW_REQUIRED'&&data.record.restoredEffects?.length?data.record.restoredEffects:[...(data.record.restoredEffects||[]),{state:data.record.state}],
+      state:data.record.state==='CONFIRMED'?'CONFIRMED':'RESTORE_REVIEW_REQUIRED'};
   }
   if(key==='writeback-settings'&&data.setting){
     data.setting={...data.setting,autoEnabled:false};

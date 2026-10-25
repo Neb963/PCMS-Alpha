@@ -14,7 +14,7 @@ export function operatorUpdateWindow(row,ready,owner,fingerprint=null){
 // existing source/recovery hold. This receipt never admits another UNLIST.
 export function admittedUpdateWindow(row,record,owner,fingerprint){
  const a=record?.windowAdmission;
- return !!(a?.version===1&&a.mode==='OPERATOR_EARLY_UPDATE'&&record.state!=='PREPARED'&&
+ return !!(a?.version===1&&(a.mode==='OPERATOR_EARLY_UPDATE'||a.mode==='RESTORED_OBSERVED_UNLISTED'&&record.source==='RESTORED_CURRENT_OWNER_FULL_SOURCE_READBACK'&&typeof record.restoredParentOperation==='string'&&['UNLIST_CONFIRMED','STAGE_CONFIRMED'].includes(record.state))&&record.state!=='PREPARED'&&
   a.nonce===record.nonce&&a.previousFingerprint===record.previousFingerprint&&
   a.accountId===record.accountId&&a.personaUid===record.personaUid&&a.bindingVersion===record.bindingVersion&&a.remotePublicId===record.remotePublicId&&a.principalFingerprint===record.principalFingerprint&&
   row?.accountId===a.accountId&&row.personaUid===a.personaUid&&row.bindingVersion===a.bindingVersion&&row.remoteId===a.remotePublicId&&

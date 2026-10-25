@@ -25,7 +25,7 @@ const link={slug,folder:'generators/'+slug,accountId,personaUid,
  bindingVersion:1,remoteId:rid};
 const inventory={slug,remoteId:rid,accountId,personaUid,
  bindingVersion:1,ownerState:'OBSERVED_OWNER'};
-const runner=async ({dirty=false,sourceChanged=false}={})=>{
+const runner=async ({dirty=false,sourceChanged=false,restored=false}={})=>{
  const db=fakeDatabase();
  const previous=await exactSource(files('safe old source'));
  const candidate=await exactSource(files('source v2'));
@@ -42,7 +42,8 @@ const runner=async ({dirty=false,sourceChanged=false}={})=>{
  const g={getSafeRouteReadiness:async()=>({ready:true,
    routeId:'protected-route',cookieStoreId:'container-01'}),
   runExistingStep:async()=>{throw Error('no provider operation expected');},
-  inspectStageEditor:async()=>dirty?{ok:false,code:'EDITOR_DIRTY'}:
+  inspectSourceEditorIdle:async()=>dirty?{ok:false,code:'EDITOR_DIRTY'}:{ok:true,clean:true,source:'GUARDED_NO_LOCAL_EDITOR'},
+  inspectStageEditor:async()=>restored?{ok:false,code:'NO_OLD_EDITOR'}:dirty?{ok:false,code:'EDITOR_DIRTY'}:
    {ok:true,clean:true,source:'GUARDED_EDITOR_CLEAN'},
   observeReadOnly:async()=>({ok:true,principalFingerprint:hash,
    original:{remotePublicId:rid,ownerResult:'IS_OWNER',visibility:'UNLISTED',
@@ -61,6 +62,11 @@ const runner=async ({dirty=false,sourceChanged=false}={})=>{
    ])m.put(row);
  });
  const ready=createReadyStore(db);
+ if(restored){
+  const old={...witness,identifier:'rev-old0000001'};await ready.observe(old);
+  await ready.handoff(slug,1,{source:'TRUSTED_S05_ADMISSION_BOUNDARY',accountOwnerVerified:true,protectedRouteReady:true,completeRecoverableBaseline:true,humanEditorClean:true,noUncertainWriter:true,writerIdle:true,nativeIdle:true,providerEffectResolved:true,approvalEffectResolved:true});
+  const tx=db.transaction('meta','readwrite');tx.objectStore('meta').put({key:'stage:'+slug,record:{slug,revision:2,state:'PINNED',restoredHistorical:false,restoredParent:{revision:1},nonce,accountId,accountRevision:account.revision,personaUid,bindingVersion:1,principalFingerprint:hash,remotePublicId:rid,previous,candidate,readyIdentifier:old.identifier,readyInputFingerprint:hash}});await new Promise(r=>{tx.oncomplete=r});record.stagedFingerprint=candidate.fingerprint;
+ }
  await ready.observe(witness);
  const seen={effects:0};
  const boundary=createExistingBoundary(api,{
@@ -108,4 +114,13 @@ test('S05 I13 refuses dirty editor or external source drift before READY admissi
   assert.equal(x.db.read('meta','stage:'+slug),undefined);
   assert.equal(x.seen.effects,0);
  }
+});
+
+test('J06 a restored never-dispatched update admits a newer READY through ordinary PIN_STAGE without an old editor or native effect',async()=>{
+ const {planReadyDevelopment}=await import('../src/runtime/ready-development.mjs');
+ const x=await runner({restored:true});assert.equal(x.result.ok,true,JSON.stringify(x.result));
+ const stage=x.db.read('meta','stage:'+slug).record;assert.equal(stage.revision,3);assert.equal(stage.readyIdentifier,witness.identifier);assert.equal(stage.previous.fingerprint,x.previous.fingerprint);assert.equal(x.seen.effects,0);
+ const desired={ok:true,record:{active:{identifier:'rev-old0000001'},desired:{identifier:witness.identifier}}};
+ assert.equal(planReadyDevelopment({ready:desired,stage:{ok:true,record:{...stage,revision:2,state:'PINNED',restoredHistorical:false,restoredParent:{revision:1},readyIdentifier:'rev-old0000001'}},existing:{ok:true,record:x.record},visibility:'UNLISTED'}).type,'PIN_STAGE');
+ const held=await runner({restored:true,dirty:true});assert.equal(held.result.ok,false);assert.equal(held.db.read('meta','stage:'+slug).record.revision,2);assert.equal(held.seen.effects,0);
 });

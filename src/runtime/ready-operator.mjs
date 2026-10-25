@@ -1,3 +1,5 @@
+import {unlockPrevious} from './existing-update-core.mjs';
+import {planRestoredSource,commitRestoredSource} from './restored-source.mjs';
 import {checkpointed} from './work-checkpoint.mjs';
 import {requestOperatorUpdate} from './update-window.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
@@ -28,7 +30,7 @@ const b64=text=>{
 };
 export function validateReadyOperator(api,sender,packet){
  if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
- if(!['ASSESS_READY','PREPARE_LOCAL','PAUSE_READY','RESUME_READY','UPDATE_NOW'].includes(packet?.type)||!packet.params||
+ if(!['ASSESS_READY','REQUALIFY_RESTORED','PREPARE_LOCAL','PAUSE_READY','RESUME_READY','UPDATE_NOW'].includes(packet?.type)||!packet.params||
     typeof packet.params!=='object'||Array.isArray(packet.params)||
     Object.keys(packet).some(k=>!['type','params'].includes(k))||
     Object.keys(packet.params).some(k=>!['slug','expectedRevision'].includes(k))||
@@ -137,7 +139,7 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
      writeback:confirmed,job,exception});
    const coherent=await inspect({repository:cfg.repository,
      token:secret.credential,pinnedHead:tree.head,
-     slug:name,includeSourceBytes:message.type==='PREPARE_LOCAL',
+     slug:name,includeSourceBytes:['PREPARE_LOCAL','REQUALIFY_RESTORED'].includes(message.type),
      ...(output.ok?{outputProof:output.outputProof}:{})});
    const id=coherent?.legacy?
       'legacy-'+coherent.declarationCommit+'-'+coherent.markerOid:
@@ -180,6 +182,22 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
     return fail('S05_CONTEXT_CHANGED_DURING_READBACK');
    if(inventory.visibility!==origin.visibility){
     await recordObservedListing(db,account,inventory,origin.visibility);return fail('S05_LISTING_OBSERVATION_REFRESHED');
+   }
+   if(message.type==='REQUALIFY_RESTORED'){
+     const compiled=await stageReadyGitSource({catalog:tree,coherent,ready:{active:expected,desired:null},slug:name,repositoryId:cfg.repositoryId});
+     if(!compiled.ok)return compiled;
+     const shadow=await new Promise((resolve,reject)=>{const q=db.transaction('meta','readonly').objectStore('meta').get('refresher:shadow:v1');q.onsuccess=()=>resolve(q.result?.state||null);q.onerror=()=>reject(Error('RESTORED_REFRESHER_READ_FAILED'))});
+     const planned=planRestoredSource({stage,job:ai,release,existing,writeback:confirmed?.ok?confirmed.record:null,
+       account,inventory,adoption,shadow,ready:r,baseline,gitCandidate:compiled.candidate,outputAttested:coherent.outputAttested===true,
+       previousCheckpoint:existing&&['STAGE_CONFIRMED','UNLIST_CONFIRMED'].includes(existing.state)?await unlockPrevious(existing.recovery):null,
+       nonce:crypto.randomUUID().replaceAll('-',''),at:Date.now()});
+     if(!planned.ok)return planned;
+     const editor=await g.inspectSourceEditorIdle?.(account.personaUid,name);
+     if(!editor?.ok||editor.clean!==true||editor.source!=='GUARDED_NO_LOCAL_EDITOR')return fail('RESTORED_EDITOR_NOT_IDLE');
+     const last=await g.getSafeRouteReadiness(account.personaUid);
+     if(!last?.ready||last.cookieStoreId!==before.cookieStoreId||last.routeId!==before.routeId||(await sentinel.inspect()).held)
+       return fail('RESTORED_SOURCE_ROUTE_CHANGED');
+     return commitRestoredSource(db,{stage,job:ai,release,existing,writeback:confirmed?.ok?confirmed.record:null,account,inventory,adoption,shadow,ready:r},planned);
    }
    const pending=existing&&['UNLIST_DISPATCH_POSSIBLE','UNLIST_UNCERTAIN',
      'STAGE_DISPATCH_POSSIBLE','STAGE_UNCERTAIN',
@@ -336,7 +354,7 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
  }
    run=checkpointed(api,run);
   return Object.freeze({run,runTrusted:async message=>{
-   if(!['ASSESS_READY','PREPARE_LOCAL','PAUSE_READY','RESUME_READY','UPDATE_NOW'].includes(message?.type))
+   if(!['ASSESS_READY','REQUALIFY_RESTORED','PREPARE_LOCAL','PAUSE_READY','RESUME_READY','UPDATE_NOW'].includes(message?.type))
      return fail('INVALID_INTERNAL_READY_ACTION');
    return run(message,{id:api.runtime.id,url:api.runtime.getURL('pcms/index.html')});
  },register});

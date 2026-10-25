@@ -86,13 +86,28 @@ t.oncomplete=ok;t.onabort=bad;});db.close();
 await browser.storage.local.set({pcmsR4MissingGitFolders:{repositoryId:'1234',slugs:['j06-missing']}});
 return {ok:true,fingerprint:original.fingerprint};
 """.replace('UID',json.dumps(made['personaUid'])).replace('BINDING',json.dumps(binding)).replace('CONTEXT',json.dumps(made['containerId']))
+        ordinary_delete=b._options(s,uuid,"""
+const id=CONTEXT,before=await send({type:'GET_SNAPSHOT'});let reply;
+try{reply=await send({type:'DELETE_PERSONA',profileId:id})}catch(e){reply={error:String(e)}}
+const after=await send({type:'GET_SNAPSHOT'}),containers=await browser.contextualIdentities.query({});
+return {reply,unchanged:JSON.stringify(before.state.profiles[id])===JSON.stringify(after.state.profiles[id]),containerPresent:containers.some(c=>c.cookieStoreId===id)};
+""".replace('CONTEXT',json.dumps(made['containerId'])))
+        assert ordinary_delete['unchanged'] and ordinary_delete['containerPresent'] and not ordinary_delete['reply'].get('removed'),ordinary_delete
+        b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s)
         original=g.oracle(s,seed_code);assert original.get('ok'),original
+        source_fixture=pathlib.Path(__file__).with_name('fixtures').joinpath('j06-restored-source.mjs').read_text().replace('export async function','async function')
+        seeded_source=g.oracle(s,source_fixture+';return await seedRestoredSourceFixture();');assert seeded_source.get('ok'),seeded_source
         donor_sources=b._options(s,uuid,"""
 const snap=await send({type:'GET_SNAPSHOT'}),state=structuredClone(snap.state);
 const {normalizeScript,normalizeWorkflow}=await import('../lib/storage.js');
 state.scripts.j06_source=normalizeScript({id:'j06_source',name:'J06 exact source',code:'// Exact donor source é\\n',enabled:false,autoRun:false,profileIds:[CONTEXT]},'j06_source');
 state.workflows.j06_flow=normalizeWorkflow({id:'j06_flow',name:'J06 source workflow',enabled:false,steps:[{type:'script',profileId:CONTEXT,scriptIds:['j06_source']}]},'j06_flow');
-const preview=await send({type:'PREVIEW_STATE_CHANGE',state});await send({type:'AUTHORIZE_SECURITY_PREVIEW',previewId:preview.previewId,approvedDelta:preview.delta});await send({type:'COMMIT_STATE_PREVIEW',authorizationId:preview.previewId});
+const preview=await send({type:'PREVIEW_STATE_CHANGE',state});
+if(!preview?.previewId)return {error:'PREVIEW_NOT_OBSERVED',preview};
+const approval=await send({type:'AUTHORIZE_SECURITY_PREVIEW',previewId:preview.previewId,approvedDelta:preview.delta});
+const committed=await send({type:'COMMIT_STATE_PREVIEW',authorizationId:preview.previewId});
+const after=await send({type:'GET_SNAPSHOT'});
+if(!after?.state?.scripts?.j06_source||!after?.state?.workflows?.j06_flow)return {error:'SOURCE_COMMIT_NOT_OBSERVED',approval,committed,preview};
 return {ok:true};
 """.replace('CONTEXT',json.dumps(made['containerId'])))
         assert donor_sources.get('ok'),donor_sources
@@ -128,7 +143,7 @@ return {ok:true};
         assert binding not in exits['bindings'] and exits['restoredBindingHistory'][binding]['destinationRetired'] is True
         assert after['state']['scripts']['j06_source']==scripts_before['j06_source']
         assert after['state']['workflows']['j06_flow']==workflows_before['j06_flow']
-        assert len(after['state']['scripts'])==2 and len(after['state']['workflows'])==2
+        assert len(after['state']['scripts'])==2*len(scripts_before) and len(after['state']['workflows'])==2*len(workflows_before),{'scripts':after['state']['scripts'],'workflows':after['state']['workflows']}
         imported_script=next(v for k,v in after['state']['scripts'].items() if k!='j06_source')
         assert imported_script['code']==scripts_before['j06_source']['code'] and imported_script['enabled'] is False
         backup.capture(s,'populated-restore-held',evidence)
@@ -145,6 +160,21 @@ return {ok:true};
         assert retry.get('code') not in ['BINDING_PERSONA_CONFLICT','EXIT_LEDGER_MISSING','ACCOUNT_HAS_OTHER_BINDING','PERSONA_TAG_UNCONFIRMED','UNTRUSTED_SENDER'],retry
         final=next(r['account'] for r in rows(s) if r.get('key')=='account:account_j06_restore');profile_after=snapshot(s)['state']['profiles'][target['containerId']]
         assert final['bindingId']==profile_after['pcmsBindingId'] and final['personaUid']==profile_after['personaUid']
+        installed_source=g.oracle(s,source_fixture+';return await installRestoredSourceFixture();');assert installed_source.get('ok'),installed_source
+        g.click(s,'[data-nav=work-queue]')
+        backup.wait(s,"[...sh.querySelectorAll('button')].some(x=>x.textContent==='Recover restored source')",'J06_RESTORED_READY_PRIMARY_ACTION')
+        g.click_text(s,'Recover restored source');g.click_text(s,'Recheck restored source')
+        backup.wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('Restored source is verified')",'J06_CURRENT_SOURCE_REQUALIFICATION_REAL_UI')
+        qualified=g.oracle(s,'return await window.__j06source.inspect()');assert qualified['stage']['personaUid']==final['personaUid'] and qualified['stage']['nonce']!='1'*32 and not qualified.get('job') and not qualified.get('release'),qualified
+        prepared=g.oracle(s,'return await window.__j06source.prepare()');assert prepared.get('ok'),prepared
+        qualified=g.oracle(s,'return await window.__j06source.inspect()');assert qualified['job']['state']=='PENDING_NATIVE_SESSION' and qualified['job'].get('verifiedFinal') is None,qualified
+        assert any(e['kind']=='ACTUAL_OWNED_TAB_CREATED' for e in qualified['events']),qualified
+        evidence['restored-source-requalification']=qualified
+        backup.capture(s,'restored-source-new-untested-job',evidence)
+        g.oracle(s,'await window.__j06source.close();return {ok:true}')
+        g.click(s,'[role=dialog] .drawer-head button')
+        g.click(s,'[data-nav=settings]');g.click(s,'[data-settings=backups]')
+        final=next(r['account'] for r in rows(s) if r.get('key')=='account:account_j06_restore')
         archived=port(s,'pcms-i03-accounts',{'type':'ARCHIVE','params':{'accountId':'account_j06_restore','expectedRevision':final['revision']}})
         assert archived.get('ok'),archived
         local_archived=next(r['account'] for r in rows(s) if r.get('key')=='account:account_j06_restore')

@@ -545,7 +545,12 @@ export function createAiBoundary(api,{
          !g?.observeReadOnly)return fail('DONOR_GUARD_UNAVAILABLE');
       const before=await g.getSafeRouteReadiness(r.personaUid);
       if(!before?.ready)return fail(before?.code||'PROTECTED_ROUTE_UNVERIFIED');
-      const editor=await g.inspectStageEditor(r.personaUid,r.slug,r.nonce);
+      let editor=await g.inspectStageEditor(r.personaUid,r.slug,r.nonce);
+      if(!editor?.ok&&r.restoredParent&&!r.tab){
+        const prepared=await g.prepareRestoredEditor?.(r.personaUid,r.slug,r.nonce);
+        if(!prepared?.ok)return fail(prepared?.code||'RESTORED_EDITOR_PREPARATION_REQUIRED');
+        editor=await g.inspectStageEditor(r.personaUid,r.slug,r.nonce);
+      }
       if(editor?.ok!==true||editor.clean!==true)return fail('EDITOR_UNKNOWN');
       let fresh,promptOverride=null;
       if(r.readyIdentifier){

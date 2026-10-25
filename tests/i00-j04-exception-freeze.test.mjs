@@ -91,3 +91,17 @@ test('J04 requested exceptional child and prepared successor retain historical G
  const parent=f.db.read('meta','ai-history:'+slug+':'+j.revision);parent.job.chat1.tests.smoke={result:'FAIL',sourceFingerprint:f.source.fingerprint};await put(f.db,parent);
  assert.equal((await resolveS06OutputProof(f.db,context)).ok,false,'a real failed parent test never becomes exceptional attribution');
 });
+
+test('J06 restored child retains exceptional Git attribution through immutable parent receipts without inheriting tests',async()=>{
+ const {resolveS06OutputProof}=await import('../src/runtime/s06-output-proof.mjs');
+ const f=await fixture('MANUAL_INFRASTRUCTURE');assert.equal((await f.boundary.runTrusted({type:'RECORD_EXCEPTION',params:f.params})).ok,true);
+ const j=f.db.read('meta','ai-job:'+slug).job,ex=f.db.read('meta','s06-exception:'+slug).record;
+ const wb={slug,accountId:f.stage.accountId,personaUid:f.stage.personaUid,principalFingerprint:f.stage.principalFingerprint,remotePublicId:f.stage.remotePublicId,folder:'generators/'+slug,operationId:'writeback_'+'1'.repeat(32),revision:1,state:'CONFIRMED',mode:'S06_EXCEPTION',exceptionRevision:ex.revision,stageRevision:3,jobRevision:j.revision,sourceFingerprint:j.sourceFingerprint,sealedSource:f.source,commitSha:'c'.repeat(40),baseHead:'d'.repeat(40),expectedHead:'d'.repeat(40),readyIdentifier:'ready',readyInputFingerprint:F};
+ const original={...j},wrapped={...j,state:'TESTS_UNVERIFIED',restoredOriginal:original};
+ const parent={...f.stage,restoredHistorical:true},child={...f.stage,personaUid:'new-persona',bindingVersion:2,revision:4,restoredParent:{revision:3,jobRevision:j.revision,personaUid:f.stage.personaUid},nonce:'e'.repeat(32)};
+ await put(f.db,{key:'stage-history:'+slug+':3',record:parent},{key:'ai-history:'+slug+':restored-'+j.revision,job:wrapped});
+ const proof=await resolveS06OutputProof(f.db,{ready:f.ready,stage:child,job:null,writeback:wb,exception:ex});
+ assert.equal(proof.ok,true,JSON.stringify(proof));assert.equal(proof.historical,true);assert.equal(proof.outputProof.commitSha,wb.commitSha);
+ assert.equal(authorizeS06Exception({ready:f.ready,stage:child,job:{...j,stageRevision:4,state:'PENDING_NATIVE_SESSION'},record:ex}).ok,false);
+ assert.equal((await resolveS06OutputProof(f.db,{ready:f.ready,stage:{...child,principalFingerprint:'e'.repeat(64)},job:null,writeback:wb,exception:ex})).ok,false);
+});

@@ -48,6 +48,28 @@ def run(browser,archive,folder):
         wait(s,"!!sh.querySelector('[data-settings=backups]')",'J06_DIAGNOSTIC_PAGE_RELOAD')
         unobserved=g.oracle(s,"return await new Promise(resolve=>{const p=browser.runtime.connect({name:'pcms-s08-startup'});p.onMessage.addListener(r=>{p.disconnect();resolve(r)});p.postMessage({type:'STATUS',params:{runId:'s08_1122334455667788'}})})")
         assert unobserved.get('observed') is False,unobserved
+        attention=pathlib.Path(__file__).with_name('fixtures').joinpath('j06-attention.mjs').read_text().replace('export async function','async function')
+        installed=g.oracle(s,attention+';return await installAttentionFixture();');assert installed.get('ok'),installed
+        g.click(s,'[data-nav=work-queue]')
+        wait(s,"sh.querySelector('#page')?.textContent.includes('Source needs verification')",'J06_ACTIONABLE_ATTENTION')
+        g.click_text(s,'Mark reviewed')
+        wait(s,"sh.querySelector('#pcms-live-toast')?.textContent.includes('Review not confirmed')&&!sh.querySelector('.queue-list button:last-child')?.disabled",'J06_FAILED_ACK_RETRY_REMAINS_AVAILABLE')
+        first=g.oracle(s,'return await window.__j06attention.inspect()');assert first['notice']['reviewed'] is False and first['acknowledgments']==1,first
+        g.oracle(s,'return await window.__j06attention.escalate()')
+        g.click_text(s,'Mark reviewed')
+        wait(s,"[...sh.querySelectorAll('button')].some(x=>x.textContent==='Mark reviewed'&&!x.disabled)",'J06_STALE_ESCALATION_RELOADS_CURRENT_INCIDENT')
+        stale=g.oracle(s,'return await window.__j06attention.inspect()');assert stale['notice']['revision']==2 and stale['notice']['reviewed'] is False and stale['acknowledgments']==1,stale
+        g.click_text(s,'Mark reviewed')
+        wait(s,"sh.querySelector('#page')?.textContent.includes('Reviewed — still active')",'J06_LOST_ACK_OBSERVED_WITHOUT_DUPLICATE_WRITE')
+        reviewed=g.oracle(s,'return await window.__j06attention.inspect()');assert reviewed['notice']['reviewed'] and reviewed['notice']['state']=='ACTIVE' and reviewed['acknowledgments']==2,reviewed
+        evidence['attention-fault-recovery']=reviewed
+        capture(s,'attention-reviewed-still-active',evidence)
+        g.click_text(s,'Open affected item')
+        wait(s,"!!sh.querySelector('#pcms-backup-inspect-file')",'J06_TYPED_INCIDENT_TARGET_NAVIGATION')
+        g.click(s,'.top-search');g.fill(s,'[role=dialog] input','incident_j06_source')
+        wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('incident_j06_source')",'J06_GLOBAL_SEARCH_INCLUDES_INCIDENTS')
+        g.click_text(s,'Open','[role=dialog]')
+        wait(s,"!sh.querySelector('[role=dialog]')&&!!sh.querySelector('#pcms-backup-inspect-file')",'J06_SEARCH_TARGET_RECOVERY')
         g.click(s,'[data-settings=backups]')
         wait(s,"!!sh.querySelector('#pcms-backup-inspect-file')",'J06_PRIMARY_BACKUP_WORKSPACE')
         g.click_text(s,'Download complete backup')
