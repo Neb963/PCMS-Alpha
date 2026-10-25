@@ -1,3 +1,4 @@
+import {restoredTargetBindings} from './restore-identities.mjs';
 import {splitPortableLocal,preparePortableLocalRestore} from './portable-local.mjs';
 // I16 recovery is observation-only: never create a context, import cookies,
 // commit donor state or replace canonical rows after a lost acknowledgement.
@@ -107,6 +108,7 @@ export async function reconcileRestore({gate,api,donor,db,archiveText,
         ...actual.stores.meta.filter(r=>selfKeys.includes(r.key))].sort((a,b)=>a.key<b.key?-1:a.key>b.key?1:0)}}:old.archive.pcms;
     const expected=prepareRestoredCanonical({incoming:incoming.archive.pcms,
       current:baseline,mode:row.recovery.mode,uidRemap:map,
+      targetBindings:restoredTargetBindings(row.donorPreparation?.sourcePersonas),
       fresh:portable&&row.fresh===true,
       accountChoices:portable?row.recovery.accountChoices||{}:{}});
     operation={pcms:await digest(JSON.stringify(expected))};

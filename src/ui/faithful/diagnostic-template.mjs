@@ -1,2 +1,32 @@
-// A07: canonical S08 diagnostic controls directly mounted into the primary UI.
-export const diagnosticTemplate="<section class=\"panel\" aria-labelledby=\"pcms-diagnostic-heading\">\n          <div class=\"panel-head\"><h2 id=\"pcms-diagnostic-heading\">Full diagnostic</h2><span class=\"unknown\">Designated disposable scope only</span></div>\n          <p>Designate a test account, its protected Persona and a separate namespace once. The disposable creation-to-publication chain stops at unsafe dependencies, but independent read-only module checks can run at any time. It preserves remote test artifacts; it never approves publication, retries an uncertain write, or substitutes production resources.</p>\n          <div class=\"account-controls\">\n            <label for=\"pcms-diagnostic-account\">Verified disposable account</label>\n            <select id=\"pcms-diagnostic-account\" aria-describedby=\"pcms-diagnostic-scope\"></select>\n            <label for=\"pcms-diagnostic-namespace\">Dedicated test namespace (pcms-test-…)</label>\n            <input id=\"pcms-diagnostic-namespace\" autocomplete=\"off\" spellcheck=\"false\" maxlength=\"42\" placeholder=\"pcms-test-alpha\">\n                        <label for=\"pcms-diagnostic-consent\">I confirm that the selected account, Persona and test namespace are disposable resources authorized for live PCMS testing</label>\n            <input id=\"pcms-diagnostic-consent\" type=\"checkbox\">\n            <label for=\"pcms-diagnostic-xpi-sha\">XPI fingerprint for backup/restart verification (the diagnostic can start without it, but cannot complete those stages)</label>\n            <input id=\"pcms-diagnostic-xpi-sha\" maxlength=\"64\" spellcheck=\"false\" autocomplete=\"off\" placeholder=\"64 hexadecimal characters\">\n            <button type=\"button\" id=\"pcms-diagnostic-designate\">Save disposable scope</button>\n            <button type=\"button\" id=\"pcms-diagnostic-independent-run\">Check independent modules (read only)</button>\n            <button type=\"button\" id=\"pcms-diagnostic-run\" disabled>Run full diagnostic</button>\n            <button type=\"button\" id=\"pcms-diagnostic-resume\" disabled>Resume failed stage</button>\n            <button type=\"button\" id=\"pcms-diagnostic-rerun\" disabled>Full rerun with new slug</button>\n            <button type=\"button\" id=\"pcms-diagnostic-export\" disabled>Export sanitized report</button>\n            <button type=\"button\" id=\"pcms-diagnostic-cleanup\" disabled>Verify test-only cleanup</button>\n          </div>\n          <p id=\"pcms-diagnostic-scope\" role=\"status\" aria-live=\"polite\">Select disposable resources.</p>\n          <p id=\"pcms-diagnostic-status\" role=\"status\" aria-live=\"polite\">No diagnostic run.</p>\n          <div class=\"account-controls\" role=\"group\" aria-label=\"Independent manual tests\">\n            <button type=\"button\" data-nav=\"accounts\">Accounts and inventory</button>\n            <button type=\"button\" data-settings=\"backups\">Backup and restore</button>\n            <button type=\"button\" data-nav=\"refresher\">Refresher</button>\n          </div>\n          <p id=\"pcms-diagnostic-independent-status\" role=\"status\" aria-live=\"polite\">Independent checks can run without a disposable generator.</p>\n          <div id=\"pcms-diagnostic-independent-results\" class=\"table-wrap\" tabindex=\"0\" aria-label=\"Independent module results\"></div>\n          <p class=\"reason\">Independent module responses verify only read-only interfaces. File export/restore, protected exits and Perchance effects retain their own acceptance evidence and controls.</p>\n          <div id=\"pcms-diagnostic-stages\" class=\"table-wrap\" tabindex=\"0\" aria-label=\"Diagnostic stage results\"></div>\n          <p class=\"reason\">A missing independent live observation remains NOT_TESTED or HELD, never PASS. Human source acceptance and exact-F publication still require real operator review. No test-only cleanup is issued without verified ownership.</p>\n        </section>";
+// Primary diagnostics use the ordinary guarded services and saved reports.
+export const diagnosticTemplate=`<section aria-labelledby="pcms-diagnostic-heading">
+ <h3 id="pcms-diagnostic-heading">Independent checks</h3>
+ <p>Check local modules, archive integrity and an isolated data restore. These checks work without a test account or generator.</p>
+ <button type="button" id="pcms-diagnostic-independent-run">Check independent modules</button>
+ <p id="pcms-diagnostic-independent-status" role="status" aria-live="polite"></p>
+ <div id="pcms-diagnostic-independent-results"></div>
+ <details><summary>Disposable account diagnostic</summary>
+ <p>Use a dedicated test account. PCMS creates a test generator, observes development and waits for your exact source approval before publication. Uncertain operations stop for readback.</p>
+ <div class="form-stack">
+  <label for="pcms-diagnostic-account">Verified test account</label><select id="pcms-diagnostic-account"></select>
+  <label for="pcms-diagnostic-namespace">Test name</label><input id="pcms-diagnostic-namespace" maxlength="42" placeholder="pcms-test-alpha" autocomplete="off" spellcheck="false">
+  <label><input id="pcms-diagnostic-consent" type="checkbox"> I authorize live testing with this disposable account and test name.</label>
+  <div class="form-foot">
+   <button type="button" id="pcms-diagnostic-designate">Save test setup</button>
+   <button type="button" id="pcms-diagnostic-run" disabled>Run full diagnostic</button>
+   <button type="button" id="pcms-diagnostic-resume" disabled>Resume current run</button>
+   <button type="button" id="pcms-diagnostic-rerun" disabled>Start a new run</button>
+   <button type="button" id="pcms-diagnostic-cleanup" disabled>Verify test cleanup</button>
+  </div>
+ </div>
+ <p id="pcms-diagnostic-scope" role="status"></p><p id="pcms-diagnostic-status" role="status" aria-live="polite"></p>
+ <div id="pcms-diagnostic-stages"></div>
+ <p>Backup and isolated restore checks use local data. The restart check asks you to close and reopen Firefox. Live provider, protected route and independent process observations retain their own evidence.</p>
+ </details>
+ <div class="form-foot"><button type="button" id="pcms-diagnostic-export" disabled>Export current report</button></div>
+ <details><summary>Saved diagnostic reports</summary>
+ <label for="pcms-diagnostic-history">Report</label><select id="pcms-diagnostic-history"></select>
+ <div class="form-foot"><button type="button" id="pcms-diagnostic-history-refresh">Reload reports</button><button type="button" id="pcms-diagnostic-history-export" disabled>Export selected report</button></div>
+ <p id="pcms-diagnostic-history-status" role="status"></p><pre id="pcms-diagnostic-history-view"></pre>
+ </details>
+</section>`;

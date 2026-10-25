@@ -1,3 +1,4 @@
+import {restoredTargetBindings} from './restore-identities.mjs';
 import {donorPreparationReceipt,observeDonorPreparation,checkpointCanonicalBaseline,donorBaselineReceipt,observeDonorBaseline,restoredAutomationHistory,canonicalWithAutomationHistory} from './restore-observation.mjs';
 import {collectPortableLocal,splitPortableLocal,preparePortableLocalRestore} from './portable-local.mjs';
 // I16: one guarded local restore command. A resume NEVER redispatches a step.
@@ -286,7 +287,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
               digest:Object.keys(portableValues).every(k=>same(got[k],portableValues[k]))?fp:'0'.repeat(64)};
           });
         preparedCanonical=prepareRestoredCanonical({incoming:canonicalWithAutomationHistory(incomingPcms,history,intent.epoch),
-          current:baseline.pcms,mode,uidRemap:remaps,fresh,accountChoices});
+          current:baseline.pcms,mode,uidRemap:remaps,targetBindings:restoredTargetBindings(preparedDonor.sourcePersonas),fresh,accountChoices});
         await step('pcms-canonical',{pcms:await digest(JSON.stringify(preparedCanonical))},
           async()=>applyCanonicalSnapshot(db,preparedCanonical,{
             assertHeld:async()=>(await gate.inspect()).held===true,

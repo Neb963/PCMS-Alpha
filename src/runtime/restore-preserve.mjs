@@ -8,6 +8,9 @@ export function preserveUnselectedDonorSources(imported,current,targetIds,{newId
   if(current.scripts?.[oldId])id=allocate('script',imported.state.scripts,current.scripts||{});
   scriptIds.set(oldId,id);
   imported.state.scripts[id]={...structuredClone(imported.state.scripts[oldId]),id};
+  // A clone is not the authenticated external installation that owns oldId.
+  const artifact=imported.state.scripts[id].externalArtifact;
+  if(artifact)artifact.ownershipVerified=false;
  }
  for(const [key,id] of imported.maps.script)imported.maps.script.set(key,scriptIds.get(id));
  for(const id of targets){const p=imported.state.profiles[id];if(p)p.scriptIds=(p.scriptIds||[]).map(s=>scriptIds.get(s)||s);}

@@ -13,6 +13,7 @@ export function validDonorPreparation(r){
  validMap(r.mappings)&&validMap(r.scriptMap)&&validMap(r.workflowMap)&&
  Array.isArray(r.sourcePersonas)&&r.sourcePersonas.length<=10000&&r.sourcePersonas.every(p=>
  typeof p.containerId==='string'&&typeof p.targetUid==='string'&&
+ (p.bindingId===undefined||p.bindingId===null||typeof p.bindingId==='string')&&
  (p.sourceUid===null||typeof p.sourceUid==='string')&&(p.sourceId===null||typeof p.sourceId==='string'))&&
  ['profiles','scripts','workflows','untouchedProfiles','untouchedScripts','untouchedWorkflows'].every(k=>validHashes(r[k]))&&
  /^[a-f0-9]{64}$/.test(r.globalSha256||'')&&/^[a-f0-9]{64}$/.test(r.routesSha256||'');
@@ -22,7 +23,7 @@ export async function donorPreparationReceipt(prepared,baseline,mappings){
  const target=new Set(Object.values(mappings));
  const receipt={schema:1,status:'PREPARED',mappings:structuredClone(mappings),
  sourcePersonas:prepared.sourcePersonas.map(p=>({sourceUid:p.sourceUid||null,targetUid:p.targetUid,
- sourceId:p.sourceId||null,containerId:p.containerId})),
+ sourceId:p.sourceId||null,containerId:p.containerId,bindingId:p.bindingId||null})),
  scriptMap:structuredClone(prepared.scriptMap||{}),workflowMap:structuredClone(prepared.workflowMap||{}),
  profiles:await rows([...target],prepared.candidate.profiles||{}),
  scripts:await rows(Object.values(prepared.scriptMap||{}),prepared.candidate.scripts||{}),
@@ -41,7 +42,7 @@ export async function observeDonorPreparation(receipt,snapshot){
  for(const [group,objects] of [['profiles',state.profiles],['untouchedProfiles',state.profiles],['scripts',state.scripts],['workflows',state.workflows],['untouchedScripts',state.scripts],['untouchedWorkflows',state.workflows]])
  for(const row of receipt[group])if(!objects?.[row.id]||await hash(objects[row.id])!==row.sha256)return false;
  for(const p of receipt.sourcePersonas){const r=state.profiles?.[p.containerId];
- if(!r||r.personaUid!==p.targetUid||r.routeId!==BLOCK_ROUTE_ID||r.killSwitch!==true||r.blockLocalNetwork!==true||r.managed!==true)return false;}
+ if(!r||r.personaUid!==p.targetUid||r.routeId!==BLOCK_ROUTE_ID||r.killSwitch!==true||r.blockLocalNetwork!==true||r.managed!==true||(r.pcmsBindingId||null)!==(p.bindingId||null))return false;}
  for(const id of Object.values(receipt.scriptMap))if(state.scripts[id]?.enabled!==false||state.scripts[id]?.autoRun!==false)return false;
  for(const id of Object.values(receipt.workflowMap))if(state.workflows[id]?.enabled!==false)return false;
  return true;

@@ -2,7 +2,7 @@
 // route. A later independent donor probe remains the only way to activate one.
 import {readLedger,LEDGER_KEY} from './network-ledger.mjs';
 const fail=code=>{throw Error(code)};
-export function mergeRestoredExitLedgers(incoming,current,{uidRemap={},affectedAccounts=[]}={}){
+export function mergeRestoredExitLedgers(incoming,current,{uidRemap={},affectedAccounts=[],accountTargets=null}={}){
  const a=readLedger(incoming),b=readLedger(current);
  if(!a.ok||!b.ok)fail('RESTORE_EXIT_HISTORY_CORRUPT');
  const source=a.ledger,destination=b.ledger,owners={...destination.owners};
@@ -26,6 +26,19 @@ export function mergeRestoredExitLedgers(incoming,current,{uidRemap={},affectedA
  for(const [id,row] of Object.entries(bindings))if(affected.has(row.accountId))
   bindings[id]={...row,personaUid:uidRemap[row.personaUid]||row.personaUid,
    pin:'HELD',holdCode:'RESTORED_ROUTE_REVERIFICATION'};
+ if(accountTargets){
+  // Only a matching destination-owned tag can be an active binding. Preserve
+  // every old allocation as exclusion/history; normal enrollment upgrades a
+  // newly created untagged Persona with its existing narrow TAG permit.
+  for(const [id,row] of Object.entries(bindings))if(affected.has(row.accountId)){
+   const target=accountTargets[row.accountId];
+   if(!target?.bindingId||target.bindingId!==id){history[id]={...row,...(destination.bindings[id]?.personaUid===row.personaUid?{destinationRetired:true}:{})};delete bindings[id]}
+   else bindings[id]={...row,personaUid:target.personaUid,pin:'HELD',holdCode:'RESTORED_ROUTE_REVERIFICATION'};
+  }
+  for(const [accountId,target] of Object.entries(accountTargets))if(target.bindingId&&
+    (!bindings[target.bindingId]||bindings[target.bindingId].accountId!==accountId))
+    fail('RESTORE_TARGET_BINDING_UNVERIFIED');
+ }
  return {key:LEDGER_KEY,schema:2,revision:Math.max(source.revision,destination.revision)+1,
   owners,bindings,...(Object.keys(history).length?{restoredBindingHistory:history}:{})};
 }

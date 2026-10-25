@@ -156,7 +156,18 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       const known=await accounts.list();
       if(!known.ok)return known;
       const ids=new Set(known.accounts.map(a=>a.bindingId).filter(Boolean));
-      if(listed.taggedBindings.some(id=>!ids.has(id)))return fail('EXIT_LEDGER_MISSING');
+      for(const id of listed.taggedBindings){
+        if(ids.has(id))continue;
+        // A deliberately displaced destination Persona remains blocked. Its
+        // actual donor identity and complete local exit exclusions survive
+        // restore, so it is not an unexplained lost-store binding.
+        const saved=await ledger.read();
+        const retired=saved.ok&&saved.ledger.restoredBindingHistory?.[id];
+        const observed=retired?.destinationRetired===true&&retired.pin==='HELD'?
+          await donor.boundPersona({bindingId:id}):null;
+        if(!observed?.ok||observed.personaUid!==retired.personaUid||
+           observed.contextId!==retired.contextId)return fail('EXIT_LEDGER_MISSING');
+      }
     }
     const latest=await accounts.get(account.accountId);
     const attempted=new Set(latest.account?.routeSearch?.active?latest.account.routeSearch.attempted:[]);

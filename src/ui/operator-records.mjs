@@ -1,15 +1,23 @@
 // Operator notes and report history are ordinary canonical backup data.
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
-export function createOperatorRecords({open=openCanonicalDatabase,storage=globalThis.browser?.storage.local}={}){
+export function createOperatorRecords({open=openCanonicalDatabase,storage=globalThis.browser?.storage.local,admitted=false}={}){
  const valid=key=>typeof key==='string'&&/^ui:(?:operator-checklist|diagnostic-report):[A-Za-z0-9_-]{1,100}$/.test(key);
  async function get(key){
   if(!valid(key))throw Error('OPERATOR_RECORD_KEY_INVALID');
   const db=await open();
-  try{return await new Promise((resolve,reject)=>{const tx=db.transaction('meta','readonly'),q=tx.objectStore('meta').get(key);q.onsuccess=()=>resolve(q.result||null);tx.onabort=()=>reject(Error('OPERATOR_RECORD_READ_FAILED'))})}
+  try{return await new Promise((resolve,reject)=>{let value;const tx=db.transaction('meta','readonly'),q=tx.objectStore('meta').get(key);q.onsuccess=()=>{value=q.result||null};tx.oncomplete=()=>resolve(value);tx.onabort=()=>reject(Error('OPERATOR_RECORD_READ_FAILED'))})}
   finally{db.close()}
  }
  async function put(key,record,{expectedRevision=null}={}){
   if(!valid(key))throw Error('OPERATOR_RECORD_KEY_INVALID');
+  if(!admitted&&globalThis.browser?.runtime?.connect)return new Promise((resolve,reject)=>{
+   const port=browser.runtime.connect({name:'pcms-operator-records'});let done=false;
+   const timer=setTimeout(()=>finish(null,Error('OPERATOR_RECORD_WRITE_UNKNOWN')),30000);
+   function finish(out,error){if(done)return;done=true;clearTimeout(timer);try{port.disconnect()}catch{};error?reject(error):resolve(out)}
+   port.onMessage.addListener(out=>out?.code==='RESTORE_HOLD'?finish(null,Error('OPERATOR_RECORD_RESTORE_HOLD')):finish(out));
+   port.onDisconnect.addListener(()=>finish(null,Error('OPERATOR_RECORD_WRITE_UNKNOWN')));
+   port.postMessage({key,record,expectedRevision});
+  });
   if(!storage||(await createRestoreSentinel(storage).inspect()).held)throw Error('OPERATOR_RECORD_RESTORE_HOLD');
   const db=await open();
   try{return await new Promise((resolve,reject)=>{

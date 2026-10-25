@@ -115,7 +115,7 @@ function portCommand(message){
    const a=row.value.account,label=node('label'),input=node('input');
    input.type='checkbox';input.dataset.account=a.accountId;
    const removed=(removals.get(a.accountId)?.revision||0)>a.revision;
-   input.checked=!fresh.checked&&known.has(a.accountId)&&known.get(a.accountId).state!=='REMOVED'&&!removed;
+   input.checked=!fresh.checked&&known.has(a.accountId)&&!known.get(a.accountId).removed&&!a.removed&&!removed;
    if(removed)input.dataset.removed='true';
    input.addEventListener('change',invalidate);
    label.append(input,document.createTextNode(' '+(a.alias||a.label||a.accountId)+(removed?' — removed here; select only to recover it inactive':'')));accounts.append(label,node('br'));

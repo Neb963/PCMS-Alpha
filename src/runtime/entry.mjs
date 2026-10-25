@@ -12,6 +12,7 @@ import './command-boundary.mjs';
 import './coordinator-boundary.mjs';
 import './s08-cleanup-boundary.mjs';
 import './diagnostic-startup.mjs';
+import './operator-record-boundary.mjs';
 import './creation-watch.mjs';
 // I03 listeners are registered in the synchronous entry evaluation path.
 import './account-boundary.mjs';

@@ -1,3 +1,4 @@
+import {mountOperatorChecklist} from '../operator-checklist.mjs';
 import {mountBackupWorkspace} from './backup-workspace.mjs';
 import {acknowledgeIncident,incidentDestination} from './attention.mjs';
 import {createRefresherWorkspace} from './refresher-workspace.mjs';
@@ -1790,6 +1791,7 @@ function primaryDiagnostics(container){
  for(const button of form.querySelectorAll('button'))button.classList.add('btn','small');
  section.append(form);
  mountDiagnosticController(section);
+ mountOperatorChecklist(container,{card:primarySettingCard,el,b});
 }
 function renderSettingsSection(){if(state.route!=='settings')return;
  const names=['connections','automation','ai','backups','diagnostics','advanced'];

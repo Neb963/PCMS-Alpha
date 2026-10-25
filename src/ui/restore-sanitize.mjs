@@ -87,7 +87,7 @@ function inertMeta(key,row,remap,existing=null){
 // Preserve reliable *destination* removals even for replace mode. The
 // archived account is not authority to undo a later local removal.
 export function prepareRestoredCanonical({incoming,current,mode='merge',
-  uidRemap={},fresh=false,accountChoices={}}={}){
+  uidRemap={},targetBindings=null,fresh=false,accountChoices={}}={}){
   validatePcmsSnapshot(incoming);validatePcmsSnapshot(current);
   incoming=splitPortableLocal(incoming).pcms;current=splitPortableLocal(current).pcms;
   if(!['merge','replace'].includes(mode))deny('RESTORE_MODE_INVALID');
@@ -144,7 +144,11 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
   const sourceExits=incoming.stores.meta.find(r=>r.key===exitKey)?.value;
   const currentExits=local.get(exitKey);
   const affectedAccounts=incomingAccounts.filter(a=>!excluded.has(a.id)).map(a=>a.id);
-  const mergedExits=sourceExits||currentExits?mergeRestoredExitLedgers(sourceExits,currentExits,{uidRemap,affectedAccounts}):null;
+  const accountTargets=targetBindings===null?null:Object.fromEntries(incomingAccounts.filter(a=>!excluded.has(a.id)).map(({id,account})=>{
+    const personaUid=uidRemap[account.personaUid];
+    return [id,{personaUid,bindingId:targetBindings[personaUid]||null}];
+  }));
+  const mergedExits=sourceExits||currentExits?mergeRestoredExitLedgers(sourceExits,currentExits,{uidRemap,affectedAccounts,accountTargets}):null;
   const stores={};
   for(const name of DB_STORES){
     const previous=current.stores[name].map(copyRow);
@@ -234,6 +238,28 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
     const account=accounts.get(binding.accountId);
     if(account&&restoredIds.has(account.accountId))account.bindingId=binding.bindingId;
   }
+  if(accountTargets)for(const [id,target] of Object.entries(accountTargets)){
+    const account=accounts.get(id);if(!account)continue;
+    account.bindingId=target.bindingId;account.upgrade=null;
+    account.routeStatus='HELD';account.routeCode='RESTORED_ROUTE_REVERIFICATION';
+  }
+  // Non-authorizing source locators follow the selected account, while their
+  // original evidence stays inspectable. Effect journals are never retargeted.
+  for(const row of stores.meta){
+    if(typeof row.key!=='string')continue;
+    const association=row.key.startsWith('adoption:')?row.value?.adoption:
+      row.key.startsWith('source-link:')?row.value?.link:
+      row.key.startsWith('identity-alias:')?row.value?.identity:null;
+    const account=association&&accounts.get(association.accountId);
+    if(!account||!restoredIds.has(account.accountId))continue;
+    association.restoredContextHistory=[...(association.restoredContextHistory||[]),{
+      personaUid:association.personaUid||null,bindingVersion:association.bindingVersion,
+      accountRevision:association.accountRevision,principalFingerprint:association.principalFingerprint||null}];
+    association.personaUid=account.personaUid;
+    association.bindingVersion=account.bindingVersion;
+    association.accountRevision=account.revision;
+    association.restoredOwnerReverificationRequired=true;
+  }
   const uidOwners=new Map();
   for(const a of accounts.values()){
     if(a.state==='ARCHIVED')continue;
@@ -273,13 +299,24 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
 // an identity observation. The final plan is recomputed with observed UIDs.
 export function preflightRestoredCanonical({incoming,current,donor,mappings,
   currentDonor,mode,fresh,accountChoices}){
-  const uidRemap=Object.create(null);
+  const uidRemap=Object.create(null),targetBindings=Object.create(null);
+  const sourceAccounts=incoming.stores.meta.filter(r=>typeof r.key==='string'&&r.key.startsWith('account:')).map(r=>r.value?.account).filter(Boolean);
+  const localAccounts=current.stores.meta.filter(r=>typeof r.key==='string'&&r.key.startsWith('account:')).map(r=>r.value?.account).filter(Boolean);
   for(const [i,p] of (donor.personas||[]).entries()){
     const source=p.profile?.personaUid;
     if(!source)continue;
     const target=mappings[p.key];
     const known=target!=='__create__'&&currentDonor.state.profiles?.[target]?.personaUid;
-    uidRemap[source]=fresh?'restore-preflight-'+i:known||'restore-preflight-'+i;
+    const targetProfile=target!=='__create__'&&currentDonor.state.profiles?.[target];
+    const tag=targetProfile?.pcmsBindingId||null;
+    if(tag){
+      const sourceAccount=sourceAccounts.find(a=>a.personaUid===source);
+      const destinationAccount=localAccounts.find(a=>a.personaUid===known&&a.bindingId===tag);
+      if(!sourceAccount||!destinationAccount||sourceAccount.accountId!==destinationAccount.accountId)
+        deny('RESTORE_PROTECTED_PERSONA_BELONGS_TO_OTHER_ACCOUNT');
+    }
+    uidRemap[source]=known||'restore-preflight-'+i;
+    targetBindings[uidRemap[source]]=tag;
   }
-  return prepareRestoredCanonical({incoming,current,uidRemap,mode,fresh,accountChoices});
+  return prepareRestoredCanonical({incoming,current,uidRemap,targetBindings,mode,fresh,accountChoices});
 }

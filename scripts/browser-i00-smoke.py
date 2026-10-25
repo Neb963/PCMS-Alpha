@@ -1036,6 +1036,8 @@ def main():
             else: raise RuntimeError('geckodriver did not become ready')
             # Exercise the changed operator journey first; all unchanged
             # persistent donor/source/backup suites still run after it passes.
+            from journey_backups_ui import run as run_j06_primary
+            run_j06_primary(browser,archive,pathlib.Path(folder))
             from journey_refresher_ui import run as run_j05_primary
             run_j05_primary(browser,archive,pathlib.Path(folder))
             from journey_refresher_clock import run as run_j05_clock
@@ -4641,16 +4643,17 @@ def main():
                     element_id=element['element-6066-11e4-a52e-4f735466cecf']
                     call('POST',f'/session/{after}/element/{element_id}/value',
                          {'text':str(filepath),'value':list(str(filepath))})
-                setup_ui="document.getElementById('pcms-restore-mappings').value="+json.dumps(json.dumps(ui_data['mappings']))+";document.getElementById('pcms-restore-preview').click();return true"
+                setup_ui="document.getElementById('pcms-restore-preview').click();return true"
                 assert execute(after,setup_ui) is True
                 # Deprecated encrypted archives are rejected by the actual
                 # passwordless parser before plan or guard creation.
                 negative_result=None
                 for _ in range(80):
                     negative_result=execute(after,"return {status:document.getElementById('pcms-restore-status').textContent,verifyDisabled:document.getElementById('pcms-restore-verify').disabled,applyDisabled:document.getElementById('pcms-restore-apply').disabled}")
-                    if 'Restore preview held:' in negative_result['status']:break
+                    if negative_result['verifyDisabled'] and 'Restore is held.' in negative_result['status']:break
                     time.sleep(.1)
-                assert 'Restore preview held: PORTABLE_' in negative_result['status'],negative_result
+                assert 'Restore is held.' in negative_result['status'],negative_result
+                assert 'PORTABLE_' in execute(after,"return document.getElementById('pcms-restore-details').textContent"),negative_result
                 assert negative_result['verifyDisabled'] is True,negative_result
                 assert negative_result['applyDisabled'] is True,negative_result
                 print('B A02_LEGACY_ENCRYPTED_FILE_REJECTED_WITHOUT_GUARD=PASS',flush=True)

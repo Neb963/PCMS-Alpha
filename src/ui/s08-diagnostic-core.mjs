@@ -35,8 +35,12 @@ export function independentReadOnlyResults({readiness,accounts,inventory,refresh
   const v=id==='BACKUP_RUNTIME'&&backup?{state:backup.ok===true?'VERIFIED':'NOT_TESTED',code:backup.ok?'BROWSER_PORTABLE_BACKUP_RESPONDED':backup.code}:lookup.get(component);
   add(id,v?.state==='VERIFIED',v?.code||'READINESS_NOT_AVAILABLE',tier);
  }
- if(archive)add('BACKUP_ARCHIVE',archive.ok===true&&archive.code==='IN_MEMORY_SOURCE_AND_DONOR_VERIFIED',archive.code||'ARCHIVE_NOT_OBSERVED');
- if(localRestore)add('RESTORE_LOCAL_DATA',localRestore.ok===true&&localRestore.code==='ISOLATED_CANONICAL_RESTORE_REOPEN_VERIFIED',localRestore.code||'RESTORE_NOT_OBSERVED');
+ if(archive){add('BACKUP_ARCHIVE',archive.ok===true&&archive.code==='IN_MEMORY_SOURCE_AND_DONOR_VERIFIED',archive.code||'ARCHIVE_NOT_OBSERVED');
+  rows.at(-1).proof=archive.ok?'FRAME_AND_SOURCE_ROUNDTRIP':'NO_AUTHORITATIVE_READBACK';
+  if(archive.ok===false&&!/UNAVAILABLE|INFLIGHT|HOLD|CUT_CHANGED/.test(archive.code||''))rows.at(-1).outcome='FAIL';}
+ if(localRestore){add('RESTORE_LOCAL_DATA',localRestore.ok===true&&localRestore.code==='ISOLATED_CANONICAL_RESTORE_REOPEN_VERIFIED',localRestore.code||'RESTORE_NOT_OBSERVED');
+  rows.at(-1).proof=localRestore.ok?'DISPOSABLE_IDB_REOPEN_AND_BYTE_COMPARISON':'NO_AUTHORITATIVE_READBACK';
+  if(localRestore.ok===false&&!/UNAVAILABLE|INFLIGHT|HOLD|CUT_CHANGED/.test(localRestore.code||''))rows.at(-1).outcome='FAIL';}
  add('ACCOUNT_STORE',accounts?.ok===true&&Array.isArray(accounts.accounts),
   accounts?.ok?'CANONICAL_ACCOUNT_LIST_READ':accounts?.code||'ACCOUNT_LIST_UNAVAILABLE');
  add('INVENTORY_STORE',inventory?.ok===true&&Array.isArray(inventory.items),
@@ -54,11 +58,11 @@ export function independentDiagnosticExport(snapshot,run=null){
     !Array.isArray(snapshot.rows))return {ok:false,code:'INDEPENDENT_REPORT_UNAVAILABLE'};
  // These sanitized fields never contain account IDs, token, source or URLs.
  const checks=snapshot.rows.map(r=>({id:safeCode(r.id,'UNKNOWN_CHECK'),
-  outcome:r.outcome==='PASS'?'PASS':'NOT_TESTED',code:safeCode(r.code),
+  outcome:['PASS','FAIL','HELD','NOT_TESTED'].includes(r.outcome)?r.outcome:'NOT_TESTED',code:safeCode(r.code),
   tier:r.tier==='GIT'?'GIT':'D',proof:safeCode(r.proof)}));
  return {format:'PCMS_S08_INDEPENDENT_SANITIZED',version:1,
   checkedAt:snapshot.checkedAt,mode:snapshot.mode,checks,
-  limitations:snapshot.limitations,chain:run?diagnosticReport(run):null};
+  limitations:(snapshot.limitations||[]).filter(v=>typeof v==='string'&&CODE.test(v)),chain:run?diagnosticReport(run):null};
 }
 export function validateDisposable(config){
  if(!config||!ID.test(config.accountId||''))return {ok:false,code:'TEST_ACCOUNT_SELECTION_INVALID'};
@@ -119,13 +123,16 @@ export function addDiagnosticEvent(run,stage,outcome,code,now){
    currentHold:failed?{stage,code}:run.currentHold?.stage===stage?null:run.currentHold||null};
 }
 export function diagnosticReport(run){
- if(!run||run.version!==1)return {ok:false,code:'REPORT_UNAVAILABLE'};
+ if(!run||run.version!==1||!/^s08_[a-f0-9]{12,32}$/.test(run.runId||''))return {ok:false,code:'REPORT_UNAVAILABLE'};
+ const event=e=>({stage:STAGES.includes(e?.stage)?e.stage:'UNKNOWN',outcome:['PASS','FAIL','HELD','UNCERTAIN','NOT_TESTED'].includes(e?.outcome)?e.outcome:'NOT_TESTED',code:safeCode(e?.code),at:Number.isSafeInteger(e?.at)?e.at:null});
+ const failure=f=>f?{stage:STAGES.includes(f.stage)?f.stage:'UNKNOWN',code:safeCode(f.code)}:null;
  return {format:'PCMS_S08_SANITIZED',version:1,runId:run.runId,
   startedAt:run.startedAt,updatedAt:run.updatedAt,
   stage:run.stage,status:run.status,
-  firstFailure:run.firstFailure,currentHold:run.currentHold||null,eventHistory:run.eventHistory||run.events,
-  stages:STAGES.map(stage=>run.events.find(e=>e.stage===stage)||
-    {stage,outcome:'NOT_TESTED',code:'NOT_REACHED'}),
+  firstFailure:failure(run.firstFailure),currentHold:failure(run.currentHold),eventHistory:(run.eventHistory||run.events||[]).map(event),
+  stages:STAGES.map(stage=>event(run.events.find(e=>e.stage===stage)||
+    {stage,outcome:'NOT_TESTED',code:'NOT_REACHED'})),
+  limitations:['RUNTIME_OBSERVATIONS_ARE_NOT_INDEPENDENT_CI_ACCEPTANCE','LOCAL_DATA_RESTORE_IS_NOT_FRESH_PROFILE_DONOR_RECOVERY','FIREFOX_STARTUP_RECEIPT_IS_NOT_INDEPENDENT_OS_PROOF'],
   scope:{account:'DESIGNATED_TEST_ACCOUNT',persona:'DESIGNATED_TEST_PERSONA',
    repository:'DESIGNATED_PRIVATE_GIT',namespace:'REDACTED',slug:'REDACTED'},
   remoteArtifactsPreserved:run.remoteArtifactsPreserved===true,
