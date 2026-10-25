@@ -102,8 +102,12 @@ const out=await createOperatorRecords().put('ui:diagnostic-report:'+run.runId,{s
         corrupt=downloads/'corrupt.pcms.jsonl';data=saved.read_bytes();corrupt.write_bytes(data[:len(data)//2]+b'CORRUPTED'+data[len(data)//2:])
         b.call('POST',f'/session/{s}/element/{control[a.ELEMENT]}/value',{'text':str(corrupt)})
         g.click_text(s,'Verify selected backup')
-        wait(s,"sh.querySelector('#page')?.textContent.includes('This file could not be verified')",'J06_CORRUPT_FILE_REJECTED')
+        wait(s,"sh.querySelector('#page')?.textContent.includes('This file could not be verified')&&!sh.querySelector('#pcms-backup-inspect-file').disabled&&[...sh.querySelectorAll('button')].some(x=>x.textContent==='Verify selected backup'&&!x.disabled)",'J06_CORRUPT_FILE_REJECTED')
+        chosen=b.execute(s,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#pcms-backup-inspect-file').files[0].name")
+        assert chosen==corrupt.name,chosen
         b.call('POST',f'/session/{s}/element/{control[a.ELEMENT]}/value',{'text':str(saved)})
+        chosen=b.execute(s,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#pcms-backup-inspect-file').files[0].name")
+        assert chosen==saved.name,chosen
         g.click_text(s,'Verify selected backup');wait(s,"sh.querySelector('#page')?.textContent.includes('Selected file verified')",'J06_FILE_ERROR_RECOVERY')
         # No configured Git or managed account exists: functional checks remain independent.
         b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;const d=[...sh.querySelectorAll('details')].find(x=>x.querySelector('summary')?.textContent==='Local functional checks');d.open=true;return true")

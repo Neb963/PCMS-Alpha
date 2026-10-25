@@ -3,6 +3,13 @@ import {snapshotCanonicalV2,preflightSourceRecovery} from '../backup-core.mjs';
 import {preparePortableStage,readPortableStage,discardPortableStage} from '../portable-restore-stage.mjs';
 const summary=good=>good?(good.kind==='DAILY'?'Daily':'Manual')+' backup · '+
  new Date(good.completedAt||good.day*86400000).toLocaleString()+' · '+good.bytes.toLocaleString()+' bytes':'No completed backup recorded.';
+export async function verifyBackupFile(file,{prepare=preparePortableStage,read=readPortableStage,discard=discardPortableStage,
+ scope='portable_'+crypto.randomUUID().replaceAll('-','')}={}){
+ let reused=false;
+ try{await prepare(file,{scope});return await read(scope)}
+ catch(error){reused=error?.message==='PORTABLE_STAGE_REUSED';throw error}
+ finally{if(!reused)try{await discard(scope)}catch{}}
+}
 function exportFile(name,value,type='application/json'){
  const blob=new Blob([typeof value==='string'?value:JSON.stringify(value,null,2)+'\n'],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');
  a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
@@ -62,13 +69,13 @@ export function mountBackupWorkspace(container,{card,el,b,request,mountRestore})
  const fileLabel=el('label','','Check a saved file');fileLabel.htmlFor=file.id;fileLabel.style.display='block';
  const verify=b('Verify selected backup',()=>void(async()=>{
   if(!file.files?.[0]){fileStatus.textContent='Choose a saved backup first.';return}
-  verify.disabled=true;file.disabled=true;let scope='portable_'+crypto.randomUUID().replaceAll('-',''),reused=false;
+  verify.disabled=true;file.disabled=true;
   fileStatus.textContent='Reading the selected file and checking its records and source bytes…';
   try{
-   await preparePortableStage(file.files[0],{scope});const opened=await readPortableStage(scope);
+   const opened=await verifyBackupFile(file.files[0]);
    fileStatus.textContent='Selected file verified · '+opened.receipt.rows+' records. It can be inspected for restore below.';
-  }catch(error){reused=error?.message==='PORTABLE_STAGE_REUSED';fileStatus.textContent='This file could not be verified. Choose an intact backup and try again.';raw.textContent+='\n'+String(error?.message||'FILE_READ_FAILED')}
-  finally{if(!reused)try{await discardPortableStage(scope)}catch{}verify.disabled=false;file.disabled=false}
+  }catch(error){fileStatus.textContent='This file could not be verified. Choose an intact backup and try again.';raw.textContent+='\n'+String(error?.message||'FILE_READ_FAILED')}
+  finally{verify.disabled=false;file.disabled=false}
  })(),'btn small');
  inspect.append(fileLabel,file,verify,fileStatus);section.append(inspect);
  const checks=el('details');checks.append(el('summary','','Local functional checks'));
