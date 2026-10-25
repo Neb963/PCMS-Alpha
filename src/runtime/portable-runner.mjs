@@ -3,7 +3,7 @@ import {preparePortableOriginals,completePortableOriginals} from './portable-ori
 // a PCMS native host, credential vault or source/provider/Git mutation.
 import {openCanonicalDatabase,createRestoreSentinel,createCanonicalStore} from './journal.mjs';
 import {createAutoStore} from './backup-auto-store.mjs';
-import {dayAt,safeStatus} from './backup-auto-core.mjs';
+import {dayAt,safeStatus,DAY} from './backup-auto-core.mjs';
 import {makeRetention} from './backup-auto-retention.mjs';
 import {inspectAuto,awaitAuto} from './backup-auto-download.mjs';
 import {capturePortableCut,downloadPortable} from './portable-cut.mjs';
@@ -42,6 +42,21 @@ const awaitManual=async(downloads,id,bytes,runId,timeoutMs=120000)=>new Promise(
   try{downloads.onChanged.addListener(changed);}catch{return done(null);}
   void inspect();
 });
+// Exact readback of an already journaled plain export, never disk hash proof.
+async function locatePortableDownload(downloads,run){
+  if(!/^(auto|manual)_[a-f0-9]{32}$/.test(run?.runId||'')||
+     !Number.isSafeInteger(run.bytes)||run.bytes<=0||
+     !/^[a-f0-9]{64}$/.test(run.sha256||''))return null;
+  const known=Number.isSafeInteger(run.downloadId)&&run.downloadId>=0;
+  if(run.downloadId!=null&&!known)return null;
+  let rows;try{rows=await downloads.search(known?{id:run.downloadId}:{query:[run.runId],limit:20})}catch{return null}
+  if(!Array.isArray(rows)||known&&rows.length!==1||!known&&rows.length>=20)return null;
+  const pattern=new RegExp('[/\\\\]pcms-backups[/\\\\]pcms-alpha-'+run.runId+'(?: \\(\\d+\\))?\\.pcms\\.jsonl$','i');
+  const matches=rows.filter(row=>Number.isSafeInteger(row?.id)&&row.id>=0&&
+    (!known||row.id===run.downloadId)&&row.state==='complete'&&row.exists===true&&
+    row.fileSize===run.bytes&&typeof row.filename==='string'&&pattern.test(row.filename));
+  return matches.length===1?matches[0]:null;
+}
 export function createPortableRunner(api,{
   open=openCanonicalDatabase,clock=Date.now,
   nextId=()=>crypto.randomUUID().replaceAll('-',''),
@@ -52,15 +67,31 @@ export function createPortableRunner(api,{
   const db=()=>dbPromise ||= open().catch(e=>{dbPromise=null;throw e});
   const sentinel=createRestoreSentinel(api.storage.local);
   const store=async()=>createAutoStore(await db(),clock);
-  async function recordManual(row){
+  async function recordManual(row,{expectedRunId=null}={}){
     const database=await db();
     return new Promise((resolve,reject)=>{
-      let tx;try{tx=database.transaction(['meta'],'readwrite');}
-      catch{return reject(Error('BACKUP_IDB_UNAVAILABLE'));}
-      const s=tx.objectStore('meta');
-      tx.oncomplete=()=>resolve();
+      let tx,out={ok:true};try{tx=database.transaction(['meta'],'readwrite')}
+      catch{return reject(Error('BACKUP_IDB_UNAVAILABLE'))}
+      const meta=tx.objectStore('meta');
+      tx.oncomplete=()=>resolve(out);
       tx.onabort=()=>reject(Error('BACKUP_MANUAL_RECEIPT_FAILED'));
-      s.put({key:'backup:manual-active',...row,updatedAt:clock()});
+      function apply(){
+        const saved={...row,updatedAt:clock()};
+        meta.put({key:'backup:manual-active',...saved});
+        if(saved.status==='BROWSER_REPORTED_COMPLETE'&&saved.tier===2&&
+           /^[a-f0-9]{64}$/.test(saved.sha256||'')&&Number.isSafeInteger(saved.bytes)&&saved.bytes>0)
+          meta.put({key:'backup:manual-last-complete',...saved,completedAt:saved.completedAt||clock()});
+      }
+      if(expectedRunId===null){apply();return}
+      meta.get('backup:manual-active').onsuccess=e=>{
+        const current=e.target.result;
+        if(current?.runId!==expectedRunId){out=fail('MANUAL_RUN_CHANGED');return}
+        if(current.status==='BROWSER_REPORTED_COMPLETE'){out={ok:true,alreadyComplete:true};return}
+        if(!['DISPATCH_POSSIBLE','DOWNLOAD_STARTED','HELD_UNCERTAIN'].includes(current.status)){
+          out=fail('MANUAL_RUN_CHANGED');return;
+        }
+        apply();
+      };
     });
   }
   async function readManual(){
@@ -73,14 +104,55 @@ export function createPortableRunner(api,{
       tx.onabort=()=>reject(Error('BACKUP_IDB_UNAVAILABLE'));
     });
   }
+  async function readLastManual(){
+    const database=await db();
+    return new Promise((resolve,reject)=>{
+      const tx=database.transaction(['meta'],'readonly');
+      tx.objectStore('meta').get('backup:manual-last-complete').onsuccess=e=>resolve(e.target.result||null);
+      tx.onabort=()=>reject(Error('BACKUP_IDB_UNAVAILABLE'));
+    });
+  }
+  async function recoverManual(){
+    const previous=await readManual();
+    if(!previous||!['DISPATCH_POSSIBLE','DOWNLOAD_STARTED','HELD_UNCERTAIN'].includes(previous.status))
+      return {ok:true,recovered:false};
+    const row=await locatePortableDownload(api.downloads,previous);
+    if(!row)return fail('MANUAL_DOWNLOAD_UNCERTAIN');
+    const proof=await manualReceipt(api.downloads,row.id,previous.bytes,previous.runId);
+    if(!proof)return fail('MANUAL_DOWNLOAD_UNCERTAIN');
+    await completeOriginals(await db(),{runId:previous.runId,sha256:previous.sha256,bytes:previous.bytes,browserCompleted:true});
+    const recorded=await recordManual({...previous,downloadId:row.id,status:'BROWSER_REPORTED_COMPLETE',
+      code:'BROWSER_REPORTED_COMPLETE',tier:2,completedAt:clock()},{expectedRunId:previous.runId});
+    if(!recorded.ok)return recorded;
+    return {ok:true,recovered:true,code:'BROWSER_REPORTED_COMPLETE',tier:2,
+      runId:previous.runId,downloadId:row.id,sha256:previous.sha256,bytes:previous.bytes,diskReadback:false};
+  }
   async function status(){
+    // Only receipt readback; never dispatch a download from STATUS.
+    if(!pending&&!manualTask){
+      try{await reconcile(await store())}catch{}
+      try{await recoverManual()}catch{}
+    }
     const s=await (await store()).read();
     if(!s.ok)return s;
-    let manual=null;try{manual=await readManual();}catch{}
+    let manual=null,lastManual=null;try{manual=await readManual();lastManual=await readLastManual()}catch{}
+    if(!lastManual&&manual?.status==='BROWSER_REPORTED_COMPLETE'&&manual.tier===2)lastManual=manual;
+    const clean=row=>row?{status:row.status,code:row.code||row.status,tier:row.tier||0,
+      bytes:row.bytes||0,runId:row.runId,sha256:row.sha256||null,
+      startedAt:row.startedAt||null,updatedAt:row.updatedAt||null,
+      completedAt:row.completedAt||row.updatedAt||null}:null;
+    const daily=s.state.archives.filter(a=>a.kind==='AUTO'&&a.state==='COMPLETE'&&
+      /\.pcms\.jsonl$/i.test(a.filename||'')).map(a=>({kind:'DAILY',runId:a.runId,
+        bytes:a.bytes,sha256:a.sha256,completedAt:a.completedAt||null,day:a.day,
+        precision:a.completedAt?'MILLISECOND':'DAY',tier:2,diskReadback:false}));
+    const successes=[...daily,...(lastManual?[{...clean(lastManual),kind:'MANUAL',
+      day:Math.floor((lastManual.completedAt||lastManual.updatedAt||lastManual.startedAt||0)/DAY),
+      precision:lastManual.completedAt||lastManual.updatedAt?'MILLISECOND':'DAY',
+      tier:2,diskReadback:false}]:[])].sort((a,b)=>b.day-a.day||
+        (b.completedAt||0)-(a.completedAt||0));
     return {...safeStatus(s.state),format:'PORTABLE',passwordRequired:false,
       guarantee:'SOURCE_COMPLETE_PLAIN_BROWSER_ARCHIVE',
-      manual:manual?{status:manual.status,code:manual.code||manual.status,
-        tier:manual.tier||0,bytes:manual.bytes||0,runId:manual.runId}:null};
+      manual:clean(manual),lastSuccess:successes[0]||null};
   }
   async function reconcile(s){
     const read=await s.read();
@@ -92,14 +164,20 @@ export function createPortableRunner(api,{
         return s.move(a.runId,a.status,'FAILED',{code:'INTERRUPTED_BEFORE_DOWNLOAD'});
       return fail('BACKUP_INFLIGHT');
     }
-    if(a.status==='DISPATCH_POSSIBLE')return fail('DOWNLOAD_OUTCOME_UNKNOWN');
-    if(a.status==='DOWNLOAD_STARTED'){
+    if(['DISPATCH_POSSIBLE','DOWNLOAD_STARTED'].includes(a.status)){
+      const row=await locatePortableDownload(api.downloads,a);
+      if(!row)return fail('DOWNLOAD_OUTCOME_UNKNOWN');
       const proof=await observe(api.downloads,{runId:a.runId,day:a.day,
-        sha256:a.sha256,bytes:a.bytes,id:a.downloadId});
-      if(proof){const done=await s.move(a.runId,'DOWNLOAD_STARTED','COMPLETE',{archive:proof});
-        if(done.ok)await completeOriginals(await db(),{runId:a.runId,sha256:a.sha256,bytes:a.bytes,browserCompleted:true});
-        return done;}
-      return s.move(a.runId,'DOWNLOAD_STARTED','HELD',{code:'DOWNLOAD_OUTCOME_UNKNOWN'});
+        sha256:a.sha256,bytes:a.bytes,id:row.id});
+      if(!proof||proof.downloadId!==row.id||proof.runId!==a.runId||
+         proof.sha256!==a.sha256||proof.bytes!==a.bytes)return fail('DOWNLOAD_OUTCOME_UNKNOWN');
+      if(a.status==='DISPATCH_POSSIBLE'){
+        const identified=await s.move(a.runId,a.status,'DOWNLOAD_STARTED',{downloadId:row.id});
+        if(!identified.ok)return identified;
+      }
+      const done=await s.move(a.runId,'DOWNLOAD_STARTED','COMPLETE',{archive:proof});
+      if(done.ok)await completeOriginals(await db(),{runId:a.runId,sha256:a.sha256,bytes:a.bytes,browserCompleted:true});
+      return done;
     }
     return fail('BACKUP_INFLIGHT');
   }
@@ -180,55 +258,44 @@ export function createPortableRunner(api,{
   async function manual(){
     if(manualTask||pending)return fail('BACKUP_INFLIGHT');
     manualTask=(async()=>{
-      let url=null,runId=null,possible=false,receipt=null;
+      let url=null,runId=null,possible=false,receipt=null,startedAt=null;
       let verifiedBytes=null,verifiedSha256=null;
       try{
         if((await sentinel.inspect()).held)return fail('BACKUP_RESTORE_HOLD');
         // A prior possible download must be observed before another local
         // export. A lost browser ACK is not evidence that nothing happened.
         const previous=await readManual();
-        if(previous&&['DISPATCH_POSSIBLE','DOWNLOAD_STARTED','HELD_UNCERTAIN']
-          .includes(previous.status)){
-          // An interrupted/late-completing Firefox download may still have a
-          // durable ID. Reconcile it before permitting any further dispatch;
-          // a lost ACK without an ID remains held, never replayed.
-          if(['DOWNLOAD_STARTED','HELD_UNCERTAIN'].includes(previous.status)&&
-             Number.isSafeInteger(previous.downloadId)&&previous.downloadId>=0){
-            const proof=await manualReceipt(api.downloads,previous.downloadId,
-              previous.bytes,previous.runId);
-            if(!proof)return fail('MANUAL_DOWNLOAD_UNCERTAIN');
-            await completeOriginals(await db(),{runId:previous.runId,sha256:previous.sha256,bytes:previous.bytes,browserCompleted:true});
-            await recordManual({...previous,status:'BROWSER_REPORTED_COMPLETE',
-              code:'BROWSER_REPORTED_COMPLETE',tier:2});
-          }else return fail('MANUAL_DOWNLOAD_UNCERTAIN');
+        if(previous&&['DISPATCH_POSSIBLE','DOWNLOAD_STARTED','HELD_UNCERTAIN'].includes(previous.status)){
+          // Return the observed original. A deliberate new export is a later action.
+          return await recoverManual();
         }
         if(previous&&['PREPARING','INTERNAL_VERIFIED'].includes(previous.status)&&
           clock()-(previous.updatedAt||previous.startedAt||clock())<keepAliveMs)
           return fail('BACKUP_INFLIGHT');
-        runId='manual_'+nextId();
+        runId='manual_'+nextId();startedAt=clock();
         await recordManual({runId,status:'PREPARING',tier:0,
-          startedAt:clock(),code:'PREPARING'});
+          startedAt,code:'PREPARING'});
         const archive=await capture(api,await db(),sentinel);
         const fileHash=await sha(archive.blob);
         await prepareOriginals(await db(),archive,runId,fileHash);
         verifiedBytes=archive.bytes;verifiedSha256=fileHash;
         await recordManual({runId,status:'INTERNAL_VERIFIED',tier:1,
-          sha256:fileHash,bytes:archive.bytes,startedAt:clock()});
+          sha256:fileHash,bytes:archive.bytes,startedAt});
         if((await sentinel.inspect()).held)throw Error('BACKUP_RESTORE_HOLD');
         // Persist possible-download intent before irreversible browser dispatch.
         await recordManual({runId,status:'DISPATCH_POSSIBLE',tier:1,
-          sha256:fileHash,bytes:archive.bytes,startedAt:clock()});
+          sha256:fileHash,bytes:archive.bytes,startedAt});
         possible=true;
         receipt=await dispatch(api,archive,{runId,manual:true});
         url=receipt.objectUrl;
         await recordManual({runId,status:'DOWNLOAD_STARTED',tier:1,
           sha256:fileHash,bytes:archive.bytes,downloadId:receipt.downloadId,
-          startedAt:clock()});
+          startedAt});
         const proof=await awaitManual(api.downloads,receipt.downloadId,archive.bytes,runId);
         if(!proof)throw Error('DOWNLOAD_OUTCOME_UNKNOWN');
         await recordManual({runId,status:'BROWSER_REPORTED_COMPLETE',tier:2,
           sha256:fileHash,bytes:archive.bytes,downloadId:receipt.downloadId,
-          startedAt:clock(),code:'BROWSER_REPORTED_COMPLETE'});
+          startedAt,code:'BROWSER_REPORTED_COMPLETE',completedAt:clock()});
         await completeOriginals(await db(),{runId,sha256:fileHash,bytes:archive.bytes,browserCompleted:true});
         return {ok:true,code:'BROWSER_REPORTED_COMPLETE',tier:2,
           sha256:fileHash,bytes:archive.bytes,runId,
@@ -240,7 +307,7 @@ export function createPortableRunner(api,{
           // Downloads API reports interruption or its ACK is lost. Without
           // these fields subsequent read-only reconciliation is impossible.
           try{await recordManual({runId,status:possible?'HELD_UNCERTAIN':'FAILED',
-            tier:possible?1:0,bytes:verifiedBytes,sha256:verifiedSha256,
+            tier:possible?1:0,startedAt,bytes:verifiedBytes,sha256:verifiedSha256,
             downloadId:receipt?.downloadId??null,code});}catch{}
         }
         return fail(possible?'DOWNLOAD_OUTCOME_UNKNOWN':explain(e));
@@ -249,7 +316,7 @@ export function createPortableRunner(api,{
     try{return await manualTask;}finally{manualTask=null;}
   }
   return Object.freeze({
-    status,tick,manual,requestOriginalCheckpoint:()=>manual(),recover:async()=>reconcile(await store()),
+    status,tick,manual,recoverManual,requestOriginalCheckpoint:()=>manual(),recover:async()=>reconcile(await store()),
     enable:async value=>{
       const s=await store(),out=await s.enabled(value);
       if(out.ok&&value)void tick();
