@@ -1,6 +1,6 @@
-# PCMS-Alpha 1.2.15 — short operator guide
+# PCMS-Alpha 1.2.16 — short operator guide
 
-Install `pcms-alpha-1.2.15.xpi` through **about:addons → gear → Install Add-on From File**. Keep a separate profile backup first. The existing add-on ID, accounts, logins and work are retained. Use Firefox 153+ in an installation that permits unsigned add-ons. Protected routing uses PersonaMonkey’s existing Mullvad bridge (`com.persona.mullvad_router`); no additional PCMS service is needed.
+Install `pcms-alpha-1.2.16.xpi` through **about:addons → gear → Install Add-on From File**. Keep a separate profile backup first. The existing add-on ID, accounts, logins and work are retained. Use Firefox 153+ in an installation that permits unsigned add-ons. Protected routing uses PersonaMonkey’s existing Mullvad bridge (`com.persona.mullvad_router`); no additional PCMS service is needed.
 
 1. **Accounts:** Open an existing account’s **Manage** dialog. Use **Verify route**, **Open Perchance** and **Sync inventory**. If login or CAPTCHA is required, complete it in that account’s protected tab, then **Confirm login**. A running tunnel with an unreachable proxy is reported separately. Once the service recovers, retry the route check; background checks also recover safe work. **Change route** preserves the account’s identity and exit history.
 2. **Generators:** Create one disposable, explicitly selected account’s generator first. Review assignments before submitting. An unknown inventory holds Automatic allocation; synchronizing that account or selecting another verified account provides contextual recovery. Creation continues with the dashboard closed. Existing generators retain their original source.

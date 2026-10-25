@@ -13,7 +13,7 @@ export async function installGeneratorFixture(options={}){
  const {createS06StandingAuthority}=await import('./s06-standing-authority.mjs');
  const {createScopedCreationGate}=await import('./creation-authority.mjs');
  const db=await openCanonicalDatabase({open:(_name,version)=>indexedDB.open('pcms-j02-ui-fixture',version)});
- let abortNextTransaction=false,releaseInputGate=null;
+ let abortNextTransaction=false,releaseInputGate=null,accountReadGate=null,releaseAccountGate=null,pendingAccountReads=0;
  const proxy=new Proxy(db,{get(target,key){if(key==='transaction')return (...args)=>{const tx=target.transaction(...args);
    if(abortNextTransaction&&args[1]==='readwrite'){abortNextTransaction=false;tx.abort()}return tx};
    const value=target[key];return typeof value==='function'?value.bind(target):value}});
@@ -121,7 +121,8 @@ export async function installGeneratorFixture(options={}){
   return {onMessage:{addListener:fn=>handlers.add(fn)},onDisconnect:{addListener:fn=>disconnected.add(fn)},disconnect(){closed=true},
    postMessage(msg){if(msg.type==='APPEND_CREATE_BATCH'&&msg.params.offset>=32&&ledger.failures.intake){
     ledger.failures.intake=false;abortNextTransaction=true;void persist();}
-    const execute=async()=>{if(msg.type==='APPEND_CREATE_BATCH'&&msg.params.offset===0&&ledger.failures.delayInput){
+    const execute=async()=>{if(msg.type==='LIST_ACCOUNTS'&&accountReadGate){pendingAccountReads++;try{await accountReadGate}finally{pendingAccountReads--}}
+     if(msg.type==='APPEND_CREATE_BATCH'&&msg.params.offset===0&&ledger.failures.delayInput){
       ledger.failures.delayInput=false;await persist();await new Promise(resolve=>{releaseInputGate=resolve});}
       return boundaries.get(name).run(msg,sender);};
     Promise.resolve(execute()).then(out=>{commands.push({type:msg.type,ok:out?.ok,code:out?.code});if(!closed)for(const fn of handlers)fn(out)})
@@ -129,7 +130,9 @@ export async function installGeneratorFixture(options={}){
  };
  window.__j02={async inspect(){const data=await rows();return {accounts:data.filter(x=>x.account).map(x=>x.account),
   records:data.filter(x=>x.record?.intentId).map(x=>x.record),chunks:data.filter(x=>x.chunk).map(x=>({key:x.key,...x.chunk})),batches:data.filter(x=>x.batch).map(x=>x.batch),
-  inventory:data.filter(x=>x.generator).map(x=>x.generator),commands:structuredClone(commands),ledger:structuredClone(ledger)}},
+  inventory:data.filter(x=>x.generator).map(x=>x.generator),commands:structuredClone(commands),pendingAccountReads,ledger:structuredClone(ledger)}},
+  holdAccountReads(){accountReadGate=new Promise(resolve=>releaseAccountGate=resolve);return true},
+  releaseAccountReads(){const release=releaseAccountGate;accountReadGate=null;releaseAccountGate=null;release?.();return true},
   async adopt(){return adoption.autoTick()},
   async tick(n=1){for(let i=0;i<n;i++){await authority.state();await watcher.tick();}return this.inspect()},
   async addUnknownAccount(){const a={accountId:'account_j02_unknown',alias:'New account',personaUid:'persona-j02-unknown',

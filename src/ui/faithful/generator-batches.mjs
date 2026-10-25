@@ -106,7 +106,7 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
   const auto=el('option','','Automatic — balanced');auto.value='';choice.append(auto);accountLabel.append(choice);
   const status=el('p','setting-note','Preview account assignments before submitting. Existing owned generators are reconciled; new generators start private.'),preview=el('div'),actions=el('div','form-foot');
   status.setAttribute('role','status');d.body.append(label,accountLabel,status,preview,actions);
-  let frozen=null,accountRows=[],busy=false,offset=0,persisted=null,draftReady=false;
+  let frozen=null,accountRows=[],busy=false,offset=0,persisted=null,draftReady=false,accountReadEpoch=0;
   const policyStatus=el('p','setting-note'),policyButton=b('Checking creation policy…',()=>void togglePolicy());policyButton.disabled=true;
   let policy=null;
   async function loadPolicy(){try{const out=await request('pcms-s06-authority','GET_OPERATOR_MANAGEMENT',{},12000);
@@ -119,8 +119,18 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
     if(out.enabled)try{await browser.alarms.create('pcms-s04-creation-followup',{when:Date.now()+1000})}catch{}
    }catch{policyStatus.textContent='Policy change was not confirmed. Refresh before retrying.';await loadPolicy()}}
   d.body.append(policyStatus,policyButton);void loadPolicy();
-  void accounts().then(out=>{accountRows=out.accounts||[];
-   for(const a of accountRows.filter(a=>a.state!=='ARCHIVED')){const o=el('option','',a.alias||a.accountId);o.value=a.accountId;choice.append(o)}}).catch(()=>{status.textContent='Accounts unavailable. Retry preview after recovering Accounts.'});
+  async function readAccounts(){
+   const epoch=++accountReadEpoch,out=await accounts();
+   if(out?.ok!==true||!Array.isArray(out.accounts))throw Error('ACCOUNTS_UNAVAILABLE');
+   if(epoch===accountReadEpoch&&d.overlay.isConnected){
+    accountRows=out.accounts;const selected=frozen?frozen.accountId||'':choice.value;choice.replaceChildren(auto);
+    for(const a of accountRows.filter(a=>a.state!=='ARCHIVED')){const o=el('option','',a.alias||a.accountId);o.value=a.accountId;choice.append(o)}
+    if(selected&&![...choice.options].some(o=>o.value===selected)){const o=el('option','','Selected account · unavailable');o.value=selected;choice.append(o)}
+    choice.value=selected;
+   }
+   return out;
+  }
+  void readAccounts().catch(()=>{if(!busy&&!frozen&&d.overlay.isConnected)status.textContent='Accounts unavailable. Retry preview after recovering Accounts.'});
   function reset(){if(!busy&&!persisted){frozen=null;preview.replaceChildren();submit.hidden=true;review.hidden=false;review.textContent='Preview assignments';review.className='btn primary';status.textContent='Preview the updated inputs before submitting.'}}
   input.addEventListener('input',reset);choice.addEventListener('change',reset);
   function draw(){preview.replaceChildren();
@@ -141,10 +151,12 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
    const slugs=input.value.split(/[\s,;]+/).map(x=>x.trim()).filter(Boolean);
    if(!slugs.length||slugs.some(s=>!/^[a-z0-9][a-z0-9-]{0,99}$/.test(s))){status.textContent='Use lowercase letters, numbers and hyphens. Your input is preserved.';return}
    busy=true;review.disabled=true;input.disabled=true;choice.disabled=true;status.textContent='Reading current counts and existing jobs…';
-   try{const out=await call('PREVIEW_CREATE_BATCH',{slugs,accountId:choice.value||null},60000);if(!out.ok)throw Error(out.code);
+   const selectedAccount=choice.value||null;
+   try{const [out]=await Promise.all([call('PREVIEW_CREATE_BATCH',{slugs,accountId:selectedAccount},60000),readAccounts()]);if(!out.ok)throw Error(out.code);
+    if(!d.overlay.isConnected)return;
     const inventoryBlockers=out.items.some(i=>i.code==='INITIAL_INVENTORY_UNKNOWN')?
-      (out.accounts||[]).filter(a=>a.state!=='ARCHIVED'&&!a.initialKnown&&(!choice.value||a.accountId===choice.value)).map(a=>a.accountId):[];
-    frozen=Object.freeze({slugs:[...slugs],accountId:choice.value||null,items:out.items,inventoryBlockers});offset=0;persisted=null;
+      (out.accounts||[]).filter(a=>a.state!=='ARCHIVED'&&!a.initialKnown&&(!selectedAccount||a.accountId===selectedAccount)).map(a=>a.accountId):[];
+    frozen=Object.freeze({slugs:[...slugs],accountId:selectedAccount,items:out.items,inventoryBlockers});offset=0;persisted=null;
     draw();status.textContent='Preview frozen for these inputs. Counts are checked again before creation; held items do not stop the others.';
     submit.hidden=false;review.hidden=false;review.textContent='Update preview';review.className='btn';submit.focus();
    }catch{status.textContent='Preview unavailable. Your input is preserved. Retry after checking Accounts.'}
