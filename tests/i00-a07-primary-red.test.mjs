@@ -6,8 +6,8 @@ import {readFile} from 'node:fs/promises';
 // routine workflows without clicking a hidden pre-v0.1.6 DOM controller.
 const primary=await readFile(new URL('../src/ui/faithful/bridge.mjs',import.meta.url),'utf8');
 const section=(start,end)=>primary.slice(primary.indexOf(start),primary.indexOf(end,primary.indexOf(start)));
-test('A07 primary backups call the live browser-native backup coordinator',()=>{
-  const s=section('function primaryBackups(container){','function primaryDiagnostics(container){');
+test('A07 primary backups call the live browser-native backup coordinator',async()=>{
+  const s=await readFile(new URL('../src/ui/faithful/backup-workspace.mjs',import.meta.url),'utf8');
   assert.doesNotMatch(s,/Encrypted source-complete|RUN_V2_MANUAL|SAVE_KEY|STORE_KEY|OS vault|recovery passphrase/i);
   assert.match(s,/MANUAL/);
   assert.match(s,/RUN_NOW/);

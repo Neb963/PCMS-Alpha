@@ -271,26 +271,19 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
             gm['gm-values:'+mapped.id]=items;
           else throw Error('RESTORE_GM_MAPPING_UNVERIFIED');
         }
-        const localPatch=preparePortableLocalRestore(incomingLocal,baseline.local||{}, {mode});
+        const localPatch=preparePortableLocalRestore(incomingLocal,baseline.local||{}, {mode,uidRemap:remaps});
         const history=await restoredAutomationHistory(payload,preparedDonor,intent.epoch,intent.startedAt);
-        const priorHistory=mode==='merge'?(baseline.portable?.automationHistory||[]):[];
-        const terminal=job=>job&&!job.externalOwner&&!['queued','preparing','running','stopping'].includes(job.state);
-        const historyWindow=[...priorHistory.filter(terminal),...history];
         const portableValues={...gm,...localPatch};
         const portableOperation={gm:await digest(JSON.stringify(gm)),
-          ...(incomingLocal!==null?{local:await digest(JSON.stringify(localPatch))}:{}),
-          ...(history.length?{history:await digest(JSON.stringify(historyWindow))}:{})};
+          ...(incomingLocal!==null?{local:await digest(JSON.stringify(localPatch))}:{})};
         await step('donor-portable',portableOperation,
           async()=>{
             if(Object.keys(portableValues).length)await api.storage.local.set(portableValues);
-            if(history.length){assert(typeof donor.restoreHistory==='function','RESTORE_HISTORY_UNAVAILABLE');await donor.restoreHistory(historyWindow);}
           },
           async fp=>{
-            const got=await api.storage.local.get([...Object.keys(portableValues),...(history.length?['automationJobs']:[])]);
-            const intended=new Map(historyWindow.map(j=>[j.id,j]));
-            const historyOk=!history.length||Object.values(got.automationJobs||{}).filter(j=>j?.id?.startsWith('restored_'+intent.epoch.slice(8)+'_')).every(j=>same(j,intended.get(j.id)));
+            const got=await api.storage.local.get(Object.keys(portableValues));
             return {source:'INDEPENDENT_READBACK',
-              digest:historyOk&&Object.keys(portableValues).every(k=>same(got[k],portableValues[k]))?fp:'0'.repeat(64)};
+              digest:Object.keys(portableValues).every(k=>same(got[k],portableValues[k]))?fp:'0'.repeat(64)};
           });
         preparedCanonical=prepareRestoredCanonical({incoming:canonicalWithAutomationHistory(incomingPcms,history,intent.epoch),
           current:baseline.pcms,mode,uidRemap:remaps,fresh,accountChoices});
@@ -531,6 +524,10 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           assert(await observeDonorBaseline(intent.donorBaseline,actual.snap),'RESTORE_DESTINATION_DRIFT');
         const baseline={snap:actual.snap,pcms:checkpointCanonicalBaseline(checkpoint.canonical,actual.pcms),
           portable:checkpoint.donor,local:splitPortableLocal(checkpoint.canonical).values||{}};
+        if(!intent.groups['pcms-canonical']||intent.groups['pcms-canonical'].status==='BEFORE_DISPATCH')
+          assert(same(actual.pcms,baseline.pcms),'RESTORE_DESTINATION_DRIFT');
+        if(!intent.groups['donor-portable']||intent.groups['donor-portable'].status==='BEFORE_DISPATCH')
+          assert(same(actual.local,baseline.local),'RESTORE_CHECKPOINT_LOCAL_DRIFT');
         await applyGuardedGroups({db,donor,baseline,intent,req:intent.recovery.mappings,
           payload:incoming.donor,incomingPcms:incoming.canonical,mode:intent.recovery.mode,
           fresh:intent.fresh,accountChoices:intent.recovery.accountChoices||{},v2:true,

@@ -14,7 +14,7 @@ export function validDonorPreparation(r){
  Array.isArray(r.sourcePersonas)&&r.sourcePersonas.length<=10000&&r.sourcePersonas.every(p=>
  typeof p.containerId==='string'&&typeof p.targetUid==='string'&&
  (p.sourceUid===null||typeof p.sourceUid==='string')&&(p.sourceId===null||typeof p.sourceId==='string'))&&
- ['profiles','scripts','workflows','untouchedProfiles'].every(k=>validHashes(r[k]))&&
+ ['profiles','scripts','workflows','untouchedProfiles','untouchedScripts','untouchedWorkflows'].every(k=>validHashes(r[k]))&&
  /^[a-f0-9]{64}$/.test(r.globalSha256||'')&&/^[a-f0-9]{64}$/.test(r.routesSha256||'');
 }
 export async function donorPreparationReceipt(prepared,baseline,mappings){
@@ -28,6 +28,8 @@ export async function donorPreparationReceipt(prepared,baseline,mappings){
  scripts:await rows(Object.values(prepared.scriptMap||{}),prepared.candidate.scripts||{}),
  workflows:await rows(Object.values(prepared.workflowMap||{}),prepared.candidate.workflows||{}),
  untouchedProfiles:await rows(Object.keys(baseline.state.profiles||{}).filter(id=>!target.has(id)),baseline.state.profiles||{}),
+ untouchedScripts:await rows(Object.keys(prepared.candidate.scripts||{}).filter(id=>!Object.values(prepared.scriptMap||{}).includes(id)),prepared.candidate.scripts||{}),
+ untouchedWorkflows:await rows(Object.keys(prepared.candidate.workflows||{}).filter(id=>!Object.values(prepared.workflowMap||{}).includes(id)),prepared.candidate.workflows||{}),
  globalSha256:await hash(baseline.state.global),routesSha256:await hash(baseline.state.routes)};
  if(!validDonorPreparation(receipt))throw Error('RESTORE_DONOR_RECEIPT_INVALID');
  return receipt;
@@ -36,7 +38,7 @@ export async function observeDonorPreparation(receipt,snapshot){
  if(!validDonorPreparation(receipt)||receipt.status!=='COMMIT_POSSIBLE'||!snapshot?.state)return false;
  const state=snapshot.state;
  if(await hash(state.global)!==receipt.globalSha256||await hash(state.routes)!==receipt.routesSha256)return false;
- for(const [group,objects] of [['profiles',state.profiles],['untouchedProfiles',state.profiles],['scripts',state.scripts],['workflows',state.workflows]])
+ for(const [group,objects] of [['profiles',state.profiles],['untouchedProfiles',state.profiles],['scripts',state.scripts],['workflows',state.workflows],['untouchedScripts',state.scripts],['untouchedWorkflows',state.workflows]])
  for(const row of receipt[group])if(!objects?.[row.id]||await hash(objects[row.id])!==row.sha256)return false;
  for(const p of receipt.sourcePersonas){const r=state.profiles?.[p.containerId];
  if(!r||r.personaUid!==p.targetUid||r.routeId!==BLOCK_ROUTE_ID||r.killSwitch!==true||r.blockLocalNetwork!==true||r.managed!==true)return false;}

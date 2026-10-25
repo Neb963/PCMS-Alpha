@@ -11,7 +11,7 @@ const fields=(value,names)=>{
  }
  return out;
 };
-const configFields=['accountId','personaUid','repositoryId','namespace'];
+const configFields=['accountId','personaUid','repositoryId','namespace','requiresRevalidation'];
 const renameFields=['schema','repositoryId','oldSlug','newSlug','oldTreeOid','newTreeOid','folderTreeOid','markerOid','evidenceHead','reason','state','revision','automaticRenameApproved','sourceReviewAt','ownerChoiceSource','sourceFingerprint','visibility','remoteId','personaUid','accountId','bindingVersion','principalFingerprint','baselineKey','preparedAt','dispatchAt','operationId','lastPreInvocationHold','providerAcknowledged','verifiedAt','readbackFingerprint','associationFingerprint','finalizedAt','restoredHistorical'];
 const eventFields=['stage','outcome','code','at','tier','proof','provenance','note'];
 const runFields=['version','runId','slug','intentId','stage','status','startedAt','updatedAt','created','remoteArtifactsPreserved','cleanup','restoredHistorical'];
@@ -76,7 +76,7 @@ export function splitPortableLocal(pcms){
  return {values,pcms:{...pcms,stores:{...pcms.stores,meta:pcms.stores.meta.filter(r=>r.key!==PORTABLE_LOCAL_META)}}};
 }
 const uncertain=v=>['DISPATCH_POSSIBLE','OUTCOME_UNCERTAIN','REMOTE_RENAME_VERIFIED_LINK_PENDING'].includes(v?.state);
-export function preparePortableLocalRestore(incoming,current,{mode='merge'}={}){
+export function preparePortableLocalRestore(incoming,current,{mode='merge',uidRemap={}}={}){
  if(incoming===null)return {};
  const source=collectPortableLocal(incoming),destination=collectPortableLocal(current),patch={};
  for(const [key,raw] of Object.entries(source)){
@@ -91,6 +91,8 @@ export function preparePortableLocalRestore(incoming,current,{mode='merge'}={}){
   else if(key.startsWith('pcmsR4ExistingRename')&&value){
    delete value.ownerChoiceSource;value.restoredHistorical=true;
    if(value.state==='DISPATCH_POSSIBLE')value.state='OUTCOME_UNCERTAIN';
+  }else if(key==='pcmsS08DisposableScope'&&value){
+   value.personaUid=uidRemap[value.personaUid]||value.personaUid;value.requiresRevalidation=true;
   }else if(key==='pcmsS08DiagnosticRun'&&value){
    value.restoredHistorical=true;value.status='HELD';
    value.currentHold={stage:value.stage||'SCOPE',code:'RESTORED_DIAGNOSTIC_REQUIRES_SCOPE_REVALIDATION'};

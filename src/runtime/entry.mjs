@@ -11,6 +11,7 @@ import './command-boundary.mjs';
 // S00 effect-free coordinator intake; no remote operations or migration.
 import './coordinator-boundary.mjs';
 import './s08-cleanup-boundary.mjs';
+import './diagnostic-startup.mjs';
 import './creation-watch.mjs';
 // I03 listeners are registered in the synchronous entry evaluation path.
 import './account-boundary.mjs';

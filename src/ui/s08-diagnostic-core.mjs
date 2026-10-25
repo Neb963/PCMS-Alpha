@@ -22,7 +22,7 @@ function safeCode(v,fallback='READ_NOT_CONFIRMED'){
 // Independence is about the TEST, not a claim that a provider effect occurred.
 // A disabled Refresher or unobserved remote login can still have a healthy local
 // runtime. Never translate a local response into H/L proof.
-export function independentReadOnlyResults({readiness,accounts,inventory,refresher,authority},now){
+export function independentReadOnlyResults({readiness,accounts,inventory,refresher,authority,backup,archive,localRestore},now){
  if(!Number.isSafeInteger(now)||now<=0)throw Error('INDEPENDENT_CHECK_CLOCK_INVALID');
  const rows=[];
  const add=(id,ok,code,tier='D')=>rows.push({
@@ -32,9 +32,11 @@ export function independentReadOnlyResults({readiness,accounts,inventory,refresh
  const lookup=new Map(readiness?.ok===true&&Array.isArray(readiness.rows)?
   readiness.rows.filter(x=>typeof x?.component==='string').map(x=>[x.component,x]):[]);
  for(const [id,component,tier] of INDEPENDENT_MODULES){
-  const v=lookup.get(component);
+  const v=id==='BACKUP_RUNTIME'&&backup?{state:backup.ok===true?'VERIFIED':'NOT_TESTED',code:backup.ok?'BROWSER_PORTABLE_BACKUP_RESPONDED':backup.code}:lookup.get(component);
   add(id,v?.state==='VERIFIED',v?.code||'READINESS_NOT_AVAILABLE',tier);
  }
+ if(archive)add('BACKUP_ARCHIVE',archive.ok===true&&archive.code==='IN_MEMORY_SOURCE_AND_DONOR_VERIFIED',archive.code||'ARCHIVE_NOT_OBSERVED');
+ if(localRestore)add('RESTORE_LOCAL_DATA',localRestore.ok===true&&localRestore.code==='ISOLATED_CANONICAL_RESTORE_REOPEN_VERIFIED',localRestore.code||'RESTORE_NOT_OBSERVED');
  add('ACCOUNT_STORE',accounts?.ok===true&&Array.isArray(accounts.accounts),
   accounts?.ok?'CANONICAL_ACCOUNT_LIST_READ':accounts?.code||'ACCOUNT_LIST_UNAVAILABLE');
  add('INVENTORY_STORE',inventory?.ok===true&&Array.isArray(inventory.items),
@@ -45,7 +47,7 @@ export function independentReadOnlyResults({readiness,accounts,inventory,refresh
   authority?.ok?'AUTHORIZATION_RECORD_READ':authority?.code||'AUTHORIZATION_READ_UNAVAILABLE');
  return {schema:1,checkedAt:now,mode:'INDEPENDENT_READ_ONLY',rows,
   limitations:['NO_PROTECTED_ROUTE_OR_LOGIN_PROOF','NO_PRIVATE_GIT_WRITE_PROOF',
-   'NO_PERCHANCE_CREATE_OR_PUBLICATION_PROOF','NO_DISK_REOPEN_OR_RESTORE_PROOF']};
+   'NO_PERCHANCE_CREATE_OR_PUBLICATION_PROOF','NO_DOWNLOADED_FILE_OR_FRESH_PROFILE_RESTORE_PROOF']};
 }
 export function independentDiagnosticExport(snapshot,run=null){
  if(snapshot?.schema!==1||snapshot.mode!=='INDEPENDENT_READ_ONLY'||
@@ -93,7 +95,7 @@ export function createDiagnosticRun(config,hex,now){
  return {ok:true,run:{
    version:1,runId:'s08_'+hex,slug,intentId:'intent_s08_'+hex,
    config:{...config},stage:'SCOPE',status:'NOT_TESTED',
-   firstFailure:null,events:[],startedAt:now,updatedAt:now,
+   firstFailure:null,currentHold:null,eventHistory:[],events:[],startedAt:now,updatedAt:now,
    created:false,remoteArtifactsPreserved:true,
    cleanup:'NOT_ATTEMPTED'}};
 }
@@ -109,16 +111,19 @@ export function addDiagnosticEvent(run,stage,outcome,code,now){
  if(!STAGES.includes(stage)||!['PASS','NOT_TESTED','HELD','UNCERTAIN'].includes(outcome)||
    typeof code!=='string'||!/^[A-Z0-9_]{1,110}$/.test(code)||
    !Number.isSafeInteger(now)||now<run.startedAt)throw Error('DIAGNOSTIC_EVENT_INVALID');
- const events=run.events.filter(e=>e.stage!==stage).concat([{stage,outcome,code,at:now}]);
- return {...run,events,updatedAt:now,
-   ...(outcome==='PASS'?{}:{firstFailure:{stage,code}})};
+ const event={stage,outcome,code,at:now};
+ const events=run.events.filter(e=>e.stage!==stage).concat([event]);
+ const failed=['HELD','UNCERTAIN'].includes(outcome);
+ return {...run,events,eventHistory:[...(run.eventHistory||run.events),event],updatedAt:now,
+   firstFailure:run.firstFailure||(failed?{stage,code}:null),
+   currentHold:failed?{stage,code}:run.currentHold?.stage===stage?null:run.currentHold||null};
 }
 export function diagnosticReport(run){
  if(!run||run.version!==1)return {ok:false,code:'REPORT_UNAVAILABLE'};
  return {format:'PCMS_S08_SANITIZED',version:1,runId:run.runId,
   startedAt:run.startedAt,updatedAt:run.updatedAt,
   stage:run.stage,status:run.status,
-  firstFailure:run.firstFailure,
+  firstFailure:run.firstFailure,currentHold:run.currentHold||null,eventHistory:run.eventHistory||run.events,
   stages:STAGES.map(stage=>run.events.find(e=>e.stage===stage)||
     {stage,outcome:'NOT_TESTED',code:'NOT_REACHED'}),
   scope:{account:'DESIGNATED_TEST_ACCOUNT',persona:'DESIGNATED_TEST_PERSONA',
@@ -140,9 +145,9 @@ export function recoverDiagnosticIfInactive(run,activeInDocument){
 export function recoverInterruptedDiagnostic(run){
  if(run?.version!==1||run.status!=='RUNNING')return run;
  if(run.stage==='COMPLETED'&&STAGES.every(stage=>run.events?.some(e=>e.stage===stage&&e.outcome==='PASS')))
-   return {...run,status:'PASS',firstFailure:null};
+   return {...run,status:'PASS',currentHold:null};
  if(!STAGES.includes(run.stage))return {...run,status:'HELD',
-   firstFailure:{stage:run.stage,code:'INTERRUPTED_STAGE_UNKNOWN'}};
+   firstFailure:run.firstFailure||{stage:run.stage,code:'INTERRUPTED_STAGE_UNKNOWN'},currentHold:{stage:run.stage,code:'INTERRUPTED_STAGE_UNKNOWN'}};
  return {...run,status:'HELD',
-   firstFailure:{stage:run.stage,code:'BROWSER_INTERRUPTED_RECONCILE_BEFORE_RESUME'}};
+   firstFailure:run.firstFailure||{stage:run.stage,code:'BROWSER_INTERRUPTED_RECONCILE_BEFORE_RESUME'},currentHold:{stage:run.stage,code:'BROWSER_INTERRUPTED_RECONCILE_BEFORE_RESUME'}};
 }

@@ -199,6 +199,7 @@ function portCommand(message){
   invalidate();await refreshStatus();
   if(!out?.ok)throw Error(out?.code||'RESTORE_RESULT_UNKNOWN');
   status.textContent='Selected data restored. Review the continuation step below.';
+  window.dispatchEvent(new Event('pcms-restore-completed'));
  }));
  cancel.addEventListener('click',()=>action(async()=>{
   if(!preparation)return;
@@ -210,6 +211,7 @@ function portCommand(message){
   const held=await portCommand({action:'STATUS'});if(!held?.portableScopes)throw Error('RESTORE_PORTABLE_RECONCILE_SCOPE');
   const out=await portCommand({action:'RECONCILE_PORTABLE',params:held.portableScopes});await refreshStatus();
   if(!out?.ok)throw Error(out?.code||'RESTORE_RESULT_UNKNOWN');
+  window.dispatchEvent(new Event('pcms-restore-completed'));
  }));
  stopped.addEventListener('change',sync);
  reactivate.addEventListener('click',()=>action(async()=>{

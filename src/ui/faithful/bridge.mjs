@@ -1,3 +1,4 @@
+import {mountBackupWorkspace} from './backup-workspace.mjs';
 import {acknowledgeIncident,incidentDestination} from './attention.mjs';
 import {createRefresherWorkspace} from './refresher-workspace.mjs';
 import {matchesReviewGroup} from '../review-queue-state.mjs';
@@ -1741,13 +1742,13 @@ function primaryAiSettings(container){
  void refresh();
 }
 // I16 restore remains implemented by the original protected stage runner.
-// This primary workflow mirrors its encrypted files and explicit review
-// controls; it never reimplements or bypasses the restore gate.
+// Primary file inspection and choices bind the same guarded restore engine.
 function primaryRestore(container){
- const section=primarySettingCard(container,'Restore portable backup',
-   'Inspect the complete plain archive and an independent pre-restore checkpoint. Imported routes, sessions and publication rights remain inactive.');
+ const section=primarySettingCard(container,'Restore a backup','');
+ section.querySelector('h2').id='pcms-restore-title';section.querySelector('p')?.remove();
  const tpl=document.createElement('template');tpl.innerHTML=portableRestoreTemplate;
  const form=tpl.content.firstElementChild;
+ form.querySelector('.panel-head')?.remove();
  form.className='form-stack';
  for(const input of form.querySelectorAll('input:not([type=checkbox]), select, textarea'))
    input.classList.add('form-input');
@@ -1777,54 +1778,7 @@ function portableBackupCommand(message,timeoutMs=90000){
  });
 }
 function primaryBackups(container){
- const section=primarySettingCard(container,'Portable backup',
-  'Passwordless, unencrypted, source-complete archive. Firefox download completion does not independently verify disk bytes.');
- const status=el('p','setting-note','Reading portable backup receipts…');status.setAttribute('role','status');
- const actions=el('div','form-foot');
- const dailyLabel=el('label','setting-option');
- const daily=el('input');daily.type='checkbox';
- dailyLabel.append(daily,document.createTextNode(' Daily automatic backups (up to 14 tracked copies)'));
- section.append(dailyLabel,actions,status);
- const run=async (message,feedback)=>{
-  for(const button of actions.querySelectorAll('button'))button.disabled=true;
-  status.textContent=feedback;
-  try{
-   const r=await portableBackupCommand(message);
-   if(r?.ok&&message.action==='ENABLE')daily.checked=r.enabled===true;
-   status.textContent=r?.ok?
-    message.action==='MANUAL'&&r.code==='BROWSER_REPORTED_COMPLETE'?
-     'Firefox reports the archive download completed: '+r.bytes+' bytes, SHA-256 '+r.sha256+'. Independent disk readback not performed.':
-     'Backup operation: '+(r.code||r.status||'ACKNOWLEDGED')+'. Check receipts before repeating uncertain effects.':
-    'Backup held: '+(r?.code||'BACKUP_RESULT_UNKNOWN')+'. No additional download will be inferred or replayed.';
-  }catch{status.textContent='Backup result uncertain. Check durable receipts and Firefox Downloads before retrying.'}
-  finally{for(const button of actions.querySelectorAll('button'))button.disabled=false;}
- };
- const manual=b('Download complete backup',()=>void run({action:'MANUAL'},'Collecting exact source, sessions and recovery records…'),'btn primary');
- const save=b('Save daily schedule',()=>void run({action:'ENABLE',enabled:daily.checked},'Updating persistent daily schedule…'),'btn small');
- const now=b('Run daily backup now',()=>void run({action:'RUN_NOW'},'Checking durable backup schedule and receipts…'),'btn small');
- const refresh=b('Check receipts',()=>void (async()=>{
-  const r=await portableBackupCommand({action:'STATUS'});
-  if(!r?.ok){status.textContent='Backup status unavailable: '+(r?.code||'UNKNOWN');return}
-  daily.checked=r.enabled===true;
-  const manual=r.manual?(' Last manual: '+r.manual.status+' ('+r.manual.code+').'):'';
-  status.textContent='Daily: '+(r.status||r.code||'NOT_OBSERVED')+
-   '. Tracked successes: '+(r.retained??'unknown')+'.'+manual+
-   ' Unknown download effects are held rather than repeated.';
- })(),'btn small');
- const audit=b('Audit stored source',()=>void (async()=>{
-  audit.disabled=true;let db;
-  try{
-   db=await openCanonicalDatabase();
-   const auditState=await snapshotCanonicalV2(db,{serializedValues:true});
-   const outcome=await preflightSourceRecovery(auditState);
-   status.textContent='Local source closure: '+outcome.manifests+' manifests, '+
-    outcome.uniqueBlobs+' blobs, '+outcome.uniqueBytes+' bytes. No disk-backup proof implied.';
-  }catch(error){status.textContent='Source audit held: '+String(error?.message||'UNKNOWN').slice(0,90)}
-  finally{try{db?.close()}catch{}audit.disabled=false}
- })(),'btn small');
- actions.append(manual,save,now,refresh,audit);
- void refresh.click();
- primaryRestore(container);
+ mountBackupWorkspace(container,{card:primarySettingCard,el,b,request:portableBackupCommand,mountRestore:primaryRestore});
 }
 function primaryDiagnostics(container){
  const section=primarySettingCard(container,'Operational diagnostics',

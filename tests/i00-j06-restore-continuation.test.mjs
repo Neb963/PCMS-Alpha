@@ -49,3 +49,37 @@ test('J06 explicit continuation starts a never-dispatched prepared group once; p
  row=await createRestoreStageEngine(g,{readback:async()=>({source:'INDEPENDENT_READBACK',digest:h})}).reconcile({epoch:row.epoch,revision:row.revision,group:'donor-cookies',step:'donor-cookies',fingerprint:h});
  assert.equal(row.groups['donor-cookies'].status,'OBSERVED');assert.equal(effects,2);
 });
+
+test('J06 replace import preserves unrelated Persona script/workflow bytes and execution assignments',async()=>{
+ const {preserveUnselectedDonorSources}=await import('../src/runtime/restore-preserve.mjs');
+ const current={profiles:{unrelated:{scriptIds:['shared']}},scripts:{shared:{id:'shared',code:'UNTOUCHED EXACT SOURCE',profileIds:['unrelated','selected'],enabled:true,autoRun:true}},workflows:{flow:{id:'flow',enabled:true,steps:[{profileId:'unrelated',scriptIds:['shared']}]}}};
+ const imported={state:{profiles:{selected:{scriptIds:['shared']}},scripts:{shared:{id:'shared',code:'IMPORTED SOURCE',profileIds:['selected'],enabled:false}},workflows:{flow:{id:'flow',enabled:false,steps:[{profileId:'selected',scriptIds:['shared']}]}}},maps:{script:new Map([['s','shared']]),workflow:new Map([['w','flow']])}};
+ let next=0;preserveUnselectedDonorSources(imported,current,new Set(['selected']),{newId:kind=>kind+'-new-'+(++next)});
+ const sid=imported.maps.script.get('s'),wid=imported.maps.workflow.get('w');
+ assert.notEqual(sid,'shared');assert.notEqual(wid,'flow');
+ assert.equal(imported.state.scripts.shared.code,current.scripts.shared.code);assert.equal(imported.state.scripts.shared.enabled,true);
+ assert.deepEqual(imported.state.scripts.shared.profileIds,['unrelated']);
+ assert.deepEqual(imported.state.workflows.flow,current.workflows.flow);
+ assert.equal(imported.state.scripts[sid].code,'IMPORTED SOURCE');assert.deepEqual(imported.state.profiles.selected.scriptIds,[sid]);
+ assert.deepEqual(imported.state.workflows[wid].steps[0].scriptIds,[sid]);
+});
+test('J06 exit exclusions union newer destination history; actual cross-account conflicts hold and no imported pin activates',async()=>{
+ const {mergeRestoredExitLedgers}=await import('../src/runtime/restore-exits.mjs');
+ const key='network:s01:exit-ownership-v1',binding={accountId:'account_fixture',bindingId:'binding_fixture',personaUid:uid,pin:'ACTIVE',routeId:'route_fixture',history:[]};
+ const incoming={key,schema:2,revision:2,owners:{'IPv4:8.8.8.8':'account_fixture'},bindings:{binding_fixture:binding}};
+ const current={key,schema:2,revision:8,owners:{'IPv4:8.8.8.8':'account_fixture','IPv4:9.9.9.9':'account_other'},bindings:{binding_fixture:binding,binding_other:{...binding,accountId:'account_other',bindingId:'binding_other'}}};
+ const merged=mergeRestoredExitLedgers(incoming,current,{affectedAccounts:['account_fixture']});
+ assert.equal(merged.owners['IPv4:9.9.9.9'],'account_other');assert.equal(merged.bindings.binding_fixture.pin,'HELD');assert.equal(merged.bindings.binding_other.pin,'ACTIVE');assert.equal(merged.revision,9);
+ const fresh=mergeRestoredExitLedgers(incoming,null);assert.equal(fresh.bindings.binding_fixture.pin,'HELD');
+ const conflict=structuredClone(incoming);conflict.owners['IPv4:9.9.9.9']='account_fixture';
+ assert.throws(()=>mergeRestoredExitLedgers(conflict,current),/RESTORE_EXIT_HISTORY_CONFLICT/);
+});
+test('J06 complete restored automation history is terminal, mapped and stable without touching private donor jobs',async()=>{
+ const {restoredAutomationHistory,canonicalWithAutomationHistory}=await import('../src/runtime/restore-observation.mjs');
+ const payload={automationHistory:[{id:'source-job',state:'running',workflowId:'old-flow',tasks:[{profileId:'old-container'}]}]};
+ const receipt={workflowMap:{'old-flow':'restored-flow'},sourcePersonas:[{sourceId:'old-container',containerId:'firefox-container-1'}]};
+ const first=await restoredAutomationHistory(payload,receipt,'restore_'+'a'.repeat(32),1000),second=await restoredAutomationHistory(payload,receipt,'restore_'+'a'.repeat(32),1000);
+ assert.deepEqual(first,second);assert.equal(first[0].state,'interrupted');assert.equal(first[0].workflowId,'restored-flow');assert.equal(first[0].tasks[0].profileId,'firefox-container-1');
+ const base={schema:1,stores:{meta:[]}};const expected=canonicalWithAutomationHistory(base,first,'restore_'+'a'.repeat(32));
+ assert.equal(expected.stores.meta[0].value.jobs[0].sourceHistoryId,'source-job');assert.equal(base.stores.meta.length,0);
+});

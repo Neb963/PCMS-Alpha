@@ -1,3 +1,4 @@
+import {inspectDisposableRestore} from './functional-restore.mjs';
 import {checkpointed} from './work-checkpoint.mjs';
 import {preparePortableOriginals,completePortableOriginals} from './portable-originals.mjs';
 // A02: one browser-native daily and manual backup coordinator. Never invokes
@@ -11,7 +12,7 @@ import {capturePortableCut,downloadPortable} from './portable-cut.mjs';
 import {createNoticeDispatcher} from './notices.mjs';
 import {readPortableArchive} from './portable-archive.mjs';
 const fail=code=>({ok:false,code});
-const explain=e=>/^(BACKUP|PORTABLE|DOWNLOAD)_[A-Z0-9_]{3,70}$/.test(e?.message||'')?
+const explain=e=>/^(BACKUP|PORTABLE|DOWNLOAD|RESTORE)_[A-Z0-9_]{3,70}$/.test(e?.message||'')?
   e.message:'BACKUP_OPERATION_FAILED';
 const sha=async blob=>Array.from(new Uint8Array(await crypto.subtle.digest(
   'SHA-256',await blob.arrayBuffer())),x=>x.toString(16).padStart(2,'0')).join('');
@@ -284,6 +285,17 @@ export function createPortableRunner(api,{
     })();
     try{return await inspection}finally{inspection=null}
   }
+  async function inspectRestore(){
+    if(pending||manualTask||inspection)return fail('BACKUP_INFLIGHT');
+    inspection=(async()=>{
+      try{
+        if((await sentinel.inspect()).held)return fail('BACKUP_RESTORE_HOLD');
+        const archive=await capture(api,await db(),sentinel);
+        return await inspectDisposableRestore(archive);
+      }catch(e){return fail(explain(e))}
+    })();
+    try{return await inspection}finally{inspection=null}
+  }
   async function ownsPreparation(owner){
     if(!owner||!/^restore_[a-f0-9]{32}$/.test(owner.epoch||'')||
        !Number.isSafeInteger(owner.revision)||!/^portable_[a-f0-9]{32}$/.test(owner.stageScope||''))return false;
@@ -360,8 +372,9 @@ export function createPortableRunner(api,{
   manual=checkpointed(api,manual,{allowDuringRestore:owner=>!!owner});
   recoverManual=checkpointed(api,recoverManual,{allowDuringRestore:owner=>!!owner});
   inspectArchive=checkpointed(api,inspectArchive);
+  inspectRestore=checkpointed(api,inspectRestore);
   return Object.freeze({
-    status,tick,manual:()=>manual(),checkpoint:owner=>manual(owner),recoverManual,inspectArchive,requestOriginalCheckpoint:()=>manual(),recover:checkpointed(api,async()=>reconcile(await store())),
+    status,tick,manual:()=>manual(),checkpoint:owner=>manual(owner),recoverManual,inspectArchive,inspectRestore,requestOriginalCheckpoint:()=>manual(),recover:checkpointed(api,async()=>reconcile(await store())),
     enable:checkpointed(api,async value=>{
       const s=await store(),out=await s.enabled(value);
       if(out.ok&&value)void tick();

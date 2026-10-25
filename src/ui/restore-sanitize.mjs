@@ -1,3 +1,4 @@
+import {mergeRestoredExitLedgers} from './restore-exits.mjs';
 import {splitPortableLocal} from './portable-local.mjs';
 // I16: restore data is history, never a portable authorization token.
 // Deterministic plan over already authenticated structured-clone rows.
@@ -139,6 +140,11 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
   const localBackupEvidence=key=>typeof key==='string'&&
     (key==='backup:auto-state'||key==='backup:manual-active'||key==='backup:manual-last-complete'||
      key.startsWith('backup:v2:'));
+  const exitKey='network:s01:exit-ownership-v1';
+  const sourceExits=incoming.stores.meta.find(r=>r.key===exitKey)?.value;
+  const currentExits=local.get(exitKey);
+  const affectedAccounts=incomingAccounts.filter(a=>!excluded.has(a.id)).map(a=>a.id);
+  const mergedExits=sourceExits||currentExits?mergeRestoredExitLedgers(sourceExits,currentExits,{uidRemap,affectedAccounts}):null;
   const stores={};
   for(const name of DB_STORES){
     const previous=current.stores[name].map(copyRow);
@@ -196,15 +202,17 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
       if(name==='meta'&&typeof item.key==='string'&&
         item.key.startsWith('removal:')&&historical.has(
           item.key.slice('removal:'.length)))continue;
-      if(name==='meta'&&item.key==='network:s01:exit-ownership-v1'&&
-        map.has(key)&&!exact(map.get(key).value,item.value))
-        deny('RESTORE_EXIT_HISTORY_CONFLICT');
+      if(name==='meta'&&item.key==='network:s01:exit-ownership-v1'){
+        item.value=mergedExits;
+        map.set(key,item);continue;
+      }
       const explicitlyRecovered=name==='meta'&&selectedRemoved.has(item.value?.account?.accountId);
       if(!explicitlyRecovered&&map.has(key)&&!exact(map.get(key).value,item.value)&&
         !exact(serializeClone(map.get(key).value),rawByKey.get(key)))
         deny('RESTORE_MERGE_CONFLICT');
       map.set(key,item);
     }
+    if(name==='meta'&&mergedExits)map.set(JSON.stringify(exitKey),{key:exitKey,value:mergedExits});
     stores[name]=[...map.values()].sort((a,b)=>{
       const x=a.key,y=b.key;
       if(typeof indexedDB!=='undefined'&&typeof indexedDB.cmp==='function')
@@ -220,6 +228,12 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
   const accounts=new Map(stores.meta.filter(r=>typeof r.key==='string'&&
     r.key.startsWith('account:')&&r.value?.account)
     .map(r=>[r.value.account.accountId,r.value.account]));
+  const restoredIds=new Set(incomingAccounts.filter(a=>!excluded.has(a.id)).map(a=>a.id));
+  const ledger=stores.meta.find(r=>r.key==='network:s01:exit-ownership-v1')?.value;
+  for(const binding of Object.values(ledger?.bindings||{})){
+    const account=accounts.get(binding.accountId);
+    if(account&&restoredIds.has(account.accountId))account.bindingId=binding.bindingId;
+  }
   const uidOwners=new Map();
   for(const a of accounts.values()){
     if(a.state==='ARCHIVED')continue;
