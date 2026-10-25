@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
 import {runInNewContext} from 'node:vm';
 import {compileV2,streamV2Frames,decodeAuthenticatedV2} from '../src/ui/backup-v2-codec.mjs';
-import {digest,serializeClone} from '../src/ui/backup-core.mjs';
+import {digest,serializeClone,deserializeClone} from '../src/ui/backup-core.mjs';
 import {createPortableBackupPayload,encodeBackupEnvelope,decodeBackupEnvelope}
   from '../donor/personamonkey/extension/lib/backup-package.js';
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
@@ -230,7 +230,12 @@ test('S02 archive and inactive apply preserve original exit exclusions/removal/u
   const meta=new Map(result.prepared.stores.meta.map(row=>[row.key,row.value]));
   // IndexedDB structured clone can produce null-prototype objects; source
   // equality is exact data/bytes, not an assumed JavaScript object prototype.
-  assert.deepEqual(JSON.parse(JSON.stringify(meta.get(exit.key))),exit);
+  const restoredExit=JSON.parse(JSON.stringify(deserializeClone(meta.get(exit.key))));
+  assert.deepEqual(restoredExit.owners,exit.owners);
+  assert.equal(restoredExit.revision,exit.revision+1);
+  assert.deepEqual(restoredExit.bindings['binding-old'],{...exit.bindings['binding-old'],holdCode:'RESTORED_ROUTE_REVERIFICATION'});
+  assert.equal(Object.hasOwn(restoredExit.bindings['binding-old'],'personaUid'),false,'legacy missing UID is not invented');
+  assert.equal(exit.bindings['binding-old'].holdCode,undefined,'original archive remains unchanged');
   assert.deepEqual(JSON.parse(JSON.stringify(meta.get(removal.key))),removal);
   const oldOp=result.prepared.stores.operations.find(x=>x.key==='op-uncertain').value;
   assert.equal(oldOp.status,'HELD_UNCERTAIN');

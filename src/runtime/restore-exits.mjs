@@ -16,7 +16,7 @@ export function mergeRestoredExitLedgers(incoming,current,{uidRemap={},affectedA
  history={...importedHistory,...(destination.restoredBindingHistory||{})};
  const byAccount=new Map(Object.values(bindings).map(r=>[r.accountId,r.bindingId]));
  for(const [id,raw] of Object.entries(source.bindings)){
-  const row={...structuredClone(raw),personaUid:uidRemap[raw.personaUid]||raw.personaUid,
+  const row={...structuredClone(raw),...(typeof raw.personaUid==='string'?{personaUid:uidRemap[raw.personaUid]||raw.personaUid}:{}),
    pin:'HELD',holdCode:'RESTORED_ROUTE_REVERIFICATION'};
   delete row.destinationRetired;
   if(bindings[id]&&bindings[id].accountId!==row.accountId)fail('RESTORE_EXIT_BINDING_CONFLICT');
@@ -27,7 +27,7 @@ export function mergeRestoredExitLedgers(incoming,current,{uidRemap={},affectedA
   bindings[id]=row;byAccount.set(row.accountId,id);
  }
  for(const [id,row] of Object.entries(bindings))if(affected.has(row.accountId))
-  bindings[id]={...row,personaUid:uidRemap[row.personaUid]||row.personaUid,
+  bindings[id]={...row,...(typeof row.personaUid==='string'?{personaUid:uidRemap[row.personaUid]||row.personaUid}:{}),
    pin:'HELD',holdCode:'RESTORED_ROUTE_REVERIFICATION'};
  if(accountTargets){
   // Only a matching destination-owned tag can be an active binding. Preserve

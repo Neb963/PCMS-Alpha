@@ -34,15 +34,18 @@ test('R3: archived account Z is excluded by newer removal in merge and replace',
     assert.equal(inventory.generator.personaUid,null);
   }
 });
-test('R3: old tombstone ambiguity and bypassed newer removal stay held',()=>{
+test('R3: old tombstone ambiguity holds; explicit newer-removal recovery imports only inactive history',()=>{
   const saved=empty(),destination=empty();saved.stores.meta.push(account('Z',3));
   destination.stores.meta.push(removal('Z',2));
   assert.throws(()=>prepareRestoredCanonical({incoming:saved,current:destination}),
     /RESTORE_REMOVAL_HISTORY_AMBIGUOUS/);
   destination.stores.meta[0]=removal('Z',8);
-  assert.throws(()=>prepareRestoredCanonical({incoming:saved,current:destination,
-    accountChoices:{Z:'INCLUDE_INACTIVE'}}),
-    /RESTORE_REMOVED_ACCOUNT_REQUIRES_SEPARATE_REVIEW/);
+  const restored=prepareRestoredCanonical({incoming:saved,current:destination,
+    accountChoices:{Z:'INCLUDE_INACTIVE'}});
+  const a=deserializeClone(restored.stores.meta.find(r=>r.key==='account:Z').value).account;
+  assert.equal(a.state,'VERIFICATION_PENDING');assert.equal(a.identity,null);assert.equal(a.restoredRemovalRevision,8);
+  assert.equal(deserializeClone(restored.stores.meta.find(r=>r.key==='removal:Z').value).revision,8);
+  assert.throws(()=>prepareRestoredCanonical({incoming:saved,current:destination,accountChoices:{Z:'ACTIVATE'}}),/RESTORE_ACCOUNT_CHOICES_INVALID/);
 });
 test('R3: fresh-profile inclusion requires explicit choice; no hidden binding authority',()=>{
   const saved=empty();saved.stores.meta.push(account('Z'));
@@ -59,8 +62,9 @@ test('R3: fresh-profile inclusion requires explicit choice; no hidden binding au
 test('R3: conflicting historic exit ownership and UID remaps block admission',()=>{
   const src=empty(),dest=empty();
   src.stores.meta.push(account('Z'));
-  src.stores.meta.push(row('network:s01:exit-ownership-v1',{owners:{'IPv4:198.19.1.8':'Z'}}));
-  dest.stores.meta.push(row('network:s01:exit-ownership-v1',{owners:{'IPv4:198.19.1.8':'Y'}}));
+  const ledger=owner=>({key:'network:s01:exit-ownership-v1',schema:2,revision:1,bindings:{},owners:{'IPv4:198.19.1.8':owner}});
+  src.stores.meta.push(row('network:s01:exit-ownership-v1',ledger('Z')));
+  dest.stores.meta.push(row('network:s01:exit-ownership-v1',ledger('Y')));
   assert.throws(()=>prepareRestoredCanonical({incoming:src,current:dest,mode:'replace'}),
     /RESTORE_EXIT_HISTORY_CONFLICT/);
   assert.throws(()=>prepareRestoredCanonical({incoming:src,current:empty(),
