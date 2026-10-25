@@ -5,7 +5,14 @@ External route/feed facts are offline; no live provider or private Git claims.
 import base64,json,pathlib,time
 import journey_generators_ui as g
 b=g.b;a=g.a
-click=g.click;button=g.click_text;fill=g.fill;wait=g.wait
+click=g.click;button=g.click_text;fill=g.fill
+def wait(s,expression,label,seconds=45):
+    try:return g.wait(s,expression,label,seconds)
+    except Exception:
+        detail=b.execute(s,"const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;return {page:sh?.querySelector('#page')?.innerText,dialog:sh?.querySelector('[role=dialog]')?.innerText,fixture:!!window.__j05}")
+        state=oracle(s);detail['runtime']={'revision':state.get('state',{}).get('revision'),'commands':state.get('commands',[])[-15:]}
+        pathlib.Path('build/j05-ui-failure.json').write_text(json.dumps(detail,indent=2));print('J05_FAILURE_CONTEXT='+json.dumps(detail),flush=True)
+        raise
 def oracle(s,body='return await window.__j05.inspect()'):return g.oracle(s,body)
 def fixture(s):
     source=pathlib.Path(__file__).with_name('fixtures').joinpath('j05-ui.mjs').read_text().replace('export async function','async function')
