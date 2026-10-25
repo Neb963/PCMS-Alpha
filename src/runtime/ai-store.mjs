@@ -10,11 +10,11 @@ const slotReleased=j=>j?.executionSlotReleased===true &&
   j.native?.state!=='DISPATCH_POSSIBLE';
 // Shared admission includes existing-public reservations before any UNLIST.
 // Once its own current AI job exists, count that job exactly once instead.
+export const compareUpdateReservations=(a,b)=>(a.state==='PREPARED'?1:0)-(b.state==='PREPARED'?1:0)||(a.createdAt||0)-(b.createdAt||0)||a.slug.localeCompare(b.slug,'en');
 export function countAiCapacity(rows,accountId,excludeSlug=''){
  const jobs=rows.filter(r=>r.key?.startsWith('ai-job:')&&r.accountId===accountId&&r.job?.slug!==excludeSlug);
  let used=jobs.filter(r=>!slotReleased(r.job)).length;
  const own=rows.find(v=>v.key==='existing-update:'+excludeSlug&&v.record?.accountId===accountId)?.record;
- const order=(a,b)=>(a.createdAt||0)-(b.createdAt||0)||a.slug.localeCompare(b.slug,'en');
  for(const row of rows){const r=row.record;if(!row.key?.startsWith('existing-update:')||!r||r.accountId!==accountId||r.slug===excludeSlug)continue;
   const queued=rows.find(v=>v.key==='s05-ready:'+r.slug)?.record,owner=rows.find(v=>v.key==='account:'+r.accountId)?.account;
   if(r.state==='PREPARED'&&(queued?.hold==='OPERATOR_PAUSED'||owner&&owner.state!=='VERIFIED'))continue;
@@ -22,7 +22,7 @@ export function countAiCapacity(rows,accountId,excludeSlug=''){
   if(published?.state==='CONFIRMED_PUBLIC'&&published.source==='INDEPENDENT_PUBLICATION_READBACK'&&published.accountId===r.accountId&&published.remoteId===r.remotePublicId&&published.bindingVersion===r.bindingVersion&&published.approval?.sourceFingerprint===r.stagedFingerprint)continue;
   const j=jobs.find(v=>v.job.slug===r.slug)?.job,stage=rows.find(v=>v.key==='stage:'+r.slug)?.record;
   const current=j&&stage?.nonce===r.nonce&&j.stageRevision===stage.revision;
-  if(!current&&!(own&&order(r,own)>0))used++;
+  if(!current&&!(own&&compareUpdateReservations(r,own)>0))used++;
  }
  return used;
 }

@@ -1359,12 +1359,14 @@ def main():
                   const legacyOpened=document.body.classList.contains('pcms-native-open');
                   drawer?.querySelector('button')?.click();
                   sh.querySelector('[data-nav="work-queue"]').click();
-                  sh.querySelector('[data-action="prepare-ai"]')?.click();
-                  const aiDrawer=sh.querySelector('[aria-label="Prepare verified AI development job"]');
-                  const primaryAiPreparation=!!aiDrawer&&
-                    !!aiDrawer.querySelector('input[placeholder="generator-slug"]')&&
-                    [...aiDrawer.querySelectorAll('button')].some(x=>x.textContent.includes('Verify stage and prepare'));
-                  aiDrawer?.querySelector('button')?.click();
+                  // Normal READY progression is autonomous. Actual full
+                  // source/controls/repair/publication effects are mandatory
+                  // in the J04 installed journey before this retained mapping.
+                  const primaryAiQueue=!!sh.querySelector('#queue-search')&&
+                    !!sh.querySelector('[data-filter="queue:All"]')&&
+                    !!sh.querySelector('[data-filter="queue:Waiting"]')&&
+                    !sh.querySelector('[data-action="prepare-ai"]')&&
+                    !sh.querySelector('[aria-label="Prepare verified AI development job"]');
                   sh.querySelector('[data-nav="settings"]').click();
                   sh.querySelector('[data-settings="automation"]').click();
                   const primaryPermission=sh.querySelector('.settings-main')?.textContent.includes('Standing permissions')&&
@@ -1407,9 +1409,9 @@ def main():
                     })&&
                     !/GIT_[A-Z_]+|NATIVE_[A-Z_]+|local[.]pcms[.]/.test(connected.textContent);
                   return {primaryCreate,legacyOpened,primaryPermission,primaryDiagnostic,
-                    primaryAi,primaryAiPreparation,protectedRestore,restoreHeld,restoredConnections,readableConnections,
+                    primaryAi,primaryAiQueue,protectedRestore,restoreHeld,restoredConnections,readableConnections,
                     drawerClosed:!sh.querySelector('[aria-label="Create generators"]')};""")
-                assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['primaryAi'] and r4_primary['primaryAiPreparation'] and r4_primary['protectedRestore'] and r4_primary['restoreHeld'] and r4_primary['restoredConnections'] and r4_primary['readableConnections'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
+                assert r4_primary['primaryCreate'] and not r4_primary['legacyOpened'] and r4_primary['primaryPermission'] and r4_primary['primaryDiagnostic'] and r4_primary['primaryAi'] and r4_primary['primaryAiQueue'] and r4_primary['protectedRestore'] and r4_primary['restoreHeld'] and r4_primary['restoredConnections'] and r4_primary['readableConnections'] and r4_primary['drawerClosed'],('R4_PRIMARY_WORKFLOWS_FAILED',r4_primary)
                 print('B R4_PRIMARY_CREATION_AND_PROTECTED_SETTINGS_WITHOUT_LEGACY=PASS',flush=True)
 
                 # A09 post-acceptance regression: an independent read-only

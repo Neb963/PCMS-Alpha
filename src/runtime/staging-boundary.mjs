@@ -1,3 +1,4 @@
+import {stageWasNotInvoked} from './stage-editor-bridge.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I09 private-only stage orchestration. UI cannot supply tab ids, page code,
 // source bytes, route or operation proof. There is NO automatic retry of a
@@ -213,7 +214,7 @@ export function createStagingBoundary(api,{
       // Marker is committed; any transport failure is now ambiguous.
       let result;
       try{result=await g.runStageStep(r.personaUid,{
-        slug:r.slug,nonce:r.nonce,remotePublicId:r.remotePublicId,
+        slug:r.slug,nonce:r.nonce,stageRevision:intent.revision,remotePublicId:r.remotePublicId,
         previousFingerprint:r.previous.fingerprint,
         previousFiles:r.previous.blobs,
         candidate:r.candidate.blobs
@@ -221,6 +222,10 @@ export function createStagingBoundary(api,{
       const after=await s.getFull(r.slug);
       if(!after.ok||after.record.state!=='DISPATCH_POSSIBLE')return fail('STAGING_UNCERTAIN');
       if(result?.ok!==true){
+        if(stageWasNotInvoked(result,after.record)){
+          await s.move(r.slug,after.record.revision,'PINNED',{reason:result.code});
+          return fail(result.code);
+        }
         await s.move(r.slug,after.record.revision,'HELD_UNCERTAIN',
           {reason:result?.code||'STAGING_EFFECT_UNCERTAIN'});
         return fail('STAGING_EFFECT_UNCERTAIN');

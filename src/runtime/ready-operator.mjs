@@ -200,7 +200,7 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
     return requestOperatorUpdate(db,{name,ready:r,account,inventory,sourceFingerprint:baseline.fingerprint});
    }
    const adopted=message.type==='PREPARE_LOCAL'&&origin.visibility==='UNLISTED'&&protectedOriginal?await findEligibleManagedSource(db,name):null;
-   const privateAdoption=adopted?.ok&&adopted.origin==='ADOPTED_PRIVATE'&&adopted.originalSource.fingerprint===baseline.fingerprint;
+   const privateAdoption=adopted?.ok&&adopted.origin==='ADOPTED_PRIVATE'&&(adopted.originalSource.fingerprint===baseline.fingerprint||savedKnown);
    if(message.type==='PREPARE_LOCAL'){
      // A nonempty, still-private source can be a later S05 development F.
      // It must have a retained SOURCE_VERIFIED predecessor and its exact
@@ -258,9 +258,16 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
      if(typeof g.inspectSourceEditorIdle!=='function')
        return fail('S05_EDITOR_IDLE_PROOF_UNAVAILABLE');
      const editor=await g.inspectSourceEditorIdle(account.personaUid,name);
-     if(!editor?.ok||editor.clean!==true||
-        editor.source!=='GUARDED_NO_LOCAL_EDITOR')
-       return fail(editor?.code||'S05_EDITOR_CONFLICT');
+     const retained=savedKnown&&stage?.state==='SOURCE_VERIFIED';
+     if(!editor?.ok||editor.clean!==true||editor.source!=='GUARDED_NO_LOCAL_EDITOR'){
+       // The saved predecessor may retain its exact owned editor. Observe it
+       // without transferring ownership or invoking a native AI operation.
+       if(!retained)return fail(editor?.code||'S05_EDITOR_CONFLICT');
+       const clean=await g.inspectStageEditor?.(account.personaUid,name,stage.nonce);
+       const native=await g.runNativeAiStep?.(account.personaUid,{slug:name,nonce:stage.nonce,action:'OBSERVE'});
+       if(!clean?.ok||clean.clean!==true||!native?.ok||native.busy!==false||native.editorClean!==true||native.sourceSaved!==true||native.hasQueue!==false||native.inputOccupied!==false||native.attachmentsPending!==false||native.sessionDigest!==(ai?.native?.sessionDigest||null))
+         return fail('S05_RETAINED_EDITOR_NOT_IDLE');
+     }
      const verifiedAgain=await g.getSafeRouteReadiness(account.personaUid);
      const stable=await createReadyStore(db).get(name);
      if(!verifiedAgain?.ready||
@@ -294,7 +301,7 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
      const pinned=await stagingFactory(db).pin({slug:name,
        candidate:compiled.candidate,previous:baseline,source:compiled.source,
        eligibility:{ok:true,origin:privateAdoption?'ADOPTED_PRIVATE':undefined,account,item:inventory,link},
-       nonce:crypto.randomUUID().replaceAll('-','')});
+       nonce:retained?stage.nonce:crypto.randomUUID().replaceAll('-','')});
      if(!pinned.ok)return pinned;
      return {ok:true,code:'S05_LOCAL_STAGE_PINNED',
        revision:actual.record.revision,stageRevision:pinned.revision,

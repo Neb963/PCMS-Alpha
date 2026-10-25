@@ -85,7 +85,35 @@ test('J04 pausing an unsent public update frees its reservation for independent 
  const prepared=await f.store.prepare(first);assert.equal(prepared.ok,true);await put(f.db,{key:'s05-ready:'+name,record:{...ready,revision:2,hold:'OPERATOR_PAUSED'}});
  const source=await exactSource([{path:'main.pjs',base64:btoa('private')},{path:'index.html',base64:btoa('<p>private</p>')}]),ai=createAiStore(f.db),stage={slug:'independent-private',revision:1,state:'SOURCE_VERIFIED',accountId:first.account.accountId,candidate:source,previous:source};
  assert.equal((await ai.start(stage)).ok,true,'paused unsent reservation cannot block independent private work');const j=f.db.read('meta','ai-job:'+stage.slug);await put(f.db,{...j,job:{...j.job,executionSlotReleased:true}});
- assert.equal((await f.store.prepare(f.args[1])).ok,true,'another public update may take the unused window');
+ const second=await f.store.prepare(f.args[1]);assert.equal(second.ok,true,'another public update may take the unused window');
+ assert.equal((await f.store.move(f.args[1].inventory.slug,second.revision,'UNLIST_DISPATCH')).ok,true);
  await put(f.db,{key:'s05-ready:'+name,record:{...ready,revision:3}});
- const resumed=await f.store.move(name,prepared.revision,'UNLIST_DISPATCH');assert.equal(resumed.ok,false);assert.match(resumed.code,/PUBLIC_UPDATE_.*RESERVED/);assert.equal(f.db.read('meta','existing-update:'+name).record.state,'PREPARED');assert.equal(f.db.keys('operations').length,0);
+ const resumed=await f.store.move(name,prepared.revision,'UNLIST_DISPATCH');assert.equal(resumed.ok,false);assert.match(resumed.code,/PUBLIC_UPDATE_.*RESERVED/);assert.equal(f.db.read('meta','existing-update:'+name).record.state,'PREPARED');assert.equal(f.db.keys('operations').length,1);
+});
+
+test('J04 shrink before UNLIST admits exactly the oldest PREPARED reservation and the next resumes after matching publication',async()=>{
+ const f=await fixture(),ai=createAiStore(f.db);await ai.changeConcurrency(1,2);
+ const a=await f.store.prepare(f.args[0]),b=await f.store.prepare(f.args[1]);assert.equal(a.ok&&b.ok,true);await ai.changeConcurrency(2,1);
+ assert.equal((await f.store.move(f.args[0].inventory.slug,a.revision,'UNLIST_DISPATCH')).ok,true);
+ const waiting=await f.store.move(f.args[1].inventory.slug,b.revision,'UNLIST_DISPATCH');assert.equal(waiting.ok,false);assert.match(waiting.code,/PUBLIC_UPDATE_.*RESERVED/);assert.equal(f.db.keys('operations').length,1);
+ const name=f.args[0].inventory.slug,old=f.db.read('meta','existing-update:'+name).record;
+ await put(f.db,{key:'existing-update:'+name,record:{...old,state:'STAGE_CONFIRMED',stagedFingerprint:f.original.fingerprint}},
+  {key:'release:'+name,release:{state:'CONFIRMED_PUBLIC',source:'INDEPENDENT_PUBLICATION_READBACK',accountId:old.accountId,remoteId:old.remotePublicId,bindingVersion:old.bindingVersion,approval:{sourceFingerprint:f.original.fingerprint}}});
+ assert.equal((await f.store.move(f.args[1].inventory.slug,b.revision,'UNLIST_DISPATCH')).ok,true);assert.equal(f.db.keys('operations').length,2);
+});
+test('J04 an admitted Update now hold survives READY supersession without a second unlist or changed active/sleep budgets',async()=>{
+ const {requestOperatorUpdate,updateWindowAvailable}=await import('../src/runtime/update-window.mjs');
+ const f=await fixture(),a=f.args[0],name=a.inventory.slug,ready={slug:name,revision:1,active:{identifier:'ready-before',inputFingerprint:'f'.repeat(64)},desired:null,hold:null};
+ const state=f.db.read('meta',REFRESHER_KEY).state,row=state.rows[0];row.phase='ACTIVE';row.slot=true;row.activeRemaining=123456;row.sleepRemaining=0;a.shadow=row;await put(f.db,{key:REFRESHER_KEY,state},{key:'s05-ready:'+name,record:ready});
+ await requestOperatorUpdate(f.db,{name,ready,account:a.account,inventory:a.inventory,sourceFingerprint:f.original.fingerprint});const p=await f.store.prepare(a),armed=await f.store.move(name,p.revision,'UNLIST_DISPATCH');assert.equal(armed.ok,true);
+ const unlisted=await f.store.move(name,armed.revision,'UNLIST_CONFIRMED',{proof:{source:'INDEPENDENT_FULL_BYTE_READBACK',fingerprint:f.original.fingerprint,visibility:'UNLISTED',ownerResult:'IS_OWNER',remotePublicId:a.inventory.remoteId}});assert.equal(unlisted.ok,true);
+ const nextReady={...ready,revision:2,desired:{identifier:'ready-newer',inputFingerprint:'e'.repeat(64)},hold:'WAIT_FOR_SAFE_SOURCE_HANDOFF'},current=f.db.read('meta',REFRESHER_KEY).state;
+ const reconciled=reconcileShadow(current,f.args.map(x=>({...x.inventory,ownerVerified:true,releaseVerified:true,releaseFingerprint:f.original.fingerprint,reviewHeld:true,updateNowCandidate:x.inventory.slug===name?nextReady.desired:null}))).state;
+ assert.equal(reconciled.rows[0].updateNow,undefined);await put(f.db,{key:REFRESHER_KEY,state:reconciled},{key:'s05-ready:'+name,record:nextReady});
+ const record=f.db.read('meta','existing-update:'+name).record;assert.equal(updateWindowAvailable(reconciled,reconciled.rows[0],nextReady,record,record.previousFingerprint,record),true);
+ const candidate=await exactSource([{path:'main.pjs',base64:btoa('latest source')},{path:'index.html',base64:btoa('<h1>Latest</h1>')}]);
+ const pin=await f.store.pinStage(name,record.revision,{candidate,source:{ok:true,ready:true,sourceBytes:candidate.blobs,head:'c'.repeat(40),folder:'generators/'+name,testingSha:null}});assert.equal(pin.ok,true);
+ assert.equal((await f.store.move(name,pin.revision,'STAGE_DISPATCH')).ok,true,'already-unlisted successor retains its admitted window');assert.equal(f.db.keys('operations').length,2,'one unlist and one stage, never a second unlist');
+ assert.deepEqual([reconciled.rows[0].phase,reconciled.rows[0].slot,reconciled.rows[0].activeRemaining,reconciled.rows[0].sleepRemaining],['ACTIVE',true,123456,0]);
+ assert.equal(updateWindowAvailable(reconciled,reconciled.rows[0],nextReady,{...record,bindingVersion:2},record.previousFingerprint,record),false);
 });

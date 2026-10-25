@@ -31,7 +31,7 @@ export async function createGitModel(saved=null){
     const at=head=>head?flatten(state.commits[head].tree.sha).find(x=>x.path===target)?.sha:null;
     while(cursor&&changes.length<100){const c=state.commits[cursor],parent=c.parents[0]?.sha||null;
       if(at(cursor)!==at(parent))changes.push({sha:cursor});cursor=parent;}
-    return response(200,changes);
+    return response(200,changes.slice(0,Math.min(100,Math.max(1,Number(u.searchParams.get('per_page'))||30))));
    }
    if(path==='/git/refs'||path==='/commits')return state.head?response(200,[{sha:state.head}]):response(409,{});
    if(path.startsWith('/git/commits/'))return state.commits[path.slice(13)]?response(200,state.commits[path.slice(13)]):response(404,{});

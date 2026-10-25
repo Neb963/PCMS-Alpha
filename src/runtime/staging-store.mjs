@@ -8,7 +8,7 @@ const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
 const changes={
   PINNED:['PREPARED','HANDOFF_REQUESTED'],
   PREPARED:['DISPATCH_POSSIBLE','PINNED','HANDOFF_REQUESTED'],
-  DISPATCH_POSSIBLE:['HELD_UNCERTAIN','SAVED_UNVERIFIED','SOURCE_VERIFIED','HANDOFF_REQUESTED'],
+  DISPATCH_POSSIBLE:['PINNED','HELD_UNCERTAIN','SAVED_UNVERIFIED','SOURCE_VERIFIED','HANDOFF_REQUESTED'],
   SAVED_UNVERIFIED:['HELD_UNCERTAIN','SOURCE_VERIFIED','HANDOFF_REQUESTED'],
   HELD_UNCERTAIN:['SOURCE_VERIFIED','HANDOFF_REQUESTED'],
   SOURCE_VERIFIED:['HANDOFF_REQUESTED'],
@@ -204,7 +204,7 @@ export function createStagingStore(db){
                 remotePublicId:eligibility.item.remoteId,
                 sourceFolder:source.folder,sourceHead:source.head,
                 gitFingerprint:source.fingerprint,testingSha:source.testingSha,
-                candidate,previous,nonce,tab:null,reason:null,sourceOrigin:eligibility.origin==='ADOPTED_PRIVATE'?'ADOPTED_PRIVATE':eligibility.origin==='EXISTING_UPDATE'?'EXISTING_UPDATE':(['S04_CONFIRMED_CREATED','LEGACY_CONFIRMED_PRIVATE_SUPPLY'].includes(eligibility.origin)||eligibility.link?.source==='S04_INDEPENDENT_NOT_READY_ASSOCIATION')?'PRIVATE_NEW':null,
+                candidate,previous,nonce,parentStageRevision:old?.revision||null,tab:null,reason:null,sourceOrigin:eligibility.origin==='ADOPTED_PRIVATE'?'ADOPTED_PRIVATE':eligibility.origin==='EXISTING_UPDATE'?'EXISTING_UPDATE':(['S04_CONFIRMED_CREATED','LEGACY_CONFIRMED_PRIVATE_SUPPLY'].includes(eligibility.origin)||eligibility.link?.source==='S04_INDEPENDENT_NOT_READY_ASSOCIATION')?'PRIVATE_NEW':null,
                 ...(source.gitReadyIdentifier?{
                   readyIdentifier:source.gitReadyIdentifier,
                   readyInputFingerprint:source.gitReadyInputFingerprint}: {})};

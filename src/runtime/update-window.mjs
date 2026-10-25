@@ -10,11 +10,22 @@ export function operatorUpdateWindow(row,ready,owner,fingerprint=null){
   p.accountId===row.accountId&&p.personaUid===row.personaUid&&p.bindingVersion===row.bindingVersion&&p.remotePublicId===row.remoteId&&
   (fingerprint===null||p.previousFingerprint===fingerprint));
 }
-export function updateWindowAvailable(state,row,ready,owner,fingerprint=null){
+// Once UNLIST was durably admitted, later READY revisions share that
+// existing source/recovery hold. This receipt never admits another UNLIST.
+export function admittedUpdateWindow(row,record,owner,fingerprint){
+ const a=record?.windowAdmission;
+ return !!(a?.version===1&&a.mode==='OPERATOR_EARLY_UPDATE'&&record.state!=='PREPARED'&&
+  a.nonce===record.nonce&&a.previousFingerprint===record.previousFingerprint&&
+  a.accountId===record.accountId&&a.personaUid===record.personaUid&&a.bindingVersion===record.bindingVersion&&a.remotePublicId===record.remotePublicId&&a.principalFingerprint===record.principalFingerprint&&
+  row?.accountId===a.accountId&&row.personaUid===a.personaUid&&row.bindingVersion===a.bindingVersion&&row.remoteId===a.remotePublicId&&
+  owner?.accountId===a.accountId&&owner.personaUid===a.personaUid&&owner.bindingVersion===a.bindingVersion&&owner.remotePublicId===a.remotePublicId&&owner.principalFingerprint===a.principalFingerprint&&
+  (fingerprint===null||fingerprint===a.previousFingerprint));
+}
+export function updateWindowAvailable(state,row,ready,owner,fingerprint=null,admission=null){
  if(!row||['OPERATOR_PAUSED','READY_REVOKED_NOT_READY'].includes(ready?.hold)||state?.globalPause||state?.accounts?.[row.accountId]?.paused||row.paused||
     state?.inflight?.some(x=>x.stableId===row.stableId)||
     ['ATTEMPT_PENDING','DISPATCH_POSSIBLE','EFFECT_UNVERIFIED'].includes(row.refresh?.state))return false;
- return row.phase==='SLEEPING'&&row.slot!==true&&row.sleepRemaining>0||operatorUpdateWindow(row,ready,owner,fingerprint);
+ return row.phase==='SLEEPING'&&row.slot!==true&&row.sleepRemaining>0||operatorUpdateWindow(row,ready,owner,fingerprint)||admittedUpdateWindow(row,admission,owner,fingerprint);
 }
 
 export function requestOperatorUpdate(db,{name,ready,account,inventory,sourceFingerprint}){

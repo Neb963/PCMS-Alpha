@@ -1,7 +1,7 @@
 // I13 local existing-source mutation ledger. One independent step per command;
 // never infer safe retry from absent ACK or restart. No remote effect in IDB.
 import {updateWindowAvailable,operatorUpdateWindow} from './update-window.mjs';
-import {countAiCapacity} from './ai-store.mjs';
+import {countAiCapacity,compareUpdateReservations} from './ai-store.mjs';
 import {releaseCandidateTestContext} from './release-core.mjs';
 import {exactSource} from './staging-core.mjs';
 import {fail} from './journal.mjs';
@@ -24,8 +24,10 @@ function tx(db,mode,fn){
 function withUpdateCapacity(m,accountId,target,done,commit){
  const rows=[];m.openCursor().onsuccess=e=>{const c=e.target.result;if(c){rows.push(c.value);c.continue();return;}
   const limit=rows.find(v=>v.key==='ai-concurrency')?.setting?.perAccount||1;
+  const own=rows.find(v=>v.key==='existing-update:'+target)?.record;
   const inventories=rows.filter(v=>v.key?.startsWith('inventory:')).map(v=>v.generator).filter(Boolean);
   const holds=rows.filter(v=>v.key?.startsWith('existing-update:')&&v.record?.slug!==target).map(v=>v.record).filter(r=>{
+   if(own?.state==='PREPARED'&&r.state==='PREPARED'&&compareUpdateReservations(r,own)>0)return false;
    const ready=rows.find(v=>v.key==='s05-ready:'+r.slug)?.record,owner=rows.find(v=>v.key==='account:'+r.accountId)?.account;
    if(r.state==='PREPARED'&&(ready?.hold==='OPERATOR_PAUSED'||owner&&owner.state!=='VERIFIED'))return false;
    const published=rows.find(v=>v.key==='release:'+r.slug)?.release;
@@ -192,14 +194,17 @@ export function createExistingStore(db){
             const ready=rr.target.result?.record,state=sh.target.result?.state,row=state?.rows?.find(v=>v.slug===s);
             if(!validShadow(state)||!row||(
                  !['RESTORE_DISPATCH','RECOVERY_UNLIST_DISPATCH'].includes(event)&&
-                 !updateWindowAvailable(state,row,ready,r,r.previousFingerprint)
+                 !updateWindowAvailable(state,row,ready,r,r.previousFingerprint,r)
                )||row.paused===true||state.globalPause===true||
                state.accounts?.[r.accountId]?.paused===true||
                row.bindingVersion!==r.bindingVersion||
                row.remoteId!==r.remotePublicId){
               done(fail('EXISTING_SLEEP_CHANGED'));return;
             }
-            if(event==='UNLIST_DISPATCH')withUpdateCapacity(m,r.accountId,s,done,()=>commit(r));else commit(r);
+            if(event==='UNLIST_DISPATCH'){
+              const admission=operatorUpdateWindow(row,ready,r,r.previousFingerprint)?{...r,windowAdmission:{version:1,mode:'OPERATOR_EARLY_UPDATE',nonce:r.nonce,accountId:r.accountId,personaUid:r.personaUid,bindingVersion:r.bindingVersion,principalFingerprint:r.principalFingerprint,remotePublicId:r.remotePublicId,previousFingerprint:r.previousFingerprint,admittedAt:Date.now()}}:r;
+              withUpdateCapacity(m,r.accountId,s,done,()=>commit(admission));
+            }else commit(r);
             };
           };
           }

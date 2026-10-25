@@ -218,7 +218,7 @@ export function createReleaseBoundary(api,{
         req.onerror=()=>reject(Error('SHADOW_READ_FAILED'));
       });
       const row=shadow?.rows?.find(v=>v.slug===name);
-      if(!row||!updateWindowAvailable(shadow,row,ready.record,r,existingRow.record.previousFingerprint)||
+      if(!row||!updateWindowAvailable(shadow,row,ready.record,r,existingRow.record.previousFingerprint,existingRow.record)||
          row.paused===true||shadow.globalPause===true||
          shadow.accounts?.[r.accountId]?.paused===true||
          row.remoteId!==r.remotePublicId||row.bindingVersion!==r.bindingVersion)

@@ -73,6 +73,14 @@ def run(browser,archive,folder):
         adopted=next(x for x in state['stages'] if x['slug']=='j04-flow-adopted');assert adopted['sourceOrigin']=='ADOPTED_PRIVATE'
         assert next(x for x in adopted['previous']['blobs'] if x['path']=='src/original-only.bin')['base64']=='CQD/'
         assert not [x for x in state['provider']['effects'] if x['slug']=='j04-flow-adopted' and x['kind']=='UNLIST']
+        parent_adopted=adopted
+        b.call('POST',f'/session/{s}/url',{'url':'about:blank'})
+        assert background(s,"return await window.__j04flow.mergeReady('j04-flow-adopted');").get('ok')
+        state=progress(s,lambda x:any(w['slug']=='j04-flow-adopted' and w['state']=='CONFIRMED' and w['stageRevision']>parent_adopted['revision'] for w in x['writebacks']),'J04_PRIVATE_READY_SUCCESSOR_RETAINED_OWNER_RETESTED_NEW_GIT')
+        latest=next(x for x in state['stages'] if x['slug']=='j04-flow-adopted');assert latest['nonce']==parent_adopted['nonce'] and latest['sourceOrigin']=='ADOPTED_PRIVATE'
+        assert latest['previous']['fingerprint']==parent_adopted['candidate']['fingerprint']
+        assert not [x for x in state['provider']['effects'] if x['slug']=='j04-flow-adopted' and x['kind']=='UNLIST']
+        b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s);assert attach(s).get('ok');ui.click(s,'[data-nav=generators]');ui.click(s,'[data-nav=work-queue]')
         ui.search(s,'j04-flow-adopted');ui.button(s,'Inspect candidate','.candidate-item:has([data-clean-select="j04-flow-adopted"])');ui.wait(s,"[...sh.querySelectorAll('button')].some(x=>x.textContent==='Approve and publish exact candidate')",'J04_ADOPTED_NONEMPTY_PRIVATE_SOURCE_TESTED_REVIEW')
         ui.click(s,'[role=dialog] .setting-option input[type=checkbox]');ui.button(s,'Approve and publish exact candidate');a.alert_accept(s)
         ui.wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('Publication may have occurred')||sh.querySelector('[role=dialog]')?.textContent.includes('Published:')",'J04_PRIVATE_EXISTING_ONE_APPROVAL')
@@ -92,6 +100,12 @@ def run(browser,archive,folder):
         update=next(x for x in state['existing'] if x['slug']=='j04-flow-public');assert update['priorSource']['totalBytes']==0 and update['previousFingerprint']==next(x for x in state['stages'] if x['slug']=='j04-flow-public')['previous']['fingerprint']
         row=state['shadow']['rows'][0];assert [row['phase'],row['slot'],row['activeRemaining'],row['sleepRemaining']]==['ACTIVE',True,123456,0]
         assert len([x for x in state['provider']['effects'] if x['slug']=='j04-flow-public' and x['kind']=='UNLIST'])==1
+        parent_public=next(x for x in state['stages'] if x['slug']=='j04-flow-public')
+        assert background(s,"return await window.__j04flow.mergeReady('j04-flow-public');").get('ok')
+        state=progress(s,lambda x:any(w['slug']=='j04-flow-public' and w['state']=='CONFIRMED' and w['stageRevision']>parent_public['revision'] for w in x['writebacks']),'J04_UPDATE_NOW_UNLISTED_HOLD_NEW_READY_RETESTED_GIT_NO_REUNLIST')
+        assert len([x for x in state['provider']['effects'] if x['slug']=='j04-flow-public' and x['kind']=='UNLIST'])==1
+        update=next(x for x in state['existing'] if x['slug']=='j04-flow-public');assert update['priorSource']['totalBytes']==0
+        row=state['shadow']['rows'][0];assert [row['phase'],row['slot'],row['activeRemaining'],row['sleepRemaining']]==['ACTIVE',True,123456,0] and not row.get('updateNow')
         b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s);assert attach(s).get('ok');ui.click(s,'[data-nav=generators]');ui.click(s,'[data-nav=work-queue]')
         ui.search(s,'j04-flow-public');ui.button(s,'Inspect candidate','.candidate-item:has([data-clean-select="j04-flow-public"])');ui.wait(s,"[...sh.querySelectorAll('button')].some(x=>x.textContent==='Approve and publish exact candidate')",'J04_PUBLIC_UPDATE_EXACT_REVIEW')
         ui.click(s,'[role=dialog] .setting-option input[type=checkbox]');ui.button(s,'Approve and publish exact candidate');a.alert_accept(s)
@@ -159,7 +173,7 @@ def run(browser,archive,folder):
         effects=[x for x in state['provider']['effects'] if x['kind']=='PUBLISH'];assert len(effects)==5 and len(set(x['slug'] for x in effects))==5
         assert all(x['slug']!='j04-flow-held' for x in state['provider']['effects'])
         assert all(next(f for f in r['source'] if f['path']=='src/retained.bin')['base64']=='AP+AEQ==' for r in state['provider']['resources'].values() if r['slug']!='j04-flow-held')
-        original=next(x for x in state['stages'] if x['slug']=='j04-flow-adopted')['previous'];assert next(x for x in original['blobs'] if x['path']=='src/original-only.bin')['base64']=='CQD/'
+        original=next(x for x in state['adoptions'] if x['slug']=='j04-flow-adopted')['original'];assert next(x for x in original['blobs'] if x['path']=='src/original-only.bin')['base64']=='CQD/'
         evidence['clean-bulk-process-restart']=state
         pathlib.Path('build/j04-autonomous-pipeline.json').write_text(json.dumps(evidence,indent=2));print('B J04_AUTONOMOUS_BACKGROUND_PRIMARY_REPAIR_GIT_APPROVAL_PUBLICATION=PASS',flush=True)
     finally:

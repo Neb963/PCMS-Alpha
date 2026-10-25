@@ -15,11 +15,12 @@ async function fixture(mode=''){
  await queue.observe({slug,repositoryId:'42',identifier:'rev-'+coherent.token,declarationCommit:coherent.declarationCommit,markerOid:coherent.markerOid,inputFingerprint:coherent.inputFingerprint,testingOid:null});
  let saved=mode==='changed-source'?await exactSource([{path:'main.pjs',base64:btoa('unadopted human save')},{path:'index.html',base64:btoa('<p>changed</p>')} ]):P;const effects=[];
  const api={runtime:{id:'fixture',getURL:p=>'moz-extension://fixture/'+p},storage:{local:{get:async key=>({[key]:key==='pcmsS03Git'?{repository,repositoryId:'42'}:undefined})}}};
- const guard={getSafeRouteReadiness:async()=>({ready:true,personaUid:uid,cookieStoreId:'container-private',routeId:'protected'}),inspectSourceEditorIdle:async()=>mode==='dirty'?{ok:false,code:'DIRTY_EDITOR'}:{ok:true,clean:true,source:'GUARDED_NO_LOCAL_EDITOR'},inspectStageEditor:async()=>({ok:true,clean:true,source:'GUARDED_EDITOR_CLEAN'}),
+ const guard={getSafeRouteReadiness:async()=>({ready:true,personaUid:uid,cookieStoreId:'container-private',routeId:'protected'}),inspectSourceEditorIdle:async()=>mode==='retained'&&effects.length?{ok:false,code:'EDITOR_PRESENT'}:mode==='dirty'?{ok:false,code:'DIRTY_EDITOR'}:{ok:true,clean:true,source:'GUARDED_NO_LOCAL_EDITOR'},inspectStageEditor:async()=>({ok:true,clean:true,source:'GUARDED_EDITOR_CLEAN'}),
   observeReadOnly:async()=>({ok:true,principalFingerprint:mode==='wrong-owner'?'b'.repeat(64):principal,original:{remotePublicId:mode==='wrong-id'?'resource-other':rid,ownerResult:'IS_OWNER',visibility:mode==='public'?'PUBLIC':'UNLISTED',pjs:text(saved.blobs.find(f=>f.path==='main.pjs')),html:text(saved.blobs.find(f=>f.path==='index.html')),assets:saved.blobs.filter(f=>f.path.startsWith('src/'))}}),
+  runNativeAiStep:async()=>({ok:true,busy:false,editorClean:true,sourceSaved:true,hasQueue:false,inputOccupied:false,attachmentsPending:false,sessionDigest:null}),
   runStageStep:async(_,req)=>{effects.push({kind:'STAGE',candidate:structuredClone(req.candidate)});saved=await exactSource(req.candidate);if(mode==='lost-ack')throw Error('lost ACK after source write');return {ok:true,tab:{tabId:12,cookieStoreId:'container-private',ownershipNonce:req.nonce,owned:true}};}};
  const common={open:async()=>db,guard:()=>guard,effectGate:()=>true,native:async()=>({ok:true,credential:token}),scanCatalog:o=>scanMainCatalog(o,model.transport),inspectReady:o=>inspectReadyCandidate(o,model.transport)};
- return {db,P,queue,inventory,effects,operator:createReadyOperator(api,{...common,scan:o=>scanMainCatalog(o,model.transport),inspect:o=>inspectReadyCandidate(o,model.transport)}),stage:()=>createStagingBoundary(api,common)};
+ return {db,P,queue,inventory,effects,model,operator:createReadyOperator(api,{...common,scan:o=>scanMainCatalog(o,model.transport),inspect:o=>inspectReadyCandidate(o,model.transport)}),stage:()=>createStagingBoundary(api,common)};
 }
 test('J04 first nonempty adopted private READY stages without unlisting or public reservation and preserves every original byte across recovery',async()=>{
  for(const mode of ['', 'lost-ack']){const f=await fixture(mode),r=(await f.queue.get(slug)).record;
@@ -37,4 +38,15 @@ test('J04 dirty editor, changed source/owner/ID or corrupt private original cann
   const result=await f.operator.runTrusted({type:'PREPARE_LOCAL',params:{slug,expectedRevision:r.revision}});assert.equal(result.ok,false,mode+JSON.stringify(result));assert.equal(f.effects.length,0);assert.equal(f.db.read('meta','stage:'+slug),undefined);
   if(mode==='public'){assert.equal(result.code,'S05_LISTING_OBSERVATION_REFRESHED');const inv=f.db.read('meta','inventory:'+slug).generator;assert.equal(inv.visibility,'PUBLIC');assert.equal(planReadyDevelopment({ready:{ok:true,record:r},visibility:inv.visibility,effects:true}).type,'PREPARE_UPDATE');}
  }
+});
+
+test('J04 a closed-editor adopted-private saved predecessor accepts a newer READY before first publication while original/history remain complete',async()=>{
+ for(const mode of ['', 'retained']){const f=await fixture(mode),initial=(await f.queue.get(slug)).record,pin=await f.operator.runTrusted({type:'PREPARE_LOCAL',params:{slug,expectedRevision:initial.revision}});assert.equal(pin.ok,true);
+ let stage=(await createStagingStore(f.db).getFull(slug)).record;await f.stage().runTrusted({type:'STAGE_PRIVATE',params:{slug,expectedRevision:stage.revision}});stage=(await createStagingStore(f.db).getFull(slug)).record;await f.stage().runTrusted({type:'RECONCILE_STAGE',params:{slug,expectedRevision:stage.revision}});stage=(await createStagingStore(f.db).getFull(slug)).record;
+ await f.model.merge({['generators/'+slug+'/DEPLOYMENT.md']:'Status: READY\nReady-Revision: private-adopt-002\n',['generators/'+slug+'/main.pjs']:'output\n  Latest candidate\n'},'new reviewed READY before publication');
+ const catalog=await scanMainCatalog({repository,token},f.model.transport),coherent=await inspectReadyCandidate({repository,token,slug,pinnedHead:catalog.head,includeSourceBytes:true},f.model.transport);
+ await f.queue.observe({slug,repositoryId:'42',identifier:'rev-'+coherent.token,declarationCommit:coherent.declarationCommit,markerOid:coherent.markerOid,inputFingerprint:coherent.inputFingerprint,testingOid:null});
+ const next=(await f.queue.get(slug)).record,out=await f.operator.runTrusted({type:'PREPARE_LOCAL',params:{slug,expectedRevision:next.revision}});assert.equal(out.ok,true,JSON.stringify(out));
+ const successor=(await createStagingStore(f.db).getFull(slug)).record;assert.equal(successor.sourceOrigin,'ADOPTED_PRIVATE');assert.equal(successor.previous.fingerprint,stage.candidate.fingerprint);assert.notEqual(successor.candidate.fingerprint,stage.candidate.fingerprint);
+ assert.deepEqual(f.db.read('meta','stage-history:'+slug+':'+stage.revision).record.previous.blobs,f.P.blobs);assert.deepEqual(f.db.read('meta','adoption:'+slug).adoption.original.blobs,f.P.blobs);assert.equal(f.db.read('meta','existing-update:'+slug),undefined);assert.equal(successor.nonce,stage.nonce);}
 });

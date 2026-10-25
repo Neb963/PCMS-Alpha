@@ -304,7 +304,7 @@ export function createReleaseStore(db){
                       m.get('s05-ready:'+name).onsuccess=rr=>{
                       const ready=rr.target.result?.record,state=sh.target.result?.state,
                         row=state?.rows?.find(z=>z.slug===name);
-                      if(!validShadow(state)||!row||!updateWindowAvailable(state,row,ready,r.approval,r.approval.previousFingerprint)||row.paused===true||
+                      if(!validShadow(state)||!row||!updateWindowAvailable(state,row,ready,r.approval,r.approval.previousFingerprint,update)||row.paused===true||
                          row.remoteId!==r.approval.remotePublicId||
                          row.bindingVersion!==r.approval.bindingVersion||
                          state.globalPause===true||

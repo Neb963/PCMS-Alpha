@@ -448,7 +448,7 @@ export function createExistingBoundary(api,{
         const windowReady=await createReadyStore(database).get(p.slug);
         if(!latest.ok||latest.shadow.globalPause===true||
            latest.shadow.accounts?.[r.accountId]?.paused===true||
-           !updateWindowAvailable(latest.shadow,latest.row,windowReady.record,r,r.previousFingerprint)||
+           !updateWindowAvailable(latest.shadow,latest.row,windowReady.record,r,r.previousFingerprint,r)||
            latest.row.paused===true||
            latest.row.remoteId!==r.remotePublicId||
            latest.row.bindingVersion!==r.bindingVersion||
