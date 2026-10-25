@@ -159,3 +159,43 @@ test('Issue60: queued release timeout cannot authorize prepare/release replay or
   late();await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(local,{});
  }finally{delete globalThis.browser;}
 });
+
+test('Issue60: native receipt storage ACK cuts prevent dispatch; malformed positive ACK never clears a possible effect',async()=>{
+ const code=await nativeCode('/tmp/pcms-issue60-native-d/xpi-root/lib/mullvad-native.js');
+ for(const cut of ['before-first-write','after-first-write','after-second-write','malformed-ack']){
+  const local={};let writes=0,dispatched=0;
+  globalThis.browser={storage:{local:{get:async k=>k===null?{...local}:{[k]:local[k]},remove:async k=>{delete local[k]},set:async value=>{
+   writes++;if(cut==='before-first-write'&&writes===1)throw Error('storage unavailable');Object.assign(local,value);
+   if((cut==='after-first-write'&&writes===1)||(cut==='after-second-write'&&writes===2))throw Error('write ACK lost');
+  }}},runtime:{connectNative(){const p={onMessage:signal(),onDisconnect:signal(),disconnect(){},postMessage(m){dispatched++;
+   queueMicrotask(()=>p.onMessage.emit({...m,ok:true,local_host:'127.0.0.1',local_port:5501}));
+  }};return p;}}};
+  try{
+   const native=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64')+'#cut-'+cut);
+   await assert.rejects(native.prepareExit({id:'route_storage',host:'10.124.0.7',port:1080},true,'a'.repeat(64)),e=>e.nativeOutcomeUncertain===true);
+   assert.equal(dispatched,cut==='malformed-ack'?1:0);
+   if(['after-second-write','malformed-ack'].includes(cut)){
+    assert.equal(local['personaMullvadPendingPrepare:route_storage'].phase,'DISPATCH_POSSIBLE');
+    await assert.rejects(native.prepareExit({id:'route_storage',host:'10.124.0.7',port:1080},true,'b'.repeat(64)));
+    assert.equal(dispatched,cut==='malformed-ack'?1:0);
+   }
+  }finally{delete globalThis.browser;}
+ }
+});
+
+test('Issue60: present corrupt or foreign receipts never become absence or grant no-dispatch replay',async()=>{
+ const route={id:'route_corrupt',host:'10.124.0.7',port:1080},key='personaMullvadPendingPrepare:'+route.id;
+ const prepared={schema:2,phase:'PREPARED',nonce:crypto.randomUUID(),routeId:route.id,relayIp:route.host,relayPort:1080,password:'a'.repeat(64),createdAtMs:Date.now()};
+ const code=await nativeCode('/tmp/pcms-issue60-native-d/xpi-root/lib/mullvad-native.js');let index=0;
+ for(const bad of [null,false,0,{},[],{...prepared,schema:3},{...prepared,routeId:'foreign_route'},
+  {...prepared,nonce:'------------------------------------'},{...prepared,operation:'RELEASE'},{...prepared,effectBoundary:'DISPATCH_POSSIBLE'}]){
+  const local={[key]:bad};let commands=0;
+  globalThis.browser={storage:{local:{get:async k=>k===null?{...local}:{[k]:local[k]},set:async v=>Object.assign(local,v),remove:async k=>{delete local[k]}}},runtime:{connectNative(){commands++;throw Error('unexpected command')}}};
+  try{
+   const native=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64')+'#corrupt-'+index++);
+   await assert.rejects(native.prepareExit(route,true,'b'.repeat(64)),e=>e.nativeOutcomeUncertain===true);
+   await assert.rejects(native.releaseExit(route.id),e=>e.nativeOutcomeUncertain===true);
+   assert.equal(commands,0);assert.deepEqual(local[key],bad);
+  }finally{delete globalThis.browser;}
+ }
+});

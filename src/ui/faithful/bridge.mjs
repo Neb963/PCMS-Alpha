@@ -1244,13 +1244,14 @@ function openOperationRecord(op){
    if(c.related?.slug)context.append(el('strong','',c.related.slug));
    if(c.evidence==='RECORDED_NO_DISPATCH')guidance.textContent='The saved checks failed before dispatch. No creation or rename was sent by this recorded attempt. Repair its account prerequisites; the original request remains preserved and is not replayed.';
    else if(c.status==='PREFLIGHT_FAILED')guidance.textContent='This historical request failed a prerequisite check, but its dispatch history is incomplete or conflicting. Keep its possible remote result held. Checking saved status never retries creation or rename.';
+   else if(c.failure?.code==='CREATE_OUTCOME_UNKNOWN_NO_IDENTITY')guidance.textContent='Perchance may have created a temporary generator, but its response did not identify it. Open the account to inspect its owned inventory. This request stays held; do not resubmit it.';
    if(c.failure?.code){
     const note=el('p','setting-note',({INITIAL_INVENTORY_UNKNOWN:'An account’s initial owned inventory was not available.',
      MULLVAD_LOCAL_SERVICE_UNAVAILABLE:'The Mullvad connection was unavailable when this request was checked.',
      PROTECTED_ROUTE_NOT_PINNED:'This account did not have a verified protected route.',
      PROTECTED_ROUTE_UNVERIFIED:'This account’s protected route was not verified.'})[c.failure.code]||'The earlier check recorded a failure. Its original reason is retained in Recorded details.');context.append(note);
     fields.querySelector('[data-operation-failure]')?.remove();
-    const reason=el('div','kv');reason.dataset.operationFailure='';reason.append(el('dt','','First recorded reason'),el('dd','',c.failure.code));fields.append(reason);
+    const reason=el('div','kv');reason.dataset.operationFailure='';reason.append(el('dt','',c.failure.kind==='LAST_ATTEMPT'?'Latest saved reason':'First recorded reason'),el('dd','',c.failure.code));fields.append(reason);
    }
    actions.querySelectorAll('[data-operation-related]').forEach(e=>e.remove());
    if(c.related?.accountId){

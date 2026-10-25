@@ -58,12 +58,11 @@ def cert_browser(browser,folder):
     (distribution/'policies.json').write_text(json.dumps({'policies':{'Certificates':{'Install':[str(certs/'ca.pem')]}}}))
     return owned/browser.name,certs
 def baseline(folder):
-    existing=pathlib.Path('/tmp/pcms-issue60-baseline/build/pcms-alpha-i00.xpi')
-    if existing.exists():
-        assert hashlib.sha256(existing.read_bytes()).hexdigest()=='196a5c8acc7fb75580f59120761f38d4d4e675d3e9349c8f009d3643241e597f'
-        return existing
+    revision='14cba259d2b209533ad0a9f4b5da6c1397820977'
+    if subprocess.run(['git','cat-file','-e',revision+'^{commit}'],cwd=ROOT,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode:
+        subprocess.run(['git','fetch','--no-tags','--depth=1','origin',revision],cwd=ROOT,check=True,timeout=60,stdout=subprocess.DEVNULL)
     checkout=folder/'baseline';checkout.mkdir()
-    archive=subprocess.Popen(['git','archive','14cba259d2b209533ad0a9f4b5da6c1397820977'],cwd=ROOT,stdout=subprocess.PIPE)
+    archive=subprocess.Popen(['git','archive',revision],cwd=ROOT,stdout=subprocess.PIPE)
     subprocess.run(['tar','--no-same-owner','-x','-C',str(checkout)],stdin=archive.stdout,check=True);archive.stdout.close();assert archive.wait()==0
     subprocess.run(['node','scripts/build-i00.mjs'],cwd=checkout,check=True,stdout=subprocess.DEVNULL)
     old=checkout/'build/pcms-alpha-i00.xpi'
@@ -155,9 +154,9 @@ def run(browser,archive,folder):
         assert not b.execute(s,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('.account-feedback').textContent.includes('Perchance opened')")
         oracle.delay_inventory=False;oracle.inventory_release.set()
         a.wait(s,"sh.querySelector('.account-feedback')?.textContent.includes('Perchance opened')",'ISSUE60_OPEN_AFTER_ACTUAL_READ_LEASE_RELEASE',55)
-        context=background(s,"const {internalPcmsGuard}=await import(browser.runtime.getURL('pcms/persona-guard.mjs'));return await internalPcmsGuard().resolveUid("+json.dumps(next(x for x in inspect(s)['accounts'] if x['accountId']==ids[0])['personaUid'])+");")
+        context=next(x for x in inspect(s)['ledger']['bindings'].values() if x['accountId']==ids[0])
         new_tabs=background(s,'return (await browser.tabs.query({})).map(t=>({id:t.id,url:t.url,cookieStoreId:t.cookieStoreId}));')
-        assert any(t['id'] not in before_tabs and t['url']=='https://perchance.org/' and t['cookieStoreId']==context['cookieStoreId'] for t in new_tabs),new_tabs
+        assert any(t['id'] not in before_tabs and t['url']=='https://perchance.org/' and t['cookieStoreId']==context['contextId'] for t in new_tabs),new_tabs
         a.close_dialog(s)
         print('B ISSUE60_NATIVE_AND_PROXY_RECOVERY_PRIMARY_ACTIONS=PASS',flush=True)
         # The old operation has a real no-dispatch receipt and exact account
@@ -170,6 +169,10 @@ def run(browser,archive,folder):
         a.wait(s,"sh.querySelectorAll('[data-operation-failure]').length===1",'ISSUE60_RECHECK_DOES_NOT_DUPLICATE_REASON')
         g.click_text(s,'Open account');a.wait(s,"!!sh.querySelector('.account-dialog')",'ISSUE60_CONTEXTUAL_ACCOUNT_RECOVERY_ACTION');a.close_dialog(s)
         assert not oracle.effects
+        # No human Perchance tab is a requirement for background creation.
+        # Remove only this disposable account's fixture tabs, retaining login.
+        create_context=next(x for x in inspect(s)['ledger']['bindings'].values() if x['accountId']==ids[0])['contextId']
+        background(s,"const tabs=await browser.tabs.query({cookieStoreId:"+json.dumps(create_context)+"});for(const t of tabs)if(t.url?.startsWith('https://perchance.org/'))await browser.tabs.remove(t.id);return true;")
         # Unknown third inventory still holds Automatic. A pinned healthy
         # account goes through actual durable intake and protected API writes.
         a.click(s,'[data-nav=generators]');a.click(s,'[data-action=create]')
@@ -237,6 +240,29 @@ def run(browser,archive,folder):
         oracle.wrong_exit=None;command(s,ids[1],'VERIFY_ROUTE');wait_record(s,ids[1],route='PINNED');a.close_dialog(s)
         assert [x['kind'] for x in oracle.effects]==['CREATE','RENAME']
         current=inspect(s);assert json.dumps(historic(current),sort_keys=True)==preserved
+        # Actual provider persistence with a lost CREATE ACK has no proven
+        # temporary identity. Preserve that uncertainty through cold restart;
+        # never guess an orphan or issue CREATE/RENAME again.
+        oracle.lost_create=True;a.click(s,'[data-nav=generators]');a.click(s,'[data-action=create]')
+        g.fill(s,'[aria-label="Generator names"]','issue60-uncertain-create');a.click(s,'[aria-label="Creation account"] option[value="'+ids[0]+'"]');g.click_text(s,'Preview assignments')
+        a.wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('1 new')",'ISSUE60_UNCERTAIN_INTAKE_PREVIEW');g.click_text(s,'Submit batch')
+        a.wait(s,"!!sh.querySelector('[aria-label="+'"Batch progress"'+"]')",'ISSUE60_UNCERTAIN_BATCH_DURABLE');b.call('POST',f'/session/{s}/url',{'url':'about:blank'})
+        deadline=time.monotonic()+90;uncertain=None
+        while time.monotonic()<deadline:
+            uncertain=next((x['record'] for x in inspect(s)['creates'] if x.get('record',{}).get('slug')=='issue60-uncertain-create'),None)
+            if uncertain and uncertain['state']=='CREATE_UNCERTAIN':break
+            background(s,"await browser.alarms.create('pcms-s04-creation-followup',{when:Date.now()+150});return true;");time.sleep(.4)
+        assert uncertain and uncertain['state']=='CREATE_UNCERTAIN',uncertain
+        assert [x['kind'] for x in oracle.effects]==['CREATE','RENAME','CREATE']
+        s=cold(s,browser,profile,url,oracle)
+        for _ in range(5):
+            background(s,"await browser.alarms.create('pcms-s04-creation-followup',{when:Date.now()+150});return true;");time.sleep(.4)
+        assert [x['kind'] for x in oracle.effects]==['CREATE','RENAME','CREATE'],'cold uncertain CREATE must not replay or infer an unrelated temporary generator'
+        a.click(s,'[data-nav=work-queue]');g.fill(s,'#queue-search',uncertain['createOperationId'])
+        a.wait(s,"!!sh.querySelector('.queue-item')",'ISSUE60_UNCERTAIN_QUEUE_ASYNC_RESULT');g.click_text(s,'Inspect','.queue-item')
+        a.wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('issue60-uncertain-create')",'ISSUE60_MODERN_UNCERTAIN_CONTEXT_EXACT_SLUG')
+        g.click_text(s,'Open account');a.wait(s,"!!sh.querySelector('.account-dialog')",'ISSUE60_MODERN_UNCERTAIN_ACCOUNT_ACTION');a.close_dialog(s)
+        print('B ISSUE60_REAL_CREATE_LOST_ACK_COLD_NO_REPLAY_CONTEXTUAL_ACCOUNT_RECOVERY=PASS',flush=True)
         screenshot(s,'recovered-accounts',evidence)
         evidence['schema']='pcms.issue60.integration/1';evidence['status']='PASS'
         evidence['oracle']=oracle.inspect();evidence['xpiSha256']=hashlib.sha256(pathlib.Path(archive).read_bytes()).hexdigest()

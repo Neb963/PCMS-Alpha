@@ -50,3 +50,12 @@ test('Issue60: contextual record inspection remains a trusted read-only command'
  assert.equal(validateCommand(api,{...sender,id:'foreign'},message).code,'UNTRUSTED_SENDER');
  assert.equal(validateCommand(api,sender,{...message,params:{...message.params,retry:true}}).ok,false);
 });
+test('Issue60: current uncertain creation has exact account/slug and saved causal reason without replay authority',async()=>{
+ const db=fakeDatabase(),operation={operationId:'s04_create_fixture',targetId:'intent_fixture_01',effectType:'s04_create',status:'HELD_UNCERTAIN',revision:4};
+ const record={intentId:operation.targetId,accountId:batch.accountId,slug:'uncertain-modern-create',createOperationId:operation.operationId,state:'CREATE_UNCERTAIN',lastAttempt:{code:'CREATE_OUTCOME_UNKNOWN_NO_IDENTITY',at:1792888000000}};
+ const tx=db.transaction(['meta','operations'],'readwrite');tx.objectStore('operations').put(operation);tx.objectStore('meta').put({key:'s00-create-intent:'+record.intentId,record});await new Promise(resolve=>tx.oncomplete=resolve);
+ const {context}=await createCanonicalStore(db).inspectOperationContext(operation.operationId);
+ assert.equal(context.provenance,'CANONICAL_CREATION');assert.equal(context.related.accountId,record.accountId);assert.equal(context.related.slug,record.slug);
+ assert.equal(context.failure.code,record.lastAttempt.code);assert.equal(context.failure.kind,'LAST_ATTEMPT');assert.equal(context.failure.at,record.lastAttempt.at);
+ assert.equal(context.evidence,'UNRESOLVED');assert.equal(context.replayAllowed,false);assert.deepEqual(db.read('operations',operation.operationId),operation);
+});

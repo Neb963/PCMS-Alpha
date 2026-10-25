@@ -4,7 +4,7 @@ export const OPERATION_STATES=Object.freeze({
  PREPARED:['Waiting',''],READY_TO_DISPATCH:['Waiting',''],
  PREFLIGHT_FAILED:['Prerequisites failed','amber'],
  DISPATCH_POSSIBLE:['Outcome not confirmed','amber'],OBSERVING:['Verifying result',''],
- HELD_UNCERTAIN:['Needs reconciliation','amber'],CONFIRMED:['Confirmed','green'],
+ HELD_UNCERTAIN:['Outcome not confirmed','amber'],CONFIRMED:['Confirmed','green'],
  ABORTED:['Cancelled',''],REJECTED:['Rejected','amber']
 });
 export function operationGroup(status){
@@ -33,10 +33,11 @@ export function projectOperationContext(op,links,events,inventory=[]){
    !op.ack&&!op.remoteId&&!op.temporarySlug&&!link.item.ack&&!link.item.ackTemporarySlug&&!link.item.ackRemoteId&&!laterDispatch;
  return {operationId:op.operationId,targetId:op.targetId,effectType:op.effectType,status:op.status,revision:op.revision,
   updatedAt:Number.isSafeInteger(op.updatedAt)?op.updatedAt:null,
-  provenance:legacy&&link?'HISTORICAL_SUPPLY_V1':legacy?'UNLINKED_SUPPLY_V1':'CANONICAL_OPERATION',
+  provenance:legacy&&link?'HISTORICAL_SUPPLY_V1':legacy?'UNLINKED_SUPPLY_V1':link?.kind==='S04'?'CANONICAL_CREATION':'CANONICAL_OPERATION',
   evidence:noDispatch?'RECORDED_NO_DISPATCH':op.status==='CONFIRMED'?'JOURNAL_CONFIRMED':'UNRESOLVED',
   failure:{code:code(failure?.code)||code(link?.item.reason),stage:code(failure?.stage),
-   at:Number.isSafeInteger(failure?.at)?failure.at:null},
+   kind:failure?'FIRST_FAILURE':link?.kind==='S04'?'LAST_ATTEMPT':null,
+   at:Number.isSafeInteger(failure?.at)?failure.at:link?.kind==='S04'&&Number.isSafeInteger(link.item.reasonAt)?link.item.reasonAt:null},
   related:link?{batchId:id(link.batch.batchId),accountId:id(link.batch.accountId),itemId:id(link.item.itemId),
    slug:slug(link.item.requestedSlug),temporarySlug:slug(link.item.temporarySlug),state:code(link.item.state),
    generatorObserved:inventory.some(g=>g.slug===link.item.requestedSlug&&g.accountId===link.batch.accountId&&g.ownerState==='OBSERVED_OWNER')}:null,

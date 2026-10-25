@@ -151,6 +151,16 @@ function setup({relays,...options}){
   return {db,accounts,ledger,flow,...d,opened,synced,order,sessions,profileOf};
 }
 const relay=(host,v4,v6)=>({host,v4,v6});
+test('Issue60: Open accepted during bounded inventory waits for its owner to settle, then uses ordinary protected admission',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),a=await enroll(h);
+ let started,finish;const entered=new Promise(resolve=>started=resolve),gate=new Promise(resolve=>finish=resolve);const opened=[];
+ const flow=createEnrollment({accounts:h.accounts,ledger:h.ledger,donor:h.donor,
+  pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},identify:async()=>({ok:false}),
+  syncInventory:async()=>{started();await gate;return {ok:true}},openLogin:async uid=>{opened.push(uid);return {ok:true,opened:true}}});
+ const syncing=flow.syncInventory(a.accountId);await entered;
+ const opening=flow.openLogin(a.accountId);await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(opened,[]);
+ finish();assert.equal((await syncing).ok,true);assert.equal((await opening).opened,true);assert.deepEqual(opened,[a.personaUid]);
+});
 test('Issue60: human route command cancels automatic observation at its boundary; another account progresses independently',async()=>{
  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED'),relay('10.124.0.2','45.83.2.1','BLOCKED')]}),a=await enroll(h),b=await enroll(h);
  let enter;const entered=new Promise(resolve=>enter=resolve),original=h.donor.probeAssigned;let first=true,active=0,max=0;

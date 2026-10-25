@@ -616,8 +616,28 @@ attachPcmsGuard({
         try{return new URL(t.url).origin==='https://perchance.org';}
         catch{return false;}
       })());
-    if(!matching.length)return {ok:false,code:'NO_PERCHANCE_TAB'};
-    const tab=matching.find(t=>t.active)||matching[0];
+    let tab=matching.find(t=>t.active)||matching[0],nonce=null,humanTouched=false,activation=null;
+    try{
+    if(!tab){
+      // The intent/possible-dispatch journal and donor lease are already
+      // admitted by the caller. Reopen only its fixed protected session;
+      // closing a human login tab must not disable background creation.
+      nonce=crypto.randomUUID();
+      tab=await browser.tabs.create({url:'https://perchance.org/',cookieStoreId,active:false});
+      if(!Number.isSafeInteger(tab?.id))return {ok:false,code:'SUPPLY_SESSION_UNCONFIRMED'};
+      activation=info=>{if(info?.tabId===tab.id)humanTouched=true;};
+      browser.tabs.onActivated.addListener(activation);
+      await browser.sessions.setTabValue(tab.id,'pcmsSupplySession',{nonce,personaUid,cookieStoreId,routeId});
+      let loaded=false;
+      for(let i=0;i<32;i++){
+        const current=await browser.tabs.get(tab.id);
+        if(current.cookieStoreId!==cookieStoreId||
+           !['about:blank','https://perchance.org/'].includes(current.url))return {ok:false,code:'SUPPLY_SESSION_CHANGED'};
+        if(current.status==='complete'&&current.url==='https://perchance.org/'){loaded=true;break;}
+        await new Promise(resolve=>setTimeout(resolve,250));
+      }
+      if(!loaded)return {ok:false,code:'SUPPLY_SESSION_NOT_READY'};
+    }
     const result=await browser.scripting.executeScript({
       target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',
       func:perchanceSupplyIsolated,args:[request]
@@ -631,6 +651,15 @@ attachPcmsGuard({
     if(result?.length!==1||result[0].frameId!==0||result[0].error)
       return {ok:false,code:'SUPPLY_INJECTION_UNVERIFIED'};
     return result[0].result;
+    }finally{
+      if(activation)browser.tabs.onActivated.removeListener(activation);
+      if(nonce&&tab?.id&&!humanTouched)try{
+        const current=await browser.tabs.get(tab.id),tag=await browser.sessions.getTabValue(tab.id,'pcmsSupplySession');
+        if(current.cookieStoreId===cookieStoreId&&current.url==='https://perchance.org/'&&current.active===false&&
+           tag?.nonce===nonce&&tag.personaUid===personaUid&&tag.cookieStoreId===cookieStoreId&&tag.routeId===routeId&&tag.humanIntent!==true)
+          await browser.tabs.remove(tab.id);
+      }catch{/* Uncertain or human-touched tab is retained. */}
+    }
   },
 
   // One donor-guarded, protected-container stage tab; never touch an

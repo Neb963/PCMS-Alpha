@@ -228,6 +228,15 @@ export function createCanonicalStore(db) {
               const batch=row.value.batch;
               for(const item of batch.items||[])if(item.itemId===op.targetId)links.push({batch,item});
             }
+            const creation=row.value?.record;
+            if(row.key==='s00-create-intent:'+op.targetId&&creation?.intentId===op.targetId&&
+               ((op.effectType==='s04_create'&&creation.createOperationId===operationId)||
+                (op.effectType==='s04_rename'&&creation.renameOperationId===operationId))){
+              links.push({kind:'S04',batch:{accountId:creation.accountId},item:{itemId:creation.intentId,
+                createOperationId:creation.createOperationId,renameOperationId:creation.renameOperationId,
+                requestedSlug:creation.slug,temporarySlug:creation.temporarySlug,state:creation.state,
+                reason:creation.lastAttempt?.code,reasonAt:creation.lastAttempt?.at}});
+            }
             if(row.value?.generator?.ownerState==='OBSERVED_OWNER')inventory.push({slug:row.value.generator.slug,accountId:row.value.generator.accountId,ownerState:'OBSERVED_OWNER'});
             row.continue();return;
           }

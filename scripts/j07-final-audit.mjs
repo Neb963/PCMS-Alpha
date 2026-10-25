@@ -21,6 +21,7 @@ export function evaluateRun(map,receipt,digest){
  assert(receipt.xpiSha256===digest&&/^[a-f0-9]{40}$/.test(receipt.checkoutSha||'')&&/^[a-f0-9]{40}$/.test(receipt.sourceTree||''),'J07_FOREIGN_SOURCE_OR_XPI');
  assert(receipt.geckoId==='persona-route-manager@local'&&receipt.version==='1.2.15','J07_WRONG_PACKAGE');
  assert(receipt.retainedSuites==='PASS','J07_RETAINED_SUITE_REQUIRED');
+ assert(receipt.issue60Integration?.schema==='pcms.issue60.integration/1'&&receipt.issue60Integration.status==='PASS'&&receipt.issue60Integration.xpiSha256===digest,'ISSUE60_SAME_PACKAGE_INTEGRATION_REQUIRED');
  const required=Object.values(map.journeys).flatMap(j=>j.browser);
  assert(required.length===receipt.completed.length&&new Set(receipt.completed).size===required.length&&required.every(x=>receipt.completed.includes(x)),'J07_MISSING_OR_DUPLICATE_JOURNEY_RUN');
  return {browser:'PASS',normalSandbox:receipt.contentSandboxDisabled!==true,
@@ -36,6 +37,7 @@ export function markdown(report){
  for(const f of report.findings)lines.push(`| ${f.id} (${f.journey}) | ${f.control} | ${f.handler} | ${f.result}${f.external?' **'+f.external+'**':''} |`);
  lines.push('','## Executed supporting scope','','| Journey | Installed browser entry points | Bounded observations |','|---|---|---|');
  for(const [id,j] of Object.entries(report.journeys))lines.push(`| ${id} | ${j.browser.join(', ')} | ${j.observations} |`);
+ lines.push('','Issue60 additionally passed a same-package three-account 1.2.14 upgrade through real authenticated SOCKS/TLS and production isolated readers: helper/proxy outage, route recovery, read/Open lease isolation, protected create/rename without a human tab or dashboard, lost native and provider ACKs, cold reconciliation/no replay, historical and current queue context, and backup independence. Native/provider protocols are offline fixtures; real OS bridge and live resources remain untested.');
  lines.push('','## Accepted requirement trace','','These are coverage references to actual regression suites, not fabricated per-case acceptance PASS. Positive, adverse and recovery expectations and required tiers come from the accepted matrix as amended; X narratives are digest-checked against recovered Part 8. Each requirement retains its external and human acceptance needs. The existing A09 evaluator accepts separately obtained exact-source/tier/case receipts.','',
   '| Requirement | Required tiers | Supporting primary journeys | Acceptance |','|---|---|---|---|');
  for(const r of report.requirements)lines.push(`| ${r.id} | ${r.tiers.join(', ')} | ${r.journeys.join(', ')} | ${r.acceptance} |`);

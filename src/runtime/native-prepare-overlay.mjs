@@ -28,6 +28,14 @@ function uncertainPrepare(){
   const error=new Error("Mullvad route preparation is unconfirmed; observe the saved connection before another update");
   error.nativeOutcomeUncertain=true;return error;
 }
+function knownPreparedReceipt(row,route){
+  const keys=['schema','phase','nonce','routeId','relayIp','relayPort','password','createdAtMs'];
+  return row&&typeof row==='object'&&!Array.isArray(row)&&row.schema===2&&row.phase==='PREPARED'&&
+    row.routeId===route.id&&row.relayIp===route.host&&row.relayPort===Number(route.port||1080)&&
+    /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(row.nonce||'')&&/^[a-f0-9]{64}$/.test(row.password||'')&&
+    Number.isSafeInteger(row.createdAtMs)&&row.createdAtMs>0&&row.createdAtMs<=Date.now()&&
+    Object.keys(row).every(key=>keys.includes(key));
+}
 async function settlePrepare(key,nonce){
   await withNativeReceiptLock(key,async()=>{
     const saved=(await browser.storage.local.get(key))[key];
@@ -40,14 +48,14 @@ export function prepareExit(route, start = true, forwarderToken){
   const prior=prepareFlights.get(route.id);
   if(prior)return prior.fingerprint===fingerprint?prior.promise:Promise.reject(uncertainPrepare());
   const promise=(async()=>{
-    // Pre-dispatch receipt contains no credential and survives a cold restart.
+    // Private, short-lived reconciliation credential; excluded from portable exports.
     const nonce=crypto.randomUUID();
     const receipt={schema:2,phase:'PREPARED',nonce,routeId:route.id,relayIp:route.host,relayPort:Number(route.port||1080),password:forwarderToken,createdAtMs:Date.now()};
     try{
      await withNativeReceiptLock(key,async()=>{
       const saved=(await browser.storage.local.get(key))[key];
-      if(saved?.phase==='PREPARED')await browser.storage.local.remove(key);
-      else if(saved)throw uncertainPrepare();
+      if(knownPreparedReceipt(saved,route))await browser.storage.local.remove(key);
+      else if(saved!==undefined)throw uncertainPrepare();
       await browser.storage.local.set({[key]:receipt});
       await browser.storage.local.set({[key]:{...receipt,phase:'DISPATCH_POSSIBLE'}});
      });
@@ -97,7 +105,7 @@ export async function settleObservedPreparation(candidate){
   `export async function releaseExit(routeId) {
     const key=PREPARE_PREFIX+routeId,nonce=crypto.randomUUID();
     await withNativeReceiptLock(key,async()=>{
-      if((await browser.storage.local.get(key))[key])throw uncertainPrepare();
+    if((await browser.storage.local.get(key))[key]!==undefined)throw uncertainPrepare();
       await browser.storage.local.set({[key]:{schema:2,phase:'DISPATCH_POSSIBLE',operation:'RELEASE',routeId,nonce,createdAtMs:Date.now()}});
     });
     const valid=reply=>reply?.ok===true&&typeof reply.released==='boolean';
@@ -131,6 +139,7 @@ export function repairMullvadRuntime(source){
           e.local_host==="127.0.0.1"&&e.local_port===cached?.route?.port);
         const pending=bridgeStatus.pending_prepare_routes||[];
         if(cachedTokenIsFresh&&bridgeStatus.ready===true&&existing.length===1&&!pending.includes(route.id)&&!pending.includes("OBSERVATION_UNAVAILABLE")){
+          if(startedLifecycleGeneration!==lifecycleGeneration||startedRouteGeneration!==(routeGenerations.get(route.id)||0))return null;
           routes.set(route.id,{...cached,at:now()});return cached.route;
         }
         // Only actual preparation/renewal rotates a credential. A unique token

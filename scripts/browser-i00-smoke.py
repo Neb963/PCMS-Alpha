@@ -5529,10 +5529,13 @@ def main():
     with zipfile.ZipFile(archive) as package:manifest=json.loads(package.read('manifest.json'))
     event=json.loads(pathlib.Path(os.environ['GITHUB_EVENT_PATH']).read_text()) if os.environ.get('GITHUB_EVENT_PATH') else {}
     checkout=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+    issue60=json.loads(pathlib.Path('build/issue60-ui-evidence.json').read_text())
+    assert issue60.get('schema')=='pcms.issue60.integration/1' and issue60.get('status')=='PASS' and issue60.get('xpiSha256')==expected_hash,'ISSUE60_SAME_PACKAGE_INTEGRATION_REQUIRED'
     receipt={'schema':'pcms.j07.full-browser-run/1','status':'PASS','retainedSuites':'PASS',
         'checkoutSha':checkout,'candidateSha':event.get('pull_request',{}).get('head',{}).get('sha',checkout),
         'sourceTree':subprocess.check_output(['git','rev-parse','HEAD^{tree}'],text=True).strip(),
         'version':manifest['version'],'geckoId':ID,'xpiSha256':expected_hash,'completed':completed,
+        'issue60Integration':{'schema':issue60['schema'],'status':issue60['status'],'xpiSha256':issue60['xpiSha256']},
         'firefox':subprocess.check_output([str(browser),'--version'],text=True,stderr=subprocess.DEVNULL).strip(),
         'installation':'persistent, fully enabled, disposable profiles only',
         'githubActions':os.environ.get('GITHUB_ACTIONS')=='true',

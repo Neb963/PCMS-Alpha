@@ -23,6 +23,7 @@ export async function installIssue60NativeFixture({url,key}){
    return {accounts:meta.filter(r=>r.key?.startsWith('account:')).map(r=>r.account),
     inventories:meta.filter(r=>r.key?.startsWith('inventory-batch:')),
     creates:meta.filter(r=>r.key?.startsWith('s00-create-intent:')),
+    ledger:meta.find(r=>r.key==='network:s01:exit-ownership-v1')||null,
     legacy:meta.filter(r=>r.key?.startsWith('supply-batch:')),
     operations,pending:Object.keys(await browser.storage.local.get(null)).filter(k=>k.startsWith('personaMullvadPendingPrepare:'))};
   },

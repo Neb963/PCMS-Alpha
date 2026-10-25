@@ -16,6 +16,8 @@ test('J01 C79/C88 growth advice requires every managed account last-confirmed ow
 test('J01 Attention includes identity-verified accounts with held, checking, missing or legacy routes',()=>{
  const ready={state:'VERIFIED',protectedRoute:'PCMS_PINNED',route:{status:'PINNED'}};
  assert.equal(accountNeedsAttention(ready),false);assert.equal(accountLabel(ready),'Ready');
+ assert.equal(accountNeedsAttention({...ready,readiness:{ready:false}}),true,'recorded PINNED history is not current donor health after restart');
+ assert.notEqual(accountLabel({...ready,readiness:{ready:false}}),'Ready');
  for(const status of ['HELD','CHECKING',null]){
   const item={...ready,route:{status}};
   assert.equal(accountNeedsAttention(item),true);
