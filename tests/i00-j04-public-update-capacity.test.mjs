@@ -117,3 +117,19 @@ test('J04 an admitted Update now hold survives READY supersession without a seco
  assert.deepEqual([reconciled.rows[0].phase,reconciled.rows[0].slot,reconciled.rows[0].activeRemaining,reconciled.rows[0].sleepRemaining],['ACTIVE',true,123456,0]);
  assert.equal(updateWindowAvailable(reconciled,reconciled.rows[0],nextReady,{...record,bindingVersion:2},record.previousFingerprint,record),false);
 });
+
+test('J04 ordinary canonical Refresher turns retain a current Update now request and retire only a newer or revoked READY without source effects',async()=>{
+ const {createRefresherStore}=await import('../src/runtime/refresher-store.mjs'),{requestOperatorUpdate}=await import('../src/runtime/update-window.mjs');
+ for(const mode of ['current','newer','revoked']){
+  const f=await fixture(),a=f.args[0],name=a.inventory.slug,account={...a.account,identity:{...a.account.identity,bindingVersion:1}},ready={slug:name,revision:1,active:{identifier:'ready-current',inputFingerprint:'f'.repeat(64)},desired:null,hold:null};
+  const state=f.db.read('meta',REFRESHER_KEY).state,row=state.rows[0];row.phase='ACTIVE';row.slot=true;row.activeRemaining=123456;row.sleepRemaining=0;
+  const adoption={...a.adoption,original:{...f.original,source:'INDEPENDENT_FULL_BYTE_READBACK',sourceStage:'PCMS_STAGED_SOURCE_V1',stagedFingerprint:f.original.fingerprint,remotePublicId:a.inventory.remoteId,visibility:'PUBLIC'}};
+  await put(f.db,{key:REFRESHER_KEY,state},{key:'account:'+account.accountId,account},{key:'adoption:'+name,adoption},{key:'source-link:'+name,link:{...a.inventory,folder:'generators/'+name}},{key:'s05-ready:'+name,record:ready});
+  const requested=await requestOperatorUpdate(f.db,{name,ready,account,inventory:a.inventory,sourceFingerprint:f.original.fingerprint});assert.equal(requested.ok,true,JSON.stringify(requested));
+  if(mode!=='current')await put(f.db,{key:'s05-ready:'+name,record:mode==='newer'?{...ready,revision:2,desired:{identifier:'ready-newer',inputFingerprint:'e'.repeat(64)},hold:'WAIT_FOR_SAFE_SOURCE_HANDOFF'}:{...ready,revision:2,hold:'READY_REVOKED_NOT_READY'}});
+  const turned=await createRefresherStore(f.db).turn({now:Date.now(),bootId:'boot_update_window_001'});assert.equal(turned.ok,true,JSON.stringify(turned));
+  const actual=f.db.read('meta',REFRESHER_KEY).state.rows.find(r=>r.slug===name);
+  assert.equal(!!actual.updateNow,mode==='current',mode);if(mode==='current')assert.equal(actual.updateNow.readyIdentifier,ready.active.identifier);
+  assert.deepEqual([actual.phase,actual.slot,actual.activeRemaining,actual.sleepRemaining],['ACTIVE',true,123456,0]);assert.equal(f.db.keys('operations').length,0);
+ }
+});

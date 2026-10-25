@@ -167,7 +167,7 @@ export function createRefresherStore(db){
           const c=ev.target.result;
           if(!c){apply(records);return;}
           if(++seen>50000){done(fail('CANONICAL_SCAN_LIMIT'));return;}
-          if(typeof c.key==='string'&&/^(account|inventory|stage|release|adoption|source-link|existing-update):/.test(c.key))
+          if(typeof c.key==='string'&&/^(account|inventory|stage|release|adoption|source-link|existing-update|s05-ready):/.test(c.key))
             records.push(c.value);
           c.continue();
         };
