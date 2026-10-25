@@ -5,6 +5,10 @@ import {exactSource,diffSource} from './staging-core.mjs';
 import {evaluation} from './ai-evidence.mjs';
 const fail=code=>({ok:false,code});
 export function createLocalSourceReview(db,{stageFactory=createStagingStore,aiFactory=createAiStore}={}){
+ // Bounded sealed byte snapshots avoid rehashing every entire F/P for each
+ // 8192-byte chunk. Current canonical revisions are still read on every chunk;
+ // a fresh view always reseals bytes. This cache grants no approval authority.
+ const sealedViews=new Map();let cachedBytes=0;
  const read=key=>new Promise((resolve,reject)=>{const t=db.transaction('meta','readonly'),q=t.objectStore('meta').get(key);q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(Error('REVIEW_READ_FAILED'))});
  async function history(slug,{before=0,limit=20}={}){
   const items=await new Promise((resolve,reject)=>{const t=db.transaction('meta','readonly'),q=t.objectStore('meta').openCursor(),rows=[];
@@ -14,7 +18,7 @@ export function createLocalSourceReview(db,{stageFactory=createStagingStore,aiFa
     c.continue()};q.onerror=()=>reject(Error('REVIEW_READ_FAILED'))});
   items.sort((a,b)=>b.revision-a.revision);const page=items.slice(0,limit);return {ok:true,slug,items:page,more:items.length>limit,nextCursor:items.length>limit?page.at(-1).revision:null};
  }
- async function snapshot(slug,historyRevision){
+ async function snapshot(slug,historyRevision,fresh=false){
   const [stage,job]=await Promise.all([stageFactory(db).getFull(slug),aiFactory(db).getJobFull(slug)]);
   if(!stage.ok)return fail('REVIEW_STAGE_UNAVAILABLE');
   let r=stage.record,j=job.ok&&(job.job.stageRevision===r.revision||job.job.stageRevision===r.handoffParentRevision)?job.job:null;
@@ -25,9 +29,17 @@ export function createLocalSourceReview(db,{stageFactory=createStagingStore,aiFa
    if(!r||r.slug!==slug||r.revision!==j.stageRevision)return fail('REVIEW_HISTORY_STAGE_UNAVAILABLE');
   }
   const stored=j?.finalSource||r.candidate;
-  const [source,previous]=await Promise.all([exactSource(stored?.blobs),exactSource(r.previous?.blobs)]);
+  const cacheKey=JSON.stringify([slug,historyRevision??null,r.revision,j?.revision||0,stored?.fingerprint,r.previous?.fingerprint]);
+  let cached=!fresh&&sealedViews.get(cacheKey);
+  const [source,previous]=cached?[cached.source,cached.previous]:await Promise.all([exactSource(stored?.blobs),exactSource(r.previous?.blobs)]);
   if(!source.ok||source.fingerprint!==stored?.fingerprint||!previous.ok||previous.fingerprint!==r.previous?.fingerprint)
    return fail('REVIEW_STORED_SOURCE_CORRUPT');
+  if(!cached){
+   const size=source.totalBytes+previous.totalBytes;
+   if(sealedViews.has(cacheKey)){cachedBytes-=sealedViews.get(cacheKey).size;sealedViews.delete(cacheKey)}
+   while(sealedViews.size&&(sealedViews.size>=2||cachedBytes+size>32*1024*1024)){const first=sealedViews.keys().next().value;cachedBytes-=sealedViews.get(first).size;sealedViews.delete(first)}
+   if(size<=32*1024*1024){sealedViews.set(cacheKey,{source,previous,size});cachedBytes+=size}
+  }
   const tests=j?evaluation(j):{state:'UNVERIFIED'};
   const [ready,exception]=await Promise.all([read('s05-ready:'+slug),read('s06-exception:'+slug)]),active=ready?.record;
   const currentReady=!r.readyIdentifier||!!(active?.active&&!active.desired&&!active.hold&&active.active.identifier===r.readyIdentifier&&active.active.inputFingerprint===r.readyInputFingerprint);
@@ -43,7 +55,7 @@ export function createLocalSourceReview(db,{stageFactory=createStagingStore,aiFa
    sourceHead:r.sourceHead,sourceFolder:r.sourceFolder,accountId:r.accountId,remotePublicId:r.remotePublicId,
    publication:'SEPARATE_CURRENT_SOURCE_APPROVAL_REQUIRED'}};
  }
- async function view(slug,historyRevision){const s=await snapshot(slug,historyRevision);return s.ok?s.summary:s;}
+ async function view(slug,historyRevision){const s=await snapshot(slug,historyRevision,true);return s.ok?s.summary:s;}
  async function chunk(p){
   const s=await snapshot(p.slug,p.historyRevision);if(!s.ok)return s;
   const v=s.summary;

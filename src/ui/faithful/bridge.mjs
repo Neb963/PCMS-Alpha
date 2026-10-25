@@ -934,7 +934,7 @@ function displayQueue(){
         'Final tested source is ready for individual publication review.':
         candidate.state==='EXCEPTION_READY_FOR_REVIEW'?
         'Exceptional candidate — manual evidence and incomplete tests require individual review.':
-        'Candidate state: '+candidate.state.replaceAll('_',' ').toLowerCase()));
+        ({IN_DEVELOPMENT:'Development and independent tests continue automatically.',DEVELOPMENT_RUNNING:'The helper is working on this candidate.',WAITING_FOR_GIT:'Saving verified source to GitHub.',APPROVED:'Approved. Publication continues automatically.',APPROVED_HELD:'Approval is saved. Inspect the current hold or cancel unsent publication.',CONFIRMED_PUBLIC:'Published source was independently confirmed.',HUMAN_DEFERRED:'Your editor is preserved. Adopt its saved source when ready.',CHANGES_REQUESTED:'Your instructions are saved. Development will resume automatically.',PUBLICATION_UNCERTAIN:'Checking a possible publication without sending it again.'})[candidate.state]||'Inspect this candidate to resolve its current hold.'));
     const action=b('Inspect candidate',()=>void openReleaseReview(candidate.slug),'btn small'),manage=b('Manage development',()=>candidate.development?void openAiJob(candidate.slug):openReadyCandidate(candidate.readyCandidate),'btn small');
     row.classList.add('candidate-item');const actions=el('div','candidate-actions');actions.append(action,manage);
     row.append(cleanPublication.checkbox(candidate.slug),detail,actions);holder.append(row);

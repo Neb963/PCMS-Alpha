@@ -11,7 +11,7 @@ import {createStagingStore} from './staging-store.mjs';
 import {createAiStore} from './ai-store.mjs';
 import {createWritebackStore} from './writeback-store.mjs';
 import {createS06ExceptionStore} from './s06-exception-review.mjs';
-import {sealedS06OutputProof} from './s06-output-proof.mjs';
+import {resolveS06OutputProof} from './s06-output-proof.mjs';
 const KEY='pcmsS05ReadyScanCursor';
 const SHA=/^[a-f0-9]{40}$/;
 const RID=/^[1-9][0-9]{0,19}$/;
@@ -91,7 +91,7 @@ export function createReadyIntake(api,{open=openCanonicalDatabase,
      createWritebackStore(db).getFull(slug),
      createAiStore(db).getJobFull(slug),
      createS06ExceptionStore(db).getFull(slug)]);
-   const proof=sealedS06OutputProof({ready:readyRow,stage,writeback,
+   const proof=await resolveS06OutputProof(db,{ready:readyRow,stage,writeback,
      job,exception});
    try{evidence=await inspect({repository,token,slug,
       pinnedHead:catalog.head,includeSourceBytes:false,

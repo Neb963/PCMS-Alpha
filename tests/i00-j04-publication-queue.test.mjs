@@ -12,7 +12,12 @@ test('J04 release queue includes every state in All and separates action, waitin
 test('J04 full cursor walk searches and filters beyond the first1000 without changing canonical state',async()=>{
  const db=fakeDatabase();await new Promise((resolve,reject)=>{const tx=db.transaction('meta','readwrite');tx.oncomplete=resolve;tx.onabort=reject;const m=tx.objectStore('meta');
   for(let i=0;i<1001;i++){const slug='release-'+String(i).padStart(4,'0');m.put({key:'s05-ready:'+slug,record:{slug,repositoryId:'42',revision:1,active:{identifier:'revision-'+i,inputFingerprint:F},desired:null,hold:'OPERATOR_PAUSED'}});}
-  m.put({key:'ai-job:release-1000',job:{slug:'release-1000',sourceFingerprint:F}});m.put({key:'release:release-1000',release:{state:'CONFIRMED_PUBLIC',approval:{sourceFingerprint:F}}});
+  const slug='release-1000',identifier='revision-1000';
+  m.put({key:'s05-ready:'+slug,record:{slug,repositoryId:'42',revision:1,active:{identifier,inputFingerprint:F},desired:null,hold:null}});
+  m.put({key:'stage:'+slug,record:{slug,revision:4,state:'SOURCE_VERIFIED',verifiedAt:1,sourceFolder:'generators/'+slug,readyIdentifier:identifier,readyInputFingerprint:F}});
+  m.put({key:'ai-job:'+slug,job:{slug,revision:7,stageRevision:4,state:'TESTS_VERIFIED',readyIdentifier:identifier,readyInputFingerprint:F,executionSlotReleased:true,sourceFingerprint:F,verifiedFinal:F,finalSource:{fingerprint:F},prompt:{tests:['smoke']},chat1:{tests:{smoke:{result:'PASS',sourceFingerprint:F}}}}});
+  m.put({key:'writeback:'+slug,record:{slug,revision:1,state:'CONFIRMED',mode:'S06',stageRevision:4,jobRevision:7,sourceFingerprint:F,readyIdentifier:identifier,readyInputFingerprint:F,commitSha:'a'.repeat(40)}});
+  m.put({key:'release:'+slug,release:{state:'CONFIRMED_PUBLIC',approval:{sourceFingerprint:F,stageRevision:4,jobRevision:7}}});
  });
  const before=db.keys('meta'),queue=createS06ReviewQueue(db),completed=await queue.list({status:'COMPLETED',limit:20});
  assert.equal(completed.ok,true);assert.deepEqual(completed.items.map(x=>x.slug),['release-1000']);assert.equal(completed.more,false);

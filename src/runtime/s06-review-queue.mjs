@@ -1,3 +1,5 @@
+import {planAiStep} from './ai-supervisor.mjs';
+import {AI_BROWSER_ASSERTIONS} from './perchance-ai-oracle.mjs';
 import {matchesReviewGroup} from './review-queue-state.mjs';
 // S06 operator queue: cursor-paged canonical READ ONLY projection. Not an
 // approval/effect authority. Every listed status is derived from persisted
@@ -12,7 +14,7 @@ import {createS06HumanStore} from './s06-human-review.mjs';
 import {createS06ExceptionStore} from './s06-exception-review.mjs';
 import {planS06Writeback} from './s06-writeback-progress.mjs';
 const fail=code=>({ok:false,code});
-export function s06ReviewStatus({decision,release,change,human,exception,sourceFingerprint,stageRevision,jobRevision,parentStageRevision,job}={}){
+export function s06ReviewStatus({decision,release,change,human,exception,sourceFingerprint,stageRevision,jobRevision,parentStageRevision,job,currentReady=false}={}){
   const r=release?.record||release;
   // An uncertain release cannot be reapproved from a new queue projection.
   if(r&&['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN',
@@ -46,8 +48,9 @@ export function s06ReviewStatus({decision,release,change,human,exception,sourceF
         code:'EXACT_EXCEPTIONAL_GIT_F_INDIVIDUAL_APPROVAL_REQUIRED'}:
       {state:'EXCEPTION_HELD',
         code:'HUMAN_CHECKS_RECORDED_NOT_AI_VERIFIED_OR_GIT_CONFIRMED'};
-  if(!decision?.ok&&job&&!job.operatorPaused&&!job.exceptionFrozen&&!job.schedulerHold&&!job.hold&&
-     ['S06_CANDIDATE_OR_TEST_EVIDENCE_UNVERIFIED'].includes(decision?.code))
+  if(!decision?.ok&&job&&currentReady&&job.stageRevision===stageRevision&&!job.operatorPaused&&!job.exceptionFrozen&&
+     !(job.schedulerHold&&(job.schedulerDeferredUntil||0)>Date.now())&&
+     decision?.code==='S06_CANDIDATE_OR_TEST_EVIDENCE_UNVERIFIED'&&planAiStep(job,{oracleNames:AI_BROWSER_ASSERTIONS}).ok)
     return {state:job.native?.state==='RUNNING_OBSERVED'?'DEVELOPMENT_RUNNING':'IN_DEVELOPMENT',code:'AUTOMATIC_DEVELOPMENT_IN_PROGRESS'};
   if(!decision?.ok)return {state:'BLOCKED',code:decision?.code||'CANDIDATE_UNVERIFIED'};
   if(decision.type==='REVIEW')
@@ -91,6 +94,7 @@ export function createS06ReviewQueue(db){
         release:release.ok?release:null,sourceFingerprint,
         change:change.ok?change:null,human:human.ok?human:null,
         exception:exception.ok?exception:null,
+        currentReady:!!(stage.ok&&ready.record.active&&!ready.record.desired&&!ready.record.hold&&ready.record.active.identifier===stage.record.readyIdentifier&&ready.record.active.inputFingerprint===stage.record.readyInputFingerprint),
         stageRevision:stage.ok?stage.record.revision:null,jobRevision:job.ok?job.job.revision:null,job:job.ok?job.job:null,
         parentStageRevision:stage.ok?stage.record.handoffParentRevision:null});
       if(!matchesReviewGroup(status.state,requestedGroup))continue;

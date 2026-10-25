@@ -70,3 +70,13 @@ test('J04 more than256 source-changing repairs preserve every full checkpoint wi
  const history=snapshot.stores.meta.find(x=>x.key==='ai-history:'+name+':129');history.value.job.finalSource.blobs[0].base64='AA==';
  await assert.rejects(auditSourceClosure(snapshot),/BACKUP_SOURCE_BYTE_MISMATCH/);
 });
+
+test('J04 multi-chunk source reads reuse bounded sealed bytes but fresh views detect corrupt same-revision storage',async()=>{
+ const f=await fixture(),view=await f.review.view('generator-one'),meta=view.files.find(x=>x.path==='src/big.bin');
+ const original=crypto.subtle.digest;let hashes=0;crypto.subtle.digest=function(...args){hashes++;return original.apply(this,args)};
+ try{
+  const bytes=await readComparisonFile({view,origin:'F',file:meta,request:(_,p)=>f.review.chunk(p)});assert.equal(bytes.length,20001);assert.equal(hashes,1,'only the independent whole-file UI hash runs; F/P are not resealed per chunk');
+  const corrupted=structuredClone(f.record);corrupted.candidate.blobs[0].base64=btoa('corrupt same revision');f.setRecord(corrupted);
+  assert.equal((await f.review.view('generator-one')).code,'REVIEW_STORED_SOURCE_CORRUPT');
+ }finally{crypto.subtle.digest=original}
+});

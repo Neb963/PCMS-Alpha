@@ -6,7 +6,7 @@ import {openCanonicalDatabase,createRestoreSentinel,fail} from './journal.mjs';
 import {createReadyStore} from './ready-store.mjs';
 import {createWritebackStore} from './writeback-store.mjs';
 import {createS06ExceptionStore} from './s06-exception-review.mjs';
-import {sealedS06OutputProof} from './s06-output-proof.mjs';
+import {resolveS06OutputProof} from './s06-output-proof.mjs';
 import {createStagingStore} from './staging-store.mjs';
 import {createAiStore} from './ai-store.mjs';
 import {stageReadyGitSource} from './ready-git-source.mjs';
@@ -120,7 +120,7 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
      createWritebackStore(db).getFull(name),
      createAiStore(db).getJobFull(name),
      createS06ExceptionStore(db).getFull(name)]);
-   const output=sealedS06OutputProof({ready:initial,stage,
+   const output=await resolveS06OutputProof(db,{ready:initial,stage,
      writeback:confirmed,job,exception});
    const coherent=await inspect({repository:cfg.repository,
      token:secret.credential,pinnedHead:tree.head,

@@ -14,7 +14,7 @@ import {pinGitChatPrompt} from './ready-git-prompt.mjs';
 import {createReadyStore} from './ready-store.mjs';
 import {createWritebackStore} from './writeback-store.mjs';
 import {createS06ExceptionStore} from './s06-exception-review.mjs';
-import {sealedS06OutputProof} from './s06-output-proof.mjs';
+import {resolveS06OutputProof} from './s06-output-proof.mjs';
 import {authorizeReadyAiAdvance,authorizeGitReadyAiAdvance} from './ready-ai-gate.mjs';
 import {verifyReadback,exactSource} from './staging-core.mjs';
 import {planAiStep} from './ai-supervisor.mjs';
@@ -95,7 +95,7 @@ export function createAiBoundary(api,{
       createWritebackStore(db).getFull(slug),
       storeFactory(db).getJobFull(slug),
       createS06ExceptionStore(db).getFull(slug)]);
-    const proof=sealedS06OutputProof({ready,stage:s,writeback:w,job:j,exception:e});
+    const proof=await resolveS06OutputProof(db,{ready,stage:s,writeback:w,job:j,exception:e});
     return proof.ok?{outputProof:proof.outputProof}:{};
   }
   async function executeTrusted(message){

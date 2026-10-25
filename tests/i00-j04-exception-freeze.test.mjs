@@ -74,3 +74,20 @@ test('J04 exceptional final F updates only the existing comparison source and pr
   assert.equal((await store.setFinal(slug,2,f.source)).code,'EXISTING_FINAL_TESTS_OR_STAGE_CHANGED');
  }
 });
+
+test('J04 requested exceptional child and prepared successor retain historical Git attribution without inheriting parent test authority',async()=>{
+ const {createS06ChangeStore}=await import('../src/runtime/s06-request-changes.mjs'),{resolveS06OutputProof}=await import('../src/runtime/s06-output-proof.mjs');
+ const f=await fixture('MANUAL_INFRASTRUCTURE');assert.equal((await f.boundary.runTrusted({type:'RECORD_EXCEPTION',params:f.params})).ok,true);
+ const j=f.db.read('meta','ai-job:'+slug).job,ex=f.db.read('meta','s06-exception:'+slug).record,commit='c'.repeat(40),operationId='writeback_'+'1'.repeat(32);
+ const wb={slug,accountId:f.stage.accountId,personaUid:f.stage.personaUid,principalFingerprint:f.stage.principalFingerprint,remotePublicId:f.stage.remotePublicId,folder:'generators/'+slug,operationId,revision:1,state:'CONFIRMED',mode:'S06_EXCEPTION',exceptionRevision:ex.revision,stageRevision:3,jobRevision:j.revision,sourceFingerprint:j.sourceFingerprint,sealedSource:f.source,commitSha:commit,baseHead:'d'.repeat(40),expectedHead:'d'.repeat(40),readyIdentifier:'ready',readyInputFingerprint:F};
+ await put(f.db,{key:'writeback:'+slug,record:wb});
+ const store=createS06ChangeStore(f.db),req=await store.request({name:slug,stage:f.stage,job:j,sourceFingerprint:j.sourceFingerprint,instructions:'Continue from this exact saved exceptional source.',expectedStageRevision:3,expectedJobRevision:j.revision,requestId:'change_'+'3'.repeat(32)});assert.equal(req.ok,true,JSON.stringify(req));assert.equal((await store.admit(slug,req.revision)).ok,true);
+ const stage=f.db.read('meta','stage:'+slug).record,job=f.db.read('meta','ai-job:'+slug).job,context={ready:f.ready,stage,job,writeback:wb,exception:ex};
+ const proof=await resolveS06OutputProof(f.db,context);assert.equal(proof.ok,true,JSON.stringify(proof));assert.equal(proof.historical,true);assert.equal(proof.outputProof.commitSha,commit);assert.equal(authorizeS06Exception({ready:f.ready,stage,job,record:ex}).ok,false);
+ await put(f.db,{key:'writeback-history:'+slug+':'+operationId,record:wb});
+ assert.equal((await resolveS06OutputProof(f.db,{...context,writeback:{...wb,state:'PREPARED',operationId:'writeback_'+'2'.repeat(32),baseHead:commit}})).ok,true);
+ assert.equal((await resolveS06OutputProof(f.db,{...context,ready:{...f.ready,desired:{identifier:'new',inputFingerprint:F}}})).ok,false);
+ assert.equal((await resolveS06OutputProof(f.db,{...context,stage:{...stage,principalFingerprint:'e'.repeat(64)}})).ok,false);
+ const parent=f.db.read('meta','ai-history:'+slug+':'+j.revision);parent.job.chat1.tests.smoke={result:'FAIL',sourceFingerprint:f.source.fingerprint};await put(f.db,parent);
+ assert.equal((await resolveS06OutputProof(f.db,context)).ok,false,'a real failed parent test never becomes exceptional attribution');
+});

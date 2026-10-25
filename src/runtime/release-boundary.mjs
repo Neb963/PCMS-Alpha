@@ -167,7 +167,7 @@ export function createReleaseBoundary(api,{
     slug:r.slug,nonce:r.nonce,action:'PUBLISH',remotePublicId:r.remotePublicId,
     principalFingerprint:r.principalFingerprint,files:r.releaseFiles})
 }={}){
-  let dbPromise;
+  let dbPromise,localSourceReview;
   const db=()=>dbPromise ||=open().catch(e=>{dbPromise=null;throw e;});
   const sentinel=createRestoreSentinel(api.storage.local);
   async function vaultToken(explicit){
@@ -286,9 +286,9 @@ export function createReleaseBoundary(api,{
   }
   async function runTrusted(msg){
     const p=msg.params||{},database=await db(),store=releaseFactory(database);
-    if(msg.type==='LIST_SOURCE_HISTORY')return createLocalSourceReview(database,{stageFactory,aiFactory}).history(p.slug,p);
-    if(msg.type==='GET_LOCAL_REVIEW')return createLocalSourceReview(database,{stageFactory,aiFactory}).view(p.slug,p.historyRevision);
-    if(msg.type==='GET_LOCAL_CHUNK')return createLocalSourceReview(database,{stageFactory,aiFactory}).chunk(p);
+    if(msg.type==='LIST_SOURCE_HISTORY')return (localSourceReview||=createLocalSourceReview(database,{stageFactory,aiFactory})).history(p.slug,p);
+    if(msg.type==='GET_LOCAL_REVIEW')return (localSourceReview||=createLocalSourceReview(database,{stageFactory,aiFactory})).view(p.slug,p.historyRevision);
+    if(msg.type==='GET_LOCAL_CHUNK')return (localSourceReview||=createLocalSourceReview(database,{stageFactory,aiFactory})).chunk(p);
     if(msg.type==='GET')return store.get(p.slug);
     if(msg.type==='LIST')return store.list();
     if(msg.type==='GET_CHANGE')return createS06ChangeStore(database).get(p.slug);
