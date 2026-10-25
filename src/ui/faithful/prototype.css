@@ -400,3 +400,11 @@ body:has(.drawer-overlay:not([hidden])) #toast-root{right:min(555px,calc(100vw -
 @media(max-width:680px){.ref-side{grid-template-columns:minmax(0,1fr)}.ref-account-tools{padding:12px}.ref-account-tools label{flex-basis:100%}.ref-account-tools select{width:100%}.ref-table-scroll table{min-width:630px}}
 
 .refresher-dialog{min-width:0}.refresher-dialog .form-foot{flex-wrap:wrap;justify-content:flex-start;align-items:center}.refresher-dialog .form-foot .btn{max-width:100%;white-space:normal}.refresher-dialog .drawer-body{min-width:0}.refresher-dialog .drawer-head{display:flex;justify-content:space-between;align-items:start;gap:12px;padding-bottom:16px}.refresher-dialog .drawer-title{overflow-wrap:anywhere}.refresher-dialog .drawer-head .btn{flex-shrink:0}
+
+#page[data-view=refresher] .ref-side{overflow-y:auto;overscroll-behavior:contain;padding-right:2px;max-height:100%}
+#page[data-view=refresher] .ref-table-scroll td{white-space:normal;text-overflow:clip;overflow-wrap:anywhere}
+#page[data-view=refresher] .ref-table-scroll td.open-col{width:26px;min-width:26px;text-align:center;font-size:20px}
+.refresher-dialog .drawer-body>label{display:grid;grid-template-columns:minmax(0,1fr) 130px;gap:12px;align-items:center;margin:14px 0}
+.refresher-dialog .form-input{box-sizing:border-box;width:100%;min-width:0;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;font:inherit}
+.refresher-dialog label:has(input[type=checkbox]){display:flex;gap:10px}
+@media(max-width:600px){.refresher-dialog .drawer-body>label{grid-template-columns:minmax(0,1fr)}}

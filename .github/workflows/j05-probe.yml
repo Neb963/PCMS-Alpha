@@ -5,6 +5,7 @@ on:
     paths:
       - 'scripts/journey_refresher_probe.py'
       - 'scripts/fixtures/j05-clock.mjs'
+      - 'scripts/journey_refresher_clock.py'
       - '.github/workflows/j05-probe.yml'
 permissions:
   contents: read

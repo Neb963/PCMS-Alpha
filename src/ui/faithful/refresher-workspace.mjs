@@ -9,7 +9,7 @@ const explain=code=>choiceHelp[code]||'The change was not confirmed ('+String(co
 const rowOf=(snap,id)=>snap?.items?.find(r=>r.stableId===id);
 const timingOf=r=>r?{activeMs:r.activeMs,sleepMs:r.sleepMs,timingOverride:r.timingOverride}:null;
 export function createRefresherWorkspace({root,el,b,request,snapshot,reload,accounts,manageAccount,notify,formatTime}){
- let accountRows=[],accountError=false,accountEpoch=0;
+ let accountRows=[],accountError=false,accountEpoch=0,lastRendered=null,lastView=null;
  const q=selector=>root.querySelector(selector);
  const text=(selector,value)=>{const n=q(selector);if(n)n.textContent=value};
  const name=id=>accountRows.find(a=>a.accountId===id)?.alias||id;
@@ -18,7 +18,7 @@ export function createRefresherWorkspace({root,el,b,request,snapshot,reload,acco
   try{const r=await accounts();if(epoch!==accountEpoch)return;
    if(!r?.ok)throw Error();accountRows=(r.accounts||[]).filter(a=>!a.removed);accountError=false;
   }catch{if(epoch!==accountEpoch)return;accountError=true}
-  if(q('#refresher-account'))renderAccounts(snapshot());
+  if(q('#refresher-account')&&lastRendered&&lastView)render(lastRendered,lastView);
  }
  function dialog(label,title){
   const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('section','drawer refresher-dialog');
@@ -179,6 +179,7 @@ export function createRefresherWorkspace({root,el,b,request,snapshot,reload,acco
  }
  function render(snap,view){
   if(!snap?.ok)return;
+  lastRendered=snap;lastView={...view};
   const table=q('.ref-table-scroll tbody');if(!table)return;
   const focused=root.activeElement?.closest('tr[data-ref-id]')?.dataset.refId;
   const signature=JSON.stringify(snap.items.map(r=>[r.stableId,r.phase,r.paused,r.activeRemaining,r.sleepRemaining,r.blockers,r.presence,r.refresh,r.eligiblePosition,name(r.accountId)]));
@@ -190,7 +191,7 @@ export function createRefresherWorkspace({root,el,b,request,snapshot,reload,acco
     const state=el('td','',row.paused?'Paused':row.blockers?.length?'Held · '+row.phase.toLowerCase():row.phase.toLowerCase());
     state.append(el('span','ref-secondary',row.phase==='WAITING'?(row.eligiblePosition?'Eligible #'+row.eligiblePosition:'Waiting for eligibility'):formatTime(row.phase==='SLEEPING'?row.sleepRemaining:row.activeRemaining)+' remaining'));
     const presence=el('td','',placementText(row));presence.append(el('span','ref-secondary',row.refresh?.sourceSavedAt?'Source saved '+observedAge(row.refresh.sourceSavedAt)+(row.refresh.awaitingVisibility?' · placement pending':''):'No confirmed marker save'));
-    const cue=el('td','','Manage');tr.append(first,state,presence,cue);table.append(tr);
+    const cue=el('td','open-col','›');cue.setAttribute('aria-hidden','true');tr.append(first,state,presence,cue);table.append(tr);
    }
    if(!snap.items.length){const tr=el('tr'),td=el('td','muted-cell','No generators match these filters.');td.colSpan=4;tr.append(td);table.append(tr)}
    if(focused){const replacement=[...table.querySelectorAll('tr[data-ref-id]')].find(r=>r.dataset.refId===focused);replacement?.focus({preventScroll:true})}
