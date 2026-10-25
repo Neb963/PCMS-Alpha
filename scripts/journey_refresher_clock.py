@@ -11,7 +11,7 @@ def open_clock_session(browser,profile):
 def idle_settings(s):
     b.call('POST',f'/session/{s}/moz/context',{'context':'chrome'})
     try:
-        return b.execute(s,"const prefs=Components.classes['@mozilla.org/preferences-service;1'].getService(Components.interfaces.nsIPrefService),branch=prefs.getBranch(''),key='extensions.background.idle.timeout';return {effectiveMs:branch.getIntPref(key),defaultMs:prefs.getDefaultBranch('').getIntPref(key),userOverride:branch.prefHasUserValue(key)}")
+        return b.execute(s,"const prefs=Components.classes['@mozilla.org/preferences-service;1'].getService(Components.interfaces.nsIPrefService),branch=prefs.getBranch(''),key='extensions.background.idle.timeout';const read=b=>{try{return b.getIntPref(key)}catch{return null}};return {effectiveMs:read(branch),defaultMs:read(prefs.getDefaultBranch('')),userOverride:branch.prefHasUserValue(key),source:branch.getPrefType(key)===0?'FIREFOX_INTERNAL_DEFAULT_NO_PREF':'FIREFOX_PREF'}")
     finally:b.call('POST',f'/session/{s}/moz/context',{'context':'content'})
 def raw(s,name):
     return p.background(s,"""const db=await new Promise((resolve,reject)=>{const q=indexedDB.open(NAME);q.onsuccess=()=>resolve(q.result);q.onerror=reject});const state=await new Promise((resolve,reject)=>{const q=db.transaction('meta').objectStore('meta').get('refresher:shadow:v1');q.onsuccess=()=>resolve(q.result?.state);q.onerror=reject});db.close();return {state,alive:!!window.__j05clock,boot:window.__j05clock?.boot};""".replace('NAME',json.dumps(name)))
