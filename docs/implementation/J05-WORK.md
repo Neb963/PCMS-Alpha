@@ -13,3 +13,6 @@ Background-clock correction in development: a short, coalesced follow-up perform
 
 
 Observation controls and scale: explicit Check now now records a due read before the real controller turn, preserving existing endpoint/account backoff and read quota. Read-only projection includes eligible order, per-account counts/grace, real source-save timestamps, observed occupancy history, capacity samples/age and the latest browser activity observation. Canonical synchronization uses bounded key-prefix cursors for its eight existing namespaces, including READY; unrelated immutable repair history cannot consume its scan limit or be cloned on every active-time observation. Regression covers the preserved read limits and more than50,000 unrelated history records. Source/rank/write admission policy is unchanged.
+
+
+Primary UI candidate now adds account controls (including before inventory), observed recent share/history/placement age and independent source-save status, effective/observed capacity with bounded override, future default/custom/reset timing and fresh-choice CAS/readback. Quick scoped Pause/Resume interval fencing was independently reviewed at c45e0e0; unchanged controls cannot charge hidden paused time. Installed UI and command-free clock/restart evidence remain pending; no completion claim.
