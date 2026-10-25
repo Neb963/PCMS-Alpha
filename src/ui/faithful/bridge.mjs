@@ -283,7 +283,13 @@ function routeHandlers(){
     !document.body.classList.contains('pcms-faithful-ready'))return;
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){
    event.preventDefault();event.stopImmediatePropagation();
-   if(!shadow('.overlay'))openGlobalSearch();
+   const dialog=[...root.querySelectorAll('[role=dialog]')].at(-1);
+   if(dialog){
+    if(dialog.getAttribute('aria-label')==='Search PCMS records')dialog.querySelector('input[type=search]')?.focus();
+    else notify('Close the current dialog to search other records.');
+    return;
+   }
+   openGlobalSearch();
   }
  },true);
  root.addEventListener('click',event=>{const link=event.target.closest('button[data-action],button[data-settings]');if(!link)return;const action=link.dataset.action;const setting=link.dataset.settings;

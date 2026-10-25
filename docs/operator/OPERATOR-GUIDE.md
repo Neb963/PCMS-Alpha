@@ -6,7 +6,7 @@ PCMS is one Firefox add-on. Its toolbar button opens the dashboard. Work continu
 
 Keep a separate copy of your Firefox profile before upgrading. In `about:addons`, use the gear menu → **Install Add-on From File** and select `pcms-alpha-1.2.14.xpi`. The add-on keeps its existing ID and stored work.
 
-This unsigned package needs Firefox Developer Edition, Nightly or an ESR installation that permits unsigned add-ons (`xpinstall.signatures.required=false` in a dedicated profile). Firefox release editions that enforce signatures cannot install it. Protected accounts use PersonaMonkey's existing `com.persona.mullvad_router` routing bridge; PCMS needs no additional native helper.
+Use Firefox **153 or later**. This unsigned package needs Developer Edition, Nightly or a compatible ESR installation that permits unsigned add-ons (`xpinstall.signatures.required=false` in a dedicated profile). Firefox release editions that enforce signatures cannot install it. Protected accounts use PersonaMonkey's existing `com.persona.mullvad_router` routing bridge; PCMS needs no additional native helper.
 
 ## Everyday work
 

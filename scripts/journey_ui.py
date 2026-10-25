@@ -11,8 +11,9 @@ def wait(s,expression,label,seconds=35):
     except Exception:
         print('J07_FOCUS_CONTEXT='+json.dumps(b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot,e=sh.activeElement;return {active:e?.outerHTML,inert:sh.querySelector('.app').inert,dialog:!!sh.querySelector('[role=dialog]')}")),flush=True)
         raise
-def key(s,value,shift=False):
-    actions=([{'type':'keyDown','value':'\ue008'}] if shift else [])+[{'type':'keyDown','value':value},{'type':'keyUp','value':value}]+([{'type':'keyUp','value':'\ue008'}] if shift else [])
+def key(s,value,shift=False,control=False):
+    modifier='\ue009' if control else '\ue008'
+    actions=([{'type':'keyDown','value':modifier}] if shift or control else [])+[{'type':'keyDown','value':value},{'type':'keyUp','value':value}]+([{'type':'keyUp','value':modifier}] if shift or control else [])
     b.call('POST',f'/session/{s}/actions',{'actions':[{'type':'key','id':'j07-keyboard','actions':actions}]})
 def capture(s,name,evidence):
     b.execute(s,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#main').scrollTop=0")
@@ -128,7 +129,10 @@ def run(browser,archive,folder):
                 key(s,'\ue00c');wait(s,"!sh.querySelector('[role=dialog]')",'J07_NARROW_DIALOG_FOCUS_RECOVERY')
                 g.click(s,'[data-action=git-sources]');dialog_geometry(s,'J07_NARROW_GIT_SOURCE_DIALOG');key(s,'\ue00c');wait(s,"!sh.querySelector('[role=dialog]')",'J07_NARROW_GIT_CLOSE')
             if route=='accounts':
-                g.click_text(s,'Manage');wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('Open Perchance')",'J07_NARROW_REAL_ACCOUNT_ACTIONS');dialog_geometry(s,'J07_NARROW_ACCOUNT_DIALOG');key(s,'\ue00c');wait(s,"!sh.querySelector('[role=dialog]')",'J07_NARROW_ACCOUNT_CLOSE')
+                g.click_text(s,'Manage');wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('Open Perchance')",'J07_NARROW_REAL_ACCOUNT_ACTIONS');dialog_geometry(s,'J07_NARROW_ACCOUNT_DIALOG')
+                key(s,'k',control=True);wait(s,"sh.querySelectorAll('[role=dialog]').length===1&&sh.querySelector('[role=dialog]').getAttribute('aria-label')==='Account management'&&sh.querySelector('#pcms-live-toast').textContent.includes('Close the current dialog')",'J07_NATIVE_SEARCH_SHORTCUT_RESPECTS_ACTIVE_MODAL')
+                key(s,'\ue00c');wait(s,"!sh.querySelector('[role=dialog]')",'J07_NARROW_ACCOUNT_CLOSE')
+                key(s,'k',control=True);wait(s,"sh.querySelector('[role=dialog]')?.getAttribute('aria-label')==='Search PCMS records'",'J07_NATIVE_GLOBAL_SEARCH_AFTER_MODAL');dialog_geometry(s,'J07_NARROW_SEARCH_DIALOG');key(s,'\ue00c');wait(s,"!sh.querySelector('[role=dialog]')",'J07_NARROW_SEARCH_CLOSE')
             if route=='refresher':
                 wait(s,"sh.querySelector('#refresher-capacity')?.textContent!=='Not observed'",'J07_REF_POLICY_LOADED');g.click(s,'[data-action=edit-timing]');dialog_geometry(s,'J07_NARROW_TIMING_DIALOG');key(s,'\ue00c');wait(s,"!sh.querySelector('[role=dialog]')",'J07_NARROW_TIMING_CLOSE')
             if route=='settings':
