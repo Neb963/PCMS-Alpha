@@ -1389,17 +1389,23 @@ def main():
                     [...aiPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Save concurrency'));
                   sh.querySelector('[data-settings="backups"]').click();
                   const backupPanel=sh.querySelector('.settings-main');
-                  const protectedRestore=!!backupPanel?.querySelector('input[type="file"]')&&
-                    backupPanel.querySelectorAll('input[type="file"]').length===2&&
-                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Verify independent checkpoint'))&&
-                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Reconcile uncertain restore'))&&
-                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Apply reviewed import'));
-                  const restoreHeld=[...backupPanel.querySelectorAll('button')].find(x=>x.textContent.includes('Apply reviewed import'))?.disabled===true;
+                  // J06's actual files and owned safety-copy flow replace raw
+                  // mapping/hash forms. Populated/fresh real apply/restart and
+                  // adverse file checks ran above in the required J06 journeys.
+                  const protectedRestore=!!backupPanel?.querySelector('#pcms-restore-archive[type="file"]')&&
+                    !!backupPanel.querySelector('#pcms-restore-checkpoint[type="file"]')&&
+                    !!backupPanel.querySelector('#pcms-restore-save-checkpoint')&&
+                    !!backupPanel.querySelector('#pcms-restore-verify')&&
+                    !!backupPanel.querySelector('#pcms-restore-reconcile')&&
+                    !!backupPanel.querySelector('#pcms-restore-apply')&&
+                    !backupPanel.querySelector('#pcms-restore-mappings');
+                  const restoreHeld=backupPanel.querySelector('#pcms-restore-apply')?.disabled===true;
                   sh.querySelector('[data-settings="diagnostics"]').click();
                   const details=sh.querySelector('.settings-main');
                   const primaryDiagnostic=details?.textContent.includes('Operational diagnostics')&&
                     !!details?.querySelector('input[placeholder="pcms-test-alpha"]')&&
-                    [...details.querySelectorAll('button')].some(x=>x.textContent.includes('Save disposable scope'));
+                    !!details.querySelector('#pcms-diagnostic-designate')&&
+                    !!details.querySelector('#pcms-diagnostic-independent-run');
                   sh.querySelector('[data-settings="connections"]').click();
                   const connected=sh.querySelector('.settings-main');
                   const git=connected?.querySelector('[data-git-connection="1"]');
@@ -1437,14 +1443,17 @@ def main():
                        const text=sh.querySelector('#pcms-diagnostic-independent-status')?.textContent||'';
                        return {count:section?.querySelectorAll('li')?.length||0,
                           text,
-                          hasLocalInventory:section?.textContent.includes('INVENTORY STORE'),
-                          hasGit:section?.textContent.includes('GIT MAIN'),
-                          hasBackup:section?.textContent.includes('BACKUP RUNTIME'),
+                          ids:[...section?.querySelectorAll('[data-check-id]')||[]].map(r=>r.dataset.checkId).sort(),
+                          hasLocalInventory:!!section?.querySelector('[data-check-id="INVENTORY_STORE"]'),
+                          hasGit:!!section?.querySelector('[data-check-id="GIT_MAIN"]'),
+                          hasBackup:!!section?.querySelector('[data-check-id="BACKUP_RUNTIME"]'),
+                          archiveProven:section?.querySelector('[data-check-id="BACKUP_ARCHIVE"]')?.dataset.outcome==='PASS',
+                          restoreProven:section?.querySelector('[data-check-id="RESTORE_LOCAL_DATA"]')?.dataset.outcome==='PASS',
                           independentExport:!sh.querySelector('#pcms-diagnostic-export')?.disabled};""")
-                    if independent['count']==8:break
+                    if independent['count']==10:break
                     time.sleep(.14)
-                assert independent and independent['count']==8 and independent['hasLocalInventory'] and independent['hasGit'] and independent['hasBackup'] and independent['independentExport'],('A09_INDEPENDENT_CHECKS_BLOCKED_BY_CREATE',independent)
-                print('B A09_INDEPENDENT_READ_ONLY_MODULE_CHECKS=PASS',flush=True)
+                assert independent and independent['ids']==sorted(['GIT_AUTH','GIT_MAIN','GIT_CREDENTIAL','BACKUP_RUNTIME','BACKUP_ARCHIVE','RESTORE_LOCAL_DATA','ACCOUNT_STORE','INVENTORY_STORE','REFRESHER_POLICY','STANDING_GRANTS']) and independent['hasLocalInventory'] and independent['hasGit'] and independent['hasBackup'] and independent['archiveProven'] and independent['restoreProven'] and independent['independentExport'],('A09_INDEPENDENT_CHECKS_BLOCKED_BY_CREATE',independent)
+                print('B A09_INDEPENDENT_MODULES_FUNCTIONAL_ARCHIVE_AND_ISOLATED_RESTORE=PASS',flush=True)
 
                 # A09 operator regression: one concrete interrupted local
                 # Git intent MUST reveal the recovery controls in the visible

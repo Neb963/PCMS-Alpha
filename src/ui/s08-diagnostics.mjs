@@ -152,6 +152,7 @@ function show(){
  const checks=document.createElement('ol');
  for(const row of independent?.rows||[]){
   const li=document.createElement('li');
+  li.dataset.checkId=row.id;li.dataset.outcome=row.outcome;
   li.textContent=(CHECK_LABELS[row.id]||'Module check')+' — '+(OUTCOME_LABELS[row.outcome]||'Not verified');
   const details=document.createElement('details'),summary=document.createElement('summary'),code=document.createElement('code');summary.textContent='Details';code.textContent=row.code+' · '+row.proof;details.append(summary,code);li.append(details);
   checks.append(li);
