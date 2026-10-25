@@ -1702,7 +1702,7 @@ def main():
                       readyInputFingerprint:input,testingSha:null,
                       accountId:'fixture-account',personaUid:'fixture-persona',
                       principalFingerprint:principal,remotePublicId:'fixture-remote',
-                      nonce:'fixture-nonce',bindingVersion:1}});
+                      nonce:'e'.repeat(32),bindingVersion:1}});
                     m.put({key:'ai-job:'+humanSlug,accountId:'fixture-account',job:{
                       slug:humanSlug,revision:7,stageRevision:4,
                       state:'TESTS_VERIFIED',sourceFingerprint:humanF.fingerprint,
@@ -1738,6 +1738,8 @@ def main():
                     getSafeRouteReadiness:async()=>({ready:true,
                       cookieStoreId:'fixture-ctx',routeId:'fixture-route'}),
                     inspectStageEditor:async()=>({ok:true,clean:true}),
+                    inspectHumanReview:async()=>({ok:true,clean:true,noEditors:true}),
+                    reclaimHumanReview:async()=>({ok:true,clean:true}),
                     runNativeAiStep:async()=>({ok:true,busy:false,editorClean:true,
                       sourceSaved:true,sessionDigest:session,hasQueue:false,
                       inputOccupied:false,attachmentsPending:false}),
@@ -1778,7 +1780,10 @@ def main():
                       slug:exceptionSlug,revision:4,state:'SOURCE_VERIFIED',verifiedAt:1,
                       candidate:humanF,previous:humanF,
                       sourceFolder:'generators/'+exceptionSlug,
-                      readyIdentifier:'rev-fixture-ex',readyInputFingerprint:input}});
+                      readyIdentifier:'rev-fixture-ex',readyInputFingerprint:input,
+                      accountId:'fixture-account',personaUid:'fixture-persona',
+                      principalFingerprint:principal,remotePublicId:'fixture-remote',
+                      nonce:'e'.repeat(32),bindingVersion:1}});
                     m.put({key:'ai-job:'+exceptionSlug,accountId:'fixture-account',job:{
                       slug:exceptionSlug,revision:7,stageRevision:4,
                       state:'TESTS_UNVERIFIED',sourceFingerprint:humanF.fingerprint,
@@ -1797,11 +1802,25 @@ def main():
                       hold:'AI_CHAT2_ISOLATION_UNVERIFIED'}});
                   });
                   const exceptionBefore=await call('EXCEPTION_CONTEXT',{slug:exceptionSlug});
-                  const exceptionRecorded=await call('RECORD_EXCEPTION',{
-                    slug:exceptionSlug,mode:'OPTIONAL_CHAT2_INCOMPLETE',
-                    checks:[],consent:'I PERFORMED THE RECORDED MANUAL CHECKS',
-                    expectedStageRevision:4,expectedJobRevision:7,
-                    sourceFingerprint:humanF.fingerprint});
+                  // The installed typed production boundary must capture a
+                  // fresh guarded idle/full-source proof; a port fixture cannot
+                  // assert that the real donor has an offline provider tab.
+                  // All negative/background-port reads above remain real.
+                  const releaseModule=await import(browser.runtime.getURL('pcms/release-boundary.mjs'));
+                  const exceptionGuard={...synthetic,observeReadOnly:async()=>({
+                    ok:true,principalFingerprint:principal,original:{
+                      remotePublicId:'fixture-remote',ownerResult:'IS_OWNER',
+                      visibility:'UNLISTED',pjs:'tested F fixture',
+                      html:'<main>tested F</main>',assets:[]}})};
+                  const guardedException=releaseModule.createReleaseBoundary(browser,{
+                    open:async()=>db,guard:()=>exceptionGuard});
+                  const exceptionRecorded=await guardedException.run({
+                    type:'RECORD_EXCEPTION',params:{
+                      slug:exceptionSlug,mode:'OPTIONAL_CHAT2_INCOMPLETE',
+                      checks:[],consent:'I PERFORMED THE RECORDED MANUAL CHECKS',
+                      expectedStageRevision:4,expectedJobRevision:7,
+                      sourceFingerprint:humanF.fingerprint}},
+                    {id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')});
                   const exceptionSaved=await call('GET_EXCEPTION',{slug:exceptionSlug});
                   const exceptionCycle=exceptionBefore?.ok===true&&
                     exceptionBefore.evidenceState==='TESTS_UNVERIFIED'&&
@@ -1838,6 +1857,9 @@ def main():
                     standingCode:standing?.reason,
                     forgedGrantCode:forgedGrant?.code,standingCycle,humanCycle,
                     humanAdoptedState:humanAdopted?.state,
+                    humanAdoptionCode:humanAdopted?.code||null,
+                    humanDeferCode:humanDeferred?.code||null,
+                    exceptionRecordCode:exceptionRecorded?.code||null,
                     exceptionCycle,exceptionMode:exceptionSaved?.mode,
                     positiveCode:entitled?.code||'GRANTED',
                     pauseCode:paused?.code||null,ui});
