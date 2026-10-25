@@ -1036,6 +1036,10 @@ def main():
             else: raise RuntimeError('geckodriver did not become ready')
             # Exercise the changed operator journey first; all unchanged
             # persistent donor/source/backup suites still run after it passes.
+            from journey_refresher_ui import run as run_j05_primary
+            run_j05_primary(browser,archive,pathlib.Path(folder))
+            from journey_refresher_clock import run as run_j05_clock
+            run_j05_clock(browser,archive,pathlib.Path(folder))
             from journey_development_ui import run as run_j04_primary
             run_j04_primary(browser,archive,pathlib.Path(folder))
             from journey_development_pipeline import run as run_j04_pipeline

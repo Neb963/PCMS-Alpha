@@ -6,6 +6,7 @@ const base='src/ui/faithful/';
 const html=await read('src/ui/index.html'),build=await read('scripts/build-i00.mjs');
 const bridge=await read(base+'bridge.mjs'),stylesheet=await read(base+'prototype.css');
 const shell=await read(base+'shell.html'),awaitSource=await read(base+'source-workspace.mjs');
+const refresherUI=await read(base+'refresher-workspace.mjs'),refresherChoices=await read(base+'refresher-choices.mjs');
 const routes=['overview','generators','work-queue','accounts','refresher','settings'];
 test('accepted prototype structure rather than prior native markup is PRIMARY',()=>{
  assert.match(html,/faithful\/native-shell\.css/);
@@ -38,9 +39,13 @@ test('canonical primary controls call protected typed runtime with exact revisio
  assert.doesNotMatch(bridge,/function nativeAction\(|function guardedClick\(|pcms-native-open/);
  assert.match(bridge,/window\.addEventListener\('focus',refreshOnWake\)/);
  assert.doesNotMatch(bridge,/guardedClick\('pcms-refresher-save'\)/);
- assert.match(bridge,/readPort\('pcms-i12-refresher','SET_POLICY'/);
- assert.match(bridge,/expectedRevision:snapshot\.revision,policy:\{refreshEnabled:next\}/);
- assert.match(bridge,/readPort\('pcms-i12-refresher','SET_GENERATOR_POLICY'/);
+ assert.match(bridge,/createRefresherWorkspace\(\{root,el,b/);
+ assert.match(bridge,/readPort\('pcms-i12-refresher',type,params/);
+ assert.match(refresherUI,/type:'SET_POLICY',params:\{policy:\{refreshEnabled:desired\}\}/);
+ assert.match(refresherUI,/type:'SET_GENERATOR_POLICY'/);
+ assert.match(refresherChoices,/expectedRevision:current\.revision/);
+ assert.match(refresherChoices,/result\?\.code==='STALE_REVISION'&&attempt===0/);
+ assert.doesNotMatch(refresherUI,/\binnerHTML\s*=/,'dynamic Refresher evidence remains text');
  assert.match(bridge,/createSourceWorkspace\(\{root,el,b,request:readPort/);
  const source=awaitSource;assert.match(source,/request\('pcms-i05-source',type/);
  assert.match(source,/call\('INSPECT_SOURCE'/);assert.match(source,/call\('READ_SOURCE_FILE'/);assert.match(source,/expectedRevision:item.revision/);
