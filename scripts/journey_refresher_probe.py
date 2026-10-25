@@ -9,7 +9,9 @@ def run(browser,archive,folder):
     s=b.open_session(browser,profile)
     try:
         assert b.call('POST',f'/session/{s}/moz/addon/install',{'path':str(archive),'temporary':False},timeout=45)==b.ID
-        b.call('POST',f'/session/{s}/url',{'url':'about:blank'});b.wait_donor_ready(s)
+        b.close(s);s=b.open_session(browser,profile)
+        uuid=b.addons_uuid(profile);b.call('POST',f'/session/{s}/url',{'url':f'moz-extension://{uuid}/pcms/index.html#refresher'});b.wait_donor_ready(s)
+        b.call('POST',f'/session/{s}/url',{'url':'about:blank'})
         source=pathlib.Path(__file__).with_name('fixtures').joinpath('j05-clock.mjs').read_text().replace('export async function','async function')
         result=p.background(s,source+';return await installRefresherClockFixture(true);')
         print('J05_TIMER_PROBE='+json.dumps(result),flush=True)
