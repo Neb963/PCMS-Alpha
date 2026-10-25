@@ -1783,7 +1783,7 @@ function primaryBackups(container){
 }
 function primaryDiagnostics(container){
  const section=primarySettingCard(container,'Operational diagnostics',
-  'Runs through real guarded services for explicitly designated disposable resources. External process and disk evidence is NOT_TESTED unless independently measured.');
+  'Check each module, review saved results and test with a dedicated account when needed.');
  const tpl=document.createElement('template');tpl.innerHTML=diagnosticTemplate;
  const form=tpl.content.firstElementChild;form.className='form-stack';
  for(const input of form.querySelectorAll('input:not([type=checkbox]), select, textarea'))

@@ -49,6 +49,13 @@ test('new untagged destination keeps source associations recoverable but never i
  }
  assert.equal(restored.stores.operations[0].value.personaUid,sourceUid);assert.equal(restored.stores.operations[0].value.status,'HELD_UNCERTAIN');
 });
+test('retired destination tag history retains the original observed UID/context instead of the imported UID remap',()=>{
+ const current=ledger('bind_source',sourceUid);current.bindings.bind_source.contextId='firefox-container-old';
+ const merged=mergeRestoredExitLedgers(current,current,{uidRemap:{[sourceUid]:targetUid},affectedAccounts:['account_same'],accountTargets:{account_same:{personaUid:targetUid,bindingId:null}}});
+ const retired=merged.restoredBindingHistory.bind_source;
+ assert.equal(retired.destinationRetired,true);assert.equal(retired.personaUid,sourceUid);assert.equal(retired.contextId,'firefox-container-old');assert.equal(retired.pin,'HELD');
+ assert.equal(merged.owners['IPv4:8.8.8.8'],'account_same');
+});
 test('cloned external artifacts never inherit verified installation ownership',()=>{
  const script={id:'shared',externalArtifact:{ownerKey:'owner_fixture',artifactId:'artifact_fixture',ownershipVerified:true},profileIds:['unrelated','selected']};
  const current={scripts:{shared:script},workflows:{}};
@@ -57,4 +64,12 @@ test('cloned external artifacts never inherit verified installation ownership',(
  assert.equal(imported.state.scripts.shared.externalArtifact.ownershipVerified,true);
  assert.equal(imported.state.scripts.cloned.externalArtifact.ownershipVerified,false);
  assert.equal(Object.values(imported.state.scripts).filter(s=>s.externalArtifact.ownershipVerified).length,1);
+});
+
+test('source history cannot assert destination retirement provenance',()=>{
+ const source=ledger('bind_source',sourceUid);source.bindings.bind_source.destinationRetired=true;
+ source.restoredBindingHistory={bind_old:{...source.bindings.bind_source,bindingId:'bind_old',destinationRetired:true}};
+ const restored=mergeRestoredExitLedgers(source,null,{affectedAccounts:['account_same'],accountTargets:{account_same:{personaUid:targetUid,bindingId:null}}});
+ assert.equal(restored.restoredBindingHistory.bind_old.destinationRetired,undefined);
+ assert.equal(restored.restoredBindingHistory.bind_source.destinationRetired,undefined);
 });

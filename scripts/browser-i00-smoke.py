@@ -1038,6 +1038,8 @@ def main():
             # persistent donor/source/backup suites still run after it passes.
             from journey_backups_ui import run as run_j06_primary
             run_j06_primary(browser,archive,pathlib.Path(folder))
+            from journey_restore_ui import run as run_j06_restore
+            run_j06_restore(browser,archive,pathlib.Path(folder))
             from journey_refresher_ui import run as run_j05_primary
             run_j05_primary(browser,archive,pathlib.Path(folder))
             from journey_refresher_clock import run as run_j05_clock

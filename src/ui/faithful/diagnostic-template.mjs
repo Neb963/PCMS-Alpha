@@ -27,6 +27,6 @@ export const diagnosticTemplate=`<section aria-labelledby="pcms-diagnostic-headi
  <details><summary>Saved diagnostic reports</summary>
  <label for="pcms-diagnostic-history">Report</label><select id="pcms-diagnostic-history"></select>
  <div class="form-foot"><button type="button" id="pcms-diagnostic-history-refresh">Reload reports</button><button type="button" id="pcms-diagnostic-history-export" disabled>Export selected report</button></div>
- <p id="pcms-diagnostic-history-status" role="status"></p><pre id="pcms-diagnostic-history-view"></pre>
+ <p id="pcms-diagnostic-history-status" role="status"></p><details><summary>Technical report</summary><pre id="pcms-diagnostic-history-view" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details>
  </details>
 </section>`;

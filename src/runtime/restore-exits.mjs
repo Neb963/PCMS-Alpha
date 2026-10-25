@@ -10,15 +10,18 @@ export function mergeRestoredExitLedgers(incoming,current,{uidRemap={},affectedA
   if(owners[exit]&&owners[exit]!==account)fail('RESTORE_EXIT_HISTORY_CONFLICT');
   owners[exit]=account;
  }
+ const importedHistory=structuredClone(source.restoredBindingHistory||{});
+ for(const row of Object.values(importedHistory))delete row.destinationRetired;
  const affected=new Set(affectedAccounts),bindings=structuredClone(destination.bindings),
- history={...(source.restoredBindingHistory||{}),...(destination.restoredBindingHistory||{})};
+ history={...importedHistory,...(destination.restoredBindingHistory||{})};
  const byAccount=new Map(Object.values(bindings).map(r=>[r.accountId,r.bindingId]));
  for(const [id,raw] of Object.entries(source.bindings)){
   const row={...structuredClone(raw),personaUid:uidRemap[raw.personaUid]||raw.personaUid,
    pin:'HELD',holdCode:'RESTORED_ROUTE_REVERIFICATION'};
+  delete row.destinationRetired;
   if(bindings[id]&&bindings[id].accountId!==row.accountId)fail('RESTORE_EXIT_BINDING_CONFLICT');
   if(byAccount.has(row.accountId)){
-   if(JSON.stringify(bindings[byAccount.get(row.accountId)])!==JSON.stringify(row))history[id]=row;
+   if(!destination.restoredBindingHistory?.[id]&&JSON.stringify(bindings[byAccount.get(row.accountId)])!==JSON.stringify(row))history[id]=row;
    continue;
   }
   bindings[id]=row;byAccount.set(row.accountId,id);
@@ -32,7 +35,12 @@ export function mergeRestoredExitLedgers(incoming,current,{uidRemap={},affectedA
   // newly created untagged Persona with its existing narrow TAG permit.
   for(const [id,row] of Object.entries(bindings))if(affected.has(row.accountId)){
    const target=accountTargets[row.accountId];
-   if(!target?.bindingId||target.bindingId!==id){history[id]={...row,...(destination.bindings[id]?.personaUid===row.personaUid?{destinationRetired:true}:{})};delete bindings[id]}
+   if(!target?.bindingId||target.bindingId!==id){
+    const historical={...(destination.bindings[id]||source.bindings[id]||row),pin:'HELD',holdCode:'RESTORED_ROUTE_REVERIFICATION'};
+    delete historical.destinationRetired;
+    if(destination.bindings[id])historical.destinationRetired=true;
+    history[id]=historical;delete bindings[id];
+   }
    else bindings[id]={...row,personaUid:target.personaUid,pin:'HELD',holdCode:'RESTORED_ROUTE_REVERIFICATION'};
   }
   for(const [accountId,target] of Object.entries(accountTargets))if(target.bindingId&&

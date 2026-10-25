@@ -120,6 +120,7 @@ function portCommand(message){
    input.addEventListener('change',invalidate);
    label.append(input,document.createTextNode(' '+(a.alias||a.label||a.accountId)+(removed?' — removed here; select only to recover it inactive':'')));accounts.append(label,node('br'));
   }
+  if(fresh.checked&&rows.length)accounts.prepend(node('p','This installation has no account history. PCMS cannot know which accounts were removed elsewhere; select only the accounts you want to recover.'));
   if(!rows.length)accounts.append(node('p','This backup contains no PCMS accounts.'));
   for(const p of incoming.donor.personas){
    const label=node('label',p.name||p.profile?.name||'Persona '+(personas.children.length+1)),

@@ -23,6 +23,31 @@ def run(browser,archive,folder):
         uuid=b.addons_uuid(profile);url=f'moz-extension://{uuid}/pcms/index.html#settings'
         b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s)
         wait(s,"!!sh.querySelector('[data-settings=backups]')",'J06_PRIMARY_SETTINGS')
+        g.click(s,'[data-settings=diagnostics]')
+        wait(s,"!!sh.querySelector('#pcms-check-AC-01')&&!sh.querySelector('#pcms-check-AC-01').disabled",'J06_OPERATOR_CHECKLIST_LOADED')
+        g.click(s,'#pcms-diagnostic-independent-run')
+        wait(s,"sh.querySelector('#pcms-diagnostic-independent-results')?.textContent.includes('Local data restore — Passed')",'J06_DIAGNOSTICS_ACTUAL_RESTORE_WITHOUT_CREATE',90)
+        # Persist real notes through the trusted tracked background port.
+        b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;sh.querySelector('#pcms-check-AC-01').closest('details').open=true")
+        g.change(s,'#pcms-check-AC-01','PASS');g.fill(s,'#pcms-notes-AC-01','Disposable UI evidence; operator-reported, not live provider acceptance.')
+        g.click_text(s,'Save observations')
+        wait(s,"sh.querySelector('#pcms-operator-checklist')?.textContent.includes('Observations saved.')",'J06_REAL_NOTES_CANONICAL_SAVE')
+        g.click_text(s,'Export Markdown');g.click_text(s,'Export JSON')
+        until=time.monotonic()+10
+        while time.monotonic()<until and not (downloads/'pcms-operator-observations.json').exists():time.sleep(.1)
+        assert json.loads((downloads/'pcms-operator-observations.json').read_text())['checks']['AC-01']['outcome']=='PASS'
+        assert 'operator-reported' in (downloads/'pcms-operator-observations.md').read_text()
+        b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;sh.querySelector('#pcms-diagnostic-history').closest('details').open=true")
+        g.click(s,'#pcms-diagnostic-history-refresh')
+        wait(s,"sh.querySelector('#pcms-diagnostic-history')?.options.length>0&&!sh.querySelector('#pcms-diagnostic-history-export').disabled",'J06_CANONICAL_REPORT_HISTORY')
+        g.click(s,'#pcms-diagnostic-history-export')
+        ticket=g.oracle(s,"return await new Promise(resolve=>{const p=browser.runtime.connect({name:'pcms-s08-startup'});p.onMessage.addListener(r=>{p.disconnect();resolve(r)});p.postMessage({type:'ARM',params:{runId:'s08_1122334455667788'}})})")
+        assert ticket.get('ok'),ticket
+        capture(s,'diagnostics-notes-history',evidence)
+        b.call('POST',f'/session/{s}/refresh',{})
+        wait(s,"!!sh.querySelector('[data-settings=backups]')",'J06_DIAGNOSTIC_PAGE_RELOAD')
+        unobserved=g.oracle(s,"return await new Promise(resolve=>{const p=browser.runtime.connect({name:'pcms-s08-startup'});p.onMessage.addListener(r=>{p.disconnect();resolve(r)});p.postMessage({type:'STATUS',params:{runId:'s08_1122334455667788'}})})")
+        assert unobserved.get('observed') is False,unobserved
         g.click(s,'[data-settings=backups]')
         wait(s,"!!sh.querySelector('#pcms-backup-inspect-file')",'J06_PRIMARY_BACKUP_WORKSPACE')
         g.click_text(s,'Download complete backup')
@@ -55,6 +80,10 @@ def run(browser,archive,folder):
         wait(s,"!!sh.querySelector('[data-settings=backups]')",'J06_RESTART_PRIMARY_SETTINGS');g.click(s,'[data-settings=backups]')
         wait(s,"sh.querySelector('#page')?.textContent.includes('Manual backup')",'J06_LAST_GOOD_PERSISTENT_RESTART')
         assert len(list(downloads.glob('pcms-backups/*.pcms.jsonl')))==1,'STATUS_RESTART_REPLAYED_DOWNLOAD'
+        receipt=g.oracle(s,"return await new Promise(resolve=>{const p=browser.runtime.connect({name:'pcms-s08-startup'});p.onMessage.addListener(r=>{p.disconnect();resolve(r)});p.postMessage({type:'STATUS',params:{runId:'s08_1122334455667788'}})})")
+        assert receipt.get('observed') is True and receipt.get('independentProcessProof') is False,receipt
+        g.click(s,'[data-settings=diagnostics]')
+        wait(s,"sh.querySelector('#pcms-notes-AC-01')?.value.includes('operator-reported')&&sh.querySelector('#pcms-check-AC-01')?.value==='PASS'",'J06_NOTES_ACTUAL_PROCESS_RESTART')
         capture(s,'restart-backup',evidence)
         pathlib.Path('build/j06-primary-backup.json').write_text(json.dumps(evidence,indent=2))
         print('B J06_ACTUAL_PRIMARY_MANUAL_FILE_REOPEN_CORRUPTION_RECOVERY_FUNCTIONAL_RESTORE_MODULE_INDEPENDENCE_RESTART=PASS',flush=True)

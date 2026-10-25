@@ -309,7 +309,19 @@ function createPcmsEnrollmentDonor(){
       try{
         return await localMutationFence(p.containerId,async()=>
           {
-          await personaPlatform.remove(p.containerId);
+          if((await browser.tabs.query({cookieStoreId:p.containerId})).length||
+             (await listActiveProfileIds()).includes(p.containerId))
+            return {ok:false,code:'PERSONA_IN_USE'};
+          const current=await getState(),target=current.profiles?.[p.containerId];
+          if(target?.personaUid!==p.personaUid||target?.pcmsBindingId!==p.pcmsBindingId)
+            return {ok:false,code:'PERSONA_CHANGED'};
+          const permit=target.pcmsBindingId?issueBoundPersonaDeletePermit({
+            bindingId:target.pcmsBindingId,contextId:p.containerId,personaUid:p.personaUid}):null;
+          // The donor checks this revision BEFORE deleting the actual Firefox
+          // container. The one-use permit allows only its exact cleanup commit.
+          await personaPlatform.remove(p.containerId,{
+            expectedRevision:current.__stateMeta.revision,expectedBootId:current.__stateMeta.bootId,
+            ...(permit?{pcmsStagePermit:permit}:{})});
           const after=await getState();
           if(Object.values(after.profiles||{}).some(x=>String(x?.personaUid||'').toLowerCase()===String(personaUid).toLowerCase()))
             return {ok:false,code:'PERSONA_REMOVAL_UNCONFIRMED'};
@@ -372,7 +384,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { inspectRoutePin, routePinsReady, reloadRoutePins } from "./pcms/route-pin.mjs";\nimport { issueBoundPersonaCreatePermit, issueExistingPersonaTagPermit } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest, fetchViaExit as pcmsFetchViaExit } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { preserveUnselectedDonorSources } from "./pcms/restore-preserve.mjs";\nimport { destinationOwnedPortable } from "./pcms/restore-identities.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain, perchanceRefresherCleanMain } from "./pcms/perchance-existing.mjs";\nimport { choosePrivateStageAdapter } from "./pcms/ready-native-source.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";\nimport { createHumanEditorBridge, handoffHumanEditor } from "./pcms/human-editor-bridge.mjs";\nimport { createManualEditorBridge } from "./pcms/manual-editor-bridge.mjs";\nimport { createStageEditorBridge } from "./pcms/stage-editor-bridge.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { inspectRoutePin, routePinsReady, reloadRoutePins } from "./pcms/route-pin.mjs";\nimport { issueBoundPersonaCreatePermit, issueExistingPersonaTagPermit, issueBoundPersonaDeletePermit } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest, fetchViaExit as pcmsFetchViaExit } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { preserveUnselectedDonorSources } from "./pcms/restore-preserve.mjs";\nimport { destinationOwnedPortable } from "./pcms/restore-identities.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain, perchanceRefresherCleanMain } from "./pcms/perchance-existing.mjs";\nimport { choosePrivateStageAdapter } from "./pcms/ready-native-source.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";\nimport { createHumanEditorBridge, handoffHumanEditor } from "./pcms/human-editor-bridge.mjs";\nimport { createManualEditorBridge } from "./pcms/manual-editor-bridge.mjs";\nimport { createStageEditorBridge } from "./pcms/stage-editor-bridge.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -909,7 +921,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
       for(const p of payload.personas||[]){
         const target=imported.maps.personaUid.get(p.key);
         if(typeof target!=='string'||!target||
-           target===p.profile?.personaUid||seen.has(target))
+           seen.has(target))
           throw Error('RESTORE_FRESH_PERSONA_UID_NOT_REGENERATED');
         seen.add(target);
       }
@@ -977,6 +989,17 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   bg = substituteOnce(bg, "    return buildProxyInfo(effectiveRoute, details.cookieStoreId || `tab-${details.tabId}`);", "    const latestPcmsState = pcmsContext.managed ? await getState() : state;\n    if(pcmsContext.managed &&\n        (!inspectRoutePin(latestPcmsState.profiles?.[details.cookieStoreId]).allow ||\n         decision.route?.id !== latestPcmsState.profiles?.[details.cookieStoreId]?.routeId))\n      return [{...BLACKHOLE_PROXY,connectionIsolationKey:details.cookieStoreId||'pcms-stale'},null];\n    return buildProxyInfo(effectiveRoute, details.cookieStoreId || `tab-${details.tabId}`);", "S01 proxy final pin");
   bg = substituteOnce(bg, "async function handleBeforeRequest(details) {\n  await initialize();\n  const state = await getState();", "async function handleBeforeRequest(details) {\n  await initialize();\n  const state = await getState();\n  const pcmsContext = await pcmsRouteGate(state.profiles?.[details.cookieStoreId]);\n  if(pcmsContext.managed && !pcmsContext.allow) {\n    recordBlock(details,'pcms-route-not-pinned');return {cancel:true};\n  }", "S01 blocking initial pin");
   bg = substituteOnce(bg, "  return {};\n}\n\nasync function fetchMullvadRelays()", "  const latestPcmsState = pcmsContext.managed ? await getState() : state;\n  if(pcmsContext.managed &&\n     (decision.mode!=='proxy' ||\n      !inspectRoutePin(latestPcmsState.profiles?.[details.cookieStoreId]).allow ||\n      decision.route?.id !== latestPcmsState.profiles?.[details.cookieStoreId]?.routeId)) {\n    recordBlock(details,'pcms-route-pin-changed');return {cancel:true};\n  }\n  return {};\n}\n\nasync function fetchMullvadRelays()", "S01 blocking final pin");
+  // Reject ordinary protected-Persona deletion before its Firefox effect;
+  // the state tag fence alone runs after the frozen donor's container call.
+  bg=substituteOnce(bg,
+    'case "DELETE_PERSONA": return localMutationFence(message.profileId, async () => ({ removed: await personaPlatform.remove(message.profileId) }));',
+    `case "DELETE_PERSONA": return localMutationFence(message.profileId, async () => {
+      const state=await getState();
+      if(state.profiles?.[message.profileId]?.pcmsBindingId)
+        throw Error("Remove this managed account in PCMS before deleting its protected Persona.");
+      return {removed:await personaPlatform.remove(message.profileId,{
+        expectedRevision:state.__stateMeta.revision,expectedBootId:state.__stateMeta.bootId})};
+    });`,'protected Persona ordinary delete preflight');
   // Only PCMS enrollment supplies a deadline. Ordinary donor callers keep
   // their existing behavior; frozen donor source remains untouched.
   bg=substituteOnce(bg,'async function fetchMullvadRelays() {\n  const response = await fetch(MULLVAD_SOCKS_API, { cache: "no-store" });',

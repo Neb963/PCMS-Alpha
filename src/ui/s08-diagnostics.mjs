@@ -22,6 +22,9 @@ const account=by('account'),namespace=by('namespace'),save=by('designate'),
  status=by('status'),stages=by('stages'),scope=by('scope'),cleanup=by('cleanup');
 let busy=false,independentBusy=false,independent=null,
   configuration=null,run=null,designationError=null;
+const STAGE_LABELS={SCOPE:'Test setup',CREATE:'Private test generator',GIT_SOURCE:'Preserved source',READY:'Development input',AI_TEST:'Development and tests',GIT_WRITEBACK:'Saved source in Git',PUBLICATION:'Reviewed publication',REFRESHER:'Visibility refresh',BACKUP:'Complete backup',RESTORE:'Isolated local restore',PROCESS_RESTART:'Firefox restart',COMPLETED:'Complete'};
+const CHECK_LABELS={GIT_AUTH:'GitHub access',GIT_MAIN:'GitHub file scan',GIT_CREDENTIAL:'Saved Git credential',BACKUP_RUNTIME:'Backup service',BACKUP_ARCHIVE:'Backup archive integrity',RESTORE_LOCAL_DATA:'Local data restore',ACCOUNT_STORE:'Account records',INVENTORY_STORE:'Generator inventory',REFRESHER_POLICY:'Refresher settings',STANDING_GRANTS:'Automation permissions'};
+const OUTCOME_LABELS={PASS:'Passed',FAIL:'Failed',HELD:'Needs attention',NOT_TESTED:'Not verified',UNCERTAIN:'Checking an uncertain result',RUNNING:'Running'};
 const records=createOperatorRecords();
 const history=by('history'),historyExport=by('history-export'),historyView=by('history-view'),historyStatus=by('history-status');
 let savedReports=[];
@@ -34,7 +37,7 @@ function showSavedReport(){
 async function loadReports(){
  historyStatus.textContent='Reading saved reports…';
  try{
-  savedReports=(await records.list('ui:diagnostic-report:')).sort((a,b)=>(b.record?.run?.updatedAt||b.record?.independent?.checkedAt||0)-(a.record?.run?.updatedAt||a.record?.independent?.checkedAt||0));
+  savedReports=(await records.list('ui:diagnostic-report:')).filter(r=>r.record?.run||r.record?.independent).sort((a,b)=>(b.record?.run?.updatedAt||b.record?.independent?.checkedAt||0)-(a.record?.run?.updatedAt||a.record?.independent?.checkedAt||0));
   const chosen=history.value;history.replaceChildren();
   for(const row of savedReports){const option=document.createElement('option');option.value=row.key;
    const stamp=row.record?.run?.updatedAt||row.record?.independent?.checkedAt;
@@ -105,7 +108,7 @@ function show(){
   ' · Repo ID '+configuration.repositoryId+'. Other resources cannot be substituted.';
  else scope.textContent='Choose your dedicated test account and a test name. PCMS will verify the connection and permissions before running anything.';
  status.textContent=run?
-  'Test generator '+run.slug+' · '+run.status+' · next '+run.stage+
+  'Test generator '+run.slug+' · '+(OUTCOME_LABELS[run.status]||'Waiting')+' · '+(STAGE_LABELS[run.stage]||'Check details')+
   (run.currentHold?' · '+run.currentHold.code+(
     run.currentHold.code==='INITIAL_INVENTORY_UNKNOWN'?
       ' — In Accounts, synchronize the generator inventory for every non-archived managed account under its verified protected route. Then Resume this same run; do not start a new slug. Independent module checks below remain available.':
@@ -122,8 +125,8 @@ function show(){
  const list=document.createElement('ol');
  for(const name of STAGES){
   const row=document.createElement('li'),e=run?.events?.find(x=>x.stage===name);
-  row.textContent=name+' — '+(e?.outcome||'NOT_TESTED')+
-    (e?.code?' · '+e.code:'');
+  row.textContent=STAGE_LABELS[name]+' — '+(OUTCOME_LABELS[e?.outcome]||'Not tested');
+  if(e?.code){const detail=document.createElement('details'),head=document.createElement('summary');head.textContent='Details';const code=document.createElement('code');code.textContent=e.code;detail.append(head,code);row.append(detail)}
   list.append(row);
  }
  stages.append(list);
@@ -131,8 +134,8 @@ function show(){
  const checks=document.createElement('ol');
  for(const row of independent?.rows||[]){
   const li=document.createElement('li');
-  li.textContent=row.id.replaceAll('_',' ')+' — '+row.outcome+
-   ' · '+row.code+(row.tier==='GIT'?' (Git read only)':' (local)');
+  li.textContent=(CHECK_LABELS[row.id]||'Module check')+' — '+(OUTCOME_LABELS[row.outcome]||'Not verified');
+  const details=document.createElement('details'),summary=document.createElement('summary'),code=document.createElement('code');summary.textContent='Details';code.textContent=row.code+' · '+row.proof;details.append(summary,code);li.append(details);
   checks.append(li);
  }
  independentRows.append(checks);
@@ -144,9 +147,9 @@ function show(){
 }
 async function persist(){
  run.updatedAt=Date.now();
- const written=await records.put('ui:diagnostic-report:'+run.runId,{schema:1,run:structuredClone(run),report:diagnosticReport(run)});
+ const written=await records.put('ui:diagnostic-report:'+run.runId,{schema:1,run:structuredClone(run),report:diagnosticReport(run)},{mirror:'RUN'});
  if(!written?.ok)throw Error(written?.code||'OPERATOR_RECORD_WRITE_UNKNOWN');
- await browser.storage.local.set({[DIAGNOSTIC_RUN]:run});
+
  show();refreshMountedViews();
 }
 async function mark(stage,outcome,code){
@@ -384,9 +387,9 @@ async function runIndependentChecks(){
   independent=independentReadOnlyResults({
     readiness:values[0],accounts:values[1],inventory:values[2],
     refresher:values[3],authority:values[4],backup:values[5],archive,localRestore},Date.now());
-  const written=await records.put('ui:diagnostic-report:independent_'+independent.checkedAt,{schema:1,independent});
+  const written=await records.put('ui:diagnostic-report:independent_'+independent.checkedAt,{schema:1,independent},{mirror:'INDEPENDENT'});
   if(!written?.ok)throw Error(written?.code||'OPERATOR_RECORD_WRITE_UNKNOWN');
-  await browser.storage.local.set({[DIAGNOSTIC_INDEPENDENT]:independent});
+
  }catch{independentStatus.textContent='Independent results could not be saved. Run the checks again to save a new report.';}
  finally{independentBusy=false;show();}
 }
@@ -423,9 +426,9 @@ save.addEventListener('click',async()=>{
   // Once a test has begun, the account, Persona, repo and namespace are
   // immutable. The local XPI hash may be provided later for restart tests.
   if(run?.restoredHistorical){
-    const written=await records.put('ui:diagnostic-report:'+run.runId,{schema:1,run:structuredClone(run),report:diagnosticReport(run)});
+    const written=await records.put('ui:diagnostic-report:'+run.runId,{schema:1,run:structuredClone(run),report:diagnosticReport(run)},{mirror:'ARCHIVE_RUN'});
  if(!written?.ok)throw Error(written?.code||'OPERATOR_RECORD_WRITE_UNKNOWN');
-    run=null;await browser.storage.local.remove(DIAGNOSTIC_RUN);
+    run=null;
   }
   if(run){
     for(const key of ['accountId','personaUid','repositoryId','namespace'])
@@ -435,7 +438,8 @@ save.addEventListener('click',async()=>{
   }
   configuration=test;
   designationError=null;
-  await browser.storage.local.set({[DIAGNOSTIC_CONFIG]:test});
+  const saved=await records.put('ui:diagnostic-report:configuration',{schema:1,configuration:test},{mirror:'CONFIG'});
+  if(!saved?.ok)throw Error(saved?.code||'OPERATOR_RECORD_WRITE_UNKNOWN');
   scope.textContent='Disposable scope saved. No remote write attempted.';
  }catch(e){designationError='Test setup not saved. '+scopeIssue(e.message);}
  finally{busy=false;show();}
@@ -518,8 +522,8 @@ mountedViews.add(refreshFromCanonical);
    configuration=saved[DIAGNOSTIC_CONFIG];
   run=saved[DIAGNOSTIC_RUN]?.version===1?
     recoverDiagnosticIfInactive(saved[DIAGNOSTIC_RUN],activeDiagnosticDrive):null;
-  if(run&&run!==saved[DIAGNOSTIC_RUN])
-    await browser.storage.local.set({[DIAGNOSTIC_RUN]:run});
+  if(run&&run!==saved[DIAGNOSTIC_RUN])await persist();
+  
   if(configuration)namespace.value=configuration.namespace;
   await populateAccounts();
   show();
