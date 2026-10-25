@@ -1,3 +1,4 @@
+import {PRESENTATION_KEY,normalizePresentation} from './presentation-preferences.mjs';
 // Archive-only, nonsecret local settings and recovery history. No live mirror,
 // credential, standing grant, runtime witness or restore marker is portable.
 import {serializeClone,deserializeClone} from './backup-core.mjs';
@@ -39,6 +40,7 @@ export function collectPortableLocal(local={}){
   if(key==='pcmsS03Git'){
    if(typeof value?.repository==='string'&&/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value.repository)&&/^[1-9][0-9]{0,19}$/.test(value.repositoryId||''))
     out[key]={repository:value.repository,repositoryId:value.repositoryId};
+  }else if(key===PRESENTATION_KEY){out[key]=normalizePresentation(value);
   }else if(key==='pcmsUiGeneratorSelectionV1'){
    out[key]={schema:1,items:(value?.items||[]).map(r=>fields(r,['slug','accountId','revision']))};
   }else if(key==='pcmsR4FolderIdentityReviews'&&Array.isArray(value))out[key]=value.map(r=>fields(r,renameFields));

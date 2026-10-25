@@ -26,7 +26,7 @@ def inspect(path, *, donor_root=pathlib.Path('donor/personamonkey/extension')):
         manifest=json.loads(z.read('manifest.json'))
         if manifest.get('browser_specific_settings',{}).get('gecko',{}).get('id')!=ID:
             raise AssertionError('A08_GECKO_ID_DRIFT')
-        if manifest.get('version')!='1.2.13':
+        if manifest.get('version')!='1.2.14':
             raise AssertionError('A08_DISTRIBUTION_VERSION_NOT_ADVANCED')
         if manifest.get('manifest_version')!=3 or manifest.get('background',{}).get('scripts')!=['pcms/entry.mjs']:
             raise AssertionError('A08_BACKGROUND_NOT_PRODUCTION')

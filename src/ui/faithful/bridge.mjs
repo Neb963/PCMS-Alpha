@@ -1,3 +1,5 @@
+import {createPresentationWorkspace} from './presentation-workspace.mjs';
+import {installInteraction} from './interaction.mjs';
 import {mountOperatorChecklist} from '../operator-checklist.mjs';
 import {mountBackupWorkspace} from './backup-workspace.mjs';
 import {acknowledgeIncident,incidentDestination} from './attention.mjs';
@@ -92,7 +94,7 @@ const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort
  ref:{offset:0,limit:25,query:'',account:'',phase:'ALL',snapshot:null,items:[],total:0},
  acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],releaseCursor:'',nextRelease:null,releaseUnavailable:false,aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,readyItems:[],readyCursor:'',nextReady:null,readyMore:false,aiUnavailable:false,readyUnavailable:false,epoch:0},
  settings:'connections',settingsStatic:null,lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},
- renderEpoch:0,version:'0.1.7',readiness:null,readinessBusy:false};
+ renderEpoch:0,version:typeof browser==='object'?browser.runtime.getManifest().version:'Unavailable',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
 const page=()=>shadow('#page');
 function el(tag,cls='',text){const o=document.createElement(tag);if(cls)o.className=cls;if(text!==undefined)o.textContent=String(text);return o}
@@ -118,6 +120,7 @@ const safeCount=n=>Number.isInteger(n)&&n>=0?n:'—';
 const snippet=(s,n=150)=>String(s??'').trim().slice(0,n);
 let currentToast;
 function notify(message){const e=shadow('#pcms-live-toast');if(!e)return;e.textContent=String(message);e.hidden=false;if(currentToast)clearTimeout(currentToast);currentToast=setTimeout(()=>e.hidden=true,6500)}
+const presentation=createPresentationWorkspace({root,el,b,notify,generator:state.gen,reload:()=>{presentation.mountTools();return loadGenerators()}});
 const generatorSelection=createGeneratorSelection(typeof browser==='object'?browser.storage.local:{
  get:async()=>{throw Error('STORAGE_UNAVAILABLE')},set:async()=>{throw Error('STORAGE_UNAVAILABLE')}});
 generatorSelection.subscribe(()=>updateGeneratorSelection());
@@ -142,7 +145,7 @@ function updateNav(){for(const a of root.querySelectorAll('[data-nav]'))a.setAtt
   t.textContent=count?String(count):'';t.hidden=!count;
  }
 }
-function routeTo(target){if(!routes.includes(target))target='overview';state.route=target;location.hash='#'+target;void render()}
+function routeTo(target){if(!routes.includes(target))target='overview';state.route=target;location.hash='#'+target;void render().then(()=>shadow('#page-heading')?.focus({preventScroll:true}))}
 function openGlobalSearch(){
  const existing=shadow('.overlay');if(existing){existing.querySelector('input[type=search]')?.focus();return}
  const priorFocus=root.activeElement;
@@ -280,12 +283,6 @@ function routeHandlers(){
    if(!shadow('.overlay'))openGlobalSearch();
   }
  },true);
- root.addEventListener('keydown',event=>{
-  if(event.key==='Escape'){
-   const overlay=shadow('.drawer-overlay');
-   if(overlay){overlay.remove();event.preventDefault()}
-  }
- });
  root.addEventListener('click',event=>{const link=event.target.closest('button[data-action],button[data-settings]');if(!link)return;const action=link.dataset.action;const setting=link.dataset.settings;
  if(setting){state.settings=setting;void renderSettingsSection();return}
  if(!action)return;
@@ -351,7 +348,7 @@ function routeHandlers(){
   if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){
    const list=[...row.closest('tbody').querySelectorAll('tr[data-item-index]')];const idx=list.indexOf(row);
    const n=event.key==='Home'?0:event.key==='End'?list.length-1:Math.min(list.length-1,Math.max(0,idx+(event.key==='ArrowDown'?1:-1)));
-   event.preventDefault();row.tabIndex=-1;list[n].tabIndex=0;list[n].focus({preventScroll:true});
+   event.preventDefault();row.tabIndex=-1;list[n].tabIndex=0;list[n].focus({preventScroll:true});list[n].scrollIntoView({block:'nearest',inline:'nearest'});
   }
  });
  root.addEventListener('change',event=>{const target=event.target;
@@ -378,7 +375,7 @@ function routeHandlers(){
 async function proposeRefresherEnable(control){await refresherWorkspace.enable(control)}
 
 function statusPill(label,kind=''){const p=el('span','pill'+(kind?' '+kind:''),label);return p}
-function tableRow(cells,itemIndex){const tr=el('tr');tr.tabIndex=itemIndex===0?0:-1;tr.dataset.itemIndex=String(itemIndex);tr.setAttribute('role','button');tr.setAttribute('aria-label','Inspect '+cells[0]);return tr}
+function tableRow(cells,itemIndex){const tr=el('tr');tr.tabIndex=itemIndex===0?0:-1;tr.dataset.itemIndex=String(itemIndex);tr.setAttribute('role','row');tr.setAttribute('aria-label','Inspect '+cells[0]);return tr}
 const statusClasses={ACTIVE:'green',SLEEPING:'',WAITING:'',HELD:'red',INELIGIBLE:'',OBSERVED_OWNER:'green',OWNER_UNVERIFIED:'',OWNER_DISPUTED:'red'};
 const ownerLabels={OBSERVED_OWNER:'Owner observed',OWNER_UNVERIFIED:'Owner unknown',OWNER_DISPUTED:'Disputed',UNOBSERVED:'Unobserved',IDENTITY_CONFLICT:'Identity conflict',OWNER_CONFLICT:'Account conflict'};
 function rowsError(tableSelector,message,colspan){const body=shadow(tableSelector);if(!body)return;body.replaceChildren();const tr=el('tr'),td=el('td','pcms-unknown',message);td.colSpan=colspan;tr.append(td);body.append(tr)}
@@ -418,7 +415,7 @@ function displayAccounts(){if(state.route!=='accounts')return;
  const list=shadow('.account-list-scroll');if(!list)return;
  const query=state.acct.query.trim().toLowerCase(),filter=state.acct.filter,all=state.lastAccountList.filter(a=>!a.removed);
  const displayed=all.filter(a=>{const term=String(a.accountId||'').toLowerCase(),name=String(a.state||'');
-  return (!query||term.includes(query)||String(a.personaUid||'').toLowerCase().includes(query))&&
+  return (!query||term.includes(query)||String(a.alias||'').toLowerCase().includes(query)||String(a.personaUid||'').toLowerCase().includes(query))&&
    (filter==='All'||filter==='Connected'&&name==='VERIFIED'&&!accountNeedsAttention(a)||filter==='Archived'&&name==='ARCHIVED'||filter==='Attention'&&accountNeedsAttention(a));
  });
  const pages=Math.ceil(displayed.length/state.acct.perPage);if(state.acct.page>=pages)state.acct.page=Math.max(0,pages-1);
@@ -453,7 +450,8 @@ async function startAccountEnrollment(){
  finally{if(button?.isConnected)button.disabled=false}
 }
 function openAccountManager(item){accountWorkspace.open(item)}
-async function loadGenerators(){if(state.route!=='generators')return;
+async function loadGenerators(){
+ presentation.rememberFilters();if(state.route!=='generators')return;
  const epoch=++state.renderEpoch,body=shadow('.workspace-surface table tbody');if(!body)return;
  renderEmpty(body,'Reading observed local generator inventory…');
  try{
@@ -587,9 +585,9 @@ function displayGenerators(){if(state.route!=='generators')return;
   tab.replaceChildren(document.createTextNode((labels[key]||key)+' '+(state.gen.facets?.[key]??0)));
   tab.setAttribute('aria-selected',String(state.gen.filter===key));tab.tabIndex=state.gen.filter===key?0:-1;
  }
- updateGeneratorSelection();
+ updateGeneratorSelection();presentation.mountTools();presentation.applyTable();
  const accountSelect=shadow('#generator-account');if(accountSelect){const prior=accountSelect.value;accountSelect.replaceChildren();const first=el('option','', 'All accounts');first.value='ALL';accountSelect.append(first);
-  for(const a of state.lastAccountList){const option=el('option','',a.alias||a.accountId);option.value=a.accountId;accountSelect.append(option)}accountSelect.value=[...accountSelect.options].some(x=>x.value===state.gen.account)?state.gen.account:'ALL';}
+  for(const a of state.lastAccountList){const option=el('option','',a.alias||a.accountId);option.value=a.accountId;accountSelect.append(option)}if(state.gen.account!=='ALL'&&![...accountSelect.options].some(x=>x.value===state.gen.account)){const missing=el('option','','Saved account · unavailable');missing.value=state.gen.account;accountSelect.append(missing)}accountSelect.value=state.gen.account;}
 }
 async function loadRefresher(){if(state.route!=='refresher')return;
  const epoch=++state.renderEpoch;
@@ -1797,11 +1795,12 @@ function primaryDiagnostics(container){
  mountOperatorChecklist(container,{card:primarySettingCard,el,b});
 }
 function renderSettingsSection(){if(state.route!=='settings')return;
- const names=['connections','automation','ai','backups','diagnostics','advanced'];
+ const names=['connections','automation','ai','backups','diagnostics','appearance','advanced'];
  const select=names.includes(state.settings)?state.settings:'connections';
  for(const b of page().querySelectorAll('[data-settings]')){b.classList.toggle('active',b.dataset.settings===select);b.setAttribute('aria-current',b.dataset.settings===select?'page':'false')}
  const container=shadow('.settings-main');if(!container)return;
  // Each category owns its visible form. Do not rehydrate obsolete hidden service cards.
+ if(select==='appearance'){presentation.appearance(container);return}
  if(select==='connections'){
   // Never mirror old service rows or native-host installation instructions.
   // The Git connection and its recovery live on the same visible Settings page.
@@ -1857,6 +1856,7 @@ function displayRouteScaffold(){
   displayQueue();void loadQueue(true);
  }
  if(state.route==='generators'){
+  presentation.mountTools();
   const select=shadow('#generator-account');if(select)select.value=state.gen.account;
   const q=shadow('#generator-search');if(q)q.value=state.gen.query;
   void loadGenerators();
@@ -1890,9 +1890,13 @@ async function mount(){
  for(const r of routes)templates.set(r,assets[r+'.html']);
  root.innerHTML=assets['symbols.html']+assets['shell.html']+'<div id="pcms-live-toast" class="pcms-action-toast" role="status" hidden></div>';
  const link=document.createElement('link');link.rel='stylesheet';link.href=new URL('prototype.css',url).href;root.prepend(link);
+ const presentationStyle=document.createElement('link');presentationStyle.rel='stylesheet';presentationStyle.href=new URL('presentation.css',url).href;root.append(presentationStyle);
  const accountStyle=document.createElement('link');accountStyle.rel='stylesheet';accountStyle.href=new URL('accounts.css',url).href;root.append(accountStyle);
  const addon=document.createElement('style');addon.textContent=':host{display:block;height:100dvh;min-height:0} .pcms-action-toast{pointer-events:none;position:fixed;bottom:20px;right:25px;z-index:100;padding:12px 16px;background:#253e55;color:white;border-radius:7px;box-shadow:0 5px 24px #0003;max-width:380px} .pcms-action-toast[hidden]{display:none}';root.append(addon);
  let initial=location.hash.slice(1);if(!routes.includes(initial))initial='overview';state.route=initial;
+ await presentation.ready;
+ const version=shadow('.preview-label');if(version){version.textContent='PCMS '+state.version;version.setAttribute('aria-label','Installed PCMS version '+state.version)}
+ installInteraction({root,preferences:presentation.preferences,route:()=>state.route});
  routeHandlers();await render();
  const legacy=document.querySelector('body > .app');
  if(legacy)legacy.inert=true; // no hidden workflow focus or operator input

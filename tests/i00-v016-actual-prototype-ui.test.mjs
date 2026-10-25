@@ -31,7 +31,9 @@ test('all six accepted prototype-derived templates are actual packaged assets',a
  assert.match(stylesheet,/\.ref-table-scroll/);
  assert.match(stylesheet,/\.sidebar/);
  assert.match(stylesheet,/\.settings-main/);
- assert.match(shell,/PCMS local · Not verified/);
+ assert.doesNotMatch(shell,/PCMS local · Not verified/);
+ assert.match(bridge,/version.textContent='PCMS '\+state.version/);
+ assert.match(bridge,/browser.runtime.getManifest\(\).version/);
 });
 test('canonical primary controls call protected typed runtime with exact revisions; original safety gates survive',()=>{
  for(const s of ['pcms-i04-inventory','pcms-i03-accounts','pcms-i12-refresher','LIST_INVENTORY','LIST_ACCOUNTS','GET_REFRESHER'])assert.ok(bridge.includes(s));
@@ -79,9 +81,9 @@ test('prototype supports adverse navigation and fail-open presentation recovery'
  assert.match(bridge,/body\.classList\.add\('pcms-faithful-ready'\)/);
  assert.doesNotMatch(bridge,/host\.remove\(\)/);
 });
-test('Firefox upgrades v1.2.1 XPI to 1.2.13 with donor manifest unchanged',()=>{
+test('Firefox upgrades v1.2.1 XPI to 1.2.14 with donor manifest unchanged',()=>{
  assert.match(build,/original\.version!=='1\.2\.0'/);
- assert.match(build,/combined\.version='1\.2\.13'/);
+ assert.match(build,/combined\.version='1\.2\.14'/);
  assert.match(html,/v015-faithful\.mjs/);
  assert.match(html,/faithful\/bridge\.mjs/);
 });
