@@ -1,3 +1,4 @@
+import {trackPcmsWork} from './work-checkpoint.mjs';
 // S01 Add Account / protected route orchestration. PersonaMonkey (donor) owns
 // Personas, routes, probes and network enforcement; this module only orders
 // those donor operations against PCMS's canonical account record and
@@ -65,6 +66,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       return fail('ENROLLMENT_INTERRUPTED');
     })
       .finally(()=>running.delete(accountId));
+    trackPcmsWork(promise);
     running.set(accountId,{kind,promise});
     return promise;
   }

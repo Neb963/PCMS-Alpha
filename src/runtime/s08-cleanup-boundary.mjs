@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 // S08: dedicated, strictly read-only test cleanup observer.
 // Ordinary S00 coordinator remains effect-free and cannot observe providers.
 import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId} from './journal.mjs';
@@ -169,7 +170,8 @@ export function createS08CleanupBoundary(api,{open=openCanonicalDatabase,
    });
   });
  }
- return Object.freeze({run,register});
+   run=checkpointed(api,run);
+  return Object.freeze({run,register});
 }
 if(typeof browser!=='undefined')createS08CleanupBoundary(browser,{
   gitGate:()=>standingS06?.gate('gitWrite')===true}).register();

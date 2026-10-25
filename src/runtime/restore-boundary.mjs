@@ -15,6 +15,8 @@ import {prepareRestoredCanonical} from './restore-sanitize.mjs';
 import {applyCanonicalSnapshot} from './restore-idb.mjs';
 import {getPcmsRestoreDonor} from './restore-donor.mjs';
 import {BLOCK_ROUTE_ID} from '../lib/constants.js';
+import {settlePcmsWork} from './work-checkpoint.mjs';
+import {autoBackup} from './backup-auto-boundary.mjs';
 import {reconcileRestore} from './restore-reconcile.mjs';
 export const RESTORE_PORT='pcms-i16-restore';
 export const REACTIVATE_CONSENT='THE PREVIOUS PCMS INSTALLATION IS STOPPED';
@@ -96,7 +98,7 @@ function cookieMatch(expected,actual){
   return expected.every(item=>got.has(safe(item)));
 }
 export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
-  database=openCanonicalDatabase}={}){
+  database=openCanonicalDatabase,backupRunner=autoBackup?.runner,settle=settlePcmsWork}={}){
   const gate=createRestoreGate(api.storage.local);
   let running=null,registered=false;
   // Static PCMS listeners can become ready before PersonaMonkey's guarded
@@ -124,7 +126,8 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
       typeof recovery?.portableCheckpointScope==='string'?
       {stageScope:recovery.portableStageScope,
         checkpointScope:recovery.portableCheckpointScope}:null;
-    return {ok:true,...result,portableScopes,
+    return {ok:true,...result,portableScopes,preparation:held?.status==='PREPARING'?{
+      epoch:held.epoch,revision:held.revision,stageScope:held.stageScope}:null,
       providerEffects:'OFF',remoteActivation:'OFF'};
   }
   // Shared durable I16 stage engine for both authenticated v1 and native v2.
@@ -326,6 +329,38 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
   const validMappings=m=>m&&typeof m==='object'&&!Array.isArray(m)&&
     Object.entries(m).length<=10000&&Object.entries(m).every(([k,v])=>
       k.length>0&&k.length<=256&&typeof v==='string'&&v.length<=256);
+  async function preparePortable(args){
+    if(running)return fail('RESTORE_BUSY');
+    running=(async()=>{
+      try{
+        assert(validScope(args?.stageScope),'RESTORE_PREPARATION_INVALID');
+        const incoming=await readPortableStage(args.stageScope);
+        let held=await gate.read();
+        if(held)assert(held.status==='PREPARING'&&held.stageScope===args.stageScope&&
+          held.archiveSha256===incoming.receipt.chain,'RESTORE_ALREADY_HELD');
+        else held=await gate.prepare({stageScope:args.stageScope,archiveSha256:incoming.receipt.chain});
+        await settle();
+        return {...await status(),ok:true,code:'RESTORE_PREPARED'};
+      }catch(e){return fail(redacted(e))}
+    })().finally(()=>{running=null});
+    return running;
+  }
+  async function checkpointPortable(args){
+    if(running)return fail('RESTORE_BUSY');
+    running=(async()=>{
+      try{
+        const held=await gate.read();
+        assert(held?.status==='PREPARING'&&held.epoch===args?.epoch&&
+          held.revision===args?.revision&&held.stageScope===args?.stageScope,
+          'RESTORE_STALE_PREPARATION');
+        await settle();
+        assert(backupRunner?.checkpoint,'RESTORE_BACKUP_UNAVAILABLE');
+        const result=await backupRunner.checkpoint(args);
+        return {...result,preparation:{epoch:held.epoch,revision:held.revision,stageScope:held.stageScope}};
+      }catch(e){return fail(redacted(e))}
+    })().finally(()=>{running=null});
+    return running;
+  }
   async function applyPortable(args){
     if(running)return fail('RESTORE_BUSY');
     running=(async()=>{
@@ -343,7 +378,13 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
             typeof id==='string'&&id.length>0&&id.length<=256&&
             ['INCLUDE_INACTIVE','EXCLUDE'].includes(choice))&&
           hex(args.reviewedPlanSha256),'RESTORE_PORTABLE_INPUT_INVALID');
-        assert(await gate.read()===null,'RESTORE_ALREADY_HELD');
+        const preparation=await gate.read();
+        if(preparation){
+          assert(preparation.status==='PREPARING'&&preparation.epoch===args.preparation?.epoch&&
+            preparation.revision===args.preparation?.revision&&preparation.stageScope===args.stageScope,
+            'RESTORE_STALE_PREPARATION');
+          await settle();
+        }else assert(!args.preparation,'RESTORE_STALE_PREPARATION');
         const incoming=await readPortableStage(args.stageScope);
         const checkpoint=await readPortableStage(args.checkpointScope);
         const donor=await donorReady();
@@ -373,6 +414,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           checkpointSha256:checked.sha256,
           reviewedPlanSha256:args.reviewedPlanSha256,
           checkpointTier:checked.tier,fresh:args.fresh,
+          preparation:preparation?{epoch:preparation.epoch,revision:preparation.revision}:null,
           recovery:{mode:args.mode,mappings:args.mappings,
             accountChoices:args.accountChoices,
             portableStageScope:args.stageScope,
@@ -421,6 +463,12 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
     if(!trustedRestoreSender(api,sender))return fail('UNTRUSTED_SENDER');
     if(!message||typeof message!=='object'||Array.isArray(message))return fail('RESTORE_INPUT_INVALID');
     if(message.action==='STATUS')return status();
+    if(message.action==='PREPARE_PORTABLE')return preparePortable(message.params);
+    if(message.action==='CHECKPOINT_PORTABLE')return checkpointPortable(message.params);
+    if(message.action==='CANCEL_PREPARATION'){
+      if(running)return fail('RESTORE_BUSY');
+      try{return await gate.cancel(message.params||{})}catch(e){return fail(redacted(e))}
+    }
     if(message.action==='APPLY_PORTABLE')return applyPortable(message.params);
     if(message.action==='RECONCILE_PORTABLE')return reconcilePortable(message.params);
     // Client amendment v1.0.1: legacy encrypted/password/native commands

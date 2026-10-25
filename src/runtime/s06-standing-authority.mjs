@@ -1,3 +1,4 @@
+import {trackPcmsWork} from './work-checkpoint.mjs';
 // S06 standing operator authority, intentionally separate from source/route and
 // provider permission proofs. No source/Git/publication grant exists by default
 // or after restore. Scoped operator intent/read-only management is independent.
@@ -25,7 +26,7 @@ export function createS06StandingAuthority(api){
  const gate=scope=>pendingChanges===0&&loaded===true&&valid(current)&&
    Object.hasOwn(OFF,scope)&&current.grants[scope]===true;
  const enqueue=fn=>{
-   const task=serial.then(fn);
+   const task=trackPcmsWork(serial.then(fn));
    serial=task.catch(()=>{});
    return task;
  };
@@ -123,7 +124,7 @@ export function createS06StandingAuthority(api){
    }catch{return false;}
  }
  function mutation(fn){
-   const task=mutationSerial.then(fn);mutationSerial=task.catch(()=>{});return task;
+   const task=trackPcmsWork(mutationSerial.then(fn));mutationSerial=task.catch(()=>{});return task;
  }
  function revoke(reason='EXPLICIT_OPERATOR'){
    const knownCurrent=current;disable();pendingChanges++;

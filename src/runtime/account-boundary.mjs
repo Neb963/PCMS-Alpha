@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 // I03/S01: isolated same-XPI account port. Add Account, Confirm and route
 // repair orchestrate donor-owned Persona/route operations through the
 // enrollment module; this port accepts only operator intents, never proofs,
@@ -299,6 +300,8 @@ export function createAccountBoundary(api,{
     void schedule();api.runtime.onStartup?.addListener(()=>void schedule());
     api.alarms?.onAlarm?.addListener(alarm=>{if(alarm?.name===ROUTE_UPKEEP_ALARM)void upkeep();});
   }
+    run=checkpointed(api,run,{allowDuringRestore:message=>["LIST_ACCOUNTS","INSPECT_ACCOUNT","LIST_PERSONAS","LIST_ROUTES","NETWORK_STATUS","WITNESS_STATUS"].includes(message?.type)});
+  upkeep=checkpointed(api,upkeep);
   return Object.freeze({register,run,upkeep});
 }
 if(typeof browser!=='undefined')createAccountBoundary(browser).register();

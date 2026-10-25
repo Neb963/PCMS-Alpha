@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 import {initializeEmptyPrivateGit} from './catalog-bootstrap.mjs';
 import {DEFAULT_AI_PROMPT} from './ai-evidence.mjs';
 // S03 fixed-purpose GitHub connection and main-only catalog boundary.
@@ -449,6 +450,7 @@ export function createCatalogBoundary(api,{scan=scanMainCatalog,transport=fetch,
       });
     });
   }
+    run=checkpointed(api,run,{allowDuringRestore:message=>["LIST_READY","GET_PROMPT_DRAFT","GET_CONNECTION_STATE","SEARCH_PATHS"].includes(message?.type)});
   return Object.freeze({run,register});
 }
 if(typeof browser!=='undefined')createCatalogBoundary(browser,{

@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 // Synchronous listeners, one coalesced scheduler alarm, canonical turn/claim
 // fences. I14 conditional executor is present but default production gate OFF.
 import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId,createCanonicalStore} from './journal.mjs';
@@ -566,6 +567,8 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     });
     registered=true;coldWake();
   }
+    run=checkpointed(api,run,{allowDuringRestore:message=>["GET_REFRESHER"].includes(message?.type)});
+  tick=checkpointed(api,tick);
   return Object.freeze({register,tick,run});
 }
 // Entry owns the single registration. Importing this factory for packaged

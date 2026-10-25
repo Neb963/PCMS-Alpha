@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 import {updateWindowAvailable,operatorUpdateWindow} from './update-window.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I13 existing-generator guarded orchestration. No credentials in canonical
@@ -494,6 +495,8 @@ export function createExistingBoundary(api,{
       });
     });
   }
+    run=checkpointed(api,run,{allowDuringRestore:message=>["GET"].includes(message?.type)});
+  runTrusted=checkpointed(api,runTrusted,{allowDuringRestore:message=>["GET"].includes(message?.type)});
   return Object.freeze({run,runTrusted,register});
 }
 if(typeof browser!=='undefined')createExistingBoundary(browser,{

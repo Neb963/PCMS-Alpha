@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // S03 read-only background observer. Git credentials stay in native Secret Service.
 // This deliberately does NOT send generator intents or provider/Git writes.
@@ -209,6 +210,12 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
     // observation when the last operating-system credential is available.
     void tick();
   }
+  if(progressReady)progressReady=checkpointed(api,progressReady);
+  if(progressChanges)progressChanges=checkpointed(api,progressChanges);
+  if(progressWriteback)progressWriteback=checkpointed(api,progressWriteback);
+  if(progressCleanBulk)progressCleanBulk=checkpointed(api,progressCleanBulk);
+  if(progressPublication)progressPublication=checkpointed(api,progressPublication);
+    tick=checkpointed(api,tick);
   return Object.freeze({register,tick});
 }
 export const catalogWatcher=typeof browser==='undefined'?null:createCatalogWatcher(browser,{

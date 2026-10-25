@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {createCleanBulkStore,cleanBulkId,inspectCleanCandidate} from './clean-bulk-release.mjs';
@@ -30,7 +31,8 @@ export function createCleanBulkBoundary(api,{open=openCanonicalDatabase}={}){
   }catch{return fail('CLEAN_BULK_UNAVAILABLE')}
  }
  function register(){api.runtime.onConnect.addListener(port=>{if(port?.name!==CLEAN_BULK_PORT)return;let busy=false;port.onMessage.addListener(msg=>{if(busy){try{port.postMessage(fail('BUSY'))}catch{}return}busy=true;Promise.resolve(run(msg,port.sender)).then(out=>{try{port.postMessage(out)}catch{}}).finally(()=>busy=false)})})}
- return Object.freeze({run,register});
+   run=checkpointed(api,run,{allowDuringRestore:message=>["GET","LIST"].includes(message?.type)});
+  return Object.freeze({run,register});
 }
 export function createCleanBulkProgress(api,{open=openCanonicalDatabase,makeRelease=()=>createReleaseBoundary(api,{open})}={}){
  let connection,busy=false,release;const db=()=>connection||=open(),sentinel=createRestoreSentinel(api.storage.local);
@@ -72,6 +74,7 @@ export function createCleanBulkProgress(api,{open=openCanonicalDatabase,makeRele
     {state:'WAITING',code:out?.code||'APPROVAL_RESPONSE_UNKNOWN'});
   }catch{return fail('CLEAN_BULK_PROGRESS_UNAVAILABLE')}finally{busy=false}
  }
+ tick=checkpointed(api,tick);
  return Object.freeze({tick});
 }
 if(typeof browser!=='undefined')createCleanBulkBoundary(browser).register();

@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 import {requestOperatorUpdate} from './update-window.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // S05 independently sourced, read-only admission diagnosis. No browser/native
@@ -333,7 +334,8 @@ export function createReadyOperator(api,{open=openCanonicalDatabase,
    });
   });
  }
- return Object.freeze({run,runTrusted:async message=>{
+   run=checkpointed(api,run);
+  return Object.freeze({run,runTrusted:async message=>{
    if(!['ASSESS_READY','PREPARE_LOCAL','PAUSE_READY','RESUME_READY','UPDATE_NOW'].includes(message?.type))
      return fail('INVALID_INTERNAL_READY_ACTION');
    return run(message,{id:api.runtime.id,url:api.runtime.getURL('pcms/index.html')});

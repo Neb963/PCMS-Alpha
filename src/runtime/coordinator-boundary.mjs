@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 import {createScopedCreationGate} from './creation-authority.mjs';
 import {previewCreation} from './creation-preview.mjs';
 // S00: trusted, installed-XPI command ingress; no provider, Git or native writes.
@@ -126,6 +127,7 @@ export function createCoordinatorBoundary(api,{open=openCanonicalDatabase,
       });
     });
   }
+    run=checkpointed(api,run,{allowDuringRestore:message=>["LIST_CREATE_BATCH_ITEMS","LIST_CREATE_BATCH_HOLDS","LIST_CREATE_BATCHES","GET_CREATE_INTENT","LIST_CREATE_INTENTS","GET_CREATE_BATCH"].includes(message?.type)});
   return Object.freeze({run,register});
 }
 if(typeof browser!=='undefined')createCoordinatorBoundary(browser).register();

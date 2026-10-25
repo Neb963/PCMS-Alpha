@@ -1,3 +1,4 @@
+import {checkpointed,trackPcmsWork} from './work-checkpoint.mjs';
 import {stageWasNotInvoked} from './stage-editor-bridge.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I09 private-only stage orchestration. UI cannot supply tab ids, page code,
@@ -281,7 +282,7 @@ export function createStagingBoundary(api,{
       port.onMessage.addListener(msg=>{
         if(busy){try{port.postMessage(fail('BUSY'));}catch{}return;}
         busy=true;
-        Promise.resolve().then(async()=>{
+        trackPcmsWork(Promise.resolve().then(async()=>{
           if(sender?.id!==api.runtime.id||!Number.isSafeInteger(tab?.id)||
              typeof msg?.slug!=='string'||!SLUG.test(msg.slug)||
              typeof msg.nonce!=='string'||!/^[a-f0-9]{32}$/.test(msg.nonce)||
@@ -308,18 +309,20 @@ export function createStagingBoundary(api,{
           const release=await guard()?.releaseStagingTab?.(record.personaUid,msg.slug,msg.nonce);
           if(release?.ok!==true)return fail('HANDOFF_RELEASE_UNVERIFIED');
           return store.move(msg.slug,next.revision,'HUMAN_OWNED');
-        }).then(v=>{try{port.postMessage(v);}catch{}})
+        })).then(v=>{try{port.postMessage(v);}catch{}})
           .catch(()=>{try{port.postMessage(fail('HANDOFF_UNVERIFIED'));}catch{}})
           .finally(()=>{busy=false;});
       });
     });
 
     // Never repeat dispatch after restart. HOLD possible effect; keep tabs.
-    Promise.resolve().then(async()=>{
+    trackPcmsWork(Promise.resolve().then(async()=>{
       if(!(await sentinel.inspect()).held)
         await storeFactory(await database()).recover();
-    }).catch(()=>{});
+    })).catch(()=>{});
   }
+    run=checkpointed(api,run,{allowDuringRestore:message=>["LIST_STAGES","GET_STAGE"].includes(message?.type)});
+  statusFor=checkpointed(api,statusFor,{allowDuringRestore:message=>["GET_STAGE"].includes(message?.type)});
   return Object.freeze({register,run,runTrusted:async message=>{
     if(!['GET_STAGE','STAGE_PRIVATE','RECONCILE_STAGE'].includes(message?.type))
       return fail('INVALID_INTERNAL_STAGE_ACTION');

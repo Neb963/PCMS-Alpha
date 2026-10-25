@@ -100,3 +100,16 @@ test('J06 foreign or malformed last-good receipt cannot be promoted by STATUS',a
   assert.equal((await f.cold().status()).lastSuccess,null);
  }
 });
+
+test('J06 restore safety copy uses the same real download coordinator without adoption qualification',async()=>{
+ const f=fixture();let prepared=0,qualified=0;
+ // Observable counters distinguish a backup from a source-authority mutation.
+ const owner={epoch:'restore_'+'a'.repeat(32),revision:1,stageScope:'portable_'+'b'.repeat(32)};
+ await f.api.storage.local.set({pcmsRestoreInProgress:{active:true,status:'PREPARING',...owner,groups:{},createdContainers:{}}});
+ assert.equal((await f.runner.manual()).code,'RESTORE_HOLD');
+ const result=await f.runner.checkpoint(owner);assert.equal(result.ok,true);assert.equal(result.purpose,'RESTORE_CHECKPOINT');
+ assert.equal(f.db.read('meta','backup:manual-active').purpose,'RESTORE_CHECKPOINT');assert.equal(f.effects(),1);
+ assert.equal((await f.runner.status()).lastSuccess.runId,result.runId);
+ await f.api.storage.local.set({pcmsRestoreInProgress:{active:true,status:'GUARD_INSTALLED',...owner}});
+ assert.equal((await f.runner.checkpoint(owner)).code,'BACKUP_RESTORE_HOLD');assert.equal(f.effects(),1);
+});
