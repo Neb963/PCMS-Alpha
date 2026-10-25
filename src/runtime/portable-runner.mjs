@@ -78,7 +78,9 @@ export function createPortableRunner(api,{
     // export; its actual/uncertain download retains ordinary busy handling.
     const read=await (await store()).read();
     if(!read.ok||read.state.enabled||read.state.active)return false;
-    await running;return !pending;
+    await running;
+    const current=await (await store()).read();
+    return !pending&&current.ok&&!current.state.enabled&&!current.state.active;
   }
   async function recordManual(row,{expectedRunId=null}={}){
     const database=await db();
@@ -277,6 +279,7 @@ export function createPortableRunner(api,{
   async function inspectArchive(){
     if(inspection)return inspection;
     if(pending&&!await settleDisabledWake())return fail('BACKUP_INFLIGHT');
+    if(inspection)return inspection;
     if(pending||manualTask)return fail('BACKUP_INFLIGHT');
     inspection=(async()=>{
       try{

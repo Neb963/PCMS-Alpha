@@ -31,6 +31,21 @@ test('J06 cold AUTO_OFF admission settles before one manual export; enabled dail
   else{assert.equal(result.ok,true,JSON.stringify(result));assert.equal(result.code,'BROWSER_REPORTED_COMPLETE');assert.equal(f.effects(),1,'one deliberate manual export');}
  }
 });
+test('J06 disabled wake rechecks durable daily state after concurrent enable and lost download ACK',async()=>{
+ const f=fixture({lostAck:true});let releaseWake,enteredWake,initialRead;
+ const wakeGate=new Promise(r=>releaseWake=r),waking=new Promise(r=>enteredWake=r),readDone=new Promise(r=>initialRead=r);
+ const get=f.api.storage.local.get;let calls=0;
+ f.api.storage.local.get=async key=>{if(++calls===2){enteredWake();await wakeGate}return get(key)};
+ const transaction=f.db.transaction;let first=true;
+ f.db.transaction=(...args)=>{const tx=transaction(...args);if(!first)return tx;first=false;
+  return new Proxy(tx,{set(target,key,value){target[key]=key==='oncomplete'?()=>{value();initialRead()}:value;return true}})};
+ const wake=f.runner.tick();await waking;
+ const manual=f.runner.manual();await readDone;
+ await f.store.enabled(true);releaseWake();
+ const result=await manual;await wake;
+ assert.equal(result.code,'BACKUP_INFLIGHT');assert.equal(f.effects(),1,'no second manual dispatch after the daily ACK is lost');
+ assert.equal((await f.store.read()).state.active.status,'DISPATCH_POSSIBLE');
+});
 test('J06 no-ID manual lost ACK is found by the exact journaled run, never downloaded again, and STATUS exposes the durable success',async()=>{
  const f=fixture({lostAck:true});assert.equal((await f.runner.manual()).code,'DOWNLOAD_OUTCOME_UNKNOWN');assert.equal(f.effects(),1);
  const before=f.db.read('meta','backup:manual-active');assert.equal(before.downloadId,null);

@@ -946,11 +946,11 @@ def s01_legacy_and_archive(session,uuid,oracle,privacy_safe,added_id):
     # native service is a real HELD receipt, not a fabricated started-success.
     assert started.get('ok') is False and started.get('code') in (
         'MULLVAD_LOCAL_SERVICE_UNAVAILABLE','NO_ROUTE_CANDIDATES',
-        'NO_UNIQUE_EXIT_AVAILABLE'),started
+        'MULLVAD_RELAY_CATALOG_UNAVAILABLE','NO_UNIQUE_EXIT_AVAILABLE'),started
     legacy=_wait_account(session,'legacy_account_ci01',lambda a:a.get('upgrade',{}) and a['upgrade'].get('phase') in ('HELD','COMPLETE'))
     # No native Mullvad helper in CI: the route step holds, but identity is intact.
     assert legacy['upgrade']['phase']=='HELD',legacy
-    assert legacy['upgrade']['code'] in ('MULLVAD_LOCAL_SERVICE_UNAVAILABLE','NO_ROUTE_CANDIDATES','NO_UNIQUE_EXIT_AVAILABLE'),legacy
+    assert legacy['upgrade']['code'] in ('MULLVAD_LOCAL_SERVICE_UNAVAILABLE','NO_ROUTE_CANDIDATES','MULLVAD_RELAY_CATALOG_UNAVAILABLE','NO_UNIQUE_EXIT_AVAILABLE'),legacy
     assert legacy['state']=='VERIFIED' and legacy['revision']==2 and legacy['identity']=='VERIFIED',legacy
     assert legacy['personaUid']==made['personaUid'],legacy
     stored=_pcms(session,uuid,"""

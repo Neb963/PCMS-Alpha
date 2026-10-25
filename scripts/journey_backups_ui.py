@@ -124,6 +124,31 @@ const out=await createOperatorRecords().put('ui:diagnostic-report:'+run.runId,{s
         g.click(s,'[data-settings=diagnostics]')
         wait(s,"sh.querySelector('#pcms-notes-AC-01')?.value.includes('operator-reported')&&sh.querySelector('#pcms-check-AC-01')?.value==='PASS'",'J06_NOTES_ACTUAL_PROCESS_RESTART')
         capture(s,'restart-backup',evidence)
+        # Daily scheduling is a real primary control and physical download,
+        # independent of CREATE/Git. A same-day turn and cold wake cannot
+        # manufacture another archive or lose the enabled schedule.
+        g.click(s,'[data-settings=backups]');g.click(s,'#pcms-backup-daily');g.click_text(s,'Save daily schedule')
+        until=time.monotonic()+45
+        while time.monotonic()<until and len(list(downloads.glob('pcms-backups/*.pcms.jsonl')))<2:time.sleep(.1)
+        daily_files=list(downloads.glob('pcms-backups/*auto_*.pcms.jsonl'));assert len(daily_files)==1,daily_files
+        wait(s,"[...sh.querySelectorAll('button')].some(x=>x.textContent==='Check status'&&!x.disabled)",'J06_DAILY_SCHEDULE_SAVED')
+        g.click_text(s,'Check status')
+        wait(s,"sh.querySelector('#page').textContent.includes('Daily backup ·')&&sh.querySelector('#page').textContent.includes('1 successful daily copies tracked')",'J06_ACTUAL_DAILY_DOWNLOAD_COMPLETION')
+        control=b.execute(s,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#pcms-backup-inspect-file')")
+        b.call('POST',f'/session/{s}/element/{control[a.ELEMENT]}/value',{'text':str(daily_files[0])})
+        g.click_text(s,'Verify selected backup');wait(s,"sh.querySelector('#page').textContent.includes('Selected file verified')",'J06_DAILY_PHYSICAL_FILE_REOPEN')
+        g.click_text(s,'Run daily backup now')
+        wait(s,"[...sh.querySelectorAll('button')].some(x=>x.textContent==='Run daily backup now'&&!x.disabled)",'J06_SAME_DAY_DAILY_TURN_SETTLED')
+        assert len(list(downloads.glob('pcms-backups/*.pcms.jsonl')))==2,'SAME_DAY_DAILY_TURN_DUPLICATED'
+        before=b.owned_firefox_pids(profile);b.close(s);b.require_owned_exit(profile,before);s=None
+        s=b.open_session(browser,profile);assert not before.intersection(b.owned_firefox_pids(profile))
+        b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s)
+        wait(s,"!!sh.querySelector('[data-settings=backups]')",'J06_DAILY_RESTART_SETTINGS');g.click(s,'[data-settings=backups]')
+        wait(s,"sh.querySelector('#pcms-backup-daily')?.checked&&sh.querySelector('#page').textContent.includes('Daily backup ·')",'J06_DAILY_ENABLED_AND_LAST_GOOD_SURVIVE_PROCESS')
+        assert len(list(downloads.glob('pcms-backups/*.pcms.jsonl')))==2,'DAILY_STARTUP_REPLAYED_DOWNLOAD'
+        g.click(s,'#pcms-backup-daily');g.click_text(s,'Save daily schedule')
+        wait(s,"!sh.querySelector('#pcms-backup-daily').checked&&sh.querySelector('#page').textContent.includes('Daily backups off')",'J06_DAILY_DISABLE_ACTUAL_STATE')
+        capture(s,'daily-physical-file-restart',evidence)
         pathlib.Path('build/j06-primary-backup.json').write_text(json.dumps(evidence,indent=2))
         print('B J06_ACTUAL_PRIMARY_MANUAL_FILE_REOPEN_CORRUPTION_RECOVERY_FUNCTIONAL_RESTORE_MODULE_INDEPENDENCE_RESTART=PASS',flush=True)
     finally:

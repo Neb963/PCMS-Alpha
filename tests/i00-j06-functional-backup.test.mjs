@@ -18,3 +18,15 @@ test('J06 functional local backup checks frame/source roundtrip without creation
  const corrupt=createPortableRunner(api,{open:async()=>fakeDatabase(),capture:async()=>({blob:new Blob(['not a verified archive']),bytes:22,sourceAudit:{}})});
  assert.equal((await corrupt.inspectArchive()).ok,false,'an API acknowledgment or bad blob is not functional archive proof');
 });
+test('J06 concurrent independent archive checks share one inspection across cold disabled wake and hold manual admission',async()=>{
+ const pcms={schema:1,stores:Object.fromEntries(DB_STORES.map(k=>[k,[]]))},donor={version:1,settings:null,routes:[],personas:[],scripts:[],workflows:[],cookies:{},gmValues:{},automationHistory:[]};
+ const archive=await encodePortableArchive({pcms,donor}),opened=await readPortableArchive(archive.blob),database=fakeDatabase();
+ let open,finish,entered,count=0;
+ const openGate=new Promise(r=>open=r),captureGate=new Promise(r=>finish=r),capturing=new Promise(r=>entered=r);
+ const api={storage:{local:{get:async()=>({})}},downloads:{download(){throw Error('NO_DOWNLOAD_ALLOWED')}}};
+ const runner=createPortableRunner(api,{open:async()=>{await openGate;return database},capture:async()=>{count++;entered();await captureGate;return {...archive,sourceAudit:opened.archiveSourceAudit}}});
+ const wake=runner.tick(),one=runner.inspectArchive(),two=runner.inspectArchive();open();await capturing;
+ assert.equal((await runner.manual()).code,'BACKUP_INFLIGHT');
+ finish();const results=await Promise.all([one,two]);await wake;
+ assert.equal(count,1,'coalesced read-only operation keeps its admission fence');assert.ok(results.every(r=>r.ok),JSON.stringify(results));
+});
