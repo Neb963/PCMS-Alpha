@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """J04 actual persistent Firefox background/primary journey; offline effects only."""
-import base64,json,os,pathlib,subprocess,sys,tempfile,time
+import base64,json,os,pathlib,subprocess,sys,tempfile,time,uuid
 from urllib.request import urlopen
 import journey_development_ui as ui
 b=ui.b;g=ui.g;a=g.a
 
 def background(s,body):
+    topic='pcms-j04-background-result-'+uuid.uuid4().hex
     b.call('POST',f'/session/{s}/moz/context',{'context':'chrome'})
     try:
-        source="""(async()=>{try{const sandbox=Cu.Sandbox(content,{sandboxPrototype:content,wantXrays:false});const value=await Cu.evalInSandbox(CODE,sandbox,'latest',content.location.href,1);sendAsyncMessage('pcms-j04-background-result',{ok:true,value:JSON.parse(JSON.stringify(value))});}catch(e){sendAsyncMessage('pcms-j04-background-result',{ok:false,error:String(e),stack:String(e.stack)})}})();""".replace('CODE',json.dumps('(async()=>{'+body+'})()'))
-        script="""const done=arguments[arguments.length-1];(async()=>{const {ExtensionParent}=ChromeUtils.importESModule('resource://gre/modules/ExtensionParent.sys.mjs');const extension=ExtensionParent.GlobalManager.extensionMap.get('persona-route-manager@local');await extension.wakeupBackground('pcms-j04-offline-test-controller');const mm=extension._backgroundPageFrameLoader.messageManager;const topic='pcms-j04-background-result';const listener=msg=>{mm.removeMessageListener(topic,listener);done(msg.data)};mm.addMessageListener(topic,listener);mm.loadFrameScript('data:application/javascript,'+encodeURIComponent(SOURCE),false);})().catch(e=>done({ok:false,error:String(e)}));""".replace('SOURCE',json.dumps(source))
+        source="""(async()=>{try{const sandbox=Cu.Sandbox(content,{sandboxPrototype:content,wantXrays:false});const value=await Cu.evalInSandbox(CODE,sandbox,'latest',content.location.href,1);sendAsyncMessage('pcms-j04-background-result',{ok:true,value:JSON.parse(JSON.stringify(value))});}catch(e){sendAsyncMessage('pcms-j04-background-result',{ok:false,error:String(e),stack:String(e.stack)})}})();""".replace('CODE',json.dumps('(async()=>{'+body+'})()')).replace('pcms-j04-background-result',topic)
+        script="""const done=arguments[arguments.length-1];let release=()=>{};(async()=>{const {ExtensionParent}=ChromeUtils.importESModule('resource://gre/modules/ExtensionParent.sys.mjs');const extension=ExtensionParent.GlobalManager.extensionMap.get('persona-route-manager@local');await extension.wakeupBackground('pcms-j04-offline-test-controller');extension.emit('background-script-reset-idle',{reason:'event'});const roundTrip=new Promise(resolve=>{release=resolve});extension.emit('background-script-idle-waituntil',{promise:roundTrip,reason:'listeners'});const mm=extension._backgroundPageFrameLoader.messageManager;const topic=TOPIC;const listener=msg=>{mm.removeMessageListener(topic,listener);release();done(msg.data)};mm.addMessageListener(topic,listener);mm.loadFrameScript('data:application/javascript,'+encodeURIComponent(SOURCE),false);})().catch(e=>{release();done({ok:false,error:String(e)})});""".replace('SOURCE',json.dumps(source)).replace('TOPIC',json.dumps(topic))
         out=b.call('POST',f'/session/{s}/execute/async',{'script':script,'args':[]},timeout=120)
         assert out.get('ok'),out
         return out.get('value')
@@ -54,7 +55,7 @@ def run(browser,archive,folder):
     s=b.open_session(browser,profile)
     try:assert b.call('POST',f'/session/{s}/moz/addon/install',{'path':str(archive),'temporary':False},timeout=45)==b.ID
     finally:b.close(s)
-    s=b.open_session(browser,profile);evidence={'scope':{'externalServices':'OFFLINE Git/provider/native models','effectAuthority':'fixture effect gates true; production standing gates remain separately tested','clock':'actual Date.now; no acceleration','alarmCadence':'100ms test wake of real browser alarm; production periodic READY alarm is one minute','process':'owned disposable persistent profile; nonempty disjoint old/new Firefox PID sets','livePrivateGitOrProvider':'NOT_TESTED'}}
+    s=b.open_session(browser,profile);evidence={'scope':{'externalServices':'OFFLINE Git/provider/native models','effectAuthority':'fixture effect gates true; production standing gates remain separately tested','clock':'actual Date.now; no acceleration','transport':'test-only per-message Firefox keepalive released on reply; no permanent product keepalive','alarmCadence':'100ms test wake of real browser alarm; production periodic READY alarm is one minute','process':'owned disposable persistent profile; nonempty disjoint old/new Firefox PID sets','livePrivateGitOrProvider':'NOT_TESTED'}}
     try:
         url=f'moz-extension://{b.addons_uuid(profile)}/pcms/index.html#work-queue';b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s)
         assert install(s).get('ok');assert attach(s).get('ok')
