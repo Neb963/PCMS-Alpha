@@ -2423,9 +2423,21 @@ def main():
                     tests:['observed_smoke']},before.current.revision);
                   const later=await store.getPrompt();
                   const exported=store.exportPrompt(later.history);
+                  const sourceCore=await import('./staging-core.mjs');
+                  const baseline=await sourceCore.exactSource([
+                    {path:'main.pjs',base64:btoa('original I10 source')},
+                    {path:'index.html',base64:btoa('<p>original I10</p>')}]);
+                  const previous=await sourceCore.exactSource([
+                    {path:'main.pjs',base64:''},{path:'index.html',base64:''}]);
                   const stage={slug:'i10-b-private',revision:6,state:'SOURCE_VERIFIED',
-                    accountId:'account-i10',candidate:{fingerprint:'a'.repeat(64)},
-                    previous:{fingerprint:'b'.repeat(64)}};
+                    accountId:'account-i10',personaUid:'persona-i10',bindingVersion:1,
+                    remotePublicId:'remote-i10',nonce:'e'.repeat(32),verifiedAt:Date.now(),
+                    candidate:baseline,previous};
+                  // Preserve the real prior bytes in canonical stage storage:
+                  // the first changed native checkpoint must archive them.
+                  await new Promise((resolve,reject)=>{const t=db.transaction('meta','readwrite');
+                    t.oncomplete=resolve;t.onabort=()=>reject(Error('I10_STAGE_FIXTURE_ABORT'));
+                    t.objectStore('meta').put({key:'stage:'+stage.slug,record:stage});});
                   const prepared=await store.start(stage);
                   const blockedDuplicate=await store.start({...stage,slug:'i10-b-other'});
                   const untrusted=policy.applyAiEvidence(policy.beginAiJob({
@@ -2441,7 +2453,7 @@ def main():
                   const wrongProof=policy.applyAiEvidence(policy.beginAiJob({
                     stage,prompt:later.current}).job,{type:'TEST',chat:1,
                       name:'observed_smoke',result:'PASS',observedAt:1,
-                      sourceFingerprint:'a'.repeat(64),
+                      sourceFingerprint:baseline.fingerprint,
                       independentSource:'AI_PROSE'});
                   done({ok:before.ok&&updated.ok&&
                     later.current.revision===before.current.revision+1&&
@@ -2497,6 +2509,8 @@ def main():
                   ]);
                   const full=await store.checkpointSource('i10-b-private',idle.revision,snapshot);
                   const stored=await store.getJobFull('i10-b-private');
+                  const archived=await new Promise(resolve=>{const q=db.transaction('meta','readonly').objectStore('meta').get('ai-history:i10-b-private:'+idle.revision);q.onsuccess=()=>resolve(q.result?.job?.finalSource)});
+                  const archivedSource=archived?.blobs?await stageCore.exactSource(archived.blobs):null;
                   const port=msg=>new Promise(resolve=>{
                     const p=browser.runtime.connect({name:'pcms-i10-ai'});
                     p.onMessage.addListener(v=>{try{p.disconnect()}catch{}resolve(v)});
@@ -2513,12 +2527,15 @@ def main():
                     greetingOnly.code==='AI_SESSION_UNVERIFIED'&&
                     busy.ok&&idle.ok&&
                     full.ok&&stored.job.finalSource.blobs.length===3&&
+                    archivedSource?.ok===true&&archivedSource.fingerprint===archived.fingerprint&&
+                    archivedSource.blobs.length===2&&
                     stored.job.chat1.tests&&
                     stored.job.sourceFingerprint===snapshot.fingerprint&&
                     stored.job.state==='TESTS_UNVERIFIED'&&
                     denied.ok!==true,armed,repeat,recovered,denied,
                     greetingOnly,recoveredAgain,afterAgainRevision:afterAgain.revision,
-                    fingerprint:snapshot.fingerprint,held:stored.job.hold});
+                    fingerprint:snapshot.fingerprint,held:stored.job.hold,
+                    checkpointCode:full.code||null,archivedComplete:archivedSource?.ok===true});
                   db.close();
                 })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,500)}));"""
                 ai_recovery=call('POST',f'/session/{after}/execute/async',
