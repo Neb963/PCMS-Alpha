@@ -124,7 +124,7 @@ function fakeDonor(relays){
   return {donor,effects,profiles,routes,faults,tabs,leases,live,legacyPersona};
 }
 const fp=c=>c.repeat(64);
-function setup({relays}){
+function setup({relays,...options}){
   const db=fakeDatabase(),accounts=createAccountStore(db),ledger=createExitLedger(db);
   const d=fakeDonor(relays),opened=[],synced=[],order=[];
   const sessions=new Map(); // personaUid -> principal fingerprint (real session oracle)
@@ -137,7 +137,7 @@ function setup({relays}){
     identify:async personaUid=>sessions.has(personaUid)?{ok:true,proof:{source:'GUARDED_SESSION_READBACK',
       verified:true,personaUid,principalFingerprint:sessions.get(personaUid),
       observationId:'identity_'+crypto.randomUUID().replaceAll('-','')}}:{ok:false,code:'NO_PAGE_SESSION'},
-    syncInventory:async(accountId,revision)=>{
+    ...options,syncInventory:async(accountId,revision)=>{
       synced.push(accountId);const account=(await accounts.get(accountId)).account;
       return createInventoryStore(db).applyObservation(account,{
         source:'GUARDED_PERCHANCE_READBACK',complete:true,accountId,personaUid:account.personaUid,
@@ -151,6 +151,79 @@ function setup({relays}){
   return {db,accounts,ledger,flow,...d,opened,synced,order,sessions,profileOf};
 }
 const relay=(host,v4,v6)=>({host,v4,v6});
+test('Issue60: Open accepted during bounded inventory waits for its owner to settle, then uses ordinary protected admission',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),a=await enroll(h);
+ let started,finish;const entered=new Promise(resolve=>started=resolve),gate=new Promise(resolve=>finish=resolve);const opened=[];
+ const flow=createEnrollment({accounts:h.accounts,ledger:h.ledger,donor:h.donor,
+  pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},identify:async()=>({ok:false}),
+  syncInventory:async()=>{started();await gate;return {ok:true}},openLogin:async uid=>{opened.push(uid);return {ok:true,opened:true}}});
+ const syncing=flow.syncInventory(a.accountId);await entered;
+ const opening=flow.openLogin(a.accountId);await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(opened,[]);
+ finish();assert.equal((await syncing).ok,true);assert.equal((await opening).opened,true);assert.deepEqual(opened,[a.personaUid]);
+});
+test('Issue60: human route command cancels automatic observation at its boundary; another account progresses independently',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED'),relay('10.124.0.2','45.83.2.1','BLOCKED')]}),a=await enroll(h),b=await enroll(h);
+ let enter;const entered=new Promise(resolve=>enter=resolve),original=h.donor.probeAssigned;let first=true,active=0,max=0;
+ h.donor.probeAssigned=async p=>{
+  if(p.bindingId!==a.bindingId)return original(p);
+  active++;max=Math.max(max,active);
+  try{if(first){first=false;enter();return await new Promise(resolve=>p.signal.addEventListener('abort',()=>resolve({ok:false,code:'ROUTE_OBSERVATION_CANCELLED',failure:'HOST'}),{once:true}))}return await original(p)}finally{active--;}
+ };
+ const background=h.flow.verifyRoute(a.accountId,{automatic:true});await entered;
+ assert.equal(h.flow.activity(a.accountId).cancellable,true);
+ assert.equal((await h.flow.verifyRoute(b.accountId)).ok,true);
+ const operator=h.flow.verifyRoute(a.accountId);
+ assert.equal((await background).code,'ROUTE_OBSERVATION_CANCELLED');assert.equal((await operator).ok,true);
+ assert.equal(max,1,'never overlap donor commands for the same account');
+ assert.equal(h.flow.running(a.accountId),false);assert.equal((await h.ledger.binding(a.bindingId)).binding.pin,'ACTIVE');
+ assert.equal(h.effects.filter(x=>x.kind==='ASSIGN').length,2,'only original enrollments assigned routes');
+});
+test('Issue60: an incompatible active human command remains owned until its donor effect settles',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),a=await enroll(h),original=h.donor.probeAssigned;
+ let enter,release,observedSignal;const entered=new Promise(resolve=>enter=resolve),gate=new Promise(resolve=>release=resolve);
+ h.donor.probeAssigned=async p=>{observedSignal=p.signal;enter();await gate;return original(p)};
+ const checking=h.flow.verifyRoute(a.accountId);await entered;
+ assert.equal((await h.flow.confirm(a.accountId)).code,'ACCOUNT_BUSY');assert.equal(h.flow.running(a.accountId),true);
+ assert.equal(observedSignal.aborted,false);release();assert.equal((await checking).ok,true);
+});
+test('Issue60: verified accounts with missing initial inventory retry guarded identity/inventory after connection recovery',async()=>{
+ let missing=false;
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')],inventoryNeeded:async()=>missing}),a=await enroll(h);
+ h.sessions.set(a.personaUid,fp('a'));assert.equal((await h.flow.confirm(a.accountId)).ok,true);
+ const baseline=h.synced.length;missing=true;h.faults.host=true;await h.flow.upkeep();assert.equal(h.synced.length,baseline);
+ h.faults.host=false;await h.flow.upkeep();assert.equal(h.synced.length,baseline+1);
+ assert.equal((await h.accounts.get(a.accountId)).account.boundPrincipal,fp('a'));
+});
+test('Issue60: missing inventory cannot preempt a legacy account route upgrade or its human-use fence',async()=>{
+ for(const busy of [false,true]){
+  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')],inventoryNeeded:async()=>true});
+  const {persona,account}=await legacyAccount(h,'10.124.0.1',fp('a'));
+  if(busy)h.tabs.add(persona.contextId);
+  const before=structuredClone(stored(h,account.accountId));
+  await h.flow.upkeep();
+  const after=stored(h,account.accountId);
+  if(busy)assert.deepEqual(after,before,'human-used legacy account waits for explicit upgrade; unknown inventory grants no control');
+  else{
+   assert.equal(typeof after.bindingId,'string','protected binding is a prerequisite to automatic inventory confirmation');
+   assert.equal(after.upgrade.phase,'COMPLETE');assert.equal(after.personaUid,account.personaUid);assert.equal(after.boundPrincipal,fp('a'));
+   assert.equal(h.effects.filter(x=>x.kind==='TAG').length,1);
+  }
+ }
+});
+test('Issue60: known helper failure durably revokes current route admission; healthy same-route recovery retains identity/history',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),a=await enroll(h);
+ h.sessions.set(a.personaUid,fp('a'));assert.equal((await h.flow.confirm(a.accountId)).ok,true);
+ const original=(await h.accounts.get(a.accountId)).account;
+ h.faults.host=true;assert.equal((await h.flow.verifyRoute(a.accountId,{automatic:true})).ok,false);
+ assert.equal((await h.ledger.binding(a.bindingId)).binding.pin,'HELD');
+ await reloadRoutePins();assert.equal(inspectRoutePin(h.profileOf(a)).allow,false,'restart cannot resurrect known failed route');
+ h.faults.host=false;assert.equal((await h.flow.verifyRoute(a.accountId)).ok,true);
+ const recovered=(await h.accounts.get(a.accountId)).account;
+ assert.equal(recovered.boundPrincipal,original.boundPrincipal);assert.equal(recovered.personaUid,a.personaUid);
+ assert.equal((await h.ledger.binding(a.bindingId)).binding.pin,'ACTIVE');
+ assert.equal((await h.ledger.read()).ledger.owners['IPv4:45.83.1.1'],a.accountId);
+ assert.equal(h.effects.filter(x=>x.kind==='ASSIGN').length,1);
+});
 async function enroll(h){
   const begun=await h.flow.begin();
   assert.equal(begun.ok,true,JSON.stringify(begun));
@@ -251,7 +324,8 @@ test('S01 AC-02/C-08 D: genuine route failure repairs to a new unique exit; hist
   const out=await h.flow.verifyRoute(a.accountId);
   assert.equal(out.ok,true,JSON.stringify(out));
   assert.equal(out.changed,true);assert.equal(out.identity,'VERIFIED');
-  assert.deepEqual(h.order.slice(0,2),['HOLD','ASSIGN'],'pin withdrawn before route mutation');
+  const assignment=h.order.indexOf('ASSIGN');
+  assert.ok(assignment>0&&h.order.slice(0,assignment).every(x=>x==='HOLD'),'pin withdrawn before route mutation');
   const ledger=h.db.read('meta',LEDGER_KEY);
   assert.equal(ledger.owners['IPv4:45.83.1.1'],a.accountId,'old exit stays reserved to A');
   assert.equal(ledger.owners['IPv4:45.83.2.2'],a.accountId);
@@ -870,7 +944,11 @@ test('J01 unique ninth candidate is reached after eight historical collisions',a
  const relays=[relay('10.124.0.1','45.83.1.1','BLOCKED'),
    ...Array.from({length:8},(_,i)=>relay('10.124.0.'+(i+2),'45.83.1.1','BLOCKED')),
    relay('10.124.0.10','45.83.1.10','BLOCKED')];
- const h=setup({relays}),a=await enroll(h),b=await enroll(h);
+ const h=setup({relays}),a=await enroll(h);let b=await enroll(h);
+ assert.equal(b.setup.code,'ROUTE_SEARCH_PENDING','large searches yield with durable progress');
+ for(let i=0;i<4&&b.state==='PREPARING';i++){
+   await h.flow.upkeep();b=(await h.accounts.get(b.accountId)).account;
+ }
  assert.equal(a.state,'WAITING_LOGIN');assert.equal(b.state,'WAITING_LOGIN');
  const binding=await h.ledger.binding(b.bindingId);
  assert.equal(binding.binding.exits[0].address,'45.83.1.10');

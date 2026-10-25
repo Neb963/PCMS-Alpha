@@ -5,13 +5,26 @@ import json
 import pathlib
 import posixpath
 import re
+import subprocess
 import sys
 import zipfile
 
 ID = 'persona-route-manager@local'
 DONOR = 'com.persona.mullvad_router'
 CRITICAL = ('lib/recovery-bootstrap.js', 'lib/routing-gate.js',
-            'lib/mullvad-native.js', 'content/userscript-trigger.js')
+            'lib/mullvad-native.js', 'lib/mullvad-runtime.js', 'content/userscript-trigger.js')
+
+def expected_donor_bytes(file, donor_root):
+    if file not in ('lib/mullvad-native.js','lib/mullvad-runtime.js'):
+        return (donor_root/file).read_bytes()
+    # Exact reviewed build-copy transformation, not a hash supplied by the
+    # candidate archive. Original donor verification remains independent.
+    code="""import {readFileSync} from 'node:fs';
+import {repairNativeTransport} from './src/runtime/native-transport-overlay.mjs';
+import {repairNativePrepare,repairMullvadRuntime} from './src/runtime/native-prepare-overlay.mjs';
+const source=readFileSync(process.argv[1],'utf8');
+process.stdout.write(process.argv[1].endsWith('mullvad-native.js')?repairNativePrepare(repairNativeTransport(source)):repairMullvadRuntime(source));"""
+    return subprocess.check_output(['node','--input-type=module','-e',code,str(donor_root/file)])
 
 def inspect(path, *, donor_root=pathlib.Path('donor/personamonkey/extension')):
     raw=pathlib.Path(path).read_bytes()
@@ -26,7 +39,7 @@ def inspect(path, *, donor_root=pathlib.Path('donor/personamonkey/extension')):
         manifest=json.loads(z.read('manifest.json'))
         if manifest.get('browser_specific_settings',{}).get('gecko',{}).get('id')!=ID:
             raise AssertionError('A08_GECKO_ID_DRIFT')
-        if manifest.get('version')!='1.2.14':
+        if manifest.get('version')!='1.2.15':
             raise AssertionError('A08_DISTRIBUTION_VERSION_NOT_ADVANCED')
         if manifest.get('manifest_version')!=3 or manifest.get('background',{}).get('scripts')!=['pcms/entry.mjs']:
             raise AssertionError('A08_BACKGROUND_NOT_PRODUCTION')
@@ -42,7 +55,7 @@ def inspect(path, *, donor_root=pathlib.Path('donor/personamonkey/extension')):
         if not set(required).issubset(names):
             raise AssertionError('A08_REQUIRED_PRODUCTION_MODULE_MISSING')
         for file in CRITICAL:
-            if z.read(file)!=(donor_root/file).read_bytes():
+            if z.read(file)!=expected_donor_bytes(file,donor_root):
                 raise AssertionError('A08_DONOR_BYTES_CHANGED:'+file)
         if DONOR.encode() not in z.read('lib/mullvad-native.js'):
             raise AssertionError('A08_DONOR_ROUTING_HOST_MISSING')
@@ -111,7 +124,7 @@ def inspect(path, *, donor_root=pathlib.Path('donor/personamonkey/extension')):
                 'xpiSha256':hashlib.sha256(raw).hexdigest(),
                 'geckoId':ID,'version':manifest['version'],
                 'zipEntries':len(names),'donorCriticalFilesVerified':len(CRITICAL),
-                'donorNativeBridge':'PRESERVED_BY_BYTE_COMPARISON',
+                'donorNativeBridge':'PINNED_HOST_UNCHANGED_REVIEWED_TRANSPORT_OVERLAY',
                 'productionPcmsModulesReachable':len(visited),
                 'retiredHistoricalModulesOutsideProductionGraph':len(retired),
                 'pcmsInstalledNativeServices':0,'pcmsInstallerFiles':0,

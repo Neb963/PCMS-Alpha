@@ -1,4 +1,5 @@
 import {validIncidentTarget} from './incident-target.mjs';
+import {operationGroup,projectOperationContext} from './operation-context.mjs';
 // PCMS canonical journal. Only short IndexedDB transactions own state.
 // This module neither imports nor invokes the donor, a provider, or a browser mutator.
 export const DB_NAME = 'pcms-alpha-canonical';
@@ -173,7 +174,7 @@ export function createCanonicalStore(db) {
         const item = event.target.result;
         if (!item) { finish(ok({ states: counts })); return; }
         const s = item.value?.status;
-        if (['PREPARED','DISPATCH_POSSIBLE','OBSERVING','HELD_UNCERTAIN','CONFIRMED','ABORTED','REJECTED'].includes(s))
+        if (typeof s==='string')
           counts[s] = Math.min(100000, (counts[s] || 0) + 1);
         item.continue();
       };
@@ -203,7 +204,7 @@ export function createCanonicalStore(db) {
         if(!row){finish(ok({items,more,next:more?items.at(-1)?.operationId||'':null}));return;}
         const op=row.value;
         if(!op||!isSafeId(op.operationId)||!isSafeId(op.targetId)||
-            (subset&&!subset.has(op.status))||
+            (status!=='ALL'&&operationGroup(op.status)!==status)||
             (query&&!([op.operationId,op.targetId,op.effectType,op.status].join(' ').toLowerCase().includes(query.toLowerCase())))){
           row.continue();return;}
         if(items.length>=limit){more=true;finish(ok({items,more,next:items.at(-1)?.operationId||null}));return;}
@@ -211,6 +212,40 @@ export function createCanonicalStore(db) {
           effectType:op.effectType,status:op.status,revision:op.revision,
           updatedAt:Number.isSafeInteger(op.updatedAt)?op.updatedAt:null});
         row.continue();
+      };
+    });
+  }
+  function inspectOperationContext(operationId){
+    if(!isSafeId(operationId))return Promise.resolve(fail('INVALID_TARGET'));
+    return transact(db,['operations','meta','events'],'readonly',(tx,finish)=>{
+      tx.objectStore('operations').get(operationId).onsuccess=e=>{
+        const op=e.target.result;if(!op){finish(fail('OPERATION_NOT_FOUND'));return;}
+        const links=[],events=[],inventory=[],eventStages=new Set();
+        tx.objectStore('meta').openCursor().onsuccess=e=>{
+          const row=e.target.result;
+          if(row){
+            if(typeof row.key==='string'&&row.key.startsWith('supply-batch:')&&row.value?.batch){
+              const batch=row.value.batch;
+              for(const item of batch.items||[])if(item.itemId===op.targetId)links.push({batch,item});
+            }
+            const creation=row.value?.record;
+            if(row.key==='s00-create-intent:'+op.targetId&&creation?.intentId===op.targetId&&
+               ((op.effectType==='s04_create'&&creation.createOperationId===operationId)||
+                (op.effectType==='s04_rename'&&creation.renameOperationId===operationId))){
+              links.push({kind:'S04',batch:{accountId:creation.accountId},item:{itemId:creation.intentId,
+                createOperationId:creation.createOperationId,renameOperationId:creation.renameOperationId,
+                requestedSlug:creation.slug,temporarySlug:creation.temporarySlug,state:creation.state,
+                reason:creation.lastAttempt?.code,reasonAt:creation.lastAttempt?.at}});
+            }
+            if(row.value?.generator?.ownerState==='OBSERVED_OWNER')inventory.push({slug:row.value.generator.slug,accountId:row.value.generator.accountId,ownerState:'OBSERVED_OWNER'});
+            row.continue();return;
+          }
+          tx.objectStore('events').openCursor().onsuccess=e=>{
+            const cursor=e.target.result;
+            if(cursor){if(cursor.value?.operationId===operationId&&!eventStages.has(cursor.value.stage)){eventStages.add(cursor.value.stage);events.push({stage:cursor.value.stage});}cursor.continue();return;}
+            finish(ok({context:projectOperationContext(op,links,events,inventory),providerEffects:'NONE'}));
+          };
+        };
       };
     });
   }
@@ -413,7 +448,7 @@ export function createCanonicalStore(db) {
       };
     });
   }
-  return Object.freeze({ provisionTarget, apply, getOperation, listOperationPage, summary, recover,
+  return Object.freeze({ provisionTarget, apply, getOperation, inspectOperationContext, listOperationPage, summary, recover,
     recordNotice, resolveNotice, ignoreNotice, acknowledgeNotice, noticeSummary,
     listNotices, pageNotices, close: () => db.close() });
 }

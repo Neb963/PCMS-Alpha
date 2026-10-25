@@ -127,6 +127,8 @@ jobs:
             build/j06-*.png
             build/j06-*.json
             build/j07-*.png
+            build/issue60-*.png
+            build/issue60-ui-evidence.json
             build/j07-*.json
             build/j07-final-audit.md
           if-no-files-found: ignore

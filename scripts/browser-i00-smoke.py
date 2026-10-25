@@ -1038,6 +1038,11 @@ def main():
             # Exercise the changed operator journey first; all unchanged
             # persistent donor/source/backup suites still run after it passes.
             completed=[]
+            # Issue60 uses real authenticated SOCKS/TLS and the actual donor,
+            # page readers, canonical stores and UI on a persistent upgrade.
+            # Native/provider protocols remain explicit offline fixtures.
+            from journey_integration_recovery import run as run_issue60
+            run_issue60(browser,archive,pathlib.Path(folder))
             def journey(name,runner):
                 runner(browser,archive,pathlib.Path(folder))
                 completed.append(name)
@@ -1262,7 +1267,7 @@ def main():
                 assert faithful['inventoryTabs']>=4 and faithful['sourceWriters']==1,faithful
                 print('B V015_TRUE_DESKTOP_PRIMARY_WORKSPACES_AND_REAL_HANDLERS=PASS',flush=True)
                 release_version=execute(after,"return {manifest:browser.runtime.getManifest().version,ui:document.documentElement.dataset.pcmsUiVersion,badge:document.querySelector('.v015-top-status')?.textContent};")
-                assert release_version.get('manifest')=='1.2.14',release_version
+                assert release_version.get('manifest')=='1.2.15',release_version
                 assert release_version.get('ui')=='0.1.5' and '0.1.5' in release_version.get('badge',''),release_version
                 print('B V015_REAL_FIREFOX_UPDATE_VERSION_AND_VISIBLE_UI_MARKER=PASS',flush=True)
                 # V016 acceptance: the PRECISE accepted prototype structure is
@@ -1286,7 +1291,7 @@ def main():
                      canonicalNative:!!document.getElementById('pcms-refresher-rows')&&
                        !!document.getElementById('pcms-release-approve')&&
                        !!document.getElementById('pcms-restore-apply')};""")
-                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.14',actual
+                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.15',actual
                 assert actual['routes']==6 and actual['visible'] and actual['nativeHidden'],actual
                 assert actual['sidebar'] and actual['primary']=='overview' and actual['styles'] and actual['canonicalNative'],actual
                 assert actual['badge']=='PCMS '+actual['manifest'],actual
@@ -5524,10 +5529,13 @@ def main():
     with zipfile.ZipFile(archive) as package:manifest=json.loads(package.read('manifest.json'))
     event=json.loads(pathlib.Path(os.environ['GITHUB_EVENT_PATH']).read_text()) if os.environ.get('GITHUB_EVENT_PATH') else {}
     checkout=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+    issue60=json.loads(pathlib.Path('build/issue60-ui-evidence.json').read_text())
+    assert issue60.get('schema')=='pcms.issue60.integration/1' and issue60.get('status')=='PASS' and issue60.get('xpiSha256')==expected_hash,'ISSUE60_SAME_PACKAGE_INTEGRATION_REQUIRED'
     receipt={'schema':'pcms.j07.full-browser-run/1','status':'PASS','retainedSuites':'PASS',
         'checkoutSha':checkout,'candidateSha':event.get('pull_request',{}).get('head',{}).get('sha',checkout),
         'sourceTree':subprocess.check_output(['git','rev-parse','HEAD^{tree}'],text=True).strip(),
         'version':manifest['version'],'geckoId':ID,'xpiSha256':expected_hash,'completed':completed,
+        'issue60Integration':{'schema':issue60['schema'],'status':issue60['status'],'xpiSha256':issue60['xpiSha256']},
         'firefox':subprocess.check_output([str(browser),'--version'],text=True,stderr=subprocess.DEVNULL).strip(),
         'installation':'persistent, fully enabled, disposable profiles only',
         'githubActions':os.environ.get('GITHUB_ACTIONS')=='true',

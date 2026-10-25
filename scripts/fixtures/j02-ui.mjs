@@ -29,6 +29,11 @@ export async function installGeneratorFixture(options={}){
   {ready:true,personaUid:uid,cookieStoreId:'fixture-'+a.accountId,routeId:'fixture-protected-'+a.accountId}:
   {ready:false,code:'FIXTURE_ACCOUNT_ROUTE_UNAVAILABLE'}};
  const guard={getSafeRouteReadiness:readiness,
+  // J02 supplies already-qualified routes. Accounts now owns inventory
+  // recovery, so instantiate its production enrollment controller as well.
+  // This fixture never grants Persona/native mutations; the separate Issue60
+  // SOCKS/TLS fixture exercises the real donor setup and recovery lifecycle.
+  enrollmentDonor:{createBoundPersona:async()=>{throw Error('J02_UNEXPECTED_PERSONA_MUTATION')}},
   observeReadOnly:async(uid,_identity,slug)=>{const a=await accountForUid(uid);
    const bytes=new Uint8Array([0,255,128,1]),sha256=[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(x=>x.toString(16).padStart(2,'0')).join('');
    return {ok:true,principalFingerprint:a.identity.principalFingerprint,original:{ownerResult:'IS_OWNER',visibility:'PUBLIC',

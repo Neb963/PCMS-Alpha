@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { verifyDonor, DONOR_COMMIT, DONOR_TREE } from '../scripts/verify-donor.mjs';
 import path from 'node:path';
 import { buildI00 } from '../scripts/build-i00.mjs';
+import {repairNativeTransport} from '../src/runtime/native-transport-overlay.mjs';
+import {repairNativePrepare,repairMullvadRuntime} from '../src/runtime/native-prepare-overlay.mjs';
 const pin='9995f6eadfa54be6cc0001f4e04f2a2d9b9401bf';
 const critical=['lib/recovery-bootstrap.js','lib/routing-gate.js','lib/mullvad-native.js','content/userscript-trigger.js'];
 const sha=async p=>createHash('sha256').update(await readFile(p)).digest('hex');
@@ -20,7 +22,7 @@ test('combined XPI preserves guarded donor bytes and opens the full dashboard ra
   assert.equal(Object.hasOwn(combined.action,'default_popup'),false);
   assert.equal(combined.browser_specific_settings.gecko.id,'persona-route-manager@local');
   assert.equal(original.version,'1.2.0','never rewrite donor manifest version');
-  assert.equal(combined.version,'1.2.14','installed PCMS UI must advance the existing v1.2.1 extension');
+  assert.equal(combined.version,'1.2.15','installed PCMS UI must advance the existing v1.2.1 extension');
   assert.deepEqual(combined.background,{scripts:['pcms/entry.mjs'],type:'module'});
   const entry=await readFile(path.join(stage,'pcms/entry.mjs'),'utf8');
   assert.match(entry,/import '\.\.\/lib\/recovery-bootstrap\.js'/);
@@ -29,7 +31,13 @@ test('combined XPI preserves guarded donor bytes and opens the full dashboard ra
   assert.match(await readFile(path.join(stage,'background.js'),'utf8'),/attachPcmsGuard/);
   assert.match(await readFile(path.join(stage,'lib/management-integration.js'),'utf8'),/pcmsGuard: Object\.freeze/);
   assert.equal(combined.options_ui.page,'pcms/index.html');
-  for(const p of critical) assert.equal(await sha(path.join(stage,p)),await sha(path.join('donor/personamonkey/extension',p)),p);
+  for(const p of critical){
+    const originalBytes=await readFile(path.join('donor/personamonkey/extension',p));
+    const expected=p==='lib/mullvad-native.js'?Buffer.from(repairNativePrepare(repairNativeTransport(originalBytes.toString()))):originalBytes;
+    assert.equal(await sha(path.join(stage,p)),createHash('sha256').update(expected).digest('hex'),p);
+  }
+  assert.equal(await readFile(path.join(stage,'lib/mullvad-runtime.js'),'utf8'),
+    repairMullvadRuntime(await readFile('donor/personamonkey/extension/lib/mullvad-runtime.js','utf8')));
   assert.equal((await readdir(path.join(stage,'pcms'))).includes('shell.mjs'),true);
   // I10 module graph MUST be present in the packaged XPI, not only in Node's
   // repository import graph (a missing file kills the Firefox event page).

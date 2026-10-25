@@ -202,7 +202,7 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
           await stage('CREATE_OBSERVING',{temporarySlug:item.ackTemporarySlug});
         if(!observing.ok)return observing;
         const proof=await read('READ_CREATE',{temporarySlug:item.ackTemporarySlug});
-        if(!proof.ok)return fail('CREATE_READBACK_PENDING');
+        if(!proof.ok)return fail(proof.code||'CREATE_READBACK_PENDING');
         return await s.stageEffect({intentId:item.intentId,
           expectedRevision:observing.record.revision,event:'CREATE_CONFIRMED',proof});
       }
@@ -212,7 +212,7 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         if(!observing.ok)return observing;
         const proof=await read('READ_RENAME',{temporarySlug:item.temporarySlug,
           remoteId:item.remoteId});
-        if(!proof.ok)return fail('RENAME_READBACK_PENDING');
+        if(!proof.ok)return fail(proof.code||'RENAME_READBACK_PENDING');
         return await s.stageEffect({intentId:item.intentId,
           expectedRevision:observing.record.revision,event:'RENAME_CONFIRMED',proof});
       }

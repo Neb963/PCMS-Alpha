@@ -23,12 +23,15 @@ export async function cachedHealthDomain(evidence){
   return 'egress_'+Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
-export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,
+export function createPersonaGuard({ initialize, securityState, shared, getRouteTest,observeRenewMs=5000,
   listPersonas, listProtectedRoutes, createPersona, openHumanLogin, readIsolatedTab,
   supplyIsolatedTab, stageIsolatedTab, handoffStagingTab, inspectStageTab, humanReviewTab, manualEditorTab, inspectNoEditorTabs, aiNativeStep, releaseIsolatedTab, existingIsolatedTab, refresherCleanupTab, readRuntimeWitness, enrollmentDonor, renameSafety=defaultRenameSafety,renameAuthority=()=>standingS06?.gate('development')===true,renameAuthorityGeneration=()=>standingS06?.policyGeneration(), pinGate = inspectRoutePin }) {
   if (typeof initialize !== 'function' || !shared?.resolve ||
       !shared?.acquire || !shared?.validate || !shared?.release ||
       typeof getRouteTest !== 'function') throw new TypeError('Donor guard dependencies unavailable');
+  // The donor reuses a lease for its same-XPI sender. Two PCMS callers must
+  // never acquire/release that same lease underneath each other's operation.
+  const activeGuards=new Map(),ownedGuards=new WeakMap();
 
   async function inspect(personaUid) {
     if (typeof personaUid !== 'string' || !/^[a-z0-9-]{8,128}$/i.test(personaUid))
@@ -69,6 +72,8 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
   async function acquireConflictGuard(personaUid) {
     const before = await inspect(personaUid);
     if (!before.ready) return before;
+    if(activeGuards.has(before.personaUid))return HOLD('DONOR_LEASE_BUSY_OR_REVOKED');
+    const owner={};activeGuards.set(before.personaUid,owner);
     let lease = null;
     let accepted = false;
     try {
@@ -79,9 +84,10 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
       const checked = await shared.validate(personaUid, lease.leaseId);
       if (checked.cookieStoreId !== before.cookieStoreId) return HOLD('PERSONA_CONTAINER_CHANGED');
       accepted = true;
-      return Object.freeze({
+      const receipt=Object.freeze({
         ...after, leaseId: lease.leaseId, expiresAt: lease.expiresAt
       });
+      ownedGuards.set(receipt,{personaUid:before.personaUid,owner});return receipt;
     } catch {
       return HOLD('DONOR_LEASE_BUSY_OR_REVOKED');
     } finally {
@@ -90,6 +96,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
       if (lease && !accepted) {
         try { await shared.release(lease.leaseId); } catch {}
       }
+      if(!accepted&&activeGuards.get(before.personaUid)===owner)activeGuards.delete(before.personaUid);
     }
   }
 
@@ -109,8 +116,11 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
 
   async function releaseConflictGuard(receipt) {
     if (!receipt?.leaseId) return HOLD('LEASE_MISSING');
+    const owned=ownedGuards.get(receipt);if(!owned)return HOLD('LEASE_ALREADY_LOST');
+    ownedGuards.delete(receipt);
     try { await shared.release(receipt.leaseId); return { released: true }; }
     catch { return HOLD('LEASE_ALREADY_LOST'); }
+    finally{if(activeGuards.get(owned.personaUid)===owned.owner)activeGuards.delete(owned.personaUid);}
   }
 
   async function listAvailablePersonas() {
@@ -167,14 +177,23 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     if(typeof readIsolatedTab!=='function')return {ok:false,code:'OBSERVER_UNAVAILABLE'};
     const leased=await acquireConflictGuard(personaUid);
     if(!leased?.ready||!leased.leaseId)return {ok:false,code:leased?.code||'GUARD_UNAVAILABLE'};
+    let timer=null,stopped=false,lost=false,renewal=Promise.resolve();
+    const schedule=()=>{if(stopped||lost||typeof shared.renew!=='function')return;
+      timer=setTimeout(()=>{renewal=(async()=>{
+        try{await shared.renew(leased.leaseId);if(!(await inspectOwnedAction(leased)).ready)lost=true;}
+        catch{lost=true;}
+      })().finally(schedule);},observeRenewMs);
+    };
+    schedule();
     try {
       const packet=await readIsolatedTab(leased,{identityOnly:identityOnly===true,originalSlug});
+      if(lost)return {ok:false,code:'DONOR_LEASE_BUSY_OR_REVOKED'};
       if(!packet?.ok)return {ok:false,code:packet?.code||'OBSERVER_UNVERIFIED'};
       const rechecked=await inspectOwnedAction(leased);
       if(!rechecked?.ready)return {ok:false,code:rechecked?.code||'GUARD_CHANGED'};
       return packet;
     }catch{return {ok:false,code:'OBSERVER_UNAVAILABLE'};}
-    finally{await releaseConflictGuard(leased);}
+    finally{stopped=true;clearTimeout(timer);await renewal;await releaseConflictGuard(leased);}
   }
 
   // Fixed public feed/statistics GETs use the SAME donor lease and isolated
