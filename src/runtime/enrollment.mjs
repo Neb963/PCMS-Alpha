@@ -586,7 +586,8 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
           if(a.route?.status!=='RELEASED')results.push(await exclusive(id,'RELEASE',()=>releaseIdle(a)));
           return;
         }
-        if(a.state==='INVENTORY_PENDING'||a.state==='VERIFIED'&&await inventoryNeeded(id)){
+        const bindingReady=typeof a.bindingId==='string'&&(!a.upgrade||a.upgrade.phase==='COMPLETE');
+        if(bindingReady&&(a.state==='INVENTORY_PENDING'||a.state==='VERIFIED'&&await inventoryNeeded(id))){
           results.push(await exclusive(id,'CONFIRM:auto',()=>confirm(id,{silent:true,automatic:true})));
         }else if(a.state==='PREPARING'){
           if(typeof a.bindingId==='string'&&(a.setup?.phase!=='HELD'||TRANSIENT.has(a.setup?.code)))

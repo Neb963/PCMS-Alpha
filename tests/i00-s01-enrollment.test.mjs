@@ -194,6 +194,22 @@ test('Issue60: verified accounts with missing initial inventory retry guarded id
  h.faults.host=false;await h.flow.upkeep();assert.equal(h.synced.length,baseline+1);
  assert.equal((await h.accounts.get(a.accountId)).account.boundPrincipal,fp('a'));
 });
+test('Issue60: missing inventory cannot preempt a legacy account route upgrade or its human-use fence',async()=>{
+ for(const busy of [false,true]){
+  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')],inventoryNeeded:async()=>true});
+  const {persona,account}=await legacyAccount(h,'10.124.0.1',fp('a'));
+  if(busy)h.tabs.add(persona.contextId);
+  const before=structuredClone(stored(h,account.accountId));
+  await h.flow.upkeep();
+  const after=stored(h,account.accountId);
+  if(busy)assert.deepEqual(after,before,'human-used legacy account waits for explicit upgrade; unknown inventory grants no control');
+  else{
+   assert.equal(typeof after.bindingId,'string','protected binding is a prerequisite to automatic inventory confirmation');
+   assert.equal(after.upgrade.phase,'COMPLETE');assert.equal(after.personaUid,account.personaUid);assert.equal(after.boundPrincipal,fp('a'));
+   assert.equal(h.effects.filter(x=>x.kind==='TAG').length,1);
+  }
+ }
+});
 test('Issue60: known helper failure durably revokes current route admission; healthy same-route recovery retains identity/history',async()=>{
  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),a=await enroll(h);
  h.sessions.set(a.personaUid,fp('a'));assert.equal((await h.flow.confirm(a.accountId)).ok,true);
