@@ -1267,7 +1267,7 @@ def main():
                 assert faithful['inventoryTabs']>=4 and faithful['sourceWriters']==1,faithful
                 print('B V015_TRUE_DESKTOP_PRIMARY_WORKSPACES_AND_REAL_HANDLERS=PASS',flush=True)
                 release_version=execute(after,"return {manifest:browser.runtime.getManifest().version,ui:document.documentElement.dataset.pcmsUiVersion,badge:document.querySelector('.v015-top-status')?.textContent};")
-                assert release_version.get('manifest')=='1.2.15',release_version
+                assert release_version.get('manifest')=='1.2.16',release_version
                 assert release_version.get('ui')=='0.1.5' and '0.1.5' in release_version.get('badge',''),release_version
                 print('B V015_REAL_FIREFOX_UPDATE_VERSION_AND_VISIBLE_UI_MARKER=PASS',flush=True)
                 # V016 acceptance: the PRECISE accepted prototype structure is
@@ -1291,7 +1291,7 @@ def main():
                      canonicalNative:!!document.getElementById('pcms-refresher-rows')&&
                        !!document.getElementById('pcms-release-approve')&&
                        !!document.getElementById('pcms-restore-apply')};""")
-                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.15',actual
+                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.16',actual
                 assert actual['routes']==6 and actual['visible'] and actual['nativeHidden'],actual
                 assert actual['sidebar'] and actual['primary']=='overview' and actual['styles'] and actual['canonicalNative'],actual
                 assert actual['badge']=='PCMS '+actual['manifest'],actual

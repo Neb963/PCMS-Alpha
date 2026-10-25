@@ -133,7 +133,7 @@ def run(browser,archive,folder):
         assert b.call('POST',f'/session/{s}/moz/addon/install',{'path':str(archive),'temporary':False},timeout=45)==b.ID
         b.close(s);s=b.open_session(browser,profile);assert not pids.intersection(b.owned_firefox_pids(profile))
         b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s);install_native(s,oracle)
-        assert b.execute(s,'return browser.runtime.getManifest().version')=='1.2.15'
+        assert b.execute(s,'return browser.runtime.getManifest().version')=='1.2.16'
         assert len(inspect(s)['accounts'])==3
         a.manage(s,ids[0]);a.wait(s,"!sh.querySelector('.account-state')?.textContent.includes('helper')",'ISSUE60_STALE_SETUP_MESSAGE_CLEARED')
         oracle.helper_down=True;command(s,ids[0],'VERIFY_ROUTE');wait_record(s,ids[0],route='HELD')

@@ -138,11 +138,21 @@ def run(browser,archive,folder):
         # Abort a real IDB write after the first bounded chunk, then recover
         # the exact saved input/batch across another complete process restart.
         oracle(s,'await window.__j02.addUnknownAccount();return true;')
+        previews=sum(c['type']=='PREVIEW_CREATE_BATCH' for c in oracle(s)['commands'])
+        oracle(s,'return window.__j02.holdAccountReads();')
         click(s,'[data-action=create]')
         partial='\n'.join('j02-restart-input-'+str(i) for i in range(40))
         b.execute(s,"const e=document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[aria-label=\"Generator names\"]');e.value="+json.dumps(partial)+";e.dispatchEvent(new Event('input',{bubbles:true}));")
-        click_text(s,'Preview assignments');wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('40 need attention')",'J02_AUTOMATIC_INITIAL_UNKNOWN_HOLD')
-        assert b.execute(s,"return [...document.getElementById('pcms-faithful-host').shadowRoot.querySelectorAll('button')].some(b=>b.textContent==='Complete inventory · New account')")
+        click_text(s,'Preview assignments')
+        deadline=time.monotonic()+15;reply=None
+        while time.monotonic()<deadline:
+            reply=oracle(s)
+            if sum(c['type']=='PREVIEW_CREATE_BATCH' for c in reply['commands'])>previews and reply['pendingAccountReads']>0:break
+            time.sleep(.1)
+        else:raise AssertionError(('J02_DELAYED_ACCOUNT_READ_NOT_EXERCISED',reply))
+        assert b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;return !sh.querySelector('[role=dialog]')?.textContent.includes('40 need attention')&&[...sh.querySelectorAll('button')].some(b=>b.textContent==='Preview assignments'&&b.disabled)"),'J02_PREVIEW_MUST_WAIT_FOR_ITS_CONTEXTUAL_ACCOUNT_ACTION'
+        oracle(s,'return window.__j02.releaseAccountReads();')
+        wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('40 need attention')&&[...sh.querySelectorAll('button')].some(b=>b.textContent==='Complete inventory · New account'&&!b.disabled)",'J02_AUTOMATIC_INITIAL_UNKNOWN_HOLD_AND_ACCOUNT_ACTION_ATOMIC')
         change(s,'[aria-label="Creation account"]','account_j02_000')
         click_text(s,'Preview assignments');wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('40 new')",'J02_PINNED_ACCOUNT_INDEPENDENT_PREVIEW')
         oracle(s,'await window.__j02.interruptInput();await window.__j02.delayInput();return true;')
