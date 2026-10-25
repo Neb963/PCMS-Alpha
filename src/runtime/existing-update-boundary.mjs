@@ -372,7 +372,7 @@ export function createExistingBoundary(api,{
         result={ok:true,revision:earlier.record.revision};
       }else{
         result=await stage.pin({slug:p.slug,candidate,
-          previous:previousForWrite,source:git,
+          previous:opened.source,writePrevious:previousForWrite,source:git,
           eligibility:{ok:true,origin:'EXISTING_UPDATE',account:f.account,item:{
             remoteId:r.remotePublicId}},nonce:r.nonce});
       }

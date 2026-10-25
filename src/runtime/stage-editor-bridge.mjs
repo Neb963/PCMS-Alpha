@@ -1,5 +1,6 @@
 // Fixed source writer under PersonaMonkey's existing conflict lease. Source
 // authority comes from the current canonical dispatch journal, never a tab ID.
+import {standingS06} from './s06-standing-authority.mjs';
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {exactSource} from './staging-core.mjs';
 import {choosePrivateStageAdapter} from './ready-native-source.mjs';
@@ -11,21 +12,29 @@ import {perchanceExistingMain} from './perchance-existing.mjs';
 import {renderPcmsEditorStrip} from './editor-strip.mjs';
 const notInvoked=new WeakMap();
 export const stageWasNotInvoked=(reply,record)=>!!reply&&JSON.stringify(notInvoked.get(reply))===JSON.stringify([record.slug,record.revision,record.nonce,record.candidate?.fingerprint,record.previous?.fingerprint]);
-export function createStageEditorBridge({browser,getState,open=openCanonicalDatabase,wait=ms=>new Promise(r=>setTimeout(r,ms))}){
- let connection;const db=()=>connection||=open(),sentinel=createRestoreSentinel(browser.storage.local);
+export function createStageEditorBridge({browser,getState,open=openCanonicalDatabase,effectGate=()=>standingS06?.gate('development')===true,policyGeneration=()=>standingS06?.policyGeneration(),wait=ms=>new Promise(r=>setTimeout(r,ms))}){
+ let connection;const db=()=>connection||=open().catch(e=>{connection=null;throw e;}),sentinel=createRestoreSentinel(browser.storage.local);
  const read=async key=>{const d=await db();return new Promise((resolve,reject)=>{const q=d.transaction('meta','readonly').objectStore('meta').get(key);q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(Error('STAGE_READ_FAILED'))})};
  return async function stageEditor({personaUid,cookieStoreId,routeId},request){
   const fail=code=>({ok:false,code}),{slug,nonce}=request||{};
   if(!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug||'')||!/^[a-f0-9]{32}$/.test(nonce||'')||!Number.isSafeInteger(request.stageRevision))return fail('INVALID_STAGING_REQUEST');
+  // Seal the exact request tuple before the first fallible browser/DB read.
+  // The caller independently matches this realm-local receipt to its still
+  // possible canonical revision before returning the candidate to PINNED.
+  const [previous,candidate]=await Promise.all([exactSource(request.previousFiles),exactSource(request.candidate)]);
+  if(!previous.ok||!candidate.ok||previous.fingerprint!==request.previousFingerprint)return fail('STAGE_SOURCE_CHANGED');
+  const retry=code=>{const reply=fail(code);notInvoked.set(reply,[slug,request.stageRevision,nonce,candidate.fingerprint,previous.fingerprint]);return reply;};
+  let invoked=false;
+  try{
   const pinned=(await read('stage:'+slug))?.record;
-  if(!pinned)return fail('STAGE_NOT_FOUND');
-  const retry=code=>{const reply=fail(code);notInvoked.set(reply,[pinned.slug,pinned.revision,pinned.nonce,pinned.candidate?.fingerprint,pinned.previous?.fingerprint]);return reply;};
-  const valid=async()=>{const [st,state,hold]=await Promise.all([read('stage:'+slug),getState(),sentinel.inspect()]),s=st?.record,p=state.profiles?.[cookieStoreId];
+  if(!pinned)return retry('STAGE_NOT_FOUND');
+  const generation=policyGeneration();
+  const valid=async()=>{const [st,state,hold,rr]=await Promise.all([read('stage:'+slug),getState(),sentinel.inspect(),read('s05-ready:'+slug)]),s=st?.record,p=state.profiles?.[cookieStoreId],ready=rr?.record;
+   if(effectGate()!==true||policyGeneration()!==generation||s?.readyIdentifier&&(!ready?.active||ready.desired||ready.hold||ready.active.identifier!==s.readyIdentifier||ready.active.inputFingerprint!==s.readyInputFingerprint))return false;
    return !hold.held&&s?.state==='DISPATCH_POSSIBLE'&&s.revision===request.stageRevision&&s.nonce===nonce&&s.personaUid===personaUid&&s.candidate?.fingerprint===pinned.candidate.fingerprint&&s.previous?.fingerprint===request.previousFingerprint&&p?.personaUid===personaUid&&p.routeId===routeId&&!['direct','block'].includes(routeId)&&!!state.routes?.[routeId]&&state.routes[routeId].enabled!==false;
   };
   if(!await valid())return retry('STAGE_CONTEXT_CHANGED');
-  const [previous,candidate]=await Promise.all([exactSource(request.previousFiles),exactSource(request.candidate)]);
-  if(!previous.ok||!candidate.ok||previous.fingerprint!==pinned.previous.fingerprint||candidate.fingerprint!==pinned.candidate.fingerprint)return retry('STAGE_SOURCE_CHANGED');
+  if(previous.fingerprint!==pinned.previous.fingerprint||candidate.fingerprint!==pinned.candidate.fingerprint)return retry('STAGE_SOURCE_CHANGED');
   const url='https://perchance.org/'+slug+'#edit',tagKey='pcmsI09Owned';
   const matches=async()=> (await browser.tabs.query({})).filter(t=>{try{const u=new URL(t.url);return u.origin==='https://perchance.org'&&u.pathname==='/'+slug&&(t.cookieStoreId===cookieStoreId||u.hash.startsWith('#edit'))}catch{return false}});
   const owned=tag=>tag?.slug===slug&&tag.nonce===nonce&&tag.personaUid===personaUid&&tag.cookieStoreId===cookieStoreId&&['PCMS_I09','PCMS_I13'].includes(tag.createdBy)&&tag.humanIntent!==true;
@@ -55,10 +64,14 @@ export function createStageEditorBridge({browser,getState,open=openCanonicalData
   const job=(await read('ai-job:'+slug))?.job;
   const native=await inject(perchanceAiNative,[{slug,nonce,action:'OBSERVE'}]);
   if(native?.ok){
-   if(native.busy!==false||native.editorClean!==true||native.sourceSaved!==true||native.hasQueue!==false||native.inputOccupied!==false||native.attachmentsPending!==false||native.sessionDigest!==(job?.native?.sessionDigest||null))return retry('STAGE_NATIVE_NOT_IDLE');
+   if(native.busy!==false||native.editorClean!==true||native.sourceSaved!==true||native.hasQueue!==false||native.inputOccupied!==false||native.attachmentsPending!==false||job?.native&&native.sessionDigest!==job.native.sessionDigest)return retry('STAGE_NATIVE_NOT_IDLE');
   }else{
    const absent=await inject(perchanceNoNativeProbe,[slug]);
    if(job?.native||!absent?.ok||absent.noNativeSession!==true)return retry('STAGE_NATIVE_NOT_IDLE');
+  }
+  if(native?.ok){
+   const settled=await inject(perchanceAiNative,[{slug,nonce,action:'OBSERVE'}]);
+   if(!settled?.ok||settled.busy!==false||settled.editorClean!==true||settled.sourceSaved!==true||settled.hasQueue!==false||settled.inputOccupied!==false||settled.attachmentsPending!==false||settled.sessionDigest!==native.sessionDigest)return retry('STAGE_NATIVE_CHANGED');
   }
   if(!await context())return retry('STAGE_CONTEXT_CHANGED');
   await inject(renderPcmsEditorStrip,[{slug,nonce,accountId:'Verified account',personaUid}],'ISOLATED');
@@ -67,11 +80,13 @@ export function createStageEditorBridge({browser,getState,open=openCanonicalData
   if(!await context())return retry('STAGE_CONTEXT_CHANGED');
   // From this point every error is uncertain; no no-invocation receipt can
   // be issued after the sole source adapter is called.
+  invoked=true;
   const result=selection.adapter==='PRIVATE_EMPTY_I09'?
    await inject(perchanceStageMain,[{slug,files:request.candidate}]):
    await inject(perchanceExistingMain,[{action:'STAGE',slug,nonce,previousFiles:request.previousFiles,targetFiles:request.candidate}]);
   if(!await context())return fail('STAGING_TAB_OR_ROUTE_CHANGED');
   if(!result?.ok)return fail(result?.code||'EDITOR_SAVE_UNKNOWN');
   return {ok:true,code:'SAVE_ACK_ONLY',tab:{tabId:tab.id,cookieStoreId,ownershipNonce:nonce,location:url}};
+  }catch{return invoked?fail('EDITOR_SAVE_UNKNOWN'):retry('STAGING_PREFLIGHT_UNAVAILABLE');}
  };
 }

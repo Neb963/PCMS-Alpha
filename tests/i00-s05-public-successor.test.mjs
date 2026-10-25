@@ -119,7 +119,8 @@ test('S05 public update supersedes saved unlisted A with READY B without re-unli
  assert.equal(old.state,'UNLIST_CONFIRMED');
  const stage=f.db.read('meta','stage:'+slug).record;
  assert.equal(stage.revision,5);
- assert.equal(stage.previous.fingerprint,f.A.fingerprint);
+ assert.equal(stage.previous.fingerprint,f.P.fingerprint,'release previous-good remains original public P');
+ assert.equal(stage.writePrevious.fingerprint,f.A.fingerprint,'native source replacement uses saved unapproved F');
  assert.equal(stage.candidate.fingerprint,f.B.fingerprint);
  assert.equal((await f.ready.get(slug)).record.active.identifier,f.b.identifier);
  assert.equal(f.db.read('meta','stage-history:'+slug+':4').record.candidate.fingerprint,

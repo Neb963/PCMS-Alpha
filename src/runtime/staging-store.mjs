@@ -165,9 +165,9 @@ export function createStagingStore(db){
       c.continue();
     };
   });
-  function pin({slug:slugName,candidate,previous,source,eligibility,nonce}){
+  function pin({slug:slugName,candidate,previous,writePrevious=previous,source,eligibility,nonce}){
     if(!slug(slugName)||!candidate?.ok||!previous?.ok||
-       !source?.ok||source.ready!==true||!source.sourceBytes||
+       !writePrevious?.ok||!source?.ok||source.ready!==true||!source.sourceBytes||
        !eligibility?.ok||!/^[-_A-Za-z0-9]{16,100}$/.test(nonce||''))
       return Promise.resolve(fail('PIN_EVIDENCE_UNVERIFIED'));
     return txn(db,'readwrite',(tx,done)=>{
@@ -204,7 +204,7 @@ export function createStagingStore(db){
                 remotePublicId:eligibility.item.remoteId,
                 sourceFolder:source.folder,sourceHead:source.head,
                 gitFingerprint:source.fingerprint,testingSha:source.testingSha,
-                candidate,previous,nonce,parentStageRevision:old?.revision||null,tab:null,reason:null,sourceOrigin:eligibility.origin==='ADOPTED_PRIVATE'?'ADOPTED_PRIVATE':eligibility.origin==='EXISTING_UPDATE'?'EXISTING_UPDATE':(['S04_CONFIRMED_CREATED','LEGACY_CONFIRMED_PRIVATE_SUPPLY'].includes(eligibility.origin)||eligibility.link?.source==='S04_INDEPENDENT_NOT_READY_ASSOCIATION')?'PRIVATE_NEW':null,
+                candidate,previous,writePrevious,nonce,parentStageRevision:old?.revision||null,tab:null,reason:null,sourceOrigin:eligibility.origin==='ADOPTED_PRIVATE'?'ADOPTED_PRIVATE':eligibility.origin==='EXISTING_UPDATE'?'EXISTING_UPDATE':(['S04_CONFIRMED_CREATED','LEGACY_CONFIRMED_PRIVATE_SUPPLY'].includes(eligibility.origin)||eligibility.link?.source==='S04_INDEPENDENT_NOT_READY_ASSOCIATION')?'PRIVATE_NEW':null,
                 ...(source.gitReadyIdentifier?{
                   readyIdentifier:source.gitReadyIdentifier,
                   readyInputFingerprint:source.gitReadyInputFingerprint}: {})};
@@ -234,7 +234,7 @@ export function createStagingStore(db){
               }
               m.get('ai-job:'+slugName).onsuccess=ar=>{
                 m.get('existing-update:'+slugName).onsuccess=er=>{
-                  const permitted=evaluateStageSuccessor({prior:old,previous,
+                  const permitted=evaluateStageSuccessor({prior:old,previous:writePrevious,
                     job:ar.target.result?.job,existing:er.target.result?.record,
                     release,ready,source:src});
                   if(!permitted.ok){done(permitted);return;}
