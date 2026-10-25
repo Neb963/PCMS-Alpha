@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 import {updateWindowAvailable} from './update-window.mjs';
 import {createLocalSourceReview} from './source-review.mjs';
 import {captureExceptionalIdle,exceptionalIdleEvidence} from './exception-idle.mjs';
@@ -522,6 +523,8 @@ export function createReleaseBoundary(api,{
       });
     });
   }
+    run=checkpointed(api,run,{allowDuringRestore:message=>["GET","LIST","LIST_REVIEW","LIST_SOURCE_HISTORY","GET_LOCAL_CHUNK","GET_LOCAL_REVIEW","GET_CHANGE","GET_HUMAN","GET_EXCEPTION","EXCEPTION_CONTEXT","HUMAN_CONTEXT","GET_REVIEW_CHUNK"].includes(message?.type)});
+  runTrusted=checkpointed(api,runTrusted,{allowDuringRestore:message=>["GET","LIST","LIST_REVIEW","LIST_SOURCE_HISTORY","GET_LOCAL_CHUNK","GET_LOCAL_REVIEW","GET_CHANGE","GET_HUMAN","GET_EXCEPTION","EXCEPTION_CONTEXT","HUMAN_CONTEXT","GET_REVIEW_CHUNK"].includes(message?.type)});
   return Object.freeze({register,run,runTrusted:async msg=>{
     if(!['GET','PREVIEW','APPROVE','DISPATCH','RECONCILE'].includes(msg?.type))return fail('COMMAND_NOT_ALLOWED');
     try{return await runTrusted(msg)}catch{return fail('RELEASE_CANONICAL_HOLD')}

@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 import {catalogWatcher} from './catalog-watch.mjs';
 // R4: exact-scope identity review after a complete pinned main observation.
 // A decision is not an owner, rename, publication, or effect receipt.
@@ -179,6 +180,8 @@ export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=n
    });
   });
  }
- return Object.freeze({register,dispatch,tick});
+   dispatch=checkpointed(api,dispatch,{allowDuringRestore:message=>["LIST","GET_RENAME_ATTEMPT"].includes(message?.type)});
+  tick=checkpointed(api,tick);
+  return Object.freeze({register,dispatch,tick});
 }
 if(typeof browser!=='undefined')createFolderIdentityBoundary(browser).register();

@@ -23,7 +23,15 @@ export function createManualEditorBridge({browser,getState,open=openCanonicalDat
   const {personaUid,cookieStoreId,routeId}=context,fail=code=>({ok:false,code});
   if(!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug||'')||!/^[a-f0-9]{32}$/.test(nonce||''))return fail('MANUAL_EDITOR_INVALID');
   async function valid(){const [st,ai,state,hold]=await Promise.all([read('stage:'+slug),read('ai-job:'+slug),getState(),sentinel.inspect()]),s=st?.record,j=ai?.job,p=state.profiles?.[cookieStoreId];
-   if(hold.held||!s||!j||j.native||j.stageRevision!==s.revision||s.state!=='SOURCE_VERIFIED'||s.nonce!==nonce||s.personaUid!==personaUid||p?.personaUid!==personaUid||p.routeId!==routeId||['direct','block'].includes(routeId)||!state.routes?.[routeId]||state.routes[routeId].enabled===false)return false;
+   if(hold.held||!s||s.state!=='SOURCE_VERIFIED'||s.nonce!==nonce||s.personaUid!==personaUid||p?.personaUid!==personaUid||p.routeId!==routeId||['direct','block'].includes(routeId)||!state.routes?.[routeId]||state.routes[routeId].enabled===false)return false;
+   if(prepare==='restored'){
+    if(j||!s.restoredParent||s.restoredParent.revision!==s.parentStageRevision||s.restoredHistorical||s.requalifiedPublicHistory)return false;
+    const [a,i,rr]=await Promise.all([read('account:'+s.accountId),read('inventory:'+slug),read('s05-ready:'+slug)]),account=a?.account,item=i?.generator,ready=rr?.record;
+    return account?.state==='VERIFIED'&&account.revision===s.accountRevision&&account.personaUid===personaUid&&account.bindingVersion===s.bindingVersion&&account.identity?.principalFingerprint===s.principalFingerprint&&account.identity.source==='GUARDED_SESSION_READBACK'&&account.identity.bindingVersion===s.bindingVersion&&
+     item?.accountId===s.accountId&&item?.ownerState==='OBSERVED_OWNER'&&item.visibility==='UNLISTED'&&typeof s.remotePublicId==='string'&&!!s.remotePublicId&&item.remoteId===s.remotePublicId&&item.personaUid===personaUid&&item.bindingVersion===s.bindingVersion&&
+     ready?.active&&!ready.desired&&!ready.hold&&ready.active.identifier===s.readyIdentifier&&ready.active.inputFingerprint===s.readyInputFingerprint;
+   }
+   if(!j||j.native||j.stageRevision!==s.revision)return false;
    if(!prepare)return true;
    const [ex,rl,change,ready]=await Promise.all([read('s06-exception:'+slug),read('release:'+slug),read('s06-change:'+slug),read('s05-ready:'+slug)]),e=ex?.record,r=rl?.release,req=change?.record,a=ready?.record;
    if(prepare==='request-changes')return !j.operatorPaused&&j.exceptionQuiescence==='NEVER_DISPATCHED_SOURCE'&&j.exceptionFrozen&&e?.state==='RECORDED'&&e.jobRevision===j.revision&&e.stageRevision===s.revision&&e.sourceFingerprint===j.sourceFingerprint&&
@@ -41,7 +49,7 @@ export function createManualEditorBridge({browser,getState,open=openCanonicalDat
   if(tag?.slug!==slug||tag.nonce!==nonce||tag.personaUid!==personaUid||tag.cookieStoreId!==cookieStoreId||owned?.humanIntent===true)return fail('MANUAL_EDITOR_NOT_OWNED');
   const inject=async(func,args)=>{const r=await browser.scripting.executeScript({target:{tabId:tab.id,frameIds:[0]},world:'MAIN',func,args});return r?.length===1&&r[0].frameId===0&&!r[0].error?r[0].result:null};
   const editor=await inject(perchanceEditorProbe,[slug]),native=await inject(perchanceNoNativeProbe,[slug]);
-  if(!editor?.ok||!native?.ok||native.noNativeSession!==true)return fail(native?.code||editor?.code||'MANUAL_EDITOR_UNVERIFIED');
+  if(!editor?.ok||editor.clean!==true||!native?.ok||native.noNativeSession!==true)return fail(native?.code||editor?.code||'MANUAL_EDITOR_UNVERIFIED');
   const after=await browser.tabs.get(tab.id),again=await matches();if(!await valid()||after.url!==url||after.cookieStoreId!==cookieStoreId||again.length!==1||again[0].id!==tab.id)return fail('MANUAL_EDITOR_CONTEXT_CHANGED');
   if(prepare&&!owned){await browser.sessions.setTabValue(tab.id,'pcmsI09Owned',{slug,nonce,personaUid,cookieStoreId,createdBy:'PCMS_I09',humanIntent:false});
    await browser.scripting.executeScript({target:{tabId:tab.id,frameIds:[0]},world:'ISOLATED',func:renderPcmsEditorStrip,args:[{slug,nonce,accountId:'Verified account',personaUid}]});}

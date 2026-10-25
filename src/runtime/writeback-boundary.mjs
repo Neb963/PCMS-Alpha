@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 // I11 privileged Git writeback command admission. Git only, never Perchance
 // publication. Synthetic tests can inject guard/transport/effect gate; packaged
 // capability is OFF until independently approved credential/provider activation.
@@ -423,6 +424,9 @@ export function createWritebackBoundary(api,{
       });
     });
   }
+    run=checkpointed(api,run,{allowDuringRestore:message=>["GET_SETTINGS","LIST","GET"].includes(message?.type)});
+  runTrusted=checkpointed(api,runTrusted,{allowDuringRestore:message=>["GET_SETTINGS","LIST","GET"].includes(message?.type)});
+  autoTick=checkpointed(api,autoTick);
   return Object.freeze({register,run,autoTick,runTrusted});
 }
 if(typeof browser!=='undefined')createWritebackBoundary(browser,{

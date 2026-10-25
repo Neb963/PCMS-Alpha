@@ -8,7 +8,7 @@ const seen=(s,identity)=>'s05-ready-seen:'+s+':'+identity;
 const view=r=>({slug:r.slug,repositoryId:r.repositoryId,revision:r.revision,
  active:r.active&&{identifier:r.active.identifier,state:r.active.state,
   inputFingerprint:r.active.inputFingerprint},
- desired:r.desired&&{identifier:r.desired.identifier,
+ restoredHistorical:r.restoredHistorical===true,desired:r.desired&&{identifier:r.desired.identifier,
   inputFingerprint:r.desired.inputFingerprint},hold:r.hold});
 function tx(db,mode,fn){
  return new Promise((resolve,reject)=>{

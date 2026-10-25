@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 import {updateWindowAvailable,operatorUpdateWindow} from './update-window.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I13 existing-generator guarded orchestration. No credentials in canonical
@@ -289,7 +290,7 @@ export function createExistingBoundary(api,{
       const remote=await observe(g,r);
       if(!remote.ok||remote.visibility!=='UNLISTED'||
          remote.source.fingerprint!==(r.state==='STAGE_CONFIRMED'?
-           r.stagedFingerprint:r.previousFingerprint))
+           r.stagedFingerprint:(r.stagePreviousFingerprint||r.previousFingerprint)))
         return fail('EXISTING_PREVIOUS_SOURCE_CHANGED');
       const queued=await createReadyStore(database).get(p.slug);
       const readyPin=queued.ok?
@@ -303,21 +304,26 @@ export function createExistingBoundary(api,{
       const candidate=readyPin?readyPin.candidate:
         await exactSource(git.sourceBytes);
       if(!candidate.ok)return candidate;
-      const replacingSavedF=r.state==='STAGE_CONFIRMED';
+      const replacingSavedF=r.state==='STAGE_CONFIRMED',retainingSavedF=r.state==='UNLIST_CONFIRMED'&&!!r.stagePreviousFingerprint;
       const previousForWrite=replacingSavedF?
-        await exactSource(r.stageSource?.blobs):opened.source;
+        await exactSource(r.stageSource?.blobs):retainingSavedF?await exactSource(r.stagePreviousSource?.blobs):opened.source;
       if(!previousForWrite.ok||
-         (replacingSavedF&&previousForWrite.fingerprint!==r.stagedFingerprint))
+         (replacingSavedF&&previousForWrite.fingerprint!==r.stagedFingerprint)||
+         (retainingSavedF&&previousForWrite.fingerprint!==r.stagePreviousFingerprint))
         return fail('S05_SAVED_F_DRIFT_OR_MISSING');
       if(queued.ok&&queued.record.desired){
         // The I13 source writer has already unlisted and independently
         // re-read authenticated, encrypted-recoverable previous P.
-        const editor=await g.inspectStageEditor?.(r.personaUid,p.slug,r.nonce);
-        if(editor?.ok!==true||editor.clean!==true||
-           editor.source!=='GUARDED_EDITOR_CLEAN')
-          return fail('S05_UPDATE_EDITOR_NOT_CLEAN');
         const previousStage=await stageFactory(database).getFull(p.slug);
-        if(previousStage.ok&&previousStage.record.state!=='SOURCE_VERIFIED')
+        const restoredUnsent=previousStage.ok&&previousStage.record.restoredParent&&
+          previousStage.record.restoredHistorical===false&&previousStage.record.state==='PINNED'&&
+          previousStage.record.nonce===r.nonce&&r.state==='UNLIST_CONFIRMED';
+        const editor=restoredUnsent?await g.inspectSourceEditorIdle?.(r.personaUid,p.slug):
+          await g.inspectStageEditor?.(r.personaUid,p.slug,r.nonce);
+        if(editor?.ok!==true||editor.clean!==true||
+           editor.source!==(restoredUnsent?'GUARDED_NO_LOCAL_EDITOR':'GUARDED_EDITOR_CLEAN'))
+          return fail('S05_UPDATE_EDITOR_NOT_CLEAN');
+        if(previousStage.ok&&previousStage.record.state!=='SOURCE_VERIFIED'&&!restoredUnsent)
           return fail('S05_PREVIOUS_STAGE_NEEDS_NATIVE_HANDOFF');
         const previousJob=await new Promise((resolve,reject)=>{
           const t=database.transaction('meta','readonly');
@@ -325,6 +331,7 @@ export function createExistingBoundary(api,{
           req.onsuccess=()=>resolve(req.result?.job||null);
           req.onerror=()=>reject(Error('AI_JOB_READ_FAILED'));
         });
+        if(restoredUnsent&&previousJob)return fail('RESTORED_NATIVE_RECONCILIATION_REQUIRED');
         // An old native session is admissible only after its actual idle
         // and saved-F proof matches the provider. evaluateStageSuccessor
         // performs those checks, not a mere absence test.
@@ -378,7 +385,7 @@ export function createExistingBoundary(api,{
       }
       if(!result.ok)return result;
       const pinned=await store.pinStage(p.slug,r.revision,{candidate,source:git,
-        ...(replacingSavedF?{previousForWrite}:{})});
+        ...(replacingSavedF||retainingSavedF?{previousForWrite}:{})});
       return pinned.ok?{...pinned,stageRevision:result.revision,
         stage:'PINNED',sourceFingerprint:candidate.fingerprint}:pinned;
     }
@@ -494,6 +501,8 @@ export function createExistingBoundary(api,{
       });
     });
   }
+    run=checkpointed(api,run,{allowDuringRestore:message=>["GET"].includes(message?.type)});
+  runTrusted=checkpointed(api,runTrusted,{allowDuringRestore:message=>["GET"].includes(message?.type)});
   return Object.freeze({run,runTrusted,register});
 }
 if(typeof browser!=='undefined')createExistingBoundary(browser,{

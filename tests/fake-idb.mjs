@@ -19,7 +19,7 @@ export function fakeDatabase(){
         if(requests||closed)return;
         closed=true;
         if(abortNext&&pending.size){abortNext=false;release();tx.onabort?.();return;}
-        for(const {s,k,v} of pending.values())store(s).set(k,structuredClone(v));
+        for(const {s,k,v,deleted} of pending.values()){if(deleted)store(s).delete(k);else store(s).set(k,structuredClone(v));}
         if(pending.size)commits.push({mode,keys:[...pending.keys()]});
         release();
         tx.oncomplete?.();
@@ -27,7 +27,7 @@ export function fakeDatabase(){
     };
     const view=s=>{
       const merged=new Map(store(s));
-      for(const p of pending.values())if(p.s===s)merged.set(p.k,p.v);
+      for(const p of pending.values())if(p.s===s){if(p.deleted)merged.delete(p.k);else merged.set(p.k,p.v);}
       return merged;
     };
     const stage=(s,k,value)=>{
@@ -42,6 +42,7 @@ export function fakeDatabase(){
         return req;
       },
       put(value){stage(s,value.key??value.id??value.operationId,value);},
+      delete(key){if(mode==='readonly')throw Error('readonly');pending.set(s+':'+key,{s,k:key,deleted:true});},
       // Match the real canonical operations keyPath as well as meta.key.
       add(value){stage(s,typeof value?.key==='string'?value.key:
         s==='operations'&&typeof value?.operationId==='string'?value.operationId:

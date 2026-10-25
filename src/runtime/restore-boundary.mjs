@@ -1,3 +1,6 @@
+import {restoredTargetBindings} from './restore-identities.mjs';
+import {donorPreparationReceipt,observeDonorPreparation,checkpointCanonicalBaseline,donorBaselineReceipt,observeDonorBaseline,restoredAutomationHistory,canonicalWithAutomationHistory} from './restore-observation.mjs';
+import {collectPortableLocal,splitPortableLocal,preparePortableLocalRestore} from './portable-local.mjs';
 // I16: one guarded local restore command. A resume NEVER redispatches a step.
 // No provider/API calls or fresh-controller activation. Source/checkpoint secrets
 // exist only in the caller's live extension port and this invocation.
@@ -15,6 +18,8 @@ import {prepareRestoredCanonical} from './restore-sanitize.mjs';
 import {applyCanonicalSnapshot} from './restore-idb.mjs';
 import {getPcmsRestoreDonor} from './restore-donor.mjs';
 import {BLOCK_ROUTE_ID} from '../lib/constants.js';
+import {settlePcmsWork} from './work-checkpoint.mjs';
+import {autoBackup} from './backup-auto-boundary.mjs';
 import {reconcileRestore} from './restore-reconcile.mjs';
 export const RESTORE_PORT='pcms-i16-restore';
 export const REACTIVATE_CONSENT='THE PREVIOUS PCMS INSTALLATION IS STOPPED';
@@ -96,7 +101,7 @@ function cookieMatch(expected,actual){
   return expected.every(item=>got.has(safe(item)));
 }
 export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
-  database=openCanonicalDatabase}={}){
+  database=openCanonicalDatabase,backupRunner=autoBackup?.runner,settle=settlePcmsWork}={}){
   const gate=createRestoreGate(api.storage.local);
   let running=null,registered=false;
   // Static PCMS listeners can become ready before PersonaMonkey's guarded
@@ -124,22 +129,51 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
       typeof recovery?.portableCheckpointScope==='string'?
       {stageScope:recovery.portableStageScope,
         checkpointScope:recovery.portableCheckpointScope}:null;
-    return {ok:true,...result,portableScopes,
+    return {ok:true,...result,portableScopes,preparation:held?.status==='PREPARING'?{
+      epoch:held.epoch,revision:held.revision,stageScope:held.stageScope}:null,
       providerEffects:'OFF',remoteActivation:'OFF'};
   }
   // Shared durable I16 stage engine for both authenticated v1 and native v2.
   // Possible donor/cookie/canonical effects are never automatically replayed.
   async function applyGuardedGroups({db,donor,baseline,intent,req,payload,
-    incomingPcms,mode,fresh=false,accountChoices={},v2=false}){
+    incomingPcms,mode,fresh=false,accountChoices={},v2=false,incomingLocal=null,continuing=false}){
         let mappings=null,preparedDonor=null,remaps=null,preparedCanonical=null;
         const session={epoch:intent.epoch,revision:intent.revision};
+        const recovered=intent.donorPreparation;
+        if(recovered?.status==='COMMIT_POSSIBLE'){
+          assert(await observeDonorPreparation(recovered,await donor.snapshot()),'RESTORE_DONOR_READBACK_PENDING');
+          mappings=recovered.mappings;remaps=uidMap(recovered.sourcePersonas);
+          const observed=await donor.snapshot();
+          preparedDonor={sourcePersonas:recovered.sourcePersonas,scriptMap:recovered.scriptMap,
+            workflowMap:recovered.workflowMap,candidate:observed.state};
+        }
         async function step(group,operation,dispatch,readback){
           const fingerprint=await digest(JSON.stringify(operation));
           const engine=createRestoreStageEngine(gate,{
             dispatch:async()=>{await dispatch();},
             readback:async()=>readback(fingerprint)
           });
-          const outcome=await engine.execute({epoch:session.epoch,revision:session.revision,
+          let saved=await gate.read(),outcome;
+          assert(saved?.epoch===session.epoch,'RESTORE_STALE_GUARD');
+          session.revision=saved.revision;
+          const previous=saved.groups[group];
+          if(previous){
+            assert(continuing&&saved.protocol===2&&previous.fingerprint===fingerprint,'RESTORE_RECOVERY_FINGERPRINT_MISMATCH');
+            if(previous.status==='OBSERVED'){
+              const proof=await readback(fingerprint);
+              assert(proof?.source==='INDEPENDENT_READBACK'&&proof.digest===fingerprint,'RESTORE_OBSERVED_GROUP_CHANGED');
+              return saved;
+            }
+            if(['DISPATCH_POSSIBLE','HELD_UNCERTAIN'].includes(previous.status)){
+              // A donor group can be interrupted during container creation or
+              // pure preparation. Its separate COMMIT_POSSIBLE WAL decides
+              // whether any donor commit may still be issued.
+              if(group==='donor-personas'&&saved.donorPreparation?.status!=='COMMIT_POSSIBLE')await dispatch();
+              saved=await gate.read();
+              outcome=await engine.reconcile({epoch:session.epoch,revision:saved.revision,group,step:group,fingerprint});
+            }else outcome=await engine.execute({epoch:session.epoch,revision:session.revision,
+              group,step:group,fingerprint,continuePrepared:true});
+          }else outcome=await engine.execute({epoch:session.epoch,revision:session.revision,
             group,step:group,fingerprint});
           session.revision=outcome.revision;
           assert(outcome.groups[group]?.status==='OBSERVED',
@@ -151,25 +185,47 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           let containers=await donor.containers();
           for(const [i,p] of (payload.personas||[]).entries()){
             if(req[p.key]!=='__create__')continue;
-            const name=createKey(intent.epoch,i);
-            assert(containers.every(c=>c.name!==name),'RESTORE_CONTAINER_ALREADY_EXISTS');
-            const made=await donor.createContainer({name,color:p.color||'blue',
-              icon:p.icon||'fingerprint'});
+            const name=createKey(intent.epoch,i),prior=await gate.read();
+            const matches=containers.filter(c=>c.name===name);
+            assert(matches.length<=1,'RESTORE_NEW_CONTAINER_AMBIGUOUS');
+            if(prior.createdContainers?.[p.key]){
+              assert(matches.length===1&&matches[0].cookieStoreId===prior.createdContainers[p.key],
+                'RESTORE_CONTAINER_RECEIPT_MISMATCH');continue;
+            }
+            let made=matches[0];
+            if(prior.protocol===2){
+              if(prior.containerIntents?.[p.key])assert(made,'RESTORE_CONTAINER_OUTCOME_UNCERTAIN');
+              else{
+                assert(!made,'RESTORE_CONTAINER_ALREADY_EXISTS');
+                await gate.prepareContainer({epoch:intent.epoch,revision:prior.revision,personaKey:p.key,name});
+                made=await donor.createContainer({name,color:p.color||'blue',icon:p.icon||'fingerprint'});
+              }
+            }else{
+              assert(!made,'RESTORE_CONTAINER_ALREADY_EXISTS');
+              made=await donor.createContainer({name,color:p.color||'blue',icon:p.icon||'fingerprint'});
+            }
             assert(made?.cookieStoreId,'RESTORE_CONTEXT_RESULT_UNKNOWN');
             containers=await donor.containers();
-            assert(containers.some(c=>c.cookieStoreId===made.cookieStoreId&&
-              c.name===name),'RESTORE_CONTEXT_READBACK_FAILED');
+            assert(containers.some(c=>c.cookieStoreId===made.cookieStoreId&&c.name===name),'RESTORE_CONTEXT_READBACK_FAILED');
             const snapshot=await gate.read();
-            await gate.recordContainer({epoch:intent.epoch,
-              revision:snapshot.revision,personaKey:p.key,cookieStoreId:made.cookieStoreId});
+            await gate.recordContainer({epoch:intent.epoch,revision:snapshot.revision,
+              personaKey:p.key,cookieStoreId:made.cookieStoreId});
           }
           mappings=mappingFromContainers(payload,req,containers,intent.epoch);
           preparedDonor=await donor.prepare({payload,mappings,mode,regeneratePersonaUids:fresh});
           remaps=uidMap(preparedDonor.sourcePersonas);
+          let held=await gate.read();
+          if(held.protocol===2){
+            const receipt=await donorPreparationReceipt(preparedDonor,baseline.snap,mappings);
+            held=await gate.donorReceipt({epoch:held.epoch,revision:held.revision,receipt});
+            await gate.donorReceipt({epoch:held.epoch,revision:held.revision,commitPossible:true});
+          }
           await donor.commit(preparedDonor.candidate);
         },async fp=>{
           if(!preparedDonor||!mappings)return {source:'INDEPENDENT_READBACK',digest:'0'.repeat(64)};
           const now=await donor.snapshot();
+          const receipt=(await gate.read())?.donorPreparation;
+          if(receipt)return {source:'INDEPENDENT_READBACK',digest:await observeDonorPreparation(receipt,now)?fp:'0'.repeat(64)};
           const personasVerified=preparedDonor.sourcePersonas.every(p=>{
             const row=now.state.profiles?.[p.containerId];
             return row?.personaUid===p.targetUid&&row?.routeId===BLOCK_ROUTE_ID&&
@@ -216,15 +272,22 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
             gm['gm-values:'+mapped.id]=items;
           else throw Error('RESTORE_GM_MAPPING_UNVERIFIED');
         }
-        await step('donor-portable',{gm:await digest(JSON.stringify(gm))},
-          async()=>{if(Object.keys(gm).length)await api.storage.local.set(gm);},
+        const localPatch=preparePortableLocalRestore(incomingLocal,baseline.local||{}, {mode,uidRemap:remaps});
+        const history=await restoredAutomationHistory(payload,preparedDonor,intent.epoch,intent.startedAt);
+        const portableValues={...gm,...localPatch};
+        const portableOperation={gm:await digest(JSON.stringify(gm)),
+          ...(incomingLocal!==null?{local:await digest(JSON.stringify(localPatch))}:{})};
+        await step('donor-portable',portableOperation,
+          async()=>{
+            if(Object.keys(portableValues).length)await api.storage.local.set(portableValues);
+          },
           async fp=>{
-            const got=await api.storage.local.get(Object.keys(gm));
+            const got=await api.storage.local.get(Object.keys(portableValues));
             return {source:'INDEPENDENT_READBACK',
-              digest:Object.keys(gm).every(k=>same(got[k],gm[k]))?fp:'0'.repeat(64)};
+              digest:Object.keys(portableValues).every(k=>same(got[k],portableValues[k]))?fp:'0'.repeat(64)};
           });
-        preparedCanonical=prepareRestoredCanonical({incoming:incomingPcms,
-          current:baseline.pcms,mode,uidRemap:remaps,fresh,accountChoices});
+        preparedCanonical=prepareRestoredCanonical({incoming:canonicalWithAutomationHistory(incomingPcms,history,intent.epoch),
+          current:baseline.pcms,mode,uidRemap:remaps,targetBindings:restoredTargetBindings(preparedDonor.sourcePersonas),fresh,accountChoices});
         await step('pcms-canonical',{pcms:await digest(JSON.stringify(preparedCanonical))},
           async()=>applyCanonicalSnapshot(db,preparedCanonical,{
             assertHeld:async()=>(await gate.inspect()).held===true,
@@ -320,12 +383,45 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
     let pcms;try{pcms=await snapshotCanonicalV2(db,{serializedValues:true});}
     finally{db.close();}
     return {snap:stableRestoreDonorCut(snap),pcms,
-      portable:await readPortable(api,donor,snap)};
+      portable:await readPortable(api,donor,snap),
+      local:collectPortableLocal(await api.storage.local.get(null))};
   }
   const validScope=s=>typeof s==='string'&&/^portable_[a-f0-9]{32}$/.test(s);
   const validMappings=m=>m&&typeof m==='object'&&!Array.isArray(m)&&
     Object.entries(m).length<=10000&&Object.entries(m).every(([k,v])=>
       k.length>0&&k.length<=256&&typeof v==='string'&&v.length<=256);
+  async function preparePortable(args){
+    if(running)return fail('RESTORE_BUSY');
+    running=(async()=>{
+      try{
+        assert(validScope(args?.stageScope),'RESTORE_PREPARATION_INVALID');
+        const incoming=await readPortableStage(args.stageScope);
+        let held=await gate.read();
+        if(held)assert(held.status==='PREPARING'&&held.stageScope===args.stageScope&&
+          held.archiveSha256===incoming.receipt.chain,'RESTORE_ALREADY_HELD');
+        else held=await gate.prepare({stageScope:args.stageScope,archiveSha256:incoming.receipt.chain});
+        await settle();
+        return {...await status(),ok:true,code:'RESTORE_PREPARED'};
+      }catch(e){return fail(redacted(e))}
+    })().finally(()=>{running=null});
+    return running;
+  }
+  async function checkpointPortable(args){
+    if(running)return fail('RESTORE_BUSY');
+    running=(async()=>{
+      try{
+        const held=await gate.read();
+        assert(held?.status==='PREPARING'&&held.epoch===args?.epoch&&
+          held.revision===args?.revision&&held.stageScope===args?.stageScope,
+          'RESTORE_STALE_PREPARATION');
+        await settle();
+        assert(backupRunner?.checkpoint,'RESTORE_BACKUP_UNAVAILABLE');
+        const result=await backupRunner.checkpoint(args);
+        return {...result,preparation:{epoch:held.epoch,revision:held.revision,stageScope:held.stageScope}};
+      }catch(e){return fail(redacted(e))}
+    })().finally(()=>{running=null});
+    return running;
+  }
   async function applyPortable(args){
     if(running)return fail('RESTORE_BUSY');
     running=(async()=>{
@@ -343,7 +439,13 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
             typeof id==='string'&&id.length>0&&id.length<=256&&
             ['INCLUDE_INACTIVE','EXCLUDE'].includes(choice))&&
           hex(args.reviewedPlanSha256),'RESTORE_PORTABLE_INPUT_INVALID');
-        assert(await gate.read()===null,'RESTORE_ALREADY_HELD');
+        const preparation=await gate.read();
+        if(preparation){
+          assert(preparation.status==='PREPARING'&&preparation.epoch===args.preparation?.epoch&&
+            preparation.revision===args.preparation?.revision&&preparation.stageScope===args.stageScope,
+            'RESTORE_STALE_PREPARATION');
+          await settle();
+        }else assert(!args.preparation,'RESTORE_STALE_PREPARATION');
         const incoming=await readPortableStage(args.stageScope);
         const checkpoint=await readPortableStage(args.checkpointScope);
         const donor=await donorReady();
@@ -352,7 +454,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           incoming,mode:args.mode,fresh:args.fresh,
           mappings:args.mappings,accountChoices:args.accountChoices,
           currentPcms:baseline.pcms,
-          currentDonor:baseline.snap,currentPortable:baseline.portable,
+          currentDonor:baseline.snap,currentPortable:baseline.portable,currentLocal:baseline.local,
           containers:baseline.snap.containers});
         assert(reviewed.planSha256===args.reviewedPlanSha256,
           'RESTORE_PLAN_CHANGED');
@@ -363,7 +465,9 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
             'CREATE_REQUESTED'].includes(g.status)),
           'RESTORE_MAPPING_UNVERIFIED');
         const checked=await verifyPortableCheckpoint({
-          checkpoint,currentPcms:baseline.pcms,currentPortable:baseline.portable});
+          checkpoint,currentPcms:baseline.pcms,currentPortable:baseline.portable,currentLocal:baseline.local});
+        const incomingLocal=splitPortableLocal(incoming.canonical).values;
+        preparePortableLocalRestore(incomingLocal,baseline.local,{mode:args.mode});
         const later=await destinationPortable(donor);
         assert(same(later,baseline),'RESTORE_DESTINATION_DRIFT');
         const intent=await gate.begin({
@@ -372,7 +476,9 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           destinationSha256:reviewed.plan.destinationSha256,
           checkpointSha256:checked.sha256,
           reviewedPlanSha256:args.reviewedPlanSha256,
-          checkpointTier:checked.tier,fresh:args.fresh,
+          checkpointTier:checked.tier,fresh:reviewed.plan.fresh,protocol:2,
+          donorBaseline:await donorBaselineReceipt(baseline.snap),
+          preparation:preparation?{epoch:preparation.epoch,revision:preparation.revision}:null,
           recovery:{mode:args.mode,mappings:args.mappings,
             accountChoices:args.accountChoices,
             portableStageScope:args.stageScope,
@@ -384,7 +490,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
         await applyGuardedGroups({db,donor,baseline,intent,
           req:args.mappings,payload:incoming.donor,
           incomingPcms:incoming.canonical,mode:args.mode,
-          fresh:args.fresh,accountChoices:args.accountChoices,v2:true});
+          fresh:reviewed.plan.fresh,accountChoices:args.accountChoices,v2:true,incomingLocal});
         const final=await gate.inspect();
         assert(final.held&&final.activation==='OFF'&&
           final.status==='COMPLETE_INACTIVE','RESTORE_PORTABLE_FINAL_HOLD_REQUIRED');
@@ -399,28 +505,50 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
   }
   async function reconcilePortable(args){
     if(running)return fail('RESTORE_BUSY');
-    let db=null;
-    try{
-      const intent=await gate.read();
-      assert(intent?.active===true&&
-        validScope(intent.recovery?.portableStageScope)&&
-        validScope(intent.recovery?.portableCheckpointScope)&&
-        args?.stageScope===intent.recovery.portableStageScope&&
-        args?.checkpointScope===intent.recovery.portableCheckpointScope,
-        'RESTORE_PORTABLE_RECONCILE_SCOPE');
-      const incoming=await readPortableStage(args.stageScope);
-      const checkpoint=await readPortableStage(args.checkpointScope);
-      const donor=await donorReady();
-      db=await database();
-      return await reconcileRestore({gate,api,donor,db,
-        portableIncoming:incoming,portableCheckpoint:checkpoint});
-    }catch(e){return fail(redacted(e))}
-    finally{try{db?.close()}catch{}}
+    running=(async()=>{
+      let db=null;
+      try{
+        const intent=await gate.read();
+        assert(intent?.active===true&&intent.status!=='PREPARING'&&
+          validScope(intent.recovery?.portableStageScope)&&validScope(intent.recovery?.portableCheckpointScope)&&
+          args?.stageScope===intent.recovery.portableStageScope&&args?.checkpointScope===intent.recovery.portableCheckpointScope,
+          'RESTORE_PORTABLE_RECONCILE_SCOPE');
+        const incoming=await readPortableStage(args.stageScope),checkpoint=await readPortableStage(args.checkpointScope);
+        assert(incoming.receipt.chain===intent.archiveSha256&&checkpoint.receipt.chain===intent.checkpointSha256,
+          'RESTORE_RECOVERY_SOURCE_CHANGED');
+        const donor=await donorReady();db=await database();
+        if(intent.protocol!==2)return await reconcileRestore({gate,api,donor,db,
+          portableIncoming:incoming,portableCheckpoint:checkpoint});
+        await settle();
+        const actual=await destinationPortable(donor);
+        if(intent.donorPreparation?.status!=='COMMIT_POSSIBLE')
+          assert(await observeDonorBaseline(intent.donorBaseline,actual.snap),'RESTORE_DESTINATION_DRIFT');
+        const baseline={snap:actual.snap,pcms:checkpointCanonicalBaseline(checkpoint.canonical,actual.pcms),
+          portable:checkpoint.donor,local:splitPortableLocal(checkpoint.canonical).values||{}};
+        if(!intent.groups['pcms-canonical']||intent.groups['pcms-canonical'].status==='BEFORE_DISPATCH')
+          assert(same(actual.pcms,baseline.pcms),'RESTORE_DESTINATION_DRIFT');
+        if(!intent.groups['donor-portable']||intent.groups['donor-portable'].status==='BEFORE_DISPATCH')
+          assert(same(actual.local,baseline.local),'RESTORE_CHECKPOINT_LOCAL_DRIFT');
+        await applyGuardedGroups({db,donor,baseline,intent,req:intent.recovery.mappings,
+          payload:incoming.donor,incomingPcms:incoming.canonical,mode:intent.recovery.mode,
+          fresh:intent.fresh,accountChoices:intent.recovery.accountChoices||{},v2:true,
+          incomingLocal:splitPortableLocal(incoming.canonical).values,continuing:true});
+        return {...await status(),ok:true,code:'RESTORE_CONTINUED_WITHOUT_REPLAY'};
+      }catch(e){return fail(redacted(e))}
+      finally{try{db?.close()}catch{}}
+    })().finally(()=>{running=null});
+    return running;
   }
   async function run(message,sender){
     if(!trustedRestoreSender(api,sender))return fail('UNTRUSTED_SENDER');
     if(!message||typeof message!=='object'||Array.isArray(message))return fail('RESTORE_INPUT_INVALID');
     if(message.action==='STATUS')return status();
+    if(message.action==='PREPARE_PORTABLE')return preparePortable(message.params);
+    if(message.action==='CHECKPOINT_PORTABLE')return checkpointPortable(message.params);
+    if(message.action==='CANCEL_PREPARATION'){
+      if(running)return fail('RESTORE_BUSY');
+      try{return await gate.cancel(message.params||{})}catch(e){return fail(redacted(e))}
+    }
     if(message.action==='APPLY_PORTABLE')return applyPortable(message.params);
     if(message.action==='RECONCILE_PORTABLE')return reconcilePortable(message.params);
     // Client amendment v1.0.1: legacy encrypted/password/native commands

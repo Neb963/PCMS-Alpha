@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 import {autoBackup} from './backup-auto-boundary.mjs';
 import {inventoryBoundary} from './inventory-boundary.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
@@ -326,6 +327,9 @@ export function createAdoptionBoundary(api,{
       });
     });
   }
+    run=checkpointed(api,run,{allowDuringRestore:message=>["LIST_ADOPTIONS","GET_ADOPTION","INSPECT_ORIGINAL","READ_ORIGINAL_FILE"].includes(message?.type)});
+  runTrusted=checkpointed(api,runTrusted,{allowDuringRestore:message=>["LIST_ADOPTIONS","GET_ADOPTION","INSPECT_ORIGINAL","READ_ORIGINAL_FILE"].includes(message?.type)});
+  autoTick=checkpointed(api,autoTick);
   return Object.freeze({run,register,autoTick});
 }
 if(typeof browser!=='undefined')createAdoptionBoundary(browser,{

@@ -120,7 +120,12 @@ test('A02 manual interrupted download reconciles a later verified completion aft
   const recovered=await cold.manual();
   assert.equal(recovered.ok,true,JSON.stringify(recovered));
   assert.equal(recovered.code,'BROWSER_REPORTED_COMPLETE');
-  assert.equal(f.effects(),2,'new manual export occurs only after receipt reconciliation');
+  assert.equal(f.effects(),1,'receipt recovery must not emit another download');
+  assert.equal(recovered.runId,receipt.runId);
+  const deliberate=await cold.manual();
+  assert.equal(deliberate.ok,true);
+  assert.notEqual(deliberate.runId,receipt.runId);
+  assert.equal(f.effects(),2,'a separate deliberate later action starts a new export');
 });
 
 test('A02 readback rejects a foreign same-sized manual file despite matching download ID',async()=>{

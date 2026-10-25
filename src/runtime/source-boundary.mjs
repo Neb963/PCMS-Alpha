@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 // I05: explicit read-only Git inspection and canonical one-to-one association.
 // Credentials are used only for an operator-triggered call, never persisted.
 import {openCanonicalDatabase, createRestoreSentinel, fail} from './journal.mjs';
@@ -193,6 +194,7 @@ export function createSourceBoundary(api,{
       });
     });
   }
+    run=checkpointed(api,run,{allowDuringRestore:message=>["GET_ASSOCIATION","READ_SOURCE_FILE","INSPECT_SOURCE"].includes(message?.type)});
   return Object.freeze({register,run});
 }
 if(typeof browser!=='undefined')createSourceBoundary(browser).register();

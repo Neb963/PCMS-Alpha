@@ -53,3 +53,12 @@ test('P55-06: retain 14 tracked verified automatic, never manual/untracked/moved
   assert.equal(deletionProof({...candidate,state:'DELETE_HELD'},row(candidate.downloadId)).ok,false);
   assert.equal(selectRetention([...list,{...list[0],runId:runId(99)}]).some(a=>a.downloadId===1),false);
 });
+
+test('J06 exact run-bound automatic receipts support custom Firefox download roots while unrelated/moved paths remain rejected',()=>{
+ const run=runId(7),file={...row(7),filename:'D:\\Saved files\\pcms-backups\\pcms-alpha-'+run+'.pcms.jsonl'};
+ const receipt=archiveFromDownload(run,7,'a'.repeat(64),120,file);
+ assert.ok(receipt);assert.equal(receipt.filename,file.filename);
+ assert.equal(archiveFromDownload(run,7,'a'.repeat(64),120,{...file,filename:'D:\\Saved files\\other\\pcms-alpha-'+run+'.pcms.jsonl'}),null);
+ assert.equal(archiveFromDownload(run,7,'a'.repeat(64),120,{...file,id:7,fileSize:121}),null);
+ assert.equal(deletionProof({...receipt,state:'DELETION_POSSIBLE'},{...file,filename:'D:\\Moved\\pcms-backups\\pcms-alpha-'+run+'.pcms.jsonl'}).ok,false);
+});

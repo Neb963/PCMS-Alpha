@@ -83,6 +83,22 @@ export function findEligibleSupply(db,slugName){
 // the donor must still prove the current private-empty source and owner.
 export async function findEligibleManagedSource(db,slugName){
   if(!slug(slugName))return fail('INVALID_SLUG');
+  // A requalified never-dispatched child is a current local association;
+  // old supply batches stay immutable and cannot assert the new binding.
+  const recovered=await txn(db,'readonly',(tx,done)=>{
+   const m=tx.objectStore('meta');m.get('stage:'+slugName).onsuccess=s=>{
+    const stage=s.target.result?.record;
+    if(!stage?.restoredParent||stage.restoredHistorical||stage.state!=='PINNED'||stage.sourceOrigin!=='PRIVATE_NEW'){done(fail('NO_REQUALIFIED_PRIVATE_CHILD'));return}
+    m.get('account:'+stage.accountId).onsuccess=a=>m.get('inventory:'+slugName).onsuccess=i=>m.get('source-link:'+slugName).onsuccess=l=>{
+     const account=a.target.result?.account,item=i.target.result?.generator,link=l.target.result?.link;
+     if(account?.state!=='VERIFIED'||account.revision!==stage.accountRevision||account.personaUid!==stage.personaUid||account.bindingVersion!==stage.bindingVersion||account.identity?.principalFingerprint!==stage.principalFingerprint||
+      item?.ownerState!=='OBSERVED_OWNER'||item.visibility!=='UNLISTED'||item.accountId!==account.accountId||item.personaUid!==account.personaUid||item.bindingVersion!==account.bindingVersion||item.remoteId!==stage.remotePublicId||
+      link?.accountId!==account.accountId||link.personaUid!==account.personaUid||link.bindingVersion!==account.bindingVersion||link.remoteId!==stage.remotePublicId||link.folder!=='generators/'+slugName){done(fail('REQUALIFIED_PRIVATE_CONTEXT_CHANGED'));return}
+     done({ok:true,origin:'S04_CONFIRMED_CREATED',account,item,link});
+    };
+   };
+  });
+  if(recovered.ok)return recovered;
   const legacy=await findEligibleSupply(db,slugName);
   if(legacy.ok||legacy.code!=='PRIVATE_NEW_SUPPLY_REQUIRED')return legacy;
   const created=await txn(db,'readonly',(tx,done)=>{

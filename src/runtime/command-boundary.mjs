@@ -1,3 +1,4 @@
+import {trackPcmsWork} from './work-checkpoint.mjs';
 // Canonical command admission is independent of UI disabled state.
 import { createCanonicalStore, createRestoreSentinel, openCanonicalDatabase, fail } from './journal.mjs';
 
@@ -116,18 +117,19 @@ export function createCommandBoundary(api, { open = openCanonicalDatabase } = {}
       port.onMessage.addListener(message => {
         if (busy) { try { port.postMessage(fail('BUSY')); } catch {} return; }
         busy = true;
-        Promise.resolve(dispatch(message, port.sender))
+        trackPcmsWork(dispatch(message, port.sender))
           .then(v => { try { port.postMessage(v); } catch {} })
           .catch(() => { try { port.postMessage(fail('CANONICAL_HOLD')); } catch {} })
           .finally(() => { busy = false; });
       });
     });
     // No provider operation on startup or alarm. Recovery observes only IDB.
-    Promise.resolve().then(async () => {
+    trackPcmsWork(Promise.resolve().then(async () => {
       const restore = await sentinel.inspect();
       if (!restore.held) await (await canonical()).recover();
-    }).catch(() => { /* read-only health reports CANONICAL_HOLD */ });
+    })).catch(() => { /* read-only health reports CANONICAL_HOLD */ });
   }
-  return Object.freeze({ register, dispatch, status });
+  const trackedDispatch=(...args)=>trackPcmsWork(dispatch(...args));
+  return Object.freeze({ register, dispatch:trackedDispatch, status });
 }
 if (typeof browser !== 'undefined') createCommandBoundary(browser).register();

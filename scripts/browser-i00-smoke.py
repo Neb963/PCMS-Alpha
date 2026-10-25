@@ -801,7 +801,7 @@ def s01_add_account_profile(browser, archive, folder):
         # reach login or fall back to an unprotected route.
         assert account['state']=='PREPARING' and account['setup']['phase']=='HELD',account
         assert account['setup']['code'] in ('MULLVAD_LOCAL_SERVICE_UNAVAILABLE','NO_ROUTE_CANDIDATES',
-            'DONOR_SECURITY_UNAVAILABLE'),account
+            'MULLVAD_RELAY_CATALOG_UNAVAILABLE','DONOR_SECURITY_UNAVAILABLE'),account
         assert account.get('message'),account
         print('B S01_REAL_ADD_ACCOUNT_HELD_WITHOUT_NATIVE=',account['setup']['code'],flush=True)
         network=account_command(session,{'type':'NETWORK_STATUS'})
@@ -946,11 +946,11 @@ def s01_legacy_and_archive(session,uuid,oracle,privacy_safe,added_id):
     # native service is a real HELD receipt, not a fabricated started-success.
     assert started.get('ok') is False and started.get('code') in (
         'MULLVAD_LOCAL_SERVICE_UNAVAILABLE','NO_ROUTE_CANDIDATES',
-        'NO_UNIQUE_EXIT_AVAILABLE'),started
+        'MULLVAD_RELAY_CATALOG_UNAVAILABLE','NO_UNIQUE_EXIT_AVAILABLE'),started
     legacy=_wait_account(session,'legacy_account_ci01',lambda a:a.get('upgrade',{}) and a['upgrade'].get('phase') in ('HELD','COMPLETE'))
     # No native Mullvad helper in CI: the route step holds, but identity is intact.
     assert legacy['upgrade']['phase']=='HELD',legacy
-    assert legacy['upgrade']['code'] in ('MULLVAD_LOCAL_SERVICE_UNAVAILABLE','NO_ROUTE_CANDIDATES','NO_UNIQUE_EXIT_AVAILABLE'),legacy
+    assert legacy['upgrade']['code'] in ('MULLVAD_LOCAL_SERVICE_UNAVAILABLE','NO_ROUTE_CANDIDATES','MULLVAD_RELAY_CATALOG_UNAVAILABLE','NO_UNIQUE_EXIT_AVAILABLE'),legacy
     assert legacy['state']=='VERIFIED' and legacy['revision']==2 and legacy['identity']=='VERIFIED',legacy
     assert legacy['personaUid']==made['personaUid'],legacy
     stored=_pcms(session,uuid,"""
@@ -1036,6 +1036,10 @@ def main():
             else: raise RuntimeError('geckodriver did not become ready')
             # Exercise the changed operator journey first; all unchanged
             # persistent donor/source/backup suites still run after it passes.
+            from journey_backups_ui import run as run_j06_primary
+            run_j06_primary(browser,archive,pathlib.Path(folder))
+            from journey_restore_ui import run as run_j06_restore
+            run_j06_restore(browser,archive,pathlib.Path(folder))
             from journey_refresher_ui import run as run_j05_primary
             run_j05_primary(browser,archive,pathlib.Path(folder))
             from journey_refresher_clock import run as run_j05_clock
@@ -1251,7 +1255,7 @@ def main():
                 assert faithful['inventoryTabs']>=4 and faithful['sourceWriters']==1,faithful
                 print('B V015_TRUE_DESKTOP_PRIMARY_WORKSPACES_AND_REAL_HANDLERS=PASS',flush=True)
                 release_version=execute(after,"return {manifest:browser.runtime.getManifest().version,ui:document.documentElement.dataset.pcmsUiVersion,badge:document.querySelector('.v015-top-status')?.textContent};")
-                assert release_version.get('manifest')=='1.2.12',release_version
+                assert release_version.get('manifest')=='1.2.13',release_version
                 assert release_version.get('ui')=='0.1.5' and '0.1.5' in release_version.get('badge',''),release_version
                 print('B V015_REAL_FIREFOX_UPDATE_VERSION_AND_VISIBLE_UI_MARKER=PASS',flush=True)
                 # V016 acceptance: the PRECISE accepted prototype structure is
@@ -1275,7 +1279,7 @@ def main():
                      canonicalNative:!!document.getElementById('pcms-refresher-rows')&&
                        !!document.getElementById('pcms-release-approve')&&
                        !!document.getElementById('pcms-restore-apply')};""")
-                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.12',actual
+                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.13',actual
                 assert actual['routes']==6 and actual['visible'] and actual['nativeHidden'],actual
                 assert actual['sidebar'] and actual['primary']=='overview' and actual['styles'] and actual['canonicalNative'],actual
                 assert actual['badge']=='PCMS local · Not verified',actual
@@ -1385,17 +1389,23 @@ def main():
                     [...aiPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Save concurrency'));
                   sh.querySelector('[data-settings="backups"]').click();
                   const backupPanel=sh.querySelector('.settings-main');
-                  const protectedRestore=!!backupPanel?.querySelector('input[type="file"]')&&
-                    backupPanel.querySelectorAll('input[type="file"]').length===2&&
-                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Verify independent checkpoint'))&&
-                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Reconcile uncertain restore'))&&
-                    [...backupPanel.querySelectorAll('button')].some(x=>x.textContent.includes('Apply reviewed import'));
-                  const restoreHeld=[...backupPanel.querySelectorAll('button')].find(x=>x.textContent.includes('Apply reviewed import'))?.disabled===true;
+                  // J06's actual files and owned safety-copy flow replace raw
+                  // mapping/hash forms. Populated/fresh real apply/restart and
+                  // adverse file checks ran above in the required J06 journeys.
+                  const protectedRestore=!!backupPanel?.querySelector('#pcms-restore-archive[type="file"]')&&
+                    !!backupPanel.querySelector('#pcms-restore-checkpoint[type="file"]')&&
+                    !!backupPanel.querySelector('#pcms-restore-save-checkpoint')&&
+                    !!backupPanel.querySelector('#pcms-restore-verify')&&
+                    !!backupPanel.querySelector('#pcms-restore-reconcile')&&
+                    !!backupPanel.querySelector('#pcms-restore-apply')&&
+                    !backupPanel.querySelector('#pcms-restore-mappings');
+                  const restoreHeld=backupPanel.querySelector('#pcms-restore-apply')?.disabled===true;
                   sh.querySelector('[data-settings="diagnostics"]').click();
                   const details=sh.querySelector('.settings-main');
                   const primaryDiagnostic=details?.textContent.includes('Operational diagnostics')&&
                     !!details?.querySelector('input[placeholder="pcms-test-alpha"]')&&
-                    [...details.querySelectorAll('button')].some(x=>x.textContent.includes('Save disposable scope'));
+                    !!details.querySelector('#pcms-diagnostic-designate')&&
+                    !!details.querySelector('#pcms-diagnostic-independent-run');
                   sh.querySelector('[data-settings="connections"]').click();
                   const connected=sh.querySelector('.settings-main');
                   const git=connected?.querySelector('[data-git-connection="1"]');
@@ -1433,14 +1443,17 @@ def main():
                        const text=sh.querySelector('#pcms-diagnostic-independent-status')?.textContent||'';
                        return {count:section?.querySelectorAll('li')?.length||0,
                           text,
-                          hasLocalInventory:section?.textContent.includes('INVENTORY STORE'),
-                          hasGit:section?.textContent.includes('GIT MAIN'),
-                          hasBackup:section?.textContent.includes('BACKUP RUNTIME'),
+                          ids:[...section?.querySelectorAll('[data-check-id]')||[]].map(r=>r.dataset.checkId).sort(),
+                          hasLocalInventory:!!section?.querySelector('[data-check-id="INVENTORY_STORE"]'),
+                          hasGit:!!section?.querySelector('[data-check-id="GIT_MAIN"]'),
+                          hasBackup:!!section?.querySelector('[data-check-id="BACKUP_RUNTIME"]'),
+                          archiveProven:section?.querySelector('[data-check-id="BACKUP_ARCHIVE"]')?.dataset.outcome==='PASS',
+                          restoreProven:section?.querySelector('[data-check-id="RESTORE_LOCAL_DATA"]')?.dataset.outcome==='PASS',
                           independentExport:!sh.querySelector('#pcms-diagnostic-export')?.disabled};""")
-                    if independent['count']==8:break
+                    if independent['count']==10:break
                     time.sleep(.14)
-                assert independent and independent['count']==8 and independent['hasLocalInventory'] and independent['hasGit'] and independent['hasBackup'] and independent['independentExport'],('A09_INDEPENDENT_CHECKS_BLOCKED_BY_CREATE',independent)
-                print('B A09_INDEPENDENT_READ_ONLY_MODULE_CHECKS=PASS',flush=True)
+                assert independent and independent['ids']==sorted(['GIT_AUTH','GIT_MAIN','GIT_CREDENTIAL','BACKUP_RUNTIME','BACKUP_ARCHIVE','RESTORE_LOCAL_DATA','ACCOUNT_STORE','INVENTORY_STORE','REFRESHER_POLICY','STANDING_GRANTS']) and independent['hasLocalInventory'] and independent['hasGit'] and independent['hasBackup'] and independent['archiveProven'] and independent['restoreProven'] and independent['independentExport'],('A09_INDEPENDENT_CHECKS_BLOCKED_BY_CREATE',independent)
+                print('B A09_INDEPENDENT_MODULES_FUNCTIONAL_ARCHIVE_AND_ISOLATED_RESTORE=PASS',flush=True)
 
                 # A09 operator regression: one concrete interrupted local
                 # Git intent MUST reveal the recovery controls in the visible
@@ -4641,16 +4654,17 @@ def main():
                     element_id=element['element-6066-11e4-a52e-4f735466cecf']
                     call('POST',f'/session/{after}/element/{element_id}/value',
                          {'text':str(filepath),'value':list(str(filepath))})
-                setup_ui="document.getElementById('pcms-restore-mappings').value="+json.dumps(json.dumps(ui_data['mappings']))+";document.getElementById('pcms-restore-preview').click();return true"
+                setup_ui="document.getElementById('pcms-restore-preview').click();return true"
                 assert execute(after,setup_ui) is True
                 # Deprecated encrypted archives are rejected by the actual
                 # passwordless parser before plan or guard creation.
                 negative_result=None
                 for _ in range(80):
                     negative_result=execute(after,"return {status:document.getElementById('pcms-restore-status').textContent,verifyDisabled:document.getElementById('pcms-restore-verify').disabled,applyDisabled:document.getElementById('pcms-restore-apply').disabled}")
-                    if 'Restore preview held:' in negative_result['status']:break
+                    if negative_result['verifyDisabled'] and 'Restore is held.' in negative_result['status']:break
                     time.sleep(.1)
-                assert 'Restore preview held: PORTABLE_' in negative_result['status'],negative_result
+                assert 'Restore is held.' in negative_result['status'],negative_result
+                assert 'PORTABLE_' in execute(after,"return document.getElementById('pcms-restore-details').textContent"),negative_result
                 assert negative_result['verifyDisabled'] is True,negative_result
                 assert negative_result['applyDisabled'] is True,negative_result
                 print('B A02_LEGACY_ENCRYPTED_FILE_REJECTED_WITHOUT_GUARD=PASS',flush=True)

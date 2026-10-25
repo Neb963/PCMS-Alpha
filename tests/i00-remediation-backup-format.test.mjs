@@ -1,19 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fakeDatabase} from './fake-idb.mjs';
-import {mkdtemp,cp} from 'node:fs/promises';
+import {mkdtemp} from 'node:fs/promises';
+import {buildI00} from '../scripts/build-i00.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-// backup-auto-run imports UI-packaged modules; mirror the XPI pcms/ layout
-// (runtime + ui flattened, donor lib alongside) in an isolated temp root.
+// Exercise the actual build's resolved flat module graph, rather than copying
+// source-only re-export aliases into a different relative directory layout.
 const root=await mkdtemp(path.join(os.tmpdir(),'pcms-backup-format-'));
-await cp('donor/personamonkey/extension/lib',path.join(root,'lib'),{recursive:true});
-await cp('src/runtime',path.join(root,'pcms'),{recursive:true});
-// The build overlays real UI primitives after resolving source-tree runtime aliases.
-await cp('src/ui',path.join(root,'pcms'),{recursive:true});
+const {stage}=await buildI00({packageArchive:false,buildDirectory:root});
 const {createAutoRunner,operatorSelectedV2,BACKUP_FORMAT_KEY,FORMAT_GUARANTEE}=
-  await import(pathToFileURL(path.join(root,'pcms','backup-auto-run.mjs')).href);
+  await import(pathToFileURL(path.join(stage,'pcms','backup-auto-run.mjs')).href);
 function apiFixture(){
   const local=new Map();
   return {local,api:{runtime:{id:'fixture'},downloads:{},storage:{local:{

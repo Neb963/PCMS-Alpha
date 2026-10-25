@@ -60,7 +60,7 @@ export function createAutoStore(db,clock=Date.now){
           archive?.runId===runId&&archive.state==='COMPLETE'&&archive.tier===2;
         if(!qualifiedNative&&!qualifiedLegacy)
           return {response:fail('BACKUP_DOWNLOAD_UNVERIFIED')};
-        s.archives.push(details.archive);
+        s.archives.push({...details.archive,completedAt:clock()});
         s.lastSuccessDay=Math.max(s.lastSuccessDay,s.active.day);
         if(s.freshRequest&&s.freshRequest.at<=s.active.startedAt)s.freshRequest=null;
         s.active=null;s.nextAttemptAt=0;s.status='COMPLETE';s.code=qualifiedNative?

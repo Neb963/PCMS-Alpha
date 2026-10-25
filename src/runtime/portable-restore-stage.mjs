@@ -145,3 +145,18 @@ export async function readPortableStage(scope,{db=openRestoreStage}={}){
       sourceVerified:true,activation:'OFF'};
   }finally{connection.close();}
 }
+
+// Dispose only a caller-owned inspection stage, never the canonical journal.
+export async function discardPortableStage(scope,{db=openRestoreStage}={}){
+ requireValid(goodId(scope),'PORTABLE_STAGE_ID_INVALID');
+ const connection=await db();
+ try{
+  await new Promise((resolve,reject)=>{
+   const tx=connection.transaction(['rows','sessions'],'readwrite');
+   tx.oncomplete=resolve;tx.onabort=()=>reject(Error('PORTABLE_STAGE_DELETE_FAILED'));
+   tx.objectStore('sessions').delete(scope);
+   const range=IDBKeyRange.bound([scope,'',0],[scope,'\uffff',Number.MAX_SAFE_INTEGER]);
+   tx.objectStore('rows').openCursor(range).onsuccess=e=>{const row=e.target.result;if(row){row.delete();row.continue()}};
+  });
+ }finally{connection.close()}
+}

@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 import {createScopedCreationGate} from './creation-authority.mjs';
 // S04 bounded no-dashboard wake. A due alarm is only a hint: canonical
 // revisions, guards and operation receipts remain the source of truth.
@@ -129,6 +130,7 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
     try{void Promise.resolve(api.alarms.create(CREATION_ALARM,
       {periodInMinutes:PERIOD})).catch(()=>{});}catch{}
   }
+    tick=checkpointed(api,tick);
   return Object.freeze({register,tick});
 }
 if(typeof browser!=='undefined')createCreationWatcher(browser).register();

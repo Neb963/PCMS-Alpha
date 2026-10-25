@@ -17,7 +17,7 @@ export async function openRestoreArchive(bytes,password,{decodeDonor}={}){
   const donor=(await decodeDonor(archive.donorEnvelope,password)).payload;
   return {archive,donor,archiveSha256:await digest(bytes)};
 }
-export function inspectRestoreMappings(donor,mappings,containers,{fresh=false,strict=true}={}){
+export function inspectRestoreMappings(donor,mappings,containers,{fresh=false,strict=true,inactive=false}={}){
   check(Array.isArray(donor?.personas)&&donor.personas.length<=10000,'RESTORE_PERSONAS_INVALID');
   check(mappings&&typeof mappings==='object'&&!Array.isArray(mappings),'RESTORE_MAPPING_REQUIRED');
   const available=new Map((containers||[]).filter(x=>typeof x?.cookieStoreId==='string').map(x=>[x.cookieStoreId,x]));
@@ -28,17 +28,18 @@ export function inspectRestoreMappings(donor,mappings,containers,{fresh=false,st
     keys.add(p.key);
     const chosen=mappings[p.key],create=chosen==='__create__',known=typeof chosen==='string'&&chosen.length>0&&available.has(chosen);
     if(strict)check(known||create,'RESTORE_MAPPING_UNVERIFIED');
+    const collision=known&&used.has(chosen);
     if(known){
-      if(strict)check(!used.has(chosen),'RESTORE_MAPPING_COLLISION');
+      if(strict)check(!collision,'RESTORE_MAPPING_COLLISION');
       used.add(chosen);
     }
     const current=known?available.get(chosen):null;
     const direct=p.profile?.routeMode==='direct';
-    if(strict)check(!direct,'RESTORE_DIRECT_REVIEW_REQUIRED');
+    if(strict)check(!direct||inactive,'RESTORE_DIRECT_REVIEW_REQUIRED');
     results.push({key:p.key,sourceId:p.sourceId||null,
       targetId:known?chosen:null,targetName:current?.name||null,
       sourcePersonaUid:p.profile?.personaUid||null,
-      status:direct?'DIRECT_REVIEW_REQUIRED':create?'CREATE_REQUESTED':!known?'MAPPING_REQUIRED':
+      status:collision?'MAPPING_COLLISION':direct&&!inactive?'DIRECT_REVIEW_REQUIRED':create?'CREATE_REQUESTED':!known?'MAPPING_REQUIRED':
         'MAPPING_ONLY_UNVERIFIED',
       freshProfile:fresh?'PREDECESSOR_UNVERIFIED':'NOT_FRESH'});
   }

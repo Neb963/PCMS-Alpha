@@ -34,6 +34,10 @@ export function planReadyDevelopment({ready,stage,existing,job,exception,
   return fail(r.hold||'AI_OPERATOR_PAUSED');
  }
  if(!candidate)return fail('S05_READY_NO_CURRENT_CANDIDATE');
+ if(stage?.record?.restoredHistorical)return {ok:true,type:'REQUALIFY_RESTORED'};
+ if(stage?.record?.requalifiedPublicPending&&visibility==='PUBLIC')return {ok:true,type:'PREPARE_UPDATE'};
+ if(stage?.record?.requalifiedPublicHistory&&visibility==='PUBLIC')
+   return r.desired?{ok:true,type:'PREPARE_UPDATE'}:fail('RESTORED_PUBLIC_SOURCE_CURRENT');
  if(stage?.record?.humanReclaimPending)return fail('S06_HUMAN_EDITOR_RECLAIM_PENDING');
  // A newer candidate never steals an in-flight old writer. First reconcile
  // any possible dispatch. Once the old helper is observed running, request
@@ -65,6 +69,7 @@ export function planReadyDevelopment({ready,stage,existing,job,exception,
    if(s==='UNLIST_DISPATCH_POSSIBLE'||s==='UNLIST_UNCERTAIN')
      return {ok:true,type:'RECHECK_UNLIST'};
    if(s==='UNLIST_CONFIRMED'){
+     if(r.desired&&stage?.record?.restoredParent&&!stage.record.restoredHistorical&&stage.record.state==='PINNED'&&stage.record.readyIdentifier!==r.desired.identifier)return {ok:true,type:'PIN_STAGE'};
      if(!existing.record.stagedFingerprint)
        return {ok:true,type:'PIN_STAGE'};
      // I13 must perform the guarded source replacement even if an I09
@@ -190,8 +195,8 @@ export function createReadyDevelopment(api,{
        return {ok:false,code,slug,step:chosen.type,providerEffects:kind};
      };
      try{
-     if(chosen.type==='PREPARE_LOCAL')outcome=await b.ready.runTrusted({
-       type:'PREPARE_LOCAL',params:{...params,expectedRevision:row.revision}});
+     if(['PREPARE_LOCAL','REQUALIFY_RESTORED'].includes(chosen.type))outcome=await b.ready.runTrusted({
+       type:chosen.type,params:{...params,expectedRevision:row.revision}});
      else if(chosen.type==='PREPARE_UPDATE'||chosen.type==='UNLIST'||
         chosen.type==='PIN_STAGE'||chosen.type==='STAGE'){
        // The guarded I13 boundary produces and verifies the browser-local

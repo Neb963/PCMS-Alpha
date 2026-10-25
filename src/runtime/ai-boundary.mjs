@@ -1,3 +1,4 @@
+import {checkpointed,trackPcmsWork} from './work-checkpoint.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I10 settings and read-only AI-job preparation. Untrusted UI never supplies
 // test evidence, native sessions, page code, helper credentials or Git writes.
@@ -544,7 +545,12 @@ export function createAiBoundary(api,{
          !g?.observeReadOnly)return fail('DONOR_GUARD_UNAVAILABLE');
       const before=await g.getSafeRouteReadiness(r.personaUid);
       if(!before?.ready)return fail(before?.code||'PROTECTED_ROUTE_UNVERIFIED');
-      const editor=await g.inspectStageEditor(r.personaUid,r.slug,r.nonce);
+      let editor=await g.inspectStageEditor(r.personaUid,r.slug,r.nonce);
+      if(!editor?.ok&&r.restoredParent&&!r.tab){
+        const prepared=await g.prepareRestoredEditor?.(r.personaUid,r.slug,r.nonce);
+        if(!prepared?.ok)return fail(prepared?.code||'RESTORED_EDITOR_PREPARATION_REQUIRED');
+        editor=await g.inspectStageEditor(r.personaUid,r.slug,r.nonce);
+      }
       if(editor?.ok!==true||editor.clean!==true)return fail('EDITOR_UNKNOWN');
       let fresh,promptOverride=null;
       if(r.readyIdentifier){
@@ -720,10 +726,10 @@ export function createAiBoundary(api,{
   }
   function register(){
     // Interrupted dispatch remains a hold. This never re-sends AI messages.
-    Promise.resolve().then(async()=>{
+    trackPcmsWork(Promise.resolve().then(async()=>{
       if(!(await sentinel.inspect()).held)
         await storeFactory(await database()).recoverNative();
-    }).catch(()=>{});
+    })).catch(()=>{});
     // Background operation remains extension-owned, not tied to a PCMS tab.
     // Firefox alarms are volatile across full process restarts.
     if(api.alarms?.onAlarm){
@@ -747,6 +753,9 @@ export function createAiBoundary(api,{
       });
     });
   }
+    run=checkpointed(api,run,{allowDuringRestore:message=>["LIST_JOBS","GET_JOB","GET_PROMPTS","GET_CONCURRENCY","EXPORT_PROMPTS"].includes(message?.type)});
+  executeTrusted=checkpointed(api,executeTrusted,{allowDuringRestore:message=>["LIST_JOBS","GET_JOB","GET_PROMPTS","GET_CONCURRENCY","EXPORT_PROMPTS"].includes(message?.type)});
+  tick=checkpointed(api,tick);
   return Object.freeze({register,run,tick,runTrusted:executeTrusted});
 }
 if(typeof browser!=='undefined')createAiBoundary(browser,{

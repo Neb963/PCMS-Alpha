@@ -37,7 +37,7 @@ const GIT_HELP={
  GITHUB_SERVICE_UNAVAILABLE:'GitHub is temporarily unavailable. No connection changes were made.',
  GIT_RECONNECT_REQUIRED:'GitHub has not been connected yet. The file preview can work without enabling automation.',
  GIT_CREDENTIAL_MISSING_OR_INVALID:'No saved GitHub credential was found. Reconnect GitHub.',
- GIT_VAULT_STATUS_UNCERTAIN:'PCMS could not read Firefox's saved GitHub credential status. Check Diagnostics.',
+ GIT_VAULT_STATUS_UNCERTAIN:"PCMS could not read Firefox’s saved GitHub credential status. Check Diagnostics.",
  GIT_RECOVERY_REQUIRES_PENDING:'There is no interrupted setup to restart. Use normal Connect instead.',
  GIT_RECOVERY_SCOPE_MISMATCH:'The repository does not match the interrupted setup. Review its identity before any changes.'
 };

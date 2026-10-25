@@ -43,6 +43,37 @@ export async function resolveS06OutputProof(db,context){
  const stage=context.stage?.record||context.stage,ready=context.ready?.record||context.ready,current=context.writeback?.record||context.writeback;
  if(!stage||!ready?.active||ready.desired||ready.hold)return direct;
  const read=key=>new Promise((resolve,reject)=>{const q=db.transaction('meta','readonly').objectStore('meta').get(key);q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(Error('OUTPUT_HISTORY_READ_FAILED'))});
+ // Restored testing/exception decisions cannot authorize current work.
+ // Their immutable original tuple can still identify an attributed Git blob;
+ // inspectReadyCandidate independently rereads its ancestry and full bytes.
+ if(current?.state==='CONFIRMED'&&(stage.restoredHistorical||stage.restoredParent)){
+  const validParent=(parent,child,revision)=>Number.isSafeInteger(revision)&&revision>=1&&revision<child.revision&&parent?.revision===revision&&
+    parent.slug===stage.slug&&parent.accountId===stage.accountId&&parent.principalFingerprint===stage.principalFingerprint&&parent.remotePublicId===stage.remotePublicId;
+  let root=stage;
+  if(stage.restoredParent){const revision=stage.restoredParent.revision,parent=(await read('stage-history:'+stage.slug+':'+revision))?.record;root=validParent(parent,stage,revision)?parent:null;}
+  const seen=new Set();
+  while(root&&current.personaUid!==root.personaUid&&root.restoredParent){
+   const revision=root.restoredParent.revision;
+   if(!Number.isSafeInteger(revision)||revision<1||revision>=root.revision||seen.has(revision)||seen.size>=1000){root=null;break}
+   seen.add(revision);const parent=(await read('stage-history:'+stage.slug+':'+revision))?.record;
+   if(!validParent(parent,root,revision)){root=null;break}
+   root=parent;
+  }
+  if(root&&root.accountId===stage.accountId&&root.principalFingerprint===stage.principalFingerprint&&root.remotePublicId===stage.remotePublicId&&
+     current.accountId===root.accountId&&current.personaUid===root.personaUid&&current.principalFingerprint===root.principalFingerprint&&current.remotePublicId===root.remotePublicId){
+   const parent=current.stageRevision===root.revision?root:(await read('stage-history:'+stage.slug+':'+current.stageRevision))?.record;
+   let oldJob=context.job?.job||context.job;
+   if(oldJob?.revision!==current.jobRevision)oldJob=(await read('ai-history:'+stage.slug+':'+current.jobRevision))?.job||
+     (await read('ai-history:'+stage.slug+':restored-'+current.jobRevision))?.job;
+   oldJob=oldJob?.restoredOriginal||oldJob;
+   let oldException=context.exception?.record||context.exception;
+   if(oldException?.revision!==current.exceptionRevision)oldException=(await read('s06-exception-history:'+stage.slug+':'+current.exceptionRevision))?.record;
+   if(parent&&parent.accountId===root.accountId&&parent.personaUid===root.personaUid&&parent.principalFingerprint===root.principalFingerprint&&parent.remotePublicId===root.remotePublicId){
+    const historical=sealedS06OutputProof({ready,stage:parent,job:oldJob,writeback:current,exception:oldException});
+    if(historical.ok)return {...historical,historical:true};
+   }
+  }
+ }
  const candidates=[];
  if(current?.state==='CONFIRMED')candidates.push(current);
  else if(current?.baseHead===stage.sourceHead){

@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 // I04: independent, non-effecting inventory port. No HTTP, page scrape,
 // native bridge, login replay or caller-provided ownership proof.
 import { openCanonicalDatabase, createRestoreSentinel, fail, isSafeId } from './journal.mjs';
@@ -190,6 +191,9 @@ export function createInventoryBoundary(api,{
   // verification (not a separate UI authority).
   const syncAccount=(accountId,expectedRevision)=>
     perform({type:'SYNC_ACCOUNT',params:{accountId,expectedRevision}});
+    run=checkpointed(api,run,{allowDuringRestore:message=>["LIST_INVENTORY","INSPECT_GENERATORS"].includes(message?.type)});
+  perform=checkpointed(api,perform,{allowDuringRestore:message=>["LIST_INVENTORY","INSPECT_GENERATORS"].includes(message?.type)});
+  recoverIdentities=checkpointed(api,recoverIdentities);
   return Object.freeze({register,run,syncAccount,recoverIdentities,
     recheckGenerator:(slug,expectedRevision)=>perform({type:'RECHECK_GENERATOR',params:{slug,expectedRevision}})});
 }

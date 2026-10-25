@@ -1,3 +1,5 @@
+import {mergeRestoredExitLedgers} from './restore-exits.mjs';
+import {splitPortableLocal} from './portable-local.mjs';
 // I16: restore data is history, never a portable authorization token.
 // Deterministic plan over already authenticated structured-clone rows.
 import {DB_STORES,validatePcmsSnapshot,serializeClone,deserializeClone} from './backup-core.mjs';
@@ -30,26 +32,35 @@ function inertMeta(key,row,remap,existing=null){
     g.ownerObservationId=null;g.principalFingerprint=null;
     g.reviewHeld=true;g.identityHeld=true;
   }
+  if(typeof key==='string'&&key.startsWith('stage:')&&data.record)data.record.restoredHistorical=true;
+  if(typeof key==='string'&&key.startsWith('s05-ready:')&&data.record)data.record.restoredHistorical=true;
   if(typeof key==='string'&&key.startsWith('release:')&&data.release){
+    if(data.release.state!=='RESTORE_REVIEW_REQUIRED'||!data.release.restoredEffects?.length)data.release.restoredEffects=[...(data.release.restoredEffects||[]),{state:data.release.state,dispatchPossible:data.release.dispatchPossible===true,source:data.release.source||null,sourceFingerprint:data.release.approval?.sourceFingerprint||null}];
     data.release={...data.release,
       state:'RESTORE_REVIEW_REQUIRED',dispatchPossible:false,
       approval:null,reason:'RESTORED_APPROVAL_IS_HISTORY'};
   }
   if(typeof key==='string'&&key.startsWith('ai-job:')&&data.job){
+    if(!data.job.restoredOriginal){const raw=structuredClone(data.job);delete raw.restoredOriginal;data.job.restoredOriginal=raw;}
+    data.job.restoredEffects=[...(data.job.restoredEffects||[]),{state:data.job.state,native:data.job.native?.state||null}];
     data.job={...data.job,state:'TESTS_UNVERIFIED',
       hold:'RESTORED_TESTS_NEED_NEW_OBSERVATION',executionSlotReleased:true};
   }
   if(typeof key==='string'&&key.startsWith('writeback:')&&data.record){
-    data.record={...data.record,state:'RESTORE_REVIEW_REQUIRED'};
+    data.record={...data.record,restoredHistorical:true,
+      restoredEffects:data.record.state==='RESTORE_REVIEW_REQUIRED'&&data.record.restoredEffects?.length?data.record.restoredEffects:[...(data.record.restoredEffects||[]),{state:data.record.state}],
+      state:data.record.state==='CONFIRMED'?'CONFIRMED':'RESTORE_REVIEW_REQUIRED'};
   }
   if(key==='writeback-settings'&&data.setting){
     data.setting={...data.setting,autoEnabled:false};
   }
   if(key==='backup:auto-state'&&data.state){
-    data.state={...data.state,enabled:false,active:null,
-      status:'SUSPENDED',code:'RESTORED_KEY_NOT_AUTHORITY'};
+    data.historicalArchives=structuredClone(data.state.archives||[]);
+    data.state={...data.state,enabled:false,active:null,archives:[],
+      lastSuccessDay:-1,lastAttemptDay:-1,nextAttemptAt:0,freshRequest:null,
+      status:'SUSPENDED',code:'RESTORED_FILE_NOT_VERIFIED'};
   }
-  if(key==='backup:manual-active'){
+  if(['backup:manual-active','backup:manual-last-complete'].includes(key)){
     data.status='RESTORED_HISTORY_ONLY';data.downloadId=null;
     data.tier=0;data.code='RESTORED_FILE_NOT_VERIFIED';
   }
@@ -83,8 +94,9 @@ function inertMeta(key,row,remap,existing=null){
 // Preserve reliable *destination* removals even for replace mode. The
 // archived account is not authority to undo a later local removal.
 export function prepareRestoredCanonical({incoming,current,mode='merge',
-  uidRemap={},fresh=false,accountChoices={}}={}){
+  uidRemap={},targetBindings=null,fresh=false,accountChoices={}}={}){
   validatePcmsSnapshot(incoming);validatePcmsSnapshot(current);
+  incoming=splitPortableLocal(incoming).pcms;current=splitPortableLocal(current).pcms;
   if(!['merge','replace'].includes(mode))deny('RESTORE_MODE_INVALID');
   if(!uidRemap||typeof uidRemap!=='object'||Array.isArray(uidRemap))
     deny('RESTORE_UID_MAP_INVALID');
@@ -103,7 +115,7 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
     typeof row.key==='string'&&row.key.startsWith('account:')&&
     row.value?.account).map(row=>({id:row.value.account.accountId,
       account:row.value.account}));
-  const excluded=new Set();
+  const excluded=new Set(),selectedRemoved=new Set();
   for(const {id,account} of incomingAccounts){
     if(typeof id!=='string'||!id||
        accountChoices[id]&&!['INCLUDE_INACTIVE','EXCLUDE'].includes(accountChoices[id]))
@@ -113,11 +125,13 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
       localRemoval.state==='REMOVED_ONLY_LOCALLY'&&
       Number.isSafeInteger(localRemoval.revision)&&
       localRemoval.revision>(Number.isSafeInteger(account.revision)?account.revision:0);
-    if(localRemoval&&!newer)deny('RESTORE_REMOVAL_HISTORY_AMBIGUOUS');
+    if(localRemoval&&!newer&&local.get('account:'+id)?.account?.restoredRemovalRevision!==localRemoval.revision)
+      deny('RESTORE_REMOVAL_HISTORY_AMBIGUOUS');
     if(newer){
-      if(accountChoices[id]==='INCLUDE_INACTIVE')
-        deny('RESTORE_REMOVED_ACCOUNT_REQUIRES_SEPARATE_REVIEW');
-      excluded.add(id);historical.set(id,localRemoval);continue;
+      historical.set(id,localRemoval);
+      if(accountChoices[id]==='INCLUDE_INACTIVE')selectedRemoved.add(id);
+      else excluded.add(id);
+      continue;
     }
     if(accountChoices[id]==='EXCLUDE'){excluded.add(id);continue;}
     if(fresh&&accountChoices[id]!=='INCLUDE_INACTIVE')
@@ -131,8 +145,17 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
   // last-known-good files; importing a different profile's receipts as live
   // controller state would either lose the local good copy or invent one.
   const localBackupEvidence=key=>typeof key==='string'&&
-    (key==='backup:auto-state'||key==='backup:manual-active'||
+    (key==='backup:auto-state'||key==='backup:manual-active'||key==='backup:manual-last-complete'||
      key.startsWith('backup:v2:'));
+  const exitKey='network:s01:exit-ownership-v1';
+  const sourceExits=incoming.stores.meta.find(r=>r.key===exitKey)?.value;
+  const currentExits=local.get(exitKey);
+  const affectedAccounts=incomingAccounts.filter(a=>!excluded.has(a.id)).map(a=>a.id);
+  const accountTargets=targetBindings===null?null:Object.fromEntries(incomingAccounts.filter(a=>!excluded.has(a.id)).map(({id,account})=>{
+    const personaUid=uidRemap[account.personaUid];
+    return [id,{personaUid,bindingId:targetBindings[personaUid]||null}];
+  }));
+  const mergedExits=sourceExits||currentExits?mergeRestoredExitLedgers(sourceExits,currentExits,{uidRemap,affectedAccounts,accountTargets}):null;
   const stores={};
   for(const name of DB_STORES){
     const previous=current.stores[name].map(copyRow);
@@ -154,6 +177,16 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
         value.status='HELD_UNCERTAIN';value.revision=(Number.isSafeInteger(value.revision)?value.revision:0)+1;
       }
       if(name==='meta')inertMeta(row.key,row,uidRemap,priorByKey.get(keyOf(row)));
+      if(name==='meta'&&selectedRemoved.has(value?.account?.accountId)){
+        const a=value.account,prior=priorByKey.get(keyOf(row))?.account;
+        a.state='VERIFICATION_PENDING';a.identity=null;a.override=null;a.removed=null;
+        a.revision=Math.max(a.revision,historical.get(a.accountId).revision+1);
+        a.bindingVersion=Math.max(a.bindingVersion,(prior?.bindingVersion||0)+1);
+        a.restoredRemovalRevision=historical.get(a.accountId).revision;
+        a.boundPrincipal=prior?.boundPrincipal||a.boundPrincipal||null;
+        a.history=[...(a.history||[]),{event:'RESTORED_INACTIVE_AFTER_LOCAL_REMOVAL',
+          removalRevision:historical.get(a.accountId).revision}];
+      }
       if(name==='observations'&&value&&typeof value==='object'){
         value.restoredHistorical=true;
       }
@@ -180,14 +213,17 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
       if(name==='meta'&&typeof item.key==='string'&&
         item.key.startsWith('removal:')&&historical.has(
           item.key.slice('removal:'.length)))continue;
-      if(name==='meta'&&item.key==='network:s01:exit-ownership-v1'&&
-        map.has(key)&&!exact(map.get(key).value,item.value))
-        deny('RESTORE_EXIT_HISTORY_CONFLICT');
-      if(map.has(key)&&!exact(map.get(key).value,item.value)&&
+      if(name==='meta'&&item.key==='network:s01:exit-ownership-v1'){
+        item.value=mergedExits;
+        map.set(key,item);continue;
+      }
+      const explicitlyRecovered=name==='meta'&&selectedRemoved.has(item.value?.account?.accountId);
+      if(!explicitlyRecovered&&map.has(key)&&!exact(map.get(key).value,item.value)&&
         !exact(serializeClone(map.get(key).value),rawByKey.get(key)))
         deny('RESTORE_MERGE_CONFLICT');
       map.set(key,item);
     }
+    if(name==='meta'&&mergedExits)map.set(JSON.stringify(exitKey),{key:exitKey,value:mergedExits});
     stores[name]=[...map.values()].sort((a,b)=>{
       const x=a.key,y=b.key;
       if(typeof indexedDB!=='undefined'&&typeof indexedDB.cmp==='function')
@@ -203,6 +239,34 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
   const accounts=new Map(stores.meta.filter(r=>typeof r.key==='string'&&
     r.key.startsWith('account:')&&r.value?.account)
     .map(r=>[r.value.account.accountId,r.value.account]));
+  const restoredIds=new Set(incomingAccounts.filter(a=>!excluded.has(a.id)).map(a=>a.id));
+  const ledger=stores.meta.find(r=>r.key==='network:s01:exit-ownership-v1')?.value;
+  for(const binding of Object.values(ledger?.bindings||{})){
+    const account=accounts.get(binding.accountId);
+    if(account&&restoredIds.has(account.accountId))account.bindingId=binding.bindingId;
+  }
+  if(accountTargets)for(const [id,target] of Object.entries(accountTargets)){
+    const account=accounts.get(id);if(!account)continue;
+    account.bindingId=target.bindingId;account.upgrade=null;
+    account.routeStatus='HELD';account.routeCode='RESTORED_ROUTE_REVERIFICATION';
+  }
+  // Non-authorizing source locators follow the selected account, while their
+  // original evidence stays inspectable. Effect journals are never retargeted.
+  for(const row of stores.meta){
+    if(typeof row.key!=='string')continue;
+    const association=row.key.startsWith('adoption:')?row.value?.adoption:
+      row.key.startsWith('source-link:')?row.value?.link:
+      row.key.startsWith('identity-alias:')?row.value?.identity:null;
+    const account=association&&accounts.get(association.accountId);
+    if(!account||!restoredIds.has(account.accountId))continue;
+    association.restoredContextHistory=[...(association.restoredContextHistory||[]),{
+      personaUid:association.personaUid||null,bindingVersion:association.bindingVersion,
+      accountRevision:association.accountRevision,principalFingerprint:association.principalFingerprint||null}];
+    association.personaUid=account.personaUid;
+    association.bindingVersion=account.bindingVersion;
+    association.accountRevision=account.revision;
+    association.restoredOwnerReverificationRequired=true;
+  }
   const uidOwners=new Map();
   for(const a of accounts.values()){
     if(a.state==='ARCHIVED')continue;
@@ -234,4 +298,32 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
   const snapshot={schema:1,stores};
   validatePcmsSnapshot(snapshot);
   return snapshot;
+}
+
+// Validate all deterministic canonical conflicts before installing an import
+// guard or changing donor data. New Persona UIDs are donor-owned and unknown
+// until creation; distinct provisional IDs check structure without claiming
+// an identity observation. The final plan is recomputed with observed UIDs.
+export function preflightRestoredCanonical({incoming,current,donor,mappings,
+  currentDonor,mode,fresh,accountChoices}){
+  const uidRemap=Object.create(null),targetBindings=Object.create(null);
+  const sourceAccounts=incoming.stores.meta.filter(r=>typeof r.key==='string'&&r.key.startsWith('account:')).map(r=>r.value?.account).filter(Boolean);
+  const localAccounts=current.stores.meta.filter(r=>typeof r.key==='string'&&r.key.startsWith('account:')).map(r=>r.value?.account).filter(Boolean);
+  for(const [i,p] of (donor.personas||[]).entries()){
+    const source=p.profile?.personaUid;
+    if(!source)continue;
+    const target=mappings[p.key];
+    const known=target!=='__create__'&&currentDonor.state.profiles?.[target]?.personaUid;
+    const targetProfile=target!=='__create__'&&currentDonor.state.profiles?.[target];
+    const tag=targetProfile?.pcmsBindingId||null;
+    if(tag){
+      const sourceAccount=sourceAccounts.find(a=>a.personaUid===source);
+      const destinationAccount=localAccounts.find(a=>a.personaUid===known&&a.bindingId===tag);
+      if(!sourceAccount||!destinationAccount||sourceAccount.accountId!==destinationAccount.accountId)
+        deny('RESTORE_PROTECTED_PERSONA_BELONGS_TO_OTHER_ACCOUNT');
+    }
+    uidRemap[source]=known||'restore-preflight-'+i;
+    targetBindings[uidRemap[source]]=tag;
+  }
+  return prepareRestoredCanonical({incoming,current,uidRemap,targetBindings,mode,fresh,accountChoices});
 }

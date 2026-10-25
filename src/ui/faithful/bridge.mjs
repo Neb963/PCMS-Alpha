@@ -1,3 +1,6 @@
+import {mountOperatorChecklist} from '../operator-checklist.mjs';
+import {mountBackupWorkspace} from './backup-workspace.mjs';
+import {acknowledgeIncident,incidentDestination} from './attention.mjs';
 import {createRefresherWorkspace} from './refresher-workspace.mjs';
 import {matchesReviewGroup} from '../review-queue-state.mjs';
 import {renderGitInventory,mountGitPromptEditor} from './git-workspace.mjs';
@@ -157,13 +160,15 @@ function openGlobalSearch(){
  async function search(){const query=input.value.trim(),n=++epoch;list.replaceChildren();if(query.length<2)return;
   list.append(el('p','pcms-unknown','Searching local records…'));
   const settled=await Promise.allSettled([inventory({query:query.slice(0,80),offset:0,limit:8}),accounts(),
-   readPort('pcms-s03-catalog','SEARCH_PATHS',{query,limit:8},12000),guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{after:'',limit:8,status:'ALL',query:query.slice(0,80)})]);if(n!==epoch||!overlay.isConnected)return;
+   readPort('pcms-s03-catalog','SEARCH_PATHS',{query,limit:8},12000),guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{after:'',limit:8,status:'ALL',query:query.slice(0,80)}),guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_PAGE',{after:'',limit:8,query:query.slice(0,80)})]);if(n!==epoch||!overlay.isConnected)return;
   list.replaceChildren();const inv=settled[0].status==='fulfilled'?settled[0].value:null,acc=settled[1].status==='fulfilled'?settled[1].value:null;
   const found=[];
   for(const g of inv?.items||[])found.push({kind:'Generator',label:g.slug,execute:()=>{state.gen.query=g.slug;state.gen.offset=0;overlay.remove();routeTo('generators')}});
   for(const a of acc?.accounts||[])if([a.accountId,a.alias].filter(Boolean).some(x=>x.toLowerCase().includes(query.toLowerCase())))found.push({kind:'Account',label:a.alias||a.accountId,execute:()=>{state.acct.query=a.accountId;state.acct.page=0;overlay.remove();routeTo('accounts')}});
   const paths=settled[2].status==='fulfilled'?settled[2].value:null,operations=settled[3].status==='fulfilled'?settled[3].value:null;
   for(const source of paths?.items||[])found.push({kind:'Git source',label:source.path,execute:()=>{overlay.remove();openSourceManager({slug:source.slug,initialPath:source.path.startsWith(source.folder+'/')?source.path.slice(source.folder.length+1):null})}});
+  const incidents=settled[4]?.status==='fulfilled'?settled[4].value:null;
+  for(const notice of incidents?.items||[])found.push({kind:'Incident',label:notice.code.replaceAll('_',' ')+' · '+notice.scopeId,execute:()=>{overlay.remove();void openIncident(notice)}});
   for(const op of operations?.items||[])found.push({kind:'Operation',label:op.operationId,execute:()=>{state.queue.query=op.operationId;state.queue.filter='All';overlay.remove();routeTo('work-queue')}});
   if(!found.length){list.append(el('p','pcms-unknown',inv||acc?'No matching local records.':'Local search unavailable.'));return}
   for(const f of found.slice(0,12)){const row=el('div','queue-item');const strong=el('strong','',f.label);const kind=el('span','muted small',f.kind);row.append(strong,kind,b('Open',f.execute));list.append(row)}
@@ -775,7 +780,7 @@ function displayQueue(){
         candidate.state==='EXCEPTION_READY_FOR_REVIEW'?
         'Exceptional candidate — manual evidence and incomplete tests require individual review.':
         ({IN_DEVELOPMENT:'Development and independent tests continue automatically.',DEVELOPMENT_RUNNING:'The helper is working on this candidate.',WAITING_FOR_GIT:'Saving verified source to GitHub.',APPROVED:'Approved. Publication continues automatically.',APPROVED_HELD:'Approval is saved. Inspect the current hold or cancel unsent publication.',CONFIRMED_PUBLIC:'Published source was independently confirmed.',HUMAN_DEFERRED:'Your editor is preserved. Adopt its saved source when ready.',CHANGES_REQUESTED:'Your instructions are saved. Development will resume automatically.',PUBLICATION_UNCERTAIN:'Checking a possible publication without sending it again.'})[candidate.state]||'Inspect this candidate to resolve its current hold.'));
-    const action=b('Inspect candidate',()=>void openReleaseReview(candidate.slug),'btn small'),manage=b('Manage development',()=>candidate.development?void openAiJob(candidate.slug):openReadyCandidate(candidate.readyCandidate),'btn small');
+    const action=b('Inspect candidate',()=>void openReleaseReview(candidate.slug),'btn small'),manage=b(candidate.readyCandidate?.restoredHistorical?'Recover restored source':'Manage development',()=>candidate.readyCandidate?.restoredHistorical?openReadyCandidate(candidate.readyCandidate):candidate.development?void openAiJob(candidate.slug):openReadyCandidate(candidate.readyCandidate),'btn small');
     row.classList.add('candidate-item');const actions=el('div','candidate-actions');actions.append(action,manage);
     if(candidate.providerVisibility==='PUBLIC'&&candidate.state!=='CONFIRMED_PUBLIC')actions.append(b('Update now',()=>openReadyCandidate({...candidate.readyCandidate,updateNowAvailable:true})));
     row.append(cleanPublication.checkbox(candidate.slug),detail,actions);holder.append(row);
@@ -841,7 +846,7 @@ function displayQueue(){
     CANONICAL_UNAVAILABLE:'Local records unavailable',
     OPERATION_UNCERTAIN:'Operation outcome uncertain',
     PROVIDER_OUTAGE:'Provider connection interrupted',
-    BACKUP_FAILED:'Encrypted backup needs attention'
+    BACKUP_FAILED:'Backup needs attention'
    }[n.code]||'An operational issue needs review';
    header.append(el('strong','',issueTitle),
      statusPill(n.reviewed?'Reviewed — still active':'Needs attention','amber'));
@@ -851,13 +856,14 @@ function displayQueue(){
    action.type='button';
    action.addEventListener('click',async()=>{action.disabled=true;
     try{
-     const out=await readQueueNoticeAck(n);
+     const out=await acknowledgeIncident(n,async(type,params)=>type==='ACK_NOTICE'?readQueueNoticeAck({...n,scopeId:params.scopeId,code:params.code,revision:params.expectedRevision}):guardedRead('pcms-i02-canonical-readonly',type,params));
      if(out?.ok&&out.stillActionable===true)await loadQueue(true);
-     else notify('Review not confirmed. Incident remains active.');
+     else{notify('Review not confirmed. Incident remains active.');if(out?.code==='STALE_REVISION')await loadQueue(true);}
     }catch{notify('Review not confirmed. Incident remains active.');}
     finally{action.disabled=n.reviewed;}
-   },{once:true});
-   action.disabled=n.reviewed;row.append(marker,detail,action);holder.append(row);
+   });
+   const recovery=b('Open affected item',()=>void openIncident(n),'btn small');
+   action.disabled=n.reviewed;row.append(marker,detail,recovery,action);holder.append(row);
   }
   for(const op of q.operations){
    const row=el('div','queue-item');const info=queueState[op.status]||['Not verified',''];
@@ -1057,7 +1063,7 @@ function openReadyCandidate(candidate){
  }
  const actions=el('div','form-foot');
  async function act(type){
-  if(type!=='ASSESS_READY'&&!window.confirm(
+  if(!['ASSESS_READY','REQUALIFY_RESTORED'].includes(type)&&!window.confirm(
    type==='UPDATE_NOW'?'Update this public generator now, before its normal maintenance window? PCMS will preserve its previous source, wait for safe capacity, unlist it before editing, and require your approval before publishing.':
    type==='PREPARE_LOCAL'?
     'Prepare a local, revision-bound READY stage after verifying source, protected owner, route and current editor? This does not publish or save the remote generator.':
@@ -1076,6 +1082,7 @@ function openReadyCandidate(candidate){
     UPDATE_NOW_SAFE_PUBLIC_BASELINE_REQUIRED:'The public source or a current operation needs verification before this update can start.',
     S05_PUBLIC_SLEEP_AND_UNLIST_REQUIRED:'This public generator must first complete its protected sleep/unlisting workflow.',
     S05_NONEMPTY_TARGET_REQUIRES_RECOVERABLE_PREDECESSOR:'A recoverable previous source is required before this update.',
+    RESTORED_SOURCE_REQUALIFIED:'Restored source is verified under this account. Old tests and approvals remain historical; guarded work can continue.',
     S05_LOCAL_STAGE_PINNED:'A new exact local development stage is prepared. AI execution is separate.',
     S05_EDITOR_AND_NATIVE_ADMISSION_REQUIRED:'The editor and native AI prerequisites require separate verification.',
     READY_OPERATOR_PAUSED:'This generator is paused.',
@@ -1087,12 +1094,14 @@ function openReadyCandidate(candidate){
       'This operation cannot proceed until the current owner, source and protected editor are verified.');
   }catch{status.textContent='Outcome unavailable. Refresh the READY candidate before another action.'}
   await loadQueue(true);
+  [...actions.querySelectorAll('button')].forEach(x=>x.disabled=false);
  }
  const assess=b('Assess prerequisites',()=>void act('ASSESS_READY'),'btn small');
 
  const pause=b(candidate.hold==='OPERATOR_PAUSED'?'Resume READY work':'Pause READY work',
   ()=>void act(candidate.hold==='OPERATOR_PAUSED'?'RESUME_READY':'PAUSE_READY'),'btn small');
  if(candidate.updateNowAvailable)actions.append(b('Update now',()=>void act('UPDATE_NOW'),'btn primary'));
+ if(candidate.restoredHistorical)actions.append(b('Recheck restored source',()=>void act('REQUALIFY_RESTORED'),'btn primary'));
  actions.append(pause,assess);body.append(facts,status,actions);panel.append(head,body);
  overlay.append(panel);root.append(overlay);
  overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
@@ -1199,6 +1208,23 @@ function openOperationRecord(op){
  overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
  header.querySelector('button')?.focus();
 }
+async function openIncident(n){
+ const target=incidentDestination(n);
+ if(target.kind==='SETTINGS'){
+  if(target.id==='refresher'){routeTo('refresher');return}
+  state.settings=target.id;routeTo('settings');return;
+ }
+ if(target.kind==='ACCOUNT'){
+  const response=await accounts(),account=response?.accounts?.find(a=>a.accountId===target.id);
+  if(account){openAccountManager(account);return}
+  state.acct.query=target.id;routeTo('accounts');notify('The affected account could not be read. Retry its account details.');return;
+ }
+ if(target.kind==='GENERATOR'){
+  if(n.code==='GIT_FOLDER_RENAME_REVIEW'){state.queue.query=target.id;state.queue.filter='All';routeTo('work-queue');return}
+  openSourceManager({slug:target.id});return;
+ }
+ state.queue.query=target.id;state.queue.filter='All';routeTo('work-queue');
+}
 function readQueueNoticeAck(n){
  return new Promise((resolve,reject)=>{
   const port=browser.runtime.connect({name:'pcms-i02-canonical-readonly'});
@@ -1214,7 +1240,7 @@ function readQueueNoticeAck(n){
 function displayOverview(){if(state.route!=='overview')return;
  const epoch=state.renderEpoch;
  const cards=[...page().querySelectorAll('.stat-grid .stat-card')];
- for(const [i,label] of ['Managed generators','Refresher','Work requiring attention','Last verified backup'].entries())
+ for(const [i,label] of ['Managed generators','Refresher','Work requiring attention','Last completed backup'].entries())
   cards[i]?.querySelector('.stat-label')?.replaceChildren(document.createTextNode(label));
  function stat(index,value,note){
   const card=cards[index];if(!card)return;
@@ -1233,7 +1259,8 @@ function displayOverview(){if(state.route!=='overview')return;
   guardedRead('pcms-i02-canonical-readonly','NOTICE_SUMMARY'),
   guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{limit:8,status:'NEEDS_ACTION'}),
   guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_PAGE',{limit:8}),
-  guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{limit:8,status:'RUNNING'})
+  guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{limit:8,status:'RUNNING'}),
+  portableBackupCommand({action:'STATUS'})
  ]).then(results=>{
   if(!still())return;
   const val=i=>results[i].status==='fulfilled'&&results[i].value?.ok?results[i].value:null;
@@ -1259,7 +1286,7 @@ function displayOverview(){if(state.route!=='overview')return;
       (x.effectType||'Recorded operation').replaceAll('_',' ')),
       el('div','row-meta',x.severity?'Still requires review':
         'Target '+x.targetId+' · '+(queueState[x.status]?.[0]||'Unknown status')));
-    row.append(body,b('Open Work Queue',()=>routeTo('work-queue')));panel.append(row);
+    row.append(body,b(x.severity?'Open affected item':'Inspect operation',()=>x.severity?void openIncident(x):openOperationRecord(x)));panel.append(row);
    }
   };
   listRows(0,[...(inc?.items||[]),...(ops?.items||[])].slice(0,8));
@@ -1268,7 +1295,10 @@ function displayOverview(){if(state.route!=='overview')return;
    if(holder){holder.replaceChildren();renderEmpty(holder,'No independent local proof has been loaded for this section.')}}
   // A native host or downloaded archive being present does not establish
   // an independently verified and recoverable backup.
-  stat(3,'—','Independent backup/restore evidence not loaded');
+  const backup=val(7),good=backup?.lastSuccess;
+  stat(3,good?new Date(good.completedAt||good.day*86400000).toLocaleDateString():'—',
+    good?'Firefox completed '+(good.kind==='MANUAL'?'manual':'daily')+' backup'+(backup.manual?.status==='FAILED'?' · latest manual attempt failed':''):
+    backup?'No completed backup recorded':'Backup status unavailable');
   state.queue.summary=summary?.ok?{...summary,attention:noticeTotals}:null;updateNav();
  });
 }
@@ -1716,13 +1746,13 @@ function primaryAiSettings(container){
  void refresh();
 }
 // I16 restore remains implemented by the original protected stage runner.
-// This primary workflow mirrors its encrypted files and explicit review
-// controls; it never reimplements or bypasses the restore gate.
+// Primary file inspection and choices bind the same guarded restore engine.
 function primaryRestore(container){
- const section=primarySettingCard(container,'Restore portable backup',
-   'Inspect the complete plain archive and an independent pre-restore checkpoint. Imported routes, sessions and publication rights remain inactive.');
+ const section=primarySettingCard(container,'Restore a backup','');
+ section.querySelector('h2').id='pcms-restore-title';section.querySelector('p')?.remove();
  const tpl=document.createElement('template');tpl.innerHTML=portableRestoreTemplate;
  const form=tpl.content.firstElementChild;
+ form.querySelector('.panel-head')?.remove();
  form.className='form-stack';
  for(const input of form.querySelectorAll('input:not([type=checkbox]), select, textarea'))
    input.classList.add('form-input');
@@ -1752,58 +1782,11 @@ function portableBackupCommand(message,timeoutMs=90000){
  });
 }
 function primaryBackups(container){
- const section=primarySettingCard(container,'Portable backup',
-  'Passwordless, unencrypted, source-complete archive. Firefox download completion does not independently verify disk bytes.');
- const status=el('p','setting-note','Reading portable backup receipts…');status.setAttribute('role','status');
- const actions=el('div','form-foot');
- const dailyLabel=el('label','setting-option');
- const daily=el('input');daily.type='checkbox';
- dailyLabel.append(daily,document.createTextNode(' Daily automatic backups (up to 14 tracked copies)'));
- section.append(dailyLabel,actions,status);
- const run=async (message,feedback)=>{
-  for(const button of actions.querySelectorAll('button'))button.disabled=true;
-  status.textContent=feedback;
-  try{
-   const r=await portableBackupCommand(message);
-   if(r?.ok&&message.action==='ENABLE')daily.checked=r.enabled===true;
-   status.textContent=r?.ok?
-    message.action==='MANUAL'&&r.code==='BROWSER_REPORTED_COMPLETE'?
-     'Firefox reports the archive download completed: '+r.bytes+' bytes, SHA-256 '+r.sha256+'. Independent disk readback not performed.':
-     'Backup operation: '+(r.code||r.status||'ACKNOWLEDGED')+'. Check receipts before repeating uncertain effects.':
-    'Backup held: '+(r?.code||'BACKUP_RESULT_UNKNOWN')+'. No additional download will be inferred or replayed.';
-  }catch{status.textContent='Backup result uncertain. Check durable receipts and Firefox Downloads before retrying.'}
-  finally{for(const button of actions.querySelectorAll('button'))button.disabled=false;}
- };
- const manual=b('Download complete backup',()=>void run({action:'MANUAL'},'Collecting exact source, sessions and recovery records…'),'btn primary');
- const save=b('Save daily schedule',()=>void run({action:'ENABLE',enabled:daily.checked},'Updating persistent daily schedule…'),'btn small');
- const now=b('Run daily backup now',()=>void run({action:'RUN_NOW'},'Checking durable backup schedule and receipts…'),'btn small');
- const refresh=b('Check receipts',()=>void (async()=>{
-  const r=await portableBackupCommand({action:'STATUS'});
-  if(!r?.ok){status.textContent='Backup status unavailable: '+(r?.code||'UNKNOWN');return}
-  daily.checked=r.enabled===true;
-  const manual=r.manual?(' Last manual: '+r.manual.status+' ('+r.manual.code+').'):'';
-  status.textContent='Daily: '+(r.status||r.code||'NOT_OBSERVED')+
-   '. Tracked successes: '+(r.retained??'unknown')+'.'+manual+
-   ' Unknown download effects are held rather than repeated.';
- })(),'btn small');
- const audit=b('Audit stored source',()=>void (async()=>{
-  audit.disabled=true;let db;
-  try{
-   db=await openCanonicalDatabase();
-   const auditState=await snapshotCanonicalV2(db,{serializedValues:true});
-   const outcome=await preflightSourceRecovery(auditState);
-   status.textContent='Local source closure: '+outcome.manifests+' manifests, '+
-    outcome.uniqueBlobs+' blobs, '+outcome.uniqueBytes+' bytes. No disk-backup proof implied.';
-  }catch(error){status.textContent='Source audit held: '+String(error?.message||'UNKNOWN').slice(0,90)}
-  finally{try{db?.close()}catch{}audit.disabled=false}
- })(),'btn small');
- actions.append(manual,save,now,refresh,audit);
- void refresh.click();
- primaryRestore(container);
+ mountBackupWorkspace(container,{card:primarySettingCard,el,b,request:portableBackupCommand,mountRestore:primaryRestore});
 }
 function primaryDiagnostics(container){
  const section=primarySettingCard(container,'Operational diagnostics',
-  'Runs through real guarded services for explicitly designated disposable resources. External process and disk evidence is NOT_TESTED unless independently measured.');
+  'Check each module, review saved results and test with a dedicated account when needed.');
  const tpl=document.createElement('template');tpl.innerHTML=diagnosticTemplate;
  const form=tpl.content.firstElementChild;form.className='form-stack';
  for(const input of form.querySelectorAll('input:not([type=checkbox]), select, textarea'))
@@ -1811,6 +1794,7 @@ function primaryDiagnostics(container){
  for(const button of form.querySelectorAll('button'))button.classList.add('btn','small');
  section.append(form);
  mountDiagnosticController(section);
+ mountOperatorChecklist(container,{card:primarySettingCard,el,b});
 }
 function renderSettingsSection(){if(state.route!=='settings')return;
  const names=['connections','automation','ai','backups','diagnostics','advanced'];
@@ -1913,6 +1897,10 @@ async function mount(){
  const legacy=document.querySelector('body > .app');
  if(legacy)legacy.inert=true; // no hidden workflow focus or operator input
  document.body.classList.add('pcms-faithful-ready');
+ window.addEventListener('pcms-find-test-generator',event=>{
+  const slug=event.detail?.slug;if(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug))return;
+  state.gen.query=slug;state.gen.offset=0;routeTo('generators');
+ });
  window.addEventListener('hashchange',()=>{const dest=location.hash.slice(1);if(routes.includes(dest)&&dest!==state.route){state.route=dest;void render()}});
  // Foreground projection reads the same canonical background ports. Never
  // mirror an inaccessible hidden controller or infer completion from its DOM.

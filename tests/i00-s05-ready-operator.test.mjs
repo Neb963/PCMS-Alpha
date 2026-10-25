@@ -290,3 +290,20 @@ test('J04 explicit Update now preserves active/sleep budgets and is scoped to ex
   const completed=reconcileShadow(saved,[{...inv,ownerVerified:true,releaseVerified:true,releaseFingerprint:H,updateNowComplete:true}]).state.rows[0];assert.equal(completed.updateNow,undefined);assert.deepEqual([completed.phase,completed.activeRemaining,completed.sleepRemaining],['ACTIVE',123456,0]);
  }
 });
+
+test('J06 primary source requalification uses current guarded source/Git/editor reads and records no provider effect',async()=>{
+ const {exactSource}=await import('../src/runtime/staging-core.mjs');
+ for(const dirtyEditor of [true,false]){
+  const h=setup({dirtyEditor}),ready=createReadyStore(h.db);await ready.observe(witness);
+  await ready.handoff(id,1,{source:'TRUSTED_S05_ADMISSION_BOUNDARY',accountOwnerVerified:true,protectedRouteReady:true,completeRecoverableBaseline:true,humanEditorClean:true,noUncertainWriter:true,writerIdle:true,nativeIdle:true,providerEffectResolved:true,approvalEffectResolved:true});
+  const current={...account,identity:{...account.identity,bindingVersion:1}},empty=await exactSource([{path:'main.pjs',base64:''},{path:'index.html',base64:''}]);
+  const stage={slug:id,revision:4,state:'PINNED',restoredHistorical:true,accountId:current.accountId,accountRevision:1,personaUid:'old-persona',bindingVersion:0,principalFingerprint:H,remotePublicId:inventory.remoteId,candidate:await exactSource(blobs),previous:empty,nonce:'f'.repeat(32),readyIdentifier:witness.identifier,readyInputFingerprint:H};
+  await seed(h.db,[{key:'account:'+current.accountId,account:current},{key:'source-link:'+id,link},{key:'inventory:'+id,generator:inventory},{key:'stage:'+id,record:stage}]);
+  const out=await h.operator.run({type:'REQUALIFY_RESTORED',params:{slug:id,expectedRevision:2}},h.sender);
+  assert.equal(out.ok,!dirtyEditor,JSON.stringify(out));
+  assert.equal(out.code,dirtyEditor?'RESTORED_EDITOR_NOT_IDLE':'RESTORED_SOURCE_REQUALIFIED');
+  const stored=h.db.read('meta','stage:'+id).record;
+  assert.equal(stored.revision,dirtyEditor?4:5);assert.equal(stored.personaUid,dirtyEditor?'old-persona':current.personaUid);
+  assert.deepEqual(h.effects,['vault:git.get']);
+ }
+});

@@ -309,7 +309,19 @@ function createPcmsEnrollmentDonor(){
       try{
         return await localMutationFence(p.containerId,async()=>
           {
-          await personaPlatform.remove(p.containerId);
+          if((await browser.tabs.query({cookieStoreId:p.containerId})).length||
+             (await listActiveProfileIds()).includes(p.containerId))
+            return {ok:false,code:'PERSONA_IN_USE'};
+          const current=await getState(),target=current.profiles?.[p.containerId];
+          if(target?.personaUid!==p.personaUid||target?.pcmsBindingId!==p.pcmsBindingId)
+            return {ok:false,code:'PERSONA_CHANGED'};
+          const permit=target.pcmsBindingId?issueBoundPersonaDeletePermit({
+            bindingId:target.pcmsBindingId,contextId:p.containerId,personaUid:p.personaUid}):null;
+          // The donor checks this revision BEFORE deleting the actual Firefox
+          // container. The one-use permit allows only its exact cleanup commit.
+          await personaPlatform.remove(p.containerId,{
+            expectedRevision:current.__stateMeta.revision,expectedBootId:current.__stateMeta.bootId,
+            ...(permit?{pcmsStagePermit:permit}:{})});
           const after=await getState();
           if(Object.values(after.profiles||{}).some(x=>String(x?.personaUid||'').toLowerCase()===String(personaUid).toLowerCase()))
             return {ok:false,code:'PERSONA_REMOVAL_UNCONFIRMED'};
@@ -372,7 +384,7 @@ export async function applyI01Overlay(root, stage) {
   await writeFile(mgPath, mg);
   let bg = await readFile(bgPath, 'utf8');
   bg = substituteOnce(bg, 'import { installRoutingHandlers } from "./lib/routing-gate.js";',
-    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { inspectRoutePin, routePinsReady, reloadRoutePins } from "./pcms/route-pin.mjs";\nimport { issueBoundPersonaCreatePermit, issueExistingPersonaTagPermit } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest, fetchViaExit as pcmsFetchViaExit } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain, perchanceRefresherCleanMain } from "./pcms/perchance-existing.mjs";\nimport { choosePrivateStageAdapter } from "./pcms/ready-native-source.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";\nimport { createHumanEditorBridge, handoffHumanEditor } from "./pcms/human-editor-bridge.mjs";\nimport { createManualEditorBridge } from "./pcms/manual-editor-bridge.mjs";\nimport { createStageEditorBridge } from "./pcms/stage-editor-bridge.mjs";',
+    'import { installRoutingHandlers } from "./lib/routing-gate.js";\nimport { inspectRoutePin, routePinsReady, reloadRoutePins } from "./pcms/route-pin.mjs";\nimport { issueBoundPersonaCreatePermit, issueExistingPersonaTagPermit, issueBoundPersonaDeletePermit } from "./pcms/pcms-donor-fence.mjs";\nimport { nativeRequest, fetchViaExit as pcmsFetchViaExit } from "./lib/mullvad-native.js";\nimport { attachPcmsGuard } from "./pcms/persona-guard.mjs";\nimport { attachPcmsBackupDonor } from "./pcms/backup-auto-donor.mjs";\nimport { attachPcmsRestoreDonor } from "./pcms/restore-donor.mjs";\nimport { preserveUnselectedDonorSources } from "./pcms/restore-preserve.mjs";\nimport { destinationOwnedPortable } from "./pcms/restore-identities.mjs";\nimport { buildImportedState } from "./lib/backup-import.js";\nimport { perchanceReadIsolated } from "./pcms/perchance-observer.mjs";\nimport { perchanceReleaseMain } from "./pcms/perchance-release.mjs";\nimport { perchanceExistingMain, perchanceRefresherCleanMain } from "./pcms/perchance-existing.mjs";\nimport { choosePrivateStageAdapter } from "./pcms/ready-native-source.mjs";\nimport { perchanceMonitorIsolated } from "./pcms/perchance-monitor.mjs";\nimport { perchanceSupplyIsolated } from "./pcms/perchance-supply.mjs";\nimport { perchanceStageMain } from "./pcms/perchance-stage.mjs";\nimport { renderPcmsEditorStrip } from "./pcms/editor-strip.mjs";\nimport { perchanceEditorProbe } from "./pcms/perchance-editor-probe.mjs";\nimport { perchanceAiNative } from "./pcms/perchance-ai-native.mjs";\nimport { perchanceAiPreviewCheck } from "./pcms/perchance-ai-oracle.mjs";\nimport { perchanceAiOpfsProbe } from "./pcms/perchance-ai-opfs.mjs";\nimport { perchanceAiHistoryCredentials, perchanceAiHistoryIsolated, perchanceAiTerminalHistoryIsolated } from "./pcms/perchance-ai-history.mjs";\nimport { createHumanEditorBridge, handoffHumanEditor } from "./pcms/human-editor-bridge.mjs";\nimport { createManualEditorBridge } from "./pcms/manual-editor-bridge.mjs";\nimport { createStageEditorBridge } from "./pcms/stage-editor-bridge.mjs";',
     'donor background import');
   bg = substituteOnce(bg, '\nfunction localMutationFence(profileIds, operation, mode = "block", options = {}) {',
     `
@@ -901,14 +913,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   }),
   prepare:async ({payload,mappings,mode,regeneratePersonaUids=false})=>{
     const snap=await getSnapshot(), bindings=new Map(Object.entries(mappings));
-    // The pinned donor's ordinary importer intentionally preserves a valid
-    // source UID. Fresh v2 recovery must NOT make an imported UID current
-    // authority: give each created Persona a new UID, while retaining the
-    // authenticated source UID solely for canonical historical remapping.
-    const portable=regeneratePersonaUids?
-      {...payload,personas:(payload.personas||[]).map(p=>({
-        ...p,profile:{...p.profile,personaUid:null}
-      }))}:payload;
+    const portable=destinationOwnedPortable(payload,snap.state,mappings);
     const imported=await buildImportedState({payload:portable,currentState:snap.state,
       profileBindings:bindings,mode});
     if(regeneratePersonaUids){
@@ -916,7 +921,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
       for(const p of payload.personas||[]){
         const target=imported.maps.personaUid.get(p.key);
         if(typeof target!=='string'||!target||
-           target===p.profile?.personaUid||seen.has(target))
+           seen.has(target))
           throw Error('RESTORE_FRESH_PERSONA_UID_NOT_REGENERATED');
         seen.add(target);
       }
@@ -929,6 +934,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
     // contextual identity into the local unmanaged/Direct routing policy.
     // Unselected destination Personas remain owned and unchanged.
     const targetIds=new Set(bindings.values());
+    preserveUnselectedDonorSources(imported,snap.state,targetIds);
     for(const [id,profile] of Object.entries(snap.state.profiles||{})){
       if(!targetIds.has(id))
         imported.state.profiles[id]=structuredClone(profile);
@@ -951,6 +957,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
     return {candidate:imported.state,sourcePersonas:(payload.personas||[]).map(p=>({
       sourceUid:p.profile?.personaUid||null,
       targetUid:imported.maps.personaUid.get(p.key)||null,
+      bindingId:imported.state.profiles?.[bindings.get(p.key)]?.pcmsBindingId||null,
       sourceId:p.sourceId||null,
       containerId:bindings.get(p.key)})),
       cookieMap:Object.fromEntries([...imported.maps.profile]),
@@ -982,6 +989,17 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   bg = substituteOnce(bg, "    return buildProxyInfo(effectiveRoute, details.cookieStoreId || `tab-${details.tabId}`);", "    const latestPcmsState = pcmsContext.managed ? await getState() : state;\n    if(pcmsContext.managed &&\n        (!inspectRoutePin(latestPcmsState.profiles?.[details.cookieStoreId]).allow ||\n         decision.route?.id !== latestPcmsState.profiles?.[details.cookieStoreId]?.routeId))\n      return [{...BLACKHOLE_PROXY,connectionIsolationKey:details.cookieStoreId||'pcms-stale'},null];\n    return buildProxyInfo(effectiveRoute, details.cookieStoreId || `tab-${details.tabId}`);", "S01 proxy final pin");
   bg = substituteOnce(bg, "async function handleBeforeRequest(details) {\n  await initialize();\n  const state = await getState();", "async function handleBeforeRequest(details) {\n  await initialize();\n  const state = await getState();\n  const pcmsContext = await pcmsRouteGate(state.profiles?.[details.cookieStoreId]);\n  if(pcmsContext.managed && !pcmsContext.allow) {\n    recordBlock(details,'pcms-route-not-pinned');return {cancel:true};\n  }", "S01 blocking initial pin");
   bg = substituteOnce(bg, "  return {};\n}\n\nasync function fetchMullvadRelays()", "  const latestPcmsState = pcmsContext.managed ? await getState() : state;\n  if(pcmsContext.managed &&\n     (decision.mode!=='proxy' ||\n      !inspectRoutePin(latestPcmsState.profiles?.[details.cookieStoreId]).allow ||\n      decision.route?.id !== latestPcmsState.profiles?.[details.cookieStoreId]?.routeId)) {\n    recordBlock(details,'pcms-route-pin-changed');return {cancel:true};\n  }\n  return {};\n}\n\nasync function fetchMullvadRelays()", "S01 blocking final pin");
+  // Reject ordinary protected-Persona deletion before its Firefox effect;
+  // the state tag fence alone runs after the frozen donor's container call.
+  bg=substituteOnce(bg,
+    'case "DELETE_PERSONA": return localMutationFence(message.profileId, async () => ({ removed: await personaPlatform.remove(message.profileId) }));',
+    `case "DELETE_PERSONA": return localMutationFence(message.profileId, async () => {
+      const state=await getState();
+      if(state.profiles?.[message.profileId]?.pcmsBindingId)
+        throw Error("Remove this managed account in PCMS before deleting its protected Persona.");
+      return {removed:await personaPlatform.remove(message.profileId,{
+        expectedRevision:state.__stateMeta.revision,expectedBootId:state.__stateMeta.bootId})};
+    });`,'protected Persona ordinary delete preflight');
   // Only PCMS enrollment supplies a deadline. Ordinary donor callers keep
   // their existing behavior; frozen donor source remains untouched.
   bg=substituteOnce(bg,'async function fetchMullvadRelays() {\n  const response = await fetch(MULLVAD_SOCKS_API, { cache: "no-store" });',
@@ -1025,14 +1043,14 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
   await writeFile(donorStoragePath,donorStorage);
 
   await writeFile(bgPath, bg);
-  for (const name of ['legacy-quarantine.mjs','creation-intake.mjs','creation-batch.mjs','creation-preview.mjs','creation-allocation.mjs','creation-authority.mjs','creation-inventory.mjs','creation-import-authority.mjs','creation-effects.mjs','creation-git.mjs','creation-git-owner.mjs','creation-git-runner.mjs','creation-runner.mjs','creation-watch.mjs','coordinator-core.mjs','coordinator-store.mjs','coordinator-boundary.mjs','s08-cleanup-boundary.mjs','pcms-donor-fence.mjs','network-ledger.mjs','route-pin.mjs','enrollment.mjs','qualified-clock.mjs','entry.mjs', 'wake.mjs', 'dashboard-action.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'git-catalog.mjs', 'git-local-secret.mjs', 'identity-reconciliation.mjs', 'git-prompt.mjs', 'catalog-bootstrap.mjs', 'catalog-import.mjs', 'catalog-import-preview.mjs', 'catalog-prompt-store.mjs', 'catalog-resume.mjs', 'catalog-declaration.mjs', 'catalog-ready-store.mjs', 'ready-planner.mjs', 'ready-git-prompt.mjs', 'ready-git-source.mjs', 'ready-native-source.mjs', 'ai-declarative-assertion.mjs', 'ready-ai-gate.mjs', 'ready-source-safety.mjs', 'ready-store.mjs', 'ready-intake.mjs', 'ready-operator.mjs', 'ready-development.mjs', 's06-output-proof.mjs', 's06-writeback-progress.mjs','s06-publication-progress.mjs','clean-bulk-authority.mjs','clean-bulk-release.mjs','clean-bulk-boundary.mjs', 's06-review-queue.mjs', 's06-request-changes.mjs', 's06-human-review.mjs', 's06-exception-review.mjs','exception-idle.mjs', 's06-standing-authority.mjs','s06-authority-bootstrap.mjs', 'readiness-boundary.mjs','catalog-boundary.mjs', 'catalog-identity-review.mjs','folder-existing-rename.mjs','folder-rename-link.mjs','folder-rename-safety.mjs','folder-identity-boundary.mjs', 'creation-catalog.mjs', 'catalog-watch.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'original-archive.mjs','adoption-recovery.mjs','adoption-recovery-bridge.mjs', 'adoption-boundary.mjs',
+  for (const name of ['legacy-quarantine.mjs','creation-intake.mjs','creation-batch.mjs','creation-preview.mjs','creation-allocation.mjs','creation-authority.mjs','creation-inventory.mjs','creation-import-authority.mjs','creation-effects.mjs','creation-git.mjs','creation-git-owner.mjs','creation-git-runner.mjs','creation-runner.mjs','creation-watch.mjs','coordinator-core.mjs','coordinator-store.mjs','coordinator-boundary.mjs','s08-cleanup-boundary.mjs','diagnostic-startup.mjs','operator-record-boundary.mjs','pcms-donor-fence.mjs','network-ledger.mjs','route-pin.mjs','enrollment.mjs','qualified-clock.mjs','entry.mjs', 'wake.mjs', 'dashboard-action.mjs', 'persona-guard.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'git-catalog.mjs', 'git-local-secret.mjs', 'identity-reconciliation.mjs', 'git-prompt.mjs', 'catalog-bootstrap.mjs', 'catalog-import.mjs', 'catalog-import-preview.mjs', 'catalog-prompt-store.mjs', 'catalog-resume.mjs', 'catalog-declaration.mjs', 'catalog-ready-store.mjs', 'ready-planner.mjs', 'ready-git-prompt.mjs', 'ready-git-source.mjs', 'ready-native-source.mjs', 'ai-declarative-assertion.mjs', 'ready-ai-gate.mjs', 'ready-source-safety.mjs','restored-source.mjs', 'ready-store.mjs', 'ready-intake.mjs', 'ready-operator.mjs', 'ready-development.mjs', 's06-output-proof.mjs', 's06-writeback-progress.mjs','s06-publication-progress.mjs','clean-bulk-authority.mjs','clean-bulk-release.mjs','clean-bulk-boundary.mjs', 's06-review-queue.mjs', 's06-request-changes.mjs', 's06-human-review.mjs', 's06-exception-review.mjs','exception-idle.mjs', 's06-standing-authority.mjs','s06-authority-bootstrap.mjs', 'readiness-boundary.mjs','catalog-boundary.mjs', 'catalog-identity-review.mjs','folder-existing-rename.mjs','folder-rename-link.mjs','folder-rename-safety.mjs','folder-identity-boundary.mjs', 'creation-catalog.mjs', 'catalog-watch.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'original-archive.mjs','adoption-recovery.mjs','adoption-recovery-bridge.mjs', 'adoption-boundary.mjs',
     'staging-core.mjs','staging-store.mjs','staging-boundary.mjs',
     'human-editor-bridge.mjs','manual-editor-bridge.mjs','stage-editor-bridge.mjs','perchance-stage.mjs','editor-strip.mjs','perchance-editor-probe.mjs','perchance-ai-native.mjs','perchance-ai-oracle.mjs','perchance-ai-opfs.mjs','perchance-ai-history.mjs','ai-supervisor.mjs','ai-testing.mjs','ai-evidence.mjs','ai-store.mjs','ai-boundary.mjs',
     'git-credential.mjs','diagnostic-ready-git.mjs','git-writeback.mjs','writeback-store.mjs','writeback-boundary.mjs',
     'update-window.mjs','release-core.mjs','release-store.mjs','release-boundary.mjs','source-review.mjs','perchance-release.mjs',
     'existing-update-core.mjs','existing-update-store.mjs','existing-update-boundary.mjs','perchance-existing.mjs',
-    'backup-auto-donor.mjs','backup-donor-port.mjs','restore-donor.mjs','restore-v2-candidate.mjs','restore-boundary.mjs','restore-reconcile.mjs','backup-auto-core.mjs','backup-auto-store.mjs','backup-auto-download.mjs',
-    'backup-auto-retention.mjs','backup-auto-export.mjs','portable-archive.mjs','portable-cut.mjs','portable-runner.mjs','portable-originals.mjs','portable-restore-stage.mjs','portable-restore-plan.mjs','source-cut-retry.mjs','backup-v2-verify.mjs','backup-auto-run.mjs','backup-auto-boundary.mjs',
+    'backup-auto-donor.mjs','backup-donor-port.mjs','restore-donor.mjs','restore-preserve.mjs','restore-identities.mjs','restore-exits.mjs','restore-v2-candidate.mjs','restore-boundary.mjs','restore-observation.mjs','work-checkpoint.mjs','restore-reconcile.mjs','backup-auto-core.mjs','backup-auto-store.mjs','backup-auto-download.mjs',
+    'backup-auto-retention.mjs','backup-auto-export.mjs','portable-archive.mjs','portable-local.mjs','functional-restore.mjs','portable-cut.mjs','portable-runner.mjs','portable-originals.mjs','portable-restore-stage.mjs','portable-restore-plan.mjs','source-cut-retry.mjs','backup-v2-verify.mjs','backup-auto-run.mjs','backup-auto-boundary.mjs',
     'refresher-native.mjs','refresher-qualified-clock.mjs','refresher-browser-clock.mjs','refresher-adopted.mjs','refresher-admission.mjs','refresher-effect-core.mjs','refresher-core.mjs','refresher-store.mjs','refresher-boundary.mjs','perchance-monitor.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }

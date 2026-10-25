@@ -4,6 +4,7 @@ import {webcrypto} from 'node:crypto';
 import {fakeDatabase} from './fake-idb.mjs';
 import {createReadyStore} from '../src/runtime/ready-store.mjs';
 import {createExistingBoundary} from '../src/runtime/existing-update-boundary.mjs';
+import {createExistingStore} from '../src/runtime/existing-update-store.mjs';
 import {createStagingStore} from '../src/runtime/staging-store.mjs';
 import {exactSource} from '../src/runtime/staging-core.mjs';
 import {sealPrevious} from '../src/runtime/existing-update-core.mjs';
@@ -25,10 +26,11 @@ const link={slug,folder:'generators/'+slug,accountId,personaUid,
  bindingVersion:1,remoteId:rid};
 const inventory={slug,remoteId:rid,accountId,personaUid,
  bindingVersion:1,ownerState:'OBSERVED_OWNER'};
-const runner=async ({dirty=false,sourceChanged=false}={})=>{
+const runner=async ({dirty=false,sourceChanged=false,restored=false,retainedF=false}={})=>{
  const db=fakeDatabase();
  const previous=await exactSource(files('safe old source'));
- const candidate=await exactSource(files('source v2'));
+ const candidate=await exactSource(files('source v2')),saved=retainedF?await exactSource(files('independently saved F1')):previous;
+ const oldCandidate=await exactSource(files('old intended candidate'));
  const sealed=await sealPrevious(previous);
  assert.equal(sealed.ok,true);
  const record={slug,state:'UNLIST_CONFIRMED',revision:3,nonce,
@@ -42,12 +44,13 @@ const runner=async ({dirty=false,sourceChanged=false}={})=>{
  const g={getSafeRouteReadiness:async()=>({ready:true,
    routeId:'protected-route',cookieStoreId:'container-01'}),
   runExistingStep:async()=>{throw Error('no provider operation expected');},
-  inspectStageEditor:async()=>dirty?{ok:false,code:'EDITOR_DIRTY'}:
+  inspectSourceEditorIdle:async()=>dirty?{ok:false,code:'EDITOR_DIRTY'}:{ok:true,clean:true,source:'GUARDED_NO_LOCAL_EDITOR'},
+  inspectStageEditor:async()=>restored?{ok:false,code:'NO_OLD_EDITOR'}:dirty?{ok:false,code:'EDITOR_DIRTY'}:
    {ok:true,clean:true,source:'GUARDED_EDITOR_CLEAN'},
   observeReadOnly:async()=>({ok:true,principalFingerprint:hash,
    original:{remotePublicId:rid,ownerResult:'IS_OWNER',visibility:'UNLISTED',
-    pjs:sourceChanged?'external human edit':'safe old source',
-    html:'<div>safe old source</div>',assets:[]}})};
+    pjs:sourceChanged?'external human edit':retainedF?'independently saved F1':'safe old source',
+    html:retainedF?'<div>independently saved F1</div>':'<div>safe old source</div>',assets:[]}})};
  await new Promise((resolve,reject)=>{
    const tx=db.transaction(['meta'],'readwrite');
    tx.oncomplete=resolve;tx.onabort=()=>reject(Error('SEED_FAIL'));
@@ -61,12 +64,17 @@ const runner=async ({dirty=false,sourceChanged=false}={})=>{
    ])m.put(row);
  });
  const ready=createReadyStore(db);
+ if(restored){
+  const old={...witness,identifier:'rev-old0000001'};await ready.observe(old);
+  await ready.handoff(slug,1,{source:'TRUSTED_S05_ADMISSION_BOUNDARY',accountOwnerVerified:true,protectedRouteReady:true,completeRecoverableBaseline:true,humanEditorClean:true,noUncertainWriter:true,writerIdle:true,nativeIdle:true,providerEffectResolved:true,approvalEffectResolved:true});
+  const tx=db.transaction('meta','readwrite');tx.objectStore('meta').put({key:'stage:'+slug,record:{slug,revision:2,state:'PINNED',restoredHistorical:false,restoredParent:{revision:1},nonce,accountId,accountRevision:account.revision,personaUid,bindingVersion:1,principalFingerprint:hash,remotePublicId:rid,previous,writePrevious:saved,candidate:oldCandidate,readyIdentifier:old.identifier,readyInputFingerprint:hash}});await new Promise(r=>{tx.oncomplete=r});record.stagedFingerprint=candidate.fingerprint;if(retainedF){record.stagePreviousSource=saved;record.stagePreviousFingerprint=saved.fingerprint;}await new Promise(r=>{const t=db.transaction('meta','readwrite');t.oncomplete=r;t.objectStore('meta').put({key:'existing-update:'+slug,record})});
+ }
  await ready.observe(witness);
  const seen={effects:0};
  const boundary=createExistingBoundary(api,{
    open:async()=>db,
    guard:()=>g,
-   existingFactory:()=>({
+   existingFactory:()=>restored?createExistingStore(db):({
     getFull:async()=>({ok:true,record}),
     pinStage:async()=>({ok:true,revision:4})
    }),
@@ -83,7 +91,7 @@ const runner=async ({dirty=false,sourceChanged=false}={})=>{
  const result=await boundary.run({type:'PIN_STAGE',params:{
    slug,expectedRevision:3
  }},sender);
- return {db,ready,record,result,previous,candidate,seen};
+ return {db,ready,record,result,previous,candidate,saved,seen};
 };
 test('S05 I13 confirmed unlisting + authenticated old P admits exact new READY and stages locally',async()=>{
  const x=await runner();
@@ -108,4 +116,23 @@ test('S05 I13 refuses dirty editor or external source drift before READY admissi
   assert.equal(x.db.read('meta','stage:'+slug),undefined);
   assert.equal(x.seen.effects,0);
  }
+});
+
+test('J06 a restored never-dispatched update admits a newer READY through ordinary PIN_STAGE without an old editor or native effect',async()=>{
+ const {planReadyDevelopment}=await import('../src/runtime/ready-development.mjs');
+ const x=await runner({restored:true});assert.equal(x.result.ok,true,JSON.stringify(x.result));
+ const stage=x.db.read('meta','stage:'+slug).record;assert.equal(stage.revision,3);assert.equal(stage.readyIdentifier,witness.identifier);assert.equal(stage.previous.fingerprint,x.previous.fingerprint);assert.equal(x.seen.effects,0);
+ const desired={ok:true,record:{active:{identifier:'rev-old0000001'},desired:{identifier:witness.identifier}}};
+ assert.equal(planReadyDevelopment({ready:desired,stage:{ok:true,record:{...stage,revision:2,state:'PINNED',restoredHistorical:false,restoredParent:{revision:1},readyIdentifier:'rev-old0000001'}},existing:{ok:true,record:x.record},visibility:'UNLISTED'}).type,'PIN_STAGE');
+ const held=await runner({restored:true,dirty:true});assert.equal(held.result.ok,false);assert.equal(held.db.read('meta','stage:'+slug).record.revision,2);assert.equal(held.seen.effects,0);
+});
+
+test('J06 desired READY repins from independently saved F1 and preserves original published P and recovery',async()=>{
+ const x=await runner({restored:true,retainedF:true});assert.equal(x.result.ok,true,JSON.stringify(x.result));
+ const stage=x.db.read('meta','stage:'+slug).record,r=x.db.read('meta','existing-update:'+slug).record;
+ assert.notEqual(x.previous.fingerprint,x.saved.fingerprint);
+ assert.equal(stage.previous.fingerprint,x.previous.fingerprint);assert.equal(stage.writePrevious.fingerprint,x.saved.fingerprint);
+ assert.equal(r.previousFingerprint,x.previous.fingerprint);assert.equal(r.recovery.fingerprint,x.record.recovery.fingerprint);
+ assert.equal(r.stagePreviousSource.fingerprint,x.saved.fingerprint);assert.equal(r.stagePreviousFingerprint,x.saved.fingerprint);
+ assert.equal(stage.candidate.fingerprint,x.candidate.fingerprint);assert.equal(x.seen.effects,0);
 });

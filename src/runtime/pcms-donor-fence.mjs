@@ -3,7 +3,8 @@
 // the PCMS route pin". Ordinary donor state edits, imports or storage events
 // can never add, remove or transplant a tag; only a same-XPI one-commit permit
 // may create a NEW Block-routed tagged Persona, or tag ONE existing untagged
-// Persona in place (legacy account upgrade) with no other change.
+// Persona in place (legacy account upgrade), or remove one explicitly
+// archived account Persona with only the donor's reference cleanup.
 const BLOCK='__block__';
 const ids = v => typeof v === 'string' && /^[a-z0-9_-]{8,128}$/i.test(v);
 const permits=new WeakSet();
@@ -21,6 +22,24 @@ export function issueExistingPersonaTagPermit({bindingId,contextId,personaUid}={
   permits.add(permit);
   return permit;
 }
+export function issueBoundPersonaDeletePermit({bindingId,contextId,personaUid}={}){
+  if(!ids(bindingId)||typeof contextId!=='string'||!contextId||!ids(personaUid))
+    throw new TypeError('Invalid protected binding');
+  const permit=Object.freeze({kind:'DELETE',bindingId,contextId,personaUid});
+  permits.add(permit);return permit;
+}
+function validateDeletePermit(before,after,permit){
+  const prior=before?.profiles?.[permit.contextId];
+  if(!prior||prior.pcmsBindingId!==permit.bindingId||prior.personaUid!==permit.personaUid||
+    after?.profiles?.[permit.contextId])return false;
+  const expected=structuredClone(before);delete expected.profiles[permit.contextId];
+  if(expected.global?.unmanagedPolicy==='direct')expected.global.unmanagedPolicy='block';
+  for(const script of Object.values(expected.scripts||{}))
+    script.profileIds=(script.profileIds||[]).filter(id=>id!==permit.contextId);
+  for(const workflow of Object.values(expected.workflows||{}))
+    for(const step of workflow.steps||[])if(step.profileId===permit.contextId)step.profileId='';
+  return JSON.stringify(expected)===JSON.stringify(after);
+}
 function validateTagPermit(before,after,permit){
   const a=before?.profiles||{};
   if(Object.values(a).some(p=>p?.pcmsBindingId===permit.bindingId))return false;
@@ -37,6 +56,7 @@ function validateTagPermit(before,after,permit){
 function validateCreatePermit(before,after,permit){
   if(!permit||!permits.delete(permit))return false;
   if(permit.kind==='TAG')return validateTagPermit(before,after,permit);
+  if(permit.kind==='DELETE')return validateDeletePermit(before,after,permit);
   const a=before?.profiles||{},b=after?.profiles||{};
   if(Object.values(a).some(p=>p?.pcmsBindingId===permit.bindingId))return false;
   const added=Object.keys(b).filter(id=>!a[id]);

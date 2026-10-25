@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I06: guarded, canonical reservation admission. No web page, untrusted UI,
 // or generic public donor API can invoke a provider write. Provider execution
@@ -369,6 +370,7 @@ export function createSupplyBoundary(api,{
       });
     });
   }
+    run=checkpointed(api,run,{allowDuringRestore:message=>["GET_BATCH","LIST_BATCHES"].includes(message?.type)});
   return Object.freeze({register,run});
 }
 if(typeof browser!=='undefined')createSupplyBoundary(browser,{

@@ -1,3 +1,4 @@
+import {trackPcmsWork} from './work-checkpoint.mjs';
 // S06 standing operator authority, intentionally separate from source/route and
 // provider permission proofs. No source/Git/publication grant exists by default
 // or after restore. Scoped operator intent/read-only management is independent.
@@ -25,7 +26,7 @@ export function createS06StandingAuthority(api){
  const gate=scope=>pendingChanges===0&&loaded===true&&valid(current)&&
    Object.hasOwn(OFF,scope)&&current.grants[scope]===true;
  const enqueue=fn=>{
-   const task=serial.then(fn);
+   const task=trackPcmsWork(serial.then(fn));
    serial=task.catch(()=>{});
    return task;
  };
@@ -40,7 +41,7 @@ export function createS06StandingAuthority(api){
      disable();
      // Restored standing grants may never reactivate when the restore marker
      // is eventually cleared. Persistently revoke on a cold restart, too.
-     if(restore.held&&(!policyValid(record)||record.operatorManagement!==false||
+     if(restore.held&&restore.status!=='PREPARING'&&(!policyValid(record)||record.operatorManagement!==false||
         Object.values(record.grants).some(Boolean)||record.revocationReason!=='RESTORE_HOLD')){
        const paused=await revoke('RESTORE_HOLD');
        return {...paused,reason:'RESTORE_HOLD'};
@@ -99,7 +100,8 @@ export function createS06StandingAuthority(api){
    disable();
    await api.storage.local.set({[KEY]:next});
    if((await sentinel.inspect()).held){
-     await performRevoke('RESTORE_HOLD');return fail('RESTORE_HOLD');
+     if((await sentinel.inspect()).status!=='PREPARING')await performRevoke('RESTORE_HOLD');
+     else disable();return fail('RESTORE_HOLD');
    }
    const again=(await api.storage.local.get(CONFIG))?.[CONFIG];
    if(!configured(again)||again.repositoryId!==next.repositoryId){
@@ -122,7 +124,7 @@ export function createS06StandingAuthority(api){
    }catch{return false;}
  }
  function mutation(fn){
-   const task=mutationSerial.then(fn);mutationSerial=task.catch(()=>{});return task;
+   const task=trackPcmsWork(mutationSerial.then(fn));mutationSerial=task.catch(()=>{});return task;
  }
  function revoke(reason='EXPLICIT_OPERATOR'){
    const knownCurrent=current;disable();pendingChanges++;
@@ -152,7 +154,8 @@ export function createS06StandingAuthority(api){
        ...(valid(raw)?raw:{grants:{...OFF}}),
        revision:revision+1,operatorManagement:p.enabled,changedAt:Date.now()};
      await api.storage.local.set({[KEY]:next});
-     if((await sentinel.inspect()).held){await performRevoke('RESTORE_HOLD');return fail('RESTORE_HOLD');}
+     if((await sentinel.inspect()).held){if((await sentinel.inspect()).status!=='PREPARING')await performRevoke('RESTORE_HOLD');
+     else disable();return fail('RESTORE_HOLD');}
      return {ok:true,revision:next.revision,enabled:p.enabled};
    }
  }
@@ -177,9 +180,17 @@ export function createS06StandingAuthority(api){
    if(registered)return;registered=true;
    // Listener runs for the module lifetime even when no dashboard is open.
    api.storage.onChanged?.addListener((changes,area)=>{
-     if(area==='local'&&(changes.pcmsRestoreInProgress||changes[CONFIG])){
-       const reason=changes.pcmsRestoreInProgress?'RESTORE_HOLD':'GIT_CONFIGURATION_CHANGED';
-       disable();void revoke(reason).catch(()=>{});
+     if(area==='local'&&changes[CONFIG]){
+       disable();void revoke('GIT_CONFIGURATION_CHANGED').catch(()=>{});
+     }else if(area==='local'&&changes.pcmsRestoreInProgress){
+       const change=changes.pcmsRestoreInProgress;
+       disable();
+       // Preparation denies effective authority while retaining the operator's
+       // durable choice. Cancellation never replays a saved grant.
+       if(change.newValue?.status==='PREPARING'||
+          !change.newValue&&change.oldValue?.status==='PREPARING')
+         void enqueue(state).catch(()=>{});
+       else void revoke('RESTORE_HOLD').catch(()=>{});
      }else if(area==='local'&&changes[KEY]){disable();void enqueue(state).catch(()=>{});}
    });
    api.runtime.onConnect.addListener(port=>{

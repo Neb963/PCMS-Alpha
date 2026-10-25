@@ -31,6 +31,7 @@ test('A02 checkpoint independently matches all state except its own terminal dow
     value:{status:'PREPARING',runId:'manual_fixture'}});
   dest.currentPcms.stores.meta.push({key:'backup:manual-active',
     value:{status:'BROWSER_REPORTED_COMPLETE',runId:'manual_fixture'}});
+  dest.currentPcms.stores.meta.push({key:'backup:manual-last-complete',value:{status:'BROWSER_REPORTED_COMPLETE',runId:'manual_fixture'}});
   const proof=await verifyPortableCheckpoint({
     checkpoint,currentPcms:dest.currentPcms,currentPortable:dest.currentPortable});
   assert.equal(proof.verified,true);assert.equal(proof.tier,3);

@@ -1,3 +1,4 @@
+import {createOperatorRecords,downloadOperatorFile} from './operator-records.mjs';
 // S08 operator-initiated, resumable live diagnostic. Uses ordinary production
 // ports and canonical production receipts. Never invents a provider success.
 import {DIAGNOSTIC_CONFIG,DIAGNOSTIC_RUN,STAGES,
@@ -13,14 +14,61 @@ function refreshMountedViews(){for(const update of mountedViews)update();}
 // A07: direct primary UI mount; isolated per-view state and genuine guarded ports.
 export function mountDiagnosticController(root=document){
 const by=id=>root.querySelector('#pcms-diagnostic-'+id);
-const consent=by('consent'),xpiSha=by('xpi-sha');
+const consent=by('consent');
 const account=by('account'),namespace=by('namespace'),save=by('designate'),
  start=by('run'),resume=by('resume'),rerun=by('rerun'),exporter=by('export'),
  independentButton=by('independent-run'),independentStatus=by('independent-status'),
  independentRows=by('independent-results'),
  status=by('status'),stages=by('stages'),scope=by('scope'),cleanup=by('cleanup');
+const locate=by('locate'),gitFolder=by('git-folder'),historyLocate=by('history-locate');
+function locateRun(selected){
+ if(!selected||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(selected.slug||''))return;
+ window.dispatchEvent(new CustomEvent('pcms-find-test-generator',{detail:{slug:selected.slug}}));
+}
+locate.addEventListener('click',()=>locateRun(run));
+gitFolder.addEventListener('click',async()=>{
+ if(!run)return;
+ try{
+  const cfg=(await browser.storage.local.get('pcmsS03Git')).pcmsS03Git;
+  if(cfg?.repositoryId!==run.config.repositoryId||!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(cfg.repository||''))throw Error('REPOSITORY_CHANGED');
+  await browser.tabs.create({url:'https://github.com/'+cfg.repository+'/tree/main/generators/'+encodeURIComponent(run.slug),active:true});
+ }catch{status.textContent='Reconnect the test repository in Connections before opening its folder.'}
+});
 let busy=false,independentBusy=false,independent=null,
   configuration=null,run=null,designationError=null;
+const STAGE_LABELS={SCOPE:'Test setup',CREATE:'Private test generator',GIT_SOURCE:'Preserved source',READY:'Development input',AI_TEST:'Development and tests',GIT_WRITEBACK:'Saved source in Git',PUBLICATION:'Reviewed publication',REFRESHER:'Visibility refresh',BACKUP:'Complete backup',RESTORE:'Isolated local restore',PROCESS_RESTART:'Firefox restart',COMPLETED:'Complete'};
+const CHECK_LABELS={GIT_AUTH:'GitHub access',GIT_MAIN:'GitHub file scan',GIT_CREDENTIAL:'Saved Git credential',BACKUP_RUNTIME:'Backup service',BACKUP_ARCHIVE:'Backup archive integrity',RESTORE_LOCAL_DATA:'Local data restore',ACCOUNT_STORE:'Account records',INVENTORY_STORE:'Generator inventory',REFRESHER_POLICY:'Refresher settings',STANDING_GRANTS:'Automation permissions'};
+const OUTCOME_LABELS={PASS:'Passed',FAIL:'Failed',HELD:'Needs attention',NOT_TESTED:'Not verified',UNCERTAIN:'Checking an uncertain result',RUNNING:'Running'};
+const records=createOperatorRecords();
+const history=by('history'),historyExport=by('history-export'),historyView=by('history-view'),historyStatus=by('history-status');
+let savedReports=[];
+function selectedReport(){return savedReports.find(r=>r.key===history.value)?.record}
+function showSavedReport(){
+ const selected=selectedReport();historyExport.disabled=!selected;historyLocate.disabled=!selected?.run;
+ const report=selected?.report||selected?.independent&&independentDiagnosticExport(selected.independent);
+ historyView.textContent=report?JSON.stringify(report,null,2):'';
+ if(selected?.run)historyStatus.textContent='Test generator '+selected.run.slug+' · Last observed visibility: '+(selected.run.remoteVisibility||'not recorded')+'. Resources are preserved until you remove them explicitly.';
+}
+async function loadReports(){
+ historyStatus.textContent='Reading saved reports…';
+ try{
+  savedReports=(await records.list('ui:diagnostic-report:')).filter(r=>r.record?.run||r.record?.independent).sort((a,b)=>(b.record?.run?.updatedAt||b.record?.independent?.checkedAt||0)-(a.record?.run?.updatedAt||a.record?.independent?.checkedAt||0));
+  const chosen=history.value;history.replaceChildren();
+  for(const row of savedReports){const option=document.createElement('option');option.value=row.key;
+   const stamp=row.record?.run?.updatedAt||row.record?.independent?.checkedAt;
+   option.textContent=(row.record?.independent?'Independent checks':'Disposable diagnostic')+' · '+(stamp?new Date(stamp).toLocaleString():'Imported history')+(row.record?.run?.status?' · '+row.record.run.status:'');history.append(option)}
+  if(savedReports.some(r=>r.key===chosen))history.value=chosen;
+  historyStatus.textContent=savedReports.length+' saved report(s).';showSavedReport();
+ }catch{historyStatus.textContent='Saved reports could not be read. Retry Reload reports.'}
+}
+historyLocate.addEventListener('click',()=>locateRun(selectedReport()?.run));
+history.addEventListener('change',showSavedReport);by('history-refresh').addEventListener('click',()=>void loadReports());
+historyExport.addEventListener('click',()=>{
+ const selected=selectedReport();if(!selected)return;
+ const report=selected.report||selected.independent&&independentDiagnosticExport(selected.independent);
+ if(report)downloadOperatorFile('pcms-saved-diagnostic.json',JSON.stringify(report,null,2)+'\n','application/json');
+});
+void loadReports();
 const SCOPE_HELP={
  TEST_ACCOUNT_SELECTION_INVALID:'Select a verified test account from the list.',
  TEST_PERSONA_BINDING_INVALID:'The selected test account has no valid Persona binding. Check Accounts.',
@@ -41,7 +89,7 @@ const PORT={accounts:'pcms-i03-accounts',git:'pcms-s03-catalog',
  ai:'pcms-i10-ai',writeback:'pcms-i11-writeback',
  release:'pcms-i13-release',refresher:'pcms-i12-refresher',
  cleanup:'pcms-s08-cleanup',
- backup:'pcms-i15-backup'};
+ backup:'pcms-i15-backup',startup:'pcms-s08-startup'};
 const pause=(code)=>{const err=new Error(code);err.code=code;throw err;};
 function request(which,type,params={}){
  return new Promise((resolve,reject)=>{
@@ -63,36 +111,40 @@ function controls(){
  const locked=busy||activeDiagnosticDrive;
  save.disabled=locked;start.disabled=locked||!configuration||
    !canStartNewDiagnostic(run);
- resume.disabled=locked||!run||!run.firstFailure;
+ resume.disabled=locked||!run||!run.currentHold||run.restoredHistorical===true;
  rerun.disabled=locked||!configuration;exporter.disabled=locked||(!run&&!independent);
  independentButton.disabled=independentBusy;
  cleanup.disabled=locked||!run||run.cleanup==='VERIFIED_REMOTE_AND_GIT_ABSENT';
- account.disabled=locked;namespace.disabled=locked;xpiSha.disabled=locked;
+ locate.disabled=gitFolder.disabled=!run;
+ account.disabled=locked;namespace.disabled=locked;
 }
 function show(){
  if(designationError)scope.textContent=designationError;
- else if(configuration)scope.textContent='Test namespace '+configuration.namespace+
-  ' · Selected account '+configuration.accountId+
-  ' · Repo ID '+configuration.repositoryId+'. Other resources cannot be substituted.';
+ else if(configuration)scope.textContent='Test name '+configuration.namespace+' · '+(account.selectedOptions[0]?.textContent||'Configured test account')+'. The selected account and repository are checked before each stage.';
  else scope.textContent='Choose your dedicated test account and a test name. PCMS will verify the connection and permissions before running anything.';
  status.textContent=run?
-  'Test generator '+run.slug+' · '+run.status+' · next '+run.stage+
-  (run.firstFailure?' · '+run.firstFailure.code+(
-    run.firstFailure.code==='INITIAL_INVENTORY_UNKNOWN'?
+  'Test generator '+run.slug+' · '+(OUTCOME_LABELS[run.status]||'Waiting')+' · '+(STAGE_LABELS[run.stage]||'Check details')+
+  (run.created?' · Last observed visibility: '+(run.remoteVisibility||'unknown')+'. Test resources are preserved.':'')+
+  (run.currentHold?' · '+run.currentHold.code+(
+    run.currentHold.code==='INITIAL_INVENTORY_UNKNOWN'?
       ' — In Accounts, synchronize the generator inventory for every non-archived managed account under its verified protected route. Then Resume this same run; do not start a new slug. Independent module checks below remain available.':
-    run.firstFailure.code==='GIT_WRITE_GRANT_REQUIRED'?
+    run.currentHold.code==='GIT_WRITE_GRANT_REQUIRED'?
       ' — Grant Git in Settings → Protected workflow activation, then Resume.':
-    run.firstFailure.code==='ENABLE_GUARDED_REFRESHER_POLICY'?
+    run.currentHold.code==='ENABLE_GUARDED_REFRESHER_POLICY'?
       ' — Enable guarded marker saves in Refresher settings, then Resume.':
-    run.firstFailure.code==='EXACT_CANDIDATE_HUMAN_APPROVAL_REQUIRED'?
-      ' — Approve exact source in Publication, then Resume.':''):''):
+    run.currentHold.code==='EXACT_CANDIDATE_HUMAN_APPROVAL_REQUIRED'?
+      ' — Review the test source in Work Queue. The diagnostic continues after exact publication is verified.':
+    run.currentHold.code==='REFRESH_NOT_DUE_YET'?
+      ' — A visibility refresh is not yet due under the normal Refresher policy. Resume this stage when it becomes due; independent checks remain available.':
+    run.currentHold.code==='RESTART_FIREFOX_TO_FINISH'?
+      ' — Close Firefox completely, reopen it and return to Diagnostics. This same run will continue.':''):''):
   'No diagnostic run. No external operations attempted.';
  stages.replaceChildren();
  const list=document.createElement('ol');
  for(const name of STAGES){
   const row=document.createElement('li'),e=run?.events?.find(x=>x.stage===name);
-  row.textContent=name+' — '+(e?.outcome||'NOT_TESTED')+
-    (e?.code?' · '+e.code:'');
+  row.textContent=STAGE_LABELS[name]+' — '+(OUTCOME_LABELS[e?.outcome]||'Not tested');
+  if(e?.code){const detail=document.createElement('details'),head=document.createElement('summary');head.textContent='Details';const code=document.createElement('code');code.textContent=e.code;detail.append(head,code);row.append(detail)}
   list.append(row);
  }
  stages.append(list);
@@ -100,34 +152,36 @@ function show(){
  const checks=document.createElement('ol');
  for(const row of independent?.rows||[]){
   const li=document.createElement('li');
-  li.textContent=row.id.replaceAll('_',' ')+' — '+row.outcome+
-   ' · '+row.code+(row.tier==='GIT'?' (Git read only)':' (local read only)');
+  li.dataset.checkId=row.id;li.dataset.outcome=row.outcome;
+  li.textContent=(CHECK_LABELS[row.id]||'Module check')+' — '+(OUTCOME_LABELS[row.outcome]||'Not verified');
+  const details=document.createElement('details'),summary=document.createElement('summary'),code=document.createElement('code');summary.textContent='Details';code.textContent=row.code+' · '+row.proof;details.append(summary,code);li.append(details);
   checks.append(li);
  }
  independentRows.append(checks);
  independentStatus.textContent=independentBusy?'Checking each independent module…':
-  independent?'Independent read-only checks: '+independent.rows.filter(x=>x.outcome==='PASS').length+
-    '/'+independent.rows.length+' responded. No Perchance writes, backup file reopen, or route proof was inferred.':
+  independent?'Independent checks: '+independent.rows.filter(x=>x.outcome==='PASS').length+
+    '/'+independent.rows.length+' responded. These results do not verify live provider actions, protected exits or downloaded files.':
   'No independent checks run. These can run even when generator creation is held.';
  controls();
 }
 async function persist(){
  run.updatedAt=Date.now();
- await browser.storage.local.set({[DIAGNOSTIC_RUN]:run});
+ const written=await records.put('ui:diagnostic-report:'+run.runId,{schema:1,run:structuredClone(run),report:diagnosticReport(run)},{mirror:'RUN'});
+ if(!written?.ok)throw Error(written?.code||'OPERATOR_RECORD_WRITE_UNKNOWN');
+
  show();refreshMountedViews();
 }
 async function mark(stage,outcome,code){
  run=addDiagnosticEvent(run,stage,outcome,code,Date.now());
  run.status=outcome==='PASS'?'RUNNING':outcome;
- if(outcome==='PASS')run.firstFailure=null;
  await persist();
 }
-async function prerequisite(){
+async function prerequisite({readOnly=false}={}){
  const [accounts,git,auth]=await Promise.all([
   request('accounts','LIST_ACCOUNTS'),
   request('git','GIT_STATUS'),
-  request('auth','GET')]);
- const assessed=evaluateDisposable(run.config,accounts,git,auth);
+  readOnly?Promise.resolve(null):request('auth','GET')]);
+ const assessed=evaluateDisposable(run.config,accounts,git,auth,{readOnly});
  if(!assessed.ok)pause(assessed.code);
  return {accounts,git,auth};
 }
@@ -154,7 +208,7 @@ async function creation(){
      got.record?.accountId!==run.config.accountId)
     pause('TEST_CREATE_SCOPE_MISMATCH');
   const state=got.record.state;
-  if(state==='ASSOCIATED_NOT_READY')return 'CREATE_AND_GIT_ASSOCIATION_VERIFIED';
+  if(state==='ASSOCIATED_NOT_READY'){run.created=true;run.remoteVisibility='UNLISTED';run.remoteObservedAt=Date.now();return 'CREATE_AND_GIT_ASSOCIATION_VERIFIED';}
   // Possible external dispatch is reconciled ONLY by the existing production
   // runner, which retains the same canonical operation identity and readback fences.
   if(state==='TARGET_COLLISION_HELD')pause('TEST_SLUG_COLLISION');
@@ -185,10 +239,13 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function waitFor(label,probe,{minutes=45,every=20000}={}){
  const until=Date.now()+minutes*60000;let last=null;
  while(Date.now()<until){
+  await prerequisite();
   last=await probe();
   if(last?.done)return last.value;
-  status.textContent='Test generator '+run.slug+' · waiting for '+label+
-   (last?.code?' ('+last.code+')':'')+' · background automation continues if this page closes.';
+  const explanation=last?.code==='EXACT_CANDIDATE_HUMAN_APPROVAL_REQUIRED'?'Review the exact test source in Work Queue. This run continues after verified publication.':
+    last?.code==='REFRESH_NOT_DUE_YET'?'A visibility refresh is not yet due. Normal Refresher timing is preserved.':
+    last?.code==='AWAITING_RECENT_FEED'?'The source save is verified; waiting for its independent recent-feed observation.':'';
+  status.textContent='Test generator '+run.slug+' · waiting for '+label+'. '+explanation+' Background work continues if you open another workspace.';
   await sleep(every);
  }
  pause(last?.code||label.toUpperCase().replace(/[^A-Z]/g,'_')+'_TIMEOUT');
@@ -254,36 +311,45 @@ async function writeback(){
  },{minutes:20});
 }
 async function publication(){
- const r=await request('release','GET',{slug:run.slug});
- if(!r?.ok)pause(r?.code||'TEST_RELEASE_NOT_READY');
- if(r.state==='CONFIRMED_PUBLIC')
-   return 'HUMAN_APPROVED_PUBLICATION_READBACK_VERIFIED';
- if(['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN'].includes(r.state))
-   pause('PUBLICATION_READBACK_REQUIRED');
- // The diagnostic does not ever create or forge an exact-source approval.
- pause('EXACT_CANDIDATE_HUMAN_APPROVAL_REQUIRED');
+ return waitFor('your exact test-source approval and publication',async()=>{
+  const r=await request('release','GET',{slug:run.slug});
+  if(!r?.ok)return {done:false,code:r?.code||'TEST_RELEASE_NOT_READY'};
+  if(r.state==='CONFIRMED_PUBLIC'){run.remoteVisibility='PUBLIC';run.remoteObservedAt=Date.now();return {done:true,value:'HUMAN_APPROVED_PUBLICATION_READBACK_VERIFIED'};}
+  if(['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN'].includes(r.state)){run.remoteVisibility='UNKNOWN';pause('PUBLICATION_READBACK_REQUIRED');}
+  return {done:false,code:'EXACT_CANDIDATE_HUMAN_APPROVAL_REQUIRED'};
+ },{minutes:60,every:10000});
 }
 async function refresher(){
- const r=await request('refresher','GET_REFRESHER',{
-  query:run.slug,accountId:run.config.accountId,limit:50,offset:0});
- if(!r?.ok)pause(r?.code||'REFRESHER_STATE_UNAVAILABLE');
- if(r.policy?.refreshEnabled!==true)pause('ENABLE_GUARDED_REFRESHER_POLICY');
- if(r.items?.filter(x=>x.slug===run.slug&&
-      x.accountId===run.config.accountId)?.length!==1)
-   pause('DESIGNATED_TEST_NOT_IN_REFRESHER');
- const result=await request('refresher','DIAGNOSTIC_TARGET_REFRESH',{
-   slug:run.slug,accountId:run.config.accountId,runId:run.runId});
- if(!result?.ok)pause(result?.code||'TEST_REFRESH_UNAVAILABLE');
- if(result.effectVerified!==true)
-   pause(result.code||'TEST_REFRESH_NOT_VERIFIED');
- return 'REFRESHER_MARKER_SOURCE_READBACK_VERIFIED';
+ return waitFor('the normal visibility refresh',async()=>{
+  const r=await request('refresher','GET_REFRESHER',{query:run.slug,accountId:run.config.accountId,limit:50,offset:0});
+  if(!r?.ok)pause(r?.code||'REFRESHER_STATE_UNAVAILABLE');
+  if(r.policy?.refreshEnabled!==true)pause('ENABLE_GUARDED_REFRESHER_POLICY');
+  if(r.items?.filter(x=>x.slug===run.slug&&x.accountId===run.config.accountId)?.length!==1)pause('DESIGNATED_TEST_NOT_IN_REFRESHER');
+  const result=await request('refresher','DIAGNOSTIC_TARGET_REFRESH',{slug:run.slug,accountId:run.config.accountId,runId:run.runId});
+  if(!result?.ok)pause(result?.code||'TEST_REFRESH_UNAVAILABLE');
+  if(result.effectVerified===true&&result.sourceVerified===true&&result.feedVerified===true)return {done:true,value:'REFRESHER_MARKER_SOURCE_AND_RECENT_FEED_VERIFIED'};
+  return {done:false,code:result.code==='NO_REFRESH_DUE'?'REFRESH_NOT_DUE_YET':result.code||'TEST_REFRESH_NOT_VERIFIED'};
+ },{minutes:60,every:20000});
 }
-// OS process restart and independent disk/fresh-profile restore are performed
-// by the developer's disposable CI controller, never a user-installed PCMS host.
-const externalProofStages=new Set(['BACKUP','RESTORE','PROCESS_RESTART']);
-async function isolatedRestart(){pause('INDEPENDENT_PROCESS_RESTART_PROOF_REQUIRED');}
-async function isolatedBackup(){pause('INDEPENDENT_DISK_BACKUP_PROOF_REQUIRED');}
-async function isolatedRestore(){pause('INDEPENDENT_FRESH_PROFILE_RESTORE_PROOF_REQUIRED');}
+// Functional local tests remain independently executable. A normal Firefox
+// startup receipt is honest browser observation, never an invented OS PID proof.
+async function isolatedBackup(){
+ const out=await request('backup','MANUAL');
+ if(!out?.ok||out.code!=='BROWSER_REPORTED_COMPLETE')pause(out?.code||'BACKUP_DOWNLOAD_NOT_VERIFIED');
+ return 'FIREFOX_DOWNLOAD_COMPLETE_FILE_REOPEN_SEPARATE';
+}
+async function isolatedRestore(){
+ const out=await request('backup','CHECK_RESTORE');
+ if(!out?.ok)pause(out?.code||'ISOLATED_DATA_RESTORE_NOT_VERIFIED');
+ return out.code;
+}
+async function isolatedRestart(){
+ const observed=await request('startup','STATUS',{runId:run.runId});
+ if(observed?.ok&&observed.observed===true)return 'FIREFOX_STARTUP_OBSERVED_OS_PROOF_SEPARATE';
+ const armed=await request('startup','ARM',{runId:run.runId});
+ if(!armed?.ok)pause(armed?.code||'STARTUP_CHECK_NOT_ARMED');
+ pause('RESTART_FIREFOX_TO_FINISH');
+}
 const ACTION={
  SCOPE:async()=>{await prerequisite();return 'SCOPED_RESOURCES_VERIFIED';},
  CREATE:creation,GIT_SOURCE:catalog,READY:ready,AI_TEST:ai,
@@ -299,13 +365,8 @@ async function drive(){
   const at=Math.max(0,STAGES.indexOf(run.stage));
   for(let i=at;i<STAGES.length;i++){
    const stage=STAGES[i];run.stage=stage;run.status='RUNNING';await persist();
-    if(externalProofStages.has(stage)){
-      // Do not call non-existent host services or assert external proof.
-      run=addDiagnosticEvent(run,stage,'NOT_TESTED',
-        'REQUIRES_INDEPENDENT_CI_OR_OPERATOR_EVIDENCE',Date.now());
-      run.stage=STAGES[i+1]||'COMPLETED';await persist();continue;
-    }
    try{
+    await prerequisite();
     const result=await ACTION[stage]();
     await mark(stage,'PASS',result);
     run.stage=STAGES[i+1]||'COMPLETED';await persist();
@@ -317,9 +378,13 @@ async function drive(){
   }
   if(run.stage==='COMPLETED'){
    run.status=run.events.some(event=>event.outcome!=='PASS')?'NOT_TESTED':'PASS';
-     run.firstFailure=null;await persist();
+     run.currentHold=null;await persist();
   }
+ }catch(error){
+  run.currentHold={stage:run.stage,code:'LOCAL_REPORT_SAVE_UNAVAILABLE'};
+  run.firstFailure ||= structuredClone(run.currentHold);run.status='HELD';
  }finally{busy=false;activeDiagnosticDrive=false;show();refreshMountedViews();}
+
 }
 // Standalone checks do NOT depend on S08's disposable generator or its
 // create/publish chain. Each request settles independently; a failure in one
@@ -329,17 +394,21 @@ async function runIndependentChecks(){
  independentBusy=true;show();
  const probes=[['readiness','CHECK',{remote:true}],
   ['accounts','LIST_ACCOUNTS',{}],['inventory','LIST_INVENTORY',{limit:1}],
-  ['refresher','GET_REFRESHER',{limit:1}],['auth','GET',{}]];
+  ['refresher','GET_REFRESHER',{limit:1}],['auth','GET',{}],['backup','STATUS',{}]];
  try{
   const settled=await Promise.allSettled(probes.map(([which,type,params])=>
     request(which,type,params)));
   const values=settled.map(x=>x.status==='fulfilled'?x.value:
    {ok:false,code:'READ_ONLY_PORT_UNAVAILABLE'});
+  const check=async type=>{try{return await request('backup',type)}catch{return {ok:false,code:'BACKUP_PORT_UNAVAILABLE'}}};
+  const archive=await check('CHECK_ARCHIVE'),localRestore=await check('CHECK_RESTORE');
   independent=independentReadOnlyResults({
     readiness:values[0],accounts:values[1],inventory:values[2],
-    refresher:values[3],authority:values[4]},Date.now());
-  await browser.storage.local.set({[DIAGNOSTIC_INDEPENDENT]:independent});
- }catch{independentStatus.textContent='Independent results could not be saved; no write or repeat effect was attempted.';}
+    refresher:values[3],authority:values[4],backup:values[5],archive,localRestore},Date.now());
+  const written=await records.put('ui:diagnostic-report:independent_'+independent.checkedAt,{schema:1,independent},{mirror:'INDEPENDENT'});
+  if(!written?.ok)throw Error(written?.code||'OPERATOR_RECORD_WRITE_UNKNOWN');
+
+ }catch{independentStatus.textContent='Independent results could not be saved. Run the checks again to save a new report.';}
  finally{independentBusy=false;show();}
 }
 independentButton.addEventListener('click',()=>void runIndependentChecks());
@@ -352,7 +421,7 @@ async function populateAccounts(){
      a.protectedRoute!=='PCMS_PINNED')continue;
   const option=document.createElement('option');
   option.value=a.accountId;
-  option.textContent=a.accountId+' · '+a.personaUid;
+  option.textContent=a.alias||a.accountId;
   account.append(option);
  }
  if(configuration)account.value=configuration.accountId;
@@ -366,23 +435,26 @@ save.addEventListener('click',async()=>{
   const git=await request('git','GIT_STATUS');
   const auth=await request('auth','GET');
   const test={accountId:selected,personaUid:item?.personaUid,
-   repositoryId:git?.repositoryId,namespace:namespace.value.trim(),
-    xpiSha256:xpiSha.value.trim().toLowerCase()};
+   repositoryId:git?.repositoryId,namespace:namespace.value.trim()};
   if(consent.checked!==true)throw Error('DISPOSABLE_SCOPE_CONSENT_REQUIRED');
-  if(test.xpiSha256&& !/^[a-f0-9]{64}$/.test(test.xpiSha256))throw Error('XPI_SHA256_INVALID');
   const valid=evaluateDisposable(test,current,git,auth);
   if(!valid.ok)throw Error(valid.code);
   // Once a test has begun, the account, Persona, repo and namespace are
-  // immutable. The local XPI hash may be provided later for restart tests.
+  // immutable. Installed-version observation is recorded automatically.
+  if(run?.restoredHistorical){
+    const written=await records.put('ui:diagnostic-report:'+run.runId,{schema:1,run:structuredClone(run),report:diagnosticReport(run)},{mirror:'ARCHIVE_RUN'});
+ if(!written?.ok)throw Error(written?.code||'OPERATOR_RECORD_WRITE_UNKNOWN');
+    run=null;
+  }
   if(run){
     for(const key of ['accountId','personaUid','repositoryId','namespace'])
       if(run.config[key]!==test[key])throw Error('RUN_SCOPE_IMMUTABLE');
-    run.config.xpiSha256=test.xpiSha256;
     await persist();
   }
   configuration=test;
   designationError=null;
-  await browser.storage.local.set({[DIAGNOSTIC_CONFIG]:test});
+  const saved=await records.put('ui:diagnostic-report:configuration',{schema:1,configuration:test},{mirror:'CONFIG'});
+  if(!saved?.ok)throw Error(saved?.code||'OPERATOR_RECORD_WRITE_UNKNOWN');
   scope.textContent='Disposable scope saved. No remote write attempted.';
  }catch(e){designationError='Test setup not saved. '+scopeIssue(e.message);}
  finally{busy=false;show();}
@@ -392,14 +464,14 @@ function nextRun(){
  const hex=[...bytes].map(x=>x.toString(16).padStart(2,'0')).join('');
  const created=createDiagnosticRun(configuration,hex,Date.now());
  if(!created.ok)throw Error(created.code);
- return created.run;
+ return {...created.run,build:{version:browser.runtime.getManifest().version,extensionId:browser.runtime.id,proof:'RUNTIME_MANIFEST_ONLY'}};
 }
 start.addEventListener('click',async()=>{
  if(busy||activeDiagnosticDrive||!configuration||!canStartNewDiagnostic(run))return;
  if(!run){run=nextRun();await persist();}
  void drive();
 });
-resume.addEventListener('click',()=>{if(!busy&&!activeDiagnosticDrive&&run?.firstFailure)void drive();});
+resume.addEventListener('click',()=>{if(!busy&&!activeDiagnosticDrive&&run?.currentHold&&run.restoredHistorical!==true)void drive();});
 rerun.addEventListener('click',async()=>{
  if(busy||activeDiagnosticDrive||!configuration)return;
  if(run&&!confirm('Start a new test slug? Existing remote test artifacts are preserved; export the previous report first if needed.'))return;
@@ -411,7 +483,7 @@ cleanup.addEventListener('click',async()=>{
  busy=true;controls();
  try{
   const config=run.config;
-  const scopeNow=await prerequisite();
+  const scopeNow=await prerequisite({readOnly:true});
   const remote=await request('cleanup','VERIFY_TEST_REMOTE_ABSENCE',{
     intentId:run.intentId,runId:run.runId});
   if(remote?.ok!==true||remote.code!=='TEST_REMOTE_ABSENCE_INDEPENDENTLY_VERIFIED'||
@@ -426,7 +498,7 @@ cleanup.addEventListener('click',async()=>{
     intentId:run.intentId,runId:run.runId});
   if(second?.ok!==true||second.slug!==run.slug)
     throw Error('TEST_REMOTE_RECHECK_NOT_VERIFIED');
-  run.cleanup='VERIFIED_REMOTE_AND_GIT_ABSENT';
+  run.cleanup='VERIFIED_REMOTE_AND_GIT_ABSENT';run.remoteVisibility='MISSING_VERIFIED';run.remoteObservedAt=Date.now();
   await persist();
   status.textContent='Test-only cleanup independently verified. No deletion was performed by the diagnostic.';
  }catch(error){
@@ -465,12 +537,15 @@ mountedViews.add(refreshFromCanonical);
    configuration=saved[DIAGNOSTIC_CONFIG];
   run=saved[DIAGNOSTIC_RUN]?.version===1?
     recoverDiagnosticIfInactive(saved[DIAGNOSTIC_RUN],activeDiagnosticDrive):null;
-  if(run&&run!==saved[DIAGNOSTIC_RUN])
-    await browser.storage.local.set({[DIAGNOSTIC_RUN]:run});
-  if(configuration){namespace.value=configuration.namespace;
-    xpiSha.value=configuration.xpiSha256||'';}
+  if(run&&run!==saved[DIAGNOSTIC_RUN])await persist();
+  
+  if(configuration)namespace.value=configuration.namespace;
   await populateAccounts();
   show();
+  if(run?.stage==='PROCESS_RESTART'&&run.currentHold?.code==='RESTART_FIREFOX_TO_FINISH'&&run.restoredHistorical!==true){
+   const receipt=await request('startup','STATUS',{runId:run.runId});
+   if(receipt?.observed===true)void drive();
+  }
  }catch{scope.textContent='Diagnostic storage or account provider unavailable. No test started.';}
 })();
 

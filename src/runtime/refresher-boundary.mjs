@@ -1,3 +1,4 @@
+import {checkpointed} from './work-checkpoint.mjs';
 // Synchronous listeners, one coalesced scheduler alarm, canonical turn/claim
 // fences. I14 conditional executor is present but default production gate OFF.
 import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId,createCanonicalStore} from './journal.mjs';
@@ -119,7 +120,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       try{
         if(change.code==='ACCOUNT_GRACE_EXPIRED')await d.emit({scopeId:change.scopeId,
           code:'ROUTE_UNAVAILABLE',severity:'ACTION_REQUIRED',revision:result.revision,
-          cause:'ACCOUNT_ROUTE_UNAVAILABLE'});
+          cause:'ACCOUNT_ROUTE_UNAVAILABLE',target:{kind:'ACCOUNT',id:change.scopeId}});
         else if(change.code==='ACCOUNT_ROUTE_RECOVERED')await d.resolve({scopeId:change.scopeId,
           code:'ROUTE_UNAVAILABLE',evidence:'ROUTE_HEALTH_OBSERVED'});
         else if(change.code==='PROVIDER_OUTAGE')await d.emit({scopeId:change.scopeId,
@@ -566,6 +567,8 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     });
     registered=true;coldWake();
   }
+    run=checkpointed(api,run,{allowDuringRestore:message=>["GET_REFRESHER"].includes(message?.type)});
+  tick=checkpointed(api,tick);
   return Object.freeze({register,tick,run});
 }
 // Entry owns the single registration. Importing this factory for packaged
