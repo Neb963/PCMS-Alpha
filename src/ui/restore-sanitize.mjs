@@ -46,10 +46,12 @@ function inertMeta(key,row,remap,existing=null){
     data.setting={...data.setting,autoEnabled:false};
   }
   if(key==='backup:auto-state'&&data.state){
-    data.state={...data.state,enabled:false,active:null,
-      status:'SUSPENDED',code:'RESTORED_KEY_NOT_AUTHORITY'};
+    data.historicalArchives=structuredClone(data.state.archives||[]);
+    data.state={...data.state,enabled:false,active:null,archives:[],
+      lastSuccessDay:-1,lastAttemptDay:-1,nextAttemptAt:0,freshRequest:null,
+      status:'SUSPENDED',code:'RESTORED_FILE_NOT_VERIFIED'};
   }
-  if(key==='backup:manual-active'){
+  if(['backup:manual-active','backup:manual-last-complete'].includes(key)){
     data.status='RESTORED_HISTORY_ONLY';data.downloadId=null;
     data.tier=0;data.code='RESTORED_FILE_NOT_VERIFIED';
   }
@@ -131,7 +133,7 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
   // last-known-good files; importing a different profile's receipts as live
   // controller state would either lose the local good copy or invent one.
   const localBackupEvidence=key=>typeof key==='string'&&
-    (key==='backup:auto-state'||key==='backup:manual-active'||
+    (key==='backup:auto-state'||key==='backup:manual-active'||key==='backup:manual-last-complete'||
      key.startsWith('backup:v2:'));
   const stores={};
   for(const name of DB_STORES){

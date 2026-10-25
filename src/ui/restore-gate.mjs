@@ -1,10 +1,12 @@
 // I16 restore intent is outside replaceable canonical IndexedDB.
-// Never clear the guard from a page, alarm, imported archive or failure handler;
-// only an explicit operator reactivation of a COMPLETE_INACTIVE restore.
+// Effect-free PREPARING may be explicitly cancelled. Once sealed, only explicit
+// reactivation of a fully observed COMPLETE_INACTIVE restore releases the hold.
 export const RESTORE_GUARD_KEY='pcmsRestoreInProgress';
 const digest64=s=>typeof s==='string'&&/^[a-f0-9]{64}$/.test(s);
 const token=s=>typeof s==='string'&&/^restore_[a-f0-9]{32}$/.test(s);
 const fail=c=>{throw Error(c);};
+const writers=new WeakMap();
+const validScope=s=>typeof s==='string'&&/^portable_[a-f0-9]{32}$/.test(s);
 export function safeRestoreReceipt(s){
   if(!s||s.active!==true)return {held:false,code:'NO_RESTORE_MARKER'};
   return {held:true,code:'RESTORE_IN_PROGRESS',epoch:s.epoch||null,revision:s.revision,
@@ -28,9 +30,35 @@ export function createRestoreGate(storage,{now=()=>Date.now(),
     if(JSON.stringify(observed)!==JSON.stringify(value))fail('RESTORE_GUARD_READBACK_FAILED');
     return observed;
   }
-  async function begin({planSha256,archiveSha256,destinationSha256,checkpointSha256,
-    reviewedPlanSha256,checkpointTier,fresh,recovery=null}){
+  // Durable hold before the safety copy: no imported effects or invented proofs.
+  async function prepare({stageScope,archiveSha256}){
     if(await read())fail('RESTORE_ALREADY_HELD');
+    if(!validScope(stageScope)||!digest64(archiveSha256))fail('RESTORE_PREPARATION_INVALID');
+    const row={active:true,revision:1,epoch:'restore_'+uuid(),status:'PREPARING',
+      step:'SAFETY_COPY',startedAt:now(),archiveSha256,stageScope,
+      groups:{},createdContainers:{},recovery:null};
+    if(!token(row.epoch))fail('RESTORE_EPOCH_INVALID');
+    return persist(row);
+  }
+  async function cancel({epoch,revision}){
+    const prior=await read();
+    if(!prior||prior.epoch!==epoch||prior.revision!==revision)fail('RESTORE_STALE_GUARD');
+    if(prior.status!=='PREPARING'||Object.keys(prior.groups||{}).length||
+       Object.keys(prior.createdContainers||{}).length)fail('RESTORE_CANCEL_DENIED');
+    try{await storage.remove(RESTORE_GUARD_KEY)}catch{fail('RESTORE_GUARD_WRITE_FAILED')}
+    if(await read())fail('RESTORE_GUARD_READBACK_FAILED');
+    return {ok:true,code:'RESTORE_PREPARATION_CANCELLED',epoch};
+  }
+  async function begin({planSha256,archiveSha256,destinationSha256,checkpointSha256,
+    reviewedPlanSha256,checkpointTier,fresh,recovery=null,preparation=null}){
+    const prior=await read();
+    if(preparation){
+      if(!prior||prior.status!=='PREPARING'||prior.epoch!==preparation.epoch||
+         prior.revision!==preparation.revision||prior.archiveSha256!==archiveSha256||
+         recovery?.portableStageScope!==prior.stageScope||
+         Object.keys(prior.groups||{}).length||Object.keys(prior.createdContainers||{}).length)
+        fail('RESTORE_STALE_PREPARATION');
+    }else if(prior)fail('RESTORE_ALREADY_HELD');
     if(![planSha256,archiveSha256,destinationSha256,checkpointSha256,
       reviewedPlanSha256].every(digest64)||planSha256!==reviewedPlanSha256||
       checkpointTier!==3)fail('RESTORE_UNREVIEWED_OR_UNVERIFIED');
@@ -40,9 +68,9 @@ export function createRestoreGate(storage,{now=()=>Date.now(),
        Object.entries(recovery.mappings).some(([k,v])=>k.length>256||
          typeof v!=='string'||v.length>256)))
        fail('RESTORE_RECOVERY_PLAN_INVALID');
-    const row={active:true,revision:1,epoch:'restore_'+uuid(),fresh:fresh===true,
+    const row={active:true,revision:prior?prior.revision+1:1,epoch:prior?.epoch||'restore_'+uuid(),fresh:fresh===true,
       status:'GUARD_INSTALLED',step:'GUARD',planSha256,archiveSha256,
-      destinationSha256,checkpointSha256,startedAt:now(),groups:{},createdContainers:{},recovery};
+      destinationSha256,checkpointSha256,startedAt:prior?.startedAt||now(),groups:{},createdContainers:{},recovery};
     if(!token(row.epoch))fail('RESTORE_EPOCH_INVALID');
     // Any failure after this point retains a global mutating hold.
     return persist(row);
@@ -51,6 +79,7 @@ export function createRestoreGate(storage,{now=()=>Date.now(),
     const prior=await read();
     if(!prior||prior.epoch!==epoch||prior.revision!==revision)
       fail('RESTORE_STALE_GUARD');
+    if(prior.status==='PREPARING')fail('RESTORE_NOT_SEALED');
     if(!['BEFORE_DISPATCH','DISPATCH_POSSIBLE','OBSERVED','HELD_UNCERTAIN',
       'REVIEW_REQUIRED'].includes(status)||typeof step!=='string'||
       step.length>80||!/^[a-z0-9-]{2,64}$/.test(group||''))
@@ -116,6 +145,14 @@ export function createRestoreGate(storage,{now=()=>Date.now(),
     if(await read())fail('RESTORE_GUARD_READBACK_FAILED');
     return {ok:true,code:'CONTROLLER_REACTIVATED',epoch:prior.epoch};
   }
-  return Object.freeze({read,begin,advance,recordContainer,reactivate,
+  // Share a writer queue across gate instances in this background. No imported
+  // record can race a cancellation or turn a late safety-copy result into a seal.
+  const serialized=fn=>(...args)=>{
+    const task=(writers.get(storage)||Promise.resolve()).then(()=>fn(...args));
+    writers.set(storage,task.catch(()=>{}));return task;
+  };
+  return Object.freeze({read,prepare:serialized(prepare),cancel:serialized(cancel),
+    begin:serialized(begin),advance:serialized(advance),
+    recordContainer:serialized(recordContainer),reactivate:serialized(reactivate),
     inspect:async()=>safeRestoreReceipt(await read())});
 }

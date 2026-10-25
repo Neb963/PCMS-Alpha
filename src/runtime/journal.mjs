@@ -425,7 +425,8 @@ export function createRestoreSentinel(storage) {
       try {
         const v = (await storage.get(key))?.[key];
         if (v === undefined) return { held: false, code: 'NO_RESTORE_MARKER' };
-        if (v && v.active === true) return { held: true, code: 'RESTORE_IN_PROGRESS' };
+        if (v && v.active === true) return { held: true, code: 'RESTORE_IN_PROGRESS',
+          status:typeof v.status==='string'?v.status:'UNKNOWN' };
         return { held: true, code: 'RESTORE_MARKER_INVALID' };
       } catch { return { held: true, code: 'RESTORE_MARKER_UNAVAILABLE' }; }
     }

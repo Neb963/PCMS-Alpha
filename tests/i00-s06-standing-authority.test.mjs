@@ -108,3 +108,15 @@ test('S06 new worker never assumes a prior repo grant authorizes another private
  assert.equal(result.reason,'UNSCOPED_OR_UNCONFIGURED');
  assert.equal(restarted.gate('development'),false);
 });
+
+test('J06 cold preparation denies effective grants without destroying durable choices; seal revokes',async()=>{
+ const x=setup();await x.gate.state();await x.gate.handle(request(all),sender);
+ const before=structuredClone(x.data.pcmsS06StandingAuthority);
+ x.data.pcmsRestoreInProgress={active:true,status:'PREPARING'};
+ const cold=createS06StandingAuthority(x.api);assert.equal((await cold.state()).reason,'RESTORE_HOLD');
+ assert.equal(cold.gate('development'),false);assert.deepEqual(x.data.pcmsS06StandingAuthority,before);
+ delete x.data.pcmsRestoreInProgress;await cold.state();
+ assert.equal(cold.gate('development'),true);
+ x.data.pcmsRestoreInProgress={active:true,status:'GUARD_INSTALLED'};await cold.state();
+ assert.deepEqual(x.data.pcmsS06StandingAuthority.grants,off);
+});

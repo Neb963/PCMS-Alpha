@@ -137,7 +137,10 @@ export function createPortableRunner(api,{
     const s=await (await store()).read();
     if(!s.ok)return s;
     let manual=null,lastManual=null;try{manual=await readManual();lastManual=await readLastManual()}catch{}
-    if(!lastManual&&manual?.status==='BROWSER_REPORTED_COMPLETE'&&manual.tier===2)lastManual=manual;
+    const qualified=row=>row?.status==='BROWSER_REPORTED_COMPLETE'&&row.tier===2&&
+      /^manual_[a-f0-9]{32}$/.test(row.runId||'')&&/^[a-f0-9]{64}$/.test(row.sha256||'')&&
+      Number.isSafeInteger(row.bytes)&&row.bytes>0;
+    if(!qualified(lastManual))lastManual=qualified(manual)?manual:null;
     const clean=row=>row?{status:row.status,code:row.code||row.status,tier:row.tier||0,
       bytes:row.bytes||0,runId:row.runId,sha256:row.sha256||null,
       startedAt:row.startedAt||null,updatedAt:row.updatedAt||null,

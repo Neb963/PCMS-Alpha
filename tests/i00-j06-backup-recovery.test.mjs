@@ -88,3 +88,15 @@ test('J06 last-success ordering follows actual completion, not the earlier sched
  await put(f.db,{key:'backup:manual-last-complete',status:'BROWSER_REPORTED_COMPLETE',tier:2,runId:'manual_'+'b'.repeat(32),bytes:38,sha256:'c'.repeat(64),startedAt:86400000+5000,completedAt:86400000+10000});
  assert.equal((await f.cold().status()).lastSuccess.runId,id);
 });
+
+test('J06 foreign or malformed last-good receipt cannot be promoted by STATUS',async()=>{
+ const f=fixture();
+ for(const value of [
+ {status:'RESTORED_HISTORY_ONLY',tier:0,runId:'manual_'+'a'.repeat(32),bytes:38,sha256:'a'.repeat(64)},
+ {status:'BROWSER_REPORTED_COMPLETE',tier:2,runId:'invalid',bytes:38,sha256:'a'.repeat(64)},
+ {status:'BROWSER_REPORTED_COMPLETE',tier:2,runId:'manual_'+'a'.repeat(32),bytes:0,sha256:'a'.repeat(64)}
+ ]){
+  await put(f.db,{key:'backup:manual-last-complete',...value});
+  assert.equal((await f.cold().status()).lastSuccess,null);
+ }
+});
