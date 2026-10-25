@@ -4,7 +4,7 @@ export async function installRefresherClockFixture(pulseEnabled=true){
  const module=path=>import(browser.runtime.getURL('pcms/'+path));
  const {openCanonicalDatabase}=await module('journal.mjs'),{createRefresherStore}=await module('refresher-store.mjs');
  const {emptyShadow,reconcileShadow,REFRESHER_KEY}=await module('refresher-core.mjs');
- const {createRefresherBoundary}=await module('refresher-boundary.mjs'),{exactSource}=await module('staging-core.mjs');
+ const {createRefresherBoundary,needsActiveClock}=await module('refresher-boundary.mjs'),{exactSource}=await module('staging-core.mjs');
  const dbName='pcms-j05-clock-'+(pulseEnabled?'on':'off'),db=await openCanonicalDatabase({open:(_n,v)=>indexedDB.open(dbName,v)}),store=createRefresherStore(db);
  const read=key=>new Promise((resolve,reject)=>{const q=db.transaction('meta','readonly').objectStore('meta').get(key);q.onsuccess=()=>resolve(q.result);q.onerror=reject});
  const put=rows=>new Promise((resolve,reject)=>{const t=db.transaction('meta','readwrite');for(const r of rows)t.objectStore('meta').put(r);t.oncomplete=resolve;t.onabort=reject});
@@ -26,7 +26,10 @@ export async function installRefresherClockFixture(pulseEnabled=true){
  }
  const guard={getSafeRouteReadiness:async uid=>({ready:true,personaUid:uid,cookieStoreId:'container-j05-clock',routeId:'protected-j05-clock',healthDomain:'domain-j05-clock'})};
  const controller=createRefresherBoundary(browser,{open:async()=>db,guard:()=>guard,browserClockGate:()=>true,observationGate:()=>false,refreshGate:()=>false,...(pulseEnabled?{}:{clockPulseMs:0})});
- controller.register();await controller.tick();
+ controller.register();const initial=await controller.tick();
  window.__j05clock={controller,store,dbName,boot:(await store.read()).state.bootId};
- return {ok:true,dbName,state:(await store.read()).state};
+ const state=(await store.read()).state;
+ let timers;try{const id=setTimeout(()=>{},1);clearTimeout(id);timers={ok:true}}catch(error){timers={ok:false,error:String(error)}}
+ let boundTimers;try{const id=window.setTimeout(()=>{},1);window.clearTimeout(id);boundTimers={ok:true}}catch(error){boundTimers={ok:false,error:String(error)}}
+ return {ok:initial?.ok===true,initial,timers,boundTimers,eligible:needsActiveClock(state,state.browserClock?.witness?.routes||[],Date.now()),dbName,state,status:(await browser.storage.local.get('pcmsI12Status')).pcmsI12Status};
 }

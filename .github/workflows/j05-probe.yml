@@ -1,0 +1,31 @@
+name: J05 focused browser diagnosis
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, converted_to_draft]
+    paths:
+      - 'scripts/journey_refresher_probe.py'
+      - 'scripts/fixtures/j05-clock.mjs'
+      - '.github/workflows/j05-probe.yml'
+permissions:
+  contents: read
+concurrency:
+  group: pcms-j05-probe-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  journey-browser-probe:
+    if: ${{ github.event.pull_request.draft == true && github.head_ref == 'journey/J05-refresher-operation' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.16.0
+      - name: Assemble diagnostic package only
+        run: node scripts/build-i00.mjs
+      - name: Install pinned disposable Firefox tooling
+        run: bash scripts/setup-firefox.sh
+      - name: Observe initial production clock controller result
+        run: python3 scripts/journey_refresher_probe.py build/pcms-alpha-i00.xpi
