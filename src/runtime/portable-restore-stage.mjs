@@ -41,6 +41,18 @@ async function putSession(db,scope,row){
   await transaction(db,['sessions'],'readwrite',tx=>
     tx.objectStore('sessions').put({...row,scope}));
 }
+async function claimSession(db,scope){
+ return new Promise((resolve,reject)=>{
+  let tx,duplicate=false;
+  try{
+   tx=db.transaction(['sessions'],'readwrite');
+   tx.oncomplete=resolve;
+   tx.onabort=()=>reject(Error(duplicate?'PORTABLE_STAGE_REUSED':'PORTABLE_STAGE_TRANSACTION_ABORTED'));
+   const request=tx.objectStore('sessions').add({scope,status:'PREPARING',startedAt:Date.now()});
+   request.onerror=()=>{duplicate=request.error?.name==='ConstraintError'};
+  }catch{try{tx?.abort()}catch{}reject(Error('PORTABLE_STAGE_UNAVAILABLE'))}
+ });
+}
 async function getSession(db,scope){
   return new Promise((resolve,reject)=>{
     const tx=db.transaction(['sessions'],'readonly');
@@ -87,10 +99,9 @@ async function* streamRows(db,scope,group){
 export async function preparePortableStage(source,{db=openRestoreStage,
   scope='portable_'+crypto.randomUUID().replaceAll('-','')}={}){
   requireValid(goodId(scope),'PORTABLE_STAGE_ID_INVALID');
-  const connection=await db();let buffer=[],rowCount=0,donorCount=0;
+  const connection=await db();let buffer=[],rowCount=0,donorCount=0,owned=false;
   try{
-    requireValid(!(await getSession(connection,scope)),'PORTABLE_STAGE_REUSED');
-    await putSession(connection,scope,{status:'PREPARING',startedAt:Date.now()});
+    await claimSession(connection,scope);owned=true;
     const flush=async()=>{const batch=buffer;buffer=[];await putRows(connection,batch)};
     const decoded=await readPortableArchive(source,{collect:false,
       onRecord:async({kind,store,record,value})=>{
@@ -112,7 +123,7 @@ export async function preparePortableStage(source,{db=openRestoreStage,
     return {scope,status:'READY',rows:rowCount,frames:decoded.frames,
       sourceAudit:decoded.archiveSourceAudit,chain:decoded.chain};
   }catch(e){
-    try{await putSession(connection,scope,{status:'HELD',
+    try{if(owned)await putSession(connection,scope,{status:'HELD',
       code:/^PORTABLE_[A-Z0-9_]+$/.test(e?.message||'')?e.message:'PORTABLE_STAGE_FAILED'})}
     catch{}
     throw e;
