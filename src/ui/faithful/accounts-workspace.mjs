@@ -1,5 +1,5 @@
 // Primary Accounts controls; typed background ports retain all authority.
-const PORT='pcms-i03-accounts',INVENTORY='pcms-i04-inventory';
+const PORT='pcms-i03-accounts';
 const LABELS={PREPARING:'Preparing',WAITING_LOGIN:'Login needed',VERIFICATION_PENDING:'Login needed',
  REBIND_PENDING:'Replacement login needed',INVENTORY_PENDING:'Inventory needed',VERIFIED:'Ready',
  OVERRIDDEN:'Enrollment exception',ARCHIVED:'Archived'};
@@ -43,6 +43,10 @@ export function accountActions(a){
  return ['OPEN_LOGIN',...(a.state==='PREPARING'?['RESUME_SETUP']:['CONFIRM_LOGIN','VERIFY_ROUTE','CHANGE_ROUTE','SYNC_ACCOUNT']),
   ...(a.protectedRoute==='LEGACY_UNPINNED'||a.protectedRoute==='UPGRADING'?['UPGRADE_ACCOUNT']:[]),
   'REPLACE_PERSONA',...(['WAITING_LOGIN','VERIFICATION_PENDING','REBIND_PENDING','INVENTORY_PENDING','OVERRIDDEN'].includes(a.state)?['MANUAL_OVERRIDE']:[]),'ARCHIVE'];
+}
+export function accountCommandBlocked(a,kind){
+ if(!a.working)return false;
+ return !(a.activity?.cancellable===true&&['OPEN_LOGIN','CONFIRM_LOGIN','VERIFY_ROUTE','CHANGE_ROUTE','SYNC_ACCOUNT'].includes(kind));
 }
 const date=value=>Number.isFinite(value)&&value>0?new Date(value).toLocaleString():'Not yet observed';
 const title=a=>'Account '+String(a.accountId).slice(-8);
@@ -104,6 +108,8 @@ export function createAccountsWorkspace({root,el,b,request,reload,notify}){
    const button=b(label,()=>void act(kind),'btn');button.dataset.accountCommand=kind;buttons.set(kind,button);
    (kind==='UPGRADE_ACCOUNT'||kind==='REPLACE_PERSONA'?recoveryActions:operations).append(button);
   }
+  const connection=b('Check connection',()=>void checkConnection(),'btn small');
+  connection.dataset.accountConnection='';operations.append(connection);
   const override=el('form','account-subform');override.hidden=true;
   override.append(el('p','setting-note','A limited enrollment exception does not enable managed writes.'));
   const reasonLabel=el('label','','Reason'),reason=el('select');reason.setAttribute('aria-label','Enrollment exception reason');
@@ -141,10 +147,13 @@ export function createAccountsWorkspace({root,el,b,request,reload,notify}){
     current.state==='VERIFIED'?'Ready for managed work.':current.state==='ARCHIVED'?'Archived. Reactivate to verify and resume.':
     current.state==='PREPARING'?'Preparing its protected Persona and route.':'Open Perchance, complete login or a challenge, then confirm login.'));
    const allowed=accountActions(current);
+   const incompatible=current.working===true&&current.activity?.cancellable!==true;
    for(const [kind,button] of buttons){button.hidden=!allowed.includes(kind);
-    button.disabled=kind==='ARCHIVE'?activeCommands.has('ARCHIVE'):(busy||current.working===true||kind==='OPEN_LOGIN'&&!current.personaUid)}
-   override.hidden=!allowed.includes('MANUAL_OVERRIDE');saveOverride.disabled=busy||current.working===true||!acknowledge.checked;
-   removeOpen.hidden=!allowed.includes('REMOVE_ACCOUNT');removeOpen.disabled=busy||current.working===true;removeConfirm.disabled=busy||current.working===true;
+    button.disabled=kind==='ARCHIVE'?activeCommands.has('ARCHIVE'):(busy||accountCommandBlocked(current,kind)||kind==='OPEN_LOGIN'&&!current.personaUid);
+    if(kind==='VERIFY_ROUTE')set(button,current.route?.status==='PINNED'?'Verify route':'Retry route check');
+   }
+   override.hidden=!allowed.includes('MANUAL_OVERRIDE');saveOverride.disabled=busy||incompatible||!acknowledge.checked;
+   removeOpen.hidden=!allowed.includes('REMOVE_ACCOUNT');removeOpen.disabled=busy||incompatible;removeConfirm.disabled=busy||incompatible;
    if(current.removed||current.state!=='ARCHIVED')removeForm.hidden=true;
    recovery.hidden=!allowed.some(x=>['MANUAL_OVERRIDE','REPLACE_PERSONA','UPGRADE_ACCOUNT'].includes(x));
    set(detailText,JSON.stringify({account:current.accountId,persona:current.personaUid,route:p?.routeId||null,
@@ -158,6 +167,14 @@ export function createAccountsWorkspace({root,el,b,request,reload,notify}){
    }catch{if(!closed)set(feedback,'Account state could not be refreshed. Your inputs are preserved.');return null}
    finally{inflight=null}})();return inflight;
   }
+  async function checkConnection(){
+   connection.disabled=true;
+   try{
+    const out=await request(PORT,'INSPECT_CONNECTION',{},10000);
+    if(!closed)set(feedback,out?.ok?(out.ready?'Mullvad connection is available. Retry the route check to verify this account’s exit.':explain(out)):explain(out));
+   }catch{if(!closed)set(feedback,'Connection check timed out. Other actions remain available.')}
+   finally{connection.disabled=false;}
+  }
   async function act(kind,extra={}){
    if(activeCommands.has(kind)||busy&&kind!=='ARCHIVE')return;
    if(kind==='ARCHIVE'&&!window.confirm('Archive this account and pause its managed work? Its Persona, generators, source and history are kept.'))return;
@@ -165,12 +182,12 @@ export function createAccountsWorkspace({root,el,b,request,reload,notify}){
    if(kind==='MANUAL_OVERRIDE'&&extra.acknowledgeLimitedAuthority!==true)return;
    const ticket=++actionEpoch;activeCommands.add(kind);busy=true;
    const report=value=>{if(!closed&&ticket===actionEpoch)set(feedback,value)};
-   report('Working…');draw();
+   report(current.activity?.cancellable?'Finishing the background check safely, then continuing your action…':'Working…');draw();
    try{
     const latest=await refresh();if(!latest?.ok)throw Error('CURRENT_STATE_UNAVAILABLE');
     const params={accountId:initial.accountId,expectedRevision:current.revision,...extra};
     if(kind==='REACTIVATE')params.explicitReactivation=true;if(kind==='REPLACE_PERSONA')params.explicitReplacement=true;
-    const out=await request(kind==='SYNC_ACCOUNT'?INVENTORY:PORT,kind,params,180000);
+    const out=await request(PORT,kind,params,180000);
     if(closed)return;
     report(out?.ok?(kind==='OPEN_LOGIN'&&out.opened?'Perchance opened in this account’s protected Persona.':
      kind==='SYNC_ACCOUNT'?'Owned inventory synchronized.':kind==='CONFIRM_LOGIN'?'Login and inventory confirmed.':

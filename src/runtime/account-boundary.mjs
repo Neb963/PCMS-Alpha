@@ -15,11 +15,11 @@ import { trustedExtensionPage } from './command-boundary.mjs';
 
 export const ACCOUNT_PORT='pcms-i03-accounts';
 export const ROUTE_UPKEEP_ALARM='pcms-s01-route-upkeep';
-const READS=['INSPECT_ACCOUNT','LIST_ACCOUNTS','LIST_PERSONAS','LIST_ROUTES','NETWORK_STATUS','WITNESS_STATUS','ADD_ACCOUNT'];
+const READS=['INSPECT_CONNECTION','INSPECT_ACCOUNT','LIST_ACCOUNTS','LIST_PERSONAS','LIST_ROUTES','NETWORK_STATUS','WITNESS_STATUS','ADD_ACCOUNT'];
 const permitted={
-  INSPECT_ACCOUNT:['accountId'],LIST_ACCOUNTS:[],LIST_PERSONAS:[],LIST_ROUTES:[],NETWORK_STATUS:[],WITNESS_STATUS:[],ADD_ACCOUNT:[],
+  INSPECT_CONNECTION:[],INSPECT_ACCOUNT:['accountId'],LIST_ACCOUNTS:[],LIST_PERSONAS:[],LIST_ROUTES:[],NETWORK_STATUS:[],WITNESS_STATUS:[],ADD_ACCOUNT:[],
   RESUME_SETUP:['accountId','expectedRevision'],CONFIRM_LOGIN:['accountId','expectedRevision'],
-  CHECK_IDENTITY:['accountId','expectedRevision'],VERIFY_ROUTE:['accountId','expectedRevision'],
+  SYNC_ACCOUNT:['accountId','expectedRevision'],CHECK_IDENTITY:['accountId','expectedRevision'],VERIFY_ROUTE:['accountId','expectedRevision'],
   CHANGE_ROUTE:['accountId','expectedRevision'],UPGRADE_ACCOUNT:['accountId','expectedRevision'],
   REPLACE_PERSONA:['accountId','expectedRevision','explicitReplacement'],
   ACK_LOGIN:['accountId','expectedRevision'],OPEN_LOGIN:['accountId','expectedRevision'],
@@ -86,6 +86,15 @@ export function inspectAccountProjection(account,network,inventory){
       routeAtReport:x.routeAtReport||null}))};
 }
 
+// Only unfinished setup/upgrade is current. A completed historical failure
+// must not outrank a newer successful route observation indefinitely.
+export function accountCurrentMessage(a){
+  const code=a.state==='PREPARING'?a.setup?.code:
+    a.upgrade&&a.upgrade.phase!=='COMPLETE'?a.upgrade.code:
+    a.route?.status==='PINNED'?null:a.route?.code;
+  return SETUP_MESSAGES[code]||null;
+}
+
 export function createAccountBoundary(api,{
   open=openCanonicalDatabase, guard=internalPcmsGuard,
   identityReader=async context=>{
@@ -140,6 +149,10 @@ export function createAccountBoundary(api,{
       // Local records are readable while PersonaMonkey is still starting.
       if(!g&&!['LIST_ACCOUNTS','INSPECT_ACCOUNT','ARCHIVE','MANUAL_OVERRIDE','ACK_LOGIN'].includes(message.type))return fail('GUARD_NOT_READY');
       if(message.type==='LIST_PERSONAS')return {ok:true,personas:await g.listAvailablePersonas()};
+      if(message.type==='INSPECT_CONNECTION'){
+        const out=await g.enrollmentDonor?.inspectConnection?.();
+        return out?{...out,message:explain(out.code)}:fail('CONNECTION_OBSERVER_UNAVAILABLE');
+      }
       if(message.type==='LIST_ROUTES')return {ok:true,routes:await g.listProtectedRoutes()};
       if(message.type==='WITNESS_STATUS'){
         const result=await g.sampleNativeWitness?.();
@@ -162,7 +175,8 @@ export function createAccountBoundary(api,{
         const projection=inspectAccountProjection(a,network,summaries.summaries?.[a.accountId]);
         const f=await flow();
         projection.account.working=f?.running(a.accountId)===true;
-        projection.account.message=explain(a.setup?.code)||explain(a.upgrade?.code)||explain(a.route?.code);
+        projection.account.activity=f?.activity(a.accountId)||null;
+        projection.account.message=accountCurrentMessage(a);
         return projection;
       }
       if(message.type==='LIST_ACCOUNTS') {
@@ -173,7 +187,7 @@ export function createAccountBoundary(api,{
         return out.ok?{ok:true,accounts:out.accounts.map(a=>({...publicAccount(a),
           inventory:inventory?.summaries?.[a.accountId]||null,
           working:f?.running(a.accountId)===true,
-          message:explain(a.setup?.code)||explain(a.upgrade?.code)||explain(a.route?.code)})),
+          activity:f?.activity(a.accountId)||null,message:accountCurrentMessage(a)})),
           truncated:out.truncated,held:restore.held,holdCode:restore.code,
           enrollment:f?'AVAILABLE':'DONOR_UNAVAILABLE'}:out;
       }
@@ -189,7 +203,7 @@ export function createAccountBoundary(api,{
       const f=await flow();
       const pinned=typeof old.account.bindingId==='string';
       const upgraded=pinned&&(!old.account.upgrade||old.account.upgrade.phase==='COMPLETE');
-      if(['RESUME_SETUP','CONFIRM_LOGIN','CHECK_IDENTITY','VERIFY_ROUTE','CHANGE_ROUTE','OPEN_LOGIN',
+      if(['RESUME_SETUP','SYNC_ACCOUNT','CONFIRM_LOGIN','CHECK_IDENTITY','VERIFY_ROUTE','CHANGE_ROUTE','OPEN_LOGIN',
           'UPGRADE_ACCOUNT','REPLACE_PERSONA'].includes(message.type)){
         if(old.account.state==='ARCHIVED')return fail('ACCOUNT_ARCHIVED');
         if(!f)return fail('ENROLLMENT_UNAVAILABLE');
@@ -202,7 +216,7 @@ export function createAccountBoundary(api,{
         const out=await f.replacePersona(p.accountId,p.expectedRevision);
         return out.ok?out:{...out,message:explain(out.code)};
       }
-      if(['CONFIRM_LOGIN','CHECK_IDENTITY','VERIFY_ROUTE','CHANGE_ROUTE','OPEN_LOGIN'].includes(message.type)&&!upgraded){
+      if(['SYNC_ACCOUNT','CONFIRM_LOGIN','CHECK_IDENTITY','VERIFY_ROUTE','CHANGE_ROUTE','OPEN_LOGIN'].includes(message.type)&&!upgraded){
         // A pre-S01 record is upgraded in place (same account), never recreated.
         void f.upgrade(p.accountId);
         return fail('UPGRADE_IN_PROGRESS');
@@ -211,7 +225,7 @@ export function createAccountBoundary(api,{
         if(old.account.state!=='PREPARING')return fail('INVALID_ACCOUNT_STATE');
         return await f.prepare(p.accountId);
       }
-      if(message.type==='CONFIRM_LOGIN'||message.type==='CHECK_IDENTITY'){
+      if(['SYNC_ACCOUNT','CONFIRM_LOGIN','CHECK_IDENTITY'].includes(message.type)){
         const out=await f.confirm(p.accountId);
         return out.ok?out:{...out,message:explain(out.code)};
       }
@@ -219,7 +233,7 @@ export function createAccountBoundary(api,{
         // Operator-requested; may take several probes, progress is listed.
         return await f.verifyRoute(p.accountId,{change:message.type==='CHANGE_ROUTE'});
       }
-      if(message.type==='OPEN_LOGIN')return await g.openHumanLogin(old.account.personaUid);
+      if(message.type==='OPEN_LOGIN')return await f.openLogin(p.accountId);
       if(message.type==='REACTIVATE'){
         if(!f)return fail('ENROLLMENT_UNAVAILABLE');
         return await f.reactivate(p.accountId,p.expectedRevision);
@@ -300,7 +314,7 @@ export function createAccountBoundary(api,{
     void schedule();api.runtime.onStartup?.addListener(()=>void schedule());
     api.alarms?.onAlarm?.addListener(alarm=>{if(alarm?.name===ROUTE_UPKEEP_ALARM)void upkeep();});
   }
-    run=checkpointed(api,run,{allowDuringRestore:message=>["LIST_ACCOUNTS","INSPECT_ACCOUNT","LIST_PERSONAS","LIST_ROUTES","NETWORK_STATUS","WITNESS_STATUS"].includes(message?.type)});
+    run=checkpointed(api,run,{allowDuringRestore:message=>["INSPECT_CONNECTION","LIST_ACCOUNTS","INSPECT_ACCOUNT","LIST_PERSONAS","LIST_ROUTES","NETWORK_STATUS","WITNESS_STATUS"].includes(message?.type)});
   upkeep=checkpointed(api,upkeep);
   return Object.freeze({register,run,upkeep});
 }

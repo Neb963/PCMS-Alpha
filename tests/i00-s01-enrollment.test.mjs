@@ -151,6 +151,20 @@ function setup({relays}){
   return {db,accounts,ledger,flow,...d,opened,synced,order,sessions,profileOf};
 }
 const relay=(host,v4,v6)=>({host,v4,v6});
+test('Issue60: known helper failure durably revokes current route admission; healthy same-route recovery retains identity/history',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),a=await enroll(h);
+ h.sessions.set(a.personaUid,fp('a'));assert.equal((await h.flow.confirm(a.accountId)).ok,true);
+ const original=(await h.accounts.get(a.accountId)).account;
+ h.faults.host=true;assert.equal((await h.flow.verifyRoute(a.accountId,{automatic:true})).ok,false);
+ assert.equal((await h.ledger.binding(a.bindingId)).binding.pin,'HELD');
+ await reloadRoutePins();assert.equal(inspectRoutePin(h.profileOf(a)).allow,false,'restart cannot resurrect known failed route');
+ h.faults.host=false;assert.equal((await h.flow.verifyRoute(a.accountId)).ok,true);
+ const recovered=(await h.accounts.get(a.accountId)).account;
+ assert.equal(recovered.boundPrincipal,original.boundPrincipal);assert.equal(recovered.personaUid,a.personaUid);
+ assert.equal((await h.ledger.binding(a.bindingId)).binding.pin,'ACTIVE');
+ assert.equal((await h.ledger.read()).ledger.owners['IPv4:45.83.1.1'],a.accountId);
+ assert.equal(h.effects.filter(x=>x.kind==='ASSIGN').length,1);
+});
 async function enroll(h){
   const begun=await h.flow.begin();
   assert.equal(begun.ok,true,JSON.stringify(begun));
@@ -251,7 +265,8 @@ test('S01 AC-02/C-08 D: genuine route failure repairs to a new unique exit; hist
   const out=await h.flow.verifyRoute(a.accountId);
   assert.equal(out.ok,true,JSON.stringify(out));
   assert.equal(out.changed,true);assert.equal(out.identity,'VERIFIED');
-  assert.deepEqual(h.order.slice(0,2),['HOLD','ASSIGN'],'pin withdrawn before route mutation');
+  const assignment=h.order.indexOf('ASSIGN');
+  assert.ok(assignment>0&&h.order.slice(0,assignment).every(x=>x==='HOLD'),'pin withdrawn before route mutation');
   const ledger=h.db.read('meta',LEDGER_KEY);
   assert.equal(ledger.owners['IPv4:45.83.1.1'],a.accountId,'old exit stays reserved to A');
   assert.equal(ledger.owners['IPv4:45.83.2.2'],a.accountId);
@@ -870,7 +885,11 @@ test('J01 unique ninth candidate is reached after eight historical collisions',a
  const relays=[relay('10.124.0.1','45.83.1.1','BLOCKED'),
    ...Array.from({length:8},(_,i)=>relay('10.124.0.'+(i+2),'45.83.1.1','BLOCKED')),
    relay('10.124.0.10','45.83.1.10','BLOCKED')];
- const h=setup({relays}),a=await enroll(h),b=await enroll(h);
+ const h=setup({relays}),a=await enroll(h);let b=await enroll(h);
+ assert.equal(b.setup.code,'ROUTE_SEARCH_PENDING','large searches yield with durable progress');
+ for(let i=0;i<4&&b.state==='PREPARING';i++){
+   await h.flow.upkeep();b=(await h.accounts.get(b.accountId)).account;
+ }
  assert.equal(a.state,'WAITING_LOGIN');assert.equal(b.state,'WAITING_LOGIN');
  const binding=await h.ledger.binding(b.bindingId);
  assert.equal(binding.binding.exits[0].address,'45.83.1.10');

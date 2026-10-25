@@ -9,13 +9,24 @@ import {normalizeRouteEvidence,exitSetDigest} from './network-ledger.mjs';
 
 // Hold codes that a later automatic attempt may clear without operator input.
 const TRANSIENT=new Set(['MULLVAD_LOCAL_SERVICE_UNAVAILABLE','DONOR_SECURITY_UNAVAILABLE',
-  'PERSONA_CREATE_UNCONFIRMED','PERSONA_TAG_UNCONFIRMED','ROUTE_ASSIGN_UNCONFIRMED','NO_ROUTE_CANDIDATES','MULLVAD_RELAY_CATALOG_UNAVAILABLE','ENROLLMENT_INTERRUPTED']);
+  'PERSONA_CREATE_UNCONFIRMED','PERSONA_TAG_UNCONFIRMED','ROUTE_ASSIGN_UNCONFIRMED','NO_ROUTE_CANDIDATES','MULLVAD_RELAY_CATALOG_UNAVAILABLE','ENROLLMENT_INTERRUPTED',
+  'ROUTE_SEARCH_PENDING','MULLVAD_STATUS_TIMEOUT','MULLVAD_PROXY_UNREACHABLE','MULLVAD_TUNNEL_UNAVAILABLE','MULLVAD_TUNNEL_ROUTE_UNAVAILABLE','MULLVAD_CONNECTION_UNVERIFIED','ROUTE_OBSERVATION_TIMEOUT','ROUTE_OBSERVATION_CANCELLED']);
 const rid=prefix=>prefix+crypto.randomUUID().replaceAll('-','');
 // Codes shown to the operator; anything else is summarized generically.
 export const SETUP_MESSAGES=Object.freeze({
   ENROLLMENT_INTERRUPTED:'Protected setup was interrupted. Resume setup checks the saved Persona and route before continuing.',
   MULLVAD_RELAY_CATALOG_UNAVAILABLE:'The Mullvad relay list is unavailable. Existing verified routes remain usable; resume setup when the connection returns.',
   MULLVAD_LOCAL_SERVICE_UNAVAILABLE:'The PersonaMonkey Mullvad helper is not running or not installed on this computer.',
+  MULLVAD_STATUS_TIMEOUT:'The Mullvad helper did not answer the connection check in time. Retry the route check; other work remains available.',
+  MULLVAD_HELPER_INCOMPATIBLE:'The installed PersonaMonkey Mullvad helper needs a compatible update before protected routes can be used.',
+  MULLVAD_PROXY_UNREACHABLE:'The Mullvad tunnel is running, but its SOCKS proxy is unreachable. Protected traffic is held. Retry the route check after the connection recovers.',
+  MULLVAD_TUNNEL_UNAVAILABLE:'The Mullvad tunnel is unavailable. Retry the route check to reconnect safely.',
+  MULLVAD_TUNNEL_ROUTE_UNAVAILABLE:'The tunnel is running, but the protected proxy route is unavailable. Retry the route check after repairing the PersonaMonkey connection.',
+  MULLVAD_CONNECTION_UNVERIFIED:'The Mullvad connection could not be verified. Retry the route check.',
+  MULLVAD_ROUTE_UNCONFIRMED:'A previous connection update has an unconfirmed outcome. This route stays held; checking connection status does not retry it. Other accounts remain available.',
+  ROUTE_OBSERVATION_TIMEOUT:'The protected route check timed out. Traffic remains held; retry when the connection recovers.',
+  ROUTE_OBSERVATION_CANCELLED:'The background route check stopped for your action. A fresh protected check is required before traffic resumes.',
+  ROUTE_SEARCH_PENDING:'Still looking for an available unique protected exit. Progress is saved; setup will continue automatically.',
   DONOR_SECURITY_UNAVAILABLE:'Firefox privacy protections are not in a safe state; PersonaMonkey is holding all protected routes.',
   NO_UNIQUE_EXIT_AVAILABLE:'No available Mullvad exit was found that has not already been used by another managed account.',
   NO_ROUTE_CANDIDATES:'No Mullvad relay list or unused Mullvad route is available right now.',
@@ -42,7 +53,7 @@ export const SETUP_MESSAGES=Object.freeze({
 });
 
 export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,syncInventory,
-  now=Date.now,mutationAllowed=async()=>true}={}){
+  now=Date.now,mutationAllowed=async()=>true,routeTurnMs=90000,maxRouteCandidates=4}={}){
   if(!accounts?.applyCurrent||!ledger?.reserve||!donor?.createBoundPersona||!pins?.hold||
      typeof openLogin!=='function'||typeof identify!=='function')
     throw new TypeError('Enrollment dependencies unavailable');
@@ -52,7 +63,17 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
   function exclusive(accountId,kind,task){
     if(archiving.has(accountId))return Promise.resolve(fail('ACCOUNT_BUSY'));
     const prior=running.get(accountId);
-    if(prior)return prior.kind===kind?prior.promise:Promise.resolve(fail('ACCOUNT_BUSY'));
+    if(prior){
+      if(prior.kind===kind)return prior.promise;
+      // Human intent cancels only automatic observation. Keep ownership
+      // until the donor actually settles, including any native preparation.
+      if(prior.kind==='ROUTE:false:true'&&['CONFIRM','OPEN_LOGIN','ROUTE:false:false','ROUTE:true:false'].includes(kind)){
+        prior.controller.abort();
+        return prior.promise.then(()=>exclusive(accountId,kind,task));
+      }
+      return Promise.resolve(fail('ACCOUNT_BUSY'));
+    }
+    const controller=new AbortController();
     const promise=Promise.resolve().then(task).catch(async()=>{
       // A thrown adapter/storage error must not leave idle setup looking busy.
       // Preserve the binding and donor intent; resume observes before effects.
@@ -67,7 +88,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     })
       .finally(()=>running.delete(accountId));
     trackPcmsWork(promise);
-    running.set(accountId,{kind,promise});
+    running.set(accountId,{kind,promise,controller,startedAt:now()});
     return promise;
   }
   const progress=(accountId,phase,code=null,extra={})=>
@@ -111,6 +132,10 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
   // reach the fixed Mullvad echo). rotate:false (archived) only observes.
   async function ensurePinnedRoute(account,{change=false,automatic=false,rotate=true}={}){
     const bindingId=account.bindingId;
+    const signal=running.get(account.accountId)?.controller.signal;
+    const cancelled=()=>signal?.aborted===true;
+    const hold=async code=>{pins.hold(bindingId);await ledger.hold(bindingId,code);return fail(code)};
+    const startedAt=now();
     const persona=await donor.boundPersona({bindingId});
     if(!persona.ok)return persona;
     // The donor's tagged Persona must be the one the account record names;
@@ -120,7 +145,8 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     const prior=await ledger.binding(bindingId);
     const failed=[];
     if(prior.ok&&prior.binding.routeId===persona.routeId&&!change){
-      const ev=await donor.probeAssigned({bindingId,contextId:persona.contextId,routeId:persona.routeId});
+      const ev=await donor.probeAssigned({bindingId,contextId:persona.contextId,routeId:persona.routeId,signal});
+      if(cancelled())return hold('ROUTE_OBSERVATION_CANCELLED');
       if(ev.ok){
         const out=await activate(bindingId,ev,persona.routeId,account.accountId,!rotate);
         if(out.ok){
@@ -132,8 +158,9 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
         if(!rotate)return out;
         if(automatic&&account.route?.code!=='ROUTE_CHECK_FAILED')return fail('ROUTE_CHECK_FAILED');
         failed.push(persona.routeId);
-      }else if(ev.failure==='HOST')return ev;
+      }else if(ev.failure==='HOST'){await hold(ev.code);return ev;}
       else{
+        await hold(ev.code||'ROUTE_CONNECTION_FAILED');
         if(!rotate)return ev;
         if(automatic&&account.route?.code!=='ROUTE_CHECK_FAILED')return fail('ROUTE_CHECK_FAILED');
         failed.push(persona.routeId);
@@ -145,6 +172,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       if(!rotate)return fail('ROUTE_CHANGED_OUTSIDE_PCMS');
     }else if(!rotate)return fail(prior.ok?'ROUTE_HELD':'BINDING_RESERVATION_ABSENT');
     if(change&&prior.ok)failed.push(prior.binding.routeId);
+    if(cancelled())return hold('ROUTE_OBSERVATION_CANCELLED');
     // Withdraw first: synchronous donor hold BEFORE any ledger or route change.
     pins.hold(bindingId);
     if(prior.ok&&prior.binding.pin!=='HELD')await ledger.hold(bindingId,change?'OPERATOR_ROUTE_CHANGE':'ROUTE_REPAIR');
@@ -178,7 +206,10 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     };
     const candidates=listed.ok&&Array.isArray(listed.candidates)?listed.candidates:[];
     let last=candidates.length?'NO_UNIQUE_EXIT_AVAILABLE':listed.relayList==='UNAVAILABLE'?'MULLVAD_RELAY_CATALOG_UNAVAILABLE':'NO_ROUTE_CANDIDATES';
+    let checkedThisTurn=0;
     for(const candidate of candidates){
+      if(cancelled())return hold('ROUTE_OBSERVATION_CANCELLED');
+      if(checkedThisTurn>=maxRouteCandidates||now()-startedAt>=routeTurnMs)return fail('ROUTE_SEARCH_PENDING');
       // The catalog is finite; visit its complete eligible set rather than
       // retrying the same colliding prefix forever. Only one probe/assignment
       // is in flight for this account; other accounts remain independent.
@@ -187,7 +218,9 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       if(candidate.kind==='ROUTE'&&attempted.has(candidate.routeId))continue;
       const route=await donor.ensureRoute(candidate);
       if(!route.ok){last=route.code;continue;}
-      const ev=await donor.probeCandidate({routeId:route.routeId});
+      checkedThisTurn++;
+      const ev=await donor.probeCandidate({routeId:route.routeId,signal});
+      if(cancelled())return hold('ROUTE_OBSERVATION_CANCELLED');
       if(!ev.ok){if(ev.failure==='HOST')return ev;last=ev.code;await checked(route.routeId);continue;}
       const afterProbe=await accounts.get(account.accountId);
       if(!afterProbe.ok||afterProbe.account.state==='ARCHIVED'||afterProbe.account.bindingId!==bindingId)return fail('ACCOUNT_ARCHIVED');
@@ -206,7 +239,8 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       // Unconfirmed assignment: the reservation is durable; the next run
       // reads the donor route and reconciles instead of assigning again.
       if(!assigned.ok)return assigned;
-      const verified=await donor.probeAssigned({bindingId,contextId:persona.contextId,routeId:route.routeId});
+      const verified=await donor.probeAssigned({bindingId,contextId:persona.contextId,routeId:route.routeId,signal});
+      if(cancelled())return hold('ROUTE_OBSERVATION_CANCELLED');
       if(!verified.ok){if(verified.failure==='HOST')return verified;last=verified.code;failed.push(route.routeId);continue;}
       const out=await activate(bindingId,verified,route.routeId,account.accountId);
       if(out.ok){await accounts.applyCurrent({type:'ROUTE_SEARCH_COMPLETE',accountId:account.accountId});return out;}
@@ -500,6 +534,16 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     resume:accountId=>exclusive(accountId,'SETUP',()=>prepare(accountId)),
     prepare:accountId=>exclusive(accountId,'SETUP',()=>prepare(accountId)),
     confirm:accountId=>exclusive(accountId,'CONFIRM',()=>confirm(accountId)),
+    openLogin:accountId=>exclusive(accountId,'OPEN_LOGIN',async()=>{
+      const got=await accounts.get(accountId);if(!got.ok)return got;
+      const a=got.account;if(a.state==='ARCHIVED')return fail('ACCOUNT_ARCHIVED');
+      // Existing valid donor admission opens immediately. An uncertain tab
+      // ACK is returned as such, never retried as a connection repair.
+      const opened=await openLogin(a.personaUid);
+      if(opened?.ok||!['PROTECTED_ROUTE_NOT_PINNED','PROTECTED_ROUTE_UNVERIFIED','PROTECTED_ROUTE_UNAVAILABLE'].includes(opened?.code))return opened;
+      const route=await verifyRoute(accountId);if(!route.ok)return route;
+      return openLogin(a.personaUid);
+    }),
     verifyRoute:(accountId,options)=>exclusive(accountId,'ROUTE:'+String(options?.change===true)+':'+String(options?.automatic===true),()=>verifyRoute(accountId,options)),
     reactivate:(accountId,rev)=>exclusive(accountId,'REACTIVATE',()=>reactivate(accountId,rev)),
     upgrade:accountId=>exclusive(accountId,'UPGRADE',()=>upgrade(accountId)),
@@ -548,6 +592,11 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
         while(cursor<listed.accounts.length)await checkAccount(listed.accounts[cursor++]);
       }));
       return {ok:true,checked:results.length};
+    },
+    activity:accountId=>{
+      const task=running.get(accountId);
+      return archiving.has(accountId)?{kind:'ARCHIVE',automatic:false,cancellable:false}:
+        task?{kind:task.kind,automatic:task.kind==='ROUTE:false:true',cancellable:task.kind==='ROUTE:false:true',startedAt:task.startedAt}:null;
     },
     running:accountId=>running.has(accountId)||archiving.has(accountId)
   });
