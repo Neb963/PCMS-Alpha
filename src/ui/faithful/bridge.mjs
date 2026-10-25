@@ -1,4 +1,5 @@
 import {createPresentationWorkspace} from './presentation-workspace.mjs';
+import {COLUMN_IDS} from '../presentation-preferences.mjs';
 import {installInteraction} from './interaction.mjs';
 import {mountOperatorChecklist} from '../operator-checklist.mjs';
 import {mountBackupWorkspace} from './backup-workspace.mjs';
@@ -251,10 +252,12 @@ function openDetails(kind,item){
   kv('Phase',item.phase||'Unknown');kv('Active remaining',formatTime(item.activeRemaining));
   kv('Sleep remaining',formatTime(item.sleepRemaining));kv('Blockers',Array.isArray(item.blockers)?item.blockers.join(' · ')||'None observed':'Unknown');
   kv('Recent presence',item.presence?(item.presence.present?'Previously present':'Previously absent, not deleted'):'Not observed');
- } else{kv('Owner evidence',item.ownerState||'Unknown');kv('Visibility',item.visibility||'Unknown');kv('Source',item.source||'Unknown')}
+ } else{kv('Owner evidence',item.ownerState||'Unknown');kv('Perchance listing',item.visibility||'Unknown');kv('GitHub source',item.sourceStatus||item.source||'Unknown');
+  const facets=generatorFacets(item);for(const label of ['Release','Refresher','Attention','Observed'])kv(label,facets[label.toLowerCase()]);}
  body.append(dl,el('p','native-bridge-note','Protected changes, source inspection and adoption remain subject to existing exact-record authorization and guarded runtime checks.'));
  const actions=el('div','form-foot');if(kind==='ref')actions.append(b('Open timing controls',()=>{backdrop.remove();nativeSelection('timing',item)}));
- else for(const [label,kind] of [['Inspect source','source'],['Refresher timing','timing'],['Original source','adopt']])actions.append(b(label,()=>{backdrop.remove();nativeSelection(kind,item)}));
+ else {for(const [label,kind] of [['Inspect source','source'],['Refresher timing','timing'],['Original source','adopt']])actions.append(b(label,()=>{backdrop.remove();nativeSelection(kind,item)}));
+  actions.append(b('Open related work',()=>{backdrop.remove();state.queue.query=item.slug;routeTo('work-queue')}));}
  body.append(actions);drawer.append(body);backdrop.append(drawer);root.append(backdrop);
  const focusable=()=>[...drawer.querySelectorAll('button:not(:disabled),[href],input:not(:disabled)')];
  backdrop.addEventListener('keydown',event=>{if(event.key==='Escape'){backdrop.remove();if(priorFocus?.isConnected)priorFocus.focus({preventScroll:true});return}if(event.key==='Tab'){let all=focusable();let index=all.indexOf(root.activeElement);if(event.shiftKey&&index<=0){event.preventDefault();all.at(-1)?.focus()}if(!event.shiftKey&&index===all.length-1){event.preventDefault();all[0]?.focus()}}});
@@ -380,7 +383,13 @@ const statusClasses={ACTIVE:'green',SLEEPING:'',WAITING:'',HELD:'red',INELIGIBLE
 const ownerLabels={OBSERVED_OWNER:'Owner observed',OWNER_UNVERIFIED:'Owner unknown',OWNER_DISPUTED:'Disputed',UNOBSERVED:'Unobserved',IDENTITY_CONFLICT:'Identity conflict',OWNER_CONFLICT:'Account conflict'};
 function rowsError(tableSelector,message,colspan){const body=shadow(tableSelector);if(!body)return;body.replaceChildren();const tr=el('tr'),td=el('td','pcms-unknown',message);td.colSpan=colspan;tr.append(td);body.append(tr)}
 function setCounts(tabSelector,map){for(const tab of shadow('#page')?.querySelectorAll(tabSelector)||[]){const x=tab.dataset.filter?.split(':')[1];const num=tab.querySelector('.count');if(num)num.textContent=map[x]??'—'}}
-function fmtObservation(item){if(item.observedAt&&Number.isFinite(item.observedAt)){const mins=Math.max(0,Math.floor((Date.now()-item.observedAt)/60000));return `${mins} min ago · historical`}return 'Not verified'}
+function fmtObservation(item){const at=item.lastObservedAt||item.observedAt;if(at&&Number.isFinite(at)){const mins=Math.max(0,Math.floor((Date.now()-at)/60000));return `${mins} min ago · historical`}return 'Not verified'}
+function generatorFacets(item){
+ const words=value=>String(value).toLowerCase().replaceAll('_',' ');
+ return {release:item.releaseState&&item.releaseState!=='NOT_RECORDED'?words(item.releaseState)+' · recorded':'No release recorded',
+  refresher:item.refresher?words(item.refresher.phase)+(item.refresher.blockers.length?' · '+item.refresher.blockers.map(words).join(', '):'')+' · recorded':words(item.refresherStatus||'NOT_OBSERVED'),
+  attention:item.attention?.length?item.attention.map(words).join(' · '):'None recorded',observed:fmtObservation(item)};
+}
 // C-14/C-80: the accepted UI records durable intents through the same
 // slug-coalescing coordinator as main-only Git discovery. Side effects are
 // exclusively run later by the protected account/creation watcher.
@@ -453,14 +462,16 @@ function openAccountManager(item){accountWorkspace.open(item)}
 async function loadGenerators(){
  presentation.rememberFilters();if(state.route!=='generators')return;
  const epoch=++state.renderEpoch,body=shadow('.workspace-surface table tbody');if(!body)return;
- renderEmpty(body,'Reading observed local generator inventory…');
+ const queryKey=JSON.stringify([state.gen.query,state.gen.offset,state.gen.limit,state.gen.filter,state.gen.source,state.gen.owner,state.gen.account,state.gen.sort,state.gen.management]);
+ if(body.dataset.queryKey!==queryKey||!body.querySelector('tr[data-item-index]'))rowsError('.workspace-surface table tbody','Reading observed local generator inventory…',COLUMN_IDS.length+2);
+ body.dataset.queryKey=queryKey;body.setAttribute('aria-busy','true');
  try{
-  const [res,accountsResult]=await Promise.all([inventory({query:state.gen.query,offset:state.gen.offset,limit:state.gen.limit,workspace:true,status:state.gen.filter,source:state.gen.source,ownerState:state.gen.owner,accountId:state.gen.account==='ALL'?'':state.gen.account,sort:state.gen.sort}),accounts().catch(()=>null)]);
+  const [res,accountsResult]=await Promise.all([inventory({query:state.gen.query,offset:state.gen.offset,limit:state.gen.limit,workspace:true,status:state.gen.filter,source:state.gen.source,ownerState:state.gen.owner,accountId:state.gen.account==='ALL'?'':state.gen.account,sort:state.gen.sort,management:state.gen.management||'ALL'}),accounts().catch(()=>null)]);
   if(epoch!==state.renderEpoch||state.route!=='generators')return;
   state.lastAccountList=accountsResult?.ok&&Array.isArray(accountsResult.accounts)?accountsResult.accounts:state.lastAccountList;
   state.gen.items=Array.isArray(res.items)?res.items:[];state.gen.total=safeCount(res.total)=== '—'?0:res.total;
-  state.gen.facets=res.facets||{};state.errors.generators='';displayGenerators();
- }catch(err){if(epoch!==state.renderEpoch)return;state.errors.generators=err.message;state.gen.items=[];state.gen.total=0;rowsError('.workspace-surface table tbody','Local inventory unavailable: '+err.message+'. No remote absence inferred.',7)}
+  state.gen.facets=res.facets||{};state.errors.generators='';displayGenerators();body.setAttribute('aria-busy','false');
+ }catch(err){if(epoch!==state.renderEpoch)return;state.errors.generators=err.message;state.gen.items=[];state.gen.total=0;rowsError('.workspace-surface table tbody','Local inventory unavailable: '+err.message+'. No remote absence inferred.',COLUMN_IDS.length+2)}
 }
 function updateGeneratorSelection(){
  if(state.route!=='generators')return;
@@ -557,13 +568,16 @@ function openGeneratorSelection(){
  });line.querySelector('button')?.focus({preventScroll:true});
 }
 function displayGenerators(){if(state.route!=='generators')return;
- const body=shadow('.workspace-surface table tbody');if(!body)return;body.replaceChildren();
+ const body=shadow('.workspace-surface table tbody');if(!body)return;
+ const active=root.activeElement,focused=body.contains(active)?active.closest('tr[data-presentation-key]'):null,
+ focusKey=focused?.dataset.presentationKey,focusTag=active?.tagName,scroller=body.closest('.table-scroll'),scrollTop=scroller?.scrollTop;
+ body.replaceChildren();
  const accountsMap=new Map(state.lastAccountList.map(a=>[a.accountId,a]));const itemList=[...state.gen.items];
  // Server already sorted the complete matching fleet before slicing.
  state.gen.visibleItems=itemList;
- if(!itemList.length){rowsError('.workspace-surface table tbody',state.errors.generators?'Local inventory unavailable.': 'No matching local generator observations.',7)}
+ if(!itemList.length){rowsError('.workspace-surface table tbody',state.errors.generators?'Local inventory unavailable.': 'No matching local generator observations.',COLUMN_IDS.length+2)}
  for(const [i,item] of itemList.entries()){
-  const tr=tableRow([item.slug],i);
+  const tr=tableRow([item.slug],i);tr.dataset.presentationKey=item.slug;
   const selectCell=el('td','generator-select-cell'),checkbox=el('input');checkbox.type='checkbox';
   checkbox.dataset.generatorSelect=item.slug;checkbox.setAttribute('aria-label','Select '+item.slug);
   checkbox.checked=generatorSelection.includes(item);checkbox.addEventListener('click',e=>e.stopPropagation());
@@ -575,7 +589,8 @@ function displayGenerators(){if(state.route!=='generators')return;
   const td3=el('td','muted-cell',item.visibility||'UNKNOWN');
   const td4=el('td','muted-cell',({GIT:'Git linked',PROTECTED:'Original protected',ORIGINAL_SAVED:'Original saved · archiving',CAPTURING:'Capturing original',PENDING:'Source pending'})[item.sourceStatus]||sourceState);
   const cue=el('td','open-col');cue.append(b('Open',e=>{e.stopPropagation();void openGeneratorPage(item)},'btn small'));
-  td1.dataset.column='account';tr.append(selectCell,td0,td1,td2,td3,td4,cue);body.append(tr);
+  const detail=generatorFacets(item),extra=['release','refresher','attention','observed'].map(key=>{const cell=el('td','muted-cell',detail[key]);cell.title=detail[key];return cell});
+  td1.dataset.column='account';tr.append(selectCell,td0,td1,td2,td3,td4,...extra,cue);body.append(tr);
  }
  setPagination('.workspace-surface .pagination span','[data-action="gen-prev"]','[data-action="gen-next"]',state.gen.offset,state.gen.total,state.gen.limit,
  `${state.gen.total?state.gen.offset+1:0}–${Math.min(state.gen.offset+state.gen.limit,state.gen.total)} of ${state.gen.total} generators${state.gen.account!=='ALL'?' · filtered account':''}`);
@@ -586,6 +601,10 @@ function displayGenerators(){if(state.route!=='generators')return;
   tab.setAttribute('aria-selected',String(state.gen.filter===key));tab.tabIndex=state.gen.filter===key?0:-1;
  }
  updateGeneratorSelection();presentation.mountTools();presentation.applyTable();
+ if(focusKey){const row=[...body.querySelectorAll('tr[data-presentation-key]')].find(r=>r.dataset.presentationKey===focusKey);
+  if(row){const target=focusTag==='INPUT'?row.querySelector('input'):focusTag==='BUTTON'?row.querySelector('button'):row;target?.focus({preventScroll:true});if(scroller)scroller.scrollTop=scrollTop}
+  else shadow('#generator-search')?.focus({preventScroll:true});
+ }
  const accountSelect=shadow('#generator-account');if(accountSelect){const prior=accountSelect.value;accountSelect.replaceChildren();const first=el('option','', 'All accounts');first.value='ALL';accountSelect.append(first);
   for(const a of state.lastAccountList){const option=el('option','',a.alias||a.accountId);option.value=a.accountId;accountSelect.append(option)}if(state.gen.account!=='ALL'&&![...accountSelect.options].some(x=>x.value===state.gen.account)){const missing=el('option','','Saved account · unavailable');missing.value=state.gen.account;accountSelect.append(missing)}accountSelect.value=state.gen.account;}
 }
@@ -1880,6 +1899,7 @@ async function render(){
  if(!html)return;
  const template=document.createElement('template');template.innerHTML=html;
  const old=shadow('#page');old.replaceWith(template.content.firstElementChild);
+ shadow('#main').scrollTop=0;
  updateNav();displayRouteScaffold();
 }
 async function mount(){
@@ -1896,7 +1916,7 @@ async function mount(){
  let initial=location.hash.slice(1);if(!routes.includes(initial))initial='overview';state.route=initial;
  await presentation.ready;
  const version=shadow('.preview-label');if(version){version.textContent='PCMS '+state.version;version.setAttribute('aria-label','Installed PCMS version '+state.version)}
- installInteraction({root,preferences:presentation.preferences,route:()=>state.route});
+ installInteraction({root,preferences:presentation.preferences,route:()=>state.route,notify});
  routeHandlers();await render();
  const legacy=document.querySelector('body > .app');
  if(legacy)legacy.inert=true; // no hidden workflow focus or operator input

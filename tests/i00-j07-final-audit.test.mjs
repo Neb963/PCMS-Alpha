@@ -1,0 +1,23 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {buildCatalog} from '../scripts/a09-evidence.mjs';
+import {validateMap,evaluateRun,markdown} from '../scripts/j07-final-audit.mjs';
+const read=p=>readFile(p,'utf8');
+test('J07 audit rejects missing findings, unmapped requirements, incomplete browser runs and foreign XPI; broad fixtures never become acceptance receipts',async()=>{
+ const map=JSON.parse(await read('docs/verification/J07-CONFORMANCE.json'));
+ const audit=await read('docs/audit/2026-10-24-PRACTICAL-PRODUCT-CONFORMANCE.md');
+ const catalog=buildCatalog(await read('docs/authority/PCMS-Alpha-ACCEPTANCE-MATRIX-v1.0.0.md'),JSON.parse(await read('tests/fixtures/a01-recovery-scenarios.json')),await read('docs/audit/PART8-ORIGINAL-X01-X14.md'));
+ validateMap(map,audit,catalog);assert.equal(catalog.length,42);
+ const missing=structuredClone(map);missing.findings.pop();assert.throws(()=>validateMap(missing,audit,catalog),/FINDING_COUNT/);
+ const duplicate=structuredClone(map);duplicate.findings[0].id=duplicate.findings[1].id;assert.throws(()=>validateMap(duplicate,audit,catalog),/FINDING_COVERAGE/);
+ const wrong=structuredClone(map);wrong.acceptanceJourneys['AC-17']=[];assert.throws(()=>validateMap(wrong,audit,catalog),/ACCEPTANCE_COVERAGE/);
+ const digest='a'.repeat(64),receipt={schema:'pcms.j07.full-browser-run/1',status:'PASS',retainedSuites:'PASS',xpiSha256:digest,checkoutSha:'b'.repeat(40),sourceTree:'c'.repeat(40),version:'1.2.14',geckoId:'persona-route-manager@local',completed:Object.values(map.journeys).flatMap(j=>j.browser)};
+ const result=evaluateRun(map,receipt,digest);assert.equal(result.browser,'PASS');assert.equal(result.deterministic,'NOT_ATTESTED_BY_BROWSER_RECEIPT');
+ assert.throws(()=>evaluateRun(map,{...receipt,completed:receipt.completed.slice(1)},digest),/MISSING_OR_DUPLICATE/);
+ assert.throws(()=>evaluateRun(map,{...receipt,retainedSuites:'NOT_TESTED'},digest),/RETAINED_SUITE/);
+ assert.throws(()=>evaluateRun(map,receipt,'d'.repeat(64)),/FOREIGN_SOURCE_OR_XPI/);
+ assert.throws(()=>evaluateRun(map,{...receipt,status:'FAIL'},digest),/FULL_BROWSER_RUN_REQUIRED/);
+ const report=markdown({...receipt,run:result,findings:map.findings,journeys:map.journeys,requirements:[],limits:['L/GIT NOT_TESTED']});
+ assert.match(report,/not fabricated per-case acceptance PASS/);assert.match(report,/L\/GIT NOT_TESTED/);
+});

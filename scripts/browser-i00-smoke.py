@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from urllib.parse import urlparse
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -1036,25 +1037,31 @@ def main():
             else: raise RuntimeError('geckodriver did not become ready')
             # Exercise the changed operator journey first; all unchanged
             # persistent donor/source/backup suites still run after it passes.
+            completed=[]
+            def journey(name,runner):
+                runner(browser,archive,pathlib.Path(folder))
+                completed.append(name)
+            from journey_ui import run as run_j07_primary
+            journey('journey_ui.run',run_j07_primary)
             from journey_backups_ui import run as run_j06_primary
-            run_j06_primary(browser,archive,pathlib.Path(folder))
+            journey('journey_backups_ui.run',run_j06_primary)
             from journey_restore_ui import run as run_j06_restore
-            run_j06_restore(browser,archive,pathlib.Path(folder))
+            journey('journey_restore_ui.run',run_j06_restore)
             from journey_refresher_ui import run as run_j05_primary
-            run_j05_primary(browser,archive,pathlib.Path(folder))
+            journey('journey_refresher_ui.run',run_j05_primary)
             from journey_refresher_clock import run as run_j05_clock
-            run_j05_clock(browser,archive,pathlib.Path(folder))
+            journey('journey_refresher_clock.run',run_j05_clock)
             from journey_development_ui import run as run_j04_primary
-            run_j04_primary(browser,archive,pathlib.Path(folder))
+            journey('journey_development_ui.run',run_j04_primary)
             from journey_development_pipeline import run as run_j04_pipeline
-            run_j04_pipeline(browser,archive,pathlib.Path(folder))
+            journey('journey_development_pipeline.run',run_j04_pipeline)
             from journey_git_ui import run as run_j03_primary, run_empty as run_j03_empty
-            run_j03_primary(browser,archive,pathlib.Path(folder))
-            run_j03_empty(browser,archive,pathlib.Path(folder))
+            journey('journey_git_ui.run',run_j03_primary)
+            journey('journey_git_ui.run_empty',run_j03_empty)
             from journey_generators_ui import run as run_j02_primary
-            run_j02_primary(browser,archive,pathlib.Path(folder))
+            journey('journey_generators_ui.run',run_j02_primary)
             from journey_accounts_ui import run as run_j01_primary
-            run_j01_primary(browser,archive,pathlib.Path(folder))
+            journey('journey_accounts_ui.run',run_j01_primary)
             first=open_session(browser,profile)
             original_firefox_pids=owned_firefox_pids(profile)
             assert original_firefox_pids,'S01_FIRST_FIREFOX_PROCESS_NOT_OBSERVED'
@@ -5510,6 +5517,25 @@ def main():
             server.terminate()
             try: server.wait(timeout=4)
             except subprocess.TimeoutExpired: server.kill()
+
+
+    # Written only after every primary journey AND all retained suites return.
+    # Failed/interrupted suites cannot produce a successful final audit receipt.
+    with zipfile.ZipFile(archive) as package:manifest=json.loads(package.read('manifest.json'))
+    event=json.loads(pathlib.Path(os.environ['GITHUB_EVENT_PATH']).read_text()) if os.environ.get('GITHUB_EVENT_PATH') else {}
+    checkout=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+    receipt={'schema':'pcms.j07.full-browser-run/1','status':'PASS','retainedSuites':'PASS',
+        'checkoutSha':checkout,'candidateSha':event.get('pull_request',{}).get('head',{}).get('sha',checkout),
+        'sourceTree':subprocess.check_output(['git','rev-parse','HEAD^{tree}'],text=True).strip(),
+        'version':manifest['version'],'geckoId':ID,'xpiSha256':expected_hash,'completed':completed,
+        'firefox':subprocess.check_output([str(browser),'--version'],text=True,stderr=subprocess.DEVNULL).strip(),
+        'installation':'persistent, fully enabled, disposable profiles only',
+        'githubActions':os.environ.get('GITHUB_ACTIONS')=='true',
+        'contentSandboxDisabled':os.environ.get('MOZ_DISABLE_CONTENT_SANDBOX')=='1',
+        'actionsUrl':('https://github.com/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID']) if os.environ.get('GITHUB_RUN_ID') else None,
+        'externalProviders':'OFFLINE_FIXTURES_NOT_L_OR_PRIVATE_GIT','observedAt':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())}
+    receipt_path=pathlib.Path('build/j07-full-browser-run.json');receipt_path.write_text(json.dumps(receipt,indent=2))
+    subprocess.run(['node','scripts/j07-final-audit.mjs',str(archive),str(receipt_path),'build'],check=True)
 
 
 if __name__=='__main__':

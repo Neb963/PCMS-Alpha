@@ -126,6 +126,9 @@ jobs:
             build/j05-*.json
             build/j06-*.png
             build/j06-*.json
+            build/j07-*.png
+            build/j07-*.json
+            build/j07-final-audit.md
           if-no-files-found: ignore
           retention-days: 14
   pcms-required:

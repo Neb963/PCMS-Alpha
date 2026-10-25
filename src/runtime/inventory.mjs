@@ -1,5 +1,6 @@
 // I04: canonical, read-only generator observations. Never a provider-write grant.
 import { fail, isSafeId } from './journal.mjs';
+import {REFRESHER_KEY,validShadow,rowBlocks} from './refresher-core.mjs';
 
 const slugOK = v => typeof v === 'string' && /^[a-z0-9][a-z0-9-]{0,99}$/.test(v);
 const hashOK = v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
@@ -249,15 +250,15 @@ export function createInventoryStore(db) {
   // Read projection only: every facet is derived before pagination from the
   // canonical workflow records. It cannot authorize an operation.
   function workspace({query='',ownerState='ALL',accountId='',offset=0,limit=50,
-    sort='name',status='ALL',source='ALL'}={}){
+    sort='name',status='ALL',source='ALL',management='ALL'}={}){
     if(typeof query!=='string'||query.length>80||!['ALL',...states].includes(ownerState)||
        accountId!==''&&!isSafeId(accountId)||!Number.isSafeInteger(offset)||offset<0||offset>100000||
        !Number.isSafeInteger(limit)||limit<1||limit>100||!['fleet','name','account'].includes(sort)||
        !['ALL','PUBLISHED','DEVELOPING','REVIEW','HELD','IDLE'].includes(status)||
-       !['ALL','GIT','PROTECTED','ORIGINAL_SAVED','CAPTURING','PENDING'].includes(source))
+       !['ALL','GIT','PROTECTED','ORIGINAL_SAVED','CAPTURING','PENDING'].includes(source)||!['ALL','MANAGED'].includes(management))
       return Promise.resolve(fail('INVALID_INVENTORY_QUERY'));
     return transact('readonly',(tx,done)=>{
-      const generators=[],facts=new Map();
+      const generators=[],facts=new Map(),accountNotices=new Map();let refresher=null;
       const fact=slug=>{if(!facts.has(slug))facts.set(slug,{});return facts.get(slug);};
       tx.objectStore('meta').openCursor().onsuccess=e=>{
         const c=e.target.result;
@@ -274,20 +275,37 @@ export function createInventoryStore(db) {
             Object.assign(fact(r.slug),{ready:r.active?.state,desired:!!r.desired,hold:r.hold});}
           else if(k.startsWith('s00-create-intent:')&&v?.record){const r=v.record;
             if(r.lastAttempt?.revision===r.revision&&!r.lastAttempt.ok)fact(r.slug).creationHold=r.lastAttempt.code;}
+          else if(k===REFRESHER_KEY&&validShadow(v?.state))refresher=v.state;
+          else if(k.startsWith('attention:')&&v.state!=='RESOLVED'){
+            if(v.target?.kind==='GENERATOR'){
+              const f=fact(v.target.id);(f.notices||=[]).push(v.code);
+            }else if(v.target?.kind==='ACCOUNT'){
+              const codes=accountNotices.get(v.target.id)||[];codes.push(v.code);accountNotices.set(v.target.id,codes);
+            }
+          }
           c.continue();return;
         }
+        const schedules=new Map((refresher?.rows||[]).map(r=>[r.slug+'\0'+r.accountId,r]));
         const items=[],facets={ALL:0,PUBLISHED:0,DEVELOPING:0,REVIEW:0,HELD:0,IDLE:0};
         for(const g of generators){const f=facts.get(g.slug)||{};
           g.sourceStatus=f.linked?'GIT':f.protected?'PROTECTED':f.original?'ORIGINAL_SAVED':
             g.management==='OBSERVED_ONLY'?'CAPTURING':'PENDING';
-          g.workflowStatus=g.ownerState!=='OBSERVED_OWNER'||f.hold||f.creationHold||
+          g.workflowStatus=g.ownerState!=='OBSERVED_OWNER'||f.hold||f.creationHold||f.notices?.length||accountNotices.get(g.accountId)?.length||
             ['HELD','FAILED','PUBLICATION_UNCERTAIN','DISPATCH_POSSIBLE'].includes(f.release)||
             ['HELD','FAILED','HELD_RECONCILE','HELD_NO_PROGRESS','HUMAN_OWNED'].includes(f.ai)?'HELD':
             ['TESTS_VERIFIED','REVIEW','AWAITING_APPROVAL','AWAITING_REVIEW'].includes(f.ai)||f.aiReleased?'REVIEW':
             f.release==='APPROVED'||f.ready==='ACTIVE'||f.desired||f.ai&&!['COMPLETED','CANCELED','ABORTED'].includes(f.ai)?'DEVELOPING':
             g.visibility==='PUBLIC'?'PUBLISHED':'IDLE';
           g.workflowHold=f.creationHold||f.hold||null;
+          g.releaseState=f.release||'NOT_RECORDED';
+          const schedule=schedules.get(g.slug+'\0'+g.accountId);g.refresherStatus=refresher?'NOT_SCHEDULED':'NOT_OBSERVED';
+          g.refresher=schedule?{phase:schedule.phase,blockers:rowBlocks(refresher,schedule),observedAt:refresher.lastTurnAt}:null;
+          g.attention=[...new Set([...(f.notices||[]),...(accountNotices.get(g.accountId)||[]),
+            ...[g.identityHold,g.workflowHold].filter(Boolean),...(g.ownerState!=='OBSERVED_OWNER'?[g.ownerState]:[])])];
+          if(g.workflowStatus==='HELD'&&!g.attention.length)g.attention.push('WORKFLOW_HELD');
+          g.managed=g.management?.startsWith('MANAGED')===true||f.original===true||f.linked===true;
           const match=(!accountId||g.accountId===accountId)&&
+            (management==='ALL'||g.managed)&&
             (ownerState==='ALL'||g.ownerState===ownerState)&&
             (source==='ALL'||g.sourceStatus===source)&&
             (!query||g.slug.includes(query.toLowerCase())||g.accountId.toLowerCase().includes(query.toLowerCase()));
