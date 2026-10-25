@@ -421,7 +421,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           destinationSha256:reviewed.plan.destinationSha256,
           checkpointSha256:checked.sha256,
           reviewedPlanSha256:args.reviewedPlanSha256,
-          checkpointTier:checked.tier,fresh:args.fresh,
+          checkpointTier:checked.tier,fresh:reviewed.plan.fresh,
           preparation:preparation?{epoch:preparation.epoch,revision:preparation.revision}:null,
           recovery:{mode:args.mode,mappings:args.mappings,
             accountChoices:args.accountChoices,
@@ -434,7 +434,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
         await applyGuardedGroups({db,donor,baseline,intent,
           req:args.mappings,payload:incoming.donor,
           incomingPcms:incoming.canonical,mode:args.mode,
-          fresh:args.fresh,accountChoices:args.accountChoices,v2:true,incomingLocal});
+          fresh:reviewed.plan.fresh,accountChoices:args.accountChoices,v2:true,incomingLocal});
         const final=await gate.inspect();
         assert(final.held&&final.activation==='OFF'&&
           final.status==='COMPLETE_INACTIVE','RESTORE_PORTABLE_FINAL_HOLD_REQUIRED');

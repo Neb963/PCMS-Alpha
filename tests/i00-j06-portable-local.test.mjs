@@ -16,7 +16,7 @@ const local=()=>({
  pcmsUiGeneratorSelectionV1:{schema:1,items:[{slug:'example',accountId:'account_fixture',revision:3}]},
  pcmsR4FolderIdentityReviews:[{repositoryId:'1411034835',newSlug:'new-name',oldSlug:'old-name',state:'RENAME_EXISTING_REQUESTED',revision:2,automaticRenameApproved:true}],
  'pcmsR4ExistingRenameAttempt:new-name':{schema:1,newSlug:'new-name',oldSlug:'old-name',state:'DISPATCH_POSSIBLE',revision:4,operationId:'rename_aaaa',sourceFingerprint:'a'.repeat(64),ownerChoiceSource:'HUMAN_EXACT_RENAME_SCOPE'},
- pcmsR4MissingGitFolders:['old-name']
+ pcmsR4MissingGitFolders:{repositoryId:'1411034835',slugs:['old-name']}
 });
 test('J06 real archive frames nonsecret settings and rename WAL, with no credential/grant/guard import',async()=>{
  const pcms=empty(),projected=collectPortableLocal(local()),archived=archiveWithPortableLocal(pcms,local());
@@ -53,4 +53,32 @@ test('J06 checkpoint and reviewed plan bind local settings independently of real
  assert.notEqual(a.planSha256,b.planSha256);
  const changedSource=structuredClone(current);changedSource.stores.meta.push({key:'adoption:example',value:{source:'changed'}});
  await assert.rejects(()=>verifyPortableCheckpoint({checkpoint,currentPcms:changedSource,currentPortable:donor,currentLocal:settings}),/RESTORE_CHECKPOINT_PCMS_DRIFT/);
+});
+
+test('J06 actual missing-folder history and alternate valid repository survive export',()=>{
+ const data={pcmsS03Git:{repository:'Example/valid-repository',repositoryId:'91',token:'EXCLUDED'},
+ pcmsR4MissingGitFolders:{repositoryId:'91',slugs:['removed-folder']}};
+ assert.deepEqual(collectPortableLocal(data),{pcmsR4MissingGitFolders:data.pcmsR4MissingGitFolders,
+ pcmsS03Git:{repository:'Example/valid-repository',repositoryId:'91'}});
+});
+test('J06 deterministic canonical conflicts fail at inspection before a restore guard or donor write',async()=>{
+ const current=empty(),archive=empty(),donor=createPortableBackupPayload({state:{},containers:[],selection:{kind:'full'}});
+ archive.stores.meta.push({key:'setting:example',value:{value:'archive'}});
+ current.stores.meta.push({key:'setting:example',value:{value:'current'}});
+ const incoming={canonical:archive,donor,sourceVerified:true,receipt:{status:'READY',chain:'a'.repeat(64)}};
+ await assert.rejects(()=>inspectPortableRestore({incoming,currentPcms:current,currentDonor:{state:{},containers:[]},currentPortable:donor,mode:'merge'}),/RESTORE_MERGE_CONFLICT/);
+ assert.equal(current.stores.meta[0].value.value,'current');
+});
+test('J06 a reliably removed account stays excluded by default and can explicitly return inactive without erasing removal history',()=>{
+ const current=empty(),archive=empty(),uid='11111111-1111-4111-8111-111111111111';
+ archive.stores.meta=[{key:'account:account_fixture',value:{key:'account:account_fixture',account:{accountId:'account_fixture',personaUid:uid,state:'VERIFIED',revision:2,bindingVersion:1,boundPrincipal:'a'.repeat(64)}}}];
+ const removal={key:'removal:account_fixture',state:'REMOVED_ONLY_LOCALLY',revision:5,accountId:'account_fixture'};
+ current.stores.meta=[{key:'account:account_fixture',value:{key:'account:account_fixture',account:{accountId:'account_fixture',personaUid:uid,state:'REMOVED',revision:5,bindingVersion:3,boundPrincipal:'a'.repeat(64)}}},{key:removal.key,value:removal}];
+ const omitted=prepareRestoredCanonical({incoming:archive,current,mode:'replace',uidRemap:{[uid]:uid}});
+ assert.equal(omitted.stores.meta.some(r=>r.key==='account:account_fixture'),false);
+ const included=prepareRestoredCanonical({incoming:archive,current,mode:'merge',uidRemap:{[uid]:uid},accountChoices:{account_fixture:'INCLUDE_INACTIVE'}});
+ const account=included.stores.meta.find(r=>r.key==='account:account_fixture').value.account;
+ assert.equal(account.state,'VERIFICATION_PENDING');assert.equal(account.identity,null);assert.equal(account.revision,6);assert.equal(account.bindingVersion,4);
+ assert.equal(account.restoredRemovalRevision,5);assert.deepEqual(JSON.parse(JSON.stringify(included.stores.meta.find(r=>r.key===removal.key).value)),removal);
+ assert.doesNotThrow(()=>prepareRestoredCanonical({incoming:included,current:included,mode:'merge',uidRemap:{[uid]:uid},accountChoices:{account_fixture:'INCLUDE_INACTIVE'}}));
 });

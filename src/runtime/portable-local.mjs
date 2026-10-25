@@ -36,12 +36,13 @@ export function collectPortableLocal(local={}){
  for(const key of Object.keys(local).sort()){
   const value=local[key];
   if(key==='pcmsS03Git'){
-   if(value?.repository==='Neb963/per-gens'&&/^[1-9][0-9]{0,19}$/.test(value.repositoryId||''))
+   if(typeof value?.repository==='string'&&/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value.repository)&&/^[1-9][0-9]{0,19}$/.test(value.repositoryId||''))
     out[key]={repository:value.repository,repositoryId:value.repositoryId};
   }else if(key==='pcmsUiGeneratorSelectionV1'){
    out[key]={schema:1,items:(value?.items||[]).map(r=>fields(r,['slug','accountId','revision']))};
   }else if(key==='pcmsR4FolderIdentityReviews'&&Array.isArray(value))out[key]=value.map(r=>fields(r,renameFields));
-  else if(key==='pcmsR4MissingGitFolders'&&Array.isArray(value))out[key]=value.filter(x=>typeof x==='string');
+  else if(key==='pcmsR4MissingGitFolders'&&value&&typeof value.repositoryId==='string'&&Array.isArray(value.slugs))
+   out[key]={repositoryId:value.repositoryId,slugs:value.slugs.filter(x=>typeof x==='string')};
   else if(/^pcmsR4ExistingRename(?:Attempt|History):[a-z0-9][a-z0-9-]{0,99}(?::[a-zA-Z0-9:_-]{1,200})?$/.test(key))
    out[key]=value===null?null:fields(value,renameFields);
   else if(key==='pcmsS08DisposableScope')out[key]=fields(value,configFields);

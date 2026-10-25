@@ -107,7 +107,7 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
     typeof row.key==='string'&&row.key.startsWith('account:')&&
     row.value?.account).map(row=>({id:row.value.account.accountId,
       account:row.value.account}));
-  const excluded=new Set();
+  const excluded=new Set(),selectedRemoved=new Set();
   for(const {id,account} of incomingAccounts){
     if(typeof id!=='string'||!id||
        accountChoices[id]&&!['INCLUDE_INACTIVE','EXCLUDE'].includes(accountChoices[id]))
@@ -117,11 +117,13 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
       localRemoval.state==='REMOVED_ONLY_LOCALLY'&&
       Number.isSafeInteger(localRemoval.revision)&&
       localRemoval.revision>(Number.isSafeInteger(account.revision)?account.revision:0);
-    if(localRemoval&&!newer)deny('RESTORE_REMOVAL_HISTORY_AMBIGUOUS');
+    if(localRemoval&&!newer&&local.get('account:'+id)?.account?.restoredRemovalRevision!==localRemoval.revision)
+      deny('RESTORE_REMOVAL_HISTORY_AMBIGUOUS');
     if(newer){
-      if(accountChoices[id]==='INCLUDE_INACTIVE')
-        deny('RESTORE_REMOVED_ACCOUNT_REQUIRES_SEPARATE_REVIEW');
-      excluded.add(id);historical.set(id,localRemoval);continue;
+      historical.set(id,localRemoval);
+      if(accountChoices[id]==='INCLUDE_INACTIVE')selectedRemoved.add(id);
+      else excluded.add(id);
+      continue;
     }
     if(accountChoices[id]==='EXCLUDE'){excluded.add(id);continue;}
     if(fresh&&accountChoices[id]!=='INCLUDE_INACTIVE')
@@ -158,6 +160,16 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
         value.status='HELD_UNCERTAIN';value.revision=(Number.isSafeInteger(value.revision)?value.revision:0)+1;
       }
       if(name==='meta')inertMeta(row.key,row,uidRemap,priorByKey.get(keyOf(row)));
+      if(name==='meta'&&selectedRemoved.has(value?.account?.accountId)){
+        const a=value.account,prior=priorByKey.get(keyOf(row))?.account;
+        a.state='VERIFICATION_PENDING';a.identity=null;a.override=null;a.removed=null;
+        a.revision=Math.max(a.revision,historical.get(a.accountId).revision+1);
+        a.bindingVersion=Math.max(a.bindingVersion,(prior?.bindingVersion||0)+1);
+        a.restoredRemovalRevision=historical.get(a.accountId).revision;
+        a.boundPrincipal=prior?.boundPrincipal||a.boundPrincipal||null;
+        a.history=[...(a.history||[]),{event:'RESTORED_INACTIVE_AFTER_LOCAL_REMOVAL',
+          removalRevision:historical.get(a.accountId).revision}];
+      }
       if(name==='observations'&&value&&typeof value==='object'){
         value.restoredHistorical=true;
       }
@@ -187,7 +199,8 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
       if(name==='meta'&&item.key==='network:s01:exit-ownership-v1'&&
         map.has(key)&&!exact(map.get(key).value,item.value))
         deny('RESTORE_EXIT_HISTORY_CONFLICT');
-      if(map.has(key)&&!exact(map.get(key).value,item.value)&&
+      const explicitlyRecovered=name==='meta'&&selectedRemoved.has(item.value?.account?.accountId);
+      if(!explicitlyRecovered&&map.has(key)&&!exact(map.get(key).value,item.value)&&
         !exact(serializeClone(map.get(key).value),rawByKey.get(key)))
         deny('RESTORE_MERGE_CONFLICT');
       map.set(key,item);
@@ -238,4 +251,21 @@ export function prepareRestoredCanonical({incoming,current,mode='merge',
   const snapshot={schema:1,stores};
   validatePcmsSnapshot(snapshot);
   return snapshot;
+}
+
+// Validate all deterministic canonical conflicts before installing an import
+// guard or changing donor data. New Persona UIDs are donor-owned and unknown
+// until creation; distinct provisional IDs check structure without claiming
+// an identity observation. The final plan is recomputed with observed UIDs.
+export function preflightRestoredCanonical({incoming,current,donor,mappings,
+  currentDonor,mode,fresh,accountChoices}){
+  const uidRemap=Object.create(null);
+  for(const [i,p] of (donor.personas||[]).entries()){
+    const source=p.profile?.personaUid;
+    if(!source)continue;
+    const target=mappings[p.key];
+    const known=target!=='__create__'&&currentDonor.state.profiles?.[target]?.personaUid;
+    uidRemap[source]=fresh?'restore-preflight-'+i:known||'restore-preflight-'+i;
+  }
+  return prepareRestoredCanonical({incoming,current,uidRemap,mode,fresh,accountChoices});
 }

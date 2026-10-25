@@ -105,15 +105,20 @@ function portCommand(message){
 
  async function renderChoices(){
   const current=await destination();accounts.replaceChildren();personas.replaceChildren();
+  const known=new Map(current.pcms.stores.meta.filter(r=>typeof r.key==='string'&&
+   r.key.startsWith('account:')&&r.value?.account).map(r=>[r.value.account.accountId,r.value.account]));
+  fresh.checked=known.size===0;
+  fresh.closest('label')?.setAttribute('hidden','');
   const rows=incoming.canonical.stores.meta.filter(r=>typeof r.key==='string'&&r.key.startsWith('account:')&&r.value?.account);
-  const removals=new Set(current.pcms.stores.meta.filter(r=>typeof r.key==='string'&&r.key.startsWith('removal:')&&r.value?.state==='REMOVED_ONLY_LOCALLY').map(r=>r.key.slice(8)));
+  const removals=new Map(current.pcms.stores.meta.filter(r=>typeof r.key==='string'&&r.key.startsWith('removal:')&&r.value?.state==='REMOVED_ONLY_LOCALLY').map(r=>[r.key.slice(8),r.value]));
   for(const row of rows){
    const a=row.value.account,label=node('label'),input=node('input');
    input.type='checkbox';input.dataset.account=a.accountId;
-   input.checked=!fresh.checked&&!removals.has(a.accountId);
-   if(removals.has(a.accountId))input.dataset.removed='true';
+   const removed=(removals.get(a.accountId)?.revision||0)>a.revision;
+   input.checked=!fresh.checked&&known.has(a.accountId)&&known.get(a.accountId).state!=='REMOVED'&&!removed;
+   if(removed)input.dataset.removed='true';
    input.addEventListener('change',invalidate);
-   label.append(input,document.createTextNode(' '+(a.alias||a.label||a.accountId)+(removals.has(a.accountId)?' — removed here; leave unchecked':'')));accounts.append(label,node('br'));
+   label.append(input,document.createTextNode(' '+(a.alias||a.label||a.accountId)+(removed?' — removed here; select only to recover it inactive':'')));accounts.append(label,node('br'));
   }
   if(!rows.length)accounts.append(node('p','This backup contains no PCMS accounts.'));
   for(const p of incoming.donor.personas){

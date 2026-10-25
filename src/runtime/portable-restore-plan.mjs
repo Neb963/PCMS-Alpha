@@ -1,4 +1,5 @@
 import {splitPortableLocal,collectPortableLocal} from './portable-local.mjs';
+import {preflightRestoredCanonical} from './restore-sanitize.mjs';
 // A02 passwordless restore decision oracle. File framing and source closure
 // were independently validated in disposable IndexedDB staging before this.
 import {DB_STORES,validatePcmsSnapshot,digest} from './backup-core.mjs';
@@ -11,6 +12,8 @@ export async function inspectPortableRestore({incoming,mode='merge',fresh=false,
   mappings={},accountChoices={},currentPcms,currentDonor,currentPortable,currentLocal={},containers=[]}){
   requireValid(RESTORE_MODES.includes(mode),'RESTORE_MODE_INVALID');
   validatePcmsSnapshot(currentPcms);
+  fresh=fresh===true||!currentPcms.stores.meta.some(row=>
+    typeof row.key==='string'&&row.key.startsWith('account:'));
   requireValid(currentPortable&&Array.isArray(currentPortable.personas),
     'RESTORE_DESTINATION_PORTABLE_MISSING');
   requireValid(currentDonor?.state&&Array.isArray(currentDonor.containers),
@@ -38,6 +41,10 @@ export async function inspectPortableRestore({incoming,mode='merge',fresh=false,
     requireValid(names.has(id)&&['INCLUDE_INACTIVE','EXCLUDE'].includes(choice),
       'RESTORE_ACCOUNT_CHOICES_INVALID');
   const choicesMissing=fresh?accounts.filter(id=>!Object.hasOwn(accountChoices,id)).length:0;
+  if(choicesMissing===0&&groups.every(g=>
+    ['MAPPING_ONLY_UNVERIFIED','CREATE_REQUESTED'].includes(g.status)))
+    preflightRestoredCanonical({incoming:incoming.canonical,current:currentPcms,
+      donor:incoming.donor,mappings,currentDonor,mode,fresh,accountChoices});
   const destinationSha256=await digest(JSON.stringify({
     pcms:currentPcms,donor:stableRestoreDonorCut(currentDonor),
     portable:currentPortable,local:collectPortableLocal(currentLocal)}));
