@@ -123,7 +123,12 @@ export function createRefresherWorkspace({root,el,b,request,snapshot,reload,acco
   const a=minuteField(body,'Active period',row.activeMs),s=minuteField(body,'Rest period',row.sleepMs);
   const refreshLabels=()=>{summary.textContent=name(row.accountId)+' · '+(row.paused?'Paused':row.phase.toLowerCase())+' · '+formatTime(row.phase==='SLEEPING'?row.sleepRemaining:row.activeRemaining)+' remaining · '+(row.timingOverride?'Custom timing':'Using default timing');
    source.textContent=placementText(row)+' · '+(row.refresh?.sourceSavedAt?'Source saved '+observedAge(row.refresh.sourceSavedAt):'No confirmed marker save')};
-  refreshLabels();const actions=el('div','form-foot');
+  refreshLabels();
+  if(row.blockers?.length){
+   const reasons={GLOBAL_PAUSE:'Refresher is paused',ACCOUNT_PAUSE:'Account schedules are paused',GENERATOR_PAUSE:'This generator is paused',BINDING_CHANGED:'Account identity needs confirmation',OWNER_UNVERIFIED:'Ownership needs verification',PUBLICATION_UNVERIFIED:'Public source needs verification',LISTING_UNVERIFIED:'Generator is not verified public',OPERATOR_UPDATE_REQUESTED:'A source update was requested',REVIEW_UNLISTING:'Source development or review is in progress',VISIBILITY_SUSPENDED:'Placement recovery is held',ACCOUNT_UNAVAILABLE:'Account login or protected route is unavailable',PROVIDER_OUTAGE:'Provider outage observed',READY_UPDATE_FIRST:'A source update has priority'};
+   body.append(el('p','setting-note',row.blockers.map(code=>reasons[code]||'Schedule eligibility needs verification').join(' · ')));
+  }
+  const actions=el('div','form-foot');
   const patch=async(useDefaults)=>{
    if(!useDefaults&&!validMinutes(a,s)){out.textContent='Use 1 to 525,600 whole minutes for each period.';return}
    if(!window.confirm(useDefaults?'Use the current default timing for future periods?':'Save this generator’s timing policy for subsequent Refresher periods?'))return;
@@ -207,9 +212,18 @@ export function createRefresherWorkspace({root,el,b,request,snapshot,reload,acco
   const toggle=q('[data-toggle="refresher"]');if(toggle){toggle.checked=snap.policy.refreshEnabled;toggle.disabled=snap.restoreHeld===true}
   const pause=q('[data-action="pause-refresher"]');if(pause){pause.textContent=snap.globalPause?'Resume Refresher':'Pause Refresher';pause.disabled=snap.restoreHeld===true}
   const values=root.querySelectorAll('.ref-monitor-value'),labels=root.querySelectorAll('.ref-monitor-row>span:first-child');
-  const pairs=[['Feed',snap.recent.suspended?'Observation held':coverage.fresh?'Current sample':'Not current'],['Provider',snap.provider.state.toLowerCase()],['Active clock',snap.activityObservedAt?'Observed '+observedAge(snap.activityObservedAt):'Not observed'],['Next wake',snap.nextWakeAt?new Date(snap.nextWakeAt).toLocaleTimeString():'Not scheduled']];
+  const pairs=[['Feed',snap.recent.suspended?'Observation held':coverage.fresh?'Current sample':'Not current'],['Provider',snap.provider.state.toLowerCase()+' · '+observedAge(snap.provider.observedAt)],['Active clock',snap.activityObservedAt?'Observed '+observedAge(snap.activityObservedAt):'Not observed'],['Next wake',snap.nextWakeAt?new Date(snap.nextWakeAt).toLocaleTimeString():'Not scheduled']];
   pairs.forEach(([label,value],i)=>{if(labels[i])labels[i].textContent=label;if(values[i])values[i].textContent=value});
   renderAccounts(snap,view.account||'');
+  const resume=q('#refresher-resume-observations');
+  if(resume){resume.hidden=!snap.recent.suspended;resume.onclick=()=>void(async()=>{
+   resume.disabled=true;
+   try{const fresh=await request('GET_REFRESHER',{});if(!fresh?.ok)throw Error();
+    const result=await request('RESET_RECENT_BACKOFF',{expectedRevision:fresh.revision});
+    notify(result?.ok?'Observations resumed. Provider backoff still applies.':'Observation recovery could not be confirmed. Refresh before retrying.');
+   }catch{notify('Observation recovery outcome unavailable. Refresh before retrying.')}
+   finally{await reload();if(resume.isConnected)resume.disabled=false}
+  })()}
   const history=q('#refresher-history');if(history){history.replaceChildren();for(const sample of (snap.recent.samples||[]).slice(-6).reverse()){
    const li=el('li','',observedAge(sample.at)+' · '+sample.ownedVisible+' / '+sample.feedSize+' recent positions');history.append(li)}
    if(!history.childElementCount)history.append(el('li','','No complete feed samples yet.'))}
