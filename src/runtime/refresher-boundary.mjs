@@ -528,6 +528,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       }
       if(message.type==='OBSERVE_NOW'){
         if(!observationGate())return fail('MONITOR_ACTIVATION_HELD');
+        const requested=await s.demandRecent(clock());if(!requested.ok)return requested;
         return tick();
       }
       let result;

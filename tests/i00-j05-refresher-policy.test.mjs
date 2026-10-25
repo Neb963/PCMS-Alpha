@@ -45,3 +45,16 @@ test('J05 typed default reset rejects ambiguous durations and caller fields',()=
  assert.equal(validateRefresherMessage(api,sender,{type:'SET_GENERATOR_POLICY',params}).ok,true);
  for(const extra of [{activeMs:60000},{sleepMs:60000},{useDefaults:'yes'},{source:{forged:true}}])assert.equal(validateRefresherMessage(api,sender,{type:'SET_GENERATOR_POLICY',params:{...params,...extra}}).code,'INVALID_PARAMS');
 });
+
+test('J05 a manual recent-page request remains bounded by existing backoff and read quota',async()=>{
+ const db=fakeDatabase(),store=createRefresherStore(db),s=reconcileShadow(emptyShadow(),inputs).state,now=Date.now();
+ s.bootId='boot_j05_recent_001';s.accounts['account-policy'].health='HEALTHY';s.recent.nextDueAt=now+600000;s.recent.endpointBackoffUntil=now+120000;s.recent.accountBackoff={'account-policy':now+180000};s.readWindow={start:now,used:s.policy.readBudget};
+ await put(db,{key:REFRESHER_KEY,state:s});const out=await store.demandRecent(now);assert.equal(out.ok,true);
+ const x=(await store.read()).state;assert.equal(x.recent.nextDueAt,now);assert.equal(x.recent.operatorRequestedAt,now);
+ assert.equal(x.recent.endpointBackoffUntil,s.recent.endpointBackoffUntil);assert.deepEqual(x.recent.accountBackoff,s.recent.accountBackoff);assert.deepEqual(x.readWindow,s.readWindow);
+ const claim=await store.claim({kind:'RECENT',preferredAccountId:'account-policy',now,bootId:s.bootId,claimId:'claim_j05_recent_001'});assert.equal(claim.ok,false);assert.equal((await store.read()).state.inflight.length,0);assert.equal(db.keys('operations').length,0);
+});
+test('J05 scheduler canonical reads are independent of more than fifty thousand unrelated history records',async()=>{
+ const db=fakeDatabase(),store=createRefresherStore(db);await put(db,{key:REFRESHER_KEY,state:emptyShadow()},...Array.from({length:50010},(_,i)=>({key:'ai-history:other-workflow:'+String(i).padStart(8,'0'),job:{slug:'other-workflow',revision:i+1}})));
+ const result=await store.turn({now:Date.now(),bootId:'boot_j05_history_001'});assert.equal(result.ok,true,JSON.stringify(result));assert.equal(result.state.rows.length,0);assert.equal(db.keys('operations').length,0);
+});
