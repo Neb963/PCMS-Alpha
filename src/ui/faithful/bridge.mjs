@@ -1,3 +1,6 @@
+import {createPresentationWorkspace} from './presentation-workspace.mjs';
+import {COLUMN_IDS} from '../presentation-preferences.mjs';
+import {installInteraction} from './interaction.mjs';
 import {mountOperatorChecklist} from '../operator-checklist.mjs';
 import {mountBackupWorkspace} from './backup-workspace.mjs';
 import {acknowledgeIncident,incidentDestination} from './attention.mjs';
@@ -92,7 +95,7 @@ const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort
  ref:{offset:0,limit:25,query:'',account:'',phase:'ALL',snapshot:null,items:[],total:0},
  acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],releaseCursor:'',nextRelease:null,releaseUnavailable:false,aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,readyItems:[],readyCursor:'',nextReady:null,readyMore:false,aiUnavailable:false,readyUnavailable:false,epoch:0},
  settings:'connections',settingsStatic:null,lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},
- renderEpoch:0,version:'0.1.7',readiness:null,readinessBusy:false};
+ renderEpoch:0,version:typeof browser==='object'?browser.runtime.getManifest().version:'Unavailable',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
 const page=()=>shadow('#page');
 function el(tag,cls='',text){const o=document.createElement(tag);if(cls)o.className=cls;if(text!==undefined)o.textContent=String(text);return o}
@@ -118,6 +121,7 @@ const safeCount=n=>Number.isInteger(n)&&n>=0?n:'—';
 const snippet=(s,n=150)=>String(s??'').trim().slice(0,n);
 let currentToast;
 function notify(message){const e=shadow('#pcms-live-toast');if(!e)return;e.textContent=String(message);e.hidden=false;if(currentToast)clearTimeout(currentToast);currentToast=setTimeout(()=>e.hidden=true,6500)}
+const presentation=createPresentationWorkspace({root,el,b,notify,generator:state.gen,reload:()=>{presentation.mountTools();return loadGenerators()}});
 const generatorSelection=createGeneratorSelection(typeof browser==='object'?browser.storage.local:{
  get:async()=>{throw Error('STORAGE_UNAVAILABLE')},set:async()=>{throw Error('STORAGE_UNAVAILABLE')}});
 generatorSelection.subscribe(()=>updateGeneratorSelection());
@@ -142,7 +146,7 @@ function updateNav(){for(const a of root.querySelectorAll('[data-nav]'))a.setAtt
   t.textContent=count?String(count):'';t.hidden=!count;
  }
 }
-function routeTo(target){if(!routes.includes(target))target='overview';state.route=target;location.hash='#'+target;void render()}
+function routeTo(target){if(!routes.includes(target))target='overview';state.route=target;location.hash='#'+target;void render().then(()=>shadow('#page-heading')?.focus({preventScroll:true}))}
 function openGlobalSearch(){
  const existing=shadow('.overlay');if(existing){existing.querySelector('input[type=search]')?.focus();return}
  const priorFocus=root.activeElement;
@@ -248,10 +252,12 @@ function openDetails(kind,item){
   kv('Phase',item.phase||'Unknown');kv('Active remaining',formatTime(item.activeRemaining));
   kv('Sleep remaining',formatTime(item.sleepRemaining));kv('Blockers',Array.isArray(item.blockers)?item.blockers.join(' · ')||'None observed':'Unknown');
   kv('Recent presence',item.presence?(item.presence.present?'Previously present':'Previously absent, not deleted'):'Not observed');
- } else{kv('Owner evidence',item.ownerState||'Unknown');kv('Visibility',item.visibility||'Unknown');kv('Source',item.source||'Unknown')}
+ } else{kv('Owner evidence',item.ownerState||'Unknown');kv('Perchance listing',item.visibility||'Unknown');kv('GitHub source',item.sourceStatus||item.source||'Unknown');
+  const facets=generatorFacets(item);for(const label of ['Release','Refresher','Attention','Observed'])kv(label,facets[label.toLowerCase()]);}
  body.append(dl,el('p','native-bridge-note','Protected changes, source inspection and adoption remain subject to existing exact-record authorization and guarded runtime checks.'));
  const actions=el('div','form-foot');if(kind==='ref')actions.append(b('Open timing controls',()=>{backdrop.remove();nativeSelection('timing',item)}));
- else for(const [label,kind] of [['Inspect source','source'],['Refresher timing','timing'],['Original source','adopt']])actions.append(b(label,()=>{backdrop.remove();nativeSelection(kind,item)}));
+ else {for(const [label,kind] of [['Inspect source','source'],['Refresher timing','timing'],['Original source','adopt']])actions.append(b(label,()=>{backdrop.remove();nativeSelection(kind,item)}));
+  actions.append(b('Open related work',()=>{backdrop.remove();state.queue.query=item.slug;routeTo('work-queue')}));}
  body.append(actions);drawer.append(body);backdrop.append(drawer);root.append(backdrop);
  const focusable=()=>[...drawer.querySelectorAll('button:not(:disabled),[href],input:not(:disabled)')];
  backdrop.addEventListener('keydown',event=>{if(event.key==='Escape'){backdrop.remove();if(priorFocus?.isConnected)priorFocus.focus({preventScroll:true});return}if(event.key==='Tab'){let all=focusable();let index=all.indexOf(root.activeElement);if(event.shiftKey&&index<=0){event.preventDefault();all.at(-1)?.focus()}if(!event.shiftKey&&index===all.length-1){event.preventDefault();all[0]?.focus()}}});
@@ -277,15 +283,15 @@ function routeHandlers(){
     !document.body.classList.contains('pcms-faithful-ready'))return;
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){
    event.preventDefault();event.stopImmediatePropagation();
-   if(!shadow('.overlay'))openGlobalSearch();
+   const dialog=[...root.querySelectorAll('[role=dialog]')].at(-1);
+   if(dialog){
+    if(dialog.getAttribute('aria-label')==='Search PCMS records')dialog.querySelector('input[type=search]')?.focus();
+    else notify('Close the current dialog to search other records.');
+    return;
+   }
+   openGlobalSearch();
   }
  },true);
- root.addEventListener('keydown',event=>{
-  if(event.key==='Escape'){
-   const overlay=shadow('.drawer-overlay');
-   if(overlay){overlay.remove();event.preventDefault()}
-  }
- });
  root.addEventListener('click',event=>{const link=event.target.closest('button[data-action],button[data-settings]');if(!link)return;const action=link.dataset.action;const setting=link.dataset.settings;
  if(setting){state.settings=setting;void renderSettingsSection();return}
  if(!action)return;
@@ -351,7 +357,7 @@ function routeHandlers(){
   if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){
    const list=[...row.closest('tbody').querySelectorAll('tr[data-item-index]')];const idx=list.indexOf(row);
    const n=event.key==='Home'?0:event.key==='End'?list.length-1:Math.min(list.length-1,Math.max(0,idx+(event.key==='ArrowDown'?1:-1)));
-   event.preventDefault();row.tabIndex=-1;list[n].tabIndex=0;list[n].focus({preventScroll:true});
+   event.preventDefault();row.tabIndex=-1;list[n].tabIndex=0;list[n].focus({preventScroll:true});list[n].scrollIntoView({block:'nearest',inline:'nearest'});
   }
  });
  root.addEventListener('change',event=>{const target=event.target;
@@ -378,12 +384,18 @@ function routeHandlers(){
 async function proposeRefresherEnable(control){await refresherWorkspace.enable(control)}
 
 function statusPill(label,kind=''){const p=el('span','pill'+(kind?' '+kind:''),label);return p}
-function tableRow(cells,itemIndex){const tr=el('tr');tr.tabIndex=itemIndex===0?0:-1;tr.dataset.itemIndex=String(itemIndex);tr.setAttribute('role','button');tr.setAttribute('aria-label','Inspect '+cells[0]);return tr}
+function tableRow(cells,itemIndex){const tr=el('tr');tr.tabIndex=itemIndex===0?0:-1;tr.dataset.itemIndex=String(itemIndex);tr.setAttribute('role','row');tr.setAttribute('aria-label','Inspect '+cells[0]);return tr}
 const statusClasses={ACTIVE:'green',SLEEPING:'',WAITING:'',HELD:'red',INELIGIBLE:'',OBSERVED_OWNER:'green',OWNER_UNVERIFIED:'',OWNER_DISPUTED:'red'};
 const ownerLabels={OBSERVED_OWNER:'Owner observed',OWNER_UNVERIFIED:'Owner unknown',OWNER_DISPUTED:'Disputed',UNOBSERVED:'Unobserved',IDENTITY_CONFLICT:'Identity conflict',OWNER_CONFLICT:'Account conflict'};
 function rowsError(tableSelector,message,colspan){const body=shadow(tableSelector);if(!body)return;body.replaceChildren();const tr=el('tr'),td=el('td','pcms-unknown',message);td.colSpan=colspan;tr.append(td);body.append(tr)}
 function setCounts(tabSelector,map){for(const tab of shadow('#page')?.querySelectorAll(tabSelector)||[]){const x=tab.dataset.filter?.split(':')[1];const num=tab.querySelector('.count');if(num)num.textContent=map[x]??'—'}}
-function fmtObservation(item){if(item.observedAt&&Number.isFinite(item.observedAt)){const mins=Math.max(0,Math.floor((Date.now()-item.observedAt)/60000));return `${mins} min ago · historical`}return 'Not verified'}
+function fmtObservation(item){const at=item.lastObservedAt||item.observedAt;if(at&&Number.isFinite(at)){const mins=Math.max(0,Math.floor((Date.now()-at)/60000));return `${mins} min ago · historical`}return 'Not verified'}
+function generatorFacets(item){
+ const words=value=>String(value).toLowerCase().replaceAll('_',' ');
+ return {release:item.releaseState&&item.releaseState!=='NOT_RECORDED'?words(item.releaseState)+' · recorded':'No release recorded',
+  refresher:item.refresher?words(item.refresher.phase)+(item.refresher.blockers.length?' · '+item.refresher.blockers.map(words).join(', '):'')+' · recorded':words(item.refresherStatus||'NOT_OBSERVED'),
+  attention:item.attention?.length?item.attention.map(words).join(' · '):'None recorded',observed:fmtObservation(item)};
+}
 // C-14/C-80: the accepted UI records durable intents through the same
 // slug-coalescing coordinator as main-only Git discovery. Side effects are
 // exclusively run later by the protected account/creation watcher.
@@ -418,7 +430,7 @@ function displayAccounts(){if(state.route!=='accounts')return;
  const list=shadow('.account-list-scroll');if(!list)return;
  const query=state.acct.query.trim().toLowerCase(),filter=state.acct.filter,all=state.lastAccountList.filter(a=>!a.removed);
  const displayed=all.filter(a=>{const term=String(a.accountId||'').toLowerCase(),name=String(a.state||'');
-  return (!query||term.includes(query)||String(a.personaUid||'').toLowerCase().includes(query))&&
+  return (!query||term.includes(query)||String(a.alias||'').toLowerCase().includes(query)||String(a.personaUid||'').toLowerCase().includes(query))&&
    (filter==='All'||filter==='Connected'&&name==='VERIFIED'&&!accountNeedsAttention(a)||filter==='Archived'&&name==='ARCHIVED'||filter==='Attention'&&accountNeedsAttention(a));
  });
  const pages=Math.ceil(displayed.length/state.acct.perPage);if(state.acct.page>=pages)state.acct.page=Math.max(0,pages-1);
@@ -453,16 +465,19 @@ async function startAccountEnrollment(){
  finally{if(button?.isConnected)button.disabled=false}
 }
 function openAccountManager(item){accountWorkspace.open(item)}
-async function loadGenerators(){if(state.route!=='generators')return;
+async function loadGenerators(){
+ presentation.rememberFilters();if(state.route!=='generators')return;
  const epoch=++state.renderEpoch,body=shadow('.workspace-surface table tbody');if(!body)return;
- renderEmpty(body,'Reading observed local generator inventory…');
+ const queryKey=JSON.stringify([state.gen.query,state.gen.offset,state.gen.limit,state.gen.filter,state.gen.source,state.gen.owner,state.gen.account,state.gen.sort,state.gen.management]);
+ if(body.dataset.queryKey!==queryKey||!body.querySelector('tr[data-item-index]'))rowsError('.workspace-surface table tbody','Reading observed local generator inventory…',COLUMN_IDS.length+2);
+ body.dataset.queryKey=queryKey;body.setAttribute('aria-busy','true');
  try{
-  const [res,accountsResult]=await Promise.all([inventory({query:state.gen.query,offset:state.gen.offset,limit:state.gen.limit,workspace:true,status:state.gen.filter,source:state.gen.source,ownerState:state.gen.owner,accountId:state.gen.account==='ALL'?'':state.gen.account,sort:state.gen.sort}),accounts().catch(()=>null)]);
+  const [res,accountsResult]=await Promise.all([inventory({query:state.gen.query,offset:state.gen.offset,limit:state.gen.limit,workspace:true,status:state.gen.filter,source:state.gen.source,ownerState:state.gen.owner,accountId:state.gen.account==='ALL'?'':state.gen.account,sort:state.gen.sort,management:state.gen.management||'ALL'}),accounts().catch(()=>null)]);
   if(epoch!==state.renderEpoch||state.route!=='generators')return;
   state.lastAccountList=accountsResult?.ok&&Array.isArray(accountsResult.accounts)?accountsResult.accounts:state.lastAccountList;
   state.gen.items=Array.isArray(res.items)?res.items:[];state.gen.total=safeCount(res.total)=== '—'?0:res.total;
-  state.gen.facets=res.facets||{};state.errors.generators='';displayGenerators();
- }catch(err){if(epoch!==state.renderEpoch)return;state.errors.generators=err.message;state.gen.items=[];state.gen.total=0;rowsError('.workspace-surface table tbody','Local inventory unavailable: '+err.message+'. No remote absence inferred.',7)}
+  state.gen.facets=res.facets||{};state.errors.generators='';displayGenerators();body.setAttribute('aria-busy','false');
+ }catch(err){if(epoch!==state.renderEpoch)return;state.errors.generators=err.message;state.gen.items=[];state.gen.total=0;rowsError('.workspace-surface table tbody','Local inventory unavailable: '+err.message+'. No remote absence inferred.',COLUMN_IDS.length+2)}
 }
 function updateGeneratorSelection(){
  if(state.route!=='generators')return;
@@ -559,13 +574,16 @@ function openGeneratorSelection(){
  });line.querySelector('button')?.focus({preventScroll:true});
 }
 function displayGenerators(){if(state.route!=='generators')return;
- const body=shadow('.workspace-surface table tbody');if(!body)return;body.replaceChildren();
+ const body=shadow('.workspace-surface table tbody');if(!body)return;
+ const active=root.activeElement,focused=body.contains(active)?active.closest('tr[data-presentation-key]'):null,
+ focusKey=focused?.dataset.presentationKey,focusTag=active?.tagName,scroller=body.closest('.table-scroll'),scrollTop=scroller?.scrollTop;
+ body.replaceChildren();
  const accountsMap=new Map(state.lastAccountList.map(a=>[a.accountId,a]));const itemList=[...state.gen.items];
  // Server already sorted the complete matching fleet before slicing.
  state.gen.visibleItems=itemList;
- if(!itemList.length){rowsError('.workspace-surface table tbody',state.errors.generators?'Local inventory unavailable.': 'No matching local generator observations.',7)}
+ if(!itemList.length){rowsError('.workspace-surface table tbody',state.errors.generators?'Local inventory unavailable.': 'No matching local generator observations.',COLUMN_IDS.length+2)}
  for(const [i,item] of itemList.entries()){
-  const tr=tableRow([item.slug],i);
+  const tr=tableRow([item.slug],i);tr.dataset.presentationKey=item.slug;
   const selectCell=el('td','generator-select-cell'),checkbox=el('input');checkbox.type='checkbox';
   checkbox.dataset.generatorSelect=item.slug;checkbox.setAttribute('aria-label','Select '+item.slug);
   checkbox.checked=generatorSelection.includes(item);checkbox.addEventListener('click',e=>e.stopPropagation());
@@ -577,7 +595,8 @@ function displayGenerators(){if(state.route!=='generators')return;
   const td3=el('td','muted-cell',item.visibility||'UNKNOWN');
   const td4=el('td','muted-cell',({GIT:'Git linked',PROTECTED:'Original protected',ORIGINAL_SAVED:'Original saved · archiving',CAPTURING:'Capturing original',PENDING:'Source pending'})[item.sourceStatus]||sourceState);
   const cue=el('td','open-col');cue.append(b('Open',e=>{e.stopPropagation();void openGeneratorPage(item)},'btn small'));
-  td1.dataset.column='account';tr.append(selectCell,td0,td1,td2,td3,td4,cue);body.append(tr);
+  const detail=generatorFacets(item),extra=['release','refresher','attention','observed'].map(key=>{const cell=el('td','muted-cell',detail[key]);cell.title=detail[key];return cell});
+  td1.dataset.column='account';tr.append(selectCell,td0,td1,td2,td3,td4,...extra,cue);body.append(tr);
  }
  setPagination('.workspace-surface .pagination span','[data-action="gen-prev"]','[data-action="gen-next"]',state.gen.offset,state.gen.total,state.gen.limit,
  `${state.gen.total?state.gen.offset+1:0}–${Math.min(state.gen.offset+state.gen.limit,state.gen.total)} of ${state.gen.total} generators${state.gen.account!=='ALL'?' · filtered account':''}`);
@@ -587,9 +606,13 @@ function displayGenerators(){if(state.route!=='generators')return;
   tab.replaceChildren(document.createTextNode((labels[key]||key)+' '+(state.gen.facets?.[key]??0)));
   tab.setAttribute('aria-selected',String(state.gen.filter===key));tab.tabIndex=state.gen.filter===key?0:-1;
  }
- updateGeneratorSelection();
+ updateGeneratorSelection();presentation.mountTools();presentation.applyTable();
+ if(focusKey){const row=[...body.querySelectorAll('tr[data-presentation-key]')].find(r=>r.dataset.presentationKey===focusKey);
+  if(row){const target=focusTag==='INPUT'?row.querySelector('input'):focusTag==='BUTTON'?row.querySelector('button'):row;target?.focus({preventScroll:true});if(scroller)scroller.scrollTop=scrollTop}
+  else shadow('#generator-search')?.focus({preventScroll:true});
+ }
  const accountSelect=shadow('#generator-account');if(accountSelect){const prior=accountSelect.value;accountSelect.replaceChildren();const first=el('option','', 'All accounts');first.value='ALL';accountSelect.append(first);
-  for(const a of state.lastAccountList){const option=el('option','',a.alias||a.accountId);option.value=a.accountId;accountSelect.append(option)}accountSelect.value=[...accountSelect.options].some(x=>x.value===state.gen.account)?state.gen.account:'ALL';}
+  for(const a of state.lastAccountList){const option=el('option','',a.alias||a.accountId);option.value=a.accountId;accountSelect.append(option)}if(state.gen.account!=='ALL'&&![...accountSelect.options].some(x=>x.value===state.gen.account)){const missing=el('option','','Saved account · unavailable');missing.value=state.gen.account;accountSelect.append(missing)}accountSelect.value=state.gen.account;}
 }
 async function loadRefresher(){if(state.route!=='refresher')return;
  const epoch=++state.renderEpoch;
@@ -1797,11 +1820,12 @@ function primaryDiagnostics(container){
  mountOperatorChecklist(container,{card:primarySettingCard,el,b});
 }
 function renderSettingsSection(){if(state.route!=='settings')return;
- const names=['connections','automation','ai','backups','diagnostics','advanced'];
+ const names=['connections','automation','ai','backups','diagnostics','appearance','advanced'];
  const select=names.includes(state.settings)?state.settings:'connections';
  for(const b of page().querySelectorAll('[data-settings]')){b.classList.toggle('active',b.dataset.settings===select);b.setAttribute('aria-current',b.dataset.settings===select?'page':'false')}
  const container=shadow('.settings-main');if(!container)return;
  // Each category owns its visible form. Do not rehydrate obsolete hidden service cards.
+ if(select==='appearance'){presentation.appearance(container);return}
  if(select==='connections'){
   // Never mirror old service rows or native-host installation instructions.
   // The Git connection and its recovery live on the same visible Settings page.
@@ -1857,6 +1881,7 @@ function displayRouteScaffold(){
   displayQueue();void loadQueue(true);
  }
  if(state.route==='generators'){
+  presentation.mountTools();
   const select=shadow('#generator-account');if(select)select.value=state.gen.account;
   const q=shadow('#generator-search');if(q)q.value=state.gen.query;
   void loadGenerators();
@@ -1880,6 +1905,7 @@ async function render(){
  if(!html)return;
  const template=document.createElement('template');template.innerHTML=html;
  const old=shadow('#page');old.replaceWith(template.content.firstElementChild);
+ shadow('#main').scrollTop=0;
  updateNav();displayRouteScaffold();
 }
 async function mount(){
@@ -1890,9 +1916,13 @@ async function mount(){
  for(const r of routes)templates.set(r,assets[r+'.html']);
  root.innerHTML=assets['symbols.html']+assets['shell.html']+'<div id="pcms-live-toast" class="pcms-action-toast" role="status" hidden></div>';
  const link=document.createElement('link');link.rel='stylesheet';link.href=new URL('prototype.css',url).href;root.prepend(link);
+ const presentationStyle=document.createElement('link');presentationStyle.rel='stylesheet';presentationStyle.href=new URL('presentation.css',url).href;root.append(presentationStyle);
  const accountStyle=document.createElement('link');accountStyle.rel='stylesheet';accountStyle.href=new URL('accounts.css',url).href;root.append(accountStyle);
  const addon=document.createElement('style');addon.textContent=':host{display:block;height:100dvh;min-height:0} .pcms-action-toast{pointer-events:none;position:fixed;bottom:20px;right:25px;z-index:100;padding:12px 16px;background:#253e55;color:white;border-radius:7px;box-shadow:0 5px 24px #0003;max-width:380px} .pcms-action-toast[hidden]{display:none}';root.append(addon);
  let initial=location.hash.slice(1);if(!routes.includes(initial))initial='overview';state.route=initial;
+ await presentation.ready;
+ const version=shadow('.preview-label');if(version){version.textContent='PCMS '+state.version;version.setAttribute('aria-label','Installed PCMS version '+state.version)}
+ installInteraction({root,preferences:presentation.preferences,route:()=>state.route,notify});
  routeHandlers();await render();
  const legacy=document.querySelector('body > .app');
  if(legacy)legacy.inert=true; // no hidden workflow focus or operator input

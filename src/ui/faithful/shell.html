@@ -1,5 +1,6 @@
+<button id="pcms-skip-main" class="skip-main" type="button">Skip to workspace</button>
 <div class="app">
-<aside aria-label="Primary navigation" class="sidebar">
+<aside id="pcms-primary-navigation" aria-label="Primary navigation" class="sidebar">
 <div class="sidebar-brand"><span aria-hidden="true" class="brand-mark">P/</span><span class="brand-label">PCMS Alpha<small>Fleet control</small></span></div>
 <nav aria-label="Workspaces">
 <span class="nav-group-label">Workspace</span>
@@ -14,9 +15,10 @@
 <div class="sidebar-foot"><span aria-hidden="true" class="operator-mark">OP</span><span><strong>Local operator</strong><small>Protected, single-machine control</small></span></div>
 </aside>
 <header class="topbar">
+<button id="pcms-menu-toggle" class="btn small" type="button" aria-controls="pcms-primary-navigation" aria-expanded="false">Menu</button>
 <div class="breadcrumbs"><span>Workspace</span><span aria-hidden="true">›</span><strong id="breadcrumb">Overview</strong></div>
-<button aria-keyshortcuts="Control+K Meta+K" aria-label="Search local generator inventory; Control K" class="top-search" data-action="search" type="button"><svg><use href="#i-search"></use></svg> Search PCMS <kbd>Ctrl K</kbd></button>
-<div class="top-right"><span class="preview-label">PCMS local · Not verified</span><button class="top-status" data-action="system-health" style="background:none;border:0;padding:0">Local observations</button><button aria-label="View attention items" class="top-icon" data-action="notifications"><svg><use href="#i-bell"></use></svg></button><span class="avatar" title="Local operator">OP</span></div>
+<button aria-keyshortcuts="Control+K Meta+K" aria-label="Search PCMS; Control K" class="top-search" data-action="search" type="button"><svg><use href="#i-search"></use></svg> Search PCMS <kbd>Ctrl K</kbd></button>
+<div class="top-right"><span class="preview-label">PCMS</span><button class="top-status" data-action="system-health" style="background:none;border:0;padding:0">Local observations</button><button aria-label="View attention items" class="top-icon" data-action="notifications"><svg><use href="#i-bell"></use></svg></button><span class="avatar" title="Local operator">OP</span></div>
 </header>
 <main id="main" tabindex="-1"><div class="page" data-view="overview" id="page"></div></main>
 </div>

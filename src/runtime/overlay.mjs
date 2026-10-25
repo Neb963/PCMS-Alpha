@@ -1050,7 +1050,7 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
     'update-window.mjs','release-core.mjs','release-store.mjs','release-boundary.mjs','source-review.mjs','perchance-release.mjs',
     'existing-update-core.mjs','existing-update-store.mjs','existing-update-boundary.mjs','perchance-existing.mjs',
     'backup-auto-donor.mjs','backup-donor-port.mjs','restore-donor.mjs','restore-preserve.mjs','restore-identities.mjs','restore-exits.mjs','restore-v2-candidate.mjs','restore-boundary.mjs','restore-observation.mjs','work-checkpoint.mjs','restore-reconcile.mjs','backup-auto-core.mjs','backup-auto-store.mjs','backup-auto-download.mjs',
-    'backup-auto-retention.mjs','backup-auto-export.mjs','portable-archive.mjs','portable-local.mjs','functional-restore.mjs','portable-cut.mjs','portable-runner.mjs','portable-originals.mjs','portable-restore-stage.mjs','portable-restore-plan.mjs','source-cut-retry.mjs','backup-v2-verify.mjs','backup-auto-run.mjs','backup-auto-boundary.mjs',
+    'backup-auto-retention.mjs','backup-auto-export.mjs','portable-archive.mjs','portable-local.mjs','presentation-preferences.mjs','presentation-boundary.mjs','functional-restore.mjs','portable-cut.mjs','portable-runner.mjs','portable-originals.mjs','portable-restore-stage.mjs','portable-restore-plan.mjs','source-cut-retry.mjs','backup-v2-verify.mjs','backup-auto-run.mjs','backup-auto-boundary.mjs',
     'refresher-native.mjs','refresher-qualified-clock.mjs','refresher-browser-clock.mjs','refresher-adopted.mjs','refresher-admission.mjs','refresher-effect-core.mjs','refresher-core.mjs','refresher-store.mjs','refresher-boundary.mjs','perchance-monitor.mjs']) {
     await cp(path.join(root, 'src/runtime', name), path.join(stage, 'pcms', name));
   }

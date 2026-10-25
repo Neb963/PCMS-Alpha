@@ -1,41 +1,25 @@
-# PCMS Alpha — XPI-only operator guide (A09 acceptance candidate)
- 
-**Status:** A09 engineering acceptance candidate, **not an operator-accepted production release**. Live Perchance, protected Mullvad routing, private generator Git writeback and host/disk acceptance need their separate authorized evidence. Do not treat a green fixture or Firefox CI check as live acceptance.
+# PCMS-Alpha 1.2.14 — Operator guide
 
-## Prerequisites
+PCMS is one Firefox add-on. Its toolbar button opens the dashboard. Work continues with the dashboard closed; a held account or item does not stop unrelated work.
 
-Use Firefox Developer Edition, Nightly or an ESR variant that allows persistent installation of this unsigned XPI. On a dedicated profile, configure `xpinstall.signatures.required=false` if needed. The installed Gecko extension ID is `persona-route-manager@local`.
+## Install or upgrade
 
-PCMS is delivered as **one combined XPI**, with no PCMS installer, supplemental native host, vault, recovery key, diagnostic daemon or witness patch. The only permitted native messaging bridge remains PersonaMonkey's existing `com.persona.mullvad_router`, installed and configured under PersonaMonkey's own documented setup. PCMS neither replaces nor modifies that bridge. Verify protected Mullvad route health through PersonaMonkey before any managed provider action.
+Keep a separate copy of your Firefox profile before upgrading. In `about:addons`, use the gear menu → **Install Add-on From File** and select `pcms-alpha-1.2.14.xpi`. The add-on keeps its existing ID and stored work.
 
-The Firefox driver's isolated process/upgrade test infrastructure is for CI, not an operator-installed prerequisite.
+Use Firefox **153 or later**. This unsigned package needs Developer Edition, Nightly or a compatible ESR installation that permits unsigned add-ons (`xpinstall.signatures.required=false` in a dedicated profile). Firefox release editions that enforce signatures cannot install it. Protected accounts use PersonaMonkey's existing `com.persona.mullvad_router` routing bridge; PCMS needs no additional native helper.
 
-## Install and upgrade
+## Everyday work
 
-1. Obtain the exact `pcms-alpha-i00.xpi` artifact and its published SHA-256 from the current reviewed GitHub Actions build. Verify its hash independently with `sha256sum pcms-alpha-i00.xpi`.
-2. Save an independent profile checkpoint before upgrading a profile containing existing sessions, source or journal history. Never migrate an uncontrolled profile just to test a release candidate.
-3. In Firefox, open `about:addons`, choose **Install Add-on From File**, and select the XPI. Upgrades keep the existing Gecko ID. If Firefox reports an installation or update error, stop rather than erase the profile.
-4. Click the extension toolbar action to open PCMS. Keep the same existing PersonaMonkey route owner. Confirm diagnostics, account/Persona bindings and source inventory before authorizing effects.
+1. **Accounts:** Choose **Add account**, complete Perchance login/CAPTCHA in its protected Persona tab, then confirm login. Use **Open Perchance**, route verification/change and inventory actions in that account. A missing Persona or legacy route has an in-place repair. Archive preserves history; permanent local removal is a separate explicit choice and does not delete remote generators.
+2. **Git sources:** From **Generators**, connect your approved repository once. Review its initial `main` folders and proposed allocation, then approve that scope. Later merged folders are discovered automatically. Browse complete source from a generator; edit the default Git prompt under **Settings → AI development**. Reconnect there if access expires.
+3. **Create or adopt:** Use **Create generators**, enter disposable slugs and review allocation/counts before submission. Follow per-item progress. Sync missing inventory in context; unknown inventory is never zero. Verified already-owned generators are onboarded automatically while their original source is preserved.
+4. **Develop and publish:** A coherent READY revision starts background AI work and tests. **Work Queue** shows progress, Pause/Resume and instructions. Inspect the exact full-source comparison and tests before approving publication. Human edits, changed source and failed tests hold that candidate and offer recovery. Clean bulk approval is available only for qualifying unchanged candidates.
+5. **Refresher:** Enable it once, then Pause/Resume globally, per account or per generator. Timing defaults apply unless overridden. Coverage and placement show what the recent feed actually established; a source save alone does not prove placement. Unknown/partial feed and unavailable protected routes show their recovery action.
+6. **Backups:** In **Settings → Backups**, download an archive or enable daily backups. These are plain, passwordless, source-complete files. Use **Inspect** to reopen a downloaded file before restoring. Restore reviews account choices and saves a safety copy; restored automation remains inactive until current identity, source and route checks and explicit activation. Git credentials are excluded and need reconnecting. Default retention is 14 successful tracked archives.
+7. **Find and recover:** Global search finds accounts, generators, Git paths and operations. Overview's Attention opens the affected item; **Mark reviewed** does not dismiss an unresolved fault. Diagnostics offers independent checks, a disposable end-to-end scope and a saved operator checklist with JSON/Markdown export.
 
-A clean disposable profile can verify UI and browser persistence without a native host or real Perchance account; **protected route and provider operations must remain held** until route admission and scoped authorization are established. Do not copy test fixtures or the original I17 uncertain generator into a live workflow.
+## Display and first use
 
-## Routine workflow
+Generators offers built-in/custom **Saved views** and **Columns**; selection survives paging and restart. **Settings → Appearance** controls theme and density. Keyboard arrows move through rows, Enter opens details, Escape closes a dialog and returns focus. A narrow window exposes **Menu**.
 
-- **Accounts:** Add an account, let PersonaMonkey prepare its protected Persona/route, complete human login/CAPTCHA as needed, then verify login/route.
-- **Generators:** Create slugs or reconcile GitHub `main` folders; the background intake persists work before guarded provider dispatch. Unknown/lost ACK effects require read-only reconciliation.
-- **GitHub:** Connect the approved repository with a scoped token in Settings/Catalog. The token stays in background-only Firefox local persistent storage and is excluded from portable backups. No OS credential store or recurring password is required.
-- **Work Queue:** READY development and tests produce a candidate tied to exact source. Individually review its exact bytes before approving publication. A stale/dirty source or uncertain write remains held.
-- **Refresher:** Enable only for eligible owned generators. Background alarms reconstruct from durable state on wake; active credit is conservative while wall-clock rest advances. Saved source and recent-feed presence are independently measured.
-- **Settings:** Manual and daily backups are **passwordless, unencrypted, portable and source-complete**. Check browser download receipts and inspect a backup through the guarded import/restore preview. Browser-reported download completion is not independent disk-byte proof. Default retention is 14 successful tracked archives.
-
-## Diagnostics and recovery
-
-Use Settings diagnostics or the emergency read-only export to see per-capability status, error codes and the next safe action. Never upload raw cookies, credentials, session data or source blobs. On restart, confirm the original account/Persona identity and route before new effects. An uncertain create, save, publication or restore action must be observed rather than blindly replayed.
-
-A restore leaves managed automation inactive and requires protected identity/source review, account-login re-verification and Git re-connection where applicable. If a prior profile's operation journal is missing, do not infer an external effect is absent. Production readback, private Git writes, disk/process host evidence and real Perchance effects are **NOT_TESTED** until independently observed at their correct tiers.
-
-See `docs/authority/PCMS-Alpha-CLIENT-AMENDMENT-v1.0.1.md` and `docs/implementation/RECOVERY-PLAN-2026-10-22.md` for the binding behavioral limits.
-
-## A09 release acceptance
-
-The [A09 single-session protocol](../verification/A09-SINGLE-SESSION-ACCEPTANCE.md) and [evidence reuse/holds map](../verification/A09-EVIDENCE-REUSE-AND-HOLDS.md) describe the exact candidate gate. Build an AC-01–AC-18 / T-01–T-10 / X-01–X-14 evidence report with `node scripts/a09-evidence.mjs --xpi build/pcms-alpha-i00.xpi --source-sha "$(git rev-parse HEAD)" --out-dir build/a09`. Missing external H/GIT/L proof remains **NOT_TESTED**; no routine workflow is made available by fabricated evidence. This guide is not authority for live provider, private Git or original-profile operations.
+For a new installation, start with a disposable account/generator: confirm protected login, create or adopt one item, follow READY through tests and exact publication approval, inspect Refresher observations, and export/reopen a backup. Run only checks relevant to your setup. Packaged-Firefox engineering checks do not establish live Perchance, real Mullvad exit health or your private repository's write permissions; PCMS reports the actual limitation when these cannot be verified.

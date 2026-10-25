@@ -23,7 +23,7 @@ export function validateInventoryMessage(api,sender,message) {
   const p=message.params||{};
   if(typeof p!=='object'||!p||Array.isArray(p))return fail('INVALID_PARAMS');
   const allowed=message.type==='LIST_INVENTORY'?
-    ['query','ownerState','accountId','offset','limit','sort','workspace','status','source']:
+    ['query','ownerState','accountId','offset','limit','sort','workspace','status','source','management']:
     message.type==='INSPECT_GENERATORS'?['slugs']:
     ['OPEN_GENERATOR','RECHECK_GENERATOR'].includes(message.type)?['slug','expectedRevision']:['accountId','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
@@ -45,6 +45,7 @@ export function validateInventoryMessage(api,sender,message) {
     (p.workspace!==undefined&&typeof p.workspace!=='boolean')||
     (p.status!==undefined&&!['ALL','PUBLISHED','DEVELOPING','REVIEW','HELD','IDLE'].includes(p.status))||
     (p.source!==undefined&&!['ALL','GIT','PROTECTED','ORIGINAL_SAVED','CAPTURING','PENDING'].includes(p.source))||
+    (p.management!==undefined&&!['ALL','MANAGED'].includes(p.management))||
     (p.sort!==undefined&&!['fleet','name','account'].includes(p.sort)))
     return fail('INVALID_PARAMS');
   return {ok:true};
