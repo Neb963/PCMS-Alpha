@@ -317,8 +317,8 @@ export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=undefined,
       if(a.health==='HEALTHY'){a.graceUsed=0;
         if(wasExpired){a.graceExpired=false;
           changes.push({code:'ACCOUNT_ROUTE_RECOVERED',scopeId:id});}}
-      if(a.health==='UNAVAILABLE'&&provider.state==='HEALTHY')a.graceUsed+=interval;
-      if(a.health==='UNAVAILABLE'&&a.graceUsed>=out.policy.graceMs){
+      if(!out.globalPause&&!a.paused&&a.health==='UNAVAILABLE'&&provider.state==='HEALTHY')a.graceUsed+=interval;
+      if(!out.globalPause&&!a.paused&&a.health==='UNAVAILABLE'&&a.graceUsed>=out.policy.graceMs){
         let released=0;
         for(const r of out.rows)if(r.accountId===id&&r.slot){
           r.slot=false;r.phase='WAITING';released++;out.diagnostics.graceReleases++;

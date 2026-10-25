@@ -95,3 +95,21 @@ test('J05 persisted global/account/generator Pause freezes rest through turns an
   assert.equal(next.state.rows[0].sleepRemaining,90000);
  }
 });
+
+test('J05 explicit global/account Pause freezes outage grace and expiry, while unpaused accounts retain independent recovery',()=>{
+ for(const scope of ['GLOBAL','ACCOUNT']){
+  const start=1000000,bootId='boot_j05_grace_01',all=Array.from({length:4},(_,i)=>({...inputs[0],slug:'grace-generator-'+i,accountId:'account-grace-'+i,personaUid:'persona-grace-'+i}));
+  const s=reconcileShadow(emptyShadow(),all).state;s.bootId=bootId;s.lastTurnAt=start;s.policy.graceMs=60000;s.globalPause=scope==='GLOBAL';
+  s.accounts['account-grace-0'].paused=scope==='ACCOUNT';
+  for(const a of Object.values(s.accounts)){a.checkpoint=start;a.graceUsed=59900;}
+  for(const row of s.rows){row.phase='ACTIVE';row.slot=true;row.admittedAt=start;}
+  const to=start+1000,receipt={source:'GUARDED_OPERATIONAL_INTERVAL',id:'receipt_grace_01',bootId,browserRunning:true,complete:true,from:start,to,
+   accounts:all.map((a,i)=>({...a,health:i<2?'UNAVAILABLE':'HEALTHY',protected:true,sessionVerified:true})),
+   witnesses:all.slice(2).map(a=>({accountId:a.accountId,domain:'domain-'+a.accountId,result:'HEALTHY',routeVerified:true,observedAt:to}))};
+  const next=advanceShadow(s,{now:to,bootId,receipt});assert.equal(next.ok,true);assert.equal(next.state.provider.state,'HEALTHY');
+  assert.equal(next.state.accounts['account-grace-0'].graceUsed,59900);assert.equal(next.state.rows[0].slot,true);
+  assert.equal(next.state.accounts['account-grace-0'].healthAt,to,'observed health remains current while paused');
+  assert.equal(next.state.rows[1].slot,scope==='GLOBAL');
+  assert.equal(next.state.accounts['account-grace-1'].graceUsed,scope==='GLOBAL'?59900:60900);
+ }
+});

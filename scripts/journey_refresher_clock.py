@@ -38,15 +38,19 @@ def run(browser,archive,folder):
             if enabled:
                 # Freeze the active timer before recording the exact durable
                 # pre-exit anchor; production Pause goes through its real store.
-                paused=p.background(s,"const x=await window.__j05clock.store.read();const r=await window.__j05clock.store.pause(x.state.revision,'GENERATOR',x.state.rows[0].stableId,true,Date.now());return {ok:r.ok,state:(await window.__j05clock.store.read()).state};")
+                paused=p.background(s,"await window.__j05clock.controller.tick();const x=await window.__j05clock.store.read();const r=await window.__j05clock.store.pause(x.state.revision,'GENERATOR',x.state.rows[0].stableId,true,Date.now());return {ok:r.ok,state:(await window.__j05clock.store.read()).state};")
                 assert paused['ok'];old=b.owned_firefox_pids(profile);assert old;b.close(s);b.require_owned_exit(profile,old);s=None
-                time.sleep(3);s=b.open_session(browser,profile);new=b.owned_firefox_pids(profile);assert new and not old.intersection(new)
+                closed_start=time.monotonic();time.sleep(3);s=b.open_session(browser,profile);new=b.owned_firefox_pids(profile);assert new and not old.intersection(new)
                 b.call('POST',f'/session/{s}/url',{'url':'about:blank'})
                 resumed=p.background(s,source+';return await installRefresherClockFixture(true);')
                 assert resumed['ok'];post=resumed['state'];pre=paused['state']
                 assert post['bootId']!=pre['bootId'],'J05_RESTART_REUSED_EPOCH'
                 assert post['rows'][0]['activeRemaining']==pre['rows'][0]['activeRemaining'],'J05_SHUTDOWN_ACTIVE_TIME_FABRICATED'
-                assert post['rows'][1]['sleepRemaining']<pre['rows'][1]['sleepRemaining'],'J05_SHUTDOWN_REST_NOT_RECONCILED'
+                closed_elapsed=(time.monotonic()-closed_start)*1000
+                rest_elapsed=post['rows'][1]['restCheckpointAt']-pre['rows'][1]['restCheckpointAt']
+                rest_used=pre['rows'][1]['sleepRemaining']-post['rows'][1]['sleepRemaining']
+                assert rest_elapsed>=3000 and abs(rest_used-rest_elapsed)<=1,('J05_SHUTDOWN_REST_NOT_EXACT_WALL_TIME',rest_used,rest_elapsed,closed_elapsed)
+                assert rest_used>=closed_elapsed-1500,('J05_CLOSED_INTERVAL_MISSING_FROM_REST',rest_used,closed_elapsed)
                 assert post['rows'][2]['sleepRemaining']==pre['rows'][2]['sleepRemaining'],'J05_RESTART_PAUSED_REST_ADVANCED'
                 evidence['restart']={'oldPids':sorted(old),'newPids':sorted(new),'before':pre,'after':post}
             print('B J05_COMMAND_FREE_CLOCK_'+('ON' if enabled else 'OFF')+'=PASS credit='+str(credit),flush=True)

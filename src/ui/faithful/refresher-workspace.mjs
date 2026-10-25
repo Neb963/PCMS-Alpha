@@ -205,9 +205,9 @@ export function createRefresherWorkspace({root,el,b,request,snapshot,reload,acco
   text('#refresher-capacity',snap.occupied+' / '+snap.capacity.cap+' active slots');
   const ev=snap.capacityEvidence;text('#refresher-capacity-evidence',ev?.estimate==null?'Practical capacity not established':ev.estimate+' estimated positions · '+ev.samples+' samples · '+observedAge(ev.observedAt));
   text('#refresher-capacity-demand',snap.eligible+' eligible waiting · '+snap.capacity.population+' eligible public generators');
-  const badge=q('.ref-side-title .pill');if(badge){badge.textContent=snap.globalPause?'Paused':snap.policy.refreshEnabled?'Enabled':'Off';badge.className='pill '+(snap.policy.refreshEnabled&&!snap.globalPause?'green':'')}
+  const badge=q('.ref-side-title .pill');if(badge){badge.textContent=snap.readUnavailable?'State unavailable':snap.restoreHeld?'Recovery hold':snap.globalPause?'Paused':snap.policy.refreshEnabled?'Enabled':'Off';badge.className='pill '+(snap.policy.refreshEnabled&&!snap.globalPause&&!snap.restoreHeld&&!snap.readUnavailable?'green':'')}
   const descriptions=root.querySelectorAll('.ref-control-card .setting-description');
-  if(descriptions[0])descriptions[0].textContent=snap.policy.refreshEnabled?'Automatic guarded saves enabled; placement measured separately.':'Enable once for eligible generators.';
+  if(descriptions[0])descriptions[0].textContent=snap.restoreHeld?'Restore recovery is in progress. Finish recovery in Settings → Backups.':snap.readUnavailable?'Current settings are unavailable. Previous values are shown.':snap.policy.refreshEnabled?'Automatic guarded saves enabled; placement measured separately.':'Enable once for eligible generators.';
   if(descriptions[1])descriptions[1].textContent=formatTime(snap.policy.activeMs)+' active / '+formatTime(snap.policy.sleepMs)+' rest';
   const toggle=q('[data-toggle="refresher"]');if(toggle){toggle.checked=snap.policy.refreshEnabled;toggle.disabled=snap.restoreHeld===true}
   const pause=q('[data-action="pause-refresher"]');if(pause){pause.textContent=snap.globalPause?'Resume Refresher':'Pause Refresher';pause.disabled=snap.restoreHeld===true}

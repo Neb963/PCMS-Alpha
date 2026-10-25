@@ -597,7 +597,14 @@ async function loadRefresher(){if(state.route!=='refresher')return;
   state.ref.total=result.total||0;state.errors.refresher='';displayRefresher();
   void refresherWorkspace.refreshAccounts();void refreshRefCounts(epoch);
  }catch(err){if(epoch!==state.renderEpoch)return;state.errors.refresher=err.message;
-  if(state.ref.snapshot){text('.ref-table-heading .muted','Current schedules unavailable · previous values shown');text('.ref-feed-state strong','Current observation unavailable')}
+  if(state.ref.snapshot){
+   const cached={...state.ref.snapshot,readUnavailable:true,
+    recent:{...state.ref.snapshot.recent,complete:false,stale:true},
+    items:state.ref.items.map(row=>({...row,presence:row.presence?{...row.presence,stale:true}:null}))};
+   refresherWorkspace.render(cached,state.ref);
+   text('.ref-table-heading .muted','Current schedules unavailable · previous values shown');
+   text('.ref-feed-state strong','Current observation unavailable');
+  }
   else rowsError('.ref-table-scroll tbody','Refresher unavailable. Retry Check now or reopen this page.',4);
  }
 }

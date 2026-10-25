@@ -36,19 +36,21 @@ export async function installRefresherFixture(){
  const guard={getSafeRouteReadiness:async uid=>uid==='persona-j05-53'?{ready:false,code:'PROTECTED_ROUTE_UNAVAILABLE'}:{ready:true,personaUid:uid,cookieStoreId:'container-'+uid,routeId:'protected-'+uid,healthDomain:'health-'+uid}};
  const controller=createRefresherBoundary(browser,{open:async()=>db,guard:()=>guard,observationGate:()=>true,refreshGate:()=>false});
  const accountController=createAccountBoundary(browser,{open:async()=>db,guard:()=>guard});
- const sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')},commands=[];let lose=false;
+ const sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')},commands=[];let lose=false,readUnavailable=false;
  const original=browser.runtime.connect.bind(browser.runtime);
  browser.runtime.connect=function(...args){
   const port=args.at(-1)?.name;if(!['pcms-i12-refresher','pcms-i03-accounts'].includes(port))return original(...args);
   const messages=new Set(),disconnected=new Set();let closed=false;
   return {onMessage:{addListener:f=>messages.add(f)},onDisconnect:{addListener:f=>disconnected.add(f)},disconnect(){closed=true},
-   postMessage(msg){Promise.resolve((port==='pcms-i12-refresher'?controller.run:accountController.run)(msg,sender)).then(out=>{
+   postMessage(msg){Promise.resolve(readUnavailable&&port==='pcms-i12-refresher'&&msg.type==='GET_REFRESHER'?{ok:false,code:'OFFLINE_TRANSPORT_UNAVAILABLE'}:(port==='pcms-i12-refresher'?controller.run:accountController.run)(msg,sender)).then(out=>{
     commands.push({type:msg.type,ok:out?.ok,code:out?.code});if(lose&&msg.type==='SET_GENERATOR_POLICY'){lose=false;for(const f of disconnected)f();return}
     if(!closed)for(const f of messages)f(out);
    }).catch(e=>{commands.push({error:String(e)});if(!closed)for(const f of disconnected)f()})}};
  };
  window.__j05={async inspect(){return {...await store.read(),commands:structuredClone(commands)}},
   loseAck(){lose=true;return true},
+  readFailure(value){readUnavailable=value;return true},
+  async restoreHold(value){if(value)await browser.storage.local.set({pcmsRestoreInProgress:{active:true}});else await browser.storage.local.remove('pcmsRestoreInProgress');return true},
   async touch(){const s=(await store.read()).state;return store.changePolicy(s.revision,{activeMs:77*60000})},
   async staleFeed(){const s=(await store.read()).state;s.recent.complete=false;s.recent.observedAt=Date.now()-1800000;s.recent.latestOccupancy.at=s.recent.observedAt;await put([{key:REFRESHER_KEY,state:s}]);return true},
   async fresh(){return controller.run({type:'GET_REFRESHER',params:{}},sender)}};
