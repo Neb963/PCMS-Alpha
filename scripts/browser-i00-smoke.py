@@ -2529,6 +2529,8 @@ def main():
                     full.ok&&stored.job.finalSource.blobs.length===3&&
                     archivedSource?.ok===true&&archivedSource.fingerprint===archived.fingerprint&&
                     archivedSource.blobs.length===2&&
+                    archivedSource.blobs.find(f=>f.path==='main.pjs')?.base64===btoa('original I10 source')&&
+                    archivedSource.blobs.find(f=>f.path==='index.html')?.base64===btoa('<p>original I10</p>')&&
                     stored.job.chat1.tests&&
                     stored.job.sourceFingerprint===snapshot.fingerprint&&
                     stored.job.state==='TESTS_UNVERIFIED'&&
