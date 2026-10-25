@@ -225,8 +225,8 @@ export function createRefresherStore(db){
     // Inherited defaults affect later periods; already accrued budgets remain exact.
     return {ok:true,state:out};
   });
-  const pause=(expectedRevision,scope,target,paused)=>mutate(expectedRevision,(s,records)=>{
-    if(typeof paused!=='boolean')return fail('INVALID_PAUSE');
+  const pause=(expectedRevision,scope,target,paused,now=Date.now())=>mutate(expectedRevision,(s,records)=>{
+    if(typeof paused!=='boolean'||!Number.isSafeInteger(now)||now<=0)return fail('INVALID_PAUSE');
     const out=structuredClone(s);
     if(scope==='GLOBAL')out.globalPause=paused;
     else if(scope==='ACCOUNT'){
@@ -242,6 +242,15 @@ export function createRefresherStore(db){
     else if(scope==='GENERATOR'&&out.rows.some(r=>r.stableId===target))
       out.rows.find(r=>r.stableId===target).paused=paused;
     else return fail('PAUSE_TARGET_UNKNOWN');
+    // Cut the scoped interval at BOTH edges. Two observations surrounding a
+    // quick Pause/Resume must never credit the hidden paused span. Other
+    // accounts/generators retain their own independent interval checkpoints.
+    for(const row of out.rows)if(scope==='GLOBAL'||scope==='ACCOUNT'&&row.accountId===target||scope==='GENERATOR'&&row.stableId===target){
+      row.checkpoint=Math.max(row.checkpoint||0,now);
+      if(row.phase==='SLEEPING')row.restCheckpointAt=Math.max(row.restCheckpointAt||0,now);
+    }
+    for(const [id,account] of Object.entries(out.accounts))if(scope==='GLOBAL'||scope==='ACCOUNT'&&id===target)
+      account.checkpoint=Math.max(account.checkpoint||0,now);
     return {ok:true,state:out,changes:[{code:paused?'PAUSED':'RESUMED',scopeId:target||'global_scope'}]};
   },{accountTarget:scope==='ACCOUNT'?target:null});
   const generatorPolicy=(expectedRevision,stableId,activeMs,sleepMs,{useDefaults=false}={})=>mutate(expectedRevision,s=>{

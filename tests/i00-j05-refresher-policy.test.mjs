@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fakeDatabase} from './fake-idb.mjs';
 import {createRefresherStore} from '../src/runtime/refresher-store.mjs';
-import {emptyShadow,reconcileShadow,rowBlocks,REFRESHER_KEY,MINUTE} from '../src/runtime/refresher-core.mjs';
+import {emptyShadow,reconcileShadow,advanceShadow,rowBlocks,REFRESHER_KEY,MINUTE} from '../src/runtime/refresher-core.mjs';
 import {exactSource} from '../src/runtime/staging-core.mjs';
 import {validateRefresherMessage} from '../src/runtime/refresher-boundary.mjs';
 const put=(db,...rows)=>new Promise(resolve=>{const t=db.transaction('meta','readwrite');t.oncomplete=resolve;for(const r of rows)t.objectStore('meta').put(r)});
@@ -57,4 +57,41 @@ test('J05 a manual recent-page request remains bounded by existing backoff and r
 test('J05 scheduler canonical reads are independent of more than fifty thousand unrelated history records',async()=>{
  const db=fakeDatabase(),store=createRefresherStore(db);await put(db,{key:REFRESHER_KEY,state:emptyShadow()},...Array.from({length:50010},(_,i)=>({key:'ai-history:other-workflow:'+String(i).padStart(8,'0'),job:{slug:'other-workflow',revision:i+1}})));
  const result=await store.turn({now:Date.now(),bootId:'boot_j05_history_001'});assert.equal(result.ok,true,JSON.stringify(result));assert.equal(result.state.rows.length,0);assert.equal(db.keys('operations').length,0);
+});
+
+test('J05 quick scoped Pause/Resume cannot charge active or rest time hidden between clock samples; unrelated generators continue',async()=>{
+ for(const scope of ['GLOBAL','ACCOUNT','GENERATOR']){
+  const db=fakeDatabase(),store=createRefresherStore(db),start=1000000,bootId='boot_j05_pause_001';
+  const s=reconcileShadow(emptyShadow(),[...inputs,{...inputs[0],slug:'independent-policy',accountId:'account-other',personaUid:'persona-other'}]).state;
+  s.bootId=bootId;s.lastTurnAt=start;s.provider={state:'HEALTHY',observedAt:start};
+  for(const a of Object.values(s.accounts))a.health='HEALTHY';
+  for(const r of s.rows){r.phase='ACTIVE';r.slot=true;r.admittedAt=start;r.checkpoint=start;r.activeRemaining=100000;}
+  s.rows[1].phase='SLEEPING';s.rows[1].slot=false;s.rows[1].restCheckpointAt=start;s.rows[1].sleepRemaining=100000;
+  const routes=Object.entries(s.accounts).map(([accountId,a])=>({ready:true,accountId,personaUid:a.personaUid,bindingVersion:1,principalFingerprint:a.principalFingerprint,cookieStoreId:'container-'+accountId,routeId:'protected-'+accountId,healthDomain:'health-'+accountId}));
+  s.recent={...s.recent,complete:true,observedAt:start-1};
+  const sample=at=>({observedAtMs:at,monotonicMs:at-start,runtimeEpoch:bootId,routes});
+  s.browserClock={bootId,witness:sample(start)};
+  await put(db,{key:REFRESHER_KEY,state:s});
+  const target=scope==='GLOBAL'?null:scope==='ACCOUNT'?'account-policy':s.rows[0].stableId;
+  const paused=await store.pause(s.revision,scope,target,true,start+5000);assert.equal(paused.ok,true);
+  const resumed=await store.pause(paused.revision,scope,target,false,start+10000);assert.equal(resumed.ok,true);
+  const next=advanceShadow((await store.read()).state,{now:start+20000,bootId,browserClock:sample(start+20000)});assert.equal(next.ok,true);
+  assert.equal(next.state.rows[0].activeRemaining,90000,scope);
+  assert.equal(next.state.rows[2].activeRemaining,scope==='GLOBAL'?90000:80000,scope+' independent');
+  assert.equal(next.state.rows[1].sleepRemaining,scope==='GENERATOR'?80000:90000,scope+' rest');
+ }
+});
+test('J05 persisted global/account/generator Pause freezes rest through turns and restart until explicit Resume',async()=>{
+ for(const scope of ['GLOBAL','ACCOUNT','GENERATOR']){
+  const db=fakeDatabase(),store=createRefresherStore(db),start=1000000;
+  const s=reconcileShadow(emptyShadow(),inputs).state;s.rows[0].phase='SLEEPING';s.rows[0].sleepRemaining=100000;s.rows[0].restCheckpointAt=start;
+  await put(db,{key:REFRESHER_KEY,state:s});
+  const target=scope==='GLOBAL'?null:scope==='ACCOUNT'?'account-policy':s.rows[0].stableId;
+  const paused=await store.pause(1,scope,target,true,start+5000);assert.equal(paused.ok,true);
+  const frozen=advanceShadow((await store.read()).state,{now:start+70000,bootId:'boot_j05_pause_new'});assert.equal(frozen.state.rows[0].sleepRemaining,100000);
+  await put(db,{key:REFRESHER_KEY,state:frozen.state});
+  const resumed=await store.pause(frozen.state.revision,scope,target,false,start+80000);assert.equal(resumed.ok,true);
+  const next=advanceShadow((await store.read()).state,{now:start+90000,bootId:'boot_j05_pause_new'});
+  assert.equal(next.state.rows[0].sleepRemaining,90000);
+ }
 });

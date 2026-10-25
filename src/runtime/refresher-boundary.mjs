@@ -533,7 +533,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       }
       let result;
       if(message.type==='SET_POLICY')result=await s.changePolicy(p.expectedRevision,p.policy);
-      if(message.type==='SET_PAUSE')result=await s.pause(p.expectedRevision,p.scope,p.target,p.paused);
+      if(message.type==='SET_PAUSE')result=await s.pause(p.expectedRevision,p.scope,p.target,p.paused,clock());
       if(message.type==='SET_GENERATOR_POLICY')result=await s.generatorPolicy(
         p.expectedRevision,p.stableId,p.activeMs,p.sleepMs,{useDefaults:p.useDefaults===true});
       if(message.type==='DEMAND_STATISTIC')result=await s.demand(p.expectedRevision,p.stableId,clock());

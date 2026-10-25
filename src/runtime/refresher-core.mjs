@@ -366,6 +366,9 @@ export function advanceShadow(s,{now,bootId,receipt=null,nativeClock=undefined,
       r.restCheckpointAt=now; // isolate discontinuity; never grant 90d
       continue;
     }
+    if(out.globalPause||out.accounts[r.accountId]?.paused||r.paused){
+      r.restCheckpointAt=now;continue;
+    }
     const used=Math.min(elapsed,r.sleepRemaining);
     r.sleepRemaining-=used;
     r.restCheckpointAt=now;
