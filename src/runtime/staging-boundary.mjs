@@ -142,7 +142,7 @@ export function createStagingBoundary(api,{
         remotePublicId:item.remoteId,principalFingerprint:account.identity.principalFingerprint};
       const baseline=await readPrevious(g,owner);
       if(!baseline.ok)return baseline;
-      if(baseline.source.files.length!==2||baseline.source.files.some(f=>f.size!==0))
+      if(eligible.origin==='ADOPTED_PRIVATE'?baseline.source.fingerprint!==eligible.originalSource?.fingerprint:baseline.source.files.length!==2||baseline.source.files.some(f=>f.size!==0))
         return fail('NOT_PRIVATE_EMPTY_NEW_TARGET');
       const routeAfter=await g.getSafeRouteReadiness(account.personaUid);
       if(!routeAfter?.ready||routeAfter.cookieStoreId!==route.cookieStoreId||

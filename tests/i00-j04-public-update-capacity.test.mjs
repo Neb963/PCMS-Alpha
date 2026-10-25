@@ -32,10 +32,60 @@ test('J04 existing public admission shares real execution reservations and retai
  assert.equal((await createAiStore(f.db).start(stage)).ok,true,'verified review frees execution capacity');
  assert.equal((await f.store.prepare(f.args[1])).code,'PUBLIC_UPDATE_EXECUTION_CAPACITY_RESERVED');
  await put(f.db,{key:'ai-job:private-waiting',accountId:'account-public',job:{slug:'private-waiting',executionSlotReleased:true}});
- assert.equal((await f.store.prepare(f.args[1])).code,'PUBLIC_UPDATE_ACCOUNT_CAPACITY_RESERVED','review still holds the visibility reservation');
+ assert.equal((await f.store.prepare(f.args[1])).code,'PUBLIC_UPDATE_MACHINE_VISIBILITY_RESERVED','review still holds the visibility reservation');
  assert.equal(releaseCandidateKind({previous:f.original},f.args[0].inventory,held),'EXISTING_UPDATE','empty published P never bypasses update protections');
 });
 test('J04 capacity counts an update AI job once and other Persona accounts independently',()=>{
  const rows=[{key:'existing-update:update',record:{slug:'update',accountId:'a',nonce:'n'}},{key:'stage:update',record:{revision:4,nonce:'n'}},{key:'ai-job:update',accountId:'a',job:{slug:'update',stageRevision:4,executionSlotReleased:false}}];
  assert.equal(countAiCapacity(rows,'a'),1);assert.equal(countAiCapacity(rows,'b'),0);assert.equal(countAiCapacity(rows,'a','update'),0);
+});
+
+test('J04 fifty accounts cannot unlist forty-nine public generators into review; machine hold follows configured execution width',async()=>{
+ const f=await fixture(),base=f.args[0],items=Array.from({length:50},(_,n)=>({...base.inventory,slug:'fleet-public-'+n,accountId:'fleet-account-'+n,personaUid:'fleet-persona-'+n,remoteId:'fleet-remote-'+n}));
+ const state=reconcileShadow(emptyShadow(),items.map(i=>({...i,ownerVerified:true,releaseVerified:true,releaseFingerprint:f.original.fingerprint}))).state;
+ state.rows.forEach(r=>{r.phase='SLEEPING';r.sleepRemaining=7200000;r.slot=false});
+ const args=items.map((inventory,n)=>{const principal=(n+1).toString(16).padStart(64,'0'),account={...base.account,accountId:inventory.accountId,personaUid:inventory.personaUid,identity:{...base.account.identity,principalFingerprint:principal}},adoption={...base.adoption,...inventory,accountRevision:1,principalFingerprint:principal,remotePublicId:inventory.remoteId},remote={...base.remote,remotePublicId:inventory.remoteId};return {...base,account,inventory,adoption,remote,shadow:state.rows[n]}});
+ await put(f.db,{key:REFRESHER_KEY,state},...args.flatMap(x=>[{key:'account:'+x.account.accountId,account:x.account},{key:'inventory:'+x.inventory.slug,generator:x.inventory},{key:'adoption:'+x.inventory.slug,adoption:x.adoption}]));
+ assert.equal((await f.store.prepare(args[0])).ok,true);
+ for(const a of args.slice(1))assert.equal((await f.store.prepare(a)).code,'PUBLIC_UPDATE_MACHINE_VISIBILITY_RESERVED');
+ assert.equal(f.db.keys('meta').filter(k=>k.startsWith('existing-update:')).length,1);assert.equal(f.db.keys('operations').length,0);
+});
+
+test('J04 explicit active-window update follows normal reservation and journaled unlist while preserving budgets and updating observed inventory',async()=>{
+ const {requestOperatorUpdate}=await import('../src/runtime/update-window.mjs');
+ const f=await fixture(),name=f.args[0].inventory.slug,ready={slug:name,revision:1,active:{identifier:'ready-explicit',inputFingerprint:'f'.repeat(64)},desired:null,hold:null};
+ const state=f.db.read('meta',REFRESHER_KEY).state,row=state.rows[0];row.phase='ACTIVE';row.slot=true;row.activeRemaining=123456;row.sleepRemaining=0;f.args[0].shadow=row;
+ await put(f.db,{key:REFRESHER_KEY,state},{key:'s05-ready:'+name,record:ready});
+ assert.equal((await f.store.prepare(f.args[0])).ok,false,'normal updates still wait for sleep');
+ const requested=await requestOperatorUpdate(f.db,{name,ready,account:f.args[0].account,inventory:f.args[0].inventory,sourceFingerprint:f.original.fingerprint});assert.equal(requested.code,'UPDATE_NOW_QUEUED');
+ const prepared=await f.store.prepare(f.args[0]);assert.equal(prepared.ok,true,JSON.stringify(prepared));
+ const blocked={...ready,desired:{identifier:'newer',inputFingerprint:'e'.repeat(64)}};await put(f.db,{key:'s05-ready:'+name,record:blocked});
+ assert.equal((await f.store.move(name,prepared.revision,'UNLIST_DISPATCH')).code,'EXISTING_SLEEP_CHANGED');assert.equal(f.db.keys('operations').length,0);
+ await put(f.db,{key:'s05-ready:'+name,record:ready});
+ const armed=await f.store.move(name,prepared.revision,'UNLIST_DISPATCH');assert.equal(armed.ok,true,JSON.stringify(armed));
+ const confirmed=await f.store.move(name,armed.revision,'UNLIST_CONFIRMED',{proof:{source:'INDEPENDENT_FULL_BYTE_READBACK',fingerprint:f.original.fingerprint,visibility:'UNLISTED',ownerResult:'IS_OWNER',remotePublicId:f.args[0].inventory.remoteId}});assert.equal(confirmed.ok,true);
+ assert.equal(f.db.read('meta','inventory:'+name).generator.visibility,'UNLISTED');
+ const saved=f.db.read('meta',REFRESHER_KEY).state.rows[0];assert.deepEqual([saved.phase,saved.slot,saved.activeRemaining,saved.sleepRemaining],['ACTIVE',true,123456,0]);
+ assert.equal(f.db.read('meta','existing-update:'+name).record.previousFingerprint,f.original.fingerprint);
+});
+
+test('J04 decreasing configured capacity drains existing reservations fairly instead of deadlocking two unlisted sources',async()=>{
+ const f=await fixture(),ai=createAiStore(f.db);assert.equal((await ai.changeConcurrency(1,2)).ok,true);
+ assert.equal((await f.store.prepare(f.args[0])).ok,true);assert.equal((await f.store.prepare(f.args[1])).ok,true);
+ const source=await exactSource([{path:'main.pjs',base64:btoa('source')},{path:'index.html',base64:btoa('<h1>source</h1>')}]),stages=[];
+ for(const a of f.args.slice(0,2)){const name=a.inventory.slug,old=f.db.read('meta','existing-update:'+name).record,stage={slug:name,revision:1,state:'SOURCE_VERIFIED',verifiedAt:1,accountId:a.account.accountId,nonce:old.nonce,candidate:source,previous:f.original};stages.push(stage);await put(f.db,{key:'stage:'+name,record:stage},{key:'existing-update:'+name,record:{...old,state:'STAGE_CONFIRMED',stagedFingerprint:source.fingerprint}});}
+ assert.equal((await ai.changeConcurrency(2,1)).ok,true);
+ assert.equal((await ai.start(stages[0])).ok,true,'oldest reserved source can make progress');assert.equal((await ai.start(stages[1])).code,'AI_ACCOUNT_CONCURRENCY_HELD');
+ const row=f.db.read('meta','ai-job:'+stages[0].slug);await put(f.db,{...row,job:{...row.job,executionSlotReleased:true}});
+ assert.equal((await ai.start(stages[1])).ok,true,'next reservation progresses after the actual slot is released');
+});
+
+test('J04 pausing an unsent public update frees its reservation for independent work; Resume reacquires before unlisting',async()=>{
+ const f=await fixture(),first=f.args[0],name=first.inventory.slug,ready={slug:name,revision:1,active:{identifier:'ready-paused',inputFingerprint:'f'.repeat(64)},desired:null,hold:null};await put(f.db,{key:'s05-ready:'+name,record:ready});
+ const prepared=await f.store.prepare(first);assert.equal(prepared.ok,true);await put(f.db,{key:'s05-ready:'+name,record:{...ready,revision:2,hold:'OPERATOR_PAUSED'}});
+ const source=await exactSource([{path:'main.pjs',base64:btoa('private')},{path:'index.html',base64:btoa('<p>private</p>')}]),ai=createAiStore(f.db),stage={slug:'independent-private',revision:1,state:'SOURCE_VERIFIED',accountId:first.account.accountId,candidate:source,previous:source};
+ assert.equal((await ai.start(stage)).ok,true,'paused unsent reservation cannot block independent private work');const j=f.db.read('meta','ai-job:'+stage.slug);await put(f.db,{...j,job:{...j.job,executionSlotReleased:true}});
+ assert.equal((await f.store.prepare(f.args[1])).ok,true,'another public update may take the unused window');
+ await put(f.db,{key:'s05-ready:'+name,record:{...ready,revision:3}});
+ const resumed=await f.store.move(name,prepared.revision,'UNLIST_DISPATCH');assert.equal(resumed.ok,false);assert.match(resumed.code,/PUBLIC_UPDATE_.*RESERVED/);assert.equal(f.db.read('meta','existing-update:'+name).record.state,'PREPARED');assert.equal(f.db.keys('operations').length,0);
 });

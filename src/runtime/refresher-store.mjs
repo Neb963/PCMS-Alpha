@@ -24,10 +24,11 @@ function transact(db,mode,fn){
 // independently confirmed exact-source publication; historical PUBLIC alone
 // never satisfies this seam. B/F fixtures exercise the same canonical seam.
 export function canonicalRefresherInputs(records){
-  const accounts=new Map(),stages=new Map(),releases=new Map(),links=new Map(),updates=new Map(),adoptions=new Map(),inventory=[];
+  const accounts=new Map(),stages=new Map(),releases=new Map(),links=new Map(),updates=new Map(),adoptions=new Map(),readyRows=new Map(),inventory=[];
   for(const record of records){
     const k=record?.key;
     if(typeof k!=='string')continue;
+    if(k.startsWith('s05-ready:')&&record.record)readyRows.set(record.record.slug,record.record);
     if(k.startsWith('account:')&&record.account)accounts.set(record.account.accountId,record.account);
     if(k.startsWith('inventory:')&&record.generator)inventory.push(record.generator);
     if(k.startsWith('stage:')&&record.record)stages.set(record.record.slug,record.record);
@@ -38,7 +39,7 @@ export function canonicalRefresherInputs(records){
   }
   return inventory.map(row=>{
     const a=accounts.get(row.accountId),release=releases.get(row.slug),stage=stages.get(row.slug),
-      link=links.get(row.slug),update=updates.get(row.slug),adopt=adoptions.get(row.slug);
+      link=links.get(row.slug),update=updates.get(row.slug),adopt=adoptions.get(row.slug),ready=readyRows.get(row.slug);
     const accountVerified=a?.state==='VERIFIED'&&a.identity?.source==='GUARDED_SESSION_READBACK'&&
       a.identity.bindingVersion===a.bindingVersion&&hex(a.identity.principalFingerprint);
     const matched=accountVerified&&a.personaUid===row.personaUid&&a.bindingVersion===row.bindingVersion;
@@ -70,6 +71,8 @@ export function canonicalRefresherInputs(records){
       adopt.archiveState!=='HELD_UNCERTAIN';
     const approvedSource=released||adopted;
     return {slug:row.slug,accountId:row.accountId,remoteId:row.remoteId,
+      updateNowCandidate:ready&&(!ready.hold||ready.hold==='WAIT_FOR_SAFE_SOURCE_HANDOFF')?(ready.desired||ready.active||null):null,
+      updateNowComplete:!!(update?.state==='STAGE_CONFIRMED'&&released&&update.stagedFingerprint===release.sourceFingerprint&&release.approval?.stageRevision===stage?.revision),
       sourceAuthority:released?'INDEPENDENT_PUBLICATION_READBACK':
         adopted?'ADOPTED_FULL_ORIGINAL_READBACK':'UNVERIFIED',
       personaUid:a?.personaUid||row.personaUid,bindingVersion:a?.bindingVersion||row.bindingVersion,

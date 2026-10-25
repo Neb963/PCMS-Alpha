@@ -1,3 +1,4 @@
+import {updateWindowAvailable} from './update-window.mjs';
 import {createLocalSourceReview} from './source-review.mjs';
 import {captureExceptionalIdle,exceptionalIdleEvidence} from './exception-idle.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
@@ -197,7 +198,7 @@ export function createReleaseBoundary(api,{
     if(!owner.ok)return owner;
     if(!tests.ok)return tests;
     const existingRow=await createExistingStore(database).getFull(name);
-    const privateNew=releaseCandidateKind(r,inventory,existingRow.ok?existingRow.record:null)==='PRIVATE_NEW';
+    const candidateKind=releaseCandidateKind(r,inventory,existingRow.ok?existingRow.record:null),privateNew=candidateKind!=='EXISTING_UPDATE';
     if(!privateNew){
       if(!existingRow?.ok||existingRow.record.state!=='STAGE_CONFIRMED'||
          existingRow.record.nonce!==r.nonce||
@@ -217,7 +218,7 @@ export function createReleaseBoundary(api,{
         req.onerror=()=>reject(Error('SHADOW_READ_FAILED'));
       });
       const row=shadow?.rows?.find(v=>v.slug===name);
-      if(!row||row.phase!=='SLEEPING'||row.slot===true||
+      if(!row||!updateWindowAvailable(shadow,row,ready.record,r,existingRow.record.previousFingerprint)||
          row.paused===true||shadow.globalPause===true||
          shadow.accounts?.[r.accountId]?.paused===true||
          row.remoteId!==r.remotePublicId||row.bindingVersion!==r.bindingVersion)
@@ -278,10 +279,10 @@ export function createReleaseBoundary(api,{
     if(!previous.ok||previous.fingerprint!==r.previous.fingerprint)
       return fail('PREVIOUS_SOURCE_CORRUPT');
     const approved=approvalTuple({slug:name,stage:r,job:j,source,git,
-      previous,kind:privateNew?'PRIVATE_NEW':'EXISTING_UPDATE',testContext:tests});
+      previous,kind:candidateKind,testContext:tests});
     if(!approved.ok)return approved;
     return {ok:true,r,j,source,previous,approval:approved.tuple,
-      kind:privateNew?'PRIVATE_NEW':'EXISTING_UPDATE',existing:existingRow?.record,
+      kind:candidateKind,existing:existingRow?.record,
       editor,route:after,remote,git,testContext:tests};
   }
   async function runTrusted(msg){

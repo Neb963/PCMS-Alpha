@@ -92,6 +92,8 @@ export function reconcileShadow(s,inputs){
       r.personaUid!==input.personaUid||r.bindingVersion!==input.bindingVersion;
     const releaseChanged=r.releaseFingerprint!=null&&
       r.releaseFingerprint!==input.releaseFingerprint;
+    if(r.updateNow&&(identityChanged||input.updateNowComplete===true||input.updateNowCandidate===null||
+       input.updateNowCandidate&&(r.updateNow.readyIdentifier!==input.updateNowCandidate.identifier||r.updateNow.readyInputFingerprint!==input.updateNowCandidate.inputFingerprint)))delete r.updateNow;
     r.identityHeld=identityChanged;
     // A new independently confirmed release F supersedes any prior marker
     // lineage; never reuse a saved marker as authority for the next source.
@@ -138,7 +140,7 @@ export function rowBlocks(s,r){
   return [s.globalPause&&'GLOBAL_PAUSE',a?.paused&&'ACCOUNT_PAUSE',r.paused&&'GENERATOR_PAUSE',
     r.identityHeld&&'BINDING_CHANGED',!r.ownerVerified&&'OWNER_UNVERIFIED',
     !r.releaseVerified&&'PUBLICATION_UNVERIFIED',r.listing!=='PUBLIC'&&'LISTING_UNVERIFIED',
-    r.reviewHeld&&'REVIEW_UNLISTING',r.refresh?.suspended&&'VISIBILITY_SUSPENDED',
+    r.updateNow&&'OPERATOR_UPDATE_REQUESTED',r.reviewHeld&&'REVIEW_UNLISTING',r.refresh?.suspended&&'VISIBILITY_SUSPENDED',
     a?.health!=='HEALTHY'&&'ACCOUNT_UNAVAILABLE',
     s.provider.state==='OUTAGE'&&'PROVIDER_OUTAGE'].filter(Boolean);
 }

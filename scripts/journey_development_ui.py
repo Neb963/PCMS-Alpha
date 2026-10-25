@@ -23,7 +23,7 @@ def capture(s,name,evidence):
     time.sleep(.2);pathlib.Path('build/j04-'+name+'.png').write_bytes(base64.b64decode(b.call('GET',f'/session/{s}/screenshot')))
     evidence[name]=b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;return {dialog:sh.querySelector('[role=dialog]')?.innerText.slice(0,6000),queue:sh.querySelector('#page')?.innerText.slice(0,6000),width:innerWidth,overflow:document.documentElement.scrollWidth>innerWidth}")
 def search(s,text):
-    fill(s,'#queue-search',text);wait(s,"!!sh.querySelector("+json.dumps('[data-clean-select=\"'+text+'\"]')+")",'J04_SEARCH_'+text)
+    fill(s,'#queue-search',text);wait(s,"sh.querySelectorAll('.candidate-item').length===1&&!!sh.querySelector("+json.dumps('[data-clean-select=\"'+text+'\"]')+")",'J04_SEARCH_'+text)
 
 def run(browser,archive,folder):
     profile=pathlib.Path(folder)/'j04-primary-development';profile.mkdir();downloads=profile/'downloads';downloads.mkdir()
@@ -35,7 +35,7 @@ def run(browser,archive,folder):
     try:
         uuid=b.addons_uuid(profile);url=f'moz-extension://{uuid}/pcms/index.html#work-queue'
         b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s);fixture(s)
-        click(s,'[data-nav=generators]');click(s,'[data-nav=work-queue]');wait(s,"!!sh.querySelector('[data-clean-selection]')",'J04_PRIMARY_QUEUE')
+        click(s,'[data-nav=generators]');click(s,'[data-nav=work-queue]');wait(s,"!!sh.querySelector('[data-filter=\"queue:All\"]')",'J04_ALL_TAB');click(s,'[data-filter="queue:All"]');wait(s,"!!sh.querySelector('[data-clean-selection]')",'J04_PRIMARY_QUEUE')
         search(s,'j04-paged-1000');wait(s,"[...sh.querySelectorAll('button')].some(x=>x.textContent==='Inspect candidate'&&!x.disabled)",'J04_INSPECTION_BEYOND_1000_NOT_DISABLED')
         search(s,'j04-review-modified');button(s,'Inspect candidate')
         wait(s,"sh.querySelector('[aria-label=\"Candidate main.pjs\"]')?.value.startsWith('output\\n  Modified final source é')",'J04_ACTUAL_FULL_SOURCE_BYTES_WITHOUT_GIT')
@@ -87,9 +87,9 @@ def run(browser,archive,folder):
         capture(s,'manual-source-review',evidence);g.close(s)
         # Actual process restart retains source, queued instructions, frozen
         # set approval and manual evidence; no test-provider effect is replayed.
-        old=b.owned_firefox_pids(profile);b.close(s);b.require_owned_exit(profile,old);s=None
-        s=b.open_session(browser,profile);b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s);fixture(s)
-        click(s,'[data-nav=generators]');click(s,'[data-nav=work-queue]');search(s,'j04-repair');button(s,'Manage development','.candidate-item:has([data-clean-select="j04-repair"])')
+        old=b.owned_firefox_pids(profile);assert old,'J04_OLD_FIREFOX_PROCESS_MISSING';b.close(s);b.require_owned_exit(profile,old);s=None
+        s=b.open_session(browser,profile);replacement=b.owned_firefox_pids(profile);assert replacement and not old.intersection(replacement),'J04_REPLACEMENT_FIREFOX_PROCESS_NOT_DISTINCT';b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s);fixture(s)
+        click(s,'[data-nav=generators]');click(s,'[data-nav=work-queue]');wait(s,"!!sh.querySelector('[data-filter=\"queue:All\"]')",'J04_ALL_TAB');click(s,'[data-filter="queue:All"]');search(s,'j04-repair');button(s,'Manage development','.candidate-item:has([data-clean-select="j04-repair"])')
         wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('Queued: Keep my exact recovery instructions.')",'J04_COLD_RESTART_INSTRUCTIONS')
         persisted=oracle(s);assert len([x for x in persisted['batches'] if x['state']=='APPROVED'])==1 and len(persisted['exceptions'])==1 and not persisted['effects']
         capture(s,'persistent-restart',evidence)

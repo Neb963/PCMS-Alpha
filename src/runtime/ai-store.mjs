@@ -13,10 +13,16 @@ const slotReleased=j=>j?.executionSlotReleased===true &&
 export function countAiCapacity(rows,accountId,excludeSlug=''){
  const jobs=rows.filter(r=>r.key?.startsWith('ai-job:')&&r.accountId===accountId&&r.job?.slug!==excludeSlug);
  let used=jobs.filter(r=>!slotReleased(r.job)).length;
+ const own=rows.find(v=>v.key==='existing-update:'+excludeSlug&&v.record?.accountId===accountId)?.record;
+ const order=(a,b)=>(a.createdAt||0)-(b.createdAt||0)||a.slug.localeCompare(b.slug,'en');
  for(const row of rows){const r=row.record;if(!row.key?.startsWith('existing-update:')||!r||r.accountId!==accountId||r.slug===excludeSlug)continue;
+  const queued=rows.find(v=>v.key==='s05-ready:'+r.slug)?.record,owner=rows.find(v=>v.key==='account:'+r.accountId)?.account;
+  if(r.state==='PREPARED'&&(queued?.hold==='OPERATOR_PAUSED'||owner&&owner.state!=='VERIFIED'))continue;
+  const published=rows.find(v=>v.key==='release:'+r.slug)?.release;
+  if(published?.state==='CONFIRMED_PUBLIC'&&published.source==='INDEPENDENT_PUBLICATION_READBACK'&&published.accountId===r.accountId&&published.remoteId===r.remotePublicId&&published.bindingVersion===r.bindingVersion&&published.approval?.sourceFingerprint===r.stagedFingerprint)continue;
   const j=jobs.find(v=>v.job.slug===r.slug)?.job,stage=rows.find(v=>v.key==='stage:'+r.slug)?.record;
   const current=j&&stage?.nonce===r.nonce&&j.stageRevision===stage.revision;
-  if(!current)used++;
+  if(!current&&!(own&&order(r,own)>0))used++;
  }
  return used;
 }
@@ -59,7 +65,7 @@ const publicJob=j=>j?{ok:true,slug:j.slug,revision:j.revision,state:j.state,
     j.schedulerDeferredUntil:null,
   schedulerHold:typeof j.schedulerHold==='string'?j.schedulerHold:null,
   chat2IsolationVerified:j.chat2?.state==='FRESH_VERIFIED',
-  operatorJudgment:j.operatorJudgment||null,operatorPaused:j.operatorPaused===true,controlRevision:j.controlRevision||1,
+  readyManaged:typeof j.readyIdentifier==='string',operatorJudgment:j.operatorJudgment||null,operatorPaused:j.operatorPaused===true,controlRevision:j.controlRevision||1,
   awaitingExecutionSlot:j.awaitingExecutionSlot===true,exceptionFrozen:j.exceptionFrozen===true,
   pendingInstruction:j.operatorInstruction?{id:j.operatorInstruction.id,
     text:j.operatorInstruction.text,status:j.operatorInstruction.status}:null,
@@ -193,8 +199,8 @@ export function createAiStore(db){
     });
   // S05 paginated listing; prior 200-job truncation silently hid eligible
   // work. Cursor is an ordinary ordered slug, not an effect/claim token.
-  const list=({after='',limit=200,query='',status='ALL'}={})=>{
-    if(typeof query!=='string'||query.length>100||
+  const list=({after='',limit=200,query='',status='ALL',legacyOnly=false}={})=>{
+    if(typeof legacyOnly!=='boolean'||typeof query!=='string'||query.length>100||
        !['ALL','NEEDS_ACTION','RUNNING','WAITING','COMPLETED'].includes(status))
       return Promise.resolve(fail('AI_PAGE_INVALID'));
     if(typeof after!=='string'||after.length>100||
@@ -209,7 +215,7 @@ export function createAiStore(db){
         if(typeof cursor.key==='string'&&cursor.key.startsWith('ai-job:')&&
            cursor.value?.job){
           const slugName=cursor.key.slice('ai-job:'.length);
-          if(slugName>after&&slugName.toLowerCase().includes(query.toLowerCase())){
+          if((!legacyOnly||!cursor.value.job.readyIdentifier)&&slugName>after&&slugName.toLowerCase().includes(query.toLowerCase())){
             const job=publicJob(cursor.value.job);
             const completed=job.state==='TESTS_VERIFIED'||job.slotReleased===true;
             const needs=['HELD_RECONCILE','KNOWN_FAILURE','HELD_NO_PROGRESS',

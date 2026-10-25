@@ -42,7 +42,7 @@ export function validateAiMessage(api,sender,message){
      !ACT.has(message.type)||!json||json.length>38000)return fail('INVALID_MESSAGE');
   const p=message.params||{};
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
-  const allowed=message.type==='LIST_JOBS'?['after','limit','query','status']:
+  const allowed=message.type==='LIST_JOBS'?['after','limit','query','status','legacyOnly']:
      message.type==='GET_JOB'?['slug']:
     ['SET_PAUSED','GIVE_INSTRUCTIONS'].includes(message.type)?['slug','expectedRevision','expectedControlRevision',...(message.type==='SET_PAUSED'?['paused','judgment']:['instructions'])]:
     message.type==='PREPARE_JOB'?['slug','expectedStageRevision','token']:
@@ -69,7 +69,8 @@ export function validateAiMessage(api,sender,message){
        !['CHAT1_SEND','CHAT2_RESET','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','CHAT1_INSTRUCT','CHAT2_INSTRUCT','STOP'].includes(p.step))))
     return fail('INVALID_PARAMS');
   if(message.type==='LIST_JOBS'&&
-      ((p.after!==undefined&&(typeof p.after!=='string'||p.after.length>100))||
+      ((p.legacyOnly!==undefined&&typeof p.legacyOnly!=='boolean')||
+       (p.after!==undefined&&(typeof p.after!=='string'||p.after.length>100))||
        (p.limit!==undefined&&(!Number.isInteger(p.limit)||p.limit<1||p.limit>200))||
        (p.query!==undefined&&(typeof p.query!=='string'||p.query.length>100))||
        (p.status!==undefined&&

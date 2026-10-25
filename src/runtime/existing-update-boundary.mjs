@@ -1,3 +1,4 @@
+import {updateWindowAvailable,operatorUpdateWindow} from './update-window.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I13 existing-generator guarded orchestration. No credentials in canonical
 // state, no UI-defined payloads, no effect without durable dispatch marker.
@@ -198,7 +199,8 @@ export function createExistingBoundary(api,{
         if(!current.ok)return current;
         original=current.source;
       }
-      if(!authorizeSleepingUpdate({account:f.account,inventory:f.inventory,
+      const windowReady=await createReadyStore(database).get(p.slug),windowOwner={...f.account,principalFingerprint:f.account.identity?.principalFingerprint,remotePublicId:f.inventory.remoteId};
+      if(!authorizeSleepingUpdate({windowOverride:operatorUpdateWindow(f.row,windowReady.record,windowOwner,original.fingerprint)&&updateWindowAvailable(f.shadow,f.row,windowReady.record,windowOwner,original.fingerprint),account:f.account,inventory:f.inventory,
         adoption:f.adoption,shadow:f.row,original,remote:{
           ok:true,remotePublicId:f.inventory.remoteId,ownerResult:'IS_OWNER',
           visibility:remote.visibility,source:remote.source}}).ok)
@@ -443,9 +445,10 @@ export function createExistingBoundary(api,{
          (await sentinel.inspect()).held)return fail('EXISTING_EFFECT_POSSIBLE_HELD');
       if(['UNLIST','STAGE','RECOVERY_UNLIST'].includes(m.type)){
         const latest=await canonical(database,p.slug);
+        const windowReady=await createReadyStore(database).get(p.slug);
         if(!latest.ok||latest.shadow.globalPause===true||
            latest.shadow.accounts?.[r.accountId]?.paused===true||
-           latest.row?.phase!=='SLEEPING'||latest.row.slot===true||
+           !updateWindowAvailable(latest.shadow,latest.row,windowReady.record,r,r.previousFingerprint)||
            latest.row.paused===true||
            latest.row.remoteId!==r.remotePublicId||
            latest.row.bindingVersion!==r.bindingVersion||

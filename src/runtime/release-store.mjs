@@ -1,5 +1,6 @@
 // I13 canonical release journal. No provider effect may occur in an IDB
 // transaction. A lost dispatch reply is always uncertain, never retried.
+import {updateWindowAvailable} from './update-window.mjs';
 import {fail} from './journal.mjs';
 import {cleanBulkAuthorization} from './clean-bulk-authority.mjs';
 import {matchesApproval,releaseContext,releaseTestContext,
@@ -122,7 +123,7 @@ export function createReleaseStore(db){
   function approve({approval,stage,job,account,inventory,source,previous,releaseId,kind,bulkAuthorization=null}){
     if(!approval?.ok||!slug(stage?.slug)||stage.slug!==job?.slug||
        stage.slug!==inventory?.slug||stage.accountId!==account?.accountId||
-       kind!=='PRIVATE_NEW'&&kind!=='EXISTING_UPDATE'||
+       !['PRIVATE_NEW','PRIVATE_EXISTING','EXISTING_UPDATE'].includes(kind)||
        !/^release_[a-f0-9]{32}$/.test(releaseId||'')||
        !source?.ok||!previous?.ok||
        source.fingerprint!==approval.tuple.sourceFingerprint||
@@ -300,10 +301,10 @@ export function createReleaseStore(db){
                       done(fail('EXISTING_RECOVERY_OR_STAGE_CHANGED'));return;
                     }
                     m.get(REFRESHER_KEY).onsuccess=sh=>{
-                      const state=sh.target.result?.state,
+                      m.get('s05-ready:'+name).onsuccess=rr=>{
+                      const ready=rr.target.result?.record,state=sh.target.result?.state,
                         row=state?.rows?.find(z=>z.slug===name);
-                      if(!validShadow(state)||!row||row.phase!=='SLEEPING'||
-                         row.slot===true||row.paused===true||
+                      if(!validShadow(state)||!row||!updateWindowAvailable(state,row,ready,r.approval,r.approval.previousFingerprint)||row.paused===true||
                          row.remoteId!==r.approval.remotePublicId||
                          row.bindingVersion!==r.approval.bindingVersion||
                          state.globalPause===true||
@@ -311,9 +312,10 @@ export function createReleaseStore(db){
                         done(fail('EXISTING_SLEEP_REVOKED'));return;
                       }
                       guardedMark();
+                      };
                     };
                   };
-                }else if(r.kind==='PRIVATE_NEW')guardedMark();
+                }else if(['PRIVATE_NEW','PRIVATE_EXISTING'].includes(r.kind))guardedMark();
                 else done(fail('RELEASE_KIND_INVALID'));
               };
             };

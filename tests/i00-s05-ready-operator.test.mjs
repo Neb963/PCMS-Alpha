@@ -131,7 +131,8 @@ test('S05 public or dirty browser editor never handoff READY or create source st
   assert.equal(result.ok,false,JSON.stringify(result));
   assert.equal((await s.get(id)).record.revision,1);
   assert.equal(h.db.read('meta','stage:'+id),undefined);
-  assert.equal(h.db.keys('events').length,1);
+  assert.equal(h.db.keys('events').length,opts.publicSource?2:1);
+  if(opts.publicSource){assert.equal(result.code,'S05_LISTING_OBSERVATION_REFRESHED');assert.equal(h.db.read('meta','inventory:'+id).generator.visibility,'PUBLIC');}
  }
 });
 test('S05 stage transaction abort after READY handoff does not pretend source pinned',async()=>{
@@ -265,4 +266,27 @@ test('S05 operator cannot resume a paused token after current Git main changes',
    params:{slug:id,expectedRevision:2}},h.sender);
  assert.equal(result.code,'S05_READY_REVISED_OR_REVOKED');
  assert.equal((await q.get(id)).record.hold,'OPERATOR_PAUSED');
+});
+
+test('J04 explicit Update now preserves active/sleep budgets and is scoped to exact public READY/owner while blocking fresh Refresher writes',async()=>{
+ const {emptyShadow,reconcileShadow,REFRESHER_KEY,rowBlocks}=await import('../src/runtime/refresher-core.mjs');
+ const {operatorUpdateWindow,updateWindowAvailable}=await import('../src/runtime/update-window.mjs');
+ for(const dirtyEditor of [true,false]){
+  const h=setup({publicSource:true,dirtyEditor}),queue=createReadyStore(h.db);await queue.observe(witness);
+  const ownerAccount={...account,accountId:'account-update-now'},ownerLink={...link,accountId:ownerAccount.accountId,remoteId:'remote-update-now'};
+  const baseGuard=h.opts.guard(),operator=createReadyOperator(h.api,{...h.opts,guard:()=>({...baseGuard,observeReadOnly:async(...args)=>{const p=await baseGuard.observeReadOnly(...args);p.original.remotePublicId=ownerLink.remoteId;return p}})});
+  const inv={...inventory,accountId:ownerAccount.accountId,remoteId:ownerLink.remoteId,revision:1,management:'ADOPTED_PUBLIC',visibility:'PUBLIC'},state=reconcileShadow(emptyShadow(),[{...inv,ownerVerified:true,releaseVerified:true,releaseFingerprint:H}]).state,row=state.rows[0];row.phase='ACTIVE';row.slot=true;row.activeRemaining=123456;row.sleepRemaining=0;
+  await seed(h.db,[{key:'account:'+ownerAccount.accountId,account:ownerAccount},{key:'inventory:'+id,generator:inv},{key:'source-link:'+id,link:ownerLink},{key:'adoption:'+id,adoption:{archiveState:'ARCHIVED_GIT_CONFIRMED',originalCheckpoint:{qualified:true}}},{key:REFRESHER_KEY,state}]);
+  const msg={type:'UPDATE_NOW',params:{slug:id,expectedRevision:1}};
+  assert.equal(validateReadyOperator(h.api,h.sender,{...msg,params:{...msg.params,windowOverride:true}}).ok,false);
+  const out=await operator.run(msg,h.sender);
+  if(dirtyEditor){assert.equal(out.code,'S05_EDITOR_TAB_PRESENT');assert.equal(h.db.read('meta',REFRESHER_KEY).state.rows[0].updateNow,undefined);continue;}
+  assert.equal(out.code,'UPDATE_NOW_QUEUED',JSON.stringify(out));assert.equal(out.providerEffects,'NONE');
+  const saved=h.db.read('meta',REFRESHER_KEY).state,target=saved.rows[0],r=(await queue.get(id)).record,owner={...ownerAccount,principalFingerprint:H,remotePublicId:inv.remoteId};
+  assert.deepEqual([target.phase,target.slot,target.activeRemaining,target.sleepRemaining],['ACTIVE',true,123456,0]);assert.ok(rowBlocks(saved,target).includes('OPERATOR_UPDATE_REQUESTED'));
+  assert.equal(operatorUpdateWindow(target,r,owner,target.updateNow.previousFingerprint),true);assert.equal(updateWindowAvailable(saved,target,r,owner,target.updateNow.previousFingerprint),true);
+  assert.equal(updateWindowAvailable({...saved,inflight:[{stableId:target.stableId}]},target,r,owner),false);
+  assert.equal(operatorUpdateWindow(target,{...r,desired:{identifier:'other',inputFingerprint:H}},owner),false);assert.equal(operatorUpdateWindow(target,r,{...owner,bindingVersion:2}),false);
+  const completed=reconcileShadow(saved,[{...inv,ownerVerified:true,releaseVerified:true,releaseFingerprint:H,updateNowComplete:true}]).state.rows[0];assert.equal(completed.updateNow,undefined);assert.deepEqual([completed.phase,completed.activeRemaining,completed.sleepRemaining],['ACTIVE',123456,0]);
+ }
 });

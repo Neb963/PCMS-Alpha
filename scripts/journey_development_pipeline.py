@@ -38,7 +38,7 @@ def alarm(s):return background(s,'return await window.__j04flow.alarm();')
 def attach(s):
     return g.oracle(s,"""const bg=await browser.runtime.getBackgroundPage();if(!bg.__j04flow)return {ok:false};const ports=new Set(['pcms-i10-ai','pcms-i13-release','pcms-j04-clean-publication','pcms-s03-catalog','pcms-i02-canonical-readonly','pcms-s05-ready-operator']);const original=browser.runtime.connect.bind(browser.runtime),sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')};browser.runtime.connect=function(...args){const name=args.at(-1)?.name;if(!ports.has(name))return original(...args);const messages=new Set(),disconnected=new Set();let closed=false;return {onMessage:{addListener:f=>messages.add(f)},onDisconnect:{addListener:f=>disconnected.add(f)},disconnect(){closed=true},postMessage(msg){Promise.resolve(bg.__j04flow.command(name,msg,sender)).then(out=>{if(!closed)for(const f of messages)f(out)}).catch(()=>{if(!closed)for(const f of disconnected)f()})}}};return {ok:true};""")
 
-def progress(s,predicate,label,steps=80):
+def progress(s,predicate,label,steps=160):
     for _ in range(steps):
         before=inspect(s)
         if predicate(before):print('B '+label,flush=True);return before
@@ -54,30 +54,63 @@ def run(browser,archive,folder):
     s=b.open_session(browser,profile)
     try:assert b.call('POST',f'/session/{s}/moz/addon/install',{'path':str(archive),'temporary':False},timeout=45)==b.ID
     finally:b.close(s)
-    s=b.open_session(browser,profile);evidence={}
+    s=b.open_session(browser,profile);evidence={'scope':{'externalServices':'OFFLINE Git/provider/native models','effectAuthority':'fixture effect gates true; production standing gates remain separately tested','clock':'actual Date.now; no acceleration','alarmCadence':'100ms test wake of real browser alarm; production periodic READY alarm is one minute','process':'owned disposable persistent profile; nonempty disjoint old/new Firefox PID sets','livePrivateGitOrProvider':'NOT_TESTED'}}
     try:
         url=f'moz-extension://{b.addons_uuid(profile)}/pcms/index.html#work-queue';b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s)
         assert install(s).get('ok');assert attach(s).get('ok')
         # Remove the actual dashboard entirely. Real browser alarms now drive
         # production background controllers, independent of a page-side tick.
         b.call('POST',f'/session/{s}/url',{'url':'about:blank'})
-        state=progress(s,lambda x:len([w for w in x['writebacks'] if w['state']=='CONFIRMED'])==3,'J04_DASHBOARD_CLOSED_READY_STAGE_DOM_FAIL_REPAIR_PASS_GIT_CONFIRMED')
+        state=progress(s,lambda x:len([w for w in x['writebacks'] if w['state']=='CONFIRMED'])==4,'J04_DASHBOARD_CLOSED_READY_STAGE_DOM_FAIL_REPAIR_PASS_GIT_CONFIRMED')
         assert any(x.get('result')=='FAIL' for x in state['provider']['assertions']),state['provider']['assertions']
         assert any(x.get('result')=='PASS' for x in state['provider']['assertions'])
-        assert len([x for x in state['provider']['effects'] if x['kind']=='STAGE'])==3
+        assert len([x for x in state['provider']['effects'] if x['kind']=='STAGE'])==4
         assert not [x for x in state['provider']['effects'] if x['kind']=='PUBLISH']
         assert all(x['slug']!='j04-flow-held' for x in state['provider']['effects'])
-        assert len(state['git']['effects'])==3 and not any(x['force'] for x in state['git']['effects'])
+        assert len(state['git']['effects'])==4 and not any(x['force'] for x in state['git']['effects'])
         evidence['background-complete-before-review']=state
+        b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s);assert attach(s).get('ok');ui.click(s,'[data-nav=generators]');ui.click(s,'[data-nav=work-queue]')
+        adopted=next(x for x in state['stages'] if x['slug']=='j04-flow-adopted');assert adopted['sourceOrigin']=='ADOPTED_PRIVATE'
+        assert next(x for x in adopted['previous']['blobs'] if x['path']=='src/original-only.bin')['base64']=='CQD/'
+        assert not [x for x in state['provider']['effects'] if x['slug']=='j04-flow-adopted' and x['kind']=='UNLIST']
+        ui.search(s,'j04-flow-adopted');ui.button(s,'Inspect candidate','.candidate-item:has([data-clean-select="j04-flow-adopted"])');ui.wait(s,"[...sh.querySelectorAll('button')].some(x=>x.textContent==='Approve and publish exact candidate')",'J04_ADOPTED_NONEMPTY_PRIVATE_SOURCE_TESTED_REVIEW')
+        ui.click(s,'[role=dialog] .setting-option input[type=checkbox]');ui.button(s,'Approve and publish exact candidate');a.alert_accept(s)
+        ui.wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('Publication may have occurred')||sh.querySelector('[role=dialog]')?.textContent.includes('Published:')",'J04_PRIVATE_EXISTING_ONE_APPROVAL')
+        b.call('POST',f'/session/{s}/url',{'url':'about:blank'})
+        state=progress(s,lambda x:any(r['slug']=='j04-flow-adopted' and r['state']=='CONFIRMED_PUBLIC' for r in x['releases']),'J04_PRIVATE_EXISTING_PUBLICATION_WITHOUT_PUBLIC_UPDATE_RESERVATION')
+        assert next(r for r in state['releases'] if r['slug']=='j04-flow-adopted')['kind']=='PRIVATE_EXISTING'
+        evidence['adopted-private-full-original']=state
+        b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s);assert attach(s).get('ok');ui.click(s,'[data-nav=generators]');ui.click(s,'[data-nav=work-queue]')
+        # A public target stays listed and unchanged until the operator
+        # explicitly requests its safe early update. Its active budget stays.
+        assert state['provider']['resources']['j04-flow-public']['visibility']=='PUBLIC'
+        assert not [x for x in state['provider']['effects'] if x['slug']=='j04-flow-public']
+        ui.search(s,'j04-flow-public');ui.button(s,'Update now','.candidate-item:has([data-clean-select="j04-flow-public"])');ui.button(s,'Update now','[role=dialog]');a.alert_accept(s)
+        ui.wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('Update requested.')",'J04_PRIMARY_SAFE_UPDATE_NOW_INTENT')
+        b.call('POST',f'/session/{s}/url',{'url':'about:blank'})
+        state=progress(s,lambda x:any(w['slug']=='j04-flow-public' and w['state']=='CONFIRMED' for w in x['writebacks']),'J04_PUBLIC_EMPTY_P_UPDATE_UNLIST_STAGE_TEST_GIT')
+        update=next(x for x in state['existing'] if x['slug']=='j04-flow-public');assert update['priorSource']['totalBytes']==0 and update['previousFingerprint']==next(x for x in state['stages'] if x['slug']=='j04-flow-public')['previous']['fingerprint']
+        row=state['shadow']['rows'][0];assert [row['phase'],row['slot'],row['activeRemaining'],row['sleepRemaining']]==['ACTIVE',True,123456,0]
+        assert len([x for x in state['provider']['effects'] if x['slug']=='j04-flow-public' and x['kind']=='UNLIST'])==1
+        b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s);assert attach(s).get('ok');ui.click(s,'[data-nav=generators]');ui.click(s,'[data-nav=work-queue]')
+        ui.search(s,'j04-flow-public');ui.button(s,'Inspect candidate','.candidate-item:has([data-clean-select="j04-flow-public"])');ui.wait(s,"[...sh.querySelectorAll('button')].some(x=>x.textContent==='Approve and publish exact candidate')",'J04_PUBLIC_UPDATE_EXACT_REVIEW')
+        ui.click(s,'[role=dialog] .setting-option input[type=checkbox]');ui.button(s,'Approve and publish exact candidate');a.alert_accept(s)
+        ui.wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('Publication may have occurred')||sh.querySelector('[role=dialog]')?.textContent.includes('Published:')",'J04_PUBLIC_UPDATE_ONE_APPROVAL')
+        b.call('POST',f'/session/{s}/url',{'url':'about:blank'})
+        state=progress(s,lambda x:any(r['slug']=='j04-flow-public' and r['state']=='CONFIRMED_PUBLIC' for r in x['releases']),'J04_PUBLIC_UPDATE_OVERRIDE_INDEPENDENT_PUBLICATION')
+        assert next(r for r in state['releases'] if r['slug']=='j04-flow-public')['kind']=='EXISTING_UPDATE'
+        evidence['public-update-now-empty-P']=state
+        background(s,'return await window.__j04flow.loseNextPublish();')
         b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s);assert attach(s).get('ok');ui.click(s,'[data-nav=generators]');ui.click(s,'[data-nav=work-queue]')
         ui.search(s,'j04-flow-repair');ui.button(s,'Inspect candidate','.candidate-item:has([data-clean-select="j04-flow-repair"])');ui.wait(s,"[...sh.querySelectorAll('button')].some(x=>x.textContent==='Approve and publish exact candidate')",'J04_REAL_GIT_FINAL_F_REVIEW')
         assert b.execute(s,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[role=dialog]').getAttribute('aria-label')")=='Review exact candidate for j04-flow-repair'
         ui.capture(s,'autonomous-tested-review',evidence)
+        parent=next(j for j in state['jobs'] if j['slug']=='j04-flow-repair')
         ui.fill(s,'[aria-label="Request changes to candidate"]','Use the revised greeting and preserve binary assets.')
         ui.button(s,'Request changes');a.alert_accept(s)
         ui.wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('Changes requested.')",'J04_PRIMARY_REQUEST_CHANGES_CAPTURED')
         b.call('POST',f'/session/{s}/url',{'url':'about:blank'})
-        state=progress(s,lambda x:any(w['slug']=='j04-flow-repair' and w['state']=='CONFIRMED' and w['stageRevision']>4 for w in x['writebacks']),'J04_REQUEST_CHILD_RETESTED_AND_NEW_GIT_F_CONFIRMED')
+        state=progress(s,lambda x:any(w['slug']=='j04-flow-repair' and w['state']=='CONFIRMED' and w['stageRevision']>parent['stageRevision'] for w in x['writebacks']),'J04_REQUEST_CHILD_RETESTED_AND_NEW_GIT_F_CONFIRMED')
         child=next(j for j in state['jobs'] if j['slug']=='j04-flow-repair')
         assert child['parentFingerprint'] and child['verifiedFinal']!=child['parentFingerprint']
         assert len([x for x in state['provider']['effects'] if x.get('text')=='Use the revised greeting and preserve binary assets.'])==1
@@ -120,12 +153,13 @@ def run(browser,archive,folder):
         # Kill/relaunch the actual owned Firefox process after the decision.
         # Test-only external dependencies are reopened in the new background;
         # all canonical/effect ledgers are read from the original disk profile.
-        pids=b.owned_firefox_pids(profile);b.close(s);b.require_owned_exit(profile,pids);s=None
-        s=b.open_session(browser,profile);b.call('POST',f'/session/{s}/url',{'url':'about:blank'});assert install(s).get('ok')
-        state=progress(s,lambda x:len([r for r in x['releases'] if r['state']=='CONFIRMED_PUBLIC'])==3,'J04_CLEAN_SET_SURVIVES_PROCESS_RESTART_AND_PUBLISHES_EACH_EXACT_SOURCE')
-        effects=[x for x in state['provider']['effects'] if x['kind']=='PUBLISH'];assert len(effects)==3 and len(set(x['slug'] for x in effects))==3
+        pids=b.owned_firefox_pids(profile);assert pids,'J04_PIPELINE_OLD_FIREFOX_PROCESS_MISSING';b.close(s);b.require_owned_exit(profile,pids);s=None
+        s=b.open_session(browser,profile);replacement=b.owned_firefox_pids(profile);assert replacement and not pids.intersection(replacement),'J04_PIPELINE_REPLACEMENT_PROCESS_NOT_DISTINCT';b.call('POST',f'/session/{s}/url',{'url':'about:blank'});assert install(s).get('ok')
+        state=progress(s,lambda x:len([r for r in x['releases'] if r['state']=='CONFIRMED_PUBLIC'])==5,'J04_CLEAN_SET_SURVIVES_PROCESS_RESTART_AND_PUBLISHES_EACH_EXACT_SOURCE')
+        effects=[x for x in state['provider']['effects'] if x['kind']=='PUBLISH'];assert len(effects)==5 and len(set(x['slug'] for x in effects))==5
         assert all(x['slug']!='j04-flow-held' for x in state['provider']['effects'])
         assert all(next(f for f in r['source'] if f['path']=='src/retained.bin')['base64']=='AP+AEQ==' for r in state['provider']['resources'].values() if r['slug']!='j04-flow-held')
+        original=next(x for x in state['stages'] if x['slug']=='j04-flow-adopted')['previous'];assert next(x for x in original['blobs'] if x['path']=='src/original-only.bin')['base64']=='CQD/'
         evidence['clean-bulk-process-restart']=state
         pathlib.Path('build/j04-autonomous-pipeline.json').write_text(json.dumps(evidence,indent=2));print('B J04_AUTONOMOUS_BACKGROUND_PRIMARY_REPAIR_GIT_APPROVAL_PUBLICATION=PASS',flush=True)
     finally:

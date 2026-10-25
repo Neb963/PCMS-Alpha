@@ -98,7 +98,8 @@ export function createS06ReviewQueue(db){
         stageRevision:stage.ok?stage.record.revision:null,jobRevision:job.ok?job.job.revision:null,job:job.ok?job.job:null,
         parentStageRevision:stage.ok?stage.record.handoffParentRevision:null});
       if(!matchesReviewGroup(status.state,requestedGroup))continue;
-      items.push({slug:item.slug,revision:item.revision,development:job.ok,readyCandidate:item,
+      const visibility=await new Promise((resolve,reject)=>{const q=db.transaction('meta','readonly').objectStore('meta').get('inventory:'+item.slug);q.onsuccess=()=>resolve(q.result?.generator?.visibility);q.onerror=reject});
+      items.push({providerVisibility:visibility,slug:item.slug,revision:item.revision,development:job.ok,readyCandidate:item,
         state:status.state,code:status.code,
         sourceFingerprint:decision.ok&&decision.type==='REVIEW'?
           decision.sourceFingerprint:null,

@@ -809,10 +809,10 @@ async function loadQueue(reset=false){
    q.releaseCursor!==null?guardedRead('pcms-i13-release','LIST_REVIEW',{after:q.releaseCursor,limit:20,query:q.query.slice(0,100),status:queueGroup(q.filter)})
      .catch(()=>({ok:false,items:[]})):Promise.resolve({ok:true,items:[],more:false,nextCursor:null}),
    q.aiCursor!==null?guardedRead('pcms-i10-ai','LIST_JOBS',{
-     after:q.aiCursor,limit:20,query:q.query.slice(0,100),status:queueGroup(q.filter)
+     after:q.aiCursor,limit:20,query:q.query.slice(0,100),status:queueGroup(q.filter),legacyOnly:!q.releaseUnavailable
    }).catch(()=>({ok:false,jobs:[],more:false,nextCursor:null})):
      Promise.resolve({ok:true,jobs:[],more:false,nextCursor:null}),
-   q.readyCursor!==null?guardedRead('pcms-s03-catalog','LIST_READY',{
+   q.releaseUnavailable&&q.readyCursor!==null?guardedRead('pcms-s03-catalog','LIST_READY',{
      after:q.readyCursor,limit:20,query:q.query.slice(0,100),status:queueGroup(q.filter)
    }).catch(()=>({ok:false,items:[],more:false,nextCursor:null})):
      Promise.resolve({ok:true,items:[],more:false,nextCursor:null}),
@@ -844,7 +844,11 @@ function displayQueue(){
  if(state.route!=='work-queue')return;
  const toolbar=shadow('.page-head .head-actions');if(toolbar)cleanPublication.mountToolbar(toolbar);
  const q=state.queue;const holder=shadow('.queue-list');
- if(!holder)return;holder.replaceChildren();
+ if(!holder)return;
+ if(q.loading&&holder.childElementCount)return;
+ const signature=JSON.stringify([q.filter,q.query,q.error,q.operations,q.incidents,q.releaseItems,q.aiJobs,q.readyItems,q.reviews,q.missing,q.more,q.releaseUnavailable,q.aiUnavailable,q.readyUnavailable]);
+ if(!q.loading&&q.renderedSignature===signature&&holder.childElementCount)return;
+ if(!q.loading)q.renderedSignature=signature;holder.replaceChildren();
  if(q.loading)renderEmpty(holder,'Reading recorded operations and incidents…');
  else if(q.error)renderEmpty(holder,'The local work queue is unavailable. No operation result has been assumed.');
  else{
@@ -937,9 +941,10 @@ function displayQueue(){
         ({IN_DEVELOPMENT:'Development and independent tests continue automatically.',DEVELOPMENT_RUNNING:'The helper is working on this candidate.',WAITING_FOR_GIT:'Saving verified source to GitHub.',APPROVED:'Approved. Publication continues automatically.',APPROVED_HELD:'Approval is saved. Inspect the current hold or cancel unsent publication.',CONFIRMED_PUBLIC:'Published source was independently confirmed.',HUMAN_DEFERRED:'Your editor is preserved. Adopt its saved source when ready.',CHANGES_REQUESTED:'Your instructions are saved. Development will resume automatically.',PUBLICATION_UNCERTAIN:'Checking a possible publication without sending it again.'})[candidate.state]||'Inspect this candidate to resolve its current hold.'));
     const action=b('Inspect candidate',()=>void openReleaseReview(candidate.slug),'btn small'),manage=b('Manage development',()=>candidate.development?void openAiJob(candidate.slug):openReadyCandidate(candidate.readyCandidate),'btn small');
     row.classList.add('candidate-item');const actions=el('div','candidate-actions');actions.append(action,manage);
+    if(candidate.providerVisibility==='PUBLIC'&&candidate.state!=='CONFIRMED_PUBLIC')actions.append(b('Update now',()=>openReadyCandidate({...candidate.readyCandidate,updateNowAvailable:true})));
     row.append(cleanPublication.checkbox(candidate.slug),detail,actions);holder.append(row);
    }
-  for(const candidate of q.readyItems||[]){
+  for(const candidate of (q.releaseUnavailable?q.readyItems:[])||[]){
    if(q.releaseItems.some(x=>x.slug===candidate.slug))continue;
    const active=Boolean(candidate.active),desired=Boolean(candidate.desired);
    const held=!!candidate.hold&&candidate.hold!=='NONE';
@@ -960,6 +965,7 @@ function displayQueue(){
    holder.append(row);
   }
   for(const job of q.aiJobs||[]){
+   if(job.readyManaged&&!q.releaseUnavailable)continue;
    if(q.releaseItems.some(x=>x.slug===job.slug))continue;
    const currentState=job.state||'NOT_VERIFIED';
    const complete=currentState==='TESTS_VERIFIED'||job.slotReleased===true;
@@ -1216,6 +1222,7 @@ function openReadyCandidate(candidate){
  const actions=el('div','form-foot');
  async function act(type){
   if(type!=='ASSESS_READY'&&!window.confirm(
+   type==='UPDATE_NOW'?'Update this public generator now, before its normal maintenance window? PCMS will preserve its previous source, wait for safe capacity, unlist it before editing, and require your approval before publishing.':
    type==='PREPARE_LOCAL'?
     'Prepare a local, revision-bound READY stage after verifying source, protected owner, route and current editor? This does not publish or save the remote generator.':
     type==='PAUSE_READY'?
@@ -1229,6 +1236,8 @@ function openReadyCandidate(candidate){
    const out=await readPort('pcms-s05-ready-operator',type,{
      slug:candidate.slug,expectedRevision:candidate.revision},95000);
    const friendly={
+    UPDATE_NOW_QUEUED:'Update requested. PCMS will continue automatically when source, account and capacity checks are satisfied.',
+    UPDATE_NOW_SAFE_PUBLIC_BASELINE_REQUIRED:'The public source or a current operation needs verification before this update can start.',
     S05_PUBLIC_SLEEP_AND_UNLIST_REQUIRED:'This public generator must first complete its protected sleep/unlisting workflow.',
     S05_NONEMPTY_TARGET_REQUIRES_RECOVERABLE_PREDECESSOR:'A recoverable previous source is required before this update.',
     S05_LOCAL_STAGE_PINNED:'A new exact local development stage is prepared. AI execution is separate.',
@@ -1247,6 +1256,7 @@ function openReadyCandidate(candidate){
 
  const pause=b(candidate.hold==='OPERATOR_PAUSED'?'Resume READY work':'Pause READY work',
   ()=>void act(candidate.hold==='OPERATOR_PAUSED'?'RESUME_READY':'PAUSE_READY'),'btn small');
+ if(candidate.updateNowAvailable)actions.append(b('Update now',()=>void act('UPDATE_NOW'),'btn primary'));
  actions.append(pause,assess);body.append(facts,status,actions);panel.append(head,body);
  overlay.append(panel);root.append(overlay);
  overlay.addEventListener('click',e=>{if(e.target===overlay)close()});

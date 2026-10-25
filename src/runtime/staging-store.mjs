@@ -1,7 +1,7 @@
 // I09 immutable private candidate and crash-safe editor handoff receipts.
 // Never write a remote effect inside an IDB transaction.
 import {fail} from './journal.mjs';
-import {diffSource} from './staging-core.mjs';
+import {diffSource,exactSource} from './staging-core.mjs';
 import {evaluateStageSuccessor} from './ready-source-safety.mjs';
 const key=s=>'stage:'+s;
 const slug=s=>typeof s==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(s);
@@ -71,7 +71,7 @@ export function findEligibleSupply(db,slugName){
              link.remoteId!==item.remoteId ||
              link.personaUid!==account.personaUid)
             {done(fail('SOURCE_ASSOCIATION_STALE'));return;}
-          done({ok:true,account,item,link});
+          done({ok:true,account,item,link,origin:'LEGACY_CONFIRMED_PRIVATE_SUPPLY'});
         };
       };
     };
@@ -85,7 +85,7 @@ export async function findEligibleManagedSource(db,slugName){
   if(!slug(slugName))return fail('INVALID_SLUG');
   const legacy=await findEligibleSupply(db,slugName);
   if(legacy.ok||legacy.code!=='PRIVATE_NEW_SUPPLY_REQUIRED')return legacy;
-  return txn(db,'readonly',(tx,done)=>{
+  const created=await txn(db,'readonly',(tx,done)=>{
     const m=tx.objectStore('meta');
     m.get('source-link:'+slugName).onsuccess=ls=>{
       const link=ls.target.result?.link;
@@ -122,6 +122,24 @@ export async function findEligibleManagedSource(db,slugName){
       };
     };
   });
+  if(created.ok)return created;
+  const adopted=await txn(db,'readonly',(tx,done)=>{const m=tx.objectStore('meta');
+   m.get('adoption:'+slugName).onsuccess=ad=>m.get('source-link:'+slugName).onsuccess=ls=>m.get('inventory:'+slugName).onsuccess=iv=>{
+    const a=ad.target.result?.adoption,link=ls.target.result?.link,item=iv.target.result?.generator;
+    if(!a||a.archived||a.archiveState!=='ARCHIVED_GIT_CONFIRMED'||a.originalCheckpoint?.qualified!==true||a.original?.source!=='INDEPENDENT_FULL_BYTE_READBACK'||
+       !item||item.visibility!=='UNLISTED'||item.ownerState!=='OBSERVED_OWNER'||item.slug!==slugName||!link||link.folder!=='generators/'+slugName||link.slug!==slugName||
+       a.accountId!==item.accountId||a.personaUid!==item.personaUid||a.bindingVersion!==item.bindingVersion||a.remotePublicId!==item.remoteId||
+       link.accountId!==item.accountId||link.personaUid!==item.personaUid||link.bindingVersion!==item.bindingVersion||link.remoteId!==item.remoteId){done(created);return;}
+    m.get('account:'+item.accountId).onsuccess=ac=>{const account=ac.target.result?.account;
+     if(account?.state!=='VERIFIED'||account.personaUid!==item.personaUid||account.bindingVersion!==item.bindingVersion||account.identity?.source!=='GUARDED_SESSION_READBACK'||account.identity.bindingVersion!==item.bindingVersion||account.identity.principalFingerprint!==a.principalFingerprint){done(created);return;}
+     done({ok:true,account,item,link,origin:'ADOPTED_PRIVATE',original:a.original});
+    };
+   };
+  });
+  if(!adopted.ok)return adopted;
+  const originalSource=await exactSource(adopted.original.blobs);
+  if(!originalSource.ok||originalSource.fingerprint!==adopted.original.stagedFingerprint||adopted.original.remotePublicId!==adopted.item.remoteId)return {ok:false,code:'ADOPTED_PRIVATE_ORIGINAL_BYTES_UNVERIFIED'};
+  return {...adopted,originalSource};
 }
 export function createStagingStore(db){
   const getFull=slugName=>!slug(slugName)?Promise.resolve(fail('INVALID_SLUG')):
@@ -186,7 +204,7 @@ export function createStagingStore(db){
                 remotePublicId:eligibility.item.remoteId,
                 sourceFolder:source.folder,sourceHead:source.head,
                 gitFingerprint:source.fingerprint,testingSha:source.testingSha,
-                candidate,previous,nonce,tab:null,reason:null,sourceOrigin:eligibility.origin==='EXISTING_UPDATE'?'EXISTING_UPDATE':'PRIVATE_NEW',
+                candidate,previous,nonce,tab:null,reason:null,sourceOrigin:eligibility.origin==='ADOPTED_PRIVATE'?'ADOPTED_PRIVATE':eligibility.origin==='EXISTING_UPDATE'?'EXISTING_UPDATE':(['S04_CONFIRMED_CREATED','LEGACY_CONFIRMED_PRIVATE_SUPPLY'].includes(eligibility.origin)||eligibility.link?.source==='S04_INDEPENDENT_NOT_READY_ASSOCIATION')?'PRIVATE_NEW':null,
                 ...(source.gitReadyIdentifier?{
                   readyIdentifier:source.gitReadyIdentifier,
                   readyInputFingerprint:source.gitReadyInputFingerprint}: {})};

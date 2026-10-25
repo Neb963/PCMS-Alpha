@@ -1,5 +1,6 @@
 // I13 local existing-source mutation ledger. One independent step per command;
 // never infer safe retry from absent ACK or restart. No remote effect in IDB.
+import {updateWindowAvailable,operatorUpdateWindow} from './update-window.mjs';
 import {countAiCapacity} from './ai-store.mjs';
 import {releaseCandidateTestContext} from './release-core.mjs';
 import {exactSource} from './staging-core.mjs';
@@ -25,10 +26,13 @@ function withUpdateCapacity(m,accountId,target,done,commit){
   const limit=rows.find(v=>v.key==='ai-concurrency')?.setting?.perAccount||1;
   const inventories=rows.filter(v=>v.key?.startsWith('inventory:')).map(v=>v.generator).filter(Boolean);
   const holds=rows.filter(v=>v.key?.startsWith('existing-update:')&&v.record?.slug!==target).map(v=>v.record).filter(r=>{
+   const ready=rows.find(v=>v.key==='s05-ready:'+r.slug)?.record,owner=rows.find(v=>v.key==='account:'+r.accountId)?.account;
+   if(r.state==='PREPARED'&&(ready?.hold==='OPERATOR_PAUSED'||owner&&owner.state!=='VERIFIED'))return false;
    const published=rows.find(v=>v.key==='release:'+r.slug)?.release;
    return !(published?.state==='CONFIRMED_PUBLIC'&&published.source==='INDEPENDENT_PUBLICATION_READBACK'&&published.accountId===r.accountId&&published.remoteId===r.remotePublicId&&published.bindingVersion===r.bindingVersion&&published.approval?.sourceFingerprint===r.stagedFingerprint);
   });
   if(countAiCapacity(rows,accountId,target)>=limit){done(fail('PUBLIC_UPDATE_EXECUTION_CAPACITY_RESERVED'));return;}
+  if(holds.length>=limit){done(fail('PUBLIC_UPDATE_MACHINE_VISIBILITY_RESERVED'));return;}
   if(holds.filter(r=>r.accountId===accountId).length>=limit){done(fail('PUBLIC_UPDATE_ACCOUNT_CAPACITY_RESERVED'));return;}
   // Do not reserve the last observed public generator while other public
   // updates are still held. A single-generator fleet can still update.
@@ -71,6 +75,8 @@ export function createExistingStore(db){
           m.get('inventory:'+s).onsuccess=i=>{
             m.get('adoption:'+s).onsuccess=o=>{
               m.get(REFRESHER_KEY).onsuccess=sh=>{
+                m.get('s05-ready:'+s).onsuccess=rr=>{
+                const ready=rr.target.result?.record;
                 const liveAccount=a.target.result?.account,
                   liveInventory=i.target.result?.generator,
                   liveAdoption=o.target.result?.adoption,
@@ -86,7 +92,7 @@ export function createExistingStore(db){
                    state.globalPause===true||state.accounts?.[account.accountId]?.paused===true||
                    !authorizeSleepingUpdate({account:liveAccount,
                      inventory:liveInventory,adoption:liveAdoption,shadow:liveShadow,
-                     original,remote}).ok){
+                     original,remote,windowOverride:operatorUpdateWindow(liveShadow,ready,{...liveAccount,principalFingerprint:liveAccount?.identity?.principalFingerprint,remotePublicId:liveInventory?.remoteId},original.fingerprint)&&updateWindowAvailable(state,liveShadow,ready,{...liveAccount,principalFingerprint:liveAccount?.identity?.principalFingerprint,remotePublicId:liveInventory?.remoteId},original.fingerprint)}).ok){
                   done(fail('EXISTING_CONTEXT_CHANGED'));return;
                 }
                 const commit=()=>{
@@ -122,6 +128,7 @@ export function createExistingStore(db){
                     done(fail('PREVIOUS_RELEASE_NOT_CONFIRMED'));return;
                   }
                   withUpdateCapacity(m,account.accountId,s,done,commit);
+                };
                 };
               };
             };
@@ -181,17 +188,19 @@ export function createExistingStore(db){
           };
           function checkShadow(item){
           m.get(REFRESHER_KEY).onsuccess=sh=>{
-            const state=sh.target.result?.state,row=state?.rows?.find(v=>v.slug===s);
+            m.get('s05-ready:'+s).onsuccess=rr=>{
+            const ready=rr.target.result?.record,state=sh.target.result?.state,row=state?.rows?.find(v=>v.slug===s);
             if(!validShadow(state)||!row||(
                  !['RESTORE_DISPATCH','RECOVERY_UNLIST_DISPATCH'].includes(event)&&
-                 (row.phase!=='SLEEPING'||row.slot===true)
+                 !updateWindowAvailable(state,row,ready,r,r.previousFingerprint)
                )||row.paused===true||state.globalPause===true||
                state.accounts?.[r.accountId]?.paused===true||
                row.bindingVersion!==r.bindingVersion||
                row.remoteId!==r.remotePublicId){
               done(fail('EXISTING_SLEEP_CHANGED'));return;
             }
-            commit(r);
+            if(event==='UNLIST_DISPATCH')withUpdateCapacity(m,r.accountId,s,done,()=>commit(r));else commit(r);
+            };
           };
           }
         }else commit(r);
@@ -204,6 +213,11 @@ export function createExistingStore(db){
             reason:verified?null:reason||current.reason,
             changedAt:Date.now()};
           m.put({key:key(s),record:next});
+          if(['UNLIST_CONFIRMED','RECOVERY_UNLIST_CONFIRMED','RESTORE_CONFIRMED'].includes(event))m.get('inventory:'+s).onsuccess=iv=>{
+            const i=iv.target.result?.generator;
+            if(i?.accountId===current.accountId&&i.personaUid===current.personaUid&&i.remoteId===current.remotePublicId&&i.bindingVersion===current.bindingVersion&&i.ownerState==='OBSERVED_OWNER')
+              m.put({key:'inventory:'+s,generator:{...i,revision:(i.revision||0)+1,visibility:'UNLISTED',lastObservedAt:Date.now()}});
+          };
           if(event==='RESTORE_CONFIRMED'){
             m.get('release:'+s).onsuccess=lv=>{
               const release=lv.target.result?.release;

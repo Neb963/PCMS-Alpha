@@ -13,6 +13,7 @@ const fp=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
 const slug=v=>typeof v==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(v);
 // Existing-update provenance takes precedence even when published P was empty.
 export function releaseCandidateKind(stage,inventory,existing=null){
+ if(!existing&&stage?.sourceOrigin==='ADOPTED_PRIVATE')return 'PRIVATE_EXISTING';
  if(existing||stage?.sourceOrigin==='EXISTING_UPDATE'||
     (inventory?.management&&inventory.management!=='MANAGED_CREATED'))return 'EXISTING_UPDATE';
  if(stage?.sourceOrigin==='PRIVATE_NEW')return 'PRIVATE_NEW';
