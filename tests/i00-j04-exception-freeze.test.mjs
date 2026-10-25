@@ -104,4 +104,15 @@ test('J06 restored child retains exceptional Git attribution through immutable p
  assert.equal(proof.ok,true,JSON.stringify(proof));assert.equal(proof.historical,true);assert.equal(proof.outputProof.commitSha,wb.commitSha);
  assert.equal(authorizeS06Exception({ready:f.ready,stage:child,job:{...j,stageRevision:4,state:'PENDING_NATIVE_SESSION'},record:ex}).ok,false);
  assert.equal((await resolveS06OutputProof(f.db,{ready:f.ready,stage:{...child,principalFingerprint:'e'.repeat(64)},job:null,writeback:wb,exception:ex})).ok,false);
+ // A second restore changes the destination context again. Its immutable
+ // parent points through the first restored child to the original Git fact.
+ const again={...child,revision:5,personaUid:'third-persona',bindingVersion:3,restoredParent:{revision:4,personaUid:child.personaUid},nonce:'f'.repeat(32)};
+ await put(f.db,{key:'stage-history:'+slug+':4',record:{...child,restoredHistorical:true}});
+ const repeated=await resolveS06OutputProof(f.db,{ready:f.ready,stage:again,job:null,writeback:wb,exception:ex});
+ assert.equal(repeated.ok,true,JSON.stringify(repeated));assert.equal(repeated.historical,true);assert.equal(repeated.outputProof.commitSha,wb.commitSha);
+ assert.equal(authorizeS06Exception({ready:f.ready,stage:again,job:{...j,stageRevision:5,state:'PENDING_NATIVE_SESSION'},record:ex}).ok,false);
+ for(const broken of [{...child,restoredParent:{revision:4}},{...child,remotePublicId:'other-remote'},{...child,accountId:'other-account'}]){
+  await put(f.db,{key:'stage-history:'+slug+':4',record:broken});
+  assert.equal((await resolveS06OutputProof(f.db,{ready:f.ready,stage:again,job:null,writeback:wb,exception:ex})).ok,false,'invalid or cross-owner ancestry is not attributed');
+ }
 });

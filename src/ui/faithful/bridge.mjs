@@ -1897,6 +1897,10 @@ async function mount(){
  const legacy=document.querySelector('body > .app');
  if(legacy)legacy.inert=true; // no hidden workflow focus or operator input
  document.body.classList.add('pcms-faithful-ready');
+ window.addEventListener('pcms-find-test-generator',event=>{
+  const slug=event.detail?.slug;if(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug))return;
+  state.gen.query=slug;state.gen.offset=0;routeTo('generators');
+ });
  window.addEventListener('hashchange',()=>{const dest=location.hash.slice(1);if(routes.includes(dest)&&dest!==state.route){state.route=dest;void render()}});
  // Foreground projection reads the same canonical background ports. Never
  // mirror an inaccessible hidden controller or infer completion from its DOM.

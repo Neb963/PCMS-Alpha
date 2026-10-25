@@ -35,3 +35,13 @@ test('R3: missing secure Git connection is distinct from valid namespace and acc
  assert.equal(validateDisposable({...cfg,personaUid:undefined}).code,'TEST_PERSONA_BINDING_INVALID');
  assert.equal(validateDisposable(cfg).ok,true);
 });
+
+test('J06 cleanup readback stays usable with write permissions revoked; effectful tests still require the grants',()=>{
+ const config={accountId:'account_fixture',personaUid:'persona_fixture',repositoryId:'42',namespace:'pcms-test-fixture'};
+ const accounts={ok:true,accounts:[{accountId:config.accountId,personaUid:config.personaUid,state:'VERIFIED',identity:'VERIFIED',protectedRoute:'PCMS_PINNED',revision:4}]},git={ok:true,repositoryId:'42'};
+ assert.equal(evaluateDisposable(config,accounts,git,null,{readOnly:true}).ok,true);
+ assert.equal(evaluateDisposable(config,accounts,git,null).ok,false);
+ assert.equal(evaluateDisposable(config,{...accounts,held:true},git,null,{readOnly:true}).code,'RESTORE_HOLD');
+ const run=createDiagnosticRun(config,'a'.repeat(16),100).run;run.remoteVisibility='PUBLIC';run.remoteObservedAt=120;run.build={version:'1.2.13',extensionId:'persona-route-manager@local'};
+ const report=diagnosticReport(run);assert.equal(report.remoteVisibility,'PUBLIC');assert.equal(report.installedBuild.version,'1.2.13');assert.equal(report.installedBuild.artifactSha256,null);assert.equal(report.scope.slug,'REDACTED');
+});

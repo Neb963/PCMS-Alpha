@@ -72,7 +72,7 @@ export function validateDisposable(config){
  if(!NS.test(config.namespace||''))return {ok:false,code:'TEST_NAMESPACE_INVALID'};
  return {ok:true};
 }
-export function evaluateDisposable(config,accounts,git,authority){
+export function evaluateDisposable(config,accounts,git,authority,{readOnly=false}={}){
  const checked=validateDisposable(config);if(!checked.ok)return checked;
  if(!accounts?.ok||!Array.isArray(accounts.accounts))
    return {ok:false,code:'TEST_ACCOUNT_LIST_UNAVAILABLE'};
@@ -84,10 +84,10 @@ export function evaluateDisposable(config,accounts,git,authority){
  if(accounts.held)return {ok:false,code:'RESTORE_HOLD'};
  if(!git?.ok||git.repositoryId!==config.repositoryId)
    return {ok:false,code:'TEST_GIT_SCOPE_CHANGED'};
- if(!authority?.ok||authority.record?.repositoryId!==config.repositoryId)
+ if(!readOnly&&(!authority?.ok||authority.record?.repositoryId!==config.repositoryId))
    return {ok:false,code:'TEST_AUTHORITY_SCOPE_CHANGED'};
- if(authority.record.grants?.development!==true||
-   authority.record.grants?.gitWrite!==true)
+ if(!readOnly&&(authority.record.grants?.development!==true||
+   authority.record.grants?.gitWrite!==true))
    return {ok:false,code:'ENABLE_SCOPED_DEVELOPMENT_AND_GIT'};
  return {ok:true,accountRevision:item.revision};
 }
@@ -101,7 +101,7 @@ export function createDiagnosticRun(config,hex,now){
    version:1,runId:'s08_'+hex,slug,intentId:'intent_s08_'+hex,
    config:{...config},stage:'SCOPE',status:'NOT_TESTED',
    firstFailure:null,currentHold:null,eventHistory:[],events:[],startedAt:now,updatedAt:now,
-   created:false,remoteArtifactsPreserved:true,
+   created:false,remoteVisibility:'NOT_CREATED',remoteObservedAt:null,remoteArtifactsPreserved:true,
    cleanup:'NOT_ATTEMPTED'}};
 }
 // A07: an incomplete already-executed diagnostic is not a new run.
@@ -129,11 +129,13 @@ export function diagnosticReport(run){
  const failure=f=>f?{stage:STAGES.includes(f.stage)?f.stage:'UNKNOWN',code:safeCode(f.code)}:null;
  return {format:'PCMS_S08_SANITIZED',version:1,runId:run.runId,
   startedAt:run.startedAt,updatedAt:run.updatedAt,
-  stage:run.stage,status:run.status,
+  stage:[...STAGES,'COMPLETED'].includes(run.stage)?run.stage:'UNKNOWN',status:['PASS','FAIL','HELD','RUNNING','UNCERTAIN','NOT_TESTED'].includes(run.status)?run.status:'NOT_TESTED',
+  installedBuild:{version:typeof run.build?.version==='string'&&/^[0-9.]{1,30}$/.test(run.build.version)?run.build.version:null,extensionId:run.build?.extensionId==='persona-route-manager@local'?run.build.extensionId:null,artifactSha256:null,proof:'RUNTIME_MANIFEST_ONLY'},
+  remoteVisibility:['NOT_CREATED','UNKNOWN','UNLISTED','PUBLIC','MISSING_VERIFIED'].includes(run.remoteVisibility)?run.remoteVisibility:'UNKNOWN',remoteObservedAt:Number.isSafeInteger(run.remoteObservedAt)?run.remoteObservedAt:null,
   firstFailure:failure(run.firstFailure),currentHold:failure(run.currentHold),eventHistory:(run.eventHistory||run.events||[]).map(event),
   stages:STAGES.map(stage=>event(run.events.find(e=>e.stage===stage)||
     {stage,outcome:'NOT_TESTED',code:'NOT_REACHED'})),
-  limitations:['RUNTIME_OBSERVATIONS_ARE_NOT_INDEPENDENT_CI_ACCEPTANCE','LOCAL_DATA_RESTORE_IS_NOT_FRESH_PROFILE_DONOR_RECOVERY','FIREFOX_STARTUP_RECEIPT_IS_NOT_INDEPENDENT_OS_PROOF'],
+  limitations:['RUNTIME_OBSERVATIONS_ARE_NOT_INDEPENDENT_CI_ACCEPTANCE','LOCAL_DATA_RESTORE_IS_NOT_FRESH_PROFILE_DONOR_RECOVERY','FIREFOX_STARTUP_RECEIPT_IS_NOT_INDEPENDENT_OS_PROOF','RUNTIME_MANIFEST_IS_NOT_INDEPENDENT_XPI_HASH_PROOF'],
   scope:{account:'DESIGNATED_TEST_ACCOUNT',persona:'DESIGNATED_TEST_PERSONA',
    repository:'DESIGNATED_PRIVATE_GIT',namespace:'REDACTED',slug:'REDACTED'},
   remoteArtifactsPreserved:run.remoteArtifactsPreserved===true,

@@ -14,11 +14,12 @@ const fields=(value,names)=>{
 const configFields=['accountId','personaUid','repositoryId','namespace','requiresRevalidation'];
 const renameFields=['schema','repositoryId','oldSlug','newSlug','oldTreeOid','newTreeOid','folderTreeOid','markerOid','evidenceHead','reason','state','revision','automaticRenameApproved','sourceReviewAt','ownerChoiceSource','sourceFingerprint','visibility','remoteId','personaUid','accountId','bindingVersion','principalFingerprint','baselineKey','preparedAt','dispatchAt','operationId','lastPreInvocationHold','providerAcknowledged','verifiedAt','readbackFingerprint','associationFingerprint','finalizedAt','restoredHistorical'];
 const eventFields=['stage','outcome','code','at','tier','proof','provenance','note'];
-const runFields=['version','runId','slug','intentId','stage','status','startedAt','updatedAt','created','remoteArtifactsPreserved','cleanup','restoredHistorical'];
+const runFields=['version','runId','slug','intentId','stage','status','startedAt','updatedAt','created','remoteArtifactsPreserved','remoteVisibility','remoteObservedAt','cleanup','restoredHistorical'];
 const codeFields=['stage','code'];
 function diagnostic(value){
  const out=fields(value,runFields);
  if(value?.config)out.config=fields(value.config,configFields);
+ if(value?.build)out.build=fields(value.build,['version','extensionId','proof']);
  if(value?.firstFailure)out.firstFailure=fields(value.firstFailure,codeFields);
  if(value?.currentHold)out.currentHold=fields(value.currentHold,codeFields);
  if(Array.isArray(value?.events))out.events=value.events.map(r=>fields(r,eventFields));

@@ -20,6 +20,20 @@ const account=by('account'),namespace=by('namespace'),save=by('designate'),
  independentButton=by('independent-run'),independentStatus=by('independent-status'),
  independentRows=by('independent-results'),
  status=by('status'),stages=by('stages'),scope=by('scope'),cleanup=by('cleanup');
+const locate=by('locate'),gitFolder=by('git-folder'),historyLocate=by('history-locate');
+function locateRun(selected){
+ if(!selected||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(selected.slug||''))return;
+ window.dispatchEvent(new CustomEvent('pcms-find-test-generator',{detail:{slug:selected.slug}}));
+}
+locate.addEventListener('click',()=>locateRun(run));
+gitFolder.addEventListener('click',async()=>{
+ if(!run)return;
+ try{
+  const cfg=(await browser.storage.local.get('pcmsS03Git')).pcmsS03Git;
+  if(cfg?.repositoryId!==run.config.repositoryId||!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(cfg.repository||''))throw Error('REPOSITORY_CHANGED');
+  await browser.tabs.create({url:'https://github.com/'+cfg.repository+'/tree/main/generators/'+encodeURIComponent(run.slug),active:true});
+ }catch{status.textContent='Reconnect the test repository in Connections before opening its folder.'}
+});
 let busy=false,independentBusy=false,independent=null,
   configuration=null,run=null,designationError=null;
 const STAGE_LABELS={SCOPE:'Test setup',CREATE:'Private test generator',GIT_SOURCE:'Preserved source',READY:'Development input',AI_TEST:'Development and tests',GIT_WRITEBACK:'Saved source in Git',PUBLICATION:'Reviewed publication',REFRESHER:'Visibility refresh',BACKUP:'Complete backup',RESTORE:'Isolated local restore',PROCESS_RESTART:'Firefox restart',COMPLETED:'Complete'};
@@ -30,9 +44,10 @@ const history=by('history'),historyExport=by('history-export'),historyView=by('h
 let savedReports=[];
 function selectedReport(){return savedReports.find(r=>r.key===history.value)?.record}
 function showSavedReport(){
- const selected=selectedReport();historyExport.disabled=!selected;
+ const selected=selectedReport();historyExport.disabled=!selected;historyLocate.disabled=!selected?.run;
  const report=selected?.report||selected?.independent&&independentDiagnosticExport(selected.independent);
  historyView.textContent=report?JSON.stringify(report,null,2):'';
+ if(selected?.run)historyStatus.textContent='Test generator '+selected.run.slug+' · Last observed visibility: '+(selected.run.remoteVisibility||'not recorded')+'. Resources are preserved until you remove them explicitly.';
 }
 async function loadReports(){
  historyStatus.textContent='Reading saved reports…';
@@ -46,6 +61,7 @@ async function loadReports(){
   historyStatus.textContent=savedReports.length+' saved report(s).';showSavedReport();
  }catch{historyStatus.textContent='Saved reports could not be read. Retry Reload reports.'}
 }
+historyLocate.addEventListener('click',()=>locateRun(selectedReport()?.run));
 history.addEventListener('change',showSavedReport);by('history-refresh').addEventListener('click',()=>void loadReports());
 historyExport.addEventListener('click',()=>{
  const selected=selectedReport();if(!selected)return;
@@ -99,16 +115,16 @@ function controls(){
  rerun.disabled=locked||!configuration;exporter.disabled=locked||(!run&&!independent);
  independentButton.disabled=independentBusy;
  cleanup.disabled=locked||!run||run.cleanup==='VERIFIED_REMOTE_AND_GIT_ABSENT';
+ locate.disabled=gitFolder.disabled=!run;
  account.disabled=locked;namespace.disabled=locked;
 }
 function show(){
  if(designationError)scope.textContent=designationError;
- else if(configuration)scope.textContent='Test namespace '+configuration.namespace+
-  ' · Selected account '+configuration.accountId+
-  ' · Repo ID '+configuration.repositoryId+'. Other resources cannot be substituted.';
+ else if(configuration)scope.textContent='Test name '+configuration.namespace+' · '+(account.selectedOptions[0]?.textContent||'Configured test account')+'. The selected account and repository are checked before each stage.';
  else scope.textContent='Choose your dedicated test account and a test name. PCMS will verify the connection and permissions before running anything.';
  status.textContent=run?
   'Test generator '+run.slug+' · '+(OUTCOME_LABELS[run.status]||'Waiting')+' · '+(STAGE_LABELS[run.stage]||'Check details')+
+  (run.created?' · Last observed visibility: '+(run.remoteVisibility||'unknown')+'. Test resources are preserved.':'')+
   (run.currentHold?' · '+run.currentHold.code+(
     run.currentHold.code==='INITIAL_INVENTORY_UNKNOWN'?
       ' — In Accounts, synchronize the generator inventory for every non-archived managed account under its verified protected route. Then Resume this same run; do not start a new slug. Independent module checks below remain available.':
@@ -118,6 +134,8 @@ function show(){
       ' — Enable guarded marker saves in Refresher settings, then Resume.':
     run.currentHold.code==='EXACT_CANDIDATE_HUMAN_APPROVAL_REQUIRED'?
       ' — Review the test source in Work Queue. The diagnostic continues after exact publication is verified.':
+    run.currentHold.code==='REFRESH_NOT_DUE_YET'?
+      ' — A visibility refresh is not yet due under the normal Refresher policy. Resume this stage when it becomes due; independent checks remain available.':
     run.currentHold.code==='RESTART_FIREFOX_TO_FINISH'?
       ' — Close Firefox completely, reopen it and return to Diagnostics. This same run will continue.':''):''):
   'No diagnostic run. No external operations attempted.';
@@ -140,7 +158,7 @@ function show(){
  }
  independentRows.append(checks);
  independentStatus.textContent=independentBusy?'Checking each independent module…':
-  independent?'Independent read-only checks: '+independent.rows.filter(x=>x.outcome==='PASS').length+
+  independent?'Independent checks: '+independent.rows.filter(x=>x.outcome==='PASS').length+
     '/'+independent.rows.length+' responded. These results do not verify live provider actions, protected exits or downloaded files.':
   'No independent checks run. These can run even when generator creation is held.';
  controls();
@@ -157,12 +175,12 @@ async function mark(stage,outcome,code){
  run.status=outcome==='PASS'?'RUNNING':outcome;
  await persist();
 }
-async function prerequisite(){
+async function prerequisite({readOnly=false}={}){
  const [accounts,git,auth]=await Promise.all([
   request('accounts','LIST_ACCOUNTS'),
   request('git','GIT_STATUS'),
-  request('auth','GET')]);
- const assessed=evaluateDisposable(run.config,accounts,git,auth);
+  readOnly?Promise.resolve(null):request('auth','GET')]);
+ const assessed=evaluateDisposable(run.config,accounts,git,auth,{readOnly});
  if(!assessed.ok)pause(assessed.code);
  return {accounts,git,auth};
 }
@@ -189,7 +207,7 @@ async function creation(){
      got.record?.accountId!==run.config.accountId)
     pause('TEST_CREATE_SCOPE_MISMATCH');
   const state=got.record.state;
-  if(state==='ASSOCIATED_NOT_READY')return 'CREATE_AND_GIT_ASSOCIATION_VERIFIED';
+  if(state==='ASSOCIATED_NOT_READY'){run.created=true;run.remoteVisibility='UNLISTED';run.remoteObservedAt=Date.now();return 'CREATE_AND_GIT_ASSOCIATION_VERIFIED';}
   // Possible external dispatch is reconciled ONLY by the existing production
   // runner, which retains the same canonical operation identity and readback fences.
   if(state==='TARGET_COLLISION_HELD')pause('TEST_SLUG_COLLISION');
@@ -223,8 +241,10 @@ async function waitFor(label,probe,{minutes=45,every=20000}={}){
   await prerequisite();
   last=await probe();
   if(last?.done)return last.value;
-  status.textContent='Test generator '+run.slug+' · waiting for '+label+
-   (last?.code?' ('+last.code+')':'')+' · background automation continues if this page closes.';
+  const explanation=last?.code==='EXACT_CANDIDATE_HUMAN_APPROVAL_REQUIRED'?'Review the exact test source in Work Queue. This run continues after verified publication.':
+    last?.code==='REFRESH_NOT_DUE_YET'?'A visibility refresh is not yet due. Normal Refresher timing is preserved.':
+    last?.code==='AWAITING_RECENT_FEED'?'The source save is verified; waiting for its independent recent-feed observation.':'';
+  status.textContent='Test generator '+run.slug+' · waiting for '+label+'. '+explanation+' Background work continues if you open another workspace.';
   await sleep(every);
  }
  pause(last?.code||label.toUpperCase().replace(/[^A-Z]/g,'_')+'_TIMEOUT');
@@ -293,25 +313,22 @@ async function publication(){
  return waitFor('your exact test-source approval and publication',async()=>{
   const r=await request('release','GET',{slug:run.slug});
   if(!r?.ok)return {done:false,code:r?.code||'TEST_RELEASE_NOT_READY'};
-  if(r.state==='CONFIRMED_PUBLIC')return {done:true,value:'HUMAN_APPROVED_PUBLICATION_READBACK_VERIFIED'};
-  if(['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN'].includes(r.state))pause('PUBLICATION_READBACK_REQUIRED');
+  if(r.state==='CONFIRMED_PUBLIC'){run.remoteVisibility='PUBLIC';run.remoteObservedAt=Date.now();return {done:true,value:'HUMAN_APPROVED_PUBLICATION_READBACK_VERIFIED'};}
+  if(['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN'].includes(r.state)){run.remoteVisibility='UNKNOWN';pause('PUBLICATION_READBACK_REQUIRED');}
   return {done:false,code:'EXACT_CANDIDATE_HUMAN_APPROVAL_REQUIRED'};
  },{minutes:60,every:10000});
 }
 async function refresher(){
- const r=await request('refresher','GET_REFRESHER',{
-  query:run.slug,accountId:run.config.accountId,limit:50,offset:0});
- if(!r?.ok)pause(r?.code||'REFRESHER_STATE_UNAVAILABLE');
- if(r.policy?.refreshEnabled!==true)pause('ENABLE_GUARDED_REFRESHER_POLICY');
- if(r.items?.filter(x=>x.slug===run.slug&&
-      x.accountId===run.config.accountId)?.length!==1)
-   pause('DESIGNATED_TEST_NOT_IN_REFRESHER');
- const result=await request('refresher','DIAGNOSTIC_TARGET_REFRESH',{
-   slug:run.slug,accountId:run.config.accountId,runId:run.runId});
- if(!result?.ok)pause(result?.code||'TEST_REFRESH_UNAVAILABLE');
- if(result.effectVerified!==true)
-   pause(result.code||'TEST_REFRESH_NOT_VERIFIED');
- return 'REFRESHER_MARKER_SOURCE_READBACK_VERIFIED';
+ return waitFor('the normal visibility refresh',async()=>{
+  const r=await request('refresher','GET_REFRESHER',{query:run.slug,accountId:run.config.accountId,limit:50,offset:0});
+  if(!r?.ok)pause(r?.code||'REFRESHER_STATE_UNAVAILABLE');
+  if(r.policy?.refreshEnabled!==true)pause('ENABLE_GUARDED_REFRESHER_POLICY');
+  if(r.items?.filter(x=>x.slug===run.slug&&x.accountId===run.config.accountId)?.length!==1)pause('DESIGNATED_TEST_NOT_IN_REFRESHER');
+  const result=await request('refresher','DIAGNOSTIC_TARGET_REFRESH',{slug:run.slug,accountId:run.config.accountId,runId:run.runId});
+  if(!result?.ok)pause(result?.code||'TEST_REFRESH_UNAVAILABLE');
+  if(result.effectVerified===true&&result.sourceVerified===true&&result.feedVerified===true)return {done:true,value:'REFRESHER_MARKER_SOURCE_AND_RECENT_FEED_VERIFIED'};
+  return {done:false,code:result.code==='NO_REFRESH_DUE'?'REFRESH_NOT_DUE_YET':result.code||'TEST_REFRESH_NOT_VERIFIED'};
+ },{minutes:60,every:20000});
 }
 // Functional local tests remain independently executable. A normal Firefox
 // startup receipt is honest browser observation, never an invented OS PID proof.
@@ -417,14 +434,12 @@ save.addEventListener('click',async()=>{
   const git=await request('git','GIT_STATUS');
   const auth=await request('auth','GET');
   const test={accountId:selected,personaUid:item?.personaUid,
-   repositoryId:git?.repositoryId,namespace:namespace.value.trim(),
-    xpiSha256:''};
+   repositoryId:git?.repositoryId,namespace:namespace.value.trim()};
   if(consent.checked!==true)throw Error('DISPOSABLE_SCOPE_CONSENT_REQUIRED');
-  if(test.xpiSha256&& !/^[a-f0-9]{64}$/.test(test.xpiSha256))throw Error('XPI_SHA256_INVALID');
   const valid=evaluateDisposable(test,current,git,auth);
   if(!valid.ok)throw Error(valid.code);
   // Once a test has begun, the account, Persona, repo and namespace are
-  // immutable. The local XPI hash may be provided later for restart tests.
+  // immutable. Installed-version observation is recorded automatically.
   if(run?.restoredHistorical){
     const written=await records.put('ui:diagnostic-report:'+run.runId,{schema:1,run:structuredClone(run),report:diagnosticReport(run)},{mirror:'ARCHIVE_RUN'});
  if(!written?.ok)throw Error(written?.code||'OPERATOR_RECORD_WRITE_UNKNOWN');
@@ -433,7 +448,6 @@ save.addEventListener('click',async()=>{
   if(run){
     for(const key of ['accountId','personaUid','repositoryId','namespace'])
       if(run.config[key]!==test[key])throw Error('RUN_SCOPE_IMMUTABLE');
-    run.config.xpiSha256=test.xpiSha256;
     await persist();
   }
   configuration=test;
@@ -449,7 +463,7 @@ function nextRun(){
  const hex=[...bytes].map(x=>x.toString(16).padStart(2,'0')).join('');
  const created=createDiagnosticRun(configuration,hex,Date.now());
  if(!created.ok)throw Error(created.code);
- return created.run;
+ return {...created.run,build:{version:browser.runtime.getManifest().version,extensionId:browser.runtime.id,proof:'RUNTIME_MANIFEST_ONLY'}};
 }
 start.addEventListener('click',async()=>{
  if(busy||activeDiagnosticDrive||!configuration||!canStartNewDiagnostic(run))return;
@@ -468,7 +482,7 @@ cleanup.addEventListener('click',async()=>{
  busy=true;controls();
  try{
   const config=run.config;
-  const scopeNow=await prerequisite();
+  const scopeNow=await prerequisite({readOnly:true});
   const remote=await request('cleanup','VERIFY_TEST_REMOTE_ABSENCE',{
     intentId:run.intentId,runId:run.runId});
   if(remote?.ok!==true||remote.code!=='TEST_REMOTE_ABSENCE_INDEPENDENTLY_VERIFIED'||
@@ -483,7 +497,7 @@ cleanup.addEventListener('click',async()=>{
     intentId:run.intentId,runId:run.runId});
   if(second?.ok!==true||second.slug!==run.slug)
     throw Error('TEST_REMOTE_RECHECK_NOT_VERIFIED');
-  run.cleanup='VERIFIED_REMOTE_AND_GIT_ABSENT';
+  run.cleanup='VERIFIED_REMOTE_AND_GIT_ABSENT';run.remoteVisibility='MISSING_VERIFIED';run.remoteObservedAt=Date.now();
   await persist();
   status.textContent='Test-only cleanup independently verified. No deletion was performed by the diagnostic.';
  }catch(error){

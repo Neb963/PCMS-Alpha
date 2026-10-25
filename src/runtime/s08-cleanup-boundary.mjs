@@ -64,19 +64,29 @@ export function createS08CleanupBoundary(api,{open=openCanonicalDatabase,
     if(!g?.getSafeRouteReadiness||!g?.runSupplyStep)
       return fail('PROTECTED_PROVIDER_OBSERVER_UNAVAILABLE');
     const before=await g.getSafeRouteReadiness(account.personaUid);
-    if(!before?.ready||before.personaUid!==account.personaUid||
-       before.principalFingerprint!==account.identity.principalFingerprint)
+    if(!before?.ready||before.personaUid!==account.personaUid)
       return fail('TEST_ROUTE_OR_IDENTITY_CHANGED');
     const observed=await g.runSupplyStep(account.personaUid,{
       kind:'READ_TARGET',slug:r.slug,
       principalFingerprint:account.identity.principalFingerprint});
     const after=await g.getSafeRouteReadiness(account.personaUid);
     if(!after?.ready||after.routeId!==before.routeId||
-       after.cookieStoreId!==before.cookieStoreId||
-       after.principalFingerprint!==before.principalFingerprint||
+       after.cookieStoreId!==before.cookieStoreId||after.personaUid!==account.personaUid||
        (await sentinel.inspect()).held)
       return fail('TEST_ROUTE_CHANGED_DURING_OBSERVATION');
-    if(observed?.ok!==true||
+    const currentAccount=await new Promise((resolve,reject)=>{
+      const tx=db.transaction('meta','readonly');let row;
+      tx.objectStore('meta').get('account:'+cfg.accountId).onsuccess=e=>{row=e.target.result?.account};
+      tx.oncomplete=()=>resolve(row);tx.onabort=()=>reject(Error('TEST_ACCOUNT_READ_FAILED'));
+    });
+    const currentScope=await api.storage.local.get(['pcmsS08DisposableScope','pcmsS08DiagnosticRun']);
+    if(JSON.stringify(currentAccount)!==JSON.stringify(account)||JSON.stringify(currentScope.pcmsS08DisposableScope)!==JSON.stringify(cfg)||
+       currentScope.pcmsS08DiagnosticRun?.runId!==r.runId||currentScope.pcmsS08DiagnosticRun?.intentId!==r.intentId||currentScope.pcmsS08DiagnosticRun?.slug!==r.slug||
+       JSON.stringify(currentScope.pcmsS08DiagnosticRun?.config)!==JSON.stringify(r.config))return fail('TEST_ACCOUNT_OR_SCOPE_CHANGED');
+    // The fixed READ_TARGET observer hashes the actual session principal,
+    // compares it with the canonical requested principal and rejects a session
+    // change before returning these two independent provider observations.
+    if(observed?.ok!==true||observed.slug!==r.slug||observed.ownerMatches!==false||
        observed.source!=='INDEPENDENT_TARGET_READBACK'||
        observed.state!=='MISSING_VERIFIED')
       return fail(observed?.code||'TEST_REMOTE_ABSENCE_NOT_VERIFIED');

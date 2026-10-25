@@ -47,13 +47,16 @@ export async function resolveS06OutputProof(db,context){
  // Their immutable original tuple can still identify an attributed Git blob;
  // inspectReadyCandidate independently rereads its ancestry and full bytes.
  if(current?.state==='CONFIRMED'&&(stage.restoredHistorical||stage.restoredParent)){
-  let root=stage.restoredParent?(await read('stage-history:'+stage.slug+':'+stage.restoredParent.revision))?.record:stage;
+  const validParent=(parent,child,revision)=>Number.isSafeInteger(revision)&&revision>=1&&revision<child.revision&&parent?.revision===revision&&
+    parent.slug===stage.slug&&parent.accountId===stage.accountId&&parent.principalFingerprint===stage.principalFingerprint&&parent.remotePublicId===stage.remotePublicId;
+  let root=stage;
+  if(stage.restoredParent){const revision=stage.restoredParent.revision,parent=(await read('stage-history:'+stage.slug+':'+revision))?.record;root=validParent(parent,stage,revision)?parent:null;}
   const seen=new Set();
   while(root&&current.personaUid!==root.personaUid&&root.restoredParent){
    const revision=root.restoredParent.revision;
    if(!Number.isSafeInteger(revision)||revision<1||revision>=root.revision||seen.has(revision)||seen.size>=1000){root=null;break}
    seen.add(revision);const parent=(await read('stage-history:'+stage.slug+':'+revision))?.record;
-   if(!parent||parent.accountId!==stage.accountId||parent.principalFingerprint!==stage.principalFingerprint||parent.remotePublicId!==stage.remotePublicId){root=null;break}
+   if(!validParent(parent,root,revision)){root=null;break}
    root=parent;
   }
   if(root&&root.accountId===stage.accountId&&root.principalFingerprint===stage.principalFingerprint&&root.remotePublicId===stage.remotePublicId&&

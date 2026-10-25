@@ -290,7 +290,7 @@ export function createExistingBoundary(api,{
       const remote=await observe(g,r);
       if(!remote.ok||remote.visibility!=='UNLISTED'||
          remote.source.fingerprint!==(r.state==='STAGE_CONFIRMED'?
-           r.stagedFingerprint:r.previousFingerprint))
+           r.stagedFingerprint:(r.stagePreviousFingerprint||r.previousFingerprint)))
         return fail('EXISTING_PREVIOUS_SOURCE_CHANGED');
       const queued=await createReadyStore(database).get(p.slug);
       const readyPin=queued.ok?
@@ -304,11 +304,12 @@ export function createExistingBoundary(api,{
       const candidate=readyPin?readyPin.candidate:
         await exactSource(git.sourceBytes);
       if(!candidate.ok)return candidate;
-      const replacingSavedF=r.state==='STAGE_CONFIRMED';
+      const replacingSavedF=r.state==='STAGE_CONFIRMED',retainingSavedF=r.state==='UNLIST_CONFIRMED'&&!!r.stagePreviousFingerprint;
       const previousForWrite=replacingSavedF?
-        await exactSource(r.stageSource?.blobs):opened.source;
+        await exactSource(r.stageSource?.blobs):retainingSavedF?await exactSource(r.stagePreviousSource?.blobs):opened.source;
       if(!previousForWrite.ok||
-         (replacingSavedF&&previousForWrite.fingerprint!==r.stagedFingerprint))
+         (replacingSavedF&&previousForWrite.fingerprint!==r.stagedFingerprint)||
+         (retainingSavedF&&previousForWrite.fingerprint!==r.stagePreviousFingerprint))
         return fail('S05_SAVED_F_DRIFT_OR_MISSING');
       if(queued.ok&&queued.record.desired){
         // The I13 source writer has already unlisted and independently
@@ -384,7 +385,7 @@ export function createExistingBoundary(api,{
       }
       if(!result.ok)return result;
       const pinned=await store.pinStage(p.slug,r.revision,{candidate,source:git,
-        ...(replacingSavedF?{previousForWrite}:{})});
+        ...(replacingSavedF||retainingSavedF?{previousForWrite}:{})});
       return pinned.ok?{...pinned,stageRevision:result.revision,
         stage:'PINNED',sourceFingerprint:candidate.fingerprint}:pinned;
     }

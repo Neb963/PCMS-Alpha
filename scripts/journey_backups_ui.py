@@ -41,6 +41,23 @@ def run(browser,archive,folder):
         g.click(s,'#pcms-diagnostic-history-refresh')
         wait(s,"sh.querySelector('#pcms-diagnostic-history')?.options.length>0&&!sh.querySelector('#pcms-diagnostic-history-export').disabled",'J06_CANONICAL_REPORT_HISTORY')
         g.click(s,'#pcms-diagnostic-history-export')
+        # Historical results retain an operator-visible resource reference;
+        # the exported diagnostic stays sanitized and distinguishes manifest proof.
+        history=g.oracle(s,"""
+const {createOperatorRecords}=await import('./operator-records.mjs'),{createDiagnosticRun,diagnosticReport}=await import('./s08-diagnostic-core.mjs');
+const run=createDiagnosticRun({accountId:'account_history_fixture',personaUid:'persona_history_fixture',repositoryId:'42',namespace:'pcms-test-history'},'123456789abc1122',Date.now()).run;
+run.created=true;run.remoteVisibility='PUBLIC';run.remoteObservedAt=Date.now();run.status='HELD';run.stage='PUBLICATION';run.restoredHistorical=true;run.build={version:browser.runtime.getManifest().version,extensionId:browser.runtime.id};
+const out=await createOperatorRecords().put('ui:diagnostic-report:'+run.runId,{schema:1,run,report:diagnosticReport(run)},{expectedRevision:0});return {...out,slug:run.slug};
+""")
+        assert history.get('ok'),history
+        g.click(s,'#pcms-diagnostic-history-refresh')
+        wait(s,"[...sh.querySelector('#pcms-diagnostic-history').options].some(x=>x.value==='ui:diagnostic-report:s08_123456789abc1122')",'J06_SAVED_DISPOSABLE_ARTIFACT_REPORT')
+        g.change(s,'#pcms-diagnostic-history','ui:diagnostic-report:s08_123456789abc1122')
+        wait(s,"sh.querySelector('#pcms-diagnostic-history-status').textContent.includes('PUBLIC')&&!sh.querySelector('#pcms-diagnostic-history-locate').disabled",'J06_REMAINING_PUBLIC_TEST_RESOURCE_DISCLOSED')
+        g.click(s,'#pcms-diagnostic-history-locate')
+        wait(s,"sh.querySelector('#generator-search')?.value==='pcms-test-history-123456789abc'",'J06_HISTORICAL_TEST_RESOURCE_PRIMARY_HANDOFF')
+        g.click(s,'[data-nav=settings]');g.click(s,'[data-settings=diagnostics]')
+        wait(s,"!!sh.querySelector('#pcms-diagnostic-history')",'J06_DIAGNOSTICS_RETURN_FROM_HISTORY')
         ticket=g.oracle(s,"return await new Promise(resolve=>{const p=browser.runtime.connect({name:'pcms-s08-startup'});p.onMessage.addListener(r=>{p.disconnect();resolve(r)});p.postMessage({type:'ARM',params:{runId:'s08_1122334455667788'}})})")
         assert ticket.get('ok'),ticket
         capture(s,'diagnostics-notes-history',evidence)

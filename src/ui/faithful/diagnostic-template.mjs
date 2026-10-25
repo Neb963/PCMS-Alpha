@@ -16,6 +16,8 @@ export const diagnosticTemplate=`<section aria-labelledby="pcms-diagnostic-headi
    <button type="button" id="pcms-diagnostic-run" disabled>Run full diagnostic</button>
    <button type="button" id="pcms-diagnostic-resume" disabled>Resume current run</button>
    <button type="button" id="pcms-diagnostic-rerun" disabled>Start a new run</button>
+   <button type="button" id="pcms-diagnostic-locate" disabled>Find test generator</button>
+   <button type="button" id="pcms-diagnostic-git-folder" disabled>Open test folder in GitHub</button>
    <button type="button" id="pcms-diagnostic-cleanup" disabled>Verify test cleanup</button>
   </div>
  </div>
@@ -27,6 +29,7 @@ export const diagnosticTemplate=`<section aria-labelledby="pcms-diagnostic-headi
  <details><summary>Saved diagnostic reports</summary>
  <label for="pcms-diagnostic-history">Report</label><select id="pcms-diagnostic-history"></select>
  <div class="form-foot"><button type="button" id="pcms-diagnostic-history-refresh">Reload reports</button><button type="button" id="pcms-diagnostic-history-export" disabled>Export selected report</button></div>
+ <button type="button" id="pcms-diagnostic-history-locate" disabled>Find selected test generator</button>
  <p id="pcms-diagnostic-history-status" role="status"></p><details><summary>Technical report</summary><pre id="pcms-diagnostic-history-view" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details>
  </details>
 </section>`;

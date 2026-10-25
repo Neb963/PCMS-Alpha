@@ -37,7 +37,7 @@ export function evaluateStageSuccessor({prior,previous,job,release,existing,read
    return fail('SOURCE_OWNER_CHANGED');
  if(prior.state==='PINNED'){
    if(prior.tab||job)return fail('OLDER_CANDIDATE_NOT_IDLE');
-   if(prior.previous?.fingerprint!==previous.fingerprint)
+   if((prior.writePrevious||prior.previous)?.fingerprint!==previous.fingerprint)
      return fail('SAVED_SOURCE_CHANGED');
    return {ok:true,reason:'UNSAVED_CANDIDATE_REPLACED'};
  }

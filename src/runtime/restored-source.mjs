@@ -67,6 +67,7 @@ export function planRestoredSource({stage,job,release,existing,writeback,account
   inventoryRevision:inventory.revision,adoptionRevision:adoption?.revision||existing.adoptionRevision,
   nonce,operationId:'existing_'+nonce,state:stage.state==='SOURCE_VERIFIED'?'STAGE_CONFIRMED':'UNLIST_CONFIRMED',stageSource:structuredClone(child.candidate),stagedFingerprint:child.candidate.fingerprint,
   windowAdmission:{version:1,mode:'RESTORED_OBSERVED_UNLISTED',nonce,accountId:account.accountId,personaUid:account.personaUid,bindingVersion:account.bindingVersion,principalFingerprint:account.identity.principalFingerprint,remotePublicId:inventory.remoteId,previousFingerprint:existing.previousFingerprint,observedAt:at},
+  ...(stage.state!=='SOURCE_VERIFIED'?{stagePreviousSource:structuredClone(baseline),stagePreviousFingerprint:baseline.fingerprint}:{}),
   restoredParentOperation:existing.operationId,source:'RESTORED_CURRENT_OWNER_FULL_SOURCE_READBACK',restoredHistorical:false}:null;
  return {ok:true,child,currentExisting,currentShadow,code:'RESTORED_SOURCE_REQUALIFIED',providerEffects:'NONE',importedTests:'INVALID',importedApproval:'INVALID'};
 }

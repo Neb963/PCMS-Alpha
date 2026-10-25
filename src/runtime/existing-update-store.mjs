@@ -263,18 +263,22 @@ export function createExistingStore(db){
            !['UNLIST_CONFIRMED','STAGE_CONFIRMED'].includes(old.state)){
           done(fail('EXISTING_STAGE_NOT_ADMISSIBLE'));return;
         }
-        const successor=old.state==='STAGE_CONFIRMED';
+        const successor=old.state==='STAGE_CONFIRMED',retained=old.state==='UNLIST_CONFIRMED'&&!!old.stagePreviousFingerprint;
         if(successor&&(!previousForWrite||
            previousForWrite.fingerprint!==old.stagedFingerprint||
            !old.stageSource||old.stageSource.fingerprint!==old.stagedFingerprint)){
+          done(fail('EXISTING_SAVED_F_REQUIRED_FOR_SUCCESSOR'));return;
+        }
+        if(retained&&(!previousForWrite||previousForWrite.fingerprint!==old.stagePreviousFingerprint||
+           old.stagePreviousSource?.fingerprint!==old.stagePreviousFingerprint)){
           done(fail('EXISTING_SAVED_F_REQUIRED_FOR_SUCCESSOR'));return;
         }
         const next={...old,revision:old.revision+1,
           state:'UNLIST_CONFIRMED',
           // Original encrypted P and previousFingerprint are deliberately
           // unchanged. A successor stages over the saved prior F, not over P.
-          stagePreviousSource:successor?structuredClone(previousForWrite):null,
-          stagePreviousFingerprint:successor?previousForWrite.fingerprint:null,
+          stagePreviousSource:successor||retained?structuredClone(previousForWrite):null,
+          stagePreviousFingerprint:successor||retained?previousForWrite.fingerprint:null,
           stagedFingerprint:candidate.fingerprint,stageSource:structuredClone(candidate),
           gitHead:source.head,gitTestingSha:source.testingSha,
           sourceFolder:source.folder};
