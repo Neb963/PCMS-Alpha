@@ -1,3 +1,4 @@
+import {splitPortableLocal,collectPortableLocal} from './portable-local.mjs';
 // A02 passwordless restore decision oracle. File framing and source closure
 // were independently validated in disposable IndexedDB staging before this.
 import {DB_STORES,validatePcmsSnapshot,digest} from './backup-core.mjs';
@@ -7,7 +8,7 @@ import {validateBackupPayload,validateExternalArtifactHashes} from '../lib/backu
 const requireValid=(ok,code)=>{if(!ok)throw Error(code)};
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 export async function inspectPortableRestore({incoming,mode='merge',fresh=false,
-  mappings={},accountChoices={},currentPcms,currentDonor,currentPortable,containers=[]}){
+  mappings={},accountChoices={},currentPcms,currentDonor,currentPortable,currentLocal={},containers=[]}){
   requireValid(RESTORE_MODES.includes(mode),'RESTORE_MODE_INVALID');
   validatePcmsSnapshot(currentPcms);
   requireValid(currentPortable&&Array.isArray(currentPortable.personas),
@@ -19,10 +20,11 @@ export async function inspectPortableRestore({incoming,mode='merge',fresh=false,
     /^[a-f0-9]{64}$/.test(incoming.receipt.chain||''),
     'PORTABLE_STAGE_NOT_VERIFIED');
   validatePcmsSnapshot(incoming.canonical);
+  splitPortableLocal(incoming.canonical);
   validateBackupPayload(incoming.donor);
   await validateExternalArtifactHashes(incoming.donor.scripts||[],{entries:true});
   const groups=inspectRestoreMappings(incoming.donor,mappings,containers,
-    {fresh,strict:false});
+    {fresh,strict:false,inactive:true});
   requireValid(accountChoices&&typeof accountChoices==='object'&&
     !Array.isArray(accountChoices)&&Object.keys(accountChoices).length<=10000,
     'RESTORE_ACCOUNT_CHOICES_INVALID');
@@ -38,7 +40,7 @@ export async function inspectPortableRestore({incoming,mode='merge',fresh=false,
   const choicesMissing=fresh?accounts.filter(id=>!Object.hasOwn(accountChoices,id)).length:0;
   const destinationSha256=await digest(JSON.stringify({
     pcms:currentPcms,donor:stableRestoreDonorCut(currentDonor),
-    portable:currentPortable}));
+    portable:currentPortable,local:collectPortableLocal(currentLocal)}));
   const sourceSha256=await digest(JSON.stringify(incoming.canonical));
   const risk={
     importedPersonas:groups.length,
@@ -63,7 +65,7 @@ export async function inspectPortableRestore({incoming,mode='merge',fresh=false,
   return {plan,planSha256:await digest(JSON.stringify(plan))};
 }
 export async function verifyPortableCheckpoint({
-  checkpoint,currentPcms,currentPortable}){
+  checkpoint,currentPcms,currentPortable,currentLocal={}}){
   requireValid(checkpoint?.sourceVerified===true&&
     checkpoint?.receipt?.status==='READY',
     'RESTORE_CHECKPOINT_FILE_REQUIRED');
@@ -73,10 +75,13 @@ export async function verifyPortableCheckpoint({
   // browser download necessarily changes backup:manual-active. That record
   // cannot serve as self-certifying destination evidence and is not imported
   // as live disk authority. All other canonical rows remain exact.
+  const local=splitPortableLocal(checkpoint.canonical),current=collectPortableLocal(currentLocal);
+  requireValid(local.values!==null||Object.keys(current).length===0,'RESTORE_CHECKPOINT_LOCAL_MISSING');
+  if(local.values!==null)requireValid(same(local.values,current),'RESTORE_CHECKPOINT_LOCAL_DRIFT');
   const withoutSelfReceipt=snapshot=>({...snapshot,stores:{
     ...snapshot.stores,meta:snapshot.stores.meta.filter(row=>
       !['backup:manual-active','backup:manual-last-complete'].includes(row.key))}});
-  requireValid(same(withoutSelfReceipt(checkpoint.canonical),
+  requireValid(same(withoutSelfReceipt(local.pcms),
     withoutSelfReceipt(currentPcms)),'RESTORE_CHECKPOINT_PCMS_DRIFT');
   requireValid(same(checkpoint.donor,currentPortable),
     'RESTORE_CHECKPOINT_DONOR_DRIFT');

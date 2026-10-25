@@ -1,3 +1,4 @@
+import {splitPortableLocal} from './portable-local.mjs';
 // I16: restore data is history, never a portable authorization token.
 // Deterministic plan over already authenticated structured-clone rows.
 import {DB_STORES,validatePcmsSnapshot,serializeClone,deserializeClone} from './backup-core.mjs';
@@ -87,6 +88,7 @@ function inertMeta(key,row,remap,existing=null){
 export function prepareRestoredCanonical({incoming,current,mode='merge',
   uidRemap={},fresh=false,accountChoices={}}={}){
   validatePcmsSnapshot(incoming);validatePcmsSnapshot(current);
+  incoming=splitPortableLocal(incoming).pcms;current=splitPortableLocal(current).pcms;
   if(!['merge','replace'].includes(mode))deny('RESTORE_MODE_INVALID');
   if(!uidRemap||typeof uidRemap!=='object'||Array.isArray(uidRemap))
     deny('RESTORE_UID_MAP_INVALID');

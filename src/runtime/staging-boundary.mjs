@@ -322,7 +322,7 @@ export function createStagingBoundary(api,{
     })).catch(()=>{});
   }
     run=checkpointed(api,run,{allowDuringRestore:message=>["LIST_STAGES","GET_STAGE"].includes(message?.type)});
-  statusFor=checkpointed(api,statusFor,{allowDuringRestore:message=>["GET_STAGE"].includes(message?.type)});
+  statusFor=checkpointed(api,statusFor,{allowDuringRestore:message=>["GET_STAGE","LIST_STAGES"].includes(message?.type)});
   return Object.freeze({register,run,runTrusted:async message=>{
     if(!['GET_STAGE','STAGE_PRIVATE','RECONCILE_STAGE'].includes(message?.type))
       return fail('INVALID_INTERNAL_STAGE_ACTION');

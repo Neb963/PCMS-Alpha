@@ -114,8 +114,11 @@ export function createPortableRunner(api,{
       tx.onabort=()=>reject(Error('BACKUP_IDB_UNAVAILABLE'));
     });
   }
-  async function recoverManual(){
+  async function recoverManual(owner=null){
+    if(owner&&!await ownsPreparation(owner))return fail('BACKUP_RESTORE_HOLD');
     const previous=await readManual();
+    if(owner&&(previous?.purpose!=='RESTORE_CHECKPOINT'||previous.preparationEpoch!==owner.epoch))
+      return fail('BACKUP_PREVIOUS_DOWNLOAD_UNCERTAIN');
     if(!previous||!['DISPATCH_POSSIBLE','DOWNLOAD_STARTED','HELD_UNCERTAIN'].includes(previous.status))
       return {ok:true,recovered:false};
     const row=await locatePortableDownload(api.downloads,previous);
@@ -303,39 +306,39 @@ export function createPortableRunner(api,{
         const previous=await readManual();
         if(previous&&['DISPATCH_POSSIBLE','DOWNLOAD_STARTED','HELD_UNCERTAIN'].includes(previous.status)){
           // Return the observed original. A deliberate new export is a later action.
-          return preparation?fail('BACKUP_PREVIOUS_DOWNLOAD_UNCERTAIN'):await recoverManual();
+          return preparation?await recoverManual(preparation):await recoverManual();
         }
         if(previous&&['PREPARING','INTERNAL_VERIFIED'].includes(previous.status)&&
           clock()-(previous.updatedAt||previous.startedAt||clock())<keepAliveMs)
           return fail('BACKUP_INFLIGHT');
         runId='manual_'+nextId();startedAt=clock();
         await recordManual({runId,status:'PREPARING',tier:0,
-          startedAt,purpose:preparation?'RESTORE_CHECKPOINT':'MANUAL',code:'PREPARING'});
+          startedAt,purpose:preparation?'RESTORE_CHECKPOINT':'MANUAL',preparationEpoch:preparation?.epoch||null,code:'PREPARING'});
         const ownedSentinel=preparation?{inspect:async()=>({held:!await ownsPreparation(preparation)})}:sentinel;
         const archive=await capture(api,await db(),ownedSentinel);
         const fileHash=await sha(archive.blob);
         if(!preparation)await prepareOriginals(await db(),archive,runId,fileHash);
         verifiedBytes=archive.bytes;verifiedSha256=fileHash;
         await recordManual({runId,status:'INTERNAL_VERIFIED',tier:1,
-          purpose:preparation?'RESTORE_CHECKPOINT':'MANUAL',sha256:fileHash,bytes:archive.bytes,startedAt});
+          purpose:preparation?'RESTORE_CHECKPOINT':'MANUAL',preparationEpoch:preparation?.epoch||null,sha256:fileHash,bytes:archive.bytes,startedAt});
         if(preparation?!await ownsPreparation(preparation):(await sentinel.inspect()).held)throw Error('BACKUP_RESTORE_HOLD');
         // Persist possible-download intent before irreversible browser dispatch.
         await recordManual({runId,status:'DISPATCH_POSSIBLE',tier:1,
-          purpose:preparation?'RESTORE_CHECKPOINT':'MANUAL',sha256:fileHash,bytes:archive.bytes,startedAt});
+          purpose:preparation?'RESTORE_CHECKPOINT':'MANUAL',preparationEpoch:preparation?.epoch||null,sha256:fileHash,bytes:archive.bytes,startedAt});
         possible=true;
         receipt=await dispatch(api,archive,{runId,manual:true});
         url=receipt.objectUrl;
         await recordManual({runId,status:'DOWNLOAD_STARTED',tier:1,
-          purpose:preparation?'RESTORE_CHECKPOINT':'MANUAL',sha256:fileHash,bytes:archive.bytes,downloadId:receipt.downloadId,
+          purpose:preparation?'RESTORE_CHECKPOINT':'MANUAL',preparationEpoch:preparation?.epoch||null,sha256:fileHash,bytes:archive.bytes,downloadId:receipt.downloadId,
           startedAt});
         const proof=await awaitManual(api.downloads,receipt.downloadId,archive.bytes,runId);
         if(!proof)throw Error('DOWNLOAD_OUTCOME_UNKNOWN');
         await recordManual({runId,status:'BROWSER_REPORTED_COMPLETE',tier:2,
-          purpose:preparation?'RESTORE_CHECKPOINT':'MANUAL',sha256:fileHash,bytes:archive.bytes,downloadId:receipt.downloadId,
+          purpose:preparation?'RESTORE_CHECKPOINT':'MANUAL',preparationEpoch:preparation?.epoch||null,sha256:fileHash,bytes:archive.bytes,downloadId:receipt.downloadId,
           startedAt,code:'BROWSER_REPORTED_COMPLETE',completedAt:clock()});
         if(!preparation)await completeOriginals(await db(),{runId,sha256:fileHash,bytes:archive.bytes,browserCompleted:true});
         return {ok:true,code:'BROWSER_REPORTED_COMPLETE',tier:2,
-          purpose:preparation?'RESTORE_CHECKPOINT':'MANUAL',sha256:fileHash,bytes:archive.bytes,runId,
+          purpose:preparation?'RESTORE_CHECKPOINT':'MANUAL',preparationEpoch:preparation?.epoch||null,sha256:fileHash,bytes:archive.bytes,runId,
           downloadId:receipt.downloadId,diskReadback:false};
       }catch(e){
         if(runId){
@@ -344,7 +347,7 @@ export function createPortableRunner(api,{
           // Downloads API reports interruption or its ACK is lost. Without
           // these fields subsequent read-only reconciliation is impossible.
           try{await recordManual({runId,status:possible?'HELD_UNCERTAIN':'FAILED',
-            tier:possible?1:0,purpose:preparation?'RESTORE_CHECKPOINT':'MANUAL',startedAt,bytes:verifiedBytes,sha256:verifiedSha256,
+            tier:possible?1:0,purpose:preparation?'RESTORE_CHECKPOINT':'MANUAL',preparationEpoch:preparation?.epoch||null,startedAt,bytes:verifiedBytes,sha256:verifiedSha256,
             downloadId:receipt?.downloadId??null,code});}catch{}
         }
         return fail(possible?'DOWNLOAD_OUTCOME_UNKNOWN':explain(e));
@@ -355,7 +358,7 @@ export function createPortableRunner(api,{
   status=checkpointed(api,status,{allowDuringRestore:true});
   tick=checkpointed(api,tick);
   manual=checkpointed(api,manual,{allowDuringRestore:owner=>!!owner});
-  recoverManual=checkpointed(api,recoverManual);
+  recoverManual=checkpointed(api,recoverManual,{allowDuringRestore:owner=>!!owner});
   inspectArchive=checkpointed(api,inspectArchive);
   return Object.freeze({
     status,tick,manual:()=>manual(),checkpoint:owner=>manual(owner),recoverManual,inspectArchive,requestOriginalCheckpoint:()=>manual(),recover:checkpointed(api,async()=>reconcile(await store())),

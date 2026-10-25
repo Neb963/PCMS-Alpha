@@ -1,3 +1,4 @@
+import {archiveWithPortableLocal,collectPortableLocal} from './portable-local.mjs';
 // A02 source-preserving, non-authorizing browser-native backup cut.
 // Intent/receipt and download dispatch are owned by the existing I15 runner.
 import {createPortableBackupPayload,validateExternalArtifactHashes} from '../lib/backup-package.js';
@@ -28,7 +29,7 @@ async function snapshotDonor(api,readDonor){
   }
   const portable=createPortableBackupPayload({...params,cookiesByProfile:cookies});
   await validateExternalArtifactHashes(portable.scripts||[],{entries:true});
-  return {portable,cut:{state:result.state,containers:result.containers,extras,cookies}};
+  return {portable,localSettings:collectPortableLocal(local),cut:{state:result.state,containers:result.containers,extras,cookies,localSettings:collectPortableLocal(local)}};
 }
 export async function capturePortableCut(api,db,sentinel,{readDonor=waitForPcmsBackupDonor,
   collect=snapshotCanonicalV2,verify=verifyCanonicalV2Unchanged}={}){
@@ -36,11 +37,12 @@ export async function capturePortableCut(api,db,sentinel,{readDonor=waitForPcmsB
   const original=await snapshotDonor(api,readDonor);
   // Temporary compatibility with v2 pinned source snapshots. A02's full-size
   // bounded cursor writer is separately required before declaring scale PASS.
-  const pcms=await collect(db,{serializedValues:true});
+  const rawPcms=await collect(db,{serializedValues:true});
+  const pcms=archiveWithPortableLocal(rawPcms,original.localSettings);
   const sourceAudit=await preflightSourceRecovery(pcms);
   const built=await encodePortableArchive({pcms,donor:original.portable,
     appVersion:api.runtime.getManifest().version});
-  const verified=await verify(db,pcms,{serializedValues:true});
+  const verified=await verify(db,rawPcms,{serializedValues:true});
   requireValid(verified?.ok===true,'BACKUP_SOURCE_CUT_CHANGED');
   const afterwards=await snapshotDonor(api,readDonor);
   consistentOrThrow(original.cut,afterwards.cut);

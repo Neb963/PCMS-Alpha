@@ -1,3 +1,4 @@
+import {collectPortableLocal,splitPortableLocal,preparePortableLocalRestore} from './portable-local.mjs';
 // I16: one guarded local restore command. A resume NEVER redispatches a step.
 // No provider/API calls or fresh-controller activation. Source/checkpoint secrets
 // exist only in the caller's live extension port and this invocation.
@@ -133,7 +134,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
   // Shared durable I16 stage engine for both authenticated v1 and native v2.
   // Possible donor/cookie/canonical effects are never automatically replayed.
   async function applyGuardedGroups({db,donor,baseline,intent,req,payload,
-    incomingPcms,mode,fresh=false,accountChoices={},v2=false}){
+    incomingPcms,mode,fresh=false,accountChoices={},v2=false,incomingLocal=null}){
         let mappings=null,preparedDonor=null,remaps=null,preparedCanonical=null;
         const session={epoch:intent.epoch,revision:intent.revision};
         async function step(group,operation,dispatch,readback){
@@ -219,12 +220,16 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
             gm['gm-values:'+mapped.id]=items;
           else throw Error('RESTORE_GM_MAPPING_UNVERIFIED');
         }
-        await step('donor-portable',{gm:await digest(JSON.stringify(gm))},
-          async()=>{if(Object.keys(gm).length)await api.storage.local.set(gm);},
+        const localPatch=preparePortableLocalRestore(incomingLocal,baseline.local||{}, {mode});
+        const portableValues={...gm,...localPatch};
+        const portableOperation={gm:await digest(JSON.stringify(gm)),
+          ...(incomingLocal!==null?{local:await digest(JSON.stringify(localPatch))}:{})};
+        await step('donor-portable',portableOperation,
+          async()=>{if(Object.keys(portableValues).length)await api.storage.local.set(portableValues);},
           async fp=>{
-            const got=await api.storage.local.get(Object.keys(gm));
+            const got=await api.storage.local.get(Object.keys(portableValues));
             return {source:'INDEPENDENT_READBACK',
-              digest:Object.keys(gm).every(k=>same(got[k],gm[k]))?fp:'0'.repeat(64)};
+              digest:Object.keys(portableValues).every(k=>same(got[k],portableValues[k]))?fp:'0'.repeat(64)};
           });
         preparedCanonical=prepareRestoredCanonical({incoming:incomingPcms,
           current:baseline.pcms,mode,uidRemap:remaps,fresh,accountChoices});
@@ -323,7 +328,8 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
     let pcms;try{pcms=await snapshotCanonicalV2(db,{serializedValues:true});}
     finally{db.close();}
     return {snap:stableRestoreDonorCut(snap),pcms,
-      portable:await readPortable(api,donor,snap)};
+      portable:await readPortable(api,donor,snap),
+      local:collectPortableLocal(await api.storage.local.get(null))};
   }
   const validScope=s=>typeof s==='string'&&/^portable_[a-f0-9]{32}$/.test(s);
   const validMappings=m=>m&&typeof m==='object'&&!Array.isArray(m)&&
@@ -393,7 +399,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
           incoming,mode:args.mode,fresh:args.fresh,
           mappings:args.mappings,accountChoices:args.accountChoices,
           currentPcms:baseline.pcms,
-          currentDonor:baseline.snap,currentPortable:baseline.portable,
+          currentDonor:baseline.snap,currentPortable:baseline.portable,currentLocal:baseline.local,
           containers:baseline.snap.containers});
         assert(reviewed.planSha256===args.reviewedPlanSha256,
           'RESTORE_PLAN_CHANGED');
@@ -404,7 +410,9 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
             'CREATE_REQUESTED'].includes(g.status)),
           'RESTORE_MAPPING_UNVERIFIED');
         const checked=await verifyPortableCheckpoint({
-          checkpoint,currentPcms:baseline.pcms,currentPortable:baseline.portable});
+          checkpoint,currentPcms:baseline.pcms,currentPortable:baseline.portable,currentLocal:baseline.local});
+        const incomingLocal=splitPortableLocal(incoming.canonical).values;
+        preparePortableLocalRestore(incomingLocal,baseline.local,{mode:args.mode});
         const later=await destinationPortable(donor);
         assert(same(later,baseline),'RESTORE_DESTINATION_DRIFT');
         const intent=await gate.begin({
@@ -426,7 +434,7 @@ export function createRestoreBoundary(api,{getDonor=getPcmsRestoreDonor,
         await applyGuardedGroups({db,donor,baseline,intent,
           req:args.mappings,payload:incoming.donor,
           incomingPcms:incoming.canonical,mode:args.mode,
-          fresh:args.fresh,accountChoices:args.accountChoices,v2:true});
+          fresh:args.fresh,accountChoices:args.accountChoices,v2:true,incomingLocal});
         const final=await gate.inspect();
         assert(final.held&&final.activation==='OFF'&&
           final.status==='COMPLETE_INACTIVE','RESTORE_PORTABLE_FINAL_HOLD_REQUIRED');

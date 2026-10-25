@@ -1,3 +1,4 @@
+import {splitPortableLocal,preparePortableLocalRestore} from './portable-local.mjs';
 // I16 recovery is observation-only: never create a context, import cookies,
 // commit donor state or replace canonical rows after a lost acknowledgement.
 import {decodeBackupEnvelope} from '../lib/backup-package.js';
@@ -90,16 +91,26 @@ export async function reconcileRestore({gate,api,donor,db,archiveText,
       if(!Array.isArray(got)||!cookiesMatch(records,got)){outcome=false;break;}
     }
   }else if(group==='donor-portable'){
-    operation={gm:await digest(JSON.stringify({}))};
-    outcome=Object.keys(incoming.donor.gmValues||{}).length===0;
+    const local=portable?splitPortableLocal(incoming.archive.pcms).values:null;
+    const oldLocal=portable?splitPortableLocal(old.archive.pcms).values||{}:{};
+    const patch=preparePortableLocalRestore(local,oldLocal,{mode:row.recovery.mode});
+    operation={gm:await digest(JSON.stringify({})),
+      ...(local!==null?{local:await digest(JSON.stringify(patch))}:{})};
+    const observed=await api.storage.local.get(Object.keys(patch));
+    outcome=Object.keys(incoming.donor.gmValues||{}).length===0&&
+      Object.keys(patch).every(k=>equal(observed[k],patch[k]));
   }else if(group==='pcms-canonical'){
+    const actual=await (portable?snapshotCanonicalV2(db,{serializedValues:true}):snapshotCanonical(db));
+    const selfKeys=['backup:manual-active','backup:manual-last-complete'];
+    const baseline=portable?{...old.archive.pcms,stores:{...old.archive.pcms.stores,
+      meta:[...old.archive.pcms.stores.meta.filter(r=>!selfKeys.includes(r.key)),
+        ...actual.stores.meta.filter(r=>selfKeys.includes(r.key))].sort((a,b)=>a.key<b.key?-1:a.key>b.key?1:0)}}:old.archive.pcms;
     const expected=prepareRestoredCanonical({incoming:incoming.archive.pcms,
-      current:old.archive.pcms,mode:row.recovery.mode,uidRemap:map,
+      current:baseline,mode:row.recovery.mode,uidRemap:map,
       fresh:portable&&row.fresh===true,
       accountChoices:portable?row.recovery.accountChoices||{}:{}});
     operation={pcms:await digest(JSON.stringify(expected))};
-    outcome=equal(await (portable?snapshotCanonicalV2(db,{serializedValues:true}):
-      snapshotCanonical(db)),expected);
+    outcome=equal(actual,expected);
   }else refuse('RESTORE_UNKNOWN_GROUP');
   const fingerprint=await digest(JSON.stringify(operation));
   if(!record.fingerprint||record.fingerprint!==fingerprint)

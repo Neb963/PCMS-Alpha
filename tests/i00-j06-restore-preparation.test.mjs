@@ -50,3 +50,12 @@ test('J06 foreign backup successes are inert history while destination successes
  const restored=prepareRestoredCanonical({incoming,current,mode:'replace'});
  assert.deepEqual(JSON.parse(JSON.stringify(restored.stores.meta.find(r=>r.key===manual.key).value)),localGood);
 });
+
+test('J06 inactive import may recover a Direct-era Persona only with all imported routes blocked; duplicate destinations remain held',async()=>{
+ const {inspectRestoreMappings}=await import('../src/ui/restore-core.mjs');
+ const donor={personas:[{key:'one',profile:{routeMode:'direct'}},{key:'two',profile:{routeMode:'route'}}]};
+ const containers=[{cookieStoreId:'firefox-container-1',name:'Existing'}];
+ assert.equal(inspectRestoreMappings(donor,{one:'__create__',two:'firefox-container-1'},containers,{strict:false,inactive:true})[0].status,'CREATE_REQUESTED');
+ assert.equal(inspectRestoreMappings(donor,{one:'firefox-container-1',two:'firefox-container-1'},containers,{strict:false,inactive:true})[1].status,'MAPPING_COLLISION');
+ assert.throws(()=>inspectRestoreMappings({personas:[donor.personas[0]]},{one:'firefox-container-1'},containers),/RESTORE_DIRECT_REVIEW_REQUIRED/);
+});
