@@ -14,6 +14,7 @@ export function createAutoBoundary(api,options={}){
   }
   async function dispatch(message){
     if(message.action==='STATUS')return runner.status();
+    if(message.action==='CHECK_ARCHIVE')return runner.inspectArchive();
     if(message.action==='ENABLE'){
       await runner.enable(message.enabled);
       return runner.status();
@@ -25,7 +26,7 @@ export function createAutoBoundary(api,options={}){
   function validate(message){
     return !!message&&typeof message==='object'&&!Array.isArray(message)&&
       (Object.keys(message).length===1&&
-        ['STATUS','RUN_NOW','MANUAL'].includes(message.action)||
+        ['STATUS','RUN_NOW','MANUAL','CHECK_ARCHIVE'].includes(message.action)||
       Object.keys(message).length===2&&message.action==='ENABLE'&&
         typeof message.enabled==='boolean');
   }

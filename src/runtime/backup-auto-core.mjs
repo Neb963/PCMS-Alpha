@@ -67,7 +67,7 @@ export function ownedFile(row){
   // Always match the actual whole Firefox path, not just a filename glob.
   return !!row&&Number.isSafeInteger(row.id)&&row.id>=0&&
     typeof row.filename==='string'&&
-    /[/\\]Downloads[/\\]pcms-backups[/\\]pcms-alpha-auto_[a-f0-9]{32}(?: \(\d+\))?\.(?:encrypted|pcms\.jsonl)$/i.test(row.filename)&&
+    /[/\\]pcms-backups[/\\]pcms-alpha-auto_[a-f0-9]{32}(?: \(\d+\))?\.(?:encrypted|pcms\.jsonl)$/i.test(row.filename)&&
     row.state==='complete'&&row.exists===true&&
     Number.isSafeInteger(row.fileSize)&&row.fileSize>0;
 }

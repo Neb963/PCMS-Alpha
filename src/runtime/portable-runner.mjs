@@ -8,6 +8,7 @@ import {makeRetention} from './backup-auto-retention.mjs';
 import {inspectAuto,awaitAuto} from './backup-auto-download.mjs';
 import {capturePortableCut,downloadPortable} from './portable-cut.mjs';
 import {createNoticeDispatcher} from './notices.mjs';
+import {readPortableArchive} from './portable-archive.mjs';
 const fail=code=>({ok:false,code});
 const explain=e=>/^(BACKUP|PORTABLE|DOWNLOAD)_[A-Z0-9_]{3,70}$/.test(e?.message||'')?
   e.message:'BACKUP_OPERATION_FAILED';
@@ -63,7 +64,7 @@ export function createPortableRunner(api,{
   capture=capturePortableCut,dispatch=downloadPortable,wait=awaitAuto,
   observe=inspectAuto,prepareOriginals=preparePortableOriginals,completeOriginals=completePortableOriginals
 }={}){
-  let pending=null,manualTask=null,dbPromise=null;
+  let pending=null,manualTask=null,inspection=null,dbPromise=null;
   const db=()=>dbPromise ||= open().catch(e=>{dbPromise=null;throw e});
   const sentinel=createRestoreSentinel(api.storage.local);
   const store=async()=>createAutoStore(await db(),clock);
@@ -129,7 +130,7 @@ export function createPortableRunner(api,{
   }
   async function status(){
     // Only receipt readback; never dispatch a download from STATUS.
-    if(!pending&&!manualTask){
+    if(!pending&&!manualTask&&!(await sentinel.inspect()).held){
       try{await reconcile(await store())}catch{}
       try{await recoverManual()}catch{}
     }
@@ -148,8 +149,7 @@ export function createPortableRunner(api,{
     const successes=[...daily,...(lastManual?[{...clean(lastManual),kind:'MANUAL',
       day:Math.floor((lastManual.completedAt||lastManual.updatedAt||lastManual.startedAt||0)/DAY),
       precision:lastManual.completedAt||lastManual.updatedAt?'MILLISECOND':'DAY',
-      tier:2,diskReadback:false}]:[])].sort((a,b)=>b.day-a.day||
-        (b.completedAt||0)-(a.completedAt||0));
+      tier:2,diskReadback:false}]:[])].sort((a,b)=>(b.completedAt??b.day*DAY)-(a.completedAt??a.day*DAY));
     return {...safeStatus(s.state),format:'PORTABLE',passwordRequired:false,
       guarantee:'SOURCE_COMPLETE_PLAIN_BROWSER_ARCHIVE',
       manual:clean(manual),lastSuccess:successes[0]||null};
@@ -183,7 +183,7 @@ export function createPortableRunner(api,{
   }
   async function tick(){
     if(pending)return pending;
-    if(manualTask)return fail('BACKUP_INFLIGHT');
+    if(manualTask||inspection)return fail('BACKUP_INFLIGHT');
     pending=(async()=>{
       let runId=null,url=null,s=null;
       try{
@@ -193,6 +193,7 @@ export function createPortableRunner(api,{
         await retention.recover();
         const recovery=await reconcile(s);
         if(!recovery.ok)return recovery;
+        if((await s.read()).state.enabled)await retention.prune();
         runId='auto_'+nextId();
         const claim=await s.claim(runId,clock());
         if(!claim.ok)return claim;
@@ -255,8 +256,29 @@ export function createPortableRunner(api,{
     }catch{}
     return result;
   }
+  async function inspectArchive(){
+    if(inspection)return inspection;
+    if(pending||manualTask)return fail('BACKUP_INFLIGHT');
+    inspection=(async()=>{
+      try{
+        if((await sentinel.inspect()).held)return fail('BACKUP_RESTORE_HOLD');
+        const archive=await capture(api,await db(),sentinel);
+        if(!(archive?.blob instanceof Blob)||archive.bytes!==archive.blob.size)
+          return fail('BACKUP_ARCHIVE_UNVERIFIED');
+        const opened=await readPortableArchive(archive.blob);
+        if(opened.integrity!=='FRAME_AND_SOURCE_VERIFIED'||
+           JSON.stringify(opened.archiveSourceAudit)!==JSON.stringify(archive.sourceAudit))
+          return fail('BACKUP_ARCHIVE_UNVERIFIED');
+        return {ok:true,code:'IN_MEMORY_SOURCE_AND_DONOR_VERIFIED',
+          format:'PORTABLE',passwordRequired:false,bytes:archive.bytes,
+          sha256:await sha(archive.blob),sourceAudit:opened.archiveSourceAudit,
+          checkedAt:clock(),diskReadback:false,downloads:0,providerEffects:'OFF'};
+      }catch(e){return fail(explain(e))}
+    })();
+    try{return await inspection}finally{inspection=null}
+  }
   async function manual(){
-    if(manualTask||pending)return fail('BACKUP_INFLIGHT');
+    if(manualTask||pending||inspection)return fail('BACKUP_INFLIGHT');
     manualTask=(async()=>{
       let url=null,runId=null,possible=false,receipt=null,startedAt=null;
       let verifiedBytes=null,verifiedSha256=null;
@@ -316,7 +338,7 @@ export function createPortableRunner(api,{
     try{return await manualTask;}finally{manualTask=null;}
   }
   return Object.freeze({
-    status,tick,manual,recoverManual,requestOriginalCheckpoint:()=>manual(),recover:async()=>reconcile(await store()),
+    status,tick,manual,recoverManual,inspectArchive,requestOriginalCheckpoint:()=>manual(),recover:async()=>reconcile(await store()),
     enable:async value=>{
       const s=await store(),out=await s.enabled(value);
       if(out.ok&&value)void tick();

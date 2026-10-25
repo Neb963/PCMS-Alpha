@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {webcrypto} from 'node:crypto';
+import {fakeDatabase} from './fake-idb.mjs';
+import {DB_STORES} from '../src/runtime/backup-core.mjs';
+import {encodePortableArchive,readPortableArchive} from '../src/runtime/portable-archive.mjs';
+import {createPortableRunner} from '../src/runtime/portable-runner.mjs';
+if(!globalThis.crypto)globalThis.crypto=webcrypto;
+test('J06 functional local backup checks frame/source roundtrip without creation, Git, native services or any download',async()=>{
+ const pcms={schema:1,stores:Object.fromEntries(DB_STORES.map(k=>[k,[]]))};
+ pcms.stores.meta.push({key:'operator-data',value:{name:'Exact local value é'}});
+ const donor={version:1,settings:null,routes:[],personas:[],scripts:[],workflows:[],cookies:{},gmValues:{},automationHistory:[]};
+ const archive=await encodePortableArchive({pcms,donor}),opened=await readPortableArchive(archive.blob);
+ const api={storage:{local:{get:async()=>({})}},downloads:{download(){throw Error('NO_DOWNLOAD_ALLOWED')}},runtime:{sendNativeMessage(){throw Error('NO_NATIVE_ALLOWED')}}};
+ const runner=createPortableRunner(api,{open:async()=>fakeDatabase(),capture:async()=>({...archive,sourceAudit:opened.archiveSourceAudit})});
+ const result=await runner.inspectArchive();assert.equal(result.ok,true,JSON.stringify(result));
+ assert.equal(result.code,'IN_MEMORY_SOURCE_AND_DONOR_VERIFIED');assert.equal(result.downloads,0);assert.equal(result.diskReadback,false);assert.equal(result.providerEffects,'OFF');assert.match(result.sha256,/^[a-f0-9]{64}$/);
+ const corrupt=createPortableRunner(api,{open:async()=>fakeDatabase(),capture:async()=>({blob:new Blob(['not a verified archive']),bytes:22,sourceAudit:{}})});
+ assert.equal((await corrupt.inspectArchive()).ok,false,'an API acknowledgment or bad blob is not functional archive proof');
+});

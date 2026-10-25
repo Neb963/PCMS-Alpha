@@ -75,7 +75,7 @@ export async function verifyPortableCheckpoint({
   // as live disk authority. All other canonical rows remain exact.
   const withoutSelfReceipt=snapshot=>({...snapshot,stores:{
     ...snapshot.stores,meta:snapshot.stores.meta.filter(row=>
-      row.key!=='backup:manual-active')}});
+      !['backup:manual-active','backup:manual-last-complete'].includes(row.key))}});
   requireValid(same(withoutSelfReceipt(checkpoint.canonical),
     withoutSelfReceipt(currentPcms)),'RESTORE_CHECKPOINT_PCMS_DRIFT');
   requireValid(same(checkpoint.donor,currentPortable),
