@@ -33,6 +33,13 @@ def wait(session, expression, label, seconds=35):
 
 
 def click(session, selector):
+    # Markup arrives before async presentation storage/CSS finishes mounting.
+    # The primary host is intentionally display:none until this real condition.
+    wait(session,"document.body.classList.contains('pcms-faithful-ready')&&!!sh&&[...sh.querySelectorAll('link[rel=stylesheet]')].every(x=>!!x.sheet)",'PRIMARY_MOUNT_AND_STYLES_READY')
+    hidden_nav=b.execute(session,"const sh=document.getElementById('pcms-faithful-host').shadowRoot,e=sh.querySelector("+json.dumps(selector)+");return !!e?.matches('[data-nav]')&&!e.getClientRects().length")
+    if hidden_nav:
+        menu=b.execute(session,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#pcms-menu-toggle')")
+        b.call('POST',f'/session/{session}/element/{menu[ELEMENT]}/click',{})
     node=b.execute(session,"const e=document.getElementById('pcms-faithful-host').shadowRoot.querySelector("+json.dumps(selector)+");if(e)e.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});return e")
     assert node and ELEMENT in node,("J01_CLICK_TARGET_MISSING",selector,node)
     b.call("POST",f"/session/{session}/element/{node[ELEMENT]}/click",{})

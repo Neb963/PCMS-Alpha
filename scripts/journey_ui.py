@@ -45,6 +45,18 @@ def run(browser,archive,folder):
         uuid=b.addons_uuid(profile);url=f'moz-extension://{uuid}/pcms/index.html#generators'
         b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s);wait(s,"!!sh.querySelector('[data-display-tools]')",'J07_PRIMARY_PRESENTATION')
         g.fixture(s)
+        # Adverse readiness cut: real hidden host with existing navigation DOM.
+        # A native click must wait for the same observable mount condition as
+        # a cold dashboard; no programmatic click or suppressed failure.
+        hidden=b.execute(s,"document.body.classList.remove('pcms-faithful-ready');return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=generators]')")
+        try:
+            b.call('POST',f'/session/{s}/element/{hidden[a.ELEMENT]}/click',{})
+            raise AssertionError('J07_HIDDEN_HOST_NEGATIVE_CONTROL_DID_NOT_FAIL')
+        except RuntimeError as error:assert 'element not interactable' in str(error),str(error)
+        finally:b.execute(s,"document.body.classList.add('pcms-faithful-ready')")
+        b.execute(s,"document.body.classList.remove('pcms-faithful-ready');window.__j07mountClick=null;const e=document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=generators]');e.addEventListener('click',()=>{window.__j07mountClick=document.body.classList.contains('pcms-faithful-ready')&&e.getClientRects().length>0},{once:true});setTimeout(()=>document.body.classList.add('pcms-faithful-ready'),400)")
+        g.click(s,'[data-nav=generators]');assert b.execute(s,"return window.__j07mountClick") is True
+        wait(s,"sh.querySelector('tbody')?.getAttribute('aria-busy')==='false'&&sh.querySelectorAll('tbody tr[data-item-index]').length===24",'J07_DELAYED_PRIMARY_MOUNT_REAL_CLICK_RECOVERY')
         assert b.execute(s,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('.preview-label').textContent")=='PCMS 1.2.14'
         g.click(s,'[data-filter="generators:PUBLISHED"]');wait(s,"sh.querySelector('.pagination').textContent.includes('600')",'J07_GLOBAL_FILTER')
         g.click(s,'[data-action=generator-filters]');g.change(s,'#generator-source','GIT');wait(s,"sh.querySelector('.pagination').textContent.includes('200')",'J07_GLOBAL_SOURCE_FILTER')
