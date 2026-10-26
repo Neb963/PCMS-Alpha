@@ -109,6 +109,16 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 **Required acceptance:** Bound *observational* waits and report a visibly timed-out status; preserve native preparation intent and readback quarantine for ambiguous effects, and separate cancellable read-only checks from in-flight mutation locks. Test intentionally nonsettling mock native prepare, late native ACK and Firefox restart; never start a conflicting preparation or route change before an independent settlement.
 
+### GAP-10 — Legacy dashboard scripts still run and contain superseded credential/backup remedies (P1)
+
+**Status:** CONFIRMED PACKAGE/UI composition; whether the hidden legacy controls are reachable by a normal user is unverified.
+
+**Source:** `src/ui/index.html` imports `operations.mjs`, `accounts-view.mjs`, `s08-diagnostics.mjs`, `v015-faithful.mjs` **and** `faithful/bridge.mjs` in one page, with a `pcms-legacy-return` control. `src/ui/operations.mjs:17–22` still says `BACKUP_FAILED` should be fixed by installing a native host/unlocking a keyring, and `GIT_RECONNECT_REQUIRED` by unlocking a keyring. Both contradict the explicit [browser-only amendment](../authority/PCMS-Alpha-CLIENT-AMENDMENT-v1.0.1.md). That script registers its own refresh and visibility listeners (`:100–106`), not just static unused markup.
+
+**Defect:** A hidden or fallback secondary UI still executes, with obsolete operator instructions and a second way to report incidents. At minimum, this is a maintainability/provenance and UI-consistency defect; do not claim that the primary visible Work Queue currently shows the keyring text.
+
+**Required acceptance:** One primary status/action controller, no obsolete native-host/keyring messages anywhere in an accessible UI/notification path. Legacy data migrations/readers may remain only as isolated noninteractive compatibility code; remove or disable duplicate UI workers only after proving their live side effects and regression scope.
+
 ## Investigation queue
 
 1. Donor bootstrap and native-host/tunnel/proxy recovery state.
@@ -128,4 +138,5 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 - 2026-10-26: GAP-06 confirmed from serialized READY alarm dispatch; starvation consequence requires adversarial evidence.
 - 2026-10-26: GAP-07 confirmed sequential creation queue tick; nonsettling-operation case needs B stress.
 - 2026-10-26: GAP-08 confirmed by grant-transition versus AI alarm call-site audit.
-- 2026-10-26: GAP-09 verified timer does not bound awaited native/route preparation settlement. Subsequent sections will be appended after each subsystem inspection.
+- 2026-10-26: GAP-09 verified timer does not bound awaited native/route preparation settlement.
+- 2026-10-26: GAP-10 verified exact packaged HTML dual-script entry and obsolete legacy advice. Subsequent sections will be appended after each subsystem inspection.
