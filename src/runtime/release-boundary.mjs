@@ -17,7 +17,7 @@ import {createS06ReviewQueue} from './s06-review-queue.mjs';
 import {createS06ChangeStore} from './s06-request-changes.mjs';
 import {createS06HumanStore,createS06HumanBoundary,humanReviewParentRevision} from './s06-human-review.mjs';
 import {createS06ExceptionStore,createS06ExceptionBoundary,hasManualInfrastructure} from './s06-exception-review.mjs';
-import {standingS06} from './s06-standing-authority.mjs';
+import {standingS06,createS06ScopeGate} from './s06-standing-authority.mjs';
 import {createExistingStore} from './existing-update-store.mjs';
 import {unlockPrevious} from './existing-update-core.mjs';
 import {REFRESHER_KEY} from './refresher-core.mjs';
@@ -484,13 +484,15 @@ export function createReleaseBoundary(api,{
         return fail('EXISTING_FINAL_F_NOT_PINNED');
       if(typeof guard()?.runReleaseStep!=='function')
         return fail('RELEASE_EXECUTOR_UNAVAILABLE');
+      const authorizationGeneration=effectGate.generation?.();
       if(effectGate({phase:'I13',record:stored.record})!==true)
         return fail('PUBLICATION_ACTIVATION_HELD');
       // The dispatch-possible transition commits *before* the only effect.
       const armed=await store.markDispatch(p.slug,p.expectedRevision,checked.approval);
       if(!armed.ok)return armed;
-      if(effectGate({phase:'I13',record:stored.record})!==true||
-         (await sentinel.inspect()).held)return store.settle(p.slug,armed.revision,
+      const restoring=(await sentinel.inspect()).held;
+      if(restoring||effectGate({phase:'I13',record:stored.record})!==true||
+         authorizationGeneration!==effectGate.generation?.())return store.settle(p.slug,armed.revision,
            {reason:'ACTIVATION_REVOKED_AFTER_DISPATCH_MARK'});
       let attempt;
       try{attempt=await dispatch(guard(),{...checked.r,releaseFiles:checked.source.blobs});}
@@ -531,4 +533,4 @@ export function createReleaseBoundary(api,{
   }});
 }
 if(typeof browser!=='undefined')createReleaseBoundary(browser,{
-  effectGate:()=>standingS06?.gate('publication')===true}).register();
+  effectGate:createS06ScopeGate(standingS06,'publication')}).register();

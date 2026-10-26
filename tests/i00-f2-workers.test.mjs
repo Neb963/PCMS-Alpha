@@ -60,15 +60,21 @@ test('F2 fast single-account creation retains all eight safe transitions per wak
  assert.equal(second.selected,8);assert.equal(second.progressed,8);
  assert.equal(new Set(attempts).size,16);
 });
-for(const mode of ['REJECT','NEVER_UNTIL_RELEASE'])
- test('F2 '+mode+' READY progression cannot block changes, Git, cleanup or approved publication',async()=>{
+for(const blocked of ['ready','changes','writeback','cleanBulk','publication'])
+ for(const mode of ['REJECT','NEVER_UNTIL_RELEASE'])
+ test('F2 '+mode+' '+blocked+' progression cannot block the four independent domains',async()=>{
   const f=apiFixture(),held=barrier(),visited=[];
+  const fn=domain=>async()=>{
+   visited.push(domain);
+   if(domain===blocked){
+    if(mode==='REJECT')throw Error('PRIVATE_TOKEN_CANARY');
+    await held.promise;
+   }
+   return {ok:true};
+  };
   const watcher=createCatalogWatcher(f.api,{
-   progressReady:async()=>{visited.push('ready');if(mode==='REJECT')throw Error('PRIVATE_TOKEN_CANARY');await held.promise;return {ok:true};},
-   progressChanges:async()=>{visited.push('changes');return {ok:true};},
-   progressWriteback:async()=>{visited.push('writeback');return {ok:true};},
-   progressCleanBulk:async()=>{visited.push('cleanBulk');return {ok:true};},
-   progressPublication:async()=>{visited.push('publication');return {ok:true};}
+   progressReady:fn('ready'),progressChanges:fn('changes'),progressWriteback:fn('writeback'),
+   progressCleanBulk:fn('cleanBulk'),progressPublication:fn('publication')
   });
   watcher.register();
   try{
@@ -76,8 +82,9 @@ for(const mode of ['REJECT','NEVER_UNTIL_RELEASE'])
    assert.deepEqual([...new Set(visited)].sort(),['changes','cleanBulk','publication','ready','writeback']);
    if(mode==='NEVER_UNTIL_RELEASE'){
     f.listeners[0]({name:READY_PROGRESS_ALARM});await drain();
-    assert.equal(visited.filter(x=>x==='ready').length,1);
-    assert.ok(visited.filter(x=>x==='publication').length>=2);
+    assert.equal(visited.filter(x=>x===blocked).length,1);
+    for(const healthy of ['ready','changes','writeback','cleanBulk','publication'].filter(x=>x!==blocked))
+     assert.ok(visited.filter(x=>x===healthy).length>=2);
    }
    assert.equal(JSON.stringify([...f.state.values()]).includes('PRIVATE_TOKEN'),false);
   }finally{held.release();}

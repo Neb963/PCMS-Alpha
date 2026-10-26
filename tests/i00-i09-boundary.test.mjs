@@ -20,8 +20,11 @@ const files=()=>[{path:'main.pjs',base64:encode('let x = 2;')},
   {path:'src/empty.txt',base64:''}];
 function fixture({gate=false,lostAck=false,denyRoute=false,drift=false,dirtyOriginal=false,
   release=false,breakReadback=false,editorDirty=false,
-  routeLossAfterPrepare=false,wrongPrincipal=false}={}){
-  let current=null,version=0,routeChecks=0;
+  routeLossAfterPrepare=false,wrongPrincipal=false,finalPolicyChange=null}={}){
+  let current=null,version=0,routeChecks=0,policyAllowed=gate,policyEpoch=1,restoreHeld=false;
+  const policyGate=()=>policyAllowed;policyGate.generation=()=>policyEpoch;
+  const scopedApi={...api,storage:{local:{get:async()=>restoreHeld?
+    {pcmsRestoreInProgress:{active:true,status:'PREPARING'}}:{}}}};
   const trace=[],remote=[];
   const stage={
     list:async()=>({ok:true,items:current?[{ok:true,...current}]:[]}),
@@ -45,6 +48,10 @@ function fixture({gate=false,lostAck=false,denyRoute=false,drift=false,dirtyOrig
         return {ok:false,code:'UNVERIFIED'};
       current={...current,state,revision:revision+1,reason,
         ...(tab?{tab}:{} )};
+      if(state==='DISPATCH_POSSIBLE'&&finalPolicyChange){
+        policyEpoch++;if(finalPolicyChange==='REVOKE')policyAllowed=false;
+        if(finalPolicyChange==='RESTORE')restoreHeld=true;
+      }
       return {ok:true,state,revision:current.revision,candidateFingerprint:current.candidate.fingerprint};
     },
     recover:async()=>({ok:true,held:0})
@@ -82,9 +89,9 @@ function fixture({gate=false,lostAck=false,denyRoute=false,drift=false,dirtyOrig
     fingerprint:drift&&q.includeSourceBytes!==true?'e'.repeat(64):'d'.repeat(64),
     testingSha:'c'.repeat(64),sourceBytes:files()
   });
-  const boundary=createStagingBoundary(api,{open:async()=>({}),guard:()=>guard,
+  const boundary=createStagingBoundary(scopedApi,{open:async()=>({}),guard:()=>guard,
     storeFactory:()=>stage,supplyLookup:async()=>({ok:true,account:acct,item,link}),
-    effectGate:()=>gate,inspect});
+    effectGate:policyGate,inspect});
   const run=(type,params={})=>boundary.run({type,params},sender);
   const pin=()=>run('PIN_STAGE',{slug:'stage-one',token:'read-only-git-token'});
   const dispatch=()=>run('STAGE_PRIVATE',{slug:'stage-one',token:'read-only-git-token',
@@ -202,3 +209,15 @@ test('X-I09 adversarial: route loss after PREPARED leaves no possible dispatch o
   assert.deepEqual(f.remote,[]);
   assert.equal((await f.dispatch()).code,'RECONCILIATION_REQUIRED');
 });
+
+for(const finalPolicyChange of ['REVOKE','REVOKE_REGRANT','RESTORE'])
+ test('F2 private staging fences '+finalPolicyChange+' after marker commit and preserves every source byte',async()=>{
+  const f=fixture({gate:true,finalPolicyChange});
+  assert.equal((await f.pin()).ok,true);
+  const pinned=structuredClone(f.current.candidate),previous=structuredClone(f.current.previous);
+  const out=await f.dispatch();
+  assert.equal(out.code,'STAGING_ACTIVATION_REVOKED_AFTER_MARKER');
+  assert.equal(f.current.state,'DISPATCH_POSSIBLE');
+  assert.deepEqual(f.remote,[]);assert.deepEqual(f.trace,['PREPARED','DISPATCH_POSSIBLE']);
+  assert.deepEqual(f.current.candidate,pinned);assert.deepEqual(f.current.previous,previous);
+ });
