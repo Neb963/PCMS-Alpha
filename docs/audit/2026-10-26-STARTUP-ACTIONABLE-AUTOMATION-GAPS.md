@@ -43,6 +43,16 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 ---
 
+### GAP-03 — Unmapped incident classes navigate to an unrelated Work Queue search (P0)
+
+**Status:** CONFIRMED CODE; precise incidence depends on stored incident target availability.
+
+**Source:** `src/runtime/journal.mjs:280–283` accepts 11 notice codes. `src/ui/faithful/attention.mjs:9–16` maps four fallback classes to Accounts/Settings, but otherwise returns `{kind:'INCIDENT',id:n.scopeId}`. `src/ui/faithful/bridge.mjs:1273–1288` responds to all unmapped kinds by filtering Work Queue by that ID. Queue search in `bridge.mjs:656–678` asks operation/release/AI records, **not a typed remediation handler for each notice class**.
+
+**Concrete missing fallbacks:** `SOURCE_HELD`, `CANONICAL_UNAVAILABLE`, `OPERATION_UNCERTAIN`, `GIT_FOLDER_MISSING`, `GIT_FOLDER_RENAME_REVIEW` (when no valid explicit target). Even with a valid target, a route to the right page is not proof that the page exposes the required action. The storage-unavailable class cannot be repaired merely by searching operation rows.
+
+**Required acceptance:** A generated machine-readable matrix of **every notice code × target present/absent × current state** → relevant contextual page, root-cause explanation, working remedy or declared safe hold. Verify navigation to actual control and its resulting readback; no empty queue dead end. Deduplicate shared upstream failures.
+
 ## Investigation queue
 
 1. Donor bootstrap and native-host/tunnel/proxy recovery state.
@@ -55,4 +65,5 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 ## Change log
 
-- 2026-10-26: Initialized with GAP-01 and GAP-02 from operator screenshots plus current source verification. Subsequent sections will be appended after each subsystem inspection.
+- 2026-10-26: Initialized with GAP-01 and GAP-02 from operator screenshots plus current source verification.
+- 2026-10-26: GAP-03 verified by code-to-UI notice destination trace. Subsequent sections will be appended after each subsystem inspection.
