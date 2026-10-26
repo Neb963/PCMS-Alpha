@@ -63,6 +63,16 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 **Acceptance:** Helper down → tunnel/proxy recover → fresh account-specific protected egress and principal facts → route status updated → stale code gone; negative when shared helper is ready but one account exit remains unsafe. No operator forced to visit PersonaMonkey settings for ordinary transient recovery.
 
+### GAP-05 — No event-driven shared-helper recovery; an otherwise recoverable account may wait for the next periodic sweep (P1)
+
+**Status:** CONFIRMED CODE delay/topology; measurable latency NEEDS runtime proof.
+
+**Source:** `src/runtime/account-boundary.mjs:323–329` creates `pcms-s01-route-upkeep` after 1 minute, recurring every 10 minutes; its only route-upkeep dispatch is the alarm callback. `src/runtime/enrollment.mjs:577–616` includes genuine automatic repair and inventory/reverification logic. `src/runtime/overlay.mjs:163–167` can re-read native readiness. **No source path observed subscribes to donor native-helper/tunnel recovery to immediately schedule account route reconciliation.**
+
+**Effect:** The code already has *some* automatic route recovery; the defect is **not** “no retry implementation.” A transient host outage that ends immediately after one failed sweep may retain account holds until another periodic sweep (and dependency failures may arise sooner). A button labeled *Check connection* obtains new shared status but does not schedule a protected account-specific follow-up.
+
+**Required acceptance:** On observed host change/recovery, coalesce a bounded, independent `upkeep` wake (with jitter/backoff and safe constraints), not a burst of unsafe route preparations. Verify 1/3/50 account fairness, no duplicate native prepares, no unverified exit reuse, and keep the ordinary 10-minute fallback.
+
 ## Investigation queue
 
 1. Donor bootstrap and native-host/tunnel/proxy recovery state.
@@ -77,4 +87,5 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 - 2026-10-26: Initialized with GAP-01 and GAP-02 from operator screenshots plus current source verification.
 - 2026-10-26: GAP-03 verified by code-to-UI notice destination trace.
-- 2026-10-26: GAP-04 verified against donor connection read and persisted account projection. Subsequent sections will be appended after each subsystem inspection.
+- 2026-10-26: GAP-04 verified against donor connection read and persisted account projection.
+- 2026-10-26: GAP-05 verified: periodic recovery exists but lacks host-ready event wake. Subsequent sections will be appended after each subsystem inspection.
