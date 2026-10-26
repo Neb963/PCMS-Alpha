@@ -120,11 +120,14 @@ export function createAccountBoundary(api,{
   const readiness=createProtectedReadinessCoordinator(api,{
     list:async()=>(await store()).list(),held:async()=>(await sentinel.inspect()).held,
     connection:async()=>guard()?.enrollmentDonor?.inspectConnection?.(),
-    hold:(bindingId,code,accountId)=>{
+    hold:(bindingId,code,accountId,current=()=>true)=>{
       pins.hold(bindingId);
       return checkpointed(api,async()=>{
-        await (await exitLedger()).hold(bindingId,code);
-        if(!(await sentinel.inspect()).held)await (await store()).applyCurrent({type:'ROUTE_STATUS',accountId,status:'HELD',code,at:Date.now()});
+        const ledger=await exitLedger();if(!current())return;
+        await ledger.hold(bindingId,code);
+        const accounts=await store();
+        if(current()&&!(await sentinel.inspect()).held&&current())
+          await accounts.applyCurrent({type:'ROUTE_STATUS',accountId,status:'HELD',code,at:Date.now()});
       })();
     },activePersonas:async()=>guard()?.enrollmentDonor?.activePersonaUids?.(),
     check:async accountId=>{

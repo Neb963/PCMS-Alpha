@@ -49,11 +49,12 @@ export function createProtectedReadinessCoordinator(api,{list,connection,check,i
   let timer;try{return await Promise.race([actual,new Promise(r=>{timer=setTimeout(()=>r({ok:false,code:'ROUTE_OBSERVATION_TIMEOUT'}),observationMs);})]);}
   finally{clearTimeout(timer)}
  }
- const demands=new Set();let lastSuccess=null,known=[],pendingWake=false,nativeReady=null,idleStopped=false;
+ const demands=new Set();let lastSuccess=null,known=[],pendingWake=false,nativeReady=null,nativeGeneration=0,idleStopped=false,hostAttempts=0;
  async function load(){
   const saved=(await api.storage.local.get(READINESS_RECEIPT))?.[READINESS_RECEIPT];
   lastSuccess=Number.isSafeInteger(saved?.lastSuccess)?saved.lastSuccess:null;
   idleStopped=saved?.idleStopped===true;
+  hostAttempts=Number.isSafeInteger(saved?.hostAttempts)?Math.max(0,Math.min(12,saved.hostAttempts)):0;
   for(const row of Array.isArray(saved?.pending)?saved.pending.slice(0,1000):[])
    if(typeof row?.accountId==='string'&&/^[A-Za-z0-9_-]{8,100}$/.test(row.accountId)&&Number.isSafeInteger(row.nextRetry))queue.set(row.accountId,{
     accountId:row.accountId,attempts:Number.isSafeInteger(row.attempts)?Math.max(0,Math.min(12,row.attempts)):0,
@@ -75,7 +76,7 @@ export function createProtectedReadinessCoordinator(api,{list,connection,check,i
   const next=queue.size?Math.min(...[...queue.values()].map(r=>r.nextRetry)):null;
   await api.storage.local.set({[READINESS_RECEIPT]:{schema:1,lastAttempt:clock(),lastSuccess,checkpoint,
    failureCode,nextSafeRetry:next,scope,causalRoot:failureCode?.startsWith('MULLVAD_')?'personamonkey_connection':'protected_account',
-   idleStopped,pending:[...queue.values()].slice(0,1000)}});
+   idleStopped,hostAttempts,pending:[...queue.values()].slice(0,1000)}});
  }
  async function perform(){
   await (hydrate||=load().catch(error=>{hydrate=null;throw error}));
@@ -105,9 +106,11 @@ export function createProtectedReadinessCoordinator(api,{list,connection,check,i
   const host=await observe('connection',connection);
   if(!host||host.installed!==true||host.compatible!==true){
    const code=host?.code||'DONOR_STARTING';
-   for(const row of queue.values()){row.nextRetry=clock()+60000;row.failureCode=code;}
+   const delay=Math.min(60000,1000*2**Math.min(6,hostAttempts++));
+   for(const row of queue.values()){row.nextRetry=clock()+delay;row.failureCode=code;}
    await receipt('WAITING_FOR_DONOR',code);await schedule();return {ok:false,code};
   }
+  hostAttempts=0;
   const selected=[...queue.values()].filter(r=>r.nextRetry<=clock())
    .sort((a,b)=>a.lastAttempt-b.lastAttempt||a.accountId.localeCompare(b.accountId)).slice(0,maxPerTurn);
   // Persist fair advancement before waiting on any potentially slow account.
@@ -123,6 +126,7 @@ export function createProtectedReadinessCoordinator(api,{list,connection,check,i
      const a=active.find(a=>a.accountId===row.accountId);if(a)accountReadinessObserved(a.personaUid);
     }else{
      const code=typeof result?.code==='string'&&/^[A-Z0-9_]{3,64}$/.test(result.code)?result.code:'ENROLLMENT_INTERRUPTED';
+     row.failureCode=code;
      failures.push({accountId:row.accountId,code});
      if(retryable(code))row.nextRetry=clock()+Math.min(300000,15000*2**Math.min(5,row.attempts));
      else queue.delete(row.accountId); // explicit individual safety hold
@@ -147,19 +151,22 @@ export function createProtectedReadinessCoordinator(api,{list,connection,check,i
   subscribe(event=>{
    if(event.kind==='DEMAND')return wake({personaUid:event.personaUid});
    else if(event.kind==='DONOR_AVAILABLE'){
+    hostAttempts=0;
     for(const row of queue.values())if(row.failureCode==='DONOR_STARTING')row.nextRetry=clock();
     void wake();
    }
    else if(event.kind==='NATIVE_CHANGED'){
+    const generation=++nativeGeneration;
     const recovered=event.ready&&nativeReady!==true;nativeReady=event.ready;
     if(event.idle){idleStopped=true;void receipt('IDLE').catch(()=>{});}
     if(!event.ready)for(const a of known)if(a.bindingId){
-     try{void Promise.resolve(hold(a.bindingId,idleStopped?'ROUTE_IDLE':event.code||'DONOR_READINESS_LOST',a.accountId)).catch(()=>{});}catch{}
+     try{void Promise.resolve(hold(a.bindingId,idleStopped?'ROUTE_IDLE':event.code||'DONOR_READINESS_LOST',a.accountId,
+       ()=>generation===nativeGeneration&&nativeReady===false)).catch(()=>{});}catch{}
      if(!idleStopped&&a.state!=='ARCHIVED')add(a);
     }
     // An intentional idle stop does not enqueue healthy idle accounts.
     if(recovered){
-     idleStopped=false;
+     idleStopped=false;hostAttempts=0;
      for(const row of queue.values())if(/^(MULLVAD_|DONOR_)/.test(row.failureCode||''))row.nextRetry=clock();
      void wake({recovery:true});
     }

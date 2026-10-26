@@ -3,21 +3,22 @@ import assert from 'node:assert/strict';
 import {createProtectedReadinessCoordinator,READINESS_RECEIPT,publishNativeReadiness,subscribeProtectedReadiness} from '../src/runtime/protected-readiness.mjs';
 import {createPersonaGuard} from '../src/runtime/persona-guard.mjs';
 function fixture(count=3,{saved=null,check=async()=>({ok:true}),host={installed:true,compatible:true,ready:true},observationMs=40000}={}){
- let now=100000,listener;const data=saved?{[READINESS_RECEIPT]:saved}:{},alarms=new Map(),holds=[],calls=[];
+ let now=100000,listener;const data=saved?{[READINESS_RECEIPT]:saved}:{},alarms=new Map(),holds=[],holdFences=[],calls=[];
  const accounts=Array.from({length:count},(_,i)=>({accountId:'account_'+String(i).padStart(5,'0'),personaUid:'persona-'+String(i).padStart(5,'0'),
   bindingId:'binding_'+String(i).padStart(5,'0'),state:'VERIFIED',route:{status:'PINNED'}}));
  const event={addListener(){}};
  const api={storage:{local:{get:async k=>({[k]:structuredClone(data[k])}),set:async v=>Object.assign(data,structuredClone(v))},onChanged:event},
   alarms:{get:async k=>alarms.get(k),create:async(k,v)=>alarms.set(k,{scheduledTime:v.when}),onAlarm:event},runtime:{onStartup:event,onInstalled:event}};
  const coordinator=createProtectedReadinessCoordinator(api,{clock:()=>now,observationMs,list:async()=>({ok:true,accounts}),
-  connection:async()=>host,check:async id=>{calls.push(id);return check(id)},hold:id=>holds.push(id),subscribe:fn=>{listener=fn;return ()=>{}}});
- return {coordinator,accounts,data,alarms,holds,calls,host,advance:ms=>now+=ms,event:e=>listener(e)};
+  connection:async()=>host,check:async id=>{calls.push(id);return check(id)},hold:(id,code,accountId,current)=>{holds.push(id);holdFences.push(current)},subscribe:fn=>{listener=fn;return ()=>{}}});
+ return {coordinator,accounts,data,alarms,holds,holdFences,calls,host,advance:ms=>now+=ms,event:e=>listener(e)};
 }
 test('F1 readiness: delayed donor stays closed; compatible stopped donor starts one account at a time; all 50 independent accounts get a turn',async()=>{
  let active=0,max=0;const h=fixture(50,{host:{installed:false,compatible:false,ready:false,code:'MULLVAD_LOCAL_SERVICE_UNAVAILABLE'},
   check:async id=>{active++;max=Math.max(max,active);await new Promise(r=>setImmediate(r));active--;return id.endsWith('00001')?{ok:false,code:'EXIT_DRIFT_CONFLICT'}:{ok:true}}});
  assert.equal((await h.coordinator.turn()).ok,false);assert.equal(h.calls.length,0);
  assert.equal(h.data[READINESS_RECEIPT].pending.length,50);assert.equal(h.data[READINESS_RECEIPT].checkpoint,'WAITING_FOR_DONOR');
+ assert.equal(h.data[READINESS_RECEIPT].nextSafeRetry,101000,'cold donor setup gets a prompt read-only retry before long outage backoff');
  Object.assign(h.host,{installed:true,compatible:true});h.advance(60000);
  for(let i=0;i<13;i++)await h.coordinator.turn();
  assert.equal(new Set(h.calls).size,50);assert.equal(h.calls.length,50);assert.equal(max,1,'only donor may bring up the stopped tunnel, no burst');
@@ -74,4 +75,11 @@ test('F1 admission waits for existing readiness work and independently rechecks 
   finish();assert.equal((await waiting).ready,true);
   pinned=false;healthy=false;repair=false;assert.equal((await guard.getSafeRouteReadiness('persona-fixture')).ready,false);
  }finally{finish();off();}
+});
+test('F1 recovery generation: a delayed dependency-hold writer becomes stale when a newer native observation arrives',async()=>{
+ const h=fixture(1);h.coordinator.register();await h.coordinator.turn();
+ h.event({kind:'NATIVE_CHANGED',ready:false,idle:true});
+ assert.equal(h.holdFences[0](),true);
+ h.event({kind:'NATIVE_CHANGED',ready:true});assert.equal(h.holdFences[0](),false);
+ await h.coordinator.turn();
 });

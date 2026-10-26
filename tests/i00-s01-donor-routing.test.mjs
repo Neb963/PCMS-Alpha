@@ -242,6 +242,8 @@ test('F1 donor restart: an unresolved durable preparation is inspected without d
   nativeStatus:{installed:true,compatible:true,ready:true,pending_prepare_routes:['mullvad-7']}});
  a.set(legacyState());const out=await a.donor.inspectPreparation({routeId:'mullvad-7'});
  assert.equal(out.ok,false);assert.equal(out.code,'MULLVAD_ROUTE_UNCONFIRMED');assert.equal(calls,0);assert.deepEqual(a.effects,[]);
+ const missing=adapter(await background(),{nativeStatus:{installed:false}});
+ assert.equal((await missing.donor.inspectPreparation({routeId:'mullvad-7'})).code,'MULLVAD_LOCAL_SERVICE_UNAVAILABLE','pending account metadata never disguises the unavailable shared helper');
 });
 
 test('S01 upgrade adapter D: production adapter tags the EXISTING Persona in place (route/session untouched), idempotently',async()=>{

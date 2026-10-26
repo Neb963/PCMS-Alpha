@@ -30,4 +30,7 @@ test('J01 Attention includes identity-verified accounts with held, checking, mis
  assert.equal(accountNeedsAttention({...ready,state:'ARCHIVED',route:{status:'HELD'}}),false);
  assert.equal(accountNeedsAttention({...ready,state:'WAITING_LOGIN'}),true);
  assert.equal(accountLabel({...ready,working:true,activity:{timedOut:true},route:{status:'HELD'}}),'Connection outcome pending');
+ const idle={...ready,route:{status:'HELD',code:'ROUTE_IDLE'},readiness:{ready:false}};
+ assert.equal(accountNeedsAttention(idle),false,'intentional idle stop is informational; real admission remains guarded');
+ assert.equal(accountLabel(idle),'Resting');assert.equal(accountNeedsAttention({...idle,route:{status:'HELD',code:'EXIT_DRIFT_CONFLICT'}}),true);
 });

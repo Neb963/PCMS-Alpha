@@ -24,10 +24,12 @@ const ERRORS={ACCOUNT_BUSY:'This account is finishing another action. Other acco
  ACCOUNT_ARCHIVED:'Reactivate this account before resuming its managed work.'};
 export function accountNeedsAttention(a){
  if(a.state==='ARCHIVED'||a.removed)return false;
+ if(a.state==='VERIFIED'&&a.route?.code==='ROUTE_IDLE')return false;
  return a.state!=='VERIFIED'||a.protectedRoute!=='PCMS_PINNED'||a.route?.status!=='PINNED'||a.readiness?.ready===false;
 }
 export const accountLabel=a=>a.removed?'Removed':
  a.state!=='ARCHIVED'&&a.activity?.timedOut?'Connection outcome pending':
+ a.state==='VERIFIED'&&a.route?.code==='ROUTE_IDLE'?'Resting':
  a.state==='PREPARING'&&a.setup?.phase==='HELD'?'Setup needs attention':
  a.state==='VERIFIED'&&a.protectedRoute==='UPGRADING'?'Upgrading route':
  a.state==='VERIFIED'&&a.protectedRoute==='LEGACY_UNPINNED'?'Route upgrade needed':
