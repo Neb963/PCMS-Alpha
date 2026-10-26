@@ -28,6 +28,15 @@ export function createScopeObservation(api,domain,{clock=Date.now,observationMs=
  if(!diagnostics){diagnostics={rows:new Map(),serial:null,dirty:false,loaded:false,
   unavailable:false,persisted:false,sequence:0,confirmed:0,versions:new Map(),pendingNotes:0};pool.receipts.set(domain,diagnostics);}
  const key=KEY+domain;
+ function reportDiagnostic(checkpoint){
+  if(typeof onFailure!=='function')return;
+  void hash(domain+'\0diagnostic-storage').then(scope=>{
+   const row={domain,scope,lastAttempt:clock(),lastSuccessfulProgression:null,checkpoint,
+    failureCode:checkpoint==='PROGRESSED'?null:'SCOPE_CHECKPOINT_FAILED',
+    nextSafeRetry:null,causalRoot:scope};
+   try{void Promise.resolve(onFailure(row)).catch(()=>{});}catch{}
+  }).catch(()=>{});
+ }
  function flush(){
   diagnostics.dirty=true;diagnostics.persisted=false;if(diagnostics.serial)return;
   diagnostics.serial=Promise.resolve().then(async()=>{
@@ -70,10 +79,12 @@ export function createScopeObservation(api,domain,{clock=Date.now,observationMs=
     const readback=(await api.storage.local.get(key))?.[key];
     if(JSON.stringify(readback)!==JSON.stringify({schema:1,domain,rows}))
      throw Error('OBSERVATION_READBACK_UNVERIFIED');
-    diagnostics.confirmed=revision;diagnostics.unavailable=false;
+    diagnostics.confirmed=revision;
+    if(diagnostics.unavailable)reportDiagnostic('PROGRESSED');
+    diagnostics.unavailable=false;
     diagnostics.persisted=revision===diagnostics.sequence;
    }
-  }).catch(()=>{diagnostics.unavailable=true;diagnostics.persisted=false;})
+  }).catch(()=>{diagnostics.unavailable=true;diagnostics.persisted=false;reportDiagnostic('FAILED');})
    .finally(()=>{diagnostics.serial=null;if(diagnostics.dirty&&!diagnostics.unavailable)flush();});
  }
  // Diagnostics never contain exception messages, credentials, URLs, raw IDs,

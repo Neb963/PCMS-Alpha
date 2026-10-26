@@ -46,3 +46,16 @@ test('F2 restore starting during incident-store acquisition prevents the later c
  for(let i=0;i<20;i++)await new Promise(resolve=>setImmediate(resolve));
  assert.equal(f.notes().length,0);assert.equal(f.desktop.length,0);
 });
+
+test('F2 failed receipt persistence itself reaches Attention and clears only after actual storage readback recovers',async()=>{
+ const f=fixture(),key='pcmsWorkObservation:ready',raw=f.api.storage.local.get;let failed=true;
+ f.api.storage.local.get=async k=>{if(k===key&&failed)throw Error('PRIVATE_TOKEN_CANARY');return raw(k);};
+ const a=createScopeObservation(f.api,'ready',{onFailure:f.sink});
+ assert.equal((await a.run(['generator:one'],async()=>({ok:true}))).ok,true);
+ await until(()=>f.notes().length===1);
+ const note=f.notes()[0];assert.equal(note.state,'ACTIVE');assert.equal(a.receipt().durability,'UNAVAILABLE');
+ failed=false;await a.run(['generator:one'],async()=>({ok:true,code:'NO_WORK'}));
+ await until(()=>a.receipt().durability==='VERIFIED'&&f.db.read('meta',note.key).state==='RESOLVED');
+ assert.equal(a.receipt().rows[0].lastSuccessfulProgression,null,'repairing diagnostics does not invent source progression');
+ assert.equal(JSON.stringify(f.notes()).includes('PRIVATE_TOKEN'),false);
+});
