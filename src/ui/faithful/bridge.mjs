@@ -4,7 +4,7 @@ import {OPERATION_STATES,operationGroup} from '../operation-context.mjs';
 import {installInteraction} from './interaction.mjs';
 import {mountOperatorChecklist} from '../operator-checklist.mjs';
 import {mountBackupWorkspace} from './backup-workspace.mjs';
-import {acknowledgeIncident,incidentDestination} from './attention.mjs';
+import {acknowledgeIncident,incidentDestination,readIncidentContext} from './attention.mjs';
 import {createRefresherWorkspace} from './refresher-workspace.mjs';
 import {matchesReviewGroup} from '../review-queue-state.mjs';
 import {renderGitInventory,mountGitPromptEditor} from './git-workspace.mjs';
@@ -1271,22 +1271,90 @@ function openOperationRecord(op){
  header.querySelector('button')?.focus();
 }
 async function openIncident(n){
- const target=incidentDestination(n);
+ const observed=await readIncidentContext(n,{
+  getNotice:params=>readPort('pcms-i02-canonical-readonly','GET_NOTICE_CONTEXT',params),
+  getAccount:accountId=>readPort('pcms-i03-accounts','INSPECT_ACCOUNT',{accountId}),
+  getGenerator:async slug=>{
+   const out=await readPort('pcms-i04-inventory','INSPECT_GENERATORS',{slugs:[slug]});
+   const row=out.items?.find(g=>g.slug===slug&&!g.missing);
+   return {...out,generator:row};
+  },
+  getOperation:operationId=>readPort('pcms-i02-canonical-readonly','GET_OPERATION_CONTEXT',{operationId})
+ });
+ const target=observed.destination;
  if(target.kind==='SETTINGS'){
   if(target.id==='refresher'){routeTo('refresher');return}
   state.settings=target.id;routeTo('settings');return;
  }
- if(target.kind==='ACCOUNT'){
-  const response=await accounts(),account=response?.accounts?.find(a=>a.accountId===target.id);
-  if(account){openAccountManager(account);return}
-  state.acct.query=target.id;routeTo('accounts');notify('The affected account could not be read. Retry its account details.');return;
+ if(observed.targetState==='CURRENT'){
+  if(target.kind==='ACCOUNT'){openAccountManager(observed.entity);return}
+  if(target.kind==='OPERATION'){openOperationRecord(observed.entity);return}
+  if(target.kind==='GENERATOR'){
+   if(n.code==='GIT_FOLDER_RENAME_REVIEW'){
+    state.queue.query=target.id;state.queue.filter='All';routeTo('work-queue');return;
+   }
+   openSourceManager({slug:target.id});return;
+  }
  }
- if(target.kind==='GENERATOR'){
-  if(n.code==='GIT_FOLDER_RENAME_REVIEW'){state.queue.query=target.id;state.queue.filter='All';routeTo('work-queue');return}
-  openSourceManager({slug:target.id});return;
- }
- state.queue.query=target.id;state.queue.filter='All';routeTo('work-queue');
+ openIncidentContext(observed);
 }
+function openIncidentContext(observed){
+ const n=observed.notice,previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('section','drawer');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');
+ panel.setAttribute('aria-label','Incident details');
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const head=el('div','drawer-head');head.append(el('h2','drawer-title','Incident details'),b('Close',close));
+ const body=el('div','drawer-body'),status=el('p','setting-note',
+  observed.ok===false?'Saved incident details could not be read. Its outcome remains unverified.':
+  n.state==='RESOLVED'?'Verified recovery is recorded. The incident history is retained.':
+  n.reviewed?'Reviewed; this incident is still active.':'This incident is still active.');
+ status.setAttribute('role','status');body.append(status);
+ const help={
+  ROUTE_UNAVAILABLE:'Check the affected account and its PersonaMonkey connection before new protected work.',
+  ACCOUNT_UNVERIFIED:'Open Accounts to verify the original login and identity.',
+  SOURCE_HELD:'Inspect the saved source and candidate history before changing the source.',
+  RESTORE_IN_PROGRESS:'Open Backups to inspect the current restore and reconciliation hold.',
+  CANONICAL_UNAVAILABLE:'Open Diagnostics to check browser-local records. Existing operations remain held.',
+  OPERATION_UNCERTAIN:'A possible remote result remains held. Inspect its saved operation and original account; do not resubmit it.',
+  PROVIDER_OUTAGE:'Open Refresher to inspect the current provider and account observations.',
+  BACKUP_FAILED:'Open Backups to inspect the export and saved source status.',
+  GIT_RECONNECT_REQUIRED:'Open Connections to read the current GitHub failure before replacing credentials.',
+  GIT_FOLDER_MISSING:'Inspect missing Git sources and retained local history. The live generator is preserved.',
+  GIT_FOLDER_RENAME_REVIEW:'Review the recorded old and new source identities before choosing how to proceed.'
+ };
+ body.append(el('p','setting-note',help[n.code]||'Inspect current diagnostics before taking another action.'));
+ if(observed.targetState==='STALE')body.append(el('p','setting-note','The original target is no longer available in current records. Its saved incident is preserved.'));
+ else if(observed.targetState==='UNAVAILABLE')body.append(el('p','setting-note','The current target could not be verified. Retry the read when its records are available.'));
+ const actions=el('div','form-foot');
+ const openAccounts=()=>{close();state.acct.query='';routeTo('accounts')};
+ const settings=id=>()=>{close();if(id==='refresher')routeTo('refresher');else{state.settings=id;routeTo('settings')}};
+ if(['ROUTE_UNAVAILABLE','ACCOUNT_UNVERIFIED','OPERATION_UNCERTAIN'].includes(n.code))
+  actions.append(b('Open Accounts',openAccounts));
+ if(['GIT_FOLDER_MISSING','GIT_FOLDER_RENAME_REVIEW','SOURCE_HELD'].includes(n.code))
+  actions.append(b('Inspect source work',()=>{close();state.queue.query='';state.queue.filter='All';routeTo('work-queue')}));
+ const destination=['RESTORE_IN_PROGRESS','BACKUP_FAILED'].includes(n.code)?'backups':
+  n.code.startsWith('GIT_')||n.code==='ROUTE_UNAVAILABLE'?'connections':
+  n.code==='PROVIDER_OUTAGE'?'refresher':'diagnostics';
+ actions.append(b(({backups:'Open Backups',connections:'Open Connections',refresher:'Open Refresher',diagnostics:'Open Diagnostics'})[destination],settings(destination)),
+  b('Check saved incident',()=>{close();void openIncident(n)}));
+ body.append(actions);
+ const technical=el('details'),fields=el('dl');technical.append(el('summary','','Recorded incident'));
+ for(const [name,value] of [['Problem',n.code],['Original cause',n.firstReason||n.firstCause||n.code],
+  ['Current cause',n.reason||n.cause||n.code],['Events',n.count||1],
+  ['First observed',Number.isSafeInteger(n.firstAt)?new Date(n.firstAt).toLocaleString():'Not recorded'],
+  ['Last observed',Number.isSafeInteger(n.lastAt)?new Date(n.lastAt).toLocaleString():'Not recorded']]){
+  const row=el('div','kv');row.append(el('dt','',name),el('dd','',value));fields.append(row);
+ }
+ technical.append(fields);
+ for(const h of n.history||[])technical.append(el('p','setting-note',
+  (h.event||'Recorded change')+(Number.isSafeInteger(h.at)?' · '+new Date(h.at).toLocaleString():'')+
+  (h.evidence?' · '+h.evidence:'')+(h.reason?' · '+h.reason:'')));
+ body.append(technical);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ head.querySelector('button')?.focus();
+}
+
 function readQueueNoticeAck(n){
  return new Promise((resolve,reject)=>{
   const port=browser.runtime.connect({name:'pcms-i02-canonical-readonly'});

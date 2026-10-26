@@ -30,3 +30,34 @@ export async function acknowledgeIncident(n,request){
  return after?.revision===fresh.revision&&after.reviewed===true?
   {ok:true,stillActionable:true,reviewed:true,observed:true}:{ok:false,code:result?.code||'NOTICE_ACK_UNKNOWN'};
 }
+
+// Fresh observations are navigation context, never effect or ownership authority.
+// An opaque incident scope is never converted into an account/slug/operation ID.
+export async function readIncidentContext(snapshot,{getNotice,getAccount,getGenerator,getOperation}={}){
+ const safe={ok:false,notice:snapshot,targetState:'UNAVAILABLE',
+  destination:validIncidentTarget(snapshot?.target)&&snapshot.target.kind==='SETTINGS'?
+   snapshot.target:incidentDestination({...snapshot,target:undefined},{targetState:'ABSENT'}),
+  providerEffects:'NONE'};
+ let response;try{response=await getNotice({scopeId:snapshot.scopeId,code:snapshot.code});}catch{return safe;}
+ const n=response?.notice;
+ if(response?.ok!==true||!n||n.scopeId!==snapshot.scopeId||n.code!==snapshot.code||
+   !Number.isSafeInteger(n.revision)||n.revision<1)return safe;
+ const result={ok:true,notice:n,targetState:'ABSENT',
+  destination:incidentDestination({...n,target:undefined},{targetState:'ABSENT'}),providerEffects:'NONE'};
+ if(!validIncidentTarget(n.target))return result;
+ const target=n.target;
+ if(target.kind==='SETTINGS')return {...result,targetState:'CURRENT',destination:target};
+ let observed;
+ try{observed=await (target.kind==='ACCOUNT'?getAccount(target.id):
+  target.kind==='GENERATOR'?getGenerator(target.id,n.code):getOperation(target.id));}
+ catch{return {...result,targetState:'UNAVAILABLE'};}
+ const entity=target.kind==='ACCOUNT'?observed?.account:
+  target.kind==='GENERATOR'?observed?.generator:observed?.context;
+ const identity=target.kind==='ACCOUNT'?entity?.accountId:
+  target.kind==='GENERATOR'?entity?.slug:entity?.operationId;
+ if(observed?.ok===true&&identity===target.id&&
+   Number.isSafeInteger(entity?.revision)&&entity.revision>0)
+  return {...result,targetState:'CURRENT',destination:target,entity};
+ return {...result,targetState:observed?.ok===false&&
+  /UNAVAILABLE|HOLD|BUSY|TIMEOUT/.test(observed.code||'')?'UNAVAILABLE':'STALE'};
+}
