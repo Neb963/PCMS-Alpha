@@ -127,6 +127,23 @@ test('Issue60: confirmed native credentials survive status renewal; a real new p
  const nextGeneration=runtime.recoveryGeneration(route.id);runtime.drop(route.id);
  assert.equal(runtime.acceptObservedPreparation(route,endpoint,first.password,now,nextGeneration),false);
 });
+test('F1 donor idle policy: sixteen idle minutes stop the tunnel; a later due route uses donor autoStart and fresh authentication',async()=>{
+ const code=await readFile('/tmp/pcms-issue60-native-d/xpi-root/lib/mullvad-runtime.js','utf8');
+ const {createMullvadRuntime}=await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64')+'#f1-idle');
+ let now=100000,prepares=0,stops=0;const events=[],data={};
+ const route={id:'route_f1_idle',host:'10.124.0.7',port:1080,provider:'mullvad'};
+ const endpoint={route_id:route.id,relay_ip:route.host,relay_port:1080,local_host:'127.0.0.1',local_port:5501};
+ const status={installed:true,ready:true,version:'0.3.0',interface_up:true,base_proxy_reachable:true,pending_prepare_routes:[],active_exits:[]};
+ const runtime=createMullvadRuntime({now:()=>now,onReadiness:(s,why)=>events.push({ready:s.ready,idle:why?.idle===true}),
+  getState:async()=>({global:{mullvadNative:{autoStart:true,autoStopMinutes:15}},routes:{[route.id]:route},profiles:{}}),
+  browserApi:{tabs:{query:async()=>[]},storage:{local:{get:async k=>({[k]:data[k]}),set:async v=>Object.assign(data,v),remove:async k=>{delete data[k]}}}},
+  operations:{getStatus:async()=>structuredClone(status),prepareExit:async(r,start)=>{assert.equal(start,true);prepares++;status.ready=true;status.interface_up=true;status.active_exits=[endpoint];return endpoint},
+   stopTunnel:async()=>{stops++;status.ready=false;status.interface_up=false;status.active_exits=[]}}});
+ const initial=await runtime.resolve(route);assert.equal(prepares,1);
+ now+=16*60*1000;assert.equal(await runtime.maybeStopIdle(),true);assert.equal(stops,1);assert.ok(events.some(e=>e.idle));
+ const due=await runtime.resolve(route,{fresh:true});assert.equal(prepares,2);assert.ok(due);assert.notEqual(due.password,initial.password);
+ assert.equal(stops,1,'no permanent tunnel override was added');
+});
 
 test('Issue60: restore apply serializes with native receipt creation and never overwrites its private nonce or credential',async()=>{
  const key='personaMullvadPendingPrepare:restore_race',local={},storage={get:async k=>({[k]:local[k]}),set:async value=>Object.assign(local,value)};

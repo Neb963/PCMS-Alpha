@@ -19,15 +19,15 @@ export const SETUP_MESSAGES=Object.freeze({
   ENROLLMENT_INTERRUPTED:'Protected setup was interrupted. Resume setup checks the saved Persona and route before continuing.',
   MULLVAD_RELAY_CATALOG_UNAVAILABLE:'The Mullvad relay list is unavailable. Existing verified routes remain usable; resume setup when the connection returns.',
   MULLVAD_LOCAL_SERVICE_UNAVAILABLE:'The PersonaMonkey Mullvad helper is not running or not installed on this computer.',
-  MULLVAD_STATUS_TIMEOUT:'The Mullvad helper did not answer the connection check in time. Retry the route check; other work remains available.',
+  MULLVAD_STATUS_TIMEOUT:'The Mullvad helper did not answer in time. PCMS checks again automatically; other work remains available.',
   MULLVAD_HELPER_INCOMPATIBLE:'The installed PersonaMonkey Mullvad helper needs a compatible update before protected routes can be used.',
-  MULLVAD_PROXY_UNREACHABLE:'The Mullvad tunnel is running, but its SOCKS proxy is unreachable. Protected traffic is held. Retry the route check after the connection recovers.',
-  MULLVAD_TUNNEL_UNAVAILABLE:'The Mullvad tunnel is unavailable. Retry the route check to reconnect safely.',
-  MULLVAD_TUNNEL_ROUTE_UNAVAILABLE:'The tunnel is running, but the protected proxy route is unavailable. Retry the route check after repairing the PersonaMonkey connection.',
-  MULLVAD_CONNECTION_UNVERIFIED:'The Mullvad connection could not be verified. Retry the route check.',
+  MULLVAD_PROXY_UNREACHABLE:'The Mullvad tunnel is running, but its SOCKS proxy is unreachable. Protected traffic stays held while PCMS checks for recovery.',
+  MULLVAD_TUNNEL_UNAVAILABLE:'The protected tunnel is unavailable. PersonaMonkey reconnects safely when managed work is due.',
+  MULLVAD_TUNNEL_ROUTE_UNAVAILABLE:'The tunnel is running, but its protected route is unavailable. PCMS checks for recovery before resuming this account.',
+  MULLVAD_CONNECTION_UNVERIFIED:'The protected connection is unverified. PCMS is checking it before resuming managed work.',
   MULLVAD_ROUTE_UNCONFIRMED:'A previous connection update has an unconfirmed outcome. This route stays held; checking connection status does not retry it. Other accounts remain available.',
   MULLVAD_PREPARATION_UNAVAILABLE:'Firefox could not safely complete the connection update. Check available storage and retry the route check.',
-  ROUTE_OBSERVATION_TIMEOUT:'The protected route check timed out. Traffic remains held; retry when the connection recovers.',
+  ROUTE_OBSERVATION_TIMEOUT:'The route check timed out. Traffic stays held while PCMS observes any pending connection update; a timeout does not cancel that update.',
   ROUTE_OBSERVATION_CANCELLED:'The background route check stopped for your action. A fresh protected check is required before traffic resumes.',
   ROUTE_SEARCH_PENDING:'Still looking for an available unique protected exit. Progress is saved; setup will continue automatically.',
   DONOR_SECURITY_UNAVAILABLE:'Firefox privacy protections are not in a safe state; PersonaMonkey is holding all protected routes.',
@@ -79,6 +79,16 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     }
     const controller=new AbortController(),entry={kind,controller,startedAt:now(),timedOut:false};
     let timer;
+    async function persistTimeout(){
+      const current=await accounts.get(accountId);
+      if(!current.ok||!current.account.bindingId)return;
+      pins.hold(current.account.bindingId);
+      if(await mutationAllowed()!==true)return;
+      await ledger.hold(current.account.bindingId,'ROUTE_OBSERVATION_TIMEOUT');
+      if(await mutationAllowed()!==true)return;
+      if(current.account.state==='PREPARING')await progress(accountId,'HELD','ROUTE_OBSERVATION_TIMEOUT');
+      else if(current.account.state!=='ARCHIVED')await routeStatus(accountId,'HELD','ROUTE_OBSERVATION_TIMEOUT');
+    }
     const promise=Promise.resolve().then(task).catch(async()=>{
       // A thrown adapter/storage error must not leave idle setup looking busy.
       // Preserve the binding and donor intent; resume observes before effects.
@@ -94,29 +104,31 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       }}catch{}
       return fail('ENROLLMENT_INTERRUPTED');
     })
-      .finally(()=>{clearTimeout(timer);if(running.get(accountId)===entry)running.delete(accountId);});
+      .finally(async()=>{
+        clearTimeout(timer);
+        // A late metadata commit cannot erase the timeout or reopen the pin.
+        if(entry.timedOut)try{await persistTimeout();}catch{}
+        if(running.get(accountId)===entry)running.delete(accountId);
+      });
     trackPcmsWork(promise);
     entry.promise=promise;
     entry.observation=new Promise(resolve=>{
       promise.then(value=>{if(!entry.timedOut)resolve(value)});
       timer=setTimeout(()=>{
-        entry.timedOut=true;controller.abort();
+        entry.timedOut=true;
+        if(entry.bindingId)pins.hold(entry.bindingId);
+        controller.abort();
         // Timeout bounds observation, never ownership of the actual work.
         // Restore continues to see the tracked task; incompatible commands
         // remain excluded until it settles. Late probes see the abort fence.
-        void (async()=>{
-          const current=await accounts.get(accountId);
-          if(current.ok&&current.account.bindingId){
-            pins.hold(current.account.bindingId);
-            if(await mutationAllowed()===true){
-              await ledger.hold(current.account.bindingId,'ROUTE_OBSERVATION_TIMEOUT');
-              if(await mutationAllowed()===true){
-                if(current.account.state==='PREPARING')await progress(accountId,'HELD','ROUTE_OBSERVATION_TIMEOUT');
-                else if(current.account.state!=='ARCHIVED')await routeStatus(accountId,'HELD','ROUTE_OBSERVATION_TIMEOUT');
-              }
-            }
-          }
-        })().catch(()=>{}).finally(()=>resolve(fail('ROUTE_OBSERVATION_TIMEOUT')));
+        const saved=trackPcmsWork(persistTimeout()).then(()=>true,()=>false);
+        // A locked store cannot extend the observation indefinitely. Its
+        // write remains tracked, the pre-dispatch preparation marker remains
+        // durable, and synchronous admission is already held above.
+        let persistenceTimer;
+        void Promise.race([saved,new Promise(r=>{persistenceTimer=setTimeout(()=>r(false),500);})])
+          .then(()=>resolve(fail('ROUTE_OBSERVATION_TIMEOUT')))
+          .finally(()=>clearTimeout(persistenceTimer));
       },observationMs);
     });
     running.set(accountId,entry);
@@ -132,9 +144,12 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
   // pinned route is allowed after a clean assigned probe (e.g. a manual route
   // edit undone); an exit owned by another account can never re-activate.
   async function activate(bindingId,evidence,routeId,accountId,allowArchived=false){
+    const cancelled=()=>running.get(accountId)?.controller.signal.aborted===true;
+    const interrupted=async()=>{pins.hold(bindingId);await ledger.hold(bindingId,'ROUTE_OBSERVATION_CANCELLED');return fail('ROUTE_OBSERVATION_CANCELLED')};
     // A successful IPv4/DNS probe is not complete exit-family evidence.
     // Withdraw old admission BEFORE parsing the new observation.
     pins.hold(bindingId);
+    if(cancelled())return interrupted();
     const n=normalizeRouteEvidence(evidence);
     if(!n.ok||n.routeId!==routeId){
       const out=n.ok?fail('ROUTE_CHANGED_DURING_PROBE'):n;
@@ -148,12 +163,15 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     const out=await ledger.observe({bindingId,routeId,exits:n.exits,
       exitSetDigest:await exitSetDigest(n.exits),observedAtMs:n.observedAtMs,ipv6Disposition:n.ipv6Disposition,activate:true});
     if(!out.ok)return out;
+    if(cancelled())return interrupted();
     const latest=await accounts.get(accountId);
     if(!latest.ok||latest.account.bindingId!==bindingId||latest.account.state==='ARCHIVED'&&!allowArchived){
       await ledger.hold(bindingId,'ACCOUNT_ARCHIVED');return fail('ACCOUNT_ARCHIVED');
     }
+    if(cancelled())return interrupted();
     pins.release(bindingId);
     await pins.reload();
+    if(cancelled())return interrupted();
     return {ok:true,routeId,changed:true};
   }
   // Verify the currently assigned route. Rotation to a different unique exit
@@ -163,6 +181,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
   // reach the fixed Mullvad echo). rotate:false (archived) only observes.
   async function ensurePinnedRoute(account,{change=false,automatic=false,rotate=true}={}){
     const bindingId=account.bindingId;
+    const owner=running.get(account.accountId);if(owner)owner.bindingId=bindingId;
     const signal=running.get(account.accountId)?.controller.signal;
     const cancelled=()=>signal?.aborted===true;
     const hold=async code=>{pins.hold(bindingId);await ledger.hold(bindingId,code);return fail(code)};
@@ -172,7 +191,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     const pending=account.routeSearch?.pendingRouteId;
     if(pending){
       const observed=await donor.inspectPreparation?.({routeId:pending});
-      if(observed?.ok!==true||observed.settled!==true)return hold('MULLVAD_ROUTE_UNCONFIRMED');
+      if(observed?.ok!==true||observed.settled!==true)return hold(observed?.code||'MULLVAD_ROUTE_UNCONFIRMED');
       const cleared=await accounts.applyCurrent({type:'ROUTE_PREPARATION_SETTLED',accountId:account.accountId,routeId:pending});
       if(!cleared.ok)return cleared;
     }
@@ -396,6 +415,14 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
   async function revalidate(account){
     const observed=await identify(account.personaUid);
     if(observed.ok&&observed.proof.principalFingerprint===account.boundPrincipal)return 'VERIFIED';
+    // Failure to observe a session through a changing protected connection
+    // is not evidence that the operator logged out. Keep original identity,
+    // withdraw route admission and retry that dependency before login advice.
+    const transient=!observed.ok&&/^(PROTECTED_|MULLVAD_|DONOR_|GUARD_|LEASE_|RESTORE_|SESSION_CONTEXT_CHANGED$)/.test(observed.code||'');
+    const code=transient?observed.code:observed.ok?'IDENTITY_CHANGED':'LOGIN_REQUIRED';
+    pins.hold(account.bindingId);await ledger.hold(account.bindingId,code);
+    await routeStatus(account.accountId,'HELD',code);
+    if(transient)return code;
     await accounts.applyCurrent({type:'REVERIFY',accountId:account.accountId});
     return observed.ok?'IDENTITY_CHANGED':'LOGIN_REQUIRED';
   }

@@ -6,6 +6,7 @@ import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {createCoordinatorStore} from './coordinator-store.mjs';
 import {createCreationRunner} from './creation-runner.mjs';
 import {standingS06} from './s06-standing-authority.mjs';
+import {subscribeProtectedReadiness} from './protected-readiness.mjs';
 export const CREATION_ALARM='pcms-s04-creation-due';
 export const CREATION_FOLLOWUP_ALARM='pcms-s04-creation-followup';
 const PERIOD=10;
@@ -119,6 +120,7 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
   }
   function register(){
     if(registered)return;registered=true;
+    subscribeProtectedReadiness(event=>{if(event.kind==='ACCOUNT_READY')void tick();});
     api.alarms.onAlarm.addListener(evt=>{
       if(evt?.name===CREATION_ALARM||evt?.name===CREATION_FOLLOWUP_ALARM)void tick();
     });

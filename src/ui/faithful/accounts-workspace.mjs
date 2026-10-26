@@ -27,6 +27,7 @@ export function accountNeedsAttention(a){
  return a.state!=='VERIFIED'||a.protectedRoute!=='PCMS_PINNED'||a.route?.status!=='PINNED'||a.readiness?.ready===false;
 }
 export const accountLabel=a=>a.removed?'Removed':
+ a.state!=='ARCHIVED'&&a.activity?.timedOut?'Connection outcome pending':
  a.state==='PREPARING'&&a.setup?.phase==='HELD'?'Setup needs attention':
  a.state==='VERIFIED'&&a.protectedRoute==='UPGRADING'?'Upgrading route':
  a.state==='VERIFIED'&&a.protectedRoute==='LEGACY_UNPINNED'?'Route upgrade needed':
@@ -145,7 +146,7 @@ export function createAccountsWorkspace({root,el,b,request,reload,notify}){
    set(stateLine,current.removed?'Removed locally. Preserved records remain available for recovery.':
     current.state==='ARCHIVED'?'Archived. Reactivate to verify and resume.':current.message||
     (current.working?'Working on this account…':current.state==='INVENTORY_PENDING'?'Login confirmed. Synchronize inventory to finish setup.':
-    current.state==='VERIFIED'?(current.readiness?.ready===false?'Verify this account’s protected route to resume managed work.':'Ready for managed work.'):current.state==='ARCHIVED'?'Archived. Reactivate to verify and resume.':
+    current.state==='VERIFIED'?(current.readiness?.ready===false?'PCMS verifies the protected route when work is due. Verify route checks it now.':'Ready for managed work.'):current.state==='ARCHIVED'?'Archived. Reactivate to verify and resume.':
     current.state==='PREPARING'?'Preparing its protected Persona and route.':'Open Perchance, complete login or a challenge, then confirm login.'));
    const allowed=accountActions(current);
    const incompatible=current.working===true&&current.activity?.cancellable!==true;

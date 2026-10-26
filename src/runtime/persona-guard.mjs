@@ -6,7 +6,7 @@ export const isGuardedRenamePreInvocationHold=reply=>!!reply&&renameNoInvocation
 import {admissionForI17Supply} from './legacy-quarantine.mjs';
 import {validateNativeWitness} from './qualified-clock.mjs';
 import {inspectRoutePin} from './route-pin.mjs';
-import {requestProtectedReadiness,donorReadinessAvailable} from './protected-readiness.mjs';
+import {requestProtectedReadiness,awaitProtectedReadiness,donorReadinessAvailable} from './protected-readiness.mjs';
 // This facade shares donor Management Integration's actual control-lease
 // registry. Nothing here can execute a browser/native/provider mutation at I01.
 let installed = null;
@@ -74,6 +74,13 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     const result=await inspectObserved(personaUid);
     if(recover&&!result.ready&&['DONOR_SECURITY_UNAVAILABLE','DONOR_READ_FAILED','PROTECTED_ROUTE_UNAVAILABLE',
       'PROTECTED_ROUTE_NOT_PINNED','PROTECTED_ROUTE_UNVERIFIED'].includes(result.code))requestProtectedReadiness(personaUid);
+    return result;
+  }
+  async function safeReadiness(personaUid,{recover=true}={}){
+    const result=await inspectObserved(personaUid);
+    if(recover&&!result.ready&&['DONOR_SECURITY_UNAVAILABLE','DONOR_READ_FAILED','PROTECTED_ROUTE_UNAVAILABLE',
+      'PROTECTED_ROUTE_NOT_PINNED','PROTECTED_ROUTE_UNVERIFIED'].includes(result.code)&&await awaitProtectedReadiness(personaUid))
+      return inspectObserved(personaUid);
     return result;
   }
 
@@ -462,7 +469,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     openHumanLogin: openLogin,
     openHumanGenerator:(personaUid,slug)=>openLogin(personaUid,slug),
     resolveUid: inspect,
-    getSafeRouteReadiness: inspect,
+    getSafeRouteReadiness: safeReadiness,
     acquireConflictGuard,
     inspectOwnedAction,
     releaseConflictGuard,

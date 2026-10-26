@@ -57,12 +57,13 @@ export function validateAccountMessage(api,sender,m) {
 // A correct session readback under a stale/rotated Persona context is NOT
 // allowed to revalidate the old account binding.
 export async function guardedIdentityRead(guard,personaUid,identityReader) {
-  const before=await guard.getSafeRouteReadiness(personaUid);
+  const before=await guard.getSafeRouteReadiness(personaUid,{recover:false});
   if(!before.ready)return fail(before.code);
   const proof=await identityReader({personaUid:before.personaUid,
     cookieStoreId:before.cookieStoreId,routeId:before.routeId});
   if(!proof)return fail('SESSION_IDENTITY_UNOBSERVABLE');
-  const after=await guard.getSafeRouteReadiness(personaUid);
+  if(proof.ok===false)return fail(typeof proof.code==='string'&&/^[A-Z0-9_]{3,64}$/.test(proof.code)?proof.code:'SESSION_IDENTITY_UNOBSERVABLE');
+  const after=await guard.getSafeRouteReadiness(personaUid,{recover:false});
   if(!after.ready||before.personaUid!==after.personaUid||
       before.cookieStoreId!==after.cookieStoreId||
       before.routeId!==after.routeId)return fail('SESSION_CONTEXT_CHANGED');
@@ -100,7 +101,8 @@ export function createAccountBoundary(api,{
   open=openCanonicalDatabase, guard=internalPcmsGuard,
   identityReader=async context=>{
     const out=await internalPcmsGuard()?.observeReadOnly(context.personaUid,true);
-    if(!out?.ok||!(/^[a-f0-9]{64}$/).test(out.principalFingerprint))return null;
+    if(!out?.ok)return {ok:false,code:out?.code||'SESSION_IDENTITY_UNOBSERVABLE'};
+    if(!(/^[a-f0-9]{64}$/).test(out.principalFingerprint))return null;
     return {source:'GUARDED_SESSION_READBACK',verified:true,
       personaUid:context.personaUid,principalFingerprint:out.principalFingerprint,
       observationId:'identity_'+crypto.randomUUID().replaceAll('-','')};
@@ -124,7 +126,7 @@ export function createAccountBoundary(api,{
         await (await exitLedger()).hold(bindingId,code);
         if(!(await sentinel.inspect()).held)await (await store()).applyCurrent({type:'ROUTE_STATUS',accountId,status:'HELD',code,at:Date.now()});
       })();
-    },inUse:async a=>(await guard()?.enrollmentDonor?.inspectRouteUse?.({personaUid:a.personaUid}))?.inUse===true,
+    },activePersonas:async()=>guard()?.enrollmentDonor?.activePersonaUids?.(),
     check:async accountId=>{
       const f=await flow();if(!f)return fail('DONOR_STARTING');
       const out=await f.upkeep({accountIds:[accountId],concurrency:1});

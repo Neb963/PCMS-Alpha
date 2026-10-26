@@ -176,7 +176,8 @@ function createPcmsEnrollmentDonor(){
       await initialize();
       if(pcmsProbeFlights.has(routeId))return pcmsFailure('MULLVAD_ROUTE_UNCONFIRMED','HOST');
       const status=await mullvadRuntime.refreshStatus();
-      if(status.installed!==true||status.compatible!==true||!Array.isArray(status.pending_prepare_routes)||
+      if(status.installed!==true||status.compatible!==true)return pcmsFailure(pcmsConnectionCode(status),'HOST');
+      if(!Array.isArray(status.pending_prepare_routes)||
          status.pending_prepare_routes.includes('OBSERVATION_UNAVAILABLE'))return pcmsFailure('MULLVAD_ROUTE_UNCONFIRMED','HOST');
       if(!status.pending_prepare_routes.includes(routeId))return {ok:true,settled:true};
       // Authenticated fixed-echo recovery only. This path never invokes
@@ -335,6 +336,14 @@ function createPcmsEnrollmentDonor(){
         {ok:false,code:made===false?'BINDING_PERSONA_AMBIGUOUS':'PERSONA_TAG_UNCONFIRMED'};
     },
     // Observation only: is this account's own route resource in use?
+    async activePersonaUids(){
+      await initialize();
+      const state=await getState(),tabs=await browser.tabs.query({}),jobs=await listActiveProfileIds(),leases=await managementIntegration.listControlLeases();
+      const contexts=new Set([...tabs.map(t=>t.cookieStoreId),...jobs]);
+      const leased=new Set(leases.map(l=>String(l?.personaUid||'').toLowerCase()));
+      return {ok:true,personas:Object.values(state.profiles||{}).filter(p=>typeof p?.pcmsBindingId==='string'&&
+        (contexts.has(p.containerId)||leased.has(String(p.personaUid).toLowerCase()))).map(p=>p.personaUid)};
+    },
     async inspectRouteUse({personaUid}){
       await initialize();
       const state=await getState(),found=pcmsProfileByUid(state,personaUid);

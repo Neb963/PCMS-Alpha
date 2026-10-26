@@ -266,6 +266,31 @@ test('F1: same-exit helper recovery revalidates the original principal before cl
   else{assert.equal(result.identity,'VERIFIED');assert.equal(after.route.code,null);assert.equal(after.revision,before.revision);}
  }
 });
+test('F1: a transient guarded identity-read failure preserves the original principal and revision while keeping route admission held',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),a=await enroll(h);
+ h.sessions.set(a.personaUid,fp('a'));await h.flow.confirm(a.accountId);
+ const before=(await h.accounts.get(a.accountId)).account;
+ await h.accounts.applyCurrent({type:'ROUTE_STATUS',accountId:a.accountId,status:'HELD',code:'MULLVAD_LOCAL_SERVICE_UNAVAILABLE'});
+ const flow=createEnrollment({accounts:h.accounts,ledger:h.ledger,donor:h.donor,
+  pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},openLogin:async()=>({ok:true}),
+  identify:async()=>({ok:false,code:'PROTECTED_ROUTE_NOT_PINNED'})});
+ assert.equal((await flow.verifyRoute(a.accountId)).code,'PROTECTED_ROUTE_NOT_PINNED');
+ const after=(await h.accounts.get(a.accountId)).account;
+ assert.equal(after.state,'VERIFIED');assert.equal(after.revision,before.revision);assert.equal(after.boundPrincipal,fp('a'));
+ assert.equal(inspectRoutePin(h.profileOf(a)).allow,false);assert.equal((await h.ledger.binding(a.bindingId)).binding.pin,'HELD');
+ assert.equal((await h.flow.verifyRoute(a.accountId)).identity,'VERIFIED');assert.equal(inspectRoutePin(h.profileOf(a)).allow,true);
+});
+test('F1: timeout during the final ledger commit cannot release admission from a late successful route observation',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),a=await enroll(h);
+ let finish,enter;const gate=new Promise(r=>finish=r),entered=new Promise(r=>enter=r),base=h.ledger.observe;
+ const ledger={...h.ledger,observe:async value=>{enter();await gate;return base(value)}};
+ const flow=createEnrollment({accounts:h.accounts,ledger,donor:h.donor,
+  pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},openLogin:async()=>({ok:true}),identify:async()=>({ok:false}),observationMs:60});
+ const task=flow.verifyRoute(a.accountId);await entered;
+ try{assert.equal((await task).code,'ROUTE_OBSERVATION_TIMEOUT');assert.equal(inspectRoutePin(h.profileOf(a)).allow,false);}
+ finally{finish();await new Promise(r=>setTimeout(r,100));}
+ assert.equal((await h.ledger.binding(a.bindingId)).binding.pin,'HELD');assert.equal(inspectRoutePin(h.profileOf(a)).allow,false);
+});
 
 test('S01 AC-01 D: Add Account creates tagged Persona, pins a unique verified exit, opens login, Confirm verifies identity and syncs inventory',async()=>{
   const h=setup({relays:[relay('10.124.0.1','45.83.1.1','2a03:1b20:1::1')]});

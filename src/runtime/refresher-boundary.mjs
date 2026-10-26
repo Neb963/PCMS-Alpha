@@ -4,6 +4,7 @@ import {checkpointed} from './work-checkpoint.mjs';
 import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId,createCanonicalStore} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
+import {subscribeProtectedReadiness} from './protected-readiness.mjs';
 import {createRefresherStore} from './refresher-store.mjs';
 import {backfillLegacyAdoptions} from './refresher-adopted.mjs';
 import {MINUTE,rowBlocks,effectiveCapacity} from './refresher-core.mjs';
@@ -186,7 +187,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     .sort(([x],[y])=>x<y?-1:x>y?1:0).slice(0,FLEET_BOUND);
   async function readinessFor(g,scopes){
     return new Map(await Promise.all(scopes.map(async([id,a])=>{
-      try{return [id,await g.getSafeRouteReadiness(a.personaUid)];}catch{return [id,{ready:false}];}
+      try{return [id,await g.getSafeRouteReadiness(a.personaUid,{recover:false})];}catch{return [id,{ready:false}];}
     })));
   }
   async function observe(s,cached=null){
@@ -196,6 +197,15 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     const now=clock(),state=snapshot.state;
     const scopes=verifiedScopes(state);
     const before=cached&&scopes.every(([id])=>cached.has(id))?cached:await readinessFor(g,scopes);
+    // Passive clock/status reads never wake idle routes. Enabled, eligible
+    // Refresher coverage and explicit statistic demand are actual due work;
+    // they request existing enrollment readiness before protected reads.
+    const needed=new Set(state.rows.filter(r=>r.ownerVerified&&!r.identityHeld&&(
+      state.policy.refreshEnabled===true&&rowBlocks(state,r).every(c=>c==='ACCOUNT_UNAVAILABLE')||
+      r.metrics?.demandUntil>now&&r.metrics.nextDueAt<=now&&!r.metrics.suspended)).map(r=>r.accountId));
+    await Promise.all(scopes.filter(([id])=>needed.has(id)&&!before.get(id)?.ready).map(async([id,a])=>{
+      try{before.set(id,await g.getSafeRouteReadiness(a.personaUid));}catch{}
+    }));
     const due=state.rows.filter(r=>!r.identityHeld&&r.ownerVerified&&!r.metrics.suspended&&
       r.metrics.nextDueAt<=now&&before.get(r.accountId)?.ready)
       .sort((a,b)=>(b.metrics.demandUntil>now?1:0)-(a.metrics.demandUntil>now?1:0)||
@@ -544,6 +554,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
   }
   function register(){
     if(registered)return;
+    subscribeProtectedReadiness(event=>{if(event.kind==='ACCOUNT_READY')void tick();});
     // Never await anything before these listener registrations.
     api.alarms.onAlarm.addListener(alarm=>{
       if(alarm?.name===REFRESHER_ALARM){void alarmReceipt();void tick();}
