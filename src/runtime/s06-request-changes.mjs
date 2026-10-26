@@ -216,6 +216,10 @@ export function createS06ChangeProgress(api,{
     if(!list.ok)return list;
     for(let i=0;i<list.items.length;i++){
      const item=list.items[i];examined++;last=item.slug;
+     // Missing/settled requests have no source transition to own. The
+     // request is read again after ownership before any canonical mutation.
+     const pending=await store.get(item.slug);
+     if(!pending.ok||pending.state!=='REQUESTED')continue;
      const keys=['generator:'+item.slug];if(scopes.busy(keys))continue;
      const next=i+1<list.items.length||list.more?item.slug:'';
      await api.storage.local.set({[cursorKey]:next});

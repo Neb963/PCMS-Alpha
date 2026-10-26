@@ -129,6 +129,17 @@ export function createS06WritebackProgress(api,{
       const settings=(await api.storage.local.get(cursorKey))?.[cursorKey];
       let after=typeof settings==='string'&&ID.test(settings)?settings:'',
         examined=0,last='';
+      async function readPlan(summary){
+        const ready=await queue.get(summary.slug),
+          stage=await createStagingStore(database).getFull(summary.slug),
+          job=await createAiStore(database).getJobFull(summary.slug),
+          wb=await createWritebackStore(database).getFull(summary.slug),
+          exception=await createS06ExceptionStore(database).getFull(summary.slug);
+        if(!ready.ok||ready.record.revision!==summary.revision)return null;
+        const chosen=planS06Writeback({ready,stage,job,writeback:wb.ok?wb:null,
+          exception:exception.ok?exception:null});
+        return {wb,chosen};
+      }
       for(let page=0;page<64&&examined<maxCandidates;page++){
         const listing=await queue.list({after,limit:Math.min(100,maxCandidates-examined)});
         if(!listing.ok)return listing;
@@ -136,19 +147,18 @@ export function createS06WritebackProgress(api,{
           const summary=listing.items[i];
           last=summary.slug;examined++;
           if(isI17Quarantined({slug:summary.slug}))continue;
+          // Select read-only before owning a source. A confirmed REVIEW
+          // must not repeatedly exclude a pending change or READY successor.
+          // Full canonical provenance is checked again after ownership.
+          const preview=await readPlan(summary);
+          if(!preview||!preview.chosen.ok||preview.chosen.type==='REVIEW')continue;
           const keys=['generator:'+summary.slug];if(scopes.busy(keys))continue;
           const next=i+1<listing.items.length||listing.more?summary.slug:'';
           await api.storage.local.set({[cursorKey]:next});
           const observed=await scopes.run(keys,async()=>{
-          const ready=await queue.get(summary.slug),
-            stage=await createStagingStore(database).getFull(summary.slug),
-            job=await createAiStore(database).getJobFull(summary.slug),
-            wb=await createWritebackStore(database).getFull(summary.slug),
-            exception=await createS06ExceptionStore(database).getFull(summary.slug);
-          if(!ready.ok||ready.record.revision!==summary.revision)return {scopeSkipped:true};
-          const chosen=planS06Writeback({ready,stage,job,writeback:wb.ok?wb:null,
-             exception:exception.ok?exception:null});
-          if(!chosen.ok||chosen.type==='REVIEW')return {scopeSkipped:true};
+          const fresh=await readPlan(summary);
+          if(!fresh||!fresh.chosen.ok||fresh.chosen.type==='REVIEW')return {scopeSkipped:true};
+          const {wb,chosen}=fresh;
           if(chosen.type==='CANCEL_PREPARED'){
             // Purely local and independently fenced, never requires Git
             // credentials or re-enables remote effects.
