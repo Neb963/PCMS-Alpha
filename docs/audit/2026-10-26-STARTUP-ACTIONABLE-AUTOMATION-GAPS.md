@@ -149,6 +149,16 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 **Required acceptance:** 31/1,000+ source-missing fixtures, pagination or indexed search, exact counts and contextual safe resolution; preserve unambiguous source provenance and avoid expensive re-rendering of all entries.
 
+### GAP-14 — Primary Work Queue does not group related incidents by root cause (P1)
+
+**Status:** CONFIRMED CODE primary-view omission (the separate legacy Attention module groups incidents correctly).
+
+**Source:** `src/runtime/journal.mjs:273–287` preserves `cause` for causal notification grouping, and `src/ui/attention-model.mjs:5–23` implements `groupNotices` per cause (C-68). Yet `src/ui/faithful/bridge.mjs:855–889` renders `for(const n of q.incidents)` as **one full row per notice**; it does not import or invoke `groupNotices` (confirmed current source). Each row repeats a “Needs attention” badge and has its own *Open affected item* / *Mark reviewed* actions.
+
+**Effect:** One native-host/tunnel outage affecting many managed accounts can swamp the primary Work Queue with redundant warnings, misrepresenting a shared prerequisite outage as dozens of separate operator tasks; this directly conflicts with C-68 and the user's request for concise action-centric UX.
+
+**Required acceptance:** Group by causal root with affected counts, preserve individually inspectable scopes only on expansion, one shared *Check connection* or equivalent recovery control, and no false resolution or suppressed independent account-specific holds. Test one failure across 50+ accounts and distinct unrelated per-account failures.
+
 ## Investigation queue
 
 1. Donor bootstrap and native-host/tunnel/proxy recovery state.
@@ -172,4 +182,5 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 - 2026-10-26: GAP-10 verified exact packaged HTML dual-script entry and obsolete legacy advice.
 - 2026-10-26: GAP-11 traced browser-native Git token observer to obsolete vault failure/evidence labels.
 - 2026-10-26: GAP-12 confirmed no action elements on source-missing queue rows.
-- 2026-10-26: GAP-13 verified silent 30-row source-missing presentation cap. Subsequent sections will be appended after each subsystem inspection.
+- 2026-10-26: GAP-13 verified silent 30-row source-missing presentation cap.
+- 2026-10-26: GAP-14 verified primary queue bypasses existing cause grouping. Subsequent sections will be appended after each subsystem inspection.
