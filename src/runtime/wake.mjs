@@ -32,11 +32,19 @@ export function createWakeService(api, { health = getPcmsGuardHealth } = {}) {
         priorBootSeen: Boolean(previous?.bootId && previous.bootId !== bootId)
       } });
     }).catch(() => { storageFailure = true; });
+    return writeTail;
   }
 
+  let alarmFlight=null;
   function alarmSchedule() {
-    try { api.alarms.create(WAKE_ALARM, { periodInMinutes: 10 }); }
-    catch { storageFailure = true; }
+    if(alarmFlight)return alarmFlight;
+    // Event-page evaluation can occur before an already due alarm is
+    // delivered. Replacing it here postpones the wake on every cold event.
+    alarmFlight=Promise.resolve().then(async()=>{
+      if(typeof api.alarms.get==='function'&&await api.alarms.get(WAKE_ALARM))return;
+      await api.alarms.create(WAKE_ALARM,{periodInMinutes:10});
+    }).catch(()=>{storageFailure=true;}).finally(()=>{alarmFlight=null;});
+    return alarmFlight;
   }
 
   function statusFor(sender) {
@@ -52,8 +60,22 @@ export function createWakeService(api, { health = getPcmsGuardHealth } = {}) {
 
   function onConnect(port) {
     if (port?.name !== HEALTH_PORT) return;
-    const response = statusFor(port.sender);
-    try { port.postMessage(response); } catch { /* closed port is not authority */ }
+    if(!trustedStatusSender(api,port.sender)){
+      try{port.postMessage(statusFor(port.sender));}catch{}return;
+    }
+    // A cold alarm can reach this port before its asynchronous storage write.
+    // Observe that real checkpoint before claiming a healthy wake receipt.
+    // A stalled diagnostic write remains tracked; it cannot hang the port.
+    const snapshot={wakeCount:eventCount,lastWake:lastEvent};
+    let timer;
+    void Promise.race([writeTail.then(()=>true),new Promise(resolve=>{
+      timer=setTimeout(()=>resolve(false),2000);
+    })]).then(persisted=>{
+      const response={...statusFor(port.sender),...snapshot};
+      if(!persisted)response.healthStorage='PENDING';
+      response.receiptPersisted=persisted&&!storageFailure;
+      try{port.postMessage(response);}catch{}
+    }).finally(()=>clearTimeout(timer));
   }
 
   function onMessage(message, sender) {
@@ -73,7 +95,7 @@ export function createWakeService(api, { health = getPcmsGuardHealth } = {}) {
     api.runtime.onStartup.addListener(() => { receipt('startup'); alarmSchedule(); });
     api.runtime.onInstalled.addListener(() => { receipt('installed'); alarmSchedule(); });
     api.alarms.onAlarm.addListener(alarm => {
-      if (alarm?.name === WAKE_ALARM) receipt('alarm');
+      if (alarm?.name === WAKE_ALARM) {void alarmSchedule();return receipt('alarm');}
     });
     registered = true;
     alarmSchedule(); // Firefox alarms do not persist across full restarts.
