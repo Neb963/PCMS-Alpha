@@ -139,6 +139,16 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 **Required acceptance:** Every such row offers the matching read-only source/history comparison, current Git scan and the applicable identity-reconciliation option; if no safe automatic repair exists, label as informational or explicitly unresolved with an actionable decision route. No automatic remote delete or mistaken newly created generator.
 
+### GAP-13 — Work Queue silently caps missing-Git-source warnings at 30 (P1)
+
+**Status:** CONFIRMED CODE visibility cap; affected production record count unknown.
+
+**Source:** `src/ui/faithful/bridge.mjs:787–789` renders `q.missing.slice(0,30)` inside `Needs action` / `All`, without a dedicated missing-source cursor/count/page. Work Queue's Prev/Next at `:915–917` paginates its other canonical feeds, not this fixed slice.
+
+**Effect:** At fleet scale (C-01, C-24–C-25, 1,000+ generators), **31st and later** missing-source incidents do not appear in this list. Operator cannot tell if there are more, and no recovery control exists even for the first 30 (GAP-12). This is a presentation gap, not permission to infer Git folders were actually deleted.
+
+**Required acceptance:** 31/1,000+ source-missing fixtures, pagination or indexed search, exact counts and contextual safe resolution; preserve unambiguous source provenance and avoid expensive re-rendering of all entries.
+
 ## Investigation queue
 
 1. Donor bootstrap and native-host/tunnel/proxy recovery state.
@@ -161,4 +171,5 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 - 2026-10-26: GAP-09 verified timer does not bound awaited native/route preparation settlement.
 - 2026-10-26: GAP-10 verified exact packaged HTML dual-script entry and obsolete legacy advice.
 - 2026-10-26: GAP-11 traced browser-native Git token observer to obsolete vault failure/evidence labels.
-- 2026-10-26: GAP-12 confirmed no action elements on source-missing queue rows. Subsequent sections will be appended after each subsystem inspection.
+- 2026-10-26: GAP-12 confirmed no action elements on source-missing queue rows.
+- 2026-10-26: GAP-13 verified silent 30-row source-missing presentation cap. Subsequent sections will be appended after each subsystem inspection.
