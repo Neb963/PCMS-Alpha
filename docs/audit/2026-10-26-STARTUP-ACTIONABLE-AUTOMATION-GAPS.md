@@ -81,6 +81,14 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 **Required acceptance:** Reproduce rejection, timeout, pause and route hold in each stage and prove unrelated stages progress; each stage owns bounded independently observable outcome, own durable rescheduling and no duplicate external effects. Do **not** naively `Promise.all` mutually exclusive source writers—the repair must preserve dependency ordering **per slug** while isolating unrelated slug/account work.
 
+### GAP-07 — Creation watcher serializes all selected items behind the slowest item (P1)
+
+**Status:** CONFIRMED CODE sequencing; permanent starvation from a nonsettling provider/native call is a testable RISK, not a proven incident.
+
+**Source:** `src/runtime/creation-watch.mjs:61–107` selects at most eight runnable intents then `await runner.step(item.intentId,item.revision)` for **each item serially** (`:95–102`), with a coalesced in-flight `pending` promise (`:20,26,116–118`). There is a fairness cursor and explicit 5-minute failed-attempt suppression (`:81–94`), but **no per-item deadline at the watcher boundary**. `src/runtime/creation-runner.mjs:31–100` has multiple awaited route, IDB, source and protected provider steps. A single unresolved promise can delay later accounts and future ticks.
+
+**Required acceptance:** Test slow/hung route setup, an ambiguous create ACK, one I17-quarantined item and 1,000+ unrelated safe entries. Ensure the watchdog produces a durable, truthful held/timeout record while other eligible items progress, maintaining account routing, one-writer and no-replay constraints. Do not confuse limiting work to eight items per turn with completed independence.
+
 ## Investigation queue
 
 1. Donor bootstrap and native-host/tunnel/proxy recovery state.
@@ -97,4 +105,5 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 - 2026-10-26: GAP-03 verified by code-to-UI notice destination trace.
 - 2026-10-26: GAP-04 verified against donor connection read and persisted account projection.
 - 2026-10-26: GAP-05 verified: periodic recovery exists but lacks host-ready event wake.
-- 2026-10-26: GAP-06 confirmed from serialized READY alarm dispatch; starvation consequence requires adversarial evidence. Subsequent sections will be appended after each subsystem inspection.
+- 2026-10-26: GAP-06 confirmed from serialized READY alarm dispatch; starvation consequence requires adversarial evidence.
+- 2026-10-26: GAP-07 confirmed sequential creation queue tick; nonsettling-operation case needs B stress. Subsequent sections will be appended after each subsystem inspection.
