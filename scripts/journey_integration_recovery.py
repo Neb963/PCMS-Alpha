@@ -39,6 +39,22 @@ def command(s,account_id,kind):
         if not account['working']:return account
         time.sleep(.2)
     raise AssertionError(('ISSUE60_COMMAND_STILL_RUNNING',kind,account))
+def wait_new_protected_tab(s,before_tabs,context_id,timeout=10,read_tabs=None,clock=time.monotonic,pause=time.sleep):
+    # tabs.create can acknowledge a tab before its first navigation changes
+    # about:blank. Observe the exact new tab/context/URL; never repeat Open.
+    before=set(before_tabs);deadline=clock()+timeout;last=[]
+    if not isinstance(context_id,str) or not context_id:
+        raise AssertionError('ISSUE60_PROTECTED_CONTEXT_UNVERIFIED')
+    if read_tabs is None:
+        read_tabs=lambda:background(s,'return (await browser.tabs.query({})).map(t=>({id:t.id,url:t.url,cookieStoreId:t.cookieStoreId}));')
+    while clock()<deadline:
+        last=read_tabs()
+        for tab in last:
+            if type(tab.get('id')) is int and tab['id'] not in before and tab.get('url')=='https://perchance.org/' and tab.get('cookieStoreId')==context_id:
+                return tab
+        pause(.1)
+    raise AssertionError(('ISSUE60_PROTECTED_TAB_NAVIGATION_UNCONFIRMED',context_id,last))
+
 def wait_record(s,account_id,state=None,route=None,seconds=55):
     deadline=time.monotonic()+seconds;last=None
     while time.monotonic()<deadline:
@@ -175,8 +191,8 @@ def run(browser,archive,folder):
         oracle.delay_inventory=False;oracle.inventory_release.set()
         a.wait(s,"sh.querySelector('.account-feedback')?.textContent.includes('Perchance opened')",'ISSUE60_OPEN_AFTER_ACTUAL_READ_LEASE_RELEASE',55)
         context=next(x for x in inspect(s)['ledger']['bindings'].values() if x['accountId']==ids[0])
-        new_tabs=background(s,'return (await browser.tabs.query({})).map(t=>({id:t.id,url:t.url,cookieStoreId:t.cookieStoreId}));')
-        assert any(t['id'] not in before_tabs and t['url']=='https://perchance.org/' and t['cookieStoreId']==context['contextId'] for t in new_tabs),new_tabs
+        opened=wait_new_protected_tab(s,before_tabs,context['contextId'])
+        assert opened['id'] not in before_tabs and opened['url']=='https://perchance.org/' and opened['cookieStoreId']==context['contextId'],opened
         a.close_dialog(s)
         print('B ISSUE60_NATIVE_AND_PROXY_RECOVERY_PRIMARY_ACTIONS=PASS',flush=True)
         # The old operation has a real no-dispatch receipt and exact account
