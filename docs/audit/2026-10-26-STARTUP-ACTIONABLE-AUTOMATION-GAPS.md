@@ -129,6 +129,16 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 **Required acceptance:** Distinguish *unconfigured Git*, *browser credential inaccessible*, *token rejected*, *remote repository identity mismatch*, *network unavailable*, and *temporary locked/unavailable local store*. Reconnect only when necessary, preserve token and source scope; notices must clear after observed recovery, without prompting for native keyring.
 
+### GAP-12 — Git source missing appears under *Needs action* without ANY action in the row (P0)
+
+**Status:** CONFIRMED CODE omission in primary UI.
+
+**Source:** `src/ui/faithful/bridge.mjs:787–795` renders each `q.missing` as a warning row containing only `Git source missing: <slug>` and a note that the live generator was not changed. Unlike adjacent rename rows (`:723–786`), it **appends no button, link or contextual inspection control**. The warning is within the `Needs action` filter.
+
+**Effect:** Operator has no in-place means to inspect source absence, reload a complete `main` observation, compare prior source/checkpoint or understand whether this is a deliberate deletion, rename, stale scan or remote Git outage. Leaving the actual deletion/rename held is correct; omitting the safe remedy is not.
+
+**Required acceptance:** Every such row offers the matching read-only source/history comparison, current Git scan and the applicable identity-reconciliation option; if no safe automatic repair exists, label as informational or explicitly unresolved with an actionable decision route. No automatic remote delete or mistaken newly created generator.
+
 ## Investigation queue
 
 1. Donor bootstrap and native-host/tunnel/proxy recovery state.
@@ -150,4 +160,5 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 - 2026-10-26: GAP-08 confirmed by grant-transition versus AI alarm call-site audit.
 - 2026-10-26: GAP-09 verified timer does not bound awaited native/route preparation settlement.
 - 2026-10-26: GAP-10 verified exact packaged HTML dual-script entry and obsolete legacy advice.
-- 2026-10-26: GAP-11 traced browser-native Git token observer to obsolete vault failure/evidence labels. Subsequent sections will be appended after each subsystem inspection.
+- 2026-10-26: GAP-11 traced browser-native Git token observer to obsolete vault failure/evidence labels.
+- 2026-10-26: GAP-12 confirmed no action elements on source-missing queue rows. Subsequent sections will be appended after each subsystem inspection.
