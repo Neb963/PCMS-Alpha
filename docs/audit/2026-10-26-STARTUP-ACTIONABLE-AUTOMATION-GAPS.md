@@ -253,4 +253,4 @@ Run affected small tests throughout development using **draft preflight**; full 
 - 2026-10-26: GAP-14 verified primary queue bypasses existing cause grouping.
 - 2026-10-26: GAP-15 confirmed cold S06 authorization-hydration race with AI alarm creation.
 - 2026-10-26: GAP-16 confirmed default donor auto-stop/no-tab policy versus PCMS background readiness.
-- 2026-10-26: GAP-17 verified silent alarm/background failure paths and missing durable failure receipts. Subsequent sections were appended after each subsystem inspection.
+- 2026-10-26: GAP-17 verified silent alarm/background failure paths and missing durable failure receipts.
