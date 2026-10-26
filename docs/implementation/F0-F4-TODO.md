@@ -6,7 +6,7 @@ Baseline: `main` `06ccf102097e238154fef51787269c398ee6b1b0`, tree `4b828f3658f2b
 
 ## Program checkpoints
 
-- [ ] F0: executable cross-domain recovery/state/notice inventory, negative drift checks, integrated verified PR.
+- [x] F0: executable cross-domain recovery/state/notice inventory, negative drift checks, integrated verified PR.
 - [ ] F1: donor-first startup, account reconciliation, bounded event wake, preparation uncertainty, on-demand idle recovery.
 - [ ] F2: independent bounded workers, fair creation, hydrated authorization transitions, redacted durable receipts.
 - [ ] F3: contextual actions for every notice, historical read-only template inspection, single UI controller, truthful Git errors, paged missing sources and causal groups.
@@ -53,3 +53,13 @@ Focused Node 22.16.0 verification: **12/12 passed**, including four presentation
 Local environment qualification: Firefox 154.0b10/geckodriver 0.36.0 were obtained; the normal content sandbox cannot start in this container (`/proc/self/uid_map: EPERM`). An isolated persistent addon-manager upgrade succeeded only with `MOZ_DISABLE_CONTENT_SANDBOX=1`; it is qualified developer evidence, not normal-sandbox acceptance. CI supplies the required normal-sandbox tier. The existing 100001-row archive fixture also exceeded its 180s local limit under Node 22.16.0 (eventually materializing all rows); no local scale PASS is claimed and its timeout/expectations were not weakened. Required CI's pinned full D lane passed that fixture.
 
 F1 pre-repair reproduction at original source: a deliberately nonsettling donor probe remained pending while the durable route projection still said `PINNED`. Preserve ownership, add bounded visible observation, and never use timeout as native cancellation.
+
+F0 integrated through PR #64: exact candidate `552978fd21922d1ae60b8908a830c1532b2a52e9`, tree `b793270232a6dee33379c1bb3de9ba1e71e17725`, full required run `40327849440` passed D/donor/reproducible XPI/archive controls, persistent upgrade and normal-sandbox installed Firefox workflows. Squash merge `9ae9c2382cf0cdb6698f7266e79c9891466caff2` has the identical tested tree; postmerge full required run `40330093815` also passed. No review threads or independent approval requirement applied to that ordinary implementation diff; protected rules were enforced.
+
+### F1 in progress — not acceptance or release
+
+Red tests reproduced unbounded account observation and missing same-exit original-principal revalidation. The first correction keeps the actual task tracked/owned after an observational timeout, withdraws admission and persists a timeout, and rejects conflicting commands until settlement. Donor native observations now race the deadline while their actual work and route ownership remain tracked; late completion cannot continue an aborted probe. Durable account preparation markers require donor read-only settlement before another route preparation, including after restart. Recovery on the same route revalidates the original principal before clearing the stale account error.
+
+The fixed readiness queue uses existing enrollment/donor authority, bounded independent account turns, durable fair retry hints and redacted native-change/demand events. Compatible-but-stopped donor state permits its existing autoStart mechanism; host-ready alone grants no account admission. Intentional idle stop does not enqueue healthy idle accounts. Account browsing opts out of demand hints. Check connection requests automatic reconciliation.
+
+Initial focused Node 22.16.0 integration: **90/90 D tests passed** across readiness, complete enrollment/donor routing regressions and native receipt/late-ACK isolation. Further event-loss, restart, idle-time, due-worker, UI and packaged Firefox coverage is still required before F1 completion. No actual host or provider effect is claimed.

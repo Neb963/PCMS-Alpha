@@ -12,6 +12,7 @@ import { internalPcmsGuard } from './persona-guard.mjs';
 import { inventoryBoundary } from './inventory-boundary.mjs';
 import { createInventoryStore } from './inventory.mjs';
 import { trustedExtensionPage } from './command-boundary.mjs';
+import {createProtectedReadinessCoordinator} from './protected-readiness.mjs';
 
 export const ACCOUNT_PORT='pcms-i03-accounts';
 export const ROUTE_UPKEEP_ALARM='pcms-s01-route-upkeep';
@@ -114,6 +115,22 @@ export function createAccountBoundary(api,{
   const connection=()=>dbPromise ||= open();
   const store=async()=>createAccountStore(await connection());
   const exitLedger=async()=>createExitLedger(await connection());
+  const readiness=createProtectedReadinessCoordinator(api,{
+    list:async()=>(await store()).list(),held:async()=>(await sentinel.inspect()).held,
+    connection:async()=>guard()?.enrollmentDonor?.inspectConnection?.(),
+    hold:(bindingId,code,accountId)=>{
+      pins.hold(bindingId);
+      return checkpointed(api,async()=>{
+        await (await exitLedger()).hold(bindingId,code);
+        if(!(await sentinel.inspect()).held)await (await store()).applyCurrent({type:'ROUTE_STATUS',accountId,status:'HELD',code,at:Date.now()});
+      })();
+    },inUse:async a=>(await guard()?.enrollmentDonor?.inspectRouteUse?.({personaUid:a.personaUid}))?.inUse===true,
+    check:async accountId=>{
+      const f=await flow();if(!f)return fail('DONOR_STARTING');
+      const out=await f.upkeep({accountIds:[accountId],concurrency:1});
+      return out.results?.[0]||fail(out.code||'ENROLLMENT_UNAVAILABLE');
+    }
+  });
   // The SAME production instance serves the UI port and background upkeep.
   async function flow(){
     // Read-only account views remain available throughout restore.
@@ -152,7 +169,7 @@ export function createAccountBoundary(api,{
       const g=guard();
       const cachedReadiness=async a=>{
         if(typeof g?.getSafeRouteReadiness!=='function'||!a.personaUid||a.state==='ARCHIVED'||a.removed)return null;
-        try{const out=await g.getSafeRouteReadiness(a.personaUid);return {ready:out?.ready===true};}
+        try{const out=await g.getSafeRouteReadiness(a.personaUid,{recover:false});return {ready:out?.ready===true};}
         catch{return {ready:false};}
       };
       // Local records are readable while PersonaMonkey is still starting.
@@ -160,6 +177,7 @@ export function createAccountBoundary(api,{
       if(message.type==='LIST_PERSONAS')return {ok:true,personas:await g.listAvailablePersonas()};
       if(message.type==='INSPECT_CONNECTION'){
         const out=await g.enrollmentDonor?.inspectConnection?.();
+        if(out?.installed&&out.compatible)void readiness.wake({recovery:true});
         return out?{...out,message:explain(out.code)}:fail('CONNECTION_OBSERVER_UNAVAILABLE');
       }
       if(message.type==='LIST_ROUTES')return {ok:true,routes:await g.listProtectedRoutes()};
@@ -300,11 +318,11 @@ export function createAccountBoundary(api,{
   async function upkeep(){
     try{
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
-      const f=await flow();
-      return f?await f.upkeep():fail('ENROLLMENT_UNAVAILABLE');
+      return readiness.wake({fallback:true});
     }catch{return fail('ROUTE_UPKEEP_UNAVAILABLE');}
   }
   function register() {
+    readiness.register();
     api.runtime.onConnect.addListener(port=>{
       if(port?.name!==ACCOUNT_PORT)return;
       let busy=false;

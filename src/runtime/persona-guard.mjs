@@ -6,6 +6,7 @@ export const isGuardedRenamePreInvocationHold=reply=>!!reply&&renameNoInvocation
 import {admissionForI17Supply} from './legacy-quarantine.mjs';
 import {validateNativeWitness} from './qualified-clock.mjs';
 import {inspectRoutePin} from './route-pin.mjs';
+import {requestProtectedReadiness,donorReadinessAvailable} from './protected-readiness.mjs';
 // This facade shares donor Management Integration's actual control-lease
 // registry. Nothing here can execute a browser/native/provider mutation at I01.
 let installed = null;
@@ -33,7 +34,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
   // never acquire/release that same lease underneath each other's operation.
   const activeGuards=new Map(),ownedGuards=new WeakMap();
 
-  async function inspect(personaUid) {
+  async function inspectObserved(personaUid) {
     if (typeof personaUid !== 'string' || !/^[a-z0-9-]{8,128}$/i.test(personaUid))
       return HOLD('INVALID_PERSONA_UID');
     try {
@@ -67,6 +68,13 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
       // Do not disclose thrown storage/native/route errors (potential secrets).
       return HOLD('DONOR_READ_FAILED');
     }
+  }
+
+  async function inspect(personaUid,{recover=true}={}){
+    const result=await inspectObserved(personaUid);
+    if(recover&&!result.ready&&['DONOR_SECURITY_UNAVAILABLE','DONOR_READ_FAILED','PROTECTED_ROUTE_UNAVAILABLE',
+      'PROTECTED_ROUTE_NOT_PINNED','PROTECTED_ROUTE_UNVERIFIED'].includes(result.code))requestProtectedReadiness(personaUid);
+    return result;
   }
 
   async function acquireConflictGuard(personaUid) {
@@ -475,6 +483,7 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
 export function attachPcmsGuard(deps) {
   if (installed) throw new Error('PCMS guard already attached');
   installed = createPersonaGuard(deps);
+  donorReadinessAvailable();
 }
 export function getPcmsGuardHealth() {
   return installed ? installed.getHealth() : {

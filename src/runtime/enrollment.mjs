@@ -14,6 +14,8 @@ const TRANSIENT=new Set(['MULLVAD_LOCAL_SERVICE_UNAVAILABLE','DONOR_SECURITY_UNA
 const rid=prefix=>prefix+crypto.randomUUID().replaceAll('-','');
 // Codes shown to the operator; anything else is summarized generically.
 export const SETUP_MESSAGES=Object.freeze({
+  ROUTE_IDLE:'The protected connection is resting. PCMS reconnects and verifies this account automatically when work is due.',
+  DONOR_READINESS_LOST:'The protected connection changed. PCMS is checking PersonaMonkey and this account before resuming work.',
   ENROLLMENT_INTERRUPTED:'Protected setup was interrupted. Resume setup checks the saved Persona and route before continuing.',
   MULLVAD_RELAY_CATALOG_UNAVAILABLE:'The Mullvad relay list is unavailable. Existing verified routes remain usable; resume setup when the connection returns.',
   MULLVAD_LOCAL_SERVICE_UNAVAILABLE:'The PersonaMonkey Mullvad helper is not running or not installed on this computer.',
@@ -54,27 +56,29 @@ export const SETUP_MESSAGES=Object.freeze({
 });
 
 export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,syncInventory,
-  now=Date.now,mutationAllowed=async()=>true,inventoryNeeded=async()=>false,routeTurnMs=90000,maxRouteCandidates=4}={}){
+  now=Date.now,mutationAllowed=async()=>true,inventoryNeeded=async()=>false,routeTurnMs=90000,maxRouteCandidates=4,observationMs=35000}={}){
   if(!accounts?.applyCurrent||!ledger?.reserve||!donor?.createBoundPersona||!pins?.hold||
      typeof openLogin!=='function'||typeof identify!=='function')
     throw new TypeError('Enrollment dependencies unavailable');
   const running=new Map(),archiving=new Map();
+  if(!Number.isSafeInteger(observationMs)||observationMs<10||observationMs>180000)throw Error('INVALID_OBSERVATION_BUDGET');
   // Coalesce only the SAME intent. A different operator command must never
   // inherit a route probe's result and falsely claim it archived an account.
   function exclusive(accountId,kind,task){
     if(archiving.has(accountId))return Promise.resolve(fail('ACCOUNT_BUSY'));
     const prior=running.get(accountId);
     if(prior){
-      if(prior.kind===kind)return prior.promise;
+      if(prior.kind===kind)return prior.observation;
       // Human intent cancels only automatic observation. Keep ownership
       // until the donor actually settles, including any native preparation.
       if(['ROUTE:false:true','CONFIRM:auto'].includes(prior.kind)&&['CONFIRM','SYNC','OPEN_LOGIN','ROUTE:false:false','ROUTE:true:false'].includes(kind)){
         prior.controller.abort();
-        return prior.promise.then(()=>exclusive(accountId,kind,task));
+        return prior.observation.then(()=>running.has(accountId)?fail('ACCOUNT_BUSY'):exclusive(accountId,kind,task));
       }
       return Promise.resolve(fail('ACCOUNT_BUSY'));
     }
-    const controller=new AbortController();
+    const controller=new AbortController(),entry={kind,controller,startedAt:now(),timedOut:false};
+    let timer;
     const promise=Promise.resolve().then(task).catch(async()=>{
       // A thrown adapter/storage error must not leave idle setup looking busy.
       // Preserve the binding and donor intent; resume observes before effects.
@@ -90,10 +94,33 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       }}catch{}
       return fail('ENROLLMENT_INTERRUPTED');
     })
-      .finally(()=>running.delete(accountId));
+      .finally(()=>{clearTimeout(timer);if(running.get(accountId)===entry)running.delete(accountId);});
     trackPcmsWork(promise);
-    running.set(accountId,{kind,promise,controller,startedAt:now()});
-    return promise;
+    entry.promise=promise;
+    entry.observation=new Promise(resolve=>{
+      promise.then(value=>{if(!entry.timedOut)resolve(value)});
+      timer=setTimeout(()=>{
+        entry.timedOut=true;controller.abort();
+        // Timeout bounds observation, never ownership of the actual work.
+        // Restore continues to see the tracked task; incompatible commands
+        // remain excluded until it settles. Late probes see the abort fence.
+        void (async()=>{
+          const current=await accounts.get(accountId);
+          if(current.ok&&current.account.bindingId){
+            pins.hold(current.account.bindingId);
+            if(await mutationAllowed()===true){
+              await ledger.hold(current.account.bindingId,'ROUTE_OBSERVATION_TIMEOUT');
+              if(await mutationAllowed()===true){
+                if(current.account.state==='PREPARING')await progress(accountId,'HELD','ROUTE_OBSERVATION_TIMEOUT');
+                else if(current.account.state!=='ARCHIVED')await routeStatus(accountId,'HELD','ROUTE_OBSERVATION_TIMEOUT');
+              }
+            }
+          }
+        })().catch(()=>{}).finally(()=>resolve(fail('ROUTE_OBSERVATION_TIMEOUT')));
+      },observationMs);
+    });
+    running.set(accountId,entry);
+    return entry.observation;
   }
   const progress=(accountId,phase,code=null,extra={})=>
     accounts.applyCurrent({type:'SETUP_PROGRESS',accountId,phase,code,...extra});
@@ -139,6 +166,27 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     const signal=running.get(account.accountId)?.controller.signal;
     const cancelled=()=>signal?.aborted===true;
     const hold=async code=>{pins.hold(bindingId);await ledger.hold(bindingId,code);return fail(code)};
+    // This metadata is an uncertainty fence, never route authority. It is
+    // written before a donor probe can prepare a native forwarder, survives
+    // restart, and blocks even an explicit change until donor readback settles.
+    const pending=account.routeSearch?.pendingRouteId;
+    if(pending){
+      const observed=await donor.inspectPreparation?.({routeId:pending});
+      if(observed?.ok!==true||observed.settled!==true)return hold('MULLVAD_ROUTE_UNCONFIRMED');
+      const cleared=await accounts.applyCurrent({type:'ROUTE_PREPARATION_SETTLED',accountId:account.accountId,routeId:pending});
+      if(!cleared.ok)return cleared;
+    }
+    const probe=async(kind,args)=>{
+      const begun=await accounts.applyCurrent({type:'ROUTE_PREPARATION_START',accountId:account.accountId,routeId:args.routeId});
+      if(!begun.ok)return begun;
+      const result=await donor[kind](args);
+      if(!['ROUTE_OBSERVATION_TIMEOUT','ROUTE_OBSERVATION_CANCELLED','MULLVAD_ROUTE_UNCONFIRMED'].includes(result?.code)&&
+         !(result?.failure==='HOST'&&result.preparationSettled===false)){
+        const settled=await accounts.applyCurrent({type:'ROUTE_PREPARATION_SETTLED',accountId:account.accountId,routeId:args.routeId});
+        if(!settled.ok)return settled;
+      }
+      return result;
+    };
     const startedAt=now();
     const persona=await donor.boundPersona({bindingId});
     if(!persona.ok)return hold(persona.code);
@@ -149,7 +197,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     const prior=await ledger.binding(bindingId);
     const failed=[];
     if(prior.ok&&prior.binding.routeId===persona.routeId&&!change){
-      const ev=await donor.probeAssigned({bindingId,contextId:persona.contextId,routeId:persona.routeId,signal});
+      const ev=await probe('probeAssigned',{bindingId,contextId:persona.contextId,routeId:persona.routeId,signal});
       if(cancelled())return hold('ROUTE_OBSERVATION_CANCELLED');
       if(ev.ok){
         const out=await activate(bindingId,ev,persona.routeId,account.accountId,!rotate);
@@ -223,7 +271,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       const route=await donor.ensureRoute(candidate);
       if(!route.ok){last=route.code;continue;}
       checkedThisTurn++;
-      const ev=await donor.probeCandidate({routeId:route.routeId,signal});
+      const ev=await probe('probeCandidate',{routeId:route.routeId,signal});
       if(cancelled())return hold('ROUTE_OBSERVATION_CANCELLED');
       if(!ev.ok){if(ev.failure==='HOST')return ev;last=ev.code;await checked(route.routeId);continue;}
       const afterProbe=await accounts.get(account.accountId);
@@ -243,7 +291,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       // Unconfirmed assignment: the reservation is durable; the next run
       // reads the donor route and reconciles instead of assigning again.
       if(!assigned.ok)return assigned;
-      const verified=await donor.probeAssigned({bindingId,contextId:persona.contextId,routeId:route.routeId,signal});
+      const verified=await probe('probeAssigned',{bindingId,contextId:persona.contextId,routeId:route.routeId,signal});
       if(cancelled())return hold('ROUTE_OBSERVATION_CANCELLED');
       if(!verified.ok){if(verified.failure==='HOST')return verified;last=verified.code;failed.push(route.routeId);continue;}
       const out=await activate(bindingId,verified,route.routeId,account.accountId);
@@ -330,11 +378,16 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       await routeStatus(accountId,route.code==='ROUTE_CHECK_FAILED'?'CHECKING':'HELD',route.code);
       return route;
     }
-    await routeStatus(accountId,'PINNED');
-    if(route.changed&&account.state==='VERIFIED'){
+    if((route.changed||account.route?.status!=='PINNED'||account.route?.code)&&account.state==='VERIFIED'){
       const identity=await revalidate(account);
-      return {ok:true,changed:true,identity};
+      if(identity!=='VERIFIED'){
+        await routeStatus(accountId,'HELD',identity);
+        return {...fail(identity),changed:route.changed===true,identity};
+      }
+      await routeStatus(accountId,'PINNED');
+      return {ok:true,changed:route.changed===true,identity};
     }
+    await routeStatus(accountId,'PINNED');
     return {ok:true,changed:route.changed===true};
   }
   // Revalidate a VERIFIED account's ORIGINAL principal on its current Persona.
@@ -411,12 +464,16 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
   function archive(accountId,expectedRevision){
     const prior=archiving.get(accountId);
     if(prior)return prior.revision===expectedRevision?prior.promise:Promise.resolve(fail('ACCOUNT_BUSY'));
-    const inFlight=running.get(accountId)?.promise;
+    const inFlight=running.get(accountId)?.observation;
     const promise=(async()=>{
       const out=await accounts.apply({type:'ARCHIVE',accountId,expectedRevision});
       if(!out.ok)return out;
       // Suspend durably now; the running effect settles at its next safe boundary.
       if(inFlight)await inFlight;
+      if(running.has(accountId)){
+        await routeStatus(accountId,'RELEASE_DEFERRED','RESOURCE_IN_USE');
+        return {ok:true,state:'ARCHIVED',release:'RELEASE_DEFERRED'};
+      }
       const release=await releaseIdle(out.account);
       return {ok:true,state:'ARCHIVED',release:release.status};
     })().finally(()=>archiving.delete(accountId));
@@ -574,24 +631,26 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     // upgrades, upgrade pre-S01 records in place, re-verify pinned routes.
     // Archived accounts are never probed (that would recreate a released
     // forwarder); only an incomplete release is retried.
-    async upkeep(){
+    async upkeep({accountIds=null,concurrency=4}={}){
       const listed=await accounts.list();
       if(!listed.ok)return listed;
+      const selected=accountIds?listed.accounts.filter(a=>accountIds.includes(a.accountId)):listed.accounts;
       const results=[];
       async function checkAccount(a){
         const id=a.accountId;
         if(a.state==='ARCHIVED'){
           // Includes accounts archived before release existed or interrupted
           // between the Archive commit and the release.
-          if(a.route?.status!=='RELEASED')results.push(await exclusive(id,'RELEASE',()=>releaseIdle(a)));
-          return;
+          if(a.route?.status!=='RELEASED')return exclusive(id,'RELEASE',async()=>({ok:true,...await releaseIdle(a)}));
+          return {ok:true,skipped:true};
         }
         const bindingReady=typeof a.bindingId==='string'&&(!a.upgrade||a.upgrade.phase==='COMPLETE');
         if(bindingReady&&(a.state==='INVENTORY_PENDING'||a.state==='VERIFIED'&&await inventoryNeeded(id))){
-          results.push(await exclusive(id,'CONFIRM:auto',()=>confirm(id,{silent:true,automatic:true})));
+          return exclusive(id,'CONFIRM:auto',()=>confirm(id,{silent:true,automatic:true}));
         }else if(a.state==='PREPARING'){
           if(typeof a.bindingId==='string'&&(a.setup?.phase!=='HELD'||TRANSIENT.has(a.setup?.code)))
-            results.push(await exclusive(id,'SETUP',()=>prepare(id)));
+            return exclusive(id,'SETUP',()=>prepare(id));
+          return fail(a.setup?.code||'SETUP_REQUIRES_OPERATOR');
         }else if(typeof a.bindingId!=='string'||(a.upgrade&&a.upgrade.phase!=='COMPLETE'&&
             (a.upgrade.phase!=='HELD'||TRANSIENT.has(a.upgrade.code)))){
           // Never start tagging (which blocks the Persona until pinned) while
@@ -601,24 +660,25 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
           if(!a.upgrade){
             let use=null;
             try{use=await donor.inspectRouteUse({personaUid:a.personaUid});}catch{}
-            if(use?.ok!==true||use.inUse!==false)return;
+            if(use?.ok!==true||use.inUse!==false)return fail('RESOURCE_IN_USE');
           }
-          results.push(await exclusive(id,'UPGRADE',()=>upgrade(id)));
+          return exclusive(id,'UPGRADE',()=>upgrade(id));
         }else if(!a.upgrade||a.upgrade.phase==='COMPLETE')
-          results.push(await exclusive(id,'ROUTE:false:true',()=>verifyRoute(id,{automatic:true})));
+          return exclusive(id,'ROUTE:false:true',()=>verifyRoute(id,{automatic:true}));
+        return fail(a.upgrade?.code||'ACCOUNT_REQUIRES_OPERATOR');
       }
       // One slow inventory/search must not prevent another account's renewal.
       // Bound in-flight account tasks while allowing ready workers to advance.
       let cursor=0;
-      await Promise.all(Array.from({length:Math.min(4,listed.accounts.length)},async()=>{
-        while(cursor<listed.accounts.length)await checkAccount(listed.accounts[cursor++]);
+      await Promise.all(Array.from({length:Math.min(Number.isSafeInteger(concurrency)?Math.max(1,Math.min(4,concurrency)):4,selected.length)},async()=>{
+        while(cursor<selected.length){const a=selected[cursor++];results.push({accountId:a.accountId,...await checkAccount(a)});}
       }));
-      return {ok:true,checked:results.length};
+      return {ok:true,checked:results.length,results};
     },
     activity:accountId=>{
       const task=running.get(accountId);
       return archiving.has(accountId)?{kind:'ARCHIVE',automatic:false,cancellable:false}:
-        task?{kind:task.kind,automatic:['ROUTE:false:true','CONFIRM:auto'].includes(task.kind),cancellable:['ROUTE:false:true','CONFIRM:auto'].includes(task.kind),startedAt:task.startedAt}:null;
+        task?{kind:task.kind,automatic:['ROUTE:false:true','CONFIRM:auto'].includes(task.kind),cancellable:!task.timedOut&&['ROUTE:false:true','CONFIRM:auto'].includes(task.kind),startedAt:task.startedAt,timedOut:task.timedOut}:null;
     },
     running:accountId=>running.has(accountId)||archiving.has(accountId)
   });

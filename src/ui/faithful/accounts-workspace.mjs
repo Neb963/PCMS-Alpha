@@ -172,7 +172,7 @@ export function createAccountsWorkspace({root,el,b,request,reload,notify}){
    connection.disabled=true;
    try{
     const out=await request(PORT,'INSPECT_CONNECTION',{},10000);
-    if(!closed)set(feedback,out?.ok?(out.ready?'Mullvad connection is available. Retry the route check to verify this account’s exit.':explain(out)):explain(out));
+    if(!closed)set(feedback,out?.ok?(out.ready?'Connection is available. Protected account checks are continuing automatically.':explain(out)):explain(out));
    }catch{if(!closed)set(feedback,'Connection check timed out. Other actions remain available.')}
    finally{connection.disabled=false;}
   }

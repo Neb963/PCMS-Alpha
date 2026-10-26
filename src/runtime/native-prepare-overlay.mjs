@@ -126,6 +126,11 @@ export async function settleObservedPreparation(candidate){
 }
 export function repairMullvadRuntime(source){
  const once=(before,after)=>{if(source.split(before).length!==2)throw Error('NATIVE_RUNTIME_ANCHOR_MISMATCH');source=source.replace(before,after)};
+ once('operations, now = () => Date.now() } = {})', 'operations, now = () => Date.now(), onReadiness = () => {} } = {})');
+ once('    status = normalizeNativeStatus(await operations.getStatus());\n    return status;',
+  '    status = normalizeNativeStatus(await operations.getStatus());\n    onReadiness(status);\n    return status;');
+ once('function setStatus(next) { status = normalizeNativeStatus(next); return status; }',
+  'function setStatus(next) { status = normalizeNativeStatus(next); onReadiness(status); return status; }');
  const before='        try { await operations.releaseExit?.(route.id); } catch {}\n        const message = String(error?.message || error);';
  if(source.split(before).length!==2)throw Error('NATIVE_UNCERTAINTY_ANCHOR_MISMATCH');
  once(before,
@@ -147,8 +152,8 @@ export function repairMullvadRuntime(source){
         let forwarderToken = createForwarderToken();
         let tokenCreatedAt = now();`);
  once('    const tabs = await browserApi.tabs.query({});',
-  '    if(inFlight.size||(await operations.getStatus()).pending_prepare_routes?.length)return false;\n    const tabs = await browserApi.tabs.query({});');
- once('      await operations.stopTunnel();\n      routes.clear();','      clear();\n      await operations.stopTunnel();');
+  '    if(inFlight.size||(await refreshStatus()).pending_prepare_routes?.length)return false;\n    const tabs = await browserApi.tabs.query({});');
+ once('      await operations.stopTunnel();\n      routes.clear();','      clear();\n      onReadiness({...status,ready:false},{idle:true});\n      await operations.stopTunnel();');
  once('  return { resolve, refreshStatus, maybeStopIdle, clear, drop, setStatus, getStatus };',
   `  function recoveryGeneration(routeId){return {routeId,lifecycle:lifecycleGeneration,route:routeGenerations.get(routeId)||0};}
   function recoveryCurrent(generation){return !!generation&&generation.lifecycle===lifecycleGeneration&&
