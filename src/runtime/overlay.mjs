@@ -170,6 +170,34 @@ async function pcmsProbeExitsWithinDeadline({routeId,profileId=null,reconcileOnl
 // Private same-XPI donor operations for PCMS Add Account / route repair.
 // Every mutation goes through the donor's own mutation fence and is
 // reconcilable by reading donor state; nothing here accepts a raw endpoint.
+async function pcmsOpenHumanLogin({personaUid,cookieStoreId,routeId,slug}){
+  const deadline=Date.now()+20000;
+  for(;;){
+    let invoked=false;
+    try{
+      return await localMutationFence(cookieStoreId,async()=>{
+        const state=await getState(),p=state.profiles?.[cookieStoreId];
+        if(!p||p.personaUid!==personaUid||p.routeId!==routeId||
+           routeId==='direct'||routeId==='block'||state.routes?.[routeId]?.enabled===false)
+          throw Error('PERSONA_ROUTE_CHANGED');
+        if(slug!==undefined&&(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)))throw Error('INVALID_GENERATOR_SLUG');
+        const pin=await pcmsRouteGate(p);
+        if(!pin.managed||!pin.allow)throw Object.assign(Error('Protected route is held'),{
+          code:'PROTECTED_ROUTE_NOT_PINNED',pcmsHumanNoDispatch:true});
+        invoked=true;
+        return personaPlatform.open(cookieStoreId,'https://perchance.org/'+(slug||''),true);
+      });
+    }catch(error){
+      // Retry ONLY donor refusal before this callback could invoke tab open.
+      // A running reader keeps its lease; no revoke or ambiguous tab replay.
+      if(!invoked&&error?.code==='PERSONA_CONTROL_BUSY'){
+        if(Date.now()<deadline){await new Promise(resolve=>setTimeout(resolve,250));continue;}
+        throw Object.assign(Error('Protected account is busy'),{code:'HUMAN_TAB_OPEN_BUSY',pcmsHumanNoDispatch:true});
+      }
+      throw error;
+    }
+  }
+}
 function createPcmsEnrollmentDonor(){
   return Object.freeze({
     async inspectPreparation({routeId}){
@@ -1025,16 +1053,7 @@ attachPcmsGuard({
   // A human handoff never closes/navigates a tab, and never releases donor
   // automation ownership or any unmatched/recycled tab.
   handoffStagingTab: ({personaUid,slug,nonce})=>handoffHumanEditor(browser,{personaUid,slug,nonce}),
-  openHumanLogin: async ({personaUid,cookieStoreId,routeId,slug}) =>
-    localMutationFence(cookieStoreId,async()=>{
-      const state=await getState(), p=state.profiles?.[cookieStoreId];
-      if(!p || p.personaUid!==personaUid || p.routeId!==routeId ||
-          routeId==='direct'||routeId==='block'||state.routes?.[routeId]?.enabled===false)
-        throw Error('PERSONA_ROUTE_CHANGED');
-      if(slug!==undefined&&(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)))
-        throw Error('INVALID_GENERATOR_SLUG');
-      return personaPlatform.open(cookieStoreId,'https://perchance.org/'+(slug||''),true);
-    })
+  openHumanLogin: pcmsOpenHumanLogin
 });
 
 function localMutationFence(profileIds, operation, mode = "block", options = {}) {`,

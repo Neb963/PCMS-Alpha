@@ -4,6 +4,7 @@ const LABELS={PREPARING:'Preparing',WAITING_LOGIN:'Login needed',VERIFICATION_PE
  REBIND_PENDING:'Replacement login needed',INVENTORY_PENDING:'Inventory needed',VERIFIED:'Ready',
  OVERRIDDEN:'Enrollment exception',ARCHIVED:'Archived'};
 const ERRORS={ACCOUNT_BUSY:'This account is finishing another action. Other accounts remain available.',
+ HUMAN_TAB_OPEN_BUSY:'Protected work is still using this account. Its tab was not opened; Open Perchance remains available when that work finishes.',
  STALE_REVISION:'The account changed. Its current state is shown; try the action again.',
  GUARD_NOT_READY:'PersonaMonkey is starting. Local records and Archive remain available.',
  NO_PAGE_SESSION:'Log in to Perchance in this account’s tab, then confirm login.',

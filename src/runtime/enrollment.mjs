@@ -56,7 +56,7 @@ export const SETUP_MESSAGES=Object.freeze({
 });
 
 export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,syncInventory,
-  now=Date.now,mutationAllowed=async()=>true,inventoryNeeded=async()=>false,routeTurnMs=90000,maxRouteCandidates=4,observationMs=35000}={}){
+  now=Date.now,mutationAllowed=async()=>true,inventoryNeeded=async()=>false,routeTurnMs=90000,maxRouteCandidates=4,observationMs=35000,setTimer=setTimeout,clearTimer=clearTimeout}={}){
   if(!accounts?.applyCurrent||!ledger?.reserve||!donor?.createBoundPersona||!pins?.hold||
      typeof openLogin!=='function'||typeof identify!=='function')
     throw new TypeError('Enrollment dependencies unavailable');
@@ -105,7 +105,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
       return fail('ENROLLMENT_INTERRUPTED');
     })
       .finally(async()=>{
-        clearTimeout(timer);
+        clearTimer(timer);
         // A late metadata commit cannot erase the timeout or reopen the pin.
         if(entry.timedOut)try{await persistTimeout();}catch{}
         if(running.get(accountId)===entry)running.delete(accountId);
@@ -114,7 +114,7 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
     entry.promise=promise;
     entry.observation=new Promise(resolve=>{
       promise.then(value=>{if(!entry.timedOut)resolve(value)});
-      timer=setTimeout(()=>{
+      timer=setTimer(()=>{
         entry.timedOut=true;
         if(entry.bindingId)pins.hold(entry.bindingId);
         controller.abort();
@@ -126,9 +126,9 @@ export function createEnrollment({accounts,ledger,donor,pins,openLogin,identify,
         // write remains tracked, the pre-dispatch preparation marker remains
         // durable, and synchronous admission is already held above.
         let persistenceTimer;
-        void Promise.race([saved,new Promise(r=>{persistenceTimer=setTimeout(()=>r(false),500);})])
+        void Promise.race([saved,new Promise(r=>{persistenceTimer=setTimer(()=>r(false),500);})])
           .then(()=>resolve(fail('ROUTE_OBSERVATION_TIMEOUT')))
-          .finally(()=>clearTimeout(persistenceTimer));
+          .finally(()=>clearTimer(persistenceTimer));
       },observationMs);
     });
     running.set(accountId,entry);

@@ -233,12 +233,13 @@ async function enroll(h){
 }
 test('F1: a bounded observation reports durable timeout while retaining the actual account owner through late settlement',async()=>{
  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),a=await enroll(h);
- let enter,finish;const entered=new Promise(r=>enter=r),gate=new Promise(r=>finish=r),original=h.donor.probeAssigned;
+ let enter,finish,expire;const entered=new Promise(r=>enter=r),gate=new Promise(r=>finish=r),original=h.donor.probeAssigned;
  h.donor.probeAssigned=async p=>{enter();await gate;return original(p)};
  const f=createEnrollment({accounts:h.accounts,ledger:h.ledger,donor:h.donor,
   pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},
-  openLogin:async()=>({ok:true}),identify:async()=>({ok:false}),observationMs:30});
- const task=f.verifyRoute(a.accountId);await entered;
+  openLogin:async()=>({ok:true}),identify:async()=>({ok:false}),observationMs:30,
+  setTimer:(fn,ms)=>ms===30?(expire=fn,undefined):setTimeout(fn,ms)});
+ const task=f.verifyRoute(a.accountId);await entered;expire();
  try{
   const result=await Promise.race([task,new Promise(r=>setTimeout(()=>r({code:'TEST_STILL_WAITING'}),250))]);
   assert.equal(result.code,'ROUTE_OBSERVATION_TIMEOUT');assert.equal(f.running(a.accountId),true);
@@ -282,11 +283,12 @@ test('F1: a transient guarded identity-read failure preserves the original princ
 });
 test('F1: timeout during the final ledger commit cannot release admission from a late successful route observation',async()=>{
  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),a=await enroll(h);
- let finish,enter;const gate=new Promise(r=>finish=r),entered=new Promise(r=>enter=r),base=h.ledger.observe;
+ let finish,enter,expire;const gate=new Promise(r=>finish=r),entered=new Promise(r=>enter=r),base=h.ledger.observe;
  const ledger={...h.ledger,observe:async value=>{enter();await gate;return base(value)}};
  const flow=createEnrollment({accounts:h.accounts,ledger,donor:h.donor,
-  pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},openLogin:async()=>({ok:true}),identify:async()=>({ok:false}),observationMs:60});
- const task=flow.verifyRoute(a.accountId);await entered;
+  pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},openLogin:async()=>({ok:true}),identify:async()=>({ok:false}),observationMs:60,
+  setTimer:(fn,ms)=>ms===60?(expire=fn,undefined):setTimeout(fn,ms)});
+ const task=flow.verifyRoute(a.accountId);await entered;expire();
  try{assert.equal((await task).code,'ROUTE_OBSERVATION_TIMEOUT');assert.equal(inspectRoutePin(h.profileOf(a)).allow,false);}
  finally{finish();await new Promise(r=>setTimeout(r,100));}
  assert.equal((await h.ledger.binding(a.bindingId)).binding.pin,'HELD');assert.equal(inspectRoutePin(h.profileOf(a)).allow,false);

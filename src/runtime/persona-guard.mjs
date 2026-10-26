@@ -185,7 +185,8 @@ export function createPersonaGuard({ initialize, securityState, shared, getRoute
     try {
       await openHumanLogin(slug===null?before:{...before,slug});
       return {ok:true,opened:true,kind:slug===null?'HUMAN_LOGIN_ONLY':'HUMAN_GENERATOR_VIEW'};
-    }catch{return {ok:false,code:'HUMAN_TAB_OPEN_UNCONFIRMED'};}
+    }catch(error){return {ok:false,code:error?.pcmsHumanNoDispatch===true&&
+      ['HUMAN_TAB_OPEN_BUSY','PROTECTED_ROUTE_NOT_PINNED'].includes(error.code)?error.code:'HUMAN_TAB_OPEN_UNCONFIRMED'};}
   }
 
   async function observeReadOnly(personaUid, identityOnly=false, originalSlug=null) {
