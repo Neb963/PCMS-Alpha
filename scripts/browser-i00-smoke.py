@@ -99,6 +99,18 @@ def canonical_command(session, command):
 
 
 
+
+def refresher_command(session, command):
+    # Real typed extension port; sender identity is supplied by Firefox.
+    script = """const done=arguments[arguments.length-1];
+    let settled=false;const finish=value=>{if(settled)return;settled=true;done(value)};
+    const port=browser.runtime.connect({name:'pcms-i12-refresher'});
+    port.onMessage.addListener(value=>{finish(value);try{port.disconnect()}catch(e){}});
+    port.onDisconnect.addListener(()=>finish({error:'refresher-disconnected'}));
+    port.postMessage(COMMAND);""".replace('COMMAND',json.dumps(command))
+    return call('POST',f'/session/{session}/execute/async',
+                {'script':script,'args':[]},timeout=30)
+
 def account_command(session, command):
     # The real same-XPI account command endpoint; sender identity is supplied
     # by Firefox, never by the test payload.
@@ -3320,6 +3332,8 @@ def main():
                   const view=await command('GET_REFRESHER',{query:'i12-b-',limit:25});
                   const globalPause=await command('SET_PAUSE',{expectedRevision:view.revision,scope:'GLOBAL',paused:true});
                   const invalid=await command('SET_PAUSE',{expectedRevision:view.revision,scope:'GLOBAL',paused:false});
+                  const pausedState=(await module.createRefresherStore(liveDb).read()).state;
+                  const pausedRest=pausedState.rows.find(r=>r.slug==='i12-b-0001').sleepRemaining;
                   done({ok:exact16===16*core.HOUR&&exact64===64*core.HOUR&&
                     firstRead.total===1250&&replay.occupied===occupied&&winners===1&&abort&&unchanged&&
                     observed.accepted&&absent.present===false&&absent.absence==='NOT_A_DELETION'&&metric.views===1200&&
@@ -3329,7 +3343,7 @@ def main():
                     activation.ok===true&&activation.refresh==='REFRESH_OPERATOR_DISABLED'&&
                     activation.providerEffects==='OFF'&&
                     globalPause.ok&&invalid.code==='STALE_REVISION',
-                    exact16,exact64,occupied,replayOccupied:replay.occupied,winners,abort,unchanged,
+                    exact16,exact64,pausedRest,occupied,replayOccupied:replay.occupied,winners,abort,unchanged,
                     observation:observed.code,runtimeProof,requests,activation,injection,globalPause,invalid,
                     measurement:{accounts:50,generators:1250,elapsedMs:Math.round(performance.now()-begin),
                       serializedBytes:JSON.stringify(runtimeState).length,queuePeak:runtimeState.diagnostics.queuePeak,
@@ -3397,13 +3411,46 @@ def main():
                 })().catch(e=>done({error:String(e)}));"""
                 restarted=call('POST',f'/session/{after}/execute/async',{'script':restart_code,'args':[]})
                 assert restarted['paused'] is True and restarted['first']==16*3600000,restarted
-                assert 0<restarted['rest']<64*3600000,('A06_REST_PROGRESS_ON_REAL_PROCESS_RESTART',restarted)
+                assert restarted['rest']==i12_proof['pausedRest'],('A06_PAUSED_REST_EXACTLY_PRESERVED',i12_proof['pausedRest'],restarted)
                 # Cold startup may seed a NEW browser epoch immediately; the
                 # unchanged ACTIVE budget, not absence of a new seed, proves
                 # no previous-run operating time was replayed.
                 assert restarted['alarm'] is True and restarted['alarms']==1,restarted
                 assert restarted['held']=='UNKNOWN',restarted
                 print('B I12_PERSISTENT_RESTART_BUDGET_PAUSE_SINGLE_ALARM_REPAIR=PASS',flush=True)
+                # A paused budget must stay exact. Prove unpaused wall rest
+                # separately across another actual OS process exit/relaunch.
+                resume_view=refresher_command(after,{'type':'GET_REFRESHER','params':{'query':'i12-b-','limit':25}})
+                resume=refresher_command(after,{'type':'SET_PAUSE','params':{'expectedRevision':resume_view['revision'],'scope':'GLOBAL','paused':False}})
+                assert resume.get('ok') is True,('A06_RESUME_FOR_REST_RESTART',resume)
+                resume_snapshot=call('POST',f'/session/{after}/execute/async',{'script':restart_code,'args':[]})
+                assert resume_snapshot['paused'] is False and 0<resume_snapshot['rest']<=restarted['rest'],resume_snapshot
+                rest_old_pids=owned_firefox_pids(profile)
+                assert rest_old_pids,'A06_REST_OLD_OS_PROCESS_MISSING'
+                close(after)
+                require_owned_exit(profile,rest_old_pids)
+                after=open_session(browser,profile)
+                rest_new_pids=owned_firefox_pids(profile)
+                assert rest_new_pids and not rest_new_pids.intersection(rest_old_pids),'A06_REST_OS_PROCESS_NOT_NEW'
+                assert addons_uuid(profile)==uuid
+                call('POST',f'/session/{after}/url',{'url':url+'#refresher'})
+                # Passive canonical readback; never invoke another scheduler
+                # turn or treat a new in-memory clock ID as completed progress.
+                rest_until=time.monotonic()+15
+                while True:
+                    rest_after=call('POST',f'/session/{after}/execute/async',{'script':restart_code,'args':[]})
+                    if rest_after.get('rest',64*3600000)<resume_snapshot['rest']:
+                        break
+                    assert time.monotonic()<rest_until,('A06_REST_PROGRESS_ON_REAL_PROCESS_RESTART',resume_snapshot,rest_after)
+                    time.sleep(.1)
+                assert rest_after['paused'] is False and 0<rest_after['rest']<resume_snapshot['rest'],rest_after
+                assert rest_after['first']==16*3600000 and rest_after['held']=='UNKNOWN',('A06_NO_RESTART_ACTIVE_CREDIT',rest_after)
+                assert rest_after['alarm'] and rest_after['alarms']==1,rest_after
+                pause_view=refresher_command(after,{'type':'GET_REFRESHER','params':{'query':'i12-b-','limit':25}})
+                repause=refresher_command(after,{'type':'SET_PAUSE','params':{'expectedRevision':pause_view['revision'],'scope':'GLOBAL','paused':True}})
+                assert repause.get('ok') is True,repause
+                print('B/H A06_RESUMED_WALL_REST_REAL_NEW_PROCESS_ZERO_ACTIVE_CREDIT=PASS',flush=True)
+
                 # A03 H: same installed Gecko ID / original Firefox profile,
                 # but NEW OS process. Browser-only Git credential survives;
                 # we delete this disposable fixture only after readback.
