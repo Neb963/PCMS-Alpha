@@ -31,13 +31,13 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
   network=fetch,clock=Date.now,observationMs=30000,ingestComplete=null,ingestReady=null,
   progressReady=null,progressChanges=null,progressWriteback=null,progressCleanBulk=null,progressPublication=null,
   // C-68/C-69: one GitHub-connection incident (queued work stays queued);
-  // resolved only by the existing guarded credential read (F3 strengthens recovery proof).
-  incidents=async(kind)=>{
+  // resolved only by complete, identity-matched, durable pinned-main readback.
+  incidents=async(kind,details={})=>{
     const d=createNoticeDispatcher(api,createCanonicalStore(await openCanonicalDatabase()));
     return kind==='RESOLVE'?d.resolve({scopeId:'git_connection',code:'GIT_RECONNECT_REQUIRED',
-      evidence:'GIT_VAULT_CREDENTIAL_READ'}):
-      d.emit({scopeId:'git_connection',code:'GIT_RECONNECT_REQUIRED',severity:'ACTION_REQUIRED',
-        revision:Math.max(1,clock())});
+      evidence:'COMPLETE_MAIN_IDENTITY_STORAGE_READBACK'}):
+      d.emit({scopeId:'git_connection',code:'GIT_RECONNECT_REQUIRED',severity:'ACTION_REQUIRED',cause:details.code||'GIT_CONNECTION_UNVERIFIED',
+        target:{kind:'SETTINGS',id:'connections'},revision:Math.max(1,clock())});
   }}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
   let running=null,registered=false,observedTick=null;
@@ -53,30 +53,40 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
     ['cleanBulk',progressCleanBulk],['publication',progressPublication]
   ].filter(([,fn])=>typeof fn==='function').map(([domain,fn])=>observe(domain,()=>fn())));
   async function persistStatus(code){
-    try{await api.storage.local.set({[RECEIPT]:{code,observedAt:clock()}});}catch{}
+    const observedAt=clock();
+    try{
+      await api.storage.local.set({[RECEIPT]:{code,observedAt}});
+      const seen=(await api.storage.local.get(RECEIPT))?.[RECEIPT];
+      if(seen?.code!==code||seen.observedAt!==observedAt)code='GIT_LOCAL_STORAGE_UNAVAILABLE';
+    }catch{code='GIT_LOCAL_STORAGE_UNAVAILABLE';}
+    if(code!=='RESTORE_HOLD')try{await incidents('OPEN',{code});}catch{}
     return safe(code);
   }
   async function perform(){
     try{
       if((await sentinel.inspect()).held)return persistStatus('RESTORE_HOLD');
       const cfg=(await api.storage.local.get(CONFIG))?.[CONFIG];
-      if(!identifier(cfg))return safe('GIT_RECONNECT_REQUIRED');
+      if(!identifier(cfg))return persistStatus('GIT_NOT_CONFIGURED');
       const value=await native({action:'git.get',repositoryId:cfg.repositoryId});
       if(!value?.ok||typeof value.credential!=='string'){
-        try{await incidents('OPEN');}catch{}
-        return persistStatus('GIT_VAULT_UNAVAILABLE');
+        return persistStatus(value?.code==='GIT_LOCAL_STORAGE_UNAVAILABLE'?
+          'GIT_LOCAL_STORAGE_UNAVAILABLE':'GIT_CREDENTIAL_MISSING');
       }
-      try{await incidents('RESOLVE');}catch{}
       const resumed=createGitResumeTransport(api.storage.local,{
         repositoryId:cfg.repositoryId,repository:cfg.repository,network});
-      const result=await scan({repository:cfg.repository,token:value.credential},resumed.transport);
+      let result;
+      try{result=await scan({repository:cfg.repository,token:value.credential},resumed.transport);}
+      catch{return persistStatus('GIT_NETWORK_UNAVAILABLE');}
       if(resumed.status().paused){
         // One-time retry is a separate alarm; do not change the periodic alarm.
         try{await api.alarms.create(CATALOG_RESUME_ALARM,{when:clock()+60000});}catch{}
         return persistStatus('CATALOG_SCAN_CHECKPOINTED');
       }
-      if(!result?.ok||!result.complete || result.repositoryId!==cfg.repositoryId)
-        return persistStatus(result?.code||'CATALOG_INCOMPLETE');
+      if(!result?.ok||!result.complete)
+        return persistStatus(result?.httpStatus===401?'GIT_CREDENTIAL_REJECTED':
+          result?.code==='GIT_ACCESS_DENIED'?'GIT_ACCESS_DENIED':
+          result?.code==='GIT_UNAVAILABLE'?'GIT_NETWORK_UNAVAILABLE':'CATALOG_INCOMPLETE');
+      if(result.repositoryId!==cfg.repositoryId)return persistStatus('GIT_IDENTITY_MISMATCH');
       if((await sentinel.inspect()).held)return persistStatus('RESTORE_HOLD');
       const current=(await api.storage.local.get(CONFIG))?.[CONFIG];
       if(current?.repositoryId!==cfg.repositoryId||current.repository!==cfg.repository)
@@ -121,6 +131,20 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
         ambiguousIdentityHeld:planned.held,identityReviewRequired:planned.created.length,
         firstImportNeedsApproval:prior?.repositoryId!==cfg.repositoryId
       }});
+      // Storage acknowledgment is not readback. Never clear an incident on a
+      // token read, incomplete scan, changed identity or unconfirmed snapshot.
+      const confirmed=(await api.storage.local.get(LAST))?.[LAST];
+      const currentConfig=(await api.storage.local.get(CONFIG))?.[CONFIG];
+      if(confirmed?.complete!==true||confirmed.repositoryId!==snapshot.repositoryId||
+         confirmed.repository!==snapshot.repository||confirmed.head!==snapshot.head||
+         confirmed.rootTreeOid!==snapshot.rootTreeOid||
+         currentConfig?.repositoryId!==cfg.repositoryId||currentConfig.repository!==cfg.repository||
+         !Array.isArray(confirmed.generators)||confirmed.generators.length!==snapshot.generators.length||
+         !snapshot.generators.every((g,i)=>['slug','markerOid','readyDeclared','sourceState','folderTreeOid'].
+           every(k=>confirmed.generators[i]?.[k]===g[k])))
+        return persistStatus('GIT_LOCAL_STORAGE_UNAVAILABLE');
+      if((await sentinel.inspect()).held)return persistStatus('RESTORE_HOLD');
+      try{await incidents('RESOLVE',{head:snapshot.head,repositoryId:cfg.repositoryId});}catch{}
       // Independent fixed domains do not wait on notice delivery or intake.
       // Their own canonical guards, approval and source ownership still apply.
       const progression=progressAll();
@@ -188,7 +212,7 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       await progression;
       return {ok:true,code:'CATALOG_OBSERVED_READ_ONLY',head:result.head,
         newFolders:added,missingFolderObservations:missing};
-    }catch{return persistStatus('CATALOG_OBSERVATION_UNAVAILABLE');}
+    }catch{return persistStatus('GIT_LOCAL_STORAGE_UNAVAILABLE');}
   }
   function tick(){return running||(running=perform().finally(()=>{running=null;}));}
   async function schedule(){

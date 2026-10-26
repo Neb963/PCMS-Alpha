@@ -4243,7 +4243,7 @@
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
       "automaticHandler": "src/runtime/portable-runner.mjs",
-      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch export or reconcile saved download.",
+      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch or reconcile saved download.",
       "prerequisites": "Source-complete stable local snapshot, browser downloads/storage; no password, vault or extra native host.",
       "destination": "Settings / Backups",
       "settlement": "Manifest integrity and browser download readback; independent disk reopen is a separate evidence tier.",
@@ -4263,7 +4263,7 @@
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
       "automaticHandler": "src/runtime/portable-runner.mjs",
-      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch export or reconcile saved download.",
+      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch or reconcile saved download.",
       "prerequisites": "Source-complete stable local snapshot, browser downloads/storage; no password, vault or extra native host.",
       "destination": "Settings / Backups",
       "settlement": "Manifest integrity and browser download readback; independent disk reopen is a separate evidence tier.",
@@ -4283,7 +4283,7 @@
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
       "automaticHandler": "src/runtime/portable-runner.mjs",
-      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch export or reconcile saved download.",
+      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch or reconcile saved download.",
       "prerequisites": "Source-complete stable local snapshot, browser downloads/storage; no password, vault or extra native host.",
       "destination": "Settings / Backups",
       "settlement": "Manifest integrity and browser download readback; independent disk reopen is a separate evidence tier.",
@@ -4303,7 +4303,7 @@
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
       "automaticHandler": "src/runtime/portable-runner.mjs",
-      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch export or reconcile saved download.",
+      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch or reconcile saved download.",
       "prerequisites": "Source-complete stable local snapshot, browser downloads/storage; no password, vault or extra native host.",
       "destination": "Settings / Backups",
       "settlement": "Manifest integrity and browser download readback; independent disk reopen is a separate evidence tier.",
@@ -4323,7 +4323,7 @@
       ],
       "rootCause": "The authoritative scoped record records an unresolved failure or required operator choice; retain its first causal code.",
       "automaticHandler": "src/runtime/portable-runner.mjs",
-      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch export or reconcile saved download.",
+      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch or reconcile saved download.",
       "prerequisites": "Source-complete stable local snapshot, browser downloads/storage; no password, vault or extra native host.",
       "destination": "Settings / Backups",
       "settlement": "Manifest integrity and browser download readback; independent disk reopen is a separate evidence tier.",
@@ -4343,7 +4343,7 @@
       ],
       "rootCause": "A prior external effect may still complete; ACK or attributable observation is missing.",
       "automaticHandler": "src/runtime/portable-runner.mjs",
-      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch export or reconcile saved download.",
+      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch or reconcile saved download.",
       "prerequisites": "Source-complete stable local snapshot, browser downloads/storage; no password, vault or extra native host.",
       "destination": "Settings / Backups",
       "settlement": "Manifest integrity and browser download readback; independent disk reopen is a separate evidence tier.",
@@ -4363,7 +4363,7 @@
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
       "automaticHandler": "src/runtime/portable-runner.mjs",
-      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch export or reconcile saved download.",
+      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch or reconcile saved download.",
       "prerequisites": "Source-complete stable local snapshot, browser downloads/storage; no password, vault or extra native host.",
       "destination": "Settings / Backups",
       "settlement": "Manifest integrity and browser download readback; independent disk reopen is a separate evidence tier.",
@@ -4383,7 +4383,7 @@
       ],
       "rootCause": "A prior external effect may still complete; ACK or attributable observation is missing.",
       "automaticHandler": "src/runtime/portable-runner.mjs",
-      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch export or reconcile saved download.",
+      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch or reconcile saved download.",
       "prerequisites": "Source-complete stable local snapshot, browser downloads/storage; no password, vault or extra native host.",
       "destination": "Settings / Backups",
       "settlement": "Manifest integrity and browser download readback; independent disk reopen is a separate evidence tier.",
@@ -4403,7 +4403,7 @@
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
       "automaticHandler": "src/runtime/portable-runner.mjs",
-      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch export or reconcile saved download.",
+      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch or reconcile saved download.",
       "prerequisites": "Source-complete stable local snapshot, browser downloads/storage; no password, vault or extra native host.",
       "destination": "Settings / Backups",
       "settlement": "Manifest integrity and browser download readback; independent disk reopen is a separate evidence tier.",
@@ -4423,7 +4423,7 @@
       ],
       "rootCause": "The authoritative scoped record records an unresolved failure or required operator choice; retain its first causal code.",
       "automaticHandler": "src/runtime/portable-runner.mjs",
-      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch export or reconcile saved download.",
+      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch or reconcile saved download.",
       "prerequisites": "Source-complete stable local snapshot, browser downloads/storage; no password, vault or extra native host.",
       "destination": "Settings / Backups",
       "settlement": "Manifest integrity and browser download readback; independent disk reopen is a separate evidence tier.",
@@ -4443,7 +4443,7 @@
       ],
       "rootCause": "A prior external effect may still complete; ACK or attributable observation is missing.",
       "automaticHandler": "src/runtime/portable-runner.mjs",
-      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch export or reconcile saved download.",
+      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch or reconcile saved download.",
       "prerequisites": "Source-complete stable local snapshot, browser downloads/storage; no password, vault or extra native host.",
       "destination": "Settings / Backups",
       "settlement": "Manifest integrity and browser download readback; independent disk reopen is a separate evidence tier.",
@@ -4463,7 +4463,7 @@
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
       "automaticHandler": "src/runtime/portable-runner.mjs",
-      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch export or reconcile saved download.",
+      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch or reconcile saved download.",
       "prerequisites": "Source-complete stable local snapshot, browser downloads/storage; no password, vault or extra native host.",
       "destination": "Settings / Backups",
       "settlement": "Manifest integrity and browser download readback; independent disk reopen is a separate evidence tier.",
@@ -4483,7 +4483,7 @@
       ],
       "rootCause": "Prerequisite, ownership or next durable progression checkpoint is pending.",
       "automaticHandler": "src/runtime/portable-runner.mjs",
-      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch export or reconcile saved download.",
+      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch or reconcile saved download.",
       "prerequisites": "Source-complete stable local snapshot, browser downloads/storage; no password, vault or extra native host.",
       "destination": "Settings / Backups",
       "settlement": "Manifest integrity and browser download readback; independent disk reopen is a separate evidence tier.",
@@ -4503,7 +4503,7 @@
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
       "automaticHandler": "src/runtime/portable-runner.mjs",
-      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch export or reconcile saved download.",
+      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch or reconcile saved download.",
       "prerequisites": "Source-complete stable local snapshot, browser downloads/storage; no password, vault or extra native host.",
       "destination": "Settings / Backups",
       "settlement": "Manifest integrity and browser download readback; independent disk reopen is a separate evidence tier.",
@@ -4523,7 +4523,7 @@
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
       "automaticHandler": "src/runtime/portable-runner.mjs",
-      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch export or reconcile saved download.",
+      "operatorAction": "Inspect downloaded artifact; retry a proved no-dispatch or reconcile saved download.",
       "prerequisites": "Source-complete stable local snapshot, browser downloads/storage; no password, vault or extra native host.",
       "destination": "Settings / Backups",
       "settlement": "Manifest integrity and browser download readback; independent disk reopen is a separate evidence tier.",
@@ -4538,9 +4538,9 @@
       "state": "BEFORE_DISPATCH",
       "owner": [
         "src/runtime/restore-boundary.mjs",
-        "src/ui/restore-stage.mjs",
-        "src/ui/restore-gate.mjs",
-        "src/ui/restore-core.mjs"
+        "src/runtime/../ui/restore-stage.mjs",
+        "src/runtime/../ui/restore-gate.mjs",
+        "src/runtime/../ui/restore-core.mjs"
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
       "automaticHandler": "src/runtime/restore-boundary.mjs",
@@ -4559,9 +4559,9 @@
       "state": "COMMIT_POSSIBLE",
       "owner": [
         "src/runtime/restore-boundary.mjs",
-        "src/ui/restore-stage.mjs",
-        "src/ui/restore-gate.mjs",
-        "src/ui/restore-core.mjs"
+        "src/runtime/../ui/restore-stage.mjs",
+        "src/runtime/../ui/restore-gate.mjs",
+        "src/runtime/../ui/restore-core.mjs"
       ],
       "rootCause": "A prior external effect may still complete; ACK or attributable observation is missing.",
       "automaticHandler": "src/runtime/restore-boundary.mjs",
@@ -4580,9 +4580,9 @@
       "state": "COMPLETE_INACTIVE",
       "owner": [
         "src/runtime/restore-boundary.mjs",
-        "src/ui/restore-stage.mjs",
-        "src/ui/restore-gate.mjs",
-        "src/ui/restore-core.mjs"
+        "src/runtime/../ui/restore-stage.mjs",
+        "src/runtime/../ui/restore-gate.mjs",
+        "src/runtime/../ui/restore-core.mjs"
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
       "automaticHandler": "src/runtime/restore-boundary.mjs",
@@ -4601,9 +4601,9 @@
       "state": "CREATE_REQUESTED",
       "owner": [
         "src/runtime/restore-boundary.mjs",
-        "src/ui/restore-stage.mjs",
-        "src/ui/restore-gate.mjs",
-        "src/ui/restore-core.mjs"
+        "src/runtime/../ui/restore-stage.mjs",
+        "src/runtime/../ui/restore-gate.mjs",
+        "src/runtime/../ui/restore-core.mjs"
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
       "automaticHandler": "src/runtime/restore-boundary.mjs",
@@ -4622,9 +4622,9 @@
       "state": "DIRECT_REVIEW_REQUIRED",
       "owner": [
         "src/runtime/restore-boundary.mjs",
-        "src/ui/restore-stage.mjs",
-        "src/ui/restore-gate.mjs",
-        "src/ui/restore-core.mjs"
+        "src/runtime/../ui/restore-stage.mjs",
+        "src/runtime/../ui/restore-gate.mjs",
+        "src/runtime/../ui/restore-core.mjs"
       ],
       "rootCause": "The authoritative scoped record records an unresolved failure or required operator choice; retain its first causal code.",
       "automaticHandler": "src/runtime/restore-boundary.mjs",
@@ -4643,9 +4643,9 @@
       "state": "MAPPING_ONLY_UNVERIFIED",
       "owner": [
         "src/runtime/restore-boundary.mjs",
-        "src/ui/restore-stage.mjs",
-        "src/ui/restore-gate.mjs",
-        "src/ui/restore-core.mjs"
+        "src/runtime/../ui/restore-stage.mjs",
+        "src/runtime/../ui/restore-gate.mjs",
+        "src/runtime/../ui/restore-core.mjs"
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
       "automaticHandler": "src/runtime/restore-boundary.mjs",
@@ -4664,9 +4664,9 @@
       "state": "OBSERVED",
       "owner": [
         "src/runtime/restore-boundary.mjs",
-        "src/ui/restore-stage.mjs",
-        "src/ui/restore-gate.mjs",
-        "src/ui/restore-core.mjs"
+        "src/runtime/../ui/restore-stage.mjs",
+        "src/runtime/../ui/restore-gate.mjs",
+        "src/runtime/../ui/restore-core.mjs"
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
       "automaticHandler": "src/runtime/restore-boundary.mjs",
@@ -4685,9 +4685,9 @@
       "state": "PREPARING",
       "owner": [
         "src/runtime/restore-boundary.mjs",
-        "src/ui/restore-stage.mjs",
-        "src/ui/restore-gate.mjs",
-        "src/ui/restore-core.mjs"
+        "src/runtime/../ui/restore-stage.mjs",
+        "src/runtime/../ui/restore-gate.mjs",
+        "src/runtime/../ui/restore-core.mjs"
       ],
       "rootCause": "Prerequisite, ownership or next durable progression checkpoint is pending.",
       "automaticHandler": "src/runtime/restore-boundary.mjs",
@@ -4706,9 +4706,9 @@
       "state": "GUARD_INSTALLED",
       "owner": [
         "src/runtime/restore-boundary.mjs",
-        "src/ui/restore-stage.mjs",
-        "src/ui/restore-gate.mjs",
-        "src/ui/restore-core.mjs"
+        "src/runtime/../ui/restore-stage.mjs",
+        "src/runtime/../ui/restore-gate.mjs",
+        "src/runtime/../ui/restore-core.mjs"
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
       "automaticHandler": "src/runtime/restore-boundary.mjs",
@@ -4727,9 +4727,9 @@
       "state": "DISPATCH_POSSIBLE",
       "owner": [
         "src/runtime/restore-boundary.mjs",
-        "src/ui/restore-stage.mjs",
-        "src/ui/restore-gate.mjs",
-        "src/ui/restore-core.mjs"
+        "src/runtime/../ui/restore-stage.mjs",
+        "src/runtime/../ui/restore-gate.mjs",
+        "src/runtime/../ui/restore-core.mjs"
       ],
       "rootCause": "A prior external effect may still complete; ACK or attributable observation is missing.",
       "automaticHandler": "src/runtime/restore-boundary.mjs",
@@ -4748,9 +4748,9 @@
       "state": "HELD_UNCERTAIN",
       "owner": [
         "src/runtime/restore-boundary.mjs",
-        "src/ui/restore-stage.mjs",
-        "src/ui/restore-gate.mjs",
-        "src/ui/restore-core.mjs"
+        "src/runtime/../ui/restore-stage.mjs",
+        "src/runtime/../ui/restore-gate.mjs",
+        "src/runtime/../ui/restore-core.mjs"
       ],
       "rootCause": "A prior external effect may still complete; ACK or attributable observation is missing.",
       "automaticHandler": "src/runtime/restore-boundary.mjs",
@@ -4769,9 +4769,9 @@
       "state": "MAPPING_COLLISION",
       "owner": [
         "src/runtime/restore-boundary.mjs",
-        "src/ui/restore-stage.mjs",
-        "src/ui/restore-gate.mjs",
-        "src/ui/restore-core.mjs"
+        "src/runtime/../ui/restore-stage.mjs",
+        "src/runtime/../ui/restore-gate.mjs",
+        "src/runtime/../ui/restore-core.mjs"
       ],
       "rootCause": "The authoritative scoped record records an unresolved failure or required operator choice; retain its first causal code.",
       "automaticHandler": "src/runtime/restore-boundary.mjs",
@@ -4790,9 +4790,9 @@
       "state": "MAPPING_REQUIRED",
       "owner": [
         "src/runtime/restore-boundary.mjs",
-        "src/ui/restore-stage.mjs",
-        "src/ui/restore-gate.mjs",
-        "src/ui/restore-core.mjs"
+        "src/runtime/../ui/restore-stage.mjs",
+        "src/runtime/../ui/restore-gate.mjs",
+        "src/runtime/../ui/restore-core.mjs"
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
       "automaticHandler": "src/runtime/restore-boundary.mjs",
@@ -4811,9 +4811,9 @@
       "state": "CREATE_POSSIBLE",
       "owner": [
         "src/runtime/restore-boundary.mjs",
-        "src/ui/restore-stage.mjs",
-        "src/ui/restore-gate.mjs",
-        "src/ui/restore-core.mjs"
+        "src/runtime/../ui/restore-stage.mjs",
+        "src/runtime/../ui/restore-gate.mjs",
+        "src/runtime/../ui/restore-core.mjs"
       ],
       "rootCause": "A prior external effect may still complete; ACK or attributable observation is missing.",
       "automaticHandler": "src/runtime/restore-boundary.mjs",
@@ -4832,9 +4832,9 @@
       "state": "PREPARED",
       "owner": [
         "src/runtime/restore-boundary.mjs",
-        "src/ui/restore-stage.mjs",
-        "src/ui/restore-gate.mjs",
-        "src/ui/restore-core.mjs"
+        "src/runtime/../ui/restore-stage.mjs",
+        "src/runtime/../ui/restore-gate.mjs",
+        "src/runtime/../ui/restore-core.mjs"
       ],
       "rootCause": "Prerequisite, ownership or next durable progression checkpoint is pending.",
       "automaticHandler": "src/runtime/restore-boundary.mjs",
@@ -4853,9 +4853,9 @@
       "state": "REVIEW_REQUIRED",
       "owner": [
         "src/runtime/restore-boundary.mjs",
-        "src/ui/restore-stage.mjs",
-        "src/ui/restore-gate.mjs",
-        "src/ui/restore-core.mjs"
+        "src/runtime/../ui/restore-stage.mjs",
+        "src/runtime/../ui/restore-gate.mjs",
+        "src/runtime/../ui/restore-core.mjs"
       ],
       "rootCause": "The authoritative scoped record records an unresolved failure or required operator choice; retain its first causal code.",
       "automaticHandler": "src/runtime/restore-boundary.mjs",
@@ -6169,6 +6169,11 @@
       "destination": "Accounts",
       "action": "Verify affected protected route; shared helper check when causally applicable.",
       "settlement": "Fresh account-specific route/identity pin",
+      "reference": {
+        "kind": "ACCOUNT",
+        "id": "account_inventory_0001"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "ACCOUNT",
         "id": "account_inventory_0001"
@@ -6184,6 +6189,11 @@
       "destination": "Accounts",
       "action": "Verify affected protected route; shared helper check when causally applicable.",
       "settlement": "Fresh account-specific route/identity pin",
+      "reference": {
+        "kind": "ACCOUNT",
+        "id": "account_inventory_0001"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "ACCOUNT",
         "id": "account_inventory_0001"
@@ -6199,6 +6209,11 @@
       "destination": "Accounts",
       "action": "Verify affected protected route; shared helper check when causally applicable.",
       "settlement": "Fresh account-specific route/identity pin",
+      "reference": {
+        "kind": "ACCOUNT",
+        "id": "account_inventory_0001"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "ACCOUNT",
         "id": "account_inventory_0001"
@@ -6214,9 +6229,11 @@
       "destination": "Accounts",
       "action": "Verify affected protected route; shared helper check when causally applicable.",
       "settlement": "Fresh account-specific route/identity pin",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "ACCOUNT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "ROUTE_UNAVAILABLE"
       },
       "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
@@ -6229,9 +6246,11 @@
       "destination": "Accounts",
       "action": "Verify affected protected route; shared helper check when causally applicable.",
       "settlement": "Fresh account-specific route/identity pin",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "ACCOUNT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "ROUTE_UNAVAILABLE"
       },
       "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
@@ -6244,9 +6263,11 @@
       "destination": "Accounts",
       "action": "Verify affected protected route; shared helper check when causally applicable.",
       "settlement": "Fresh account-specific route/identity pin",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "ACCOUNT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "ROUTE_UNAVAILABLE"
       },
       "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
@@ -6259,9 +6280,14 @@
       "destination": "Accounts",
       "action": "Verify affected protected route; shared helper check when causally applicable.",
       "settlement": "Fresh account-specific route/identity pin",
-      "currentDestination": {
+      "reference": {
         "kind": "ACCOUNT",
-        "id": "scope_inventory_0001"
+        "id": "account_inventory_0001"
+      },
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "ROUTE_UNAVAILABLE"
       },
       "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
@@ -6274,9 +6300,14 @@
       "destination": "Accounts",
       "action": "Verify affected protected route; shared helper check when causally applicable.",
       "settlement": "Fresh account-specific route/identity pin",
-      "currentDestination": {
+      "reference": {
         "kind": "ACCOUNT",
-        "id": "scope_inventory_0001"
+        "id": "account_inventory_0001"
+      },
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "ROUTE_UNAVAILABLE"
       },
       "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
@@ -6289,9 +6320,14 @@
       "destination": "Accounts",
       "action": "Verify affected protected route; shared helper check when causally applicable.",
       "settlement": "Fresh account-specific route/identity pin",
-      "currentDestination": {
+      "reference": {
         "kind": "ACCOUNT",
-        "id": "scope_inventory_0001"
+        "id": "account_inventory_0001"
+      },
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "ROUTE_UNAVAILABLE"
       },
       "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
@@ -6304,6 +6340,11 @@
       "destination": "Accounts",
       "action": "Complete login or confirm original identity.",
       "settlement": "Fresh original principal and owned inventory",
+      "reference": {
+        "kind": "ACCOUNT",
+        "id": "account_inventory_0001"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "ACCOUNT",
         "id": "account_inventory_0001"
@@ -6319,6 +6360,11 @@
       "destination": "Accounts",
       "action": "Complete login or confirm original identity.",
       "settlement": "Fresh original principal and owned inventory",
+      "reference": {
+        "kind": "ACCOUNT",
+        "id": "account_inventory_0001"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "ACCOUNT",
         "id": "account_inventory_0001"
@@ -6334,6 +6380,11 @@
       "destination": "Accounts",
       "action": "Complete login or confirm original identity.",
       "settlement": "Fresh original principal and owned inventory",
+      "reference": {
+        "kind": "ACCOUNT",
+        "id": "account_inventory_0001"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "ACCOUNT",
         "id": "account_inventory_0001"
@@ -6349,9 +6400,11 @@
       "destination": "Accounts",
       "action": "Complete login or confirm original identity.",
       "settlement": "Fresh original principal and owned inventory",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "ACCOUNT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "ACCOUNT_UNVERIFIED"
       },
       "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
@@ -6364,9 +6417,11 @@
       "destination": "Accounts",
       "action": "Complete login or confirm original identity.",
       "settlement": "Fresh original principal and owned inventory",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "ACCOUNT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "ACCOUNT_UNVERIFIED"
       },
       "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
@@ -6379,9 +6434,11 @@
       "destination": "Accounts",
       "action": "Complete login or confirm original identity.",
       "settlement": "Fresh original principal and owned inventory",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "ACCOUNT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "ACCOUNT_UNVERIFIED"
       },
       "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
@@ -6394,9 +6451,14 @@
       "destination": "Accounts",
       "action": "Complete login or confirm original identity.",
       "settlement": "Fresh original principal and owned inventory",
-      "currentDestination": {
+      "reference": {
         "kind": "ACCOUNT",
-        "id": "scope_inventory_0001"
+        "id": "account_inventory_0001"
+      },
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "ACCOUNT_UNVERIFIED"
       },
       "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
@@ -6409,9 +6471,14 @@
       "destination": "Accounts",
       "action": "Complete login or confirm original identity.",
       "settlement": "Fresh original principal and owned inventory",
-      "currentDestination": {
+      "reference": {
         "kind": "ACCOUNT",
-        "id": "scope_inventory_0001"
+        "id": "account_inventory_0001"
+      },
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "ACCOUNT_UNVERIFIED"
       },
       "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
@@ -6424,9 +6491,14 @@
       "destination": "Accounts",
       "action": "Complete login or confirm original identity.",
       "settlement": "Fresh original principal and owned inventory",
-      "currentDestination": {
+      "reference": {
         "kind": "ACCOUNT",
-        "id": "scope_inventory_0001"
+        "id": "account_inventory_0001"
+      },
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "ACCOUNT_UNVERIFIED"
       },
       "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
@@ -6439,6 +6511,11 @@
       "destination": "Generators / Source",
       "action": "Compare exact source/history; adopt human changes or defer.",
       "settlement": "Current full source and writer settlement",
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "GENERATOR",
         "id": "inventory-generator"
@@ -6454,6 +6531,11 @@
       "destination": "Generators / Source",
       "action": "Compare exact source/history; adopt human changes or defer.",
       "settlement": "Current full source and writer settlement",
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "GENERATOR",
         "id": "inventory-generator"
@@ -6469,6 +6551,11 @@
       "destination": "Generators / Source",
       "action": "Compare exact source/history; adopt human changes or defer.",
       "settlement": "Current full source and writer settlement",
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "GENERATOR",
         "id": "inventory-generator"
@@ -6484,11 +6571,13 @@
       "destination": "Generators / Source",
       "action": "Compare exact source/history; adopt human changes or defer.",
       "settlement": "Current full source and writer settlement",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "SOURCE_HELD"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6499,11 +6588,13 @@
       "destination": "Generators / Source",
       "action": "Compare exact source/history; adopt human changes or defer.",
       "settlement": "Current full source and writer settlement",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "SOURCE_HELD"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6514,11 +6605,13 @@
       "destination": "Generators / Source",
       "action": "Compare exact source/history; adopt human changes or defer.",
       "settlement": "Current full source and writer settlement",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "SOURCE_HELD"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6529,11 +6622,16 @@
       "destination": "Generators / Source",
       "action": "Compare exact source/history; adopt human changes or defer.",
       "settlement": "Current full source and writer settlement",
-      "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "SOURCE_HELD"
+      },
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6544,11 +6642,16 @@
       "destination": "Generators / Source",
       "action": "Compare exact source/history; adopt human changes or defer.",
       "settlement": "Current full source and writer settlement",
-      "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "SOURCE_HELD"
+      },
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6559,11 +6662,16 @@
       "destination": "Generators / Source",
       "action": "Compare exact source/history; adopt human changes or defer.",
       "settlement": "Current full source and writer settlement",
-      "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "SOURCE_HELD"
+      },
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6574,6 +6682,11 @@
       "destination": "Settings / Backups",
       "action": "Inspect/resume interrupted restore; retain inactive safety hold.",
       "settlement": "Donor/canonical readback and explicit verified activation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "backups"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -6589,6 +6702,11 @@
       "destination": "Settings / Backups",
       "action": "Inspect/resume interrupted restore; retain inactive safety hold.",
       "settlement": "Donor/canonical readback and explicit verified activation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "backups"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -6604,6 +6722,11 @@
       "destination": "Settings / Backups",
       "action": "Inspect/resume interrupted restore; retain inactive safety hold.",
       "settlement": "Donor/canonical readback and explicit verified activation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "backups"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -6619,6 +6742,8 @@
       "destination": "Settings / Backups",
       "action": "Inspect/resume interrupted restore; retain inactive safety hold.",
       "settlement": "Donor/canonical readback and explicit verified activation",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -6634,6 +6759,8 @@
       "destination": "Settings / Backups",
       "action": "Inspect/resume interrupted restore; retain inactive safety hold.",
       "settlement": "Donor/canonical readback and explicit verified activation",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -6649,6 +6776,8 @@
       "destination": "Settings / Backups",
       "action": "Inspect/resume interrupted restore; retain inactive safety hold.",
       "settlement": "Donor/canonical readback and explicit verified activation",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -6664,6 +6793,11 @@
       "destination": "Settings / Backups",
       "action": "Inspect/resume interrupted restore; retain inactive safety hold.",
       "settlement": "Donor/canonical readback and explicit verified activation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "backups"
+      },
+      "authoritativeTargetState": "STALE",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -6679,6 +6813,11 @@
       "destination": "Settings / Backups",
       "action": "Inspect/resume interrupted restore; retain inactive safety hold.",
       "settlement": "Donor/canonical readback and explicit verified activation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "backups"
+      },
+      "authoritativeTargetState": "STALE",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -6694,6 +6833,11 @@
       "destination": "Settings / Backups",
       "action": "Inspect/resume interrupted restore; retain inactive safety hold.",
       "settlement": "Donor/canonical readback and explicit verified activation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "backups"
+      },
+      "authoritativeTargetState": "STALE",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -6709,6 +6853,11 @@
       "destination": "Settings / Diagnostics",
       "action": "Check browser-local storage; preserve effects until storage reopens.",
       "settlement": "Successful canonical reopen and pending-effect reconciliation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "diagnostics"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "diagnostics"
@@ -6724,6 +6873,11 @@
       "destination": "Settings / Diagnostics",
       "action": "Check browser-local storage; preserve effects until storage reopens.",
       "settlement": "Successful canonical reopen and pending-effect reconciliation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "diagnostics"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "diagnostics"
@@ -6739,6 +6893,11 @@
       "destination": "Settings / Diagnostics",
       "action": "Check browser-local storage; preserve effects until storage reopens.",
       "settlement": "Successful canonical reopen and pending-effect reconciliation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "diagnostics"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "diagnostics"
@@ -6754,11 +6913,13 @@
       "destination": "Settings / Diagnostics",
       "action": "Check browser-local storage; preserve effects until storage reopens.",
       "settlement": "Successful canonical reopen and pending-effect reconciliation",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+        "kind": "SETTINGS",
+        "id": "diagnostics"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6769,11 +6930,13 @@
       "destination": "Settings / Diagnostics",
       "action": "Check browser-local storage; preserve effects until storage reopens.",
       "settlement": "Successful canonical reopen and pending-effect reconciliation",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+        "kind": "SETTINGS",
+        "id": "diagnostics"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6784,11 +6947,13 @@
       "destination": "Settings / Diagnostics",
       "action": "Check browser-local storage; preserve effects until storage reopens.",
       "settlement": "Successful canonical reopen and pending-effect reconciliation",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+        "kind": "SETTINGS",
+        "id": "diagnostics"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6799,11 +6964,16 @@
       "destination": "Settings / Diagnostics",
       "action": "Check browser-local storage; preserve effects until storage reopens.",
       "settlement": "Successful canonical reopen and pending-effect reconciliation",
-      "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "diagnostics"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "SETTINGS",
+        "id": "diagnostics"
+      },
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6814,11 +6984,16 @@
       "destination": "Settings / Diagnostics",
       "action": "Check browser-local storage; preserve effects until storage reopens.",
       "settlement": "Successful canonical reopen and pending-effect reconciliation",
-      "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "diagnostics"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "SETTINGS",
+        "id": "diagnostics"
+      },
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6829,11 +7004,16 @@
       "destination": "Settings / Diagnostics",
       "action": "Check browser-local storage; preserve effects until storage reopens.",
       "settlement": "Successful canonical reopen and pending-effect reconciliation",
-      "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "diagnostics"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "SETTINGS",
+        "id": "diagnostics"
+      },
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6844,6 +7024,11 @@
       "destination": "Work Queue / Operation",
       "action": "Read-only saved-status reconciliation; no replay.",
       "settlement": "Attributable independent outcome; otherwise explicit hold",
+      "reference": {
+        "kind": "OPERATION",
+        "id": "operation_inventory_0001"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "OPERATION",
         "id": "operation_inventory_0001"
@@ -6859,6 +7044,11 @@
       "destination": "Work Queue / Operation",
       "action": "Read-only saved-status reconciliation; no replay.",
       "settlement": "Attributable independent outcome; otherwise explicit hold",
+      "reference": {
+        "kind": "OPERATION",
+        "id": "operation_inventory_0001"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "OPERATION",
         "id": "operation_inventory_0001"
@@ -6874,6 +7064,11 @@
       "destination": "Work Queue / Operation",
       "action": "Read-only saved-status reconciliation; no replay.",
       "settlement": "Attributable independent outcome; otherwise explicit hold",
+      "reference": {
+        "kind": "OPERATION",
+        "id": "operation_inventory_0001"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "OPERATION",
         "id": "operation_inventory_0001"
@@ -6889,11 +7084,13 @@
       "destination": "Work Queue / Operation",
       "action": "Read-only saved-status reconciliation; no replay.",
       "settlement": "Attributable independent outcome; otherwise explicit hold",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "OPERATION_UNCERTAIN"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6904,11 +7101,13 @@
       "destination": "Work Queue / Operation",
       "action": "Read-only saved-status reconciliation; no replay.",
       "settlement": "Attributable independent outcome; otherwise explicit hold",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "OPERATION_UNCERTAIN"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6919,11 +7118,13 @@
       "destination": "Work Queue / Operation",
       "action": "Read-only saved-status reconciliation; no replay.",
       "settlement": "Attributable independent outcome; otherwise explicit hold",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "OPERATION_UNCERTAIN"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6934,11 +7135,16 @@
       "destination": "Work Queue / Operation",
       "action": "Read-only saved-status reconciliation; no replay.",
       "settlement": "Attributable independent outcome; otherwise explicit hold",
-      "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+      "reference": {
+        "kind": "OPERATION",
+        "id": "operation_inventory_0001"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "OPERATION_UNCERTAIN"
+      },
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6949,11 +7155,16 @@
       "destination": "Work Queue / Operation",
       "action": "Read-only saved-status reconciliation; no replay.",
       "settlement": "Attributable independent outcome; otherwise explicit hold",
-      "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+      "reference": {
+        "kind": "OPERATION",
+        "id": "operation_inventory_0001"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "OPERATION_UNCERTAIN"
+      },
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6964,11 +7175,16 @@
       "destination": "Work Queue / Operation",
       "action": "Read-only saved-status reconciliation; no replay.",
       "settlement": "Attributable independent outcome; otherwise explicit hold",
-      "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+      "reference": {
+        "kind": "OPERATION",
+        "id": "operation_inventory_0001"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "OPERATION_UNCERTAIN"
+      },
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -6979,6 +7195,11 @@
       "destination": "Refresher / affected account",
       "action": "Inspect provider/feed and affected account; retain source/route holds.",
       "settlement": "Fresh protected provider/feed observation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "refresher"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "refresher"
@@ -6994,6 +7215,11 @@
       "destination": "Refresher / affected account",
       "action": "Inspect provider/feed and affected account; retain source/route holds.",
       "settlement": "Fresh protected provider/feed observation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "refresher"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "refresher"
@@ -7009,6 +7235,11 @@
       "destination": "Refresher / affected account",
       "action": "Inspect provider/feed and affected account; retain source/route holds.",
       "settlement": "Fresh protected provider/feed observation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "refresher"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "refresher"
@@ -7024,6 +7255,8 @@
       "destination": "Refresher / affected account",
       "action": "Inspect provider/feed and affected account; retain source/route holds.",
       "settlement": "Fresh protected provider/feed observation",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "refresher"
@@ -7039,6 +7272,8 @@
       "destination": "Refresher / affected account",
       "action": "Inspect provider/feed and affected account; retain source/route holds.",
       "settlement": "Fresh protected provider/feed observation",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "refresher"
@@ -7054,6 +7289,8 @@
       "destination": "Refresher / affected account",
       "action": "Inspect provider/feed and affected account; retain source/route holds.",
       "settlement": "Fresh protected provider/feed observation",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "refresher"
@@ -7069,6 +7306,11 @@
       "destination": "Refresher / affected account",
       "action": "Inspect provider/feed and affected account; retain source/route holds.",
       "settlement": "Fresh protected provider/feed observation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "refresher"
+      },
+      "authoritativeTargetState": "STALE",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "refresher"
@@ -7084,6 +7326,11 @@
       "destination": "Refresher / affected account",
       "action": "Inspect provider/feed and affected account; retain source/route holds.",
       "settlement": "Fresh protected provider/feed observation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "refresher"
+      },
+      "authoritativeTargetState": "STALE",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "refresher"
@@ -7099,6 +7346,11 @@
       "destination": "Refresher / affected account",
       "action": "Inspect provider/feed and affected account; retain source/route holds.",
       "settlement": "Fresh protected provider/feed observation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "refresher"
+      },
+      "authoritativeTargetState": "STALE",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "refresher"
@@ -7112,8 +7364,13 @@
       "target": "VALID",
       "state": "ACTIVE",
       "destination": "Settings / Backups",
-      "action": "Inspect export status/download and retry only a known-safe step.",
+      "action": "Inspect status/download and retry only a known-safe step.",
       "settlement": "Manifest and download observation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "backups"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -7127,8 +7384,13 @@
       "target": "VALID",
       "state": "REVIEWED",
       "destination": "Settings / Backups",
-      "action": "Inspect export status/download and retry only a known-safe step.",
+      "action": "Inspect status/download and retry only a known-safe step.",
       "settlement": "Manifest and download observation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "backups"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -7142,8 +7404,13 @@
       "target": "VALID",
       "state": "RESOLVED",
       "destination": "Settings / Backups",
-      "action": "Inspect export status/download and retry only a known-safe step.",
+      "action": "Inspect status/download and retry only a known-safe step.",
       "settlement": "Manifest and download observation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "backups"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -7157,8 +7424,10 @@
       "target": "ABSENT",
       "state": "ACTIVE",
       "destination": "Settings / Backups",
-      "action": "Inspect export status/download and retry only a known-safe step.",
+      "action": "Inspect status/download and retry only a known-safe step.",
       "settlement": "Manifest and download observation",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -7172,8 +7441,10 @@
       "target": "ABSENT",
       "state": "REVIEWED",
       "destination": "Settings / Backups",
-      "action": "Inspect export status/download and retry only a known-safe step.",
+      "action": "Inspect status/download and retry only a known-safe step.",
       "settlement": "Manifest and download observation",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -7187,8 +7458,10 @@
       "target": "ABSENT",
       "state": "RESOLVED",
       "destination": "Settings / Backups",
-      "action": "Inspect export status/download and retry only a known-safe step.",
+      "action": "Inspect status/download and retry only a known-safe step.",
       "settlement": "Manifest and download observation",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -7202,8 +7475,13 @@
       "target": "STALE",
       "state": "ACTIVE",
       "destination": "Settings / Backups",
-      "action": "Inspect export status/download and retry only a known-safe step.",
+      "action": "Inspect status/download and retry only a known-safe step.",
       "settlement": "Manifest and download observation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "backups"
+      },
+      "authoritativeTargetState": "STALE",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -7217,8 +7495,13 @@
       "target": "STALE",
       "state": "REVIEWED",
       "destination": "Settings / Backups",
-      "action": "Inspect export status/download and retry only a known-safe step.",
+      "action": "Inspect status/download and retry only a known-safe step.",
       "settlement": "Manifest and download observation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "backups"
+      },
+      "authoritativeTargetState": "STALE",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -7232,8 +7515,13 @@
       "target": "STALE",
       "state": "RESOLVED",
       "destination": "Settings / Backups",
-      "action": "Inspect export status/download and retry only a known-safe step.",
+      "action": "Inspect status/download and retry only a known-safe step.",
       "settlement": "Manifest and download observation",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "backups"
+      },
+      "authoritativeTargetState": "STALE",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "backups"
@@ -7249,6 +7537,11 @@
       "destination": "Settings / Connections",
       "action": "Inspect actual Git cause; reconnect only invalid/missing credential.",
       "settlement": "Fresh complete main and repository identity",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "connections"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "connections"
@@ -7264,6 +7557,11 @@
       "destination": "Settings / Connections",
       "action": "Inspect actual Git cause; reconnect only invalid/missing credential.",
       "settlement": "Fresh complete main and repository identity",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "connections"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "connections"
@@ -7279,6 +7577,11 @@
       "destination": "Settings / Connections",
       "action": "Inspect actual Git cause; reconnect only invalid/missing credential.",
       "settlement": "Fresh complete main and repository identity",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "connections"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "connections"
@@ -7294,6 +7597,8 @@
       "destination": "Settings / Connections",
       "action": "Inspect actual Git cause; reconnect only invalid/missing credential.",
       "settlement": "Fresh complete main and repository identity",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "connections"
@@ -7309,6 +7614,8 @@
       "destination": "Settings / Connections",
       "action": "Inspect actual Git cause; reconnect only invalid/missing credential.",
       "settlement": "Fresh complete main and repository identity",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "connections"
@@ -7324,6 +7631,8 @@
       "destination": "Settings / Connections",
       "action": "Inspect actual Git cause; reconnect only invalid/missing credential.",
       "settlement": "Fresh complete main and repository identity",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "connections"
@@ -7339,6 +7648,11 @@
       "destination": "Settings / Connections",
       "action": "Inspect actual Git cause; reconnect only invalid/missing credential.",
       "settlement": "Fresh complete main and repository identity",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "connections"
+      },
+      "authoritativeTargetState": "STALE",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "connections"
@@ -7354,6 +7668,11 @@
       "destination": "Settings / Connections",
       "action": "Inspect actual Git cause; reconnect only invalid/missing credential.",
       "settlement": "Fresh complete main and repository identity",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "connections"
+      },
+      "authoritativeTargetState": "STALE",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "connections"
@@ -7369,6 +7688,11 @@
       "destination": "Settings / Connections",
       "action": "Inspect actual Git cause; reconnect only invalid/missing credential.",
       "settlement": "Fresh complete main and repository identity",
+      "reference": {
+        "kind": "SETTINGS",
+        "id": "connections"
+      },
+      "authoritativeTargetState": "STALE",
       "currentDestination": {
         "kind": "SETTINGS",
         "id": "connections"
@@ -7384,6 +7708,11 @@
       "destination": "Work Queue / Source",
       "action": "Inspect history/current source and scan main; preserve live generator.",
       "settlement": "Complete main reappearance or explicit source identity decision",
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "GENERATOR",
         "id": "inventory-generator"
@@ -7399,6 +7728,11 @@
       "destination": "Work Queue / Source",
       "action": "Inspect history/current source and scan main; preserve live generator.",
       "settlement": "Complete main reappearance or explicit source identity decision",
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "GENERATOR",
         "id": "inventory-generator"
@@ -7414,6 +7748,11 @@
       "destination": "Work Queue / Source",
       "action": "Inspect history/current source and scan main; preserve live generator.",
       "settlement": "Complete main reappearance or explicit source identity decision",
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "GENERATOR",
         "id": "inventory-generator"
@@ -7429,11 +7768,13 @@
       "destination": "Work Queue / Source",
       "action": "Inspect history/current source and scan main; preserve live generator.",
       "settlement": "Complete main reappearance or explicit source identity decision",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "GIT_FOLDER_MISSING"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -7444,11 +7785,13 @@
       "destination": "Work Queue / Source",
       "action": "Inspect history/current source and scan main; preserve live generator.",
       "settlement": "Complete main reappearance or explicit source identity decision",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "GIT_FOLDER_MISSING"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -7459,11 +7802,13 @@
       "destination": "Work Queue / Source",
       "action": "Inspect history/current source and scan main; preserve live generator.",
       "settlement": "Complete main reappearance or explicit source identity decision",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "GIT_FOLDER_MISSING"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -7474,11 +7819,16 @@
       "destination": "Work Queue / Source",
       "action": "Inspect history/current source and scan main; preserve live generator.",
       "settlement": "Complete main reappearance or explicit source identity decision",
-      "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "GIT_FOLDER_MISSING"
+      },
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -7489,11 +7839,16 @@
       "destination": "Work Queue / Source",
       "action": "Inspect history/current source and scan main; preserve live generator.",
       "settlement": "Complete main reappearance or explicit source identity decision",
-      "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "GIT_FOLDER_MISSING"
+      },
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -7504,11 +7859,16 @@
       "destination": "Work Queue / Source",
       "action": "Inspect history/current source and scan main; preserve live generator.",
       "settlement": "Complete main reappearance or explicit source identity decision",
-      "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "GIT_FOLDER_MISSING"
+      },
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -7519,6 +7879,11 @@
       "destination": "Work Queue / Identity",
       "action": "Inspect old/new source; choose distinct creation or verified rename.",
       "settlement": "Canonical explicit identity choice and independent readback",
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "GENERATOR",
         "id": "inventory-generator"
@@ -7534,6 +7899,11 @@
       "destination": "Work Queue / Identity",
       "action": "Inspect old/new source; choose distinct creation or verified rename.",
       "settlement": "Canonical explicit identity choice and independent readback",
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "GENERATOR",
         "id": "inventory-generator"
@@ -7549,6 +7919,11 @@
       "destination": "Work Queue / Identity",
       "action": "Inspect old/new source; choose distinct creation or verified rename.",
       "settlement": "Canonical explicit identity choice and independent readback",
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
+      },
+      "authoritativeTargetState": "CURRENT",
       "currentDestination": {
         "kind": "GENERATOR",
         "id": "inventory-generator"
@@ -7564,11 +7939,13 @@
       "destination": "Work Queue / Identity",
       "action": "Inspect old/new source; choose distinct creation or verified rename.",
       "settlement": "Canonical explicit identity choice and independent readback",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "GIT_FOLDER_RENAME_REVIEW"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -7579,11 +7956,13 @@
       "destination": "Work Queue / Identity",
       "action": "Inspect old/new source; choose distinct creation or verified rename.",
       "settlement": "Canonical explicit identity choice and independent readback",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "GIT_FOLDER_RENAME_REVIEW"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -7594,11 +7973,13 @@
       "destination": "Work Queue / Identity",
       "action": "Inspect old/new source; choose distinct creation or verified rename.",
       "settlement": "Canonical explicit identity choice and independent readback",
+      "reference": null,
+      "authoritativeTargetState": "ABSENT",
       "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+        "kind": "CONTEXT",
+        "id": "GIT_FOLDER_RENAME_REVIEW"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -7609,11 +7990,16 @@
       "destination": "Work Queue / Identity",
       "action": "Inspect old/new source; choose distinct creation or verified rename.",
       "settlement": "Canonical explicit identity choice and independent readback",
-      "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "GIT_FOLDER_RENAME_REVIEW"
+      },
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -7624,11 +8010,16 @@
       "destination": "Work Queue / Identity",
       "action": "Inspect old/new source; choose distinct creation or verified rename.",
       "settlement": "Canonical explicit identity choice and independent readback",
-      "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "GIT_FOLDER_RENAME_REVIEW"
+      },
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     },
@@ -7639,11 +8030,16 @@
       "destination": "Work Queue / Identity",
       "action": "Inspect old/new source; choose distinct creation or verified rename.",
       "settlement": "Canonical explicit identity choice and independent readback",
-      "currentDestination": {
-        "kind": "INCIDENT",
-        "id": "scope_inventory_0001"
+      "reference": {
+        "kind": "GENERATOR",
+        "id": "inventory-generator"
       },
-      "knownCorrection": "GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.",
+      "authoritativeTargetState": "STALE",
+      "currentDestination": {
+        "kind": "CONTEXT",
+        "id": "GIT_FOLDER_RENAME_REVIEW"
+      },
+      "knownCorrection": null,
       "acknowledgment": "Review never resolves or suppresses an active safety hold.",
       "fallback": "Use typed domain context when target is missing/stale; never an unrelated empty queue search."
     }

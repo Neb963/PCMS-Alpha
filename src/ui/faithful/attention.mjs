@@ -6,13 +6,13 @@ export function validIncidentTarget(t){return t&&typeof t==='object'&&!Array.isA
  t.kind==='GENERATOR'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(t.id)||
  t.kind==='OPERATION'&&/^[A-Za-z0-9_-]{8,100}$/.test(t.id)||
  t.kind==='SETTINGS'&&settings.has(t.id));}
-export function incidentDestination(n){
- if(validIncidentTarget(n.target))return n.target;
+export function incidentDestination(n,{targetState='CURRENT'}={}){
+ if(targetState==='CURRENT'&&validIncidentTarget(n.target))return n.target;
  if(n.code==='BACKUP_FAILED'||n.code==='RESTORE_IN_PROGRESS')return {kind:'SETTINGS',id:'backups'};
  if(n.code==='GIT_RECONNECT_REQUIRED')return {kind:'SETTINGS',id:'connections'};
- if(['ROUTE_UNAVAILABLE','ACCOUNT_UNVERIFIED'].includes(n.code))return {kind:'ACCOUNT',id:n.scopeId};
+ if(n.code==='CANONICAL_UNAVAILABLE')return {kind:'SETTINGS',id:'diagnostics'};
  if(n.code==='PROVIDER_OUTAGE')return {kind:'SETTINGS',id:'refresher'};
- return {kind:'INCIDENT',id:n.scopeId};
+ return {kind:'CONTEXT',id:n.code};
 }
 export async function acknowledgeIncident(n,request){
  const observe=async()=>{

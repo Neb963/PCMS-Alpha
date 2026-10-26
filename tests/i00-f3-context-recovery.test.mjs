@@ -25,7 +25,7 @@ function setup(kind){
  const values={pcmsS03Git:{repository:'Neb963/per-gens',repositoryId:'42'}},events=[];
  if(kind==='UNCONFIGURED')delete values.pcmsS03Git;
  const api={runtime:{id:'fixture',getURL:p=>'moz-extension://fixture/'+p},
-  storage:{local:{get:async keys=>{if(kind==='READ_STORAGE')throw Error('synthetic');
+  storage:{local:{get:async keys=>{if(kind==='READ_STORAGE'&&keys==='pcmsS03Git')throw Error('synthetic');
    const out=Object.fromEntries((Array.isArray(keys)?keys:[keys]).filter(k=>k in values).map(k=>[k,structuredClone(values[k])]));
    if(kind==='BAD_READBACK'&&out.pcmsS03CatalogLastComplete)out.pcmsS03CatalogLastComplete.head='f'.repeat(40);
    return out;},

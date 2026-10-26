@@ -1,3 +1,4 @@
+import {noticeCause} from './attention-model.mjs';
 import {validIncidentTarget} from './incident-target.mjs';
 import {operationGroup,projectOperationContext} from './operation-context.mjs';
 // PCMS canonical journal. Only short IndexedDB transactions own state.
@@ -326,11 +327,11 @@ export function createCanonicalStore(db) {
         if (!changed) { finish(ok({ changed:false, notify:false, reviewed:next.reviewed, event:event2 })); return; }
         // One desktop notification per cause per window: a provider outage
         // across many accounts/generators is one alert, unless it escalates.
-        meta.get('attention-cause:' + next.cause).onsuccess = ce => {
+        meta.get('attention-cause:' + noticeCause(next)).onsuccess = ce => {
           const last = ce.target.result;
           const notify = !last || at - last.notifiedAt >= RENOTIFY_MS ||
             (RANK[next.severity] || 0) > (RANK[last.severity] || 0);
-          if (notify) meta.put({ key:'attention-cause:' + next.cause, cause:next.cause,
+          if (notify) meta.put({ key:'attention-cause:' + noticeCause(next), cause:next.cause,
             notifiedAt:at, severity:next.severity });
           finish(ok({ changed:true, notify, ignored:false, event:event2 }));
         };
