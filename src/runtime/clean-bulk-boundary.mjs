@@ -57,7 +57,7 @@ export function createCleanBulkProgress(api,{open=openCanonicalDatabase,makeRele
    if(index<0)return {ok:true,code:'CLEAN_BULK_WAITING_FOR_FINISH'};
    const item=r.items[index];
    await api.storage.local.set({pcmsCleanBulkScopeCursor:{id:r.id,index:(index+1)%r.items.length}});
-   return await scopes.run(['generator:'+item.slug],async()=>{
+   const observed=await scopes.run(['generator:'+item.slug],async()=>{
    const existing=await releases.getFull(item.slug),same=existing.ok&&matchesApproval(existing.record.approval,item.snapshot.tuple).ok;
    const update=patch=>store.update(r.id,r.revision,index,patch);
    if(existing.ok&&['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN','RECOVERY_HOLD'].includes(existing.record.state))return update({state:'VERIFYING',code:'PUBLICATION_READBACK_PENDING',...(same?{releaseId:existing.record.releaseId}:{})});
@@ -84,6 +84,7 @@ export function createCleanBulkProgress(api,{open=openCanonicalDatabase,makeRele
    return store.update(r.id,latest.record.revision,index,matched?{state:observed.record.state==='CONFIRMED_PUBLIC'?'CONFIRMED':'APPROVED',releaseId:observed.record.releaseId,code:'PUBLICATION_QUEUED'}:
     {state:'WAITING',code:out?.code||'APPROVAL_RESPONSE_UNKNOWN'});
    },{progressed:out=>out?.ok===true&&out?.revision>r.revision});
+   return observed?.code==='SCOPE_CHECKPOINT_FAILED'?fail('CLEAN_BULK_PROGRESS_UNAVAILABLE'):observed;
   }catch{return fail('CLEAN_BULK_PROGRESS_UNAVAILABLE')}finally{busy=false}
  }
  tick=checkpointed(api,tick);

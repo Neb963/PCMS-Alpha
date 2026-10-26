@@ -120,3 +120,25 @@ test('R4 S03: delayed apparent Git folder rename remains held before actual crea
  assert.equal(review[0].state,'REVIEW_REQUIRED');
  assert.equal(v.saved.get('pcmsS03CatalogReceipt').identityReviewRequired,1);
 });
+
+test('F2 catalog observation coalesces callers and a cold adapter cannot replace an unresolved actual scan',async()=>{
+ const v=env();await v.set({pcmsS03Git:{repository:repo,repositoryId:'42'}});
+ let release,reads=0;const gate=new Promise(r=>release=r);
+ const options={observationMs:10,native:async()=>({ok:true,credential:TOKEN}),
+  scan:async()=>{reads++;await gate;return observed([generator('one')]);}};
+ const watcher=createCatalogWatcher(v.api,options),one=watcher.tick(),two=watcher.tick();
+ try{
+  assert.equal((await one).code,'SCOPE_OBSERVATION_PENDING');
+  assert.equal((await two).code,'SCOPE_OBSERVATION_PENDING');
+  assert.equal(reads,1);
+  assert.equal((await createCatalogWatcher(v.api,options).tick()).code,'SCOPE_ACTUAL_WORK_PENDING');
+  assert.equal(reads,1);
+ }finally{release();}
+ const deadline=Date.now()+2000;
+ while(!v.saved.get('pcmsS03CatalogLastComplete')){
+  assert.ok(Date.now()<deadline);await new Promise(r=>setImmediate(r));
+ }
+ for(let i=0;i<40;i++)await Promise.resolve();
+ assert.equal((await createCatalogWatcher(v.api,options).tick()).ok,true);
+ assert.equal(reads,2);
+});

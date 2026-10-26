@@ -28,7 +28,7 @@ const safe=code=>({ok:false,code});
 const MINUTES=15;
 export function createCatalogWatcher(api,{scan=scanMainCatalog,
   native=p=>browserGitCredentialPacket(p),
-  network=fetch,clock=Date.now,ingestComplete=null,ingestReady=null,
+  network=fetch,clock=Date.now,observationMs=30000,ingestComplete=null,ingestReady=null,
   progressReady=null,progressChanges=null,progressWriteback=null,progressCleanBulk=null,progressPublication=null,
   // C-68/C-69: one GitHub-connection incident (queued work stays queued);
   // resolved only by the existing guarded credential read (F3 strengthens recovery proof).
@@ -40,11 +40,11 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
         revision:Math.max(1,clock())});
   }}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
-  let running=null,registered=false;
+  let running=null,registered=false,observedTick=null;
   const domainObservers=new Map();
   const observe=(domain,fn)=>{
     let observer=domainObservers.get(domain);
-    if(!observer){observer=createScopeObservation(api,domain,{clock,observationMs:30000});domainObservers.set(domain,observer);}
+    if(!observer){observer=createScopeObservation(api,domain,{clock,observationMs});domainObservers.set(domain,observer);}
     return observer.run(['domain:'+domain],fn,{progressed:r=>r?.checkpointAdvanced===true||r?.progressed>0||
       domain==='catalog'&&r?.ok===true&&r.code==='CATALOG_OBSERVED_READ_ONLY'});
   };
@@ -221,7 +221,7 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
   if(progressCleanBulk)progressCleanBulk=checkpointed(api,progressCleanBulk);
   if(progressPublication)progressPublication=checkpointed(api,progressPublication);
     const actualTick=checkpointed(api,tick);
-    tick=()=>observe('catalog',actualTick);
+    tick=()=>observedTick||(observedTick=observe('catalog',actualTick).finally(()=>{observedTick=null;}));
   return Object.freeze({register,tick});
 }
 export const catalogWatcher=typeof browser==='undefined'?null:createCatalogWatcher(browser,{

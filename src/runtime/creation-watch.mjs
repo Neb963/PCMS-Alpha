@@ -73,7 +73,7 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
         item.accountId?'account:'+item.accountId:'intent:'+item.intentId;
       const saved=(await api.storage.local.get(CURSOR))?.[CURSOR];
       const anchor=typeof saved==='string'&&ID.test(saved)?saved:null;
-      let after=anchor,wrapped=anchor===null,pages=0,tail=null;
+      let after=anchor,wrapped=anchor===null,pages=0,tail=null,overflow=false;
       // Cursor is a bounded fairness hint only, NOT an effect claim, route
       // grant or source of truth. The authoritative state is always reread
       // from the canonical journal at the selected revision.
@@ -96,7 +96,7 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
             const key=scopeOf(item);
             if(!buckets.has(key)&&buckets.size<maxPerWake)buckets.set(key,[]);
             const bucket=buckets.get(key);
-            if(bucket&&bucket.length<maxPerWake)bucket.push(item);
+            if(bucket&&bucket.length<maxPerWake)bucket.push(item);else overflow=true;
           }
         }
         tail=page.next;
@@ -139,7 +139,7 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
         batchHeld=batchResult?.batchHeld||(batchResult?.ok===false?1:0);
       const result={ok:true,code:'S04_WAKE_CHECKPOINT',progressed,held,
         selected,batchProgressed,batchHeld,
-        more:batchProgressed>0||[...buckets.values()].reduce((n,b)=>n+b.length,0)>selected||!!tail||pages===16,
+        more:overflow||batchProgressed>0||[...buckets.values()].reduce((n,b)=>n+b.length,0)>selected||!!tail||pages===16,
         observedAt:clock(),providerActivation:'HELD_UNLESS_SCOPED_GATE'};
       await api.storage.local.set({[NEXT]:result});
       // Large batches keep moving: one bounded follow-up wake while queued

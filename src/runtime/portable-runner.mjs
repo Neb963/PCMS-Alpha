@@ -67,7 +67,7 @@ export function createPortableRunner(api,{
   capture=capturePortableCut,dispatch=downloadPortable,wait=awaitAuto,
   observe=inspectAuto,prepareOriginals=preparePortableOriginals,completeOriginals=completePortableOriginals,observationMs=30000
 }={}){
-  let pending=null,manualTask=null,inspection=null,dbPromise=null;
+  let pending=null,manualTask=null,inspection=null,dbPromise=null,wakeObservation=null;
   const db=()=>dbPromise ||= open().catch(e=>{dbPromise=null;throw e});
   const sentinel=createRestoreSentinel(api.storage.local);
   const scopes=createScopeObservation(api,'backup',{clock,observationMs});
@@ -387,18 +387,19 @@ export function createPortableRunner(api,{
   }
   status=checkpointed(api,status,{allowDuringRestore:true});
   const actualTick=checkpointed(api,tick);
-  tick=()=>scopes.run(['backup:automatic'],actualTick,{
-   progressed:r=>r?.ok===true&&r.code==='BROWSER_REPORTED_COMPLETE'});
+  tick=()=>wakeObservation||(wakeObservation=scopes.run(['backup:automatic'],actualTick,{
+   alreadyGuarded:true,progressed:r=>r?.ok===true&&r.code==='BROWSER_REPORTED_COMPLETE'})
+    .finally(()=>{wakeObservation=null;}));
   manual=checkpointed(api,manual,{allowDuringRestore:owner=>!!owner});
   recoverManual=checkpointed(api,recoverManual,{allowDuringRestore:owner=>!!owner});
   inspectArchive=checkpointed(api,inspectArchive);
   inspectRestore=checkpointed(api,inspectRestore);
   return Object.freeze({
     status,tick,manual:()=>scopes.run(['backup:manual'],()=>manual(),{
-     progressed:r=>r?.ok===true&&r.code==='BROWSER_REPORTED_COMPLETE'}),
+     alreadyGuarded:true,progressed:r=>r?.ok===true&&r.code==='BROWSER_REPORTED_COMPLETE'}),
     checkpoint:owner=>manual(owner),recoverManual,inspectArchive,inspectRestore,
     requestOriginalCheckpoint:()=>scopes.run(['backup:manual'],()=>manual(),{
-     progressed:r=>r?.ok===true&&r.code==='BROWSER_REPORTED_COMPLETE'}),recover:checkpointed(api,async()=>reconcile(await store())),
+     alreadyGuarded:true,progressed:r=>r?.ok===true&&r.code==='BROWSER_REPORTED_COMPLETE'}),recover:checkpointed(api,async()=>reconcile(await store())),
     enable:checkpointed(api,async value=>{
       const s=await store(),out=await s.enabled(value);
       if(out.ok&&value)void tick();

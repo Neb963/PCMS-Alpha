@@ -113,7 +113,7 @@ export function createScopeObservation(api,domain,{clock=Date.now,observationMs=
  function busy(scopes){
   return scopes.some(scope=>pool.owners.has(scope));
  }
- function run(scopes,fn,{progressed=()=>false,failure=value=>value?.ok===false&&/UNAVAILABLE|UNVERIFIED|INTERRUPTED|FAILED/.test(value?.code||''),diagnostic=true,onPending=null,timeoutMs=observationMs}={}){
+ function run(scopes,fn,{progressed=()=>false,failure=value=>value?.ok===false&&/UNAVAILABLE|UNVERIFIED|INTERRUPTED|FAILED/.test(value?.code||''),diagnostic=true,onPending=null,alreadyGuarded=false,timeoutMs=observationMs}={}){
   if(!Array.isArray(scopes)||!scopes.length||scopes.length>3||
     scopes.some(s=>typeof s!=='string'||s.length<1||s.length>256)||
     typeof fn!=='function'||!bounded(timeoutMs)||timeoutMs>60000)
@@ -129,7 +129,9 @@ export function createScopeObservation(api,domain,{clock=Date.now,observationMs=
   // The original actual work, not this bounded observation, stays in the
   // existing restore drain. Diagnostic storage is deliberately outside it.
   const actual=trackPcmsWork(Promise.resolve().then(async()=>{
-   if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+   // A caller with its existing checkpointed entry retains that fresh guard
+   // and synchronous admission ordering without adding another pre-entry await.
+   if(!alreadyGuarded&&(await sentinel.inspect()).held)return fail('RESTORE_HOLD');
    return fn();
   }));
   const settled=actual.then(value=>{
