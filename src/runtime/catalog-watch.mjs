@@ -1,6 +1,7 @@
+import {createScopeObservation} from './scope-observation.mjs';
 import {checkpointed} from './work-checkpoint.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
-// S03 read-only background observer. Git credentials stay in native Secret Service.
+// S03 read-only background observer. Git credentials stay in the browser-local credential store.
 // This deliberately does NOT send generator intents or provider/Git writes.
 import {scanMainCatalog} from './git-catalog.mjs';
 import {createRestoreSentinel,openCanonicalDatabase,createCanonicalStore} from './journal.mjs';
@@ -30,7 +31,7 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
   network=fetch,clock=Date.now,ingestComplete=null,ingestReady=null,
   progressReady=null,progressChanges=null,progressWriteback=null,progressCleanBulk=null,progressPublication=null,
   // C-68/C-69: one GitHub-connection incident (queued work stays queued);
-  // resolved only by the next successful vault credential read.
+  // resolved only by the existing guarded credential read (F3 strengthens recovery proof).
   incidents=async(kind)=>{
     const d=createNoticeDispatcher(api,createCanonicalStore(await openCanonicalDatabase()));
     return kind==='RESOLVE'?d.resolve({scopeId:'git_connection',code:'GIT_RECONNECT_REQUIRED',
@@ -40,6 +41,16 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
   }}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
   let running=null,registered=false;
+  const domainObservers=new Map();
+  const observe=(domain,fn)=>{
+    let observer=domainObservers.get(domain);
+    if(!observer){observer=createScopeObservation(api,domain,{clock,observationMs:30000});domainObservers.set(domain,observer);}
+    return observer.run(['domain:'+domain],fn);
+  };
+  const progressAll=()=>Promise.allSettled([
+    ['ready',progressReady],['changes',progressChanges],['writeback',progressWriteback],
+    ['cleanBulk',progressCleanBulk],['publication',progressPublication]
+  ].filter(([,fn])=>typeof fn==='function').map(([domain,fn])=>observe(domain,()=>fn())));
   async function persistStatus(code){
     try{await api.storage.local.set({[RECEIPT]:{code,observedAt:clock()}});}catch{}
     return safe(code);
@@ -109,6 +120,9 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
         ambiguousIdentityHeld:planned.held,identityReviewRequired:planned.created.length,
         firstImportNeedsApproval:prior?.repositoryId!==cfg.repositoryId
       }});
+      // Independent fixed domains do not wait on notice delivery or intake.
+      // Their own canonical guards, approval and source ownership still apply.
+      const progression=progressAll();
       // Each missing folder remains a distinct actionable incident. A full
       // successful reappearance, not a failed scan, is the only resolution.
       // Notification payloads contain no source paths or credentials.
@@ -146,7 +160,7 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       // The S03 observer never invents provider ownership or performs writes.
       if(ingestComplete){
         let intake;
-        try{intake=await ingestComplete(result,{heldSlugs:planned.held});}catch{intake={ok:false,code:'S04_INTAKE_UNAVAILABLE'};}
+        try{intake=await observe('catalogIntake',()=>ingestComplete(result,{heldSlugs:planned.held}));}catch{intake={ok:false,code:'S04_INTAKE_UNAVAILABLE'};}
         if(intake?.more===true)
           try{await api.alarms.create(CATALOG_RESUME_ALARM,{when:clock()+60000});}catch{}
         if(intake?.ok===false)
@@ -158,8 +172,8 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       // is local and effect-free; incomplete witnesses never become candidates.
       if(ingestReady){
         let ready;
-        try{ready=await ingestReady({catalog:result,repository:cfg.repository,
-          token:value.credential,transport:resumed.transport,heldSlugs:planned.held});}
+        try{ready=await observe('readyIntake',()=>ingestReady({catalog:result,repository:cfg.repository,
+          token:value.credential,transport:resumed.transport,heldSlugs:planned.held}));}
         catch{ready={ok:false,code:'S05_READY_INTAKE_UNAVAILABLE'};}
         if(ready?.more===true)
           try{await api.alarms.create(CATALOG_RESUME_ALARM,{when:clock()+60000});}catch{}
@@ -170,11 +184,7 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       }
       // The same existing observer owns bounded S05 progression. This
       // never promotes a partial Git scan into READY authority.
-      if(progressReady)try{await progressReady();}catch{}
-      if(progressChanges)try{await progressChanges();}catch{}
-      if(progressWriteback)try{await progressWriteback();}catch{}
-      if(progressCleanBulk)try{await progressCleanBulk();}catch{}
-      if(progressPublication)try{await progressPublication();}catch{}
+      await progression;
       return {ok:true,code:'CATALOG_OBSERVED_READ_ONLY',head:result.head,
         newFolders:added,missingFolderObservations:missing};
     }catch{return persistStatus('CATALOG_OBSERVATION_UNAVAILABLE');}
@@ -195,19 +205,13 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
     api.alarms.onAlarm.addListener(event=>{
       if(event?.name===CATALOG_ALARM||event?.name===CATALOG_RESUME_ALARM)void tick();
       if(event?.name===READY_PROGRESS_ALARM&&(progressReady||progressChanges||progressWriteback||progressCleanBulk||progressPublication))
-        void Promise.resolve().then(async()=>{
-          if(progressReady)await progressReady();
-          if(progressChanges)await progressChanges();
-          if(progressWriteback)await progressWriteback();
-          if(progressCleanBulk)await progressCleanBulk();
-          if(progressPublication)await progressPublication();
-        }).catch(()=>{});
+        void progressAll().catch(()=>{});
     });
     api.runtime.onStartup.addListener(()=>{schedule();void tick();});
     api.runtime.onInstalled.addListener(()=>{schedule();void tick();});
     schedule();
     // Cold extension evaluation (including after background suspend) resumes
-    // observation when the last operating-system credential is available.
+    // observation when the browser-local credential is available.
     void tick();
   }
   if(progressReady)progressReady=checkpointed(api,progressReady);
@@ -215,7 +219,8 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
   if(progressWriteback)progressWriteback=checkpointed(api,progressWriteback);
   if(progressCleanBulk)progressCleanBulk=checkpointed(api,progressCleanBulk);
   if(progressPublication)progressPublication=checkpointed(api,progressPublication);
-    tick=checkpointed(api,tick);
+    const actualTick=checkpointed(api,tick);
+    tick=()=>observe('catalog',actualTick);
   return Object.freeze({register,tick});
 }
 export const catalogWatcher=typeof browser==='undefined'?null:createCatalogWatcher(browser,{
