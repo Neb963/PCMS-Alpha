@@ -53,6 +53,16 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 **Required acceptance:** A generated machine-readable matrix of **every notice code × target present/absent × current state** → relevant contextual page, root-cause explanation, working remedy or declared safe hold. Verify navigation to actual control and its resulting readback; no empty queue dead end. Deduplicate shared upstream failures.
 
+### GAP-04 — Healthy shared helper does not reconcile a stale account route failure (P0)
+
+**Status:** CONFIRMED CODE; observed Oct 25 account symptom consistent; exact user's current bridge reachability NEEDS H proof.
+
+**Source:** `src/runtime/overlay.mjs:163–167` provides a fresh **host-wide** `inspectConnection()` (installed/tunnel/proxy booleans). `src/ui/faithful/accounts-workspace.mjs:171–178` offers **Check connection**, but on success it **only changes a feedback string** saying to retry route verification; it does not request bounded automatic route reconciliation or update account state. `src/runtime/account-boundary.mjs:91–95,179–190` projects persisted `route.code` unless its stored route status is PINNED; `src/ui/faithful/accounts-workspace.mjs:145–149` displays that historical code before more recent local readiness guidance.
+
+**Defect:** The UI can report a recovered helper while the account still shows the old helper failure and a separate manual action is required, with no integrated state transition. A **host ready** observation is NOT a verified specific Persona/exit: automatically schedule/check the correct pinned route, then clear the old error only when new protection is committed. Do not simply mask a real held route.
+
+**Acceptance:** Helper down → tunnel/proxy recover → fresh account-specific protected egress and principal facts → route status updated → stale code gone; negative when shared helper is ready but one account exit remains unsafe. No operator forced to visit PersonaMonkey settings for ordinary transient recovery.
+
 ## Investigation queue
 
 1. Donor bootstrap and native-host/tunnel/proxy recovery state.
@@ -66,4 +76,5 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 ## Change log
 
 - 2026-10-26: Initialized with GAP-01 and GAP-02 from operator screenshots plus current source verification.
-- 2026-10-26: GAP-03 verified by code-to-UI notice destination trace. Subsequent sections will be appended after each subsystem inspection.
+- 2026-10-26: GAP-03 verified by code-to-UI notice destination trace.
+- 2026-10-26: GAP-04 verified against donor connection read and persisted account projection. Subsequent sections will be appended after each subsystem inspection.
