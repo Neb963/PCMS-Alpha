@@ -1,3 +1,4 @@
+import {retryS02ConsistentCut} from './source-cut-retry.mjs';
 import {archiveWithPortableLocal,collectPortableLocal} from './portable-local.mjs';
 // A02 source-preserving, non-authorizing browser-native backup cut.
 // Intent/receipt and download dispatch are owned by the existing I15 runner.
@@ -33,6 +34,9 @@ async function snapshotDonor(api,readDonor){
 }
 export async function capturePortableCut(api,db,sentinel,{readDonor=waitForPcmsBackupDonor,
   collect=snapshotCanonicalV2,verify=verifyCanonicalV2Unchanged}={}){
+  // Discard a changed read-only cut in full. The runner retains ownership;
+  // no download is admitted until one entirely fresh attempt verifies.
+  return retryS02ConsistentCut(async()=>{
   requireValid(!(await sentinel.inspect()).held,'BACKUP_RESTORE_HOLD');
   const original=await snapshotDonor(api,readDonor);
   // Temporary compatibility with v2 pinned source snapshots. A02's full-size
@@ -53,6 +57,7 @@ export async function capturePortableCut(api,db,sentinel,{readDonor=waitForPcmsB
   consistentOrThrow(opened.archiveSourceAudit,sourceAudit);
   return Object.freeze({...built,sourceAudit,
     code:'IN_MEMORY_SOURCE_AND_DONOR_VERIFIED',diskReadback:false});
+  });
 }
 export async function downloadPortable(api,archive,{runId,manual=false}){
   requireValid(archive?.blob instanceof Blob&&Number.isSafeInteger(archive.bytes)&&
