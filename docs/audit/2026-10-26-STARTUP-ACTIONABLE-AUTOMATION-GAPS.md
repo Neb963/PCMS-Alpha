@@ -73,6 +73,14 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 **Required acceptance:** On observed host change/recovery, coalesce a bounded, independent `upkeep` wake (with jitter/backoff and safe constraints), not a burst of unsafe route preparations. Verify 1/3/50 account fairness, no duplicate native prepares, no unverified exit reuse, and keep the ordinary 10-minute fallback.
 
+### GAP-06 — READY/AI/Git/publication progress shares a single serial alarm chain (P1)
+
+**Status:** CONFIRMED CODE isolation weakness; a specific rejected/hung worker causing starvation is INFERRED RISK and needs an adversarial test.
+
+**Source:** `src/runtime/catalog-watch.mjs:193–204` calls `progressReady`, `progressChanges`, `progressWriteback`, `progressCleanBulk`, and `progressPublication` with **sequential `await`** inside one `Promise.resolve().then(async ()=> ...).catch(()=>{})`. A rejection stops all later steps for that wake; a promise that fails to settle prevents later progress entirely. C-16/C-39/C-43 and J03/J04 require autonomous independent work/recovery.
+
+**Required acceptance:** Reproduce rejection, timeout, pause and route hold in each stage and prove unrelated stages progress; each stage owns bounded independently observable outcome, own durable rescheduling and no duplicate external effects. Do **not** naively `Promise.all` mutually exclusive source writers—the repair must preserve dependency ordering **per slug** while isolating unrelated slug/account work.
+
 ## Investigation queue
 
 1. Donor bootstrap and native-host/tunnel/proxy recovery state.
@@ -88,4 +96,5 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 - 2026-10-26: Initialized with GAP-01 and GAP-02 from operator screenshots plus current source verification.
 - 2026-10-26: GAP-03 verified by code-to-UI notice destination trace.
 - 2026-10-26: GAP-04 verified against donor connection read and persisted account projection.
-- 2026-10-26: GAP-05 verified: periodic recovery exists but lacks host-ready event wake. Subsequent sections will be appended after each subsystem inspection.
+- 2026-10-26: GAP-05 verified: periodic recovery exists but lacks host-ready event wake.
+- 2026-10-26: GAP-06 confirmed from serialized READY alarm dispatch; starvation consequence requires adversarial evidence. Subsequent sections will be appended after each subsystem inspection.
