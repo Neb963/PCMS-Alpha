@@ -97,7 +97,10 @@ def run(browser,archive,folder):
     folder=pathlib.Path(folder)/'issue60-integration';folder.mkdir()
     browser,certs=cert_browser(pathlib.Path(browser),folder);oracle=Oracle(certs/'server.pem',certs/'server.key')
     profile=folder/'profile';profile.mkdir();downloads=folder/'downloads';downloads.mkdir()
-    (profile/'user.js').write_text('user_pref("xpinstall.signatures.required",false);\nuser_pref("network.dns.forceResolve","127.0.0.1");\nuser_pref("browser.download.folderList",2);\nuser_pref("browser.download.useDownloadDir",true);\nuser_pref("browser.download.dir",'+json.dumps(str(downloads))+');\n')
+    # Default browser traffic goes to a closed LOOPBACK proxy. Only the
+    # production donor's explicit authenticated fixture SOCKS routes override
+    # it. DNS is forced to loopback as a second layer; DoH is disabled.
+    (profile/'user.js').write_text('user_pref("xpinstall.signatures.required",false);\nuser_pref("network.dns.forceResolve","127.0.0.1");\nuser_pref("network.trr.mode",5);\nuser_pref("network.proxy.type",1);\nuser_pref("network.proxy.http","127.0.0.1");\nuser_pref("network.proxy.http_port",9);\nuser_pref("network.proxy.ssl","127.0.0.1");\nuser_pref("network.proxy.ssl_port",9);\nuser_pref("network.proxy.no_proxies_on","localhost,127.0.0.1");\nuser_pref("browser.download.folderList",2);\nuser_pref("browser.download.useDownloadDir",true);\nuser_pref("browser.download.dir",'+json.dumps(str(downloads))+');\n')
     s=None;evidence={'scope':{'network':'real authenticated SOCKS/TLS; no Internet forwarding','native':'Native Messaging API protocol fixture, no OS bridge mutation','provider':'offline Perchance protocol/page; actual production isolated-world readers','background':'test controller holds mock native-port lifetime; actual process cold restarts separately observed','sandboxOverride':os.environ.get('MOZ_DISABLE_CONTENT_SANDBOX')=='1','realMullvadPerchancePrivateGit':'NOT_TESTED'}}
     try:
         old=baseline(folder);s=b.open_session(browser,profile)
@@ -118,6 +121,16 @@ def run(browser,archive,folder):
             account_id=new[0]['accountId'];ids.append(account_id)
             if b.execute(s,"return !!document.getElementById('pcms-faithful-host').shadowRoot.querySelector('.account-dialog')"):a.close_dialog(s)
             a.manage(s,account_id)
+            # Only the historical baseline is being seeded here. Its first
+            # one-minute upkeep can overlap the third enrollment on a slow
+            # machine. Observe its actual owner finishing before issuing
+            # another baseline intent; never bypass or cancel that owner.
+            deadline=time.monotonic()+100
+            while time.monotonic()<deadline:
+                current=b.account_command(s,{'type':'INSPECT_ACCOUNT','params':{'accountId':account_id}})['account']
+                if not current['working']:break
+                time.sleep(.2)
+            else:raise AssertionError(('ISSUE60_BASELINE_OWNER_DID_NOT_SETTLE',current))
             command(s,account_id,'CONFIRM_LOGIN');wait_record(s,account_id,'VERIFIED' if index<2 else 'INVENTORY_PENDING')
             a.close_dialog(s)
         seeded=inspect(s);assert len(seeded['inventories'])==2,seeded
@@ -141,7 +154,14 @@ def run(browser,archive,folder):
         oracle.helper_down=False;oracle.proxy_down=True;command(s,ids[0],'VERIFY_ROUTE');wait_record(s,ids[0],route='HELD')
         a.wait(s,"sh.querySelector('.account-state')?.textContent.includes('SOCKS proxy is unreachable')",'ISSUE60_TUNNEL_UP_PROXY_DOWN_REAL_UI')
         screenshot(s,'tunnel-up-proxy-down',evidence)
-        oracle.proxy_down=False;command(s,ids[0],'VERIFY_ROUTE');wait_record(s,ids[0],route='PINNED')
+        # F1: host readback alone is insufficient. The real Check connection
+        # handler must wake existing enrollment, verify the affected original
+        # account route/principal, then commit a newer successful readback.
+        prior_route=next(x for x in inspect(s)['accounts'] if x['accountId']==ids[0])['route']
+        oracle.proxy_down=False;g.click_text(s,'Check connection','.account-dialog')
+        recovered=wait_record(s,ids[0],route='PINNED',seconds=90)
+        assert recovered['route']['at']>prior_route['at'] and recovered['route']['code'] is None
+        evidence['f1CheckConnection']={'automaticAccountRecovery':True,'freshRouteReadback':True,'hostReadyAloneAdmits':False}
         a.wait(s,"!sh.querySelector('.account-state')?.textContent.includes('helper')",'ISSUE60_HEALTHY_RECOVERY_CLEARS_FAILURE')
         command(s,ids[0],'OPEN_LOGIN');a.wait(s,"sh.querySelector('.account-feedback')?.textContent.includes('Perchance opened')",'ISSUE60_OPEN_PROTECTED_TAB')
         command(s,ids[0],'SYNC_ACCOUNT');a.wait(s,"sh.querySelector('.account-feedback')?.textContent.includes('synchronized')",'ISSUE60_SYNC_RECOVERED_ACCOUNT')

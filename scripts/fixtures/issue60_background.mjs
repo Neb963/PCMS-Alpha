@@ -2,7 +2,23 @@
 // Native Messaging is the sole dependency substituted here. All registered
 // production ports, stores, donor routes, proxy listeners and page readers run.
 export async function installIssue60NativeFixture({url,key}){
+ const control=new URL(url);
+ if(control.protocol!=='http:'||control.hostname!=='127.0.0.1'||!control.port||control.pathname!=='/native')throw Error('OFFLINE_FIXTURE_CONTROL_REQUIRED');
  const nativeFetch=window.fetch.bind(window);
+ const blockedNetwork=[];
+ // The public relay catalog is a fixture input too. Do not contact Mullvad
+ // while finding an unused route in this isolated engineering environment.
+ const catalog='https://api.mullvad.net/network/v1-beta1/socks-proxies';
+ window.fetch=async(input,options)=>{
+  const target=String(input?.url||input),parsed=new URL(target);
+  if(target===catalog)return new Response(JSON.stringify(Array.from({length:4},(_,i)=>({
+   online:true,hostname:'offline-relay-'+i,ipv4_address:'10.124.0.'+(7+i),port:1080,
+   location:{country:'Offline fixture',city:'Loopback'}}))),{status:200,headers:{'Content-Type':'application/json'}});
+  if(target===url||parsed.protocol==='https:'&&parsed.port===''&&(
+   ['perchance.org','ipv4.am.i.mullvad.net','ipv6.am.i.mullvad.net','am.i.mullvad.net'].includes(parsed.hostname)||
+   parsed.hostname.endsWith('.dnsleak.am.i.mullvad.net')))return nativeFetch(input,options);
+  blockedNetwork.push({host:parsed.hostname});throw Error('OFFLINE_FIXTURE_NETWORK_DENIED');
+ };
  const event=()=>{const listeners=new Set();return {addListener:f=>listeners.add(f),removeListener:f=>listeners.delete(f),emit:m=>{for(const f of [...listeners])f(m)}}};
  browser.runtime.connectNative=name=>{
   if(name!=='com.persona.mullvad_router')throw Error('FIXTURE_UNEXPECTED_NATIVE_HOST');
@@ -25,7 +41,7 @@ export async function installIssue60NativeFixture({url,key}){
     creates:meta.filter(r=>r.key?.startsWith('s00-create-intent:')),
     ledger:meta.find(r=>r.key==='network:s01:exit-ownership-v1')||null,
     legacy:meta.filter(r=>r.key?.startsWith('supply-batch:')),
-    operations,pending:Object.keys(await browser.storage.local.get(null)).filter(k=>k.startsWith('personaMullvadPendingPrepare:'))};
+    operations,blockedNetwork,pending:Object.keys(await browser.storage.local.get(null)).filter(k=>k.startsWith('personaMullvadPendingPrepare:'))};
   },
   async seedLegacy(accountId){
    const accounts=(await this.inspect()).accounts,a=accounts.find(a=>a.accountId===accountId);

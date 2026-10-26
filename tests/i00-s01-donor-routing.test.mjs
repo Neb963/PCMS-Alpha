@@ -6,6 +6,7 @@ import {readFile,mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {buildI00} from '../scripts/build-i00.mjs';
+import {trackPcmsWork} from '../src/runtime/work-checkpoint.mjs';
 import * as pins from '../src/runtime/route-pin.mjs';
 import {beforeDonorStateCommit,issueBoundPersonaCreatePermit,issueExistingPersonaTagPermit} from '../src/runtime/pcms-donor-fence.mjs';
 globalThis.crypto??=webcrypto;
@@ -104,14 +105,14 @@ test('S01 D: extension-origin Perchance requests never inherit the donor extensi
 
 // Production enrollment adapter from the staged background, over fake donor primitives.
 function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=false,tabs=new Map(),leased=new Set(),
-  jobs=[],activeExits=['mullvad-7'],releaseFails=false,relayRead=null,timerSet=setTimeout,timerClear=clearTimeout,nativeStatus=null}={}){
+  jobs=[],activeExits=['mullvad-7'],releaseFails=false,relayRead=null,timerSet=setTimeout,timerClear=clearTimeout,nativeStatus=null,nativeResolve=null,humanOpen=async()=>({id:99}),clock=Date.now}={}){
   const effects=[];
   let state={global:{},routes:{},profiles:{}};
   const securityState={ready:true,privacySafe:true};
   const commit=(next,permit=null)=>{beforeDonorStateCommit(state,next,permit);state=next;};
   const echo=url=>url.includes('ipv6')?(v6==='OBSERVED'?{ip:'2a03:1b20::1',mullvad_exit_ip:true}:null):
     url.includes('dnsleak')?[{ip:'10.64.0.1',mullvad_dns:true}]:{ip:'45.83.1.1',mullvad_exit_ip:true};
-  const ctx={URL,crypto,AbortController,setTimeout:timerSet,clearTimeout:timerClear,Uint32Array,JSON,Object,Array,Number,String,Promise,Set,Map,routeTestTargetLocks:new Map(),
+  const ctx={URL,crypto,Date:{now:clock},AbortController,trackPcmsWork,setTimeout:timerSet,clearTimeout:timerClear,Uint32Array,JSON,Object,Array,Number,String,Promise,Set,Map,routeTestTargetLocks:new Map(),
     ...pins,issueBoundPersonaCreatePermit,issueExistingPersonaTagPermit,BLOCK_ROUTE_ID:'__block__',
     browser:{tabs:{query:async({cookieStoreId})=>tabs.get(cookieStoreId)||[]}},
     listActiveProfileIds:async()=>jobs,
@@ -125,8 +126,9 @@ function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=fal
     securityState,initialize:async()=>{},getState:async()=>structuredClone(state),
     allPersonaUids:()=>[],localMutationFence:async(ids,op)=>{
       // Donor fence semantics: an active control lease on a target refuses.
-      if([].concat(ids).some(id=>leased.has(id)))throw Error('PERSONA_CONTROL_BUSY');return op();},
+      if([].concat(ids).some(id=>leased.has(id)))throw Object.assign(Error('PERSONA_CONTROL_BUSY'),{code:'PERSONA_CONTROL_BUSY'});return op();},
     personaPlatform:{
+      async open(...args){effects.push('HUMAN_OPEN');return humanOpen(...args)},
       async create(input,options){
         const next=structuredClone(state),id='firefox-container-'+(Object.keys(next.profiles).length+1);
         next.profiles[id]={...input.profile,routeId:input.routeId,personaUid:'persona-'+id.slice(-1)+'-0000',
@@ -147,9 +149,10 @@ function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=fal
       effects.push('ROUTE_CREATE');commit(next);
     },
     fetchMullvadRelays:relayRead|| (async()=>relays),
-    mullvadRuntime:{resolve:async r=>nativeError==='HOST'?null:r,drop:id=>effects.push('DROP:'+id),
+    pcmsInspectPendingPreparation:async()=>null,
+    mullvadRuntime:{resolve:nativeResolve|| (async r=>nativeError==='HOST'?null:r),drop:id=>effects.push('DROP:'+id),
       getStatus:()=>({}),recoveryGeneration:routeId=>({routeId}),
-      refreshStatus:async()=>nativeStatus||(nativeError==='HOST'?{installed:false}:{installed:true,compatible:true,ready:true,interface_up:true,base_proxy_reachable:true,base_route_bound:true})},
+      refreshStatus:async()=>nativeStatus||(nativeError==='HOST'?{installed:false}:{installed:true,compatible:true,ready:true,interface_up:true,base_proxy_reachable:true,base_route_bound:true,pending_prepare_routes:[]})},
     async fetchJsonThroughRouteTest(_iso,_route,url){
       effects.push('PROBE:'+new URL(url).hostname.split('.')[0]);
       if(routeTestFails)throw Error('Route check timed out');
@@ -164,7 +167,9 @@ function adapter(bg,{relays=[],v6='OBSERVED',nativeError=null,routeTestFails=fal
     .replace('void reloadRoutePins();','');
   const lock=slice(bg,'async function withRouteTestTargetLock(target, task, signal = null) {','async function fetchJsonThroughRouteTest(');
   const donor=vm.runInNewContext(lock+code+'\ncreatePcmsEnrollmentDonor();',ctx);
-  return {donor,effects,state:()=>state,set:next=>{state=next;}};
+  const human=slice(bg,'  openHumanLogin:', '\n});').trim().slice('openHumanLogin:'.length);
+  const openHuman=vm.runInNewContext('('+human+')',ctx);
+  return {donor,openHuman,effects,state:()=>state,set:next=>{state=next;}};
 }
 const relayList=[{hostname:'se-sto-wg-socks5-001',ipv4_address:'10.124.0.7',port:1080},
   {hostname:'bad',ipv4_address:'192.168.1.1',port:1080},{hostname:'bad-port',ipv4_address:'10.124.0.8',port:9050}];
@@ -221,6 +226,60 @@ test('S01 adapter D: native loss is HOST scope (no rotation); a failing route te
 const legacyState=()=>({global:{},routes:{'mullvad-7':{id:'mullvad-7',provider:'mullvad',host:'10.124.0.7',port:1080,type:'socks',enabled:true}},
   profiles:{'firefox-container-7':{containerId:'firefox-container-7',personaUid:'persona-legacy-0007',managed:true,
     status:'active',routeId:'mullvad-7',killSwitch:true,blockLocalNetwork:true,pcmsBindingId:null}}});
+test('F1 donor observation: a never-settling native preparation times out visibly without releasing its route owner or probing after late settlement',async()=>{
+ let finish,calls=0;const gate=new Promise(r=>finish=r),a=adapter(await background(),{
+  timerSet:(fn,ms)=>setTimeout(fn,ms===30000?20:ms),nativeResolve:async route=>{calls++;await gate;return route}});
+ const state=legacyState();state.profiles['firefox-container-7'].pcmsBindingId='binding_0007';a.set(state);
+ const args={bindingId:'binding_0007',contextId:'firefox-container-7',routeId:'mullvad-7'};
+ try{
+  const out=await a.donor.probeAssigned(args);assert.equal(out.code,'ROUTE_OBSERVATION_TIMEOUT');assert.equal(out.preparationSettled,false);
+  assert.equal((await a.donor.probeAssigned(args)).code,'MULLVAD_ROUTE_UNCONFIRMED');
+  assert.equal((await a.donor.inspectPreparation({routeId:args.routeId})).ok,false);assert.equal(calls,1);
+ }finally{finish();await new Promise(r=>setImmediate(r));}
+ assert.equal(a.effects.some(x=>x.startsWith('PROBE:')||x==='TEST_PROFILE'),false,'aborted native observer cannot continue to network or cleanup');
+ assert.equal((await a.donor.inspectPreparation({routeId:args.routeId})).settled,true);
+ assert.equal((await a.donor.probeAssigned(args)).ok,true);assert.equal(calls,2);
+});
+test('F1 donor restart: an unresolved durable preparation is inspected without dispatching another prepare',async()=>{
+ let calls=0;const a=adapter(await background(),{nativeResolve:async r=>{calls++;return r},
+  nativeStatus:{installed:true,compatible:true,ready:true,pending_prepare_routes:['mullvad-7']}});
+ a.set(legacyState());const out=await a.donor.inspectPreparation({routeId:'mullvad-7'});
+ assert.equal(out.ok,false);assert.equal(out.code,'MULLVAD_ROUTE_UNCONFIRMED');assert.equal(calls,0);assert.deepEqual(a.effects,[]);
+ const missing=adapter(await background(),{nativeStatus:{installed:false}});
+ assert.equal((await missing.donor.inspectPreparation({routeId:'mullvad-7'})).code,'MULLVAD_LOCAL_SERVICE_UNAVAILABLE','pending account metadata never disguises the unavailable shared helper');
+});
+test('F1 human tab: ordinary donor admission waits for a protected reader to settle without overriding its lease',async()=>{
+ const leased=new Set(['firefox-container-7']),a=adapter(await background(),{leased,timerSet:(fn,ms)=>setTimeout(fn,ms===250?0:ms)});
+ const state=legacyState();state.profiles['firefox-container-7'].pcmsBindingId='binding_0007';a.set(state);
+ await pinned([pinOf(state.profiles['firefox-container-7'])]);
+ const opening=a.openHuman({personaUid:'persona-legacy-0007',cookieStoreId:'firefox-container-7',routeId:'mullvad-7'}).then(value=>({ok:true,value}),error=>({ok:false,code:error.code}));
+ await new Promise(r=>setImmediate(r));assert.deepEqual(a.effects,[]);leased.clear();
+ assert.equal((await opening).ok,true);assert.deepEqual(a.effects,['HUMAN_OPEN']);
+});
+test('F1 human tab: a never-released reader produces a bounded no-dispatch hold and never loses its lease',async()=>{
+ let clock=100000;const leased=new Set(['firefox-container-7']),a=adapter(await background(),{leased,clock:()=>clock,
+  timerSet:(fn,ms)=>{clock+=ms;return setTimeout(fn,0)}});
+ a.set(legacyState());
+ await assert.rejects(a.openHuman({personaUid:'persona-legacy-0007',cookieStoreId:'firefox-container-7',routeId:'mullvad-7'}),
+  e=>e.code==='HUMAN_TAB_OPEN_BUSY'&&e.pcmsHumanNoDispatch===true);
+ assert.equal(leased.has('firefox-container-7'),true);assert.deepEqual(a.effects,[]);assert.equal(clock,120000);
+});
+test('F1 human tab: an error after invoking tab open is never retried or marked as a proved no-dispatch',async()=>{
+ let calls=0,waits=0;const a=adapter(await background(),{humanOpen:async()=>{calls++;throw Object.assign(Error('lost ACK'),{code:'PERSONA_CONTROL_BUSY'})},
+  timerSet:(fn,ms)=>{if(ms===250)waits++;return setTimeout(fn,ms)}});
+ const state=legacyState();state.profiles['firefox-container-7'].pcmsBindingId='binding_0007';a.set(state);await pinned([pinOf(state.profiles['firefox-container-7'])]);
+ await assert.rejects(a.openHuman({personaUid:'persona-legacy-0007',cookieStoreId:'firefox-container-7',routeId:'mullvad-7'}),e=>e.pcmsHumanNoDispatch!==true);
+ assert.equal(calls,1);assert.equal(waits,0);assert.deepEqual(a.effects,['HUMAN_OPEN']);
+});
+test('F1 human tab: losing the route pin while waiting cannot open a tab after the reader releases',async()=>{
+ const leased=new Set(['firefox-container-7']);let binding;
+ const a=adapter(await background(),{leased,timerSet:(fn,ms)=>{
+  if(ms===250){leased.clear();pins.holdRoutePin(binding);return setTimeout(fn,0)}return setTimeout(fn,ms)}});
+ const state=legacyState();state.profiles['firefox-container-7'].pcmsBindingId=binding='binding_0007';a.set(state);await pinned([pinOf(state.profiles['firefox-container-7'])]);
+ try{await assert.rejects(a.openHuman({personaUid:'persona-legacy-0007',cookieStoreId:'firefox-container-7',routeId:'mullvad-7'}),e=>e.code==='PROTECTED_ROUTE_NOT_PINNED'&&e.pcmsHumanNoDispatch===true);
+  assert.deepEqual(a.effects,[]);
+ }finally{pins.releaseRoutePinHold(binding)}
+});
 
 test('S01 upgrade adapter D: production adapter tags the EXISTING Persona in place (route/session untouched), idempotently',async()=>{
   const a=adapter(await background());a.set(legacyState());

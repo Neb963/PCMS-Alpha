@@ -4,6 +4,50 @@ import { readFile } from 'node:fs/promises';
 import { createPersonaGuard } from '../src/runtime/persona-guard.mjs';
 import { createWakeService, WAKE_ALARM } from '../src/runtime/wake.mjs';
 
+test('F1 cold health wake preserves an existing due alarm instead of postponing delivery',async()=>{
+ const f=fakeBrowser(),created=[];
+ const due={name:WAKE_ALARM,scheduledTime:6000};
+ f.api.alarms.get=async name=>{assert.equal(name,WAKE_ALARM);return due};
+ f.api.alarms.create=(...args)=>created.push(args);
+ const wake=createWakeService(f.api);wake.register();
+ for(let i=0;i<20;i++)await Promise.resolve();
+ assert.deepEqual(created,[],'cold evaluation must not replace the already scheduled wake');
+ assert.equal(due.scheduledTime,6000);
+});
+
+test('F1 alarm reconstruction coalesces concurrent startup hints and reports failed inspection',async()=>{
+ const f=fakeBrowser(),created=[];let release;
+ f.api.alarms.get=()=>new Promise(r=>release=r);
+ f.api.alarms.create=(...args)=>created.push(args);
+ const wake=createWakeService(f.api);wake.register();
+ f.listeners.startup[0]();f.listeners.installed[0]();
+ for(let i=0;i<5;i++)await Promise.resolve();
+ assert.deepEqual(created,[]);release(undefined);
+ for(let i=0;i<20;i++)await Promise.resolve();
+ assert.deepEqual(created,[[WAKE_ALARM,{periodInMinutes:10}]]);
+ f.api.alarms.get=async()=>{throw Error('private details must not escape')};
+ f.listeners.startup[0]();
+ for(let i=0;i<20;i++)await Promise.resolve();
+ assert.equal(wake.getLocalReceipt().storageFailure,true);
+ assert.equal(created.length,1,'unknown alarm state must not reset the existing schedule');
+});
+
+test('F1 health readback waits for the actual queued alarm receipt instead of reporting an unpersisted wake',async()=>{
+ const f=fakeBrowser(),set=f.api.storage.local.set,replies=[];let release;
+ const barrier=new Promise(r=>release=r);
+ f.api.storage.local.set=async packet=>{await barrier;return set(packet)};
+ const wake=createWakeService(f.api);wake.register();
+ f.listeners.alarm[0]({name:WAKE_ALARM});
+ f.listeners.connect[0]({name:'pcms-i01-health-readonly',
+  sender:{id:f.api.runtime.id,url:f.api.runtime.getURL('pcms/index.html')},postMessage:v=>replies.push(v)});
+ for(let i=0;i<20;i++)await Promise.resolve();
+ assert.deepEqual(replies,[],'health must not overtake the persisted alarm checkpoint');
+ release();await new Promise(r=>setImmediate(r));
+ assert.equal(replies[0].healthStorage,'BEST_EFFORT');
+ assert.equal(replies[0].receiptPersisted,true);
+ assert.equal(f.storage.pcmsI01WakeHealth.alarmCount,1);
+});
+
 function donorFixture() {
   const all = {
     aaaaaaaa: { personaUid:'aaaaaaaa', cookieStoreId:'firefox-container-1', routeId:'protected',
@@ -121,11 +165,13 @@ test('P51-01 F: registers all wake sources synchronously, no dashboard, recovery
   wake.register();wake.register();
   assert.deepEqual(Object.fromEntries(Object.entries(f.listeners).map(([k,v])=>[k,v.length])),
     {message:1,connect:1,startup:1,installed:1,alarm:1});
+  await new Promise(resolve=>setImmediate(resolve));
   assert.equal(f.api.alarms.created.length,1);
   const trusted={id:f.api.runtime.id,url:f.api.runtime.getURL('pcms/index.html')};
   const replies=[];
   f.listeners.connect[0]({name:'pcms-i01-health-readonly',sender:trusted,
     postMessage:reply=>replies.push(reply)});
+  await new Promise(resolve=>setImmediate(resolve));
   assert.equal(replies[0].providerEffects,'OFF');
   assert.equal(replies[0].donorReady,false);
   const denied=[];
@@ -142,8 +188,8 @@ test('P51-01 F: registers all wake sources synchronously, no dashboard, recovery
   f.listeners.startup[0]();
   f.listeners.alarm[0]({name:WAKE_ALARM});
   assert.equal(wake.getLocalReceipt().lastEvent,'alarm');
-  assert.equal(f.api.alarms.created.length,2,'startup must reconstruct Firefox alarm');
   await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.api.alarms.created.length,2,'startup/alarm hints coalesce reconstruction');
   assert.equal(f.storage.pcmsI01WakeHealth.lastWake,'alarm');
   assert.equal(f.storage.pcmsI01WakeHealth.alarmCount,1);
 });
@@ -157,6 +203,7 @@ test('P51-01 F negative: storage fail does not fake success or allow effect disp
   f.listeners.connect[0]({name:'pcms-i01-health-readonly',
     sender:{id:f.api.runtime.id,url:f.api.runtime.getURL('pcms/index.html')},
     postMessage:reply=>replies.push(reply)});
+  await new Promise(resolve=>setImmediate(resolve));
   assert.equal(replies[0].healthStorage,'DEGRADED');
   assert.equal(replies[0].providerEffects,'OFF');
 });

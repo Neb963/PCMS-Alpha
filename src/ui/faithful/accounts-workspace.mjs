@@ -4,6 +4,7 @@ const LABELS={PREPARING:'Preparing',WAITING_LOGIN:'Login needed',VERIFICATION_PE
  REBIND_PENDING:'Replacement login needed',INVENTORY_PENDING:'Inventory needed',VERIFIED:'Ready',
  OVERRIDDEN:'Enrollment exception',ARCHIVED:'Archived'};
 const ERRORS={ACCOUNT_BUSY:'This account is finishing another action. Other accounts remain available.',
+ HUMAN_TAB_OPEN_BUSY:'Protected work is still using this account. Its tab was not opened; Open Perchance remains available when that work finishes.',
  STALE_REVISION:'The account changed. Its current state is shown; try the action again.',
  GUARD_NOT_READY:'PersonaMonkey is starting. Local records and Archive remain available.',
  NO_PAGE_SESSION:'Log in to Perchance in this account’s tab, then confirm login.',
@@ -24,9 +25,12 @@ const ERRORS={ACCOUNT_BUSY:'This account is finishing another action. Other acco
  ACCOUNT_ARCHIVED:'Reactivate this account before resuming its managed work.'};
 export function accountNeedsAttention(a){
  if(a.state==='ARCHIVED'||a.removed)return false;
+ if(a.state==='VERIFIED'&&a.route?.code==='ROUTE_IDLE')return false;
  return a.state!=='VERIFIED'||a.protectedRoute!=='PCMS_PINNED'||a.route?.status!=='PINNED'||a.readiness?.ready===false;
 }
 export const accountLabel=a=>a.removed?'Removed':
+ a.state!=='ARCHIVED'&&a.activity?.timedOut?'Connection outcome pending':
+ a.state==='VERIFIED'&&a.route?.code==='ROUTE_IDLE'?'Resting':
  a.state==='PREPARING'&&a.setup?.phase==='HELD'?'Setup needs attention':
  a.state==='VERIFIED'&&a.protectedRoute==='UPGRADING'?'Upgrading route':
  a.state==='VERIFIED'&&a.protectedRoute==='LEGACY_UNPINNED'?'Route upgrade needed':
@@ -145,7 +149,7 @@ export function createAccountsWorkspace({root,el,b,request,reload,notify}){
    set(stateLine,current.removed?'Removed locally. Preserved records remain available for recovery.':
     current.state==='ARCHIVED'?'Archived. Reactivate to verify and resume.':current.message||
     (current.working?'Working on this account…':current.state==='INVENTORY_PENDING'?'Login confirmed. Synchronize inventory to finish setup.':
-    current.state==='VERIFIED'?(current.readiness?.ready===false?'Verify this account’s protected route to resume managed work.':'Ready for managed work.'):current.state==='ARCHIVED'?'Archived. Reactivate to verify and resume.':
+    current.state==='VERIFIED'?(current.readiness?.ready===false?'PCMS verifies the protected route when work is due. Verify route checks it now.':'Ready for managed work.'):current.state==='ARCHIVED'?'Archived. Reactivate to verify and resume.':
     current.state==='PREPARING'?'Preparing its protected Persona and route.':'Open Perchance, complete login or a challenge, then confirm login.'));
    const allowed=accountActions(current);
    const incompatible=current.working===true&&current.activity?.cancellable!==true;
@@ -172,7 +176,7 @@ export function createAccountsWorkspace({root,el,b,request,reload,notify}){
    connection.disabled=true;
    try{
     const out=await request(PORT,'INSPECT_CONNECTION',{},10000);
-    if(!closed)set(feedback,out?.ok?(out.ready?'Mullvad connection is available. Retry the route check to verify this account’s exit.':explain(out)):explain(out));
+    if(!closed)set(feedback,out?.ok?(out.ready?'Connection is available. Protected account checks are continuing automatically.':explain(out)):explain(out));
    }catch{if(!closed)set(feedback,'Connection check timed out. Other actions remain available.')}
    finally{connection.disabled=false;}
   }

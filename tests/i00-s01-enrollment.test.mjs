@@ -30,6 +30,7 @@ function fakeDonor(relays){
   const bound=bindingId=>[...profiles.entries()].filter(([,p])=>p.pcmsBindingId===bindingId);
   const byUid=uid=>[...profiles.entries()].filter(([,p])=>p.personaUid===uid);
   const donor={
+    async inspectPreparation(){return {ok:true,settled:true,source:'SIMULATED_NATIVE_READBACK'};},
     async tagExistingPersona({bindingId,personaUid}){
       const already=bound(bindingId);
       if(already.length)return {ok:true,personaUid:already[0][1].personaUid,contextId:already[0][0],routeId:already[0][1].routeId};
@@ -230,6 +231,68 @@ async function enroll(h){
   await h.flow.prepare(begun.accountId);
   return (await h.accounts.get(begun.accountId)).account;
 }
+test('F1: a bounded observation reports durable timeout while retaining the actual account owner through late settlement',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),a=await enroll(h);
+ let enter,finish,expire;const entered=new Promise(r=>enter=r),gate=new Promise(r=>finish=r),original=h.donor.probeAssigned;
+ h.donor.probeAssigned=async p=>{enter();await gate;return original(p)};
+ const f=createEnrollment({accounts:h.accounts,ledger:h.ledger,donor:h.donor,
+  pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},
+  openLogin:async()=>({ok:true}),identify:async()=>({ok:false}),observationMs:30,
+  setTimer:(fn,ms)=>ms===30?(expire=fn,undefined):setTimeout(fn,ms)});
+ const task=f.verifyRoute(a.accountId);await entered;expire();
+ try{
+  const result=await Promise.race([task,new Promise(r=>setTimeout(()=>r({code:'TEST_STILL_WAITING'}),250))]);
+  assert.equal(result.code,'ROUTE_OBSERVATION_TIMEOUT');assert.equal(f.running(a.accountId),true);
+  assert.equal(f.activity(a.accountId).timedOut,true);
+  assert.equal((await h.accounts.get(a.accountId)).account.route.code,'ROUTE_OBSERVATION_TIMEOUT');
+  assert.equal(inspectRoutePin(h.profileOf(a)).allow,false);
+  assert.equal((await f.verifyRoute(a.accountId,{change:true})).code,'ACCOUNT_BUSY');
+  assert.equal(h.effects.filter(x=>x.kind==='ASSIGN').length,1);
+ }finally{finish();await new Promise(r=>setTimeout(r,150));}
+ assert.equal(f.running(a.accountId),false);
+ assert.equal(inspectRoutePin(h.profileOf(a)).allow,false,'late canceled observation never reinstates admission');
+ h.donor.probeAssigned=original;assert.equal((await h.flow.verifyRoute(a.accountId)).ok,true);
+});
+test('F1: same-exit helper recovery revalidates the original principal before clearing a stale account failure',async()=>{
+ for(const changed of [false,true]){
+  const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),a=await enroll(h);
+  h.sessions.set(a.personaUid,fp('a'));assert.equal((await h.flow.confirm(a.accountId)).ok,true);
+  const before=(await h.accounts.get(a.accountId)).account;
+  h.faults.host=true;await h.flow.verifyRoute(a.accountId,{automatic:true});h.faults.host=false;
+  if(changed)h.sessions.set(a.personaUid,fp('b'));
+  const result=await h.flow.verifyRoute(a.accountId,{automatic:true});
+  const after=(await h.accounts.get(a.accountId)).account;
+  assert.equal(after.boundPrincipal,fp('a'));assert.equal(h.effects.filter(x=>x.kind==='ASSIGN').length,1);
+  if(changed){assert.equal(result.ok,false);assert.equal(result.code,'IDENTITY_CHANGED');assert.notEqual(after.state,'VERIFIED');}
+  else{assert.equal(result.identity,'VERIFIED');assert.equal(after.route.code,null);assert.equal(after.revision,before.revision);}
+ }
+});
+test('F1: a transient guarded identity-read failure preserves the original principal and revision while keeping route admission held',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),a=await enroll(h);
+ h.sessions.set(a.personaUid,fp('a'));await h.flow.confirm(a.accountId);
+ const before=(await h.accounts.get(a.accountId)).account;
+ await h.accounts.applyCurrent({type:'ROUTE_STATUS',accountId:a.accountId,status:'HELD',code:'MULLVAD_LOCAL_SERVICE_UNAVAILABLE'});
+ const flow=createEnrollment({accounts:h.accounts,ledger:h.ledger,donor:h.donor,
+  pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},openLogin:async()=>({ok:true}),
+  identify:async()=>({ok:false,code:'PROTECTED_ROUTE_NOT_PINNED'})});
+ assert.equal((await flow.verifyRoute(a.accountId)).code,'PROTECTED_ROUTE_NOT_PINNED');
+ const after=(await h.accounts.get(a.accountId)).account;
+ assert.equal(after.state,'VERIFIED');assert.equal(after.revision,before.revision);assert.equal(after.boundPrincipal,fp('a'));
+ assert.equal(inspectRoutePin(h.profileOf(a)).allow,false);assert.equal((await h.ledger.binding(a.bindingId)).binding.pin,'HELD');
+ assert.equal((await h.flow.verifyRoute(a.accountId)).identity,'VERIFIED');assert.equal(inspectRoutePin(h.profileOf(a)).allow,true);
+});
+test('F1: timeout during the final ledger commit cannot release admission from a late successful route observation',async()=>{
+ const h=setup({relays:[relay('10.124.0.1','45.83.1.1','BLOCKED')]}),a=await enroll(h);
+ let finish,enter,expire;const gate=new Promise(r=>finish=r),entered=new Promise(r=>enter=r),base=h.ledger.observe;
+ const ledger={...h.ledger,observe:async value=>{enter();await gate;return base(value)}};
+ const flow=createEnrollment({accounts:h.accounts,ledger,donor:h.donor,
+  pins:{hold:holdRoutePin,release:releaseRoutePinHold,reload:reloadRoutePins},openLogin:async()=>({ok:true}),identify:async()=>({ok:false}),observationMs:60,
+  setTimer:(fn,ms)=>ms===60?(expire=fn,undefined):setTimeout(fn,ms)});
+ const task=flow.verifyRoute(a.accountId);await entered;expire();
+ try{assert.equal((await task).code,'ROUTE_OBSERVATION_TIMEOUT');assert.equal(inspectRoutePin(h.profileOf(a)).allow,false);}
+ finally{finish();await new Promise(r=>setTimeout(r,100));}
+ assert.equal((await h.ledger.binding(a.bindingId)).binding.pin,'HELD');assert.equal(inspectRoutePin(h.profileOf(a)).allow,false);
+});
 
 test('S01 AC-01 D: Add Account creates tagged Persona, pins a unique verified exit, opens login, Confirm verifies identity and syncs inventory',async()=>{
   const h=setup({relays:[relay('10.124.0.1','45.83.1.1','2a03:1b20:1::1')]});

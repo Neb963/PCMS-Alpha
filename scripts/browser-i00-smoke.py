@@ -61,9 +61,10 @@ def execute(session, script):
 
 def guard_status(session):
     script = '''const done=arguments[arguments.length-1];
+    let settled=false;const finish=value=>{if(settled)return;settled=true;done(value)};
     const port=browser.runtime.connect({name:'pcms-i01-health-readonly'});
-    port.onMessage.addListener(value=>{try{port.disconnect()}catch(e){}done(value)});
-    port.onDisconnect.addListener(()=>done({error:'health-port-disconnected'}));'''
+    port.onMessage.addListener(value=>{finish(value);try{port.disconnect()}catch(e){}});
+    port.onDisconnect.addListener(()=>finish({error:'health-port-disconnected'}));'''
     return call('POST',f'/session/{session}/execute/async', {'script':script,'args':[]},timeout=30)
 
 
@@ -3182,15 +3183,20 @@ def main():
                   const core=await import('./refresher-core.mjs');
                   const module=await import('./refresher-store.mjs');
                   const runtime=await import('./refresher-boundary.mjs');
-                  const db=await journal.openCanonicalDatabase(),store=module.createRefresherStore(db);
+                  // The model owns a separate real IDB. The autonomous background
+                  // has another boot/clock and must never share synthetic claims.
+                  const db=await journal.openCanonicalDatabase({
+                    open:(_name,version)=>indexedDB.open('pcms-i12-scaled-model',version)
+                  }),store=module.createRefresherStore(db),inputs=[];
                   const hash='b'.repeat(64),now=Date.now()+60000,boot='i12_packaged_synthetic_boot';
                   const begin=performance.now();
                   await new Promise((resolve,reject)=>{
                     const tx=db.transaction(['meta'],'readwrite'),m=tx.objectStore('meta');
+                    const put=value=>{m.put(value);if(value.key!==core.REFRESHER_KEY)inputs.push(value);};
                     for(let i=0;i<50;i++){
                       const accountId='i12_account_'+String(i).padStart(4,'0');
                       const personaUid='persona-i12-'+String(i).padStart(4,'0');
-                      m.put({key:'account:'+accountId,account:{accountId,personaUid,bindingVersion:1,
+                      put({key:'account:'+accountId,account:{accountId,personaUid,bindingVersion:1,
                         state:'VERIFIED',revision:1,identity:{source:'GUARDED_SESSION_READBACK',
                         bindingVersion:1,principalFingerprint:hash}}});
                     }
@@ -3199,14 +3205,14 @@ def main():
                       const accountId='i12_account_'+String(a).padStart(4,'0');
                       const personaUid='persona-i12-'+String(a).padStart(4,'0');
                       const remoteId='i12_remote_'+String(i).padStart(8,'0');
-                      m.put({key:'inventory:'+slug,generator:{slug,accountId,personaUid,bindingVersion:1,
+                      put({key:'inventory:'+slug,generator:{slug,accountId,personaUid,bindingVersion:1,
                         remoteId,ownerState:'OBSERVED_OWNER',visibility:'PUBLIC',lastObservedAt:now,revision:1}});
-                      m.put({key:'release:'+slug,release:{slug,accountId,personaUid,bindingVersion:1,
+                      put({key:'release:'+slug,release:{slug,accountId,personaUid,bindingVersion:1,
                         remoteId,state:'CONFIRMED_PUBLIC',source:'INDEPENDENT_PUBLICATION_READBACK',
                         sourceFingerprint:hash,principalFingerprint:hash,observationId:'i12_observed_'+String(i).padStart(8,'0'),
                         observedAt:now}});
                     }
-                    m.put({key:core.REFRESHER_KEY,state:core.emptyShadow()});
+                    put({key:core.REFRESHER_KEY,state:core.emptyShadow()});
                     tx.oncomplete=resolve;tx.onabort=()=>reject(Error('fixture aborted'));
                   });
                   let turn=await store.turn({now:now-8*core.HOUR,bootId:boot});
@@ -3230,6 +3236,9 @@ def main():
                     witnesses:[0,1].map(i=>({accountId:'witness_'+i,domain:'independent_'+i,
                       routeVerified:true,observedAt:now,result:'HEALTHY'}))};
                   turn=await store.turn({now,bootId:boot,receipt});
+                  // Preserve only the synthetic budget image for the later live
+                  // integration fixture, before model reads alter its wall rest.
+                  const integrationSeed=structuredClone(turn.state);
                   const firstRead=await store.list(now,{query:'i12-b-',limit:25});
                   const exact16=firstRead.items.find(r=>r.slug==='i12-b-0000').activeRemaining;
                   const exact64=firstRead.items.find(r=>r.slug==='i12-b-0001').sleepRemaining;
@@ -3278,6 +3287,29 @@ def main():
                   const runtimeProof=await service.tick();
                   const runtimeState=(await store.read()).state;
                   const isolated=await (await import('./perchance-monitor.mjs')).perchanceMonitorIsolated({kind:'RECENT'});
+                  // Keep the real port/UI/restart proof on the actual canonical
+                  // database. Seed disposable inputs and exact synthetic budgets;
+                  // no model claim, clock witness or health receipt crosses over.
+                  const liveDb=await journal.openCanonicalDatabase(),seedAt=Date.now();
+                  const liveSeed={...core.emptyShadow(),rows:integrationSeed.rows,
+                    accounts:integrationSeed.accounts,nextOrdinal:integrationSeed.nextOrdinal};
+                  for(const row of liveSeed.rows){
+                    row.checkpoint=seedAt;row.restCheckpointAt=row.phase==='SLEEPING'?seedAt:0;
+                    if(row.slot)row.admittedAt=seedAt;
+                  }
+                  for(const account of Object.values(liveSeed.accounts)){
+                    account.health='UNKNOWN';account.checkpoint=seedAt;account.healthAt=0;
+                  }
+                  await new Promise((resolve,reject)=>{
+                    const tx=liveDb.transaction('meta','readwrite'),meta=tx.objectStore('meta');
+                    for(const input of inputs){
+                      if(input.generator)input.generator.lastObservedAt=seedAt;
+                      if(input.release)input.release.observedAt=seedAt;
+                      meta.put(input);
+                    }
+                    meta.put({key:core.REFRESHER_KEY,state:liveSeed});
+                    tx.oncomplete=resolve;tx.onabort=()=>reject(Error('live fixture seed aborted'));
+                  });
                   const command=(type,params={})=>new Promise(resolve=>{
                     const port=browser.runtime.connect({name:'pcms-i12-refresher'});
                     port.onMessage.addListener(v=>{resolve(v);port.disconnect();});port.postMessage({type,params});
@@ -3302,7 +3334,7 @@ def main():
                       serializedBytes:JSON.stringify(runtimeState).length,queuePeak:runtimeState.diagnostics.queuePeak,
                       readPeak:runtimeState.diagnostics.readPeak},
                     persistedRevision:(await store.read()).state.revision});
-                  db.close();
+                  db.close();liveDb.close();
                 })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,600)}));"""
                 i12_proof=call('POST',f'/session/{after}/execute/async',{'script':code,'args':[]},timeout=90)
                 assert i12_proof.get('ok') is True,i12_proof
@@ -4793,8 +4825,38 @@ def main():
                     const sentinel=gate.createRestoreGate(browser.storage.local);
                     if(!(await sentinel.inspect()).held)
                       throw Error('RESTORE_SENTINEL_NOT_DURABLE');
-                    const receipt=await idb.applyCanonicalSnapshot(db,prepared,{
-                      assertHeld:async()=>(await sentinel.inspect()).held,expectedBefore:before});
+                    let receipt;
+                    try{receipt=await idb.applyCanonicalSnapshot(db,prepared,{
+                      assertHeld:async()=>(await sentinel.inspect()).held,expectedBefore:before});}
+                    catch(error){
+                      // Identify a real drifting writer without logging keys,
+                      // source bytes, tokens or weakening the atomic fence.
+                      if(error?.message==='RESTORE_DESTINATION_DRIFT'){
+                        const current=await core.snapshotCanonical(db),changes=[];
+                        const families=new Set(['account','network','inventory','inventory-batch',
+                          's00-create-intent','s00-create-slug','s05-ready','stage','ai-job',
+                          'release','writeback','backup','attention','s06-change','s06-exception',
+                          's06-human','source-link','adoption','identity-alias','removal',
+                          'refresher','ai-concurrency','ai-prompts','s04','s02','attention-cause']);
+                        for(const store of core.DB_STORES){
+                          const oldRows=new Map(before.stores[store].map(r=>[JSON.stringify(r.key),r]));
+                          const newRows=new Map(current.stores[store].map(r=>[JSON.stringify(r.key),r]));
+                          for(const key of new Set([...oldRows.keys(),...newRows.keys()])){
+                            const old=oldRows.get(key),now=newRows.get(key);
+                            if(JSON.stringify(old)===JSON.stringify(now))continue;
+                            const prefix=typeof (now||old).key==='string'?(now||old).key.split(':')[0]:'NON_STRING';
+                            const fields=['state','record','revision','status','setting','history',
+                            'lastTurnAt','nextWakeAt','bootId','browserClock','nativeClock','diagnostics'];
+                          const left=old?.value?.state||old?.value,right=now?.value?.state||now?.value;
+                          changes.push({store,family:families.has(prefix)?prefix:'OTHER',
+                              change:!old?'ADDED':!now?'REMOVED':'CHANGED',
+                              fields:fields.filter(field=>JSON.stringify(left?.[field])!==JSON.stringify(right?.[field]))});
+                          }
+                        }
+                        error.restoreDrift={count:changes.length,sample:changes.slice(0,12)};
+                      }
+                      throw error;
+                    }
                     const after=await core.snapshotCanonical(db);
                     const release=after.stores.meta.find(r=>r.key==='release:restore-b');
                     if(receipt.source!=='INDEPENDENT_READBACK'||
@@ -4805,7 +4867,7 @@ def main():
                       receiptDigest:receipt.digest,
                       status:release.value.release.state};
                   }finally{db.close();}
-                })().then(done).catch(e=>done({ok:false,error:String(e)}));"""
+                })().then(done).catch(e=>done({ok:false,error:String(e),drift:e.restoreDrift||null}));"""
                 i16_db=call('POST',f'/session/{after}/execute/async',
                             {'script':i16_db_code,'args':[]},timeout=75)
                 assert i16_db.get('ok') is True,i16_db

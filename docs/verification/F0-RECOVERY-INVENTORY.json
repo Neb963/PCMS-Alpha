@@ -5,12 +5,241 @@
   "states": [
     {
       "domain": "readiness",
-      "state": "DONOR_STARTING",
+      "state": "COMPLETE",
       "owner": [
-        "src/runtime/native-transport-overlay.mjs"
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
-      "automaticHandler": "src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
+      "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
+      "destination": "Accounts / Connection",
+      "settlement": "Fresh per-account protected egress, historical unique-exit reservation and original identity; host ready alone is insufficient.",
+      "retry": "Bounded domain alarm; reread current canonical revisions before progression.",
+      "timeout": "An observation deadline never cancels a possibly dispatched effect.",
+      "cancellation": "Pause prevents new effects; retain ownership until independent settlement.",
+      "uncertainty": "Read-only reconciliation; no blind replay, reassignment or expired-lock stealing.",
+      "safetyHold": null
+    },
+    {
+      "domain": "readiness",
+      "state": "RELEASED",
+      "owner": [
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
+      ],
+      "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
+      "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
+      "destination": "Accounts / Connection",
+      "settlement": "Fresh per-account protected egress, historical unique-exit reservation and original identity; host ready alone is insufficient.",
+      "retry": "Bounded domain alarm; reread current canonical revisions before progression.",
+      "timeout": "An observation deadline never cancels a possibly dispatched effect.",
+      "cancellation": "Pause prevents new effects; retain ownership until independent settlement.",
+      "uncertainty": "Read-only reconciliation; no blind replay, reassignment or expired-lock stealing.",
+      "safetyHold": null
+    },
+    {
+      "domain": "readiness",
+      "state": "ARCHIVED",
+      "owner": [
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
+      ],
+      "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
+      "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
+      "destination": "Accounts / Connection",
+      "settlement": "Fresh per-account protected egress, historical unique-exit reservation and original identity; host ready alone is insufficient.",
+      "retry": "Bounded domain alarm; reread current canonical revisions before progression.",
+      "timeout": "An observation deadline never cancels a possibly dispatched effect.",
+      "cancellation": "Pause prevents new effects; retain ownership until independent settlement.",
+      "uncertainty": "Read-only reconciliation; no blind replay, reassignment or expired-lock stealing.",
+      "safetyHold": null
+    },
+    {
+      "domain": "readiness",
+      "state": "PREPARING",
+      "owner": [
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
+      ],
+      "rootCause": "Prerequisite, ownership or next durable progression checkpoint is pending.",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
+      "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
+      "destination": "Accounts / Connection",
+      "settlement": "Fresh per-account protected egress, historical unique-exit reservation and original identity; host ready alone is insufficient.",
+      "retry": "Bounded domain alarm; reread current canonical revisions before progression.",
+      "timeout": "An observation deadline never cancels a possibly dispatched effect.",
+      "cancellation": "Pause prevents new effects; retain ownership until independent settlement.",
+      "uncertainty": "Read-only reconciliation; no blind replay, reassignment or expired-lock stealing.",
+      "safetyHold": null
+    },
+    {
+      "domain": "readiness",
+      "state": "INVENTORY_PENDING",
+      "owner": [
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
+      ],
+      "rootCause": "Prerequisite, ownership or next durable progression checkpoint is pending.",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
+      "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
+      "destination": "Accounts / Connection",
+      "settlement": "Fresh per-account protected egress, historical unique-exit reservation and original identity; host ready alone is insufficient.",
+      "retry": "Bounded domain alarm; reread current canonical revisions before progression.",
+      "timeout": "An observation deadline never cancels a possibly dispatched effect.",
+      "cancellation": "Pause prevents new effects; retain ownership until independent settlement.",
+      "uncertainty": "Read-only reconciliation; no blind replay, reassignment or expired-lock stealing.",
+      "safetyHold": null
+    },
+    {
+      "domain": "readiness",
+      "state": "PINNED",
+      "owner": [
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
+      ],
+      "rootCause": "Prerequisite, ownership or next durable progression checkpoint is pending.",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
+      "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
+      "destination": "Accounts / Connection",
+      "settlement": "Fresh per-account protected egress, historical unique-exit reservation and original identity; host ready alone is insufficient.",
+      "retry": "Bounded domain alarm; reread current canonical revisions before progression.",
+      "timeout": "An observation deadline never cancels a possibly dispatched effect.",
+      "cancellation": "Pause prevents new effects; retain ownership until independent settlement.",
+      "uncertainty": "Read-only reconciliation; no blind replay, reassignment or expired-lock stealing.",
+      "safetyHold": null
+    },
+    {
+      "domain": "readiness",
+      "state": "IDLE",
+      "owner": [
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
+      ],
+      "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
+      "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
+      "destination": "Accounts / Connection",
+      "settlement": "Fresh per-account protected egress, historical unique-exit reservation and original identity; host ready alone is insufficient.",
+      "retry": "Bounded domain alarm; reread current canonical revisions before progression.",
+      "timeout": "An observation deadline never cancels a possibly dispatched effect.",
+      "cancellation": "Pause prevents new effects; retain ownership until independent settlement.",
+      "uncertainty": "Read-only reconciliation; no blind replay, reassignment or expired-lock stealing.",
+      "safetyHold": null
+    },
+    {
+      "domain": "readiness",
+      "state": "WAITING_FOR_DONOR",
+      "owner": [
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
+      ],
+      "rootCause": "Prerequisite, ownership or next durable progression checkpoint is pending.",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
+      "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
+      "destination": "Accounts / Connection",
+      "settlement": "Fresh per-account protected egress, historical unique-exit reservation and original identity; host ready alone is insufficient.",
+      "retry": "Bounded domain alarm; reread current canonical revisions before progression.",
+      "timeout": "An observation deadline never cancels a possibly dispatched effect.",
+      "cancellation": "Pause prevents new effects; retain ownership until independent settlement.",
+      "uncertainty": "Read-only reconciliation; no blind replay, reassignment or expired-lock stealing.",
+      "safetyHold": null
+    },
+    {
+      "domain": "readiness",
+      "state": "CHECKING_ACCOUNTS",
+      "owner": [
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
+      ],
+      "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
+      "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
+      "destination": "Accounts / Connection",
+      "settlement": "Fresh per-account protected egress, historical unique-exit reservation and original identity; host ready alone is insufficient.",
+      "retry": "Bounded domain alarm; reread current canonical revisions before progression.",
+      "timeout": "An observation deadline never cancels a possibly dispatched effect.",
+      "cancellation": "Pause prevents new effects; retain ownership until independent settlement.",
+      "uncertainty": "Read-only reconciliation; no blind replay, reassignment or expired-lock stealing.",
+      "safetyHold": null
+    },
+    {
+      "domain": "readiness",
+      "state": "ACCOUNT_HELD",
+      "owner": [
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
+      ],
+      "rootCause": "The authoritative scoped record records an unresolved failure or required operator choice; retain its first causal code.",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
+      "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
+      "destination": "Accounts / Connection",
+      "settlement": "Fresh per-account protected egress, historical unique-exit reservation and original identity; host ready alone is insufficient.",
+      "retry": "Bounded domain alarm; reread current canonical revisions before progression.",
+      "timeout": "An observation deadline never cancels a possibly dispatched effect.",
+      "cancellation": "Pause prevents new effects; retain ownership until independent settlement.",
+      "uncertainty": "Read-only reconciliation; no blind replay, reassignment or expired-lock stealing.",
+      "safetyHold": null
+    },
+    {
+      "domain": "readiness",
+      "state": "OBSERVED",
+      "owner": [
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
+      ],
+      "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
+      "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
+      "destination": "Accounts / Connection",
+      "settlement": "Fresh per-account protected egress, historical unique-exit reservation and original identity; host ready alone is insufficient.",
+      "retry": "Bounded domain alarm; reread current canonical revisions before progression.",
+      "timeout": "An observation deadline never cancels a possibly dispatched effect.",
+      "cancellation": "Pause prevents new effects; retain ownership until independent settlement.",
+      "uncertainty": "Read-only reconciliation; no blind replay, reassignment or expired-lock stealing.",
+      "safetyHold": null
+    },
+    {
+      "domain": "readiness",
+      "state": "FAILED",
+      "owner": [
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
+      ],
+      "rootCause": "The authoritative scoped record records an unresolved failure or required operator choice; retain its first causal code.",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
+      "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
+      "destination": "Accounts / Connection",
+      "settlement": "Fresh per-account protected egress, historical unique-exit reservation and original identity; host ready alone is insufficient.",
+      "retry": "Bounded domain alarm; reread current canonical revisions before progression.",
+      "timeout": "An observation deadline never cancels a possibly dispatched effect.",
+      "cancellation": "Pause prevents new effects; retain ownership until independent settlement.",
+      "uncertainty": "Read-only reconciliation; no blind replay, reassignment or expired-lock stealing.",
+      "safetyHold": null
+    },
+    {
+      "domain": "readiness",
+      "state": "DONOR_STARTING",
+      "owner": [
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
+      ],
+      "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
       "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
       "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
       "destination": "Accounts / Connection",
@@ -25,10 +254,11 @@
       "domain": "readiness",
       "state": "DONOR_SECURITY_UNAVAILABLE",
       "owner": [
-        "src/runtime/native-transport-overlay.mjs"
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
       ],
       "rootCause": "The authoritative scoped record records an unresolved failure or required operator choice; retain its first causal code.",
-      "automaticHandler": "src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
       "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
       "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
       "destination": "Accounts / Connection",
@@ -43,10 +273,11 @@
       "domain": "readiness",
       "state": "MULLVAD_LOCAL_SERVICE_UNAVAILABLE",
       "owner": [
-        "src/runtime/native-transport-overlay.mjs"
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
       ],
       "rootCause": "The authoritative scoped record records an unresolved failure or required operator choice; retain its first causal code.",
-      "automaticHandler": "src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
       "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
       "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
       "destination": "Accounts / Connection",
@@ -61,10 +292,11 @@
       "domain": "readiness",
       "state": "MULLVAD_HELPER_INCOMPATIBLE",
       "owner": [
-        "src/runtime/native-transport-overlay.mjs"
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
-      "automaticHandler": "src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
       "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
       "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
       "destination": "Accounts / Connection",
@@ -79,10 +311,11 @@
       "domain": "readiness",
       "state": "MULLVAD_TUNNEL_UNAVAILABLE",
       "owner": [
-        "src/runtime/native-transport-overlay.mjs"
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
       ],
       "rootCause": "The authoritative scoped record records an unresolved failure or required operator choice; retain its first causal code.",
-      "automaticHandler": "src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
       "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
       "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
       "destination": "Accounts / Connection",
@@ -97,10 +330,11 @@
       "domain": "readiness",
       "state": "MULLVAD_TUNNEL_ROUTE_UNAVAILABLE",
       "owner": [
-        "src/runtime/native-transport-overlay.mjs"
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
       ],
       "rootCause": "The authoritative scoped record records an unresolved failure or required operator choice; retain its first causal code.",
-      "automaticHandler": "src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
       "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
       "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
       "destination": "Accounts / Connection",
@@ -115,10 +349,11 @@
       "domain": "readiness",
       "state": "MULLVAD_PROXY_UNREACHABLE",
       "owner": [
-        "src/runtime/native-transport-overlay.mjs"
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
-      "automaticHandler": "src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
       "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
       "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
       "destination": "Accounts / Connection",
@@ -133,10 +368,11 @@
       "domain": "readiness",
       "state": "MULLVAD_CONNECTION_UNVERIFIED",
       "owner": [
-        "src/runtime/native-transport-overlay.mjs"
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
-      "automaticHandler": "src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
       "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
       "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
       "destination": "Accounts / Connection",
@@ -151,10 +387,11 @@
       "domain": "readiness",
       "state": "MULLVAD_ROUTE_UNCONFIRMED",
       "owner": [
-        "src/runtime/native-transport-overlay.mjs"
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
-      "automaticHandler": "src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
       "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
       "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
       "destination": "Accounts / Connection",
@@ -169,10 +406,11 @@
       "domain": "readiness",
       "state": "MULLVAD_STATUS_TIMEOUT",
       "owner": [
-        "src/runtime/native-transport-overlay.mjs"
+        "src/runtime/native-transport-overlay.mjs",
+        "src/runtime/protected-readiness.mjs"
       ],
       "rootCause": "Observed domain checkpoint; revalidate current prerequisites before new work.",
-      "automaticHandler": "src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
+      "automaticHandler": "src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor",
       "operatorAction": "Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.",
       "prerequisites": "Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.",
       "destination": "Accounts / Connection",
