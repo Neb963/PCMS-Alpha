@@ -238,7 +238,24 @@ def run(browser,archive,folder):
             files=list(downloads.glob('pcms-backups/*.pcms.jsonl'))
             if files:break
             time.sleep(.2)
-        assert files,'held route must not block backup'
+        if not files:
+            backup_receipt=background(s,"""const {openCanonicalDatabase}=await import(browser.runtime.getURL('pcms/journal.mjs'));
+              const db=await openCanonicalDatabase();
+              try{
+                const row=await new Promise((resolve,reject)=>{
+                  const tx=db.transaction('meta','readonly'),q=tx.objectStore('meta').get('backup:manual-active');
+                  q.onsuccess=()=>resolve(q.result);tx.onabort=()=>reject(Error('READ_UNAVAILABLE'));
+                });
+                const codes=new Set(['PREPARING','BACKUP_INFLIGHT','BACKUP_RESTORE_HOLD',
+                  'BACKUP_SOURCE_CUT_CHANGED','BACKUP_LOCAL_DRIFT','BACKUP_OPERATION_FAILED',
+                  'BACKUP_SOURCE_INCOMPLETE_RELEASE','BACKUP_SOURCE_INCOMPLETE_ADOPTION',
+                  'PORTABLE_DONOR_UNAVAILABLE','PORTABLE_COOKIE_UNAVAILABLE','DOWNLOAD_OUTCOME_UNKNOWN']);
+                const statuses=new Set(['PREPARING','INTERNAL_VERIFIED','DISPATCH_POSSIBLE',
+                  'DOWNLOAD_STARTED','BROWSER_REPORTED_COMPLETE','FAILED','HELD_UNCERTAIN']);
+                return {status:statuses.has(row?.status)?row.status:'UNKNOWN',
+                  code:codes.has(row?.code)?row.code:'OTHER'};
+              }finally{db.close()}""")
+            raise AssertionError({'message':'held route must not block backup','receipt':backup_receipt})
         selected=b.execute(s,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#pcms-backup-inspect-file')")
         b.call('POST',f'/session/{s}/element/{selected[a.ELEMENT]}/value',{'text':str(files[-1])})
         absence=g.oracle(s,"const file=document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#pcms-backup-inspect-file').files[0],text=await file.text(),all=await browser.storage.local.get(null),row=Object.entries(all).find(([k])=>k.startsWith('personaMullvadPendingPrepare:'))?.[1];return {containsNativeCredential:!!row&&text.includes(row.password),bytes:file.size};")
