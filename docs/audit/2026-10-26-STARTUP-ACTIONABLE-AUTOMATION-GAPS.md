@@ -169,6 +169,16 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 **Required acceptance:** With persisted valid granted authority, kill/suspend event page and recover with no onStartup event; verify alarm recreated **after** authorization hydration. Also verify invalid/stale/revoked grant never schedules mutable AI effects. A single trusted authorization-state transition should trigger wake reconciliation for every dependent scheduler.
 
+### GAP-16 — Donor's default 15-minute *no managed tab* idle-stop conflicts with headless PCMS expectations (P0)
+
+**Status:** CONFIRMED CODE policy interaction; whether it caused the operator's observed tunnel disconnect NEEDS H timing evidence.
+
+**Source:** `donor/personamonkey/extension/lib/constants.js:49–54` defaults to `autoStart:true`, `autoStopMinutes:15`. `donor/personamonkey/extension/lib/mullvad-runtime.js:182–218` identifies idle activity primarily by **open managed-Persona tabs**, then calls `operations.stopTunnel()` and clears cached routes after the timeout. `donor/personamonkey/extension/background.js:1333–1346` checks idle every minute. The PCMS-specific `native-prepare-overlay.mjs:149–151` additionally defers idle stop during in-flight/pending route preparations, but does **not** treat a future scheduled, headless PCMS batch/Refresher window as an open managed Persona tab. C-02/C-07/C-08/C-20 demand reliable background work without an open dashboard/tab.
+
+**Effect:** With no managed Perchance tab and periods without route resolutions, the donor may intentionally stop the shared tunnel. This is not necessarily a donor bug: it is a **cross-product lifecycle/policy mismatch** when PCMS's next headless job assumes a still-active verified path. It also provides a plausible explanation for “route automatically disconnected,” but does not prove this was the user's actual root cause.
+
+**Required acceptance:** Decide and implement *one* accepted policy through PersonaMonkey authority: either suspend idle-stop while genuinely due protected PCMS work exists, or allow idle-stop but wake/preflight the donor early enough for safe automatic reestablishment. Do not globally force a 24/7 tunnel or monkeypatch private daemon state without demonstrating product need. Test 15+ minutes without tabs, multiple bound Personas, 24h/72h Refresher, recovered native helper and a scheduled create job; ensure no Direct leakage and no false active-time credit.
+
 ## Investigation queue
 
 1. Donor bootstrap and native-host/tunnel/proxy recovery state.
@@ -194,4 +204,5 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 - 2026-10-26: GAP-12 confirmed no action elements on source-missing queue rows.
 - 2026-10-26: GAP-13 verified silent 30-row source-missing presentation cap.
 - 2026-10-26: GAP-14 verified primary queue bypasses existing cause grouping.
-- 2026-10-26: GAP-15 confirmed cold S06 authorization-hydration race with AI alarm creation. Subsequent sections will be appended after each subsystem inspection.
+- 2026-10-26: GAP-15 confirmed cold S06 authorization-hydration race with AI alarm creation.
+- 2026-10-26: GAP-16 confirmed default donor auto-stop/no-tab policy versus PCMS background readiness. Subsequent sections will be appended after each subsystem inspection.
