@@ -4,6 +4,7 @@
 import {readFile,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
+import {incidentDestination} from '../src/ui/faithful/attention.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const words=s=>s.split(' ');
 const common={retry:'Bounded domain alarm; reread current canonical revisions before progression.',
@@ -136,9 +137,26 @@ export async function inventory(){
     'Possible effect remains owned; observation only until attributable independent settlement.':
     state==='HUMAN_OWNED'?'Preserve human edits; no conflicting source actor.':null});
  }
+ const sampleTarget=code=>({
+  ROUTE_UNAVAILABLE:{kind:'ACCOUNT',id:'account_inventory_0001'},
+  ACCOUNT_UNVERIFIED:{kind:'ACCOUNT',id:'account_inventory_0001'},
+  SOURCE_HELD:{kind:'GENERATOR',id:'inventory-generator'},
+  GIT_FOLDER_MISSING:{kind:'GENERATOR',id:'inventory-generator'},
+  GIT_FOLDER_RENAME_REVIEW:{kind:'GENERATOR',id:'inventory-generator'},
+  OPERATION_UNCERTAIN:{kind:'OPERATION',id:'operation_inventory_0001'},
+  RESTORE_IN_PROGRESS:{kind:'SETTINGS',id:'backups'},
+  BACKUP_FAILED:{kind:'SETTINGS',id:'backups'},
+  GIT_RECONNECT_REQUIRED:{kind:'SETTINGS',id:'connections'},
+  CANONICAL_UNAVAILABLE:{kind:'SETTINGS',id:'diagnostics'},
+  PROVIDER_OUTAGE:{kind:'SETTINGS',id:'refresher'}
+ }[code]);
  const notices=Object.entries(noticePolicies).flatMap(([code,[destination,action,settlement]])=>
   ['VALID','ABSENT','STALE'].flatMap(target=>['ACTIVE','REVIEWED','RESOLVED'].map(state=>({code,target,state,
-   destination,action,settlement,acknowledgment:'Review never resolves or suppresses an active safety hold.',
+   destination,action,settlement,
+   currentDestination:incidentDestination({code,scopeId:'scope_inventory_0001',
+    ...(target==='VALID'?{target:sampleTarget(code)}:target==='STALE'?{target:{kind:'GENERATOR',id:'invalid target'}}:{}),reviewed:state==='REVIEWED'}),
+   knownCorrection:target!=='VALID'&&['SOURCE_HELD','CANONICAL_UNAVAILABLE','OPERATION_UNCERTAIN','GIT_FOLDER_MISSING','GIT_FOLDER_RENAME_REVIEW'].includes(code)?'GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.':null,
+   acknowledgment:'Review never resolves or suppresses an active safety hold.',
    fallback:'Use typed domain context when target is missing/stale; never an unrelated empty queue search.'}))));
  return {schema:1,source:'Production state owners + explicit accepted state/notice policies',drift,states,notices,
   historicalQuarantine:{batch:'batch_e2c328e54f9c4a6ab89f1084134fde52',slug:'pcms-test-esr-chain-20261015-a01',

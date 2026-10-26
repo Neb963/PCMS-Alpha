@@ -23,7 +23,11 @@ test('F0 new production state/notice vocabulary fails coverage rather than falli
  const actual=[...block.matchAll(/'([A-Z_]+)'/g)].map(m=>m[1]).sort();
  assert.deepEqual(Object.keys(noticePolicies).sort(),actual);
  const result=await inventory();assert.equal(result.notices.length,11*3*3);
- for(const row of result.notices)assert.ok(row.destination&&row.action&&row.settlement);
+ for(const row of result.notices){
+  assert.ok(row.destination&&row.action&&row.settlement&&row.currentDestination);
+  if(row.currentDestination.kind==='INCIDENT')assert.match(row.knownCorrection,/GAP-03/,'every observed dead-end has an explicit correction');
+ }
+ assert.ok(result.notices.some(n=>n.code==='SOURCE_HELD'&&n.target==='ABSENT'&&n.currentDestination.kind==='INCIDENT'),'baseline exposes the actual missing contextual path, not an invented working handler');
 });
 test('F0 uncertain and historical effects retain no-replay ownership fences',async()=>{
  const r=await inventory();
