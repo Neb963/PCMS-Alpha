@@ -1047,6 +1047,9 @@ def main():
             def journey(name,runner):
                 runner(browser,archive,pathlib.Path(folder))
                 completed.append(name)
+            # Run the changed creation journey first; all other suites remain mandatory.
+            from journey_generators_ui import run as run_j02_primary
+            journey('journey_generators_ui.run',run_j02_primary)
             from journey_ui import run as run_j07_primary
             journey('journey_ui.run',run_j07_primary)
             from journey_backups_ui import run as run_j06_primary
@@ -1064,8 +1067,6 @@ def main():
             from journey_git_ui import run as run_j03_primary, run_empty as run_j03_empty
             journey('journey_git_ui.run',run_j03_primary)
             journey('journey_git_ui.run_empty',run_j03_empty)
-            from journey_generators_ui import run as run_j02_primary
-            journey('journey_generators_ui.run',run_j02_primary)
             from journey_accounts_ui import run as run_j01_primary
             journey('journey_accounts_ui.run',run_j01_primary)
             first=open_session(browser,profile)

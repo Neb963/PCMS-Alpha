@@ -125,7 +125,11 @@ export async function installGeneratorFixture(options={}){
      if(msg.type==='APPEND_CREATE_BATCH'&&msg.params.offset===0&&ledger.failures.delayInput){
       ledger.failures.delayInput=false;await persist();await new Promise(resolve=>{releaseInputGate=resolve});}
       return boundaries.get(name).run(msg,sender);};
-    Promise.resolve(execute()).then(out=>{commands.push({type:msg.type,ok:out?.ok,code:out?.code});if(!closed)for(const fn of handlers)fn(out)})
+    Promise.resolve(execute()).then(out=>{commands.push({type:msg.type,ok:out?.ok,code:out?.code,
+     ...(['GET_CREATE_INTENT','RUN_CREATE_STEP'].includes(msg.type)?{
+      requestedIntent:msg.params?.intentId,requestedRevision:msg.params?.expectedRevision,
+      observedIntent:out?.record?.intentId,observedSlug:out?.record?.slug,
+      observedRevision:out?.record?.revision,state:out?.record?.state}:{} )});if(!closed)for(const fn of handlers)fn(out)})
     .catch(()=>{if(!closed)for(const fn of disconnected)fn()})}};
  };
  window.__j02={async inspect(){const data=await rows();return {accounts:data.filter(x=>x.account).map(x=>x.account),

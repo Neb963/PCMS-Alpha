@@ -129,7 +129,7 @@ def run(browser,archive,folder):
         click_text(s,'Refresh','[aria-label="Batch progress"]')
         click(s,'[data-batch-index="1"] button')
         recovered=oracle(s,'return await window.__j02.tick(18);')
-        held=[r for r in recovered['records'] if r['slug']=='j02-held'];assert held[0]['state']=='GIT_INIT_PENDING',{'held':held,'commands':recovered['commands'][-12:]}
+        held=[r for r in recovered['records'] if r['slug']=='j02-held'];assert held[0]['state']=='GIT_INIT_PENDING',{'held':held,'commands':recovered['commands'][-12:],'ui':b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;return {toast:sh.querySelector('#pcms-live-toast')?.textContent,dialog:sh.querySelector('[role=dialog]')?.textContent.slice(-2000)}")}
         assert held[0]['accountId']=='account_j02_049',held
         assert [x['kind'] for x in recovered['ledger']['effects']]==['CREATE','RENAME','CREATE','RENAME'],recovered['ledger']
         # Inspect canonical outcomes even if cooldown defers automatic retry.
