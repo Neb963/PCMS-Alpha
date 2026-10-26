@@ -200,8 +200,8 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     // Passive clock/status reads never wake idle routes. Enabled, eligible
     // Refresher coverage and explicit statistic demand are actual due work;
     // they request existing enrollment readiness before protected reads.
-    const needed=new Set(state.rows.filter(r=>r.ownerVerified&&!r.identityHeld&&(
-      state.policy.refreshEnabled===true&&rowBlocks(state,r).every(c=>c==='ACCOUNT_UNAVAILABLE')||
+    const needed=new Set(state.rows.filter(r=>!before.get(r.accountId)?.ready&&r.ownerVerified&&!r.identityHeld&&(
+      state.policy?.refreshEnabled===true&&state.provider&&rowBlocks(state,r).every(c=>c==='ACCOUNT_UNAVAILABLE')||
       r.metrics?.demandUntil>now&&r.metrics.nextDueAt<=now&&!r.metrics.suspended)).map(r=>r.accountId));
     await Promise.all(scopes.filter(([id])=>needed.has(id)&&!before.get(id)?.ready).map(async([id,a])=>{
       try{before.set(id,await g.getSafeRouteReadiness(a.personaUid));}catch{}
