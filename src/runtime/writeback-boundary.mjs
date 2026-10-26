@@ -1,3 +1,4 @@
+import {createScopeObservation} from './scope-observation.mjs';
 import {checkpointed} from './work-checkpoint.mjs';
 // I11 privileged Git writeback command admission. Git only, never Perchance
 // publication. Synthetic tests can inject guard/transport/effect gate; packaged
@@ -120,11 +121,12 @@ export function createWritebackBoundary(api,{
   storeFactory=createWritebackStore,aiFactory=createAiStore,
   stageFactory=createStagingStore,inspect=inspectWriteback,
   write=writeGitCandidate,observe=observeGitCandidate,
-  effectGate=()=>false,credential=createGitCredentialResolver(api)
+  effectGate=()=>false,credential=createGitCredentialResolver(api),observationMs=10000
 }={}){
   let dbPromise;
   const database=()=>dbPromise ||=open();
   const sentinel=createRestoreSentinel(api.storage.local);
+  const scopes=createScopeObservation(api,'legacyGit',{observationMs});
   // Ephemeral tokens are intentionally lost on background restart; canonical
   // autoEnabled alone never authorizes a Git action or stores credentials.
   const autoCredentials=new Map();
@@ -308,6 +310,7 @@ export function createWritebackBoundary(api,{
       const record=prior.record;
       if(record.state!=='PREPARED')
         return fail('WRITEBACK_RECONCILIATION_REQUIRED');
+      const authorizationGeneration=effectGate.generation?.();
       const autoAuthorized=()=>record.mode!=='AUTO'||(
         typeof p.autoArmId==='string'&&
         autoCredentials.get(p.slug)?.armId===p.autoArmId&&
@@ -322,8 +325,9 @@ export function createWritebackBoundary(api,{
       // requests from different Firefox wakes cannot arm twice.
       const armed=await store.arm(p.slug,p.expectedRevision);
       if(!armed.ok)return armed;
-      if(!autoAuthorized()||effectGate({phase:'I11',record})!==true||
-         (await sentinel.inspect()).held){
+      const restoring=(await sentinel.inspect()).held;
+      if(restoring||!autoAuthorized()||effectGate({phase:'I11',record})!==true||
+         authorizationGeneration!==effectGate.generation?.()){
         await store.finish(p.slug,armed.revision,{reason:'WRITEBACK_HELD_AFTER_ARM'});
         return fail('WRITEBACK_DISPATCH_UNCERTAIN');
       }
@@ -361,6 +365,8 @@ export function createWritebackBoundary(api,{
         autoCredentials.clear();return fail('GIT_AUTO_NOT_ENABLED');
       }
       for(const [slug,credential] of autoCredentials){
+        const keys=['generator:'+slug];if(scopes.busy(keys))continue;
+        const observed=await scopes.run(keys,async()=>{
         const {token,armId}=credential;
         const current=await store.get(slug);
         if(current.ok&&current.state!=='CANCELED'){
@@ -375,10 +381,10 @@ export function createWritebackBoundary(api,{
           }
           if(autoCredentials.get(slug)?.armId===armId)
             autoCredentials.delete(slug);
-          continue;
+          return {scopeSkipped:true};
         }
         const candidate=await runTrusted({type:'PREVIEW',params:{slug}});
-        if(!candidate.ok)continue; // no verified final F; no Git effect
+        if(!candidate.ok)return {scopeSkipped:true}; // no verified final F; no Git effect
         const prepared=await runTrusted({type:'PREPARE',params:{
           slug,token,mode:'AUTO',message:'',
           expectedJobRevision:candidate.jobRevision,
@@ -402,6 +408,9 @@ export function createWritebackBoundary(api,{
         if(autoCredentials.get(slug)?.armId===armId)
           autoCredentials.delete(slug);
         return result;
+        },{progressed:r=>r?.ok===true&&Number.isSafeInteger(r?.revision)});
+        if(observed?.scopeSkipped)continue;
+        return observed;
       }
       return {ok:true,code:'GIT_AUTO_WAITING_FOR_VERIFIED_F'};
     }catch{return fail('GIT_AUTO_HELD_UNVERIFIED');}
@@ -429,8 +438,9 @@ export function createWritebackBoundary(api,{
   autoTick=checkpointed(api,autoTick);
   return Object.freeze({register,run,autoTick,runTrusted});
 }
-if(typeof browser!=='undefined')createWritebackBoundary(browser,{
-  effectGate:({step})=>step==='READ_ONLY_AI_TERMINAL'
-    ? standingS06?.gate('development')===true
-    : standingS06?.gate('gitWrite')===true
-}).register();
+if(typeof browser!=='undefined'){
+ const gate=({step})=>step==='READ_ONLY_AI_TERMINAL'
+  ? standingS06?.gate('development')===true:standingS06?.gate('gitWrite')===true;
+ gate.generation=()=>standingS06?.policyGeneration();
+ createWritebackBoundary(browser,{effectGate:gate}).register();
+}

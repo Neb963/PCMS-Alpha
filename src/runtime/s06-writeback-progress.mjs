@@ -1,6 +1,7 @@
+import {createScopeObservation} from './scope-observation.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // S06: use the existing S03/S05 background alarm, not a second scheduler.
-// All Git credentials are retrieved on demand from native Secret Service.
+// Git credentials are retrieved on demand from browser-local storage.
 // Only exact S05 TESTS_VERIFIED F is eligible. A lost Git ACK is *observed*;
 // it is never retried by a new operation. Production activation defaults OFF.
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
@@ -109,11 +110,15 @@ export function planS06Writeback({ready,stage,job,writeback,exception}={}){
 export function createS06WritebackProgress(api,{
   open=openCanonicalDatabase,effectGate=()=>false,
   native=p=>browserGitCredentialPacket(p),
-  makeBoundary=(db)=>createWritebackBoundary(api,{open:async()=>db,
-    effectGate:ctx=>effectGate({phase:'S06',step:ctx.step||'GIT_WRITE',slug:ctx.record?.slug})}),
-  maxCandidates=100
+  makeBoundary=(db)=>{
+    const gate=ctx=>effectGate({phase:'S06',step:ctx.step||'GIT_WRITE',slug:ctx.record?.slug});
+    gate.generation=()=>effectGate.generation?.();
+    return createWritebackBoundary(api,{open:async()=>db,effectGate:gate});
+  },
+  maxCandidates=100,observationMs=10000
 }={}){
   const sentinel=createRestoreSentinel(api.storage.local);
+  const scopes=createScopeObservation(api,'writeback',{observationMs});
   let connection=null,flight=null;
   const db=()=>connection||=open().catch(e=>{connection=null;throw e;});
   const cursorKey='pcmsS06GitWritebackCursor',statusKey='pcmsS06GitWritebackReceipt';
@@ -131,24 +136,26 @@ export function createS06WritebackProgress(api,{
           const summary=listing.items[i];
           last=summary.slug;examined++;
           if(isI17Quarantined({slug:summary.slug}))continue;
+          const keys=['generator:'+summary.slug];if(scopes.busy(keys))continue;
+          const next=i+1<listing.items.length||listing.more?summary.slug:'';
+          await api.storage.local.set({[cursorKey]:next});
+          const observed=await scopes.run(keys,async()=>{
           const ready=await queue.get(summary.slug),
             stage=await createStagingStore(database).getFull(summary.slug),
             job=await createAiStore(database).getJobFull(summary.slug),
             wb=await createWritebackStore(database).getFull(summary.slug),
             exception=await createS06ExceptionStore(database).getFull(summary.slug);
-          if(!ready.ok||ready.record.revision!==summary.revision)continue;
+          if(!ready.ok||ready.record.revision!==summary.revision)return {scopeSkipped:true};
           const chosen=planS06Writeback({ready,stage,job,writeback:wb.ok?wb:null,
              exception:exception.ok?exception:null});
-          if(!chosen.ok||chosen.type==='REVIEW')continue;
-          const next=i+1<listing.items.length||listing.more?summary.slug:'';
+          if(!chosen.ok||chosen.type==='REVIEW')return {scopeSkipped:true};
           if(chosen.type==='CANCEL_PREPARED'){
             // Purely local and independently fenced, never requires Git
             // credentials or re-enables remote effects.
             const result=await makeBoundary(database).runTrusted({
               type:'CANCEL_PREPARED',params:{
                 slug:chosen.slug,expectedRevision:chosen.revision}});
-            await api.storage.local.set({[cursorKey]:next,
-              [statusKey]:{slug:chosen.slug,step:'CANCEL_PREPARED',
+            await api.storage.local.set({[statusKey]:{slug:chosen.slug,step:'CANCEL_PREPARED',
                 code:result?.code||'S06_CANCELLATION_RECHECK_REQUIRED',
                 ok:result?.ok===true,remoteEffect:'NONE',
                 observedAt:Date.now()}});
@@ -158,18 +165,15 @@ export function createS06WritebackProgress(api,{
           // private account, Git branch, source editor or remote publisher.
           const cfg=(await api.storage.local.get('pcmsS03Git'))?.pcmsS03Git;
           if(cfg?.repository!=='Neb963/per-gens'||!RID.test(cfg.repositoryId||'')){
-            await api.storage.local.set({[cursorKey]:next});
             return fail('S06_REPOSITORY_NOT_CONNECTED');
           }
           if(chosen.type!=='RECONCILE'&&
              effectGate({phase:'S06',step:'GIT_WRITE',slug:chosen.slug})!==true){
-            await api.storage.local.set({[cursorKey]:next});
             return fail('S06_PRIVATE_GIT_ACTIVATION_HELD');
           }
           const credential=await native({action:'git.get',repositoryId:cfg.repositoryId});
           if(!credential?.ok||typeof credential.credential!=='string'||
              credential.credential.length<12||credential.credential.length>512){
-            await api.storage.local.set({[cursorKey]:next});
             return fail('S06_GIT_VAULT_UNAVAILABLE');
           }
           // Recheck revision after waiting for native host and before any
@@ -204,8 +208,11 @@ export function createS06WritebackProgress(api,{
             remoteEffect:chosen.type==='COMMIT'?'MAY_HAVE_OCCURRED':'NONE'};
           // Never store credentials, sealed source or misleading ACKs here.
           if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
-          await api.storage.local.set({[cursorKey]:next,[statusKey]:receipt});
-          return receipt;
+          await api.storage.local.set({[statusKey]:receipt});
+          return {...receipt,checkpointAdvanced:outcome?.ok===true&&
+            (outcome?.record?.revision||outcome?.revision||0)>(wb?.record?.revision||0)};
+          },{progressed:r=>r?.checkpointAdvanced===true});
+          if(observed?.scopeSkipped)continue;return observed;
         }
         if(!listing.more)break;
         if(!listing.nextCursor||listing.nextCursor<=after)

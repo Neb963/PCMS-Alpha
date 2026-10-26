@@ -3,6 +3,13 @@ import assert from 'node:assert/strict';
 import {createScopeObservation} from '../src/runtime/scope-observation.mjs';
 import {settlePcmsWork} from '../src/runtime/work-checkpoint.mjs';
 const drain=async()=>{for(let i=0;i<200;i++)await Promise.resolve();};
+async function until(predicate){
+ const deadline=Date.now()+2000;
+ while(!predicate()){
+  assert.ok(Date.now()<deadline,'Expected actual asynchronous receipt did not settle');
+  await new Promise(resolve=>setImmediate(resolve));
+ }
+}
 const barrier=()=>{let release;return {promise:new Promise(r=>release=r),release:()=>release()};};
 function fixture({holdWrites=false,failReads=false}={}){
  const rows=new Map(),writes=[],bar=barrier();let blocked=holdWrites;
@@ -24,7 +31,7 @@ test('F2 observation expiry retains actual ownership across adapters and domains
   assert.equal(await other.run(['generator:healthy'],async()=>({ok:true})).then(r=>r.ok),true);
   await assert.rejects(settlePcmsWork({timeoutMs:10}),/RESTORE_LOCAL_WORK_BUSY/);
  }finally{held.release();}
- await settlePcmsWork({timeoutMs:1000});await drain();
+ await settlePcmsWork({timeoutMs:1000});await until(()=>a.receipt().durability==='VERIFIED');
  assert.equal((await other.run(['generator:PRIVATE_CANARY'],async()=>({ok:true}))).ok,true);
  assert.equal(called,1);
  assert.equal(a.receipt().rows.at(-1).lastSuccessfulProgression!==null,true);
@@ -47,21 +54,21 @@ test('F2 hung diagnostics neither block healthy progression nor join actual rest
  const f=fixture({holdWrites:true}),a=createScopeObservation(f.api,'creation');
  try{
   assert.equal((await a.run(['generator:one'],async()=>({ok:true}),{progressed:r=>r.ok})).ok,true);
-  await settlePcmsWork({timeoutMs:100});await drain();
+  await settlePcmsWork({timeoutMs:100});await until(()=>f.writes.length>0);
   assert.equal(a.receipt().durability,'PENDING');
   assert.equal((await a.run(['generator:two'],async()=>({ok:true}))).ok,true);
  }finally{f.release();}
- await drain();assert.equal(a.receipt().durability,'VERIFIED');
+ await until(()=>a.receipt().durability==='VERIFIED');assert.equal(a.receipt().durability,'VERIFIED');
 });
 test('F2 receipt failure remains visible through idle results and only observed progression clears it',async()=>{
  const f=fixture(),a=createScopeObservation(f.api,'writeback');
- await a.run(['generator:one'],async()=>{throw Error('PRIVATE_TOKEN_CANARY');});await drain();
+ await a.run(['generator:one'],async()=>{throw Error('PRIVATE_TOKEN_CANARY');});await until(()=>a.receipt().durability==='VERIFIED');
  assert.equal(a.receipt().rows[0].failureCode,'SCOPE_CHECKPOINT_FAILED');
  assert.equal(a.receipt().rows[0].lastSuccessfulProgression,null);
- await a.run(['generator:one'],async()=>({ok:true,code:'NO_WORK'}));await drain();
+ await a.run(['generator:one'],async()=>({ok:true,code:'NO_WORK'}));await until(()=>a.receipt().durability==='VERIFIED');
  assert.equal(a.receipt().rows[0].failureCode,'SCOPE_CHECKPOINT_FAILED');
  assert.equal(a.receipt().rows[0].lastSuccessfulProgression,null);
- await a.run(['generator:one'],async()=>({ok:true,revision:2}),{progressed:r=>r.revision===2});await drain();
+ await a.run(['generator:one'],async()=>({ok:true,revision:2}),{progressed:r=>r.revision===2});await until(()=>a.receipt().durability==='VERIFIED');
  assert.equal(a.receipt().rows[0].failureCode,null);
  assert.ok(a.receipt().rows[0].lastSuccessfulProgression);
  assert.equal(JSON.stringify(f.writes).includes('PRIVATE_TOKEN'),false);
@@ -73,7 +80,7 @@ test('F2 failed diagnostic hydration never overwrites a previous-good durable re
  const rawGet=f.api.storage.local.get;
  f.api.storage.local.get=async k=>{if(k===key)throw Error('PRIVATE_TOKEN_CANARY');return rawGet(k);};
  const a=createScopeObservation(f.api,'inventory');
- assert.equal((await a.run(['inventory:one'],async()=>({ok:true}))).ok,true);await drain();
+ assert.equal((await a.run(['inventory:one'],async()=>({ok:true}))).ok,true);await until(()=>a.receipt().durability==='UNAVAILABLE');
  assert.equal(a.receipt().durability,'UNAVAILABLE');assert.equal(f.writes.length,0);
  assert.deepEqual(f.rows.get(key),previous);
 });
@@ -81,5 +88,5 @@ test('F2 restore hold denies task entry and grants no progress credit',async()=>
  const f=fixture();f.rows.set('pcmsRestoreInProgress',{active:true,status:'PREPARING'});
  let called=false;const a=createScopeObservation(f.api,'adoption');
  assert.equal((await a.run(['generator:one'],async()=>{called=true;return {ok:true};})).code,'RESTORE_HOLD');
- await drain();assert.equal(called,false);assert.equal(a.receipt().rows[0].lastSuccessfulProgression,null);
+ await until(()=>a.receipt().rows.length>0);assert.equal(called,false);assert.equal(a.receipt().rows[0].lastSuccessfulProgression,null);
 });

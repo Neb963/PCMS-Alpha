@@ -1,3 +1,4 @@
+import {createScopeObservation} from './scope-observation.mjs';
 import {inspectDisposableRestore} from './functional-restore.mjs';
 import {checkpointed} from './work-checkpoint.mjs';
 import {preparePortableOriginals,completePortableOriginals} from './portable-originals.mjs';
@@ -64,11 +65,12 @@ export function createPortableRunner(api,{
   open=openCanonicalDatabase,clock=Date.now,
   nextId=()=>crypto.randomUUID().replaceAll('-',''),
   capture=capturePortableCut,dispatch=downloadPortable,wait=awaitAuto,
-  observe=inspectAuto,prepareOriginals=preparePortableOriginals,completeOriginals=completePortableOriginals
+  observe=inspectAuto,prepareOriginals=preparePortableOriginals,completeOriginals=completePortableOriginals,observationMs=30000
 }={}){
   let pending=null,manualTask=null,inspection=null,dbPromise=null;
   const db=()=>dbPromise ||= open().catch(e=>{dbPromise=null;throw e});
   const sentinel=createRestoreSentinel(api.storage.local);
+  const scopes=createScopeObservation(api,'backup',{clock,observationMs});
   const store=async()=>createAutoStore(await db(),clock);
   async function settleDisabledWake(){
     const running=pending;if(!running)return true;
@@ -384,13 +386,19 @@ export function createPortableRunner(api,{
     try{return await manualTask;}finally{manualTask=null;}
   }
   status=checkpointed(api,status,{allowDuringRestore:true});
-  tick=checkpointed(api,tick);
+  const actualTick=checkpointed(api,tick);
+  tick=()=>scopes.run(['backup:automatic'],actualTick,{
+   progressed:r=>r?.ok===true&&r.code==='BROWSER_REPORTED_COMPLETE'});
   manual=checkpointed(api,manual,{allowDuringRestore:owner=>!!owner});
   recoverManual=checkpointed(api,recoverManual,{allowDuringRestore:owner=>!!owner});
   inspectArchive=checkpointed(api,inspectArchive);
   inspectRestore=checkpointed(api,inspectRestore);
   return Object.freeze({
-    status,tick,manual:()=>manual(),checkpoint:owner=>manual(owner),recoverManual,inspectArchive,inspectRestore,requestOriginalCheckpoint:()=>manual(),recover:checkpointed(api,async()=>reconcile(await store())),
+    status,tick,manual:()=>scopes.run(['backup:manual'],()=>manual(),{
+     progressed:r=>r?.ok===true&&r.code==='BROWSER_REPORTED_COMPLETE'}),
+    checkpoint:owner=>manual(owner),recoverManual,inspectArchive,inspectRestore,
+    requestOriginalCheckpoint:()=>scopes.run(['backup:manual'],()=>manual(),{
+     progressed:r=>r?.ok===true&&r.code==='BROWSER_REPORTED_COMPLETE'}),recover:checkpointed(api,async()=>reconcile(await store())),
     enable:checkpointed(api,async value=>{
       const s=await store(),out=await s.enabled(value);
       if(out.ok&&value)void tick();

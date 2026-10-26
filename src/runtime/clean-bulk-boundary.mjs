@@ -1,3 +1,4 @@
+import {createScopeObservation} from './scope-observation.mjs';
 import {checkpointed} from './work-checkpoint.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
@@ -34,8 +35,9 @@ export function createCleanBulkBoundary(api,{open=openCanonicalDatabase}={}){
    run=checkpointed(api,run,{allowDuringRestore:message=>["GET","LIST"].includes(message?.type)});
   return Object.freeze({run,register});
 }
-export function createCleanBulkProgress(api,{open=openCanonicalDatabase,makeRelease=()=>createReleaseBoundary(api,{open})}={}){
+export function createCleanBulkProgress(api,{open=openCanonicalDatabase,makeRelease=()=>createReleaseBoundary(api,{open}),observationMs=10000}={}){
  let connection,busy=false,release;const db=()=>connection||=open(),sentinel=createRestoreSentinel(api.storage.local);
+ const scopes=createScopeObservation(api,'cleanBulk',{observationMs});
  async function tick(){if(busy)return fail('CLEAN_BULK_BUSY');busy=true;
   try{
    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
@@ -45,9 +47,18 @@ export function createCleanBulkProgress(api,{open=openCanonicalDatabase,makeRele
    if(!page.items.length)return {ok:true,code:'CLEAN_BULK_NO_ACTIVE_SET'};
    const full=await store.getFull(page.items[0].id);if(!full.ok)return full;const r=full.record;
    await api.storage.local.set({[cursorKey]:r.id});
-   let index=-1;for(let n=0;n<r.items.length;n++){const i=(r.cursor+n)%r.items.length,item=r.items[i];if(!['CONFIRMED','CANCELED'].includes(item.state)&&!(item.state==='HELD'&&item.requiresNewReview)){index=i;break}}
+   const hint=(await api.storage.local.get('pcmsCleanBulkScopeCursor'))?.pcmsCleanBulkScopeCursor;
+   const start=hint?.id===r.id&&Number.isInteger(hint.index)&&hint.index>=0&&hint.index<r.items.length?hint.index:r.cursor;
+   let index=-1;for(let n=0;n<r.items.length;n++){
+    const i=(start+n)%r.items.length,item=r.items[i];
+    if(!['CONFIRMED','CANCELED'].includes(item.state)&&!(item.state==='HELD'&&item.requiresNewReview)&&
+       !scopes.busy(['generator:'+item.slug])){index=i;break}
+   }
    if(index<0)return {ok:true,code:'CLEAN_BULK_WAITING_FOR_FINISH'};
-   const item=r.items[index],existing=await releases.getFull(item.slug),same=existing.ok&&matchesApproval(existing.record.approval,item.snapshot.tuple).ok;
+   const item=r.items[index];
+   await api.storage.local.set({pcmsCleanBulkScopeCursor:{id:r.id,index:(index+1)%r.items.length}});
+   return await scopes.run(['generator:'+item.slug],async()=>{
+   const existing=await releases.getFull(item.slug),same=existing.ok&&matchesApproval(existing.record.approval,item.snapshot.tuple).ok;
    const update=patch=>store.update(r.id,r.revision,index,patch);
    if(existing.ok&&['DISPATCH_POSSIBLE','PUBLICATION_UNCERTAIN','RECOVERY_HOLD'].includes(existing.record.state))return update({state:'VERIFYING',code:'PUBLICATION_READBACK_PENDING',...(same?{releaseId:existing.record.releaseId}:{})});
    if(same&&existing.record.state==='CONFIRMED_PUBLIC')return update({state:'CONFIRMED',code:'INDEPENDENT_PUBLIC_READBACK',releaseId:existing.record.releaseId});
@@ -72,6 +83,7 @@ export function createCleanBulkProgress(api,{open=openCanonicalDatabase,makeRele
    const observed=await releases.getFull(item.slug),matched=observed.ok&&matchesApproval(observed.record.approval,item.snapshot.tuple).ok;
    return store.update(r.id,latest.record.revision,index,matched?{state:observed.record.state==='CONFIRMED_PUBLIC'?'CONFIRMED':'APPROVED',releaseId:observed.record.releaseId,code:'PUBLICATION_QUEUED'}:
     {state:'WAITING',code:out?.code||'APPROVAL_RESPONSE_UNKNOWN'});
+   },{progressed:out=>out?.ok===true&&out?.revision>r.revision});
   }catch{return fail('CLEAN_BULK_PROGRESS_UNAVAILABLE')}finally{busy=false}
  }
  tick=checkpointed(api,tick);

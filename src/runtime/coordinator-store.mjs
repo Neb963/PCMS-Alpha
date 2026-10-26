@@ -612,7 +612,10 @@ export function createCoordinatorStore(db){
       return Promise.resolve(fail('INVALID_LIMIT'));
     return transact(db,'readonly',(tx,finish)=>{
       const items=[];let truncated=false,tail=null;
-      tx.objectStore('meta').openCursor().onsuccess=e=>{
+      const prefix='s00-create-intent:';
+      const range=typeof IDBKeyRange==='undefined'?undefined:
+        IDBKeyRange.bound(after?prefix+after:prefix,prefix+'\uffff',!!after,false);
+      tx.objectStore('meta').openCursor(range).onsuccess=e=>{
         const cursor=e.target.result;
         if(!cursor){
           finish({ok:true,items,truncated,next:truncated?tail:null,
@@ -623,7 +626,7 @@ export function createCoordinatorStore(db){
         if(typeof keyName==='string'&&keyName.startsWith('s00-create-intent:')&&
            record&&(!after||keyName>'s00-create-intent:'+after)){
           if(items.length>=limit){
-            truncated=true;cursor.continue();return;
+            truncated=true;finish({ok:true,items,truncated,next:tail,providerEffects:'OFF'});return;
           }
           items.push({intentId:record.intentId,slug:record.slug,
             accountId:record.accountId||null,state:record.state,

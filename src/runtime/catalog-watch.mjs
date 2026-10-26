@@ -45,7 +45,8 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
   const observe=(domain,fn)=>{
     let observer=domainObservers.get(domain);
     if(!observer){observer=createScopeObservation(api,domain,{clock,observationMs:30000});domainObservers.set(domain,observer);}
-    return observer.run(['domain:'+domain],fn);
+    return observer.run(['domain:'+domain],fn,{progressed:r=>r?.checkpointAdvanced===true||r?.progressed>0||
+      domain==='catalog'&&r?.ok===true&&r.code==='CATALOG_OBSERVED_READ_ONLY'});
   };
   const progressAll=()=>Promise.allSettled([
     ['ready',progressReady],['changes',progressChanges],['writeback',progressWriteback],

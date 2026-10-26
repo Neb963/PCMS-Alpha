@@ -1,3 +1,5 @@
+import {subscribeProtectedReadiness} from './protected-readiness.mjs';
+import {createScopeObservation} from './scope-observation.mjs';
 import {checkpointed,trackPcmsWork} from './work-checkpoint.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I10 settings and read-only AI-job preparation. Untrusted UI never supplies
@@ -86,12 +88,14 @@ export function createAiBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,
   storeFactory=createAiStore,stageFactory=createStagingStore,
   inspect=inspectGitSource,inspectReady=inspectReadyCandidate,
-  scanCatalog=scanMainCatalog,gitCredential=browserGitCredentialPacket,effectGate=()=>false,authority=null,clock=Date.now
+  scanCatalog=scanMainCatalog,gitCredential=browserGitCredentialPacket,effectGate=()=>false,authority=null,clock=Date.now,observationMs=10000
 }={}){
   let databasePromise,tickBusy=false,registered=false,nativeRecovery=null,nativeRecovered=false;
   let policyAlarm=null,policyAlarmAgain=false,activationTask=null,activationAgain=false;
+  let policyRetryTimer=null,policyRetryCount=0;
   const database=()=>databasePromise ||=open();
   const sentinel=createRestoreSentinel(api.storage.local);
+  const scopes=createScopeObservation(api,'ai',{clock,observationMs});
   async function outputProof(db,slug,ready,stage){
     const [s,w,j,e]=await Promise.all([
       stage?Promise.resolve(stage):stageFactory(db).getFull(slug),
@@ -707,6 +711,8 @@ export function createAiBoundary(api,{
         if(!next.ok)continue;
         // One attempted guarded step per wake, never simultaneous provider
         // operations or a retry of DISPATCH_POSSIBLE.
+        const keys=['generator:'+job.slug];if(scopes.busy(keys))continue;
+        return await scopes.run(keys,async()=>{
         const outcome=await executeTrusted({type:'ADVANCE_JOB',params:{
           slug:job.slug,expectedRevision:job.revision
         }});
@@ -724,6 +730,8 @@ export function createAiBoundary(api,{
           }
         }
         return outcome;
+        },{progressed:r=>r?.ok===true&&
+         (r?.job?.revision||r?.record?.revision||r?.revision||0)>job.revision});
       }
       return {ok:true,code:'AI_NO_ELIGIBLE_WORK'};
     }catch{return fail('AI_TICK_UNVERIFIED');}
@@ -747,7 +755,8 @@ export function createAiBoundary(api,{
   }
   function reconcilePolicyAlarm(){
     policyAlarmAgain=true;if(policyAlarm)return policyAlarm;
-    policyAlarm=Promise.resolve().then(async()=>{
+    const actual=Promise.resolve().then(async()=>{
+      let created=false;
       do{
         policyAlarmAgain=false;
         if(effectGate({phase:'I10',step:'AUTOMATION'})!==true||(await sentinel.inspect()).held){
@@ -759,19 +768,34 @@ export function createAiBoundary(api,{
           if(api.alarms?.clear)await api.alarms.clear(AI_PROGRESS_ALARM);
           continue;
         }
-        if(!current)await api.alarms.create(AI_PROGRESS_ALARM,{periodInMinutes:1});
+        if(!current){await api.alarms.create(AI_PROGRESS_ALARM,{periodInMinutes:1});created=true;}
         // A create may return after synchronous policy revocation.
         if(effectGate({phase:'I10',step:'AUTOMATION'})!==true||(await sentinel.inspect()).held)
           if(api.alarms?.clear)await api.alarms.clear(AI_PROGRESS_ALARM);
       }while(policyAlarmAgain);
-    }).catch(()=>{}).finally(()=>{
+      policyRetryCount=0;
+      const observed=api.alarms.get?await api.alarms.get(AI_PROGRESS_ALARM):null;
+      return {ok:true,checkpointAdvanced:created&&observed?.name===AI_PROGRESS_ALARM};
+    });
+    policyAlarm=actual.catch(()=>{
+      if(effectGate({phase:'I10',step:'AUTOMATION'})===true&&policyRetryTimer===null){
+        const delay=Math.min(60000,1000*2**Math.min(6,policyRetryCount++));
+        policyRetryTimer=setTimeout(()=>{policyRetryTimer=null;void reconcilePolicyAlarm();},delay);
+        policyRetryTimer?.unref?.();
+      }
+    }).finally(()=>{
       policyAlarm=null;if(policyAlarmAgain)void reconcilePolicyAlarm();
     });
+    // An observation deadline cannot release the actual alarm API operation.
+    void scopes.run(['alarm:ai'],()=>actual,{progressed:r=>r?.checkpointAdvanced===true});
     return policyAlarm;
   }
   function reconcileAuthority(){
     void reconcilePolicyAlarm();
-    if(effectGate({phase:'I10',step:'AUTOMATION'})!==true){activationAgain=false;return;}
+    if(effectGate({phase:'I10',step:'AUTOMATION'})!==true){
+      activationAgain=false;if(policyRetryTimer!==null)clearTimeout(policyRetryTimer);
+      policyRetryTimer=null;policyRetryCount=0;return;
+    }
     activationAgain=true;if(activationTask)return;
     activationTask=Promise.resolve().then(async()=>{
       do{
@@ -809,6 +833,10 @@ export function createAiBoundary(api,{
           .catch(()=>{try{port.postMessage(fail('AI_CANONICAL_HOLD'));}catch{}})
           .finally(()=>{busy=false;});
       });
+    });
+    subscribeProtectedReadiness(event=>{
+      if(event.kind==='ACCOUNT_READY'&&effectGate({phase:'I10',step:'AUTOMATION'})===true)
+        void tick();
     });
     if(authority?.subscribe)authority.subscribe(reconcileAuthority);
     else if(authority)reconcileAuthority();

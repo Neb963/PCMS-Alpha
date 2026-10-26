@@ -1,3 +1,4 @@
+import {createWorkNoticeSink} from './work-notices.mjs';
 // Private execution observation, not effect, route, task or restore authority.
 // Only actual settlement releases ownership. Canonical journals still decide
 // admissibility, CAS, intent-before-dispatch and restart reconciliation.
@@ -19,7 +20,7 @@ function poolFor(api){
  return pool;
 }
 export function createScopeObservation(api,domain,{clock=Date.now,observationMs=10000,
- setTimer=setTimeout,clearTimer=clearTimeout,onFailure=null}={}){
+ setTimer=setTimeout,clearTimer=clearTimeout,onFailure=typeof browser==='undefined'?null:createWorkNoticeSink(api,domain)}={}){
  if(!DOMAINS.includes(domain)||!bounded(observationMs)||observationMs>60000)
   throw Error('INVALID_SCOPE_OBSERVATION');
  const pool=poolFor(api),sentinel=createRestoreSentinel(api.storage.local);
@@ -83,13 +84,13 @@ export function createScopeObservation(api,domain,{clock=Date.now,observationMs=
    const row={domain,scope,lastAttempt:owner.startedAt,
     lastSuccessfulProgression:progressed?at:previous?.lastSuccessfulProgression??null,
     checkpoint,failureCode:failureCode||(progressed?null:previous?.failureCode??null),
-    nextSafeRetry:settled?at+60000:null,
+    nextSafeRetry:settled?at:null,
     causalRoot:failureCode?scope:progressed?null:previous?.causalRoot??null};
    diagnostics.rows.delete(scope);diagnostics.rows.set(scope,row);
    while(diagnostics.rows.size>RECENT){const oldest=diagnostics.rows.keys().next().value;
     diagnostics.rows.delete(oldest);diagnostics.versions.delete(oldest);}
    flush();
-   if(failureCode&&typeof onFailure==='function'){
+   if((row.failureCode||checkpoint==='PROGRESSED')&&typeof onFailure==='function'){
     try{void Promise.resolve(onFailure(clone(row))).catch(()=>{});}catch{}
    }
   }).catch(()=>{diagnostics.unavailable=true;diagnostics.persisted=false;})
@@ -98,7 +99,7 @@ export function createScopeObservation(api,domain,{clock=Date.now,observationMs=
  function busy(scopes){
   return scopes.some(scope=>pool.owners.has(scope));
  }
- function run(scopes,fn,{progressed=()=>false,failure=()=>false,timeoutMs=observationMs}={}){
+ function run(scopes,fn,{progressed=()=>false,failure=value=>value?.ok===false&&/UNAVAILABLE|UNVERIFIED|INTERRUPTED|FAILED/.test(value?.code||''),diagnostic=true,onPending=null,timeoutMs=observationMs}={}){
   if(!Array.isArray(scopes)||!scopes.length||scopes.length>3||
     scopes.some(s=>typeof s!=='string'||s.length<1||s.length>256)||
     typeof fn!=='function'||!bounded(timeoutMs)||timeoutMs>60000)
@@ -110,7 +111,7 @@ export function createScopeObservation(api,domain,{clock=Date.now,observationMs=
   const owner={startedAt:clock(),sequence:0,digest:hash(domain+'\0'+unique.join('\0'))};
   for(const scope of unique)pool.owners.set(scope,owner);
   pool.active++;pool.domains.set(domain,(pool.domains.get(domain)||0)+1);
-  note(owner,'ATTEMPTED');
+  if(diagnostic)note(owner,'ATTEMPTED');
   // The original actual work, not this bounded observation, stays in the
   // existing restore drain. Diagnostic storage is deliberately outside it.
   const actual=trackPcmsWork(Promise.resolve().then(async()=>{
@@ -120,7 +121,7 @@ export function createScopeObservation(api,domain,{clock=Date.now,observationMs=
   const settled=actual.then(value=>{
    let advanced=false;try{advanced=progressed(value)===true;}catch{}
    let failed=false;try{failed=failure(value)===true;}catch{}
-   note(owner,advanced?'PROGRESSED':failed?'FAILED':'SETTLED',
+   if(diagnostic||failed||advanced)note(owner,advanced?'PROGRESSED':failed?'FAILED':'SETTLED',
     failed?'SCOPE_CHECKPOINT_UNVERIFIED':null,{progressed:advanced,settled:true});
    return value;
   },()=>{
@@ -133,15 +134,21 @@ export function createScopeObservation(api,domain,{clock=Date.now,observationMs=
   let timer;
   return Promise.race([settled,new Promise(resolve=>{
    timer=setTimer(()=>{
+    if(typeof onPending==='function')try{onPending();}catch{}
     note(owner,'AWAITING_SETTLEMENT','SCOPE_OBSERVATION_PENDING');
     resolve(fail('SCOPE_OBSERVATION_PENDING'));
    },timeoutMs);
   })]).finally(()=>clearTimer(timer));
+ }
+ function recordProgress(scopes){
+  if(!Array.isArray(scopes)||!scopes.length)return;
+  note({startedAt:clock(),sequence:0,digest:hash(domain+'\0'+[...new Set(scopes)].join('\0'))},
+   'PROGRESSED',null,{progressed:true,settled:true});
  }
  function receipt(){
   return {ok:!diagnostics.unavailable,domain,
    durability:diagnostics.persisted&&diagnostics.pendingNotes===0?'VERIFIED':diagnostics.unavailable?'UNAVAILABLE':'PENDING',
    rows:[...diagnostics.rows.values()].slice(-RECENT).map(clone)};
  }
- return Object.freeze({run,busy,receipt});
+ return Object.freeze({run,busy,receipt,recordProgress});
 }

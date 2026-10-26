@@ -1,3 +1,4 @@
+import {createScopeObservation} from './scope-observation.mjs';
 // S06 Request Changes is local operator intent, never a provider command.
 // The only child admission is an atomic handoff of independently tested F:
 // same READY declaration, stable owner, same guarded generator/editor slot,
@@ -199,8 +200,9 @@ export function createS06ChangeStore(db){
 // A separate guarded read-only preflight, before atomic admission. A changed
 // editor, route, owner or saved F holds the child rather than overwriting it.
 export function createS06ChangeProgress(api,{
- open=openCanonicalDatabase,guard=internalPcmsGuard,maxCandidates=80}={}){
+ open=openCanonicalDatabase,guard=internalPcmsGuard,maxCandidates=80,observationMs=10000}={}){
  const sentinel=createRestoreSentinel(api.storage.local);
+ const scopes=createScopeObservation(api,'changes',{observationMs});
  let database=null,flight=null;const db=()=>database||=open().catch(e=>{database=null;throw e;});
  async function perform(){
   try{
@@ -214,17 +216,19 @@ export function createS06ChangeProgress(api,{
     if(!list.ok)return list;
     for(let i=0;i<list.items.length;i++){
      const item=list.items[i];examined++;last=item.slug;
-     const req=await store.get(item.slug);
-     if(!req.ok||req.state!=='REQUESTED')continue;
+     const keys=['generator:'+item.slug];if(scopes.busy(keys))continue;
      const next=i+1<list.items.length||list.more?item.slug:'';
+     await api.storage.local.set({[cursorKey]:next});
+     const observed=await scopes.run(keys,async()=>{
+     const req=await store.get(item.slug);
+     if(!req.ok||req.state!=='REQUESTED')return {scopeSkipped:true};
      const held=async code=>{
-       await api.storage.local.set({[cursorKey]:next,
-         pcmsS06ChangeReceipt:{slug:item.slug,code,ok:false,
+       await api.storage.local.set({         pcmsS06ChangeReceipt:{slug:item.slug,code,ok:false,
            observedAt:Date.now()}});
        return fail(code);
      };
      const superseded=await store.supersede(item.slug,req.revision);
-     if(superseded.ok){await api.storage.local.set({[cursorKey]:next});return superseded;}
+     if(superseded.ok)return {...superseded,checkpointAdvanced:superseded.revision>req.revision};
      const [stage,job,writeback,ready,exception]=await Promise.all([
       createStagingStore(d).getFull(item.slug),createAiStore(d).getJobFull(item.slug),
       createWritebackStore(d).getFull(item.slug),queue.get(item.slug),createS06ExceptionStore(d).getFull(item.slug)]);
@@ -277,10 +281,11 @@ export function createS06ChangeProgress(api,{
      }
      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
      const result=await store.admit(item.slug,req.revision);
-     await api.storage.local.set({[cursorKey]:next,
-       pcmsS06ChangeReceipt:{slug:item.slug,code:result.code||null,
+     await api.storage.local.set({       pcmsS06ChangeReceipt:{slug:item.slug,code:result.code||null,
          ok:result.ok,state:result.state,observedAt:Date.now()}});
-     return result;
+     return {...result,checkpointAdvanced:result?.ok===true&&result.revision>req.revision};
+     },{progressed:r=>r?.checkpointAdvanced===true});
+     if(observed?.scopeSkipped)continue;return observed;
     }
     if(!list.more)break;
     if(!list.nextCursor||list.nextCursor<=after)

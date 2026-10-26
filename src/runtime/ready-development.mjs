@@ -1,3 +1,4 @@
+import {createScopeObservation} from './scope-observation.mjs';
 // S05: a bounded production-workflow adapter for the existing catalog watcher.
 // This is not a second coordinator or a source writer. Every decision reads
 // canonical I13/I09/I10/READY journals; every action invokes their real
@@ -134,9 +135,10 @@ export function createReadyDevelopment(api,{
  makeExisting=()=>createExistingBoundary(api,{effectGate}),
  makeStage=()=>createStagingBoundary(api,{effectGate}),
  makeAi=()=>createAiBoundary(api,{effectGate}),
- maxCandidates=120
+ maxCandidates=120,observationMs=10000
 }={}){
  const sentinel=createRestoreSentinel(api.storage.local);
+ const scopes=createScopeObservation(api,'ready',{observationMs});
  let busy=null,connection=null,ports=null;
  const db=()=>connection||=open().catch(e=>{connection=null;throw e;});
  const boundaries=()=>ports||=(Object.freeze({
@@ -164,8 +166,12 @@ export function createReadyDevelopment(api,{
      const row=listing.items[i];
      examined++;lastSeen=row.slug;
      if(!row.desired&&!row.active)continue;
+     const keys=['generator:'+row.slug];if(scopes.busy(keys))continue;
+     const nextCursor=(i+1<listing.items.length||listing.more)?row.slug:'';
+     await api.storage.local.set({[cursorKey]:nextCursor});
+     const observed=await scopes.run(keys,async()=>{
      const full=await queue.get(row.slug);
-     if(!full.ok||full.record.revision!==row.revision)continue;
+     if(!full.ok||full.record.revision!==row.revision)return {scopeSkipped:true};
      const stage=await createStagingStore(database).getFull(row.slug);
      const existing=await createExistingStore(database).getFull(row.slug);
      const job=await createAiStore(database).getJobFull(row.slug);
@@ -180,15 +186,13 @@ export function createReadyDevelopment(api,{
        exception:exception.ok?exception:null,
        visibility:inventory?.visibility,
        effects:effectGate({phase:'S05',step:'AUTO_PROGRESS',slug:row.slug})===true});
-     if(!chosen.ok||chosen.type==='HOLD')continue;
+     if(!chosen.ok||chosen.type==='HOLD')return {scopeSkipped:true};
      // One source-heavy step at most per wake, so wrong owner, changed
      // route or source cannot cause fleet-wide unlisting or repeated effects.
      let outcome;
      const slug=row.slug,params={slug};
-     const nextCursor=(i+1<listing.items.length||listing.more)?slug:'';
      const held=async(code,kind='NONE')=>{
        await api.storage.local.set({
-         [cursorKey]:nextCursor,
          [statusKey]:{ok:false,code,slug,step:chosen.type,
            providerEffects:kind,observedAt:Date.now()}
        });
@@ -247,9 +251,16 @@ export function createReadyDevelopment(api,{
           'MAY_HAVE_DISPATCHED':'NONE'};
      // This cursor schedules fairness only. It never means a remote save
      // completed, nor authorizes replay of a failed or ambiguous effect.
-     await api.storage.local.set({[cursorKey]:nextCursor,
-       [statusKey]:{...receipt,observedAt:Date.now()}});
-     return {...receipt,canonical:outcome};
+     await api.storage.local.set({[statusKey]:{...receipt,observedAt:Date.now()}});
+     const previousRevision=['PREPARE_LOCAL','REQUALIFY_RESTORED'].includes(chosen.type)?row.revision:
+      ['STAGE_PRIVATE','RECONCILE_STAGE'].includes(chosen.type)?stage?.record?.revision||0:
+      ['PREPARE_JOB','ADVANCE_JOB','PROBE_NATIVE','PROBE_OLDER_NATIVE','STOP_OLDER_NATIVE'].includes(chosen.type)?job?.job?.revision||0:
+      existing?.record?.revision||0;
+     return {...receipt,canonical:outcome,checkpointAdvanced:outcome?.ok===true&&
+      (outcome?.record?.revision||outcome?.job?.revision||outcome?.revision||0)>previousRevision};
+     },{progressed:r=>r?.checkpointAdvanced===true});
+     if(observed?.scopeSkipped)continue;
+     return observed;
     }
     if(!listing.more)break;
     if(!listing.nextCursor||listing.nextCursor<=after)
