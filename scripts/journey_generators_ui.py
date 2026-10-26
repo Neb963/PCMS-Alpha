@@ -128,6 +128,21 @@ def run(browser,archive,folder):
         oracle(s,'await window.__j02.recover();return true;')
         click_text(s,'Refresh','[aria-label="Batch progress"]')
         click(s,'[data-batch-index="1"] button')
+        # A click starts one asynchronous protected check. The faster F2
+        # queue scan must not be used as an implicit wait for that request.
+        # Observe its actual canonical checkpoint; never send it again.
+        deadline=time.monotonic()+15;checkpoint=None;owner=[];settled=[]
+        while time.monotonic()<deadline:
+            checkpoint=oracle(s)
+            owner=[r for r in checkpoint['records'] if r['slug']=='j02-held']
+            settled=[c for c in checkpoint['commands'] if c['type']=='RUN_CREATE_STEP' and c.get('phase')=='SETTLED' and c.get('requestedIntent')=='intent_j02_waiting']
+            if owner and owner[0]['state']=='OWNER_MISSING_VERIFIED' and settled:break
+            time.sleep(.1)
+        assert owner and owner[0]['state']=='OWNER_MISSING_VERIFIED',{'owner':owner,'commands':checkpoint['commands'][-12:]}
+        assert owner[0]['accountId']=='account_j02_049',owner
+        assert len(settled)==1 and settled[0]['ok'] is True,settled
+        assert [x['kind'] for x in checkpoint['ledger']['effects']]==['CREATE','RENAME'],checkpoint['ledger']
+        print('B J02_RECOVERY_CLICK_CANONICAL_OWNER_READBACK_SETTLED',flush=True)
         recovered=oracle(s,'return await window.__j02.tick(18);')
         held=[r for r in recovered['records'] if r['slug']=='j02-held'];assert held[0]['state']=='GIT_INIT_PENDING',{'held':held,'commands':recovered['commands'][-12:],'ui':b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot;return {toast:sh.querySelector('#pcms-live-toast')?.textContent,dialog:sh.querySelector('[role=dialog]')?.textContent.slice(-2000)}")}
         assert held[0]['accountId']=='account_j02_049',held

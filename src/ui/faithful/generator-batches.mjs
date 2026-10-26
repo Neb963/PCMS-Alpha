@@ -89,8 +89,10 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
    }catch{status.textContent='Progress could not be read. Saved requests are preserved. Use Refresh to retry.'}
   }
   async function action(type,params){if(busy)return;busy=true;
+   status.textContent='Checking this saved request…';
+   for(const button of list.querySelectorAll('button'))button.disabled=true;
    try{const out=type==='RUN_CREATE_STEP'?await checkCreationItem(params,call):await call(type,params,100000);notify(out?.ok?'Checkpoint updated.':explain(out?.code));await draw();await reload()}
-   catch{status.textContent='The result was not confirmed. Refresh this item before retrying.'}finally{busy=false}}
+   catch{status.textContent='The result was not confirmed. Refresh this item before retrying.'}finally{busy=false;for(const button of list.querySelectorAll('button'))button.disabled=false}}
   let timer;query.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>{offset=0;void draw()},180)});
   filter.addEventListener('change',()=>{offset=0;void draw()});void draw();
   const polling=setInterval(()=>{if(!d.overlay.isConnected){clearInterval(polling);return}
