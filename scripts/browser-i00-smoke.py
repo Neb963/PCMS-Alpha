@@ -3645,7 +3645,11 @@ def main():
                   const module=await import('./existing-update-store.mjs');
                   const source=(await import('./staging-core.mjs'));
                   const refresher=await import('./refresher-core.mjs');
-                  const db=await journal.openCanonicalDatabase();
+                  // Model authority must not race the autonomous real
+                  // Refresher's eligibility derivation on canonical IDB.
+                  const db=await journal.openCanonicalDatabase({
+                    open:(_name,version)=>indexedDB.open('pcms-i13-existing-model',version)
+                  });
                   const slug='i13-existing-fixture',fp='e'.repeat(64),
                     accountId='i13_existing_account',personaUid='persona-i13-existing',
                     remoteId='public_i13_existing01';
@@ -3697,6 +3701,17 @@ def main():
                     store.move(slug,first.revision,'UNLIST_DISPATCH'),
                     store.move(slug,first.revision,'UNLIST_DISPATCH')]);
                   const winners=competing.filter(x=>x.ok);
+                  if(!first.ok||winners.length!==1){
+                    const error=Error('I13_MODEL_PREPARATION_OR_CAS_FAILED');
+                    const codes=new Set(['EXISTING_CONTEXT_CHANGED','EXISTING_ALREADY_PREPARED',
+                      'INVALID_EXISTING_EVENT','STALE_REVISION','EXISTING_SLEEP_CHANGED',
+                      'EXISTING_OWNER_CONTEXT_CHANGED','PUBLIC_UPDATE_EXECUTION_CAPACITY_RESERVED',
+                      'PUBLIC_UPDATE_MACHINE_VISIBILITY_RESERVED','PUBLIC_UPDATE_ACCOUNT_CAPACITY_RESERVED']);
+                    error.model={first:first.ok?'OK':codes.has(first.code)?first.code:'OTHER',
+                      second:second.ok?'OK':codes.has(second.code)?second.code:'OTHER',
+                      winners:winners.length,competing:competing.map(x=>x.ok?'OK':codes.has(x.code)?x.code:'OTHER')};
+                    throw error;
+                  }
                   const operations=await new Promise((resolve,reject)=>{
                     const t=db.transaction('operations','readonly');
                     const req=t.objectStore('operations').getAll();
@@ -3707,6 +3722,20 @@ def main():
                   const uncertain=await store.move(slug,winners[0].revision,
                     'UNLIST_UNCERTAIN',{reason:'LOST_ACK'});
                   const retry=await store.move(slug,uncertain.revision,'UNLIST_DISPATCH');
+                  // Retain the actual canonical port/UI readback. Copy only
+                  // this disposable fixture's source/owner/uncertainty records;
+                  // never transplant the model's Refresher state or clock.
+                  const full=await store.getFull(slug);
+                  if(!full.ok)throw Error('I13_MODEL_RECEIPT_UNAVAILABLE');
+                  const liveDb=await journal.openCanonicalDatabase();
+                  await new Promise((resolve,reject)=>{
+                    const tx=liveDb.transaction(['meta','operations'],'readwrite'),meta=tx.objectStore('meta');
+                    for(const row of [{key:'account:'+accountId,account},
+                      {key:'inventory:'+slug,generator:inventory},{key:'adoption:'+slug,adoption},
+                      {key:'existing-update:'+slug,record:full.record}])meta.put(row);
+                    for(const operation of operations)tx.objectStore('operations').put(operation);
+                    tx.oncomplete=resolve;tx.onabort=()=>reject(Error('I13 live receipt copy aborted'));
+                  });
                   const port=browser.runtime.connect({name:'pcms-i13-existing'});
                   const reply=new Promise(resolve=>port.onMessage.addListener(resolve));
                   port.postMessage({type:'GET',params:{slug}});
@@ -3719,8 +3748,8 @@ def main():
                     actual.state==='UNLIST_UNCERTAIN',
                     first,second,competing,operations:operations.length,
                     uncertain,retry,actual});
-                  db.close();
-                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,600)}));"""
+                  db.close();liveDb.close();
+                })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,600),model:e?.model||null}));"""
                 proof=call('POST',f'/session/{after}/execute/async',
                            {'script':code,'args':[]},timeout=90)
                 assert proof.get('ok') is True,proof
@@ -3746,7 +3775,10 @@ def main():
                   const aiModule=await import('./ai-store.mjs');
                   const releaseModule=await import('./release-store.mjs');
                   const refresh=await import('./refresher-core.mjs');
-                  const db=await journal.openCanonicalDatabase();
+                  // This history/CAS model owns its synthetic update window.
+                  const db=await journal.openCanonicalDatabase({
+                    open:(_name,version)=>indexedDB.open('pcms-i13-repeat-model',version)
+                  });
                   const slug='i13-repeat-generator',fp='f'.repeat(64),
                     accountId='i13_repeat_account',personaUid='persona-i13-repeat',
                     remoteId='public_i13_repeat';
@@ -4836,8 +4868,7 @@ def main():
                         const families=new Set(['account','network','inventory','inventory-batch',
                           's00-create-intent','s00-create-slug','s05-ready','stage','ai-job',
                           'release','writeback','backup','attention','s06-change','s06-exception',
-                          's06-human','source-link','adoption','identity-alias','removal',
-                          'refresher','ai-concurrency','ai-prompts','s04','s02','attention-cause']);
+                          's06-human','source-link','adoption','identity-alias','removal']);
                         for(const store of core.DB_STORES){
                           const oldRows=new Map(before.stores[store].map(r=>[JSON.stringify(r.key),r]));
                           const newRows=new Map(current.stores[store].map(r=>[JSON.stringify(r.key),r]));
@@ -4845,12 +4876,8 @@ def main():
                             const old=oldRows.get(key),now=newRows.get(key);
                             if(JSON.stringify(old)===JSON.stringify(now))continue;
                             const prefix=typeof (now||old).key==='string'?(now||old).key.split(':')[0]:'NON_STRING';
-                            const fields=['state','record','revision','status','setting','history',
-                            'lastTurnAt','nextWakeAt','bootId','browserClock','nativeClock','diagnostics'];
-                          const left=old?.value?.state||old?.value,right=now?.value?.state||now?.value;
-                          changes.push({store,family:families.has(prefix)?prefix:'OTHER',
-                              change:!old?'ADDED':!now?'REMOVED':'CHANGED',
-                              fields:fields.filter(field=>JSON.stringify(left?.[field])!==JSON.stringify(right?.[field]))});
+                            changes.push({store,family:families.has(prefix)?prefix:'OTHER',
+                              change:!old?'ADDED':!now?'REMOVED':'CHANGED'});
                           }
                         }
                         error.restoreDrift={count:changes.length,sample:changes.slice(0,12)};
