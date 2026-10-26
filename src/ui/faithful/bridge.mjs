@@ -94,7 +94,7 @@ function friendlyConnectionIssue(code){
 }
 const state={route:'overview',gen:{offset:0,limit:24,query:'',account:'ALL',sort:'fleet',filter:'ALL',owner:'ALL',source:'ALL',total:0,items:[]},
  ref:{offset:0,limit:25,query:'',account:'',phase:'ALL',snapshot:null,items:[],total:0},
- acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],releaseItems:[],releaseCursor:'',nextRelease:null,releaseUnavailable:false,aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,readyItems:[],readyCursor:'',nextReady:null,readyMore:false,aiUnavailable:false,readyUnavailable:false,epoch:0},
+ acct:{page:0,perPage:24,query:'',filter:'All',list:[]},queue:{filter:'Needs action',query:'',operations:[],incidents:[],opCursor:'',noticeCursor:'',history:[],nextOps:null,nextNotices:null,more:false,loading:false,error:null,summary:null,reviews:[],missing:[],missingCursor:'',reviewCursor:'',nextMissing:null,nextReview:null,missingTotal:null,missingUnfilteredTotal:null,reviewTotal:null,reviewUnfilteredTotal:null,identityUnavailable:false,releaseItems:[],releaseCursor:'',nextRelease:null,releaseUnavailable:false,aiJobs:[],aiCursor:'',nextAi:null,aiMore:false,readyItems:[],readyCursor:'',nextReady:null,readyMore:false,aiUnavailable:false,readyUnavailable:false,epoch:0},
  settings:'connections',settingsStatic:null,lastAccountList:[],lastInventoryTotal:null,lastRef:null,errors:{},
  renderEpoch:0,version:typeof browser==='object'?browser.runtime.getManifest().version:'Unavailable',readiness:null,readinessBusy:false};
 const shadow=(sel)=>root.querySelector(sel);
@@ -202,7 +202,7 @@ function nativeSelection(type,item){
 const openSourceManager=createSourceWorkspace({root,el,b,request:readPort,reload:()=>loadGenerators(),connect:()=>{state.settings='connections';routeTo('settings')}});
 // Adoption is guarded by the protected account and owned-source readbacks.
 // The visible button never creates a new generator, writes source or publishes.
-function openAdoptionManager(item){
+function openAdoptionManager(item,{readOnly=false}={}){
  const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('section','drawer');
  panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-label','Original source '+item.slug);
  const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
@@ -230,14 +230,18 @@ function openAdoptionManager(item){
       const a=el('a');a.href=url;a.download=item.slug+'-'+file.path.replaceAll('/','-');a.click();setTimeout(()=>URL.revokeObjectURL(url),30000)}));
    }catch{notify('Original file could not be read. The saved original is preserved.')}})()));files.append(row)}
  }catch{status.textContent='Original-source status unavailable. Retry to read the saved state.'}}
- const actions=el('div','form-foot');actions.append(b('Retry preservation',()=>void(async()=>{
+ const actions=el('div','form-foot');
+ if(!readOnly)actions.append(b('Retry preservation',()=>void(async()=>{
   status.textContent='Checking the next safe preservation step…';
   try{const out=await readPort('pcms-i07-adoption','RETRY_ADOPTION',{slug:item.slug},100000);
     if(!out.ok)notify('Preservation is waiting for its account or GitHub connection.');await draw();}
   catch{status.textContent='Check was not confirmed. Refresh the saved state before retrying.'}
- } )()),b('Refresh',()=>void draw()),b('Manage account',()=>void(async()=>{
+ })()));
+ actions.append(b('Refresh',()=>void draw()));
+ if(item.accountId)actions.append(b('Manage account',()=>void(async()=>{
   const out=await accounts(),a=out.accounts.find(a=>a.accountId===item.accountId);if(a){close();openAccountManager(a)}
- })()));body.append(actions);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ })()));
+ body.append(actions);panel.append(head,body);overlay.append(panel);root.append(overlay);
  overlay.addEventListener('click',e=>{if(e.target===overlay)close()});overlay.addEventListener('keydown',e=>{if(e.key==='Escape')close()});void draw();head.querySelector('button').focus();
 }
 
@@ -318,16 +322,17 @@ function routeHandlers(){
  if(action==='queue-prev'){
    const prior=state.queue.history.pop();if(!prior)return;
    state.queue.opCursor=prior.op;state.queue.noticeCursor=prior.notice;
-   state.queue.aiCursor=prior.ai;state.queue.readyCursor=prior.ready;state.queue.releaseCursor=prior.release;void loadQueue();return;
+   state.queue.aiCursor=prior.ai;state.queue.readyCursor=prior.ready;state.queue.releaseCursor=prior.release;state.queue.missingCursor=prior.missing;state.queue.reviewCursor=prior.review;void loadQueue();return;
  }
  if(action==='queue-next'){
    if(!state.queue.more)return;
-   state.queue.history.push({op:state.queue.opCursor,notice:state.queue.noticeCursor,ai:state.queue.aiCursor,ready:state.queue.readyCursor,release:state.queue.releaseCursor});
+   state.queue.history.push({op:state.queue.opCursor,notice:state.queue.noticeCursor,ai:state.queue.aiCursor,ready:state.queue.readyCursor,release:state.queue.releaseCursor,missing:state.queue.missingCursor,review:state.queue.reviewCursor});
    state.queue.opCursor=state.queue.nextOps===null?null:state.queue.nextOps;
    state.queue.noticeCursor=state.queue.nextNotices===null?null:state.queue.nextNotices;
    state.queue.aiCursor=state.queue.nextAi===null?null:state.queue.nextAi;
    state.queue.readyCursor=state.queue.nextReady===null?null:state.queue.nextReady;
    state.queue.releaseCursor=state.queue.nextRelease===null?null:state.queue.nextRelease;
+   state.queue.missingCursor=state.queue.nextMissing;state.queue.reviewCursor=state.queue.nextReview;
    void loadQueue();return;
  }
  if(action==='add-account'){void startAccountEnrollment();return}
@@ -656,17 +661,19 @@ function queueGroup(filter){
 async function loadQueue(reset=false){
  if(state.route!=='work-queue')return;
  const q=state.queue;
- if(reset){q.opCursor='';q.noticeCursor='';q.aiCursor='';q.readyCursor='';q.releaseCursor='';q.history=[];q.nextOps=null;q.nextNotices=null;q.nextAi=null;q.nextReady=null;q.nextRelease=null;}
+ if(reset){q.opCursor='';q.noticeCursor='';q.aiCursor='';q.readyCursor='';q.releaseCursor='';q.missingCursor='';q.reviewCursor='';q.history=[];q.nextOps=null;q.nextNotices=null;q.nextAi=null;q.nextReady=null;q.nextRelease=null;q.nextMissing=null;q.nextReview=null;}
  const epoch=++q.epoch;
  q.loading=true;q.error=null;displayQueue();
- const includeNotices=q.filter==='Needs action'||q.filter==='All';
+ const includeNotices=['Needs action','All','Completed'].includes(q.filter);
+ const noticeState=q.filter==='Completed'?'RESOLVED':q.filter==='All'?'ALL':'ACTIVE';
+ const includeSources=q.filter==='Needs action'||q.filter==='All';
  const requested=[
    q.opCursor!==null?guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{
-     after:q.opCursor,limit:20,status:queueGroup(q.filter),query:q.query}):
+     after:q.opCursor,limit:20,status:queueGroup(q.filter),query:q.query.slice(0,80)}):
      Promise.resolve({ok:true,items:[],more:false,next:null}),
    includeNotices&&q.noticeCursor!==null?
-     guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_PAGE',{
-       after:q.noticeCursor,limit:20,query:q.query}):Promise.resolve({ok:true,items:[],more:false,next:null}),
+     guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_GROUP_PAGE',{
+       after:q.noticeCursor,limit:20,query:q.query.slice(0,80),state:noticeState}):Promise.resolve({ok:true,items:[],more:false,next:null}),
    guardedRead('pcms-i02-canonical-readonly','SUMMARY'),
    guardedRead('pcms-i02-canonical-readonly','NOTICE_SUMMARY'),
    q.releaseCursor!==null?guardedRead('pcms-i13-release','LIST_REVIEW',{after:q.releaseCursor,limit:20,query:q.query.slice(0,100),status:queueGroup(q.filter)})
@@ -679,13 +686,17 @@ async function loadQueue(reset=false){
      after:q.readyCursor,limit:20,query:q.query.slice(0,100),status:queueGroup(q.filter)
    }).catch(()=>({ok:false,items:[],more:false,nextCursor:null})):
      Promise.resolve({ok:true,items:[],more:false,nextCursor:null}),
-   guardedRead('pcms-r4-folder-identity','LIST')
-     .catch(()=>({ok:false,items:[],missingFolders:[]}))
+   includeSources&&q.reviewCursor!==null?guardedRead('pcms-r4-folder-identity','LIST_PAGE',
+     {kind:'REVIEW',after:q.reviewCursor,limit:20,query:q.query})
+     .catch(()=>({ok:false,items:[]})):Promise.resolve({ok:true,items:[],total:includeSources?q.reviewTotal||0:0,unfilteredTotal:includeSources?q.reviewUnfilteredTotal||0:0,more:false,next:null}),
+   includeSources&&q.missingCursor!==null?guardedRead('pcms-r4-folder-identity','LIST_PAGE',
+     {kind:'MISSING',after:q.missingCursor,limit:20,query:q.query})
+     .catch(()=>({ok:false,items:[]})):Promise.resolve({ok:true,items:[],total:includeSources?q.missingTotal||0:0,unfilteredTotal:includeSources?q.missingUnfilteredTotal||0:0,more:false,next:null})
  ];
  try{
-  const [ops,notices,summary,noticeTotals,releases,ai,ready,identities]=await Promise.all(requested);
+  const [ops,notices,summary,noticeTotals,releases,ai,ready,identities,missing]=await Promise.all(requested);
   if(state.route!=='work-queue'||q.epoch!==epoch)return;
-  q.operations=ops.items||[];q.incidents=notices.items||[];
+  q.operations=ops.items||[];q.incidents=(notices.items||[]).map(g=>({...g.notice,causalGroup:{...g,query:q.query.slice(0,80),queryState:noticeState}}));
   q.nextOps=ops.more?ops.next:null;q.nextNotices=notices.more?notices.next:null;
   q.aiUnavailable=ai?.ok!==true;q.aiJobs=ai?.ok?(ai.jobs||[]):[];q.aiMore=ai?.ok&&ai.more===true;
   q.nextAi=q.aiMore?ai.nextCursor:null;
@@ -693,10 +704,14 @@ async function loadQueue(reset=false){
   q.nextReady=q.readyMore?ready.nextCursor:null;
   q.nextRelease=releases?.ok&&releases.more?releases.nextCursor:null;
   q.releaseUnavailable=releases?.ok!==true;
-  q.more=Boolean(ops.more||notices.more||q.aiMore||q.readyMore||releases?.more);q.summary={...summary,attention:noticeTotals};
+  q.more=Boolean(ops.more||notices.more||q.aiMore||q.readyMore||releases?.more||identities?.more||missing?.more);q.summary={...summary,attention:noticeTotals};
   q.releaseItems=releases?.ok?(releases.items||[]):[];
   q.reviews=identities?.ok?(identities.items||[]):[];
-  q.missing=identities?.ok?(identities.missingFolders||[]):[];
+  q.missing=missing?.ok?(missing.items||[]).map(r=>r.slug):[];
+  q.nextMissing=missing?.ok&&missing.more?missing.next:null;q.nextReview=identities?.ok&&identities.more?identities.next:null;
+  q.missingTotal=missing?.ok?missing.total:null;q.missingUnfilteredTotal=missing?.ok?missing.unfilteredTotal:null;
+  q.reviewTotal=identities?.ok?identities.total:null;q.reviewUnfilteredTotal=identities?.ok?identities.unfilteredTotal:null;
+  q.identityUnavailable=identities?.ok!==true||missing?.ok!==true;
   q.error=null;
  }catch(err){
   if(q.epoch!==epoch)return;
@@ -709,7 +724,7 @@ function displayQueue(){
  const q=state.queue;const holder=shadow('.queue-list');
  if(!holder)return;
  if(q.loading&&holder.childElementCount)return;
- const signature=JSON.stringify([q.filter,q.query,q.error,q.operations,q.incidents,q.releaseItems,q.aiJobs,q.readyItems,q.reviews,q.missing,q.more,q.releaseUnavailable,q.aiUnavailable,q.readyUnavailable]);
+ const signature=JSON.stringify([q.filter,q.query,q.error,q.operations,q.incidents,q.releaseItems,q.aiJobs,q.readyItems,q.reviews,q.missing,q.more,q.releaseUnavailable,q.aiUnavailable,q.readyUnavailable,q.identityUnavailable,q.missingTotal,q.missingUnfilteredTotal,q.reviewTotal,q.reviewUnfilteredTotal]);
  if(!q.loading&&q.renderedSignature===signature&&holder.childElementCount)return;
  if(!q.loading)q.renderedSignature=signature;holder.replaceChildren();
  if(q.loading)renderEmpty(holder,'Reading recorded operations and incidents…');
@@ -718,9 +733,10 @@ function displayQueue(){
   if(q.releaseUnavailable)holder.append(el('p','setting-note','Publication records could not be read. Refresh the queue to try again.'));
   if(q.aiUnavailable)
    holder.append(el('p','setting-note','AI development records could not be read. Their absence here does not mean there is no work.'));
+  if(q.identityUnavailable)holder.append(el('p','setting-note','Git source observations could not be read. Open Connections to check current access; previous history is preserved.'));
   if(q.readyUnavailable)
    holder.append(el('p','setting-note','READY generator records could not be read. Check GitHub connection and local journal availability.'));
-  if((q.filter==='Needs action'||q.filter==='All')&&!q.query)
+  if((q.filter==='Needs action'||q.filter==='All'))
    for(const review of q.reviews.filter(r=>['REVIEW_REQUIRED','RENAME_EXISTING_REQUESTED','REMOTE_RENAMED_LINK_PENDING'].includes(r.state)||r.stale)){
     const row=el('div','queue-item'),mark=el('span','row-mark warn');mark.append(icon('alert'));
     const content=el('div','row-body');
@@ -784,14 +800,14 @@ function displayQueue(){
     }
     row.append(mark,content);holder.append(row);
    }
-  if((q.filter==='Needs action'||q.filter==='All')&&!q.query)
-   for(const slug of q.missing.slice(0,30)){
+  if((q.filter==='Needs action'||q.filter==='All'))
+   for(const slug of q.missing){
     const row=el('div','queue-item'),mark=el('span','row-mark warn');mark.append(icon('alert'));
-    const data=el('div','row-body');
+    const data=el('div','row-body');row.dataset.missingSlug=slug;
     data.append(el('strong','','Git source missing: '+slug),
       el('p','setting-note',
        'The folder was absent from a complete main snapshot. The live generator has not been deleted or unlisted.'));
-    row.append(mark,data);holder.append(row);
+    row.append(mark,data,b('Inspect source and history',()=>void openFolderContext(slug),'btn small'));holder.append(row);
    }
   for(const candidate of q.releaseItems.filter(x=>matchesReviewGroup(x.state,queueGroup(q.filter)))){
     if(q.query&&!candidate.slug.includes(q.query.toLowerCase()))continue;
@@ -853,7 +869,8 @@ function displayQueue(){
    row.append(el('span','row-mark'+(needs?' warn':'')),info,open);holder.append(row);
   }
   for(const n of q.incidents){
-   const row=el('div','queue-item');
+   if(n.causalGroup?.memberCount>1){renderIncidentGroupRow(holder,n.causalGroup);continue;}
+   const row=el('div','queue-item');row.dataset.noticeScope=n.scopeId;row.dataset.noticeCode=n.code;
    const marker=el('span','row-mark warn');marker.append(icon('alert'));
    const detail=el('div','row-body');
    const header=el('div','queue-head');
@@ -871,10 +888,10 @@ function displayQueue(){
     BACKUP_FAILED:'Backup needs attention'
    }[n.code]||'An operational issue needs review';
    header.append(el('strong','',issueTitle),
-     statusPill(n.reviewed?'Reviewed — still active':'Needs attention','amber'));
+     statusPill(n.state==='RESOLVED'?'Recovered':n.reviewed?'Reviewed — still active':'Needs attention',n.state==='RESOLVED'?'green':'amber'));
    detail.append(header,el('div','row-meta',
      'Recorded local issue · '+(Number.isFinite(n.lastAt)?new Date(n.lastAt).toLocaleString():'time not recorded')));
-   const action=el('button','btn small',n.reviewed?'Reviewed':'Mark reviewed');
+   const action=el('button','btn small',n.state==='RESOLVED'?'Recovered':n.reviewed?'Reviewed':'Mark reviewed');
    action.type='button';
    action.addEventListener('click',async()=>{action.disabled=true;
     try{
@@ -885,7 +902,7 @@ function displayQueue(){
     finally{action.disabled=n.reviewed;}
    });
    const recovery=b('Open affected item',()=>void openIncident(n),'btn small');
-   action.disabled=n.reviewed;row.append(marker,detail,recovery,action);holder.append(row);
+   action.disabled=n.reviewed||n.state==='RESOLVED';row.append(marker,detail,recovery,action);holder.append(row);
   }
   for(const op of q.operations){
    const row=el('div','queue-item');const info=queueState[op.status]||['Not verified',''];
@@ -905,13 +922,15 @@ function displayQueue(){
  }
  const records=holder.querySelectorAll('.queue-item').length,candidates=holder.querySelectorAll('.candidate-item').length;
  const counters=shadow('.queue-stats');if(counters){counters.replaceChildren();
-  counters.append(el('span','',q.loading?'Loading work…':candidates+' candidates · '+Math.max(0,records-candidates)+' other items on this page'));
+  counters.append(el('span','',q.loading?'Loading work…':candidates+' candidates · '+Math.max(0,records-candidates)+' other items on this page'+
+    (q.missingTotal!==null?' · '+q.missingTotal+' matching missing sources of '+q.missingUnfilteredTotal:'')+
+    (q.reviewTotal!==null?' · '+q.reviewTotal+' matching identity reviews of '+q.reviewUnfilteredTotal:'')));
  }
  for(const tab of shadow('.tabs[aria-label="Work queue status"]')?.querySelectorAll('[data-filter]')||[]){
   const f=tab.dataset.filter.split(':')[1],badge=tab.querySelector('.count');if(badge)badge.hidden=true;
   tab.setAttribute('aria-selected',String(f===q.filter));
  }
- const foot=shadow('.pagination span');if(foot)foot.textContent=q.loading?'Loading work…':q.error?'Saved work is unavailable':records+' work '+(records===1?'item':'items')+' on this page';
+ const foot=shadow('.pagination span');if(foot)foot.textContent=q.loading?'Loading work…':q.error?'Saved work is unavailable':records+' work '+(records===1?'item':'items')+' on this page'+(q.missingTotal!==null?' · '+q.missingTotal+' missing sources match':'');
  const prev=shadow('[data-action="queue-prev"]'),next=shadow('[data-action="queue-next"]');
  if(prev)prev.disabled=q.loading||q.history.length===0;
  if(next)next.disabled=q.loading||!q.more;
@@ -1315,6 +1334,10 @@ async function openIncident(n){
   getOperation:operationId=>readPort('pcms-i02-canonical-readonly','GET_OPERATION_CONTEXT',{operationId})
  });
  const target=observed.destination;
+ if(observed.ok&&['GIT_FOLDER_MISSING','GIT_FOLDER_RENAME_REVIEW'].includes(observed.notice.code)&&
+   observed.notice.target?.kind==='GENERATOR'){
+  void openFolderContext(observed.notice.target.id);return;
+ }
  if(target.kind==='SETTINGS'){
   if(target.id==='refresher'){routeTo('refresher');return}
   state.settings=target.id;routeTo('settings');return;
@@ -1326,7 +1349,7 @@ async function openIncident(n){
    if(n.code==='GIT_FOLDER_RENAME_REVIEW'){
     state.queue.query=target.id;state.queue.filter='All';routeTo('work-queue');return;
    }
-   openSourceManager({slug:target.id});return;
+   void openFolderContext(target.id);return;
   }
  }
  openIncidentContext(observed);
@@ -1388,6 +1411,147 @@ function openIncidentContext(observed){
  head.querySelector('button')?.focus();
 }
 
+
+function sourceConnectionMessage(code){
+ return ({
+  GIT_NOT_CONFIGURED:'GitHub is not connected.',
+  GIT_CREDENTIAL_MISSING:'The saved Firefox GitHub credential is missing.',
+  GIT_CREDENTIAL_REJECTED:'GitHub rejected the saved credential. Review its validity and repository access.',
+  GIT_ACCESS_DENIED:'GitHub denied access. Check repository permissions; this does not prove that the credential is invalid.',
+  GIT_IDENTITY_MISMATCH:'The repository identity differs from the saved connection.',
+  GIT_LOCAL_STORAGE_UNAVAILABLE:'Firefox could not confirm the saved connection or observation.',
+  GIT_NETWORK_UNAVAILABLE:'GitHub could not be reached. The saved credential is retained.',
+  CATALOG_INCOMPLETE:'GitHub did not return a complete source observation.'
+ })[code]||'The current Git observation could not be verified.';
+}
+async function openFolderContext(slug){
+ if(typeof slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(slug)){notify('No verified source identity is available.');return;}
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('section','drawer source-workspace');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-label','Source context · '+slug);
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const head=el('div','drawer-head');head.append(el('h2','drawer-title','Source · '+slug),b('Close',close));
+ const body=el('div','drawer-body'),status=el('p','setting-note','Reading the recorded source association…');
+ status.setAttribute('role','status');status.dataset.sourceObservation='UNAVAILABLE';
+ const metadata=el('div'),actions=el('div','form-foot'),saved=el('div'),history=el('div');
+ body.append(status,metadata,actions,saved,history);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ let busy=false,context=null;
+ async function draw(fresh=null){
+  if(busy)return;busy=true;
+  try{
+   const results=await Promise.allSettled([
+    fresh?Promise.resolve(fresh):readPort('pcms-r4-folder-identity','GET_CONTEXT',{slug}),
+    readPort('pcms-i13-release','GET_LOCAL_REVIEW',{slug},30000),
+    readPort('pcms-i04-inventory','INSPECT_GENERATORS',{slugs:[slug]})
+   ]);
+   if(!overlay.isConnected)return;
+   const value=i=>results[i].status==='fulfilled'?results[i].value:null;
+   context=value(0);const local=value(1),inventory=value(2),generator=inventory?.items?.find(g=>g.slug===slug&&!g.missing);
+   metadata.replaceChildren();actions.replaceChildren();saved.replaceChildren();history.replaceChildren();
+   status.dataset.sourceObservation=context?.ok?context.presence:'UNAVAILABLE';
+   status.textContent=context?.ok?
+    context.presence==='MISSING_IN_COMPLETE_MAIN'?
+     'This folder was absent from the last complete Git observation. The live generator and local history are preserved.':
+    context.presence==='PRESENT_IN_COMPLETE_MAIN'?
+     'This folder is present in the last complete Git observation. Local source history is shown separately.':
+     'No current association was found in the recorded complete Git observation. Local history is preserved.':
+    'The Git source association could not be read. Local source history can still be inspected.';
+   if(context?.ok){
+    metadata.append(el('p','setting-note','Last complete main: '+context.head+
+     (Number.isSafeInteger(context.observedAt)?' · '+new Date(context.observedAt).toLocaleString():'')));
+    if(context.currentConnectionCode&&context.currentConnectionCode!=='CATALOG_OBSERVED_READ_ONLY')
+     metadata.append(el('p','setting-note',sourceConnectionMessage(context.currentConnectionCode)+' The earlier complete observation is retained.'));
+    if(context.observation){
+     const details=el('details');details.append(el('summary','','Recorded folder observations'));
+     for(const [label,value] of [['First recorded absence',context.observation.firstAbsentHead],
+       ['Latest complete absence',context.observation.lastAbsentHead],['Last recorded presence',context.observation.lastPresentHead],
+       ['Reappearance',context.observation.returnedHead]])details.append(el('p','setting-note',label+': '+(value||'Not recorded')));
+     metadata.append(details);
+    }
+    if(context.reviewTotal)metadata.append(el('p','setting-note',context.reviewTotal+' related identity reviews. No rename or separate creation is inferred.'));
+   }
+   const refresh=b('Read Git now',()=>void(async()=>{
+    refresh.disabled=true;status.textContent='Reading complete Git main without starting provider work…';
+    let out;try{out=await readPort('pcms-r4-folder-identity','REFRESH_OBSERVATION',{slug},95000);}catch{}
+    if(!overlay.isConnected)return;
+    refresh.disabled=false;
+    if(out?.ok)await draw(out);else status.textContent=sourceConnectionMessage(out?.code)+' The prior source observation and history are preserved.';
+   })());
+   actions.append(refresh,b('Open Connections',()=>{close();state.settings='connections';routeTo('settings')}),
+    b('Inspect preserved original',()=>openAdoptionManager(generator||{slug},{readOnly:true})));
+   if(context?.reviewTotal)actions.append(b('Review source identities',()=>{close();state.queue.query=slug;state.queue.filter='All';routeTo('work-queue')}));
+   if(local?.ok){
+    saved.append(el('h3','','Saved source'));
+    mountSourceComparison({container:saved,view:local,el,b,request:(type,params)=>readPort('pcms-i13-release',type,params,30000)});
+    if(context?.presence!=='MISSING_IN_COMPLETE_MAIN')actions.append(b('Manage candidate',()=>{close();void openReleaseReview(slug)}));
+   }else saved.append(el('p','setting-note','No current local candidate could be read. The preserved original and earlier checkpoints can be inspected separately.'));
+   mountSourceHistory({container:history,slug,el,b,request:(type,params)=>readPort('pcms-i13-release',type,params,30000)});
+  }finally{busy=false;}
+ }
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ head.querySelector('button')?.focus();void draw();
+}
+function renderIncidentGroupRow(holder,g){
+ const row=el('div','queue-item'),mark=el('span','row-mark warn');mark.append(icon('alert'));row.dataset.incidentGroup=g.key;
+ const body=el('div','row-body'),n=g.notice,sharedHelper=['personamonkey_connection','PERSONAMONKEY_HELPER_OUTAGE'].includes(g.cause);
+ body.append(el('strong','',sharedHelper?'Protected connection needs attention':n.code.replaceAll('_',' ').toLowerCase()),
+  el('p','setting-note',g.affectedCount+' affected items · '+g.memberCount+' incident records · '+g.eventCount+' events'),
+  statusPill(g.queryState==='RESOLVED'?'Recovered':g.reviewed?'Reviewed — still active':'Needs attention',g.queryState==='RESOLVED'?'green':'amber'));
+ row.append(mark,body,b('Inspect affected items',()=>void openIncidentGroup(g),'btn small'));holder.append(row);
+}
+async function openIncidentGroup(group){
+ const previous=root.activeElement,overlay=el('div','drawer-overlay'),panel=el('section','drawer');
+ panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-label','Affected incident items');
+ const close=()=>{overlay.remove();previous?.isConnected&&previous.focus({preventScroll:true})};
+ const head=el('div','drawer-head');head.append(el('h2','drawer-title','Affected items'),b('Close',close));
+ const body=el('div','drawer-body'),status=el('p','setting-note'),list=el('div','queue-list'),pager=el('div','form-foot');
+ status.setAttribute('role','status');body.append(status,list,pager);panel.append(head,body);overlay.append(panel);root.append(overlay);
+ let after='',stack=[],busy=false;
+ async function load(){
+  if(busy)return;busy=true;status.textContent='Reading the actual incident members…';
+  try{
+   const [out,accountList]=await Promise.all([
+    readPort('pcms-i02-canonical-readonly','LIST_NOTICE_GROUP_MEMBERS',{
+     groupKey:group.key,after,limit:20,query:group.query||'',state:group.queryState||'ACTIVE'}),
+    accounts().catch(()=>null)
+   ]);
+   if(!overlay.isConnected)return;
+   if(!out?.ok)throw Error('MEMBERS_UNAVAILABLE');
+   list.replaceChildren();pager.replaceChildren();status.textContent=out.total+' matching incident records of '+out.unfilteredTotal+' · review does not resolve an active hold.';
+   const aliases=new Map((accountList?.accounts||[]).map(a=>[a.accountId,a.alias||'Affected account']));
+   for(const n of out.items){
+    const row=el('div','queue-item'),data=el('div','row-body');row.dataset.noticeScope=n.scopeId;row.dataset.noticeCode=n.code;
+    const target=n.target,label=target?.kind==='ACCOUNT'?aliases.get(target.id)||'Account details unavailable':
+     target?.kind==='GENERATOR'?target.id:target?.kind==='OPERATION'?'Recorded operation':
+     target?.kind==='SETTINGS'?({backups:'Backups',connections:'Connections',refresher:'Refresher',diagnostics:'Diagnostics'})[target.id]:'Recorded affected item';
+    data.append(el('strong','',label),el('p','setting-note',n.code.replaceAll('_',' ').toLowerCase()+' · '+n.count+' events'),
+     statusPill(n.state==='RESOLVED'?'Recovered':n.reviewed?'Reviewed — still active':'Needs attention',n.state==='RESOLVED'?'green':'amber'));
+    row.append(data,b('Open affected item',()=>void openIncident(n)));
+    if(n.state!=='RESOLVED'){
+     const review=b(n.reviewed?'Reviewed':'Mark reviewed',()=>void(async()=>{
+      review.disabled=true;
+      try{const r=await acknowledgeIncident(n,async(type,params)=>type==='ACK_NOTICE'?
+       readQueueNoticeAck({...n,scopeId:params.scopeId,code:params.code,revision:params.expectedRevision}):
+       readPort('pcms-i02-canonical-readonly',type,params));
+       if(!r?.ok)status.textContent='Review was not confirmed. The incident remains active.';
+       else await load();
+      }catch{status.textContent='Review was not confirmed. The incident remains active.'}
+      finally{review.disabled=n.reviewed;}
+     })());review.disabled=n.reviewed;row.append(review);
+    }
+    list.append(row);
+   }
+   if(!out.items.length)list.append(el('p','setting-note','No matching incident records remain in this view. Verified recovery remains in history.'));
+   const prev=b('Previous affected items',()=>{after=stack.pop()||'';void load()}),next=b('Next affected items',()=>{stack.push(after);after=out.next;void load()});
+   prev.disabled=!stack.length;next.disabled=!out.more;
+   pager.append(prev,b('Refresh affected items',()=>{after='';stack=[];void load()}),next);
+  }catch{if(overlay.isConnected)status.textContent='Incident members could not be read. Retry; no hold was dismissed.'}
+  finally{busy=false;}
+ }
+ overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ overlay.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();close()}});
+ head.querySelector('button')?.focus();void load();
+}
 function readQueueNoticeAck(n){
  return new Promise((resolve,reject)=>{
   const port=browser.runtime.connect({name:'pcms-i02-canonical-readonly'});
@@ -1421,7 +1585,7 @@ function displayOverview(){if(state.route!=='overview')return;
   guardedRead('pcms-i02-canonical-readonly','SUMMARY'),
   guardedRead('pcms-i02-canonical-readonly','NOTICE_SUMMARY'),
   guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{limit:8,status:'NEEDS_ACTION'}),
-  guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_PAGE',{limit:8}),
+  guardedRead('pcms-i02-canonical-readonly','LIST_NOTICE_GROUP_PAGE',{limit:8,state:'ACTIVE'}),
   guardedRead('pcms-i02-canonical-readonly','LIST_OPERATION_PAGE',{limit:8,status:'RUNNING'}),
   portableBackupCommand({action:'STATUS'})
  ]).then(results=>{
@@ -1447,12 +1611,12 @@ function displayOverview(){if(state.route!=='overview')return;
     body.append(el('p','row-title',x.severity?
       'Incident: '+x.code.replaceAll('_',' ').toLowerCase():
       (x.effectType||'Recorded operation').replaceAll('_',' ')),
-      el('div','row-meta',x.severity?'Still requires review':
+      el('div','row-meta',x.severity?x.causalGroup?.memberCount>1?x.causalGroup.affectedCount+' affected items · '+x.causalGroup.eventCount+' events':x.reviewed?'Reviewed; still active':'Needs attention':
         'Target '+x.targetId+' · '+(queueState[x.status]?.[0]||'Unknown status')));
-    row.append(body,b(x.severity?'Open affected item':'Inspect operation',()=>x.severity?void openIncident(x):openOperationRecord(x)));panel.append(row);
+    row.append(body,b(x.severity?'Open affected item':'Inspect operation',()=>x.severity?x.causalGroup?.memberCount>1?void openIncidentGroup(x.causalGroup):void openIncident(x):openOperationRecord(x)));panel.append(row);
    }
   };
-  listRows(0,[...(inc?.items||[]),...(ops?.items||[])].slice(0,8));
+  listRows(0,[...(inc?.items||[]).map(g=>({...g.notice,causalGroup:{...g,queryState:'ACTIVE'}})),...(ops?.items||[])].slice(0,8));
   listRows(1,running?.items||[]);
   for(const panel of blocks.slice(2)){const holder=panel.querySelector('.panel-scroll');
    if(holder){holder.replaceChildren();renderEmpty(holder,'No independent local proof has been loaded for this section.')}}
