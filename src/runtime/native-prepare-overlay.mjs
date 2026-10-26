@@ -155,7 +155,12 @@ export function repairMullvadRuntime(source){
   '    if(inFlight.size||(await refreshStatus()).pending_prepare_routes?.length)return false;\n    const tabs = await browserApi.tabs.query({});');
  once('      await operations.stopTunnel();\n      routes.clear();','      clear();\n      onReadiness({...status,ready:false},{idle:true});\n      await operations.stopTunnel();');
  once('  return { resolve, refreshStatus, maybeStopIdle, clear, drop, setStatus, getStatus };',
-  `  function recoveryGeneration(routeId){return {routeId,lifecycle:lifecycleGeneration,route:routeGenerations.get(routeId)||0};}
+  `  function invalidateConnections(){
+    // Proxy failure withdraws connection freshness, not authentication or
+    // ownership of an already dispatched native preparation.
+    for(const [routeId,cached] of routes)routes.set(routeId,{...cached,at:now()-8000});
+  }
+  function recoveryGeneration(routeId){return {routeId,lifecycle:lifecycleGeneration,route:routeGenerations.get(routeId)||0};}
   function recoveryCurrent(generation){return !!generation&&generation.lifecycle===lifecycleGeneration&&
     generation.route===(routeGenerations.get(generation.routeId)||0)&&!inFlight.has(generation.routeId);}
   function acceptObservedPreparation(route,prepared,password,tokenCreatedAt,generation){
@@ -163,6 +168,6 @@ export function repairMullvadRuntime(source){
     routes.set(route.id,{route:materialize(route,prepared,password),at:now(),tokenCreatedAt});
     return true;
   }
-  return { resolve, refreshStatus, maybeStopIdle, clear, drop, setStatus, getStatus, recoveryGeneration,recoveryCurrent,acceptObservedPreparation };`);
+  return { resolve, refreshStatus, maybeStopIdle, clear, drop, setStatus, getStatus, invalidateConnections,recoveryGeneration,recoveryCurrent,acceptObservedPreparation };`);
  return source;
 }
