@@ -21,7 +21,7 @@ test('F2 actual catalog domain workers complete the shared J04 pipeline without 
   return structuredClone(saved);
  },set:async values=>{for(const [key,value] of Object.entries(values))saved[key]=structuredClone(value);}};
  const api={storage:{local:storage},runtime:{id:'fixture',
-  getURL:p=>p==='pcms/'?root.href:'moz-extension://fixture/'+p,
+  getURL:p=>p.startsWith('pcms/')?new URL(p.slice(5),root).href:'moz-extension://fixture/'+p,
   onStartup:{addListener(){}},onInstalled:{addListener(){}}},
   tabs:{query:async()=>[]},
   alarms:{get:async name=>alarms.get(name),
