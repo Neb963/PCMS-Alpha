@@ -16,7 +16,7 @@ export function createPresentationBoundary(api){
   const next=normalize(message.value);
   try{await storage.set({[key]:next})}catch{/* Read back a possibly committed save. */}
   const observed=(await storage.get(key))[key];
-  return JSON.stringify(observed)===JSON.stringify(next)?{ok:true}:{ok:false,code:'PRESENTATION_SAVE_UNCONFIRMED'};
+  return observed?.schema===1&&JSON.stringify(normalize(observed))===JSON.stringify(next)?{ok:true}:{ok:false,code:'PRESENTATION_SAVE_UNCONFIRMED'};
  });
  function handle(message,sender){const task=tail.then(()=>admitted(message,sender));tail=task.catch(()=>{});return task}
  return {handle,register(){api.runtime.onConnect.addListener(port=>{
