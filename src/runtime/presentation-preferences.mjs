@@ -55,7 +55,10 @@ export function createPresentationPreferences(storage,{write}={}){
    try{reply=write?await write(next,structuredClone(value)):await storage.set({[PRESENTATION_KEY]:next})}catch{/* A lost reply is checked below. */}
    if(reply?.ok===false)throw Error(reply.code||'PRESENTATION_SAVE_UNCONFIRMED');
    const observed=(await storage.get(PRESENTATION_KEY))[PRESENTATION_KEY];
-   if(JSON.stringify(observed)!==JSON.stringify(next))throw Error('PRESENTATION_SAVE_UNCONFIRMED');
+   // Browser storage preserves values, not JavaScript object insertion order.
+   // Compare the same canonical display projection used by the write/CAS.
+   // An absent record must never masquerade as persisted default settings.
+   if(observed?.schema!==1||JSON.stringify(normalizePresentation(observed))!==JSON.stringify(next))throw Error('PRESENTATION_SAVE_UNCONFIRMED');
    value=next;announce();return structuredClone(value);
   });tail=task.catch(()=>{});return task;
  }

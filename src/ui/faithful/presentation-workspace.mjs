@@ -9,7 +9,7 @@ export function createPresentationWorkspace({root,el,b,notify,generator,reload})
   const message=error.message==='RESTORE_HOLD'?'Settings could not be saved while a restore is in progress. Your choices are kept here; retry after it finishes.':
    error.message==='PRESENTATION_STALE'?'Saved display settings changed in another dashboard or restore. Reload this page before saving; your current choices have not overwritten them.':
    'Settings could not be saved. Your choices are kept here; retry Save.';
-  if(status)status.textContent=message;else notify(message);return null}}
+  if(status){status.textContent=message;status.dataset.failureCode=/^(?:PRESENTATION_[A-Z_]+|RESTORE_HOLD)$/.test(error.message)?error.message:'PRESENTATION_STORAGE_UNAVAILABLE'}else notify(message);return null}}
  function dialog(title,trigger){
   const prior=trigger||root.activeElement,overlay=el('div','drawer-overlay'),panel=el('section','drawer presentation-dialog');
   panel.setAttribute('role','dialog');panel.setAttribute('aria-modal','true');panel.setAttribute('aria-label',title);
@@ -19,7 +19,13 @@ export function createPresentationWorkspace({root,el,b,notify,generator,reload})
   overlay.addEventListener('click',event=>{if(event.target===overlay)close()});head.querySelector('button').focus();
   return {body,close};
  }
- function rememberFilters(){void ready.then(()=>save(value=>({...value,generator:{...value.generator,filters:normalizeFilters(generator)}})))}
+ function rememberFilters(){
+  // This invocation records the operator's current choice. Reading the
+  // mutable workspace inside the queued reducer can persist a later choice
+  // under an earlier event (including an in-flight saved-view transition).
+  const filters=normalizeFilters(generator);
+  void ready.then(()=>save(value=>({...value,generator:{...value.generator,filters}})));
+ }
  function applyTable(){
   const table=root.querySelector('#page[data-view=generators] table.data');if(!table)return;
   const defaults=['selection',...COLUMN_IDS,'actions'],columns=preferences.get().generator.columns;

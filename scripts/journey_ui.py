@@ -9,7 +9,7 @@ b=g.b;a=g.a
 def wait(s,expression,label,seconds=35):
     try:return g.wait(s,expression,label,seconds)
     except Exception:
-        print('J07_FOCUS_CONTEXT='+json.dumps(b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot,e=sh.activeElement;return {active:e?.outerHTML,inert:sh.querySelector('.app').inert,dialog:!!sh.querySelector('[role=dialog]')}")),flush=True)
+        print('J07_FOCUS_CONTEXT='+json.dumps(b.execute(s,"const sh=document.getElementById('pcms-faithful-host').shadowRoot,e=sh.activeElement,d=sh.querySelector('[role=dialog]');return {active:e?.outerHTML,inert:sh.querySelector('.app').inert,dialog:d?.innerText?.slice(0,2000),failureCode:d?.querySelector('[data-failure-code]')?.dataset.failureCode}")),flush=True)
         raise
 def key(s,value,shift=False,control=False):
     modifier='\ue009' if control else '\ue008'
@@ -46,6 +46,13 @@ def run(browser,archive,folder):
         uuid=b.addons_uuid(profile);url=f'moz-extension://{uuid}/pcms/index.html#generators'
         b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s);wait(s,"!!sh.querySelector('[data-display-tools]')",'J07_PRIMARY_PRESENTATION')
         g.fixture(s)
+        # Storage dictionaries do not promise JS property insertion order.
+        # Reorder only non-authorizing presentation metadata at the UI read
+        # boundary. The unmodified client rejects these identical values;
+        # actual clicks must save, apply and reopen them successfully.
+        b.execute(s,"""const get=browser.storage.local.get.bind(browser.storage.local);
+const order=v=>Array.isArray(v)?v.map(order):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,order(v[k])])):v;
+browser.storage.local.get=async(...args)=>{const out=await get(...args);for(const key of ['pcmsUiWorkspaceV1','pcmsUiGeneratorSelectionV1'])if(out[key]!==undefined)out[key]=order(out[key]);return out};return true;""")
         # Adverse readiness cut: real hidden host with existing navigation DOM.
         # A native click must wait for the same observable mount condition as
         # a cold dashboard; no programmatic click or suppressed failure.
