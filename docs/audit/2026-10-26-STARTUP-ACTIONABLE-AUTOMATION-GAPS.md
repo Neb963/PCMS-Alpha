@@ -99,6 +99,16 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 **Required acceptance:** Explicitly test no grant at boot → user grants development in UI → alarm established/one guarded progress turn → restart persistence, and off→on again; revoke immediately prevents further effects. No duplicate AI native send, no forced per-job Start and no invented AI pass.
 
+### GAP-09 — Route-probe timeout does not bound the whole native-preparation promise (P0)
+
+**Status:** CONFIRMED CODE deadline coverage gap; indefinite real native-host behavior NEEDS H proof.
+
+**Source:** `src/runtime/overlay.mjs:77–87` creates an abort timer at 30 seconds but does **`await pcmsProbeExitsWithinDeadline(...)`** before examining `signal.aborted`. Inside that function (`:89–113`), `await mullvadRuntime.resolve(route,{fresh:true})` occurs **without passing the AbortSignal**. The helper may perform native prepare; `src/runtime/native-prepare-overlay.mjs:45–78` sets a separate 45-second native request deadline and deliberately treats ambiguous completion as uncertain. `src/runtime/enrollment.mjs:64–96` keeps the per-account `running` lock until the promise settles; `src/ui/faithful/accounts-workspace.mjs:47–50,150–156` disables incompatible account controls while it is active.
+
+**Effect:** A 30-second abort guarantees a **signal**, not a 30-second settlement of the account task; slow/noncooperative nested waits can extend the `working` UI and postponement of human actions. Naively racing and dropping a possibly dispatched native action would be **unsafe**.
+
+**Required acceptance:** Bound *observational* waits and report a visibly timed-out status; preserve native preparation intent and readback quarantine for ambiguous effects, and separate cancellable read-only checks from in-flight mutation locks. Test intentionally nonsettling mock native prepare, late native ACK and Firefox restart; never start a conflicting preparation or route change before an independent settlement.
+
 ## Investigation queue
 
 1. Donor bootstrap and native-host/tunnel/proxy recovery state.
@@ -117,4 +127,5 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 - 2026-10-26: GAP-05 verified: periodic recovery exists but lacks host-ready event wake.
 - 2026-10-26: GAP-06 confirmed from serialized READY alarm dispatch; starvation consequence requires adversarial evidence.
 - 2026-10-26: GAP-07 confirmed sequential creation queue tick; nonsettling-operation case needs B stress.
-- 2026-10-26: GAP-08 confirmed by grant-transition versus AI alarm call-site audit. Subsequent sections will be appended after each subsystem inspection.
+- 2026-10-26: GAP-08 confirmed by grant-transition versus AI alarm call-site audit.
+- 2026-10-26: GAP-09 verified timer does not bound awaited native/route preparation settlement. Subsequent sections will be appended after each subsystem inspection.
