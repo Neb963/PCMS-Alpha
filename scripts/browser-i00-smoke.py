@@ -4836,7 +4836,8 @@ def main():
                         const families=new Set(['account','network','inventory','inventory-batch',
                           's00-create-intent','s00-create-slug','s05-ready','stage','ai-job',
                           'release','writeback','backup','attention','s06-change','s06-exception',
-                          's06-human','source-link','adoption','identity-alias','removal']);
+                          's06-human','source-link','adoption','identity-alias','removal',
+                          'refresher','ai-concurrency','ai-prompts','s04','s02','attention-cause']);
                         for(const store of core.DB_STORES){
                           const oldRows=new Map(before.stores[store].map(r=>[JSON.stringify(r.key),r]));
                           const newRows=new Map(current.stores[store].map(r=>[JSON.stringify(r.key),r]));
@@ -4844,8 +4845,12 @@ def main():
                             const old=oldRows.get(key),now=newRows.get(key);
                             if(JSON.stringify(old)===JSON.stringify(now))continue;
                             const prefix=typeof (now||old).key==='string'?(now||old).key.split(':')[0]:'NON_STRING';
-                            changes.push({store,family:families.has(prefix)?prefix:'OTHER',
-                              change:!old?'ADDED':!now?'REMOVED':'CHANGED'});
+                            const fields=['state','record','revision','status','setting','history',
+                            'lastTurnAt','nextWakeAt','bootId','browserClock','nativeClock','diagnostics'];
+                          const left=old?.value?.state||old?.value,right=now?.value?.state||now?.value;
+                          changes.push({store,family:families.has(prefix)?prefix:'OTHER',
+                              change:!old?'ADDED':!now?'REMOVED':'CHANGED',
+                              fields:fields.filter(field=>JSON.stringify(left?.[field])!==JSON.stringify(right?.[field]))});
                           }
                         }
                         error.restoreDrift={count:changes.length,sample:changes.slice(0,12)};

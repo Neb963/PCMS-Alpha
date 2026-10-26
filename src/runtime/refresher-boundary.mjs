@@ -119,6 +119,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     for(const change of result?.changes||[]){
       let d;try{d=createNoticeDispatcher(api,createCanonicalStore(await dbPromise));}catch{continue;}
       try{
+        if((await sentinel.inspect()).held)return;
         if(change.code==='ACCOUNT_GRACE_EXPIRED')await d.emit({scopeId:change.scopeId,
           code:'ROUTE_UNAVAILABLE',severity:'ACTION_REQUIRED',revision:result.revision,
           cause:'ACCOUNT_ROUTE_UNAVAILABLE',target:{kind:'ACCOUNT',id:change.scopeId}});
@@ -211,6 +212,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       .sort((a,b)=>(b.metrics.demandUntil>now?1:0)-(a.metrics.demandUntil>now?1:0)||
         a.metrics.nextDueAt-b.metrics.nextDueAt||a.ordinal-b.ordinal);
     const claims=[];
+    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
     if(!state.recent.suspended&&state.recent.nextDueAt<=now){
       // Rotate the shared recent-feed read across ready accounts. A shared
       // endpoint backoff (429) applies to ALL accounts: rotation never evades it.
@@ -224,6 +226,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     for(const r of due){
       if(claims.length>=2)break;
       if(claims.some(c=>c.accountId===r.accountId))continue;
+      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       const out=await s.claim({kind:'STATISTIC',stableId:r.stableId,now:clock(),bootId,claimId:newId()});
       if(out.ok)claims.push(out.claim);
     }
@@ -276,8 +279,11 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       }
     }
     const completed=[];
-    for(const {c,packet} of results)completed.push(await s.complete(c.claimId,
-      {...packet,observedAt:c.startedAt,...(group?{group}:{})},clock()));
+    for(const {c,packet} of results){
+      if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      completed.push(await s.complete(c.claimId,
+        {...packet,observedAt:c.startedAt,...(group?{group}:{})},clock()));
+    }
     const latest=completed.at(-1);
     return {...latest,code:completed.some(r=>r.accepted)?'OBSERVED':latest.code,
       changes:completed.flatMap(r=>r.changes||[])};
@@ -287,6 +293,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     // No UI message can enable this gate or supply provider qualifications.
     // Production has no verified method/adapter and is unconditionally OFF.
     if(!refreshGate()||!refreshAdapter||!observationGate())return 'REFRESH_ACTIVATION_HELD';
+    if((await sentinel.inspect()).held)return 'RESTORE_HOLD';
     const enabled=await s.read();
     if(!enabled.ok||enabled.state.policy.refreshEnabled!==true)
       return 'REFRESH_OPERATOR_DISABLED';
@@ -454,6 +461,10 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
             }
           }catch{/* no fake time credited on native/route failure */}
         }
+        // Acquisition/readiness may have awaited while restore installed its
+        // durable hold. Recheck immediately before admitting a canonical turn.
+        if((await sentinel.inspect()).held){stopActiveClock();
+          await safeBreadcrumb(null,'RESTORE_HOLD');return fail('RESTORE_HOLD');}
         const now=clock(),result=await s.turn({now,bootId,nativeClock,qualifiedCoverages,browserClock});
         if(!result.ok){stopActiveClock();await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return result;}
         await schedule(result.state.nextWakeAt);
