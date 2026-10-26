@@ -4794,8 +4794,33 @@ def main():
                     const sentinel=gate.createRestoreGate(browser.storage.local);
                     if(!(await sentinel.inspect()).held)
                       throw Error('RESTORE_SENTINEL_NOT_DURABLE');
-                    const receipt=await idb.applyCanonicalSnapshot(db,prepared,{
-                      assertHeld:async()=>(await sentinel.inspect()).held,expectedBefore:before});
+                    let receipt;
+                    try{receipt=await idb.applyCanonicalSnapshot(db,prepared,{
+                      assertHeld:async()=>(await sentinel.inspect()).held,expectedBefore:before});}
+                    catch(error){
+                      // Identify a real drifting writer without logging keys,
+                      // source bytes, tokens or weakening the atomic fence.
+                      if(error?.message==='RESTORE_DESTINATION_DRIFT'){
+                        const current=await core.snapshotCanonical(db),changes=[];
+                        const families=new Set(['account','network','inventory','inventory-batch',
+                          's00-create-intent','s00-create-slug','s05-ready','stage','ai-job',
+                          'release','writeback','backup','attention','s06-change','s06-exception',
+                          's06-human','source-link','adoption','identity-alias','removal']);
+                        for(const store of core.DB_STORES){
+                          const oldRows=new Map(before.stores[store].map(r=>[JSON.stringify(r.key),r]));
+                          const newRows=new Map(current.stores[store].map(r=>[JSON.stringify(r.key),r]));
+                          for(const key of new Set([...oldRows.keys(),...newRows.keys()])){
+                            const old=oldRows.get(key),now=newRows.get(key);
+                            if(JSON.stringify(old)===JSON.stringify(now))continue;
+                            const prefix=typeof (now||old).key==='string'?(now||old).key.split(':')[0]:'NON_STRING';
+                            changes.push({store,family:families.has(prefix)?prefix:'OTHER',
+                              change:!old?'ADDED':!now?'REMOVED':'CHANGED'});
+                          }
+                        }
+                        error.restoreDrift={count:changes.length,sample:changes.slice(0,12)};
+                      }
+                      throw error;
+                    }
                     const after=await core.snapshotCanonical(db);
                     const release=after.stores.meta.find(r=>r.key==='release:restore-b');
                     if(receipt.source!=='INDEPENDENT_READBACK'||
@@ -4806,7 +4831,7 @@ def main():
                       receiptDigest:receipt.digest,
                       status:release.value.release.state};
                   }finally{db.close();}
-                })().then(done).catch(e=>done({ok:false,error:String(e)}));"""
+                })().then(done).catch(e=>done({ok:false,error:String(e),drift:e.restoreDrift||null}));"""
                 i16_db=call('POST',f'/session/{after}/execute/async',
                             {'script':i16_db_code,'args':[]},timeout=75)
                 assert i16_db.get('ok') is True,i16_db

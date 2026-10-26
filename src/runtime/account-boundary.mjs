@@ -123,7 +123,8 @@ export function createAccountBoundary(api,{
     hold:(bindingId,code,accountId,current=()=>true)=>{
       pins.hold(bindingId);
       return checkpointed(api,async()=>{
-        const ledger=await exitLedger();if(!current())return;
+        const ledger=await exitLedger();
+        if(!current()||(await sentinel.inspect()).held||!current())return;
         await ledger.hold(bindingId,code);
         const accounts=await store();
         if(current()&&!(await sentinel.inspect()).held&&current())
