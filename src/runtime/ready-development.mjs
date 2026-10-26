@@ -159,6 +159,24 @@ export function createReadyDevelopment(api,{
    let after=typeof before==='string'&&
      /^[a-z0-9][a-z0-9-]{0,99}$/.test(before)?before:'',
      examined=0,lastSeen=after;
+   async function readPlan(row){
+    const full=await queue.get(row.slug);
+    if(!full.ok||full.record.revision!==row.revision)return null;
+    const stage=await createStagingStore(database).getFull(row.slug);
+    const existing=await createExistingStore(database).getFull(row.slug);
+    const job=await createAiStore(database).getJobFull(row.slug);
+    const exception=await createS06ExceptionStore(database).getFull(row.slug);
+    const inventory=await new Promise((resolve,reject)=>{
+     const t=database.transaction('meta','readonly');
+     const q=t.objectStore('meta').get('inventory:'+row.slug);
+     q.onsuccess=()=>resolve(q.result?.generator||null);
+     q.onerror=()=>reject(Error('S05_INVENTORY_READ_FAILED'));
+    });
+    const chosen=planReadyDevelopment({ready:full,stage,existing,job,
+     exception:exception.ok?exception:null,visibility:inventory?.visibility,
+     effects:effectGate({phase:'S05',step:'AUTO_PROGRESS',slug:row.slug})===true});
+    return {stage,existing,job,chosen};
+   }
    for(let page=0;page<64&&examined<maxCandidates;page++){
     const listing=await queue.list({after,limit:Math.min(200,maxCandidates-examined)});
     if(!listing.ok)return listing;
@@ -166,27 +184,19 @@ export function createReadyDevelopment(api,{
      const row=listing.items[i];
      examined++;lastSeen=row.slug;
      if(!row.desired&&!row.active)continue;
+     // A read-only HOLD has no source work to own. Taking its lock on
+     // every wake can deterministically starve another domain's eligible
+     // transition for the same first generator. This optimistic selection
+     // grants no authority: re-read the complete plan after acquiring ownership.
+     const preview=await readPlan(row);
+     if(!preview||!preview.chosen.ok||preview.chosen.type==='HOLD')continue;
      const keys=['generator:'+row.slug];if(scopes.busy(keys))continue;
      const nextCursor=(i+1<listing.items.length||listing.more)?row.slug:'';
      await api.storage.local.set({[cursorKey]:nextCursor});
      const observed=await scopes.run(keys,async()=>{
-     const full=await queue.get(row.slug);
-     if(!full.ok||full.record.revision!==row.revision)return {scopeSkipped:true};
-     const stage=await createStagingStore(database).getFull(row.slug);
-     const existing=await createExistingStore(database).getFull(row.slug);
-     const job=await createAiStore(database).getJobFull(row.slug);
-     const exception=await createS06ExceptionStore(database).getFull(row.slug);
-     const inventory=await new Promise((resolve,reject)=>{
-      const t=database.transaction('meta','readonly');
-      const q=t.objectStore('meta').get('inventory:'+row.slug);
-      q.onsuccess=()=>resolve(q.result?.generator||null);
-      q.onerror=()=>reject(Error('S05_INVENTORY_READ_FAILED'));
-     });
-     const chosen=planReadyDevelopment({ready:full,stage,existing,job,
-       exception:exception.ok?exception:null,
-       visibility:inventory?.visibility,
-       effects:effectGate({phase:'S05',step:'AUTO_PROGRESS',slug:row.slug})===true});
-     if(!chosen.ok||chosen.type==='HOLD')return {scopeSkipped:true};
+     const fresh=await readPlan(row);
+     if(!fresh||!fresh.chosen.ok||fresh.chosen.type==='HOLD')return {scopeSkipped:true};
+     const {stage,existing,job,chosen}=fresh;
      // One source-heavy step at most per wake, so wrong owner, changed
      // route or source cannot cause fleet-wide unlisting or repeated effects.
      let outcome;
