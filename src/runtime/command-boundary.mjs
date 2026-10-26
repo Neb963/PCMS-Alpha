@@ -3,7 +3,7 @@ import {trackPcmsWork} from './work-checkpoint.mjs';
 import { createCanonicalStore, createRestoreSentinel, openCanonicalDatabase, fail } from './journal.mjs';
 
 export const COMMAND_PORT = 'pcms-i02-canonical-readonly';
-const SAFE_NAMES = new Set(['HEALTH','SUMMARY','GET_OPERATION','GET_OPERATION_CONTEXT','GET_NOTICES','NOTICE_SUMMARY','LIST_OPERATION_PAGE','LIST_NOTICE_PAGE','IGNORE_NOTICE','ACK_NOTICE','PREVIEW']);
+const SAFE_NAMES = new Set(['HEALTH','SUMMARY','GET_OPERATION','GET_OPERATION_CONTEXT','GET_NOTICES','GET_NOTICE_CONTEXT','LIST_NOTICE_GROUP_PAGE','LIST_NOTICE_GROUP_MEMBERS','NOTICE_SUMMARY','LIST_OPERATION_PAGE','LIST_NOTICE_PAGE','IGNORE_NOTICE','ACK_NOTICE','PREVIEW']);
 export function trustedExtensionPage(api, sender) {
   if (sender?.id !== api.runtime.id || typeof sender.url !== 'string') return false;
   const base = api.runtime.getURL('pcms/');
@@ -42,6 +42,21 @@ export function validateCommand(api, sender, message) {
        (message.params.limit!==undefined&&(!Number.isInteger(message.params.limit)||
            message.params.limit<1||message.params.limit>100)))
       return fail('INVALID_QUEUE_PAGE');
+  }
+  if(['GET_NOTICE_CONTEXT','LIST_NOTICE_GROUP_PAGE','LIST_NOTICE_GROUP_MEMBERS'].includes(message.type)){
+    const p=message.params;
+    const fields=message.type==='GET_NOTICE_CONTEXT'?['scopeId','code']:
+      ['after','limit','query','state',...(message.type==='LIST_NOTICE_GROUP_MEMBERS'?['groupKey']:[])];
+    if(Object.keys(message).some(k=>!['type','params'].includes(k))||
+       !p||typeof p!=='object'||Array.isArray(p)||Object.keys(p).some(k=>!fields.includes(k))||
+       (message.type==='GET_NOTICE_CONTEXT'&&(!/^[a-zA-Z0-9_-]{8,100}$/.test(p.scopeId||'')||!/^[A-Z_]{3,80}$/.test(p.code||'')))||
+       (message.type!=='GET_NOTICE_CONTEXT'&&(
+        p.after!==undefined&&(typeof p.after!=='string'||p.after.length>240)||
+        p.query!==undefined&&(typeof p.query!=='string'||p.query.length>80)||
+        p.state!==undefined&&!['ACTIVE','RESOLVED','ALL'].includes(p.state)||
+        p.limit!==undefined&&(!Number.isInteger(p.limit)||p.limit<1||p.limit>100)||
+        message.type==='LIST_NOTICE_GROUP_MEMBERS'&&(typeof p.groupKey!=='string'||p.groupKey.length>240))))
+      return fail('INVALID_NOTICE_PAGE');
   }
   if (message.type === 'GET_OPERATION' &&
       (typeof message.operationId !== 'string' || !/^[a-zA-Z0-9_-]{8,100}$/.test(message.operationId)))
@@ -87,6 +102,13 @@ export function createCommandBoundary(api, { open = openCanonicalDatabase } = {}
     if (message.type === 'IGNORE_NOTICE') {
       try { return await (await canonical()).ignoreNotice(message.notice); }
       catch { return fail('CANONICAL_HOLD'); }
+    }
+    if(['GET_NOTICE_CONTEXT','LIST_NOTICE_GROUP_PAGE','LIST_NOTICE_GROUP_MEMBERS'].includes(message.type)){
+      try{
+        const store=await canonical();
+        return await store[message.type==='GET_NOTICE_CONTEXT'?'inspectNotice':
+          message.type==='LIST_NOTICE_GROUP_PAGE'?'pageNoticeGroups':'pageNoticeMembers'](message.params);
+      }catch{return fail('CANONICAL_HOLD');}
     }
     if(message.type==='NOTICE_SUMMARY'){
       try{return await (await canonical()).noticeSummary();}
