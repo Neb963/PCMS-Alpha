@@ -199,6 +199,43 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 6. Whole primary UI: hidden/unavailable controls, stale status, lack of recovery.
 7. Adversarial coverage/evidence-tier assessment and prioritized implementation handoff.
 
+## Subsystem-by-subsystem results and evidence boundary
+
+| Area inspected | Confirmed or conditional gaps | Existing safeguards/capabilities that MUST NOT be broken | Remaining proof |
+|---|---|---|---|
+| PersonaMonkey bootstrap/native lifecycle | GAP-01, 05, 09, 16 | Donor registers fail-closed proxy/webRequest listeners before recovery, authenticates protected SOCKS forwarding, records ambiguous preparation and avoids automatic Direct on guarded managed requests | Real H helper restart, tunnel-up/proxy-down, idle 15+ min, route readback |
+| Account state/recovery | GAP-04, 05, 09 | `enrollment.mjs` already performs periodic upkeep, safe two-failure route checking, identity revalidation and protected unique exit pinning; `OPEN_LOGIN` and *Change route* are present in current primary UI | 3/50 accounts; stalled task versus fresh route; automatic recovery without user clicks |
+| Attention/Work Queue | GAP-02, 03, 10, 12–14 | Canonical notice review does not dismiss safety holds; historical `PREFLIGHT_FAILED` is read-only reconciled; unsure external effects remain fenced | Exhaustive notice/state × cause × target × destination coverage, 31/1,000 missing items |
+| Generator creation | GAP-02, 07 | `creation-allocation.mjs:17–27` correctly requires all initial counts **only for automatic balancing** and scopes explicit account choice to that account; `creation-runner.mjs:38–40` fences original I17 quarantine | Distinct healthy account + unrelated unknown inventory, slow/hung item, real template capability |
+| Git/READY/development/publication | GAP-06, 08, 11, 15 | Git observer uses browser-local token packet and complete pinned `main` source; standing grants and verified writeback/publication review are separate; no claim that AI or Git can publish without exact human approval | Grant-at-boot vs late grant, independent stage isolation, real private GIT/source, L publication |
+| Refresher | Shared dependency GAP-01/05/16; no additional uniquely *source-proved* scheduler blocker from this audit | `refresher-boundary.mjs:133–149,545–568` recreates one-shot alarm without continually postponing it; `refresher-native.mjs` distinguishes source-save ACK from independent readback/feed placement | Automatic actual source changes, 24h/72h policy, restart/closed-Firefox accounting, recent-feed L observation |
+| Portable backup and restore | GAP-10 obsolete legacy UI help; no new blocker in current browser-native backup scheduler | `backup-auto-boundary.mjs:10–13,34–63` establishes hourly background alarm, immediate startup `tick()`, manual/enable/status controls, no extra native PCMS host | Full downloaded file, fresh-profile inspected restore, crash/large-scale case |
+| Primary UX and evidence | GAP-03/04/10/12–14/17 | Recent J01–J07 controls markedly better than pre-J work; typed ports constrain actions and local read-only diagnostics are independently runnable | Fully mounted packaged Firefox, real clicked path, form/keyboard, no misleading stale alerts |
+
+### Explicit non-findings / limits
+
+- The supplied historical `TEMPLATE_SOURCE_UNVERIFIED` **does not prove** that the present provider's `minimal` source is broken; it predates the current readback adapter and is quarantined. No read-only current Perchance L check was performed.
+- Transient helper/tunnel/proxy readiness **does not authorize** an exit reassignment by itself. Two-failure guarded verification and unique exit/IP history remain mandatory.
+- Automatic work on timers **does exist** in Accounts, Creation, Git, Refresher and Backup. The identified defects are ordering, wake triggering, causality, recovery/action gaps, or fairness—not wholesale absence of all automation.
+- All findings came from repo source and the two user-provided screenshots. Neither the operator's native host nor their three live Personas/Perchance accounts were inspected. No background executable was installed or run, no screenshots/logs requested and no live Perchance/Git changes made.
+- P0 here means **priority of an accepted-journey repair**, not “exploitable severity proven.” Structural hazards that still need simulated/nonsettling evidence are explicitly marked RISK.
+
+## Prioritized implementation and adversarial verification program
+
+| Step | Corrective work / trace | Minimum reproducible evidence |
+|---|---|---|
+| **F0 — Cross-domain causal inventory** | Generate full state-action graph from notice codes, account statuses, creation intents, Git/READY/AI/release, Refresher and backups. Map each nonterminal state to automatic handler, operator action, or safety fence, with authoritative root cause and readback; list every unmapped pair | Matrix test fails if any accepted recoverable state has neither owner nor UI path. Include historic I17 as permanent no-replay |
+| **F1 — Donor-first lifecycle** | Fix GAP-01/04/05/09/16. Reconcile native helper → tunnel/proxy → bound Persona route/unique exit → eligible dependent workers. Idempotent, bounded, cancellable read checks and explicit uncertain-preparation hold | Startup out-of-order, 3/50 Personas, proxy unreachable then healthy, 15+ min without tabs, no Direct or reused exit, automatic clearing of *verified* stale holds |
+| **F2 — Autonomous worker activation/isolation** | Fix GAP-06/07/08/15/17. Rehydrate standing grants then schedule eligible workers; wake on transitions; per-scope fairness and bounded progress receipts | Disable grant at boot, enable later, cold worker wake, revoke, one hung AI/Git/creation step does not prevent unrelated work; preserve one writer/per-slug order |
+| **F3 — Actionable operator recovery** | Fix GAP-02/03/10/11/12–14. Clean modern primary UI, no duplicate incident engine, grouped cause and explicit repair/refusal, no 30-item cap | Every one of 11 notice codes with/without explicit target; 31 and 1,000 source-missing; one shared outage; button click actually invokes guard and readback |
+| **F4 — Final complete, ordinary workflow** | Verify Accounts/login → Inventory → 1 safe disposable creation/adoption → Git READY → AI/test/writeback → exact review/publication; independent Refresher and source-complete backup/restore | Persistent **installed full-capability XPI B**, negative/race/restart, no manual debug ports; separately authorized H, private GIT and live L later, never fabricated |
+
+### Release evidence and implementation handoff
+
+A good engineering fix is **not** “disable retries” or “turn all holds into green.” Success is: route and service setup happen automatically when legitimately safe; state-specific Attention has an actual working resolution; modules with independent prerequisites remain independently runnable; cached failures are cleared only after fresh verified recovery; and the operator sees short names/actions rather than inner journal terminology. Preserve exact-source human approval and all I17 lost-effect protections.
+
+Run affected small tests throughout development using **draft preflight**; full donor/reproducible-XPI/installed-Firefox checks only on stable ready candidate. Avoid asking the user to repeat read-only checks they already performed. Deliver one final higher-version XPI only after proactive installed-Firefox negative and positive journeys are verified. **No fixes or tests are claimed completed by this audit.**
+
 ## Change log
 
 - 2026-10-26: Initialized with GAP-01 and GAP-02 from operator screenshots plus current source verification.
@@ -216,4 +253,4 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 - 2026-10-26: GAP-14 verified primary queue bypasses existing cause grouping.
 - 2026-10-26: GAP-15 confirmed cold S06 authorization-hydration race with AI alarm creation.
 - 2026-10-26: GAP-16 confirmed default donor auto-stop/no-tab policy versus PCMS background readiness.
-- 2026-10-26: GAP-17 verified silent alarm/background failure paths and missing durable failure receipts. Subsequent sections will be appended after each subsystem inspection.
+- 2026-10-26: GAP-17 verified silent alarm/background failure paths and missing durable failure receipts. Subsequent sections were appended after each subsystem inspection.
