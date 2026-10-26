@@ -22,7 +22,21 @@ const view=r=>({ok:true,onboardingAllowed:r.revocationReason==='GIT_CONFIGURATIO
 export function createS06StandingAuthority(api){
  const sentinel=createRestoreSentinel(api.storage.local);
  let loaded=false,current=null,registered=false,serial=Promise.resolve(),mutationSerial=Promise.resolve(),generation=0,pendingChanges=0;
- const disable=()=>{generation++;loaded=false;current=null;};
+ const listeners=new Set();let lastPublished='';
+ const effective=()=>Object.freeze({generation,revision:loaded?current?.revision||null:null,
+  grants:Object.freeze(Object.fromEntries(Object.keys(OFF).map(scope=>[scope,gate(scope)])))});
+ function deliver(listener,snapshot){
+  try{const result=listener(snapshot);if(result?.then)void Promise.resolve(result).catch(()=>{});}catch{}
+ }
+ function publish(){
+  const snapshot=effective(),signature=JSON.stringify(snapshot);
+  if(signature===lastPublished)return;lastPublished=signature;
+  for(const listener of [...listeners]){
+   if(snapshot.generation!==generation)break;
+   deliver(listener,snapshot);
+  }
+ }
+ const disable=()=>{generation++;loaded=false;current=null;publish();};
  const gate=scope=>pendingChanges===0&&loaded===true&&valid(current)&&
    Object.hasOwn(OFF,scope)&&current.grants[scope]===true;
  const enqueue=fn=>{
@@ -53,7 +67,7 @@ export function createS06StandingAuthority(api){
        reason:restore.held?'RESTORE_HOLD':'UNSCOPED_OR_UNCONFIGURED'};
    }
    if(at!==generation||pendingChanges)return {ok:true,record:{...view(record).record,grants:{...OFF}},reason:'POLICY_CHANGE_PENDING'};
-   current=record;loaded=true;return view(record);
+   current=record;loaded=true;publish();return view(record);
  }
  async function performRevoke(reason,knownCurrent=current){
    // Synchronous process-local revocation precedes the durable write. A
@@ -107,7 +121,7 @@ export function createS06StandingAuthority(api){
    if(!configured(again)||again.repositoryId!==next.repositoryId){
      await performRevoke('GIT_CONFIGURATION_CHANGED');return fail('STANDING_REPOSITORY_CHANGED');
    }
-   current=next;loaded=true;return view(next);
+   current=next;loaded=true;publish();return view(next);
  }
  // Scoped operator requests and read-only account originals are independent
  // of Git. A false legacy record has ambiguous provenance and stays paused.
@@ -127,12 +141,12 @@ export function createS06StandingAuthority(api){
    const task=trackPcmsWork(mutationSerial.then(fn));mutationSerial=task.catch(()=>{});return task;
  }
  function revoke(reason='EXPLICIT_OPERATOR'){
-   const knownCurrent=current;disable();pendingChanges++;
-   return mutation(()=>performRevoke(reason,knownCurrent)).finally(()=>{pendingChanges--;});
+   const knownCurrent=current;disable();pendingChanges++;publish();
+   return mutation(()=>performRevoke(reason,knownCurrent)).finally(()=>{pendingChanges--;publish();});
  }
  function update(p){
-   generation++;pendingChanges++;
-   return mutation(()=>applyUpdate(p)).finally(()=>{pendingChanges--;});
+   generation++;pendingChanges++;publish();
+   return mutation(()=>applyUpdate(p)).finally(()=>{pendingChanges--;publish();});
  }
  async function operatorManagementState(){
    await mutationSerial;
@@ -160,8 +174,8 @@ export function createS06StandingAuthority(api){
    }
  }
  function setOperatorManagement(p){
-   generation++;pendingChanges++;
-   return mutation(()=>applyOperatorManagement(p)).finally(()=>{pendingChanges--;});
+   generation++;pendingChanges++;publish();
+   return mutation(()=>applyOperatorManagement(p)).finally(()=>{pendingChanges--;publish();});
  }
  async function handle(msg,sender){
    if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
@@ -207,10 +221,21 @@ export function createS06StandingAuthority(api){
    });
    void enqueue(state).catch(disable);
  }
- return Object.freeze({gate,register,state,update,revoke,handle,allowsOperatorManagement,operatorManagementState,setOperatorManagement,policyGeneration:()=>generation});
+ function subscribe(listener){
+  if(typeof listener!=='function')throw Error('INVALID_AUTHORITY_SUBSCRIBER');
+  listeners.add(listener);deliver(listener,effective());
+  return ()=>listeners.delete(listener);
+ }
+ return Object.freeze({gate,register,state,update,revoke,handle,subscribe,allowsOperatorManagement,operatorManagementState,setOperatorManagement,policyGeneration:()=>generation});
 }
 export const standingS06=typeof browser==='undefined'?null:
   createS06StandingAuthority(browser);
 // Only the background entrypoint registers this singleton. Importing a
 // production adapter in another extension context must not create another
 // policy writer or a second configuration-invalidation queue.
+
+export function createS06ScopeGate(authority,scope){
+ const gate=()=>authority?.gate(scope)===true;
+ gate.generation=()=>authority?.policyGeneration();
+ return gate;
+}

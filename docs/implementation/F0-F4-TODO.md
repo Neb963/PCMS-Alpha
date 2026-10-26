@@ -7,7 +7,7 @@ Baseline: `main` `06ccf102097e238154fef51787269c398ee6b1b0`, tree `4b828f3658f2b
 ## Program checkpoints
 
 - [x] F0: executable cross-domain recovery/state/notice inventory, negative drift checks, integrated verified PR.
-- [ ] F1: donor-first startup, account reconciliation, bounded event wake, preparation uncertainty, on-demand idle recovery.
+- [x] F1: donor-first startup, account reconciliation, bounded event wake, preparation uncertainty, on-demand idle recovery.
 - [ ] F2: independent bounded workers, fair creation, hydrated authorization transitions, redacted durable receipts.
 - [ ] F3: contextual actions for every notice, historical read-only template inspection, single UI controller, truthful Git errors, paged missing sources and causal groups.
 - [ ] F4: integrated D/B regression, persistent installed Firefox, upgrade, exact required CI/main, reproducible higher-version XPI, checksum and one short live-acceptance guide.
@@ -18,22 +18,22 @@ Baseline: `main` `06ccf102097e238154fef51787269c398ee6b1b0`, tree `4b828f3658f2b
 
 | GAP | Root cause / affected production files | Correction | Tests / evidence | Status |
 |---|---|---|---|---|
-| 01 | Independent startup imports: entry, account boundary, enrollment, overlay | Donor-owned readiness through account-specific protected admission | Delayed donor/helper/proxy, scoped isolation, restart | OPEN F1 |
+| 01 | Independent startup imports: entry, account boundary, enrollment, overlay | Donor-owned readiness through account-specific protected admission | Delayed donor/helper/proxy, scoped isolation, restart | VERIFIED F1 D/B |
 | 02 | Historic reason has generic operation detail: operation-context, faithful bridge, perchance-supply | Read-only current template/provenance check; permanent historical fence | Old/missing template, owner denial, zero CREATE/RENAME | OPEN F3 |
 | 03 | Incomplete notice destination resolver: faithful attention/bridge | Typed contextual recovery, stale/missing targets and safe holds | All 11 × target/current-state matrix, real actions/readback | OPEN F3 |
-| 04 | Host Check connection does not reconcile account state: accounts workspace/boundary | Fresh per-account route/identity after shared recovery | Shared recovery + one unsafe account | OPEN F1 |
-| 05 | Only 10-minute upkeep polling: account boundary, donor native state | Coalesced bounded wake, backoff/fairness and fallback | 1/3/50 accounts, no duplicate preparation | OPEN F1 |
+| 04 | Host Check connection does not reconcile account state: accounts workspace/boundary | Fresh per-account route/identity after shared recovery | Shared recovery + one unsafe account | VERIFIED F1 D/B |
+| 05 | Only 10-minute upkeep polling: account boundary, donor native state | Coalesced bounded wake, backoff/fairness and fallback | 1/3/50 accounts, no duplicate preparation | VERIFIED F1 D/B |
 | 06 | Serial alarm progression: catalog-watch, domain progressors | Independent bounded domain/scoped progression preserving source ordering | Reject/hang each stage; independent ledgers | OPEN F2 |
 | 07 | One serial creation pending promise: creation-watch/runner | Bounded independent scope work and durable observational timeout | Hung account + 1,000 items, lost ACK, no replay | OPEN F2 |
 | 08 | No grant-transition scheduler hook: standing authority, ai-boundary | Trusted transition subscription and immediate scheduler reconciliation | Boot OFF → grant → progression, revoke/regrant | OPEN F2 |
-| 09 | Abort signal does not settle native await: overlay/native-prepare/enrollment | Bound observations, retain possible native ownership until settlement | Never-settle, late ACK, restart, no conflicting prepare | OPEN F1 |
+| 09 | Abort signal does not settle native await: overlay/native-prepare/enrollment | Bound observations, retain possible native ownership until settlement | Never-settle, late ACK, restart, no conflicting prepare | VERIFIED F1 D/B |
 | 10 | Multiple mounted UI workers: index.html, operations and legacy views | One primary controller, isolated compatibility readers | Actual primary workflows, no obsolete native/vault advice | OPEN F3 |
 | 11 | Browser token errors labeled vault: catalog-watch, Git local secret/UI | Stable cause-specific browser/Git classification and observed recovery | Six causes, preserve valid credential, no false clear | OPEN F3 |
 | 12 | Missing-source queue rows have no actions: faithful bridge/source | Contextual source/history/current scan/identity inspection | Actual action-to-readback; no provider deletion | OPEN F3 |
 | 13 | Silent missing slice(0,30): faithful bridge/catalog | Exact counts and bounded paging/search | 31/1,000+ fixtures, all entries reachable | OPEN F3 |
 | 14 | Primary incidents ignore causal grouping: faithful bridge/attention model | Shared-root groups with counts and individual inspection | One helper outage/50 accounts vs independent holds | OPEN F3 |
 | 15 | Async grant hydration misses alarm init: standing authority/AI | Same trusted transition after hydration/cold wake | Cold worker, no onStartup, invalid/revoked records | OPEN F2 |
-| 16 | Donor idle-stop vs headless work: donor overlay/enrollment/workers | Allow idle-stop; donor safely reestablishes before due protected work | 15+ minutes, scheduled creation, 24h/72h/no false credit | OPEN F1 |
+| 16 | Donor idle-stop vs headless work: donor overlay/enrollment/workers | Allow idle-stop; donor safely reestablishes before due protected work | 15+ minutes, scheduled creation, 24h/72h/no false credit | VERIFIED F1 D/B |
 | 17 | Empty catch and success-only wake receipt: catalog/creation/account | Per-domain bounded redacted attempt/success/checkpoint/retry/cause | Reject, suspend, partial failure, grouped Attention | OPEN F2 |
 
 ## Evidence and limits
@@ -169,3 +169,10 @@ That model planted synthetic sleeping/release authority in the same Refresher st
 The model now owns a dedicated real Firefox IDB. Its complete synthetic previous-source/owner/adoption record, uncertain update receipt and sole operation are then copied to actual canonical IDB for the retained real port and UI state/disabled-retry assertions. The model Refresher state/clock is never copied. Every prior seal/corruption/CAS/one-operation/uncertainty/no-replay/UI assertion remains. An early fixed-code diagnostic replaces the unhelpful undefined-winner dereference if model preparation fails. No production update/eligibility gate is weakened. Two regressions cover correct stale-context refusal and isolated one-winner/byte-preserving/no-replay behavior. Independent exact-head Node and full required Firefox verification remain mandatory; F1–F4 are not complete and no release artifact is delivered.
 
 The same autonomous-state collision also applied to the adjacent repeat-cycle source/stage/AI/release history model. It now owns a second dedicated real IDB, preserving every immutable-history, cancellation, renewed-approval and exact-revision assertion. That model has no real-port/UI phase or downstream dependency on its synthetic Refresher image; the preceding actual canonical uncertain receipt continues to drive the retained UI and source-incomplete-history checks.
+
+
+### F1 completed on verified main; F2 authorization checkpoint
+
+PR #66 final candidate `52a8679c95f1bd28bab455bf60bc7346dbb0a737`, tree `18c74e41503fa1eb340f991de904a8743cd14977`, passed full required run `40376120353`: all **1,214 deterministic tests**, baseline, pinned donor, reproducible package/archive and the complete normal-sandbox installed Firefox suite. Protected squash merge produced `eb81383a9e1fea948ddd0f0399a790d51c5f8d56` with the identical independently fetched tree. Full postmerge run `40378073800` passed all the same lanes; exact main required check `121773742766` succeeded with app 15368. Both retained held-route manual backup and existing-update/adjacent repeat models passed. Package SHA-256 remains `c8c3bda04f190cb8f56a27f9516bb89eb3a4e6ef6017f23ba7e2577a9c107505`, v1.2.16, for engineering verification only. F1 is complete for available D/B tiers. The historical missing-backup code and original I16 changed record were not independently attributed; the limits above still apply. Real operator H/GIT/L remains a final-stage acceptance tier.
+
+F2 is in progress. Its first checkpoint adds nonblocking trusted effective-authority subscriptions, cold/new-grant AI scheduler reconciliation after native-marker recovery, and a fresh synchronous permission/generation fence after the final route await before native dispatch. Revocation, revoke/regrant and restore retain the possible-dispatch marker and prohibit Send. Existing consent, repository identity, scope, restore and original-principal checks are retained. Controlled execution of actual production sources passes ten new regression cases; this is not independent Node or Firefox acceptance. The draft PR supplies independent Node execution. GAP06/07/17, scoped worker fairness, durable diagnostics and the remaining F2 domain integration are not complete. F3/F4 and final release are unfinished; no intermediate XPI is delivered.

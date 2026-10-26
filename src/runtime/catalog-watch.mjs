@@ -13,7 +13,7 @@ import {createS06WritebackProgress} from './s06-writeback-progress.mjs';
 import {createCleanBulkProgress} from './clean-bulk-boundary.mjs';
 import {createS06PublicationProgress} from './s06-publication-progress.mjs';
 import {createS06ChangeProgress} from './s06-request-changes.mjs';
-import {standingS06} from './s06-standing-authority.mjs';
+import {standingS06,createS06ScopeGate} from './s06-standing-authority.mjs';
 import {planMainFolderChanges,REVIEW_KEY} from './catalog-identity-review.mjs';
 export const CATALOG_ALARM='pcms-s03-main-observe';
 export const CATALOG_RESUME_ALARM='pcms-s03-main-resume';
@@ -222,12 +222,12 @@ export const catalogWatcher=typeof browser==='undefined'?null:createCatalogWatch
   ingestComplete:createCreationCatalogIntake(browser).run,
   ingestReady:createReadyIntake(browser).run,
   progressReady:createReadyDevelopment(browser,{
-    effectGate:()=>standingS06?.gate('development')===true}).tick,
+    effectGate:createS06ScopeGate(standingS06,'development')}).tick,
   progressChanges:createS06ChangeProgress(browser).tick,
   progressWriteback:createS06WritebackProgress(browser,{
-    effectGate:()=>standingS06?.gate('gitWrite')===true}).tick,
+    effectGate:createS06ScopeGate(standingS06,'gitWrite')}).tick,
   progressCleanBulk:createCleanBulkProgress(browser).tick,
   progressPublication:createS06PublicationProgress(browser,{
-    effectGate:()=>standingS06?.gate('publication')===true}).tick
+    effectGate:createS06ScopeGate(standingS06,'publication')}).tick
 });
 if(catalogWatcher)catalogWatcher.register();
