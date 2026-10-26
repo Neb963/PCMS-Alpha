@@ -120,3 +120,41 @@ test('S04 Git D: existing READY source links without replacing its source or dec
   assert.equal(db.read('meta','source-link:'+slug).link.readyAtInspection,true);
   assert.equal(db.keys('operations').length,0);
 });
+
+for(const finalPolicyChange of ['REVOKE','REVOKE_REGRANT','RESTORE','UNCHANGED'])
+ test('F2 creation Git marker checks '+finalPolicyChange+' after final restore read and retains one uncertain operation',async()=>{
+  const {db,store}=await make();let allowed=true,epoch=1,changed=false,held=false,writes=0;
+  const gate=()=>allowed;gate.generation=()=>epoch;
+  const config={repository:'Neb963/per-gens',repositoryId:'42'};
+  const api={storage:{local:{get:async key=>{
+   if(key==='pcmsS03Git')return {[key]:config};
+   if(key==='pcmsRestoreInProgress'&&!changed&&
+     db.read('meta','s00-create-intent:'+intentId)?.record?.state==='GIT_DISPATCH_POSSIBLE'){
+    changed=true;if(finalPolicyChange!=='UNCHANGED')epoch++;
+    if(finalPolicyChange==='REVOKE')allowed=false;
+    if(finalPolicyChange==='RESTORE')held=true;
+    await Promise.resolve();
+   }
+   return key==='pcmsRestoreInProgress'&&held?{[key]:{active:true,status:'PREPARING'}}:{};
+  }}}};
+  const runner=createS04GitContinuation(api,{open:async()=>db,gate,
+   guard:()=>({getSafeRouteReadiness:async()=>({ready:true,personaUid:account.personaUid,
+    cookieStoreId:'container_fixture',routeId:'protected_fixture'}),
+    runSupplyStep:async()=>({ok:true,source:'INDEPENDENT_TARGET_READBACK',state:'OWNED_VERIFIED',
+     ownerMatches:true,slug,remoteId:intent.remoteId,visibility:'UNLISTED'})}),
+   vault:async()=>({ok:true,credential:'synthetic-browser-token'}),
+   scan:async()=>({ok:true,complete:true,repositoryId:'42',head,generators:[]}),
+   write:async()=>{writes++;return {ok:false,code:'GIT_WRITE_UNCERTAIN'};}});
+  const prepared=await runner.step(intentId,10);
+  assert.equal(prepared.record?.state,'GIT_PREPARED',JSON.stringify(prepared));
+  const operation=prepared.record.gitOperationId;
+  const out=await runner.step(intentId,prepared.record.revision);
+  assert.equal(changed,true,JSON.stringify(out));
+  assert.equal(writes,finalPolicyChange==='UNCHANGED'?1:0);
+  const uncertain=await store.getCreate(intentId);
+  assert.equal(uncertain.record.state,'GIT_UNCERTAIN');
+  assert.equal(db.keys('operations').length,1);
+  assert.equal(uncertain.record.gitOperationId,operation);
+  await runner.step(intentId,uncertain.record.revision);
+  assert.equal(writes,finalPolicyChange==='UNCHANGED'?1:0,'uncertain marker cannot write again');
+ });

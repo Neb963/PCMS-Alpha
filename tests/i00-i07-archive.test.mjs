@@ -139,3 +139,42 @@ test('I07 trusted port rejects forged caller, arbitrary Git writes and payload',
     {open:never,guard:never,gitWrite:never});
   assert.equal((await boundary.run({type:'WRITE_PROVIDER'},sender)).code,'CAPABILITY_OFF');
 });
+
+for(const finalPolicyChange of ['REVOKE','REVOKE_REGRANT','RESTORE','UNCHANGED'])
+ test('F2 original archive checks '+finalPolicyChange+' after final restore read and preserves immutable originals',async()=>{
+  let record={slug,revision:1,archiveState:'ARCHIVE_PENDING',personaUid:'persona_fixture_01',original},
+   allowed=true,epoch=1,armed=false,changed=false,held=false,writes=0;
+  const gate=()=>allowed;gate.generation=()=>epoch;
+  const api={runtime:{id:'fixture',getURL:p=>'moz-extension://fixture/'+p},
+   storage:{local:{get:async key=>{
+    if(key==='pcmsRestoreInProgress'&&armed&&!changed){
+     changed=true;if(finalPolicyChange!=='UNCHANGED')epoch++;
+     if(finalPolicyChange==='REVOKE')allowed=false;
+     if(finalPolicyChange==='RESTORE')held=true;
+     await Promise.resolve();
+    }
+    return key==='pcmsRestoreInProgress'&&held?{[key]:{active:true,status:'PREPARING'}}:{};
+   }}}};
+  const boundary=createAdoptionBoundary(api,{open:async()=>({}),gitGate:gate,
+   storeFactory:()=>({getFull:async()=>({ok:true,record}),
+    archiveStage:async(_slug,revision,event)=>{
+     assert.equal(revision,record.revision);
+     const state={PREPARE:'GIT_PREPARED',MARK_DISPATCH:'DISPATCH_POSSIBLE',HELD_UNCERTAIN:'HELD_UNCERTAIN'}[event];
+     assert.ok(state);record={...record,revision:record.revision+1,archiveState:state};
+     if(event==='MARK_DISPATCH')armed=true;
+     return {ok:true,record};
+    }}),
+   guard:()=>({getSafeRouteReadiness:async()=>({ready:true,cookieStoreId:'container_01',routeId:'protected_01'})}),
+   getGitConnection:async()=>({repository:'Neb963/per-gens',repositoryId:'42'}),
+   getGitCredential:async()=>({ok:true,credential:'synthetic-browser-token'}),
+   gitWrite:async request=>{assert.deepEqual(request.original,original);writes++;return {ok:false,code:'GIT_WRITE_UNCERTAIN'};}});
+  const sender={id:'fixture',url:'moz-extension://fixture/pcms/index.html'};
+  const out=await boundary.run({type:'ARCHIVE_GIT',params:{slug,expectedRevision:1}},sender);
+  assert.equal(changed,true,JSON.stringify(out));
+  assert.equal(writes,finalPolicyChange==='UNCHANGED'?1:0);
+  assert.equal(record.archiveState,'HELD_UNCERTAIN');
+  assert.equal(out.code,finalPolicyChange==='UNCHANGED'?'GIT_WRITE_UNCERTAIN':'GIT_DISPATCH_HELD_UNCERTAIN');
+  assert.deepEqual(record.original,original);
+  await boundary.run({type:'ARCHIVE_GIT',params:{slug,expectedRevision:record.revision}},sender);
+  assert.equal(writes,finalPolicyChange==='UNCHANGED'?1:0,'uncertainty cannot archive again');
+ });

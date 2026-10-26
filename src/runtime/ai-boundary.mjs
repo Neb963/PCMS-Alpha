@@ -741,12 +741,14 @@ export function createAiBoundary(api,{
     if(nativeRecovered)return Promise.resolve(true);
     if(nativeRecovery)return nativeRecovery;
     // This actual canonical recovery remains in the existing restore drain.
-    nativeRecovery=trackPcmsWork(Promise.resolve().then(async()=>{
+    nativeRecovery=scopes.run(['nativeRecovery:ai'],async()=>{
       if((await sentinel.inspect()).held)return false;
       const store=storeFactory(await database());
+      if((await sentinel.inspect()).held)return false;
       const result=typeof store.recoverNative==='function'?await store.recoverNative():{ok:true};
-      nativeRecovered=result?.ok===true;return nativeRecovered;
-    })).catch(()=>false).finally(()=>{nativeRecovery=null;});
+      nativeRecovered=result?.ok===true&&!(await sentinel.inspect()).held;
+      return nativeRecovered;
+    }).then(value=>value===true).catch(()=>false).finally(()=>{nativeRecovery=null;});
     return nativeRecovery;
   }
   function schedule(){

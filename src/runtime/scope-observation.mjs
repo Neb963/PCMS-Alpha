@@ -34,11 +34,14 @@ export function createScopeObservation(api,domain,{clock=Date.now,observationMs=
    if(!diagnostics.loaded){
     // A failed read cannot authorize replacing unknown previous-good receipts.
     const prior=(await api.storage.local.get(key))?.[key];
+    if(prior!==undefined&&(prior?.schema!==1||prior.domain!==domain||!Array.isArray(prior.rows)||prior.rows.length>RECENT))
+     throw Error('OBSERVATION_SCHEMA_UNAVAILABLE');
     if(prior?.schema===1&&Array.isArray(prior.rows)){
      const currentRows=[...diagnostics.rows.entries()],hydrated=new Map();
      for(const row of prior.rows.slice(-RECENT)){
       if(!/^[a-f0-9]{64}$/.test(row?.scope||'')||row.domain!==domain||
-       !['ATTEMPTED','AWAITING_SETTLEMENT','FAILED','SETTLED','PROGRESSED'].includes(row.checkpoint))continue;
+       !['ATTEMPTED','AWAITING_SETTLEMENT','FAILED','SETTLED','PROGRESSED'].includes(row.checkpoint))
+       throw Error('OBSERVATION_ROW_UNAVAILABLE');
       const time=v=>Number.isSafeInteger(v)&&v>0?v:null;
       const old={domain,scope:row.scope,checkpoint:row.checkpoint,
        lastAttempt:time(row.lastAttempt),lastSuccessfulProgression:time(row.lastSuccessfulProgression),

@@ -6,7 +6,7 @@ import {createScopedCreationGate} from './creation-authority.mjs';
 import {openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {createCoordinatorStore} from './coordinator-store.mjs';
 import {createCreationRunner} from './creation-runner.mjs';
-import {standingS06} from './s06-standing-authority.mjs';
+import {standingS06,createS06ScopeGate} from './s06-standing-authority.mjs';
 import {subscribeProtectedReadiness} from './protected-readiness.mjs';
 export const CREATION_ALARM='pcms-s04-creation-due';
 export const CREATION_FOLLOWUP_ALARM='pcms-s04-creation-followup';
@@ -25,7 +25,7 @@ export function createCreationWatcher(api,{open=openCanonicalDatabase,
   const intakes=createScopeObservation(api,'creationIntake',{clock,observationMs});
   const runner=createRunner(api,{open,
     effectGate:createScopedCreationGate(authority),
-    gitGate:()=>standingS06?.gate('gitWrite')===true});
+    gitGate:createS06ScopeGate(authority,'gitWrite')});
   async function tick(){
     if(pending)return pending;
     pending=(async()=>{

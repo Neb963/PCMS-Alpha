@@ -9,7 +9,7 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {createAdoptionStore} from './adoption-store.mjs';
 import {validateAdoptionIntent,verifyOriginal} from './adoption.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
-import {standingS06} from './s06-standing-authority.mjs';
+import {standingS06,createS06ScopeGate} from './s06-standing-authority.mjs';
 import {writeOriginalArchive,inspectOriginalArchive} from './original-archive.mjs';
 export const ADOPTION_PORT='pcms-i07-adoption';
 export const ADOPTION_AUTO_ALARM='pcms-adoption-auto';
@@ -136,6 +136,7 @@ export function createAdoptionBoundary(api,{
         }
         if(rec.archiveState!=='ARCHIVE_PENDING')
           return fail('ARCHIVE_RECONCILIATION_REQUIRED');
+        const authorizationGeneration=gitGate.generation?.();
         if(gitGate({slug:p.slug,record:rec})!==true)
           return fail('GIT_WRITE_ACTIVATION_HELD');
         let at=await store.archiveStage(p.slug,rec.revision,'PREPARE');
@@ -151,10 +152,11 @@ export function createAdoptionBoundary(api,{
         // DISPATCH_POSSIBLE committed before the first Git API write.
         // A late hold here is UNCERTAIN, never a safe unjournaled restart.
         const finalRoute=await g.getSafeRouteReadiness(rec.personaUid);
-        if(gitGate({slug:p.slug,record:at.record})!==true||
+        const restoring=(await sentinel.inspect()).held;
+        if(restoring||gitGate({slug:p.slug,record:at.record})!==true||
+           authorizationGeneration!==gitGate.generation?.()||
            !finalRoute?.ready||finalRoute.cookieStoreId!==route.cookieStoreId||
-           finalRoute.routeId!==route.routeId||
-           (await sentinel.inspect()).held){
+           finalRoute.routeId!==route.routeId){
           await store.archiveStage(p.slug,at.record.revision,'HELD_UNCERTAIN');
           return fail('GIT_DISPATCH_HELD_UNCERTAIN');
         }
@@ -344,6 +346,6 @@ export function createAdoptionBoundary(api,{
   return Object.freeze({run,register,autoTick});
 }
 if(typeof browser!=='undefined')createAdoptionBoundary(browser,{
-  gitGate:()=>standingS06?.gate('gitWrite')===true,
+  gitGate:createS06ScopeGate(standingS06,'gitWrite'),
   managementGate:()=>standingS06?.allowsOperatorManagement()
 }).register();

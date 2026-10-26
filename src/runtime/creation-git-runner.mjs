@@ -93,6 +93,7 @@ export function createS04GitContinuation(api,{open=openCanonicalDatabase,
             repositoryId:cfg.repositoryId}});
       }
       if(item.state==='GIT_PREPARED'){
+        const authorizationGeneration=gate.generation?.();
         if(observed.head!==item.gitBaseHead ||
            item.gitExpectedMarkerOid!==await markerSha())
           return fail('GIT_PREPARED_PARENT_CHANGED');
@@ -103,8 +104,9 @@ export function createS04GitContinuation(api,{open=openCanonicalDatabase,
         const marked=await s.stageGit({intentId,expectedRevision,event:'DISPATCH'});
         if(!marked.ok)return marked;
         const now=marked.record;
-        if(!gate({intent:now,repositoryId:cfg.repositoryId})||
-           (await sentinel.inspect()).held){
+        const restoring=(await sentinel.inspect()).held;
+        if(restoring||gate({intent:now,repositoryId:cfg.repositoryId})!==true||
+           authorizationGeneration!==gate.generation?.()){
           return await s.stageGit({intentId,
             expectedRevision:now.revision,event:'UNCERTAIN'});
         }

@@ -9,11 +9,11 @@ const valid=row=>row&&/^[a-f0-9]{64}$/.test(row.scope||'')&&
 export function createWorkNoticeSink(api,domain,{open=openCanonicalDatabase,
  makeStore=createCanonicalStore,clock=Date.now}={}){
  const sentinel=createRestoreSentinel(api.storage.local);
- const pending=new Map();let flight=null;
+ const pending=new Map();let flight=null,connection=null;
  function flush(){
   if(flight||!pending.size)return;
   flight=Promise.resolve().then(async()=>{
-   const store=makeStore(await open());
+   const store=makeStore(await (connection||=open().catch(error=>{connection=null;throw error;})));
    const dispatcher=createNoticeDispatcher(api,{
     recordNotice:args=>trackPcmsWork(store.recordNotice(args)),
     resolveNotice:args=>trackPcmsWork(store.resolveNotice(args))
