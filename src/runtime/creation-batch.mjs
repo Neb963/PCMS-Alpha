@@ -129,7 +129,9 @@ export function createBatchStore(db,{acceptCreate}){
     return Promise.resolve(fail('INVALID_BATCH_CURSOR'));
   return transaction(db,'readonly',(tx,done)=>{
    const all=[];
-   tx.objectStore('meta').openCursor().onsuccess=e=>{
+   const prefix='s04-batch:',range=typeof IDBKeyRange==='undefined'?undefined:
+    IDBKeyRange.bound(prefix,prefix+'\uffff');
+   tx.objectStore('meta').openCursor(range).onsuccess=e=>{
     const c=e.target.result;
     if(c){if(typeof c.key==='string'&&c.key.startsWith('s04-batch:')&&c.value?.batch)
       all.push(view(c.value.batch));c.continue();return;}

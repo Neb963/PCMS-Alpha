@@ -8,7 +8,7 @@ import {fail,openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {createGitCredentialResolver} from './git-credential.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
-import {standingS06} from './s06-standing-authority.mjs';
+import {standingS06,createS06ScopeGate} from './s06-standing-authority.mjs';
 import {createStagingStore,findEligibleManagedSource} from './staging-store.mjs';
 import {exactSource,verifyReadback} from './staging-core.mjs';
 import {inspectGitSource} from './git-source.mjs';
@@ -172,6 +172,7 @@ export function createStagingBoundary(api,{
       return s.move(r.slug,held.revision,'HUMAN_OWNED');
     }
     if(msg.type==='STAGE_PRIVATE'){
+      const authorizationGeneration=effectGate.generation?.();
       if(r.state!=='PINNED')return fail('RECONCILIATION_REQUIRED');
       if(effectGate({phase:'I09',stage:r})!==true)
         return fail('PROVIDER_ACTIVATION_HELD');
@@ -212,6 +213,10 @@ export function createStagingBoundary(api,{
          again.routeId!==guarded.routeId)return fail('PREPARED_GUARD_CHANGED');
       intent=await s.move(r.slug,intent.revision,'DISPATCH_POSSIBLE');
       if(!intent.ok)return intent;
+      const restoring=(await sentinel.inspect()).held;
+      if(restoring||effectGate({phase:'I09',stage:r})!==true||
+         authorizationGeneration!==effectGate.generation?.())
+        return fail('STAGING_ACTIVATION_REVOKED_AFTER_MARKER');
       // Marker is committed; any transport failure is now ambiguous.
       let result;
       try{result=await g.runStageStep(r.personaUid,{
@@ -330,5 +335,5 @@ export function createStagingBoundary(api,{
   }});
 }
 if(typeof browser!=='undefined')createStagingBoundary(browser,{
-  effectGate:()=>standingS06?.gate('development')===true
+  effectGate:createS06ScopeGate(standingS06,'development')
 }).register();

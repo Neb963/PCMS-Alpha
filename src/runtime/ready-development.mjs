@@ -1,3 +1,4 @@
+import {createScopeObservation} from './scope-observation.mjs';
 // S05: a bounded production-workflow adapter for the existing catalog watcher.
 // This is not a second coordinator or a source writer. Every decision reads
 // canonical I13/I09/I10/READY journals; every action invokes their real
@@ -134,9 +135,10 @@ export function createReadyDevelopment(api,{
  makeExisting=()=>createExistingBoundary(api,{effectGate}),
  makeStage=()=>createStagingBoundary(api,{effectGate}),
  makeAi=()=>createAiBoundary(api,{effectGate}),
- maxCandidates=120
+ maxCandidates=120,observationMs=10000
 }={}){
  const sentinel=createRestoreSentinel(api.storage.local);
+ const scopes=createScopeObservation(api,'ready',{observationMs});
  let busy=null,connection=null,ports=null;
  const db=()=>connection||=open().catch(e=>{connection=null;throw e;});
  const boundaries=()=>ports||=(Object.freeze({
@@ -157,6 +159,24 @@ export function createReadyDevelopment(api,{
    let after=typeof before==='string'&&
      /^[a-z0-9][a-z0-9-]{0,99}$/.test(before)?before:'',
      examined=0,lastSeen=after;
+   async function readPlan(row){
+    const full=await queue.get(row.slug);
+    if(!full.ok||full.record.revision!==row.revision)return null;
+    const stage=await createStagingStore(database).getFull(row.slug);
+    const existing=await createExistingStore(database).getFull(row.slug);
+    const job=await createAiStore(database).getJobFull(row.slug);
+    const exception=await createS06ExceptionStore(database).getFull(row.slug);
+    const inventory=await new Promise((resolve,reject)=>{
+     const t=database.transaction('meta','readonly');
+     const q=t.objectStore('meta').get('inventory:'+row.slug);
+     q.onsuccess=()=>resolve(q.result?.generator||null);
+     q.onerror=()=>reject(Error('S05_INVENTORY_READ_FAILED'));
+    });
+    const chosen=planReadyDevelopment({ready:full,stage,existing,job,
+     exception:exception.ok?exception:null,visibility:inventory?.visibility,
+     effects:effectGate({phase:'S05',step:'AUTO_PROGRESS',slug:row.slug})===true});
+    return {stage,existing,job,chosen};
+   }
    for(let page=0;page<64&&examined<maxCandidates;page++){
     const listing=await queue.list({after,limit:Math.min(200,maxCandidates-examined)});
     if(!listing.ok)return listing;
@@ -164,31 +184,25 @@ export function createReadyDevelopment(api,{
      const row=listing.items[i];
      examined++;lastSeen=row.slug;
      if(!row.desired&&!row.active)continue;
-     const full=await queue.get(row.slug);
-     if(!full.ok||full.record.revision!==row.revision)continue;
-     const stage=await createStagingStore(database).getFull(row.slug);
-     const existing=await createExistingStore(database).getFull(row.slug);
-     const job=await createAiStore(database).getJobFull(row.slug);
-     const exception=await createS06ExceptionStore(database).getFull(row.slug);
-     const inventory=await new Promise((resolve,reject)=>{
-      const t=database.transaction('meta','readonly');
-      const q=t.objectStore('meta').get('inventory:'+row.slug);
-      q.onsuccess=()=>resolve(q.result?.generator||null);
-      q.onerror=()=>reject(Error('S05_INVENTORY_READ_FAILED'));
-     });
-     const chosen=planReadyDevelopment({ready:full,stage,existing,job,
-       exception:exception.ok?exception:null,
-       visibility:inventory?.visibility,
-       effects:effectGate({phase:'S05',step:'AUTO_PROGRESS',slug:row.slug})===true});
-     if(!chosen.ok||chosen.type==='HOLD')continue;
+     // A read-only HOLD has no source work to own. Taking its lock on
+     // every wake can deterministically starve another domain's eligible
+     // transition for the same first generator. This optimistic selection
+     // grants no authority: re-read the complete plan after acquiring ownership.
+     const preview=await readPlan(row);
+     if(!preview||!preview.chosen.ok||preview.chosen.type==='HOLD')continue;
+     const keys=['generator:'+row.slug];if(scopes.busy(keys))continue;
+     const nextCursor=(i+1<listing.items.length||listing.more)?row.slug:'';
+     await api.storage.local.set({[cursorKey]:nextCursor});
+     const observed=await scopes.run(keys,async()=>{
+     const fresh=await readPlan(row);
+     if(!fresh||!fresh.chosen.ok||fresh.chosen.type==='HOLD')return {scopeSkipped:true};
+     const {stage,existing,job,chosen}=fresh;
      // One source-heavy step at most per wake, so wrong owner, changed
      // route or source cannot cause fleet-wide unlisting or repeated effects.
      let outcome;
      const slug=row.slug,params={slug};
-     const nextCursor=(i+1<listing.items.length||listing.more)?slug:'';
      const held=async(code,kind='NONE')=>{
        await api.storage.local.set({
-         [cursorKey]:nextCursor,
          [statusKey]:{ok:false,code,slug,step:chosen.type,
            providerEffects:kind,observedAt:Date.now()}
        });
@@ -247,9 +261,16 @@ export function createReadyDevelopment(api,{
           'MAY_HAVE_DISPATCHED':'NONE'};
      // This cursor schedules fairness only. It never means a remote save
      // completed, nor authorizes replay of a failed or ambiguous effect.
-     await api.storage.local.set({[cursorKey]:nextCursor,
-       [statusKey]:{...receipt,observedAt:Date.now()}});
-     return {...receipt,canonical:outcome};
+     await api.storage.local.set({[statusKey]:{...receipt,observedAt:Date.now()}});
+     const previousRevision=['PREPARE_LOCAL','REQUALIFY_RESTORED'].includes(chosen.type)?row.revision:
+      ['STAGE_PRIVATE','RECONCILE_STAGE'].includes(chosen.type)?stage?.record?.revision||0:
+      ['PREPARE_JOB','ADVANCE_JOB','PROBE_NATIVE','PROBE_OLDER_NATIVE','STOP_OLDER_NATIVE'].includes(chosen.type)?job?.job?.revision||0:
+      existing?.record?.revision||0;
+     return {...receipt,canonical:outcome,checkpointAdvanced:outcome?.ok===true&&
+      (outcome?.record?.revision||outcome?.job?.revision||outcome?.revision||0)>previousRevision};
+     },{progressed:r=>r?.checkpointAdvanced===true});
+     if(observed?.scopeSkipped)continue;
+     return observed;
     }
     if(!listing.more)break;
     if(!listing.nextCursor||listing.nextCursor<=after)

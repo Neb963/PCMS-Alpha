@@ -1,3 +1,5 @@
+import {subscribeProtectedReadiness} from './protected-readiness.mjs';
+import {createScopeObservation} from './scope-observation.mjs';
 import {checkpointed,trackPcmsWork} from './work-checkpoint.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I10 settings and read-only AI-job preparation. Untrusted UI never supplies
@@ -5,7 +7,7 @@ import {browserGitCredentialPacket} from './git-local-secret.mjs';
 import {fail,openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
-import {standingS06} from './s06-standing-authority.mjs';
+import {standingS06,createS06ScopeGate} from './s06-standing-authority.mjs';
 import {createStagingStore} from './staging-store.mjs';
 import {createAiStore} from './ai-store.mjs';
 import {inspectGitSource} from './git-source.mjs';
@@ -86,11 +88,14 @@ export function createAiBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,
   storeFactory=createAiStore,stageFactory=createStagingStore,
   inspect=inspectGitSource,inspectReady=inspectReadyCandidate,
-  scanCatalog=scanMainCatalog,gitCredential=browserGitCredentialPacket,effectGate=()=>false,clock=Date.now
+  scanCatalog=scanMainCatalog,gitCredential=browserGitCredentialPacket,effectGate=()=>false,authority=null,clock=Date.now,observationMs=10000
 }={}){
-  let databasePromise,tickBusy=false;
+  let databasePromise,tickBusy=false,registered=false,nativeRecovery=null,nativeRecovered=false;
+  let policyAlarm=null,policyAlarmAgain=false,activationTask=null,activationAgain=false;
+  let policyRetryTimer=null,policyRetryCount=0;
   const database=()=>databasePromise ||=open();
   const sentinel=createRestoreSentinel(api.storage.local);
+  const scopes=createScopeObservation(api,'ai',{clock,observationMs});
   async function outputProof(db,slug,ready,stage){
     const [s,w,j,e]=await Promise.all([
       stage?Promise.resolve(stage):stageFactory(db).getFull(slug),
@@ -382,6 +387,7 @@ export function createAiBoundary(api,{
           });
         }
         if(message.type==='BEGIN_NATIVE'){
+          const authorizationGeneration=effectGate.generation?.();
           // Live native provider AI action is NEVER enabled by a green CI.
           if(effectGate({phase:'I10',job,stage:r,step:p.step})!==true)
             return fail('AI_PROVIDER_ACTIVATION_HELD');
@@ -431,7 +437,8 @@ export function createAiBoundary(api,{
             'A separate browser assertion previously observed a real failing required test. Re-examine the current generator-owned code and src files, make a bounded corrective change, save and run the tests again. Do not declare PASS without an independent browser observation. If no safe progress is possible, report a blocker.':null;
           if(['CHAT1_SEND','CHAT2_SEND','CHAT1_REPAIR','CHAT2_REPAIR','CHAT1_INSTRUCT','CHAT2_INSTRUCT'].includes(p.step)&&
              (typeof text!=='string'||!text.trim()))return fail('AI_PROMPT_UNVERIFIED');
-          if((await sentinel.inspect()).held||effectGate({phase:'I10',job,stage:r,step:p.step})!==true)
+          if((await sentinel.inspect()).held||effectGate({phase:'I10',job,stage:r,step:p.step})!==true||
+             authorizationGeneration!==effectGate.generation?.())
             return fail('AI_PROVIDER_ACTIVATION_HELD');
           // Commit DISPATCH_POSSIBLE before ANY possible remote AI effect;
           // a lost page acknowledgment cannot be replayed.
@@ -444,6 +451,11 @@ export function createAiBoundary(api,{
           if(!after?.ready||after.cookieStoreId!==route.cookieStoreId||
              after.routeId!==route.routeId)
             return fail('AI_DISPATCH_GUARD_CHANGED_RECONCILE');
+          // No await may separate this fresh authority/generation fence from
+          // dispatch. A revoked/regranted policy cannot revive this old actor.
+          if((await sentinel.inspect()).held||effectGate({phase:'I10',job,stage:r,step:p.step})!==true||
+             authorizationGeneration!==effectGate.generation?.())
+            return fail('AI_ACTIVATION_REVOKED_AFTER_MARKER');
           let observed;
           try{observed=await g.runNativeAiStep(r.personaUid,{
             slug:r.slug,nonce:r.nonce,
@@ -660,6 +672,7 @@ export function createAiBoundary(api,{
     tickBusy=true;
     try{
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      if(registered&&authority&&!await ensureNativeRecovery())return fail('AI_STARTUP_RECOVERY_HELD');
       const store=storeFactory(await database());
       // Read every canonical job page before choosing global oldest eligible.
       // An omitted 201st job is not an empty queue or permission to starve it.
@@ -698,6 +711,8 @@ export function createAiBoundary(api,{
         if(!next.ok)continue;
         // One attempted guarded step per wake, never simultaneous provider
         // operations or a retry of DISPATCH_POSSIBLE.
+        const keys=['generator:'+job.slug];if(scopes.busy(keys))continue;
+        return await scopes.run(keys,async()=>{
         const outcome=await executeTrusted({type:'ADVANCE_JOB',params:{
           slug:job.slug,expectedRevision:job.revision
         }});
@@ -715,30 +730,99 @@ export function createAiBoundary(api,{
           }
         }
         return outcome;
+        },{progressed:r=>r?.ok===true&&
+         (r?.job?.revision||r?.record?.revision||r?.revision||0)>job.revision});
       }
       return {ok:true,code:'AI_NO_ELIGIBLE_WORK'};
     }catch{return fail('AI_TICK_UNVERIFIED');}
     finally{tickBusy=false;}
   }
+  function ensureNativeRecovery(){
+    if(nativeRecovered)return Promise.resolve(true);
+    if(nativeRecovery)return nativeRecovery;
+    // This actual canonical recovery remains in the existing restore drain.
+    nativeRecovery=scopes.run(['nativeRecovery:ai'],async()=>{
+      if((await sentinel.inspect()).held)return false;
+      const store=storeFactory(await database());
+      if((await sentinel.inspect()).held)return false;
+      const result=typeof store.recoverNative==='function'?await store.recoverNative():{ok:true};
+      nativeRecovered=result?.ok===true&&!(await sentinel.inspect()).held;
+      return nativeRecovered;
+    }).then(value=>value===true).catch(()=>false).finally(()=>{nativeRecovery=null;});
+    return nativeRecovery;
+  }
   function schedule(){
     if(effectGate({phase:'I10',step:'AUTOMATION'})!==true)return;
-    try{api.alarms.create(AI_PROGRESS_ALARM,{periodInMinutes:1});}catch{}
+    try{void Promise.resolve(api.alarms.create(AI_PROGRESS_ALARM,{periodInMinutes:1})).catch(()=>{});}catch{}
+  }
+  function reconcilePolicyAlarm(){
+    policyAlarmAgain=true;if(policyAlarm)return policyAlarm;
+    const actual=Promise.resolve().then(async()=>{
+      let created=false;
+      do{
+        policyAlarmAgain=false;
+        if(effectGate({phase:'I10',step:'AUTOMATION'})!==true||(await sentinel.inspect()).held){
+          if(api.alarms?.clear)await api.alarms.clear(AI_PROGRESS_ALARM);
+          continue;
+        }
+        const current=api.alarms.get?await api.alarms.get(AI_PROGRESS_ALARM):null;
+        if(effectGate({phase:'I10',step:'AUTOMATION'})!==true){
+          if(api.alarms?.clear)await api.alarms.clear(AI_PROGRESS_ALARM);
+          continue;
+        }
+        if(!current){await api.alarms.create(AI_PROGRESS_ALARM,{periodInMinutes:1});created=true;}
+        // A create may return after synchronous policy revocation.
+        if(effectGate({phase:'I10',step:'AUTOMATION'})!==true||(await sentinel.inspect()).held)
+          if(api.alarms?.clear)await api.alarms.clear(AI_PROGRESS_ALARM);
+      }while(policyAlarmAgain);
+      policyRetryCount=0;
+      const observed=api.alarms.get?await api.alarms.get(AI_PROGRESS_ALARM):null;
+      return {ok:true,checkpointAdvanced:created&&observed?.name===AI_PROGRESS_ALARM};
+    });
+    policyAlarm=actual.catch(()=>{
+      if(effectGate({phase:'I10',step:'AUTOMATION'})===true&&policyRetryTimer===null){
+        const delay=Math.min(60000,1000*2**Math.min(6,policyRetryCount++));
+        policyRetryTimer=setTimeout(()=>{policyRetryTimer=null;void reconcilePolicyAlarm();},delay);
+        policyRetryTimer?.unref?.();
+      }
+    }).finally(()=>{
+      policyAlarm=null;if(policyAlarmAgain)void reconcilePolicyAlarm();
+    });
+    // An observation deadline cannot release the actual alarm API operation.
+    void scopes.run(['alarm:ai'],()=>actual,{progressed:r=>r?.checkpointAdvanced===true});
+    return policyAlarm;
+  }
+  function reconcileAuthority(){
+    void reconcilePolicyAlarm();
+    if(effectGate({phase:'I10',step:'AUTOMATION'})!==true){
+      activationAgain=false;if(policyRetryTimer!==null)clearTimeout(policyRetryTimer);
+      policyRetryTimer=null;policyRetryCount=0;return;
+    }
+    activationAgain=true;if(activationTask)return;
+    activationTask=Promise.resolve().then(async()=>{
+      do{
+        activationAgain=false;
+        if(!await ensureNativeRecovery()||effectGate({phase:'I10',step:'AUTOMATION'})!==true||
+           (await sentinel.inspect()).held)return;
+        await tick();
+      }while(activationAgain);
+    }).catch(()=>{}).finally(()=>{
+      activationTask=null;if(activationAgain)reconcileAuthority();
+    });
   }
   function register(){
+    if(registered)return;registered=true;
     // Interrupted dispatch remains a hold. This never re-sends AI messages.
-    trackPcmsWork(Promise.resolve().then(async()=>{
-      if(!(await sentinel.inspect()).held)
-        await storeFactory(await database()).recoverNative();
-    })).catch(()=>{});
+    void ensureNativeRecovery();
     // Background operation remains extension-owned, not tied to a PCMS tab.
     // Firefox alarms are volatile across full process restarts.
     if(api.alarms?.onAlarm){
       api.alarms.onAlarm.addListener(alarm=>{
         if(alarm?.name===AI_PROGRESS_ALARM)void tick();
       });
-      api.runtime.onStartup.addListener(schedule);
-      api.runtime.onInstalled.addListener(schedule);
-      schedule();
+      api.runtime.onStartup.addListener(authority?reconcileAuthority:schedule);
+      api.runtime.onInstalled.addListener(authority?reconcileAuthority:schedule);
+      if(!authority)schedule();
     }
     api.runtime.onConnect.addListener(port=>{
       if(port?.name!==AI_PORT)return;
@@ -752,6 +836,12 @@ export function createAiBoundary(api,{
           .finally(()=>{busy=false;});
       });
     });
+    subscribeProtectedReadiness(event=>{
+      if(event.kind==='ACCOUNT_READY'&&effectGate({phase:'I10',step:'AUTOMATION'})===true)
+        void tick();
+    });
+    if(authority?.subscribe)authority.subscribe(reconcileAuthority);
+    else if(authority)reconcileAuthority();
   }
     run=checkpointed(api,run,{allowDuringRestore:message=>["LIST_JOBS","GET_JOB","GET_PROMPTS","GET_CONCURRENCY","EXPORT_PROMPTS"].includes(message?.type)});
   executeTrusted=checkpointed(api,executeTrusted,{allowDuringRestore:message=>["LIST_JOBS","GET_JOB","GET_PROMPTS","GET_CONCURRENCY","EXPORT_PROMPTS"].includes(message?.type)});
@@ -759,5 +849,5 @@ export function createAiBoundary(api,{
   return Object.freeze({register,run,tick,runTrusted:executeTrusted});
 }
 if(typeof browser!=='undefined')createAiBoundary(browser,{
-  effectGate:()=>standingS06?.gate('development')===true
+  authority:standingS06,effectGate:createS06ScopeGate(standingS06,'development')
 }).register();

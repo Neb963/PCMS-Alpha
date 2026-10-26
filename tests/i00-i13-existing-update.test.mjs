@@ -173,3 +173,46 @@ test('A05 X: forged ports, prohibited password input, target confusion and calle
   assert.equal((await boundary.run({type:'GET',params:{slug}},sender)).code,'NOT_FOUND');
   assert.equal(effects,0);
 });
+
+for(const finalPolicyChange of ['REVOKE','REVOKE_REGRANT','RESTORE','UNCHANGED'])
+ test('F2 existing-source recovery checks '+finalPolicyChange+' after the final restore read without replay',async()=>{
+  const previous=await exactSource(oldFiles),current=await exactSource(newFiles);
+  const recovery=await sealPrevious(previous),effects=[];
+  let record={slug,revision:3,state:'STAGE_CONFIRMED',personaUid:'persona_fixture01',
+   principalFingerprint:H,remotePublicId:'remote_fixture01',nonce:'a'.repeat(32),
+   previousFingerprint:previous.fingerprint,stagedFingerprint:current.fingerprint,
+   recovery,stageSource:current},allowed=true,epoch=1,armed=false,changed=false,held=false;
+  const gate=()=>allowed;gate.generation=()=>epoch;
+  const localApi={runtime:{id:'fixture',getURL:p=>'moz-extension://fixture/'+p},
+   storage:{local:{get:async key=>{
+    if(key==='pcmsRestoreInProgress'&&armed&&!changed){
+     changed=true;if(finalPolicyChange!=='UNCHANGED')epoch++;
+     if(finalPolicyChange==='REVOKE')allowed=false;
+     if(finalPolicyChange==='RESTORE')held=true;
+     await Promise.resolve();
+    }
+    return key==='pcmsRestoreInProgress'&&held?{[key]:{active:true,status:'PREPARING'}}:{};
+   }}}};
+  const boundary=createExistingBoundary(localApi,{open:async()=>({}),effectGate:gate,
+   existingFactory:()=>({getFull:async()=>({ok:true,record}),
+    move:async(_slug,revision,event)=>{
+     assert.equal(revision,record.revision);
+     if(event==='RESTORE_DISPATCH'){armed=true;record={...record,state:'RESTORE_DISPATCH_POSSIBLE',revision:4};}
+     else {assert.equal(event,'RESTORE_UNCERTAIN');record={...record,state:'RESTORE_UNCERTAIN',revision:5};}
+     return {ok:true,...record};
+    }}),
+   guard:()=>({getSafeRouteReadiness:async()=>({ready:true,cookieStoreId:'container_01',routeId:'protected_01'}),
+    observeReadOnly:async()=>({ok:true,principalFingerprint:H,original:{remotePublicId:record.remotePublicId,
+     ownerResult:'IS_OWNER',visibility:'UNLISTED',pjs:'updated F',html:'<p>F</p>',assets:newFiles.slice(2)}}),
+    runExistingStep:async(_uid,request)=>{
+     assert.equal(request.action,'RESTORE');assert.deepEqual(request.targetFiles,previous.blobs);
+     effects.push('RESTORE');return {ok:true};
+    }})});
+  const out=await boundary.run({type:'RESTORE',params:{slug,expectedRevision:3}},
+   {id:'fixture',url:'moz-extension://fixture/pcms/index.html'});
+  assert.equal(changed,true,JSON.stringify(out));
+  assert.deepEqual(effects,finalPolicyChange==='UNCHANGED'?['RESTORE']:[]);
+  assert.equal(record.state,finalPolicyChange==='UNCHANGED'?'RESTORE_UNCERTAIN':'RESTORE_DISPATCH_POSSIBLE');
+  if(finalPolicyChange!=='UNCHANGED')assert.equal(out.code,'EXISTING_EFFECT_POSSIBLE_HELD');
+  assert.deepEqual(record.recovery,recovery);assert.deepEqual(record.stageSource,current);
+ });

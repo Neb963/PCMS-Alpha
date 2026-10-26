@@ -24,7 +24,7 @@ async function fixture(count=3){
  async function approveOne(msg){const name=msg.params.slug,s=db.read('meta','stage:'+name).record,j=db.read('meta','ai-job:'+name).job,inventory=db.read('meta','inventory:'+name).generator,source=await exactSource(j.finalSource.blobs);
   return releases.approve({approval:approvalTuple({slug:name,stage:s,job:j,source,previous:P,git:{ok:true,testingSha:null},kind:'PRIVATE_NEW'}),stage:s,job:j,source,previous:P,account,inventory,releaseId:'release_'+crypto.randomUUID().replaceAll('-',''),kind:'PRIVATE_NEW',bulkAuthorization:msg.bulkAuthorization});
  }
- return {A,B,P,input,db,bulk,releases,api,approveOne,progress:makeRelease=>createCleanBulkProgress(api,{open:async()=>db,makeRelease:makeRelease||(()=>({runTrusted:approveOne}))})};
+ return {A,B,P,input,db,bulk,releases,api,approveOne,progress:(makeRelease,options={})=>createCleanBulkProgress(api,{...options,open:async()=>db,makeRelease:makeRelease||(()=>({runTrusted:approveOne}))})};
 }
 test('J04 clean approval derives unchanged bytes from immutable declared input, excluding modified children and exceptional/incomplete tests',async()=>{
  const f=await fixture();let j=f.db.read('meta','ai-job:'+slug(1));j.job={...j.job,sourceFingerprint:f.B.fingerprint,verifiedFinal:f.B.fingerprint,finalSource:f.B,chat1:{tests:{smoke:{result:'PASS',sourceFingerprint:f.B.fingerprint}}}};
@@ -79,4 +79,28 @@ test('J04 individual cancellation permanently revokes that item in the older bul
  const fresh=await f.bulk.prepare([slug(0)]);assert.equal(fresh.eligible,1);assert.equal((await f.bulk.approve(fresh.id,1,fresh.digest)).ok,true);
  for(let n=0;n<3;n++)await f.progress().tick();assert.equal((await f.releases.get(slug(0))).state,'APPROVED');
  assert.equal(f.db.keys('events').map(k=>f.db.read('events',k)).filter(e=>e.stage==='RELEASE_APPROVED'&&e.slug===slug(0)).length,2);
+});
+
+test('F2 a pending clean child retains its generator while another approved child progresses and late approval is not duplicated',async()=>{
+ const f=await fixture(2),plan=await f.bulk.prepare([slug(0),slug(1)]);
+ await f.bulk.approve(plan.id,plan.revision,plan.digest);
+ let release,enter,attempts=0;const gate=new Promise(r=>release=r),entered=new Promise(r=>enter=r);
+ const first=f.progress(()=>({runTrusted:async msg=>{
+  attempts++;enter();await gate;return f.approveOne(msg);
+ }}),{observationMs:10});
+ const pending=first.tick();await entered;
+ try{
+  assert.equal((await pending).code,'SCOPE_OBSERVATION_PENDING');
+  await f.progress().tick();
+  assert.equal((await f.releases.get(slug(1))).state,'APPROVED');
+  assert.equal((await f.releases.get(slug(0))).ok,false);
+  assert.equal(attempts,1);
+ }finally{release();}
+ const deadline=Date.now()+2000;
+ while(!(await f.releases.get(slug(0))).ok){assert.ok(Date.now()<deadline);await new Promise(r=>setImmediate(r));}
+ for(let i=0;i<20;i++)await new Promise(r=>setImmediate(r));
+ await f.progress().tick();
+ const approved=f.db.keys('events').map(k=>f.db.read('events',k)).filter(x=>x.stage==='RELEASE_APPROVED');
+ assert.equal(approved.length,2);assert.equal(attempts,1);
+ assert.equal(new Set(approved.map(x=>x.slug)).size,2);
 });

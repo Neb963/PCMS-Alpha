@@ -1,3 +1,4 @@
+import {createScopeObservation} from './scope-observation.mjs';
 import {checkpointed} from './work-checkpoint.mjs';
 // I04: independent, non-effecting inventory port. No HTTP, page scrape,
 // native bridge, login replay or caller-provided ownership proof.
@@ -60,12 +61,13 @@ export function sameGuardContext(before,after) {
 export function createInventoryBoundary(api,{
   open=openCanonicalDatabase,guard=internalPcmsGuard,
   // Fixed donor-owned guarded isolated-page observer; no page-supplied proof.
-  inventoryReader=createReadOnlyInterpreter({
+  observationMs=10000,inventoryReader=createReadOnlyInterpreter({
     readProtectedPage:async ctx=>internalPcmsGuard()?.observeReadOnly(ctx.personaUid,false)
   })
 }={}) {
   let dbPromise;
   const sentinel=createRestoreSentinel(api.storage.local);
+  const scopes=createScopeObservation(api,'inventory',{observationMs});
   const store=()=>dbPromise ||= open().then(db=>({
     accounts:createAccountStore(db),inventory:createInventoryStore(db)
   }));
@@ -166,10 +168,17 @@ export function createInventoryBoundary(api,{
       rows=rows.filter(r=>r.identityHold==='PUBLIC_ID_REVALIDATION_REQUIRED');
       const start=hint?rows.findIndex(r=>r.slug>hint):0;
       const ordered=[...rows.slice(start<0?0:start),...rows.slice(0,start<0?0:start)];
-      for(const row of ordered.slice(0,8)){
-        await perform({type:'RECHECK_GENERATOR',params:{slug:row.slug,expectedRevision:row.revision}});
+      let selected=0,index=0;
+      async function worker(){
+       while(index<ordered.length&&selected<8){
+        const row=ordered[index++],keys=['generator:'+row.slug];if(scopes.busy(keys))continue;
+        if((await sentinel.inspect()).held)return;if(selected>=8)return;selected++;
         await api.storage.local.set({pcmsInventoryRecoveryCursor:row.slug});
+        await scopes.run(keys,()=>perform({type:'RECHECK_GENERATOR',params:{slug:row.slug,expectedRevision:row.revision}}),{
+         progressed:r=>r?.ok===true&&(r?.generator?.revision||r?.revision||0)>row.revision});
+       }
       }
+      await Promise.all([worker(),worker()]);
     }catch{}finally{recoveryBusy=false;}
   }
   function register(){

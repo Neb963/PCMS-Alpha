@@ -9,7 +9,11 @@ test('J02 actual runner attempts persist through watcher restart, drain unvisite
  const api={storage:{local:{get:async k=>({[k]:local[k]}),set:async data=>Object.assign(local,data)}},
   alarms:{create:async(name)=>alarms.push(name)}};
  const options={open:async()=>db,clock:()=>now,createRunner:(api,o)=>createCreationRunner(api,{...o,now:()=>now})};
- for(let i=0;i<3;i++)assert.equal((await createCreationWatcher(api,options).tick()).held,Math.min(8,23-i*8));
+ for(let i=0;i<3;i++){
+  const turn=await createCreationWatcher(api,options).tick();
+  assert.equal(turn.held,Math.min(8,23-i*8));
+  if(i<2)assert.equal(turn.more,true,'unvisited account buckets retain one bounded followup');
+ }
  const before=alarms.length,out=await createCreationWatcher(api,options).tick();
  assert.equal(out.selected,0);assert.equal(out.more,false);assert.equal(alarms.length,before);
  const page=await store.listCreate({limit:100});assert.equal(page.items.filter(x=>x.lastAttempt?.code==='NO_MANAGED_ACCOUNTS').length,23);

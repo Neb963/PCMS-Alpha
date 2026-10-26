@@ -39,10 +39,25 @@ def alarm(s):return background(s,'return await window.__j04flow.alarm();')
 def attach(s):
     return g.oracle(s,"""const bg=await browser.runtime.getBackgroundPage();if(!bg.__j04flow)return {ok:false};const ports=new Set(['pcms-i10-ai','pcms-i13-release','pcms-j04-clean-publication','pcms-s03-catalog','pcms-i02-canonical-readonly','pcms-s05-ready-operator']);const original=browser.runtime.connect.bind(browser.runtime),sender={id:browser.runtime.id,url:browser.runtime.getURL('pcms/index.html')};browser.runtime.connect=function(...args){const name=args.at(-1)?.name;if(!ports.has(name))return original(...args);const messages=new Set(),disconnected=new Set();let closed=false;return {onMessage:{addListener:f=>messages.add(f)},onDisconnect:{addListener:f=>disconnected.add(f)},disconnect(){closed=true},postMessage(msg){Promise.resolve(bg.__j04flow.command(name,msg,sender)).then(out=>{if(!closed)for(const f of messages)f(out)}).catch(()=>{if(!closed)for(const f of disconnected)f()})}}};return {ok:true};""")
 
+def progress_summary(state):
+    # Only fixture IDs, canonical revisions/states and fixed result classes.
+    # Source bytes, prompts, credentials and native/provider payloads stay out.
+    return {key:[{k:row.get(k) for k in ('slug','state','revision','hold') if k in row}
+                 for row in state.get(key,[])]
+            for key in ('ready','stages','jobs','writebacks','releases')} | {
+        'completedWakes':state.get('completedWakes'),
+        'events':[{'name':event.get('name'),
+                   'ok':event.get('result',{}).get('ok'),
+                   'code':event.get('result',{}).get('code'),
+                   'step':event.get('result',{}).get('step')}
+                  for event in state.get('events',[])[-10:]]}
+
 def progress(s,predicate,label,steps=160):
-    for _ in range(steps):
+    print('B '+label+'_BEGIN',flush=True)
+    for attempt in range(steps):
         before=inspect(s)
         if predicate(before):print('B '+label,flush=True);return before
+        if attempt%4==0:print('B J04_PIPELINE_WAIT '+json.dumps({'label':label,'attempt':attempt,**progress_summary(before)},sort_keys=True),flush=True)
         count=before['completedWakes'];alarm(s)
         deadline=time.time()+12
         while time.time()<deadline:
@@ -58,7 +73,9 @@ def run(browser,archive,folder):
     s=b.open_session(browser,profile);evidence={'scope':{'externalServices':'OFFLINE Git/provider/native models','effectAuthority':'fixture effect gates true; production standing gates remain separately tested','clock':'actual Date.now; no acceleration','transport':'test-only per-message Firefox keepalive released on reply; no permanent product keepalive','alarmCadence':'100ms test wake of real browser alarm; production periodic READY alarm is one minute','process':'owned disposable persistent profile; nonempty disjoint old/new Firefox PID sets','livePrivateGitOrProvider':'NOT_TESTED'}}
     try:
         url=f'moz-extension://{b.addons_uuid(profile)}/pcms/index.html#work-queue';b.call('POST',f'/session/{s}/url',{'url':url});b.wait_donor_ready(s)
-        assert install(s).get('ok');assert attach(s).get('ok')
+        print('B J04_PIPELINE_INSTALL_BEGIN',flush=True)
+        assert install(s).get('ok');print('B J04_PIPELINE_INSTALLED',flush=True)
+        assert attach(s).get('ok');print('B J04_PIPELINE_ATTACHED',flush=True)
         # Remove the actual dashboard entirely. Real browser alarms now drive
         # production background controllers, independent of a page-side tick.
         b.call('POST',f'/session/{s}/url',{'url':'about:blank'})

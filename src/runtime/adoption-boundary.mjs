@@ -1,3 +1,4 @@
+import {createScopeObservation} from './scope-observation.mjs';
 import {checkpointed} from './work-checkpoint.mjs';
 import {autoBackup} from './backup-auto-boundary.mjs';
 import {inventoryBoundary} from './inventory-boundary.mjs';
@@ -8,7 +9,7 @@ import {trustedExtensionPage} from './command-boundary.mjs';
 import {createAdoptionStore} from './adoption-store.mjs';
 import {validateAdoptionIntent,verifyOriginal} from './adoption.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
-import {standingS06} from './s06-standing-authority.mjs';
+import {standingS06,createS06ScopeGate} from './s06-standing-authority.mjs';
 import {writeOriginalArchive,inspectOriginalArchive} from './original-archive.mjs';
 export const ADOPTION_PORT='pcms-i07-adoption';
 export const ADOPTION_AUTO_ALARM='pcms-adoption-auto';
@@ -65,7 +66,7 @@ export function createAdoptionBoundary(api,{
   gitGate=()=>false,
   // C-10 account-level management: production uses the standing operator
   // development grant. Off by default; tests inject.
-  managementGate=()=>false,clock=Date.now,
+  managementGate=()=>false,clock=Date.now,observationMs=10000,
   refreshIdentity=(slug,revision)=>inventoryBoundary?.recheckGenerator(slug,revision),
   requestCheckpoint=()=>autoBackup?.runner.requestOriginalCheckpoint(),
   getGitConnection=async()=>{const out=await api.storage.local.get('pcmsS03Git');
@@ -75,6 +76,7 @@ export function createAdoptionBoundary(api,{
   let dbPromise;
   const db=()=>dbPromise ||=open();
   const sentinel=createRestoreSentinel(api.storage.local);
+  const scopes=createScopeObservation(api,'adoption',{clock,observationMs});
   async function run(msg,sender){
     const valid=validateAdoptionMessage(api,sender,msg);
     if(!valid.ok)return valid;
@@ -134,6 +136,7 @@ export function createAdoptionBoundary(api,{
         }
         if(rec.archiveState!=='ARCHIVE_PENDING')
           return fail('ARCHIVE_RECONCILIATION_REQUIRED');
+        const authorizationGeneration=gitGate.generation?.();
         if(gitGate({slug:p.slug,record:rec})!==true)
           return fail('GIT_WRITE_ACTIVATION_HELD');
         let at=await store.archiveStage(p.slug,rec.revision,'PREPARE');
@@ -149,10 +152,11 @@ export function createAdoptionBoundary(api,{
         // DISPATCH_POSSIBLE committed before the first Git API write.
         // A late hold here is UNCERTAIN, never a safe unjournaled restart.
         const finalRoute=await g.getSafeRouteReadiness(rec.personaUid);
-        if(gitGate({slug:p.slug,record:at.record})!==true||
+        const restoring=(await sentinel.inspect()).held;
+        if(restoring||gitGate({slug:p.slug,record:at.record})!==true||
+           authorizationGeneration!==gitGate.generation?.()||
            !finalRoute?.ready||finalRoute.cookieStoreId!==route.cookieStoreId||
-           finalRoute.routeId!==route.routeId||
-           (await sentinel.inspect()).held){
+           finalRoute.routeId!==route.routeId){
           await store.archiveStage(p.slug,at.record.revision,'HELD_UNCERTAIN');
           return fail('GIT_DISPATCH_HELD_UNCERTAIN');
         }
@@ -288,15 +292,28 @@ export function createAdoptionBoundary(api,{
       let cursor=null;try{cursor=(await api.storage.local.get(AUTO_CURSOR))?.[AUTO_CURSOR]||null;}catch{}
       const start=cursor?Math.max(0,work.findIndex(w=>w.slug>cursor)):0;
       const ordered=[...work.slice(start<0?0:start),...work.slice(0,start<0?0:start)];
-      const results=[];
-      for(const item of ordered.slice(0,maxSteps)){
-        if((await managementGate())!==true||(await sentinel.inspect()).held)break;
-        const out=item.type==='REFRESH_CONTEXT'?await refreshIdentity(item.slug,item.params.expectedRevision):
-          await runTrusted({type:item.type,params:item.params});
-        if(!out?.ok)backoff.set(item.slug,clock()+AUTO_BACKOFF);else backoff.delete(item.slug);
+      const results=[];let selected=0,index=0;
+      async function worker(){
+       while(index<ordered.length&&selected<maxSteps){
+        const item=ordered[index++],keys=['generator:'+item.slug];
+        if(scopes.busy(keys))continue;
+        if((await managementGate())!==true||(await sentinel.inspect()).held)return;
+        if(selected>=maxSteps)return;selected++;
+        await api.storage.local.set({[AUTO_CURSOR]:item.slug});
+        const out=await scopes.run(keys,()=>item.type==='REFRESH_CONTEXT'?
+         refreshIdentity(item.slug,item.params.expectedRevision):runTrusted({type:item.type,params:item.params}),{
+          progressed:r=>r?.ok===true&&
+           (r?.record?.revision||r?.revision||0)>item.params.expectedRevision});
+        if(!out?.ok&&!['SCOPE_OBSERVATION_PENDING','SCOPE_ACTUAL_WORK_PENDING','SCOPE_CAPACITY_HELD'].includes(out?.code))
+         backoff.set(item.slug,clock()+AUTO_BACKOFF);else backoff.delete(item.slug);
         results.push({slug:item.slug,step:item.type,ok:out?.ok===true,code:out?.ok?null:out?.code||'HELD'});
-        try{await api.storage.local.set({[AUTO_CURSOR]:item.slug});}catch{}
+       }
       }
+      await Promise.all([worker(),worker()]);
+      // Execution may finish independently; the public checkpoint preserves
+      // its original fair selection order for existing callers and projections.
+      const position=new Map(ordered.map((item,index)=>[item.slug,index]));
+      results.sort((a,b)=>position.get(a.slug)-position.get(b.slug));
       if(results.some(r=>r.ok)||work.length>results.length)
         try{void Promise.resolve(api.alarms?.create(ADOPTION_AUTO_ALARM+'-followup',{when:clock()+60000})).catch(()=>{});}catch{}
       const unqualified=[...adoptions.values()].some(a=>{const current=accounts.get(a.accountId);
@@ -333,6 +350,6 @@ export function createAdoptionBoundary(api,{
   return Object.freeze({run,register,autoTick});
 }
 if(typeof browser!=='undefined')createAdoptionBoundary(browser,{
-  gitGate:()=>standingS06?.gate('gitWrite')===true,
+  gitGate:createS06ScopeGate(standingS06,'gitWrite'),
   managementGate:()=>standingS06?.allowsOperatorManagement()
 }).register();

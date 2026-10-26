@@ -19,14 +19,14 @@ async function seed(db,rows){
     for(const r of rows)m.put({key:'inventory:'+r.slug,generator:r});
   });
 }
-function fixture(rows,{management=true,changing=new Set()}={}){
+function fixture(rows,{management=true,changing=new Set(),beforeRead=null}={}){
   const db=fakeDatabase(),local=new Map(),reads=[],effects=[];
   const api={runtime:{id:'f',getURL:p=>'moz-extension://f/'+p,onConnect:{addListener(){}}},
     alarms:{create(){},onAlarm:{addListener(){}}},
     storage:{local:{get:async k=>local.has(k)?{[k]:local.get(k)}:{},set:async o=>{for(const [k,v] of Object.entries(o))local.set(k,v);}}}};
   let n=0;
   const guard=()=>({getSafeRouteReadiness:async()=>({ready:true,cookieStoreId:'c1',routeId:'r1'}),
-    observeReadOnly:async(uid,identityOnly,slug)=>{reads.push(slug);
+    observeReadOnly:async(uid,identityOnly,slug)=>{reads.push(slug);if(beforeRead)await beforeRead(slug);
       return {ok:true,principalFingerprint:fp,original:{ownerResult:'IS_OWNER',
         visibility:rows.find(r=>r.slug===slug).visibility,remotePublicId:'public_'+slug.replaceAll('-','_'),
         pjs:'let x='+(changing.has(slug)?++n:1),html:'<b>x</b>',assets:[]}};}});
@@ -115,4 +115,24 @@ test('J02 primary retry command re-reads canonical revision and advances only it
  assert.equal(adoptionOf(f.db,'j02-retry-target').archiveState,'ARCHIVE_PENDING');
  assert.equal(adoptionOf(f.db,'j02-other'),undefined);
  assert.equal((await f.boundary.run({type:'RETRY_ADOPTION',params:{slug:'j02-retry-target',expectedRevision:4}},sender)).ok,false);
+});
+
+test('F2 adoption preserves selection-order results while another source finishes before the first settles',async()=>{
+ let release;const held=new Promise(resolve=>{release=resolve;});
+ const f=fixture([gen('alpha'),gen('beta'),gen('gamma')],{
+  beforeRead:async slug=>{if(slug==='alpha')await held;}});
+ await f.ready;const pending=f.boundary.autoTick({maxSteps:3});
+ try{
+  const deadline=Date.now()+2000;
+  while(!adoptionOf(f.db,'beta')&&Date.now()<deadline)
+   await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(adoptionOf(f.db,'beta')?.archiveState,'ARCHIVE_PENDING',
+   'independent source must commit before held alpha is released');
+  assert.equal(adoptionOf(f.db,'alpha'),undefined);
+ }finally{release();}
+ const out=await pending;
+ assert.deepEqual(out.results.map(r=>[r.slug,r.ok]),[['alpha',true],['beta',true],['gamma',true]]);
+ assert.deepEqual(f.effects,[]);
+ for(const slug of ['alpha','beta','gamma'])
+  assert.equal(adoptionOf(f.db,slug).archiveState,'ARCHIVE_PENDING');
 });

@@ -7,7 +7,7 @@ import {browserGitCredentialPacket} from './git-local-secret.mjs';
 import {fail,openCanonicalDatabase,createRestoreSentinel} from './journal.mjs';
 import {trustedExtensionPage} from './command-boundary.mjs';
 import {internalPcmsGuard} from './persona-guard.mjs';
-import {standingS06} from './s06-standing-authority.mjs';
+import {standingS06,createS06ScopeGate} from './s06-standing-authority.mjs';
 import {createExistingStore} from './existing-update-store.mjs';
 import {authorizeSleepingUpdate,sealPrevious,unlockPrevious} from './existing-update-core.mjs';
 import {createStagingStore} from './staging-store.mjs';
@@ -434,6 +434,7 @@ export function createExistingBoundary(api,{
             return fail('S05_READY_CHANGED_BEFORE_UPDATE_SAVE');
         }
       }
+      const authorizationGeneration=effectGate.generation?.();
       if(effectGate({phase:'I13',action:m.type,record:r})!==true)
         return fail('PROVIDER_ACTIVATION_HELD');
       if(!(await recheck(g,r.personaUid,before)).ok)return fail('EXISTING_GUARD_CHANGED');
@@ -470,6 +471,10 @@ export function createExistingBoundary(api,{
           ['UNLIST','STAGE'].includes(m.type)?prior.source.blobs:r.stageSource.blobs,
         ...(m.type==='STAGE'?{targetFiles:r.stageSource.blobs}:
           m.type==='RESTORE'?{targetFiles:prior.source.blobs}:{})};
+      const restoring=(await sentinel.inspect()).held;
+      if(restoring||effectGate({phase:'I13',action:m.type,record:r})!==true||
+         authorizationGeneration!==effectGate.generation?.())
+        return fail('EXISTING_EFFECT_POSSIBLE_HELD');
       let attempt;
       try{attempt=await g.runExistingStep(r.personaUid,request);}
       catch{attempt=fail('EXISTING_EFFECT_OUTCOME_UNKNOWN');}
@@ -506,5 +511,5 @@ export function createExistingBoundary(api,{
   return Object.freeze({run,runTrusted,register});
 }
 if(typeof browser!=='undefined')createExistingBoundary(browser,{
-  effectGate:()=>standingS06?.gate('development')===true
+  effectGate:createS06ScopeGate(standingS06,'development')
 }).register();

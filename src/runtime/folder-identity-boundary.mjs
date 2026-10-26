@@ -1,3 +1,4 @@
+import {createScopeObservation} from './scope-observation.mjs';
 import {checkpointed} from './work-checkpoint.mjs';
 import {catalogWatcher} from './catalog-watch.mjs';
 // R4: exact-scope identity review after a complete pinned main observation.
@@ -43,8 +44,9 @@ export function validateIdentityMessage(api,sender,message){
    return fail('INVALID_PARAMS');
  return {ok:true};
 }
-export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=null,refreshMain=()=>catalogWatcher?.tick()}={}){
+export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=null,refreshMain=()=>catalogWatcher?.tick(),observationMs=10000}={}){
  const sentinel=createRestoreSentinel(api.storage.local);
+ const scopes=createScopeObservation(api,'rename',{clock,observationMs});
  const existingRename=renameService||createExistingRenameService(api,{clock});
  const ALARM='pcms-r4-identity-followup';let ticking=null;
  let busy=false;
@@ -152,8 +154,12 @@ export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=n
     r.state==='RENAME_EXISTING_REQUESTED'&&r.automaticRenameApproved===true||
     ['DISPATCH_POSSIBLE','OUTCOME_UNCERTAIN'].includes(attempts['pcmsR4ExistingRenameAttempt:'+r.newSlug]?.state)));
   const progress=await api.storage.local.get(candidates.map(r=>'pcmsR4RenameProgress:'+r.newSlug));
-  const review=candidates.sort((a,b)=>(progress['pcmsR4RenameProgress:'+a.newSlug]?.observedAt||0)-(progress['pcmsR4RenameProgress:'+b.newSlug]?.observedAt||0))[0];
+  const review=candidates.filter(r=>!scopes.busy(['generator:'+r.newSlug,...(r.oldSlug?['generator:'+r.oldSlug]:[])])).sort((a,b)=>(progress['pcmsR4RenameProgress:'+a.newSlug]?.observedAt||0)-(progress['pcmsR4RenameProgress:'+b.newSlug]?.observedAt||0))[0];
   if(!review)return {ok:true,code:'NO_PENDING_RENAME'};
+  const keys=['generator:'+review.newSlug,...(review.oldSlug?['generator:'+review.oldSlug]:[])];
+  await api.storage.local.set({['pcmsR4RenameProgress:'+review.newSlug]:{
+   code:'RENAME_OBSERVATION_PENDING',ok:false,observedAt:clock()}});
+  return scopes.run(keys,async()=>{
   const saved=(await api.storage.local.get('pcmsR4ExistingRenameAttempt:'+review.newSlug))?.['pcmsR4ExistingRenameAttempt:'+review.newSlug];
   const type=!saved&&review.automaticRenameApproved===true?'PREPARE':saved?.state==='RENAME_PREPARED'&&review.automaticRenameApproved===true?'EXECUTE':['DISPATCH_POSSIBLE','OUTCOME_UNCERTAIN'].includes(saved?.state)?'RECONCILE':review.automaticRenameApproved===true&&['REMOTE_RENAME_VERIFIED_LINK_PENDING','RENAME_COMPLETED'].includes(saved?.state)?'FINALIZE':null;
   if(!type)return fail('RENAME_STAGE_NOT_ADMISSIBLE');
@@ -162,6 +168,7 @@ export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=n
   await api.storage.local.set({['pcmsR4RenameProgress:'+review.newSlug]:{code:out.code,ok:out.ok,observedAt:clock()}});
   if(out.ok&&out.state!=='RENAME_COMPLETED')try{await api.alarms.create(ALARM+'-soon',{when:clock()+1000});}catch{}
   return out;
+  },{progressed:r=>r?.ok===true&&Number.isSafeInteger(r?.revision)});
  }
  function tick(slug){return ticking||(ticking=performTick(slug).finally(()=>{ticking=null}))}
  function register(){

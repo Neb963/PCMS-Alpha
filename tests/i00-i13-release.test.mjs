@@ -1,3 +1,5 @@
+import {fakeDatabase} from './fake-idb.mjs';
+import {createReleaseStore} from '../src/runtime/release-store.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
@@ -180,3 +182,51 @@ test('I13 startup B-preflight: all release modules ship in combined XPI; entry p
     assert.equal(parsed.status,0,file+': '+parsed.stderr);
   }
 });
+
+for(const finalPolicyChange of ['REVOKE','REVOKE_REGRANT','RESTORE','UNCHANGED'])
+ test('F2 approved publication checks '+finalPolicyChange+' after its final awaited restore read',async()=>{
+  const f=await fixture(),db=fakeDatabase(),effects=[];
+  await new Promise((resolve,reject)=>{
+   const tx=db.transaction('meta','readwrite');tx.oncomplete=resolve;tx.onabort=reject;
+   for(const row of [{key:'stage:'+f.stage.slug,record:f.stage},
+    {key:'ai-job:'+f.stage.slug,job:f.job},{key:'account:'+f.account.accountId,account:f.account},
+    {key:'inventory:'+f.stage.slug,generator:f.inventory}])tx.objectStore('meta').put(row);
+  });
+  const store=createReleaseStore(db),approved=approvalTuple({slug:f.stage.slug,stage:f.stage,job:f.job,
+   source:f.source,previous:f.previous,git:f.git,kind:'PRIVATE_NEW'});
+  const admission=await store.approve({approval:approved,stage:f.stage,job:f.job,account:f.account,
+   inventory:f.inventory,source:f.source,previous:f.previous,kind:'PRIVATE_NEW',releaseId:'release_'+'9'.repeat(32)});
+  assert.equal(admission.ok,true,JSON.stringify(admission));
+  let allowed=true,epoch=1,changed=false,held=false;
+  const gate=()=>allowed;gate.generation=()=>epoch;
+  const scopedApi={...api,storage:{local:{get:async key=>{
+   if(key==='pcmsRestoreInProgress'&&!changed&&
+      db.read('meta','release:'+f.stage.slug)?.release?.state==='DISPATCH_POSSIBLE'){
+    changed=true;
+    if(finalPolicyChange!=='UNCHANGED')epoch++;
+    if(finalPolicyChange==='REVOKE')allowed=false;
+    if(finalPolicyChange==='RESTORE')held=true;
+    await Promise.resolve();
+   }
+   return key==='pcmsRestoreInProgress'&&held?{[key]:{active:true,status:'PREPARING'}}:{};
+  }}}};
+  const boundary=createReleaseBoundary(scopedApi,{open:async()=>db,effectGate:gate,
+   gitCredential:async()=>({ok:true,credential:'synthetic-browser-token'}),
+   inspect:async()=>({...f.git,sourceBytes:f.source.blobs}),
+   guard:()=>({getSafeRouteReadiness:async()=>({ready:true,routeId:'protected_01',cookieStoreId:'container_01'}),
+    inspectStageEditor:async()=>({ok:true,clean:true}),runReleaseStep:async()=>({ok:true}),
+    runNativeAiStep:async()=>({ok:true,busy:false,editorClean:true,sourceSaved:true,sessionDigest:H,
+     hasQueue:false,inputOccupied:false,attachmentsPending:false}),
+    observeReadOnly:async()=>({ok:true,principalFingerprint:H,original:{
+     remotePublicId:f.stage.remotePublicId,ownerResult:'IS_OWNER',visibility:'UNLISTED',
+     pjs:'PJS F version',html:'<p>F version</p>',assets:f.source.blobs.filter(x=>x.path.startsWith('src/'))}})
+   }),dispatch:async()=>{effects.push('PUBLISH');return {ok:true};}});
+  const out=await boundary.run({type:'DISPATCH',params:{slug:f.stage.slug,
+   token:'synthetic-browser-token',expectedRevision:admission.revision}},sender);
+  assert.equal(changed,true,JSON.stringify(out));
+  assert.equal(out.state,'PUBLICATION_UNCERTAIN',JSON.stringify(out));
+  assert.deepEqual(effects,finalPolicyChange==='UNCHANGED'?['PUBLISH']:[]);
+  const stored=await store.getFull(f.stage.slug);
+  assert.equal(stored.record.dispatchPossible,true);
+  assert.deepEqual(stored.record.sealedSource,f.source);
+ });

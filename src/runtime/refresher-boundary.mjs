@@ -1,3 +1,4 @@
+import {createScopeObservation} from './scope-observation.mjs';
 import {checkpointed} from './work-checkpoint.mjs';
 // Synchronous listeners, one coalesced scheduler alarm, canonical turn/claim
 // fences. I14 conditional executor is present but default production gate OFF.
@@ -93,13 +94,17 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
   nativeClockGate=()=>false,continuousCoverageFor=()=>null,
   browserClockGate=()=>false,monotonicClock=()=>performance.now(),
   clockPulseMs=REFRESHER_CLOCK_PULSE_MS,setClockTimer=(fn,ms)=>setTimeout(fn,ms),
-  clearClockTimer=id=>clearTimeout(id),
+  clearClockTimer=id=>clearTimeout(id),observationMs=10000,
   newId=()=>crypto.randomUUID().replaceAll('-','')}={}){
   let dbPromise,turnPromise=null,registered=false,alarmHeld=false,alarmTail=Promise.resolve();
   const bootId=newId(),sentinel=createRestoreSentinel(api.storage.local);
-  let clockTimer=null,clockGeneration=0;
+  const routesObserved=createScopeObservation(api,'refresherClock',{clock,observationMs});
+  const monitors=createScopeObservation(api,'refresher',{clock,observationMs});
+  const mutations=createScopeObservation(api,'refresher',{clock,observationMs});
+  let clockTimer=null,clockGeneration=0,clockHoldSequence=0,browserEpoch=bootId;
   const pulse=Number.isSafeInteger(clockPulseMs)&&clockPulseMs>=1000&&clockPulseMs<=REFRESHER_CLOCK_PULSE_MS?clockPulseMs:0;
-  function stopActiveClock(){
+  function stopActiveClock({invalidateEvidence=false}={}){
+    if(invalidateEvidence)browserEpoch=String(bootId).slice(0,64)+'_hold_'+(++clockHoldSequence).toString(36);
     clockGeneration++;
     if(clockTimer!==null)try{clearClockTimer(clockTimer);}catch{}
     clockTimer=null;
@@ -186,10 +191,18 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
   const verifiedScopes=state=>Object.entries(state.accounts)
     .filter(([,a])=>a.verifiedIdentity===true)
     .sort(([x],[y])=>x<y?-1:x>y?1:0).slice(0,FLEET_BOUND);
-  async function readinessFor(g,scopes){
-    return new Map(await Promise.all(scopes.map(async([id,a])=>{
-      try{return [id,await g.getSafeRouteReadiness(a.personaUid,{recover:false})];}catch{return [id,{ready:false}];}
-    })));
+  async function readinessFor(g,scopes,{recover=false}={}){
+    const results=new Map();let index=0;
+    async function worker(){
+      while(index<scopes.length){
+        const [id,a]=scopes[index++];
+        const read=await routesObserved.run(['routeRead:'+id],
+          ()=>g?.getSafeRouteReadiness?.(a.personaUid,{recover}),{diagnostic:false});
+        results.set(id,read?.ready===true?read:{ready:false,code:read?.code||'PROTECTED_ROUTE_UNVERIFIED'});
+      }
+    }
+    await Promise.all(Array.from({length:Math.min(4,scopes.length)},worker));
+    return results;
   }
   async function observe(s,cached=null){
     if(!observationGate())return fail('MONITOR_ACTIVATION_HELD');
@@ -204,9 +217,8 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     const needed=new Set(state.rows.filter(r=>!before.get(r.accountId)?.ready&&r.ownerVerified&&!r.identityHeld&&(
       state.policy?.refreshEnabled===true&&state.provider&&rowBlocks(state,r).every(c=>c==='ACCOUNT_UNAVAILABLE')||
       r.metrics?.demandUntil>now&&r.metrics.nextDueAt<=now&&!r.metrics.suspended)).map(r=>r.accountId));
-    await Promise.all(scopes.filter(([id])=>needed.has(id)&&!before.get(id)?.ready).map(async([id,a])=>{
-      try{before.set(id,await g.getSafeRouteReadiness(a.personaUid));}catch{}
-    }));
+    const recovered=await readinessFor(g,scopes.filter(([id])=>needed.has(id)&&!before.get(id)?.ready),{recover:true});
+    for(const [id,value] of recovered)before.set(id,value);
     const due=state.rows.filter(r=>!r.identityHeld&&r.ownerVerified&&!r.metrics.suspended&&
       r.metrics.nextDueAt<=now&&before.get(r.accountId)?.ready)
       .sort((a,b)=>(b.metrics.demandUntil>now?1:0)-(a.metrics.demandUntil>now?1:0)||
@@ -216,7 +228,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     if(!state.recent.suspended&&state.recent.nextDueAt<=now){
       // Rotate the shared recent-feed read across ready accounts. A shared
       // endpoint backoff (429) applies to ALL accounts: rotation never evades it.
-      const ready=scopes.filter(([id])=>before.get(id)?.ready).map(([id])=>id);
+      const ready=scopes.filter(([id])=>before.get(id)?.ready&&!monitors.busy(['monitorAccount:'+id])).map(([id])=>id);
       const accountId=(state.recent.endpointBackoffUntil||0)>now?null:
         ready.find(id=>recentCursor===null||id>recentCursor)||ready[0];
       if(accountId)recentCursor=accountId;
@@ -225,13 +237,15 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     }
     for(const r of due){
       if(claims.length>=2)break;
-      if(claims.some(c=>c.accountId===r.accountId))continue;
+      if(claims.some(c=>c.accountId===r.accountId)||monitors.busy(['monitorAccount:'+r.accountId]))continue;
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
       const out=await s.claim({kind:'STATISTIC',stableId:r.stableId,now:clock(),bootId,claimId:newId()});
       if(out.ok)claims.push(out.claim);
     }
     if(!claims.length)return {ok:true,code:'NO_OBSERVATION_DUE'};
     const results=await Promise.all(claims.map(async c=>{
+      let late=false;
+      const observed=await monitors.run(['monitorAccount:'+c.accountId],async()=>{
       let packet;
       try{
         if((await sentinel.inspect()).held)return {c,packet:{ok:false,code:'RESTORE_HOLD'}};
@@ -245,7 +259,16 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         else packet={...packet,interval:{source:'GUARDED_MONITOR_INTERVAL',bootId,
           from:c.startedAt,to:clock(),domain:first.healthDomain||null}};
       }catch{packet={ok:false,code:'MONITOR_READ_UNAVAILABLE'};}
+      if(late){
+        // A deadline did not cancel the actual protected read. Its late
+        // packet still requires original canonical claim/restore validation.
+        if(!(await sentinel.inspect()).held)
+          {const done=await s.complete(c.claimId,{...packet,observedAt:c.startedAt},clock());
+           if(done?.accepted===true)monitors.recordProgress(['monitorAccount:'+c.accountId]);}
+      }
       return {c,packet};
+      },{onPending:()=>{late=true;},progressed:()=>false});
+      return observed?.c?observed:{c,packet:{ok:false,code:observed?.code||'MONITOR_READ_UNAVAILABLE'},pending:true};
     }));
     if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
     const evidenced=results.filter(({c,packet:p})=>p?.interval&&
@@ -263,9 +286,10 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         // Only an independently observed shared healthy interval can consume
         // grace for a scoped protected-route failure. Unknown local errors
         // and healthy scopes without current session evidence remain frozen.
-        for(const [id,a] of scopes){
-          if(accounts.some(x=>x.accountId===id))continue;
-          const old=before.get(id),current=await g.getSafeRouteReadiness(a.personaUid);
+        const unobserved=scopes.filter(([id])=>!accounts.some(x=>x.accountId===id));
+        const currentRoutes=await readinessFor(g,unobserved);
+        for(const [id,a] of unobserved){
+          const old=before.get(id),current=currentRoutes.get(id);
           const known=new Set(['DIRECT_FORBIDDEN','PROTECTED_ROUTE_UNVERIFIED',
             'PROTECTED_ROUTE_UNAVAILABLE','PERSONA_NOT_ACTIVE']);
           if(!old?.ready&&!current?.ready&&known.has(old?.code)&&known.has(current?.code))
@@ -279,12 +303,15 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       }
     }
     const completed=[];
-    for(const {c,packet} of results){
+    for(const {c,packet,pending} of results){
+      if(pending)continue;
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
-      completed.push(await s.complete(c.claimId,
-        {...packet,observedAt:c.startedAt,...(group?{group}:{})},clock()));
+      const done=await s.complete(c.claimId,
+        {...packet,observedAt:c.startedAt,...(group?{group}:{})},clock());
+      if(done?.accepted===true)monitors.recordProgress(['monitorAccount:'+c.accountId]);
+      completed.push(done);
     }
-    const latest=completed.at(-1);
+    const latest=completed.at(-1)||{ok:false,code:'MONITOR_OBSERVATION_PENDING'};
     return {...latest,code:completed.some(r=>r.accepted)?'OBSERVED':latest.code,
       changes:completed.flatMap(r=>r.changes||[])};
   }
@@ -301,7 +328,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     const snapshot=await s.read();if(!snapshot.ok)return 'CANONICAL_UNAVAILABLE';
     // Reconcile a possibly-dispatched effect by independent READBACK ONLY.
     // A cold wake or lost response must never invoke execute a second time.
-    const stranded=snapshot.state.rows.find(r=>(!target||
+    const stranded=snapshot.state.rows.find(r=>!mutations.busy(['generator:'+r.slug])&&(!target||
       (r.slug===target.slug&&r.accountId===target.accountId))&&
       r.refresh?.intent?.state==='RESERVED'&&
       clock()-r.refresh.intent.at>=MINUTE);
@@ -311,11 +338,12 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       const done=await s.cancelReserved(stranded.stableId,stranded.refresh.intent.id,clock());
       return done.ok?'STALE_RESERVATION_ABORTED':done.code;
     }
-    const uncertain=snapshot.state.rows.find(r=>(!target||
+    const uncertain=snapshot.state.rows.find(r=>!mutations.busy(['generator:'+r.slug])&&(!target||
       (r.slug===target.slug&&r.accountId===target.accountId))&&
       r.refresh?.intent?.state==='DISPATCH_POSSIBLE'&&
       (r.refresh.probes||0)<3&&(r.refresh.nextAttemptAt||0)<=clock());
     if(uncertain){
+      const observed=await mutations.run(['generator:'+uncertain.slug],async()=>{
       const intent=uncertain.refresh.intent,a=snapshot.state.accounts[uncertain.accountId];
       if(!uncertain.ownerVerified||!uncertain.releaseVerified||uncertain.identityHeld||
         uncertain.reviewHeld||uncertain.listing!=='PUBLIC'||!a?.verifiedIdentity||
@@ -348,8 +376,10 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       const settled=await s.settleAttempt(uncertain.stableId,intent.id,receipt);
       return settled.ok?(settled.proof.effectVerified?
         'REFRESH_READBACK_EFFECT_PROVEN':'REFRESH_READBACK_HELD'):settled.code;
+      },{progressed:code=>code==='REFRESH_READBACK_EFFECT_PROVEN'});
+      return typeof observed==='string'?observed:observed?.code||'REFRESH_READBACK_HELD';
     }
-    const row=snapshot.state.rows.find(r=>(!target||
+    const row=snapshot.state.rows.find(r=>!mutations.busy(['generator:'+r.slug])&&(!target||
       (r.slug===target.slug&&r.accountId===target.accountId))&&
       r.slot&&r.phase==='ACTIVE'&&
       r.ownerVerified&&r.releaseVerified&&!r.identityHeld&&!r.reviewHeld&&
@@ -359,6 +389,8 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
       qualifyRecentAbsence({row:r,recent:snapshot.state.recent,
         policy:snapshot.state.policy,now:clock()}).ok);
     if(!row)return 'NO_REFRESH_DUE';
+    const observed=await mutations.run(['generator:'+row.slug],async()=>{
+    const authorizationGeneration=refreshGate.generation?.();
     const candidate=await qualificationFor(row,snapshot.state.accounts[row.accountId]);
     // A candidate from a fixture, code comment or stale source is not enough.
     const first=await g.getSafeRouteReadiness(row.personaUid);
@@ -379,6 +411,8 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     }
     const possible=await s.markDispatch(claim,clock());
     if(!possible.ok)return possible.code;
+    if((await sentinel.inspect()).held||!refreshGate()||
+       authorizationGeneration!==refreshGate.generation?.())return 'REFRESH_DISPATCH_UNCERTAIN';
     let receipt={at:clock(),kind:'UNKNOWN',sourceFingerprint:null,
       targetMatched:false,principalMatched:false};
     try{
@@ -398,12 +432,14 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
     const settled=await s.settleAttempt(claim.stableId,claim.id,receipt);
     return settled.ok?(settled.proof.effectVerified?'EFFECT_INDEPENDENTLY_PROVEN':
       'REFRESH_EFFECT_HELD'):settled.code;
+    },{progressed:code=>code==='EFFECT_INDEPENDENTLY_PROVEN'});
+    return typeof observed==='string'?observed:observed?.code||'REFRESH_EFFECT_HELD';
   }
   function tick(){
     if(turnPromise)return turnPromise;
     turnPromise=(async()=>{
       try{
-        if((await sentinel.inspect()).held){stopActiveClock();await safeBreadcrumb(null,'RESTORE_HOLD');return fail('RESTORE_HOLD');}
+        if((await sentinel.inspect()).held){stopActiveClock({invalidateEvidence:true});await safeBreadcrumb(null,'RESTORE_HOLD');return fail('RESTORE_HOLD');}
         const s=await store();
         // Passive additive migration of previously adopted public originals.
         // Independent hashing and CAS occur outside scheduler transactions;
@@ -431,7 +467,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
                   routeId:ready.routeId,cookieStoreId:ready.cookieStoreId,
                   healthDomain:ready.healthDomain});
             }
-            browserClock={runtimeEpoch:bootId,monotonicMs:monotonicClock(),
+            browserClock={runtimeEpoch:browserEpoch,monotonicMs:monotonicClock(),
               observedAtMs:clock(),routes};
           }catch{browserClock=null;turnReadiness=null;}
         }
@@ -463,10 +499,10 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
         }
         // Acquisition/readiness may have awaited while restore installed its
         // durable hold. Recheck immediately before admitting a canonical turn.
-        if((await sentinel.inspect()).held){stopActiveClock();
+        if((await sentinel.inspect()).held){stopActiveClock({invalidateEvidence:true});
           await safeBreadcrumb(null,'RESTORE_HOLD');return fail('RESTORE_HOLD');}
         const now=clock(),result=await s.turn({now,bootId,nativeClock,qualifiedCoverages,browserClock});
-        if(!result.ok){stopActiveClock();await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return result;}
+        if(!result.ok){stopActiveClock({invalidateEvidence:true});await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return result;}
         await schedule(result.state.nextWakeAt);
         // At most two protected reads per turn. Persistent quota/coalescing spans
         // all wake sources and both recent-list/statistics request classes.
@@ -489,7 +525,7 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
             'GUARDED_REFRESH_ENABLED':'SHADOW_ONLY',
           providerEffects:mutationPossible?'POSSIBLE_SOURCE_WRITE':
             'OFF',alarmHeld,observation:observed.code||'OBSERVED',refresh};
-      }catch{stopActiveClock();await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return fail('REFRESHER_AUTHORITY_UNAVAILABLE');}
+      }catch{stopActiveClock({invalidateEvidence:true});await safeBreadcrumb(null,'CANONICAL_UNAVAILABLE');return fail('REFRESHER_AUTHORITY_UNAVAILABLE');}
       finally{turnPromise=null;}
     })();
     return turnPromise;
@@ -587,10 +623,18 @@ export function createRefresherBoundary(api,{open=openCanonicalDatabase,storeFac
           .finally(()=>{busy=false;});
       });
     });
+    api.storage.onChanged?.addListener((changes,area)=>{
+      if(area!=='local'||!changes.pcmsRestoreInProgress)return;
+      stopActiveClock({invalidateEvidence:true});
+      const marker=changes.pcmsRestoreInProgress;
+      if(!marker.newValue&&marker.oldValue?.status==='PREPARING')void tick();
+    });
     registered=true;coldWake();
   }
     run=checkpointed(api,run,{allowDuringRestore:message=>["GET_REFRESHER"].includes(message?.type)});
-  tick=checkpointed(api,tick);
+  // The inner entry checks restore before any canonical access and also
+  // invalidates prospective evidence on a denied turn.
+  tick=checkpointed(api,tick,{allowDuringRestore:true});
   return Object.freeze({register,tick,run});
 }
 // Entry owns the single registration. Importing this factory for packaged

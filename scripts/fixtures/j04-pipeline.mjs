@@ -36,7 +36,14 @@ export async function installDevelopmentPipelineFixture(){
   }
   await model.merge(files,'external reviewed READY inputs');await persist();
  }
- const api={...browser,runtime:{...browser.runtime}},token='offline-j04-pipeline-credential',credential=async()=>({ok:true,credential:token});
+ // The fixture has its own canonical DB and external ledgers. Give its
+ // controllers one shared API facade so ephemeral scope ownership does not
+ // collide with the simultaneously installed controller on the empty product
+ // DB. Every storage operation still delegates to actual persistent Firefox
+ // storage, and all fixture actors share this same facade/ownership pool.
+ const local={get:(...args)=>browser.storage.local.get(...args),
+  set:(...args)=>browser.storage.local.set(...args)};
+ const api={...browser,runtime:{...browser.runtime},storage:{...browser.storage,local}},token='offline-j04-pipeline-credential',credential=async()=>({ok:true,credential:token});
  await browser.storage.local.set({pcmsS03Git:{repository:'Neb963/per-gens',repositoryId:'42'}});
  if(!await read('j04-flow-initialized')){
   const rows=[];for(const [accountId,personaUid,principal] of [['flow-account','flow-persona','1'.repeat(64)],['flow-held-account','flow-held-persona','2'.repeat(64)]])rows.push({key:'account:'+accountId,account:{accountId,personaUid,bindingVersion:1,revision:1,state:'VERIFIED',boundPrincipal:principal,identity:{source:'GUARDED_SESSION_READBACK',bindingVersion:1,principalFingerprint:principal}}});

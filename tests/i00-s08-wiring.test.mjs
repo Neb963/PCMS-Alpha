@@ -9,12 +9,13 @@ test('S08 creation entrypoints preserve Git authority and canonical scoped opera
   if(['coordinator-boundary.mjs','creation-watch.mjs'].some(name=>path.endsWith(name)))
    assert.match(source,/effectGate:createScopedCreationGate\(authority\)/,path);
   else assert.match(source,/standingS06\?\.gate\('development'\)===true/,path);
-  assert.match(source,/standingS06\?\.gate\('gitWrite'\)===true/,path);
+  if(path.endsWith('creation-watch.mjs'))assert.match(source,/gitGate:createS06ScopeGate\(authority,'gitWrite'\)/,path);
+  else assert.match(source,/standingS06\?\.gate\('gitWrite'\)===true/,path);
  }
  const runner=await readFile('src/runtime/creation-runner.mjs','utf8');
  assert.match(runner,/git=createGit\(api,\{open,gate:gitGate\}\)/);
  const release=await readFile('src/runtime/release-boundary.mjs','utf8');
- assert.match(release,/standingS06\?\.gate\('publication'\)===true/);
+ assert.match(release,/effectGate:createS06ScopeGate\(standingS06,'publication'\)/);
 });
 
 test('S08 cold recovery listener is registered once, immediately after donor bootstrap',async()=>{

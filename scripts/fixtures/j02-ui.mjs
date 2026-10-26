@@ -119,13 +119,19 @@ export async function installGeneratorFixture(options={}){
  browser.runtime.connect=function(...args){const name=args.at(-1)?.name;if(!boundaries.has(name))return original(...args);
   const handlers=new Set(),disconnected=new Set();let closed=false;
   return {onMessage:{addListener:fn=>handlers.add(fn)},onDisconnect:{addListener:fn=>disconnected.add(fn)},disconnect(){closed=true},
-   postMessage(msg){if(msg.type==='APPEND_CREATE_BATCH'&&msg.params.offset>=32&&ledger.failures.intake){
+   postMessage(msg){if(['GET_CREATE_INTENT','RUN_CREATE_STEP'].includes(msg.type))
+    commands.push({type:msg.type,phase:'STARTED',requestedIntent:msg.params?.intentId,requestedRevision:msg.params?.expectedRevision});
+    if(msg.type==='APPEND_CREATE_BATCH'&&msg.params.offset>=32&&ledger.failures.intake){
     ledger.failures.intake=false;abortNextTransaction=true;void persist();}
     const execute=async()=>{if(msg.type==='LIST_ACCOUNTS'&&accountReadGate){pendingAccountReads++;try{await accountReadGate}finally{pendingAccountReads--}}
      if(msg.type==='APPEND_CREATE_BATCH'&&msg.params.offset===0&&ledger.failures.delayInput){
       ledger.failures.delayInput=false;await persist();await new Promise(resolve=>{releaseInputGate=resolve});}
       return boundaries.get(name).run(msg,sender);};
-    Promise.resolve(execute()).then(out=>{commands.push({type:msg.type,ok:out?.ok,code:out?.code});if(!closed)for(const fn of handlers)fn(out)})
+    Promise.resolve(execute()).then(out=>{commands.push({type:msg.type,ok:out?.ok,code:out?.code,
+     ...(['GET_CREATE_INTENT','RUN_CREATE_STEP'].includes(msg.type)?{
+      requestedIntent:msg.params?.intentId,requestedRevision:msg.params?.expectedRevision,
+      observedIntent:out?.record?.intentId,observedSlug:out?.record?.slug,
+      observedRevision:out?.record?.revision,state:out?.record?.state,phase:'SETTLED'}:{} )});if(!closed)for(const fn of handlers)fn(out)})
     .catch(()=>{if(!closed)for(const fn of disconnected)fn()})}};
  };
  window.__j02={async inspect(){const data=await rows();return {accounts:data.filter(x=>x.account).map(x=>x.account),

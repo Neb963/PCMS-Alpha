@@ -12,6 +12,20 @@ const labels={WAITING_CAPABILITY:'Waiting for allocation',OWNER_READBACK_PENDING
  GIT_OBSERVING:'Generator confirmed · checking Git',GIT_UNCERTAIN:'Generator confirmed · reconciling Git',
  GIT_DISPATCH_POSSIBLE:'Generator confirmed · reconciling Git',ASSOCIATED_NOT_READY:'Generator and source linked',
  CANCELLED:'Input canceled',INTAKE_HELD:'Input needs attention',STAGED:'Saved input · not submitted',QUEUED:'Queued for allocation'};
+// A batch row is a presentation snapshot. Read its current canonical intent
+// before the operator's one requested check; never replay a lost response.
+export async function checkCreationItem(item,call){
+ if(typeof item?.intentId!=='string'||!/^[A-Za-z0-9_-]{8,100}$/.test(item.intentId)||
+    typeof item.slug!=='string'||!/^[a-z0-9][a-z0-9-]{0,99}$/.test(item.slug))
+  return {ok:false,code:'CREATION_ITEM_UNVERIFIED'};
+ const fresh=await call('GET_CREATE_INTENT',{intentId:item.intentId});
+ if(fresh?.ok!==true)return fresh||{ok:false,code:'CREATION_READBACK_UNAVAILABLE'};
+ const record=fresh.record;
+ if(record?.slug!==item.slug||!Number.isSafeInteger(record.revision)||record.revision<1)
+  return {ok:false,code:'CREATION_ITEM_CHANGED'};
+ if(record.state==='ASSOCIATED_NOT_READY')return {ok:true,code:'CREATION_ALREADY_ASSOCIATED'};
+ return call('RUN_CREATE_STEP',{intentId:item.intentId,expectedRevision:record.revision},100000);
+}
 export function createGeneratorBatches({root,el,b,request,accounts,reload,manageAccount,notify}){
  const call=(type,params={},timeout=30000)=>request(port,type,params,timeout);
  function dialog(title){
@@ -63,7 +77,7 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
       (item.coalesced?' · shared existing job':'')),el('p','setting-note',explain(item.hold)));
      if(item.intakeHeld){row.append(b('Retry this input',()=>void action('RETRY_CREATE_BATCH_HOLD',{batchId,index:item.index})))}
      else if(item.intentId&&item.state!=='ASSOCIATED_NOT_READY')row.append(b('Retry check',()=>void action('RUN_CREATE_STEP',{
-      intentId:item.intentId,expectedRevision:item.revision})));
+      intentId:item.intentId,slug:item.slug,expectedRevision:item.revision})));
      if(item.accountId&&item.state!=='CANCELLED')row.append(b('Manage account',()=>{const a=rows.find(a=>a.accountId===item.accountId);if(a){d.close();manageAccount(a)}}));
      list.append(row);
     }
@@ -75,8 +89,10 @@ export function createGeneratorBatches({root,el,b,request,accounts,reload,manage
    }catch{status.textContent='Progress could not be read. Saved requests are preserved. Use Refresh to retry.'}
   }
   async function action(type,params){if(busy)return;busy=true;
-   try{const out=await call(type,params,100000);notify(out?.ok?'Checkpoint updated.':explain(out?.code));await draw();await reload()}
-   catch{status.textContent='The result was not confirmed. Refresh this item before retrying.'}finally{busy=false}}
+   status.textContent='Checking this saved request…';
+   for(const button of list.querySelectorAll('button'))button.disabled=true;
+   try{const out=type==='RUN_CREATE_STEP'?await checkCreationItem(params,call):await call(type,params,100000);notify(out?.ok?'Checkpoint updated.':explain(out?.code));await draw();await reload()}
+   catch{status.textContent='The result was not confirmed. Refresh this item before retrying.'}finally{busy=false;for(const button of list.querySelectorAll('button'))button.disabled=false}}
   let timer;query.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>{offset=0;void draw()},180)});
   filter.addEventListener('change',()=>{offset=0;void draw()});void draw();
   const polling=setInterval(()=>{if(!d.overlay.isConnected){clearInterval(polling);return}
