@@ -8,7 +8,7 @@ Baseline: `main` `06ccf102097e238154fef51787269c398ee6b1b0`, tree `4b828f3658f2b
 
 - [x] F0: executable cross-domain recovery/state/notice inventory, negative drift checks, integrated verified PR.
 - [x] F1: donor-first startup, account reconciliation, bounded event wake, preparation uncertainty, on-demand idle recovery.
-- [ ] F2: independent bounded workers, fair creation, hydrated authorization transitions, redacted durable receipts.
+- [x] F2: independent bounded workers, fair creation, hydrated authorization transitions, redacted durable receipts.
 - [ ] F3: contextual actions for every notice, historical read-only template inspection, single UI controller, truthful Git errors, paged missing sources and causal groups.
 - [ ] F4: integrated D/B regression, persistent installed Firefox, upgrade, exact required CI/main, reproducible higher-version XPI, checksum and one short live-acceptance guide.
 
@@ -23,18 +23,18 @@ Baseline: `main` `06ccf102097e238154fef51787269c398ee6b1b0`, tree `4b828f3658f2b
 | 03 | Incomplete notice destination resolver: faithful attention/bridge | Typed contextual recovery, stale/missing targets and safe holds | All 11 × target/current-state matrix, real actions/readback | OPEN F3 |
 | 04 | Host Check connection does not reconcile account state: accounts workspace/boundary | Fresh per-account route/identity after shared recovery | Shared recovery + one unsafe account | VERIFIED F1 D/B |
 | 05 | Only 10-minute upkeep polling: account boundary, donor native state | Coalesced bounded wake, backoff/fairness and fallback | 1/3/50 accounts, no duplicate preparation | VERIFIED F1 D/B |
-| 06 | Serial alarm progression: catalog-watch, domain progressors | Independent bounded domain/scoped progression preserving source ordering | Reject/hang each stage; independent ledgers | OPEN F2 |
-| 07 | One serial creation pending promise: creation-watch/runner | Bounded independent scope work and durable observational timeout | Hung account + 1,000 items, lost ACK, no replay | OPEN F2 |
-| 08 | No grant-transition scheduler hook: standing authority, ai-boundary | Trusted transition subscription and immediate scheduler reconciliation | Boot OFF → grant → progression, revoke/regrant | OPEN F2 |
+| 06 | Serial alarm progression: catalog-watch, domain progressors | Independent bounded domain/scoped progression preserving source ordering | Reject/hang each stage; independent ledgers | VERIFIED F2 D/B |
+| 07 | One serial creation pending promise: creation-watch/runner | Bounded independent scope work and durable observational timeout | Hung account + 1,000 items, lost ACK, no replay | VERIFIED F2 D/B |
+| 08 | No grant-transition scheduler hook: standing authority, ai-boundary | Trusted transition subscription and immediate scheduler reconciliation | Boot OFF → grant → progression, revoke/regrant | VERIFIED F2 D/B |
 | 09 | Abort signal does not settle native await: overlay/native-prepare/enrollment | Bound observations, retain possible native ownership until settlement | Never-settle, late ACK, restart, no conflicting prepare | VERIFIED F1 D/B |
 | 10 | Multiple mounted UI workers: index.html, operations and legacy views | One primary controller, isolated compatibility readers | Actual primary workflows, no obsolete native/vault advice | OPEN F3 |
 | 11 | Browser token errors labeled vault: catalog-watch, Git local secret/UI | Stable cause-specific browser/Git classification and observed recovery | Six causes, preserve valid credential, no false clear | OPEN F3 |
 | 12 | Missing-source queue rows have no actions: faithful bridge/source | Contextual source/history/current scan/identity inspection | Actual action-to-readback; no provider deletion | OPEN F3 |
 | 13 | Silent missing slice(0,30): faithful bridge/catalog | Exact counts and bounded paging/search | 31/1,000+ fixtures, all entries reachable | OPEN F3 |
 | 14 | Primary incidents ignore causal grouping: faithful bridge/attention model | Shared-root groups with counts and individual inspection | One helper outage/50 accounts vs independent holds | OPEN F3 |
-| 15 | Async grant hydration misses alarm init: standing authority/AI | Same trusted transition after hydration/cold wake | Cold worker, no onStartup, invalid/revoked records | OPEN F2 |
+| 15 | Async grant hydration misses alarm init: standing authority/AI | Same trusted transition after hydration/cold wake | Cold worker, no onStartup, invalid/revoked records | VERIFIED F2 D/B |
 | 16 | Donor idle-stop vs headless work: donor overlay/enrollment/workers | Allow idle-stop; donor safely reestablishes before due protected work | 15+ minutes, scheduled creation, 24h/72h/no false credit | VERIFIED F1 D/B |
-| 17 | Empty catch and success-only wake receipt: catalog/creation/account | Per-domain bounded redacted attempt/success/checkpoint/retry/cause | Reject, suspend, partial failure, grouped Attention | OPEN F2 |
+| 17 | Empty catch and success-only wake receipt: catalog/creation/account | Per-domain bounded redacted attempt/success/checkpoint/retry/cause | Reject, suspend, partial failure, grouped Attention | VERIFIED F2 D/B |
 
 ## Evidence and limits
 
@@ -256,3 +256,10 @@ PR #68 head `695c94870c5c491472a96182743300bb8e969662`, full run `40408490706`, 
 Production `advanceShadow` correctly freezes sleep while globally paused. The test seeded 64 hours, immediately paused, then assumed a concurrent startup turn had first consumed an unpaused gap. F2's faster scans exposed this race; unchanged paused rest is correct and is not failed rest progression. Do not infer an unobserved turn or weaken pause semantics.
 
 The follow-up records the actual canonical rest budget after successful Pause and requires exact preservation through restart. It retains the 16-hour active budget, unknown account health, same installed ID and single reconstructed alarm. It separately resumes through the real typed port, observes an owned OS process exit and distinct new process, then passively awaits actual canonical rest decrease with zero active-time credit. Finally it pauses again for the retained downstream tests. A production-store deterministic regression demonstrates the old 64-hour predicate can fail for correct immediate-pause behavior, then proves resume/new-boot rest progression and no double counting. Product bytes and original adverse assertions are unchanged. Corrected focused/full CI and verified main remain pending; no F2/F3/F4 or release completion is claimed.
+
+
+### F2 verified main; F3 contextual recovery begins
+
+PR #68 exact head `0b2bf1057b21bcf5dc810b4a80aa8e30d5e9c6d4`, tree `260a70f24910bd4b9deb5126aa9a1ced1314d0a8`, passed full run `40410761204`: **1,288 D tests**, donor/baseline/reproducible XPI/archive adverse controls, persistent upgrade and all normal-sandbox installed Firefox. Authorized squash merge `7e8187cac74d34edeb914c747553f71b803162eb` has the identical tested tree. Postmerge full run `40412740037` passed every lane; main required check `121892755809` succeeded. Both tab readback and paused/resumed rest assertions passed. XPI remains engineering v1.2.16, SHA-256 `44b8369073ea99582cf89659a9322ad775d91d60f3c0a727252de48c192fc09f`.
+
+F3 owns GAP02/03/10/11/12/13/14: actionable typed incident context (including stale/absent targets), current read-only historical template provenance without replay, one default UI controller, truthful Git failure classes and verified recovery, complete bounded missing-source paging/search and causally grounded incident grouping. Read-only production probes reproduced opaque route scopes guessed as account IDs and 50 independent account failures collapsed into one group. New deterministic tests also require every failed/mismatched/unpersisted Git scan to retain its incident and only a complete identity-matched durable main readback to resolve it. This first checkpoint intentionally records red regressions; F3/F4 are incomplete. Preserve original I17/history, current source/writer/approval/route fences, frozen donor and protected CI/policy roots. No real host/private Git/provider effects or intermediate XPI.
