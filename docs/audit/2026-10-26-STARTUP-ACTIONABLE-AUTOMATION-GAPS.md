@@ -159,6 +159,16 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 **Required acceptance:** Group by causal root with affected counts, preserve individually inspectable scopes only on expansion, one shared *Check connection* or equivalent recovery control, and no false resolution or suppressed independent account-specific holds. Test one failure across 50+ accounts and distinct unrelated per-account failures.
 
+### GAP-15 — Cold-background startup can miss AI alarm creation even when development was already authorized (P0)
+
+**Status:** CONFIRMED CODE race / missing post-hydration hook; exact Firefox startup-event ordering must be tested at B tier.
+
+**Source:** `src/runtime/entry.mjs:3–5,45–46` imports the S06 authorization bootstrap before AI, but `src/runtime/s06-standing-authority.mjs:22–56,179–209` starts with `loaded=false` and retrieves persisted grant/config asynchronously via `void enqueue(state)`. `gate('development')` returns false until hydration completes (`:24–27`). `src/runtime/ai-boundary.mjs:723–742,761–763` checks that **synchronous** gate during module registration to decide whether to create `pcms-i10-progress`, and **does not subscribe to completion of that asynchronous grant hydration**.
+
+**Defect:** At a cold event-page evaluation the AI scheduler may decide permission is OFF before the persisted authorized state becomes ready. An `onStartup` event can sometimes rescue this; an ordinary worker wake after suspension need not. GAP-08 covers the *late new grant* case; this finding covers *already-saved grant rehydration*.
+
+**Required acceptance:** With persisted valid granted authority, kill/suspend event page and recover with no onStartup event; verify alarm recreated **after** authorization hydration. Also verify invalid/stale/revoked grant never schedules mutable AI effects. A single trusted authorization-state transition should trigger wake reconciliation for every dependent scheduler.
+
 ## Investigation queue
 
 1. Donor bootstrap and native-host/tunnel/proxy recovery state.
@@ -183,4 +193,5 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 - 2026-10-26: GAP-11 traced browser-native Git token observer to obsolete vault failure/evidence labels.
 - 2026-10-26: GAP-12 confirmed no action elements on source-missing queue rows.
 - 2026-10-26: GAP-13 verified silent 30-row source-missing presentation cap.
-- 2026-10-26: GAP-14 verified primary queue bypasses existing cause grouping. Subsequent sections will be appended after each subsystem inspection.
+- 2026-10-26: GAP-14 verified primary queue bypasses existing cause grouping.
+- 2026-10-26: GAP-15 confirmed cold S06 authorization-hydration race with AI alarm creation. Subsequent sections will be appended after each subsystem inspection.
