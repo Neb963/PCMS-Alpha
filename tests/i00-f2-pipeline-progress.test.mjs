@@ -6,8 +6,10 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {fakeDatabase} from './fake-idb.mjs';
 import {settlePcmsWork} from '../src/runtime/work-checkpoint.mjs';
+import {createCatalogWatcher} from '../src/runtime/catalog-watch.mjs';
 
-test('F2 actual catalog domain workers complete the shared J04 pipeline without starving a source', {timeout:20000}, async()=>{
+for(const unrelated of [false,true])
+test('F2 shared J04 pipeline completes with unrelated default listener '+unrelated, {timeout:20000}, async()=>{
  const root=new URL('../src/runtime/',import.meta.url);
  const fixture=await readFile(new URL('../scripts/fixtures/j04-pipeline.mjs',import.meta.url),'utf8');
  const model=await readFile(new URL('../scripts/fixtures/j03-git-model.mjs',import.meta.url),'utf8');
@@ -31,6 +33,14 @@ test('F2 actual catalog domain workers complete the shared J04 pipeline without 
  const preview=async(_slug,name,html)=>({ok:true,source:'INDEPENDENT_BROWSER_ASSERTION',name,
   result:html.includes('perchance-error-indicator')?'FAIL':'PASS',observedAt:Date.now(),
   reason:'EXPLICIT_D_OFFLINE_PREVIEW_SEAM'});
+ // The installed browser also has the production controller on its empty
+ // canonical DB. The fixture owns a distinct DB and an offline effect ledger.
+ if(unrelated){
+  const idle=async()=>({ok:true,code:'EMPTY_UNRELATED_CANONICAL_DB'});
+  createCatalogWatcher(api,{native:async()=>({ok:false}),incidents:async()=>{},
+   progressReady:idle,progressChanges:idle,progressWriteback:idle,
+   progressCleanBulk:idle,progressPublication:idle}).register();
+ }
  const install=Function('browser','window','indexedDB','j04ActualPreview',
   model.replace('export async function','async function')+'\n'+
   fixture.replace('export async function','async function')+'\nreturn installDevelopmentPipelineFixture;'
