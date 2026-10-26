@@ -1247,6 +1247,8 @@ function openOperationRecord(op){
    else if(c.failure?.code==='CREATE_OUTCOME_UNKNOWN_NO_IDENTITY')guidance.textContent='Perchance may have created a temporary generator, but its response did not identify it. Open the account to inspect its owned inventory. This request stays held; do not resubmit it.';
    if(c.failure?.code){
     const note=el('p','setting-note',({INITIAL_INVENTORY_UNKNOWN:'An account’s initial owned inventory was not available.',
+     TEMPLATE_UNVERIFIED:'The earlier creation check could not read its fixed template. Check the current template separately; the original failure is retained.',
+     TEMPLATE_OWNER_UNVERIFIED:'The earlier template ownership check was not verified. A current read does not replay that request.',
      MULLVAD_LOCAL_SERVICE_UNAVAILABLE:'The Mullvad connection was unavailable when this request was checked.',
      PROTECTED_ROUTE_NOT_PINNED:'This account did not have a verified protected route.',
      PROTECTED_ROUTE_UNVERIFIED:'This account’s protected route was not verified.'})[c.failure.code]||'The earlier check recorded a failure. Its original reason is retained in Recorded details.');context.append(note);
@@ -1262,6 +1264,37 @@ function openOperationRecord(op){
      }catch{notify('The account could not be read. Retry without resubmitting the request.')}
      finally{account.disabled=false;}
     })());account.dataset.operationRelated='';actions.prepend(account);
+   }
+   if(c.provenance==='HISTORICAL_SUPPLY_V1'&&c.related?.batchId&&c.related?.accountId&&
+     /^supply_(create|rename)_v1$/.test(c.effectType||'')){
+    const observation=el('p','setting-note');observation.setAttribute('role','status');
+    observation.dataset.templateReadback='UNOBSERVED';context.append(observation);
+    const inspect=b('Check current creation template',()=>void(async()=>{
+     inspect.disabled=true;observation.textContent='Reading the current template under the original account…';
+     try{
+      const out=await readPort('pcms-i06-supply','READ_TEMPLATE',{operationId:c.operationId},45000);
+      if(!observation.isConnected)return;
+      if(out?.ok===true&&out.providerEffects==='NONE'&&out.replayAllowed===false&&out.templateObservation){
+       const t=out.templateObservation;observation.dataset.templateReadback=t.state;
+       observation.textContent=t.state==='MISSING_VERIFIED'?
+        'The current creation template is missing. This saved request and its original failure remain unchanged.':
+        t.ownership==='OWNED'?
+        'The current template is available and belongs to this account. This check does not resume the saved request.':
+        'The current template is available and its ownership was checked. The saved request and original failure remain unchanged.';
+      }else{
+       observation.dataset.templateReadback='UNAVAILABLE';
+       observation.textContent=out?.code==='ORIGINAL_ACCOUNT_IDENTITY_UNVERIFIED'?
+        'Verify the original account login and protected connection before checking the current template. The saved request is preserved.':
+        out?.code==='TEMPLATE_OWNER_UNVERIFIED'?
+        'Current template ownership could not be verified. The original failure and request remain held.':
+        out?.code==='HISTORICAL_SCOPE_UNVERIFIED'?
+        'The original account scope is incomplete in this historical record. Its history is preserved; no request was replayed.':
+        'The current template could not be verified. The saved request remains unchanged; no creation or rename was attempted.';
+      }
+     }catch{if(observation.isConnected){observation.dataset.templateReadback='UNAVAILABLE';
+       observation.textContent='The template read did not finish. Check its status again when the account is available; no creation or rename was attempted.';}}
+     finally{inspect.disabled=false;}
+    })());inspect.dataset.operationRelated='';actions.append(inspect);
    }
    if(c.related?.generatorObserved){const target=b('Inspect generator',()=>{close();openSourceManager({slug:c.related.slug})});target.dataset.operationRelated='';actions.append(target)}
   }catch{if(overlay.isConnected)context.textContent='Saved details could not be checked. Retry; nothing was dispatched.'}
