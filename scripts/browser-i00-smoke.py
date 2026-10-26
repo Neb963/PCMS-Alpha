@@ -3183,15 +3183,20 @@ def main():
                   const core=await import('./refresher-core.mjs');
                   const module=await import('./refresher-store.mjs');
                   const runtime=await import('./refresher-boundary.mjs');
-                  const db=await journal.openCanonicalDatabase(),store=module.createRefresherStore(db);
+                  // The model owns a separate real IDB. The autonomous background
+                  // has another boot/clock and must never share synthetic claims.
+                  const db=await journal.openCanonicalDatabase({
+                    open:(_name,version)=>indexedDB.open('pcms-i12-scaled-model',version)
+                  }),store=module.createRefresherStore(db),inputs=[];
                   const hash='b'.repeat(64),now=Date.now()+60000,boot='i12_packaged_synthetic_boot';
                   const begin=performance.now();
                   await new Promise((resolve,reject)=>{
                     const tx=db.transaction(['meta'],'readwrite'),m=tx.objectStore('meta');
+                    const put=value=>{m.put(value);if(value.key!==core.REFRESHER_KEY)inputs.push(value);};
                     for(let i=0;i<50;i++){
                       const accountId='i12_account_'+String(i).padStart(4,'0');
                       const personaUid='persona-i12-'+String(i).padStart(4,'0');
-                      m.put({key:'account:'+accountId,account:{accountId,personaUid,bindingVersion:1,
+                      put({key:'account:'+accountId,account:{accountId,personaUid,bindingVersion:1,
                         state:'VERIFIED',revision:1,identity:{source:'GUARDED_SESSION_READBACK',
                         bindingVersion:1,principalFingerprint:hash}}});
                     }
@@ -3200,14 +3205,14 @@ def main():
                       const accountId='i12_account_'+String(a).padStart(4,'0');
                       const personaUid='persona-i12-'+String(a).padStart(4,'0');
                       const remoteId='i12_remote_'+String(i).padStart(8,'0');
-                      m.put({key:'inventory:'+slug,generator:{slug,accountId,personaUid,bindingVersion:1,
+                      put({key:'inventory:'+slug,generator:{slug,accountId,personaUid,bindingVersion:1,
                         remoteId,ownerState:'OBSERVED_OWNER',visibility:'PUBLIC',lastObservedAt:now,revision:1}});
-                      m.put({key:'release:'+slug,release:{slug,accountId,personaUid,bindingVersion:1,
+                      put({key:'release:'+slug,release:{slug,accountId,personaUid,bindingVersion:1,
                         remoteId,state:'CONFIRMED_PUBLIC',source:'INDEPENDENT_PUBLICATION_READBACK',
                         sourceFingerprint:hash,principalFingerprint:hash,observationId:'i12_observed_'+String(i).padStart(8,'0'),
                         observedAt:now}});
                     }
-                    m.put({key:core.REFRESHER_KEY,state:core.emptyShadow()});
+                    put({key:core.REFRESHER_KEY,state:core.emptyShadow()});
                     tx.oncomplete=resolve;tx.onabort=()=>reject(Error('fixture aborted'));
                   });
                   let turn=await store.turn({now:now-8*core.HOUR,bootId:boot});
@@ -3231,6 +3236,9 @@ def main():
                     witnesses:[0,1].map(i=>({accountId:'witness_'+i,domain:'independent_'+i,
                       routeVerified:true,observedAt:now,result:'HEALTHY'}))};
                   turn=await store.turn({now,bootId:boot,receipt});
+                  // Preserve only the synthetic budget image for the later live
+                  // integration fixture, before model reads alter its wall rest.
+                  const integrationSeed=structuredClone(turn.state);
                   const firstRead=await store.list(now,{query:'i12-b-',limit:25});
                   const exact16=firstRead.items.find(r=>r.slug==='i12-b-0000').activeRemaining;
                   const exact64=firstRead.items.find(r=>r.slug==='i12-b-0001').sleepRemaining;
@@ -3279,6 +3287,29 @@ def main():
                   const runtimeProof=await service.tick();
                   const runtimeState=(await store.read()).state;
                   const isolated=await (await import('./perchance-monitor.mjs')).perchanceMonitorIsolated({kind:'RECENT'});
+                  // Keep the real port/UI/restart proof on the actual canonical
+                  // database. Seed disposable inputs and exact synthetic budgets;
+                  // no model claim, clock witness or health receipt crosses over.
+                  const liveDb=await journal.openCanonicalDatabase(),seedAt=Date.now();
+                  const liveSeed={...core.emptyShadow(),rows:integrationSeed.rows,
+                    accounts:integrationSeed.accounts,nextOrdinal:integrationSeed.nextOrdinal};
+                  for(const row of liveSeed.rows){
+                    row.checkpoint=seedAt;row.restCheckpointAt=row.phase==='SLEEPING'?seedAt:0;
+                    if(row.slot)row.admittedAt=seedAt;
+                  }
+                  for(const account of Object.values(liveSeed.accounts)){
+                    account.health='UNKNOWN';account.checkpoint=seedAt;account.healthAt=0;
+                  }
+                  await new Promise((resolve,reject)=>{
+                    const tx=liveDb.transaction('meta','readwrite'),meta=tx.objectStore('meta');
+                    for(const input of inputs){
+                      if(input.generator)input.generator.lastObservedAt=seedAt;
+                      if(input.release)input.release.observedAt=seedAt;
+                      meta.put(input);
+                    }
+                    meta.put({key:core.REFRESHER_KEY,state:liveSeed});
+                    tx.oncomplete=resolve;tx.onabort=()=>reject(Error('live fixture seed aborted'));
+                  });
                   const command=(type,params={})=>new Promise(resolve=>{
                     const port=browser.runtime.connect({name:'pcms-i12-refresher'});
                     port.onMessage.addListener(v=>{resolve(v);port.disconnect();});port.postMessage({type,params});
@@ -3303,7 +3334,7 @@ def main():
                       serializedBytes:JSON.stringify(runtimeState).length,queuePeak:runtimeState.diagnostics.queuePeak,
                       readPeak:runtimeState.diagnostics.readPeak},
                     persistedRevision:(await store.read()).state.revision});
-                  db.close();
+                  db.close();liveDb.close();
                 })().catch(e=>done({error:String(e),stack:e?.stack?.slice(0,600)}));"""
                 i12_proof=call('POST',f'/session/{after}/execute/async',{'script':code,'args':[]},timeout=90)
                 assert i12_proof.get('ok') is True,i12_proof
