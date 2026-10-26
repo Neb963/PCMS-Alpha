@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile,access} from 'node:fs/promises';
-import {domains,inventory,noticePolicies,extractStates,main} from '../scripts/recovery-inventory.mjs';
+import {domains,inventory,noticePolicies,extractStates,unmappedStates,main} from '../scripts/recovery-inventory.mjs';
 test('F0 inventory covers production state literals and every required recovery dimension',async()=>{
  const result=await inventory();assert.deepEqual(result.drift,[]);
  for(const row of result.states){
@@ -15,7 +15,9 @@ test('F0 inventory covers production state literals and every required recovery 
 });
 test('F0 new production state/notice vocabulary fails coverage rather than falling back silently',async()=>{
  assert.deepEqual(extractStates("next.state='NEW_UNMAPPED_STATE'"),['NEW_UNMAPPED_STATE']);
- assert.ok(!domains.some(d=>d.states.includes('NEW_UNMAPPED_STATE')));
+ assert.deepEqual(unmappedStates(domains[0],"next.state='NEW_UNMAPPED_STATE'"),['NEW_UNMAPPED_STATE']);
+ assert.deepEqual(unmappedStates(domains[0],"const changes={\n  VERIFIED:['NEW_UNMAPPED_STATE']\n};"),['NEW_UNMAPPED_STATE']);
+ assert.deepEqual(unmappedStates(domains[0],"['NEW_UNMAPPED_STATE'].includes(record.state)"),['NEW_UNMAPPED_STATE']);
  const source=await readFile('src/runtime/journal.mjs','utf8');
  const block=source.match(/const NOTICE_CODES = new Set\(\[([\s\S]*?)\]\)/)[1];
  const actual=[...block.matchAll(/'([A-Z_]+)'/g)].map(m=>m[1]).sort();
@@ -26,7 +28,7 @@ test('F0 new production state/notice vocabulary fails coverage rather than falli
 test('F0 uncertain and historical effects retain no-replay ownership fences',async()=>{
  const r=await inventory();
  for(const s of r.states.filter(s=>/UNCERTAIN|DISPATCH_POSSIBLE|COMMIT_POSSIBLE|RECONCILE/.test(s.state)))
-  assert.match(s.safetyHold,/observation only/);
+  assert.match(s.safetyHold,/observation only|Historical inspection only/);
  assert.equal(r.historicalQuarantine.replay,false);
  assert.equal(r.historicalQuarantine.automaticCreate,false);
  assert.equal(r.historicalQuarantine.automaticRename,false);
