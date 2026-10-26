@@ -179,6 +179,16 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 **Required acceptance:** Decide and implement *one* accepted policy through PersonaMonkey authority: either suspend idle-stop while genuinely due protected PCMS work exists, or allow idle-stop but wake/preflight the donor early enough for safe automatic reestablishment. Do not globally force a 24/7 tunnel or monkeypatch private daemon state without demonstrating product need. Test 15+ minutes without tabs, multiple bound Personas, 24h/72h Refresher, recovered native helper and a scheduled create job; ensure no Direct leakage and no false active-time credit.
 
+### GAP-17 — Background wake failures can disappear without a durable, user-actionable receipt (P1)
+
+**Status:** CONFIRMED CODE observability gaps; exact frequency of real failures unverified.
+
+**Source:** `src/runtime/catalog-watch.mjs:197–204` catches any failed READY/change/writeback/bulk/publication progression with an empty `.catch(()=>{})`; the individual failed stage is neither identified nor reported there. `src/runtime/creation-watch.mjs:103–117` persists wake receipt only along the success path; on an exception it returns a generic `S04_WAKE_UNAVAILABLE` result without updating the durable `pcmsS04WakeReceipt`. `src/runtime/account-boundary.mjs:298–305,329` turns upkeep exceptions into `ROUTE_UPKEEP_UNAVAILABLE` but its alarm handler discards the returned result.
+
+**Defect:** A running background worker can fail while the last visible status stays stale or green, or multiple dependent modules show derivative *Needs attention* without the actual upstream failure. This is the opposite of the accepted “simple working app with meaningful exceptions”: the operator needs **less** technical output but more accurate causality.
+
+**Required acceptance:** Each background wake records bounded redacted `lastAttempt/lastSuccessful/checkpoint/failureCode/nextSafeRetry` for its own domain; propagate a single causal Attention issue with a direct recovery action. No raw native errors/tokens/page source in receipts, no automatic writes on uncertain outcomes. Prove worker rejection, extension suspend and per-account partial failure are observable and do not hide independent progress.
+
 ## Investigation queue
 
 1. Donor bootstrap and native-host/tunnel/proxy recovery state.
@@ -205,4 +215,5 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 - 2026-10-26: GAP-13 verified silent 30-row source-missing presentation cap.
 - 2026-10-26: GAP-14 verified primary queue bypasses existing cause grouping.
 - 2026-10-26: GAP-15 confirmed cold S06 authorization-hydration race with AI alarm creation.
-- 2026-10-26: GAP-16 confirmed default donor auto-stop/no-tab policy versus PCMS background readiness. Subsequent sections will be appended after each subsystem inspection.
+- 2026-10-26: GAP-16 confirmed default donor auto-stop/no-tab policy versus PCMS background readiness.
+- 2026-10-26: GAP-17 verified silent alarm/background failure paths and missing durable failure receipts. Subsequent sections will be appended after each subsystem inspection.
