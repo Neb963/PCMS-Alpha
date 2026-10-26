@@ -310,6 +310,10 @@ export function createAdoptionBoundary(api,{
        }
       }
       await Promise.all([worker(),worker()]);
+      // Execution may finish independently; the public checkpoint preserves
+      // its original fair selection order for existing callers and projections.
+      const position=new Map(ordered.map((item,index)=>[item.slug,index]));
+      results.sort((a,b)=>position.get(a.slug)-position.get(b.slug));
       if(results.some(r=>r.ok)||work.length>results.length)
         try{void Promise.resolve(api.alarms?.create(ADOPTION_AUTO_ALARM+'-followup',{when:clock()+60000})).catch(()=>{});}catch{}
       const unqualified=[...adoptions.values()].some(a=>{const current=accounts.get(a.accountId);
