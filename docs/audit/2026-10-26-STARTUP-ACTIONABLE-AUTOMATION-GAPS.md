@@ -89,6 +89,16 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 **Required acceptance:** Test slow/hung route setup, an ambiguous create ACK, one I17-quarantined item and 1,000+ unrelated safe entries. Ensure the watchdog produces a durable, truthful held/timeout record while other eligible items progress, maintaining account routing, one-writer and no-replay constraints. Do not confuse limiting work to eight items per turn with completed independence.
 
+### GAP-08 — Turning on standing AI-development authorization may not start its automatic scheduler until a later startup (P0)
+
+**Status:** CONFIRMED CODE missing activation wake; test must reproduce actual late authorization on a newly installed/profile-restored XPI.
+
+**Source:** `src/runtime/ai-boundary.mjs:723–742`: `schedule()` **returns immediately** while `effectGate({phase:'I10',step:'AUTOMATION'})` is false; the only explicit calls are registration, Firefox `onStartup`, and `onInstalled`. `src/runtime/ai-boundary.mjs:761–763` binds that gate to current `standingS06.gate('development')`. `src/runtime/s06-standing-authority.mjs:85–110,133–135,179–208` permits grant updates and watches storage changes, but **does not schedule the AI alarm when development transitions from false to true**. Search of the repo found no other references to the `pcms-i10-progress` alarm.
+
+**Defect:** An ordinary user enabling development after startup can have authorized queued jobs but no automatic `AI_PROGRESS_ALARM` registered; current `tick()` only runs from that alarm. Restart may incidentally mask this defect. This contradicts automatic post-READY development (C-16, C-43–C-46). **Do not work around it by instructing the user to restart Firefox.**
+
+**Required acceptance:** Explicitly test no grant at boot → user grants development in UI → alarm established/one guarded progress turn → restart persistence, and off→on again; revoke immediately prevents further effects. No duplicate AI native send, no forced per-job Start and no invented AI pass.
+
 ## Investigation queue
 
 1. Donor bootstrap and native-host/tunnel/proxy recovery state.
@@ -106,4 +116,5 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 - 2026-10-26: GAP-04 verified against donor connection read and persisted account projection.
 - 2026-10-26: GAP-05 verified: periodic recovery exists but lacks host-ready event wake.
 - 2026-10-26: GAP-06 confirmed from serialized READY alarm dispatch; starvation consequence requires adversarial evidence.
-- 2026-10-26: GAP-07 confirmed sequential creation queue tick; nonsettling-operation case needs B stress. Subsequent sections will be appended after each subsystem inspection.
+- 2026-10-26: GAP-07 confirmed sequential creation queue tick; nonsettling-operation case needs B stress.
+- 2026-10-26: GAP-08 confirmed by grant-transition versus AI alarm call-site audit. Subsequent sections will be appended after each subsystem inspection.
