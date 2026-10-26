@@ -80,11 +80,15 @@ test('F2 actual J02 coordinator/runner resumes the recovered pinned account from
   port.onMessage.addListener(out=>{port.disconnect();resolve(out)});
   port.onDisconnect.addListener(()=>reject(Error('DISCONNECTED')));port.postMessage({type,params});
  });
+ // Reproduce the old rendered-row request at the same real boundary.
+ const old=await call('RUN_CREATE_STEP',{intentId:displayed.intentId,expectedRevision:displayed.expectedRevision});
+ assert.equal(old.code,'STALE_REVISION');
+ assert.equal((await store.getCreate(displayed.intentId)).record.revision,fresh.record.revision);
  const checked=await checkCreationItem(displayed,call);await settlePcmsWork({timeoutMs:2000});
  assert.equal(checked.ok,true,JSON.stringify(checked));
  assert.equal(checked.record.state,'OWNER_MISSING_VERIFIED');
  assert.equal(checked.record.accountId,'account_j02_049');
- assert.equal(requests.filter(r=>r.type==='RUN_CREATE_STEP').length,1);
+ assert.equal(requests.filter(r=>r.type==='RUN_CREATE_STEP'&&r.expectedRevision===fresh.record.revision).length,1);
  assert.equal(requests.at(-1).expectedRevision,fresh.record.revision);
  assert.deepEqual((await host.__j02.inspect()).ledger.effects,[],'owner readback cannot CREATE or RENAME');
 });
