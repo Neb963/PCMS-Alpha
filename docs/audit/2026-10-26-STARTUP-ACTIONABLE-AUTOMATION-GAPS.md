@@ -119,6 +119,16 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 
 **Required acceptance:** One primary status/action controller, no obsolete native-host/keyring messages anywhere in an accessible UI/notification path. Legacy data migrations/readers may remain only as isolated noninteractive compatibility code; remove or disable duplicate UI workers only after proving their live side effects and regression scope.
 
+### GAP-11 — Browser-native Git failures still masquerade as a removed OS vault/keyring dependency (P1)
+
+**Status:** CONFIRMED CODE misleading diagnostic nomenclature, not a claim that Git itself fails.
+
+**Source:** `src/runtime/catalog-watch.mjs:3,28–39,47–57` calls `browserGitCredentialPacket` but marks a missing/failed browser read as `GIT_VAULT_UNAVAILABLE`; its notice resolver uses `GIT_VAULT_CREDENTIAL_READ` as the recovery evidence label. `src/ui/operations.mjs:21–22` (the separately loaded legacy UI) instructs the operator to unlock a keyring. The [client amendment A/D](../authority/PCMS-Alpha-CLIENT-AMENDMENT-v1.0.1.md) explicitly removes OS vault and keyring, and forbids extra native service prerequisites.
+
+**Defect:** Missing browser-stored token, temporary IndexedDB failure and remote Git permission loss are distinct root causes, but the observer conflates one class with an obsolete external vault. A routine action may be blocked with no truthful local remedy.
+
+**Required acceptance:** Distinguish *unconfigured Git*, *browser credential inaccessible*, *token rejected*, *remote repository identity mismatch*, *network unavailable*, and *temporary locked/unavailable local store*. Reconnect only when necessary, preserve token and source scope; notices must clear after observed recovery, without prompting for native keyring.
+
 ## Investigation queue
 
 1. Donor bootstrap and native-host/tunnel/proxy recovery state.
@@ -139,4 +149,5 @@ Investigate one subsystem at a time. For each finding: operator symptom, exact s
 - 2026-10-26: GAP-07 confirmed sequential creation queue tick; nonsettling-operation case needs B stress.
 - 2026-10-26: GAP-08 confirmed by grant-transition versus AI alarm call-site audit.
 - 2026-10-26: GAP-09 verified timer does not bound awaited native/route preparation settlement.
-- 2026-10-26: GAP-10 verified exact packaged HTML dual-script entry and obsolete legacy advice. Subsequent sections will be appended after each subsystem inspection.
+- 2026-10-26: GAP-10 verified exact packaged HTML dual-script entry and obsolete legacy advice.
+- 2026-10-26: GAP-11 traced browser-native Git token observer to obsolete vault failure/evidence labels. Subsequent sections will be appended after each subsystem inspection.
