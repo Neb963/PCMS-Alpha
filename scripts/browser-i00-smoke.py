@@ -795,14 +795,37 @@ def s01_add_account_profile(browser, archive, folder):
         uuid=addons_uuid(profile)
         call('POST',f'/session/{session}/url',{'url':f'moz-extension://{uuid}/pcms/index.html#accounts'})
         wait_donor_ready(session)
+        # Installed primary UI owns Add account. The retired historical
+        # button is deliberately inert; a visible enabled control and a
+        # guarded account readback are the only valid enrollment evidence.
+        ui=None
         for _ in range(120):
-            ui=execute(session,"return {add:document.getElementById('pcms-add-account')?.disabled,legacy:!!document.getElementById('pcms-persona-picker')}")
-            if ui.get('add') is False: break
+            ui=execute(session,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+              const page=sh?.querySelector('#page');
+              const b=page?.querySelector('[data-action="add-account"]');
+              return {route:page?.dataset.view,add:!!b,enabled:!!b&&!b.disabled,
+                visible:!!b&&b.getClientRects().length>0,
+                legacy:!!sh?.querySelector('#pcms-persona-picker')};""")
+            if ui['route']=='accounts' and ui['add'] and ui['enabled'] and ui['visible']:break
             time.sleep(.25)
-        assert ui=={'add':False,'legacy':False},(ui,account_command(session,{'type':'LIST_ACCOUNTS'}))
+        assert ui=={'route':'accounts','add':True,'enabled':True,'visible':True,'legacy':False},(ui,account_command(session,{'type':'LIST_ACCOUNTS'}))
+        initial=account_command(session,{'type':'LIST_ACCOUNTS'})
+        assert initial.get('ok') and initial.get('enrollment')=='AVAILABLE' and not initial.get('accounts'),initial
         print('B S01_ADD_ACCOUNT_CONTROL_ENABLED_NO_MANUAL_PERSONA_PICKER=PASS',flush=True)
-        started=account_command(session,{'type':'ADD_ACCOUNT'})
-        assert started.get('ok') is True,started
+        # Actual browser click initiates exactly one account creation; do not
+        # send a second enrollment command or retry an uncertain first click.
+        initiated=execute(session,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+          const b=sh.querySelector('[data-action="add-account"]');
+          if(!b||b.disabled)return false;b.click();return true;""")
+        assert initiated is True,'S01_PRIMARY_ACCOUNT_ENROLLMENT_CLICK_UNAVAILABLE'
+        started=None
+        for _ in range(240):
+            current=account_command(session,{'type':'LIST_ACCOUNTS'})
+            if current.get('ok') and len(current.get('accounts',[]))==1:
+                started=current['accounts'][0]
+                break
+            time.sleep(.5)
+        assert started and started.get('accountId'),('S01_PRIMARY_ADD_NOT_RECORDED',current)
         account=None
         for _ in range(240):
             listed=account_command(session,{'type':'LIST_ACCOUNTS'})
