@@ -14,6 +14,26 @@ export function incidentDestination(n,{targetState='CURRENT'}={}){
  if(n.code==='PROVIDER_OUTAGE')return {kind:'SETTINGS',id:'refresher'};
  return {kind:'CONTEXT',id:n.code};
 }
+// The primary link must never promise an affected entity when the journal
+// records only a problem category or an opaque scope. Settings links are
+// labeled as settings; local database failure first opens its actual receipt.
+const directSettings=Object.freeze({
+ BACKUP_FAILED:'backups',RESTORE_IN_PROGRESS:'backups',
+ GIT_RECONNECT_REQUIRED:'connections',PROVIDER_OUTAGE:'refresher'
+});
+const settingsLabels=Object.freeze({
+ backups:'Open Backups',connections:'Open Connections',refresher:'Open Refresher'
+});
+export function incidentPrimaryAction(n){
+ const target=validIncidentTarget(n?.target)?n.target:null;
+ if(target&&target.kind!=='SETTINGS')return {label:'Open affected item',kind:'ENTITY'};
+ const expected=directSettings[n?.code];
+ const destination=incidentDestination(n||{},{targetState:'ABSENT'});
+ if(expected&&destination.kind==='SETTINGS'&&destination.id===expected&&
+    (!target||target.kind==='SETTINGS'&&target.id===expected))
+  return {label:settingsLabels[expected],kind:'SETTINGS',id:expected};
+ return {label:'Inspect cause',kind:'CONTEXT'};
+}
 export async function acknowledgeIncident(n,request){
  const observe=async()=>{
   const page=await request('LIST_NOTICE_PAGE',{after:'',limit:100,query:n.scopeId});
