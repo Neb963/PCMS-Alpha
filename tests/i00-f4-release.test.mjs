@@ -27,9 +27,9 @@ test('F4 final combined package advances monotonically without donor/Gecko chang
 test('F4 existing-combined upgrade uses exact prior source and digest, genuine AOM update and real IDB cold readback',async()=>{
   const helper=await readFile('scripts/f4-previous-package.py','utf8');
   const upgrade=await readFile('scripts/a08-upgrade-firefox.py','utf8');
-  assert.match(helper,/9af3f86ac03b4aafa72eba9af51005a09ee8f6e9/);
-  assert.match(helper,/910a5ec71a76148d38954d04d7ee1167764eac86/);
-  assert.match(helper,/e7ef3f63503909b210d42be379680fb9dc520a0937cdc4c3f27ae995b00a3402/);
+  assert.match(helper,/3fcfa4b1985619d367e5d11bd60c6af610563cbd/);
+  assert.match(helper,/8f480ce4a759b58672062324c1dc42342698af34/);
+  assert.match(helper,/7ab1c2a5bebc95289c218040036829186b222ee2441435b8a0522142d2f83ee1/);
   assert.match(helper,/git\(root, 'worktree', 'add'/);
   assert.match(helper,/BASE_XPI_SHA256/);
   assert.match(upgrade,/main\(previous_archive=previous\)/);
