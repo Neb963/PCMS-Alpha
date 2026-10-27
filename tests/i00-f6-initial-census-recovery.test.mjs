@@ -97,3 +97,26 @@ test('an ambiguous owner result cannot qualify a fresh zero count or unlock auto
  const preview=await previewCreation(db,{slugs:['new-unverified']});
  assert.equal(preview.items[0].action,'HELD');
 });
+
+test('parallel queued generators share one guarded census read and never count an incomplete result',async()=>{
+ const db=fakeDatabase();await seed(db,[alpha]);
+ const inventory=createInventoryStore(db);
+ let calls=0,release;
+ const gate=new Promise(resolve=>release=resolve);
+ const syncInventory=async(id,revision)=>{
+  calls++;assert.equal(id,alpha.accountId);assert.equal(revision,alpha.revision);
+  await gate;
+  return inventory.applyObservation(alpha,witness(alpha,Date.now()-5));
+ };
+ const a=recoverMissingCreationCensus({db,syncInventory});
+ const b=recoverMissingCreationCensus({db,syncInventory});
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(calls,1,'one external guarded census per canonical account');
+ assert.equal(db.read('meta','inventory-batch:'+alpha.accountId),undefined,
+  'pending observation must not count as authoritative initial zero');
+ release();
+ const results=await Promise.all([a,b]);
+ assert.equal(results.every(x=>x.ok===true&&x.refreshed===true),true,JSON.stringify(results));
+ assert.equal(calls,1);
+ assert.equal(db.read('meta','inventory-batch:'+alpha.accountId).countsTrusted,true);
+});
