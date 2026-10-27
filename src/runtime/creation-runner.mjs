@@ -123,6 +123,7 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         // A prior readback is historical; recheck target immediately before
         // starting a possible remote CREATE.
         const target=await read('READ_TARGET');
+        if(!target.ok)return target; // Preserve actual bridge, identity or provider-read failure.
         if(target.state!=='MISSING_VERIFIED')return fail('TARGET_STATE_CHANGED');
         const operationId='s04_create_'+crypto.randomUUID().replaceAll('-','');
         const fp=await fingerprint({intentId:item.intentId,accountId:item.accountId,
@@ -133,6 +134,7 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
       if(item.state==='PRIVATE_EMPTY_CONFIRMED'){
         if(!mutable)return fail('PROVIDER_ACTIVATION_HELD');
         const target=await read('READ_TARGET');
+        if(!target.ok)return target; // Preserve actual bridge, identity or provider-read failure.
         if(target.state!=='MISSING_VERIFIED')return fail('TARGET_STATE_CHANGED');
         const operationId='s04_rename_'+crypto.randomUUID().replaceAll('-','');
         const fp=await fingerprint({intentId:item.intentId,accountId:item.accountId,
