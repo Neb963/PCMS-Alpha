@@ -102,13 +102,14 @@ test('F5 bridge loss: donor-only restart occurs once after two unhealthy observa
  await c.turn();assert.equal(restarted,1,'healthy bridge is not restarted');
 });
 test('F5 ambiguous shared restart is fenced across cold workers, no blind second restart',async()=>{
+ let now=100000;
  const store={},host={installed:true,compatible:true,ready:false,tunnelUp:false,
   proxyReachable:false,code:'MULLVAD_TUNNEL_UNAVAILABLE'};
  let mutations=0;
  const api={storage:{local:{get:async k=>({[k]:store[k]}),
   set:async values=>Object.assign(store,structuredClone(values))}},
   alarms:{get:async()=>null,create:async()=>{}}};
- const opts={clock:()=>100000,list:async()=>({ok:true,accounts:[{accountId:'account_fixture02',
+ const opts={clock:()=>now,list:async()=>({ok:true,accounts:[{accountId:'account_fixture02',
   personaUid:'persona-fixture02',bindingId:'binding_fixture02',state:'VERIFIED',route:{status:'HELD'}}]}),
   connection:async()=>({...host}),check:async()=>{throw Error('must hold')},
   repairBridge:async()=>{mutations++;return {ok:false,code:'MULLVAD_RESTART_UNCONFIRMED'}}};
