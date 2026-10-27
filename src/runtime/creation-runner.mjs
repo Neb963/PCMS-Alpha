@@ -103,6 +103,9 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         try{response=await g.runSupplyStep(item.personaUid,{...base,...extra,kind});}
         catch{return fail('PROVIDER_OUTCOME_UNKNOWN');}
         const after=await g.getSafeRouteReadiness(item.personaUid);
+        if(after?.ready!==true)return fail(after?.code||'PROTECTED_ROUTE_UNVERIFIED');
+        // A route/persona change can never be interpreted as a successful
+        // read, even if the provider independently returned valid data.
         if(!routeSame(ready,after)||(await sentinel.inspect()).held)
           return fail('PROTECTED_CONTEXT_CHANGED');
         if(!response?.ok)return fail(response?.code||'PROVIDER_READBACK_UNKNOWN');
