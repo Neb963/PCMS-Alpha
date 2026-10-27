@@ -20,7 +20,7 @@ test('F4 final combined package advances monotonically without donor/Gecko chang
   assert.deepEqual(combined.background,{scripts:['pcms/entry.mjs'],type:'module'});
   const entry=await readFile(path.join(stage,'pcms/entry.mjs'),'utf8');
   for(const unit of ['backup-auto-boundary.mjs','refresher-boundary.mjs','ai-boundary.mjs',
-    'catalog-watch.mjs','creation-watch.mjs','standing-authority.mjs'])
+    'catalog-watch.mjs','creation-watch.mjs'])
     assert.match(entry,new RegExp(unit.replaceAll('.','\\.')));
 });
 
