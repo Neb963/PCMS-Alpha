@@ -33,6 +33,17 @@ export async function ensureCreationInventory({db,account,syncInventory,now=Date
 // Refresh at most ONE verified account per call; the caller's existing
 // bounded wake/fairness loop may resume after the durable observation.
 // Never change the allocation or an uncertain remote-operation record here.
+const inFlightCensuses=new WeakMap();
+function oneCensusPerAccount(db,accountId,start){
+ let active=inFlightCensuses.get(db);
+ if(!active){active=new Map();inFlightCensuses.set(db,active)}
+ if(active.has(accountId))return active.get(accountId);
+ const task=Promise.resolve().then(start).finally(()=>{
+  if(active.get(accountId)===task)active.delete(accountId);
+ });
+ active.set(accountId,task);
+ return task;
+}
 export async function recoverMissingCreationCensus({db,accountId=null,syncInventory}={}){
  const census=await createAccountStore(db).list();
  if(!census?.ok||census.truncated===true)return fail('ACCOUNT_CENSUS_UNAVAILABLE');
@@ -49,7 +60,7 @@ export async function recoverMissingCreationCensus({db,accountId=null,syncInvent
      account.identity?.bindingVersion!==account.bindingVersion)
     return fail('INITIAL_INVENTORY_ACCOUNT_UNVERIFIED');
   if(typeof syncInventory!=='function')return fail('INITIAL_INVENTORY_SYNCHRONIZER_UNAVAILABLE');
-  const refreshed=await syncInventory(account.accountId,account.revision);
+  const refreshed=await oneCensusPerAccount(db,account.accountId,()=>syncInventory(account.accountId,account.revision));
   if(refreshed?.ok!==true)return fail(refreshed?.code||'INITIAL_INVENTORY_SYNC_FAILED');
   const after=await readCreationInventory(db,account.accountId);
   if(after?.source!=='GUARDED_PERCHANCE_READBACK'||after.complete!==true||
