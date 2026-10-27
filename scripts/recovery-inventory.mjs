@@ -15,7 +15,7 @@ const domain=(id,files,states,handler,destination,action,prerequisites,settlemen
  states:words(states),handler,destination,action,prerequisites,settlement});
 export const domains=[
  domain('readiness',['native-transport-overlay','protected-readiness'],
- 'COMPLETE RELEASED ARCHIVED PREPARING INVENTORY_PENDING PINNED IDLE WAITING_FOR_DONOR CHECKING_ACCOUNTS ACCOUNT_HELD OBSERVED FAILED DONOR_STARTING DONOR_SECURITY_UNAVAILABLE MULLVAD_LOCAL_SERVICE_UNAVAILABLE MULLVAD_HELPER_INCOMPATIBLE MULLVAD_TUNNEL_UNAVAILABLE MULLVAD_TUNNEL_ROUTE_UNAVAILABLE MULLVAD_PROXY_UNREACHABLE MULLVAD_CONNECTION_UNVERIFIED MULLVAD_ROUTE_UNCONFIRMED MULLVAD_STATUS_TIMEOUT',
+ 'COMPLETE RELEASED ARCHIVED PREPARING INVENTORY_PENDING PINNED IDLE WAITING_FOR_DONOR CHECKING_ACCOUNTS ACCOUNT_HELD OBSERVED FAILED DONOR_STARTING DONOR_SECURITY_UNAVAILABLE MULLVAD_LOCAL_SERVICE_UNAVAILABLE MULLVAD_HELPER_INCOMPATIBLE MULLVAD_TUNNEL_UNAVAILABLE MULLVAD_TUNNEL_ROUTE_UNAVAILABLE MULLVAD_PROXY_UNREACHABLE MULLVAD_CONNECTION_UNVERIFIED MULLVAD_ROUTE_UNCONFIRMED MULLVAD_STATUS_TIMEOUT DISPATCH_POSSIBLE HEALTHY HELD NO_DISPATCH OBSERVED_RECOVERED',
  'src/runtime/protected-readiness.mjs#createProtectedReadinessCoordinator;src/runtime/enrollment.mjs#upkeep;src/runtime/overlay.mjs#createPcmsEnrollmentDonor','Accounts / Connection','Inspect shared helper; permit donor-owned readiness recovery and verify each affected account before admission.',
  'Donor initialized, compatible existing Mullvad bridge, tunnel and authenticated proxy; no Direct fallback or second router.',
  'Fresh per-account protected egress, historical unique-exit reservation and original identity; host ready alone is insufficient.'),
