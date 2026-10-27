@@ -3543,8 +3543,25 @@ def main():
                 # vs duplicate dispatch, installed operator controls, and
                 # independent postrestart uncertainty. No live provider effects.
                 call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
-                ui=execute(after,"return {release:!!document.getElementById('pcms-release-preview'),approve:document.getElementById('pcms-release-approve').disabled,dispatch:document.getElementById('pcms-release-dispatch').disabled,resolve:document.getElementById('pcms-release-reconcile').disabled}")
-                assert ui=={'release':True,'approve':True,'dispatch':True,'resolve':True},ui
+                # The primary Work Queue shows source-bound reviews only.
+                # No anonymous publication action can be invoked without
+                # opening a verified exact candidate review first. Retained
+                # CAS, lost ACK and no-replay checks below remain authoritative.
+                ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                  const page=sh?.querySelector('#page');
+                  return {queue:page?.dataset.view==='work-queue',
+                    visible:!!sh?.querySelector('.queue-board'),
+                    directDispatch:!![...page?.querySelectorAll('button')||[]]
+                      .find(x=>/^(publish|dispatch release|approve and publish)$/i.test(x.textContent.trim()))};""")
+                assert ui['queue'] and ui['visible'] and not ui['directDispatch'],ui
+                release_denial=call('POST',f'/session/{after}/execute/async',{
+                    'script':"""const done=arguments[arguments.length-1];
+                      const port=browser.runtime.connect({name:'pcms-i13-release'});
+                      port.onMessage.addListener(v=>{try{port.disconnect()}catch{}done(v)});
+                      port.onDisconnect.addListener(()=>done({ok:false,code:'PORT_CLOSED'}));
+                      port.postMessage({type:'PREVIEW',params:{slug:'i13-nonexistent'}});
+                      """,'args':[]},timeout=35)
+                assert release_denial.get('ok') is False and release_denial.get('code')=='RELEASE_CANONICAL_EVIDENCE_MISSING',release_denial
                 code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const journal=await import('./journal.mjs');
