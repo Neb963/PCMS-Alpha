@@ -60,21 +60,32 @@ def main():
             mod.call('POST',f'/session/{session}/url',
                 {'url':f'moz-extension://{uuid}/pcms/index.html'},timeout=30)
             observation={}
-            for _ in range(70):
-                observation=mod.execute(session,"""return {
-                  title:document.title,
-                  main:!!document.getElementById('pcms-faithful-host'),
-                  shadow:!!document.getElementById('pcms-faithful-host')?.shadowRoot,
-                  legacy:!!document.querySelector('body > .app'),
-                  url:location.protocol,
-                  manifest:browser.runtime.getManifest().browser_specific_settings?.gecko?.id,
-                  storageReady:typeof browser.storage.local.get==='function',
-                  alarmsReady:typeof browser.alarms.getAll==='function'
-                }""")
-                if observation.get('shadow'):break
+            # A shadow root exists before asynchronous templates, preferences,
+            # route event listeners and render() finish. Waiting only for the
+            # root races the primary navigation on a cold installed extension.
+            # The UI publishes this ready marker only AFTER routeHandlers()
+            # and the first render(); never ignore a failed/error-only mount.
+            for _ in range(100):
+                observation=mod.execute(session,"""const host=document.getElementById('pcms-faithful-host');
+                  const sh=host?.shadowRoot;
+                  const routes=['overview','generators','work-queue','accounts','refresher','settings'];
+                  return {
+                    title:document.title,
+                    main:!!host,
+                    shadow:!!sh,
+                    mountedReady:document.body.classList.contains('pcms-faithful-ready') &&
+                      !!sh?.querySelector('#page[data-view="overview"]') &&
+                      routes.every(route=>!!sh.querySelector('[data-nav="'+route+'"]')),
+                    legacy:!!document.querySelector('body > .app'),
+                    url:location.protocol,
+                    manifest:browser.runtime.getManifest().browser_specific_settings?.gecko?.id,
+                    storageReady:typeof browser.storage.local.get==='function',
+                    alarmsReady:typeof browser.alarms.getAll==='function'
+                  };""")
+                if observation.get('mountedReady'):break
                 time.sleep(.15)
             assert observation.get('manifest')==mod.ID,observation
-            assert observation.get('shadow'),('CLEAN_PRIMARY_NOT_MOUNTED',observation)
+            assert observation.get('mountedReady'),('CLEAN_PRIMARY_NOT_MOUNTED_AND_READY',observation)
             assert observation.get('storageReady') and observation.get('alarmsReady'),observation
             routes={}
             for route in ('overview','generators','work-queue','accounts','refresher','settings'):
