@@ -65,16 +65,21 @@ def main():
                   title:document.title,
                   main:!!document.getElementById('pcms-faithful-host'),
                   shadow:!!document.getElementById('pcms-faithful-host')?.shadowRoot,
+                  // attachShadow happens before templates are loaded and nav
+                  // handlers are registered. A shadowRoot is NOT mounted UI.
+                  mounted:document.body.classList.contains('pcms-faithful-ready')&&
+                    !!document.getElementById('pcms-faithful-host')?.shadowRoot?.querySelector('#page')&&
+                    !!document.getElementById('pcms-faithful-host')?.shadowRoot?.querySelector('[data-nav="generators"]'),
                   legacy:!!document.querySelector('body > .app'),
                   url:location.protocol,
                   manifest:browser.runtime.getManifest().browser_specific_settings?.gecko?.id,
                   storageReady:typeof browser.storage.local.get==='function',
                   alarmsReady:typeof browser.alarms.getAll==='function'
                 }""")
-                if observation.get('shadow'):break
+                if observation.get('mounted'):break
                 time.sleep(.15)
             assert observation.get('manifest')==mod.ID,observation
-            assert observation.get('shadow'),('CLEAN_PRIMARY_NOT_MOUNTED',observation)
+            assert observation.get('mounted'),('CLEAN_PRIMARY_NOT_MOUNTED',observation)
             assert observation.get('storageReady') and observation.get('alarmsReady'),observation
             routes={}
             for route in ('overview','generators','work-queue','accounts','refresher','settings'):
