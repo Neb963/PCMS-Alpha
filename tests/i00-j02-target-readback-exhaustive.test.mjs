@@ -15,7 +15,7 @@ const missing={status:'generator-does-not-exist'};
 const body=(obj,status=200,type='application/json')=>({status,headers:{get:()=>type},json:async()=>obj});
 async function run({inventory=[{name:owned,isPrivate:true}],owner='is-not-owner',
  page=missing,controlPage={status:'success',generator:control},
- controlOwner='is-owner',changeSession=false,firstFailure=null,
+ controlOwner='is-owner',changeSession=false,firstFailure=null,rateLimitedEndpoint=null,
  wrongPrincipal=false}={}){
  const prior={location:globalThis.location,localStorage:globalThis.localStorage,fetch:globalThis.fetch};
  let sessionRaw=raw,calls=[],failed=false;
@@ -26,6 +26,7 @@ async function run({inventory=[{name:owned,isPrivate:true}],owner='is-not-owner'
   calls.push({endpoint,name:args.generatorName||null,method:params.method});
   if(['save','changeGeneratorName'].includes(endpoint))throw Error('MUTATION_FORBIDDEN');
   if(firstFailure&&!failed&&endpoint===firstFailure){failed=true;return body({status:'unknown'},503);}
+  if(rateLimitedEndpoint===endpoint)return body({},429);
   if(changeSession&&endpoint==='getGeneratorPageData'&&args.generatorName===key)sessionRaw=JSON.stringify({...JSON.parse(raw),changed:true});
   if(endpoint==='getGeneratorsByUser')return body({status:'success',generators:inventory,generatorFolderMap:{}});
   if(endpoint==='checkGeneratorOwnership')return body({status:args.generatorName===key?owner:controlOwner});
@@ -82,7 +83,10 @@ for(const [title,options,code] of [
  ['owner rate limit cannot be mistaken for available slug',{owner:'too-many-requests'},'PROVIDER_RATE_LIMITED'],
  ['page rate limit cannot be mistaken for available slug',{page:{status:'too-many-requests'}},'PROVIDER_RATE_LIMITED'],
  ['page backend error cannot be mistaken for available slug',{page:{status:'server-error'}},'PROVIDER_UNAVAILABLE'],
- ['page transport failure twice cannot prove absence',{page:{status:'unverified'}},'TARGET_PAGE_TRANSPORT_UNAVAILABLE']
+ ['page transport failure twice cannot prove absence',{page:{status:'unverified'}},'TARGET_PAGE_TRANSPORT_UNAVAILABLE'],
+ ['authenticated owner HTTP 429',{rateLimitedEndpoint:'checkGeneratorOwnership'},'PROVIDER_RATE_LIMITED'],
+ ['authenticated census HTTP 429',{rateLimitedEndpoint:'getGeneratorsByUser'},'PROVIDER_RATE_LIMITED'],
+ ['public target HTTP 429',{rateLimitedEndpoint:'getGeneratorPageData'},'PROVIDER_RATE_LIMITED']
 ]){
  test('fails closed: '+title,async()=>{
   const {out,calls}=await run(options);
