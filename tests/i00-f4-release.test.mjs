@@ -11,7 +11,7 @@ test('F4 final combined package advances monotonically without donor/Gecko chang
   t.after(()=>rm(dir,{recursive:true,force:true}));
   const {original,combined,stage}=await buildI00({packageArchive:false,buildDirectory:dir});
   assert.equal(original.version,'1.2.0');
-  assert.equal(combined.version,'1.2.17');
+  assert.equal(combined.version,'1.2.18');
   assert.deepEqual(combined.browser_specific_settings,original.browser_specific_settings);
   assert.equal(combined.browser_specific_settings.gecko.id,'persona-route-manager@local');
   assert.deepEqual(combined.permissions,original.permissions);
@@ -35,14 +35,14 @@ test('F4 existing-combined upgrade uses exact prior source and digest, genuine A
   assert.match(upgrade,/main\(previous_archive=previous\)/);
   assert.match(upgrade,/installAddonFromAOMWithOptions/);
   assert.match(upgrade,/F4_EXISTING_COMBINED_CANONICAL_IDB_SURVIVES_COLD_UPDATE/);
-  assert.match(upgrade,/F4_REAL_1_2_16_TO_1_2_17_UPGRADE/);
-  assert.match(upgrade,/registry_version=='1.2.17'/);
+  assert.match(upgrade,/F5_REAL_1_2_17_TO_1_2_18_UPGRADE/);
+  assert.match(upgrade,/registry_version=='1.2.18'/);
   assert.doesNotMatch(upgrade,/MONKEY_PATCH|skipUpgrade|upgradeBypass/);
 });
 
 test('F4 operator release guide is versioned, short, safe, and separates live provider outcomes',async()=>{
   const guide=await readFile('docs/operator/OPERATOR-GUIDE.md','utf8');
-  for(const required of ['1.2.17','persona-route-manager@local','about:addons',
+  for(const required of ['1.2.18','persona-route-manager@local','about:addons',
     'Mullvad','Turnstile','Git','AI','Refresher','Backup','Work Queue',
     'source','unverified','unsigned'])
     assert.ok(guide.toLowerCase().includes(required.toLowerCase()),required);
