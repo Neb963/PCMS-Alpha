@@ -4035,23 +4035,36 @@ def main():
                 # portable format, Settings action, and wrong-password failure.
                 # No live provider or native calls; no disk byte proof claimed.
                 call('POST',f'/session/{after}/url',{'url':url+'#settings'})
-                settings=execute(after,"return {button:!!document.getElementById('pcms-backup-export'),passwordless:!document.getElementById('pcms-backup-passphrase'),status:!!document.getElementById('pcms-backup-status')}")
-                assert settings=={'button':True,'passwordless':True,'status':True},settings
-                # S02 B: new source-completeness action runs in the same installed
-                # XPI, reads the real synthetic historical IDB, and truthfully
-                # holds a source-incomplete legacy publication. v1 codec stays
-                # usable to preserve that historical record, not to bless it.
-                audit_button=execute(after,"const b=document.getElementById('pcms-backup-audit');if(b)b.click();return !!b")
-                assert audit_button is True,'S02 read-only source audit not packaged'
-                audit_status=''
-                for _ in range(50):
-                    audit_status=execute(after,"return document.getElementById('pcms-backup-audit-status')?.textContent||''")
-                    if 'Source closure held:' in audit_status or (
-                        'Source closure verified:' in audit_status):
-                        break
-                    time.sleep(.1)
-                assert 'Source closure held: BACKUP_SOURCE_INCOMPLETE' in audit_status,audit_status
-                assert 'No state changed' in audit_status,audit_status
+                # The v0 backup-audit button is retained only in inactive
+                # historical HTML. Exercise its production source-closure
+                # checker directly on actual packaged IndexedDB without
+                # mutation; the primary Backups UI is separately clicked
+                # below and in the complete J06 Firefox journeys.
+                backup_ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                  sh?.querySelector('[data-nav="settings"]')?.click();
+                  sh?.querySelector('[data-settings="backups"]')?.click();
+                  const headings=[...sh?.querySelectorAll('.settings-main h2')||[]].map(x=>x.textContent.trim());
+                  return {route:sh?.querySelector('#page')?.dataset.view,
+                    backed:headings.includes('Backups'),passwordless:!sh?.querySelector('input[type=password]'),
+                    inspect:!!sh?.querySelector('#pcms-backup-inspect-file')};""")
+                assert backup_ui=={'route':'settings','backed':True,'passwordless':True,'inspect':True},backup_ui
+                closure_code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const backup=await import('./backup-core.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  try{
+                    const before=await backup.snapshotCanonicalV2(db,{serializedValues:true});
+                    let code='NO_HOLD';
+                    try{await backup.preflightSourceRecovery(before)}
+                    catch(e){code=String(e?.message||e)}
+                    const after=await backup.snapshotCanonicalV2(db,{serializedValues:true});
+                    done({code,unchanged:JSON.stringify(before)===JSON.stringify(after)});
+                  }finally{db.close()}
+                })().catch(e=>done({error:String(e)}));"""
+                closure=call('POST',f'/session/{after}/execute/async',
+                             {'script':closure_code,'args':[]},timeout=90)
+                assert closure.get('code')=='BACKUP_SOURCE_INCOMPLETE' and closure.get('unchanged') is True,closure
                 print('B S02_PACKAGED_READONLY_SOURCE_RECOVERY_HOLD=PASS',flush=True)
                 # S02 B: production packaged v2 codec runs on real Firefox
                 # with complete original/current/history/binary source and
