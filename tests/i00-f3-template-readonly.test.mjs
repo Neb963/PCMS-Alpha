@@ -4,6 +4,8 @@ import {webcrypto,createHash} from 'node:crypto';
 import {runInNewContext} from 'node:vm';
 import {perchanceSupplyIsolated} from '../src/runtime/perchance-supply.mjs';
 import {createSupplyBoundary} from '../src/runtime/supply-boundary.mjs';
+import {createCanonicalStore} from '../src/runtime/journal.mjs';
+import {validateCommand} from '../src/runtime/command-boundary.mjs';
 import {fakeDatabase} from './fake-idb.mjs';
 import {I17_QUARANTINED_BATCH,I17_QUARANTINED_SLUG} from '../src/runtime/legacy-quarantine.mjs';
 const EMAIL='template-fixture@example.test',TOKEN='synthetic_template_session_not_real';
@@ -117,4 +119,56 @@ test('F3 historical read holds missing original scope, later account change, res
   {operationId:f.op.operationId,template:'https://example.test'},{operationId:'bad target'}])
   assert.equal((await f.run(params)).ok,false);
  assert.equal(f.calls.length,0);
+});
+
+test('F5 historical no-dispatch can be explicitly archived once without losing original failure or replaying creation',async()=>{
+ const f=await boundaryFixture(),store=createCanonicalStore(f.db);
+ const before=structuredClone(f.db.read('operations',f.op.operationId));
+ const context=await store.inspectOperationContext(f.op.operationId);
+ assert.equal(context.context.evidence,'RECORDED_NO_DISPATCH');
+ const out=await store.archiveHistoricalNoDispatch({operationId:f.op.operationId,expectedRevision:before.revision});
+ assert.deepEqual({ok:out.ok,archived:out.archived,providerEffects:out.providerEffects,replayAllowed:out.replayAllowed},
+  {ok:true,archived:true,providerEffects:'NONE',replayAllowed:false});
+ const after=f.db.read('operations',f.op.operationId);
+ assert.equal(after.status,'ABORTED');assert.equal(after.originalStatus,'PREFLIGHT_FAILED');
+ assert.equal(after.archivedNoDispatch,true);assert.deepEqual(after.firstFailure,before.firstFailure);
+ assert.equal(after.revision,before.revision+1);
+ assert.equal(f.db.read('meta','supply-batch:'+f.batch.batchId).batch.items[0].state,'CREATE_PREFLIGHT_FAILED');
+ assert.equal((await store.inspectOperationContext(f.op.operationId)).context.evidence,'RECORDED_NO_DISPATCH');
+ assert.equal((await store.inspectOperationContext(f.op.operationId)).context.archived,true);
+ const needs=await store.listOperationPage({status:'NEEDS_ACTION'});
+ const completed=await store.listOperationPage({status:'COMPLETED'});
+ assert.equal(needs.items.some(x=>x.operationId===f.op.operationId),false);
+ assert.equal(completed.items.some(x=>x.operationId===f.op.operationId),true);
+ assert.equal((await store.archiveHistoricalNoDispatch({operationId:f.op.operationId,expectedRevision:after.revision})).code,'ARCHIVE_NOT_ADMISSIBLE');
+ assert.equal(f.calls.length,0,'archival may never invoke the provider template or effects');
+});
+test('F5 archiving denies uncertain, inconsistent, stale and unsupported historical operations',async()=>{
+ for(const change of [
+  op=>{op.effectBoundary='DISPATCH_POSSIBLE'},
+  op=>{op.status='HELD_UNCERTAIN'},
+  op=>{op.firstFailure.effectBoundary='DISPATCH_POSSIBLE'},
+  op=>{op.ack={ok:true}},
+  op=>{op.effectType='s04_create'}
+ ]){
+  const f=await boundaryFixture();
+  const op=structuredClone(f.op);change(op);
+  await new Promise(resolve=>{const tx=f.db.transaction(['operations'],'readwrite');tx.oncomplete=resolve;
+   tx.objectStore('operations').put(op);
+  });
+  const store=createCanonicalStore(f.db);
+  const out=await store.archiveHistoricalNoDispatch({operationId:op.operationId,expectedRevision:op.revision});
+  assert.equal(out.ok,false,JSON.stringify(op));
+  assert.equal(f.db.read('operations',op.operationId).status,op.status);
+ }
+ const f=await boundaryFixture(),store=createCanonicalStore(f.db);
+ assert.equal((await store.archiveHistoricalNoDispatch({operationId:f.op.operationId,expectedRevision:1})).code,'STALE_REVISION');
+ const sender={id:'fixture',url:'moz-extension://fixture/pcms/index.html'};
+ const api={runtime:{id:'fixture',getURL:p=>'moz-extension://fixture/'+p}};
+ assert.equal(validateCommand(api,sender,{type:'ARCHIVE_HISTORICAL_NO_DISPATCH',params:{
+  operationId:f.op.operationId,expectedRevision:2}}).ok,true);
+ assert.equal(validateCommand(api,sender,{type:'ARCHIVE_HISTORICAL_NO_DISPATCH',params:{
+  operationId:f.op.operationId,expectedRevision:2,force:true}}).ok,false);
+ assert.equal(validateCommand(api,{id:'attacker',url:sender.url},{type:'ARCHIVE_HISTORICAL_NO_DISPATCH',params:{
+  operationId:f.op.operationId,expectedRevision:2}}).ok,false);
 });
