@@ -322,3 +322,8 @@ primary-shell assertions enforce the same one-script entry and absence of the
 hidden legacy button. This is an implementation checkpoint only: installed-Firefox
 B tests, required full CI, and full feature action-to-readback remain unverified at
 this draft checkpoint. No provider/private-Git/native mutations or intermediate XPI.
+
+
+### F3 full-gate first cause and regression correction
+
+Full Ready run [40497381143](https://github.com/Neb963/PCMS-Alpha/actions/runs/40497381143) at `9f90c4712ecfee505654e7c680d1adc5f76a562c` passed the baseline and 1,409 of 1,417 D tests; eight D assertions failed and installed Firefox was consequently skipped. Six asserted that obsolete legacy controller scripts remained mounted in `index.html`, rather than checking the single guarded primary controller. Two expected the superseded `GIT_VAULT_UNAVAILABLE` classification for missing Firefox browser-local credentials, where production correctly returned `GIT_CREDENTIAL_MISSING`. The follow-up updates each of those existing oracles to require the actual primary script, targeted guarded imports, nonmounting of historical scripts, and correct failure code while retaining no-effect, last-good snapshot and recovery assertions. The failed run remains evidence; full corrected D/B CI and browser actions are still pending. No change to Git/route/effect authorization or weakening of required workflows.
