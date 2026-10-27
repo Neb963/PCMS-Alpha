@@ -85,7 +85,7 @@ test('prototype supports adverse navigation and fail-open presentation recovery'
 });
 test('Firefox upgrades v1.2.1 XPI to 1.2.19 with donor manifest unchanged',()=>{
  assert.match(build,/original\.version!=='1\.2\.0'/);
- assert.match(build,/combined\.version='1\.2\.18'/);
+ assert.match(build,/combined\.version='1\.2\.19'/);
  assert.doesNotMatch(html,/src="v015-faithful\.mjs"/);
  assert.match(html,/faithful\/bridge\.mjs/);
 });
