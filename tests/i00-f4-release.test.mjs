@@ -35,7 +35,7 @@ test('F4 existing-combined upgrade uses exact prior source and digest, genuine A
   assert.match(upgrade,/main\(previous_archive=previous\)/);
   assert.match(upgrade,/installAddonFromAOMWithOptions/);
   assert.match(upgrade,/F4_EXISTING_COMBINED_CANONICAL_IDB_SURVIVES_COLD_UPDATE/);
-  assert.match(upgrade,/F5_REAL_1_2_17_TO_1_2_18_UPGRADE/);
+  assert.match(upgrade,/F6_REAL_1_2_18_TO_1_2_19_UPGRADE/);
   assert.match(upgrade,/registry_version=='1.2.19'/);
   assert.doesNotMatch(upgrade,/MONKEY_PATCH|skipUpgrade|upgradeBypass/);
 });
