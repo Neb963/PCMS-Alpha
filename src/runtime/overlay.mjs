@@ -1213,7 +1213,8 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
     `    case "MULLVAD_RESTART": return localMutationFence(allPersonaUids, async () => {
       if(message.pcmsAutomatic===true){
         const observed=await mullvadRuntime.refreshStatus();
-        if(observed.installed!==true||observed.compatible!==true||observed.ready===true||
+        if(observed.installed!==true||observed.compatible!==true||
+           (observed.ready===true&&observed.interface_up!==false&&observed.base_proxy_reachable!==false&&observed.base_route_bound!==false)||
            !Array.isArray(observed.pending_prepare_routes)||observed.pending_prepare_routes.length!==0||
            !(observed.interface_up===false||observed.base_proxy_reachable===false||
              observed.base_route_bound===false))
