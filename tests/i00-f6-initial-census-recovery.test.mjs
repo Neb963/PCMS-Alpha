@@ -103,14 +103,15 @@ test('parallel queued generators share one guarded census read and never count a
  const inventory=createInventoryStore(db);
  let calls=0,release;
  const gate=new Promise(resolve=>release=resolve);
+ let started;const censusStarted=new Promise(resolve=>started=resolve);
  const syncInventory=async(id,revision)=>{
-  calls++;assert.equal(id,alpha.accountId);assert.equal(revision,alpha.revision);
+  calls++;started();assert.equal(id,alpha.accountId);assert.equal(revision,alpha.revision);
   await gate;
   return inventory.applyObservation(alpha,witness(alpha,Date.now()-5));
  };
  const a=recoverMissingCreationCensus({db,syncInventory});
  const b=recoverMissingCreationCensus({db,syncInventory});
- await new Promise(resolve=>setImmediate(resolve));
+ await Promise.race([censusStarted,new Promise((_,reject)=>setTimeout(()=>reject(Error('CENSUS_NOT_STARTED')),5000))]);
  assert.equal(calls,1,'one external guarded census per canonical account');
  assert.equal(db.read('meta','inventory-batch:'+alpha.accountId),undefined,
   'pending observation must not count as authoritative initial zero');
