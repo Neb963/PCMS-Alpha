@@ -28,7 +28,9 @@ test('all DOM IDREFs in labeled sections resolve, including search suggestions',
 });
 test('new production script is packaged by existing builder with all imports present',()=>{
  assert.match(html,/<link rel="stylesheet" href="v014-desktop\.css">/);
- assert.match(html,/<script type="module" src="v014-desktop-ui\.mjs"><\/script>/);
+ assert.match(html,/<script type="module" src="faithful\/bridge\.mjs"><\/script>/);
+ assert.doesNotMatch(html,/src="v014-desktop-ui\.mjs"/);
+ assert.equal((html.match(/<script type="module"/g)||[]).length,1);
  assert.match(ui,/from '\.\/v014-ui-core\.mjs'/);
  assert.match(ui,/pcms-i04-inventory/);
  assert.match(ui,/pcms-i03-accounts/);
