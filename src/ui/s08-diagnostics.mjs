@@ -127,7 +127,7 @@ function show(){
   (run.created?' · Last observed visibility: '+(run.remoteVisibility||'unknown')+'. Test resources are preserved.':'')+
   (run.currentHold?' · '+run.currentHold.code+(
     run.currentHold.code==='INITIAL_INVENTORY_UNKNOWN'?
-      ' — In Accounts, synchronize the generator inventory for every non-archived managed account under its verified protected route. Then Resume this same run; do not start a new slug. Independent module checks below remain available.':
+      ' — The first verified account census was unavailable. Resume this same saved request to trigger protected read-only inventory recovery; if account identity or ownership is held, inspect that account in Accounts. Do not start a new slug.':
     run.currentHold.code==='GIT_WRITE_GRANT_REQUIRED'?
       ' — Grant Git in Settings → Protected workflow activation, then Resume.':
     run.currentHold.code==='ENABLE_GUARDED_REFRESHER_POLICY'?
@@ -214,6 +214,17 @@ async function creation(){
   if(state==='TARGET_COLLISION_HELD')pause('TEST_SLUG_COLLISION');
   const outcome=await request('creation','RUN_CREATE_STEP',{
    intentId:run.intentId,expectedRevision:got.record.revision});
+  if(outcome?.code==='INITIAL_INVENTORY_REFRESHED'){
+   // A single protected census made forward progress, with no CREATE and
+   // no intent revision change. Continue the SAME persisted intent inside
+   // this bounded diagnostic loop; never submit another request or infer a
+   // successful provider effect from a local count.
+   const current=await request('creation','GET_CREATE_INTENT',{intentId:run.intentId});
+   if(!current?.ok||current.record?.slug!==run.slug||
+      current.record?.intentId!==run.intentId||
+      current.record?.state!=='WAITING_CAPABILITY')pause('CREATION_CENSUS_RECONCILE_REQUIRED');
+   continue;
+  }
   if(!outcome?.ok)pause(outcome?.code||'CREATION_STEP_NOT_VERIFIED');
   const verified=await request('creation','GET_CREATE_INTENT',{intentId:run.intentId});
   if(!verified?.ok||verified.record?.slug!==run.slug)
