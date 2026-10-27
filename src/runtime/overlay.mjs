@@ -1204,6 +1204,27 @@ function localMutationFence(profileIds, operation, mode = "block", options = {})
     'S01 durable donor binding');
   await writeFile(donorStoragePath,donorStorage);
 
+  // Auto-repair is a restricted path through the SAME donor MULLVAD_RESTART
+  // mutation fence, not a new PCMS tunnel controller. Immediately before
+  // mutation, refuse healthy connections and unresolved native preparations.
+  // Manual PersonaMonkey Restart tunnel keeps its original behavior.
+  bg = substituteOnce(bg,
+    '    case "MULLVAD_RESTART": return localMutationFence(allPersonaUids, async () => {\\n      const result = await restartTunnel();'.replaceAll('\\n','\n'),
+    `    case "MULLVAD_RESTART": return localMutationFence(allPersonaUids, async () => {
+      if(message.pcmsAutomatic===true){
+        const observed=await mullvadRuntime.refreshStatus();
+        if(observed.installed!==true||observed.compatible!==true||observed.ready===true||
+           !Array.isArray(observed.pending_prepare_routes)||observed.pending_prepare_routes.length!==0||
+           !(observed.interface_up===false||observed.base_proxy_reachable===false||
+             observed.base_route_bound===false))
+          return {status:observed,restarted:false};
+      }
+      const result = await restartTunnel();`,
+    'F5 donor-owned guarded automatic restart');
+  bg = substituteOnce(bg,
+    '      return { status };\\n    });\\n    case "MULLVAD_LIST_ENTRIES":'.replaceAll('\\n','\n'),
+    '      return { status, restarted: message.pcmsAutomatic===true };\\n    });\\n    case "MULLVAD_LIST_ENTRIES":'.replaceAll('\\n','\n'),
+    'F5 restart dispatch acknowledgement');
   await writeFile(bgPath, bg);
   for (const name of ['work-notices.mjs','scope-observation.mjs','protected-readiness.mjs','native-receipts.mjs','legacy-quarantine.mjs','creation-intake.mjs','creation-batch.mjs','creation-preview.mjs','creation-allocation.mjs','creation-authority.mjs','creation-inventory.mjs','creation-import-authority.mjs','creation-effects.mjs','creation-git.mjs','creation-git-owner.mjs','creation-git-runner.mjs','creation-runner.mjs','creation-watch.mjs','coordinator-core.mjs','coordinator-store.mjs','coordinator-boundary.mjs','s08-cleanup-boundary.mjs','diagnostic-startup.mjs','operator-record-boundary.mjs','pcms-donor-fence.mjs','network-ledger.mjs','route-pin.mjs','enrollment.mjs','qualified-clock.mjs','entry.mjs', 'wake.mjs', 'dashboard-action.mjs', 'persona-guard.mjs', 'operation-context.mjs', 'journal.mjs', 'command-boundary.mjs', 'notices.mjs', 'accounts.mjs', 'account-boundary.mjs', 'inventory.mjs', 'inventory-boundary.mjs', 'perchance-readback.mjs', 'perchance-observer.mjs', 'git-source.mjs', 'source-boundary.mjs', 'git-catalog.mjs', 'git-local-secret.mjs', 'identity-reconciliation.mjs', 'git-prompt.mjs', 'catalog-bootstrap.mjs', 'catalog-import.mjs', 'catalog-import-preview.mjs', 'catalog-prompt-store.mjs', 'catalog-resume.mjs', 'catalog-declaration.mjs', 'catalog-ready-store.mjs', 'ready-planner.mjs', 'ready-git-prompt.mjs', 'ready-git-source.mjs', 'ready-native-source.mjs', 'ai-declarative-assertion.mjs', 'ready-ai-gate.mjs', 'ready-source-safety.mjs','restored-source.mjs', 'ready-store.mjs', 'ready-intake.mjs', 'ready-operator.mjs', 'ready-development.mjs', 's06-output-proof.mjs', 's06-writeback-progress.mjs','s06-publication-progress.mjs','clean-bulk-authority.mjs','clean-bulk-release.mjs','clean-bulk-boundary.mjs', 's06-review-queue.mjs', 's06-request-changes.mjs', 's06-human-review.mjs', 's06-exception-review.mjs','exception-idle.mjs', 's06-standing-authority.mjs','s06-authority-bootstrap.mjs', 'readiness-boundary.mjs','catalog-boundary.mjs', 'catalog-identity-review.mjs','folder-existing-rename.mjs','folder-rename-link.mjs','folder-rename-safety.mjs','folder-identity-boundary.mjs', 'creation-catalog.mjs', 'catalog-watch.mjs', 'supply-plan.mjs', 'supply-store.mjs', 'perchance-supply.mjs', 'supply-git.mjs', 'supply-boundary.mjs', 'adoption.mjs', 'adoption-store.mjs', 'adoption-git.mjs', 'original-archive.mjs','adoption-recovery.mjs','adoption-recovery-bridge.mjs', 'adoption-boundary.mjs',
     'staging-core.mjs','staging-store.mjs','staging-boundary.mjs',
