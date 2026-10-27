@@ -3436,9 +3436,22 @@ def main():
                 print('B I12_PERSISTENT_RESTART_BUDGET_PAUSE_SINGLE_ALARM_REPAIR=PASS',flush=True)
                 # A paused budget must stay exact. Prove unpaused wall rest
                 # separately across another actual OS process exit/relaunch.
-                resume_view=refresher_command(after,{'type':'GET_REFRESHER','params':{'query':'i12-b-','limit':25}})
-                resume=refresher_command(after,{'type':'SET_PAUSE','params':{'expectedRevision':resume_view['revision'],'scope':'GLOBAL','paused':False}})
+                # A concurrently running Firefox alarm may advance the policy
+                # revision between read and CAS. Only STALE_REVISION is a
+                # proven no-effect rejection; reread the actual browser store
+                # before submitting a new CAS. Never replay an uncertain ACK.
+                resume=None
+                for attempt in range(5):
+                    view=refresher_command(after,{'type':'GET_REFRESHER',
+                        'params':{'query':'i12-b-','limit':25}})
+                    assert view.get('ok') is True and view.get('globalPause') is True,('A06_POLICY_CHANGED_EXTERNALLY',view)
+                    resume=refresher_command(after,{'type':'SET_PAUSE',
+                        'params':{'expectedRevision':view['revision'],'scope':'GLOBAL','paused':False}})
+                    if resume.get('code')!='STALE_REVISION':break
                 assert resume.get('ok') is True,('A06_RESUME_FOR_REST_RESTART',resume)
+                settled=refresher_command(after,{'type':'GET_REFRESHER',
+                    'params':{'query':'i12-b-','limit':25}})
+                assert settled.get('ok') is True and settled.get('globalPause') is False,('A06_PAUSE_READBACK_UNVERIFIED',settled)
                 resume_snapshot=call('POST',f'/session/{after}/execute/async',{'script':restart_code,'args':[]})
                 assert resume_snapshot['paused'] is False and 0<resume_snapshot['rest']<=restarted['rest'],resume_snapshot
                 rest_old_pids=owned_firefox_pids(profile)
@@ -3462,9 +3475,22 @@ def main():
                 assert rest_after['paused'] is False and 0<rest_after['rest']<resume_snapshot['rest'],rest_after
                 assert rest_after['first']==16*3600000 and rest_after['held']=='UNKNOWN',('A06_NO_RESTART_ACTIVE_CREDIT',rest_after)
                 assert rest_after['alarm'] and rest_after['alarms']==1,rest_after
-                pause_view=refresher_command(after,{'type':'GET_REFRESHER','params':{'query':'i12-b-','limit':25}})
-                repause=refresher_command(after,{'type':'SET_PAUSE','params':{'expectedRevision':pause_view['revision'],'scope':'GLOBAL','paused':True}})
-                assert repause.get('ok') is True,repause
+                # A concurrently running Firefox alarm may advance the policy
+                # revision between read and CAS. Only STALE_REVISION is a
+                # proven no-effect rejection; reread the actual browser store
+                # before submitting a new CAS. Never replay an uncertain ACK.
+                repause=None
+                for attempt in range(5):
+                    view=refresher_command(after,{'type':'GET_REFRESHER',
+                        'params':{'query':'i12-b-','limit':25}})
+                    assert view.get('ok') is True and view.get('globalPause') is False,('A06_POLICY_CHANGED_EXTERNALLY',view)
+                    repause=refresher_command(after,{'type':'SET_PAUSE',
+                        'params':{'expectedRevision':view['revision'],'scope':'GLOBAL','paused':True}})
+                    if repause.get('code')!='STALE_REVISION':break
+                assert repause.get('ok') is True,('A06_REPAUSE_FOR_REST_RESTART',repause)
+                settled=refresher_command(after,{'type':'GET_REFRESHER',
+                    'params':{'query':'i12-b-','limit':25}})
+                assert settled.get('ok') is True and settled.get('globalPause') is True,('A06_PAUSE_READBACK_UNVERIFIED',settled)
                 print('B/H A06_RESUMED_WALL_REST_REAL_NEW_PROCESS_ZERO_ACTIVE_CREDIT=PASS',flush=True)
 
                 # A03 H: same installed Gecko ID / original Firefox profile,
