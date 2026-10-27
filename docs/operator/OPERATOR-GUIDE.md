@@ -10,9 +10,9 @@
 
 ## Changes in 1.2.18
 
-- Protected bridge recovery: while eligible account work is genuinely due, PCMS can request one guarded PersonaMonkey-native tunnel restart after independently repeated bridge/proxy failure. Native ambiguity stays held; account-specific route and principal checks still decide when work resumes. Verify real helper recovery in this session.
-- Work Queue: a historical failed request can be **archived** only when the saved journal independently proves no dispatch. The original error, event history and I17 no-replay fence remain. Use **Start separate new request** for a new, different slug; it never replays the historical attempt.
-- New creation: a failed current target read now retains its real bridge, account or provider failure code instead of misleading `TARGET_STATE_CHANGED`. This does not establish that Perchance's live creation API is compatible; a disposable end-to-end creation remains necessary.
+- Bridge recovery: due account work may trigger one guarded PersonaMonkey restart after repeated tunnel/proxy failure. Uncertain native effects stay held; protected account egress must still be verified.
+- Work Queue: **Archive failed attempt** requires saved proof of no dispatch. Original failure and I17 no-replay fence remain. **Start separate new request** creates no effect until separately submitted with a different slug.
+- New creation: target-read errors retain their bridge, account or provider cause rather than `TARGET_STATE_CHANGED`. Live Perchance creation still requires disposable confirmation.
 
 ## One final live-acceptance session
 
