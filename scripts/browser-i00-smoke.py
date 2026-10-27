@@ -3321,18 +3321,32 @@ def main():
                 assert i12_proof.get('ok') is True,i12_proof
                 print('B I12_PACKAGED_IDB_INTERVAL_CAS_FLEET_OBSERVER_AND_HELD_PORT=PASS',flush=True)
                 print('B I12_PACKAGED_MEASUREMENTS=',json.dumps(i12_proof['measurement']),flush=True)
-                execute(after,"location.hash='#refresher';document.getElementById('pcms-refresher-query').value='i12-b-';document.getElementById('pcms-refresher-reload').click();return true")
-                ui={}
-                for _ in range(60):
-                    ui=execute(after,"return {rows:document.querySelectorAll('#pcms-refresher-rows tr').length,summary:document.getElementById('pcms-refresher-summary').textContent,page:document.getElementById('pcms-refresher-page').textContent,pause:document.getElementById('pcms-refresher-global-pause').textContent,optIn:document.getElementById('pcms-refresher-enable').checked}")
-                    if '1250' in ui.get('page','') and ui.get('pause')=='Resume globally': break
+                # Primary UI: real guarded, paged Refresher rows replace the
+                # inert light-DOM controls retired with the single-controller UI.
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-nav="refresher"]').click();return true;""")
+                for _ in range(40):
+                    if execute(after,"return !!document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#refresher-search')"):break
                     time.sleep(.1)
-                assert ui['rows']==25 and '1250' in ui['page'] and ui['optIn'] is False,ui
-                assert ui['pause']=='Resume globally',ui
-                execute(after,"document.querySelector('#pcms-refresher-rows button').click();return true")
-                inspector=execute(after,"return {visible:!document.getElementById('pcms-refresher-inspector').hidden,selected:document.getElementById('pcms-refresher-selected').textContent}")
-                assert inspector['visible'] and 'i12-b-0000' in inspector['selected'],inspector
-                print('B I12_PACKAGED_REFRESHER_PAGING_PAUSE_INSPECTOR=PASS',flush=True)
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot,e=sh.querySelector('#refresher-search');
+                  e.value='i12-b-';e.dispatchEvent(new Event('input',{bubbles:true}));return true;""")
+                ui=None
+                for _ in range(90):
+                    ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      return {rows:sh.querySelectorAll('.ref-table-scroll tr[data-ref-id]').length,
+                        page:sh.querySelector('.ref-pagination span')?.textContent||'',
+                        pause:sh.querySelector('[data-action="pause-refresher"]')?.textContent||'',
+                        optIn:sh.querySelector('[data-toggle="refresher"]')?.checked};""")
+                    if ui['rows']==25 and '1250' in ui['page'] and ui['pause']=='Resume Refresher':break
+                    time.sleep(.15)
+                assert ui['rows']==25 and '1250' in ui['page'] and ui['pause']=='Resume Refresher' and ui['optIn'] is False,ui
+                execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('.ref-table-scroll tr[data-ref-id]').click();return true")
+                for _ in range(60):
+                    inspector=execute(after,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[role=dialog][aria-label^=\"Manage Refresher timing\"]')?.getAttribute('aria-label')")
+                    if inspector and 'i12-b-0000' in inspector:break
+                    time.sleep(.15)
+                assert inspector and 'i12-b-0000' in inspector,inspector
+                print('B I12_PRIMARY_REFRESHER_PAGING_PAUSE_INSPECTOR=PASS',flush=True)
                 alarm_code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const prior=(await browser.storage.local.get('pcmsI12AlarmCount')).pcmsI12AlarmCount||0;
