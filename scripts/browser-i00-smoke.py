@@ -3790,14 +3790,32 @@ def main():
                            {'script':code,'args':[]},timeout=90)
                 assert proof.get('ok') is True,proof
                 print('B I13_INSTALLED_EXISTING_ENCRYPTED_P_CAS_UNLIST_UNCERTAIN=PASS',flush=True)
-                execute(after,"document.getElementById('pcms-existing-slug').value='i13-existing-fixture';document.getElementById('pcms-existing-slug').dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('pcms-existing-get').click();return true")
-                existing_ui=''
-                for _ in range(80):
-                    existing_ui=execute(after,"return document.getElementById('pcms-existing-status').textContent")
-                    if 'UNLIST_UNCERTAIN' in existing_ui:break
+                # Retired existing-update form is no longer mounted. Check the
+                # exact uncertain record through its guarded port above and
+                # open the matching generator through the visible primary UI.
+                assert proof['actual']['state']=='UNLIST_UNCERTAIN',proof
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-nav="generators"]').click();return true;""")
+                for _ in range(40):
+                    if execute(after,"return !!document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#generator-search')"):break
+                    time.sleep(.1)
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot,e=sh.querySelector('#generator-search');
+                  e.value='i13-existing-fixture';e.dispatchEvent(new Event('input',{bubbles:true}));return true;""")
+                existing_ui=None
+                for _ in range(70):
+                    existing_ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      return {row:[...sh.querySelectorAll('.workspace-surface tr[data-item-index]')].some(x=>x.querySelector('.name-cell')?.textContent==='i13-existing-fixture'),
+                        page:sh.querySelector('#page')?.dataset.view};""")
+                    if existing_ui['row']:break
                     time.sleep(.15)
-                assert 'UNLIST_UNCERTAIN' in existing_ui,existing_ui
-                assert execute(after,"return document.getElementById('pcms-existing-unlist').disabled") is True
+                assert existing_ui['page']=='generators' and existing_ui['row'],existing_ui
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  [...sh.querySelectorAll('.workspace-surface tr[data-item-index]')].find(x=>x.querySelector('.name-cell')?.textContent==='i13-existing-fixture').querySelector('.name-cell').click();return true;""")
+                visible=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  const dialog=sh.querySelector('[role=dialog]');
+                  return {item:dialog?.textContent.includes('i13-existing-fixture'),
+                    unsafe:[...dialog?.querySelectorAll('button')||[]].some(x=>/retry unlist|unlist again/i.test(x.textContent))};""")
+                assert visible['item'] and not visible['unsafe'],visible
                 print('B I13_EXISTING_UI_NO_BLIND_UNLIST_RETRY=PASS',flush=True)
 
                 # Synthetic prior confirmed public F permits a NEW source
