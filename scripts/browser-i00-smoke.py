@@ -2481,9 +2481,36 @@ def main():
                 assert ai_b.get('ok') is True,ai_b
                 print('B I10_PACKAGED_SETTINGS_CAS_PROMPT_PIN_AND_ORACLE_HOLDS=PASS',flush=True)
                 call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
-                ai_work=execute(after,"return {job:!!document.getElementById('pcms-ai-job-list'),prepare:!!document.getElementById('pcms-ai-prepare'),enabled:!document.getElementById('pcms-ai-prepare')?.disabled}")
-                assert ai_work=={'job':True,'prepare':True,'enabled':False},ai_work
-                print('B I10_PACKAGED_UI_HELD_NO_AI_PROVIDER_DISPATCH=PASS',flush=True)
+                # The historical AI Prepare form is no longer mounted, and
+                # enabled workflow controls are intentional. The real primary
+                # UI must display the durable, unverified fixture without
+                # mistaking its existence for authorized provider dispatch.
+                ai_work=None
+                for _ in range(80):
+                    ai_work=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                      const rows=[...sh?.querySelectorAll('.queue-item')||[]];
+                      const row=rows.find(x=>x.textContent.includes('i10-b-private'));
+                      return {route:sh?.querySelector('#page')?.dataset.view,
+                        row:!!row,manage:!![...row?.querySelectorAll('button')||[]]
+                          .find(x=>x.textContent.trim()==='Manage development'),
+                        state:row?.textContent||''};""")
+                    if ai_work['route']=='work-queue' and ai_work['row'] and ai_work['manage']:break
+                    time.sleep(.15)
+                assert ai_work['route']=='work-queue' and ai_work['row'] and ai_work['manage'],ai_work
+                assert 'independent' in ai_work['state'].lower() or 'testing' in ai_work['state'].lower(),ai_work
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  const row=[...sh.querySelectorAll('.queue-item')].find(x=>x.textContent.includes('i10-b-private'));
+                  [...row.querySelectorAll('button')].find(x=>x.textContent.trim()==='Manage development').click();return true;""")
+                ai_inspector=None
+                for _ in range(60):
+                    ai_inspector=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      const modal=sh.querySelector('[role="dialog"][aria-label="AI development for i10-b-private"]');
+                      return {visible:!!modal,readable:!!modal?.textContent.includes('i10-b-private')};""")
+                    if ai_inspector['visible'] and ai_inspector['readable']:break
+                    time.sleep(.15)
+                assert ai_inspector['visible'] and ai_inspector['readable'],ai_inspector
+                execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[role=dialog][aria-label=\"AI development for i10-b-private\"] button[aria-label=Close]')?.click();return true")
+                print('B I10_PRIMARY_AI_UNVERIFIED_JOB_INSPECTABLE_NO_PROVIDER_DISPATCH=PASS',flush=True)
                 # I10 B: durable uncertain native send on real IndexedDB, actual
                 # process-cold recovery state and full generator asset checkpoint.
                 code="""const done=arguments[arguments.length-1];
