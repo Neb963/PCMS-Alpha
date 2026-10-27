@@ -4819,7 +4819,13 @@ def main():
                 # I16 B: actual installed XPI, extension Settings DOM and real
                 # canonical IDB + Firefox local-storage guard. Independent
                 # synthetic archives only; no donor/provider/live mutation.
-                i16_ui=execute(after,"return {archive:!!document.getElementById('pcms-restore-archive'),checkpoint:!!document.getElementById('pcms-restore-checkpoint'),preview:!!document.getElementById('pcms-restore-preview'),stage:!!document.getElementById('pcms-restore-verify')}")
+                i16_ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                  const form=sh?.querySelector('#pcms-restore-archive')?.closest('section');
+                  return {archive:!!form?.querySelector('#pcms-restore-archive'),
+                    checkpoint:!!form?.querySelector('#pcms-restore-checkpoint'),
+                    preview:!!form?.querySelector('#pcms-restore-preview'),
+                    stage:!!form?.querySelector('#pcms-restore-verify'),
+                    active:sh?.querySelector('#page')?.dataset.view==='settings'};""")
                 assert all(i16_ui.values()),i16_ui
 
                 # I16 B/UX: exercise actual file-input UI, not just existence.
@@ -4868,22 +4874,25 @@ def main():
                 path_b.write_text(ui_data['archive'])
                 for css,filepath in [('#pcms-restore-archive',path_a),
                                       ('#pcms-restore-checkpoint',path_b)]:
-                    element=call('POST',f'/session/{after}/element',
-                                 {'using':'css selector','value':css})
+                    element=execute(after,"""const css=CSS_VALUE;
+                      return document.getElementById('pcms-faithful-host').shadowRoot.querySelector(css);""".replace('CSS_VALUE',json.dumps(css)))
                     element_id=element['element-6066-11e4-a52e-4f735466cecf']
                     call('POST',f'/session/{after}/element/{element_id}/value',
                          {'text':str(filepath),'value':list(str(filepath))})
-                setup_ui="document.getElementById('pcms-restore-preview').click();return true"
+                setup_ui="document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#pcms-restore-preview').click();return true"
                 assert execute(after,setup_ui) is True
                 # Deprecated encrypted archives are rejected by the actual
                 # passwordless parser before plan or guard creation.
                 negative_result=None
                 for _ in range(80):
-                    negative_result=execute(after,"return {status:document.getElementById('pcms-restore-status').textContent,verifyDisabled:document.getElementById('pcms-restore-verify').disabled,applyDisabled:document.getElementById('pcms-restore-apply').disabled}")
+                    negative_result=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      return {status:sh.querySelector('#pcms-restore-status').textContent,
+                        verifyDisabled:sh.querySelector('#pcms-restore-verify').disabled,
+                        applyDisabled:sh.querySelector('#pcms-restore-apply').disabled};""")
                     if negative_result['verifyDisabled'] and 'Restore is held.' in negative_result['status']:break
                     time.sleep(.1)
                 assert 'Restore is held.' in negative_result['status'],negative_result
-                assert 'PORTABLE_' in execute(after,"return document.getElementById('pcms-restore-details').textContent"),negative_result
+                assert 'PORTABLE_' in execute(after,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#pcms-restore-details').textContent"),negative_result
                 assert negative_result['verifyDisabled'] is True,negative_result
                 assert negative_result['applyDisabled'] is True,negative_result
                 print('B A02_LEGACY_ENCRYPTED_FILE_REJECTED_WITHOUT_GUARD=PASS',flush=True)
