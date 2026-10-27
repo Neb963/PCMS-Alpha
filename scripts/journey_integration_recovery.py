@@ -203,6 +203,15 @@ def run(browser,archive,folder):
         a.wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('No creation or rename was sent')",'ISSUE60_EXACT_LEGACY_NO_DISPATCH_CONTEXT')
         g.click_text(s,'Check saved status');g.click_text(s,'Check saved status')
         a.wait(s,"sh.querySelectorAll('[data-operation-failure]').length===1",'ISSUE60_RECHECK_DOES_NOT_DUPLICATE_REASON')
+        # Real Firefox should interact with the recovery action without
+        # scrolling a nested offscreen form out of its enclosing drawer.
+        bounds=b.execute(s,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+const dialog=sh.querySelector('[aria-label="Recorded operation details"]');
+const button=[...dialog.querySelectorAll('button')].find(x=>x.textContent.trim()==='Open account');
+const rect=button.getBoundingClientRect();return {footer:!!button.closest('.drawer-foot'),
+  y:rect.y,bottom:rect.bottom,viewport:innerHeight,disabled:button.disabled,
+  visible:rect.height>0&&rect.y>=0&&rect.bottom<=innerHeight};""")
+        assert bounds['footer'] and bounds['visible'] and not bounds['disabled'],('ISSUE60_RECOVERY_BUTTON_GEOMETRY',bounds)
         g.click_text(s,'Open account');a.wait(s,"!!sh.querySelector('.account-dialog')",'ISSUE60_CONTEXTUAL_ACCOUNT_RECOVERY_ACTION');a.close_dialog(s)
         assert not oracle.effects
         # No human Perchance tab is a requirement for background creation.
