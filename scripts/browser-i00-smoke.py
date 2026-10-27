@@ -3559,7 +3559,7 @@ def main():
                       const port=browser.runtime.connect({name:'pcms-i13-release'});
                       port.onMessage.addListener(v=>{try{port.disconnect()}catch{}done(v)});
                       port.onDisconnect.addListener(()=>done({ok:false,code:'PORT_CLOSED'}));
-                      port.postMessage({type:'PREVIEW',params:{slug:'i13-nonexistent'}});
+                      port.postMessage({type:'PREVIEW',params:{slug:'i13-nonexistent',token:'offline-fixture-no-network'}});
                       """,'args':[]},timeout=35)
                 assert release_denial.get('ok') is False and release_denial.get('code')=='RELEASE_CANONICAL_EVIDENCE_MISSING',release_denial
                 code="""const done=arguments[arguments.length-1];
