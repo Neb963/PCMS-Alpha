@@ -12,7 +12,7 @@ test('J07 audit rejects missing findings, unmapped requirements, incomplete brow
  const missing=structuredClone(map);missing.findings.pop();assert.throws(()=>validateMap(missing,audit,catalog),/FINDING_COUNT/);
  const duplicate=structuredClone(map);duplicate.findings[0].id=duplicate.findings[1].id;assert.throws(()=>validateMap(duplicate,audit,catalog),/FINDING_COVERAGE/);
  const wrong=structuredClone(map);wrong.acceptanceJourneys['AC-17']=[];assert.throws(()=>validateMap(wrong,audit,catalog),/ACCEPTANCE_COVERAGE/);
- const digest='a'.repeat(64),receipt={schema:'pcms.j07.full-browser-run/1',status:'PASS',retainedSuites:'PASS',xpiSha256:digest,checkoutSha:'b'.repeat(40),sourceTree:'c'.repeat(40),version:'1.2.19',issue60Integration:{schema:'pcms.issue60.integration/1',status:'PASS',xpiSha256:digest},geckoId:'persona-route-manager@local',completed:Object.values(map.journeys).flatMap(j=>j.browser)};
+ const digest='a'.repeat(64),receipt={schema:'pcms.j07.full-browser-run/1',status:'PASS',retainedSuites:'PASS',xpiSha256:digest,checkoutSha:'b'.repeat(40),sourceTree:'c'.repeat(40),version:'1.2.20',issue60Integration:{schema:'pcms.issue60.integration/1',status:'PASS',xpiSha256:digest},geckoId:'persona-route-manager@local',completed:Object.values(map.journeys).flatMap(j=>j.browser)};
  assert.throws(()=>evaluateRun(map,{...receipt,issue60Integration:null},digest),/ISSUE60_SAME_PACKAGE/);
  const result=evaluateRun(map,receipt,digest);assert.equal(result.browser,'PASS');assert.equal(result.deterministic,'NOT_ATTESTED_BY_BROWSER_RECEIPT');
  assert.throws(()=>evaluateRun(map,{...receipt,completed:receipt.completed.slice(1)},digest),/MISSING_OR_DUPLICATE/);
