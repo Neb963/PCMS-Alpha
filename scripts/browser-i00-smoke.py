@@ -5546,8 +5546,19 @@ def main():
                     call('POST',f'/session/{disk_session}/url',
                         {'url':f'moz-extension://{disk_uuid}/pcms/index.html#settings'})
                     wait_donor_ready(disk_session)
-                    input_el=call('POST',f'/session/{disk_session}/element',
-                        {'using':'css selector','value':'#pcms-restore-archive'})
+                    # Fresh-profile file import must exercise the active
+                    # Backup & Restore form, not the inert pre-F3 light DOM.
+                    active=False
+                    for _ in range(60):
+                        active=execute(disk_session,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                          if(!sh?.querySelector('[data-settings="backups"]'))return false;
+                          sh.querySelector('[data-nav="settings"]')?.click();
+                          sh.querySelector('[data-settings="backups"]')?.click();
+                          return !!sh.querySelector('#pcms-restore-archive');""")
+                        if active:break
+                        time.sleep(.15)
+                    assert active,'F3_FRESH_PROFILE_PRIMARY_RESTORE_FILE_INPUT_MISSING'
+                    input_el=execute(disk_session,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#pcms-restore-archive')")
                     input_id=input_el['element-6066-11e4-a52e-4f735466cecf']
                     call('POST',f'/session/{disk_session}/element/{input_id}/value',
                         {'text':str(disk_path),'value':list(str(disk_path))})
@@ -5561,7 +5572,7 @@ def main():
                       const journal=await import('./journal.mjs');
                       const donorModule=await import('./donor-snapshot.mjs');
                       const hist=await import('../lib/automation-history.js');
-                      const file=document.getElementById('pcms-restore-archive')?.files?.[0];
+                      const file=document.getElementById('pcms-faithful-host')?.shadowRoot?.querySelector('#pcms-restore-archive')?.files?.[0];
                       if(!file||file.size<1)throw Error('A02_IMPORTED_DISK_FILE_MISSING');
                       const imported=await stage.preparePortableStage(file);
                       const parsed=await stage.readPortableStage(imported.scope);
