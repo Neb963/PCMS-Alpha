@@ -1,15 +1,8 @@
 html,body{margin:0!important;width:100%;height:100%;overflow:hidden}
-/* Faithful prototype UI owns primary display; old controller stays in DOM.
-   Native management reopens only on an explicit operator action. */
+/* The canonical primary controller is the only mounted interactive UI.
+   Historical native markup remains inert solely for compatibility/data readers;
+   neither a second controller nor a hidden "advanced" dashboard is loaded. */
+body>.app{display:none!important}
 #pcms-faithful-host{display:none}
 body.pcms-faithful-ready{overflow:hidden}
 body.pcms-faithful-ready>#pcms-faithful-host{display:block;height:100dvh;position:relative;z-index:1}
-body.pcms-faithful-ready>.app{position:fixed!important;left:-200vw!important;top:-200vh!important;
- width:100vw!important;height:100dvh!important;pointer-events:none!important;visibility:hidden!important}
-body.pcms-faithful-ready.pcms-native-open>.app{left:0!important;top:0!important;
- z-index:9999!important;visibility:visible!important;pointer-events:auto!important}
-#pcms-legacy-return{display:none;position:fixed;z-index:10000;right:24px;bottom:22px;
- background:#175bb5;color:#fff;border:1px solid #1457ab;border-radius:7px;
- padding:12px 20px;font:700 13px system-ui;box-shadow:0 7px 28px #1628404d;cursor:pointer}
-body.pcms-native-open #pcms-legacy-return{display:block}
-
