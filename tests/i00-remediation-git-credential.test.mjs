@@ -37,7 +37,7 @@ test('one-time Git: writeback commands no longer require a per-operation token',
   assert.equal(validateWritebackMessage(api,sender,{type:'ARM_AUTO',params:{slug:'a-b'}}).ok,true);
   assert.equal(validateWritebackMessage(api,sender,{type:'COMMIT',params:{slug:'a-b',expectedRevision:2,token:'short'}}).ok,false);
 });
-test('cross-feature: vault loss holds queued work with one incident; reconnect resumes the same queue',async()=>{
+test('cross-feature: unavailable browser Git credential holds queued work with one incident; recovery resumes the same queue',async()=>{
   const {createCatalogWatcher}=await import('../src/runtime/catalog-watch.mjs');
   const saved=new Map([['pcmsS03Git',{repository:'Neb963/per-gens',repositoryId:'42'}]]);
   const api={storage:{local:{get:async k=>saved.has(k)?{[k]:saved.get(k)}:{},
@@ -53,7 +53,7 @@ test('cross-feature: vault loss holds queued work with one incident; reconnect r
     progressReady:async()=>{progressed.push(1);},
     incidents:async kind=>{incidents.push(kind);},clock:()=>1000});
   const lost=await watcher.tick();
-  assert.equal(lost.code,'GIT_VAULT_UNAVAILABLE');
+  assert.equal(lost.code,'GIT_CREDENTIAL_MISSING');
   assert.deepEqual(incidents,['OPEN']);assert.equal(ingested.length,0);assert.equal(progressed.length,0);
   vault=true; // operator reconnects once (Settings → Connect GitHub)
   const resumed=await watcher.tick();
