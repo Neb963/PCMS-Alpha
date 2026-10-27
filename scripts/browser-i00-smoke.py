@@ -1257,7 +1257,7 @@ def main():
                      badge:sh?.querySelector('.preview-label')?.textContent,
                      routes:sh?.querySelectorAll('[data-nav]').length,
                      visible:getComputedStyle(host).display!=='none',
-                     nativeHidden:getComputedStyle(legacy).visibility==='hidden',
+                     nativeHidden:!!legacy&&getComputedStyle(legacy).display==='none',
                      sidebar:!!sh?.querySelector('.sidebar'),
                      primary:sh?.querySelector('#page')?.dataset.view,
                      styles:[...sh?.querySelectorAll('link[rel=stylesheet]')||[]].some(e=>e.href.includes('prototype.css')),
@@ -1958,40 +1958,33 @@ def main():
                 assert inventory_page['items'][0]['evidence']=='HISTORICAL_READ_ONLY',inventory_page
                 assert inventory_command(after,{'type':'SYNC_ACCOUNT','params':{
                     'accountId':'fixture_inventory_01','expectedRevision':2}}).get('ok') is not True
+                # I04: the installed primary UI consumes the real guarded
+                # canonical 1,250-row inventory; legacy hidden HTML has no
+                # controller. Exercise actual primary pagination, not inert IDs.
                 call('POST',f'/session/{after}/url',{'url':url+'#generators'})
-                for _ in range(40):
-                    view=execute(after,"return {rows:document.querySelectorAll('#pcms-generators-rows tr').length, "
-                        "count:document.getElementById('pcms-generator-count')?.textContent||'', "
-                        "sync:document.getElementById('pcms-generator-sync')?.disabled}")
-                    if '1250' in view.get('count',''):break
+                first=None
+                for _ in range(60):
+                    first=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                      return {route:sh?.querySelector('#page')?.dataset.view,
+                        rows:sh?.querySelectorAll('.workspace-surface tbody tr[data-item-index]').length,
+                        summary:sh?.querySelector('.workspace-surface .pagination span')?.textContent||'',
+                        next:!sh?.querySelector('[data-action="gen-next"]')?.disabled};""")
+                    if first['route']=='generators' and first['rows']==24 and '1250' in first['summary']:break
                     time.sleep(.15)
-                if view.get('rows')!=50 or '1250' not in view.get('count',''):
-                    # Non-mutating failure diagnostic: independent port result
-                    # versus DOM/filter state after installed-page navigation.
-                    debug_ui=execute(after,"""const by=id=>document.getElementById(id);
-                      return {href:location.href,ready:document.readyState,
-                        query:by('pcms-generator-query')?.value,
-                        ownerFilter:by('pcms-generator-owner-filter')?.value,
-                        feedback:by('pcms-inventory-feedback')?.textContent,
-                        visiblePanel:by('generators-table-title')?.closest('section.panel')?.hidden,
-                        results:by('pcms-generator-count')?.textContent,
-                        loadedModules:!!document.querySelector('script[src="v014-desktop-ui.mjs"]'),
-                        selected:document.querySelector('#view-generators .pcms-v014-workflow-button[aria-pressed=true]')?.textContent};""")
-                    debug_port=inventory_command(after,{'type':'LIST_INVENTORY',
-                       'params':{'query':'','ownerState':'ALL','offset':0,'limit':50}})
-                    print('B V014_INVENTORY_FAILURE_DIAGNOSTICS=',json.dumps({
-                      'ui':debug_ui,
-                      'port':{'ok':debug_port.get('ok'), 'total':debug_port.get('total'),
-                        'count':len(debug_port.get('items',[])),
-                        'code':debug_port.get('code')}},default=str),flush=True)
-                assert view.get('rows')==50 and '1250' in view.get('count',''),view
-                execute(after,"document.getElementById('pcms-generator-next').click();return true")
-                for _ in range(40):
-                    pagination=execute(after,"return document.getElementById('pcms-generator-count')?.textContent||''")
-                    if '51–100' in pagination:break
+                assert first['route']=='generators' and first['rows']==24 and first['next'],first
+                assert '1250' in first['summary'],first
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-action="gen-next"]').click();return true;""")
+                next_page=None
+                for _ in range(60):
+                    next_page=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      return {summary:sh.querySelector('.workspace-surface .pagination span')?.textContent||'',
+                        rows:sh.querySelectorAll('.workspace-surface tbody tr[data-item-index]').length};""")
+                    if next_page['rows']==24 and '25–48' in next_page['summary']:break
                     time.sleep(.15)
-                assert '51–100' in pagination,pagination
-                print('B I04_REAL_IDB_1250_FILTER_PAGINATION_OWNER_HOLD=PASS',flush=True)
+                assert next_page['rows']==24 and '25–48' in next_page['summary'],next_page
+                execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-action=\"gen-prev\"]').click();return true")
+                print('B I04_REAL_IDB_1250_PRIMARY_PAGINATION_OWNER_HOLD=PASS',flush=True)
                 # V016 must ALSO show 1,250 canonical readback in the visible
                 # prototype, not only in the hidden legacy inventory controller.
                 execute(after,"""const h=document.getElementById('pcms-faithful-host');
