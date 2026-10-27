@@ -3032,24 +3032,33 @@ def main():
                 # I11 B: exact installed-XPI UI controls and real IDB canonical
                 # writeback CAS. No real Git or provider effect is attempted.
                 call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
-                ui=execute(after,"return {preview:!!document.getElementById('pcms-writeback-preview'),prepare:!!document.getElementById('pcms-writeback-prepare'),commit:!!document.getElementById('pcms-writeback-commit'),reconcile:!!document.getElementById('pcms-writeback-reconcile'),status:!!document.getElementById('pcms-writeback-status'),cancel:!!document.getElementById('pcms-writeback-cancel'),arm:!!document.getElementById('pcms-writeback-arm-auto'),disarm:!!document.getElementById('pcms-writeback-disarm-auto')}")
-                assert ui=={'preview':True,'prepare':True,'commit':True,'reconcile':True,'status':True,'cancel':True,'arm':True,'disarm':True},ui
-                # Actual installed-XPI button clicks must produce visible
-                # responses rather than only existing in the DOM.
-                execute(after,"const el=document.getElementById('pcms-writeback-slug');el.value='missing-private';el.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('pcms-writeback-preview').click();return true")
-                preview_result=''
-                for _ in range(60):
-                    preview_result=execute(after,"return document.getElementById('pcms-writeback-status').textContent")
-                    if 'TESTED_FINAL_SOURCE_REQUIRED' in preview_result: break
-                    time.sleep(.1)
-                assert 'TESTED_FINAL_SOURCE_REQUIRED' in preview_result,preview_result
-                execute(after,"document.getElementById('pcms-writeback-disarm-auto').click();return true")
-                disarm_result=''
-                for _ in range(60):
-                    disarm_result=execute(after,"return document.getElementById('pcms-writeback-status').textContent")
-                    if 'AUTO_CREDENTIAL_DISARMED' in disarm_result: break
-                    time.sleep(.1)
-                assert 'AUTO_CREDENTIAL_DISARMED' in disarm_result,disarm_result
+                # J03/J04 verify actual primary Git review and approval
+                # clicks earlier in this same installed-XPI run. Retired
+                # light-DOM Git buttons no longer authorize actions. Preserve
+                # the exact negative and disarm proofs through their guarded
+                # production port rather than clicking inert hidden controls.
+                writeback_ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-nav="settings"]').click();
+                  sh.querySelector('[data-settings="connections"]').click();
+                  return {route:sh.querySelector('#page')?.dataset.view,
+                    settings:!!sh.querySelector('.settings-main')};""")
+                assert writeback_ui['route']=='settings' and writeback_ui['settings'],writeback_ui
+                writeback_port="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const run=(type,params)=>new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-i11-writeback'});
+                    let settled=false;const finish=v=>{if(settled)return;settled=true;try{port.disconnect()}catch{}resolve(v)};
+                    port.onMessage.addListener(finish);
+                    port.onDisconnect.addListener(()=>finish({ok:false,code:'PORT_CLOSED'}));
+                    port.postMessage({type,params});
+                  });
+                  const preview=await run('PREVIEW',{slug:'missing-private'});
+                  const disarm=await run('DISARM_AUTO',{slug:'missing-private'});
+                  done({preview:preview.code,disarm:disarm.code,disarmOk:disarm.ok});
+                })().catch(e=>done({error:String(e)}));"""
+                observed=call('POST',f'/session/{after}/execute/async',{'script':writeback_port,'args':[]},timeout=60)
+                assert observed.get('preview')=='TESTED_FINAL_SOURCE_REQUIRED',observed
+                assert observed.get('disarm')=='AUTO_CREDENTIAL_DISARMED' and observed.get('disarmOk') is True,observed
                 code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const db=await (await import('./journal.mjs')).openCanonicalDatabase();
