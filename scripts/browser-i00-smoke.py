@@ -1218,72 +1218,31 @@ def main():
                 print('B A03_SANDBOX_WEB_DOCUMENT_DENIED_EXTENSION_GIT_DATABASE=PASS',flush=True)
                 print('B A03_REAL_CONTENT_SCRIPT_INJECTION=NOT_TESTED_ROUTING_HOLD',flush=True)
 
-                # v0.1.4 B evidence: verify the actual installed XPI dashboard.
-                # This tests real packaged assets/DOM and presentation actions
-                # without sending any provider, Git or local mutation command.
-                desktop=execute(after,"""const get=id=>document.getElementById(id);
-                  const routes=['generators','work-queue','settings'];
-                  const groups=routes.map(route=>{
-                    const ws=get('view-'+route);
-                    const bar=ws.querySelector('.pcms-v014-workflow-nav');
-                    const buttons=[...(bar?.querySelectorAll('button[data-ui-group]')||[])];
-                    const current=buttons.filter(b=>b.getAttribute('aria-pressed')==='true');
-                    const controlled=buttons.every(b=>
-                      b.getAttribute('aria-controls')?.split(/\\s+/).every(id=>!!get(id)));
-                    return {route,count:buttons.length,current:current.length,controlled,
-                      visiblePanels:[...ws.children].filter(el=>el.matches?.('section.panel')&&!el.hidden).length};
-                  });
-                  const field=get('pcms-v014-search');
-                  return {groups,search:!!field,role:field?.getAttribute('role'),
-                    expanded:field?.getAttribute('aria-expanded'),
-                    source:!!get('pcms-source-target'),stage:!!get('pcms-stage-slug'),
-                    release:!!get('pcms-release-heading'),
-                    account:!!get('pcms-accounts-list'),
-                    backup:!!get('pcms-backup-export'),
-                    restore:!!get('pcms-restore-apply')};""")
-                assert desktop['search'] and desktop['role']=='combobox',desktop
-                assert desktop['expanded']=='false',desktop
-                assert all(desktop[k] for k in ['source','stage','release','account','backup','restore']),desktop
-                assert len(desktop['groups'])==3,desktop
-                assert all(row['count']>=5 and row['current']==1 and row['controlled']
-                           and row['visiblePanels']>=1 for row in desktop['groups']),desktop
-                print('B V014_PACKAGED_DESKTOP_GROUPS_AND_AUTHORITATIVE_CONTROLS=PASS',flush=True)
-                # v0.1.5 visual-hierarchy test: the prior release kept an
-                # old dashboard with cosmetic CSS. Verify real production
-                # workspace composition in this installed full-capability XPI.
-                faithful=execute(after,"""const get=id=>document.getElementById(id);
-                  const root=document.documentElement;
-                  const inv=get('generators-table-title')?.closest('section.panel');
-                  const qs=document.querySelector('#view-work-queue .v015-queue-board');
-                  const refs=get('pcms-refresher-rows');
-                  const rail=document.querySelector('#view-refresher .v015-refresher-rail');
-                  const stats=document.querySelector('#view-refresher .v015-refresher-stats');
-                  const settings=document.querySelector('#view-settings .v015-settings-nav');
-                  const accountTools=document.querySelector('#view-accounts .v015-account-tools');
-                  const source=get('pcms-generator-query');
-                  return {booted:root.classList.contains('pcms-v015-faithful'),
-                    overview:!!document.querySelector('#view-overview .v015-overview-stats'),
-                    inventory:!!inv?.classList.contains('v015-inventory-panel'),
-                    inventoryTabs:document.querySelectorAll('#view-generators .v015-filter-tab').length,
-                    inputPreserved:!!source&&source.closest('.v015-inventory-tools')!==null,
-                    nativeRowIdentity:!!get('pcms-generators-rows'),
-                    queue:!!qs,queueRows:!!qs?.querySelector('.v015-queue-list'),
-                    accounts:!!accountTools,
-                    refresher:!!refs&&!!rail&&!!stats,
-                    nativeRefresherInBoard:!!refs?.closest('.v015-refresher-panel'),
-                    nativePolicyInRail:!!rail?.querySelector('#pcms-v014-refresher-policy'),
-                    settings:!!settings,
-                    sourceWriters:document.querySelectorAll('script[src="v015-faithful.mjs"]').length};""")
-                assert faithful['booted'] and all(faithful[k] for k in
-                    ['overview','inventory','inputPreserved','nativeRowIdentity',
-                     'queue','queueRows','accounts','refresher',
-                     'nativeRefresherInBoard','nativePolicyInRail','settings']),faithful
-                assert faithful['inventoryTabs']>=4 and faithful['sourceWriters']==1,faithful
-                print('B V015_TRUE_DESKTOP_PRIMARY_WORKSPACES_AND_REAL_HANDLERS=PASS',flush=True)
-                release_version=execute(after,"return {manifest:browser.runtime.getManifest().version,ui:document.documentElement.dataset.pcmsUiVersion,badge:document.querySelector('.v015-top-status')?.textContent};")
-                assert release_version.get('manifest')=='1.2.16',release_version
-                assert release_version.get('ui')=='0.1.5' and '0.1.5' in release_version.get('badge',''),release_version
-                print('B V015_REAL_FIREFOX_UPDATE_VERSION_AND_VISIBLE_UI_MARKER=PASS',flush=True)
+                # F3: the visible canonical primary controller replaces both
+                # v0.1.4 and v0.1.5. Old DOM remains as inert compatibility
+                # markup; it is NOT a second UI or a valid operator test target.
+                # This checks the real packaged entrypoint, mounted shadow UI,
+                # production routes and active control visibility rather than
+                # resurrecting retired tab/group event listeners.
+                canonical=execute(after,"""const host=document.getElementById('pcms-faithful-host');
+                  const sh=host?.shadowRoot,legacy=document.querySelector('body > .app');
+                  const scripts=[...document.querySelectorAll('script[type=module][src]')]
+                    .map(s=>new URL(s.src).pathname.split('/').pop());
+                  const routes=['overview','generators','work-queue','accounts','refresher','settings'];
+                  const nav=routes.map(route=>{const b=sh?.querySelector('[data-nav="'+route+'"]');
+                    return {route,exists:!!b,enabled:!!b&&!b.disabled,
+                      visible:!!b&&b.getClientRects().length>0};});
+                  return {scripts,ready:document.body.classList.contains('pcms-faithful-ready'),
+                    shadow:!!sh,visible:!!host&&getComputedStyle(host).display!=='none',
+                    inert:!!legacy&&getComputedStyle(legacy).display==='none',
+                    nav,version:browser.runtime.getManifest().version,
+                    tokenField:!!sh?.querySelector('input[type=password]')};""")
+                assert canonical['scripts']==['bridge.mjs'],canonical
+                assert canonical['ready'] and canonical['shadow'] and canonical['visible'],canonical
+                assert canonical['inert'] and not canonical['tokenField'],canonical
+                assert all(row['exists'] and row['enabled'] for row in canonical['nav']),canonical
+                assert canonical['version']=='1.2.16',canonical
+                print('B F3_CANONICAL_ONLY_ACTIVE_CONTROLLER_AND_SIX_ENABLED_ROUTES=PASS',flush=True)
                 # V016 acceptance: the PRECISE accepted prototype structure is
                 # the visible full-screen extension UI, not an old markup reskin.
                 for _ in range(70):
