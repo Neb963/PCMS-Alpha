@@ -1364,7 +1364,7 @@ async function openIncident(n){
    observed.notice.target?.kind==='GENERATOR'){
   void openFolderContext(observed.notice.target.id);return;
  }
- if(target.kind==='SETTINGS'&&incidentPrimaryAction(observed.notice).kind==='SETTINGS'){
+ if(observed.ok&&target.kind==='SETTINGS'&&incidentPrimaryAction(observed.notice).kind==='SETTINGS'){
   if(target.id==='refresher'){routeTo('refresher');return}
   state.settings=target.id;routeTo('settings');return;
  }
