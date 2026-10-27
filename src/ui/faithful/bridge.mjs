@@ -1267,6 +1267,7 @@ function openOperationRecord(op){
    if(c.failure?.code){
     const note=el('p','setting-note',({INITIAL_INVENTORY_UNKNOWN:'An account’s initial owned inventory was not available.',
      TEMPLATE_UNVERIFIED:'The earlier creation check could not read its fixed template. Check the current template separately; the original failure is retained.',
+     TEMPLATE_SOURCE_UNVERIFIED:'The original template source was unverified. Check the account and current template; the historical request is not retried.',
      TEMPLATE_OWNER_UNVERIFIED:'The earlier template ownership check was not verified. A current read does not replay that request.',
      MULLVAD_LOCAL_SERVICE_UNAVAILABLE:'The Mullvad connection was unavailable when this request was checked.',
      PROTECTED_ROUTE_NOT_PINNED:'This account did not have a verified protected route.',
