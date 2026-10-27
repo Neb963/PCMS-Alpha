@@ -135,7 +135,7 @@ const refresherWorkspace=createRefresherWorkspace({root,el,b,
  }catch{notify('Account details could not be read. Other schedule controls remain available.')}}});
 
 const generatorBatches=createGeneratorBatches({root,el,b,request:readPort,accounts,
- reload:()=>loadGenerators(),manageAccount:openAccountManager,notify});
+ reload:()=>loadGenerators(),manageAccount:openAccountManager,openAccounts:()=>routeTo('accounts'),notify});
 const cleanPublication=createCleanPublicationWorkspace({root,el,b,notify,openReview:openReleaseReview,
  request:(type,params)=>readPort('pcms-j04-clean-publication',type,params,120000)});
 function updateNav(){for(const a of root.querySelectorAll('[data-nav]'))a.setAttribute('aria-current',a.dataset.nav===state.route?'page':'false');
