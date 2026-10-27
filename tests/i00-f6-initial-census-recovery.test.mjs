@@ -29,10 +29,10 @@ test('new submitted generator autonomously synchronizes one real missing census 
  const db=fakeDatabase(),observed=[],mutations=[];
  await seed(db,[alpha,beta]);
  const c=createCoordinatorStore(db),intentId='intent_missing_census01';
- const accepted=await c.acceptCreate({intentId,slug:'disposable-new-fixture',origin:'OPERATOR'});
- assert.equal(accepted.ok,true);
  const before=await previewCreation(db,{slugs:['disposable-new-fixture']});
  assert.equal(before.items[0].code,'INITIAL_INVENTORY_UNKNOWN');
+ const accepted=await c.acceptCreate({intentId,slug:'disposable-new-fixture',origin:'OPERATOR'});
+ assert.equal(accepted.ok,true);
  const reader=createInventoryStore(db);
  const syncInventory=async(id,revision)=>{
   observed.push(id);
