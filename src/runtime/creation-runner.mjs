@@ -156,7 +156,8 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
           return fail(target.code||'TARGET_STATE_CHANGED');
         if(item.state==='RENAME_PREPARED'){
           const temporary=await read('READ_CREATE',{temporarySlug:item.temporarySlug,remoteId:item.remoteId});
-          if(!temporary.ok||temporary.source!=='INDEPENDENT_READBACK'||temporary.ownerMatches!==true||
+          if(!temporary.ok)return temporary; // Keep bridge/provider readback reason before rename.
+          if(temporary.source!=='INDEPENDENT_READBACK'||temporary.ownerMatches!==true||
              temporary.privateEmpty!==true||temporary.remoteId!==item.remoteId||
              temporary.temporarySlug!==item.temporarySlug)return fail('TEMPORARY_SOURCE_CHANGED');
         }
@@ -164,6 +165,7 @@ export function createCreationRunner(api,{open=openCanonicalDatabase,
         // Read guards again before crossing the dispatch-possible marker.
         const scope=await importGuard(await (dbPromise||=open()),item);if(!scope.ok)return scope;
         const before=await g.getSafeRouteReadiness(item.personaUid);
+        if(before?.ready!==true)return fail(before?.code||'PROTECTED_ROUTE_UNVERIFIED');
         if(!routeSame(ready,before)||(await sentinel.inspect()).held)
           return fail('PROTECTED_CONTEXT_CHANGED');
         const isCreate=item.state==='CREATE_PREPARED';
