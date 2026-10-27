@@ -5,11 +5,14 @@ const html=await readFile('src/ui/index.html','utf8');
 const css=await readFile('src/ui/v015-faithful.css','utf8');
 const js=await readFile('src/ui/v015-faithful.mjs','utf8');
 const base=await readFile('src/ui/v014-desktop-ui.mjs','utf8');
-test('faithful production UI is loaded AFTER guarded production modules',()=>{
+test('prior faithful presentation is archived, not mounted with the canonical primary controller',()=>{
  const pos=s=>html.indexOf(s);
  assert.ok(pos('v015-faithful.css')>pos('v014-desktop.css'));
- assert.ok(pos('v015-faithful.mjs')>pos('v014-desktop-ui.mjs'));
- assert.ok(pos('v014-desktop-ui.mjs')>pos('refresher-view.mjs'));
+ assert.equal(pos('v015-faithful.mjs'),-1);
+ assert.equal(pos('v014-desktop-ui.mjs'),-1);
+ assert.equal(pos('refresher-view.mjs'),-1);
+ assert.equal((html.match(/<script type="module"/g)||[]).length,1);
+ assert.match(html,/<script type="module" src="faithful\/bridge\.mjs"><\/script>/);
  assert.match(js,/mountOverview\(\)/);
  for(const label of ['mountHeader','mountGeneratorInventory','mountQueue','mountAccounts','mountRefresher','mountSettings'])
    assert.match(js,new RegExp('function '+label+'\\('));
@@ -55,8 +58,8 @@ test('desktop workspaces replace old visual hierarchy, not merely buttons/colors
  assert.doesNotMatch(css,/#pcms-refresher-rows\s*\{[^}]*display:\s*none/);
 });
 test('request admission and background modules remain unchanged by presentation',()=>{
- for(const name of ['v015-faithful.mjs','v015-faithful.css'])
-  assert.match(html,new RegExp(name.replaceAll('.','\\.')));
+ assert.match(html,/v015-faithful\.css/);
+ assert.doesNotMatch(html,/src="v015-faithful\.mjs"/);
  assert.match(js,/navigate\('generators','create'\)/);
  assert.match(js,/navigate\('work-queue',o\.group\)/);
  assert.match(js,/new MutationObserver/);
