@@ -300,3 +300,25 @@ The existing catalog observer now supports an explicit read-only observation mod
 The existing identity boundary adds bounded missing/review pages, exact filtered/unfiltered totals and typed single-source context. Related identities are bounded with explicit totals. A refresh uses that same read-only observer and retains the last good complete observation when Git is unavailable; no absence authorizes provider deletion/unlisting/rename.
 
 The primary queue now pages and searches missing sources and identity reviews with independent cursors; it no longer hides them on search or slices the first 30. Each missing row opens actual Git/source/history context. Local source comparison, original archive reads and paged checkpoints work independently of the absent Git folder. Context reads expose no publication/rename controls; separate guarded workflows remain explicit. Primary Attention/Overview use canonical causal groups with event/affected counts, bounded member inspection, individual review and resolved-history views. The original `noticeCause` reader remains compatible. New D tests cover all 31/1,001 rows, last-page search, 100-character source names, bounded related reviews, Git outage/read-only refresh, no effect callbacks and missing receipt readback. These new tests and actual packaged UI clicks are pending; single-controller migration and full F3 verification are still incomplete.
+
+
+### F3 canonical single-controller startup — pending installed Firefox verification
+
+The original `src/ui/index.html` simultaneously imported 22 historical native and
+presentation controllers plus the accepted `faithful/bridge.mjs`, even though the
+historical `.app` was then moved off-screen and made inert. This retained duplicate
+readers, event observers and potentially conflicting runtime requests. The entry now
+imports **only** the canonical primary controller. Original modules/markup remain as
+non-executing compatibility material so existing data migrations/readers are not
+removed, and historical assertions can still inspect their unaltered source. The
+hidden legacy "Back to dashboard" control and reactivation CSS are gone; no
+inaccessible second dashboard is exposed as a normal recovery path. The primary
+bridge already mounts Accounts, generators, Git, Refresher, AI, publication, backup,
+restore and diagnostics through its own typed guarded boundaries.
+
+Legacy v0.1.5 presentation tests continue checking the retained source and native
+control IDs but now assert that only the prototype bridge is mounted. The v0.1.6
+primary-shell assertions enforce the same one-script entry and absence of the
+hidden legacy button. This is an implementation checkpoint only: installed-Firefox
+B tests, required full CI, and full feature action-to-readback remain unverified at
+this draft checkpoint. No provider/private-Git/native mutations or intermediate XPI.
