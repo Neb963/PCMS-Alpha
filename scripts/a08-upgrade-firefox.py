@@ -107,6 +107,35 @@ def main(previous_archive=None):
                 }));"""%json.dumps(marker))
             assert stored=={'marker':marker,'version':expected_old,'gecko':b.ID},stored
             print('B A08_DONOR_PRE_UPGRADE_PERSISTED_STATE=PASS',flush=True)
+            if previous_archive:
+                # Existing combined release: prove canonical IndexedDB survives
+                # the AddonManager update, not merely storage.local. Fixture
+                # lives solely in the disposable profile; no account or
+                # provider effect is submitted.
+                b.call('POST',f'/session/{session}/url',{
+                    'url':f'moz-extension://{uuid_before}/pcms/index.html'},timeout=30)
+                b.wait_donor_ready(session)
+                f4_mark="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const {openCanonicalDatabase}=await import('./journal.mjs');
+                  const db=await openCanonicalDatabase();
+                  try{
+                    await new Promise((resolve,reject)=>{
+                      const tx=db.transaction(['meta'],'readwrite');
+                      tx.objectStore('meta').put({key:'f4:upgrade-marker',
+                        value:{schema:1,accountBindings:'PRESERVED',
+                          operationReceipts:'PRESERVED',pendingSchedules:'PRESERVED'}});
+                      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+                      tx.onabort=()=>reject(tx.error);
+                    });
+                    done({ok:true});
+                  }finally{db.close()}
+                })().catch(e=>done({ok:false,error:String(e)}));"""
+                recorded=b.call('POST',f'/session/{session}/execute/async',
+                    {'script':f4_mark,'args':[]},timeout=30)
+                assert recorded=={'ok':True},('F4_CANONICAL_MARKER_NOT_PERSISTED',recorded)
+                print('B F4_OLD_COMBINED_CANONICAL_IDB_MARKER_PERSISTED=PASS',flush=True)
+
             # Use the real Firefox add-on-manager update path. Replacing a
             # cached XPI file under profile/extensions broke Gecko startup and
             # is not a valid install/upgrade test. No profile filesystem edit.
@@ -230,6 +259,27 @@ def main(previous_archive=None):
             retained=b.execute(session,"""return browser.storage.local.get(
                 'a08UpgradeCheckpoint').then(s=>s.a08UpgradeCheckpoint);""")
             assert retained==marker,('A08_UPGRADE_STORAGE_LOST',retained)
+            if previous_archive:
+                f4_read="""return (async()=>{
+                  const {openCanonicalDatabase}=await import('./journal.mjs');
+                  const db=await openCanonicalDatabase();
+                  try{
+                    return await new Promise((resolve,reject)=>{
+                      const tx=db.transaction(['meta'],'readonly');
+                      const rq=tx.objectStore('meta').get('f4:upgrade-marker');
+                      rq.onsuccess=()=>resolve(rq.result?.value||null);
+                      rq.onerror=()=>reject(rq.error);
+                    });
+                  }finally{db.close()}
+                })();"""
+                observed_marker=b.execute(session,f4_read)
+                assert observed_marker=={
+                    'schema':1,'accountBindings':'PRESERVED',
+                    'operationReceipts':'PRESERVED','pendingSchedules':'PRESERVED'},(
+                    'F4_COMBINED_CANONICAL_IDB_LOST_ON_UPGRADE',observed_marker)
+                print('B/H F4_EXISTING_COMBINED_CANONICAL_IDB_SURVIVES_COLD_UPDATE=PASS',
+                      flush=True)
+
             b.wait_donor_ready(session)
             assert not any(home.rglob('local.pcms.*.json')), 'A08_PCMS_HOST_REGISTERED'
             print('B A08_GENUINE_ADDON_MANAGER_UPGRADE_ID_AND_STORAGE_SURVIVE=PASS',
