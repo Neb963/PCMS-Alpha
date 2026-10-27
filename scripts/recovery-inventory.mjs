@@ -153,9 +153,12 @@ export async function inventory(){
  const notices=Object.entries(noticePolicies).flatMap(([code,[destination,action,settlement]])=>
   ['VALID','ABSENT','STALE'].flatMap(target=>['ACTIVE','REVIEWED','RESOLVED'].map(state=>({code,target,state,
    destination,action,settlement,
+   reference:target==='ABSENT'?null:sampleTarget(code),
+   authoritativeTargetState:target==='VALID'?'CURRENT':target,
    currentDestination:incidentDestination({code,scopeId:'scope_inventory_0001',
-    ...(target==='VALID'?{target:sampleTarget(code)}:target==='STALE'?{target:{kind:'GENERATOR',id:'invalid target'}}:{}),reviewed:state==='REVIEWED'}),
-   knownCorrection:target!=='VALID'&&['SOURCE_HELD','CANONICAL_UNAVAILABLE','OPERATION_UNCERTAIN','GIT_FOLDER_MISSING','GIT_FOLDER_RENAME_REVIEW'].includes(code)?'GAP-03; F3 must replace the observed generic incident fallback with the required contextual recovery.':null,
+    ...(target==='ABSENT'?{}:{target:sampleTarget(code)}),reviewed:state==='REVIEWED'},
+    {targetState:target==='VALID'?'CURRENT':target}),
+   knownCorrection:null,
    acknowledgment:'Review never resolves or suppresses an active safety hold.',
    fallback:'Use typed domain context when target is missing/stale; never an unrelated empty queue search.'}))));
  return {schema:1,source:'Production state owners + explicit accepted state/notice policies',drift,states,notices,

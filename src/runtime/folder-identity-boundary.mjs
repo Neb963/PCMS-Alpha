@@ -15,9 +15,19 @@ const fail=code=>({ok:false,code});
 export function validateIdentityMessage(api,sender,message){
  if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
  if(!message||typeof message!=='object'||Array.isArray(message)||
-   !['LIST','CHOOSE','GET_RENAME_ATTEMPT','PREPARE_RENAME','EXECUTE_RENAME','RECONCILE_RENAME','FINALIZE_RENAME','RUN_RENAME_JOB','REFRESH_REVIEW'].includes(message.type)||
+   !['LIST','LIST_PAGE','GET_CONTEXT','REFRESH_OBSERVATION','CHOOSE','GET_RENAME_ATTEMPT','PREPARE_RENAME','EXECUTE_RENAME','RECONCILE_RENAME','FINALIZE_RENAME','RUN_RENAME_JOB','REFRESH_REVIEW'].includes(message.type)||
    Object.keys(message).some(k=>!['type','params'].includes(k)))return fail('INVALID_MESSAGE');
  const p=message.params||{};
+ if(['GET_CONTEXT','REFRESH_OBSERVATION'].includes(message.type))
+  return p&&typeof p==='object'&&!Array.isArray(p)&&Object.keys(p).length===1&&typeof p.slug==='string'&&SLUG.test(p.slug)?{ok:true}:fail('INVALID_PARAMS');
+ if(message.type==='LIST_PAGE'){
+  return p&&typeof p==='object'&&!Array.isArray(p)&&
+   Object.keys(p).every(k=>['kind','after','limit','query'].includes(k))&&
+   ['MISSING','REVIEW'].includes(p.kind)&&
+   (p.after===undefined||typeof p.after==='string'&&(p.after===''||SLUG.test(p.after)))&&
+   (p.limit===undefined||Number.isInteger(p.limit)&&p.limit>=1&&p.limit<=100)&&
+   (p.query===undefined||typeof p.query==='string'&&p.query.length<=100)?{ok:true}:fail('INVALID_PARAMS');
+ }
  if(message.type==='REFRESH_REVIEW'){return p&&typeof p==='object'&&!Array.isArray(p)&&Object.keys(p).length===2&&SLUG.test(p.newSlug||'')&&Number.isSafeInteger(p.expectedRevision)&&p.expectedRevision>0?{ok:true}:fail('INVALID_PARAMS');}
  if(['GET_RENAME_ATTEMPT','RUN_RENAME_JOB'].includes(message.type)){
   return typeof p==='object'&&!Array.isArray(p)&&
@@ -44,7 +54,7 @@ export function validateIdentityMessage(api,sender,message){
    return fail('INVALID_PARAMS');
  return {ok:true};
 }
-export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=null,refreshMain=()=>catalogWatcher?.tick(),observationMs=10000}={}){
+export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=null,refreshMain=options=>catalogWatcher?.tick(options),observationMs=10000}={}){
  const sentinel=createRestoreSentinel(api.storage.local);
  const scopes=createScopeObservation(api,'rename',{clock,observationMs});
  const existingRename=renameService||createExistingRenameService(api,{clock});
@@ -53,6 +63,11 @@ export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=n
  async function dispatch(message,sender){
   const a=validateIdentityMessage(api,sender,message);if(!a.ok)return a;
   if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+  if(message.type==='REFRESH_OBSERVATION'){
+    let refreshed;try{refreshed=await refreshMain({observeOnly:true});}catch{return fail('GIT_OBSERVATION_UNAVAILABLE');}
+    if(refreshed?.ok!==true)return {...fail(refreshed?.code||'GIT_OBSERVATION_UNAVAILABLE'),providerEffects:'NONE',gitEffects:'NONE'};
+    return dispatch({type:'GET_CONTEXT',params:{slug:message.params.slug}},sender);
+  }
   if(message.type==='REFRESH_REVIEW'){
     if(busy||ticking)return fail('REVIEW_BUSY');busy=true;
     try{
@@ -103,6 +118,41 @@ export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=n
     return fail('COMPLETE_MAIN_REQUIRED');
   const plan=planMainFolderChanges(null,observed,records);
   if(!plan.ok)return fail(plan.code);
+  if(message.type==='LIST_PAGE'||message.type==='GET_CONTEXT'){
+    const missing=(await api.storage.local.get('pcmsR4MissingGitFolders'))?.pcmsR4MissingGitFolders;
+    const missingSlugs=missing?.repositoryId===cfg.repositoryId&&Array.isArray(missing.slugs)?
+      [...new Set(missing.slugs.filter(slug=>typeof slug==='string'&&SLUG.test(slug)))].sort():[];
+    const receipt=(await api.storage.local.get('pcmsS03CatalogReceipt'))?.pcmsS03CatalogReceipt;
+    const reviews=plan.review.map(r=>({newSlug:r.newSlug,oldSlug:r.oldSlug,newTreeOid:r.newTreeOid,
+      oldTreeOid:r.oldTreeOid||null,evidenceHead:r.evidenceHead||null,
+      revision:r.revision||1,state:r.state,reason:r.reason,stale:plan.stale.includes(r.newSlug)}));
+    if(message.type==='GET_CONTEXT'){
+      const slug=message.params.slug,present=observed.generators.find(g=>g.slug===slug);
+      const related=reviews.filter(r=>r.newSlug===slug||r.oldSlug===slug);
+      const historical=missing?.repositoryId===cfg.repositoryId?missing.observations?.[slug]:null;
+      const sha=v=>SHA.test(v||'')?v:null;
+      return {ok:true,slug,repository:observed.repository,repositoryId:cfg.repositoryId,
+        head:observed.head,observedAt:Number.isSafeInteger(observed.observedAt)?observed.observedAt:null,
+        presence:present?'PRESENT_IN_COMPLETE_MAIN':missingSlugs.includes(slug)?'MISSING_IN_COMPLETE_MAIN':'NOT_RECORDED',
+        currentConnectionCode:typeof receipt?.code==='string'&&/^[A-Z_]{3,80}$/.test(receipt.code)?receipt.code:null,
+        review:related.slice(0,20),reviewTotal:related.length,reviewMore:related.length>20,observation:historical?{firstAbsentHead:sha(historical.firstAbsentHead),
+          lastAbsentHead:sha(historical.lastAbsentHead),lastPresentHead:sha(historical.lastPresentHead),
+          oldTreeOid:sha(historical.oldTreeOid),returnedHead:sha(historical.returnedHead),
+          observedAt:Number.isSafeInteger(historical.observedAt)?historical.observedAt:null,
+          returnedAt:Number.isSafeInteger(historical.returnedAt)?historical.returnedAt:null}:null,
+        providerEffects:'NONE',gitEffects:'NONE'};
+    }
+    const p=message.params,limit=p.limit||20,after=p.after||'',query=(p.query||'').toLowerCase();
+    const all=p.kind==='MISSING'?missingSlugs.map(slug=>({slug})):
+      reviews.filter(r=>['REVIEW_REQUIRED','RENAME_EXISTING_REQUESTED','REMOTE_RENAMED_LINK_PENDING'].includes(r.state)||r.stale);
+    const key=r=>p.kind==='MISSING'?r.slug:r.newSlug;
+    const ordered=all.sort((a,b)=>key(a)<key(b)?-1:key(a)>key(b)?1:0);
+    const matching=ordered.filter(r=>!query||[key(r),r.oldSlug,r.state,r.reason].join(' ').toLowerCase().includes(query));
+    const remaining=matching.filter(r=>!after||key(r)>after),more=remaining.length>limit,items=remaining.slice(0,limit);
+    return {ok:true,head:observed.head,repository:observed.repository,
+      items,total:matching.length,unfilteredTotal:all.length,more,next:more?key(items.at(-1)):null,
+      currentConnectionCode:receipt?.code||null,providerEffects:'NONE',gitEffects:'NONE'};
+  }
   if(message.type==='LIST')
     return {ok:true,head:observed.head,repository:observed.repository,
       items:plan.review.map(r=>({newSlug:r.newSlug,oldSlug:r.oldSlug,
@@ -187,7 +237,7 @@ export function createFolderIdentityBoundary(api,{clock=Date.now,renameService=n
    });
   });
  }
-   dispatch=checkpointed(api,dispatch,{allowDuringRestore:message=>["LIST","GET_RENAME_ATTEMPT"].includes(message?.type)});
+   dispatch=checkpointed(api,dispatch,{allowDuringRestore:message=>["LIST","LIST_PAGE","GET_CONTEXT","GET_RENAME_ATTEMPT"].includes(message?.type)});
   tick=checkpointed(api,tick);
   return Object.freeze({register,dispatch,tick});
 }

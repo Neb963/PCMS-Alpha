@@ -11,7 +11,9 @@ const routes=['overview','generators','work-queue','accounts','refresher','setti
 test('accepted prototype structure rather than prior native markup is PRIMARY',()=>{
  assert.match(html,/faithful\/native-shell\.css/);
  assert.match(html,/faithful\/bridge\.mjs/);
- assert.match(html,/pcms-legacy-return/);
+ assert.doesNotMatch(html,/pcms-legacy-return/);
+ assert.equal((html.match(/<script type="module"/g)||[]).length,1);
+ assert.match(html,/<script type="module" src="faithful\/bridge\.mjs"><\/script>/);
  assert.match(bridge,/attachShadow\(\{mode:'open'\}\)/);
  assert.match(bridge,/pcms-faithful-ready/);
  assert.match(bridge,/root\.innerHTML=assets\['symbols\.html'\]\+assets\['shell\.html'\]/);
@@ -84,6 +86,6 @@ test('prototype supports adverse navigation and fail-open presentation recovery'
 test('Firefox upgrades v1.2.1 XPI to 1.2.16 with donor manifest unchanged',()=>{
  assert.match(build,/original\.version!=='1\.2\.0'/);
  assert.match(build,/combined\.version='1\.2\.16'/);
- assert.match(html,/v015-faithful\.mjs/);
+ assert.doesNotMatch(html,/src="v015-faithful\.mjs"/);
  assert.match(html,/faithful\/bridge\.mjs/);
 });

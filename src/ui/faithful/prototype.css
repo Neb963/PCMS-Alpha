@@ -399,7 +399,7 @@ body:has(.drawer-overlay:not([hidden])) #toast-root{right:min(555px,calc(100vw -
 @media(max-width:1050px){.refresher-layout{grid-template-columns:minmax(0,1fr)}.ref-side{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}}
 @media(max-width:680px){.ref-side{grid-template-columns:minmax(0,1fr)}.ref-account-tools{padding:12px}.ref-account-tools label{flex-basis:100%}.ref-account-tools select{width:100%}.ref-table-scroll table{min-width:630px}}
 
-.refresher-dialog{min-width:0}.refresher-dialog .form-foot{flex-wrap:wrap;justify-content:flex-start;align-items:center}.refresher-dialog .form-foot .btn{max-width:100%;white-space:normal}.refresher-dialog .drawer-body{min-width:0}.refresher-dialog .drawer-head{display:flex;justify-content:space-between;align-items:start;gap:12px;padding-bottom:16px}.refresher-dialog .drawer-title{overflow-wrap:anywhere}.refresher-dialog .drawer-head .btn{flex-shrink:0}
+.refresher-dialog{min-width:0}.refresher-dialog .form-foot{flex-wrap:wrap;justify-content:flex-start;align-items:center}.refresher-dialog .form-foot .btn{max-width:100%;white-space:normal}.refresher-dialog .drawer-body{min-width:0;min-height:0}.refresher-dialog .drawer-head{display:flex;justify-content:space-between;align-items:start;gap:12px;padding-bottom:16px}.refresher-dialog .drawer-title{overflow-wrap:anywhere}.refresher-dialog .drawer-head .btn{flex-shrink:0}
 
 #page[data-view=refresher] .ref-side{overflow-y:auto;overscroll-behavior:contain;padding-right:2px;max-height:100%}
 #page[data-view=refresher] .ref-table-scroll td{white-space:normal;text-overflow:clip;overflow-wrap:anywhere}

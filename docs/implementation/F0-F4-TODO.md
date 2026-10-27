@@ -8,8 +8,8 @@ Baseline: `main` `06ccf102097e238154fef51787269c398ee6b1b0`, tree `4b828f3658f2b
 
 - [x] F0: executable cross-domain recovery/state/notice inventory, negative drift checks, integrated verified PR.
 - [x] F1: donor-first startup, account reconciliation, bounded event wake, preparation uncertainty, on-demand idle recovery.
-- [ ] F2: independent bounded workers, fair creation, hydrated authorization transitions, redacted durable receipts.
-- [ ] F3: contextual actions for every notice, historical read-only template inspection, single UI controller, truthful Git errors, paged missing sources and causal groups.
+- [x] F2: independent bounded workers, fair creation, hydrated authorization transitions, redacted durable receipts.
+- [x] F3: contextual actions for every notice, historical read-only template inspection, single UI controller, truthful Git errors, paged missing sources and causal groups. Engineering D/B verified; integration/main still subject to exact final CI.
 - [ ] F4: integrated D/B regression, persistent installed Firefox, upgrade, exact required CI/main, reproducible higher-version XPI, checksum and one short live-acceptance guide.
 
 `scripts/recovery-inventory.mjs` generates `docs/verification/F0-RECOVERY-INVENTORY.json`; `--check` and `tests/i00-f0-recovery-inventory.test.mjs` detect vocabulary drift. The inventory specifies recovery owners and settlement requirements; it does not assert that existing UI paths or open GAP corrections already pass. F1–F4 must exercise actual handlers and authoritative readback.
@@ -19,22 +19,22 @@ Baseline: `main` `06ccf102097e238154fef51787269c398ee6b1b0`, tree `4b828f3658f2b
 | GAP | Root cause / affected production files | Correction | Tests / evidence | Status |
 |---|---|---|---|---|
 | 01 | Independent startup imports: entry, account boundary, enrollment, overlay | Donor-owned readiness through account-specific protected admission | Delayed donor/helper/proxy, scoped isolation, restart | VERIFIED F1 D/B |
-| 02 | Historic reason has generic operation detail: operation-context, faithful bridge, perchance-supply | Read-only current template/provenance check; permanent historical fence | Old/missing template, owner denial, zero CREATE/RENAME | OPEN F3 |
-| 03 | Incomplete notice destination resolver: faithful attention/bridge | Typed contextual recovery, stale/missing targets and safe holds | All 11 × target/current-state matrix, real actions/readback | OPEN F3 |
+| 02 | Historic reason has generic operation detail: operation-context, faithful bridge, perchance-supply | Read-only current template/provenance check; permanent historical fence | Old/missing template, owner denial, zero CREATE/RENAME | VERIFIED F3 D/B (offline) |
+| 03 | Incomplete notice destination resolver: faithful attention/bridge | Typed contextual recovery, stale/missing targets and safe holds | All 11 × target/current-state matrix, real actions/readback | VERIFIED F3 D/B (offline) |
 | 04 | Host Check connection does not reconcile account state: accounts workspace/boundary | Fresh per-account route/identity after shared recovery | Shared recovery + one unsafe account | VERIFIED F1 D/B |
 | 05 | Only 10-minute upkeep polling: account boundary, donor native state | Coalesced bounded wake, backoff/fairness and fallback | 1/3/50 accounts, no duplicate preparation | VERIFIED F1 D/B |
-| 06 | Serial alarm progression: catalog-watch, domain progressors | Independent bounded domain/scoped progression preserving source ordering | Reject/hang each stage; independent ledgers | OPEN F2 |
-| 07 | One serial creation pending promise: creation-watch/runner | Bounded independent scope work and durable observational timeout | Hung account + 1,000 items, lost ACK, no replay | OPEN F2 |
-| 08 | No grant-transition scheduler hook: standing authority, ai-boundary | Trusted transition subscription and immediate scheduler reconciliation | Boot OFF → grant → progression, revoke/regrant | OPEN F2 |
+| 06 | Serial alarm progression: catalog-watch, domain progressors | Independent bounded domain/scoped progression preserving source ordering | Reject/hang each stage; independent ledgers | VERIFIED F2 D/B |
+| 07 | One serial creation pending promise: creation-watch/runner | Bounded independent scope work and durable observational timeout | Hung account + 1,000 items, lost ACK, no replay | VERIFIED F2 D/B |
+| 08 | No grant-transition scheduler hook: standing authority, ai-boundary | Trusted transition subscription and immediate scheduler reconciliation | Boot OFF → grant → progression, revoke/regrant | VERIFIED F2 D/B |
 | 09 | Abort signal does not settle native await: overlay/native-prepare/enrollment | Bound observations, retain possible native ownership until settlement | Never-settle, late ACK, restart, no conflicting prepare | VERIFIED F1 D/B |
-| 10 | Multiple mounted UI workers: index.html, operations and legacy views | One primary controller, isolated compatibility readers | Actual primary workflows, no obsolete native/vault advice | OPEN F3 |
-| 11 | Browser token errors labeled vault: catalog-watch, Git local secret/UI | Stable cause-specific browser/Git classification and observed recovery | Six causes, preserve valid credential, no false clear | OPEN F3 |
-| 12 | Missing-source queue rows have no actions: faithful bridge/source | Contextual source/history/current scan/identity inspection | Actual action-to-readback; no provider deletion | OPEN F3 |
-| 13 | Silent missing slice(0,30): faithful bridge/catalog | Exact counts and bounded paging/search | 31/1,000+ fixtures, all entries reachable | OPEN F3 |
-| 14 | Primary incidents ignore causal grouping: faithful bridge/attention model | Shared-root groups with counts and individual inspection | One helper outage/50 accounts vs independent holds | OPEN F3 |
-| 15 | Async grant hydration misses alarm init: standing authority/AI | Same trusted transition after hydration/cold wake | Cold worker, no onStartup, invalid/revoked records | OPEN F2 |
+| 10 | Multiple mounted UI workers: index.html, operations and legacy views | One primary controller, isolated compatibility readers | Actual primary workflows, no obsolete native/vault advice | VERIFIED F3 D/B (offline) |
+| 11 | Browser token errors labeled vault: catalog-watch, Git local secret/UI | Stable cause-specific browser/Git classification and observed recovery | Six causes, preserve valid credential, no false clear | VERIFIED F3 D/B (offline) |
+| 12 | Missing-source queue rows have no actions: faithful bridge/source | Contextual source/history/current scan/identity inspection | Actual action-to-readback; no provider deletion | VERIFIED F3 D/B (offline) |
+| 13 | Silent missing slice(0,30): faithful bridge/catalog | Exact counts and bounded paging/search | 31/1,000+ fixtures, all entries reachable | VERIFIED F3 D/B (offline) |
+| 14 | Primary incidents ignore causal grouping: faithful bridge/attention model | Shared-root groups with counts and individual inspection | One helper outage/50 accounts vs independent holds | VERIFIED F3 D/B (offline) |
+| 15 | Async grant hydration misses alarm init: standing authority/AI | Same trusted transition after hydration/cold wake | Cold worker, no onStartup, invalid/revoked records | VERIFIED F2 D/B |
 | 16 | Donor idle-stop vs headless work: donor overlay/enrollment/workers | Allow idle-stop; donor safely reestablishes before due protected work | 15+ minutes, scheduled creation, 24h/72h/no false credit | VERIFIED F1 D/B |
-| 17 | Empty catch and success-only wake receipt: catalog/creation/account | Per-domain bounded redacted attempt/success/checkpoint/retry/cause | Reject, suspend, partial failure, grouped Attention | OPEN F2 |
+| 17 | Empty catch and success-only wake receipt: catalog/creation/account | Per-domain bounded redacted attempt/success/checkpoint/retry/cause | Reject, suspend, partial failure, grouped Attention | VERIFIED F2 D/B |
 
 ## Evidence and limits
 
@@ -256,3 +256,128 @@ PR #68 head `695c94870c5c491472a96182743300bb8e969662`, full run `40408490706`, 
 Production `advanceShadow` correctly freezes sleep while globally paused. The test seeded 64 hours, immediately paused, then assumed a concurrent startup turn had first consumed an unpaused gap. F2's faster scans exposed this race; unchanged paused rest is correct and is not failed rest progression. Do not infer an unobserved turn or weaken pause semantics.
 
 The follow-up records the actual canonical rest budget after successful Pause and requires exact preservation through restart. It retains the 16-hour active budget, unknown account health, same installed ID and single reconstructed alarm. It separately resumes through the real typed port, observes an owned OS process exit and distinct new process, then passively awaits actual canonical rest decrease with zero active-time credit. Finally it pauses again for the retained downstream tests. A production-store deterministic regression demonstrates the old 64-hour predicate can fail for correct immediate-pause behavior, then proves resume/new-boot rest progression and no double counting. Product bytes and original adverse assertions are unchanged. Corrected focused/full CI and verified main remain pending; no F2/F3/F4 or release completion is claimed.
+
+
+### F2 verified main; F3 contextual recovery begins
+
+PR #68 exact head `0b2bf1057b21bcf5dc810b4a80aa8e30d5e9c6d4`, tree `260a70f24910bd4b9deb5126aa9a1ced1314d0a8`, passed full run `40410761204`: **1,288 D tests**, donor/baseline/reproducible XPI/archive adverse controls, persistent upgrade and all normal-sandbox installed Firefox. Authorized squash merge `7e8187cac74d34edeb914c747553f71b803162eb` has the identical tested tree. Postmerge full run `40412740037` passed every lane; main required check `121892755809` succeeded. Both tab readback and paused/resumed rest assertions passed. XPI remains engineering v1.2.16, SHA-256 `44b8369073ea99582cf89659a9322ad775d91d60f3c0a727252de48c192fc09f`.
+
+F3 owns GAP02/03/10/11/12/13/14: actionable typed incident context (including stale/absent targets), current read-only historical template provenance without replay, one default UI controller, truthful Git failure classes and verified recovery, complete bounded missing-source paging/search and causally grounded incident grouping. Read-only production probes reproduced opaque route scopes guessed as account IDs and 50 independent account failures collapsed into one group. New deterministic tests also require every failed/mismatched/unpersisted Git scan to retain its incident and only a complete identity-matched durable main readback to resolve it. This first checkpoint intentionally records red regressions; F3/F4 are incomplete. Preserve original I17/history, current source/writer/approval/route fences, frozen donor and protected CI/policy roots. No real host/private Git/provider effects or intermediate XPI.
+
+
+F3 initial independent draft run `40414535102` at `fb98237a2fdf7002d2109b1767502af5ff317362` reported **12 red regressions / one healthy control passed**: opaque target guessing, 50 independent route failures collapsed, missing/inaccessible credential mislabeled as vault, HTTP401 indistinguishable from forbidden access, wrong identity reported CATALOG_COMPLETE, network/local persistence failures and a false incident resolution on unsuccessful scans. The first compatible correction removes guessed identities, scopes generic symptom causes and delays Git resolution until exact complete main/storage readback. The inventory now distinguishes a well-formed stale reference from an absent or malformed reference. Contextual UI, paging, actual actions and remaining F3 work are still incomplete; no completion claim.
+
+### F3 causal context and independent paging checkpoint
+
+The shared F3 branch advanced to `e8b262f1200b582294df96fb3af0e8b529d4da97` while the causal-context checkpoint was being prepared. The expected-head update correctly refused the older parent. Its truthful Git classifications, opaque-target fix, new regression file, generated-inventory changes and existing assertions are preserved; no force update or replacement of concurrent work is used.
+
+Draft run `40414932005` passed all contextual/Git regressions but failed `RECOVERY_INVENTORY_STALE`. The inventory is regenerated directly from the current production owners and resolver; the original drift check remains mandatory.
+
+This additive checkpoint supplies canonical exact incident context, bounded group/member pages and exact counts/history. Only explicitly witnessed shared roots join account scopes; the existing `noticeCause` export remains compatible. The same notification metadata records verified group recovery, so initial failure and relapse inside the old window produce one alert each. Current material reason/target/cause changes preserve the original causal detail and reopen review. New production-store tests cover 50 shared plus 50 independent holds, review staying active, all member pages, resolved history, relapse, action changes, supersession and trusted read-only admission. A pure V8 actual-journal probe observed one 50-account group and two alerts across recovery/relapse; it is not Node/B acceptance. Full F3 UI, template, missing-source paging and packaged verification remain incomplete.
+
+### F3 fresh typed navigation checkpoint
+
+Draft run `40415592849` on `02827f6c751799b73de0dc136910831291c9f0a5` passed **29 tests**, zero failed/cancelled, including retained provider/independent-scope checks, all Git failure/recovery regressions, causal history/pagination and the generated inventory drift check. This is draft D preflight only; Firefox/full acceptance is not claimed.
+
+Primary incident opening now requests the exact canonical notice, then reads the explicit account, exact generator selection or operation context before navigation. Stale/missing/unavailable references open a contextual incident drawer with the original and current cause, event/history detail and safe domain recovery. Opaque incident scopes are never used as account IDs or queue searches. Typed Settings destinations remain safe recovery views. Resolved notices retain history; review does not assert recovery.
+
+A 99-case deterministic matrix uses actual canonical notice/account/inventory/operation stores for every code, valid/absent/well-formed stale reference and active/reviewed/resolved state. Settings addresses remain stable even when their domain configuration needs recovery. Additional negatives reject mismatched notice/entity identities, read failures and malformed targets; current canonical target replacement supersedes the old UI snapshot without any effect dispatch. These new tests and actual installed clicks remain pending. Historical template inspection, missing-source context/paging, grouped primary rendering and single-controller migration are still incomplete.
+
+### F3 historical current-template read checkpoint
+
+Draft run `40416253751` at `6aa5aa0441db3627bd981b1f011adb49b67e4b6c` passed **129 tests**, zero failed/cancelled: the 99-case actual canonical context matrix, fresh/mismatched/unavailable/malformed target controls and all prior changed-file regressions. This is D draft preflight, not installed-browser acceptance.
+
+Historical operation details now offer a separate **Check current creation template** action. The existing supply boundary accepts exactly an operation ID, derives the historical batch/item and unchanged original account/Persona/binding, requires current verified original identity and protected admission, and calls only fixed READ_TEMPLATE through PersonaMonkey's existing lease. A repaired account revision is allowed for this read; changed identity/binding, missing original scope, restore and changed canonical context hold it. The template adapter reads only fixed minimal page/ownership endpoints, before the owned census, and returns current presence/ownership/schema/fingerprint without source/session bytes. It contains no save/create/rename call. A current result never rewrites the old first failure, batch, journal or I17 quarantine; replay remains false.
+
+New D tests independently record provider endpoints and canonical before/after bytes, covering available/missing/owned/owner-denied/schema/principal/session changes, the original I17 scope, repaired revision, later account change, restore and malicious caller-supplied account/template fields. These new tests and real packaged template clicks still require verification. F3 remains incomplete; missing-source paging/context, primary causal groups, one controller and complete B integration remain outstanding.
+
+### F3 missing-source pages and causal primary views
+
+Draft run `40416851373` at `d2cde0263d522aa400ca1cfe3d96c065c5084ace` passed **133 tests**, zero failed/cancelled, including all template adapter/boundary negatives. This remains D draft preflight, not B acceptance.
+
+The existing catalog observer now supports an explicit read-only observation mode that skips all seven domain progression/intake callbacks. Complete snapshot, configuration and receipt readback are required before Git incident recovery; current Git causes use one explicit connection root and separate actionable reason. Actual missing/reappearing folder observations retain known main heads without fabricating a first historical head for older records. Missing/rename notices from one complete Git change share that exact repository/head cause.
+
+The existing identity boundary adds bounded missing/review pages, exact filtered/unfiltered totals and typed single-source context. Related identities are bounded with explicit totals. A refresh uses that same read-only observer and retains the last good complete observation when Git is unavailable; no absence authorizes provider deletion/unlisting/rename.
+
+The primary queue now pages and searches missing sources and identity reviews with independent cursors; it no longer hides them on search or slices the first 30. Each missing row opens actual Git/source/history context. Local source comparison, original archive reads and paged checkpoints work independently of the absent Git folder. Context reads expose no publication/rename controls; separate guarded workflows remain explicit. Primary Attention/Overview use canonical causal groups with event/affected counts, bounded member inspection, individual review and resolved-history views. The original `noticeCause` reader remains compatible. New D tests cover all 31/1,001 rows, last-page search, 100-character source names, bounded related reviews, Git outage/read-only refresh, no effect callbacks and missing receipt readback. These new tests and actual packaged UI clicks are pending; single-controller migration and full F3 verification are still incomplete.
+
+
+### F3 canonical single-controller startup — pending installed Firefox verification
+
+The original `src/ui/index.html` simultaneously imported 22 historical native and
+presentation controllers plus the accepted `faithful/bridge.mjs`, even though the
+historical `.app` was then moved off-screen and made inert. This retained duplicate
+readers, event observers and potentially conflicting runtime requests. The entry now
+imports **only** the canonical primary controller. Original modules/markup remain as
+non-executing compatibility material so existing data migrations/readers are not
+removed, and historical assertions can still inspect their unaltered source. The
+hidden legacy "Back to dashboard" control and reactivation CSS are gone; no
+inaccessible second dashboard is exposed as a normal recovery path. The primary
+bridge already mounts Accounts, generators, Git, Refresher, AI, publication, backup,
+restore and diagnostics through its own typed guarded boundaries.
+
+Legacy v0.1.5 presentation tests continue checking the retained source and native
+control IDs but now assert that only the prototype bridge is mounted. The v0.1.6
+primary-shell assertions enforce the same one-script entry and absence of the
+hidden legacy button. This is an implementation checkpoint only: installed-Firefox
+B tests, required full CI, and full feature action-to-readback remain unverified at
+this draft checkpoint. No provider/private-Git/native mutations or intermediate XPI.
+
+
+### F3 full-gate first cause and regression correction
+
+Full Ready run [40497381143](https://github.com/Neb963/PCMS-Alpha/actions/runs/40497381143) at `9f90c4712ecfee505654e7c680d1adc5f76a562c` passed the baseline and 1,409 of 1,417 D tests; eight D assertions failed and installed Firefox was consequently skipped. Six asserted that obsolete legacy controller scripts remained mounted in `index.html`, rather than checking the single guarded primary controller. Two expected the superseded `GIT_VAULT_UNAVAILABLE` classification for missing Firefox browser-local credentials, where production correctly returned `GIT_CREDENTIAL_MISSING`. The follow-up updates each of those existing oracles to require the actual primary script, targeted guarded imports, nonmounting of historical scripts, and correct failure code while retaining no-effect, last-good snapshot and recovery assertions. The failed run remains evidence; full corrected D/B CI and browser actions are still pending. No change to Git/route/effect authorization or weakening of required workflows.
+
+
+### F3 first installed-Firefox failure — fixed candidate pending B rerun
+
+Ready full-gate run [40498002152](https://github.com/Neb963/PCMS-Alpha/actions/runs/40498002152) passed the baseline and deterministic fast suite. Persistent Firefox installed donor upgrade passed; the browser journey then failed on the actual `Open account` recovery control in the saved historical operation drawer: WebDriver reported the button could not be scrolled into view. This is a real user-facing failure, not an unavailable or acceptable skip. The repair keeps the context/details in the scrollable drawer body but places the guarded existing recovery controls in a visible drawer footer, with minimum body height allowing normal flex scrolling. The identical installed-Firefox workflow now includes an independent geometry/disabled-state oracle before the original actual WebDriver click and account-manager readback. The underlying stored operation and uncertain-effect no-replay policy remain untouched. Full corrected B evidence and independent merge requirements remain pending.
+
+
+### F3 second installed-Firefox result — query settlement oracle
+
+Run [40498650799](https://github.com/Neb963/PCMS-Alpha/actions/runs/40498650799) passed baseline and fast D. Actual Firefox now passed the previously blocked historical-operation `Open account` click, progressed through route identity/change, verified creation, restart and ambiguous CREATE no-replay. It then exposed a B harness race: after typing an uncertain operation ID, the script waited for `any .queue-item`, which was immediately true for previously rendered Git/Attention entries. The next `Inspect` selector incorrectly targeted the first old row. The regression test now waits for a single exact filtered *uncertain operation* row and its real Inspect button before invoking the original WebDriver click; a missing result will still fail. No operation replay or error masking is introduced. Corrected full B rerun pending.
+
+
+### F3 required B conflict — historical controllers vs canonical single-controller production
+
+Full required run [40499288895](https://github.com/Neb963/PCMS-Alpha/actions/runs/40499288895) at `a73293841d246a70ca376e7c7e4a95fc7a294867`:
+
+- Baseline, 1,417/1,417 deterministic tests, pinned donor, exact package reproducibility and A08 installed donor-to-PCMS upgrade: **PASS**.
+- Offline installed-XPI ISSUE60 integration and the complete modern J01–J07 **primary** operator journey runners: **PASS**, including route repair, failed/uncertain creation without replay, primary UI 1,200-generator navigation/keyboard, backed-up restore, Refresher clock, native AI, Git and human approval.
+- Retained legacy monolithic browser smoke: **FAIL** after its A03 protected IndexedDB/security boundary proof. At `scripts/browser-i00-smoke.py:1248`, the obsolete v0.1.4 workspace navigation has zero mounted group buttons because the production entry now correctly imports only `faithful/bridge.mjs`. Its next assertions at lines 1252–1286 likewise demand the removed v0.1.5 controller. Later portions contain old DOM-dependent control assertions as well as unique security/operation/backup cases.
+
+**Required engineering action, not a waiver:** systematically migrate the historical installed-browser suite's approximately 95 named proof checkpoints after line 1218 to the actually mounted canonical primary UI or independent real typed runtime/host/disk observations; retain original negative and restart safety checks, preserving version upgrades, A03 boundary, offline provider ledgers, uncertainty/no-replay, and cross-account isolation. Existing J01–J07 PASS does not automatically subsume every unique historical checkpoint. Do not re-enable obsolete controllers, create a test-only hidden production dashboard, bypass or delete the required browser job, or claim B acceptance while its required historical coverage is red. The branch and reproducible candidate remain reviewable; F3 is **BLOCKED on meaningful required-B test migration**, not accepted. F4 final version/build/live guide must not start or release on red B.
+
+
+### F3 installed-Firefox migration checkpoint — 2026-10-27
+
+Ready full run [40502690877](https://github.com/Neb963/PCMS-Alpha/actions/runs/40502690877) at `bbcb357b6c7180874c623de250f7278a11688281` passed trusted baseline, all 1,417 deterministic tests, donor and reproducible-XPI checks, persistent Firefox upgrade, real offline ISSUE60 protection and all modern J01–J07 primary journeys. The retained browser smoke then independently passed `F3_CANONICAL_ONLY_ACTIVE_CONTROLLER_AND_SIX_ENABLED_ROUTES`, `V016_ACCEPTED_PROTOTYPE_PRIMARY_ALL_SIX_ROUTED_BACKEND_CONTROLS`, and `I04_REAL_IDB_1250_PRIMARY_PAGINATION_OWNER_HOLD` on the fully installed XPI. Its first new failure was an older single-notice assertion: the synthetic `SOURCE_HELD` notice correctly coexisted with a new autonomously recorded `GIT_RECONNECT_REQUIRED` alert. Global cardinality 1 is no longer valid. No provider/Git mutation occurred.
+
+The follow-up requires the exact fixture scope and code while preserving unrelated Git notices, and exercises the actual primary Work Queue `Mark reviewed` button with W3C Firefox interaction, canonical readback, and unchanged held operation. A stale legacy Accounts-route assertion was likewise redirected to the single visible controller. Additional old native UI-only probes were migrated to real primary Refresher paging/inspector, the production typed Git negative/disarm port (primary Git workflows independently exercised by J03/J04), the primary generator review and production uncertain journal, and the actual primary passwordless backup export hold. Old protected port, source-byte, donor, restart, uncertain-effect and restore negatives remain in the retained browser smoke and its independent journey suites. No assertion-only PASS is substituted for the required B gate. These newly revised cases are **UNVERIFIED pending next full same-head CI**, and F3/F4 remain unaccepted/inactive.
+
+
+### F3 required installed-Firefox AI and migration follow-up
+
+Full Ready [40505295217](https://github.com/Neb963/PCMS-Alpha/actions/runs/40505295217) at `4b9820fae78a11662cb0c7d4cc67f4bc4c009be6` retained PASS baseline, D 1,417/1,417, donor and reproducible package, upgraded persistent Firefox, primary J01–J07, protected effects and the migrated exact `SOURCE_HELD` incident review, cold event-page wake, A03 credential isolation, source bytes, synthetic original provider journals, and pinned AI prompt/concurrency tests. B then failed at `browser-i00-smoke.py:2485`: an obsolete hidden v0 AI button is now enabled but has no mounted controller; expecting disabled falsely rejected the legitimate fully enabled primary AI workflow. Do not reintroduce a disabled feature for CI.
+
+The next candidate replaces that oracle with actual primary Work Queue AI job inspection and guarded testing evidence, and updates downstream historical-only smoke UI probes to canonical primary views/read-only producer boundaries: Git preview + disarm; 1,250-generator Refresher pagination and actual timing inspector; fail-closed publication preview; existing-generator uncertain unlist; read-only original-source closure with no storage mutation; primary passwordless Backup UI; legacy encrypted-file rejection using actual primary restore file inputs; and fresh-profile disk import through visible primary Backups. Original synthetic operation, provider/Git effect, source fingerprint, route, alarm, cold restart and uncertain-effect negative checks remain retained. Primary J01–J07 packaged browser tests were not removed or weakened.
+
+These migrations are **implementation checkpoints**, not certified full B/H results. GitHub Actions is currently queueing some runs; a draft preflight success is not required-Firefox acceptance. Do not merge F3 or start F4 until same-head full independent required jobs and accurate final-diff inspection are green. No live provider, private generator Git, personal profile, routing host or real native mutation was authorized or attempted.
+
+
+### F3 installed-Firefox CAS contention checkpoint
+
+Ready required run [40518298224](https://github.com/Neb963/PCMS-Alpha/actions/runs/40518298224) at `e9695aaae826fbf8d96fc437c1cc87e5c8c10bc2`: baseline and **1,417/1,417 deterministic tests + pinned donor/reproducible package PASS**. Installed Firefox passed the initial ISSUE60 and all primary J01–J07 offline journeys, the canonical single-controller/incident/AI inspection, exact 1,250-generator inventory, independent I10/I11 readback and frozen effect cases, real Refresher 1,250-row pagination and timing inspector, actual Firefox alarm delivery with dashboard closed, and paused cold restart. The next historical retained test `A06_RESUME_FOR_REST_RESTART` failed `STALE_REVISION` because a browser-native background scheduler changed the canonical Refresher revision between the test's GET and pause CAS. This rejection is a **proven no-effect CAS failure**, not an uncertain provider dispatch. The test now rereads canonical `GET_REFRESHER` state before each bounded fresh-revision attempt, checks that a competing actor has not already changed the intended global pause, accepts retries **only** for explicit `STALE_REVISION`, and independently verifies the resulting policy through canonical readback. The same applies when repausing after the second real OS restart. No blind replay, backend gate exception, disabled job or timeout extension. New same-head full B/H verification remains pending; F3 is still unaccepted and F4 not authorized.
+
+
+### F3 S01 disposable account-enrollment Firefox correction
+
+Full independent required [40520449784](https://github.com/Neb963/PCMS-Alpha/actions/runs/40520449784), exact head `198417ddd9c77c1933c0a4550750c764344a6e79`, passed baseline, D **1,417/1,417**, donor, reproducible XPI, installed Firefox upgrade, real protected ISSUE60/J01–J07 actions and all retained browser checks through `H A02_IMPORTED_DISK_RESTORE_GUARD_PERSISTS_AFTER_RELAUNCH`: preserved source, uncertainty/no-replay, synthetic original Git/Perchance ledgers, Refresher CAS/restart, publication, source-closure, backup export and fresh installed Firefox restore PASS. Its next test `s01_add_account_profile()` used an inert old light-DOM `#pcms-add-account` and reported `disabled=true`, even though canonical LIST_ACCOUNTS returned `enrollment=AVAILABLE` with no accounts. This is a legacy test-target mismatch, not a legitimate primary Add Account disablement. The revised disposable fresh-profile S01 test locates the visible enabled primary Accounts action, proves no manual Persona picker, clicks it **once**, waits for **exactly one** new account through the guarded canonical LIST_ACCOUNTS port, then retains the original protected route setup hold, donor tag, proxy isolation and ordinary-persona negative probes. Never retries a lost-click account creation; no native/Mullvad or real Perchance effects. Latest replacement is pending exact-head installed Firefox B/H and aggregate required gate. F3 remains unaccepted and unmerged, F4 not started.
+
+
+### F3 ready-candidate full required PASS — status and integration boundary
+
+The full Ready PR [#69](https://github.com/Neb963/PCMS-Alpha/pull/69) candidate `2480b31a5b4c348efe4397367a265e43357b3403` passed independent required [40523099070](https://github.com/Neb963/PCMS-Alpha/actions/runs/40523099070): signed baseline, 1,417/1,417 D tests, pinned donor regression, reproducible full-capability XPI, persistent installed-Firefox donor upgrade and primary J01–J07, all retained browser smoke, actual S01 **single-click** enrollment and native-helper-unavailable protected hold, same-route unpinned Persona isolation, real OS process cold restarts and guarded backup/restore, 110-item batch with restart progress and A07 1,200-generator/55-account primary pagination. The B/H job returned **success**, as did the aggregate `pcms-required`. The exact installed-XPI log includes `B S01_ADD_ACCOUNT_CONTROL_ENABLED_NO_MANUAL_PERSONA_PICKER=PASS`, `B S01_UNPINNED_TAGGED_PERSONA_REQUEST_NEVER_REACHED_PROXY=PASS`, `B S01_ORDINARY_PERSONA_SAME_ROUTE_UNAFFECTED=PASS`, `B A07_PRIMARY_1200_GENERATOR_AND_55_ACCOUNT_PAGING=PASS` and generated the J07 final-audit receipt with **external acceptance OPEN**. Historical prerequisite failures remain preserved evidence.
+
+This is an engineering **D/B and disposable-process/disk H** verification, not an authorization or assertion of private Git, production PersonaMonkey/Mullvad or live Perchance L acceptance. No operator-profile, live provider, real native helper or private source mutations. The seven F3 gap outcomes are verified at those available offline engineering tiers. **Independent main integration and final documentation-commit full CI remain pending**. F4 is not started; its final versioned XPI, checksum and operator live acceptance guide are a separate bounded phase. The earlier 1,417-test/head evidence is not being silently applied to the new documentation-only tree.

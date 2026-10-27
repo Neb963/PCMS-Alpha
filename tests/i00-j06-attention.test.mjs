@@ -12,7 +12,7 @@ test('J06 incident target is typed, durable and cannot inject a URL or mutation 
   assert.equal(validIncidentTarget(invalid),false);
   assert.equal((await store.recordNotice({...n,severity:'SERIOUS',revision:3,target:invalid})).ok,false);
  }
- assert.deepEqual(incidentDestination(n),{kind:'ACCOUNT',id:n.scopeId});
+ assert.deepEqual(incidentDestination(n),{kind:'CONTEXT',id:n.code},'an opaque scope is not an account identity');
  assert.deepEqual(incidentDestination({...n,code:'BACKUP_FAILED'}),{kind:'SETTINGS',id:'backups'});
 });
 test('J06 lost acknowledgement is independently observed; no duplicate write and no resolution',async()=>{

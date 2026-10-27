@@ -2,7 +2,8 @@ import {createScopeObservation} from './scope-observation.mjs';
 import {checkpointed} from './work-checkpoint.mjs';
 import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // S03 read-only background observer. Git credentials stay in the browser-local credential store.
-// This deliberately does NOT send generator intents or provider/Git writes.
+// Normal ticks hand complete observations to independently guarded domain owners.
+// observeOnly skips every intake/progression handoff and performs no remote write.
 import {scanMainCatalog} from './git-catalog.mjs';
 import {createRestoreSentinel,openCanonicalDatabase,createCanonicalStore} from './journal.mjs';
 import {createNoticeDispatcher} from './notices.mjs';
@@ -31,13 +32,13 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
   network=fetch,clock=Date.now,observationMs=30000,ingestComplete=null,ingestReady=null,
   progressReady=null,progressChanges=null,progressWriteback=null,progressCleanBulk=null,progressPublication=null,
   // C-68/C-69: one GitHub-connection incident (queued work stays queued);
-  // resolved only by the existing guarded credential read (F3 strengthens recovery proof).
-  incidents=async(kind)=>{
+  // resolved only by complete, identity-matched, durable pinned-main readback.
+  incidents=async(kind,details={})=>{
     const d=createNoticeDispatcher(api,createCanonicalStore(await openCanonicalDatabase()));
     return kind==='RESOLVE'?d.resolve({scopeId:'git_connection',code:'GIT_RECONNECT_REQUIRED',
-      evidence:'GIT_VAULT_CREDENTIAL_READ'}):
-      d.emit({scopeId:'git_connection',code:'GIT_RECONNECT_REQUIRED',severity:'ACTION_REQUIRED',
-        revision:Math.max(1,clock())});
+      evidence:'COMPLETE_MAIN_IDENTITY_STORAGE_READBACK'}):
+      d.emit({scopeId:'git_connection',code:'GIT_RECONNECT_REQUIRED',severity:'ACTION_REQUIRED',cause:'git_connection',reason:details.code||'GIT_CONNECTION_UNVERIFIED',
+        target:{kind:'SETTINGS',id:'connections'},revision:Math.max(1,clock())});
   }}={}){
   const sentinel=createRestoreSentinel(api.storage.local);
   let running=null,registered=false,observedTick=null;
@@ -53,30 +54,40 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
     ['cleanBulk',progressCleanBulk],['publication',progressPublication]
   ].filter(([,fn])=>typeof fn==='function').map(([domain,fn])=>observe(domain,()=>fn())));
   async function persistStatus(code){
-    try{await api.storage.local.set({[RECEIPT]:{code,observedAt:clock()}});}catch{}
+    const observedAt=clock();
+    try{
+      await api.storage.local.set({[RECEIPT]:{code,observedAt}});
+      const seen=(await api.storage.local.get(RECEIPT))?.[RECEIPT];
+      if(seen?.code!==code||seen.observedAt!==observedAt)code='GIT_LOCAL_STORAGE_UNAVAILABLE';
+    }catch{code='GIT_LOCAL_STORAGE_UNAVAILABLE';}
+    if(code!=='RESTORE_HOLD')try{await incidents('OPEN',{code});}catch{}
     return safe(code);
   }
-  async function perform(){
+  async function perform({observeOnly=false}={}){
     try{
       if((await sentinel.inspect()).held)return persistStatus('RESTORE_HOLD');
       const cfg=(await api.storage.local.get(CONFIG))?.[CONFIG];
-      if(!identifier(cfg))return safe('GIT_RECONNECT_REQUIRED');
+      if(!identifier(cfg))return persistStatus('GIT_NOT_CONFIGURED');
       const value=await native({action:'git.get',repositoryId:cfg.repositoryId});
       if(!value?.ok||typeof value.credential!=='string'){
-        try{await incidents('OPEN');}catch{}
-        return persistStatus('GIT_VAULT_UNAVAILABLE');
+        return persistStatus(value?.code==='GIT_LOCAL_STORAGE_UNAVAILABLE'?
+          'GIT_LOCAL_STORAGE_UNAVAILABLE':'GIT_CREDENTIAL_MISSING');
       }
-      try{await incidents('RESOLVE');}catch{}
       const resumed=createGitResumeTransport(api.storage.local,{
         repositoryId:cfg.repositoryId,repository:cfg.repository,network});
-      const result=await scan({repository:cfg.repository,token:value.credential},resumed.transport);
+      let result;
+      try{result=await scan({repository:cfg.repository,token:value.credential},resumed.transport);}
+      catch{return persistStatus('GIT_NETWORK_UNAVAILABLE');}
       if(resumed.status().paused){
         // One-time retry is a separate alarm; do not change the periodic alarm.
         try{await api.alarms.create(CATALOG_RESUME_ALARM,{when:clock()+60000});}catch{}
         return persistStatus('CATALOG_SCAN_CHECKPOINTED');
       }
-      if(!result?.ok||!result.complete || result.repositoryId!==cfg.repositoryId)
-        return persistStatus(result?.code||'CATALOG_INCOMPLETE');
+      if(!result?.ok||!result.complete)
+        return persistStatus(result?.httpStatus===401?'GIT_CREDENTIAL_REJECTED':
+          result?.code==='GIT_ACCESS_DENIED'?'GIT_ACCESS_DENIED':
+          result?.code==='GIT_UNAVAILABLE'?'GIT_NETWORK_UNAVAILABLE':'CATALOG_INCOMPLETE');
+      if(result.repositoryId!==cfg.repositoryId)return persistStatus('GIT_IDENTITY_MISMATCH');
       if((await sentinel.inspect()).held)return persistStatus('RESTORE_HOLD');
       const current=(await api.storage.local.get(CONFIG))?.[CONFIG];
       if(current?.repositoryId!==cfg.repositoryId||current.repository!==cfg.repository)
@@ -111,19 +122,49 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
         filter(slug=>!snapshot.generators.some(g=>g.slug===slug)).slice(0,100000);
       const reappeared=formerlyMissing.filter(slug=>
         snapshot.generators.some(g=>g.slug===slug));
+      const observations={...(older?.repositoryId===cfg.repositoryId&&older?.observations&&
+        typeof older.observations==='object'&&!Array.isArray(older.observations)?older.observations:{})};
+      const observedAt=clock(),knownMissing=new Set(formerlyMissing);
+      const previousRows=new Map((prior?.repositoryId===cfg.repositoryId&&prior.complete?prior.generators:[]).map(g=>[g.slug,g]));
+      for(const slug of stillMissing){
+        const old=observations[slug],previous=previousRows.get(slug);
+        observations[slug]={...old,
+          firstAbsentHead:SHA.test(old?.firstAbsentHead||'')?old.firstAbsentHead:knownMissing.has(slug)?null:snapshot.head,
+          lastAbsentHead:snapshot.head,observedAt,
+          ...(previous?{lastPresentHead:prior.head,oldTreeOid:previous.folderTreeOid||null}:{})};
+      }
+      for(const slug of reappeared)if(observations[slug])
+        observations[slug]={...observations[slug],returnedHead:snapshot.head,returnedAt:observedAt};
       // "Missing" is a reported Git path observation, NEVER deletion authority.
       await api.storage.local.set({[LAST]:snapshot,[REVIEW_KEY]:reviews,
-        [MISSING]:{repositoryId:cfg.repositoryId,slugs:stillMissing},
+        [MISSING]:{repositoryId:cfg.repositoryId,slugs:stillMissing,observations},
         [RECEIPT]:{
-        code:'CATALOG_OBSERVED_READ_ONLY',observedAt:clock(),
+        code:'CATALOG_OBSERVED_READ_ONLY',observedAt,
         repositoryId:cfg.repositoryId,head:result.head,recognizedCount:result.recognizedCount,
         newFolders:added,missingFolderObservations:missing,
         ambiguousIdentityHeld:planned.held,identityReviewRequired:planned.created.length,
         firstImportNeedsApproval:prior?.repositoryId!==cfg.repositoryId
       }});
+      // Storage acknowledgment is not readback. Never clear an incident on a
+      // token read, incomplete scan, changed identity or unconfirmed snapshot.
+      const [seenSnapshot,seenConfig,seenReceipt]=await Promise.all([
+        api.storage.local.get(LAST),api.storage.local.get(CONFIG),api.storage.local.get(RECEIPT)]);
+      const confirmed=seenSnapshot?.[LAST],currentConfig=seenConfig?.[CONFIG],receipt=seenReceipt?.[RECEIPT];
+      if(receipt?.code!=='CATALOG_OBSERVED_READ_ONLY'||receipt.observedAt!==observedAt||
+         receipt.repositoryId!==cfg.repositoryId||receipt.head!==snapshot.head||
+         confirmed?.complete!==true||confirmed.repositoryId!==snapshot.repositoryId||
+         confirmed.repository!==snapshot.repository||confirmed.head!==snapshot.head||
+         confirmed.rootTreeOid!==snapshot.rootTreeOid||
+         currentConfig?.repositoryId!==cfg.repositoryId||currentConfig.repository!==cfg.repository||
+         !Array.isArray(confirmed.generators)||confirmed.generators.length!==snapshot.generators.length||
+         !snapshot.generators.every((g,i)=>['slug','markerOid','readyDeclared','sourceState','folderTreeOid'].
+           every(k=>confirmed.generators[i]?.[k]===g[k])))
+        return persistStatus('GIT_LOCAL_STORAGE_UNAVAILABLE');
+      if((await sentinel.inspect()).held)return persistStatus('RESTORE_HOLD');
+      try{await incidents('RESOLVE',{head:snapshot.head,repositoryId:cfg.repositoryId});}catch{}
       // Independent fixed domains do not wait on notice delivery or intake.
       // Their own canonical guards, approval and source ownership still apply.
-      const progression=progressAll();
+      const progression=observeOnly?Promise.resolve():progressAll();
       // Each missing folder remains a distinct actionable incident. A full
       // successful reappearance, not a failed scan, is the only resolution.
       // Notification payloads contain no source paths or credentials.
@@ -136,12 +177,12 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       }
       for(const slug of missing.slice(0,64)){
         try{await dispatcher.emit({scopeId:await scopeFor(slug),
-          code:'GIT_FOLDER_MISSING',target:{kind:'GENERATOR',id:slug},severity:'ACTION_REQUIRED',
+          code:'GIT_FOLDER_MISSING',cause:'git_main_change:'+cfg.repositoryId+':'+snapshot.head,target:{kind:'GENERATOR',id:slug},severity:'ACTION_REQUIRED',
           revision:Math.max(1,clock())});}catch{}
       }
       for(const rec of planned.created.slice(0,64)){
         try{await dispatcher.emit({scopeId:await scopeFor(rec.newSlug),
-          code:'GIT_FOLDER_RENAME_REVIEW',target:{kind:'GENERATOR',id:rec.newSlug},severity:'ACTION_REQUIRED',
+          code:'GIT_FOLDER_RENAME_REVIEW',cause:'git_main_change:'+cfg.repositoryId+':'+snapshot.head,target:{kind:'GENERATOR',id:rec.newSlug},severity:'ACTION_REQUIRED',
           revision:Math.max(1,clock())});}catch{}
       }
       // Incident resolution is independent of owner/source write authority.
@@ -159,7 +200,7 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       // S04 receives only the independently complete pinned-main scan. Its
       // own approval check and canonical DB handle decide local intent intake.
       // The S03 observer never invents provider ownership or performs writes.
-      if(ingestComplete){
+      if(!observeOnly&&ingestComplete){
         let intake;
         try{intake=await observe('catalogIntake',()=>ingestComplete(result,{heldSlugs:planned.held}));}catch{intake={ok:false,code:'S04_INTAKE_UNAVAILABLE'};}
         if(intake?.more===true)
@@ -171,7 +212,7 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       }
       // S05 consumes only complete, pinned-main READY observations. Its queue
       // is local and effect-free; incomplete witnesses never become candidates.
-      if(ingestReady){
+      if(!observeOnly&&ingestReady){
         let ready;
         try{ready=await observe('readyIntake',()=>ingestReady({catalog:result,repository:cfg.repository,
           token:value.credential,transport:resumed.transport,heldSlugs:planned.held}));}
@@ -188,9 +229,9 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
       await progression;
       return {ok:true,code:'CATALOG_OBSERVED_READ_ONLY',head:result.head,
         newFolders:added,missingFolderObservations:missing};
-    }catch{return persistStatus('CATALOG_OBSERVATION_UNAVAILABLE');}
+    }catch{return persistStatus('GIT_LOCAL_STORAGE_UNAVAILABLE');}
   }
-  function tick(){return running||(running=perform().finally(()=>{running=null;}));}
+  function tick(options={}){return running||(running=perform({observeOnly:options?.observeOnly===true}).finally(()=>{running=null;}));}
   async function schedule(){
     async function ensure(name,minutes){try{
       if(typeof api.alarms.get==='function'&&await api.alarms.get(name))return;
@@ -221,7 +262,7 @@ export function createCatalogWatcher(api,{scan=scanMainCatalog,
   if(progressCleanBulk)progressCleanBulk=checkpointed(api,progressCleanBulk);
   if(progressPublication)progressPublication=checkpointed(api,progressPublication);
     const actualTick=checkpointed(api,tick);
-    tick=()=>observedTick||(observedTick=observe('catalog',actualTick).finally(()=>{observedTick=null;}));
+    tick=(options={})=>observedTick||(observedTick=observe('catalog',()=>actualTick(options)).finally(()=>{observedTick=null;}));
   return Object.freeze({register,tick});
 }
 export const catalogWatcher=typeof browser==='undefined'?null:createCatalogWatcher(browser,{

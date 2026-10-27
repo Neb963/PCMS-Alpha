@@ -65,7 +65,10 @@ test('C-68 grouped by cause: unrelated root causes on one scope stay separate',(
     {scopeId:'scope_1234',code:'ROUTE_UNAVAILABLE',severity:'SERIOUS'},
     {scopeId:'scope_9999',code:'ROUTE_UNAVAILABLE',severity:'ACTION_REQUIRED'},
     {scopeId:'scope_5678',code:'RESTORE_IN_PROGRESS',severity:'INFORMATIONAL'}]);
-  assert.equal(g.length,3);assert.equal(g[0].severity,'SERIOUS');assert.equal(g[0].cause,'ROUTE_UNAVAILABLE');
-  assert.deepEqual(g[0].scopes,['scope_1234','scope_9999']);
-  assert.equal(g[1].cause,'SOURCE_HELD');assert.equal(g[2].cause,'RESTORE_IN_PROGRESS');
+  assert.equal(g.length,4);assert.equal(g[0].severity,'SERIOUS');
+  assert.equal(g[0].cause,'ROUTE_UNAVAILABLE:scope_1234');
+  assert.deepEqual(g[0].scopes,['scope_1234']);
+  assert.ok(g.some(x=>x.cause==='ROUTE_UNAVAILABLE:scope_9999'));
+  assert.ok(g.some(x=>x.cause==='SOURCE_HELD:scope_1234'));
+  assert.ok(g.some(x=>x.cause==='RESTORE_IN_PROGRESS:scope_5678'));
 });

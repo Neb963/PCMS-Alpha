@@ -795,14 +795,37 @@ def s01_add_account_profile(browser, archive, folder):
         uuid=addons_uuid(profile)
         call('POST',f'/session/{session}/url',{'url':f'moz-extension://{uuid}/pcms/index.html#accounts'})
         wait_donor_ready(session)
+        # Installed primary UI owns Add account. The retired historical
+        # button is deliberately inert; a visible enabled control and a
+        # guarded account readback are the only valid enrollment evidence.
+        ui=None
         for _ in range(120):
-            ui=execute(session,"return {add:document.getElementById('pcms-add-account')?.disabled,legacy:!!document.getElementById('pcms-persona-picker')}")
-            if ui.get('add') is False: break
+            ui=execute(session,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+              const page=sh?.querySelector('#page');
+              const b=page?.querySelector('[data-action="add-account"]');
+              return {route:page?.dataset.view,add:!!b,enabled:!!b&&!b.disabled,
+                visible:!!b&&b.getClientRects().length>0,
+                legacy:!!sh?.querySelector('#pcms-persona-picker')};""")
+            if ui['route']=='accounts' and ui['add'] and ui['enabled'] and ui['visible']:break
             time.sleep(.25)
-        assert ui=={'add':False,'legacy':False},(ui,account_command(session,{'type':'LIST_ACCOUNTS'}))
+        assert ui=={'route':'accounts','add':True,'enabled':True,'visible':True,'legacy':False},(ui,account_command(session,{'type':'LIST_ACCOUNTS'}))
+        initial=account_command(session,{'type':'LIST_ACCOUNTS'})
+        assert initial.get('ok') and initial.get('enrollment')=='AVAILABLE' and not initial.get('accounts'),initial
         print('B S01_ADD_ACCOUNT_CONTROL_ENABLED_NO_MANUAL_PERSONA_PICKER=PASS',flush=True)
-        started=account_command(session,{'type':'ADD_ACCOUNT'})
-        assert started.get('ok') is True,started
+        # Actual browser click initiates exactly one account creation; do not
+        # send a second enrollment command or retry an uncertain first click.
+        initiated=execute(session,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+          const b=sh.querySelector('[data-action="add-account"]');
+          if(!b||b.disabled)return false;b.click();return true;""")
+        assert initiated is True,'S01_PRIMARY_ACCOUNT_ENROLLMENT_CLICK_UNAVAILABLE'
+        started=None
+        for _ in range(240):
+            current=account_command(session,{'type':'LIST_ACCOUNTS'})
+            if current.get('ok') and len(current.get('accounts',[]))==1:
+                started=current['accounts'][0]
+                break
+            time.sleep(.5)
+        assert started and started.get('accountId'),('S01_PRIMARY_ADD_NOT_RECORDED',current)
         account=None
         for _ in range(240):
             listed=account_command(session,{'type':'LIST_ACCOUNTS'})
@@ -1218,72 +1241,31 @@ def main():
                 print('B A03_SANDBOX_WEB_DOCUMENT_DENIED_EXTENSION_GIT_DATABASE=PASS',flush=True)
                 print('B A03_REAL_CONTENT_SCRIPT_INJECTION=NOT_TESTED_ROUTING_HOLD',flush=True)
 
-                # v0.1.4 B evidence: verify the actual installed XPI dashboard.
-                # This tests real packaged assets/DOM and presentation actions
-                # without sending any provider, Git or local mutation command.
-                desktop=execute(after,"""const get=id=>document.getElementById(id);
-                  const routes=['generators','work-queue','settings'];
-                  const groups=routes.map(route=>{
-                    const ws=get('view-'+route);
-                    const bar=ws.querySelector('.pcms-v014-workflow-nav');
-                    const buttons=[...(bar?.querySelectorAll('button[data-ui-group]')||[])];
-                    const current=buttons.filter(b=>b.getAttribute('aria-pressed')==='true');
-                    const controlled=buttons.every(b=>
-                      b.getAttribute('aria-controls')?.split(/\\s+/).every(id=>!!get(id)));
-                    return {route,count:buttons.length,current:current.length,controlled,
-                      visiblePanels:[...ws.children].filter(el=>el.matches?.('section.panel')&&!el.hidden).length};
-                  });
-                  const field=get('pcms-v014-search');
-                  return {groups,search:!!field,role:field?.getAttribute('role'),
-                    expanded:field?.getAttribute('aria-expanded'),
-                    source:!!get('pcms-source-target'),stage:!!get('pcms-stage-slug'),
-                    release:!!get('pcms-release-heading'),
-                    account:!!get('pcms-accounts-list'),
-                    backup:!!get('pcms-backup-export'),
-                    restore:!!get('pcms-restore-apply')};""")
-                assert desktop['search'] and desktop['role']=='combobox',desktop
-                assert desktop['expanded']=='false',desktop
-                assert all(desktop[k] for k in ['source','stage','release','account','backup','restore']),desktop
-                assert len(desktop['groups'])==3,desktop
-                assert all(row['count']>=5 and row['current']==1 and row['controlled']
-                           and row['visiblePanels']>=1 for row in desktop['groups']),desktop
-                print('B V014_PACKAGED_DESKTOP_GROUPS_AND_AUTHORITATIVE_CONTROLS=PASS',flush=True)
-                # v0.1.5 visual-hierarchy test: the prior release kept an
-                # old dashboard with cosmetic CSS. Verify real production
-                # workspace composition in this installed full-capability XPI.
-                faithful=execute(after,"""const get=id=>document.getElementById(id);
-                  const root=document.documentElement;
-                  const inv=get('generators-table-title')?.closest('section.panel');
-                  const qs=document.querySelector('#view-work-queue .v015-queue-board');
-                  const refs=get('pcms-refresher-rows');
-                  const rail=document.querySelector('#view-refresher .v015-refresher-rail');
-                  const stats=document.querySelector('#view-refresher .v015-refresher-stats');
-                  const settings=document.querySelector('#view-settings .v015-settings-nav');
-                  const accountTools=document.querySelector('#view-accounts .v015-account-tools');
-                  const source=get('pcms-generator-query');
-                  return {booted:root.classList.contains('pcms-v015-faithful'),
-                    overview:!!document.querySelector('#view-overview .v015-overview-stats'),
-                    inventory:!!inv?.classList.contains('v015-inventory-panel'),
-                    inventoryTabs:document.querySelectorAll('#view-generators .v015-filter-tab').length,
-                    inputPreserved:!!source&&source.closest('.v015-inventory-tools')!==null,
-                    nativeRowIdentity:!!get('pcms-generators-rows'),
-                    queue:!!qs,queueRows:!!qs?.querySelector('.v015-queue-list'),
-                    accounts:!!accountTools,
-                    refresher:!!refs&&!!rail&&!!stats,
-                    nativeRefresherInBoard:!!refs?.closest('.v015-refresher-panel'),
-                    nativePolicyInRail:!!rail?.querySelector('#pcms-v014-refresher-policy'),
-                    settings:!!settings,
-                    sourceWriters:document.querySelectorAll('script[src="v015-faithful.mjs"]').length};""")
-                assert faithful['booted'] and all(faithful[k] for k in
-                    ['overview','inventory','inputPreserved','nativeRowIdentity',
-                     'queue','queueRows','accounts','refresher',
-                     'nativeRefresherInBoard','nativePolicyInRail','settings']),faithful
-                assert faithful['inventoryTabs']>=4 and faithful['sourceWriters']==1,faithful
-                print('B V015_TRUE_DESKTOP_PRIMARY_WORKSPACES_AND_REAL_HANDLERS=PASS',flush=True)
-                release_version=execute(after,"return {manifest:browser.runtime.getManifest().version,ui:document.documentElement.dataset.pcmsUiVersion,badge:document.querySelector('.v015-top-status')?.textContent};")
-                assert release_version.get('manifest')=='1.2.16',release_version
-                assert release_version.get('ui')=='0.1.5' and '0.1.5' in release_version.get('badge',''),release_version
-                print('B V015_REAL_FIREFOX_UPDATE_VERSION_AND_VISIBLE_UI_MARKER=PASS',flush=True)
+                # F3: the visible canonical primary controller replaces both
+                # v0.1.4 and v0.1.5. Old DOM remains as inert compatibility
+                # markup; it is NOT a second UI or a valid operator test target.
+                # This checks the real packaged entrypoint, mounted shadow UI,
+                # production routes and active control visibility rather than
+                # resurrecting retired tab/group event listeners.
+                canonical=execute(after,"""const host=document.getElementById('pcms-faithful-host');
+                  const sh=host?.shadowRoot,legacy=document.querySelector('body > .app');
+                  const scripts=[...document.querySelectorAll('script[type=module][src]')]
+                    .map(s=>new URL(s.src).pathname.split('/').pop());
+                  const routes=['overview','generators','work-queue','accounts','refresher','settings'];
+                  const nav=routes.map(route=>{const b=sh?.querySelector('[data-nav="'+route+'"]');
+                    return {route,exists:!!b,enabled:!!b&&!b.disabled,
+                      visible:!!b&&b.getClientRects().length>0};});
+                  return {scripts,ready:document.body.classList.contains('pcms-faithful-ready'),
+                    shadow:!!sh,visible:!!host&&getComputedStyle(host).display!=='none',
+                    inert:!!legacy&&getComputedStyle(legacy).display==='none',
+                    nav,version:browser.runtime.getManifest().version,
+                    tokenField:!!sh?.querySelector('input[type=password]')};""")
+                assert canonical['scripts']==['bridge.mjs'],canonical
+                assert canonical['ready'] and canonical['shadow'] and canonical['visible'],canonical
+                assert canonical['inert'] and not canonical['tokenField'],canonical
+                assert all(row['exists'] and row['enabled'] for row in canonical['nav']),canonical
+                assert canonical['version']=='1.2.16',canonical
+                print('B F3_CANONICAL_ONLY_ACTIVE_CONTROLLER_AND_SIX_ENABLED_ROUTES=PASS',flush=True)
                 # V016 acceptance: the PRECISE accepted prototype structure is
                 # the visible full-screen extension UI, not an old markup reskin.
                 for _ in range(70):
@@ -1298,7 +1280,7 @@ def main():
                      badge:sh?.querySelector('.preview-label')?.textContent,
                      routes:sh?.querySelectorAll('[data-nav]').length,
                      visible:getComputedStyle(host).display!=='none',
-                     nativeHidden:getComputedStyle(legacy).visibility==='hidden',
+                     nativeHidden:!!legacy&&getComputedStyle(legacy).display==='none',
                      sidebar:!!sh?.querySelector('.sidebar'),
                      primary:sh?.querySelector('#page')?.dataset.view,
                      styles:[...sh?.querySelectorAll('link[rel=stylesheet]')||[]].some(e=>e.href.includes('prototype.css')),
@@ -1999,40 +1981,33 @@ def main():
                 assert inventory_page['items'][0]['evidence']=='HISTORICAL_READ_ONLY',inventory_page
                 assert inventory_command(after,{'type':'SYNC_ACCOUNT','params':{
                     'accountId':'fixture_inventory_01','expectedRevision':2}}).get('ok') is not True
+                # I04: the installed primary UI consumes the real guarded
+                # canonical 1,250-row inventory; legacy hidden HTML has no
+                # controller. Exercise actual primary pagination, not inert IDs.
                 call('POST',f'/session/{after}/url',{'url':url+'#generators'})
-                for _ in range(40):
-                    view=execute(after,"return {rows:document.querySelectorAll('#pcms-generators-rows tr').length, "
-                        "count:document.getElementById('pcms-generator-count')?.textContent||'', "
-                        "sync:document.getElementById('pcms-generator-sync')?.disabled}")
-                    if '1250' in view.get('count',''):break
+                first=None
+                for _ in range(60):
+                    first=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                      return {route:sh?.querySelector('#page')?.dataset.view,
+                        rows:sh?.querySelectorAll('.workspace-surface tbody tr[data-item-index]').length,
+                        summary:sh?.querySelector('.workspace-surface .pagination span')?.textContent||'',
+                        next:!sh?.querySelector('[data-action="gen-next"]')?.disabled};""")
+                    if first['route']=='generators' and first['rows']==24 and '1250' in first['summary']:break
                     time.sleep(.15)
-                if view.get('rows')!=50 or '1250' not in view.get('count',''):
-                    # Non-mutating failure diagnostic: independent port result
-                    # versus DOM/filter state after installed-page navigation.
-                    debug_ui=execute(after,"""const by=id=>document.getElementById(id);
-                      return {href:location.href,ready:document.readyState,
-                        query:by('pcms-generator-query')?.value,
-                        ownerFilter:by('pcms-generator-owner-filter')?.value,
-                        feedback:by('pcms-inventory-feedback')?.textContent,
-                        visiblePanel:by('generators-table-title')?.closest('section.panel')?.hidden,
-                        results:by('pcms-generator-count')?.textContent,
-                        loadedModules:!!document.querySelector('script[src="v014-desktop-ui.mjs"]'),
-                        selected:document.querySelector('#view-generators .pcms-v014-workflow-button[aria-pressed=true]')?.textContent};""")
-                    debug_port=inventory_command(after,{'type':'LIST_INVENTORY',
-                       'params':{'query':'','ownerState':'ALL','offset':0,'limit':50}})
-                    print('B V014_INVENTORY_FAILURE_DIAGNOSTICS=',json.dumps({
-                      'ui':debug_ui,
-                      'port':{'ok':debug_port.get('ok'), 'total':debug_port.get('total'),
-                        'count':len(debug_port.get('items',[])),
-                        'code':debug_port.get('code')}},default=str),flush=True)
-                assert view.get('rows')==50 and '1250' in view.get('count',''),view
-                execute(after,"document.getElementById('pcms-generator-next').click();return true")
-                for _ in range(40):
-                    pagination=execute(after,"return document.getElementById('pcms-generator-count')?.textContent||''")
-                    if '51–100' in pagination:break
+                assert first['route']=='generators' and first['rows']==24 and first['next'],first
+                assert '1250' in first['summary'],first
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-action="gen-next"]').click();return true;""")
+                next_page=None
+                for _ in range(60):
+                    next_page=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      return {summary:sh.querySelector('.workspace-surface .pagination span')?.textContent||'',
+                        rows:sh.querySelectorAll('.workspace-surface tbody tr[data-item-index]').length};""")
+                    if next_page['rows']==24 and '25–48' in next_page['summary']:break
                     time.sleep(.15)
-                assert '51–100' in pagination,pagination
-                print('B I04_REAL_IDB_1250_FILTER_PAGINATION_OWNER_HOLD=PASS',flush=True)
+                assert next_page['rows']==24 and '25–48' in next_page['summary'],next_page
+                execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-action=\"gen-prev\"]').click();return true")
+                print('B I04_REAL_IDB_1250_PRIMARY_PAGINATION_OWNER_HOLD=PASS',flush=True)
                 # V016 must ALSO show 1,250 canonical readback in the visible
                 # prototype, not only in the hidden legacy inventory controller.
                 execute(after,"""const h=document.getElementById('pcms-faithful-host');
@@ -2237,7 +2212,12 @@ def main():
                 assert noticed.get('stale',{}).get('code')=='STALE_REVISION',noticed
                 assert noticed.get('summary',{}).get('counts',{}).get('serious')==1,noticed
                 notices=canonical_command(after,{'type':'GET_NOTICES'})
-                assert notices.get('ok') is True and len(notices.get('notices',[]))==1,notices
+                assert notices.get('ok') is True,notices
+                seeded_notices=[n for n in notices.get('notices',[])
+                    if n.get('code')=='SOURCE_HELD' and n.get('scopeId')=='fixture_scope_01']
+                assert len(seeded_notices)==1 and seeded_notices[0]['revision']==1,notices
+                # Background Git observation legitimately records an independent
+                # reconnect incident; never assume the global fleet has one notice.
                 print('B I02_REAL_ATTENTION_DEDUP_AND_REVISION=PASS',flush=True)
                 assert restore_marker_probe(after) is True
                 held=canonical_command(after,{'type':'SUMMARY'})
@@ -2285,10 +2265,19 @@ def main():
                 assert s00_after_wake.get('record',{}).get('revision')==1,s00_after_wake
                 print('B S00_INSTALLED_COLD_WAKE_PERSISTED_HELD_INTENT=PASS',flush=True)
                 call('POST',f'/session/{after}/url',{'url':url+'#accounts'})
-                view=execute(after,"return {selected:[...document.querySelectorAll('[data-view]')].filter(x=>!x.hidden).map(x=>x.dataset.view),active:document.querySelector('[aria-current=page]')?.dataset.workspace,blocked:document.querySelector('#pcms-persona-picker')===null,refresh:document.querySelector('#pcms-refresh-accounts')?.disabled}")
-                assert view=={'selected':['accounts'],'active':'accounts','blocked':True,'refresh':False},view
-                account_ui=execute(after,"return {controls:!!document.getElementById('pcms-accounts-list'),description:document.getElementById('pcms-accounts-list')?.textContent||''}")
-                assert account_ui.get('controls'),account_ui
+                # The default page has one live shadow controller; old
+                # light-DOM workspace selectors are intentionally inert.
+                account_ui=None
+                for _ in range(60):
+                    account_ui=execute(after,"""const host=document.getElementById('pcms-faithful-host'),sh=host?.shadowRoot;
+                      const page=sh?.querySelector('#page'),active=sh?.querySelector('[data-nav="accounts"]');
+                      return {route:page?.dataset.view,active:active?.getAttribute('aria-current'),
+                        list:!!sh?.querySelector('.account-list-scroll'),
+                        legacyInert:getComputedStyle(document.querySelector('body > .app')).display==='none',
+                        blocked:!sh?.querySelector('#pcms-persona-picker')};""")
+                    if account_ui['route']=='accounts' and account_ui['list']:break
+                    time.sleep(.15)
+                assert account_ui['route']=='accounts' and account_ui['active']=='page' and account_ui['list'] and account_ui['legacyInert'] and account_ui['blocked'],account_ui
                 call('POST',f'/session/{after}/url',{'url':f'moz-extension://{uuid}/options/options.html'})
                 title=execute(after,'return document.title')
                 assert title, 'Original donor advanced option page not available'
@@ -2313,42 +2302,42 @@ def main():
                 assert 0 < diagnostic.get('length',0) < 65536,diagnostic
                 print('B I02_REDACTED_ZIP_MARKDOWN=PASS',flush=True)
                 print('B I02_CORE_INDEPENDENT_EMERGENCY=PASS',flush=True)
-                call('POST',f'/session/{after}/url',{'url':url+'#overview'})
-                for _ in range(40):
-                    notice_ui=execute(after,
-                        "return {button:document.querySelector('#pcms-attention-list button')?.textContent||'',text:document.querySelector('#pcms-attention-list')?.textContent||''}")
-                    if notice_ui.get('button'):break
+                # S08 now requires a real click on the canonical primary
+                # Work Queue notice action, not an inactive legacy Overview
+                # button. Unrelated autonomously reported Git notices stay
+                # visible and cannot be mistaken for this exact scope/code.
+                call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
+                review_node=None
+                for _ in range(100):
+                    review_node=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                      const row=sh?.querySelector('.queue-item[data-notice-scope="fixture_scope_01"][data-notice-code="SOURCE_HELD"]');
+                      const btn=[...row?.querySelectorAll('button')||[]].find(x=>x.textContent.trim()==='Mark reviewed'&&!x.disabled);
+                      if(btn)btn.scrollIntoView({block:'center',behavior:'instant'});return btn||null;""")
+                    if review_node and 'element-6066-11e4-a52e-4f735466cecf' in review_node:break
                     time.sleep(.15)
-                if notice_ui.get('button')!='Mark reviewed':
-                    direct_notices=canonical_command(after,{'type':'GET_NOTICES'})
-                    direct_summary=canonical_command(after,{'type':'SUMMARY'})
-                    ui_state=execute(after,
-                        "return {journal:document.getElementById('pcms-journal-health')?.textContent,queue:document.getElementById('pcms-work-queue-summary')?.textContent,ready:document.readyState,overview:document.getElementById('view-overview')?.hidden}")
-                    raise AssertionError(('Attention UI did not show known fake notice',
-                                          notice_ui,ui_state,direct_summary,direct_notices))
-                assert 'SOURCE_HELD' in notice_ui.get('text',''),notice_ui
-                execute(after,"document.querySelector('#pcms-attention-list button').click();return true")
-                for _ in range(40):
-                    residual=canonical_command(after,{'type':'GET_NOTICES'})
-                    if (residual.get('ok') is True and
-                        any(n.get('code')=='SOURCE_HELD' and n.get('reviewed') is True
-                            for n in residual.get('notices',[]))):break
-                    time.sleep(.15)
-                assert residual.get('ok') is True,residual
-                assert len(residual.get('notices',[]))==1,residual
-                assert residual['notices'][0]['code']=='SOURCE_HELD',residual
-                assert residual['notices'][0]['reviewed'] is True,residual
-                # Canonical review persistence and UI confirmation are
-                # separate asynchronous receipts. Wait for the actual
-                # rendered completion; a perpetual Saving… remains failure.
+                assert review_node and 'element-6066-11e4-a52e-4f735466cecf' in review_node,('S08_PRIMARY_NOTICE_NOT_ACTIONABLE',canonical_command(after,{'type':'GET_NOTICES'}))
+                element_id=review_node['element-6066-11e4-a52e-4f735466cecf']
+                call('POST',f'/session/{after}/element/{element_id}/click',{})
+                residual=None
                 for _ in range(60):
-                    acknowledgement=execute(after,
-                        "return {text:document.querySelector('#pcms-attention-list')?.textContent||'',"
-                        "disabled:document.querySelector('#pcms-attention-list button')?.disabled}")
-                    if ('Reviewed' in acknowledgement['text'] and
-                        acknowledgement['disabled'] is True):break
+                    residual=canonical_command(after,{'type':'GET_NOTICES'})
+                    current=[n for n in residual.get('notices',[])
+                        if n.get('code')=='SOURCE_HELD' and n.get('scopeId')=='fixture_scope_01']
+                    if residual.get('ok') and len(current)==1 and current[0].get('reviewed') is True:break
                     time.sleep(.15)
-                assert 'Reviewed' in acknowledgement['text'] and acknowledgement['disabled'] is True,acknowledgement
+                assert residual.get('ok') and len(current)==1 and current[0]['reviewed'] is True,residual
+                assert current[0]['state']=='ACTIVE',current
+                # Rendered readback must confirm review while retaining the hold.
+                acknowledgement=None
+                for _ in range(60):
+                    acknowledgement=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                      const row=sh?.querySelector('.queue-item[data-notice-scope="fixture_scope_01"][data-notice-code="SOURCE_HELD"]');
+                      const buttons=[...row?.querySelectorAll('button')||[]];
+                      return {present:!!row,reviewed:buttons.some(x=>x.textContent.trim()==='Reviewed'&&x.disabled),
+                        stillActive:row?.textContent.includes('still active')===true};""")
+                    if acknowledgement['present'] and acknowledgement['reviewed']:break
+                    time.sleep(.15)
+                assert acknowledgement['present'] and acknowledgement['reviewed'],acknowledgement
                 uncertain=canonical_command(after,{'type':'GET_OPERATION',
                     'operationId':'fixture_operation_01'})
                 assert uncertain.get('state')=='HELD_UNCERTAIN',uncertain
@@ -2515,9 +2504,36 @@ def main():
                 assert ai_b.get('ok') is True,ai_b
                 print('B I10_PACKAGED_SETTINGS_CAS_PROMPT_PIN_AND_ORACLE_HOLDS=PASS',flush=True)
                 call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
-                ai_work=execute(after,"return {job:!!document.getElementById('pcms-ai-job-list'),prepare:!!document.getElementById('pcms-ai-prepare'),enabled:!document.getElementById('pcms-ai-prepare')?.disabled}")
-                assert ai_work=={'job':True,'prepare':True,'enabled':False},ai_work
-                print('B I10_PACKAGED_UI_HELD_NO_AI_PROVIDER_DISPATCH=PASS',flush=True)
+                # The historical AI Prepare form is no longer mounted, and
+                # enabled workflow controls are intentional. The real primary
+                # UI must display the durable, unverified fixture without
+                # mistaking its existence for authorized provider dispatch.
+                ai_work=None
+                for _ in range(80):
+                    ai_work=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                      const rows=[...sh?.querySelectorAll('.queue-item')||[]];
+                      const row=rows.find(x=>x.textContent.includes('i10-b-private'));
+                      return {route:sh?.querySelector('#page')?.dataset.view,
+                        row:!!row,manage:!![...row?.querySelectorAll('button')||[]]
+                          .find(x=>x.textContent.trim()==='Manage development'),
+                        state:row?.textContent||''};""")
+                    if ai_work['route']=='work-queue' and ai_work['row'] and ai_work['manage']:break
+                    time.sleep(.15)
+                assert ai_work['route']=='work-queue' and ai_work['row'] and ai_work['manage'],ai_work
+                assert 'independent' in ai_work['state'].lower() or 'testing' in ai_work['state'].lower(),ai_work
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  const row=[...sh.querySelectorAll('.queue-item')].find(x=>x.textContent.includes('i10-b-private'));
+                  [...row.querySelectorAll('button')].find(x=>x.textContent.trim()==='Manage development').click();return true;""")
+                ai_inspector=None
+                for _ in range(60):
+                    ai_inspector=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      const modal=sh.querySelector('[role="dialog"][aria-label="AI development for i10-b-private"]');
+                      return {visible:!!modal,readable:!!modal?.textContent.includes('i10-b-private')};""")
+                    if ai_inspector['visible'] and ai_inspector['readable']:break
+                    time.sleep(.15)
+                assert ai_inspector['visible'] and ai_inspector['readable'],ai_inspector
+                execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[role=dialog][aria-label=\"AI development for i10-b-private\"] .drawer-head button').click();return true")
+                print('B I10_PRIMARY_AI_UNVERIFIED_JOB_INSPECTABLE_NO_PROVIDER_DISPATCH=PASS',flush=True)
                 # I10 B: durable uncertain native send on real IndexedDB, actual
                 # process-cold recovery state and full generator asset checkpoint.
                 code="""const done=arguments[arguments.length-1];
@@ -3066,24 +3082,33 @@ def main():
                 # I11 B: exact installed-XPI UI controls and real IDB canonical
                 # writeback CAS. No real Git or provider effect is attempted.
                 call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
-                ui=execute(after,"return {preview:!!document.getElementById('pcms-writeback-preview'),prepare:!!document.getElementById('pcms-writeback-prepare'),commit:!!document.getElementById('pcms-writeback-commit'),reconcile:!!document.getElementById('pcms-writeback-reconcile'),status:!!document.getElementById('pcms-writeback-status'),cancel:!!document.getElementById('pcms-writeback-cancel'),arm:!!document.getElementById('pcms-writeback-arm-auto'),disarm:!!document.getElementById('pcms-writeback-disarm-auto')}")
-                assert ui=={'preview':True,'prepare':True,'commit':True,'reconcile':True,'status':True,'cancel':True,'arm':True,'disarm':True},ui
-                # Actual installed-XPI button clicks must produce visible
-                # responses rather than only existing in the DOM.
-                execute(after,"const el=document.getElementById('pcms-writeback-slug');el.value='missing-private';el.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('pcms-writeback-preview').click();return true")
-                preview_result=''
-                for _ in range(60):
-                    preview_result=execute(after,"return document.getElementById('pcms-writeback-status').textContent")
-                    if 'TESTED_FINAL_SOURCE_REQUIRED' in preview_result: break
-                    time.sleep(.1)
-                assert 'TESTED_FINAL_SOURCE_REQUIRED' in preview_result,preview_result
-                execute(after,"document.getElementById('pcms-writeback-disarm-auto').click();return true")
-                disarm_result=''
-                for _ in range(60):
-                    disarm_result=execute(after,"return document.getElementById('pcms-writeback-status').textContent")
-                    if 'AUTO_CREDENTIAL_DISARMED' in disarm_result: break
-                    time.sleep(.1)
-                assert 'AUTO_CREDENTIAL_DISARMED' in disarm_result,disarm_result
+                # J03/J04 verify actual primary Git review and approval
+                # clicks earlier in this same installed-XPI run. Retired
+                # light-DOM Git buttons no longer authorize actions. Preserve
+                # the exact negative and disarm proofs through their guarded
+                # production port rather than clicking inert hidden controls.
+                writeback_ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-nav="settings"]').click();
+                  sh.querySelector('[data-settings="connections"]').click();
+                  return {route:sh.querySelector('#page')?.dataset.view,
+                    settings:!!sh.querySelector('.settings-main')};""")
+                assert writeback_ui['route']=='settings' and writeback_ui['settings'],writeback_ui
+                writeback_port="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const run=(type,params)=>new Promise(resolve=>{
+                    const port=browser.runtime.connect({name:'pcms-i11-writeback'});
+                    let settled=false;const finish=v=>{if(settled)return;settled=true;try{port.disconnect()}catch{}resolve(v)};
+                    port.onMessage.addListener(finish);
+                    port.onDisconnect.addListener(()=>finish({ok:false,code:'PORT_CLOSED'}));
+                    port.postMessage({type,params});
+                  });
+                  const preview=await run('PREVIEW',{slug:'missing-private'});
+                  const disarm=await run('DISARM_AUTO',{slug:'missing-private'});
+                  done({preview:preview.code,disarm:disarm.code,disarmOk:disarm.ok});
+                })().catch(e=>done({error:String(e)}));"""
+                observed=call('POST',f'/session/{after}/execute/async',{'script':writeback_port,'args':[]},timeout=60)
+                assert observed.get('preview')=='TESTED_FINAL_SOURCE_REQUIRED',observed
+                assert observed.get('disarm')=='AUTO_CREDENTIAL_DISARMED' and observed.get('disarmOk') is True,observed
                 code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const db=await (await import('./journal.mjs')).openCanonicalDatabase();
@@ -3355,18 +3380,32 @@ def main():
                 assert i12_proof.get('ok') is True,i12_proof
                 print('B I12_PACKAGED_IDB_INTERVAL_CAS_FLEET_OBSERVER_AND_HELD_PORT=PASS',flush=True)
                 print('B I12_PACKAGED_MEASUREMENTS=',json.dumps(i12_proof['measurement']),flush=True)
-                execute(after,"location.hash='#refresher';document.getElementById('pcms-refresher-query').value='i12-b-';document.getElementById('pcms-refresher-reload').click();return true")
-                ui={}
-                for _ in range(60):
-                    ui=execute(after,"return {rows:document.querySelectorAll('#pcms-refresher-rows tr').length,summary:document.getElementById('pcms-refresher-summary').textContent,page:document.getElementById('pcms-refresher-page').textContent,pause:document.getElementById('pcms-refresher-global-pause').textContent,optIn:document.getElementById('pcms-refresher-enable').checked}")
-                    if '1250' in ui.get('page','') and ui.get('pause')=='Resume globally': break
+                # Primary UI: real guarded, paged Refresher rows replace the
+                # inert light-DOM controls retired with the single-controller UI.
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-nav="refresher"]').click();return true;""")
+                for _ in range(40):
+                    if execute(after,"return !!document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#refresher-search')"):break
                     time.sleep(.1)
-                assert ui['rows']==25 and '1250' in ui['page'] and ui['optIn'] is False,ui
-                assert ui['pause']=='Resume globally',ui
-                execute(after,"document.querySelector('#pcms-refresher-rows button').click();return true")
-                inspector=execute(after,"return {visible:!document.getElementById('pcms-refresher-inspector').hidden,selected:document.getElementById('pcms-refresher-selected').textContent}")
-                assert inspector['visible'] and 'i12-b-0000' in inspector['selected'],inspector
-                print('B I12_PACKAGED_REFRESHER_PAGING_PAUSE_INSPECTOR=PASS',flush=True)
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot,e=sh.querySelector('#refresher-search');
+                  e.value='i12-b-';e.dispatchEvent(new Event('input',{bubbles:true}));return true;""")
+                ui=None
+                for _ in range(90):
+                    ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      return {rows:sh.querySelectorAll('.ref-table-scroll tr[data-ref-id]').length,
+                        page:sh.querySelector('.ref-pagination span')?.textContent||'',
+                        pause:sh.querySelector('[data-action="pause-refresher"]')?.textContent||'',
+                        optIn:sh.querySelector('[data-toggle="refresher"]')?.checked};""")
+                    if ui['rows']==25 and '1250' in ui['page'] and ui['pause']=='Resume Refresher':break
+                    time.sleep(.15)
+                assert ui['rows']==25 and '1250' in ui['page'] and ui['pause']=='Resume Refresher' and ui['optIn'] is False,ui
+                execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('.ref-table-scroll tr[data-ref-id]').click();return true")
+                for _ in range(60):
+                    inspector=execute(after,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[role=dialog][aria-label^=\"Manage Refresher timing\"]')?.getAttribute('aria-label')")
+                    if inspector and 'i12-b-0000' in inspector:break
+                    time.sleep(.15)
+                assert inspector and 'i12-b-0000' in inspector,inspector
+                print('B I12_PRIMARY_REFRESHER_PAGING_PAUSE_INSPECTOR=PASS',flush=True)
                 alarm_code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const prior=(await browser.storage.local.get('pcmsI12AlarmCount')).pcmsI12AlarmCount||0;
@@ -3420,9 +3459,22 @@ def main():
                 print('B I12_PERSISTENT_RESTART_BUDGET_PAUSE_SINGLE_ALARM_REPAIR=PASS',flush=True)
                 # A paused budget must stay exact. Prove unpaused wall rest
                 # separately across another actual OS process exit/relaunch.
-                resume_view=refresher_command(after,{'type':'GET_REFRESHER','params':{'query':'i12-b-','limit':25}})
-                resume=refresher_command(after,{'type':'SET_PAUSE','params':{'expectedRevision':resume_view['revision'],'scope':'GLOBAL','paused':False}})
+                # A concurrently running Firefox alarm may advance the policy
+                # revision between read and CAS. Only STALE_REVISION is a
+                # proven no-effect rejection; reread the actual browser store
+                # before submitting a new CAS. Never replay an uncertain ACK.
+                resume=None
+                for attempt in range(5):
+                    view=refresher_command(after,{'type':'GET_REFRESHER',
+                        'params':{'query':'i12-b-','limit':25}})
+                    assert view.get('ok') is True and view.get('globalPause') is True,('A06_POLICY_CHANGED_EXTERNALLY',view)
+                    resume=refresher_command(after,{'type':'SET_PAUSE',
+                        'params':{'expectedRevision':view['revision'],'scope':'GLOBAL','paused':False}})
+                    if resume.get('code')!='STALE_REVISION':break
                 assert resume.get('ok') is True,('A06_RESUME_FOR_REST_RESTART',resume)
+                settled=refresher_command(after,{'type':'GET_REFRESHER',
+                    'params':{'query':'i12-b-','limit':25}})
+                assert settled.get('ok') is True and settled.get('globalPause') is False,('A06_PAUSE_READBACK_UNVERIFIED',settled)
                 resume_snapshot=call('POST',f'/session/{after}/execute/async',{'script':restart_code,'args':[]})
                 assert resume_snapshot['paused'] is False and 0<resume_snapshot['rest']<=restarted['rest'],resume_snapshot
                 rest_old_pids=owned_firefox_pids(profile)
@@ -3446,9 +3498,22 @@ def main():
                 assert rest_after['paused'] is False and 0<rest_after['rest']<resume_snapshot['rest'],rest_after
                 assert rest_after['first']==16*3600000 and rest_after['held']=='UNKNOWN',('A06_NO_RESTART_ACTIVE_CREDIT',rest_after)
                 assert rest_after['alarm'] and rest_after['alarms']==1,rest_after
-                pause_view=refresher_command(after,{'type':'GET_REFRESHER','params':{'query':'i12-b-','limit':25}})
-                repause=refresher_command(after,{'type':'SET_PAUSE','params':{'expectedRevision':pause_view['revision'],'scope':'GLOBAL','paused':True}})
-                assert repause.get('ok') is True,repause
+                # A concurrently running Firefox alarm may advance the policy
+                # revision between read and CAS. Only STALE_REVISION is a
+                # proven no-effect rejection; reread the actual browser store
+                # before submitting a new CAS. Never replay an uncertain ACK.
+                repause=None
+                for attempt in range(5):
+                    view=refresher_command(after,{'type':'GET_REFRESHER',
+                        'params':{'query':'i12-b-','limit':25}})
+                    assert view.get('ok') is True and view.get('globalPause') is False,('A06_POLICY_CHANGED_EXTERNALLY',view)
+                    repause=refresher_command(after,{'type':'SET_PAUSE',
+                        'params':{'expectedRevision':view['revision'],'scope':'GLOBAL','paused':True}})
+                    if repause.get('code')!='STALE_REVISION':break
+                assert repause.get('ok') is True,('A06_REPAUSE_FOR_REST_RESTART',repause)
+                settled=refresher_command(after,{'type':'GET_REFRESHER',
+                    'params':{'query':'i12-b-','limit':25}})
+                assert settled.get('ok') is True and settled.get('globalPause') is True,('A06_PAUSE_READBACK_UNVERIFIED',settled)
                 print('B/H A06_RESUMED_WALL_REST_REAL_NEW_PROCESS_ZERO_ACTIVE_CREDIT=PASS',flush=True)
 
                 # A03 H: same installed Gecko ID / original Firefox profile,
@@ -3508,19 +3573,44 @@ def main():
                 i14=call('POST',f'/session/{after}/execute/async',
                          {'script':i14_code,'args':[]},timeout=90)
                 assert i14.get('ok') is True,i14
-                ui=execute(after,"return {provider:document.getElementById('pcms-refresher-provider')?.textContent||'',summary:document.getElementById('pcms-refresher-summary')?.textContent||'',optIn:document.getElementById('pcms-refresher-enable')?.checked}")
-                assert ('refresh mutation OFF' in ui['provider'] and
-                        'qualified browser operating time' in ui['provider'] and
-                        ui['optIn'] is False and
-                        'visibility-held' in ui['summary']),ui
+                # The current user-facing Refresher policy is in the primary
+                # workspace; the retired source mutation status cannot render.
+                execute(after,"document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=refresher]').click();return true")
+                ui=None
+                for _ in range(60):
+                    ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      return {route:sh.querySelector('#page')?.dataset.view,
+                        enabled:sh.querySelector('[data-toggle="refresher"]')?.checked,
+                        switch:!!sh.querySelector('[data-toggle="refresher"]'),
+                        feed:sh.querySelector('.ref-feed-state strong')?.textContent||''};""")
+                    if ui['route']=='refresher' and ui['switch'] and ui['feed']:break
+                    time.sleep(.15)
+                assert ui['route']=='refresher' and ui['switch'] and ui['enabled'] is False and ui['feed'],ui
                 print('B I14_PACKAGED_PERSISTENT_IDB_GATED_EFFECTS_AND_REFERSHER_PROOF_UI=PASS',flush=True)
 
                 # I13 B: exact packaged XPI, real IndexedDB atomic approval
                 # vs duplicate dispatch, installed operator controls, and
                 # independent postrestart uncertainty. No live provider effects.
                 call('POST',f'/session/{after}/url',{'url':url+'#work-queue'})
-                ui=execute(after,"return {release:!!document.getElementById('pcms-release-preview'),approve:document.getElementById('pcms-release-approve').disabled,dispatch:document.getElementById('pcms-release-dispatch').disabled,resolve:document.getElementById('pcms-release-reconcile').disabled}")
-                assert ui=={'release':True,'approve':True,'dispatch':True,'resolve':True},ui
+                # The primary Work Queue shows source-bound reviews only.
+                # No anonymous publication action can be invoked without
+                # opening a verified exact candidate review first. Retained
+                # CAS, lost ACK and no-replay checks below remain authoritative.
+                ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                  const page=sh?.querySelector('#page');
+                  return {queue:page?.dataset.view==='work-queue',
+                    visible:!!sh?.querySelector('.queue-list'),
+                    directDispatch:!![...page?.querySelectorAll('button')||[]]
+                      .find(x=>/^(publish|dispatch release|approve and publish)$/i.test(x.textContent.trim()))};""")
+                assert ui['queue'] and ui['visible'] and not ui['directDispatch'],ui
+                release_denial=call('POST',f'/session/{after}/execute/async',{
+                    'script':"""const done=arguments[arguments.length-1];
+                      const port=browser.runtime.connect({name:'pcms-i13-release'});
+                      port.onMessage.addListener(v=>{try{port.disconnect()}catch{}done(v)});
+                      port.onDisconnect.addListener(()=>done({ok:false,code:'PORT_CLOSED'}));
+                      port.postMessage({type:'PREVIEW',params:{slug:'i13-nonexistent',token:'offline-fixture-no-network'}});
+                      """,'args':[]},timeout=35)
+                assert release_denial.get('ok') is False and release_denial.get('code')=='RELEASE_CANONICAL_EVIDENCE_MISSING',release_denial
                 code="""const done=arguments[arguments.length-1];
                 (async()=>{
                   const journal=await import('./journal.mjs');
@@ -3802,14 +3892,32 @@ def main():
                            {'script':code,'args':[]},timeout=90)
                 assert proof.get('ok') is True,proof
                 print('B I13_INSTALLED_EXISTING_ENCRYPTED_P_CAS_UNLIST_UNCERTAIN=PASS',flush=True)
-                execute(after,"document.getElementById('pcms-existing-slug').value='i13-existing-fixture';document.getElementById('pcms-existing-slug').dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('pcms-existing-get').click();return true")
-                existing_ui=''
-                for _ in range(80):
-                    existing_ui=execute(after,"return document.getElementById('pcms-existing-status').textContent")
-                    if 'UNLIST_UNCERTAIN' in existing_ui:break
+                # Retired existing-update form is no longer mounted. Check the
+                # exact uncertain record through its guarded port above and
+                # open the matching generator through the visible primary UI.
+                assert proof['actual']['state']=='UNLIST_UNCERTAIN',proof
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-nav="generators"]').click();return true;""")
+                for _ in range(40):
+                    if execute(after,"return !!document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#generator-search')"):break
+                    time.sleep(.1)
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot,e=sh.querySelector('#generator-search');
+                  e.value='i13-existing-fixture';e.dispatchEvent(new Event('input',{bubbles:true}));return true;""")
+                existing_ui=None
+                for _ in range(70):
+                    existing_ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      return {row:[...sh.querySelectorAll('.workspace-surface tr[data-item-index]')].some(x=>x.querySelector('.name-cell')?.textContent==='i13-existing-fixture'),
+                        page:sh.querySelector('#page')?.dataset.view};""")
+                    if existing_ui['row']:break
                     time.sleep(.15)
-                assert 'UNLIST_UNCERTAIN' in existing_ui,existing_ui
-                assert execute(after,"return document.getElementById('pcms-existing-unlist').disabled") is True
+                assert existing_ui['page']=='generators' and existing_ui['row'],existing_ui
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  [...sh.querySelectorAll('.workspace-surface tr[data-item-index]')].find(x=>x.querySelector('.name-cell')?.textContent==='i13-existing-fixture').querySelector('.name-cell').click();return true;""")
+                visible=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  const dialog=sh.querySelector('[role=dialog]');
+                  return {item:dialog?.textContent.includes('i13-existing-fixture'),
+                    unsafe:[...dialog?.querySelectorAll('button')||[]].some(x=>/retry unlist|unlist again/i.test(x.textContent))};""")
+                assert visible['item'] and not visible['unsafe'],visible
                 print('B I13_EXISTING_UI_NO_BLIND_UNLIST_RETRY=PASS',flush=True)
 
                 # Synthetic prior confirmed public F permits a NEW source
@@ -3993,23 +4101,36 @@ def main():
                 # portable format, Settings action, and wrong-password failure.
                 # No live provider or native calls; no disk byte proof claimed.
                 call('POST',f'/session/{after}/url',{'url':url+'#settings'})
-                settings=execute(after,"return {button:!!document.getElementById('pcms-backup-export'),passwordless:!document.getElementById('pcms-backup-passphrase'),status:!!document.getElementById('pcms-backup-status')}")
-                assert settings=={'button':True,'passwordless':True,'status':True},settings
-                # S02 B: new source-completeness action runs in the same installed
-                # XPI, reads the real synthetic historical IDB, and truthfully
-                # holds a source-incomplete legacy publication. v1 codec stays
-                # usable to preserve that historical record, not to bless it.
-                audit_button=execute(after,"const b=document.getElementById('pcms-backup-audit');if(b)b.click();return !!b")
-                assert audit_button is True,'S02 read-only source audit not packaged'
-                audit_status=''
-                for _ in range(50):
-                    audit_status=execute(after,"return document.getElementById('pcms-backup-audit-status')?.textContent||''")
-                    if 'Source closure held:' in audit_status or (
-                        'Source closure verified:' in audit_status):
-                        break
-                    time.sleep(.1)
-                assert 'Source closure held: BACKUP_SOURCE_INCOMPLETE' in audit_status,audit_status
-                assert 'No state changed' in audit_status,audit_status
+                # The v0 backup-audit button is retained only in inactive
+                # historical HTML. Exercise its production source-closure
+                # checker directly on actual packaged IndexedDB without
+                # mutation; the primary Backups UI is separately clicked
+                # below and in the complete J06 Firefox journeys.
+                backup_ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                  sh?.querySelector('[data-nav="settings"]')?.click();
+                  sh?.querySelector('[data-settings="backups"]')?.click();
+                  const headings=[...sh?.querySelectorAll('.settings-main h2')||[]].map(x=>x.textContent.trim());
+                  return {route:sh?.querySelector('#page')?.dataset.view,
+                    backed:headings.includes('Backups'),passwordless:!sh?.querySelector('input[type=password]'),
+                    inspect:!!sh?.querySelector('#pcms-backup-inspect-file')};""")
+                assert backup_ui=={'route':'settings','backed':True,'passwordless':True,'inspect':True},backup_ui
+                closure_code="""const done=arguments[arguments.length-1];
+                (async()=>{
+                  const journal=await import('./journal.mjs');
+                  const backup=await import('./backup-core.mjs');
+                  const db=await journal.openCanonicalDatabase();
+                  try{
+                    const before=await backup.snapshotCanonicalV2(db,{serializedValues:true});
+                    let code='NO_HOLD';
+                    try{await backup.preflightSourceRecovery(before)}
+                    catch(e){code=String(e?.message||e)}
+                    const after=await backup.snapshotCanonicalV2(db,{serializedValues:true});
+                    done({code,unchanged:JSON.stringify(before)===JSON.stringify(after)});
+                  }finally{db.close()}
+                })().catch(e=>done({error:String(e)}));"""
+                closure=call('POST',f'/session/{after}/execute/async',
+                             {'script':closure_code,'args':[]},timeout=90)
+                assert closure.get('code')=='BACKUP_SOURCE_INCOMPLETE' and closure.get('unchanged') is True,closure
                 print('B S02_PACKAGED_READONLY_SOURCE_RECOVERY_HOLD=PASS',flush=True)
                 # S02 B: production packaged v2 codec runs on real Firefox
                 # with complete original/current/history/binary source and
@@ -4676,18 +4797,41 @@ def main():
 
                 # A02: a real source-incomplete fixture cannot be exported by
                 # the installed passwordless manual UI, unlike legacy V1.
-                assert execute(after,"document.getElementById('pcms-backup-export').click();return true")
-                guarded_status=''
-                for _ in range(80):
-                    guarded_status=execute(after,"return document.getElementById('pcms-backup-status')?.textContent||''")
-                    if 'Portable backup held:' in guarded_status:break
-                    time.sleep(.2)
-                assert 'Portable backup held: BACKUP_SOURCE_INCOMPLETE' in guarded_status,guarded_status
+                # The passwordless backup action lives in primary Settings,
+                # not the retired hidden exporter. Exercise the actual button
+                # against the source-incomplete archived fixture.
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  sh.querySelector('[data-nav="settings"]').click();
+                  sh.querySelector('[data-settings="backups"]').click();return true;""")
+                ready=None
+                for _ in range(70):
+                    ready=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      const section=[...sh.querySelectorAll('section')].find(x=>x.querySelector('h2')?.textContent==='Backups');
+                      return {panel:!!section,download:!![...section?.querySelectorAll('button')||[]].find(x=>x.textContent.trim()==='Download complete backup')};""")
+                    if ready['panel'] and ready['download']:break
+                    time.sleep(.15)
+                assert ready['panel'] and ready['download'],ready
+                execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  const sec=[...sh.querySelectorAll('section')].find(x=>x.querySelector('h2')?.textContent==='Backups');
+                  [...sec.querySelectorAll('button')].find(x=>x.textContent.trim()==='Download complete backup').click();return true;""")
+                guarded_status=None
+                for _ in range(100):
+                    guarded_status=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      const sec=[...sh.querySelectorAll('section')].find(x=>x.querySelector('h2')?.textContent==='Backups');
+                      return {message:sec?.querySelector('[role=status]')?.textContent||'',
+                        detail:sec?.querySelector('pre')?.textContent||''};""")
+                    if 'Backup did not complete' in guarded_status['message'] and 'BACKUP_SOURCE_INCOMPLETE' in guarded_status['detail']:break
+                    time.sleep(.15)
+                assert 'Backup did not complete' in guarded_status['message'] and 'BACKUP_SOURCE_INCOMPLETE' in guarded_status['detail'],guarded_status
                 print('B A02_UI_DENIES_SOURCE_INCOMPLETE_EXPORT=PASS',flush=True)
 
                 # A02 runtime status and retired native/vault dispatch are
                 # exercised on the actual production port, not a stub.
-                i15_ui=execute(after,"return {enabled:!!document.getElementById('pcms-auto-backup-enabled'),noVault:!document.getElementById('pcms-auto-backup-vault'),status:!!document.getElementById('pcms-auto-backup-status')}")
+                i15_ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                  const sec=[...sh.querySelectorAll('section')].find(x=>x.querySelector('h2')?.textContent==='Backups');
+                  return {enabled:!!sec?.querySelector('#pcms-backup-daily'),
+                    noVault:!sh.querySelector('#pcms-auto-backup-vault'),
+                    status:!!sec?.querySelector('[role=status]')};""")
                 assert i15_ui=={'enabled':True,'noVault':True,'status':True},i15_ui
                 i15_result=call('POST',f'/session/{after}/execute/async',{
                   'script':"""const done=arguments[arguments.length-1];
@@ -4724,7 +4868,13 @@ def main():
                 # I16 B: actual installed XPI, extension Settings DOM and real
                 # canonical IDB + Firefox local-storage guard. Independent
                 # synthetic archives only; no donor/provider/live mutation.
-                i16_ui=execute(after,"return {archive:!!document.getElementById('pcms-restore-archive'),checkpoint:!!document.getElementById('pcms-restore-checkpoint'),preview:!!document.getElementById('pcms-restore-preview'),stage:!!document.getElementById('pcms-restore-verify')}")
+                i16_ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                  const form=sh?.querySelector('#pcms-restore-archive')?.closest('section');
+                  return {archive:!!form?.querySelector('#pcms-restore-archive'),
+                    checkpoint:!!form?.querySelector('#pcms-restore-checkpoint'),
+                    preview:!!form?.querySelector('#pcms-restore-preview'),
+                    stage:!!form?.querySelector('#pcms-restore-verify'),
+                    active:sh?.querySelector('#page')?.dataset.view==='settings'};""")
                 assert all(i16_ui.values()),i16_ui
 
                 # I16 B/UX: exercise actual file-input UI, not just existence.
@@ -4773,22 +4923,25 @@ def main():
                 path_b.write_text(ui_data['archive'])
                 for css,filepath in [('#pcms-restore-archive',path_a),
                                       ('#pcms-restore-checkpoint',path_b)]:
-                    element=call('POST',f'/session/{after}/element',
-                                 {'using':'css selector','value':css})
+                    element=execute(after,"""const css=CSS_VALUE;
+                      return document.getElementById('pcms-faithful-host').shadowRoot.querySelector(css);""".replace('CSS_VALUE',json.dumps(css)))
                     element_id=element['element-6066-11e4-a52e-4f735466cecf']
                     call('POST',f'/session/{after}/element/{element_id}/value',
                          {'text':str(filepath),'value':list(str(filepath))})
-                setup_ui="document.getElementById('pcms-restore-preview').click();return true"
+                setup_ui="document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#pcms-restore-preview').click();return true"
                 assert execute(after,setup_ui) is True
                 # Deprecated encrypted archives are rejected by the actual
                 # passwordless parser before plan or guard creation.
                 negative_result=None
                 for _ in range(80):
-                    negative_result=execute(after,"return {status:document.getElementById('pcms-restore-status').textContent,verifyDisabled:document.getElementById('pcms-restore-verify').disabled,applyDisabled:document.getElementById('pcms-restore-apply').disabled}")
+                    negative_result=execute(after,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+                      return {status:sh.querySelector('#pcms-restore-status').textContent,
+                        verifyDisabled:sh.querySelector('#pcms-restore-verify').disabled,
+                        applyDisabled:sh.querySelector('#pcms-restore-apply').disabled};""")
                     if negative_result['verifyDisabled'] and 'Restore is held.' in negative_result['status']:break
                     time.sleep(.1)
                 assert 'Restore is held.' in negative_result['status'],negative_result
-                assert 'PORTABLE_' in execute(after,"return document.getElementById('pcms-restore-details').textContent"),negative_result
+                assert 'PORTABLE_' in execute(after,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#pcms-restore-details').textContent"),negative_result
                 assert negative_result['verifyDisabled'] is True,negative_result
                 assert negative_result['applyDisabled'] is True,negative_result
                 print('B A02_LEGACY_ENCRYPTED_FILE_REJECTED_WITHOUT_GUARD=PASS',flush=True)
@@ -5442,8 +5595,19 @@ def main():
                     call('POST',f'/session/{disk_session}/url',
                         {'url':f'moz-extension://{disk_uuid}/pcms/index.html#settings'})
                     wait_donor_ready(disk_session)
-                    input_el=call('POST',f'/session/{disk_session}/element',
-                        {'using':'css selector','value':'#pcms-restore-archive'})
+                    # Fresh-profile file import must exercise the active
+                    # Backup & Restore form, not the inert pre-F3 light DOM.
+                    active=False
+                    for _ in range(60):
+                        active=execute(disk_session,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
+                          if(!sh?.querySelector('[data-settings="backups"]'))return false;
+                          sh.querySelector('[data-nav="settings"]')?.click();
+                          sh.querySelector('[data-settings="backups"]')?.click();
+                          return !!sh.querySelector('#pcms-restore-archive');""")
+                        if active:break
+                        time.sleep(.15)
+                    assert active,'F3_FRESH_PROFILE_PRIMARY_RESTORE_FILE_INPUT_MISSING'
+                    input_el=execute(disk_session,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('#pcms-restore-archive')")
                     input_id=input_el['element-6066-11e4-a52e-4f735466cecf']
                     call('POST',f'/session/{disk_session}/element/{input_id}/value',
                         {'text':str(disk_path),'value':list(str(disk_path))})
@@ -5457,7 +5621,7 @@ def main():
                       const journal=await import('./journal.mjs');
                       const donorModule=await import('./donor-snapshot.mjs');
                       const hist=await import('../lib/automation-history.js');
-                      const file=document.getElementById('pcms-restore-archive')?.files?.[0];
+                      const file=document.getElementById('pcms-faithful-host')?.shadowRoot?.querySelector('#pcms-restore-archive')?.files?.[0];
                       if(!file||file.size<1)throw Error('A02_IMPORTED_DISK_FILE_MISSING');
                       const imported=await stage.preparePortableStage(file);
                       const parsed=await stage.readPortableStage(imported.scope);

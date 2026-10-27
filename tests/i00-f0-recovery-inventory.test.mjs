@@ -25,9 +25,11 @@ test('F0 new production state/notice vocabulary fails coverage rather than falli
  const result=await inventory();assert.equal(result.notices.length,11*3*3);
  for(const row of result.notices){
   assert.ok(row.destination&&row.action&&row.settlement&&row.currentDestination);
-  if(row.currentDestination.kind==='INCIDENT')assert.match(row.knownCorrection,/GAP-03/,'every observed dead-end has an explicit correction');
+  assert.notEqual(row.currentDestination.kind,'INCIDENT','no incident may fall into an unrelated empty queue');
+  if(row.target==='STALE'){assert.ok(row.reference);assert.equal(row.authoritativeTargetState,'STALE');}
  }
- assert.ok(result.notices.some(n=>n.code==='SOURCE_HELD'&&n.target==='ABSENT'&&n.currentDestination.kind==='INCIDENT'),'baseline exposes the actual missing contextual path, not an invented working handler');
+ assert.ok(result.notices.some(n=>n.code==='SOURCE_HELD'&&n.target==='ABSENT'&&n.currentDestination.kind==='CONTEXT'));
+ assert.ok(result.notices.some(n=>n.code==='ROUTE_UNAVAILABLE'&&n.target==='STALE'&&n.currentDestination.kind==='CONTEXT'),'a well-formed stale reference uses safe context');
 });
 test('F0 uncertain and historical effects retain no-replay ownership fences',async()=>{
  const r=await inventory();

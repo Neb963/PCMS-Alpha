@@ -47,8 +47,9 @@ test('operator workspaces expose guarded production actions without UI-origin ne
   assert.match(html, /id="pcms-add-account" disabled/);
   assert.doesNotMatch(html, /id="pcms-create-persona"|id="pcms-persona-picker"/);
   assert.match(html, /id="pcms-accounts-list"/);
-  assert.match(html, /accounts-view\.mjs/);
-  assert.match(html, /inventory-view\.mjs/);
+  assert.match(html, /<script type="module" src="faithful\/bridge\.mjs"><\/script>/);
+  assert.doesNotMatch(html, /src="accounts-view\.mjs"|src="inventory-view\.mjs"/);
+  assert.equal((html.match(/<script type="module"/g)||[]).length,1);
   assert.match(html,/id="blocked-refresher"/);
   assert.match(html,/id="pcms-refresher-enable" type="checkbox"/);
   assert.match(html,/Source saves are OFF until explicitly enabled|source saves are OFF until explicitly enabled/i);

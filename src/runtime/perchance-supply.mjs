@@ -1,18 +1,18 @@
 // Fixed I06 ISOLATED-world provider operation. The DONOR owns tab choice,
 // Persona route and a short control lease. No arbitrary script/code/URL or
 // browser-provided identity is taken from the PCMS UI.
-// This function may execute a remote effect: NEVER call except after durable
-// DISPATCH_POSSIBLE and exact owner/route/restore/capability verification.
+// Mutating kinds require durable DISPATCH_POSSIBLE plus exact owner/route,
+// restore and capability verification. READ kinds observe only; none authorizes replay.
 export async function perchanceSupplyIsolated(request) {
   const hold=code=>({ok:false,code});
   const slug=x=>typeof x==='string'&&/^[a-z0-9][a-z0-9-]{0,99}$/.test(x);
   const safeId=x=>typeof x==='string'&&/^[a-zA-Z0-9_-]{8,100}$/.test(x);
   const hex=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
   if(location.origin!=='https://perchance.org')return hold('WRONG_ORIGIN');
-  if(!request||!['CREATE','RENAME','READ_CREATE','READ_RENAME','READ_TARGET','RENAME_EXISTING','READ_EXISTING_RENAME'].includes(request.kind)||
+  if(!request||!['CREATE','RENAME','READ_CREATE','READ_RENAME','READ_TARGET','RENAME_EXISTING','READ_EXISTING_RENAME','READ_TEMPLATE'].includes(request.kind)||
      !slug(request.slug)||!hex(request.principalFingerprint))
     return hold('INVALID_SUPPLY_REQUEST');
-  if(!['CREATE','READ_TARGET'].includes(request.kind)&&!slug(request.temporarySlug))
+  if(!['CREATE','READ_TARGET','READ_TEMPLATE'].includes(request.kind)&&!slug(request.temporarySlug))
     return hold('INVALID_SUPPLY_REQUEST');
   if(['RENAME','READ_RENAME','RENAME_EXISTING','READ_EXISTING_RENAME'].includes(request.kind)&&!safeId(request.remoteId))
     return hold('INVALID_SUPPLY_REQUEST');
@@ -44,6 +44,31 @@ export async function perchanceSupplyIsolated(request) {
         return data&&typeof data==='object'&&!Array.isArray(data)?data:{status:'unverified'};
       }catch{return {status:'unverified'};}
       finally{clearTimeout(timer);}
+    }
+    if(request.kind==='READ_TEMPLATE'){
+      // Current prerequisite observation only. This path never saves, creates,
+      // renames, uses the editor, or requires a complete owned-generator census.
+      const page=await call('getGeneratorPageData',{generatorName:'minimal'},{unauthenticated:true});
+      const owner=await call('checkGeneratorOwnership',{generatorName:'minimal'});
+      if(!sameSession())return hold('SESSION_CHANGED');
+      if(owner.status==='is-not-owner'&&['generator-does-not-exist','not-found'].includes(page.status))
+        return {ok:true,source:'INDEPENDENT_TEMPLATE_READBACK',template:'minimal',
+          state:'MISSING_VERIFIED',ownership:'NOT_OWNED',schemaVerified:false,fingerprint:null};
+      if(!['is-owner','is-not-owner'].includes(owner.status))return hold('TEMPLATE_OWNER_UNVERIFIED');
+      if(page.status!=='success')return hold('TEMPLATE_UNVERIFIED');
+      const g=page.generator,manifest=g?.srcManifest;
+      if(!g||g.name!=='minimal'||typeof g.isPrivate!=='boolean'||
+        typeof g.modelText!=='string'||typeof g.outputTemplate!=='string'||
+        g.modelText.length>2097152||g.outputTemplate.length>2097152||
+        !manifest||typeof manifest!=='object')return hold('TEMPLATE_SCHEMA_UNVERIFIED');
+      const source=JSON.stringify({name:g.name,isPrivate:g.isPrivate,
+        modelText:g.modelText,outputTemplate:g.outputTemplate,srcManifest:manifest});
+      if(source.length>4194304)return hold('TEMPLATE_SCHEMA_UNVERIFIED');
+      const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(source));
+      if(!sameSession())return hold('SESSION_CHANGED');
+      return {ok:true,source:'INDEPENDENT_TEMPLATE_READBACK',template:'minimal',
+        state:'AVAILABLE',ownership:owner.status==='is-owner'?'OWNED':'NOT_OWNED',
+        schemaVerified:true,fingerprint:[...new Uint8Array(bytes)].map(x=>x.toString(16).padStart(2,'0')).join('')};
     }
     const census=await call('getGeneratorsByUser',{});
     if(census.status!=='success'||!Array.isArray(census.generators)||

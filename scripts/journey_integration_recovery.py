@@ -203,6 +203,15 @@ def run(browser,archive,folder):
         a.wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('No creation or rename was sent')",'ISSUE60_EXACT_LEGACY_NO_DISPATCH_CONTEXT')
         g.click_text(s,'Check saved status');g.click_text(s,'Check saved status')
         a.wait(s,"sh.querySelectorAll('[data-operation-failure]').length===1",'ISSUE60_RECHECK_DOES_NOT_DUPLICATE_REASON')
+        # Real Firefox should interact with the recovery action without
+        # scrolling a nested offscreen form out of its enclosing drawer.
+        bounds=b.execute(s,"""const sh=document.getElementById('pcms-faithful-host').shadowRoot;
+const dialog=sh.querySelector('[aria-label="Recorded operation details"]');
+const button=[...dialog.querySelectorAll('button')].find(x=>x.textContent.trim()==='Open account');
+const rect=button.getBoundingClientRect();return {footer:!!button.closest('.drawer-foot'),
+  y:rect.y,bottom:rect.bottom,viewport:innerHeight,disabled:button.disabled,
+  visible:rect.height>0&&rect.y>=0&&rect.bottom<=innerHeight};""")
+        assert bounds['footer'] and bounds['visible'] and not bounds['disabled'],('ISSUE60_RECOVERY_BUTTON_GEOMETRY',bounds)
         g.click_text(s,'Open account');a.wait(s,"!!sh.querySelector('.account-dialog')",'ISSUE60_CONTEXTUAL_ACCOUNT_RECOVERY_ACTION');a.close_dialog(s)
         assert not oracle.effects
         # No human Perchance tab is a requirement for background creation.
@@ -312,7 +321,10 @@ def run(browser,archive,folder):
             background(s,"await browser.alarms.create('pcms-s04-creation-followup',{when:Date.now()+150});return true;");time.sleep(.4)
         assert [x['kind'] for x in oracle.effects]==['CREATE','RENAME','CREATE'],'cold uncertain CREATE must not replay or infer an unrelated temporary generator'
         a.click(s,'[data-nav=work-queue]');g.fill(s,'#queue-search',uncertain['createOperationId'])
-        a.wait(s,"!!sh.querySelector('.queue-item')",'ISSUE60_UNCERTAIN_QUEUE_ASYNC_RESULT');g.click_text(s,'Inspect','.queue-item')
+        # Search is debounced and background paging is asynchronous. A prior
+        # attention row is not the requested operation, even if it is clickable.
+        a.wait(s,"(()=>{const rows=[...sh.querySelectorAll('.queue-item')];return rows.length===1&&rows[0].textContent.includes('Outcome not confirmed')&&[...rows[0].querySelectorAll('button')].some(x=>x.textContent.trim()==='Inspect')})()",'ISSUE60_EXACT_UNCERTAIN_OPERATION_SEARCH_RESULT')
+        g.click_text(s,'Inspect','.queue-item')
         a.wait(s,"sh.querySelector('[role=dialog]')?.textContent.includes('issue60-uncertain-create')",'ISSUE60_MODERN_UNCERTAIN_CONTEXT_EXACT_SLUG')
         g.click_text(s,'Open account');a.wait(s,"!!sh.querySelector('.account-dialog')",'ISSUE60_MODERN_UNCERTAIN_ACCOUNT_ACTION');a.close_dialog(s)
         print('B ISSUE60_REAL_CREATE_LOST_ACK_COLD_NO_REPLAY_CONTEXTUAL_ACCOUNT_RECOVERY=PASS',flush=True)

@@ -159,7 +159,11 @@ test('S03: extension sender and operation allowlist, no token storage or mutatio
     'catalog-prompt-store.mjs','catalog-resume.mjs','catalog-declaration.mjs',
     'catalog-ready-store.mjs','catalog-boundary.mjs','catalog-watch.mjs'])
     assert.ok(files[1].includes("'"+name+"'"),name);
-  assert.match(files[2],/src="catalog-view\.mjs"/);
+  assert.match(files[2],/<script type="module" src="faithful\/bridge\.mjs"><\/script>/);
+  assert.doesNotMatch(files[2],/src="catalog-view\.mjs"/);
+  const primary=await readFile(new URL('../src/ui/faithful/bridge.mjs',import.meta.url),'utf8');
+  assert.match(primary,/pcms-s03-catalog/);
+  assert.match(primary,/primaryConnections/);
   for(const id of ['pcms-catalog-scan','pcms-catalog-repo','pcms-catalog-token',
     'pcms-catalog-list','pcms-catalog-prompt'])assert.match(files[2],new RegExp('id="'+id+'"'));
   assert.doesNotMatch(files[3],/storage\.local\.set|storage\.sync\.set/);

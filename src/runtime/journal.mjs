@@ -1,3 +1,4 @@
+import {incidentGroupKey,sharedIncidentCause} from './attention-model.mjs';
 import {validIncidentTarget} from './incident-target.mjs';
 import {operationGroup,projectOperationContext} from './operation-context.mjs';
 // PCMS canonical journal. Only short IndexedDB transactions own state.
@@ -286,17 +287,20 @@ export function createCanonicalStore(db) {
   const causeOk = c => typeof c === 'string' && /^[A-Za-z0-9_:.-]{3,120}$/.test(c);
   const active = n => n && n.state !== 'RESOLVED';
   const pushHistory = (n, entry) => [...(Array.isArray(n?.history) ? n.history : []), entry].slice(-20);
-  function recordNotice({ scopeId, code, severity, revision, cause, target, at = Date.now() }) {
+  function recordNotice({ scopeId, code, severity, revision, cause, target, reason, at = Date.now(), isCurrent=()=>true }) {
     if (!isSafeId(scopeId) || !NOTICE_CODES.has(code) ||
         !['SERIOUS','ACTION_REQUIRED','INFORMATIONAL'].includes(severity) ||
         !Number.isSafeInteger(revision) || revision < 1 ||
-        (cause !== undefined && !causeOk(cause)) || (target!==undefined&&!validIncidentTarget(target)) || !Number.isSafeInteger(at))
+        (cause !== undefined && !causeOk(cause)) || (target!==undefined&&!validIncidentTarget(target)) ||
+        (reason!==undefined&&(typeof reason!=='string'||!/^[A-Z][A-Z0-9_]{2,79}$/.test(reason))) ||
+        typeof isCurrent!=='function' || !Number.isSafeInteger(at))
       return Promise.resolve(fail('INVALID_NOTICE'));
-    const key = 'attention:' + scopeId + ':' + code, causeKey = cause || code;
+    const key = 'attention:' + scopeId + ':' + code;
     return transact(db, ['meta'], 'readwrite', (tx, finish) => {
       const meta = tx.objectStore('meta');
       meta.get(key).onsuccess = event => {
         const prior = event.target.result;
+        if(!isCurrent()){finish(fail('NOTICE_SUPERSEDED'));return;}
         if (prior && revision <= prior.revision) {
           finish(revision === prior.revision
             ? ok({ changed:false, notify:false, reviewed:prior.reviewed === true || prior.ignored === true })
@@ -304,45 +308,59 @@ export function createCanonicalStore(db) {
           return;
         }
         let next, changed, event2;
+        const incomingCause=cause||prior?.cause||code;
+        const changedCause=!!prior&&incomingCause!==(prior.cause||code);
+        const changedTarget=!!prior&&target!==undefined&&JSON.stringify(target)!==JSON.stringify(prior.target);
+        const changedReason=!!prior&&reason!==undefined&&reason!==prior.reason;
+        const material=changedCause||changedTarget||changedReason;
         if (!prior || !active(prior)) {
           event2 = prior ? 'REOPENED' : 'OPENED';
-          next = { key, scopeId, code, cause:causeKey, severity, revision, state:'ACTIVE',
+          next = { key, scopeId, code, cause:incomingCause, firstCause:prior?.firstCause||prior?.cause||incomingCause,
+            ...(reason?{reason,firstReason:prior?.firstReason||prior?.reason||reason}:{}), severity, revision, state:'ACTIVE',
             reviewed:false, ignored:false, count:(prior?.count || 0) + 1,
             firstAt:prior?.firstAt ?? at, lastAt:at, resolvedAt:null,
             history:pushHistory(prior, { event:event2, at, severity, revision }) };
           changed = true;
         } else {
           const escalated = (RANK[severity] || 0) > (RANK[prior.severity] || 0);
-          event2 = escalated ? 'ESCALATED' : 'REPEATED';
-          next = { ...prior, cause:prior.cause || causeKey, severity:escalated ? severity : prior.severity,
+          event2 = escalated ? 'ESCALATED' : material?'CONTEXT_CHANGED':'REPEATED';
+          next = { ...prior, cause:incomingCause,firstCause:prior.firstCause||prior.cause||incomingCause,
+            ...(reason?{reason,firstReason:prior.firstReason||prior.reason||reason}:{}), severity:escalated ? severity : prior.severity,
             revision, state:'ACTIVE', count:(prior.count || 1) + 1, lastAt:at,
-            reviewed:escalated ? false : (prior.reviewed === true || prior.ignored === true),
-            ignored:false, history:escalated ? pushHistory(prior, { event:event2, at, severity, revision }) :
+            reviewed:escalated||material ? false : (prior.reviewed === true || prior.ignored === true),
+            ignored:false, history:escalated||material ? pushHistory(prior, { event:event2, at, severity, revision,
+              cause:incomingCause,...(reason?{reason}:{}),...(changedCause?{previousCause:prior.cause||code}:{}) }) :
               (Array.isArray(prior.history) ? prior.history : []) };
-          changed = escalated;
+          changed = escalated||material;
         }
         if(target)next.target={kind:target.kind,id:target.id};
-        meta.put(next);
-        if (!changed) { finish(ok({ changed:false, notify:false, reviewed:next.reviewed, event:event2 })); return; }
-        // One desktop notification per cause per window: a provider outage
-        // across many accounts/generators is one alert, unless it escalates.
-        meta.get('attention-cause:' + next.cause).onsuccess = ce => {
-          const last = ce.target.result;
-          const notify = !last || at - last.notifiedAt >= RENOTIFY_MS ||
-            (RANK[next.severity] || 0) > (RANK[last.severity] || 0);
-          if (notify) meta.put({ key:'attention-cause:' + next.cause, cause:next.cause,
-            notifiedAt:at, severity:next.severity });
-          finish(ok({ changed:true, notify, ignored:false, event:event2 }));
+        if (!changed) { meta.put(next);finish(ok({ changed:false, notify:false, reviewed:next.reviewed, event:event2 })); return; }
+        // The canonical causal scope owns notification deduplication. A
+        // shared outage alerts once; independent account failures stay distinct.
+        const groupKey=incidentGroupKey(next),notificationKey='attention-cause:'+groupKey;
+        meta.get(notificationKey).onsuccess = ce => {
+          if(!isCurrent()){finish(fail('NOTICE_SUPERSEDED'));return;}
+          meta.put(next);
+          const last=ce.target.result,signature=JSON.stringify([code,next.reason||null,
+            sharedIncidentCause(next.cause)?null:next.target||null]);
+          const notify=!last||!Number.isSafeInteger(last.notifiedAt)||at-last.notifiedAt>=RENOTIFY_MS||
+            (RANK[next.severity]||0)>(RANK[last.severity]||0)||
+            (last.recoveryGeneration||0)!==(last.notifiedRecoveryGeneration||0)||
+            material&&signature!==last.signature;
+          if(notify)meta.put({...last,key:notificationKey,cause:next.cause,notifiedAt:at,
+            severity:next.severity,signature,
+            notifiedRecoveryGeneration:last?.recoveryGeneration||0});
+          finish(ok({changed:true,notify,ignored:false,event:event2}));
         };
       };
     });
   }
-  function resolveNotice({ scopeId, code, evidence, at = Date.now() }) {
+  function resolveNotice({ scopeId, code, evidence, at = Date.now(), isCurrent=()=>true }) {
     // Trusted background callers only; evidence names the independent
     // observation (for example ROUTE_HEALTH_OBSERVED), never elapsed time.
     if (!isSafeId(scopeId) || !NOTICE_CODES.has(code) ||
         typeof evidence !== 'string' || !/^[A-Z0-9_]{6,64}$/.test(evidence) ||
-        !Number.isSafeInteger(at))
+        (!Number.isSafeInteger(at)||typeof isCurrent!=='function'))
       return Promise.resolve(fail('INVALID_NOTICE'));
     const key = 'attention:' + scopeId + ':' + code;
     return transact(db, ['meta'], 'readwrite', (tx, finish) => {
@@ -350,9 +368,31 @@ export function createCanonicalStore(db) {
       meta.get(key).onsuccess = event => {
         const note = event.target.result;
         if (!note || !active(note)) { finish(ok({ changed:false })); return; }
+        if(!isCurrent()){finish(fail('NOTICE_SUPERSEDED'));return;}
         meta.put({ ...note, state:'RESOLVED', resolvedAt:at, ignored:false,
           history:pushHistory(note, { event:'RESOLVED', at, evidence }) });
-        finish(ok({ changed:true, resolved:true }));
+        const groupKey=incidentGroupKey(note),notificationKey='attention-cause:'+groupKey;
+        // Reopening after verified recovery alerts once, including a recurrence
+        // inside the old notification window. Existing dedup metadata is only
+        // presentation state; it never changes a route/effect safety fence.
+        const range=typeof IDBKeyRange==='undefined'?undefined:IDBKeyRange.bound('attention:','attention:\uffff');
+        const cursor=meta.openCursor(range);
+        cursor.onsuccess=e=>{
+          const row=e.target.result;
+          if(row){
+            if(row.key!==key&&String(row.key).startsWith('attention:')&&
+              active(row.value)&&incidentGroupKey(row.value)===groupKey){
+              finish(ok({changed:true,resolved:true}));return;
+            }
+            row.continue();return;
+          }
+          meta.get(notificationKey).onsuccess=e=>{
+            const prior=e.target.result;
+            meta.put({...prior,key:notificationKey,
+              recoveryGeneration:(prior?.recoveryGeneration||0)+1});
+            finish(ok({changed:true,resolved:true}));
+          };
+        };
       };
     });
   }
@@ -448,9 +488,107 @@ export function createCanonicalStore(db) {
       };
     });
   }
+
+  function projectNotice(n){
+    const time=v=>Number.isSafeInteger(v)&&v>=0?v:null;
+    const token=v=>typeof v==='string'&&/^[A-Z][A-Z0-9_]{2,79}$/.test(v)?v:null;
+    return {cursor:n.key,scopeId:n.scopeId,code:n.code,cause:causeOk(n.cause)?n.cause:n.code,
+      firstCause:causeOk(n.firstCause)?n.firstCause:causeOk(n.cause)?n.cause:n.code,
+      reason:token(n.reason),firstReason:token(n.firstReason)||token(n.reason),
+      severity:n.severity,revision:n.revision,
+      ...(validIncidentTarget(n.target)?{target:{...n.target}}:{}),
+      state:active(n)?'ACTIVE':'RESOLVED',reviewed:n.reviewed===true||n.ignored===true,
+      count:Number.isSafeInteger(n.count)&&n.count>0?n.count:1,
+      firstAt:time(n.firstAt),lastAt:time(n.lastAt),resolvedAt:time(n.resolvedAt),
+      history:(Array.isArray(n.history)?n.history:[]).slice(-20).map(h=>({
+        event:token(h.event),at:time(h.at),evidence:token(h.evidence),
+        cause:causeOk(h.cause)?h.cause:null,reason:token(h.reason),
+        previousCause:causeOk(h.previousCause)?h.previousCause:null
+      }))};
+  }
+  function inspectNotice({scopeId,code}={}){
+    if(!isSafeId(scopeId)||!NOTICE_CODES.has(code))return Promise.resolve(fail('INVALID_NOTICE'));
+    return transact(db,['meta'],'readonly',(tx,finish)=>{
+      tx.objectStore('meta').get('attention:'+scopeId+':'+code).onsuccess=e=>{
+        const n=e.target.result;
+        finish(n?ok({notice:projectNotice(n),providerEffects:'NONE'}):fail('NOTICE_NOT_FOUND'));
+      };
+    });
+  }
+  const groupKeyOk=v=>typeof v==='string'&&v.length<=240&&(
+    /^scope:[a-zA-Z0-9_-]{8,100}:[A-Z_]{3,80}$/.test(v)||
+    v.startsWith('shared:')&&sharedIncidentCause(v.slice(7)));
+  const noticeMatch=(n,query)=>!query||[n.scopeId,n.code,n.cause,n.reason,n.firstReason,n.target?.id].
+    join(' ').toLowerCase().includes(query.toLowerCase());
+  const stateMatch=(n,state)=>state==='ALL'||(active(n)?'ACTIVE':'RESOLVED')===state;
+  function pageNoticeGroups({after='',limit=20,query='',state='ACTIVE'}={}){
+    if(typeof after!=='string'||after!==''&&!groupKeyOk(after)||
+       typeof query!=='string'||query.length>80||!['ACTIVE','RESOLVED','ALL'].includes(state)||
+       !Number.isInteger(limit)||limit<1||limit>100)return Promise.resolve(fail('INVALID_NOTICE_PAGE'));
+    return transact(db,['meta'],'readonly',(tx,finish)=>{
+      const groups=new Map();let seen=0,totalNotices=0,matchingNotices=0;
+      const range=typeof IDBKeyRange==='undefined'?undefined:IDBKeyRange.bound('attention:','attention:\uffff');
+      const cursor=tx.objectStore('meta').openCursor(range);
+      cursor.onsuccess=e=>{
+        const row=e.target.result;
+        if(row){
+          const n=row.value;
+          if(String(row.key).startsWith('attention:')&&isSafeId(n?.scopeId)&&NOTICE_CODES.has(n?.code)&&stateMatch(n,state)){
+            if(++seen>100000){finish(fail('NOTICE_SCAN_LIMIT'));return;}
+            const key=incidentGroupKey(n);let g=groups.get(key);
+            if(!g){g={key,cause:n.cause||n.code,severity:n.severity,memberCount:0,eventCount:0,
+              reviewedCount:0,scopes:new Set(),firstAt:null,lastAt:null,matched:false,notice:null};groups.set(key,g);}
+            totalNotices++;g.memberCount++;g.eventCount+=Number.isSafeInteger(n.count)&&n.count>0?n.count:1;
+            g.scopes.add(n.scopeId);if(n.reviewed===true||n.ignored===true)g.reviewedCount++;
+            if((RANK[n.severity]||0)>(RANK[g.severity]||0))g.severity=n.severity;
+            if(Number.isSafeInteger(n.firstAt))g.firstAt=g.firstAt===null?n.firstAt:Math.min(g.firstAt,n.firstAt);
+            if(Number.isSafeInteger(n.lastAt))g.lastAt=g.lastAt===null?n.lastAt:Math.max(g.lastAt,n.lastAt);
+            if(noticeMatch(n,query)){matchingNotices++;g.matched=true;g.notice??=projectNotice(n);}
+          }
+          row.continue();return;
+        }
+        const matching=[...groups.values()].filter(g=>g.matched).sort((a,b)=>a.key.localeCompare(b.key));
+        const remaining=matching.filter(g=>!after||g.key.localeCompare(after)>0),more=remaining.length>limit;
+        const items=remaining.slice(0,limit).map(({scopes,matched,...g})=>({...g,
+          affectedCount:scopes.size,reviewed:g.reviewedCount===g.memberCount}));
+        finish(ok({items,more,next:more?items.at(-1)?.key||null:null,total:matching.length,
+          totalNotices,matchingNotices,unfilteredTotal:groups.size,providerEffects:'NONE'}));
+      };
+    });
+  }
+  function pageNoticeMembers({groupKey,after='',limit=20,query='',state='ACTIVE'}={}){
+    if(!groupKeyOk(groupKey)||typeof after!=='string'||after.length>240||
+       after!==''&&!/^attention:[a-zA-Z0-9_-]{8,100}:[A-Z_]{3,80}$/.test(after)||
+       typeof query!=='string'||query.length>80||!['ACTIVE','RESOLVED','ALL'].includes(state)||
+       !Number.isInteger(limit)||limit<1||limit>100)return Promise.resolve(fail('INVALID_NOTICE_PAGE'));
+    return transact(db,['meta'],'readonly',(tx,finish)=>{
+      const items=[];let seen=0,total=0,unfilteredTotal=0,remaining=0;
+      const range=typeof IDBKeyRange==='undefined'?undefined:IDBKeyRange.bound('attention:','attention:\uffff');
+      const cursor=tx.objectStore('meta').openCursor(range);
+      cursor.onsuccess=e=>{
+        const row=e.target.result;
+        if(row){
+          const n=row.value,key=String(row.key);
+          if(key.startsWith('attention:')&&isSafeId(n?.scopeId)&&NOTICE_CODES.has(n?.code)&&
+             stateMatch(n,state)&&incidentGroupKey(n)===groupKey){
+            if(++seen>100000){finish(fail('NOTICE_SCAN_LIMIT'));return;}
+            unfilteredTotal++;
+            if(noticeMatch(n,query)){
+              total++;
+              if(!after||key>after){remaining++;items.push(projectNotice(n));
+                items.sort((a,b)=>a.cursor<b.cursor?-1:a.cursor>b.cursor?1:0);if(items.length>limit)items.pop();}
+            }
+          }
+          row.continue();return;
+        }
+        const more=remaining>limit;finish(ok({items,total,unfilteredTotal,more,
+          next:more?items.at(-1)?.cursor||null:null,providerEffects:'NONE'}));
+      };
+    });
+  }
   return Object.freeze({ provisionTarget, apply, getOperation, inspectOperationContext, listOperationPage, summary, recover,
     recordNotice, resolveNotice, ignoreNotice, acknowledgeNotice, noticeSummary,
-    listNotices, pageNotices, close: () => db.close() });
+    listNotices, pageNotices, inspectNotice, pageNoticeGroups, pageNoticeMembers, close: () => db.close() });
 }
 
 // Restore sentinel lives OUTSIDE replaceable IDB. It must not be cleared by

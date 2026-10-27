@@ -3,7 +3,7 @@ import {browserGitCredentialPacket} from './git-local-secret.mjs';
 // I06: guarded, canonical reservation admission. No web page, untrusted UI,
 // or generic public donor API can invoke a provider write. Provider execution
 // remains held until a separately proven, explicit capability gate activates.
-import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId} from './journal.mjs';
+import {fail,openCanonicalDatabase,createRestoreSentinel,isSafeId,createCanonicalStore} from './journal.mjs';
 import {createSupplyStore} from './supply-store.mjs';
 import {createAccountStore} from './accounts.mjs';
 import {freezeSupply,validateOwnerContext,publicSupply} from './supply-plan.mjs';
@@ -13,7 +13,7 @@ import {internalPcmsGuard} from './persona-guard.mjs';
 import {standingS06} from './s06-standing-authority.mjs';
 import {isI17Quarantined,I17_QUARANTINE_CODE} from './legacy-quarantine.mjs';
 export const SUPPLY_PORT='pcms-i06-supply';
-const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED']);
+const commands=new Set(['PREVIEW','FREEZE','GET_BATCH','LIST_BATCHES','EXECUTE_ITEM','RECONCILE_ITEM','FINISH_SOURCE_FOLDER','ABORT_PREPARED','READ_TEMPLATE']);
 const hex=/^[a-f0-9]{64}$/;
 export function validateSupplyMessage(api,sender,message){
   if(!trustedExtensionPage(api,sender))return fail('UNTRUSTED_SENDER');
@@ -26,11 +26,13 @@ export function validateSupplyMessage(api,sender,message){
   if(!p||typeof p!=='object'||Array.isArray(p))return fail('INVALID_PARAMS');
   const allowed=message.type==='PREVIEW'||message.type==='FREEZE'
     ?['accountId','expectedAccountRevision','slugs','batchId']:
+    message.type==='READ_TEMPLATE'?['operationId']:
     message.type==='GET_BATCH'?['batchId']:
     message.type==='LIST_BATCHES'?[]:
     message.type==='FINISH_SOURCE_FOLDER'?['batchId','itemId','expectedRevision']:
     ['batchId','itemId','expectedRevision'];
   if(Object.keys(p).some(k=>!allowed.includes(k)))return fail('INVALID_PARAMS');
+  if(message.type==='READ_TEMPLATE')return Object.keys(p).length===1&&isSafeId(p.operationId)?{ok:true}:fail('INVALID_PARAMS');
   if(message.type==='PREVIEW'||message.type==='FREEZE'){
     if(!isSafeId(p.accountId)||!Number.isSafeInteger(p.expectedAccountRevision)||
        p.expectedAccountRevision<1||!Array.isArray(p.slugs)||p.slugs.length<1||
@@ -57,17 +59,82 @@ function redacted(out) {
     source:out.item?.folder?'NON_READY_FOLDER':'SOURCE_PENDING'};
 }
 export function createSupplyBoundary(api,{
-  open=openCanonicalDatabase,guard=internalPcmsGuard,
+  open=openCanonicalDatabase,guard=internalPcmsGuard,clock=Date.now,
   // Deliberately OFF in packaged extension. Tests must explicitly supply
   // an independently controlled synthetic gate and fake isolated executor.
   effectGate=()=>false,gitGate=()=>false,gitWrite=writeNonReadyFolder,
   getGitConnection=async()=>{const r=await api.storage.local.get('pcmsS03Git');return r?.pcmsS03Git;},
   getGitCredential=async repositoryId=>browserGitCredentialPacket({action:'git.get',repositoryId}),
-  makeStores=db=>({supply:createSupplyStore(db),accounts:createAccountStore(db)})
+  makeStores=db=>({supply:createSupplyStore(db),accounts:createAccountStore(db),canonical:createCanonicalStore(db)})
 }={}){
   let dbPromise;
   const sentinel=createRestoreSentinel(api.storage.local);
   const stores=()=>dbPromise ||=open().then(makeStores);
+  async function originalTemplateScope(s,c){
+    if(c?.provenance!=='HISTORICAL_SUPPLY_V1'||c.ambiguous||
+      !/^supply_(create|rename)_v1$/.test(c.effectType||'')||
+      !isSafeId(c.related?.batchId)||!isSafeId(c.related?.accountId))
+      return fail('HISTORICAL_SCOPE_UNVERIFIED');
+    const found=await s.supply.get(c.related.batchId),batch=found.batch;
+    const item=batch?.items?.find(i=>i.itemId===c.targetId&&
+      i[c.effectType==='supply_create_v1'?'createOperationId':'renameOperationId']===c.operationId);
+    if(!found.ok||batch.accountId!==c.related.accountId||!item||
+      item.requestedSlug!==c.related.slug||!isSafeId(batch.personaUid)||
+      !Number.isSafeInteger(batch.bindingVersion)||batch.bindingVersion<1)
+      return fail('HISTORICAL_SCOPE_UNVERIFIED');
+    const current=await s.accounts.get(batch.accountId),account=current.account;
+    if(!current.ok||!['VERIFIED','INVENTORY_PENDING'].includes(account?.state)||
+      account.personaUid!==batch.personaUid||account.bindingVersion!==batch.bindingVersion||
+      account.identity?.source!=='GUARDED_SESSION_READBACK'||
+      account.identity.bindingVersion!==batch.bindingVersion||
+      !hex.test(account.boundPrincipal||'')||account.identity.principalFingerprint!==account.boundPrincipal)
+      return fail('ORIGINAL_ACCOUNT_IDENTITY_UNVERIFIED');
+    return {ok:true,batch,item,account};
+  }
+  async function readTemplate(s,p){
+    if(typeof s.canonical?.inspectOperationContext!=='function')return fail('HISTORICAL_CONTEXT_UNAVAILABLE');
+    const original=await s.canonical.inspectOperationContext(p.operationId);
+    if(!original.ok)return original;
+    const c=original.context,scope=await originalTemplateScope(s,c);
+    if(!scope.ok)return scope;
+    const g=guard();
+    if(typeof g?.getSafeRouteReadiness!=='function'||typeof g?.runSupplyStep!=='function')
+      return fail('DONOR_GUARD_UNAVAILABLE');
+    const before=await g.getSafeRouteReadiness(scope.batch.personaUid,{recover:false});
+    if(!before?.ready||before.personaUid!==scope.batch.personaUid)
+      return fail(before?.code||'PROTECTED_ROUTE_UNVERIFIED');
+    const current=await originalTemplateScope(s,c);
+    if(!current.ok||current.account.revision!==scope.account.revision)
+      return fail('ORIGINAL_ACCOUNT_CONTEXT_CHANGED');
+    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+    let observed;
+    try{observed=await g.runSupplyStep(scope.batch.personaUid,{kind:'READ_TEMPLATE',
+      slug:scope.item.requestedSlug,principalFingerprint:scope.account.boundPrincipal});}
+    catch{return fail('TEMPLATE_OBSERVATION_UNAVAILABLE');}
+    if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+    const after=await originalTemplateScope(s,c);
+    if(!after.ok||after.account.revision!==scope.account.revision)
+      return fail('ORIGINAL_ACCOUNT_CONTEXT_CHANGED');
+    const latest=await s.canonical.inspectOperationContext(p.operationId);
+    if(!latest.ok||latest.context.revision!==c.revision)
+      return fail('HISTORICAL_CONTEXT_CHANGED');
+    if(observed?.ok!==true)return fail(new Set(['TEMPLATE_OWNER_UNVERIFIED','TEMPLATE_UNVERIFIED',
+      'TEMPLATE_SCHEMA_UNVERIFIED','SESSION_CHANGED','PRINCIPAL_CHANGED','NO_PAGE_SESSION',
+      'NO_PERCHANCE_TAB','GUARD_UNAVAILABLE','POST_EFFECT_GUARD_CHANGED','SUPPLY_EXECUTOR_UNAVAILABLE',
+      'SUPPLY_PACKET_UNVERIFIED','PROTECTED_ROUTE_UNVERIFIED']).has(observed?.code)?
+        observed.code:'TEMPLATE_OBSERVATION_UNAVAILABLE');
+    if(observed.source!=='INDEPENDENT_TEMPLATE_READBACK'||observed.template!=='minimal'||
+      !['AVAILABLE','MISSING_VERIFIED'].includes(observed.state)||
+      !['OWNED','NOT_OWNED'].includes(observed.ownership)||
+      (observed.state==='AVAILABLE'&&(observed.schemaVerified!==true||!hex.test(observed.fingerprint||'')))||
+      (observed.state==='MISSING_VERIFIED'&&(observed.ownership!=='NOT_OWNED'||observed.fingerprint!==null)))
+      return fail('TEMPLATE_READBACK_UNVERIFIED');
+    return {ok:true,code:'CURRENT_TEMPLATE_OBSERVED',operationId:p.operationId,
+      templateObservation:{template:'minimal',state:observed.state,ownership:observed.ownership,
+        schemaVerified:observed.schemaVerified===true,fingerprint:observed.fingerprint,observedAt:clock()},
+      historicalStatus:latest.context.status,historicalReason:latest.context.failure?.code||null,
+      providerEffects:'NONE',replayAllowed:false};
+  }
   async function frozenPlan(s,p,previewOnly){
     const current=await s.accounts.get(p.accountId);
     if(!current.ok)return current;
@@ -345,6 +412,7 @@ export function createSupplyBoundary(api,{
             'OPERATOR_GRANTED_GUARDED':'OPERATOR_GRANT_REQUIRED'}:out;
       }
       if((await sentinel.inspect()).held)return fail('RESTORE_HOLD');
+      if(message.type==='READ_TEMPLATE')return await readTemplate(s,p);
       if(message.type==='PREVIEW'||message.type==='FREEZE')
         return await frozenPlan(s,p,message.type==='PREVIEW');
       if(message.type==='ABORT_PREPARED'){

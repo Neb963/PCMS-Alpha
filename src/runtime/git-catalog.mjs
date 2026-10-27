@@ -216,7 +216,8 @@ export async function scanMainCatalog({token,repository='Neb963/per-gens',maxReq
       prompt,generators,recognizedCount:generators.length,
       requests,source:'PINNED_MAIN_READ_ONLY'};
   }catch(e){
-    return error(['CATALOG_CONFLICT','CATALOG_INCOMPLETE','GIT_ACCESS_DENIED',
-      'GIT_UNAVAILABLE'].includes(e?.message)?e.message:'CATALOG_INCOMPLETE');
+    return {...error(['CATALOG_CONFLICT','CATALOG_INCOMPLETE','GIT_ACCESS_DENIED',
+      'GIT_UNAVAILABLE'].includes(e?.message)?e.message:'CATALOG_INCOMPLETE'),
+      ...([401,403,404].includes(e?.http)?{httpStatus:e.http}:{})};
   }
 }

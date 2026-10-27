@@ -71,7 +71,7 @@ test('S03: locked credential, restore hold and identity drift cannot replace las
   });
   await watcher.tick();
   unlocked=false;
-  assert.equal((await watcher.tick()).code,'GIT_VAULT_UNAVAILABLE');
+  assert.equal((await watcher.tick()).code,'GIT_CREDENTIAL_MISSING');
   unlocked=true;wrong=true;
   const r=await watcher.tick();
   assert.equal(r.ok,false);
