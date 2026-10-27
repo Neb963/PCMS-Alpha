@@ -80,9 +80,11 @@ export async function perchanceSupplyIsolated(request) {
         schemaVerified:true,fingerprint:[...new Uint8Array(bytes)].map(x=>x.toString(16).padStart(2,'0')).join('')};
     }
     const census=await call('getGeneratorsByUser',{});
+    if(!sameSession())return hold('SESSION_CHANGED');
+    if(census.status==='session-token-error')return hold('SESSION_REJECTED');
+    if(census.status==='too-many-requests')return hold('PROVIDER_RATE_LIMITED');
     if(census.status!=='success'||!Array.isArray(census.generators)||
-       census.generators.length>5000||!sameSession())
-      return hold('SESSION_UNVERIFIED');
+       census.generators.length>5000)return hold('SESSION_UNVERIFIED');
     const all=census.generators;
     const currentNames=new Set();
     for(const g of all){
@@ -142,6 +144,8 @@ export async function perchanceSupplyIsolated(request) {
         return proof('OWNED_VERIFIED',{remoteId:'public_'+page.generator.publicId,
           visibility:page.generator.isPrivate?'UNLISTED':'PUBLIC'});
       }
+      if(owner.status==='session-token-error')return hold('SESSION_REJECTED');
+      if(owner.status==='too-many-requests')return hold('PROVIDER_RATE_LIMITED');
       if(owner.status!=='is-not-owner')return hold('TARGET_OWNER_READBACK_UNVERIFIED');
       if(ownedHere)return hold('TARGET_CENSUS_OWNER_CONFLICT');
       if(page.status==='success'){
@@ -170,6 +174,9 @@ export async function perchanceSupplyIsolated(request) {
         }
         return proof('MISSING_VERIFIED');
       }
+      if(page.status==='too-many-requests')return hold('PROVIDER_RATE_LIMITED');
+      if(page.status==='server-error')return hold('PROVIDER_UNAVAILABLE');
+      if(page.status==='unverified')return hold('TARGET_PAGE_TRANSPORT_UNAVAILABLE');
       return hold('TARGET_PAGE_ABSENCE_UNVERIFIED');
     }
     if(request.kind==='READ_CREATE') {
