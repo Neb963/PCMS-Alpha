@@ -26,13 +26,14 @@ export function projectOperationContext(op,links,events,inventory=[]){
  const failure=op.firstFailure||link?.item.diagnostic?.first;
  // Only positively known no-effect vocabulary can support the stronger
  // historical claim. Unknown later schemas remain unresolved.
- const safeEvents=new Set(['SUPPLY_'+phase+'_PREPARED','SUPPLY_'+phase+'_READY_TO_DISPATCH','SUPPLY_'+phase+'_PREFLIGHT_FAILED']);
+ const safeEvents=new Set(['SUPPLY_'+phase+'_PREPARED','SUPPLY_'+phase+'_READY_TO_DISPATCH','SUPPLY_'+phase+'_PREFLIGHT_FAILED','HISTORICAL_PREFLIGHT_ARCHIVED']);
  const laterDispatch=events.some(e=>!safeEvents.has(e.stage));
- const noDispatch=legacy&&!!link&&op.status==='PREFLIGHT_FAILED'&&op.effectBoundary==='NOT_DISPATCHED'&&
+ const noDispatch=legacy&&!!link&&(op.status==='PREFLIGHT_FAILED'||op.status==='ABORTED'&&op.archivedNoDispatch===true)&&op.effectBoundary==='NOT_DISPATCHED'&&
    failure?.effectBoundary==='NOT_DISPATCHED'&&link.item.state===phase+'_PREFLIGHT_FAILED'&&
    !op.ack&&!op.remoteId&&!op.temporarySlug&&!link.item.ack&&!link.item.ackTemporarySlug&&!link.item.ackRemoteId&&!laterDispatch;
  return {operationId:op.operationId,targetId:op.targetId,effectType:op.effectType,status:op.status,revision:op.revision,
   updatedAt:Number.isSafeInteger(op.updatedAt)?op.updatedAt:null,
+  archived:op.archivedNoDispatch===true,originalStatus:op.archivedNoDispatch===true?'PREFLIGHT_FAILED':null,
   provenance:legacy&&link?'HISTORICAL_SUPPLY_V1':legacy?'UNLINKED_SUPPLY_V1':link?.kind==='S04'?'CANONICAL_CREATION':'CANONICAL_OPERATION',
   evidence:noDispatch?'RECORDED_NO_DISPATCH':op.status==='CONFIRMED'?'JOURNAL_CONFIRMED':'UNRESOLVED',
   failure:{code:code(failure?.code)||code(link?.item.reason),stage:code(failure?.stage),
