@@ -3550,7 +3550,7 @@ def main():
                 ui=execute(after,"""const sh=document.getElementById('pcms-faithful-host')?.shadowRoot;
                   const page=sh?.querySelector('#page');
                   return {queue:page?.dataset.view==='work-queue',
-                    visible:!!sh?.querySelector('.queue-board'),
+                    visible:!!sh?.querySelector('.queue-list'),
                     directDispatch:!![...page?.querySelectorAll('button')||[]]
                       .find(x=>/^(publish|dispatch release|approve and publish)$/i.test(x.textContent.trim()))};""")
                 assert ui['queue'] and ui['visible'] and not ui['directDispatch'],ui
