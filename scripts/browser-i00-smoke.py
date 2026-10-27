@@ -1264,7 +1264,7 @@ def main():
                 assert canonical['ready'] and canonical['shadow'] and canonical['visible'],canonical
                 assert canonical['inert'] and not canonical['tokenField'],canonical
                 assert all(row['exists'] and row['enabled'] for row in canonical['nav']),canonical
-                assert canonical['version']=='1.2.17',canonical
+                assert canonical['version']=='1.2.18',canonical
                 print('B F3_CANONICAL_ONLY_ACTIVE_CONTROLLER_AND_SIX_ENABLED_ROUTES=PASS',flush=True)
                 # V016 acceptance: the PRECISE accepted prototype structure is
                 # the visible full-screen extension UI, not an old markup reskin.
@@ -1287,7 +1287,7 @@ def main():
                      canonicalNative:!!document.getElementById('pcms-refresher-rows')&&
                        !!document.getElementById('pcms-release-approve')&&
                        !!document.getElementById('pcms-restore-apply')};""")
-                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.17',actual
+                assert actual['shadow'] and actual['host'] and actual['manifest']=='1.2.18',actual
                 assert actual['routes']==6 and actual['visible'] and actual['nativeHidden'],actual
                 assert actual['sidebar'] and actual['primary']=='overview' and actual['styles'] and actual['canonicalNative'],actual
                 assert actual['badge']=='PCMS '+actual['manifest'],actual

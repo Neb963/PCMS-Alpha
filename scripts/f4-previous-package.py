@@ -2,8 +2,8 @@
 """Rebuild the previously verified combined XPI from its exact public Git tree.
 
 CI/developer fixture only. Never accesses the user's Firefox profile, secrets,
-private repositories, or live provider. Used to prove real installed 1.2.16
--> 1.2.17 update, rather than testing solely donor 1.2.0 -> 1.2.17.
+private repositories, or live provider. Used to prove real installed 1.2.17
+-> 1.2.18 update, rather than testing solely donor 1.2.0 -> 1.2.18.
 """
 import hashlib
 import json
@@ -14,9 +14,9 @@ import sys
 import tempfile
 import zipfile
 
-BASE_COMMIT = '9af3f86ac03b4aafa72eba9af51005a09ee8f6e9'
-BASE_TREE = '910a5ec71a76148d38954d04d7ee1167764eac86'
-BASE_XPI_SHA256 = 'e7ef3f63503909b210d42be379680fb9dc520a0937cdc4c3f27ae995b00a3402'
+BASE_COMMIT = '3fcfa4b1985619d367e5d11bd60c6af610563cbd'
+BASE_TREE = '8f480ce4a759b58672062324c1dc42342698af34'
+BASE_XPI_SHA256 = '7ab1c2a5bebc95289c218040036829186b222ee2441435b8a0522142d2f83ee1'
 GECKO_ID = 'persona-route-manager@local'
 
 
@@ -48,7 +48,7 @@ def rebuild(output):
             assert digest == BASE_XPI_SHA256, ('F4_PREVIOUS_RELEASE_BYTES_CHANGED', digest)
             with zipfile.ZipFile(old) as archive:
                 manifest = json.loads(archive.read('manifest.json'))
-            assert manifest['version'] == '1.2.16', manifest
+            assert manifest['version'] == '1.2.17', manifest
             assert manifest['browser_specific_settings']['gecko']['id'] == GECKO_ID, manifest
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_bytes(raw)

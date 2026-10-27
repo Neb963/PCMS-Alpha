@@ -65,7 +65,7 @@ browser.storage.local.get=async(...args)=>{const out=await get(...args);for(cons
         b.execute(s,"document.body.classList.remove('pcms-faithful-ready');window.__j07mountClick=null;const e=document.getElementById('pcms-faithful-host').shadowRoot.querySelector('[data-nav=generators]');e.addEventListener('click',()=>{window.__j07mountClick=document.body.classList.contains('pcms-faithful-ready')&&e.getClientRects().length>0},{once:true});setTimeout(()=>document.body.classList.add('pcms-faithful-ready'),400)")
         g.click(s,'[data-nav=generators]');assert b.execute(s,"return window.__j07mountClick") is True
         wait(s,"sh.querySelector('tbody')?.getAttribute('aria-busy')==='false'&&sh.querySelectorAll('tbody tr[data-item-index]').length===24",'J07_DELAYED_PRIMARY_MOUNT_REAL_CLICK_RECOVERY')
-        assert b.execute(s,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('.preview-label').textContent")=='PCMS 1.2.17'
+        assert b.execute(s,"return document.getElementById('pcms-faithful-host').shadowRoot.querySelector('.preview-label').textContent")=='PCMS 1.2.18'
         g.click(s,'[data-filter="generators:PUBLISHED"]');wait(s,"sh.querySelector('.pagination').textContent.includes('600')",'J07_GLOBAL_FILTER')
         g.click(s,'[data-action=generator-filters]');g.change(s,'#generator-source','GIT');wait(s,"sh.querySelector('.pagination').textContent.includes('200')",'J07_GLOBAL_SOURCE_FILTER')
         g.click(s,'[data-generator-select]');g.click_text(s,'Columns');wait(s,"!!sh.querySelector('[aria-label="+'"Generator columns"'+"]')",'J07_COLUMN_CONTROLS')

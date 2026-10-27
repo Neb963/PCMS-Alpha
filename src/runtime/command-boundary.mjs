@@ -3,7 +3,7 @@ import {trackPcmsWork} from './work-checkpoint.mjs';
 import { createCanonicalStore, createRestoreSentinel, openCanonicalDatabase, fail } from './journal.mjs';
 
 export const COMMAND_PORT = 'pcms-i02-canonical-readonly';
-const SAFE_NAMES = new Set(['HEALTH','SUMMARY','GET_OPERATION','GET_OPERATION_CONTEXT','GET_NOTICES','GET_NOTICE_CONTEXT','LIST_NOTICE_GROUP_PAGE','LIST_NOTICE_GROUP_MEMBERS','NOTICE_SUMMARY','LIST_OPERATION_PAGE','LIST_NOTICE_PAGE','IGNORE_NOTICE','ACK_NOTICE','PREVIEW']);
+const SAFE_NAMES = new Set(['HEALTH','SUMMARY','GET_OPERATION','GET_OPERATION_CONTEXT','ARCHIVE_HISTORICAL_NO_DISPATCH','GET_NOTICES','GET_NOTICE_CONTEXT','LIST_NOTICE_GROUP_PAGE','LIST_NOTICE_GROUP_MEMBERS','NOTICE_SUMMARY','LIST_OPERATION_PAGE','LIST_NOTICE_PAGE','IGNORE_NOTICE','ACK_NOTICE','PREVIEW']);
 export function trustedExtensionPage(api, sender) {
   if (sender?.id !== api.runtime.id || typeof sender.url !== 'string') return false;
   const base = api.runtime.getURL('pcms/');
@@ -60,6 +60,13 @@ export function validateCommand(api, sender, message) {
   }
   if (message.type === 'GET_OPERATION' &&
       (typeof message.operationId !== 'string' || !/^[a-zA-Z0-9_-]{8,100}$/.test(message.operationId)))
+    return fail('INVALID_TARGET');
+  if(message.type==='ARCHIVE_HISTORICAL_NO_DISPATCH'&&
+    (Object.keys(message).some(k=>!['type','params'].includes(k))||
+     !message.params||typeof message.params!=='object'||Array.isArray(message.params)||
+     Object.keys(message.params).length!==2||
+     !/^[a-zA-Z0-9_-]{8,100}$/.test(message.params.operationId||'')||
+     !Number.isSafeInteger(message.params.expectedRevision)||message.params.expectedRevision<1))
     return fail('INVALID_TARGET');
   if(message.type==='GET_OPERATION_CONTEXT'&&
     (Object.keys(message).some(k=>!['type','params'].includes(k))||
@@ -133,6 +140,10 @@ export function createCommandBoundary(api, { open = openCanonicalDatabase } = {}
         // Deliberately do not disclose target/account/slug/manifest/operation identity.
         return { ok: true, state: op.operation.status, revision: op.operation.revision };
       } catch { return fail('CANONICAL_HOLD'); }
+    }
+    if(message.type==='ARCHIVE_HISTORICAL_NO_DISPATCH'){
+      try{return await (await canonical()).archiveHistoricalNoDispatch(message.params);}
+      catch{return fail('CANONICAL_HOLD');}
     }
     if(message.type==='GET_OPERATION_CONTEXT'){
       try{return await (await canonical()).inspectOperationContext(message.params.operationId);}

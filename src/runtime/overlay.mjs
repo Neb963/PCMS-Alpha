@@ -220,6 +220,30 @@ function createPcmsEnrollmentDonor(){
         installed:status.installed===true,compatible:status.compatible===true,ready:status.ready===true,
         tunnelUp:status.interface_up===true,proxyReachable:status.base_proxy_reachable===true};
     },
+    async restartBridge(){
+      // Called directly by PCMS in this background frame; the donor owns
+      // native tunnel mutation, global Persona lease fencing and status.
+      await initialize();
+      return localMutationFence(allPersonaUids,async()=>{
+        const observed=await mullvadRuntime.refreshStatus();
+        const unhealthy=observed?.interface_up===false||
+          observed?.base_proxy_reachable===false||observed?.base_route_bound===false;
+        const healthy=observed?.ready===true&&!unhealthy;
+        if(observed?.installed!==true||observed?.compatible!==true||healthy||
+           !Array.isArray(observed?.pending_prepare_routes)||
+           observed.pending_prepare_routes.length!==0||!unhealthy)
+          return {ok:false,noDispatch:true,code:'MULLVAD_REPAIR_NOT_ADMITTED'};
+        // This is the donor's existing Restart tunnel lifecycle, not route
+        // rotation, proxy reassignment or a new native executor.
+        const result=await restartTunnel();
+        mullvadRuntime.clear();
+        const status=mullvadRuntime.setStatus({
+          installed:true,...result,error:result?.ok===false?result.error:null
+        });
+        return {ok:result?.ok===true&&status?.ready===true,
+          restarted:true,code:pcmsConnectionCode(status)};
+      });
+    },
     async boundPersona({bindingId}){
       await initialize();
       const p=pcmsBoundProfile(await getState(),bindingId);

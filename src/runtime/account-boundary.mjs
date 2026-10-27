@@ -120,6 +120,10 @@ export function createAccountBoundary(api,{
   const readiness=createProtectedReadinessCoordinator(api,{
     list:async()=>(await store()).list(),held:async()=>(await sentinel.inspect()).held,
     connection:async()=>guard()?.enrollmentDonor?.inspectConnection?.(),
+    // The same background frame cannot message itself. Use the donor-owned
+    // protected lifecycle method, which retains its native mutation fence.
+    repairBridge:async()=>await guard()?.enrollmentDonor?.restartBridge?.()||
+      {ok:false,noDispatch:true,code:'DONOR_REPAIR_UNAVAILABLE'},
     hold:(bindingId,code,accountId,current=()=>true)=>{
       pins.hold(bindingId);
       return checkpointed(api,async()=>{

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createProtectedReadinessCoordinator,READINESS_RECEIPT,publishNativeReadiness,subscribeProtectedReadiness} from '../src/runtime/protected-readiness.mjs';
+import {createProtectedReadinessCoordinator,READINESS_RECEIPT,BRIDGE_RECOVERY_RECEIPT,publishNativeReadiness,subscribeProtectedReadiness} from '../src/runtime/protected-readiness.mjs';
 import {createPersonaGuard} from '../src/runtime/persona-guard.mjs';
 function fixture(count=3,{saved=null,check=async()=>({ok:true}),host={installed:true,compatible:true,ready:true},observationMs=40000}={}){
  let now=100000,listener;const data=saved?{[READINESS_RECEIPT]:saved}:{},alarms=new Map(),holds=[],holdFences=[],calls=[];
@@ -82,4 +82,41 @@ test('F1 recovery generation: a delayed dependency-hold writer becomes stale whe
  assert.equal(h.holdFences[0](),true);
  h.event({kind:'NATIVE_CHANGED',ready:true});assert.equal(h.holdFences[0](),false);
  await h.coordinator.turn();
+});
+
+test('F5 bridge loss: donor-only restart occurs once after two unhealthy observations and independent healthy readback',async()=>{
+ const host={installed:true,compatible:true,ready:false,tunnelUp:true,
+  proxyReachable:false,code:'MULLVAD_PROXY_UNREACHABLE'};
+ const entries={},alarms=new Map();let restarted=0,checks=0;
+ const api={storage:{local:{get:async k=>({[k]:entries[k]}),
+  set:async values=>Object.assign(entries,structuredClone(values))}},
+  alarms:{get:async k=>alarms.get(k),create:async(k,v)=>alarms.set(k,v)}};
+ const c=createProtectedReadinessCoordinator(api,{
+  clock:()=>100000,list:async()=>({ok:true,accounts:[{accountId:'account_fixture01',
+   personaUid:'persona-fixture01',bindingId:'binding_fixture01',state:'VERIFIED',route:{status:'HELD'}}]}),
+  connection:async()=>({...host}),check:async()=>{checks++;return {ok:true}},
+  repairBridge:async()=>{restarted++;Object.assign(host,{ready:true,tunnelUp:true,proxyReachable:true,code:null});return {ok:true}}});
+ const first=await c.turn();
+ assert.equal(first.ok,true);assert.equal(restarted,1);assert.equal(checks,1);
+ assert.equal(entries[BRIDGE_RECOVERY_RECEIPT].phase,'OBSERVED_RECOVERED');
+ await c.turn();assert.equal(restarted,1,'healthy bridge is not restarted');
+});
+test('F5 ambiguous shared restart is fenced across cold workers, no blind second restart',async()=>{
+ let now=100000;
+ const store={},host={installed:true,compatible:true,ready:false,tunnelUp:false,
+  proxyReachable:false,code:'MULLVAD_TUNNEL_UNAVAILABLE'};
+ let mutations=0;
+ const api={storage:{local:{get:async k=>({[k]:store[k]}),
+  set:async values=>Object.assign(store,structuredClone(values))}},
+  alarms:{get:async()=>null,create:async()=>{}}};
+ const opts={clock:()=>now,list:async()=>({ok:true,accounts:[{accountId:'account_fixture02',
+  personaUid:'persona-fixture02',bindingId:'binding_fixture02',state:'VERIFIED',route:{status:'HELD'}}]}),
+  connection:async()=>({...host}),check:async()=>{throw Error('must hold')},
+  repairBridge:async()=>{mutations++;return {ok:false,code:'MULLVAD_RESTART_UNCONFIRMED'}}};
+ assert.equal((await createProtectedReadinessCoordinator(api,opts).turn()).code,'MULLVAD_BRIDGE_RECOVERY_UNCERTAIN');
+ assert.equal(mutations,1);assert.equal(store[BRIDGE_RECOVERY_RECEIPT].phase,'HELD');
+ now+=60000;
+ const cold=await createProtectedReadinessCoordinator(api,opts).turn();
+ assert.equal(cold.code,'MULLVAD_BRIDGE_RECOVERY_UNCERTAIN',JSON.stringify({cold,receipt:store[READINESS_RECEIPT],bridge:store[BRIDGE_RECOVERY_RECEIPT]}));
+ assert.equal(mutations,1);
 });
